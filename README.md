@@ -3,8 +3,12 @@
 [![npm version](https://img.shields.io/npm/v/squad-kit.svg)](https://www.npmjs.com/package/squad-kit)
 [![CI](https://github.com/AzmSquad/Squad-Kit/actions/workflows/ci.yml/badge.svg)](https://github.com/AzmSquad/Squad-Kit/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Website](https://img.shields.io/badge/site-squad--kit.netlify.app-7cffa0?labelColor=0a0a0c)](https://squad-kit.netlify.app)
 
 **Plan once, execute cheap.** A 3-step SDD-style workflow CLI for AI-assisted coding: **raw story → good plan → implementation**.
+
+Website & docs: **[squad-kit.netlify.app](https://squad-kit.netlify.app)**
+
 
 Your expensive model plans once. A cheap model executes many times. Squad-kit owns the folder conventions, the plan meta-prompt, and the agent slash-commands so the token cost goes where it pays off.
 

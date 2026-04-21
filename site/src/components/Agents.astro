@@ -1,0 +1,37 @@
+---
+const agents = [
+  { name: "Claude Code", path: ".claude/commands/squad-plan.md", color: "#d97757" },
+  { name: "Cursor", path: ".cursor/commands/squad-plan.md", color: "#ffffff" },
+  { name: "GitHub Copilot", path: ".github/prompts/squad-plan.prompt.md", color: "#7c3aed" },
+  { name: "Gemini CLI", path: ".gemini/commands/squad-plan.toml", color: "#60a5fa" },
+];
+---
+
+<section class="relative py-20 sm:py-24" id="agents">
+  <div class="container-page">
+    <div class="mx-auto max-w-2xl text-center mb-12">
+      <div class="chip mb-4">Agents</div>
+      <h2 class="text-3xl sm:text-5xl font-bold gradient-text tracking-tight">
+        Native slash commands, four agents.
+      </h2>
+      <p class="mt-4 text-[var(--color-text-muted)] text-base sm:text-lg">
+        <code class="chip !text-xs">squad init</code> installs a <code class="chip !text-xs">/squad-plan</code> command into the agent you pick.
+        Don't see yours? <code class="chip !text-xs">squad new-plan</code> prints the composed prompt to stdout — paste it anywhere.
+      </p>
+    </div>
+
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      {agents.map((a) => (
+        <div class="card !p-5 flex flex-col gap-3 hover:!border-[var(--color-accent)]/40 transition-colors">
+          <div class="flex items-center gap-2">
+            <span class="h-2 w-2 rounded-full" style={`background: ${a.color}`}></span>
+            <span class="font-medium">{a.name}</span>
+          </div>
+          <div class="font-mono text-[11px] text-[var(--color-text-muted)] break-all leading-relaxed">
+            {a.path}
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>

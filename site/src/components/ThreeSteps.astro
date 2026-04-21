@@ -1,0 +1,76 @@
+---
+const steps = [
+  {
+    n: "01",
+    title: "Write an intake",
+    subtitle: "Raw story in",
+    description:
+      "Scaffold a story folder. Paste the tracker title, description, and acceptance criteria into intake.md. Drop screenshots into attachments/.",
+    command: "squad new-story checkout --title \"Add guest checkout\"",
+    output: ".squad/stories/checkout/add-guest-checkout/intake.md",
+    cost: "Human time",
+  },
+  {
+    n: "02",
+    title: "Plan once, expensively",
+    subtitle: "The only expensive turn",
+    description:
+      "Your strongest model reads the intake, scans real files in your repo, and produces one concrete plan: paths, line ranges, type signatures, verification commands.",
+    command: "/squad-plan .squad/stories/checkout/add-guest-checkout/intake.md",
+    output: ".squad/plans/checkout/01-story-add-guest-checkout.md",
+    cost: "Opus / GPT-5 tier",
+  },
+  {
+    n: "03",
+    title: "Execute cheaply, many times",
+    subtitle: "Cheap model out",
+    description:
+      "Fresh agent session. Attach only the plan file — no meta-prompts, no cross-artifact reads. A cheap executor ships the code.",
+    command: "# open a new chat, attach the plan file",
+    output: "done ✓",
+    cost: "Haiku / 4o-mini tier",
+  },
+];
+---
+
+<section class="relative py-20 sm:py-24" id="how-it-works">
+  <div class="container-page">
+    <div class="mx-auto max-w-2xl text-center mb-14">
+      <div class="chip mb-4">How it works</div>
+      <h2 class="text-3xl sm:text-5xl font-bold gradient-text tracking-tight">
+        Three steps. One artifact.
+      </h2>
+      <p class="mt-4 text-[var(--color-text-muted)] text-base sm:text-lg">
+        squad-kit separates the two things every SDD tool conflates: thinking and typing.
+      </p>
+    </div>
+
+    <div class="grid gap-5 sm:gap-6 md:grid-cols-3">
+      {steps.map((step, i) => (
+        <div class="card relative flex flex-col animate-fade-up" style={`animation-delay: ${i * 0.08}s`}>
+          <div class="flex items-start justify-between mb-5">
+            <span class="font-mono text-xs text-[var(--color-text-dim)] tracking-[0.2em]">{step.n}</span>
+            <span class="chip !px-2 !py-0.5 !text-[10px]">{step.cost}</span>
+          </div>
+
+          <h3 class="text-xl font-semibold mb-1">{step.title}</h3>
+          <div class="text-xs font-mono text-[var(--color-accent-dim)] uppercase tracking-wider mb-3">
+            {step.subtitle}
+          </div>
+          <p class="text-sm text-[var(--color-text-muted)] leading-relaxed mb-5 flex-1">
+            {step.description}
+          </p>
+
+          <div class="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] p-3 font-mono text-[11.5px] leading-relaxed">
+            <div class="text-[var(--color-text)] break-all">
+              <span class="text-[var(--color-text-dim)]">$ </span>{step.command}
+            </div>
+            <div class="mt-1.5 text-[var(--color-accent)] break-all">
+              → {step.output}
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>

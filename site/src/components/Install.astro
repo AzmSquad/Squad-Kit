@@ -1,0 +1,120 @@
+---
+const tabs = [
+  { id: "npm", label: "npm", cmd: "npm install -g squad-kit" },
+  { id: "pnpm", label: "pnpm", cmd: "pnpm add -g squad-kit" },
+  { id: "yarn", label: "yarn", cmd: "yarn global add squad-kit" },
+];
+---
+
+<section class="relative py-20 sm:py-24" id="install">
+  <div class="container-page">
+    <div class="mx-auto max-w-2xl text-center mb-10">
+      <div class="chip mb-4">Install</div>
+      <h2 class="text-3xl sm:text-5xl font-bold gradient-text tracking-tight">
+        Sixty seconds from zero.
+      </h2>
+      <p class="mt-4 text-[var(--color-text-muted)] text-base sm:text-lg">
+        Requires Node 18+. No API keys. No telemetry. No background services.
+      </p>
+    </div>
+
+    <div class="mx-auto max-w-2xl">
+      <div class="gradient-border rounded-xl overflow-hidden">
+        <div class="bg-[var(--color-bg-elevated)]">
+          <div class="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-2">
+            <div class="flex gap-1" role="tablist">
+              {tabs.map((t, i) => (
+                <button
+                  type="button"
+                  class={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                    i === 0
+                      ? "text-[var(--color-text)] bg-[var(--color-surface)]"
+                      : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                  }`}
+                  data-tab={t.id}
+                  role="tab"
+                  aria-selected={i === 0}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              class="copy-btn inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:border-[var(--color-border-strong)] transition-colors"
+              data-copy-target="#install-cmd"
+              aria-label="Copy command"
+            >
+              <svg class="h-3.5 w-3.5 copy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="9" y="9" width="13" height="13" rx="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
+              <span class="copy-label">Copy</span>
+            </button>
+          </div>
+          <div class="p-5 sm:p-6 font-mono text-sm">
+            {tabs.map((t, i) => (
+              <div data-pane={t.id} class={i === 0 ? "" : "hidden"}>
+                <span class="text-[var(--color-text-dim)] select-none">$ </span>
+                <span id={i === 0 ? "install-cmd" : undefined} data-cmd={t.cmd}>{t.cmd}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-6 flex flex-wrap items-center justify-center gap-3 text-xs text-[var(--color-text-dim)]">
+        <span class="inline-flex items-center gap-1.5"><span class="kbd">squad --version</span> to verify</span>
+        <span class="text-[var(--color-border-strong)]">·</span>
+        <a href="/docs/getting-started" class="text-[var(--color-text-muted)] hover:text-[var(--color-accent)] transition-colors">Full quickstart →</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script is:inline>
+  (function () {
+    const buttons = document.querySelectorAll("[data-tab]");
+    const panes = document.querySelectorAll("[data-pane]");
+    const cmd = document.getElementById("install-cmd");
+    buttons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.getAttribute("data-tab");
+        buttons.forEach((b) => {
+          const active = b.getAttribute("data-tab") === id;
+          b.classList.toggle("text-[var(--color-text)]", active);
+          b.classList.toggle("bg-[var(--color-surface)]", active);
+          b.classList.toggle("text-[var(--color-text-muted)]", !active);
+          b.setAttribute("aria-selected", active ? "true" : "false");
+        });
+        panes.forEach((p) => {
+          const active = p.getAttribute("data-pane") === id;
+          p.classList.toggle("hidden", !active);
+          if (active && cmd) {
+            const newCmd = p.querySelector("[data-cmd]");
+            if (newCmd) cmd.textContent = newCmd.textContent;
+          }
+        });
+      });
+    });
+
+    const copyBtns = document.querySelectorAll(".copy-btn");
+    copyBtns.forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const target = document.querySelector(btn.getAttribute("data-copy-target"));
+        if (!target) return;
+        try {
+          await navigator.clipboard.writeText(target.textContent.trim());
+          const label = btn.querySelector(".copy-label");
+          const original = label.textContent;
+          label.textContent = "Copied";
+          btn.style.color = "var(--color-accent)";
+          setTimeout(() => {
+            label.textContent = original;
+            btn.style.color = "";
+          }, 1500);
+        } catch {}
+      });
+    });
+  })();
+</script>

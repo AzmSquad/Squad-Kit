@@ -1,0 +1,69 @@
+---
+import Layout from "./Layout.astro";
+
+interface Props {
+  title: string;
+  description?: string;
+  slug: string;
+}
+
+const { title, description, slug } = Astro.props;
+
+const nav = [
+  { slug: "getting-started", label: "Getting started" },
+  { slug: "philosophy", label: "Philosophy" },
+  { slug: "vs-spec-kit", label: "vs Spec-Kit" },
+  { slug: "customization", label: "Customization" },
+];
+---
+
+<Layout title={`${title} · squad-kit docs`} description={description}>
+  <div class="container-page py-10 sm:py-14">
+    <div class="grid lg:grid-cols-[220px_1fr] gap-10 lg:gap-14">
+      <aside class="lg:sticky lg:top-24 lg:self-start">
+        <div class="text-xs font-mono uppercase tracking-wider text-[var(--color-text-dim)] mb-3 px-3">
+          Docs
+        </div>
+        <nav class="flex flex-row lg:flex-col gap-1 overflow-x-auto lg:overflow-x-visible pb-2 lg:pb-0">
+          {nav.map((item) => (
+            <a
+              href={`/docs/${item.slug}`}
+              class={`whitespace-nowrap rounded-md px-3 py-2 text-sm transition-colors ${
+                item.slug === slug
+                  ? "bg-[var(--color-surface)] text-[var(--color-text)] border border-[var(--color-border)]"
+                  : "text-[var(--color-text-muted)] hover:text-[var(--color-text)] border border-transparent"
+              }`}
+            >
+              {item.label}
+            </a>
+          ))}
+        </nav>
+        <div class="mt-8 hidden lg:block px-3 text-xs text-[var(--color-text-dim)] leading-relaxed">
+          Prefer the repo? See <a href="https://github.com/AzmSquad/Squad-Kit/tree/main/docs" target="_blank" rel="noopener" class="text-[var(--color-accent)] hover:underline">docs/ on GitHub</a>.
+        </div>
+      </aside>
+
+      <article class="prose-docs max-w-3xl">
+        <slot />
+
+        <hr />
+        <div class="flex items-center justify-between not-prose text-sm">
+          <a
+            href={`https://github.com/AzmSquad/Squad-Kit/blob/main/docs/${slug}.md`}
+            target="_blank"
+            rel="noopener"
+            class="text-[var(--color-text-muted)] hover:text-[var(--color-accent)] transition-colors inline-flex items-center gap-1.5"
+          >
+            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 1 1 3 3L7 19l-4 1 1-4Z" />
+            </svg>
+            Edit this page on GitHub
+          </a>
+          <a href="/docs/getting-started" class="text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors">
+            ← Back to docs
+          </a>
+        </div>
+      </article>
+    </div>
+  </div>
+</Layout>

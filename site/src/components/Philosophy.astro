@@ -1,0 +1,77 @@
+---
+const stats = [
+  {
+    value: "1",
+    unit: "artifact",
+    label: "per story",
+    note: "One plan file is the contract. No spec/plan/data-model/contracts/research/quickstart/tasks sprawl.",
+  },
+  {
+    value: "~5–15",
+    unit: "KB",
+    label: "implementation context",
+    note: "vs 15–25 KB of framework boilerplate before your code is even touched.",
+  },
+  {
+    value: "40×",
+    unit: "reuse",
+    label: "per feature",
+    note: "The cheap executor loops dozens of times. Every KB of saved context compounds.",
+  },
+];
+---
+
+<section class="relative py-20 sm:py-24" id="philosophy">
+  <div class="container-page">
+    <div class="grid lg:grid-cols-[1.1fr_1fr] gap-10 lg:gap-16 items-center">
+      <div>
+        <div class="chip mb-4">Philosophy</div>
+        <h2 class="text-3xl sm:text-5xl font-bold gradient-text tracking-tight leading-[1.05]">
+          Stop paying top-tier tokens for typing work.
+        </h2>
+        <div class="mt-6 space-y-4 text-[var(--color-text-muted)] leading-relaxed">
+          <p>
+            SDD has <strong class="text-[var(--color-text)]">two phases</strong> every tool conflates:
+            <em>thinking</em> (reading code, weighing tradeoffs) and
+            <em>typing</em> (applying edits, running tests, wiring things up).
+          </p>
+          <p>
+            Thinking is expensive per token and benefits from the best model you have.
+            Typing is verbose and repetitive — a weak model can do it, <em>if</em> the plan is concrete enough.
+          </p>
+          <p>
+            squad-kit is built around one rule:
+            <strong class="text-[var(--color-text)]">plan once, execute cheap</strong>.
+            Every task in a squad-kit plan has a file path, a symbol or line range, a type signature or command.
+            Vague guidance like "consider introducing a service layer" does not belong there — that's a planning decision, not a task.
+          </p>
+        </div>
+        <div class="mt-8">
+          <a href="/docs/philosophy" class="btn-secondary">
+            Read the full philosophy
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M5 12h14M13 5l7 7-7 7" />
+            </svg>
+          </a>
+        </div>
+      </div>
+
+      <div class="grid gap-4">
+        {stats.map((s) => (
+          <div class="card flex items-start gap-5">
+            <div class="flex-none">
+              <div class="font-mono text-4xl sm:text-5xl font-semibold text-[var(--color-accent)] leading-none">
+                {s.value}
+              </div>
+              <div class="font-mono text-xs text-[var(--color-text-dim)] mt-1">{s.unit}</div>
+            </div>
+            <div>
+              <div class="font-medium text-[var(--color-text)] text-sm">{s.label}</div>
+              <div class="text-sm text-[var(--color-text-muted)] leading-relaxed mt-1">{s.note}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  </div>
+</section>

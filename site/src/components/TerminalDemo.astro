@@ -1,0 +1,30 @@
+---
+// Static fake terminal capture — zero JS required.
+---
+
+<div class="gradient-border rounded-xl overflow-hidden shadow-[0_30px_80px_-20px_rgba(0,0,0,0.8)]">
+  <div class="rounded-xl bg-[var(--color-bg-elevated)]">
+    <div class="flex items-center gap-2 border-b border-[var(--color-border)] px-4 py-2.5">
+      <div class="flex gap-1.5">
+        <span class="h-3 w-3 rounded-full bg-[#ff5f57]"></span>
+        <span class="h-3 w-3 rounded-full bg-[#febc2e]"></span>
+        <span class="h-3 w-3 rounded-full bg-[#28c840]"></span>
+      </div>
+      <div class="flex-1 text-center text-xs text-[var(--color-text-dim)] font-mono">
+        ~/your-project — squad
+      </div>
+    </div>
+
+    <pre class="m-0 p-5 sm:p-6 font-mono text-[12px] sm:text-[13px] leading-relaxed overflow-x-auto"><code><span class="text-[var(--color-text-dim)]">$</span> <span class="text-[var(--color-text)]">squad init</span>
+<span class="text-[var(--color-accent)]">✓</span> <span class="text-[var(--color-text-muted)]">Initialized .squad/ with prompts + Cursor commands</span>
+
+<span class="text-[var(--color-text-dim)]">$</span> <span class="text-[var(--color-text)]">squad new-story checkout --title "Add guest checkout"</span>
+<span class="text-[var(--color-accent)]">✓</span> <span class="text-[var(--color-text-muted)]">Created intake:</span>
+  <span class="text-[var(--color-info)]">.squad/stories/checkout/add-guest-checkout/intake.md</span>
+
+<span class="text-[var(--color-text-dim)]">$</span> <span class="text-[var(--color-text)]">/squad-plan</span> <span class="text-[var(--color-text-muted)]">.squad/stories/checkout/add-guest-checkout/intake.md</span>
+<span class="text-[var(--color-text-muted)]">  reading intake · scanning existing plans · composing</span>
+<span class="text-[var(--color-accent)]">✓</span> <span class="text-[var(--color-text-muted)]">wrote</span> <span class="text-[var(--color-info)]">.squad/plans/checkout/01-story-add-guest-checkout.md</span>
+<span class="text-[var(--color-text-muted)]">  <span class="text-[var(--color-accent)]">~8 KB</span> — ready for a cheap executor</span><span class="animate-blink">▊</span></code></pre>
+  </div>
+</div>

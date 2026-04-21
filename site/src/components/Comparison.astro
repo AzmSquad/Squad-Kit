@@ -1,0 +1,179 @@
+---
+const rows = [
+  {
+    label: "Plan-turn starting context",
+    squad: "intake (~2 KB) + meta-prompt (~5 KB)",
+    speckit: "spec.md + plan.md + constitution + /plan template + research",
+    winner: "squad",
+  },
+  {
+    label: "Implement-turn starting context",
+    squad: "one plan file (~5–15 KB)",
+    speckit: "/implement template + tasks + plan + data-model + contracts + …",
+    winner: "squad",
+  },
+  {
+    label: "Artifacts per story",
+    squad: "intake.md + NN-story-<slug>.md",
+    speckit: "spec + plan + data-model + contracts/ + research + quickstart + tasks",
+    winner: "squad",
+  },
+  {
+    label: "Model-tier awareness",
+    squad: "built in: planner ≠ executor",
+    speckit: "not prescribed",
+    winner: "squad",
+  },
+  {
+    label: "Planning safety nets",
+    squad: "none (trust the planner)",
+    speckit: "/clarify, /analyze, checklists",
+    winner: "speckit",
+  },
+  {
+    label: "Customization",
+    squad: "edit Markdown in your repo",
+    speckit: "template override stack + presets",
+    winner: "tie",
+  },
+  {
+    label: "Runtime",
+    squad: "Node + TypeScript · npm",
+    speckit: "Python 3.11+ · uv",
+    winner: "tie",
+  },
+  {
+    label: "Bundle size",
+    squad: "~23 KB (single JS file)",
+    speckit: "Python package with deps",
+    winner: "squad",
+  },
+];
+
+const legend = {
+  squad: {
+    label: "squad-kit",
+    bg: "rgba(124, 255, 160, 0.08)",
+    border: "rgba(124, 255, 160, 0.25)",
+    text: "var(--color-accent)",
+  },
+  speckit: {
+    label: "Spec-Kit",
+    bg: "rgba(96, 165, 250, 0.08)",
+    border: "rgba(96, 165, 250, 0.25)",
+    text: "#93c5fd",
+  },
+};
+---
+
+<section class="relative py-20 sm:py-24" id="compare">
+  <div class="container-page">
+    <div class="mx-auto max-w-2xl text-center mb-14">
+      <div class="chip mb-4">Comparison</div>
+      <h2 class="text-3xl sm:text-5xl font-bold gradient-text tracking-tight">
+        squad-kit vs Spec-Kit
+      </h2>
+      <p class="mt-4 text-[var(--color-text-muted)] text-base sm:text-lg">
+        Same problem, opposite philosophies. Pick the one that matches how you already work.
+      </p>
+    </div>
+
+    <div class="hidden md:block rounded-xl border border-[var(--color-border)] overflow-hidden">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="bg-[var(--color-surface)]">
+            <th class="text-left font-medium text-[var(--color-text-muted)] px-6 py-4 w-[28%]">
+              Dimension
+            </th>
+            <th class="text-left font-medium px-6 py-4">
+              <span class="inline-flex items-center gap-2">
+                <span class="h-2 w-2 rounded-full bg-[var(--color-accent)]"></span>
+                squad-kit
+              </span>
+            </th>
+            <th class="text-left font-medium px-6 py-4">
+              <span class="inline-flex items-center gap-2 text-[var(--color-text-muted)]">
+                <span class="h-2 w-2 rounded-full bg-[var(--color-info)]"></span>
+                Spec-Kit
+              </span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <tr class={i % 2 === 0 ? "bg-[var(--color-bg)]" : "bg-[var(--color-bg-elevated)]/50"}>
+              <td class="px-6 py-4 font-medium text-[var(--color-text)]">{row.label}</td>
+              <td
+                class="px-6 py-4 text-[var(--color-text-muted)]"
+                style={row.winner === "squad"
+                  ? `color: var(--color-accent); background: ${legend.squad.bg}`
+                  : ""}
+              >
+                {row.squad}
+              </td>
+              <td
+                class="px-6 py-4 text-[var(--color-text-muted)]"
+                style={row.winner === "speckit"
+                  ? `color: #93c5fd; background: ${legend.speckit.bg}`
+                  : ""}
+              >
+                {row.speckit}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="md:hidden grid gap-4">
+      {rows.map((row) => (
+        <div class="card !p-4">
+          <div class="text-xs font-mono uppercase tracking-wider text-[var(--color-text-dim)] mb-3">
+            {row.label}
+          </div>
+          <div
+            class="rounded-md border px-3 py-2.5 mb-2"
+            style={`background: ${legend.squad.bg}; border-color: ${row.winner === "squad" ? legend.squad.border : "var(--color-border)"};`}
+          >
+            <div class="text-[11px] font-medium text-[var(--color-accent)] mb-0.5">squad-kit</div>
+            <div class="text-sm text-[var(--color-text)]">{row.squad}</div>
+          </div>
+          <div
+            class="rounded-md border px-3 py-2.5"
+            style={`background: ${legend.speckit.bg}; border-color: ${row.winner === "speckit" ? legend.speckit.border : "var(--color-border)"};`}
+          >
+            <div class="text-[11px] font-medium text-[#93c5fd] mb-0.5">Spec-Kit</div>
+            <div class="text-sm text-[var(--color-text-muted)]">{row.speckit}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+
+    <div class="mt-10 grid md:grid-cols-2 gap-5">
+      <div class="card">
+        <div class="flex items-center gap-2 mb-3">
+          <span class="h-2 w-2 rounded-full bg-[var(--color-accent)]"></span>
+          <span class="font-semibold">Pick squad-kit when…</span>
+        </div>
+        <ul class="space-y-2 text-sm text-[var(--color-text-muted)]">
+          <li class="flex gap-2"><span class="text-[var(--color-accent)]">→</span> You trust your planner (Opus, GPT-5) and want lean implementation turns.</li>
+          <li class="flex gap-2"><span class="text-[var(--color-accent)]">→</span> You already live in Node / TypeScript tooling.</li>
+          <li class="flex gap-2"><span class="text-[var(--color-accent)]">→</span> You want prompts as plain files in your repo — editable, committable.</li>
+          <li class="flex gap-2"><span class="text-[var(--color-accent)]">→</span> You run a cheap model for execution and want real savings.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="flex items-center gap-2 mb-3">
+          <span class="h-2 w-2 rounded-full bg-[var(--color-info)]"></span>
+          <span class="font-semibold">Pick Spec-Kit when…</span>
+        </div>
+        <ul class="space-y-2 text-sm text-[var(--color-text-muted)]">
+          <li class="flex gap-2"><span class="text-[var(--color-info)]">→</span> You want /clarify + /analyze to catch spec–plan drift automatically.</li>
+          <li class="flex gap-2"><span class="text-[var(--color-info)]">→</span> Your team includes non-engineers editing specs.</li>
+          <li class="flex gap-2"><span class="text-[var(--color-info)]">→</span> You're already in Python / uv tooling.</li>
+          <li class="flex gap-2"><span class="text-[var(--color-info)]">→</span> You want a governance / constitution layer built in.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>

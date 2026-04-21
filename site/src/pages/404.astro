@@ -1,0 +1,19 @@
+---
+import Layout from "~/layouts/Layout.astro";
+---
+
+<Layout title="404 · squad-kit" description="Page not found">
+  <section class="py-28 sm:py-40">
+    <div class="container-page text-center">
+      <div class="font-mono text-7xl sm:text-9xl font-bold gradient-text leading-none">404</div>
+      <h1 class="mt-6 text-2xl sm:text-3xl font-semibold">Nothing planned for this route.</h1>
+      <p class="mt-3 text-[var(--color-text-muted)] max-w-md mx-auto">
+        The page you're looking for doesn't exist. Maybe it's a story you haven't written yet.
+      </p>
+      <div class="mt-8 flex flex-wrap items-center justify-center gap-3">
+        <a href="/" class="btn-primary">Back home</a>
+        <a href="/docs/getting-started" class="btn-secondary">Go to docs</a>
+      </div>
+    </div>
+  </section>
+</Layout>

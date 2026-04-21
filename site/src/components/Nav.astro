@@ -1,0 +1,79 @@
+---
+const pathname = Astro.url.pathname;
+const isActive = (href: string) =>
+  href === "/" ? pathname === "/" : pathname.startsWith(href);
+---
+
+<header class="sticky top-0 z-50 border-b border-[var(--color-border)]/60 backdrop-blur-xl bg-[color-mix(in_oklab,var(--color-bg)_75%,transparent)]">
+  <nav class="container-page flex h-14 items-center justify-between">
+    <a href="/" class="flex items-center gap-2.5 group" aria-label="squad-kit home">
+      <span class="relative inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] font-mono text-[13px] font-bold text-[var(--color-accent)]">
+        sk
+        <span class="absolute -inset-px rounded-md" style="background: radial-gradient(circle at 50% 50%, rgba(124,255,160,0.18), transparent 70%);"></span>
+      </span>
+      <span class="font-semibold tracking-tight">squad-kit</span>
+      <span class="chip hidden sm:inline-flex !px-2 !py-0.5 !text-[10px]">v0.1.0</span>
+    </a>
+
+    <div class="hidden md:flex items-center gap-1">
+      <a
+        href="/"
+        class={`px-3 py-2 text-sm rounded-md transition-colors ${
+          isActive("/") && pathname === "/"
+            ? "text-[var(--color-text)]"
+            : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+        }`}
+      >
+        Home
+      </a>
+      <a
+        href="/docs/getting-started"
+        class={`px-3 py-2 text-sm rounded-md transition-colors ${
+          isActive("/docs")
+            ? "text-[var(--color-text)]"
+            : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+        }`}
+      >
+        Docs
+      </a>
+      <a
+        href="/#compare"
+        class="px-3 py-2 text-sm rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+      >
+        vs Spec-Kit
+      </a>
+      <a
+        href="/#install"
+        class="px-3 py-2 text-sm rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+      >
+        Install
+      </a>
+    </div>
+
+    <div class="flex items-center gap-2">
+      <a
+        href="https://www.npmjs.com/package/squad-kit"
+        target="_blank"
+        rel="noopener"
+        class="hidden sm:inline-flex items-center gap-1.5 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+        aria-label="npm"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M0 10.4V14h6.4v1.2h4V14h13.6V10.4H0zm4 2.8H2.8v-1.6H4v1.6zm5.6 0H6.8v-1.6h1.2v.4h1.2V10.4h1.2v2.8zm9.6 0h-1.2v-1.6h-1.2v1.6h-1.2v-1.6h-1.2v1.6h-2.4V10.4h7.2v2.8z" />
+        </svg>
+        npm
+      </a>
+      <a
+        href="https://github.com/AzmSquad/Squad-Kit"
+        target="_blank"
+        rel="noopener"
+        class="inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-xs font-medium text-[var(--color-text)] hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface-hover)] transition-colors"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.9 1.2 1.9 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-6 0-1.2.5-2.3 1.3-3.1-.2-.4-.6-1.6 0-3.2 0 0 1-.3 3.4 1.2a11.5 11.5 0 0 1 6 0C17 4.7 18 5 18 5c.6 1.6.2 2.8 0 3.2a4.5 4.5 0 0 1 1.3 3.1c0 4.7-2.8 5.7-5.5 6 .4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3" />
+        </svg>
+        GitHub
+      </a>
+    </div>
+  </nav>
+</header>
