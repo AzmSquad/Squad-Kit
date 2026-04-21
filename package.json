@@ -1,0 +1,61 @@
+{
+  "name": "squad-kit",
+  "version": "0.1.0",
+  "author": "Momen Yasser <momenysr@gmail.com>",
+  "description": "Plan once, execute cheap. A token-efficient, 3-step SDD workflow CLI (stories → plans → implementation).",
+  "keywords": [
+    "sdd",
+    "spec-driven-development",
+    "ai-agents",
+    "claude-code",
+    "cursor",
+    "copilot",
+    "planning",
+    "llm"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "squad": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "templates",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit",
+    "prepublishOnly": "pnpm build && pnpm test"
+  },
+  "dependencies": {
+    "@inquirer/prompts": "^7.2.0",
+    "commander": "^12.1.0",
+    "fs-extra": "^11.2.0",
+    "js-yaml": "^4.1.0",
+    "kleur": "^4.1.5"
+  },
+  "devDependencies": {
+    "@types/fs-extra": "^11.0.4",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.10.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AzmSquad/squad-kit"
+  },
+  "homepage": "https://github.com/AzmSquad/squad-kit#readme",
+  "bugs": {
+    "url": "https://github.com/AzmSquad/squad-kit/issues"
+  }
+}

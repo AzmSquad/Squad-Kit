@@ -1,0 +1,64 @@
+# Story file anatomy (reference)
+
+This file documents the structure of `NN-story-<slug>.md` plans that the planner produces. The planner reads `generate-plan.md`; this file exists so contributors can scan the target shape at a glance.
+
+```md
+# Story NN — <title> (Story: <tracker-id?>)
+
+## Prerequisites
+- None.   # or: - Story NN completed: <short note>
+- See `../other-feature/NN-story-<slug>.md` when dependencies cross feature folders.
+
+---
+
+## Story Goal
+<1–3 paragraphs or a short numbered list of user-visible outcomes>
+
+---
+
+## Context — Read These Files First
+
+1. `path/to/file.ts` — read `handleRequest` (~lines 80–140). Note shape of `RequestDTO`.
+2. `path/to/model.ts` — existing `User` entity; new fields must be nullable.
+3. Grep for `FLAG_NAME` across `src/` to find usages.
+4. `.squad/stories/<feature>/<id>/attachments/flow.png` — user-flow diagram.
+
+---
+
+## Implementation tasks
+
+### 1 — <short title>
+
+**File: `path/to/file.ts`**
+
+<concrete instructions; include code blocks with language tags for new signatures/DTOs>
+
+### 2 — <short title>
+
+**Create file: `path/to/new-file.ts`**
+
+<…>
+
+---
+
+## Verification Steps
+
+1. **Backend builds:** `<build command>` — no errors.
+2. **Unit tests pass:** `<test command>` — new tests green.
+3. **Regression:** open `<URL or route>` and confirm existing behaviour is intact.
+
+---
+
+## Done Criteria
+
+- [ ] <acceptance criterion 1>
+- [ ] <acceptance criterion 2>
+- [ ] Overview `00-overview.md` updated with this story.
+```
+
+Guidelines:
+
+- **Concrete over clever.** Paths, line ranges, type names. No "consider" or "might".
+- **Every task maps to a file edit or a command to run.** If it does not, it belongs in a comment, not a task.
+- **State "no changes required" explicitly** for layers the story does not touch. Silence implies "figure it out", which defeats the point.
+- **Keep Verification small and runnable.** 3–7 steps. If it balloons, the plan is doing too much — split the story.
