@@ -1,5 +1,9 @@
 # squad-kit
 
+[![npm version](https://img.shields.io/npm/v/squad-kit.svg)](https://www.npmjs.com/package/squad-kit)
+[![CI](https://github.com/AzmSquad/Squad-Kit/actions/workflows/ci.yml/badge.svg)](https://github.com/AzmSquad/Squad-Kit/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 **Plan once, execute cheap.** A 3-step SDD-style workflow CLI for AI-assisted coding: **raw story → good plan → implementation**.
 
 Your expensive model plans once. A cheap model executes many times. Squad-kit owns the folder conventions, the plan meta-prompt, and the agent slash-commands so the token cost goes where it pays off.
