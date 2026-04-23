@@ -1,33 +1,21 @@
 # Customization
 
-Squad-kit's prompts are plain Markdown files in your repo. Edit them. That is the feature.
+Plan meta-prompts (`generate-plan.md`, `intake.md`, `story-skeleton.md`) ship inside the **squad-kit npm package** (`templates/prompts/`). They are not copied into `.squad/` — you always get the version that matches your installed CLI. To change them, **fork squad-kit** and patch `templates/prompts/`, or open a discussion on the main repo if the change should be upstream.
 
 ## Files you can safely edit
 
 | File | What it drives |
 |---|---|
-| `.squad/prompts/intake.md` | The scaffold used by `squad new-story` |
-| `.squad/prompts/generate-plan.md` | The meta-prompt the agent follows when planning |
-| `.squad/prompts/story-skeleton.md` | Structural reference for plan files |
-| `.squad/config.yaml` | Project name, tracker, naming, agents |
+| `.squad/config.yaml` | Project name, tracker, naming, agents, planner |
+| `.squad/secrets.yaml` | API keys (git-ignored) |
 
-Commit them. They are project artifacts, not framework internals.
+Project workflow files under `.squad/stories/` and `.squad/plans/` are yours.
 
 ## Common customizations
 
-### Add language-specific verification
+### Conventions in intake and plans
 
-Edit `.squad/prompts/generate-plan.md`, section `## Verification Steps`:
-
-```diff
- 6. **`## Verification Steps`** — Numbered list. Bold lead-ins: **`Frontend runs:`**, **`Backend builds:`**, **`Regression:`**.
-+   For Rust stories, always require `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test`.
-+   For Python stories, always require `ruff check`, `mypy`, and `pytest`.
-```
-
-### Pin your project's review conventions
-
-Add a "Product rules" bullet to `generate-plan.md` reminding the planner about non-obvious constraints — feature flags, monorepo build order, mandatory i18n keys, etc.
+Put language-specific verification commands, product rules, and review expectations in the **story intake** (and reflect them in generated plans). The bundled meta-prompt is shared across all users; project-specific rules belong in your story content.
 
 ### Change filename convention
 
@@ -57,7 +45,7 @@ If this happens often, switch to `globalSequence: false` and accept per-feature 
 squad init --force --agents claude-code,cursor,copilot,gemini
 ```
 
-`--force` overwrites only the agent slash-command files and the templates in `.squad/prompts/`. Your plans, stories, and `config.yaml` are left alone.
+`--force` overwrites agent slash-command files in the repo root. Your plans, stories, and `config.yaml` are left alone.
 
 ## Upgrading squad-kit
 
@@ -65,4 +53,4 @@ squad init --force --agents claude-code,cursor,copilot,gemini
 npm update -g squad-kit
 ```
 
-CLI upgrades do not touch your `.squad/` contents. If a new squad-kit version changes the default templates meaningfully, the release notes will say so and you can re-run `squad init --force` to pull the new defaults (then re-apply your customizations).
+CLI upgrades do not touch your `.squad/` story and plan content. New squad-kit versions may change bundled prompts in the package; upgrade the CLI to pick them up.

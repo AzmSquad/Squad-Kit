@@ -19,6 +19,7 @@ You are maintaining **agent-executable implementation plans** for this project.
 
 - Project roots: `{{projectRoots}}`
 - Primary language: `{{primaryLanguage}}`
+- Tracker type: `{{trackerType}}`
 - Existing plans in `.squad/plans/` — read one or two to match tone and file-oriented style.
 
 ## Story document pattern

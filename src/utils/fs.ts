@@ -44,3 +44,21 @@ export function packageRoot(): string {
 export function templatesDir(): string {
   return path.join(packageRoot(), 'templates');
 }
+
+/**
+ * Read a prompt file from the installed squad-kit package's `templates/prompts/` directory.
+ * This is the ONLY supported way to read prompts. Users do not have the ability to override
+ * them; `.squad/prompts/` is legacy and ignored at runtime.
+ *
+ * @throws if the file is missing (indicates a broken package install).
+ */
+export function readBundledPrompt(name: 'generate-plan.md' | 'intake.md' | 'story-skeleton.md'): string {
+  const file = path.join(templatesDir(), 'prompts', name);
+  if (!fs.existsSync(file)) {
+    throw new Error(
+      `Bundled prompt "${name}" not found at ${file}. ` +
+        `This indicates a broken squad-kit install — reinstall with: pnpm add -g squad-kit`,
+    );
+  }
+  return fs.readFileSync(file, 'utf8');
+}

@@ -4,7 +4,7 @@ prompt = """
 Generate an implementation plan using the squad-kit workflow.
 
 Steps:
-1. Read .squad/prompts/generate-plan.md and follow its instructions exactly.
+1. Read generate-plan.md from the installed squad-kit package (templates/prompts/; not under .squad/) and follow its instructions exactly.
 2. Read the intake file at the argument path (under .squad/stories/) plus any referenced files in its attachments/.
 3. Read .squad/config.yaml for tracker type and naming rules.
 4. Scan .squad/plans/**/NN-story-*.md to determine the next global sequence number.

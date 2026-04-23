@@ -37,10 +37,12 @@ describe('buildPaths', () => {
   it('produces .squad-relative paths', () => {
     const p = buildPaths('/root');
     expect(p.configFile).toBe(path.join('/root', SQUAD_DIR, 'config.yaml'));
+    expect(p.secretsFile).toBe(path.join('/root', SQUAD_DIR, 'secrets.yaml'));
     expect(p.promptsDir).toBe(path.join('/root', SQUAD_DIR, 'prompts'));
     expect(p.storiesDir).toBe(path.join('/root', SQUAD_DIR, 'stories'));
     expect(p.plansDir).toBe(path.join('/root', SQUAD_DIR, 'plans'));
     expect(p.indexFile).toBe(path.join('/root', SQUAD_DIR, 'plans', '00-index.md'));
+    expect(p.trashDir).toBe(path.join('/root', SQUAD_DIR, '.trash'));
   });
 });
 

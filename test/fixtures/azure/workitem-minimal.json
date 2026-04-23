@@ -1,0 +1,23 @@
+{
+  "id": 42,
+  "fields": {
+    "System.Title": "Sample user story",
+    "System.Description": "<p>hello <br/> world</p>",
+    "System.WorkItemType": "User Story",
+    "System.State": "Active",
+    "System.Tags": "frontend; bug",
+    "System.AssignedTo": { "displayName": "Dev One" }
+  },
+  "relations": [
+    {
+      "rel": "AttachedFile",
+      "url": "https://dev.azure.com/myorg/myproject/_apis/wit/attachments/mock-abc",
+      "attributes": { "name": "mock.png", "resourceSize": 2048 }
+    },
+    {
+      "rel": "System.LinkTypes.Related",
+      "url": "https://dev.azure.com/myorg/myproject/_workitems/edit/99",
+      "attributes": { "name": "related" }
+    }
+  ]
+}

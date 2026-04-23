@@ -1,0 +1,36 @@
+{
+  "key": "PROJ-42",
+  "fields": {
+    "summary": "Login fails when MFA enabled",
+    "description": {
+      "type": "doc",
+      "version": 1,
+      "content": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "ADF body text for fallback."
+            }
+          ]
+        }
+      ]
+    },
+    "labels": ["frontend", "bug"],
+    "issuetype": { "name": "Bug" },
+    "assignee": { "displayName": "Jamie Doe" },
+    "status": { "name": "In Progress" },
+    "attachment": [
+      {
+        "filename": "screenshot.png",
+        "content": "https://mycompany.atlassian.net/rest/api/3/attachment/content/10000",
+        "size": 1024,
+        "mimeType": "image/png"
+      }
+    ]
+  },
+  "renderedFields": {
+    "description": "<p>Same text, as HTML.</p>"
+  }
+}

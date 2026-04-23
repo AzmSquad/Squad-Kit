@@ -6,7 +6,7 @@ Fill this template for each story you want planned. Keep it copy-paste-friendly:
 - Binaries (screenshots, PDFs, exports): put them in `attachments/` next to this file and list them below.
 - Do **not** rely on external links (tracker URLs, wiki, chat) — the planner cannot open them. Paste the content you want considered.
 
-This is **not** an implementation prompt. It is the input to `.squad/prompts/generate-plan.md`.
+This is **not** an implementation prompt. It is the input to the plan-generation meta-prompt bundled with squad-kit (`generate-plan.md` in the installed package).
 
 ---
 

@@ -51,11 +51,11 @@ Across dozens of implement turns per feature, that delta compounds.
 
 | | squad-kit | Spec-Kit |
 |---|---|---|
-| Prompt location | `.squad/prompts/*.md` in your repo | `.specify/templates/` + overrides + presets |
-| How to customize | edit the Markdown, commit | template override stack, preset priority |
-| Per-project drift | expected and desirable | managed via overrides |
+| Prompt location | Bundled in the `squad-kit` package (`templates/prompts/`) | `.specify/templates/` + overrides + presets |
+| How to customize | fork squad-kit and patch, or request upstream changes | template override stack, preset priority |
+| Per-project rules | in intakes and plans (your repo) | managed via overrides |
 
-Squad-kit treats prompts as code you own. Spec-Kit treats them as framework assets you override.
+Squad-kit keeps shared meta-prompts in the package; project-specific detail lives in your story and plan files. Spec-Kit uses a template override stack.
 
 ---
 

@@ -60,10 +60,4 @@ This is a deliberate choice, not an oversight. If you want safety nets, Spec-Kit
 
 ## Why Markdown prompts, not embedded logic
 
-Squad-kit's "intelligence" lives in three Markdown files in your repo:
-
-- `.squad/prompts/intake.md`
-- `.squad/prompts/generate-plan.md`
-- `.squad/prompts/story-skeleton.md`
-
-You can edit them. You should. The CLI ships defaults distilled from real-world use, but your project will have conventions the defaults cannot predict. Commit your customizations alongside your code. That is the point.
+Squad-kit's default planning rules live in three Markdown files shipped **inside the npm package** (`templates/prompts/`). Your **project** conventions — verification commands, product rules, acceptance criteria — belong in intakes and plans under `.squad/stories/` and `.squad/plans/`, which you own and commit.

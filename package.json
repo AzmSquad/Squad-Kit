@@ -1,6 +1,6 @@
 {
   "name": "squad-kit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "Momen Yasser <momenysr@gmail.com>",
   "description": "Plan once, execute cheap. A token-efficient, 3-step SDD workflow CLI (stories → plans → implementation).",
   "keywords": [
@@ -22,6 +22,8 @@
     "dist",
     "templates",
     "README.md",
+    "CHANGELOG.md",
+    "SECURITY.md",
     "LICENSE"
   ],
   "scripts": {
@@ -30,20 +32,27 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "tsc --noEmit",
-    "prepublishOnly": "pnpm build && pnpm test"
+    "verify:models": "tsx scripts/verify-models.ts",
+    "prepublishOnly": "pnpm run verify:models && pnpm build && pnpm test"
   },
   "dependencies": {
     "@inquirer/prompts": "^7.2.0",
+    "boxen": "^8.0.1",
     "commander": "^12.1.0",
     "fs-extra": "^11.2.0",
+    "gradient-string": "^3.0.0",
+    "ignore": "^6.0.2",
     "js-yaml": "^4.1.0",
-    "kleur": "^4.1.5"
+    "kleur": "^4.1.5",
+    "ora": "^8.1.1"
   },
   "devDependencies": {
     "@types/fs-extra": "^11.0.4",
+    "@types/gradient-string": "^1.1.6",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.10.0",
     "tsup": "^8.3.5",
+    "tsx": "^4.19.3",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
   },

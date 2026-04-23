@@ -5,7 +5,7 @@ description: Generate an implementation plan from a squad-kit story intake file.
 
 Generate an implementation plan using the squad-kit workflow.
 
-- Read `.squad/prompts/generate-plan.md` and follow its instructions exactly.
+- Read `generate-plan.md` from the installed squad-kit package (`templates/prompts/`; not under `.squad/` — use `npm root -g`/your package manager path to `squad-kit`, or `squad new-plan <intake> --copy` for the composed prompt) and follow its instructions exactly.
 - Read the intake file provided by the user (under `.squad/stories/`) plus any referenced files in its `attachments/`.
 - Read `.squad/config.yaml` for tracker type and naming rules.
 - Scan `.squad/plans/**/NN-story-*.md` to determine the next global sequence number.

@@ -19,6 +19,6 @@
     "sourceMap": true,
     "types": ["node"]
   },
-  "include": ["src/**/*", "test/**/*"],
+  "include": ["src/**/*", "test/**/*", "scripts/**/*"],
   "exclude": ["dist", "node_modules"]
 }

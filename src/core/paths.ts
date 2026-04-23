@@ -7,10 +7,18 @@ export interface SquadPaths {
   root: string;
   squadDir: string;
   configFile: string;
+  secretsFile: string;
+  /**
+   * Legacy: path where 0.1.x copied prompt templates. No longer created on fresh install
+   * and no longer read at runtime. Kept on the interface so `squad doctor` and
+   * `squad migrate` can locate and clean up stale copies from pre-0.2 users.
+   */
   promptsDir: string;
   storiesDir: string;
   plansDir: string;
   indexFile: string;
+  /** `.squad/.trash` — created on demand by `squad rm --trash`. */
+  trashDir: string;
 }
 
 export function buildPaths(root: string): SquadPaths {
@@ -19,10 +27,12 @@ export function buildPaths(root: string): SquadPaths {
     root,
     squadDir,
     configFile: path.join(squadDir, 'config.yaml'),
+    secretsFile: path.join(squadDir, 'secrets.yaml'),
     promptsDir: path.join(squadDir, 'prompts'),
     storiesDir: path.join(squadDir, 'stories'),
     plansDir: path.join(squadDir, 'plans'),
     indexFile: path.join(squadDir, 'plans', '00-index.md'),
+    trashDir: path.join(squadDir, '.trash'),
   };
 }
 

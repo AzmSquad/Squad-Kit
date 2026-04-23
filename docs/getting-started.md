@@ -119,6 +119,6 @@ project:
 
 The planner sees this hint in the meta-prompt and anchors file paths across the declared roots.
 
-## Editing prompts
+## Prompts
 
-The three files under `.squad/prompts/` are yours. Edit them to codify your project's conventions — naming, verification steps, language-specific idioms. Commit them with your code. `squad init --force` overwrites; the CLI otherwise never touches them after init.
+Intake template, plan meta-prompt, and plan skeleton are **bundled in the squad-kit package** (not under `.squad/`). Upgrade the CLI to get updates. Customisation requires forking squad-kit; see [customization.md](customization.md).

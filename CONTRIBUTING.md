@@ -34,6 +34,16 @@ squad --version
 - Every code path that touches the filesystem should have a test using a `os.mkdtempSync` fixture.
 - Prefer testing behaviour, not implementation. If the refactor is obvious, the test should survive it.
 
+## Command authoring guidelines
+
+Every new command must:
+
+1. Accept `-y` / `--yes` as an explicit opt-out for prompts.
+2. Detect `process.stdin.isTTY && process.env.CI !== 'true'` as the condition for prompting (and honour `--yes`).
+3. Validate prompt input with clear error messages.
+4. When non-interactive and input is missing, throw a clear error with the canonical usage line.
+5. Use `@inquirer/prompts` for prompts; use `src/ui/*` for all other output.
+
 ## Style
 
 - TypeScript strict mode.

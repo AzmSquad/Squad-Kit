@@ -1,0 +1,43 @@
+{
+  "type": "doc",
+  "version": 1,
+  "content": [
+    {
+      "type": "heading",
+      "attrs": { "level": 2 },
+      "content": [{ "type": "text", "text": "Section title" }]
+    },
+    {
+      "type": "bulletList",
+      "content": [
+        {
+          "type": "listItem",
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [{ "type": "text", "text": "Alpha bullet" }]
+            }
+          ]
+        },
+        {
+          "type": "listItem",
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [{ "type": "text", "text": "Beta bullet" }]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "customWrapper",
+      "content": [
+        {
+          "type": "paragraph",
+          "content": [{ "type": "text", "text": "Inside unknown wrapper" }]
+        }
+      ]
+    }
+  ]
+}
