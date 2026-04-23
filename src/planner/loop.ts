@@ -1,7 +1,21 @@
 import path from 'node:path';
-import type { ChatTurn, PlannerProvider, ToolCall, ToolResult, Usage } from './types.js';
+import type {
+  ChatTurn,
+  PlannerProvider,
+  ProviderRequest,
+  ProviderResponse,
+  ToolCall,
+  ToolResult,
+  Usage,
+} from './types.js';
 import { Budget } from './budget.js';
 import { READ_FILE_TOOL, readFileTool } from './tools.js';
+import { rateLimitMessage } from './provider-errors.js';
+
+/** Upper bound on the auto-retry wait. Provider can ask for more, but we never block longer. */
+const MAX_RATE_LIMIT_RETRY_SEC = 30;
+
+const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 export interface RunPlannerInput {
   root: string;
@@ -14,7 +28,11 @@ export interface RunPlannerInput {
   onToolCall?: (tc: ToolCall, bytesLoaded: number, totalBytes: number) => void;
   onUsage?: (u: Usage) => void;
   onAssistantText?: (delta: string) => void;
+  /** Invoked when the loop is about to sleep before retrying a 429. The arg is seconds. */
+  onRateLimit?: (waitSec: number) => void;
   maxIterations?: number;
+  /** Test injection for `setTimeout`. Defaults to the real timer. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export interface RunPlannerOutput {
@@ -43,23 +61,36 @@ export async function runPlanner(input: RunPlannerInput): Promise<RunPlannerOutp
       return { planText: accumulatedText, budgetExhausted: true, timedOut: false, finishedNormally: false, iterations };
     }
 
-    const response = await input.provider.send({
+    const request: ProviderRequest = {
       systemPrompt: input.systemPrompt,
       model: input.model,
       tools: [READ_FILE_TOOL],
       turns,
       apiKey: input.apiKey,
       maxOutputTokens: 8192,
-    });
+    };
 
+    let response = await input.provider.send(request);
     if (response.usage) {
       input.budget.recordUsage(response.usage);
       input.onUsage?.(response.usage);
     }
 
+    let retriedRateLimit = false;
+    if (response.stopReason === 'error' && response.errorKind === 'rate_limit') {
+      const waitSec = Math.min(response.retryAfterSec ?? 10, MAX_RATE_LIMIT_RETRY_SEC);
+      input.onRateLimit?.(waitSec);
+      await (input.sleep ?? defaultSleep)(waitSec * 1000);
+      response = await input.provider.send(request);
+      if (response.usage) {
+        input.budget.recordUsage(response.usage);
+        input.onUsage?.(response.usage);
+      }
+      retriedRateLimit = true;
+    }
+
     if (response.stopReason === 'error') {
-      const base = response.rawError ?? 'planner: provider error';
-      throw new Error(`${base} Run \`squad doctor\` to verify models and credentials.`);
+      throw composePlannerError(input.provider.name, response, retriedRateLimit);
     }
 
     if (response.text) {
@@ -115,4 +146,26 @@ export async function runPlanner(input: RunPlannerInput): Promise<RunPlannerOutp
 
 export function relativisePath(root: string, p: string): string {
   return path.relative(root, p) || p;
+}
+
+function composePlannerError(
+  providerName: PlannerProvider['name'],
+  response: ProviderResponse,
+  retriedRateLimit: boolean,
+): Error {
+  if (response.errorKind === 'rate_limit') {
+    return new Error(
+      rateLimitMessage({
+        provider: providerName,
+        retryAfterSec: response.retryAfterSec,
+        rawBody: response.rawError ?? '',
+        retryAlreadyAttempted: retriedRateLimit,
+      }),
+    );
+  }
+  if (response.errorKind === 'model_not_found') {
+    return new Error(response.rawError ?? 'planner: model not found');
+  }
+  const base = response.rawError ?? 'planner: provider error';
+  return new Error(`${base} Run \`squad doctor\` to diagnose, or retry \u2014 most 5xx errors are transient.`);
 }

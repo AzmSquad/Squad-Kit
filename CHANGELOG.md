@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-04-22
+
+### Fixed
+
+- **`squad new-plan --api` now handles provider rate limits (HTTP 429) properly.** Previously a 429 surfaced the generic `Run \`squad doctor\` to verify models and credentials.` hint, which is misleading — the credentials are fine, the org is just over its per-minute quota. `runPlanner` now:
+  - Detects 429s across Anthropic, OpenAI, and Google (new `errorKind: 'rate_limit'` on `ProviderResponse`).
+  - Parses `Retry-After` (seconds or HTTP-date) and Google's body-level `retryDelay` field.
+  - Retries **once** automatically, waiting the provider-requested time capped at 30 seconds. A new `onRateLimit(waitSec)` callback lets the UI show a "retrying in Ns" notice.
+  - When the retry also fails, throws a dedicated error that names the provider, summarises the wait time, and lists four concrete recovery paths: wait and retry, switch planner model (`squad config set planner`), tighten `planner.budget`, or upgrade tier (with a deep-link to each provider's limits page).
+- The generic (non-429) provider-error hint now reads `Run \`squad doctor\` to diagnose, or retry — most 5xx errors are transient.`, which is accurate for the actual 5xx / network cases it covers.
+
+### Added
+
+- `detectRateLimit()` and `rateLimitMessage()` in `src/planner/provider-errors.ts`. Both cover all three supported providers and are unit-tested with real-shaped 429 fixtures.
+
 ## [0.2.0] - 2026-04-22
 
 ### tracker-intake-fetch

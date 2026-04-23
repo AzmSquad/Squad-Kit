@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { detectModelNotFound, modelNotFoundMessage } from '../src/planner/provider-errors.js';
+import {
+  detectModelNotFound,
+  detectRateLimit,
+  modelNotFoundMessage,
+  rateLimitMessage,
+} from '../src/planner/provider-errors.js';
 
 describe('detectModelNotFound', () => {
   it('returns ModelNotFoundError for Anthropic 404 with not_found_error body', () => {
@@ -58,5 +63,92 @@ describe('modelNotFoundMessage', () => {
     expect(msg).toContain('squad config set planner');
     expect(msg).toContain('planner.modelOverride.anthropic');
     expect(msg).toContain('squad doctor');
+  });
+});
+
+describe('detectRateLimit', () => {
+  it('returns undefined for non-429 statuses', () => {
+    expect(detectRateLimit('anthropic', 500, new Headers(), 'x')).toBeUndefined();
+    expect(detectRateLimit('anthropic', 200, new Headers(), 'x')).toBeUndefined();
+  });
+
+  it('parses a numeric retry-after header', () => {
+    const headers = new Headers({ 'retry-after': '45' });
+    const rl = detectRateLimit('anthropic', 429, headers, '{}');
+    expect(rl).toBeDefined();
+    expect(rl?.retryAfterSec).toBe(45);
+    expect(rl?.provider).toBe('anthropic');
+    expect(rl?.status).toBe(429);
+  });
+
+  it('parses an HTTP-date retry-after header relative to now', () => {
+    const target = new Date(Date.now() + 20_000).toUTCString();
+    const headers = new Headers({ 'Retry-After': target });
+    const rl = detectRateLimit('openai', 429, headers, '{}');
+    expect(rl?.retryAfterSec).toBeGreaterThanOrEqual(19);
+    expect(rl?.retryAfterSec).toBeLessThanOrEqual(21);
+  });
+
+  it("parses Google's body-level retryDelay when the header is absent", () => {
+    const body = JSON.stringify({
+      error: {
+        code: 429,
+        message: 'Quota exceeded',
+        details: [{ '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '30s' }],
+      },
+    });
+    const rl = detectRateLimit('google', 429, new Headers(), body);
+    expect(rl?.retryAfterSec).toBe(30);
+  });
+
+  it('returns a rate-limit result with no retryAfterSec when provider gave no hint', () => {
+    const rl = detectRateLimit('anthropic', 429, new Headers(), '{}');
+    expect(rl).toBeDefined();
+    expect(rl?.retryAfterSec).toBeUndefined();
+  });
+
+  it('accepts plain-record headers as well as fetch Headers', () => {
+    const rl = detectRateLimit('anthropic', 429, { 'retry-after': '12' }, '{}');
+    expect(rl?.retryAfterSec).toBe(12);
+  });
+});
+
+describe('rateLimitMessage', () => {
+  it('mentions wait time, all four recovery options, and the provider-specific limits URL', () => {
+    const msg = rateLimitMessage({
+      provider: 'anthropic',
+      retryAfterSec: 45,
+      rawBody: '{"error":{"type":"rate_limit_error"}}',
+      retryAlreadyAttempted: true,
+    });
+    expect(msg).toContain('anthropic rate limit hit');
+    expect(msg).toContain('45s');
+    expect(msg).toContain('already retried once');
+    expect(msg).toContain('squad config set planner');
+    expect(msg).toContain('planner.budget');
+    expect(msg).toContain('console.anthropic.com/settings/limits');
+    expect(msg).toContain('migrating-from-0.1');
+    expect(msg).not.toContain('verify models and credentials');
+  });
+
+  it('falls back to a 60s hint when the provider gave no retry-after', () => {
+    const msg = rateLimitMessage({
+      provider: 'openai',
+      retryAfterSec: undefined,
+      rawBody: '',
+      retryAlreadyAttempted: false,
+    });
+    expect(msg).toContain('openai rate limit hit.');
+    expect(msg).toContain('Wait 60s');
+    expect(msg).toContain('aborted before retrying');
+    expect(msg).toContain('platform.openai.com');
+  });
+
+  it('includes the google limits URL for google-provider errors', () => {
+    const msg = rateLimitMessage({
+      provider: 'google',
+      rawBody: '',
+    });
+    expect(msg).toContain('aistudio.google.com');
   });
 });

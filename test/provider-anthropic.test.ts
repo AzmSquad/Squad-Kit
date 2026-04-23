@@ -121,10 +121,13 @@ describe('callAnthropic', () => {
     ]);
   });
 
-  it('returns error stopReason and rawError on non-2xx with truncated body', async () => {
+  it('flags 429 as rate_limit with parsed retry-after header and truncated body', async () => {
     const longBody = 'x'.repeat(600);
     const fetchMock = vi.fn(async () => {
-      return new Response(longBody, { status: 429 });
+      return new Response(longBody, {
+        status: 429,
+        headers: { 'retry-after': '45' },
+      });
     });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -137,9 +140,46 @@ describe('callAnthropic', () => {
     });
 
     expect(res.stopReason).toBe('error');
+    expect(res.errorKind).toBe('rate_limit');
+    expect(res.retryAfterSec).toBe(45);
     expect(res.rawError).toMatch(/^anthropic 429: /);
     expect(res.rawError!.length).toBeLessThan(longBody.length);
     expect(res.rawError!.length).toBeLessThanOrEqual('anthropic 429: '.length + 500);
+  });
+
+  it('flags 429 as rate_limit even when retry-after header is absent', async () => {
+    const fetchMock = vi.fn(async () => {
+      return new Response('{"type":"error","error":{"type":"rate_limit_error"}}', { status: 429 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await callAnthropic({
+      systemPrompt: 's',
+      model: 'm',
+      tools: [],
+      turns: [],
+      apiKey: 'k',
+    });
+
+    expect(res.errorKind).toBe('rate_limit');
+    expect(res.retryAfterSec).toBeUndefined();
+  });
+
+  it('non-429/404 errors remain unclassified', async () => {
+    const fetchMock = vi.fn(async () => new Response('oops', { status: 500 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await callAnthropic({
+      systemPrompt: 's',
+      model: 'm',
+      tools: [],
+      turns: [],
+      apiKey: 'k',
+    });
+
+    expect(res.stopReason).toBe('error');
+    expect(res.errorKind).toBeUndefined();
+    expect(res.rawError).toMatch(/^anthropic 500: /);
   });
 
   it('returns friendly rawError on 404 model not found', async () => {

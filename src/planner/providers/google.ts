@@ -6,7 +6,11 @@ import type {
   ToolCall,
   ToolSchema,
 } from '../types.js';
-import { detectModelNotFound, modelNotFoundMessage } from '../provider-errors.js';
+import {
+  detectModelNotFound,
+  detectRateLimit,
+  modelNotFoundMessage,
+} from '../provider-errors.js';
 
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
@@ -37,7 +41,20 @@ export async function callGoogle(req: ProviderRequest): Promise<ProviderResponse
     const text = await res.text().catch(() => '');
     const nf = detectModelNotFound('google', req.model, res.status, text);
     if (nf) {
-      return { stopReason: 'error', rawError: modelNotFoundMessage(nf) };
+      return {
+        stopReason: 'error',
+        rawError: modelNotFoundMessage(nf),
+        errorKind: 'model_not_found',
+      };
+    }
+    const rl = detectRateLimit('google', res.status, res.headers, text);
+    if (rl) {
+      return {
+        stopReason: 'error',
+        rawError: `google 429: ${text.slice(0, 500)}`,
+        errorKind: 'rate_limit',
+        retryAfterSec: rl.retryAfterSec,
+      };
     }
     return { stopReason: 'error', rawError: `google ${res.status}: ${text.slice(0, 500)}` };
   }

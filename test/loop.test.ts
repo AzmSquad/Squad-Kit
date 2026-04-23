@@ -96,7 +96,7 @@ describe('runPlanner', () => {
     expect(result.finishedNormally).toBe(false);
   });
 
-  it('throws on stopReason error with rawError in message', async () => {
+  it('throws on stopReason error with rawError and generic retry hint', async () => {
     const provider = mockProvider([{ stopReason: 'error', rawError: 'provider exploded' }]);
     const budget = new Budget(budgetCfg);
     await expect(
@@ -109,7 +109,117 @@ describe('runPlanner', () => {
         userPrompt: 'user',
         budget,
       }),
-    ).rejects.toThrow(/provider exploded/);
+    ).rejects.toThrow(/provider exploded[\s\S]*squad doctor[\s\S]*5xx errors are transient/);
+  });
+
+  it('retries once on rate_limit and continues when the retry succeeds', async () => {
+    const sleepCalls: number[] = [];
+    const onRateLimit = vi.fn();
+    const provider = mockProvider([
+      {
+        stopReason: 'error',
+        errorKind: 'rate_limit',
+        retryAfterSec: 3,
+        rawError: 'anthropic 429: {...}',
+      },
+      { text: '# after retry\n', stopReason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1 } },
+    ]);
+    const budget = new Budget(budgetCfg);
+    const result = await runPlanner({
+      root: os.tmpdir(),
+      provider,
+      model: 'm',
+      apiKey: 'k',
+      systemPrompt: 'sys',
+      userPrompt: 'user',
+      budget,
+      sleep: async (ms) => {
+        sleepCalls.push(ms);
+      },
+      onRateLimit,
+    });
+    expect(sleepCalls).toEqual([3000]);
+    expect(onRateLimit).toHaveBeenCalledWith(3);
+    expect(result.planText).toContain('after retry');
+    expect(result.finishedNormally).toBe(true);
+  });
+
+  it('caps retry-after at 30s even when provider asks for longer', async () => {
+    const sleepCalls: number[] = [];
+    const provider = mockProvider([
+      { stopReason: 'error', errorKind: 'rate_limit', retryAfterSec: 300, rawError: '429' },
+      { text: 'ok', stopReason: 'end_turn' },
+    ]);
+    await runPlanner({
+      root: os.tmpdir(),
+      provider,
+      model: 'm',
+      apiKey: 'k',
+      systemPrompt: 'sys',
+      userPrompt: 'user',
+      budget: new Budget(budgetCfg),
+      sleep: async (ms) => void sleepCalls.push(ms),
+    });
+    expect(sleepCalls).toEqual([30_000]);
+  });
+
+  it('throws an actionable rate-limit error when both attempts are rate-limited', async () => {
+    const provider = mockProvider([
+      { stopReason: 'error', errorKind: 'rate_limit', retryAfterSec: 5, rawError: 'anthropic 429: one' },
+      { stopReason: 'error', errorKind: 'rate_limit', retryAfterSec: 5, rawError: 'anthropic 429: two' },
+    ]);
+    await expect(
+      runPlanner({
+        root: os.tmpdir(),
+        provider,
+        model: 'm',
+        apiKey: 'k',
+        systemPrompt: 'sys',
+        userPrompt: 'user',
+        budget: new Budget(budgetCfg),
+        sleep: async () => undefined,
+      }),
+    ).rejects.toThrow(/anthropic rate limit hit[\s\S]*already retried[\s\S]*squad config set planner[\s\S]*console\.anthropic\.com/);
+  });
+
+  it('does not retry for a non-rate-limit error', async () => {
+    const sleep = vi.fn(async () => undefined);
+    const provider = mockProvider([{ stopReason: 'error', rawError: 'boom' }]);
+    await expect(
+      runPlanner({
+        root: os.tmpdir(),
+        provider,
+        model: 'm',
+        apiKey: 'k',
+        systemPrompt: 'sys',
+        userPrompt: 'user',
+        budget: new Budget(budgetCfg),
+        sleep,
+      }),
+    ).rejects.toThrow(/boom/);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it('preserves the model_not_found message verbatim without extra hint', async () => {
+    const canonical = 'The anthropic planner model "claude-x" is no longer available.\n...';
+    const provider = mockProvider([
+      {
+        stopReason: 'error',
+        errorKind: 'model_not_found',
+        rawError: canonical,
+      },
+    ]);
+    await expect(
+      runPlanner({
+        root: os.tmpdir(),
+        provider,
+        model: 'm',
+        apiKey: 'k',
+        systemPrompt: 'sys',
+        userPrompt: 'user',
+        budget: new Budget(budgetCfg),
+      }),
+    ).rejects.toThrowError(canonical);
   });
 
   it('returns tool_result isError for unknown tool name', async () => {

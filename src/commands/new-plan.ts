@@ -217,6 +217,11 @@ async function emitViaApi(
       sessionSpinner.current?.succeed('planner thinking complete (this chunk)');
       sessionSpinner.current = ui.spinner('thinking…');
     },
+    onRateLimit: (waitSec) => {
+      sessionSpinner.current?.stop();
+      ui.warning(`${planner.provider} rate limit hit — retrying in ${waitSec}s`);
+      sessionSpinner.current = ui.spinner('waiting for rate limit to reset…');
+    },
   });
   sessionSpinner.current?.stop();
 

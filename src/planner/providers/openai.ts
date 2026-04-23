@@ -6,7 +6,11 @@ import type {
   ToolCall,
   ToolSchema,
 } from '../types.js';
-import { detectModelNotFound, modelNotFoundMessage } from '../provider-errors.js';
+import {
+  detectModelNotFound,
+  detectRateLimit,
+  modelNotFoundMessage,
+} from '../provider-errors.js';
 
 const API_URL = 'https://api.openai.com/v1/chat/completions';
 
@@ -41,7 +45,20 @@ export async function callOpenAI(req: ProviderRequest): Promise<ProviderResponse
     const text = await res.text().catch(() => '');
     const nf = detectModelNotFound('openai', req.model, res.status, text);
     if (nf) {
-      return { stopReason: 'error', rawError: modelNotFoundMessage(nf) };
+      return {
+        stopReason: 'error',
+        rawError: modelNotFoundMessage(nf),
+        errorKind: 'model_not_found',
+      };
+    }
+    const rl = detectRateLimit('openai', res.status, res.headers, text);
+    if (rl) {
+      return {
+        stopReason: 'error',
+        rawError: `openai 429: ${text.slice(0, 500)}`,
+        errorKind: 'rate_limit',
+        retryAfterSec: rl.retryAfterSec,
+      };
     }
     return { stopReason: 'error', rawError: `openai ${res.status}: ${text.slice(0, 500)}` };
   }

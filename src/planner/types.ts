@@ -64,12 +64,22 @@ export interface ProviderRequest {
   apiKey: string;
 }
 
+export type ProviderErrorKind = 'rate_limit' | 'model_not_found' | 'unknown';
+
 export interface ProviderResponse {
   text?: string;
   toolCalls?: ToolCall[];
   stopReason: 'end_turn' | 'tool_use' | 'max_tokens' | 'error';
   usage?: Usage;
   rawError?: string;
+  /**
+   * Structured error classification. Set by provider adapters when the shape of the error
+   * is recognised; used by `runPlanner` to pick the right retry behaviour and the right
+   * user-facing hint. Absent when the adapter did not classify the error.
+   */
+  errorKind?: ProviderErrorKind;
+  /** For `errorKind === 'rate_limit'`: seconds the provider asked us to wait. */
+  retryAfterSec?: number;
 }
 
 export interface Usage {
