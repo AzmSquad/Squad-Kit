@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://squad-kit.com">
-    <img src=".github/assets/logo-wordmark.svg" alt="squad-kit — plan once, execute cheap" width="360">
+    <img src="https://squad-kit.com/logo-wordmark.svg" alt="squad-kit — plan once, execute cheap" width="360">
   </a>
 </p>
 
