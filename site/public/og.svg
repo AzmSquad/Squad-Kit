@@ -54,7 +54,7 @@
         font-weight="400" font-size="30">3-step SDD workflow CLI for AI coding agents.</text>
 
   <g transform="translate(80 558)">
-    <rect x="0" y="-26" width="220" height="40" rx="8" fill="#111114" stroke="#24242a" stroke-width="1"/>
+    <rect x="0" y="-26" width="262" height="40" rx="8" fill="#111114" stroke="#24242a" stroke-width="1"/>
     <text x="14" y="1" fill="#7cffa0"
           font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
           font-weight="500" font-size="20">npx squad-kit init</text>
