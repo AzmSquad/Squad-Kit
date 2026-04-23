@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <defs>
+    <linearGradient id="arrow" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#7cffa0"/>
+      <stop offset="100%" stop-color="#4ade80"/>
+    </linearGradient>
+    <linearGradient id="accent-text" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#7cffa0"/>
+      <stop offset="100%" stop-color="#4ade80"/>
+    </linearGradient>
+    <radialGradient id="bg-glow" cx="20%" cy="85%" r="70%">
+      <stop offset="0%" stop-color="#7cffa0" stop-opacity="0.14"/>
+      <stop offset="100%" stop-color="#7cffa0" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="bg-glow-2" cx="85%" cy="15%" r="60%">
+      <stop offset="0%" stop-color="#60a5fa" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#60a5fa" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1200" height="630" fill="#0a0a0c"/>
+  <rect width="1200" height="630" fill="url(#bg-glow)"/>
+  <rect width="1200" height="630" fill="url(#bg-glow-2)"/>
+
+  <g opacity="0.05" stroke="#ffffff" stroke-width="1">
+    <line x1="0"    y1="157.5" x2="1200" y2="157.5"/>
+    <line x1="0"    y1="315"   x2="1200" y2="315"/>
+    <line x1="0"    y1="472.5" x2="1200" y2="472.5"/>
+    <line x1="300"  y1="0"     x2="300"  y2="630"/>
+    <line x1="600"  y1="0"     x2="600"  y2="630"/>
+    <line x1="900"  y1="0"     x2="900"  y2="630"/>
+  </g>
+
+  <g transform="translate(80 72)">
+    <rect x="0" y="0" width="72" height="72" rx="14" fill="#0a0a0c" stroke="#32323a" stroke-width="1.5"/>
+    <circle cx="16" cy="36" r="3.2" fill="#7cffa0" fill-opacity="0.35"/>
+    <circle cx="25" cy="36" r="3.2" fill="#7cffa0" fill-opacity="0.65"/>
+    <circle cx="34" cy="36" r="3.2" fill="#7cffa0"/>
+    <path d="M43 23 L60 36 L43 49" fill="none" stroke="url(#arrow)" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <text x="172" y="123" fill="#ededed"
+        font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI, Inter, Roboto, sans-serif"
+        font-weight="700" font-size="38" letter-spacing="-1">squad-kit</text>
+
+  <text x="80" y="325" fill="#ededed"
+        font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI, Inter, Roboto, sans-serif"
+        font-weight="800" font-size="96" letter-spacing="-3">Plan once,</text>
+  <text x="80" y="435" fill="url(#accent-text)"
+        font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI, Inter, Roboto, sans-serif"
+        font-weight="800" font-size="96" letter-spacing="-3">execute cheap.</text>
+
+  <text x="80" y="505" fill="#a1a1aa"
+        font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI, Inter, Roboto, sans-serif"
+        font-weight="400" font-size="30">3-step SDD workflow CLI for AI coding agents.</text>
+
+  <g transform="translate(80 558)">
+    <rect x="0" y="-26" width="220" height="40" rx="8" fill="#111114" stroke="#24242a" stroke-width="1"/>
+    <text x="14" y="1" fill="#7cffa0"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-weight="500" font-size="20">npx squad-kit init</text>
+  </g>
+  <text x="1120" y="575" text-anchor="end" fill="#71717a"
+        font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+        font-weight="500" font-size="22">squad-kit.com</text>
+</svg>
