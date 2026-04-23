@@ -1,6 +1,6 @@
 {
   "name": "squad-kit",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "author": "Momen Yasser <momenysr@gmail.com>",
   "description": "Plan once, execute cheap. A token-efficient, 3-step SDD workflow CLI (stories → plans → implementation).",
   "keywords": [

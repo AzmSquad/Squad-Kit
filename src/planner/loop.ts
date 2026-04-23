@@ -12,8 +12,12 @@ import { Budget } from './budget.js';
 import { READ_FILE_TOOL, readFileTool } from './tools.js';
 import { rateLimitMessage } from './provider-errors.js';
 
-/** Upper bound on the auto-retry wait. Provider can ask for more, but we never block longer. */
-const MAX_RATE_LIMIT_RETRY_SEC = 30;
+/**
+ * Upper bound on the auto-retry wait. Chosen to cover the common Anthropic Tier 1 /
+ * OpenAI free-tier "wait 60-90s" asks; anything longer means the org is badly over
+ * quota and retrying would only burn another request, so we skip and surface guidance.
+ */
+const MAX_RATE_LIMIT_RETRY_SEC = 90;
 
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -77,20 +81,28 @@ export async function runPlanner(input: RunPlannerInput): Promise<RunPlannerOutp
     }
 
     let retriedRateLimit = false;
+    let retrySkippedReason: 'retry_after_too_long' | undefined;
     if (response.stopReason === 'error' && response.errorKind === 'rate_limit') {
-      const waitSec = Math.min(response.retryAfterSec ?? 10, MAX_RATE_LIMIT_RETRY_SEC);
-      input.onRateLimit?.(waitSec);
-      await (input.sleep ?? defaultSleep)(waitSec * 1000);
-      response = await input.provider.send(request);
-      if (response.usage) {
-        input.budget.recordUsage(response.usage);
-        input.onUsage?.(response.usage);
+      const asked = response.retryAfterSec;
+      if (asked !== undefined && asked > MAX_RATE_LIMIT_RETRY_SEC) {
+        // Provider asked for longer than we're willing to block; a retry now would
+        // fail inside the same window and burn a request. Skip straight to guidance.
+        retrySkippedReason = 'retry_after_too_long';
+      } else {
+        const waitSec = Math.min(asked ?? 10, MAX_RATE_LIMIT_RETRY_SEC);
+        input.onRateLimit?.(waitSec);
+        await (input.sleep ?? defaultSleep)(waitSec * 1000);
+        response = await input.provider.send(request);
+        if (response.usage) {
+          input.budget.recordUsage(response.usage);
+          input.onUsage?.(response.usage);
+        }
+        retriedRateLimit = true;
       }
-      retriedRateLimit = true;
     }
 
     if (response.stopReason === 'error') {
-      throw composePlannerError(input.provider.name, response, retriedRateLimit);
+      throw composePlannerError(input.provider.name, response, retriedRateLimit, retrySkippedReason);
     }
 
     if (response.text) {
@@ -152,6 +164,7 @@ function composePlannerError(
   providerName: PlannerProvider['name'],
   response: ProviderResponse,
   retriedRateLimit: boolean,
+  retrySkippedReason?: 'retry_after_too_long',
 ): Error {
   if (response.errorKind === 'rate_limit') {
     return new Error(
@@ -160,6 +173,8 @@ function composePlannerError(
         retryAfterSec: response.retryAfterSec,
         rawBody: response.rawError ?? '',
         retryAlreadyAttempted: retriedRateLimit,
+        retrySkippedReason,
+        maxRetrySec: MAX_RATE_LIMIT_RETRY_SEC,
       }),
     );
   }

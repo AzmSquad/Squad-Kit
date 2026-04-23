@@ -144,10 +144,10 @@ describe('runPlanner', () => {
     expect(result.finishedNormally).toBe(true);
   });
 
-  it('caps retry-after at 30s even when provider asks for longer', async () => {
+  it('honours retry-after up to the 90s cap', async () => {
     const sleepCalls: number[] = [];
     const provider = mockProvider([
-      { stopReason: 'error', errorKind: 'rate_limit', retryAfterSec: 300, rawError: '429' },
+      { stopReason: 'error', errorKind: 'rate_limit', retryAfterSec: 60, rawError: '429' },
       { text: 'ok', stopReason: 'end_turn' },
     ]);
     await runPlanner({
@@ -160,7 +160,41 @@ describe('runPlanner', () => {
       budget: new Budget(budgetCfg),
       sleep: async (ms) => void sleepCalls.push(ms),
     });
-    expect(sleepCalls).toEqual([30_000]);
+    expect(sleepCalls).toEqual([60_000]);
+  });
+
+  it('skips the retry entirely when retry-after is longer than the 90s cap', async () => {
+    const sleepCalls: number[] = [];
+    const onRateLimit = vi.fn();
+    const sends = vi.fn<(r: unknown) => Promise<unknown>>();
+    const provider: PlannerProvider = {
+      name: 'anthropic',
+      async send(req) {
+        sends(req);
+        return {
+          stopReason: 'error' as const,
+          errorKind: 'rate_limit' as const,
+          retryAfterSec: 132,
+          rawError: 'anthropic 429: {too-long}',
+        };
+      },
+    };
+    await expect(
+      runPlanner({
+        root: os.tmpdir(),
+        provider,
+        model: 'm',
+        apiKey: 'k',
+        systemPrompt: 'sys',
+        userPrompt: 'user',
+        budget: new Budget(budgetCfg),
+        sleep: async (ms) => void sleepCalls.push(ms),
+        onRateLimit,
+      }),
+    ).rejects.toThrow(/did not auto-retry[\s\S]*132s wait is longer than our 90s cap/);
+    expect(sleepCalls).toEqual([]);
+    expect(onRateLimit).not.toHaveBeenCalled();
+    expect(sends).toHaveBeenCalledTimes(1);
   });
 
   it('throws an actionable rate-limit error when both attempts are rate-limited', async () => {

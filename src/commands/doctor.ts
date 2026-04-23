@@ -319,6 +319,35 @@ async function checkPlannerModel(_paths: SquadPaths, ctx: DoctorContext): Promis
   }
 }
 
+async function checkPlannerTierAwareness(
+  _paths: SquadPaths,
+  ctx: DoctorContext,
+): Promise<CheckResult> {
+  const id = 'planner-tier';
+  const name = 'planner tier vs. model';
+  if (!ctx.config || ctx.config.planner?.enabled !== true) {
+    return { id, name, status: 'skip', detail: 'planner disabled' };
+  }
+  const provider = ctx.config.planner.provider;
+  if (provider !== 'anthropic') {
+    return { id, name, status: 'skip', detail: `not applicable for ${provider}` };
+  }
+  const planModel = modelFor(provider, 'plan', ctx.config.planner.modelOverride);
+  if (!/opus/i.test(planModel)) {
+    return { id, name, status: 'ok', detail: `${planModel} is comfortably under Tier 1` };
+  }
+  return {
+    id,
+    name,
+    status: 'warn',
+    detail: `${planModel} on Anthropic Tier 1 (10k input tokens/min) is throttle-prone for plans over ~3 file reads`,
+    fixHint:
+      'Run `squad config set planner` and pick a Sonnet or Haiku id for planner.modelOverride.anthropic, ' +
+      'or upgrade tier at https://console.anthropic.com/settings/limits. ' +
+      'squad-kit will auto-retry a 429 once (waiting up to 90s), but repeated throttling means the plan model is simply too big for your quota.',
+  };
+}
+
 async function checkTrackerConfig(_paths: SquadPaths, ctx: DoctorContext): Promise<CheckResult> {
   if (!ctx.config) {
     return { id: 'tracker-config', name: 'tracker configuration', status: 'skip', detail: 'config unavailable' };
@@ -445,6 +474,7 @@ async function runAllChecks(paths: SquadPaths, ctx: DoctorContext, fix: boolean)
   await add('planner configuration', () => checkPlannerConfig(paths, ctx));
   await add('planner credential resolves', () => checkPlannerCredential(paths, ctx));
   await add('planner model resolves at provider', () => checkPlannerModel(paths, ctx));
+  await add('planner tier vs. model', () => checkPlannerTierAwareness(paths, ctx));
   await add('tracker configuration', () => checkTrackerConfig(paths, ctx));
   await add('tracker credential resolves', () => checkTrackerCredential(paths, ctx));
   await add('tracker connectivity', () => checkTrackerConnectivity(paths, ctx));

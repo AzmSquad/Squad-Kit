@@ -155,6 +155,66 @@ describe('runDoctor', () => {
     }
   });
 
+  it('planner tier-awareness warns for Anthropic Opus and stays ok for Sonnet/Haiku', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
+      Promise.resolve(new Response(JSON.stringify({ data: [] }), { status: 200 })),
+    );
+    const prev = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = 'sk-test';
+    try {
+      installWorkspace({
+        ...DEFAULT_CONFIG,
+        planner: {
+          enabled: true,
+          provider: 'anthropic',
+          mode: 'auto',
+          budget: { maxFileReads: 10, maxContextBytes: 20_000, maxDurationSeconds: 60 },
+          modelOverride: { anthropic: 'claude-opus-4-7' },
+        },
+      });
+      ensureGitignore(tmp);
+
+      const cap = captureStdout();
+      try {
+        await runDoctor({ json: true });
+        const j = JSON.parse(cap.text()) as {
+          checks: { id: string; status: string; detail?: string; fixHint?: string }[];
+        };
+        const row = j.checks.find((c) => c.id === 'planner-tier');
+        expect(row?.status).toBe('warn');
+        expect(row?.detail).toContain('claude-opus-4-7');
+        expect(row?.detail).toContain('Tier 1');
+        expect(row?.fixHint).toContain('Sonnet or Haiku');
+      } finally {
+        cap.restore();
+      }
+
+      saveConfig(path.join(tmp, SQUAD_DIR, 'config.yaml'), {
+        ...DEFAULT_CONFIG,
+        planner: {
+          enabled: true,
+          provider: 'anthropic',
+          mode: 'auto',
+          budget: { maxFileReads: 10, maxContextBytes: 20_000, maxDurationSeconds: 60 },
+          modelOverride: { anthropic: 'claude-sonnet-4-5' },
+        },
+      });
+      const cap2 = captureStdout();
+      try {
+        await runDoctor({ json: true });
+        const j = JSON.parse(cap2.text()) as { checks: { id: string; status: string }[] };
+        const row = j.checks.find((c) => c.id === 'planner-tier');
+        expect(row?.status).toBe('ok');
+      } finally {
+        cap2.restore();
+      }
+    } finally {
+      fetchSpy.mockRestore();
+      if (prev !== undefined) process.env.ANTHROPIC_API_KEY = prev;
+      else delete process.env.ANTHROPIC_API_KEY;
+    }
+  });
+
   it('planner model probe succeeds when /v1/models lists pinned id', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
       Promise.resolve(

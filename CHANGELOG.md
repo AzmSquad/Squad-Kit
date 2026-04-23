@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-04-22
+
+### Fixed
+
+- **Rate-limit retry no longer burns a doomed request.** 0.2.1 capped the auto-retry wait at 30 s. When a provider asked for longer than that (common on Anthropic Tier 1, which regularly asks for 60–180 s), squad-kit would retry *inside the same throttle window* and fail a second time. 0.2.2:
+  - Raises the retry cap from 30 s to **90 s**, which comfortably covers the provider-suggested wait for most Tier 1 / free-tier 429s.
+  - **Skips the retry entirely** when `Retry-After` is longer than the 90 s cap, and surfaces a dedicated message explaining the decision (`squad-kit did not auto-retry: the provider's 132s wait is longer than our 90s cap, so retrying would just burn another request inside the same throttle window.`) instead of wasting a request and showing the "already retried" variant.
+
+### Added
+
+- **`squad doctor` now reports planner tier vs. model awareness** (check id `planner-tier`). When `planner.provider === 'anthropic'` and the resolved plan model id contains `opus`, the check emits a **warn** with a fix hint suggesting `squad config set planner` to pick Sonnet or Haiku, which live in separate per-model rate-limit buckets on Anthropic Tier 1 (10 k input tokens / minute). For non-Anthropic providers and non-Opus models, the check is `skip` or `ok` — no noise for users who aren't affected.
+- `rateLimitMessage` gained a `retrySkippedReason` + `maxRetrySec` field, so the error text can distinguish "we retried and got throttled again" (firm over-quota) from "we did not retry because your wait is longer than our cap" (retry would be pointless). Both cases still surface the same four recovery options.
+
 ## [0.2.1] - 2026-04-22
 
 ### Fixed

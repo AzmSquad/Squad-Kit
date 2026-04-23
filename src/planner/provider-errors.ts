@@ -113,6 +113,13 @@ export interface RateLimitMessageInput {
   rawBody: string;
   /** True when squad-kit already retried once and got rate-limited again. */
   retryAlreadyAttempted?: boolean;
+  /**
+   * Set when the loop deliberately did not retry. Currently only one reason:
+   * the provider asked for longer than our retry cap.
+   */
+  retrySkippedReason?: 'retry_after_too_long';
+  /** The retry cap in seconds, used in the skipped-retry sentence. */
+  maxRetrySec?: number;
 }
 
 /**
@@ -130,7 +137,10 @@ export function rateLimitMessage(err: RateLimitMessageInput): string {
   const headline = err.retryAfterSec
     ? `${err.provider} rate limit hit \u2014 provider asked us to wait ${err.retryAfterSec}s before retrying.`
     : `${err.provider} rate limit hit.`;
-  const retried = err.retryAlreadyAttempted
+  const cap = err.maxRetrySec ?? 90;
+  const retried = err.retrySkippedReason === 'retry_after_too_long'
+    ? `squad-kit did not auto-retry: the provider's ${err.retryAfterSec}s wait is longer than our ${cap}s cap, so retrying would just burn another request inside the same throttle window.`
+    : err.retryAlreadyAttempted
     ? 'squad-kit already retried once automatically and was throttled again \u2014 your org is firmly over its per-minute quota.'
     : 'squad-kit aborted before retrying.';
   return [

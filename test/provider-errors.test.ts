@@ -151,4 +151,28 @@ describe('rateLimitMessage', () => {
     });
     expect(msg).toContain('aistudio.google.com');
   });
+
+  it('explains the retry-skipped case when provider asks beyond our cap', () => {
+    const msg = rateLimitMessage({
+      provider: 'anthropic',
+      retryAfterSec: 132,
+      rawBody: 'anthropic 429: quota',
+      retrySkippedReason: 'retry_after_too_long',
+      maxRetrySec: 90,
+    });
+    expect(msg).toContain('did not auto-retry');
+    expect(msg).toContain('132s wait is longer than our 90s cap');
+    expect(msg).not.toContain('already retried');
+    expect(msg).not.toContain('aborted before retrying');
+  });
+
+  it('uses the 90s default cap when maxRetrySec is not provided for a skipped retry', () => {
+    const msg = rateLimitMessage({
+      provider: 'anthropic',
+      retryAfterSec: 200,
+      rawBody: '',
+      retrySkippedReason: 'retry_after_too_long',
+    });
+    expect(msg).toContain('longer than our 90s cap');
+  });
 });
