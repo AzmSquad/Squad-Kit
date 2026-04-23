@@ -44,6 +44,8 @@ const stats = [
             <strong class="text-[var(--color-text)]">plan once, execute cheap</strong>.
             Every task in a squad-kit plan has a file path, a symbol or line range, a type signature or command.
             Vague guidance like "consider introducing a service layer" does not belong there — that's a planning decision, not a task.
+            The direct planner (<code class="font-mono text-sm text-[var(--color-text)]">squad new-plan --api</code>) does not change
+            the math — the expensive model still plans once per story. It just shortens the path from intake to plan file.
           </p>
         </div>
         <div class="mt-8">

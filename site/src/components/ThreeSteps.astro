@@ -5,9 +5,9 @@ const steps = [
     title: "Write an intake",
     subtitle: "Raw story in",
     description:
-      "Scaffold a story folder. Paste the tracker title, description, and acceptance criteria into intake.md. Drop screenshots into attachments/.",
-    command: "squad new-story checkout --title \"Add guest checkout\"",
-    output: ".squad/stories/checkout/add-guest-checkout/intake.md",
+      "Scaffold a story folder. Use `squad new-story <feature> --id <ID>` to auto-fetch title, description, labels, and attachments from Jira or Azure DevOps — or `--no-tracker` for a manual intake.",
+    command: "squad new-story checkout --id ENG-42",
+    output: ".squad/stories/checkout/ENG-42/intake.md",
     cost: "Human time",
   },
   {
@@ -15,8 +15,8 @@ const steps = [
     title: "Plan once, expensively",
     subtitle: "The only expensive turn",
     description:
-      "Your strongest model reads the intake, scans real files in your repo, and produces one concrete plan: paths, line ranges, type signatures, verification commands.",
-    command: "/squad-plan .squad/stories/checkout/add-guest-checkout/intake.md",
+      "Your strongest model reads the intake and requests repo files on demand (budget-enforced). Writes one concrete plan: paths, line ranges, type signatures, verification commands. Run inside your agent, or directly with `squad new-plan --api`.",
+    command: "squad new-plan --api",
     output: ".squad/plans/checkout/01-story-add-guest-checkout.md",
     cost: "Opus / GPT-5 tier",
   },

@@ -2,7 +2,7 @@
 const rows = [
   {
     label: "Plan-turn starting context",
-    squad: "intake (~2 KB) + meta-prompt (~5 KB)",
+    squad: "intake (~2 KB) + meta-prompt (~5 KB) + files planner requests on demand",
     speckit: "spec.md + plan.md + constitution + /plan template + research",
     winner: "squad",
   },
@@ -19,8 +19,14 @@ const rows = [
     winner: "squad",
   },
   {
-    label: "Model-tier awareness",
-    squad: "built in: planner ≠ executor",
+    label: "Direct-from-terminal planning",
+    squad: "squad new-plan --api (Anthropic, OpenAI, Google)",
+    speckit: "agent-only",
+    winner: "squad",
+  },
+  {
+    label: "Tracker intake fetch",
+    squad: "built in: Jira Cloud, Azure DevOps Services",
     speckit: "not prescribed",
     winner: "squad",
   },
@@ -32,7 +38,7 @@ const rows = [
   },
   {
     label: "Customization",
-    squad: "edit Markdown in your repo",
+    squad: "squad config · intakes · fork to change prompts",
     speckit: "template override stack + presets",
     winner: "tie",
   },
@@ -41,12 +47,6 @@ const rows = [
     squad: "Node + TypeScript · npm",
     speckit: "Python 3.11+ · uv",
     winner: "tie",
-  },
-  {
-    label: "Bundle size",
-    squad: "~23 KB (single JS file)",
-    speckit: "Python package with deps",
-    winner: "squad",
   },
 ];
 

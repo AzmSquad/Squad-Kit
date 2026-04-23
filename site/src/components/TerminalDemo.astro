@@ -16,15 +16,16 @@
     </div>
 
     <pre class="m-0 p-5 sm:p-6 font-mono text-[12px] sm:text-[13px] leading-relaxed overflow-x-auto"><code><span class="text-[var(--color-text-dim)]">$</span> <span class="text-[var(--color-text)]">squad init</span>
-<span class="text-[var(--color-accent)]">✓</span> <span class="text-[var(--color-text-muted)]">Initialized .squad/ with prompts + Cursor commands</span>
+<span class="text-[var(--color-accent)]">✓</span> <span class="text-[var(--color-text-muted)]">Initialized .squad/ · planner: anthropic · tracker: jira</span>
+<span class="text-[var(--color-text-muted)]">  credentials saved to </span><span class="text-[var(--color-info)]">.squad/secrets.yaml</span> <span class="text-[var(--color-text-muted)]">(0600, git-ignored)</span>
 
-<span class="text-[var(--color-text-dim)]">$</span> <span class="text-[var(--color-text)]">squad new-story checkout --title "Add guest checkout"</span>
-<span class="text-[var(--color-accent)]">✓</span> <span class="text-[var(--color-text-muted)]">Created intake:</span>
-  <span class="text-[var(--color-info)]">.squad/stories/checkout/add-guest-checkout/intake.md</span>
+<span class="text-[var(--color-text-dim)]">$</span> <span class="text-[var(--color-text)]">squad new-story checkout --id ENG-42</span>
+<span class="text-[var(--color-text-muted)]">  fetching ENG-42 from Jira · title · description · 2 attachments</span>
+<span class="text-[var(--color-accent)]">✓</span> <span class="text-[var(--color-text-muted)]">wrote</span> <span class="text-[var(--color-info)]">.squad/stories/checkout/ENG-42/intake.md</span>
 
-<span class="text-[var(--color-text-dim)]">$</span> <span class="text-[var(--color-text)]">/squad-plan</span> <span class="text-[var(--color-text-muted)]">.squad/stories/checkout/add-guest-checkout/intake.md</span>
-<span class="text-[var(--color-text-muted)]">  reading intake · scanning existing plans · composing</span>
+<span class="text-[var(--color-text-dim)]">$</span> <span class="text-[var(--color-text)]">squad new-plan --api</span>
+<span class="text-[var(--color-text-muted)]">  picker · intake · planner (claude-opus) reading repo files on request</span>
 <span class="text-[var(--color-accent)]">✓</span> <span class="text-[var(--color-text-muted)]">wrote</span> <span class="text-[var(--color-info)]">.squad/plans/checkout/01-story-add-guest-checkout.md</span>
-<span class="text-[var(--color-text-muted)]">  <span class="text-[var(--color-accent)]">~8 KB</span> — ready for a cheap executor</span><span class="animate-blink">▊</span></code></pre>
+<span class="text-[var(--color-text-muted)]">  <span class="text-[var(--color-accent)]">~9 KB</span> — ready for a cheap executor</span><span class="animate-blink">▊</span></code></pre>
   </div>
 </div>

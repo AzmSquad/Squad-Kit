@@ -5,52 +5,41 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Website](https://img.shields.io/badge/site-squad--kit.netlify.app-7cffa0?labelColor=0a0a0c)](https://squad-kit.netlify.app)
 
-**Plan once, execute cheap.** A 3-step SDD-style workflow CLI for AI-assisted coding: **raw story → good plan → implementation**.
-
-Website & docs: **[squad-kit.netlify.app](https://squad-kit.netlify.app)**
-
-
-Your expensive model plans once. A cheap model executes many times. Squad-kit owns the folder conventions, the plan meta-prompt, and the agent slash-commands so the token cost goes where it pays off.
+**Plan once, execute cheap.** A 3-step SDD-style workflow CLI for AI-assisted coding: **raw story → good plan → implementation**. Your expensive model plans once. A cheap model executes many times. Squad-kit owns the folder conventions, the plan meta-prompt, and the agent slash-commands so the token cost goes where it pays off. Deeper product notes live on **[squad-kit.netlify.app](https://squad-kit.netlify.app)** and in [`docs/`](docs/philosophy.md).
 
 ```
 .squad/
-├── stories/<feature>/<id>/ # intake + attachments (one per story)
-└── plans/<feature>/        # NN-story-<slug>.md (one per executable plan)
+├── stories/<feature>/<id>/  # intake + attachments (one per story)
+└── plans/<feature>/         # NN-story-<slug>.md (one per executable plan)
 ```
 
-Plan meta-prompts (`generate-plan.md`, `story-skeleton.md`, intake template) are **bundled inside the squad-kit npm package**, not copied into your repo. Upgrade the CLI to change them; to fork and customise, patch `templates/prompts/` in a fork of squad-kit.
+## What's new in 0.2.0
 
----
+- **Direct planner.** `squad new-plan --api` runs Anthropic, OpenAI, or Google from your terminal and writes the plan file. Demand-driven context keeps tokens bounded.
+- **Tracker auto-fetch.** `squad new-story --id <ID>` pulls title, description, labels, and attachments (≤ 10 MB each) from Jira Cloud or Azure DevOps Services.
+- **Secrets split.** API tokens live in `.squad/secrets.yaml` (git-ignored, `0600` on POSIX). `.squad/config.yaml` never holds secrets; the loader rejects secret-shaped keys.
+- **Interactive-first UX.** Missing input prompts in a TTY; `-y` / `--yes` or `CI=1` opts out and fails fast.
+- **`squad doctor`.** Full read-only health check; `--fix` for non-destructive repairs, `--json` for scripting.
+- **`squad migrate`.** One-shot 0.1.x → 0.2.0 structural migrations (delete legacy `.squad/prompts/`, permissions, config normalisation). Destructive; use `--dry-run` first.
+- **`squad upgrade`.** Safe npm-backed self-update (`--check` to verify only).
+- **`squad config`.** `show`, `set planner` / `set tracker`, `unset …`, `remove-credential …` — edit config and secrets without hand-editing YAML.
+- **`squad rm`.** `rm story` / `rm plan` / `rm feature` with `--dry-run`, `--trash`, and cascading overview updates.
+- **Bundled prompts.** `generate-plan.md`, `intake.md`, and `story-skeleton.md` ship inside the npm package; upgrade the CLI to update them.
 
-## Why not Spec-Kit?
+Full list in [`CHANGELOG.md`](CHANGELOG.md).
 
-Both aim at spec-driven development. They make different bets.
+## Upgrading from 0.1.x
 
-| | squad-kit | Spec-Kit |
-|---|---|---|
-| Commands | `init`, `new-story`, `new-plan`, `status`, `doctor`, `migrate`, `upgrade`, `list`, `rm`, `tracker link` | `constitution`, `specify`, `clarify`, `plan`, `tasks`, `analyze`, `checklist`, `implement` |
-| `/implement` turn starts with | one plan file (~5–15 KB) | 5–7 command templates + cross-artifact reads (~15–25 KB) |
-| Model-tier awareness | Built into the philosophy (planner ≠ executor) | Not prescribed |
-| Generated artifacts per story | `intake.md`, `NN-story-<slug>.md`, overview row | `spec.md`, `plan.md`, `data-model.md`, `contracts/`, `research.md`, `quickstart.md`, `tasks.md` |
-| Customization | Prompts ship with the CLI (fork squad-kit to change them). | Template override stack with presets/extensions |
-| Runtime | Node + TypeScript, npm-distributable | Python + `uv` |
-| Scope | Intentionally small | Broad, with safety nets (`clarify`, `analyze`) |
+Existing squad-kit users should run two commands, once per repo:
 
-Spec-Kit ships safety rails. Squad-kit ships the cheap path and gets out of the way. Pick squad-kit when your planner already produces trustworthy plans; pick Spec-Kit when you want the process to catch planning mistakes for you.
+```bash
+pnpm add -g squad-kit@0.2.0       # or: npm install -g squad-kit@0.2.0 — or: squad upgrade
+cd your-project && squad migrate
+```
 
-See [`docs/philosophy.md`](docs/philosophy.md) for the token math and [`docs/vs-spec-kit.md`](docs/vs-spec-kit.md) for the full comparison.
+`squad migrate` deletes the now-unused `.squad/prompts/` directory, appends the managed `.gitignore` block, tightens `.squad/secrets.yaml` permissions to `0600`, and normalises `.squad/config.yaml`. It is idempotent but destructive — run it with `--dry-run` first if you forked the prompt files.
 
-### Tracker auto-fetch (new in 0.2.0)
-
-When a supported tracker is configured, `squad new-story <feature> --id <ID>` pulls the work item's title, description, labels, and attachments (≤ 10 MB each) directly into the intake. No more manual copy-paste.
-
-Supported trackers in 0.2.0: **Jira Cloud**, **Azure DevOps Services**.
-
-Credentials are prompted during `squad init` and stored in `.squad/secrets.yaml`, which squad-kit auto-adds to your `.gitignore`. Environment variables (`JIRA_API_TOKEN`, `AZURE_DEVOPS_PAT`, or the cross-provider `SQUAD_TRACKER_API_KEY`) also work if you prefer them.
-
-Pass `--no-fetch` to skip the call and scaffold an empty intake; `--no-attachments` to fetch metadata only.
-
----
+Full upgrade walkthrough, including what-if scenarios and how to recover customised prompts: [migration guide (repo)](docs/migrating-from-0.1.md) · [migration guide (site)](https://squad-kit.netlify.app/docs/migrating-from-0.1).
 
 ## Install
 
@@ -62,200 +51,114 @@ pnpm add -g squad-kit@0.2.0
 
 Requires Node 18+.
 
----
-
 ## Quickstart
 
-In your project root:
-
 ```bash
-squad init                        # interactive: tracker, agents, name
-squad new-story auth --title "SSO support"
-# → edit .squad/stories/auth/sso-support/intake.md (paste title, description, criteria)
+cd your-project
+squad init                                              # interactive: tracker, planner, agents, name
+squad new-story auth --title "SSO support"              # or: squad new-story auth --id ENG-42 to auto-fetch
+# → edit .squad/stories/auth/ENG-42/intake.md
 
-# Write an intake without a tracker id (even when naming.includeTrackerId would normally require one):
-squad new-story feature-slug --no-tracker --title "quick exploration"
-# Per-invocation only — .squad/config.yaml is not modified.
+/squad-plan .squad/stories/auth/ENG-42/intake.md        # in your agent (Claude / Cursor / Copilot / Gemini)
+# → .squad/plans/auth/01-story-sso-support.md
+
+# new agent chat · attach ONLY the plan file · a cheap model ships it
 ```
 
-### Managing configuration
-
-squad-kit stores settings in two files:
-
-- `.squad/config.yaml` — project name, tracker type, naming rules, planner provider.
-- `.squad/secrets.yaml` — API keys and tokens, `.gitignore`-d and chmod 0600.
-
-Never edit these by hand. Use:
-
-| Command | What it does |
-| --- | --- |
-| `squad config show` | Detailed view of both files (secrets masked). |
-| `squad config set planner` | Interactively change provider, model, and key. |
-| `squad config set tracker` | Interactively change tracker type, host, token. |
-| `squad config unset planner` | Disable the direct planner; keeps credentials. |
-| `squad config unset tracker` | Set tracker to `none`; keeps credentials. |
-| `squad config remove-credential planner` | Delete planner keys without touching config. |
-| `squad config remove-credential tracker` | Delete tracker keys without touching config. |
-| `squad status` | Quick operational summary (stories, plans). |
-| `squad doctor` | Full health check. |
+No slash commands in your agent? Skip the meta-prompt copy-paste entirely:
 
 ```bash
-# then, in your agent (Claude Code / Cursor / Copilot / Gemini):
-/squad-plan .squad/stories/auth/sso-support/intake.md
-
-# → produces .squad/plans/auth/01-story-sso-support.md
-
-# implementation: new agent chat, attach ONLY the plan file.
-# a cheap model can execute it end-to-end.
+squad new-plan --api   # interactive picker, direct provider call, writes the plan file
 ```
 
-No slash commands in your agent? Pipe the prompt directly:
-
-```bash
-squad new-plan .squad/stories/auth/sso-support/intake.md   # prints to stdout, copies to clipboard
-```
-
----
+Configuration, credential edits, and non-interactive flags: see [`docs/customization.md`](docs/customization.md) and `squad config show`. Full walkthrough: [`docs/getting-started.md`](docs/getting-started.md).
 
 ## Commands
 
 | Command | What it does |
-|---|---|
-| `squad init` | Bootstrap `.squad/` with config and agent slash-commands (prompts are bundled in the package) |
-| `squad new-story [feature] [--id ID] [--title ...]` | Scaffold a story intake folder (optional feature prompts in a TTY) |
-| `squad new-plan <intake-path>` | Compose the plan-generation meta-prompt with the intake inlined; print to stdout + copy to clipboard |
-| `squad status` | Count stories/plans, show next global `NN`, tracker/planner credential hints, warn on duplicates |
-| `squad doctor` | Run a health check on your `.squad/` workspace |
-| `squad doctor --fix` | Apply non-destructive repairs (`.gitignore` block, `secrets.yaml` mode `0600`, missing dirs) |
-| `squad doctor --json` | Emit results as JSON on stdout (for scripting) |
-| `squad list [--feature <slug>]` | Table of stories + their plan state |
-| `squad rm` | Delete stories, plans, or whole features (`rm story` / `rm plan` / `rm feature`) with `--dry-run`, `--trash`, `-y` |
-| `squad tracker link [story] [id]` | Attach or update a tracker id on an intake (optional args prompt in a TTY) |
-| `squad migrate` | One-shot structural migrations from 0.1.x to 0.2.0 |
-| `squad migrate --dry-run` | Show what would change without applying |
-| `squad migrate --yes` | Skip the confirmation prompt |
-| `squad upgrade` | Check npm for a newer squad-kit release and install it |
-| `squad upgrade --check` | Only check; do not install |
-| `squad upgrade --yes` | Skip the confirmation prompt |
-
-### Removing things safely
-
-squad-kit never asks you to `rm -rf` by hand. Use:
-
-| Command | What it does |
 | --- | --- |
-| `squad rm story` | Interactive picker; deletes intake + plan + overview row. |
-| `squad rm story <path\|id>` | Same, targeted. |
-| `squad rm plan` | Interactive picker; deletes the plan file only. |
-| `squad rm feature` | Interactive picker; deletes every story + plan + overview. |
-| `... --dry-run` | Preview without changing anything. |
-| `... --trash` | Move into `.squad/.trash/<ts>/` instead of deleting. |
-| `... -y` | Skip the confirmation prompt (non-interactive). |
+| `squad init` | Scaffold `.squad/` with config, bundled prompts reference, and agent slash-commands. See [`docs/getting-started.md`](docs/getting-started.md). |
+| `squad new-story [feature] [--id ID] [--title …] [--no-tracker] [--no-fetch] [--no-attachments] [--attachment-mb n]` | Create a story intake. Auto-fetches from the configured tracker when `--id` is given. |
+| `squad new-plan [intake] [--api] [--copy] [--feature <slug>] [--all]` | Generate a plan from an intake. `--api` calls the configured planner; without `--api`, copy-paste mode prints the prompt to stdout and clipboard (`--no-clipboard` to skip the clipboard). |
+| `squad status` | Counts, next `NN`, planner and tracker rows (including credential source). |
+| `squad list [--feature <slug>]` | Table of stories and plan state. |
+| `squad tracker link [story] [id]` | Attach or update a tracker id on an intake. |
+| `squad config <show\|set\|unset\|remove-credential> …` | View and edit `.squad/config.yaml` and `.squad/secrets.yaml` interactively. See [`docs/customization.md`](docs/customization.md). |
+| `squad rm <story\|plan\|feature> [target] [--dry-run] [--trash] [-y]` | Safely delete with cascading overview updates. |
+| `squad doctor [--fix] [--json]` | Full health check; `--fix` applies non-destructive repairs. |
+| `squad migrate [--dry-run] [-y]` | One-shot 0.1.x → 0.2.0 structural migrations. Destructive. |
+| `squad upgrade [--check] [-y]` | Check npm and install a newer squad-kit release. |
 
-`.squad/.trash/` is git-ignored automatically. Recover with `mv .squad/.trash/<ts>/<item> .squad/...`. Empty it when you are sure: `rm -rf .squad/.trash`.
-
-### `squad upgrade`
-
-`squad upgrade` queries `registry.npmjs.org` for the latest squad-kit release, detects your package manager (pnpm, npm, yarn, bun), and runs the appropriate global-install command with your confirmation. After upgrading, run `squad migrate` in each project to update the `.squad/` structure if needed.
-
-### `squad doctor`
-
-Use this when something feels misconfigured. By default it is read-only: it loads `.squad/config.yaml` and `.squad/secrets.yaml`, checks directory layout, warns if a legacy `.squad/prompts/` directory is still present (removed in 0.2.0), validates planner settings and API keys (including a lightweight `/v1/models` probe — never a paid completion), checks Jira/Azure tracker config and credentials, and optionally hits a small REST endpoint to verify connectivity.
-
-`--fix` only performs safe, idempotent fixes: creating missing `.squad/stories` or `.squad/plans`, appending the managed `.gitignore` block (including `.squad/.trash/` when missing), and tightening `secrets.yaml` permissions on POSIX. It does not delete files or rewrite config; for legacy prompts cleanup and other migrations, use `squad migrate`.
-
-### Upgrading from 0.1.x
-
-After upgrading the squad-kit package (`pnpm add -g squad-kit@latest`), run `squad migrate` once in each repo that uses squad-kit. This deletes the now-unused `.squad/prompts/` directory, ensures your `.gitignore` has the squad-kit block, tightens permissions on `.squad/secrets.yaml`, and normalises `.squad/config.yaml` formatting. Comments inside `config.yaml` will be dropped.
-
----
-
-## CLI conventions
-
-### Interactive-first
-
-Every squad-kit command prompts for missing required input when run in a TTY. Use `-y` or `--yes` to opt out — missing input then fails fast instead of prompting. Useful in scripts and CI, e.g. `CI=1 squad new-story user-auth --id ENG-42 --yes`.
-
-Set `CI=1` to force non-interactive behaviour even in a TTY (matches how other tools behave in CI environments).
+Deeper option lists: `squad <command> --help` and the `docs/` pages above.
 
 ## Direct planner (optional)
 
-Squad can call a strong planning model for you from the terminal so you do not have to paste the prompt into your agent. Off by default.
+Off by default. Enable during `squad init` (answer **yes** to *Enable automatic plan generation?*) or later with `squad config set planner`. Supported providers: Anthropic, OpenAI, Google.
 
-1. `squad init --force` and answer **yes** to *Enable automatic plan generation?* (or re-run `squad init -y --planner anthropic`). Use `--skip-secrets-prompt` (or `--no-prompt-secrets`) if you want to skip all secret prompts in a TTY session.
-2. Export the provider's API key:
+Credential resolution order:
 
-   ```bash
-   export ANTHROPIC_API_KEY=...   # or OPENAI_API_KEY / GOOGLE_API_KEY
-   ```
+1. Provider env var (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`).
+2. `.squad/secrets.yaml` under `planner.<provider>.apiKey` (or cross-provider `SQUAD_PLANNER_API_KEY`).
+3. Interactive prompt (TTY only).
+4. Fail with a recovery hint.
 
-3. `squad new-plan` — pick an un-planned intake; squad reads only the files the planner asks for (bounded by `planner.budget`), writes the plan to `.squad/plans/<feature>/NN-story-<slug>.md`, and prints a summary.
-
-Optional: override the default plan-phase model id (per provider) without changing squad-kit:
+Override the default plan-phase model without editing squad-kit:
 
 ```yaml
 planner:
   enabled: true
   provider: anthropic
-  # Optional: pin a specific model for the plan phase, overriding the squad-kit default.
-  # Useful when riding a newer provider release ahead of a squad-kit update, or when the
-  # default has been deprecated.
   modelOverride:
-    anthropic: claude-opus-5-0
+    anthropic: claude-opus-5-0      # riding a newer provider release early
 ```
 
-Slash commands inside your agent (`/squad-plan`) continue to work unchanged — the agent already has your repo in scope.
+`squad status` marks the planner row `(override)` when a `modelOverride` is active. `squad doctor` probes the provider's `/v1/models` endpoint (no paid completion) and tells you what to do if the id is no longer served.
 
-Squad-kit never reads API keys from `.squad/config.yaml`. You can set keys via environment variables, save them in `.squad/secrets.yaml` (prompted by `squad init` when the planner is enabled), or a mix. See [Secrets](#secrets) below.
+Slash commands inside your agent (`/squad-plan`) continue to work unchanged — the agent already has your repo in scope. The direct planner is an alternative path, not a replacement. For where keys live, see [Secrets](#secrets) below and [`docs/customization.md`](docs/customization.md).
 
-#### Secrets
+## Tracker auto-fetch
 
-- `.squad/config.yaml` — shape and non-sensitive settings. Safe to commit.
-- `.squad/secrets.yaml` — API tokens for the planner and tracker. **Always git-ignored** (managed by squad-kit).
-- Environment variables override `.squad/secrets.yaml`.
-- Priority: env var → `.squad/secrets.yaml` → prompt (interactive) → fail.
+`squad new-story <feature> --id <ID>` pulls the work item's title, description, labels, and attachments (≤ 10 MB each) straight into the intake. Supported trackers in 0.2.0: **Jira Cloud**, **Azure DevOps Services**.
 
----
+Credentials follow the same resolution order as the planner (env → `.squad/secrets.yaml` → prompt → fail). `squad init` prompts for them when a supported tracker is selected.
 
-## Agent integration
+Flags:
 
-At `squad init` you pick which agents get native slash commands. Supported:
+- `--no-fetch` — scaffold an empty intake; never call the tracker.
+- `--no-attachments` — fetch metadata only.
+- `--attachment-mb <n>` — override the 10 MB per-file cap.
+- `--no-tracker` — skip the tracker id requirement for this story even when `naming.includeTrackerId: true`.
 
-- **Claude Code** → `.claude/commands/squad-plan.md`, `.claude/commands/squad-new-story.md`
-- **Cursor** → `.cursor/commands/squad-*.md`
-- **GitHub Copilot** → `.github/prompts/squad-plan.prompt.md`
-- **Gemini CLI** → `.gemini/commands/squad-plan.toml`
+Full example with Azure DevOps: [`docs/getting-started.md`](docs/getting-started.md).
 
-Unsupported agents work fine too — `squad new-plan` prints the composed prompt on stdout.
+## Secrets
 
----
+squad-kit stores settings in two files:
 
-## Trackers
+| File | Purpose | Git-tracked? | Editable by hand? |
+| --- | --- | --- | --- |
+| `.squad/config.yaml` | Project name, tracker, naming, agents, planner shape. | yes — commit it | yes, but `squad config set` is safer |
+| `.squad/secrets.yaml` | Planner + tracker API tokens. | **no** — auto-ignored, `0600` on POSIX | no — use `squad config set` / `squad init` |
 
-Optional. Configure in `.squad/config.yaml`:
+`config.yaml` rejects any key matching `apiKey`, `token`, `secret`, or `credential` at load time, so accidental commits fail loud. Rotate a credential with `squad config set planner` or `squad config set tracker`; remove one with `squad config remove-credential <section>`.
 
-```yaml
-tracker:
-  type: linear     # none | github | linear | jira | azure
-naming:
-  includeTrackerId: true
-  globalSequence: true
-```
+## Why not Spec-Kit?
 
-`--id` on `new-story` is validated against the tracker's id format. For **Jira** and **Azure DevOps**, with credentials configured, the CLI can [auto-fetch](#tracker-auto-fetch-new-in-020) issue metadata and attachments. Other trackers (GitHub, Linear) use id format validation only in v0.2.
+Both aim at spec-driven development. They make different bets.
 
----
+| | squad-kit | Spec-Kit |
+| --- | --- | --- |
+| Commands | `init`, `new-story`, `new-plan`, `status`, `doctor`, `migrate`, `upgrade`, `list`, `rm`, `tracker link`, `config` | `constitution`, `specify`, `clarify`, `plan`, `tasks`, `analyze`, `checklist`, `implement` |
+| `/implement` turn starts with | one plan file (~5–15 KB) | 5–7 command templates + cross-artifact reads (~15–25 KB) |
+| Model-tier awareness | Built into the philosophy (planner ≠ executor) | Not prescribed |
+| Generated artifacts per story | `intake.md`, `NN-story-<slug>.md`, overview row | `spec.md`, `plan.md`, `data-model.md`, `contracts/`, `research.md`, `quickstart.md`, `tasks.md` |
+| Customization | Prompts ship with the CLI (fork squad-kit to change them). | Template override stack with presets/extensions |
+| Runtime | Node + TypeScript, npm-distributable | Python + `uv` |
+| Scope | Intentionally small | Broad, with safety nets (`clarify`, `analyze`) |
 
-## What's *not* in v0.2
+Spec-Kit ships safety rails. Squad-kit ships the cheap path and gets out of the way. Pick squad-kit when your planner already produces trustworthy plans; pick Spec-Kit when you want the process to catch planning mistakes for you.
 
-We ship lean on purpose. Current non-goals:
-
-- OpenAI-compatible generic endpoint (local models, OpenRouter, etc.); [Direct planner (optional)](#direct-planner-optional) covers hosted Anthropic, OpenAI, and Google
-- MCP server
-- `/clarify`, `/analyze`, constitution-equivalent
-- Telemetry
-
----
+See [`docs/philosophy.md`](docs/philosophy.md) for the token math and [`docs/vs-spec-kit.md`](docs/vs-spec-kit.md) for the full comparison.
 
 ## Tradeoffs to know
 
@@ -263,7 +166,15 @@ We ship lean on purpose. Current non-goals:
 - **Plans are project-coupled.** They reference real file paths. That is the point — do not expect portability between projects.
 - **Global `NN` can collide on parallel branches.** Rebase-and-renumber is the resolution. Documented in [`docs/customization.md`](docs/customization.md).
 
----
+## Non-goals for 0.2
+
+We ship lean on purpose. Current non-goals:
+
+- OpenAI-compatible generic endpoint (local models, OpenRouter, etc.); [Direct planner (optional)](#direct-planner-optional) covers hosted Anthropic, OpenAI, and Google
+- MCP server
+- `squad implement` (targeted for 0.3)
+- `/clarify`, `/analyze`, constitution-equivalent
+- Telemetry
 
 ## License
 

@@ -1,0 +1,78 @@
+---
+const items = [
+  {
+    kicker: "New",
+    title: "Direct planner",
+    body: "Run the strongest model from the terminal. Demand-driven context. Budget-enforced.",
+    code: "squad new-plan --api",
+  },
+  {
+    kicker: "New",
+    title: "Tracker auto-fetch",
+    body: "Pull title, description, labels, and attachments from Jira Cloud or Azure DevOps Services.",
+    code: "squad new-story auth --id ENG-42",
+  },
+  {
+    kicker: "New",
+    title: "Secrets split",
+    body: ".squad/secrets.yaml is 0600 and git-ignored. Config stays committable.",
+    code: ".squad/secrets.yaml",
+  },
+  {
+    kicker: "New",
+    title: "Health check",
+    body: "Full read-only probe. --fix makes only non-destructive repairs.",
+    code: "squad doctor",
+  },
+  {
+    kicker: "New",
+    title: "One-shot migration",
+    body: "Idempotent 0.1.x → 0.2.0 structural update. --dry-run first.",
+    code: "squad migrate",
+  },
+  {
+    kicker: "New",
+    title: "Safe deletion",
+    body: "Cascading cleanup with --dry-run and --trash for recovery.",
+    code: "squad rm story",
+  },
+];
+---
+
+<section class="relative py-20 sm:py-24" id="whats-new">
+  <div class="container-page">
+    <div class="mx-auto max-w-2xl text-center mb-14">
+      <div class="chip mb-4">What's new in 0.2.0</div>
+      <h2 class="text-3xl sm:text-5xl font-bold gradient-text tracking-tight">
+        Six upgrades worth a release.
+      </h2>
+      <p class="mt-4 text-[var(--color-text-muted)] text-base sm:text-lg">
+        Same philosophy. Sharper tools. Zero breaking changes to your stories and plans.
+      </p>
+    </div>
+
+    <div class="grid gap-5 sm:gap-6 md:grid-cols-2 lg:grid-cols-3">
+      {items.map((item, i) => (
+        <div class="card relative flex flex-col animate-fade-up" style={`animation-delay: ${i * 0.05}s`}>
+          <div class="flex items-center justify-between mb-3">
+            <span class="chip !px-2 !py-0.5 !text-[10px]">{item.kicker}</span>
+          </div>
+          <h3 class="text-lg font-semibold mb-1">{item.title}</h3>
+          <p class="text-sm text-[var(--color-text-muted)] leading-relaxed flex-1">{item.body}</p>
+          <div class="mt-4 rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 font-mono text-[12px] leading-relaxed text-[var(--color-text)] break-all">
+            <span class="text-[var(--color-text-dim)]">$ </span>{item.code}
+          </div>
+        </div>
+      ))}
+    </div>
+
+    <div class="mt-10 text-center">
+      <a href="/docs/migrating-from-0.1" class="btn-secondary">
+        Upgrading from 0.1.x? Read the guide
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M5 12h14M13 5l7 7-7 7" />
+        </svg>
+      </a>
+    </div>
+  </div>
+</section>

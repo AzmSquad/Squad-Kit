@@ -5,7 +5,7 @@ import DocsLayout from "~/layouts/DocsLayout.astro";
 export async function getStaticPaths() {
   const docs = await getCollection("docs");
   return docs.map((doc) => ({
-    params: { slug: doc.id },
+    params: { slug: doc.data.slug ?? doc.id },
     props: { doc },
   }));
 }
@@ -17,6 +17,6 @@ const titleFromHeading = headings.find((h) => h.depth === 1)?.text;
 const title = doc.data.title ?? titleFromHeading ?? doc.id;
 ---
 
-<DocsLayout title={title} description={doc.data.description} slug={doc.id}>
+<DocsLayout title={title} description={doc.data.description} slug={doc.data.slug ?? doc.id}>
   <Content />
 </DocsLayout>
