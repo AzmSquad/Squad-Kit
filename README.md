@@ -1,11 +1,17 @@
-# squad-kit
+<p align="center">
+  <a href="https://squad-kit.com">
+    <img src=".github/assets/logo-wordmark.svg" alt="squad-kit — plan once, execute cheap" width="360">
+  </a>
+</p>
 
-[![npm version](https://img.shields.io/npm/v/squad-kit.svg)](https://www.npmjs.com/package/squad-kit)
-[![CI](https://github.com/AzmSquad/Squad-Kit/actions/workflows/ci.yml/badge.svg)](https://github.com/AzmSquad/Squad-Kit/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Website](https://img.shields.io/badge/site-squad--kit.netlify.app-7cffa0?labelColor=0a0a0c)](https://squad-kit.netlify.app)
+<p align="center">
+  <a href="https://www.npmjs.com/package/squad-kit"><img src="https://img.shields.io/npm/v/squad-kit.svg" alt="npm version"></a>
+  <a href="https://github.com/AzmSquad/Squad-Kit/actions/workflows/ci.yml"><img src="https://github.com/AzmSquad/Squad-Kit/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="https://squad-kit.com"><img src="https://img.shields.io/badge/site-squad--kit.com-7cffa0?labelColor=0a0a0c" alt="Website"></a>
+</p>
 
-**Plan once, execute cheap.** A 3-step SDD-style workflow CLI for AI-assisted coding: **raw story → good plan → implementation**. Your expensive model plans once. A cheap model executes many times. Squad-kit owns the folder conventions, the plan meta-prompt, and the agent slash-commands so the token cost goes where it pays off. Deeper product notes live on **[squad-kit.netlify.app](https://squad-kit.netlify.app)** and in [`docs/`](docs/philosophy.md).
+**Plan once, execute cheap.** A 3-step SDD-style workflow CLI for AI-assisted coding: **raw story → good plan → implementation**. Your expensive model plans once. A cheap model executes many times. Squad-kit owns the folder conventions, the plan meta-prompt, and the agent slash-commands so the token cost goes where it pays off. Deeper product notes live on **[squad-kit.com](https://squad-kit.com)** and in [`docs/`](docs/philosophy.md).
 
 ```
 .squad/
@@ -39,7 +45,7 @@ cd your-project && squad migrate
 
 `squad migrate` deletes the now-unused `.squad/prompts/` directory, appends the managed `.gitignore` block, tightens `.squad/secrets.yaml` permissions to `0600`, and normalises `.squad/config.yaml`. It is idempotent but destructive — run it with `--dry-run` first if you forked the prompt files.
 
-Full upgrade walkthrough, including what-if scenarios and how to recover customised prompts: [migration guide (repo)](docs/migrating-from-0.1.md) · [migration guide (site)](https://squad-kit.netlify.app/docs/migrating-from-0.1).
+Full upgrade walkthrough, including what-if scenarios and how to recover customised prompts: [migration guide (repo)](docs/migrating-from-0.1.md) · [migration guide (site)](https://squad-kit.com/docs/migrating-from-0.1).
 
 ## Install
 
