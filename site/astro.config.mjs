@@ -4,7 +4,7 @@ import sitemap from '@astrojs/sitemap';
 import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
-  site: 'https://squad-kit.netlify.app',
+  site: 'https://squad-kit.com',
   integrations: [mdx(), sitemap()],
   redirects: {
     '/docs': '/docs/getting-started',

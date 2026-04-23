@@ -175,7 +175,7 @@ squad upgrade --yes       # skip confirmation
 
 **`squad upgrade`** fetches the **latest** release from npm and refuses **dev** installs and **major** version jumps (it prints a manual guide instead) so you do not jump across breaking changes by accident. Patch and minor updates within the same major are the sweet spot.
 
-After installing a new **version** of the package, run **`squad migrate` once per repo** the first time the CLI reports structural drift, or when upgrading from **0.1.x** → **0.2.x**, so `.squad/` matches what the new CLI expects. The full 0.1.x → 0.2.x walkthrough (including what gets deleted) is on the site: [migration guide](https://squad-kit.netlify.app/docs/migrating-from-0.1) (a repo-local `docs/migrating-from-0.1.md` is maintained alongside the project).
+After installing a new **version** of the package, run **`squad migrate` once per repo** the first time the CLI reports structural drift, or when upgrading from **0.1.x** → **0.2.x**, so `.squad/` matches what the new CLI expects. The full 0.1.x → 0.2.x walkthrough (including what gets deleted) is on the site: [migration guide](https://squad-kit.com/docs/migrating-from-0.1) (a repo-local `docs/migrating-from-0.1.md` is maintained alongside the project).
 
 `npm install -g squad-kit@x` or `pnpm add -g squad-kit@x` is still valid if you pin versions in automation; **`squad upgrade`** is the interactive default.
 
