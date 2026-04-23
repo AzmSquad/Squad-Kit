@@ -6,5 +6,6 @@ export default defineConfig({
     environment: 'node',
     globals: false,
     restoreMocks: true,
+    setupFiles: ['test/support/env-isolation.ts'],
   },
 });
