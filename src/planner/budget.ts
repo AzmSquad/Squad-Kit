@@ -4,7 +4,7 @@ export class Budget {
   private reads = 0;
   private bytes = 0;
   private readonly startedAt = Date.now();
-  private totalUsage: Usage = { inputTokens: 0, outputTokens: 0 };
+  private totalUsage: Usage = { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 };
 
   constructor(public readonly cfg: BudgetConfig) {}
 
@@ -27,6 +27,8 @@ export class Budget {
     this.totalUsage.inputTokens += u.inputTokens;
     this.totalUsage.outputTokens += u.outputTokens;
     if (u.costUsd !== undefined) this.totalUsage.costUsd = (this.totalUsage.costUsd ?? 0) + u.costUsd;
+    this.totalUsage.cacheCreationTokens = (this.totalUsage.cacheCreationTokens ?? 0) + (u.cacheCreationTokens ?? 0);
+    this.totalUsage.cacheReadTokens = (this.totalUsage.cacheReadTokens ?? 0) + (u.cacheReadTokens ?? 0);
   }
 
   timedOut(): boolean {

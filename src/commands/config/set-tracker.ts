@@ -148,6 +148,7 @@ export async function runConfigSetTracker(opts: ConfigSetTrackerOptions = {}): P
   }
 
   if (process.env.CI === 'true') {
+    printTrackerNextSteps(next.tracker.type);
     return;
   }
 
@@ -176,4 +177,20 @@ export async function runConfigSetTracker(opts: ConfigSetTrackerOptions = {}): P
       );
     }
   }
+
+  printTrackerNextSteps(next.tracker.type);
+}
+
+function printTrackerNextSteps(type: string): void {
+  ui.blank();
+  ui.step('Next:');
+  if (type === 'none') {
+    ui.info('1) Tracker is off. Create stories manually with `squad new-story <slug> --no-tracker`.');
+    ui.info('2) Re-enable any time with `squad config set tracker`.');
+    return;
+  }
+  ui.info('1) Verify with `squad doctor` — tracker checks should be green.');
+  ui.info(`2) Create a story: squad new-story <feature-slug> --id <${type === 'jira' ? 'JIRA-123' : 'azure-work-item-id'}>`);
+  ui.info('   squad-kit auto-fetches the title, description, and attachments into the intake.');
+  ui.info('3) Review the generated intake.md, then run `squad new-plan --api` to generate the plan.');
 }

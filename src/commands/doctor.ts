@@ -10,6 +10,8 @@ import { modelFor, providerEnvVar, resolveProviderKey } from '../core/planner-mo
 import { clientFor, overlayTrackerEnv, type ClientResolutionError } from '../tracker/index.js';
 import type { ProviderName } from '../planner/types.js';
 import { fetchProviderModelIds, probeJiraConnectivity, probeAzureConnectivity } from '../core/probes.js';
+import { readLastRun } from '../core/last-run.js';
+import { formatTokenK } from '../ui/planner-cache-summary.js';
 
 export interface DoctorOptions {
   fix?: boolean;
@@ -336,6 +338,19 @@ async function checkPlannerTierAwareness(
   if (!/opus/i.test(planModel)) {
     return { id, name, status: 'ok', detail: `${planModel} is comfortably under Tier 1` };
   }
+  const cacheOn = ctx.config.planner?.cache?.enabled !== false;
+  if (cacheOn) {
+    return {
+      id,
+      name,
+      status: 'warn',
+      detail: 'Anthropic Tier 1 with Opus — tight but viable with prompt caching on',
+      fixHint: [
+        'Caching saves ~70% on billed input tokens. Keep `planner.cache.enabled: true` in config.',
+        'If you still hit 429s on long runs, reduce `planner.budget.maxContextBytes` or use Haiku for plan phase.',
+      ].join('\n'),
+    };
+  }
   return {
     id,
     name,
@@ -345,6 +360,74 @@ async function checkPlannerTierAwareness(
       'Run `squad config set planner` and pick a Sonnet or Haiku id for planner.modelOverride.anthropic, ' +
       'or upgrade tier at https://console.anthropic.com/settings/limits. ' +
       'squad-kit will auto-retry a 429 once (waiting up to 90s), but repeated throttling means the plan model is simply too big for your quota.',
+  };
+}
+
+export async function checkPlannerCache(paths: SquadPaths, ctx: DoctorContext): Promise<CheckResult> {
+  const id = 'planner-cache';
+  const name = 'planner cache effectiveness';
+  const config = ctx.config;
+  const cacheCfg = config?.planner?.cache;
+
+  if (config?.planner?.enabled !== true) {
+    return { id, name, status: 'skip', detail: 'planner disabled — cache check not applicable' };
+  }
+
+  if (cacheCfg?.enabled === false) {
+    return {
+      id,
+      name,
+      status: 'warn',
+      detail: 'prompt caching is disabled in .squad/config.yaml',
+      fixHint: 'Cache saves ~70% on billed tokens. Re-enable with `squad config set planner`.',
+    };
+  }
+
+  const lastRun = await readLastRun(paths);
+  if (!lastRun) {
+    return {
+      id,
+      name,
+      status: 'skip',
+      detail: 'no planner runs logged yet',
+      fixHint: 'Run `squad new-plan --api` once, then re-run `squad doctor` to see cache telemetry.',
+    };
+  }
+
+  const { stats } = lastRun;
+  const hitPct = Math.round(stats.cacheHitRatio * 100);
+
+  if (stats.cacheReadTokens === 0 && stats.turns > 1) {
+    return {
+      id,
+      name,
+      status: 'fail',
+      detail: `caching configured but last run saw 0% hits across ${stats.turns} turns`,
+      fixHint: [
+        'Possible causes:',
+        '  • Planner provider is not Anthropic and the prefix is below 1024 tokens (OpenAI / Google need larger prefixes).',
+        '  • System prompt is mutating between turns — check recent changes.',
+        "  • Using an older model that doesn't support caching.",
+        `Provider: ${lastRun.provider}/${lastRun.model}. Run \`NODE_ENV=development squad new-plan --api\` to surface prefix-mismatch warnings.`,
+      ].join('\n'),
+    };
+  }
+
+  if (hitPct < 30 && stats.turns > 3) {
+    return {
+      id,
+      name,
+      status: 'warn',
+      detail: `low cache hit rate: ${hitPct}% (last run, ${stats.turns} turns)`,
+      fixHint: 'Expected ≥60% for Anthropic, ≥40% for OpenAI, ≥50% for Google after 3+ turns. Prefix may be unstable.',
+    };
+  }
+
+  return {
+    id,
+    name,
+    status: 'ok',
+    detail: `caching active — last run ${hitPct}% hit (${formatTokenK(stats.cacheReadTokens)} read, ${lastRun.provider}/${lastRun.model})`,
   };
 }
 
@@ -475,6 +558,7 @@ async function runAllChecks(paths: SquadPaths, ctx: DoctorContext, fix: boolean)
   await add('planner credential resolves', () => checkPlannerCredential(paths, ctx));
   await add('planner model resolves at provider', () => checkPlannerModel(paths, ctx));
   await add('planner tier vs. model', () => checkPlannerTierAwareness(paths, ctx));
+  await add('planner cache effectiveness', () => checkPlannerCache(paths, ctx));
   await add('tracker configuration', () => checkTrackerConfig(paths, ctx));
   await add('tracker credential resolves', () => checkTrackerCredential(paths, ctx));
   await add('tracker connectivity', () => checkTrackerConnectivity(paths, ctx));

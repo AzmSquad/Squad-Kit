@@ -24,7 +24,7 @@ const program = new Command();
 program
   .name('squad')
   .description('Plan once, execute cheap. A 3-step SDD workflow CLI.')
-  .version('0.2.2');
+  .version('0.3.0');
 
 program
   .command('init')

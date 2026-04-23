@@ -2,6 +2,7 @@ import path from 'node:path';
 import type {
   ChatTurn,
   PlannerProvider,
+  PlannerRunStats,
   ProviderRequest,
   ProviderResponse,
   ToolCall,
@@ -11,6 +12,8 @@ import type {
 import { Budget } from './budget.js';
 import { READ_FILE_TOOL, readFileTool } from './tools.js';
 import { rateLimitMessage } from './provider-errors.js';
+import { prefixOf } from './providers/prefix.js';
+import * as ui from '../ui/index.js';
 
 /**
  * Upper bound on the auto-retry wait. Chosen to cover the common Anthropic Tier 1 /
@@ -35,6 +38,8 @@ export interface RunPlannerInput {
   /** Invoked when the loop is about to sleep before retrying a 429. The arg is seconds. */
   onRateLimit?: (waitSec: number) => void;
   maxIterations?: number;
+  /** When `false`, disables Anthropic prompt-cache markers. Default `true` when omitted. */
+  cacheEnabled?: boolean;
   /** Test injection for `setTimeout`. Defaults to the real timer. */
   sleep?: (ms: number) => Promise<void>;
 }
@@ -45,24 +50,63 @@ export interface RunPlannerOutput {
   timedOut: boolean;
   finishedNormally: boolean;
   iterations: number;
+  stats: PlannerRunStats;
+}
+
+/** @alias RunPlannerOutput — result object including aggregated cache telemetry from Story 03. */
+export type RunPlannerResult = RunPlannerOutput;
+
+function buildPlannerRunStats(budget: Budget, turns: number, runStartedAt: number): PlannerRunStats {
+  const u = budget.snapshot().usage;
+  const cacheRead = u.cacheReadTokens ?? 0;
+  const cacheCreate = u.cacheCreationTokens ?? 0;
+  const inTok = u.inputTokens;
+  const outTok = u.outputTokens;
+  const totalInput = inTok + cacheRead;
+  const cacheHitRatio = totalInput === 0 ? 0 : Math.round((cacheRead / totalInput) * 100) / 100;
+  return {
+    turns,
+    inputTokens: inTok,
+    outputTokens: outTok,
+    cacheCreationTokens: cacheCreate,
+    cacheReadTokens: cacheRead,
+    cacheHitRatio,
+    durationMs: Date.now() - runStartedAt,
+  };
 }
 
 export async function runPlanner(input: RunPlannerInput): Promise<RunPlannerOutput> {
+  const runStartedAt = Date.now();
   const maxIter = input.maxIterations ?? 40;
   const turns: ChatTurn[] = [{ role: 'user', text: input.userPrompt }];
   let accumulatedText = '';
   let iterations = 0;
   let budgetExhausted = false;
   let finishedNormally = false;
+  let prevRequestPrefix: string | undefined;
 
   while (iterations < maxIter) {
     iterations += 1;
 
     if (input.budget.timedOut()) {
-      return { planText: accumulatedText, budgetExhausted, timedOut: true, finishedNormally: false, iterations };
+      return {
+        planText: accumulatedText,
+        budgetExhausted,
+        timedOut: true,
+        finishedNormally: false,
+        iterations,
+        stats: buildPlannerRunStats(input.budget, iterations, runStartedAt),
+      };
     }
     if (input.budget.overCost()) {
-      return { planText: accumulatedText, budgetExhausted: true, timedOut: false, finishedNormally: false, iterations };
+      return {
+        planText: accumulatedText,
+        budgetExhausted: true,
+        timedOut: false,
+        finishedNormally: false,
+        iterations,
+        stats: buildPlannerRunStats(input.budget, iterations, runStartedAt),
+      };
     }
 
     const request: ProviderRequest = {
@@ -72,7 +116,22 @@ export async function runPlanner(input: RunPlannerInput): Promise<RunPlannerOutp
       turns,
       apiKey: input.apiKey,
       maxOutputTokens: 8192,
+      cacheEnabled: input.cacheEnabled ?? true,
     };
+
+    if (
+      process.env.NODE_ENV !== 'production' &&
+      process.env.NODE_ENV !== 'test' &&
+      prevRequestPrefix !== undefined
+    ) {
+      const currentPrefix = prefixOf(input.provider.name, request);
+      if (!currentPrefix.startsWith(prevRequestPrefix)) {
+        const byte = firstByteDiff(prevRequestPrefix, currentPrefix);
+        ui.warning(
+          `planner: prefix mutation at turn ${iterations}, byte ${byte} — caching will not hit.`,
+        );
+      }
+    }
 
     let response = await input.provider.send(request);
     if (response.usage) {
@@ -105,18 +164,34 @@ export async function runPlanner(input: RunPlannerInput): Promise<RunPlannerOutp
       throw composePlannerError(input.provider.name, response, retriedRateLimit, retrySkippedReason);
     }
 
+    prevRequestPrefix = prefixOf(input.provider.name, request);
+
     if (response.text) {
       accumulatedText += response.text;
       input.onAssistantText?.(response.text);
     }
 
     if (response.stopReason === 'max_tokens' && !response.toolCalls?.length) {
-      return { planText: accumulatedText, budgetExhausted, timedOut: false, finishedNormally: false, iterations };
+      return {
+        planText: accumulatedText,
+        budgetExhausted,
+        timedOut: false,
+        finishedNormally: false,
+        iterations,
+        stats: buildPlannerRunStats(input.budget, iterations, runStartedAt),
+      };
     }
 
     if (response.stopReason === 'end_turn' || !response.toolCalls?.length) {
       finishedNormally = true;
-      return { planText: accumulatedText, budgetExhausted, timedOut: false, finishedNormally, iterations };
+      return {
+        planText: accumulatedText,
+        budgetExhausted,
+        timedOut: false,
+        finishedNormally,
+        iterations,
+        stats: buildPlannerRunStats(input.budget, iterations, runStartedAt),
+      };
     }
 
     turns.push({
@@ -153,11 +228,26 @@ export async function runPlanner(input: RunPlannerInput): Promise<RunPlannerOutp
     }
   }
 
-  return { planText: accumulatedText, budgetExhausted, timedOut: false, finishedNormally: false, iterations };
+  return {
+    planText: accumulatedText,
+    budgetExhausted,
+    timedOut: false,
+    finishedNormally: false,
+    iterations,
+    stats: buildPlannerRunStats(input.budget, iterations, runStartedAt),
+  };
 }
 
 export function relativisePath(root: string, p: string): string {
   return path.relative(root, p) || p;
+}
+
+function firstByteDiff(a: string, b: string): number {
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i += 1) {
+    if (a.charCodeAt(i) !== b.charCodeAt(i)) return i;
+  }
+  return n;
 }
 
 function composePlannerError(

@@ -19,6 +19,11 @@
 └── plans/<feature>/         # NN-story-<slug>.md (one per executable plan)
 ```
 
+## What's new in 0.3.0
+
+- **Prompt caching** across Anthropic, OpenAI, and Google — ~70% fewer billed input tokens on
+  a typical planning run, and Anthropic Tier 1 ITPM pressure roughly 5× lower.
+
 ## What's new in 0.2.0
 
 - **Direct planner.** `squad new-plan --api` runs Anthropic, OpenAI, or Google from your terminal and writes the plan file. Demand-driven context keeps tokens bounded.
@@ -114,6 +119,8 @@ Override the default plan-phase model without editing squad-kit:
 planner:
   enabled: true
   provider: anthropic
+  cache:
+    enabled: true   # default; turn off via squad config set planner
   modelOverride:
     anthropic: claude-opus-5-0      # riding a newer provider release early
 ```
@@ -171,6 +178,7 @@ See [`docs/philosophy.md`](docs/philosophy.md) for the token math and [`docs/vs-
 - **Quality depends on the planning model.** squad-kit has no safety-net commands. Use a strong model for `new-plan`.
 - **Plans are project-coupled.** They reference real file paths. That is the point — do not expect portability between projects.
 - **Global `NN` can collide on parallel branches.** Rebase-and-renumber is the resolution. Documented in [`docs/customization.md`](docs/customization.md).
+- **Anthropic Tier 1 + Opus** shares a tight input-token-per-minute bucket. **0.3.0** enables prompt caching by default so typical multi-turn plans stay viable; see [Prompt caching](docs/customization.md#prompt-caching) in the customization docs.
 
 ## Non-goals for 0.2
 

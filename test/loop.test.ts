@@ -5,7 +5,8 @@ import path from 'node:path';
 import { runPlanner } from '../src/planner/loop.js';
 import { Budget } from '../src/planner/budget.js';
 import { READ_FILE_TOOL } from '../src/planner/tools.js';
-import type { PlannerProvider, ProviderResponse, ToolCall } from '../src/planner/types.js';
+import type { PlannerProvider, ProviderRequest, ProviderResponse, ToolCall } from '../src/planner/types.js';
+import { prefixOf } from '../src/planner/providers/prefix.js';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -48,6 +49,30 @@ describe('runPlanner', () => {
     expect(result.finishedNormally).toBe(true);
     expect(result.budgetExhausted).toBe(false);
     expect(result.timedOut).toBe(false);
+  });
+
+  it('passes cacheReadTokens through onUsage unmodified', async () => {
+    const onUsage = vi.fn();
+    const provider = mockProvider([
+      {
+        text: '# My plan\n',
+        stopReason: 'end_turn',
+        usage: { inputTokens: 1, outputTokens: 2, cacheReadTokens: 100, cacheCreationTokens: 0 },
+      },
+    ]);
+    await runPlanner({
+      root: os.tmpdir(),
+      provider,
+      model: 'm',
+      apiKey: 'k',
+      systemPrompt: 'sys',
+      userPrompt: 'user',
+      budget: new Budget(budgetCfg),
+      onUsage,
+    });
+    expect(onUsage).toHaveBeenCalledWith(
+      expect.objectContaining({ cacheReadTokens: 100, cacheCreationTokens: 0 }),
+    );
   });
 
   it('handles read_file tool call then end_turn on next turn', async () => {
@@ -313,6 +338,44 @@ describe('runPlanner', () => {
       });
       expect(result.budgetExhausted).toBe(true);
       expect(result.planText).toContain('# Final');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps cacheable request prefixes aligned across multi-turn sends (anthropic)', async () => {
+    const recorded: ProviderRequest[] = [];
+    const tc: ToolCall = { id: 't1', name: READ_FILE_TOOL.name, input: { path: 'x.txt' } };
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-loop-prefix-'));
+    fs.writeFileSync(path.join(root, 'x.txt'), 'ok', 'utf8');
+    try {
+      const provider: PlannerProvider = {
+        name: 'anthropic',
+        async send(req) {
+          recorded.push(req);
+          if (recorded.length === 1) {
+            return { text: '…', toolCalls: [tc], stopReason: 'tool_use', usage: { inputTokens: 1, outputTokens: 1 } };
+          }
+          if (recorded.length === 2) {
+            return { text: '# Plan\n', stopReason: 'end_turn', usage: { inputTokens: 2, outputTokens: 2 } };
+          }
+          return { text: '', stopReason: 'end_turn' };
+        },
+      };
+      await runPlanner({
+        root,
+        provider,
+        model: 'm',
+        apiKey: 'k',
+        systemPrompt: 'sys',
+        userPrompt: 'user',
+        budget: new Budget(budgetCfg),
+      });
+      expect(recorded.length).toBe(2);
+      const p0 = prefixOf('anthropic', recorded[0]!);
+      const p1 = prefixOf('anthropic', recorded[1]!);
+      expect(p1.startsWith(p0)).toBe(true);
+      expect(p1.slice(0, p0.length)).toBe(p0);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }

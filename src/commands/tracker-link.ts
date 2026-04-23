@@ -83,6 +83,10 @@ export async function runTrackerLink(
   fs.writeFileSync(intakeFile, updated, 'utf8');
 
   ui.success(`Linked tracker id ${resolvedTrackerId} → ${path.relative(root, intakeFile)}`);
+  ui.blank();
+  ui.step('Next:');
+  ui.info('1) Review the intake — the Source block at the top now carries the tracker id.');
+  ui.info('2) Run `squad new-plan --api` (or `--copy`) to generate the plan for this story.');
 }
 
 function upsertTrackerId(content: string, id: string): string {

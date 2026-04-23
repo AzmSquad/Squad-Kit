@@ -73,6 +73,7 @@ describe('config load/save', () => {
         maxDurationSeconds: 60,
         maxCostUsd: 0.5,
       },
+      cache: { enabled: true },
     });
   });
 

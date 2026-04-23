@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { confirm, input, password, select } from '@inquirer/prompts';
+import { confirm, password, select } from '@inquirer/prompts';
 import * as ui from '../../ui/index.js';
 import { buildPaths, requireSquadRoot } from '../../core/paths.js';
 import { loadConfig, saveConfig, type SquadConfig } from '../../core/config.js';
@@ -128,22 +128,11 @@ export async function runConfigSetPlanner(opts: ConfigSetPlannerOptions = {}): P
       ui.info('.squad/secrets.yaml updated (chmod 0600 on POSIX)');
     }
 
-    const wantOverride = await confirm({
-      message: 'Set a custom plan-phase model id (planner.modelOverride)?',
-      default: false,
+    const cacheEnabled = await confirm({
+      message: 'Enable prompt caching? (Recommended — reduces billed tokens by ~70% on most providers.)',
+      default: nextPlanner.cache?.enabled ?? true,
     });
-    if (wantOverride) {
-      const modelId = await input({
-        message: 'Plan model id (leave empty to use the default for this provider):',
-        default: '',
-      });
-      if (modelId.trim().length > 0 && nextPlanner) {
-        nextPlanner = {
-          ...nextPlanner,
-          modelOverride: { ...(nextPlanner.modelOverride ?? {}), [provider]: modelId.trim() },
-        };
-      }
-    }
+    nextPlanner = { ...nextPlanner, cache: { enabled: cacheEnabled } };
   }
 
   const next: SquadConfig = { ...config, planner: nextPlanner };
@@ -168,6 +157,7 @@ export async function runConfigSetPlanner(opts: ConfigSetPlannerOptions = {}): P
   }
 
   if (process.env.CI === 'true' || !cred) {
+    printPlannerNextSteps(Boolean(cred));
     return;
   }
   const listed = await fetchProviderModelIds(provider, cred.value);
@@ -181,4 +171,23 @@ export async function runConfigSetPlanner(opts: ConfigSetPlannerOptions = {}): P
   } else {
     ui.info('Credential check: models API responded OK for this key.');
   }
+
+  printPlannerNextSteps(true);
+}
+
+function printPlannerNextSteps(credentialReady: boolean): void {
+  ui.blank();
+  ui.step('Next:');
+  if (!credentialReady) {
+    ui.info('1) Save a planner key: re-run `squad config set planner` and paste the key when prompted.');
+    ui.info('2) Verify with `squad doctor` — all planner checks should turn green.');
+    ui.info('3) Then run `squad new-story <slug>` and `squad new-plan --api` to generate your first plan.');
+    return;
+  }
+  ui.info('1) Verify with `squad doctor` — every planner check should be green.');
+  ui.info('2) Create a story:  squad new-story <feature-slug>  (or --no-tracker for a manual story).');
+  ui.info('3) Fill the generated intake.md, then run `squad new-plan --api` to generate the plan.');
+  ui.info(
+    '4) To change provider, key, or disable caching later: re-run `squad config set planner`. Model overrides are edited directly in .squad/config.yaml (planner.modelOverride).',
+  );
 }

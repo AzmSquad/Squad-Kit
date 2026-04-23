@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-04-24
+
+### Why this release
+
+squad-kit 0.2.2 stabilised rate-limit handling with retries and a softer `squad doctor` warning.
+That made failures loud but didn't reduce the underlying token spend: every planning turn
+re-sent the cumulative transcript, so costs scaled roughly quadratically with the number of
+tool calls. On Anthropic Tier 1 with Opus, that made non-trivial plans structurally infeasible.
+
+0.3.0 adds **prompt caching end-to-end** across Anthropic, OpenAI, and Google. Expected savings
+on a typical 10-turn run: ~70% fewer billed input tokens, and — critically on Anthropic —
+cached reads don't count the same against your per-minute quota. Tier 1 Opus users should find
+moderate plans work where they previously hit 429 from turn 7 onward.
+
+### Added
+
+- Anthropic explicit prompt caching via `cache_control: { type: 'ephemeral' }` on the system
+  prompt and the most recent tool-result block each turn (cache TTL rolls forward).
+- OpenAI and Google implicit prefix caching (no config required; activated by the stable-prefix
+  refactor below).
+- `planner.cache.enabled` config knob (default `true`). Configure via `squad config set planner`.
+- Run-summary line: `cache hit 68% (22.4k read / 32.9k total)` every `squad new-plan --api` run.
+- `squad doctor` now checks `planner cache effectiveness`, reading `.squad/.last-run.json`.
+- `.squad/.last-run.json` persistence of planner run stats (git-ignored, per-user).
+- `Usage.cacheCreationTokens` and `Usage.cacheReadTokens` on every provider response.
+- Deterministic request-body builders (`buildAnthropicBody`, `buildOpenAIBody`, `buildGoogleBody`)
+  exposed for testing; dev-mode warning when a turn mutates the cacheable prefix.
+- Copy-paste mode (`squad new-plan --copy`) now writes the composed prompt to
+  `.squad/.last-copy-prompt.md` and prints a compact summary (mode · story · file · size · est
+  tokens · clipboard status) instead of dumping the full 5–10 KB prompt into the terminal.
+- Clipboard fallbacks for Linux (`xsel` in addition to `xclip`) and Termux
+  (`termux-clipboard-set`). Headless Linux / SSH sessions now surface an actionable reason in
+  the summary ("no display server detected — install xclip or xsel, or use the saved file")
+  instead of silently skipping.
+- `squad config set planner` and `squad config set tracker` print a "▸ Next:" block so users
+  know what to run next (`squad doctor` → `squad new-story` → `squad new-plan`).
+- `squad tracker link` and `squad migrate` also print "▸ Next:" guidance.
+- Managed `.gitignore` block now covers `.squad/.last-run.json` and `.squad/.last-copy-prompt.md`.
+
+### Changed
+
+- System prompt no longer embeds timestamps, random IDs, or absolute host paths (these
+  cache-busted the prefix on every turn).
+- `squad doctor` Anthropic Tier 1 Opus warning softened from "you will hit ITPM" to "tight but
+  viable with caching on."
+- `squad config set planner` no longer prompts for `planner.modelOverride`. The interactive
+  flow is shorter and less intimidating; power users can still set the override directly in
+  `.squad/config.yaml` (documented in `docs/customization.md`).
+- `copyToClipboard()` now returns a structured `{ ok, tool?, reason? }` result instead of a
+  bare boolean, so callers can explain failures to the user.
+
+### Known limitations
+
+- Google `cachedContents` explicit API not implemented (implicit caching is sufficient for
+  single-run CLI use).
+- No cross-run persistence of cache stats yet — doctor only reads the most recent run.
+- No automatic context compression when transcripts exceed ~50 KB. Caching helps but doesn't
+  solve the long-horizon case. 0.4.0 candidate.
+- Anthropic 1-hour cache TTL (`ttl: "1h"`) not used — default 5-minute TTL covers single-run.
+
+### Migration
+
+See `docs/migrating-from-0.1.md` §9 "Upgrading from 0.2.x to 0.3.0" for the full path. Short
+version: `squad upgrade` and you're done. Caching is on by default; no config edits required.
+
 ## [0.2.2] - 2026-04-22
 
 ### Fixed
@@ -128,6 +193,9 @@ First public release.
 - Plan-generation meta-prompt (`generate-plan.md`), intake template (`intake.md`), and plan skeleton reference (`story-skeleton.md`).
 - Documentation: `docs/philosophy.md`, `docs/getting-started.md`, `docs/customization.md`, `docs/vs-spec-kit.md`.
 
-[Unreleased]: https://github.com/AzmSquad/squad-kit/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/AzmSquad/squad-kit/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/AzmSquad/Squad-Kit/releases/tag/v0.3.0
+[0.2.2]: https://github.com/AzmSquad/squad-kit/compare/v0.2.1...v0.2.2
+[0.2.1]: https://github.com/AzmSquad/squad-kit/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/AzmSquad/squad-kit/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/AzmSquad/squad-kit/releases/tag/v0.1.0

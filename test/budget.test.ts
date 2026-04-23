@@ -77,4 +77,18 @@ describe('Budget', () => {
     b.recordUsage({ inputTokens: 1, outputTokens: 1, costUsd: 0.02 });
     expect(b.overCost()).toBe(true);
   });
+
+  it('recordUsage accepts extended usage with cache token fields', () => {
+    const b = new Budget({
+      maxFileReads: 10,
+      maxContextBytes: 1000,
+      maxDurationSeconds: 60,
+    });
+    expect(() =>
+      b.recordUsage({ inputTokens: 1, outputTokens: 1, cacheReadTokens: 100 }),
+    ).not.toThrow();
+    const s = b.snapshot();
+    expect(s.usage.inputTokens).toBe(1);
+    expect(s.usage.outputTokens).toBe(1);
+  });
 });

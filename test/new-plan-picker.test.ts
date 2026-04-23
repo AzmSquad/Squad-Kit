@@ -95,7 +95,6 @@ describe('new-plan picker branches', () => {
     });
 
     const restoreTTY = stubInteractiveTTY();
-    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     const prevCI = process.env.CI;
     process.env.CI = 'true';
     try {
@@ -112,12 +111,13 @@ describe('new-plan picker branches', () => {
         name: expect.stringContaining('auth / s1'),
         value: expect.stringMatching(/intake\.md$/),
       });
-      expect(stdout).toHaveBeenCalled();
+      const promptFile = path.join(paths.squadDir, '.last-copy-prompt.md');
+      expect(fs.existsSync(promptFile)).toBe(true);
+      expect(fs.readFileSync(promptFile, 'utf8').length).toBeGreaterThan(100);
     } finally {
       if (prevCI === undefined) delete process.env.CI;
       else process.env.CI = prevCI;
       restoreTTY();
-      stdout.mockRestore();
     }
   });
 });

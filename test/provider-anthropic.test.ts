@@ -58,7 +58,9 @@ describe('callAnthropic', () => {
     });
 
     const body = JSON.parse(firstFetchCall(fetchMock).init!.body as string);
-    expect(body.system).toBe('You are a planner.');
+    expect(body.system).toEqual([
+      { type: 'text', text: 'You are a planner.', cache_control: { type: 'ephemeral' } },
+    ]);
     expect(body.messages).toEqual([
       { role: 'user', content: [{ type: 'text', text: 'Hello' }] },
     ]);
@@ -88,7 +90,12 @@ describe('callAnthropic', () => {
       { id: 'toolu_01', name: 'read_file', input: { path: 'src/a.ts' } },
     ]);
     expect(res.stopReason).toBe('tool_use');
-    expect(res.usage).toEqual({ inputTokens: 100, outputTokens: 50 });
+    expect(res.usage).toEqual({
+      inputTokens: 100,
+      outputTokens: 50,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+    });
   });
 
   it('maps toolResults turns to tool_result blocks on the user message', async () => {
@@ -117,7 +124,13 @@ describe('callAnthropic', () => {
     const body = JSON.parse(init!.body as string);
     expect(body.messages[0].content).toEqual([
       { type: 'tool_result', tool_use_id: 't1', content: 'file contents', is_error: false },
-      { type: 'tool_result', tool_use_id: 't2', content: 'oops', is_error: true },
+      {
+        type: 'tool_result',
+        tool_use_id: 't2',
+        content: 'oops',
+        is_error: true,
+        cache_control: { type: 'ephemeral' },
+      },
     ]);
   });
 

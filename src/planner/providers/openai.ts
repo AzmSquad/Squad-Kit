@@ -6,6 +6,7 @@ import type {
   ToolCall,
   ToolSchema,
 } from '../types.js';
+import { sortRecordKeys } from '../stable-json.js';
 import {
   detectModelNotFound,
   detectRateLimit,
@@ -14,6 +15,18 @@ import {
 
 const API_URL = 'https://api.openai.com/v1/chat/completions';
 
+/**
+ * When `turns` is empty, `messages` is omitted from the object so prefix helpers can treat
+ * the static header as a string prefix; `callOpenAI` injects a single system message for the
+ * real POST.
+ */
+export type OpenAIRequestBody = {
+  model: string;
+  max_completion_tokens: number;
+  tools: ReturnType<typeof toOpenAITool>[];
+  messages?: unknown[];
+};
+
 export const openaiProvider: PlannerProvider = {
   name: 'openai',
   async send(req) {
@@ -21,16 +34,28 @@ export const openaiProvider: PlannerProvider = {
   },
 };
 
-export async function callOpenAI(req: ProviderRequest): Promise<ProviderResponse> {
+export function buildOpenAIBody(req: ProviderRequest): OpenAIRequestBody {
+  const base: OpenAIRequestBody = {
+    model: req.model,
+    max_completion_tokens: req.maxOutputTokens ?? 4096,
+    tools: req.tools.map(toOpenAITool),
+  };
+  if (req.turns.length === 0) {
+    return base;
+  }
   const messages: unknown[] = [{ role: 'system', content: req.systemPrompt }];
   for (const turn of req.turns) messages.push(...toOpenAIMessages(turn));
+  return { ...base, messages };
+}
 
-  const body = {
-    model: req.model,
-    messages,
-    tools: req.tools.map(toOpenAITool),
-    max_completion_tokens: req.maxOutputTokens ?? 4096,
-  };
+export async function callOpenAI(req: ProviderRequest): Promise<ProviderResponse> {
+  const built = buildOpenAIBody(req);
+  const messages: unknown[] =
+    built.messages && built.messages.length > 0
+      ? (built.messages as unknown[])
+      : [{ role: 'system', content: req.systemPrompt }];
+
+  const body = { ...built, messages };
 
   const res = await fetch(API_URL, {
     method: 'POST',
@@ -86,7 +111,14 @@ export async function callOpenAI(req: ProviderRequest): Promise<ProviderResponse
 }
 
 function toOpenAITool(t: ToolSchema) {
-  return { type: 'function', function: { name: t.name, description: t.description, parameters: t.inputSchema } };
+  return {
+    type: 'function' as const,
+    function: {
+      name: t.name,
+      description: t.description,
+      parameters: sortRecordKeys(t.inputSchema) as Record<string, unknown>,
+    },
+  };
 }
 
 function toOpenAIMessages(turn: ChatTurn): unknown[] {
@@ -98,7 +130,10 @@ function toOpenAIMessages(turn: ChatTurn): unknown[] {
       tool_calls: turn.toolCalls?.map((tc) => ({
         id: tc.id,
         type: 'function',
-        function: { name: tc.name, arguments: JSON.stringify(tc.input) },
+        function: {
+          name: tc.name,
+          arguments: JSON.stringify(sortRecordKeys(tc.input) as Record<string, unknown>),
+        },
       })),
     });
   } else {
@@ -120,7 +155,7 @@ function mapStop(r: string | undefined): ProviderResponse['stopReason'] {
 
 function safeJson(raw: string): Record<string, unknown> {
   try {
-    return JSON.parse(raw) as Record<string, unknown>;
+    return sortRecordKeys(JSON.parse(raw) as Record<string, unknown>);
   } catch {
     return {};
   }

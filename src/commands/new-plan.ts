@@ -15,6 +15,8 @@ import { buildRepoMap } from '../core/repo-map.js';
 import { composeSystemPrompt, composeUserPrompt } from '../planner/system-prompt.js';
 import { writePlanFile, buildMetadataHeader } from '../planner/writer.js';
 import { modelFor, providerEnvVar, readProviderKey } from '../core/planner-models.js';
+import { writeLastRun } from '../core/last-run.js';
+import { formatPlannerCacheLine } from '../ui/planner-cache-summary.js';
 
 export interface NewPlanOptions {
   /** Default true; `--no-clipboard` sets false (copy-paste mode only). */
@@ -197,6 +199,7 @@ async function emitViaApi(
 
   const sessionSpinner: { current: ReturnType<typeof ui.spinner> | null } = { current: null };
   const startedAt = Date.now();
+  const cacheEnabled = planner.cache?.enabled ?? true;
 
   const result = await runPlanner({
     root: paths.root,
@@ -206,6 +209,7 @@ async function emitViaApi(
     systemPrompt,
     userPrompt,
     budget,
+    cacheEnabled,
     onToolCall: (tc, bytes, total) => {
       const p = (tc.input as { path?: string }).path ?? '<unknown>';
       sessionSpinner.current?.succeed(
@@ -253,6 +257,17 @@ async function emitViaApi(
     metadataHeader: header,
   });
 
+  try {
+    await writeLastRun(paths, {
+      stats: result.stats,
+      completedAt: new Date().toISOString(),
+      provider: planner.provider,
+      model,
+    });
+  } catch {
+    // best-effort telemetry
+  }
+
   ui.blank();
   ui.summaryBox(' plan generated ', [
     { key: 'file', value: path.relative(paths.root, planFile) },
@@ -263,6 +278,7 @@ async function emitViaApi(
       key: 'tokens',
       value: `${snap.usage.inputTokens} in · ${snap.usage.outputTokens} out${snap.usage.costUsd !== undefined ? `  ≈ $${snap.usage.costUsd.toFixed(2)}` : ''}`,
     },
+    { key: 'cache', value: formatPlannerCacheLine({ cacheEnabled, stats: result.stats }) },
     { key: 'time', value: `${Math.round(elapsedMs / 1000)}s` },
     { key: 'action', value: overwrote ? 'overwrote existing plan' : 'new plan' },
   ]);
@@ -279,7 +295,7 @@ async function emitViaApi(
 
 async function emitCopyPrompt(
   story: StoryRecord,
-  _paths: SquadPaths,
+  paths: SquadPaths,
   config: SquadConfig,
   clipboard: boolean,
 ): Promise<void> {
@@ -293,15 +309,52 @@ async function emitCopyPrompt(
     intakeContent,
   });
 
+  const promptFile = path.join(paths.squadDir, '.last-copy-prompt.md');
+  fs.writeFileSync(promptFile, composed, 'utf8');
+  const relPromptFile = path.relative(paths.root, promptFile);
+
+  const bytes = Buffer.byteLength(composed, 'utf8');
+  const estTokens = Math.round(bytes / 4);
+  const clipResult = clipboard
+    ? await copyToClipboard(composed)
+    : { ok: false as const, reason: 'clipboard disabled (--no-clipboard)' };
+
+  ui.blank();
+  ui.divider('planner prompt ready');
+  ui.kv('mode', 'copy-paste', 10);
+  ui.kv('story', `${story.feature} / ${story.id}`, 10);
+  ui.kv('prompt', relPromptFile, 10);
+  ui.kv('size', `${formatKB(bytes)} · ~${formatCount(estTokens)} tokens (est)`, 10);
+  if (clipResult.ok) {
+    ui.kv('clipboard', `✓ copied via ${clipResult.tool}`, 10);
+  } else {
+    ui.kv('clipboard', `! ${clipResult.reason}`, 10);
+  }
+
   printModelBanner(config);
 
-  process.stdout.write(composed);
-  if (!composed.endsWith('\n')) process.stdout.write('\n');
-
-  if (clipboard) {
-    const ok = await copyToClipboard(composed);
-    if (ok) ui.info('copied to clipboard');
+  ui.blank();
+  ui.step('Next:');
+  ui.info('1) Open your agent chat (Cursor / Claude Code / Copilot / Gemini).');
+  ui.info('2) Switch to a strong plan model (Opus 4.x / GPT-5.3 Codex thinking / Gemini deep-think).');
+  if (clipResult.ok) {
+    ui.info('3) Paste from clipboard and let the agent work. It will read files and write the plan itself.');
+  } else {
+    ui.info(`3) Open ${relPromptFile}, paste its contents into the agent chat, and let it work.`);
   }
+  ui.info(
+    `4) The agent writes the plan to .squad/plans/${story.feature}/<nn>-story-${story.id}.md. Review it, then open a fresh chat to implement (attach only the plan file).`,
+  );
+}
+
+function formatKB(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  return `${(bytes / 1024).toFixed(1)} KB`;
+}
+
+function formatCount(n: number): string {
+  if (n < 1000) return String(n);
+  return `${(n / 1000).toFixed(1)}k`;
 }
 
 function printModelBanner(config: SquadConfig): void {

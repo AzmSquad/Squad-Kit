@@ -182,9 +182,8 @@ describe('runDoctor', () => {
         };
         const row = j.checks.find((c) => c.id === 'planner-tier');
         expect(row?.status).toBe('warn');
-        expect(row?.detail).toContain('claude-opus-4-7');
-        expect(row?.detail).toContain('Tier 1');
-        expect(row?.fixHint).toContain('Sonnet or Haiku');
+        expect(row?.detail).toMatch(/tight but viable|Tier 1/);
+        expect(row?.fixHint).toMatch(/caching|maxContextBytes|Haiku/);
       } finally {
         cap.restore();
       }
@@ -207,6 +206,42 @@ describe('runDoctor', () => {
         expect(row?.status).toBe('ok');
       } finally {
         cap2.restore();
+      }
+    } finally {
+      fetchSpy.mockRestore();
+      if (prev !== undefined) process.env.ANTHROPIC_API_KEY = prev;
+      else delete process.env.ANTHROPIC_API_KEY;
+    }
+  });
+
+  it('planner tier Opus with cache off keeps the stricter ITPM warning', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
+      Promise.resolve(new Response(JSON.stringify({ data: [] }), { status: 200 })),
+    );
+    const prev = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = 'sk-test';
+    try {
+      installWorkspace({
+        ...DEFAULT_CONFIG,
+        planner: {
+          enabled: true,
+          provider: 'anthropic',
+          mode: 'auto',
+          budget: { maxFileReads: 10, maxContextBytes: 20_000, maxDurationSeconds: 60 },
+          modelOverride: { anthropic: 'claude-opus-4-7' },
+          cache: { enabled: false },
+        },
+      });
+      ensureGitignore(tmp);
+      const cap = captureStdout();
+      try {
+        await runDoctor({ json: true });
+        const j = JSON.parse(cap.text()) as { checks: { id: string; status: string; detail?: string }[] };
+        const row = j.checks.find((c) => c.id === 'planner-tier');
+        expect(row?.status).toBe('warn');
+        expect(row?.detail).toContain('~3 file reads');
+      } finally {
+        cap.restore();
       }
     } finally {
       fetchSpy.mockRestore();

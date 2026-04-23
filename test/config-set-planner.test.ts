@@ -77,7 +77,8 @@ describe('config set planner', () => {
     vi.mocked(select).mockResolvedValueOnce('anthropic' as never);
     const key = 'sk-12345678901234567890abcdefghij';
     vi.mocked(password).mockResolvedValueOnce(key);
-    vi.mocked(confirm).mockResolvedValue(false);
+    vi.mocked(confirm).mockResolvedValueOnce(false);
+    vi.mocked(confirm).mockResolvedValueOnce(true);
 
     await runConfigSetPlanner({});
 
@@ -109,7 +110,8 @@ describe('config set planner', () => {
 
     vi.mocked(select).mockResolvedValueOnce('change' as never);
     vi.mocked(select).mockResolvedValueOnce('openai' as never);
-    vi.mocked(confirm).mockResolvedValue(false);
+    vi.mocked(confirm).mockResolvedValueOnce(false);
+    vi.mocked(confirm).mockResolvedValueOnce(true);
     vi.mocked(password).mockResolvedValue('sk-OPEN9999999999999999999OPEN999');
 
     await runConfigSetPlanner({});
@@ -121,13 +123,14 @@ describe('config set planner', () => {
     expect(c.planner?.provider).toBe('openai');
   });
 
-  it('modelOverride path sets planner.modelOverride plan model', async () => {
+  it('preserves an existing planner.modelOverride across re-runs (no prompt for override in 0.3+)', async () => {
     const cfg: SquadConfig = {
       ...baseConfig(),
       planner: {
         enabled: true,
         provider: 'anthropic',
         mode: 'auto',
+        modelOverride: { anthropic: 'preserved-override-id' },
         budget: { maxFileReads: 10, maxContextBytes: 1, maxDurationSeconds: 1 },
       },
     };
@@ -142,12 +145,40 @@ describe('config set planner', () => {
     vi.mocked(select).mockResolvedValueOnce('anthropic' as never);
     vi.mocked(confirm).mockResolvedValueOnce(false);
     vi.mocked(confirm).mockResolvedValueOnce(true);
-    vi.mocked(input).mockResolvedValue('custom-model-id');
 
     await runConfigSetPlanner({});
 
     const c = loadConfig(path.join(tmp, SQUAD_DIR, 'config.yaml'));
-    expect(c.planner?.modelOverride?.anthropic).toBe('custom-model-id');
+    expect(c.planner?.modelOverride?.anthropic).toBe('preserved-override-id');
+  });
+
+  it('interactive: cache prompt default preserves planner.cache when false in config', async () => {
+    const cfg: SquadConfig = {
+      ...baseConfig(),
+      planner: {
+        enabled: true,
+        provider: 'anthropic',
+        mode: 'auto',
+        budget: { maxFileReads: 10, maxContextBytes: 1, maxDurationSeconds: 1 },
+        cache: { enabled: false },
+      },
+    };
+    saveConfig(path.join(tmp, SQUAD_DIR, 'config.yaml'), cfg);
+    fs.writeFileSync(
+      path.join(tmp, SQUAD_DIR, 'secrets.yaml'),
+      'planner:\n  anthropic: sk-12345678901234567890abcdefghijk\n',
+      'utf8',
+    );
+    vi.mocked(select).mockResolvedValueOnce('change' as never);
+    vi.mocked(select).mockResolvedValueOnce('anthropic' as never);
+    vi.mocked(confirm).mockResolvedValueOnce(false);
+    vi.mocked(confirm).mockResolvedValueOnce(false);
+    vi.mocked(confirm).mockResolvedValueOnce(false);
+
+    await runConfigSetPlanner({});
+
+    const c = loadConfig(path.join(tmp, SQUAD_DIR, 'config.yaml'));
+    expect(c.planner?.cache?.enabled).toBe(false);
   });
 
   it('non-interactive: --yes + openai with no key throws a dead-end error', async () => {

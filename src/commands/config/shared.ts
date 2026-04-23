@@ -59,6 +59,7 @@ export function newPlannerBlock(provider: ProviderName): PlannerConfig {
       maxContextBytes: 50_000,
       maxDurationSeconds: 180,
     },
+    cache: { enabled: true },
   };
 }
 

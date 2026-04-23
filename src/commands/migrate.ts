@@ -184,5 +184,9 @@ export async function runMigrate(opts: MigrateOptions): Promise<void> {
   }
   ui.info('');
   ui.success(`Applied ${applied}/${pending.length} migration(s).`);
-  ui.info('Run `squad doctor` to verify.');
+  ui.blank();
+  ui.step('Next:');
+  ui.info('1) Run `squad doctor` to verify every check is green.');
+  ui.info('2) If you were upgrading from 0.1.x, review .squad/config.yaml — new defaults (planner, cache) may have been added.');
+  ui.info('3) Continue your usual workflow: `squad new-story` → fill intake → `squad new-plan`.');
 }

@@ -6,6 +6,7 @@ import type {
   ToolCall,
   ToolSchema,
 } from '../types.js';
+import { sortRecordKeys } from '../stable-json.js';
 import {
   detectModelNotFound,
   detectRateLimit,
@@ -14,6 +15,17 @@ import {
 
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
+/**
+ * `contents` is last (optional) for cache-prefix string prefixing; it is omitted when `turns`
+ * is empty. `callGoogle` adds `contents: []` on the wire when missing.
+ */
+export type GoogleRequestBody = {
+  system_instruction: { parts: Array<{ text: string }> };
+  tools?: Array<{ functionDeclarations: ReturnType<typeof toGoogleTool>[] }>;
+  generationConfig: { maxOutputTokens: number };
+  contents?: ReturnType<typeof toGoogleContent>[];
+};
+
 export const googleProvider: PlannerProvider = {
   name: 'google',
   async send(req) {
@@ -21,15 +33,25 @@ export const googleProvider: PlannerProvider = {
   },
 };
 
+export function buildGoogleBody(req: ProviderRequest): GoogleRequestBody {
+  const base: GoogleRequestBody = {
+    system_instruction: { parts: [{ text: req.systemPrompt }] },
+    generationConfig: { maxOutputTokens: req.maxOutputTokens ?? 4096 },
+  };
+  if (req.tools.length) {
+    base.tools = [{ functionDeclarations: req.tools.map(toGoogleTool) }];
+  }
+  if (req.turns.length === 0) {
+    return base;
+  }
+  return { ...base, contents: req.turns.map(toGoogleContent) };
+}
+
 export async function callGoogle(req: ProviderRequest): Promise<ProviderResponse> {
   const url = `${API_BASE}/${encodeURIComponent(req.model)}:generateContent?key=${encodeURIComponent(req.apiKey)}`;
 
-  const body = {
-    system_instruction: { parts: [{ text: req.systemPrompt }] },
-    contents: req.turns.map(toGoogleContent),
-    tools: req.tools.length ? [{ functionDeclarations: req.tools.map(toGoogleTool) }] : undefined,
-    generationConfig: { maxOutputTokens: req.maxOutputTokens ?? 4096 },
-  };
+  const built = buildGoogleBody(req);
+  const body: GoogleRequestBody = { ...built, contents: built.contents ?? [] };
 
   const res = await fetch(url, {
     method: 'POST',
@@ -73,7 +95,7 @@ export async function callGoogle(req: ProviderRequest): Promise<ProviderResponse
     .map((p, i) => ({
       id: `gcall_${i}_${p.functionCall.name}`,
       name: p.functionCall.name,
-      input: p.functionCall.args ?? {},
+      input: p.functionCall.args ? (sortRecordKeys(p.functionCall.args) as Record<string, unknown>) : {},
     }));
 
   return {
@@ -88,15 +110,18 @@ export async function callGoogle(req: ProviderRequest): Promise<ProviderResponse
 }
 
 function toGoogleTool(t: ToolSchema) {
-  return { name: t.name, description: t.description, parameters: t.inputSchema };
+  return { name: t.name, description: t.description, parameters: sortRecordKeys(t.inputSchema) as Record<string, unknown> };
 }
 
 function toGoogleContent(turn: ChatTurn) {
   const role = turn.role === 'assistant' ? 'model' : 'user';
   const parts: unknown[] = [];
   if (turn.text) parts.push({ text: turn.text });
-  if (turn.toolCalls)
-    for (const tc of turn.toolCalls) parts.push({ functionCall: { name: tc.name, args: tc.input } });
+  if (turn.toolCalls) {
+    for (const tc of turn.toolCalls) {
+      parts.push({ functionCall: { name: tc.name, args: sortRecordKeys(tc.input) as Record<string, unknown> } });
+    }
+  }
   if (turn.toolResults) {
     for (const tr of turn.toolResults) {
       parts.push({

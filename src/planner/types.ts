@@ -8,6 +8,10 @@ export interface PlannerModelOverride {
   google?: string;
 }
 
+export interface PlannerCacheConfig {
+  enabled: boolean;
+}
+
 export interface PlannerConfig {
   enabled: boolean;
   provider: ProviderName;
@@ -19,6 +23,26 @@ export interface PlannerConfig {
    * between squad-kit releases, or to trial a newer model ahead of pinning.
    */
   modelOverride?: PlannerModelOverride;
+  /**
+   * Prompt caching. When enabled (default), squad-kit attaches provider-specific cache markers
+   * (Anthropic cache_control) and relies on OpenAI / Google implicit caching. Cached tokens
+   * bill at ~10–25% of normal rate and do not consume ITPM the same way, which is critical
+   * for Anthropic Tier 1 users planning with Opus.
+   *
+   * Only turn this off for debugging or when comparing billed costs with/without caching.
+   */
+  cache?: PlannerCacheConfig;
+}
+
+export interface PlannerRunStats {
+  turns: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationTokens: number;
+  cacheReadTokens: number;
+  /** cacheReadTokens / (inputTokens + cacheReadTokens), rounded to a 2-decimal fraction. 0 when no input tokens. */
+  cacheHitRatio: number;
+  durationMs: number;
 }
 
 export interface BudgetConfig {
@@ -62,6 +86,11 @@ export interface ProviderRequest {
   turns: ChatTurn[];
   maxOutputTokens?: number;
   apiKey: string;
+  /**
+   * When `false`, Anthropic requests omit `cache_control` and use a string `system` (legacy
+   * wire shape). Omitted or `true` enables prompt-cache markers. Other providers ignore this.
+   */
+  cacheEnabled?: boolean;
 }
 
 export type ProviderErrorKind = 'rate_limit' | 'model_not_found' | 'unknown';
@@ -86,6 +115,10 @@ export interface Usage {
   inputTokens: number;
   outputTokens: number;
   costUsd?: number;
+  /** Tokens written into the provider cache on this turn (first time this prefix was seen). */
+  cacheCreationTokens?: number;
+  /** Tokens served from the provider cache on this turn (not billed at full rate, does not count ITPM). */
+  cacheReadTokens?: number;
 }
 
 export interface PlannerProvider {

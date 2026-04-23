@@ -72,6 +72,9 @@ function mergePlanner(
       ...(base?.modelOverride ?? {}),
       ...(override.modelOverride ?? {}),
     },
+    cache: {
+      enabled: override.cache?.enabled ?? base?.cache?.enabled ?? true,
+    },
   };
   // Normalise: drop undefined/null entries; remove modelOverride entirely if nothing left (clean YAML).
   if (merged.modelOverride) {
@@ -120,6 +123,22 @@ export function loadConfig(configFile: string): SquadConfig {
   rejectSecretsInYaml(parsed, configFile);
   const merged = mergeConfig(DEFAULT_CONFIG, parsed);
   validateModelOverride(merged.planner?.modelOverride, configFile);
+  if (merged.planner?.cache !== undefined) {
+    const c = merged.planner.cache;
+    if (typeof c !== 'object' || c === null || Array.isArray(c)) {
+      throw new Error(
+        `planner.cache in ${configFile} must be an object with \`enabled: true\` or \`false\`. ` +
+          `Run \`squad config set planner\` to set prompt caching.`,
+      );
+    }
+    const ce = c.enabled;
+    if (typeof ce !== 'boolean') {
+      throw new Error(
+        `planner.cache.enabled in ${configFile} must be a boolean (not a quoted string). ` +
+          `Run \`squad config set planner\` to set prompt caching, or use \`true\` or \`false\` unquoted in YAML.`,
+      );
+    }
+  }
   if (merged.planner?.enabled) {
     if (!['anthropic', 'openai', 'google'].includes(merged.planner.provider)) {
       throw new Error(

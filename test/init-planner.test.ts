@@ -38,6 +38,7 @@ describe('init planner (non-interactive)', () => {
         maxContextBytes: 50_000,
         maxDurationSeconds: 180,
       },
+      cache: { enabled: true },
     });
   });
 

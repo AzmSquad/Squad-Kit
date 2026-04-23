@@ -1,6 +1,8 @@
 node_modules
 dist
 coverage
+.squad/.last-run.json
+.squad/.last-copy-prompt.md
 .DS_Store
 *.log
 .env

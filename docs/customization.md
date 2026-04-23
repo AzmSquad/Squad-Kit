@@ -83,6 +83,54 @@ If the planner hits a cap mid-run, the CLI still writes partial output and warns
 
 `maxCostUsd` is optional: when the provider returns usage cost and you set a cap, the run can stop early. Most setups rely on the read/time caps instead.
 
+## Prompt caching
+
+Starting in 0.3.0, squad-kit uses provider prompt caching on every planning run. Cached tokens
+bill at ~10% (Anthropic), ~25% (Google), and ~50% (OpenAI) of the normal input rate — and on
+Anthropic they **don't count against your per-minute rate limit the same way**, which is the
+difference between "Tier 1 Opus works" and "Tier 1 Opus hits 429 after five tool reads."
+
+### How it works per provider
+
+- **Anthropic** — explicit `cache_control: { type: 'ephemeral' }` on the system prompt (stable)
+  and the most recent tool-result block (rolling forward each turn). 5-minute TTL.
+- **OpenAI** — automatic prefix caching on prompts ≥1024 tokens. No code or config needed; just
+  a stable prefix, which 0.3.0 guarantees.
+- **Google** (Gemini 2.0+ / 2.5) — implicit caching enabled by default. Same prefix-stability
+  guarantee makes it work.
+
+### Reading the telemetry
+
+Every `squad new-plan --api` run prints a cache line:
+
+    cache hit 68% (22.4k read / 32.9k total · 1.2k written)
+
+- `68%` — fraction of input tokens served from cache (higher is cheaper).
+- `22.4k read` — tokens this run served from cache.
+- `32.9k total` — total input tokens this run.
+- `1.2k written` — tokens newly written into the cache (first turn of a session only).
+
+A fresh run against a new repo shows low hit % on turn 1 and rising through turn 3-4 as the
+cache warms up. By turn 5 you should see 60–80% hits on Anthropic.
+
+### Turning it off
+
+    squad config set planner
+
+…and answer `No` to the caching prompt. You'll see `cache disabled` in the run summary.
+`squad doctor` will warn that caching is off (noisy for a reason — you're paying 3-10× more).
+
+### Troubleshooting
+
+Run `squad doctor`. The `planner cache effectiveness` check has four outcomes:
+
+- **skip** — no runs yet, or planner disabled. Run `squad new-plan --api` once.
+- **ok** — caching is working. You'll see the last run's hit rate.
+- **warn** — hit rate < 30% after 3+ turns. Something is busting the prefix. Check your
+  `.squad/config.yaml` for anything that changes per-run. Run with
+  `NODE_ENV=development squad new-plan --api` to surface prefix-mismatch warnings.
+- **fail** — 0% hits across multiple turns. Same causes as warn, more severe.
+
 ## Naming convention
 
 `.squad/config.yaml`:

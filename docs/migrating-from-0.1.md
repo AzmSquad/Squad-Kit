@@ -233,7 +233,7 @@ Then the `squad` you run in any project uses your fork’s prompts. Alternativel
 - **`squad migrate` says there is nothing to do.** The message is **`No migrations needed. Your .squad/ is up to date.`** — a safe no-op. Run **`squad doctor`** to double-check. No fix command is required.
 - **Doctor reports a missing `.gitignore` block** (or missing **`.squad/.trash/`** line in an older block). Run **`squad doctor --fix`**, which appends the managed block or updates it idempotently. If the repo has **no** **`.gitignore`**, **`ensureGitignore`** can **create** one. Command: `squad doctor --fix`.
 - **Doctor warns about `secrets.yaml` permissions** (not “skip / Windows”). Run **`squad doctor --fix`**; it runs **`chmod 0600`** on the file. On Windows the permissions check is skipped by design. Command: `squad doctor --fix`.
-- **Planner hits HTTP 429 (rate limit) during `squad new-plan --api`.** `squad-kit` 0.2.2+ detects 429s, retries once automatically after the `Retry-After` hint (capped at **90 s**; if the provider asks for longer the retry is skipped entirely so we don't waste a request inside the same throttle window), and — if the retry also fails or is skipped — shows a rate-limit-specific error instead of the old "verify models and credentials" hint. On Anthropic Tier 1 in particular, **rate limits are per-model**: the default Opus plan model shares a 10 k tokens/minute bucket; switching to a Sonnet or Haiku id via `squad config set planner` uses a different bucket and usually unblocks Tier 1 users immediately. `squad doctor` emits a `planner-tier` warning when this combination is detected. Recovery paths, in order of effort: (a) wait 60 s and rerun; most provider limits reset per minute. (b) switch to a smaller planner model: **`squad config set planner`** and pick a cheaper id (for Anthropic, `claude-haiku-*` variants are comfortably under most tier quotas). (c) tighten **`planner.budget`** in **`.squad/config.yaml`** (lower `maxContextBytes` and `maxFileReads`) so each request carries fewer tokens. (d) upgrade your provider tier — each provider's link is in the error message, or visit the provider's console directly (Anthropic: `https://console.anthropic.com/settings/limits`). Command: `squad config set planner`.
+- **Planner hits HTTP 429 (rate limit) during `squad new-plan --api`.** `squad-kit` 0.2.2+ detects 429s, retries once automatically after the `Retry-After` hint (capped at **90 s**; if the provider asks for longer the retry is skipped entirely so we don't waste a request inside the same throttle window), and — if the retry also fails or is skipped — shows a rate-limit-specific error instead of the old "verify models and credentials" hint. On Anthropic Tier 1 in particular, **rate limits are per-model**: the default Opus plan model shares a 10 k tokens/minute bucket (you can still hit ITPM limits quickly on long plans without mitigation, or enable **prompt caching** — default in 0.3.0); switching to a Sonnet or Haiku id via `squad config set planner` uses a different bucket and usually unblocks Tier 1 users immediately. `squad doctor` emits a `planner-tier` warning when this combination is detected. For caching details see [Prompt caching in **customization.md**](customization.md#prompt-caching). Recovery paths, in order of effort: (a) wait 60 s and rerun; most provider limits reset per minute. (b) switch to a smaller planner model: **`squad config set planner`** and pick a cheaper id (for Anthropic, `claude-haiku-*` variants are comfortably under most tier quotas). (c) tighten **`planner.budget`** in **`.squad/config.yaml`** (lower `maxContextBytes` and `maxFileReads`) so each request carries fewer tokens. (d) upgrade your provider tier — each provider's link is in the error message, or visit the provider's console directly (Anthropic: `https://console.anthropic.com/settings/limits`). Command: `squad config set planner`.
 - **Planner model is missing or the provider returns 404/401 for the list probe.** The pinned id may be retired. Option A: **`squad upgrade`** to a release that updates provider pins. Option B: set **`planner.modelOverride.<provider>`** in **`.squad/config.yaml`** or run **`squad config set planner`** and pick a model that appears in the provider’s current catalog. For background, see [Model override in **customization.md**](customization.md#model-override) and the [`[0.2.0]` section of **CHANGELOG.md** on GitHub](https://github.com/AzmSquad/Squad-Kit/blob/main/CHANGELOG.md).
 - **Comments in `config.yaml` vanished.** **Expected** after the *Normalise* migration — see [§3 — On disk](#on-disk). Recover text from history: `git show HEAD~1:.squad/config.yaml` (adjust revision). Re-apply any commentary into team docs if you need it, because future **`squad config set`** runs will rewrite YAML again. Command: `git show <commit>:.squad/config.yaml` (or your host’s equivalent).
 - **A story was deleted with `rm -rf` instead of the CLI.** Restore from **git** if tracked: `git restore` the paths, or `git checkout -- .squad/...` as appropriate. Going forward, use **`squad rm story --trash`** so files move under **`.squad/.trash/<timestamp>/`**, which is git-ignored but recoverable on disk. Command: `squad rm story --trash` (after the story exists again, if needed).
@@ -243,7 +243,47 @@ Then the `squad` you run in any project uses your fork’s prompts. Alternativel
 - **Registry or network errors during `squad upgrade`.** The command already suggests a **manual** `pnpm` / `npm` install if it cannot reach **registry.npmjs.org**. Fix DNS or proxy, then re-run the printed install. Command: `pnpm add -g squad-kit@0.2.0` (replace version as needed)
 - **A migration step throws “Refusing to delete suspicious path”** for **`.squad/prompts`**. The delete has a **safety** check that the path contains **`.squad`** and **`prompts`**. If your layout is a symlink or an unusual mount, run **`squad doctor`** to confirm **`paths`** look normal, or remove the bad link **by hand** after reading the error. Command: `squad doctor`
 
-## 9. What didn't change
+## 9. Upgrading from 0.2.x to 0.3.0
+
+**TL;DR: `squad upgrade` and you're done. Caching is on by default.**
+
+### What changed
+
+- Prompt caching on every `squad new-plan --api` run. See [Prompt caching in **customization.md**](customization.md#prompt-caching) for the user-facing story.
+- `squad doctor` has a new check (`planner cache effectiveness`) and softer Tier 1 Opus warning.
+- New file on disk: `.squad/.last-run.json` (git-ignored, per-user, small).
+- System prompt stripped of timestamps and absolute paths. If you had a custom template that
+  relied on `Today is {date}` in the system prompt, it's gone — plans don't need it.
+
+### No config changes required
+
+0.2.x configs load cleanly in 0.3.0. The new `planner.cache.enabled` field defaults to `true`
+when absent.
+
+### Verify it worked
+
+```bash
+squad upgrade               # updates the binary
+squad --version             # should show 0.3.0
+squad doctor                # all checks green; "no planner runs logged yet" is expected
+squad new-plan --api        # run any existing intake; watch for the `cache hit N%` line
+squad doctor                # re-check; should now say "caching active"
+```
+
+### If you want to opt out
+
+See [`docs/customization.md`](customization.md#prompt-caching) §"Prompt caching" → "Turning it off". Not recommended — you'll pay
+3–10× more per planning run.
+
+### Known rough edges
+
+- First run on a fresh `.squad/` directory shows low cache hits on the first 2-3 turns while the
+  cache warms up. This is normal; ratio climbs as the transcript grows.
+- Users on Anthropic Free tier now have a realistic path to completing plans that previously
+  failed on ITPM. Not guaranteed — Free tier is still Free tier — but the bottleneck moves from
+  "turn 5" to "turn 15+" for typical repos.
+
+## 10. What didn't change
 
 - **Stories and plans** under **`.squad/stories/`** and **`.squad/plans/`** are **not** moved or bulk-edited by `squad migrate`. Your narrative content and the **`NN-story-<slug>.md` plan shape** you already use remain valid.
 - **Field names in `config.yaml`** stay **compatible** at the semantic level. New 0.2 pieces (**`planner`**, **`planner.budget`**, **`planner.modelOverride`**, expanded tracker options) are **additive** once you are on 0.2 and run **`saveConfig`**-backed commands.
