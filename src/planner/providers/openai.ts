@@ -1,0 +1,121 @@
+import type {
+  ChatTurn,
+  PlannerProvider,
+  ProviderRequest,
+  ProviderResponse,
+  ToolCall,
+  ToolSchema,
+} from '../types.js';
+import { detectModelNotFound, modelNotFoundMessage } from '../provider-errors.js';
+
+const API_URL = 'https://api.openai.com/v1/chat/completions';
+
+export const openaiProvider: PlannerProvider = {
+  name: 'openai',
+  async send(req) {
+    return callOpenAI(req);
+  },
+};
+
+export async function callOpenAI(req: ProviderRequest): Promise<ProviderResponse> {
+  const messages: unknown[] = [{ role: 'system', content: req.systemPrompt }];
+  for (const turn of req.turns) messages.push(...toOpenAIMessages(turn));
+
+  const body = {
+    model: req.model,
+    messages,
+    tools: req.tools.map(toOpenAITool),
+    max_completion_tokens: req.maxOutputTokens ?? 4096,
+  };
+
+  const res = await fetch(API_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${req.apiKey}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    const nf = detectModelNotFound('openai', req.model, res.status, text);
+    if (nf) {
+      return { stopReason: 'error', rawError: modelNotFoundMessage(nf) };
+    }
+    return { stopReason: 'error', rawError: `openai ${res.status}: ${text.slice(0, 500)}` };
+  }
+
+  const json = (await res.json()) as OpenAIResponse;
+  const choice = json.choices?.[0];
+  if (!choice) return { stopReason: 'error', rawError: 'openai: empty choices' };
+
+  const textOut = choice.message.content ?? '';
+  const toolCalls: ToolCall[] = (choice.message.tool_calls ?? []).map((tc) => ({
+    id: tc.id,
+    name: tc.function.name,
+    input: safeJson(tc.function.arguments),
+  }));
+
+  return {
+    text: textOut || undefined,
+    toolCalls: toolCalls.length ? toolCalls : undefined,
+    stopReason: mapStop(choice.finish_reason),
+    usage: {
+      inputTokens: json.usage?.prompt_tokens ?? 0,
+      outputTokens: json.usage?.completion_tokens ?? 0,
+    },
+  };
+}
+
+function toOpenAITool(t: ToolSchema) {
+  return { type: 'function', function: { name: t.name, description: t.description, parameters: t.inputSchema } };
+}
+
+function toOpenAIMessages(turn: ChatTurn): unknown[] {
+  const out: unknown[] = [];
+  if (turn.role === 'assistant') {
+    out.push({
+      role: 'assistant',
+      content: turn.text ?? null,
+      tool_calls: turn.toolCalls?.map((tc) => ({
+        id: tc.id,
+        type: 'function',
+        function: { name: tc.name, arguments: JSON.stringify(tc.input) },
+      })),
+    });
+  } else {
+    if (turn.text) out.push({ role: 'user', content: turn.text });
+    if (turn.toolResults) {
+      for (const tr of turn.toolResults) {
+        out.push({ role: 'tool', tool_call_id: tr.toolCallId, content: tr.content });
+      }
+    }
+  }
+  return out;
+}
+
+function mapStop(r: string | undefined): ProviderResponse['stopReason'] {
+  if (r === 'tool_calls') return 'tool_use';
+  if (r === 'length') return 'max_tokens';
+  return 'end_turn';
+}
+
+function safeJson(raw: string): Record<string, unknown> {
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+interface OpenAIResponse {
+  choices: Array<{
+    message: {
+      content: string | null;
+      tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>;
+    };
+    finish_reason: string;
+  }>;
+  usage?: { prompt_tokens: number; completion_tokens: number };
+}
