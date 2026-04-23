@@ -19,6 +19,13 @@ const ISOLATED_VARS = [
   'JIRA_API_TOKEN',
   'AZURE_DEVOPS_PAT',
   'SQUAD_TRACKER_API_KEY',
+  // Also isolate the interactivity-gating vars. Tests that want CI=1 (fail-fast
+  // path) set it explicitly inside their own beforeEach, which runs after this
+  // global one and is restored from the pre-test snapshot after the test ends.
+  // Without this, GitHub Actions' CI=true breaks every test that mocks isTTY
+  // but expects `isInteractive()` to return true.
+  'CI',
+  'SQUAD_QUIET',
 ] as const;
 
 const snapshot: Partial<Record<(typeof ISOLATED_VARS)[number], string | undefined>> = {};
