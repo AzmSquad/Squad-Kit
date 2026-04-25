@@ -41,6 +41,7 @@ describe('AzureDevOpsClient', () => {
     expect(res.title).toBe('Sample user story');
     // `<br/>` → newline; `</p>` adds paragraph breaks, then `trim()` drops trailing whitespace.
     expect(res.description).toBe('hello \n world');
+    expect(res.acceptanceCriteria).toBe('AC1: user can log in');
     expect(res.labels).toEqual(['frontend', 'bug']);
     expect(res.type).toBe('User Story');
     expect(res.assignee).toBe('Dev One');

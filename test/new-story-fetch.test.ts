@@ -108,6 +108,14 @@ describe('new-story tracker fetch', () => {
     expect(body).toContain('**Labels:** frontend, bug');
     expect(body).toMatch(/\| `attachments\/screenshot\.png` \| .* \| downloaded \|/);
 
+    const titleInTemplate = body.match(/(?:^|\n)## Title\b[\s\S]*?\n```(?:[\w-]*)?\s*\n([\s\S]*?)\n```/);
+    expect(titleInTemplate?.[1]?.trim()).toBe('Login fails when MFA enabled');
+    const descInTemplate = body.match(/(?:^|\n)## Description\b[\s\S]*?\n```(?:[\w-]*)?\s*\n([\s\S]*?)\n```/);
+    expect(descInTemplate?.[1]?.trim()).toContain('Same text, as HTML.');
+    const acInTemplate = body.match(/(?:^|\n)## Acceptance criteria\b[\s\S]*?\n```(?:[\w-]*)?\s*\n([\s\S]*?)\n```/);
+    expect(acInTemplate?.[1]?.trim()).toBe('');
+    expect(body).toContain('**Work item id:** `PROJ-42`');
+
     const attachDir = path.join(tmp, '.squad/stories/my-feature/PROJ-42/attachments');
     expect(fs.readdirSync(attachDir)).toContain('screenshot.png');
     expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2);

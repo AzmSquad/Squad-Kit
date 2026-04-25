@@ -3,6 +3,7 @@
   "fields": {
     "System.Title": "Sample user story",
     "System.Description": "<p>hello <br/> world</p>",
+    "Microsoft.VSTS.Common.AcceptanceCriteria": "<p>AC1: user can log in</p>",
     "System.WorkItemType": "User Story",
     "System.State": "Active",
     "System.Tags": "frontend; bug",

@@ -8,7 +8,7 @@ import { loadConfig, type SquadConfig, type TrackerType } from '../core/config.j
 import { validateTrackerId, trackerIdForFilename } from '../core/tracker.js';
 import { loadSecrets } from '../core/secrets.js';
 import { readFile, readBundledPrompt, templatesDir, writeFileSafe } from '../utils/fs.js';
-import { render } from '../core/template.js';
+import { escapeTemplateValue, render } from '../core/template.js';
 import { clientFor, overlayTrackerEnv } from '../tracker/index.js';
 import { TrackerError, type DownloadedAttachment, type FetchIssueResult } from '../tracker/types.js';
 
@@ -166,12 +166,14 @@ export async function runNewStory(featureSlug: string | undefined, opts: NewStor
 
   let sourceBlock = '';
   let fetchedSummary: { id: string; written: number } | undefined;
+  let fetchedIssue: FetchIssueResult | undefined;
 
   const shouldFetch =
     !noTracker && opts.fetch !== false && Boolean(id) && config.tracker.type !== 'none';
   if (shouldFetch) {
     const outcome = await tryFetchIssue(config, id!, opts, paths, attachmentsDir);
     if (outcome.outcome === 'ok') {
+      fetchedIssue = outcome.issue;
       sourceBlock = buildSourcePreamble(outcome.issue, outcome.downloads, config.tracker.type);
       if (!title) title = outcome.issue.title;
       const written = outcome.downloads.filter((d) => d.outcome === 'written').length;
@@ -184,20 +186,23 @@ export async function runNewStory(featureSlug: string | undefined, opts: NewStor
   }
 
   const template = readBundledPrompt('intake.md');
-  const rendered = render(template, {
-    featureSlug: slug,
-    storyId: storyFolderName,
-    trackerType: config.tracker.type,
-    projectRoots: (config.project.projectRoots ?? ['.']).join(', '),
-    primaryLanguage: config.project.primaryLanguage ?? '',
-  });
+  const rendered = render(
+    template,
+    buildIntakeTemplateVars({
+      config,
+      featureSlug: slug,
+      storyFolderName,
+      trackerId: id,
+      title,
+      fetchedIssue,
+    }),
+  );
 
   const skippedPreamble =
     noTracker && config.tracker.type !== 'none' && !sourceBlock
       ? buildSkippedTrackerPreamble(config.tracker.type)
       : '';
-  const titleHint = title ? `> **Title hint (from CLI):** ${title}\n\n` : '';
-  writeFileSafe(intakeFile, skippedPreamble + sourceBlock + titleHint + rendered, false);
+  writeFileSafe(intakeFile, skippedPreamble + sourceBlock + rendered, false);
 
   ensureFeatureOverview(path.join(paths.plansDir, slug), slug);
 
@@ -288,6 +293,33 @@ function explainTrackerErrorHint(err: TrackerError): string | undefined {
 
 function truncate(s: string, n: number): string {
   return s.length <= n ? s : s.slice(0, n - 1) + '…';
+}
+
+function buildIntakeTemplateVars(args: {
+  config: SquadConfig;
+  featureSlug: string;
+  storyFolderName: string;
+  trackerId: string | undefined;
+  title: string | undefined;
+  fetchedIssue: FetchIssueResult | undefined;
+}): Record<string, string> {
+  const e = escapeTemplateValue;
+  const { config, featureSlug, storyFolderName, trackerId, title, fetchedIssue } = args;
+  return {
+    featureSlug,
+    storyId: storyFolderName,
+    trackerType: config.tracker.type,
+    trackerWorkItemId: e((fetchedIssue?.id ?? trackerId ?? '').trim()),
+    trackerWorkItemType: e((fetchedIssue?.type ?? '').trim()),
+    trackerStatus: e((fetchedIssue?.status ?? '').trim()),
+    trackerAssignee: e((fetchedIssue?.assignee ?? '').trim()),
+    trackerLabels: e((fetchedIssue?.labels ?? []).join(', ').trim()),
+    trackerTitle: e((title ?? '').trim()),
+    trackerDescription: e((fetchedIssue?.description ?? '').trim()),
+    trackerAcceptanceCriteria: e((fetchedIssue?.acceptanceCriteria ?? '').trim()),
+    projectRoots: (config.project.projectRoots ?? ['.']).join(', '),
+    primaryLanguage: config.project.primaryLanguage ?? '',
+  };
 }
 
 function buildSourcePreamble(

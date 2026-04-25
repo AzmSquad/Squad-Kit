@@ -4,6 +4,8 @@ export interface FetchIssueResult {
   id: string; // canonical id, e.g. "PROJ-123" (Jira) or "42" (Azure)
   title: string;
   description: string; // plain text, may contain blank lines
+  /** Plain text when the tracker exposes it (e.g. Azure); empty string otherwise. */
+  acceptanceCriteria: string;
   url: string; // web URL for the human
   labels: string[];
   type?: string; // "Story" | "Bug" | "Task" | …

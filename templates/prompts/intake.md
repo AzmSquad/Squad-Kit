@@ -18,8 +18,11 @@ This is **not** an implementation prompt. It is the input to the plan-generation
 ## Tracker (metadata only)
 
 - **Tracker type:** `{{trackerType}}`
-- **Work item id:** (used in filenames and plan tables; leave blank if tracker type is `none`)
-- **Work item type:** Story / Bug / Task / Chore / …
+- **Work item id:** `{{trackerWorkItemId}}` *(used in filenames and plan tables; fill manually if empty)*
+- **Work item type:** `{{trackerWorkItemType}}`
+- **Status:** `{{trackerStatus}}`
+- **Assignee:** `{{trackerAssignee}}`
+- **Labels:** `{{trackerLabels}}`
 
 External tracker links are **not** followed by the planner. Keep the id for naming and traceability only.
 
@@ -27,30 +30,30 @@ External tracker links are **not** followed by the planner. Keep the id for nami
 
 ## Title
 
-*(Paste the work item title verbatim.)*
+*(Paste the work item title verbatim. Prefilled when `squad new-story` fetched from a tracker.)*
 
 ```
-
+{{trackerTitle}}
 ```
 
 ---
 
 ## Description
 
-*(Paste the full work item description, including any formatting you rely on.)*
+*(Paste the full work item description. Prefilled when fetched from a tracker.)*
 
 ```
-
+{{trackerDescription}}
 ```
 
 ---
 
 ## Acceptance criteria
 
-*(Paste the acceptance criteria — checklist, bullets, Gherkin, whatever the tracker stores.)*
+*(Checklist, bullets, Gherkin, etc. Prefilled for Azure DevOps when the work item has acceptance criteria.)*
 
 ```
-
+{{trackerAcceptanceCriteria}}
 ```
 
 ---

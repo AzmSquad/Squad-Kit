@@ -72,6 +72,7 @@ export class AzureDevOpsClient implements TrackerClient {
       id: String(body.id ?? id),
       title: fields['System.Title'] ?? '(no title)',
       description: stripHtml(fields['System.Description'] ?? ''),
+      acceptanceCriteria: stripHtml(fields['Microsoft.VSTS.Common.AcceptanceCriteria'] ?? ''),
       url: `${this.webBase}/${body.id ?? id}`,
       labels: parseTags(fields['System.Tags']),
       type: fields['System.WorkItemType'],
@@ -143,6 +144,7 @@ interface AzureWorkItemPayload {
   fields?: {
     'System.Title'?: string;
     'System.Description'?: string;
+    'Microsoft.VSTS.Common.AcceptanceCriteria'?: string;
     'System.WorkItemType'?: string;
     'System.State'?: string;
     'System.Tags'?: string;

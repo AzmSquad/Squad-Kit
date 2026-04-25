@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { render } from '../src/core/template.js';
+import { escapeTemplateValue, render } from '../src/core/template.js';
 
 describe('render', () => {
   it('substitutes {{var}} tokens', () => {
@@ -16,5 +16,14 @@ describe('render', () => {
   });
   it('leaves non-matching braces alone', () => {
     expect(render('{single} {{x-y}} {}', { 'x-y': 'ok' })).toBe('{single} ok {}');
+  });
+});
+
+describe('escapeTemplateValue', () => {
+  it('breaks {{ so nested tokens in values are not expanded', () => {
+    const body = escapeTemplateValue('Use {{featureSlug}} here');
+    expect(render('desc={{body}} slug={{featureSlug}}', { body, featureSlug: 'auth' })).toBe(
+      'desc=Use { {featureSlug}} here slug=auth',
+    );
   });
 });

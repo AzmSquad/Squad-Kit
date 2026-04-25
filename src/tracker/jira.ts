@@ -59,6 +59,7 @@ export class JiraClient implements TrackerClient {
       id: body.key ?? id,
       title: fields.summary ?? '(no title)',
       description,
+      acceptanceCriteria: '',
       url: `${this.baseUrl}/browse/${body.key ?? id}`,
       labels: Array.isArray(fields.labels) ? fields.labels : [],
       type: fields.issuetype?.name,

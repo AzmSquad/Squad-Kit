@@ -41,6 +41,7 @@ describe('JiraClient', () => {
     expect(res.title).toBe('Login fails when MFA enabled');
     expect(res.description.length).toBeGreaterThan(0);
     expect(res.description).toContain('Same text, as HTML.');
+    expect(res.acceptanceCriteria).toBe('');
     expect(res.labels).toEqual(['frontend', 'bug']);
     expect(res.type).toBe('Bug');
     expect(res.assignee).toBe('Jamie Doe');
