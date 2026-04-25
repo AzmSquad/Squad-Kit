@@ -24,3 +24,4 @@ You are generating an agent-executable implementation plan for this project usin
 - Planning only. Do **not** modify application source code in this session.
 - Concrete over clever. File paths, line ranges, type names, function signatures, verification commands.
 - Respect existing conventions — read neighbouring plan files first.
+- If a plan file already starts with `<!-- squad-kit:`, **never change or remove that first line** when editing the file. New plans you write start with `# Story NN — …` per `generate-plan.md`; do not fake the API metadata comment (only `squad new-plan --api` emits that header). In later **implementation** chats, treat the plan file as read-only unless the user explicitly asks to revise the plan.

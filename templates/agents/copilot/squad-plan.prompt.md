@@ -12,3 +12,5 @@ Generate an implementation plan using the squad-kit workflow.
 - Write the plan file to `.squad/plans/<feature-slug>/NN-story-<slug>[-<id>].md` and update `00-overview.md` / `00-index.md` as needed.
 
 Planning only. Do not modify application source code in this session.
+
+If a plan file already starts with `<!-- squad-kit:`, never change or remove that first line when editing (tooling / `squad list`). New plans start with `# Story NN — …` per `generate-plan.md`; do not fake the API metadata comment. In later implementation sessions, keep the plan file read-only unless the user explicitly asks to revise the plan.
