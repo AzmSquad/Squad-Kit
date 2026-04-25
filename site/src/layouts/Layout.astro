@@ -16,6 +16,56 @@ const {
 } = Astro.props;
 
 const canonical = new URL(Astro.url.pathname, Astro.site).toString();
+const siteOrigin = Astro.site ? new URL(Astro.site).origin : "https://squad-kit.com";
+const ogImageAbsolute = new URL(ogImage, Astro.site).toString();
+const ogImageLower = ogImage.toLowerCase();
+const ogImageMime = ogImageLower.endsWith(".png")
+  ? "image/png"
+  : ogImageLower.endsWith(".svg")
+    ? "image/svg+xml"
+    : null;
+const ogImageAlt =
+  "squad-kit — plan once, execute cheap. 3-step SDD workflow CLI for AI coding agents.";
+
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebSite",
+      "@id": `${siteOrigin}/#website`,
+      url: `${siteOrigin}/`,
+      name: "squad-kit",
+      description:
+        "A token-efficient, 3-step spec-driven development CLI for AI coding agents. Raw story → concrete plan → cheap execution.",
+      publisher: { "@id": `${siteOrigin}/#organization` },
+      inLanguage: "en",
+    },
+    {
+      "@type": "Organization",
+      "@id": `${siteOrigin}/#organization`,
+      name: "squad-kit",
+      url: `${siteOrigin}/`,
+      logo: new URL("/logo.svg", Astro.site).href,
+    },
+    {
+      "@type": "SoftwareApplication",
+      name: "squad-kit",
+      applicationCategory: "DeveloperApplication",
+      operatingSystem: "Windows, macOS, Linux",
+      offers: {
+        "@type": "Offer",
+        price: "0",
+        priceCurrency: "USD",
+      },
+      url: `${siteOrigin}/`,
+      description:
+        "Plan once, execute cheap. A 3-step SDD workflow CLI for AI coding agents: raw story, concrete plan file, cheap implementation.",
+      license: "https://opensource.org/licenses/MIT",
+      codeRepository: "https://github.com/AzmSquad/Squad-Kit",
+      downloadUrl: "https://www.npmjs.com/package/squad-kit",
+    },
+  ],
+};
 ---
 
 <!doctype html>
@@ -34,12 +84,19 @@ const canonical = new URL(Astro.url.pathname, Astro.site).toString();
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:url" content={canonical} />
-    <meta property="og:image" content={new URL(ogImage, Astro.site).toString()} />
+    <meta property="og:image" content={ogImageAbsolute} />
+    <meta property="og:image:alt" content={ogImageAlt} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    {ogImageMime && <meta property="og:image:type" content={ogImageMime} />}
 
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
-    <meta name="twitter:image" content={new URL(ogImage, Astro.site).toString()} />
+    <meta name="twitter:image" content={ogImageAbsolute} />
+    <meta name="twitter:image:alt" content={ogImageAlt} />
+
+    <script type="application/ld+json" set:html={JSON.stringify(jsonLd).replace(/</g, "\\u003c")} />
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

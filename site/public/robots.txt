@@ -1,0 +1,5 @@
+# https://squad-kit.com
+User-agent: *
+Allow: /
+
+Sitemap: https://squad-kit.com/sitemap-index.xml
