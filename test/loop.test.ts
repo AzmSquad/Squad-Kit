@@ -119,6 +119,31 @@ describe('runPlanner', () => {
     });
     expect(result.planText).toBe('partial only');
     expect(result.finishedNormally).toBe(false);
+    expect(result.incompleteKind).toBe('max_output_tokens');
+  });
+
+  it('continues after max_tokens when decideOnLimit returns continue', async () => {
+    const provider = mockProvider([
+      { text: 'part-a', stopReason: 'max_tokens', usage: { inputTokens: 1, outputTokens: 1 } },
+      { text: 'part-b', stopReason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1 } },
+    ]);
+    const budget = new Budget(budgetCfg);
+    const decideOnLimit = vi.fn().mockResolvedValue('continue' as const);
+    const result = await runPlanner({
+      root: os.tmpdir(),
+      provider,
+      model: 'm',
+      apiKey: 'k',
+      systemPrompt: 'sys',
+      userPrompt: 'user',
+      budget,
+      maxOutputTokens: 100,
+      maxIterations: 5,
+      decideOnLimit,
+    });
+    expect(result.planText).toBe('part-apart-b');
+    expect(result.finishedNormally).toBe(true);
+    expect(decideOnLimit).toHaveBeenCalledTimes(1);
   });
 
   it('throws on stopReason error with rawError and generic retry hint', async () => {

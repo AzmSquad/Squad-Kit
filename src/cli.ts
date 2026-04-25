@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import * as ui from './ui/index.js';
+import { isSquadExit } from './core/cli-exit.js';
 import { runInit, type InitOptions } from './commands/init.js';
 import { runNewStory } from './commands/new-story.js';
 import { runNewPlan } from './commands/new-plan.js';
@@ -202,6 +203,10 @@ config
   );
 
 program.parseAsync(process.argv).catch((err) => {
+  if (isSquadExit(err)) {
+    if (err.message.trim()) ui.info(err.message);
+    process.exit(err.exitCode);
+  }
   ui.renderError(err);
   process.exit(1);
 });
@@ -211,6 +216,10 @@ function wrap<T>(fn: (opts: T) => Promise<void>) {
     try {
       await fn(opts);
     } catch (err) {
+      if (isSquadExit(err)) {
+        if (err.message.trim()) ui.info(err.message);
+        process.exit(err.exitCode);
+      }
       ui.renderError(err);
       process.exit(1);
     }
@@ -222,6 +231,10 @@ function wrapArgs<A extends unknown[]>(fn: (...args: A) => Promise<void>) {
     try {
       await fn(...args);
     } catch (err) {
+      if (isSquadExit(err)) {
+        if (err.message.trim()) ui.info(err.message);
+        process.exit(err.exitCode);
+      }
       ui.renderError(err);
       process.exit(1);
     }

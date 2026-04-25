@@ -78,6 +78,18 @@ describe('Budget', () => {
     expect(b.overCost()).toBe(true);
   });
 
+  it('extendSession adds another slice of read and byte limits', () => {
+    const b = new Budget({
+      maxFileReads: 1,
+      maxContextBytes: 100,
+      maxDurationSeconds: 60,
+    });
+    b.recordRead(100);
+    expect(b.canRead(1).ok).toBe(false);
+    b.extendSession();
+    expect(b.canRead(1).ok).toBe(true);
+  });
+
   it('recordUsage accepts extended usage with cache token fields', () => {
     const b = new Budget({
       maxFileReads: 10,

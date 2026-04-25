@@ -11,9 +11,17 @@ import type {
 } from './types.js';
 import { Budget } from './budget.js';
 import { READ_FILE_TOOL, readFileTool } from './tools.js';
+import type { ReadFileResult } from './tools.js';
 import { rateLimitMessage } from './provider-errors.js';
 import { prefixOf } from './providers/prefix.js';
 import * as ui from '../ui/index.js';
+import { DEFAULT_PLANNER_MAX_OUTPUT_TOKENS } from '../core/config.js';
+import {
+  DEFAULT_PLANNER_MAX_ITERATIONS,
+  PLANNER_MARKDOWN_CONTINUATION_USER,
+  type PlannerLimitDecision,
+  type PlannerSessionLimitContext,
+} from './session-limits.js';
 
 /**
  * Upper bound on the auto-retry wait. Chosen to cover the common Anthropic Tier 1 /
@@ -42,7 +50,23 @@ export interface RunPlannerInput {
   cacheEnabled?: boolean;
   /** Test injection for `setTimeout`. Defaults to the real timer. */
   sleep?: (ms: number) => Promise<void>;
+  /** Per provider request; default 16384 when omitted. */
+  maxOutputTokens?: number;
+  /**
+   * When set, the planner asks before extending limits (extra provider calls = extra cost).
+   * When omitted, legacy behaviour: read-budget hits nudge the model to finalise without tools;
+   * other hard stops return immediately.
+   */
+  decideOnLimit?: (ctx: PlannerSessionLimitContext) => Promise<PlannerLimitDecision>;
 }
+
+/** Why the loop stopped when `finishedNormally` is false (non-error, non-budget, non-timeout). */
+export type PlannerIncompleteKind =
+  | 'max_output_tokens'
+  | 'max_iterations'
+  | 'wall_clock'
+  | 'cost_cap'
+  | 'budget_reads';
 
 export interface RunPlannerOutput {
   planText: string;
@@ -51,10 +75,15 @@ export interface RunPlannerOutput {
   finishedNormally: boolean;
   iterations: number;
   stats: PlannerRunStats;
+  incompleteKind?: PlannerIncompleteKind;
+  /** User declined to continue after a session limit was hit (only when `decideOnLimit` is set). */
+  userCancelled?: boolean;
 }
 
 /** @alias RunPlannerOutput — result object including aggregated cache telemetry from Story 03. */
 export type RunPlannerResult = RunPlannerOutput;
+
+export type { PlannerLimitDecision, PlannerSessionLimitContext, PlannerSessionLimitKind } from './session-limits.js';
 
 function buildPlannerRunStats(budget: Budget, turns: number, runStartedAt: number): PlannerRunStats {
   const u = budget.snapshot().usage;
@@ -75,20 +104,95 @@ function buildPlannerRunStats(budget: Budget, turns: number, runStartedAt: numbe
   };
 }
 
+function readBudgetishError(result: ReadFileResult): boolean {
+  return result.isError && (/budget/i.test(result.content) || /max file reads/i.test(result.content));
+}
+
+function extendAllSessionLimits(
+  input: RunPlannerInput,
+  maxIter: { current: number },
+  maxOut: { current: number },
+  baseMaxIter: number,
+  baseMaxOut: number,
+): void {
+  input.budget.extendSession();
+  maxIter.current += baseMaxIter;
+  maxOut.current += baseMaxOut;
+}
+
 export async function runPlanner(input: RunPlannerInput): Promise<RunPlannerOutput> {
   const runStartedAt = Date.now();
-  const maxIter = input.maxIterations ?? 40;
+  const baseMaxIter = input.maxIterations ?? DEFAULT_PLANNER_MAX_ITERATIONS;
+  const maxIter = { current: baseMaxIter };
+  const baseMaxOut = input.maxOutputTokens ?? DEFAULT_PLANNER_MAX_OUTPUT_TOKENS;
+  const maxOut = { current: baseMaxOut };
   const turns: ChatTurn[] = [{ role: 'user', text: input.userPrompt }];
   let accumulatedText = '';
   let iterations = 0;
   let budgetExhausted = false;
   let finishedNormally = false;
   let prevRequestPrefix: string | undefined;
+  const decide = input.decideOnLimit;
 
-  while (iterations < maxIter) {
+  const limitCtx = (kind: PlannerSessionLimitContext['kind']): PlannerSessionLimitContext => ({
+    kind,
+    budgetSnapshot: input.budget.snapshot(),
+    iterations,
+    maxIterations: maxIter.current,
+    maxOutputTokens: maxOut.current,
+  });
+
+  for (;;) {
+    if (iterations >= maxIter.current) {
+      if (decide) {
+        const d = await decide(limitCtx('max_iterations'));
+        if (d === 'cancel') {
+          return {
+            planText: accumulatedText,
+            budgetExhausted,
+            timedOut: false,
+            finishedNormally: false,
+            iterations,
+            stats: buildPlannerRunStats(input.budget, iterations, runStartedAt),
+            incompleteKind: 'max_iterations',
+            userCancelled: true,
+          };
+        }
+        extendAllSessionLimits(input, maxIter, maxOut, baseMaxIter, baseMaxOut);
+        continue;
+      }
+      return {
+        planText: accumulatedText,
+        budgetExhausted,
+        timedOut: false,
+        finishedNormally: false,
+        iterations,
+        stats: buildPlannerRunStats(input.budget, iterations, runStartedAt),
+        incompleteKind: 'max_iterations',
+      };
+    }
+
     iterations += 1;
 
     if (input.budget.timedOut()) {
+      if (decide) {
+        const d = await decide(limitCtx('wall_clock'));
+        if (d === 'cancel') {
+          return {
+            planText: accumulatedText,
+            budgetExhausted,
+            timedOut: true,
+            finishedNormally: false,
+            iterations,
+            stats: buildPlannerRunStats(input.budget, iterations, runStartedAt),
+            incompleteKind: 'wall_clock',
+            userCancelled: true,
+          };
+        }
+        extendAllSessionLimits(input, maxIter, maxOut, baseMaxIter, baseMaxOut);
+        iterations -= 1;
+        continue;
+      }
       return {
         planText: accumulatedText,
         budgetExhausted,
@@ -99,6 +203,24 @@ export async function runPlanner(input: RunPlannerInput): Promise<RunPlannerOutp
       };
     }
     if (input.budget.overCost()) {
+      if (decide) {
+        const d = await decide(limitCtx('cost_cap'));
+        if (d === 'cancel') {
+          return {
+            planText: accumulatedText,
+            budgetExhausted,
+            timedOut: false,
+            finishedNormally: false,
+            iterations,
+            stats: buildPlannerRunStats(input.budget, iterations, runStartedAt),
+            incompleteKind: 'cost_cap',
+            userCancelled: true,
+          };
+        }
+        extendAllSessionLimits(input, maxIter, maxOut, baseMaxIter, baseMaxOut);
+        iterations -= 1;
+        continue;
+      }
       return {
         planText: accumulatedText,
         budgetExhausted: true,
@@ -115,7 +237,7 @@ export async function runPlanner(input: RunPlannerInput): Promise<RunPlannerOutp
       tools: [READ_FILE_TOOL],
       turns,
       apiKey: input.apiKey,
-      maxOutputTokens: 8192,
+      maxOutputTokens: maxOut.current,
       cacheEnabled: input.cacheEnabled ?? true,
     };
 
@@ -144,8 +266,6 @@ export async function runPlanner(input: RunPlannerInput): Promise<RunPlannerOutp
     if (response.stopReason === 'error' && response.errorKind === 'rate_limit') {
       const asked = response.retryAfterSec;
       if (asked !== undefined && asked > MAX_RATE_LIMIT_RETRY_SEC) {
-        // Provider asked for longer than we're willing to block; a retry now would
-        // fail inside the same window and burn a request. Skip straight to guidance.
         retrySkippedReason = 'retry_after_too_long';
       } else {
         const waitSec = Math.min(asked ?? 10, MAX_RATE_LIMIT_RETRY_SEC);
@@ -172,6 +292,26 @@ export async function runPlanner(input: RunPlannerInput): Promise<RunPlannerOutp
     }
 
     if (response.stopReason === 'max_tokens' && !response.toolCalls?.length) {
+      if (decide) {
+        const d = await decide(limitCtx('max_output_tokens'));
+        if (d === 'cancel') {
+          return {
+            planText: accumulatedText,
+            budgetExhausted,
+            timedOut: false,
+            finishedNormally: false,
+            iterations,
+            stats: buildPlannerRunStats(input.budget, iterations, runStartedAt),
+            incompleteKind: 'max_output_tokens',
+            userCancelled: true,
+          };
+        }
+        extendAllSessionLimits(input, maxIter, maxOut, baseMaxIter, baseMaxOut);
+        turns.push({ role: 'assistant', text: response.text ?? '' });
+        turns.push({ role: 'user', text: PLANNER_MARKDOWN_CONTINUATION_USER });
+        iterations -= 1;
+        continue;
+      }
       return {
         planText: accumulatedText,
         budgetExhausted,
@@ -179,6 +319,7 @@ export async function runPlanner(input: RunPlannerInput): Promise<RunPlannerOutp
         finishedNormally: false,
         iterations,
         stats: buildPlannerRunStats(input.budget, iterations, runStartedAt),
+        incompleteKind: 'max_output_tokens',
       };
     }
 
@@ -201,17 +342,50 @@ export async function runPlanner(input: RunPlannerInput): Promise<RunPlannerOutp
     });
 
     const toolResults: ToolResult[] = [];
-    for (const tc of response.toolCalls) {
+    const toolCalls = response.toolCalls;
+    for (let i = 0; i < toolCalls.length; i += 1) {
+      const tc = toolCalls[i]!;
       if (tc.name !== READ_FILE_TOOL.name) {
         toolResults.push({ toolCallId: tc.id, content: `unknown tool "${tc.name}"`, isError: true });
         continue;
       }
       const before = input.budget.snapshot().bytes;
-      const result = readFileTool(input.root, input.budget, tc.input);
+      let result = readFileTool(input.root, input.budget, tc.input);
       const after = input.budget.snapshot().bytes;
       input.onToolCall?.(tc, after - before, after);
-      if (result.isError && (/budget/i.test(result.content) || /max file reads/i.test(result.content))) {
-        budgetExhausted = true;
+      if (readBudgetishError(result)) {
+        if (decide) {
+          const d = await decide(limitCtx('file_or_context_reads'));
+          if (d === 'cancel') {
+            toolResults.push({ toolCallId: tc.id, content: result.content, isError: true });
+            for (let j = i + 1; j < toolCalls.length; j += 1) {
+              const t2 = toolCalls[j]!;
+              toolResults.push({
+                toolCallId: t2.id,
+                content:
+                  t2.name === READ_FILE_TOOL.name
+                    ? 'read_file: not executed (planning session stopped after file/context budget).'
+                    : `unknown tool "${t2.name}"`,
+                isError: true,
+              });
+            }
+            turns.push({ role: 'user', toolResults });
+            return {
+              planText: accumulatedText,
+              budgetExhausted: false,
+              timedOut: false,
+              finishedNormally: false,
+              iterations,
+              stats: buildPlannerRunStats(input.budget, iterations, runStartedAt),
+              incompleteKind: 'budget_reads',
+              userCancelled: true,
+            };
+          }
+          extendAllSessionLimits(input, maxIter, maxOut, baseMaxIter, baseMaxOut);
+          result = readFileTool(input.root, input.budget, tc.input);
+        } else {
+          budgetExhausted = true;
+        }
       }
       toolResults.push({ toolCallId: tc.id, content: result.content, isError: result.isError });
     }
@@ -227,15 +401,6 @@ export async function runPlanner(input: RunPlannerInput): Promise<RunPlannerOutp
       });
     }
   }
-
-  return {
-    planText: accumulatedText,
-    budgetExhausted,
-    timedOut: false,
-    finishedNormally: false,
-    iterations,
-    stats: buildPlannerRunStats(input.budget, iterations, runStartedAt),
-  };
 }
 
 export function relativisePath(root: string, p: string): string {

@@ -53,12 +53,12 @@ describe('writePlanFile', () => {
     });
     expect(overwrote).toBe(false);
     expect(sequenceNumber).toBe(1);
-    expect(planFile).toMatch(/01-story-login-flow\.md$/);
+    expect(planFile).toMatch(/01-story-story-1\.md$/);
     expect(fs.readFileSync(planFile, 'utf8').startsWith('<!-- meta -->')).toBe(true);
     expect(fs.readFileSync(planFile, 'utf8')).toContain('# Plan body');
     const overview = path.join(paths.plansDir, 'auth', '00-overview.md');
     expect(fs.existsSync(overview)).toBe(true);
-    expect(fs.readFileSync(overview, 'utf8')).toContain('01-story-login-flow.md');
+    expect(fs.readFileSync(overview, 'utf8')).toContain('01-story-story-1.md');
     expect(fs.readFileSync(overview, 'utf8')).toContain('story-1');
   });
 
@@ -87,7 +87,7 @@ describe('writePlanFile', () => {
     expect(fs.readFileSync(first.planFile, 'utf8')).toContain('<!-- b -->');
   });
 
-  it('includes tracker id in filename when naming + linear tracker', () => {
+  it('uses slugified story folder id for linear tracker plans', () => {
     const paths = buildPaths(tmp);
     fs.mkdirSync(paths.squadDir, { recursive: true });
     const config: SquadConfig = {
@@ -103,29 +103,37 @@ describe('writePlanFile', () => {
       planBodyMarkdown: 'x',
       metadataHeader: '<!-- h -->',
     });
-    expect(path.basename(planFile)).toMatch(/ENG-42/);
+    expect(path.basename(planFile)).toBe('01-story-eng-42.md');
   });
 
-  it('does not duplicate the tracker id when there is no titleHint', () => {
+  it('writes a partial plan with .partial.md and YAML status front matter', () => {
     const paths = buildPaths(tmp);
     fs.mkdirSync(paths.squadDir, { recursive: true });
-    const config: SquadConfig = {
-      ...baseConfig,
-      tracker: { type: 'azure' },
-      naming: { includeTrackerId: true, globalSequence: true },
-    };
-    const s = story({ feature: 'inspection-team', id: '852655' });
+    const s = story({ titleHint: 'Draft plan' });
     const { planFile } = writePlanFile({
       paths,
-      config,
+      config: baseConfig,
       story: s,
-      planBodyMarkdown: 'x',
-      metadataHeader: '<!-- h -->',
+      planBodyMarkdown: '# WIP\n',
+      metadataHeader: buildMetadataHeader({
+        provider: 'anthropic',
+        model: 'm',
+        reads: 0,
+        bytes: 0,
+        inputTokens: 1,
+        outputTokens: 2,
+        durationMs: 1,
+        planStatus: 'partial',
+      }),
+      partial: true,
     });
-    expect(path.basename(planFile)).toBe('01-story-852655.md');
+    expect(planFile).toMatch(/\.partial\.md$/);
+    const raw = fs.readFileSync(planFile, 'utf8');
+    expect(raw).toContain('squad-kit-plan-status: partial');
+    expect(raw).toContain('# WIP');
   });
 
-  it('keeps tracker id suffix when titleHint differs from the id', () => {
+  it('does not put title hint in the filename when it differs from the story id', () => {
     const paths = buildPaths(tmp);
     fs.mkdirSync(paths.squadDir, { recursive: true });
     const config: SquadConfig = {
@@ -141,7 +149,7 @@ describe('writePlanFile', () => {
       planBodyMarkdown: 'x',
       metadataHeader: '<!-- h -->',
     });
-    expect(path.basename(planFile)).toBe('01-story-inspection-form-updates-852655.md');
+    expect(path.basename(planFile)).toBe('01-story-852655.md');
   });
 });
 

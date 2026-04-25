@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { buildPaths, SQUAD_DIR } from '../src/core/paths.js';
 import { DEFAULT_CONFIG, saveConfig } from '../src/core/config.js';
+import { SquadExit } from '../src/core/cli-exit.js';
 import { runNewPlan } from '../src/commands/new-plan.js';
 import { READ_FILE_TOOL } from '../src/planner/tools.js';
 import type { PlannerProvider } from '../src/planner/types.js';
@@ -83,6 +84,23 @@ describe('runNewPlan API path', () => {
     expect(content.startsWith('<!-- squad-kit:')).toBe(true);
     expect(content).toContain('# Story 01 — Done');
     expect(content).toContain('Body.');
+  });
+
+  it('writes a .partial.md plan and throws SquadExit(2) when the planner stops on max_tokens', async () => {
+    mockSend.mockResolvedValueOnce({
+      text: '# truncated\n',
+      stopReason: 'max_tokens' as const,
+      usage: { inputTokens: 1, outputTokens: 1 },
+    });
+    const intake = path.join(tmp, '.squad/stories/feat/sid/intake.md');
+    await expect(runNewPlan(intake, { yes: true, api: true })).rejects.toSatisfy(
+      (e: unknown) => e instanceof SquadExit && (e as SquadExit).exitCode === 2,
+    );
+    const planDir = path.join(tmp, '.squad/plans/feat');
+    const partial = fs.readdirSync(planDir).find((f) => f.endsWith('.partial.md'));
+    expect(partial).toBeTruthy();
+    const raw = fs.readFileSync(path.join(planDir, partial!), 'utf8');
+    expect(raw).toContain('squad-kit-plan-status: partial');
   });
 
   it('throws when API key is missing', async () => {

@@ -2,13 +2,20 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { confirm, select } from '@inquirer/prompts';
 import * as ui from '../ui/index.js';
+import { SquadExit } from '../core/cli-exit.js';
 import { buildPaths, requireSquadRoot, type SquadPaths } from '../core/paths.js';
-import { loadConfig, type SquadConfig } from '../core/config.js';
+import { DEFAULT_PLANNER_MAX_OUTPUT_TOKENS, loadConfig, type SquadConfig } from '../core/config.js';
 import { readBundledPrompt, readFile } from '../utils/fs.js';
 import { render } from '../core/template.js';
 import { copyToClipboard } from '../utils/clipboard.js';
 import { findStoryByIntake, listStories, type StoryRecord } from '../core/stories.js';
-import { runPlanner } from '../planner/loop.js';
+import { runPlanner, type RunPlannerOutput } from '../planner/loop.js';
+import type { PlannerLimitDecision, PlannerSessionLimitContext } from '../planner/session-limits.js';
+import {
+  printPlannerApiCostNotice,
+  printPlannerLimitExplanation,
+  printPlannerLimitNextSteps,
+} from '../planner/planner-limit-messages.js';
 import { providerFor } from '../planner/providers/index.js';
 import { Budget } from '../planner/budget.js';
 import { buildRepoMap } from '../core/repo-map.js';
@@ -148,11 +155,24 @@ async function confirmOverwrite(story: StoryRecord, interactive: boolean, yes: b
   return go;
 }
 
+function printPlannerRunIncompleteSummary(result: RunPlannerOutput, relPlanFile: string): void {
+  ui.blank();
+  ui.warning('Planning stopped before the model reported a clean completion.');
+  ui.kv('saved', relPlanFile, 8);
+  if (result.userCancelled) ui.kv('stopped', 'you chose not to continue after a limit', 8);
+  if (result.timedOut) ui.kv('timed out', 'yes', 8);
+  if (result.budgetExhausted) ui.kv('read budget', 'exhausted (model was asked to finalise)', 8);
+  if (result.incompleteKind) ui.kv('detail', result.incompleteKind, 8);
+  ui.blank();
+  ui.info('The file uses the `.partial.md` suffix and YAML `squad-kit-plan-status: partial`.');
+  ui.info('Raise limits in `.squad/config.yaml` (`planner.budget`, `planner.maxOutputTokens`) or re-run when ready.');
+}
+
 async function emitViaApi(
   story: StoryRecord,
   paths: SquadPaths,
   config: SquadConfig,
-  _opts: NewPlanOptions,
+  opts: NewPlanOptions,
 ): Promise<void> {
   const planner = config.planner;
   if (!planner?.enabled) {
@@ -181,6 +201,11 @@ async function emitViaApi(
   );
   ui.blank();
 
+  const interactive = !opts.yes && Boolean(process.stdin.isTTY);
+  if (interactive) {
+    printPlannerApiCostNotice();
+  }
+
   const mapSpinner = ui.spinner('building repo map…');
   const repoMap = buildRepoMap(paths.root);
   mapSpinner.succeed(
@@ -201,6 +226,21 @@ async function emitViaApi(
   const startedAt = Date.now();
   const cacheEnabled = planner.cache?.enabled ?? true;
 
+  const decideOnLimit = interactive
+    ? async (ctx: PlannerSessionLimitContext): Promise<PlannerLimitDecision> => {
+        printPlannerLimitExplanation(ctx);
+        const ans = await select({
+          message: 'Continue this planning session? (Continuing sends more API requests and is billed.)',
+          choices: [
+            { name: 'Continue — extend limits for this run', value: 'continue' as const },
+            { name: 'Stop — save partial plan and exit', value: 'cancel' as const },
+          ],
+        });
+        if (ans === 'cancel') printPlannerLimitNextSteps();
+        return ans;
+      }
+    : undefined;
+
   const result = await runPlanner({
     root: paths.root,
     provider,
@@ -209,7 +249,9 @@ async function emitViaApi(
     systemPrompt,
     userPrompt,
     budget,
+    maxOutputTokens: planner.maxOutputTokens,
     cacheEnabled,
+    decideOnLimit,
     onToolCall: (tc, bytes, total) => {
       const p = (tc.input as { path?: string }).path ?? '<unknown>';
       sessionSpinner.current?.succeed(
@@ -237,6 +279,7 @@ async function emitViaApi(
 
   const snap = budget.snapshot();
   const elapsedMs = Date.now() - startedAt;
+  const success = result.finishedNormally && !result.timedOut && !result.userCancelled;
 
   const header = buildMetadataHeader({
     provider: planner.provider,
@@ -247,6 +290,7 @@ async function emitViaApi(
     outputTokens: snap.usage.outputTokens,
     durationMs: elapsedMs,
     costUsd: snap.usage.costUsd,
+    planStatus: success ? undefined : 'partial',
   });
 
   const { planFile, sequenceNumber, overwrote } = writePlanFile({
@@ -255,6 +299,7 @@ async function emitViaApi(
     story,
     planBodyMarkdown: result.planText,
     metadataHeader: header,
+    partial: !success,
   });
 
   try {
@@ -268,9 +313,10 @@ async function emitViaApi(
     // best-effort telemetry
   }
 
+  const relPlan = path.relative(paths.root, planFile);
   ui.blank();
-  ui.summaryBox(' plan generated ', [
-    { key: 'file', value: path.relative(paths.root, planFile) },
+  ui.summaryBox(success ? ' plan generated ' : ' plan saved (incomplete) ', [
+    { key: 'file', value: relPlan },
     { key: 'nn', value: String(sequenceNumber).padStart(2, '0') },
     { key: 'model', value: `${planner.provider}/${model}` },
     { key: 'reads', value: `${snap.reads} files · ${(snap.bytes / 1024).toFixed(1)} KB` },
@@ -279,14 +325,28 @@ async function emitViaApi(
       value: `${snap.usage.inputTokens} in · ${snap.usage.outputTokens} out${snap.usage.costUsd !== undefined ? `  ≈ $${snap.usage.costUsd.toFixed(2)}` : ''}`,
     },
     { key: 'cache', value: formatPlannerCacheLine({ cacheEnabled, stats: result.stats }) },
+    {
+      key: 'max out',
+      value: `${planner.maxOutputTokens ?? DEFAULT_PLANNER_MAX_OUTPUT_TOKENS} tok/req`,
+    },
     { key: 'time', value: `${Math.round(elapsedMs / 1000)}s` },
-    { key: 'action', value: overwrote ? 'overwrote existing plan' : 'new plan' },
+    {
+      key: 'action',
+      value: success
+        ? overwrote
+          ? 'overwrote existing plan'
+          : 'new plan'
+        : 'partial plan (review limits)',
+    },
   ]);
 
-  if (result.budgetExhausted) ui.warning('Budget exhausted mid-plan. Review and, if needed, re-run with a larger budget.');
-  if (result.timedOut) ui.warning('Planner timed out; plan may be incomplete.');
-  if (!result.finishedNormally && !result.budgetExhausted && !result.timedOut) {
-    ui.warning('Planner did not reach end_turn. Inspect the plan carefully.');
+  if (!success) {
+    printPlannerRunIncompleteSummary(result, relPlan);
+    throw new SquadExit(2);
+  }
+
+  if (result.budgetExhausted) {
+    ui.info('Note: file-read budget was reached; the model finalised without further reads.');
   }
 
   ui.blank();
