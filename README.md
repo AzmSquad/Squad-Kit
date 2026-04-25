@@ -16,8 +16,16 @@
 ```
 .squad/
 ├── stories/<feature>/<id>/  # intake + attachments (one per story)
-└── plans/<feature>/         # NN-story-<slug>.md (one per executable plan)
+└── plans/<feature>/         # NN-story-<id>.md (one per executable plan)
 ```
+
+## What's new in 0.4.0
+
+- **`squad new-plan --api` limits UX.** When a budget or cap stops the planner, the CLI asks before more API spend. Stop saves a `*.partial.md` with a clear status flag; exit code **2** when the run did not finish cleanly.
+- **`planner.maxOutputTokens`** in merged config (default **16384** tokens per model round).
+- **Shorter plan filenames** — new plans use the story folder id (`NN-story-<id-slug>.md`), not a long title slug; the overview table still shows the title.
+- **Richer intakes** when `squad new-story` fetches Jira / Azure work items (more fields wired into the template).
+- **`squad list`** reads `<!-- squad-kit: … -->` metadata from the first matching line near the top of a plan file, not only line 1.
 
 ## What's new in 0.3.0
 
@@ -164,7 +172,7 @@ Both aim at spec-driven development. They make different bets.
 | Commands | `init`, `new-story`, `new-plan`, `status`, `doctor`, `migrate`, `upgrade`, `list`, `rm`, `tracker link`, `config` | `constitution`, `specify`, `clarify`, `plan`, `tasks`, `analyze`, `checklist`, `implement` |
 | `/implement` turn starts with | one plan file (~5–15 KB) | 5–7 command templates + cross-artifact reads (~15–25 KB) |
 | Model-tier awareness | Built into the philosophy (planner ≠ executor) | Not prescribed |
-| Generated artifacts per story | `intake.md`, `NN-story-<slug>.md`, overview row | `spec.md`, `plan.md`, `data-model.md`, `contracts/`, `research.md`, `quickstart.md`, `tasks.md` |
+| Generated artifacts per story | `intake.md`, `NN-story-<id>.md`, overview row | `spec.md`, `plan.md`, `data-model.md`, `contracts/`, `research.md`, `quickstart.md`, `tasks.md` |
 | Customization | Prompts ship with the CLI (fork squad-kit to change them). | Template override stack with presets/extensions |
 | Runtime | Node + TypeScript, npm-distributable | Python + `uv` |
 | Scope | Intentionally small | Broad, with safety nets (`clarify`, `analyze`) |
@@ -178,7 +186,7 @@ See [`docs/philosophy.md`](docs/philosophy.md) for the token math and [`docs/vs-
 - **Quality depends on the planning model.** squad-kit has no safety-net commands. Use a strong model for `new-plan`.
 - **Plans are project-coupled.** They reference real file paths. That is the point — do not expect portability between projects.
 - **Global `NN` can collide on parallel branches.** Rebase-and-renumber is the resolution. Documented in [`docs/customization.md`](docs/customization.md).
-- **Anthropic Tier 1 + Opus** shares a tight input-token-per-minute bucket. **0.3.0** enables prompt caching by default so typical multi-turn plans stay viable; see [Prompt caching](docs/customization.md#prompt-caching) in the customization docs.
+- **Anthropic Tier 1 + Opus** shares a tight input-token-per-minute bucket. **0.3.0** added prompt caching (on by default) so typical multi-turn plans stay viable; see [Prompt caching](docs/customization.md#prompt-caching) in the customization docs.
 
 ## Non-goals for 0.2
 
@@ -186,7 +194,7 @@ We ship lean on purpose. Current non-goals:
 
 - OpenAI-compatible generic endpoint (local models, OpenRouter, etc.); [Direct planner (optional)](#direct-planner-optional) covers hosted Anthropic, OpenAI, and Google
 - MCP server
-- `squad implement` (targeted for 0.3)
+- `squad implement` (future release)
 - `/clarify`, `/analyze`, constitution-equivalent
 - Telemetry
 
