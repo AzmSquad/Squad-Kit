@@ -42,7 +42,7 @@ export async function runList(opts: ListOptions): Promise<void> {
     r.id,
     r.hasIntake ? 'yes' : '—',
     r.planFile ?? ui.theme.dim('—'),
-    r.meta?.generatedBy ?? (r.planFile ? 'copy-paste' : ui.theme.dim('—')),
+    r.meta?.generatedBy ?? (r.planFile ? ui.theme.dim('not recorded') : ui.theme.dim('—')),
   ]);
   printTable([header, ...table]);
 }

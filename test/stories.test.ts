@@ -80,6 +80,14 @@ describe('findPlanFor', () => {
     fs.writeFileSync(path.join(planDir, '02-story-my-id.md'), '', 'utf8');
     expect(findPlanFor(paths.plansDir, 'f', 'my-id')).toBe('02-story-my-id.md');
   });
+
+  it('prefers a non-partial plan when both exist for the same story id', () => {
+    const planDir = path.join(paths.plansDir, 'f');
+    fs.mkdirSync(planDir, { recursive: true });
+    fs.writeFileSync(path.join(planDir, '01-story-my-id.partial.md'), '', 'utf8');
+    fs.writeFileSync(path.join(planDir, '02-story-my-id.md'), '', 'utf8');
+    expect(findPlanFor(paths.plansDir, 'f', 'my-id')).toBe('02-story-my-id.md');
+  });
 });
 
 describe('findStoryByIntake', () => {
@@ -119,5 +127,24 @@ describe('readTitleHint', () => {
     const f = path.join(tmp, 'no-hint.md');
     fs.writeFileSync(f, '# Title\n\nBody\n', 'utf8');
     expect(readTitleHint(f)).toBeUndefined();
+  });
+
+  it('reads title from the ## Title fenced block when no CLI hint', () => {
+    const f = path.join(tmp, 'fence-title.md');
+    fs.writeFileSync(
+      f,
+      [
+        '> **Fetched from jira:** …',
+        '',
+        '## Title',
+        '',
+        '```',
+        'From tracker title line',
+        '```',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    expect(readTitleHint(f)).toBe('From tracker title line');
   });
 });
