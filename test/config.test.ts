@@ -74,7 +74,55 @@ describe('config load/save', () => {
         maxCostUsd: 0.5,
       },
       cache: { enabled: true },
+      maxOutputTokens: 16384,
     });
+  });
+
+  it('defaults planner.maxOutputTokens when planner block has no key', () => {
+    fs.writeFileSync(
+      file,
+      [
+        'version: 1',
+        'project: { name: x, projectRoots: ["."] }',
+        'tracker: { type: none }',
+        'naming: { includeTrackerId: false, globalSequence: true }',
+        'agents: []',
+        'planner:',
+        '  enabled: true',
+        '  provider: anthropic',
+        '  mode: auto',
+        '  budget:',
+        '    maxFileReads: 25',
+        '    maxContextBytes: 50000',
+        '    maxDurationSeconds: 180',
+      ].join('\n'),
+      'utf8',
+    );
+    expect(loadConfig(file).planner?.maxOutputTokens).toBe(16384);
+  });
+
+  it('respects planner.maxOutputTokens within bounds', () => {
+    fs.writeFileSync(
+      file,
+      [
+        'version: 1',
+        'project: { name: x, projectRoots: ["."] }',
+        'tracker: { type: none }',
+        'naming: { includeTrackerId: false, globalSequence: true }',
+        'agents: []',
+        'planner:',
+        '  enabled: true',
+        '  provider: anthropic',
+        '  mode: auto',
+        '  maxOutputTokens: 24576',
+        '  budget:',
+        '    maxFileReads: 25',
+        '    maxContextBytes: 50000',
+        '    maxDurationSeconds: 180',
+      ].join('\n'),
+      'utf8',
+    );
+    expect(loadConfig(file).planner?.maxOutputTokens).toBe(24576);
   });
 
   it('throws when planner.budget.maxFileReads is 0 and planner enabled', () => {

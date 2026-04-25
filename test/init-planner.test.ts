@@ -39,6 +39,7 @@ describe('init planner (non-interactive)', () => {
         maxDurationSeconds: 180,
       },
       cache: { enabled: true },
+      maxOutputTokens: 16384,
     });
   });
 

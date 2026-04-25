@@ -5,7 +5,12 @@ import * as ui from '../ui/index.js';
 import { isInteractive } from '../ui/tty.js';
 import { buildPaths, SQUAD_DIR } from '../core/paths.js';
 import { ensureGitignore } from '../core/gitignore.js';
-import { saveConfig, type SquadConfig, type TrackerType } from '../core/config.js';
+import {
+  DEFAULT_PLANNER_MAX_OUTPUT_TOKENS,
+  saveConfig,
+  type SquadConfig,
+  type TrackerType,
+} from '../core/config.js';
 import { modelFor, providerEnvVar, resolveProviderKey } from '../core/planner-models.js';
 import { copyTree, templatesDir, writeFileSafe, readFile } from '../utils/fs.js';
 import { render } from '../core/template.js';
@@ -170,6 +175,8 @@ export async function runInit(opts: InitOptions): Promise<void> {
           maxContextBytes: 50_000,
           maxDurationSeconds: 180,
         },
+        cache: { enabled: true },
+        maxOutputTokens: DEFAULT_PLANNER_MAX_OUTPUT_TOKENS,
       };
     }
   } else {
@@ -197,6 +204,8 @@ export async function runInit(opts: InitOptions): Promise<void> {
           maxContextBytes: 50_000,
           maxDurationSeconds: 180,
         },
+        cache: { enabled: true },
+        maxOutputTokens: DEFAULT_PLANNER_MAX_OUTPUT_TOKENS,
       };
     }
   }

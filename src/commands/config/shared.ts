@@ -1,4 +1,5 @@
 import { input, password } from '@inquirer/prompts';
+import { DEFAULT_PLANNER_MAX_OUTPUT_TOKENS } from '../../core/config.js';
 import { mergeSecrets, type SquadSecrets } from '../../core/secrets.js';
 import type { PlannerConfig } from '../../planner/types.js';
 import type { ProviderName } from '../../planner/types.js';
@@ -60,6 +61,7 @@ export function newPlannerBlock(provider: ProviderName): PlannerConfig {
       maxDurationSeconds: 180,
     },
     cache: { enabled: true },
+    maxOutputTokens: DEFAULT_PLANNER_MAX_OUTPUT_TOKENS,
   };
 }
 

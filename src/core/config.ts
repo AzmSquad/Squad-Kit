@@ -39,6 +39,21 @@ export const DEFAULT_CONFIG: SquadConfig = {
 
 const FORBIDDEN_KEYS = ['apikey', 'api_key', 'token', 'secret', 'credential', 'credentials'];
 
+/** Default max completion tokens per planner API round (was 8192; long Opus plans truncated). */
+export const DEFAULT_PLANNER_MAX_OUTPUT_TOKENS = 16384;
+const MIN_PLANNER_MAX_OUTPUT_TOKENS = 1024;
+const MAX_PLANNER_MAX_OUTPUT_TOKENS = 128_000;
+
+function clampPlannerMaxOut(raw: unknown): number {
+  if (raw === undefined || raw === null) return DEFAULT_PLANNER_MAX_OUTPUT_TOKENS;
+  const n = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number.parseInt(raw, 10) : NaN;
+  if (!Number.isFinite(n) || n < 1) return DEFAULT_PLANNER_MAX_OUTPUT_TOKENS;
+  return Math.min(
+    MAX_PLANNER_MAX_OUTPUT_TOKENS,
+    Math.max(MIN_PLANNER_MAX_OUTPUT_TOKENS, Math.round(n)),
+  );
+}
+
 function rejectSecretsInYaml(node: unknown, configFile: string, path: string[] = []): void {
   if (node === null || typeof node !== 'object') return;
   for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
@@ -75,6 +90,7 @@ function mergePlanner(
     cache: {
       enabled: override.cache?.enabled ?? base?.cache?.enabled ?? true,
     },
+    maxOutputTokens: clampPlannerMaxOut(override.maxOutputTokens ?? base?.maxOutputTokens),
   };
   // Normalise: drop undefined/null entries; remove modelOverride entirely if nothing left (clean YAML).
   if (merged.modelOverride) {

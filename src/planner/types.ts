@@ -32,6 +32,12 @@ export interface PlannerConfig {
    * Only turn this off for debugging or when comparing billed costs with/without caching.
    */
   cache?: PlannerCacheConfig;
+  /**
+   * Max completion tokens per provider request in the planner loop (each model round).
+   * Long plans can hit the API output cap and truncate mid-document. Omitted defaults to 16384.
+   * Anthropic/OpenAI/Google each enforce their own upper bounds.
+   */
+  maxOutputTokens?: number;
 }
 
 export interface PlannerRunStats {
