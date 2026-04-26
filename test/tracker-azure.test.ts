@@ -164,3 +164,100 @@ describe('AzureDevOpsClient', () => {
     expect(res.labels).toEqual([]);
   });
 });
+
+describe('AzureDevOpsClient.searchIssues', () => {
+  it('empty query produces project-scoped WIQL with @project', async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ workItems: [] }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new AzureDevOpsClient({ organization: 'o', project: 'p', pat: 't' });
+    await client.searchIssues('');
+
+    const { init } = firstFetchCall(fetchMock);
+    const body = JSON.parse((init?.body as string) ?? '{}') as { query: string };
+    expect(body.query).toContain('WHERE [System.TeamProject] = @project');
+    expect(body.query).toContain('ORDER BY [System.ChangedDate] DESC');
+    expect(body.query).not.toContain('[System.Title] CONTAINS');
+  });
+
+  it('numeric query produces project-scoped id WIQL', async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ workItems: [] }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new AzureDevOpsClient({ organization: 'o', project: 'p', pat: 't' });
+    await client.searchIssues('42');
+
+    const { init } = firstFetchCall(fetchMock);
+    const body = JSON.parse((init?.body as string) ?? '{}') as { query: string };
+    expect(body.query).toContain('[System.TeamProject] = @project AND [System.Id] = 42');
+  });
+
+  it('free-text query produces project-scoped CONTAINS WIQL with escaped quotes', async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ workItems: [] }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new AzureDevOpsClient({ organization: 'o', project: 'p', pat: 't' });
+    await client.searchIssues("o'malley");
+
+    const { init } = firstFetchCall(fetchMock);
+    const body = JSON.parse((init?.body as string) ?? '{}') as { query: string };
+    expect(body.query).toContain("[System.TeamProject] = @project AND [System.Title] CONTAINS 'o''malley'");
+  });
+
+  it('empty query against real-shaped fixture returns rows', async () => {
+    const fetchMock = vi.fn(async (url: string | URL) => {
+      const u = String(url);
+      if (u.includes('/wiql')) {
+        return new Response(JSON.stringify({ workItems: [{ id: 1 }, { id: 2 }] }), { status: 200 });
+      }
+      if (u.includes('/workitems?ids=')) {
+        return new Response(
+          JSON.stringify({
+            value: [
+              {
+                id: 1,
+                fields: { 'System.Title': 'First', 'System.WorkItemType': 'Bug', 'System.State': 'New' },
+              },
+              {
+                id: 2,
+                fields: { 'System.Title': 'Second', 'System.WorkItemType': 'Task', 'System.State': 'Open' },
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response('not found', { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new AzureDevOpsClient({ organization: 'acme', project: 'web', pat: 't' });
+    const rows = await client.searchIssues('');
+
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.id).toBe('1');
+    expect(rows[0]!.title).toBe('First');
+    expect(rows[0]!.url).toBe('https://dev.azure.com/acme/web/_workitems/edit/1');
+    expect(rows[1]!.id).toBe('2');
+    expect(rows[1]!.title).toBe('Second');
+  });
+
+  it('HTTP 400 maps to TrackerError other with actionable detail', async () => {
+    const fetchMock = vi.fn(async () => new Response('', { status: 400 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new AzureDevOpsClient({ organization: 'acme', project: 'web', pat: 't' });
+    try {
+      await client.searchIssues('');
+      expect.fail('expected throw');
+    } catch (e) {
+      expect(e).toBeInstanceOf(TrackerError);
+      const err = e as TrackerError;
+      expect(err.kind).toBe('other');
+      expect(err.statusCode).toBe(400);
+      expect(err.message).toContain('acme');
+      expect(err.message).toContain('web');
+    }
+  });
+});

@@ -69,6 +69,7 @@ export function TrackerPage() {
         if (j.ok && j.results) setRows(j.results);
         else {
           setRows([]);
+          // TrackerError comes through as ok=false with detail
           if (j.detail) setErr(j.detail);
         }
       } catch (e) {

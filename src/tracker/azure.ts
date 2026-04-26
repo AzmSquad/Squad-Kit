@@ -51,14 +51,24 @@ export class AzureDevOpsClient implements TrackerClient {
     const limit = Math.min(50, Math.max(1, opts?.limit ?? 25));
     const q = query.trim();
     let wiql: string;
-    if (/^\d+$/.test(q)) {
-      wiql = `SELECT [System.Id] FROM WorkItems WHERE [System.Id] = ${q}`;
-    } else if (q.length === 0) {
-      wiql = 'SELECT [System.Id] FROM WorkItems ORDER BY [System.ChangedDate] DESC';
+    if (q.length === 0) {
+      wiql =
+        'SELECT [System.Id] FROM WorkItems ' +
+        'WHERE [System.TeamProject] = @project ' +
+        'ORDER BY [System.ChangedDate] DESC';
+    } else if (/^\d+$/.test(q)) {
+      wiql =
+        'SELECT [System.Id] FROM WorkItems ' +
+        `WHERE [System.TeamProject] = @project AND [System.Id] = ${q}`;
     } else {
       const esc = q.replace(/'/g, "''");
-      wiql = `SELECT [System.Id] FROM WorkItems WHERE [System.Title] CONTAINS STRING '${esc}' ORDER BY [System.ChangedDate] DESC`;
+      wiql =
+        'SELECT [System.Id] FROM WorkItems ' +
+        `WHERE [System.TeamProject] = @project AND [System.Title] CONTAINS '${esc}' ` +
+        'ORDER BY [System.ChangedDate] DESC';
     }
+    // Project-scoped WIQL endpoint. We also include `[System.TeamProject] = @project`
+    // in the WHERE clause because Azure DevOps rejects unbounded WIQL with HTTP 400.
     const wiqlUrl = `${this.baseUrl}/wiql?api-version=${this.apiVersion}`;
     let wiqlRes: Response;
     try {
@@ -164,6 +174,17 @@ export class AzureDevOpsClient implements TrackerClient {
           : `Azure DevOps work item "${id}" not found in ${this.cfg.organization}/${this.cfg.project} (HTTP 404). ` +
               `Check the id and the organization/project in .squad/config.yaml.`,
         'not-found',
+        status,
+      );
+    }
+    if (status === 400) {
+      return new TrackerError(
+        id === 'search'
+          ? `Azure DevOps rejected the search query (HTTP 400). ` +
+              `This usually means the WIQL is not scoped to a team project, ` +
+              `or the configured organization/project (${this.cfg.organization}/${this.cfg.project}) is wrong.`
+          : `Azure DevOps rejected the request (HTTP 400).`,
+        'other',
         status,
       );
     }
