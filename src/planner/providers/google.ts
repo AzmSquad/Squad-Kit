@@ -57,6 +57,7 @@ export async function callGoogle(req: ProviderRequest): Promise<ProviderResponse
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
+    signal: req.abort,
   });
 
   if (!res.ok) {

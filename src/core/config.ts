@@ -120,8 +120,10 @@ function validateModelOverride(mo: PlannerModelOverride | undefined, configFile:
   }
 }
 
-export function loadConfig(configFile: string): SquadConfig {
-  const raw = fs.readFileSync(configFile, 'utf8');
+/**
+ * Parse and validate config YAML the same way as reading from disk. Used by `loadConfig` and `saveConfig` (round-trip check).
+ */
+export function parseConfig(raw: string, configFile: string): SquadConfig {
   let parsed: Partial<SquadConfig> | undefined;
   try {
     parsed = yaml.load(raw) as Partial<SquadConfig> | undefined;
@@ -181,12 +183,19 @@ export function loadConfig(configFile: string): SquadConfig {
   return merged;
 }
 
+export function loadConfig(configFile: string): SquadConfig {
+  const raw = fs.readFileSync(configFile, 'utf8');
+  return parseConfig(raw, configFile);
+}
+
 export function serializeConfig(config: SquadConfig): string {
   return yaml.dump(config, { lineWidth: 100, noRefs: true, sortKeys: false });
 }
 
 export function saveConfig(configFile: string, config: SquadConfig): void {
-  fs.writeFileSync(configFile, serializeConfig(config), 'utf8');
+  const body = serializeConfig(config);
+  parseConfig(body, configFile);
+  fs.writeFileSync(configFile, body, 'utf8');
 }
 
 function mergeConfig(base: SquadConfig, override: Partial<SquadConfig>): SquadConfig {

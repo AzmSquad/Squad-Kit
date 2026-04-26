@@ -64,6 +64,7 @@ export async function callOpenAI(req: ProviderRequest): Promise<ProviderResponse
       'content-type': 'application/json',
     },
     body: JSON.stringify(body),
+    signal: req.abort,
   });
 
   if (!res.ok) {

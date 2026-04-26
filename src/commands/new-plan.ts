@@ -5,8 +5,7 @@ import * as ui from '../ui/index.js';
 import { SquadExit } from '../core/cli-exit.js';
 import { buildPaths, requireSquadRoot, type SquadPaths } from '../core/paths.js';
 import { DEFAULT_PLANNER_MAX_OUTPUT_TOKENS, loadConfig, type SquadConfig } from '../core/config.js';
-import { readBundledPrompt, readFile } from '../utils/fs.js';
-import { render } from '../core/template.js';
+import { readFile } from '../utils/fs.js';
 import { copyToClipboard } from '../utils/clipboard.js';
 import { findStoryByIntake, listStories, type StoryRecord } from '../core/stories.js';
 import { runPlanner, type RunPlannerOutput } from '../planner/loop.js';
@@ -21,9 +20,12 @@ import { Budget } from '../planner/budget.js';
 import { buildRepoMap } from '../core/repo-map.js';
 import { composeSystemPrompt, composeUserPrompt } from '../planner/system-prompt.js';
 import { writePlanFile, buildMetadataHeader } from '../planner/writer.js';
+import { buildCopyPlanPromptMarkdown } from '../core/copy-plan-prompt.js';
 import { modelFor, providerEnvVar, readProviderKey } from '../core/planner-models.js';
 import { writeLastRun } from '../core/last-run.js';
+import { appendRun, newRunId } from '../core/runs.js';
 import { formatPlannerCacheLine } from '../ui/planner-cache-summary.js';
+import { PlannerEventBus } from '../planner/events.js';
 
 export interface NewPlanOptions {
   /** Default true; `--no-clipboard` sets false (copy-paste mode only). */
@@ -225,6 +227,33 @@ async function emitViaApi(
   const sessionSpinner: { current: ReturnType<typeof ui.spinner> | null } = { current: null };
   const startedAt = Date.now();
   const cacheEnabled = planner.cache?.enabled ?? true;
+  const runId = newRunId();
+  const bus = new PlannerEventBus();
+  const unsubscribe = bus.subscribe((e) => {
+    switch (e.kind) {
+      case 'tool_call': {
+        const p = (e.toolCall.input as { path?: string }).path ?? '<unknown>';
+        sessionSpinner.current?.succeed(
+          `read ${p}  (${(e.bytesLoaded / 1024).toFixed(1)} KB · ${(e.totalBytes / 1024).toFixed(1)} KB / ${(planner.budget.maxContextBytes / 1024).toFixed(0)} KB)`,
+        );
+        sessionSpinner.current = ui.spinner('reading next file…');
+        break;
+      }
+      case 'assistant_text':
+        sessionSpinner.current?.succeed('planner thinking complete (this chunk)');
+        sessionSpinner.current = ui.spinner('thinking…');
+        break;
+      case 'rate_limit':
+        sessionSpinner.current?.stop();
+        ui.warning(`${planner.provider} rate limit hit — retrying in ${e.waitSec}s`);
+        sessionSpinner.current = ui.spinner('waiting for rate limit to reset…');
+        break;
+      case 'usage':
+        break;
+      default:
+        break;
+    }
+  });
 
   const decideOnLimit = interactive
     ? async (ctx: PlannerSessionLimitContext): Promise<PlannerLimitDecision> => {
@@ -241,35 +270,26 @@ async function emitViaApi(
       }
     : undefined;
 
-  const result = await runPlanner({
-    root: paths.root,
-    provider,
-    model,
-    apiKey,
-    systemPrompt,
-    userPrompt,
-    budget,
-    maxOutputTokens: planner.maxOutputTokens,
-    cacheEnabled,
-    decideOnLimit,
-    onToolCall: (tc, bytes, total) => {
-      const p = (tc.input as { path?: string }).path ?? '<unknown>';
-      sessionSpinner.current?.succeed(
-        `read ${p}  (${(bytes / 1024).toFixed(1)} KB · ${(total / 1024).toFixed(1)} KB / ${(planner.budget.maxContextBytes / 1024).toFixed(0)} KB)`,
-      );
-      sessionSpinner.current = ui.spinner(`reading next file…`);
-    },
-    onAssistantText: () => {
-      sessionSpinner.current?.succeed('planner thinking complete (this chunk)');
-      sessionSpinner.current = ui.spinner('thinking…');
-    },
-    onRateLimit: (waitSec) => {
-      sessionSpinner.current?.stop();
-      ui.warning(`${planner.provider} rate limit hit — retrying in ${waitSec}s`);
-      sessionSpinner.current = ui.spinner('waiting for rate limit to reset…');
-    },
-  });
-  sessionSpinner.current?.stop();
+  let result: RunPlannerOutput;
+  try {
+    result = await runPlanner({
+      root: paths.root,
+      provider,
+      model,
+      apiKey,
+      systemPrompt,
+      userPrompt,
+      budget,
+      maxOutputTokens: planner.maxOutputTokens,
+      cacheEnabled,
+      decideOnLimit,
+      events: bus,
+      runId,
+    });
+  } finally {
+    unsubscribe();
+    sessionSpinner.current?.stop();
+  }
 
   if (!result.planText.trim()) {
     throw new Error(
@@ -302,6 +322,8 @@ async function emitViaApi(
     partial: !success,
   });
 
+  const relPlan = path.relative(paths.root, planFile);
+
   try {
     await writeLastRun(paths, {
       stats: result.stats,
@@ -309,11 +331,24 @@ async function emitViaApi(
       provider: planner.provider,
       model,
     });
+    await appendRun(paths, {
+      runId,
+      provider: planner.provider,
+      model,
+      feature: story.feature,
+      storyId: story.id,
+      startedAt: new Date(startedAt).toISOString(),
+      completedAt: new Date().toISOString(),
+      success,
+      partial: !success,
+      planFile: relPlan,
+      stats: result.stats,
+      cacheEnabled,
+      durationMs: elapsedMs,
+    });
   } catch {
     // best-effort telemetry
   }
-
-  const relPlan = path.relative(paths.root, planFile);
   ui.blank();
   ui.summaryBox(success ? ' plan generated ' : ' plan saved (incomplete) ', [
     { key: 'file', value: relPlan },
@@ -360,14 +395,7 @@ async function emitCopyPrompt(
   clipboard: boolean,
 ): Promise<void> {
   const intakeContent = readFile(story.intakePath);
-  const metaPromptTemplate = readBundledPrompt('generate-plan.md');
-
-  const composed = render(metaPromptTemplate, {
-    projectRoots: (config.project.projectRoots ?? ['.']).join(', '),
-    primaryLanguage: config.project.primaryLanguage ?? '',
-    trackerType: config.tracker.type,
-    intakeContent,
-  });
+  const composed = buildCopyPlanPromptMarkdown(config, intakeContent);
 
   const promptFile = path.join(paths.squadDir, '.last-copy-prompt.md');
   fs.writeFileSync(promptFile, composed, 'utf8');

@@ -6,6 +6,7 @@ export const SQUAD_ATTACHMENTS_PATTERN = '.squad/stories/**/attachments/';
 export const SQUAD_TRASH_PATTERN = '.squad/.trash/';
 export const SQUAD_LAST_RUN_PATTERN = '.squad/.last-run.json';
 export const SQUAD_LAST_COPY_PROMPT_PATTERN = '.squad/.last-copy-prompt.md';
+export const SQUAD_RUNS_PATTERN = '.squad/runs/';
 
 const MANAGED_BLOCK_HEADER = '# Managed by squad-kit — do not edit this block';
 const MANAGED_BLOCK_FOOTER = '# End squad-kit block';
@@ -28,6 +29,7 @@ export function ensureGitignore(repoRoot: string): boolean {
     SQUAD_TRASH_PATTERN,
     SQUAD_LAST_RUN_PATTERN,
     SQUAD_LAST_COPY_PROMPT_PATTERN,
+    SQUAD_RUNS_PATTERN,
   ];
 
   const allPresent = requiredPatterns.every((p) => text.includes(p));

@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { findSquadRoot, buildPaths } from './paths.js';
+import { findSquadRoot, buildPaths, type SquadPaths } from './paths.js';
 import { loadSecrets, type SquadSecrets } from './secrets.js';
 import type { PlannerModelOverride, PlannerPhase, ProviderName } from '../planner/types.js';
 
@@ -82,6 +82,24 @@ export function resolveProviderKey(provider: ProviderName): CredentialSource | u
 /** Backwards-compatible wrapper; returns only the value. Existing callers continue to work. */
 export function readProviderKey(provider: ProviderName): string | undefined {
   return resolveProviderKey(provider)?.value;
+}
+
+/**
+ * Resolve planner API key for a known workspace (e.g. console server) without relying on
+ * `process.cwd()` / `findSquadRoot()`.
+ */
+export function readProviderKeyForPaths(paths: SquadPaths, provider: ProviderName): string | undefined {
+  const envVar = providerEnvVar(provider);
+  const envValue = process.env[envVar];
+  if (envValue) return envValue;
+  const fallback = process.env.SQUAD_PLANNER_API_KEY;
+  if (fallback) return fallback;
+  if (fs.existsSync(paths.secretsFile)) {
+    const secrets = loadSecrets(paths.secretsFile);
+    const fromFile = secrets.planner?.[provider];
+    if (fromFile) return fromFile;
+  }
+  return undefined;
 }
 
 export interface TrackerCredentialLookup {

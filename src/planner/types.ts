@@ -92,6 +92,8 @@ export interface ProviderRequest {
   turns: ChatTurn[];
   maxOutputTokens?: number;
   apiKey: string;
+  /** When set, passed to provider `fetch` for cancellation mid-request. */
+  abort?: AbortSignal;
   /**
    * When `false`, Anthropic requests omit `cache_control` and use a string `system` (legacy
    * wire shape). Omitted or `true` enables prompt-cache markers. Other providers ignore this.

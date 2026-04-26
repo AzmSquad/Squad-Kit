@@ -16,12 +16,14 @@ import { rateLimitMessage } from './provider-errors.js';
 import { prefixOf } from './providers/prefix.js';
 import * as ui from '../ui/index.js';
 import { DEFAULT_PLANNER_MAX_OUTPUT_TOKENS } from '../core/config.js';
+import { newRunId } from '../core/runs.js';
 import {
   DEFAULT_PLANNER_MAX_ITERATIONS,
   PLANNER_MARKDOWN_CONTINUATION_USER,
   type PlannerLimitDecision,
   type PlannerSessionLimitContext,
 } from './session-limits.js';
+import { PlannerEventBus } from './events.js';
 
 /**
  * Upper bound on the auto-retry wait. Chosen to cover the common Anthropic Tier 1 /
@@ -31,6 +33,28 @@ import {
 const MAX_RATE_LIMIT_RETRY_SEC = 90;
 
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+function isAbortError(e: unknown): boolean {
+  return e instanceof Error && e.name === 'AbortError';
+}
+
+async function sleepWithAbort(
+  ms: number,
+  sleepFn: (n: number) => Promise<void>,
+  abort: AbortSignal | undefined,
+): Promise<void> {
+  if (!abort) {
+    await sleepFn(ms);
+    return;
+  }
+  if (abort.aborted) throw new DOMException('Aborted', 'AbortError');
+  await Promise.race([
+    sleepFn(ms),
+    new Promise<never>((_, reject) => {
+      abort.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+    }),
+  ]);
+}
 
 export interface RunPlannerInput {
   root: string;
@@ -58,6 +82,12 @@ export interface RunPlannerInput {
    * other hard stops return immediately.
    */
   decideOnLimit?: (ctx: PlannerSessionLimitContext) => Promise<PlannerLimitDecision>;
+  /** Optional event bus the caller has set up subscribers on. */
+  events?: PlannerEventBus;
+  /** Stable id for this run; surfaces in every event for correlation. */
+  runId?: string;
+  /** Optional cancel signal; loop checks between turns and inside long sleeps. */
+  abort?: AbortSignal;
 }
 
 /** Why the loop stopped when `finishedNormally` is false (non-error, non-budget, non-timeout). */
@@ -120,8 +150,68 @@ function extendAllSessionLimits(
   maxOut.current += baseMaxOut;
 }
 
+function recordUsageAndEmit(
+  bus: PlannerEventBus,
+  input: RunPlannerInput,
+  runId: string,
+  turn: number,
+  usage: Usage,
+): void {
+  input.budget.recordUsage(usage);
+  input.onUsage?.(usage);
+  bus.emit({ kind: 'usage', runId, turn, usage });
+  const u = input.budget.snapshot().usage;
+  const cacheRead = u.cacheReadTokens ?? 0;
+  const cacheCreate = u.cacheCreationTokens ?? 0;
+  if (cacheRead > 0 || cacheCreate > 0) {
+    const inTok = u.inputTokens;
+    const totalInput = inTok + cacheRead;
+    const cacheHitRatio = totalInput === 0 ? 0 : Math.round((cacheRead / totalInput) * 100) / 100;
+    bus.emit({
+      kind: 'cache_summary',
+      runId,
+      turn,
+      cacheHitRatio,
+      cacheReadTokens: cacheRead,
+      cacheCreationTokens: cacheCreate,
+    });
+  }
+}
+
+function cancelledOutput(
+  input: RunPlannerInput,
+  bus: PlannerEventBus,
+  runId: string,
+  accumulatedText: string,
+  budgetExhausted: boolean,
+  iterations: number,
+  runStartedAt: number,
+): RunPlannerOutput {
+  bus.emit({ kind: 'cancelled', runId });
+  return {
+    planText: accumulatedText,
+    budgetExhausted,
+    timedOut: false,
+    finishedNormally: false,
+    iterations,
+    stats: buildPlannerRunStats(input.budget, iterations, runStartedAt),
+    userCancelled: true,
+  };
+}
+
 export async function runPlanner(input: RunPlannerInput): Promise<RunPlannerOutput> {
   const runStartedAt = Date.now();
+  const bus = input.events ?? new PlannerEventBus();
+  const runId = input.runId ?? newRunId();
+  const cacheEnabled = input.cacheEnabled ?? true;
+  bus.emit({
+    kind: 'started',
+    runId,
+    provider: input.provider.name,
+    model: input.model,
+    cacheEnabled,
+  });
+
   const baseMaxIter = input.maxIterations ?? DEFAULT_PLANNER_MAX_ITERATIONS;
   const maxIter = { current: baseMaxIter };
   const baseMaxOut = input.maxOutputTokens ?? DEFAULT_PLANNER_MAX_OUTPUT_TOKENS;
@@ -133,6 +223,7 @@ export async function runPlanner(input: RunPlannerInput): Promise<RunPlannerOutp
   let finishedNormally = false;
   let prevRequestPrefix: string | undefined;
   const decide = input.decideOnLimit;
+  const sleepFn = input.sleep ?? defaultSleep;
 
   const limitCtx = (kind: PlannerSessionLimitContext['kind']): PlannerSessionLimitContext => ({
     kind,
@@ -143,6 +234,10 @@ export async function runPlanner(input: RunPlannerInput): Promise<RunPlannerOutp
   });
 
   for (;;) {
+    if (input.abort?.aborted) {
+      return cancelledOutput(input, bus, runId, accumulatedText, budgetExhausted, iterations, runStartedAt);
+    }
+
     if (iterations >= maxIter.current) {
       if (decide) {
         const d = await decide(limitCtx('max_iterations'));
@@ -231,6 +326,10 @@ export async function runPlanner(input: RunPlannerInput): Promise<RunPlannerOutp
       };
     }
 
+    if (iterations >= 2) {
+      bus.emit({ kind: 'turn_started', runId, turn: iterations });
+    }
+
     const request: ProviderRequest = {
       systemPrompt: input.systemPrompt,
       model: input.model,
@@ -238,8 +337,11 @@ export async function runPlanner(input: RunPlannerInput): Promise<RunPlannerOutp
       turns,
       apiKey: input.apiKey,
       maxOutputTokens: maxOut.current,
-      cacheEnabled: input.cacheEnabled ?? true,
+      cacheEnabled,
+      abort: input.abort,
     };
+
+    bus.emit({ kind: 'request_sent', runId, turn: iterations });
 
     if (
       process.env.NODE_ENV !== 'production' &&
@@ -255,10 +357,18 @@ export async function runPlanner(input: RunPlannerInput): Promise<RunPlannerOutp
       }
     }
 
-    let response = await input.provider.send(request);
+    let response: ProviderResponse;
+    try {
+      response = await input.provider.send(request);
+    } catch (e) {
+      if (isAbortError(e)) {
+        return cancelledOutput(input, bus, runId, accumulatedText, budgetExhausted, iterations, runStartedAt);
+      }
+      throw e;
+    }
+
     if (response.usage) {
-      input.budget.recordUsage(response.usage);
-      input.onUsage?.(response.usage);
+      recordUsageAndEmit(bus, input, runId, iterations, response.usage);
     }
 
     let retriedRateLimit = false;
@@ -270,11 +380,25 @@ export async function runPlanner(input: RunPlannerInput): Promise<RunPlannerOutp
       } else {
         const waitSec = Math.min(asked ?? 10, MAX_RATE_LIMIT_RETRY_SEC);
         input.onRateLimit?.(waitSec);
-        await (input.sleep ?? defaultSleep)(waitSec * 1000);
-        response = await input.provider.send(request);
+        bus.emit({ kind: 'rate_limit', runId, turn: iterations, waitSec });
+        try {
+          await sleepWithAbort(waitSec * 1000, sleepFn, input.abort);
+        } catch (e) {
+          if (isAbortError(e)) {
+            return cancelledOutput(input, bus, runId, accumulatedText, budgetExhausted, iterations, runStartedAt);
+          }
+          throw e;
+        }
+        try {
+          response = await input.provider.send(request);
+        } catch (e) {
+          if (isAbortError(e)) {
+            return cancelledOutput(input, bus, runId, accumulatedText, budgetExhausted, iterations, runStartedAt);
+          }
+          throw e;
+        }
         if (response.usage) {
-          input.budget.recordUsage(response.usage);
-          input.onUsage?.(response.usage);
+          recordUsageAndEmit(bus, input, runId, iterations, response.usage);
         }
         retriedRateLimit = true;
       }
@@ -289,9 +413,11 @@ export async function runPlanner(input: RunPlannerInput): Promise<RunPlannerOutp
     if (response.text) {
       accumulatedText += response.text;
       input.onAssistantText?.(response.text);
+      bus.emit({ kind: 'assistant_text', runId, turn: iterations, delta: response.text });
     }
 
     if (response.stopReason === 'max_tokens' && !response.toolCalls?.length) {
+      bus.emit({ kind: 'turn_complete', runId, turn: iterations, stopReason: response.stopReason });
       if (decide) {
         const d = await decide(limitCtx('max_output_tokens'));
         if (d === 'cancel') {
@@ -324,6 +450,7 @@ export async function runPlanner(input: RunPlannerInput): Promise<RunPlannerOutp
     }
 
     if (response.stopReason === 'end_turn' || !response.toolCalls?.length) {
+      bus.emit({ kind: 'turn_complete', runId, turn: iterations, stopReason: response.stopReason });
       finishedNormally = true;
       return {
         planText: accumulatedText,
@@ -352,7 +479,16 @@ export async function runPlanner(input: RunPlannerInput): Promise<RunPlannerOutp
       const before = input.budget.snapshot().bytes;
       let result = readFileTool(input.root, input.budget, tc.input);
       const after = input.budget.snapshot().bytes;
-      input.onToolCall?.(tc, after - before, after);
+      const bytesLoaded = after - before;
+      input.onToolCall?.(tc, bytesLoaded, after);
+      bus.emit({
+        kind: 'tool_call',
+        runId,
+        turn: iterations,
+        toolCall: tc,
+        bytesLoaded,
+        totalBytes: after,
+      });
       if (readBudgetishError(result)) {
         if (decide) {
           const d = await decide(limitCtx('file_or_context_reads'));
@@ -400,6 +536,8 @@ export async function runPlanner(input: RunPlannerInput): Promise<RunPlannerOutp
           'Do not call any more tools. Output the complete plan markdown now.',
       });
     }
+
+    bus.emit({ kind: 'turn_complete', runId, turn: iterations, stopReason: response.stopReason });
   }
 }
 

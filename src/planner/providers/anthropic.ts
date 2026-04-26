@@ -93,6 +93,7 @@ export async function callAnthropic(req: ProviderRequest): Promise<ProviderRespo
       'content-type': 'application/json',
     },
     body: JSON.stringify(body),
+    signal: req.abort,
   });
 
   if (!res.ok) {

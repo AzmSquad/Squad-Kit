@@ -22,6 +22,7 @@ const BLOCK_LINES = [
   '.squad/secrets.yaml',
   '.squad/stories/**/attachments/',
   '.squad/.trash/',
+  '.squad/runs/',
   '# End squad-kit block',
 ];
 
