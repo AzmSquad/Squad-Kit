@@ -30,9 +30,17 @@ export interface DownloadedAttachment {
   skipReason?: string; // present when outcome starts with 'skipped-'
 }
 
+/** Subset of issue fields for search result lists. */
+export type SearchIssueRow = Pick<FetchIssueResult, 'id' | 'title' | 'type' | 'status' | 'url'>;
+
 export interface TrackerClient {
   readonly name: TrackerName;
   fetchIssue(id: string): Promise<FetchIssueResult>;
+  /**
+   * Find issues by id, free-text, or recent (empty query → recently updated).
+   * Default limit 25.
+   */
+  searchIssues(query: string, opts?: { limit?: number }): Promise<SearchIssueRow[]>;
   /**
    * Authenticated per-attachment download. Caller passes the directory;
    * client returns one record per attachment describing the outcome.

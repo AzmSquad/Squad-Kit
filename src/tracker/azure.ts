@@ -3,6 +3,7 @@ import type {
   DownloadOptions,
   DownloadedAttachment,
   FetchIssueResult,
+  SearchIssueRow,
   TrackerClient,
 } from './types.js';
 import { TrackerError } from './types.js';
@@ -44,6 +45,56 @@ export class AzureDevOpsClient implements TrackerClient {
     this.webBase = `https://dev.azure.com/${encodeURIComponent(cfg.organization)}/${encodeURIComponent(cfg.project)}/_workitems/edit`;
     const basic = Buffer.from(`:${cfg.pat}`).toString('base64');
     this.authHeader = `Basic ${basic}`;
+  }
+
+  async searchIssues(query: string, opts?: { limit?: number }): Promise<SearchIssueRow[]> {
+    const limit = Math.min(50, Math.max(1, opts?.limit ?? 25));
+    const q = query.trim();
+    let wiql: string;
+    if (/^\d+$/.test(q)) {
+      wiql = `SELECT [System.Id] FROM WorkItems WHERE [System.Id] = ${q}`;
+    } else if (q.length === 0) {
+      wiql = 'SELECT [System.Id] FROM WorkItems ORDER BY [System.ChangedDate] DESC';
+    } else {
+      const esc = q.replace(/'/g, "''");
+      wiql = `SELECT [System.Id] FROM WorkItems WHERE [System.Title] CONTAINS STRING '${esc}' ORDER BY [System.ChangedDate] DESC`;
+    }
+    const wiqlUrl = `${this.baseUrl}/wiql?api-version=${this.apiVersion}`;
+    let wiqlRes: Response;
+    try {
+      wiqlRes = await fetch(wiqlUrl, {
+        method: 'POST',
+        headers: { ...this.headers(), 'content-type': 'application/json' },
+        body: JSON.stringify({ query: `${wiql}` }),
+      });
+    } catch (err) {
+      throw new TrackerError(`Azure DevOps search failed: ${(err as Error).message}`, 'network');
+    }
+    if (!wiqlRes.ok) throw this.mapHttpError(wiqlRes.status, 'search');
+    const wiqlBody = (await wiqlRes.json()) as { workItems?: { id: number }[] };
+    const ids = (wiqlBody.workItems ?? []).slice(0, limit).map((w) => w.id);
+    if (ids.length === 0) return [];
+    const batchUrl = `${this.baseUrl}/workitems?ids=${ids.map(String).join(',')}&$expand=all&api-version=${this.apiVersion}`;
+    let batchRes: Response;
+    try {
+      batchRes = await fetch(batchUrl, { headers: this.headers() });
+    } catch (err) {
+      throw new TrackerError(`Azure DevOps work items fetch failed: ${(err as Error).message}`, 'network');
+    }
+    if (!batchRes.ok) throw this.mapHttpError(batchRes.status, 'search');
+    const batchBody = (await batchRes.json()) as { value?: AzureWorkItemPayload[] };
+    const value = batchBody.value ?? [];
+    return value.map((body) => {
+      const id = String(body.id ?? '');
+      const fields = body.fields ?? {};
+      return {
+        id,
+        title: fields['System.Title'] ?? '(no title)',
+        type: fields['System.WorkItemType'],
+        status: fields['System.State'],
+        url: `${this.webBase}/${id}`,
+      };
+    });
   }
 
   async fetchIssue(id: string): Promise<FetchIssueResult> {
@@ -108,8 +159,10 @@ export class AzureDevOpsClient implements TrackerClient {
     }
     if (status === 404) {
       return new TrackerError(
-        `Azure DevOps work item "${id}" not found in ${this.cfg.organization}/${this.cfg.project} (HTTP 404). ` +
-          `Check the id and the organization/project in .squad/config.yaml.`,
+        id === 'search'
+          ? `Azure DevOps search failed (HTTP 404) in ${this.cfg.organization}/${this.cfg.project}.`
+          : `Azure DevOps work item "${id}" not found in ${this.cfg.organization}/${this.cfg.project} (HTTP 404). ` +
+              `Check the id and the organization/project in .squad/config.yaml.`,
         'not-found',
         status,
       );
@@ -117,7 +170,11 @@ export class AzureDevOpsClient implements TrackerClient {
     if (status === 429) {
       return new TrackerError(`Azure DevOps rate limit hit (HTTP 429). Wait a minute and retry.`, 'rate-limited', status);
     }
-    return new TrackerError(`Azure DevOps request failed (HTTP ${status}).`, 'other', status);
+    return new TrackerError(
+      id === 'search' ? `Azure DevOps search failed (HTTP ${status}).` : `Azure DevOps request failed (HTTP ${status}).`,
+      'other',
+      status,
+    );
   }
 }
 

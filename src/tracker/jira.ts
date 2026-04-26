@@ -3,6 +3,7 @@ import type {
   DownloadOptions,
   DownloadedAttachment,
   FetchIssueResult,
+  SearchIssueRow,
   TrackerClient,
 } from './types.js';
 import { TrackerError } from './types.js';
@@ -70,6 +71,43 @@ export class JiraClient implements TrackerClient {
     };
   }
 
+  async searchIssues(query: string, opts?: { limit?: number }): Promise<SearchIssueRow[]> {
+    const limit = Math.min(50, Math.max(1, opts?.limit ?? 25));
+    const q = query.trim();
+    let jql: string;
+    if (/^[A-Z][A-Z0-9_]+-\d+$/i.test(q)) {
+      jql = `issuekey = "${q.toUpperCase()}"`;
+    } else if (q.length === 0) {
+      jql = 'order by updated DESC';
+    } else {
+      const esc = q.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      jql = `text ~ "${esc}" order by updated DESC`;
+    }
+    const url =
+      `${this.baseUrl}/rest/api/3/search?jql=${encodeURIComponent(jql)}` +
+      `&fields=summary,status,issuetype&maxResults=${limit}`;
+    let res: Response;
+    try {
+      res = await fetch(url, { headers: this.headers() });
+    } catch (err) {
+      throw new TrackerError(`Jira search failed: ${(err as Error).message}`, 'network');
+    }
+    if (!res.ok) throw this.mapHttpError(res.status, 'search');
+    const body = (await res.json()) as { issues?: JiraSearchIssue[] };
+    const issues = body.issues ?? [];
+    return issues.map((it) => {
+      const key = it.key ?? '';
+      const f = it.fields ?? {};
+      return {
+        id: key,
+        title: f.summary ?? '(no title)',
+        type: f.issuetype?.name,
+        status: f.status?.name,
+        url: `${this.baseUrl}/browse/${key}`,
+      };
+    });
+  }
+
   async downloadAttachments(
     refs: AttachmentRef[],
     targetDir: string,
@@ -95,7 +133,9 @@ export class JiraClient implements TrackerClient {
     }
     if (status === 404) {
       return new TrackerError(
-        `Jira issue "${id}" not found on ${this.cfg.host} (HTTP 404). Check the id and your workspace host.`,
+        id === 'search'
+          ? `Jira search not found (HTTP 404) on ${this.cfg.host}.`
+          : `Jira issue "${id}" not found on ${this.cfg.host} (HTTP 404). Check the id and your workspace host.`,
         'not-found',
         status,
       );
@@ -103,8 +143,21 @@ export class JiraClient implements TrackerClient {
     if (status === 429) {
       return new TrackerError(`Jira rate limit hit (HTTP 429). Wait a minute and retry.`, 'rate-limited', status);
     }
-    return new TrackerError(`Jira request failed (HTTP ${status}).`, 'other', status);
+    return new TrackerError(
+      id === 'search' ? `Jira search failed (HTTP ${status}).` : `Jira request failed (HTTP ${status}).`,
+      'other',
+      status,
+    );
   }
+}
+
+interface JiraSearchIssue {
+  key?: string;
+  fields?: {
+    summary?: string;
+    issuetype?: { name?: string };
+    status?: { name?: string };
+  };
 }
 
 // ---- Local types for the Jira payload ----
