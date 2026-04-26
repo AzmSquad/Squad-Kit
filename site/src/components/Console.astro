@@ -1,0 +1,26 @@
+---
+const screens = [
+  { src: '/console/dashboard.png', alt: 'Dashboard with cache-hit ring and token sparkline' },
+  { src: '/console/generate.png', alt: 'Live planner streaming with file-read ticker' },
+  { src: '/console/doctor.png', alt: 'Graphical squad doctor with PASS/WARN/FAIL chips' },
+];
+---
+
+<section class="container-page py-20">
+  <h2 class="gradient-text text-3xl sm:text-4xl font-semibold mb-4">A visual console for everything</h2>
+  <p class="text-[var(--color-text-muted)] max-w-2xl mb-10">
+    <code class="kbd">squad console</code> opens a local, dark-modern web UI on port 4571.
+    Every CLI capability has a panel; the planner streams live over SSE.
+    Redesigned for 0.6.0 — Vercel-inspired palette, command palette, keyboard shortcuts.
+  </p>
+  <div class="grid gap-6 sm:grid-cols-3">
+    {screens.map((s) => (
+      <figure class="card p-0 overflow-hidden">
+        <img src={s.src} alt={s.alt} class="w-full h-auto" loading="lazy" width="800" height="500" />
+      </figure>
+    ))}
+  </div>
+  <p class="mt-10 text-center text-sm text-[var(--color-text-muted)]">
+    Run <code class="kbd">squad console</code> from any squad-kit workspace to try it.
+  </p>
+</section>
