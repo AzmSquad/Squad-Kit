@@ -13,11 +13,25 @@
 
 **Plan once, execute cheap.** A 3-step SDD-style workflow CLI for AI-assisted coding: **raw story → good plan → implementation**. Your expensive model plans once. A cheap model executes many times. Squad-kit owns the folder conventions, the plan meta-prompt, and the agent slash-commands so the token cost goes where it pays off. Deeper product notes live on **[squad-kit.com](https://squad-kit.com)** and in [`docs/`](docs/philosophy.md).
 
+- **Visual console** — `squad console` opens a local, dark-modern web UI for stories, plans, live planner runs, config, secrets, tracker, and doctor. Loopback-only, token-gated. v0.6.0 redesigned the console with a near-monochrome Vercel/Geist palette, a Cmd+K command palette, Linear-style chord shortcuts (`g s`, `g p`, `?`), a portal-rendered dialog system, and a density toggle. Full tour: [`docs/console.md`](docs/console.md).
+
+![Squad console dashboard](docs/images/console/dashboard.png)
+
 ```
 .squad/
 ├── stories/<feature>/<id>/  # intake + attachments (one per story)
 └── plans/<feature>/         # NN-story-<id>.md (one per executable plan)
 ```
+
+## What's new in 0.6.0
+
+- **Console redesign** — Geist-style flat dark UI, Cmd+K command palette, global keyboard shortcuts, portal dialogs, density toggle. Same CLI and `.squad/` on disk; no migration. See [`docs/console.md`](docs/console.md).
+
+## What's new in 0.5.0
+
+- **`squad console`** — local web UI on `127.0.0.1:4571` for the whole workflow (dashboard with run charts, stories, plans + diff, live Generate SSE, config/secrets editors, tracker search/import, graphical doctor). See [`docs/console.md`](docs/console.md).
+- **Run history** — last 20 planner runs under `.squad/runs/` power dashboard charts; **recent projects** list in `~/.squad/recent-projects.json` for quick handoff between repos.
+- **`pnpm size:guard`** — publish tarball must stay under 2.5 MB unpacked.
 
 ## What's new in 0.4.0
 
@@ -107,6 +121,7 @@ Configuration, credential edits, and non-interactive flags: see [`docs/customiza
 | `squad doctor [--fix] [--json]` | Full health check; `--fix` applies non-destructive repairs. |
 | `squad migrate [--dry-run] [-y]` | One-shot 0.1.x → 0.2.0 structural migrations. Destructive. |
 | `squad upgrade [--check] [-y]` | Check npm and install a newer squad-kit release. |
+| `squad console [--port n] [--no-open]` | Start the loopback web console; see [`docs/console.md`](docs/console.md). |
 
 Deeper option lists: `squad <command> --help` and the `docs/` pages above.
 

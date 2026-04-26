@@ -298,4 +298,10 @@ The migration is **intentionally narrow**: it does not rewrite your story bodies
 
 **Ongoing version bumps** after 0.2.0: use **`squad upgrade`** for **same major** line updates, and **`squad doctor`** after any install that might change how **`gitignore`** or **`planner` pins** behave. Re-read the **[0.2.0] → newer** section of the upstream **`CHANGELOG.md`** when you move **minor** or **major** — squad-kit will refuse blind major upgrades via **`squad upgrade`** for good reason.
 
+## 11. Upgrading from 0.4.x to 0.5.0
+
+0.5.0 is a feature release with no breaking changes. Run `npm i -g squad-kit@latest`, then in any squad-kit-initialised directory run `squad console`. The terminal CLI continues to work exactly as in 0.4.x. The console UI reads and writes the same `.squad/config.yaml` and `.squad/secrets.yaml` your CLI already uses, so nothing migrates.
+
+If you've been pinning a specific version, the only files added on disk by 0.5.x are `.squad/runs/<runId>.json` (last-20 ring buffer for the dashboard) and `~/.squad/recent-projects.json` (a per-user list of project roots you've opened in the console). The runs directory is git-ignored automatically; the recent-projects file lives under your home directory, not in the repo.
+
 Need more? Start with [getting-started.md](getting-started.md) for the refreshed quickstart or [customization.md](customization.md) for **`squad config`**, **`squad rm`**, and **`squad doctor`** in depth.

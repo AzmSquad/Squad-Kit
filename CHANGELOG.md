@@ -7,6 +7,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-04-29
+
+### Why this release
+
+squad-kit 0.5.0 shipped the console end-to-end. Real users found the visual layer hostile for an admin/console surface — too marketing-y, glow orbs everywhere, dialog positioning glitches under our overflow rules — so 0.6.0 is a redesign-only release. Zero CLI behaviour changes, zero API contract changes. The console adopts a Vercel/Geist-inspired palette: flat near-black surfaces, white text, accent green reserved for status (live planner dot, focus rings, active sidebar, success badges). Every dialog is now portal-rendered and centred reliably. The signature Vercel/Linear move — Cmd+K command palette — is in.
+
+### Added
+
+- console-ui: Cmd+K command palette (powered by `cmdk`) — searches stories, plans, and actions; Linear-style chord shortcuts (`g s` for Stories, `g p` for Plans, `n s` for new story, `?` for the cheatsheet, etc.).
+- console-ui: portal-rendered Dialog primitive with focus trap, body scroll lock, ESC + backdrop close, focus restore. Replaces the native `<dialog>` element (and fixes its positioning bugs).
+- console-ui: Toast system (`useToast()`) with bottom-right stack, tone-coloured icons, auto-dismiss, manual dismiss, optional inline action.
+- console-ui: Confirm provider (`useConfirm()`) — promise-based ergonomics for destructive actions.
+- console-ui: Callout component for inline alerts (default / info / success / warning / danger). Replaces every ad-hoc tone block sprinkled through pages.
+- console-ui: Density toggle (Comfortable / Compact) in the topbar; persists to `localStorage`, applies via `[data-density]` on `<html>`.
+- console-ui: Breadcrumbs in the topbar, derived from the route match tree.
+- console-ui: New primitives — `Page`, `Spinner`, `IconButton`, `Tooltip`, `Kbd`, `Field`. All density-aware.
+- console-ui: Internal design playground at `/__design` for primitive sanity checks.
+- console-ui: `lucide-react` for icons; sidebar letter-icons (`D / S / P …`) replaced with proper Lucide icons.
+
+### Changed
+
+- console-ui: complete design-token rewrite — Geist-inspired graphite scale (12 steps from `--gray-1` to `--gray-12`), accent green reserved for status only. The marketing-site palette stays on the marketing site; the console diverges. CSS variable names that pages already used (`--color-bg`, `--color-surface`, `--color-text`, `--color-accent`, etc.) keep working — their values changed.
+- console-ui: layout shell rewritten — sidebar is sectioned (Workspace / Run / Settings) with Lucide icons, project switcher moved into the sidebar header, topbar shows breadcrumbs + density toggle + Cmd+K hint. The decorative `grid-bg` and `glow-orb` divs were removed from the working surface.
+- console-ui: every page rewritten through the new `<Page>` wrapper. Inline tone classes (`bg-emerald-…`, `bg-red-…`, etc.) replaced with `<Badge>`, `<Callout>`, and `<Toast>`. Destructive actions go through `useConfirm()`.
+- console-ui: charts read CSS variables instead of hard-coded hex codes; near-monochrome palette with green only for the most-recent / success series.
+- console-ui: shimmer Skeleton replaces the static `animate-pulse` block.
+- console-ui: Markdown viewer adopts a near-monochrome prism theme matching the new tokens.
+
+### Fixed
+
+- console-ui: dialog positioning bugs caused by the native `<dialog>` element interacting with our layout's overflow rules. Now portal-rendered and reliably centred.
+
+### Migration
+
+No breaking changes for CLI users. The `.squad/` file formats, command flags, planner output, tracker integration, and config schema are byte-identical to 0.5.0. If you've installed `squad-kit@0.5.0` globally and run `squad console`, simply `npm i -g squad-kit@0.6.0` and your next `squad console` opens the new look. No `.squad/config.yaml` changes.
+
+### Internal
+
+- console-ui: `cmdk`, `lucide-react` added to `console-ui/package.json` (consumed at build-time only; the CLI runtime dependency tree is unchanged).
+- console-ui: extensive primitive coverage with vitest — tests grew by ~25 cases across `Button`, `Badge`, `Spinner`, `Field`, `Page`, `Dialog`, `Toast`, `Callout`, `Confirm`, `Breadcrumbs`, `useDensity`, `CommandPalette`, `useGlobalShortcuts`.
+
+## [0.5.0] — 2026-04-25
+
+### Why this release
+
+squad-kit 0.4.0 made the planner reliable and the partial-plan recovery flow first-class. 0.5.0 makes the whole product **shareable**: a local-first, dark-modern web console that exposes every CLI capability with a UI a teammate can use without learning the commands.
+
+The console isn't a hosted dashboard. It binds to `127.0.0.1`, gates every API request behind a per-session token, and reads/writes the same `.squad/` files the CLI already uses. Open it with `squad console`, share a screenshot of a streaming planning run on Slack, close the tab, keep working in the terminal.
+
+### Added
+
+- `squad console` — open `http://127.0.0.1:4571` (configurable) for a dashboard, stories CRUD, plans browser with diff, live planner streaming via SSE, visual editors for `config.yaml` and `secrets.yaml`, tracker issue search and import, graphical `squad doctor`. Token-gated and loopback-only.
+- Persistent run history in `.squad/runs/<runId>.json` (last 20 retained). Dashboard reads from it for cache-hit ratio, token spend sparkline, and run-duration bars.
+- `~/.squad/recent-projects.json` — per-user list of project roots you've opened the console against; surfaces in the topbar dropdown.
+- Internal: `PlannerEventBus` + `runPlanner({ events, runId, abort })` lets multiple consumers share one run; CLI rendering becomes a bus subscriber.
+- Internal: `core/story-mutations.ts` (`createStoryRecord`, `deleteStoryRecord`, `createStoryRecordFromIssue`) is now the single implementation behind the CLI new-story / rm-story commands and the console.
+- Internal: `commands/doctor-engine.ts` extracts `gatherContext` and `runAllChecks` so the doctor logic is reusable from the API.
+- Internal: `TrackerClient.searchIssues` for Jira (REST `/search`) and Azure (WIQL).
+- Build: `pnpm size:guard` — fails CI if the published tarball exceeds 2.5 MB unpacked. Wired into `prepublishOnly`.
+
+### Changed
+
+- `pnpm build` now runs the SPA build (`pnpm -C console-ui build`) before the CLI build (`tsup`) and verifies `dist/console-ui/index.html` was emitted.
+- The npm tarball gains a `dist/console-ui/` tree (~700–900 KB gzipped).
+
+### Migration
+
+No breaking changes. CLI commands behave byte-identically. The `.squad/runs/` directory and `~/.squad/recent-projects.json` are added on first console run; `.squad/runs/` is gitignored automatically (managed block).
+
 ## [0.4.0] — 2026-04-24
 
 ### Added
@@ -216,7 +285,9 @@ First public release.
 - Plan-generation meta-prompt (`generate-plan.md`), intake template (`intake.md`), and plan skeleton reference (`story-skeleton.md`).
 - Documentation: `docs/philosophy.md`, `docs/getting-started.md`, `docs/customization.md`, `docs/vs-spec-kit.md`.
 
-[Unreleased]: https://github.com/AzmSquad/squad-kit/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/AzmSquad/squad-kit/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/AzmSquad/squad-kit/releases/tag/v0.6.0
+[0.5.0]: https://github.com/AzmSquad/squad-kit/releases/tag/v0.5.0
 [0.3.0]: https://github.com/AzmSquad/Squad-Kit/releases/tag/v0.3.0
 [0.2.2]: https://github.com/AzmSquad/squad-kit/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/AzmSquad/squad-kit/compare/v0.2.0...v0.2.1
