@@ -23,6 +23,17 @@ export function listFeatures(paths: SquadPaths): string[] {
     .sort();
 }
 
+/** Feature slugs that have a `plans/<feature>/` tree (union of story features and plan-only dirs). */
+export function listPlanFeatureNames(paths: SquadPaths): string[] {
+  const names = new Set(listFeatures(paths));
+  if (fs.existsSync(paths.plansDir)) {
+    for (const e of fs.readdirSync(paths.plansDir, { withFileTypes: true })) {
+      if (e.isDirectory()) names.add(e.name);
+    }
+  }
+  return [...names].sort();
+}
+
 /** All intakes; same rows as `listStories()` with no filter. */
 export function listAllStories(paths: SquadPaths): StoryRecord[] {
   return listStories(paths);

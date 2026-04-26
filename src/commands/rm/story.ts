@@ -10,12 +10,11 @@ import {
   countOverviewDataRows,
   featureStoriesDirEmpty,
   pickStoryInteractive,
-  removeOverviewRow,
   renderPreview,
   resolveStoryFromArg,
-  trashOrDelete,
   type RmBaseOptions,
 } from './shared.js';
+import { deleteStoryRecord } from '../../core/story-mutations.js';
 import { runRmFeature } from './feature.js';
 
 export interface RmStoryOptions extends RmBaseOptions {}
@@ -89,9 +88,7 @@ export async function runRmStory(storyPathOrId: string | undefined, opts: RmStor
     }
   }
 
-  const absPaths = targets.map((t) => t.absPath);
-  const result = trashOrDelete(absPaths, paths.trashDir, useTrash);
-  removeOverviewRow(path.join(paths.plansDir, story.feature), story.id);
+  const result = deleteStoryRecord({ paths, story, trash: useTrash });
 
   if (result.trashed) {
     ui.success(`Removed (moved to ${path.relative(root, result.trashed)}).`);
