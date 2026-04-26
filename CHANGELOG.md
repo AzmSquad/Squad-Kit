@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-04-26
+
+### Bug fixes
+
+- Azure DevOps console tracker search was failing on first load and on text
+  search with HTTP 400. WIQL queries now require the team project (`@project`)
+  in the WHERE clause; HTTP 400 responses include a clearer hint about
+  org/project or WIQL scoping.
+
 ## [0.6.0] — 2026-04-29
 
 ### Why this release
