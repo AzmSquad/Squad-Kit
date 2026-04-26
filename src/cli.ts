@@ -10,6 +10,7 @@ import { runTrackerLink } from './commands/tracker-link.js';
 import { runDoctor } from './commands/doctor.js';
 import { runMigrate } from './commands/migrate.js';
 import { runUpgrade } from './commands/upgrade.js';
+import { runConsole } from './commands/console.js';
 import {
   runConfigShow,
   runConfigSetPlanner,
@@ -25,7 +26,7 @@ const program = new Command();
 program
   .name('squad')
   .description('Plan once, execute cheap. A 3-step SDD workflow CLI.')
-  .version('0.4.0');
+  .version('0.6.0');
 
 program
   .command('init')
@@ -114,6 +115,18 @@ program
   .option('--check', 'Only check for updates; do not install', false)
   .option('-y, --yes', 'Skip the confirmation prompt', false)
   .action(wrap(runUpgrade));
+
+program
+  .command('console')
+  .description('Open the squad-kit web console (local, dark-modern UI for stories, plans, runs, config)')
+  .option(
+    '--port <number>',
+    'Port to bind on 127.0.0.1 (default 4571; falls back to next free port)',
+    (v) => parseInt(v, 10),
+  )
+  .option('--no-open', 'Do not auto-open the browser; print the URL instead')
+  .option('--token <hex>', 'Reuse a specific session token (advanced; default: random per session)')
+  .action(wrap(runConsole));
 
 program
   .command('list')
