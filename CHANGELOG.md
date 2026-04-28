@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-04-28
+
+### What's new
+
+- GitHub Issues works as the issue tracker: set owner/repo in config, PAT (or
+  `GITHUB_TOKEN` / `GITHUB_HOST`) in secrets, search and import like Jira or
+  Azure. Console Secrets page has GitHub host and token fields plus a
+  connectivity test; `squad doctor` probes the GitHub REST API.
+
+### Breaking changes
+
+- Linear is no longer a tracker type. Use GitHub Issues, Jira, or Azure, or
+  set tracker to `none`. Update `.squad/config.yaml` if you had `linear`.
+
 ## [0.6.1] — 2026-04-26
 
 ### Bug fixes
