@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] — 2026-04-28
+
+### Bug fixes
+
+- The console sidebar and dashboard still reported `v0.6.0` after 0.7.1
+  because `/api/meta` and `/api/dashboard` had the version hardcoded.
+  Both now read from `package.json` (matching the CLI and `/healthz`
+  fix in 0.7.1).
+- `squad config set tracker --type github` was a no-op stub: it set
+  `tracker.type = github` without prompting for owner/repo or PAT and
+  skipped the connectivity probe. It now matches the Jira and Azure
+  flows — interactive credential prompt, secrets written to
+  `.squad/secrets.yaml`, post-config GitHub probe, and an updated
+  next-steps hint with `--id <github-issue-number>`.
+
 ## [0.7.1] — 2026-04-28
 
 ### Bug fixes
