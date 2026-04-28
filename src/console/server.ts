@@ -5,6 +5,7 @@ import { cors } from 'hono/cors';
 import { secureHeaders } from 'hono/secure-headers';
 import * as ui from '../ui/index.js';
 import type { SquadPaths } from '../core/paths.js';
+import { readInstalledPackage } from '../core/package-info.js';
 import { mountApi } from './api/index.js';
 import { mountStaticAssets } from './static-assets.js';
 import { authMiddleware } from './auth.js';
@@ -34,7 +35,7 @@ export async function startConsoleServer(opts: StartConsoleServerOptions): Promi
   // Public health endpoint (no auth) — used by tests and external uptime checks.
   app.get('/healthz', (c) =>
     c.json(
-      { ok: true, version: '0.6.0', port: bindPort },
+      { ok: true, version: readInstalledPackage().version, port: bindPort },
       200,
       {
         'cache-control': 'no-store',

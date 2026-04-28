@@ -20,13 +20,14 @@ import {
   runConfigRemoveCredential,
 } from './commands/config/index.js';
 import { runRmFeature, runRmPlan, runRmStory } from './commands/rm/index.js';
+import { readInstalledPackage } from './core/package-info.js';
 
 const program = new Command();
 
 program
   .name('squad')
   .description('Plan once, execute cheap. A 3-step SDD workflow CLI.')
-  .version('0.6.0');
+  .version(readInstalledPackage().version);
 
 program
   .command('init')
