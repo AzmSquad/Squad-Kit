@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-04-28
+
+### Bug fixes
+
+- `squad --version` printed `0.6.0` on 0.7.0 — the version string was
+  hardcoded in the CLI and the console `/healthz` endpoint. Both now
+  read from `package.json` and stay in sync with the installed package.
+
 ## [0.7.0] — 2026-04-28
 
 ### What's new
