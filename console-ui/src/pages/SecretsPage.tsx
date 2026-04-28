@@ -15,6 +15,7 @@ type MaskedSecrets = {
   tracker: {
     jira: { host: string | null; email: string | null; token: string | null };
     azure: { organization: string | null; project: string | null; pat: string | null };
+    github: { host: string | null; pat: string | null };
   };
 };
 
@@ -109,12 +110,14 @@ export function SecretsPage() {
   const [jiraEmail, setJiraEmail] = useState('');
   const [azOrg, setAzOrg] = useState('');
   const [azProj, setAzProj] = useState('');
+  const [ghHost, setGhHost] = useState('');
 
   const [tAnth, setTAnth] = useState<TestState>(null);
   const [tOpen, setTOpen] = useState<TestState>(null);
   const [tGoo, setTGoo] = useState<TestState>(null);
   const [tJira, setTJira] = useState<TestState>(null);
   const [tAz, setTAz] = useState<TestState>(null);
+  const [tGh, setTGh] = useState<TestState>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   const q = useQuery({ queryKey: ['secrets'], queryFn: () => api<MaskedSecrets>('/api/secrets') });
@@ -137,6 +140,7 @@ export function SecretsPage() {
     setJiraEmail(q.data.tracker.jira.email ?? '');
     setAzOrg(q.data.tracker.azure.organization ?? '');
     setAzProj(q.data.tracker.azure.project ?? '');
+    setGhHost(q.data.tracker.github.host ?? '');
   }, [q.data]);
 
   async function testProvider(
@@ -185,6 +189,20 @@ export function SecretsPage() {
       else setTAz({ ok: false, message: j.detail ? `Azure: ${j.detail}` : 'unreachable' });
     } catch (e) {
       setTAz({ ok: false, message: (e as Error).message });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function testGitHub() {
+    setBusy('github');
+    setTGh(null);
+    try {
+      const j = (await postSecretsTest('/api/secrets/test/github')) as { ok: boolean; detail?: string; status?: number };
+      if (j.ok) setTGh({ ok: true, message: 'GitHub reachable' });
+      else setTGh({ ok: false, message: j.detail ? `GitHub: ${j.detail}` : 'unreachable' });
+    } catch (e) {
+      setTGh({ ok: false, message: (e as Error).message });
     } finally {
       setBusy(null);
     }
@@ -352,6 +370,59 @@ export function SecretsPage() {
               </Button>
             </div>
             {tAz ? <Badge tone={tAz.ok ? 'success' : 'danger'}>{tAz.message}</Badge> : null}
+          </div>
+        </Card>
+
+        <Card variant="default">
+          <h2 className="mb-3 text-sm font-semibold">GitHub</h2>
+          <p className="mb-3 text-[12px] text-[var(--color-text-muted)]">
+            Owner and repo come from <code>tracker.workspace</code> and <code>tracker.project</code> on the Config page.
+          </p>
+          <div className="grid max-w-lg gap-3">
+            <Field label="Host" helper="Leave blank for github.com; set for GitHub Enterprise Server (e.g. ghes.example.com).">
+              {({ id, helperId }) => (
+                <Input
+                  id={id}
+                  aria-describedby={helperId}
+                  className="mt-0"
+                  placeholder="api.github.com"
+                  value={ghHost}
+                  onChange={(e) => setGhHost(e.target.value)}
+                />
+              )}
+            </Field>
+            <TokenRow
+              label="Personal access token"
+              helper="GitHub PAT with repo (or fine-grained Issues: read) scope."
+              display={s.tracker.github.pat}
+              onSave={(plain) => mut.mutate({ tracker: { github: { pat: plain } } })}
+            />
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                onClick={() => mut.mutate({ tracker: { github: { host: ghHost } } })}
+                loading={mut.isPending}
+              >
+                Save GitHub fields
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                loading={busy === 'github' || mut.isPending}
+                onClick={async () => {
+                  setTGh(null);
+                  try {
+                    await mut.mutateAsync({ tracker: { github: { host: ghHost } } });
+                    await testGitHub();
+                  } catch {
+                    /* globalErr */
+                  }
+                }}
+              >
+                Save and test
+              </Button>
+            </div>
+            {tGh ? <Badge tone={tGh.ok ? 'success' : 'danger'}>{tGh.message}</Badge> : null}
           </div>
         </Card>
       </div>

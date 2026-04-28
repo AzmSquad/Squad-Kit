@@ -3,7 +3,12 @@ import type { Hono } from 'hono';
 import type { SquadPaths } from '../../core/paths.js';
 import { loadSecrets, mergeSecrets, saveSecrets, type SquadSecrets } from '../../core/secrets.js';
 import { maskToken } from '../../core/mask-token.js';
-import { fetchProviderModelIds, probeJiraConnectivity, probeAzureConnectivity } from '../../core/probes.js';
+import {
+  fetchProviderModelIds,
+  probeJiraConnectivity,
+  probeAzureConnectivity,
+  probeGitHubConnectivity,
+} from '../../core/probes.js';
 import { loadConfig } from '../../core/config.js';
 import type { ProviderName } from '../../planner/types.js';
 
@@ -31,6 +36,10 @@ export function mountSecretsApi(app: Hono, opts: { paths: SquadPaths }): void {
           project: s.tracker?.azure?.project ?? null,
           pat: maskToken(s.tracker?.azure?.pat),
         },
+        github: {
+          host: s.tracker?.github?.host ?? null,
+          pat: maskToken(s.tracker?.github?.pat),
+        },
       },
     });
   });
@@ -56,6 +65,12 @@ export function mountSecretsApi(app: Hono, opts: { paths: SquadPaths }): void {
           .object({
             organization: z.string().optional(),
             project: z.string().optional(),
+            pat: z.string().optional(),
+          })
+          .optional(),
+        github: z
+          .object({
+            host: z.string().optional(),
             pat: z.string().optional(),
           })
           .optional(),
@@ -93,5 +108,11 @@ export function mountSecretsApi(app: Hono, opts: { paths: SquadPaths }): void {
     const cfg = loadConfig(opts.paths.configFile);
     const s = loadSecrets(opts.paths.secretsFile);
     return c.json(await probeAzureConnectivity(s, cfg));
+  });
+
+  app.post('/api/secrets/test/github', async (c) => {
+    const cfg = loadConfig(opts.paths.configFile);
+    const s = loadSecrets(opts.paths.secretsFile);
+    return c.json(await probeGitHubConnectivity(s, cfg));
   });
 }

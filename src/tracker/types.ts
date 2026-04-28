@@ -1,4 +1,4 @@
-export type TrackerName = 'jira' | 'azure';
+export type TrackerName = 'jira' | 'azure' | 'github';
 
 export interface FetchIssueResult {
   id: string; // canonical id, e.g. "PROJ-123" (Jira) or "42" (Azure)

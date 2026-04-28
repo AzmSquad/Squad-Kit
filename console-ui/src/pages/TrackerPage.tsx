@@ -120,7 +120,7 @@ export function TrackerPage() {
   return (
     <Page
       title="Tracker"
-      description="Search Jira / Azure issues and import as stories. Configure the tracker in Config and credentials in Secrets."
+      description="Search Jira, Azure, or GitHub issues and import as stories. Configure the tracker in Config and credentials in Secrets."
     >
       <div className="max-w-2xl">
         <Input

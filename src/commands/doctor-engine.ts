@@ -7,7 +7,12 @@ import { ensureGitignore, SQUAD_TRASH_PATTERN } from '../core/gitignore.js';
 import { modelFor, providerEnvVar, resolveProviderKey } from '../core/planner-models.js';
 import { clientFor, overlayTrackerEnv, type ClientResolutionError } from '../tracker/index.js';
 import type { ProviderName } from '../planner/types.js';
-import { fetchProviderModelIds, probeJiraConnectivity, probeAzureConnectivity } from '../core/probes.js';
+import {
+  fetchProviderModelIds,
+  probeJiraConnectivity,
+  probeAzureConnectivity,
+  probeGitHubConnectivity,
+} from '../core/probes.js';
 import { readLastRun } from '../core/last-run.js';
 import { formatTokenK } from '../ui/planner-cache-summary.js';
 
@@ -448,6 +453,14 @@ async function checkTrackerConfig(_paths: SquadPaths, ctx: DoctorContext): Promi
       detail: 'Azure DevOps requires tracker.workspace (organization) and tracker.project',
     };
   }
+  if (t.type === 'github' && (!t.workspace?.trim() || !t.project?.trim())) {
+    return {
+      id: 'tracker-config',
+      name: 'tracker configuration',
+      status: 'fail',
+      detail: 'GitHub requires tracker.workspace (owner) and tracker.project (repo)',
+    };
+  }
   return { id: 'tracker-config', name: 'tracker configuration', status: 'ok' };
 }
 
@@ -507,6 +520,16 @@ async function checkTrackerConnectivity(paths: SquadPaths, ctx: DoctorContext): 
   if (client.name === 'azure') {
     const r = await probeAzureConnectivity(secrets, ctx.config);
     if (r.ok) return { id: 'tracker-live', name: 'tracker connectivity', status: 'ok', detail: 'Azure DevOps' };
+    return {
+      id: 'tracker-live',
+      name: 'tracker connectivity',
+      status: 'fail',
+      detail: r.status !== undefined ? `HTTP ${r.status}` : r.detail ?? 'request failed',
+    };
+  }
+  if (client.name === 'github') {
+    const r = await probeGitHubConnectivity(secrets, ctx.config);
+    if (r.ok) return { id: 'tracker-live', name: 'tracker connectivity', status: 'ok', detail: 'GitHub REST' };
     return {
       id: 'tracker-live',
       name: 'tracker connectivity',

@@ -39,7 +39,7 @@ describe('clientFor', () => {
       kind: 'unsupported-tracker',
       message: 'Tracker type "none" does not support auto-fetch in 0.2.0.',
       detail:
-        'Run `squad config set tracker` to use jira or azure for fetch, or pass `--no-fetch` on new-story. Run `squad doctor` to review tracker setup.',
+        'Run `squad config set tracker` to use jira, azure, or github for fetch, or pass `--no-fetch` on new-story. Run `squad doctor` to review tracker setup.',
     });
   });
 
@@ -89,6 +89,41 @@ describe('clientFor', () => {
     const res = clientFor(config, secrets);
     expect(res.error).toBeUndefined();
     expect(res.client?.name).toBe('azure');
+  });
+
+  it('returns missing-credentials for github without owner/repo', () => {
+    const config: SquadConfig = {
+      ...DEFAULT_CONFIG,
+      tracker: { type: 'github' },
+    };
+    const res = clientFor(config, { tracker: { github: { pat: 'p' } } });
+    expect(res.client).toBeUndefined();
+    expect(res.error?.kind).toBe('missing-credentials');
+    expect(res.error?.message).toContain('GitHub');
+  });
+
+  it('returns missing-credentials for github without pat', () => {
+    const config: SquadConfig = {
+      ...DEFAULT_CONFIG,
+      tracker: { type: 'github', workspace: 'octocat', project: 'hello-world' },
+    };
+    const res = clientFor(config, {});
+    expect(res.client).toBeUndefined();
+    expect(res.error?.kind).toBe('missing-credentials');
+    expect(res.error?.message).toContain('GitHub');
+  });
+
+  it('returns github client when credentials are complete', () => {
+    const config: SquadConfig = {
+      ...DEFAULT_CONFIG,
+      tracker: { type: 'github', workspace: 'octocat', project: 'hello-world' },
+    };
+    const secrets: SquadSecrets = {
+      tracker: { github: { pat: 'ghp_test' } },
+    };
+    const res = clientFor(config, secrets);
+    expect(res.error).toBeUndefined();
+    expect(res.client?.name).toBe('github');
   });
 
   it('prefers secrets.tracker.jira.host over config.tracker.workspace for requests', async () => {

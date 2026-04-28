@@ -14,6 +14,11 @@ export interface TrackerAzureSecrets {
   pat?: string;
 }
 
+export interface TrackerGitHubSecrets {
+  host?: string; // optional GHES hostname (e.g. "ghes.example.com"); defaults to api.github.com
+  pat?: string;
+}
+
 export interface SquadSecrets {
   planner?: {
     anthropic?: string;
@@ -23,6 +28,7 @@ export interface SquadSecrets {
   tracker?: {
     jira?: TrackerJiraSecrets;
     azure?: TrackerAzureSecrets;
+    github?: TrackerGitHubSecrets;
   };
 }
 
@@ -89,6 +95,10 @@ export function mergeSecrets(base: SquadSecrets, patch: SquadSecrets): SquadSecr
       azure: {
         ...(base.tracker?.azure ?? {}),
         ...filterEmpty((patch.tracker?.azure ?? {}) as Record<string, unknown>),
+      },
+      github: {
+        ...(base.tracker?.github ?? {}),
+        ...filterEmpty((patch.tracker?.github ?? {}) as Record<string, unknown>),
       },
     },
   };

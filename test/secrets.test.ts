@@ -102,4 +102,11 @@ describe('mergeSecrets', () => {
     expect(m.tracker?.jira).toEqual({ host: 'h', email: 'e', token: 't' });
     expect(m.tracker?.azure).toEqual({ organization: 'o' });
   });
+
+  it('merges nested tracker github', () => {
+    const base: SquadSecrets = { tracker: { github: { host: 'gh.example.com' } } };
+    const patch: SquadSecrets = { tracker: { github: { pat: 'ghp_new' } } };
+    const m = mergeSecrets(base, patch);
+    expect(m.tracker?.github).toEqual({ host: 'gh.example.com', pat: 'ghp_new' });
+  });
 });

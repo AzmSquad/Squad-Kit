@@ -14,6 +14,9 @@ export function overlayTrackerEnv(base: SquadSecrets): SquadSecrets {
   const azProj = process.env.AZURE_DEVOPS_PROJECT;
   const azPat = process.env.AZURE_DEVOPS_PAT ?? process.env.SQUAD_TRACKER_API_KEY;
 
+  const ghHost = process.env.GITHUB_HOST;
+  const ghPat = process.env.GITHUB_TOKEN ?? process.env.SQUAD_TRACKER_API_KEY;
+
   return {
     ...base,
     tracker: {
@@ -26,6 +29,10 @@ export function overlayTrackerEnv(base: SquadSecrets): SquadSecrets {
         organization: azOrg ?? base.tracker?.azure?.organization,
         project: azProj ?? base.tracker?.azure?.project,
         pat: azPat ?? base.tracker?.azure?.pat,
+      },
+      github: {
+        host: ghHost ?? base.tracker?.github?.host,
+        pat: ghPat ?? base.tracker?.github?.pat,
       },
     },
   };

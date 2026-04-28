@@ -226,7 +226,7 @@ Then the `squad` you run in any project uses your fork’s prompts. Alternativel
 
 **`squad status`** in 0.2 shows whether each provider’s key came from **env** vs **`secrets.yaml`** — use it after a migration to confirm your team sees **consistent** `source=` lines. **`squad config show`** prints a **masked** view of the same; neither command echoes raw secrets. If you use a **direnv**-style **`.envrc`**, run **`squad doctor`** in the same environment your editors use, or you may get **false “missing key”** failures.
 
-**Jira and Azure** store host / org / project in **`config.yaml`** and tokens in **`secrets.yaml`** (or the documented env var names, which vary by release — **`CHANGELOG.md`** and **customization.md** are the source of truth for your installed version). **GitHub** and **Linear**-style paths may still be primarily format-based; keep **`squad doctor`** green before relying on **auto-fetch** for Jira or Azure.
+**Jira, Azure, and GitHub** store host / org / project in **`config.yaml`** and tokens in **`secrets.yaml`** (or the documented env var names, which vary by release — **`CHANGELOG.md`** and **customization.md** are the source of truth for your installed version). Keep **`squad doctor`** green before relying on **auto-fetch**.
 
 ## 8. If something goes wrong
 
@@ -290,7 +290,7 @@ See [`docs/customization.md`](customization.md#prompt-caching) §"Prompt caching
 - **Agent slash files** (for example **`.claude/commands/`**, **`.cursor/commands/`**, **`.github/prompts/`**, **`.gemini/commands/`**) are only **regenerated** if you re-run something like **`squad init --force --agents …`**. A normal `squad migrate` does not touch them.
 - **Plan file format** and **overview** patterns are unchanged: 0.1.x plan files work with the 0.2.0 CLI and agents.
 - **Workspace discovery** (walking **up** from the current directory to find **`.squad/config.yaml`**) is the same model as 0.1.x — only the files inside **`.squad/`** and the managed **`.gitignore`** block change.
-- **Tracker id validation** for GitHub / Linear and filename conventions you already set stay in effect; 0.2 **adds** opt-in **fetch** behaviour for Jira and Azure when those backends are selected.
+- **Tracker id validation** for GitHub and filename conventions you already set stay in effect; 0.2 **adds** opt-in **fetch** behaviour for Jira and Azure when those backends are selected.
 
 The migration is **intentionally narrow**: it does not rewrite your story bodies, renumber plan **`NN`**, or touch **`00-index.md`** / feature **`00-overview.md`** except indirectly when you run separate commands (for example **`squad rm`**) that always updated those files in 0.1.x as well.
 

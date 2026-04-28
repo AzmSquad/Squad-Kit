@@ -89,3 +89,28 @@ export async function probeAzureConnectivity(
     return { ok: false, detail: (err as Error).message };
   }
 }
+
+export async function probeGitHubConnectivity(
+  secrets: SquadSecrets,
+  _config: SquadConfig,
+): Promise<{ ok: boolean; status?: number; detail?: string }> {
+  const gh = overlayTrackerEnv(secrets).tracker?.github ?? {};
+  const pat = gh.pat ?? '';
+  const rawHost = (gh.host ?? 'api.github.com').replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+  const apiPath = rawHost === 'api.github.com' ? '' : '/api/v3';
+  const url = `https://${rawHost}${apiPath}/user`;
+  try {
+    const res = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${pat}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'squad-kit',
+      },
+    });
+    if (res.ok) return { ok: true };
+    return { ok: false, status: res.status, detail: (await res.text()).slice(0, 200) };
+  } catch (err) {
+    return { ok: false, detail: (err as Error).message };
+  }
+}
