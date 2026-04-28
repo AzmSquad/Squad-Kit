@@ -27,7 +27,7 @@ squad init
 
 - **Project name** — defaults to the current directory name.
 - **Primary language** — e.g. `typescript`; used as a hint in planning.
-- **Issue tracker** — `none`, `github`, `linear`, `jira`, or `azure`.
+- **Issue tracker** — `none`, `github`, `jira`, or `azure`.
 - **Slash commands** — which agents get `squad-plan` (and friends): `claude-code`, `cursor`, `copilot`, `gemini`.
 - **Tracker id in filenames** — when the tracker is not `none`, you can require `NN-story-<slug>-<id>.md` names (`naming.includeTrackerId`).
 - **Jira or Azure** — if you pick either, you are prompted for host / org, email or PAT, and API token. Values are written to **`.squad/secrets.yaml`** (git-ignored, `0600` on POSIX).

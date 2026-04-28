@@ -6,12 +6,12 @@ describe('composeSystemPrompt', () => {
     const out = composeSystemPrompt({
       projectRoots: ['src', 'lib'],
       primaryLanguage: 'ts',
-      trackerType: 'linear',
+      trackerType: 'jira',
       repoMap: 'a.txt\nb.ts',
     });
     expect(out).toContain('src, lib');
     expect(out).toContain('ts');
-    expect(out).toContain('linear');
+    expect(out).toContain('jira');
     expect(out).toContain('Direct-API mode notes');
     expect(out).toContain('a.txt');
     expect(out).toContain('b.ts');

@@ -17,8 +17,6 @@ function trackerFieldLabel(tracker: string): string {
       return 'Jira issue id';
     case 'azure':
       return 'Azure work item id';
-    case 'linear':
-      return 'Linear issue id';
     case 'github':
       return 'GitHub issue id';
     default:

@@ -15,7 +15,7 @@ import { Tabs } from '~/components/Tabs';
 import { Skeleton } from '~/components/Skeleton';
 import { useToast } from '~/components/Toast';
 
-type TrackerType = 'none' | 'github' | 'linear' | 'jira' | 'azure';
+type TrackerType = 'none' | 'github' | 'jira' | 'azure';
 type ProviderName = 'anthropic' | 'openai' | 'google';
 
 type SquadConfig = {
@@ -177,7 +177,6 @@ export function ConfigPage() {
                           >
                             <option value="none">none</option>
                             <option value="github">github</option>
-                            <option value="linear">linear</option>
                             <option value="jira">jira</option>
                             <option value="azure">azure</option>
                           </Select>

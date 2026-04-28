@@ -105,7 +105,6 @@ export async function runInit(opts: InitOptions): Promise<void> {
           choices: [
             { name: 'None', value: 'none' as TrackerType },
             { name: 'GitHub Issues', value: 'github' as TrackerType },
-            { name: 'Linear', value: 'linear' as TrackerType },
             { name: 'Jira', value: 'jira' as TrackerType },
             { name: 'Azure DevOps', value: 'azure' as TrackerType },
           ],

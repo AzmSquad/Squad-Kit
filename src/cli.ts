@@ -32,7 +32,7 @@ program
   .command('init')
   .description('Bootstrap .squad/ in the current directory')
   .option('--agents <list>', 'Comma-separated agent list: claude-code,cursor,copilot,gemini')
-  .option('--tracker <type>', 'Tracker type: none|github|linear|jira|azure')
+  .option('--tracker <type>', 'Tracker type: none|github|jira|azure')
   .option(
     '--tracker-workspace <hostOrOrg>',
     'Jira host or Azure org (non-interactive default; also written to config for jira/azure)',
@@ -187,7 +187,7 @@ set
 set
   .command('tracker')
   .description('Set or change the tracker type, workspace, and credentials')
-  .option('--type <name>', 'Skip the tracker-type prompt (none|jira|azure|github|linear)')
+  .option('--type <name>', 'Skip the tracker-type prompt (none|jira|azure|github)')
   .option('-y, --yes', 'Fail fast instead of prompting for missing values', false)
   .action(wrap(runConfigSetTracker));
 

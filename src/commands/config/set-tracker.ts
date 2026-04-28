@@ -9,17 +9,17 @@ import { probeJiraConnectivity, probeAzureConnectivity } from '../../core/probes
 import { isInteractive } from '../../ui/tty.js';
 import { promptJiraCredentials, promptAzureCredentials } from './shared.js';
 
-const TYPES: TrackerType[] = ['none', 'github', 'linear', 'jira', 'azure'];
+const TYPES: TrackerType[] = ['none', 'github', 'jira', 'azure'];
 
 function parseType(t: string | undefined): TrackerType {
   if (!t) {
     throw new Error(
-      'Pass --type (none|jira|azure|github|linear) with --yes, or run `squad config set tracker` without --yes in a TTY to pick a type.',
+      'Pass --type (none|jira|azure|github) with --yes, or run `squad config set tracker` without --yes in a TTY to pick a type.',
     );
   }
   if (!TYPES.includes(t as TrackerType)) {
     throw new Error(
-      `Invalid --type "${t}". Use none | jira | azure | github | linear, or run \`squad config set tracker\` interactively.`,
+      `Invalid --type "${t}". Use none | jira | azure | github, or run \`squad config set tracker\` interactively.`,
     );
   }
   return t as TrackerType;
@@ -62,7 +62,6 @@ export async function runConfigSetTracker(opts: ConfigSetTrackerOptions = {}): P
       choices: [
         { name: 'None', value: 'none' as TrackerType },
         { name: 'GitHub Issues', value: 'github' as TrackerType },
-        { name: 'Linear', value: 'linear' as TrackerType },
         { name: 'Jira', value: 'jira' as TrackerType },
         { name: 'Azure DevOps', value: 'azure' as TrackerType },
       ],
@@ -74,7 +73,7 @@ export async function runConfigSetTracker(opts: ConfigSetTrackerOptions = {}): P
 
   if (type === 'none') {
     nextTracker = { type: 'none' };
-  } else if (type === 'github' || type === 'linear') {
+  } else if (type === 'github') {
     nextTracker = { ...config.tracker, type };
   } else if (type === 'jira') {
     if (interactive) {

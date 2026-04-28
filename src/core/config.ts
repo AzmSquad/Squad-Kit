@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import yaml from 'js-yaml';
 import type { PlannerConfig, PlannerModelOverride, ProviderName } from '../planner/types.js';
 
-export type TrackerType = 'none' | 'github' | 'linear' | 'jira' | 'azure';
+export type TrackerType = 'none' | 'github' | 'jira' | 'azure';
 
 export interface SquadConfig {
   version: number;

@@ -49,7 +49,7 @@ beforeEach(() => {
   fs.mkdirSync(p.plansDir, { recursive: true });
   saveConfig(p.configFile, {
     ...DEFAULT_CONFIG,
-    tracker: { type: 'linear' },
+    tracker: { type: 'jira' },
     naming: { includeTrackerId: true, globalSequence: true },
   });
 });
@@ -114,7 +114,7 @@ describe('tracker link', () => {
     );
   });
 
-  it('exposes id validation on input (linear)', async () => {
+  it('exposes id validation on input (jira)', async () => {
     const intake = writeStory('fx', 's5', '# x\n');
     restoreTTY = stubStdinTTY(true);
     vi.mocked(select).mockResolvedValueOnce(intake);
@@ -122,6 +122,6 @@ describe('tracker link', () => {
 
     await runTrackerLink(undefined, undefined, { yes: false });
     const first = vi.mocked(input).mock.calls[0]?.[0] as { validate?: (v: string) => true | string };
-    expect(first?.validate?.('nope-nope')).toBe('Invalid linear id format.');
+    expect(first?.validate?.('nope-nope')).toBe('Invalid jira id format.');
   });
 });

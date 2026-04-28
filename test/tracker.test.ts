@@ -13,12 +13,6 @@ describe('validateTrackerId', () => {
     expect(validateTrackerId('github', 'abc')).toBe(false);
   });
 
-  it('validates linear ids', () => {
-    expect(validateTrackerId('linear', 'ENG-123')).toBe(true);
-    expect(validateTrackerId('linear', 'BUG-1')).toBe(true);
-    expect(validateTrackerId('linear', '123')).toBe(false);
-  });
-
   it('validates jira ids', () => {
     expect(validateTrackerId('jira', 'PROJ-1234')).toBe(true);
     expect(validateTrackerId('jira', 'proj-1')).toBe(false);
@@ -36,7 +30,7 @@ describe('trackerIdForFilename', () => {
     expect(trackerIdForFilename('github', '42')).toBe('42');
   });
   it('leaves other types alone', () => {
-    expect(trackerIdForFilename('linear', 'ENG-123')).toBe('ENG-123');
+    expect(trackerIdForFilename('jira', 'PROJ-123')).toBe('PROJ-123');
     expect(trackerIdForFilename('azure', '843806')).toBe('843806');
   });
 });

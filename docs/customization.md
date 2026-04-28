@@ -25,7 +25,7 @@ Secrets never belong in **`.squad/config.yaml`**: the loader rejects secret-shap
 
 **`squad config set planner`** — interactive flow to enable or change the direct planner: provider (Anthropic / OpenAI / Google), optional `modelOverride`, and where to put the API key (`.squad/secrets.yaml` or remind you to use a provider env var). Updates `.squad/config.yaml` and, when you choose in-file storage, `.squad/secrets.yaml`.
 
-**`squad config set tracker`** — set tracker type (`none`, `github`, `linear`, `jira`, `azure`), workspace / org / project fields, and tracker credentials for APIs that need them. Secrets go to `.squad/secrets.yaml` only.
+**`squad config set tracker`** — set tracker type (`none`, `github`, `jira`, `azure`), workspace / org / project fields, and tracker credentials for APIs that need them. Secrets go to `.squad/secrets.yaml` only.
 
 **`squad config unset planner`** — removes the `planner` block from `config.yaml` (disables the direct planner). **By default, planner keys in `secrets.yaml` are left in place** so you can re-enable without re-entering. Pass **`--remove-credentials`** to delete planner keys from `secrets.yaml` as well. Use **`-y`** in scripts.
 

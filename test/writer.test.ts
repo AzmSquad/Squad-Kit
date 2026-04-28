@@ -87,15 +87,15 @@ describe('writePlanFile', () => {
     expect(fs.readFileSync(first.planFile, 'utf8')).toContain('<!-- b -->');
   });
 
-  it('uses slugified story folder id for linear tracker plans', () => {
+  it('uses slugified story folder id for jira tracker plans', () => {
     const paths = buildPaths(tmp);
     fs.mkdirSync(paths.squadDir, { recursive: true });
     const config: SquadConfig = {
       ...baseConfig,
-      tracker: { type: 'linear' },
+      tracker: { type: 'jira' },
       naming: { includeTrackerId: true, globalSequence: true },
     };
-    const s = story({ id: 'ENG-42' });
+    const s = story({ id: 'PROJ-42' });
     const { planFile } = writePlanFile({
       paths,
       config,
@@ -103,7 +103,7 @@ describe('writePlanFile', () => {
       planBodyMarkdown: 'x',
       metadataHeader: '<!-- h -->',
     });
-    expect(path.basename(planFile)).toBe('01-story-eng-42.md');
+    expect(path.basename(planFile)).toBe('01-story-proj-42.md');
   });
 
   it('writes a partial plan with .partial.md and YAML status front matter', () => {
