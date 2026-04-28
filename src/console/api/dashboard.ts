@@ -4,6 +4,7 @@ import { loadConfig } from '../../core/config.js';
 import { listStories } from '../../core/stories.js';
 import { readLastRun } from '../../core/last-run.js';
 import { listRuns } from '../../core/runs.js';
+import { readInstalledPackage } from '../../core/package-info.js';
 
 export function mountDashboardApi(app: Hono, opts: { paths: SquadPaths }): void {
   app.get('/api/dashboard', async (c) => {
@@ -12,7 +13,7 @@ export function mountDashboardApi(app: Hono, opts: { paths: SquadPaths }): void 
     const runs = await listRuns(opts.paths);
     const stories = listStories(opts.paths);
     return c.json({
-      version: '0.6.0',
+      version: readInstalledPackage().version,
       root: opts.paths.root,
       project: cfg.project,
       planner: cfg.planner ? { provider: cfg.planner.provider, enabled: cfg.planner.enabled } : null,
