@@ -50,6 +50,32 @@ export async function promptAzureCredentials(defaults: {
   return { organization: organization.trim(), project: project.trim(), pat };
 }
 
+export async function promptGitHubCredentials(defaults: {
+  owner?: string;
+  repo?: string;
+  host?: string;
+} = {}): Promise<{ owner: string; repo: string; host: string; pat: string }> {
+  const owner = await input({
+    message: 'GitHub repo owner (user or org, e.g. octocat):',
+    default: defaults.owner ?? '',
+    validate: notEmpty,
+  });
+  const repo = await input({
+    message: 'GitHub repo name (e.g. hello-world):',
+    default: defaults.repo ?? '',
+    validate: notEmpty,
+  });
+  const host = await input({
+    message: 'GitHub host (leave blank for github.com; for GHES use ghes.example.com):',
+    default: defaults.host ?? '',
+  });
+  const pat = await password({
+    message: 'Personal Access Token (needs "repo" scope, or fine-grained "Issues: read"; input hidden):',
+    validate: (v) => (v.length >= 20 ? true : 'PAT seems too short'),
+  });
+  return { owner: owner.trim(), repo: repo.trim(), host: host.trim(), pat };
+}
+
 export function newPlannerBlock(provider: ProviderName): PlannerConfig {
   return {
     enabled: true,
