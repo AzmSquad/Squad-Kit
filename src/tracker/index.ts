@@ -3,12 +3,14 @@ import type { SquadSecrets } from '../core/secrets.js';
 import { AzureDevOpsClient } from './azure.js';
 import { GitHubClient } from './github.js';
 import { JiraClient } from './jira.js';
+import { NotionClient } from './notion.js';
 import type { TrackerClient } from './types.js';
 
 export * from './types.js';
 export { JiraClient } from './jira.js';
 export { AzureDevOpsClient } from './azure.js';
 export { GitHubClient } from './github.js';
+export { NotionClient } from './notion.js';
 export { sanitizeFilename } from './attachments.js';
 export { overlayTrackerEnv } from './env-overlay.js';
 
@@ -81,6 +83,21 @@ export function clientFor(config: SquadConfig, secrets: SquadSecrets): ClientRes
         };
       }
       return { client: new GitHubClient({ owner, repo, pat: gh.pat, host: gh.host }) };
+    }
+
+    case 'notion': {
+      const notion = secrets.tracker?.notion ?? {};
+      if (!notion.token) {
+        return {
+          error: {
+            kind: 'missing-credentials',
+            message: 'Notion credentials are incomplete.',
+            detail:
+              'Run `squad config set tracker` to enter a Notion integration token, or set NOTION_TOKEN. Share the target page/database with the integration. Run `squad doctor` to verify the connection.',
+          },
+        };
+      }
+      return { client: new NotionClient({ token: notion.token }) };
     }
 
     case 'none':

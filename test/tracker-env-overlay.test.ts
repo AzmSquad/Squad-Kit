@@ -11,6 +11,8 @@ const KEYS = [
   'AZURE_DEVOPS_PAT',
   'GITHUB_HOST',
   'GITHUB_TOKEN',
+  'NOTION_TOKEN',
+  'NOTION_API_KEY',
   'SQUAD_TRACKER_API_KEY',
 ] as const;
 
@@ -122,5 +124,29 @@ describe('overlayTrackerEnv', () => {
     };
     const out = overlayTrackerEnv(base);
     expect(out.tracker?.github?.pat).toBe('explicit-github');
+  });
+
+  it('overrides notion token from NOTION_TOKEN', () => {
+    process.env.NOTION_TOKEN = 'env-notion';
+    const base: SquadSecrets = { tracker: { notion: { token: 'file-notion' } } };
+    const out = overlayTrackerEnv(base);
+    expect(out.tracker?.notion?.token).toBe('env-notion');
+  });
+
+  it('falls back to NOTION_API_KEY then SQUAD_TRACKER_API_KEY for notion', () => {
+    process.env.NOTION_API_KEY = 'api-key-notion';
+    const base: SquadSecrets = { tracker: { notion: { token: 'file-notion' } } };
+    expect(overlayTrackerEnv(base).tracker?.notion?.token).toBe('api-key-notion');
+
+    delete process.env.NOTION_API_KEY;
+    process.env.SQUAD_TRACKER_API_KEY = 'shared-notion';
+    expect(overlayTrackerEnv(base).tracker?.notion?.token).toBe('shared-notion');
+  });
+
+  it('prefers NOTION_TOKEN over SQUAD_TRACKER_API_KEY for notion', () => {
+    process.env.NOTION_TOKEN = 'explicit-notion';
+    process.env.SQUAD_TRACKER_API_KEY = 'shared';
+    const base: SquadSecrets = { tracker: { notion: { token: 'file' } } };
+    expect(overlayTrackerEnv(base).tracker?.notion?.token).toBe('explicit-notion');
   });
 });

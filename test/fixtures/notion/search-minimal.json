@@ -1,0 +1,36 @@
+{
+  "object": "list",
+  "results": [
+    {
+      "object": "page",
+      "id": "aaaa1111-bbbb-2222-cccc-333344445555",
+      "url": "https://www.notion.so/First-result-aaaa1111bbbb2222cccc333344445555",
+      "properties": {
+        "Name": {
+          "id": "title",
+          "type": "title",
+          "title": [{ "type": "text", "plain_text": "First result" }]
+        },
+        "Status": {
+          "id": "status",
+          "type": "status",
+          "status": { "name": "To Do" }
+        }
+      }
+    },
+    {
+      "object": "page",
+      "id": "bbbb2222-cccc-3333-dddd-444455556666",
+      "url": "https://www.notion.so/Second-result-bbbb2222cccc3333dddd444455556666",
+      "properties": {
+        "Name": {
+          "id": "title",
+          "type": "title",
+          "title": [{ "type": "text", "plain_text": "Second result" }]
+        }
+      }
+    }
+  ],
+  "next_cursor": null,
+  "has_more": false
+}

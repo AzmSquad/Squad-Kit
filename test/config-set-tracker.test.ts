@@ -94,6 +94,19 @@ describe('config set tracker', () => {
     expect(s.tracker?.azure?.organization).toBe('myorg');
   }, 25_000);
 
+  it('interactive notion: saves token to secrets', async () => {
+    saveConfig(path.join(tmp, SQUAD_DIR, 'config.yaml'), baseConfig());
+    vi.mocked(select).mockResolvedValueOnce('notion' as never);
+    vi.mocked(password).mockResolvedValueOnce('notion-secret-token-1234');
+
+    await runConfigSetTracker({});
+
+    const c = loadConfig(path.join(tmp, SQUAD_DIR, 'config.yaml'));
+    expect(c.tracker.type).toBe('notion');
+    const s = loadSecrets(path.join(tmp, SQUAD_DIR, 'secrets.yaml'));
+    expect(s.tracker?.notion?.token).toBe('notion-secret-token-1234');
+  }, 25_000);
+
   it('jira to azure: keeps jira in secrets', async () => {
     const cfg: SquadConfig = {
       ...baseConfig(),

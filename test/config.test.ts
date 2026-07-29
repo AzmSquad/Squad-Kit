@@ -224,6 +224,24 @@ describe('config load/save', () => {
     expect(loadConfig(file).planner?.auth).toEqual({ anthropic: 'subscription' });
   });
 
+  it('rejects tracker.notion.token in config.yaml (secret must live in secrets.yaml)', () => {
+    fs.writeFileSync(
+      file,
+      [
+        'version: 1',
+        'project: { name: x, projectRoots: ["."] }',
+        'tracker:',
+        '  type: notion',
+        '  notion:',
+        '    token: secret_should_not_be_here',
+        'naming: { includeTrackerId: false, globalSequence: true }',
+        'agents: []',
+      ].join('\n'),
+      'utf8',
+    );
+    expect(() => loadConfig(file)).toThrow(/tracker\.notion\.token/);
+  });
+
   it('returns planner undefined when no planner block', () => {
     fs.writeFileSync(
       file,

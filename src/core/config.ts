@@ -3,7 +3,7 @@ import yaml from 'js-yaml';
 import type { PlannerConfig, PlannerModelOverride, ProviderName } from '../planner/types.js';
 import { PLANNER_AUTH_MODES, type PlannerAuthMode } from './planner-auth.js';
 
-export type TrackerType = 'none' | 'github' | 'jira' | 'azure';
+export type TrackerType = 'none' | 'github' | 'jira' | 'azure' | 'notion';
 
 export interface SquadConfig {
   version: number;

@@ -111,6 +111,23 @@ export async function probeAzureConnectivity(
   }
 }
 
+export async function probeNotionConnectivity(
+  secrets: SquadSecrets,
+  _config: SquadConfig,
+): Promise<{ ok: boolean; status?: number; detail?: string }> {
+  const notion = overlayTrackerEnv(secrets).tracker?.notion ?? {};
+  const token = notion.token ?? '';
+  try {
+    const res = await fetch('https://api.notion.com/v1/users/me', {
+      headers: { Authorization: `Bearer ${token}`, 'Notion-Version': '2022-06-28', Accept: 'application/json' },
+    });
+    if (res.ok) return { ok: true };
+    return { ok: false, status: res.status, detail: (await res.text()).slice(0, 200) };
+  } catch (err) {
+    return { ok: false, detail: (err as Error).message };
+  }
+}
+
 export async function probeGitHubConnectivity(
   secrets: SquadSecrets,
   _config: SquadConfig,
