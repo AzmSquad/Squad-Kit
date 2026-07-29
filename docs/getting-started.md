@@ -27,10 +27,10 @@ squad init
 
 - **Project name** — defaults to the current directory name.
 - **Primary language** — e.g. `typescript`; used as a hint in planning.
-- **Issue tracker** — `none`, `github`, `jira`, or `azure`.
+- **Issue tracker** — `none`, `github`, `jira`, `azure`, or `notion`.
 - **Slash commands** — which agents get `squad-plan` (and friends): `claude-code`, `cursor`, `copilot`, `gemini`.
 - **Tracker id in filenames** — when the tracker is not `none`, you can require `NN-story-<slug>-<id>.md` names (`naming.includeTrackerId`).
-- **Jira or Azure** — if you pick either, you are prompted for host / org, email or PAT, and API token. Values are written to **`.squad/secrets.yaml`** (git-ignored, `0600` on POSIX).
+- **Jira, Azure, or Notion** — if you pick Jira or Azure, you are prompted for host / org, email or PAT, and API token; if you pick Notion, you are prompted for an integration token. Values are written to **`.squad/secrets.yaml`** (git-ignored, `0600` on POSIX).
 - **Direct planner (optional)** — “Enable automatic plan generation?” If yes, you choose **Anthropic**, **OpenAI**, or **Google**.
   - Picking **Anthropic** then asks *“How should squad-kit authenticate with Anthropic?”*:
     - **Use my Claude subscription (browser login)** — the default. Writes `planner.auth.anthropic: subscription`. **No API key is asked for.** Finish with `squad auth login` after init (or `claude` → `/login` if you already use Claude Code).
@@ -82,9 +82,9 @@ squad new-story checkout --title "Add guest checkout"
 
 This scaffolds `.squad/stories/checkout/<folder>/intake.md` and the feature’s `attachments/` folder. Fill in title, description, and acceptance criteria yourself.
 
-### With a tracker id (auto-fetch for Jira or Azure)
+### With a tracker id (auto-fetch for Jira, Azure, GitHub, or Notion)
 
-When the workspace tracker is **Jira** or **Azure DevOps** and credentials resolve (env → `.squad/secrets.yaml` → prompt), passing **`--id`** fetches the work item:
+When the workspace tracker is **Jira**, **Azure DevOps**, **GitHub**, or **Notion** and credentials resolve (env → `.squad/secrets.yaml` → prompt), passing **`--id`** fetches the work item:
 
 ```bash
 squad new-story checkout --id ENG-42

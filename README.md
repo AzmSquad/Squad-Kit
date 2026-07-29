@@ -79,7 +79,7 @@
 ## What's new in 0.2.0
 
 - **Direct planner.** `squad new-plan --api` runs Anthropic, OpenAI, or Google from your terminal and writes the plan file. Demand-driven context keeps tokens bounded.
-- **Tracker auto-fetch.** `squad new-story --id <ID>` pulls title, description, labels, and attachments (≤ 10 MB each) from Jira Cloud or Azure DevOps Services.
+- **Tracker auto-fetch.** `squad new-story --id <ID>` pulls title, description, labels, and attachments (≤ 10 MB each) from Jira Cloud, Azure DevOps Services, GitHub, or Notion.
 - **Secrets split.** API tokens live in `.squad/secrets.yaml` (git-ignored, `0600` on POSIX). `.squad/config.yaml` never holds secrets; the loader rejects secret-shaped keys.
 - **Interactive-first UX.** Missing input prompts in a TTY; `-y` / `--yes` or `CI=1` opts out and fails fast.
 - **`squad doctor`.** Full read-only health check; `--fix` for non-destructive repairs, `--json` for scripting.
@@ -217,7 +217,7 @@ Slash commands inside your agent (`/squad-plan`) continue to work unchanged — 
 
 ## Tracker auto-fetch
 
-`squad new-story <feature> --id <ID>` pulls the work item's title, description, labels, and attachments (≤ 10 MB each) straight into the intake. Supported trackers in 0.2.0: **Jira Cloud**, **Azure DevOps Services**.
+`squad new-story <feature> --id <ID>` pulls the work item's title, description, labels, and attachments (≤ 10 MB each) straight into the intake. Supported trackers: **Jira Cloud**, **Azure DevOps Services**, **GitHub**, and **Notion** (read-only fetch/search).
 
 Credentials follow the same resolution order as the planner (env → `.squad/secrets.yaml` → prompt → fail). `squad init` prompts for them when a supported tracker is selected.
 

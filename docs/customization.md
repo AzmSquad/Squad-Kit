@@ -29,7 +29,7 @@ The rejected key names are matched against the **exact lowercased key name**, no
 
 **`squad config set planner`** — interactive flow to enable or change the direct planner: provider (Anthropic / OpenAI / Google), the Anthropic **authentication mode** (subscription / API key / automatic), optional `modelOverride`, and where to put the API key (`.squad/secrets.yaml` or remind you to use a provider env var). Updates `.squad/config.yaml` and, when you choose in-file storage, `.squad/secrets.yaml`. Logging in and out lives on **`squad auth`**, not here.
 
-**`squad config set tracker`** — set tracker type (`none`, `github`, `jira`, `azure`), workspace / org / project fields, and tracker credentials for APIs that need them. Secrets go to `.squad/secrets.yaml` only.
+**`squad config set tracker`** — set tracker type (`none`, `github`, `jira`, `azure`, `notion`), workspace / org / project fields, and tracker credentials for APIs that need them. Secrets go to `.squad/secrets.yaml` only.
 
 **`squad config unset planner`** — removes the `planner` block from `config.yaml` (disables the direct planner). **By default, planner keys in `secrets.yaml` are left in place** so you can re-enable without re-entering. Pass **`--remove-credentials`** to delete planner keys from `secrets.yaml` as well. Use **`-y`** in scripts.
 
@@ -109,7 +109,7 @@ Write it with `squad auth login` (or `squad auth login --token <v>`); remove it 
 
 Your shell is not modified; only the planner subprocess sees the stripped environment. **If you have `ANTHROPIC_API_KEY` exported and it is being ignored, this is why** — set `planner.auth.anthropic: api-key` to use it.
 
-Jira and Azure have host/org/project in **`config.yaml`** and tokens in **`secrets.yaml`** (or the env var names the tracker clients document). `squad status`, `squad auth status`, and `squad config show` are the best way to see what your current workspace *resolves* without printing raw secrets.
+Jira and Azure have host/org/project in **`config.yaml`** and tokens in **`secrets.yaml`** (or the env var names the tracker clients document). Notion reads its integration token from **`NOTION_TOKEN`**, then **`NOTION_API_KEY`**, then the cross-tracker fall-back **`SQUAD_TRACKER_API_KEY`**, before falling back to `secrets.yaml`. `squad status`, `squad auth status`, and `squad config show` are the best way to see what your current workspace *resolves* without printing raw secrets.
 
 Tracker-specific env names are the ones implemented in the squad-kit version you have installed; when in doubt, prefer **`squad config set tracker`** so the right keys are written to **`secrets.yaml`** in the shape the clients expect.
 
