@@ -13,6 +13,12 @@ const SUFFIX_GZ = '.events.jsonl.gz';
 
 export function redactPlannerEventForDisk(e: PlannerEvent): PlannerEvent {
   if (e.kind === 'thinking_delta') return { ...e, delta: '' };
+  if (e.kind === 'auth_info') {
+    // `mode`, `reason`, `credentialHint`, and `apiKeySource` are safe to keep; the account block
+    // (email, organization, plan) is live-stream only and never touches disk.
+    const { account: _account, ...rest } = e;
+    return rest;
+  }
   return e;
 }
 

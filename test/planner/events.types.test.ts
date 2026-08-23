@@ -25,6 +25,7 @@ describe('PlannerEvent taxonomy', () => {
         case 'stage_complete':
         case 'scout_result':
         case 'runtime_info':
+        case 'auth_info':
         case 'tool_call_started':
         case 'tool_call_completed':
         case 'thinking_delta':

@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { runPlanner } from '../../src/planner/loop.js';
 import { resolveRuntime } from '../../src/planner/runtimes/index.js';
+import { apiKeyAuth } from '../support/planner-auth-fixtures.js';
 import { Budget } from '../../src/planner/budget.js';
 
 const SHOULD_RUN =
@@ -28,7 +29,7 @@ describe.skipIf(!SHOULD_RUN)('Agent SDK smoke (live Anthropic)', () => {
         const runtime = resolveRuntime({
           provider: 'anthropic',
           modelId: SMOKE_MODEL,
-          apiKey: process.env.ANTHROPIC_API_KEY!,
+          auth: apiKeyAuth(process.env.ANTHROPIC_API_KEY!),
           anthropicRuntime: 'agent-sdk',
         });
         expect(runtime.kind).toBe('agent-sdk');

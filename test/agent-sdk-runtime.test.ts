@@ -5,6 +5,7 @@ import { PlannerEventBus, type PlannerEvent } from '../src/planner/events.js';
 import { Budget } from '../src/planner/budget.js';
 import type { PlannerToolDefinition } from '../src/planner/runtimes/planner-tool-def.js';
 import { ScoutOutputSchema } from '../src/planner/stages/scout-schema.js';
+import { apiKeyAuth, subscriptionAuth } from './support/planner-auth-fixtures.js';
 
 const queryMock = vi.hoisted(() => vi.fn());
 const createSdkMcpServerMock = vi.hoisted(() =>
@@ -83,7 +84,7 @@ describe('AgentSdkRuntime', () => {
     const events: PlannerEvent[] = [];
     bus.subscribe((e) => events.push(e));
 
-    const rt = new AgentSdkRuntime('claude-opus-4-7', 'sk-secret');
+    const rt = new AgentSdkRuntime('claude-opus-4-7', apiKeyAuth('sk-secret'));
     const toolExec = vi.fn(async () => 'noop');
     const tools: PlannerToolDefinition[] = [
       {
@@ -139,7 +140,7 @@ describe('AgentSdkRuntime', () => {
     const events: PlannerEvent[] = [];
     bus.subscribe((e) => events.push(e));
 
-    const rt = new AgentSdkRuntime('claude-opus-4-7', 'sk-secret');
+    const rt = new AgentSdkRuntime('claude-opus-4-7', apiKeyAuth('sk-secret'));
     await rt.runDraft({
       systemPrompt: 'sys',
       userMessage: 'hi',
@@ -179,7 +180,7 @@ describe('AgentSdkRuntime', () => {
     const events: PlannerEvent[] = [];
     bus.subscribe((e) => events.push(e));
 
-    const rt = new AgentSdkRuntime('m', 'k');
+    const rt = new AgentSdkRuntime('m', apiKeyAuth('k'));
     await rt.runDraft({
       systemPrompt: 's',
       userMessage: 'u',
@@ -211,7 +212,7 @@ describe('AgentSdkRuntime', () => {
       })();
     });
 
-    const rt = new AgentSdkRuntime('claude-opus-4-7', 'sk-secret');
+    const rt = new AgentSdkRuntime('claude-opus-4-7', apiKeyAuth('sk-secret'));
     const tools: PlannerToolDefinition[] = [
       {
         name: 'read_file',
@@ -248,7 +249,7 @@ describe('AgentSdkRuntime', () => {
     const events: PlannerEvent[] = [];
     bus.subscribe((e) => events.push(e));
 
-    const rt = new AgentSdkRuntime('claude-opus-4-7', 'sk-secret');
+    const rt = new AgentSdkRuntime('claude-opus-4-7', apiKeyAuth('sk-secret'));
     const out = await rt.runDraft({
       systemPrompt: 's',
       userMessage: 'u',
@@ -273,7 +274,7 @@ describe('AgentSdkRuntime', () => {
       })(),
     );
 
-    const rt = new AgentSdkRuntime('m', 'k');
+    const rt = new AgentSdkRuntime('m', apiKeyAuth('k'));
     await rt.runDraft({
       systemPrompt: 's',
       userMessage: 'u',
@@ -298,7 +299,7 @@ describe('AgentSdkRuntime', () => {
       })(),
     );
 
-    const rt = new AgentSdkRuntime('m', 'k');
+    const rt = new AgentSdkRuntime('m', apiKeyAuth('k'));
     await rt.runDraft({
       systemPrompt: 's',
       userMessage: 'u',
@@ -322,7 +323,7 @@ describe('AgentSdkRuntime', () => {
       })(),
     );
 
-    const rt = new AgentSdkRuntime('m', 'sk-injected');
+    const rt = new AgentSdkRuntime('m', apiKeyAuth('sk-injected'));
     await rt.runDraft({
       systemPrompt: 's',
       userMessage: 'u',
@@ -345,7 +346,7 @@ describe('AgentSdkRuntime', () => {
       })(),
     );
 
-    const rt = new AgentSdkRuntime('m', 'k');
+    const rt = new AgentSdkRuntime('m', apiKeyAuth('k'));
     await rt.runDraft({
       systemPrompt: 's',
       userMessage: 'u',
@@ -371,7 +372,7 @@ describe('AgentSdkRuntime', () => {
       })(),
     );
 
-    const rt = new AgentSdkRuntime('m', 'k');
+    const rt = new AgentSdkRuntime('m', apiKeyAuth('k'));
     const out = await rt.runDraft({
       systemPrompt: 's',
       userMessage: 'u',
@@ -412,7 +413,7 @@ describe('AgentSdkRuntime', () => {
       if (e.kind === 'assistant_text' && e.delta) texts.push(e.delta);
     });
 
-    const rt = new AgentSdkRuntime('m', 'k');
+    const rt = new AgentSdkRuntime('m', apiKeyAuth('k'));
     const out = await rt.runScout({
       systemPrompt: 'sys',
       userMessage: 'pick files',
@@ -443,7 +444,7 @@ describe('AgentSdkRuntime', () => {
       })();
     });
 
-    const rt = new AgentSdkRuntime('m', 'k');
+    const rt = new AgentSdkRuntime('m', apiKeyAuth('k'));
     const out = await rt.runScout({
       systemPrompt: 'sys',
       userMessage: 'pick files',
@@ -476,7 +477,7 @@ describe('AgentSdkRuntime', () => {
       })();
     });
 
-    const rt = new AgentSdkRuntime('m', 'k');
+    const rt = new AgentSdkRuntime('m', apiKeyAuth('k'));
     const out = await rt.runScout({
       systemPrompt: 'sys',
       userMessage: 'pick files',
@@ -495,7 +496,7 @@ describe('AgentSdkRuntime', () => {
       })(),
     );
 
-    const rt = new AgentSdkRuntime('m', 'k');
+    const rt = new AgentSdkRuntime('m', apiKeyAuth('k'));
     const out = await rt.runScout({
       systemPrompt: 'sys',
       userMessage: 'pick files',
@@ -514,7 +515,7 @@ describe('AgentSdkRuntime', () => {
       })(),
     );
 
-    const rt = new AgentSdkRuntime('m', 'k');
+    const rt = new AgentSdkRuntime('m', apiKeyAuth('k'));
     await rt.runScout({
       systemPrompt: 'sys',
       userMessage: 'u',
@@ -529,5 +530,91 @@ describe('AgentSdkRuntime', () => {
     expect(opts.persistSession).toBe(false);
     expect(opts.settingSources).toEqual([]);
     expect(opts.includePartialMessages).toBe(true);
+  });
+});
+
+describe('AgentSdkRuntime auth-shaped SDK errors', () => {
+  beforeEach(() => {
+    queryMock.mockReset();
+  });
+
+  function draft(rt: AgentSdkRuntime, bus: PlannerEventBus) {
+    return rt.runDraft({
+      systemPrompt: 's',
+      userMessage: 'u',
+      tools: [],
+      bus,
+      runId: 'r-err',
+      budget: new Budget(budgetCfg),
+      maxSteps: 2,
+      maxOutputTokens: 256,
+    });
+  }
+
+  function errorRun(...messages: unknown[]) {
+    queryMock.mockImplementation(() =>
+      (async function* () {
+        for (const m of messages) yield m;
+      })(),
+    );
+  }
+
+  it('maps authentication_failed to the subscription recovery message', async () => {
+    errorRun(
+      { type: 'assistant', error: 'authentication_failed' },
+      { type: 'result', subtype: 'error_during_execution', usage: {} },
+    );
+    await expect(draft(new AgentSdkRuntime('m', subscriptionAuth()), new PlannerEventBus())).rejects.toThrow(
+      /Claude login failed or expired.*squad auth login/s,
+    );
+  });
+
+  it('maps authentication_failed to the key message in api-key mode', async () => {
+    errorRun(
+      { type: 'assistant', error: 'authentication_failed' },
+      { type: 'result', subtype: 'error_during_execution', usage: {} },
+    );
+    await expect(draft(new AgentSdkRuntime('m', apiKeyAuth('k')), new PlannerEventBus())).rejects.toThrow(
+      /rejected the planner API key/,
+    );
+  });
+
+  it('routes a terminal rate limit through the existing rate_limit event channel', async () => {
+    errorRun(
+      { type: 'assistant', error: 'rate_limit' },
+      { type: 'result', subtype: 'error_during_execution', usage: {} },
+    );
+    const bus = new PlannerEventBus();
+    const events: PlannerEvent[] = [];
+    bus.subscribe((e) => events.push(e));
+
+    await expect(draft(new AgentSdkRuntime('m', subscriptionAuth()), bus)).rejects.toThrow(
+      /usage limit reached/,
+    );
+    const rl = events.filter((e) => e.kind === 'rate_limit');
+    expect(rl).toHaveLength(1);
+    expect(rl[0]).toMatchObject({ phase: 'aborted', provider: 'anthropic' });
+  });
+
+  it('forwards an SDK api_retry rate limit as phase: retrying', async () => {
+    errorRun(
+      { type: 'system', subtype: 'api_retry', error: 'rate_limit', retry_delay_ms: 4200 },
+      { type: 'result', subtype: 'success', usage: { input_tokens: 1, output_tokens: 1 } },
+    );
+    const bus = new PlannerEventBus();
+    const events: PlannerEvent[] = [];
+    bus.subscribe((e) => events.push(e));
+
+    await draft(new AgentSdkRuntime('m', subscriptionAuth()), bus);
+    const rl = events.filter((e) => e.kind === 'rate_limit');
+    expect(rl).toHaveLength(1);
+    expect(rl[0]).toMatchObject({ phase: 'retrying', waitSec: 5, capSec: 90 });
+  });
+
+  it('leaves non-auth error subtypes on the existing incomplete path', async () => {
+    errorRun({ type: 'result', subtype: 'error_max_turns', usage: {} });
+    const out = await draft(new AgentSdkRuntime('m', apiKeyAuth('k')), new PlannerEventBus());
+    expect(out.finishedNormally).toBe(false);
+    expect(out.incompleteKind).toBe('max_iterations');
   });
 });

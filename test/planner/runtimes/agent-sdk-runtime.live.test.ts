@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { runPlanner } from '../../../src/planner/loop.js';
 import { resolveRuntime } from '../../../src/planner/runtimes/index.js';
+import { apiKeyAuth } from '../../support/planner-auth-fixtures.js';
 import { Budget } from '../../../src/planner/budget.js';
 import { PlannerEventBus, type PlannerEvent } from '../../../src/planner/events.js';
 
@@ -29,7 +30,7 @@ describe.skipIf(!SHOULD_RUN)('Agent SDK runtime (live telemetry)', () => {
         const runtime = resolveRuntime({
           provider: 'anthropic',
           modelId: LIVE_MODEL,
-          apiKey: process.env.ANTHROPIC_API_KEY!,
+          auth: apiKeyAuth(process.env.ANTHROPIC_API_KEY!),
           anthropicRuntime: 'agent-sdk',
         });
         expect(runtime.kind).toBe('agent-sdk');

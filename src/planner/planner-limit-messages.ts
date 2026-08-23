@@ -1,8 +1,18 @@
 import * as ui from '../ui/index.js';
 import type { PlannerSessionLimitContext } from './session-limits.js';
 
-export function printPlannerApiCostNotice(): void {
+export function printPlannerApiCostNotice(authMode: 'subscription' | 'api-key' = 'api-key'): void {
   ui.blank();
+  if (authMode === 'subscription') {
+    ui.step('Usage');
+    ui.info(
+      '`squad new-plan --api` runs on your Claude subscription — there is no per-token API bill. ' +
+        'Agent SDK usage draws on the same usage limits as Claude and Claude Code, so a long planning ' +
+        'run consumes part of your window. Hitting the limit means waiting for the reset, not a larger invoice.',
+    );
+    ui.blank();
+    return;
+  }
   ui.step('Billing');
   ui.info(
     '`squad new-plan --api` sends your intake and repo context to the configured provider. ' +

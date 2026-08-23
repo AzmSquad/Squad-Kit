@@ -22,7 +22,8 @@ import { buildRepoMap } from '../core/repo-map.js';
 import { composeSystemPrompt, composeUserPrompt, composeScoutSystemPrompt } from '../planner/system-prompt.js';
 import { writePlanFile, buildMetadataHeader } from '../planner/writer.js';
 import { buildCopyPlanPromptMarkdown } from '../core/copy-plan-prompt.js';
-import { modelFor, providerEnvVar, readProviderKey } from '../core/planner-models.js';
+import { modelFor, readProviderKey, resolvePlannerAuthForCwd } from '../core/planner-models.js';
+import { describeAuth, type ResolvedPlannerAuth } from '../core/planner-auth.js';
 import { writeLastRun } from '../core/last-run.js';
 import { appendRun, newRunId } from '../core/runs.js';
 import { formatPlannerCacheLine } from '../ui/planner-cache-summary.js';
@@ -191,6 +192,12 @@ function printPlannerRunIncompleteSummary(result: RunPlannerOutput, relPlanFile:
   ui.info('Raise limits in `.squad/config.yaml` (`planner.budget`, `planner.maxOutputTokens`) or re-run when ready.');
 }
 
+/** Header row: `subscription (Claude login)` or `api-key (ANTHROPIC_API_KEY)`. Never a credential. */
+function formatAuthRow(auth: ResolvedPlannerAuth): string {
+  if (auth.mode === 'subscription') return 'subscription (Claude login)';
+  return `api-key (${describeAuth(auth).credentialHint})`;
+}
+
 async function emitViaApi(
   story: StoryRecord,
   paths: SquadPaths,
@@ -203,12 +210,10 @@ async function emitViaApi(
       'Direct planner API is not configured. Run `squad init --force` to enable it, or `squad new-plan --copy` for the manual copy-paste flow.',
     );
   }
-  const apiKey = readProviderKey(planner.provider);
-  if (!apiKey) {
-    throw new Error(
-      `Missing ${providerEnvVar(planner.provider)}. Run \`squad config set planner\` to save a key to secrets, or export the env var, or run \`squad new-plan --copy\` without the API.`,
-    );
-  }
+  // Resolved once for the whole run: scout and draft must never disagree, and a token could
+  // otherwise rotate between the two stages. `PlannerAuthUnavailableError` already names both
+  // recovery paths, so let it propagate unwrapped.
+  const auth = resolvePlannerAuthForCwd(planner.provider, planner);
 
   const modelId = modelFor(planner.provider, 'plan', planner.modelOverride);
 
@@ -218,7 +223,7 @@ async function emitViaApi(
   const draftRuntime = resolveRuntime({
     provider: planner.provider,
     modelId,
-    apiKey,
+    auth,
     anthropicRuntime: planner.provider === 'anthropic' ? anthropicRuntimeChoice : undefined,
   });
 
@@ -243,11 +248,12 @@ async function emitViaApi(
   ui.step(`planning   ${story.feature} / ${story.id}`);
   ui.kv('provider', planner.provider);
   ui.kv('model', modelId);
+  ui.kv('auth', formatAuthRow(auth));
   ui.blank();
 
   const interactive = !opts.yes && Boolean(process.stdin.isTTY);
   if (interactive) {
-    printPlannerApiCostNotice();
+    printPlannerApiCostNotice(auth.mode);
   }
 
   const mapSpinner = ui.spinner('building repo map…');
@@ -284,7 +290,7 @@ async function emitViaApi(
     scoutRuntime = resolveRuntime({
       provider: planner.provider,
       modelId: scoutModelId,
-      apiKey,
+      auth,
       anthropicRuntime: planner.provider === 'anthropic' ? anthropicRuntimeChoice : undefined,
     });
     scoutSystemPrompt = composeScoutSystemPrompt({
@@ -348,6 +354,7 @@ async function emitViaApi(
       runtime: draftRuntime,
       provider: planner.provider,
       modelId,
+      auth,
       anthropicProviderSpecific,
       systemPrompt,
       userPrompt,

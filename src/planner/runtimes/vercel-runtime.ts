@@ -236,6 +236,13 @@ export class VercelRuntime implements PlannerRuntime {
     if (typeof apiKeyOrModel !== 'string') {
       throw new Error('VercelRuntime: apiKey must be a string unless injectModel is true');
     }
+    // `resolveRuntime` never routes subscription auth here, but this path builds an `x-api-key`
+    // client — an empty key would fail opaquely at the provider instead of at construction.
+    if (!apiKeyOrModel) {
+      throw new Error(
+        `VercelRuntime: a non-empty ${provider} API key is required. Run \`squad config set planner\` to save one.`,
+      );
+    }
     this.languageModel = resolveModel(provider, modelId, apiKeyOrModel).model;
   }
 

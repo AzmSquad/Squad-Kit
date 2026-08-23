@@ -1,4 +1,8 @@
+import type { PlannerAuthReason } from '../core/planner-auth.js';
 import type { ToolCall, Usage, PlannerRunStats, ProviderName } from './types.js';
+
+/** Mirrors the Agent SDK's `ApiKeySource`. `oauth` proves the subscription path is live. */
+export type PlannerApiKeySource = 'user' | 'project' | 'org' | 'temporary' | 'oauth';
 
 export type PlannerEvent =
   | {
@@ -89,6 +93,23 @@ export type PlannerEvent =
           effortByPhase?: { scout?: 'minimal' | 'medium' | 'high'; draft?: 'minimal' | 'medium' | 'high' };
         };
       };
+    }
+  | {
+      /**
+       * How this run authenticates. Emitted once by `runPlanner` right after `runtime_info`, and
+       * again — enriched with `apiKeySource` (and `account` in subscription mode) — when the Agent
+       * SDK reports its `system`/`init` message. Consumers take the most recent one; a run that is
+       * cancelled before the SDK initialises only ever sees the first, so treat both as optional.
+       */
+      kind: 'auth_info';
+      runId: string;
+      mode: 'subscription' | 'api-key';
+      reason: PlannerAuthReason;
+      credentialHint: string;
+      /** From the SDK init message. 'oauth' proves the subscription path is live. */
+      apiKeySource?: PlannerApiKeySource;
+      /** Live stream only — {@link redactPlannerEventForDisk} strips this before JSONL persistence. */
+      account?: { email?: string; organization?: string; subscriptionType?: string };
     }
   | { kind: 'tool_call_started'; runId: string; turn: number; toolCallId: string; name: string; input: Record<string, unknown> }
   | {

@@ -43,18 +43,7 @@ function tok(p: number, o: number) {
   return { promptTokens: p, completionTokens: o, totalTokens: p + o };
 }
 
-let tmp: string;
-let prevCwd: string;
-let prevKey: string | undefined;
-
-beforeEach(() => {
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-new-plan-api-'));
-  prevCwd = process.cwd();
-  process.chdir(tmp);
-  prevKey = process.env.ANTHROPIC_API_KEY;
-  process.env.ANTHROPIC_API_KEY = 'test-key';
-  mockDoStream.mockReset();
-
+function writePlannerConfig(extra: Partial<NonNullable<typeof DEFAULT_CONFIG.planner>> = {}) {
   const squad = path.join(tmp, SQUAD_DIR);
   fs.mkdirSync(squad, { recursive: true });
   saveConfig(path.join(squad, 'config.yaml'), {
@@ -70,8 +59,24 @@ beforeEach(() => {
       },
       stages: { scout: { enabled: false } },
       validation: { enabled: false },
+      ...extra,
     },
   });
+}
+
+let tmp: string;
+let prevCwd: string;
+let prevKey: string | undefined;
+
+beforeEach(() => {
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-new-plan-api-'));
+  prevCwd = process.cwd();
+  process.chdir(tmp);
+  prevKey = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY = 'test-key';
+  mockDoStream.mockReset();
+
+  writePlannerConfig();
 
   const paths = buildPaths(tmp);
   const intakeDir = path.join(paths.storiesDir, 'feat', 'sid');
@@ -139,11 +144,16 @@ describe('runNewPlan API path', () => {
     expect(raw).toContain('squad-kit-plan-status: partial');
   });
 
-  it('throws when API key is missing', async () => {
+  it('throws naming both recovery paths when no credential resolves', async () => {
+    // Pin `auth: api-key` so the assertion does not depend on whether the machine running the
+    // suite happens to have a Claude login (under `auto`, a login would be used instead).
+    writePlannerConfig({ auth: { anthropic: 'api-key' } });
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.SQUAD_PLANNER_API_KEY;
     const intake = path.join(tmp, '.squad/stories/feat/sid/intake.md');
-    await expect(runNewPlan(intake, { yes: true, api: true })).rejects.toThrow(/Missing ANTHROPIC_API_KEY/);
+    await expect(runNewPlan(intake, { yes: true, api: true })).rejects.toThrow(
+      /planner\.auth\.anthropic is `api-key`.*squad auth login.*ANTHROPIC_API_KEY/s,
+    );
   });
 
   it('rejects --api and --copy together', async () => {

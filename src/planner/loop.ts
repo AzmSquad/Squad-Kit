@@ -13,6 +13,7 @@ import type { AnthropicProviderSpecific, PlannerRuntime } from './runtimes/types
 import type { SquadPaths } from '../core/paths.js';
 import { createRunEventsStore, rotateRunEvents } from '../core/run-events-store.js';
 import { PlannerEventBus } from './events.js';
+import { describeAuth, type ResolvedPlannerAuth } from '../core/planner-auth.js';
 import { runScout } from './stages/scout.js';
 import { validatePlan, type ValidationIssue } from './validation.js';
 
@@ -24,6 +25,12 @@ export interface RunPlannerInput {
   modelId: string;
   /** When the Anthropic provider runs both scout and draft, pass per-phase Agent SDK options. */
   anthropicProviderSpecific?: { scout?: AnthropicProviderSpecific; draft?: AnthropicProviderSpecific };
+  /**
+   * How this run authenticates. Resolve it once in the caller and pass the same instance to every
+   * `resolveRuntime` call so scout and draft can never disagree. Omit only in tests that inject a
+   * runtime directly — then no `auth_info` event is emitted.
+   */
+  auth?: ResolvedPlannerAuth;
   systemPrompt: string;
   userPrompt: string;
   budget: Budget;
@@ -395,6 +402,10 @@ export async function runPlanner(input: RunPlannerInput): Promise<RunPlannerOutp
           }
         : undefined,
   });
+
+  if (input.auth) {
+    bus.emit({ kind: 'auth_info', runId, ...describeAuth(input.auth) });
+  }
 
   const merged: RunPlannerInput = { ...input, events: bus, runId };
   const systemPrompt = input.systemPrompt;

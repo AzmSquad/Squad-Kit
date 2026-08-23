@@ -9,7 +9,51 @@ import type {
 import type { Usage } from '../types.js';
 import { sdkEffortFromPlanner, thinkingConfigFromProviderSpecific } from './anthropic-options.js';
 import { usageFromAgentSdkResult } from '../usage-map.js';
-import type { PlannerEventBus } from '../events.js';
+import type { PlannerApiKeySource, PlannerEvent, PlannerEventBus } from '../events.js';
+import { describeAuth, type ResolvedPlannerAuth } from '../../core/planner-auth.js';
+import {
+  authErrorContextFrom,
+  authErrorMessage,
+  detectAuthShapedSdkError,
+  type AuthShapedSdkError,
+} from '../auth-errors.js';
+
+/**
+ * Cleared from the child environment in subscription mode. Both outrank the login credential in
+ * Claude Code's precedence order, so an inherited one would silently bill API credits instead.
+ * Compared case-insensitively — Windows env vars are case-insensitive but a `{...process.env}`
+ * copy is a plain object, so `delete env.ANTHROPIC_API_KEY` would miss `Anthropic_Api_Key`.
+ */
+const SUBSCRIPTION_WITHHELD_ENV_KEYS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'];
+
+/** Hard cap on the best-effort `accountInfo()` lookup so a wedged control channel cannot stall a run. */
+const ACCOUNT_INFO_TIMEOUT_MS = 2000;
+
+/** Matches the Vercel runtime's rate-limit retry cap so the console countdown renders identically. */
+const MAX_RATE_LIMIT_RETRY_SEC = 90;
+
+/**
+ * Scout and draft build separate runtime instances from the same `ResolvedPlannerAuth`, but share
+ * one bus per run. Keyed by bus so the enriched `auth_info` is emitted exactly once per run.
+ */
+const enrichedAuthInfoRuns = new WeakMap<PlannerEventBus, Set<string>>();
+
+function markAuthInfoEmitted(bus: PlannerEventBus, runId: string): boolean {
+  let seen = enrichedAuthInfoRuns.get(bus);
+  if (!seen) {
+    seen = new Set<string>();
+    enrichedAuthInfoRuns.set(bus, seen);
+  }
+  if (seen.has(runId)) return false;
+  seen.add(runId);
+  return true;
+}
+
+const API_KEY_SOURCES: readonly PlannerApiKeySource[] = ['user', 'project', 'org', 'temporary', 'oauth'];
+
+function asApiKeySource(v: unknown): PlannerApiKeySource | undefined {
+  return API_KEY_SOURCES.find((s) => s === v);
+}
 
 const BUILTIN_TOOL_DENY = [
   'Read',
@@ -242,6 +286,39 @@ function handleDecodedStreamEvent(
   }
 }
 
+type SdkAccountInfo = { email?: string; organization?: string; subscriptionType?: string };
+
+/**
+ * Best-effort account lookup. `Query.accountInfo()` resolves from the `initialize` control-protocol
+ * response the SDK issues when the subprocess starts — it does **not** consume a model turn — so by
+ * the time the `system`/`init` message arrives it is already settled. The timeout only guards a
+ * wedged control channel.
+ */
+async function readSdkAccountInfo(q: unknown): Promise<SdkAccountInfo | undefined> {
+  const fn = (q as { accountInfo?: unknown } | null | undefined)?.accountInfo;
+  if (typeof fn !== 'function') return undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const info = await Promise.race([
+      (fn as () => Promise<unknown>).call(q),
+      new Promise<undefined>((resolve) => {
+        timer = setTimeout(() => resolve(undefined), ACCOUNT_INFO_TIMEOUT_MS);
+      }),
+    ]);
+    if (!info || typeof info !== 'object') return undefined;
+    const o = info as Record<string, unknown>;
+    const out: SdkAccountInfo = {};
+    if (typeof o.email === 'string') out.email = o.email;
+    if (typeof o.organization === 'string') out.organization = o.organization;
+    if (typeof o.subscriptionType === 'string') out.subscriptionType = o.subscriptionType;
+    return Object.keys(out).length > 0 ? out : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /**
  * Anthropic-only runtime using `@anthropic-ai/claude-agent-sdk` `query()` and in-process MCP tools.
  */
@@ -251,8 +328,103 @@ export class AgentSdkRuntime implements PlannerRuntime {
 
   constructor(
     readonly modelId: string,
-    private readonly apiKey: string,
+    private readonly auth: ResolvedPlannerAuth,
   ) {}
+
+  /**
+   * Environment handed to the Agent SDK subprocess.
+   *
+   * In subscription mode the point is what is *absent*: `ANTHROPIC_API_KEY` and
+   * `ANTHROPIC_AUTH_TOKEN` both outrank the `/login` credential in Claude Code's precedence order,
+   * so an inherited one would silently bill API credits. `SQUAD_PLANNER_API_KEY` is left alone —
+   * it is squad-kit's own variable and the SDK never reads it.
+   */
+  private buildSdkEnv(): NodeJS.ProcessEnv {
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    if (this.auth.mode === 'api-key') {
+      env.ANTHROPIC_API_KEY = this.auth.key;
+      return env;
+    }
+    for (const key of Object.keys(env)) {
+      if (SUBSCRIPTION_WITHHELD_ENV_KEYS.includes(key.toUpperCase())) delete env[key];
+    }
+    if (this.auth.oauthToken) env.CLAUDE_CODE_OAUTH_TOKEN = this.auth.oauthToken;
+    return env;
+  }
+
+  /** Safe-to-log auth projection — never carries the key or the token. */
+  private authDescriptor(): Pick<
+    Extract<PlannerEvent, { kind: 'auth_info' }>,
+    'mode' | 'reason' | 'credentialHint'
+  > {
+    return describeAuth(this.auth);
+  }
+
+  /**
+   * Handle a `system` message. On `init` this emits the enriched `auth_info` (once per run, even
+   * though scout and draft are separate instances); on `api_retry` it forwards a rate limit through
+   * the existing 0.8.0 rate-limit channel so the console countdown and CLI spinner keep working.
+   */
+  private async handleSystemMessage(
+    m: { subtype?: string; apiKeySource?: unknown; error?: unknown; retry_delay_ms?: unknown },
+    input: { bus: PlannerEventBus; runId: string },
+    ctx: { query: unknown; withAccountInfo: boolean; turn: number },
+  ): Promise<void> {
+    if (m.subtype === 'init') {
+      const apiKeySource = asApiKeySource(m.apiKeySource);
+      if (!apiKeySource || !markAuthInfoEmitted(input.bus, input.runId)) return;
+      const account =
+        ctx.withAccountInfo && this.auth.mode === 'subscription'
+          ? await readSdkAccountInfo(ctx.query)
+          : undefined;
+      input.bus.emit({
+        kind: 'auth_info',
+        runId: input.runId,
+        ...this.authDescriptor(),
+        apiKeySource,
+        ...(account ? { account } : {}),
+      });
+      return;
+    }
+    if (m.subtype === 'api_retry' && detectAuthShapedSdkError(m.error) === 'rate_limit') {
+      const delayMs = typeof m.retry_delay_ms === 'number' ? m.retry_delay_ms : 0;
+      const waitSec = Math.max(1, Math.ceil(delayMs / 1000));
+      input.bus.emit({
+        kind: 'rate_limit',
+        runId: input.runId,
+        turn: ctx.turn,
+        retryAfterSec: waitSec,
+        waitSec,
+        capSec: MAX_RATE_LIMIT_RETRY_SEC,
+        phase: 'retrying',
+        provider: 'anthropic',
+      });
+    }
+  }
+
+  /**
+   * Turn an auth-shaped SDK failure into an actionable error. Rate limits also emit the terminal
+   * `rate_limit` event so the UI closes its countdown before the throw.
+   */
+  private authError(
+    signal: AuthShapedSdkError,
+    input: { bus: PlannerEventBus; runId: string },
+    turn: number,
+  ): Error {
+    if (signal === 'rate_limit') {
+      input.bus.emit({
+        kind: 'rate_limit',
+        runId: input.runId,
+        turn,
+        retryAfterSec: undefined,
+        waitSec: 0,
+        capSec: MAX_RATE_LIMIT_RETRY_SEC,
+        phase: 'aborted',
+        provider: 'anthropic',
+      });
+    }
+    return new Error(authErrorMessage(signal, authErrorContextFrom(this.auth)));
+  }
 
   async runDraft(input: RunDraftInput): Promise<RunDraftOutput> {
     const { query, createSdkMcpServer, tool } = await import('@anthropic-ai/claude-agent-sdk');
@@ -293,7 +465,7 @@ export class AgentSdkRuntime implements PlannerRuntime {
       persistSession: false,
       settingSources: [] as [],
       abortController: ac,
-      env: { ...process.env, ANTHROPIC_API_KEY: this.apiKey },
+      env: this.buildSdkEnv(),
       thinking,
       effort,
     };
@@ -304,6 +476,7 @@ export class AgentSdkRuntime implements PlannerRuntime {
     let finishedNormally = false;
     let incompleteKind: RunDraftOutput['incompleteKind'];
     let userCancelled = false;
+    let authSignal: AuthShapedSdkError | undefined;
     const think = initialThinkingState();
 
     try {
@@ -313,7 +486,15 @@ export class AgentSdkRuntime implements PlannerRuntime {
       });
 
       for await (const message of q) {
-        const m = message as { type?: string; subtype?: string; event?: unknown; result?: string; usage?: unknown };
+        const m = message as {
+          type?: string;
+          subtype?: string;
+          event?: unknown;
+          result?: string;
+          usage?: unknown;
+          error?: unknown;
+          errors?: unknown;
+        };
         switch (m.type) {
           case 'stream_event': {
             handleDecodedStreamEvent(decodeStreamEvent(m.event), {
@@ -327,6 +508,7 @@ export class AgentSdkRuntime implements PlannerRuntime {
             break;
           }
           case 'assistant': {
+            authSignal = detectAuthShapedSdkError(m.error) ?? authSignal;
             think.blockIndexCounter = 0;
             think.inThinkingBlock = false;
             think.thinkingBlockIndex = -1;
@@ -358,10 +540,17 @@ export class AgentSdkRuntime implements PlannerRuntime {
               finishedNormally = false;
             } else if (typeof sub === 'string' && sub.startsWith('error')) {
               finishedNormally = false;
+              const signal = authSignal ?? detectAuthShapedSdkError(m.errors);
+              if (signal) throw this.authError(signal, input, assistantTurns);
             }
             break;
           }
           case 'system':
+            await this.handleSystemMessage(m, input, {
+              query: q,
+              withAccountInfo: true,
+              turn: assistantTurns,
+            });
             break;
           default:
             break;
@@ -432,13 +621,14 @@ export class AgentSdkRuntime implements PlannerRuntime {
       includePartialMessages: true,
       persistSession: false,
       settingSources: [] as [],
-      env: { ...process.env, ANTHROPIC_API_KEY: this.apiKey },
+      env: this.buildSdkEnv(),
       thinking,
       effort,
     };
 
     let usage: Usage = { inputTokens: 0, outputTokens: 0 };
     let assistantTurns = 0;
+    let authSignal: AuthShapedSdkError | undefined;
     const think = initialThinkingState();
 
     const ac = new AbortController();
@@ -454,7 +644,15 @@ export class AgentSdkRuntime implements PlannerRuntime {
         options: { ...queryOptions, abortController: ac },
       });
       for await (const message of q) {
-        const m = message as { type?: string; usage?: unknown; subtype?: string; event?: unknown; result?: string };
+        const m = message as {
+          type?: string;
+          usage?: unknown;
+          subtype?: string;
+          event?: unknown;
+          result?: string;
+          error?: unknown;
+          errors?: unknown;
+        };
         switch (m.type) {
           case 'stream_event':
             handleDecodedStreamEvent(decodeStreamEvent(m.event), {
@@ -465,6 +663,7 @@ export class AgentSdkRuntime implements PlannerRuntime {
             });
             break;
           case 'assistant':
+            authSignal = detectAuthShapedSdkError(m.error) ?? authSignal;
             think.blockIndexCounter = 0;
             think.inThinkingBlock = false;
             think.thinkingBlockIndex = -1;
@@ -480,8 +679,18 @@ export class AgentSdkRuntime implements PlannerRuntime {
                 cache_read_input_tokens?: number | null;
               },
             );
+            if (typeof m.subtype === 'string' && m.subtype.startsWith('error')) {
+              const signal = authSignal ?? detectAuthShapedSdkError(m.errors);
+              if (signal) throw this.authError(signal, input, assistantTurns);
+            }
             break;
           case 'system':
+            // Scout never pays for the account lookup — draft covers it, on the same credential.
+            await this.handleSystemMessage(m, input, {
+              query: q,
+              withAccountInfo: false,
+              turn: assistantTurns,
+            });
             break;
           default:
             break;

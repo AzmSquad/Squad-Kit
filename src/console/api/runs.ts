@@ -10,7 +10,8 @@ import { Budget } from '../../planner/budget.js';
 import { runPlanner } from '../../planner/loop.js';
 import { PlannerEventBus, type PlannerEvent } from '../../planner/events.js';
 import { listStories } from '../../core/stories.js';
-import { modelFor, readProviderKeyForPaths, providerEnvVar } from '../../core/planner-models.js';
+import { modelFor, resolvePlannerAuthForPaths } from '../../core/planner-models.js';
+import { PlannerAuthUnavailableError, type ResolvedPlannerAuth } from '../../core/planner-auth.js';
 import { buildRepoMap } from '../../core/repo-map.js';
 import { buildPlansIndex } from '../../core/plans-index.js';
 import { summariseIssuesByKind } from '../../planner/validation.js';
@@ -74,15 +75,23 @@ export function mountRunsApi(app: Hono, opts: { paths: SquadPaths }): void {
     if (!cfg.planner?.enabled) {
       return c.json({ error: 'planner_disabled', detail: 'Run `squad config set planner` first.' }, 400);
     }
-    const apiKey = readProviderKeyForPaths(opts.paths, cfg.planner.provider);
-    if (!apiKey) {
-      return c.json(
-        {
-          error: 'missing_credentials',
-          detail: `Set ${providerEnvVar(cfg.planner.provider)} or save a key via the Secrets tab.`,
-        },
-        400,
-      );
+    // Resolved once, before the run body: scout and draft build their runtimes from this same
+    // instance so a rotating token can never make the two stages disagree.
+    let auth: ResolvedPlannerAuth;
+    try {
+      auth = resolvePlannerAuthForPaths(opts.paths, cfg.planner.provider, cfg.planner);
+    } catch (err) {
+      if (err instanceof PlannerAuthUnavailableError) {
+        return c.json(
+          {
+            error: 'auth_unavailable',
+            mode: cfg.planner.auth?.anthropic ?? 'auto',
+            detail: err.message,
+          },
+          400,
+        );
+      }
+      throw err;
     }
     const stories = listStories(opts.paths, { feature: body.data.feature });
     const story = stories.find((s) => s.id === body.data.storyId);
@@ -106,7 +115,7 @@ export function mountRunsApi(app: Hono, opts: { paths: SquadPaths }): void {
       const draftRuntime = resolveRuntime({
         provider: planner.provider,
         modelId,
-        apiKey,
+        auth,
         anthropicRuntime: planner.provider === 'anthropic' ? anthropicRuntimeChoice : undefined,
       });
       const anthropicProviderSpecific =
@@ -136,7 +145,7 @@ export function mountRunsApi(app: Hono, opts: { paths: SquadPaths }): void {
         scoutRuntime = resolveRuntime({
           provider: planner.provider,
           modelId: scoutModelId,
-          apiKey,
+          auth,
           anthropicRuntime: planner.provider === 'anthropic' ? anthropicRuntimeChoice : undefined,
         });
       }
@@ -170,6 +179,7 @@ export function mountRunsApi(app: Hono, opts: { paths: SquadPaths }): void {
             runtime: draftRuntime,
             provider: planner.provider,
             modelId,
+            auth,
             anthropicProviderSpecific,
             systemPrompt,
             userPrompt,

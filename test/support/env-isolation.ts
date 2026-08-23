@@ -13,6 +13,10 @@ import { beforeEach, afterEach } from 'vitest';
  */
 const ISOLATED_VARS = [
   'ANTHROPIC_API_KEY',
+  // Anthropic subscription auth: both outrank the Claude login in the SDK's precedence order,
+  // so a developer's exported value would silently change which credential tests resolve.
+  'ANTHROPIC_AUTH_TOKEN',
+  'CLAUDE_CODE_OAUTH_TOKEN',
   'OPENAI_API_KEY',
   'GOOGLE_API_KEY',
   'SQUAD_PLANNER_API_KEY',

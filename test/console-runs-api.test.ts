@@ -92,6 +92,49 @@ describe('console runs API', () => {
     }
   });
 
+  it('POST /api/runs returns 400 auth_unavailable when no credential resolves', async () => {
+    const soloRoot = await mkdtemp(path.join(tmpdir(), 'squad-runs-noauth-'));
+    const paths = buildPaths(soloRoot);
+    await mkdir(paths.squadDir, { recursive: true });
+    await mkdir(paths.storiesDir, { recursive: true });
+    await mkdir(paths.plansDir, { recursive: true });
+    await writeFile(
+      paths.configFile,
+      yaml.dump({
+        version: 1,
+        project: { name: 'x', primaryLanguage: 'ts' },
+        tracker: { type: 'none' },
+        naming: { includeTrackerId: false, globalSequence: true },
+        agents: [],
+        planner: {
+          enabled: true,
+          provider: 'anthropic',
+          mode: 'auto',
+          // Pinned so the assertion does not depend on whether the host has a Claude login.
+          auth: { anthropic: 'api-key' },
+          budget: { maxFileReads: 25, maxContextBytes: 50_000, maxDurationSeconds: 180 },
+        },
+      }),
+      'utf8',
+    );
+    const s = await startConsoleServer({ paths, requestedPort: 0, token: 'g'.repeat(64) });
+    try {
+      const res = await fetch(`http://127.0.0.1:${s.port}/api/runs`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${'g'.repeat(64)}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ feature: 'demo', storyId: '01-pull' }),
+      });
+      expect(res.status).toBe(400);
+      const j = (await res.json()) as { error: string; mode: string; detail: string };
+      expect(j.error).toBe('auth_unavailable');
+      expect(j.mode).toBe('api-key');
+      expect(j.detail).toContain('squad auth login');
+      expect(j.detail).toContain('ANTHROPIC_API_KEY');
+    } finally {
+      await s.close();
+    }
+  });
+
   it('POST /api/runs returns 202 and stream includes started, done, closed', async () => {
     runPlannerMock.mockImplementation(async (opts) => {
       opts.events?.emit({
