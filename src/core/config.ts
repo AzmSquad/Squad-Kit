@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import yaml from 'js-yaml';
 import type { PlannerConfig, PlannerModelOverride, ProviderName } from '../planner/types.js';
+import { PLANNER_AUTH_MODES, type PlannerAuthMode } from './planner-auth.js';
 
 export type TrackerType = 'none' | 'github' | 'jira' | 'azure';
 
@@ -37,7 +38,21 @@ export const DEFAULT_CONFIG: SquadConfig = {
   planner: undefined,
 };
 
-const FORBIDDEN_KEYS = ['apikey', 'api_key', 'token', 'secret', 'credential', 'credentials'];
+/**
+ * Matched against a lowercased key name **exactly**, not as a substring: `planner.maxOutputTokens`
+ * is a legitimate config key and must keep loading. New credential-shaped keys are listed here
+ * by name — `anthropicOauthToken` belongs in .squad/secrets.yaml only.
+ */
+const FORBIDDEN_KEYS = [
+  'apikey',
+  'api_key',
+  'token',
+  'oauthtoken',
+  'anthropicoauthtoken',
+  'secret',
+  'credential',
+  'credentials',
+];
 
 /** Default max completion tokens per planner API round (was 8192; long Opus plans truncated). */
 export const DEFAULT_PLANNER_MAX_OUTPUT_TOKENS = 16384;
@@ -68,15 +83,30 @@ function rejectSecretsInYaml(node: unknown, configFile: string, path: string[] =
   }
 }
 
+/** `planner.auth.anthropic` is a mode, not a secret — lowercased and trimmed before matching. */
+function normalizeAuthMode(raw: unknown, configFile: string): PlannerAuthMode | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  const value = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  if ((PLANNER_AUTH_MODES as readonly string[]).includes(value)) return value as PlannerAuthMode;
+  throw new Error(
+    `Invalid planner.auth.anthropic ${JSON.stringify(raw)} in ${configFile}: must be ${PLANNER_AUTH_MODES.join(', ')}. ` +
+      `Run \`squad config set planner\` to fix it.`,
+  );
+}
+
 function mergePlanner(
   base: PlannerConfig | undefined,
   override: Partial<PlannerConfig> | undefined,
+  configFile: string,
 ): PlannerConfig | undefined {
   if (!override) return base;
   const merged: PlannerConfig = {
     enabled: override.enabled ?? base?.enabled ?? false,
     provider: (override.provider ?? base?.provider ?? 'anthropic') as ProviderName,
     mode: override.mode ?? base?.mode ?? 'auto',
+    auth: {
+      anthropic: normalizeAuthMode(override.auth?.anthropic ?? base?.auth?.anthropic, configFile) ?? 'auto',
+    },
     budget: {
       maxFileReads: override.budget?.maxFileReads ?? base?.budget?.maxFileReads ?? 25,
       maxContextBytes: override.budget?.maxContextBytes ?? base?.budget?.maxContextBytes ?? 50_000,
@@ -177,7 +207,7 @@ export function parseConfig(raw: string, configFile: string): SquadConfig {
     );
   }
   rejectSecretsInYaml(parsed, configFile);
-  const merged = mergeConfig(DEFAULT_CONFIG, parsed);
+  const merged = mergeConfig(DEFAULT_CONFIG, parsed, configFile);
   validateModelOverride(merged.planner?.modelOverride, configFile);
   if (merged.planner?.cache !== undefined) {
     const c = merged.planner.cache;
@@ -242,13 +272,13 @@ export function saveConfig(configFile: string, config: SquadConfig): void {
   fs.writeFileSync(configFile, body, 'utf8');
 }
 
-function mergeConfig(base: SquadConfig, override: Partial<SquadConfig>): SquadConfig {
+function mergeConfig(base: SquadConfig, override: Partial<SquadConfig>, configFile: string): SquadConfig {
   return {
     version: override.version ?? base.version,
     project: { ...base.project, ...(override.project ?? {}) },
     tracker: { ...base.tracker, ...(override.tracker ?? {}) },
     naming: { ...base.naming, ...(override.naming ?? {}) },
     agents: override.agents ?? base.agents,
-    planner: mergePlanner(base.planner, override.planner as Partial<PlannerConfig> | undefined),
+    planner: mergePlanner(base.planner, override.planner as Partial<PlannerConfig> | undefined, configFile),
   };
 }

@@ -166,6 +166,64 @@ describe('config load/save', () => {
     expect(() => loadConfig(file)).toThrow(/planner\.nested\.apiKey/);
   });
 
+  it('rejects planner.anthropicOauthToken in config.yaml, pointing at secrets.yaml', () => {
+    fs.writeFileSync(
+      file,
+      [
+        'version: 1',
+        'project: { name: x, projectRoots: ["."] }',
+        'tracker: { type: none }',
+        'naming: { includeTrackerId: false, globalSequence: true }',
+        'agents: []',
+        'planner:',
+        '  enabled: false',
+        '  anthropicOauthToken: oat-abc',
+      ].join('\n'),
+      'utf8',
+    );
+    expect(() => loadConfig(file)).toThrow(/planner\.anthropicOauthToken/);
+    expect(() => loadConfig(file)).toThrow(/\.squad\/secrets\.yaml/);
+  });
+
+  it('still accepts planner.maxOutputTokens (forbidden keys match exactly, not by substring)', () => {
+    fs.writeFileSync(
+      file,
+      [
+        'version: 1',
+        'project: { name: x, projectRoots: ["."] }',
+        'tracker: { type: none }',
+        'naming: { includeTrackerId: false, globalSequence: true }',
+        'agents: []',
+        'planner:',
+        '  enabled: true',
+        '  provider: anthropic',
+        '  maxOutputTokens: 20000',
+      ].join('\n'),
+      'utf8',
+    );
+    expect(loadConfig(file).planner?.maxOutputTokens).toBe(20000);
+  });
+
+  it('loads planner.auth.anthropic: subscription — the value is not a secret-looking key', () => {
+    fs.writeFileSync(
+      file,
+      [
+        'version: 1',
+        'project: { name: x, projectRoots: ["."] }',
+        'tracker: { type: none }',
+        'naming: { includeTrackerId: false, globalSequence: true }',
+        'agents: []',
+        'planner:',
+        '  enabled: true',
+        '  provider: anthropic',
+        '  auth:',
+        '    anthropic: subscription',
+      ].join('\n'),
+      'utf8',
+    );
+    expect(loadConfig(file).planner?.auth).toEqual({ anthropic: 'subscription' });
+  });
+
   it('returns planner undefined when no planner block', () => {
     fs.writeFileSync(
       file,

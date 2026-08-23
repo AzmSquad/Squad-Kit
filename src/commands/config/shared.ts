@@ -100,3 +100,7 @@ export function mergePlannerKeyIntoSecrets(base: SquadSecrets, provider: Provide
   }
   return mergeSecrets(base, { planner: { google: key } });
 }
+
+export function mergePlannerOauthTokenIntoSecrets(base: SquadSecrets, token: string): SquadSecrets {
+  return mergeSecrets(base, { planner: { anthropicOauthToken: token } });
+}

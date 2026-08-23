@@ -1,7 +1,13 @@
 import fs from 'node:fs';
 import { findSquadRoot, buildPaths, type SquadPaths } from './paths.js';
 import { loadSecrets, type SquadSecrets } from './secrets.js';
-import type { PlannerModelOverride, PlannerPhase, ProviderName } from '../planner/types.js';
+import {
+  detectClaudeLogin,
+  resolvePlannerAuth,
+  type PlannerAuthMode,
+  type ResolvedPlannerAuth,
+} from './planner-auth.js';
+import type { PlannerConfig, PlannerModelOverride, PlannerPhase, ProviderName } from '../planner/types.js';
 
 export interface PlannerPhaseModels {
   plan: string;
@@ -95,18 +101,61 @@ export function readProviderKey(provider: ProviderName): string | undefined {
  * Resolve planner API key for a known workspace (e.g. console server) without relying on
  * `process.cwd()` / `findSquadRoot()`.
  */
-export function readProviderKeyForPaths(paths: SquadPaths, provider: ProviderName): string | undefined {
+function resolveProviderKeyForPaths(paths: SquadPaths, provider: ProviderName): CredentialSource | undefined {
   const envVar = providerEnvVar(provider);
   const envValue = process.env[envVar];
-  if (envValue) return envValue;
+  if (envValue) return { value: envValue, source: 'env', detail: envVar };
+
   const fallback = process.env.SQUAD_PLANNER_API_KEY;
-  if (fallback) return fallback;
+  if (fallback) return { value: fallback, source: 'fallback-env', detail: 'SQUAD_PLANNER_API_KEY' };
+
   if (fs.existsSync(paths.secretsFile)) {
     const secrets = loadSecrets(paths.secretsFile);
     const fromFile = secrets.planner?.[provider];
-    if (fromFile) return fromFile;
+    if (fromFile) return { value: fromFile, source: 'secrets', detail: '.squad/secrets.yaml' };
   }
   return undefined;
+}
+
+/** Backwards-compatible wrapper; returns only the value. Existing callers continue to work. */
+export function readProviderKeyForPaths(paths: SquadPaths, provider: ProviderName): string | undefined {
+  return resolveProviderKeyForPaths(paths, provider)?.value;
+}
+
+function configuredAuthMode(provider: ProviderName, config: PlannerConfig | undefined): PlannerAuthMode | undefined {
+  return provider === 'anthropic' ? config?.auth?.anthropic : undefined;
+}
+
+/** Auth-aware sibling of `resolveProviderKey`; resolves the workspace from `process.cwd()`. */
+export function resolvePlannerAuthForCwd(
+  provider: ProviderName,
+  config?: PlannerConfig,
+): ResolvedPlannerAuth {
+  const root = findSquadRoot();
+  const secrets = root ? loadSecrets(buildPaths(root).secretsFile) : undefined;
+  return resolvePlannerAuth({
+    provider,
+    configuredMode: configuredAuthMode(provider, config),
+    apiKey: resolveProviderKey(provider),
+    login: detectClaudeLogin(secrets),
+  });
+}
+
+/**
+ * Auth-aware sibling of `readProviderKeyForPaths`. Deliberately does not call `findSquadRoot()`
+ * — the console server passes an explicit workspace (see the note above).
+ */
+export function resolvePlannerAuthForPaths(
+  paths: SquadPaths,
+  provider: ProviderName,
+  config?: PlannerConfig,
+): ResolvedPlannerAuth {
+  return resolvePlannerAuth({
+    provider,
+    configuredMode: configuredAuthMode(provider, config),
+    apiKey: resolveProviderKeyForPaths(paths, provider),
+    login: detectClaudeLogin(loadSecrets(paths.secretsFile)),
+  });
 }
 
 export interface TrackerCredentialLookup {

@@ -24,6 +24,13 @@ export interface SquadSecrets {
     anthropic?: string;
     openai?: string;
     google?: string;
+    /**
+     * `claude setup-token` output, exported to the Agent SDK as CLAUDE_CODE_OAUTH_TOKEN.
+     * Deliberately NOT named after a provider: `readProviderKeyForPaths` and
+     * `resolveProviderKey` index this block with a `ProviderName`, so this key can never
+     * be selected by that lookup and handed back as an API key.
+     */
+    anthropicOauthToken?: string;
   };
   tracker?: {
     jira?: TrackerJiraSecrets;

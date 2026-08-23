@@ -1,3 +1,5 @@
+import type { PlannerAuthMode } from '../core/planner-auth.js';
+
 export type PlannerPhase = 'plan' | 'execute' | 'scout';
 
 export type ProviderName = 'anthropic' | 'openai' | 'google';
@@ -77,6 +79,13 @@ export interface PlannerConfig {
   runtime?: { anthropic?: 'agent-sdk' | 'vercel' };
   /** Provider-specific request tuning (Anthropic thinking/effort for Agent SDK path). */
   providerOptions?: { anthropic?: AnthropicPlannerProviderOptions };
+  /**
+   * How each provider authenticates. Per-provider map so the shape can extend later;
+   * only `anthropic` is populated today. Merges to `auto` when absent.
+   */
+  auth?: {
+    anthropic?: PlannerAuthMode;
+  };
 }
 
 export interface PlannerRunStats {
