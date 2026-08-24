@@ -55,6 +55,33 @@ describe('probeClaudeAuth', () => {
     expect(passed.prompt[Symbol.asyncIterator]).toBeTypeOf('function');
   });
 
+  it('refuses to call a subscription credential ok when no account comes back', async () => {
+    // `accountInfo()` resolves off the subprocess `initialize` response, which succeeds even for an
+    // invalid or expired token. An empty answer must not render as "signed in".
+    queryMock.mockReturnValue(fakeQuery(async () => ({})));
+
+    const res = await probeClaudeAuth(SUBSCRIPTION);
+
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error('unreachable');
+    expect(res.detail).toMatch(/could not be verified/i);
+    expect(res.detail).toMatch(/squad auth login/);
+  });
+
+  it('still accepts api-key auth with no account, which legitimately has none', async () => {
+    queryMock.mockReturnValue(fakeQuery(async () => ({})));
+
+    const res = await probeClaudeAuth({
+      mode: 'api-key',
+      reason: 'explicit-config',
+      key: 'sk-ant-test',
+      source: 'env',
+      detail: 'ANTHROPIC_API_KEY',
+    });
+
+    expect(res.ok).toBe(true);
+  });
+
   it('maps authentication_failed to not-logged-in', async () => {
     queryMock.mockImplementation(() => {
       throw new Error('stream error: authentication_failed');

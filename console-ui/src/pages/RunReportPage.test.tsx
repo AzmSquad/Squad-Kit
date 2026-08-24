@@ -187,4 +187,52 @@ describe('RunReportPage', () => {
       expect(screen.getAllByText(/missing_path/).length).toBeGreaterThan(0);
     });
   });
+  it('renders the Auth row from a persisted authMode and enriches it from a replayed auth_info', async () => {
+    const events = [
+      {
+        kind: 'runtime_info',
+        provider: 'anthropic',
+        model: 'opus',
+        runtimeKind: 'agent-sdk' as const,
+        cacheEnabled: true,
+        scoutEnabled: true,
+        validationEnabled: true,
+      },
+      {
+        kind: 'auth_info',
+        mode: 'subscription' as const,
+        reason: 'explicit-config',
+        credentialHint: 'Claude login (macOS Keychain)',
+        apiKeySource: 'oauth',
+      },
+    ];
+    apiMock.mockImplementation(async (path: string) => {
+      if (path === '/api/runs/active') return [];
+      if (path === '/api/runs/demo-run') return { ...RECORD_BASE, authMode: 'subscription' };
+      if (path.startsWith('/api/runs/demo-run/events'))
+        return { runId: 'demo-run', fromIndex: 0, limit: 2000, total: events.length, events };
+      throw new Error(`unexpected api path ${path}`);
+    });
+
+    renderReport();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('run-auth-row')).toHaveTextContent(
+        'Auth subscription · Claude login (macOS Keychain) · oauth',
+      ),
+    );
+  });
+
+  it('renders an em dash for a legacy run record with no authMode', async () => {
+    apiMock.mockImplementation(async (path: string) => {
+      if (path === '/api/runs/active') return [];
+      if (path === '/api/runs/demo-run') return RECORD_BASE;
+      if (path.startsWith('/api/runs/demo-run/events')) throw new Error('no events file');
+      throw new Error(`unexpected api path ${path}`);
+    });
+
+    renderReport();
+
+    await waitFor(() => expect(screen.getByTestId('run-auth-row')).toHaveTextContent('Auth —'));
+  });
 });

@@ -24,6 +24,12 @@ export function mountSecretsApi(app: Hono, opts: { paths: SquadPaths }): void {
         anthropic: maskToken(s.planner?.anthropic),
         openai: maskToken(s.planner?.openai),
         google: maskToken(s.planner?.google),
+        /**
+         * `claude setup-token` output. Masked exactly like the API keys — the Claude account
+         * card shows it so a user can tell "a token is stored here" from "the OS login store
+         * is being used". Never returned in full, and never by `/api/planner-auth`.
+         */
+        anthropicOauthToken: maskToken(s.planner?.anthropicOauthToken),
       },
       tracker: {
         jira: {
@@ -50,6 +56,7 @@ export function mountSecretsApi(app: Hono, opts: { paths: SquadPaths }): void {
         anthropic: z.string().optional(),
         openai: z.string().optional(),
         google: z.string().optional(),
+        anthropicOauthToken: z.string().optional(),
       })
       .optional(),
     tracker: z
@@ -83,6 +90,13 @@ export function mountSecretsApi(app: Hono, opts: { paths: SquadPaths }): void {
     if (!parse.success) return c.json({ error: 'invalid_body', issues: parse.error.issues }, 400);
     const current = loadSecrets(opts.paths.secretsFile);
     const merged = mergeSecrets(current, parse.data as SquadSecrets);
+    // `mergeSecrets` drops empty strings so a partial update cannot clobber a sibling, which
+    // means there is no "clear" path through it. The Claude account card's Remove action needs
+    // one, so an explicitly-empty OAuth token is honoured as a delete here — and only here, so
+    // saving a blank API key stays the no-op it has always been.
+    if (parse.data.planner?.anthropicOauthToken === '' && merged.planner) {
+      delete merged.planner.anthropicOauthToken;
+    }
     saveSecrets(opts.paths.secretsFile, merged);
     return c.json({ ok: true });
   });

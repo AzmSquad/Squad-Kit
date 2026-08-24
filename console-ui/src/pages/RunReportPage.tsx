@@ -74,6 +74,10 @@ function replaySeed(record: ApiRunRecord): GenerateRunState {
 
   const startedMs = Number.isFinite(Date.parse(record.startedAt)) ? Date.parse(record.startedAt) : Date.now();
 
+  // Seeded from the summary so the Auth row survives a run whose events file rotated away; a
+  // replayed `auth_info` overwrites it with the richer credentialHint / apiKeySource.
+  const auth: GenerateRunState['auth'] = record.authMode ? { mode: record.authMode } : null;
+
   return {
     ...INITIAL_GENERATE_RUN_STATE,
     phase: 'streaming',
@@ -83,6 +87,7 @@ function replaySeed(record: ApiRunRecord): GenerateRunState {
     mode: 'api',
     startedAtMs: startedMs,
     runtime,
+    auth,
     budget: runtime ? { caps, fileReadsCompleted: 0, contextBytesApprox: 0 } : { caps: null, fileReadsCompleted: 0, contextBytesApprox: 0 },
     tokens: {
       input,
@@ -395,7 +400,7 @@ export function RunReportPage() {
           </Callout>
         ) : null}
         <MetricsBar state={st} elapsedSec={durSec} frozen />
-        <RunIdentityCard runtime={st.runtime} telemetryPartial={false} />
+        <RunIdentityCard runtime={st.runtime} auth={st.auth} telemetryPartial={false} />
         <StagePipeline stages={st.stages} onJump={onJump} />
         <BudgetMeters budget={st.budget} startedAtMs={st.startedAtMs} replayWallSec={durSec} />
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">

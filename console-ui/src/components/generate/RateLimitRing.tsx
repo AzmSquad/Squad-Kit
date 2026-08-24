@@ -8,11 +8,14 @@ export function RateLimitRing({
   onRerun,
   onCancel,
   rerunDisabled,
+  subscription = false,
 }: {
   rateLimit: RateLimitStateUI;
   onRerun: () => void;
   onCancel: () => void;
   rerunDisabled?: boolean;
+  /** Subscription runs hit a Claude *usage window*, not a provider API rate limit. */
+  subscription?: boolean;
 }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -60,7 +63,9 @@ export function RateLimitRing({
         </div>
         <div className="min-w-0 flex-1 text-sm">
           <p className="font-semibold text-[var(--color-text)]">
-            {rateLimit.provider} rate limit hit ({rateLimit.phase})
+            {subscription
+              ? `Claude usage limit reached (${rateLimit.phase})`
+              : `${rateLimit.provider} rate limit hit (${rateLimit.phase})`}
           </p>
           <p className="mt-1 text-[var(--color-text-muted)]">
             Retry after{' '}
@@ -82,7 +87,11 @@ export function RateLimitRing({
           <details className="mt-2 text-[12px] text-[var(--color-text-muted)]">
             <summary className="cursor-pointer text-[var(--color-text)]">Why this happened</summary>
             <ul className="mt-2 list-disc space-y-1 pl-4">
-              <li>Provider throttled upstream requests.</li>
+              {subscription ? (
+                <li>Planning draws on the same usage limits as Claude and Claude Code — the window has to reset.</li>
+              ) : (
+                <li>Provider throttled upstream requests.</li>
+              )}
               <li>Wait the full backoff before retrying to avoid multiplying 429s.</li>
               <li>
                 <Link to={'/config' as never} className="underline">
@@ -90,11 +99,13 @@ export function RateLimitRing({
                 </Link>{' '}
                 lets you shrink model tier or tighten planner budget.
               </li>
-              <li>
-                <a href={limitsUrl[rateLimit.provider]} className="underline" target="_blank" rel="noreferrer">
-                  Provider limits dashboard
-                </a>
-              </li>
+              {subscription ? null : (
+                <li>
+                  <a href={limitsUrl[rateLimit.provider]} className="underline" target="_blank" rel="noreferrer">
+                    Provider limits dashboard
+                  </a>
+                </li>
+              )}
             </ul>
           </details>
 

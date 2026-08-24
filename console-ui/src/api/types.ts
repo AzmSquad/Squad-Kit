@@ -104,6 +104,39 @@ export interface ApiConfig {
   version?: number;
 }
 
+/** Anthropic auth mode as stored in `planner.auth.anthropic`. */
+export type ApiPlannerAuthMode = 'subscription' | 'api-key' | 'auto';
+
+/** Resolved mode. `auto` is resolved away before anything renders it. */
+export type ApiResolvedAuthMode = 'subscription' | 'api-key';
+
+export interface ApiPlannerAuthAccount {
+  email?: string;
+  organization?: string;
+  subscriptionType?: string;
+}
+
+/**
+ * `GET /api/planner-auth` — the Anthropic credential, NOT the console's own URL token
+ * (that one lives in `~/api/client`). Carries no key and no OAuth token, ever.
+ */
+export interface ApiPlannerAuth {
+  provider: 'anthropic' | 'openai' | 'google';
+  configuredMode: ApiPlannerAuthMode;
+  resolved: { mode: ApiResolvedAuthMode; reason: string; credentialHint: string } | null;
+  error: string | null;
+  login: { present: boolean; hint: string; detail: string };
+  account: ApiPlannerAuthAccount | null;
+  apiKeySource: string | null;
+  runtime: 'agent-sdk' | 'vercel';
+  binary: { found: boolean; source: 'bundled' | 'path' | null };
+  loginCommand: string;
+  loggedIn: boolean;
+  probe: { ran: true; ok: boolean; kind?: string; detail?: string } | null;
+  /** Subscription auth asked for on a runtime that cannot carry it; blocks a Config save. */
+  runtimeConflict: string | null;
+}
+
 export interface ApiLastRun {
   stats: {
     turns: number;
@@ -180,6 +213,12 @@ export interface PlannerStreamEventWire {
   blockIndex?: number;
   tokensUsed?: number;
   chars?: number;
+  /** `auth_info` only. `account` is live-stream only — it is stripped before JSONL persistence. */
+  mode?: ApiResolvedAuthMode;
+  reason?: string;
+  credentialHint?: string;
+  apiKeySource?: string;
+  account?: ApiPlannerAuthAccount;
 }
 
 export interface ApiRunStats {
@@ -217,6 +256,8 @@ export interface ApiRunRecord {
     durationMs?: number;
   };
   plannerRuntime?: { kind: 'vercel' | 'agent-sdk'; provider: string };
+  /** Absent on runs recorded before 0.12.0 — render `—`, never a guess. */
+  authMode?: ApiResolvedAuthMode;
   providerOptionsSnapshot?: PlannerStreamEventWire['providerOptions'];
 }
 

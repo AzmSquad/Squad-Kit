@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
+import { Link } from '@tanstack/react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, UnauthorizedError } from '~/api/client';
+import type { ApiPlannerAuth } from '~/api/types';
 import { Badge } from '~/components/Badge';
 import { Button } from '~/components/Button';
 import { Callout } from '~/components/Callout';
@@ -9,9 +11,24 @@ import { Field } from '~/components/Field';
 import { Input } from '~/components/Input';
 import { Page } from '~/components/Page';
 import { useToast } from '~/components/Toast';
+import { CommandBlock } from '~/components/CommandBlock';
+import { Spinner } from '~/components/Spinner';
+import {
+  accountLine,
+  isSignedIn,
+  PLANNER_AUTH_QUERY_KEY,
+  probeFailureNote,
+  usePlannerAuth,
+  usePlannerAuthProbe,
+} from '~/hooks/usePlannerAuth';
 
 type MaskedSecrets = {
-  planner: { anthropic: string | null; openai: string | null; google: string | null };
+  planner: {
+    anthropic: string | null;
+    openai: string | null;
+    google: string | null;
+    anthropicOauthToken: string | null;
+  };
   tracker: {
     jira: { host: string | null; email: string | null; token: string | null };
     azure: { organization: string | null; project: string | null; pat: string | null };
@@ -102,6 +119,116 @@ function TokenRow({
   );
 }
 
+/**
+ * The Claude account. Deliberately has no "Sign in" button: the console guides the browser login,
+ * it never performs it — it cannot complete an OAuth callback on the user's behalf.
+ *
+ * "Claude account" is also never called an "auth token" anywhere here; that phrase belongs to the
+ * console's own loopback URL token, which is a completely different thing.
+ */
+function ClaudeAccountCard({
+  auth,
+  storedToken,
+  onRemoveToken,
+  removing,
+}: {
+  auth: ApiPlannerAuth;
+  storedToken: string | null;
+  onRemoveToken: () => void;
+  removing: boolean;
+}) {
+  const probe = usePlannerAuthProbe();
+
+  if (auth.provider !== 'anthropic') return null;
+
+  if (auth.resolved?.mode === 'api-key') {
+    return (
+      <Card variant="default">
+        <h2 className="mb-2 text-sm font-semibold">Claude account</h2>
+        <p className="text-[13px] text-[var(--color-text-muted)]">
+          Using an Anthropic API key. Switch to your Claude subscription in{' '}
+          <Link to={'/config' as never} className="text-[var(--color-accent)] underline">
+            Config
+          </Link>
+          .
+        </p>
+      </Card>
+    );
+  }
+
+  const signedIn = isSignedIn(auth);
+  const verifyNote = probeFailureNote(auth);
+  const account = accountLine(auth);
+  const envWins = auth.login.hint === 'oauth-token-env' && storedToken !== null;
+
+  return (
+    <Card variant="default">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold">Claude account</h2>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          loading={probe.isPending}
+          onClick={() => probe.mutate()}
+        >
+          Check again
+        </Button>
+      </div>
+
+      {signedIn ? (
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2 text-[13px]">
+            <Badge tone="success" dot>
+              Signed in
+            </Badge>
+            {probe.isPending ? (
+              <span className="flex items-center gap-2 text-[var(--color-text-muted)]">
+                <Spinner />
+                Checking…
+              </span>
+            ) : (
+              <span className="text-[var(--color-text)]">{account ?? auth.resolved?.credentialHint ?? '—'}</span>
+            )}
+          </div>
+          {auth.apiKeySource ? (
+            <p className="text-[12px] text-[var(--color-text-muted)]">apiKeySource: {auth.apiKeySource}</p>
+          ) : null}
+          {verifyNote ? <p className="text-[12px] text-[var(--color-text-muted)]">{verifyNote}</p> : null}
+          {storedToken ? (
+            <div className="pt-1">
+              <div className="text-[12px] font-medium text-[var(--color-text)]">Stored token</div>
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                <code className="rounded bg-[var(--color-surface)] px-2 py-1 text-sm">{storedToken}</code>
+                <Button type="button" variant="secondary" size="sm" loading={removing} onClick={onRemoveToken}>
+                  Remove
+                </Button>
+              </div>
+              {envWins ? (
+                <p className="mt-1 text-[12px] text-[var(--color-text-muted)]">
+                  CLAUDE_CODE_OAUTH_TOKEN is set in the environment and takes precedence over this stored token.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <Badge tone="muted" dot>
+            Not signed in
+          </Badge>
+          <p className="text-[13px] text-[var(--color-text-muted)]">
+            No Claude login was found on this machine, so subscription runs have nothing to authenticate with. Sign in
+            from your terminal — the console cannot open the browser login for you.
+          </p>
+          <CommandBlock command={auth.loginCommand} />
+          {verifyNote ? <p className="text-[12px] text-[var(--color-text-muted)]">{verifyNote}</p> : null}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export function SecretsPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
@@ -121,6 +248,7 @@ export function SecretsPage() {
   const [busy, setBusy] = useState<string | null>(null);
 
   const q = useQuery({ queryKey: ['secrets'], queryFn: () => api<MaskedSecrets>('/api/secrets') });
+  const plannerAuthQ = usePlannerAuth();
   const inited = useRef(false);
   const mut = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
@@ -128,6 +256,9 @@ export function SecretsPage() {
     onSuccess: () => {
       setGlobalErr(null);
       void qc.invalidateQueries({ queryKey: ['secrets'] });
+      // Removing (or adding) an OAuth token changes which credential resolves — refresh the card
+      // and the Generate badge instead of leaving them describing the previous state.
+      void qc.invalidateQueries({ queryKey: PLANNER_AUTH_QUERY_KEY });
       toast({ tone: 'success', title: 'Secrets saved' });
     },
     onError: (e: Error) => setGlobalErr(e.message),
@@ -217,6 +348,7 @@ export function SecretsPage() {
   }
 
   const s = q.data;
+  const subscriptionActive = plannerAuthQ.data?.resolved?.mode === 'subscription';
 
   return (
     <Page title="Secrets" description="Stored in .squad/secrets.yaml. Never committed.">
@@ -226,15 +358,27 @@ export function SecretsPage() {
       {globalErr ? <Callout tone="danger">{globalErr}</Callout> : null}
 
       <div className="space-y-4">
+        {plannerAuthQ.data ? (
+          <ClaudeAccountCard
+            auth={plannerAuthQ.data}
+            storedToken={s.planner.anthropicOauthToken}
+            removing={mut.isPending}
+            onRemoveToken={() => mut.mutate({ planner: { anthropicOauthToken: '' } })}
+          />
+        ) : null}
         <Card variant="default">
           <h2 className="mb-3 text-sm font-semibold">Planner</h2>
           <div className="space-y-4">
-            <TokenRow
-              label="Anthropic API key"
-              helper="Stored in .squad/secrets.yaml; never committed."
-              display={s.planner.anthropic}
-              onSave={(plain) => mut.mutate({ planner: { anthropic: plain } })}
-            />
+            {/* Kept visible in every mode — a subscription user may still want a key as a
+                fallback — but visually stepped back while the subscription is doing the work. */}
+            <div className={subscriptionActive ? 'opacity-60' : undefined}>
+              <TokenRow
+                label="Anthropic API key"
+                helper="Stored in .squad/secrets.yaml; never committed."
+                display={s.planner.anthropic}
+                onSave={(plain) => mut.mutate({ planner: { anthropic: plain } })}
+              />
+            </div>
             {tAnth ? <Badge tone={tAnth.ok ? 'success' : 'danger'}>{tAnth.ok ? 'reachable' : 'failed'}</Badge> : null}
             <div className="flex flex-wrap gap-2">
               <Button

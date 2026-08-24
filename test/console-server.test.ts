@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import http from 'node:http';
 import fs from 'node:fs';
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
@@ -7,6 +7,29 @@ import path from 'node:path';
 import yaml from 'js-yaml';
 import { buildPaths } from '../src/core/paths.js';
 import { startConsoleServer, type ConsoleServer } from '../src/console/server.js';
+import { resetPlannerAuthProbeCache } from '../src/console/api/planner-auth.js';
+
+/**
+ * The suite deletes `CI` (see `test/support/env-isolation.ts`), so nothing else stops
+ * `probeClaudeAuth` from spawning a real Agent SDK subprocess against the developer's live Claude
+ * login. Every console test therefore runs against this stub. It is a plain function rather than a
+ * `vi.fn()` on purpose: `restoreMocks: true` would strip a `vi.fn()`'s implementation before each
+ * test and turn a leaked probe into an obscure `undefined` crash instead of an obvious failure.
+ */
+const probeStub = vi.hoisted(() => ({
+  calls: 0,
+  result: { ok: true as const } as unknown,
+}));
+vi.mock('../src/planner/runtimes/auth-probe.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/planner/runtimes/auth-probe.js')>();
+  return {
+    ...actual,
+    probeClaudeAuth: async () => {
+      probeStub.calls += 1;
+      return probeStub.result;
+    },
+  };
+});
 
 let server: ConsoleServer;
 let baseUrl: string;
@@ -366,5 +389,180 @@ describe('console server static UI', () => {
       req.end();
     });
     expect(status).toBe(403);
+  });
+});
+
+describe('console server planner auth', () => {
+  let server: ConsoleServer;
+  let baseUrl: string;
+  let paths: ReturnType<typeof buildPaths>;
+  const TOKEN = 'd'.repeat(64);
+  const FAKE_KEY = 'sk-ant-fake-api-key-for-this-test-only';
+  const FAKE_TOKEN = 'sk-ant-oat01-fake-oauth-token-for-this-test-only';
+
+  beforeAll(async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'squad-auth-api-'));
+    paths = buildPaths(root);
+    await mkdir(paths.squadDir, { recursive: true });
+    await mkdir(paths.storiesDir, { recursive: true });
+    await mkdir(paths.plansDir, { recursive: true });
+    await writeFile(
+      paths.configFile,
+      yaml.dump({
+        version: 1,
+        project: { name: 'auth-api', primaryLanguage: 'ts' },
+        tracker: { type: 'none' },
+        naming: { includeTrackerId: false, globalSequence: true },
+        agents: [],
+        planner: { enabled: true, provider: 'anthropic' },
+      }),
+      'utf8',
+    );
+    await writeFile(
+      paths.secretsFile,
+      yaml.dump({ planner: { anthropic: FAKE_KEY, anthropicOauthToken: FAKE_TOKEN } }),
+      'utf8',
+    );
+    server = await startConsoleServer({ paths, requestedPort: 0, token: TOKEN });
+    baseUrl = `http://127.0.0.1:${server.port}`;
+  });
+
+  afterAll(async () => {
+    await server.close();
+  });
+
+  beforeEach(() => {
+    probeStub.calls = 0;
+    probeStub.result = { ok: true as const };
+    resetPlannerAuthProbeCache();
+  });
+
+  const auth = () => ({ authorization: `Bearer ${TOKEN}` });
+
+  it('GET /api/planner-auth returns the offline shape without probing or leaking a credential', async () => {
+    const res = await fetch(`${baseUrl}/api/planner-auth`, { headers: auth() });
+    expect(res.status).toBe(200);
+    const raw = await res.text();
+    // The whole point of the endpoint: it describes the credential, it never carries it.
+    expect(raw).not.toContain(FAKE_KEY);
+    expect(raw).not.toContain(FAKE_TOKEN);
+
+    const body = JSON.parse(raw) as Record<string, unknown>;
+    expect(body.provider).toBe('anthropic');
+    expect(body.configuredMode).toBe('auto');
+    expect(body.account).toBeNull();
+    expect(body.apiKeySource).toBeNull();
+    expect(body.probe).toBeNull();
+    expect(body.loginCommand).toBe('squad auth login');
+    expect(body.runtime).toBe('agent-sdk');
+    expect(body.binary).toHaveProperty('found');
+    expect(body.login).toHaveProperty('present');
+    expect(body.login).not.toHaveProperty('token');
+    expect(body.resolved).not.toBeNull();
+    expect(body.error).toBeNull();
+    expect(probeStub.calls).toBe(0);
+  });
+
+  it('GET /api/planner-auth?probe=1 fills account, and caches the probe for the next request', async () => {
+    probeStub.result = {
+      ok: true as const,
+      apiKeySource: 'oauth',
+      account: { email: 'dev@example.com', organization: 'Acme', subscriptionType: 'max' },
+    };
+
+    const first = await fetch(`${baseUrl}/api/planner-auth?probe=1`, { headers: auth() });
+    expect(first.status).toBe(200);
+    const body = (await first.json()) as {
+      account: { email?: string } | null;
+      apiKeySource: string | null;
+      probe: { ran: boolean; ok: boolean } | null;
+    };
+    expect(body.account?.email).toBe('dev@example.com');
+    expect(body.apiKeySource).toBe('oauth');
+    expect(body.probe).toEqual({ ran: true, ok: true });
+    expect(probeStub.calls).toBe(1);
+
+    const second = await fetch(`${baseUrl}/api/planner-auth?probe=1`, { headers: auth() });
+    const secondBody = (await second.json()) as { account: { email?: string } | null };
+    expect(secondBody.account?.email).toBe('dev@example.com');
+    expect(probeStub.calls).toBe(1);
+  });
+
+  it('POST /api/planner-auth/mode persists a valid mode and 400s on an invalid one', async () => {
+    const ok = await fetch(`${baseUrl}/api/planner-auth/mode`, {
+      method: 'POST',
+      headers: { ...auth(), 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: 'subscription' }),
+    });
+    expect(ok.status).toBe(200);
+    const written = yaml.load(fs.readFileSync(paths.configFile, 'utf8')) as {
+      planner: { auth: { anthropic: string } };
+    };
+    expect(written.planner.auth.anthropic).toBe('subscription');
+
+    const bad = await fetch(`${baseUrl}/api/planner-auth/mode`, {
+      method: 'POST',
+      headers: { ...auth(), 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: 'browser' }),
+    });
+    expect(bad.status).toBe(400);
+    const badBody = (await bad.json()) as { error: string; detail: string };
+    expect(badBody.error).toBe('invalid_auth_mode');
+    // Same sentence `squad config set planner` prints, straight from `normalizeAuthMode`.
+    expect(badBody.detail).toContain('must be subscription, api-key, auto');
+    expect(badBody.detail).toContain('squad config set planner');
+  });
+
+  it('GET /api/secrets masks the stored OAuth token, and PUT with an empty value clears it', async () => {
+    const before = await fetch(`${baseUrl}/api/secrets`, { headers: auth() });
+    const beforeBody = (await before.json()) as { planner: { anthropicOauthToken: string | null } };
+    expect(beforeBody.planner.anthropicOauthToken).not.toBeNull();
+    expect(beforeBody.planner.anthropicOauthToken).not.toContain('oat01-fake');
+
+    const cleared = await fetch(`${baseUrl}/api/secrets`, {
+      method: 'PUT',
+      headers: { ...auth(), 'content-type': 'application/json' },
+      body: JSON.stringify({ planner: { anthropicOauthToken: '' } }),
+    });
+    expect(cleared.status).toBe(200);
+
+    const after = await fetch(`${baseUrl}/api/secrets`, { headers: auth() });
+    const afterBody = (await after.json()) as {
+      planner: { anthropicOauthToken: string | null; anthropic: string | null };
+    };
+    expect(afterBody.planner.anthropicOauthToken).toBeNull();
+    // Clearing the token must not take the API key with it.
+    expect(afterBody.planner.anthropic).not.toBeNull();
+  });
+
+  it('POST /api/runs returns auth_unavailable when subscription mode has no credential', async () => {
+    await writeFile(
+      paths.configFile,
+      yaml.dump({
+        version: 1,
+        project: { name: 'auth-api', primaryLanguage: 'ts' },
+        tracker: { type: 'none' },
+        naming: { includeTrackerId: false, globalSequence: true },
+        agents: [],
+        planner: { enabled: true, provider: 'openai', auth: { anthropic: 'api-key' } },
+      }),
+      'utf8',
+    );
+    await writeFile(paths.secretsFile, yaml.dump({ planner: {} }), 'utf8');
+
+    const res = await fetch(`${baseUrl}/api/runs`, {
+      method: 'POST',
+      headers: { ...auth(), 'content-type': 'application/json' },
+      body: JSON.stringify({ feature: 'demo', storyId: '01-pull' }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string; mode: string; detail: string };
+    expect(body.error).toBe('auth_unavailable');
+    expect(body.detail).toContain('No openai API key available');
+
+    const authRes = await fetch(`${baseUrl}/api/planner-auth`, { headers: auth() });
+    const authBody = (await authRes.json()) as { resolved: unknown; error: string | null };
+    expect(authBody.resolved).toBeNull();
+    expect(authBody.error).toContain('No openai API key available');
   });
 });

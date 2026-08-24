@@ -14,6 +14,9 @@ import { Select } from '~/components/Select';
 import { Tabs } from '~/components/Tabs';
 import { Skeleton } from '~/components/Skeleton';
 import { useToast } from '~/components/Toast';
+import { CommandBlock } from '~/components/CommandBlock';
+import { PLANNER_AUTH_QUERY_KEY, usePlannerAuth } from '~/hooks/usePlannerAuth';
+import type { ApiPlannerAuthMode } from '~/api/types';
 
 type TrackerType = 'none' | 'github' | 'jira' | 'azure';
 type ProviderName = 'anthropic' | 'openai' | 'google';
@@ -28,6 +31,8 @@ type SquadConfig = {
     enabled: boolean;
     provider: ProviderName;
     mode?: 'auto' | 'copy';
+    /** Per-provider auth map; 0.12.0 populates `anthropic` alone. */
+    auth?: { anthropic?: ApiPlannerAuthMode };
     budget: {
       maxFileReads: number;
       maxContextBytes: number;
@@ -43,6 +48,7 @@ const DEFAULT_PLANNER: NonNullable<SquadConfig['planner']> = {
   enabled: false,
   provider: 'anthropic',
   mode: 'auto',
+  auth: { anthropic: 'auto' },
   budget: {
     maxFileReads: 25,
     maxContextBytes: 50_000,
@@ -52,10 +58,29 @@ const DEFAULT_PLANNER: NonNullable<SquadConfig['planner']> = {
   maxOutputTokens: 16_384,
 };
 
+const AUTH_OPTIONS: { value: ApiPlannerAuthMode; label: string; helper: string }[] = [
+  {
+    value: 'subscription',
+    label: 'Claude subscription (browser login)',
+    helper: 'Runs on your Claude plan. No API key needed. Sign in with `squad auth login`.',
+  },
+  {
+    value: 'api-key',
+    label: 'Anthropic API key',
+    helper: 'Uses ANTHROPIC_API_KEY or the key saved in Secrets.',
+  },
+  {
+    value: 'auto',
+    label: 'Automatic',
+    helper: 'Prefers your Claude login when signed in, otherwise falls back to the API key.',
+  },
+];
+
 export function ConfigPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
   const q = useQuery({ queryKey: ['config'], queryFn: () => api<SquadConfig>('/api/config') });
+  const plannerAuthQ = usePlannerAuth();
   const [draft, setDraft] = useState<SquadConfig | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -70,6 +95,9 @@ export function ConfigPage() {
       setErr(null);
       void qc.invalidateQueries({ queryKey: ['config'] });
       void qc.invalidateQueries({ queryKey: ['meta'] });
+      // The account card and the Generate badge read the resolved mode; a stale one is worse
+      // than a missing one, so refetch as soon as the write lands.
+      void qc.invalidateQueries({ queryKey: PLANNER_AUTH_QUERY_KEY });
       toast({ tone: 'success', title: 'Config saved' });
     },
     onError: (e: Error) => setErr(e.message),
@@ -92,6 +120,18 @@ export function ConfigPage() {
   function setPlanner(next: NonNullable<SquadConfig['planner']>) {
     setDraft((d) => (d ? { ...d, planner: next } : d));
   }
+
+  const authMode: ApiPlannerAuthMode = p.auth?.anthropic ?? 'auto';
+  const authHelper = AUTH_OPTIONS.find((o) => o.value === authMode)?.helper ?? '';
+  const anthropicSelected = p.enabled && p.provider === 'anthropic';
+  const loginCommand = plannerAuthQ.data?.loginCommand ?? 'squad auth login';
+  // Not a blocking error: the user may be one terminal away from logging in, and the CLI lets
+  // them save the same combination.
+  const showLoginWarning =
+    anthropicSelected && authMode === 'subscription' && plannerAuthQ.data?.login.present === false;
+  // Hard conflict — `@ai-sdk/anthropic` speaks `x-api-key`, so an OAuth credential cannot work.
+  const authRuntimeConflict =
+    anthropicSelected && authMode === 'subscription' ? (plannerAuthQ.data?.runtimeConflict ?? null) : null;
 
   return (
     <Page
@@ -297,6 +337,47 @@ export function ConfigPage() {
                           </Select>
                         )}
                       </Field>
+                      {p.provider === 'anthropic' ? (
+                        <Field label="Authentication" helper={authHelper}>
+                          {({ id, helperId }) => (
+                            <Select
+                              id={id}
+                              aria-describedby={helperId}
+                              className="w-full"
+                              value={authMode}
+                              onChange={(e) =>
+                                setPlanner({
+                                  ...p,
+                                  auth: { ...p.auth, anthropic: e.target.value as ApiPlannerAuthMode },
+                                })
+                              }
+                            >
+                              {AUTH_OPTIONS.map((o) => (
+                                <option key={o.value} value={o.value}>
+                                  {o.label}
+                                </option>
+                              ))}
+                            </Select>
+                          )}
+                        </Field>
+                      ) : null}
+                      {showLoginWarning ? (
+                        <div className="sm:col-span-2">
+                          <Callout tone="warning" title="No Claude login detected">
+                            <p>
+                              Subscription mode is fine to save now — the next run will fail until you sign in.
+                            </p>
+                            <CommandBlock className="mt-2" command={loginCommand} />
+                          </Callout>
+                        </div>
+                      ) : null}
+                      {authRuntimeConflict ? (
+                        <div className="sm:col-span-2">
+                          <Callout tone="danger" title="Subscription auth cannot use this runtime">
+                            {authRuntimeConflict}
+                          </Callout>
+                        </div>
+                      ) : null}
                       <Field label="Max output tokens">
                         {({ id, helperId }) => (
                           <Input
@@ -401,7 +482,12 @@ export function ConfigPage() {
                 </Card>
 
                 <div className="flex justify-end">
-                  <Button type="button" onClick={() => mut.mutate({ ...draft, planner: p })} loading={mut.isPending}>
+                  <Button
+                    type="button"
+                    disabled={Boolean(authRuntimeConflict)}
+                    onClick={() => mut.mutate({ ...draft, planner: p })}
+                    loading={mut.isPending}
+                  >
                     Save changes
                   </Button>
                 </div>

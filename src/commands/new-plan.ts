@@ -481,6 +481,7 @@ async function emitViaApi(
         durationMs: result.validation?.durationMs,
       },
       plannerRuntime: { kind: draftRuntime.kind, provider: planner.provider },
+      authMode: describeAuth(auth).mode,
       providerOptionsSnapshot: anthropicProviderSpecific
         ? { anthropic: anthropicProviderSpecific }
         : undefined,

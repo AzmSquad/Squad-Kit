@@ -10,7 +10,7 @@ import {
 } from '@tanstack/react-router';
 import { GeneratePage } from './GeneratePage';
 import { ToastProvider } from '~/components/Toast';
-import type { ApiStory } from '~/api/types';
+import type { ApiPlannerAuth, ApiStory } from '~/api/types';
 
 const apiMock = vi.hoisted(() => vi.fn());
 vi.mock('~/api/client', () => ({
@@ -41,6 +41,22 @@ class MockEventSource {
     for (const fn of this.listeners.get(type) ?? []) fn({ data } as MessageEvent);
   }
 }
+
+const API_KEY_AUTH: ApiPlannerAuth = {
+  provider: 'anthropic',
+  configuredMode: 'api-key',
+  resolved: { mode: 'api-key', reason: 'explicit in .squad/config.yaml', credentialHint: 'ANTHROPIC_API_KEY' },
+  error: null,
+  login: { present: false, hint: 'none', detail: 'no Claude login detected' },
+  account: null,
+  apiKeySource: null,
+  runtime: 'agent-sdk',
+  binary: { found: true, source: 'bundled' },
+  loginCommand: 'squad auth login',
+  loggedIn: true,
+  probe: null,
+  runtimeConflict: null,
+};
 
 const generateSearch = (search: Record<string, unknown>) => ({
   feature: typeof search.feature === 'string' ? search.feature : '',
@@ -106,6 +122,7 @@ describe('GeneratePage', () => {
       if (path === '/api/config') return { planner: { enabled: true, provider: 'anthropic' }, version: 1 };
       if (path === '/api/runs/active') return [];
       if (path === '/api/runs') return [];
+      if (path === '/api/planner-auth') return API_KEY_AUTH;
       throw new Error(`unexpected ${path}`);
     });
 
@@ -184,6 +201,7 @@ describe('GeneratePage', () => {
       if (path === '/api/config') return { planner: { enabled: true }, version: 1 };
       if (path === '/api/runs/active') return [];
       if (path === '/api/runs') return [];
+      if (path === '/api/planner-auth') return API_KEY_AUTH;
       throw new Error(`unexpected ${path}`);
     });
 
@@ -234,6 +252,7 @@ describe('GeneratePage', () => {
       if (path === '/api/config') return { planner: { enabled: true }, version: 1 };
       if (path === '/api/runs/active') return [];
       if (path === '/api/runs') return [];
+      if (path === '/api/planner-auth') return API_KEY_AUTH;
       throw new Error(`unexpected ${path}`);
     });
 
@@ -263,6 +282,7 @@ describe('GeneratePage', () => {
       if (path === '/api/config') return { planner: { enabled: true, provider: 'anthropic' }, version: 1 };
       if (path === '/api/runs/active') return [];
       if (path === '/api/runs') return [];
+      if (path === '/api/planner-auth') return API_KEY_AUTH;
       throw new Error(`unexpected ${path}`);
     });
 
@@ -352,6 +372,7 @@ describe('GeneratePage', () => {
       if (path === '/api/config') return { planner: { enabled: true, provider: 'anthropic' }, version: 1 };
       if (path === '/api/runs/active') return [];
       if (path === '/api/runs') return [];
+      if (path === '/api/planner-auth') return API_KEY_AUTH;
       throw new Error(`unexpected ${path}`);
     });
 
@@ -387,5 +408,100 @@ describe('GeneratePage', () => {
     await waitFor(() => expect(screen.getByText(/Auto-retrying in/)).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: /rerun planner/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /^Cancel$/ })).toBeNull();
+  });
+  it('renders the Subscription badge and usage-limit billing copy from an auth_info event', async () => {
+    const stories: ApiStory[] = [
+      { feature: 'demo', id: '01-x', intakePath: '/p', storyDir: '/s', planFile: null, titleHint: 't' },
+    ];
+    apiMock.mockImplementation(async (path: string) => {
+      if (path === '/api/stories') return stories;
+      if (path === '/api/config') return { planner: { enabled: true, provider: 'anthropic' }, version: 1 };
+      if (path === '/api/runs/active') return [];
+      if (path === '/api/runs') return [];
+      if (path === '/api/planner-auth')
+        return {
+          ...API_KEY_AUTH,
+          configuredMode: 'subscription',
+          resolved: {
+            mode: 'subscription',
+            reason: 'explicit in .squad/config.yaml',
+            credentialHint: 'Claude login (macOS Keychain)',
+          },
+          login: { present: true, hint: 'credential-store', detail: 'macOS Keychain' },
+        } satisfies ApiPlannerAuth;
+      throw new Error(`unexpected ${path}`);
+    });
+
+    fetchMock.mockResolvedValue({ ok: true, status: 202, json: async () => ({ runId: 'run-sub' }) } as Response);
+
+    renderPage();
+
+    // Pre-run the badge comes from the config fallback…
+    await waitFor(() => expect(screen.getByTestId('generate-auth-badge')).toHaveTextContent('Subscription'));
+    expect(screen.getByText(/draw on your Claude usage limits/)).toBeInTheDocument();
+    expect(screen.queryByText(/billed like any other API usage/)).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(MockEventSource.instances.length).toBe(1));
+    const es = MockEventSource.instances[0]!;
+
+    // …and once the run reports its own credential, the run wins.
+    es.emit(
+      'auth_info',
+      JSON.stringify({
+        kind: 'auth_info',
+        runId: 'run-sub',
+        mode: 'subscription',
+        reason: 'explicit-config',
+        credentialHint: 'Claude login (macOS Keychain)',
+        apiKeySource: 'oauth',
+      }),
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId('generate-auth-badge')).toHaveAttribute(
+        'title',
+        'Claude login (macOS Keychain) · apiKeySource: oauth',
+      ),
+    );
+  });
+
+  it('renders an actionable recovery callout when the run start returns auth_unavailable', async () => {
+    const stories: ApiStory[] = [
+      { feature: 'demo', id: '01-x', intakePath: '/p', storyDir: '/s', planFile: null, titleHint: 't' },
+    ];
+    apiMock.mockImplementation(async (path: string) => {
+      if (path === '/api/stories') return stories;
+      if (path === '/api/config') return { planner: { enabled: true, provider: 'anthropic' }, version: 1 };
+      if (path === '/api/runs/active') return [];
+      if (path === '/api/runs') return [];
+      if (path === '/api/planner-auth') return API_KEY_AUTH;
+      throw new Error(`unexpected ${path}`);
+    });
+
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({
+        error: 'auth_unavailable',
+        mode: 'subscription',
+        detail:
+          'No Anthropic credential available. Either log in with your Claude subscription (`squad auth login`) ' +
+          'or save an API key (`squad config set planner`, or export ANTHROPIC_API_KEY).',
+      }),
+    } as Response);
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Run' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Run' }));
+
+    await waitFor(() => expect(screen.getByText('No Claude credential available')).toBeInTheDocument());
+    expect(screen.getByText(/No Anthropic credential available/)).toBeInTheDocument();
+    expect(screen.getByText('squad auth login')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Configure auth' })).toHaveAttribute('href', '/config');
+    // The generic string-only failure state must not fire for this code.
+    expect(screen.queryByText('Run failed')).toBeNull();
   });
 });

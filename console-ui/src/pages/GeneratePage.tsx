@@ -13,14 +13,18 @@ import { StagePipeline } from '~/components/generate/StagePipeline';
 import { api, UnauthorizedError } from '~/api/client';
 import type { ApiConfig, ApiStory } from '~/api/types';
 import type { ApiCopyPlanPrompt } from '~/api/types';
+import { Badge } from '~/components/Badge';
 import { Button } from '~/components/Button';
 import { Callout } from '~/components/Callout';
+import { CommandBlock } from '~/components/CommandBlock';
 import { Page } from '~/components/Page';
 import { Select } from '~/components/Select';
 import { Spinner } from '~/components/Spinner';
 import { useToast } from '~/components/Toast';
 import { useGenerateRun } from '~/hooks/useGenerateRun';
 import type { StageKey } from '~/hooks/useGenerateRun';
+import { usePlannerAuth } from '~/hooks/usePlannerAuth';
+import type { ApiResolvedAuthMode } from '~/api/types';
 import { groupByFeature } from '~/lib/group-by-feature';
 
 function StoryAndModePicker({
@@ -227,6 +231,62 @@ function PlanSavedCallout({
   );
 }
 
+function AuthBadge({
+  mode,
+  credentialHint,
+  apiKeySource,
+}: {
+  mode: ApiResolvedAuthMode | null;
+  credentialHint?: string;
+  apiKeySource?: string;
+}) {
+  if (!mode) return null;
+  const tooltip = [credentialHint, apiKeySource ? `apiKeySource: ${apiKeySource}` : null]
+    .filter(Boolean)
+    .join(' · ');
+  return (
+    <Badge
+      tone={mode === 'subscription' ? 'info' : 'muted'}
+      title={tooltip || undefined}
+      data-testid="generate-auth-badge"
+    >
+      {mode === 'subscription' ? 'Subscription' : 'API key'}
+    </Badge>
+  );
+}
+
+/**
+ * The cost sentence has to branch: a subscription run has no per-token invoice at all, and telling
+ * a Pro/Max user their planning is "billed per token" is simply false. It is never called free
+ * either — Agent SDK usage draws on the same window as Claude and Claude Code.
+ */
+function BillingCallout({ mode }: { mode: ApiResolvedAuthMode | null }) {
+  if (mode === 'subscription') {
+    return (
+      <Callout tone="info" title="Runs on your Claude subscription">
+        API runs here draw on your Claude usage limits — there is no per-token API bill. Agent SDK usage counts against
+        the same limits as Claude and Claude Code, so a long planning run consumes part of your window. Hitting the
+        limit means waiting for the reset, not a larger invoice.
+      </Callout>
+    );
+  }
+  return (
+    <Callout tone="info" title="Provider keys">
+      <p>
+        API runs need a provider key in{' '}
+        <Link to={'/secrets' as never} className="text-[var(--color-accent)] underline">
+          Secrets
+        </Link>{' '}
+        or <code className="text-xs">ANTHROPIC_API_KEY</code>, etc.
+      </p>
+      <p className="mt-1">
+        Each model round is billed like any other API usage (input tokens, output tokens, and cache-related tokens when
+        applicable).
+      </p>
+    </Callout>
+  );
+}
+
 export function GeneratePage() {
   const run = useGenerateRun();
   const st = run.state;
@@ -244,7 +304,15 @@ export function GeneratePage() {
     queryFn: () => api<ApiConfig>('/api/config'),
   });
 
+  const plannerAuthQ = usePlannerAuth();
   const plannerEnabled = Boolean(configQ.data?.planner?.enabled);
+
+  // Prefer the run's own `auth_info`: a Config change mid-run must not retro-change the badge on a
+  // run that already picked its credential. The config answer is only the pre-run fallback.
+  const authMode: ApiResolvedAuthMode | null = st.auth?.mode ?? plannerAuthQ.data?.resolved?.mode ?? null;
+  const authHint = st.auth?.credentialHint ?? plannerAuthQ.data?.resolved?.credentialHint;
+  const authKeySource = st.auth?.apiKeySource ?? plannerAuthQ.data?.apiKeySource ?? undefined;
+  const loginCommand = plannerAuthQ.data?.loginCommand ?? 'squad auth login';
 
   const copyPromptQ = useQuery({
     queryKey: ['copy-plan-prompt', st.feature, st.storyId],
@@ -345,13 +413,12 @@ export function GeneratePage() {
           )}
 
           {plannerEnabled && (
-            <Callout tone="info" title="Provider keys">
-              API runs need a provider key in{' '}
-              <Link to={'/secrets' as never} className="text-[var(--color-accent)] underline">
-                Secrets
-              </Link>{' '}
-              or <code className="text-xs">ANTHROPIC_API_KEY</code>, etc.
-            </Callout>
+            <>
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <AuthBadge mode={authMode} credentialHint={authHint} apiKeySource={authKeySource} />
+              </div>
+              <BillingCallout mode={authMode} />
+            </>
           )}
 
           <StoryAndModePicker
@@ -369,7 +436,11 @@ export function GeneratePage() {
                 <>
                   <MetricsBar state={st} elapsedSec={elapsedSec} onCancel={() => void run.cancel()} />
 
-                  <RunIdentityCard runtime={st.runtime} telemetryPartial={run.state.telemetryPartialUi} />
+                  <RunIdentityCard
+                    runtime={st.runtime}
+                    auth={st.auth}
+                    telemetryPartial={run.state.telemetryPartialUi}
+                  />
 
                   {st.phase === 'cancelling' ? (
                     <Callout tone="info" title="Cancelling…">
@@ -391,6 +462,7 @@ export function GeneratePage() {
                   {st.rateLimit ? (
                     <RateLimitRing
                       rateLimit={st.rateLimit}
+                      subscription={authMode === 'subscription'}
                       onRerun={() => void run.start()}
                       onCancel={() => {
                         void run.cancel();
@@ -421,7 +493,18 @@ export function GeneratePage() {
                 <PlanSavedCallout tone="warning" title="Saved partial plan" feature={st.feature} planFile={st.planFile} />
               ) : null}
 
-              {st.error && st.phase === 'failed' && !st.rateLimit ? (
+              {st.errorCode === 'auth_unavailable' && st.phase === 'failed' ? (
+                <Callout tone="danger" title="No Claude credential available">
+                  <p>{st.error}</p>
+                  <CommandBlock className="mt-2" command={loginCommand} />
+                  <p className="mt-2">
+                    <Link to={'/config' as never} className="text-[var(--color-accent)] underline">
+                      Configure auth
+                    </Link>{' '}
+                    to switch between your Claude subscription and an API key.
+                  </p>
+                </Callout>
+              ) : st.error && st.phase === 'failed' && !st.rateLimit ? (
                 <Callout tone="danger" title="Run failed">
                   {st.error}
                 </Callout>

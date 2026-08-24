@@ -25,6 +25,11 @@ export interface RunRecord {
   version: 1;
   /** Present on new runs: which planner LLM runtime was used (Anthropic Agent SDK vs Vercel AI SDK). */
   plannerRuntime?: { kind: 'vercel' | 'agent-sdk'; provider: ProviderName };
+  /**
+   * Which credential the run authenticated with, from `describeAuth(auth).mode`. Absent on
+   * records written before 0.12.0 — readers render `—` rather than guessing a mode.
+   */
+  authMode?: 'subscription' | 'api-key';
   /** Snapshot of Anthropic Agent SDK tuning for this run (optional). */
   providerOptionsSnapshot?: {
     anthropic?: { draft?: AnthropicProviderSpecific; scout?: AnthropicProviderSpecific };

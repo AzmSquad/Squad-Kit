@@ -1,11 +1,19 @@
 import { Badge } from '~/components/Badge';
-import type { RuntimeInfo } from '~/hooks/useGenerateRun';
+import type { AuthInfoUI, RuntimeInfo } from '~/hooks/useGenerateRun';
+
+/** `subscription · Claude login (macOS Keychain) · oauth`, or `—` for a pre-0.12.0 run record. */
+function authSummary(auth: AuthInfoUI | null): string {
+  if (!auth) return '—';
+  return [auth.mode, auth.credentialHint, auth.apiKeySource].filter(Boolean).join(' · ');
+}
 
 export function RunIdentityCard({
   runtime,
+  auth = null,
   telemetryPartial,
 }: {
   runtime: RuntimeInfo | null;
+  auth?: AuthInfoUI | null;
   telemetryPartial?: boolean;
 }) {
   if (!runtime) {
@@ -38,6 +46,9 @@ export function RunIdentityCard({
           <Badge tone="default">thinking: {think}</Badge>
         ) : null}
       </div>
+      <p className="mt-2 text-[11px] text-[var(--color-text-muted)]" data-testid="run-auth-row">
+        <span className="text-[var(--color-text)]">Auth</span> {authSummary(auth)}
+      </p>
       <p className="mt-2 text-[11px] text-[var(--color-text-muted)]">
         cache {runtime.cacheEnabled ? 'on' : 'off'} · scout {runtime.scoutEnabled ? 'on' : 'off'} · validation{' '}
         {runtime.validationEnabled ? 'on' : 'off'}

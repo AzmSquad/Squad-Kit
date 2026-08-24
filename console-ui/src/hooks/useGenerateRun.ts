@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { api, UnauthorizedError } from '~/api/client';
-import type { ApiActiveRun, PlannerStreamEventWire } from '~/api/types';
+import type { ApiActiveRun, ApiResolvedAuthMode, PlannerStreamEventWire } from '~/api/types';
 
 const ACTIVITY_CAP = 200;
 const TOKENS_CAP_FLOOR = 8192;
@@ -32,6 +32,22 @@ export type RuntimeInfo = {
   validationEnabled: boolean;
   budgetCaps: { maxFileReads: number; maxContextBytes: number; maxDurationSeconds: number };
   providerOptions?: PlannerStreamEventWire['providerOptions'];
+};
+
+/**
+ * Auth telemetry for *this* run, from the `auth_info` SSE event.
+ *
+ * Keyed to the run rather than to the live config on purpose: a Config save while a run is in
+ * flight must not retro-change the badge on a run that already picked its credential.
+ */
+export type AuthInfoUI = {
+  mode: ApiResolvedAuthMode;
+  reason?: string;
+  credentialHint?: string;
+  /** From the Agent SDK init message; `oauth` proves the subscription path is live. */
+  apiKeySource?: string;
+  /** Live stream only — stripped before the event is written to JSONL. */
+  account?: { email?: string; organization?: string; subscriptionType?: string };
 };
 
 export type StageKey = 'scout' | 'draft' | 'validation';
@@ -175,6 +191,13 @@ export interface GenerateRunState {
   activities: ActivityFeedRow[];
   turn: number;
   error: string | null;
+  /**
+   * Machine-readable code from a failed `POST /api/runs` (`auth_unavailable`, `planner_disabled`,
+   * …). `error` alone forced the UI to render every failure as a bare string; the recovery states
+   * need to know *which* failure it was.
+   */
+  errorCode: string | null;
+  auth: AuthInfoUI | null;
 }
 
 const EMPTY_STAGE: StageNodeState = { phase: 'idle' };
@@ -213,6 +236,8 @@ export const INITIAL_GENERATE_RUN_STATE: GenerateRunState = {
   activities: [],
   turn: 0,
   error: null,
+  errorCode: null,
+  auth: null,
 };
 
 type Action =
@@ -221,7 +246,7 @@ type Action =
   | { type: 'start_post' }
   | { type: 'start_stream'; runId: string }
   | { type: 'resume'; runId: string; feature: string; storyId: string }
-  | { type: 'fail'; message: string }
+  | { type: 'fail'; message: string; code?: string }
   | { type: 'reset_stream_ui' }
   | { type: 'reset_all' }
   | { type: 'cancel_requested' }
@@ -698,6 +723,21 @@ export function applyGenerateEvent(
     };
   }
 
+  if (e.kind === 'auth_info' && e.mode) {
+    next = {
+      ...next,
+      auth: {
+        mode: e.mode,
+        reason: e.reason,
+        credentialHint: e.credentialHint,
+        // The Agent SDK emits a second, enriched `auth_info` at init; keep whatever the newest
+        // event knows and never regress a filled field back to undefined.
+        apiKeySource: e.apiKeySource ?? next.auth?.apiKeySource,
+        account: e.account ?? next.auth?.account,
+      },
+    };
+  }
+
   if (e.kind === 'assistant_text' && e.delta)
     next = { ...next, assistantMd: next.assistantMd + e.delta };
 
@@ -737,6 +777,8 @@ export function generateRunReducer(state: GenerateRunState, action: Action): Gen
         ...state,
         phase: 'starting',
         error: null,
+        errorCode: null,
+        auth: null,
         rateLimit: null,
         assistantMd: '',
         planFile: null,
@@ -782,6 +824,7 @@ export function generateRunReducer(state: GenerateRunState, action: Action): Gen
         mode: 'api',
         startedAtMs: Date.now(),
         error: null,
+        errorCode: null,
       };
     case 'cancel_requested':
       if (state.phase !== 'streaming' && state.phase !== 'starting') return state;
@@ -794,6 +837,8 @@ export function generateRunReducer(state: GenerateRunState, action: Action): Gen
         phase: 'idle',
         runId: null,
         error: null,
+        errorCode: null,
+        auth: null,
         rateLimit: null,
         startedAtMs: null,
         planFile: null,
@@ -824,7 +869,7 @@ export function generateRunReducer(state: GenerateRunState, action: Action): Gen
     case 'reset_all':
       return INITIAL_GENERATE_RUN_STATE;
     case 'fail':
-      return { ...state, phase: 'failed', error: action.message, runId: null };
+      return { ...state, phase: 'failed', error: action.message, errorCode: action.code ?? null, runId: null };
     case 'sse':
       return applyGenerateEvent(state, action.event, Date.now());
     default:
@@ -861,6 +906,7 @@ function useEventSourceBridge(runId: string | null, dispatch: React.Dispatch<Act
     on('validation_issue', handlePayload);
     on('started', handlePayload);
     on('runtime_info', handlePayload);
+    on('auth_info', handlePayload);
     on('turn_started', handlePayload);
     on('request_sent', handlePayload);
     on('usage', handlePayload);
@@ -1045,12 +1091,20 @@ export function useGenerateRun(): {
       if (res.status === 401) throw new UnauthorizedError();
       if (!res.ok) {
         const j = (await res.json().catch(() => ({}))) as { error?: string; detail?: string };
-        throw new Error(j.detail ?? j.error ?? `${res.status}`);
+        // `auth_unavailable` (and `planner_disabled`) are recoverable states with their own UI,
+        // not anonymous strings — carry the code through so the page can render the fix.
+        const err = new Error(j.detail ?? j.error ?? `${res.status}`) as Error & { code?: string };
+        err.code = j.error;
+        throw err;
       }
       const body = (await res.json()) as { runId: string };
       dispatch({ type: 'start_stream', runId: body.runId });
     } catch (e) {
-      dispatch({ type: 'fail', message: e instanceof Error ? e.message : String(e) });
+      dispatch({
+        type: 'fail',
+        message: e instanceof Error ? e.message : String(e),
+        code: (e as { code?: string } | null)?.code,
+      });
     }
   }, [state.feature, state.storyId]);
 

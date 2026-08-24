@@ -141,6 +141,23 @@ export async function probeClaudeAuth(
     }
 
     const { account, apiKeySource } = readAccount(info);
+
+    // `accountInfo()` resolves from the subprocess's `initialize` response, which succeeds whether or
+    // not the credential is any good — the CLI does not validate it until a real request. A working
+    // subscription login answers with an email/organization/plan; an invalid or expired one answers
+    // with nothing. Reporting that as `ok` would tell the user they are signed in right up until
+    // their next planning run fails. API-key mode legitimately has no claude.ai account attached, so
+    // this only applies to subscription auth.
+    if (auth.mode === 'subscription' && !account && !apiKeySource) {
+      return {
+        ok: false,
+        kind: 'unknown',
+        detail:
+          'The Claude login did not report an account, so it could not be verified. The credential may be ' +
+          'invalid or expired — run `squad auth login` to sign in again.',
+      };
+    }
+
     return { ok: true, ...(apiKeySource ? { apiKeySource } : {}), ...(account ? { account } : {}) };
   } catch (err) {
     return mapProbeFailure(err, auth);

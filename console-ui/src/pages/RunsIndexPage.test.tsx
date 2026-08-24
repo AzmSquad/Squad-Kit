@@ -117,4 +117,19 @@ describe('RunsIndexPage', () => {
       expect(screen.getByTestId('opened-run-detail')).toBeTruthy();
     });
   });
+  it('shows a per-row auth chip and degrades legacy records to an em dash', async () => {
+    const rows: ApiRunRecord[] = [
+      { ...BASE, runId: 'sub-run', success: true, partial: false, authMode: 'subscription' },
+      { ...BASE, runId: 'key-run', feature: 'f2', storyId: 's2', success: true, partial: false, authMode: 'api-key' },
+      { ...BASE, runId: 'legacy-run', feature: 'f3', storyId: 's3', success: true, partial: false },
+    ];
+    apiMock.mockResolvedValue(rows);
+    renderRunsIndex();
+
+    const subRow = await screen.findByRole('link', { name: /Run sub-run/ });
+    expect(subRow).toHaveTextContent('sub');
+    expect(screen.getByRole('link', { name: /Run key-run/ })).toHaveTextContent('key');
+    // Never invent a mode for a run recorded before 0.12.0.
+    expect(screen.getByRole('link', { name: /Run legacy-run/ })).toHaveTextContent('—');
+  });
 });

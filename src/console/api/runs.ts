@@ -11,7 +11,7 @@ import { runPlanner } from '../../planner/loop.js';
 import { PlannerEventBus, type PlannerEvent } from '../../planner/events.js';
 import { listStories } from '../../core/stories.js';
 import { modelFor, resolvePlannerAuthForPaths } from '../../core/planner-models.js';
-import { PlannerAuthUnavailableError, type ResolvedPlannerAuth } from '../../core/planner-auth.js';
+import { describeAuth, PlannerAuthUnavailableError, type ResolvedPlannerAuth } from '../../core/planner-auth.js';
 import { buildRepoMap } from '../../core/repo-map.js';
 import { buildPlansIndex } from '../../core/plans-index.js';
 import { summariseIssuesByKind } from '../../planner/validation.js';
@@ -288,6 +288,7 @@ export function mountRunsApi(app: Hono, opts: { paths: SquadPaths }): void {
               durationMs: result.validation?.durationMs,
             },
             plannerRuntime: { kind: draftRuntime.kind, provider: planner.provider },
+            authMode: describeAuth(auth).mode,
             providerOptionsSnapshot: anthropicProviderSpecific
               ? { anthropic: anthropicProviderSpecific }
               : undefined,

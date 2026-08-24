@@ -6,6 +6,7 @@ import { mountConfigApi } from './config.js';
 import { mountMetaApi } from './meta.js';
 import { mountRunsApi } from './runs.js';
 import { mountSecretsApi } from './secrets.js';
+import { mountPlannerAuthApi } from './planner-auth.js';
 import { mountTrackerApi } from './tracker.js';
 import { mountDoctorApi } from './doctor.js';
 import { mountCopyPlanPromptApi } from './copy-plan-prompt.js';
@@ -25,6 +26,7 @@ export function mountApi(app: Hono, opts: MountApiOptions): void {
   mountConfigApi(app, opts);
   mountRunsApi(app, opts);
   mountSecretsApi(app, opts);
+  mountPlannerAuthApi(app, opts);
   mountTrackerApi(app, opts);
   mountDoctorApi(app, opts);
   mountCopyPlanPromptApi(app, opts);

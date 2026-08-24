@@ -31,6 +31,8 @@ const base: GenerateRunState = {
   activities: [],
   turn: 0,
   error: null,
+  errorCode: null,
+  auth: null,
 };
 
 describe('MetricsBar', () => {

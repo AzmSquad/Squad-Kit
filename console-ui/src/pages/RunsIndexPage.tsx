@@ -13,6 +13,16 @@ function runtimeLabel(r: ApiRunRecord): string {
   return k === 'agent-sdk' ? 'Agent SDK' : k === 'vercel' ? 'Vercel' : '—';
 }
 
+/** Runs recorded before 0.12.0 carry no `authMode`; show `—` rather than inventing one. */
+function AuthChip({ mode }: { mode: ApiRunRecord['authMode'] }) {
+  if (!mode) return <span className="text-[var(--color-text-muted)]">—</span>;
+  return (
+    <Badge tone={mode === 'subscription' ? 'info' : 'muted'} title={mode}>
+      {mode === 'subscription' ? 'sub' : 'key'}
+    </Badge>
+  );
+}
+
 export function RunsIndexPage() {
   const navigate = useNavigate();
   const q = useQuery({
@@ -55,7 +65,7 @@ export function RunsIndexPage() {
         </Callout>
       ) : (
         <div className="overflow-auto rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)]">
-          <table className="w-full min-w-[860px] table-fixed border-collapse text-left text-[13px]">
+          <table className="w-full min-w-[940px] table-fixed border-collapse text-left text-[13px]">
             <thead className="bg-[var(--gray-2)] text-[var(--color-text-muted)]">
               <tr>
                 <th className="border-b border-[var(--color-border)] px-3 py-2 font-medium w-[10rem]">
@@ -66,6 +76,7 @@ export function RunsIndexPage() {
                 </th>
                 <th className="border-b border-[var(--color-border)] px-3 py-2 font-medium">Model</th>
                 <th className="border-b border-[var(--color-border)] px-3 py-2 font-medium w-[6rem]">Runtime</th>
+                <th className="border-b border-[var(--color-border)] px-3 py-2 font-medium w-[5rem]">Auth</th>
                 <th className="border-b border-[var(--color-border)] px-3 py-2 font-medium tabular text-right w-[5rem]">
                   Duration
                 </th>
@@ -132,6 +143,9 @@ export function RunsIndexPage() {
                       {r.model}
                     </td>
                     <td className="px-3 py-[var(--space-row-y)]">{runtimeLabel(r)}</td>
+                    <td className="px-3 py-[var(--space-row-y)]">
+                      <AuthChip mode={r.authMode} />
+                    </td>
                     <td className="px-3 py-[var(--space-row-y)] tabular text-right">{secs}s</td>
                     <td className="px-3 py-[var(--space-row-y)] tabular text-right">{sumTok}</td>
                     <td className="px-3 py-[var(--space-row-y)] tabular text-right">{pct != null ? `${pct}%` : '—'}</td>
