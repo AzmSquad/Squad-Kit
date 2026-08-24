@@ -1,10 +1,21 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { type SquadPaths } from '../core/paths.js';
-import { loadConfig, type SquadConfig } from '../core/config.js';
+import { loadConfig, saveConfig, type SquadConfig } from '../core/config.js';
 import { loadSecrets, type SquadSecrets } from '../core/secrets.js';
 import { ensureGitignore, SQUAD_TRASH_PATTERN } from '../core/gitignore.js';
-import { modelFor, providerEnvVar, resolveProviderKey } from '../core/planner-models.js';
+import {
+  modelFor,
+  providerEnvVar,
+  resolvePlannerAuthForPaths,
+  resolveProviderKeyForPaths,
+} from '../core/planner-models.js';
+import { describeAuth, type ResolvedPlannerAuth } from '../core/planner-auth.js';
+import { MISSING_CLAUDE_BINARY_MESSAGE, resolveClaudeBinary } from '../core/claude-binary.js';
+import { skipExternalProbesInAutomation } from '../core/ci-env.js';
+import { probeClaudeAuth, type ProbeClaudeAuthResult } from '../planner/runtimes/auth-probe.js';
+import { plannerAuthRuntimeMismatchMessage } from '../planner/runtimes/auth-runtime-mismatch.js';
+import { authReasonText, credentialPresent, runtimeNameFor } from './auth/shared.js';
 import { clientFor, overlayTrackerEnv, type ClientResolutionError } from '../tracker/index.js';
 import type { ProviderName } from '../planner/types.js';
 import {
@@ -25,12 +36,30 @@ export interface CheckResult {
   fixable?: boolean;
 }
 
+/** Either the resolver answered, or it told us why it cannot. Never both. */
+type AuthResolution = { ok: true; auth: ResolvedPlannerAuth } | { ok: false; error: Error };
+
+/** `{ skipped: true }` means the run is in CI/automation, not that the login failed. */
+type AuthProbeOutcome = ProbeClaudeAuthResult | { skipped: true };
+
+/**
+ * Auth state is resolved once and probed at most once per doctor run: `planner-auth-mode`,
+ * `planner-cred`, `planner-model`, `planner-auth-runtime-fit` and the Agent SDK check all want it,
+ * and a second `probeClaudeAuth()` would mean a second SDK subprocess.
+ */
+interface DoctorAuthMemo {
+  resolution?: AuthResolution;
+  probe?: AuthProbeOutcome;
+}
+
 export interface DoctorContext {
   config?: SquadConfig;
   configError?: Error;
   secrets?: SquadSecrets;
   secretsError?: Error;
   hasLegacyPromptsDir: boolean;
+  /** Internal per-run memo; see `DoctorAuthMemo`. Not part of the `--json` output. */
+  authMemo?: DoctorAuthMemo;
 }
 
 export async function gatherContext(paths: SquadPaths): Promise<DoctorContext> {
@@ -58,6 +87,14 @@ function gitignoreHasTrashPattern(repoRoot: string): boolean {
   const gitignore = path.join(repoRoot, '.gitignore');
   return fs.existsSync(gitignore) && fs.readFileSync(gitignore, 'utf8').includes(SQUAD_TRASH_PATTERN);
 }
+
+/**
+ * Doctor is deliberately more patient than the 10s `probeClaudeAuth` default. A *cold* Agent SDK
+ * subprocess start was measured at ~9.2s on a warm-cache machine (warm runs ~1.6s), so the default
+ * would report a spurious timeout on the first `squad doctor` after a reboot. A timeout still
+ * degrades to `warn`, never `fail` — this just stops us crying wolf on the common case.
+ */
+const DOCTOR_AUTH_PROBE_TIMEOUT_MS = 25_000;
 
 async function checkDirStructure(paths: SquadPaths, _ctx: DoctorContext, fix: boolean): Promise<CheckResult> {
   const need = [paths.squadDir, paths.storiesDir, paths.plansDir].filter((p) => !fs.existsSync(p));
@@ -228,37 +265,186 @@ async function checkPlannerConfig(_paths: SquadPaths, ctx: DoctorContext): Promi
   return { id: 'planner-config', name: 'planner configuration', status: 'ok' };
 }
 
-async function checkPlannerCredential(_paths: SquadPaths, ctx: DoctorContext): Promise<CheckResult> {
-  if (!ctx.config || ctx.config.planner?.enabled !== true) {
-    return { id: 'planner-cred', name: 'planner credential resolves', status: 'skip', detail: 'planner disabled' };
-  }
-  const provider = ctx.config.planner.provider;
-  const resolved = resolveProviderKey(provider);
-  if (!resolved) {
-    const envVar = providerEnvVar(provider);
-    return {
-      id: 'planner-cred',
-      name: 'planner credential resolves',
-      status: 'fail',
-      detail: `no API key found (${envVar} or .squad/secrets.yaml)`,
-      fixHint: `Set ${envVar} or save a key via 'squad init' interactive setup`,
-    };
-  }
-  return {
-    id: 'planner-cred',
-    name: 'planner credential resolves',
-    status: 'ok',
-    detail: `source=${resolved.source} (${resolved.detail})`,
-  };
+const LOGIN_FIX_HINT = 'Run `squad auth login` to sign in with your Claude account.';
+
+const ORG_NOT_ALLOWED_FIX_HINT =
+  'That Claude account is signed in, but its organization policy blocks this kind of access. ' +
+  'Ask an administrator to allow Claude Agent SDK usage, or set `planner.auth.anthropic: api-key` ' +
+  'in .squad/config.yaml and provide an ANTHROPIC_API_KEY.';
+
+/** Planner enabled with a usable config? Every auth-aware check starts here. */
+function plannerEnabled(ctx: DoctorContext): boolean {
+  return ctx.config?.planner?.enabled === true;
 }
 
-async function checkPlannerModel(_paths: SquadPaths, ctx: DoctorContext): Promise<CheckResult> {
-  if (!ctx.config || ctx.config.planner?.enabled !== true) {
+/**
+ * Resolve the planner auth mode once per doctor run. Errors are captured rather than thrown:
+ * `PlannerAuthUnavailableError` is a finding (`planner-auth-mode` fails and names both recovery
+ * paths), not a crashed check.
+ */
+function authFor(paths: SquadPaths, ctx: DoctorContext, provider: ProviderName): AuthResolution {
+  const memo = (ctx.authMemo ??= {});
+  if (!memo.resolution) {
+    try {
+      memo.resolution = { ok: true, auth: resolvePlannerAuthForPaths(paths, provider, ctx.config?.planner) };
+    } catch (err) {
+      memo.resolution = { ok: false, error: err as Error };
+    }
+  }
+  return memo.resolution;
+}
+
+/**
+ * Verify the login with the Agent SDK — at most once per run, and never in CI: `pnpm test` sets
+ * `CI`, and an unconditional probe would spawn an SDK subprocess per doctor run in the suite.
+ */
+async function probeAuthOnce(ctx: DoctorContext, auth: ResolvedPlannerAuth): Promise<AuthProbeOutcome> {
+  const memo = (ctx.authMemo ??= {});
+  if (!memo.probe) {
+    memo.probe = skipExternalProbesInAutomation()
+      ? { skipped: true }
+      : await probeClaudeAuth(auth, { timeoutMs: DOCTOR_AUTH_PROBE_TIMEOUT_MS });
+  }
+  return memo.probe;
+}
+
+function probeWasSkipped(outcome: AuthProbeOutcome): outcome is { skipped: true } {
+  return 'skipped' in outcome;
+}
+
+async function checkPlannerAuthMode(
+  paths: SquadPaths,
+  ctx: DoctorContext,
+  _fix: boolean,
+): Promise<CheckResult> {
+  const id = 'planner-auth-mode';
+  const name = 'planner auth mode';
+  if (!plannerEnabled(ctx) || !ctx.config?.planner) {
+    return { id, name, status: 'skip', detail: 'planner disabled' };
+  }
+  const planner = ctx.config.planner;
+  const provider = planner.provider;
+  if (provider !== 'anthropic') {
+    return { id, name, status: 'skip', detail: `api key only for ${provider}` };
+  }
+
+  const resolution = authFor(paths, ctx, provider);
+  if (!resolution.ok) {
+    return { id, name, status: 'fail', detail: resolution.error.message, fixHint: LOGIN_FIX_HINT };
+  }
+
+  const auth = resolution.auth;
+  const described = describeAuth(auth);
+  let detail = `${described.mode} (${authReasonText(described.reason, provider)}) → ${described.credentialHint}`;
+
+  if (auth.mode === 'subscription') {
+    // A key *and* a login in `auto` — say out loud which one wins, so the change is never silent.
+    const ignoredKey = resolveProviderKeyForPaths(paths, provider);
+    if (ignoredKey) detail += ` · ignoring the API key from ${ignoredKey.detail}`;
+  }
+
+  const implicitApiKey = (planner.auth?.anthropic ?? 'auto') === 'auto' && auth.reason === 'auto-fallback-api-key';
+  if (implicitApiKey) {
+    // Deliberately NOT offered as a `--fix`. Pinning `api-key` here would look like tidying up, but
+    // `auto` exists precisely so that a Claude login, once present, takes over — pinning it would
+    // silently stop that from ever happening, which is the opposite of what 0.12 is for. Nothing is
+    // broken in this state, so doctor explains it and leaves the choice to the user.
+    return {
+      id,
+      name,
+      status: 'ok',
+      detail,
+      fixHint:
+        'Resolving by fallback. Set `planner.auth.anthropic` explicitly (`squad config set planner`) if you want to pin this, ' +
+        'or run `squad auth login` to plan on your Claude subscription instead.',
+    };
+  }
+
+  return { id, name, status: 'ok', detail };
+}
+
+/** Human summary of a successful probe. Account fields are optional; never assume they are there. */
+function describeProbeAccount(probe: ProbeClaudeAuthResult & { ok: true }): string {
+  const bits: string[] = [];
+  const email = probe.account?.email;
+  const plan = probe.account?.subscriptionType;
+  bits.push(email ? `signed in as ${email}${plan ? ` (${plan})` : ''}` : 'Claude login verified');
+  if (probe.account?.organization) bits.push(probe.account.organization);
+  if (probe.apiKeySource) bits.push(`apiKeySource=${probe.apiKeySource}`);
+  return bits.join(' · ');
+}
+
+async function checkPlannerCredential(paths: SquadPaths, ctx: DoctorContext): Promise<CheckResult> {
+  const id = 'planner-cred';
+  const name = 'planner credential resolves';
+  if (!plannerEnabled(ctx) || !ctx.config?.planner) {
+    return { id, name, status: 'skip', detail: 'planner disabled' };
+  }
+  const provider = ctx.config.planner.provider;
+  const resolution = authFor(paths, ctx, provider);
+  if (!resolution.ok) {
+    const envVar = providerEnvVar(provider);
+    return {
+      id,
+      name,
+      status: 'fail',
+      detail: `no API key found (${envVar} or .squad/secrets.yaml)`,
+      fixHint: resolution.error.message,
+    };
+  }
+
+  const auth = resolution.auth;
+  if (auth.mode === 'api-key') {
+    return { id, name, status: 'ok', detail: `source=${auth.source} (${auth.detail})` };
+  }
+
+  const credentialHint = describeAuth(auth).credentialHint;
+  const probe = await probeAuthOnce(ctx, auth);
+  if (probeWasSkipped(probe)) {
+    return credentialPresent(auth)
+      ? { id, name, status: 'ok', detail: `${credentialHint} · offline check only` }
+      : {
+          id,
+          name,
+          status: 'warn',
+          detail: 'no Claude login detected · offline check only',
+          fixHint: LOGIN_FIX_HINT,
+        };
+  }
+  if (probe.ok) {
+    return { id, name, status: 'ok', detail: describeProbeAccount(probe) };
+  }
+  switch (probe.kind) {
+    case 'not-logged-in':
+    case 'expired':
+      return { id, name, status: 'fail', detail: probe.detail, fixHint: LOGIN_FIX_HINT };
+    case 'org-not-allowed':
+      return { id, name, status: 'fail', detail: probe.detail, fixHint: ORG_NOT_ALLOWED_FIX_HINT };
+    case 'no-binary':
+      // Not a credential problem — `agent-sdk-binary-present` owns this one.
+      return { id, name, status: 'warn', detail: probe.detail, fixHint: MISSING_CLAUDE_BINARY_MESSAGE };
+    default:
+      // timeout / unknown: the network is not the user's config, so never fail on it *unless* the
+      // offline detector already said there is no login — that signal is definitive on its own.
+      return credentialPresent(auth)
+        ? { id, name, status: 'warn', detail: `${probe.kind}: ${probe.detail}` }
+        : {
+            id,
+            name,
+            status: 'fail',
+            detail: `no Claude login detected (live check: ${probe.kind})`,
+            fixHint: LOGIN_FIX_HINT,
+          };
+  }
+}
+
+async function checkPlannerModel(paths: SquadPaths, ctx: DoctorContext): Promise<CheckResult> {
+  if (!plannerEnabled(ctx) || !ctx.config?.planner) {
     return { id: 'planner-model', name: 'planner model resolves at provider', status: 'skip', detail: 'planner disabled' };
   }
   const provider = ctx.config.planner.provider;
-  const cred = resolveProviderKey(provider);
-  if (!cred) {
+  const resolution = authFor(paths, ctx, provider);
+  if (!resolution.ok) {
     return {
       id: 'planner-model',
       name: 'planner model resolves at provider',
@@ -266,9 +452,20 @@ async function checkPlannerModel(_paths: SquadPaths, ctx: DoctorContext): Promis
       detail: 'no credential',
     };
   }
+  const auth = resolution.auth;
+  if (auth.mode === 'subscription') {
+    // `/v1/models` authenticates with `x-api-key`; an OAuth subscription credential is not one, and
+    // a stray key in the environment would validate against a different account than the run uses.
+    return {
+      id: 'planner-model',
+      name: 'planner model resolves at provider',
+      status: 'skip',
+      detail: 'model list needs an API key; skipped in subscription mode',
+    };
+  }
   const model = modelFor(provider, 'plan', ctx.config.planner.modelOverride);
   try {
-    const listed = await fetchProviderModelIds(provider, cred.value);
+    const listed = await fetchProviderModelIds(provider, auth.key);
     if (!listed.ok) {
       const st = listed.status;
       if (st === 401 || st === 403) {
@@ -312,7 +509,7 @@ async function checkPlannerModel(_paths: SquadPaths, ctx: DoctorContext): Promis
 }
 
 async function checkPlannerTierAwareness(
-  _paths: SquadPaths,
+  paths: SquadPaths,
   ctx: DoctorContext,
 ): Promise<CheckResult> {
   const id = 'planner-tier';
@@ -323,6 +520,13 @@ async function checkPlannerTierAwareness(
   const provider = ctx.config.planner.provider;
   if (provider !== 'anthropic') {
     return { id, name, status: 'skip', detail: `not applicable for ${provider}` };
+  }
+  // Every branch below is about API rate tiers — ITPM ceilings, 429s, console.anthropic.com limits.
+  // None of that governs a subscription run, which draws on the plan's usage window instead, so
+  // warning about Tier 1 here would be advice for an account the user is not billing against.
+  const tierAuth = authFor(paths, ctx, provider);
+  if (tierAuth.ok && tierAuth.auth.mode === 'subscription') {
+    return { id, name, status: 'skip', detail: 'not applicable on subscription auth (no API rate tier)' };
   }
   const planModel = modelFor(provider, 'plan', ctx.config.planner.modelOverride);
   if (!/opus/i.test(planModel)) {
@@ -468,18 +672,62 @@ async function checkPlannerAnthropicRuntimeModelFit(_paths: SquadPaths, ctx: Doc
   };
 }
 
-async function checkAgentSdkBinaryPresent(_paths: SquadPaths, ctx: DoctorContext): Promise<CheckResult> {
+async function checkPlannerAuthRuntimeFit(paths: SquadPaths, ctx: DoctorContext): Promise<CheckResult> {
+  const id = 'planner-auth-runtime-fit';
+  const name = 'planner auth vs. runtime';
+  if (!plannerEnabled(ctx) || !ctx.config?.planner) {
+    return { id, name, status: 'skip', detail: 'planner disabled' };
+  }
+  const planner = ctx.config.planner;
+  const provider = planner.provider;
+  const configuredMode = planner.auth?.anthropic ?? 'auto';
+
+  if (provider !== 'anthropic') {
+    if (configuredMode === 'subscription') {
+      return {
+        id,
+        name,
+        status: 'fail',
+        detail: `planner.auth.anthropic: subscription with planner.provider: ${provider}`,
+        fixHint: plannerAuthRuntimeMismatchMessage(provider),
+      };
+    }
+    return { id, name, status: 'skip', detail: `api key only for ${provider}` };
+  }
+
+  const runtime = runtimeNameFor(provider, planner);
+  const resolution = authFor(paths, ctx, provider);
+  if (!resolution.ok) {
+    return { id, name, status: 'skip', detail: 'auth unresolved' };
+  }
+  const mode = resolution.auth.mode;
+  if (mode === 'subscription' && runtime !== 'agent-sdk') {
+    return {
+      id,
+      name,
+      status: 'fail',
+      detail: `subscription auth with planner.runtime.anthropic: ${runtime}`,
+      fixHint: plannerAuthRuntimeMismatchMessage(provider),
+    };
+  }
+  return { id, name, status: 'ok', detail: `${mode} + ${runtime} runtime` };
+}
+
+async function checkAgentSdkBinaryPresent(paths: SquadPaths, ctx: DoctorContext): Promise<CheckResult> {
   const id = 'agent-sdk-binary-present';
   const name = 'Anthropic Agent SDK install';
   if (!ctx.config?.planner?.enabled || ctx.config.planner.provider !== 'anthropic') {
     return { id, name, status: 'skip', detail: 'not applicable' };
   }
-  if ((ctx.config.planner.runtime?.anthropic ?? 'agent-sdk') === 'vercel') {
+  const resolution = authFor(paths, ctx, 'anthropic');
+  const subscription = resolution.ok && resolution.auth.mode === 'subscription';
+  // Subscription mode needs the binary whatever `runtime.anthropic` says — and `planner-auth-runtime-fit`
+  // has already failed the vercel combination by the time this row is read.
+  if ((ctx.config.planner.runtime?.anthropic ?? 'agent-sdk') === 'vercel' && !subscription) {
     return { id, name, status: 'skip', detail: 'vercel runtime selected' };
   }
   try {
     await import('@anthropic-ai/claude-agent-sdk');
-    return { id, name, status: 'ok', detail: 'package resolves' };
   } catch (e) {
     return {
       id,
@@ -489,6 +737,24 @@ async function checkAgentSdkBinaryPresent(_paths: SquadPaths, ctx: DoctorContext
       fixHint: 'Run pnpm install / npm install in the squad-kit package so the Agent SDK (and its platform binary) is present.',
     };
   }
+  const binary = resolveClaudeBinary();
+  if (!binary) {
+    // A login runs *through* the binary, so in subscription mode its absence is fatal; with an API
+    // key the SDK can still work, so it is only a warning.
+    return {
+      id,
+      name,
+      status: subscription ? 'fail' : 'warn',
+      detail: 'package resolves; no `claude` executable found',
+      fixHint: MISSING_CLAUDE_BINARY_MESSAGE,
+    };
+  }
+  return {
+    id,
+    name,
+    status: 'ok',
+    detail: `package + ${binary.source === 'bundled' ? 'bundled' : 'PATH'} binary`,
+  };
 }
 
 async function checkTrackerConfig(_paths: SquadPaths, ctx: DoctorContext): Promise<CheckResult> {
@@ -633,11 +899,13 @@ export async function runAllChecks(paths: SquadPaths, ctx: DoctorContext, fix: b
   await add('.squad/secrets.yaml parseable', () => checkSecretsParseable(paths, ctx));
   await add('legacy .squad/prompts/ directory', () => checkLegacyPrompts(paths, ctx));
   await add('planner configuration', () => checkPlannerConfig(paths, ctx));
+  await add('planner auth mode', () => checkPlannerAuthMode(paths, ctx, fix));
   await add('planner credential resolves', () => checkPlannerCredential(paths, ctx));
   await add('planner model resolves at provider', () => checkPlannerModel(paths, ctx));
   await add('planner tier vs. model', () => checkPlannerTierAwareness(paths, ctx));
   await add('planner cache effectiveness', () => checkPlannerCache(paths, ctx));
   await add('planner runtime (resolved)', () => checkPlannerRuntimeInfo(paths, ctx));
+  await add('planner auth vs. runtime', () => checkPlannerAuthRuntimeFit(paths, ctx));
   await add('Anthropic Opus 4.7+ vs Vercel runtime', () => checkPlannerAnthropicRuntimeModelFit(paths, ctx));
   await add('Anthropic Agent SDK install', () => checkAgentSdkBinaryPresent(paths, ctx));
   await add('tracker configuration', () => checkTrackerConfig(paths, ctx));

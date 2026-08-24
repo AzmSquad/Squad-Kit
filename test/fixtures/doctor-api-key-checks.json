@@ -1,0 +1,233 @@
+{
+  "note": "squad doctor rows for an API-key Anthropic workspace (ANTHROPIC_API_KEY set, no Claude login, /v1/models stubbed to list the pinned plan model, Agent SDK platform binary present). `v0110` was captured by running the 0.11.0 doctor engine (unchanged through story 16) against that workspace; `current` is what this build produces. Regenerate `current` deliberately with UPDATE_DOCTOR_FIXTURE=1 vitest run test/doctor-auth.test.ts.",
+  "intendedDeltas": [
+    "agent-sdk-binary-present",
+    "planner-auth-mode",
+    "planner-auth-runtime-fit"
+  ],
+  "v0110": [
+    {
+      "id": "dirs",
+      "name": ".squad/ directory structure",
+      "status": "ok"
+    },
+    {
+      "id": "config",
+      "name": ".squad/config.yaml readable",
+      "status": "ok"
+    },
+    {
+      "id": "gitignore",
+      "name": ".gitignore managed block",
+      "status": "ok"
+    },
+    {
+      "id": "gitignore-trash",
+      "name": ".gitignore includes .squad/.trash/",
+      "status": "ok"
+    },
+    {
+      "id": "secrets-perms",
+      "name": ".squad/secrets.yaml permissions",
+      "status": "ok",
+      "detail": "not present"
+    },
+    {
+      "id": "secrets-yaml",
+      "name": ".squad/secrets.yaml parseable",
+      "status": "ok",
+      "detail": "not present"
+    },
+    {
+      "id": "legacy-prompts",
+      "name": "legacy .squad/prompts/ directory",
+      "status": "ok"
+    },
+    {
+      "id": "planner-config",
+      "name": "planner configuration",
+      "status": "ok"
+    },
+    {
+      "id": "planner-cred",
+      "name": "planner credential resolves",
+      "status": "ok",
+      "detail": "source=env (ANTHROPIC_API_KEY)"
+    },
+    {
+      "id": "planner-model",
+      "name": "planner model resolves at provider",
+      "status": "ok",
+      "detail": "claude-opus-4-7 (anthropic)"
+    },
+    {
+      "id": "planner-tier",
+      "name": "planner tier vs. model",
+      "status": "warn",
+      "detail": "Anthropic Tier 1 with Opus — tight but viable with prompt caching on",
+      "fixHint": "Caching saves ~70% on billed input tokens. Keep `planner.cache.enabled: true` in config.\nIf you still hit 429s on long runs, reduce `planner.budget.maxContextBytes` or use Haiku for plan phase."
+    },
+    {
+      "id": "planner-cache",
+      "name": "planner cache effectiveness",
+      "status": "skip",
+      "detail": "no planner runs logged yet",
+      "fixHint": "Run `squad new-plan --api` once, then re-run `squad doctor` to see cache telemetry."
+    },
+    {
+      "id": "planner-runtime-info",
+      "name": "planner runtime (resolved)",
+      "status": "ok",
+      "detail": "anthropic → agent-sdk"
+    },
+    {
+      "id": "planner-anthropic-runtime-model-fit",
+      "name": "Anthropic Opus 4.7+ vs Vercel runtime",
+      "status": "ok",
+      "detail": "using Agent SDK or default"
+    },
+    {
+      "id": "agent-sdk-binary-present",
+      "name": "Anthropic Agent SDK install",
+      "status": "ok",
+      "detail": "package resolves"
+    },
+    {
+      "id": "tracker-config",
+      "name": "tracker configuration",
+      "status": "skip",
+      "detail": "none"
+    },
+    {
+      "id": "tracker-cred",
+      "name": "tracker credential resolves",
+      "status": "skip",
+      "detail": "none"
+    },
+    {
+      "id": "tracker-live",
+      "name": "tracker connectivity",
+      "status": "skip",
+      "detail": "none"
+    }
+  ],
+  "current": [
+    {
+      "id": "dirs",
+      "name": ".squad/ directory structure",
+      "status": "ok"
+    },
+    {
+      "id": "config",
+      "name": ".squad/config.yaml readable",
+      "status": "ok"
+    },
+    {
+      "id": "gitignore",
+      "name": ".gitignore managed block",
+      "status": "ok"
+    },
+    {
+      "id": "gitignore-trash",
+      "name": ".gitignore includes .squad/.trash/",
+      "status": "ok"
+    },
+    {
+      "id": "secrets-perms",
+      "name": ".squad/secrets.yaml permissions",
+      "status": "ok",
+      "detail": "not present"
+    },
+    {
+      "id": "secrets-yaml",
+      "name": ".squad/secrets.yaml parseable",
+      "status": "ok",
+      "detail": "not present"
+    },
+    {
+      "id": "legacy-prompts",
+      "name": "legacy .squad/prompts/ directory",
+      "status": "ok"
+    },
+    {
+      "id": "planner-config",
+      "name": "planner configuration",
+      "status": "ok"
+    },
+    {
+      "id": "planner-auth-mode",
+      "name": "planner auth mode",
+      "status": "ok",
+      "detail": "api-key (auto — no Claude login, fell back to an API key) → ANTHROPIC_API_KEY",
+      "fixHint": "Resolving by fallback. Set `planner.auth.anthropic` explicitly (`squad config set planner`) if you want to pin this, or run `squad auth login` to plan on your Claude subscription instead."
+    },
+    {
+      "id": "planner-cred",
+      "name": "planner credential resolves",
+      "status": "ok",
+      "detail": "source=env (ANTHROPIC_API_KEY)"
+    },
+    {
+      "id": "planner-model",
+      "name": "planner model resolves at provider",
+      "status": "ok",
+      "detail": "claude-opus-4-7 (anthropic)"
+    },
+    {
+      "id": "planner-tier",
+      "name": "planner tier vs. model",
+      "status": "warn",
+      "detail": "Anthropic Tier 1 with Opus — tight but viable with prompt caching on",
+      "fixHint": "Caching saves ~70% on billed input tokens. Keep `planner.cache.enabled: true` in config.\nIf you still hit 429s on long runs, reduce `planner.budget.maxContextBytes` or use Haiku for plan phase."
+    },
+    {
+      "id": "planner-cache",
+      "name": "planner cache effectiveness",
+      "status": "skip",
+      "detail": "no planner runs logged yet",
+      "fixHint": "Run `squad new-plan --api` once, then re-run `squad doctor` to see cache telemetry."
+    },
+    {
+      "id": "planner-runtime-info",
+      "name": "planner runtime (resolved)",
+      "status": "ok",
+      "detail": "anthropic → agent-sdk"
+    },
+    {
+      "id": "planner-auth-runtime-fit",
+      "name": "planner auth vs. runtime",
+      "status": "ok",
+      "detail": "api-key + agent-sdk runtime"
+    },
+    {
+      "id": "planner-anthropic-runtime-model-fit",
+      "name": "Anthropic Opus 4.7+ vs Vercel runtime",
+      "status": "ok",
+      "detail": "using Agent SDK or default"
+    },
+    {
+      "id": "agent-sdk-binary-present",
+      "name": "Anthropic Agent SDK install",
+      "status": "ok",
+      "detail": "package + bundled binary"
+    },
+    {
+      "id": "tracker-config",
+      "name": "tracker configuration",
+      "status": "skip",
+      "detail": "none"
+    },
+    {
+      "id": "tracker-cred",
+      "name": "tracker credential resolves",
+      "status": "skip",
+      "detail": "none"
+    },
+    {
+      "id": "tracker-live",
+      "name": "tracker connectivity",
+      "status": "skip",
+      "detail": "none"
+    }
+  ]
+}

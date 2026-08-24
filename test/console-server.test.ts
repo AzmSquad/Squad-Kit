@@ -123,6 +123,20 @@ describe('console server', () => {
     expect(body.project.name).toBe('console-test');
   });
 
+  it('GET /api/doctor exposes the auth checks the CLI has', async () => {
+    const res = await fetch(`${baseUrl}/api/doctor`, {
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { checks: { id: string; status: string }[] };
+    const ids = body.checks.map((c) => c.id);
+    // The console renders whatever the registry produces; parity is the point of the assertion.
+    expect(ids).toContain('planner-auth-mode');
+    expect(ids).toContain('planner-auth-runtime-fit');
+    expect(ids).toContain('planner-cred');
+    expect(ids).toContain('planner-model');
+  });
+
   it('rejects path-traversal attempts on plans', async () => {
     const res = await fetch(`${baseUrl}/api/plans/${encodeURIComponent('../..')}/etc-passwd`, {
       headers: { authorization: `Bearer ${TOKEN}` },

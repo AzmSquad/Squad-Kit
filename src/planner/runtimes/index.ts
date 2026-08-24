@@ -3,8 +3,15 @@ import type { ProviderName } from '../types.js';
 import type { PlannerRuntime } from './types.js';
 import { VercelRuntime } from './vercel-runtime.js';
 import { AgentSdkRuntime } from './agent-sdk-runtime.js';
+import { plannerAuthRuntimeMismatchMessage } from './auth-runtime-mismatch.js';
 
 export * from './types.js';
+export {
+  plannerAuthRuntimeMismatchMessage,
+  SUBSCRIPTION_NEEDS_AGENT_SDK_LEAD,
+  SUBSCRIPTION_VERCEL_RUNTIME_HINT,
+  subscriptionProviderMismatchHint,
+} from './auth-runtime-mismatch.js';
 export { VercelRuntime } from './vercel-runtime.js';
 export { AgentSdkRuntime } from './agent-sdk-runtime.js';
 export { extractAnthropicProviderSpecific, sdkEffortFromPlanner, thinkingConfigFromProviderSpecific } from './anthropic-options.js';
@@ -15,14 +22,8 @@ export { extractAnthropicProviderSpecific, sdkEffortFromPlanner, thinkingConfigF
  */
 export class PlannerAuthRuntimeMismatchError extends Error {
   constructor(readonly provider: ProviderName, readonly runtimeChoice: 'agent-sdk' | 'vercel') {
-    super(
-      'Subscription auth needs the Claude Agent SDK runtime. ' +
-        (provider === 'anthropic'
-          ? 'Remove `planner.runtime.anthropic: vercel` from .squad/config.yaml (the default is agent-sdk), ' +
-            'or set `planner.auth.anthropic: api-key` and provide an ANTHROPIC_API_KEY.'
-          : `The planner provider is \`${provider}\`, which is API-key only. Switch to Anthropic with ` +
-            '`squad config set planner`, or set `planner.auth.anthropic: api-key` and provide an ANTHROPIC_API_KEY.'),
-    );
+    // Shared with `squad doctor`'s planner-auth-runtime-fit check — see auth-runtime-mismatch.ts.
+    super(plannerAuthRuntimeMismatchMessage(provider));
     this.name = 'PlannerAuthRuntimeMismatchError';
   }
 }

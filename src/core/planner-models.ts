@@ -101,7 +101,7 @@ export function readProviderKey(provider: ProviderName): string | undefined {
  * Resolve planner API key for a known workspace (e.g. console server) without relying on
  * `process.cwd()` / `findSquadRoot()`.
  */
-function resolveProviderKeyForPaths(paths: SquadPaths, provider: ProviderName): CredentialSource | undefined {
+export function resolveProviderKeyForPaths(paths: SquadPaths, provider: ProviderName): CredentialSource | undefined {
   const envVar = providerEnvVar(provider);
   const envValue = process.env[envVar];
   if (envValue) return { value: envValue, source: 'env', detail: envVar };

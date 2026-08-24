@@ -8,6 +8,31 @@ import { SQUAD_DIR } from '../src/core/paths.js';
 import { ensureGitignore } from '../src/core/gitignore.js';
 import { PLANNER_MODEL_MAP } from '../src/core/planner-models.js';
 
+/**
+ * These cases assert the API-key world, so the machine running them must look like one: without
+ * this the real `detectClaudeLogin()` would find a developer's own Claude login (macOS Keychain)
+ * and `planner.auth.anthropic: auto` would resolve to `subscription` here but not in CI.
+ * `probeClaudeAuth` is stubbed to a hard failure so a leaked live probe shows up as a broken test
+ * rather than as a silent SDK subprocess spawn.
+ */
+vi.mock('../src/core/planner-auth.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/core/planner-auth.js')>();
+  return {
+    ...actual,
+    detectClaudeLogin: () => ({ present: false, hint: 'none', detail: 'no Claude login detected' }),
+  };
+});
+
+vi.mock('../src/planner/runtimes/auth-probe.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/planner/runtimes/auth-probe.js')>();
+  return {
+    ...actual,
+    probeClaudeAuth: async () => {
+      throw new Error('probeClaudeAuth must not run in the API-key doctor suite');
+    },
+  };
+});
+
 type FetchInput = Parameters<typeof globalThis.fetch>[0];
 
 let tmp: string;
