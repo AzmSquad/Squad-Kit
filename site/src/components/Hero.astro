@@ -29,7 +29,7 @@ import TerminalDemo from "./TerminalDemo.astro";
           <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--color-accent)] opacity-75"></span>
           <span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-[var(--color-accent)]"></span>
         </span>
-        v0.11.0 · on npm
+        v0.12.0 · on npm
         <svg class="h-3 w-3 transition-transform group-hover:translate-x-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M5 12h14M13 5l7 7-7 7" />
         </svg>
@@ -42,13 +42,13 @@ import TerminalDemo from "./TerminalDemo.astro";
 
       <p class="mt-6 text-base sm:text-lg text-[var(--color-text-muted)] leading-relaxed max-w-2xl mx-auto">
         A 3-step SDD workflow CLI for AI coding agents. Your strongest model plans once — now directly
-        from the terminal — and a cheap model executes many times. Prompt caching on every planning run
-        cuts billed input tokens ~70% on typical sessions; tracker fetch, secrets split, and
-        <code class="font-mono text-[var(--color-text)]">squad doctor</code> round out 0.2+.
+        from the terminal — and a cheap model executes many times. With Anthropic that planning pass runs
+        on your <strong class="text-[var(--color-text)]">Claude subscription</strong> by default: no API key,
+        no per-token API bill. An API key still works if you prefer one.
       </p>
 
       <p class="text-sm text-[var(--color-text-muted)] mt-3 max-w-2xl mx-auto">
-        Now with a visual console: <code class="kbd">npx squad-kit console</code>
+        Sign in once: <code class="kbd">squad auth login</code> · visual console: <code class="kbd">npx squad-kit console</code>
       </p>
 
       <div class="mt-8 flex flex-wrap items-center justify-center gap-3">

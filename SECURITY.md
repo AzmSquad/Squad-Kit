@@ -37,11 +37,25 @@ squad-kit reads API tokens from (in order):
 2. **`.squad/secrets.yaml`** — created with mode `0600` on POSIX; always included in `.gitignore` by `squad init`.
 3. **Interactive prompt** — when the terminal is a TTY and the command needs a credential that is missing.
 
+### Anthropic subscription credentials (0.12.0+)
+
+The Anthropic planner can authenticate with a Claude subscription instead of an API key. That path resolves, in order: **`CLAUDE_CODE_OAUTH_TOKEN`** → **`planner.anthropicOauthToken` in `.squad/secrets.yaml`** → the **OS credential store** managed by Claude Code.
+
+- The OAuth token is a credential and is treated as one: it lives in `.squad/secrets.yaml` only (git-ignored, `0600` on POSIX), is masked everywhere it is displayed, and is rejected by name if it appears in `.squad/config.yaml`.
+- squad-kit **never reads** the OS credential store. It checks only whether an entry **exists** (on macOS via `security find-generic-password -s "Claude Code-credentials"`, never `-w` / `-g`) and leaves the reading to the Claude Agent SDK.
+- In subscription mode, `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` are **removed from the planner subprocess environment** (case-insensitively). Both outrank the subscription credential inside Claude Code, so an inherited one would silently redirect usage to API billing. The parent shell is not modified.
+- `squad auth logout` removes **only** the token squad-kit stored. It never deletes the user's global Claude Code credential.
+- Persisted run records (`.squad/runs/*.json`, `*.events.jsonl`) carry the resolved auth **mode** and `apiKeySource` only — never a token, key, email, or organization. Account details are fetched live for display and never written to disk.
+
 ### Non-goals
 
-- `.squad/config.yaml` must never contain secrets. Loading it with a key matching `apiKey`, `api_key`, `token`, `secret`, `credential`, or `credentials` raises a loud error.
-- squad-kit does not integrate with OS keychains in 0.2.0. The secrets file model is intentional: it is inspectable, excluded by ignore rules, and portable.
+- `.squad/config.yaml` must never contain secrets. Loading it with a key whose lowercased name is exactly `apikey`, `api_key`, `token`, `oauthtoken`, `anthropicoauthtoken`, `secret`, `credential`, or `credentials` raises a loud error. Matching is exact rather than substring so that legitimate keys such as `planner.maxOutputTokens` keep loading; new credential-shaped keys must be added to that list by name.
+- squad-kit does not **store** credentials in an OS keychain. It will detect and use a Claude Code login held in one (see above), but its own secrets model remains the `.squad/secrets.yaml` file: inspectable, excluded by ignore rules, and portable.
 - Credentials are never logged. Tracker error messages redact tokens; planner provider errors do the same.
+
+### Known limitation — enterprise managed settings
+
+squad-kit runs the Agent SDK with `settingSources: []`, which prevents it from reading user, project, and local settings files. An ordinary user-level `apiKeyHelper` therefore cannot redirect a subscription run. **Policy settings are always merged regardless**, so an enterprise **managed-settings** `apiKeyHelper` deployed by MDM is still honoured and still outranks the login credential. On a managed device, `planner.auth.anthropic: subscription` may resolve through the organization's helper. This was established by reading the credential resolver in the bundled `claude` binary, not by testing on a live managed device. `squad auth status` reports the `apiKeySource` the SDK actually resolved.
 
 ## Scope
 

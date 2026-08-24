@@ -49,11 +49,13 @@ The direct planner (`squad new-plan --api`) **does not violate** “plan once, e
 | --- | --- | --- |
 | Where planning happens | Inside the agent session you already use. | In the terminal, via the provider API. |
 | Who feeds context | The agent (may over-read). | squad-kit (budget-enforced). |
-| Credentials | Agent’s existing credentials. | `.squad/secrets.yaml` or a provider env var. |
+| Credentials | Agent’s existing credentials. | **Anthropic:** your Claude subscription by default (`squad auth login`, or an existing `claude` login), or an API key. **OpenAI / Google:** an API key in `.squad/secrets.yaml` or a provider env var. |
 | Best when | You already have a capable agent open. | You want one-shot CLI output without changing tools. |
-| Cost shape | Same planner tier, agent overhead on top. | Same planner tier, no agent session overhead. |
+| Cost shape | Same planner tier, agent overhead on top. | Same planner tier, no agent session overhead. On the Anthropic subscription path, **no per-token API bill** — the pass draws on your Claude plan's usage limits instead. |
 
 In both cases the “expensive” work is a **single** planning pass per story. The direct path simply avoids an agent session and lets squad-kit enforce **read budgets** the agent might ignore. The executor step stays identical: it still ingests **one** `NN-story-*.md` and nothing else.
+
+**“Plan once, execute cheap” gets cheaper still when the planning pass runs on a subscription you already pay for.** From 0.12.0 the default Anthropic path is your Claude plan, so the one expensive pass per story stops arriving as a separate API invoice. That is not the same as free: Agent SDK usage draws on the **same usage limits** as Claude and Claude Code, so a long Opus planning run consumes a real part of your window — noticeably more of a **Pro** window than of a **Max** one. What changes is the *shape* of the cost, not its existence: an allowance you have already bought instead of a metered bill on top. The read-budget discipline matters just as much either way. See [Anthropic authentication](auth.md).
 
 ---
 

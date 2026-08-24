@@ -7,6 +7,120 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-08-24
+
+### What's new
+
+- **Plan on your Claude subscription.** The Anthropic planner can authenticate
+  with the Claude login you already have (Pro, Max, or Team/Enterprise) instead
+  of an API key. `squad new-plan --api` and the console Generate page both run
+  on it. No per-token API bill. OpenAI and Google are unchanged and remain
+  API-key only.
+- **`squad auth login | status | logout`.** `login` runs the Anthropic browser
+  authorization flow and stores the resulting token in `.squad/secrets.yaml`;
+  `--token <value>` consumes a `claude setup-token` value on a headless machine,
+  and `--print-only` runs the flow, prints the token, and stores nothing.
+  `status` reports the resolved mode, the credential behind it, and the
+  signed-in account (`--json` for a stable scripting shape, `--offline` to skip
+  the live check). `logout` removes only the token squad-kit stored.
+- **`planner.auth.anthropic`** in `.squad/config.yaml` — `subscription`,
+  `api-key`, or `auto`. The merged default is **`auto`**: prefer a detected
+  Claude login, fall back to a resolvable API key, otherwise fail naming both
+  recovery paths. `squad init` offers the subscription as the first and default
+  choice for new workspaces and writes it explicitly.
+- **`planner.anthropicOauthToken`** is a new secrets-only key. `.squad/config.yaml`
+  rejects it by name at load time.
+- **Subscription runs withhold the API key.** In subscription mode
+  `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` are removed (case-insensitively)
+  from the planner subprocess environment. Both outrank the login credential
+  inside Claude Code, so an inherited one would silently bill API credits. The
+  parent shell is untouched.
+- **No new runtime dependency.** `squad auth login` shells out to the `claude`
+  binary that `@anthropic-ai/claude-agent-sdk` already ships through
+  `optionalDependencies`. A separate Claude Code install is never required.
+- **Auth-aware `squad doctor`.** New `planner auth mode` (resolved mode, why,
+  and the credential — naming any API key it is ignoring) and
+  `planner auth vs. runtime` (subscription auth requires the Agent SDK runtime)
+  checks. `planner model resolves at provider` and `planner tier vs. model` now
+  **skip** on subscription auth: there is no API key to list models with and no
+  API rate tier to warn about.
+- **Console auth surface.** An Authentication control on Config (with a
+  hard-conflict callout that disables Save), a Claude Account card on Secrets
+  with a live "Check again" probe and a masked stored token, an auth badge and
+  branched billing copy on Generate, a dedicated recovery callout for
+  `auth_unavailable` failures, and an Auth column on the runs index. The console
+  guides the login and never performs it — it cannot complete an OAuth callback
+  on your behalf.
+- **Run records carry `authMode`**, and the planner stream gained one additive
+  `auth_info` event. Older clients ignore unknown event kinds.
+- **Cost copy branches on auth mode.** `printPlannerApiCostNotice()` and the
+  limit explanations no longer describe per-token billing on a subscription run.
+
+### Bug fixes
+
+- Planner model-list probe (`src/core/probes.ts`): a network-level `fetch`
+  rejection (offline, DNS failure, proxy refusal) or a non-JSON response body
+  threw out of `fetchProviderModelIds` instead of returning a failure result, so
+  `squad doctor`'s `planner model resolves at provider` check surfaced an
+  unexpected error rather than a clean diagnosis. Both are now caught and
+  reported as `status: 0` with the message, and long error bodies are truncated.
+  Shipped to GitHub after v0.11.0 (`d2d67a1`) and missed the 0.11.0 changelog.
+
+### Upgrade notes
+
+Zero-config. A `config.yaml` with no `planner.auth` block merges to `auto` and
+keeps loading; every existing `planner.*` key, including `maxOutputTokens`, is
+unaffected. An untouched 0.11.0 API-key workspace resolves to `api-key` and
+behaves identically — **provided the machine has no Claude login**.
+
+Under `auto`, a detected Claude login **outranks** a stored API key. So on a
+machine that has both, an upgraded workspace switches to subscription billing.
+Nothing errors, and the change is announced rather than silent: `squad doctor`'s
+`planner auth mode` row reads `subscription (auto — Claude login detected) → …
+· ignoring the API key from .squad/secrets.yaml`. Set
+`planner.auth.anthropic: api-key` to pin the previous behaviour.
+
+`squad doctor --fix` deliberately does **not** pin an implicit `auto` to
+`api-key`. `auto` exists so that a Claude login takes over once one appears;
+pinning would silently prevent that forever.
+
+### Notes / limitations
+
+- **Usage draws on your Claude plan's limits.** Per Anthropic's
+  [Use the Claude Agent SDK with your Claude plan](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan),
+  Agent SDK, `claude -p`, and third-party usage consumes the subscription's
+  usage limits, and the separately announced monthly SDK credit is not currently
+  available. The claim this release makes is **"no per-token API bill"** — not
+  free, and not unlimited. Opus planning against a **Pro** plan consumes a usage
+  window noticeably faster than against **Max**. Hitting the ceiling means
+  waiting for the reset window or switching to an API key.
+- **Enterprise managed-settings `apiKeyHelper` still wins.** squad-kit runs the
+  Agent SDK with `settingSources: []`, so user, project, and local settings are
+  not read and an ordinary user-level `apiKeyHelper` cannot hijack a
+  subscription run. **Policy settings are always merged regardless**, so a
+  managed-settings `apiKeyHelper` deployed by MDM is still honoured and still
+  outranks the login credential — on a managed device, `auth: subscription` may
+  resolve through the organization's helper. This was established by reading the
+  credential resolver in the bundled `claude` binary, **not** on a live managed
+  device. `squad auth status` reports the `apiKeySource` the SDK actually
+  resolved.
+- **`auth: subscription` requires the Agent SDK runtime.** `@ai-sdk/anthropic`
+  authenticates with `x-api-key`, and an OAuth credential is not an API key.
+  `auth: subscription` with `planner.runtime.anthropic: vercel`, or with a
+  non-Anthropic provider, is a hard failure before any network call — never a
+  silent downgrade to API billing.
+- **Account details are never persisted.** Email, organization, and plan are
+  fetched live for display in `squad auth status`, `squad doctor`, and the
+  console. `.squad/runs/` records the resolved **mode** and `apiKeySource` only —
+  no token, key, email, or organization. Asserted by a test.
+- **A successful SDK handshake does not prove the credential works.**
+  `accountInfo()` resolves from the subprocess's `initialize` response, which
+  succeeds whether or not the credential is valid. Subscription auth that
+  reports no account **and** no `apiKeySource` is therefore treated as
+  unverified rather than signed in.
+- `docs/auth.md` is not shipped inside the npm tarball. It is served at
+  <https://squad-kit.com/docs/auth> and lives in the repo under `docs/`.
+
 ## [0.11.0] — 2026-05-04
 
 ### What's new

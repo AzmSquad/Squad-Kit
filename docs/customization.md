@@ -12,18 +12,22 @@ If you only remember one command after reading this page, make it **`squad confi
 | Path | Who owns it | How to change |
 | --- | --- | --- |
 | `.squad/config.yaml` | You (commit this) | Prefer **`squad config set …`**; hand-editing is possible but easy to get wrong. |
-| `.squad/secrets.yaml` | You (git-ignored, `0600` on POSIX) | **`squad config set planner` / `set tracker`**, or **`squad config remove-credential …`**. |
+| `.squad/secrets.yaml` | You (git-ignored, `0600` on POSIX) | **`squad config set planner` / `set tracker`**, **`squad auth login` / `logout`** for the Claude OAuth token, or **`squad config remove-credential …`**. |
 | `.squad/stories/**`, `.squad/plans/**` | You | Normal file operations; use **`squad rm`** to delete in sync with overviews. |
 | `templates/prompts/*.md` (inside the installed package) | squad-kit | Fork, patch, then `pnpm link` (or publish a fork). No runtime override. |
 | Agent slash files (`.claude/`, `.cursor/`, `.github/prompts/`, `.gemini/`) | You (committed) | Regenerate with **`squad init --force --agents …`** (overwrites only those files). |
 
 ## Managing configuration (`squad config`)
 
-Secrets never belong in **`.squad/config.yaml`**: the loader rejects secret-shaped key names, by design. Anything sensitive goes to **`.squad/secrets.yaml`** (or the provider env vars squad-kit already documents). For both planner and tracker keys, **resolution order** in normal operation is: **env var** → **`.squad/secrets.yaml`** → **prompt** in a TTY → **fail with a recovery hint** (see `CHANGELOG` for the exact list per provider).
+Secrets never belong in **`.squad/config.yaml`**: the loader rejects secret-shaped key names, by design. Anything sensitive goes to **`.squad/secrets.yaml`** (or the provider env vars squad-kit already documents). For tracker keys and for **API-key** planner credentials, **resolution order** in normal operation is: **env var** → **`.squad/secrets.yaml`** → **prompt** in a TTY → **fail with a recovery hint**.
+
+Since **0.12.0** the Anthropic planner can authenticate with your **Claude subscription** instead, which has its own resolution chain — see [Anthropic authentication](#anthropic-authentication-plannerauthanthropic) below and the full guide in [auth.md](auth.md).
+
+The rejected key names are matched against the **exact lowercased key name**, not as a substring: `apikey`, `api_key`, `token`, `oauthtoken`, `anthropicoauthtoken`, `secret`, `credential`, `credentials`. Exact matching is deliberate — a substring rule would reject the legitimate `planner.maxOutputTokens` and break every existing workspace. A new credential-shaped key has to be added to that list by name.
 
 **`squad config show`** — prints the current config and a **masked** view of secrets (values are **never** echoed in full). Use **`--json`** for machine-readable output (secrets still masked).
 
-**`squad config set planner`** — interactive flow to enable or change the direct planner: provider (Anthropic / OpenAI / Google), optional `modelOverride`, and where to put the API key (`.squad/secrets.yaml` or remind you to use a provider env var). Updates `.squad/config.yaml` and, when you choose in-file storage, `.squad/secrets.yaml`.
+**`squad config set planner`** — interactive flow to enable or change the direct planner: provider (Anthropic / OpenAI / Google), the Anthropic **authentication mode** (subscription / API key / automatic), optional `modelOverride`, and where to put the API key (`.squad/secrets.yaml` or remind you to use a provider env var). Updates `.squad/config.yaml` and, when you choose in-file storage, `.squad/secrets.yaml`. Logging in and out lives on **`squad auth`**, not here.
 
 **`squad config set tracker`** — set tracker type (`none`, `github`, `jira`, `azure`), workspace / org / project fields, and tracker credentials for APIs that need them. Secrets go to `.squad/secrets.yaml` only.
 
@@ -33,15 +37,83 @@ Secrets never belong in **`.squad/config.yaml`**: the loader rejects secret-shap
 
 **`squad config remove-credential <planner|tracker>`** — removes only the matching credential subtree from **`.squad/secrets.yaml`**, without touching non-secret fields in `config.yaml`. Handy for rotation when you do not want to re-run a full `set` flow.
 
-### Environment variables the CLI respects
-
-The docs track **`CHANGELOG.md`**; typical planner vars are `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `GOOGLE_API_KEY`, plus a cross-provider fall-back **`SQUAD_PLANNER_API_KEY`**. Jira and Azure have host/org/project in **`config.yaml`** and tokens in **`secrets.yaml`** (or the env var names the tracker clients document). `squad status` and `squad config show` are the best way to see what your current workspace *resolves* without printing raw secrets.
-
-Tracker-specific env names are the ones implemented in the squad-kit version you have installed; when in doubt, prefer **`squad config set tracker`** so the right keys are written to **`secrets.yaml`** in the shape the clients expect.
+**`squad auth <login|status|logout>`** — the Claude subscription surface. `login` runs the browser flow (or takes `--token <v>` on a headless machine, or `--print-only` to produce a token without storing it), `status` reports the resolved mode and account (`--json`, `--offline`), `logout` removes only the token squad-kit stored. See [auth.md](auth.md).
 
 ### If you must hand-edit `config.yaml`
 
 Some teams check in a **template** and expand secrets in CI. For local work, prefer **`squad config set …`** so you never write `apiKey:` into the wrong file. If you do edit YAML by hand, keep `planner.budget` limits positive, avoid secret keys in the committed file, and run **`squad doctor`** after edits.
+
+## Anthropic authentication (`planner.auth.anthropic`)
+
+**New in 0.12.0.** The Anthropic planner can run on your **Claude subscription** instead of an API key. `planner.auth` is a per-provider map; 0.12.0 populates `anthropic` alone, and OpenAI / Google stay API-key only.
+
+| Value | Behaviour |
+| --- | --- |
+| **`subscription`** | Always use the Claude login (`squad auth login`, or `claude` → `/login`). Never reads an API key. |
+| **`api-key`** | Always use an API key. Identical to 0.11.0 behaviour. |
+| **`auto`** | **Merged default.** Prefer a detected Claude login; fall back to a resolvable API key; otherwise fail naming both recovery paths. |
+
+```yaml
+planner:
+  enabled: true
+  provider: anthropic
+  auth:
+    anthropic: subscription    # subscription | api-key | auto  (default: auto)
+  runtime:
+    anthropic: agent-sdk       # required for subscription auth — see below
+  modelOverride:
+    anthropic: claude-opus-4-7
+```
+
+An omitted `planner.auth` block merges to `{ anthropic: 'auto' }`, so an untouched 0.11.0 workspace keeps loading. An invalid value is a load-time error naming the three legal ones. `squad init` writes `subscription` explicitly for new workspaces.
+
+> **Under `auto`, a Claude login beats a stored API key.** On a machine that has both, an upgraded 0.11.0 workspace switches to subscription billing. Nothing errors, and `squad doctor`'s `planner auth mode` row says so explicitly — it names the API key it is ignoring. Pin `api-key` if you want the old behaviour.
+
+### `planner.anthropicOauthToken` is a **secrets-only** key
+
+The OAuth token from `claude setup-token` is a credential. It lives at `planner.anthropicOauthToken` in **`.squad/secrets.yaml`** (git-ignored, `0600` on POSIX) and nowhere else:
+
+```yaml
+# .squad/secrets.yaml  — never .squad/config.yaml
+planner:
+  anthropicOauthToken: sk-ant-oat01-…
+```
+
+`config.yaml` **rejects** it by name. Putting it there fails the load with:
+
+> Refusing to load …/config.yaml: key "planner.anthropicOauthToken" looks like a secret.
+
+Write it with `squad auth login` (or `squad auth login --token <v>`); remove it with `squad auth logout`.
+
+### `auth: subscription` requires the Agent SDK runtime
+
+`@ai-sdk/anthropic` — the `vercel` runtime — authenticates with an `x-api-key` header against `api.anthropic.com`. An OAuth subscription credential is not an API key, so that combination cannot work. squad-kit makes it a **hard, early failure** rather than a silent downgrade to API-key billing:
+
+- `planner.auth.anthropic: subscription` + `planner.runtime.anthropic: vercel` → throws before any network call, with the fix hint.
+- `planner.auth.anthropic: subscription` + `planner.provider: openai` / `google` → same failure; those providers are API-key only.
+
+`squad doctor`'s **`planner auth vs. runtime`** check catches both before you attempt a run, and the console's Config page disables Save on the conflict.
+
+### Environment variables the CLI respects
+
+| Variable | How squad-kit uses it |
+| --- | --- |
+| `ANTHROPIC_API_KEY` | **API-key mode:** first source in the Anthropic key chain. **Subscription mode: deleted from the planner subprocess environment.** |
+| `ANTHROPIC_AUTH_TOKEN` | Never read by squad-kit. **Subscription mode: deleted from the planner subprocess environment.** |
+| `CLAUDE_CODE_OAUTH_TOKEN` | **Subscription mode:** highest-priority login source, above the token stored in `.squad/secrets.yaml`. |
+| `CLAUDE_CONFIG_DIR` | Relocates the `.claude` directory when squad-kit probes for a login (relative paths resolve against the cwd). |
+| `OPENAI_API_KEY`, `GOOGLE_API_KEY` | Provider key for those providers. Unchanged. |
+| `SQUAD_PLANNER_API_KEY` | Cross-provider API-key fall-back. **Never cleared** — it is squad-kit's own variable and the Agent SDK does not read it. |
+
+**Why the two Anthropic variables are cleared.** Inside Claude Code's credential precedence, `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_API_KEY` rank **above** the `/login` subscription credential. If squad-kit passed an inherited one through, a user who thought they were planning on their Claude plan would be silently billed against API credits instead. So in subscription mode both are removed from the child environment before the Agent SDK subprocess starts — **case-insensitively**, because a `{...process.env}` copy is a plain object and would otherwise miss `Anthropic_Api_Key` on Windows.
+
+Your shell is not modified; only the planner subprocess sees the stripped environment. **If you have `ANTHROPIC_API_KEY` exported and it is being ignored, this is why** — set `planner.auth.anthropic: api-key` to use it.
+
+Jira and Azure have host/org/project in **`config.yaml`** and tokens in **`secrets.yaml`** (or the env var names the tracker clients document). `squad status`, `squad auth status`, and `squad config show` are the best way to see what your current workspace *resolves* without printing raw secrets.
+
+Tracker-specific env names are the ones implemented in the squad-kit version you have installed; when in doubt, prefer **`squad config set tracker`** so the right keys are written to **`secrets.yaml`** in the shape the clients expect.
+
+Full walkthrough of both login paths, per-platform credential storage, CI, usage limits, and troubleshooting: [Anthropic authentication](auth.md).
 
 ## Model override
 
@@ -204,6 +276,8 @@ The trash directory is for recovery only — it is not a long-term backup strate
 
 ## Common workflows (quick reference)
 
+- **Plan on your Claude subscription instead of an API key** — `squad auth login`, then `squad new-plan --api`. Or `claude` → `/login` and set `planner.auth.anthropic: subscription`. See [auth.md](auth.md).
+- **Move back to an API key** — set `planner.auth.anthropic: api-key` (via `squad config set planner`), and make sure a key resolves. Optionally `squad auth logout` to drop the stored token.
 - **First-time planner key after a `skip-secrets` init** — `squad config set planner`, choose provider, paste or defer to env.
 - **Rotate a leaked Jira token** — `squad config remove-credential tracker`, then `squad config set tracker` to write a new PAT, or edit `secrets.yaml` with `squad doctor` to verify.
 - **Temporarily drop the tracker API** — `squad config unset tracker` (keeps `secrets.yaml` unless you add `--remove-credentials`); re-enable with `squad config set tracker`.
@@ -230,17 +304,28 @@ The trash directory is for recovery only — it is not a long-term backup strate
 6. `.squad/secrets.yaml` parseable
 7. **Legacy prompts directory** (0.1.x; same check name in the CLI: legacy `.squad/prompts/` when present — **removed in 0.2.0** for new installs)
 8. planner configuration (shape, budget, `modelOverride` when set)
-9. planner credential resolves
-10. planner model resolves at provider (models list API — not a chat completion)
-11. tracker configuration (required fields for Jira / Azure, etc.)
-12. tracker credential resolves
-13. tracker connectivity (Jira or Azure when applicable)
+9. **planner auth mode** — the resolved mode, why, and the credential behind it (0.12.0)
+10. planner credential resolves — a live Agent SDK login check on subscription auth
+11. planner model resolves at provider (models list API — not a chat completion); **skips on subscription auth**
+12. planner tier vs. model; **skips on subscription auth**
+13. planner cache effectiveness
+14. planner runtime (resolved)
+15. **planner auth vs. runtime** — subscription auth needs the Agent SDK runtime (0.12.0)
+16. Anthropic Opus 4.7+ vs Vercel runtime
+17. Anthropic Agent SDK install
+18. tracker configuration (required fields for Jira / Azure, etc.)
+19. tracker credential resolves
+20. tracker connectivity (Jira, Azure, or GitHub when applicable)
+
+The two subscription **skips** are deliberate, not gaps: the model-list probe needs an API key and there is none, and a Claude plan has no API rate tier to warn about.
 
 **`squad doctor --fix`** applies **non-destructive** fixes only (directories, `gitignore`, `chmod` on `secrets.yaml`). It does **not** remove legacy `prompts/` or rewrite config the way **`squad migrate`** does.
 
+It also deliberately **does not pin an implicit `auto` to `api-key`**. When `auto` falls back to a key, `planner auth mode` reports `ok` with an explanatory hint and writes nothing: `auto` exists precisely so a Claude login takes over once one appears, and pinning would silently prevent that forever. Use `squad config set planner` if you want the mode fixed.
+
 **`squad doctor --json`** prints `{ root, checks }` for scripts.
 
-squad-kit **never** runs a **paid** planner completion during `squad doctor`; “model resolves” is a **models-API** probe with your key.
+squad-kit **never** runs a **paid** planner completion during `squad doctor`; “model resolves” is a **models-API** probe with your key, and the subscription login check is an `accountInfo()` handshake that runs no model round.
 
 ## Upgrading the CLI
 
@@ -261,7 +346,8 @@ After installing a new **version** of the package, run **`squad migrate` once pe
 These read-only commands complement config work:
 
 - **`squad list`** — table of intakes, plan filenames, and whether a plan was last produced by **API** or **copy-paste** (per `squad` metadata).
-- **`squad status`** — global **next `NN`**, story/plan counts, **planner** row (provider, model, `(override)` when `modelOverride` applies, key presence), and **tracker** row (type, workspace, credential source: `env` / `secrets.yaml` / `missing`).
+- **`squad status`** — global **next `NN`**, story/plan counts, **planner** row (provider, model, `(override)` when `modelOverride` applies), a **planner auth** row (resolved mode, credential hint, and why it resolved that way), and **tracker** row (type, workspace, credential source: `env` / `secrets.yaml` / `missing`).
+- **`squad auth status`** — the auth row on its own, plus the live Claude account when one resolves. `--offline` skips the live check; `--json` is stable and never contains a credential.
 
 Use them after any `squad config` change to confirm the workspace is coherent before running `squad new-plan --api`.
 

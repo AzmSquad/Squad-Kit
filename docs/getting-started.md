@@ -10,8 +10,8 @@ A complete first run: zero → planned story → executable.
 ## 0. Install
 
 ```bash
-pnpm add -g squad-kit@0.2.0     # or: npm install -g squad-kit@0.2.0
-squad --version                 # expect 0.2.0
+pnpm add -g squad-kit           # or: npm install -g squad-kit
+squad --version
 ```
 
 ## 1. Initialize in your project
@@ -31,7 +31,14 @@ squad init
 - **Slash commands** — which agents get `squad-plan` (and friends): `claude-code`, `cursor`, `copilot`, `gemini`.
 - **Tracker id in filenames** — when the tracker is not `none`, you can require `NN-story-<slug>-<id>.md` names (`naming.includeTrackerId`).
 - **Jira or Azure** — if you pick either, you are prompted for host / org, email or PAT, and API token. Values are written to **`.squad/secrets.yaml`** (git-ignored, `0600` on POSIX).
-- **Direct planner (optional)** — “Enable automatic plan generation?” If yes, you choose **Anthropic**, **OpenAI**, or **Google**, then either save an API key into `.squad/secrets.yaml` or opt to **export the provider env var** instead (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GOOGLE_API_KEY`).
+- **Direct planner (optional)** — “Enable automatic plan generation?” If yes, you choose **Anthropic**, **OpenAI**, or **Google**.
+  - Picking **Anthropic** then asks *“How should squad-kit authenticate with Anthropic?”*:
+    - **Use my Claude subscription (browser login)** — the default. Writes `planner.auth.anthropic: subscription`. **No API key is asked for.** Finish with `squad auth login` after init (or `claude` → `/login` if you already use Claude Code).
+    - **Use an Anthropic API key** — the 0.11.0 path; you are prompted for the key.
+    - **Decide automatically** — writes `auto`: a detected Claude login first, otherwise a resolvable API key.
+  - **OpenAI** and **Google** are API-key only: save the key into `.squad/secrets.yaml` or opt to **export the provider env var** instead (`OPENAI_API_KEY` / `GOOGLE_API_KEY`).
+
+  Full guide to the Anthropic options: [Anthropic authentication](auth.md).
 
 ### What it creates
 
@@ -137,6 +144,16 @@ Use the real path to your `intake.md`. The agent runs the bundled meta-prompt, r
 
 ### Option B — direct from the terminal (`0.2.0`)
 
+**Anthropic with no API key (0.12.0).** If you chose the subscription during `init`, sign in once and you are done:
+
+```bash
+squad auth login       # browser flow; stores a token in .squad/secrets.yaml
+squad auth status      # confirms mode, credential, and the signed-in account
+squad new-plan --api   # runs on your Claude plan
+```
+
+Already signed in through Claude Code (`claude`, then `/login`)? Skip `squad auth login` — squad-kit detects that credential automatically. There is **no per-token API bill** on this path, but planning **draws on your Claude plan's usage limits**, the same window Claude and Claude Code consume; hitting it means waiting for the reset, not a bigger invoice. Precedence, CI setup, and troubleshooting: [Anthropic authentication](auth.md).
+
 With the direct planner enabled and credentials set, the live terminal session mirrors the console-style activity feed: **stage pipeline** (scout → draft → validation), **budget meters** (reads, context KB, wall time), **extended thinking** (when the model supports it), **streaming validation findings**, and a final summary that includes **runtime** metadata plus the path to the persisted **`.events.jsonl`** timeline under `.squad/runs/` (when event persistence is enabled).
 
 ```bash
@@ -176,7 +193,8 @@ squad list --feature auth  # filter by feature
 
 ## 6. When something feels off
 
-- **`squad doctor`** — read-only health check (config, credentials, model id probe via the provider’s **models API** — **no** paid completion calls, secrets stay masked in normal output).
+- **`squad doctor`** — read-only health check (config, credentials, resolved auth mode, model id probe via the provider’s **models API** — **no** paid completion calls, secrets stay masked in normal output).
+- **`squad auth status`** — which Anthropic credential resolved, and the Claude account behind it. Start here when a `--api` run complains about authentication; the fixes are in [auth.md](auth.md#troubleshooting).
 - **`squad doctor --fix`** — **non-destructive** repairs only (e.g. missing dirs, `.gitignore` block, `secrets.yaml` permissions on POSIX).
 - **`squad migrate`** — **one-shot, destructive** upgrades from 0.1.x layout (e.g. deleting the pre-0.2 local prompts copy — **removed in 0.2.0** in favour of package-bundled templates). Use when upgrading the **package**; confirm with the prompt, or pass **`--yes`** in automation. **`--dry-run`** shows the plan first.
 
@@ -187,7 +205,7 @@ squad migrate --dry-run
 squad migrate            # or: squad migrate -y
 ```
 
-For the full list of checks and all configuration knobs, see [customization.md](customization.md).
+For the full list of checks and all configuration knobs, see [customization.md](customization.md). For anything Anthropic-credential-shaped, see [auth.md](auth.md).
 
 ## Multi-repo workspaces
 

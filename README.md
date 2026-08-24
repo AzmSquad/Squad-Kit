@@ -23,6 +23,36 @@
 └── plans/<feature>/         # NN-story-<id>.md (one per executable plan)
 ```
 
+## What's new in 0.12.0
+
+- **Plan on your Claude subscription.** `squad auth login` signs in with your Anthropic account and `squad new-plan --api` runs on your Claude plan — no API key, no per-token API bill. Usage draws on the same limits as Claude and Claude Code. Full guide: [`docs/auth.md`](docs/auth.md) · [on the site](https://squad-kit.com/docs/auth).
+- **`planner.auth.anthropic`** — `subscription` | `api-key` | `auto` (default `auto`). Existing API-key workspaces keep working; `squad doctor` gained `planner auth mode` and `planner auth vs. runtime` so the resolved mode is never a mystery.
+- **Console auth surface** — an Authentication control on Config, a Claude Account card on Secrets, an auth badge on Generate and on every run record.
+
+## What's new in 0.11.0
+
+- **Persisted run history** — `--api` runs append to `.squad/runs/<id>.events.jsonl` (thinking text redacted on disk, old files rotated), and the console gained a runs index plus a full run report page.
+- **Richer live telemetry** — tool lifecycle, thinking deltas, and runtime metadata stream to both the CLI and the console; the CLI prints a stage pipeline and budget meters.
+
+## What's new in 0.10.0
+
+- **Anthropic planning moved to the Claude Agent SDK** by default so Opus 4.7 can use adaptive thinking and effort. OpenAI and Google stay on the Vercel AI SDK.
+- **Thinking, effort, and runtime are configurable** — `planner.runtime.anthropic`, `planner.providerOptions.anthropic`, and the `--anthropic-runtime` / `--effort` / `--scout-effort` / `--no-thinking` flags.
+- **`squad doctor` checks runtime wiring**, model-vs-runtime fit, and the Agent SDK binary.
+
+## What's new in 0.9.0
+
+- **Scout stage** — a cheap-tier model picks the files worth preloading before your plan model drafts, cutting the expensive model's read loop.
+- **LLM-free validation pass** flags missing paths, line ranges past EOF, and simple symbol problems; `--strict-validation` writes `*.partial.md` when it finds something.
+
+## What's new in 0.8.0
+
+- **Rate-limit handling you can watch** — the Generate page shows a countdown, auto-retry banner, and rerun control; the planner emits `rate_limit` events distinguishing "retrying" from "aborted".
+
+## What's new in 0.7.0
+
+- **GitHub Issues as a tracker** — owner/repo in config, PAT (or `GITHUB_TOKEN`) in secrets, search and import like Jira or Azure. **Linear was removed** as a tracker type in the same release.
+
 ## What's new in 0.6.0
 
 - **Console redesign** — Geist-style flat dark UI, Cmd+K command palette, global keyboard shortcuts, portal dialogs, density toggle. Same CLI and `.squad/` on disk; no migration. See [`docs/console.md`](docs/console.md).
@@ -66,7 +96,7 @@ Full list in [`CHANGELOG.md`](CHANGELOG.md).
 Existing squad-kit users should run two commands, once per repo:
 
 ```bash
-pnpm add -g squad-kit@0.2.0       # or: npm install -g squad-kit@0.2.0 — or: squad upgrade
+pnpm add -g squad-kit             # or: npm install -g squad-kit — or: squad upgrade
 cd your-project && squad migrate
 ```
 
@@ -77,9 +107,9 @@ Full upgrade walkthrough, including what-if scenarios and how to recover customi
 ## Install
 
 ```bash
-npm install -g squad-kit@0.2.0
+npm install -g squad-kit
 # or
-pnpm add -g squad-kit@0.2.0
+pnpm add -g squad-kit
 ```
 
 Requires Node 18+.
@@ -104,6 +134,20 @@ No slash commands in your agent? Skip the meta-prompt copy-paste entirely:
 squad new-plan --api   # interactive picker, direct provider call, writes the plan file
 ```
 
+### Plan on your Claude subscription
+
+If you already pay for **Claude Pro or Max**, you do not need an Anthropic API key to use the direct planner:
+
+```bash
+squad init             # choose Anthropic, then "Use my Claude subscription (browser login)"
+squad auth login       # browser sign-in; or just run `claude` and use /login
+squad new-plan --api   # plans on your Claude plan
+```
+
+**No API key is needed** on this path. Planning usage draws on your **Claude plan's usage limits** — the same limits Claude and Claude Code consume — so there is no per-token API bill, but a long planning run does consume part of your window. Opus planning against a **Pro** plan drains that window noticeably faster than against **Max**.
+
+Already signed in to Claude Code? squad-kit picks that login up automatically. Prefer an API key? Nothing changed — set `planner.auth.anthropic: api-key`. Details, CI setup, precedence, and troubleshooting: [`docs/auth.md`](docs/auth.md) · [on the site](https://squad-kit.com/docs/auth).
+
 Configuration, credential edits, and non-interactive flags: see [`docs/customization.md`](docs/customization.md) and `squad config show`. Full walkthrough: [`docs/getting-started.md`](docs/getting-started.md).
 
 ## Commands
@@ -116,6 +160,7 @@ Configuration, credential edits, and non-interactive flags: see [`docs/customiza
 | `squad status` | Counts, next `NN`, planner and tracker rows (including credential source). |
 | `squad list [--feature <slug>]` | Table of stories and plan state. |
 | `squad tracker link [story] [id]` | Attach or update a tracker id on an intake. |
+| `squad auth <login\|status\|logout>` | Sign in to Anthropic with your Claude subscription, inspect the resolved auth, or clear the stored token. `login` takes `--token <v>` (CI) and `--print-only`; `status` takes `--json` and `--offline`. See [`docs/auth.md`](docs/auth.md) · [site](https://squad-kit.com/docs/auth). |
 | `squad config <show\|set\|unset\|remove-credential> …` | View and edit `.squad/config.yaml` and `.squad/secrets.yaml` interactively. See [`docs/customization.md`](docs/customization.md). |
 | `squad rm <story\|plan\|feature> [target] [--dry-run] [--trash] [-y]` | Safely delete with cascading overview updates. |
 | `squad doctor [--fix] [--json]` | Full health check; `--fix` applies non-destructive repairs. |
@@ -129,12 +174,28 @@ Deeper option lists: `squad <command> --help` and the `docs/` pages above.
 
 Off by default. Enable during `squad init` (answer **yes** to *Enable automatic plan generation?*) or later with `squad config set planner`. Supported providers: Anthropic, OpenAI, Google.
 
-Credential resolution order:
+### Credential resolution order
 
-1. Provider env var (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`).
-2. `.squad/secrets.yaml` under `planner.<provider>.apiKey` (or cross-provider `SQUAD_PLANNER_API_KEY`).
+**Anthropic — default: your Claude subscription**
+
+1. **`planner.auth.anthropic`** in `.squad/config.yaml` — `subscription` | `api-key` | `auto` (merged default: **`auto`**).
+2. **`subscription`** — the login created by `squad auth login` (or `claude` → `/login`), resolved in this order:
+   `CLAUDE_CODE_OAUTH_TOKEN` → `planner.anthropicOauthToken` in `.squad/secrets.yaml` → the OS credential store (macOS Keychain / `~/.claude/.credentials.json`).
+3. **`api-key`** — `ANTHROPIC_API_KEY` → `SQUAD_PLANNER_API_KEY` → `.squad/secrets.yaml`.
+4. **`auto`** — a detected Claude login first, otherwise the API key chain, otherwise fail naming both recovery paths.
+
+In subscription mode squad-kit **clears `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` from the planner subprocess** (your shell is untouched): both outrank the login credential inside Claude Code, so an inherited one would silently bill API credits instead. If you have a key exported and it is being ignored, that is why.
+
+`auth: subscription` requires the Agent SDK runtime — `planner.runtime.anthropic: vercel` is a hard, early failure, never a silent downgrade.
+
+**OpenAI / Google — API key only, unchanged**
+
+1. Provider env var (`OPENAI_API_KEY`, `GOOGLE_API_KEY`).
+2. `.squad/secrets.yaml` under `planner.<provider>` (or cross-provider `SQUAD_PLANNER_API_KEY`).
 3. Interactive prompt (TTY only).
 4. Fail with a recovery hint.
+
+The deep page — both login paths, per-platform credential storage, CI, usage limits, and a troubleshooting table — is [`docs/auth.md`](docs/auth.md), also served at [squad-kit.com/docs/auth](https://squad-kit.com/docs/auth).
 
 Override the default plan-phase model without editing squad-kit:
 
@@ -142,13 +203,15 @@ Override the default plan-phase model without editing squad-kit:
 planner:
   enabled: true
   provider: anthropic
+  auth:
+    anthropic: subscription   # or api-key, or auto (default)
   cache:
     enabled: true   # default; turn off via squad config set planner
   modelOverride:
     anthropic: claude-opus-5-0      # riding a newer provider release early
 ```
 
-`squad status` marks the planner row `(override)` when a `modelOverride` is active. `squad doctor` probes the provider's `/v1/models` endpoint (no paid completion) and tells you what to do if the id is no longer served.
+`squad status` marks the planner row `(override)` when a `modelOverride` is active, and shows a **planner auth** row with the resolved mode. `squad doctor` probes the provider's `/v1/models` endpoint (no paid completion) and tells you what to do if the id is no longer served — that probe and the API rate-tier check both **skip on subscription auth**, since there is no API key to list models with and no API rate tier to warn about.
 
 Slash commands inside your agent (`/squad-plan`) continue to work unchanged — the agent already has your repo in scope. The direct planner is an alternative path, not a replacement. For where keys live, see [Secrets](#secrets) below and [`docs/customization.md`](docs/customization.md).
 
@@ -174,9 +237,11 @@ squad-kit stores settings in two files:
 | File | Purpose | Git-tracked? | Editable by hand? |
 | --- | --- | --- | --- |
 | `.squad/config.yaml` | Project name, tracker, naming, agents, planner shape. | yes — commit it | yes, but `squad config set` is safer |
-| `.squad/secrets.yaml` | Planner + tracker API tokens. | **no** — auto-ignored, `0600` on POSIX | no — use `squad config set` / `squad init` |
+| `.squad/secrets.yaml` | Planner + tracker API tokens, and the Claude OAuth token (`planner.anthropicOauthToken`). | **no** — auto-ignored, `0600` on POSIX | no — use `squad auth login` / `squad config set` / `squad init` |
 
-`config.yaml` rejects any key matching `apiKey`, `token`, `secret`, or `credential` at load time, so accidental commits fail loud. Rotate a credential with `squad config set planner` or `squad config set tracker`; remove one with `squad config remove-credential <section>`.
+`config.yaml` rejects credential-shaped key names at load time — `apiKey`, `api_key`, `token`, `oauthToken`, `anthropicOauthToken`, `secret`, `credential`, `credentials` — so accidental commits fail loud. Matching is on the **exact lowercased key name**, not a substring: a substring rule would reject the legitimate `planner.maxOutputTokens`. Any future credential-shaped key has to be added to that list by name.
+
+Rotate a credential with `squad config set planner` or `squad config set tracker`; remove one with `squad config remove-credential <section>`. `squad auth logout` removes only the Claude OAuth token squad-kit stored and never touches your global Claude Code login.
 
 ## Why not Spec-Kit?
 
@@ -184,7 +249,7 @@ Both aim at spec-driven development. They make different bets.
 
 | | squad-kit | Spec-Kit |
 | --- | --- | --- |
-| Commands | `init`, `new-story`, `new-plan`, `status`, `doctor`, `migrate`, `upgrade`, `list`, `rm`, `tracker link`, `config` | `constitution`, `specify`, `clarify`, `plan`, `tasks`, `analyze`, `checklist`, `implement` |
+| Commands | `init`, `new-story`, `new-plan`, `status`, `doctor`, `migrate`, `upgrade`, `list`, `rm`, `tracker link`, `auth`, `config` | `constitution`, `specify`, `clarify`, `plan`, `tasks`, `analyze`, `checklist`, `implement` |
 | `/implement` turn starts with | one plan file (~5–15 KB) | 5–7 command templates + cross-artifact reads (~15–25 KB) |
 | Model-tier awareness | Built into the philosophy (planner ≠ executor) | Not prescribed |
 | Generated artifacts per story | `intake.md`, `NN-story-<id>.md`, overview row | `spec.md`, `plan.md`, `data-model.md`, `contracts/`, `research.md`, `quickstart.md`, `tasks.md` |
@@ -202,6 +267,7 @@ See [`docs/philosophy.md`](docs/philosophy.md) for the token math and [`docs/vs-
 - **Plans are project-coupled.** They reference real file paths. That is the point — do not expect portability between projects.
 - **Global `NN` can collide on parallel branches.** Rebase-and-renumber is the resolution. Documented in [`docs/customization.md`](docs/customization.md).
 - **Anthropic Tier 1 + Opus** shares a tight input-token-per-minute bucket. **0.3.0** added prompt caching (on by default) so typical multi-turn plans stay viable; see [Prompt caching](docs/customization.md#prompt-caching) in the customization docs.
+- **Subscription planning is not free planning.** It removes the per-token API bill, not the cost: Agent SDK usage draws on your Claude plan's usage limits. Opus planning on **Pro** will exhaust a window much faster than on **Max**. See [`docs/auth.md`](docs/auth.md).
 
 ## Non-goals for 0.2
 

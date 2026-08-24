@@ -295,8 +295,12 @@ function authFor(paths: SquadPaths, ctx: DoctorContext, provider: ProviderName):
 }
 
 /**
- * Verify the login with the Agent SDK — at most once per run, and never in CI: `pnpm test` sets
- * `CI`, and an unconditional probe would spawn an SDK subprocess per doctor run in the suite.
+ * Verify the login with the Agent SDK — at most once per run, and never when
+ * `skipExternalProbesInAutomation()` says so. Note the vitest suite does NOT set `CI`:
+ * `test/support/env-isolation.ts` deletes it so tests mocking `isTTY` still see
+ * `isInteractive() === true`. Suite-level protection therefore comes from stubbing
+ * `probeClaudeAuth`, not from this guard — an unstubbed test would spawn a real SDK
+ * subprocess against the developer's own Claude login.
  */
 async function probeAuthOnce(ctx: DoctorContext, auth: ResolvedPlannerAuth): Promise<AuthProbeOutcome> {
   const memo = (ctx.authMemo ??= {});

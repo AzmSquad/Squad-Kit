@@ -1,6 +1,30 @@
 ---
 const items = [
   {
+    kicker: "0.12",
+    title: "Plan on your Claude subscription",
+    body: "Sign in with your Anthropic account and the direct planner runs on your Claude plan — no API key. Usage draws on the same limits as Claude and Claude Code, so there is no per-token API bill.",
+    code: "squad auth login",
+  },
+  {
+    kicker: "0.12",
+    title: "Auth you can see",
+    body: "planner.auth.anthropic picks subscription, api-key, or auto. squad doctor explains the resolved mode; the console shows your Claude account and badges every run with the credential it used.",
+    code: "squad auth status",
+  },
+  {
+    kicker: "0.11",
+    title: "Run history you can replay",
+    body: "Every --api run persists a summary and an event timeline under .squad/runs/. The console gained a runs index and a full run report page. Thinking text is redacted on disk.",
+    code: "squad console",
+  },
+  {
+    kicker: "0.10",
+    title: "Claude Agent SDK planning",
+    body: "Anthropic planning runs on the Agent SDK by default so Opus can use adaptive thinking and effort. Runtime, thinking, and effort are all configurable per phase.",
+    code: "squad new-plan --api --effort high",
+  },
+  {
     kicker: "0.5",
     title: "Visual console",
     body: "squad console launches a local UI for stories, plans, live planner runs, config, secrets, tracker, and doctor. Same workspace; same files; nicer surface.",
@@ -60,12 +84,13 @@ const items = [
 <section class="relative py-20 sm:py-24" id="whats-new">
   <div class="container-page">
     <div class="mx-auto max-w-2xl text-center mb-14">
-      <div class="chip mb-4">What's new · 0.6.0 + 0.5.0</div>
+      <div class="chip mb-4">What's new · 0.12.0 + 0.11.0</div>
       <h2 class="text-3xl sm:text-5xl font-bold gradient-text tracking-tight">
-        Nine upgrades worth a release.
+        Plan with the account you already pay for.
       </h2>
       <p class="mt-4 text-[var(--color-text-muted)] text-base sm:text-lg">
-        Same philosophy. Sharper tools. Zero breaking changes to your stories and plans.
+        0.12.0 makes your Claude subscription the default way to plan with Anthropic. Same philosophy,
+        sharper tools, and nothing breaking in your stories and plans.
       </p>
     </div>
 
@@ -84,7 +109,13 @@ const items = [
       ))}
     </div>
 
-    <div class="mt-10 text-center">
+    <div class="mt-10 flex flex-wrap items-center justify-center gap-3">
+      <a href="/docs/auth" class="btn-secondary">
+        Set up subscription planning
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M5 12h14M13 5l7 7-7 7" />
+        </svg>
+      </a>
       <a href="/docs/migrating-from-0.1" class="btn-secondary">
         Upgrading from 0.1.x? Read the guide
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

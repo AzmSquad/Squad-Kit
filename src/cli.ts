@@ -203,7 +203,10 @@ tracker
 
 const auth = program
   .command('auth')
-  .description('Sign in to Anthropic with your Claude subscription, inspect it, or clear the stored token');
+  .description(
+    'Sign in to Anthropic with your Claude subscription, inspect it, or clear the stored token. ' +
+      'Precedence, CI setup, usage limits, and troubleshooting: https://squad-kit.com/docs/auth',
+  );
 
 auth
   .command('login')
