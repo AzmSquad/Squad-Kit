@@ -206,3 +206,74 @@ describe('config set planner', () => {
     }
   });
 });
+
+describe('config set planner — anthropic auth mode', () => {
+  const OAUTH_TOKEN = 'sk-ant-oat01-config-set-planner-0123456789';
+  const prevToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  const prevAnth = process.env.ANTHROPIC_API_KEY;
+
+  beforeEach(() => {
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    const cfg: SquadConfig = {
+      ...baseConfig(),
+      planner: {
+        enabled: true,
+        provider: 'anthropic',
+        mode: 'auto',
+        budget: { maxFileReads: 10, maxContextBytes: 1, maxDurationSeconds: 1 },
+      },
+    };
+    saveConfig(path.join(tmp, SQUAD_DIR, 'config.yaml'), cfg);
+  });
+
+  afterEach(() => {
+    if (prevToken === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    else process.env.CLAUDE_CODE_OAUTH_TOKEN = prevToken;
+    if (prevAnth === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = prevAnth;
+  });
+
+  it('subscription: records the mode and never prompts for an API key', async () => {
+    // A resolvable token makes the login probe deterministic on every platform.
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = OAUTH_TOKEN;
+    vi.mocked(select).mockResolvedValueOnce('change' as never);
+    vi.mocked(select).mockResolvedValueOnce('anthropic' as never);
+    vi.mocked(select).mockResolvedValueOnce('subscription' as never);
+    vi.mocked(confirm).mockResolvedValueOnce(true); // prompt caching
+
+    await runConfigSetPlanner({});
+
+    const saved = loadConfig(path.join(tmp, SQUAD_DIR, 'config.yaml'));
+    expect(saved.planner?.auth?.anthropic).toBe('subscription');
+    expect(vi.mocked(password)).not.toHaveBeenCalled();
+    expect(fs.existsSync(path.join(tmp, SQUAD_DIR, 'secrets.yaml'))).toBe(false);
+  }, 25_000);
+
+  it('api-key: records the mode and still saves the key to secrets', async () => {
+    vi.mocked(select).mockResolvedValueOnce('change' as never);
+    vi.mocked(select).mockResolvedValueOnce('anthropic' as never);
+    vi.mocked(select).mockResolvedValueOnce('api-key' as never);
+    const key = 'sk-ant-api03-1234567890abcdefghij';
+    vi.mocked(password).mockResolvedValueOnce(key);
+    vi.mocked(confirm).mockResolvedValueOnce(true); // prompt caching
+
+    await runConfigSetPlanner({});
+
+    const saved = loadConfig(path.join(tmp, SQUAD_DIR, 'config.yaml'));
+    expect(saved.planner?.auth?.anthropic).toBe('api-key');
+    expect(loadSecrets(path.join(tmp, SQUAD_DIR, 'secrets.yaml')).planner?.anthropic).toBe(key);
+  }, 25_000);
+
+  it('auto: records the mode without demanding either credential up front', async () => {
+    vi.mocked(select).mockResolvedValueOnce('change' as never);
+    vi.mocked(select).mockResolvedValueOnce('anthropic' as never);
+    vi.mocked(select).mockResolvedValueOnce('auto' as never);
+    vi.mocked(confirm).mockResolvedValueOnce(true); // prompt caching
+
+    await runConfigSetPlanner({});
+
+    expect(loadConfig(path.join(tmp, SQUAD_DIR, 'config.yaml')).planner?.auth?.anthropic).toBe('auto');
+    expect(vi.mocked(password)).not.toHaveBeenCalled();
+  }, 25_000);
+});

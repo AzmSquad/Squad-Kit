@@ -2,7 +2,10 @@ import fs from 'node:fs';
 import * as ui from '../ui/index.js';
 import { buildPaths, requireSquadRoot } from '../core/paths.js';
 import { loadConfig, type SquadConfig } from '../core/config.js';
-import { modelFor, providerEnvVar, resolveProviderKey } from '../core/planner-models.js';
+import { modelFor, providerEnvVar, resolvePlannerAuthForCwd } from '../core/planner-models.js';
+import { describeAuth, PlannerAuthUnavailableError } from '../core/planner-auth.js';
+import { authReasonText } from './auth/shared.js';
+import type { PlannerConfig } from '../planner/types.js';
 import { scanPlans, formatSequence } from '../core/sequence.js';
 import { listStories } from '../core/stories.js';
 import { loadSecrets, type SquadSecrets } from '../core/secrets.js';
@@ -65,14 +68,7 @@ export async function runStatus(): Promise<void> {
     const model = modelFor(config.planner.provider, 'plan', config.planner.modelOverride);
     const overrideNote = config.planner.modelOverride?.[config.planner.provider] ? ' (override)' : '';
     ui.kv('planner', `${config.planner.provider}/${model}${overrideNote}`, kw);
-    const cred = resolveProviderKey(config.planner.provider);
-    ui.kv(
-      'planner key',
-      cred
-        ? `set via ${cred.detail}`
-        : `missing — set ${providerEnvVar(config.planner.provider)} or run \`squad init\``,
-      kw,
-    );
+    ui.kv('planner auth', buildPlannerAuthLine(config.planner), kw);
   } else {
     ui.kv('planner', 'disabled (copy-paste flow)', kw);
   }
@@ -81,6 +77,23 @@ export async function runStatus(): Promise<void> {
   ui.kv('next NN', formatSequence(scan.nextGlobal), kw);
   if (scan.duplicates.length > 0) {
     ui.warning(`duplicate NN numbers: ${scan.duplicates.map(formatSequence).join(', ')}`);
+  }
+}
+
+/**
+ * Auth-aware replacement for the old `planner key` row. Strictly offline: `resolvePlannerAuth` reads
+ * config, env, and `.squad/secrets.yaml`, and probes the local credential store — it makes no
+ * network call, and `squad status` must keep that property.
+ */
+function buildPlannerAuthLine(planner: PlannerConfig): string {
+  try {
+    const described = describeAuth(resolvePlannerAuthForCwd(planner.provider, planner));
+    return `${described.mode} · ${described.credentialHint} (${authReasonText(described.reason, planner.provider)})`;
+  } catch (err) {
+    if (!(err instanceof PlannerAuthUnavailableError)) throw err;
+    return planner.provider === 'anthropic'
+      ? 'missing — run `squad auth login` for your Claude subscription, or `squad config set planner` for an API key'
+      : `missing — set ${providerEnvVar(planner.provider)} or run \`squad config set planner\``;
   }
 }
 

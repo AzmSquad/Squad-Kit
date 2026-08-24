@@ -17,14 +17,7 @@ import {
   detectAuthShapedSdkError,
   type AuthShapedSdkError,
 } from '../auth-errors.js';
-
-/**
- * Cleared from the child environment in subscription mode. Both outrank the login credential in
- * Claude Code's precedence order, so an inherited one would silently bill API credits instead.
- * Compared case-insensitively — Windows env vars are case-insensitive but a `{...process.env}`
- * copy is a plain object, so `delete env.ANTHROPIC_API_KEY` would miss `Anthropic_Api_Key`.
- */
-const SUBSCRIPTION_WITHHELD_ENV_KEYS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'];
+import { buildSdkEnv } from './sdk-env.js';
 
 /** Hard cap on the best-effort `accountInfo()` lookup so a wedged control channel cannot stall a run. */
 const ACCOUNT_INFO_TIMEOUT_MS = 2000;
@@ -331,27 +324,6 @@ export class AgentSdkRuntime implements PlannerRuntime {
     private readonly auth: ResolvedPlannerAuth,
   ) {}
 
-  /**
-   * Environment handed to the Agent SDK subprocess.
-   *
-   * In subscription mode the point is what is *absent*: `ANTHROPIC_API_KEY` and
-   * `ANTHROPIC_AUTH_TOKEN` both outrank the `/login` credential in Claude Code's precedence order,
-   * so an inherited one would silently bill API credits. `SQUAD_PLANNER_API_KEY` is left alone —
-   * it is squad-kit's own variable and the SDK never reads it.
-   */
-  private buildSdkEnv(): NodeJS.ProcessEnv {
-    const env: NodeJS.ProcessEnv = { ...process.env };
-    if (this.auth.mode === 'api-key') {
-      env.ANTHROPIC_API_KEY = this.auth.key;
-      return env;
-    }
-    for (const key of Object.keys(env)) {
-      if (SUBSCRIPTION_WITHHELD_ENV_KEYS.includes(key.toUpperCase())) delete env[key];
-    }
-    if (this.auth.oauthToken) env.CLAUDE_CODE_OAUTH_TOKEN = this.auth.oauthToken;
-    return env;
-  }
-
   /** Safe-to-log auth projection — never carries the key or the token. */
   private authDescriptor(): Pick<
     Extract<PlannerEvent, { kind: 'auth_info' }>,
@@ -465,7 +437,7 @@ export class AgentSdkRuntime implements PlannerRuntime {
       persistSession: false,
       settingSources: [] as [],
       abortController: ac,
-      env: this.buildSdkEnv(),
+      env: buildSdkEnv(this.auth),
       thinking,
       effort,
     };
@@ -621,7 +593,7 @@ export class AgentSdkRuntime implements PlannerRuntime {
       includePartialMessages: true,
       persistSession: false,
       settingSources: [] as [],
-      env: this.buildSdkEnv(),
+      env: buildSdkEnv(this.auth),
       thinking,
       effort,
     };

@@ -113,13 +113,16 @@ describe('runStatus tracker + planner key rows', () => {
     spy.mockRestore();
   });
 
-  it('planner key row uses resolveProviderKey detail', async () => {
+  it('planner auth row uses the resolved api-key credential detail', async () => {
     const cfg: SquadConfig = {
       ...baseJiraConfig,
       planner: {
         enabled: true,
         provider: 'anthropic',
         mode: 'auto',
+        // Pinned to `api-key` so the row is about key resolution and not about whether the machine
+        // running the suite happens to have a Claude login in its credential store.
+        auth: { anthropic: 'api-key' },
         budget: { maxFileReads: 25, maxContextBytes: 50_000, maxDurationSeconds: 180 },
       },
     };
@@ -143,7 +146,8 @@ describe('runStatus tracker + planner key rows', () => {
 
     await runStatus();
 
-    const pk = rows.find((r) => r.k === 'planner key');
+    const pk = rows.find((r) => r.k === 'planner auth');
+    expect(pk?.v).toContain('api-key');
     expect(pk?.v).toContain('.squad/secrets.yaml');
 
     const prev = process.env.ANTHROPIC_API_KEY;
@@ -154,7 +158,7 @@ describe('runStatus tracker + planner key rows', () => {
         rows2.push({ k, v: String(v) });
       });
       await runStatus();
-      const pk2 = rows2.find((r) => r.k === 'planner key');
+      const pk2 = rows2.find((r) => r.k === 'planner auth');
       expect(pk2?.v).toContain('ANTHROPIC_API_KEY');
     } finally {
       if (prev === undefined) delete process.env.ANTHROPIC_API_KEY;

@@ -4,12 +4,16 @@ import * as ui from '../../ui/index.js';
 import { buildPaths, requireSquadRoot } from '../../core/paths.js';
 import { loadConfig, saveConfig, type SquadConfig } from '../../core/config.js';
 import { loadSecrets, saveSecrets, type SquadSecrets } from '../../core/secrets.js';
-import { modelFor, providerEnvVar, resolveProviderKey } from '../../core/planner-models.js';
+import { modelFor, providerEnvVar, resolveProviderKey, resolvePlannerAuthForCwd } from '../../core/planner-models.js';
+import { detectClaudeLogin, describeAuth, type ResolvedPlannerAuth } from '../../core/planner-auth.js';
 import { fetchProviderModelIds } from '../../core/probes.js';
+import type { PlannerAuthMode } from '../../core/planner-auth.js';
 import type { PlannerConfig, ProviderName } from '../../planner/types.js';
+import { probeClaudeAuth } from '../../planner/runtimes/auth-probe.js';
 import { isInteractive } from '../../ui/tty.js';
 import { mergePlannerKeyIntoSecrets, newPlannerBlock } from './shared.js';
 import { runConfigUnsetPlanner } from './unset-planner.js';
+import { runAuthLogin } from '../auth/login.js';
 import { skipExternalProbesInAutomation } from '../../core/ci-env.js';
 
 function parseProvider(arg: string): ProviderName {
@@ -93,40 +97,47 @@ export async function runConfigSetPlanner(opts: ConfigSetPlannerOptions = {}): P
     nextPlanner = { ...prev, provider, enabled: true };
   }
 
+  // Anthropic is the only provider `planner.auth` applies to; OpenAI and Google stay API-key only.
+  let authChoice: PlannerAuthMode | undefined;
+  if (interactive && provider === 'anthropic') {
+    authChoice = (await select({
+      message: 'How should squad-kit authenticate with Anthropic?',
+      choices: [
+        {
+          name: 'Use my Claude subscription (browser login) — recommended, no API key needed',
+          value: 'subscription' as PlannerAuthMode,
+        },
+        { name: 'Use an Anthropic API key', value: 'api-key' as PlannerAuthMode },
+        {
+          name: 'Decide automatically (subscription if signed in, otherwise API key)',
+          value: 'auto' as PlannerAuthMode,
+        },
+      ],
+      default: 'subscription' as PlannerAuthMode,
+    })) as PlannerAuthMode;
+    nextPlanner = { ...nextPlanner, auth: { ...nextPlanner.auth, anthropic: authChoice } };
+  }
+
   if (useYes) {
     if (!resolveProviderKey(provider)) {
       throw credentialError(provider);
     }
   } else {
-    const existing = resolveProviderKey(provider);
-    if (existing) {
-      const shouldUpdate = await confirm({
-        message: 'A planner credential is already available. Enter a new key and save it to .squad/secrets.yaml?',
-        default: false,
-      });
-      if (shouldUpdate) {
-        const envVar = providerEnvVar(provider);
-        const key = await password({
-          message: `${envVar} value (input hidden):`,
-          validate: (v) => (v.length >= 20 ? true : 'key looks too short'),
-        });
-        const merged = mergePlannerKeyIntoSecrets(baseSecrets, provider, key);
-        saveSecrets(paths.secretsFile, merged);
-        ui.success('Planner key saved to .squad/secrets.yaml');
-        ui.info('.squad/secrets.yaml updated (chmod 0600 on POSIX)');
-      } else {
-        ui.info('Keeping the existing planner credential; no change to .squad/secrets.yaml for the key.');
+    if (authChoice === 'subscription') {
+      await offerBrowserLogin(baseSecrets);
+    } else if (authChoice === 'auto') {
+      ui.info(
+        '`auto` resolves in this order: a detected Claude login first, then a resolvable API key ' +
+          '(ANTHROPIC_API_KEY, SQUAD_PLANNER_API_KEY, or .squad/secrets.yaml).',
+      );
+      if (!detectClaudeLogin(baseSecrets).present && !resolveProviderKey(provider)) {
+        ui.warning(
+          'Neither a Claude login nor an API key resolves right now. Run `squad auth login`, or re-run ' +
+            '`squad config set planner` and choose the API-key option.',
+        );
       }
     } else {
-      const envVar = providerEnvVar(provider);
-      const key = await password({
-        message: `${envVar} value (input hidden) — required:`,
-        validate: (v) => (v.length >= 20 ? true : 'key looks too short'),
-      });
-      const merged = mergePlannerKeyIntoSecrets(baseSecrets, provider, key);
-      saveSecrets(paths.secretsFile, merged);
-      ui.success('Planner key saved to .squad/secrets.yaml');
-      ui.info('.squad/secrets.yaml updated (chmod 0600 on POSIX)');
+      await promptForApiKey(provider, paths.secretsFile, baseSecrets);
     }
 
     const cacheEnabled = await confirm({
@@ -138,6 +149,16 @@ export async function runConfigSetPlanner(opts: ConfigSetPlannerOptions = {}): P
 
   const next: SquadConfig = { ...config, planner: nextPlanner };
   saveConfig(paths.configFile, next);
+
+  // Only the interactive path can land on subscription: `--yes` never offers the auth choice, so its
+  // output stays byte-identical to 0.11.0 rather than changing shape because the machine happens to
+  // have a Claude login sitting in its credential store.
+  const auth = interactive && provider === 'anthropic' ? tryResolveAuth(provider, nextPlanner) : undefined;
+  const configuredMode = nextPlanner.auth?.anthropic;
+  if (auth?.mode === 'subscription' && (configuredMode === 'subscription' || configuredMode === 'auto')) {
+    await reportSubscriptionSetup(provider, nextPlanner, auth);
+    return;
+  }
 
   const cred = resolveProviderKey(provider);
   if (!cred) {
@@ -158,7 +179,7 @@ export async function runConfigSetPlanner(opts: ConfigSetPlannerOptions = {}): P
   }
 
   if (skipExternalProbesInAutomation() || !cred) {
-    printPlannerNextSteps(Boolean(cred));
+    printPlannerNextSteps(Boolean(cred), 'api-key');
     return;
   }
   try {
@@ -180,12 +201,119 @@ export async function runConfigSetPlanner(opts: ConfigSetPlannerOptions = {}): P
     );
   }
 
-  printPlannerNextSteps(true);
+  printPlannerNextSteps(true, 'api-key');
 }
 
-function printPlannerNextSteps(credentialReady: boolean): void {
+/** The 0.11.0 credential prompt block, unchanged — reached only on the API-key branch. */
+async function promptForApiKey(
+  provider: ProviderName,
+  secretsFile: string,
+  baseSecrets: SquadSecrets,
+): Promise<void> {
+  const envVar = providerEnvVar(provider);
+  const existing = resolveProviderKey(provider);
+  if (existing) {
+    const shouldUpdate = await confirm({
+      message: 'A planner credential is already available. Enter a new key and save it to .squad/secrets.yaml?',
+      default: false,
+    });
+    if (!shouldUpdate) {
+      ui.info('Keeping the existing planner credential; no change to .squad/secrets.yaml for the key.');
+      return;
+    }
+    const key = await password({
+      message: `${envVar} value (input hidden):`,
+      validate: (v) => (v.length >= 20 ? true : 'key looks too short'),
+    });
+    saveSecrets(secretsFile, mergePlannerKeyIntoSecrets(baseSecrets, provider, key));
+    ui.success('Planner key saved to .squad/secrets.yaml');
+    ui.info('.squad/secrets.yaml updated (chmod 0600 on POSIX)');
+    return;
+  }
+  const key = await password({
+    message: `${envVar} value (input hidden) — required:`,
+    validate: (v) => (v.length >= 20 ? true : 'key looks too short'),
+  });
+  saveSecrets(secretsFile, mergePlannerKeyIntoSecrets(baseSecrets, provider, key));
+  ui.success('Planner key saved to .squad/secrets.yaml');
+  ui.info('.squad/secrets.yaml updated (chmod 0600 on POSIX)');
+}
+
+/**
+ * Subscription mode needs no key at all — so instead of prompting for one, offer the login when
+ * nothing is signed in. Calls the command function directly rather than shelling out to `squad`:
+ * a subprocess would be a different (possibly published) build.
+ */
+async function offerBrowserLogin(baseSecrets: SquadSecrets): Promise<void> {
+  if (detectClaudeLogin(baseSecrets).present) {
+    ui.info('A Claude login is already available on this machine — no API key needed.');
+    return;
+  }
+  const now = await confirm({
+    message: 'No Claude login found. Run the browser login now?',
+    default: true,
+  });
+  if (!now) {
+    ui.info('Skipped. Run `squad auth login` when you are ready — planning needs it in subscription mode.');
+    return;
+  }
+  await runAuthLogin({});
+}
+
+function tryResolveAuth(provider: ProviderName, planner: PlannerConfig): ResolvedPlannerAuth | undefined {
+  try {
+    return resolvePlannerAuthForCwd(provider, planner);
+  } catch {
+    // `PlannerAuthUnavailableError` here just means "nothing resolves yet"; the API-key branch below
+    // already prints the right recovery copy.
+    return undefined;
+  }
+}
+
+/**
+ * Subscription mode has no key to validate, so the `fetchProviderModelIds` check is skipped: that
+ * probe authenticates with `x-api-key` and would fail on an OAuth credential for the wrong reason.
+ */
+async function reportSubscriptionSetup(
+  provider: ProviderName,
+  planner: PlannerConfig,
+  auth: ResolvedPlannerAuth,
+): Promise<void> {
+  ui.blank();
+  ui.success('Planner configuration updated.');
+  ui.kv('provider', provider, 10);
+  ui.kv('model (plan)', modelFor(provider, 'plan', planner.modelOverride), 10);
+  ui.kv('model (execute)', modelFor(provider, 'execute', planner.modelOverride), 10);
+  ui.kv('auth', `subscription (${describeAuth(auth).credentialHint})`, 10);
+
+  if (!skipExternalProbesInAutomation()) {
+    const probe = await probeClaudeAuth(auth);
+    if (probe.ok) {
+      const account = [probe.account?.email, probe.account?.organization, probe.account?.subscriptionType]
+        .filter(Boolean)
+        .join(' · ');
+      ui.info(account ? `Credential check: signed in as ${account}.` : 'Credential check: the Claude login responded OK.');
+    } else {
+      ui.warning(`Credential check failed (${probe.kind}). ${probe.detail}`);
+    }
+  }
+
+  printPlannerNextSteps(true, 'subscription');
+}
+
+function printPlannerNextSteps(credentialReady: boolean, mode: 'subscription' | 'api-key'): void {
   ui.blank();
   ui.step('Next:');
+  if (mode === 'subscription') {
+    ui.info('1) Confirm the login with `squad auth status` — it shows the account and how it resolved.');
+    ui.info('2) Verify with `squad doctor` — every planner check should be green.');
+    ui.info('3) Create a story:  squad new-story <feature-slug>  (or --no-tracker for a manual story).');
+    ui.info('4) Fill the generated intake.md, then run `squad new-plan --api` to generate the plan.');
+    ui.info(
+      '   Planning draws on your Claude usage limits — there is no per-token API bill. To switch to an API key later, re-run `squad config set planner`.',
+    );
+    return;
+  }
   if (!credentialReady) {
     ui.info('1) Save a planner key: re-run `squad config set planner` and paste the key when prompted.');
     ui.info('2) Verify with `squad doctor` — all planner checks should turn green.');

@@ -1,7 +1,10 @@
 import * as ui from '../ui/index.js';
 import type { PlannerSessionLimitContext } from './session-limits.js';
 
-export function printPlannerApiCostNotice(authMode: 'subscription' | 'api-key' = 'api-key'): void {
+/** The two resolved modes; `auto` is resolved away before any of this copy is chosen. */
+type PlannerAuthMode = 'subscription' | 'api-key';
+
+export function printPlannerApiCostNotice(authMode: PlannerAuthMode = 'api-key'): void {
   ui.blank();
   if (authMode === 'subscription') {
     ui.step('Usage');
@@ -40,12 +43,15 @@ function tokenSummary(ctx: PlannerSessionLimitContext): string {
   return `Tokens so far: ${snap.usage.inputTokens} in / ${snap.usage.outputTokens} out for this session.`;
 }
 
-function kindDetail(ctx: PlannerSessionLimitContext): string[] {
+function kindDetail(ctx: PlannerSessionLimitContext, authMode: PlannerAuthMode): string[] {
   switch (ctx.kind) {
     case 'max_output_tokens':
       return [
         `The model hit the per-request output cap (${ctx.maxOutputTokens} completion tokens). Long plans can stop mid-markdown even though the session is otherwise healthy.`,
-        'You can continue: squad-kit will ask the model to append the rest of the plan in a follow-up request (extra tokens apply).',
+        'You can continue: squad-kit will ask the model to append the rest of the plan in a follow-up request ' +
+          (authMode === 'subscription'
+            ? '(it draws further on your Claude usage limits).'
+            : '(extra tokens apply).'),
         tokenSummary(ctx),
       ];
     case 'max_iterations':
@@ -69,9 +75,17 @@ function kindDetail(ctx: PlannerSessionLimitContext): string[] {
   }
 }
 
-export function printPlannerLimitExplanation(ctx: PlannerSessionLimitContext): void {
+/**
+ * `authMode` defaults to `api-key` so 0.11.0 callers keep the per-token wording. Subscription runs
+ * have no per-request invoice, so any copy that implies one has to branch — same reason
+ * `printPlannerApiCostNotice` above does.
+ */
+export function printPlannerLimitExplanation(
+  ctx: PlannerSessionLimitContext,
+  authMode: PlannerAuthMode = 'api-key',
+): void {
   ui.warning(kindTitle(ctx.kind));
-  for (const line of kindDetail(ctx)) {
+  for (const line of kindDetail(ctx, authMode)) {
     ui.info(line);
   }
   ui.kv('session so far', `${snapSummary(ctx)}`, 18);

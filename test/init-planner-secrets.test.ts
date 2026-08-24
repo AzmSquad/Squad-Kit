@@ -50,6 +50,7 @@ describe('init planner key → secrets (interactive, mocked)', () => {
       const m = String((opts as { message: string }).message);
       if (m.includes('Issue tracker')) return 'github';
       if (m.includes('Planner provider')) return 'anthropic';
+      if (m.includes('How should squad-kit authenticate with Anthropic')) return 'api-key';
       if (m.includes('How do you want to store')) return 'secrets';
       throw new Error(`unexpected select: ${m}`);
     });

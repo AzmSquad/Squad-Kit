@@ -66,9 +66,21 @@ function decideMode(opts: NewPlanOptions, config: SquadConfig): 'api' | 'copy' {
   }
   if (opts.api) return 'api';
   if (opts.copy) return 'copy';
-  const enabled = config.planner?.enabled;
-  const key = enabled && config.planner?.provider ? readProviderKey(config.planner.provider) : undefined;
-  return enabled && key ? 'api' : 'copy';
+  const planner = config.planner;
+  if (!planner?.enabled || !planner.provider) return 'copy';
+
+  // Auth-aware, but deliberately not probe-driven. Story 15 objected that `detectClaudeLogin()`
+  // shells out to `security` on macOS, so putting it on the bare-`squad new-plan` path would add
+  // latency and start consuming subscription usage for users who never asked for an API run.
+  // The compromise, in both directions:
+  //   * `auth.anthropic: subscription` is an explicit, already-recorded opt-in — no probe needed,
+  //     and honouring it is what stops a subscription-only workspace being dumped into copy-paste
+  //     mode when the whole point of 0.12 is that subscription is the default.
+  //   * `auto` with no resolvable key still falls back to `copy`. `auto` means "figure it out",
+  //     not "spend", and a bare `squad new-plan` must never start drawing on a usage window on its
+  //     own. Those users pass `--api` (or set the mode explicitly) once, and it sticks.
+  if (planner.provider === 'anthropic' && planner.auth?.anthropic === 'subscription') return 'api';
+  return readProviderKey(planner.provider) ? 'api' : 'copy';
 }
 
 export async function runNewPlan(intakePath: string | undefined, opts: NewPlanOptions): Promise<void> {
@@ -334,9 +346,12 @@ async function emitViaApi(
 
   const decideOnLimit = interactive
     ? async (ctx: PlannerSessionLimitContext): Promise<PlannerLimitDecision> => {
-        printPlannerLimitExplanation(ctx);
+        printPlannerLimitExplanation(ctx, auth.mode);
         const ans = await select({
-          message: 'Continue this planning session? (Continuing sends more API requests and is billed.)',
+          message:
+            auth.mode === 'subscription'
+              ? 'Continue this planning session? (Continuing runs more model rounds against your Claude usage limits.)'
+              : 'Continue this planning session? (Continuing sends more API requests and is billed.)',
           choices: [
             { name: 'Continue — extend limits for this run', value: 'continue' as const },
             { name: 'Stop — save partial plan and exit', value: 'cancel' as const },

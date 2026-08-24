@@ -15,6 +15,7 @@ import { modelFor, providerEnvVar, resolveProviderKey } from '../core/planner-mo
 import { copyTree, templatesDir, writeFileSafe, readFile } from '../utils/fs.js';
 import { render } from '../core/template.js';
 import type { PlannerConfig } from '../planner/types.js';
+import type { PlannerAuthMode } from '../core/planner-auth.js';
 import type { ProviderName } from '../planner/types.js';
 import { loadSecrets, saveSecrets, mergeSecrets, type SquadSecrets } from '../core/secrets.js';
 import {
@@ -210,30 +211,65 @@ export async function runInit(opts: InitOptions): Promise<void> {
   }
 
   if (plannerBlock?.enabled && allowSecretPrompts) {
-    const envVar = providerEnvVar(plannerBlock.provider);
-    const envPresent = Boolean(process.env[envVar]);
-    if (envPresent) {
-      ui.info(`Planner key detected in ${envVar}; keeping env-var resolution as the primary source.`);
-    } else {
-      const storeKey = (await select({
-        message: `No ${envVar} in your environment. How do you want to store your planner API key?`,
+    // Anthropic gets the auth-mode choice first; subscription is the offered default for new
+    // workspaces and is written explicitly (not `auto`) so an upgrade never has to guess.
+    let needsApiKey = true;
+    if (plannerBlock.provider === 'anthropic') {
+      const authMode = (await select({
+        message: 'How should squad-kit authenticate with Anthropic?',
         choices: [
-          { name: `Enter it now and save to .squad/secrets.yaml (git-ignored)`, value: 'secrets' as const },
-          { name: `I'll export ${envVar} in my shell profile myself`, value: 'env' as const },
+          {
+            name: 'Use my Claude subscription (browser login) — recommended, no API key needed',
+            value: 'subscription' as PlannerAuthMode,
+          },
+          { name: 'Use an Anthropic API key', value: 'api-key' as PlannerAuthMode },
+          {
+            name: 'Decide automatically (subscription if signed in, otherwise API key)',
+            value: 'auto' as PlannerAuthMode,
+          },
         ],
-      })) as 'secrets' | 'env';
+        default: 'subscription' as PlannerAuthMode,
+      })) as PlannerAuthMode;
+      plannerBlock = { ...plannerBlock, auth: { anthropic: authMode } };
+      needsApiKey = authMode === 'api-key';
+      if (authMode === 'subscription') {
+        ui.info('No API key needed. Run `squad auth login` after init to sign in with your Claude account.');
+        ui.info('Already signed in through Claude Code (`claude` then `/login`)? squad-kit picks that up automatically.');
+      } else if (authMode === 'auto') {
+        ui.info(
+          '`auto` resolves in this order: a detected Claude login first, then a resolvable API key ' +
+            '(ANTHROPIC_API_KEY, SQUAD_PLANNER_API_KEY, or .squad/secrets.yaml).',
+        );
+        ui.info('Run `squad auth login` for the subscription, or `squad config set planner` to save a key.');
+      }
+    }
 
-      if (storeKey === 'secrets') {
-        const key = await password({
-          message: `${envVar} value (input hidden):`,
-          validate: (v) => (v.length >= 20 ? true : 'key looks too short'),
-        });
-        const base = loadSecrets(paths.secretsFile);
-        const merged = mergePlannerKeyIntoSecrets(base, plannerBlock.provider, key);
-        saveSecrets(paths.secretsFile, merged);
-        ui.success('Planner key saved to .squad/secrets.yaml');
+    if (needsApiKey) {
+      const envVar = providerEnvVar(plannerBlock.provider);
+      const envPresent = Boolean(process.env[envVar]);
+      if (envPresent) {
+        ui.info(`Planner key detected in ${envVar}; keeping env-var resolution as the primary source.`);
       } else {
-        ui.info(`Remember to export ${envVar} before running \`squad new-plan\`.`);
+        const storeKey = (await select({
+          message: `No ${envVar} in your environment. How do you want to store your planner API key?`,
+          choices: [
+            { name: `Enter it now and save to .squad/secrets.yaml (git-ignored)`, value: 'secrets' as const },
+            { name: `I'll export ${envVar} in my shell profile myself`, value: 'env' as const },
+          ],
+        })) as 'secrets' | 'env';
+
+        if (storeKey === 'secrets') {
+          const key = await password({
+            message: `${envVar} value (input hidden):`,
+            validate: (v) => (v.length >= 20 ? true : 'key looks too short'),
+          });
+          const base = loadSecrets(paths.secretsFile);
+          const merged = mergePlannerKeyIntoSecrets(base, plannerBlock.provider, key);
+          saveSecrets(paths.secretsFile, merged);
+          ui.success('Planner key saved to .squad/secrets.yaml');
+        } else {
+          ui.info(`Remember to export ${envVar} before running \`squad new-plan\`.`);
+        }
       }
     }
   }
@@ -289,8 +325,14 @@ export async function runInit(opts: InitOptions): Promise<void> {
     const model = modelFor(plannerBlock.provider, 'plan', plannerBlock.modelOverride);
     const overrideNote = plannerBlock.modelOverride?.[plannerBlock.provider] ? ' (override)' : '';
     ui.kv('planner', `${plannerBlock.provider}/${model}${overrideNote}`);
-    ui.kv('key', hasKey ? `✓ (${envVar} or .squad/secrets.yaml)` : `missing (set ${envVar})`);
-    if (!hasKey) {
+    const subscriptionMode = plannerBlock.auth?.anthropic === 'subscription' && plannerBlock.provider === 'anthropic';
+    if (subscriptionMode) {
+      // The key row would read "missing" for a workspace that is correctly configured, so replace it.
+      ui.kv('auth', 'subscription (Claude login) — run `squad auth login` if you have not signed in');
+    } else {
+      ui.kv('key', hasKey ? `✓ (${envVar} or .squad/secrets.yaml)` : `missing (set ${envVar})`);
+    }
+    if (!hasKey && !subscriptionMode) {
       ui.blank();
       ui.warning('Planner key not found in environment or .squad/secrets.yaml.');
       ui.info('Set one of these before running `squad new-plan`:');

@@ -20,6 +20,7 @@ import {
   runConfigRemoveCredential,
 } from './commands/config/index.js';
 import { runRmFeature, runRmPlan, runRmStory } from './commands/rm/index.js';
+import { runAuthLogin, runAuthStatus, runAuthLogout } from './commands/auth/index.js';
 import { readInstalledPackage } from './core/package-info.js';
 
 const program = new Command();
@@ -199,6 +200,35 @@ tracker
   .description('Attach/update a tracker id on an existing story intake')
   .option('-y, --yes', 'Fail fast instead of prompting for missing values', false)
   .action(wrapArgs(runTrackerLink));
+
+const auth = program
+  .command('auth')
+  .description('Sign in to Anthropic with your Claude subscription, inspect it, or clear the stored token');
+
+auth
+  .command('login')
+  .description(
+    'Run the Anthropic browser authorization flow and store the resulting token in .squad/secrets.yaml. ' +
+      'Prefer not to store a token? Run `claude` and use `/login` instead — squad-kit picks up the OS ' +
+      'credential store automatically under `auth: subscription`.',
+  )
+  .option('--token <value>', 'Use a `claude setup-token` value you already have (CI / remote machines; no browser)')
+  .option('--print-only', 'Run the flow, print the token, store nothing and change no config', false)
+  .option('-y, --yes', 'Overwrite an already-stored token without confirming', false)
+  .action(wrap(runAuthLogin));
+
+auth
+  .command('status')
+  .description('Show the resolved auth mode, the credential behind it, and the signed-in account')
+  .option('--json', 'Emit a stable JSON object for scripting (never contains the token)', false)
+  .option('--offline', 'Skip the live account check; report only what resolves locally', false)
+  .action(wrap(runAuthStatus));
+
+auth
+  .command('logout')
+  .description('Remove only the OAuth token squad-kit stored; your Claude Code login is untouched')
+  .option('-y, --yes', 'Skip the confirmation prompt', false)
+  .action(wrap(runAuthLogout));
 
 const config = program.command('config').description('Inspect and change .squad/ settings');
 
