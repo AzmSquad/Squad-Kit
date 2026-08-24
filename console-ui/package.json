@@ -2,7 +2,7 @@
   "name": "@squad-kit/console-ui",
   "private": true,
   "type": "module",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
