@@ -10,7 +10,19 @@ export interface ProbeAccount {
 }
 
 export type ProbeClaudeAuthResult =
-  | { ok: true; apiKeySource?: string; account?: ProbeAccount }
+  | {
+      ok: true;
+      apiKeySource?: string;
+      account?: ProbeAccount;
+      /**
+       * Set when the SDK resolved a credential *source* but could not confirm the credential
+       * works. Token auth always lands here — see `probeClaudeAuth`. Callers should report
+       * "signed in, not verifiable" rather than either "verified" or "invalid".
+       */
+      unverifiable?: string;
+      /** e.g. `CLAUDE_CODE_OAUTH_TOKEN` — which source the SDK says it is using. */
+      credentialSource?: string;
+    }
   | {
       ok: false;
       kind: 'not-logged-in' | 'expired' | 'org-not-allowed' | 'no-binary' | 'timeout' | 'unknown';
@@ -25,7 +37,12 @@ type SdkQuery = AsyncIterable<unknown> & {
   return?: (value?: unknown) => Promise<unknown>;
 };
 
-function readAccount(raw: unknown): { account?: ProbeAccount; apiKeySource?: string } {
+function readAccount(raw: unknown): {
+  account?: ProbeAccount;
+  apiKeySource?: string;
+  tokenSource?: string;
+  apiProvider?: string;
+} {
   if (!raw || typeof raw !== 'object') return {};
   const o = raw as Record<string, unknown>;
   const account: ProbeAccount = {};
@@ -33,9 +50,13 @@ function readAccount(raw: unknown): { account?: ProbeAccount; apiKeySource?: str
   if (typeof o.organization === 'string') account.organization = o.organization;
   if (typeof o.subscriptionType === 'string') account.subscriptionType = o.subscriptionType;
   const apiKeySource = typeof o.apiKeySource === 'string' ? o.apiKeySource : undefined;
+  const tokenSource = typeof o.tokenSource === 'string' ? o.tokenSource : undefined;
+  const apiProvider = typeof o.apiProvider === 'string' ? o.apiProvider : undefined;
   return {
     account: Object.keys(account).length > 0 ? account : undefined,
     apiKeySource,
+    tokenSource,
+    apiProvider,
   };
 }
 
@@ -140,25 +161,44 @@ export async function probeClaudeAuth(
       };
     }
 
-    const { account, apiKeySource } = readAccount(info);
+    const { account, apiKeySource, tokenSource, apiProvider } = readAccount(info);
+    const base = { ...(apiKeySource ? { apiKeySource } : {}), ...(account ? { account } : {}) };
 
-    // `accountInfo()` resolves from the subprocess's `initialize` response, which succeeds whether or
-    // not the credential is any good — the CLI does not validate it until a real request. A working
-    // subscription login answers with an email/organization/plan; an invalid or expired one answers
-    // with nothing. Reporting that as `ok` would tell the user they are signed in right up until
-    // their next planning run fails. API-key mode legitimately has no claude.ai account attached, so
-    // this only applies to subscription auth.
-    if (auth.mode === 'subscription' && !account && !apiKeySource) {
+    /*
+     * What `accountInfo()` can and cannot tell us. It resolves from the subprocess's `initialize`
+     * response, which succeeds whether or not the credential is any good — the CLI does not
+     * validate it until a real request. Measured against 0.2.126:
+     *
+     *   valid keychain login -> { email, organization, subscriptionType, apiProvider }
+     *   CLAUDE_CODE_OAUTH_TOKEN, *valid or bogus* -> { tokenSource, apiProvider }
+     *
+     * So token auth NEVER reports an account, and the payload cannot separate a good token from a
+     * bad one. Claiming "verified" there would be a lie; claiming "invalid or expired" would flag
+     * every healthy `squad auth login`. Report it as what it is: a resolved source we cannot check.
+     */
+    if (auth.mode !== 'subscription') return { ok: true, ...base };
+
+    if (account) return { ok: true, ...base };
+
+    if (tokenSource || apiProvider) {
       return {
-        ok: false,
-        kind: 'unknown',
-        detail:
-          'The Claude login did not report an account, so it could not be verified. The credential may be ' +
-          'invalid or expired — run `squad auth login` to sign in again.',
+        ok: true,
+        ...base,
+        ...(tokenSource ? { credentialSource: tokenSource } : {}),
+        unverifiable:
+          `The Agent SDK resolved ${tokenSource ?? 'a credential'}, but token auth reports no account, ` +
+          'so its validity can only be confirmed by an actual planning run.',
       };
     }
 
-    return { ok: true, ...(apiKeySource ? { apiKeySource } : {}), ...(account ? { account } : {}) };
+    // Nothing at all came back — not even a credential source. That is genuinely suspicious.
+    return {
+      ok: false,
+      kind: 'unknown',
+      detail:
+        'The Claude login reported neither an account nor a credential source, so it could not be ' +
+        'verified. Run `squad auth login` to sign in again.',
+    };
   } catch (err) {
     return mapProbeFailure(err, auth);
   } finally {

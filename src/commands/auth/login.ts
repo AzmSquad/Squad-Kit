@@ -182,6 +182,14 @@ async function verifyAndSummarise(planner: ReturnType<typeof loadConfig>['planne
     ui.warning(probe.detail);
     return;
   }
+  if (probe.unverifiable) {
+    // Token auth never reports an account, valid or not, so "verified" would be a lie here.
+    spin.succeed('login stored');
+    if (probe.credentialSource) ui.kv('credential', probe.credentialSource, 15);
+    ui.info(probe.unverifiable);
+    return;
+  }
+
   spin.succeed('login verified');
   const account = [probe.account?.email, probe.account?.organization, probe.account?.subscriptionType]
     .filter(Boolean)

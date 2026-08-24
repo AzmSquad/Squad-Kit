@@ -372,7 +372,14 @@ function describeProbeAccount(probe: ProbeClaudeAuthResult & { ok: true }): stri
   const bits: string[] = [];
   const email = probe.account?.email;
   const plan = probe.account?.subscriptionType;
-  bits.push(email ? `signed in as ${email}${plan ? ` (${plan})` : ''}` : 'Claude login verified');
+  if (email) {
+    bits.push(`signed in as ${email}${plan ? ` (${plan})` : ''}`);
+  } else if (probe.unverifiable) {
+    // Token auth resolves a source but never an account, so we cannot claim it is verified.
+    bits.push(`credential resolved (${probe.credentialSource ?? 'token auth'}) · not verifiable without a run`);
+  } else {
+    bits.push('Claude login verified');
+  }
   if (probe.account?.organization) bits.push(probe.account.organization);
   if (probe.apiKeySource) bits.push(`apiKeySource=${probe.apiKeySource}`);
   return bits.join(' · ');

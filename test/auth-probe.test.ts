@@ -68,6 +68,36 @@ describe('probeClaudeAuth', () => {
     expect(res.detail).toMatch(/squad auth login/);
   });
 
+  it('reports a token credential as resolved-but-unverifiable rather than invalid', async () => {
+    // Measured against SDK 0.2.126: CLAUDE_CODE_OAUTH_TOKEN auth returns {tokenSource, apiProvider}
+    // and never an account — for a VALID token as much as a bogus one. Failing here would flag
+    // every healthy `squad auth login`.
+    queryMock.mockReturnValue(
+      fakeQuery(async () => ({ tokenSource: 'CLAUDE_CODE_OAUTH_TOKEN', apiProvider: 'firstParty' })),
+    );
+
+    const res = await probeClaudeAuth(SUBSCRIPTION);
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) throw new Error('unreachable');
+    expect(res.credentialSource).toBe('CLAUDE_CODE_OAUTH_TOKEN');
+    expect(res.unverifiable).toMatch(/only be confirmed by an actual planning run/);
+    expect(res.account).toBeUndefined();
+  });
+
+  it('treats a real account payload as verified, with no caveat', async () => {
+    queryMock.mockReturnValue(
+      fakeQuery(async () => ({ email: 'dev@example.com', subscriptionType: 'Claude Pro', apiProvider: 'firstParty' })),
+    );
+
+    const res = await probeClaudeAuth(SUBSCRIPTION);
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) throw new Error('unreachable');
+    expect(res.unverifiable).toBeUndefined();
+    expect(res.account).toEqual({ email: 'dev@example.com', subscriptionType: 'Claude Pro' });
+  });
+
   it('still accepts api-key auth with no account, which legitimately has none', async () => {
     queryMock.mockReturnValue(fakeQuery(async () => ({})));
 
