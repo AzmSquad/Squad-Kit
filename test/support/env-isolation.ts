@@ -29,6 +29,11 @@ const ISOLATED_VARS = [
   // Without this, GitHub Actions' CI=true breaks every test that mocks isTTY
   // but expects `isInteractive()` to return true.
   'CI',
+  // `skipExternalProbesInAutomation()` also short-circuits on GITHUB_ACTIONS. Isolating CI but not
+  // this one made the suite behave differently on a runner than on a laptop: probe-driven doctor
+  // checks silently took the "skipped" path in CI only, and tests asserting probe behaviour failed
+  // there while passing locally. Reproduce a runner with `GITHUB_ACTIONS=true pnpm test`.
+  'GITHUB_ACTIONS',
   'SQUAD_QUIET',
 ] as const;
 

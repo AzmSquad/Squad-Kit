@@ -135,7 +135,10 @@ describe('doctor — subscription workspace, logged in', () => {
     const mode = row(checks, 'planner-auth-mode');
     expect(mode.status).toBe('ok');
     expect(mode.detail).toContain('subscription');
-    expect(mode.detail).toContain('Claude login (macOS Keychain)');
+    // `describeAuth` renders the credential-store hint per platform — "macOS Keychain" on darwin,
+    // "~/.claude/.credentials.json" elsewhere. Assert the platform-independent part, or this passes
+    // on a laptop and fails on the Linux runner.
+    expect(mode.detail).toContain('Claude login (');
 
     const cred = row(checks, 'planner-cred');
     expect(cred.status).toBe('ok');
