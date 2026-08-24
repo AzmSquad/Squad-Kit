@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1] — 2026-08-24
+
+### Bug fixes
+
+- `squad auth login` ended a **successful** browser login with
+  `could not verify the login (unknown)` and a warning that the credential "may
+  be invalid or expired". The token was fine. `accountInfo()` resolves from the
+  Agent SDK's `initialize` response, and for `CLAUDE_CODE_OAUTH_TOKEN` auth that
+  response carries `{tokenSource, apiProvider}` and **never** an account — for a
+  valid token exactly as much as for a bogus one. 0.12.0 treated a missing
+  account as a failed credential, which flagged every healthy login through the
+  primary documented flow.
+
+  The probe now separates three outcomes instead of two: an account came back
+  (verified, shown); a credential *source* came back without an account
+  (reported as resolved, with the honest caveat that token validity can only be
+  confirmed by an actual planning run); or nothing came back at all (still
+  treated as unverified). `squad auth login`'s summary and `squad doctor`'s
+  planner credential row both reflect which applies, and neither claims a
+  verification the SDK cannot perform.
+
+  Workspaces that authenticate through the OS credential store are unaffected —
+  those do report an account and are still verified as before.
+
 ## [0.12.0] — 2026-08-24
 
 ### What's new

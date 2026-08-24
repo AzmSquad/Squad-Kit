@@ -1,6 +1,6 @@
 {
   "name": "squad-kit",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "author": "Momen Yasser <momenysr@gmail.com>",
   "description": "Plan once, execute cheap. A token-efficient, 3-step SDD workflow CLI (stories → plans → implementation).",
   "keywords": [
@@ -86,5 +86,6 @@
   "homepage": "https://github.com/AzmSquad/squad-kit#readme",
   "bugs": {
     "url": "https://github.com/AzmSquad/squad-kit/issues"
-  }
+  },
+  "packageManager": "pnpm@11.1.2+sha512.415a1cc25974731e75455c1468371be74c5aa5fb7621b50d4056d222451609f11412f23fd602e6169f1e060466641f798597e1be961a10688836a67b16569499"
 }
