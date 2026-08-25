@@ -312,6 +312,40 @@ async function readSdkAccountInfo(q: unknown): Promise<SdkAccountInfo | undefine
   }
 }
 
+/** In-process MCP servers this runtime registers. Tool names arrive as `mcp__<server>__<tool>`. */
+const SQUAD_MCP_TOOL_PREFIX = 'mcp__squad-kit-';
+
+/**
+ * Two things the Agent SDK does by default that break planning, both fixed at the call site:
+ *
+ * 1. **Every tool call is gated on a permission decision.** With no handler the planner's own MCP
+ *    tools are emitted by the model and then never granted, so a run reports `reads 0/N`, the scout
+ *    exhausts its turns without reaching `respond_with_scout_result`, and the session stalls waiting
+ *    on a decision nothing will make. Granting our own tools is what makes the tool loop work at all.
+ * 2. **Anything not ours is denied**, so a stray tool can never touch the user's machine from inside
+ *    a planning run.
+ */
+type PermissionDecision =
+  | { behavior: 'allow'; updatedInput: Record<string, unknown> }
+  | { behavior: 'deny'; message: string };
+
+/**
+ * Structural stand-in for the SDK's `CanUseTool`. Declared locally rather than imported: a static
+ * type import from the SDK pulls in its `zod/v4` type graph, which does not line up with the
+ * `zod@^3` this package pins, and the runtime only imports the SDK dynamically.
+ */
+type CanUseToolFn = (toolName: string, input: Record<string, unknown>) => Promise<PermissionDecision>;
+
+function allowOnlySquadKitTools(): CanUseToolFn {
+  return async (toolName, input) =>
+    toolName.startsWith(SQUAD_MCP_TOOL_PREFIX)
+      ? { behavior: 'allow', updatedInput: input }
+      : {
+          behavior: 'deny',
+          message: `The squad-kit planner may only call its own tools; refusing ${toolName}.`,
+        };
+}
+
 /**
  * Anthropic-only runtime using `@anthropic-ai/claude-agent-sdk` `query()` and in-process MCP tools.
  */
@@ -436,6 +470,11 @@ export class AgentSdkRuntime implements PlannerRuntime {
       includePartialMessages: true,
       persistSession: false,
       settingSources: [] as [],
+      // A claude.ai login carries the user's connectors (Drive, etc.) into the session: they show up
+      // as extra MCP servers and crowd the tool namespace the planner depends on. Planning must see
+      // only the tools squad-kit registers.
+      strictMcpConfig: true,
+      canUseTool: allowOnlySquadKitTools(),
       abortController: ac,
       env: buildSdkEnv(this.auth),
       thinking,
@@ -593,6 +632,11 @@ export class AgentSdkRuntime implements PlannerRuntime {
       includePartialMessages: true,
       persistSession: false,
       settingSources: [] as [],
+      // A claude.ai login carries the user's connectors (Drive, etc.) into the session: they show up
+      // as extra MCP servers and crowd the tool namespace the planner depends on. Planning must see
+      // only the tools squad-kit registers.
+      strictMcpConfig: true,
+      canUseTool: allowOnlySquadKitTools(),
       env: buildSdkEnv(this.auth),
       thinking,
       effort,

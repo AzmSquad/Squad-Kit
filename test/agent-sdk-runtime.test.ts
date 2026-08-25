@@ -57,6 +57,80 @@ function lastScoutQueryOptions() {
   return (call![0] as { options: Record<string, unknown> }).options;
 }
 
+type PermissionDecision = { behavior: 'allow' } | { behavior: 'deny'; message: string };
+
+/**
+ * Regression cover for https://github.com/AzmSquad/Squad-Kit/issues/8. On a claude.ai login the SDK
+ * pulls the user's connectors in as extra MCP servers, and every tool call is gated on a permission
+ * decision. Without both guards the planner's own tools were emitted but never executed: runs showed
+ * `reads 0/N`, the scout exhausted its turns before reaching `respond_with_scout_result`, and the
+ * session stalled. Verified against a real subscription run — 0 reads before, 8/8 after.
+ */
+async function runBothStages(): Promise<void> {
+  const bus = new PlannerEventBus();
+  const rt = new AgentSdkRuntime('claude-opus-4-7', apiKeyAuth('sk-secret'));
+  const common = {
+    systemPrompt: 'sys',
+    userMessage: 'hi',
+    bus,
+    runId: 'r-issue-8',
+    budget: new Budget(budgetCfg),
+    maxOutputTokens: 4096,
+    providerSpecific: { thinking: 'adaptive' as const, effort: 'medium' as const },
+  };
+  await rt.runDraft({
+    ...common,
+    maxSteps: 4,
+    tools: [
+      { name: 'read_file', description: 'x', parameters: z.object({ path: z.string() }), execute: async () => 'noop' },
+    ],
+  });
+  await rt.runScout({ ...common, schema: z.object({ files: z.array(z.string()) }) } as never);
+}
+
+describe('AgentSdkRuntime — tool reachability (issue #8)', () => {
+  beforeEach(() => {
+    queryMock.mockReset();
+    queryMock.mockImplementation(() =>
+      (async function* () {
+        yield { type: 'result', subtype: 'success', result: 'ok', usage: {} };
+      })(),
+    );
+  });
+
+  it('keeps claude.ai connectors out of both stages', async () => {
+    await runBothStages();
+    expect(lastDraftQueryOptions().strictMcpConfig).toBe(true);
+    expect(lastScoutQueryOptions().strictMcpConfig).toBe(true);
+  });
+
+  it('grants the planner its own MCP tools, on both stages', async () => {
+    await runBothStages();
+    for (const options of [lastDraftQueryOptions(), lastScoutQueryOptions()]) {
+      const canUseTool = options.canUseTool as (n: string, i: Record<string, unknown>) => Promise<PermissionDecision>;
+      expect(canUseTool).toBeTypeOf('function');
+      await expect(canUseTool('mcp__squad-kit-planner__read_file', { path: 'a.ts' })).resolves.toMatchObject({
+        behavior: 'allow',
+      });
+      await expect(canUseTool('mcp__squad-kit-scout__respond_with_scout_result', {})).resolves.toMatchObject({
+        behavior: 'allow',
+      });
+    }
+  });
+
+  it('denies anything that is not a squad-kit tool', async () => {
+    await runBothStages();
+    const canUseTool = lastDraftQueryOptions().canUseTool as (
+      n: string,
+      i: Record<string, unknown>,
+    ) => Promise<PermissionDecision>;
+    for (const foreign of ['Bash', 'Read', 'mcp__claude-ai-google-drive__search']) {
+      const decision = await canUseTool(foreign, {});
+      expect(decision.behavior).toBe('deny');
+    }
+  });
+});
+
 describe('AgentSdkRuntime', () => {
   beforeEach(() => {
     vi.clearAllMocks();
