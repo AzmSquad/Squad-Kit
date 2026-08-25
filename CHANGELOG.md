@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.2] — 2026-08-25
+
+### Bug fixes
+
+- **The planner never read any project files, then hung.** On the Agent SDK runtime a run reported
+  `reads 0/N`, the scout exhausted its turns without reaching `respond_with_scout_result`, the draft
+  produced a plan with no repo context, and the session then stalled indefinitely — the plan file was
+  written but the CLI and the console both kept spinning. Reported as
+  [#8](https://github.com/AzmSquad/Squad-Kit/issues/8). Two causes, both fixed:
+
+  1. **Every tool call is gated on a permission decision**, and the runtime supplied no handler. The
+     model emitted `tool_use` for `read_file` / `grep` / `list_dir` and nothing ever executed them.
+     The runtime now grants its own `mcp__squad-kit-*` tools and denies everything else, so a tool
+     the planner did not register can never run during planning.
+  2. **A claude.ai login carries the account's connectors into the session** as extra MCP servers
+     (Google Drive and friends), crowding the tool namespace the planner depends on — measured at 12
+     tools where the planner registers a handful. Planning now runs with `strictMcpConfig`, so it
+     sees only the tools squad-kit registers.
+
+  Verified on a real subscription run: `reads 0/25` and an indefinite hang before, `scout ✓` with
+  `reads 8/8` and a clean exit after.
+
+  **Scope.** Cause 2 needs a Claude subscription login and so only affects 0.12.x. Cause 1 is
+  auth-independent and dates to the Agent SDK runtime landing in **0.10.0**, so API-key users on
+  `planner.runtime.anthropic: agent-sdk` (the default for Anthropic) were most likely getting
+  context-free plans too. That inference follows from the mechanism; it has not been reproduced
+  against an API-key run.
+
+### Internal
+
+- Pinned `packageManager` to `pnpm@9.15.9` and removed the duplicate pin from the CI workflow.
+  Corepack had been resolving pnpm 11 locally, which re-added a `packageManager` field on every
+  invocation, generated a stray `pnpm-workspace.yaml`, and failed `pnpm install` on unapproved
+  esbuild build scripts — breaking `pnpm build`, `pnpm test`, and `npm publish` (whose
+  `prepublishOnly` runs all three). The lockfile has always been `lockfileVersion 9.0`.
+
 ## [0.12.1] — 2026-08-24
 
 ### Bug fixes
