@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.3] — 2026-08-25
+
+### Bug fixes
+
+- **The console's Doctor page was unreachable.** `/doctor` was defined as a route but never added to
+  the router's child list, so the sidebar link, the breadcrumb, and the Cmd+K entry all resolved to a
+  bare "Not Found". Introduced in 0.11.0 (`46519fd`, the runs-pages work) and shipped in every
+  release since. The CLI's `squad doctor` was unaffected throughout, which is why it went unnoticed.
+
+  The route is registered again, and `console-ui/src/router.test.ts` now asserts that **every**
+  sidebar destination resolves to a registered route. Neither the type checker nor the existing
+  tests could catch this: a defined-but-unregistered route is valid unused code, and a link to a
+  non-existent path is just a string.
+
 ## [0.12.2] — 2026-08-25
 
 ### Bug fixes
