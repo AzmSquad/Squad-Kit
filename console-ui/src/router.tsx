@@ -97,6 +97,7 @@ export const routeTree = rootRoute.addChildren([
   tracker,
   runsIndex,
   runReport,
+  doctor,
   design,
 ]);
 

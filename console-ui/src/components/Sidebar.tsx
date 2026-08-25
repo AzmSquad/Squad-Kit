@@ -33,7 +33,8 @@ interface NavSection {
   items: NavItem[];
 }
 
-const sections: NavSection[] = [
+/** Exported so `router.test.ts` can assert every destination actually resolves to a route. */
+export const sections: NavSection[] = [
   {
     heading: 'Workspace',
     items: [
