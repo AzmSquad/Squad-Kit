@@ -78,6 +78,24 @@ describe('RunReportPage', () => {
     apiMock.mockReset();
   });
 
+  it('links "Open plan" at the plan route, not the stored workspace path (issue #9)', async () => {
+    // Run records store planFile as `.squad/plans/<feature>/<file>.md`; the route wants the file
+    // name. Passing the stored value through built /plans/feat/.squad%2Fplans%2F... which 404s.
+    apiMock.mockImplementation(async (path: string) => {
+      if (path === '/api/runs/active') return [];
+      if (path === '/api/runs/demo-run')
+        return { ...RECORD_BASE, planFile: '.squad/plans/feat/01-story-142.md' };
+      if (path.startsWith('/api/runs/demo-run/events'))
+        return { runId: 'demo-run', fromIndex: 0, limit: 2000, total: 0, events: [] };
+      throw new Error(`unexpected api path ${path}`);
+    });
+
+    renderReport();
+
+    const link = await screen.findByRole('link', { name: /Open plan/i });
+    expect(link.getAttribute('href')).toBe('/plans/feat/01-story-142.md');
+  });
+
   it('hydrates metrics, stage markers, thinking redaction notice, then done event', async () => {
     const caps = { maxFileReads: 10, maxContextBytes: 4096, maxDurationSeconds: 120 };
     const events = [

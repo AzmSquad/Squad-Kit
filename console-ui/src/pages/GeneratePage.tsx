@@ -25,6 +25,7 @@ import { useGenerateRun } from '~/hooks/useGenerateRun';
 import type { StageKey } from '~/hooks/useGenerateRun';
 import { usePlannerAuth } from '~/hooks/usePlannerAuth';
 import type { ApiResolvedAuthMode } from '~/api/types';
+import { planFileParam } from '~/lib/plan-route';
 import { groupByFeature } from '~/lib/group-by-feature';
 
 function StoryAndModePicker({
@@ -219,7 +220,7 @@ function PlanSavedCallout({
       action={
         <Link
           to="/plans/$feature/$planFile"
-          params={{ feature, planFile }}
+          params={{ feature, planFile: planFileParam(planFile) }}
           className="text-[13px] font-medium text-[var(--color-accent)] hover:underline"
         >
           Open

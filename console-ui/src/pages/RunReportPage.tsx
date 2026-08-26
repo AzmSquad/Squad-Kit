@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { planFileParam } from '~/lib/plan-route';
 import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { Copy, ExternalLink } from 'lucide-react';
@@ -168,7 +169,7 @@ export function RunReportHeader({
           {record.planFile ? (
             <Link
               to="/plans/$feature/$planFile"
-              params={{ feature: record.feature, planFile: record.planFile }}
+              params={{ feature: record.feature, planFile: planFileParam(record.planFile) }}
               className="btn-secondary inline-flex items-center rounded-[var(--radius-md)] px-3 py-1.5 text-[13px] font-medium"
             >
               Open plan

@@ -163,7 +163,10 @@ describe('GeneratePage', () => {
         kind: 'done',
         runId: 'run-1',
         success: true,
-        planFile: '01-story-x.md',
+        // Must match what `console/api/runs.ts` actually emits: a path relative to the workspace
+        // root, not a bare file name. The bare form made this assertion pass while the real link
+        // 404'd — see https://github.com/AzmSquad/Squad-Kit/issues/9.
+        planFile: '.squad/plans/demo/01-story-x.md',
         partial: false,
         stats: {
           turns: 1,
