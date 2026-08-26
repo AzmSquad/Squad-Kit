@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.4] — 2026-08-26
+
+### Bug fixes
+
+- **"Open" on a freshly generated plan 404'd in the console.** After a run finished, the *Plan
+  saved* callout's **Open** link — and the **Open plan** button on the run report — resolved to
+  `/plans/<feature>/.squad%2Fplans%2F<feature>%2F<file>.md`, and the page rendered
+  `404 Not Found: {"error":"not_found"}`. Reported as
+  [#9](https://github.com/AzmSquad/Squad-Kit/issues/9).
+
+  Run records and the `done` event carry `planFile` as a path relative to the workspace root
+  (`.squad/plans/<feature>/<file>.md`) — that is the form shown to the user, and what both
+  `squad new-plan` and the console runs API have always written. The `/plans/$feature/$planFile`
+  route and `GET /api/plans/:feature/:planFile` want the **file name** only, because the API
+  resolves it under `.squad/plans/<feature>/`. Both link sites now normalise the value.
+
+  Normalising in the UI rather than at the writers also repairs every run record already on disk,
+  which all store the long form — so the run report's link works for historical runs too, not just
+  new ones.
+
+  The existing test asserted the correct href but fed the component a bare file name the server
+  never sends, so it passed while the real link was broken. The fixture now matches the actual
+  payload, and reverting the fix makes it fail.
+
 ## [0.12.3] — 2026-08-25
 
 ### Bug fixes
