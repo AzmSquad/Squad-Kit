@@ -18,7 +18,7 @@ import { CommandBlock } from '~/components/CommandBlock';
 import { PLANNER_AUTH_QUERY_KEY, usePlannerAuth } from '~/hooks/usePlannerAuth';
 import type { ApiPlannerAuthMode } from '~/api/types';
 
-type TrackerType = 'none' | 'github' | 'jira' | 'azure';
+type TrackerType = 'none' | 'github' | 'jira' | 'azure' | 'notion';
 type ProviderName = 'anthropic' | 'openai' | 'google';
 
 type SquadConfig = {
@@ -218,6 +218,7 @@ export function ConfigPage() {
                             <option value="github">github</option>
                             <option value="jira">jira</option>
                             <option value="azure">azure</option>
+                            <option value="notion">notion</option>
                           </Select>
                         )}
                       </Field>

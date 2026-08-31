@@ -535,6 +535,20 @@ describe('console server planner auth', () => {
     expect(afterBody.planner.anthropic).not.toBeNull();
   });
 
+  it('PUT /api/secrets stores a Notion token and GET returns it masked', async () => {
+    const put = await fetch(`${baseUrl}/api/secrets`, {
+      method: 'PUT',
+      headers: { ...auth(), 'content-type': 'application/json' },
+      body: JSON.stringify({ tracker: { notion: { token: 'secret_notion_fake_value' } } }),
+    });
+    expect(put.status).toBe(200);
+
+    const res = await fetch(`${baseUrl}/api/secrets`, { headers: auth() });
+    const body = (await res.json()) as { tracker: { notion: { token: string | null } } };
+    expect(body.tracker.notion.token).not.toBeNull();
+    expect(body.tracker.notion.token).not.toContain('secret_notion_fake_value');
+  });
+
   it('POST /api/runs returns auth_unavailable when subscription mode has no credential', async () => {
     await writeFile(
       paths.configFile,

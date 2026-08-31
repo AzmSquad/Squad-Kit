@@ -33,6 +33,7 @@ type MaskedSecrets = {
     jira: { host: string | null; email: string | null; token: string | null };
     azure: { organization: string | null; project: string | null; pat: string | null };
     github: { host: string | null; pat: string | null };
+    notion: { token: string | null };
   };
 };
 
@@ -245,6 +246,7 @@ export function SecretsPage() {
   const [tJira, setTJira] = useState<TestState>(null);
   const [tAz, setTAz] = useState<TestState>(null);
   const [tGh, setTGh] = useState<TestState>(null);
+  const [tNo, setTNo] = useState<TestState>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   const q = useQuery({ queryKey: ['secrets'], queryFn: () => api<MaskedSecrets>('/api/secrets') });
@@ -334,6 +336,20 @@ export function SecretsPage() {
       else setTGh({ ok: false, message: j.detail ? `GitHub: ${j.detail}` : 'unreachable' });
     } catch (e) {
       setTGh({ ok: false, message: (e as Error).message });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function testNotion() {
+    setBusy('notion');
+    setTNo(null);
+    try {
+      const j = (await postSecretsTest('/api/secrets/test/notion')) as { ok: boolean; detail?: string; status?: number };
+      if (j.ok) setTNo({ ok: true, message: 'Notion reachable' });
+      else setTNo({ ok: false, message: j.detail ? `Notion: ${j.detail}` : 'unreachable' });
+    } catch (e) {
+      setTNo({ ok: false, message: (e as Error).message });
     } finally {
       setBusy(null);
     }
@@ -567,6 +583,35 @@ export function SecretsPage() {
               </Button>
             </div>
             {tGh ? <Badge tone={tGh.ok ? 'success' : 'danger'}>{tGh.message}</Badge> : null}
+          </div>
+        </Card>
+
+        <Card variant="default">
+          <h2 className="mb-3 text-sm font-semibold">Notion</h2>
+          <p className="mb-3 text-[12px] text-[var(--color-text-muted)]">
+            Read-only. Create an internal integration, then share the pages or databases you want
+            squad-kit to read with it — a token alone grants no access.
+          </p>
+          <div className="grid max-w-lg gap-3">
+            <TokenRow
+              label="Integration token"
+              helper="Notion internal integration token (secret_… or ntn_…)."
+              display={s.tracker.notion.token}
+              onSave={(plain) => mut.mutate({ tracker: { notion: { token: plain } } })}
+            />
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                loading={busy === 'notion' || mut.isPending}
+                onClick={() => {
+                  void testNotion();
+                }}
+              >
+                Test connection
+              </Button>
+            </div>
+            {tNo ? <Badge tone={tNo.ok ? 'success' : 'danger'}>{tNo.message}</Badge> : null}
           </div>
         </Card>
       </div>

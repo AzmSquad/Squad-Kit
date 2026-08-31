@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
+import fs, { readFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { NotionClient } from '../src/tracker/notion.js';
@@ -113,6 +114,17 @@ describe('NotionClient.fetchIssue', () => {
       kind: 'auth',
       statusCode: 401,
     });
+  });
+
+  it('leaks no token into the attachment ref urls it returns', async () => {
+    const fetchMock = pageThenBlocksStub(loadPage());
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await new NotionClient({ token: 'secret_leaky' }).fetchIssue(
+      '11112222333344445555666677778888',
+    );
+
+    for (const a of res.attachments) expect(a.url).not.toContain('secret_leaky');
   });
 
   it('403 throws TrackerError auth (share hint)', async () => {
@@ -229,5 +241,40 @@ describe('NotionClient.searchIssues', () => {
       kind: 'auth',
       statusCode: 401,
     });
+  });
+});
+
+describe('NotionClient.downloadAttachments', () => {
+  /**
+   * Notion attachment URLs are pre-signed S3 links. S3 rejects a request that carries both a
+   * signature and an `Authorization` header, and forwarding the integration token to a
+   * third-party host would leak it outright — so the download must send *no* auth headers.
+   * This is the security-sensitive half of the adapter; assert the wire, not the call.
+   */
+  it('sends no authorization header to the pre-signed URL', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-notion-att-'));
+    const fetchMock = vi.fn(async () => new Response(Buffer.from('png-bytes'), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const out = await new NotionClient({ token: 'secret_must_not_leak' }).downloadAttachments(
+      [{ filename: 'shot.png', url: 'https://s3.us-west-2.amazonaws.com/secure.notion-static.com/x?X-Amz-Signature=abc', size: 0 }],
+      dir,
+    );
+
+    expect(out[0]!.outcome).toBe('written');
+    const { init } = firstFetchCall(fetchMock);
+    const headers = (init?.headers ?? {}) as Record<string, string>;
+    // No auth of any casing, and the token appears nowhere in the outgoing headers.
+    for (const key of Object.keys(headers)) expect(key.toLowerCase()).not.toBe('authorization');
+    expect(JSON.stringify(headers)).not.toContain('secret_must_not_leak');
+  });
+
+  it('makes no request at all when there are no refs', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-notion-att-'));
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(new NotionClient({ token: 'secret_tok' }).downloadAttachments([], dir)).resolves.toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
