@@ -126,6 +126,22 @@ describe('clientFor', () => {
     expect(res.client?.name).toBe('github');
   });
 
+  it('returns missing-credentials for notion without token', () => {
+    const config: SquadConfig = { ...DEFAULT_CONFIG, tracker: { type: 'notion' } };
+    const res = clientFor(config, {});
+    expect(res.client).toBeUndefined();
+    expect(res.error?.kind).toBe('missing-credentials');
+    expect(res.error?.message).toContain('Notion');
+  });
+
+  it('returns notion client when token is present', () => {
+    const config: SquadConfig = { ...DEFAULT_CONFIG, tracker: { type: 'notion' } };
+    const secrets: SquadSecrets = { tracker: { notion: { token: 'secret_tok' } } };
+    const res = clientFor(config, secrets);
+    expect(res.error).toBeUndefined();
+    expect(res.client?.name).toBe('notion');
+  });
+
   it('prefers secrets.tracker.jira.host over config.tracker.workspace for requests', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify(loadMinimalIssue()), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);

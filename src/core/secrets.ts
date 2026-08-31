@@ -19,6 +19,10 @@ export interface TrackerGitHubSecrets {
   pat?: string;
 }
 
+export interface TrackerNotionSecrets {
+  token?: string; // Notion internal integration token ("secret_…" / "ntn_…")
+}
+
 export interface SquadSecrets {
   planner?: {
     anthropic?: string;
@@ -36,6 +40,7 @@ export interface SquadSecrets {
     jira?: TrackerJiraSecrets;
     azure?: TrackerAzureSecrets;
     github?: TrackerGitHubSecrets;
+    notion?: TrackerNotionSecrets;
   };
 }
 
@@ -106,6 +111,10 @@ export function mergeSecrets(base: SquadSecrets, patch: SquadSecrets): SquadSecr
       github: {
         ...(base.tracker?.github ?? {}),
         ...filterEmpty((patch.tracker?.github ?? {}) as Record<string, unknown>),
+      },
+      notion: {
+        ...(base.tracker?.notion ?? {}),
+        ...filterEmpty((patch.tracker?.notion ?? {}) as Record<string, unknown>),
       },
     },
   };

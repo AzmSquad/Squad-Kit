@@ -5,22 +5,32 @@ import { buildPaths, requireSquadRoot } from '../../core/paths.js';
 import { loadConfig, saveConfig, type SquadConfig, type TrackerType } from '../../core/config.js';
 import { loadSecrets, saveSecrets, mergeSecrets, type SquadSecrets } from '../../core/secrets.js';
 import { clientFor, overlayTrackerEnv } from '../../tracker/index.js';
-import { probeJiraConnectivity, probeAzureConnectivity, probeGitHubConnectivity } from '../../core/probes.js';
+import {
+  probeJiraConnectivity,
+  probeAzureConnectivity,
+  probeGitHubConnectivity,
+  probeNotionConnectivity,
+} from '../../core/probes.js';
 import { skipExternalProbesInAutomation } from '../../core/ci-env.js';
 import { isInteractive } from '../../ui/tty.js';
-import { promptJiraCredentials, promptAzureCredentials, promptGitHubCredentials } from './shared.js';
+import {
+  promptJiraCredentials,
+  promptAzureCredentials,
+  promptGitHubCredentials,
+  promptNotionCredentials,
+} from './shared.js';
 
-const TYPES: TrackerType[] = ['none', 'github', 'jira', 'azure'];
+const TYPES: TrackerType[] = ['none', 'github', 'jira', 'azure', 'notion'];
 
 function parseType(t: string | undefined): TrackerType {
   if (!t) {
     throw new Error(
-      'Pass --type (none|jira|azure|github) with --yes, or run `squad config set tracker` without --yes in a TTY to pick a type.',
+      'Pass --type (none|jira|azure|github|notion) with --yes, or run `squad config set tracker` without --yes in a TTY to pick a type.',
     );
   }
   if (!TYPES.includes(t as TrackerType)) {
     throw new Error(
-      `Invalid --type "${t}". Use none | jira | azure | github, or run \`squad config set tracker\` interactively.`,
+      `Invalid --type "${t}". Use none | jira | azure | github | notion, or run \`squad config set tracker\` interactively.`,
     );
   }
   return t as TrackerType;
@@ -41,6 +51,12 @@ function azureError(): Error {
 function githubError(): Error {
   return new Error(
     `GitHub configuration is incomplete. Set tracker.workspace (owner) and tracker.project (repo) in .squad/config.yaml plus GITHUB_TOKEN (or run \`squad config set tracker\` without --yes to enter credentials interactively).`,
+  );
+}
+
+function notionError(): Error {
+  return new Error(
+    `Notion configuration is incomplete. Set NOTION_TOKEN (or run \`squad config set tracker\` without --yes to enter the integration token interactively).`,
   );
 }
 
@@ -71,6 +87,7 @@ export async function runConfigSetTracker(opts: ConfigSetTrackerOptions = {}): P
         { name: 'GitHub Issues', value: 'github' as TrackerType },
         { name: 'Jira', value: 'jira' as TrackerType },
         { name: 'Azure DevOps', value: 'azure' as TrackerType },
+        { name: 'Notion', value: 'notion' as TrackerType },
       ],
       default: config.tracker.type,
     })) as TrackerType;
@@ -167,6 +184,23 @@ export async function runConfigSetTracker(opts: ConfigSetTrackerOptions = {}): P
       }
       nextTracker = { type: 'azure', workspace: org, project };
     }
+  } else if (type === 'notion') {
+    if (interactive) {
+      ui.step('Notion credentials (stored in .squad/secrets.yaml — always git-ignored)');
+      const n = await promptNotionCredentials();
+      const merged = mergeSecrets(baseSecrets, { tracker: { notion: { token: n.token } } });
+      saveSecrets(paths.secretsFile, merged);
+      nextTracker = { type: 'notion' };
+      ui.success('Notion credentials saved');
+      ui.info('.squad/secrets.yaml updated (chmod 0600 on POSIX)');
+    } else {
+      const o = overlayTrackerEnv(baseSecrets);
+      const candidate: SquadConfig = { ...config, tracker: { type: 'notion' } };
+      if (clientFor(candidate, o).error) {
+        throw notionError();
+      }
+      nextTracker = { type: 'notion' };
+    }
   }
 
   const next: SquadConfig = { ...config, tracker: nextTracker };
@@ -222,6 +256,17 @@ export async function runConfigSetTracker(opts: ConfigSetTrackerOptions = {}): P
           : `GitHub connectivity check failed: ${r.detail ?? 'unknown'}`,
       );
     }
+  } else if (reloaded.tracker.type === 'notion') {
+    const r = await probeNotionConnectivity(s, reloaded);
+    if (r.ok) {
+      ui.info('Notion connectivity check: OK');
+    } else {
+      ui.warning(
+        r.status !== undefined
+          ? `Notion connectivity check: HTTP ${r.status}`
+          : `Notion connectivity check failed: ${r.detail ?? 'unknown'}`,
+      );
+    }
   }
 
   printTrackerNextSteps(next.tracker.type);
@@ -237,7 +282,13 @@ function printTrackerNextSteps(type: string): void {
   }
   ui.info('1) Verify with `squad doctor` — tracker checks should be green.');
   const idHint =
-    type === 'jira' ? 'JIRA-123' : type === 'github' ? 'github-issue-number' : 'azure-work-item-id';
+    type === 'jira'
+      ? 'JIRA-123'
+      : type === 'github'
+        ? 'github-issue-number'
+        : type === 'notion'
+          ? 'notion-page-id'
+          : 'azure-work-item-id';
   ui.info(`2) Create a story: squad new-story <feature-slug> --id <${idHint}>`);
   ui.info('   squad-kit auto-fetches the title, description, and attachments into the intake.');
   ui.info('3) Review the generated intake.md, then run `squad new-plan --api` to generate the plan.');

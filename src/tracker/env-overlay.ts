@@ -17,6 +17,8 @@ export function overlayTrackerEnv(base: SquadSecrets): SquadSecrets {
   const ghHost = process.env.GITHUB_HOST;
   const ghPat = process.env.GITHUB_TOKEN ?? process.env.SQUAD_TRACKER_API_KEY;
 
+  const notionToken = process.env.NOTION_TOKEN ?? process.env.NOTION_API_KEY ?? process.env.SQUAD_TRACKER_API_KEY;
+
   return {
     ...base,
     tracker: {
@@ -33,6 +35,9 @@ export function overlayTrackerEnv(base: SquadSecrets): SquadSecrets {
       github: {
         host: ghHost ?? base.tracker?.github?.host,
         pat: ghPat ?? base.tracker?.github?.pat,
+      },
+      notion: {
+        token: notionToken ?? base.tracker?.notion?.token,
       },
     },
   };

@@ -26,6 +26,7 @@ const SECRETS = {
     jira: { host: null, email: null, token: null },
     azure: { organization: null, project: null, pat: null },
     github: { host: null, pat: null },
+    notion: { token: null },
   },
 };
 

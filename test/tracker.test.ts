@@ -22,6 +22,13 @@ describe('validateTrackerId', () => {
     expect(validateTrackerId('azure', '843806')).toBe(true);
     expect(validateTrackerId('azure', 'abc')).toBe(false);
   });
+
+  it('validates notion ids (bare 32-hex or dashed UUID)', () => {
+    expect(validateTrackerId('notion', '11112222333344445555666677778888')).toBe(true);
+    expect(validateTrackerId('notion', '11112222-3333-4444-5555-666677778888')).toBe(true);
+    expect(validateTrackerId('notion', 'not-a-uuid')).toBe(false);
+    expect(validateTrackerId('notion', '1234')).toBe(false);
+  });
 });
 
 describe('trackerIdForFilename', () => {

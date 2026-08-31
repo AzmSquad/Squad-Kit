@@ -76,6 +76,14 @@ export async function promptGitHubCredentials(defaults: {
   return { owner: owner.trim(), repo: repo.trim(), host: host.trim(), pat };
 }
 
+export async function promptNotionCredentials(_defaults: { token?: string } = {}): Promise<{ token: string }> {
+  const token = await password({
+    message: 'Notion integration token (input hidden; create one at notion.so/my-integrations):',
+    validate: (v) => (v.trim().length >= 20 ? true : 'token seems too short'),
+  });
+  return { token: token.trim() };
+}
+
 export function newPlannerBlock(provider: ProviderName): PlannerConfig {
   return {
     enabled: true,

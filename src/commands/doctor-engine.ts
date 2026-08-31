@@ -23,6 +23,7 @@ import {
   probeJiraConnectivity,
   probeAzureConnectivity,
   probeGitHubConnectivity,
+  probeNotionConnectivity,
 } from '../core/probes.js';
 import { readLastRun } from '../core/last-run.js';
 import { formatTokenK } from '../ui/planner-cache-summary.js';
@@ -869,6 +870,16 @@ async function checkTrackerConnectivity(paths: SquadPaths, ctx: DoctorContext): 
   if (client.name === 'github') {
     const r = await probeGitHubConnectivity(secrets, ctx.config);
     if (r.ok) return { id: 'tracker-live', name: 'tracker connectivity', status: 'ok', detail: 'GitHub REST' };
+    return {
+      id: 'tracker-live',
+      name: 'tracker connectivity',
+      status: 'fail',
+      detail: r.status !== undefined ? `HTTP ${r.status}` : r.detail ?? 'request failed',
+    };
+  }
+  if (client.name === 'notion') {
+    const r = await probeNotionConnectivity(secrets, ctx.config);
+    if (r.ok) return { id: 'tracker-live', name: 'tracker connectivity', status: 'ok', detail: 'Notion API' };
     return {
       id: 'tracker-live',
       name: 'tracker connectivity',

@@ -4,6 +4,7 @@ const VALIDATORS: Record<Exclude<TrackerType, 'none'>, RegExp> = {
   github: /^(?:[\w.-]+\/[\w.-]+#)?\d+$/,
   jira: /^[A-Z][A-Z0-9]+-\d+$/,
   azure: /^\d+$/,
+  notion: /^[0-9a-f]{32}$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
 };
 
 export function validateTrackerId(type: TrackerType, id: string): boolean {

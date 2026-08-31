@@ -8,6 +8,7 @@ import {
   probeJiraConnectivity,
   probeAzureConnectivity,
   probeGitHubConnectivity,
+  probeNotionConnectivity,
 } from '../../core/probes.js';
 import { loadConfig } from '../../core/config.js';
 import type { ProviderName } from '../../planner/types.js';
@@ -46,6 +47,9 @@ export function mountSecretsApi(app: Hono, opts: { paths: SquadPaths }): void {
           host: s.tracker?.github?.host ?? null,
           pat: maskToken(s.tracker?.github?.pat),
         },
+        notion: {
+          token: maskToken(s.tracker?.notion?.token),
+        },
       },
     });
   });
@@ -79,6 +83,11 @@ export function mountSecretsApi(app: Hono, opts: { paths: SquadPaths }): void {
           .object({
             host: z.string().optional(),
             pat: z.string().optional(),
+          })
+          .optional(),
+        notion: z
+          .object({
+            token: z.string().optional(),
           })
           .optional(),
       })
@@ -128,5 +137,11 @@ export function mountSecretsApi(app: Hono, opts: { paths: SquadPaths }): void {
     const cfg = loadConfig(opts.paths.configFile);
     const s = loadSecrets(opts.paths.secretsFile);
     return c.json(await probeGitHubConnectivity(s, cfg));
+  });
+
+  app.post('/api/secrets/test/notion', async (c) => {
+    const cfg = loadConfig(opts.paths.configFile);
+    const s = loadSecrets(opts.paths.secretsFile);
+    return c.json(await probeNotionConnectivity(s, cfg));
   });
 }

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### What's new
+
+- **Notion issue tracker (read-only).** `notion` joins Jira, Azure DevOps, and
+  GitHub as a supported tracker type. `squad new-story --id <page-id>` fetches a
+  page's title, description, labels, and attachments into the intake, and the
+  tracker layer can search pages by query. Setup via `squad config set tracker`
+  prompts for an integration token stored only in `.squad/secrets.yaml`; the
+  token also resolves from `NOTION_TOKEN`, `NOTION_API_KEY`, or
+  `SQUAD_TRACKER_API_KEY`. Page ids accept bare 32-hex or dashed-UUID form.
+  `squad doctor` and the connectivity probe cover Notion. The console's Config
+  and Secrets pages can select Notion and store its token. Creating/updating
+  pages and OAuth are out of scope.
+
 ## [0.12.4] — 2026-08-26
 
 ### Bug fixes

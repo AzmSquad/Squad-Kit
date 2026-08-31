@@ -19,6 +19,8 @@ function trackerFieldLabel(tracker: string): string {
       return 'Azure work item id';
     case 'github':
       return 'GitHub issue id';
+    case 'notion':
+      return 'Notion page id';
     default:
       return 'Work item id';
   }

@@ -1,0 +1,46 @@
+{
+  "object": "page",
+  "id": "11112222-3333-4444-5555-666677778888",
+  "url": "https://www.notion.so/Login-fails-when-MFA-enabled-1111222233334444555566667777888",
+  "properties": {
+    "Name": {
+      "id": "title",
+      "type": "title",
+      "title": [
+        {
+          "type": "text",
+          "text": { "content": "Login fails when MFA enabled" },
+          "plain_text": "Login fails when MFA enabled"
+        }
+      ]
+    },
+    "Status": {
+      "id": "status",
+      "type": "status",
+      "status": { "name": "In Progress" }
+    },
+    "Tags": {
+      "id": "tags",
+      "type": "multi_select",
+      "multi_select": [{ "name": "frontend" }, { "name": "bug" }]
+    },
+    "Assignee": {
+      "id": "people",
+      "type": "people",
+      "people": [{ "object": "user", "name": "Jamie Doe" }]
+    },
+    "Files": {
+      "id": "files",
+      "type": "files",
+      "files": [
+        {
+          "name": "screenshot.png",
+          "type": "file",
+          "file": {
+            "url": "https://s3.us-west-2.amazonaws.com/secure.notion-static.com/screenshot.png?X-Amz-Signature=abc"
+          }
+        }
+      ]
+    }
+  }
+}
