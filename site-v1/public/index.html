@@ -1,0 +1,2321 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f6f8f7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#050d09" media="(prefers-color-scheme: dark)" />
+    <title>squad-kit v1: You write the ticket. Your squad does the rest.</title>
+    <meta name="description" content="squad-kit v1 is a team of AI agents for your software projects. Write a ticket and your squad writes the spec, builds it, tests it, reviews it, and gets it ready to release. Coming soon." />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <meta name="author" content="Momen Yasser" />
+    <link rel="canonical" href="https://v1.squad-kit.com/" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:url" content="https://v1.squad-kit.com/" />
+    <meta property="og:site_name" content="squad-kit" />
+    <meta property="og:title" content="squad-kit v1: You write the ticket. Your squad does the rest." />
+    <meta property="og:description" content="A team of AI agents that takes a ticket from your tracker to a release: spec, build, test, review, release, and bugs. Coming soon." />
+    <meta property="og:image" content="https://v1.squad-kit.com/og.png" />
+    <meta property="og:image:secure_url" content="https://v1.squad-kit.com/og.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="squad-kit v1. You write the ticket. Your squad does the rest. Coming soon." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="squad-kit v1: You write the ticket. Your squad does the rest." />
+    <meta name="twitter:description" content="A team of AI agents that takes a ticket from your tracker to a release: spec, build, test, review, release, and bugs. Coming soon." />
+    <meta name="twitter:image" content="https://v1.squad-kit.com/og.png" />
+    <meta name="twitter:image:alt" content="squad-kit v1. You write the ticket. Your squad does the rest. Coming soon." />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "WebSite",
+            "@id": "https://v1.squad-kit.com/#website",
+            "url": "https://v1.squad-kit.com/",
+            "name": "squad-kit v1",
+            "description": "A team of AI agents that takes a ticket from your tracker to a release: spec, build, test, review, release, and bugs.",
+            "inLanguage": "en"
+          },
+          {
+            "@type": "SoftwareApplication",
+            "name": "squad-kit",
+            "softwareVersion": "1.0 (coming soon)",
+            "applicationCategory": "BusinessApplication",
+            "operatingSystem": "Windows, macOS, Linux",
+            "description": "You write the ticket. Your squad does the rest. AI agents write the spec, build it, test it, review it, and get it ready to release.",
+            "url": "https://v1.squad-kit.com/",
+            "image": "https://v1.squad-kit.com/og.png",
+            "license": "https://opensource.org/licenses/MIT",
+            "codeRepository": "https://github.com/AzmSquad/Squad-Kit",
+            "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+            "author": { "@type": "Person", "name": "Momen Yasser" }
+          }
+        ]
+      }
+    </script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wdth,wght@75..100,400..700&family=JetBrains+Mono:wght@400;500&display=swap"
+    />
+
+    <script>
+      // Apply a saved theme before first paint so the page does not flash.
+      try {
+        var savedTheme = localStorage.getItem("sk-theme");
+        if (savedTheme === "light" || savedTheme === "dark") document.documentElement.dataset.theme = savedTheme;
+      } catch (e) {}
+    </script>
+
+    <style>
+      :root {
+        --bg: #f6f8f7;
+        --surface: #ffffff;
+        --surface-2: #eef2f0;
+        --line: #dfe5e1;
+        --line-strong: #c7d1cb;
+        --text: #0e1813;
+        --muted: #536159;
+        --dim: #7a877f;
+        --mint: #7cffa0;
+        --mint-ink: #03210f;
+        --accent: #0d8a42;
+        --accent-soft: rgba(13, 138, 66, 0.09);
+        --bug: #d4442a;
+        --bug-soft: rgba(212, 68, 42, 0.09);
+        --wait: #b7791f;
+        --shadow: 0 1px 2px rgba(14, 24, 19, 0.05), 0 6px 18px -6px rgba(14, 24, 19, 0.1);
+        --shadow-lift: 0 2px 4px rgba(14, 24, 19, 0.06), 0 18px 40px -12px rgba(13, 138, 66, 0.35);
+        --sans: "Instrument Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        color-scheme: light;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"]) {
+          --bg: #050d09;
+          --surface: #0b1611;
+          --surface-2: #10201a;
+          --line: #17291f;
+          --line-strong: #25432f;
+          --text: #e6f0ea;
+          --muted: #95ae9f;
+          --dim: #68826f;
+          --accent: #7cffa0;
+          --accent-soft: rgba(124, 255, 160, 0.09);
+          --bug: #ff7b5c;
+          --bug-soft: rgba(255, 123, 92, 0.11);
+          --wait: #f0b45a;
+          --shadow: 0 1px 0 rgba(255, 255, 255, 0.02);
+          --shadow-lift: 0 0 0 1px rgba(124, 255, 160, 0.35), 0 18px 40px -14px rgba(124, 255, 160, 0.35);
+          color-scheme: dark;
+        }
+      }
+
+      :root[data-theme="dark"] {
+        --bg: #050d09;
+        --surface: #0b1611;
+        --surface-2: #10201a;
+        --line: #17291f;
+        --line-strong: #25432f;
+        --text: #e6f0ea;
+        --muted: #95ae9f;
+        --dim: #68826f;
+        --accent: #7cffa0;
+        --accent-soft: rgba(124, 255, 160, 0.09);
+        --bug: #ff7b5c;
+        --bug-soft: rgba(255, 123, 92, 0.11);
+        --wait: #f0b45a;
+        --shadow: 0 1px 0 rgba(255, 255, 255, 0.02);
+        --shadow-lift: 0 0 0 1px rgba(124, 255, 160, 0.35), 0 18px 40px -14px rgba(124, 255, 160, 0.35);
+        color-scheme: dark;
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      html {
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        text-rendering: optimizeLegibility;
+        scroll-behavior: smooth;
+        scroll-padding-top: 80px;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--sans);
+        font-size: 1.0625rem;
+        line-height: 1.6;
+        overflow-x: hidden;
+      }
+
+      a {
+        color: inherit;
+      }
+
+      :focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 3px;
+        border-radius: 6px;
+      }
+
+      h1,
+      h2,
+      h3,
+      h4,
+      p {
+        margin: 0;
+      }
+
+      .wrap {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 0 24px;
+      }
+
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+
+      /* Buttons */
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        height: 48px;
+        padding: 0 22px;
+        border-radius: 12px;
+        font: 500 1rem var(--sans);
+        text-decoration: none;
+        cursor: pointer;
+        transition: background-color 0.15s, border-color 0.15s, transform 0.15s;
+      }
+
+      .btn svg {
+        width: 18px;
+        height: 18px;
+        flex: none;
+      }
+
+      .btn-primary {
+        border: 0;
+        background: var(--mint);
+        color: var(--mint-ink);
+      }
+
+      .btn-primary:hover {
+        background: #a2ffbc;
+      }
+
+      .btn-secondary {
+        border: 1px solid var(--line-strong);
+        background: var(--surface);
+        color: var(--text);
+      }
+
+      .btn-secondary:hover {
+        border-color: var(--muted);
+      }
+
+      /* Header */
+
+      .site-header {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        border-bottom: 1px solid transparent;
+        background: color-mix(in oklab, var(--bg) 82%, transparent);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        transition: border-color 0.2s;
+      }
+
+      .site-header.is-scrolled {
+        border-bottom-color: var(--line);
+      }
+
+      .site-header .wrap {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+        height: 68px;
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 600;
+        font-size: 1.0625rem;
+        letter-spacing: -0.01em;
+        text-decoration: none;
+      }
+
+      .brand img {
+        width: 30px;
+        height: 30px;
+      }
+
+      .brand-version {
+        padding: 2px 8px;
+        border: 1px solid var(--line-strong);
+        border-radius: 999px;
+        color: var(--muted);
+        font-size: 0.75rem;
+        font-weight: 500;
+      }
+
+      .site-nav {
+        display: flex;
+        gap: 4px;
+      }
+
+      .site-nav a {
+        padding: 8px 12px;
+        border-radius: 8px;
+        color: var(--muted);
+        font-size: 0.9375rem;
+        text-decoration: none;
+      }
+
+      .site-nav a:hover {
+        color: var(--text);
+        background: var(--surface-2);
+      }
+
+      .header-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .icon-btn {
+        display: inline-grid;
+        place-items: center;
+        width: 40px;
+        height: 40px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--surface);
+        color: var(--muted);
+        cursor: pointer;
+      }
+
+      .icon-btn:hover {
+        color: var(--text);
+        border-color: var(--line-strong);
+      }
+
+      .icon-btn svg {
+        width: 18px;
+        height: 18px;
+      }
+
+      .theme-toggle .icon-sun {
+        display: none;
+      }
+
+      :root[data-theme="dark"] .theme-toggle .icon-sun {
+        display: block;
+      }
+
+      :root[data-theme="dark"] .theme-toggle .icon-moon {
+        display: none;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"]) .theme-toggle .icon-sun {
+          display: block;
+        }
+
+        :root:not([data-theme="light"]) .theme-toggle .icon-moon {
+          display: none;
+        }
+      }
+
+      .header-actions .btn {
+        height: 40px;
+        padding: 0 14px;
+        border-radius: 10px;
+        font-size: 0.9375rem;
+      }
+
+      /* Hero */
+
+      .hero {
+        padding: 72px 0 0;
+        text-align: center;
+      }
+
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        padding: 6px 14px 6px 12px;
+        border: 1px solid var(--line-strong);
+        border-radius: 999px;
+        background: var(--surface);
+        color: var(--accent);
+        font-size: 0.875rem;
+        font-weight: 500;
+        line-height: 1.2;
+      }
+
+      .tag::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--mint);
+        box-shadow: 0 0 0 3px var(--accent-soft);
+      }
+
+      .hero h1 {
+        margin: 28px auto 0;
+        max-width: 14em;
+        font-size: clamp(2.5rem, 6vw, 4.75rem);
+        font-weight: 600;
+        line-height: 1.04;
+        letter-spacing: -0.03em;
+        text-wrap: balance;
+      }
+
+      .hero h1 span {
+        display: block;
+      }
+
+      .hero-lede {
+        max-width: 38em;
+        margin: 24px auto 0;
+        color: var(--muted);
+        font-size: 1.1875rem;
+        line-height: 1.55;
+        text-wrap: pretty;
+      }
+
+      .hero-actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 12px;
+        margin-top: 32px;
+      }
+
+      .hero-note {
+        margin-top: 18px;
+        color: var(--dim);
+        font-size: 0.9375rem;
+      }
+
+      /* Live board */
+
+      .board-figure {
+        margin: 56px 0 0;
+      }
+
+      .board-scroll {
+        overflow-x: auto;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: var(--surface-2);
+        scrollbar-width: thin;
+      }
+
+      .board {
+        display: grid;
+        grid-template-columns: repeat(7, minmax(0, 1fr));
+        min-width: 1040px;
+        text-align: left;
+      }
+
+      .board-col {
+        min-height: 360px;
+        padding: 14px 10px 18px;
+        border-right: 1px solid var(--line);
+        transition: background-color 0.4s;
+      }
+
+      .board-col:last-child {
+        border-right: 0;
+      }
+
+      .board-col.is-active {
+        background: var(--accent-soft);
+      }
+
+      .board-col-head {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 5px;
+        padding: 2px 4px 12px;
+      }
+
+      .board-col-name {
+        font-size: 0.9375rem;
+        font-weight: 600;
+      }
+
+      .board-col.is-bugs .board-col-name {
+        color: var(--bug);
+      }
+
+      .board-role {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--dim);
+        font-size: 0.75rem;
+        white-space: nowrap;
+      }
+
+      .avatar {
+        display: inline-grid;
+        place-items: center;
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        background: var(--surface);
+        border: 1px solid var(--line-strong);
+        color: var(--muted);
+        font-size: 0.625rem;
+        font-weight: 600;
+        transition: border-color 0.3s, box-shadow 0.3s;
+      }
+
+      .board-col.is-active .avatar {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-soft);
+        color: var(--accent);
+      }
+
+      .board-cards {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .board-card {
+        padding: 10px 11px 11px;
+        border: 1px solid var(--line);
+        border-radius: 11px;
+        background: var(--surface);
+        box-shadow: var(--shadow);
+        transition: box-shadow 0.3s, border-color 0.3s, opacity 0.4s;
+      }
+
+      .board-card.is-moving {
+        border-color: var(--accent);
+        box-shadow: var(--shadow-lift);
+      }
+
+      .board-card.is-bug {
+        border-left: 3px solid var(--bug);
+      }
+
+      .board-card.is-hidden {
+        opacity: 0;
+      }
+
+      .card-id {
+        color: var(--dim);
+        font-size: 0.75rem;
+        font-weight: 500;
+      }
+
+      .card-title {
+        margin-top: 2px;
+        font-size: 0.875rem;
+        font-weight: 500;
+        line-height: 1.35;
+      }
+
+      .card-status {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        margin-top: 8px;
+        color: var(--muted);
+        font-size: 0.75rem;
+        line-height: 1.3;
+      }
+
+      .dot {
+        flex: none;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+      }
+
+      .dot-run {
+        background: var(--accent);
+        animation: dot-pulse 1.2s ease-in-out infinite;
+      }
+
+      .dot-done {
+        background: var(--accent);
+      }
+
+      .dot-wait {
+        border: 2px solid var(--wait);
+      }
+
+      .dot-bug {
+        background: var(--bug);
+      }
+
+      .dot-idle {
+        border: 2px solid var(--line-strong);
+      }
+
+      @keyframes dot-pulse {
+        50% {
+          opacity: 0.3;
+        }
+      }
+
+      .board-caption {
+        margin-top: 14px;
+        color: var(--dim);
+        font-size: 0.875rem;
+        text-align: center;
+      }
+
+      /* Sections */
+
+      .section {
+        padding: 120px 0 0;
+      }
+
+      .section-head {
+        max-width: 40em;
+      }
+
+      .section-head h2 {
+        font-size: clamp(2rem, 3.6vw, 2.875rem);
+        font-weight: 600;
+        line-height: 1.1;
+        letter-spacing: -0.025em;
+        text-wrap: balance;
+      }
+
+      .section-head p {
+        margin-top: 16px;
+        color: var(--muted);
+        font-size: 1.125rem;
+        text-wrap: pretty;
+      }
+
+      /* How it works */
+
+      .steps {
+        margin: 48px 0 0;
+        padding: 0;
+        list-style: none;
+        border-top: 1px solid var(--line);
+      }
+
+      .step {
+        display: grid;
+        grid-template-columns: 56px 220px minmax(0, 1fr) 280px;
+        gap: 24px;
+        align-items: baseline;
+        padding: 26px 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .step-num {
+        color: var(--dim);
+        font-size: 0.9375rem;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .step-name {
+        font-size: 1.25rem;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+
+      .step-role {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 0.9375rem;
+      }
+
+      .step-text {
+        color: var(--muted);
+      }
+
+      .step-you {
+        padding-left: 16px;
+        border-left: 2px solid var(--line-strong);
+        color: var(--muted);
+        font-size: 0.9375rem;
+      }
+
+      .step-you strong {
+        display: block;
+        color: var(--text);
+        font-weight: 600;
+      }
+
+      .step.is-yours .step-you {
+        border-left-color: var(--accent);
+      }
+
+      .step.is-bugs .step-name {
+        color: var(--bug);
+      }
+
+      /* Teams */
+
+      .teams {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0 48px;
+        margin-top: 48px;
+      }
+
+      .team {
+        padding: 28px 0;
+        border-top: 1px solid var(--line);
+      }
+
+      .team h3 {
+        font-size: 1.25rem;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+
+      .team p {
+        margin-top: 8px;
+        color: var(--muted);
+      }
+
+      .team.is-lead {
+        grid-row: span 2;
+        padding: 32px;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: var(--surface);
+      }
+
+      .team.is-lead h3 {
+        font-size: 1.5rem;
+      }
+
+      .team.is-lead p {
+        font-size: 1.0625rem;
+      }
+
+      .team-points {
+        margin: 20px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .team-points li {
+        position: relative;
+        padding: 10px 0 10px 30px;
+        border-top: 1px solid var(--line);
+        font-size: 0.9375rem;
+      }
+
+      .team-points li::before {
+        content: "";
+        position: absolute;
+        left: 2px;
+        top: 15px;
+        width: 14px;
+        height: 8px;
+        border-left: 2px solid var(--accent);
+        border-bottom: 2px solid var(--accent);
+        transform: rotate(-45deg);
+      }
+
+      /* App mockup */
+
+      .window {
+        margin-top: 48px;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: var(--surface);
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+
+      .window-bar {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        height: 44px;
+        padding: 0 16px;
+        border-bottom: 1px solid var(--line);
+        background: var(--surface-2);
+      }
+
+      .window-dots {
+        display: flex;
+        gap: 6px;
+      }
+
+      .window-dots span {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--line-strong);
+      }
+
+      .window-url {
+        flex: 1;
+        max-width: 340px;
+        margin: 0 auto;
+        padding: 4px 12px;
+        border-radius: 7px;
+        background: var(--surface);
+        color: var(--dim);
+        font-size: 0.8125rem;
+        text-align: center;
+      }
+
+      .window-body {
+        display: grid;
+        grid-template-columns: 200px minmax(0, 1fr);
+        min-height: 520px;
+      }
+
+      .mock-side {
+        padding: 18px 12px;
+        border-right: 1px solid var(--line);
+      }
+
+      .mock-side-brand {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 8px 16px;
+        font-size: 0.9375rem;
+        font-weight: 600;
+      }
+
+      .mock-side-brand img {
+        width: 22px;
+        height: 22px;
+      }
+
+      .mock-nav {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .mock-nav li {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 10px;
+        border-radius: 8px;
+        color: var(--muted);
+        font-size: 0.9375rem;
+      }
+
+      .mock-nav li.is-current {
+        background: var(--surface-2);
+        color: var(--text);
+        font-weight: 500;
+      }
+
+      .mock-count {
+        min-width: 22px;
+        padding: 0 6px;
+        border-radius: 999px;
+        background: var(--surface-2);
+        color: var(--dim);
+        font-size: 0.75rem;
+        text-align: center;
+      }
+
+      .mock-nav li.is-current .mock-count {
+        background: var(--mint);
+        color: var(--mint-ink);
+        font-weight: 600;
+      }
+
+      .mock-main {
+        padding: 26px 30px 30px;
+      }
+
+      .mock-title {
+        margin-top: 4px;
+        font-size: 1.5rem;
+        font-weight: 600;
+        letter-spacing: -0.015em;
+      }
+
+      .mock-sub {
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 0.9375rem;
+      }
+
+      .mock-progress {
+        display: grid;
+        grid-template-columns: repeat(7, minmax(0, 1fr));
+        gap: 6px;
+        margin: 22px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .mock-progress li {
+        padding-top: 10px;
+        border-top: 4px solid var(--line);
+        color: var(--dim);
+        font-size: 0.8125rem;
+      }
+
+      .mock-progress li.is-done {
+        border-top-color: var(--accent);
+        color: var(--muted);
+      }
+
+      .mock-progress li.is-current {
+        border-top-color: var(--wait);
+        color: var(--text);
+        font-weight: 600;
+      }
+
+      .mock-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+        gap: 28px;
+        margin-top: 28px;
+      }
+
+      .mock-panel h4 {
+        margin-bottom: 12px;
+        font-size: 0.9375rem;
+        font-weight: 600;
+      }
+
+      .mock-checks {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+      }
+
+      .mock-checks li {
+        display: flex;
+        gap: 10px;
+        padding: 11px 14px;
+        border-bottom: 1px solid var(--line);
+        font-size: 0.9375rem;
+        line-height: 1.4;
+      }
+
+      .mock-checks li:last-child {
+        border-bottom: 0;
+      }
+
+      .tick {
+        flex: none;
+        display: inline-grid;
+        place-items: center;
+        width: 18px;
+        height: 18px;
+        margin-top: 1px;
+        border-radius: 50%;
+        background: var(--accent-soft);
+        color: var(--accent);
+      }
+
+      .tick svg {
+        width: 11px;
+        height: 11px;
+      }
+
+      .mock-feed {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .mock-feed li {
+        position: relative;
+        display: grid;
+        grid-template-columns: 26px minmax(0, 1fr);
+        gap: 10px;
+        padding-bottom: 14px;
+        font-size: 0.9375rem;
+        line-height: 1.45;
+      }
+
+      .mock-feed li::before {
+        content: "";
+        position: absolute;
+        left: 12px;
+        top: 26px;
+        bottom: 0;
+        width: 1px;
+        background: var(--line);
+      }
+
+      .mock-feed li:last-child::before {
+        display: none;
+      }
+
+      .mock-feed .avatar {
+        width: 26px;
+        height: 26px;
+        font-size: 0.6875rem;
+      }
+
+      .mock-feed .avatar.is-you {
+        background: var(--mint);
+        border-color: var(--mint);
+        color: var(--mint-ink);
+      }
+
+      .mock-feed b {
+        font-weight: 600;
+      }
+
+      .mock-feed span {
+        color: var(--muted);
+      }
+
+      .mock-approve {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        margin-top: 6px;
+        padding: 14px 16px;
+        border: 1px solid var(--wait);
+        border-radius: 12px;
+        background: color-mix(in oklab, var(--wait) 9%, transparent);
+        font-size: 0.9375rem;
+      }
+
+      .mock-approve.is-done {
+        border-color: var(--accent);
+        background: var(--accent-soft);
+      }
+
+      .mock-approve .btn {
+        height: 38px;
+        padding: 0 16px;
+        border-radius: 9px;
+        font-size: 0.9375rem;
+        white-space: nowrap;
+      }
+
+      /* Cost */
+
+      .cost {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 64px;
+        align-items: center;
+      }
+
+      .cost-visual {
+        padding: 32px;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: var(--surface);
+      }
+
+      .cost-row + .cost-row {
+        margin-top: 28px;
+      }
+
+      .cost-label {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        font-size: 0.9375rem;
+      }
+
+      .cost-label span {
+        color: var(--muted);
+      }
+
+      .cost-bar {
+        display: flex;
+        gap: 4px;
+        height: 34px;
+        margin-top: 10px;
+      }
+
+      .cost-bar i {
+        flex: 1;
+        border-radius: 6px;
+        background: var(--line-strong);
+      }
+
+      .cost-bar.is-plan i {
+        flex: none;
+        width: 100%;
+        background: var(--mint);
+      }
+
+      .cost-bar.is-work i {
+        background: var(--accent-soft);
+        border: 1px solid color-mix(in oklab, var(--accent) 40%, transparent);
+      }
+
+      .cost-points {
+        margin: 24px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .cost-points li {
+        padding: 14px 0;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+      }
+
+      .cost-points strong {
+        color: var(--text);
+        font-weight: 600;
+      }
+
+      /* Tools */
+
+      .tools {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 24px;
+        margin-top: 48px;
+      }
+
+      .tool-group {
+        padding-top: 20px;
+        border-top: 1px solid var(--line);
+      }
+
+      .tool-group h3 {
+        font-size: 1rem;
+        font-weight: 600;
+      }
+
+      .tool-group p {
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 0.9375rem;
+      }
+
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 16px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .chips li {
+        padding: 7px 13px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--surface);
+        font-size: 0.9375rem;
+      }
+
+      /* What's new */
+
+      .compare {
+        width: 100%;
+        margin-top: 48px;
+        border-collapse: collapse;
+        font-size: 1rem;
+      }
+
+      .compare th,
+      .compare td {
+        padding: 16px 18px;
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+      }
+
+      .compare thead th {
+        color: var(--muted);
+        font-size: 0.9375rem;
+        font-weight: 500;
+      }
+
+      .compare thead th:last-child {
+        color: var(--text);
+        font-weight: 600;
+      }
+
+      .compare tbody th {
+        width: 34%;
+        font-weight: 500;
+      }
+
+      .compare td {
+        color: var(--muted);
+      }
+
+      .compare td:last-child {
+        background: var(--accent-soft);
+        color: var(--text);
+      }
+
+      .compare thead th:last-child {
+        background: var(--accent-soft);
+        border-radius: 12px 12px 0 0;
+      }
+
+      .yes,
+      .no {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .yes::before,
+      .no::before {
+        content: "";
+        flex: none;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+      }
+
+      .yes::before {
+        background: var(--accent);
+      }
+
+      .no::before {
+        border: 2px solid var(--line-strong);
+      }
+
+      /* FAQ */
+
+      .faq {
+        margin-top: 40px;
+        border-top: 1px solid var(--line);
+      }
+
+      .faq details {
+        border-bottom: 1px solid var(--line);
+      }
+
+      .faq summary {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+        padding: 22px 0;
+        font-size: 1.125rem;
+        font-weight: 500;
+        cursor: pointer;
+        list-style: none;
+      }
+
+      .faq summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .faq summary::after {
+        content: "";
+        flex: none;
+        width: 10px;
+        height: 10px;
+        margin-right: 4px;
+        border-right: 2px solid var(--muted);
+        border-bottom: 2px solid var(--muted);
+        transform: rotate(45deg) translateY(-3px);
+        transition: transform 0.2s;
+      }
+
+      .faq details[open] summary::after {
+        transform: rotate(-135deg) translateY(-3px);
+      }
+
+      .faq details p {
+        max-width: 44em;
+        padding: 0 0 24px;
+        color: var(--muted);
+      }
+
+      .faq-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+        gap: 64px;
+      }
+
+      .faq-layout .faq {
+        margin-top: 0;
+      }
+
+      /* Closing call to action */
+
+      .closing {
+        margin-top: 120px;
+        padding: 72px 48px;
+        border-radius: 24px;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        text-align: center;
+      }
+
+      .closing h2 {
+        font-size: clamp(2rem, 4vw, 3.25rem);
+        font-weight: 600;
+        line-height: 1.08;
+        letter-spacing: -0.03em;
+        text-wrap: balance;
+      }
+
+      .closing > p {
+        max-width: 34em;
+        margin: 16px auto 0;
+        color: var(--muted);
+        font-size: 1.125rem;
+      }
+
+      .closing .hero-actions {
+        margin-top: 28px;
+      }
+
+      .dev-line {
+        display: inline-flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: center;
+        gap: 10px 14px;
+        margin-top: 32px;
+        color: var(--dim);
+        font-size: 0.9375rem;
+      }
+
+      .cmd {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 5px 5px 5px 14px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--surface-2);
+      }
+
+      .cmd code {
+        color: var(--text);
+        font-family: var(--mono);
+        font-size: 0.875rem;
+        white-space: nowrap;
+      }
+
+      .cmd button {
+        margin-left: 8px;
+        height: 30px;
+        padding: 0 12px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: var(--surface);
+        color: var(--text);
+        font: 500 0.8125rem var(--sans);
+        cursor: pointer;
+      }
+
+      .cmd button:hover {
+        border-color: var(--line-strong);
+      }
+
+      /* Footer */
+
+      .site-footer {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px 24px;
+        margin-top: 64px;
+        padding: 28px 0 44px;
+        border-top: 1px solid var(--line);
+        color: var(--dim);
+        font-size: 0.875rem;
+      }
+
+      .site-footer .brand {
+        color: var(--text);
+        font-size: 0.9375rem;
+      }
+
+      .site-footer .brand img {
+        width: 24px;
+        height: 24px;
+      }
+
+      .footer-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 22px;
+      }
+
+      .footer-links a {
+        text-decoration: none;
+      }
+
+      .footer-links a:hover {
+        color: var(--text);
+      }
+
+      /* Responsive */
+
+      @media (max-width: 1080px) {
+        .site-nav {
+          display: none;
+        }
+
+        .step {
+          grid-template-columns: 44px minmax(0, 1fr);
+          gap: 6px 16px;
+        }
+
+        .step-text,
+        .step-you {
+          grid-column: 2;
+        }
+
+        .step-you {
+          margin-top: 6px;
+        }
+
+        .teams {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 0 32px;
+        }
+
+        .team.is-lead {
+          grid-column: 1 / -1;
+          grid-row: auto;
+          margin-bottom: 24px;
+        }
+
+        .cost,
+        .faq-layout {
+          grid-template-columns: minmax(0, 1fr);
+          gap: 40px;
+        }
+      }
+
+      @media (max-width: 760px) {
+        .hero {
+          padding-top: 44px;
+        }
+
+        .hero-lede {
+          font-size: 1.0625rem;
+        }
+
+        .board-figure {
+          margin-top: 40px;
+          margin-right: -24px;
+          margin-left: -24px;
+        }
+
+        .board-scroll {
+          border-radius: 0;
+          border-right: 0;
+          border-left: 0;
+        }
+
+        .board {
+          min-width: 980px;
+        }
+
+        .section {
+          padding-top: 88px;
+        }
+
+        .teams,
+        .tools {
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        .team.is-lead {
+          padding: 24px;
+        }
+
+        .window-body {
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        .mock-side {
+          display: none;
+        }
+
+        .mock-main {
+          padding: 20px 18px 22px;
+        }
+
+        .mock-progress {
+          grid-template-columns: repeat(7, minmax(0, 1fr));
+          gap: 3px;
+        }
+
+        .mock-progress li {
+          font-size: 0;
+        }
+
+        .mock-progress li.is-current {
+          font-size: 0.75rem;
+          white-space: nowrap;
+        }
+
+        .mock-grid {
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        .mock-approve {
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        .compare th,
+        .compare td {
+          padding: 12px 10px;
+          font-size: 0.9375rem;
+        }
+
+        .compare tbody th {
+          width: 38%;
+        }
+
+        .closing {
+          margin-top: 88px;
+          padding: 48px 20px;
+        }
+      }
+
+      @media (max-width: 420px) {
+        .wrap {
+          padding: 0 16px;
+        }
+
+        .board-figure {
+          margin-right: -16px;
+          margin-left: -16px;
+        }
+
+        .header-actions .btn span {
+          display: none;
+        }
+
+        .header-actions .btn {
+          width: 40px;
+          padding: 0;
+        }
+
+        .brand-version {
+          display: none;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+
+        .dot-run {
+          animation: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="/" aria-label="squad-kit v1 home">
+          <img src="/logo.svg" alt="" width="30" height="30" />
+          squad-kit
+          <span class="brand-version">v1</span>
+        </a>
+        <nav class="site-nav" aria-label="Sections">
+          <a href="#how">How it works</a>
+          <a href="#teams">For teams</a>
+          <a href="#app">The app</a>
+          <a href="#new">What's new</a>
+          <a href="#faq">FAQ</a>
+        </nav>
+        <div class="header-actions">
+          <button class="icon-btn theme-toggle" type="button" aria-label="Switch between light and dark theme">
+            <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></svg>
+            <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg>
+          </button>
+          <a class="btn btn-secondary" href="https://github.com/AzmSquad/Squad-Kit" rel="noopener" aria-label="squad-kit on GitHub">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.9 1.2 1.9 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-6 0-1.2.5-2.3 1.3-3.1-.2-.4-.6-1.6 0-3.2 0 0 1-.3 3.4 1.2a11.5 11.5 0 0 1 6 0C17 4.7 18 5 18 5c.6 1.6.2 2.8 0 3.2a4.5 4.5 0 0 1 1.3 3.1c0 4.7-2.8 5.7-5.5 6 .4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3" /></svg>
+            <span>GitHub</span>
+          </a>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="wrap">
+          <span class="tag">squad-kit v1 is coming soon</span>
+          <h1><span>You write the ticket.</span> <span>Your squad does the rest.</span></h1>
+          <p class="hero-lede">
+            squad-kit is a team of AI agents for your software projects. Write a ticket the way you always do. Your
+            squad writes the spec, builds it, tests it, reviews it, and gets it ready to release. You approve the steps
+            that matter.
+          </p>
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="#how">See how it works</a>
+            <a class="btn btn-secondary" href="https://github.com/AzmSquad/Squad-Kit" rel="noopener">Follow on GitHub</a>
+          </div>
+          <p class="hero-note">Works with Jira, Azure DevOps, and GitHub Issues</p>
+
+          <figure class="board-figure">
+            <figcaption class="sr-only">
+              An example board with seven columns: Tickets, Specs, Implement, Test, Review, Release, and Bugs. A ticket
+              called "Dark mode for the dashboard" moves from column to column as the squad works on it, and a bug
+              report moves from Bugs back to Tickets.
+            </figcaption>
+            <div class="board-scroll" aria-hidden="true">
+              <div class="board">
+                <section class="board-col">
+                  <div class="board-col-head">
+                    <span class="board-col-name">Tickets</span>
+                    <span class="board-role"><span class="avatar">An</span>Analyst</span>
+                  </div>
+                  <div class="board-cards">
+                    <article class="board-card" id="card-main">
+                      <div class="card-id">SK-148</div>
+                      <p class="card-title">Dark mode for the dashboard</p>
+                      <p class="card-status"><span class="dot dot-idle"></span><span class="card-status-text">New from Jira</span></p>
+                    </article>
+                    <article class="board-card">
+                      <div class="card-id">SK-151</div>
+                      <p class="card-title">Export invoices as PDF</p>
+                      <p class="card-status"><span class="dot dot-idle"></span>Waiting</p>
+                    </article>
+                  </div>
+                </section>
+                <section class="board-col">
+                  <div class="board-col-head">
+                    <span class="board-col-name">Specs</span>
+                    <span class="board-role"><span class="avatar">Sw</span>Spec writer</span>
+                  </div>
+                  <div class="board-cards">
+                    <article class="board-card">
+                      <div class="card-id">SK-147</div>
+                      <p class="card-title">Weekly summary email</p>
+                      <p class="card-status"><span class="dot dot-wait"></span>Waiting for your OK</p>
+                    </article>
+                  </div>
+                </section>
+                <section class="board-col">
+                  <div class="board-col-head">
+                    <span class="board-col-name">Implement</span>
+                    <span class="board-role"><span class="avatar">Bu</span>Builder</span>
+                  </div>
+                  <div class="board-cards">
+                    <article class="board-card">
+                      <div class="card-id">SK-143</div>
+                      <p class="card-title">Search across all projects</p>
+                      <p class="card-status"><span class="dot dot-run"></span>Building, step 4 of 7</p>
+                    </article>
+                  </div>
+                </section>
+                <section class="board-col">
+                  <div class="board-col-head">
+                    <span class="board-col-name">Test</span>
+                    <span class="board-role"><span class="avatar">Te</span>Tester</span>
+                  </div>
+                  <div class="board-cards">
+                    <article class="board-card">
+                      <div class="card-id">SK-140</div>
+                      <p class="card-title">Faster dashboard loading</p>
+                      <p class="card-status"><span class="dot dot-done"></span>18 of 18 checks passed</p>
+                    </article>
+                  </div>
+                </section>
+                <section class="board-col">
+                  <div class="board-col-head">
+                    <span class="board-col-name">Review</span>
+                    <span class="board-role"><span class="avatar">Re</span>Reviewer</span>
+                  </div>
+                  <div class="board-cards"></div>
+                </section>
+                <section class="board-col">
+                  <div class="board-col-head">
+                    <span class="board-col-name">Release</span>
+                    <span class="board-role"><span class="avatar">Rm</span>Release</span>
+                  </div>
+                  <div class="board-cards">
+                    <article class="board-card">
+                      <div class="card-id">SK-136</div>
+                      <p class="card-title">Onboarding checklist</p>
+                      <p class="card-status"><span class="dot dot-done"></span>Released in v2.3</p>
+                    </article>
+                  </div>
+                </section>
+                <section class="board-col is-bugs">
+                  <div class="board-col-head">
+                    <span class="board-col-name">Bugs</span>
+                    <span class="board-role"><span class="avatar">Tr</span>Triage</span>
+                  </div>
+                  <div class="board-cards">
+                    <article class="board-card is-bug" id="card-bug">
+                      <div class="card-id">SK-152</div>
+                      <p class="card-title">Sign-in button cut off on iPad</p>
+                      <p class="card-status"><span class="dot dot-bug"></span><span class="card-status-text">Reported after v2.3</span></p>
+                    </article>
+                  </div>
+                </section>
+              </div>
+            </div>
+            <p class="board-caption">An example board. Each column has a squad member who does the work.</p>
+          </figure>
+        </div>
+      </section>
+
+      <section class="section" id="how">
+        <div class="wrap">
+          <div class="section-head">
+            <h2>From ticket to release in seven steps</h2>
+            <p>
+              Every step has a squad member who does the work and hands it to the next one. You choose where you want to
+              approve before work moves on.
+            </p>
+          </div>
+
+          <ol class="steps">
+            <li class="step is-yours">
+              <span class="step-num">01</span>
+              <div>
+                <h3 class="step-name">Tickets</h3>
+                <p class="step-role"><span class="avatar">An</span>Analyst</p>
+              </div>
+              <p class="step-text">
+                Picks up the ticket from your tracker, or you write it right in squad-kit. If something is unclear, it asks
+                you before anyone starts.
+              </p>
+              <p class="step-you"><strong>You</strong>Write the ticket and answer questions.</p>
+            </li>
+            <li class="step is-yours">
+              <span class="step-num">02</span>
+              <div>
+                <h3 class="step-name">Specs</h3>
+                <p class="step-role"><span class="avatar">Sw</span>Spec writer</p>
+              </div>
+              <p class="step-text">
+                Turns the ticket into a clear spec in plain language: what changes, why, and how everyone will know it's
+                done.
+              </p>
+              <p class="step-you"><strong>You</strong>Read the spec, then approve it or comment.</p>
+            </li>
+            <li class="step">
+              <span class="step-num">03</span>
+              <div>
+                <h3 class="step-name">Implement</h3>
+                <p class="step-role"><span class="avatar">Bu</span>Builder</p>
+              </div>
+              <p class="step-text">
+                Builds it step by step, exactly as the spec says. Routine work runs on cheaper AI models, so costs stay
+                low.
+              </p>
+              <p class="step-you"><strong>Your developers</strong>Can follow along or take over any step.</p>
+            </li>
+            <li class="step">
+              <span class="step-num">04</span>
+              <div>
+                <h3 class="step-name">Test</h3>
+                <p class="step-role"><span class="avatar">Te</span>Tester</p>
+              </div>
+              <p class="step-text">
+                Checks the work against every item on the spec's done list and shows you what passed and what didn't.
+              </p>
+              <p class="step-you"><strong>Nothing to do</strong>Failed checks go back to the Builder.</p>
+            </li>
+            <li class="step">
+              <span class="step-num">05</span>
+              <div>
+                <h3 class="step-name">Review</h3>
+                <p class="step-role"><span class="avatar">Re</span>Reviewer</p>
+              </div>
+              <p class="step-text">
+                Reviews the changes against what the spec asked for, and flags anything that drifted from the plan.
+              </p>
+              <p class="step-you"><strong>Your developers</strong>Give the final approval on the changes.</p>
+            </li>
+            <li class="step is-yours">
+              <span class="step-num">06</span>
+              <div>
+                <h3 class="step-name">Release</h3>
+                <p class="step-role"><span class="avatar">Rm</span>Release manager</p>
+              </div>
+              <p class="step-text">
+                Writes the release notes, sets the version number, and lines up everything that's ready to go out.
+              </p>
+              <p class="step-you"><strong>You</strong>Press release when you're happy.</p>
+            </li>
+            <li class="step is-bugs">
+              <span class="step-num">07</span>
+              <div>
+                <h3 class="step-name">Bugs</h3>
+                <p class="step-role"><span class="avatar">Tr</span>Triage</p>
+              </div>
+              <p class="step-text">
+                Turns bug reports into new tickets, linked to the release they came from, and the loop starts again.
+              </p>
+              <p class="step-you"><strong>You</strong>Decide which bugs to fix first.</p>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="section" id="teams">
+        <div class="wrap">
+          <div class="section-head">
+            <h2>Built for the whole team, not just developers</h2>
+            <p>
+              Earlier versions of squad-kit were made for developers in the terminal. v1 opens the door to everyone who
+              plans, tracks, and ships software.
+            </p>
+          </div>
+
+          <div class="teams">
+            <article class="team is-lead">
+              <h3>Project managers</h3>
+              <p>Run the whole cycle from one board. No terminal, no code.</p>
+              <ul class="team-points">
+                <li>Write tickets, or pull them from Jira</li>
+                <li>Approve specs in plain language</li>
+                <li>See where every ticket is, and why</li>
+                <li>Press release when it's ready</li>
+              </ul>
+            </article>
+            <article class="team">
+              <h3>Product owners</h3>
+              <p>Know exactly what will be built before work starts. Every spec is written so you can check it.</p>
+            </article>
+            <article class="team">
+              <h3>Developers</h3>
+              <p>Hand off the routine work. Review changes, step in where it matters, and keep using your own tools.</p>
+            </article>
+            <article class="team">
+              <h3>QA</h3>
+              <p>Every change is tested against its spec, with a clear list of what passed and what didn't.</p>
+            </article>
+            <article class="team">
+              <h3>Team leads</h3>
+              <p>See where work is waiting, what it costs, and what's ready to release, at a glance.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="app">
+        <div class="wrap">
+          <div class="section-head">
+            <h2>One place to follow every ticket</h2>
+            <p>Open any ticket to see its spec, everything the squad did, and what's waiting for you.</p>
+          </div>
+
+          <div class="window" role="img" aria-label="The squad-kit app showing ticket SK-148, Dark mode for the dashboard, with its spec, the squad's activity, and a release waiting for approval.">
+            <div class="window-bar" aria-hidden="true">
+              <div class="window-dots"><span></span><span></span><span></span></div>
+              <div class="window-url">app.squad-kit.com/tickets/SK-148</div>
+            </div>
+            <div class="window-body" aria-hidden="true">
+              <aside class="mock-side">
+                <div class="mock-side-brand"><img src="/logo.svg" alt="" width="22" height="22" />Acme web app</div>
+                <ul class="mock-nav">
+                  <li>Board <span class="mock-count">12</span></li>
+                  <li class="is-current">Waiting for you <span class="mock-count">2</span></li>
+                  <li>Tickets <span class="mock-count">38</span></li>
+                  <li>Releases <span class="mock-count">9</span></li>
+                  <li>Squad</li>
+                  <li>Settings</li>
+                </ul>
+              </aside>
+              <div class="mock-main">
+                <div class="card-id">SK-148, from Jira</div>
+                <p class="mock-title">Dark mode for the dashboard</p>
+                <p class="mock-sub">Requested by the design team. Planned for v2.4.</p>
+
+                <ol class="mock-progress">
+                  <li class="is-done">Tickets</li>
+                  <li class="is-done">Specs</li>
+                  <li class="is-done">Implement</li>
+                  <li class="is-done">Test</li>
+                  <li class="is-done">Review</li>
+                  <li class="is-current">Release</li>
+                  <li>Bugs</li>
+                </ol>
+
+                <div class="mock-grid">
+                  <section class="mock-panel">
+                    <h4>Spec, approved by you</h4>
+                    <ul class="mock-checks">
+                      <li><span class="tick"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.2 5 8.5l4.5-5" /></svg></span>Add a light and dark switch to Settings</li>
+                      <li><span class="tick"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.2 5 8.5l4.5-5" /></svg></span>Remember each person's choice</li>
+                      <li><span class="tick"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.2 5 8.5l4.5-5" /></svg></span>Charts follow the chosen theme</li>
+                      <li><span class="tick"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.2 5 8.5l4.5-5" /></svg></span>Text stays readable in both themes</li>
+                      <li><span class="tick"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.2 5 8.5l4.5-5" /></svg></span>Follows the device setting by default</li>
+                    </ul>
+                  </section>
+                  <section class="mock-panel">
+                    <h4>Activity</h4>
+                    <ol class="mock-feed">
+                      <li><span class="avatar">An</span><p><b>Analyst</b> <span>picked this up from Jira and asked if charts should change too.</span></p></li>
+                      <li><span class="avatar is-you">You</span><p><b>You</b> <span>said yes, charts should follow the theme.</span></p></li>
+                      <li><span class="avatar">Sw</span><p><b>Spec writer</b> <span>wrote a spec with 5 checks. You approved it.</span></p></li>
+                      <li><span class="avatar">Bu</span><p><b>Builder</b> <span>finished all 6 build steps.</span></p></li>
+                      <li><span class="avatar">Te</span><p><b>Tester</b> <span>ran 21 checks. All passed.</span></p></li>
+                      <li><span class="avatar">Re</span><p><b>Reviewer</b> <span>approved the changes. Omar from the dev team agreed.</span></p></li>
+                    </ol>
+                    <div class="mock-approve" id="mock-approve">
+                      <span class="mock-approve-text">Release notes for v2.4 are ready.</span>
+                      <button class="btn btn-primary" type="button" id="mock-release" tabindex="-1">Release v2.4</button>
+                    </div>
+                  </section>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="cost">
+        <div class="wrap cost">
+          <div class="section-head">
+            <h2>Smart where it counts, cheap everywhere else</h2>
+            <p>
+              squad-kit uses your strongest AI model once per ticket, to plan the work carefully. Everything after that
+              follows the plan on cheaper models. You get careful planning without paying top price for every step.
+            </p>
+            <ul class="cost-points">
+              <li><strong>Use the plan you already pay for.</strong> Run on your Claude subscription, or bring your own API keys.</li>
+              <li><strong>No surprise bills.</strong> Set a budget per ticket and see what every step cost.</li>
+            </ul>
+          </div>
+          <div class="cost-visual" aria-hidden="true">
+            <div class="cost-row">
+              <p class="cost-label">Planning the ticket <span>Best model, once</span></p>
+              <div class="cost-bar is-plan"><i></i></div>
+            </div>
+            <div class="cost-row">
+              <p class="cost-label">Building, testing, reviewing <span>Cheaper models, many times</span></p>
+              <div class="cost-bar is-work"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="tools">
+        <div class="wrap">
+          <div class="section-head">
+            <h2>Works with the tools you already use</h2>
+            <p>Keep your tracker and your team's tools. squad-kit connects to them instead of replacing them.</p>
+          </div>
+          <div class="tools">
+            <div class="tool-group">
+              <h3>Trackers</h3>
+              <p>Tickets come in, and status goes back out.</p>
+              <ul class="chips">
+                <li>Jira</li>
+                <li>Azure DevOps</li>
+                <li>GitHub Issues</li>
+              </ul>
+            </div>
+            <div class="tool-group">
+              <h3>AI models</h3>
+              <p>Pick the provider your company already uses.</p>
+              <ul class="chips">
+                <li>Claude</li>
+                <li>OpenAI</li>
+                <li>Google Gemini</li>
+              </ul>
+            </div>
+            <div class="tool-group">
+              <h3>Coding tools</h3>
+              <p>Developers keep the editor they like.</p>
+              <ul class="chips">
+                <li>Claude Code</li>
+                <li>Cursor</li>
+                <li>GitHub Copilot</li>
+                <li>Gemini CLI</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="new">
+        <div class="wrap">
+          <div class="section-head">
+            <h2>What's new in v1</h2>
+            <p>squad-kit 0.12 turns tickets into plans for developers. v1 carries the work all the way to a release.</p>
+          </div>
+          <table class="compare">
+            <thead>
+              <tr>
+                <th scope="col"><span class="sr-only">Feature</span></th>
+                <th scope="col">squad-kit 0.12</th>
+                <th scope="col">squad-kit v1</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">Who it's for</th>
+                <td>Developers</td>
+                <td>The whole team</td>
+              </tr>
+              <tr>
+                <th scope="row">Tickets from Jira, Azure DevOps, GitHub</th>
+                <td><span class="yes">Pulls them in</span></td>
+                <td><span class="yes">Pulls them in and updates their status</span></td>
+              </tr>
+              <tr>
+                <th scope="row">Plain-language specs</th>
+                <td><span class="yes">Yes, as plan files</span></td>
+                <td><span class="yes">Yes, with approvals</span></td>
+              </tr>
+              <tr>
+                <th scope="row">Building from the spec</th>
+                <td><span class="yes">In your own coding tool</span></td>
+                <td><span class="yes">By the Builder, or in your own tool</span></td>
+              </tr>
+              <tr>
+                <th scope="row">Testing against the done list</th>
+                <td><span class="no">Not included</span></td>
+                <td><span class="yes">By the Tester</span></td>
+              </tr>
+              <tr>
+                <th scope="row">Review against the spec</th>
+                <td><span class="no">Not included</span></td>
+                <td><span class="yes">By the Reviewer</span></td>
+              </tr>
+              <tr>
+                <th scope="row">Release notes and versions</th>
+                <td><span class="no">Not included</span></td>
+                <td><span class="yes">By the Release manager</span></td>
+              </tr>
+              <tr>
+                <th scope="row">Bugs back into tickets</th>
+                <td><span class="no">Not included</span></td>
+                <td><span class="yes">By Triage</span></td>
+              </tr>
+              <tr>
+                <th scope="row">Web app</th>
+                <td>Console for setup and plans</td>
+                <td>A shared board for the whole team</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section" id="faq">
+        <div class="wrap faq-layout">
+          <div class="section-head">
+            <h2>Questions</h2>
+            <p>
+              Something we didn't cover? Ask on
+              <a href="https://github.com/AzmSquad/Squad-Kit/issues" rel="noopener">GitHub</a>.
+            </p>
+          </div>
+          <div class="faq">
+            <details open>
+              <summary>Do I need to know how to code?</summary>
+              <p>
+                No. You write tickets, approve specs, and press release in the app. Developers who prefer the terminal can
+                still use squad-kit from there.
+              </p>
+            </details>
+            <details>
+              <summary>Does it replace my developers?</summary>
+              <p>
+                No. The squad takes the routine work. Your developers review the changes, handle the tricky parts, and
+                decide what's good enough to ship.
+              </p>
+            </details>
+            <details>
+              <summary>Which trackers does it work with?</summary>
+              <p>Jira Cloud, Azure DevOps Services, and GitHub Issues. You can also write tickets directly in squad-kit.</p>
+            </details>
+            <details>
+              <summary>What does it cost?</summary>
+              <p>
+                squad-kit is free and open source under the MIT license. You only pay for the AI you use, through your
+                Claude subscription or your own API keys.
+              </p>
+            </details>
+            <details>
+              <summary>Where does my code go?</summary>
+              <p>
+                squad-kit runs on your own machine or server and talks only to the AI provider you choose. Your code is
+                never sent to us.
+              </p>
+            </details>
+            <details>
+              <summary>When can I try v1?</summary>
+              <p>
+                We're building it now. Follow the project on GitHub to hear as soon as it's out. squad-kit 0.12 is
+                available today for developers.
+              </p>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <div class="wrap">
+        <section class="closing" aria-labelledby="closing-heading">
+          <h2 id="closing-heading">Your squad is almost ready</h2>
+          <p>Follow along on GitHub to hear the moment v1 is out. Developers can start with squad-kit 0.12 today.</p>
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="https://github.com/AzmSquad/Squad-Kit" rel="noopener">Follow on GitHub</a>
+            <a class="btn btn-secondary" href="https://squad-kit.com">See squad-kit 0.12</a>
+          </div>
+          <p class="dev-line">
+            For developers
+            <span class="cmd">
+              <code>npm install -g squad-kit</code>
+              <button type="button" data-copy="npm install -g squad-kit">Copy</button>
+            </span>
+          </p>
+        </section>
+      </div>
+    </main>
+
+    <div class="wrap">
+      <footer class="site-footer">
+        <a class="brand" href="/"><img src="/logo.svg" alt="" width="24" height="24" />squad-kit</a>
+        <span>Free and open source under the MIT license.</span>
+        <nav class="footer-links" aria-label="Project links">
+          <a href="https://squad-kit.com">squad-kit.com</a>
+          <a href="https://squad-kit.com/docs/getting-started">Docs for 0.12</a>
+          <a href="https://github.com/AzmSquad/Squad-Kit" rel="noopener">GitHub</a>
+          <a href="https://www.npmjs.com/package/squad-kit" rel="noopener">npm</a>
+        </nav>
+      </footer>
+    </div>
+
+    <script>
+      (function () {
+        var root = document.documentElement;
+        var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+        // Theme toggle: flips between light and dark and remembers the choice.
+        var toggle = document.querySelector(".theme-toggle");
+        toggle.addEventListener("click", function () {
+          var current = root.dataset.theme;
+          if (!current) current = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+          var next = current === "dark" ? "light" : "dark";
+          root.dataset.theme = next;
+          try {
+            localStorage.setItem("sk-theme", next);
+          } catch (e) {}
+        });
+
+        // Header border once the page scrolls.
+        var header = document.querySelector(".site-header");
+        var onScroll = function () {
+          header.classList.toggle("is-scrolled", window.scrollY > 8);
+        };
+        window.addEventListener("scroll", onScroll, { passive: true });
+        onScroll();
+
+        // Copy buttons.
+        document.querySelectorAll("[data-copy]").forEach(function (button) {
+          button.addEventListener("click", function () {
+            if (!navigator.clipboard) return;
+            navigator.clipboard.writeText(button.dataset.copy).then(function () {
+              button.textContent = "Copied";
+              setTimeout(function () {
+                button.textContent = "Copy";
+              }, 1600);
+            });
+          });
+        });
+
+        // App mockup: the release button flips to its released state.
+        var release = document.getElementById("mock-release");
+        var approve = document.getElementById("mock-approve");
+        release.addEventListener("click", function () {
+          approve.classList.add("is-done");
+          approve.querySelector(".mock-approve-text").textContent = "v2.4 is released. Jira tickets are updated.";
+          release.textContent = "Released";
+          release.disabled = true;
+        });
+
+        // Live board: the main card walks through the stages, then the bug goes back to Tickets.
+        var scroller = document.querySelector(".board-scroll");
+        var cols = Array.prototype.slice.call(document.querySelectorAll(".board-col"));
+        var main = document.getElementById("card-main");
+        var bug = document.getElementById("card-bug");
+        if (!scroller || !main || !bug) return;
+
+        var steps = [
+          { card: main, col: 0, dot: "run", text: "Analyst is reading it" },
+          { card: main, col: 1, dot: "run", text: "Writing the spec" },
+          { card: main, col: 1, dot: "done", text: "Spec approved by you" },
+          { card: main, col: 2, dot: "run", text: "Building, step 2 of 6" },
+          { card: main, col: 2, dot: "run", text: "Building, step 6 of 6" },
+          { card: main, col: 3, dot: "run", text: "Running 21 checks" },
+          { card: main, col: 3, dot: "done", text: "21 of 21 checks passed" },
+          { card: main, col: 4, dot: "done", text: "Changes approved" },
+          { card: main, col: 5, dot: "wait", text: "Waiting for you to release" },
+          { card: main, col: 5, dot: "done", text: "Released in v2.4" },
+          { card: bug, col: 0, dot: "run", text: "New ticket, linked to v2.3" }
+        ];
+
+        function setStatus(card, dot, text) {
+          card.querySelector(".dot").className = "dot dot-" + dot;
+          card.querySelector(".card-status-text").textContent = text;
+        }
+
+        function setActive(index) {
+          cols.forEach(function (col, i) {
+            col.classList.toggle("is-active", i === index);
+          });
+        }
+
+        // Moves a card to another column, animating every card that shifts (FLIP).
+        function moveCard(card, colIndex) {
+          var list = cols[colIndex].querySelector(".board-cards");
+          if (card.parentNode === list) return;
+          var cards = Array.prototype.slice.call(document.querySelectorAll(".board-card"));
+          var before = cards.map(function (c) {
+            return c.getBoundingClientRect();
+          });
+          list.insertBefore(card, list.firstChild);
+          cards.forEach(function (c, i) {
+            var after = c.getBoundingClientRect();
+            var dx = before[i].left - after.left;
+            var dy = before[i].top - after.top;
+            if (!dx && !dy) return;
+            if (c.animate) {
+              c.animate([{ transform: "translate(" + dx + "px," + dy + "px)" }, { transform: "none" }], {
+                duration: c === card ? 700 : 400,
+                easing: "cubic-bezier(.2,.8,.2,1)"
+              });
+            }
+          });
+        }
+
+        // On narrow screens the board scrolls sideways; keep the active column in view.
+        var userScrolledAt = 0;
+        scroller.addEventListener("pointerdown", function () {
+          userScrolledAt = Date.now();
+        });
+        scroller.addEventListener("wheel", function () {
+          userScrolledAt = Date.now();
+        }, { passive: true });
+        function follow(colIndex) {
+          if (scroller.scrollWidth <= scroller.clientWidth) return;
+          if (Date.now() - userScrolledAt < 5000) return;
+          var col = cols[colIndex];
+          var target = col.offsetLeft - (scroller.clientWidth - col.offsetWidth) / 2;
+          scroller.scrollTo({ left: Math.max(0, target), behavior: "smooth" });
+        }
+
+        if (reduceMotion) {
+          moveCard(main, 4);
+          setStatus(main, "done", "Changes approved");
+          setActive(4);
+          return;
+        }
+
+        var index = 0;
+        var timer = null;
+        var visible = true;
+
+        function reset() {
+          main.classList.add("is-hidden");
+          bug.classList.add("is-hidden");
+          setTimeout(function () {
+            var ticketList = cols[0].querySelector(".board-cards");
+            var bugList = cols[6].querySelector(".board-cards");
+            ticketList.insertBefore(main, ticketList.firstChild);
+            bugList.insertBefore(bug, bugList.firstChild);
+            setStatus(main, "idle", "New from Jira");
+            setStatus(bug, "bug", "Reported after v2.3");
+            bug.classList.remove("is-moving");
+            main.classList.remove("is-hidden");
+            bug.classList.remove("is-hidden");
+            index = 0;
+            schedule(1400);
+          }, 450);
+        }
+
+        function tick() {
+          timer = null;
+          if (!visible) return;
+          if (index >= steps.length) {
+            setActive(-1);
+            reset();
+            return;
+          }
+          var step = steps[index];
+          main.classList.toggle("is-moving", step.card === main && index < steps.length - 2);
+          bug.classList.toggle("is-moving", step.card === bug);
+          moveCard(step.card, step.col);
+          setStatus(step.card, step.dot, step.text);
+          setActive(step.col);
+          follow(step.col);
+          index += 1;
+          schedule(index >= steps.length ? 3200 : 1700);
+        }
+
+        function schedule(delay) {
+          if (timer) clearTimeout(timer);
+          timer = setTimeout(tick, delay);
+        }
+
+        // Pause when the board is off screen.
+        if ("IntersectionObserver" in window) {
+          new IntersectionObserver(function (entries) {
+            visible = entries[0].isIntersecting;
+            if (visible && !timer) schedule(600);
+          }).observe(scroller);
+        } else {
+          schedule(1200);
+        }
+      })();
+    </script>
+  </body>
+</html>
