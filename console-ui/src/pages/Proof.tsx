@@ -21,7 +21,7 @@ export function ProofPage() {
       <div className="top">
         <span className="crumbs">
           <Link to="/inbox">Waiting for you</Link> /
-          <Link to="/board" search={{ t: t.id }}>
+          <Link to="/board" search={{ ticket: t.id }}>
             {t.id} {t.title}
           </Link>{' '}
           / <b>Proof</b>

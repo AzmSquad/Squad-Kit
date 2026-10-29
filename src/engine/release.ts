@@ -1,0 +1,148 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { readMeta, type BoardPaths } from '../board/store.js';
+import type { Release, Ticket } from '../board/types.js';
+import { runCommand, tail } from './checks.js';
+import { commitArgsFor, currentBranch, git, remotes, removeWorktree, worktreeRoot } from './git.js';
+import { projectRoot } from './live.js';
+import { repoFor } from './repos.js';
+import type { RepoInfo } from '../board/types.js';
+
+/**
+ * A real release: merge every ready ticket branch, write the changelog, set the version, tag it,
+ * and push. All of it happens in a separate worktree, so the person's own checkout is never touched
+ * unless it can simply fast-forward.
+ */
+
+export type ReleaseLog = { ok: boolean; text: string }[];
+
+export function commitTicket(ticket: Ticket): string | null {
+  if (!ticket.worktree || !fs.existsSync(ticket.worktree)) return null;
+  git(ticket.worktree, ['add', '-A']);
+  if (!git(ticket.worktree, ['status', '--porcelain'], { allowFail: true })) return null;
+  git(ticket.worktree, [...commitArgsFor(ticket.worktree), 'commit', '-m', `${ticket.title} (${ticket.id})`]);
+  return git(ticket.worktree, ['rev-parse', '--short', 'HEAD']);
+}
+
+export async function liveRelease(bp: BoardPaths, release: Release, tickets: Ticket[]): Promise<ReleaseLog> {
+  const root = projectRoot(bp);
+  const meta = readMeta(bp);
+  const groups = new Map<string, { repo: RepoInfo; tickets: Ticket[] }>();
+  for (const t of tickets) {
+    const repo = repoFor(meta, t);
+    const g = groups.get(repo.path) ?? { repo, tickets: [] };
+    g.tickets.push(t);
+    groups.set(repo.path, g);
+  }
+  const log: ReleaseLog = [];
+  const multi = groups.size > 1 || Boolean(meta.repos?.length);
+  for (const { repo, tickets: list } of groups.values()) {
+    const repoRoot = path.join(root, repo.path);
+    const repoLog = await releaseRepo(repoRoot, repo, release, list, meta.commands?.deploy);
+    log.push(...repoLog.map((l) => (multi ? { ...l, text: `${repo.path}: ${l.text}` } : l)));
+  }
+  return log;
+}
+
+async function releaseRepo(root: string, repo: RepoInfo, release: Release, tickets: Ticket[], deployFallback?: string): Promise<ReleaseLog> {
+  const base = repo.base || currentBranch(root);
+  const remote = repo.remote || remotes(root)[0];
+  const version = release.version;
+  const branch = `release/${version}`;
+  const dir = path.join(worktreeRoot(root), `release-${version}`);
+  const log: ReleaseLog = [];
+
+  removeWorktree(root, dir);
+  git(root, ['worktree', 'prune'], { allowFail: true });
+  git(root, ['branch', '-D', branch], { allowFail: true });
+  fs.mkdirSync(path.dirname(dir), { recursive: true });
+  git(root, ['worktree', 'add', '-b', branch, dir, base]);
+
+  try {
+    for (const t of tickets) {
+      if (!t.branch) continue;
+      try {
+        git(dir, [...commitArgsFor(dir), 'merge', '--no-ff', '-m', `Merge ${t.title} (${t.id})`, t.branch]);
+        log.push({ ok: true, text: `Merged ${t.id} ${t.title}` });
+      } catch (err) {
+        git(dir, ['merge', '--abort'], { allowFail: true });
+        throw new Error(`${t.id} clashes with other changes in ${base}, so the release stopped. ${(err as Error).message}`);
+      }
+    }
+
+    if (release.addons.changelog) {
+      writeChangelog(dir, version, release.notes);
+      log.push({ ok: true, text: 'Changelog updated' });
+    }
+    const pkg = path.join(dir, 'package.json');
+    if (fs.existsSync(pkg)) {
+      const json = JSON.parse(fs.readFileSync(pkg, 'utf8')) as { version?: string };
+      if (json.version) {
+        json.version = version.replace(/^v/, '');
+        fs.writeFileSync(pkg, `${JSON.stringify(json, null, 2)}\n`, 'utf8');
+        log.push({ ok: true, text: `Version set to ${json.version} in package.json` });
+      }
+    }
+    git(dir, ['add', '-A']);
+    if (git(dir, ['status', '--porcelain'], { allowFail: true })) git(dir, [...commitArgsFor(dir), 'commit', '-m', `release ${version}`]);
+
+    if (release.addons.tag) {
+      git(dir, ['tag', '-f', '-a', version, '-m', `Release ${version}`]);
+      log.push({ ok: true, text: `Tagged ${version}` });
+    }
+
+    const head = git(dir, ['rev-parse', 'HEAD']);
+    if (remote) {
+      try {
+        git(dir, ['push', remote, `HEAD:refs/heads/${base}`]);
+        if (release.addons.tag) git(dir, ['push', '-f', remote, `refs/tags/${version}`]);
+        log.push({ ok: true, text: `Pushed ${base}${release.addons.tag ? ` and ${version}` : ''} to ${remote}` });
+      } catch (err) {
+        log.push({ ok: false, text: `Push to ${remote} failed: ${(err as Error).message}` });
+      }
+    } else {
+      log.push({ ok: false, text: 'No git remote is set, so nothing was pushed. Add one with: git remote add origin <url>' });
+    }
+
+    // Move the local base branch too, without disturbing work in progress.
+    if (currentBranch(root) === base) {
+      const dirty = git(root, ['status', '--porcelain', '--untracked-files=no'], { allowFail: true });
+      if (dirty) log.push({ ok: false, text: `Your ${base} checkout has changes, so it was not updated. Run: git merge ${branch}` });
+      else {
+        git(root, ['merge', '--ff-only', head], { allowFail: true });
+        log.push({ ok: true, text: `Your ${base} checkout now has the release` });
+      }
+    } else {
+      git(root, ['update-ref', `refs/heads/${base}`, head], { allowFail: true });
+    }
+
+    if (release.addons.pipeline) {
+      const deploy = repo.commands.deploy?.trim() || deployFallback?.trim();
+      if (deploy) {
+        const r = await runCommand(dir, deploy, 20 * 60_000);
+        log.push({ ok: r.ok, text: r.ok ? `Ran the pipeline: ${deploy}` : `Pipeline failed: ${tail(r.output, 3)}` });
+      } else {
+        log.push({ ok: false, text: 'No pipeline command is set up in Settings, so no pipeline ran' });
+      }
+    }
+  } finally {
+    removeWorktree(root, dir);
+  }
+
+  for (const t of tickets) if (t.worktree) removeWorktree(root, t.worktree);
+  return log;
+}
+
+function writeChangelog(dir: string, version: string, notes: string): void {
+  const file = path.join(dir, 'CHANGELOG.md');
+  const date = new Date().toISOString().slice(0, 10);
+  const body = notes
+    .split('\n')
+    .filter((l) => !l.startsWith('### '))
+    .join('\n')
+    .trim();
+  const section = `## ${version.replace(/^v/, '')} (${date})\n\n${body}\n`;
+  const current = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '# Changelog\n';
+  const [head, ...rest] = current.split(/\n(?=## )/);
+  fs.writeFileSync(file, [head!.trimEnd(), '', section, ...rest].join('\n').replace(/\n{3,}/g, '\n\n'), 'utf8');
+}

@@ -65,7 +65,7 @@ describe('board flow', () => {
     actions.approve(bp, 'SK-148');
     expect(draftRelease(bp)?.tickets).toContain('SK-148');
 
-    const release = actions.releaseVersion(bp);
+    const release = await actions.releaseVersion(bp);
     expect(release.version).toBe('v2.4.0');
     expect(readTicket(bp, 'SK-148')!.stage).toBe('done');
   });

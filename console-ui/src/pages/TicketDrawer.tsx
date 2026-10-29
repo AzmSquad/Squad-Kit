@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { ArrowUp, Check, Code, Copy, Download, ExternalLink, MessageCircle, Send, X } from 'lucide-react';
+import { ArrowUp, Check, Code, Copy, Download, ExternalLink, MessageCircle, Send, Square, X } from 'lucide-react';
 import { assetUrl } from '../api/client';
 import type { Question, Ticket } from '../api/types';
 import { useAct, useTicket } from '../lib/data';
@@ -53,6 +53,11 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
                 <span>
                   Created by <b>{t.createdBy}</b> {ago(t.createdAt)}
                 </span>
+                {t.repo && (
+                  <span>
+                    Repo <b className="mono" style={{ fontSize: 12.5 }}>{t.repo}</b>
+                  </span>
+                )}
                 {t.builder && (
                   <span>
                     Builder <b>{t.builder}</b>
@@ -488,10 +493,10 @@ function StuckPanel({ t }: { t: Ticket }) {
           <span className="ring">!</span>
           <div>
             <b>The squad stopped and needs your decision</b>
-            <span>It tried 3 times and the checks still fail. It won't guess on something this important.</span>
+            <span>Read what happened, then pick what should happen next. It won't guess on something this important.</span>
           </div>
         </div>
-        <div className="lbl">The question</div>
+        <div className="lbl">What happened</div>
         <p className="stuckq">{t.stuck?.question}</p>
         <div className="opts2">
           {t.stuck?.options.map((o, i) => (
@@ -524,12 +529,13 @@ function StuckPanel({ t }: { t: Ticket }) {
 /* ── Working, ready, released ──────────────────────────── */
 
 function WorkingPanel({ t }: { t: Ticket }) {
+  const stop = useAct();
   const calm =
     t.stage === 'release'
       ? { title: `Ready for ${t.release}`, text: 'It goes out with the next release. Nothing needed from you until then.' }
       : t.stage === 'done'
         ? { title: t.status, text: 'This ticket is live. Found a problem? Report a bug and it comes back around.' }
-        : { title: 'Nothing needed from you', text: `${t.status}. You'll get a card when the squad needs you.` };
+        : { title: 'Nothing needed from you', text: `${nowLine(t)} You'll get a card when the squad needs you.` };
   return (
     <>
       <div className="db">
@@ -561,12 +567,29 @@ function WorkingPanel({ t }: { t: Ticket }) {
         <RecentActivity t={t} />
       </div>
       <div className="df">
+        {t.live && t.stage !== 'release' && t.stage !== 'done' && (
+          <button className="btn sm" disabled={t.stopRequested || stop.isPending} onClick={() => stop.mutate({ path: `/api/v1/tickets/${t.id}/stop`, done: 'Stopping the squad' })}>
+            <Square size={12} /> {t.stopRequested ? 'Stopping…' : 'Stop'}
+          </button>
+        )}
         <span className="note">{t.live ? 'Updates live as the squad works.' : ''}</span>
         <span className="grow" />
-        <Cmd text={commandFor(t)} />
+        <Cmd text={t.live && t.stage !== 'release' ? `squad stop ${t.id}` : commandFor(t)} />
       </div>
     </>
   );
+}
+
+/** A calm sentence for what the squad is doing; raw tool lines stay in the steps list. */
+function nowLine(t: Ticket): string {
+  const steps = t.steps ?? [];
+  const i = steps.findIndex((s) => s.status === 'doing');
+  if (t.stage === 'implement' && i >= 0) return `The Builder is on step ${i + 1} of ${steps.length}.`;
+  if (t.stage === 'test') return 'squad-kit is running the project checks.';
+  if (t.stage === 'review') return 'The Reviewer is checking the work.';
+  if (t.stage === 'tickets') return 'The Analyst is reading the ticket.';
+  if (t.stage === 'specs') return 'The Architect is writing the plan.';
+  return `${t.status}.`;
 }
 
 function Steps({ t }: { t: Ticket }) {
@@ -675,7 +698,16 @@ function DeveloperTab({ t }: { t: Ticket }) {
   return (
     <div className="db">
       <div className="lbl">Branch</div>
-      <p className="mono" style={{ fontSize: 13 }}>squad/{t.id.toLowerCase()}</p>
+      <p className="mono" style={{ fontSize: 13 }}>
+        {t.repo ? `${t.repo}: ` : ''}
+        {t.branch ?? `squad/${t.id.toLowerCase()}`}
+      </p>
+      {t.worktree && (
+        <>
+          <div className="lbl">Working copy</div>
+          <p className="mono" style={{ fontSize: 12.5, overflowWrap: 'anywhere' }}>{t.worktree}</p>
+        </>
+      )}
       <div className="lbl">Files the squad touched</div>
       {files.length ? (
         <div className="feed">

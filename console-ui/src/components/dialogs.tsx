@@ -186,11 +186,17 @@ export function ReleasedDialog({ release, demo, onClose }: { release: Release; d
     >
       <div className="donelist">
         <div><Check size={16} /> {release.tickets.length} tickets released</div>
-        {steps.map((s) => (
-          <div key={s}><Check size={16} /> {s}</div>
-        ))}
+        {release.log
+          ? release.log.map((l) => (
+              <div key={l.text} style={l.ok ? undefined : { color: 'var(--you-ink)' }}>
+                {l.ok ? <Check size={16} /> : <span style={{ width: 16, textAlign: 'center', fontWeight: 800 }}>!</span>} {l.text}
+              </div>
+            ))
+          : steps.map((s) => (
+              <div key={s}><Check size={16} /> {s}</div>
+            ))}
       </div>
-      {demo && <p className="note" style={{ marginBottom: 12 }}>Demo board: these release steps are shown, not run.</p>}
+      {demo && !release.log && <p className="note" style={{ marginBottom: 12 }}>Demo board: these release steps are shown, not run.</p>}
       {release.addons.whatsapp && release.whatsappDraft && (
         <>
           <div className="lbl" style={{ marginTop: 4 }}>A WhatsApp note for your manager. Copy it and send it yourself.</div>

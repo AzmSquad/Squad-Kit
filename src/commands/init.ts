@@ -345,8 +345,8 @@ export async function runInit(opts: InitOptions): Promise<void> {
   }
   ui.blank();
   ui.step('Next:');
-  ui.info('1) squad new-story <feature-slug>');
-  ui.info('2) Fill the generated intake.md, then run /squad-plan in your agent (or squad new-plan).');
+  ui.info('1) squad console   opens the board; the Architect reads the project first.');
+  ui.info('2) Write your first ticket on the board, or with: squad new "What you want"');
 }
 
 function parseAgentsFlag(flag?: string): AgentName[] {

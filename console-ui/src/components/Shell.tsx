@@ -54,7 +54,7 @@ export function Shell() {
           {(meta?.tools ?? []).map((t) => (
             <div className="row" key={t.name}>
               <span>{t.name}</span>
-              <span className="dot">{t.ready ? 'Ready' : 'Not found'}</span>
+              <span className={`dot ${t.ready ? '' : 'off'}`}>{t.ready ? 'Ready' : 'Not installed'}</span>
             </div>
           ))}
         </div>

@@ -24,6 +24,7 @@ import {
   runPull,
   runRelease,
   runShow,
+  runStop,
   runWatch,
 } from './commands/board.js';
 import {
@@ -209,6 +210,10 @@ program
   .command('decide <ticket> [choice]')
   .description('Decide for the squad when it is stuck')
   .action(wrapArgs(runDecide));
+program
+  .command('stop <ticket>')
+  .description('Stop the squad on a ticket; the work so far is kept')
+  .action(wrapArgs(runStop));
 program
   .command('watch <ticket>')
   .description('Follow a ticket live until it needs you')

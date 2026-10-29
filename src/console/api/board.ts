@@ -16,10 +16,12 @@ import {
   requestChange,
   saveReleaseNotes,
   skipQuestions,
+  stopTicket,
 } from '../../board/actions.js';
-import { boardExists, boardPaths, listDecisions, listReleases, listTickets, readMeta, readRelease, readTicket } from '../../board/store.js';
+import { boardExists, boardPaths, listDecisions, listReleases, listTickets, readMeta, readRelease, readTicket, writeMeta } from '../../board/store.js';
 import { seedDemoBoard } from '../../board/demo.js';
-import type { Release } from '../../board/types.js';
+import { repoFor } from '../../engine/repos.js';
+import type { ProjectCommands, Release } from '../../board/types.js';
 
 const DAY = 86_400_000;
 
@@ -36,9 +38,9 @@ async function body<T>(c: Context): Promise<T> {
 }
 
 /** Runs a board action and turns a person-facing mistake into a 400 with the message. */
-function act(c: Context, fn: () => unknown) {
+async function act(c: Context, fn: () => unknown) {
   try {
-    return c.json(fn() ?? { ok: true });
+    return c.json(((await fn()) as object) ?? { ok: true });
   } catch (err) {
     if (err instanceof BoardActionError || err instanceof Error) return c.json({ error: err.message }, 400);
     throw err;
@@ -93,6 +95,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths }): void {
   });
 
   app.post('/api/v1/tickets/:id/approve', (c) => act(c, () => approve(bp, c.req.param('id'))));
+  app.post('/api/v1/tickets/:id/stop', (c) => act(c, () => stopTicket(bp, c.req.param('id'))));
 
   app.post('/api/v1/tickets/:id/change', async (c) => {
     const b = await body<{ text?: string }>(c);
@@ -106,10 +109,22 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths }): void {
 
   app.get('/api/v1/releases', (c) => {
     const tickets = listTickets(bp);
+    const meta = readMeta(bp);
     const titleOf = (id: string, r: Release) => tickets.find((t) => t.id === id)?.title ?? r.titles?.[id] ?? id;
+    /** Where a release will push, per repo, so the person sees it before confirming. */
+    const targets = (r: Release) => {
+      if (meta.engine !== 'live') return [];
+      const seen = new Map<string, { repo: string; branch: string; remote: string }>();
+      for (const t of tickets.filter((x) => r.tickets.includes(x.id))) {
+        const repo = repoFor(meta, t);
+        seen.set(repo.path, { repo: repo.path, branch: repo.base, remote: repo.remote });
+      }
+      return [...seen.values()];
+    };
     return c.json(
       listReleases(bp).map((r) => ({
         ...withNotes(bp, r),
+        targets: targets(r),
         items: r.tickets.map((id) => {
           const t = tickets.find((x) => x.id === id);
           return { id, title: titleOf(id, r), gates: t?.gates ?? null, kind: t?.kind ?? 'feature' };
@@ -147,6 +162,47 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths }): void {
     if (!name.endsWith('.png') || !fs.existsSync(abs)) return c.text('not found', 404);
     return new Response(fs.readFileSync(abs), { headers: { 'content-type': 'image/png', 'cache-control': 'private, max-age=3600' } });
   });
+
+  app.put('/api/v1/settings', async (c) => {
+    const b = await body<{
+      commands?: ProjectCommands;
+      git?: { base?: string; remote?: string };
+      parallel?: number;
+      repos?: { path: string; base?: string; remote?: string; commands?: ProjectCommands }[];
+    }>(c);
+    return act(c, () => {
+      const meta = readMeta(bp);
+      if (b.commands) {
+        meta.commands = Object.fromEntries(
+          Object.entries(b.commands).map(([k, v]) => [k, String(v ?? '').trim()]).filter(([, v]) => v),
+        ) as ProjectCommands;
+      }
+      if (b.git) meta.git = { base: b.git.base?.trim() || meta.git?.base || 'main', remote: b.git.remote?.trim() ?? meta.git?.remote ?? '' };
+      if (typeof b.parallel === 'number' && b.parallel >= 1 && b.parallel <= 4) meta.parallel = Math.round(b.parallel);
+      if (b.repos && meta.repos) {
+        meta.repos = meta.repos.map((r) => {
+          const u = b.repos!.find((x) => x.path === r.path);
+          if (!u) return r;
+          const commands = Object.fromEntries(
+            Object.entries(u.commands ?? r.commands).map(([k, v]) => [k, String(v ?? '').trim()]).filter(([, v]) => v),
+          ) as ProjectCommands;
+          return { ...r, base: u.base?.trim() || r.base, remote: u.remote?.trim() ?? r.remote, commands };
+        });
+      }
+      writeMeta(bp, meta);
+      return meta;
+    });
+  });
+
+  app.post('/api/v1/scan', (c) =>
+    act(c, () => {
+      const meta = readMeta(bp);
+      if (meta.engine !== 'live') throw new Error('Only a live board reads the project.');
+      meta.scan = { status: 'pending' };
+      writeMeta(bp, meta);
+      return meta;
+    }),
+  );
 
   app.post('/api/v1/demo/reset', (c) => {
     if (boardExists(bp) && readMeta(bp).engine !== 'demo') return c.json({ error: 'Only a demo board can be reset.' }, 400);

@@ -5,6 +5,8 @@ import * as ui from '../ui/index.js';
 import { buildPaths, requireSquadRoot } from '../core/paths.js';
 import { loadConfig } from '../core/config.js';
 import { startConsoleServer, type ConsoleServer } from '../console/server.js';
+import { boardPaths } from '../board/store.js';
+import { ensureLiveBoard } from '../engine/setup.js';
 
 export interface ConsoleOptions {
   port?: number;
@@ -19,7 +21,9 @@ export async function runConsole(opts: ConsoleOptions): Promise<void> {
   const root = requireSquadRoot();
   const paths = buildPaths(root);
   // loadConfig also validates the YAML — surface schema problems before binding a port.
-  loadConfig(paths.configFile);
+  const config = loadConfig(paths.configFile);
+  // A project without a board gets a live one; the Architect reads the project first.
+  ensureLiveBoard(boardPaths(paths.squadDir), config.project.name);
 
   const portOpt = opts.port;
   const requestedPort =

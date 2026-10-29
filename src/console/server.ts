@@ -12,6 +12,7 @@ import { authMiddleware } from './auth.js';
 import { boardPaths } from '../board/store.js';
 import { startDemoSquad } from '../board/engine.js';
 import { claimSquad } from '../board/lock.js';
+import { LiveSquad } from '../engine/live.js';
 
 export interface StartConsoleServerOptions {
   paths: SquadPaths;
@@ -74,12 +75,14 @@ export async function startConsoleServer(opts: StartConsoleServerOptions): Promi
 
   const nodeServer = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: bindPort });
 
-  // The demo squad only acts on a board seeded with `engine: demo`; on other boards it stays idle.
+  // Each squad only acts on its own kind of board: `engine: demo` plays a script, `engine: live` runs Claude Code.
   const bp = boardPaths(opts.paths.squadDir);
   const stopTimer = startDemoSquad(bp);
+  const stopLive = new LiveSquad(bp).start();
   const releaseLock = claimSquad(bp);
   const stopSquad = () => {
     stopTimer();
+    stopLive();
     releaseLock();
   };
 

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { Check, Download, Plus, Search } from 'lucide-react';
 import type { Actor, Stage, Ticket } from '../api/types';
-import { useBoard } from '../lib/data';
+import { useAct, useBoard } from '../lib/data';
 import { BugDialog, NewTicketDialog, PullDialog } from '../components/dialogs';
 import { Cmd, Glyph, STAGE_NAME, actionLabel } from '../components/ui';
 import { TicketDrawer } from './TicketDrawer';
@@ -26,8 +26,8 @@ export function BoardPage() {
   const [dialog, setDialog] = useState<'new' | 'pull' | 'bug' | null>(null);
   const [query, setQuery] = useState('');
   const view: View = search.view ?? 'all';
-  const open = (id: string) => void navigate({ search: (s) => ({ ...s, t: id }) });
-  const close = () => void navigate({ search: (s) => ({ ...s, t: undefined }) });
+  const open = (id: string) => void navigate({ search: (s) => ({ ...s, ticket: id }) });
+  const close = () => void navigate({ search: (s) => ({ ...s, ticket: undefined }) });
 
   const data = board.data?.ready ? board.data : null;
   const tickets = useMemo(() => {
@@ -81,7 +81,20 @@ export function BoardPage() {
           <span className="grow" />
           <Cmd text="squad inbox" />
         </div>
-        {waiting.length === 0 ? (
+        {data.meta.engine === 'live' && data.meta.scan && data.meta.scan.status !== 'done' ? (
+          <ScanState meta={data.meta} />
+        ) : data.meta.engine === 'live' && data.tickets.length === 0 ? (
+          <div className="calmlane">
+            <span className="glyph"><Plus size={14} strokeWidth={2.5} /></span>
+            <span>
+              <b>Start with your first ticket.</b> Write what you want in plain words. The squad asks what it needs to know.
+            </span>
+            <span className="grow" style={{ flex: 1 }} />
+            <button className="btn pri sm" onClick={() => setDialog('new')}>
+              <Plus size={14} /> New ticket
+            </button>
+          </div>
+        ) : waiting.length === 0 ? (
           <div className="calmlane">
             <span className="glyph"><Check size={14} strokeWidth={2.5} /></span>
             <span><b>Nothing needs you right now.</b> The squad is working. New questions and approvals show up here.</span>
@@ -119,7 +132,7 @@ export function BoardPage() {
                 <span className="n">{here.length}</span>
               </div>
               {here.map((t) => (
-                <Card key={t.id} t={t} selected={search.t === t.id} onOpen={() => open(t.id)} />
+                <Card key={t.id} t={t} selected={search.ticket === t.id} onOpen={() => open(t.id)} />
               ))}
               {here.length === 0 && <div className="empty-lane">Nothing here</div>}
             </section>
@@ -141,7 +154,7 @@ export function BoardPage() {
         <button className="btn sm quiet" onClick={() => setDialog('bug')}>Report a bug</button>
       </div>
 
-      {search.t && <TicketDrawer id={search.t} onClose={close} />}
+      {search.ticket && <TicketDrawer id={search.ticket} onClose={close} />}
       {dialog === 'new' && <NewTicketDialog onClose={() => setDialog(null)} onCreated={(t) => open(t.id)} />}
       {dialog === 'pull' && <PullDialog onClose={() => setDialog(null)} onCreated={(t) => open(t.id)} />}
       {dialog === 'bug' && <BugDialog onClose={() => setDialog(null)} />}
@@ -170,6 +183,32 @@ function Card({ t, selected, onOpen }: { t: Ticket; selected: boolean; onOpen():
     </button>
   );
 }
+
+function ScanState({ meta }: { meta: BoardResponseMeta }) {
+  const act = useAct();
+  if (meta.scan?.status === 'failed') {
+    return (
+      <div className="calmlane">
+        <span className="glyph you">!</span>
+        <span>
+          <b>The Architect could not read the project.</b> {meta.scan.error}
+        </span>
+        <span className="grow" style={{ flex: 1 }} />
+        <button className="btn sm" onClick={() => act.mutate({ path: '/api/v1/scan', done: 'Reading the project again' })}>Try again</button>
+      </div>
+    );
+  }
+  return (
+    <div className="calmlane">
+      <span className="live" />
+      <span>
+        <b>The Architect is reading your project.</b> It writes the project map and finds how to test and run it. This takes a minute or two.
+      </span>
+    </div>
+  );
+}
+
+type BoardResponseMeta = NonNullable<ReturnType<typeof useBoard>['data']>['meta'];
 
 function NoBoard() {
   return (

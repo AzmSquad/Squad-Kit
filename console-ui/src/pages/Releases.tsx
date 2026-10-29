@@ -88,7 +88,7 @@ function ReleaseDetail({ r, onReleased }: { r: ReleaseWithItems; onReleased(r: R
           {r.bugs.map((b) => (
             <div className="trow" key={b}>
               <span className="mono">{b}</span>
-              <Link to="/board" search={{ t: b }}>
+              <Link to="/board" search={{ ticket: b }}>
                 <b>Open the bug</b>
               </Link>
               <span />
@@ -106,20 +106,27 @@ function ReleaseDetail({ r, onReleased }: { r: ReleaseWithItems; onReleased(r: R
             <span>{r.version.replace(/^v/, '')}</span>
           </div>
           <p className="note" style={{ marginTop: 4 }}>{part}</p>
-          <div className="lbl">Also</div>
-          {[
-            ['changelog', 'Update the changelog'],
-            ['tag', `Tag ${r.version} in git`],
-            ['pipeline', 'Run the Azure pipeline'],
-            ['whatsapp', 'Draft a WhatsApp note for my manager'],
-          ].map(([k, label]) => (
-            <div className="checkrow" key={k}>
-              <span className={`cbx ${r.addons[k as keyof Release['addons']] ? 'on' : ''}`}>
-                {r.addons[k as keyof Release['addons']] && <Check size={11} strokeWidth={3} />}
-              </span>
-              {label}
-            </div>
-          ))}
+          <div className="lbl">{draft || !r.log ? 'Also' : 'What the release did'}</div>
+          {!draft && r.log
+            ? r.log.map((l) => (
+                <div className="checkrow" key={l.text} style={l.ok ? undefined : { color: 'var(--you-ink)' }}>
+                  <span className={`cbx ${l.ok ? 'on' : ''}`}>{l.ok ? <Check size={11} strokeWidth={3} /> : '!'}</span>
+                  {l.text}
+                </div>
+              ))
+            : [
+                ['changelog', 'Update the changelog'],
+                ['tag', `Tag ${r.version} in git`],
+                ['pipeline', 'Run the pipeline'],
+                ['whatsapp', 'Draft a WhatsApp note for my manager'],
+              ].map(([k, label]) => (
+                <div className="checkrow" key={k}>
+                  <span className={`cbx ${r.addons[k as keyof Release['addons']] ? 'on' : ''}`}>
+                    {r.addons[k as keyof Release['addons']] && <Check size={11} strokeWidth={3} />}
+                  </span>
+                  {label}
+                </div>
+              ))}
         </div>
         <div>
           <div className="lbl">
@@ -201,6 +208,17 @@ function ReleaseDetail({ r, onReleased }: { r: ReleaseWithItems; onReleased(r: R
           <p>
             {r.items.length} tickets go live: {r.items.map((i) => i.title).join(', ')}.
           </p>
+          {r.targets.length > 0 && (
+            <div className="box" style={{ marginBottom: 6 }}>
+              <b>This release changes these branches:</b>
+              {r.targets.map((g) => (
+                <div key={g.repo} className="mono" style={{ fontSize: 12.5, marginTop: 6 }}>
+                  {g.repo === '.' ? 'project' : g.repo}: {g.branch} {g.remote ? `→ pushed to ${g.remote}` : '(no remote, stays on this Mac)'}
+                </div>
+              ))}
+              <p className="note" style={{ marginTop: 6 }}>Change the branch or remote in Settings first if this is not right.</p>
+            </div>
+          )}
         </Modal>
       )}
       {bug && <BugDialog foundIn={r.version} onClose={() => setBug(false)} />}

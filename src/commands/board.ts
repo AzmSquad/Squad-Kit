@@ -18,11 +18,13 @@ import {
   reportBug,
   requestChange,
   skipQuestions,
+  stopTicket,
   type AnswerInput,
 } from '../board/actions.js';
 import { tick } from '../board/engine.js';
 import { squadRunsElsewhere } from '../board/lock.js';
 import { seedDemoBoard } from '../board/demo.js';
+import { repoFor } from '../engine/repos.js';
 import {
   boardExists,
   boardPaths,
@@ -62,9 +64,16 @@ function board(): BoardPaths {
   return bp;
 }
 
-/** When no console is open, the terminal runs the squad itself while it waits. */
+/** On a demo board with no console open, the terminal plays the squad itself while it waits. */
 function stepSquad(bp: BoardPaths): void {
-  if (!squadRunsElsewhere(bp)) tick(bp);
+  if (squadRunsElsewhere(bp)) return;
+  if (readMeta(bp).engine === 'demo') tick(bp);
+}
+
+function warnIfNoSquad(bp: BoardPaths): void {
+  if (readMeta(bp).engine === 'live' && !squadRunsElsewhere(bp)) {
+    ui.warning('The squad works while the board is open. Run `squad console` in another tab.');
+  }
 }
 
 function nextCommand(t: Ticket): string {
@@ -252,8 +261,9 @@ export async function runAnswer(ticketId: string, opts: { skip?: boolean }): Pro
 }
 
 async function waitForReply(bp: BoardPaths, ticketId: string, qid: string): Promise<string> {
+  warnIfNoSquad(bp);
   const spin = ui.spinner('Thinking…');
-  for (let i = 0; i < 60; i += 1) {
+  for (let i = 0; i < 400; i += 1) {
     stepSquad(bp);
     const q = readTicket(bp, ticketId)?.questions?.find((x) => x.id === qid);
     if (q && !q.thinking) {
@@ -304,6 +314,7 @@ export async function runDecide(ticketId: string, choice?: string): Promise<void
 
 export async function runWatch(ticketId: string): Promise<void> {
   const bp = board();
+  warnIfNoSquad(bp);
   let t = requireTicket(bp, ticketId);
   out();
   out(`  ${id(t.id)}  ${kleur.bold(t.title)}`);
@@ -361,17 +372,30 @@ export async function runRelease(version: string | undefined, opts: { yes?: bool
   out();
   for (const l of (draft.notes.trim() || composeNotes(bp, draft)).split('\n')) out(`  ${kleur.gray(l.replace(/\*\*/g, ''))}`);
   out();
+  const meta = readMeta(bp);
+  if (meta.engine === 'live') {
+    const targets = new Map(tickets.map((t) => [repoFor(meta, t).path, repoFor(meta, t)]));
+    out(`  ${kleur.bold('This release changes these branches:')}`);
+    for (const r of targets.values()) {
+      out(`    ${r.path === '.' ? 'project' : r.path}: ${r.base} ${r.remote ? amber(`→ pushed to ${r.remote}`) : kleur.gray('(no remote, stays on this Mac)')}`);
+    }
+    out();
+  }
   if (!opts.yes && !(await confirm({ message: `Release ${draft.version} now?`, default: false }))) {
     ui.info('Not released.');
     return;
   }
-  const r = releaseVersion(bp, draft.version);
-  const demo = readMeta(bp).engine === 'demo';
+  const spin = ui.spinner(`Releasing ${draft.version}…`);
+  const r = await releaseVersion(bp, draft.version).finally(() => spin.stop());
   ui.success(`Released ${r.version}.`);
-  const tag = demo ? kleur.gray(' (shown, not run, on a demo board)') : '';
-  if (r.addons.changelog) ui.success(`Changelog updated${tag}`);
-  if (r.addons.tag) ui.success(`Tagged ${r.version} in git${tag}`);
-  if (r.addons.pipeline) ui.success(`Azure pipeline started${tag}`);
+  if (r.log) {
+    for (const l of r.log) (l.ok ? ui.success : ui.warning)(l.text);
+  } else {
+    const tag = kleur.gray(' (shown, not run, on a demo board)');
+    if (r.addons.changelog) ui.success(`Changelog updated${tag}`);
+    if (r.addons.tag) ui.success(`Tagged ${r.version} in git${tag}`);
+    if (r.addons.pipeline) ui.success(`Azure pipeline started${tag}`);
+  }
   if (r.addons.whatsapp && r.whatsappDraft) {
     out();
     out(kleur.gray('  WhatsApp note for your manager. Copy it and send it yourself:'));
@@ -396,9 +420,15 @@ export async function runNew(words: string[], opts: { ask?: string; priority?: T
   ui.success(`${t.id} created. The Analyst is reading it.`);
 }
 
+export async function runStop(ticketId: string): Promise<void> {
+  const bp = board();
+  const t = stopTicket(bp, ticketId);
+  ui.success(`Stopping the squad on ${t.id}. The work so far is kept.`);
+}
+
 export async function runPull(ref: string): Promise<void> {
   const bp = board();
-  const t = pullTicket(bp, ref);
+  const t = await pullTicket(bp, ref);
   ui.success(`${t.id} pulled from ${t.source.ref}: ${t.title}`);
 }
 

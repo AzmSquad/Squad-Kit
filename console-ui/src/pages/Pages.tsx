@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { Bug, Check, Lightbulb, Map as MapIcon, RotateCcw, Terminal } from 'lucide-react';
-import type { Decision } from '../api/types';
+import type { Decision, ProjectCommands, RepoInfo } from '../api/types';
 import { useAct, useBoard, useDecisions } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { BugDialog } from '../components/dialogs';
@@ -46,7 +46,7 @@ export function InboxPage() {
                   {t.waiting!.kind === 'proof' ? (
                     <Link to="/tickets/$id/proof" params={{ id: t.id }} className="btn pri sm">{actionLabel(t)}</Link>
                   ) : (
-                    <Link to="/board" search={{ t: t.id }} className="btn pri sm">{actionLabel(t)}</Link>
+                    <Link to="/board" search={{ ticket: t.id }} className="btn pri sm">{actionLabel(t)}</Link>
                   )}
                 </div>
               ))}
@@ -232,7 +232,7 @@ export function BugsPage() {
                   <tr key={t.id}>
                     <td className="mono">{t.id}</td>
                     <td>
-                      <Link to="/board" search={{ t: t.id }} style={{ fontWeight: 600 }}>{t.title}</Link>
+                      <Link to="/board" search={{ ticket: t.id }} style={{ fontWeight: 600 }}>{t.title}</Link>
                     </td>
                     <td>{t.foundIn ?? ''}</td>
                     <td>{STAGE_NAME[t.stage]}</td>
@@ -312,6 +312,105 @@ export function SquadPage() {
 
 /* ── Settings ──────────────────────────────────────────── */
 
+const COMMAND_FIELDS: { key: keyof ProjectCommands; label: string; hint: string }[] = [
+  { key: 'setup', label: 'Set up', hint: 'Installs what the project needs, e.g. npm install' },
+  { key: 'test', label: 'Test', hint: 'Runs the tests, e.g. npm test' },
+  { key: 'lint', label: 'Lint', hint: 'Checks code style, e.g. npm run lint' },
+  { key: 'build', label: 'Build', hint: 'Builds the project, e.g. npm run build' },
+  { key: 'start', label: 'Start', hint: 'Runs the app for screenshots, e.g. npm start' },
+  { key: 'url', label: 'App address', hint: 'Where the app opens, e.g. http://localhost:3000' },
+  { key: 'deploy', label: 'Pipeline', hint: 'Runs after a release, e.g. az pipelines run …' },
+];
+
+function ProjectSettings() {
+  const board = useBoard();
+  const meta = board.data?.ready ? board.data.meta : undefined;
+  if (!meta) return null;
+  const repos = meta.repos?.length
+    ? meta.repos
+    : [{ path: '.', base: meta.git?.base ?? 'main', remote: meta.git?.remote ?? '', commands: meta.commands ?? {} }];
+  const multi = Boolean(meta.repos?.length);
+  return (
+    <>
+      <h2 style={{ marginTop: 6 }}>How the squad checks and runs this project</h2>
+      <p className="note" style={{ margin: '2px 0 10px' }}>
+        The Architect filled these in when it read the project. squad-kit runs Test, Lint and Build itself before anything ships.
+        {multi && ' This workspace has several code repos; each ticket works in one of them.'}
+      </p>
+      {repos.map((r) => (
+        <RepoSettings key={r.path} repo={r} multi={multi} />
+      ))}
+      <ScanAgain />
+    </>
+  );
+}
+
+function RepoSettings({ repo, multi }: { repo: RepoInfo; multi: boolean }) {
+  const act = useAct();
+  const [commands, setCommands] = useState<ProjectCommands | null>(null);
+  const [git, setGit] = useState<{ base: string; remote: string } | null>(null);
+  const current = commands ?? repo.commands;
+  const gitNow = git ?? { base: repo.base, remote: repo.remote };
+  const save = () => {
+    const body = multi ? { repos: [{ path: repo.path, ...gitNow, commands: current }] } : { commands: current, git: gitNow };
+    act.mutate(
+      { path: '/api/v1/settings', method: 'PUT', body, done: 'Settings saved' },
+      {
+        onSuccess: () => {
+          setCommands(null);
+          setGit(null);
+        },
+      },
+    );
+  };
+  return (
+    <div style={{ marginBottom: 24 }}>
+      {multi && (
+        <h3 className="mono" style={{ fontSize: 14, margin: '18px 0 2px' }}>
+          {repo.path}
+          {repo.summary && <span className="note" style={{ fontFamily: 'inherit', marginLeft: 8 }}>{repo.summary}</span>}
+        </h3>
+      )}
+      {COMMAND_FIELDS.map((f) => (
+        <div className="maprow" key={f.key} style={{ alignItems: 'center' }}>
+          <b>{f.label}</b>
+          <input
+            className="input mono"
+            style={{ fontSize: 13 }}
+            value={current[f.key] ?? ''}
+            placeholder={f.hint}
+            onChange={(e) => setCommands({ ...current, [f.key]: e.target.value })}
+          />
+        </div>
+      ))}
+      <div className="maprow" style={{ alignItems: 'center' }}>
+        <b>Release branch</b>
+        <input className="input mono" style={{ fontSize: 13 }} value={gitNow.base} onChange={(e) => setGit({ ...gitNow, base: e.target.value })} />
+      </div>
+      <div className="maprow" style={{ alignItems: 'center' }}>
+        <b>Push to</b>
+        <input className="input mono" style={{ fontSize: 13 }} value={gitNow.remote} placeholder="origin (empty: no push)" onChange={(e) => setGit({ ...gitNow, remote: e.target.value })} />
+      </div>
+      <div style={{ marginTop: 12 }}>
+        <button className="btn pri sm" disabled={!commands && !git} onClick={save}>
+          Save{multi ? ` ${repo.path}` : ''}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ScanAgain() {
+  const act = useAct();
+  return (
+    <div style={{ margin: '4px 0 26px' }}>
+      <button className="btn sm" onClick={() => act.mutate({ path: '/api/v1/scan', done: 'The Architect is reading the project again' })}>
+        Read the project again
+      </button>
+    </div>
+  );
+}
+
 export function SettingsPage() {
   const board = useBoard();
   const { theme, toggleTheme, showCommands, toggleCommands } = usePrefs();
@@ -342,6 +441,7 @@ export function SettingsPage() {
             <b>Board files</b>
             <span className="mono" style={{ fontSize: 13 }}>.squad/board/</span>
           </div>
+          {meta?.engine === 'live' && <ProjectSettings />}
           {meta?.engine === 'demo' && (
             <div className="maprow">
               <b>Demo board</b>

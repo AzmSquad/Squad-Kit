@@ -103,6 +103,14 @@ export interface SquadState {
   index?: number;
 }
 
+/** Saved Claude Code conversations for a ticket, one per role, so follow-ups continue them. */
+export interface TicketSessions {
+  intake?: string;
+  build?: string;
+  review?: string;
+  tester?: string;
+}
+
 export interface Ticket {
   id: string;
   title: string;
@@ -139,6 +147,22 @@ export interface Ticket {
   changeRequest?: string;
   activity: Activity[];
   squad?: SquadState | null;
+  /** Live engine only: where the ticket's code lives and how far the squad got. */
+  sessions?: TicketSessions;
+  worktree?: string;
+  branch?: string;
+  baseCommit?: string;
+  tries?: number;
+  reviewRound?: number;
+  /** Step to run again when the person picks "Try again" on a stuck card. */
+  retryPhase?: string;
+  attachments?: string[];
+  /** In a multi-repo workspace: the code repo this ticket changes. */
+  repo?: string;
+  /** Set when the person presses Stop; the live squad stops the running step. */
+  stopRequested?: boolean;
+  /** The squad's review notes still to fix, passed to the Builder. */
+  reviewNotes?: string[];
 }
 
 export interface Release {
@@ -153,6 +177,8 @@ export interface Release {
   whatsappDraft?: string;
   /** Titles of tickets that are no longer on the board, for past releases. */
   titles?: Record<string, string>;
+  /** What the release really did, in plain words, shown after releasing. */
+  log?: { ok: boolean; text: string }[];
 }
 
 export interface Decision {
@@ -188,8 +214,38 @@ export interface BoardMeta {
   speed: number;
   map: { area: string; detail: string }[];
   lessons: Lesson[];
+  /** Live engine: how to set up, check and run the project. Empty means "not set up". */
+  commands?: ProjectCommands;
+  git?: { base: string; remote: string };
+  scan?: { status: 'pending' | 'running' | 'done' | 'failed'; at?: string; error?: string; summary?: string; empty?: boolean };
+  /** How many squad jobs may run at the same time. */
+  parallel?: number;
+  /**
+   * A workspace that holds several code repos (each with its own git). Without it, the project
+   * folder itself is the one repo, using `commands` and `git`.
+   */
+  repos?: RepoInfo[];
 }
 
+export interface RepoInfo {
+  /** Folder relative to the project, like "moj-t4-ui-vue". */
+  path: string;
+  base: string;
+  remote: string;
+  commands: ProjectCommands;
+  summary?: string;
+}
+
+export interface ProjectCommands {
+  setup?: string;
+  test?: string;
+  lint?: string;
+  build?: string;
+  start?: string;
+  url?: string;
+  /** Runs after a release, for example a pipeline trigger. */
+  deploy?: string;
+}
 export interface BoardResponse {
   ready: boolean;
   meta: BoardMeta;
@@ -204,7 +260,7 @@ export interface ReleaseItem {
   kind: 'feature' | 'bug';
 }
 
-export type ReleaseWithItems = Release & { items: ReleaseItem[] };
+export type ReleaseWithItems = Release & { items: ReleaseItem[]; targets: { repo: string; branch: string; remote: string }[] };
 
 export interface DecisionsResponse {
   decisions: Decision[];

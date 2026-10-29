@@ -13,10 +13,20 @@ import {
   writeDecision,
   writeRelease,
   writeTicket,
+  writeMeta,
   type BoardPaths,
 } from './store.js';
+import fs from 'node:fs';
+import path from 'node:path';
 import type { Release, Ticket } from './types.js';
 import { scheduleSquad } from './schedule.js';
+import { commitTicket, liveRelease } from '../engine/release.js';
+import { git } from '../engine/git.js';
+import { reposOf } from '../engine/repos.js';
+import { buildPaths } from '../core/paths.js';
+import { loadConfig } from '../core/config.js';
+import { loadSecrets } from '../core/secrets.js';
+import { clientFor, overlayTrackerEnv } from '../tracker/index.js';
 
 /** Every person-facing action lives here, so the board and the terminal do exactly the same thing. */
 
@@ -68,11 +78,51 @@ const AZURE_ITEMS: Record<string, { title: string; ask: string }> = {
   },
 };
 
-export function pullTicket(bp: BoardPaths, ref: string): Ticket {
+export async function pullTicket(bp: BoardPaths, ref: string): Promise<Ticket> {
   const clean = ref.replace(/^AB#/i, '').trim();
   if (!clean) throw new BoardActionError('Give a work item number, for example AB#4133.');
-  const item = AZURE_ITEMS[clean] ?? { title: `Azure work item ${clean}`, ask: `Pulled from Azure DevOps work item ${clean}.` };
-  return createTicket(bp, { ...item, source: { type: 'azure', ref: `AB#${clean}` } });
+  if (readMeta(bp).engine === 'demo') {
+    const item = AZURE_ITEMS[clean] ?? { title: `Azure work item ${clean}`, ask: `Pulled from Azure DevOps work item ${clean}.` };
+    return createTicket(bp, { ...item, source: { type: 'azure', ref: `AB#${clean}` } });
+  }
+  return pullFromTracker(bp, clean);
+}
+
+/** Fetch a real work item with the tracker set up in .squad/ (the same one `squad new-story --id` uses). */
+async function pullFromTracker(bp: BoardPaths, id: string): Promise<Ticket> {
+  const paths = buildPaths(path.dirname(path.dirname(bp.dir)));
+  const config = loadConfig(paths.configFile);
+  if (config.tracker.type === 'none') {
+    throw new BoardActionError('No tracker is set up for this project. Run: squad config set tracker');
+  }
+  const { client, error } = clientFor(config, overlayTrackerEnv(loadSecrets(paths.secretsFile)));
+  if (!client) throw new BoardActionError(`${error?.message ?? 'The tracker is not ready.'} ${error?.detail ?? ''}`.trim());
+  let issue;
+  try {
+    issue = await client.fetchIssue(id);
+  } catch (err) {
+    throw new BoardActionError(`Could not fetch ${id}: ${(err as Error).message}`);
+  }
+  const ask = [issue.description, issue.acceptanceCriteria && `Acceptance criteria:\n${issue.acceptanceCriteria}`].filter(Boolean).join('\n\n');
+  const ticket = createTicket(bp, {
+    title: issue.title,
+    ask: ask || issue.title,
+    priority: 'normal',
+    source: { type: config.tracker.type === 'azure' ? 'azure' : config.tracker.type, ref: config.tracker.type === 'azure' ? `AB#${issue.id}` : issue.id },
+  });
+  if (issue.attachments.length) {
+    const dir = path.join(bp.dir, 'attachments', ticket.id);
+    fs.mkdirSync(dir, { recursive: true });
+    const saved = await client.downloadAttachments(issue.attachments, dir).catch(() => []);
+    const files = saved.filter((a) => a.outcome === 'written' && a.absolutePath).map((a) => a.absolutePath!);
+    if (files.length) {
+      return updateTicket(bp, ticket.id, (t) => {
+        t.attachments = files;
+        addActivity(t, 'you', `Pulled ${files.length} attachments with it`);
+      });
+    }
+  }
+  return ticket;
 }
 
 export interface AnswerInput {
@@ -175,6 +225,14 @@ function testNameFor(ticket: Ticket): string {
 }
 
 function acceptProof(bp: BoardPaths, ticket: Ticket): Ticket {
+  let commit: string | null = null;
+  if (readMeta(bp).engine === 'live') {
+    try {
+      commit = commitTicket(ticket);
+    } catch (err) {
+      throw new BoardActionError(`Could not save the change in git: ${(err as Error).message}`);
+    }
+  }
   const release = ensureDraftRelease(bp, ticket.kind === 'bug' ? 'patch' : 'minor');
   if (!release.tickets.includes(ticket.id)) release.tickets.push(ticket.id);
   writeRelease(bp, release);
@@ -187,6 +245,7 @@ function acceptProof(bp: BoardPaths, ticket: Ticket): Ticket {
     t.status = `Ready for ${release.version}`;
     t.squad = null;
     addActivity(t, 'you', 'Checked the proof. Looks right');
+    if (commit) addActivity(t, 'release', `Saved the change as commit ${commit} on ${t.branch}`);
     addActivity(t, 'release', `Added to release ${release.version}`);
   });
 }
@@ -224,9 +283,24 @@ export function decideStuck(bp: BoardPaths, id: string, choice: number): Ticket 
     t.stuck.options.forEach((o, i) => (o.chosen = i === choice));
     t.waiting = null;
     t.live = true;
-    t.status = 'Builder is trying your choice';
     addActivity(t, 'you', `Decided: ${option.name}`);
-    scheduleSquad(t, 'unstick', 2, meta.speed);
+    if (meta.engine !== 'live') {
+      t.status = 'Builder is trying your choice';
+      scheduleSquad(t, 'unstick', 2, meta.speed);
+      return;
+    }
+    // Live squad: the first choice runs the stopped step again, the second goes back to the plan.
+    if (choice === 0) {
+      t.tries = 0;
+      t.status = 'Trying again';
+      scheduleSquad(t, t.retryPhase ?? 'analyst-read', 0.5, 1);
+    } else {
+      t.changeRequest = `The squad got stuck: ${t.stuck.question}`;
+      t.stage = 'specs';
+      t.status = 'Spec writer is updating the plan';
+      scheduleSquad(t, t.story ? 'plan-rewrite' : 'analyst-read', 0.5, 1);
+    }
+    t.retryPhase = undefined;
   });
 }
 
@@ -238,18 +312,57 @@ function bump(version: string, part: 'minor' | 'patch'): string {
 export function ensureDraftRelease(bp: BoardPaths, part: 'minor' | 'patch'): Release {
   const draft = draftRelease(bp);
   if (draft) return draft;
+  const meta = readMeta(bp);
+  const live = meta.engine === 'live';
   const last = latestRelease(bp);
-  const from = last?.version ?? 'v0.0.0';
+  // The first release on a live board continues the project's own version, not 0.0.0.
+  const from = last?.version ?? (live ? projectVersion(path.dirname(path.dirname(bp.dir)), meta) : 'v0.0.0');
   const release: Release = {
     version: bump(from, part),
     status: 'draft',
     from,
     tickets: [],
     notes: '',
-    addons: { changelog: true, tag: true, pipeline: true, whatsapp: true },
+    addons: {
+      changelog: true,
+      tag: true,
+      pipeline: live ? reposOf(meta).some((r) => r.commands.deploy) || Boolean(meta.commands?.deploy) : true,
+      whatsapp: true,
+    },
   };
   writeRelease(bp, release);
   return release;
+}
+
+function versionKey(v: string): number[] {
+  return v.replace(/^v/, '').split('.').map((n) => Number(n) || 0);
+}
+
+function newer(a: string, b: string): string {
+  const [x, y] = [versionKey(a), versionKey(b)];
+  for (let i = 0; i < 3; i += 1) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) > (y[i] ?? 0) ? a : b;
+  return a;
+}
+
+/** The highest version a project already has: a git tag like v2.3.1, or package.json. */
+function projectVersion(root: string, meta: ReturnType<typeof readMeta>): string {
+  let best = 'v0.0.0';
+  for (const repo of reposOf(meta)) {
+    const dir = path.join(root, repo.path);
+    for (const tag of git(dir, ['tag', '--list', 'v*'], { allowFail: true }).split('\n')) {
+      if (/^v\d+\.\d+\.\d+$/.test(tag.trim())) best = newer(best, tag.trim());
+    }
+    const pkg = path.join(dir, 'package.json');
+    if (fs.existsSync(pkg)) {
+      try {
+        const v = (JSON.parse(fs.readFileSync(pkg, 'utf8')) as { version?: string }).version;
+        if (v && /^\d+\.\d+\.\d+/.test(v)) best = newer(best, `v${v.split('-')[0]}`);
+      } catch {
+        // A broken package.json says nothing about the version.
+      }
+    }
+  }
+  return best;
 }
 
 /** Release notes written from the tickets inside, in plain words. */
@@ -267,13 +380,21 @@ export function saveReleaseNotes(bp: BoardPaths, version: string, notes: string)
   return release;
 }
 
-export function releaseVersion(bp: BoardPaths, version?: string): Release {
+export async function releaseVersion(bp: BoardPaths, version?: string): Promise<Release> {
   const release = version ? readRelease(bp, version) : draftRelease(bp);
   if (!release || release.status !== 'draft') throw new BoardActionError('There is no release ready to go out.');
   if (release.tickets.length === 0) throw new BoardActionError(`${release.version} has no tickets yet.`);
   const meta = readMeta(bp);
   if (!release.notes.trim()) release.notes = composeNotes(bp, release);
   const tickets = listTickets(bp).filter((t) => release.tickets.includes(t.id));
+  if (meta.engine === 'live') {
+    try {
+      release.log = await liveRelease(bp, release, tickets);
+      if (meta.scan?.empty) writeMeta(bp, { ...readMeta(bp), scan: { ...meta.scan, empty: false } });
+    } catch (err) {
+      throw new BoardActionError(`The release did not go out: ${(err as Error).message}`);
+    }
+  }
   release.status = 'released';
   release.date = now();
   release.whatsappDraft = [
@@ -341,6 +462,15 @@ export function reportBug(bp: BoardPaths, input: BugInput): Ticket {
     }
   }
   return ticket;
+}
+
+export function stopTicket(bp: BoardPaths, id: string): Ticket {
+  return updateTicket(bp, id, (t) => {
+    if (!t.live && !t.squad) throw new BoardActionError(`${t.id} is not running right now.`);
+    t.stopRequested = true;
+    t.status = 'Stopping…';
+    addActivity(t, 'you', 'Pressed Stop');
+  });
 }
 
 export function inbox(bp: BoardPaths): Ticket[] {
