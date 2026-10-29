@@ -42,7 +42,7 @@ const program = new Command();
 
 program
   .name('squad')
-  .description('Plan once, execute cheap. A 3-step SDD workflow CLI.')
+  .description('You write the ticket. Your squad does the rest.')
   .version(readInstalledPackage().version);
 
 program
