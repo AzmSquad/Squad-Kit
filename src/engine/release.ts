@@ -109,8 +109,16 @@ async function releaseRepo(root: string, repo: RepoInfo, release: Release, ticke
       const dirty = git(root, ['status', '--porcelain', '--untracked-files=no'], { allowFail: true });
       if (dirty) log.push({ ok: false, text: `Your ${base} checkout has changes, so it was not updated. Run: git merge ${branch}` });
       else {
-        git(root, ['merge', '--ff-only', head], { allowFail: true });
-        log.push({ ok: true, text: `Your ${base} checkout now has the release` });
+        try {
+          git(root, ['merge', '--ff-only', head]);
+          log.push({ ok: true, text: `Your ${base} checkout now has the release` });
+        } catch (err) {
+          // Usually untracked files in the checkout that the release also adds.
+          log.push({
+            ok: false,
+            text: `Your ${base} checkout was not updated (${(err as Error).message.replace(/^git merge failed: /, '')}). Run: git merge --ff-only ${head.slice(0, 8)}`,
+          });
+        }
       }
     } else {
       git(root, ['update-ref', `refs/heads/${base}`, head], { allowFail: true });

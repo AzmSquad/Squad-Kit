@@ -51,7 +51,8 @@ export async function runChecks(cwd: string, commands: ProjectCommands, onStart?
 
 /** "18 passed" style counts from common test runners, for the gate pill. */
 export function testCount(output: string): number | null {
-  const patterns = [/Tests?:?\s+(\d+)\s+passed/i, /(\d+)\s+passing/i, /(\d+)\s+passed/i, /Passed:\s+(\d+)/i];
+  // The "Tests" summary line first (vitest, jest), so a "Test Files 1 passed" line is not mistaken for it.
+  const patterns = [/^\s*Tests:?\s+(\d+)\s+passed/im, /(\d+)\s+passing/i, /^# pass (\d+)/m, /Passed:\s+(\d+)/i, /(\d+)\s+passed/i];
   for (const p of patterns) {
     const m = output.match(p);
     if (m) return Number(m[1]);

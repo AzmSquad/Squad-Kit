@@ -31,7 +31,8 @@ export function ensureRepo(dir: string, projectName: string): void {
   if (!hasCommits(dir)) {
     const readme = path.join(dir, 'README.md');
     if (!fs.existsSync(readme)) fs.writeFileSync(readme, `# ${projectName}\n`, 'utf8');
-    git(dir, ['add', 'README.md']);
+    // Commit the .gitignore that `squad init` wrote too, so tickets build on it instead of clashing with it.
+    git(dir, ['add', 'README.md', ...(fs.existsSync(path.join(dir, '.gitignore')) ? ['.gitignore'] : [])]);
     git(dir, ['-c', 'user.name=squad-kit', '-c', 'user.email=squad-kit@localhost', 'commit', '-m', 'start the project'], {});
   }
   excludeLocal(dir, ['.squad/board/squad.pid']);
