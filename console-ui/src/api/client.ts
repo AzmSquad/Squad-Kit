@@ -45,3 +45,24 @@ async function safeText(res: Response): Promise<string> {
     return '';
   }
 }
+
+/** API errors carry the server's plain-words message, so the UI can show it as is. */
+export async function send<T>(path: string, method: 'POST' | 'PUT', payload: unknown = {}): Promise<T> {
+  const token = sessionStorage.getItem(TOKEN_KEY);
+  if (!token) throw new UnauthorizedError();
+  const res = await fetch(path, {
+    method,
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload),
+  });
+  if (res.status === 401) throw new UnauthorizedError();
+  const data = (await res.json().catch(() => ({}))) as { error?: string };
+  if (!res.ok) throw new Error(data.error ?? `${res.status} ${res.statusText}`);
+  return data as T;
+}
+
+/** Images can't send a header, so they carry the session token in the query string. */
+export function assetUrl(path: string): string {
+  const token = sessionStorage.getItem(TOKEN_KEY) ?? '';
+  return `${path}?t=${encodeURIComponent(token)}`;
+}

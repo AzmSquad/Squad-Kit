@@ -1,270 +1,213 @@
-export interface ApiStory {
-  feature: string;
+// Mirrors src/board/types.ts on the server. Keep the two in step.
+
+/** The 7 stages a ticket moves through. `done` means released and off the board. */
+export type Stage = 'tickets' | 'specs' | 'implement' | 'test' | 'review' | 'release' | 'bugs' | 'done';
+
+
+export type Role = 'analyst' | 'architect' | 'spec' | 'builder' | 'tester' | 'reviewer' | 'release' | 'triage';
+
+/** Who wrote an activity line or a thread message. */
+export type Actor = Role | 'you' | 'squad';
+
+export type WaitingKind = 'questions' | 'plan' | 'proof' | 'stuck' | 'release';
+
+export interface Waiting {
+  kind: WaitingKind;
+  /** One line shown on the "Waiting for you" card. */
+  summary: string;
+}
+
+export interface ThreadMessage {
+  who: Actor;
+  text: string;
+  at: string;
+}
+
+export interface Question {
   id: string;
-  intakePath: string;
-  storyDir: string;
-  planFile: string | null;
-  titleHint: string | null;
+  from: 'analyst' | 'architect';
+  text: string;
+  options: string[];
+  /** The option that takes a typed value, e.g. "Yes: Angular Material". */
+  inputOption?: string;
+  answer?: { choice: string; value?: string };
+  thread?: ThreadMessage[];
+  /** Set while the squad is writing a reply to "Ask about this". */
+  thinking?: boolean;
 }
 
-export interface ApiStoryDetail extends ApiStory {
-  intakeContent: string;
+export interface Criterion {
+  given: string;
+  when: string;
+  then: string;
 }
 
-/** Composed copy-paste plan meta-prompt (same bytes as `squad new-plan --copy`). */
-export interface ApiCopyPlanPrompt {
-  prompt: string;
-  feature: string;
-  storyId: string;
-  bytes: number;
-  estTokensApprox: number;
+export interface DecisionOption {
+  name: string;
+  note: string;
+  chosen?: boolean;
 }
 
-export interface ApiPlan {
-  feature: string;
-  planFile: string;
-  metadata: { provider?: string; model?: string; generatedBy?: string };
+export interface DecisionDraft {
+  title: string;
+  options: DecisionOption[];
+  why: string;
+  clientCheck?: string;
+  /** Set once the plan is approved and the decision is saved. */
+  adr?: string;
 }
 
-export interface ApiPlanDetail extends ApiPlan {
-  content: string;
-  absPath: string;
+export interface Step {
+  title: string;
+  status: 'todo' | 'doing' | 'done';
+  minutes?: number;
+  /** What the squad is doing right now, shown under the active step. */
+  live?: string;
 }
 
-export interface ApiCreatedStory {
-  storyDir: string;
-  intakePath: string;
-  feature: string;
+export type GateState = 'pending' | 'pass' | 'fail';
+
+export interface Gates {
+  checks: GateState;
+  checksText?: string;
+  review: GateState;
+  reviewBy?: string;
+  proof: GateState;
+}
+
+export interface ProofShot {
+  criterion: string;
+  before: string;
+  after: string;
+  beforeLabel: string;
+  afterLabel: string;
+  note?: string;
+}
+
+export interface StuckChoice {
+  question: string;
+  options: DecisionOption[];
+}
+
+export interface Activity {
+  at: string;
+  who: Actor;
+  text: string;
+}
+
+/** Where the scripted squad is in a ticket's journey. Only the squad reads and writes this. */
+export interface SquadState {
+  phase: string;
+  /** ISO time when the squad should take its next step. */
+  nextAt: string;
+  index?: number;
+}
+
+export interface Ticket {
   id: string;
+  title: string;
+  ask: string;
+  kind: 'feature' | 'bug';
+  source: { type: 'manual' | 'azure' | 'github' | 'jira'; ref?: string };
+  priority: 'high' | 'normal' | 'low';
+  stage: Stage;
+  /** One line under the card title: what is happening now. */
+  status: string;
+  /** True while a squad member is actively working on it. */
+  live?: boolean;
+  /** 0 to 100, for the current stage. */
+  progress?: number;
+  waiting: Waiting | null;
+  createdAt: string;
+  createdBy: string;
+  builder?: string;
+  reviewer?: string;
+  story?: string;
+  criteria?: Criterion[];
+  questions?: Question[];
+  decision?: DecisionDraft;
+  work?: { steps: number; tests: number; screens: number };
+  steps?: Step[];
+  gates?: Gates;
+  proof?: ProofShot[];
+  stuck?: StuckChoice;
+  release?: string;
+  /** One line for the release notes, written by the squad. */
+  releaseNote?: string;
+  foundIn?: string;
+  severity?: 'stops-work' | 'annoying' | 'small';
+  changeRequest?: string;
+  activity: Activity[];
+  squad?: SquadState | null;
 }
 
-export type PlanDiffChange = {
-  value: string;
-  added?: boolean;
-  removed?: boolean;
-};
-
-export interface ApiPlanDiff {
-  feature: string;
-  a: string;
-  b: string;
-  changes: PlanDiffChange[];
-}
-
-export interface ApiMeta {
+export interface Release {
   version: string;
-  root: string;
-  project: { name: string; primaryLanguage?: string; projectRoots?: string[] };
-  planner: { provider: string; enabled: boolean } | null;
-  tracker: { type: string };
-  /** Omitted when no `.last-run.json` exists. */
-  lastRun?: ApiLastRun | null;
+  status: 'draft' | 'released';
+  from: string;
+  date?: string;
+  tickets: string[];
+  notes: string;
+  addons: { changelog: boolean; tag: boolean; pipeline: boolean; whatsapp: boolean };
+  bugs?: string[];
+  whatsappDraft?: string;
+  /** Titles of tickets that are no longer on the board, for past releases. */
+  titles?: Record<string, string>;
 }
 
-export interface ApiDashboardRun {
-  runId: string;
-  startedAt: string;
-  durationMs: number;
-  success: boolean;
-  partial: boolean;
-  inputTokens: number;
-  outputTokens: number;
-  cacheHitRatio: number;
+export interface Decision {
+  id: string;
+  title: string;
+  why: string;
+  options: string[];
+  chosen: string;
+  from: string;
+  approvedBy: string;
+  date: string;
+  checkedBy: { kind: 'test' | 'lint rule'; name: string; passing: boolean } | null;
+  tickets: string[];
 }
 
-export interface ApiDashboard {
-  version: string;
-  root: string;
-  project: ApiMeta['project'];
-  planner: ApiMeta['planner'];
-  tracker: ApiMeta['tracker'];
-  lastRun: ApiLastRun | null;
-  runs: ApiDashboardRun[];
-  storyCounts: { total: number; planned: number; unplanned: number };
-  stories: ApiStory[];
+export interface Lesson {
+  id: string;
+  text: string;
+  from: string;
+  date: string;
 }
 
-export interface ApiRecentProject {
-  root: string;
-  lastOpenedAt: string;
+export interface BoardMeta {
+  project: string;
+  key: string;
+  nextNumber: number;
+  /** `demo` runs the scripted squad; `live` will drive the real AI tools. */
+  engine: 'demo' | 'live';
+  user: { name: string; role: string };
+  roles: Record<'analyst' | 'architect' | 'builder' | 'tester' | 'reviewer', string>;
+  tools: { name: string; ready: boolean }[];
+  /** Multiplier for the scripted squad's pace. 1 is normal, 2 is twice as fast. */
+  speed: number;
+  map: { area: string; detail: string }[];
+  lessons: Lesson[];
 }
 
-export interface ApiActiveRun {
-  runId: string;
-  feature: string;
-  storyId: string;
-  startedAt: number;
+export interface BoardResponse {
+  ready: boolean;
+  meta: BoardMeta;
+  tickets: Ticket[];
+  stats: { released30: number; bugs30: number; open: number };
 }
 
-/** Subset of squad config exposed to the console UI. */
-export interface ApiConfig {
-  planner?: { enabled: boolean; provider?: string };
-  project?: { name: string; primaryLanguage?: string };
-  tracker?: { type: string };
-  version?: number;
+export interface ReleaseItem {
+  id: string;
+  title: string;
+  gates: Gates | null;
+  kind: 'feature' | 'bug';
 }
 
-/** Anthropic auth mode as stored in `planner.auth.anthropic`. */
-export type ApiPlannerAuthMode = 'subscription' | 'api-key' | 'auto';
+export type ReleaseWithItems = Release & { items: ReleaseItem[] };
 
-/** Resolved mode. `auto` is resolved away before anything renders it. */
-export type ApiResolvedAuthMode = 'subscription' | 'api-key';
-
-export interface ApiPlannerAuthAccount {
-  email?: string;
-  organization?: string;
-  subscriptionType?: string;
-}
-
-/**
- * `GET /api/planner-auth` — the Anthropic credential, NOT the console's own URL token
- * (that one lives in `~/api/client`). Carries no key and no OAuth token, ever.
- */
-export interface ApiPlannerAuth {
-  provider: 'anthropic' | 'openai' | 'google';
-  configuredMode: ApiPlannerAuthMode;
-  resolved: { mode: ApiResolvedAuthMode; reason: string; credentialHint: string } | null;
-  error: string | null;
-  login: { present: boolean; hint: string; detail: string };
-  account: ApiPlannerAuthAccount | null;
-  apiKeySource: string | null;
-  runtime: 'agent-sdk' | 'vercel';
-  binary: { found: boolean; source: 'bundled' | 'path' | null };
-  loginCommand: string;
-  loggedIn: boolean;
-  probe: { ran: true; ok: boolean; kind?: string; detail?: string } | null;
-  /** Subscription auth asked for on a runtime that cannot carry it; blocks a Config save. */
-  runtimeConflict: string | null;
-}
-
-export interface ApiLastRun {
-  stats: {
-    turns: number;
-    inputTokens: number;
-    outputTokens: number;
-    cacheCreationTokens: number;
-    cacheReadTokens: number;
-    cacheHitRatio: number;
-    durationMs: number;
-  };
-  completedAt: string;
-  provider: string;
-  model: string;
-  version: 1;
-}
-
-/** Wire shape parsed from SSE JSON payloads on `/api/runs/:id/stream`. */
-export interface PlannerStreamEventWire {
-  kind: string;
-  runId?: string;
-  turn?: number;
-  success?: boolean;
-  planFile?: string | null;
-  partial?: boolean;
-  message?: string;
-  waitSec?: number;
-  retryAfterSec?: number;
-  capSec?: number;
-  phase?: 'retrying' | 'aborted';
-  provider?: 'anthropic' | 'openai' | 'google';
-  rawBody?: string;
-  delta?: string;
-  usage?: {
-    inputTokens?: number;
-    outputTokens?: number;
-    cacheCreationTokens?: number;
-    cacheReadTokens?: number;
-  };
-  cacheHitRatio?: number;
-  toolCall?: { input?: Record<string, unknown>; name?: string };
-  bytesLoaded?: number;
-  totalBytes?: number;
-  toolCallId?: string;
-  name?: string;
-  input?: Record<string, unknown>;
-  durationMs?: number;
-  isError?: boolean;
-  errorSnippet?: string;
-  cacheReadTokens?: number;
-  cacheCreationTokens?: number;
-  stopReason?: string;
-  stage?: 'scout' | 'draft' | 'validation';
-  errorMessage?: string;
-  severity?: 'warning' | 'error';
-  issueKind?: 'missing_path' | 'line_range_too_large' | 'symbol_not_found' | 'malformed_metadata';
-  path?: string;
-  detail?: string;
-  excerpt?: string;
-  selected?: string[];
-  reasoning?: string;
-  model?: string;
-  runtimeKind?: 'vercel' | 'agent-sdk';
-  cacheEnabled?: boolean;
-  scoutEnabled?: boolean;
-  validationEnabled?: boolean;
-  budgetCaps?: { maxFileReads: number; maxContextBytes: number; maxDurationSeconds: number };
-  providerOptions?: {
-    anthropic?: {
-      thinking?: 'adaptive' | 'enabled' | 'disabled' | 'off';
-      effort?: 'minimal' | 'medium' | 'high';
-      effortByPhase?: { scout?: 'minimal' | 'medium' | 'high'; draft?: 'minimal' | 'medium' | 'high' };
-    };
-  };
-  blockIndex?: number;
-  tokensUsed?: number;
-  chars?: number;
-  /** `auth_info` only. `account` is live-stream only — it is stripped before JSONL persistence. */
-  mode?: ApiResolvedAuthMode;
-  reason?: string;
-  credentialHint?: string;
-  apiKeySource?: string;
-  account?: ApiPlannerAuthAccount;
-}
-
-export interface ApiRunStats {
-  turns: number;
-  inputTokens: number;
-  outputTokens: number;
-  cacheCreationTokens: number;
-  cacheReadTokens: number;
-  cacheHitRatio: number;
-  durationMs: number;
-}
-
-/** Persisted planner run (`GET /api/runs`) — aligns with `.squad/runs/<id>.json`. */
-export interface ApiRunRecord {
-  runId: string;
-  provider: string;
-  model: string;
-  feature: string;
-  storyId: string;
-  startedAt: string;
-  completedAt: string;
-  success: boolean;
-  partial: boolean;
-  planFile: string | null;
-  durationMs: number;
-  version: 1;
-  stats?: ApiRunStats;
-  cacheEnabled?: boolean;
-  validation?: {
-    enabled: boolean;
-    issuesCount: number;
-    issuesByKind?: Partial<
-      Record<'missing_path' | 'line_range_too_large' | 'symbol_not_found' | 'malformed_metadata', number>
-    >;
-    durationMs?: number;
-  };
-  plannerRuntime?: { kind: 'vercel' | 'agent-sdk'; provider: string };
-  /** Absent on runs recorded before 0.12.0 — render `—`, never a guess. */
-  authMode?: ApiResolvedAuthMode;
-  providerOptionsSnapshot?: PlannerStreamEventWire['providerOptions'];
-}
-
-export interface ApiRunEventsPage {
-  runId: string;
-  fromIndex: number;
-  limit: number;
-  total: number;
-  events: PlannerStreamEventWire[];
+export interface DecisionsResponse {
+  decisions: Decision[];
+  map: BoardMeta['map'];
+  lessons: Lesson[];
 }

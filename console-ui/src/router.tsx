@@ -1,107 +1,41 @@
-import type { ComponentType } from 'react';
-import { createRootRoute, createRoute, createRouter } from '@tanstack/react-router';
-import { Layout } from './components/Layout';
-import { Dashboard } from './pages/Dashboard';
-import { StoriesPage } from './pages/StoriesPage';
-import { StoryDetail } from './pages/StoryDetail';
-import { PlansPage } from './pages/PlansPage';
-import { PlanDetail } from './pages/PlanDetail';
-import { PlanDiff } from './pages/PlanDiff';
-import { GeneratePage } from './pages/GeneratePage';
-import { ConfigPage } from './pages/ConfigPage';
-import { SecretsPage } from './pages/SecretsPage';
-import { TrackerPage } from './pages/TrackerPage';
-import { DoctorPage } from './pages/DoctorPage';
-import { DesignPlayground } from './pages/DesignPlayground';
-import { RunsIndexPage } from './pages/RunsIndexPage';
-import { RunReportPage } from './pages/RunReportPage';
+import { createRootRoute, createRoute, createRouter, redirect } from '@tanstack/react-router';
+import { Shell } from './components/Shell';
+import { BoardPage } from './pages/Board';
+import { ProofPage } from './pages/Proof';
+import { ReleasesPage } from './pages/Releases';
+import { BugsPage, DecisionsPage, InboxPage, SettingsPage, SquadPage } from './pages/Pages';
 
-const rootRoute = createRootRoute({
-  component: Layout,
-});
+const rootRoute = createRootRoute({ component: Shell });
 
-function leaf(path: string, component: ComponentType) {
-  return createRoute({
-    getParentRoute: () => rootRoute,
-    path,
-    component: component as never,
-  });
-}
-
-const dashboard = leaf('/', Dashboard);
-const stories = leaf('/stories', StoriesPage);
-const storyDetail = createRoute({
+const index = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/stories/$feature/$id',
-  component: StoryDetail as never,
-});
-const plans = leaf('/plans', PlansPage);
-const planDetail = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/plans/$feature/$planFile',
-  component: PlanDetail as never,
-});
-const planDiff = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/plans/$feature/diff',
-  validateSearch: (search: Record<string, unknown>) => ({
-    a: typeof search.a === 'string' ? search.a : '',
-    b: typeof search.b === 'string' ? search.b : '',
-  }),
-  component: PlanDiff as never,
-});
-const generate = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/generate',
-  validateSearch: (search: Record<string, unknown>) => ({
-    feature: typeof search.feature === 'string' ? search.feature : '',
-    storyId: typeof search.storyId === 'string' ? search.storyId : '',
-  }),
-  component: GeneratePage as never,
-});
-const config = leaf('/config', ConfigPage);
-const secrets = leaf('/secrets', SecretsPage);
-const tracker = leaf('/tracker', TrackerPage);
-const doctor = leaf('/doctor', DoctorPage);
-const runsIndex = leaf('/runs', RunsIndexPage);
-const runReport = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/runs/$runId',
-  validateSearch: (search: Record<string, unknown>) => {
-    const t = typeof search.tab === 'string' ? search.tab : '';
-    const tab =
-      t === 'plan' || t === 'issues' || t === 'telemetry' ? (t as 'plan' | 'issues' | 'telemetry') : 'plan';
-    return { tab };
+  path: '/',
+  beforeLoad: () => {
+    throw redirect({ to: '/board' });
   },
-  component: RunReportPage as never,
 });
-const design = createRoute({
+
+const board = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/__design',
-  validateSearch: (search: Record<string, unknown>) => ({
-    design: typeof search.design === 'string' ? search.design : undefined,
+  path: '/board',
+  validateSearch: (s: Record<string, unknown>): { t?: string; view?: 'mine' | 'bugs' } => ({
+    t: typeof s.t === 'string' && s.t ? s.t : undefined,
+    view: s.view === 'mine' || s.view === 'bugs' ? s.view : undefined,
   }),
-  component: DesignPlayground as never,
+  component: BoardPage,
 });
 
-export const routeTree = rootRoute.addChildren([
-  dashboard,
-  stories,
-  storyDetail,
-  plans,
-  planDetail,
-  planDiff,
-  generate,
-  config,
-  secrets,
-  tracker,
-  runsIndex,
-  runReport,
-  doctor,
-  design,
-]);
+const proof = createRoute({ getParentRoute: () => rootRoute, path: '/tickets/$id/proof', component: ProofPage });
+const inbox = createRoute({ getParentRoute: () => rootRoute, path: '/inbox', component: InboxPage });
+const releases = createRoute({ getParentRoute: () => rootRoute, path: '/releases', component: ReleasesPage });
+const decisions = createRoute({ getParentRoute: () => rootRoute, path: '/decisions', component: DecisionsPage });
+const bugs = createRoute({ getParentRoute: () => rootRoute, path: '/bugs', component: BugsPage });
+const squad = createRoute({ getParentRoute: () => rootRoute, path: '/squad', component: SquadPage });
+const settings = createRoute({ getParentRoute: () => rootRoute, path: '/settings', component: SettingsPage });
 
-export const router = createRouter({ routeTree });
+const routeTree = rootRoute.addChildren([index, board, proof, inbox, releases, decisions, bugs, squad, settings]);
+
+export const router = createRouter({ routeTree, defaultPreload: false });
 
 declare module '@tanstack/react-router' {
   interface Register {

@@ -9,6 +9,9 @@ import { readInstalledPackage } from '../core/package-info.js';
 import { mountApi } from './api/index.js';
 import { mountStaticAssets } from './static-assets.js';
 import { authMiddleware } from './auth.js';
+import { boardPaths } from '../board/store.js';
+import { startDemoSquad } from '../board/engine.js';
+import { claimSquad } from '../board/lock.js';
 
 export interface StartConsoleServerOptions {
   paths: SquadPaths;
@@ -71,6 +74,15 @@ export async function startConsoleServer(opts: StartConsoleServerOptions): Promi
 
   const nodeServer = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: bindPort });
 
+  // The demo squad only acts on a board seeded with `engine: demo`; on other boards it stays idle.
+  const bp = boardPaths(opts.paths.squadDir);
+  const stopTimer = startDemoSquad(bp);
+  const releaseLock = claimSquad(bp);
+  const stopSquad = () => {
+    stopTimer();
+    releaseLock();
+  };
+
   let resolveDone: () => void = () => {};
   const done = new Promise<void>((resolve) => {
     resolveDone = resolve;
@@ -83,6 +95,7 @@ export async function startConsoleServer(opts: StartConsoleServerOptions): Promi
   })();
 
   const shutdown = (onClose: (err?: Error) => void) => {
+    stopSquad();
     nodeServer.close((err) => {
       onClose(err);
     });

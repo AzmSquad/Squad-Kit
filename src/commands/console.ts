@@ -43,9 +43,9 @@ export async function runConsole(opts: ConsoleOptions): Promise<void> {
   }
   ui.blank();
   ui.step('Next:');
-  ui.info('1) Pick a story in the Stories tab.');
-  ui.info('2) Click "Generate plan" to start a planning run live.');
-  ui.info("3) Press Ctrl-C in this terminal to stop the server when you're done.");
+  ui.info('1) Work from the board, or from this terminal: try `squad inbox` in a second tab.');
+  ui.info('2) Every button on the board shows its terminal command.');
+  ui.info("3) Press Ctrl-C here to stop the board when you're done.");
 
   if (opts.open !== false) {
     try {

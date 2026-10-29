@@ -12,6 +12,21 @@ import { runMigrate } from './commands/migrate.js';
 import { runUpgrade } from './commands/upgrade.js';
 import { runConsole } from './commands/console.js';
 import {
+  runAnswer,
+  runApprove,
+  runBoard,
+  runBug,
+  runChange,
+  runDecide,
+  runDemo,
+  runInbox,
+  runNew,
+  runPull,
+  runRelease,
+  runShow,
+  runWatch,
+} from './commands/board.js';
+import {
   runConfigShow,
   runConfigSetPlanner,
   runConfigSetTracker,
@@ -150,7 +165,7 @@ program
 
 program
   .command('console')
-  .description('Open the squad-kit web console (local, dark-modern UI for stories, plans, runs, config)')
+  .description('Open the board in your browser. Every button there is also a command here')
   .option(
     '--port <number>',
     'Port to bind on 127.0.0.1 (default 4571; falls back to next free port)',
@@ -159,6 +174,68 @@ program
   .option('--no-open', 'Do not auto-open the browser; print the URL instead')
   .option('--token <hex>', 'Reuse a specific session token (advanced; default: random per session)')
   .action(wrap(runConsole));
+
+program
+  .command('demo')
+  .description('Open a sample board where the squad works on its own, to try squad-kit v1')
+  .option('--speed <n>', 'How fast the squad works: 1 is normal, 2 is twice as fast', (v) => parseFloat(v))
+  .option('--project <name>', 'Project name on the sample board')
+  .option('--port <number>', 'Port to bind on 127.0.0.1', (v) => parseInt(v, 10))
+  .option('--no-open', 'Do not open the browser; print the URL instead')
+  .option('--keep', 'Keep the current sample board instead of starting fresh', false)
+  .option('--token <hex>', 'Reuse a specific session token (advanced)')
+  .action(wrap(runDemo));
+
+program.command('inbox').description('List everything waiting for you').action(wrap(runInbox));
+program.command('board').description('Show every open ticket by stage').action(wrap(runBoard));
+program
+  .command('show <ticket>')
+  .description('Show a ticket: its story, plan, steps, gates and proof')
+  .action(wrapArgs(runShow));
+program
+  .command('answer <ticket>')
+  .description("Answer the squad's questions on a ticket")
+  .option('--skip', 'Let the squad guess every answer', false)
+  .action(wrapArgs(runAnswer));
+program
+  .command('approve <ticket>')
+  .description('Approve what a ticket is waiting on: the plan or the proof')
+  .action(wrapArgs(runApprove));
+program
+  .command('change <ticket> [note...]')
+  .description('Ask for a change to the plan, or send the proof back with a note')
+  .action(wrapArgs(runChange));
+program
+  .command('decide <ticket> [choice]')
+  .description('Decide for the squad when it is stuck')
+  .action(wrapArgs(runDecide));
+program
+  .command('watch <ticket>')
+  .description('Follow a ticket live until it needs you')
+  .action(wrapArgs(runWatch));
+program
+  .command('release [version]')
+  .description('Release the tickets that are ready')
+  .option('-y, --yes', 'Skip the confirmation', false)
+  .action(wrapArgs(runRelease));
+program
+  .command('bug [what...]')
+  .description('Report a bug; it becomes a ticket linked to the release')
+  .option('--in <version>', 'The release where you found it (default: the latest)')
+  .option('--severity <level>', 'stops-work, annoying or small')
+  .option('--how <steps>', 'How to see it')
+  .option('--expected <text>', 'What you expected')
+  .action(wrapArgs(runBug));
+program
+  .command('new [title...]')
+  .description('Write a new ticket in plain words')
+  .option('--ask <text>', 'What you want, in a sentence or two')
+  .option('--priority <level>', 'high, normal or low')
+  .action(wrapArgs(runNew));
+program
+  .command('pull <ref>')
+  .description('Pull a ticket from Azure DevOps, for example AB#4133')
+  .action(wrapArgs(runPull));
 
 program
   .command('list')

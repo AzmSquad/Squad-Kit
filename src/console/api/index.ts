@@ -12,6 +12,7 @@ import { mountDoctorApi } from './doctor.js';
 import { mountCopyPlanPromptApi } from './copy-plan-prompt.js';
 import { mountDashboardApi } from './dashboard.js';
 import { mountProjectsApi } from './projects.js';
+import { mountBoardApi } from './board.js';
 
 export interface MountApiOptions {
   paths: SquadPaths;
@@ -30,4 +31,5 @@ export function mountApi(app: Hono, opts: MountApiOptions): void {
   mountTrackerApi(app, opts);
   mountDoctorApi(app, opts);
   mountCopyPlanPromptApi(app, opts);
+  mountBoardApi(app, opts);
 }

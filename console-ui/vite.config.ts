@@ -17,6 +17,8 @@ export default defineConfig({
     emptyOutDir: true,
     sourcemap: false,
     target: 'es2022',
+    // Fonts must ship as files: the console's CSP blocks data: URLs.
+    assetsInlineLimit: 0,
   },
   server: {
     port: 5173,
