@@ -240,7 +240,9 @@ program
   .action(wrapArgs(runNote));
 program
   .command('decide <ticket> [choice]')
-  .description('Decide for the squad when it is stuck')
+  .description('Decide for the squad when it is stuck: try again, fix it yourself, continue anyway or back to the plan')
+  .option('--note <text>', 'With "Try again": a note the squad reads first')
+  .option('--reason <text>', 'With "Continue anyway": why. It shows on the ticket, the pull request and the release notes')
   .action(wrapArgs(runDecide));
 program
   .command('stop <ticket>')

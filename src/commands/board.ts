@@ -352,12 +352,13 @@ export async function runNote(ticketId: string, words: string[], opts: { criteri
   ui.success(`Added to ${t.id}. Every agent on it reads this${t.live ? ' from its next step' : ''}.`);
 }
 
-export async function runDecide(ticketId: string, choice?: string): Promise<void> {
+export async function runDecide(ticketId: string, choice?: string, opts: { note?: string; reason?: string } = {}): Promise<void> {
   const bp = board();
   const t = requireTicket(bp, ticketId);
   if (!t.stuck || t.waiting?.kind !== 'stuck') throw new Error(`${t.id} is not stuck.`);
   let index = choice ? Number(choice) - 1 : NaN;
-  if (Number.isNaN(index)) {
+  const ask = Number.isNaN(index);
+  if (ask) {
     out();
     out(`  ${t.stuck.question}`);
     index = await select({
@@ -365,8 +366,16 @@ export async function runDecide(ticketId: string, choice?: string): Promise<void
       choices: t.stuck.options.map((o, i) => ({ name: `${o.name}  ${kleur.gray(o.note)}`, value: i })),
     });
   }
-  decideStuck(bp, t.id, index);
-  ui.success(`Decided. The Builder is trying "${t.stuck.options[index]?.name}".`);
+  const way = t.stuck.options[index]?.do;
+  let { note, reason } = opts;
+  if (way === 'continue' && !reason?.trim()) {
+    if (!ask) throw new Error('Add --reason "why". It shows on the ticket, the pull request and the release notes.');
+    reason = await input({ message: 'Why continue anyway? (shows on the ticket, the pull request and the release notes)', validate: (v) => (v.trim() ? true : 'Write a short reason.') });
+  }
+  if (way === 'retry' && ask && note === undefined) note = await input({ message: 'A note for the squad (optional, Enter to skip)' });
+  if (way === 'yourself' && t.worktree) out(`  The ticket's copy: ${t.worktree}`);
+  decideStuck(bp, t.id, index, { note, reason });
+  ui.success(way === 'yourself' ? 'OK. The checks, review and proof run again on your fix.' : `Decided: "${t.stuck.options[index]?.name}".`);
 }
 
 export async function runWatch(ticketId: string): Promise<void> {

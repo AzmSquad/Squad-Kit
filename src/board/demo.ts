@@ -146,10 +146,13 @@ function demoTickets(user: string): Ticket[] {
       status: 'Stuck after 3 test runs',
       waiting: { kind: 'stuck', summary: 'The squad is stuck and needs one decision' },
       stuck: {
-        question: 'Two clerks editing the same case notes overwrite each other, so the tests fail. What should happen?',
+        gate: 'checks',
+        question: 'The checks still fail after 3 tries. autosave.spec.ts says: two clerks editing the same case notes overwrite each other.',
         options: [
-          { name: 'Last save wins', note: 'Simple. A clerk may lose a few words.' },
-          { name: 'Warn the second clerk', note: 'Safer. Shows "someone else is editing" and keeps both texts.' },
+          { do: 'retry', name: 'Let the Builder try 3 more times', note: 'It gets the full error and tries again.' },
+          { do: 'yourself', name: 'Fix it yourself', note: "Open the ticket's copy in your editor and fix it. Then the checks, review and proof run again." },
+          { do: 'continue', name: 'Continue anyway', note: 'Go on with the checks failing. Write why: it shows on the ticket, the pull request and the release notes.' },
+          { do: 'plan', name: 'Send it back to the plan', note: 'The Spec writer rewrites the plan with what went wrong.' },
         ],
       },
       steps: [
@@ -161,7 +164,7 @@ function demoTickets(user: string): Ticket[] {
       story: 'As a clerk, I want my case notes saved as I type, so I never lose my work.',
       progress: 50,
       activity: log([
-        [2, 'builder', 'Stopped after 3 failed test runs and asked for a decision'],
+        [2, 'tester', 'Checks failed 3 times. Stopped and asked you'],
         [12, 'builder', 'Finished step 2: Build case notes autosave'],
       ]),
     }),

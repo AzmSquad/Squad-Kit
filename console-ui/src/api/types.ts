@@ -65,7 +65,7 @@ export interface Step {
   live?: string;
 }
 
-export type GateState = 'pending' | 'pass' | 'fail';
+export type GateState = 'pending' | 'pass' | 'fail' | 'skipped';
 
 export interface Gates {
   checks: GateState;
@@ -84,9 +84,19 @@ export interface ProofShot {
   note?: string;
 }
 
+export type WayOut = 'retry' | 'yourself' | 'continue' | 'plan' | 'skip-pr';
+
 export interface StuckChoice {
   question: string;
-  options: DecisionOption[];
+  options: (DecisionOption & { do?: WayOut })[];
+  gate?: 'checks' | 'review' | 'merge';
+}
+
+export interface GateOverride {
+  gate: 'checks' | 'review';
+  reason: string;
+  by: string;
+  at: string;
 }
 
 export interface Activity {
@@ -170,6 +180,7 @@ export interface Ticket {
   attachments?: string[];
   brief?: { criteria: string[]; rules: string[]; edgeCases: string[] };
   notes?: TicketNote[];
+  overrides?: GateOverride[];
   track?: Track;
   agentQuestion?: { from: 'builder' | 'reviewer'; text: string; options: string[]; why?: string; at: string; answer?: string };
   /** In a multi-repo workspace: the code repo this ticket changes. */

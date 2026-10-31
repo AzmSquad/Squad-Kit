@@ -72,7 +72,8 @@ export interface Step {
   live?: string;
 }
 
-export type GateState = 'pending' | 'pass' | 'fail';
+/** 'skipped': the person pressed Continue anyway, with a reason (see Ticket.overrides). The engine never skips a gate itself. */
+export type GateState = 'pending' | 'pass' | 'fail' | 'skipped';
 
 export interface Gates {
   checks: GateState;
@@ -91,9 +92,27 @@ export interface ProofShot {
   note?: string;
 }
 
+/** The ways out of a stop. Every stop has at least Try again and one more. */
+export type WayOut = 'retry' | 'yourself' | 'continue' | 'plan' | 'skip-pr';
+
+export interface StuckOption extends DecisionOption {
+  /** What the choice does. Older boards have no `do`: their first choice tries again, the second goes to the plan. */
+  do?: WayOut;
+}
+
 export interface StuckChoice {
   question: string;
-  options: DecisionOption[];
+  options: StuckOption[];
+  /** What stopped: a failed gate the person can continue past, a clash with the base branch, or any other error. */
+  gate?: 'checks' | 'review' | 'merge';
+}
+
+/** The person went past a failed gate on purpose. Shown on the ticket, the pull request and the release notes. */
+export interface GateOverride {
+  gate: 'checks' | 'review';
+  reason: string;
+  by: string;
+  at: string;
 }
 
 export interface Activity {
@@ -212,6 +231,7 @@ export interface Ticket {
   /** Updates still to send to the tracker; the live squad sends them, so terminal commands never wait on Azure. */
   trackerQueue?: TrackerEvent[];
   notes?: TicketNote[];
+  overrides?: GateOverride[];
   /**
    * Full runs every step. Express (a typo, an urgent small bug) skips the questions and the plan approval, never the
    * build, checks, review or your Looks right. Missing means Full.

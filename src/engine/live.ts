@@ -14,13 +14,13 @@ import {
   writeMeta,
   type BoardPaths,
 } from '../board/store.js';
-import { approveExpress } from '../board/actions.js';
+import { approveExpress, wayOptions } from '../board/actions.js';
 import { scheduleSquad } from '../board/schedule.js';
 import type { BoardMeta, ProjectCommands, Question, Role, Ticket } from '../board/types.js';
 import { describeTool, runClaude, type RunOptions, type RunResult } from './claude.js';
 import { AcpStartError, acpAdapterPath, runClaudeAcp } from './acp-runner.js';
 import { runChecks, runCommand, startApp, tail, testCount, type RunningApp } from './checks.js';
-import { addWorktree } from './git.js';
+import { addWorktree, git } from './git.js';
 import * as P from './prompts.js';
 import { findNestedRepos, repoFor, rulesFiles } from './repos.js';
 import { flushTracker, publishTicket, syncWiki } from './sync.js';
@@ -312,16 +312,10 @@ export class LiveSquad {
         t.status = 'Stopped, needs you';
         t.stuck = {
           question: error,
-          options:
-            retryPhase === 'publish'
-              ? [
-                  { name: 'Try again', note: 'Push the branch and open the pull request again.' },
-                  { name: 'Skip the pull request', note: 'Release merges this branch directly instead.' },
-                ]
-              : [
-                  { name: 'Try again', note: 'Run the same step again.' },
-                  { name: 'Send it back to the plan', note: 'The Spec writer rewrites the plan with what went wrong.' },
-                ],
+          options: wayOptions({
+            publish: retryPhase === 'publish',
+            copy: Boolean(t.worktree && fs.existsSync(t.worktree)) && ['implement', 'test', 'review'].includes(t.stage),
+          }),
         };
         t.waiting = { kind: 'stuck', summary: 'The squad stopped and needs you' };
         addActivity(t, 'squad', `Stopped: ${error}`);
@@ -425,6 +419,10 @@ export class LiveSquad {
         return this.checks(id);
       case 'review':
         return this.review(id);
+      case 'review-fix':
+        return this.reviewFix(id);
+      case 'update-base':
+        return this.updateBase(id);
       case 'proof':
         return this.proof(id);
       case 'publish':
@@ -762,6 +760,59 @@ export class LiveSquad {
     throw new WaitingForYou();
   }
 
+  /** "Let the Builder fix the notes" after the last review round: fix them, then the checks and two more rounds. */
+  private async reviewFix(id: string): Promise<void> {
+    const t = await this.workspace(id);
+    this.update(id, (x) => {
+      x.stage = 'implement';
+      x.live = true;
+      x.status = 'Builder is fixing the review notes';
+      x.tries = 0;
+      x.reviewRound = 0;
+    });
+    await this.runBuilder(id, P.reviewFixPrompt(t.reviewNotes ?? []), Boolean(t.sessions?.build));
+    this.update(id, (x) => {
+      addActivity(x, 'builder', 'Fixed the review notes');
+      x.reviewNotes = undefined;
+      x.stage = 'test';
+      x.status = 'Running the project checks';
+      scheduleSquad(x, 'test', 0.2, 1);
+    });
+  }
+
+  /**
+   * The accepted change clashes with newer work in the base. squad-kit starts the merge in the ticket's copy (agents
+   * never write to git), the Builder settles each clash, and the checks, review and proof run again.
+   */
+  private async updateBase(id: string): Promise<void> {
+    const t = await this.workspace(id);
+    const base = repoFor(this.meta(), t).base;
+    const dir = t.worktree!;
+    const baseSha = git(dir, ['rev-parse', base]);
+    git(dir, ['merge', '--no-commit', '--no-ff', base], { allowFail: true });
+    const clashes = git(dir, ['diff', '--name-only', '--diff-filter=U'], { allowFail: true }).split('\n').filter(Boolean);
+    this.update(id, (x) => {
+      x.baseCommit = baseSha;
+      x.stage = 'implement';
+      x.live = true;
+      x.tries = 0;
+      x.reviewRound = 0;
+      x.proof = undefined;
+      x.gates = { checks: 'pending', review: 'pending', proof: 'pending' };
+      x.status = clashes.length ? `Builder is fixing ${clashes.length} clashing ${clashes.length === 1 ? 'file' : 'files'}` : 'Running the project checks';
+      addActivity(x, 'squad', `Brought the latest ${base} into this ticket${clashes.length ? `. Clashes in ${clashes.join(', ')}` : ''}`);
+    });
+    if (clashes.length) {
+      await this.runBuilder(id, P.clashPrompt(base, clashes), Boolean(t.sessions?.build));
+      this.update(id, (x) => addActivity(x, 'builder', `Fixed the clash with ${base}`));
+    }
+    this.update(id, (x) => {
+      x.stage = 'test';
+      x.status = 'Running the project checks';
+      scheduleSquad(x, 'test', 0.2, 1);
+    });
+  }
+
   private async fixFromPerson(id: string): Promise<void> {
     const t = await this.workspace(id);
     this.update(id, (x) => {
@@ -836,11 +887,9 @@ export class LiveSquad {
         x.retryPhase = 'test';
         x.status = `Stuck after ${tries} check runs`;
         x.stuck = {
+          gate: 'checks',
           question: `The checks still fail after ${tries} tries. ${failed[0]!.name} says: ${tail(failed[0]!.output, 3).slice(0, 300)}`,
-          options: [
-            { name: 'Let the Builder try 3 more times', note: 'It gets the full error and tries again.' },
-            { name: 'Send it back to the plan', note: 'The Spec writer rewrites the plan with what went wrong.' },
-          ],
+          options: wayOptions({ gate: 'checks', copy: Boolean(x.worktree && fs.existsSync(x.worktree)) }),
         };
         x.waiting = { kind: 'stuck', summary: 'The squad is stuck and needs one decision' };
       });
@@ -885,12 +934,31 @@ export class LiveSquad {
     const out = r.structured as { approved: boolean; summary: string; comments: string[]; question?: AgentAsk };
     this.askIfNeeded(id, 'reviewer', out.question);
     if (goOn) this.update(id, (x) => (x.agentQuestion = undefined));
-    if (out.approved || round >= MAX_REVIEW_ROUNDS) {
+    if (out.approved) {
       this.update(id, (x) => {
         x.gates = { ...(x.gates ?? { checks: 'pass', proof: 'pending' }), review: 'pass', reviewBy: 'a second Claude session' } as Ticket['gates'];
-        addActivity(x, 'reviewer', out.approved ? `Approved: ${out.summary}` : `Accepted after ${round} rounds with notes: ${out.comments.join(' ')}`);
+        addActivity(x, 'reviewer', `Approved: ${out.summary}`);
         x.status = 'Recording the proof';
         scheduleSquad(x, 'proof', 0.2, 1);
+      });
+      return;
+    }
+    // The engine never waves a review through: after the last round, you decide.
+    if (round >= MAX_REVIEW_ROUNDS) {
+      this.update(id, (x) => {
+        x.live = false;
+        x.squad = null;
+        x.reviewNotes = out.comments;
+        x.gates = { ...(x.gates ?? { checks: 'pass', proof: 'pending' }), review: 'fail', reviewBy: 'a second Claude session' } as Ticket['gates'];
+        x.retryPhase = 'review-fix';
+        x.status = `Review still open after ${round} rounds`;
+        addActivity(x, 'reviewer', `Still asks for ${out.comments.length} ${out.comments.length === 1 ? 'fix' : 'fixes'} after ${round} rounds: ${out.comments.join(' ')}`);
+        x.stuck = {
+          gate: 'review',
+          question: `The Reviewer still asks for changes after ${round} rounds: ${out.comments.join(' ')}`.slice(0, 600),
+          options: wayOptions({ gate: 'review', copy: Boolean(x.worktree && fs.existsSync(x.worktree)) }),
+        };
+        x.waiting = { kind: 'stuck', summary: 'The review is still open and needs one decision' };
       });
       return;
     }

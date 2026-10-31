@@ -415,17 +415,24 @@ function AskDeveloper({ t, onClose }: { t: Ticket; onClose(): void }) {
 function GatePills({ t }: { t: Ticket }) {
   const g = t.gates;
   const pill = (state: string | undefined, text: string) => (
-    <span className={`pill ${state === 'pass' ? 'ok' : 'wait'}`}>
+    <span className={`pill ${state === 'pass' ? 'ok' : state === 'skipped' ? 'skip' : 'wait'}`}>
       {state === 'pass' && <Check size={13} strokeWidth={2.5} />}
       {text}
     </span>
   );
   return (
-    <div className="pills">
-      {pill(g?.checks, g?.checksText ?? 'All checks pass')}
-      {pill(g?.review, g?.review === 'pass' ? `Review approved by ${g.reviewBy}` : 'Review approved')}
-      {pill(g?.proof, 'Proof made')}
-    </div>
+    <>
+      <div className="pills">
+        {pill(g?.checks, g?.checks === 'skipped' ? 'Checks failed, you continued' : (g?.checksText ?? 'All checks pass'))}
+        {pill(g?.review, g?.review === 'pass' ? `Review approved by ${g.reviewBy}` : g?.review === 'skipped' ? 'Review notes open, you continued' : 'Review approved')}
+        {pill(g?.proof, 'Proof made')}
+      </div>
+      {t.overrides?.map((o) => (
+        <p className="note override" key={o.at}>
+          <b>Continued anyway</b> past the {o.gate === 'checks' ? 'failed checks' : 'open review'}, by {o.by}: {o.reason}
+        </p>
+      ))}
+    </>
   );
 }
 
@@ -578,9 +585,16 @@ function AskPanel({ t }: { t: Ticket }) {
 
 /* ── Stuck ─────────────────────────────────────────────── */
 
+/** Every stop has a way out: try again (with a note), fix it yourself in the copy, continue anyway (with a reason), or back to the plan. */
 function StuckPanel({ t }: { t: Ticket }) {
   const act = useAct();
   const [pick, setPick] = useState<number | null>(null);
+  const [text, setText] = useState('');
+  const opts = t.stuck?.options ?? [];
+  const way = pick === null ? undefined : (opts[pick]?.do ?? (pick === 0 ? 'retry' : undefined));
+  const needsReason = way === 'continue' && !text.trim();
+  const label = way === 'yourself' ? 'I fixed it, check again' : way === 'continue' ? 'Continue anyway' : way === 'retry' ? 'Try again' : 'Decide';
+  const flag = way === 'continue' ? ` --reason "${text.trim() || '…'}"` : way === 'retry' && text.trim() ? ` --note "${text.trim()}"` : '';
   return (
     <>
       <div className="db">
@@ -588,14 +602,21 @@ function StuckPanel({ t }: { t: Ticket }) {
           <span className="ring">!</span>
           <div>
             <b>The squad stopped and needs your decision</b>
-            <span>Read what happened, then pick what should happen next. It won't guess on something this important.</span>
+            <span>Read what happened, then pick a way out. Nothing is lost whatever you pick.</span>
           </div>
         </div>
         <div className="lbl">What happened</div>
         <p className="stuckq">{t.stuck?.question}</p>
         <div className="opts2">
-          {t.stuck?.options.map((o, i) => (
-            <button key={o.name} className={`opt2 ${pick === i ? 'pick' : ''}`} onClick={() => setPick(i)}>
+          {opts.map((o, i) => (
+            <button
+              key={o.name}
+              className={`opt2 ${pick === i ? 'pick' : ''}`}
+              onClick={() => {
+                setPick(i);
+                setText('');
+              }}
+            >
               <b>
                 {o.name}
                 {pick === i && (
@@ -608,14 +629,43 @@ function StuckPanel({ t }: { t: Ticket }) {
             </button>
           ))}
         </div>
+        {way === 'retry' && (
+          <>
+            <div className="lbl">A note for the squad (optional)</div>
+            <textarea className="waynote" rows={2} value={text} onChange={(e) => setText(e.target.value)} placeholder="For example: the test server needs the VPN, it is on now" />
+          </>
+        )}
+        {way === 'continue' && (
+          <>
+            <div className="lbl">Why continue anyway?</div>
+            <textarea className="waynote" rows={2} value={text} onChange={(e) => setText(e.target.value)} placeholder="For example: the failing test is broken on main too, fixed in SK-160" />
+            <p className="note" style={{ fontSize: 12.5 }}>Only you can do this. Your reason shows on the ticket, the pull request and the release notes.</p>
+          </>
+        )}
+        {way === 'yourself' && (
+          <div className="stuckbox">
+            <p style={{ margin: '0 0 8px' }}>Open the ticket&apos;s copy, fix it, and save. Then press <b>I fixed it</b>: the checks, review and proof run again.</p>
+            <OpenInEditor t={t} />
+          </div>
+        )}
         <RecentActivity t={t} />
       </div>
       <div className="df">
-        <button className="btn pri" disabled={pick === null || act.isPending} onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/decide`, body: { choice: pick }, done: 'Decided. The Builder is trying your choice.' })}>
-          <Check size={15} strokeWidth={2.5} /> Decide
+        <button
+          className="btn pri"
+          disabled={pick === null || needsReason || act.isPending}
+          onClick={() =>
+            act.mutate({
+              path: `/api/v1/tickets/${t.id}/decide`,
+              body: { choice: pick, ...(way === 'continue' ? { reason: text } : way === 'retry' ? { note: text } : {}) },
+              done: way === 'yourself' ? 'OK. The checks run again on your fix.' : 'Decided. The squad carries on.',
+            })
+          }
+        >
+          <Check size={15} strokeWidth={2.5} /> {label}
         </button>
         <span className="grow" />
-        <Cmd text={`squad decide ${t.id}${pick !== null ? ` ${pick + 1}` : ''}`} />
+        <Cmd text={`squad decide ${t.id}${pick !== null ? ` ${pick + 1}` : ''}${flag}`} />
       </div>
     </>
   );

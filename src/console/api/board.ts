@@ -305,8 +305,8 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
   });
 
   app.post('/api/v1/tickets/:id/decide', async (c) => {
-    const b = await body<{ choice?: number }>(c);
-    return act(c, () => decideStuck(bp, c.req.param('id'), Number(b.choice)));
+    const b = await body<{ choice?: number; note?: string; reason?: string }>(c);
+    return act(c, () => decideStuck(bp, c.req.param('id'), Number(b.choice), { note: b.note, reason: b.reason }));
   });
 
   app.get('/api/v1/releases', (c) => {

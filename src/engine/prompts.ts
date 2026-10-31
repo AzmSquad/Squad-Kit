@@ -327,6 +327,10 @@ export function reviewFixPrompt(comments: string[]): string {
   return `The Reviewer asked for these changes:\n${comments.map((c) => `- ${c}`).join('\n')}\n\nPrint ">> fix" first, then make the changes and run the tests again.`;
 }
 
+export function clashPrompt(base: string, files: string[]): string {
+  return `Someone changed the same lines in ${base} since this ticket started. squad-kit has merged ${base} into this folder, and these files have clash markers (<<<<<<<, =======, >>>>>>>):\n${files.map((f) => `- ${f}`).join('\n')}\n\nPrint ">> clash" first. In each file, keep both changes working together and remove every marker. Do not run git commands; squad-kit saves the merge. Then run the tests again.`;
+}
+
 export function changeFixPrompt(note: string): string {
   return `The person checked the result and said: "${note}"\n\nPrint ">> fix" first, then fix it and run the tests again.`;
 }

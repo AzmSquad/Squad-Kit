@@ -22,14 +22,14 @@ import type { Release, Ticket } from './types.js';
 import { scheduleSquad } from './schedule.js';
 import { commitTicket, liveRelease } from '../engine/release.js';
 import { git } from '../engine/git.js';
-import { reposOf } from '../engine/repos.js';
+import { repoFor, reposOf } from '../engine/repos.js';
 import { buildPaths } from '../core/paths.js';
 import { loadConfig } from '../core/config.js';
 import { loadSecrets } from '../core/secrets.js';
 import { clientFor, overlayTrackerEnv } from '../tracker/index.js';
 import { azureFor, type Azure } from '../engine/azure.js';
 import { mergeLocally, opensPullRequest, syncWiki } from '../engine/sync.js';
-import type { TicketNote, Track, TrackerEvent } from './types.js';
+import type { StuckChoice, StuckOption, TicketNote, Track, TrackerEvent, WayOut } from './types.js';
 import { endProcessTree } from '../engine/watchdog.js';
 
 /** Every person-facing action lives here, so the board and the terminal do exactly the same thing. */
@@ -353,9 +353,6 @@ function acceptProof(bp: BoardPaths, ticket: Ticket): Ticket {
       throw new BoardActionError(`Could not save the change in git: ${(err as Error).message}`);
     }
   }
-  const release = ensureDraftRelease(bp, ticket.kind === 'bug' ? 'patch' : 'minor');
-  if (!release.tickets.includes(ticket.id)) release.tickets.push(ticket.id);
-  writeRelease(bp, release);
   const openPr = !ticket.pr && opensPullRequest(bp, ticket);
   // Merge on accept: without a pull request host the branch merges into the base right here, so the next tickets
   // build on it. With Azure Repos the live squad opens the PR and merges it.
@@ -364,9 +361,12 @@ function acceptProof(bp: BoardPaths, ticket: Ticket): Ticket {
     try {
       merged = mergeLocally(bp, ticket);
     } catch (err) {
-      throw new BoardActionError(`${ticket.id} is saved as a commit, but it ${(err as Error).message.replace(/^squad\/\S+ /, '')} Send it back to the Builder with "Ask for a change" to update it.`);
+      return clashed(bp, ticket.id, commit, (err as Error).message);
     }
   }
+  const release = ensureDraftRelease(bp, ticket.kind === 'bug' ? 'patch' : 'minor');
+  if (!release.tickets.includes(ticket.id)) release.tickets.push(ticket.id);
+  writeRelease(bp, release);
   return updateTicket(bp, ticket.id, (t) => {
     t.waiting = null;
     t.stage = 'release';
@@ -380,6 +380,27 @@ function acceptProof(bp: BoardPaths, ticket: Ticket): Ticket {
     if (commit) addActivity(t, 'release', `Saved the change as commit ${commit} on ${t.branch}`);
     if (merged) addActivity(t, 'release', `Merged into ${merged.base}${merged.note ? `. ${merged.note}` : ''}`);
     addActivity(t, 'release', `Added to release ${release.version}`);
+  });
+}
+
+/** The accepted branch clashes with the base: not a dead end, a stuck card with ways out. */
+function clashed(bp: BoardPaths, id: string, commit: string | null, error: string): Ticket {
+  const meta = readMeta(bp);
+  return updateTicket(bp, id, (t) => {
+    const base = repoFor(meta, t).base;
+    t.waiting = { kind: 'stuck', summary: `Clashes with ${base} and needs one decision` };
+    t.live = false;
+    t.squad = null;
+    t.status = `Clashes with ${base}`;
+    t.retryPhase = 'update-base';
+    t.stuck = {
+      gate: 'merge',
+      question: `The change is saved, but it cannot go into ${base}: someone changed the same lines there since this ticket started. ${error.replace(/^squad\/\S+ /, '')}`.trim(),
+      options: wayOptions({ gate: 'merge', base, copy: Boolean(t.worktree && fs.existsSync(t.worktree)) }),
+    };
+    addActivity(t, 'you', 'Checked the proof. Looks right');
+    if (commit) addActivity(t, 'release', `Saved the change as commit ${commit} on ${t.branch}`);
+    addActivity(t, 'release', `Could not merge into ${base}: it clashes with newer changes there`);
   });
 }
 
@@ -442,36 +463,137 @@ export function requestChange(bp: BoardPaths, id: string, text: string): Ticket 
   });
 }
 
-export function decideStuck(bp: BoardPaths, id: string, choice: number): Ticket {
+/** The choices on a stuck card. Every stop has a way out: try again, do it yourself, go around it, or back to the plan. */
+export function wayOptions(stop: { gate?: StuckChoice['gate']; publish?: boolean; copy?: boolean; base?: string }): StuckOption[] {
+  if (stop.publish) {
+    return [
+      { do: 'retry', name: 'Try again', note: 'Push the branch and open the pull request again.' },
+      { do: 'skip-pr', name: 'Skip the pull request', note: 'Release merges this branch directly instead.' },
+    ];
+  }
+  const retry: StuckOption =
+    stop.gate === 'checks'
+      ? { do: 'retry', name: 'Let the Builder try 3 more times', note: 'It gets the full error and tries again.' }
+      : stop.gate === 'review'
+        ? { do: 'retry', name: 'Let the Builder fix the notes', note: 'Then the Reviewer gets two more rounds.' }
+        : stop.gate === 'merge'
+          ? { do: 'retry', name: `Let the Builder bring in the latest ${stop.base ?? 'base'}`, note: 'It merges it into this ticket, fixes the clash, and the checks run again.' }
+          : { do: 'retry', name: 'Try again', note: 'Run the same step again. You can add a note for the squad.' };
+  const out: StuckOption[] = [retry];
+  if (stop.copy) {
+    out.push({
+      do: 'yourself',
+      name: stop.gate === 'merge' ? 'Fix the clash yourself' : 'Fix it yourself',
+      note: 'Open the ticket\'s copy in your editor and fix it. Then the checks, review and proof run again.',
+    });
+  }
+  if (stop.gate === 'checks' || stop.gate === 'review') {
+    out.push({
+      do: 'continue',
+      name: 'Continue anyway',
+      note: `Go on with the ${stop.gate === 'checks' ? 'checks failing' : 'review notes open'}. Write why: it shows on the ticket, the pull request and the release notes.`,
+    });
+  }
+  out.push({ do: 'plan', name: 'Send it back to the plan', note: 'The Spec writer rewrites the plan with what went wrong.' });
+  return out;
+}
+
+/** Older stuck cards have no `do` on their options: the first tried again, the second went to the plan or skipped the PR. */
+function wayOf(t: Ticket, option: StuckOption, choice: number): WayOut {
+  if (option.do) return option.do;
+  if (choice === 0) return 'retry';
+  return t.retryPhase === 'publish' ? 'skip-pr' : 'plan';
+}
+
+export function decideStuck(bp: BoardPaths, id: string, choice: number, input: { note?: string; reason?: string } = {}): Ticket {
   const meta = readMeta(bp);
   return updateTicket(bp, id, (t) => {
     if (t.waiting?.kind !== 'stuck' || !t.stuck) throw new BoardActionError(`${t.id} is not stuck.`);
     const option = t.stuck.options[choice];
     if (!option) throw new BoardActionError(`Pick a choice between 1 and ${t.stuck.options.length}.`);
+    const way = wayOf(t, option, choice);
+    const gate = t.stuck.gate;
+    const reason = input.reason?.trim();
+    const note = input.note?.trim();
+    if (way === 'continue') {
+      if (gate !== 'checks' && gate !== 'review') throw new BoardActionError('Only a failed check or review can be continued past.');
+      if (!reason) throw new BoardActionError('Write why you continue anyway. It shows on the ticket, the pull request and the release notes.');
+    }
+    if (way === 'yourself' && meta.engine === 'live' && !(t.worktree && fs.existsSync(t.worktree))) {
+      throw new BoardActionError(`${t.id} has no copy of the code to fix. Try again or send it back to the plan.`);
+    }
     t.stuck.options.forEach((o, i) => (o.chosen = i === choice));
     t.waiting = null;
     t.live = true;
-    addActivity(t, 'you', `Decided: ${option.name}`);
+    addActivity(t, 'you', `Decided: ${option.name}${way === 'continue' ? `. Why: ${reason}` : ''}`);
+    if (note) {
+      t.notes = [...(t.notes ?? []), { at: now(), by: meta.user.name, kind: 'note', text: note }];
+      addActivity(t, 'you', `Added a note: ${note}`);
+      tellLater(t, meta.engine, { kind: 'note', text: note, noteKind: 'note' });
+    }
+    if (way === 'continue') {
+      t.overrides = [...(t.overrides ?? []), { gate: gate as 'checks' | 'review', reason: reason!, by: meta.user.name, at: now() }];
+      t.gates = { ...(t.gates ?? { checks: 'pending', review: 'pending', proof: 'pending' }), [gate as string]: 'skipped' };
+      tellLater(t, meta.engine, { kind: 'note', text: `Continued anyway past the failed ${gate}: ${reason}`, noteKind: 'note' });
+    }
     if (meta.engine !== 'live') {
       t.status = 'Builder is trying your choice';
       scheduleSquad(t, 'unstick', 2, meta.speed);
       return;
     }
-    // Live squad: the first choice runs the stopped step again, the second goes back to the plan.
-    if (t.retryPhase === 'publish' && choice === 1) {
-      t.live = false;
-      t.status = `Ready for ${t.release ?? 'the next release'}`;
-    } else if (choice === 0) {
-      t.tries = 0;
-      t.status = 'Trying again';
-      scheduleSquad(t, t.retryPhase ?? 'analyst-read', 0.5, 1);
-    } else {
-      t.changeRequest = `The squad got stuck: ${t.stuck.question}`;
-      t.stage = 'specs';
-      t.status = 'Spec writer is updating the plan';
-      scheduleSquad(t, t.story ? 'plan-rewrite' : 'analyst-read', 0.5, 1);
-    }
+    const retryPhase = t.retryPhase;
     t.retryPhase = undefined;
+    switch (way) {
+      case 'skip-pr':
+        t.live = false;
+        t.status = `Ready for ${t.release ?? 'the next release'}`;
+        return;
+      case 'retry':
+        t.tries = 0;
+        if (gate === 'review') {
+          t.reviewRound = 0;
+          t.stage = 'implement';
+          t.status = 'Builder is fixing the review notes';
+          scheduleSquad(t, 'review-fix', 0.5, 1);
+        } else if (gate === 'merge') {
+          t.stage = 'implement';
+          t.status = 'Builder is bringing in the latest changes';
+          scheduleSquad(t, 'update-base', 0.5, 1);
+        } else {
+          t.status = 'Trying again';
+          scheduleSquad(t, retryPhase ?? 'analyst-read', 0.5, 1);
+        }
+        return;
+      case 'yourself':
+        t.tries = 0;
+        t.reviewRound = 0;
+        t.reviewNotes = undefined;
+        t.proof = undefined;
+        t.mergedAt = undefined;
+        t.gates = { checks: 'pending', review: 'pending', proof: 'pending' };
+        t.stage = 'test';
+        t.status = 'Running the project checks on your fix';
+        addActivity(t, 'you', 'Fixed it myself in the ticket\'s copy');
+        scheduleSquad(t, 'test', 0.2, 1);
+        return;
+      case 'continue':
+        if (gate === 'checks') {
+          t.stage = 'review';
+          t.status = 'Reviewer is reading the changes';
+          scheduleSquad(t, 'review', 0.2, 1);
+        } else {
+          t.reviewNotes = undefined;
+          t.status = 'Recording the proof';
+          scheduleSquad(t, 'proof', 0.2, 1);
+        }
+        return;
+      case 'plan':
+        t.changeRequest = `The squad got stuck: ${t.stuck.question}`;
+        t.stage = 'specs';
+        t.status = 'Spec writer is updating the plan';
+        scheduleSquad(t, t.story ? 'plan-rewrite' : 'analyst-read', 0.5, 1);
+        return;
+    }
   });
 }
 
@@ -540,7 +662,8 @@ function projectVersion(root: string, meta: ReturnType<typeof readMeta>): string
 export function composeNotes(bp: BoardPaths, release: Release): string {
   const tickets = listTickets(bp).filter((t) => release.tickets.includes(t.id));
   const lines = tickets.map((t) => `- ${t.releaseNote ?? `**${t.title}.**`}`);
-  return [`### What's new in ${release.version.replace(/^v/, '')}`, '', ...lines].join('\n');
+  const skipped = tickets.flatMap((t) => (t.overrides ?? []).map((o) => `- ${t.id} ${t.title}: went out with ${o.gate === 'checks' ? 'failing checks' : 'open review notes'}. ${o.by}: ${o.reason}`));
+  return [`### What's new in ${release.version.replace(/^v/, '')}`, '', ...lines, ...(skipped.length ? ['', '### Continued anyway', '', ...skipped] : [])].join('\n');
 }
 
 export function saveReleaseNotes(bp: BoardPaths, version: string, notes: string): Release {
