@@ -99,6 +99,13 @@ export const SPEC_SCHEMA = {
 };
 
 
+/** A reply in a chat with the person, and whether the agent thinks it understands enough for the next step. */
+export const CHAT_SCHEMA = {
+  type: 'object',
+  properties: { reply: STR, ready: { type: 'boolean' } },
+  required: ['reply', 'ready'],
+};
+
 /** Filled only when the agent must stop and ask the person. */
 const QUESTION = {
   type: 'object',
@@ -305,8 +312,10 @@ function changeText(change: string): string {
   return change.includes('\n') ? change : `They asked for this change: "${change}"`;
 }
 
-export function specPrompt(t: Ticket, change?: string): string {
-  const head = change
+export function specPrompt(t: Ticket, change?: string, fromChat = false): string {
+  const head = fromChat
+    ? `You and the person talked it through in this conversation. Now write the spec from everything you agreed${t.story ? ', the whole spec again' : ''}. Where the talk changed something, follow the talk. Write what to build and how we know it is done, not how to build it.`
+    : change
     ? `The person read your spec.\n${changeText(change)}\n\nWrite the whole spec again with this.`
     : `The person answered your questions:\n${answersText(t)}\n\nNow write the spec, as the Analyst: what to build and how we know it is done. Not how to build it; the Architect designs that next, after the person approves this.`;
   return `${head}
@@ -317,11 +326,13 @@ export function specPrompt(t: Ticket, change?: string): string {
 ${PLAIN}`;
 }
 
-export function designPrompt(t: Ticket, change?: string, meta?: BoardMeta): string {
+export function designPrompt(t: Ticket, change?: string, meta?: BoardMeta, fromChat = false): string {
   const repo = meta?.repos?.length
     ? `\n- repo: the folder of the ONE code repo this ticket changes, exactly as written in the list (${meta.repos.map((r) => r.path).join(', ')}).`
     : '';
-  const head = change
+  const head = fromChat
+    ? `You and the person talked it through in this conversation. Now write the design from everything you agreed${t.steps ? ', the whole design again' : ''}. Where the talk changed something, follow the talk.`
+    : change
     ? `The person read your design.\n${changeText(change)}\n\nWrite the whole design again with this.`
     : 'The person approved the spec below. Now, as the Architect, design how to build it. Read the code you need first.';
   return `${head}
@@ -479,4 +490,43 @@ Produce:
 - edgeCases: the unusual cases the builder must handle (empty lists, wrong input, no access, two people at once).
 - gaps: what the text leaves unclear, as short questions. Do not invent answers for them.
 Only use what the text says or the project shows. Write in the same language as the text. ${PLAIN}`;
+}
+
+const CHAT_ROLE: Record<string, string> = {
+  analyst: 'the Analyst: you make sure the squad understands what the person wants before anything is written',
+  architect: 'the Architect: you choose how to build the approved spec',
+  builder: 'the Builder: you are building this ticket in this folder',
+  reviewer: "the Reviewer: you check the Builder's work",
+  tester: 'the Tester: you prove each "done when" with the running app',
+};
+
+/**
+ * One turn of a chat with the person. The agent only talks and reads: it changes no files, and it never moves the
+ * ticket on. The person does that with a button.
+ */
+export function chatPrompt(agent: string, message: string | null, next: string, attached = ''): string {
+  const head = message === null
+    ? `The person wants to talk this ticket through with you before you go on. You are ${CHAT_ROLE[agent] ?? agent}.
+Open the talk: say in a few short lines what you understand so far and where you are, then ask about what is most unclear.`
+    : `The person says: "${message}"${attached ? `\n${attached}` : ''}`;
+  return `${head}
+
+Rules for this talk:
+- Answer in plain words, in the person's language, in a few short paragraphs at most. Ask one or two questions at a time.
+- Do not write or change any files. Read the code only when it helps you answer.
+- Do not start the next step yourself. ${next}
+- Set "ready" to true only when you think you understand enough for that next step; say so in your reply.`;
+}
+
+/** What the person's buttons do after the talk, told to the agent so it can say so. */
+export function chatNext(agent: string, hasSpec: boolean, specApproved: boolean): string {
+  if (agent === 'analyst') return `When the person is happy, they press "${hasSpec ? 'Update' : 'Write'} the spec" and you write it from this talk.`;
+  if (agent === 'architect') return specApproved ? `When the person is happy, they press "Write the design" and you write it from this talk.` : 'The design comes after the person approves the spec.';
+  return 'When the person presses Done, you carry on with your work as you agreed.';
+}
+
+export function chatCarryOnPrompt(agent: string): string {
+  if (agent === 'builder') return 'You and the person talked it through above, and they pressed Done. Carry on with the work as you agreed, then run the tests.';
+  if (agent === 'reviewer') return 'You and the person talked it through above, and they pressed Done. Finish your review with what you agreed in mind.';
+  return 'You and the person talked it through above, and they pressed Done. Carry on as you agreed.';
 }

@@ -18,6 +18,7 @@ import {
   runBug,
   runChange,
   runNote,
+  runChat,
   runAgent,
   runSendBack,
   runEditPlan,
@@ -246,6 +247,13 @@ program
   .option('--rule', 'A business rule the squad must follow', false)
   .action(wrapArgs(runNote));
 program
+  .command('chat <ticket> [message...]')
+  .description('Talk a ticket through with an agent. /write writes the spec or design from the talk, /done ends it')
+  .option('--with <agent>', 'analyst, architect, builder, reviewer or tester', 'analyst')
+  .option('--write', 'Write (or update) the spec or design from the talk')
+  .option('--done', 'Done talking; the squad carries on')
+  .action(wrapArgs(runChat));
+program
   .command('agent <role>')
   .description("See or change an agent's instructions per step, or read its core prompts (read only)")
   .option('--step <step>', 'One step, like questions, spec, scan, design, build, fix, review or proof')
@@ -318,6 +326,7 @@ program
   .option('--bug', 'It is a bug, not a new feature')
   .option('--express', 'Express track: no questions and the plan is approved on its own; build, checks, review and Looks right still run')
   .option('--full', 'Full track (the default): every step, with your approvals')
+  .option('--talk', 'Talk it through with the Analyst first, instead of questions: squad chat <ticket>')
   .option('--criteria <text>', 'An acceptance criterion (repeat for more)', more, [])
   .option('--rule <text>', 'A business rule (repeat for more)', more, [])
   .option('--edge <text>', 'An edge case to handle (repeat for more)', more, [])

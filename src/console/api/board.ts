@@ -16,6 +16,10 @@ import {
   reportBug,
   requestChange,
   addNote,
+  chatDone,
+  chatWrite,
+  sendChat,
+  startChat,
   editPlan,
   sendBack,
   startOver,
@@ -289,6 +293,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
         rules: b.rules,
         edgeCases: b.edgeCases,
         files: b.files,
+        talkFirst: Boolean(b.talkFirst),
       }),
     );
   });
@@ -360,6 +365,21 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     const b = await body<{ direction?: string }>(c);
     return act(c, () => startOver(bp, c.req.param('id'), b.direction ?? ''));
   });
+
+  // Talk it through with an agent: start, send (with files), write the spec or design from it, or Done.
+  app.post('/api/v1/tickets/:id/chat/start', async (c) => {
+    const b = await body<{ with?: AgentName }>(c);
+    return act(c, () => startChat(bp, c.req.param('id'), b.with ?? 'analyst'));
+  });
+
+  app.post('/api/v1/tickets/:id/chat/send', async (c) => {
+    const b = await body<{ text?: string; files?: UploadedFile[] }>(c);
+    return act(c, () => sendChat(bp, c.req.param('id'), b.text ?? '', b.files ?? []));
+  });
+
+  app.post('/api/v1/tickets/:id/chat/write', (c) => act(c, () => chatWrite(bp, c.req.param('id'))));
+
+  app.post('/api/v1/tickets/:id/chat/done', (c) => act(c, () => chatDone(bp, c.req.param('id'))));
 
   app.post('/api/v1/tickets/:id/take-over', (c) => act(c, () => takeOver(bp, c.req.param('id'))));
 

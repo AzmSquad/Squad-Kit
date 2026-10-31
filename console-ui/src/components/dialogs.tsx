@@ -19,7 +19,7 @@ interface Draft {
   gaps: string[];
 }
 
-interface PickedFile {
+export interface PickedFile {
   name: string;
   size: number;
   data: string;
@@ -29,7 +29,7 @@ interface PickedFile {
 
 const MAX_FILE = 10 * 1024 * 1024;
 
-function readFile(f: File): Promise<PickedFile> {
+export function readFile(f: File): Promise<PickedFile> {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
     r.onload = () => {
@@ -61,6 +61,7 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
   const [kind, setKind] = useState<Ticket['kind']>('feature');
   const [priority, setPriority] = useState<Ticket['priority']>('normal');
   const [track, setTrack] = useState<Track>('full');
+  const [talkFirst, setTalkFirst] = useState(false);
   const [suggested, setSuggested] = useState<Track | null>(null);
   const [criteria, setCriteria] = useState<string[]>([]);
   const [rules, setRules] = useState<string[]>([]);
@@ -107,7 +108,7 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
     act.mutate(
       {
         path: '/api/v1/tickets',
-        body: { title, ask, kind, track, priority, criteria, rules, edgeCases, files: upload },
+        body: { title, ask, kind, track, priority, criteria, rules, edgeCases, files: upload, talkFirst: talkFirst && track === 'full' },
       },
       {
         onSuccess: (t) => {
@@ -124,6 +125,7 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
           `squad new ${quote(title.trim() || 'Your title')}`,
           kind === 'bug' ? '--bug' : '',
           track === 'express' ? '--express' : '',
+          talkFirst && track === 'full' ? '--talk' : '',
           ...criteria.filter((x) => x.trim()).map((x) => `--criteria ${quote(x)}`),
           ...rules.filter((x) => x.trim()).map((x) => `--rule ${quote(x)}`),
           ...edgeCases.filter((x) => x.trim()).map((x) => `--edge ${quote(x)}`),
@@ -250,6 +252,14 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
               ))}
             </div>
           </div>
+          {track === 'full' && (
+            <label className="talkfirst">
+              <input type="checkbox" checked={talkFirst} onChange={(e) => setTalkFirst(e.target.checked)} />
+              <span>
+                <b>Talk it through first.</b> The Analyst opens a chat instead of sending questions. The spec is written from your talk when you say so.
+              </span>
+            </label>
+          )}
         </>
       )}
     </Modal>

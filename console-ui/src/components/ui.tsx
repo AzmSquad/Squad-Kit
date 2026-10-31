@@ -179,6 +179,8 @@ export function commandFor(t: Ticket): string {
       return `squad reply ${t.id}`;
     case 'yours':
       return `squad give-back ${t.id}`;
+    case 'chat':
+      return `squad chat ${t.id}`;
     case 'spec':
     case 'plan':
     case 'proof':
@@ -204,6 +206,8 @@ export function actionLabel(t: Ticket): string {
       return 'Answer';
     case 'yours':
       return 'Give back';
+    case 'chat':
+      return 'Open chat';
     default:
       return 'Open';
   }

@@ -29,7 +29,7 @@ import { loadSecrets } from '../core/secrets.js';
 import { clientFor, overlayTrackerEnv } from '../tracker/index.js';
 import { azureFor, type Azure } from '../engine/azure.js';
 import { mergeLocally, opensPullRequest, syncWiki } from '../engine/sync.js';
-import type { AgentName, Criterion, PlanComment, PlanEdit, PlanPart, PlanSnapshot, StuckChoice, StuckOption, TicketNote, Track, TrackerEvent, WayOut } from './types.js';
+import type { AgentChat, AgentName, Criterion, PlanComment, PlanEdit, PlanPart, PlanSnapshot, StuckChoice, StuckOption, TicketNote, Track, TrackerEvent, WayOut } from './types.js';
 import { endProcessTree } from '../engine/watchdog.js';
 
 /** Every person-facing action lives here, so the board and the terminal do exactly the same thing. */
@@ -49,6 +49,8 @@ export interface NewTicketInput {
   priority?: Ticket['priority'];
   kind?: Ticket['kind'];
   track?: Track;
+  /** Talk it through with the Analyst first, before any questions or spec. */
+  talkFirst?: boolean;
   source?: Ticket['source'];
   criteria?: string[];
   rules?: string[];
@@ -80,7 +82,7 @@ export function saveUploads(dir: string, files: UploadedFile[]): string[] {
   const used = new Set<string>();
   return decoded.map((f) => {
     let name = f.name;
-    for (let i = 2; used.has(name.toLowerCase()); i += 1) name = f.name.replace(/(\.[^.]*)?$/, (ext) => `-${i}${ext}`);
+    for (let i = 2; used.has(name.toLowerCase()) || fs.existsSync(path.join(dir, name)); i += 1) name = f.name.replace(/(\.[^.]*)?$/, (ext) => `-${i}${ext}`);
     used.add(name.toLowerCase());
     const file = path.join(dir, name);
     fs.writeFileSync(file, f.data);
@@ -118,7 +120,10 @@ export function createTicket(bp: BoardPaths, input: NewTicketInput): Ticket {
   addActivity(ticket, 'you', input.source?.type === 'azure' ? `Pulled ${input.source.ref} from Azure DevOps` : 'Created the ticket');
   if (ticket.track === 'express') addActivity(ticket, 'you', 'Chose the Express track: no questions, the plan is approved on its own');
   if (attachments.length) addActivity(ticket, 'you', `Added ${attachments.length === 1 ? '1 file' : `${attachments.length} files`}`);
-  scheduleSquad(ticket, 'analyst-read', 4, meta.speed);
+  if (input.talkFirst && ticket.track !== 'express') {
+    openChat(ticket, 'analyst', { waiting: null, phase: 'analyst-read' });
+    addActivity(ticket, 'you', 'Chose to talk it through with the Analyst first');
+  } else scheduleSquad(ticket, 'analyst-read', 4, meta.speed);
   writeTicket(bp, ticket);
   return ticket;
 }
@@ -552,6 +557,124 @@ export function requestChange(bp: BoardPaths, id: string, text: string): Ticket 
       t.status = 'Builder is fixing what you found';
       t.gates = { checks: 'pending', review: 'pending', proof: 'pending' };
       scheduleSquad(t, 'fix', 2, meta.speed);
+    }
+  });
+}
+
+/* ── Talk it through with an agent ────────────────────── */
+
+const AGENT_TITLE: Record<AgentName, string> = { analyst: 'Analyst', architect: 'Architect', builder: 'Builder', reviewer: 'Reviewer', tester: 'Tester' };
+
+/** The session each agent talks in: its own Claude Code conversation on the ticket. */
+export const CHAT_SESSION: Record<AgentName, 'intake' | 'build' | 'review' | 'tester'> = {
+  analyst: 'intake',
+  architect: 'intake',
+  builder: 'build',
+  reviewer: 'review',
+  tester: 'tester',
+};
+
+function openChat(t: Ticket, agent: AgentName, before: AgentChat['before']): void {
+  const keep = t.chat?.with === agent ? t.chat.messages : [];
+  t.chat = { with: agent, open: true, messages: keep, thinking: true, before };
+  t.waiting = { kind: 'chat', summary: `Talking it through with the ${AGENT_TITLE[agent]}` };
+  t.live = false;
+  t.squad = null;
+  t.status = `Talking with the ${AGENT_TITLE[agent]}`;
+}
+
+/**
+ * Talk it through: open a chat with any agent on the ticket. Its work pauses until you are done, so the two of you
+ * never pull the ticket in different directions. The agent opens with where it is and what it is unsure of.
+ */
+export function startChat(bp: BoardPaths, id: string, agent: AgentName): Ticket {
+  const meta = readMeta(bp);
+  if (!AGENT_TITLE[agent]) throw new BoardActionError('Pick an agent: analyst, architect, builder, reviewer or tester.');
+  return updateTicket(bp, id, (t) => {
+    if (t.chat?.open) throw new BoardActionError(`${t.id} already has a chat open with the ${AGENT_TITLE[t.chat.with]}.`);
+    if (t.takenOver) throw new BoardActionError(`${t.id} is taken over. Give it back first.`);
+    if (t.stage === 'release' || t.stage === 'done') throw new BoardActionError(`${t.id} is accepted already. Report a bug or add a new ticket instead.`);
+    const later = agent === 'builder' || agent === 'reviewer' || agent === 'tester';
+    if (later && meta.engine === 'live' && !t.sessions?.[CHAT_SESSION[agent]]) {
+      throw new BoardActionError(`The ${AGENT_TITLE[agent]} has not worked on ${t.id} yet, so there is nothing to talk through with it.`);
+    }
+    if (t.live && meta.engine === 'live') t.stopRequested = true;
+    openChat(t, agent, { waiting: t.waiting, ...(t.squad?.phase ? { phase: t.squad.phase } : {}) });
+    addActivity(t, 'you', `Started talking it through with the ${AGENT_TITLE[agent]}`);
+  });
+}
+
+/** Your message in the chat, with screenshots, files or voice notes if you add them. */
+export function sendChat(bp: BoardPaths, id: string, text: string, uploads: UploadedFile[] = []): Ticket {
+  const msg = text?.trim() ?? '';
+  if (!msg && !uploads.length) throw new BoardActionError('Write your message first.');
+  const t0 = requireTicket(bp, id);
+  if (!t0.chat?.open) throw new BoardActionError(`${t0.id} has no chat open.`);
+  if (t0.chat.thinking) throw new BoardActionError(`The ${AGENT_TITLE[t0.chat.with]} is still answering. Wait a moment.`);
+  const files = saveUploads(path.join(bp.dir, 'attachments', t0.id), uploads);
+  return updateTicket(bp, id, (t) => {
+    const c = t.chat!;
+    c.messages.push({ who: 'you', text: msg, at: now(), ...(files.length ? { files } : {}) });
+    if (files.length) t.attachments = [...(t.attachments ?? []), ...files];
+    c.thinking = true;
+  });
+}
+
+/**
+ * Write (or update) the spec or the design from the talk. The chat closes, and the new version comes to you as
+ * usual, with what changed. Reopen the chat from there to keep talking.
+ */
+export function chatWrite(bp: BoardPaths, id: string): Ticket {
+  const meta = readMeta(bp);
+  return updateTicket(bp, id, (t) => {
+    const c = t.chat;
+    if (!c?.open) throw new BoardActionError(`${t.id} has no chat open.`);
+    if (c.thinking) throw new BoardActionError(`The ${AGENT_TITLE[c.with]} is still answering. Wait a moment.`);
+    if (c.with === 'architect' ? !t.specApproved : c.with !== 'analyst') {
+      throw new BoardActionError(c.with === 'architect' ? 'The Architect writes the design once the spec is approved.' : `The ${AGENT_TITLE[c.with]} does not write the spec or design.`);
+    }
+    const design = c.with === 'architect';
+    if (design ? t.steps : t.story) t.planReview = { before: planSnapshot(t), sent: [] };
+    c.open = false;
+    t.waiting = null;
+    t.live = true;
+    t.stage = 'specs';
+    t.status = design ? (t.steps ? 'Architect is updating the design from your talk' : 'Architect is writing the design from your talk') : t.story ? 'Analyst is updating the spec from your talk' : 'Analyst is writing the spec from your talk';
+    addActivity(t, 'you', `Asked the ${AGENT_TITLE[c.with]} to ${(design ? t.steps : t.story) ? 'update' : 'write'} the ${design ? 'design' : 'spec'} from your talk`);
+    scheduleSquad(t, design ? 'chat-design' : 'chat-spec', meta.engine === 'live' ? 0.2 : 2, meta.engine === 'live' ? 1 : meta.speed);
+  });
+}
+
+/**
+ * Done talking. The Builder, Reviewer and Tester carry on from what you agreed (the talk is in their session). The
+ * Analyst and Architect leave the ticket where it was; to change the spec or design, use chatWrite instead.
+ */
+export function chatDone(bp: BoardPaths, id: string): Ticket {
+  const meta = readMeta(bp);
+  return updateTicket(bp, id, (t) => {
+    const c = t.chat;
+    if (!c?.open) throw new BoardActionError(`${t.id} has no chat open.`);
+    if (c.thinking) throw new BoardActionError(`The ${AGENT_TITLE[c.with]} is still answering. Wait a moment.`);
+    c.open = false;
+    t.stopRequested = undefined;
+    addActivity(t, 'you', `Done talking with the ${AGENT_TITLE[c.with]}`);
+    const live = meta.engine === 'live';
+    const later = c.with === 'builder' || c.with === 'reviewer' || c.with === 'tester';
+    if (later && c.messages.some((m) => m.who === 'you')) {
+      t.waiting = null;
+      t.live = true;
+      t.status = `${AGENT_TITLE[c.with]} is carrying on with what you agreed`;
+      scheduleSquad(t, `chat-carry-${c.with}`, live ? 0.2 : 2, live ? 1 : meta.speed);
+      return;
+    }
+    t.waiting = c.before.waiting;
+    if (c.before.phase) {
+      t.live = true;
+      t.status = 'Carrying on';
+      scheduleSquad(t, c.before.phase, live ? 0.2 : 2, live ? 1 : meta.speed);
+    } else {
+      t.live = false;
+      t.status = c.before.waiting ? c.before.waiting.summary : t.status;
     }
   });
 }

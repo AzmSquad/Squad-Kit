@@ -11,6 +11,7 @@ import { ChangesTab, OpenInEditor } from '../components/Changes';
 import { TakeOverButton, canTakeOver } from '../components/TakeOver';
 import { Attachments as AgentFiles, Mockup } from '../components/Attachments';
 import { Part, WhatChanged, type Review } from '../components/PlanReview';
+import { ChatPanel, TalkButton } from '../components/Chat';
 import { Lightbox, type Picture } from '../components/Lightbox';
 
 type Tab = 'now' | 'story' | 'plan' | 'activity' | 'conversation' | 'proof' | 'changes' | 'developer';
@@ -141,6 +142,8 @@ function NowPanel({ t }: { t: Ticket }) {
       return <AskPanel t={t} />;
     case 'yours':
       return <YoursPanel t={t} />;
+    case 'chat':
+      return t.chat ? <ChatPanel t={t} /> : <WorkingPanel t={t} />;
     default:
       return <WorkingPanel t={t} />;
   }
@@ -202,6 +205,7 @@ function QuestionsPanel({ t }: { t: Ticket }) {
         <button className="btn" onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/skip`, done: 'The squad made its own guesses. You will see them in the plan.' })}>
           Skip, let the squad guess
         </button>
+        <TalkButton t={t} agent="analyst" label="Talk it through instead" />
         <span className="grow" />
         <Cmd text={`squad answer ${t.id}`} />
       </div>
@@ -476,6 +480,7 @@ function PlanPanel({ t }: { t: Ticket }) {
             </button>
           )}
           {n === 0 && <button className="btn" onClick={() => setMode('change')}>Change something</button>}
+          {(spec || design) && <TalkButton t={t} agent={spec ? 'analyst' : 'architect'} label="Talk it through" />}
           <button className="btn quiet" onClick={() => setMode('over')}>Start over</button>
           <button className="btn quiet" onClick={() => setAskDev(true)}>Ask a developer</button>
           <span className="grow" />

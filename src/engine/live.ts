@@ -14,7 +14,7 @@ import {
   writeMeta,
   type BoardPaths,
 } from '../board/store.js';
-import { applyPlanEdits, approveExpress, changeSummary, needsSpec, wayOptions } from '../board/actions.js';
+import { CHAT_SESSION, applyPlanEdits, approveExpress, changeSummary, needsSpec, wayOptions } from '../board/actions.js';
 import { scheduleSquad } from '../board/schedule.js';
 import type { BoardMeta, ProjectCommands, Question, Role, Ticket } from '../board/types.js';
 import { describeTool, runClaude, type RunOptions, type RunResult } from './claude.js';
@@ -128,6 +128,10 @@ export class LiveSquad {
       }
       if (this.running.size >= limit + 1) break;
       if (this.running.has(t.id)) continue;
+      if (t.chat?.open && t.chat.thinking) {
+        this.launch(t.id, () => this.chatReply(t.id));
+        continue;
+      }
       const q = t.questions?.find((x) => x.thinking);
       if (q) {
         this.launch(t.id, () => this.reply(t.id, q.id));
@@ -195,8 +199,9 @@ export class LiveSquad {
 
   /** The person pressed Stop: park the ticket with a way to pick it up again. */
   private stopped(id: string, phase?: string): void {
-    // Taken over: the person has the ticket now, so no stuck card, just quiet.
-    if (readTicket(this.bp, id)?.takenOver) {
+    // Taken over, or talking it through: the person has the ticket now, so no stuck card, just quiet.
+    const held = readTicket(this.bp, id);
+    if (held?.takenOver || held?.chat?.open) {
       this.update(id, (t) => {
         t.stopRequested = undefined;
         t.live = false;
@@ -240,6 +245,12 @@ export class LiveSquad {
       // A step that ends after you took the ticket over must not move it on: it stays yours until you give it back.
       if (t.takenOver) {
         t.waiting = { kind: 'yours', summary: 'You took it over. Give it back when you are done' };
+        t.squad = null;
+        t.live = false;
+      }
+      // The same while you talk it through with an agent: nothing moves until you press a button.
+      else if (t.chat?.open) {
+        t.waiting = { kind: 'chat', summary: t.waiting?.kind === 'chat' ? t.waiting.summary : 'Talking it through' };
         t.squad = null;
         t.live = false;
       }
@@ -325,7 +336,7 @@ export class LiveSquad {
   private fail(id: string, error: string, retryPhase: string): void {
     try {
       this.update(id, (t) => {
-        if (t.takenOver) return;
+        if (t.takenOver || t.chat?.open) return;
         t.live = false;
         t.squad = null;
         t.retryPhase = retryPhase;
@@ -440,6 +451,16 @@ export class LiveSquad {
         return this.review(id, true);
       case 'answered-architect':
         return this.plan(id, undefined, true);
+      case 'chat-spec':
+        return this.spec(id, undefined, true);
+      case 'chat-design':
+        return this.plan(id, undefined, false, true);
+      case 'chat-carry-builder':
+        return this.carryOnBuilder(id);
+      case 'chat-carry-reviewer':
+        return this.review(id, true, true);
+      case 'chat-carry-tester':
+        return this.proof(id);
       case 'test':
         return this.checks(id);
       case 'review':
@@ -497,6 +518,8 @@ export class LiveSquad {
       });
       return;
     }
+    // After a talk with the Analyst its session exists already: go on in it, so it remembers what you said.
+    const had = readTicket(this.bp, id)?.sessions?.intake;
     const t0 = this.update(id, (t) => {
       t.stage = 'tickets';
       t.live = true;
@@ -504,11 +527,11 @@ export class LiveSquad {
       t.sessions = { ...t.sessions, intake: t.sessions?.intake ?? randomUUID() };
     });
     const r = await this.claude({
-        role: 'analyst',
-        step: 'questions',
+      role: 'analyst',
+      step: 'questions',
       ticket: id,
       cwd: root,
-      sessionId: t0.sessions!.intake,
+      ...(had ? { resume: had } : { sessionId: t0.sessions!.intake }),
       prompt: P.intakePrompt(meta, listDecisions(this.bp), t0, this.ctx()),
       allowedTools: READ_ONLY,
       schema: P.QUESTIONS_SCHEMA,
@@ -575,8 +598,80 @@ export class LiveSquad {
     }
   }
 
+  /**
+   * One reply in a talk with the person, in the agent's own session (a new one for the Analyst when you talk first).
+   * The agent only talks and reads; it never moves the ticket on.
+   */
+  private async chatReply(id: string): Promise<void> {
+    const t = readTicket(this.bp, id)!;
+    const c = t.chat!;
+    const key = CHAT_SESSION[c.with];
+    const had = t.sessions?.[key];
+    const later = c.with === 'builder' || c.with === 'reviewer' || c.with === 'tester';
+    const cwd = later && t.worktree && fs.existsSync(t.worktree) ? t.worktree : projectRoot(this.bp);
+    const session = had ?? randomUUID();
+    if (!had) this.update(id, (x) => (x.sessions = { ...x.sessions, [key]: session }));
+    const last = c.messages[c.messages.length - 1];
+    const message = last?.who === 'you' ? last.text : null;
+    let attached = '';
+    if (message !== null && last?.files?.length) {
+      // Voice and video notes are written out first; the agent reads the text and the pictures.
+      const heard = await prepareMedia(this.bp, last.files);
+      const files = [...last.files.filter((f) => !isMediaNote(f)), ...heard.added];
+      attached = `The person attached: ${files.join(', ')}${heard.missingKey ? ' (voice notes could not be written out: no Munsit key)' : ''}`;
+    }
+    const talk = P.chatPrompt(c.with, message, P.chatNext(c.with, Boolean(t.story), Boolean(t.specApproved)), attached);
+    const step = { analyst: 'questions', architect: 'design', builder: 'build', reviewer: 'review', tester: 'proof' }[c.with];
+    try {
+      const r = await this.claude({
+        role: c.with,
+        step,
+        ticket: id,
+        cwd,
+        ...(had ? { resume: had } : { sessionId: session }),
+        prompt: had ? talk : `${P.intakePrompt(this.meta(), listDecisions(this.bp), t, this.ctx(t))}\n\n${talk}`,
+        allowedTools: READ_ONLY,
+        schema: P.CHAT_SCHEMA,
+        timeoutMs: 10 * 60_000,
+        addDirs: attachmentDirs(t),
+      });
+      const out = (r.structured ?? {}) as { reply?: string; ready?: boolean };
+      this.update(id, (x) => {
+        if (!x.chat) return;
+        x.chat.messages.push({ who: c.with, text: (out.reply ?? r.text ?? '').trim() || '(no answer)', at: now() });
+        x.chat.ready = Boolean(out.ready);
+        x.chat.thinking = false;
+      });
+    } catch (err) {
+      this.update(id, (x) => {
+        if (!x.chat) return;
+        x.chat.messages.push({ who: 'squad', text: `Could not answer: ${(err as Error).message}`, at: now() });
+        x.chat.thinking = false;
+      });
+    }
+  }
+
+  /** Done talking with the Builder: it carries on in the same session with what you agreed, then the checks run. */
+  private async carryOnBuilder(id: string): Promise<void> {
+    await this.workspace(id);
+    this.update(id, (x) => {
+      x.stage = 'implement';
+      x.live = true;
+    });
+    await this.runBuilder(id, P.chatCarryOnPrompt('builder'), true, 'build');
+    this.update(id, (x) => {
+      addActivity(x, 'builder', 'Carried on with what you agreed');
+      x.stage = 'test';
+      x.status = 'Running the project checks';
+      x.gates = { checks: 'pending', review: 'pending', proof: 'pending' };
+      x.reviewRound = 0;
+      x.proof = undefined;
+      scheduleSquad(x, 'test', 0.2, 1);
+    });
+  }
+
   /** Full track, step one: the Analyst writes the what (story, done when). You approve it before any design. */
-  private async spec(id: string, change?: string): Promise<void> {
+  private async spec(id: string, change?: string, fromChat = false): Promise<void> {
     const root = projectRoot(this.bp);
     const t0 = this.update(id, (t) => {
       t.stage = 'specs';
@@ -584,7 +679,7 @@ export class LiveSquad {
       t.status = change ? 'Analyst is updating the spec' : 'Analyst is writing the spec';
       t.sessions = { ...t.sessions, intake: t.sessions?.intake ?? randomUUID() };
     });
-    const resume = Boolean(t0.activity.some((a) => a.who === 'analyst'));
+    const resume = fromChat || Boolean(t0.activity.some((a) => a.who === 'analyst'));
     const r = await this.claude({
       role: 'analyst',
       step: 'spec',
@@ -592,7 +687,7 @@ export class LiveSquad {
       cwd: root,
       ...(resume ? { resume: t0.sessions!.intake } : { sessionId: t0.sessions!.intake }),
       prompt: resume
-        ? P.specPrompt(t0, change)
+        ? P.specPrompt(t0, change, fromChat)
         : `${P.intakePrompt(this.meta(), listDecisions(this.bp), t0, this.ctx())}\n\n${P.specPrompt(t0, change)}`,
       allowedTools: READ_ONLY,
       schema: P.SPEC_SCHEMA,
@@ -609,7 +704,7 @@ export class LiveSquad {
       delete t.decision;
       delete t.steps;
       delete t.work;
-      addActivity(t, 'analyst', change ? `Updated the spec: ${changeSummary(change)}` : 'Wrote the spec');
+      addActivity(t, 'analyst', fromChat ? (t.planReview?.before ? 'Updated the spec from your talk' : 'Wrote the spec from your talk') : change ? `Updated the spec: ${changeSummary(change)}` : 'Wrote the spec');
       t.changeRequest = undefined;
       t.live = false;
       t.status = 'Spec ready for you';
@@ -618,7 +713,7 @@ export class LiveSquad {
     });
   }
 
-  private async plan(id: string, change?: string, answered = false): Promise<void> {
+  private async plan(id: string, change?: string, answered = false, fromChat = false): Promise<void> {
     const root = projectRoot(this.bp);
     const t0 = this.update(id, (t) => {
       t.stage = 'specs';
@@ -626,11 +721,11 @@ export class LiveSquad {
       t.status = change ? (t.specApproved ? 'Architect is updating the design' : 'Spec writer is updating the plan') : 'Architect is choosing the design';
       t.sessions = { ...t.sessions, intake: t.sessions?.intake ?? randomUUID() };
     });
-    const resume = Boolean(readTicket(this.bp, id)?.activity.some((a) => a.who === 'analyst'));
+    const resume = fromChat || Boolean(readTicket(this.bp, id)?.activity.some((a) => a.who === 'analyst'));
     // Full track: the spec is approved, so the Architect writes only the design. Express writes both at once.
     const design = Boolean(t0.specApproved);
     const asked = answered ? t0.agentQuestion : undefined;
-    const ask = `${asked ? `${P.answerPrompt(asked, 'architect')}\n\n` : ''}${design ? P.designPrompt(t0, change, this.meta()) : P.planPrompt(t0, change, this.meta())}`;
+    const ask = `${asked ? `${P.answerPrompt(asked, 'architect')}\n\n` : ''}${design ? P.designPrompt(t0, change, this.meta(), fromChat) : P.planPrompt(t0, change, this.meta())}`;
     const r = await this.claude({
       role: 'architect',
       step: 'design',
@@ -1012,7 +1107,7 @@ export class LiveSquad {
     });
   }
 
-  private async review(id: string, answered = false): Promise<void> {
+  private async review(id: string, answered = false, carry = false): Promise<void> {
     const meta = this.meta();
     const t0 = this.update(id, (x) => {
       x.stage = 'review';
@@ -1030,7 +1125,7 @@ export class LiveSquad {
       ticket: id,
       cwd: t0.worktree!,
       ...(round > 1 || goOn ? { resume: t0.sessions!.review } : { sessionId: t0.sessions!.review }),
-      prompt: goOn ? P.answerPrompt(t0.agentQuestion ?? { text: '' }, 'reviewer') : P.reviewPrompt(meta, listDecisions(this.bp), t0, round, this.ctx(t0)),
+      prompt: goOn ? (carry ? P.chatCarryOnPrompt('reviewer') : P.answerPrompt(t0.agentQuestion ?? { text: '' }, 'reviewer')) : P.reviewPrompt(meta, listDecisions(this.bp), t0, round, this.ctx(t0)),
       addDirs: this.extraDirs(t0),
       allowedTools: [...READ_ONLY, 'Bash(git diff:*)', 'Bash(git status:*)', 'Bash(git log:*)', 'Bash(git show:*)'],
       schema: P.REVIEW_SCHEMA,

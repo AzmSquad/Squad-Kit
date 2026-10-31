@@ -21,6 +21,10 @@ import {
   answerAgent,
   giveBack,
   takeOver,
+  chatDone,
+  chatWrite,
+  sendChat,
+  startChat,
   editPlan,
   sendBack,
   startOver,
@@ -369,6 +373,73 @@ export async function runStartOver(ticketId: string, words: string[]): Promise<v
   ui.success(`Starting over. ${t.status}.`);
 }
 
+/** Waits for the agent's chat reply (the squad writes it while the board is open) and prints it. */
+async function chatAnswer(bp: BoardPaths, id: string): Promise<boolean> {
+  const spin = ui.spinner('Thinking…');
+  const started = Date.now();
+  for (;;) {
+    stepSquad(bp);
+    const c = requireTicket(bp, id).chat;
+    if (!c?.thinking) {
+      spin.stop();
+      const last = c?.messages.at(-1);
+      if (last && last.who !== 'you') {
+        out();
+        out(`  ${kleur.bold(last.who === 'squad' ? 'squad-kit' : `${last.who[0]!.toUpperCase()}${last.who.slice(1)}`)}`);
+        out(last.text.replace(/^/gm, '  '));
+        out();
+      }
+      if (c?.ready) ui.info(c.with === 'analyst' ? 'It thinks it understands. Write the spec: /write' : c.with === 'architect' ? 'It thinks it understands. Write the design: /write' : 'It thinks it understands. Carry on: /done');
+      return true;
+    }
+    if (Date.now() - started > 10 * 60_000) {
+      spin.stop();
+      ui.warning('No answer yet. Check the board in a moment.');
+      return false;
+    }
+    await sleep(500);
+  }
+}
+
+/** Talk a ticket through with an agent. Without a message in a terminal, it keeps the talk going until /done or /write. */
+export async function runChat(ticketId: string, words: string[], opts: { with?: string; write?: boolean; done?: boolean }): Promise<void> {
+  const bp = board();
+  warnIfNoSquad(bp);
+  let t = requireTicket(bp, ticketId);
+  if (opts.done) {
+    chatDone(bp, t.id);
+    ui.success('Done talking. The squad carries on.');
+    return;
+  }
+  if (opts.write) {
+    t = chatWrite(bp, t.id);
+    ui.success(`${t.status}. You check it as usual: squad show ${t.id}`);
+    return;
+  }
+  if (!t.chat?.open) {
+    t = startChat(bp, t.id, (opts.with ?? 'analyst').toLowerCase() as AgentName);
+    await chatAnswer(bp, t.id);
+  }
+  const text = words.join(' ');
+  if (text) {
+    sendChat(bp, t.id, text);
+    await chatAnswer(bp, t.id);
+    return;
+  }
+  if (!process.stdin.isTTY) return;
+  for (;;) {
+    const line = (await input({ message: 'You (/write, /done, Enter to leave the chat open)' })).trim();
+    if (!line) {
+      ui.info(`The chat stays open on the board. Continue: squad chat ${t.id}`);
+      return;
+    }
+    if (line === '/done') return runChat(t.id, [], { done: true });
+    if (line === '/write') return runChat(t.id, [], { write: true });
+    sendChat(bp, t.id, line);
+    await chatAnswer(bp, t.id);
+  }
+}
+
 /** Shows an agent: its tool, model and the team's instructions per step; or one step's core prompt; or sets them. */
 export async function runAgent(role: string, opts: { step?: string; set?: string; prompt?: boolean; ticket?: string }): Promise<void> {
   const bp = board();
@@ -607,6 +678,7 @@ interface NewOptions {
   priority?: Ticket['priority'];
   bug?: boolean;
   express?: boolean;
+  talk?: boolean;
   full?: boolean;
   criteria?: string[];
   rule?: string[];
@@ -627,6 +699,7 @@ export async function runNew(words: string[], opts: NewOptions): Promise<void> {
     priority: opts.priority,
     kind: opts.bug ? 'bug' : 'feature',
     track: opts.express ? 'express' : 'full',
+    talkFirst: Boolean(opts.talk),
     criteria: opts.criteria,
     rules: opts.rule,
     edgeCases: opts.edge,
@@ -654,6 +727,7 @@ export async function runNew(words: string[], opts: NewOptions): Promise<void> {
       priority: fields.priority ?? d.priority,
       kind: opts.bug ? 'bug' : d.kind,
       track: opts.express ? 'express' : opts.full ? 'full' : d.track,
+      talkFirst: Boolean(opts.talk),
       criteria: [...d.criteria, ...(fields.criteria ?? [])],
       rules: [...d.rules, ...(fields.rules ?? [])],
       edgeCases: [...d.edgeCases, ...(fields.edgeCases ?? [])],

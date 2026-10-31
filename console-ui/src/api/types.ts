@@ -9,7 +9,7 @@ export type Role = 'analyst' | 'architect' | 'spec' | 'builder' | 'tester' | 're
 /** Who wrote an activity line or a thread message. */
 export type Actor = Role | 'you' | 'squad';
 
-export type WaitingKind = 'questions' | 'spec' | 'plan' | 'proof' | 'stuck' | 'release' | 'ask' | 'yours';
+export type WaitingKind = 'questions' | 'spec' | 'plan' | 'proof' | 'stuck' | 'release' | 'ask' | 'yours' | 'chat';
 
 export interface Waiting {
   kind: WaitingKind;
@@ -34,6 +34,23 @@ export interface Question {
   thread?: ThreadMessage[];
   /** Set while the squad is writing a reply to "Ask about this". */
   thinking?: boolean;
+}
+
+export type AgentName = 'analyst' | 'architect' | 'builder' | 'reviewer' | 'tester';
+
+export interface ChatMessage {
+  who: 'you' | AgentName | 'squad';
+  text: string;
+  at: string;
+  files?: string[];
+}
+
+export interface AgentChat {
+  with: AgentName;
+  open: boolean;
+  messages: ChatMessage[];
+  thinking?: boolean;
+  ready?: boolean;
 }
 
 export interface PlanPart {
@@ -203,6 +220,7 @@ export interface Ticket {
   track?: Track;
   agentQuestion?: { from: 'architect' | 'builder' | 'reviewer'; text: string; options: string[]; why?: string; files?: string[]; at: string; answer?: string };
   mockup?: string;
+  chat?: AgentChat;
   planReview?: { before?: PlanSnapshot; sent?: PlanComment[]; edits?: (PlanPart & { text?: string; criterion?: Criterion })[] };
   /** In a multi-repo workspace: the code repo this ticket changes. */
   repo?: string;

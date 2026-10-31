@@ -27,6 +27,7 @@ import { usePrefs } from '../lib/prefs';
 import { Cmd, clock } from './ui';
 import { useAct } from '../lib/data';
 import { TakeOverButton, canTakeOver } from './TakeOver';
+import { TalkButton } from './Chat';
 
 /**
  * The real conversation behind each role on a ticket, drawn from Agent Client Protocol (ACP) updates: messages,
@@ -85,7 +86,12 @@ export function ConversationTab({ t }: { t: Ticket }) {
         ))}
         <div ref={end} />
       </div>
-      {chosen && <MessageAgent t={t} to={AGENT_OF[chosen] ?? 'builder'} />}
+      {chosen && (
+        <div className="convactions">
+          <MessageAgent t={t} to={AGENT_OF[chosen] ?? 'builder'} />
+          {!t.chat?.open && !t.takenOver && t.stage !== 'release' && t.stage !== 'done' && <TalkButton t={t} agent={AGENT_OF[chosen] ?? 'builder'} />}
+        </div>
+      )}
       {conv.data?.command && (
         <>
           <div className="lbl">Open it in Claude Code</div>
@@ -133,13 +139,13 @@ function MessageAgent({ t, to }: { t: Ticket; to: keyof typeof AGENT_NAME }) {
 
 /* ── Turning ACP updates into things to draw ───────────── */
 
-type Item =
+export type Item =
   | { kind: 'message'; from: 'squad-kit' | 'claude-code' | 'agent' | 'thought'; content: AcpContentBlock; at?: string }
   | { kind: 'plan'; entries: Extract<AcpUpdate, { sessionUpdate: 'plan' }>['entries']; at?: string }
   | { kind: 'tool'; id: string; title: string; toolKind: AcpToolKind; status: AcpToolStatus; content: AcpToolContent[]; command?: string; at?: string };
 
 /** A tool call and its later updates become one row whose status and content grow as the agent works. */
-function merge(updates: { at?: string; update: AcpUpdate }[]): Item[] {
+export function merge(updates: { at?: string; update: AcpUpdate }[]): Item[] {
   const items: Item[] = [];
   const tools = new Map<string, Extract<Item, { kind: 'tool' }>>();
   for (const { at, update: u } of updates) {
@@ -191,7 +197,7 @@ function merge(updates: { at?: string; update: AcpUpdate }[]): Item[] {
 
 /* ── Drawing ───────────────────────────────────────────── */
 
-function Item({ it, ticket, cwd }: { it: Item; ticket: string; cwd?: string }) {
+export function Item({ it, ticket, cwd }: { it: Item; ticket: string; cwd?: string }) {
   if (it.kind === 'plan') return <PlanCard entries={it.entries} />;
   if (it.kind === 'tool') return <ToolRow it={it} ticket={ticket} cwd={cwd} />;
   const { from, content } = it;
@@ -388,7 +394,7 @@ function FileCard({ uri, name, mime, size, ticket }: { uri: string; name: string
   );
 }
 
-function Markdown({ text }: { text: string }) {
+export function Markdown({ text }: { text: string }) {
   const { theme } = usePrefs();
   return (
     <div className="md">

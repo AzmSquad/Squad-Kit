@@ -17,7 +17,7 @@ export type Role = 'analyst' | 'architect' | 'spec' | 'builder' | 'tester' | 're
 export type Actor = Role | 'you' | 'squad';
 
 /** 'spec' waits for you to approve the what (story, done when); 'plan' the how (decision, steps). */
-export type WaitingKind = 'questions' | 'spec' | 'plan' | 'proof' | 'stuck' | 'release' | 'ask' | 'yours';
+export type WaitingKind = 'questions' | 'spec' | 'plan' | 'proof' | 'stuck' | 'release' | 'ask' | 'yours' | 'chat';
 
 export interface Waiting {
   kind: WaitingKind;
@@ -175,6 +175,30 @@ export interface TicketNote {
 
 export type AgentName = 'analyst' | 'architect' | 'builder' | 'reviewer' | 'tester';
 
+export interface ChatMessage {
+  who: 'you' | AgentName | 'squad';
+  text: string;
+  at: string;
+  /** Screenshots, files or voice notes added to the message, as full paths. */
+  files?: string[];
+}
+
+/**
+ * Talking it through with one agent, in its own Claude Code session. The ticket waits while you talk; only you move
+ * it on: write or update the spec or design from the talk, or Done.
+ */
+export interface AgentChat {
+  with: AgentName;
+  open: boolean;
+  messages: ChatMessage[];
+  /** Set while the agent writes its reply. */
+  thinking?: boolean;
+  /** The agent thinks it understands enough for the next step. It only says so; you decide. */
+  ready?: boolean;
+  /** Where the ticket was when the chat started, to go back to it on Done. */
+  before: { waiting: Waiting | null; phase?: string };
+}
+
 export type Track = 'full' | 'express';
 
 export interface AgentQuestion {
@@ -268,6 +292,7 @@ export interface Ticket {
   /** The Architect's HTML mockup of the main screen, approved with the design. */
   mockup?: string;
   /** Review like a document: comments sent back, the person's own edits, and the version before the rewrite. */
+  chat?: AgentChat;
   planReview?: { before?: PlanSnapshot; sent?: PlanComment[]; edits?: PlanEdit[] };
   /** You took the ticket over in Claude Code. The squad does nothing on it until you give it back. */
   takenOver?: { by: string; at: string; session: string; cwd: string };

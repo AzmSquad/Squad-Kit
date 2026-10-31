@@ -47,6 +47,8 @@ export function tick(bp: BoardPaths): void {
   for (const t of listTickets(bp)) {
     const q = t.questions?.find((x) => x.thinking);
     if (q && at - lastMessageAt(q) >= 2200 / meta.speed) reply(bp, t.id, q.id);
+    const c = t.chat;
+    if (c?.open && c.thinking && at - Date.parse(c.messages.at(-1)?.at ?? t.activity[0]?.at ?? new Date(0).toISOString()) >= 2200 / meta.speed) chatReply(bp, t.id);
     if (t.squad && Date.parse(t.squad.nextAt) <= at) advance(bp, t.id, meta);
   }
 }
@@ -68,6 +70,28 @@ function reply(bp: BoardPaths, id: string, qid: string): void {
         : 'Then pick the choice closest to what you mean. I will show my reasoning in the plan, and you can change it there.';
     q.thread = [...(q.thread ?? []), { who: q.from, text, at: now() }];
     q.thinking = false;
+  });
+}
+
+/** The demo agents talk back with short scripted lines, so the chat can be shown without Claude. */
+function chatReply(bp: BoardPaths, id: string): void {
+  updateTicket(bp, id, (t) => {
+    const c = t.chat;
+    if (!c?.open || !c.thinking) return;
+    const said = c.messages.filter((m) => m.who === 'you');
+    const last = c.messages.at(-1);
+    const opening = last?.who !== 'you';
+    const name = c.with[0]!.toUpperCase() + c.with.slice(1);
+    const text = opening
+      ? c.with === 'analyst'
+        ? `I read "${t.title}". As I understand it: ${t.ask || 'the ticket asks for a change'}.\n\nTwo things are not clear to me yet:\n1. **Who** uses this most?\n2. Is there a **rule** about it I must follow?`
+        : `I am the ${name} on ${t.id}. ${t.status ? `Where I am: ${t.status}.` : ''} What would you like to talk through?`
+      : said.length < 2
+        ? `Got it: **${last.text}**${last.files?.length ? ` (I looked at ${last.files.length === 1 ? 'your file' : `your ${last.files.length} files`})` : ''}. Anything else I should know?`
+        : `Thank you. I think I understand enough now. ${c.with === 'analyst' ? 'Press **Write the spec** when you are happy.' : c.with === 'architect' ? 'Press **Write the design** when you are happy.' : 'Press **Done** and I will carry on as we agreed.'}`;
+    c.messages.push({ who: c.with, text, at: now() });
+    c.ready = !opening && said.length >= 2;
+    c.thinking = false;
   });
 }
 
@@ -114,6 +138,52 @@ function advance(bp: BoardPaths, id: string, meta: BoardMeta): void {
         t.waiting = { kind: 'questions', summary: `${t.questions.length} questions from the Analyst and Architect` };
         t.squad = null;
         addActivity(t, 'analyst', `Asked ${t.questions.length} questions`);
+        return;
+      }
+      case 'chat-spec':
+      case 'chat-design': {
+        // The demo writer adds what you said in the chat as one more "done when", so the change shows.
+        const said = (t.chat?.messages ?? []).filter((m) => m.who === 'you' && m.text).map((m) => m.text);
+        if (state.phase === 'chat-spec') {
+          t.story = t.story ?? script.story(t);
+          t.criteria = [...(t.criteria ?? script.criteria(t)), ...said.slice(-1).map((x) => ({ given: 'what we agreed in the chat', when: 'the squad builds it', then: x }))];
+          t.releaseNote = t.releaseNote ?? script.releaseNote(t);
+          applyPlanEdits(t);
+          t.waiting = { kind: 'spec', summary: 'The spec is ready: is this what you want?' };
+          t.status = 'Spec ready for you';
+          addActivity(t, 'analyst', t.planReview?.before ? 'Updated the spec from your talk' : 'Wrote the spec from your talk');
+        } else {
+          t.steps = [...(t.steps ?? script.steps.map((x) => ({ title: x.title, status: 'todo' as const }))), ...said.slice(-1).map((x) => ({ title: `As agreed: ${x}`, status: 'todo' as const }))];
+          const decision = script.decision(t);
+          if (decision && !t.decision) t.decision = decision;
+          t.work = { steps: t.steps.length, tests: Math.round(script.tests * 0.43), screens: script.proof.length };
+          applyPlanEdits(t);
+          t.waiting = { kind: 'plan', summary: 'The design is ready: is this how to build it?' };
+          t.status = 'Design ready for you';
+          addActivity(t, 'architect', t.planReview?.before ? 'Updated the design from your talk' : 'Wrote the design from your talk');
+        }
+        t.stage = 'specs';
+        t.live = false;
+        t.squad = null;
+        return;
+      }
+      case 'chat-carry-builder':
+      case 'chat-carry-reviewer':
+      case 'chat-carry-tester': {
+        const who = state.phase.slice('chat-carry-'.length) as 'builder' | 'reviewer' | 'tester';
+        addActivity(t, who, 'Carried on with what you agreed');
+        if (who === 'builder') {
+          t.stage = 'test';
+          t.status = `Running ${script.tests} checks`;
+          scheduleSquad(t, 'test', 1.5, speed, 0);
+        } else if (who === 'reviewer') {
+          t.stage = 'review';
+          t.status = 'Reviewer is reading the changes';
+          scheduleSquad(t, 'review', 1.5, speed, 0);
+        } else {
+          t.status = 'Recording the proof';
+          scheduleSquad(t, 'review', 1.5, speed, 0);
+        }
         return;
       }
       case 'spec-rewrite':

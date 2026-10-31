@@ -124,7 +124,7 @@ export function WhatChanged({ t }: { t: Ticket }) {
   return (
     <div className="changed">
       <button className="changedhead" onClick={() => setOpen(!open)}>
-        <b>What changed</b> {rows.length ? `${rows.length} ${rows.length === 1 ? 'part' : 'parts'}` : 'nothing'} since you sent it back {open ? '▾' : '▸'}
+        <b>What changed</b> {rows.length ? `${rows.length} ${rows.length === 1 ? 'part' : 'parts'}` : 'nothing'} since the last version {open ? '▾' : '▸'}
       </button>
       {open && (
         <>
