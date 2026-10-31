@@ -1,6 +1,6 @@
 import { Link, Outlet, useRouterState } from '@tanstack/react-router';
-import { ArrowUp, Bug, Inbox, LayoutGrid, ListTodo, Moon, Network, Settings, Sun, Terminal, Users } from 'lucide-react';
-import { useBoard } from '../lib/data';
+import { ArrowUp, Bug, ExternalLink, Inbox, LayoutGrid, ListTodo, Moon, Network, Settings, Sun, Terminal, Users } from 'lucide-react';
+import { useApps, useBoard } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { UpdateBanner } from './Restart';
 
@@ -21,7 +21,7 @@ export function Shell() {
   const path = useRouterState({ select: (s) => s.location.pathname });
   const meta = board.data?.ready ? board.data.meta : undefined;
   const tickets = board.data?.ready ? board.data.tickets : [];
-  const waiting = tickets.filter((t) => t.waiting).length;
+  const waiting = tickets.filter((t) => t.waiting || t.outdated?.length).length;
   const bugs = tickets.filter((t) => t.kind === 'bug').length;
   const initials = (meta?.user.name ?? 'You').slice(0, 2).toUpperCase();
 
@@ -52,6 +52,7 @@ export function Shell() {
           );
         })}
         <div className="grow" />
+        <Apps />
         <div className="engines">
           {(meta?.tools ?? []).map((t) => (
             <div className="row" key={t.name}>
@@ -85,3 +86,32 @@ export function Shell() {
     </div>
   );
 }
+
+/** Every app the project runs, one per code repo, with a button that opens it. */
+function Apps() {
+  const apps = useApps().data?.apps ?? [];
+  if (!apps.length) return null;
+  return (
+    <div className="apps">
+      <div className="apps-h">Your apps</div>
+      {apps.map((a) => (
+        <a
+          key={a.repo}
+          className={`app-row ${a.up ? 'up' : ''}`}
+          href={a.url}
+          target="_blank"
+          rel="noreferrer"
+          title={a.up ? `Open ${a.url}` : `Not running. Start it in ${a.repo === '.' ? 'the project folder' : `${a.repo}/`}${a.start ? ` with: ${a.start}` : ''}`}
+        >
+          <i />
+          <span className="nm">
+            <b>{a.name}</b>
+            <small>{a.up ? a.url.replace(/^https?:\/\//, '') : 'Not running'}</small>
+          </span>
+          <ExternalLink size={14} />
+        </a>
+      ))}
+    </div>
+  );
+}
+

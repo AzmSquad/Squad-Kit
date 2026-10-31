@@ -227,6 +227,35 @@ export interface TicketBrief {
   edgeCases: string[];
 }
 
+/** A decision approved after this ticket was planned, that the Architect says changes it. */
+export interface Outdated {
+  adr: string;
+  why: string;
+  /** What to change, in the Architect's words: the change request for the plan, or the follow-up ticket. */
+  change: string;
+  at: string;
+}
+
+/** The Architect checking the open tickets against a newly approved decision. */
+export interface ImpactCheck {
+  adr: string;
+  status: 'pending' | 'running' | 'done' | 'failed';
+  at?: string;
+  error?: string;
+  checked?: string[];
+  affected?: string[];
+}
+
+/** After a merge moved the person's own checkout: the project's setup runs there, so the app keeps working. */
+export interface LocalSetup {
+  status: 'pending' | 'running' | 'done' | 'failed';
+  dir: string;
+  command: string;
+  at?: string;
+  seconds?: number;
+  output?: string;
+}
+
 export interface Ticket {
   id: string;
   title: string;
@@ -288,6 +317,12 @@ export interface Ticket {
   pr?: { id: number; url: string; repo: string; host: 'azure' };
   /** When the change went into the base branch. Accepted work merges right away, so later tickets build on it. */
   mergedAt?: string;
+  /** Installing packages and running migrations in the person's own checkout, after the merge moved it. */
+  localSetup?: LocalSetup;
+  /** Decisions approved after this ticket was planned that change it, waiting for the person. */
+  outdated?: Outdated[];
+  /** The plan is being redone to follow this decision: the build brings in the latest base first. */
+  replanFor?: string;
   /** Set by the watchdog when a running step shows no progress: what it waits on, and whether that looks stuck. */
   quiet?: { since: string; kind: 'stuck' | 'long'; detail: string; command?: string; pid?: number };
   /** "Keep waiting": the watchdog stays quiet about this ticket until then. */
@@ -368,6 +403,37 @@ export interface Lesson {
   date: string;
 }
 
+/** A technology the code uses, as the Architect explains it. */
+export interface StackNote {
+  name: string;
+  why: string;
+  decision?: string;
+}
+
+/** A design pattern the code follows, where it is used, and the decision it comes from. */
+export interface PatternNote {
+  name: string;
+  what: string;
+  where: string[];
+  decision?: string;
+}
+
+/** The Architect's draft decision for a technology already in the code. The person approves or discards it. */
+export interface TechDraft {
+  tech: string;
+  status: 'writing' | 'ready' | 'failed';
+  error?: string;
+  decision?: { title: string; area: DecisionArea; options: string[]; chosen: string; why: string; buildsOn: string[] };
+}
+
+export interface Blueprint {
+  status: 'pending' | 'running' | 'done' | 'failed';
+  at?: string;
+  error?: string;
+  stack: StackNote[];
+  patterns: PatternNote[];
+}
+
 export interface BoardMeta {
   project: string;
   key: string;
@@ -385,6 +451,12 @@ export interface BoardMeta {
   commands?: ProjectCommands;
   git?: { base: string; remote: string };
   scan?: { status: 'pending' | 'running' | 'done' | 'failed'; at?: string; error?: string; summary?: string; empty?: boolean };
+  /** What the Architect last read from the code: why each technology is there, and the design patterns it follows. */
+  blueprint?: Blueprint;
+  /** Decisions the Architect is writing, or has written, for technologies that were picked without one. */
+  techDrafts?: TechDraft[];
+  /** Each approved decision is checked against the tickets planned before it. */
+  impactChecks?: ImpactCheck[];
   /** How many squad jobs may run at the same time. */
   parallel?: number;
   /** How squad-kit talks to Claude: through the Agent Client Protocol (default), or by running Claude Code directly. */

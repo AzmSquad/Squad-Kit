@@ -13,13 +13,17 @@ import {
   updateTicket,
   writeDecision,
   writeRelease,
+  listReleases,
   writeTicket,
   writeMeta,
+  codeChanged,
+  queueImpactCheck,
   type BoardPaths,
 } from './store.js';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { Release, Ticket } from './types.js';
+import type { BoardMeta, Decision, ImpactCheck, Release, TechDraft, Ticket } from './types.js';
+import { detectStack } from './stack.js';
 import { scheduleSquad } from './schedule.js';
 import { commitTicket, liveRelease } from '../engine/release.js';
 import { git } from '../engine/git.js';
@@ -29,7 +33,7 @@ import { loadConfig } from '../core/config.js';
 import { loadSecrets } from '../core/secrets.js';
 import { clientFor, overlayTrackerEnv } from '../tracker/index.js';
 import { azureFor, type Azure } from '../engine/azure.js';
-import { mergeLocally, opensPullRequest, syncWiki } from '../engine/sync.js';
+import { localSetupFor, mergeLocally, opensPullRequest, syncWiki } from '../engine/sync.js';
 import type { AgentChat, AgentName, Criterion, PlanComment, PlanEdit, PlanPart, PlanSnapshot, StuckChoice, StuckOption, TicketNote, Track, TrackerEvent, WayOut } from './types.js';
 import { endProcessTree } from '../engine/watchdog.js';
 
@@ -360,6 +364,7 @@ function approvePlan(bp: BoardPaths, ticket: Ticket, speed: number, express = fa
     });
   }
   linkDecisions(bp, ticket, adr);
+  if (adr) queueImpactCheck(bp, adr);
   return updateTicket(bp, ticket.id, (t) => {
     t.planReview = undefined;
     if (t.decision && adr) t.decision.adr = adr;
@@ -417,6 +422,8 @@ function acceptProof(bp: BoardPaths, ticket: Ticket): Ticket {
   const release = ensureDraftRelease(bp, ticket.kind === 'bug' ? 'patch' : 'minor');
   if (!release.tickets.includes(ticket.id)) release.tickets.push(ticket.id);
   writeRelease(bp, release);
+  // New code on the base: the architecture page reads it again.
+  if (merged?.moved) codeChanged(bp);
   return updateTicket(bp, ticket.id, (t) => {
     t.waiting = null;
     t.stage = 'release';
@@ -431,7 +438,11 @@ function acceptProof(bp: BoardPaths, ticket: Ticket): Ticket {
         : merged
           ? `Ready for ${release.version} · ${merged.base} not moved yet`
           : `Ready for ${release.version}`;
-    if (into) t.mergedAt = now();
+    if (into) {
+      t.mergedAt = now();
+      const ls = localSetupFor(bp, t);
+      if (ls) t.localSetup = ls;
+    }
     t.squad = openPr ? { phase: 'publish', nextAt: now() } : null;
     addActivity(t, 'you', 'Checked the proof. Looks right');
     if (commit) addActivity(t, 'release', `Saved the change as commit ${commit} on ${t.branch}`);
@@ -1185,5 +1196,142 @@ export function keepWaiting(bp: BoardPaths, id: string): Ticket {
 
 /** Everything that needs the person: open questions, plans, proof, decisions, and steps that look stuck. */
 export function inbox(bp: BoardPaths): Ticket[] {
-  return listTickets(bp).filter((t) => t.waiting || t.quiet?.kind === 'stuck');
+  return listTickets(bp).filter((t) => t.waiting || t.quiet?.kind === 'stuck' || t.outdated?.length);
 }
+
+/** Ask the Architect to read the code again for the architecture page: the stack, the patterns and the project map. */
+export function readCodeAgain(bp: BoardPaths): BoardMeta['blueprint'] {
+  const meta = readMeta(bp);
+  if (meta.engine !== 'live') throw new BoardActionError('Reading the code needs the live squad.');
+  return codeChanged(bp) ?? meta.blueprint;
+}
+
+/** Ask the Architect to write a decision for a technology that was picked without one. */
+export function draftTechDecision(bp: BoardPaths, tech: string): TechDraft {
+  const meta = readMeta(bp);
+  if (meta.engine !== 'live') throw new BoardActionError('Writing a decision needs the live squad.');
+  if (!detectStack(path.dirname(path.dirname(bp.dir)), meta).some((t) => t.name === tech)) throw new BoardActionError(`${tech} is not in the code.`);
+  const drafts = (meta.techDrafts ?? []).filter((d) => d.tech !== tech || d.status !== 'failed');
+  const open = drafts.find((d) => d.tech === tech);
+  if (open) return open;
+  const draft: TechDraft = { tech, status: 'writing' };
+  writeMeta(bp, { ...meta, techDrafts: [...drafts, draft] });
+  return draft;
+}
+
+/** The person approves the Architect's draft: it becomes a saved decision, and a rule from now on. */
+export function approveTechDecision(bp: BoardPaths, tech: string): Decision {
+  const meta = readMeta(bp);
+  const draft = meta.techDrafts?.find((d) => d.tech === tech);
+  if (draft?.status !== 'ready' || !draft.decision) throw new BoardActionError(`There is no decision for ${tech} to approve yet.`);
+  const known = new Set(listDecisions(bp).map((d) => d.id));
+  const d = draft.decision;
+  const decision: Decision = {
+    id: nextDecisionId(bp),
+    title: d.title,
+    why: d.why,
+    options: d.options,
+    // The choice must name the technology, so the stack links to it.
+    chosen: d.chosen.toLowerCase().includes(tech.toLowerCase()) ? d.chosen : `${tech}: ${d.chosen}`,
+    from: 'Code review',
+    approvedBy: meta.user.name,
+    date: now(),
+    checkedBy: null,
+    tickets: [],
+    area: d.area,
+    ...(d.buildsOn.filter((x) => known.has(x)).length ? { buildsOn: d.buildsOn.filter((x) => known.has(x)) } : {}),
+  };
+  writeDecision(bp, decision);
+  writeMeta(bp, { ...readMeta(bp), techDrafts: meta.techDrafts!.filter((x) => x.tech !== tech) });
+  queueImpactCheck(bp, decision.id);
+  return decision;
+}
+
+export function discardTechDecision(bp: BoardPaths, tech: string): void {
+  const meta = readMeta(bp);
+  writeMeta(bp, { ...meta, techDrafts: (meta.techDrafts ?? []).filter((x) => x.tech !== tech) });
+}
+
+/** Run the setup again in the person's own checkout, for example after it failed. */
+export function setUpLocalCopy(bp: BoardPaths, id: string): Ticket {
+  const t = requireTicket(bp, id);
+  if (t.localSetup?.status === 'pending' || t.localSetup?.status === 'running') return t;
+  const ls = t.localSetup ?? localSetupFor(bp, t);
+  if (!ls) throw new BoardActionError('There is no setup command, or your checkout is on another branch.');
+  return updateTicket(bp, id, (x) => {
+    x.localSetup = { dir: ls.dir, command: ls.command, status: 'pending' };
+  });
+}
+
+/**
+ * A newer decision changes this ticket. Not merged yet: the Architect redoes the design to follow it, and a ticket
+ * that was already being built brings in the latest base before the Builder redoes the work. Merged already: its code
+ * is in the base, so a follow-up ticket brings it in line.
+ */
+export function updateForDecision(bp: BoardPaths, id: string, adr: string): Ticket {
+  const meta = readMeta(bp);
+  const t0 = requireTicket(bp, id);
+  const hit = t0.outdated?.find((o) => o.adr === adr);
+  if (!hit) throw new BoardActionError(`${id} has nothing to update for ${adr}.`);
+  const rest = (t0.outdated ?? []).filter((o) => o.adr !== adr);
+  if (t0.mergedAt || t0.stage === 'done') {
+    const d = listDecisions(bp).find((x) => x.id === adr);
+    const follow = createTicket(bp, {
+      title: `Bring "${t0.title}" in line with ${adr}`,
+      ask: `${t0.id} (${t0.title}) was built before ${adr}${d ? ` (${d.title})` : ''} was approved. ${hit.change}`,
+      priority: t0.priority,
+    });
+    updateTicket(bp, id, (t) => {
+      t.outdated = rest.length ? rest : undefined;
+      addActivity(t, 'you', `Made ${follow.id} to bring it in line with ${adr}`);
+    });
+    return follow;
+  }
+  if (t0.takenOver) throw new BoardActionError(`${id} is taken over. Give it back first.`);
+  if (t0.chat?.open) throw new BoardActionError(`${id} has a chat open. Finish it first.`);
+  if (t0.live && meta.engine === 'live') throw new BoardActionError(`${id} is working right now. Press Stop first, then update the plan.`);
+  // Accepted but not merged (its pull request could not merge): it leaves the draft release until it is accepted again.
+  const draft = listReleases(bp).find((r) => r.status !== 'released' && r.tickets.includes(id));
+  if (draft) writeRelease(bp, { ...draft, tickets: draft.tickets.filter((x) => x !== id) });
+  return updateTicket(bp, id, (t) => {
+    // Its open pull request is found again by branch when it is accepted the next time.
+    t.pr = undefined;
+    t.release = undefined;
+    t.outdated = rest.length ? rest : undefined;
+    t.changeRequest = `Follow ${adr}: ${hit.change}`;
+    t.waiting = null;
+    t.stuck = undefined;
+    t.retryPhase = undefined;
+    t.live = true;
+    t.stage = 'specs';
+    t.status = 'Architect is updating the design';
+    if (t.worktree) t.replanFor = adr;
+    addActivity(t, 'you', `Asked to update the plan to follow ${adr}`);
+    scheduleSquad(t, 'plan-rewrite', 2, meta.speed);
+  });
+}
+
+/** The person keeps the plan as it is, and says why. The reason stays on the ticket. */
+export function keepPlan(bp: BoardPaths, id: string, adr: string, reason: string): Ticket {
+  const why = reason.trim();
+  if (!why) throw new BoardActionError('Say in one line why the plan stays as it is.');
+  return updateTicket(bp, id, (t) => {
+    if (!t.outdated?.some((o) => o.adr === adr)) throw new BoardActionError(`${id} has nothing to update for ${adr}.`);
+    t.outdated = t.outdated.filter((o) => o.adr !== adr);
+    if (!t.outdated.length) t.outdated = undefined;
+    addActivity(t, 'you', `Kept the plan with ${adr}: ${why}`);
+  });
+}
+
+/** Check the open tickets against a saved decision again, or for the first time on one approved before checks. */
+export function checkTicketsAgainst(bp: BoardPaths, adr: string): ImpactCheck {
+  const meta = readMeta(bp);
+  if (meta.engine !== 'live') throw new BoardActionError('Checking tickets needs the live squad.');
+  if (!listDecisions(bp).some((d) => d.id === adr)) throw new BoardActionError(`${adr} is not a saved decision.`);
+  const now = meta.impactChecks?.find((c) => c.adr === adr);
+  if (now?.status === 'pending' || now?.status === 'running') return now;
+  const check: ImpactCheck = { adr, status: 'pending' };
+  writeMeta(bp, { ...meta, impactChecks: [...(meta.impactChecks ?? []).filter((c) => c.adr !== adr), check] });
+  return check;
+}
+

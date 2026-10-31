@@ -26,6 +26,7 @@ export const STEPS: Record<AgentRole, { id: string; name: string }[]> = {
   architect: [
     { id: 'scan', name: 'Reading the project' },
     { id: 'design', name: 'Design' },
+    { id: 'blueprint', name: 'Stack and patterns' },
   ],
   builder: [
     { id: 'build', name: 'Build' },

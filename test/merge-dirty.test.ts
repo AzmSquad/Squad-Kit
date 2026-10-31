@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
-import { boardPaths, readTicket, writeMeta, writeTicket, type BoardPaths } from '../src/board/store.js';
+import { boardPaths, readMeta, readTicket, writeMeta, writeTicket, type BoardPaths } from '../src/board/store.js';
+import { LiveSquad } from '../src/engine/live.js';
 import * as actions from '../src/board/actions.js';
 import { addWorktree } from '../src/engine/git.js';
 
@@ -89,3 +90,49 @@ describe('merge on accept with your own changes in the checkout', () => {
     expect(fs.readFileSync(path.join(project, 'limit.txt'), 'utf8')).toBe('limit = 9\n');
   });
 });
+
+describe('your own checkout after the merge', () => {
+  const setup = (command: string) => writeMeta(bp, { ...readMeta(bp), commands: { setup: command } });
+  const run = (id: string) => (new LiveSquad(bp) as unknown as { localSetup(id: string): Promise<void> }).localSetup(id);
+
+  it('runs the setup there, so new packages and database changes are in place', async () => {
+    setup('echo installed > setup.log');
+    proofReady();
+    const t = actions.approve(bp, 'AP-1');
+    expect(t.localSetup).toEqual({ status: 'pending', dir: project, command: 'echo installed > setup.log' });
+    await run('AP-1');
+    const after = readTicket(bp, 'AP-1')!;
+    expect(after.localSetup?.status).toBe('done');
+    expect(fs.readFileSync(path.join(project, 'setup.log'), 'utf8')).toBe('installed\n');
+    expect(after.activity[0]!.text).toMatch(/^Your copy of the code is ready: ran echo installed > setup.log \(\d+ s\)$/);
+  });
+
+  it('says so when the setup fails, and can try again', async () => {
+    setup('echo no network >&2; exit 3');
+    proofReady();
+    actions.approve(bp, 'AP-1');
+    await run('AP-1');
+    const t = readTicket(bp, 'AP-1')!;
+    expect(t.localSetup).toMatchObject({ status: 'failed', output: expect.stringContaining('no network') });
+    expect(actions.setUpLocalCopy(bp, 'AP-1').localSetup?.status).toBe('pending');
+  });
+
+  it('can be started for a ticket merged before this step existed', () => {
+    setup('echo installed > setup.log');
+    proofReady();
+    actions.approve(bp, 'AP-1');
+    writeTicket(bp, { ...readTicket(bp, 'AP-1')!, localSetup: undefined });
+    expect(actions.setUpLocalCopy(bp, 'AP-1').localSetup).toEqual({ status: 'pending', dir: project, command: 'echo installed > setup.log' });
+    expect(readTicket(bp, 'AP-1')!.localSetup?.status).toBe('pending');
+  });
+
+  it('leaves it alone when your checkout is on another branch: its files did not change', () => {
+    setup('echo installed > setup.log');
+    proofReady();
+    sh('git checkout -q -b my-work', project);
+    const t = actions.approve(bp, 'AP-1');
+    expect(t.mergedAt).toBeTruthy();
+    expect(t.localSetup).toBeUndefined();
+  });
+});
+

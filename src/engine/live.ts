@@ -5,6 +5,7 @@ import {
   addActivity,
   boardExists,
   listDecisions,
+  listReleases,
   listTickets,
   now,
   readMeta,
@@ -16,7 +17,8 @@ import {
 } from '../board/store.js';
 import { CHAT_SESSION, applyPlanEdits, approveExpress, changeSummary, needsSpec, wayOptions } from '../board/actions.js';
 import { scheduleSquad } from '../board/schedule.js';
-import type { BoardMeta, DecisionArea, ProjectCommands, Question, Role, Ticket } from '../board/types.js';
+import type { BoardMeta, DecisionArea, ImpactCheck, PatternNote, ProjectCommands, Question, Role, StackNote, TechDraft, Ticket } from '../board/types.js';
+import { detectStack } from '../board/stack.js';
 import { describeTool, runClaude, type RunOptions, type RunResult } from './claude.js';
 import { AcpStartError, acpAdapterPath, runClaudeAcp } from './acp-runner.js';
 import { runChecks, runCommand, startApp, tail, testCount, type RunningApp } from './checks.js';
@@ -60,6 +62,7 @@ export class LiveSquad {
   private timer: NodeJS.Timeout | null = null;
   private stops = new Map<string, AbortController>();
   private syncing = new Set<string>();
+  private localRuns = new Set<string>();
   private closing = false;
   private dog = new Watchdog();
   private lastWatch = 0;
@@ -113,6 +116,18 @@ export class LiveSquad {
       this.launch('__scan', () => this.scan());
       return;
     }
+    // Pending, or cut off by a restart: the Architect reads the code for the architecture page, beside the tickets.
+    if ((meta.blueprint?.status === 'pending' || meta.blueprint?.status === 'running') && !this.running.has('__blueprint')) {
+      this.launch('__blueprint', () => this.readBlueprint());
+    }
+    for (const c of meta.impactChecks ?? []) {
+      const key = `__impact:${c.adr}`;
+      if ((c.status === 'pending' || c.status === 'running') && !this.running.has(key)) this.launch(key, () => this.checkImpact(c.adr));
+    }
+    for (const d of meta.techDrafts ?? []) {
+      const key = `__tech:${d.tech}`;
+      if (d.status === 'writing' && !this.running.has(key)) this.launch(key, () => this.writeTechDecision(d.tech));
+    }
     for (const t of listTickets(this.bp)) {
       // Tracker updates run beside the squad's work and never count against the parallel limit.
       if (t.trackerQueue?.length && !this.syncing.has(t.id)) {
@@ -120,6 +135,14 @@ export class LiveSquad {
         flushTracker(this.bp, t.id)
           .catch(() => undefined)
           .finally(() => this.syncing.delete(t.id));
+      }
+      // Setting up the person's own checkout after a merge runs beside the squad too, one at a time per folder.
+      const ls = t.localSetup;
+      if ((ls?.status === 'pending' || ls?.status === 'running') && !this.localRuns.has(ls.dir)) {
+        this.localRuns.add(ls.dir);
+        this.localSetup(t.id)
+          .catch(() => undefined)
+          .finally(() => this.localRuns.delete(ls.dir));
       }
       if (t.stopRequested) {
         this.stops.get(t.id)?.abort();
@@ -151,7 +174,7 @@ export class LiveSquad {
     const phase = readTicket(this.bp, key)?.squad?.phase;
     job()
       .catch((err: Error) => {
-        if (key === '__scan' || this.closing) return;
+        if (key.startsWith('__') || this.closing) return;
         if (readTicket(this.bp, key)?.stopRequested) return this.stopped(key, phase);
         if (err instanceof WaitingForYou) return;
         this.fail(key, err.message, phase ?? 'analyst-read');
@@ -160,7 +183,7 @@ export class LiveSquad {
         this.running.delete(key);
         this.stops.delete(key);
         this.dog.forget(key);
-        if (key !== '__scan') this.setQuiet(key, null);
+        if (!key.startsWith('__')) this.setQuiet(key, null);
       });
   }
 
@@ -171,7 +194,7 @@ export class LiveSquad {
   private watch(): void {
     if (Date.now() - this.lastWatch < 15_000) return;
     this.lastWatch = Date.now();
-    const keys = [...this.running].filter((k) => k !== '__scan');
+    const keys = [...this.running].filter((k) => !k.startsWith('__'));
     if (!keys.length) return;
     const rows = processTable();
     for (const id of keys) {
@@ -417,6 +440,137 @@ export class LiveSquad {
       const fresh = this.meta();
       fresh.scan = { status: 'failed', at: now(), error: (err as Error).message };
       writeMeta(this.bp, fresh);
+    }
+  }
+
+  /* ── the person's own checkout, after a merge ─────────── */
+
+  private async localSetup(id: string): Promise<void> {
+    const ls = readTicket(this.bp, id)?.localSetup;
+    if (!ls) return;
+    this.update(id, (x) => (x.localSetup = { dir: ls.dir, command: ls.command, status: 'running', at: now() }));
+    const r = await runCommand(ls.dir, ls.command, 20 * 60_000);
+    const seconds = Math.round(r.seconds);
+    this.update(id, (x) => {
+      x.localSetup = { dir: ls.dir, command: ls.command, status: r.ok ? 'done' : 'failed', at: now(), seconds, ...(r.ok ? {} : { output: tail(r.output, 12) }) };
+      addActivity(x, 'release', r.ok ? `Your copy of the code is ready: ran ${ls.command} (${seconds} s)` : `Setting up your copy failed (${ls.command}): ${tail(r.output, 2)}`);
+    });
+  }
+
+  /* ── stack and patterns, for the architecture page ──── */
+
+  private async readBlueprint(): Promise<void> {
+    const root = projectRoot(this.bp);
+    const meta = this.meta();
+    const decisions = listDecisions(this.bp);
+    meta.blueprint = { stack: [], patterns: [], ...meta.blueprint, status: 'running' };
+    writeMeta(this.bp, meta);
+    try {
+      const r = await this.claude({
+        role: 'architect',
+        step: 'blueprint',
+        cwd: root,
+        prompt: P.blueprintPrompt(meta, decisions, detectStack(root, meta).map((x) => x.name)),
+        allowedTools: READ_ONLY,
+        schema: P.BLUEPRINT_SCHEMA,
+        timeoutMs: 10 * 60_000,
+      });
+      const out = r.structured as { map: BoardMeta['map']; stack: StackNote[]; patterns: PatternNote[] };
+      // Only links to decisions that exist, so a made-up id never shows on the page.
+      const known = new Set(decisions.map((d) => d.id));
+      const link = (id?: string) => (id && known.has(id) ? { decision: id } : {});
+      const fresh = this.meta();
+      if (out.map.length) fresh.map = out.map;
+      fresh.blueprint = {
+        status: 'done',
+        at: now(),
+        stack: out.stack.map((x) => ({ name: x.name, why: x.why, ...link(x.decision) })),
+        patterns: out.patterns.map((x) => ({ name: x.name, what: x.what, where: x.where ?? [], ...link(x.decision) })),
+      };
+      writeMeta(this.bp, fresh);
+    } catch (err) {
+      const fresh = this.meta();
+      fresh.blueprint = { stack: [], patterns: [], ...fresh.blueprint, status: 'failed', error: (err as Error).message };
+      writeMeta(this.bp, fresh);
+    }
+  }
+
+  /** A decision was approved: which tickets planned before it does it change? The person decides on each one. */
+  private async checkImpact(adr: string): Promise<void> {
+    const set = (change: (c: ImpactCheck) => void) => {
+      const fresh = this.meta();
+      const c = fresh.impactChecks?.find((x) => x.adr === adr);
+      if (!c) return;
+      change(c);
+      writeMeta(this.bp, fresh);
+    };
+    const d = listDecisions(this.bp).find((x) => x.id === adr);
+    if (!d) return set((c) => Object.assign(c, { status: 'failed', error: `${adr} is not saved.` }));
+    const shipped = new Set(listReleases(this.bp).filter((r) => r.status === 'released').flatMap((r) => r.tickets));
+    const open = listTickets(this.bp).filter(
+      (t) =>
+        t.id !== d.from &&
+        !d.tickets.includes(t.id) &&
+        !(t.follows ?? []).includes(adr) &&
+        !t.outdated?.some((o) => o.adr === adr) &&
+        t.stage !== 'done' &&
+        !shipped.has(t.id) &&
+        Boolean(t.steps?.length || t.work),
+    );
+    set((c) => Object.assign(c, { status: 'running', at: now() }));
+    if (!open.length) return set((c) => Object.assign(c, { status: 'done', at: now(), checked: [], affected: [] }));
+    try {
+      const r = await this.claude({
+        role: 'architect',
+        step: 'blueprint',
+        cwd: projectRoot(this.bp),
+        prompt: P.impactPrompt(d, open),
+        allowedTools: READ_ONLY,
+        schema: P.IMPACT_SCHEMA,
+        timeoutMs: 10 * 60_000,
+      });
+      const out = (r.structured as { tickets: { id: string; affected: boolean; why: string; change: string }[] }).tickets;
+      const affected = out.filter((x) => x.affected && x.change.trim() && open.some((t) => t.id === x.id));
+      for (const x of affected) {
+        this.update(x.id, (t) => {
+          t.outdated = [...(t.outdated ?? []).filter((o) => o.adr !== adr), { adr, why: x.why, change: x.change, at: now() }];
+          addActivity(t, 'architect', `${adr} came after this plan and changes it: ${x.why}`);
+        });
+      }
+      set((c) => Object.assign(c, { status: 'done', at: now(), checked: open.map((t) => t.id), affected: affected.map((x) => x.id) }));
+    } catch (err) {
+      set((c) => Object.assign(c, { status: 'failed', at: now(), error: (err as Error).message }));
+    }
+  }
+
+  private async writeTechDecision(tech: string): Promise<void> {
+    const set = (change: (d: TechDraft) => void) => {
+      const fresh = this.meta();
+      const d = fresh.techDrafts?.find((x) => x.tech === tech);
+      if (!d) return;
+      change(d);
+      writeMeta(this.bp, fresh);
+    };
+    try {
+      const r = await this.claude({
+        role: 'architect',
+        step: 'blueprint',
+        cwd: projectRoot(this.bp),
+        prompt: P.techDecisionPrompt(listDecisions(this.bp), tech, this.meta().blueprint?.stack.find((s) => s.name === tech)?.why),
+        allowedTools: READ_ONLY,
+        schema: P.TECH_DECISION_SCHEMA,
+        timeoutMs: 10 * 60_000,
+      });
+      const out = r.structured as NonNullable<TechDraft['decision']>;
+      set((d) => {
+        d.status = 'ready';
+        d.decision = { ...out, buildsOn: out.buildsOn ?? [] };
+      });
+    } catch (err) {
+      set((d) => {
+        d.status = 'failed';
+        d.error = (err as Error).message;
+      });
     }
   }
 
@@ -824,6 +978,7 @@ export class LiveSquad {
 
   private async build(id: string): Promise<void> {
     const t0 = await this.workspace(id);
+    if (t0.replanFor) return this.rebuild(id, t0.replanFor);
     const meta = this.meta();
     const rc = repoFor(meta, t0).commands;
     if (!t0.proof?.length && rc.start && rc.url && (t0.work?.screens ?? 0) > 0 && !meta.scan?.empty) {
@@ -988,6 +1143,47 @@ export class LiveSquad {
    * The accepted change clashes with newer work in the base. squad-kit starts the merge in the ticket's copy (agents
    * never write to git), the Builder settles each clash, and the checks, review and proof run again.
    */
+  /**
+   * The plan was redone to follow a newer decision, after the Builder had started. The latest base comes in first, so
+   * the work builds on what that decision already changed, then the Builder redoes the work to the new plan.
+   */
+  private async rebuild(id: string, adr: string): Promise<void> {
+    const t = readTicket(this.bp, id)!;
+    const base = repoFor(this.meta(), t).base;
+    const dir = t.worktree!;
+    const baseSha = git(dir, ['rev-parse', base]);
+    git(dir, ['merge', '--no-commit', '--no-ff', base], { allowFail: true });
+    const clashes = git(dir, ['diff', '--name-only', '--diff-filter=U'], { allowFail: true }).split('\n').filter(Boolean);
+    const t1 = this.update(id, (x) => {
+      x.baseCommit = baseSha;
+      x.stage = 'implement';
+      x.live = true;
+      x.tries = 0;
+      x.reviewRound = 0;
+      x.proof = undefined;
+      x.gates = { checks: 'pending', review: 'pending', proof: 'pending' };
+      x.sessions = { ...x.sessions, build: x.sessions?.build ?? randomUUID() };
+      x.status = `Redoing the work to follow ${adr}`;
+      addActivity(x, 'squad', `Brought the latest ${base} into this ticket${clashes.length ? `. Clashes in ${clashes.join(', ')}` : ''}`);
+      addActivity(x, 'builder', `Started redoing the work to follow ${adr}`);
+    });
+    const meta = this.meta();
+    const intro = `The plan changed to follow ${adr}, a decision approved after you started. The latest ${base} is now in this copy${clashes.length ? `, with clashes in ${clashes.join(', ')} to fix first` : ''}. Redo the work to the new plan below: keep what still fits, change what does not.`;
+    await this.runBuilder(id, `${intro}\n\n${P.buildPrompt(meta, listDecisions(this.bp), t1, this.ctx(t1))}`, Boolean(t.sessions?.build), 'build');
+    this.update(id, (x) => {
+      for (const s of x.steps ?? []) {
+        s.status = 'done';
+        s.live = undefined;
+      }
+      x.replanFor = undefined;
+      x.progress = 100;
+      addActivity(x, 'builder', 'Finished all steps');
+      x.stage = 'test';
+      x.status = 'Running the project checks';
+      scheduleSquad(x, 'test', 0.2, 1);
+    });
+  }
+
   private async updateBase(id: string): Promise<void> {
     const t = await this.workspace(id);
     const base = repoFor(this.meta(), t).base;

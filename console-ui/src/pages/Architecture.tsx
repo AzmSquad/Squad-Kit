@@ -1,16 +1,17 @@
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
-import { Check, Lightbulb, Map as MapIcon, Pause, Play } from 'lucide-react';
+import { Check, Lightbulb, Loader2, Map as MapIcon, Pause, Play, RefreshCw, Shapes } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { DECISION_AREAS, type Decision, type DecisionArea, type TimelineState, type TimelineTicket } from '../api/types';
-import { useArchitecture } from '../lib/data';
-import { dateShort } from '../components/ui';
+import { DECISION_AREAS, type ArchitectureResponse, type Decision, type ImpactCheck, type DecisionArea, type StackItem, type TechRole, type TimelineState, type TimelineTicket } from '../api/types';
+import { useAct, useArchitecture } from '../lib/data';
+import { LOGOS } from '../lib/logos';
+import { ago, dateShort } from '../components/ui';
 
 /* ── Architecture: every saved decision, how they build on each other, and the tickets they shaped ──
    Map: decisions as cards, left to right from the starting points to what was built on them.
    Timeline: each decision is a track from the ticket that made it; a dot is a later ticket that followed it.
    All decisions, Project map and Lessons are the plain lists the squad reads before every ticket. */
 
-export type ArchView = 'map' | 'timeline' | 'list' | 'project' | 'lessons';
+export type ArchView = 'map' | 'timeline' | 'stack' | 'list' | 'project' | 'lessons';
 
 const STATE_NAME: Record<TimelineState, string> = {
   shipped: 'Released',
@@ -85,6 +86,7 @@ export function ArchitecturePage() {
           [
             ['map', 'Map'],
             ['timeline', 'Timeline'],
+            ['stack', 'Stack', data.data.stack.length],
             ['list', 'All decisions', decisions.length],
             ['project', 'Project map'],
             ['lessons', 'Lessons', lessons.length],
@@ -156,12 +158,14 @@ export function ArchitecturePage() {
             {visual && <Legend view={view} />}
             {view === 'map' && <Inherit decisions={decisions} tickets={tickets} onPick={setPick} />}
 
+            {view === 'stack' && <StackView data={data.data} picked={pick?.id ?? null} onPick={setPick} />}
             {view === 'list' && <DecisionTable decisions={decisions} picked={pick?.id ?? null} onPick={setPick} />}
             {view === 'project' && (
               <div style={{ maxWidth: 820 }}>
                 <p className="note" style={{ marginBottom: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <MapIcon size={15} /> The Architect wrote this when it first read the project. Every agent reads it first, then opens only the files it needs.
+                  <MapIcon size={15} /> The Architect writes this from the code and reads it again after every merge. Every agent reads it first, then opens only the files it needs.
                 </p>
+                <ReadingBar reading={data.data.reading} />
                 {data.data.map.map((m) => (
                   <div className="maprow" key={m.area}>
                     <b>{m.area}</b>
@@ -187,9 +191,206 @@ export function ArchitecturePage() {
             )}
           </div>
         </div>
-        {view !== 'project' && view !== 'lessons' && <Detail pick={pick} decisions={decisions} tickets={tickets} onPick={setPick} />}
+        {view !== 'project' && view !== 'lessons' && <Detail pick={pick} decisions={decisions} tickets={tickets} impact={data.data.impact ?? []} onPick={setPick} />}
       </div>
     </>
+  );
+}
+
+/* ── Stack: the technologies in the code, why each is there, and the patterns the code follows ── */
+
+const ROLES: { role: TechRole; label: string }[] = [
+  { role: 'Language', label: 'Language and runtime' },
+  { role: 'Framework', label: 'App framework' },
+  { role: 'Interface', label: 'Screens' },
+  { role: 'Data', label: 'Data' },
+  { role: 'Services', label: 'Outside services' },
+  { role: 'Testing', label: 'Testing' },
+  { role: 'Tooling', label: 'Tooling' },
+];
+
+function StackView({ data, picked, onPick }: { data: ArchitectureResponse; picked: string | null; onPick(p: Pick): void }) {
+  const unchosen = data.stack.filter((t) => !t.decisions.length && !t.via).length;
+  const came = data.stack.filter((t) => !t.decisions.length && t.via).length;
+  return (
+    <div className="stackv">
+      <ReadingBar reading={data.reading} />
+      <div className="stack-sum">
+        <span>
+          <b>{data.stack.length}</b> technologies in the code
+        </span>
+        <span>
+          <b>{data.stack.length - unchosen - came}</b> chosen by a saved decision
+        </span>
+        {came > 0 && (
+          <span>
+            <b>{came}</b> came with one of those
+          </span>
+        )}
+        {unchosen > 0 && (
+          <span className="ahead">
+            <b>{unchosen}</b> picked while building, no decision yet
+          </span>
+        )}
+        <span>
+          <b>{data.patterns.length}</b> design patterns
+        </span>
+      </div>
+      {data.stack.length === 0 && <p className="note">No package files found in the code yet.</p>}
+      <section className="stack-group">
+        <h3>Technologies</h3>
+        <div className="techs">
+          {ROLES.flatMap((r) => data.stack.filter((t) => t.role === r.role)).map((t) => (
+            <TechCard key={t.name} t={t} picked={picked} onPick={onPick} />
+          ))}
+        </div>
+      </section>
+
+      <section className="stack-group">
+        <h3>Design patterns the code follows</h3>
+        {data.patterns.length === 0 && <p className="note">Not read yet. Press Read the code again, and the Architect lists the patterns a new developer must keep.</p>}
+        <div className="patterns">
+          {data.patterns.map((p) => (
+            <div key={p.name} className="pattern">
+              <span className="glyph sm"><Shapes size={13} /></span>
+              <div>
+                <b>{p.name}</b>
+                <p>{p.what}</p>
+                <div className="where">
+                  {p.where.map((w) => (
+                    <code key={w}>{w}</code>
+                  ))}
+                  {p.decision && (
+                    <button className={`pill click ${picked === p.decision ? 'on' : ''}`} onClick={() => onPick({ kind: 'adr', id: p.decision! })}>
+                      From {p.decision}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function TechCard({ t, picked, onPick }: { t: StackItem; picked: string | null; onPick(p: Pick): void }) {
+  const logo = t.icon ? LOGOS[t.icon] : undefined;
+  return (
+    <div className={`tech ${t.decisions.some((d) => d === picked) ? 'picked' : ''}`}>
+      <div className="tech-head">
+        <span className="logo" style={logo ? ({ '--brand': `#${logo.hex}` } as React.CSSProperties) : undefined}>
+          {logo ? (
+            <svg viewBox="0 0 24 24" aria-hidden="true" className={dark(logo.hex) ? 'ink' : ''}>
+              <path d={logo.path} />
+            </svg>
+          ) : (
+            <span className="mono">{t.name.slice(0, 2)}</span>
+          )}
+        </span>
+        <span className="tech-name">
+          <b>{t.name}</b>
+          {t.version && <span className="mono">v{t.version}</span>}
+        </span>
+        <span className="tech-role">{ROLES.find((r) => r.role === t.role)?.label}</span>
+      </div>
+      <p className={t.why ? '' : 'note'}>{t.why ?? 'Not explained yet. The Architect fills this in when it reads the code.'}</p>
+      <div className="tech-foot">
+        {t.decisions.length ? (
+          t.decisions.map((d) => (
+            <button key={d} className={`pill click ${picked === d ? 'on' : ''}`} onClick={() => onPick({ kind: 'adr', id: d })}>
+              Chosen in {d}
+            </button>
+          ))
+        ) : t.via ? (
+          t.via.decisions.map((d) => (
+            <button key={d} className={`pill click ${picked === d ? 'on' : ''}`} onClick={() => onPick({ kind: 'adr', id: d })} title={`Choosing ${t.via!.name} chose ${t.name} too`}>
+              Comes with {t.via!.name} · {d}
+            </button>
+          ))
+        ) : (
+          <TechDecision t={t} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** A technology picked while building: the Architect can write its decision, for the person to approve. */
+function TechDecision({ t }: { t: StackItem }) {
+  const act = useAct();
+  const send = (what: 'write' | 'approve' | 'discard', done?: string) => act.mutate({ path: '/api/v1/architecture/decide', body: { tech: t.name, do: what }, done });
+  const d = t.draft;
+  if (d?.status === 'writing' || (act.isPending && !d)) {
+    return (
+      <span className="pill nodecision">
+        <Loader2 size={12} className="spin" /> The Architect is writing it
+      </span>
+    );
+  }
+  if (d?.status === 'ready' && d.decision) {
+    const x = d.decision;
+    return (
+      <div className="techdraft">
+        <span className="lbl">Decision for you to approve</span>
+        <b>{x.title}</b>
+        <p>
+          <span className="note">Chosen:</span> {x.chosen}
+        </p>
+        <p>{x.why}</p>
+        {x.options.filter((o) => o !== x.chosen).length > 0 && (
+          <p className="note">Also looked at: {x.options.filter((o) => o !== x.chosen).join('; ')}</p>
+        )}
+        <div className="row">
+          <button className="btn sm pri" disabled={act.isPending} onClick={() => send('approve', 'Saved as a decision. Every new ticket follows it now.')}>
+            <Check size={13} /> Approve
+          </button>
+          <button className="btn sm" disabled={act.isPending} onClick={() => send('discard')}>
+            Discard
+          </button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <>
+      <span className="pill nodecision" title={d?.status === 'failed' ? `The last try stopped: ${d.error ?? ''}` : 'The Builder added it while building; nobody wrote down why.'}>
+        {d?.status === 'failed' ? 'Writing stopped, try again' : 'Picked while building'}
+      </span>
+      <button className="btn sm" onClick={() => send('write', `The Architect is writing a decision for ${t.name}.`)}>
+        Save as a decision
+      </button>
+    </>
+  );
+}
+
+/** Near-black brand colours (Next.js, Prisma) take the text colour, so they show in the dark theme too. */
+function dark(hex: string): boolean {
+  const n = parseInt(hex, 16);
+  return ((n >> 16) & 255) * 0.299 + ((n >> 8) & 255) * 0.587 + (n & 255) * 0.114 < 60;
+}
+
+function ReadingBar({ reading }: { reading?: ArchitectureResponse['reading'] }) {
+  const act = useAct();
+  const busy = reading?.status === 'pending' || reading?.status === 'running' || act.isPending;
+  return (
+    <div className={`reading ${reading?.status === 'failed' ? 'bad' : ''}`}>
+      {busy ? <Loader2 size={15} className="spin" /> : <RefreshCw size={15} />}
+      <span>
+        {busy
+          ? 'The Architect is reading the code. This takes a minute or two.'
+          : reading?.status === 'failed'
+            ? `The last read stopped: ${reading.error ?? 'unknown error'}`
+            : reading?.at
+              ? `Read from the code ${ago(reading.at)}. It is read again after every merge.`
+              : 'Not read from the code yet.'}
+      </span>
+      <span className="grow" />
+      <button className="btn sm" disabled={busy} onClick={() => act.mutate({ path: '/api/v1/architecture/read', done: 'The Architect is reading the code.' })}>
+        <RefreshCw size={13} /> Read the code again
+      </button>
+    </div>
   );
 }
 
@@ -579,7 +780,7 @@ function DecisionTable({ decisions, picked, onPick }: { decisions: Decision[]; p
 
 /* ── the side panel ── */
 
-function Detail({ pick, decisions, tickets, onPick }: { pick: Pick; decisions: Decision[]; tickets: TimelineTicket[]; onPick: (p: Pick) => void }) {
+function Detail({ pick, decisions, tickets, impact, onPick }: { pick: Pick; decisions: Decision[]; tickets: TimelineTicket[]; impact: ImpactCheck[]; onPick: (p: Pick) => void }) {
   const adr = (id: string) => (
     <button key={id} className="pill click" onClick={() => onPick({ kind: 'adr', id })}>{id}</button>
   );
@@ -675,6 +876,7 @@ function Detail({ pick, decisions, tickets, onPick }: { pick: Pick; decisions: D
           <div className="pills">{ahead.map((t) => tk(t.id))}</div>
         </>
       )}
+      <ImpactBox d={d} check={impact.find((c) => c.adr === d.id)} tk={tk} />
       <div className="lbl">Checked by</div>
       {d.checkedBy ? (
         <div className="box">
@@ -686,6 +888,41 @@ function Detail({ pick, decisions, tickets, onPick }: { pick: Pick; decisions: D
         <p className="note">A fact about the project, nothing to test.</p>
       )}
     </aside>
+  );
+}
+
+/** Each approved decision is checked against the tickets planned before it, so older plans do not miss it. */
+function ImpactBox({ d, check, tk }: { d: Decision; check?: ImpactCheck; tk: (id: string) => React.ReactNode }) {
+  const act = useAct();
+  if (d.replacedBy) return null;
+  const busy = check?.status === 'pending' || check?.status === 'running' || act.isPending;
+  const run = () => act.mutate({ path: '/api/v1/architecture/impact', body: { adr: d.id }, done: `The Architect is checking the open tickets against ${d.id}.` });
+  return (
+    <>
+      <div className="lbl">Tickets planned before it</div>
+      {busy ? (
+        <p className="note" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <Loader2 size={13} className="spin" /> The Architect is checking the open tickets.
+        </p>
+      ) : check?.status === 'done' ? (
+        <>
+          <p className="note" style={{ marginBottom: 6 }}>
+            {check.checked?.length
+              ? `Checked ${check.checked.length} open ${check.checked.length === 1 ? 'ticket' : 'tickets'} ${check.at ? ago(check.at) : ''}. ${check.affected?.length ? 'These need a change, waiting for you:' : 'None need a change.'}`
+              : 'No open ticket was planned before it.'}
+          </p>
+          <div className="pills">{(check.affected ?? []).map(tk)}</div>
+          <button className="btn sm quiet" style={{ marginTop: 8 }} onClick={run}>Check again</button>
+        </>
+      ) : (
+        <>
+          <p className="note" style={{ marginBottom: 8 }}>
+            {check?.status === 'failed' ? `The last check stopped: ${check.error ?? ''}` : 'Not checked yet. Plans written before it may still do it the old way.'}
+          </p>
+          <button className="btn sm" onClick={run}>Check open tickets</button>
+        </>
+      )}
+    </>
   );
 }
 

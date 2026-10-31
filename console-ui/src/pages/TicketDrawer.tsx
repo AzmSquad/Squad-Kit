@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { ArrowUp, Check, Code, Copy, Download, ExternalLink, GitPullRequest, MessageCircle, Send, Square, X } from 'lucide-react';
+import { ArrowUp, Check, Code, Copy, Download, ExternalLink, GitPullRequest, Loader2, MessageCircle, Send, Square, TriangleAlert, X } from 'lucide-react';
 import { assetUrl, ticketFileUrl } from '../api/client';
 import type { PlanComment, Question, Ticket, TicketNote } from '../api/types';
 import { useAct, useTicket } from '../lib/data';
@@ -104,13 +104,14 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
               ).map(([k, label]) => (
                 <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>
                   {label}
-                  {k === 'now' && t.waiting && <span className="dot" />}
+                  {k === 'now' && (t.waiting || t.outdated?.length) && <span className="dot" />}
                 </button>
               ))}
               <button className={`dev ${tab === 'developer' ? 'on' : ''}`} onClick={() => setTab('developer')}>
                 <Code size={15} /> Developer
               </button>
             </div>
+            {tab === 'now' && t.outdated?.length ? <OutdatedBanner t={t} /> : null}
             {tab === 'now' && <NowPanel t={t} />}
             {tab === 'story' && <StoryTab t={t} />}
             {tab === 'plan' && <PlanTab t={t} />}
@@ -843,6 +844,95 @@ function QuietPanel({ t }: { t: Ticket }) {
   );
 }
 
+/** A decision approved after this ticket was planned changes it. The person updates the plan or keeps it, with a reason. */
+function OutdatedBanner({ t }: { t: Ticket }) {
+  const act = useAct<Ticket>();
+  const [keeping, setKeeping] = useState<string | null>(null);
+  const [reason, setReason] = useState('');
+  const merged = Boolean(t.mergedAt) || t.stage === 'done';
+  return (
+    <div className="outdated">
+      {t.outdated!.map((o) => (
+        <div key={o.adr} className="outdated-item">
+          <div className="outdated-head">
+            <span className="ic"><TriangleAlert size={15} /></span>
+            <b>
+              <Link to="/architecture" search={{ adr: o.adr }}>{o.adr}</Link> came after this plan and changes it
+            </b>
+          </div>
+          <p>{o.why}</p>
+          <p>
+            <span className="note">{merged ? 'What a follow-up would change:' : 'What would change:'}</span> {o.change}
+          </p>
+          {keeping === o.adr ? (
+            <div className="row">
+              <input className="input" autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why the plan stays as it is" />
+              <button className="btn sm" disabled={!reason.trim() || act.isPending} onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/decision-update`, body: { adr: o.adr, do: 'keep', reason }, done: 'Kept the plan. The reason is on the ticket.' }, { onSuccess: () => setKeeping(null) })}>
+                Keep it
+              </button>
+              <button className="btn sm quiet" onClick={() => setKeeping(null)}>Cancel</button>
+            </div>
+          ) : (
+            <div className="row">
+              <button
+                className="btn sm pri"
+                disabled={act.isPending}
+                onClick={() =>
+                  act.mutate({
+                    path: `/api/v1/tickets/${t.id}/decision-update`,
+                    body: { adr: o.adr, do: 'update' },
+                    done: merged ? 'Made a follow-up ticket.' : 'The Architect is updating the plan.',
+                  })
+                }
+              >
+                {merged ? 'Make a follow-up ticket' : 'Update the plan'}
+              </button>
+              <button className="btn sm" onClick={() => { setKeeping(o.adr); setReason(''); }}>
+                Keep it as is
+              </button>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** The merge moved the person's own checkout; this says whether its packages and database are up to date. */
+function LocalSetupLine({ t }: { t: Ticket }) {
+  const again = useAct();
+  const ls = t.localSetup!;
+  const busy = ls.status === 'pending' || ls.status === 'running';
+  return (
+    <div className={`localsetup ${ls.status}`}>
+      <span className="ic">{busy ? <Loader2 size={15} className="spin" /> : ls.status === 'done' ? <Check size={15} strokeWidth={2.5} /> : <TriangleAlert size={15} />}</span>
+      <div>
+        <b>
+          {busy
+            ? 'Updating your copy of the code'
+            : ls.status === 'done'
+              ? 'Your copy of the code is ready to run'
+              : 'Your copy of the code needs a hand'}
+        </b>
+        <span>
+          {busy
+            ? 'The merge changed your own folder, so the squad installs new packages and runs the database changes there.'
+            : ls.status === 'done'
+              ? `New packages and database changes are in your own folder${ls.at ? `, ${ago(ls.at)}` : ''}${ls.seconds !== undefined ? ` (${ls.seconds} s)` : ''}.`
+              : 'The setup stopped in your own folder. Run it there, or try again.'}
+        </span>
+        <code>{ls.command}</code>
+        {ls.status === 'failed' && ls.output && <pre>{ls.output}</pre>}
+      </div>
+      {ls.status === 'failed' && (
+        <button className="btn sm" disabled={again.isPending} onClick={() => again.mutate({ path: `/api/v1/tickets/${t.id}/local-setup`, done: 'Running the setup again' })}>
+          Try again
+        </button>
+      )}
+    </div>
+  );
+}
+
 function WorkingPanel({ t }: { t: Ticket }) {
   const stop = useAct();
   const calm =
@@ -867,6 +957,7 @@ function WorkingPanel({ t }: { t: Ticket }) {
             </>
           )}
         </div>
+        {t.localSetup && <LocalSetupLine t={t} />}
         {t.steps && t.steps.length > 0 && (
           <>
             <div className="lbl">Steps</div>

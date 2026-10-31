@@ -1,3 +1,4 @@
+import { detectStack } from '../board/stack.js';
 import path from 'node:path';
 import { listDecisions, listTickets, readMeta, readTicket, type BoardPaths } from '../board/store.js';
 import type { Ticket } from '../board/types.js';
@@ -64,6 +65,7 @@ export function corePrompts(bp: BoardPaths, role: AgentRole, ticketId?: string):
     spec: () => P.specPrompt(t),
     scan: () => P.scanPrompt(meta, [], ctx),
     design: () => P.designPrompt(t, undefined, meta),
+    blueprint: () => P.blueprintPrompt(meta, decisions, detectStack(root, meta).map((x) => x.name)),
     build: () => P.buildPrompt(meta, decisions, t, ctx),
     fix: () =>
       [

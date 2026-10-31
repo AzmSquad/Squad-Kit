@@ -45,7 +45,7 @@ const architecture = createRoute({
   path: '/architecture',
   validateSearch: (s: Record<string, unknown>): { adr?: string; view?: ArchView } => ({
     adr: typeof s.adr === 'string' && s.adr ? s.adr : undefined,
-    view: ['timeline', 'list', 'project', 'lessons'].includes(s.view as string) ? (s.view as ArchView) : undefined,
+    view: ['timeline', 'stack', 'list', 'project', 'lessons'].includes(s.view as string) ? (s.view as ArchView) : undefined,
   }),
   component: ArchitecturePage,
 });

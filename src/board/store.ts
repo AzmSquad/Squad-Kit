@@ -146,3 +146,21 @@ export function draftRelease(bp: BoardPaths): Release | null {
 export function latestRelease(bp: BoardPaths): Release | null {
   return listReleases(bp).find((r) => r.status === 'released') ?? null;
 }
+
+/** The code on the base changed: queue a fresh read, unless one is already waiting or running. */
+export function codeChanged(bp: BoardPaths): BoardMeta['blueprint'] {
+  const meta = readMeta(bp);
+  if (meta.engine !== 'live') return undefined;
+  if (meta.blueprint?.status === 'pending' || meta.blueprint?.status === 'running') return meta.blueprint;
+  meta.blueprint = { stack: [], patterns: [], ...meta.blueprint, status: 'pending' };
+  writeMeta(bp, meta);
+  return meta.blueprint;
+}
+
+/** A decision was approved: the Architect checks the tickets planned before it. */
+export function queueImpactCheck(bp: BoardPaths, adr: string): void {
+  const meta = readMeta(bp);
+  if (meta.engine !== 'live' || meta.impactChecks?.some((c) => c.adr === adr)) return;
+  writeMeta(bp, { ...meta, impactChecks: [...(meta.impactChecks ?? []), { adr, status: 'pending' }] });
+}
+

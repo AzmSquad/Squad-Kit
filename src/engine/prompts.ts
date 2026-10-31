@@ -27,6 +27,55 @@ export const SCAN_SCHEMA = {
   required: ['empty', 'summary', 'map', 'decisions', 'commands'],
 };
 
+export const BLUEPRINT_SCHEMA = {
+  type: 'object',
+  properties: {
+    map: { type: 'array', items: { type: 'object', properties: { area: STR, detail: STR }, required: ['area', 'detail'] } },
+    stack: {
+      type: 'array',
+      items: { type: 'object', properties: { name: STR, why: STR, decision: STR }, required: ['name', 'why'] },
+    },
+    patterns: {
+      type: 'array',
+      maxItems: 10,
+      items: {
+        type: 'object',
+        properties: { name: STR, what: STR, where: { type: 'array', maxItems: 4, items: STR }, decision: STR },
+        required: ['name', 'what', 'where'],
+      },
+    },
+  },
+  required: ['map', 'stack', 'patterns'],
+};
+
+export const TECH_DECISION_SCHEMA = {
+  type: 'object',
+  properties: {
+    title: STR,
+    area: { type: 'string', enum: [...DECISION_AREAS] },
+    options: { type: 'array', minItems: 2, maxItems: 3, items: STR },
+    chosen: STR,
+    why: STR,
+    buildsOn: { type: 'array', maxItems: 4, items: STR },
+  },
+  required: ['title', 'area', 'options', 'chosen', 'why', 'buildsOn'],
+};
+
+export const IMPACT_SCHEMA = {
+  type: 'object',
+  properties: {
+    tickets: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { id: STR, affected: { type: 'boolean' }, why: STR, change: STR },
+        required: ['id', 'affected', 'why', 'change'],
+      },
+    },
+  },
+  required: ['tickets'],
+};
+
 export const QUESTIONS_SCHEMA = {
   type: 'object',
   properties: {
@@ -261,6 +310,72 @@ Produce:
   Leave a command empty if the project does not have it.
 
 Project name: ${meta.project}. ${PLAIN}`;
+}
+
+/** The Architect reads the code as it is now: the project map, why each technology is there, and its patterns. */
+export function blueprintPrompt(meta: BoardMeta, decisions: Decision[], tech: string[]): string {
+  const saved = decisions.filter((d) => !d.replacedBy).map((d) => `- ${d.id}: ${d.title}. Chosen: ${d.chosen}`).join('\n') || '- none yet';
+  return `You are the Architect of a software squad. Read the project's code as it is now on its main branch.
+Look at the files and folders. Do not change anything.${meta.repos?.length ? `\nThe code repos: ${meta.repos.map((r) => r.path).join(', ')}.` : ''}
+
+Saved decisions:
+${saved}
+
+Technologies found in the package files: ${tech.join(', ') || 'none'}.
+
+Produce:
+- map: 4 to 8 rows of "area" and "detail" for the code today, like "Pages: Next.js app router, in src/app/".
+- stack: for each technology found above, name (exactly as written above) and why: one plain sentence on what it does
+  here and why it fits this project. decision: the id of the saved decision that chose it, only if one clearly did.
+- patterns: 4 to 8 design patterns the code really follows, the ones a new developer must keep, like "One rules file
+  per feature, shared by the form and the server". name: a short name. what: one or two plain sentences, what it is
+  and why. where: up to 4 real file or folder paths that show it. decision: the saved decision it comes from, if any.
+Only what you can see in the code. ${PLAIN}`;
+}
+
+/** The Architect writes down, after the fact, why a technology already in the code was picked. */
+export function techDecisionPrompt(decisions: Decision[], tech: string, why?: string): string {
+  const saved = decisions.filter((d) => !d.replacedBy).map((d) => `- ${d.id}: ${d.title}. Chosen: ${d.chosen}`).join('\n') || '- none yet';
+  return `You are the Architect of a software squad. The code already uses ${tech}, but no saved decision says why.
+Read how the project uses it (package files, config, the code that uses it). Do not change anything.${why ? `\nWhat you noted before: ${why}` : ''}
+
+Saved decisions:
+${saved}
+
+Write the decision as it stands today, for the person to approve:
+- title: a short question-like title, like "How we test the screens".
+- area: the one that fits best.
+- options: 2 or 3 real choices a team would weigh, the one in use first.
+- chosen: the option in use. It must name ${tech}.
+- why: 2 or 3 plain sentences on why it fits this project, from what you see in the code.
+- buildsOn: ids of saved decisions this one relies on (like "ADR-003"). Only real ones from the list.
+${PLAIN}`;
+}
+
+/** The Architect checks the tickets planned before a new decision: does it change them? */
+export function impactPrompt(d: Decision, tickets: Ticket[]): string {
+  const list = tickets
+    .map((t) => {
+      const where = t.mergedAt ? 'merged into the main branch already' : t.worktree ? 'being built' : 'planned, not built yet';
+      const steps = (t.steps ?? []).map((s, i) => `   ${i + 1}. ${s.title}`).join('\n');
+      return `- ${t.id}: ${t.title} (${where})${t.story ? `\n  Story: ${t.story}` : ''}${t.decision ? `\n  Its design: ${t.decision.title}` : ''}${steps ? `\n  Steps:\n${steps}` : ''}`;
+    })
+    .join('\n');
+  return `You are the Architect of a software squad. A new decision was just approved:
+${d.id}: ${d.title}
+Chosen: ${d.chosen}
+Why: ${d.why}
+
+These tickets were planned before it. Read the code on the main branch and the mockups if you need to. Do not change anything.
+${list}
+
+For each ticket, answer:
+- affected: true only if its plan, or its code already merged, goes against ${d.id} or misses it. For example a screen
+  that still has the old look, or a step that does it the old way. False if ${d.id} does not touch what it builds,
+  or if its screens already follow ${d.id}.
+- why: one plain sentence the person reads.
+- change: if affected, one or two sentences on what to change so it follows ${d.id}. Empty if not.
+${PLAIN}`;
 }
 
 export function intakePrompt(meta: BoardMeta, decisions: Decision[], t: Ticket, ctx?: PromptContext): string {

@@ -4,7 +4,7 @@ import { Check, Download, Plus, Search } from 'lucide-react';
 import type { Actor, Stage, Ticket } from '../api/types';
 import { useAct, useBoard } from '../lib/data';
 import { BugDialog, NewTicketDialog, PullDialog } from '../components/dialogs';
-import { Cmd, Glyph, STAGE_NAME, actionLabel } from '../components/ui';
+import { Cmd, Glyph, STAGE_NAME, actionLabel, outdatedLine } from '../components/ui';
 import { TicketDrawer } from './TicketDrawer';
 
 const LANES: { stage: Stage; role: Actor; who: string }[] = [
@@ -46,7 +46,7 @@ export function BoardPage() {
   const ORDER = ['chat', 'ask', 'questions', 'spec', 'plan', 'stuck', 'proof', 'yours', 'release'];
   // A step that looks stuck needs the person as much as a question does, so it comes first.
   const waiting = data.tickets
-    .filter((t) => t.waiting || t.quiet?.kind === 'stuck')
+    .filter((t) => t.waiting || t.quiet?.kind === 'stuck' || t.outdated?.length)
     .sort((a, b) => (a.waiting ? ORDER.indexOf(a.waiting.kind) : -1) - (b.waiting ? ORDER.indexOf(b.waiting.kind) : -1));
 
   return (
@@ -115,7 +115,7 @@ export function BoardPage() {
                     <span>{STAGE_NAME[t.stage]}</span>
                   </div>
                   <h3>{t.title}</h3>
-                  <p>{t.waiting?.summary ?? 'Looks stuck. Check what it is waiting on'}</p>
+                  <p>{t.waiting?.summary ?? (t.outdated?.length ? outdatedLine(t) : 'Looks stuck. Check what it is waiting on')}</p>
                 </div>
                 <span className="btn sm pri">{t.waiting ? actionLabel(t) : 'Check it'}</span>
               </button>

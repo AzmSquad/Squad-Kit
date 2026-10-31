@@ -9,13 +9,13 @@ import { useAct, useBoard } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { BugDialog } from '../components/dialogs';
 import { useRestart } from '../components/Restart';
-import { Cmd, Glyph, Modal, STAGE_NAME, actionLabel, ago, commandFor } from '../components/ui';
+import { Cmd, Glyph, Modal, STAGE_NAME, actionLabel, ago, commandFor, outdatedLine } from '../components/ui';
 
 /* ── Waiting for you ───────────────────────────────────── */
 
 export function InboxPage() {
   const board = useBoard();
-  const tickets = board.data?.ready ? board.data.tickets.filter((t) => t.waiting) : [];
+  const tickets = board.data?.ready ? board.data.tickets.filter((t) => t.waiting || t.outdated?.length) : [];
   return (
     <>
       <div className="top">
@@ -44,13 +44,13 @@ export function InboxPage() {
                       <span>{ago(t.activity[0]?.at ?? t.createdAt)}</span>
                     </div>
                     <h3>{t.title}</h3>
-                    <p>{t.waiting!.summary}</p>
+                    <p>{t.waiting?.summary ?? outdatedLine(t)}</p>
                   </div>
                   <Cmd text={commandFor(t)} />
-                  {t.waiting!.kind === 'proof' ? (
+                  {t.waiting?.kind === 'proof' ? (
                     <Link to="/tickets/$id/proof" params={{ id: t.id }} className="btn pri sm">{actionLabel(t)}</Link>
                   ) : (
-                    <Link to="/board" search={{ ticket: t.id }} className="btn pri sm">{actionLabel(t)}</Link>
+                    <Link to="/board" search={{ ticket: t.id }} className="btn pri sm">{t.waiting ? actionLabel(t) : 'Check it'}</Link>
                   )}
                 </div>
               ))}

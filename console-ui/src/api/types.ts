@@ -178,6 +178,13 @@ export interface Ticket {
   kind: 'feature' | 'bug';
   source: { type: 'manual' | 'azure' | 'github' | 'jira'; ref?: string; id?: string; url?: string; itemType?: string };
   pr?: { id: number; url: string; repo: string; host: 'azure' };
+  /** Installing packages and running migrations in the person's own checkout, after the merge moved it. */
+  /** Decisions approved after this ticket was planned that change it, waiting for the person. */
+  outdated?: { adr: string; why: string; change: string; at: string }[];
+  replanFor?: string;
+  /** When the change went into the base branch. */
+  mergedAt?: string;
+  localSetup?: { status: 'pending' | 'running' | 'done' | 'failed'; dir: string; command: string; at?: string; seconds?: number; output?: string };
   quiet?: { since: string; kind: 'stuck' | 'long'; detail: string; command?: string; pid?: number };
   priority: 'high' | 'normal' | 'low';
   stage: Stage;
@@ -462,9 +469,59 @@ export interface TimelineTicket {
   release?: string;
 }
 
+export type TechRole = 'Language' | 'Framework' | 'Interface' | 'Data' | 'Testing' | 'Tooling' | 'Services';
+
+/** A technology the code really uses, with the Architect's why and the decisions that chose it. */
+export interface StackItem {
+  name: string;
+  role: TechRole;
+  icon?: string;
+  version?: string;
+  repo: string;
+  why?: string;
+  decisions: string[];
+  via?: { name: string; decisions: string[] };
+  draft?: {
+    tech: string;
+    status: 'writing' | 'ready' | 'failed';
+    error?: string;
+    decision?: { title: string; area: DecisionArea; options: string[]; chosen: string; why: string; buildsOn: string[] };
+  };
+}
+
+/** The Architect checking the open tickets against a newly approved decision. */
+export interface ImpactCheck {
+  adr: string;
+  status: 'pending' | 'running' | 'done' | 'failed';
+  at?: string;
+  error?: string;
+  checked?: string[];
+  affected?: string[];
+}
+
+export interface PatternNote {
+  name: string;
+  what: string;
+  where: string[];
+  decision?: string;
+}
+
 export interface ArchitectureResponse {
   decisions: Decision[];
   tickets: TimelineTicket[];
   map: BoardMeta['map'];
   lessons: Lesson[];
+  stack: StackItem[];
+  patterns: PatternNote[];
+  impact: ImpactCheck[];
+  reading?: { status: 'pending' | 'running' | 'done' | 'failed'; at?: string; error?: string };
+}
+
+/** One app the project runs: a code repo with a start command and a web address. */
+export interface ProjectApp {
+  name: string;
+  repo: string;
+  url: string;
+  start?: string;
+  up: boolean;
 }

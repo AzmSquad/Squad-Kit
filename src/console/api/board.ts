@@ -12,6 +12,14 @@ import {
   createTicket,
   decideStuck,
   pullTicket,
+  readCodeAgain,
+  setUpLocalCopy,
+  updateForDecision,
+  checkTicketsAgainst,
+  keepPlan,
+  draftTechDecision,
+  approveTechDecision,
+  discardTechDecision,
   releaseVersion,
   reportBug,
   requestChange,
@@ -34,6 +42,7 @@ import {
   stopTicket,
 } from '../../board/actions.js';
 import { architecture } from '../../board/architecture.js';
+import { projectApps } from '../../board/apps.js';
 import { boardExists, boardPaths, listDecisions, listReleases, listTickets, readMeta, readRelease, readTicket, writeMeta } from '../../board/store.js';
 import { seedDemoBoard } from '../../board/demo.js';
 import type { AgentName, PlanComment, PlanEdit } from '../../board/types.js';
@@ -316,6 +325,14 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     return act(c, () => answerQuestions(bp, c.req.param('id'), b.answers ?? {}));
   });
 
+  app.post('/api/v1/tickets/:id/decision-update', async (c) => {
+    const b = await body<{ adr?: string; do?: 'update' | 'keep'; reason?: string }>(c);
+    const id = c.req.param('id');
+    return act(c, () => (b.do === 'keep' ? keepPlan(bp, id, b.adr ?? '', b.reason ?? '') : updateForDecision(bp, id, b.adr ?? '')));
+  });
+
+  app.post('/api/v1/tickets/:id/local-setup', (c) => act(c, () => setUpLocalCopy(bp, c.req.param('id'))));
+
   app.post('/api/v1/tickets/:id/skip', (c) => act(c, () => skipQuestions(bp, c.req.param('id'))));
 
   app.post('/api/v1/tickets/:id/ask', async (c) => {
@@ -444,8 +461,23 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     return c.json({ decisions: listDecisions(bp), map: meta.map, lessons: meta.lessons });
   });
 
+  app.get('/api/v1/apps', async (c) => c.json({ apps: boardExists(bp) ? await projectApps(readMeta(bp)) : [] }));
+
+  app.post('/api/v1/architecture/read', (c) => act(c, () => readCodeAgain(bp)));
+  app.post('/api/v1/architecture/impact', async (c) => {
+    const b = await body<{ adr?: string }>(c);
+    return act(c, () => checkTicketsAgainst(bp, b.adr ?? ''));
+  });
+  app.post('/api/v1/architecture/decide', async (c) => {
+    const b = await body<{ tech?: string; do?: 'write' | 'approve' | 'discard' }>(c);
+    const tech = b.tech ?? '';
+    if (b.do === 'approve') return act(c, () => approveTechDecision(bp, tech));
+    if (b.do === 'discard') return act(c, () => (discardTechDecision(bp, tech), { ok: true }));
+    return act(c, () => draftTechDecision(bp, tech));
+  });
+
   app.get('/api/v1/architecture', (c) => {
-    if (!boardExists(bp)) return c.json({ decisions: [], tickets: [], map: [], lessons: [] });
+    if (!boardExists(bp)) return c.json({ decisions: [], tickets: [], map: [], lessons: [], stack: [], patterns: [], impact: [] });
     return c.json(architecture(bp));
   });
 

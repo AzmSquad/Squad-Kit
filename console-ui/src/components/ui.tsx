@@ -190,6 +190,12 @@ export function commandFor(t: Ticket): string {
   }
 }
 
+/** A newer decision changes this ticket's plan: the line the waiting cards show. */
+export function outdatedLine(t: Ticket): string {
+  const o = t.outdated ?? [];
+  return o.length === 1 ? `${o[0]!.adr} came after this plan and changes it` : `${o.map((x) => x.adr).join(' and ')} came after this plan and change it`;
+}
+
 export function actionLabel(t: Ticket): string {
   switch (t.waiting?.kind) {
     case 'questions':

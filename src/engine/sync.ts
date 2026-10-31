@@ -1,9 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { addActivity, listTickets, readMeta, requireTicket, updateTicket, type BoardPaths } from '../board/store.js';
-import type { Ticket, TrackerEvent } from '../board/types.js';
+import { addActivity, codeChanged, listTickets, readMeta, requireTicket, updateTicket, type BoardPaths } from '../board/store.js';
+import type { LocalSetup, Ticket, TrackerEvent } from '../board/types.js';
 import { Azure, azureFor, escapeHtml, gitAuthEnv, parseAzureRemote } from './azure.js';
-import { git, mergeIntoBase, moveBase, remotes } from './git.js';
+import { currentBranch, git, mergeIntoBase, moveBase, remotes } from './git.js';
 import { projectRoot } from './live.js';
 import { repoFor } from './repos.js';
 
@@ -236,6 +236,7 @@ export async function publishTicket(bp: BoardPaths, ticketId: string, http?: typ
 
   // Merge on accept: the change goes into the base branch now, so the next tickets build on it.
   let merged = false;
+  let movedLocal = false;
   let why = '';
   try {
     await az.completePullRequest(where.repo, opened.id, `Merge ${t.title} (${t.id})`);
@@ -244,6 +245,7 @@ export async function publishTicket(bp: BoardPaths, ticketId: string, http?: typ
     const head = git(target.dir, ['rev-parse', 'FETCH_HEAD']);
     const local = moveBase(target.dir, target.base, head);
     if (local.note) note(bp, ticketId, local.note);
+    movedLocal = local.moved;
   } catch (err) {
     why = (err as Error).message;
   }
@@ -253,6 +255,8 @@ export async function publishTicket(bp: BoardPaths, ticketId: string, http?: typ
     x.progress = undefined;
     if (merged) {
       x.mergedAt = new Date().toISOString();
+      const ls = movedLocal ? localSetupFor(bp, x) : undefined;
+      if (ls) x.localSetup = ls;
       x.status = `Merged into ${target.base} · goes out in ${x.release ?? 'the next release'}`;
       addActivity(x, 'release', `Merged pull request ${opened.id} into ${target.base}`);
     } else {
@@ -260,6 +264,7 @@ export async function publishTicket(bp: BoardPaths, ticketId: string, http?: typ
       addActivity(x, 'release', `Pull request ${opened.id} is open but not merged yet: ${why}`);
     }
   });
+  if (merged) codeChanged(bp);
 
   if (wid) {
     try {
@@ -281,6 +286,23 @@ export async function publishTicket(bp: BoardPaths, ticketId: string, http?: typ
  * Merge on accept for repos without a pull request host: merge the ticket's branch into the base branch locally, so
  * the next tickets start from it. Pushing waits for the release.
  */
+/**
+ * The setup to run in the person's own checkout once a merge moved it: new packages and migrations came with the
+ * merged code. Nothing when the checkout is on another branch (its files did not change) or there is no setup.
+ */
+export function localSetupFor(bp: BoardPaths, t: Ticket): LocalSetup | undefined {
+  const repo = repoFor(readMeta(bp), t);
+  const command = repo.commands.setup?.trim();
+  const dir = path.join(projectRoot(bp), repo.path);
+  if (!command) return undefined;
+  try {
+    if (currentBranch(dir) !== repo.base) return undefined;
+  } catch {
+    return undefined;
+  }
+  return { status: 'pending', dir, command };
+}
+
 export function mergeLocally(bp: BoardPaths, t: Ticket): { commit: string; base: string; moved: boolean; note?: string } | null {
   if (!t.branch) return null;
   const repo = repoFor(readMeta(bp), t);

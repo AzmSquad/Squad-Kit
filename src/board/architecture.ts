@@ -1,5 +1,7 @@
+import path from 'node:path';
 import { listDecisions, listReleases, listTickets, readMeta, type BoardPaths } from './store.js';
-import type { BoardMeta, Decision, Ticket } from './types.js';
+import { decidedIn, detectStack, type Tech } from './stack.js';
+import type { BoardMeta, Blueprint, Decision, ImpactCheck, PatternNote, TechDraft, Ticket } from './types.js';
 
 /** Where a ticket is, seen from the architecture: built and out, built, being built, designed, or still to come. */
 export type TimelineState = 'shipped' | 'merged' | 'building' | 'designed' | 'coming';
@@ -15,11 +17,26 @@ export interface TimelineTicket {
   release?: string;
 }
 
+/** A technology with the Architect's why and the decisions that chose it. */
+export interface StackItem extends Tech {
+  why?: string;
+  decisions: string[];
+  /** No decision names it, but it came with a technology that one chose: React with Next.js. */
+  via?: { name: string; decisions: string[] };
+  draft?: TechDraft;
+}
+
 export interface Architecture {
   decisions: Decision[];
   tickets: TimelineTicket[];
   map: BoardMeta['map'];
   lessons: BoardMeta['lessons'];
+  stack: StackItem[];
+  patterns: PatternNote[];
+  /** Each decision checked against the tickets planned before it. */
+  impact: ImpactCheck[];
+  /** When the Architect last read the code, and whether a read is on its way. */
+  reading?: Omit<Blueprint, 'stack' | 'patterns'>;
 }
 
 /** Decisions with their links, and every ticket in order, for the architecture page. */
@@ -38,7 +55,20 @@ export function architecture(bp: BoardPaths): Architecture {
       ...(t.release ? { release: t.release } : {}),
     }));
   const meta = readMeta(bp);
-  return { decisions, tickets, map: meta.map, lessons: meta.lessons };
+  const notes = meta.blueprint?.stack ?? [];
+  const found = detectStack(path.dirname(path.dirname(bp.dir)), meta).map((t): StackItem => {
+    const note = notes.find((n) => n.name.toLowerCase() === t.name.toLowerCase());
+    const chosen = [...new Set([...(note?.decision ? [note.decision] : []), ...decidedIn(t, decisions)])];
+    const draft = meta.techDrafts?.find((d) => d.tech === t.name);
+    return { ...t, ...(note?.why ? { why: note.why } : {}), decisions: chosen, ...(draft ? { draft } : {}) };
+  });
+  const stack = found.map((t) => {
+    if (t.decisions.length) return t;
+    const parent = found.find((p) => t.comesWith?.includes(p.name) && p.decisions.length);
+    return parent ? { ...t, via: { name: parent.name, decisions: parent.decisions } } : t;
+  });
+  const { stack: _s, patterns = [], ...reading } = meta.blueprint ?? { stack: [], patterns: [] };
+  return { decisions, tickets, map: meta.map, lessons: meta.lessons, stack, patterns, impact: meta.impactChecks ?? [], ...(meta.blueprint ? { reading: reading as Architecture['reading'] } : {}) };
 }
 
 function stateOf(t: Ticket, shipped: Set<string>): TimelineState {
