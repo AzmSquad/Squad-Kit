@@ -185,7 +185,7 @@ export function opensPullRequest(bp: BoardPaths, t: Ticket): boolean {
  * Push the ticket's branch and open a PR to the base branch, linked to the work item, with the proof screenshots.
  * Safe to run again: it reuses the open PR for the branch.
  */
-export async function publishTicket(bp: BoardPaths, ticketId: string, http?: typeof fetch): Promise<void> {
+export async function publishTicket(bp: BoardPaths, ticketId: string, http?: typeof fetch): Promise<{ clash: boolean }> {
   const t = requireTicket(bp, ticketId);
   const target = repoTarget(bp, t);
   const where = target && parseAzureRemote(target.url);
@@ -238,6 +238,7 @@ export async function publishTicket(bp: BoardPaths, ticketId: string, http?: typ
   let merged = false;
   let movedLocal = false;
   let why = '';
+  let clash = false;
   try {
     await az.completePullRequest(where.repo, opened.id, `Merge ${t.title} (${t.id})`);
     merged = true;
@@ -248,6 +249,8 @@ export async function publishTicket(bp: BoardPaths, ticketId: string, http?: typ
     movedLocal = local.moved;
   } catch (err) {
     why = (err as Error).message;
+    // Newer changes in the base clash with it: that needs the clash card (the caller gives it), not a wait in Azure.
+    clash = (await az.getPullRequest(where.repo, opened.id).catch(() => null))?.mergeStatus === 'conflicts';
   }
   updateTicket(bp, ticketId, (x) => {
     x.live = false;
@@ -259,14 +262,15 @@ export async function publishTicket(bp: BoardPaths, ticketId: string, http?: typ
       if (ls) x.localSetup = ls;
       x.status = `Merged into ${target.base} · goes out in ${x.release ?? 'the next release'}`;
       addActivity(x, 'release', `Merged pull request ${opened.id} into ${target.base}`);
-    } else {
+    } else if (!clash) {
       x.status = `PR ${opened.id} is waiting in Azure · ${x.release ?? 'next release'}`;
       addActivity(x, 'release', `Pull request ${opened.id} is open but not merged yet: ${why}`);
     }
   });
   if (merged) codeChanged(bp);
 
-  if (wid) {
+  // A clash is not done yet: the story stays where it is until the ticket is accepted again.
+  if (wid && !clash) {
     try {
       const state = await az.moveTo(wid, 'Resolved');
       await az.comment(
@@ -280,6 +284,7 @@ export async function publishTicket(bp: BoardPaths, ticketId: string, http?: typ
       note(bp, ticketId, `Could not update AB#${wid} on Azure: ${(err as Error).message}`);
     }
   }
+  return { clash };
 }
 
 /**

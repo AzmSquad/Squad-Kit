@@ -25,7 +25,7 @@ import path from 'node:path';
 import type { BoardMeta, Decision, ImpactCheck, Release, TechDraft, Ticket } from './types.js';
 import { detectStack } from './stack.js';
 import { scheduleSquad } from './schedule.js';
-import { commitTicket, liveRelease } from '../engine/release.js';
+import { PullRequestClash, commitTicket, liveRelease } from '../engine/release.js';
 import { git } from '../engine/git.js';
 import { repoFor, reposOf } from '../engine/repos.js';
 import { buildPaths } from '../core/paths.js';
@@ -456,19 +456,40 @@ function clashed(bp: BoardPaths, id: string, commit: string | null, error: strin
   const meta = readMeta(bp);
   return updateTicket(bp, id, (t) => {
     const base = repoFor(meta, t).base;
-    t.waiting = { kind: 'stuck', summary: `Clashes with ${base} and needs one decision` };
-    t.live = false;
-    t.squad = null;
-    t.status = `Clashes with ${base}`;
-    t.retryPhase = 'update-base';
-    t.stuck = {
-      gate: 'merge',
-      question: `The change is saved, but it cannot go into ${base}: someone changed the same lines there since this ticket started. ${error.replace(/^squad\/\S+ /, '')}`.trim(),
-      options: wayOptions({ gate: 'merge', base, copy: Boolean(t.worktree && fs.existsSync(t.worktree)) }),
-    };
+    clashCard(t, base, `The change is saved, but it cannot go into ${base}: someone changed the same lines there since this ticket started. ${error.replace(/^squad\/\S+ /, '')}`.trim());
     addActivity(t, 'you', 'Checked the proof. Looks right');
     if (commit) addActivity(t, 'release', `Saved the change as commit ${commit} on ${t.branch}`);
     addActivity(t, 'release', `Could not merge into ${base}: it clashes with newer changes there`);
+  });
+}
+
+function clashCard(t: Ticket, base: string, question: string): void {
+  t.waiting = { kind: 'stuck', summary: `Clashes with ${base} and needs one decision` };
+  t.live = false;
+  t.squad = null;
+  t.status = `Clashes with ${base}`;
+  t.retryPhase = 'update-base';
+  t.stuck = { gate: 'merge', question, options: wayOptions({ gate: 'merge', base, copy: Boolean(t.worktree && fs.existsSync(t.worktree)) }) };
+}
+
+/**
+ * Azure cannot merge the ticket's pull request: newer changes in the base clash with it. Instead of waiting there and
+ * stopping the release, the ticket leaves the draft release with the clash card; accepting it again updates the same
+ * pull request.
+ */
+export function pullRequestClashed(bp: BoardPaths, id: string): Ticket {
+  const meta = readMeta(bp);
+  const draft = listReleases(bp).find((r) => r.status !== 'released' && r.tickets.includes(id));
+  if (draft) writeRelease(bp, { ...draft, tickets: draft.tickets.filter((x) => x !== id) });
+  return updateTicket(bp, id, (t) => {
+    const base = repoFor(meta, t).base;
+    const pr = t.pr?.id;
+    clashCard(t, base, `Pull request ${pr} cannot go into ${base}: someone changed the same lines there since this ticket started.`);
+    t.stage = 'review';
+    // Found again by its branch when the ticket is accepted the next time.
+    t.pr = undefined;
+    t.release = undefined;
+    addActivity(t, 'release', `Pull request ${pr} clashes with newer changes in ${base}, so it left ${draft?.version ?? 'the release'}`);
   });
 }
 
@@ -1088,6 +1109,15 @@ export async function releaseVersion(bp: BoardPaths, version?: string): Promise<
       release.log = await liveRelease(bp, release, tickets);
       if (meta.scan?.empty) writeMeta(bp, { ...readMeta(bp), scan: { ...meta.scan, empty: false } });
     } catch (err) {
+      if (err instanceof PullRequestClash) {
+        // Nothing changed yet: the clashing tickets leave the release with a way out, and the rest can go.
+        for (const id of err.tickets) pullRequestClashed(bp, id);
+        const one = err.tickets.length === 1;
+        const left = readRelease(bp, release.version)?.tickets.length ?? 0;
+        throw new BoardActionError(
+          `The release did not go out: the pull request of ${err.tickets.join(', ')} clashes with newer changes in ${err.base}. ${one ? 'It' : 'They'} left ${release.version} and ${one ? 'waits' : 'wait'} for you with ways out.${left ? ' Press Release again to send the rest.' : ''}`,
+        );
+      }
       throw new BoardActionError(`The release did not go out: ${(err as Error).message}`);
     }
   }

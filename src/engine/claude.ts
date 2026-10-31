@@ -25,6 +25,8 @@ export interface RunOptions {
   resume?: string;
   allowedTools?: string[];
   disallowedTools?: string[];
+  /** Files no agent may read or change, such as squad-kit's own secrets.yaml. */
+  secretFiles?: string[];
   permissionMode?: 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions';
   /** JSON Schema for the final answer; Claude Code validates it and returns `structured`. */
   schema?: object;
@@ -99,15 +101,32 @@ export function withIpv4First(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return flags.length ? { ...env, NODE_OPTIONS: `${current} ${flags.join(' ')}`.trim() } : env;
 }
 
+/** squad-kit's own keys are for the engine: agents never talk to the tracker or the speech service themselves. */
+const ENGINE_ONLY_ENV_KEYS = ['AZURE_DEVOPS_PAT', 'SQUAD_TRACKER_API_KEY', 'JIRA_API_TOKEN', 'MUNSIT_API_KEY'];
+
 export function childEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = withIpv4First({ ...process.env });
   // An inherited API key would outrank the subscription login and bill API credits instead.
   for (const key of Object.keys(env)) {
-    if (SUBSCRIPTION_WITHHELD_ENV_KEYS.includes(key.toUpperCase())) delete env[key];
+    if (SUBSCRIPTION_WITHHELD_ENV_KEYS.includes(key.toUpperCase()) || ENGINE_ONLY_ENV_KEYS.includes(key.toUpperCase())) delete env[key];
   }
   // A step is one run: a command left running in the background would outlive it and the step would end too early.
   env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS = '1';
   return env;
+}
+
+/**
+ * The tools a run may not use. Each secret file gets Read and Edit deny rules on its absolute path, so Claude Code
+ * refuses it to its file tools and to Bash commands that read it (like cat), from any folder the agent works in.
+ */
+export function deniedTools(opts: RunOptions): string[] {
+  const files = new Set<string>();
+  for (const f of opts.secretFiles ?? []) {
+    files.add(path.resolve(f));
+    // /tmp and /private/tmp are the same folder on a Mac: deny the real path too.
+    if (fs.existsSync(f)) files.add(fs.realpathSync(f));
+  }
+  return [...(opts.disallowedTools ?? []), ...[...files].flatMap((f) => [`Read(/${f})`, `Edit(/${f})`])];
 }
 
 export function runClaude(opts: RunOptions): Promise<RunResult> {
@@ -121,7 +140,8 @@ export function runClaude(opts: RunOptions): Promise<RunResult> {
   if (opts.resume || sessionExists(sessionId)) args.push('--resume', sessionId);
   else args.push('--session-id', sessionId);
   if (opts.allowedTools?.length) args.push('--allowedTools', opts.allowedTools.join(','));
-  if (opts.disallowedTools?.length) args.push('--disallowedTools', opts.disallowedTools.join(','));
+  const denied = deniedTools(opts);
+  if (denied.length) args.push('--disallowedTools', denied.join(','));
   if (opts.permissionMode) args.push('--permission-mode', opts.permissionMode);
   if (opts.schema) args.push('--json-schema', JSON.stringify(opts.schema));
   if (opts.appendSystemPrompt) args.push('--append-system-prompt', opts.appendSystemPrompt);

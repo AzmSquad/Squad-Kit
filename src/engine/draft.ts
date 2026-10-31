@@ -7,7 +7,7 @@ import type { Ticket, TicketBrief, Track } from '../board/types.js';
 import { runClaude, type RunOptions, type RunResult } from './claude.js';
 import { AcpStartError, acpAdapterPath, runClaudeAcp } from './acp-runner.js';
 import { agentInstructions, readAgent } from './agents.js';
-import { projectRoot } from './live.js';
+import { projectRoot, secretFiles } from './live.js';
 import { rulesFiles } from './repos.js';
 import * as P from './prompts.js';
 import { prepareMedia } from './media.js';
@@ -64,7 +64,7 @@ async function runAnalyst(bp: BoardPaths, opts: RunOptions): Promise<RunResult> 
   const agent = readAgent(bp, 'analyst');
   if (agent.tool !== 'claude') throw new BoardActionError(`The Analyst is set to ${agent.tool}, which squad-kit cannot run yet. Switch it to Claude Code in Squad and AI.`);
   const extra = agentInstructions(agent);
-  const run = { ...opts, ...(extra ? { appendSystemPrompt: extra } : {}), ...(agent.model ? { model: agent.model } : {}) };
+  const run = { ...opts, secretFiles: secretFiles(bp), ...(extra ? { appendSystemPrompt: extra } : {}), ...(agent.model ? { model: agent.model } : {}) };
   let r: RunResult;
   if (readMeta(bp).runner !== 'direct' && acpAdapterPath()) {
     try {

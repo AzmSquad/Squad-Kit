@@ -144,7 +144,7 @@ export function mergeIntoBase(dir: string, base: string, branch: string, message
   return { commit, ...moveBase(dir, base, commit) };
 }
 
-function isAncestor(dir: string, a: string, b: string): boolean {
+export function isAncestor(dir: string, a: string, b: string): boolean {
   try {
     execFileSync('git', ['merge-base', '--is-ancestor', a, b], { cwd: dir, stdio: 'ignore' });
     return true;

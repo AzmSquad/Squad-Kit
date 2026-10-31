@@ -15,14 +15,14 @@ import {
   writeMeta,
   type BoardPaths,
 } from '../board/store.js';
-import { CHAT_SESSION, applyPlanEdits, approveExpress, changeSummary, needsSpec, wayOptions } from '../board/actions.js';
+import { CHAT_SESSION, applyPlanEdits, approveExpress, changeSummary, needsSpec, pullRequestClashed, wayOptions } from '../board/actions.js';
 import { scheduleSquad } from '../board/schedule.js';
 import type { BoardMeta, DecisionArea, ImpactCheck, PatternNote, ProjectCommands, Question, Role, StackNote, TechDraft, Ticket } from '../board/types.js';
 import { detectStack } from '../board/stack.js';
 import { describeTool, runClaude, type RunOptions, type RunResult } from './claude.js';
 import { AcpStartError, acpAdapterPath, runClaudeAcp } from './acp-runner.js';
 import { runChecks, runCommand, startApp, tail, testCount, type RunningApp } from './checks.js';
-import { addWorktree, git } from './git.js';
+import { addWorktree, commitAll, git, isAncestor } from './git.js';
 import * as P from './prompts.js';
 import { findNestedRepos, repoFor, rulesFiles } from './repos.js';
 import { flushTracker, publishTicket, syncWiki } from './sync.js';
@@ -55,6 +55,11 @@ const MAX_REVIEW_ROUNDS = 2;
 
 export function projectRoot(bp: BoardPaths): string {
   return path.dirname(path.dirname(bp.dir));
+}
+
+/** squad-kit's own keys (tracker token, speech key): no agent may read them, whichever folder it works in. */
+export function secretFiles(bp: BoardPaths): string[] {
+  return [path.join(path.dirname(bp.dir), 'secrets.yaml')];
 }
 
 export class LiveSquad {
@@ -311,7 +316,7 @@ export class LiveSquad {
     const key = opts.ticket;
     opts = this.withNewNotes(opts);
     const watch = key ? { onActivity: () => this.dog.beat(key), onSpawn: (pid: number) => this.dog.track(key, pid) } : {};
-    const run = { ...opts, ...watch, ...(appendSystemPrompt ? { appendSystemPrompt } : {}), ...(agent.model ? { model: agent.model } : {}), ...(signal ? { signal } : {}) };
+    const run = { ...opts, ...watch, secretFiles: secretFiles(this.bp), ...(appendSystemPrompt ? { appendSystemPrompt } : {}), ...(agent.model ? { model: agent.model } : {}), ...(signal ? { signal } : {}) };
     let r: RunResult;
     // By default every role runs through the Agent Client Protocol; the direct runner is the fallback.
     if (this.meta().runner !== 'direct' && acpAdapterPath()) {
@@ -625,8 +630,11 @@ export class LiveSquad {
         return this.updateBase(id);
       case 'proof':
         return this.proof(id);
-      case 'publish':
-        return publishTicket(this.bp, id);
+      case 'publish': {
+        const { clash } = await publishTicket(this.bp, id);
+        if (clash) pullRequestClashed(this.bp, id);
+        return;
+      }
       default:
         this.update(id, (t) => (t.squad = null));
     }
@@ -1147,13 +1155,33 @@ export class LiveSquad {
    * The plan was redone to follow a newer decision, after the Builder had started. The latest base comes in first, so
    * the work builds on what that decision already changed, then the Builder redoes the work to the new plan.
    */
+  /**
+   * Brings the latest base into the ticket's copy. Work not saved yet is committed first, or git refuses to merge over
+   * it; if the base still is not in the copy, the step fails with git's reason instead of saying it worked.
+   */
+  private bringInBase(t: Ticket, base: string): { baseSha: string; clashes: string[] } {
+    const dir = t.worktree!;
+    const unmerged = () => git(dir, ['diff', '--name-only', '--diff-filter=U'], { allowFail: true }).split('\n').filter(Boolean);
+    const merging = () => git(dir, ['rev-parse', '-q', '--verify', 'MERGE_HEAD'], { allowFail: true }) !== '';
+    const baseSha = git(dir, ['rev-parse', base]);
+    // Clashes from last time that are not fixed yet: the Builder fixes those first.
+    if (merging() && unmerged().length) return { baseSha, clashes: unmerged() };
+    commitAll(dir, `Work so far on ${t.title} (${t.id})`);
+    let why = 'git did not merge it';
+    try {
+      git(dir, ['merge', '--no-commit', '--no-ff', base]);
+    } catch (err) {
+      why = (err as Error).message;
+    }
+    const clashes = unmerged();
+    if (!merging() && !isAncestor(dir, baseSha, 'HEAD')) throw new Error(`Could not bring the latest ${base} into this ticket: ${why}`);
+    return { baseSha, clashes };
+  }
+
   private async rebuild(id: string, adr: string): Promise<void> {
     const t = readTicket(this.bp, id)!;
     const base = repoFor(this.meta(), t).base;
-    const dir = t.worktree!;
-    const baseSha = git(dir, ['rev-parse', base]);
-    git(dir, ['merge', '--no-commit', '--no-ff', base], { allowFail: true });
-    const clashes = git(dir, ['diff', '--name-only', '--diff-filter=U'], { allowFail: true }).split('\n').filter(Boolean);
+    const { baseSha, clashes } = this.bringInBase(t, base);
     const t1 = this.update(id, (x) => {
       x.baseCommit = baseSha;
       x.stage = 'implement';
@@ -1168,7 +1196,7 @@ export class LiveSquad {
       addActivity(x, 'builder', `Started redoing the work to follow ${adr}`);
     });
     const meta = this.meta();
-    const intro = `The plan changed to follow ${adr}, a decision approved after you started. The latest ${base} is now in this copy${clashes.length ? `, with clashes in ${clashes.join(', ')} to fix first` : ''}. Redo the work to the new plan below: keep what still fits, change what does not.`;
+    const intro = `The plan changed to follow ${adr}, a decision approved after you started. The latest ${base} is now in this copy${clashes.length ? `, with clashes in ${clashes.join(', ')} to fix first` : ''}. Stay on this branch: it already has the latest ${base}, so a plan that says to start from ${base} is met, and squad-kit does all the git. Redo the work to the new plan below: keep what still fits, change what does not.`;
     await this.runBuilder(id, `${intro}\n\n${P.buildPrompt(meta, listDecisions(this.bp), t1, this.ctx(t1))}`, Boolean(t.sessions?.build), 'build');
     this.update(id, (x) => {
       for (const s of x.steps ?? []) {
@@ -1187,10 +1215,7 @@ export class LiveSquad {
   private async updateBase(id: string): Promise<void> {
     const t = await this.workspace(id);
     const base = repoFor(this.meta(), t).base;
-    const dir = t.worktree!;
-    const baseSha = git(dir, ['rev-parse', base]);
-    git(dir, ['merge', '--no-commit', '--no-ff', base], { allowFail: true });
-    const clashes = git(dir, ['diff', '--name-only', '--diff-filter=U'], { allowFail: true }).split('\n').filter(Boolean);
+    const { baseSha, clashes } = this.bringInBase(t, base);
     this.update(id, (x) => {
       x.baseCommit = baseSha;
       x.stage = 'implement';

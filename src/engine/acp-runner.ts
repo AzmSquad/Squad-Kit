@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { childEnv, claudeBinary, plainError, sessionExists, type RunOptions, type RunResult } from './claude.js';
+import { childEnv, claudeBinary, deniedTools, plainError, sessionExists, type RunOptions, type RunResult } from './claude.js';
 
 /**
  * Runs a role through the Agent Client Protocol (ACP): squad-kit is the ACP client and talks JSON-RPC over stdio to
@@ -165,9 +165,10 @@ export async function runClaudeAcp(opts: AcpRunOptions): Promise<RunResult> {
   const timer = setTimeout(() => (stoppedBy = stop(`It took longer than ${Math.round((opts.timeoutMs ?? 20 * 60_000) / 60_000)} minutes, so squad-kit stopped it.`)), opts.timeoutMs ?? 20 * 60_000);
   const exited = new Promise<void>((resolve) => child.on('exit', () => resolve()));
 
+  const denied = deniedTools(opts);
   const options = {
     ...(opts.allowedTools?.length ? { allowedTools: opts.allowedTools } : {}),
-    ...(opts.disallowedTools?.length ? { disallowedTools: opts.disallowedTools } : {}),
+    ...(denied.length ? { disallowedTools: denied } : {}),
     ...(opts.permissionMode ? { permissionMode: opts.permissionMode } : {}),
     ...(opts.schema ? { outputFormat: { type: 'json_schema', schema: opts.schema } } : {}),
     ...(opts.appendSystemPrompt ? { systemPrompt: { type: 'preset', preset: 'claude_code', append: opts.appendSystemPrompt } } : {}),

@@ -8,6 +8,8 @@ import * as actions from '../src/board/actions.js';
 import { addWorktree } from '../src/engine/git.js';
 import { azureFor } from '../src/engine/azure.js';
 import { flushTracker, publishTicket } from '../src/engine/sync.js';
+import { LiveSquad } from '../src/engine/live.js';
+import { listReleases } from '../src/board/store.js';
 
 const AZURE_URL = 'https://dev.azure.com/momenysr/Mawid/_git/Mawid';
 
@@ -16,6 +18,8 @@ let project: string;
 let remote: string;
 let bp: BoardPaths;
 let calls: { method: string; url: string; body: unknown }[];
+/** Azure's answer when newer changes in main clash with the pull request. */
+let prConflicts = false;
 
 const sh = (cmd: string, cwd: string) => execSync(cmd, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 
@@ -59,6 +63,7 @@ function fakeAzure() {
     if (method === 'POST' && /repositories\/Mawid\/pullrequests$|repositories\/Mawid\/pullrequests\?/.test(url)) return reply({ pullRequestId: 7, status: 'active' });
     if (method === 'POST' && /pullRequests\/7\/attachments/.test(url)) return reply({ url: 'https://dev.azure.com/att/after-1.png' });
     if (method === 'PATCH' && /pullrequests\/7/.test(url)) {
+      if ((body as { status?: string }).status === 'completed' && prConflicts) return reply({ pullRequestId: 7, status: 'active', mergeStatus: 'conflicts' });
       if ((body as { status?: string }).status === 'completed') {
         // What Azure does when a PR completes: a merge commit on main, and the branch is deleted.
         const work = path.join(tmp, 'azure-side');
@@ -70,7 +75,7 @@ function fakeAzure() {
       return reply({ pullRequestId: 7, status: prStatus });
     }
     if (method === 'GET' && /pullrequests\/7/.test(url)) {
-      return reply({ pullRequestId: 7, status: prStatus, lastMergeSourceCommit: { commitId: 'x' }, lastMergeCommit: { commitId: 'm' } });
+      return reply({ pullRequestId: 7, status: prStatus, mergeStatus: prConflicts ? 'conflicts' : 'succeeded', lastMergeSourceCommit: { commitId: 'x' }, lastMergeCommit: { commitId: 'm' } });
     }
     return new Response(JSON.stringify({ message: `unexpected ${method} ${url}` }), { status: 404 });
   };
@@ -94,6 +99,7 @@ beforeEach(() => {
   );
   vi.stubEnv('AZURE_DEVOPS_PAT', 'secret');
   calls = [];
+  prConflicts = false;
   vi.stubGlobal('fetch', fakeAzure());
   bp = boardPaths(path.join(project, '.squad'));
   writeMeta(bp, {
@@ -207,4 +213,59 @@ describe('Azure Boards and Repos', () => {
     expect(ops).toContainEqual({ op: 'add', path: '/fields/Microsoft.VSTS.Common.Severity', value: '1 - Critical' });
     expect(after.trackerQueue).toBeUndefined();
   });
+});
+
+describe('a pull request that clashes with newer changes in main', () => {
+  async function accepted() {
+    const t = await actions.startFromAzure(bp, azureFor(bp)!, '35');
+    await flushTracker(bp, t.id);
+    const wt = addWorktree(project, t.id, 'main');
+    fs.writeFileSync(path.join(wt.dir, 'signup.ts'), 'export const signup = true;\n');
+    updateTicket(bp, t.id, (x) => {
+      x.worktree = wt.dir;
+      x.branch = wt.branch;
+      x.baseCommit = wt.baseCommit;
+      x.stage = 'review';
+      x.gates = { checks: 'pass', review: 'pass', proof: 'pass' };
+      x.waiting = { kind: 'proof', summary: 'The proof is ready for you to check' };
+      x.squad = null;
+      x.trackerQueue = undefined;
+    });
+    actions.approve(bp, t.id);
+    return t.id;
+  }
+  const completions = () => calls.filter((c) => c.method === 'PATCH' && (c.body as { status?: string }).status === 'completed').length;
+
+  it('gives the clash card on accept and leaves the release, instead of waiting in Azure', async () => {
+    const id = await accepted();
+    prConflicts = true;
+    await (new LiveSquad(bp) as unknown as { step(id: string, phase: string): Promise<void> }).step(id, 'publish');
+    const t = readTicket(bp, id)!;
+    expect(t.waiting).toEqual({ kind: 'stuck', summary: 'Clashes with main and needs one decision' });
+    expect(t.stuck?.gate).toBe('merge');
+    expect(t.retryPhase).toBe('update-base');
+    expect(t.pr).toBeUndefined();
+    expect(t.release).toBeUndefined();
+    expect(t.activity[0]!.text).toBe('Pull request 7 clashes with newer changes in main, so it left v0.1.0');
+    expect(listReleases(bp).find((r) => r.version === 'v0.1.0')?.tickets ?? []).not.toContain(id);
+    // The story is not done yet, so it stays Active.
+    expect(statesSet()).toEqual(['Active']);
+  }, 30_000);
+
+  it('stops the release before anything changes, and gives the ticket a way out', async () => {
+    const id = await accepted();
+    // Like MA-5: accepted, its pull request open in Azure, then main moved on and it clashes.
+    updateTicket(bp, id, (x) => {
+      x.pr = { id: 7, url: `${AZURE_URL}/pullrequest/7`, repo: 'Mawid', host: 'azure' };
+      x.squad = null;
+    });
+    prConflicts = true;
+    await expect(actions.releaseVersion(bp)).rejects.toThrow(
+      'The release did not go out: the pull request of AP-1 clashes with newer changes in main. It left v0.1.0 and waits for you with ways out.',
+    );
+    expect(completions()).toBe(0);
+    expect(sh('git tag', project)).toBe('');
+    expect(readTicket(bp, id)!.stuck?.gate).toBe('merge');
+    expect(listReleases(bp).find((r) => r.version === 'v0.1.0')).toMatchObject({ status: 'draft', tickets: [] });
+  }, 30_000);
 });

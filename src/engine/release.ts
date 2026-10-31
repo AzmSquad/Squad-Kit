@@ -17,6 +17,16 @@ import { Azure, azureFor, gitAuthEnv, parseAzureRemote } from './azure.js';
 
 export type ReleaseLog = { ok: boolean; text: string }[];
 
+/** Pull requests Azure cannot merge because newer changes in the base clash with them. Thrown before anything changes. */
+export class PullRequestClash extends Error {
+  constructor(
+    readonly tickets: string[],
+    readonly base: string,
+  ) {
+    super(`The pull request of ${tickets.join(', ')} clashes with newer changes in ${base}.`);
+  }
+}
+
 export function commitTicket(ticket: Ticket): string | null {
   if (!ticket.worktree || !fs.existsSync(ticket.worktree)) return null;
   git(ticket.worktree, ['add', '-A']);
@@ -38,13 +48,24 @@ export async function liveRelease(bp: BoardPaths, release: Release, tickets: Tic
   const log: ReleaseLog = [];
   const multi = groups.size > 1 || Boolean(meta.repos?.length);
   const pat = azureFor(bp)?.target.pat;
-  for (const { repo, tickets: list } of groups.values()) {
+  const plans = [...groups.values()].map(({ repo, tickets: list }) => {
     const repoRoot = path.join(root, repo.path);
     const remote = repo.remote || remotes(repoRoot)[0];
     const url = remote ? git(repoRoot, ['config', '--get', `remote.${remote}.url`], { allowFail: true }) : '';
     const where = parseAzureRemote(url);
     const host = where && pat ? { az: new Azure({ organization: where.organization, project: where.project, pat }), repo: where.repo } : null;
-    const repoLog = await releaseRepo(repoRoot, repo, release, list, meta.commands?.deploy, host, gitAuthEnv(pat, url));
+    return { repo, repoRoot, list, host, env: gitAuthEnv(pat, url) };
+  });
+  // One pull request Azure cannot merge would stop the release halfway: look for those first, before anything changes.
+  for (const { repo, repoRoot, list, host } of plans) {
+    const clashing: string[] = [];
+    for (const t of list.filter((x) => x.pr?.host === 'azure' && !x.mergedAt)) {
+      if (host && (await host.az.getPullRequest(host.repo, t.pr!.id)).mergeStatus === 'conflicts') clashing.push(t.id);
+    }
+    if (clashing.length) throw new PullRequestClash(clashing, repo.base || currentBranch(repoRoot));
+  }
+  for (const { repo, repoRoot, list, host, env } of plans) {
+    const repoLog = await releaseRepo(repoRoot, repo, release, list, meta.commands?.deploy, host, env);
     log.push(...repoLog.map((l) => (multi ? { ...l, text: `${repo.path}: ${l.text}` } : l)));
   }
   return log;
