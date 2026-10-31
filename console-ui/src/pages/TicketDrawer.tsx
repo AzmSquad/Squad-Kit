@@ -8,6 +8,7 @@ import { usePrefs } from '../lib/prefs';
 import { Cmd, Glyph, Modal, ROLE_NAME, Tracker, ago, clock, commandFor } from '../components/ui';
 import { ConversationTab } from '../components/Conversation';
 import { ChangesTab, OpenInEditor } from '../components/Changes';
+import { TakeOverButton, canTakeOver } from '../components/TakeOver';
 import { Lightbox, type Picture } from '../components/Lightbox';
 
 type Tab = 'now' | 'story' | 'plan' | 'activity' | 'conversation' | 'proof' | 'changes' | 'developer';
@@ -136,6 +137,8 @@ function NowPanel({ t }: { t: Ticket }) {
       return <StuckPanel t={t} />;
     case 'ask':
       return <AskPanel t={t} />;
+    case 'yours':
+      return <YoursPanel t={t} />;
     default:
       return <WorkingPanel t={t} />;
   }
@@ -784,9 +787,51 @@ function WorkingPanel({ t }: { t: Ticket }) {
             <Square size={12} /> {t.stopRequested ? 'Stopping…' : 'Stop'}
           </button>
         )}
+        {canTakeOver(t) && <TakeOverButton t={t} />}
         <span className="note">{t.live ? 'Updates live as the squad works.' : ''}</span>
         <span className="grow" />
         <Cmd text={t.live && t.stage !== 'release' ? `squad stop ${t.id}` : commandFor(t)} />
+      </div>
+    </>
+  );
+}
+
+/* ── Take over and give back ───────────────────────────── */
+
+/** The ticket is yours: work in the Builder's session, then give it back so the checks and review run again. */
+function YoursPanel({ t }: { t: Ticket }) {
+  const act = useAct();
+  const [note, setNote] = useState('');
+  const k = t.takenOver!;
+  return (
+    <>
+      <div className="db">
+        <div className="youbox">
+          <span className="ring">
+            <Code size={15} />
+          </span>
+          <div>
+            <b>You have this ticket</b>
+            <span>The squad stopped and waits. Nothing runs until you give it back.</span>
+          </div>
+        </div>
+        <div className="lbl">1. Open the Builder&apos;s session in Claude Code</div>
+        <Cmd text={`cd "${k.cwd}" && claude --resume ${k.session}`} />
+        <p className="note" style={{ fontSize: 12.5, marginTop: 6 }}>
+          It is the same conversation the Builder had, in the ticket&apos;s own copy of the code. Your folder is not touched. Or just edit the files:
+        </p>
+        <OpenInEditor t={t} />
+        <div className="lbl">2. Give it back</div>
+        <textarea className="waynote" rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="What did you change? (optional, every agent reads it)" />
+        <p className="note" style={{ fontSize: 12.5 }}>Then squad-kit runs the checks, the Reviewer reads all the changes, yours too, and the Tester makes the proof again.</p>
+        <RecentActivity t={t} />
+      </div>
+      <div className="df">
+        <button className="btn pri" disabled={act.isPending} onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/give-back`, body: { note }, done: 'Given back. The checks run on your changes.' })}>
+          <Check size={15} strokeWidth={2.5} /> Give back
+        </button>
+        <span className="grow" />
+        <Cmd text={`squad give-back ${t.id}${note.trim() ? ` "${note.trim()}"` : ''}`} />
       </div>
     </>
   );

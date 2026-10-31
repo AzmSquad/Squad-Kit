@@ -17,7 +17,7 @@ export type Role = 'analyst' | 'architect' | 'spec' | 'builder' | 'tester' | 're
 export type Actor = Role | 'you' | 'squad';
 
 /** 'spec' waits for you to approve the what (story, done when); 'plan' the how (decision, steps). */
-export type WaitingKind = 'questions' | 'spec' | 'plan' | 'proof' | 'stuck' | 'release' | 'ask';
+export type WaitingKind = 'questions' | 'spec' | 'plan' | 'proof' | 'stuck' | 'release' | 'ask' | 'yours';
 
 export interface Waiting {
   kind: WaitingKind;
@@ -145,7 +145,11 @@ export interface TicketNote {
   /** A criterion joins the "done when" list, so the Tester must prove it. */
   kind: 'note' | 'criterion' | 'rule';
   text: string;
+  /** A message to one agent from its conversation. Every agent still reads it; this one is told it is for them. */
+  to?: AgentName;
 }
+
+export type AgentName = 'analyst' | 'architect' | 'builder' | 'reviewer' | 'tester';
 
 export type Track = 'full' | 'express';
 
@@ -235,6 +239,8 @@ export interface Ticket {
   overrides?: GateOverride[];
   /** Full track: who approved the spec. The Architect writes the design only after this. */
   specApproved?: { by: string; at: string };
+  /** You took the ticket over in Claude Code. The squad does nothing on it until you give it back. */
+  takenOver?: { by: string; at: string; session: string; cwd: string };
   /**
    * Full runs every step. Express (a typo, an urgent small bug) skips the questions and the plan approval, never the
    * build, checks, review or your Looks right. Missing means Full.

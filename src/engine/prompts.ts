@@ -207,7 +207,7 @@ export function notesText(notes: TicketNote[], fresh = false): string {
   const head = fresh
     ? 'The person added these notes to the ticket since your last step. Take them into account now; they outrank the plan where they disagree'
     : 'Notes the person added to the ticket (they outrank the plan where they disagree)';
-  return `\n${head}:\n${notes.map((n) => `- ${NOTE_HEAD[n.kind]}: ${n.text}`).join('\n')}`;
+  return `\n${head}:\n${notes.map((n) => `- ${NOTE_HEAD[n.kind]}${n.to ? ` to the ${n.to}` : ''}: ${n.text}`).join('\n')}`;
 }
 
 /** The plan's "done when" list, plus every acceptance criterion the person added later as a note. */

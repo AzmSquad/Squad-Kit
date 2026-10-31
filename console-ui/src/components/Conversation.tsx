@@ -14,6 +14,7 @@ import {
   Loader2,
   Pencil,
   Search,
+  Send,
   Terminal,
   Wrench,
   X,
@@ -24,6 +25,8 @@ import type { AcpContentBlock, AcpToolContent, AcpToolKind, AcpToolStatus, AcpUp
 import { lineDiff } from '../lib/diff';
 import { usePrefs } from '../lib/prefs';
 import { Cmd, clock } from './ui';
+import { useAct } from '../lib/data';
+import { TakeOverButton, canTakeOver } from './TakeOver';
 
 /**
  * The real conversation behind each role on a ticket, drawn from Agent Client Protocol (ACP) updates: messages,
@@ -82,13 +85,48 @@ export function ConversationTab({ t }: { t: Ticket }) {
         ))}
         <div ref={end} />
       </div>
+      {chosen && <MessageAgent t={t} to={AGENT_OF[chosen] ?? 'builder'} />}
       {conv.data?.command && (
         <>
           <div className="lbl">Open it in Claude Code</div>
           <Cmd text={conv.data.command} />
-          <p className="note" style={{ fontSize: 12.5, marginTop: 6 }}>Only type into it once the squad has finished with this ticket.</p>
+          <p className="note" style={{ fontSize: 12.5, marginTop: 6 }}>
+            {chosen === 'build' && canTakeOver(t) ? (
+              <>
+                To work in it yourself, press <b>Take over</b> first, so you and the squad never edit at the same time.{' '}
+                <TakeOverButton t={t} />
+              </>
+            ) : t.takenOver ? (
+              'The ticket is yours: type into it freely, then press Give back on the Now tab.'
+            ) : (
+              'Read it any time. To work in it, take the ticket over while it is being built.'
+            )}
+          </p>
         </>
       )}
+    </div>
+  );
+}
+
+const AGENT_OF: Record<string, 'analyst' | 'builder' | 'reviewer' | 'tester'> = { intake: 'analyst', build: 'builder', review: 'reviewer', tester: 'tester' };
+const AGENT_NAME = { analyst: 'Analyst', architect: 'Architect', builder: 'Builder', reviewer: 'Reviewer', tester: 'Tester' } as const;
+
+/** Message the agent: it reads it at its next step (a safe moment), and the work goes on. */
+function MessageAgent({ t, to }: { t: Ticket; to: keyof typeof AGENT_NAME }) {
+  const act = useAct();
+  const [text, setText] = useState('');
+  if (t.stage === 'done') return null;
+  const send = () =>
+    act.mutate(
+      { path: `/api/v1/tickets/${t.id}/notes`, body: { text, to }, done: `Sent. The ${AGENT_NAME[to]} reads it at its next step.` },
+      { onSuccess: () => setText('') },
+    );
+  return (
+    <div className="msgagent">
+      <input className="input" value={text} onChange={(e) => setText(e.target.value)} placeholder={`Message the ${AGENT_NAME[to]}…`} onKeyDown={(e) => e.key === 'Enter' && text.trim() && send()} />
+      <button className="btn sm pri" disabled={!text.trim() || act.isPending} onClick={send}>
+        <Send size={13} /> Send
+      </button>
     </div>
   );
 }

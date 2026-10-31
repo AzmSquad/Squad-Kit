@@ -573,3 +573,7 @@ ul.ticketnotes .grow, .addnote .grow { flex: 1; }
 .twostep > span.done { background: var(--accent-soft); color: var(--accent); box-shadow: none; }
 .twostep .bar { width: 22px; height: 1px; background: var(--line-strong); }
 .twostep p { flex-basis: 100%; margin: 4px 0 0; font-size: 13px; }
+
+/* Message an agent */
+.msgagent { display: flex; gap: 8px; margin: 14px 0 4px; }
+.msgagent .input { flex: 1; }

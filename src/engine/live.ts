@@ -194,6 +194,16 @@ export class LiveSquad {
 
   /** The person pressed Stop: park the ticket with a way to pick it up again. */
   private stopped(id: string, phase?: string): void {
+    // Taken over: the person has the ticket now, so no stuck card, just quiet.
+    if (readTicket(this.bp, id)?.takenOver) {
+      this.update(id, (t) => {
+        t.stopRequested = undefined;
+        t.live = false;
+        t.squad = null;
+        addActivity(t, 'squad', 'Stopped the running step for you');
+      });
+      return;
+    }
     this.fail(id, 'You stopped the squad. Nothing was lost; the work so far is kept.', phase ?? readTicket(this.bp, id)?.retryPhase ?? 'analyst-read');
     this.update(id, (t) => {
       t.stopRequested = undefined;
@@ -224,7 +234,15 @@ export class LiveSquad {
   }
 
   private update(id: string, change: (t: Ticket) => void): Ticket {
-    return updateTicket(this.bp, id, change);
+    return updateTicket(this.bp, id, (t) => {
+      change(t);
+      // A step that ends after you took the ticket over must not move it on: it stays yours until you give it back.
+      if (t.takenOver) {
+        t.waiting = { kind: 'yours', summary: 'You took it over. Give it back when you are done' };
+        t.squad = null;
+        t.live = false;
+      }
+    });
   }
 
   /** Show live progress: the latest tool line on the ticket, a few of them in its activity. */
@@ -306,6 +324,7 @@ export class LiveSquad {
   private fail(id: string, error: string, retryPhase: string): void {
     try {
       this.update(id, (t) => {
+        if (t.takenOver) return;
         t.live = false;
         t.squad = null;
         t.retryPhase = retryPhase;

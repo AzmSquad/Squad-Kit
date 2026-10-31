@@ -18,6 +18,9 @@ import {
   runBug,
   runChange,
   runNote,
+  runMessage,
+  runTakeOver,
+  runGiveBack,
   runReply,
   runChanges,
   runOpen,
@@ -238,6 +241,19 @@ program
   .option('--criterion', 'An acceptance criterion: it joins the "done when" list and must be proven', false)
   .option('--rule', 'A business rule the squad must follow', false)
   .action(wrapArgs(runNote));
+program
+  .command('message <ticket> [text...]')
+  .description('Message an agent on a ticket; it reads it at its next step and the work goes on')
+  .option('--to <agent>', 'analyst, architect, builder, reviewer or tester', 'builder')
+  .action(wrapArgs(runMessage));
+program
+  .command('take-over <ticket>')
+  .description("Stop the squad on a ticket and work in the Builder's Claude Code session yourself")
+  .action(wrapArgs(runTakeOver));
+program
+  .command('give-back <ticket> [note...]')
+  .description('Give a ticket back to the squad; the checks, review and proof run again')
+  .action(wrapArgs(runGiveBack));
 program
   .command('decide <ticket> [choice]')
   .description('Decide for the squad when it is stuck: try again, fix it yourself, continue anyway or back to the plan')

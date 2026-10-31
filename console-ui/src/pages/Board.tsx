@@ -43,7 +43,7 @@ export function BoardPage() {
   if (board.isLoading) return <div className="center">Loading the board…</div>;
   if (!data) return <NoBoard />;
 
-  const ORDER = ['ask', 'questions', 'spec', 'plan', 'stuck', 'proof', 'release'];
+  const ORDER = ['ask', 'questions', 'spec', 'plan', 'stuck', 'proof', 'yours', 'release'];
   // A step that looks stuck needs the person as much as a question does, so it comes first.
   const waiting = data.tickets
     .filter((t) => t.waiting || t.quiet?.kind === 'stuck')

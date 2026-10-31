@@ -15,6 +15,8 @@ import {
   reportBug,
   requestChange,
   addNote,
+  giveBack,
+  takeOver,
   answerAgent,
   saveReleaseNotes,
   skipQuestions,
@@ -25,6 +27,7 @@ import {
 } from '../../board/actions.js';
 import { boardExists, boardPaths, listDecisions, listReleases, listTickets, readMeta, readRelease, readTicket, writeMeta } from '../../board/store.js';
 import { seedDemoBoard } from '../../board/demo.js';
+import type { AgentName } from '../../board/types.js';
 import { repoFor } from '../../engine/repos.js';
 import type { ProjectCommands, Release } from '../../board/types.js';
 import { Azure, azureFor, parseAzureRemote } from '../../engine/azure.js';
@@ -300,8 +303,15 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
   });
 
   app.post('/api/v1/tickets/:id/notes', async (c) => {
-    const b = await body<{ text?: string; kind?: 'note' | 'criterion' | 'rule' }>(c);
-    return act(c, () => addNote(bp, c.req.param('id'), { text: b.text ?? '', kind: b.kind }));
+    const b = await body<{ text?: string; kind?: 'note' | 'criterion' | 'rule'; to?: AgentName }>(c);
+    return act(c, () => addNote(bp, c.req.param('id'), { text: b.text ?? '', kind: b.kind, to: b.to }));
+  });
+
+  app.post('/api/v1/tickets/:id/take-over', (c) => act(c, () => takeOver(bp, c.req.param('id'))));
+
+  app.post('/api/v1/tickets/:id/give-back', async (c) => {
+    const b = await body<{ note?: string }>(c);
+    return act(c, () => giveBack(bp, c.req.param('id'), b.note));
   });
 
   app.post('/api/v1/tickets/:id/decide', async (c) => {

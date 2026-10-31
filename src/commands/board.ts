@@ -19,6 +19,8 @@ import {
   requestChange,
   addNote,
   answerAgent,
+  giveBack,
+  takeOver,
   DECIDE_YOURSELF,
   skipQuestions,
   stopTicket,
@@ -44,7 +46,7 @@ import {
   requireTicket,
   type BoardPaths,
 } from '../board/store.js';
-import type { Stage, Ticket } from '../board/types.js';
+import type { AgentName, Stage, Ticket } from '../board/types.js';
 import { runConsole } from './console.js';
 
 const out = (s = '') => process.stdout.write(`${s}\n`);
@@ -97,6 +99,8 @@ function nextCommand(t: Ticket): string {
       return `squad show ${t.id}   then   squad approve ${t.id}`;
     case 'stuck':
       return `squad decide ${t.id}`;
+    case 'yours':
+      return `cd "${t.takenOver?.cwd}" && claude --resume ${t.takenOver?.session}   then   squad give-back ${t.id}`;
     default:
       return `squad watch ${t.id}`;
   }
@@ -366,6 +370,30 @@ export async function runNote(ticketId: string, words: string[], opts: { criteri
   const kind = opts.criterion ? 'criterion' : opts.rule ? 'rule' : 'note';
   const t = addNote(bp, ticketId, { text, kind });
   ui.success(`Added to ${t.id}. Every agent on it reads this${t.live ? ' from its next step' : ''}.`);
+}
+
+export async function runMessage(ticketId: string, words: string[], opts: { to?: string }): Promise<void> {
+  const bp = board();
+  const to = (opts.to ?? 'builder').toLowerCase() as AgentName;
+  if (!['analyst', 'architect', 'builder', 'reviewer', 'tester'].includes(to)) throw new Error('--to is one of: analyst, architect, builder, reviewer, tester.');
+  const text = words.join(' ') || (await input({ message: `Your message to the ${to}` }));
+  const t = addNote(bp, ticketId, { text, to });
+  ui.success(`Sent. The ${to} reads it ${t.live ? 'at its next step' : 'when it works on the ticket again'}; the work goes on.`);
+}
+
+export async function runTakeOver(ticketId: string): Promise<void> {
+  const t = takeOver(board(), ticketId);
+  ui.success(`${t.id} is yours. The squad stops and waits.`);
+  out();
+  out(`  Open the Builder's session in its copy of the code:`);
+  out(`    ${kleur.bold(`cd "${t.takenOver!.cwd}" && claude --resume ${t.takenOver!.session}`)}`);
+  out();
+  ui.info(`When you are done: squad give-back ${t.id} "what you changed"`);
+}
+
+export async function runGiveBack(ticketId: string, words: string[]): Promise<void> {
+  const t = giveBack(board(), ticketId, words.join(' '));
+  ui.success(`Given back. The checks, review and proof run again on your changes. Follow it: squad watch ${t.id}`);
 }
 
 export async function runDecide(ticketId: string, choice?: string, opts: { note?: string; reason?: string } = {}): Promise<void> {

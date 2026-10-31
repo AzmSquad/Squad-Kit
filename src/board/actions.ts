@@ -29,7 +29,7 @@ import { loadSecrets } from '../core/secrets.js';
 import { clientFor, overlayTrackerEnv } from '../tracker/index.js';
 import { azureFor, type Azure } from '../engine/azure.js';
 import { mergeLocally, opensPullRequest, syncWiki } from '../engine/sync.js';
-import type { StuckChoice, StuckOption, TicketNote, Track, TrackerEvent, WayOut } from './types.js';
+import type { AgentName, StuckChoice, StuckOption, TicketNote, Track, TrackerEvent, WayOut } from './types.js';
 import { endProcessTree } from '../engine/watchdog.js';
 
 /** Every person-facing action lives here, so the board and the terminal do exactly the same thing. */
@@ -446,17 +446,76 @@ export const DECIDE_YOURSELF = 'Decide yourself: take the simplest choice that f
 
 const NOTE_LABEL = { note: 'a note', criterion: 'an acceptance criterion', rule: 'a business rule' } as const;
 
-/** A note, rule or acceptance criterion added at any time. Running agents get it at their next step. */
-export function addNote(bp: BoardPaths, id: string, input: { text: string; kind?: TicketNote['kind'] }): Ticket {
+/** A note, rule or acceptance criterion added at any time, or a message to one agent. Running agents get it at their next step. */
+export function addNote(bp: BoardPaths, id: string, input: { text: string; kind?: TicketNote['kind']; to?: AgentName }): Ticket {
   const text = input.text?.trim();
-  if (!text) throw new BoardActionError('Write the note first.');
+  if (!text) throw new BoardActionError(input.to ? 'Write the message first.' : 'Write the note first.');
   const kind = input.kind && input.kind in NOTE_LABEL ? input.kind : 'note';
+  const to = input.to && AGENT_LABEL[input.to] ? input.to : undefined;
   const meta = readMeta(bp);
   return updateTicket(bp, id, (t) => {
     if (t.stage === 'done') throw new BoardActionError(`${t.id} is released. Add a new ticket instead.`);
-    t.notes = [...(t.notes ?? []), { at: now(), by: meta.user.name, kind, text }];
-    addActivity(t, 'you', `Added ${NOTE_LABEL[kind]}: ${text}`);
-    tellLater(t, meta.engine, { kind: 'note', text, noteKind: kind });
+    t.notes = [...(t.notes ?? []), { at: now(), by: meta.user.name, kind, text, ...(to ? { to } : {}) }];
+    addActivity(t, 'you', to ? `Message to the ${AGENT_LABEL[to]}: ${text}` : `Added ${NOTE_LABEL[kind]}: ${text}`);
+    tellLater(t, meta.engine, { kind: 'note', text: to ? `To the ${AGENT_LABEL[to]}: ${text}` : text, noteKind: kind });
+  });
+}
+
+const AGENT_LABEL: Record<AgentName, string> = { analyst: 'Analyst', architect: 'Architect', builder: 'Builder', reviewer: 'Reviewer', tester: 'Tester' };
+
+/**
+ * Take over: the squad stops on this ticket and you work in the Builder's own Claude Code session, in the ticket's
+ * copy. Nothing runs until you give it back, so you and the squad never edit at the same time.
+ */
+export function takeOver(bp: BoardPaths, id: string): Ticket {
+  const meta = readMeta(bp);
+  return updateTicket(bp, id, (t) => {
+    if (t.takenOver) throw new BoardActionError(`${t.id} is already yours. Give it back when you are done.`);
+    if (t.stage === 'release' || t.stage === 'done') throw new BoardActionError(`${t.id} is accepted already. Report a bug or add a new ticket instead.`);
+    const demo = meta.engine !== 'live';
+    const building = ['implement', 'test', 'review'].includes(t.stage);
+    const session = t.sessions?.build ?? (demo && building ? 'demo-session' : undefined);
+    const cwd = t.worktree ?? (demo ? path.dirname(path.dirname(bp.dir)) : undefined);
+    if (!session || !cwd || (!demo && !fs.existsSync(cwd))) {
+      throw new BoardActionError(`${t.id} has no code yet. You can take over once the Builder has started.`);
+    }
+    if (t.live && !demo) t.stopRequested = true;
+    t.takenOver = { by: meta.user.name, at: now(), session, cwd };
+    t.live = false;
+    t.squad = null;
+    t.waiting = { kind: 'yours', summary: 'You took it over. Give it back when you are done' };
+    t.status = `${meta.user.name} is working on it in Claude Code`;
+    addActivity(t, 'you', 'Took it over in Claude Code. The squad waits');
+  });
+}
+
+/** Give back: the squad picks up from your changes, and the checks, review and proof run again on them. */
+export function giveBack(bp: BoardPaths, id: string, note?: string): Ticket {
+  const meta = readMeta(bp);
+  return updateTicket(bp, id, (t) => {
+    if (!t.takenOver) throw new BoardActionError(`${t.id} is not taken over.`);
+    const text = note?.trim();
+    if (text) {
+      t.notes = [...(t.notes ?? []), { at: now(), by: meta.user.name, kind: 'note', text }];
+      tellLater(t, meta.engine, { kind: 'note', text, noteKind: 'note' });
+    }
+    t.takenOver = undefined;
+    t.stopRequested = undefined;
+    t.waiting = null;
+    t.stuck = undefined;
+    t.agentQuestion = undefined;
+    t.retryPhase = undefined;
+    t.live = true;
+    t.tries = 0;
+    t.reviewRound = 0;
+    t.reviewNotes = undefined;
+    t.proof = undefined;
+    t.mergedAt = undefined;
+    t.gates = { checks: 'pending', review: 'pending', proof: 'pending' };
+    t.stage = 'test';
+    t.status = 'Running the project checks on your changes';
+    addActivity(t, 'you', text ? `Gave it back: ${text}` : 'Gave it back');
+    scheduleSquad(t, 'test', meta.engine === 'live' ? 0.2 : 2, meta.engine === 'live' ? 1 : meta.speed);
   });
 }
 
