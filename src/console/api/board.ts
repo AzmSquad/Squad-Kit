@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { createHmac, randomBytes } from 'node:crypto';
 import path from 'node:path';
 import type { Context, Hono } from 'hono';
 import type { SquadPaths } from '../../core/paths.js';
@@ -35,6 +36,7 @@ import { findNestedRepos } from '../../engine/repos.js';
 import { git } from '../../engine/git.js';
 import { allowedFile, mimeOf, readConversation, ticketConversations, ticketFolders } from '../../engine/conversations.js';
 import { buildStamp } from '../../board/console-info.js';
+import { timingSafeEqualHex } from '../auth.js';
 import type { NewTicketInput, UploadedFile } from '../../board/actions.js';
 import { draftTicket } from '../../engine/draft.js';
 import { AGENTS, ensureAgents, readAgent, roleForPhase, writeAgent, type AgentRole, type AgentTool } from '../../engine/agents.js';
@@ -44,6 +46,21 @@ import { munsitKey } from '../../engine/media.js';
 import { installedEditors, openInEditor, ticketChanges } from '../../engine/changes.js';
 
 const DAY = 86_400_000;
+
+/** Signs mockup links for this run of the board only. */
+const MOCKUP_SECRET = randomBytes(32);
+
+function mockupKey(id: string, file: string): string {
+  return createHmac('sha256', MOCKUP_SECRET).update(`${id}\0${file}`).digest('hex');
+}
+
+/** An HTML file inside the ticket's own folders, at most 5 MB, or null. */
+function mockupFile(bp: ReturnType<typeof boardPaths>, id: string, asked: string): string | null {
+  const t = readTicket(bp, id);
+  if (!t || !/\.html?$/i.test(asked)) return null;
+  const file = allowedFile(asked.replace(/^file:\/\//, ''), ticketFolders(t, bp.dir));
+  return file && fs.statSync(file).size <= 5 * 1024 * 1024 ? file : null;
+}
 
 function withNotes(bp: ReturnType<typeof boardPaths>, r: Release): Release {
   return r.status === 'draft' && !r.notes.trim() ? { ...r, notes: composeNotes(bp, r) } : r;
@@ -235,6 +252,24 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
         'cache-control': 'private, max-age=300',
       },
     });
+  });
+
+  // An HTML mockup an agent made, shown in a sandboxed frame. The frame gets a key for that one file, never the
+  // board's token, because the mockup's own scripts can read their address.
+  app.get('/api/v1/tickets/:id/mockup-link', (c) => {
+    const id = c.req.param('id');
+    const file = mockupFile(bp, id, c.req.query('path') ?? '');
+    if (!file) return c.json({ error: 'not found' }, 404);
+    return c.json({ url: `/mockup/${encodeURIComponent(id)}?path=${encodeURIComponent(file)}&k=${mockupKey(id, file)}` });
+  });
+
+  // Outside /api, so no token: the key proves the board handed out this link. Sent with its own sealed policy.
+  app.get('/mockup/:id', (c) => {
+    const id = c.req.param('id');
+    const file = mockupFile(bp, id, c.req.query('path') ?? '');
+    const k = c.req.query('k') ?? '';
+    if (!file || !timingSafeEqualHex(k, mockupKey(id, file))) return c.text('not found', 404);
+    return new Response(fs.readFileSync(file), { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'private, no-store' } });
   });
 
   app.post('/api/v1/tickets', async (c) => {

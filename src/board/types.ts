@@ -154,12 +154,14 @@ export type AgentName = 'analyst' | 'architect' | 'builder' | 'reviewer' | 'test
 export type Track = 'full' | 'express';
 
 export interface AgentQuestion {
-  from: 'builder' | 'reviewer';
+  from: 'architect' | 'builder' | 'reviewer';
   text: string;
   /** What the agent thinks the choices are. The person can also write their own answer. */
   options: string[];
   /** Why it matters: what goes wrong with a wrong guess. */
   why?: string;
+  /** Pictures, wireframes, an HTML mockup or other files the agent attached, as full paths it may show. */
+  files?: string[];
   at: string;
   answer?: string;
 }
@@ -239,6 +241,8 @@ export interface Ticket {
   overrides?: GateOverride[];
   /** Full track: who approved the spec. The Architect writes the design only after this. */
   specApproved?: { by: string; at: string };
+  /** The Architect's HTML mockup of the main screen, approved with the design. */
+  mockup?: string;
   /** You took the ticket over in Claude Code. The squad does nothing on it until you give it back. */
   takenOver?: { by: string; at: string; session: string; cwd: string };
   /**

@@ -577,3 +577,14 @@ ul.ticketnotes .grow, .addnote .grow { flex: 1; }
 /* Message an agent */
 .msgagent { display: flex; gap: 8px; margin: 14px 0 4px; }
 .msgagent .input { flex: 1; }
+
+/* Files from an agent, and the Architect's mockup */
+.attached { display: flex; flex-direction: column; gap: 10px; margin: 6px 0 12px; }
+.attached > a.btn { align-self: flex-start; }
+.attpics { display: flex; flex-wrap: wrap; gap: 8px; }
+.attpics img { width: 150px; height: 100px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); }
+.mockup { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--surface); }
+.mockbar { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; font-size: 12.5px; color: var(--muted); border-bottom: 1px solid var(--line); }
+.mockbar span { flex: 1; }
+.mockframe { display: block; width: 100%; height: 300px; border: 0; background: #fff; }
+.mockframe.big { height: min(70vh, 720px); border-radius: 8px; border: 1px solid var(--line); }

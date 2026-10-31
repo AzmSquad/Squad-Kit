@@ -27,6 +27,7 @@ import { flushTracker, publishTicket, syncWiki } from './sync.js';
 import { agentInstructions, readAgent, type AgentRole } from './agents.js';
 import { Watchdog, processTable, type Quiet } from './watchdog.js';
 import { isMediaNote, prepareMedia } from './media.js';
+import { allowedFile, ticketFolders } from './conversations.js';
 
 /**
  * The live squad. Each step of a ticket is one real Claude Code run in the project (or the
@@ -436,6 +437,8 @@ export class LiveSquad {
         return this.builderAnswered(id);
       case 'answered-reviewer':
         return this.review(id, true);
+      case 'answered-architect':
+        return this.plan(id, undefined, true);
       case 'test':
         return this.checks(id);
       case 'review':
@@ -610,7 +613,7 @@ export class LiveSquad {
     });
   }
 
-  private async plan(id: string, change?: string): Promise<void> {
+  private async plan(id: string, change?: string, answered = false): Promise<void> {
     const root = projectRoot(this.bp);
     const t0 = this.update(id, (t) => {
       t.stage = 'specs';
@@ -621,7 +624,8 @@ export class LiveSquad {
     const resume = Boolean(readTicket(this.bp, id)?.activity.some((a) => a.who === 'analyst'));
     // Full track: the spec is approved, so the Architect writes only the design. Express writes both at once.
     const design = Boolean(t0.specApproved);
-    const ask = design ? P.designPrompt(t0, change, this.meta()) : P.planPrompt(t0, change, this.meta());
+    const asked = answered ? t0.agentQuestion : undefined;
+    const ask = `${asked ? `${P.answerPrompt(asked, 'architect')}\n\n` : ''}${design ? P.designPrompt(t0, change, this.meta()) : P.planPrompt(t0, change, this.meta())}`;
     const r = await this.claude({
       role: 'architect',
       ticket: id,
@@ -635,6 +639,8 @@ export class LiveSquad {
       onTool: this.watcher(id, 'architect', root),
     });
     const out = r.structured as {
+      question?: AgentAsk;
+      mockup?: string;
       story?: string;
       criteria?: { given: string; when: string; then: string }[];
       decision?: { title: string; options: { name: string; note: string; chosen: boolean }[]; why: string; clientCheck?: string };
@@ -645,6 +651,8 @@ export class LiveSquad {
       commands?: ProjectCommands;
       repo?: string;
     };
+    if (design) this.askIfNeeded(id, 'architect', out.question);
+    const mockup = out.mockup?.trim() && out.screens > 0 ? this.saveMockup(id, out.mockup) : undefined;
     const meta = this.meta();
     const repo = meta.repos?.length ? (meta.repos.find((r) => r.path === out.repo?.replace(/\/$/, ''))?.path ?? meta.repos[0]!.path) : undefined;
     if (out.commands && Object.values(out.commands).some(Boolean)) {
@@ -662,6 +670,11 @@ export class LiveSquad {
         t.criteria = out.criteria;
         t.releaseNote = out.releaseNote;
       }
+      t.agentQuestion = undefined;
+      if (mockup) {
+        t.mockup = mockup;
+        addActivity(t, 'architect', 'Made a mockup of how the screen will look');
+      } else if (!out.screens) delete t.mockup;
       if (out.decision) t.decision = { ...out.decision };
       else delete t.decision;
       t.steps = out.steps.map((s) => ({ title: s, status: 'todo' }));
@@ -811,18 +824,37 @@ export class LiveSquad {
    * An agent filled "question" in its answer: pause the ticket in Waiting for you. The answer goes back into the same
    * session. Throws WaitingForYou so the step stops here without counting as a failure.
    */
-  private askIfNeeded(id: string, from: 'builder' | 'reviewer', q: AgentAsk | undefined): void {
+  private askIfNeeded(id: string, from: 'architect' | 'builder' | 'reviewer', q: AgentAsk | undefined): void {
     if (!q?.text?.trim()) return;
-    const who = from === 'builder' ? 'Builder' : 'Reviewer';
+    const who = { architect: 'Architect', builder: 'Builder', reviewer: 'Reviewer' }[from];
     this.update(id, (x) => {
-      x.agentQuestion = { from, text: q.text.trim(), options: (q.options ?? []).filter((o) => o.trim()).slice(0, 4), ...(q.why ? { why: q.why } : {}), at: now() };
+      // Only files the board may show: inside the ticket's copy, its proof or its attachments.
+      const folders = ticketFolders(x, this.bp.dir);
+      const files = (q.files ?? []).map((f) => allowedFile(f.replace(/^file:\/\//, ''), folders)).filter((f): f is string => Boolean(f)).slice(0, 6);
+      x.agentQuestion = {
+        from,
+        text: q.text.trim(),
+        options: (q.options ?? []).filter((o) => o.trim()).slice(0, 4),
+        ...(q.why ? { why: q.why } : {}),
+        ...(files.length ? { files } : {}),
+        at: now(),
+      };
       x.live = false;
       x.squad = null;
       x.status = `${who} has a question for you`;
       x.waiting = { kind: 'ask', summary: `The ${who} needs an answer to carry on` };
-      addActivity(x, from, `Asked you: ${q.text.trim()}`);
+      addActivity(x, from, `Asked you: ${q.text.trim()}${files.length ? ` (with ${files.length} ${files.length === 1 ? 'file' : 'files'})` : ''}`);
     });
     throw new WaitingForYou();
+  }
+
+  /** The Architect's mockup is text in its answer (it only reads); squad-kit saves it with the ticket's files. */
+  private saveMockup(id: string, html: string): string {
+    const dir = path.join(this.bp.dir, 'attachments', id);
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'mockup.html');
+    fs.writeFileSync(file, html);
+    return file;
   }
 
   /** "Let the Builder fix the notes" after the last review round: fix them, then the checks and two more rounds. */
@@ -1161,4 +1193,5 @@ interface AgentAsk {
   text: string;
   options?: string[];
   why?: string;
+  files?: string[];
 }

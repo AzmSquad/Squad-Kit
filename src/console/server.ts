@@ -55,10 +55,11 @@ export async function startConsoleServer(opts: StartConsoleServerOptions): Promi
     ),
   );
 
+  const MOCKUP_PATH = /^\/mockup\/[^/]+$/;
+  const MOCKUP_CSP = "sandbox allow-scripts; default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src data:; frame-ancestors 'self'";
+
   // Tighten headers everywhere. Static asset and API responses inherit these.
-  app.use(
-    '*',
-    secureHeaders({
+  const strict = secureHeaders({
       contentSecurityPolicy: {
         defaultSrc: ["'self'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
@@ -68,8 +69,15 @@ export async function startConsoleServer(opts: StartConsoleServerOptions): Promi
         frameAncestors: ["'none'"],
       },
       referrerPolicy: 'no-referrer',
-    }),
-  );
+  });
+  app.use('*', async (c, next) => {
+    if (!MOCKUP_PATH.test(c.req.path)) return strict(c, next);
+    // An agent's HTML mockup: its own inline scripts may run, sealed in a sandbox with no network and no board origin.
+    await next();
+    c.res.headers.set('content-security-policy', MOCKUP_CSP);
+    c.res.headers.set('x-content-type-options', 'nosniff');
+    c.res.headers.set('referrer-policy', 'no-referrer');
+  });
 
   // Disable CORS in production builds — same-origin only.
   app.use('*', cors({ origin: 'http://127.0.0.1:' + bindPort }));

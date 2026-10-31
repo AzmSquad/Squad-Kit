@@ -9,6 +9,7 @@ import { Cmd, Glyph, Modal, ROLE_NAME, Tracker, ago, clock, commandFor } from '.
 import { ConversationTab } from '../components/Conversation';
 import { ChangesTab, OpenInEditor } from '../components/Changes';
 import { TakeOverButton, canTakeOver } from '../components/TakeOver';
+import { Attachments as AgentFiles, Mockup } from '../components/Attachments';
 import { Lightbox, type Picture } from '../components/Lightbox';
 
 type Tab = 'now' | 'story' | 'plan' | 'activity' | 'conversation' | 'proof' | 'changes' | 'developer';
@@ -343,6 +344,12 @@ function PlanBody({ t }: { t: Ticket }) {
           </div>
         </>
       )}
+      {t.mockup && t.work && (
+        <>
+          <div className="lbl">How it will look</div>
+          <Mockup ticket={t.id} file={t.mockup} title={`${t.title}: mockup`} />
+        </>
+      )}
       {t.work && (
         <>
           <div className="lbl">The work</div>
@@ -561,7 +568,7 @@ function AskPanel({ t }: { t: Ticket }) {
   const [pick, setPick] = useState<string | null>(null);
   const [own, setOwn] = useState('');
   if (!q) return <WorkingPanel t={t} />;
-  const who = q.from === 'builder' ? 'Builder' : 'Reviewer';
+  const who = { architect: 'Architect', builder: 'Builder', reviewer: 'Reviewer' }[q.from];
   const answer = pick === '' ? own.trim() : pick;
   const choices = [...q.options, DECIDE_YOURSELF];
   return (
@@ -577,6 +584,7 @@ function AskPanel({ t }: { t: Ticket }) {
         <div className="lbl">{who} asks</div>
         <p className="stuckq">{q.text}</p>
         {q.why && <p className="note" style={{ marginTop: -4 }}>Why it matters: {q.why}</p>}
+        {q.files && q.files.length > 0 && <AgentFiles ticket={t.id} files={q.files} />}
         <div className="opts2">
           {choices.map((o) => (
             <button key={o} className={`opt2 ${pick === o ? 'pick' : ''}`} onClick={() => setPick(o)}>

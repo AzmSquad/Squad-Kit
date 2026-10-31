@@ -79,6 +79,7 @@ export const PLAN_SCHEMA = {
     releaseNote: STR,
     commands: COMMANDS,
     repo: STR,
+    mockup: STR,
   },
   required: ['story', 'criteria', 'steps', 'tests', 'screens', 'releaseNote'],
 };
@@ -97,18 +98,19 @@ export const SPEC_SCHEMA = {
   required: ['story', 'criteria', 'releaseNote'],
 };
 
-/** Full track, step two: the how, written from the approved spec. */
-export const DESIGN_SCHEMA = {
-  type: 'object',
-  properties: Object.fromEntries(Object.entries(PLAN_SCHEMA.properties).filter(([k]) => !['story', 'criteria', 'releaseNote'].includes(k))),
-  required: ['steps', 'tests', 'screens'],
-};
 
 /** Filled only when the agent must stop and ask the person. */
 const QUESTION = {
   type: 'object',
-  properties: { text: STR, options: { type: 'array', maxItems: 4, items: STR }, why: STR },
+  properties: { text: STR, options: { type: 'array', maxItems: 4, items: STR }, why: STR, files: { type: 'array', maxItems: 6, items: STR } },
   required: ['text'],
+};
+
+/** Full track, step two: the how, written from the approved spec. */
+export const DESIGN_SCHEMA = {
+  type: 'object',
+  properties: { ...Object.fromEntries(Object.entries(PLAN_SCHEMA.properties).filter(([k]) => !['story', 'criteria', 'releaseNote'].includes(k))), question: QUESTION },
+  required: ['steps', 'tests', 'screens'],
 };
 
 export const BUILD_SCHEMA = {
@@ -331,8 +333,15 @@ ${doneWhen(t)}
 - tests: how many tests you expect to add. screens: how many "done when" can be shown in a screenshot (0 without a UI).
 - commands: only if the project has no way yet to set up, test, build or start it, or this ticket changes that.
   For a new project, choose simple, common tools and give every command, including start and url.${repo}
+${MOCKUP_RULE}
+${ASK_RULE}
 ${PLAIN}`;
 }
+
+const MOCKUP_RULE = `- mockup: when screens is 1 or more, one self-contained HTML page showing how the main screen will look after this
+  ticket, using the project's own look where you can see it (colors, fonts, layout). Inline CSS and a little inline
+  JavaScript for clicks are fine; no links to other sites, no images from the web. The person approves the look with
+  the design, before anything is built. Leave it out when nothing on screen changes.`;
 
 export function buildPrompt(meta: BoardMeta, decisions: Decision[], t: Ticket, ctx?: PromptContext): string {
   const steps = (t.steps ?? []).map((s, i) => `${i + 1}. ${s.title}`).join('\n');
@@ -363,11 +372,18 @@ ${ASK_RULE}`;
 
 const ASK_RULE = `- Ask the person only when something important is unclear and a wrong guess would waste the work or break a business rule:
   then stop, fill "question" (one plain sentence, 2 to 4 short options, and why it matters), and leave the rest for later.
-  They answer in this same conversation. Never ask about code style or small choices.`;
+  They answer in this same conversation. Never ask about code style or small choices.
+  To show what you mean, put full paths of files you made in "files": screenshots, a wireframe, or one self-contained
+  HTML page as a clickable mockup (inline CSS, no links to other sites).`;
 
 /** The person's answer to a question an agent asked mid-work. It goes back into the same conversation. */
-export function answerPrompt(q: { text: string; answer?: string }, role: 'builder' | 'reviewer'): string {
-  const next = role === 'builder' ? 'Carry on with the work from where you stopped, then run the tests.' : 'Finish your review with this in mind.';
+export function answerPrompt(q: { text: string; answer?: string }, role: 'architect' | 'builder' | 'reviewer'): string {
+  const next =
+    role === 'builder'
+      ? 'Carry on with the work from where you stopped, then run the tests.'
+      : role === 'architect'
+        ? 'Now write the design with this answer.'
+        : 'Finish your review with this in mind.';
   return `You asked: "${q.text}"\nThe person answered: "${q.answer ?? ''}"\n\n${next}`;
 }
 

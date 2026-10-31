@@ -333,8 +333,9 @@ export async function runReply(ticketId: string, words: string[]): Promise<void>
   let text = words.join(' ');
   if (!text) {
     out();
-    ui.info(`${q.from === 'builder' ? 'Builder' : 'Reviewer'} asks: ${q.text}`);
+    ui.info(`${q.from[0]!.toUpperCase()}${q.from.slice(1)} asks: ${q.text}`);
     if (q.why) ui.info(`Why it matters: ${q.why}`);
+    for (const f of q.files ?? []) ui.info(`Attached: ${f}`);
     const choice = await select({
       message: 'Your answer',
       choices: [...q.options.map((o) => ({ name: o, value: o })), { name: 'Let it decide', value: DECIDE_YOURSELF }, { name: 'Write my own', value: '' }],

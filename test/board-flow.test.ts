@@ -61,6 +61,8 @@ describe('board flow', () => {
     expect(readTicket(bp, 'SK-148')!.specApproved?.by).toBe('Momen');
     const planned = await until('SK-148', (t) => t.waiting?.kind === 'plan');
     expect(planned.story).toBe(specced.story);
+    // With screens, the design comes with a mockup you approve before anything is built.
+    expect(fs.readFileSync(planned.mockup!, 'utf8')).toContain('Switch theme');
     expect(planned.decision?.title).toBe("Save each person's theme in their account");
 
     actions.approve(bp, 'SK-148');

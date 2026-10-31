@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   addActivity,
   boardExists,
@@ -156,6 +158,11 @@ function advance(bp: BoardPaths, id: string, meta: BoardMeta): void {
         if (decision) t.decision = decision;
         t.steps = script.steps.map((s) => ({ title: s.title, status: 'todo' }));
         t.work = { steps: script.steps.length, tests: Math.round(script.tests * 0.43), screens: script.proof.length };
+        // Full track with screens: the look is approved with the design, before anything is built.
+        if (design && script.proof.length) {
+          t.mockup = writeDemoMockup(bp, t);
+          addActivity(t, 'architect', 'Made a mockup of how the screen will look');
+        }
         if (t.track === 'express' && state.phase === 'plan-write') {
           addActivity(t, 'spec', 'Wrote the plan');
           t.status = 'Express track: approving the plan';
@@ -207,6 +214,14 @@ function advance(bp: BoardPaths, id: string, meta: BoardMeta): void {
         t.status = builder ? `Running ${script.tests} checks` : 'Reviewer is reading the changes';
         if (builder) scheduleSquad(t, 'test', 1.5, speed, 0);
         else scheduleSquad(t, 'review', 1.5, speed, 0);
+        return;
+      }
+      case 'answered-architect': {
+        addActivity(t, 'architect', `Carried on with your answer: ${t.agentQuestion?.answer ?? ''}`);
+        t.agentQuestion = undefined;
+        t.live = true;
+        t.status = 'Architect is writing the design';
+        scheduleSquad(t, 'plan-write', 1.5, speed, script.planLines.length);
         return;
       }
       case 'test': {
@@ -360,4 +375,34 @@ function markDecisionChecked(bp: BoardPaths, ticketId: string): void {
     });
     writeMeta(bp, meta);
   }
+}
+
+/** A small clickable mockup for the demo board, like the one the Architect makes for a real ticket. */
+function writeDemoMockup(bp: BoardPaths, t: Ticket): string {
+  const dir = path.join(bp.dir, 'attachments', t.id);
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'mockup.html');
+  const esc = (x: string) => x.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+  const rows = (t.criteria ?? []).map((c) => `<li>${esc(c.then)}</li>`).join('');
+  fs.writeFileSync(
+    file,
+    `<!doctype html><html><head><meta charset="utf-8"><style>
+body{margin:0;font:14px system-ui,sans-serif;background:#f4f6f8;color:#1b2430;transition:background .3s,color .3s}
+body.dark{background:#11161c;color:#e4e9ee}
+header{display:flex;align-items:center;gap:12px;padding:14px 20px;background:#1f3a5f;color:#fff}
+header b{flex:1;font-size:16px}
+button{border:0;border-radius:999px;padding:7px 14px;font:inherit;cursor:pointer;background:#fff;color:#1f3a5f}
+main{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;padding:20px}
+.card{background:#fff;border-radius:10px;padding:16px;box-shadow:0 1px 2px #0002}
+body.dark .card{background:#1b232c}
+.card small{opacity:.6}.card h3{margin:6px 0 0;font-size:22px}
+ul{margin:0 20px 20px;padding:16px 16px 16px 34px;background:#fff8;border-radius:10px}
+body.dark ul{background:#0004}
+</style></head><body>
+<header><b>${esc(t.title)}</b><button onclick="document.body.classList.toggle('dark')">Switch theme</button></header>
+<main><div class="card"><small>Open cases</small><h3>128</h3></div><div class="card"><small>Hearings today</small><h3>14</h3></div><div class="card"><small>Waiting on documents</small><h3>9</h3></div></main>
+<ul>${rows}</ul>
+</body></html>`,
+  );
+  return file;
 }

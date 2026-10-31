@@ -185,7 +185,8 @@ export interface Ticket {
   specApproved?: { by: string; at: string };
   takenOver?: { by: string; at: string; session: string; cwd: string };
   track?: Track;
-  agentQuestion?: { from: 'builder' | 'reviewer'; text: string; options: string[]; why?: string; at: string; answer?: string };
+  agentQuestion?: { from: 'architect' | 'builder' | 'reviewer'; text: string; options: string[]; why?: string; files?: string[]; at: string; answer?: string };
+  mockup?: string;
   /** In a multi-repo workspace: the code repo this ticket changes. */
   repo?: string;
   /** Set when the person presses Stop; the live squad stops the running step. */

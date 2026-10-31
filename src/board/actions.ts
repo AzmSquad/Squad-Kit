@@ -436,8 +436,9 @@ export function answerAgent(bp: BoardPaths, id: string, text: string): Ticket {
     q.answer = answer;
     t.waiting = null;
     t.live = true;
-    t.status = q.from === 'builder' ? 'Builder is carrying on with your answer' : 'Reviewer is finishing with your answer';
-    addActivity(t, 'you', `Answered the ${q.from === 'builder' ? 'Builder' : 'Reviewer'}: ${answer}`);
+    const who = { architect: 'Architect', builder: 'Builder', reviewer: 'Reviewer' }[q.from];
+    t.status = q.from === 'builder' ? 'Builder is carrying on with your answer' : q.from === 'architect' ? 'Architect is writing the design with your answer' : 'Reviewer is finishing with your answer';
+    addActivity(t, 'you', `Answered the ${who}: ${answer}`);
     scheduleSquad(t, `answered-${q.from}`, 1, meta.speed);
   });
 }
