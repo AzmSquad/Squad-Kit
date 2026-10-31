@@ -16,7 +16,8 @@ export type Role = 'analyst' | 'architect' | 'spec' | 'builder' | 'tester' | 're
 /** Who wrote an activity line or a thread message. */
 export type Actor = Role | 'you' | 'squad';
 
-export type WaitingKind = 'questions' | 'plan' | 'proof' | 'stuck' | 'release' | 'ask';
+/** 'spec' waits for you to approve the what (story, done when); 'plan' the how (decision, steps). */
+export type WaitingKind = 'questions' | 'spec' | 'plan' | 'proof' | 'stuck' | 'release' | 'ask';
 
 export interface Waiting {
   kind: WaitingKind;
@@ -232,6 +233,8 @@ export interface Ticket {
   trackerQueue?: TrackerEvent[];
   notes?: TicketNote[];
   overrides?: GateOverride[];
+  /** Full track: who approved the spec. The Architect writes the design only after this. */
+  specApproved?: { by: string; at: string };
   /**
    * Full runs every step. Express (a typo, an urgent small bug) skips the questions and the plan approval, never the
    * build, checks, review or your Looks right. Missing means Full.

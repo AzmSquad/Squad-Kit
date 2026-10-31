@@ -127,6 +127,7 @@ function NowPanel({ t }: { t: Ticket }) {
   switch (t.waiting?.kind) {
     case 'questions':
       return <QuestionsPanel t={t} />;
+    case 'spec':
     case 'plan':
       return <PlanPanel t={t} />;
     case 'proof':
@@ -353,29 +354,55 @@ function PlanBody({ t }: { t: Ticket }) {
   );
 }
 
+/** Full track: the spec (the what) and then the design (the how), each approved on its own. Express: one plan. */
 function PlanPanel({ t }: { t: Ticket }) {
   const act = useAct();
   const [changing, setChanging] = useState(false);
   const [note, setNote] = useState('');
   const [askDev, setAskDev] = useState(false);
+  const spec = t.waiting?.kind === 'spec';
+  const design = !spec && Boolean(t.specApproved);
+  const who = spec ? 'the Analyst' : design ? 'the Architect' : 'the Spec writer';
+  const send = () => act.mutate({ path: `/api/v1/tickets/${t.id}/change`, body: { text: note }, done: `Sent to ${who}.` });
   return (
     <>
       <div className="db">
-        <PlanBody t={t} />
-        {t.decision && <p className="note" style={{ marginTop: 14 }}>Approved decisions are saved in Decisions. Later tickets must follow them.</p>}
+        {(spec || design) && (
+          <div className="twostep">
+            <span className={spec ? 'on' : 'done'}>{spec ? '1' : <Check size={12} strokeWidth={3} />} The what</span>
+            <span className="bar" />
+            <span className={design ? 'on' : ''}>2 The how</span>
+            <p>
+              {spec
+                ? 'Is this what you want? Check the story and the "done when" list. The Architect designs how to build it after you approve.'
+                : `The spec was approved by ${t.specApproved!.by}. Now check how the Architect will build it. A developer can approve this part for you.`}
+            </p>
+          </div>
+        )}
+        {spec ? <PlanBody t={{ ...t, decision: undefined, work: undefined }} /> : <PlanBody t={t} />}
+        {!spec && t.decision && <p className="note" style={{ marginTop: 14 }}>Approved decisions are saved in Decisions. Later tickets must follow them.</p>}
       </div>
       {changing ? (
         <div className="df">
-          <input className="input" style={{ flex: 1 }} autoFocus value={note} onChange={(e) => setNote(e.target.value)} placeholder="What should change? One line is enough." onKeyDown={(e) => e.key === 'Enter' && note.trim() && act.mutate({ path: `/api/v1/tickets/${t.id}/change`, body: { text: note }, done: 'Sent to the Spec writer.' })} />
-          <button className="btn pri" disabled={!note.trim()} onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/change`, body: { text: note }, done: 'Sent to the Spec writer.' })}>
+          <input className="input" style={{ flex: 1 }} autoFocus value={note} onChange={(e) => setNote(e.target.value)} placeholder="What should change? One line is enough." onKeyDown={(e) => e.key === 'Enter' && note.trim() && send()} />
+          <button className="btn pri" disabled={!note.trim()} onClick={send}>
             Send
           </button>
           <button className="btn" onClick={() => setChanging(false)}>Cancel</button>
         </div>
       ) : (
         <div className="df">
-          <button className="btn pri" disabled={act.isPending} onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/approve`, done: 'Plan approved. The Builder started.' })}>
-            <Check size={15} strokeWidth={2.5} /> Approve plan
+          <button
+            className="btn pri"
+            disabled={act.isPending}
+            onClick={() =>
+              act.mutate({
+                path: `/api/v1/tickets/${t.id}/approve`,
+                done: spec ? 'Spec approved. The Architect is designing how to build it.' : 'Plan approved. The Builder started.',
+              })
+            }
+          >
+            <Check size={15} strokeWidth={2.5} /> {spec ? 'Approve spec' : design ? 'Approve design' : 'Approve plan'}
           </button>
           <button className="btn" onClick={() => setChanging(true)}>Change something</button>
           <button className="btn quiet" onClick={() => setAskDev(true)}>Ask a developer</button>

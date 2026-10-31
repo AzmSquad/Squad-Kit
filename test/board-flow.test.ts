@@ -52,7 +52,15 @@ describe('board flow', () => {
       q3: { choice: 'Yes:', value: 'Angular Material' },
       q4: { choice: 'Yes, shared desks' },
     });
+    // Full track: the spec first (the what), then the design (the how), each approved on its own.
+    const specced = await until('SK-148', (t) => t.waiting?.kind === 'spec');
+    expect(specced.story).toBeTruthy();
+    expect(specced.criteria?.length).toBeGreaterThan(0);
+    expect(specced.decision).toBeUndefined();
+    actions.approve(bp, 'SK-148');
+    expect(readTicket(bp, 'SK-148')!.specApproved?.by).toBe('Momen');
     const planned = await until('SK-148', (t) => t.waiting?.kind === 'plan');
+    expect(planned.story).toBe(specced.story);
     expect(planned.decision?.title).toBe("Save each person's theme in their account");
 
     actions.approve(bp, 'SK-148');
@@ -74,6 +82,8 @@ describe('board flow', () => {
     const bug = actions.reportBug(bp, { what: 'Table text is hard to read', severity: 'annoying' });
     expect(bug.foundIn).toBe('v2.3.1');
     expect(listReleases(bp).find((r) => r.version === 'v2.3.1')!.bugs).toContain(bug.id);
+    await until(bug.id, (t) => t.waiting?.kind === 'spec');
+    actions.approve(bp, bug.id);
     await until(bug.id, (t) => t.waiting?.kind === 'plan');
     actions.approve(bp, bug.id);
     await until(bug.id, (t) => t.waiting?.kind === 'proof');

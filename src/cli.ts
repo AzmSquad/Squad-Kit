@@ -212,11 +212,11 @@ program
   .action(wrapArgs(runAnswer));
 program
   .command('approve <ticket>')
-  .description('Approve what a ticket is waiting on: the plan or the proof')
+  .description('Approve what a ticket is waiting on: the spec, the design (plan) or the proof')
   .action(wrapArgs(runApprove));
 program
   .command('change <ticket> [note...]')
-  .description('Ask for a change to the plan, or send the proof back with a note')
+  .description('Ask for a change to the spec or design, or send the proof back with a note')
   .action(wrapArgs(runChange));
 program
   .command('changes <ticket>')

@@ -9,7 +9,7 @@ export type Role = 'analyst' | 'architect' | 'spec' | 'builder' | 'tester' | 're
 /** Who wrote an activity line or a thread message. */
 export type Actor = Role | 'you' | 'squad';
 
-export type WaitingKind = 'questions' | 'plan' | 'proof' | 'stuck' | 'release' | 'ask';
+export type WaitingKind = 'questions' | 'spec' | 'plan' | 'proof' | 'stuck' | 'release' | 'ask';
 
 export interface Waiting {
   kind: WaitingKind;
@@ -181,6 +181,7 @@ export interface Ticket {
   brief?: { criteria: string[]; rules: string[]; edgeCases: string[] };
   notes?: TicketNote[];
   overrides?: GateOverride[];
+  specApproved?: { by: string; at: string };
   track?: Track;
   agentQuestion?: { from: 'builder' | 'reviewer'; text: string; options: string[]; why?: string; at: string; answer?: string };
   /** In a multi-repo workspace: the code repo this ticket changes. */

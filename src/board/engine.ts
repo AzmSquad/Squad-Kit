@@ -12,7 +12,7 @@ import {
   type BoardPaths,
 } from './store.js';
 import { scheduleSquad } from './schedule.js';
-import { approveExpress } from './actions.js';
+import { approveExpress, needsSpec } from './actions.js';
 import { AMBIENT, scriptFor } from './scripts.js';
 import type { BoardMeta, Question, Ticket } from './types.js';
 
@@ -114,8 +114,30 @@ function advance(bp: BoardPaths, id: string, meta: BoardMeta): void {
         addActivity(t, 'analyst', `Asked ${t.questions.length} questions`);
         return;
       }
+      case 'spec-rewrite':
       case 'plan-write':
       case 'plan-rewrite': {
+        // Full track, step one: the Analyst writes the what, and you approve it before any design.
+        if (state.phase === 'spec-rewrite' || (state.phase === 'plan-write' && needsSpec(t))) {
+          if (i === 0) {
+            t.stage = 'specs';
+            t.live = true;
+            t.status = 'Analyst is writing the spec';
+            addActivity(t, 'analyst', 'Writing the story and the "done when" list');
+            scheduleSquad(t, state.phase, 2, speed, 1);
+            return;
+          }
+          t.story = script.story(t);
+          t.criteria = script.criteria(t);
+          t.releaseNote = script.releaseNote(t);
+          t.live = false;
+          t.status = 'Spec ready for you';
+          t.waiting = { kind: 'spec', summary: 'The spec is ready: is this what you want?' };
+          t.squad = null;
+          addActivity(t, 'analyst', state.phase === 'spec-rewrite' ? `Updated the spec: ${t.changeRequest ?? 'your change'}` : 'Wrote the spec');
+          return;
+        }
+        const design = Boolean(t.specApproved);
         const line = script.planLines[i];
         if (line) {
           t.stage = 'specs';
@@ -125,13 +147,15 @@ function advance(bp: BoardPaths, id: string, meta: BoardMeta): void {
           scheduleSquad(t, state.phase, 2, speed, i + 1);
           return;
         }
-        t.story = script.story(t);
-        t.criteria = script.criteria(t);
+        if (!design) {
+          t.story = script.story(t);
+          t.criteria = script.criteria(t);
+          t.releaseNote = script.releaseNote(t);
+        }
         const decision = script.decision(t);
         if (decision) t.decision = decision;
         t.steps = script.steps.map((s) => ({ title: s.title, status: 'todo' }));
         t.work = { steps: script.steps.length, tests: Math.round(script.tests * 0.43), screens: script.proof.length };
-        t.releaseNote = script.releaseNote(t);
         if (t.track === 'express' && state.phase === 'plan-write') {
           addActivity(t, 'spec', 'Wrote the plan');
           t.status = 'Express track: approving the plan';
@@ -139,10 +163,11 @@ function advance(bp: BoardPaths, id: string, meta: BoardMeta): void {
           return;
         }
         t.live = false;
-        t.status = 'Plan ready for you';
-        t.waiting = { kind: 'plan', summary: 'The plan is ready for your approval' };
+        t.status = design ? 'Design ready for you' : 'Plan ready for you';
+        t.waiting = design ? { kind: 'plan', summary: 'The design is ready: is this how to build it?' } : { kind: 'plan', summary: 'The plan is ready for your approval' };
         t.squad = null;
-        addActivity(t, 'spec', state.phase === 'plan-rewrite' ? `Updated the plan: ${t.changeRequest ?? 'your change'}` : 'Wrote the plan');
+        const what = design ? 'design' : 'plan';
+        addActivity(t, design ? 'architect' : 'spec', state.phase === 'plan-rewrite' ? `Updated the ${what}: ${t.changeRequest ?? 'your change'}` : `Wrote the ${what}`);
         return;
       }
       case 'build':

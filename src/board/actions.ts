@@ -292,6 +292,7 @@ export function approve(bp: BoardPaths, id: string): Ticket {
   const meta = readMeta(bp);
   const ticket = requireTicket(bp, id);
   const kind = ticket.waiting?.kind;
+  if (kind === 'spec') return approveSpec(bp, ticket, meta.speed);
   if (kind === 'plan') return approvePlan(bp, ticket, meta.speed);
   if (kind === 'proof') return acceptProof(bp, ticket);
   if (kind === 'questions') throw new BoardActionError(`${ticket.id} needs answers first. Run: squad answer ${ticket.id}`);
@@ -304,6 +305,26 @@ export function approveExpress(bp: BoardPaths, id: string): Ticket {
   const ticket = requireTicket(bp, id);
   if (ticket.track !== 'express') throw new BoardActionError(`${ticket.id} is on the Full track.`);
   return approvePlan(bp, { ...ticket, waiting: { kind: 'plan', summary: '' } }, readMeta(bp).speed, true);
+}
+
+/** True when the Full track still needs the spec approved before the Architect designs. */
+export function needsSpec(t: Ticket): boolean {
+  return t.track !== 'express' && !t.specApproved;
+}
+
+/** Full track: you approve the what. Then the Architect designs the how from it, and you approve that too. */
+function approveSpec(bp: BoardPaths, ticket: Ticket, speed: number): Ticket {
+  const meta = readMeta(bp);
+  return updateTicket(bp, ticket.id, (t) => {
+    t.specApproved = { by: meta.user.name, at: now() };
+    t.waiting = null;
+    t.stage = 'specs';
+    t.live = true;
+    t.status = 'Architect is choosing the design';
+    addActivity(t, 'you', 'Approved the spec');
+    scheduleSquad(t, 'plan-write', 2, speed, 0);
+    tellLater(t, meta.engine, { kind: 'note', text: `Spec approved by ${meta.user.name}: ${t.story ?? ''}`, noteKind: 'note' });
+  });
 }
 
 function approvePlan(bp: BoardPaths, ticket: Ticket, speed: number, express = false): Ticket {
@@ -439,20 +460,23 @@ export function addNote(bp: BoardPaths, id: string, input: { text: string; kind?
   });
 }
 
-/** "Change something" on a plan, or "Something's wrong" on the proof. */
+/** "Change something" on a spec or plan, or "Something's wrong" on the proof. */
 export function requestChange(bp: BoardPaths, id: string, text: string): Ticket {
   const note = text.trim();
   if (!note) throw new BoardActionError('Say in one line what should change.');
   const meta = readMeta(bp);
   return updateTicket(bp, id, (t) => {
     const kind = t.waiting?.kind;
-    if (kind !== 'plan' && kind !== 'proof') throw new BoardActionError(`${t.id} has no plan or proof waiting for you.`);
+    if (kind !== 'spec' && kind !== 'plan' && kind !== 'proof') throw new BoardActionError(`${t.id} has no spec, plan or proof waiting for you.`);
     t.changeRequest = note;
     t.waiting = null;
     t.live = true;
     addActivity(t, 'you', `Asked for a change: ${note}`);
-    if (kind === 'plan') {
-      t.status = 'Spec writer is updating the plan';
+    if (kind === 'spec') {
+      t.status = 'Analyst is updating the spec';
+      scheduleSquad(t, 'spec-rewrite', 2, meta.speed);
+    } else if (kind === 'plan') {
+      t.status = t.specApproved ? 'Architect is updating the design' : 'Spec writer is updating the plan';
       scheduleSquad(t, 'plan-rewrite', 2, meta.speed);
     } else {
       t.stage = 'implement';

@@ -177,6 +177,7 @@ export function commandFor(t: Ticket): string {
       return `squad decide ${t.id}`;
     case 'ask':
       return `squad reply ${t.id}`;
+    case 'spec':
     case 'plan':
     case 'proof':
       return `squad approve ${t.id}`;
@@ -189,8 +190,10 @@ export function actionLabel(t: Ticket): string {
   switch (t.waiting?.kind) {
     case 'questions':
       return 'Answer';
+    case 'spec':
+      return 'Review spec';
     case 'plan':
-      return 'Review plan';
+      return t.specApproved ? 'Review design' : 'Review plan';
     case 'proof':
       return 'Check proof';
     case 'stuck':

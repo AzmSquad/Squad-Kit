@@ -14,7 +14,7 @@ import {
   writeMeta,
   type BoardPaths,
 } from '../board/store.js';
-import { approveExpress, wayOptions } from '../board/actions.js';
+import { approveExpress, needsSpec, wayOptions } from '../board/actions.js';
 import { scheduleSquad } from '../board/schedule.js';
 import type { BoardMeta, ProjectCommands, Question, Role, Ticket } from '../board/types.js';
 import { describeTool, runClaude, type RunOptions, type RunResult } from './claude.js';
@@ -400,7 +400,9 @@ export class LiveSquad {
       case 'triage':
         return this.triage(id);
       case 'plan-write':
-        return this.plan(id);
+        return needsSpec(readTicket(this.bp, id)!) ? this.spec(id) : this.plan(id);
+      case 'spec-rewrite':
+        return this.spec(id, readTicket(this.bp, id)?.changeRequest);
       case 'plan-rewrite':
         return this.plan(id, readTicket(this.bp, id)?.changeRequest);
       case 'express-approve':
@@ -548,37 +550,79 @@ export class LiveSquad {
     }
   }
 
+  /** Full track, step one: the Analyst writes the what (story, done when). You approve it before any design. */
+  private async spec(id: string, change?: string): Promise<void> {
+    const root = projectRoot(this.bp);
+    const t0 = this.update(id, (t) => {
+      t.stage = 'specs';
+      t.live = true;
+      t.status = change ? 'Analyst is updating the spec' : 'Analyst is writing the spec';
+      t.sessions = { ...t.sessions, intake: t.sessions?.intake ?? randomUUID() };
+    });
+    const resume = Boolean(t0.activity.some((a) => a.who === 'analyst'));
+    const r = await this.claude({
+      role: 'analyst',
+      ticket: id,
+      cwd: root,
+      ...(resume ? { resume: t0.sessions!.intake } : { sessionId: t0.sessions!.intake }),
+      prompt: resume
+        ? P.specPrompt(t0, change)
+        : `${P.intakePrompt(this.meta(), listDecisions(this.bp), t0, this.ctx())}\n\n${P.specPrompt(t0, change)}`,
+      allowedTools: READ_ONLY,
+      schema: P.SPEC_SCHEMA,
+      timeoutMs: 10 * 60_000,
+      addDirs: attachmentDirs(t0),
+      onTool: this.watcher(id, 'analyst', root),
+    });
+    const out = r.structured as { story: string; criteria: { given: string; when: string; then: string }[]; releaseNote: string };
+    this.update(id, (t) => {
+      t.story = out.story;
+      t.criteria = out.criteria;
+      t.releaseNote = out.releaseNote;
+      delete t.decision;
+      delete t.steps;
+      delete t.work;
+      addActivity(t, 'analyst', change ? `Updated the spec: ${change}` : 'Wrote the spec');
+      t.changeRequest = undefined;
+      t.live = false;
+      t.status = 'Spec ready for you';
+      t.waiting = { kind: 'spec', summary: 'The spec is ready: is this what you want?' };
+      t.squad = null;
+    });
+  }
+
   private async plan(id: string, change?: string): Promise<void> {
     const root = projectRoot(this.bp);
     const t0 = this.update(id, (t) => {
       t.stage = 'specs';
       t.live = true;
-      t.status = change ? 'Spec writer is updating the plan' : 'Architect is choosing the design';
+      t.status = change ? (t.specApproved ? 'Architect is updating the design' : 'Spec writer is updating the plan') : 'Architect is choosing the design';
       t.sessions = { ...t.sessions, intake: t.sessions?.intake ?? randomUUID() };
     });
     const resume = Boolean(readTicket(this.bp, id)?.activity.some((a) => a.who === 'analyst'));
+    // Full track: the spec is approved, so the Architect writes only the design. Express writes both at once.
+    const design = Boolean(t0.specApproved);
+    const ask = design ? P.designPrompt(t0, change, this.meta()) : P.planPrompt(t0, change, this.meta());
     const r = await this.claude({
-        role: 'architect',
+      role: 'architect',
       ticket: id,
       cwd: root,
       ...(resume ? { resume: t0.sessions!.intake } : { sessionId: t0.sessions!.intake }),
-      prompt: resume
-        ? P.planPrompt(t0, change, this.meta())
-        : `${P.intakePrompt(this.meta(), listDecisions(this.bp), t0, this.ctx())}\n\n${P.planPrompt(t0, change, this.meta())}`,
+      prompt: resume ? ask : `${P.intakePrompt(this.meta(), listDecisions(this.bp), t0, this.ctx())}\n\n${ask}`,
       allowedTools: READ_ONLY,
-      schema: P.PLAN_SCHEMA,
+      schema: design ? P.DESIGN_SCHEMA : P.PLAN_SCHEMA,
       timeoutMs: 10 * 60_000,
       addDirs: attachmentDirs(t0),
       onTool: this.watcher(id, 'architect', root),
     });
     const out = r.structured as {
-      story: string;
-      criteria: { given: string; when: string; then: string }[];
+      story?: string;
+      criteria?: { given: string; when: string; then: string }[];
       decision?: { title: string; options: { name: string; note: string; chosen: boolean }[]; why: string; clientCheck?: string };
       steps: string[];
       tests: number;
       screens: number;
-      releaseNote: string;
+      releaseNote?: string;
       commands?: ProjectCommands;
       repo?: string;
     };
@@ -594,22 +638,24 @@ export class LiveSquad {
     }
     this.update(id, (t) => {
       if (repo) t.repo = repo;
-      t.story = out.story;
-      t.criteria = out.criteria;
+      if (!design) {
+        t.story = out.story;
+        t.criteria = out.criteria;
+        t.releaseNote = out.releaseNote;
+      }
       if (out.decision) t.decision = { ...out.decision };
       else delete t.decision;
       t.steps = out.steps.map((s) => ({ title: s, status: 'todo' }));
       t.work = { steps: out.steps.length, tests: Math.max(0, out.tests), screens: Math.max(0, out.screens) };
-      t.releaseNote = out.releaseNote;
-      addActivity(t, 'spec', change ? `Updated the plan: ${change}` : 'Wrote the plan');
+      addActivity(t, design ? 'architect' : 'spec', change ? `Updated the ${design ? 'design' : 'plan'}: ${change}` : design ? 'Wrote the design' : 'Wrote the plan');
       if (t.track === 'express' && !change) {
         t.status = 'Express track: approving the plan';
         scheduleSquad(t, 'express-approve', 0.2, 1);
         return;
       }
       t.live = false;
-      t.status = 'Plan ready for you';
-      t.waiting = { kind: 'plan', summary: 'The plan is ready for your approval' };
+      t.status = design ? 'Design ready for you' : 'Plan ready for you';
+      t.waiting = { kind: 'plan', summary: design ? 'The design is ready: is this how to build it?' : 'The plan is ready for your approval' };
       t.squad = null;
     });
   }

@@ -83,6 +83,27 @@ export const PLAN_SCHEMA = {
   required: ['story', 'criteria', 'steps', 'tests', 'screens', 'releaseNote'],
 };
 
+const CRITERIA = {
+  type: 'array',
+  minItems: 1,
+  maxItems: 6,
+  items: { type: 'object', properties: { given: STR, when: STR, then: STR }, required: ['given', 'when', 'then'] },
+};
+
+/** Full track, step one: the what. The person approves it before any design. */
+export const SPEC_SCHEMA = {
+  type: 'object',
+  properties: { story: STR, criteria: CRITERIA, releaseNote: STR },
+  required: ['story', 'criteria', 'releaseNote'],
+};
+
+/** Full track, step two: the how, written from the approved spec. */
+export const DESIGN_SCHEMA = {
+  type: 'object',
+  properties: Object.fromEntries(Object.entries(PLAN_SCHEMA.properties).filter(([k]) => !['story', 'criteria', 'releaseNote'].includes(k))),
+  required: ['steps', 'tests', 'screens'],
+};
+
 /** Filled only when the agent must stop and ask the person. */
 const QUESTION = {
   type: 'object',
@@ -272,6 +293,42 @@ export function planPrompt(t: Ticket, change?: string, meta?: BoardMeta): string
 - steps: 3 to 7 small steps in order, one sentence each. The last step writes the tests.
 - tests: how many tests you expect to add. screens: how many "done when" can be shown in a screenshot (0 without a UI).
 - releaseNote: one line for release notes, like "**Dark mode.** Switch the dashboard to dark."
+- commands: only if the project has no way yet to set up, test, build or start it, or this ticket changes that.
+  For a new project, choose simple, common tools and give every command, including start and url.${repo}
+${PLAIN}`;
+}
+
+export function specPrompt(t: Ticket, change?: string): string {
+  const head = change
+    ? `The person read your spec and asked for this change: "${change}". Write the whole spec again with the change.`
+    : `The person answered your questions:\n${answersText(t)}\n\nNow write the spec, as the Analyst: what to build and how we know it is done. Not how to build it; the Architect designs that next, after the person approves this.`;
+  return `${head}
+
+- story: "As a <who>, I want <what>, so <why>."
+- criteria: 2 to 5 "done when" checks in Given / When / Then form. Each must be testable, in the person's words.
+- releaseNote: one line for release notes, like "**Dark mode.** Switch the dashboard to dark."
+${PLAIN}`;
+}
+
+export function designPrompt(t: Ticket, change?: string, meta?: BoardMeta): string {
+  const repo = meta?.repos?.length
+    ? `\n- repo: the folder of the ONE code repo this ticket changes, exactly as written in the list (${meta.repos.map((r) => r.path).join(', ')}).`
+    : '';
+  const head = change
+    ? `The person read your design and asked for this change: "${change}". Write the whole design again with the change.`
+    : 'The person approved the spec below. Now, as the Architect, design how to build it. Read the code you need first.';
+  return `${head}
+
+Approved spec (do not change it):
+Story: ${t.story}
+Done when:
+${doneWhen(t)}
+
+- decision: only if this ticket makes a technical choice later tickets must follow. Give 2 options you considered,
+  mark the chosen one, and say why in plain words tied to the spec. If the client forces a technology,
+  check it against the business needs and write the result in clientCheck ("no conflict" or the conflict).
+- steps: 3 to 7 small steps in order, one sentence each. The last step writes the tests.
+- tests: how many tests you expect to add. screens: how many "done when" can be shown in a screenshot (0 without a UI).
 - commands: only if the project has no way yet to set up, test, build or start it, or this ticket changes that.
   For a new project, choose simple, common tools and give every command, including start and url.${repo}
 ${PLAIN}`;

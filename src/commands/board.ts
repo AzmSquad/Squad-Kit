@@ -90,6 +90,7 @@ function nextCommand(t: Ticket): string {
   switch (t.waiting?.kind) {
     case 'questions':
       return `squad answer ${t.id}`;
+    case 'spec':
     case 'plan':
       return `squad show ${t.id}   then   squad approve ${t.id}`;
     case 'proof':
@@ -288,10 +289,16 @@ async function waitForReply(bp: BoardPaths, ticketId: string, qid: string): Prom
 
 export async function runApprove(ticketId: string): Promise<void> {
   const bp = board();
+  const was = requireTicket(bp, ticketId).waiting?.kind;
   const t = approve(bp, ticketId);
-  if (t.stage === 'implement') {
+  if (was === 'spec') {
+    ui.success('Spec approved. The Architect is designing how to build it; you approve that next.');
+    ui.info(`Follow it live: squad watch ${t.id}`);
+  } else if (t.stage === 'implement') {
     ui.success(`Plan approved${t.decision?.adr ? `. Decision saved as ${t.decision.adr}` : ''}. The Builder started.`);
     ui.info(`Follow it live: squad watch ${t.id}`);
+  } else if (t.waiting?.kind === 'stuck') {
+    ui.warning(`${t.id} is saved, but it clashes with newer changes. Run: squad decide ${t.id}`);
   } else {
     ui.success(`Proof accepted. ${t.id} is ready for ${t.release}.`);
     ui.info('Release it when you are ready: squad release');
@@ -300,9 +307,18 @@ export async function runApprove(ticketId: string): Promise<void> {
 
 export async function runChange(ticketId: string, words: string[]): Promise<void> {
   const bp = board();
+  const was = requireTicket(bp, ticketId).waiting?.kind;
   const text = words.join(' ') || (await input({ message: 'What should change?' }));
   const t = requestChange(bp, ticketId, text);
-  ui.success(t.stage === 'implement' ? 'Sent back to the Builder with your note.' : 'Sent to the Spec writer to update the plan.');
+  ui.success(
+    was === 'spec'
+      ? 'Sent to the Analyst to update the spec.'
+      : t.stage === 'implement'
+        ? 'Sent back to the Builder with your note.'
+        : t.specApproved
+          ? 'Sent to the Architect to update the design.'
+          : 'Sent to the Spec writer to update the plan.',
+  );
 }
 
 export async function runReply(ticketId: string, words: string[]): Promise<void> {

@@ -565,3 +565,11 @@ ul.ticketnotes .grow, .addnote .grow { flex: 1; }
 .waynote { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13.5px; background: var(--surface); color: var(--text); resize: vertical; }
 .pill.skip { background: var(--you-soft); color: var(--you-ink); }
 .note.override { font-size: 12.5px; margin: 8px 0 0; }
+
+/* Spec, then design: two approvals */
+.twostep { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px; font-size: 12.5px; color: var(--muted); }
+.twostep > span:not(.bar) { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--line-strong); font-weight: 600; }
+.twostep > span.on { background: var(--you-soft); color: var(--you-ink); box-shadow: inset 0 0 0 1px var(--you-line); }
+.twostep > span.done { background: var(--accent-soft); color: var(--accent); box-shadow: none; }
+.twostep .bar { width: 22px; height: 1px; background: var(--line-strong); }
+.twostep p { flex-basis: 100%; margin: 4px 0 0; font-size: 13px; }
