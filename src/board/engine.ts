@@ -5,12 +5,14 @@ import {
   listTickets,
   now,
   readMeta,
+  readTicket,
   updateTicket,
   writeDecision,
   writeMeta,
   type BoardPaths,
 } from './store.js';
 import { scheduleSquad } from './schedule.js';
+import { approveExpress } from './actions.js';
 import { AMBIENT, scriptFor } from './scripts.js';
 import type { BoardMeta, Question, Ticket } from './types.js';
 
@@ -69,6 +71,10 @@ function reply(bp: BoardPaths, id: string, qid: string): void {
 
 function advance(bp: BoardPaths, id: string, meta: BoardMeta): void {
   const speed = meta.speed;
+  if (readTicket(bp, id)?.squad?.phase === 'express-approve') {
+    approveExpress(bp, id);
+    return;
+  }
   updateTicket(bp, id, (t) => {
     const state = t.squad;
     if (!state) return;
@@ -77,6 +83,14 @@ function advance(bp: BoardPaths, id: string, meta: BoardMeta): void {
     switch (state.phase) {
       case 'analyst-read': {
         const line = script.analystLines[i];
+        if (t.track === 'express') {
+          t.questions = [];
+          t.stage = 'specs';
+          t.status = 'Spec writer is writing the plan';
+          addActivity(t, 'squad', 'Express track: no questions, straight to the plan');
+          scheduleSquad(t, 'plan-write', 1.5, speed, 0);
+          return;
+        }
         if (line) {
           t.stage = 'tickets';
           t.live = true;
@@ -118,6 +132,12 @@ function advance(bp: BoardPaths, id: string, meta: BoardMeta): void {
         t.steps = script.steps.map((s) => ({ title: s.title, status: 'todo' }));
         t.work = { steps: script.steps.length, tests: Math.round(script.tests * 0.43), screens: script.proof.length };
         t.releaseNote = script.releaseNote(t);
+        if (t.track === 'express' && state.phase === 'plan-write') {
+          addActivity(t, 'spec', 'Wrote the plan');
+          t.status = 'Express track: approving the plan';
+          scheduleSquad(t, 'express-approve', 1, speed, 0);
+          return;
+        }
         t.live = false;
         t.status = 'Plan ready for you';
         t.waiting = { kind: 'plan', summary: 'The plan is ready for your approval' };
@@ -151,6 +171,17 @@ function advance(bp: BoardPaths, id: string, meta: BoardMeta): void {
         t.stage = 'test';
         t.status = `Running ${script.tests} checks`;
         scheduleSquad(t, 'test', 1.5, speed, 0);
+        return;
+      }
+      case 'answered-builder':
+      case 'answered-reviewer': {
+        const builder = state.phase === 'answered-builder';
+        addActivity(t, builder ? 'builder' : 'reviewer', `Carried on with your answer: ${t.agentQuestion?.answer ?? ''}`);
+        t.agentQuestion = undefined;
+        t.stage = builder ? 'test' : 'review';
+        t.status = builder ? `Running ${script.tests} checks` : 'Reviewer is reading the changes';
+        if (builder) scheduleSquad(t, 'test', 1.5, speed, 0);
+        else scheduleSquad(t, 'review', 1.5, speed, 0);
         return;
       }
       case 'test': {

@@ -2,14 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { ArrowUp, Check, Code, Copy, Download, ExternalLink, GitPullRequest, MessageCircle, Send, Square, X } from 'lucide-react';
 import { assetUrl, ticketFileUrl } from '../api/client';
-import type { Question, Ticket } from '../api/types';
+import type { Question, Ticket, TicketNote } from '../api/types';
 import { useAct, useTicket } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { Cmd, Glyph, Modal, ROLE_NAME, Tracker, ago, clock, commandFor } from '../components/ui';
 import { ConversationTab } from '../components/Conversation';
+import { ChangesTab, OpenInEditor } from '../components/Changes';
 import { Lightbox, type Picture } from '../components/Lightbox';
 
-type Tab = 'now' | 'story' | 'plan' | 'activity' | 'conversation' | 'proof' | 'developer';
+type Tab = 'now' | 'story' | 'plan' | 'activity' | 'conversation' | 'proof' | 'changes' | 'developer';
 
 export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
   const ticket = useTicket(id);
@@ -64,6 +65,8 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
               <div className="sub">
                 <span>
                   Created by <b>{t.createdBy}</b> {ago(t.createdAt)}
+                  {' · '}
+                  <b>{t.track === 'express' ? 'Express' : 'Full'}</b> track
                 </span>
                 {t.repo && (
                   <span>
@@ -92,6 +95,7 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
                   ['activity', 'Activity'],
                   ['conversation', 'Conversation'],
                   ['proof', 'Proof'],
+                  ['changes', 'Changes'],
                 ] as [Tab, string][]
               ).map(([k, label]) => (
                 <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>
@@ -109,6 +113,7 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
             {tab === 'activity' && <ActivityTab t={t} />}
             {tab === 'conversation' && <ConversationTab t={t} />}
             {tab === 'proof' && <ProofTab t={t} />}
+            {tab === 'changes' && <ChangesTab t={t} />}
             {tab === 'developer' && <DeveloperTab t={t} />}
           </>
         )}
@@ -128,6 +133,8 @@ function NowPanel({ t }: { t: Ticket }) {
       return <ProofPanel t={t} />;
     case 'stuck':
       return <StuckPanel t={t} />;
+    case 'ask':
+      return <AskPanel t={t} />;
     default:
       return <WorkingPanel t={t} />;
   }
@@ -506,6 +513,69 @@ function ProofPanel({ t }: { t: Ticket }) {
   );
 }
 
+/* ── An agent asks mid-work ────────────────────────────── */
+
+const DECIDE_YOURSELF = 'Decide yourself: take the simplest choice that fits the plan, and say what you chose';
+
+/** The Builder or Reviewer stopped to ask. The answer goes back into the same conversation and the work carries on. */
+function AskPanel({ t }: { t: Ticket }) {
+  const act = useAct();
+  const q = t.agentQuestion;
+  const [pick, setPick] = useState<string | null>(null);
+  const [own, setOwn] = useState('');
+  if (!q) return <WorkingPanel t={t} />;
+  const who = q.from === 'builder' ? 'Builder' : 'Reviewer';
+  const answer = pick === '' ? own.trim() : pick;
+  const choices = [...q.options, DECIDE_YOURSELF];
+  return (
+    <>
+      <div className="db">
+        <div className="youbox">
+          <span className="ring">?</span>
+          <div>
+            <b>The {who} has a question</b>
+            <span>It stopped instead of guessing. Your answer goes back into the same conversation, and the work carries on.</span>
+          </div>
+        </div>
+        <div className="lbl">{who} asks</div>
+        <p className="stuckq">{q.text}</p>
+        {q.why && <p className="note" style={{ marginTop: -4 }}>Why it matters: {q.why}</p>}
+        <div className="opts2">
+          {choices.map((o) => (
+            <button key={o} className={`opt2 ${pick === o ? 'pick' : ''}`} onClick={() => setPick(o)}>
+              <b>
+                {o === DECIDE_YOURSELF ? 'Let it decide' : o}
+                {pick === o && (
+                  <span>
+                    <Check size={13} strokeWidth={2.5} /> Your pick
+                  </span>
+                )}
+              </b>
+              {o === DECIDE_YOURSELF ? 'It takes the simplest choice that fits the plan and tells you which.' : ''}
+            </button>
+          ))}
+          <button className={`opt2 ${pick === '' ? 'pick' : ''}`} onClick={() => setPick('')}>
+            <b>Write my own answer</b>
+          </button>
+        </div>
+        {pick === '' && <textarea className="input" rows={3} style={{ width: '100%', marginTop: 8 }} autoFocus value={own} placeholder="Your answer" onChange={(e) => setOwn(e.target.value)} />}
+        <RecentActivity t={t} />
+      </div>
+      <div className="df">
+        <button
+          className="btn pri"
+          disabled={!answer || act.isPending}
+          onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/reply`, body: { text: answer }, done: `Sent. The ${who} carries on.` })}
+        >
+          <Send size={15} /> Send answer
+        </button>
+        <span className="grow" />
+        <Cmd text={`squad reply ${t.id}${answer ? ` "${answer.length > 40 ? `${answer.slice(0, 40)}…` : answer}"` : ''}`} />
+      </div>
+    </>
+  );
+}
+
 /* ── Stuck ─────────────────────────────────────────────── */
 
 function StuckPanel({ t }: { t: Ticket }) {
@@ -713,12 +783,80 @@ function StoryTab({ t }: { t: Ticket }) {
       <BriefList head="Business rules" items={t.brief?.rules} />
       <BriefList head="Edge cases" items={t.brief?.edgeCases} />
       <Attachments t={t} />
+      <Notes t={t} />
       {t.story ? (
         <PlanBody t={{ ...t, decision: undefined, work: undefined }} />
       ) : (
         <p className="note" style={{ marginTop: 16 }}>The Analyst writes the user story after your answers.</p>
       )}
     </div>
+  );
+}
+
+const NOTE_KINDS = [
+  { kind: 'note', label: 'Note', head: 'Note', hint: 'Anything the squad should know' },
+  { kind: 'rule', label: 'Business rule', head: 'Rule', hint: 'For example: at most 3 bookings a day per person' },
+  { kind: 'criterion', label: 'Acceptance criterion', head: 'Done when', hint: 'The Tester must prove it, for example: the clerk sees an error on the 4th booking' },
+] as const;
+
+/** Notes the person adds at any time. Every agent on the ticket reads them; a running one gets them at its next step. */
+function Notes({ t }: { t: Ticket }) {
+  const act = useAct();
+  const [kind, setKind] = useState<TicketNote['kind']>('note');
+  const [text, setText] = useState('');
+  const notes = t.notes ?? [];
+  const open = t.stage !== 'done';
+  const pick = NOTE_KINDS.find((k) => k.kind === kind)!;
+  const add = () =>
+    act.mutate(
+      { path: `/api/v1/tickets/${t.id}/notes`, body: { text, kind }, done: t.live ? 'Added. The squad reads it at its next step.' : 'Added. Every agent on this ticket reads it.' },
+      { onSuccess: () => setText('') },
+    );
+  if (!open && !notes.length) return null;
+  return (
+    <>
+      <div className="lbl">Notes{notes.length ? ` · ${notes.length}` : ''}</div>
+      {notes.length > 0 && (
+        <ul className="ticketnotes">
+          {notes.map((n, i) => (
+            <li key={i}>
+              <span className={`pill ${n.kind === 'criterion' ? 'ok' : n.kind === 'rule' ? 'wait' : ''}`}>{NOTE_KINDS.find((k) => k.kind === n.kind)?.head}</span>
+              <span className="grow">{n.text}</span>
+              <span className="note">{n.by} · {ago(n.at)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {open && (
+        <div className="addnote">
+          <div className="seg" style={{ width: 'fit-content' }}>
+            {NOTE_KINDS.map((k) => (
+              <button key={k.kind} className={kind === k.kind ? 'on' : ''} onClick={() => setKind(k.kind)}>
+                {k.label}
+              </button>
+            ))}
+          </div>
+          <textarea
+            className="input"
+            rows={2}
+            value={text}
+            placeholder={pick.hint}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && text.trim()) add();
+            }}
+          />
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <button className="btn pri sm" disabled={!text.trim() || act.isPending} onClick={add}>
+              Add {pick.label.toLowerCase()}
+            </button>
+            <span className="note">Every agent on this ticket reads it{t.live ? ', the one working now from its next step' : ''}.</span>
+            <span className="grow" />
+            <Cmd text={`squad note ${t.id}${kind === 'note' ? '' : ` --${kind}`} "${text.trim() || '…'}"`} />
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -819,8 +957,9 @@ function DeveloperTab({ t }: { t: Ticket }) {
       </p>
       {t.worktree && (
         <>
-          <div className="lbl">Working copy</div>
+          <div className="lbl">The ticket's copy of the code</div>
           <p className="mono" style={{ fontSize: 12.5, overflowWrap: 'anywhere' }}>{t.worktree}</p>
+          <OpenInEditor t={t} />
         </>
       )}
       <div className="lbl">Files the squad touched</div>

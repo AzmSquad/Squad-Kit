@@ -29,7 +29,7 @@ import { loadSecrets } from '../core/secrets.js';
 import { clientFor, overlayTrackerEnv } from '../tracker/index.js';
 import { azureFor, type Azure } from '../engine/azure.js';
 import { mergeLocally, opensPullRequest, syncWiki } from '../engine/sync.js';
-import type { TrackerEvent } from './types.js';
+import type { TicketNote, Track, TrackerEvent } from './types.js';
 import { endProcessTree } from '../engine/watchdog.js';
 
 /** Every person-facing action lives here, so the board and the terminal do exactly the same thing. */
@@ -48,6 +48,7 @@ export interface NewTicketInput {
   ask?: string;
   priority?: Ticket['priority'];
   kind?: Ticket['kind'];
+  track?: Track;
   source?: Ticket['source'];
   criteria?: string[];
   rules?: string[];
@@ -99,6 +100,7 @@ export function createTicket(bp: BoardPaths, input: NewTicketInput): Ticket {
     title,
     ask: input.ask?.trim() || title,
     kind: input.kind ?? 'feature',
+    track: input.track === 'express' ? 'express' : 'full',
     source: input.source ?? { type: 'manual' },
     priority: input.priority ?? 'normal',
     stage: 'tickets',
@@ -114,6 +116,7 @@ export function createTicket(bp: BoardPaths, input: NewTicketInput): Ticket {
     ...(attachments.length ? { attachments } : {}),
   };
   addActivity(ticket, 'you', input.source?.type === 'azure' ? `Pulled ${input.source.ref} from Azure DevOps` : 'Created the ticket');
+  if (ticket.track === 'express') addActivity(ticket, 'you', 'Chose the Express track: no questions, the plan is approved on its own');
   if (attachments.length) addActivity(ticket, 'you', `Added ${attachments.length === 1 ? '1 file' : `${attachments.length} files`}`);
   scheduleSquad(ticket, 'analyst-read', 4, meta.speed);
   writeTicket(bp, ticket);
@@ -296,7 +299,14 @@ export function approve(bp: BoardPaths, id: string): Ticket {
   throw new BoardActionError(`${ticket.id} is not waiting for an approval right now.`);
 }
 
-function approvePlan(bp: BoardPaths, ticket: Ticket, speed: number): Ticket {
+/** Express track: the plan is approved on its own. You still see it; nothing waits for you. */
+export function approveExpress(bp: BoardPaths, id: string): Ticket {
+  const ticket = requireTicket(bp, id);
+  if (ticket.track !== 'express') throw new BoardActionError(`${ticket.id} is on the Full track.`);
+  return approvePlan(bp, { ...ticket, waiting: { kind: 'plan', summary: '' } }, readMeta(bp).speed, true);
+}
+
+function approvePlan(bp: BoardPaths, ticket: Ticket, speed: number, express = false): Ticket {
   const meta = readMeta(bp);
   let adr: string | undefined;
   if (ticket.decision && !ticket.decision.adr) {
@@ -309,7 +319,7 @@ function approvePlan(bp: BoardPaths, ticket: Ticket, speed: number): Ticket {
       options: ticket.decision.options.map((o) => o.name),
       chosen: chosen?.name ?? '',
       from: ticket.id,
-      approvedBy: meta.user.name,
+      approvedBy: express ? `${meta.user.name} (Express track)` : meta.user.name,
       date: now(),
       checkedBy: { kind: 'test', name: testNameFor(ticket), passing: false },
       tickets: [ticket.id],
@@ -323,7 +333,8 @@ function approvePlan(bp: BoardPaths, ticket: Ticket, speed: number): Ticket {
     t.progress = 0;
     t.status = `Step 1 of ${t.steps?.length ?? 1} with ${t.builder ?? 'the Builder'}`;
     t.gates = { checks: 'pending', review: 'pending', proof: 'pending' };
-    addActivity(t, 'you', adr ? `Approved the plan. Decision saved as ${adr}` : 'Approved the plan');
+    const approved = express ? 'Express track: approved the plan on its own' : 'Approved the plan';
+    addActivity(t, express ? 'squad' : 'you', adr ? `${approved}. Decision saved as ${adr}` : approved);
     scheduleSquad(t, 'build', 2, speed, 0);
     tellLater(t, meta.engine, { kind: 'planned' });
   });
@@ -369,6 +380,41 @@ function acceptProof(bp: BoardPaths, ticket: Ticket): Ticket {
     if (commit) addActivity(t, 'release', `Saved the change as commit ${commit} on ${t.branch}`);
     if (merged) addActivity(t, 'release', `Merged into ${merged.base}${merged.note ? `. ${merged.note}` : ''}`);
     addActivity(t, 'release', `Added to release ${release.version}`);
+  });
+}
+
+/** Answers a question the Builder or Reviewer asked mid-work. "Decide yourself" is always a way out. */
+export function answerAgent(bp: BoardPaths, id: string, text: string): Ticket {
+  const answer = text.trim();
+  if (!answer) throw new BoardActionError('Write your answer, or pick one of the choices.');
+  const meta = readMeta(bp);
+  return updateTicket(bp, id, (t) => {
+    const q = t.agentQuestion;
+    if (t.waiting?.kind !== 'ask' || !q) throw new BoardActionError(`${t.id} has no question waiting for you.`);
+    q.answer = answer;
+    t.waiting = null;
+    t.live = true;
+    t.status = q.from === 'builder' ? 'Builder is carrying on with your answer' : 'Reviewer is finishing with your answer';
+    addActivity(t, 'you', `Answered the ${q.from === 'builder' ? 'Builder' : 'Reviewer'}: ${answer}`);
+    scheduleSquad(t, `answered-${q.from}`, 1, meta.speed);
+  });
+}
+
+export const DECIDE_YOURSELF = 'Decide yourself: take the simplest choice that fits the plan, and say what you chose';
+
+const NOTE_LABEL = { note: 'a note', criterion: 'an acceptance criterion', rule: 'a business rule' } as const;
+
+/** A note, rule or acceptance criterion added at any time. Running agents get it at their next step. */
+export function addNote(bp: BoardPaths, id: string, input: { text: string; kind?: TicketNote['kind'] }): Ticket {
+  const text = input.text?.trim();
+  if (!text) throw new BoardActionError('Write the note first.');
+  const kind = input.kind && input.kind in NOTE_LABEL ? input.kind : 'note';
+  const meta = readMeta(bp);
+  return updateTicket(bp, id, (t) => {
+    if (t.stage === 'done') throw new BoardActionError(`${t.id} is released. Add a new ticket instead.`);
+    t.notes = [...(t.notes ?? []), { at: now(), by: meta.user.name, kind, text }];
+    addActivity(t, 'you', `Added ${NOTE_LABEL[kind]}: ${text}`);
+    tellLater(t, meta.engine, { kind: 'note', text, noteKind: kind });
   });
 }
 

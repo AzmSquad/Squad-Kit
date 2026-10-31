@@ -14,6 +14,7 @@ import {
   writeMeta,
   type BoardPaths,
 } from '../board/store.js';
+import { approveExpress } from '../board/actions.js';
 import { scheduleSquad } from '../board/schedule.js';
 import type { BoardMeta, ProjectCommands, Question, Role, Ticket } from '../board/types.js';
 import { describeTool, runClaude, type RunOptions, type RunResult } from './claude.js';
@@ -147,6 +148,7 @@ export class LiveSquad {
       .catch((err: Error) => {
         if (key === '__scan' || this.closing) return;
         if (readTicket(this.bp, key)?.stopRequested) return this.stopped(key, phase);
+        if (err instanceof WaitingForYou) return;
         this.fail(key, err.message, phase ?? 'analyst-read');
       })
       .finally(() => {
@@ -254,6 +256,7 @@ export class LiveSquad {
     const extra = agentInstructions(agent);
     const appendSystemPrompt = [opts.appendSystemPrompt, extra].filter(Boolean).join('\n\n') || undefined;
     const key = opts.ticket;
+    opts = this.withNewNotes(opts);
     const watch = key ? { onActivity: () => this.dog.beat(key), onSpawn: (pid: number) => this.dog.track(key, pid) } : {};
     const run = { ...opts, ...watch, ...(appendSystemPrompt ? { appendSystemPrompt } : {}), ...(agent.model ? { model: agent.model } : {}), ...(signal ? { signal } : {}) };
     let r: RunResult;
@@ -276,10 +279,27 @@ export class LiveSquad {
         for (const k of Object.keys(x.sessions ?? {}) as (keyof NonNullable<Ticket['sessions']>)[]) {
           if (x.sessions?.[k] === asked) x.sessions[k] = r.sessionId;
         }
+        if (x.notesSeen?.[asked] !== undefined) x.notesSeen[r.sessionId!] = x.notesSeen[asked];
       });
     }
     if (!r.ok) throw new Error(r.error ?? 'Claude Code did not finish.');
     return r;
+  }
+
+  /**
+   * Notes reach a running agent at a safe moment: the start of its next step. A fresh session reads every note in
+   * its ticket context; a session that goes on gets only the ones added since its last step.
+   */
+  private withNewNotes<T extends RunOptions & { ticket?: string }>(opts: T): T {
+    const session = opts.resume ?? opts.sessionId;
+    if (!opts.ticket || !session) return opts;
+    const t = readTicket(this.bp, opts.ticket);
+    const notes = t?.notes ?? [];
+    if (!t || !notes.length) return opts;
+    const seen = opts.resume ? (t.notesSeen?.[session] ?? 0) : notes.length;
+    this.update(t.id, (x) => (x.notesSeen = { ...x.notesSeen, [session]: notes.length }));
+    const fresh = notes.slice(seen);
+    return fresh.length ? { ...opts, prompt: `${opts.prompt}\n${P.notesText(fresh, true)}` } : opts;
   }
 
   /** Something went wrong: stop and ask the person, with a way to try again. */
@@ -389,11 +409,18 @@ export class LiveSquad {
         return this.plan(id);
       case 'plan-rewrite':
         return this.plan(id, readTicket(this.bp, id)?.changeRequest);
+      case 'express-approve':
+        approveExpress(this.bp, id);
+        return;
       case 'build':
       case 'unstick':
         return this.build(id);
       case 'fix':
         return this.fixFromPerson(id);
+      case 'answered-builder':
+        return this.builderAnswered(id);
+      case 'answered-reviewer':
+        return this.review(id, true);
       case 'test':
         return this.checks(id);
       case 'review':
@@ -436,6 +463,17 @@ export class LiveSquad {
     const root = projectRoot(this.bp);
     const meta = this.meta();
     await this.hearNotes(id);
+    if (readTicket(this.bp, id)?.track === 'express') {
+      this.update(id, (t) => {
+        t.questions = [];
+        t.stage = 'specs';
+        t.live = true;
+        t.status = 'Spec writer is writing the plan';
+        addActivity(t, 'squad', 'Express track: no questions, straight to the plan');
+        scheduleSquad(t, 'plan-write', 0.2, 1);
+      });
+      return;
+    }
     const t0 = this.update(id, (t) => {
       t.stage = 'tickets';
       t.live = true;
@@ -565,11 +603,16 @@ export class LiveSquad {
       t.steps = out.steps.map((s) => ({ title: s, status: 'todo' }));
       t.work = { steps: out.steps.length, tests: Math.max(0, out.tests), screens: Math.max(0, out.screens) };
       t.releaseNote = out.releaseNote;
+      addActivity(t, 'spec', change ? `Updated the plan: ${change}` : 'Wrote the plan');
+      if (t.track === 'express' && !change) {
+        t.status = 'Express track: approving the plan';
+        scheduleSquad(t, 'express-approve', 0.2, 1);
+        return;
+      }
       t.live = false;
       t.status = 'Plan ready for you';
       t.waiting = { kind: 'plan', summary: 'The plan is ready for your approval' };
       t.squad = null;
-      addActivity(t, 'spec', change ? `Updated the plan: ${change}` : 'Wrote the plan');
     });
   }
 
@@ -634,7 +677,7 @@ export class LiveSquad {
     const cwd = t.worktree!;
     const started = Date.now();
     let current = -1;
-    await this.claude({
+    const r = await this.claude({
         role: 'builder',
       ticket: id,
       cwd,
@@ -676,6 +719,47 @@ export class LiveSquad {
         if (doing) doing.live = line;
       }),
     });
+    this.askIfNeeded(id, 'builder', (r.structured as { question?: AgentAsk } | undefined)?.question);
+  }
+
+  /** The person answered the Builder: the same conversation carries on, then the checks run as after any build. */
+  private async builderAnswered(id: string): Promise<void> {
+    const t = await this.workspace(id);
+    this.update(id, (x) => {
+      x.stage = 'implement';
+      x.live = true;
+    });
+    await this.runBuilder(id, P.answerPrompt(t.agentQuestion ?? { text: '' }, 'builder'), true);
+    this.update(id, (x) => {
+      for (const s of x.steps ?? []) {
+        s.status = 'done';
+        s.live = undefined;
+      }
+      x.progress = 100;
+      x.agentQuestion = undefined;
+      addActivity(x, 'builder', 'Carried on with your answer and finished');
+      x.stage = 'test';
+      x.status = 'Running the project checks';
+      scheduleSquad(x, 'test', 0.2, 1);
+    });
+  }
+
+  /**
+   * An agent filled "question" in its answer: pause the ticket in Waiting for you. The answer goes back into the same
+   * session. Throws WaitingForYou so the step stops here without counting as a failure.
+   */
+  private askIfNeeded(id: string, from: 'builder' | 'reviewer', q: AgentAsk | undefined): void {
+    if (!q?.text?.trim()) return;
+    const who = from === 'builder' ? 'Builder' : 'Reviewer';
+    this.update(id, (x) => {
+      x.agentQuestion = { from, text: q.text.trim(), options: (q.options ?? []).filter((o) => o.trim()).slice(0, 4), ...(q.why ? { why: q.why } : {}), at: now() };
+      x.live = false;
+      x.squad = null;
+      x.status = `${who} has a question for you`;
+      x.waiting = { kind: 'ask', summary: `The ${who} needs an answer to carry on` };
+      addActivity(x, from, `Asked you: ${q.text.trim()}`);
+    });
+    throw new WaitingForYou();
   }
 
   private async fixFromPerson(id: string): Promise<void> {
@@ -774,29 +858,33 @@ export class LiveSquad {
     });
   }
 
-  private async review(id: string): Promise<void> {
+  private async review(id: string, answered = false): Promise<void> {
     const meta = this.meta();
     const t0 = this.update(id, (x) => {
       x.stage = 'review';
       x.live = true;
+      if (answered && x.sessions?.review) return;
       x.reviewRound = (x.reviewRound ?? 0) + 1;
       x.sessions = { ...x.sessions, review: x.reviewRound === 1 || !x.sessions?.review ? randomUUID() : x.sessions.review };
       addActivity(x, 'reviewer', `Reading the changes (round ${x.reviewRound} of ${MAX_REVIEW_ROUNDS})`);
     });
     const round = t0.reviewRound!;
+    const goOn = answered && Boolean(t0.sessions?.review);
     const r = await this.claude({
         role: 'reviewer',
       ticket: id,
       cwd: t0.worktree!,
-      ...(round > 1 ? { resume: t0.sessions!.review } : { sessionId: t0.sessions!.review }),
-      prompt: P.reviewPrompt(meta, listDecisions(this.bp), t0, round, this.ctx(t0)),
+      ...(round > 1 || goOn ? { resume: t0.sessions!.review } : { sessionId: t0.sessions!.review }),
+      prompt: goOn ? P.answerPrompt(t0.agentQuestion ?? { text: '' }, 'reviewer') : P.reviewPrompt(meta, listDecisions(this.bp), t0, round, this.ctx(t0)),
       addDirs: this.extraDirs(t0),
       allowedTools: [...READ_ONLY, 'Bash(git diff:*)', 'Bash(git status:*)', 'Bash(git log:*)', 'Bash(git show:*)'],
       schema: P.REVIEW_SCHEMA,
       timeoutMs: 15 * 60_000,
       onTool: this.watcher(id, 'reviewer', t0.worktree!),
     });
-    const out = r.structured as { approved: boolean; summary: string; comments: string[] };
+    const out = r.structured as { approved: boolean; summary: string; comments: string[]; question?: AgentAsk };
+    this.askIfNeeded(id, 'reviewer', out.question);
+    if (goOn) this.update(id, (x) => (x.agentQuestion = undefined));
     if (out.approved || round >= MAX_REVIEW_ROUNDS) {
       this.update(id, (x) => {
         x.gates = { ...(x.gates ?? { checks: 'pass', proof: 'pending' }), review: 'pass', reviewBy: 'a second Claude session' } as Ticket['gates'];
@@ -927,4 +1015,17 @@ function clean(c: ProjectCommands): ProjectCommands {
 
 function attachmentDirs(t: Ticket): string[] {
   return [...new Set((t.attachments ?? []).map((a) => path.dirname(a)))];
+}
+
+/** Thrown when a step pauses to ask the person. The ticket already shows the question; nothing failed. */
+class WaitingForYou extends Error {
+  constructor() {
+    super('Waiting for your answer');
+  }
+}
+
+interface AgentAsk {
+  text: string;
+  options?: string[];
+  why?: string;
 }

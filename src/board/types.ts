@@ -16,7 +16,7 @@ export type Role = 'analyst' | 'architect' | 'spec' | 'builder' | 'tester' | 're
 /** Who wrote an activity line or a thread message. */
 export type Actor = Role | 'you' | 'squad';
 
-export type WaitingKind = 'questions' | 'plan' | 'proof' | 'stuck' | 'release';
+export type WaitingKind = 'questions' | 'plan' | 'proof' | 'stuck' | 'release' | 'ask';
 
 export interface Waiting {
   kind: WaitingKind;
@@ -118,6 +118,28 @@ export interface TicketSessions {
   tester?: string;
 }
 
+/** Something the person added to a ticket at any time. Every agent on the ticket reads all of them. */
+export interface TicketNote {
+  at: string;
+  by: string;
+  /** A criterion joins the "done when" list, so the Tester must prove it. */
+  kind: 'note' | 'criterion' | 'rule';
+  text: string;
+}
+
+export type Track = 'full' | 'express';
+
+export interface AgentQuestion {
+  from: 'builder' | 'reviewer';
+  text: string;
+  /** What the agent thinks the choices are. The person can also write their own answer. */
+  options: string[];
+  /** Why it matters: what goes wrong with a wrong guess. */
+  why?: string;
+  at: string;
+  answer?: string;
+}
+
 export interface TicketBrief {
   criteria: string[];
   rules: string[];
@@ -189,12 +211,23 @@ export interface Ticket {
   quietSnoozedUntil?: string;
   /** Updates still to send to the tracker; the live squad sends them, so terminal commands never wait on Azure. */
   trackerQueue?: TrackerEvent[];
+  notes?: TicketNote[];
+  /**
+   * Full runs every step. Express (a typo, an urgent small bug) skips the questions and the plan approval, never the
+   * build, checks, review or your Looks right. Missing means Full.
+   */
+  track?: Track;
+  /** A question from an agent in the middle of its work. The ticket waits; the answer goes back into the same session. */
+  agentQuestion?: AgentQuestion;
+  /** How many notes each agent session has been given, so a running agent gets new ones at its next step. */
+  notesSeen?: Record<string, number>;
 }
 
 export type TrackerEvent =
   | { kind: 'started' }
   | { kind: 'answered' }
   | { kind: 'planned' }
+  | { kind: 'note'; text: string; noteKind: TicketNote['kind'] }
   | { kind: 'released'; version: string }
   | { kind: 'file-bug' };
 

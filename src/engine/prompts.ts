@@ -1,4 +1,4 @@
-import type { BoardMeta, Decision, Question, RepoInfo, Ticket } from '../board/types.js';
+import type { BoardMeta, Decision, Question, RepoInfo, Ticket, TicketNote } from '../board/types.js';
 import { reposOf } from './repos.js';
 
 /** Role briefs for the live squad, and the JSON shapes each role must answer in. */
@@ -83,15 +83,22 @@ export const PLAN_SCHEMA = {
   required: ['story', 'criteria', 'steps', 'tests', 'screens', 'releaseNote'],
 };
 
+/** Filled only when the agent must stop and ask the person. */
+const QUESTION = {
+  type: 'object',
+  properties: { text: STR, options: { type: 'array', maxItems: 4, items: STR }, why: STR },
+  required: ['text'],
+};
+
 export const BUILD_SCHEMA = {
   type: 'object',
-  properties: { summary: STR, testsAdded: { type: 'integer' }, notes: STR },
+  properties: { summary: STR, testsAdded: { type: 'integer' }, notes: STR, question: QUESTION },
   required: ['summary'],
 };
 
 export const REVIEW_SCHEMA = {
   type: 'object',
-  properties: { approved: { type: 'boolean' }, summary: STR, comments: { type: 'array', items: STR } },
+  properties: { approved: { type: 'boolean' }, summary: STR, comments: { type: 'array', items: STR }, question: QUESTION },
   required: ['approved', 'summary', 'comments'],
 };
 
@@ -113,13 +120,14 @@ export const DRAFT_SCHEMA = {
     title: STR,
     ask: STR,
     kind: { type: 'string', enum: ['feature', 'bug'] },
+    track: { type: 'string', enum: ['full', 'express'] },
     priority: { type: 'string', enum: ['high', 'normal', 'low'] },
     criteria: { type: 'array', maxItems: 8, items: STR },
     rules: { type: 'array', maxItems: 8, items: STR },
     edgeCases: { type: 'array', maxItems: 8, items: STR },
     gaps: { type: 'array', maxItems: 5, items: STR },
   },
-  required: ['title', 'ask', 'kind', 'priority', 'criteria', 'rules', 'edgeCases', 'gaps'],
+  required: ['title', 'ask', 'kind', 'track', 'priority', 'criteria', 'rules', 'edgeCases', 'gaps'],
 };
 
 const PLAIN = 'Write for a project manager who may not be a developer: plain words, short sentences, no jargon.';
@@ -167,7 +175,25 @@ function ticketContext(t: Ticket): string {
       list('Business rules the person wrote (follow every one)', t.brief.rules) +
       list('Edge cases the person wrote (handle every one)', t.brief.edgeCases)
     : '';
-  return `Ticket ${t.id}: ${t.title}\n${t.kind === 'bug' ? 'This is a bug report.' : 'This is a feature request.'}\nWhat was asked:\n${t.ask}${brief}${files}`;
+  return `Ticket ${t.id}: ${t.title}\n${t.kind === 'bug' ? 'This is a bug report.' : 'This is a feature request.'}\nWhat was asked:\n${t.ask}${brief}${files}${notesText(t.notes ?? [])}`;
+}
+
+const NOTE_HEAD = { note: 'Note', criterion: 'Acceptance criterion (must be done and proven)', rule: 'Business rule (follow it)' } as const;
+
+/** Notes the person added to the ticket. They outrank the plan where they disagree. */
+export function notesText(notes: TicketNote[], fresh = false): string {
+  if (!notes.length) return '';
+  const head = fresh
+    ? 'The person added these notes to the ticket since your last step. Take them into account now; they outrank the plan where they disagree'
+    : 'Notes the person added to the ticket (they outrank the plan where they disagree)';
+  return `\n${head}:\n${notes.map((n) => `- ${NOTE_HEAD[n.kind]}: ${n.text}`).join('\n')}`;
+}
+
+/** The plan's "done when" list, plus every acceptance criterion the person added later as a note. */
+function doneWhen(t: Ticket): string {
+  const plan = (t.criteria ?? []).map((c) => `Given ${c.given}, when ${c.when}, then ${c.then}.`);
+  const added = (t.notes ?? []).filter((n) => n.kind === 'criterion').map((n) => `${n.text} (added by the person)`);
+  return [...plan, ...added].map((c, i) => `${i + 1}. ${c}`).join('\n');
 }
 
 function answersText(t: Ticket): string {
@@ -233,7 +259,9 @@ export function planPrompt(t: Ticket, change?: string, meta?: BoardMeta): string
     : '';
   const head = change
     ? `The person read your plan and asked for this change: "${change}". Write the whole plan again with the change.`
-    : `The person answered your questions:\n${answersText(t)}\n\nNow write the plan, as the Architect and the Spec writer.`;
+    : t.track === 'express'
+      ? 'This ticket is on the Express track: a small change the person wants done fast, with no questions. Write a short plan, as the Architect and the Spec writer. Where something is unclear, take the simplest choice that fits and say it in the story. Keep it small: few steps, no new technical decisions unless needed.'
+      : `The person answered your questions:\n${answersText(t)}\n\nNow write the plan, as the Architect and the Spec writer.`;
   return `${head}
 
 - story: "As a <who>, I want <what>, so <why>."
@@ -251,7 +279,7 @@ ${PLAIN}`;
 
 export function buildPrompt(meta: BoardMeta, decisions: Decision[], t: Ticket, ctx?: PromptContext): string {
   const steps = (t.steps ?? []).map((s, i) => `${i + 1}. ${s.title}`).join('\n');
-  const criteria = (t.criteria ?? []).map((c, i) => `${i + 1}. Given ${c.given}, when ${c.when}, then ${c.then}.`).join('\n');
+  const criteria = doneWhen(t);
   const decision = t.decision ? `\nDecision for this ticket: ${t.decision.title}. Why: ${t.decision.why}` : '';
   return `You are the Builder of a software squad. Build the approved plan below in this folder.
 
@@ -272,7 +300,18 @@ Rules:
 - Write tests that check every "done when", and run the tests before you finish.
 - Never commit, push, switch branches, or change files outside this folder.
 - Wait for every command to finish (installs too). Never leave anything running in the background; this step ends when you answer.
-- If the plan does not cover a choice, take the simplest one and say so in notes.`;
+- If the plan does not cover a small choice, take the simplest one and say so in notes.
+${ASK_RULE}`;
+}
+
+const ASK_RULE = `- Ask the person only when something important is unclear and a wrong guess would waste the work or break a business rule:
+  then stop, fill "question" (one plain sentence, 2 to 4 short options, and why it matters), and leave the rest for later.
+  They answer in this same conversation. Never ask about code style or small choices.`;
+
+/** The person's answer to a question an agent asked mid-work. It goes back into the same conversation. */
+export function answerPrompt(q: { text: string; answer?: string }, role: 'builder' | 'reviewer'): string {
+  const next = role === 'builder' ? 'Carry on with the work from where you stopped, then run the tests.' : 'Finish your review with this in mind.';
+  return `You asked: "${q.text}"\nThe person answered: "${q.answer ?? ''}"\n\n${next}`;
 }
 
 export function fixChecksPrompt(failures: { name: string; command: string; output: string }[]): string {
@@ -293,7 +332,7 @@ export function changeFixPrompt(note: string): string {
 }
 
 export function reviewPrompt(meta: BoardMeta, decisions: Decision[], t: Ticket, round: number, ctx?: PromptContext): string {
-  const criteria = (t.criteria ?? []).map((c, i) => `${i + 1}. Given ${c.given}, when ${c.when}, then ${c.then}.`).join('\n');
+  const criteria = doneWhen(t);
   if (round > 1) {
     return `The Builder made changes after your review. Look again at what changed since commit ${t.baseCommit} (run "git status" and "git diff ${t.baseCommit}", and read new files). Approve if your comments are handled.`;
   }
@@ -309,11 +348,12 @@ ${criteria}
 
 Look at everything that changed since commit ${t.baseCommit}: run "git status" and "git diff ${t.baseCommit}", and read new files.
 Check: does it do every "done when"? Does it follow the saved decisions? Real bugs, security holes, missing tests?
-Approve unless there is a real problem. Small style notes do not block. Each comment is one concrete sentence.`;
+Approve unless there is a real problem. Small style notes do not block. Each comment is one concrete sentence.
+${ASK_RULE}`;
 }
 
 export function proofPrompt(meta: BoardMeta, t: Ticket, outDir: string, when: 'before' | 'after', ctx?: PromptContext, appRunning = false): string {
-  const criteria = (t.criteria ?? []).map((c, i) => `${i + 1}. Given ${c.given}, when ${c.when}, then ${c.then}.`).join('\n');
+  const criteria = doneWhen(t);
   const c = ctx?.repo?.commands ?? meta.commands ?? {};
   return `You are the Tester of a software squad. Take screenshots that show each "done when" below ${
     when === 'before' ? 'as the app is BEFORE the change (some may not exist yet; show the closest screen)' : 'working AFTER the change'
@@ -350,6 +390,7 @@ Produce:
 - title: a short name for the ticket, at most 8 words, like "Show hearing time in local time".
 - ask: who needs it and why, in one to three sentences.
 - kind: "bug" if something that worked is broken, else "feature".
+- track: "express" only for a tiny, clear change (a typo, a label, a small obvious bug) that needs no questions; else "full".
 - priority: "high" only if the text says it is urgent or blocks people, "low" if it is a nice-to-have, else "normal".
 - criteria: 2 to 6 acceptance criteria, each one testable sentence that starts with a person doing or seeing something.
 - rules: the business rules the text states or clearly implies (limits, who may do what, numbers). Empty if none.

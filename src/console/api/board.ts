@@ -14,6 +14,8 @@ import {
   releaseVersion,
   reportBug,
   requestChange,
+  addNote,
+  answerAgent,
   saveReleaseNotes,
   skipQuestions,
   startFromAzure,
@@ -36,6 +38,7 @@ import { AGENTS, ensureAgents, readAgent, roleForPhase, writeAgent, type AgentRo
 import { loadConfig, saveConfig } from '../../core/config.js';
 import { loadSecrets, mergeSecrets, saveSecrets } from '../../core/secrets.js';
 import { munsitKey } from '../../engine/media.js';
+import { installedEditors, openInEditor, ticketChanges } from '../../engine/changes.js';
 
 const DAY = 86_400_000;
 
@@ -239,6 +242,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
         ask: b.ask,
         priority: b.priority,
         kind: b.kind === 'bug' ? 'bug' : 'feature',
+        track: b.track === 'express' ? 'express' : 'full',
         criteria: b.criteria,
         rules: b.rules,
         edgeCases: b.edgeCases,
@@ -278,6 +282,26 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
   app.post('/api/v1/tickets/:id/change', async (c) => {
     const b = await body<{ text?: string }>(c);
     return act(c, () => requestChange(bp, c.req.param('id'), b.text ?? ''));
+  });
+
+  // Everything the ticket changed against main, read from its own copy.
+  app.get('/api/v1/tickets/:id/changes', (c) => act(c, () => ticketChanges(bp, c.req.param('id'))));
+
+  app.get('/api/v1/editors', (c) => c.json({ editors: installedEditors() }));
+
+  app.post('/api/v1/tickets/:id/open-editor', async (c) => {
+    const b = await body<{ editor?: string }>(c);
+    return act(c, () => openInEditor(bp, c.req.param('id'), b.editor));
+  });
+
+  app.post('/api/v1/tickets/:id/reply', async (c) => {
+    const b = await body<{ text?: string }>(c);
+    return act(c, () => answerAgent(bp, c.req.param('id'), b.text ?? ''));
+  });
+
+  app.post('/api/v1/tickets/:id/notes', async (c) => {
+    const b = await body<{ text?: string; kind?: 'note' | 'criterion' | 'rule' }>(c);
+    return act(c, () => addNote(bp, c.req.param('id'), { text: b.text ?? '', kind: b.kind }));
   });
 
   app.post('/api/v1/tickets/:id/decide', async (c) => {

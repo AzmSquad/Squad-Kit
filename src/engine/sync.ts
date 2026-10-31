@@ -69,6 +69,12 @@ export async function tellTracker(bp: BoardPaths, ticketId: string, event: Track
         note(bp, ticketId, `Posted the plan on AB#${wid}`);
         break;
       }
+      case 'note': {
+        const label = event.noteKind === 'criterion' ? 'Acceptance criterion added' : event.noteKind === 'rule' ? 'Business rule added' : 'Note';
+        await az.comment(wid, `<p><b>${label}</b> by ${escapeHtml(readMeta(bp).user.name)}</p><p>${escapeHtml(event.text)}</p>`);
+        note(bp, ticketId, `Posted the note on AB#${wid}`);
+        break;
+      }
       case 'released': {
         const state = await az.moveTo(wid, 'Completed');
         await az.addTag(wid, event.version);

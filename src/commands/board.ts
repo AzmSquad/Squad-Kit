@@ -17,6 +17,9 @@ import {
   releaseVersion,
   reportBug,
   requestChange,
+  addNote,
+  answerAgent,
+  DECIDE_YOURSELF,
   skipQuestions,
   stopTicket,
   endStuckCommand,
@@ -29,6 +32,7 @@ import { squadRunsElsewhere } from '../board/lock.js';
 import { seedDemoBoard } from '../board/demo.js';
 import { repoFor } from '../engine/repos.js';
 import { azureFor } from '../engine/azure.js';
+import { openInEditor, ticketChanges } from '../engine/changes.js';
 import { draftTicket } from '../engine/draft.js';
 import {
   boardExists,
@@ -301,6 +305,53 @@ export async function runChange(ticketId: string, words: string[]): Promise<void
   ui.success(t.stage === 'implement' ? 'Sent back to the Builder with your note.' : 'Sent to the Spec writer to update the plan.');
 }
 
+export async function runReply(ticketId: string, words: string[]): Promise<void> {
+  const bp = board();
+  const t = requireTicket(bp, ticketId);
+  const q = t.agentQuestion;
+  if (t.waiting?.kind !== 'ask' || !q) throw new Error(`${t.id} has no question waiting for you.`);
+  let text = words.join(' ');
+  if (!text) {
+    out();
+    ui.info(`${q.from === 'builder' ? 'Builder' : 'Reviewer'} asks: ${q.text}`);
+    if (q.why) ui.info(`Why it matters: ${q.why}`);
+    const choice = await select({
+      message: 'Your answer',
+      choices: [...q.options.map((o) => ({ name: o, value: o })), { name: 'Let it decide', value: DECIDE_YOURSELF }, { name: 'Write my own', value: '' }],
+    });
+    text = choice || (await input({ message: 'Your answer' }));
+  }
+  answerAgent(bp, ticketId, text);
+  ui.success('Sent. The squad carries on with your answer.');
+}
+
+export async function runChanges(ticketId: string, opts: { full?: boolean }): Promise<void> {
+  const c = ticketChanges(board(), ticketId);
+  if (!c.files.length) {
+    ui.info(c.from === 'none' ? 'Nothing built yet, so there are no changes to show.' : 'No changes against main.');
+    return;
+  }
+  ui.info(`${c.files.length} files changed${c.from === 'branch' ? ` on ${c.branch}` : ''}:`);
+  for (const f of c.files) {
+    out(`  ${f.status.padEnd(8)} ${f.path}${f.binary ? '  (binary)' : `  +${f.added} -${f.removed}`}`);
+    if (opts.full && f.patch) out(f.patch.split('\n').map((l) => `    ${l}`).join('\n'));
+  }
+  if (!opts.full) ui.info(`Full diff: squad changes ${ticketId} --full`);
+}
+
+export async function runOpen(ticketId: string, opts: { editor?: string }): Promise<void> {
+  const r = openInEditor(board(), ticketId, opts.editor);
+  ui.success(`Opened ${r.folder} in ${r.editor}.`);
+}
+
+export async function runNote(ticketId: string, words: string[], opts: { criterion?: boolean; rule?: boolean }): Promise<void> {
+  const bp = board();
+  const text = words.join(' ') || (await input({ message: 'What should the squad know?' }));
+  const kind = opts.criterion ? 'criterion' : opts.rule ? 'rule' : 'note';
+  const t = addNote(bp, ticketId, { text, kind });
+  ui.success(`Added to ${t.id}. Every agent on it reads this${t.live ? ' from its next step' : ''}.`);
+}
+
 export async function runDecide(ticketId: string, choice?: string): Promise<void> {
   const bp = board();
   const t = requireTicket(bp, ticketId);
@@ -423,6 +474,8 @@ interface NewOptions {
   ask?: string;
   priority?: Ticket['priority'];
   bug?: boolean;
+  express?: boolean;
+  full?: boolean;
   criteria?: string[];
   rule?: string[];
   edge?: string[];
@@ -441,6 +494,7 @@ export async function runNew(words: string[], opts: NewOptions): Promise<void> {
     ask: opts.ask,
     priority: opts.priority,
     kind: opts.bug ? 'bug' : 'feature',
+    track: opts.express ? 'express' : 'full',
     criteria: opts.criteria,
     rules: opts.rule,
     edgeCases: opts.edge,
@@ -450,7 +504,7 @@ export async function runNew(words: string[], opts: NewOptions): Promise<void> {
     const d = await draftTicket(bp, { text: opts.from, files });
     const list = (head: string, items: string[]) => (items.length ? `\n${kleur.bold(head)}\n${items.map((x) => `  - ${x}`).join('\n')}` : '');
     console.log(
-      `\n${kleur.bold(d.title)} ${kleur.dim(`(${d.kind}, ${d.priority})`)}\n${d.ask}` +
+      `\n${kleur.bold(d.title)} ${kleur.dim(`(${d.kind}, ${d.priority}, ${d.track === 'express' ? 'Express' : 'Full'} track suggested)`)}\n${d.ask}` +
         list('Acceptance criteria', d.criteria) +
         list('Business rules', d.rules) +
         list('Edge cases', d.edgeCases) +
@@ -467,6 +521,7 @@ export async function runNew(words: string[], opts: NewOptions): Promise<void> {
       ask: fields.ask ?? d.ask,
       priority: fields.priority ?? d.priority,
       kind: opts.bug ? 'bug' : d.kind,
+      track: opts.express ? 'express' : opts.full ? 'full' : d.track,
       criteria: [...d.criteria, ...(fields.criteria ?? [])],
       rules: [...d.rules, ...(fields.rules ?? [])],
       edgeCases: [...d.edgeCases, ...(fields.edgeCases ?? [])],
@@ -474,7 +529,7 @@ export async function runNew(words: string[], opts: NewOptions): Promise<void> {
   }
   const title = fields.title || (await input({ message: 'Ticket title:' }));
   const t = createTicket(bp, { ...fields, title, files });
-  ui.success(`${t.id} created. The Analyst is reading it.`);
+  ui.success(t.track === 'express' ? `${t.id} created on the Express track. The squad goes straight to the plan.` : `${t.id} created. The Analyst is reading it.`);
 }
 
 export async function runUnstick(ticketId: string, opts: { keepWaiting?: boolean }): Promise<void> {

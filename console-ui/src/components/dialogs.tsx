@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Bug, Check, Copy, Download, Loader2, Paperclip, Plus, Rocket, Sparkles, X } from 'lucide-react';
-import type { Release, Ticket } from '../api/types';
+import type { Release, Ticket, Track } from '../api/types';
 import { api, send } from '../api/client';
 import { useAct } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
@@ -11,6 +11,7 @@ interface Draft {
   title: string;
   ask: string;
   kind: Ticket['kind'];
+  track?: Track;
   priority: Ticket['priority'];
   criteria: string[];
   rules: string[];
@@ -59,6 +60,8 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
   const [ask, setAsk] = useState('');
   const [kind, setKind] = useState<Ticket['kind']>('feature');
   const [priority, setPriority] = useState<Ticket['priority']>('normal');
+  const [track, setTrack] = useState<Track>('full');
+  const [suggested, setSuggested] = useState<Track | null>(null);
   const [criteria, setCriteria] = useState<string[]>([]);
   const [rules, setRules] = useState<string[]>([]);
   const [edgeCases, setEdgeCases] = useState<string[]>([]);
@@ -84,6 +87,10 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
       setAsk(d.ask);
       setKind(d.kind);
       setPriority(d.priority);
+      if (d.track) {
+        setTrack(d.track);
+        setSuggested(d.track);
+      }
       setCriteria(d.criteria);
       setRules(d.rules);
       setEdgeCases(d.edgeCases);
@@ -100,7 +107,7 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
     act.mutate(
       {
         path: '/api/v1/tickets',
-        body: { title, ask, kind, priority, criteria, rules, edgeCases, files: upload },
+        body: { title, ask, kind, track, priority, criteria, rules, edgeCases, files: upload },
       },
       {
         onSuccess: (t) => {
@@ -116,6 +123,7 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
       : [
           `squad new ${quote(title.trim() || 'Your title')}`,
           kind === 'bug' ? '--bug' : '',
+          track === 'express' ? '--express' : '',
           ...criteria.filter((x) => x.trim()).map((x) => `--criteria ${quote(x)}`),
           ...rules.filter((x) => x.trim()).map((x) => `--rule ${quote(x)}`),
           ...edgeCases.filter((x) => x.trim()).map((x) => `--edge ${quote(x)}`),
@@ -224,11 +232,34 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
               ))}
             </div>
           </div>
+          <div className="field">
+            <label>Track{suggested && <span className="note" style={{ marginLeft: 8, fontWeight: 400 }}>The Analyst suggests {suggested === 'express' ? 'Express' : 'Full'}</span>}</label>
+            <div className="tracks">
+              {TRACKS.map((tr) => (
+                <button key={tr.id} className={`opt2 ${track === tr.id ? 'pick' : ''}`} onClick={() => setTrack(tr.id)}>
+                  <b>
+                    {tr.name}
+                    {track === tr.id && (
+                      <span>
+                        <Check size={13} strokeWidth={2.5} /> Chosen
+                      </span>
+                    )}
+                  </b>
+                  {tr.note}
+                </button>
+              ))}
+            </div>
+          </div>
         </>
       )}
     </Modal>
   );
 }
+
+const TRACKS: { id: Track; name: string; note: string }[] = [
+  { id: 'full', name: 'Full', note: 'Every step. The Analyst asks questions and you approve the plan.' },
+  { id: 'express', name: 'Express', note: 'For a typo or a small urgent fix. No questions, the plan is approved on its own. Build, checks, review and your Looks right still run.' },
+];
 
 /** A list of short lines the person can add to, edit and remove. Enter on the last line adds a new one. */
 function ListField({ label, hint, items, onChange, add }: { label: string; hint: string; items: string[]; onChange(items: string[]): void; add: string }) {

@@ -175,6 +175,8 @@ export function commandFor(t: Ticket): string {
       return `squad answer ${t.id}`;
     case 'stuck':
       return `squad decide ${t.id}`;
+    case 'ask':
+      return `squad reply ${t.id}`;
     case 'plan':
     case 'proof':
       return `squad approve ${t.id}`;
@@ -193,6 +195,8 @@ export function actionLabel(t: Ticket): string {
       return 'Check proof';
     case 'stuck':
       return 'Decide';
+    case 'ask':
+      return 'Answer';
     default:
       return 'Open';
   }

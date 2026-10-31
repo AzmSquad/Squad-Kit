@@ -9,7 +9,7 @@ export type Role = 'analyst' | 'architect' | 'spec' | 'builder' | 'tester' | 're
 /** Who wrote an activity line or a thread message. */
 export type Actor = Role | 'you' | 'squad';
 
-export type WaitingKind = 'questions' | 'plan' | 'proof' | 'stuck' | 'release';
+export type WaitingKind = 'questions' | 'plan' | 'proof' | 'stuck' | 'release' | 'ask';
 
 export interface Waiting {
   kind: WaitingKind;
@@ -111,6 +111,15 @@ export interface TicketSessions {
   tester?: string;
 }
 
+export type Track = 'full' | 'express';
+
+export interface TicketNote {
+  at: string;
+  by: string;
+  kind: 'note' | 'criterion' | 'rule';
+  text: string;
+}
+
 export interface Ticket {
   id: string;
   title: string;
@@ -160,6 +169,9 @@ export interface Ticket {
   retryPhase?: string;
   attachments?: string[];
   brief?: { criteria: string[]; rules: string[]; edgeCases: string[] };
+  notes?: TicketNote[];
+  track?: Track;
+  agentQuestion?: { from: 'builder' | 'reviewer'; text: string; options: string[]; why?: string; at: string; answer?: string };
   /** In a multi-repo workspace: the code repo this ticket changes. */
   repo?: string;
   /** Set when the person presses Stop; the live squad stops the running step. */

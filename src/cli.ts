@@ -17,6 +17,10 @@ import {
   runBoard,
   runBug,
   runChange,
+  runNote,
+  runReply,
+  runChanges,
+  runOpen,
   runDecide,
   runDemo,
   runInbox,
@@ -215,6 +219,26 @@ program
   .description('Ask for a change to the plan, or send the proof back with a note')
   .action(wrapArgs(runChange));
 program
+  .command('changes <ticket>')
+  .description("Show what a ticket changed against main, read from the ticket's own copy")
+  .option('--full', 'Print the whole diff', false)
+  .action(wrapArgs(runChanges));
+program
+  .command('open <ticket>')
+  .description("Open the ticket's copy of the code in Cursor or VS Code")
+  .option('--editor <name>', 'cursor or code')
+  .action(wrapArgs(runOpen));
+program
+  .command('reply <ticket> [answer...]')
+  .description('Answer a question the Builder or Reviewer asked in the middle of its work')
+  .action(wrapArgs(runReply));
+program
+  .command('note <ticket> [text...]')
+  .description('Add a note, business rule or acceptance criterion to a ticket; every agent on it reads it')
+  .option('--criterion', 'An acceptance criterion: it joins the "done when" list and must be proven', false)
+  .option('--rule', 'A business rule the squad must follow', false)
+  .action(wrapArgs(runNote));
+program
   .command('decide <ticket> [choice]')
   .description('Decide for the squad when it is stuck')
   .action(wrapArgs(runDecide));
@@ -250,6 +274,8 @@ program
   .option('--ask <text>', 'What you want, in a sentence or two')
   .option('--priority <level>', 'high, normal or low')
   .option('--bug', 'It is a bug, not a new feature')
+  .option('--express', 'Express track: no questions and the plan is approved on its own; build, checks, review and Looks right still run')
+  .option('--full', 'Full track (the default): every step, with your approvals')
   .option('--criteria <text>', 'An acceptance criterion (repeat for more)', more, [])
   .option('--rule <text>', 'A business rule (repeat for more)', more, [])
   .option('--edge <text>', 'An edge case to handle (repeat for more)', more, [])

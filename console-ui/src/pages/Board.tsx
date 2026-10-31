@@ -43,7 +43,7 @@ export function BoardPage() {
   if (board.isLoading) return <div className="center">Loading the board…</div>;
   if (!data) return <NoBoard />;
 
-  const ORDER = ['questions', 'plan', 'stuck', 'proof', 'release'];
+  const ORDER = ['ask', 'questions', 'plan', 'stuck', 'proof', 'release'];
   // A step that looks stuck needs the person as much as a question does, so it comes first.
   const waiting = data.tickets
     .filter((t) => t.waiting || t.quiet?.kind === 'stuck')
@@ -169,6 +169,7 @@ function Card({ t, selected, onOpen }: { t: Ticket; selected: boolean; onOpen():
     <button className={`card ${you ? 'you' : ''} ${t.kind === 'bug' ? 'bug' : ''} ${selected ? 'sel' : ''}`} onClick={onOpen}>
       <div className="row1">
         <span className="id">{t.id}</span>
+        {t.track === 'express' && <span className="prio express">Express</span>}
         {you ? <span className="youtag">You</span> : t.kind === 'bug' ? <span className="prio">Bug</span> : t.priority === 'high' ? <span className="prio">High</span> : null}
       </div>
       <h4>{t.title}</h4>

@@ -537,3 +537,26 @@ ul.brief li { margin: 2px 0; }
 .drafted { background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); border-radius: 10px; padding: 10px 12px; font-size: 13px; margin-bottom: 14px; }
 .drafted b { font-weight: 650; }
 .drafted ul { margin: 4px 0 0; padding-left: 18px; }
+
+/* Notes on a ticket */
+ul.ticketnotes { list-style: none; padding: 0; margin: 4px 0 10px; display: flex; flex-direction: column; gap: 6px; }
+ul.ticketnotes li { display: flex; gap: 10px; align-items: baseline; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
+ul.ticketnotes li .pill { flex: none; }
+.addnote { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 14px; }
+.addnote textarea { width: 100%; resize: vertical; }
+ul.ticketnotes .grow, .addnote .grow { flex: 1; }
+
+/* Changes tab */
+.changes-head { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 12px; }
+.changes-head .grow { flex: 1; }
+.changes-head .add { color: var(--accent); }
+.changes-head .del { color: var(--bug); }
+.conv-diff-head.changes-file { width: 100%; border: 0; cursor: pointer; font: inherit; display: flex; gap: 8px; align-items: center; }
+.fstat { font-size: 11px; padding: 1px 6px; border-radius: 6px; border: 1px solid var(--line); flex: none; }
+.fstat.added { color: var(--accent); }
+.fstat.deleted { color: var(--bug); }
+
+/* Track choice */
+.tracks { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+@media (max-width: 640px) { .tracks { grid-template-columns: 1fr; } }
+.prio.express { color: var(--accent); background: var(--accent-soft, rgba(13, 138, 66, 0.12)); }

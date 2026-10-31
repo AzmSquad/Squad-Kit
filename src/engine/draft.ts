@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { readMeta, type BoardPaths } from '../board/store.js';
 import { BoardActionError, saveUploads, type UploadedFile } from '../board/actions.js';
-import type { Ticket, TicketBrief } from '../board/types.js';
+import type { Ticket, TicketBrief, Track } from '../board/types.js';
 import { runClaude, type RunOptions, type RunResult } from './claude.js';
 import { AcpStartError, acpAdapterPath, runClaudeAcp } from './acp-runner.js';
 import { agentInstructions, readAgent } from './agents.js';
@@ -17,6 +17,8 @@ export interface TicketDraft extends TicketBrief {
   title: string;
   ask: string;
   kind: Ticket['kind'];
+  /** The Analyst's suggestion; the person picks. */
+  track: Track;
   priority: Ticket['priority'];
   /** What the text leaves unclear. The Analyst asks about these again after the ticket is created. */
   gaps: string[];
@@ -86,6 +88,7 @@ function roughDraft(text: string): TicketDraft {
     title,
     ask: lines.slice(1).join(' ') || title,
     kind: /\b(bug|broken|error|crash|fails?)\b/i.test(text) ? 'bug' : 'feature',
+    track: /\b(typo|label|spelling|rename)\b/i.test(text) ? 'express' : 'full',
     priority: /\b(urgent|asap|blocker|today)\b/i.test(text) ? 'high' : 'normal',
     criteria: [],
     rules: [],

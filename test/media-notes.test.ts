@@ -36,7 +36,7 @@ function file(name: string, body = 'x'): string {
 function munsit(answer: unknown, status = 200) {
   const calls: { url: string; auth: string }[] = [];
   const fake = (async (url: string, init: RequestInit) => {
-    calls.push({ url, auth: (init.headers as Record<string, string>).authorization });
+    calls.push({ url, auth: new Headers(init.headers).get('authorization') ?? '' });
     return new Response(JSON.stringify(answer), { status });
   }) as unknown as typeof fetch;
   return { calls, fake };
