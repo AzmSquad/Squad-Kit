@@ -108,7 +108,7 @@ export function commitArgsFor(dir: string): string[] {
 
 /**
  * Move the base branch to a commit that already contains it, without disturbing the person's own work: a checked-out
- * base only fast-forwards when it is clean; otherwise the result says what to run.
+ * base fast-forwards unless that would touch a file the person changed; then the result says what to run.
  */
 export function moveBase(dir: string, base: string, commit: string): { moved: boolean; note?: string } {
   const before = git(dir, ['rev-parse', base]);
@@ -116,9 +116,7 @@ export function moveBase(dir: string, base: string, commit: string): { moved: bo
     git(dir, ['update-ref', `refs/heads/${base}`, commit, before]);
     return { moved: true };
   }
-  if (git(dir, ['status', '--porcelain', '--untracked-files=no'], { allowFail: true })) {
-    return { moved: false, note: `Your ${base} checkout has changes, so it was not moved. Run: git merge --ff-only ${commit.slice(0, 8)}` };
-  }
+  // Your own changes stay safe: git refuses the fast-forward itself if it would touch a file you changed.
   try {
     git(dir, ['merge', '--ff-only', commit]);
     return { moved: true };

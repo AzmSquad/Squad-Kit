@@ -281,12 +281,12 @@ export async function publishTicket(bp: BoardPaths, ticketId: string, http?: typ
  * Merge on accept for repos without a pull request host: merge the ticket's branch into the base branch locally, so
  * the next tickets start from it. Pushing waits for the release.
  */
-export function mergeLocally(bp: BoardPaths, t: Ticket): { commit: string; base: string; note?: string } | null {
+export function mergeLocally(bp: BoardPaths, t: Ticket): { commit: string; base: string; moved: boolean; note?: string } | null {
   if (!t.branch) return null;
   const repo = repoFor(readMeta(bp), t);
   const dir = path.join(projectRoot(bp), repo.path);
   const r = mergeIntoBase(dir, repo.base, t.branch, `Merge ${t.title} (${t.id})`);
-  return { commit: r.commit, base: repo.base, ...(r.note ? { note: r.note } : {}) };
+  return { commit: r.commit, base: repo.base, moved: r.moved, ...(r.note ? { note: r.note } : {}) };
 }
 
 export function prDescription(t: Ticket, wid: number | null, shots: { label: string; url: string }[]): string {

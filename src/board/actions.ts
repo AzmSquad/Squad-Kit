@@ -356,7 +356,7 @@ function approvePlan(bp: BoardPaths, ticket: Ticket, speed: number, express = fa
     t.progress = 0;
     t.status = `Step 1 of ${t.steps?.length ?? 1} with ${t.builder ?? 'the Builder'}`;
     t.gates = { checks: 'pending', review: 'pending', proof: 'pending' };
-    const approved = express ? 'Express track: approved the plan on its own' : 'Approved the plan';
+    const approved = express ? 'Express track: approved the plan on its own' : t.specApproved ? 'Approved the design' : 'Approved the plan';
     addActivity(t, express ? 'squad' : 'you', adr ? `${approved}. Decision saved as ${adr}` : approved);
     scheduleSquad(t, 'build', 2, speed, 0);
     tellLater(t, meta.engine, { kind: 'planned' });
@@ -396,12 +396,19 @@ function acceptProof(bp: BoardPaths, ticket: Ticket): Ticket {
     t.live = openPr;
     t.progress = undefined;
     t.release = release.version;
-    t.status = openPr ? 'Opening the pull request' : merged ? `Merged into ${merged.base} · goes out in ${release.version}` : `Ready for ${release.version}`;
-    if (merged) t.mergedAt = now();
+    const into = merged?.moved ? merged : null;
+    t.status = openPr
+      ? 'Opening the pull request'
+      : into
+        ? `Merged into ${into.base} · goes out in ${release.version}`
+        : merged
+          ? `Ready for ${release.version} · ${merged.base} not moved yet`
+          : `Ready for ${release.version}`;
+    if (into) t.mergedAt = now();
     t.squad = openPr ? { phase: 'publish', nextAt: now() } : null;
     addActivity(t, 'you', 'Checked the proof. Looks right');
     if (commit) addActivity(t, 'release', `Saved the change as commit ${commit} on ${t.branch}`);
-    if (merged) addActivity(t, 'release', `Merged into ${merged.base}${merged.note ? `. ${merged.note}` : ''}`);
+    if (merged) addActivity(t, 'release', merged.moved ? `Merged into ${merged.base}` : `Could not move ${merged.base} yet. ${merged.note ?? ''}`.trim());
     addActivity(t, 'release', `Added to release ${release.version}`);
   });
 }
