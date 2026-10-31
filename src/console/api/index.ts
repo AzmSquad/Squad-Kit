@@ -16,6 +16,8 @@ import { mountBoardApi } from './board.js';
 
 export interface MountApiOptions {
   paths: SquadPaths;
+  /** The running board itself: when it started, which build it runs, and a way to restart it. */
+  control?: { startedAt: string; build: number; restart(): void };
 }
 
 export function mountApi(app: Hono, opts: MountApiOptions): void {

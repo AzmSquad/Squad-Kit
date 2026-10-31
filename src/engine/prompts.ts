@@ -107,6 +107,21 @@ export const PROOF_SCHEMA = {
   required: ['shots'],
 };
 
+export const DRAFT_SCHEMA = {
+  type: 'object',
+  properties: {
+    title: STR,
+    ask: STR,
+    kind: { type: 'string', enum: ['feature', 'bug'] },
+    priority: { type: 'string', enum: ['high', 'normal', 'low'] },
+    criteria: { type: 'array', maxItems: 8, items: STR },
+    rules: { type: 'array', maxItems: 8, items: STR },
+    edgeCases: { type: 'array', maxItems: 8, items: STR },
+    gaps: { type: 'array', maxItems: 5, items: STR },
+  },
+  required: ['title', 'ask', 'kind', 'priority', 'criteria', 'rules', 'edgeCases', 'gaps'],
+};
+
 const PLAIN = 'Write for a project manager who may not be a developer: plain words, short sentences, no jargon.';
 
 /** Extra facts a role needs: the project's own rule files, and the repo the ticket works in. */
@@ -117,7 +132,7 @@ export interface PromptContext {
 
 function rulesText(ctx?: PromptContext): string {
   if (!ctx?.rules.length) return '';
-  return `\n\nThis project has its own rules for AI tools. Read them first and follow them:\n${ctx.rules.map((r) => `- ${r}`).join('\n')}`;
+  return `\n\nThis project has its own rules: instruction files, and the team's wiki pages (business rules, definition of done) under .squad/board/context/wiki. Read them first and follow them:\n${ctx.rules.map((r) => `- ${r}`).join('\n')}`;
 }
 
 function reposText(meta: BoardMeta): string {
@@ -146,7 +161,13 @@ function projectContext(meta: BoardMeta, decisions: Decision[], ctx?: PromptCont
 
 function ticketContext(t: Ticket): string {
   const files = t.attachments?.length ? `\nAttached files (read them):\n${t.attachments.map((a) => `- ${a}`).join('\n')}` : '';
-  return `Ticket ${t.id}: ${t.title}\n${t.kind === 'bug' ? 'This is a bug report.' : 'This is a feature request.'}\nWhat was asked:\n${t.ask}${files}`;
+  const list = (head: string, items?: string[]) => (items?.length ? `\n${head}:\n${items.map((x) => `- ${x}`).join('\n')}` : '');
+  const brief = t.brief
+    ? list('Acceptance criteria the person wrote (keep every one)', t.brief.criteria) +
+      list('Business rules the person wrote (follow every one)', t.brief.rules) +
+      list('Edge cases the person wrote (handle every one)', t.brief.edgeCases)
+    : '';
+  return `Ticket ${t.id}: ${t.title}\n${t.kind === 'bug' ? 'This is a bug report.' : 'This is a feature request.'}\nWhat was asked:\n${t.ask}${brief}${files}`;
 }
 
 function answersText(t: Ticket): string {
@@ -250,6 +271,7 @@ Rules:
 - Follow the saved decisions and the project's existing style.
 - Write tests that check every "done when", and run the tests before you finish.
 - Never commit, push, switch branches, or change files outside this folder.
+- Wait for every command to finish (installs too). Never leave anything running in the background; this step ends when you answer.
 - If the plan does not cover a choice, take the simplest one and say so in notes.`;
 }
 
@@ -290,7 +312,7 @@ Check: does it do every "done when"? Does it follow the saved decisions? Real bu
 Approve unless there is a real problem. Small style notes do not block. Each comment is one concrete sentence.`;
 }
 
-export function proofPrompt(meta: BoardMeta, t: Ticket, outDir: string, when: 'before' | 'after', ctx?: PromptContext): string {
+export function proofPrompt(meta: BoardMeta, t: Ticket, outDir: string, when: 'before' | 'after', ctx?: PromptContext, appRunning = false): string {
   const criteria = (t.criteria ?? []).map((c, i) => `${i + 1}. Given ${c.given}, when ${c.when}, then ${c.then}.`).join('\n');
   const c = ctx?.repo?.commands ?? meta.commands ?? {};
   return `You are the Tester of a software squad. Take screenshots that show each "done when" below ${
@@ -300,10 +322,38 @@ export function proofPrompt(meta: BoardMeta, t: Ticket, outDir: string, when: 'b
 Done when:
 ${criteria}
 
-How to run the app: ${c.setup ? `set up with "${c.setup}", then ` : ''}start it with "${c.start}" in the background and wait until ${c.url} answers.
+${
+  appRunning
+    ? `The app is already running at ${c.url}; squad-kit started it and will stop it. Do not start or stop it yourself.`
+    : `How to run the app: ${c.setup ? `set up with "${c.setup}", then ` : ''}start it with "${c.start}" and wait until ${c.url} answers. Stop it when you are done.`
+}
 For each "done when" that shows on a screen, save one 1280x800 PNG named ${t.id.toLowerCase()}-${when}-<number>.png in ${outDir}.
 Use the project's Playwright if it has one, or "npx -y playwright screenshot --viewport-size=1280,800 <url> <file>".
 If you need clicks or typing first, write a short Playwright script in a temporary folder outside the project.
 If browsers are missing, run "npx -y playwright install chromium".
-Stop the app when you are done. Do not change project files. In shots, give the "done when" number and file name for each screenshot.${rulesText(ctx)}`;
+Do not change project files. In shots, give the "done when" number and file name for each screenshot.${rulesText(ctx)}`;
+}
+
+/** Turns a rough idea, a forwarded chat message or one line of business into a ticket the person checks before saving. */
+export function draftPrompt(meta: BoardMeta, text: string, files: string[], ctx?: PromptContext): string {
+  const attached = files.length ? `\nThe person also attached these files (read them, they may be screenshots of a chat):\n${files.map((f) => `- ${f}`).join('\n')}\n` : '';
+  return `You are the Analyst of a software squad. A person pasted the text below: maybe an idea, a forwarded chat
+message (WhatsApp or similar), or one line of business. Turn it into a clear ticket for project ${meta.project}.
+You may read the project to use its real words and screens. Do not write or change any files.${rulesText(ctx)}
+
+What the person pasted:
+"""
+${text.trim() || '(no text, only the attached files)'}
+"""
+${attached}
+Produce:
+- title: a short name for the ticket, at most 8 words, like "Show hearing time in local time".
+- ask: who needs it and why, in one to three sentences.
+- kind: "bug" if something that worked is broken, else "feature".
+- priority: "high" only if the text says it is urgent or blocks people, "low" if it is a nice-to-have, else "normal".
+- criteria: 2 to 6 acceptance criteria, each one testable sentence that starts with a person doing or seeing something.
+- rules: the business rules the text states or clearly implies (limits, who may do what, numbers). Empty if none.
+- edgeCases: the unusual cases the builder must handle (empty lists, wrong input, no access, two people at once).
+- gaps: what the text leaves unclear, as short questions. Do not invent answers for them.
+Only use what the text says or the project shows. Write in the same language as the text. ${PLAIN}`;
 }

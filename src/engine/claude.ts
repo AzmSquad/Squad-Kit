@@ -29,12 +29,18 @@ export interface RunOptions {
   /** JSON Schema for the final answer; Claude Code validates it and returns `structured`. */
   schema?: object;
   appendSystemPrompt?: string;
+  /** A model name or alias such as sonnet or opus; empty uses the person's default. */
+  model?: string;
   addDirs?: string[];
   timeoutMs?: number;
   /** Stops the run when the person presses Stop. */
   signal?: AbortSignal;
   onTool?(event: ToolEvent): void;
   onText?(text: string): void;
+  /** Any sign of life from Claude Code (a message, a tool call, a tool result), for the watchdog. */
+  onActivity?(): void;
+  /** The Claude Code process id, so the watchdog can look at the commands it runs. */
+  onSpawn?(pid: number): void;
 }
 
 export interface RunResult {
@@ -83,19 +89,24 @@ export function sessionExists(id: string): boolean {
   }
 }
 
-/** Node tools (npm, pnpm, vite) stall on networks with broken IPv6; ask them to try IPv4 first. */
+/**
+ * Node tools (npm, pnpm, vite) stall on networks with broken IPv6. Preferring IPv4 is not enough on its own: Node
+ * still races IPv6 connections, and a stuck one hangs `npm install`. So use the first (IPv4) address only.
+ */
 export function withIpv4First(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const flag = '--dns-result-order=ipv4first';
   const current = env.NODE_OPTIONS ?? '';
-  return current.includes('dns-result-order') ? env : { ...env, NODE_OPTIONS: `${current} ${flag}`.trim() };
+  const flags = ['--dns-result-order=ipv4first', '--no-network-family-autoselection'].filter((f) => !current.includes(f.replace(/^--(no-)?/, '').split('=')[0]!));
+  return flags.length ? { ...env, NODE_OPTIONS: `${current} ${flags.join(' ')}`.trim() } : env;
 }
 
-function childEnv(): NodeJS.ProcessEnv {
+export function childEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = withIpv4First({ ...process.env });
   // An inherited API key would outrank the subscription login and bill API credits instead.
   for (const key of Object.keys(env)) {
     if (SUBSCRIPTION_WITHHELD_ENV_KEYS.includes(key.toUpperCase())) delete env[key];
   }
+  // A step is one run: a command left running in the background would outlive it and the step would end too early.
+  env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS = '1';
   return env;
 }
 
@@ -114,10 +125,12 @@ export function runClaude(opts: RunOptions): Promise<RunResult> {
   if (opts.permissionMode) args.push('--permission-mode', opts.permissionMode);
   if (opts.schema) args.push('--json-schema', JSON.stringify(opts.schema));
   if (opts.appendSystemPrompt) args.push('--append-system-prompt', opts.appendSystemPrompt);
+  if (opts.model) args.push('--model', opts.model);
   for (const d of opts.addDirs ?? []) args.push('--add-dir', d);
 
   return new Promise((resolve) => {
     const child = spawn(bin, args, { cwd: opts.cwd, env: childEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+    if (child.pid) opts.onSpawn?.(child.pid);
     opts.signal?.addEventListener('abort', () => {
       result = { ok: false, sessionId, text: lastText, error: 'You stopped the squad.' };
       child.kill('SIGTERM');
@@ -139,6 +152,7 @@ export function runClaude(opts: RunOptions): Promise<RunResult> {
       } catch {
         return;
       }
+      opts.onActivity?.();
       if (event.type === 'assistant') {
         for (const part of event.message?.content ?? []) {
           if (part.type === 'tool_use' && part.name !== 'StructuredOutput') opts.onTool?.({ name: part.name, input: part.input ?? {} });
@@ -184,7 +198,7 @@ export function runClaude(opts: RunOptions): Promise<RunResult> {
 }
 
 /** Turn Claude Code failures into a sentence a project manager can act on. */
-function plainError(raw: string): string {
+export function plainError(raw: string): string {
   const s = raw.toLowerCase();
   if (s.includes('exit 143') || s.includes('sigterm')) {
     return 'The squad was interrupted before it finished, for example because the board was closed. Press Try again to carry on.';

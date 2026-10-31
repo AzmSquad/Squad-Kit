@@ -116,7 +116,9 @@ export interface Ticket {
   title: string;
   ask: string;
   kind: 'feature' | 'bug';
-  source: { type: 'manual' | 'azure' | 'github' | 'jira'; ref?: string };
+  source: { type: 'manual' | 'azure' | 'github' | 'jira'; ref?: string; id?: string; url?: string; itemType?: string };
+  pr?: { id: number; url: string; repo: string; host: 'azure' };
+  quiet?: { since: string; kind: 'stuck' | 'long'; detail: string; command?: string; pid?: number };
   priority: 'high' | 'normal' | 'low';
   stage: Stage;
   /** One line under the card title: what is happening now. */
@@ -157,6 +159,7 @@ export interface Ticket {
   /** Step to run again when the person picks "Try again" on a stuck card. */
   retryPhase?: string;
   attachments?: string[];
+  brief?: { criteria: string[]; rules: string[]; edgeCases: string[] };
   /** In a multi-repo workspace: the code repo this ticket changes. */
   repo?: string;
   /** Set when the person presses Stop; the live squad stops the running step. */
@@ -220,6 +223,7 @@ export interface BoardMeta {
   scan?: { status: 'pending' | 'running' | 'done' | 'failed'; at?: string; error?: string; summary?: string; empty?: boolean };
   /** How many squad jobs may run at the same time. */
   parallel?: number;
+  runner?: 'acp' | 'direct';
   /**
    * A workspace that holds several code repos (each with its own git). Without it, the project
    * folder itself is the one repo, using `commands` and `git`.
@@ -249,6 +253,8 @@ export interface ProjectCommands {
 export interface BoardResponse {
   ready: boolean;
   meta: BoardMeta;
+  /** The running board: when it started and whether a newer squad-kit is installed. */
+  console?: { startedAt: string; outdated: boolean } | null;
   tickets: Ticket[];
   stats: { released30: number; bugs30: number; open: number };
 }
@@ -266,4 +272,93 @@ export interface DecisionsResponse {
   decisions: Decision[];
   map: BoardMeta['map'];
   lessons: Lesson[];
+}
+
+export interface WorkItemRow {
+  id: number;
+  type: string;
+  title: string;
+  state: string;
+  points?: number;
+  priority?: number;
+  sprint?: string;
+  assignedTo?: string;
+  tags: string[];
+  url: string;
+  ticket: { id: string; stage: Stage; status: string } | null;
+}
+
+export interface Sprint {
+  name: string;
+  path: string;
+  start?: string;
+  finish?: string;
+  current: boolean;
+}
+
+export interface BacklogResponse {
+  connected: boolean;
+  error?: string | null;
+  user?: string;
+  sprints: Sprint[];
+  sprint?: string;
+  items: WorkItemRow[];
+}
+
+export interface TrackerStatus {
+  type: 'none' | 'azure' | 'jira' | 'github';
+  organization: string;
+  project: string;
+  hasToken: boolean;
+  user?: string;
+  error?: string;
+}
+
+export interface AgentInfo {
+  role: 'analyst' | 'architect' | 'builder' | 'reviewer' | 'tester';
+  name: string;
+  job: string;
+  tool: 'claude' | 'codex';
+  model: string;
+  instructions: string;
+  file: string;
+  working: { id: string; title: string; status: string }[];
+}
+
+export interface ConversationSummary {
+  key: 'intake' | 'build' | 'review' | 'tester';
+  label: string;
+  sessionId: string;
+  started: boolean;
+}
+
+/** A subset of the Agent Client Protocol (ACP v1) types the board draws. */
+export type AcpContentBlock =
+  | { type: 'text'; text: string; _meta?: { squadKit?: { from?: 'squad-kit' | 'claude-code' } } | null }
+  | { type: 'image'; data: string; mimeType: string; uri?: string | null }
+  | { type: 'audio'; data: string; mimeType: string }
+  | { type: 'resource_link'; uri: string; name: string; mimeType?: string | null; size?: number | null }
+  | { type: 'resource'; resource: { uri: string; text?: string; mimeType?: string | null } };
+
+export type AcpToolContent =
+  | { type: 'content'; content: AcpContentBlock }
+  | { type: 'diff'; path: string; oldText?: string | null; newText: string }
+  | { type: 'terminal'; terminalId: string };
+
+export type AcpToolKind = 'read' | 'edit' | 'delete' | 'move' | 'search' | 'execute' | 'think' | 'fetch' | 'switch_mode' | 'other';
+export type AcpToolStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
+
+export type AcpUpdate =
+  | { sessionUpdate: 'user_message_chunk' | 'agent_message_chunk' | 'agent_thought_chunk'; content: AcpContentBlock }
+  | { sessionUpdate: 'tool_call'; toolCallId: string; title: string; kind?: AcpToolKind; status?: AcpToolStatus; content?: AcpToolContent[]; locations?: { path: string; line?: number | null }[]; rawInput?: { command?: string; path?: string } }
+  | { sessionUpdate: 'tool_call_update'; toolCallId: string; title?: string | null; kind?: AcpToolKind | null; status?: AcpToolStatus | null; content?: AcpToolContent[] | null; rawInput?: { command?: string; path?: string } | null }
+  | { sessionUpdate: 'plan'; entries: { content: string; priority: string; status: 'pending' | 'in_progress' | 'completed' }[] };
+
+export interface ConversationResponse {
+  sessionId: string;
+  protocol?: string;
+  cwd?: string;
+  command?: string;
+  total: number;
+  updates: { at?: string; update: AcpUpdate }[];
 }

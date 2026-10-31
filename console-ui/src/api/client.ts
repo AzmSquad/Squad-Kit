@@ -62,6 +62,12 @@ export async function send<T>(path: string, method: 'POST' | 'PUT', payload: unk
 }
 
 /** Images can't send a header, so they carry the session token in the query string. */
+/** A file the squad made for a ticket (picture, recording, document), served only from the ticket's own folders. */
+export function ticketFileUrl(ticketId: string, file: string): string {
+  const token = sessionStorage.getItem(TOKEN_KEY) ?? '';
+  return `/api/v1/tickets/${encodeURIComponent(ticketId)}/file?path=${encodeURIComponent(file.replace(/^file:\/\//, ''))}&t=${encodeURIComponent(token)}`;
+}
+
 export function assetUrl(path: string): string {
   const token = sessionStorage.getItem(TOKEN_KEY) ?? '';
   return `${path}?t=${encodeURIComponent(token)}`;

@@ -1,10 +1,12 @@
 import { Link, Outlet, useRouterState } from '@tanstack/react-router';
-import { ArrowUp, Bug, Hexagon, Inbox, LayoutGrid, Moon, Settings, Sun, Terminal, Users } from 'lucide-react';
+import { ArrowUp, Bug, Hexagon, Inbox, LayoutGrid, ListTodo, Moon, Settings, Sun, Terminal, Users } from 'lucide-react';
 import { useBoard } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
+import { UpdateBanner } from './Restart';
 
 const NAV = [
   { to: '/board', label: 'Board', icon: LayoutGrid },
+  { to: '/backlog', label: 'Backlog', icon: ListTodo },
   { to: '/inbox', label: 'Waiting for you', icon: Inbox, badge: 'you' as const },
   { to: '/releases', label: 'Releases', icon: ArrowUp },
   { to: '/decisions', label: 'Decisions', icon: Hexagon },
@@ -77,6 +79,7 @@ export function Shell() {
         </div>
       </aside>
       <main className="canvas">
+        {board.data?.ready && board.data.console?.outdated && <UpdateBanner />}
         <Outlet />
       </main>
     </div>

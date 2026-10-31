@@ -27,27 +27,78 @@ import { buildPaths } from '../core/paths.js';
 import { loadConfig } from '../core/config.js';
 import { loadSecrets } from '../core/secrets.js';
 import { clientFor, overlayTrackerEnv } from '../tracker/index.js';
+import { azureFor, type Azure } from '../engine/azure.js';
+import { mergeLocally, opensPullRequest, syncWiki } from '../engine/sync.js';
+import type { TrackerEvent } from './types.js';
+import { endProcessTree } from '../engine/watchdog.js';
 
 /** Every person-facing action lives here, so the board and the terminal do exactly the same thing. */
 
 export class BoardActionError extends Error {}
 
+/** Queue an update for the tracker. The live squad sends it, so this never waits on the network. */
+function tellLater(t: Ticket, engine: string, event: TrackerEvent): void {
+  if (engine !== 'live') return;
+  if (event.kind !== 'file-bug' && t.source.type !== 'azure') return;
+  t.trackerQueue = [...(t.trackerQueue ?? []), event];
+}
+
 export interface NewTicketInput {
   title: string;
   ask?: string;
   priority?: Ticket['priority'];
+  kind?: Ticket['kind'];
   source?: Ticket['source'];
+  criteria?: string[];
+  rules?: string[];
+  edgeCases?: string[];
+  files?: UploadedFile[];
+}
+
+/** A file the person added to a ticket, sent as base64 so the board and the terminal send it the same way. */
+export interface UploadedFile {
+  name: string;
+  data: string;
+}
+
+export const MAX_UPLOADS = 10;
+export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
+function cleanList(items: string[] | undefined): string[] {
+  return (items ?? []).map((x) => x.trim()).filter(Boolean);
+}
+
+/** Saves uploaded files into a folder, with safe names, and returns their paths. */
+export function saveUploads(dir: string, files: UploadedFile[]): string[] {
+  if (files.length > MAX_UPLOADS) throw new BoardActionError(`Add at most ${MAX_UPLOADS} files.`);
+  const decoded = files.map((f) => ({ name: path.basename(f.name).replace(/[^\w.\- ]+/g, '_').slice(-120) || 'file', data: Buffer.from(f.data, 'base64') }));
+  const big = decoded.find((f) => f.data.length > MAX_UPLOAD_BYTES);
+  if (big) throw new BoardActionError(`${big.name} is larger than 10 MB.`);
+  if (!decoded.length) return [];
+  fs.mkdirSync(dir, { recursive: true });
+  const used = new Set<string>();
+  return decoded.map((f) => {
+    let name = f.name;
+    for (let i = 2; used.has(name.toLowerCase()); i += 1) name = f.name.replace(/(\.[^.]*)?$/, (ext) => `-${i}${ext}`);
+    used.add(name.toLowerCase());
+    const file = path.join(dir, name);
+    fs.writeFileSync(file, f.data);
+    return file;
+  });
 }
 
 export function createTicket(bp: BoardPaths, input: NewTicketInput): Ticket {
   const title = input.title.trim();
   if (!title) throw new BoardActionError('A ticket needs a title.');
   const meta = readMeta(bp);
+  const id = nextTicketId(bp);
+  const brief = { criteria: cleanList(input.criteria), rules: cleanList(input.rules), edgeCases: cleanList(input.edgeCases) };
+  const attachments = input.files?.length ? saveUploads(path.join(bp.dir, 'attachments', id), input.files) : [];
   const ticket: Ticket = {
-    id: nextTicketId(bp),
+    id,
     title,
     ask: input.ask?.trim() || title,
-    kind: 'feature',
+    kind: input.kind ?? 'feature',
     source: input.source ?? { type: 'manual' },
     priority: input.priority ?? 'normal',
     stage: 'tickets',
@@ -59,8 +110,11 @@ export function createTicket(bp: BoardPaths, input: NewTicketInput): Ticket {
     builder: meta.roles.builder,
     reviewer: meta.roles.reviewer,
     activity: [],
+    ...(brief.criteria.length || brief.rules.length || brief.edgeCases.length ? { brief } : {}),
+    ...(attachments.length ? { attachments } : {}),
   };
   addActivity(ticket, 'you', input.source?.type === 'azure' ? `Pulled ${input.source.ref} from Azure DevOps` : 'Created the ticket');
+  if (attachments.length) addActivity(ticket, 'you', `Added ${attachments.length === 1 ? '1 file' : `${attachments.length} files`}`);
   scheduleSquad(ticket, 'analyst-read', 4, meta.speed);
   writeTicket(bp, ticket);
   return ticket;
@@ -90,6 +144,8 @@ export async function pullTicket(bp: BoardPaths, ref: string): Promise<Ticket> {
 
 /** Fetch a real work item with the tracker set up in .squad/ (the same one `squad new-story --id` uses). */
 async function pullFromTracker(bp: BoardPaths, id: string): Promise<Ticket> {
+  const az = azureFor(bp);
+  if (az) return startFromAzure(bp, az, id);
   const paths = buildPaths(path.dirname(path.dirname(bp.dir)));
   const config = loadConfig(paths.configFile);
   if (config.tracker.type === 'none') {
@@ -130,6 +186,57 @@ export interface AnswerInput {
   value?: string;
 }
 
+/**
+ * A work item from Azure Boards becomes a ticket with everything the squad needs: the story, its acceptance criteria,
+ * the feature and epic it belongs to, the stories it depends on, and its attachments.
+ */
+export async function startFromAzure(bp: BoardPaths, az: Azure, ref: string): Promise<Ticket> {
+  const id = Number(ref.replace(/^AB#/i, ''));
+  if (!Number.isInteger(id) || id <= 0) throw new BoardActionError(`"${ref}" is not a work item number.`);
+  const existing = listTickets(bp).find((t) => t.source.type === 'azure' && (t.source.id === String(id) || t.source.ref === `AB#${id}`));
+  if (existing) throw new BoardActionError(`AB#${id} is already on the board as ${existing.id}.`);
+  let w;
+  try {
+    w = await az.getWorkItem(id);
+  } catch (err) {
+    throw new BoardActionError(`Could not fetch AB#${id}: ${(err as Error).message}`);
+  }
+  const ask = [
+    w.description,
+    w.reproSteps && `Steps to reproduce:\n${w.reproSteps}`,
+    w.acceptanceCriteria && `Acceptance criteria:\n${w.acceptanceCriteria}`,
+    w.parents.length ? `Part of: ${w.parents.map((p) => `${p.type} "${p.title}"`).join(', in ')}` : '',
+    w.dependsOn.length ? `Builds on: ${w.dependsOn.map((d) => `AB#${d.id} ${d.title} (${d.state})`).join('; ')}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+  const meta = readMeta(bp);
+  await syncWiki(bp, az);
+  const ticket = createTicket(bp, {
+    title: w.title,
+    ask: ask || w.title,
+    priority: w.priority === 1 ? 'high' : w.priority === 4 ? 'low' : 'normal',
+    source: { type: 'azure', ref: `AB#${w.id}`, id: String(w.id), url: w.url, itemType: w.type },
+  });
+  const files: string[] = [];
+  if (w.attachments.length) {
+    const dir = path.join(bp.dir, 'attachments', ticket.id);
+    fs.mkdirSync(dir, { recursive: true });
+    for (const a of w.attachments.filter((x) => x.size <= 10 * 1024 * 1024)) {
+      const file = await az.download(a.url, path.join(dir, a.name.replace(/[^\w.\- ]+/g, '_'))).catch(() => null);
+      if (file) files.push(file);
+    }
+  }
+  return updateTicket(bp, ticket.id, (t) => {
+    if (w.type === 'Bug') t.kind = 'bug';
+    if (files.length) {
+      t.attachments = files;
+      addActivity(t, 'you', `Pulled ${files.length} attachments with it`);
+    }
+    tellLater(t, meta.engine, { kind: 'started' });
+  });
+}
+
 export function answerQuestions(bp: BoardPaths, id: string, answers: Record<string, AnswerInput>): Ticket {
   const meta = readMeta(bp);
   return updateTicket(bp, id, (t) => {
@@ -149,6 +256,7 @@ export function answerQuestions(bp: BoardPaths, id: string, answers: Record<stri
     t.status = 'Architect is choosing the design';
     addActivity(t, 'you', `Answered ${t.questions.length} questions`);
     scheduleSquad(t, 'plan-write', 2, meta.speed);
+    tellLater(t, meta.engine, { kind: 'answered' });
   });
 }
 
@@ -217,6 +325,7 @@ function approvePlan(bp: BoardPaths, ticket: Ticket, speed: number): Ticket {
     t.gates = { checks: 'pending', review: 'pending', proof: 'pending' };
     addActivity(t, 'you', adr ? `Approved the plan. Decision saved as ${adr}` : 'Approved the plan');
     scheduleSquad(t, 'build', 2, speed, 0);
+    tellLater(t, meta.engine, { kind: 'planned' });
   });
 }
 
@@ -236,16 +345,29 @@ function acceptProof(bp: BoardPaths, ticket: Ticket): Ticket {
   const release = ensureDraftRelease(bp, ticket.kind === 'bug' ? 'patch' : 'minor');
   if (!release.tickets.includes(ticket.id)) release.tickets.push(ticket.id);
   writeRelease(bp, release);
+  const openPr = !ticket.pr && opensPullRequest(bp, ticket);
+  // Merge on accept: without a pull request host the branch merges into the base right here, so the next tickets
+  // build on it. With Azure Repos the live squad opens the PR and merges it.
+  let merged: ReturnType<typeof mergeLocally> = null;
+  if (readMeta(bp).engine === 'live' && !openPr && !ticket.mergedAt) {
+    try {
+      merged = mergeLocally(bp, ticket);
+    } catch (err) {
+      throw new BoardActionError(`${ticket.id} is saved as a commit, but it ${(err as Error).message.replace(/^squad\/\S+ /, '')} Send it back to the Builder with "Ask for a change" to update it.`);
+    }
+  }
   return updateTicket(bp, ticket.id, (t) => {
     t.waiting = null;
     t.stage = 'release';
-    t.live = false;
+    t.live = openPr;
     t.progress = undefined;
     t.release = release.version;
-    t.status = `Ready for ${release.version}`;
-    t.squad = null;
+    t.status = openPr ? 'Opening the pull request' : merged ? `Merged into ${merged.base} · goes out in ${release.version}` : `Ready for ${release.version}`;
+    if (merged) t.mergedAt = now();
+    t.squad = openPr ? { phase: 'publish', nextAt: now() } : null;
     addActivity(t, 'you', 'Checked the proof. Looks right');
     if (commit) addActivity(t, 'release', `Saved the change as commit ${commit} on ${t.branch}`);
+    if (merged) addActivity(t, 'release', `Merged into ${merged.base}${merged.note ? `. ${merged.note}` : ''}`);
     addActivity(t, 'release', `Added to release ${release.version}`);
   });
 }
@@ -290,7 +412,10 @@ export function decideStuck(bp: BoardPaths, id: string, choice: number): Ticket 
       return;
     }
     // Live squad: the first choice runs the stopped step again, the second goes back to the plan.
-    if (choice === 0) {
+    if (t.retryPhase === 'publish' && choice === 1) {
+      t.live = false;
+      t.status = `Ready for ${t.release ?? 'the next release'}`;
+    } else if (choice === 0) {
       t.tries = 0;
       t.status = 'Trying again';
       scheduleSquad(t, t.retryPhase ?? 'analyst-read', 0.5, 1);
@@ -412,6 +537,7 @@ export async function releaseVersion(bp: BoardPaths, version?: string): Promise<
       x.status = `Released in ${release.version}`;
       x.live = false;
       addActivity(x, 'release', `Released in ${release.version}`);
+      tellLater(x, meta.engine, { kind: 'released', version: release.version });
     });
   }
   return release;
@@ -453,6 +579,7 @@ export function reportBug(bp: BoardPaths, input: BugInput): Ticket {
   };
   addActivity(ticket, 'you', foundIn ? `Reported a bug found in ${foundIn}` : 'Reported a bug');
   scheduleSquad(ticket, 'triage', 3, meta.speed);
+  tellLater(ticket, meta.engine, { kind: 'file-bug' });
   writeTicket(bp, ticket);
   if (foundIn) {
     const release = readRelease(bp, foundIn);
@@ -473,6 +600,30 @@ export function stopTicket(bp: BoardPaths, id: string): Ticket {
   });
 }
 
+/**
+ * The watchdog says a step looks stuck on a command: end that command (and what it started). The role gets an error
+ * back and carries on, with its conversation intact.
+ */
+export function endStuckCommand(bp: BoardPaths, id: string): Ticket {
+  return updateTicket(bp, id, (t) => {
+    if (!t.quiet?.pid) throw new BoardActionError(`${t.id} has no stuck command to end.`);
+    endProcessTree(t.quiet.pid);
+    addActivity(t, 'you', `Ended the stuck command: ${t.quiet.command ?? 'a command'}`);
+    delete t.quiet;
+  });
+}
+
+/** "Keep waiting": the step is slow but fine. The watchdog stays quiet about it for 10 minutes. */
+export function keepWaiting(bp: BoardPaths, id: string): Ticket {
+  return updateTicket(bp, id, (t) => {
+    if (!t.quiet) throw new BoardActionError(`${t.id} is not quiet right now.`);
+    t.quietSnoozedUntil = new Date(Date.now() + 10 * 60_000).toISOString();
+    addActivity(t, 'you', 'Chose to keep waiting');
+    delete t.quiet;
+  });
+}
+
+/** Everything that needs the person: open questions, plans, proof, decisions, and steps that look stuck. */
 export function inbox(bp: BoardPaths): Ticket[] {
-  return listTickets(bp).filter((t) => t.waiting);
+  return listTickets(bp).filter((t) => t.waiting || t.quiet?.kind === 'stuck');
 }

@@ -6,9 +6,10 @@ import path from 'node:path';
 
 /** Small git helpers. The squad never touches the person's own checkout: each ticket gets a worktree. */
 
-export function git(cwd: string, args: string[], opts: { allowFail?: boolean } = {}): string {
+export function git(cwd: string, args: string[], opts: { allowFail?: boolean; env?: Record<string, string> } = {}): string {
   try {
-    return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024 }).trim();
+    const env = opts.env ? { ...process.env, ...opts.env } : undefined;
+    return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024, ...(env ? { env } : {}) }).trim();
   } catch (err) {
     if (opts.allowFail) return '';
     const e = err as { stderr?: Buffer | string; message: string };
@@ -33,7 +34,7 @@ export function ensureRepo(dir: string, projectName: string): void {
     if (!fs.existsSync(readme)) fs.writeFileSync(readme, `# ${projectName}\n`, 'utf8');
     // Commit the .gitignore that `squad init` wrote too, so tickets build on it instead of clashing with it.
     git(dir, ['add', 'README.md', ...(fs.existsSync(path.join(dir, '.gitignore')) ? ['.gitignore'] : [])]);
-    git(dir, ['-c', 'user.name=squad-kit', '-c', 'user.email=squad-kit@localhost', 'commit', '-m', 'start the project'], {});
+    git(dir, authorArgs(dir).concat(['commit', '-m', 'start the project']));
   }
   excludeLocal(dir, ['.squad/board/squad.pid']);
 }
@@ -103,4 +104,53 @@ function authorArgs(dir: string): string[] {
 
 export function commitArgsFor(dir: string): string[] {
   return authorArgs(dir);
+}
+
+/**
+ * Move the base branch to a commit that already contains it, without disturbing the person's own work: a checked-out
+ * base only fast-forwards when it is clean; otherwise the result says what to run.
+ */
+export function moveBase(dir: string, base: string, commit: string): { moved: boolean; note?: string } {
+  const before = git(dir, ['rev-parse', base]);
+  if (currentBranch(dir) !== base) {
+    git(dir, ['update-ref', `refs/heads/${base}`, commit, before]);
+    return { moved: true };
+  }
+  if (git(dir, ['status', '--porcelain', '--untracked-files=no'], { allowFail: true })) {
+    return { moved: false, note: `Your ${base} checkout has changes, so it was not moved. Run: git merge --ff-only ${commit.slice(0, 8)}` };
+  }
+  try {
+    git(dir, ['merge', '--ff-only', commit]);
+    return { moved: true };
+  } catch (err) {
+    return { moved: false, note: `Your ${base} checkout was not moved (${(err as Error).message.replace(/^git merge failed: /, '')}). Run: git merge --ff-only ${commit.slice(0, 8)}` };
+  }
+}
+
+/**
+ * Merge a ticket's branch into the base branch with a merge commit, without checking anything out, so the next
+ * tickets start from it. Throws when the branch clashes with changes already in the base.
+ */
+export function mergeIntoBase(dir: string, base: string, branch: string, message: string): { commit: string; moved: boolean; note?: string } {
+  const baseSha = git(dir, ['rev-parse', base]);
+  const branchSha = git(dir, ['rev-parse', branch]);
+  // Already in the base (merged before, or nothing new): nothing to do.
+  if (isAncestor(dir, branchSha, baseSha)) return { commit: baseSha, moved: true };
+  let tree: string;
+  try {
+    tree = git(dir, ['merge-tree', '--write-tree', baseSha, branchSha]).split('\n')[0]!.trim();
+  } catch {
+    throw new Error(`${branch} clashes with changes already in ${base}.`);
+  }
+  const commit = git(dir, [...authorArgs(dir), 'commit-tree', tree, '-p', baseSha, '-p', branchSha, '-m', message]);
+  return { commit, ...moveBase(dir, base, commit) };
+}
+
+function isAncestor(dir: string, a: string, b: string): boolean {
+  try {
+    execFileSync('git', ['merge-base', '--is-ancestor', a, b], { cwd: dir, stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
 }

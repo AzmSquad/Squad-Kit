@@ -118,12 +118,19 @@ export interface TicketSessions {
   tester?: string;
 }
 
+export interface TicketBrief {
+  criteria: string[];
+  rules: string[];
+  edgeCases: string[];
+}
+
 export interface Ticket {
   id: string;
   title: string;
   ask: string;
   kind: 'feature' | 'bug';
-  source: { type: 'manual' | 'azure' | 'github' | 'jira'; ref?: string };
+  /** Where the ticket came from. For tracker items: its id, web link and type (User Story, Bug…). */
+  source: { type: 'manual' | 'azure' | 'github' | 'jira'; ref?: string; id?: string; url?: string; itemType?: string };
   priority: 'high' | 'normal' | 'low';
   stage: Stage;
   /** One line under the card title: what is happening now. */
@@ -164,13 +171,32 @@ export interface Ticket {
   /** Step to run again when the person picks "Try again" on a stuck card. */
   retryPhase?: string;
   attachments?: string[];
+  /** What the person added when writing the ticket by hand: their own acceptance criteria, business rules and edge cases. */
+  brief?: TicketBrief;
   /** In a multi-repo workspace: the code repo this ticket changes. */
   repo?: string;
   /** Set when the person presses Stop; the live squad stops the running step. */
   stopRequested?: boolean;
   /** The squad's review notes still to fix, passed to the Builder. */
   reviewNotes?: string[];
+  /** The pull request opened after the proof was accepted. */
+  pr?: { id: number; url: string; repo: string; host: 'azure' };
+  /** When the change went into the base branch. Accepted work merges right away, so later tickets build on it. */
+  mergedAt?: string;
+  /** Set by the watchdog when a running step shows no progress: what it waits on, and whether that looks stuck. */
+  quiet?: { since: string; kind: 'stuck' | 'long'; detail: string; command?: string; pid?: number };
+  /** "Keep waiting": the watchdog stays quiet about this ticket until then. */
+  quietSnoozedUntil?: string;
+  /** Updates still to send to the tracker; the live squad sends them, so terminal commands never wait on Azure. */
+  trackerQueue?: TrackerEvent[];
 }
+
+export type TrackerEvent =
+  | { kind: 'started' }
+  | { kind: 'answered' }
+  | { kind: 'planned' }
+  | { kind: 'released'; version: string }
+  | { kind: 'file-bug' };
 
 export interface Release {
   version: string;
@@ -227,6 +253,8 @@ export interface BoardMeta {
   scan?: { status: 'pending' | 'running' | 'done' | 'failed'; at?: string; error?: string; summary?: string; empty?: boolean };
   /** How many squad jobs may run at the same time. */
   parallel?: number;
+  /** How squad-kit talks to Claude: through the Agent Client Protocol (default), or by running Claude Code directly. */
+  runner?: 'acp' | 'direct';
   /**
    * A workspace that holds several code repos (each with its own git). Without it, the project
    * folder itself is the one repo, using `commands` and `git`.

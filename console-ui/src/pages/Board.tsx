@@ -44,9 +44,10 @@ export function BoardPage() {
   if (!data) return <NoBoard />;
 
   const ORDER = ['questions', 'plan', 'stuck', 'proof', 'release'];
+  // A step that looks stuck needs the person as much as a question does, so it comes first.
   const waiting = data.tickets
-    .filter((t) => t.waiting)
-    .sort((a, b) => ORDER.indexOf(a.waiting!.kind) - ORDER.indexOf(b.waiting!.kind));
+    .filter((t) => t.waiting || t.quiet?.kind === 'stuck')
+    .sort((a, b) => (a.waiting ? ORDER.indexOf(a.waiting.kind) : -1) - (b.waiting ? ORDER.indexOf(b.waiting.kind) : -1));
 
   return (
     <>
@@ -109,9 +110,9 @@ export function BoardPage() {
                     <span>{STAGE_NAME[t.stage]}</span>
                   </div>
                   <h3>{t.title}</h3>
-                  <p>{t.waiting!.summary}</p>
+                  <p>{t.waiting?.summary ?? 'Looks stuck. Check what it is waiting on'}</p>
                 </div>
-                <span className="btn sm pri">{actionLabel(t)}</span>
+                <span className="btn sm pri">{t.waiting ? actionLabel(t) : 'Check it'}</span>
               </button>
             ))}
           </div>
@@ -163,7 +164,7 @@ export function BoardPage() {
 }
 
 function Card({ t, selected, onOpen }: { t: Ticket; selected: boolean; onOpen(): void }) {
-  const you = Boolean(t.waiting);
+  const you = Boolean(t.waiting) || t.quiet?.kind === 'stuck';
   return (
     <button className={`card ${you ? 'you' : ''} ${t.kind === 'bug' ? 'bug' : ''} ${selected ? 'sel' : ''}`} onClick={onOpen}>
       <div className="row1">
@@ -173,7 +174,7 @@ function Card({ t, selected, onOpen }: { t: Ticket; selected: boolean; onOpen():
       <h4>{t.title}</h4>
       <div className="st">
         {t.live && !you ? <span className="live" /> : t.stage === 'release' ? <Check size={13} strokeWidth={2.5} /> : null}
-        <span>{t.status}</span>
+        <span>{t.quiet ? (t.quiet.kind === 'stuck' ? `Looks stuck: ${t.quiet.command ?? 'no progress'}` : `Taking long: ${t.quiet.command ?? t.status}`) : t.status}</span>
       </div>
       {typeof t.progress === 'number' && !you && (
         <div className="bar">

@@ -75,6 +75,13 @@ describe('live release', () => {
 
     actions.approve(bp, 'AP-1');
     expect(readTicket(bp, 'AP-1')!.release).toBe('v1.5.0');
+    // Merge on accept: main has the change right away, so the next ticket starts from it. Nothing is pushed yet.
+    expect(readTicket(bp, 'AP-1')!.mergedAt).toBeTruthy();
+    expect(sh('git log --format=%s -1 main', project)).toBe('Merge Say hello (AP-1)');
+    expect(fs.existsSync(path.join(project, 'hello.txt'))).toBe(true);
+    expect(sh('git log --format=%s -1 main', remote)).toBe('start');
+    const next = addWorktree(project, 'AP-2', 'main');
+    expect(fs.existsSync(path.join(next.dir, 'hello.txt'))).toBe(true);
 
     const release = await actions.releaseVersion(bp);
     expect(release.from).toBe('v1.4.2');

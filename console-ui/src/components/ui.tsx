@@ -96,8 +96,10 @@ export function Modal({
   children,
   footer,
   icon,
+  wide,
 }: {
   title: string;
+  wide?: boolean;
   onClose(): void;
   children: ReactNode;
   footer?: ReactNode;
@@ -110,7 +112,7 @@ export function Modal({
   }, [onClose]);
   return (
     <div className="modal-veil" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal" role="dialog" aria-modal="true" aria-label={title}>
+      <div className={`modal ${wide ? 'wide' : ''}`} role="dialog" aria-modal="true" aria-label={title}>
         <header>
           {icon}
           <h3>{title}</h3>

@@ -1,0 +1,101 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { boardPaths, type BoardPaths } from '../src/board/store.js';
+import { seedDemoBoard } from '../src/board/demo.js';
+import { loadSecrets, mergeSecrets, saveSecrets } from '../src/core/secrets.js';
+import { MUNSIT_URL, munsitKey, prepareMedia, transcriptOf } from '../src/engine/media.js';
+
+let tmp: string;
+let bp: BoardPaths;
+let dir: string;
+const savedEnv = process.env.MUNSIT_API_KEY;
+
+beforeEach(() => {
+  delete process.env.MUNSIT_API_KEY;
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-media-test-'));
+  bp = boardPaths(path.join(tmp, '.squad'));
+  seedDemoBoard(bp, { speed: 50 });
+  dir = path.join(tmp, 'files');
+  fs.mkdirSync(dir);
+});
+
+afterEach(() => {
+  if (savedEnv === undefined) delete process.env.MUNSIT_API_KEY;
+  else process.env.MUNSIT_API_KEY = savedEnv;
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+function file(name: string, body = 'x'): string {
+  const f = path.join(dir, name);
+  fs.writeFileSync(f, body);
+  return f;
+}
+
+function munsit(answer: unknown, status = 200) {
+  const calls: { url: string; auth: string }[] = [];
+  const fake = (async (url: string, init: RequestInit) => {
+    calls.push({ url, auth: (init.headers as Record<string, string>).authorization });
+    return new Response(JSON.stringify(answer), { status });
+  }) as unknown as typeof fetch;
+  return { calls, fake };
+}
+
+describe('voice and video notes', () => {
+  it('without a Munsit key, keeps the note and says nobody can hear it', async () => {
+    const r = await prepareMedia(bp, [file('voice.ogg'), file('shot.png')]);
+    expect(r.missingKey).toBe(true);
+    expect(r.added).toEqual([]);
+    expect(r.notes[0]).toMatch(/Add a Munsit key in Settings/);
+  });
+
+  it('reads the key saved in Settings', () => {
+    const secretsFile = path.join(tmp, '.squad', 'secrets.yaml');
+    saveSecrets(secretsFile, mergeSecrets(loadSecrets(secretsFile), { speech: { munsit: 'k-123' } }));
+    expect(munsitKey(bp)).toBe('k-123');
+  });
+
+  it('writes out a voice note once, and leaves pictures alone', async () => {
+    const note = file('voice.ogg');
+    const { calls, fake } = munsit({ data: { transcription: 'المدير يقول لا أكثر من ٣ مواعيد' } });
+    const r = await prepareMedia(bp, [note, file('shot.png')], { key: 'k-1', fetch: fake });
+    expect(calls).toEqual([{ url: MUNSIT_URL, auth: 'Bearer k-1' }]);
+    expect(r.added).toEqual([transcriptOf(note)]);
+    expect(fs.readFileSync(transcriptOf(note), 'utf8')).toContain('لا أكثر من ٣ مواعيد');
+    const again = await prepareMedia(bp, [note], { key: 'k-1', fetch: fake });
+    expect(again.added).toEqual([]);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('gives long notes their times', async () => {
+    const note = file('long.m4a');
+    const words = [{ word: 'first', start: 1 }, { word: 'second', start: 12 }, { word: 'late', start: 65 }];
+    const { fake } = munsit({ data: { transcription: 'first second late', timestamps: words } });
+    await prepareMedia(bp, [note], { key: 'k', fetch: fake });
+    const text = fs.readFileSync(transcriptOf(note), 'utf8');
+    expect(text).toContain('0:00  first');
+    expect(text).toContain('0:10  second');
+    expect(text).toContain('1:00  late');
+  });
+
+  it('takes the sound and pictures out of a video', async () => {
+    const video = file('screen.mp4');
+    const shot = file('screen.mp4.screen-01-0m02s.jpg');
+    const { fake } = munsit({ data: { transcription: 'click here' } });
+    const r = await prepareMedia(bp, [video], {
+      key: 'k',
+      fetch: fake,
+      extractAudio: (_v, out) => fs.writeFileSync(out, 'sound'),
+      extractFrames: () => [shot],
+    });
+    expect(r.added).toEqual([shot, transcriptOf(video)]);
+  });
+
+  it('a wrong key is reported, not thrown', async () => {
+    const { fake } = munsit({}, 401);
+    const r = await prepareMedia(bp, [file('voice.opus')], { key: 'bad', fetch: fake });
+    expect(r.added).toEqual([]);
+    expect(r.notes[0]).toMatch(/did not accept the key/);
+  });
+});

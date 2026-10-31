@@ -22,6 +22,8 @@ import {
   runInbox,
   runNew,
   runPull,
+  runBacklog,
+  runUnstick,
   runRelease,
   runShow,
   runStop,
@@ -38,6 +40,11 @@ import {
 import { runRmFeature, runRmPlan, runRmStory } from './commands/rm/index.js';
 import { runAuthLogin, runAuthStatus, runAuthLogout } from './commands/auth/index.js';
 import { readInstalledPackage } from './core/package-info.js';
+
+/** Collects a repeatable option into a list. */
+function more(value: string, previous: string[]): string[] {
+  return [...previous, value];
+}
 
 const program = new Command();
 
@@ -173,7 +180,8 @@ program
     (v) => parseInt(v, 10),
   )
   .option('--no-open', 'Do not auto-open the browser; print the URL instead')
-  .option('--token <hex>', 'Reuse a specific session token (advanced; default: random per session)')
+  .option('--token <hex>', 'Reuse a specific session token (advanced; default: the same link as last time)')
+  .option('--restart', 'Stop the board that is already running for this project, then start a fresh one')
   .action(wrap(runConsole));
 
 program
@@ -215,6 +223,11 @@ program
   .description('Stop the squad on a ticket; the work so far is kept')
   .action(wrapArgs(runStop));
 program
+  .command('unstick <ticket>')
+  .description('End the command a ticket looks stuck on, so the squad carries on')
+  .option('--keep-waiting', 'It is just slow: stay quiet about it for 10 minutes')
+  .action(wrapArgs(runUnstick));
+program
   .command('watch <ticket>')
   .description('Follow a ticket live until it needs you')
   .action(wrapArgs(runWatch));
@@ -236,11 +249,23 @@ program
   .description('Write a new ticket in plain words')
   .option('--ask <text>', 'What you want, in a sentence or two')
   .option('--priority <level>', 'high, normal or low')
+  .option('--bug', 'It is a bug, not a new feature')
+  .option('--criteria <text>', 'An acceptance criterion (repeat for more)', more, [])
+  .option('--rule <text>', 'A business rule (repeat for more)', more, [])
+  .option('--edge <text>', 'An edge case to handle (repeat for more)', more, [])
+  .option('--attach <file>', 'Attach a file: a screenshot, a document (repeat for more)', more, [])
+  .option('--from <text>', 'Paste an idea or a chat message; the Analyst fills in the ticket for you to check')
   .action(wrapArgs(runNew));
 program
   .command('pull <ref>')
-  .description('Pull a ticket from Azure DevOps, for example AB#4133')
+  .description('Start a ticket from an Azure DevOps work item, for example 35 or AB#35')
   .action(wrapArgs(runPull));
+program
+  .command('backlog')
+  .description("Show the sprint's stories and bugs from Azure DevOps")
+  .option('--sprint <name>', 'Which sprint, for example "Sprint 1" (default: the current one)')
+  .option('--all', 'Everything open, in every sprint')
+  .action(wrapArgs(runBacklog));
 
 program
   .command('list')

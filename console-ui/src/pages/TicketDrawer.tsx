@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { ArrowUp, Check, Code, Copy, Download, ExternalLink, MessageCircle, Send, Square, X } from 'lucide-react';
-import { assetUrl } from '../api/client';
+import { ArrowUp, Check, Code, Copy, Download, ExternalLink, GitPullRequest, MessageCircle, Send, Square, X } from 'lucide-react';
+import { assetUrl, ticketFileUrl } from '../api/client';
 import type { Question, Ticket } from '../api/types';
 import { useAct, useTicket } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { Cmd, Glyph, Modal, ROLE_NAME, Tracker, ago, clock, commandFor } from '../components/ui';
+import { ConversationTab } from '../components/Conversation';
+import { Lightbox, type Picture } from '../components/Lightbox';
 
-type Tab = 'now' | 'story' | 'plan' | 'activity' | 'proof' | 'developer';
+type Tab = 'now' | 'story' | 'plan' | 'activity' | 'conversation' | 'proof' | 'developer';
 
 export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
   const ticket = useTicket(id);
@@ -31,10 +33,20 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
             <div className="dh">
               <div className="dtop">
                 <span className="idtag">{t.id}</span>
-                {t.source.type === 'azure' && (
-                  <span className="src">
-                    <Download size={14} /> From Azure {t.source.ref}
-                  </span>
+                {t.source.type === 'azure' &&
+                  (t.source.url ? (
+                    <a className="src" href={t.source.url} target="_blank" rel="noreferrer">
+                      <Download size={14} /> {t.source.itemType ?? 'Azure'} {t.source.ref} <ExternalLink size={12} />
+                    </a>
+                  ) : (
+                    <span className="src">
+                      <Download size={14} /> From Azure {t.source.ref}
+                    </span>
+                  ))}
+                {t.pr && (
+                  <a className="src" href={t.pr.url} target="_blank" rel="noreferrer">
+                    <GitPullRequest size={14} /> Pull request {t.pr.id} <ExternalLink size={12} />
+                  </a>
                 )}
                 {t.kind === 'bug' && <span className="prio">Bug{t.foundIn ? ` found in ${t.foundIn}` : ''}</span>}
                 {t.priority === 'high' && t.kind !== 'bug' && <span className="prio">High priority</span>}
@@ -78,6 +90,7 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
                   ['story', 'Story'],
                   ['plan', 'Plan'],
                   ['activity', 'Activity'],
+                  ['conversation', 'Conversation'],
                   ['proof', 'Proof'],
                 ] as [Tab, string][]
               ).map(([k, label]) => (
@@ -94,6 +107,7 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
             {tab === 'story' && <StoryTab t={t} />}
             {tab === 'plan' && <PlanTab t={t} />}
             {tab === 'activity' && <ActivityTab t={t} />}
+            {tab === 'conversation' && <ConversationTab t={t} />}
             {tab === 'proof' && <ProofTab t={t} />}
             {tab === 'developer' && <DeveloperTab t={t} />}
           </>
@@ -104,6 +118,7 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
 }
 
 function NowPanel({ t }: { t: Ticket }) {
+  if (!t.waiting && t.quiet) return <QuietPanel t={t} />;
   switch (t.waiting?.kind) {
     case 'questions':
       return <QuestionsPanel t={t} />;
@@ -408,10 +423,16 @@ function GatePills({ t }: { t: Ticket }) {
 }
 
 function ProofShots({ t }: { t: Ticket }) {
+  const [zoom, setZoom] = useState<number | null>(null);
   if (!t.proof?.length) return <p className="note">No screens change in this ticket, so the passing checks are the proof.</p>;
+  const pictures: Picture[] = t.proof.flatMap((p) => [
+    { src: assetUrl(`/api/v1/proof/${p.before}`), caption: `${p.criterion} · ${p.beforeLabel}` },
+    { src: assetUrl(`/api/v1/proof/${p.after}`), caption: `${p.criterion} · ${p.afterLabel}` },
+  ]);
   return (
     <>
-      {t.proof.map((p) => (
+      {zoom !== null && <Lightbox pictures={pictures} start={zoom} onClose={() => setZoom(null)} />}
+      {t.proof.map((p, k) => (
         <div className="critrow" key={p.criterion}>
           <h5>
             <Check size={15} strokeWidth={2.5} />
@@ -420,11 +441,15 @@ function ProofShots({ t }: { t: Ticket }) {
           <div className="proofmini">
             <div>
               <small>{p.beforeLabel}</small>
-              <img src={assetUrl(`/api/v1/proof/${p.before}`)} alt={`${p.criterion}, ${p.beforeLabel}`} />
+              <button className="zoom" onClick={() => setZoom(k * 2)} aria-label={`Open ${p.beforeLabel} full size`}>
+                <img src={assetUrl(`/api/v1/proof/${p.before}`)} alt={`${p.criterion}, ${p.beforeLabel}`} />
+              </button>
             </div>
             <div>
               <small>{p.afterLabel}</small>
-              <img src={assetUrl(`/api/v1/proof/${p.after}`)} alt={`${p.criterion}, ${p.afterLabel}`} />
+              <button className="zoom" onClick={() => setZoom(k * 2 + 1)} aria-label={`Open ${p.afterLabel} full size`}>
+                <img src={assetUrl(`/api/v1/proof/${p.after}`)} alt={`${p.criterion}, ${p.afterLabel}`} />
+              </button>
             </div>
           </div>
         </div>
@@ -527,6 +552,46 @@ function StuckPanel({ t }: { t: Ticket }) {
 }
 
 /* ── Working, ready, released ──────────────────────────── */
+
+/** The watchdog saw no progress: say what the step waits on and let the person decide. Nothing hangs silently. */
+function QuietPanel({ t }: { t: Ticket }) {
+  const act = useAct();
+  const q = t.quiet!;
+  const stuck = q.kind === 'stuck';
+  return (
+    <>
+      <div className="db">
+        <div className="lbl">{stuck ? 'This step looks stuck' : 'This step is taking long'}</div>
+        <div className="stuckbox">
+          <p style={{ margin: 0 }}>{q.detail}</p>
+          {q.command && <p className="mono" style={{ fontSize: 12.5, margin: '8px 0 0', overflowWrap: 'anywhere' }}>{q.command}</p>}
+          <p className="note" style={{ margin: '8px 0 0', fontSize: 12.5 }}>No progress since {clock(q.since)}. Nothing is lost whatever you choose.</p>
+        </div>
+        <div className="lbl">What to do</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {q.pid && (
+            <button className="btn pri" disabled={act.isPending} onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/unstick`, done: 'Ended the stuck command. The squad carries on.' })}>
+              End the stuck command
+            </button>
+          )}
+          <button className="btn" disabled={act.isPending} onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/keep-waiting`, done: 'OK. squad-kit stays quiet about it for 10 minutes.' })}>
+            Keep waiting
+          </button>
+          <button className="btn" disabled={act.isPending} onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/stop`, done: 'Stopping. The work so far is kept.' })}>
+            <Square size={13} /> Stop
+          </button>
+        </div>
+        <p className="note" style={{ marginTop: 10, fontSize: 12.5 }}>
+          Ending the command gives the squad an error back, and it carries on in the same conversation. See what it was doing in the Conversation tab.
+        </p>
+      </div>
+      <div className="foot">
+        <span className="grow" />
+        <Cmd text={q.pid ? `squad unstick ${t.id}` : `squad stop ${t.id}`} />
+      </div>
+    </>
+  );
+}
 
 function WorkingPanel({ t }: { t: Ticket }) {
   const stop = useAct();
@@ -644,12 +709,62 @@ function StoryTab({ t }: { t: Ticket }) {
     <div className="db">
       <div className="lbl">What was asked</div>
       <p className="story" style={{ whiteSpace: 'pre-wrap' }}>{t.ask}</p>
+      <BriefList head="Your acceptance criteria" items={t.brief?.criteria} />
+      <BriefList head="Business rules" items={t.brief?.rules} />
+      <BriefList head="Edge cases" items={t.brief?.edgeCases} />
+      <Attachments t={t} />
       {t.story ? (
         <PlanBody t={{ ...t, decision: undefined, work: undefined }} />
       ) : (
         <p className="note" style={{ marginTop: 16 }}>The Analyst writes the user story after your answers.</p>
       )}
     </div>
+  );
+}
+
+function BriefList({ head, items }: { head: string; items?: string[] }) {
+  if (!items?.length) return null;
+  return (
+    <>
+      <div className="lbl">{head}</div>
+      <ul className="brief">
+        {items.map((x, i) => (
+          <li key={i}>{x}</li>
+        ))}
+      </ul>
+    </>
+  );
+}
+
+const IMAGE = /\.(png|jpe?g|gif|webp|bmp)$/i;
+
+/** The files that came with the ticket. Pictures open in the viewer; anything else opens or downloads. */
+function Attachments({ t }: { t: Ticket }) {
+  const [zoom, setZoom] = useState<number | null>(null);
+  const files = t.attachments ?? [];
+  if (!files.length) return null;
+  const name = (f: string) => f.split(/[\\/]/).pop() ?? f;
+  const pictures: Picture[] = files.filter((f) => IMAGE.test(f)).map((f) => ({ src: ticketFileUrl(t.id, f), caption: name(f) }));
+  const others = files.filter((f) => !IMAGE.test(f));
+  return (
+    <>
+      <div className="lbl">Attached · {files.length}</div>
+      {pictures.length > 0 && (
+        <div className="thumbs">
+          {pictures.map((p, i) => (
+            <button key={p.src} className="zoom thumb" onClick={() => setZoom(i)} aria-label={`Open ${p.caption} full size`}>
+              <img src={p.src} alt={p.caption} loading="lazy" />
+            </button>
+          ))}
+        </div>
+      )}
+      {others.map((f) => (
+        <a key={f} className="filechip mono" href={ticketFileUrl(t.id, f)} target="_blank" rel="noreferrer">
+          {name(f)}
+        </a>
+      ))}
+      {zoom !== null && <Lightbox pictures={pictures} start={zoom} onClose={() => setZoom(null)} />}
+    </>
   );
 }
 

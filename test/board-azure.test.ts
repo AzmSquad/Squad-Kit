@@ -1,0 +1,210 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { execSync } from 'node:child_process';
+import { boardPaths, readTicket, updateTicket, writeMeta, type BoardPaths } from '../src/board/store.js';
+import * as actions from '../src/board/actions.js';
+import { addWorktree } from '../src/engine/git.js';
+import { azureFor } from '../src/engine/azure.js';
+import { flushTracker, publishTicket } from '../src/engine/sync.js';
+
+const AZURE_URL = 'https://dev.azure.com/momenysr/Mawid/_git/Mawid';
+
+let tmp: string;
+let project: string;
+let remote: string;
+let bp: BoardPaths;
+let calls: { method: string; url: string; body: unknown }[];
+
+const sh = (cmd: string, cwd: string) => execSync(cmd, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+
+/** Azure DevOps as far as squad-kit uses it. Completing a PR really merges it in the local "remote". */
+function fakeAzure() {
+  const states = new Map<number, string>([[35, 'New']]);
+  let prStatus = 'active';
+  const reply = (data: unknown) => new Response(JSON.stringify(data), { status: 200 });
+  return async (url: string, init: RequestInit = {}) => {
+    const method = init.method ?? 'GET';
+    const body = typeof init.body === 'string' ? JSON.parse(init.body) : init.body;
+    calls.push({ method, url, body });
+    if (method === 'GET' && /workitems\/35\?\$expand=relations/.test(url)) {
+      return reply({
+        id: 35,
+        fields: {
+          'System.WorkItemType': 'User Story',
+          'System.Title': 'Owner signs up for a Mawid account',
+          'System.State': states.get(35),
+          'System.Description': '<p>As a business owner, I want to sign up.</p>',
+          'Microsoft.VSTS.Common.AcceptanceCriteria': '<ol><li>Given the sign-up page, then an account is made.</li></ol>',
+          'Microsoft.VSTS.Common.Priority': 1,
+        },
+        relations: [],
+      });
+    }
+    if (method === 'GET' && /workitems\/35\?fields=System.WorkItemType/.test(url)) {
+      return reply({ id: 35, fields: { 'System.WorkItemType': 'User Story', 'System.State': states.get(35) } });
+    }
+    if (method === 'GET' && /workitems\/35\?fields=System.Tags/.test(url)) return reply({ id: 35, fields: { 'System.Tags': 'owner; mvp' } });
+    if (method === 'GET' && /workitemtypes\/User%20Story\/states/.test(url)) {
+      return reply({ value: [{ name: 'New', category: 'Proposed' }, { name: 'Active', category: 'InProgress' }, { name: 'Resolved', category: 'Resolved' }, { name: 'Closed', category: 'Completed' }] });
+    }
+    if (method === 'PATCH' && /workitems\/35/.test(url)) {
+      const op = (body as { path: string; value: string }[]).find((o) => o.path === '/fields/System.State');
+      if (op) states.set(35, op.value);
+      return reply({ id: 35 });
+    }
+    if (method === 'POST' && /workItems\/35\/comments/.test(url)) return reply({ id: 1 });
+    if (method === 'GET' && /pullrequests\?searchCriteria/.test(url)) return reply({ value: [] });
+    if (method === 'POST' && /repositories\/Mawid\/pullrequests$|repositories\/Mawid\/pullrequests\?/.test(url)) return reply({ pullRequestId: 7, status: 'active' });
+    if (method === 'POST' && /pullRequests\/7\/attachments/.test(url)) return reply({ url: 'https://dev.azure.com/att/after-1.png' });
+    if (method === 'PATCH' && /pullrequests\/7/.test(url)) {
+      if ((body as { status?: string }).status === 'completed') {
+        // What Azure does when a PR completes: a merge commit on main, and the branch is deleted.
+        const work = path.join(tmp, 'azure-side');
+        sh(`git clone -q ${remote} ${work}`, tmp);
+        sh('git -c user.name=Azure -c user.email=a@a merge -q --no-ff -m "Merged PR 7" origin/squad/ap-1', work);
+        sh('git push -q origin main && git push -q origin --delete squad/ap-1', work);
+        prStatus = 'completed';
+      }
+      return reply({ pullRequestId: 7, status: prStatus });
+    }
+    if (method === 'GET' && /pullrequests\/7/.test(url)) {
+      return reply({ pullRequestId: 7, status: prStatus, lastMergeSourceCommit: { commitId: 'x' }, lastMergeCommit: { commitId: 'm' } });
+    }
+    return new Response(JSON.stringify({ message: `unexpected ${method} ${url}` }), { status: 404 });
+  };
+}
+
+beforeEach(() => {
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-azure-'));
+  project = path.join(tmp, 'app');
+  remote = path.join(tmp, 'remote.git');
+  fs.mkdirSync(project);
+  sh(`git init -q --bare -b main ${remote}`, tmp);
+  sh(`git init -q -b main && git remote add origin ${AZURE_URL}`, project);
+  // The repo says Azure; git really talks to the local bare repo.
+  sh(`git config url.${remote}.insteadOf ${AZURE_URL}`, project);
+  fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ name: 'mawid', version: '0.0.0' }, null, 2));
+  sh('git add -A && git -c user.name=t -c user.email=t@t commit -qm start', project);
+  fs.mkdirSync(path.join(project, '.squad'), { recursive: true });
+  fs.writeFileSync(
+    path.join(project, '.squad', 'config.yaml'),
+    'version: 1\nproject:\n  name: Mawid\n  projectRoots:\n    - .\ntracker:\n  type: azure\n  workspace: momenysr\n  project: Mawid\nnaming:\n  includeTrackerId: false\n  globalSequence: true\nagents: []\n',
+  );
+  vi.stubEnv('AZURE_DEVOPS_PAT', 'secret');
+  calls = [];
+  vi.stubGlobal('fetch', fakeAzure());
+  bp = boardPaths(path.join(project, '.squad'));
+  writeMeta(bp, {
+    project: 'Mawid',
+    key: 'AP',
+    nextNumber: 1,
+    engine: 'live',
+    user: { name: 'Momen', role: 'Project manager' },
+    roles: { analyst: 'Claude', architect: 'Claude', builder: 'Claude', tester: 'Claude', reviewer: 'Claude' },
+    tools: [],
+    speed: 1,
+    map: [],
+    lessons: [],
+    commands: {},
+    git: { base: 'main', remote: 'origin' },
+    scan: { status: 'done', empty: false },
+  });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+const statesSet = () =>
+  calls
+    .filter((c) => c.method === 'PATCH' && /workitems\/35/.test(c.url))
+    .flatMap((c) => (c.body as { path: string; value: string }[]).filter((o) => o.path === '/fields/System.State').map((o) => o.value));
+
+describe('Azure Boards and Repos', () => {
+  it('takes a story from Azure to a merged PR, a pushed release and a closed work item', async () => {
+    const az = azureFor(bp);
+    expect(az).not.toBeNull();
+
+    // 1. Start from the work item.
+    const t = await actions.startFromAzure(bp, az!, '35');
+    expect(t.source).toMatchObject({ type: 'azure', id: '35', ref: 'AB#35', itemType: 'User Story' });
+    expect(t.priority).toBe('high');
+    expect(t.ask).toContain('Acceptance criteria:\n- Given the sign-up page');
+    await flushTracker(bp, t.id);
+    expect(statesSet()).toEqual(['Active']);
+    await expect(actions.startFromAzure(bp, az!, '35')).rejects.toThrow(/already on the board as AP-1/);
+
+    // 2. The squad's work, as the live engine leaves it at the proof.
+    const wt = addWorktree(project, t.id, 'main');
+    fs.writeFileSync(path.join(wt.dir, 'signup.ts'), 'export const signup = true;\n');
+    fs.mkdirSync(bp.proofDir, { recursive: true });
+    fs.writeFileSync(path.join(bp.proofDir, 'AP-1-after-1.png'), 'png');
+    updateTicket(bp, t.id, (x) => {
+      x.worktree = wt.dir;
+      x.branch = wt.branch;
+      x.baseCommit = wt.baseCommit;
+      x.stage = 'review';
+      x.story = 'As an owner I want to sign up.';
+      x.criteria = [{ given: 'the sign-up page', when: 'I sign up', then: 'an account is made' }];
+      x.gates = { checks: 'pass', checksText: '12 tests pass', review: 'pass', proof: 'pass' };
+      x.proof = [{ criterion: 'An account is made', before: '', after: 'AP-1-after-1.png', beforeLabel: '', afterLabel: '' }];
+      x.releaseNote = '**Sign up.** Owners can make an account.';
+      x.waiting = { kind: 'proof', summary: 'The proof is ready for you to check' };
+      x.squad = null;
+      x.trackerQueue = undefined;
+    });
+
+    // 3. "Looks right" commits and hands the PR to the live squad.
+    actions.approve(bp, t.id);
+    expect(readTicket(bp, t.id)!.squad?.phase).toBe('publish');
+    await publishTicket(bp, t.id);
+    const published = readTicket(bp, t.id)!;
+    expect(published.pr).toMatchObject({ id: 7, repo: 'Mawid', url: `${AZURE_URL}/pullrequest/7` });
+    expect(published.squad).toBeNull();
+    expect(sh('git branch -r --list', project) || sh('git ls-remote --heads origin', project)).toContain('squad/ap-1');
+    const created = calls.find((c) => c.method === 'POST' && /pullrequests$|pullrequests\?/.test(c.url))!.body as Record<string, unknown>;
+    expect(created).toMatchObject({ sourceRefName: 'refs/heads/squad/ap-1', targetRefName: 'refs/heads/main', workItemRefs: [{ id: '35' }] });
+    const described = calls.filter((c) => c.method === 'PATCH' && /pullrequests\/7/.test(c.url) && (c.body as { description?: string }).description).at(-1)!.body as { description: string };
+    expect(described.description).toContain('![An account is made](https://dev.azure.com/att/after-1.png)');
+    expect(described.description).not.toMatch(/claude|\bai\b/i);
+    expect(statesSet()).toEqual(['Active', 'Resolved']);
+    // Merge on accept: the PR is merged right away, and the local main has it too, so the next ticket builds on it.
+    expect(published.mergedAt).toBeTruthy();
+    expect(published.status).toBe('Merged into main · goes out in v0.1.0');
+    expect(sh('git log --format=%s -1 main', remote)).toBe('Merged PR 7');
+    expect(sh('git rev-parse main', project)).toBe(sh('git rev-parse main', remote));
+
+    // 4. Release adds the changelog, version and tag on top, and pushes.
+    const release = await actions.releaseVersion(bp);
+    expect(release.version).toBe('v0.1.0');
+    expect(release.log?.filter((l) => !l.ok)).toEqual([]);
+    expect(release.log?.[0]?.text).toBe('Already in main: AP-1 Owner signs up for a Mawid account');
+    expect(calls.filter((c) => c.method === 'PATCH' && (c.body as { status?: string }).status === 'completed').length).toBe(1);
+    const log = sh('git log --format=%s main', remote).split('\n');
+    expect(log.slice(0, 2)).toEqual(['release v0.1.0', 'Merged PR 7']);
+    expect(sh('git tag', remote)).toBe('v0.1.0');
+    await flushTracker(bp, t.id);
+    expect(statesSet()).toEqual(['Active', 'Resolved', 'Closed']);
+    expect(calls.filter((c) => /comments/.test(c.url)).length).toBe(3);
+  }, 30_000);
+
+  it('files a reported bug on Azure', async () => {
+    const bug = actions.reportBug(bp, { what: 'Booking page is blank on Safari', severity: 'stops-work' });
+    expect(bug.trackerQueue).toEqual([{ kind: 'file-bug' }]);
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
+      calls.push({ method: init.method ?? 'GET', url, body: typeof init.body === 'string' ? JSON.parse(init.body) : init.body });
+      return new Response(JSON.stringify({ id: 90, fields: { 'System.WorkItemType': 'Bug', 'System.Title': 'Booking page is blank on Safari' } }), { status: 200 });
+    });
+    await flushTracker(bp, bug.id);
+    const after = readTicket(bp, bug.id)!;
+    expect(after.source).toMatchObject({ type: 'azure', id: '90', itemType: 'Bug' });
+    const ops = calls.at(-1)!.body as { path: string; value: string }[];
+    expect(calls.at(-1)!.url).toContain('_apis/wit/workitems/$Bug');
+    expect(ops).toContainEqual({ op: 'add', path: '/fields/Microsoft.VSTS.Common.Severity', value: '1 - Critical' });
+    expect(after.trackerQueue).toBeUndefined();
+  });
+});

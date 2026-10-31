@@ -18,6 +18,8 @@ export interface StartConsoleServerOptions {
   paths: SquadPaths;
   requestedPort: number;
   token: string;
+  /** When the running squad-kit code was built; the board compares it with the code on disk to spot updates. */
+  build?: number;
 }
 
 export interface ConsoleServer {
@@ -26,6 +28,8 @@ export interface ConsoleServer {
   done: Promise<void>;
   /** Programmatic close (used by tests). */
   close(): Promise<void>;
+  /** True when the person pressed Restart on the board; the console command then starts a fresh one. */
+  restartRequested(): boolean;
 }
 
 export async function startConsoleServer(opts: StartConsoleServerOptions): Promise<ConsoleServer> {
@@ -36,10 +40,14 @@ export async function startConsoleServer(opts: StartConsoleServerOptions): Promi
 
   const app = new Hono();
 
+  const startedAt = new Date().toISOString();
+  let restart = false;
+  let stopForRestart: () => void = () => {};
+
   // Public health endpoint (no auth) — used by tests and external uptime checks.
   app.get('/healthz', (c) =>
     c.json(
-      { ok: true, version: readInstalledPackage().version, port: bindPort },
+      { ok: true, version: readInstalledPackage().version, port: bindPort, startedAt },
       200,
       {
         'cache-control': 'no-store',
@@ -68,7 +76,18 @@ export async function startConsoleServer(opts: StartConsoleServerOptions): Promi
 
   // API: token-gated.
   app.use('/api/*', authMiddleware(opts.token));
-  mountApi(app, { paths: opts.paths });
+  mountApi(app, {
+    paths: opts.paths,
+    control: {
+      startedAt,
+      build: opts.build ?? 0,
+      restart: () => {
+        restart = true;
+        // Answer the request first, then stop.
+        setTimeout(() => stopForRestart(), 200);
+      },
+    },
+  });
 
   // Static SPA: public reads from project/dist/console-ui (story 02 fills it in).
   mountStaticAssets(app, { paths: opts.paths });
@@ -111,12 +130,14 @@ export async function startConsoleServer(opts: StartConsoleServerOptions): Promi
     });
   };
 
+  stopForRestart = stop;
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
 
   return {
     port: actualPort,
     done,
+    restartRequested: () => restart,
     close: () =>
       new Promise<void>((resolve, reject) => {
         shutdown((err) => {

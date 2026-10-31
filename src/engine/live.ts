@@ -17,10 +17,15 @@ import {
 import { scheduleSquad } from '../board/schedule.js';
 import type { BoardMeta, ProjectCommands, Question, Role, Ticket } from '../board/types.js';
 import { describeTool, runClaude, type RunOptions, type RunResult } from './claude.js';
-import { runChecks, runCommand, tail, testCount } from './checks.js';
+import { AcpStartError, acpAdapterPath, runClaudeAcp } from './acp-runner.js';
+import { runChecks, runCommand, startApp, tail, testCount, type RunningApp } from './checks.js';
 import { addWorktree } from './git.js';
 import * as P from './prompts.js';
 import { findNestedRepos, repoFor, rulesFiles } from './repos.js';
+import { flushTracker, publishTicket, syncWiki } from './sync.js';
+import { agentInstructions, readAgent, type AgentRole } from './agents.js';
+import { Watchdog, processTable, type Quiet } from './watchdog.js';
+import { isMediaNote, prepareMedia } from './media.js';
 
 /**
  * The live squad. Each step of a ticket is one real Claude Code run in the project (or the
@@ -52,7 +57,10 @@ export class LiveSquad {
   private running = new Set<string>();
   private timer: NodeJS.Timeout | null = null;
   private stops = new Map<string, AbortController>();
+  private syncing = new Set<string>();
   private closing = false;
+  private dog = new Watchdog();
+  private lastWatch = 0;
 
   constructor(private bp: BoardPaths) {}
 
@@ -92,6 +100,7 @@ export class LiveSquad {
       return;
     }
     if (meta.engine !== 'live') return;
+    this.watch();
     const limit = Math.max(1, meta.parallel ?? 2);
     if (meta.scan?.status === 'pending' && !this.running.has('__scan')) {
       this.launch('__scan', () => this.scan());
@@ -103,6 +112,13 @@ export class LiveSquad {
       return;
     }
     for (const t of listTickets(this.bp)) {
+      // Tracker updates run beside the squad's work and never count against the parallel limit.
+      if (t.trackerQueue?.length && !this.syncing.has(t.id)) {
+        this.syncing.add(t.id);
+        flushTracker(this.bp, t.id)
+          .catch(() => undefined)
+          .finally(() => this.syncing.delete(t.id));
+      }
       if (t.stopRequested) {
         this.stops.get(t.id)?.abort();
         if (!this.running.has(t.id)) this.stopped(t.id);
@@ -125,6 +141,7 @@ export class LiveSquad {
   private launch(key: string, job: () => Promise<void>): void {
     this.running.add(key);
     this.stops.set(key, new AbortController());
+    this.dog.beat(key);
     const phase = readTicket(this.bp, key)?.squad?.phase;
     job()
       .catch((err: Error) => {
@@ -135,7 +152,42 @@ export class LiveSquad {
       .finally(() => {
         this.running.delete(key);
         this.stops.delete(key);
+        this.dog.forget(key);
+        if (key !== '__scan') this.setQuiet(key, null);
       });
+  }
+
+  /**
+   * Every 15 seconds: is any running step quiet? Then say so on the ticket, with what it waits on, so nothing hangs
+   * without the person knowing.
+   */
+  private watch(): void {
+    if (Date.now() - this.lastWatch < 15_000) return;
+    this.lastWatch = Date.now();
+    const keys = [...this.running].filter((k) => k !== '__scan');
+    if (!keys.length) return;
+    const rows = processTable();
+    for (const id of keys) {
+      const t = readTicket(this.bp, id);
+      if (!t) continue;
+      const snoozed = t.quietSnoozedUntil && Date.parse(t.quietSnoozedUntil) > Date.now();
+      this.setQuiet(id, snoozed ? null : this.dog.check(id, Date.now(), rows));
+    }
+  }
+
+  private setQuiet(id: string, q: Quiet | null): void {
+    try {
+      const t = readTicket(this.bp, id);
+      if (!t || (!q && !t.quiet)) return;
+      if (q && t.quiet && q.kind === t.quiet.kind && q.detail === t.quiet.detail) return;
+      this.update(id, (x) => {
+        if (q && x.quiet?.kind !== q.kind) addActivity(x, 'squad', q.kind === 'stuck' ? `Looks stuck: ${q.detail}` : `Taking long: ${q.detail}`);
+        if (q) x.quiet = q;
+        else delete x.quiet;
+      });
+    } catch {
+      // The ticket was removed meanwhile.
+    }
   }
 
   /** The person pressed Stop: park the ticket with a way to pick it up again. */
@@ -148,6 +200,11 @@ export class LiveSquad {
   }
 
   /* ── helpers ─────────────────────────────────────────── */
+
+  /** Commands squad-kit runs itself (setup, checks) report to the watchdog too. */
+  private commandWatch(id: string) {
+    return { onSpawn: (pid: number) => this.dog.track(id, pid), onOutput: () => this.dog.beat(id) };
+  }
 
   private meta(): BoardMeta {
     return readMeta(this.bp);
@@ -189,9 +246,38 @@ export class LiveSquad {
     };
   }
 
-  private async claude(opts: RunOptions & { ticket?: string }): Promise<RunResult> {
+  private async claude(opts: RunOptions & { ticket?: string; role: AgentRole }): Promise<RunResult> {
     const signal = opts.ticket ? this.stops.get(opts.ticket)?.signal : undefined;
-    const r = await runClaude({ ...opts, ...(signal ? { signal } : {}) });
+    // Each role runs as its own agent: the team's file for it sets the tool, the model and extra instructions.
+    const agent = readAgent(this.bp, opts.role);
+    if (agent.tool !== 'claude') throw new Error(`The ${opts.role} agent is set to ${agent.tool}, which squad-kit cannot run yet. Switch it to Claude Code in Squad and AI.`);
+    const extra = agentInstructions(agent);
+    const appendSystemPrompt = [opts.appendSystemPrompt, extra].filter(Boolean).join('\n\n') || undefined;
+    const key = opts.ticket;
+    const watch = key ? { onActivity: () => this.dog.beat(key), onSpawn: (pid: number) => this.dog.track(key, pid) } : {};
+    const run = { ...opts, ...watch, ...(appendSystemPrompt ? { appendSystemPrompt } : {}), ...(agent.model ? { model: agent.model } : {}), ...(signal ? { signal } : {}) };
+    let r: RunResult;
+    // By default every role runs through the Agent Client Protocol; the direct runner is the fallback.
+    if (this.meta().runner !== 'direct' && acpAdapterPath()) {
+      try {
+        r = await runClaudeAcp({ ...run, acpLogDir: path.join(this.bp.dir, 'sessions') });
+      } catch (err) {
+        if (!(err instanceof AcpStartError)) throw err;
+        if (key) this.update(key, (x) => addActivity(x, 'squad', `ACP did not start (${err.message.slice(0, 160)}), so this step runs Claude Code directly`));
+        r = await runClaude(run);
+      }
+    } else {
+      r = await runClaude(run);
+    }
+    // ACP picks the id of a new conversation; keep the ticket pointing at it for follow-ups.
+    const asked = opts.resume ?? opts.sessionId;
+    if (key && asked && r.sessionId && r.sessionId !== asked) {
+      this.update(key, (x) => {
+        for (const k of Object.keys(x.sessions ?? {}) as (keyof NonNullable<Ticket['sessions']>)[]) {
+          if (x.sessions?.[k] === asked) x.sessions[k] = r.sessionId;
+        }
+      });
+    }
     if (!r.ok) throw new Error(r.error ?? 'Claude Code did not finish.');
     return r;
   }
@@ -206,10 +292,16 @@ export class LiveSquad {
         t.status = 'Stopped, needs you';
         t.stuck = {
           question: error,
-          options: [
-            { name: 'Try again', note: 'Run the same step again.' },
-            { name: 'Send it back to the plan', note: 'The Spec writer rewrites the plan with what went wrong.' },
-          ],
+          options:
+            retryPhase === 'publish'
+              ? [
+                  { name: 'Try again', note: 'Push the branch and open the pull request again.' },
+                  { name: 'Skip the pull request', note: 'Release merges this branch directly instead.' },
+                ]
+              : [
+                  { name: 'Try again', note: 'Run the same step again.' },
+                  { name: 'Send it back to the plan', note: 'The Spec writer rewrites the plan with what went wrong.' },
+                ],
         };
         t.waiting = { kind: 'stuck', summary: 'The squad stopped and needs you' };
         addActivity(t, 'squad', `Stopped: ${error}`);
@@ -227,8 +319,10 @@ export class LiveSquad {
     meta.scan = { status: 'running', at: now() };
     writeMeta(this.bp, meta);
     const nested = findNestedRepos(root);
+    await syncWiki(this.bp, undefined, true);
     try {
       const r = await this.claude({
+        role: 'architect',
         cwd: root,
         prompt: P.scanPrompt(meta, nested, this.ctx()),
         allowedTools: READ_ONLY,
@@ -306,9 +400,24 @@ export class LiveSquad {
         return this.review(id);
       case 'proof':
         return this.proof(id);
+      case 'publish':
+        return publishTicket(this.bp, id);
       default:
         this.update(id, (t) => (t.squad = null));
     }
+  }
+
+  /** Voice and video notes become text and pictures before any agent reads the ticket (agents cannot listen). */
+  private async hearNotes(id: string): Promise<void> {
+    const files = readTicket(this.bp, id)?.attachments ?? [];
+    if (!files.some((f) => isMediaNote(f))) return;
+    this.update(id, (t) => (t.status = 'Writing out the voice and video notes'));
+    const r = await prepareMedia(this.bp, files);
+    if (!r.notes.length) return;
+    this.update(id, (t) => {
+      t.attachments = [...new Set([...(t.attachments ?? []), ...r.added])];
+      for (const n of r.notes) addActivity(t, 'squad', n);
+    });
   }
 
   private async triage(id: string): Promise<void> {
@@ -326,6 +435,7 @@ export class LiveSquad {
   private async intake(id: string): Promise<void> {
     const root = projectRoot(this.bp);
     const meta = this.meta();
+    await this.hearNotes(id);
     const t0 = this.update(id, (t) => {
       t.stage = 'tickets';
       t.live = true;
@@ -333,6 +443,7 @@ export class LiveSquad {
       t.sessions = { ...t.sessions, intake: t.sessions?.intake ?? randomUUID() };
     });
     const r = await this.claude({
+        role: 'analyst',
       ticket: id,
       cwd: root,
       sessionId: t0.sessions!.intake,
@@ -377,6 +488,7 @@ export class LiveSquad {
     const n = t.questions!.indexOf(q) + 1;
     try {
       const r = await this.claude({
+        role: 'analyst',
         ticket: id,
         cwd: projectRoot(this.bp),
         resume: t.sessions?.intake,
@@ -410,6 +522,7 @@ export class LiveSquad {
     });
     const resume = Boolean(readTicket(this.bp, id)?.activity.some((a) => a.who === 'analyst'));
     const r = await this.claude({
+        role: 'architect',
       ticket: id,
       cwd: root,
       ...(resume ? { resume: t0.sessions!.intake } : { sessionId: t0.sessions!.intake }),
@@ -477,7 +590,7 @@ export class LiveSquad {
     const setup = repo.commands.setup?.trim();
     if (setup) {
       this.update(id, (x) => (x.status = `Setting up the copy: ${setup}`));
-      const r = await runCommand(wt.dir, setup, 20 * 60_000);
+      const r = await runCommand(wt.dir, setup, 20 * 60_000, this.commandWatch(id));
       // A new project has nothing to set up yet; the Builder creates it in this ticket.
       if (!r.ok && !meta.scan?.empty) throw new Error(`Setting up the project failed (${setup}): ${tail(r.output, 6)}`);
     }
@@ -500,7 +613,7 @@ export class LiveSquad {
       x.reviewRound = 0;
     });
     const resume = Boolean(t.activity.some((a) => a.who === 'builder' && a.text.startsWith('Started')));
-    this.update(id, (x) => addActivity(x, 'builder', resume ? 'Started again after your decision' : 'Started building'));
+    this.update(id, (x) => addActivity(x, 'builder', resume ? 'Picked up where it stopped' : 'Started building'));
     await this.runBuilder(id, resume ? 'Continue the steps that are not done yet, then run the tests.' : P.buildPrompt(meta, listDecisions(this.bp), t, this.ctx(t)), resume);
     this.update(id, (x) => {
       for (const s of x.steps ?? []) {
@@ -522,6 +635,7 @@ export class LiveSquad {
     const started = Date.now();
     let current = -1;
     await this.claude({
+        role: 'builder',
       ticket: id,
       cwd,
       ...(resume ? { resume: t.sessions!.build } : { sessionId: t.sessions!.build }),
@@ -600,7 +714,7 @@ export class LiveSquad {
       x.gates = { checks: 'pending', review: x.gates?.review ?? 'pending', proof: 'pending' };
       addActivity(x, 'tester', 'squad-kit is running the project checks');
     });
-    const results = await runChecks(t.worktree!, commands, (name) => this.update(id, (x) => (x.status = `Running ${name}: ${commands[name as 'test']}`)));
+    const results = await runChecks(t.worktree!, commands, (name) => this.update(id, (x) => (x.status = `Running ${name}: ${commands[name as 'test']}`)), this.commandWatch(id));
     const failed = results.filter((r) => !r.ok);
     if (results.length === 0) {
       this.update(id, (x) => {
@@ -671,6 +785,7 @@ export class LiveSquad {
     });
     const round = t0.reviewRound!;
     const r = await this.claude({
+        role: 'reviewer',
       ticket: id,
       cwd: t0.worktree!,
       ...(round > 1 ? { resume: t0.sessions!.review } : { sessionId: t0.sessions!.review }),
@@ -740,13 +855,34 @@ export class LiveSquad {
       addActivity(x, 'tester', when === 'before' ? 'Taking screenshots before the change' : 'Taking screenshots after the change');
     });
     fs.mkdirSync(this.bp.proofDir, { recursive: true });
+    const rc = repoFor(meta, t).commands;
+    let app: RunningApp | null = null;
+    if (rc.start && rc.url) {
+      this.update(id, (x) => (x.status = `Starting the app: ${rc.start}`));
+      try {
+        app = await startApp(t.worktree!, rc.start, rc.url);
+        this.update(id, (x) => addActivity(x, 'tester', `squad-kit started the app at ${rc.url}`));
+      } catch (err) {
+        // The Tester can still try on its own; it sees the error in the activity.
+        this.update(id, (x) => addActivity(x, 'tester', (err as Error).message.slice(0, 300)));
+      }
+    }
+    try {
+      await this.shoot(id, t, when, meta, app !== null);
+    } finally {
+      app?.stop();
+    }
+  }
+
+  private async shoot(id: string, t: Ticket, when: 'before' | 'after', meta: BoardMeta, appRunning: boolean): Promise<void> {
     const r = await this.claude({
+        role: 'tester',
       ticket: id,
       cwd: t.worktree!,
       ...(t.activity.some((a) => a.text === 'Taking screenshots before the change') && when === 'after'
         ? { resume: t.sessions!.tester }
         : { sessionId: t.sessions!.tester }),
-      prompt: P.proofPrompt(meta, t, this.bp.proofDir, when, this.ctx(t)),
+      prompt: P.proofPrompt(meta, t, this.bp.proofDir, when, this.ctx(t), appRunning),
       allowedTools: BUILD_TOOLS,
       disallowedTools: NO_GIT_WRITES,
       permissionMode: 'acceptEdits',

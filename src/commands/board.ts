@@ -19,12 +19,17 @@ import {
   requestChange,
   skipQuestions,
   stopTicket,
+  endStuckCommand,
+  keepWaiting,
   type AnswerInput,
+  type NewTicketInput,
 } from '../board/actions.js';
 import { tick } from '../board/engine.js';
 import { squadRunsElsewhere } from '../board/lock.js';
 import { seedDemoBoard } from '../board/demo.js';
 import { repoFor } from '../engine/repos.js';
+import { azureFor } from '../engine/azure.js';
+import { draftTicket } from '../engine/draft.js';
 import {
   boardExists,
   boardPaths,
@@ -77,6 +82,7 @@ function warnIfNoSquad(bp: BoardPaths): void {
 }
 
 function nextCommand(t: Ticket): string {
+  if (!t.waiting && t.quiet) return t.quiet.pid ? `squad unstick ${t.id}   or   squad unstick ${t.id} --keep-waiting` : `squad stop ${t.id}`;
   switch (t.waiting?.kind) {
     case 'questions':
       return `squad answer ${t.id}`;
@@ -114,7 +120,7 @@ export async function runInbox(): Promise<void> {
   }
   const w = Math.max(...items.map((t) => t.title.length));
   for (const t of items) {
-    out(`  ${id(t.id)}  ${t.title.padEnd(w)}   ${amber(t.waiting!.summary)}`);
+    out(`  ${id(t.id)}  ${t.title.padEnd(w)}   ${amber(t.waiting?.summary ?? `Looks stuck: ${t.quiet?.detail ?? ''}`)}`);
     out(`  ${' '.repeat(t.id.length)}  ${cmd(nextCommand(t))}`);
   }
   out();
@@ -413,17 +419,104 @@ export async function runBug(words: string[], opts: { in?: string; severity?: st
   ui.success(`${t.id} created${t.foundIn ? `, linked to ${t.foundIn}` : ''}. Triage is sorting it.`);
 }
 
-export async function runNew(words: string[], opts: { ask?: string; priority?: Ticket['priority'] }): Promise<void> {
+interface NewOptions {
+  ask?: string;
+  priority?: Ticket['priority'];
+  bug?: boolean;
+  criteria?: string[];
+  rule?: string[];
+  edge?: string[];
+  attach?: string[];
+  from?: string;
+}
+
+export async function runNew(words: string[], opts: NewOptions): Promise<void> {
   const bp = board();
-  const title = words.join(' ') || (await input({ message: 'Ticket title:' }));
-  const t = createTicket(bp, { title, ask: opts.ask, priority: opts.priority });
+  const files = (opts.attach ?? []).map((f) => {
+    if (!fs.existsSync(f)) throw new Error(`No file at ${f}`);
+    return { name: path.basename(f), data: fs.readFileSync(f).toString('base64') };
+  });
+  let fields: NewTicketInput = {
+    title: words.join(' '),
+    ask: opts.ask,
+    priority: opts.priority,
+    kind: opts.bug ? 'bug' : 'feature',
+    criteria: opts.criteria,
+    rules: opts.rule,
+    edgeCases: opts.edge,
+  };
+  if (opts.from !== undefined) {
+    ui.info('The Analyst is filling in the ticket…');
+    const d = await draftTicket(bp, { text: opts.from, files });
+    const list = (head: string, items: string[]) => (items.length ? `\n${kleur.bold(head)}\n${items.map((x) => `  - ${x}`).join('\n')}` : '');
+    console.log(
+      `\n${kleur.bold(d.title)} ${kleur.dim(`(${d.kind}, ${d.priority})`)}\n${d.ask}` +
+        list('Acceptance criteria', d.criteria) +
+        list('Business rules', d.rules) +
+        list('Edge cases', d.edgeCases) +
+        list('Still unclear (the Analyst will ask)', d.gaps) +
+        '\n',
+    );
+    if (!(await confirm({ message: 'Create this ticket?', default: true }))) {
+      ui.info('Not created.');
+      return;
+    }
+    // What the person typed as options wins over the draft.
+    fields = {
+      title: fields.title || d.title,
+      ask: fields.ask ?? d.ask,
+      priority: fields.priority ?? d.priority,
+      kind: opts.bug ? 'bug' : d.kind,
+      criteria: [...d.criteria, ...(fields.criteria ?? [])],
+      rules: [...d.rules, ...(fields.rules ?? [])],
+      edgeCases: [...d.edgeCases, ...(fields.edgeCases ?? [])],
+    };
+  }
+  const title = fields.title || (await input({ message: 'Ticket title:' }));
+  const t = createTicket(bp, { ...fields, title, files });
   ui.success(`${t.id} created. The Analyst is reading it.`);
+}
+
+export async function runUnstick(ticketId: string, opts: { keepWaiting?: boolean }): Promise<void> {
+  const bp = board();
+  if (opts.keepWaiting) {
+    const t = keepWaiting(bp, ticketId);
+    ui.success(`OK, waiting. squad-kit stays quiet about ${t.id} for 10 minutes.`);
+    return;
+  }
+  const t = endStuckCommand(bp, ticketId);
+  ui.success(`Ended the stuck command on ${t.id}. The squad carries on from there.`);
 }
 
 export async function runStop(ticketId: string): Promise<void> {
   const bp = board();
   const t = stopTicket(bp, ticketId);
   ui.success(`Stopping the squad on ${t.id}. The work so far is kept.`);
+}
+
+/** The sprint's open stories and bugs on Azure Boards, with the ticket each one became. */
+export async function runBacklog(opts: { sprint?: string; all?: boolean }): Promise<void> {
+  const bp = board();
+  const az = azureFor(bp);
+  if (!az) throw new Error('Azure DevOps is not set up for this project. Run: squad config set tracker');
+  const sprints = await az.sprints();
+  const wanted = opts.sprint?.toLowerCase();
+  const sprint = opts.all ? undefined : wanted ? sprints.find((s) => s.name.toLowerCase() === wanted || s.path.toLowerCase() === wanted) : sprints.find((s) => s.current) ?? sprints[0];
+  if (wanted && !sprint) throw new Error(`No sprint called "${opts.sprint}". Sprints: ${sprints.map((s) => s.name).join(', ')}`);
+  const items = await az.listWorkItems(sprint ? { sprintPath: sprint.path } : {});
+  const tickets = listTickets(bp).filter((t) => t.source.type === 'azure');
+  out();
+  out(`  ${kleur.bold('Backlog')} ${kleur.gray(`${sprint ? sprint.name : 'everything open'} · ${items.length} open`)}`);
+  out();
+  const w = Math.min(60, Math.max(10, ...items.map((i) => i.title.length)));
+  for (const i of items) {
+    const t = tickets.find((x) => x.source.id === String(i.id) || x.source.ref === `AB#${i.id}`);
+    const title = i.title.length > w ? `${i.title.slice(0, w - 1)}…` : i.title.padEnd(w);
+    const kind = i.type === 'Bug' ? kleur.red('bug ') : '    ';
+    const where = t ? kleur.gray(`${t.id} ${t.stage === 'done' ? 'released' : STAGE_NAME[t.stage]}`) : cmd(`squad pull ${i.id}`);
+    out(`  ${id(String(i.id).padStart(5))}  ${kind}${title}  ${kleur.gray(String(i.points ?? '').padStart(2))}  ${kleur.gray(i.state.padEnd(9))} ${where}`);
+  }
+  out();
 }
 
 export async function runPull(ref: string): Promise<void> {

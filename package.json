@@ -1,6 +1,6 @@
 {
   "name": "squad-kit",
-  "version": "0.12.4",
+  "version": "1.0.0-beta.1",
   "author": "Momen Yasser <momenysr@gmail.com>",
   "description": "Plan once, execute cheap. A token-efficient, 3-step SDD workflow CLI (stories → plans → implementation).",
   "keywords": [
@@ -43,6 +43,8 @@
     "prepublishOnly": "pnpm run verify:models && pnpm build && pnpm test && pnpm size:guard"
   },
   "dependencies": {
+    "@agentclientprotocol/claude-agent-acp": "0.99.1",
+    "@agentclientprotocol/sdk": "2.1.0",
     "@ai-sdk/anthropic": "^1.2.12",
     "@ai-sdk/google": "^1.2.22",
     "@ai-sdk/openai": "^1.3.24",

@@ -37,6 +37,10 @@ export interface SquadSecrets {
     azure?: TrackerAzureSecrets;
     github?: TrackerGitHubSecrets;
   };
+  /** Speech to text for voice and video notes attached to tickets. */
+  speech?: {
+    munsit?: string;
+  };
 }
 
 const EMPTY: SquadSecrets = {};
@@ -108,6 +112,7 @@ export function mergeSecrets(base: SquadSecrets, patch: SquadSecrets): SquadSecr
         ...filterEmpty((patch.tracker?.github ?? {}) as Record<string, unknown>),
       },
     },
+    ...(base.speech || patch.speech ? { speech: { ...(base.speech ?? {}), ...filterEmpty(patch.speech ?? {}) } } : {}),
   };
 }
 

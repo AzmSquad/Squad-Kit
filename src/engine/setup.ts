@@ -1,10 +1,12 @@
 import { execSync } from 'node:child_process';
+import path from 'node:path';
 import { boardExists, readMeta, writeMeta, type BoardPaths } from '../board/store.js';
 import type { BoardMeta } from '../board/types.js';
 import { claudeBinary, toolVersion } from './claude.js';
 import { currentBranch, ensureRepo, isRepo, remotes } from './git.js';
 import { findNestedRepos } from './repos.js';
 import { projectRoot } from './live.js';
+import { ensureAgents } from './agents.js';
 
 /** A short ticket key from the project name: "moj-taqadi" becomes "MT", "Leave requests" becomes "LR". */
 export function keyFor(name: string): string {
@@ -49,11 +51,15 @@ export function ensureLiveBoard(bp: BoardPaths, projectName: string): void {
     if (meta.engine === 'live') {
       meta.tools = detectTools();
       writeMeta(bp, meta);
+      ensureAgents(bp);
     }
     return;
   }
   // A workspace of separate code repos needs no repo of its own; a plain folder becomes one.
-  if (isRepo(root) || findNestedRepos(root).length === 0) ensureRepo(root, projectName);
+  const nested = findNestedRepos(root);
+  if (isRepo(root) || nested.length === 0) ensureRepo(root, projectName);
+  // A freshly cloned empty repo has nothing to branch from yet, so it gets its first commit too.
+  for (const r of nested) ensureRepo(path.join(root, r.path), projectName);
   const tools = detectTools();
   const meta: BoardMeta = {
     project: projectName,
@@ -72,4 +78,5 @@ export function ensureLiveBoard(bp: BoardPaths, projectName: string): void {
     parallel: 2,
   };
   writeMeta(bp, meta);
+  ensureAgents(bp);
 }

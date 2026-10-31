@@ -4,17 +4,25 @@ import { Check } from 'lucide-react';
 import { assetUrl } from '../api/client';
 import { useTicket } from '../lib/data';
 import { ProofDecision } from './TicketDrawer';
+import { Lightbox, type Picture } from '../components/Lightbox';
 
 export function ProofPage() {
   const { id } = useParams({ from: '/tickets/$id/proof' });
   const ticket = useTicket(id);
   const [pick, setPick] = useState(0);
+  const [zoom, setZoom] = useState<number | null>(null);
   const t = ticket.data;
   if (!t) return <div className="center">{ticket.isError ? `No ticket ${id}.` : 'Loading…'}</div>;
   const shots = t.proof ?? [];
   const shot = shots[Math.min(pick, shots.length - 1)];
   const waiting = t.waiting?.kind === 'proof';
   const g = t.gates;
+  // Every picture of the proof in order, so the viewer can step through all of them.
+  const pictures: Picture[] = shots.flatMap((s) => [
+    { src: assetUrl(`/api/v1/proof/${s.before}`), caption: `${s.criterion} · ${s.beforeLabel}` },
+    { src: assetUrl(`/api/v1/proof/${s.after}`), caption: `${s.criterion} · ${s.afterLabel}` },
+  ]);
+  const at = Math.min(pick, shots.length - 1) * 2;
 
   return (
     <>
@@ -53,13 +61,17 @@ export function ProofPage() {
                   <div className="cap">
                     <span>{shot.beforeLabel}</span>
                   </div>
-                  <img src={assetUrl(`/api/v1/proof/${shot.before}`)} alt={`${shot.criterion}, ${shot.beforeLabel}`} />
+                  <button className="zoom" onClick={() => setZoom(at)} aria-label={`Open ${shot.beforeLabel} full size`}>
+                    <img src={assetUrl(`/api/v1/proof/${shot.before}`)} alt={`${shot.criterion}, ${shot.beforeLabel}`} />
+                  </button>
                 </div>
                 <div>
                   <div className="cap">
                     <span>{shot.afterLabel}</span>
                   </div>
-                  <img src={assetUrl(`/api/v1/proof/${shot.after}`)} alt={`${shot.criterion}, ${shot.afterLabel}`} />
+                  <button className="zoom" onClick={() => setZoom(at + 1)} aria-label={`Open ${shot.afterLabel} full size`}>
+                    <img src={assetUrl(`/api/v1/proof/${shot.after}`)} alt={`${shot.criterion}, ${shot.afterLabel}`} />
+                  </button>
                 </div>
               </div>
               {shot.note && <p className="note">{shot.note}</p>}
@@ -69,6 +81,7 @@ export function ProofPage() {
           )}
         </div>
       </div>
+      {zoom !== null && <Lightbox pictures={pictures} start={zoom} onClose={() => setZoom(null)} />}
       {waiting ? (
         <ProofDecision t={t} sticky />
       ) : (

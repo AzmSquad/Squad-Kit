@@ -1,10 +1,14 @@
 import { useState } from 'react';
 import { Link } from '@tanstack/react-router';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '../api/client';
+import type { AgentInfo, TrackerStatus } from '../api/types';
 import { Bug, Check, Lightbulb, Map as MapIcon, RotateCcw, Terminal } from 'lucide-react';
 import type { Decision, ProjectCommands, RepoInfo } from '../api/types';
 import { useAct, useBoard, useDecisions } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { BugDialog } from '../components/dialogs';
+import { useRestart } from '../components/Restart';
 import { Cmd, Glyph, Modal, STAGE_NAME, actionLabel, ago, commandFor, dateShort } from '../components/ui';
 
 /* ── Waiting for you ───────────────────────────────────── */
@@ -251,25 +255,56 @@ export function BugsPage() {
 
 /* ── Squad and AI ──────────────────────────────────────── */
 
-const ROLES = [
-  { key: 'analyst', role: 'analyst', name: 'Analyst', job: 'Turns your words into a user story and "done when"' },
-  { key: 'architect', role: 'architect', name: 'Architect', job: 'Chooses how to build it and explains why' },
-  { key: 'builder', role: 'builder', name: 'Builder', job: 'Writes the code in small steps, never commits' },
-  { key: 'tester', role: 'tester', name: 'Tester', job: 'Runs every check and records before and after' },
-  { key: 'reviewer', role: 'reviewer', name: 'Reviewer', job: "Reviews the Builder's work, up to 2 rounds" },
-] as const;
+const TOOL_NAME: Record<AgentInfo['tool'], string> = { claude: 'Claude Code', codex: 'Codex' };
 
 export function SquadPage() {
   const board = useBoard();
   const meta = board.data?.ready ? board.data.meta : undefined;
+  const agents = useQuery({ queryKey: ['agents'], queryFn: () => api<AgentInfo[]>('/api/v1/agents'), refetchInterval: 2000 });
+  const [editing, setEditing] = useState<AgentInfo | null>(null);
   return (
     <>
       <div className="top">
         <h1>Squad and AI</h1>
       </div>
       <div className="scroll">
-        <div className="page" style={{ maxWidth: 860 }}>
-          <h2>Your AI tools</h2>
+        <div className="page" style={{ maxWidth: 900 }}>
+          <h2>The squad</h2>
+          <p className="note" style={{ marginTop: 2 }}>
+            squad-kit is the lead. Each role is its own agent with its own session and tools, and the Reviewer always starts fresh, so every change
+            gets a real second opinion. Edit an agent to give it house rules or a different model.
+          </p>
+          <div style={{ marginTop: 10 }}>
+            {(agents.data ?? []).map((a) => (
+              <div className="maprow" key={a.role} style={{ gridTemplateColumns: '34px 120px 1fr 200px 70px', alignItems: 'center' }}>
+                <Glyph role={a.role} />
+                <b>{a.name}</b>
+                <span style={{ fontSize: 13 }}>
+                  <span className="note">{a.job}</span>
+                  {a.working.length > 0 && (
+                    <span style={{ display: 'block', marginTop: 3 }}>
+                      {a.working.map((w) => (
+                        <Link key={w.id} to="/board" search={{ ticket: w.id }} style={{ display: 'block', color: 'var(--accent)' }}>
+                          <b className="mono">{w.id}</b> {w.status}
+                        </Link>
+                      ))}
+                    </span>
+                  )}
+                </span>
+                <span className="pills">
+                  <span className="pill">{TOOL_NAME[a.tool]}</span>
+                  {a.model && <span className="pill wait mono">{a.model}</span>}
+                  {a.instructions.replace(/<!--[\s\S]*?-->/g, '').trim() && <span className="pill ok">House rules</span>}
+                </span>
+                <button className="btn sm" onClick={() => setEditing(a)}>Edit</button>
+              </div>
+            ))}
+          </div>
+          <div className="maprow" style={{ marginTop: 4 }}>
+            <b>Tickets at once</b>
+            <span className="note">Up to {meta?.parallel ?? 2}. Change it in Settings.</span>
+          </div>
+          <h2 style={{ marginTop: 30 }}>Your AI tools</h2>
           <p className="note" style={{ marginTop: 2 }}>squad-kit uses the logins you already have. Nothing new to buy.</p>
           {(meta?.tools ?? []).map((t) => (
             <div className="toolrow" key={t.name}>
@@ -291,22 +326,60 @@ export function SquadPage() {
             </span>
             <span />
           </div>
-          <h2 style={{ marginTop: 30 }}>Who does what</h2>
-          <p className="note" style={{ marginTop: 2 }}>A different AI reviews the Builder's work, so every change gets a real second opinion.</p>
-          <div style={{ marginTop: 10 }}>
-            {ROLES.map((r) => (
-              <div className="maprow" key={r.key} style={{ gridTemplateColumns: '34px 140px 1fr 110px', alignItems: 'center' }}>
-                <Glyph role={r.role} />
-                <b>{r.name}</b>
-                <span className="note" style={{ fontSize: 13 }}>{r.job}</span>
-                <span className="pill">{meta?.roles[r.key] ?? '—'}</span>
-              </div>
-            ))}
-          </div>
-          <p className="note" style={{ marginTop: 14 }}>If one tool hits its limit, the work moves to the other.</p>
         </div>
       </div>
+      {editing && <AgentDialog agent={editing} onClose={() => setEditing(null)} />}
     </>
+  );
+}
+
+function AgentDialog({ agent, onClose }: { agent: AgentInfo; onClose: () => void }) {
+  const act = useAct();
+  const [tool, setTool] = useState(agent.tool);
+  const [model, setModel] = useState(agent.model);
+  const [instructions, setInstructions] = useState(agent.instructions.replace(/<!--[\s\S]*?-->/g, '').trim());
+  const save = () =>
+    act.mutate(
+      { path: `/api/v1/agents/${agent.role}`, method: 'PUT', body: { tool, model, instructions }, done: `${agent.name} saved. It uses this from its next step.` },
+      { onSuccess: onClose },
+    );
+  return (
+    <Modal
+      title={`Edit the ${agent.name}`}
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn pri" disabled={act.isPending} onClick={save}>Save</button>
+          <button className="btn" onClick={onClose}>Cancel</button>
+          <span className="grow" />
+          <span className="note mono" style={{ fontSize: 12 }}>{agent.file}</span>
+        </>
+      }
+    >
+      <p className="note" style={{ marginTop: 0 }}>{agent.job}.</p>
+      <div className="maprow" style={{ alignItems: 'center' }}>
+        <b>AI tool</b>
+        <select className="input" value={tool} onChange={(e) => setTool(e.target.value as AgentInfo['tool'])}>
+          <option value="claude">Claude Code</option>
+          <option value="codex" disabled>Codex (coming soon)</option>
+        </select>
+      </div>
+      <div className="maprow" style={{ alignItems: 'center' }}>
+        <b>Model</b>
+        <input className="input mono" style={{ fontSize: 13 }} value={model} placeholder="Your default. Or: sonnet, opus" onChange={(e) => setModel(e.target.value)} />
+      </div>
+      <div style={{ marginTop: 12 }}>
+        <b style={{ display: 'block', marginBottom: 6 }}>House rules</b>
+        <textarea
+          className="input"
+          rows={7}
+          style={{ width: '100%', resize: 'vertical' }}
+          value={instructions}
+          placeholder={`Extra instructions the ${agent.name} reads before every step, in plain words.`}
+          onChange={(e) => setInstructions(e.target.value)}
+        />
+      </div>
+    </Modal>
   );
 }
 
@@ -400,6 +473,181 @@ function RepoSettings({ repo, multi }: { repo: RepoInfo; multi: boolean }) {
   );
 }
 
+/** Where stories come from and where PRs go. The token stays in .squad/secrets.yaml on this computer. */
+function AzureSettings() {
+  const act = useAct();
+  const status = useQuery({ queryKey: ['tracker'], queryFn: () => api<TrackerStatus>('/api/v1/tracker'), refetchInterval: 60_000 });
+  const [form, setForm] = useState<{ organization: string; project: string; token: string } | null>(null);
+  const s = status.data;
+  const current = form ?? { organization: s?.organization ?? '', project: s?.project ?? '', token: '' };
+  const connected = s?.type === 'azure' && s.user;
+  return (
+    <div style={{ marginBottom: 26 }}>
+      <h2 style={{ marginTop: 6 }}>Azure DevOps</h2>
+      <p className="note" style={{ margin: '2px 0 10px' }}>
+        Stories and bugs come from Azure Boards. squad-kit moves them along as the squad works, opens a pull request for each finished ticket, and
+        merges it when you release. Your token stays on this computer.
+      </p>
+      {s && (
+        <div className="maprow" style={{ alignItems: 'center' }}>
+          <b>Status</b>
+          <span>
+            {connected ? (
+              <span className="pill ok">Connected as {s.user}</span>
+            ) : s.type === 'azure' ? (
+              <span className="pill bug">{s.error ?? (s.hasToken ? 'Not connected' : 'Needs a token')}</span>
+            ) : (
+              <span className="pill wait">Not set up</span>
+            )}
+          </span>
+        </div>
+      )}
+      <div className="maprow" style={{ alignItems: 'center' }}>
+        <b>Organization</b>
+        <input className="input mono" style={{ fontSize: 13 }} value={current.organization} placeholder="e.g. momenysr" onChange={(e) => setForm({ ...current, organization: e.target.value })} />
+      </div>
+      <div className="maprow" style={{ alignItems: 'center' }}>
+        <b>Project</b>
+        <input className="input mono" style={{ fontSize: 13 }} value={current.project} placeholder="e.g. Mawid" onChange={(e) => setForm({ ...current, project: e.target.value })} />
+      </div>
+      <div className="maprow" style={{ alignItems: 'center' }}>
+        <b>Token</b>
+        <input
+          className="input mono"
+          style={{ fontSize: 13 }}
+          type="password"
+          autoComplete="off"
+          value={current.token}
+          placeholder={s?.hasToken ? 'Saved. Paste a new one to replace it' : 'Personal access token from Azure DevOps'}
+          onChange={(e) => setForm({ ...current, token: e.target.value })}
+        />
+      </div>
+      <div style={{ marginTop: 12, display: 'flex', gap: 10, alignItems: 'center' }}>
+        <button
+          className="btn pri sm"
+          disabled={!form || act.isPending}
+          onClick={() =>
+            act.mutate(
+              { path: '/api/v1/tracker', method: 'PUT', body: current, done: 'Azure DevOps is connected' },
+              { onSuccess: () => { setForm(null); void status.refetch(); } },
+            )
+          }
+        >
+          {act.isPending ? 'Checking…' : 'Save and check'}
+        </button>
+        <span className="note">Token scopes: Work Items and Code (read, write and manage).</span>
+        <span className="grow" />
+        <Cmd text="squad config set tracker" />
+      </div>
+    </div>
+  );
+}
+
+/** Voice and video notes need speech to text. The key stays in .squad/secrets.yaml on this computer. */
+function SpeechSettings() {
+  const act = useAct();
+  const status = useQuery({ queryKey: ['speech'], queryFn: () => api<{ hasKey: boolean }>('/api/v1/speech') });
+  const [key, setKey] = useState('');
+  const hasKey = status.data?.hasKey;
+  const save = (body: { munsit?: string; remove?: boolean }, done: string) =>
+    act.mutate({ path: '/api/v1/speech', method: 'PUT', body, done }, { onSuccess: () => { setKey(''); void status.refetch(); } });
+  return (
+    <div style={{ marginBottom: 26 }}>
+      <h2 style={{ marginTop: 6 }}>Speech to text</h2>
+      <p className="note" style={{ margin: '2px 0 10px' }}>
+        Agents cannot listen. With a Munsit key, squad-kit writes out every voice and video note you attach, in Arabic or English, and takes pictures of
+        the screen in videos. Without a key, notes stay attached but nobody hears them. Your key stays on this computer.
+      </p>
+      <div className="maprow" style={{ alignItems: 'center' }}>
+        <b>Status</b>
+        <span>{hasKey ? <span className="pill ok">Munsit is set up</span> : <span className="pill wait">Not set up</span>}</span>
+      </div>
+      <div className="maprow" style={{ alignItems: 'center' }}>
+        <b>Munsit key</b>
+        <input
+          className="input mono"
+          style={{ fontSize: 13 }}
+          type="password"
+          autoComplete="off"
+          value={key}
+          placeholder={hasKey ? 'Saved. Paste a new one to replace it' : 'API key from munsit.com'}
+          onChange={(e) => setKey(e.target.value)}
+        />
+      </div>
+      <div style={{ marginTop: 12, display: 'flex', gap: 10, alignItems: 'center' }}>
+        <button className="btn pri sm" disabled={!key.trim() || act.isPending} onClick={() => save({ munsit: key }, 'Munsit is set up')}>
+          Save
+        </button>
+        {hasKey && (
+          <button className="btn sm" disabled={act.isPending} onClick={() => save({ remove: true }, 'Munsit key removed')}>
+            Remove
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RestartRow() {
+  const { restarting, restart } = useRestart();
+  return (
+    <div className="maprow" style={{ alignItems: 'center' }}>
+      <b>Board</b>
+      <span style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <button className="btn sm" disabled={restarting} onClick={() => void restart()}>
+          {restarting ? 'Restarting…' : 'Restart the board'}
+        </button>
+        <span className="note">Same link. Running work picks up where it stopped.</span>
+        <Cmd text="squad console --restart" />
+      </span>
+    </div>
+  );
+}
+
+function RunnerSetting() {
+  const board = useBoard();
+  const act = useAct();
+  const meta = board.data?.ready ? board.data.meta : undefined;
+  if (!meta) return null;
+  const runner = meta.runner ?? 'acp';
+  const pick = (r: 'acp' | 'direct', done: string) => act.mutate({ path: '/api/v1/settings', method: 'PUT', body: { runner: r }, done });
+  return (
+    <div className="maprow" style={{ alignItems: 'center' }}>
+      <b>Talk to Claude</b>
+      <span style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+        <button className={`btn sm ${runner === 'acp' ? 'pri' : ''}`} onClick={() => pick('acp', 'The squad talks to Claude through ACP')}>
+          Agent Client Protocol
+        </button>
+        <button className={`btn sm ${runner === 'direct' ? 'pri' : ''}`} onClick={() => pick('direct', 'The squad runs Claude Code directly')}>
+          Directly
+        </button>
+        <span className="note" style={{ marginLeft: 6 }}>ACP is the open standard for agents. If it cannot start, a step runs Claude Code directly.</span>
+      </span>
+    </div>
+  );
+}
+
+function ParallelSetting() {
+  const board = useBoard();
+  const act = useAct();
+  const meta = board.data?.ready ? board.data.meta : undefined;
+  if (!meta) return null;
+  const n = meta.parallel ?? 2;
+  return (
+    <div className="maprow" style={{ alignItems: 'center' }}>
+      <b>Tickets at once</b>
+      <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        {[1, 2, 3, 4, 5].map((k) => (
+          <button key={k} className={`btn sm ${k === n ? 'pri' : ''}`} onClick={() => act.mutate({ path: '/api/v1/settings', method: 'PUT', body: { parallel: k }, done: `The squad works on up to ${k} tickets at once` })}>
+            {k}
+          </button>
+        ))}
+        <span className="note" style={{ marginLeft: 6 }}>How many tickets the squad works on at the same time.</span>
+      </span>
+    </div>
+  );
+}
+
 function ScanAgain() {
   const act = useAct();
   return (
@@ -441,6 +689,11 @@ export function SettingsPage() {
             <b>Board files</b>
             <span className="mono" style={{ fontSize: 13 }}>.squad/board/</span>
           </div>
+          <RestartRow />
+          {meta?.engine === 'live' && <ParallelSetting />}
+          {meta?.engine === 'live' && <RunnerSetting />}
+          {meta?.engine === 'live' && <AzureSettings />}
+          {meta?.engine === 'live' && <SpeechSettings />}
           {meta?.engine === 'live' && <ProjectSettings />}
           {meta?.engine === 'demo' && (
             <div className="maprow">

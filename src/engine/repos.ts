@@ -44,5 +44,10 @@ export function rulesFiles(root: string): string[] {
   if (fs.existsSync(rulesDir)) {
     for (const f of fs.readdirSync(rulesDir)) if (f.endsWith('.md')) found.push(path.join(rulesDir, f));
   }
+  // The tracker's wiki (business rules, definition of done), copied next to the board.
+  const wiki = path.join(root, '.squad', 'board', 'context', 'wiki');
+  if (fs.existsSync(wiki)) {
+    for (const f of fs.readdirSync(wiki).sort()) if (f.endsWith('.md')) found.push(path.join(wiki, f));
+  }
   return found;
 }
