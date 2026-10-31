@@ -66,6 +66,13 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
   const [criteria, setCriteria] = useState<string[]>([]);
   const [rules, setRules] = useState<string[]>([]);
   const [edgeCases, setEdgeCases] = useState<string[]>([]);
+  // The bug template: what happens, how to see it, what should happen, where, and how bad.
+  const [what, setWhat] = useState('');
+  const [steps, setSteps] = useState<string[]>([]);
+  const [expected, setExpected] = useState('');
+  const [where, setWhere] = useState('');
+  const [severity, setSeverity] = useState<NonNullable<Ticket['severity']>>('annoying');
+  const isBug = kind === 'bug';
   const [files, setFiles] = useState<PickedFile[]>([]);
 
   const addFiles = async (list: FileList | File[]) => {
@@ -86,6 +93,7 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
       const d = await send<Draft>('/api/v1/tickets/draft', 'POST', { text: pasted, files: upload });
       setTitle(d.title);
       setAsk(d.ask);
+      if (d.kind === 'bug') setWhat(d.ask);
       setKind(d.kind);
       setPriority(d.priority);
       if (d.track) {
@@ -104,12 +112,22 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
     }
   };
 
+  const bugSteps = steps.filter((x) => x.trim());
+  const bugAsk = [
+    what.trim() && `What happens:\n${what.trim()}`,
+    bugSteps.length && `Steps to see it:\n${bugSteps.map((x, i) => `${i + 1}. ${x.trim()}`).join('\n')}`,
+    expected.trim() && `What should happen:\n${expected.trim()}`,
+    where.trim() && `Where: ${where.trim()}`,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+  const body = isBug
+    ? { title, ask: bugAsk, kind, severity, priority: severity === 'stops-work' ? 'high' : severity === 'small' ? 'low' : 'normal', track, files: upload, talkFirst: talkFirst && track === 'full' }
+    : { title, ask, kind, track, priority, criteria, rules, edgeCases, files: upload, talkFirst: talkFirst && track === 'full' };
+
   const submit = () =>
     act.mutate(
-      {
-        path: '/api/v1/tickets',
-        body: { title, ask, kind, track, priority, criteria, rules, edgeCases, files: upload, talkFirst: talkFirst && track === 'full' },
-      },
+      { path: '/api/v1/tickets', body },
       {
         onSuccess: (t) => {
           onCreated(t);
@@ -123,12 +141,13 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
       ? `squad new --from ${quote(pasted.trim().split('\n')[0]?.slice(0, 40) || 'your message')}`
       : [
           `squad new ${quote(title.trim() || 'Your title')}`,
-          kind === 'bug' ? '--bug' : '',
+          isBug ? `--bug --severity ${severity}` : '',
+          isBug && what.trim() ? `--ask ${quote(what.trim())}` : '',
           track === 'express' ? '--express' : '',
           talkFirst && track === 'full' ? '--talk' : '',
-          ...criteria.filter((x) => x.trim()).map((x) => `--criteria ${quote(x)}`),
-          ...rules.filter((x) => x.trim()).map((x) => `--rule ${quote(x)}`),
-          ...edgeCases.filter((x) => x.trim()).map((x) => `--edge ${quote(x)}`),
+          ...(isBug ? [] : criteria.filter((x) => x.trim()).map((x) => `--criteria ${quote(x)}`)),
+          ...(isBug ? [] : rules.filter((x) => x.trim()).map((x) => `--rule ${quote(x)}`)),
+          ...(isBug ? [] : edgeCases.filter((x) => x.trim()).map((x) => `--edge ${quote(x)}`)),
           ...files.map((f) => `--attach ${quote(f.name)}`),
         ]
           .filter(Boolean)
@@ -202,22 +221,10 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
               )}
             </div>
           ) : (
-            <p>Write it in plain words. Add what you already know; the Analyst asks you about the rest.</p>
+            <p>{isBug ? 'Say what goes wrong and how to see it. The squad finds the cause and fixes it.' : 'Write it in plain words. Add what you already know; the Analyst asks you about the rest.'}</p>
           )}
           <div className="field">
-            <label htmlFor="nt-title">Title</label>
-            <input id="nt-title" className="input" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="For example: Show hearing time in local time" />
-          </div>
-          <div className="field">
-            <label htmlFor="nt-ask">What do you want?</label>
-            <textarea id="nt-ask" className="textarea" value={ask} onChange={(e) => setAsk(e.target.value)} placeholder="Who needs it, and why. One or two sentences is enough." />
-          </div>
-          <ListField label="Acceptance criteria" hint="Each one is something you can check, for example: The clerk sees the time in their own city." items={criteria} onChange={setCriteria} add="Add a criterion" />
-          <ListField label="Business rules" hint="Limits and who may do what, for example: Only a team lead can reassign a case." items={rules} onChange={setRules} add="Add a rule" />
-          <ListField label="Edge cases" hint="Unusual cases to handle, for example: The person has no cases yet." items={edgeCases} onChange={setEdgeCases} add="Add an edge case" />
-          <FilePicker files={files} onAdd={addFiles} onRemove={(i) => setFiles((now) => now.filter((_, k) => k !== i))} />
-          <div className="field">
-            <label>Kind and priority</label>
+            <label>Kind</label>
             <div className="sevs">
               {(['feature', 'bug'] as const).map((k) => (
                 <button key={k} className={`choice ${kind === k ? 'on' : ''}`} onClick={() => setKind(k)}>
@@ -225,15 +232,70 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
                   {k === 'feature' ? 'New feature' : 'Bug'}
                 </button>
               ))}
-              <span style={{ width: 10 }} />
-              {(['high', 'normal', 'low'] as const).map((p) => (
-                <button key={p} className={`choice ${priority === p ? 'on' : ''}`} onClick={() => setPriority(p)}>
-                  <span className="rd" />
-                  {p === 'high' ? 'High' : p === 'normal' ? 'Normal' : 'Low'}
-                </button>
-              ))}
             </div>
           </div>
+          <div className="field">
+            <label htmlFor="nt-title">Title</label>
+            <input
+              id="nt-title"
+              className="input"
+              autoFocus
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder={isBug ? 'For example: A price written as 1,500 is refused' : 'For example: Show hearing time in local time'}
+            />
+          </div>
+          {isBug ? (
+            <>
+              <div className="field">
+                <label htmlFor="nt-what">What happens</label>
+                <textarea id="nt-what" className="textarea" value={what} onChange={(e) => setWhat(e.target.value)} placeholder="For example: the form says the price is not valid." />
+              </div>
+              <ListField label="Steps to see it" hint="One step per line, for example: Open Services and add a service." items={steps} onChange={setSteps} add="Add a step" />
+              <div className="field">
+                <label htmlFor="nt-expected">What should happen</label>
+                <textarea id="nt-expected" className="textarea" value={expected} onChange={(e) => setExpected(e.target.value)} placeholder="For example: the price is saved as 1,500 SAR." />
+              </div>
+              <div className="field">
+                <label htmlFor="nt-where">Where</label>
+                <input id="nt-where" className="input" value={where} onChange={(e) => setWhere(e.target.value)} placeholder="The page or link, for example: Setup, Services" />
+              </div>
+              <FilePicker files={files} onAdd={addFiles} onRemove={(i) => setFiles((now) => now.filter((_, k) => k !== i))} />
+              <div className="field">
+                <label>How bad is it?</label>
+                <div className="sevs">
+                  {SEVERITY.map((x) => (
+                    <button key={x.value} className={`choice ${severity === x.value ? 'on' : ''}`} onClick={() => setSeverity(x.value)}>
+                      <span className="rd" />
+                      {x.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="field">
+                <label htmlFor="nt-ask">What do you want?</label>
+                <textarea id="nt-ask" className="textarea" value={ask} onChange={(e) => setAsk(e.target.value)} placeholder="Who needs it, and why. One or two sentences is enough." />
+              </div>
+              <ListField label="Acceptance criteria" hint="Each one is something you can check, for example: The clerk sees the time in their own city." items={criteria} onChange={setCriteria} add="Add a criterion" />
+              <ListField label="Business rules" hint="Limits and who may do what, for example: Only a team lead can reassign a case." items={rules} onChange={setRules} add="Add a rule" />
+              <ListField label="Edge cases" hint="Unusual cases to handle, for example: The person has no cases yet." items={edgeCases} onChange={setEdgeCases} add="Add an edge case" />
+              <FilePicker files={files} onAdd={addFiles} onRemove={(i) => setFiles((now) => now.filter((_, k) => k !== i))} />
+              <div className="field">
+                <label>Priority</label>
+                <div className="sevs">
+                  {(['high', 'normal', 'low'] as const).map((p) => (
+                    <button key={p} className={`choice ${priority === p ? 'on' : ''}`} onClick={() => setPriority(p)}>
+                      <span className="rd" />
+                      {p === 'high' ? 'High' : p === 'normal' ? 'Normal' : 'Low'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
           <div className="field">
             <label>Track{suggested && <span className="note" style={{ marginLeft: 8, fontWeight: 400 }}>The Analyst suggests {suggested === 'express' ? 'Express' : 'Full'}</span>}</label>
             <div className="tracks">

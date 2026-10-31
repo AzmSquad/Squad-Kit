@@ -1,3 +1,4 @@
+import { DECISION_AREAS } from '../board/types.js';
 import type { BoardMeta, Decision, Question, RepoInfo, Ticket, TicketNote } from '../board/types.js';
 import { reposOf } from './repos.js';
 
@@ -70,9 +71,12 @@ export const PLAN_SCHEMA = {
         },
         why: STR,
         clientCheck: STR,
+        replaces: STR,
+        area: { type: 'string', enum: [...DECISION_AREAS] },
       },
-      required: ['title', 'options', 'why'],
+      required: ['title', 'options', 'why', 'area'],
     },
+    follows: { type: 'array', maxItems: 12, items: STR },
     steps: { type: 'array', minItems: 1, maxItems: 8, items: STR },
     tests: { type: 'integer' },
     screens: { type: 'integer' },
@@ -182,16 +186,17 @@ function reposText(meta: BoardMeta): string {
 
 function projectContext(meta: BoardMeta, decisions: Decision[], ctx?: PromptContext): string {
   const map = meta.map.length ? meta.map.map((m) => `- ${m.area}: ${m.detail}`).join('\n') : '- (not read yet)';
-  const adrs = decisions.length
-    ? decisions.map((d) => `- ${d.id} ${d.title}. Chosen: ${d.chosen}. Why: ${d.why}`).join('\n')
-    : '- (none yet)';
+  const rules = decisions.filter((d) => !d.replacedBy);
+  const adrs = rules.length ? rules.map((d) => `- ${d.id} ${d.title}. Chosen: ${d.chosen}. Why: ${d.why}`).join('\n') : '- (none yet)';
+  const old = decisions.filter((d) => d.replacedBy);
+  const replaced = old.length ? `\n\nReplaced decisions, no longer rules (do not follow):\n${old.map((d) => `- ${d.id} ${d.title}, replaced by ${d.replacedBy}`).join('\n')}` : '';
   const lessons = meta.lessons.length ? meta.lessons.map((l) => `- ${l.text}`).join('\n') : '- (none yet)';
   const c = ctx?.repo?.commands ?? reposOf(meta)[0]?.commands ?? {};
   const commands = Object.entries(c).filter(([, v]) => v).map(([k, v]) => `- ${k}: ${v}`).join('\n') || '- (none set up yet)';
   return [
     `Project: ${meta.project}${reposText(meta)}`,
     `Project map:\n${map}`,
-    `Saved decisions every ticket must follow:\n${adrs}`,
+    `Saved decisions every ticket must follow:\n${adrs}${replaced}`,
     `Lessons from past tickets:\n${lessons}`,
     `${ctx?.repo && meta.repos?.length ? `Commands for ${ctx.repo.path}` : 'Project commands'}:\n${commands}${rulesText(ctx)}`,
   ].join('\n\n');
@@ -299,6 +304,7 @@ export function planPrompt(t: Ticket, change?: string, meta?: BoardMeta): string
 - decision: only if this ticket makes a technical choice later tickets must follow. Give 2 options you considered,
   mark the chosen one, and say why in plain words tied to the person's answers. If the client forces a technology,
   check it against the business needs and write the result in clientCheck ("no conflict" or the conflict).
+${DECISION_LINKS}
 - steps: 3 to 7 small steps in order, one sentence each. The last step writes the tests.
 - tests: how many tests you expect to add. screens: how many "done when" can be shown in a screenshot (0 without a UI).
 - releaseNote: one line for release notes, like "**Dark mode.** Switch the dashboard to dark."
@@ -345,6 +351,7 @@ ${doneWhen(t)}
 - decision: only if this ticket makes a technical choice later tickets must follow. Give 2 options you considered,
   mark the chosen one, and say why in plain words tied to the spec. If the client forces a technology,
   check it against the business needs and write the result in clientCheck ("no conflict" or the conflict).
+${DECISION_LINKS}
 - steps: 3 to 7 small steps in order, one sentence each. The last step writes the tests.
 - tests: how many tests you expect to add. screens: how many "done when" can be shown in a screenshot (0 without a UI).
 - commands: only if the project has no way yet to set up, test, build or start it, or this ticket changes that.
@@ -353,6 +360,11 @@ ${MOCKUP_RULE}
 ${ASK_RULE}
 ${PLAIN}`;
 }
+
+const DECISION_LINKS = `  area: one of ${DECISION_AREAS.join(', ')}. replaces: only if it changes a saved decision, that decision's id
+  (like "ADR-004"); the old one stops being a rule once this is approved.
+- follows: the ids of the saved decisions this ticket's design relies on (like ["ADR-003", "ADR-005"]). Only real
+  ones from the list, only those that shape this ticket. Empty if none.`;
 
 const MOCKUP_RULE = `- mockup: when screens is 1 or more, one self-contained HTML page showing how the main screen will look after this
   ticket, using the project's own look where you can see it (colors, fonts, layout). Inline CSS and a little inline

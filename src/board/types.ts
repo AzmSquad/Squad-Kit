@@ -85,9 +85,16 @@ export interface DecisionDraft {
   options: DecisionOption[];
   why: string;
   clientCheck?: string;
+  /** The saved decision (ADR id) this one changes. On approval the old one is marked replaced. */
+  replaces?: string;
+  /** Where in the project it sits, for the architecture page. */
+  area?: DecisionArea;
   /** Set once the plan is approved and the decision is saved. */
   adr?: string;
 }
+
+export const DECISION_AREAS = ['Structure', 'Data', 'Security', 'Interface', 'Rules'] as const;
+export type DecisionArea = (typeof DECISION_AREAS)[number];
 
 export interface Step {
   title: string;
@@ -244,6 +251,8 @@ export interface Ticket {
   criteria?: Criterion[];
   questions?: Question[];
   decision?: DecisionDraft;
+  /** Saved decisions (ADR ids) this ticket's design follows. Each one lists the ticket once the design is approved. */
+  follows?: string[];
   work?: { steps: number; tests: number; screens: number };
   steps?: Step[];
   gates?: Gates;
@@ -341,7 +350,15 @@ export interface Decision {
   approvedBy: string;
   date: string;
   checkedBy: { kind: 'test' | 'lint rule'; name: string; passing: boolean } | null;
+  /** The ticket that made it first, then every ticket whose design followed it. */
   tickets: string[];
+  area?: DecisionArea;
+  /** Saved decisions this one was built on: the ones its ticket followed. */
+  buildsOn?: string[];
+  /** The older decision this one changed. */
+  replaces?: string;
+  /** Set when a newer decision changed this one. A replaced decision is no longer a rule. */
+  replacedBy?: string;
 }
 
 export interface Lesson {

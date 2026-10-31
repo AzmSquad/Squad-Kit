@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, send } from '../api/client';
-import type { BoardResponse, DecisionsResponse, ReleaseWithItems, Ticket } from '../api/types';
+import type { ArchitectureResponse, BoardResponse, ReleaseWithItems, Ticket } from '../api/types';
 import { usePrefs } from './prefs';
 
 /** The squad writes to .squad/ on its own, so screens poll to stay live. */
@@ -23,8 +23,8 @@ export function useReleases() {
   return useQuery({ queryKey: ['releases'], queryFn: () => api<ReleaseWithItems[]>('/api/v1/releases'), refetchInterval: 2000 });
 }
 
-export function useDecisions() {
-  return useQuery({ queryKey: ['decisions'], queryFn: () => api<DecisionsResponse>('/api/v1/decisions'), refetchInterval: 2000 });
+export function useArchitecture() {
+  return useQuery({ queryKey: ['architecture'], queryFn: () => api<ArchitectureResponse>('/api/v1/architecture'), refetchInterval: 2000 });
 }
 
 /** A person action: POST it, refresh everything, and show the result or the error in plain words. */

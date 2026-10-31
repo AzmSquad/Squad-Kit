@@ -33,6 +33,7 @@ import {
   keepWaiting,
   stopTicket,
 } from '../../board/actions.js';
+import { architecture } from '../../board/architecture.js';
 import { boardExists, boardPaths, listDecisions, listReleases, listTickets, readMeta, readRelease, readTicket, writeMeta } from '../../board/store.js';
 import { seedDemoBoard } from '../../board/demo.js';
 import type { AgentName, PlanComment, PlanEdit } from '../../board/types.js';
@@ -288,6 +289,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
         ask: b.ask,
         priority: b.priority,
         kind: b.kind === 'bug' ? 'bug' : 'feature',
+        severity: b.severity === 'stops-work' || b.severity === 'annoying' || b.severity === 'small' ? b.severity : undefined,
         track: b.track === 'express' ? 'express' : 'full',
         criteria: b.criteria,
         rules: b.rules,
@@ -440,6 +442,11 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     if (!boardExists(bp)) return c.json({ decisions: [], map: [], lessons: [] });
     const meta = readMeta(bp);
     return c.json({ decisions: listDecisions(bp), map: meta.map, lessons: meta.lessons });
+  });
+
+  app.get('/api/v1/architecture', (c) => {
+    if (!boardExists(bp)) return c.json({ decisions: [], tickets: [], map: [], lessons: [] });
+    return c.json(architecture(bp));
   });
 
   app.get('/api/v1/proof/:file', (c) => {

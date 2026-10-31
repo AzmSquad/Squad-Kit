@@ -324,6 +324,7 @@ program
   .option('--ask <text>', 'What you want, in a sentence or two')
   .option('--priority <level>', 'high, normal or low')
   .option('--bug', 'It is a bug, not a new feature')
+  .option('--severity <level>', 'For a bug: stops-work, annoying or small')
   .option('--express', 'Express track: no questions and the plan is approved on its own; build, checks, review and Looks right still run')
   .option('--full', 'Full track (the default): every step, with your approvals')
   .option('--talk', 'Talk it through with the Analyst first, instead of questions: squad chat <ticket>')

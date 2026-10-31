@@ -2,6 +2,7 @@ import {
   addActivity,
   draftRelease,
   latestRelease,
+  listDecisions,
   listTickets,
   nextDecisionId,
   nextTicketId,
@@ -48,6 +49,8 @@ export interface NewTicketInput {
   ask?: string;
   priority?: Ticket['priority'];
   kind?: Ticket['kind'];
+  /** How bad a bug is. Only kept on bugs. */
+  severity?: Ticket['severity'];
   track?: Track;
   /** Talk it through with the Analyst first, before any questions or spec. */
   talkFirst?: boolean;
@@ -116,6 +119,7 @@ export function createTicket(bp: BoardPaths, input: NewTicketInput): Ticket {
     activity: [],
     ...(brief.criteria.length || brief.rules.length || brief.edgeCases.length ? { brief } : {}),
     ...(attachments.length ? { attachments } : {}),
+    ...(input.kind === 'bug' && input.severity ? { severity: input.severity } : {}),
   };
   addActivity(ticket, 'you', input.source?.type === 'azure' ? `Pulled ${input.source.ref} from Azure DevOps` : 'Created the ticket');
   if (ticket.track === 'express') addActivity(ticket, 'you', 'Chose the Express track: no questions, the plan is approved on its own');
@@ -350,8 +354,12 @@ function approvePlan(bp: BoardPaths, ticket: Ticket, speed: number, express = fa
       date: now(),
       checkedBy: { kind: 'test', name: testNameFor(ticket), passing: false },
       tickets: [ticket.id],
+      ...(ticket.decision.area ? { area: ticket.decision.area } : {}),
+      ...(ticket.follows?.length ? { buildsOn: ticket.follows } : {}),
+      ...(ticket.decision.replaces ? { replaces: ticket.decision.replaces } : {}),
     });
   }
+  linkDecisions(bp, ticket, adr);
   return updateTicket(bp, ticket.id, (t) => {
     t.planReview = undefined;
     if (t.decision && adr) t.decision.adr = adr;
@@ -362,10 +370,24 @@ function approvePlan(bp: BoardPaths, ticket: Ticket, speed: number, express = fa
     t.status = `Step 1 of ${t.steps?.length ?? 1} with ${t.builder ?? 'the Builder'}`;
     t.gates = { checks: 'pending', review: 'pending', proof: 'pending' };
     const approved = express ? 'Express track: approved the plan on its own' : t.specApproved ? 'Approved the design' : 'Approved the plan';
-    addActivity(t, express ? 'squad' : 'you', adr ? `${approved}. Decision saved as ${adr}` : approved);
+    addActivity(t, express ? 'squad' : 'you', adr ? `${approved}. Decision saved as ${adr}${t.decision?.replaces ? `, replacing ${t.decision.replaces}` : ''}` : approved);
     scheduleSquad(t, 'build', 2, speed, 0);
     tellLater(t, meta.engine, { kind: 'planned' });
   });
+}
+
+/** Each decision the design followed lists the ticket; the one a new decision replaces stops being a rule. */
+function linkDecisions(bp: BoardPaths, ticket: Ticket, adr: string | undefined): void {
+  const all = listDecisions(bp);
+  for (const id of ticket.follows ?? []) {
+    const d = all.find((x) => x.id === id);
+    if (d && !d.tickets.includes(ticket.id)) writeDecision(bp, { ...d, tickets: [...d.tickets, ticket.id] });
+  }
+  const old = adr && ticket.decision?.replaces ? all.find((x) => x.id === ticket.decision!.replaces) : undefined;
+  if (old && adr && old.id !== adr) {
+    const fresh = listDecisions(bp).find((x) => x.id === old.id) ?? old;
+    writeDecision(bp, { ...fresh, replacedBy: adr, tickets: fresh.tickets.includes(ticket.id) ? fresh.tickets : [...fresh.tickets, ticket.id] });
+  }
 }
 
 function testNameFor(ticket: Ticket): string {

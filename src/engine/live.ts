@@ -16,7 +16,7 @@ import {
 } from '../board/store.js';
 import { CHAT_SESSION, applyPlanEdits, approveExpress, changeSummary, needsSpec, wayOptions } from '../board/actions.js';
 import { scheduleSquad } from '../board/schedule.js';
-import type { BoardMeta, ProjectCommands, Question, Role, Ticket } from '../board/types.js';
+import type { BoardMeta, DecisionArea, ProjectCommands, Question, Role, Ticket } from '../board/types.js';
 import { describeTool, runClaude, type RunOptions, type RunResult } from './claude.js';
 import { AcpStartError, acpAdapterPath, runClaudeAcp } from './acp-runner.js';
 import { runChecks, runCommand, startApp, tail, testCount, type RunningApp } from './checks.js';
@@ -744,7 +744,8 @@ export class LiveSquad {
       mockup?: string;
       story?: string;
       criteria?: { given: string; when: string; then: string }[];
-      decision?: { title: string; options: { name: string; note: string; chosen: boolean }[]; why: string; clientCheck?: string };
+      decision?: { title: string; options: { name: string; note: string; chosen: boolean }[]; why: string; clientCheck?: string; replaces?: string; area?: DecisionArea };
+      follows?: string[];
       steps: string[];
       tests: number;
       screens: number;
@@ -778,6 +779,9 @@ export class LiveSquad {
       } else if (!out.screens) delete t.mockup;
       if (out.decision) t.decision = { ...out.decision };
       else delete t.decision;
+      const known = new Set(listDecisions(this.bp).map((d) => d.id));
+      t.follows = [...new Set(out.follows ?? [])].filter((x) => known.has(x));
+      if (t.decision?.replaces && !known.has(t.decision.replaces)) delete t.decision.replaces;
       t.steps = out.steps.map((s) => ({ title: s, status: 'todo' }));
       applyPlanEdits(t);
       t.work = { steps: out.steps.length, tests: Math.max(0, out.tests), screens: Math.max(0, out.screens) };

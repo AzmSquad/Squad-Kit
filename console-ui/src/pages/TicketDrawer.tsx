@@ -350,9 +350,24 @@ function PlanBody({ t, review }: { t: Ticket; review?: Review }) {
                   <b>Client's choice</b> {t.decision.clientCheck}
                 </span>
               )}
+              {t.decision.replaces && (
+                <span>
+                  <b>Replaces</b> {t.decision.replaces}. Once you approve, it is no longer a rule and later tickets follow this one.
+                </span>
+              )}
             </div>
           </div>
           </Part>
+        </>
+      )}
+      {t.work && t.follows && t.follows.length > 0 && (
+        <>
+          <div className="lbl">Follows saved decisions</div>
+          <div className="pills">
+            {t.follows.map((id) => (
+              <Link key={id} to="/architecture" search={{ adr: id }} className="pill">{id}</Link>
+            ))}
+          </div>
         </>
       )}
       {t.mockup && t.work && (

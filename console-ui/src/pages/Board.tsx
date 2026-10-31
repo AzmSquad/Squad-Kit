@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useNavigate, useSearch } from '@tanstack/react-router';
+import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { Check, Download, Plus, Search } from 'lucide-react';
 import type { Actor, Stage, Ticket } from '../api/types';
 import { useAct, useBoard } from '../lib/data';
@@ -80,6 +80,11 @@ export function BoardPage() {
           </h2>
           <p>{waiting.length ? 'Everything else is handled by the squad.' : ''}</p>
           <span className="grow" />
+          {waiting.length > 3 && (
+            <Link to="/inbox" className="btn sm">
+              See all {waiting.length}
+            </Link>
+          )}
           <Cmd text="squad inbox" />
         </div>
         {data.meta.engine === 'live' && data.meta.scan && data.meta.scan.status !== 'done' ? (

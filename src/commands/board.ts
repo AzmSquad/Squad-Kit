@@ -677,6 +677,7 @@ interface NewOptions {
   ask?: string;
   priority?: Ticket['priority'];
   bug?: boolean;
+  severity?: string;
   express?: boolean;
   talk?: boolean;
   full?: boolean;
@@ -698,6 +699,7 @@ export async function runNew(words: string[], opts: NewOptions): Promise<void> {
     ask: opts.ask,
     priority: opts.priority,
     kind: opts.bug ? 'bug' : 'feature',
+    ...(opts.bug && ['stops-work', 'annoying', 'small'].includes(opts.severity ?? '') ? { severity: opts.severity as Ticket['severity'] } : {}),
     track: opts.express ? 'express' : 'full',
     talkFirst: Boolean(opts.talk),
     criteria: opts.criteria,

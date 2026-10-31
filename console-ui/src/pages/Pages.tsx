@@ -3,13 +3,13 @@ import { Link } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { AgentInfo, CorePrompts, TrackerStatus } from '../api/types';
-import { Bug, Check, Lightbulb, Map as MapIcon, RotateCcw, Terminal } from 'lucide-react';
-import type { Decision, ProjectCommands, RepoInfo } from '../api/types';
-import { useAct, useBoard, useDecisions } from '../lib/data';
+import { Bug, Check, RotateCcw, Terminal } from 'lucide-react';
+import type { ProjectCommands, RepoInfo } from '../api/types';
+import { useAct, useBoard } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { BugDialog } from '../components/dialogs';
 import { useRestart } from '../components/Restart';
-import { Cmd, Glyph, Modal, STAGE_NAME, actionLabel, ago, commandFor, dateShort } from '../components/ui';
+import { Cmd, Glyph, Modal, STAGE_NAME, actionLabel, ago, commandFor } from '../components/ui';
 
 /* ── Waiting for you ───────────────────────────────────── */
 
@@ -59,143 +59,6 @@ export function InboxPage() {
         </div>
       </div>
     </>
-  );
-}
-
-/* ── Decisions and memory ──────────────────────────────── */
-
-export function DecisionsPage() {
-  const data = useDecisions();
-  const [tab, setTab] = useState<'decisions' | 'map' | 'lessons'>('decisions');
-  const [selected, setSelected] = useState<string | null>(null);
-  const decisions = data.data?.decisions ?? [];
-  const current = decisions.find((d) => d.id === selected) ?? decisions[0];
-  return (
-    <>
-      <div className="top">
-        <h1>Decisions and memory</h1>
-        <span className="note">What your squad knows. Every new ticket follows it.</span>
-      </div>
-      <div className="ptabs" role="tablist">
-        <button className={tab === 'decisions' ? 'on' : ''} onClick={() => setTab('decisions')}>
-          Decisions <span className="n">{decisions.length}</span>
-        </button>
-        <button className={tab === 'map' ? 'on' : ''} onClick={() => setTab('map')}>
-          Project map
-        </button>
-        <button className={tab === 'lessons' ? 'on' : ''} onClick={() => setTab('lessons')}>
-          Lessons <span className="n">{data.data?.lessons.length ?? 0}</span>
-        </button>
-      </div>
-      {tab === 'decisions' && (
-        <div className="split">
-          <div className="scroll" style={{ padding: '8px 20px' }}>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th style={{ width: 90 }}>ID</th>
-                  <th>Decision</th>
-                  <th style={{ width: 150 }}>From</th>
-                  <th style={{ width: 150 }}>Checked by</th>
-                </tr>
-              </thead>
-              <tbody>
-                {decisions.map((d) => (
-                  <tr key={d.id} className={`click ${current?.id === d.id ? 'on' : ''}`} onClick={() => setSelected(d.id)}>
-                    <td className="mono">{d.id}</td>
-                    <td style={{ fontWeight: current?.id === d.id ? 600 : 500 }}>{d.title}</td>
-                    <td style={{ color: 'var(--muted)', fontSize: 13 }}>{d.from}</td>
-                    <td><CheckedBy d={d} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {current && <DecisionDetail d={current} />}
-        </div>
-      )}
-      {tab === 'map' && (
-        <div className="scroll">
-          <div className="page" style={{ maxWidth: 820 }}>
-            <p className="note" style={{ marginBottom: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
-              <MapIcon size={15} /> The Architect wrote this when it first read the project. Every agent reads it first, then opens only the files it needs.
-            </p>
-            {data.data?.map.map((m) => (
-              <div className="maprow" key={m.area}>
-                <b>{m.area}</b>
-                <span>{m.detail}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      {tab === 'lessons' && (
-        <div className="scroll">
-          <div className="page" style={{ maxWidth: 820 }}>
-            <p className="note" style={{ marginBottom: 8 }}>Learned from bugs and reviews. Each lesson makes the next ticket better.</p>
-            {data.data?.lessons.map((l) => (
-              <div className="lesson" key={l.id}>
-                <span className="glyph sm"><Lightbulb size={12} /></span>
-                <span>
-                  {l.text} <span className="note">From {l.from}</span>
-                </span>
-                <span className="mono">{dateShort(l.date)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </>
-  );
-}
-
-function CheckedBy({ d }: { d: Decision }) {
-  if (!d.checkedBy) return <span className="pill wait">Not checkable</span>;
-  return d.checkedBy.passing ? (
-    <span className="pill ok">
-      <Check size={13} strokeWidth={2.5} /> A {d.checkedBy.kind}
-    </span>
-  ) : (
-    <span className="pill you">Test being written</span>
-  );
-}
-
-function DecisionDetail({ d }: { d: Decision }) {
-  return (
-    <aside className="sidepanel">
-      <span className="note mono">
-        {d.id} · approved by {d.approvedBy} · {dateShort(d.date)}
-      </span>
-      <h3>{d.title}</h3>
-      <div className="lbl">Why</div>
-      <p style={{ fontSize: 13.5 }}>{d.why}</p>
-      <div className="lbl">Options looked at</div>
-      {d.options.map((o) => (
-        <p key={o} style={{ fontSize: 13.5, display: 'flex', gap: 7, alignItems: 'center' }}>
-          {o === d.chosen ? <Check size={14} strokeWidth={2.5} color="var(--accent)" /> : <span style={{ width: 14 }} />} {o}
-        </p>
-      ))}
-      <div className="lbl">Checked by</div>
-      {d.checkedBy ? (
-        <div className="box">
-          <b style={{ color: d.checkedBy.passing ? 'var(--accent)' : 'var(--you-ink)' }}>{d.checkedBy.passing ? 'Passing' : 'Being written'}</b>{' '}
-          <span className="mono" style={{ fontSize: 12 }}>{d.checkedBy.name}</span>
-          <p className="note" style={{ marginTop: 4 }}>If someone breaks this decision, the checks fail and nothing ships.</p>
-        </div>
-      ) : (
-        <p className="note">A fact about the project, nothing to test.</p>
-      )}
-      {d.tickets.length > 0 && (
-        <>
-          <div className="lbl">Tickets that used it</div>
-          <div className="pills">
-            {d.tickets.map((t) => (
-              <span key={t} className="pill">{t}</span>
-            ))}
-          </div>
-        </>
-      )}
-    </aside>
   );
 }
 

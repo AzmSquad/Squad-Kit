@@ -1,5 +1,5 @@
 import { Link, Outlet, useRouterState } from '@tanstack/react-router';
-import { ArrowUp, Bug, Hexagon, Inbox, LayoutGrid, ListTodo, Moon, Settings, Sun, Terminal, Users } from 'lucide-react';
+import { ArrowUp, Bug, Inbox, LayoutGrid, ListTodo, Moon, Network, Settings, Sun, Terminal, Users } from 'lucide-react';
 import { useBoard } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { UpdateBanner } from './Restart';
@@ -9,7 +9,7 @@ const NAV = [
   { to: '/backlog', label: 'Backlog', icon: ListTodo },
   { to: '/inbox', label: 'Waiting for you', icon: Inbox, badge: 'you' as const },
   { to: '/releases', label: 'Releases', icon: ArrowUp },
-  { to: '/decisions', label: 'Decisions', icon: Hexagon },
+  { to: '/architecture', label: 'Architecture', icon: Network },
   { to: '/bugs', label: 'Bugs', icon: Bug, badge: 'bugs' as const },
   { to: '/squad', label: 'Squad and AI', icon: Users },
   { to: '/settings', label: 'Settings', icon: Settings },

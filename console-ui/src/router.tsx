@@ -4,7 +4,8 @@ import { BoardPage } from './pages/Board';
 import { ProofPage } from './pages/Proof';
 import { ReleasesPage } from './pages/Releases';
 import { BacklogPage } from './pages/Backlog';
-import { BugsPage, DecisionsPage, InboxPage, SettingsPage, SquadPage } from './pages/Pages';
+import { ArchitecturePage, type ArchView } from './pages/Architecture';
+import { BugsPage, InboxPage, SettingsPage, SquadPage } from './pages/Pages';
 
 const rootRoute = createRootRoute({ component: Shell });
 
@@ -31,12 +32,28 @@ const proof = createRoute({ getParentRoute: () => rootRoute, path: '/tickets/$id
 const backlog = createRoute({ getParentRoute: () => rootRoute, path: '/backlog', component: BacklogPage });
 const inbox = createRoute({ getParentRoute: () => rootRoute, path: '/inbox', component: InboxPage });
 const releases = createRoute({ getParentRoute: () => rootRoute, path: '/releases', component: ReleasesPage });
-const decisions = createRoute({ getParentRoute: () => rootRoute, path: '/decisions', component: DecisionsPage });
+// Decisions now live on the Architecture page; old links still work.
+const decisions = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/decisions',
+  beforeLoad: () => {
+    throw redirect({ to: '/architecture', search: { view: 'list' } });
+  },
+});
+const architecture = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/architecture',
+  validateSearch: (s: Record<string, unknown>): { adr?: string; view?: ArchView } => ({
+    adr: typeof s.adr === 'string' && s.adr ? s.adr : undefined,
+    view: ['timeline', 'list', 'project', 'lessons'].includes(s.view as string) ? (s.view as ArchView) : undefined,
+  }),
+  component: ArchitecturePage,
+});
 const bugs = createRoute({ getParentRoute: () => rootRoute, path: '/bugs', component: BugsPage });
 const squad = createRoute({ getParentRoute: () => rootRoute, path: '/squad', component: SquadPage });
 const settings = createRoute({ getParentRoute: () => rootRoute, path: '/settings', component: SettingsPage });
 
-const routeTree = rootRoute.addChildren([index, board, backlog, proof, inbox, releases, decisions, bugs, squad, settings]);
+const routeTree = rootRoute.addChildren([index, board, backlog, proof, inbox, releases, decisions, architecture, bugs, squad, settings]);
 
 export const router = createRouter({ routeTree, defaultPreload: false });
 

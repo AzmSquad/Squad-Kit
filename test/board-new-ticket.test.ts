@@ -25,6 +25,13 @@ afterEach(() => {
 const b64 = (text: string) => Buffer.from(text).toString('base64');
 
 describe('a ticket written by hand', () => {
+  it('keeps how bad a bug is, and only on bugs', () => {
+    const bug = actions.createTicket(bp, { title: 'Price 1,500 is refused', ask: 'What happens:\nThe form refuses it.', kind: 'bug', severity: 'stops-work' });
+    expect(readTicket(bp, bug.id)?.severity).toBe('stops-work');
+    const feature = actions.createTicket(bp, { title: 'Show prices in bold', kind: 'feature', severity: 'small' });
+    expect(readTicket(bp, feature.id)?.severity).toBeUndefined();
+  });
+
   it('keeps its criteria, rules, edge cases and files, and every agent reads them', () => {
     const t = actions.createTicket(bp, {
       title: 'Limit bookings per day',
