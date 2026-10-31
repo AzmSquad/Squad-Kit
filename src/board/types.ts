@@ -129,12 +129,12 @@ export interface StuckChoice {
   question: string;
   options: StuckOption[];
   /** What stopped: a failed gate the person can continue past, a clash with the base branch, or any other error. */
-  gate?: 'checks' | 'review' | 'merge';
+  gate?: 'checks' | 'review' | 'proof' | 'merge';
 }
 
 /** The person went past a failed gate on purpose. Shown on the ticket, the pull request and the release notes. */
 export interface GateOverride {
-  gate: 'checks' | 'review';
+  gate: 'checks' | 'review' | 'proof';
   reason: string;
   by: string;
   at: string;

@@ -215,3 +215,40 @@ describe('a branch that clashes with main is not a dead end', () => {
     expect(sh('git log --format=%s -1 main', project)).toBe('Merge Raise the limit (AP-1)');
   });
 });
+
+describe('the proof gate never passes without screenshots', () => {
+  beforeEach(() => {
+    bp = boardPaths(path.join(tmp, '.squad'));
+    seedDemoBoard(bp, { speed: 50 });
+    writeMeta(bp, { ...readMeta(bp), engine: 'live', runner: 'direct', commands: { start: 'npm run dev', url: 'http://localhost:1' } });
+  });
+
+  it('stops with a card when a ticket with screens got none, and only you can continue past it', async () => {
+    const t0 = actions.createTicket(bp, { title: 'Business profile' });
+    updateTicket(bp, t0.id, (x) => {
+      x.squad = null;
+      x.worktree = tmp;
+      x.stage = 'review';
+      x.work = { steps: 3, tests: 4, screens: 2 };
+      x.gates = { checks: 'pass', review: 'pass', proof: 'pending' };
+    });
+    // The Tester answers, but saves no screenshot (here the app could not even start).
+    answers.push({ shots: [] }, { shots: [] });
+    await (new LiveSquad(bp) as unknown as { proof(id: string): Promise<void> }).proof(t0.id);
+    let t = readTicket(bp, t0.id)!;
+    expect(t.waiting?.kind).toBe('stuck');
+    expect(t.stuck?.gate).toBe('proof');
+    expect(t.gates?.proof).toBe('fail');
+    expect(t.stuck?.options.map((o) => o.do)).toEqual(['retry', 'continue', 'plan']);
+    expect(actions.decideStuck(bp, t0.id, 0).squad?.phase).toBe('proof');
+
+    updateTicket(bp, t0.id, (x) => {
+      x.waiting = { kind: 'stuck', summary: '' };
+      x.retryPhase = 'proof';
+    });
+    t = actions.decideStuck(bp, t0.id, 1, { reason: 'Screens checked by hand on the demo machine' });
+    expect(t.waiting?.kind).toBe('proof');
+    expect(t.gates?.proof).toBe('skipped');
+    expect(t.overrides?.[0]).toMatchObject({ gate: 'proof', reason: 'Screens checked by hand on the demo machine' });
+  }, 30_000);
+});

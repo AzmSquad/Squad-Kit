@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import http from 'node:http';
 import { startApp } from '../src/engine/checks.js';
 
 describe('startApp', () => {
@@ -19,6 +20,28 @@ describe('startApp', () => {
   it('says why when the app crashes while starting', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-app-'));
     await expect(startApp(dir, 'node -e "console.error(\'port in use\'); process.exit(1)"', 'http://localhost:4798', 10_000)).rejects.toThrow(/stopped while starting.*port in use/s);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }, 20_000);
+
+  it('runs the ticket copy on a free port when your own app already uses the address', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-app-'));
+    const yours = http.createServer((q, r) => r.end('yours')).listen(4797, '127.0.0.1');
+    fs.writeFileSync(path.join(dir, 'server.js'), "require('http').createServer((q, r) => r.end('ticket')).listen(Number(process.env.PORT || 4797), '127.0.0.1');");
+    const app = await startApp(dir, 'node server.js', 'http://localhost:4797', 20_000);
+    expect(app.url).not.toBe('http://localhost:4797');
+    expect(await fetch(app.url.replace('localhost', '127.0.0.1')).then((r) => r.text())).toBe('ticket');
+    expect(await fetch('http://127.0.0.1:4797').then((r) => r.text())).toBe('yours');
+    app.stop();
+    yours.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }, 30_000);
+
+  it('says the address is taken when the app cannot move to a free port', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-app-'));
+    const yours = http.createServer((q, r) => r.end('yours')).listen(4796, '127.0.0.1');
+    fs.writeFileSync(path.join(dir, 'server.js'), "require('http').createServer((q, r) => r.end('ticket')).listen(4796, '127.0.0.1');");
+    await expect(startApp(dir, 'node server.js', 'http://localhost:4796', 10_000)).rejects.toThrow(/localhost:4796 is used by another program \(maybe your own "npm run dev"\)/);
+    yours.close();
     fs.rmSync(dir, { recursive: true, force: true });
   }, 20_000);
 });

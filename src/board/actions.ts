@@ -840,23 +840,22 @@ export function wayOptions(stop: { gate?: StuckChoice['gate']; publish?: boolean
       ? { do: 'retry', name: 'Let the Builder try 3 more times', note: 'It gets the full error and tries again.' }
       : stop.gate === 'review'
         ? { do: 'retry', name: 'Let the Builder fix the notes', note: 'Then the Reviewer gets two more rounds.' }
-        : stop.gate === 'merge'
+        : stop.gate === 'proof'
+          ? { do: 'retry', name: 'Take the screenshots again', note: 'Only the proof runs again. Nothing is rebuilt. You can add a note for the Tester.' }
+          : stop.gate === 'merge'
           ? { do: 'retry', name: `Let the Builder bring in the latest ${stop.base ?? 'base'}`, note: 'It merges it into this ticket, fixes the clash, and the checks run again.' }
           : { do: 'retry', name: 'Try again', note: 'Run the same step again. You can add a note for the squad.' };
   const out: StuckOption[] = [retry];
-  if (stop.copy) {
+  if (stop.copy && stop.gate !== 'proof') {
     out.push({
       do: 'yourself',
       name: stop.gate === 'merge' ? 'Fix the clash yourself' : 'Fix it yourself',
       note: 'Open the ticket\'s copy in your editor and fix it. Then the checks, review and proof run again.',
     });
   }
-  if (stop.gate === 'checks' || stop.gate === 'review') {
-    out.push({
-      do: 'continue',
-      name: 'Continue anyway',
-      note: `Go on with the ${stop.gate === 'checks' ? 'checks failing' : 'review notes open'}. Write why: it shows on the ticket, the pull request and the release notes.`,
-    });
+  if (stop.gate === 'checks' || stop.gate === 'review' || stop.gate === 'proof') {
+    const what = { checks: 'with the checks failing', review: 'with the review notes open', proof: 'without screenshots' }[stop.gate];
+    out.push({ do: 'continue', name: 'Continue anyway', note: `Go on ${what}. Write why: it shows on the ticket, the pull request and the release notes.` });
   }
   out.push({ do: 'plan', name: 'Send it back to the plan', note: 'The Spec writer rewrites the plan with what went wrong.' });
   return out;
@@ -880,7 +879,7 @@ export function decideStuck(bp: BoardPaths, id: string, choice: number, input: {
     const reason = input.reason?.trim();
     const note = input.note?.trim();
     if (way === 'continue') {
-      if (gate !== 'checks' && gate !== 'review') throw new BoardActionError('Only a failed check or review can be continued past.');
+      if (gate !== 'checks' && gate !== 'review' && gate !== 'proof') throw new BoardActionError('Only a failed check, review or proof can be continued past.');
       if (!reason) throw new BoardActionError('Write why you continue anyway. It shows on the ticket, the pull request and the release notes.');
     }
     if (way === 'yourself' && meta.engine === 'live' && !(t.worktree && fs.existsSync(t.worktree))) {
@@ -896,7 +895,7 @@ export function decideStuck(bp: BoardPaths, id: string, choice: number, input: {
       tellLater(t, meta.engine, { kind: 'note', text: note, noteKind: 'note' });
     }
     if (way === 'continue') {
-      t.overrides = [...(t.overrides ?? []), { gate: gate as 'checks' | 'review', reason: reason!, by: meta.user.name, at: now() }];
+      t.overrides = [...(t.overrides ?? []), { gate: gate as 'checks' | 'review' | 'proof', reason: reason!, by: meta.user.name, at: now() }];
       t.gates = { ...(t.gates ?? { checks: 'pending', review: 'pending', proof: 'pending' }), [gate as string]: 'skipped' };
       tellLater(t, meta.engine, { kind: 'note', text: `Continued anyway past the failed ${gate}: ${reason}`, noteKind: 'note' });
     }
@@ -945,6 +944,12 @@ export function decideStuck(bp: BoardPaths, id: string, choice: number, input: {
           t.stage = 'review';
           t.status = 'Reviewer is reading the changes';
           scheduleSquad(t, 'review', 0.2, 1);
+        } else if (gate === 'proof') {
+          // No screenshots, on the record: you still check the work and press Looks right.
+          t.live = false;
+          t.stage = 'review';
+          t.status = 'Proof ready to check';
+          t.waiting = { kind: 'proof', summary: 'Ready for you to check, without screenshots' };
         } else {
           t.reviewNotes = undefined;
           t.status = 'Recording the proof';
@@ -1026,7 +1031,7 @@ function projectVersion(root: string, meta: ReturnType<typeof readMeta>): string
 export function composeNotes(bp: BoardPaths, release: Release): string {
   const tickets = listTickets(bp).filter((t) => release.tickets.includes(t.id));
   const lines = tickets.map((t) => `- ${t.releaseNote ?? `**${t.title}.**`}`);
-  const skipped = tickets.flatMap((t) => (t.overrides ?? []).map((o) => `- ${t.id} ${t.title}: went out with ${o.gate === 'checks' ? 'failing checks' : 'open review notes'}. ${o.by}: ${o.reason}`));
+  const skipped = tickets.flatMap((t) => (t.overrides ?? []).map((o) => `- ${t.id} ${t.title}: went out with ${o.gate === 'checks' ? 'failing checks' : o.gate === 'proof' ? 'no screenshots' : 'open review notes'}. ${o.by}: ${o.reason}`));
   return [`### What's new in ${release.version.replace(/^v/, '')}`, '', ...lines, ...(skipped.length ? ['', '### Continued anyway', '', ...skipped] : [])].join('\n');
 }
 

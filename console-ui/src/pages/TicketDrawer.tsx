@@ -533,11 +533,11 @@ function GatePills({ t }: { t: Ticket }) {
       <div className="pills">
         {pill(g?.checks, g?.checks === 'skipped' ? 'Checks failed, you continued' : (g?.checksText ?? 'All checks pass'))}
         {pill(g?.review, g?.review === 'pass' ? `Review approved by ${g.reviewBy}` : g?.review === 'skipped' ? 'Review notes open, you continued' : 'Review approved')}
-        {pill(g?.proof, 'Proof made')}
+        {pill(g?.proof, g?.proof === 'skipped' ? 'No screenshots, you continued' : 'Proof made')}
       </div>
       {t.overrides?.map((o) => (
         <p className="note override" key={o.at}>
-          <b>Continued anyway</b> past the {o.gate === 'checks' ? 'failed checks' : 'open review'}, by {o.by}: {o.reason}
+          <b>Continued anyway</b> past the {o.gate === 'checks' ? 'failed checks' : o.gate === 'proof' ? 'missing screenshots' : 'open review'}, by {o.by}: {o.reason}
         </p>
       ))}
     </>
@@ -546,7 +546,13 @@ function GatePills({ t }: { t: Ticket }) {
 
 function ProofShots({ t }: { t: Ticket }) {
   const [zoom, setZoom] = useState<number | null>(null);
-  if (!t.proof?.length) return <p className="note">No screens change in this ticket, so the passing checks are the proof.</p>;
+  if (!t.proof?.length) {
+    return (
+      <p className="note">
+        {t.gates?.proof === 'skipped' || (t.work?.screens ?? 0) > 0 ? 'No screenshots were taken for this ticket. See the activity for why.' : 'No screens change in this ticket, so the passing checks are the proof.'}
+      </p>
+    );
+  }
   const pictures: Picture[] = t.proof.flatMap((p) => [
     { src: assetUrl(`/api/v1/proof/${p.before}`), caption: `${p.criterion} · ${p.beforeLabel}` },
     { src: assetUrl(`/api/v1/proof/${p.after}`), caption: `${p.criterion} · ${p.afterLabel}` },

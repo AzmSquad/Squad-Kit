@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import net from 'node:net';
 import type { ProjectCommands } from '../board/types.js';
 import { withIpv4First } from './claude.js';
 
@@ -67,8 +68,36 @@ export interface RunningApp {
  * squad-kit starts the app for the Tester and stops it afterwards, so a dev server can never keep a step running
  * forever. Resolves once the app answers at its address.
  */
+/** True when something already answers at the address. */
+async function answers(url: string): Promise<boolean> {
+  for (const u of [url, url.replace('://localhost', '://127.0.0.1')]) {
+    if (await fetch(u, { signal: AbortSignal.timeout(3000) }).then((r) => r.status < 500).catch(() => false)) return true;
+  }
+  return false;
+}
+
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.once('error', reject);
+    srv.listen(0, '127.0.0.1', () => {
+      const port = (srv.address() as net.AddressInfo).port;
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
+/**
+ * Starts the ticket's copy of the app and waits until it answers. When something else already answers at the app's
+ * address (often the person's own "npm run dev"), the copy starts on a free port instead (PORT), so the Tester never
+ * looks at the wrong app. The address the app really runs at comes back in `url`.
+ */
 export async function startApp(cwd: string, command: string, url: string, waitMs = 3 * 60_000): Promise<RunningApp> {
-  const child = spawn(command, { cwd, shell: true, detached: true, stdio: ['ignore', 'pipe', 'pipe'], env: withIpv4First({ ...process.env, CI: '1', FORCE_COLOR: '0', BROWSER: 'none' }) });
+  const taken = await answers(url);
+  const port = taken ? await freePort() : null;
+  const target = port ? url.replace(/(:\/\/[^/:]+)(:\d+)?/, `$1:${port}`) : url;
+  const env = withIpv4First({ ...process.env, CI: '1', FORCE_COLOR: '0', BROWSER: 'none', ...(port ? { PORT: String(port) } : {}) });
+  const child = spawn(command, { cwd, shell: true, detached: true, stdio: ['ignore', 'pipe', 'pipe'], env });
   let out = '';
   let exited: number | null = null;
   const keep = (chunk: Buffer) => {
@@ -85,18 +114,19 @@ export async function startApp(cwd: string, command: string, url: string, waitMs
       // Already gone.
     }
   };
-  const tries = [url, url.replace('://localhost', '://127.0.0.1')];
+  const busy = port ? ` ${new URL(url).host} is used by another program (maybe your own "npm run dev"), so squad-kit tried port ${port}.` : '';
   const until = Date.now() + waitMs;
   while (Date.now() < until) {
-    if (exited !== null) throw new Error(`The app stopped while starting (${command}): ${tail(out, 8)}`);
-    for (const u of tries) {
-      const ok = await fetch(u, { signal: AbortSignal.timeout(3000) }).then((r) => r.status < 500).catch(() => false);
-      if (ok) return { url, stop };
-    }
+    if (exited !== null) throw new Error(`The app stopped while starting (${command}):${busy} ${tail(out, 8)}`);
+    if (await answers(target)) return { url: target, stop };
     await new Promise((r) => setTimeout(r, 2000));
   }
   stop();
-  throw new Error(`The app did not answer at ${url} within ${Math.round(waitMs / 60_000)} minutes (${command}): ${tail(out, 8)}`);
+  throw new Error(
+    port
+      ? `The app did not start on a free port.${busy} Stop the other program, then press Try again. (${command}): ${tail(out, 8)}`
+      : `The app did not answer at ${url} within ${Math.round(waitMs / 60_000)} minutes (${command}): ${tail(out, 8)}`,
+  );
 }
 
 /** "18 passed" style counts from common test runners, for the gate pill. */

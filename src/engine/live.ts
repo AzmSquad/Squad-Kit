@@ -1183,12 +1183,34 @@ export class LiveSquad {
     const t = readTicket(this.bp, id)!;
     const rc = repoFor(meta, t).commands;
     const canShow = Boolean(rc.start && rc.url) && (t.work?.screens ?? 0) > 0;
+    let why = '';
     if (canShow) {
       try {
         await this.screens(id, 'after');
       } catch (err) {
-        this.update(id, (x) => addActivity(x, 'tester', `Could not take screenshots: ${(err as Error).message}`));
+        why = (err as Error).message;
+        this.update(id, (x) => addActivity(x, 'tester', `Could not take screenshots: ${why}`));
       }
+    }
+    // The ticket has screens but nothing was shot: the gate does not pass on its own. You decide.
+    const shot = (readTicket(this.bp, id)?.proof ?? []).some((p) => p.after);
+    if (canShow && !shot) {
+      this.update(id, (x) => {
+        const said = x.activity.find((a) => a.who === 'tester' && /screenshot/i.test(a.text) && !/^Taking screenshots/.test(a.text))?.text;
+        x.live = false;
+        x.squad = null;
+        x.stage = 'review';
+        x.retryPhase = 'proof';
+        x.gates = { ...(x.gates ?? { checks: 'pass', review: 'pass' }), proof: 'fail' } as Ticket['gates'];
+        x.status = 'No screenshots yet';
+        x.stuck = {
+          gate: 'proof',
+          question: `The Tester could not take the screenshots. ${(why || said || 'It saved none.').slice(0, 600)}`,
+          options: wayOptions({ gate: 'proof' }),
+        };
+        x.waiting = { kind: 'stuck', summary: 'No screenshots yet: needs one decision' };
+      });
+      return;
     }
     this.update(id, (x) => {
       x.proof = (x.proof ?? []).filter((p) => p.after);
@@ -1218,20 +1240,21 @@ export class LiveSquad {
       this.update(id, (x) => (x.status = `Starting the app: ${rc.start}`));
       try {
         app = await startApp(t.worktree!, rc.start, rc.url);
-        this.update(id, (x) => addActivity(x, 'tester', `squad-kit started the app at ${rc.url}`));
+        const at = app.url;
+        this.update(id, (x) => addActivity(x, 'tester', `squad-kit started the app at ${at}${at !== rc.url ? ` (${rc.url} was used by another program)` : ''}`));
       } catch (err) {
         // The Tester can still try on its own; it sees the error in the activity.
         this.update(id, (x) => addActivity(x, 'tester', (err as Error).message.slice(0, 300)));
       }
     }
     try {
-      await this.shoot(id, t, when, meta, app !== null);
+      await this.shoot(id, t, when, meta, app !== null, app?.url);
     } finally {
       app?.stop();
     }
   }
 
-  private async shoot(id: string, t: Ticket, when: 'before' | 'after', meta: BoardMeta, appRunning: boolean): Promise<void> {
+  private async shoot(id: string, t: Ticket, when: 'before' | 'after', meta: BoardMeta, appRunning: boolean, appUrl?: string): Promise<void> {
     const r = await this.claude({
         role: 'tester',
         step: 'proof',
@@ -1240,7 +1263,7 @@ export class LiveSquad {
       ...(t.activity.some((a) => a.text === 'Taking screenshots before the change') && when === 'after'
         ? { resume: t.sessions!.tester }
         : { sessionId: t.sessions!.tester }),
-      prompt: P.proofPrompt(meta, t, this.bp.proofDir, when, this.ctx(t), appRunning),
+      prompt: P.proofPrompt(meta, t, this.bp.proofDir, when, this.ctx(t), appRunning, appUrl),
       allowedTools: BUILD_TOOLS,
       disallowedTools: NO_GIT_WRITES,
       permissionMode: 'acceptEdits',

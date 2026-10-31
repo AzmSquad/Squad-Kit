@@ -303,12 +303,12 @@ export function prDescription(t: Ticket, wid: number | null, shots: { label: str
     lines.push('### Checks');
     lines.push(`- Tests, lint and build: ${g.checks === 'pass' ? 'pass' : g.checks === 'skipped' ? 'failed, continued anyway' : g.checks}${g.checksText ? ` (${g.checksText})` : ''}`);
     lines.push(`- Code review: ${g.review === 'pass' ? 'approved' : g.review === 'skipped' ? 'notes still open, continued anyway' : g.review}${t.reviewRound ? ` after ${t.reviewRound} round${t.reviewRound > 1 ? 's' : ''}` : ''}`);
-    lines.push(`- Proof: ${g.proof === 'pass' ? `checked by ${t.createdBy}` : g.proof}`);
+    lines.push(`- Proof: ${g.proof === 'pass' ? `checked by ${t.createdBy}` : g.proof === 'skipped' ? 'no screenshots, continued anyway' : g.proof}`);
     lines.push('');
   }
   if (t.overrides?.length) {
     lines.push('### Continued anyway');
-    for (const o of t.overrides) lines.push(`- **${o.gate === 'checks' ? 'Failed checks' : 'Open review notes'}**, by ${o.by}: ${o.reason}`);
+    for (const o of t.overrides) lines.push(`- **${o.gate === 'checks' ? 'Failed checks' : o.gate === 'proof' ? 'No screenshots' : 'Open review notes'}**, by ${o.by}: ${o.reason}`);
     lines.push('');
   }
   if (shots.length) {

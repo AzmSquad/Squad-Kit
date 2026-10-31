@@ -445,9 +445,11 @@ Approve unless there is a real problem. Small style notes do not block. Each com
 ${ASK_RULE}`;
 }
 
-export function proofPrompt(meta: BoardMeta, t: Ticket, outDir: string, when: 'before' | 'after', ctx?: PromptContext, appRunning = false): string {
+export function proofPrompt(meta: BoardMeta, t: Ticket, outDir: string, when: 'before' | 'after', ctx?: PromptContext, appRunning = false, appUrl?: string): string {
   const criteria = doneWhen(t);
-  const c = ctx?.repo?.commands ?? meta.commands ?? {};
+  const base = ctx?.repo?.commands ?? meta.commands ?? {};
+  // squad-kit may run the ticket's copy on another port when the usual one is taken.
+  const c = appUrl ? { ...base, url: appUrl } : base;
   return `You are the Tester of a software squad. Take screenshots that show each "done when" below ${
     when === 'before' ? 'as the app is BEFORE the change (some may not exist yet; show the closest screen)' : 'working AFTER the change'
   }.

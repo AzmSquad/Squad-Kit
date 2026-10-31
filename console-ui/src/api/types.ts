@@ -122,11 +122,11 @@ export type WayOut = 'retry' | 'yourself' | 'continue' | 'plan' | 'skip-pr';
 export interface StuckChoice {
   question: string;
   options: (DecisionOption & { do?: WayOut })[];
-  gate?: 'checks' | 'review' | 'merge';
+  gate?: 'checks' | 'review' | 'proof' | 'merge';
 }
 
 export interface GateOverride {
-  gate: 'checks' | 'review';
+  gate: 'checks' | 'review' | 'proof';
   reason: string;
   by: string;
   at: string;

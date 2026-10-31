@@ -36,9 +36,10 @@ export function ProofPage() {
         </span>
       </div>
       <div className="gatebar">
-        <span className="pill ok"><Check size={13} strokeWidth={2.5} />{g?.checksText ?? 'All checks pass'}</span>
-        <span className="pill ok"><Check size={13} strokeWidth={2.5} />Review approved{g?.reviewBy ? ` by ${g.reviewBy}` : ''}</span>
-        <span className="pill ok"><Check size={13} strokeWidth={2.5} />Proof made</span>
+        {/* Each gate as it really is: green only when it passed; a gate you continued past says so. */}
+        <Gate state={g?.checks} text={g?.checks === 'skipped' ? 'Checks failed, you continued' : (g?.checksText ?? 'All checks pass')} />
+        <Gate state={g?.review} text={g?.review === 'skipped' ? 'Review notes open, you continued' : `Review approved${g?.reviewBy ? ` by ${g.reviewBy}` : ''}`} />
+        <Gate state={g?.proof} text={g?.proof === 'skipped' ? 'No screenshots, you continued' : 'Proof made'} />
         <span style={{ marginLeft: 6 }}>Nothing ships without these three.</span>
       </div>
       <div className="split">
@@ -50,7 +51,11 @@ export function ProofPage() {
               <span>{s.criterion}</span>
             </button>
           ))}
-          {shots.length === 0 && <p className="note">No screens change in this ticket, so the passing checks are the proof.</p>}
+          {shots.length === 0 && (
+            <p className="note">
+              {g?.proof === 'skipped' || (t.work?.screens ?? 0) > 0 ? 'No screenshots were taken for this ticket. See the activity for why.' : 'No screens change in this ticket, so the passing checks are the proof.'}
+            </p>
+          )}
         </div>
         <div className="stage">
           {shot ? (
@@ -90,5 +95,14 @@ export function ProofPage() {
         </div>
       )}
     </>
+  );
+}
+
+function Gate({ state, text }: { state?: string; text: string }) {
+  return (
+    <span className={`pill ${state === 'pass' ? 'ok' : state === 'skipped' ? 'skip' : 'wait'}`}>
+      {state === 'pass' && <Check size={13} strokeWidth={2.5} />}
+      {text}
+    </span>
   );
 }
