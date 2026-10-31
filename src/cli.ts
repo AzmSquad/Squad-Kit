@@ -18,6 +18,9 @@ import {
   runBug,
   runChange,
   runNote,
+  runSendBack,
+  runEditPlan,
+  runStartOver,
   runMessage,
   runTakeOver,
   runGiveBack,
@@ -241,6 +244,18 @@ program
   .option('--criterion', 'An acceptance criterion: it joins the "done when" list and must be proven', false)
   .option('--rule', 'A business rule the squad must follow', false)
   .action(wrapArgs(runNote));
+program
+  .command('send-back <ticket> <comments...>')
+  .description('Send a spec or design back with comments on its parts, like "step 2: use the cache" "story: …"')
+  .action(wrapArgs(runSendBack));
+program
+  .command('edit <ticket> <part> <text...>')
+  .description('Edit a part of the waiting spec or design yourself: "story", "step N" or "done when N"')
+  .action(wrapArgs(runEditPlan));
+program
+  .command('start-over <ticket> [direction...]')
+  .description('Throw away the waiting spec or design and write it again from zero with a new direction')
+  .action(wrapArgs(runStartOver));
 program
   .command('message <ticket> [text...]')
   .description('Message an agent on a ticket; it reads it at its next step and the work goes on')

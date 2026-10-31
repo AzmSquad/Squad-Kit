@@ -21,6 +21,9 @@ import {
   answerAgent,
   giveBack,
   takeOver,
+  editPlan,
+  sendBack,
+  startOver,
   DECIDE_YOURSELF,
   skipQuestions,
   stopTicket,
@@ -46,7 +49,7 @@ import {
   requireTicket,
   type BoardPaths,
 } from '../board/store.js';
-import type { AgentName, Stage, Ticket } from '../board/types.js';
+import type { AgentName, PlanPart, Stage, Ticket } from '../board/types.js';
 import { runConsole } from './console.js';
 
 const out = (s = '') => process.stdout.write(`${s}\n`);
@@ -323,6 +326,45 @@ export async function runChange(ticketId: string, words: string[]): Promise<void
           ? 'Sent to the Architect to update the design.'
           : 'Sent to the Spec writer to update the plan.',
   );
+}
+
+/** "story", "decision", "step 2" or "done when 1" (also "criterion 1"), as people write them. */
+export function parsePart(words: string): PlanPart | null {
+  const w = words.trim().toLowerCase();
+  if (w === 'story') return { part: 'story' };
+  if (w === 'decision') return { part: 'decision' };
+  const m = /^(step|done when|criterion)\s+(\d+)$/.exec(w);
+  if (!m) return null;
+  return { part: m[1] === 'step' ? 'step' : 'criterion', index: Number(m[2]) - 1 };
+}
+
+export async function runSendBack(ticketId: string, comments: string[]): Promise<void> {
+  const parsed = comments.map((c) => {
+    const i = c.indexOf(':');
+    const part = i > 0 ? parsePart(c.slice(0, i)) : null;
+    if (!part) throw new Error(`Start each comment with the part, like "step 2: use the cache" or "story: …". Not: ${c}`);
+    return { ...part, text: c.slice(i + 1).trim() };
+  });
+  const t = sendBack(board(), ticketId, parsed);
+  ui.success(`Sent back with ${parsed.length} ${parsed.length === 1 ? 'comment' : 'comments'}. ${t.status}.`);
+}
+
+export async function runEditPlan(ticketId: string, part: string, words: string[]): Promise<void> {
+  const p = parsePart(part);
+  if (!p || p.part === 'decision') throw new Error('Edit "story", "step N" or "done when N".');
+  const text = words.join(' ');
+  if (p.part === 'criterion') {
+    const m = /^given (.+?),? when (.+?),? then (.+?)\.?$/i.exec(text.trim());
+    if (!m) throw new Error('Write it as: Given …, when …, then …');
+    editPlan(board(), ticketId, { ...p, criterion: { given: m[1]!, when: m[2]!, then: m[3]! } });
+  } else editPlan(board(), ticketId, { ...p, text });
+  ui.success('Edited. Approve keeps your wording, and so does a rewrite.');
+}
+
+export async function runStartOver(ticketId: string, words: string[]): Promise<void> {
+  const text = words.join(' ') || (await input({ message: 'What is the new direction?' }));
+  const t = startOver(board(), ticketId, text);
+  ui.success(`Starting over. ${t.status}.`);
 }
 
 export async function runReply(ticketId: string, words: string[]): Promise<void> {

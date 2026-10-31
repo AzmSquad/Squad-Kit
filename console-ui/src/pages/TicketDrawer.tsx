@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { ArrowUp, Check, Code, Copy, Download, ExternalLink, GitPullRequest, MessageCircle, Send, Square, X } from 'lucide-react';
 import { assetUrl, ticketFileUrl } from '../api/client';
-import type { Question, Ticket, TicketNote } from '../api/types';
+import type { PlanComment, Question, Ticket, TicketNote } from '../api/types';
 import { useAct, useTicket } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { Cmd, Glyph, Modal, ROLE_NAME, Tracker, ago, clock, commandFor } from '../components/ui';
@@ -10,6 +10,7 @@ import { ConversationTab } from '../components/Conversation';
 import { ChangesTab, OpenInEditor } from '../components/Changes';
 import { TakeOverButton, canTakeOver } from '../components/TakeOver';
 import { Attachments as AgentFiles, Mockup } from '../components/Attachments';
+import { Part, WhatChanged, type Review } from '../components/PlanReview';
 import { Lightbox, type Picture } from '../components/Lightbox';
 
 type Tab = 'now' | 'story' | 'plan' | 'activity' | 'conversation' | 'proof' | 'changes' | 'developer';
@@ -289,20 +290,24 @@ function QuestionBlock({
 
 /* ── Plan ──────────────────────────────────────────────── */
 
-function PlanBody({ t }: { t: Ticket }) {
+function PlanBody({ t, review }: { t: Ticket; review?: Review }) {
   return (
     <>
       <div className="lbl">The story</div>
-      <p className="story">{t.story}</p>
+      <Part review={review} at={{ part: 'story' }}>
+        <p className="story">{t.story}</p>
+      </Part>
       {t.criteria && (
         <>
           <div className="lbl">Done when</div>
           <ol className="ac">
             {t.criteria.map((c, i) => (
               <li key={i}>
-                <span>
-                  <em>Given</em> {c.given}, <em>when</em> {c.when}, <em>then</em> {c.then}.
-                </span>
+                <Part review={review} at={{ part: 'criterion', index: i }}>
+                  <span>
+                    <em>Given</em> {c.given}, <em>when</em> {c.when}, <em>then</em> {c.then}.
+                  </span>
+                </Part>
               </li>
             ))}
           </ol>
@@ -311,6 +316,7 @@ function PlanBody({ t }: { t: Ticket }) {
       {t.decision && (
         <>
           <div className="lbl">The Architect's decision {t.decision.adr && <span className="pill ok">Saved as {t.decision.adr}</span>}</div>
+          <Part review={review} at={{ part: 'decision' }}>
           <div className="decision">
             <h3>
               <Glyph role="architect" small />
@@ -342,6 +348,7 @@ function PlanBody({ t }: { t: Ticket }) {
               )}
             </div>
           </div>
+          </Part>
         </>
       )}
       {t.mockup && t.work && (
@@ -360,20 +367,49 @@ function PlanBody({ t }: { t: Ticket }) {
           </div>
         </>
       )}
+      {review && t.work && t.steps && (
+        <>
+          <div className="lbl">Build steps</div>
+          <ol className="ac">
+            {t.steps.map((st, i) => (
+              <li key={i}>
+                <Part review={review} at={{ part: 'step', index: i }}>
+                  <span>{st.title}</span>
+                </Part>
+              </li>
+            ))}
+          </ol>
+        </>
+      )}
     </>
   );
 }
 
-/** Full track: the spec (the what) and then the design (the how), each approved on its own. Express: one plan. */
+/**
+ * Full track: the spec (the what) and then the design (the how), each approved on its own. Express: one plan.
+ * Reviewed like a document: comment on any part or edit it, send every comment back at once, or start over.
+ */
 function PlanPanel({ t }: { t: Ticket }) {
   const act = useAct();
-  const [changing, setChanging] = useState(false);
+  const [mode, setMode] = useState<'change' | 'over' | null>(null);
   const [note, setNote] = useState('');
   const [askDev, setAskDev] = useState(false);
+  const [comments, setComments] = useState<PlanComment[]>([]);
   const spec = t.waiting?.kind === 'spec';
   const design = !spec && Boolean(t.specApproved);
   const who = spec ? 'the Analyst' : design ? 'the Architect' : 'the Spec writer';
-  const send = () => act.mutate({ path: `/api/v1/tickets/${t.id}/change`, body: { text: note }, done: `Sent to ${who}.` });
+  const review: Review = {
+    t,
+    comments,
+    add: (c) => setComments((cs) => [...cs, c]),
+    remove: (i) => setComments((cs) => cs.filter((_, k) => k !== i)),
+    canEdit: (p) => (spec ? p.part === 'story' || p.part === 'criterion' : p.part === 'step' || (!design && (p.part === 'story' || p.part === 'criterion'))),
+  };
+  const send = () =>
+    mode === 'over'
+      ? act.mutate({ path: `/api/v1/tickets/${t.id}/plan/start-over`, body: { direction: note }, done: `Starting over. ${who[0]!.toUpperCase()}${who.slice(1)} writes it again.` })
+      : act.mutate({ path: `/api/v1/tickets/${t.id}/change`, body: { text: note }, done: `Sent to ${who}.` });
+  const n = comments.length;
   return (
     <>
       <div className="db">
@@ -389,40 +425,70 @@ function PlanPanel({ t }: { t: Ticket }) {
             </p>
           </div>
         )}
-        {spec ? <PlanBody t={{ ...t, decision: undefined, work: undefined }} /> : <PlanBody t={t} />}
+        <WhatChanged t={t} />
+        <p className="note reviewhint">Point at any part to comment on it or edit it yourself. Send back sends every comment at once.</p>
+        {spec ? <PlanBody t={{ ...t, decision: undefined, work: undefined }} review={review} /> : <PlanBody t={t} review={review} />}
         {!spec && t.decision && <p className="note" style={{ marginTop: 14 }}>Approved decisions are saved in Decisions. Later tickets must follow them.</p>}
       </div>
-      {changing ? (
+      {mode ? (
         <div className="df">
-          <input className="input" style={{ flex: 1 }} autoFocus value={note} onChange={(e) => setNote(e.target.value)} placeholder="What should change? One line is enough." onKeyDown={(e) => e.key === 'Enter' && note.trim() && send()} />
-          <button className="btn pri" disabled={!note.trim()} onClick={send}>
-            Send
+          <input
+            className="input"
+            style={{ flex: 1 }}
+            autoFocus
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder={mode === 'over' ? 'What is the new direction? It is written again from zero.' : 'What should change? One line is enough.'}
+            onKeyDown={(e) => e.key === 'Enter' && note.trim() && send()}
+          />
+          <button className="btn pri" disabled={!note.trim() || act.isPending} onClick={send}>
+            {mode === 'over' ? 'Start over' : 'Send'}
           </button>
-          <button className="btn" onClick={() => setChanging(false)}>Cancel</button>
+          <button className="btn" onClick={() => setMode(null)}>Cancel</button>
         </div>
       ) : (
         <div className="df">
-          <button
-            className="btn pri"
-            disabled={act.isPending}
-            onClick={() =>
-              act.mutate({
-                path: `/api/v1/tickets/${t.id}/approve`,
-                done: spec ? 'Spec approved. The Architect is designing how to build it.' : 'Plan approved. The Builder started.',
-              })
-            }
-          >
-            <Check size={15} strokeWidth={2.5} /> {spec ? 'Approve spec' : design ? 'Approve design' : 'Approve plan'}
-          </button>
-          <button className="btn" onClick={() => setChanging(true)}>Change something</button>
+          {n > 0 ? (
+            <button
+              className="btn pri"
+              disabled={act.isPending}
+              onClick={() =>
+                act.mutate(
+                  { path: `/api/v1/tickets/${t.id}/plan/send-back`, body: { comments }, done: `Sent back to ${who} with ${n} ${n === 1 ? 'comment' : 'comments'}.` },
+                  { onSuccess: () => setComments([]) },
+                )
+              }
+            >
+              <Send size={15} /> Send back ({n})
+            </button>
+          ) : (
+            <button
+              className="btn pri"
+              disabled={act.isPending}
+              onClick={() =>
+                act.mutate({
+                  path: `/api/v1/tickets/${t.id}/approve`,
+                  done: spec ? 'Spec approved. The Architect is designing how to build it.' : 'Plan approved. The Builder started.',
+                })
+              }
+            >
+              <Check size={15} strokeWidth={2.5} /> {spec ? 'Approve spec' : design ? 'Approve design' : 'Approve plan'}
+            </button>
+          )}
+          {n === 0 && <button className="btn" onClick={() => setMode('change')}>Change something</button>}
+          <button className="btn quiet" onClick={() => setMode('over')}>Start over</button>
           <button className="btn quiet" onClick={() => setAskDev(true)}>Ask a developer</button>
           <span className="grow" />
-          <Cmd text={`squad approve ${t.id}`} />
+          <Cmd text={n > 0 ? `squad send-back ${t.id} ${comments.map((c) => `"${partName(c)}: ${c.text}"`).join(' ')}` : `squad approve ${t.id}`} />
         </div>
       )}
       {askDev && <AskDeveloper t={t} onClose={() => setAskDev(false)} />}
     </>
   );
+}
+
+function partName(c: PlanComment): string {
+  return c.part === 'criterion' ? `done when ${(c.index ?? 0) + 1}` : c.part === 'step' ? `step ${(c.index ?? 0) + 1}` : c.part;
 }
 
 function AskDeveloper({ t, onClose }: { t: Ticket; onClose(): void }) {

@@ -14,7 +14,7 @@ import {
   writeMeta,
   type BoardPaths,
 } from '../board/store.js';
-import { approveExpress, needsSpec, wayOptions } from '../board/actions.js';
+import { applyPlanEdits, approveExpress, changeSummary, needsSpec, wayOptions } from '../board/actions.js';
 import { scheduleSquad } from '../board/schedule.js';
 import type { BoardMeta, ProjectCommands, Question, Role, Ticket } from '../board/types.js';
 import { describeTool, runClaude, type RunOptions, type RunResult } from './claude.js';
@@ -601,10 +601,11 @@ export class LiveSquad {
       t.story = out.story;
       t.criteria = out.criteria;
       t.releaseNote = out.releaseNote;
+      applyPlanEdits(t);
       delete t.decision;
       delete t.steps;
       delete t.work;
-      addActivity(t, 'analyst', change ? `Updated the spec: ${change}` : 'Wrote the spec');
+      addActivity(t, 'analyst', change ? `Updated the spec: ${changeSummary(change)}` : 'Wrote the spec');
       t.changeRequest = undefined;
       t.live = false;
       t.status = 'Spec ready for you';
@@ -678,8 +679,9 @@ export class LiveSquad {
       if (out.decision) t.decision = { ...out.decision };
       else delete t.decision;
       t.steps = out.steps.map((s) => ({ title: s, status: 'todo' }));
+      applyPlanEdits(t);
       t.work = { steps: out.steps.length, tests: Math.max(0, out.tests), screens: Math.max(0, out.screens) };
-      addActivity(t, design ? 'architect' : 'spec', change ? `Updated the ${design ? 'design' : 'plan'}: ${change}` : design ? 'Wrote the design' : 'Wrote the plan');
+      addActivity(t, design ? 'architect' : 'spec', change ? `Updated the ${design ? 'design' : 'plan'}: ${changeSummary(change)}` : design ? 'Wrote the design' : 'Wrote the plan');
       if (t.track === 'express' && !change) {
         t.status = 'Express track: approving the plan';
         scheduleSquad(t, 'express-approve', 0.2, 1);

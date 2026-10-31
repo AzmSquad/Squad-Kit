@@ -14,7 +14,7 @@ import {
   type BoardPaths,
 } from './store.js';
 import { scheduleSquad } from './schedule.js';
-import { approveExpress, needsSpec } from './actions.js';
+import { applyPlanEdits, approveExpress, changeSummary, needsSpec } from './actions.js';
 import { AMBIENT, scriptFor } from './scripts.js';
 import type { BoardMeta, Question, Ticket } from './types.js';
 
@@ -132,11 +132,16 @@ function advance(bp: BoardPaths, id: string, meta: BoardMeta): void {
           t.story = script.story(t);
           t.criteria = script.criteria(t);
           t.releaseNote = script.releaseNote(t);
+          // The demo writer takes each comment as one more "done when", so the new version shows what changed.
+          if (state.phase === 'spec-rewrite') {
+            for (const c of t.planReview?.sent ?? []) t.criteria.push({ given: 'your comment', when: 'the squad builds it', then: c.text });
+          }
+          applyPlanEdits(t);
           t.live = false;
           t.status = 'Spec ready for you';
           t.waiting = { kind: 'spec', summary: 'The spec is ready: is this what you want?' };
           t.squad = null;
-          addActivity(t, 'analyst', state.phase === 'spec-rewrite' ? `Updated the spec: ${t.changeRequest ?? 'your change'}` : 'Wrote the spec');
+          addActivity(t, 'analyst', state.phase === 'spec-rewrite' ? `Updated the spec: ${changeSummary(t.changeRequest)}` : 'Wrote the spec');
           return;
         }
         const design = Boolean(t.specApproved);
@@ -157,6 +162,10 @@ function advance(bp: BoardPaths, id: string, meta: BoardMeta): void {
         const decision = script.decision(t);
         if (decision) t.decision = decision;
         t.steps = script.steps.map((s) => ({ title: s.title, status: 'todo' }));
+        if (state.phase === 'plan-rewrite') {
+          for (const c of t.planReview?.sent ?? []) t.steps.splice(t.steps.length - 1, 0, { title: `Change: ${c.text}`, status: 'todo' });
+        }
+        applyPlanEdits(t);
         t.work = { steps: script.steps.length, tests: Math.round(script.tests * 0.43), screens: script.proof.length };
         // Full track with screens: the look is approved with the design, before anything is built.
         if (design && script.proof.length) {
@@ -174,7 +183,7 @@ function advance(bp: BoardPaths, id: string, meta: BoardMeta): void {
         t.waiting = design ? { kind: 'plan', summary: 'The design is ready: is this how to build it?' } : { kind: 'plan', summary: 'The plan is ready for your approval' };
         t.squad = null;
         const what = design ? 'design' : 'plan';
-        addActivity(t, design ? 'architect' : 'spec', state.phase === 'plan-rewrite' ? `Updated the ${what}: ${t.changeRequest ?? 'your change'}` : `Wrote the ${what}`);
+        addActivity(t, design ? 'architect' : 'spec', state.phase === 'plan-rewrite' ? `Updated the ${what}: ${changeSummary(t.changeRequest)}` : `Wrote the ${what}`);
         return;
       }
       case 'build':

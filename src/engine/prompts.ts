@@ -281,7 +281,7 @@ export function planPrompt(t: Ticket, change?: string, meta?: BoardMeta): string
     ? `\n- repo: the folder of the ONE code repo this ticket changes, exactly as written in the list (${meta.repos.map((r) => r.path).join(', ')}).`
     : '';
   const head = change
-    ? `The person read your plan and asked for this change: "${change}". Write the whole plan again with the change.`
+    ? `The person read your plan.\n${changeText(change)}\n\nWrite the whole plan again with this.`
     : t.track === 'express'
       ? 'This ticket is on the Express track: a small change the person wants done fast, with no questions. Write a short plan, as the Architect and the Spec writer. Where something is unclear, take the simplest choice that fits and say it in the story. Keep it small: few steps, no new technical decisions unless needed.'
       : `The person answered your questions:\n${answersText(t)}\n\nNow write the plan, as the Architect and the Spec writer.`;
@@ -300,9 +300,14 @@ export function planPrompt(t: Ticket, change?: string, meta?: BoardMeta): string
 ${PLAIN}`;
 }
 
+/** A one-line change is quoted; a review (comments, edits) or a new direction is passed as it is. */
+function changeText(change: string): string {
+  return change.includes('\n') ? change : `They asked for this change: "${change}"`;
+}
+
 export function specPrompt(t: Ticket, change?: string): string {
   const head = change
-    ? `The person read your spec and asked for this change: "${change}". Write the whole spec again with the change.`
+    ? `The person read your spec.\n${changeText(change)}\n\nWrite the whole spec again with this.`
     : `The person answered your questions:\n${answersText(t)}\n\nNow write the spec, as the Analyst: what to build and how we know it is done. Not how to build it; the Architect designs that next, after the person approves this.`;
   return `${head}
 
@@ -317,7 +322,7 @@ export function designPrompt(t: Ticket, change?: string, meta?: BoardMeta): stri
     ? `\n- repo: the folder of the ONE code repo this ticket changes, exactly as written in the list (${meta.repos.map((r) => r.path).join(', ')}).`
     : '';
   const head = change
-    ? `The person read your design and asked for this change: "${change}". Write the whole design again with the change.`
+    ? `The person read your design.\n${changeText(change)}\n\nWrite the whole design again with this.`
     : 'The person approved the spec below. Now, as the Architect, design how to build it. Read the code you need first.';
   return `${head}
 

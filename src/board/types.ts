@@ -50,6 +50,30 @@ export interface Criterion {
   then: string;
 }
 
+/** A part of a spec or design the person can point at. `index` counts from 0 for criteria and steps. */
+export interface PlanPart {
+  part: 'story' | 'criterion' | 'decision' | 'step';
+  index?: number;
+}
+
+export interface PlanComment extends PlanPart {
+  text: string;
+}
+
+/** The person's own wording for a part. It wins over a rewrite. */
+export interface PlanEdit extends PlanPart {
+  text?: string;
+  criterion?: Criterion;
+}
+
+/** The spec and design as they were, so the next version can show what changed. */
+export interface PlanSnapshot {
+  story?: string;
+  criteria?: Criterion[];
+  decision?: string;
+  steps?: string[];
+}
+
 export interface DecisionOption {
   name: string;
   note: string;
@@ -243,6 +267,8 @@ export interface Ticket {
   specApproved?: { by: string; at: string };
   /** The Architect's HTML mockup of the main screen, approved with the design. */
   mockup?: string;
+  /** Review like a document: comments sent back, the person's own edits, and the version before the rewrite. */
+  planReview?: { before?: PlanSnapshot; sent?: PlanComment[]; edits?: PlanEdit[] };
   /** You took the ticket over in Claude Code. The squad does nothing on it until you give it back. */
   takenOver?: { by: string; at: string; session: string; cwd: string };
   /**

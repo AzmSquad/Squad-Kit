@@ -36,6 +36,22 @@ export interface Question {
   thinking?: boolean;
 }
 
+export interface PlanPart {
+  part: 'story' | 'criterion' | 'decision' | 'step';
+  index?: number;
+}
+
+export interface PlanComment extends PlanPart {
+  text: string;
+}
+
+export interface PlanSnapshot {
+  story?: string;
+  criteria?: Criterion[];
+  decision?: string;
+  steps?: string[];
+}
+
 export interface Criterion {
   given: string;
   when: string;
@@ -187,6 +203,7 @@ export interface Ticket {
   track?: Track;
   agentQuestion?: { from: 'architect' | 'builder' | 'reviewer'; text: string; options: string[]; why?: string; files?: string[]; at: string; answer?: string };
   mockup?: string;
+  planReview?: { before?: PlanSnapshot; sent?: PlanComment[]; edits?: (PlanPart & { text?: string; criterion?: Criterion })[] };
   /** In a multi-repo workspace: the code repo this ticket changes. */
   repo?: string;
   /** Set when the person presses Stop; the live squad stops the running step. */
