@@ -267,12 +267,12 @@ export class LiveSquad {
     };
   }
 
-  private async claude(opts: RunOptions & { ticket?: string; role: AgentRole }): Promise<RunResult> {
+  private async claude(opts: RunOptions & { ticket?: string; role: AgentRole; step?: string }): Promise<RunResult> {
     const signal = opts.ticket ? this.stops.get(opts.ticket)?.signal : undefined;
     // Each role runs as its own agent: the team's file for it sets the tool, the model and extra instructions.
     const agent = readAgent(this.bp, opts.role);
     if (agent.tool !== 'claude') throw new Error(`The ${opts.role} agent is set to ${agent.tool}, which squad-kit cannot run yet. Switch it to Claude Code in Squad and AI.`);
-    const extra = agentInstructions(agent);
+    const extra = agentInstructions(agent, opts.step);
     const appendSystemPrompt = [opts.appendSystemPrompt, extra].filter(Boolean).join('\n\n') || undefined;
     const key = opts.ticket;
     opts = this.withNewNotes(opts);
@@ -357,6 +357,7 @@ export class LiveSquad {
     try {
       const r = await this.claude({
         role: 'architect',
+        step: 'scan',
         cwd: root,
         prompt: P.scanPrompt(meta, nested, this.ctx()),
         allowedTools: READ_ONLY,
@@ -504,6 +505,7 @@ export class LiveSquad {
     });
     const r = await this.claude({
         role: 'analyst',
+        step: 'questions',
       ticket: id,
       cwd: root,
       sessionId: t0.sessions!.intake,
@@ -549,6 +551,7 @@ export class LiveSquad {
     try {
       const r = await this.claude({
         role: 'analyst',
+        step: 'questions',
         ticket: id,
         cwd: projectRoot(this.bp),
         resume: t.sessions?.intake,
@@ -584,6 +587,7 @@ export class LiveSquad {
     const resume = Boolean(t0.activity.some((a) => a.who === 'analyst'));
     const r = await this.claude({
       role: 'analyst',
+      step: 'spec',
       ticket: id,
       cwd: root,
       ...(resume ? { resume: t0.sessions!.intake } : { sessionId: t0.sessions!.intake }),
@@ -629,6 +633,7 @@ export class LiveSquad {
     const ask = `${asked ? `${P.answerPrompt(asked, 'architect')}\n\n` : ''}${design ? P.designPrompt(t0, change, this.meta()) : P.planPrompt(t0, change, this.meta())}`;
     const r = await this.claude({
       role: 'architect',
+      step: 'design',
       ticket: id,
       cwd: root,
       ...(resume ? { resume: t0.sessions!.intake } : { sessionId: t0.sessions!.intake }),
@@ -735,7 +740,7 @@ export class LiveSquad {
     });
     const resume = Boolean(t.activity.some((a) => a.who === 'builder' && a.text.startsWith('Started')));
     this.update(id, (x) => addActivity(x, 'builder', resume ? 'Picked up where it stopped' : 'Started building'));
-    await this.runBuilder(id, resume ? 'Continue the steps that are not done yet, then run the tests.' : P.buildPrompt(meta, listDecisions(this.bp), t, this.ctx(t)), resume);
+    await this.runBuilder(id, resume ? 'Continue the steps that are not done yet, then run the tests.' : P.buildPrompt(meta, listDecisions(this.bp), t, this.ctx(t)), resume, 'build');
     this.update(id, (x) => {
       for (const s of x.steps ?? []) {
         s.status = 'done';
@@ -750,13 +755,14 @@ export class LiveSquad {
   }
 
   /** Runs (or continues) the Builder's conversation and maps its ">> step N" lines to the plan. */
-  private async runBuilder(id: string, prompt: string, resume: boolean): Promise<void> {
+  private async runBuilder(id: string, prompt: string, resume: boolean, step: 'build' | 'fix' = 'fix'): Promise<void> {
     const t = readTicket(this.bp, id)!;
     const cwd = t.worktree!;
     const started = Date.now();
     let current = -1;
     const r = await this.claude({
         role: 'builder',
+        step,
       ticket: id,
       cwd,
       ...(resume ? { resume: t.sessions!.build } : { sessionId: t.sessions!.build }),
@@ -807,7 +813,7 @@ export class LiveSquad {
       x.stage = 'implement';
       x.live = true;
     });
-    await this.runBuilder(id, P.answerPrompt(t.agentQuestion ?? { text: '' }, 'builder'), true);
+    await this.runBuilder(id, P.answerPrompt(t.agentQuestion ?? { text: '' }, 'builder'), true, 'build');
     this.update(id, (x) => {
       for (const s of x.steps ?? []) {
         s.status = 'done';
@@ -1020,6 +1026,7 @@ export class LiveSquad {
     const goOn = answered && Boolean(t0.sessions?.review);
     const r = await this.claude({
         role: 'reviewer',
+        step: 'review',
       ticket: id,
       cwd: t0.worktree!,
       ...(round > 1 || goOn ? { resume: t0.sessions!.review } : { sessionId: t0.sessions!.review }),
@@ -1132,6 +1139,7 @@ export class LiveSquad {
   private async shoot(id: string, t: Ticket, when: 'before' | 'after', meta: BoardMeta, appRunning: boolean): Promise<void> {
     const r = await this.claude({
         role: 'tester',
+        step: 'proof',
       ticket: id,
       cwd: t.worktree!,
       ...(t.activity.some((a) => a.text === 'Taking screenshots before the change') && when === 'after'

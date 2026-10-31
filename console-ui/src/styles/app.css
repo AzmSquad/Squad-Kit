@@ -619,3 +619,10 @@ ul.ticketnotes .grow, .addnote .grow { flex: 1; }
 .chnew { color: var(--text); }
 @media (max-width: 640px) { .chrow { grid-template-columns: 1fr; } }
 .chold.empty { text-decoration: none; }
+
+/* An agent's steps: team instructions and the read-only core prompt */
+.agentstep { border-top: 1px solid var(--line); padding: 10px 0 4px; }
+.agentstep > b { display: block; margin-bottom: 6px; }
+.agentstep details { margin-top: 6px; }
+.agentstep summary { cursor: pointer; font-size: 12.5px; color: var(--muted); }
+.coreprompt { white-space: pre-wrap; font-size: 12px; line-height: 1.5; max-height: 280px; overflow: auto; background: var(--lane); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 6px 0 0; }

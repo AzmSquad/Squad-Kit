@@ -42,11 +42,12 @@ import { buildStamp } from '../../board/console-info.js';
 import { timingSafeEqualHex } from '../auth.js';
 import type { NewTicketInput, UploadedFile } from '../../board/actions.js';
 import { draftTicket } from '../../engine/draft.js';
-import { AGENTS, ensureAgents, readAgent, roleForPhase, writeAgent, type AgentRole, type AgentTool } from '../../engine/agents.js';
+import { AGENTS, STEPS, ensureAgents, readAgent, roleForPhase, writeAgent, type AgentRole, type AgentTool } from '../../engine/agents.js';
 import { loadConfig, saveConfig } from '../../core/config.js';
 import { loadSecrets, mergeSecrets, saveSecrets } from '../../core/secrets.js';
 import { munsitKey } from '../../engine/media.js';
 import { installedEditors, openInEditor, ticketChanges } from '../../engine/changes.js';
+import { corePrompts } from '../../engine/core-prompts.js';
 
 const DAY = 86_400_000;
 
@@ -470,14 +471,22 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
         ...a,
         ...readAgent(bp, a.role),
         file: `.squad/board/agents/${a.role}.md`,
+        stepList: STEPS[a.role],
         working: tickets.filter((t) => roleForPhase(t.squad?.phase) === a.role).map((t) => ({ id: t.id, title: t.title, status: t.status })),
       })),
     );
   });
 
   app.put('/api/v1/agents/:role', async (c) => {
-    const b = await body<{ tool?: AgentTool; model?: string; instructions?: string }>(c);
-    return act(c, () => writeAgent(bp, c.req.param('role') as AgentRole, { tool: b.tool, model: b.model?.trim(), instructions: b.instructions }));
+    const b = await body<{ tool?: AgentTool; model?: string; instructions?: string; steps?: Record<string, string> }>(c);
+    return act(c, () => writeAgent(bp, c.req.param('role') as AgentRole, { tool: b.tool, model: b.model?.trim(), instructions: b.instructions, steps: b.steps }));
+  });
+
+  // The core prompts, read only, filled in from a real ticket: what each step of the agent reads.
+  app.get('/api/v1/agents/:role/prompts', (c) => {
+    const role = c.req.param('role') as AgentRole;
+    if (!AGENTS.some((a) => a.role === role)) return c.json({ error: 'not found' }, 404);
+    return c.json(corePrompts(bp, role, c.req.query('ticket') || undefined));
   });
 
   app.post('/api/v1/restart', (c) => {

@@ -38,6 +38,8 @@ import { seedDemoBoard } from '../board/demo.js';
 import { repoFor } from '../engine/repos.js';
 import { azureFor } from '../engine/azure.js';
 import { openInEditor, ticketChanges } from '../engine/changes.js';
+import { AGENTS, STEPS, readAgent, writeAgent, type AgentRole } from '../engine/agents.js';
+import { corePrompts } from '../engine/core-prompts.js';
 import { draftTicket } from '../engine/draft.js';
 import {
   boardExists,
@@ -365,6 +367,40 @@ export async function runStartOver(ticketId: string, words: string[]): Promise<v
   const text = words.join(' ') || (await input({ message: 'What is the new direction?' }));
   const t = startOver(board(), ticketId, text);
   ui.success(`Starting over. ${t.status}.`);
+}
+
+/** Shows an agent: its tool, model and the team's instructions per step; or one step's core prompt; or sets them. */
+export async function runAgent(role: string, opts: { step?: string; set?: string; prompt?: boolean; ticket?: string }): Promise<void> {
+  const bp = board();
+  const r = role.toLowerCase() as AgentRole;
+  if (!AGENTS.some((a) => a.role === r)) throw new Error(`There is no ${role} agent. Agents: ${AGENTS.map((a) => a.role).join(', ')}.`);
+  const steps = STEPS[r];
+  if (opts.step && !steps.some((s) => s.id === opts.step)) throw new Error(`The ${r} has no step "${opts.step}". Its steps: ${steps.map((s) => s.id).join(', ')}.`);
+  if (opts.set !== undefined) {
+    writeAgent(bp, r, opts.step ? { steps: { [opts.step]: opts.set } } : { instructions: opts.set });
+    ui.success(`Saved. The ${r} reads it ${opts.step ? `in the ${opts.step} step` : 'in every step'}, on top of its core prompt.`);
+    return;
+  }
+  if (opts.prompt) {
+    const core = corePrompts(bp, r, opts.ticket);
+    out(kleur.gray(`  Core prompts, read only, filled in from ${core.ticket.id} "${core.ticket.title}"`));
+    for (const p of core.prompts.filter((x) => !opts.step || x.step === opts.step)) {
+      out();
+      out(kleur.bold(`  ── ${p.name} (${p.step}) ──`));
+      out(p.prompt);
+      if (p.team) out(`\n${kleur.green(p.team)}`);
+    }
+    return;
+  }
+  const a = readAgent(bp, r);
+  const clean = (x: string) => x.replace(/<!--[\s\S]*?-->/g, '').trim();
+  out();
+  out(`  ${kleur.bold(AGENTS.find((x) => x.role === r)!.name)}  ${kleur.gray(`${a.tool}${a.model ? ` · ${a.model}` : ''}`)}`);
+  out(`  ${kleur.gray('Every step:')} ${clean(a.instructions) || kleur.gray('nothing added')}`);
+  for (const s of steps) out(`  ${kleur.gray(`${s.name} (${s.id}):`)} ${clean(a.steps[s.id] ?? '') || kleur.gray('nothing added')}`);
+  out();
+  ui.info(`See a core prompt: squad agent ${r} --prompt --step ${steps[0]!.id}`);
+  ui.info(`Add to a step: squad agent ${r} --step ${steps[0]!.id} --set "..."`);
 }
 
 export async function runReply(ticketId: string, words: string[]): Promise<void> {

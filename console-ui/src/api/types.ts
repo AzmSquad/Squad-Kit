@@ -365,8 +365,16 @@ export interface AgentInfo {
   tool: 'claude' | 'codex';
   model: string;
   instructions: string;
+  /** The team's instructions for one step, by step id. */
+  steps: Record<string, string>;
+  stepList: { id: string; name: string }[];
   file: string;
   working: { id: string; title: string; status: string }[];
+}
+
+export interface CorePrompts {
+  ticket: { id: string; title: string };
+  prompts: { step: string; name: string; prompt: string; team: string }[];
 }
 
 export interface ConversationSummary {

@@ -18,6 +18,7 @@ import {
   runBug,
   runChange,
   runNote,
+  runAgent,
   runSendBack,
   runEditPlan,
   runStartOver,
@@ -244,6 +245,14 @@ program
   .option('--criterion', 'An acceptance criterion: it joins the "done when" list and must be proven', false)
   .option('--rule', 'A business rule the squad must follow', false)
   .action(wrapArgs(runNote));
+program
+  .command('agent <role>')
+  .description("See or change an agent's instructions per step, or read its core prompts (read only)")
+  .option('--step <step>', 'One step, like questions, spec, scan, design, build, fix, review or proof')
+  .option('--set <text>', 'Save the team instructions (for --step, or for every step)')
+  .option('--prompt', 'Print the core prompts, filled in from a real ticket')
+  .option('--ticket <id>', 'With --prompt: the ticket to fill them in from')
+  .action(wrapArgs(runAgent));
 program
   .command('send-back <ticket> <comments...>')
   .description('Send a spec or design back with comments on its parts, like "step 2: use the cache" "story: …"')

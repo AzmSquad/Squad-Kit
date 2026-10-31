@@ -17,6 +17,24 @@ export const AGENTS: { role: AgentRole; name: string; job: string; phases: strin
   { role: 'tester', name: 'Tester', job: 'Runs the app and records before and after screenshots', phases: ['proof'] },
 ];
 
+/** The steps of each role. Teams can add instructions for one step; the core prompt of each stays inside squad-kit. */
+export const STEPS: Record<AgentRole, { id: string; name: string }[]> = {
+  analyst: [
+    { id: 'questions', name: 'Questions' },
+    { id: 'spec', name: 'Spec' },
+  ],
+  architect: [
+    { id: 'scan', name: 'Reading the project' },
+    { id: 'design', name: 'Design' },
+  ],
+  builder: [
+    { id: 'build', name: 'Build' },
+    { id: 'fix', name: 'Fixes' },
+  ],
+  reviewer: [{ id: 'review', name: 'Review' }],
+  tester: [{ id: 'proof', name: 'Proof' }],
+};
+
 export const AGENT_TOOLS = ['claude', 'codex'] as const;
 export type AgentTool = (typeof AGENT_TOOLS)[number];
 
@@ -25,6 +43,8 @@ export interface Agent {
   tool: AgentTool;
   model: string;
   instructions: string;
+  /** Extra instructions for one step, by step id. Written in the file under "## Step: <id>". */
+  steps: Record<string, string>;
 }
 
 export function agentsDir(bp: BoardPaths): string {
@@ -36,7 +56,21 @@ function fileOf(bp: BoardPaths, role: AgentRole): string {
 }
 
 function render(a: Agent): string {
-  return `---\ntool: ${a.tool}\nmodel: ${a.model}\n---\n${a.instructions.trim()}\n`;
+  const steps = Object.entries(a.steps)
+    .filter(([, text]) => text.trim())
+    .map(([id, text]) => `\n## Step: ${id}\n${text.trim()}\n`)
+    .join('');
+  return `---\ntool: ${a.tool}\nmodel: ${a.model}\n---\n${a.instructions.trim()}\n${steps}`;
+}
+
+const STEP_HEAD = /^## Step: ([\w-]+)[ \t]*$/m;
+
+/** Splits the file body into the role's general instructions and its per-step sections. */
+function splitSteps(body: string): { instructions: string; steps: Record<string, string> } {
+  const parts = body.split(new RegExp(STEP_HEAD.source, 'm'));
+  const steps: Record<string, string> = {};
+  for (let i = 1; i < parts.length; i += 2) steps[parts[i]!] = (parts[i + 1] ?? '').trim();
+  return { instructions: (parts[0] ?? '').trim(), steps };
 }
 
 function defaultAgent(role: AgentRole): Agent {
@@ -45,7 +79,8 @@ function defaultAgent(role: AgentRole): Agent {
     role,
     tool: 'claude',
     model: '',
-    instructions: `<!-- Extra instructions for the ${name}, in plain words. The ${name} reads them before every run. For example: "Write the questions in simple English." -->`,
+    steps: {},
+    instructions: `<!-- Extra instructions for the ${name}, in plain words. The ${name} reads them before every run. For example: "Write the questions in simple English." For one step only, add a heading like "## Step: ${STEPS[role][0]!.id}" and write under it. -->`,
   };
 }
 
@@ -70,24 +105,35 @@ export function readAgent(bp: BoardPaths, role: AgentRole): Agent {
       .filter(([k]) => k),
   );
   const tool = AGENT_TOOLS.includes(head.tool as AgentTool) ? (head.tool as AgentTool) : 'claude';
-  return { role, tool, model: head.model ?? '', instructions: (m ? m[2] : text)?.trim() ?? '' };
+  return { role, tool, model: head.model ?? '', ...splitSteps((m ? m[2] : text) ?? '') };
 }
 
 export function writeAgent(bp: BoardPaths, role: AgentRole, change: Partial<Omit<Agent, 'role'>>): Agent {
   if (!AGENTS.some((a) => a.role === role)) throw new Error(`There is no ${role} agent.`);
   if (change.tool && !AGENT_TOOLS.includes(change.tool)) throw new Error(`"${change.tool}" is not a tool squad-kit can run.`);
   if (change.model && !/^[\w.:-]{1,60}$/.test(change.model)) throw new Error('A model name is one word, for example sonnet or opus.');
-  const next = { ...readAgent(bp, role), ...change, role };
+  const known = new Set(STEPS[role].map((x) => x.id));
+  const bad = Object.keys(change.steps ?? {}).find((k) => !known.has(k));
+  if (bad) throw new Error(`The ${role} has no step "${bad}". Its steps: ${[...known].join(', ')}.`);
+  const current = readAgent(bp, role);
+  const next = { ...current, ...change, steps: { ...current.steps, ...(change.steps ?? {}) }, role };
   fs.mkdirSync(agentsDir(bp), { recursive: true });
   fs.writeFileSync(fileOf(bp, role), render(next), 'utf8');
   return next;
 }
 
-/** The team's instructions for a role, ready to add to its system prompt. Comments in the file are left out. */
-export function agentInstructions(a: Agent): string {
-  const text = a.instructions.replace(/<!--[\s\S]*?-->/g, '').trim();
+/**
+ * The team's instructions for a role, and for the step it runs now, ready to add to its system prompt. They add to
+ * the core prompt and never replace it. Comments in the file are left out.
+ */
+export function agentInstructions(a: Agent, step?: string): string {
+  const clean = (x: string | undefined) => (x ?? '').replace(/<!--[\s\S]*?-->/g, '').trim();
+  const general = clean(a.instructions);
+  const forStep = step ? clean(a.steps[step]) : '';
   const name = AGENTS.find((x) => x.role === a.role)!.name;
-  return text ? `Instructions from the project team for the ${name}. Follow them unless they conflict with the task:\n${text}` : '';
+  const stepName = STEPS[a.role].find((x) => x.id === step)?.name;
+  const parts = [general, forStep ? `For the ${stepName ?? step} step:\n${forStep}` : ''].filter(Boolean);
+  return parts.length ? `Instructions from the project team for the ${name}. Follow them unless they conflict with the task:\n${parts.join('\n\n')}` : '';
 }
 
 export function roleForPhase(phase: string | undefined): AgentRole | null {

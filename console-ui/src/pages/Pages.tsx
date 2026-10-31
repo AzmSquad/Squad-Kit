@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { AgentInfo, TrackerStatus } from '../api/types';
+import type { AgentInfo, CorePrompts, TrackerStatus } from '../api/types';
 import { Bug, Check, Lightbulb, Map as MapIcon, RotateCcw, Terminal } from 'lucide-react';
 import type { Decision, ProjectCommands, RepoInfo } from '../api/types';
 import { useAct, useBoard, useDecisions } from '../lib/data';
@@ -333,19 +333,27 @@ export function SquadPage() {
   );
 }
 
+/**
+ * An agent: its tool and model, the team's house rules for every step and for each step, and the core prompt of each
+ * step, read only. Team instructions are added to the core prompt; they never replace it.
+ */
 function AgentDialog({ agent, onClose }: { agent: AgentInfo; onClose: () => void }) {
   const act = useAct();
+  const clean = (x: string | undefined) => (x ?? '').replace(/<!--[\s\S]*?-->/g, '').trim();
   const [tool, setTool] = useState(agent.tool);
   const [model, setModel] = useState(agent.model);
-  const [instructions, setInstructions] = useState(agent.instructions.replace(/<!--[\s\S]*?-->/g, '').trim());
+  const [instructions, setInstructions] = useState(clean(agent.instructions));
+  const [steps, setSteps] = useState<Record<string, string>>(() => Object.fromEntries(agent.stepList.map((s) => [s.id, clean(agent.steps?.[s.id])])));
+  const core = useQuery({ queryKey: ['core-prompts', agent.role], queryFn: () => api<CorePrompts>(`/api/v1/agents/${agent.role}/prompts`) });
   const save = () =>
     act.mutate(
-      { path: `/api/v1/agents/${agent.role}`, method: 'PUT', body: { tool, model, instructions }, done: `${agent.name} saved. It uses this from its next step.` },
+      { path: `/api/v1/agents/${agent.role}`, method: 'PUT', body: { tool, model, instructions, steps }, done: `${agent.name} saved. It uses this from its next step.` },
       { onSuccess: onClose },
     );
   return (
     <Modal
       title={`Edit the ${agent.name}`}
+      wide
       onClose={onClose}
       footer={
         <>
@@ -369,19 +377,54 @@ function AgentDialog({ agent, onClose }: { agent: AgentInfo; onClose: () => void
         <input className="input mono" style={{ fontSize: 13 }} value={model} placeholder="Your default. Or: sonnet, opus" onChange={(e) => setModel(e.target.value)} />
       </div>
       <div style={{ marginTop: 12 }}>
-        <b style={{ display: 'block', marginBottom: 6 }}>House rules</b>
+        <b style={{ display: 'block', marginBottom: 6 }}>House rules for every step</b>
         <textarea
           className="input"
-          rows={7}
+          rows={4}
           style={{ width: '100%', resize: 'vertical' }}
           value={instructions}
-          placeholder={`Extra instructions the ${agent.name} reads before every step, in plain words.`}
+          placeholder={`Extra instructions the ${agent.name} reads in every step, in plain words.`}
           onChange={(e) => setInstructions(e.target.value)}
         />
       </div>
+      <p className="note" style={{ fontSize: 12.5 }}>
+        Each step has a core prompt that squad-kit keeps and improves with every release. Your instructions are added to it, never instead of it.
+        {core.data && ` The prompts below are filled in from ${core.data.ticket.id} "${core.data.ticket.title}".`}
+      </p>
+      {agent.stepList.map((s) => {
+        const p = core.data?.prompts.find((x) => x.step === s.id);
+        return (
+          <div className="agentstep" key={s.id}>
+            <b>{s.name}</b>
+            <textarea
+              className="input"
+              rows={2}
+              style={{ width: '100%', resize: 'vertical' }}
+              value={steps[s.id] ?? ''}
+              placeholder={`Only for the ${s.name} step. For example: ${STEP_EXAMPLE[s.id] ?? 'keep it short'}.`}
+              onChange={(e) => setSteps({ ...steps, [s.id]: e.target.value })}
+            />
+            <details>
+              <summary>Core prompt for {s.name}, read only</summary>
+              <pre className="coreprompt">{p ? p.prompt : core.isLoading ? 'Loading…' : 'Not available.'}</pre>
+            </details>
+          </div>
+        );
+      })}
     </Modal>
   );
 }
+
+const STEP_EXAMPLE: Record<string, string> = {
+  questions: 'always ask who will use it',
+  spec: 'write "done when" items a clerk can check by hand',
+  scan: 'the old /legacy folder is not used',
+  design: 'prefer the existing service layer over new packages',
+  build: 'use our logger, never console.log',
+  fix: 'never turn a failing test off',
+  review: 'check every query for missing tenant filters',
+  proof: 'take screenshots in Arabic too',
+};
 
 /* ── Settings ──────────────────────────────────────────── */
 
