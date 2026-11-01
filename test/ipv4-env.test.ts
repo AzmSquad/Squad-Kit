@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { withIpv4First } from '../src/engine/claude.js';
+import { withIpv4First } from '../src/engine/agent-env.js';
 
 describe('withIpv4First', () => {
   it('makes Node tools use IPv4 only, keeping other options', () => {

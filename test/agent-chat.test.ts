@@ -2,12 +2,12 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { RunOptions, RunResult } from '../src/engine/claude.js';
+import type { RunOptions, RunResult } from '../src/modules/claude/direct.js';
 
 const calls: RunOptions[] = [];
 const answers: unknown[] = [];
-vi.mock('../src/engine/claude.js', async (orig) => ({
-  ...(await orig<typeof import('../src/engine/claude.js')>()),
+vi.mock('../src/modules/claude/direct.js', async (orig) => ({
+  ...(await orig<typeof import('../src/modules/claude/direct.js')>()),
   runClaude: async (opts: RunOptions): Promise<RunResult> => {
     calls.push(opts);
     return { ok: true, structured: answers.shift() ?? { summary: 'done' }, text: '', sessionId: opts.resume ?? opts.sessionId } as RunResult;

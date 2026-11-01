@@ -36,7 +36,7 @@ import {
   answerAgent,
   saveReleaseNotes,
   skipQuestions,
-  startFromAzure,
+  startFromTracker,
   endStuckCommand,
   keepWaiting,
   stopTicket,
@@ -48,7 +48,8 @@ import { seedDemoBoard } from '../../board/demo.js';
 import type { AgentName, PlanComment, PlanEdit } from '../../board/types.js';
 import { repoFor } from '../../engine/repos.js';
 import type { ProjectCommands, Release } from '../../board/types.js';
-import { Azure, azureFor, parseAzureRemote } from '../../engine/azure.js';
+import { guessTracker, speechModule, trackerFor, trackerModule, TRACKERS } from '../../modules/registry.js';
+import type { Tracker } from '../../modules/tracker/types.js';
 import { findNestedRepos } from '../../engine/repos.js';
 import { git } from '../../engine/git.js';
 import { allowedFile, mimeOf, readConversation, ticketConversations, ticketFolders } from '../../engine/conversations.js';
@@ -57,9 +58,7 @@ import { timingSafeEqualHex } from '../auth.js';
 import type { NewTicketInput, UploadedFile } from '../../board/actions.js';
 import { draftTicket } from '../../engine/draft.js';
 import { AGENTS, STEPS, ensureAgents, readAgent, roleForPhase, writeAgent, type AgentRole, type AgentTool } from '../../engine/agents.js';
-import { loadConfig, saveConfig } from '../../core/config.js';
-import { loadSecrets, mergeSecrets, saveSecrets } from '../../core/secrets.js';
-import { munsitKey } from '../../engine/media.js';
+import { loadConfig } from '../../core/config.js';
 import { installedEditors, openInEditor, ticketChanges } from '../../engine/changes.js';
 import { corePrompts } from '../../engine/core-prompts.js';
 
@@ -104,95 +103,88 @@ async function act(c: Context, fn: () => unknown) {
 
 export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { startedAt: string; build: number; restart(): void } }): void {
   const bp = boardPaths(opts.paths.squadDir);
-  // Who the Azure token belongs to, checked at most once a minute.
+  // Who the tracker sign-in belongs to, checked at most once a minute.
   let connection: { at: number; key: string; user?: string; error?: string } | null = null;
 
-  async function azureStatus(): Promise<{ az: Azure | null; user?: string; error?: string }> {
-    const az = azureFor(bp);
-    if (!az) return { az: null };
-    const key = `${az.target.organization}/${az.target.project}/${az.target.pat.slice(-6)}`;
+  async function trackerStatus(): Promise<{ tracker: Tracker | null; user?: string; error?: string }> {
+    const tracker = trackerFor(bp);
+    if (!tracker) return { tracker: null };
+    const key = `${tracker.name}/${tracker.identity}`;
     if (!connection || connection.key !== key || Date.now() - connection.at > 60_000) {
       try {
-        connection = { at: Date.now(), key, user: await az.whoAmI() };
+        connection = { at: Date.now(), key, user: await tracker.whoAmI() };
       } catch (err) {
         connection = { at: Date.now(), key, error: (err as Error).message };
       }
     }
-    return { az: connection.error ? null : az, user: connection.user, error: connection.error };
+    return { tracker: connection.error ? null : tracker, user: connection.user, error: connection.error };
   }
 
   app.get('/api/v1/tracker', async (c) => {
     const config = fs.existsSync(opts.paths.configFile) ? loadConfig(opts.paths.configFile) : null;
-    const type = config?.tracker.type ?? 'none';
-    const hasToken = Boolean(loadSecrets(opts.paths.secretsFile).tracker?.azure?.pat || process.env.AZURE_DEVOPS_PAT);
-    const status = type === 'azure' ? await azureStatus() : { user: undefined, error: undefined };
-    // Not set up yet: a repo that lives on Azure already says which organization and project to use.
     const root = path.dirname(opts.paths.squadDir);
+    const type = config?.tracker.type ?? 'none';
+    const mod = trackerModule(type);
+    const status = mod ? await trackerStatus() : { user: undefined, error: undefined };
+    // Not set up yet: a repo whose remote lives on a tracker's product already says which settings to use.
     const dirs = [root, ...findNestedRepos(root).map((r) => path.join(root, r.path))];
-    const found = dirs.map((d) => parseAzureRemote(git(d, ['config', '--get', 'remote.origin.url'], { allowFail: true }))).find(Boolean);
-    return c.json({
-      type,
-      organization: config?.tracker.workspace ?? found?.organization ?? '',
-      project: config?.tracker.project ?? found?.project ?? '',
-      hasToken,
-      user: status.user,
-      error: status.error,
-    });
+    const guessed = guessTracker(dirs.map((d) => git(d, ['config', '--get', 'remote.origin.url'], { allowFail: true })));
+    const saved = mod ? mod.read(root) : { values: {}, hasSecret: false };
+    const fieldsOf = mod ?? guessed?.module ?? TRACKERS[0]!;
+    const values = Object.fromEntries(fieldsOf.fields.filter((f) => !f.secret).map((f) => [f.key, saved.values[f.key] || guessed?.values[f.key] || '']));
+    return c.json({ type, module: fieldsOf.name, label: fieldsOf.label, fields: fieldsOf.fields, ...values, hasToken: saved.hasSecret, user: status.user, error: status.error });
   });
 
-  // The person's own token for their own project, saved in .squad/secrets.yaml (never in git).
+  // The person's own sign-in for their own project, saved in .squad/secrets.yaml (never in git).
   app.put('/api/v1/tracker', async (c) => {
-    const b = await body<{ organization?: string; project?: string; token?: string }>(c);
+    const b = await body<Record<string, string | undefined>>(c);
     return act(c, async () => {
-      const organization = b.organization?.trim().replace(/^https:\/\/dev\.azure\.com\//, '').replace(/\/.*$/, '');
-      const project = b.project?.trim();
-      if (!organization || !project) throw new Error('Enter the Azure organization and project.');
       const config = loadConfig(opts.paths.configFile);
-      saveConfig(opts.paths.configFile, { ...config, tracker: { ...config.tracker, type: 'azure', workspace: organization, project } });
-      const secrets = loadSecrets(opts.paths.secretsFile);
-      saveSecrets(opts.paths.secretsFile, mergeSecrets(secrets, { tracker: { azure: { organization, project, pat: b.token?.trim() || undefined } } }));
+      const mod = trackerModule(b.module ?? config.tracker.type) ?? TRACKERS[0]!;
+      mod.save(path.dirname(opts.paths.squadDir), b);
       connection = null;
-      const status = await azureStatus();
+      const status = await trackerStatus();
       if (status.error) throw new Error(status.error);
       return { ok: true, user: status.user };
     });
   });
 
   // Speech to text for voice and video notes. The key stays in .squad/secrets.yaml and is never sent back.
-  app.get('/api/v1/speech', (c) => c.json({ hasKey: Boolean(munsitKey(bp)) }));
+  const root = path.dirname(opts.paths.squadDir);
+  app.get('/api/v1/speech', (c) => c.json({ hasKey: speechModule().hasKey(root), label: speechModule().label }));
 
   app.put('/api/v1/speech', async (c) => {
-    const b = await body<{ munsit?: string; remove?: boolean }>(c);
+    const b = await body<{ key?: string; munsit?: string; remove?: boolean }>(c);
     return act(c, () => {
-      const secrets = loadSecrets(opts.paths.secretsFile);
+      const speech = speechModule();
       if (b.remove) {
-        delete secrets.speech;
-        saveSecrets(opts.paths.secretsFile, secrets);
-        return { ok: true, hasKey: Boolean(munsitKey(bp)) };
+        speech.removeKey(root);
+        return { ok: true, hasKey: speech.hasKey(root) };
       }
-      const key = b.munsit?.trim();
-      if (!key) throw new Error('Paste your Munsit key first.');
-      saveSecrets(opts.paths.secretsFile, mergeSecrets(secrets, { speech: { munsit: key } }));
+      const key = (b.key ?? b.munsit)?.trim();
+      if (!key) throw new Error(`Paste your ${speech.label} key first.`);
+      speech.saveKey(root, key);
       return { ok: true, hasKey: true };
     });
   });
 
   app.get('/api/v1/backlog', async (c) => {
-    const status = await azureStatus();
-    if (!status.az) return c.json({ connected: false, error: status.error ?? null, sprints: [], items: [] });
+    const status = await trackerStatus();
+    const tracker = status.tracker;
+    if (!tracker) return c.json({ connected: false, error: status.error ?? null, sprints: [], items: [] });
     try {
-      const sprints = await status.az.sprints();
+      const sprints = tracker.abilities.sprints ? await tracker.sprints() : [];
       const asked = c.req.query('sprint');
       const sprint = asked === 'all' ? null : (sprints.find((s) => s.path === asked) ?? sprints.find((s) => s.current) ?? sprints[0] ?? null);
-      const items = await status.az.listWorkItems(sprint ? { sprintPath: sprint.path } : {});
-      const onBoard = new Map(listTickets(bp).filter((t) => t.source.type === 'azure').map((t) => [t.source.id ?? t.source.ref?.replace(/^AB#/, ''), t]));
+      const items = await tracker.list(sprint ? { sprint: sprint.path } : {});
+      const onBoard = new Map(listTickets(bp).filter((t) => t.source.type === tracker.name).map((t) => [t.source.id ?? tracker.parseRef(t.source.ref ?? ''), t]));
       return c.json({
         connected: true,
         user: status.user,
         sprints,
         sprint: sprint?.path ?? 'all',
         items: items.map((w) => {
-          const t = onBoard.get(String(w.id));
+          const t = onBoard.get(w.id);
           return { ...w, ticket: t ? { id: t.id, stage: t.stage, status: t.status } : null };
         }),
       });
@@ -203,9 +195,9 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
 
   app.post('/api/v1/backlog/:id/start', async (c) =>
     act(c, async () => {
-      const status = await azureStatus();
-      if (!status.az) throw new Error(status.error ?? 'Azure is not connected. Add it in Settings.');
-      return startFromAzure(bp, status.az, c.req.param('id'));
+      const status = await trackerStatus();
+      if (!status.tracker) throw new Error(status.error ?? 'No tracker is connected. Add it in Settings.');
+      return startFromTracker(bp, status.tracker, c.req.param('id'));
     }),
   );
 

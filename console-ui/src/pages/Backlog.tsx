@@ -110,7 +110,7 @@ function Row({ w }: { w: WorkItemRow }) {
           <button
             className="btn sm pri"
             disabled={act.isPending}
-            onClick={() => act.mutate({ path: `/api/v1/backlog/${w.id}/start`, done: `AB#${w.id} is on the board. The Analyst is reading it.` })}
+            onClick={() => act.mutate({ path: `/api/v1/backlog/${w.id}/start`, done: `${w.ref} is on the board. The Analyst is reading it.` })}
           >
             <Play size={13} /> Start
           </button>

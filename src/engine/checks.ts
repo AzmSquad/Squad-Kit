@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import net from 'node:net';
 import type { ProjectCommands } from '../board/types.js';
-import { withIpv4First } from './claude.js';
+import { withIpv4First } from './agent-env.js';
 
 /** squad-kit runs the project's own checks itself, so the AI never grades its own work. */
 

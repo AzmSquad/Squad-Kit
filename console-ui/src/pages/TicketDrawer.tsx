@@ -38,14 +38,14 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
             <div className="dh">
               <div className="dtop">
                 <span className="idtag">{t.id}</span>
-                {t.source.type === 'azure' &&
+                {t.source.type !== 'manual' &&
                   (t.source.url ? (
                     <a className="src" href={t.source.url} target="_blank" rel="noreferrer">
-                      <Download size={14} /> {t.source.itemType ?? 'Azure'} {t.source.ref} <ExternalLink size={12} />
+                      <Download size={14} /> {t.source.itemType ?? 'Item'} {t.source.ref} <ExternalLink size={12} />
                     </a>
                   ) : (
                     <span className="src">
-                      <Download size={14} /> From Azure {t.source.ref}
+                      <Download size={14} /> From {t.source.ref}
                     </span>
                   ))}
                 {t.pr && (

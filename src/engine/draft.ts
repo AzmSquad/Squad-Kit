@@ -4,10 +4,10 @@ import path from 'node:path';
 import { readMeta, type BoardPaths } from '../board/store.js';
 import { BoardActionError, saveUploads, type UploadedFile } from '../board/actions.js';
 import type { Ticket, TicketBrief, Track } from '../board/types.js';
-import { runClaude, type RunOptions, type RunResult } from './claude.js';
-import { AcpStartError, acpAdapterPath, runClaudeAcp } from './acp-runner.js';
+import { AI_TOOLS, aiTool } from '../modules/registry.js';
+import type { AgentResult, AgentRun } from '../modules/ai-tool/types.js';
 import { agentInstructions, readAgent } from './agents.js';
-import { READ_ONLY, projectRoot, secretFiles } from './live.js';
+import { projectRoot, secretFiles } from './live.js';
 import { rulesFiles } from './repos.js';
 import * as P from './prompts.js';
 import { prepareMedia } from './media.js';
@@ -48,7 +48,7 @@ export async function draftTicket(bp: BoardPaths, input: DraftInput): Promise<Ti
     const r = await runAnalyst(bp, {
       cwd: root,
       prompt: P.draftPrompt(meta, text, files, { rules: rulesFiles(root) }),
-      allowedTools: READ_ONLY,
+      permissions: ['read'],
       schema: P.DRAFT_SCHEMA,
       addDirs: [dir],
       timeoutMs: 4 * 60_000,
@@ -59,23 +59,23 @@ export async function draftTicket(bp: BoardPaths, input: DraftInput): Promise<Ti
   }
 }
 
-/** The same runner choice the live squad makes: ACP first, Claude Code directly as the fallback. */
-async function runAnalyst(bp: BoardPaths, opts: RunOptions): Promise<RunResult> {
+/** The Analyst's AI tool, the way the live squad runs it: over ACP, or directly when the board says so. */
+async function runAnalyst(bp: BoardPaths, opts: AgentRun): Promise<AgentResult> {
   const agent = readAgent(bp, 'analyst');
-  if (agent.tool !== 'claude') throw new BoardActionError(`The Analyst is set to ${agent.tool}, which squad-kit cannot run yet. Switch it to Claude Code in Squad and AI.`);
-  const extra = agentInstructions(agent);
-  const run = { ...opts, secretFiles: secretFiles(bp), ...(extra ? { appendSystemPrompt: extra } : {}), ...(agent.model ? { model: agent.model } : {}) };
-  let r: RunResult;
-  if (readMeta(bp).runner !== 'direct' && acpAdapterPath()) {
-    try {
-      r = await runClaudeAcp({ ...run, acpLogDir: path.join(bp.dir, 'sessions') });
-    } catch (err) {
-      if (!(err instanceof AcpStartError)) throw err;
-      r = await runClaude(run);
-    }
-  } else {
-    r = await runClaude(run);
+  const tool = aiTool(agent.tool);
+  if (!tool?.canRun) {
+    const can = AI_TOOLS.filter((t) => t.canRun).map((t) => t.label).join(' or ');
+    throw new BoardActionError(`The Analyst is set to ${tool?.label ?? agent.tool}, which squad-kit cannot run yet. Switch it to ${can} in Squad and AI.`);
   }
+  const extra = agentInstructions(agent);
+  const r = await tool.run({
+    ...opts,
+    secretFiles: secretFiles(bp),
+    ...(extra ? { instructions: extra } : {}),
+    ...(agent.model ? { model: agent.model } : {}),
+    logDir: path.join(bp.dir, 'sessions'),
+    direct: readMeta(bp).runner === 'direct',
+  });
   if (!r.ok || !r.structured) throw new BoardActionError(r.error ?? 'The Analyst did not fill in the ticket. Try again.');
   return r;
 }

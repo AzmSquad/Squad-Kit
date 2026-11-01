@@ -2,7 +2,7 @@ import { execSync } from 'node:child_process';
 import path from 'node:path';
 import { boardExists, readMeta, writeMeta, type BoardPaths } from '../board/store.js';
 import type { BoardMeta } from '../board/types.js';
-import { claudeBinary, toolVersion } from './claude.js';
+import { AI_TOOLS } from '../modules/registry.js';
 import { currentBranch, ensureRepo, isRepo, remotes } from './git.js';
 import { findNestedRepos } from './repos.js';
 import { projectRoot } from './live.js';
@@ -23,21 +23,9 @@ function gitUser(): string {
   }
 }
 
-function codexReady(): boolean {
-  try {
-    execSync(process.platform === 'win32' ? 'where codex' : 'which codex', { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
+/** Which AI tools are on this computer, one line per AI tool module. */
 export function detectTools(): BoardMeta['tools'] {
-  const claude = claudeBinary();
-  return [
-    { name: 'Claude Code', ready: Boolean(claude && toolVersion(claude)) },
-    { name: 'Codex', ready: codexReady() },
-  ];
+  return AI_TOOLS.map((t) => ({ name: t.label, ready: t.ready() }));
 }
 
 /**

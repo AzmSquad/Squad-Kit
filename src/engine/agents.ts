@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { BoardPaths } from '../board/store.js';
+import { AI_TOOLS } from '../modules/registry.js';
 
 /**
  * One agent per role, each defined by a small file the team can read and edit: which AI tool runs it, an optional
@@ -36,8 +37,9 @@ export const STEPS: Record<AgentRole, { id: string; name: string }[]> = {
   tester: [{ id: 'proof', name: 'Proof' }],
 };
 
-export const AGENT_TOOLS = ['claude', 'codex'] as const;
-export type AgentTool = (typeof AGENT_TOOLS)[number];
+/** The AI tools an agent file can name: one per AI tool module. The first is the default. */
+export const AGENT_TOOLS: string[] = AI_TOOLS.map((t) => t.name);
+export type AgentTool = string;
 
 export interface Agent {
   role: AgentRole;
@@ -78,7 +80,7 @@ function defaultAgent(role: AgentRole): Agent {
   const name = AGENTS.find((a) => a.role === role)!.name;
   return {
     role,
-    tool: 'claude',
+    tool: AGENT_TOOLS[0]!,
     model: '',
     steps: {},
     instructions: `<!-- Extra instructions for the ${name}, in plain words. The ${name} reads them before every run. For example: "Write the questions in simple English." For one step only, add a heading like "## Step: ${STEPS[role][0]!.id}" and write under it. -->`,
@@ -105,7 +107,7 @@ export function readAgent(bp: BoardPaths, role: AgentRole): Agent {
       .map((l) => [l.slice(0, l.indexOf(':')).trim(), l.slice(l.indexOf(':') + 1).trim()] as const)
       .filter(([k]) => k),
   );
-  const tool = AGENT_TOOLS.includes(head.tool as AgentTool) ? (head.tool as AgentTool) : 'claude';
+  const tool = head.tool && AGENT_TOOLS.includes(head.tool) ? head.tool : AGENT_TOOLS[0]!;
   return { role, tool, model: head.model ?? '', ...splitSteps((m ? m[2] : text) ?? '') };
 }
 

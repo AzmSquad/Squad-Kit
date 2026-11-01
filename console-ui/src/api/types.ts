@@ -176,8 +176,8 @@ export interface Ticket {
   title: string;
   ask: string;
   kind: 'feature' | 'bug';
-  source: { type: 'manual' | 'azure' | 'github' | 'jira'; ref?: string; id?: string; url?: string; itemType?: string };
-  pr?: { id: number; url: string; repo: string; host: 'azure' };
+  source: { type: string; ref?: string; id?: string; url?: string; itemType?: string };
+  pr?: { id: number; url: string; repo: string; host: string };
   /** Installing packages and running migrations in the person's own checkout, after the merge moved it. */
   /** Decisions approved after this ticket was planned that change it, waiting for the person. */
   outdated?: { adr: string; why: string; change: string; at: string }[];
@@ -361,7 +361,9 @@ export interface DecisionsResponse {
 }
 
 export interface WorkItemRow {
-  id: number;
+  id: string;
+  /** How people write it, for example AB#40. */
+  ref: string;
   type: string;
   title: string;
   state: string;

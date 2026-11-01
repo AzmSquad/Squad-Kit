@@ -6,7 +6,7 @@ import { execSync } from 'node:child_process';
 import { boardPaths, readTicket, updateTicket, writeMeta, type BoardPaths } from '../src/board/store.js';
 import * as actions from '../src/board/actions.js';
 import { addWorktree } from '../src/engine/git.js';
-import { azureFor } from '../src/engine/azure.js';
+import { trackerFor } from '../src/modules/registry.js';
 import { flushTracker, publishTicket } from '../src/engine/sync.js';
 import { LiveSquad } from '../src/engine/live.js';
 import { listReleases } from '../src/board/store.js';
@@ -132,17 +132,17 @@ const statesSet = () =>
 
 describe('Azure Boards and Repos', () => {
   it('takes a story from Azure to a merged PR, a pushed release and a closed work item', async () => {
-    const az = azureFor(bp);
+    const az = trackerFor(bp);
     expect(az).not.toBeNull();
 
     // 1. Start from the work item.
-    const t = await actions.startFromAzure(bp, az!, '35');
+    const t = await actions.startFromTracker(bp, az!, '35');
     expect(t.source).toMatchObject({ type: 'azure', id: '35', ref: 'AB#35', itemType: 'User Story' });
     expect(t.priority).toBe('high');
     expect(t.ask).toContain('Acceptance criteria:\n- Given the sign-up page');
     await flushTracker(bp, t.id);
     expect(statesSet()).toEqual(['Active']);
-    await expect(actions.startFromAzure(bp, az!, '35')).rejects.toThrow(/already on the board as AP-1/);
+    await expect(actions.startFromTracker(bp, az!, '35')).rejects.toThrow(/already on the board as AP-1/);
 
     // 2. The squad's work, as the live engine leaves it at the proof.
     const wt = addWorktree(project, t.id, 'main');
@@ -217,7 +217,7 @@ describe('Azure Boards and Repos', () => {
 
 describe('a pull request that clashes with newer changes in main', () => {
   async function accepted() {
-    const t = await actions.startFromAzure(bp, azureFor(bp)!, '35');
+    const t = await actions.startFromTracker(bp, trackerFor(bp)!, '35');
     await flushTracker(bp, t.id);
     const wt = addWorktree(project, t.id, 'main');
     fs.writeFileSync(path.join(wt.dir, 'signup.ts'), 'export const signup = true;\n');

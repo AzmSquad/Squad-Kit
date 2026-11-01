@@ -261,8 +261,11 @@ export interface Ticket {
   title: string;
   ask: string;
   kind: 'feature' | 'bug';
-  /** Where the ticket came from. For tracker items: its id, web link and type (User Story, Bug…). */
-  source: { type: 'manual' | 'azure' | 'github' | 'jira'; ref?: string; id?: string; url?: string; itemType?: string };
+  /**
+   * Where the ticket came from: 'manual', or the name of the tracker module it was pulled from, with the item's id,
+   * how people write it (ref), its web link and its type (User Story, Bug…).
+   */
+  source: { type: string; ref?: string; id?: string; url?: string; itemType?: string };
   priority: 'high' | 'normal' | 'low';
   stage: Stage;
   /** One line under the card title: what is happening now. */
@@ -314,7 +317,8 @@ export interface Ticket {
   /** The squad's review notes still to fix, passed to the Builder. */
   reviewNotes?: string[];
   /** The pull request opened after the proof was accepted. */
-  pr?: { id: number; url: string; repo: string; host: 'azure' };
+  /** The pull request on the code host module named in host. */
+  pr?: { id: number; url: string; repo: string; host: string };
   /** When the change went into the base branch. Accepted work merges right away, so later tickets build on it. */
   mergedAt?: string;
   /** Installing packages and running migrations in the person's own checkout, after the merge moved it. */

@@ -32,7 +32,8 @@ import { buildPaths } from '../core/paths.js';
 import { loadConfig } from '../core/config.js';
 import { loadSecrets } from '../core/secrets.js';
 import { clientFor, overlayTrackerEnv } from '../tracker/index.js';
-import { azureFor, type Azure } from '../engine/azure.js';
+import { trackerFor, trackerModule } from '../modules/registry.js';
+import type { Tracker } from '../modules/tracker/types.js';
 import { localSetupFor, mergeLocally, opensPullRequest, syncWiki } from '../engine/sync.js';
 import type { AgentChat, AgentName, Criterion, PlanComment, PlanEdit, PlanPart, PlanSnapshot, StuckChoice, StuckOption, TicketNote, Track, TrackerEvent, WayOut } from './types.js';
 import { endProcessTree } from '../engine/watchdog.js';
@@ -44,7 +45,7 @@ export class BoardActionError extends Error {}
 /** Queue an update for the tracker. The live squad sends it, so this never waits on the network. */
 function tellLater(t: Ticket, engine: string, event: TrackerEvent): void {
   if (engine !== 'live') return;
-  if (event.kind !== 'file-bug' && t.source.type !== 'azure') return;
+  if (event.kind !== 'file-bug' && !trackerModule(t.source.type)) return;
   t.trackerQueue = [...(t.trackerQueue ?? []), event];
 }
 
@@ -125,7 +126,8 @@ export function createTicket(bp: BoardPaths, input: NewTicketInput): Ticket {
     ...(attachments.length ? { attachments } : {}),
     ...(input.kind === 'bug' && input.severity ? { severity: input.severity } : {}),
   };
-  addActivity(ticket, 'you', input.source?.type === 'azure' ? `Pulled ${input.source.ref} from Azure DevOps` : 'Created the ticket');
+  const from = input.source && input.source.type !== 'manual' ? (trackerModule(input.source.type)?.label ?? input.source.type) : '';
+  addActivity(ticket, 'you', from ? `Pulled ${input.source!.ref} from ${from}` : 'Created the ticket');
   if (ticket.track === 'express') addActivity(ticket, 'you', 'Chose the Express track: no questions, the plan is approved on its own');
   if (attachments.length) addActivity(ticket, 'you', `Added ${attachments.length === 1 ? '1 file' : `${attachments.length} files`}`);
   if (input.talkFirst && ticket.track !== 'express') {
@@ -160,8 +162,8 @@ export async function pullTicket(bp: BoardPaths, ref: string): Promise<Ticket> {
 
 /** Fetch a real work item with the tracker set up in .squad/ (the same one `squad new-story --id` uses). */
 async function pullFromTracker(bp: BoardPaths, id: string): Promise<Ticket> {
-  const az = azureFor(bp);
-  if (az) return startFromAzure(bp, az, id);
+  const tracker = trackerFor(bp);
+  if (tracker) return startFromTracker(bp, tracker, id);
   const paths = buildPaths(path.dirname(path.dirname(bp.dir)));
   const config = loadConfig(paths.configFile);
   if (config.tracker.type === 'none') {
@@ -180,7 +182,7 @@ async function pullFromTracker(bp: BoardPaths, id: string): Promise<Ticket> {
     title: issue.title,
     ask: ask || issue.title,
     priority: 'normal',
-    source: { type: config.tracker.type === 'azure' ? 'azure' : config.tracker.type, ref: config.tracker.type === 'azure' ? `AB#${issue.id}` : issue.id },
+    source: { type: config.tracker.type, ref: issue.id },
   });
   if (issue.attachments.length) {
     const dir = path.join(bp.dir, 'attachments', ticket.id);
@@ -203,48 +205,48 @@ export interface AnswerInput {
 }
 
 /**
- * A work item from Azure Boards becomes a ticket with everything the squad needs: the story, its acceptance criteria,
- * the feature and epic it belongs to, the stories it depends on, and its attachments.
+ * An item from the tracker becomes a ticket with everything the squad needs: the story, its acceptance criteria,
+ * the feature and epic it belongs to, the items it depends on, and its attachments.
  */
-export async function startFromAzure(bp: BoardPaths, az: Azure, ref: string): Promise<Ticket> {
-  const id = Number(ref.replace(/^AB#/i, ''));
-  if (!Number.isInteger(id) || id <= 0) throw new BoardActionError(`"${ref}" is not a work item number.`);
-  const existing = listTickets(bp).find((t) => t.source.type === 'azure' && (t.source.id === String(id) || t.source.ref === `AB#${id}`));
-  if (existing) throw new BoardActionError(`AB#${id} is already on the board as ${existing.id}.`);
+export async function startFromTracker(bp: BoardPaths, tracker: Tracker, ref: string): Promise<Ticket> {
+  const id = tracker.parseRef(ref);
+  if (!id) throw new BoardActionError(`"${ref}" is not a ${tracker.label} item.`);
+  const existing = listTickets(bp).find((t) => t.source.type === tracker.name && (t.source.id === id || t.source.ref === tracker.refOf(id)));
+  if (existing) throw new BoardActionError(`${tracker.refOf(id)} is already on the board as ${existing.id}.`);
   let w;
   try {
-    w = await az.getWorkItem(id);
+    w = await tracker.get(id);
   } catch (err) {
-    throw new BoardActionError(`Could not fetch AB#${id}: ${(err as Error).message}`);
+    throw new BoardActionError(`Could not fetch ${tracker.refOf(id)}: ${(err as Error).message}`);
   }
   const ask = [
     w.description,
     w.reproSteps && `Steps to reproduce:\n${w.reproSteps}`,
     w.acceptanceCriteria && `Acceptance criteria:\n${w.acceptanceCriteria}`,
     w.parents.length ? `Part of: ${w.parents.map((p) => `${p.type} "${p.title}"`).join(', in ')}` : '',
-    w.dependsOn.length ? `Builds on: ${w.dependsOn.map((d) => `AB#${d.id} ${d.title} (${d.state})`).join('; ')}` : '',
+    w.dependsOn.length ? `Builds on: ${w.dependsOn.map((d) => `${d.ref} ${d.title} (${d.state})`).join('; ')}` : '',
   ]
     .filter(Boolean)
     .join('\n\n');
   const meta = readMeta(bp);
-  await syncWiki(bp, az);
+  await syncWiki(bp, tracker);
   const ticket = createTicket(bp, {
     title: w.title,
     ask: ask || w.title,
     priority: w.priority === 1 ? 'high' : w.priority === 4 ? 'low' : 'normal',
-    source: { type: 'azure', ref: `AB#${w.id}`, id: String(w.id), url: w.url, itemType: w.type },
+    source: { type: tracker.name, ref: w.ref, id: w.id, url: w.url, itemType: w.type },
   });
   const files: string[] = [];
   if (w.attachments.length) {
     const dir = path.join(bp.dir, 'attachments', ticket.id);
     fs.mkdirSync(dir, { recursive: true });
     for (const a of w.attachments.filter((x) => x.size <= 10 * 1024 * 1024)) {
-      const file = await az.download(a.url, path.join(dir, a.name.replace(/[^\w.\- ]+/g, '_'))).catch(() => null);
+      const file = await tracker.download(a.url, path.join(dir, a.name.replace(/[^\w.\- ]+/g, '_'))).catch(() => null);
       if (file) files.push(file);
     }
   }
   return updateTicket(bp, ticket.id, (t) => {
-    if (w.type === 'Bug') t.kind = 'bug';
+    if (w.isBug) t.kind = 'bug';
     if (files.length) {
       t.attachments = files;
       addActivity(t, 'you', `Pulled ${files.length} attachments with it`);
@@ -410,7 +412,7 @@ function acceptProof(bp: BoardPaths, ticket: Ticket): Ticket {
   }
   const openPr = !ticket.pr && opensPullRequest(bp, ticket);
   // Merge on accept: without a pull request host the branch merges into the base right here, so the next tickets
-  // build on it. With Azure Repos the live squad opens the PR and merges it.
+  // build on it. With a code host module the live squad opens the PR and merges it.
   let merged: ReturnType<typeof mergeLocally> = null;
   if (readMeta(bp).engine === 'live' && !openPr && !ticket.mergedAt) {
     try {
@@ -473,7 +475,7 @@ function clashCard(t: Ticket, base: string, question: string): void {
 }
 
 /**
- * Azure cannot merge the ticket's pull request: newer changes in the base clash with it. Instead of waiting there and
+ * The code host cannot merge the ticket's pull request: newer changes in the base clash with it. Instead of waiting there and
  * stopping the release, the ticket leaves the draft release with the clash card; accepting it again updates the same
  * pull request.
  */

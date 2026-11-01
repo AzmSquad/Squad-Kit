@@ -1,10 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { buildPaths } from '../core/paths.js';
-import { loadConfig } from '../core/config.js';
-import { loadSecrets } from '../core/secrets.js';
-import { overlayTrackerEnv } from '../tracker/env-overlay.js';
-import type { BoardPaths } from '../board/store.js';
+import { buildPaths } from '../../core/paths.js';
+import { loadConfig } from '../../core/config.js';
+import { loadSecrets } from '../../core/secrets.js';
+import { overlayTrackerEnv } from '../../tracker/env-overlay.js';
+import { ModuleError, kindOfStatus, type ModuleErrorKind } from '../errors.js';
 
 /**
  * Azure Boards and Azure Repos for the live squad: the backlog, work item states and comments, bugs, and pull
@@ -55,9 +55,9 @@ export interface PullRequest {
   status: string;
 }
 
-export class AzureError extends Error {
-  constructor(message: string, readonly status?: number) {
-    super(message);
+export class AzureError extends ModuleError {
+  constructor(message: string, status?: number, kind?: ModuleErrorKind) {
+    super(message, kind ?? (status ? kindOfStatus(status) : 'other'), status);
     this.name = 'AzureError';
   }
 }
@@ -96,7 +96,7 @@ export class Azure {
         body: body === undefined ? undefined : Buffer.isBuffer(body) ? body : JSON.stringify(body),
       });
     } catch (err) {
-      throw new AzureError(`Could not reach Azure DevOps: ${(err as Error).message}`);
+      throw new AzureError(`Could not reach Azure DevOps: ${(err as Error).message}`, undefined, 'offline');
     }
     if (!res.ok) {
       const text = await res.text().catch(() => '');
@@ -317,7 +317,7 @@ export class Azure {
     });
   }
 
-  async getPullRequest(repo: string, prId: number): Promise<RawPr> {
+  async getPullRequest(repo: string, prId: number): Promise<AzurePr> {
     return this.call<RawPr>('GET', `_apis/git/repositories/${encodeURIComponent(repo)}/pullrequests/${prId}`);
   }
 
@@ -333,7 +333,7 @@ export class Azure {
     }
     for (let i = 0; i < 30 && pr.status !== 'completed'; i++) {
       if (pr.mergeStatus === 'conflicts' || pr.mergeStatus === 'failure' || pr.mergeStatus === 'rejectedByPolicy') {
-        throw new AzureError(`Azure could not merge PR ${prId} (${pr.mergeStatus}). Open it in Azure to see why.`);
+        throw new AzureError(`Azure could not merge PR ${prId} (${pr.mergeStatus}). Open it in Azure to see why.`, undefined, pr.mergeStatus === 'conflicts' ? 'clash' : 'other');
       }
       await new Promise((r) => setTimeout(r, 2000));
       pr = await this.getPullRequest(repo, prId);
@@ -390,6 +390,8 @@ interface RawItem {
   fields?: Record<string, unknown>;
   relations?: { rel: string; url: string; attributes?: { name?: string; resourceSize?: number } }[];
 }
+
+export type AzurePr = RawPr;
 
 interface RawPr {
   pullRequestId: number;
@@ -457,9 +459,9 @@ export function parseAzureRemote(url: string): { organization: string; project: 
   return null;
 }
 
-/** The Azure client for a board, when the project's tracker is Azure and a token is saved. */
-export function azureFor(bp: BoardPaths): Azure | null {
-  const paths = buildPaths(path.dirname(path.dirname(bp.dir)));
+/** The Azure client for a project folder, when its tracker is Azure and a token is saved. */
+export function azureForProject(root: string): Azure | null {
+  const paths = buildPaths(root);
   if (!fs.existsSync(paths.configFile)) return null;
   const config = loadConfig(paths.configFile);
   if (config.tracker.type !== 'azure') return null;

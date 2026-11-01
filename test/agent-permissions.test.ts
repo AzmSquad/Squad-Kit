@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { WRITE_TOOLS, deniedTools } from '../src/engine/claude.js';
+import { WRITE_TOOLS, deniedTools } from '../src/modules/claude/direct.js';
 import { answerPermission } from '../src/engine/acp-runner.js';
-import { READ_ONLY } from '../src/engine/live.js';
+import { READ_ONLY } from '../src/modules/claude/index.js';
 
 const OPTIONS = [
   { optionId: 'allow', kind: 'allow_once' },

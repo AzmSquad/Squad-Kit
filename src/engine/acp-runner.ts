@@ -1,30 +1,47 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { createRequire } from 'node:module';
-import { childEnv, claudeBinary, deniedTools, plainError, sessionExists, type RunOptions, type RunResult } from './claude.js';
+import type { AgentResult, ToolEvent } from '../modules/ai-tool/types.js';
 
 /**
- * Runs a role through the Agent Client Protocol (ACP): squad-kit is the ACP client and talks JSON-RPC over stdio to
- * the official Claude adapter, which drives the person's own Claude Code on their subscription. Every update the agent
- * sends (messages, tool calls with diffs, plans) is saved as it arrives, so the board shows the conversation natively.
+ * The agent gateway: runs a role through the Agent Client Protocol (ACP). squad-kit is the ACP client and talks
+ * JSON-RPC over stdio to the AI tool's adapter, which drives the person's own tool on their own login. Every update
+ * the agent sends (messages, tool calls with diffs, plans) is saved as it arrives, so the board shows the
+ * conversation natively. The AI tool module says how to start its adapter and what to send it (AcpLaunch).
  */
 
-export interface AcpRunOptions extends RunOptions {
-  /** Folder for the ACP updates of each session, one `<sessionId>.jsonl` file per session, one JSON line per update. */
-  acpLogDir?: string;
+export interface AcpLaunch {
+  /** The command that starts the adapter, its arguments and its environment. */
+  command: string;
+  args: string[];
+  env: NodeJS.ProcessEnv;
+  /** Session settings the adapter reads from `_meta` on session/new and session/resume. */
+  meta: Record<string, unknown>;
+  /** True when the tool already saved a conversation with this id, so it is resumed rather than started. */
+  canResume(id: string): boolean;
+  /** A failure in words a person can act on. */
+  explain(raw: string): string;
+  /** The tool's name for a tool call update, when the adapter says it. */
+  toolName(update: Record<string, any>): string | undefined;
+  /** The tool call that carries the structured answer, when the tool answers that way. */
+  structuredTool?: string;
 }
 
-/** The adapter's entry point, or null when it is not installed. */
-export function acpAdapterPath(): string | null {
-  try {
-    const require = createRequire(import.meta.url);
-    const pkg = require.resolve('@agentclientprotocol/claude-agent-acp/package.json');
-    const entry = path.join(path.dirname(pkg), 'dist', 'index.js');
-    return fs.existsSync(entry) ? entry : null;
-  } catch {
-    return null;
-  }
+export interface AcpRunOptions {
+  cwd: string;
+  prompt: string;
+  sessionId?: string;
+  resume?: string;
+  /** The run must end with a structured answer. */
+  expectStructured?: boolean;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  /** Folder for the ACP updates of each session, one `<sessionId>.jsonl` file per session, one JSON line per update. */
+  logDir?: string;
+  onTool?(event: ToolEvent): void;
+  onText?(text: string): void;
+  onActivity?(): void;
+  onSpawn?(pid: number): void;
 }
 
 /** Raised when the adapter could not start, before any work began, so the caller can fall back safely. */
@@ -54,7 +71,7 @@ class Rpc {
   ) {
     child.stdout.on('data', (chunk: Buffer) => this.read(chunk.toString('utf8')));
     child.on('exit', () => {
-      for (const p of this.pending.values()) p.reject(new Error('The Claude ACP adapter stopped.'));
+      for (const p of this.pending.values()) p.reject(new Error('The ACP adapter stopped.'));
       this.pending.clear();
     });
   }
@@ -105,19 +122,13 @@ class Rpc {
   }
 }
 
-/** Same contract as runClaude: one step of one role, with the session saved for follow-ups. */
-export async function runClaudeAcp(opts: AcpRunOptions): Promise<RunResult> {
-  const adapter = acpAdapterPath();
-  const bin = claudeBinary();
-  if (!adapter) throw new AcpStartError('The Claude ACP adapter is not installed.');
-  if (!bin) return { ok: false, sessionId: opts.resume ?? opts.sessionId ?? '', text: '', error: 'Claude Code is not installed. Install it and log in, then try again.' };
-
-  const env = { ...childEnv(), CLAUDE_CODE_EXECUTABLE: bin };
-  const child = spawn(process.execPath, [adapter], { cwd: opts.cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
+/** One step of one role, with the session saved for follow-ups. */
+export async function runAcp(launch: AcpLaunch, opts: AcpRunOptions): Promise<AgentResult> {
+  const child = spawn(launch.command, launch.args, { cwd: opts.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'] });
   if (child.pid) opts.onSpawn?.(child.pid);
   let stderr = '';
   child.stderr.on('data', (d: Buffer) => (stderr = (stderr + d.toString('utf8')).slice(-4000)));
-  if (opts.acpLogDir) fs.mkdirSync(opts.acpLogDir, { recursive: true });
+  if (opts.logDir) fs.mkdirSync(opts.logDir, { recursive: true });
 
   // Tool calls arrive first as a stub, then their details (name, input, diff) in updates.
   const tools = new Map<string, { name?: string; input?: Record<string, unknown>; reported?: boolean; structured?: unknown }>();
@@ -131,19 +142,19 @@ export async function runClaudeAcp(opts: AcpRunOptions): Promise<RunResult> {
       if (method !== 'session/update') return;
       const update = params.update as Record<string, any>;
       opts.onActivity?.();
-      if (opts.acpLogDir && sessionId) fs.appendFileSync(path.join(opts.acpLogDir, `${sessionId}.jsonl`), `${JSON.stringify({ at: new Date().toISOString(), update })}\n`);
+      if (opts.logDir && sessionId) fs.appendFileSync(path.join(opts.logDir, `${sessionId}.jsonl`), `${JSON.stringify({ at: new Date().toISOString(), update })}\n`);
       if (update.sessionUpdate === 'agent_message_chunk' && update.content?.type === 'text') {
         lastText = update.content.text;
         opts.onText?.(update.content.text);
       }
       if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
         const t = tools.get(update.toolCallId) ?? {};
-        const name = update._meta?.claudeCode?.toolName ?? (update.sessionUpdate === 'tool_call' ? undefined : t.name);
+        const name = launch.toolName(update) ?? (update.sessionUpdate === 'tool_call' ? undefined : t.name);
         if (name) t.name = name;
         if (update.rawInput && Object.keys(update.rawInput).length) t.input = update.rawInput;
-        if (t.name === 'StructuredOutput' && t.input) structured = t.input;
+        if (launch.structuredTool && t.name === launch.structuredTool && t.input) structured = t.input;
         // Report each tool once, when its name and input are known, the way the direct runner does.
-        if (!t.reported && t.name && t.input && t.name !== 'StructuredOutput') {
+        if (!t.reported && t.name && t.input && t.name !== launch.structuredTool) {
           t.reported = true;
           opts.onTool?.({ name: t.name, input: t.input });
         }
@@ -170,16 +181,7 @@ export async function runClaudeAcp(opts: AcpRunOptions): Promise<RunResult> {
   const timer = setTimeout(() => (stoppedBy = stop(`It took longer than ${Math.round((opts.timeoutMs ?? 20 * 60_000) / 60_000)} minutes, so squad-kit stopped it.`)), opts.timeoutMs ?? 20 * 60_000);
   const exited = new Promise<void>((resolve) => child.on('exit', () => resolve()));
 
-  const denied = deniedTools(opts);
-  const options = {
-    ...(opts.allowedTools?.length ? { allowedTools: opts.allowedTools } : {}),
-    ...(denied.length ? { disallowedTools: denied } : {}),
-    ...(opts.permissionMode ? { permissionMode: opts.permissionMode } : {}),
-    ...(opts.schema ? { outputFormat: { type: 'json_schema', schema: opts.schema } } : {}),
-    ...(opts.appendSystemPrompt ? { systemPrompt: { type: 'preset', preset: 'claude_code', append: opts.appendSystemPrompt } } : {}),
-    ...(opts.model ? { model: opts.model } : {}),
-    ...(opts.addDirs?.length ? { additionalDirectories: opts.addDirs } : {}),
-  };
+  const meta = launch.meta;
 
   try {
     try {
@@ -189,14 +191,14 @@ export async function runClaudeAcp(opts: AcpRunOptions): Promise<RunResult> {
         clientInfo: { name: 'squad-kit', version: '1' },
       });
     } catch (err) {
-      throw new AcpStartError(`The Claude ACP adapter did not start: ${(err as Error).message} ${stderr.slice(-300)}`.trim());
+      throw new AcpStartError(`The ACP adapter did not start: ${(err as Error).message} ${stderr.slice(-300)}`.trim());
     }
-    const existing = sessionId && sessionExists(sessionId);
+    const existing = sessionId && launch.canResume(sessionId);
     if (existing) {
       // Continue the saved conversation under the same id.
-      await rpc.request('session/resume', { sessionId, cwd: opts.cwd, mcpServers: [], _meta: { claudeCode: { options } } });
+      await rpc.request('session/resume', { sessionId, cwd: opts.cwd, mcpServers: [], _meta: meta });
     } else {
-      const s = await rpc.request<{ sessionId: string }>('session/new', { cwd: opts.cwd, mcpServers: [], _meta: { claudeCode: { options } } });
+      const s = await rpc.request<{ sessionId: string }>('session/new', { cwd: opts.cwd, mcpServers: [], _meta: meta });
       sessionId = s.sessionId;
     }
     const res = await rpc.request<{ stopReason: string }>('session/prompt', { sessionId, prompt: [{ type: 'text', text: opts.prompt }] });
@@ -204,20 +206,20 @@ export async function runClaudeAcp(opts: AcpRunOptions): Promise<RunResult> {
     if (res.stopReason !== 'end_turn') {
       const why =
         res.stopReason === 'max_tokens' ? 'The answer was cut off because it got too long.'
-        : res.stopReason === 'refusal' ? 'Claude declined to do this step.'
+        : res.stopReason === 'refusal' ? 'The agent declined to do this step.'
         : res.stopReason === 'cancelled' ? 'The step was cancelled.'
-        : `Claude stopped early (${res.stopReason}).`;
+        : `The agent stopped early (${res.stopReason}).`;
       return { ok: false, sessionId, text: lastText, error: why };
     }
-    if (opts.schema && structured === undefined) return { ok: false, sessionId, text: lastText, error: 'Claude finished without giving squad-kit its answer.' };
+    if (opts.expectStructured && structured === undefined) return { ok: false, sessionId, text: lastText, error: 'The agent finished without giving squad-kit its answer.' };
     return { ok: true, sessionId, text: lastText, ...(structured !== undefined ? { structured } : {}) };
   } catch (err) {
     if (err instanceof AcpStartError) throw err;
-    return { ok: false, sessionId, text: lastText, error: stoppedBy ?? plainError(`${(err as Error).message}\n${stderr}`) };
+    return { ok: false, sessionId, text: lastText, error: stoppedBy ?? launch.explain(`${(err as Error).message}\n${stderr}`) };
   } finally {
     clearTimeout(timer);
     child.stdin.end();
-    // Give the adapter a moment to close Claude Code cleanly, then make sure nothing is left running.
+    // Give the adapter a moment to close its tool cleanly, then make sure nothing is left running.
     await Promise.race([exited, new Promise((r) => setTimeout(r, 3000))]);
     if (child.exitCode === null) child.kill('SIGTERM');
   }

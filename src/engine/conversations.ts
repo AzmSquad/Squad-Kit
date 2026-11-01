@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { ContentBlock, PlanEntry, SessionUpdate, ToolCallContent, ToolKind } from '@agentclientprotocol/sdk';
 import type { Ticket } from '../board/types.js';
-import { describeTool } from './claude.js';
+import { describeToolEvent } from '../modules/registry.js';
 
 /**
  * The real conversations behind a ticket, in the Agent Client Protocol (ACP) format: messages, thoughts, tool calls
@@ -228,7 +228,7 @@ export function readConversation(id: string, limit = 400, base?: string, nativeD
           continue;
         }
         const title =
-          b.name === 'StructuredOutput' ? 'Gave squad-kit its answer' : (describeTool({ name: b.name, input }, cwd ?? '/') ?? `Used ${b.name}`);
+          b.name === 'StructuredOutput' ? 'Gave squad-kit its answer' : (describeToolEvent({ name: b.name, input }, cwd ?? '/') ?? `Used ${b.name}`);
         const filePath = typeof input.file_path === 'string' ? input.file_path : typeof input.path === 'string' ? input.path : '';
         const command = typeof input.command === 'string' ? input.command : '';
         if (command) toolFiles.set(b.id, command);

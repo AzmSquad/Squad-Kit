@@ -3,14 +3,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
-import type { RunOptions, RunResult } from '../src/engine/claude.js';
+import type { RunOptions, RunResult } from '../src/modules/claude/direct.js';
 
 const calls: RunOptions[] = [];
 const answers: unknown[] = [];
 /** What the fake Builder does to the files before it answers. */
 let builderWork: ((cwd: string) => void) | null = null;
-vi.mock('../src/engine/claude.js', async (orig) => ({
-  ...(await orig<typeof import('../src/engine/claude.js')>()),
+vi.mock('../src/modules/claude/direct.js', async (orig) => ({
+  ...(await orig<typeof import('../src/modules/claude/direct.js')>()),
   runClaude: async (opts: RunOptions): Promise<RunResult> => {
     calls.push(opts);
     if (opts.permissionMode === 'acceptEdits' && builderWork && opts.cwd) builderWork(opts.cwd);

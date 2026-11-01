@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Azure, gitAuthEnv, htmlToText, parseAzureRemote, pickState } from '../src/engine/azure.js';
+import { Azure, gitAuthEnv, htmlToText, parseAzureRemote, pickState } from '../src/modules/azure/client.js';
 
 type Route = { method: string; match: RegExp; reply: unknown | ((body: unknown) => unknown); status?: number };
 

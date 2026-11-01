@@ -5,7 +5,8 @@ import path from 'node:path';
 import { boardPaths, type BoardPaths } from '../src/board/store.js';
 import { seedDemoBoard } from '../src/board/demo.js';
 import { loadSecrets, mergeSecrets, saveSecrets } from '../src/core/secrets.js';
-import { MUNSIT_URL, munsitKey, prepareMedia, transcriptOf } from '../src/engine/media.js';
+import { prepareMedia, transcriptOf } from '../src/engine/media.js';
+import { MUNSIT_URL, munsitKey } from '../src/modules/munsit/speech.js';
 
 let tmp: string;
 let bp: BoardPaths;
@@ -53,7 +54,7 @@ describe('voice and video notes', () => {
   it('reads the key saved in Settings', () => {
     const secretsFile = path.join(tmp, '.squad', 'secrets.yaml');
     saveSecrets(secretsFile, mergeSecrets(loadSecrets(secretsFile), { speech: { munsit: 'k-123' } }));
-    expect(munsitKey(bp)).toBe('k-123');
+    expect(munsitKey(path.dirname(path.dirname(bp.dir)))).toBe('k-123');
   });
 
   it('writes out a voice note once, and leaves pictures alone', async () => {

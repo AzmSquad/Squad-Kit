@@ -19,8 +19,8 @@ import { CHAT_SESSION, applyPlanEdits, approveExpress, changeSummary, needsSpec,
 import { scheduleSquad } from '../board/schedule.js';
 import type { BoardMeta, DecisionArea, ImpactCheck, PatternNote, ProjectCommands, Question, Role, StackNote, TechDraft, Ticket } from '../board/types.js';
 import { detectStack } from '../board/stack.js';
-import { describeTool, runClaude, type RunOptions, type RunResult } from './claude.js';
-import { AcpStartError, acpAdapterPath, runClaudeAcp } from './acp-runner.js';
+import { AI_TOOLS, aiTool, describeToolEvent } from '../modules/registry.js';
+import type { AgentResult, AgentRun, ToolEvent } from '../modules/ai-tool/types.js';
 import { runChecks, runCommand, startApp, tail, testCount, type RunningApp } from './checks.js';
 import { addWorktree, commitAll, git, isAncestor } from './git.js';
 import * as P from './prompts.js';
@@ -32,26 +32,11 @@ import { isMediaNote, prepareMedia } from './media.js';
 import { allowedFile, ticketFolders } from './conversations.js';
 
 /**
- * The live squad. Each step of a ticket is one real Claude Code run in the project (or the
+ * The live squad. Each step of a ticket is one real run of the role's AI tool in the project (or the
  * ticket's own worktree). Every step reads the ticket file, does its work, and writes the result
  * back, so the board and the terminal always show the true state.
  */
 
-/** Steps that only read may look around with the shell too, but any other command is refused, even when asked. */
-const READ_SHELL = ['cat', 'ls', 'grep', 'rg', 'head', 'tail', 'wc', 'cd', 'pwd', 'git log', 'git show', 'git diff', 'git status'].map((c) => `Bash(${c}:*)`);
-export const READ_ONLY = ['Read', 'Glob', 'Grep', 'LS', ...READ_SHELL];
-const BUILD_TOOLS = ['Read', 'Edit', 'MultiEdit', 'Write', 'Glob', 'Grep', 'LS', 'Bash', 'TodoWrite'];
-const NO_GIT_WRITES = [
-  'Bash(git commit:*)',
-  'Bash(git push:*)',
-  'Bash(git checkout:*)',
-  'Bash(git switch:*)',
-  'Bash(git reset:*)',
-  'Bash(git rebase:*)',
-  'Bash(git merge:*)',
-  'Bash(git branch:*)',
-  'Bash(git tag:*)',
-];
 const MAX_CHECK_TRIES = 3;
 const MAX_REVIEW_ROUNDS = 2;
 
@@ -291,8 +276,8 @@ export class LiveSquad {
   private watcher(id: string, role: Role, cwd: string, onLine?: (line: string, t: Ticket) => void) {
     let last = 0;
     let logged = 0;
-    return (e: Parameters<NonNullable<RunOptions['onTool']>>[0]) => {
-      const line = describeTool(e, cwd);
+    return (e: ToolEvent) => {
+      const line = describeToolEvent(e, cwd);
       if (!line || Date.now() - last < 700) return;
       last = Date.now();
       this.update(id, (t) => {
@@ -308,30 +293,34 @@ export class LiveSquad {
     };
   }
 
-  private async claude(opts: RunOptions & { ticket?: string; role: AgentRole; step?: string }): Promise<RunResult> {
+  private async runAgent(opts: AgentRun & { ticket?: string; role: AgentRole; step?: string }): Promise<AgentResult> {
     const signal = opts.ticket ? this.stops.get(opts.ticket)?.signal : undefined;
     // Each role runs as its own agent: the team's file for it sets the tool, the model and extra instructions.
     const agent = readAgent(this.bp, opts.role);
-    if (agent.tool !== 'claude') throw new Error(`The ${opts.role} agent is set to ${agent.tool}, which squad-kit cannot run yet. Switch it to Claude Code in Squad and AI.`);
+    const tool = aiTool(agent.tool);
+    if (!tool?.canRun) {
+      const can = AI_TOOLS.filter((t) => t.canRun).map((t) => t.label).join(' or ');
+      throw new Error(`The ${opts.role} agent is set to ${tool?.label ?? agent.tool}, which squad-kit cannot run yet. Switch it to ${can} in Squad and AI.`);
+    }
     const extra = agentInstructions(agent, opts.step);
-    const appendSystemPrompt = [opts.appendSystemPrompt, extra].filter(Boolean).join('\n\n') || undefined;
+    const instructions = [opts.instructions, extra].filter(Boolean).join('\n\n') || undefined;
     const key = opts.ticket;
     opts = this.withNewNotes(opts);
     const watch = key ? { onActivity: () => this.dog.beat(key), onSpawn: (pid: number) => this.dog.track(key, pid) } : {};
-    const run = { ...opts, ...watch, secretFiles: secretFiles(this.bp), ...(appendSystemPrompt ? { appendSystemPrompt } : {}), ...(agent.model ? { model: agent.model } : {}), ...(signal ? { signal } : {}) };
-    let r: RunResult;
-    // By default every role runs through the Agent Client Protocol; the direct runner is the fallback.
-    if (this.meta().runner !== 'direct' && acpAdapterPath()) {
-      try {
-        r = await runClaudeAcp({ ...run, acpLogDir: path.join(this.bp.dir, 'sessions') });
-      } catch (err) {
-        if (!(err instanceof AcpStartError)) throw err;
-        if (key) this.update(key, (x) => addActivity(x, 'squad', `ACP did not start (${err.message.slice(0, 160)}), so this step runs Claude Code directly`));
-        r = await runClaude(run);
-      }
-    } else {
-      r = await runClaude(run);
-    }
+    // Every role runs through the Agent Client Protocol unless the board says to run tools directly.
+    const r = await tool.run({
+      ...opts,
+      ...watch,
+      secretFiles: secretFiles(this.bp),
+      ...(instructions ? { instructions } : {}),
+      ...(agent.model ? { model: agent.model } : {}),
+      ...(signal ? { signal } : {}),
+      logDir: path.join(this.bp.dir, 'sessions'),
+      direct: this.meta().runner === 'direct',
+      onFallback: (why) => {
+        if (key) this.update(key, (x) => addActivity(x, 'squad', `ACP did not start (${why.slice(0, 160)}), so this step runs ${tool.label} directly`));
+      },
+    });
     // ACP picks the id of a new conversation; keep the ticket pointing at it for follow-ups.
     const asked = opts.resume ?? opts.sessionId;
     if (key && asked && r.sessionId && r.sessionId !== asked) {
@@ -342,7 +331,7 @@ export class LiveSquad {
         if (x.notesSeen?.[asked] !== undefined) x.notesSeen[r.sessionId!] = x.notesSeen[asked];
       });
     }
-    if (!r.ok) throw new Error(r.error ?? 'Claude Code did not finish.');
+    if (!r.ok) throw new Error(r.error ?? `${tool.label} did not finish.`);
     return r;
   }
 
@@ -350,7 +339,7 @@ export class LiveSquad {
    * Notes reach a running agent at a safe moment: the start of its next step. A fresh session reads every note in
    * its ticket context; a session that goes on gets only the ones added since its last step.
    */
-  private withNewNotes<T extends RunOptions & { ticket?: string }>(opts: T): T {
+  private withNewNotes<T extends { prompt: string; resume?: string; sessionId?: string; ticket?: string }>(opts: T): T {
     const session = opts.resume ?? opts.sessionId;
     if (!opts.ticket || !session) return opts;
     const t = readTicket(this.bp, opts.ticket);
@@ -396,12 +385,12 @@ export class LiveSquad {
     const nested = findNestedRepos(root);
     await syncWiki(this.bp, undefined, true);
     try {
-      const r = await this.claude({
+      const r = await this.runAgent({
         role: 'architect',
         step: 'scan',
         cwd: root,
         prompt: P.scanPrompt(meta, nested, this.ctx()),
-        allowedTools: READ_ONLY,
+        permissions: ['read'],
         schema: P.SCAN_SCHEMA,
         timeoutMs: 10 * 60_000,
       });
@@ -473,12 +462,12 @@ export class LiveSquad {
     meta.blueprint = { stack: [], patterns: [], ...meta.blueprint, status: 'running' };
     writeMeta(this.bp, meta);
     try {
-      const r = await this.claude({
+      const r = await this.runAgent({
         role: 'architect',
         step: 'blueprint',
         cwd: root,
         prompt: P.blueprintPrompt(meta, decisions, detectStack(root, meta).map((x) => x.name)),
-        allowedTools: READ_ONLY,
+        permissions: ['read'],
         schema: P.BLUEPRINT_SCHEMA,
         timeoutMs: 10 * 60_000,
       });
@@ -527,12 +516,12 @@ export class LiveSquad {
     set((c) => Object.assign(c, { status: 'running', at: now() }));
     if (!open.length) return set((c) => Object.assign(c, { status: 'done', at: now(), checked: [], affected: [] }));
     try {
-      const r = await this.claude({
+      const r = await this.runAgent({
         role: 'architect',
         step: 'blueprint',
         cwd: projectRoot(this.bp),
         prompt: P.impactPrompt(d, open),
-        allowedTools: READ_ONLY,
+        permissions: ['read'],
         schema: P.IMPACT_SCHEMA,
         timeoutMs: 10 * 60_000,
       });
@@ -559,12 +548,12 @@ export class LiveSquad {
       writeMeta(this.bp, fresh);
     };
     try {
-      const r = await this.claude({
+      const r = await this.runAgent({
         role: 'architect',
         step: 'blueprint',
         cwd: projectRoot(this.bp),
         prompt: P.techDecisionPrompt(listDecisions(this.bp), tech, this.meta().blueprint?.stack.find((s) => s.name === tech)?.why),
-        allowedTools: READ_ONLY,
+        permissions: ['read'],
         schema: P.TECH_DECISION_SCHEMA,
         timeoutMs: 10 * 60_000,
       });
@@ -690,14 +679,14 @@ export class LiveSquad {
       t.status = 'Analyst is reading the ticket';
       t.sessions = { ...t.sessions, intake: t.sessions?.intake ?? randomUUID() };
     });
-    const r = await this.claude({
+    const r = await this.runAgent({
       role: 'analyst',
       step: 'questions',
       ticket: id,
       cwd: root,
       ...(had ? { resume: had } : { sessionId: t0.sessions!.intake }),
       prompt: P.intakePrompt(meta, listDecisions(this.bp), t0, this.ctx()),
-      allowedTools: READ_ONLY,
+      permissions: ['read'],
       schema: P.QUESTIONS_SCHEMA,
       timeoutMs: 10 * 60_000,
       addDirs: attachmentDirs(t0),
@@ -736,14 +725,14 @@ export class LiveSquad {
     const ask = [...(q.thread ?? [])].reverse().find((m) => m.who === 'you')?.text ?? '';
     const n = t.questions!.indexOf(q) + 1;
     try {
-      const r = await this.claude({
+      const r = await this.runAgent({
         role: 'analyst',
         step: 'questions',
         ticket: id,
         cwd: projectRoot(this.bp),
         resume: t.sessions?.intake,
         prompt: P.replyPrompt(q, n, ask),
-        allowedTools: READ_ONLY,
+        permissions: ['read'],
         timeoutMs: 5 * 60_000,
       });
       this.update(id, (x) => {
@@ -782,19 +771,19 @@ export class LiveSquad {
       // Voice and video notes are written out first; the agent reads the text and the pictures.
       const heard = await prepareMedia(this.bp, last.files);
       const files = [...last.files.filter((f) => !isMediaNote(f)), ...heard.added];
-      attached = `The person attached: ${files.join(', ')}${heard.missingKey ? ' (voice notes could not be written out: no Munsit key)' : ''}`;
+      attached = `The person attached: ${files.join(', ')}${heard.missingKey ? ' (voice notes could not be written out: no speech to text key)' : ''}`;
     }
     const talk = P.chatPrompt(c.with, message, P.chatNext(c.with, Boolean(t.story), Boolean(t.specApproved)), attached);
     const step = { analyst: 'questions', architect: 'design', builder: 'build', reviewer: 'review', tester: 'proof' }[c.with];
     try {
-      const r = await this.claude({
+      const r = await this.runAgent({
         role: c.with,
         step,
         ticket: id,
         cwd,
         ...(had ? { resume: had } : { sessionId: session }),
         prompt: had ? talk : `${P.intakePrompt(this.meta(), listDecisions(this.bp), t, this.ctx(t))}\n\n${talk}`,
-        allowedTools: READ_ONLY,
+        permissions: ['read'],
         schema: P.CHAT_SCHEMA,
         timeoutMs: 10 * 60_000,
         addDirs: attachmentDirs(t),
@@ -844,7 +833,7 @@ export class LiveSquad {
       t.sessions = { ...t.sessions, intake: t.sessions?.intake ?? randomUUID() };
     });
     const resume = fromChat || Boolean(t0.activity.some((a) => a.who === 'analyst'));
-    const r = await this.claude({
+    const r = await this.runAgent({
       role: 'analyst',
       step: 'spec',
       ticket: id,
@@ -853,7 +842,7 @@ export class LiveSquad {
       prompt: resume
         ? P.specPrompt(t0, change, fromChat)
         : `${P.intakePrompt(this.meta(), listDecisions(this.bp), t0, this.ctx())}\n\n${P.specPrompt(t0, change)}`,
-      allowedTools: READ_ONLY,
+      permissions: ['read'],
       schema: P.SPEC_SCHEMA,
       timeoutMs: 10 * 60_000,
       addDirs: attachmentDirs(t0),
@@ -890,14 +879,14 @@ export class LiveSquad {
     const design = Boolean(t0.specApproved);
     const asked = answered ? t0.agentQuestion : undefined;
     const ask = `${asked ? `${P.answerPrompt(asked, 'architect')}\n\n` : ''}${design ? P.designPrompt(t0, change, this.meta(), fromChat) : P.planPrompt(t0, change, this.meta())}`;
-    const r = await this.claude({
+    const r = await this.runAgent({
       role: 'architect',
       step: 'design',
       ticket: id,
       cwd: root,
       ...(resume ? { resume: t0.sessions!.intake } : { sessionId: t0.sessions!.intake }),
       prompt: resume ? ask : `${P.intakePrompt(this.meta(), listDecisions(this.bp), t0, this.ctx())}\n\n${ask}`,
-      allowedTools: READ_ONLY,
+      permissions: ['read'],
       schema: design ? P.DESIGN_SCHEMA : P.PLAN_SCHEMA,
       timeoutMs: 10 * 60_000,
       addDirs: attachmentDirs(t0),
@@ -1024,16 +1013,14 @@ export class LiveSquad {
     const cwd = t.worktree!;
     const started = Date.now();
     let current = -1;
-    const r = await this.claude({
+    const r = await this.runAgent({
         role: 'builder',
         step,
       ticket: id,
       cwd,
       ...(resume ? { resume: t.sessions!.build } : { sessionId: t.sessions!.build }),
       prompt,
-      allowedTools: BUILD_TOOLS,
-      disallowedTools: NO_GIT_WRITES,
-      permissionMode: 'acceptEdits',
+      permissions: ['edit'],
       schema: P.BUILD_SCHEMA,
       timeoutMs: 60 * 60_000,
       addDirs: this.extraDirs(t),
@@ -1346,7 +1333,7 @@ export class LiveSquad {
     });
     const round = t0.reviewRound!;
     const goOn = answered && Boolean(t0.sessions?.review);
-    const r = await this.claude({
+    const r = await this.runAgent({
         role: 'reviewer',
         step: 'review',
       ticket: id,
@@ -1354,7 +1341,7 @@ export class LiveSquad {
       ...(round > 1 || goOn ? { resume: t0.sessions!.review } : { sessionId: t0.sessions!.review }),
       prompt: goOn ? (carry ? P.chatCarryOnPrompt('reviewer') : P.answerPrompt(t0.agentQuestion ?? { text: '' }, 'reviewer')) : P.reviewPrompt(meta, listDecisions(this.bp), t0, round, this.ctx(t0)),
       addDirs: this.extraDirs(t0),
-      allowedTools: [...READ_ONLY, 'Bash(git diff:*)', 'Bash(git status:*)', 'Bash(git log:*)', 'Bash(git show:*)'],
+      permissions: ['read', 'git-read'],
       schema: P.REVIEW_SCHEMA,
       timeoutMs: 15 * 60_000,
       onTool: this.watcher(id, 'reviewer', t0.worktree!),
@@ -1482,7 +1469,7 @@ export class LiveSquad {
   }
 
   private async shoot(id: string, t: Ticket, when: 'before' | 'after', meta: BoardMeta, appRunning: boolean, appUrl?: string): Promise<void> {
-    const r = await this.claude({
+    const r = await this.runAgent({
         role: 'tester',
         step: 'proof',
       ticket: id,
@@ -1491,9 +1478,7 @@ export class LiveSquad {
         ? { resume: t.sessions!.tester }
         : { sessionId: t.sessions!.tester }),
       prompt: P.proofPrompt(meta, t, this.bp.proofDir, when, this.ctx(t), appRunning, appUrl),
-      allowedTools: BUILD_TOOLS,
-      disallowedTools: NO_GIT_WRITES,
-      permissionMode: 'acceptEdits',
+      permissions: ['edit'],
       schema: P.PROOF_SCHEMA,
       timeoutMs: 20 * 60_000,
       addDirs: [this.bp.proofDir, ...this.extraDirs(t)],

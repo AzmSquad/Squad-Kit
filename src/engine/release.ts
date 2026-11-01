@@ -7,17 +7,18 @@ import { commitArgsFor, currentBranch, git, remotes, removeWorktree, worktreeRoo
 import { projectRoot } from './live.js';
 import { repoFor } from './repos.js';
 import type { RepoInfo } from '../board/types.js';
-import { Azure, azureFor, gitAuthEnv, parseAzureRemote } from './azure.js';
+import { repoHostFor } from '../modules/registry.js';
+import type { RepoHost } from '../modules/code-host/types.js';
 
 /**
- * A real release: merge every ready ticket (its pull request on Azure Repos, or its branch locally), write the
+ * A real release: merge every ready ticket (its pull request on the code host, or its branch locally), write the
  * changelog, set the version, tag it, and push. All of it happens in a separate worktree, so the person's own
  * checkout is never touched unless it can simply fast-forward.
  */
 
 export type ReleaseLog = { ok: boolean; text: string }[];
 
-/** Pull requests Azure cannot merge because newer changes in the base clash with them. Thrown before anything changes. */
+/** Pull requests the code host cannot merge because newer changes in the base clash with them. Thrown before anything changes. */
 export class PullRequestClash extends Error {
   constructor(
     readonly tickets: string[],
@@ -47,20 +48,18 @@ export async function liveRelease(bp: BoardPaths, release: Release, tickets: Tic
   }
   const log: ReleaseLog = [];
   const multi = groups.size > 1 || Boolean(meta.repos?.length);
-  const pat = azureFor(bp)?.target.pat;
   const plans = [...groups.values()].map(({ repo, tickets: list }) => {
     const repoRoot = path.join(root, repo.path);
     const remote = repo.remote || remotes(repoRoot)[0];
     const url = remote ? git(repoRoot, ['config', '--get', `remote.${remote}.url`], { allowFail: true }) : '';
-    const where = parseAzureRemote(url);
-    const host = where && pat ? { az: new Azure({ organization: where.organization, project: where.project, pat }), repo: where.repo } : null;
-    return { repo, repoRoot, list, host, env: gitAuthEnv(pat, url) };
+    const host = url ? repoHostFor(bp, url) : null;
+    return { repo, repoRoot, list, host, env: host?.gitEnv() ?? {} };
   });
-  // One pull request Azure cannot merge would stop the release halfway: look for those first, before anything changes.
+  // One pull request the host cannot merge would stop the release halfway: look for those first, before anything changes.
   for (const { repo, repoRoot, list, host } of plans) {
     const clashing: string[] = [];
-    for (const t of list.filter((x) => x.pr?.host === 'azure' && !x.mergedAt)) {
-      if (host && (await host.az.getPullRequest(host.repo, t.pr!.id)).mergeStatus === 'conflicts') clashing.push(t.id);
+    for (const t of list.filter((x) => host && x.pr?.host === host.host && !x.mergedAt)) {
+      if ((await host!.mergeState(t.pr!.id)) === 'clash') clashing.push(t.id);
     }
     if (clashing.length) throw new PullRequestClash(clashing, repo.base || currentBranch(repoRoot));
   }
@@ -71,15 +70,13 @@ export async function liveRelease(bp: BoardPaths, release: Release, tickets: Tic
   return log;
 }
 
-type CodeHost = { az: Azure; repo: string } | null;
-
 async function releaseRepo(
   root: string,
   repo: RepoInfo,
   release: Release,
   tickets: Ticket[],
   deployFallback: string | undefined,
-  host: CodeHost,
+  host: RepoHost | null,
   env: Record<string, string>,
 ): Promise<ReleaseLog> {
   const base = repo.base || currentBranch(root);
@@ -89,11 +86,11 @@ async function releaseRepo(
   const dir = path.join(worktreeRoot(root), `release-${version}`);
   const log: ReleaseLog = [];
 
-  // Accepted work is normally merged already. A pull request still waiting in Azure is merged now.
+  // Accepted work is normally merged already. A pull request still waiting on the host is merged now.
   for (const t of tickets.filter((x) => x.mergedAt)) log.push({ ok: true, text: `Already in ${base}: ${t.id} ${t.title}` });
-  const viaPr = tickets.filter((t) => t.pr?.host === 'azure' && host && !t.mergedAt);
+  const viaPr = tickets.filter((t) => host && t.pr?.host === host.host && !t.mergedAt);
   for (const t of viaPr) {
-    await host!.az.completePullRequest(host!.repo, t.pr!.id, `Merge ${t.title} (${t.id})`);
+    await host!.merge(t.pr!.id, `Merge ${t.title} (${t.id})`);
     log.push({ ok: true, text: `Merged pull request ${t.pr!.id}: ${t.title}` });
   }
   let start = base;
@@ -195,17 +192,17 @@ async function releaseRepo(
  * Push the release commit to the base branch. When the branch only accepts pull requests, the release commit goes
  * through its own small PR, which is merged at once.
  */
-async function pushRelease(dir: string, remote: string, base: string, version: string, notes: string, host: CodeHost, env: Record<string, string>, log: ReleaseLog): Promise<void> {
+async function pushRelease(dir: string, remote: string, base: string, version: string, notes: string, host: RepoHost | null, env: Record<string, string>, log: ReleaseLog): Promise<void> {
   try {
     git(dir, ['push', remote, `HEAD:refs/heads/${base}`], { env });
     return;
   } catch (err) {
-    if (!host || !/TF402455|not permitted|protected|policy/i.test((err as Error).message)) throw err;
+    if (!host || !host.refusedPush((err as Error).message)) throw err;
   }
   const branch = `release/${version}`;
   git(dir, ['push', '-f', remote, `HEAD:refs/heads/${branch}`], { env });
-  const pr = (await host.az.findPullRequest(host.repo, branch)) ?? (await host.az.createPullRequest({ repo: host.repo, source: branch, target: base, title: `Release ${version}`, description: notes, workItemIds: [] }));
-  await host.az.completePullRequest(host.repo, pr.id, `Release ${version}`);
+  const pr = (await host.findPullRequest(branch)) ?? (await host.openPullRequest({ source: branch, target: base, title: `Release ${version}`, description: notes, items: [] }));
+  await host.merge(pr.id, `Release ${version}`);
   log.push({ ok: true, text: `${base} only takes pull requests, so the release went through pull request ${pr.id}` });
 }
 

@@ -40,7 +40,7 @@ import { tick } from '../board/engine.js';
 import { squadRunsElsewhere } from '../board/lock.js';
 import { seedDemoBoard } from '../board/demo.js';
 import { repoFor } from '../engine/repos.js';
-import { azureFor } from '../engine/azure.js';
+import { trackerFor } from '../modules/registry.js';
 import { openInEditor, ticketChanges } from '../engine/changes.js';
 import { AGENTS, STEPS, readAgent, writeAgent, type AgentRole } from '../engine/agents.js';
 import { corePrompts } from '../engine/core-prompts.js';
@@ -654,7 +654,7 @@ export async function runRelease(version: string | undefined, opts: { yes?: bool
     const tag = kleur.gray(' (shown, not run, on a demo board)');
     if (r.addons.changelog) ui.success(`Changelog updated${tag}`);
     if (r.addons.tag) ui.success(`Tagged ${r.version} in git${tag}`);
-    if (r.addons.pipeline) ui.success(`Azure pipeline started${tag}`);
+    if (r.addons.pipeline) ui.success(`Pipeline started${tag}`);
   }
   if (r.addons.whatsapp && r.whatsappDraft) {
     out();
@@ -757,27 +757,27 @@ export async function runStop(ticketId: string): Promise<void> {
   ui.success(`Stopping the squad on ${t.id}. The work so far is kept.`);
 }
 
-/** The sprint's open stories and bugs on Azure Boards, with the ticket each one became. */
+/** The sprint's open stories and bugs on the tracker, with the ticket each one became. */
 export async function runBacklog(opts: { sprint?: string; all?: boolean }): Promise<void> {
   const bp = board();
-  const az = azureFor(bp);
-  if (!az) throw new Error('Azure DevOps is not set up for this project. Run: squad config set tracker');
-  const sprints = await az.sprints();
+  const tracker = trackerFor(bp);
+  if (!tracker) throw new Error('No tracker is set up for this project. Run: squad config set tracker');
+  const sprints = tracker.abilities.sprints ? await tracker.sprints() : [];
   const wanted = opts.sprint?.toLowerCase();
   const sprint = opts.all ? undefined : wanted ? sprints.find((s) => s.name.toLowerCase() === wanted || s.path.toLowerCase() === wanted) : sprints.find((s) => s.current) ?? sprints[0];
   if (wanted && !sprint) throw new Error(`No sprint called "${opts.sprint}". Sprints: ${sprints.map((s) => s.name).join(', ')}`);
-  const items = await az.listWorkItems(sprint ? { sprintPath: sprint.path } : {});
-  const tickets = listTickets(bp).filter((t) => t.source.type === 'azure');
+  const items = await tracker.list(sprint ? { sprint: sprint.path } : {});
+  const tickets = listTickets(bp).filter((t) => t.source.type === tracker.name);
   out();
   out(`  ${kleur.bold('Backlog')} ${kleur.gray(`${sprint ? sprint.name : 'everything open'} · ${items.length} open`)}`);
   out();
   const w = Math.min(60, Math.max(10, ...items.map((i) => i.title.length)));
   for (const i of items) {
-    const t = tickets.find((x) => x.source.id === String(i.id) || x.source.ref === `AB#${i.id}`);
+    const t = tickets.find((x) => x.source.id === i.id || x.source.ref === i.ref);
     const title = i.title.length > w ? `${i.title.slice(0, w - 1)}…` : i.title.padEnd(w);
-    const kind = i.type === 'Bug' ? kleur.red('bug ') : '    ';
+    const kind = i.isBug ? kleur.red('bug ') : '    ';
     const where = t ? kleur.gray(`${t.id} ${t.stage === 'done' ? 'released' : STAGE_NAME[t.stage]}`) : cmd(`squad pull ${i.id}`);
-    out(`  ${id(String(i.id).padStart(5))}  ${kind}${title}  ${kleur.gray(String(i.points ?? '').padStart(2))}  ${kleur.gray(i.state.padEnd(9))} ${where}`);
+    out(`  ${id(i.id.padStart(5))}  ${kind}${title}  ${kleur.gray(String(i.points ?? '').padStart(2))}  ${kleur.gray(i.state.padEnd(9))} ${where}`);
   }
   out();
 }
