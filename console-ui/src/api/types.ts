@@ -306,7 +306,7 @@ export interface BoardMeta {
   /** Live engine: how to set up, check and run the project. Empty means "not set up". */
   commands?: ProjectCommands;
   git?: { base: string; remote: string };
-  scan?: { status: 'pending' | 'running' | 'done' | 'failed'; at?: string; error?: string; summary?: string; empty?: boolean };
+  scan?: { status: 'pending' | 'running' | 'done' | 'failed'; at?: string; error?: string; summary?: string; empty?: boolean; now?: string };
   /** How many squad jobs may run at the same time. */
   parallel?: number;
   runner?: 'acp' | 'direct';
@@ -395,6 +395,8 @@ export interface BacklogResponse {
 
 export interface TrackerStatus {
   type: 'none' | 'azure' | 'jira' | 'github';
+  /** The tracker's name in words: "Azure DevOps". */
+  label?: string;
   organization: string;
   project: string;
   hasToken: boolean;

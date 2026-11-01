@@ -7,6 +7,7 @@ import {
   listDecisions,
   listReleases,
   listTickets,
+  nextDecisionId,
   now,
   readMeta,
   readTicket,
@@ -399,7 +400,22 @@ export class LiveSquad {
     writeMeta(this.bp, meta);
     const nested = findNestedRepos(root);
     await syncWiki(this.bp, undefined, true);
+    // What the Architect is reading right now, for the board's setup card.
+    let last = 0;
+    const onTool = (e: ToolEvent) => {
+      const line = describeToolEvent(e, root);
+      if (!line || Date.now() - last < 700) return;
+      last = Date.now();
+      const m = this.meta();
+      if (m.scan?.status !== 'running') return;
+      m.scan = { ...m.scan, now: line };
+      writeMeta(this.bp, m);
+    };
     try {
+      const tool = aiTool(readAgent(this.bp, 'architect').tool);
+      if (tool && !tool.ready()) {
+        throw new Error(`${tool.label} is not installed on this computer. Install it and sign in once, then press Try again.`);
+      }
       const r = await this.runAgent({
         role: 'architect',
         step: 'scan',
@@ -408,6 +424,7 @@ export class LiveSquad {
         permissions: ['read'],
         schema: P.SCAN_SCHEMA,
         timeoutMs: 10 * 60_000,
+        onTool,
       });
       const out = r.structured as {
         empty: boolean;
@@ -430,12 +447,11 @@ export class LiveSquad {
       fresh.scan = { status: 'done', at: now(), summary: out.summary, empty: out.empty };
       writeMeta(this.bp, fresh);
       const existing = listDecisions(this.bp);
-      let n = existing.length ? Math.max(...existing.map((d) => Number(d.id.replace(/\D/g, '')))) : 0;
       for (const d of out.decisions) {
         if (existing.some((x) => x.title === d.title)) continue;
-        n += 1;
+        // Found in the code, made by no ticket: STACK.1, STACK.2 (ADR-001).
         writeDecision(this.bp, {
-          id: `ADR-${String(n).padStart(3, '0')}`,
+          id: nextDecisionId(this.bp),
           title: d.title,
           why: d.why,
           options: [d.title],

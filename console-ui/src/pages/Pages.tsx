@@ -464,7 +464,7 @@ function RepoSettings({ repo, multi }: { repo: RepoInfo; multi: boolean }) {
   );
 }
 
-/** Where stories come from and where PRs go. The token stays in .squad/secrets.yaml on this computer. */
+/** Where stories come from and where PRs go. The token stays on this computer, never in .squad. */
 function AzureSettings() {
   const act = useAct();
   const status = useQuery({ queryKey: ['tracker'], queryFn: () => api<TrackerStatus>('/api/v1/tracker'), refetchInterval: 60_000 });

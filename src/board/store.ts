@@ -382,8 +382,15 @@ export function listTickets(bp: BoardPaths): Ticket[] {
   return fs
     .readdirSync(bp.ticketsDir, { withFileTypes: true })
     .filter((d) => d.isDirectory())
-    .map((d) => readTicketFiles(bp, d.name))
-    .filter((t): t is Ticket => Boolean(t))
+    .map((d) => {
+      // A folder that does not read as a ticket is the project's own, and is left alone.
+      try {
+        return readTicketFiles(bp, d.name);
+      } catch {
+        return null;
+      }
+    })
+    .filter((t): t is Ticket => Boolean(t?.title && t.stage))
     .sort((a, b) => idNumber(a.id) - idNumber(b.id) || a.id.localeCompare(b.id));
 }
 
@@ -442,20 +449,32 @@ export function addActivity(ticket: Ticket, who: Actor, text: string): void {
 
 /* ── Decisions ──────────────────────────────────────────── */
 
-function listDocs<T>(dir: string, parse: (text: string) => T): T[] {
+/**
+ * The board's own records in a folder. A project may keep its own notes there too (an older squad-kit wrote release
+ * notes into releases/): a file that does not read as one of the board's records is left alone, not shown.
+ */
+function listDocs<T>(dir: string, parse: (text: string) => T, ours: (x: T) => boolean): T[] {
   if (!fs.existsSync(dir)) return [];
   return fs
     .readdirSync(dir)
     .filter((f) => f.endsWith('.md'))
     .map((f) => {
       const file = path.join(dir, f);
-      return cached(`doc:${file}`, [file], () => parse(fs.readFileSync(file, 'utf8')));
-    });
+      return cached(`doc:${file}`, [file], () => {
+        try {
+          const x = parse(fs.readFileSync(file, 'utf8'));
+          return ours(x) ? x : null;
+        } catch {
+          return null;
+        }
+      });
+    })
+    .filter((x): x is T => x !== null);
 }
 
 /** Newest first: by date, then by name. */
 export function listDecisions(bp: BoardPaths): Decision[] {
-  return listDocs(bp.decisionsDir, parseDecisionDoc).sort((a, b) => String(b.date).localeCompare(String(a.date)) || idNumber(b.id) - idNumber(a.id) || b.id.localeCompare(a.id));
+  return listDocs(bp.decisionsDir, parseDecisionDoc, (d) => Boolean(d.id && d.title)).sort((a, b) => String(b.date).localeCompare(String(a.date)) || idNumber(b.id) - idNumber(a.id) || b.id.localeCompare(a.id));
 }
 
 export function writeDecision(bp: BoardPaths, decision: Decision): void {
@@ -491,7 +510,7 @@ function withReleaseState(bp: BoardPaths, r: Release): Release {
 }
 
 export function listReleases(bp: BoardPaths): Release[] {
-  return listDocs(bp.releasesDir, parseReleaseDoc).map((r) => withReleaseState(bp, r)).sort((a, b) => {
+  return listDocs(bp.releasesDir, parseReleaseDoc, (r) => Boolean(r.version && r.status)).map((r) => withReleaseState(bp, r)).sort((a, b) => {
     const [x, y] = [versionKey(a.version), versionKey(b.version)];
     for (let i = 0; i < 3; i += 1) if (x[i] !== y[i]) return (y[i] ?? 0) - (x[i] ?? 0);
     return 0;

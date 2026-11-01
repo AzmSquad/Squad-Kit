@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { Check, Download, Plus, Search } from 'lucide-react';
-import type { Actor, Stage, Ticket } from '../api/types';
+import { api } from '../api/client';
+import type { Actor, Stage, Ticket, TrackerStatus } from '../api/types';
 import { useAct, useBoard } from '../lib/data';
 import { BugDialog, NewTicketDialog, PullDialog } from '../components/dialogs';
 import { Cmd, Glyph, STAGE_NAME, actionLabel, outdatedLine } from '../components/ui';
@@ -65,9 +67,7 @@ export function BoardPage() {
           <Search size={15} />
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search tickets" aria-label="Search tickets" />
         </label>
-        <button className="btn" onClick={() => setDialog('pull')}>
-          <Download size={15} /> Pull from Azure
-        </button>
+        <PullButton onPull={() => setDialog('pull')} />
         <button className="btn pri" onClick={() => setDialog('new')}>
           <Plus size={15} /> New ticket
         </button>
@@ -191,26 +191,70 @@ function Card({ t, selected, onOpen }: { t: Ticket; selected: boolean; onOpen():
   );
 }
 
-function ScanState({ meta }: { meta: BoardResponseMeta }) {
-  const act = useAct();
-  if (meta.scan?.status === 'failed') {
+/** Pull from the tracker this project is connected to; without one, the way to connect it. */
+function PullButton({ onPull }: { onPull(): void }) {
+  const tracker = useQuery({ queryKey: ['tracker'], queryFn: () => api<TrackerStatus>('/api/v1/tracker'), refetchInterval: 60_000 });
+  const t = tracker.data;
+  if (!t) return null;
+  if (t.type === 'none') {
     return (
-      <div className="calmlane">
-        <span className="glyph you">!</span>
-        <span>
-          <b>The Architect could not read the project.</b> {meta.scan.error}
-        </span>
-        <span className="grow" style={{ flex: 1 }} />
-        <button className="btn sm" onClick={() => act.mutate({ path: '/api/v1/scan', done: 'Reading the project again' })}>Try again</button>
-      </div>
+      <Link to="/settings" className="btn">
+        <Download size={15} /> Connect a tracker
+      </Link>
     );
   }
   return (
-    <div className="calmlane">
-      <span className="live" />
-      <span>
-        <b>The Architect is reading your project.</b> It writes the project map and finds how to test and run it. This takes a minute or two.
-      </span>
+    <button className="btn" onClick={onPull}>
+      <Download size={15} /> Pull from {t.label ?? 'the tracker'}
+    </button>
+  );
+}
+
+type SetupStep = { label: string; state: 'done' | 'now' | 'todo' | 'fail'; note?: string };
+
+/** A project's first open: what squad-kit set up, then the Architect reading the project, step by step. */
+function ScanState({ meta }: { meta: BoardResponseMeta }) {
+  const act = useAct();
+  const scan = meta.scan!;
+  const failed = scan.status === 'failed';
+  const tool = meta.tools.find((t) => t.ready);
+  const steps: SetupStep[] = [
+    { label: 'Project files and board', state: 'done', note: '.squad/ in this folder' },
+    tool
+      ? { label: `${tool.name} is ready`, state: 'done', note: 'The squad works with it' }
+      : { label: 'An AI tool', state: 'fail', note: 'Install Claude Code or Codex and sign in once' },
+    {
+      label: 'The Architect reads the project',
+      state: failed ? 'fail' : scan.status === 'running' ? 'now' : 'todo',
+      note: failed ? scan.error : scan.status === 'running' ? (scan.now ?? 'Starting…') : 'Starts in a moment',
+    },
+    { label: 'Ready for your first ticket', state: 'todo', note: 'Write it, or pull it from your tracker' },
+  ];
+  return (
+    <div className="setup">
+      <div className="setup-head">
+        <b>{failed ? 'The Architect could not read the project.' : 'Setting up your project'}</b>
+        <span>{failed ? 'Fix what the step below says, then try again.' : 'The Architect maps the project and finds how to test and run it. This takes a few minutes.'}</span>
+        {failed && (
+          <button className="btn sm" onClick={() => act.mutate({ path: '/api/v1/scan', done: 'Reading the project again' })}>Try again</button>
+        )}
+      </div>
+      <ol className="setup-steps">
+        {steps.map((st) => (
+          <li key={st.label} className={st.state}>
+            <span className="mark">{st.state === 'done' ? <Check size={12} strokeWidth={3} /> : st.state === 'fail' ? '!' : st.state === 'now' ? <span className="live" /> : null}</span>
+            <span className="txt">
+              <b>{st.label}</b>
+              {st.note && <small title={st.note}>{st.note}</small>}
+            </span>
+          </li>
+        ))}
+      </ol>
+      {!failed && (
+        <div className="setup-bar" aria-hidden>
+          <i />
+        </div>
+      )}
     </div>
   );
 }

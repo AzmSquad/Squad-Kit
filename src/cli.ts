@@ -194,6 +194,7 @@ program
   .option('--no-open', 'Do not auto-open the browser; print the URL instead')
   .option('--token <hex>', 'Reuse a specific session token (advanced; default: the same link as last time)')
   .option('--restart', 'Stop the board that is already running for this project, then start a fresh one')
+  .option('-y, --yes', 'Set up a folder without squad-kit without asking first')
   .action(wrap(runConsole));
 
 program

@@ -245,7 +245,8 @@ export function describeTool(e: ToolEvent, cwd: string): string | null {
     case 'LS':
       return `Listing ${rel(i.path) || 'the folder'}`;
     case 'Bash': {
-      const cmd = String(i.command ?? '').split('\n')[0]!.slice(0, 70);
+      // "cd <the project> && npm test" reads as "npm test": the folder is always the project.
+      const cmd = String(i.command ?? '').split('\n')[0]!.replace(/^cd\s+("[^"]*"|'[^']*'|\S+)\s*&&\s*/, '').slice(0, 70);
       return cmd ? `Running ${cmd}` : null;
     }
     case 'WebFetch':

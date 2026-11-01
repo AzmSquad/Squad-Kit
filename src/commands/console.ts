@@ -1,14 +1,17 @@
 import { randomBytes } from 'node:crypto';
-import { spawn } from 'node:child_process';
-import { resolve } from 'node:path';
+import { execSync, spawn } from 'node:child_process';
+import os from 'node:os';
+import path, { resolve } from 'node:path';
+import { confirm } from '@inquirer/prompts';
 import open from 'open';
 import * as ui from '../ui/index.js';
-import { buildPaths, requireSquadRoot } from '../core/paths.js';
+import { isInteractive } from '../ui/tty.js';
+import { buildPaths, findSquadRoot } from '../core/paths.js';
 import { loadConfig } from '../core/config.js';
 import { startConsoleServer, type ConsoleServer } from '../console/server.js';
-import { boardPaths } from '../board/store.js';
+import { boardExists, boardPaths } from '../board/store.js';
 import { openBoard } from '../board/move.js';
-import { ensureLiveBoard } from '../engine/setup.js';
+import { ensureLiveBoard, setupProject } from '../engine/setup.js';
 import { readInstalledPackage } from '../core/package-info.js';
 import { buildStamp, readConsoleInfo, runningConsole, stopConsole, writeConsoleInfo } from '../board/console-info.js';
 
@@ -19,6 +22,8 @@ export interface ConsoleOptions {
   token?: string;
   /** Stop the board that is already running for this project and start a fresh one. */
   restart?: boolean;
+  /** Set up a folder without squad-kit without asking first. */
+  yes?: boolean;
 }
 
 const DEFAULT_PORT = 4571;
@@ -26,11 +31,39 @@ const DEFAULT_PORT = 4571;
 const RESTART_EXIT = 75;
 const KEEPER_ENV = 'SQUAD_CONSOLE_KEEPER';
 
+/**
+ * The project for this terminal: the nearest folder with squad-kit, or this folder, set up now. A home folder or the
+ * disk's top folder is never set up: a project needs its own folder.
+ */
+async function projectHere(opts: ConsoleOptions): Promise<string | null> {
+  const found = findSquadRoot();
+  if (found) return found;
+  const here = process.cwd();
+  if (here === os.homedir() || here === path.parse(here).root) {
+    throw new Error('squad-kit works inside a project folder. Open the terminal in your project folder (or a new, empty one) and run: squad console');
+  }
+  if (isInteractive() && !opts.yes && !(await confirm({ message: `${here} has no squad-kit yet. Set it up here?`, default: true }))) return null;
+  ui.step(`Setting up squad-kit in ${here}`);
+  setupProject(here);
+  ui.success('Project files: .squad/ with the settings and a README');
+  return here;
+}
+
+/** Every project squad-kit works on is a git repo; on a Mac, git comes with the developer tools. */
+function requireGit(): void {
+  try {
+    execSync('git --version', { stdio: 'ignore' });
+  } catch {
+    throw new Error('squad-kit needs git. On a Mac, run this once, then run squad console again: xcode-select --install');
+  }
+}
+
 export async function runConsole(opts: ConsoleOptions): Promise<void> {
   // Read once: the tools the squad starts don't need to see it.
   const underKeeper = process.env[KEEPER_ENV] === '1';
   delete process.env[KEEPER_ENV];
-  const root = requireSquadRoot();
+  const root = await projectHere(opts);
+  if (!root) return;
   const paths = buildPaths(root);
   // loadConfig also validates the YAML — surface schema problems before binding a port.
   const config = loadConfig(paths.configFile);
@@ -66,7 +99,11 @@ export async function runConsole(opts: ConsoleOptions): Promise<void> {
     ui.info(`The project's files are in .squad/; this computer's are in ${m.localDir}. A copy of the old files: ${m.backup}`);
   }
   // A project without a board gets a live one; the Architect reads the project first.
-  ensureLiveBoard(bp, config.project.name);
+  if (!boardExists(bp)) requireGit();
+  const setup = ensureLiveBoard(bp, config.project.name);
+  bp = setup.bp;
+  for (const line of setup.did) ui.success(line);
+  if (setup.did.length) ui.info('The Architect reads the project now. Follow it on the board.');
 
   // The same port and link as last time, so an open browser tab keeps working after a restart.
   const prior = readConsoleInfo(bp);

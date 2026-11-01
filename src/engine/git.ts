@@ -28,16 +28,22 @@ export function hasCommits(dir: string): boolean {
 }
 
 /** A new project starts as an empty folder: give it a repo and a first commit so tickets can branch. */
+/** Never part of a first commit squad-kit makes: squad-kit's own folder, what tools generate, and secrets. */
+const FIRST_COMMIT_SKIPS = ['/.squad/', 'node_modules/', 'dist/', 'build/', '.next/', 'target/', 'bin/', 'obj/', '.venv/', 'venv/', '__pycache__/', '.DS_Store', '*.log', '.env', '.env.*'];
+
+/**
+ * A folder squad-kit works in needs git with one commit to branch from. A plain folder becomes a repo whose first
+ * commit holds the files already there, so the squad's copies start from the real code.
+ */
 export function ensureRepo(dir: string, projectName: string): void {
   if (!isRepo(dir)) git(dir, ['init', '-b', 'main']);
   if (!hasCommits(dir)) {
     const readme = path.join(dir, 'README.md');
-    if (!fs.existsSync(readme)) fs.writeFileSync(readme, `# ${projectName}\n`, 'utf8');
-    // Commit the .gitignore that `squad init` wrote too, so tickets build on it instead of clashing with it.
-    git(dir, ['add', 'README.md', ...(fs.existsSync(path.join(dir, '.gitignore')) ? ['.gitignore'] : [])]);
-    git(dir, authorArgs(dir).concat(['commit', '-m', 'start the project']));
+    if (!fs.readdirSync(dir).some((f) => f !== '.git' && f !== '.squad') && !fs.existsSync(readme)) fs.writeFileSync(readme, `# ${projectName}\n`, 'utf8');
+    excludeLocal(dir, FIRST_COMMIT_SKIPS);
+    git(dir, ['add', '-A']);
+    git(dir, authorArgs(dir).concat(['commit', '--allow-empty', '-m', 'start the project']));
   }
-  excludeLocal(dir, ['.squad/board/squad.pid']);
 }
 
 /** Ignore squad-kit's own runtime files without editing the project's .gitignore. */

@@ -185,6 +185,27 @@ svg.lucide { flex: none; }
 .calmlane { display: flex; align-items: center; gap: 12px; font-size: 13.5px; color: var(--muted); }
 .calmlane b { color: var(--text); font-weight: 600; }
 
+/* ── First open: setting up the project ────────────────── */
+.setup { display: grid; gap: 12px; }
+.setup-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; font-size: 13.5px; color: var(--muted); }
+.setup-head b { color: var(--text); font-weight: 650; font-size: 14.5px; }
+.setup-head .btn { margin-left: auto; }
+.setup-steps { list-style: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 0; padding: 0; }
+.setup-steps li { display: flex; gap: 9px; align-items: flex-start; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; min-width: 0; }
+.setup-steps .mark { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; flex: none; border: 1.5px solid var(--line-strong); font-size: 11px; font-weight: 700; }
+.setup-steps .done .mark { background: var(--accent); border-color: var(--accent); color: #fff; }
+.setup-steps .now .mark { border-color: var(--accent); }
+.setup-steps .fail .mark { background: var(--bug); border-color: var(--bug); color: #fff; }
+.setup-steps .txt { min-width: 0; display: grid; gap: 2px; }
+.setup-steps .txt b { font-size: 13px; font-weight: 600; color: var(--text); }
+.setup-steps .txt small { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.setup-steps .fail small { white-space: normal; color: var(--bug); }
+.setup-steps .todo { opacity: 0.6; }
+.setup-bar { height: 3px; border-radius: 99px; background: var(--accent-soft); overflow: hidden; }
+.setup-bar i { display: block; height: 100%; width: 30%; border-radius: inherit; background: var(--accent); animation: setup-run 1.6s ease-in-out infinite; }
+@keyframes setup-run { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+@media (max-width: 760px) { .setup-steps { grid-template-columns: 1fr 1fr; } }
+
 /* ── Board ─────────────────────────────────────────────── */
 .board { flex: 1; display: grid; grid-template-columns: repeat(7, minmax(240px, 1fr)); gap: 12px; padding: 16px 18px; min-height: 0; overflow-x: auto; overflow-y: hidden; }
 .lane { background: var(--lane); border-radius: 12px; padding: 10px 8px 8px; display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; overflow-y: auto; }

@@ -460,7 +460,7 @@ export interface BoardMeta {
   /** Live engine: how to set up, check and run the project. Empty means "not set up". */
   commands?: ProjectCommands;
   git?: { base: string; remote: string };
-  scan?: { status: 'pending' | 'running' | 'done' | 'failed'; at?: string; error?: string; summary?: string; empty?: boolean };
+  scan?: { status: 'pending' | 'running' | 'done' | 'failed'; at?: string; error?: string; summary?: string; empty?: boolean; now?: string };
   /** What the Architect last read from the code: why each technology is there, and the design patterns it follows. */
   blueprint?: Blueprint;
   /** Decisions the Architect is writing, or has written, for technologies that were picked without one. */
