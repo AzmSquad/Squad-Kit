@@ -293,6 +293,11 @@ export class LiveSquad {
     };
   }
 
+  /** The AI tool a role runs on, in words: "Claude Code". */
+  private toolLabel(role: AgentRole): string {
+    return aiTool(readAgent(this.bp, role).tool)?.label ?? 'its AI tool';
+  }
+
   private async runAgent(opts: AgentRun & { ticket?: string; role: AgentRole; step?: string }): Promise<AgentResult> {
     const signal = opts.ticket ? this.stops.get(opts.ticket)?.signal : undefined;
     // Each role runs as its own agent: the team's file for it sets the tool, the model and extra instructions.
@@ -986,7 +991,7 @@ export class LiveSquad {
     const t = this.update(id, (x) => {
       x.stage = 'implement';
       x.live = true;
-      x.status = `Step 1 of ${x.steps?.length ?? 1} with Claude Code`;
+      x.status = `Step 1 of ${x.steps?.length ?? 1} with ${this.toolLabel('builder')}`;
       x.sessions = { ...x.sessions, build: x.sessions?.build ?? randomUUID() };
       x.tries = 0;
       x.reviewRound = 0;
@@ -1046,7 +1051,7 @@ export class LiveSquad {
             addActivity(x, 'builder', `Started step ${n + 1}: ${s.title}`);
           }
           x.progress = Math.round((n / Math.max(1, steps.length)) * 100);
-          x.status = `Step ${n + 1} of ${steps.length} with Claude Code`;
+          x.status = `Step ${n + 1} of ${steps.length} with ${this.toolLabel('builder')}`;
         });
       },
       onTool: this.watcher(id, 'builder', cwd, (line, x) => {
@@ -1351,7 +1356,7 @@ export class LiveSquad {
     if (goOn) this.update(id, (x) => (x.agentQuestion = undefined));
     if (out.approved) {
       this.update(id, (x) => {
-        x.gates = { ...(x.gates ?? { checks: 'pass', proof: 'pending' }), review: 'pass', reviewBy: 'a second Claude session' } as Ticket['gates'];
+        x.gates = { ...(x.gates ?? { checks: 'pass', proof: 'pending' }), review: 'pass', reviewBy: `a second ${this.toolLabel('reviewer')} session` } as Ticket['gates'];
         addActivity(x, 'reviewer', `Approved: ${out.summary}`);
         x.status = 'Recording the proof';
         scheduleSquad(x, 'proof', 0.2, 1);
@@ -1364,7 +1369,7 @@ export class LiveSquad {
         x.live = false;
         x.squad = null;
         x.reviewNotes = out.comments;
-        x.gates = { ...(x.gates ?? { checks: 'pass', proof: 'pending' }), review: 'fail', reviewBy: 'a second Claude session' } as Ticket['gates'];
+        x.gates = { ...(x.gates ?? { checks: 'pass', proof: 'pending' }), review: 'fail', reviewBy: `a second ${this.toolLabel('reviewer')} session` } as Ticket['gates'];
         x.retryPhase = 'review-fix';
         x.status = `Review still open after ${round} rounds`;
         addActivity(x, 'reviewer', `Still asks for ${out.comments.length} ${out.comments.length === 1 ? 'fix' : 'fixes'} after ${round} rounds: ${out.comments.join(' ')}`);

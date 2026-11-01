@@ -32,7 +32,8 @@ import { buildPaths } from '../core/paths.js';
 import { loadConfig } from '../core/config.js';
 import { loadSecrets } from '../core/secrets.js';
 import { clientFor, overlayTrackerEnv } from '../tracker/index.js';
-import { trackerFor, trackerModule } from '../modules/registry.js';
+import { aiTool, trackerFor, trackerModule } from '../modules/registry.js';
+import { readAgent } from '../engine/agents.js';
 import type { Tracker } from '../modules/tracker/types.js';
 import { localSetupFor, mergeLocally, opensPullRequest, syncWiki } from '../engine/sync.js';
 import type { AgentChat, AgentName, Criterion, PlanComment, PlanEdit, PlanPart, PlanSnapshot, StuckChoice, StuckOption, TicketNote, Track, TrackerEvent, WayOut } from './types.js';
@@ -535,7 +536,7 @@ export function addNote(bp: BoardPaths, id: string, input: { text: string; kind?
 const AGENT_LABEL: Record<AgentName, string> = { analyst: 'Analyst', architect: 'Architect', builder: 'Builder', reviewer: 'Reviewer', tester: 'Tester' };
 
 /**
- * Take over: the squad stops on this ticket and you work in the Builder's own Claude Code session, in the ticket's
+ * Take over: the squad stops on this ticket and you work in the Builder's own AI tool session, in the ticket's
  * copy. Nothing runs until you give it back, so you and the squad never edit at the same time.
  */
 export function takeOver(bp: BoardPaths, id: string): Ticket {
@@ -555,8 +556,9 @@ export function takeOver(bp: BoardPaths, id: string): Ticket {
     t.live = false;
     t.squad = null;
     t.waiting = { kind: 'yours', summary: 'You took it over. Give it back when you are done' };
-    t.status = `${meta.user.name} is working on it in Claude Code`;
-    addActivity(t, 'you', 'Took it over in Claude Code. The squad waits');
+    const tool = aiTool(readAgent(bp, 'builder').tool)?.label ?? 'the AI tool';
+    t.status = `${meta.user.name} is working on it in ${tool}`;
+    addActivity(t, 'you', `Took it over in ${tool}. The squad waits`);
   });
 }
 
@@ -621,7 +623,7 @@ export function requestChange(bp: BoardPaths, id: string, text: string): Ticket 
 
 const AGENT_TITLE: Record<AgentName, string> = { analyst: 'Analyst', architect: 'Architect', builder: 'Builder', reviewer: 'Reviewer', tester: 'Tester' };
 
-/** The session each agent talks in: its own Claude Code conversation on the ticket. */
+/** The session each agent talks in: its own AI tool conversation on the ticket. */
 export const CHAT_SESSION: Record<AgentName, 'intake' | 'build' | 'review' | 'tester'> = {
   analyst: 'intake',
   architect: 'intake',
