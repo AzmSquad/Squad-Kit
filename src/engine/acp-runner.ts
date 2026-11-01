@@ -30,6 +30,16 @@ export function acpAdapterPath(): string | null {
 /** Raised when the adapter could not start, before any work began, so the caller can fall back safely. */
 export class AcpStartError extends Error {}
 
+/**
+ * squad-kit gives each step its tools up front, so a permission question means the agent wants something it was not
+ * given, such as writing files in a step that only reads, even when the person asked it to in a chat. The answer is no.
+ */
+export function answerPermission(params: Record<string, any>): { outcome: { outcome: 'selected'; optionId: string } | { outcome: 'cancelled' } } {
+  const options = (params.options ?? []) as { optionId: string; kind: string }[];
+  const no = options.find((o) => o.kind === 'reject_once') ?? options.find((o) => o.kind.startsWith('reject'));
+  return no ? { outcome: { outcome: 'selected', optionId: no.optionId } } : { outcome: { outcome: 'cancelled' } };
+}
+
 type Pending = { resolve(v: unknown): void; reject(e: Error): void };
 
 class Rpc {
@@ -141,12 +151,7 @@ export async function runClaudeAcp(opts: AcpRunOptions): Promise<RunResult> {
       }
     },
     (method, params) => {
-      // squad-kit sets the allowed tools up front, so any permission question gets the first "allow" choice.
-      if (method === 'session/request_permission') {
-        const options = (params.options ?? []) as { optionId: string; kind: string }[];
-        const allow = options.find((o) => o.kind === 'allow_once') ?? options.find((o) => o.kind.startsWith('allow')) ?? options[0];
-        return allow ? { outcome: { outcome: 'selected', optionId: allow.optionId } } : { outcome: { outcome: 'cancelled' } };
-      }
+      if (method === 'session/request_permission') return answerPermission(params);
       throw new Error(`squad-kit does not offer ${method}`);
     },
   );

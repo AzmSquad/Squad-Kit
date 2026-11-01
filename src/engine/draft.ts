@@ -7,7 +7,7 @@ import type { Ticket, TicketBrief, Track } from '../board/types.js';
 import { runClaude, type RunOptions, type RunResult } from './claude.js';
 import { AcpStartError, acpAdapterPath, runClaudeAcp } from './acp-runner.js';
 import { agentInstructions, readAgent } from './agents.js';
-import { projectRoot, secretFiles } from './live.js';
+import { READ_ONLY, projectRoot, secretFiles } from './live.js';
 import { rulesFiles } from './repos.js';
 import * as P from './prompts.js';
 import { prepareMedia } from './media.js';
@@ -48,7 +48,7 @@ export async function draftTicket(bp: BoardPaths, input: DraftInput): Promise<Ti
     const r = await runAnalyst(bp, {
       cwd: root,
       prompt: P.draftPrompt(meta, text, files, { rules: rulesFiles(root) }),
-      allowedTools: ['Read', 'Glob', 'Grep', 'LS'],
+      allowedTools: READ_ONLY,
       schema: P.DRAFT_SCHEMA,
       addDirs: [dir],
       timeoutMs: 4 * 60_000,

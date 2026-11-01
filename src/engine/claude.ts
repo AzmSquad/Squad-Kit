@@ -118,6 +118,7 @@ export function childEnv(): NodeJS.ProcessEnv {
 /**
  * The tools a run may not use. Each secret file gets Read and Edit deny rules on its absolute path, so Claude Code
  * refuses it to its file tools and to Bash commands that read it (like cat), from any folder the agent works in.
+ * A run that may only read gets the file-changing tools denied outright, not just left out of its allowed tools.
  */
 export function deniedTools(opts: RunOptions): string[] {
   const files = new Set<string>();
@@ -126,8 +127,13 @@ export function deniedTools(opts: RunOptions): string[] {
     // /tmp and /private/tmp are the same folder on a Mac: deny the real path too.
     if (fs.existsSync(f)) files.add(fs.realpathSync(f));
   }
-  return [...(opts.disallowedTools ?? []), ...[...files].flatMap((f) => [`Read(/${f})`, `Edit(/${f})`])];
+  const allowed = opts.allowedTools ?? [];
+  const readOnly = allowed.length > 0 && !allowed.some((t) => WRITE_TOOLS.includes(t));
+  return [...(opts.disallowedTools ?? []), ...(readOnly ? WRITE_TOOLS : []), ...[...files].flatMap((f) => [`Read(/${f})`, `Edit(/${f})`])];
 }
+
+/** The tools that change files. */
+export const WRITE_TOOLS = ['Edit', 'MultiEdit', 'Write', 'NotebookEdit'];
 
 export function runClaude(opts: RunOptions): Promise<RunResult> {
   const bin = claudeBinary();

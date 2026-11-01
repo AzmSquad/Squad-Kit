@@ -75,6 +75,8 @@ describe('agents never see squad-kit secrets', () => {
     await (new LiveSquad(bp) as unknown as { step(id: string, phase: string): Promise<void> }).step(t.id, 'analyst-read');
     expect(calls.length).toBeGreaterThan(0);
     for (const c of calls) expect(deniedTools(c)).toContain(`Read(/${path.join(tmp, '.squad', 'secrets.yaml')})`);
+    // The Analyst only reads: asking it to change files in a chat or a question step gets nowhere.
+    for (const c of calls) expect(deniedTools(c)).toContain('Write');
   });
 
   it('the Analyst filling in a new ticket carries it too', async () => {

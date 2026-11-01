@@ -37,7 +37,9 @@ import { allowedFile, ticketFolders } from './conversations.js';
  * back, so the board and the terminal always show the true state.
  */
 
-const READ_ONLY = ['Read', 'Glob', 'Grep', 'LS'];
+/** Steps that only read may look around with the shell too, but any other command is refused, even when asked. */
+const READ_SHELL = ['cat', 'ls', 'grep', 'rg', 'head', 'tail', 'wc', 'cd', 'pwd', 'git log', 'git show', 'git diff', 'git status'].map((c) => `Bash(${c}:*)`);
+export const READ_ONLY = ['Read', 'Glob', 'Grep', 'LS', ...READ_SHELL];
 const BUILD_TOOLS = ['Read', 'Edit', 'MultiEdit', 'Write', 'Glob', 'Grep', 'LS', 'Bash', 'TodoWrite'];
 const NO_GIT_WRITES = [
   'Bash(git commit:*)',
