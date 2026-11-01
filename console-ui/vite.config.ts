@@ -24,6 +24,8 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': { target: 'http://127.0.0.1:4571', changeOrigin: false },
+      // Each project's API in the one app: /p/<project id>/api/…
+      '^/p/[^/]+/(api|mockup)/': { target: 'http://127.0.0.1:4571', changeOrigin: false },
       '/healthz': { target: 'http://127.0.0.1:4571', changeOrigin: false },
     },
   },

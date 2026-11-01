@@ -5,7 +5,7 @@ import { api, send } from '../api/client';
 import type { AgentInfo, CorePrompts, Effort, LevelChoice, LevelRow, ModelLevel, TrackerStatus } from '../api/types';
 import { Bug, Check, RotateCcw, Terminal } from 'lucide-react';
 import type { ProjectCommands, RepoInfo } from '../api/types';
-import { useAct, useBoard } from '../lib/data';
+import { useAct, useAppSettings, useBoard } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { BugDialog } from '../components/dialogs';
 import { useRestart } from '../components/Restart';
@@ -123,6 +123,7 @@ const TOOL_NAME: Record<AgentInfo['tool'], string> = { claude: 'Claude Code', co
 
 export function SquadPage() {
   const board = useBoard();
+  const shared = useAppSettings();
   const meta = board.data?.ready ? board.data.meta : undefined;
   const agents = useQuery({ queryKey: ['agents'], queryFn: () => api<AgentInfo[]>('/api/v1/agents'), refetchInterval: 2000 });
   const [editing, setEditing] = useState<AgentInfo | null>(null);
@@ -170,7 +171,7 @@ export function SquadPage() {
           </div>
           <div className="maprow" style={{ marginTop: 4 }}>
             <b>Tickets at once</b>
-            <span className="note">Up to {meta?.parallel ?? 2}. Change it in Settings.</span>
+            <span className="note">Up to {shared.data?.parallel ?? meta?.parallel ?? 2}, shared by all your projects. Change it in Settings.</span>
           </div>
           <SquadUsage />
           <h2 style={{ marginTop: 30 }}>Your AI tools</h2>
@@ -620,22 +621,22 @@ function RunnerSetting() {
   );
 }
 
+/** One number for every project in the app: they all use the same AI accounts. */
 function ParallelSetting() {
-  const board = useBoard();
+  const shared = useAppSettings();
   const act = useAct();
-  const meta = board.data?.ready ? board.data.meta : undefined;
-  if (!meta) return null;
-  const n = meta.parallel ?? 2;
+  const s = shared.data;
+  if (!s) return null;
   return (
     <div className="maprow" style={{ alignItems: 'center' }}>
       <b>Tickets at once</b>
-      <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-        {[1, 2, 3, 4, 5].map((k) => (
-          <button key={k} className={`btn sm ${k === n ? 'pri' : ''}`} onClick={() => act.mutate({ path: '/api/v1/settings', method: 'PUT', body: { parallel: k }, done: `The squad works on up to ${k} tickets at once` })}>
+      <span style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+        {Array.from({ length: s.max }, (_, i) => i + 1).map((k) => (
+          <button key={k} className={`btn sm ${k === s.parallel ? 'pri' : ''}`} onClick={() => act.mutate({ path: '/api/v1/app/settings', method: 'PUT', body: { parallel: k }, done: `Up to ${k} tickets at once, across all your projects` })}>
             {k}
           </button>
         ))}
-        <span className="note" style={{ marginLeft: 6 }}>How many tickets the squad works on at the same time.</span>
+        <span className="note" style={{ marginLeft: 6 }}>How many tickets the squads work on at the same time, across all your projects. They share your AI accounts.</span>
       </span>
     </div>
   );

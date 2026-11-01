@@ -27,7 +27,7 @@ function pathnameForStatic(c: Context): string {
 }
 
 export interface MountStaticOptions {
-  paths: SquadPaths;
+  paths?: SquadPaths;
 }
 
 export function mountStaticAssets(app: Hono, _opts: MountStaticOptions): void {

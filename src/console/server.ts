@@ -6,16 +6,17 @@ import { secureHeaders } from 'hono/secure-headers';
 import * as ui from '../ui/index.js';
 import type { SquadPaths } from '../core/paths.js';
 import { readInstalledPackage } from '../core/package-info.js';
-import { mountApi } from './api/index.js';
+import { mountAppApi } from './api/app.js';
 import { mountStaticAssets } from './static-assets.js';
 import { authMiddleware } from './auth.js';
-import { boardPaths } from '../board/store.js';
-import { startDemoSquad } from '../board/engine.js';
-import { claimSquad } from '../board/lock.js';
-import { LiveSquad } from '../engine/live.js';
+import { OpenProjects, type OpenProject } from './open-projects.js';
+import type { ConsoleInfo } from '../board/console-info.js';
 
 export interface StartConsoleServerOptions {
-  paths: SquadPaths;
+  /** The project to open first. Its API also answers at the addresses one board had, without the /p/<id> prefix. */
+  paths?: SquadPaths;
+  /** The one app (ADR-001): also open every project on the app's list in ~/.squad-kit/projects.json, and keep it. */
+  app?: boolean;
   requestedPort: number;
   token: string;
   /** When the running squad-kit code was built; the board compares it with the code on disk to spot updates. */
@@ -30,6 +31,8 @@ export interface ConsoleServer {
   close(): Promise<void>;
   /** True when the person pressed Restart on the board; the console command then starts a fresh one. */
   restartRequested(): boolean;
+  /** The projects open in this app, each with its own squad. */
+  projects: OpenProjects;
 }
 
 export async function startConsoleServer(opts: StartConsoleServerOptions): Promise<ConsoleServer> {
@@ -55,7 +58,7 @@ export async function startConsoleServer(opts: StartConsoleServerOptions): Promi
     ),
   );
 
-  const MOCKUP_PATH = /^\/mockup\/[^/]+$/;
+  const MOCKUP_PATH = /^(\/p\/[^/]+)?\/mockup\/[^/]+$/;
   const MOCKUP_CSP = "sandbox allow-scripts; default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src data:; frame-ancestors 'self'";
 
   // Tighten headers everywhere. Static asset and API responses inherit these.
@@ -82,47 +85,70 @@ export async function startConsoleServer(opts: StartConsoleServerOptions): Promi
   // Disable CORS in production builds — same-origin only.
   app.use('*', cors({ origin: 'http://127.0.0.1:' + bindPort }));
 
-  // API: token-gated.
-  app.use('/api/*', authMiddleware(opts.token));
-  mountApi(app, {
-    paths: opts.paths,
-    control: {
-      startedAt,
-      build: opts.build ?? 0,
-      restart: () => {
-        restart = true;
-        // Answer the request first, then stop.
-        setTimeout(() => stopForRestart(), 200);
-      },
+  const control = {
+    startedAt,
+    build: opts.build ?? 0,
+    restart: () => {
+      restart = true;
+      // Answer the request first, then stop.
+      setTimeout(() => stopForRestart(), 200);
     },
+  };
+  let actualPort = bindPort;
+  const info = (): ConsoleInfo => ({ pid: process.pid, port: actualPort, token: opts.token, startedAt, version: readInstalledPackage().version, build: opts.build ?? 0 });
+  const projects = new OpenProjects({ token: opts.token, control, info, remember: Boolean(opts.app) });
+
+  // API: token-gated. The app's own calls first; each project checks the token again for its own.
+  app.use('/api/*', authMiddleware(opts.token));
+  mountAppApi(app, { projects });
+
+  // Every project's API names it: /p/<id>/api/v1/board reaches that project's /api/v1/board. This is the one place
+  // the prefix is made, so each project keeps the routes one board always had. Its pages go to the board app below.
+  app.all('/p/:project/*', async (c, next) => {
+    const url = new URL(c.req.url);
+    const prefix = url.pathname.split('/').slice(0, 3).join('/');
+    url.pathname = url.pathname.slice(prefix.length);
+    if (!url.pathname.startsWith('/api/') && !url.pathname.startsWith('/mockup/')) return next();
+    const p = projects.get(c.req.param('project'));
+    if (!p) return c.json({ error: 'This project is not open in the app. Add it from Home.' }, 404);
+    return p.api.fetch(new Request(url, c.req.raw), c.env);
   });
 
-  // Static SPA: public reads from project/dist/console-ui (story 02 fills it in).
+  // The first project also answers at the old addresses, so older links, tools and tests keep working.
+  const first = (): OpenProject | undefined => (projects.first ? projects.get(projects.first) : undefined);
+  app.all('/api/*', (c) => {
+    const p = first();
+    return p ? p.api.fetch(c.req.raw, c.env) : c.json({ error: 'Name the project: /p/<project id>/api/v1/…' }, 404);
+  });
+  // An agent's mockup link names no project: the project whose ticket holds that file answers it.
+  app.get('/mockup/:id', async (c) => {
+    for (const p of [first(), ...projects.all()]) {
+      if (!p) continue;
+      const res = await p.api.fetch(c.req.raw, c.env);
+      if (res.status !== 404) return res;
+    }
+    return c.text('not found', 404);
+  });
+
+  // Static SPA: public reads from project/dist/console-ui.
   mountStaticAssets(app, { paths: opts.paths });
 
   const nodeServer = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: bindPort });
+  actualPort = (() => {
+    const addr = nodeServer.address();
+    if (addr && typeof addr === 'object') return addr.port;
+    return bindPort;
+  })();
 
-  // Each squad only acts on its own kind of board: `engine: demo` plays a script, `engine: live` runs Claude Code.
-  const bp = boardPaths(opts.paths.squadDir);
-  const stopTimer = startDemoSquad(bp);
-  const stopLive = new LiveSquad(bp).start();
-  const releaseLock = claimSquad(bp);
-  const stopSquad = () => {
-    stopTimer();
-    stopLive();
-    releaseLock();
-  };
+  // Each project runs its own squad; the tickets running at once are limited across all of them.
+  if (opts.paths) projects.first = projects.openReady(opts.paths).id;
+  if (opts.app) projects.openSaved();
+  const stopSquad = () => projects.closeAll();
 
   let resolveDone: () => void = () => {};
   const done = new Promise<void>((resolve) => {
     resolveDone = resolve;
   });
-
-  const actualPort = (() => {
-    const addr = nodeServer.address();
-    if (addr && typeof addr === 'object') return addr.port;
-    return bindPort;
-  })();
 
   const shutdown = (onClose: (err?: Error) => void) => {
     // A process that outlives its board (a restart keeper, tests) must not stop it again on a later Ctrl-C.
@@ -149,6 +175,7 @@ export async function startConsoleServer(opts: StartConsoleServerOptions): Promi
     port: actualPort,
     done,
     restartRequested: () => restart,
+    projects,
     close: () =>
       new Promise<void>((resolve, reject) => {
         shutdown((err) => {

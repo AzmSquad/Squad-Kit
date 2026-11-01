@@ -10,7 +10,8 @@ import { runTrackerLink } from './commands/tracker-link.js';
 import { runDoctor } from './commands/doctor.js';
 import { runMigrate } from './commands/migrate.js';
 import { runUpgrade } from './commands/upgrade.js';
-import { runConsole } from './commands/console.js';
+import { runApp, runConsole } from './commands/console.js';
+import { runProjects } from './commands/projects.js';
 import {
   runAnswer,
   runApprove,
@@ -52,6 +53,8 @@ import {
 import { runRmFeature, runRmPlan, runRmStory } from './commands/rm/index.js';
 import { runAuthLogin, runAuthStatus, runAuthLogout } from './commands/auth/index.js';
 import { readInstalledPackage } from './core/package-info.js';
+import { chooseProject } from './core/paths.js';
+import { findProject } from './core/projects.js';
 
 /** Collects a repeatable option into a list. */
 function more(value: string, previous: string[]): string[] {
@@ -62,8 +65,20 @@ const program = new Command();
 
 program
   .name('squad')
-  .description('You write the ticket. Your squad does the rest.')
-  .version(readInstalledPackage().version);
+  .description('You write the ticket. Your squad does the rest. Run squad on its own to open squad-kit with all your projects.')
+  .version(readInstalledPackage().version)
+  // squad's own options come before a command, so `squad console --port` stays the console's.
+  .enablePositionalOptions()
+  .option('--port <number>', 'Port to bind on 127.0.0.1 (default 4571; falls back to next free port)', (v) => parseInt(v, 10))
+  .option('--no-open', 'Do not auto-open the browser; print the URL instead')
+  .option('--token <hex>', 'Reuse a specific session token (advanced; default: the same link as last time)')
+  .option('--restart', 'Stop squad-kit if it runs already, then start a fresh one')
+  .action(
+    wrap(async (opts: Parameters<typeof runApp>[0]) => {
+      if (program.args.length) program.error(`squad: unknown command '${program.args[0]}'. See them all: squad --help`);
+      await runApp(opts);
+    }),
+  );
 
 program
   .command('init')
@@ -185,7 +200,7 @@ program
 
 program
   .command('console')
-  .description('Open the board in your browser. Every button there is also a command here')
+  .description("Open this folder's project in squad-kit (it starts squad-kit if it is not open). Every button there is also a command here")
   .option(
     '--port <number>',
     'Port to bind on 127.0.0.1 (default 4571; falls back to next free port)',
@@ -193,7 +208,7 @@ program
   )
   .option('--no-open', 'Do not auto-open the browser; print the URL instead')
   .option('--token <hex>', 'Reuse a specific session token (advanced; default: the same link as last time)')
-  .option('--restart', 'Stop the board that is already running for this project, then start a fresh one')
+  .option('--restart', "Stop squad-kit if it runs already (or this project's own board), then start a fresh one")
   .option('-y, --yes', 'Set up a folder without squad-kit without asking first')
   .action(wrap(runConsole));
 
@@ -208,7 +223,13 @@ program
   .option('--token <hex>', 'Reuse a specific session token (advanced)')
   .action(wrap(runDemo));
 
-program.command('inbox').description('List everything waiting for you').action(wrap(runInbox));
+program
+  .command('projects')
+  .description('List the projects in squad-kit, with what waits for you in each')
+  .option('--remove <name>', 'Take a project out of squad-kit; its files stay in its folder')
+  .action(wrap(runProjects));
+
+program.command('inbox').description('List everything waiting for you (outside a project folder: in every project)').action(wrap(runInbox));
 program.command('board').description('Show every open ticket by stage').action(wrap(runBoard));
 program
   .command('show <ticket>')
@@ -464,6 +485,17 @@ config
       (section: string, opts: { yes?: boolean }) => runConfigRemoveCredential(section, { yes: opts.yes }),
     ),
   );
+
+// Commands that act on one project find it from the folder they run in, or take --project (ADR-001).
+const NOT_ON_ONE_PROJECT = new Set(['init', 'demo', 'upgrade', 'projects', 'help']);
+const leaves = (c: Command): Command[] => (c.commands.length ? c.commands.flatMap(leaves) : [c]);
+for (const c of program.commands.filter((x) => !NOT_ON_ONE_PROJECT.has(x.name())).flatMap(leaves)) {
+  if (!c.options.some((o) => o.long === '--project')) c.option('--project <name>', 'The project: its name, id or folder (default: the one this folder is in)');
+}
+program.hook('preAction', (_squad, action) => {
+  const ref = action.opts().project as unknown;
+  if (typeof ref === 'string' && ref.trim() && !NOT_ON_ONE_PROJECT.has(action.name())) chooseProject(findProject(ref));
+});
 
 program.parseAsync(process.argv).catch((err) => {
   if (isSquadExit(err)) {

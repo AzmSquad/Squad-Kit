@@ -59,6 +59,7 @@ import type { AgentName, PlanPart, Stage, Ticket, UsageLine, UsageTotal } from '
 import { boardUsage, byRole, costWords, stepWords, tokenWords, totalOf } from '../board/usage.js';
 import { runConsole } from './console.js';
 import { openBoard } from '../board/move.js';
+import { projectName, readProjects } from '../core/projects.js';
 
 const out = (s = '') => process.stdout.write(`${s}\n`);
 const cmd = (s: string) => kleur.green(s);
@@ -129,6 +130,8 @@ function trackLine(t: Ticket): string {
 }
 
 export async function runInbox(): Promise<void> {
+  // Outside a project folder: one Waiting for you list across every project in squad-kit.
+  if (!findSquadRoot()) return inboxEverywhere();
   const bp = board();
   const items = inbox(bp);
   out();
@@ -143,6 +146,32 @@ export async function runInbox(): Promise<void> {
   for (const t of items) {
     out(`  ${id(t.id)}  ${t.title.padEnd(w)}   ${amber(t.waiting?.summary ?? `Looks stuck: ${t.quiet?.detail ?? ''}`)}`);
     out(`  ${' '.repeat(t.id.length)}  ${cmd(nextCommand(t))}`);
+  }
+  out();
+}
+
+function inboxEverywhere(): void {
+  const groups = readProjects()
+    .map((p) => ({ root: p.root, bp: boardPaths(path.join(p.root, '.squad')) }))
+    .filter((p) => fs.existsSync(p.bp.configFile) && boardExists(p.bp))
+    .map((p) => ({ name: readMeta(p.bp).project || projectName(p.root), items: inbox(p.bp) }));
+  if (!groups.length) throw new Error('No projects in squad-kit yet. Open a terminal in a project folder (or a new, empty one) and run: squad console');
+  const total = groups.reduce((n, g) => n + g.items.length, 0);
+  out();
+  out(`  ${kleur.bold('Waiting for you')} ${amber(`(${total})`)} ${kleur.gray(`in ${groups.length} ${groups.length === 1 ? 'project' : 'projects'}`)}`);
+  if (total === 0) {
+    out();
+    out(kleur.gray('  Nothing needs you right now. The squads are working.'));
+  }
+  for (const g of groups.filter((x) => x.items.length)) {
+    const ref = /\s/.test(g.name) ? `"${g.name}"` : g.name;
+    const w = Math.max(...g.items.map((t) => t.title.length));
+    out();
+    out(`  ${kleur.bold(g.name)}`);
+    for (const t of g.items) {
+      out(`  ${id(t.id)}  ${t.title.padEnd(w)}   ${amber(t.waiting?.summary ?? `Looks stuck: ${t.quiet?.detail ?? ''}`)}`);
+      out(`  ${' '.repeat(t.id.length)}  ${cmd(nextCommand(t).replace(/\bsquad ([a-z-]+) (\S+)/g, `squad $1 $2 --project ${ref}`))}`);
+    }
   }
   out();
 }

@@ -1,9 +1,11 @@
 import { execSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { LAYOUT, boardExists, boardPaths, newProjectId, readMeta, writeMeta, type BoardPaths } from '../board/store.js';
 import { DEFAULT_CONFIG, loadConfig, saveConfig } from '../core/config.js';
-import { SQUAD_DIR } from '../core/paths.js';
+import { SQUAD_DIR, buildPaths, type SquadPaths } from '../core/paths.js';
+import { openBoard } from '../board/move.js';
 import type { BoardMeta } from '../board/types.js';
 import { AI_TOOLS } from '../modules/registry.js';
 import { currentBranch, ensureRepo, isRepo, remotes } from './git.js';
@@ -167,4 +169,54 @@ export function ensureLiveBoard(bp: BoardPaths, projectName: string): BoardSetup
   did.push(`Board: ready, with rules for the five roles; tickets are named ${meta.key}-1, ${meta.key}-2`);
   did.push(`AI tools: ${tools.map((t) => `${t.name} ${t.ready ? 'ready' : 'not installed'}`).join(', ')}`);
   return { bp: next, did };
+}
+
+/** Every project squad-kit works on is a git repo; on a Mac, git comes with the developer tools. */
+export function requireGit(): void {
+  try {
+    execSync('git --version', { stdio: 'ignore' });
+  } catch {
+    throw new Error('squad-kit needs git. On a Mac, run this once, then run squad console again: xcode-select --install');
+  }
+}
+
+/** A home folder or the disk's top folder is never set up: a project needs its own folder. */
+export function isOwnFolder(dir: string): boolean {
+  const abs = path.resolve(dir);
+  return abs !== path.resolve(os.homedir()) && abs !== path.parse(abs).root;
+}
+
+export interface ReadyProject {
+  paths: SquadPaths;
+  bp: BoardPaths;
+  /** What getting it ready did, one plain line each; nothing when it was ready already. */
+  did: string[];
+  /** The board was set up just now, so the Architect reads the project first. */
+  fresh: boolean;
+}
+
+/**
+ * Gets a folder ready the way `squad console` and Add project in the app do: the project files when it has none, a
+ * board from before ADR-001 moved once, and a live board where there is none, so the Architect reads the project first.
+ */
+export function prepareProject(root: string): ReadyProject {
+  const did: string[] = [];
+  if (!fs.existsSync(path.join(root, SQUAD_DIR, 'config.yaml'))) {
+    if (!isOwnFolder(root)) throw new Error("squad-kit works inside a project folder. Pick the project's own folder, or a new, empty one.");
+    setupProject(root);
+    did.push('Project files: .squad/ with the settings and a README');
+  }
+  const paths = buildPaths(root);
+  // loadConfig also validates the YAML: settings problems show before anything starts.
+  const config = loadConfig(paths.configFile);
+  const opened = openBoard(paths.squadDir);
+  if (opened.moved) {
+    const m = opened.moved;
+    did.push(`Moved this board to the new layout: ${m.tickets} tickets, ${m.decisions} decisions and ${m.releases} releases, all checked.`);
+    did.push(`The project's files are in .squad/; this computer's are in ${m.localDir}. A copy of the old files: ${m.backup}`);
+  }
+  if (!boardExists(opened.bp)) requireGit();
+  const setup = ensureLiveBoard(opened.bp, config.project.name);
+  did.push(...setup.did);
+  return { paths: buildPaths(root), bp: setup.bp, did, fresh: setup.did.length > 0 };
 }

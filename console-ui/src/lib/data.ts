@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, send } from '../api/client';
-import type { ArchitectureResponse, BoardResponse, ReleaseWithItems, Ticket, ProjectApp } from '../api/types';
+import type { AppSettings, ArchitectureResponse, BoardResponse, ReleaseWithItems, Ticket, ProjectApp } from '../api/types';
 import { usePrefs } from './prefs';
 
 /** The squad writes to .squad/ on its own, so screens poll to stay live. */
@@ -25,6 +25,11 @@ export function useReleases() {
 
 export function useApps() {
   return useQuery({ queryKey: ['apps'], queryFn: () => api<{ apps: ProjectApp[] }>('/api/v1/apps'), refetchInterval: 5000 });
+}
+
+/** How many tickets run at once: one number for every project in the app, because they share the AI accounts. */
+export function useAppSettings() {
+  return useQuery({ queryKey: ['app', 'settings'], queryFn: () => api<AppSettings>('/api/v1/app/settings'), refetchInterval: 5000 });
 }
 
 export function useArchitecture() {

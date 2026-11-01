@@ -35,6 +35,7 @@ import { describeLevel, personLevels, resolveLevel } from './levels.js';
 import { ticketDir } from '../board/store.js';
 import { commitTicketDocs } from './project-git.js';
 import { recordUsage } from '../board/usage.js';
+import { parallelLimit } from '../core/settings.js';
 
 /**
  * The live squad. Each step of a ticket is one real run of the role's AI tool in the project (or the
@@ -54,6 +55,21 @@ export function secretFiles(bp: BoardPaths): string[] {
   return [bp.secretsFile, path.join(bp.squadDir, 'secrets.yaml')];
 }
 
+/**
+ * Every squad running in this app, one per project. They share the person's AI accounts, so one limit of tickets at
+ * once holds across all of them (ADR-001). The Architect's reads beside the tickets don't count.
+ */
+const squads = new Set<LiveSquad>();
+/** Squads with a ticket ready to start but no free place, at their last look. */
+const waiting = new Set<LiveSquad>();
+
+/** Tickets the squads of every project in this app work on right now. */
+export function ticketsRunning(): number {
+  let n = 0;
+  for (const s of squads) n += s.ticketsRunning();
+  return n;
+}
+
 export class LiveSquad {
   private running = new Set<string>();
   private timer: NodeJS.Timeout | null = null;
@@ -68,13 +84,32 @@ export class LiveSquad {
 
   start(intervalMs = 1000): () => void {
     this.resumeAfterRestart();
+    squads.add(this);
     this.timer = setInterval(() => this.tick(), intervalMs);
     return () => {
       // Closing the board: stop running steps quietly; they resume when the board opens again.
+      squads.delete(this);
+      waiting.delete(this);
       this.closing = true;
       if (this.timer) clearInterval(this.timer);
       for (const c of this.stops.values()) c.abort();
     };
+  }
+
+  ticketsRunning(): number {
+    return [...this.running].filter((k) => !k.startsWith('__')).length;
+  }
+
+  /** A free place in the app's one limit. While squads wait for one, it goes to the squad with fewer tickets running. */
+  private mayStart(limit: number): boolean {
+    const mine = this.ticketsRunning();
+    const busy = ticketsRunning() + (squads.has(this) ? 0 : mine);
+    if (busy < limit && ![...waiting].some((s) => s !== this && s.ticketsRunning() < mine)) {
+      waiting.delete(this);
+      return true;
+    }
+    waiting.add(this);
+    return false;
   }
 
   /** A step that was running when the console stopped is picked up again right away. */
@@ -103,7 +138,8 @@ export class LiveSquad {
     }
     if (meta.engine !== 'live') return;
     this.watch();
-    const limit = Math.max(1, meta.parallel ?? 2);
+    const limit = parallelLimit(meta.parallel);
+    waiting.delete(this);
     if (meta.scan?.status === 'pending' && !this.running.has('__scan')) {
       this.launch('__scan', () => this.scan());
       return;
@@ -146,18 +182,17 @@ export class LiveSquad {
         if (!this.running.has(t.id)) this.stopped(t.id);
         continue;
       }
-      if (this.running.size >= limit + 1) break;
       if (this.running.has(t.id)) continue;
       if (t.chat?.open && t.chat.thinking) {
-        this.launch(t.id, () => this.chatReply(t.id));
+        if (this.mayStart(limit)) this.launch(t.id, () => this.chatReply(t.id));
         continue;
       }
       const q = t.questions?.find((x) => x.thinking);
       if (q) {
-        this.launch(t.id, () => this.reply(t.id, q.id));
+        if (this.mayStart(limit)) this.launch(t.id, () => this.reply(t.id, q.id));
         continue;
       }
-      if (t.squad && Date.parse(t.squad.nextAt) <= Date.now()) {
+      if (t.squad && Date.parse(t.squad.nextAt) <= Date.now() && this.mayStart(limit)) {
         const phase = t.squad.phase;
         this.launch(t.id, () => this.step(t.id, phase));
       }
@@ -411,7 +446,8 @@ export class LiveSquad {
       last = Date.now();
       const m = this.meta();
       if (m.scan?.status !== 'running') return;
-      m.scan = { ...m.scan, now: line };
+      // Shell lines mean little to most people here; files and searches read well as they are.
+      m.scan = { ...m.scan, now: line.startsWith('Running ') ? 'Reading the project files' : line };
       writeMeta(this.bp, m);
     };
     try {

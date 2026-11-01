@@ -1,5 +1,27 @@
 const TOKEN_KEY = 'squad.console.token';
 
+/**
+ * The project this page shows (ADR-001): every board address starts with /p/<project id>. The app's Home has none.
+ * Switching projects loads the page again, so this is read once.
+ */
+export const PROJECT: string | null = (() => {
+  const m = /^\/p\/([^/]+)/.exec(window.location.pathname);
+  return m ? decodeURIComponent(m[1]!) : null;
+})();
+
+/** Where this page's project lives in the app: the board's pages and its API sit under it. */
+export const PROJECT_BASE = PROJECT ? `/p/${encodeURIComponent(PROJECT)}` : '';
+
+/**
+ * Every board call names its project: /api/v1/board on a project's page goes to /p/<project>/api/v1/board. This is
+ * the one place that adds it, so every page keeps calling the addresses one board always had. The app's own calls,
+ * under /api/v1/app/, go as they are.
+ */
+export function apiPath(path: string): string {
+  if (!PROJECT_BASE || !path.startsWith('/api/') || path.startsWith('/api/v1/app/')) return path;
+  return PROJECT_BASE + path;
+}
+
 export function bootstrapToken(): string | null {
   const url = new URL(window.location.href);
   const fromUrl = url.searchParams.get('t');
@@ -22,7 +44,7 @@ export class UnauthorizedError extends Error {
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const token = sessionStorage.getItem(TOKEN_KEY);
   if (!token) throw new UnauthorizedError();
-  const res = await fetch(path, {
+  const res = await fetch(apiPath(path), {
     ...init,
     headers: {
       'content-type': 'application/json',
@@ -47,10 +69,10 @@ async function safeText(res: Response): Promise<string> {
 }
 
 /** API errors carry the server's plain-words message, so the UI can show it as is. */
-export async function send<T>(path: string, method: 'POST' | 'PUT', payload: unknown = {}): Promise<T> {
+export async function send<T>(path: string, method: 'POST' | 'PUT' | 'DELETE', payload: unknown = {}): Promise<T> {
   const token = sessionStorage.getItem(TOKEN_KEY);
   if (!token) throw new UnauthorizedError();
-  const res = await fetch(path, {
+  const res = await fetch(apiPath(path), {
     method,
     headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
     body: JSON.stringify(payload),
@@ -65,10 +87,10 @@ export async function send<T>(path: string, method: 'POST' | 'PUT', payload: unk
 /** A file the squad made for a ticket (picture, recording, document), served only from the ticket's own folders. */
 export function ticketFileUrl(ticketId: string, file: string): string {
   const token = sessionStorage.getItem(TOKEN_KEY) ?? '';
-  return `/api/v1/tickets/${encodeURIComponent(ticketId)}/file?path=${encodeURIComponent(file.replace(/^file:\/\//, ''))}&t=${encodeURIComponent(token)}`;
+  return `${apiPath(`/api/v1/tickets/${encodeURIComponent(ticketId)}/file`)}?path=${encodeURIComponent(file.replace(/^file:\/\//, ''))}&t=${encodeURIComponent(token)}`;
 }
 
 export function assetUrl(path: string): string {
   const token = sessionStorage.getItem(TOKEN_KEY) ?? '';
-  return `${path}?t=${encodeURIComponent(token)}`;
+  return `${apiPath(path)}?t=${encodeURIComponent(token)}`;
 }

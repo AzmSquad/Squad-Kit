@@ -6,14 +6,23 @@ import { ReleasesPage } from './pages/Releases';
 import { BacklogPage } from './pages/Backlog';
 import { ArchitecturePage, type ArchView } from './pages/Architecture';
 import { BugsPage, InboxPage, SettingsPage, SquadPage } from './pages/Pages';
+import { HomePage } from './pages/Home';
+import { PROJECT, PROJECT_BASE } from './api/client';
 
-const rootRoute = createRootRoute({ component: Shell });
+// One app, many projects (ADR-001): a project's pages sit under /p/<project id>/ (the router's base), and the app's
+// Home, with every project and one Waiting for you list, at /.
+const rootRoute = createRootRoute({
+  component: PROJECT ? Shell : HomePage,
+  beforeLoad: ({ location }) => {
+    if (!PROJECT && location.pathname !== '/') throw redirect({ to: '/' });
+  },
+});
 
 const index = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
   beforeLoad: () => {
-    throw redirect({ to: '/board' });
+    if (PROJECT) throw redirect({ to: '/board' });
   },
 });
 
@@ -55,7 +64,7 @@ const settings = createRoute({ getParentRoute: () => rootRoute, path: '/settings
 
 const routeTree = rootRoute.addChildren([index, board, backlog, proof, inbox, releases, decisions, architecture, bugs, squad, settings]);
 
-export const router = createRouter({ routeTree, defaultPreload: false });
+export const router = createRouter({ routeTree, defaultPreload: false, basepath: PROJECT_BASE || '/' });
 
 declare module '@tanstack/react-router' {
   interface Register {

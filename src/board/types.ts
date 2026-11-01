@@ -497,7 +497,7 @@ export interface BoardMeta {
   techDrafts?: TechDraft[];
   /** Each approved decision is checked against the tickets planned before it. */
   impactChecks?: ImpactCheck[];
-  /** How many squad jobs may run at the same time. */
+  /** How many tickets this board ran at once before the one app; the app's shared limit in ~/.squad-kit/settings.yaml wins. */
   parallel?: number;
   /** How squad-kit talks to Claude: through the Agent Client Protocol (default), or by running Claude Code directly. */
   runner?: 'acp' | 'direct';

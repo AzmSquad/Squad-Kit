@@ -1,5 +1,5 @@
 import { Link, Outlet, useRouterState } from '@tanstack/react-router';
-import { ArrowUp, Bug, ExternalLink, Inbox, LayoutGrid, ListTodo, Moon, Network, Settings, Sun, Terminal, Users } from 'lucide-react';
+import { ArrowUp, Bug, ChevronsUpDown, ExternalLink, Inbox, LayoutGrid, ListTodo, Moon, Network, Settings, Sun, Terminal, Users } from 'lucide-react';
 import { useApps, useBoard } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { UpdateBanner } from './Restart';
@@ -28,18 +28,20 @@ export function Shell() {
   return (
     <div className="app">
       <aside className="side">
-        <div className="brand">
+        {/* Home and the other projects are other pages of the app, outside this project's board. */}
+        <a className="brand" href="/" title="All your projects">
           <img src="/logo.svg" alt="" />
           <b>squad-kit</b>
           {meta?.engine === 'demo' && <small title="The squad plays back a recorded run">Demo</small>}
-        </div>
-        <div className="proj">
+        </a>
+        <a className="proj" href="/" title="All your projects">
           <span className="pm">{(meta?.project ?? 'P').charAt(0)}</span>
           <div>
             <b>{meta?.project ?? 'Your project'}</b>
             <span>{tickets.length} open tickets</span>
           </div>
-        </div>
+          <ChevronsUpDown size={14} className="sw" />
+        </a>
         {NAV.map((n) => {
           const count = n.badge === 'you' ? waiting : n.badge === 'bugs' ? bugs : 0;
           const on = path.startsWith(n.to) || (n.to === '/inbox' && path.endsWith('/proof'));

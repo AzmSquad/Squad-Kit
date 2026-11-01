@@ -54,7 +54,14 @@ export function buildPaths(root: string): SquadPaths {
   };
 }
 
-export function findSquadRoot(startDir: string = process.cwd()): string | null {
+/** The project a terminal command named with --project; without one, commands use the folder they run in. */
+let chosenProject: string | null = null;
+
+export function chooseProject(root: string | null): void {
+  chosenProject = root;
+}
+
+export function findSquadRoot(startDir: string = chosenProject ?? process.cwd()): string | null {
   let current = path.resolve(startDir);
   const { root } = path.parse(current);
   while (true) {
@@ -66,7 +73,7 @@ export function findSquadRoot(startDir: string = process.cwd()): string | null {
   }
 }
 
-export function requireSquadRoot(startDir: string = process.cwd()): string {
+export function requireSquadRoot(startDir: string = chosenProject ?? process.cwd()): string {
   const root = findSquadRoot(startDir);
   if (!root) {
     throw new Error(

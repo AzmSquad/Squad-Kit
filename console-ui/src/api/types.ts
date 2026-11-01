@@ -594,3 +594,47 @@ export interface ProjectApp {
   start?: string;
   up: boolean;
 }
+
+/* ── The one app (ADR-001): every project, one Waiting for you list, the folder browser ── */
+
+export interface AppProject {
+  id: string;
+  name: string;
+  root: string;
+  /** The squad runs here. A project that could not open says why instead. */
+  open: boolean;
+  why?: string;
+  engine?: 'demo' | 'live';
+  setup?: { status: 'pending' | 'running' | 'done' | 'failed'; now?: string; error?: string };
+  tickets: number;
+  waiting: number;
+  working: number;
+  url: string;
+}
+
+/** How many tickets run at once, shared by every project, and how many run now. */
+export interface AppSettings {
+  parallel: number;
+  max: number;
+  running: number;
+}
+
+export interface AppProjects extends AppSettings {
+  projects: AppProject[];
+}
+
+export interface AppWaiting {
+  items: { project: { id: string; name: string }; ticket: Ticket }[];
+}
+
+export interface FolderListing {
+  path: string;
+  parent: string | null;
+  home: string;
+  kind: 'project' | 'repo' | 'repos' | 'empty' | 'files';
+  repos: number;
+  /** A home folder or the disk's top folder can't be a project; a folder inside it can. */
+  canAdd: boolean;
+  folders: { name: string; path: string; kind: 'project' | 'repo' | 'folder' }[];
+  places: { name: string; path: string }[];
+}

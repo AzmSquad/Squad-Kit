@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { squadHome } from '../core/home.js';
 import type { BoardPaths } from './store.js';
 
 /**
@@ -33,6 +34,30 @@ export function readConsoleInfo(bp: BoardPaths): ConsoleInfo | null {
 export function writeConsoleInfo(bp: BoardPaths, info: ConsoleInfo): void {
   fs.mkdirSync(bp.localDir, { recursive: true });
   fs.writeFileSync(infoFile(bp), `${JSON.stringify(info, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+}
+
+/** The one app on this computer (ADR-001) records where it runs the same way, in ~/.squad-kit/app.json. */
+function appFile(): string {
+  return path.join(squadHome(), 'app.json');
+}
+
+export function readAppInfo(): ConsoleInfo | null {
+  try {
+    return JSON.parse(fs.readFileSync(appFile(), 'utf8')) as ConsoleInfo;
+  } catch {
+    return null;
+  }
+}
+
+export function writeAppInfo(info: ConsoleInfo): void {
+  fs.mkdirSync(squadHome(), { recursive: true });
+  fs.writeFileSync(appFile(), `${JSON.stringify(info, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+}
+
+/** The app, when it runs in another process. */
+export function runningApp(): (ConsoleInfo & { pid: number }) | null {
+  const info = readAppInfo();
+  return info && isAlive(info.pid) ? (info as ConsoleInfo & { pid: number }) : null;
 }
 
 export function isAlive(pid: number | null | undefined): pid is number {
