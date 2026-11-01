@@ -5,7 +5,7 @@ import path from 'node:path';
 import { execSync } from 'node:child_process';
 import yaml from 'js-yaml';
 import { boardPaths, listDecisions, listReleases, listTickets, readMeta, writeRelease } from '../src/board/store.js';
-import { DEFAULT_CONFIG, saveConfig } from '../src/core/config.js';
+import { DEFAULT_CONFIG, loadConfig, saveConfig } from '../src/core/config.js';
 import { ensureLiveBoard, setupProject } from '../src/engine/setup.js';
 
 /** Every way a project starts with squad-kit: an empty folder, existing code with or without git, and squad-kit 0.x. */
@@ -72,7 +72,11 @@ describe('starting squad-kit in a project', () => {
     const dir = path.join(tmp, 'legacy');
     const squad = path.join(dir, '.squad');
     fs.mkdirSync(squad, { recursive: true });
-    saveConfig(path.join(squad, 'config.yaml'), { ...DEFAULT_CONFIG, project: { ...DEFAULT_CONFIG.project, name: 'legacy' } });
+    saveConfig(path.join(squad, 'config.yaml'), {
+      ...DEFAULT_CONFIG,
+      project: { ...DEFAULT_CONFIG.project, name: 'legacy' },
+      tracker: { type: 'azure', workspace: 'contoso', project: 'Legacy' },
+    });
     put(path.join(squad, 'stories', 'login', '1', 'intake.md'), '# Login\n');
     put(path.join(squad, 'releases', '2026-10-19-925572.md'), '# 2026-10-19 — Story 925572\n\nWhat changed.\n');
     put(path.join(squad, 'decisions', 'notes.md'), '# Our notes\n');
@@ -86,6 +90,8 @@ describe('starting squad-kit in a project', () => {
     expect(did).toContain('Sign-ins: moved out of .squad, to this computer only');
     expect(did).toContain('Your notes in knowledge/ kept as project.before-squad-kit.md');
     expect(fs.readFileSync(path.join(squad, 'stories', 'login', '1', 'intake.md'), 'utf8')).toBe('# Login\n');
+    // The 0.x tracker settings stay where they were, and the board reads them.
+    expect(loadConfig(bp.configFile).tracker).toMatchObject({ type: 'azure', workspace: 'contoso', project: 'Legacy' });
     expect(fs.readFileSync(path.join(squad, 'knowledge', 'project.before-squad-kit.md'), 'utf8')).toBe('# Our own project notes\n');
     expect(fs.existsSync(path.join(squad, 'secrets.yaml'))).toBe(false);
     expect(bp.secretsFile).toBe(path.join(bp.localDir, 'secrets.yaml'));

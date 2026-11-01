@@ -154,6 +154,31 @@ describe('moving a board to the new layout', () => {
     expect(fs.existsSync(path.join(bp.squadDir, 'secrets.yaml'))).toBe(false);
   });
 
+  it('keeps a ticket in the middle of building where it was, so the squad carries on', () => {
+    updateTicket(bp, 'SK-148', (t) => {
+      t.stage = 'implement';
+      t.status = 'Step 2 of 3 with Claude Code';
+      t.live = true;
+      t.worktree = path.join(tmp, 'copies', 'sk-148');
+      t.branch = 'squad/sk-148';
+      t.baseCommit = 'a1b2c3d';
+      t.steps = [
+        { title: 'Add the table', status: 'done', minutes: 4 },
+        { title: 'Show the hours', status: 'doing', live: 'Editing src/hours.ts' },
+        { title: 'Write the tests', status: 'todo' },
+      ];
+    });
+    legacyBoard();
+    moveBoard(boardPaths(bp.squadDir));
+    const t = readTicket(boardPaths(bp.squadDir), 'SK-148')!;
+    expect(t).toMatchObject({ stage: 'implement', live: true, branch: 'squad/sk-148', baseCommit: 'a1b2c3d', worktree: path.join(tmp, 'copies', 'sk-148') });
+    expect(t.steps!.map((s) => [s.title, s.status])).toEqual([
+      ['Add the table', 'done'],
+      ['Show the hours', 'doing'],
+      ['Write the tests', 'todo'],
+    ]);
+  });
+
   it('puts everything back and stops when the new files would not match', () => {
     legacyBoard();
     const file = path.join(bp.squadDir, 'board', 'tickets', 'SK-148.yaml');
