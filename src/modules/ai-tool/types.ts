@@ -64,12 +64,28 @@ export interface AgentRun {
   onFallback?(why: string): void;
 }
 
+/**
+ * What one run used, as the AI tool reports it, for the cost on the board (ADR-001). Each module fills in what its
+ * tool says; anything it does not say is left out, because unknown is not zero.
+ */
+export interface AgentUsage {
+  /** Tokens the model read, cached ones included. */
+  inputTokens?: number;
+  /** The part of inputTokens read back from the tool's cache, which costs less. */
+  cachedTokens?: number;
+  outputTokens?: number;
+  /** What this run would cost at the AI company's API prices, in US dollars. Tools report it even on a subscription. */
+  costUsd?: number;
+}
+
 export interface AgentResult {
   ok: boolean;
   sessionId: string;
   text: string;
   structured?: unknown;
   error?: string;
+  /** Left out when the tool said nothing about what the run used. */
+  usage?: AgentUsage;
 }
 
 export interface AiTool {

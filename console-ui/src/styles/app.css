@@ -387,6 +387,11 @@ button.opt2:hover { border-color: var(--line-strong); }
 .table tr.click:hover td { background: var(--lane); }
 .table tr.on td { background: var(--you-soft); }
 .table .mono { color: var(--dim); font-size: 12px; }
+.table.usage td { padding: 9px 10px; font-size: 13px; }
+.table.usage th { padding: 8px 10px; }
+.table.usage .num { text-align: right; white-space: nowrap; }
+.table.usage .who { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; white-space: nowrap; }
+.table.usage tfoot td { border-bottom: 0; font-weight: 650; }
 .sidepanel { width: 420px; flex: none; border-left: 1px solid var(--line); padding: 22px 24px; overflow-y: auto; }
 .sidepanel h3 { font-size: 19px; font-weight: 650; font-stretch: 90%; letter-spacing: -0.01em; margin: 6px 0 4px; line-height: 1.25; }
 .box { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; background: var(--lane); font-size: 13px; }

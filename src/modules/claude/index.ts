@@ -3,7 +3,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { AcpStartError, runAcp, type AcpLaunch } from '../../engine/acp-runner.js';
 import type { AgentResult, AgentRun, AiTool } from '../ai-tool/types.js';
-import { claudeBinary, claudeEnv, deniedTools, describeTool, plainError, runClaude, sessionExists, toolVersion, type RunOptions } from './direct.js';
+import { claudeBinary, claudeEnv, costSoFar, deniedTools, describeTool, plainError, runClaude, sessionExists, toolVersion, type RunOptions } from './direct.js';
 
 /**
  * Claude Code as a squad-kit AI tool, on the person's own Claude login: over ACP through the official adapter, with
@@ -89,6 +89,7 @@ export function claudeLaunch(opts: RunOptions, adapter: string, bin: string): Ac
     env: { ...claudeEnv(), CLAUDE_CODE_EXECUTABLE: bin, ...(opts.model ? { ANTHROPIC_MODEL: opts.model } : {}) },
     meta: { claudeCode: { options } },
     canResume: sessionExists,
+    costSoFar,
     explain: plainError,
     toolName: (update) => update._meta?.claudeCode?.toolName,
     structuredTool: 'StructuredOutput',

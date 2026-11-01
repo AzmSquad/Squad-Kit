@@ -288,6 +288,7 @@ export const TICKET_HOME = {
   agentQuestion: 'local',
   chat: 'local',
   planReview: 'local',
+  usage: 'local',
 } as const satisfies Record<keyof Ticket, 'project' | 'local'>;
 
 /** The live part of a ticket on this computer, plus the parts of split fields that stay here. */

@@ -9,6 +9,7 @@ import { useAct, useBoard } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { BugDialog } from '../components/dialogs';
 import { useRestart } from '../components/Restart';
+import { SquadUsage } from '../components/Usage';
 import { Cmd, Glyph, Modal, STAGE_NAME, actionLabel, ago, commandFor, outdatedLine } from '../components/ui';
 
 /* ── Waiting for you ───────────────────────────────────── */
@@ -171,6 +172,7 @@ export function SquadPage() {
             <b>Tickets at once</b>
             <span className="note">Up to {meta?.parallel ?? 2}. Change it in Settings.</span>
           </div>
+          <SquadUsage />
           <h2 style={{ marginTop: 30 }}>Your AI tools</h2>
           <p className="note" style={{ marginTop: 2 }}>squad-kit uses the logins you already have. Nothing new to buy.</p>
           {(meta?.tools ?? []).map((t) => (

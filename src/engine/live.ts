@@ -34,6 +34,7 @@ import { allowedFile, ticketFolders } from './conversations.js';
 import { describeLevel, personLevels, resolveLevel } from './levels.js';
 import { ticketDir } from '../board/store.js';
 import { commitTicketDocs } from './project-git.js';
+import { recordUsage } from '../board/usage.js';
 
 /**
  * The live squad. Each step of a ticket is one real run of the role's AI tool in the project (or the
@@ -337,6 +338,8 @@ export class LiveSquad {
         if (key) this.update(key, (x) => addActivity(x, 'squad', `ACP did not start (${why.slice(0, 160)}), so this step runs ${tool.label} directly`));
       },
     });
+    // What the run used, counted on the ticket (or the project's own line) even when the run failed.
+    recordUsage(this.bp, key, { role: opts.role, step: levelStep, level: lv.level, model: lv.model || tool.modelFor(lv.level) }, r.usage);
     // ACP picks the id of a new conversation; keep the ticket pointing at it for follow-ups.
     const asked = opts.resume ?? opts.sessionId;
     if (key && asked && r.sessionId && r.sessionId !== asked) {

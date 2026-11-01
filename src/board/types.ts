@@ -246,6 +246,34 @@ export interface ImpactCheck {
   affected?: string[];
 }
 
+/** What some runs used, added up. A count the AI tool never reported stays out, with the runs it is missing for. */
+export interface UsageTotal {
+  runs: number;
+  /** Tokens the model read, cached ones included. */
+  inputTokens?: number;
+  /** The part of inputTokens read back from the tool's cache. */
+  cachedTokens?: number;
+  outputTokens?: number;
+  /** What the runs would cost at the AI company's API prices, in US dollars. */
+  costUsd?: number;
+  /** Runs whose tokens the AI tool did not report. */
+  tokensUnknown?: number;
+  /** Runs whose cost the AI tool did not report. */
+  costUnknown?: number;
+}
+
+/**
+ * What one role used on one step at one model level (ADR-001: cost is visible). Kept on this computer: each person
+ * runs the squad on their own AI account, and it changes with every run.
+ */
+export interface UsageLine extends UsageTotal {
+  role: AgentName;
+  step: string;
+  level: 'strongest' | 'balanced' | 'fast';
+  /** The model in words, as the AI tool names it for the level ("Opus"), or the model someone pinned. */
+  model: string;
+}
+
 /** After a merge moved the person's own checkout: the project's setup runs there, so the app keeps working. */
 export interface LocalSetup {
   status: 'pending' | 'running' | 'done' | 'failed';
@@ -353,6 +381,8 @@ export interface Ticket {
   agentQuestion?: AgentQuestion;
   /** How many notes each agent session has been given, so a running agent gets new ones at its next step. */
   notesSeen?: Record<string, number>;
+  /** What each role used on this ticket, per step and model level. */
+  usage?: UsageLine[];
 }
 
 export type TrackerEvent =
@@ -471,6 +501,8 @@ export interface BoardMeta {
   parallel?: number;
   /** How squad-kit talks to Claude: through the Agent Client Protocol (default), or by running Claude Code directly. */
   runner?: 'acp' | 'direct';
+  /** What the squad used on the project's own work, with no ticket: reading the project, filling in new tickets. */
+  usage?: UsageLine[];
   /**
    * A workspace that holds several code repos (each with its own git). Without it, the project
    * folder itself is the one repo, using `commands` and `git`.

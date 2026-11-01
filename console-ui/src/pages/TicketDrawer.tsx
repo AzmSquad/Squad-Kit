@@ -13,8 +13,9 @@ import { Attachments as AgentFiles, Mockup } from '../components/Attachments';
 import { Part, WhatChanged, type Review } from '../components/PlanReview';
 import { ChatPanel, TalkButton } from '../components/Chat';
 import { Lightbox, type Picture } from '../components/Lightbox';
+import { TicketUsage } from '../components/Usage';
 
-type Tab = 'now' | 'story' | 'plan' | 'activity' | 'conversation' | 'proof' | 'changes' | 'developer';
+type Tab = 'now' | 'story' | 'plan' | 'activity' | 'conversation' | 'proof' | 'changes' | 'cost' | 'developer';
 
 export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
   const ticket = useTicket(id);
@@ -100,6 +101,7 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
                   ['conversation', 'Conversation'],
                   ['proof', 'Proof'],
                   ['changes', 'Changes'],
+                  ['cost', 'Cost'],
                 ] as [Tab, string][]
               ).map(([k, label]) => (
                 <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>
@@ -119,6 +121,11 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
             {tab === 'conversation' && <ConversationTab t={t} />}
             {tab === 'proof' && <ProofTab t={t} />}
             {tab === 'changes' && <ChangesTab t={t} />}
+            {tab === 'cost' && (
+              <div className="db">
+                <TicketUsage t={t} />
+              </div>
+            )}
             {tab === 'developer' && <DeveloperTab t={t} />}
           </>
         )}
@@ -970,6 +977,7 @@ function WorkingPanel({ t }: { t: Ticket }) {
             <GatePills t={t} />
           </>
         )}
+        {(t.stage === 'release' || t.stage === 'done') && t.usage?.length ? <TicketUsage t={t} /> : null}
         <RecentActivity t={t} />
       </div>
       <div className="df">

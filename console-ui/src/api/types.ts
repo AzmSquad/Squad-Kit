@@ -244,6 +244,44 @@ export interface Ticket {
   stopRequested?: boolean;
   /** The squad's review notes still to fix, passed to the Builder. */
   reviewNotes?: string[];
+  /** What each role used on this ticket, per step and model level. */
+  usage?: UsageLine[];
+}
+
+/** What some runs used, added up. A count the AI tool never reported stays out, with the runs it is missing for. */
+export interface UsageTotal {
+  runs: number;
+  /** Tokens the model read, cached ones included. */
+  inputTokens?: number;
+  cachedTokens?: number;
+  outputTokens?: number;
+  /** What the runs would cost at the AI company's API prices, in US dollars. */
+  costUsd?: number;
+  tokensUnknown?: number;
+  costUnknown?: number;
+}
+
+export interface UsageLine extends UsageTotal {
+  role: AgentName;
+  step: string;
+  level: ModelLevel;
+  /** The model in words ("Opus"), or the model someone pinned. */
+  model: string;
+}
+
+export interface RoleUsage {
+  role: AgentName;
+  total: UsageTotal;
+  levels: { level: ModelLevel; model: string; steps: string[]; total: UsageTotal }[];
+}
+
+/** Everything the squad used on this board, on this computer. */
+export interface BoardUsage {
+  total: UsageTotal;
+  /** The project's own work, with no ticket. */
+  project: UsageTotal;
+  roles: RoleUsage[];
+  tickets: number;
 }
 
 export interface Release {
@@ -310,6 +348,8 @@ export interface BoardMeta {
   /** How many squad jobs may run at the same time. */
   parallel?: number;
   runner?: 'acp' | 'direct';
+  /** What the squad used on the project's own work, with no ticket. */
+  usage?: UsageLine[];
   /**
    * A workspace that holds several code repos (each with its own git). Without it, the project
    * folder itself is the one repo, using `commands` and `git`.

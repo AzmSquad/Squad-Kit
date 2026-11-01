@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { resolveClaudeBinary } from '../../core/claude-binary.js';
 import { childEnv } from '../../engine/agent-env.js';
+import { usageFrom } from '../../engine/acp-runner.js';
 
 /**
  * Runs the real Claude Code CLI headless (`claude -p`) in a project folder. squad-kit never
@@ -12,7 +13,7 @@ import { childEnv } from '../../engine/agent-env.js';
  */
 
 export type { ToolEvent } from '../ai-tool/types.js';
-import type { ToolEvent } from '../ai-tool/types.js';
+import type { AgentUsage, ToolEvent } from '../ai-tool/types.js';
 
 export interface RunOptions {
   cwd: string;
@@ -51,6 +52,7 @@ export interface RunResult {
   text: string;
   structured?: unknown;
   error?: string;
+  usage?: AgentUsage;
 }
 
 let cachedBinary: string | null = null;
@@ -81,14 +83,68 @@ export function toolVersion(bin: string): string | null {
   }
 }
 
-/** True when Claude Code already saved a conversation with this id (it can only be resumed, not started again). */
-export function sessionExists(id: string): boolean {
+/** The file Claude Code saved a conversation in, or null. */
+function sessionFile(id: string): string | null {
   const dir = path.join(os.homedir(), '.claude', 'projects');
   try {
-    return fs.readdirSync(dir).some((d) => fs.existsSync(path.join(dir, d, `${id}.jsonl`)));
+    const found = fs.readdirSync(dir).find((d) => fs.existsSync(path.join(dir, d, `${id}.jsonl`)));
+    return found ? path.join(dir, found, `${id}.jsonl`) : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+/** True when Claude Code already saved a conversation with this id (it can only be resumed, not started again). */
+export function sessionExists(id: string): boolean {
+  return sessionFile(id) !== null;
+}
+
+/**
+ * What a saved conversation has cost so far, in US dollars. Claude Code saves its cost in the conversation after each
+ * run and, when the conversation goes on, reports the cost from its very start; so a run costs the difference. Only the
+ * end of a long conversation file is read, unless the cost is not there.
+ */
+export function costSoFar(id: string): number | undefined {
+  const file = sessionFile(id);
+  if (!file) return 0;
+  try {
+    const size = fs.statSync(file).size;
+    const TAIL = 1 << 20;
+    for (const from of size > TAIL ? [size - TAIL, 0] : [0]) {
+      const buf = Buffer.alloc(size - from);
+      const fd = fs.openSync(file, 'r');
+      try {
+        fs.readSync(fd, buf, 0, buf.length, from);
+      } finally {
+        fs.closeSync(fd);
+      }
+      const lines = buf.toString('utf8').split('\n');
+      for (let i = lines.length - 1; i >= 0; i -= 1) {
+        if (!lines[i]!.includes('"cost-state"')) continue;
+        try {
+          const e = JSON.parse(lines[i]!) as { type?: string; sessionId?: string; totalCostUSD?: unknown };
+          if (e.type === 'cost-state' && (!e.sessionId || e.sessionId === id) && typeof e.totalCostUSD === 'number') return e.totalCostUSD;
+        } catch {
+          // A line cut in half by the tail; read on.
+        }
+      }
+    }
+    // Nothing saved yet, so nothing is carried over.
+    return 0;
+  } catch {
+    return undefined;
+  }
+}
+
+/** What one run used, from Claude Code's result: this run's tokens, and the conversation's cost minus its cost before. */
+export function claudeUsage(result: Record<string, any>, before: number | undefined): AgentUsage | undefined {
+  const u = (result.usage ?? {}) as Record<string, unknown>;
+  const n = (v: unknown) => (typeof v === 'number' ? v : undefined);
+  return usageFrom(
+    { inputTokens: n(u.input_tokens), outputTokens: n(u.output_tokens), cachedReadTokens: n(u.cache_read_input_tokens), cachedWriteTokens: n(u.cache_creation_input_tokens) },
+    n(result.total_cost_usd),
+    before,
+  );
 }
 
 /** The environment Claude Code starts with: every agent's, and no background tasks. */
@@ -125,8 +181,10 @@ export function runClaude(opts: RunOptions): Promise<RunResult> {
   }
   const args = ['-p', opts.prompt, '--output-format', 'stream-json', '--verbose'];
   // After a restart the same step may run again: continue its saved conversation instead of failing.
-  if (opts.resume || sessionExists(sessionId)) args.push('--resume', sessionId);
+  const goesOn = Boolean(opts.resume || sessionExists(sessionId));
+  if (goesOn) args.push('--resume', sessionId);
   else args.push('--session-id', sessionId);
+  const costBefore = goesOn ? costSoFar(sessionId) : 0;
   if (opts.allowedTools?.length) args.push('--allowedTools', opts.allowedTools.join(','));
   const denied = deniedTools(opts);
   if (denied.length) args.push('--disallowedTools', denied.join(','));
@@ -172,12 +230,14 @@ export function runClaude(opts: RunOptions): Promise<RunResult> {
         }
       } else if (event.type === 'result') {
         const isError = Boolean(event.is_error) || event.subtype !== 'success';
+        const usage = claudeUsage(event, costBefore);
         result = {
           ok: !isError,
           sessionId: event.session_id ?? sessionId,
           text: typeof event.result === 'string' ? event.result : lastText,
           structured: event.structured_output ?? undefined,
           ...(isError ? { error: plainError(typeof event.result === 'string' ? event.result : String(event.subtype)) } : {}),
+          ...(usage ? { usage } : {}),
         };
       }
     };

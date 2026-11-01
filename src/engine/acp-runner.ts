@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { AgentResult, ToolEvent } from '../modules/ai-tool/types.js';
+import type { AgentResult, AgentUsage, ToolEvent } from '../modules/ai-tool/types.js';
 
 /**
  * The agent gateway: runs a role through the Agent Client Protocol (ACP). squad-kit is the ACP client and talks
@@ -25,6 +25,39 @@ export interface AcpLaunch {
   toolName(update: Record<string, any>): string | undefined;
   /** The tool call that carries the structured answer, when the tool answers that way. */
   structuredTool?: string;
+  /**
+   * What a saved conversation had cost before this run, by the tool's own record. ACP reports the cost of a whole
+   * session, so a run that continues one costs the difference. Without it, a continued run's cost stays unknown.
+   */
+  costSoFar?(sessionId: string): number | undefined;
+}
+
+/** The token counts ACP gives with the answer to session/prompt, for that turn. Cached tokens are counted apart. */
+export interface AcpTokens {
+  inputTokens?: number;
+  outputTokens?: number;
+  cachedReadTokens?: number | null;
+  cachedWriteTokens?: number | null;
+}
+
+const count = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0;
+
+/**
+ * One run's usage from what the agent reported: the run's tokens, and the session's cost now and before the run (US
+ * dollars). Whatever was not reported is left out. A session cost lower than before means the tool started counting
+ * again, so it is this run's alone.
+ */
+export function usageFrom(tokens: AcpTokens | undefined, cost: number | undefined, before: number | undefined): AgentUsage | undefined {
+  const u: AgentUsage = {};
+  if (tokens && count(tokens.inputTokens)) {
+    const read = count(tokens.cachedReadTokens) ? tokens.cachedReadTokens : 0;
+    const write = count(tokens.cachedWriteTokens) ? tokens.cachedWriteTokens : 0;
+    u.inputTokens = tokens.inputTokens + read + write;
+    if (count(tokens.cachedReadTokens)) u.cachedTokens = read;
+  }
+  if (tokens && count(tokens.outputTokens)) u.outputTokens = tokens.outputTokens;
+  if (count(cost) && count(before)) u.costUsd = cost >= before ? cost - before : cost;
+  return Object.keys(u).length ? u : undefined;
 }
 
 export interface AcpRunOptions {
@@ -135,6 +168,14 @@ export async function runAcp(launch: AcpLaunch, opts: AcpRunOptions): Promise<Ag
   let lastText = '';
   let structured: unknown;
   let sessionId = opts.resume ?? opts.sessionId ?? '';
+  // What the session has cost so far, in US dollars, as the agent last said, and what it had cost before this run.
+  let cost: number | undefined;
+  let costBefore: number | undefined = 0;
+  let tokens: AcpTokens | undefined;
+  const used = () => {
+    const u = usageFrom(tokens, cost, costBefore);
+    return u ? { usage: u } : {};
+  };
 
   const rpc = new Rpc(
     child,
@@ -143,6 +184,7 @@ export async function runAcp(launch: AcpLaunch, opts: AcpRunOptions): Promise<Ag
       const update = params.update as Record<string, any>;
       opts.onActivity?.();
       if (opts.logDir && sessionId) fs.appendFileSync(path.join(opts.logDir, `${sessionId}.jsonl`), `${JSON.stringify({ at: new Date().toISOString(), update })}\n`);
+      if (update.sessionUpdate === 'usage_update' && update.cost?.currency === 'USD' && count(update.cost.amount)) cost = update.cost.amount;
       if (update.sessionUpdate === 'agent_message_chunk' && update.content?.type === 'text') {
         lastText = update.content.text;
         opts.onText?.(update.content.text);
@@ -195,27 +237,29 @@ export async function runAcp(launch: AcpLaunch, opts: AcpRunOptions): Promise<Ag
     }
     const existing = sessionId && launch.canResume(sessionId);
     if (existing) {
+      costBefore = launch.costSoFar?.(sessionId);
       // Continue the saved conversation under the same id.
       await rpc.request('session/resume', { sessionId, cwd: opts.cwd, mcpServers: [], _meta: meta });
     } else {
       const s = await rpc.request<{ sessionId: string }>('session/new', { cwd: opts.cwd, mcpServers: [], _meta: meta });
       sessionId = s.sessionId;
     }
-    const res = await rpc.request<{ stopReason: string }>('session/prompt', { sessionId, prompt: [{ type: 'text', text: opts.prompt }] });
-    if (stoppedBy) return { ok: false, sessionId, text: lastText, error: stoppedBy };
+    const res = await rpc.request<{ stopReason: string; usage?: AcpTokens | null }>('session/prompt', { sessionId, prompt: [{ type: 'text', text: opts.prompt }] });
+    tokens = res.usage ?? undefined;
+    if (stoppedBy) return { ok: false, sessionId, text: lastText, error: stoppedBy, ...used() };
     if (res.stopReason !== 'end_turn') {
       const why =
         res.stopReason === 'max_tokens' ? 'The answer was cut off because it got too long.'
         : res.stopReason === 'refusal' ? 'The agent declined to do this step.'
         : res.stopReason === 'cancelled' ? 'The step was cancelled.'
         : `The agent stopped early (${res.stopReason}).`;
-      return { ok: false, sessionId, text: lastText, error: why };
+      return { ok: false, sessionId, text: lastText, error: why, ...used() };
     }
-    if (opts.expectStructured && structured === undefined) return { ok: false, sessionId, text: lastText, error: 'The agent finished without giving squad-kit its answer.' };
-    return { ok: true, sessionId, text: lastText, ...(structured !== undefined ? { structured } : {}) };
+    if (opts.expectStructured && structured === undefined) return { ok: false, sessionId, text: lastText, error: 'The agent finished without giving squad-kit its answer.', ...used() };
+    return { ok: true, sessionId, text: lastText, ...(structured !== undefined ? { structured } : {}), ...used() };
   } catch (err) {
     if (err instanceof AcpStartError) throw err;
-    return { ok: false, sessionId, text: lastText, error: stoppedBy ?? launch.explain(`${(err as Error).message}\n${stderr}`) };
+    return { ok: false, sessionId, text: lastText, error: stoppedBy ?? launch.explain(`${(err as Error).message}\n${stderr}`), ...used() };
   } finally {
     clearTimeout(timer);
     child.stdin.end();

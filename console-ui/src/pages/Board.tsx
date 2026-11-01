@@ -8,6 +8,7 @@ import { useAct, useBoard } from '../lib/data';
 import { BugDialog, NewTicketDialog, PullDialog } from '../components/dialogs';
 import { Cmd, Glyph, STAGE_NAME, actionLabel, outdatedLine } from '../components/ui';
 import { TicketDrawer } from './TicketDrawer';
+import { BoardCost } from '../components/Usage';
 
 const LANES: { stage: Stage; role: Actor; who: string }[] = [
   { stage: 'tickets', role: 'analyst', who: 'Analyst' },
@@ -156,6 +157,7 @@ export function BoardPage() {
         <span>
           <b>{data.stats.open}</b> open tickets
         </span>
+        <BoardCost />
         <span className="grow" />
         <button className="btn sm quiet" onClick={() => setDialog('bug')}>Report a bug</button>
       </div>

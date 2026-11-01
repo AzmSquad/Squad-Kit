@@ -55,7 +55,8 @@ import {
   requireTicket,
   type BoardPaths,
 } from '../board/store.js';
-import type { AgentName, PlanPart, Stage, Ticket } from '../board/types.js';
+import type { AgentName, PlanPart, Stage, Ticket, UsageLine, UsageTotal } from '../board/types.js';
+import { boardUsage, byRole, costWords, stepWords, tokenWords, totalOf } from '../board/usage.js';
 import { runConsole } from './console.js';
 import { openBoard } from '../board/move.js';
 
@@ -151,7 +152,8 @@ export async function runBoard(): Promise<void> {
   const meta = readMeta(bp);
   const tickets = listTickets(bp).filter((t) => t.stage !== 'done');
   out();
-  out(`  ${kleur.bold(meta.project)}  ${kleur.gray(`${tickets.length} open tickets`)}`);
+  const used = boardUsage(bp).total;
+  out(`  ${kleur.bold(meta.project)}  ${kleur.gray(`${tickets.length} open tickets`)}${used.runs ? kleur.gray(`  ·  used ${costWords(used) ?? 'an unknown amount'} at API prices`) : ''}`);
   for (const stage of ['tickets', 'specs', 'implement', 'test', 'review', 'release', 'bugs'] as Stage[]) {
     const here = tickets.filter((t) => t.stage === stage);
     out();
@@ -225,6 +227,11 @@ export async function runShow(ticketId: string): Promise<void> {
     out(`  ${t.stuck.question}`);
     t.stuck.options.forEach((o, i) => out(`    ${i + 1}. ${o.name}  ${kleur.gray(o.note)}`));
   }
+  if (t.usage?.length) {
+    out();
+    out(`  ${kleur.bold('What it used')}  ${usedWords(totalOf(t.usage))}`);
+    for (const row of usageRows(t.usage)) out(row);
+  }
   out();
   out(`  ${kleur.bold('Latest')}`);
   for (const a of t.activity.slice(0, 4)) out(`    ${kleur.gray(time(a.at))}  ${a.text}`);
@@ -235,6 +242,24 @@ export async function runShow(ticketId: string): Promise<void> {
 
 function time(iso: string): string {
   return new Date(iso).toTimeString().slice(0, 5);
+}
+
+/** "$1.23 at API prices, 9 runs": what it would cost, even though the person's own AI subscription pays for it. */
+function usedWords(t: UsageTotal): string {
+  const cost = costWords(t);
+  return `${cost ? `${cost} at API prices` : 'cost not reported'}${kleur.gray(`, ${t.runs} ${t.runs === 1 ? 'run' : 'runs'}`)}`;
+}
+
+/** One row per role and model level: its cost, its steps, its runs and tokens. */
+function usageRows(lines: UsageLine[]): string[] {
+  return byRole(lines).flatMap((r) =>
+    r.levels.map((l, i) => {
+      const name = i ? '' : (AGENTS.find((a) => a.role === r.role)?.name ?? r.role);
+      const model = l.model ? `${l.model} (${l.level})` : `${l.level} level`;
+      const what = [l.steps.map((s) => stepWords(r.role, s)).join(', '), `${l.total.runs} ${l.total.runs === 1 ? 'run' : 'runs'}`, tokenWords(l.total)].filter(Boolean).join(' · ');
+      return `    ${name.padEnd(10)} ${model.padEnd(20)} ${(costWords(l.total) ?? 'not reported').padEnd(12)} ${kleur.gray(what)}`;
+    }),
+  );
 }
 
 export async function runAnswer(ticketId: string, opts: { skip?: boolean }): Promise<void> {
