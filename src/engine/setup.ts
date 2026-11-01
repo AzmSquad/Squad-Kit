@@ -7,6 +7,7 @@ import { currentBranch, ensureRepo, isRepo, remotes } from './git.js';
 import { findNestedRepos } from './repos.js';
 import { projectRoot } from './live.js';
 import { ensureAgents } from './agents.js';
+import { hideSquadFromGit } from './project-git.js';
 
 /** A short ticket key from the project name: "moj-taqadi" becomes "MT", "Leave requests" becomes "LR". */
 export function keyFor(name: string): string {
@@ -34,6 +35,8 @@ export function detectTools(): BoardMeta['tools'] {
  */
 export function ensureLiveBoard(bp: BoardPaths, projectName: string): void {
   const root = projectRoot(bp);
+  // `.squad/` never shows in `git status`; squad-kit commits the documents itself (ADR-001).
+  hideSquadFromGit(bp);
   if (boardExists(bp)) {
     const meta = readMeta(bp);
     if (meta.engine === 'live') {

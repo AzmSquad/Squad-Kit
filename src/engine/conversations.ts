@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { ContentBlock, PlanEntry, SessionUpdate, ToolCallContent, ToolKind } from '@agentclientprotocol/sdk';
 import type { Ticket } from '../board/types.js';
 import { describeToolEvent } from '../modules/registry.js';
+import { ticketDir, ticketMediaDir, type BoardPaths } from '../board/store.js';
 
 /**
  * The real conversations behind a ticket, in the Agent Client Protocol (ACP) format: messages, thoughts, tool calls
@@ -279,8 +280,9 @@ export function ticketConversations(t: Ticket, base?: string, nativeDir?: string
 }
 
 /** Folders a ticket's files may be shown from: its copy of the code, its proof and its attachments. */
-export function ticketFolders(t: Ticket, boardDir: string): string[] {
-  return [t.worktree, path.join(boardDir, 'proof'), path.join(boardDir, 'attachments', t.id)].filter((d): d is string => Boolean(d));
+/** The folders a ticket's files may be shown from: its copy, the screenshots, its folder and its voice notes. */
+export function ticketFolders(t: Ticket, bp: BoardPaths): string[] {
+  return [t.worktree, bp.proofDir, ticketDir(bp, t.id), ticketMediaDir(bp, t.id)].filter((d): d is string => Boolean(d));
 }
 
 /** The real path of a file if it sits inside one of the allowed folders, else null. */

@@ -1,4 +1,11 @@
 import { beforeEach, afterEach } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+// squad-kit keeps each project's local files in ~/.squad-kit (ADR-001). Tests use a temp folder instead, never the
+// developer's own.
+process.env.SQUAD_KIT_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-home-'));
 
 /**
  * Every env var that squad-kit reads to resolve planner or tracker credentials.

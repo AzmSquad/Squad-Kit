@@ -439,6 +439,12 @@ export interface Blueprint {
 }
 
 export interface BoardMeta {
+  /** Links the project's files to this computer's files for it (ADR-001). */
+  id?: string;
+  /** The shape of the project's files: 2 is the split of ADR-001. */
+  layout?: number;
+  /** One-repo projects: commit the project's documents on each ticket's branch (on by default). */
+  documentsInGit?: boolean;
   project: string;
   key: string;
   nextNumber: number;

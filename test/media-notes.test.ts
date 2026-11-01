@@ -54,7 +54,7 @@ describe('voice and video notes', () => {
   it('reads the key saved in Settings', () => {
     const secretsFile = path.join(tmp, '.squad', 'secrets.yaml');
     saveSecrets(secretsFile, mergeSecrets(loadSecrets(secretsFile), { speech: { munsit: 'k-123' } }));
-    expect(munsitKey(path.dirname(path.dirname(bp.dir)))).toBe('k-123');
+    expect(munsitKey(bp.root)).toBe('k-123');
   });
 
   it('writes out a voice note once, and leaves pictures alone', async () => {

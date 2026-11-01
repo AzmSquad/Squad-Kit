@@ -78,7 +78,7 @@ async function runAnalyst(bp: BoardPaths, opts: AgentRun): Promise<AgentResult> 
     level: lv.level,
     ...(lv.effort && tool.supportsEffort ? { effort: lv.effort } : {}),
     ...(lv.model ? { model: lv.model } : {}),
-    logDir: path.join(bp.dir, 'sessions'),
+    logDir: bp.chatsDir,
     direct: readMeta(bp).runner === 'direct',
   });
   if (!r.ok || !r.structured) throw new BoardActionError(r.error ?? 'The Analyst did not fill in the ticket. Try again.');

@@ -18,7 +18,7 @@ export interface ConsoleInfo {
 }
 
 function infoFile(bp: BoardPaths): string {
-  return path.join(bp.dir, 'console.json');
+  return bp.consoleFile;
 }
 
 export function readConsoleInfo(bp: BoardPaths): ConsoleInfo | null {
@@ -31,7 +31,7 @@ export function readConsoleInfo(bp: BoardPaths): ConsoleInfo | null {
 
 /** The link token is a secret for this computer only, so the file is readable by the owner alone. */
 export function writeConsoleInfo(bp: BoardPaths, info: ConsoleInfo): void {
-  fs.mkdirSync(bp.dir, { recursive: true });
+  fs.mkdirSync(bp.localDir, { recursive: true });
   fs.writeFileSync(infoFile(bp), `${JSON.stringify(info, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
 }
 
@@ -49,11 +49,15 @@ export function isAlive(pid: number | null | undefined): pid is number {
 export function runningConsole(bp: BoardPaths): (Partial<ConsoleInfo> & { pid: number }) | null {
   const info = readConsoleInfo(bp);
   if (info && isAlive(info.pid)) return info as ConsoleInfo & { pid: number };
-  try {
-    const pid = Number(fs.readFileSync(path.join(bp.dir, 'squad.pid'), 'utf8').trim());
-    if (isAlive(pid)) return { pid };
-  } catch {
-    // No lock file.
+  // A board started before the move kept its files in .squad/board.
+  for (const file of [bp.pidFile, path.join(bp.legacyDir, 'console.json'), path.join(bp.legacyDir, 'squad.pid')]) {
+    try {
+      const text = fs.readFileSync(file, 'utf8').trim();
+      const pid = file.endsWith('.json') ? Number((JSON.parse(text) as ConsoleInfo).pid) : Number(text);
+      if (isAlive(pid)) return file.endsWith('.json') ? ({ ...(JSON.parse(text) as ConsoleInfo), pid }) : { pid };
+    } catch {
+      // No such file.
+    }
   }
   return null;
 }

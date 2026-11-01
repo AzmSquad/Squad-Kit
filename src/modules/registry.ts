@@ -24,7 +24,7 @@ export const SPEECH: SpeechModule[] = [munsitSpeech];
 export const AI_TOOLS: AiTool[] = [claudeTool, codexTool];
 
 function rootOf(bp: BoardPaths): string {
-  return path.dirname(path.dirname(bp.dir));
+  return bp.root;
 }
 
 export function trackerModule(name: string | undefined): TrackerModule | undefined {

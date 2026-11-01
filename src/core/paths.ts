@@ -1,5 +1,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
+import yaml from 'js-yaml';
+import { squadHome } from './home.js';
 
 export const SQUAD_DIR = '.squad';
 
@@ -21,13 +23,29 @@ export interface SquadPaths {
   trashDir: string;
 }
 
+/**
+ * Secrets belong to this computer (ADR-001): once a project has a board id they live in
+ * ~/.squad-kit/projects/<id>/secrets.yaml. A project not moved yet keeps them in .squad/secrets.yaml.
+ */
+function secretsFileOf(squadDir: string): string {
+  const old = path.join(squadDir, 'secrets.yaml');
+  try {
+    const id = (yaml.load(fs.readFileSync(path.join(squadDir, 'config.yaml'), 'utf8')) as { board?: { id?: string } } | undefined)?.board?.id;
+    if (!id) return old;
+    const local = path.join(squadHome(), 'projects', String(id), 'secrets.yaml');
+    return fs.existsSync(local) || !fs.existsSync(old) ? local : old;
+  } catch {
+    return old;
+  }
+}
+
 export function buildPaths(root: string): SquadPaths {
   const squadDir = path.join(root, SQUAD_DIR);
   return {
     root,
     squadDir,
     configFile: path.join(squadDir, 'config.yaml'),
-    secretsFile: path.join(squadDir, 'secrets.yaml'),
+    secretsFile: secretsFileOf(squadDir),
     promptsDir: path.join(squadDir, 'prompts'),
     storiesDir: path.join(squadDir, 'stories'),
     plansDir: path.join(squadDir, 'plans'),

@@ -23,6 +23,8 @@ export interface SquadConfig {
   };
   agents: string[];
   planner?: PlannerConfig;
+  /** The board's project settings (squad-kit 1.0): kept as written, read and written by the board's store. */
+  board?: Record<string, unknown>;
 }
 
 export const DEFAULT_CONFIG: SquadConfig = {
@@ -280,5 +282,6 @@ function mergeConfig(base: SquadConfig, override: Partial<SquadConfig>, configFi
     naming: { ...base.naming, ...(override.naming ?? {}) },
     agents: override.agents ?? base.agents,
     planner: mergePlanner(base.planner, override.planner as Partial<PlannerConfig> | undefined, configFile),
+    ...(override.board ?? base.board ? { board: (override.board ?? base.board)! } : {}),
   };
 }

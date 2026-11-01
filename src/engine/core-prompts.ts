@@ -58,7 +58,7 @@ export function corePrompts(bp: BoardPaths, role: AgentRole, ticketId?: string):
   const meta = readMeta(bp);
   const decisions = listDecisions(bp);
   const t = previewTicket(bp, ticketId);
-  const root = path.dirname(path.dirname(bp.dir));
+  const root = bp.root;
   const ctx: P.PromptContext = { rules: rulesFiles(root), repo: repoFor(meta, t) };
   const text: Record<string, () => string> = {
     questions: () => P.intakePrompt(meta, decisions, t, ctx),

@@ -3,12 +3,13 @@ import path from 'node:path';
 import { readMeta, type BoardPaths } from '../board/store.js';
 import type { Release, Ticket } from '../board/types.js';
 import { runCommand, tail } from './checks.js';
-import { commitArgsFor, currentBranch, git, remotes, removeWorktree, worktreeRoot } from './git.js';
+import { commitArgsFor, currentBranch, git, keepingFiles, remotes, removeWorktree, worktreeRoot } from './git.js';
 import { projectRoot } from './live.js';
 import { repoFor } from './repos.js';
 import type { RepoInfo } from '../board/types.js';
 import { repoHostFor } from '../modules/registry.js';
 import type { RepoHost } from '../modules/code-host/types.js';
+import { docsInGit, docsRepo, stageReleaseDocs } from './project-git.js';
 
 /**
  * A real release: merge every ready ticket (its pull request on the code host, or its branch locally), write the
@@ -64,7 +65,10 @@ export async function liveRelease(bp: BoardPaths, release: Release, tickets: Tic
     if (clashing.length) throw new PullRequestClash(clashing, repo.base || currentBranch(repoRoot));
   }
   for (const { repo, repoRoot, list, host, env } of plans) {
-    const repoLog = await releaseRepo(repoRoot, repo, release, list, meta.commands?.deploy, host, env);
+    // The project's shared files go out with the release when `.squad/` sits in this repo (ADR-001).
+    const docs = docsInGit(bp) && path.resolve(docsRepo(bp)!) === path.resolve(repoRoot) ? (dir: string) => stageReleaseDocs(bp, dir, release, list) : undefined;
+    const keep = path.relative(repoRoot, bp.squadDir);
+    const repoLog = await releaseRepo(repoRoot, repo, release, list, meta.commands?.deploy, host, env, docs, keep && !keep.startsWith('..') ? keep : undefined);
     log.push(...repoLog.map((l) => (multi ? { ...l, text: `${repo.path}: ${l.text}` } : l)));
   }
   return log;
@@ -78,6 +82,8 @@ async function releaseRepo(
   deployFallback: string | undefined,
   host: RepoHost | null,
   env: Record<string, string>,
+  docs?: (dir: string) => void,
+  keep?: string,
 ): Promise<ReleaseLog> {
   const base = repo.base || currentBranch(root);
   const remote = repo.remote || remotes(root)[0];
@@ -130,6 +136,7 @@ async function releaseRepo(
         log.push({ ok: true, text: `Version set to ${json.version} in package.json` });
       }
     }
+    docs?.(dir);
     git(dir, ['add', '-A']);
     if (git(dir, ['status', '--porcelain'], { allowFail: true })) git(dir, [...commitArgsFor(dir), 'commit', '-m', `release ${version}`]);
 
@@ -153,11 +160,12 @@ async function releaseRepo(
 
     // Move the local base branch too, without disturbing work in progress.
     if (currentBranch(root) === base) {
-      const dirty = git(root, ['status', '--porcelain', '--untracked-files=no'], { allowFail: true });
+      // squad-kit's own .squad/ files do not count: they are kept as they are while the checkout moves.
+      const dirty = git(root, ['status', '--porcelain', '--untracked-files=no', '--', '.', ...(keep ? [`:(exclude)${keep}`] : [])], { allowFail: true });
       if (dirty) log.push({ ok: false, text: `Your ${base} checkout has changes, so it was not updated. Run: git merge ${branch}` });
       else {
         try {
-          git(root, ['merge', '--ff-only', head]);
+          keepingFiles(root, keep, git(root, ['rev-parse', 'HEAD']), head, () => git(root, ['merge', '--ff-only', head]));
           log.push({ ok: true, text: `Your ${base} checkout now has the release` });
         } catch (err) {
           // Usually untracked files in the checkout that the release also adds.

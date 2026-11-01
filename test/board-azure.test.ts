@@ -68,8 +68,8 @@ function fakeAzure() {
         // What Azure does when a PR completes: a merge commit on main, and the branch is deleted.
         const work = path.join(tmp, 'azure-side');
         sh(`git clone -q ${remote} ${work}`, tmp);
-        sh('git -c user.name=Azure -c user.email=a@a merge -q --no-ff -m "Merged PR 7" origin/squad/ap-1', work);
-        sh('git push -q origin main && git push -q origin --delete squad/ap-1', work);
+        sh('git -c user.name=Azure -c user.email=a@a merge -q --no-ff -m "Merged PR 7" origin/squad/ab-35', work);
+        sh('git push -q origin main && git push -q origin --delete squad/ab-35', work);
         prStatus = 'completed';
       }
       return reply({ pullRequestId: 7, status: prStatus });
@@ -142,7 +142,7 @@ describe('Azure Boards and Repos', () => {
     expect(t.ask).toContain('Acceptance criteria:\n- Given the sign-up page');
     await flushTracker(bp, t.id);
     expect(statesSet()).toEqual(['Active']);
-    await expect(actions.startFromTracker(bp, az!, '35')).rejects.toThrow(/already on the board as AP-1/);
+    await expect(actions.startFromTracker(bp, az!, '35')).rejects.toThrow(/already on the board as AB-35/);
 
     // 2. The squad's work, as the live engine leaves it at the proof.
     const wt = addWorktree(project, t.id, 'main');
@@ -171,9 +171,9 @@ describe('Azure Boards and Repos', () => {
     const published = readTicket(bp, t.id)!;
     expect(published.pr).toMatchObject({ id: 7, repo: 'Mawid', url: `${AZURE_URL}/pullrequest/7` });
     expect(published.squad).toBeNull();
-    expect(sh('git branch -r --list', project) || sh('git ls-remote --heads origin', project)).toContain('squad/ap-1');
+    expect(sh('git branch -r --list', project) || sh('git ls-remote --heads origin', project)).toContain('squad/ab-35');
     const created = calls.find((c) => c.method === 'POST' && /pullrequests$|pullrequests\?/.test(c.url))!.body as Record<string, unknown>;
-    expect(created).toMatchObject({ sourceRefName: 'refs/heads/squad/ap-1', targetRefName: 'refs/heads/main', workItemRefs: [{ id: '35' }] });
+    expect(created).toMatchObject({ sourceRefName: 'refs/heads/squad/ab-35', targetRefName: 'refs/heads/main', workItemRefs: [{ id: '35' }] });
     const described = calls.filter((c) => c.method === 'PATCH' && /pullrequests\/7/.test(c.url) && (c.body as { description?: string }).description).at(-1)!.body as { description: string };
     expect(described.description).toContain('![An account is made](https://dev.azure.com/att/after-1.png)');
     expect(described.description).not.toMatch(/claude|\bai\b/i);
@@ -188,7 +188,7 @@ describe('Azure Boards and Repos', () => {
     const release = await actions.releaseVersion(bp);
     expect(release.version).toBe('v0.1.0');
     expect(release.log?.filter((l) => !l.ok)).toEqual([]);
-    expect(release.log?.[0]?.text).toBe('Already in main: AP-1 Owner signs up for a Mawid account');
+    expect(release.log?.[0]?.text).toBe('Already in main: AB-35 Owner signs up for a Mawid account');
     expect(calls.filter((c) => c.method === 'PATCH' && (c.body as { status?: string }).status === 'completed').length).toBe(1);
     const log = sh('git log --format=%s main', remote).split('\n');
     expect(log.slice(0, 2)).toEqual(['release v0.1.0', 'Merged PR 7']);
@@ -261,7 +261,7 @@ describe('a pull request that clashes with newer changes in main', () => {
     });
     prConflicts = true;
     await expect(actions.releaseVersion(bp)).rejects.toThrow(
-      'The release did not go out: the pull request of AP-1 clashes with newer changes in main. It left v0.1.0 and waits for you with ways out.',
+      'The release did not go out: the pull request of AB-35 clashes with newer changes in main. It left v0.1.0 and waits for you with ways out.',
     );
     expect(completions()).toBe(0);
     expect(sh('git tag', project)).toBe('');

@@ -6,6 +6,7 @@ import { scriptFor } from './scripts.js';
 import { scheduleSquad } from './schedule.js';
 import { writeDecision, writeMeta, writeRelease, writeTicket, type BoardPaths } from './store.js';
 import type { Activity, BoardMeta, Decision, Release, Ticket } from './types.js';
+import { clearBoard } from './store.js';
 
 /** Minutes before now, as an ISO time, so the seeded board always looks fresh. */
 function ago(minutes: number): string {
@@ -326,7 +327,7 @@ export interface SeedOptions {
 
 /** Writes a full demo board: tickets in every stage, past releases, decisions and proof images. */
 export function seedDemoBoard(bp: BoardPaths, opts: SeedOptions = {}): void {
-  fs.rmSync(bp.dir, { recursive: true, force: true });
+  clearBoard(bp);
   const user = gitUserName();
   const speed = opts.speed ?? 1;
   writeMeta(bp, demoMeta(user, speed, opts.project ?? 'Case portal'));

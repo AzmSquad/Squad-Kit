@@ -62,7 +62,7 @@ describe('talk it through with the Analyst first', () => {
 
     // Your message, with a screenshot: same session, and the agent is told where the file is.
     t = actions.sendChat(bp, t.id, 'By national ID. See the screen.', [{ name: 'screen.png', data: Buffer.from('png').toString('base64') }]);
-    expect(t.chat!.messages.at(-1)!.files![0]).toMatch(/attachments\/.+\/screen\.png$/);
+    expect(t.chat!.messages.at(-1)!.files![0]).toMatch(/tickets\/.+\/files\/screen\.png$/);
     expect(() => actions.sendChat(bp, t.id, 'again')).toThrow(/still answering/);
     answers.push({ reply: 'Clear: 3 a day per national ID. I understand enough to write the spec.', ready: true });
     await squad.chatReply(t.id);

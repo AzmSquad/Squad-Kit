@@ -17,6 +17,7 @@ import { scheduleSquad } from './schedule.js';
 import { applyPlanEdits, approveExpress, changeSummary, needsSpec } from './actions.js';
 import { AMBIENT, scriptFor } from './scripts.js';
 import type { BoardMeta, Question, Ticket } from './types.js';
+import { ticketDir } from './store.js';
 
 /**
  * The demo squad. It plays a recorded journey for each ticket on a timer and writes every
@@ -458,7 +459,7 @@ function markDecisionChecked(bp: BoardPaths, ticketId: string): void {
 
 /** A small clickable mockup for the demo board, like the one the Architect makes for a real ticket. */
 function writeDemoMockup(bp: BoardPaths, t: Ticket): string {
-  const dir = path.join(bp.dir, 'attachments', t.id);
+  const dir = ticketDir(bp, t.id);
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, 'mockup.html');
   const esc = (x: string) => x.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);

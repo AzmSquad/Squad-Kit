@@ -53,7 +53,7 @@ describe('a ticket written by hand', () => {
       rules: ['At most 3 bookings a day per person'],
       edgeCases: ['The person cancels one and books again'],
     });
-    const dir = path.join(bp.dir, 'attachments', t.id);
+    const dir = path.join(bp.ticketsDir, t.id, 'files');
     expect(saved.attachments!.map((f) => path.relative(dir, f))).toEqual(['chat.png', 'chat-2.png', 'evil name_.txt']);
     expect(fs.readFileSync(saved.attachments![1]!, 'utf8')).toBe('second');
 

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { allowedFile, readConversation, ticketConversations, ticketFolders } from '../src/engine/conversations.js';
+import { boardPaths } from '../src/board/store.js';
 import type { Ticket } from '../src/board/types.js';
 
 let base: string;
@@ -87,7 +88,7 @@ describe('conversations in ACP format', () => {
 
   it('only serves files from the ticket’s own folders', () => {
     const t = { id: 'MA-1', worktree: work } as unknown as Ticket;
-    const folders = ticketFolders(t, path.join(base, 'board'));
+    const folders = ticketFolders(t, boardPaths(path.join(base, '.squad')));
     expect(allowedFile(path.join(work, 'shots', 'home.png'), folders)).toBe(fs.realpathSync(path.join(work, 'shots', 'home.png')));
     expect(allowedFile(path.join(work, 'shots', '..', '..', 'etc', 'passwd'), folders)).toBeNull();
     expect(allowedFile('/etc/hosts', folders)).toBeNull();

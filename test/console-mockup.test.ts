@@ -28,7 +28,7 @@ beforeAll(async () => {
   await writeFile(paths.configFile, yaml.dump({ version: 1, project: { name: 'mockup-test', primaryLanguage: 'typescript' }, tracker: { type: 'none' }, agents: [] }), 'utf8');
   const bp = boardPaths(paths.squadDir);
   seedDemoBoard(bp, { speed: 0.001 });
-  const dir = path.join(bp.dir, 'attachments', 'SK-148');
+  const dir = path.join(bp.ticketsDir, 'SK-148');
   fs.mkdirSync(dir, { recursive: true });
   mockup = path.join(dir, 'mockup.html');
   fs.writeFileSync(mockup, '<button onclick="document.body.className=\'dark\'">Dark</button>');

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { squadHome } from './levels.js';
+import { squadHome } from '../core/home.js';
 
 /** Small git helpers. The squad never touches the person's own checkout: each ticket gets a worktree. */
 
@@ -111,7 +111,7 @@ export function commitArgsFor(dir: string): string[] {
  * Move the base branch to a commit that already contains it, without disturbing the person's own work: a checked-out
  * base fast-forwards unless that would touch a file the person changed; then the result says what to run.
  */
-export function moveBase(dir: string, base: string, commit: string): { moved: boolean; note?: string } {
+export function moveBase(dir: string, base: string, commit: string, keep?: string): { moved: boolean; note?: string } {
   const before = git(dir, ['rev-parse', base]);
   if (currentBranch(dir) !== base) {
     git(dir, ['update-ref', `refs/heads/${base}`, commit, before]);
@@ -119,7 +119,7 @@ export function moveBase(dir: string, base: string, commit: string): { moved: bo
   }
   // Your own changes stay safe: git refuses the fast-forward itself if it would touch a file you changed.
   try {
-    git(dir, ['merge', '--ff-only', commit]);
+    keepingFiles(dir, keep, before, commit, () => git(dir, ['merge', '--ff-only', commit]));
     return { moved: true };
   } catch (err) {
     return { moved: false, note: `Your ${base} checkout was not moved (${(err as Error).message.replace(/^git merge failed: /, '')}). Run: git merge --ff-only ${commit.slice(0, 8)}` };
@@ -130,7 +130,7 @@ export function moveBase(dir: string, base: string, commit: string): { moved: bo
  * Merge a ticket's branch into the base branch with a merge commit, without checking anything out, so the next
  * tickets start from it. Throws when the branch clashes with changes already in the base.
  */
-export function mergeIntoBase(dir: string, base: string, branch: string, message: string): { commit: string; moved: boolean; note?: string } {
+export function mergeIntoBase(dir: string, base: string, branch: string, message: string, keep?: string): { commit: string; moved: boolean; note?: string } {
   const baseSha = git(dir, ['rev-parse', base]);
   const branchSha = git(dir, ['rev-parse', branch]);
   // Already in the base (merged before, or nothing new): nothing to do.
@@ -142,7 +142,35 @@ export function mergeIntoBase(dir: string, base: string, branch: string, message
     throw new Error(`${branch} clashes with changes already in ${base}.`);
   }
   const commit = git(dir, [...authorArgs(dir), 'commit-tree', tree, '-p', baseSha, '-p', branchSha, '-m', message]);
-  return { commit, ...moveBase(dir, base, commit) };
+  return { commit, ...moveBase(dir, base, commit, keep) };
+}
+
+/**
+ * Runs a git step that moves the checkout from one commit to another, keeping the files under `keep` (a folder in the
+ * repo) as they were: squad-kit's own `.squad/` files in the checkout are newer than the copies the branch carries.
+ * Its tracked files changed since the last commit are set back first, so git lets the step through, and come back
+ * after. Files the step brings that were not there before stay as the step left them.
+ */
+export function keepingFiles<T>(dir: string, keep: string | undefined, from: string, to: string, step: () => T): T {
+  if (!keep) return step();
+  const lines = (args: string[]) => git(dir, args, { allowFail: true }).split('\n').filter(Boolean);
+  const changed = lines(['diff', '--name-only', from, to, '--', keep]);
+  const edited = lines(['diff', '--name-only', 'HEAD', '--', keep]);
+  const files = [...new Set([...changed, ...edited])].map((f) => path.join(dir, f)).filter((f) => fs.existsSync(f));
+  const saved = new Map(files.map((f) => [f, fs.readFileSync(f)]));
+  if (edited.length) git(dir, ['checkout', 'HEAD', '--', ...edited]);
+  let result: T;
+  try {
+    result = step();
+  } catch (err) {
+    for (const [file, content] of saved) fs.writeFileSync(file, content);
+    throw err;
+  }
+  for (const [file, content] of saved) {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, content);
+  }
+  return result;
 }
 
 export function isAncestor(dir: string, a: string, b: string): boolean {

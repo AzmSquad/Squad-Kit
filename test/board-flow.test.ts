@@ -66,7 +66,7 @@ describe('board flow', () => {
     expect(planned.decision?.title).toBe("Save each person's theme in their account");
 
     actions.approve(bp, 'SK-148');
-    expect(listDecisions(bp)[0]).toMatchObject({ id: 'ADR-012', from: 'SK-148' });
+    expect(listDecisions(bp)[0]).toMatchObject({ id: 'SK-148.1', from: 'SK-148' });
 
     const proven = await until('SK-148', (t) => t.waiting?.kind === 'proof');
     expect(proven.gates).toMatchObject({ checks: 'pass', review: 'pass', proof: 'pass' });

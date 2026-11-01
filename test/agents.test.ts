@@ -17,7 +17,7 @@ afterEach(() => fs.rmSync(tmp, { recursive: true, force: true }));
 describe('agents', () => {
   it('gives every role an editable file with no instructions yet', () => {
     ensureAgents(bp);
-    expect(fs.readdirSync(path.join(bp.dir, 'agents')).sort()).toEqual(['analyst.md', 'architect.md', 'builder.md', 'reviewer.md', 'tester.md']);
+    expect(fs.readdirSync(bp.rulesDir).sort()).toEqual(['analyst.md', 'architect.md', 'builder.md', 'reviewer.md', 'tester.md']);
     const builder = readAgent(bp, 'builder');
     expect(builder).toMatchObject({ tool: 'claude', model: '' });
     expect(agentInstructions(builder)).toBe('');
@@ -29,9 +29,9 @@ describe('agents', () => {
     const r = readAgent(bp, 'reviewer');
     expect(r).toMatchObject({ tool: 'claude', model: 'opus', instructions: 'Check every form for Arabic labels.' });
     expect(agentInstructions(r)).toContain('for the Reviewer');
-    expect(fs.readFileSync(path.join(bp.dir, 'agents', 'reviewer.md'), 'utf8')).toBe('---\ntool: claude\nmodel: opus\n---\nCheck every form for Arabic labels.\n');
+    expect(fs.readFileSync(path.join(bp.rulesDir, 'reviewer.md'), 'utf8')).toBe('---\ntool: claude\nmodel: opus\n---\nCheck every form for Arabic labels.\n');
     // An edit made by hand in the file is read the same way.
-    fs.writeFileSync(path.join(bp.dir, 'agents', 'tester.md'), '---\ntool: claude\nmodel: sonnet\n---\nUse a phone-sized screen.\n');
+    fs.writeFileSync(path.join(bp.rulesDir, 'tester.md'), '---\ntool: claude\nmodel: sonnet\n---\nUse a phone-sized screen.\n');
     expect(readAgent(bp, 'tester')).toMatchObject({ model: 'sonnet', instructions: 'Use a phone-sized screen.' });
   });
 

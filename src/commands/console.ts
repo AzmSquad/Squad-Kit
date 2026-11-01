@@ -7,6 +7,7 @@ import { buildPaths, requireSquadRoot } from '../core/paths.js';
 import { loadConfig } from '../core/config.js';
 import { startConsoleServer, type ConsoleServer } from '../console/server.js';
 import { boardPaths } from '../board/store.js';
+import { openBoard } from '../board/move.js';
 import { ensureLiveBoard } from '../engine/setup.js';
 import { readInstalledPackage } from '../core/package-info.js';
 import { buildStamp, readConsoleInfo, runningConsole, stopConsole, writeConsoleInfo } from '../board/console-info.js';
@@ -21,17 +22,20 @@ export interface ConsoleOptions {
 }
 
 const DEFAULT_PORT = 4571;
+/** A board run by a keeper (see restartBoard) exits with this code to ask the keeper for a fresh one. */
+const RESTART_EXIT = 75;
+const KEEPER_ENV = 'SQUAD_CONSOLE_KEEPER';
 
 export async function runConsole(opts: ConsoleOptions): Promise<void> {
+  // Read once: the tools the squad starts don't need to see it.
+  const underKeeper = process.env[KEEPER_ENV] === '1';
+  delete process.env[KEEPER_ENV];
   const root = requireSquadRoot();
   const paths = buildPaths(root);
   // loadConfig also validates the YAML — surface schema problems before binding a port.
   const config = loadConfig(paths.configFile);
-  // A project without a board gets a live one; the Architect reads the project first.
-  const bp = boardPaths(paths.squadDir);
-  ensureLiveBoard(bp, config.project.name);
-
   // One board per project: a second one would run a second squad on the same tickets.
+  let bp = boardPaths(paths.squadDir);
   const running = runningConsole(bp);
   if (running && !opts.restart) {
     const link = running.port && running.token ? `http://127.0.0.1:${running.port}/?t=${running.token}` : null;
@@ -52,6 +56,17 @@ export async function runConsole(opts: ConsoleOptions): Promise<void> {
     ui.info('Stopping the board that is running now…');
     if (!(await stopConsole(running.pid))) throw new Error(`The running board (process ${running.pid}) did not stop. Close it with Ctrl-C in its terminal.`);
   }
+
+  // A board from before ADR-001 moves to the new layout once, now that nothing runs.
+  const opened = openBoard(paths.squadDir);
+  bp = opened.bp;
+  if (opened.moved) {
+    const m = opened.moved;
+    ui.success(`Moved this board to the new layout: ${m.tickets} tickets, ${m.decisions} decisions and ${m.releases} releases, all checked.`);
+    ui.info(`The project's files are in .squad/; this computer's are in ${m.localDir}. A copy of the old files: ${m.backup}`);
+  }
+  // A project without a board gets a live one; the Architect reads the project first.
+  ensureLiveBoard(bp, config.project.name);
 
   // The same port and link as last time, so an open browser tab keeps working after a restart.
   const prior = readConsoleInfo(bp);
@@ -98,12 +113,38 @@ export async function runConsole(opts: ConsoleOptions): Promise<void> {
   await server.done;
   writeConsoleInfo(bp, { ...info, pid: null });
   if (server.restartRequested()) {
-    // Restart from the board: a fresh process loads the newest squad-kit, in this same terminal, on the same link.
     ui.info('Restarting the board…');
-    const child = spawn(process.execPath, [...process.execArgv, process.argv[1]!, 'console', '--no-open'], { stdio: 'inherit' });
-    const code = await new Promise<number>((done) => child.on('exit', (c) => done(c ?? 0)));
-    process.exitCode = code;
+    await restartBoard(underKeeper);
     return;
   }
   ui.info('console stopped');
+}
+
+/**
+ * Restart from the board: a fresh process loads the newest squad-kit, in this same terminal, on the same link
+ * (console.json keeps the port and token). It never leaves the old board alive as the parent of the new one.
+ */
+async function restartBoard(underKeeper: boolean): Promise<void> {
+  const args = [...process.execArgv, process.argv[1]!, 'console', '--no-open'];
+  await new Promise<void>((done) => process.stdout.write('', () => done()));
+  // Node 22.15+ swaps this process for the new board: same pid, same terminal, nothing left behind.
+  if (typeof process.execve === 'function' && process.platform !== 'win32') {
+    process.execve(process.execPath, [process.execPath, ...args], process.env);
+  }
+  // Older Node can't. A process that exits hands the terminal back to the shell, and Ctrl-C with it, so the first
+  // board stays on as a small keeper that runs one board at a time; each board it runs exits to be restarted.
+  if (underKeeper) process.exit(RESTART_EXIT);
+  // Ctrl-C reaches the board as well (same terminal): wait for it to stop rather than leave it behind.
+  process.on('SIGINT', () => undefined);
+  for (;;) {
+    const child = spawn(process.execPath, args, { stdio: 'inherit', env: { ...process.env, [KEEPER_ENV]: '1' } });
+    const forward = () => child.kill('SIGTERM');
+    process.on('SIGTERM', forward);
+    const code = await new Promise<number>((done) => child.on('exit', (c) => done(c ?? 0)));
+    process.off('SIGTERM', forward);
+    if (code !== RESTART_EXIT) {
+      process.exitCode = code;
+      return;
+    }
+  }
 }

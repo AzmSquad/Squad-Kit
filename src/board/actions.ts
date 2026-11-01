@@ -38,6 +38,9 @@ import type { Tracker } from '../modules/tracker/types.js';
 import { localSetupFor, mergeLocally, opensPullRequest, syncWiki } from '../engine/sync.js';
 import type { AgentChat, AgentName, Criterion, PlanComment, PlanEdit, PlanPart, PlanSnapshot, StuckChoice, StuckOption, TicketNote, Track, TrackerEvent, WayOut } from './types.js';
 import { endProcessTree } from '../engine/watchdog.js';
+import { readTicket, ticketFilesDir, ticketMediaDir } from './store.js';
+import { isMediaNote } from '../engine/media.js';
+import { stageTicketDocs } from '../engine/project-git.js';
 
 /** Every person-facing action lives here, so the board and the terminal do exactly the same thing. */
 
@@ -51,6 +54,8 @@ function tellLater(t: Ticket, engine: string, event: TrackerEvent): void {
 }
 
 export interface NewTicketInput {
+  /** The ticket's name when it comes from a tracker (AB-80); otherwise the project key and a number. */
+  id?: string;
   title: string;
   ask?: string;
   priority?: Ticket['priority'];
@@ -81,6 +86,12 @@ function cleanList(items: string[] | undefined): string[] {
 }
 
 /** Saves uploaded files into a folder, with safe names, and returns their paths. */
+/** A ticket's uploads: images and documents go with the project, voice and video notes stay on this computer (ADR-001). */
+export function saveTicketUploads(bp: BoardPaths, id: string, files: UploadedFile[]): string[] {
+  const media = files.filter((f) => isMediaNote(f.name));
+  return [...saveUploads(ticketFilesDir(bp, id), files.filter((f) => !isMediaNote(f.name))), ...saveUploads(ticketMediaDir(bp, id), media)];
+}
+
 export function saveUploads(dir: string, files: UploadedFile[]): string[] {
   if (files.length > MAX_UPLOADS) throw new BoardActionError(`Add at most ${MAX_UPLOADS} files.`);
   const decoded = files.map((f) => ({ name: path.basename(f.name).replace(/[^\w.\- ]+/g, '_').slice(-120) || 'file', data: Buffer.from(f.data, 'base64') }));
@@ -103,9 +114,10 @@ export function createTicket(bp: BoardPaths, input: NewTicketInput): Ticket {
   const title = input.title.trim();
   if (!title) throw new BoardActionError('A ticket needs a title.');
   const meta = readMeta(bp);
-  const id = nextTicketId(bp);
+  const id = input.id ?? nextTicketId(bp);
+  if (input.id && readTicket(bp, input.id)) throw new BoardActionError(`${input.id} is already on the board.`);
   const brief = { criteria: cleanList(input.criteria), rules: cleanList(input.rules), edgeCases: cleanList(input.edgeCases) };
-  const attachments = input.files?.length ? saveUploads(path.join(bp.dir, 'attachments', id), input.files) : [];
+  const attachments = input.files?.length ? saveTicketUploads(bp, id, input.files) : [];
   const ticket: Ticket = {
     id,
     title,
@@ -165,7 +177,7 @@ export async function pullTicket(bp: BoardPaths, ref: string): Promise<Ticket> {
 async function pullFromTracker(bp: BoardPaths, id: string): Promise<Ticket> {
   const tracker = trackerFor(bp);
   if (tracker) return startFromTracker(bp, tracker, id);
-  const paths = buildPaths(path.dirname(path.dirname(bp.dir)));
+  const paths = buildPaths(bp.root);
   const config = loadConfig(paths.configFile);
   if (config.tracker.type === 'none') {
     throw new BoardActionError('No tracker is set up for this project. Run: squad config set tracker');
@@ -186,7 +198,7 @@ async function pullFromTracker(bp: BoardPaths, id: string): Promise<Ticket> {
     source: { type: config.tracker.type, ref: issue.id },
   });
   if (issue.attachments.length) {
-    const dir = path.join(bp.dir, 'attachments', ticket.id);
+    const dir = ticketFilesDir(bp, ticket.id);
     fs.mkdirSync(dir, { recursive: true });
     const saved = await client.downloadAttachments(issue.attachments, dir).catch(() => []);
     const files = saved.filter((a) => a.outcome === 'written' && a.absolutePath).map((a) => a.absolutePath!);
@@ -232,6 +244,8 @@ export async function startFromTracker(bp: BoardPaths, tracker: Tracker, ref: st
   const meta = readMeta(bp);
   await syncWiki(bp, tracker);
   const ticket = createTicket(bp, {
+    // Named by the tracker (ADR-001), so two people pulling different items never make the same name.
+    id: w.ref.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').toUpperCase(),
     title: w.title,
     ask: ask || w.title,
     priority: w.priority === 1 ? 'high' : w.priority === 4 ? 'low' : 'normal',
@@ -239,7 +253,7 @@ export async function startFromTracker(bp: BoardPaths, tracker: Tracker, ref: st
   });
   const files: string[] = [];
   if (w.attachments.length) {
-    const dir = path.join(bp.dir, 'attachments', ticket.id);
+    const dir = ticketFilesDir(bp, ticket.id);
     fs.mkdirSync(dir, { recursive: true });
     for (const a of w.attachments.filter((x) => x.size <= 10 * 1024 * 1024)) {
       const file = await tracker.download(a.url, path.join(dir, a.name.replace(/[^\w.\- ]+/g, '_'))).catch(() => null);
@@ -348,7 +362,7 @@ function approvePlan(bp: BoardPaths, ticket: Ticket, speed: number, express = fa
   const meta = readMeta(bp);
   let adr: string | undefined;
   if (ticket.decision && !ticket.decision.adr) {
-    adr = nextDecisionId(bp);
+    adr = nextDecisionId(bp, ticket.id);
     const chosen = ticket.decision.options.find((o) => o.chosen) ?? ticket.decision.options[0];
     writeDecision(bp, {
       id: adr,
@@ -404,8 +418,11 @@ function testNameFor(ticket: Ticket): string {
 
 function acceptProof(bp: BoardPaths, ticket: Ticket): Ticket {
   let commit: string | null = null;
+  const release = ensureDraftRelease(bp, ticket.kind === 'bug' ? 'patch' : 'minor');
   if (readMeta(bp).engine === 'live') {
     try {
+      // The accepted ticket's documents go in the same commit as its code, when the project keeps them in git.
+      stageTicketDocs(bp, { ...ticket, stage: 'release', release: release.version, waiting: null });
       commit = commitTicket(ticket);
     } catch (err) {
       throw new BoardActionError(`Could not save the change in git: ${(err as Error).message}`);
@@ -422,7 +439,6 @@ function acceptProof(bp: BoardPaths, ticket: Ticket): Ticket {
       return clashed(bp, ticket.id, commit, (err as Error).message);
     }
   }
-  const release = ensureDraftRelease(bp, ticket.kind === 'bug' ? 'patch' : 'minor');
   if (!release.tickets.includes(ticket.id)) release.tickets.push(ticket.id);
   writeRelease(bp, release);
   // New code on the base: the architecture page reads it again.
@@ -547,7 +563,7 @@ export function takeOver(bp: BoardPaths, id: string): Ticket {
     const demo = meta.engine !== 'live';
     const building = ['implement', 'test', 'review'].includes(t.stage);
     const session = t.sessions?.build ?? (demo && building ? 'demo-session' : undefined);
-    const cwd = t.worktree ?? (demo ? path.dirname(path.dirname(bp.dir)) : undefined);
+    const cwd = t.worktree ?? (demo ? bp.root : undefined);
     if (!session || !cwd || (!demo && !fs.existsSync(cwd))) {
       throw new BoardActionError(`${t.id} has no code yet. You can take over once the Builder has started.`);
     }
@@ -669,7 +685,7 @@ export function sendChat(bp: BoardPaths, id: string, text: string, uploads: Uplo
   const t0 = requireTicket(bp, id);
   if (!t0.chat?.open) throw new BoardActionError(`${t0.id} has no chat open.`);
   if (t0.chat.thinking) throw new BoardActionError(`The ${AGENT_TITLE[t0.chat.with]} is still answering. Wait a moment.`);
-  const files = saveUploads(path.join(bp.dir, 'attachments', t0.id), uploads);
+  const files = saveTicketUploads(bp, t0.id, uploads);
   return updateTicket(bp, id, (t) => {
     const c = t.chat!;
     c.messages.push({ who: 'you', text: msg, at: now(), ...(files.length ? { files } : {}) });
@@ -1036,7 +1052,7 @@ export function ensureDraftRelease(bp: BoardPaths, part: 'minor' | 'patch'): Rel
   const live = meta.engine === 'live';
   const last = latestRelease(bp);
   // The first release on a live board continues the project's own version, not 0.0.0.
-  const from = last?.version ?? (live ? projectVersion(path.dirname(path.dirname(bp.dir)), meta) : 'v0.0.0');
+  const from = last?.version ?? (live ? projectVersion(bp.root, meta) : 'v0.0.0');
   const release: Release = {
     version: bump(from, part),
     status: 'draft',
@@ -1108,6 +1124,16 @@ export async function releaseVersion(bp: BoardPaths, version?: string): Promise<
   const meta = readMeta(bp);
   if (!release.notes.trim()) release.notes = composeNotes(bp, release);
   const tickets = listTickets(bp).filter((t) => release.tickets.includes(t.id));
+  // Set before it goes out, so the release commit carries the release as the board will keep it.
+  release.date = now();
+  release.whatsappDraft = [
+    `Hello, version ${release.version.replace(/^v/, '')} of ${meta.project} is now live.`,
+    '',
+    "What's new:",
+    ...tickets.map((t) => `- ${t.title}`),
+    '',
+    'Release notes are in the changelog.',
+  ].join('\n');
   if (meta.engine === 'live') {
     try {
       release.log = await liveRelease(bp, release, tickets);
@@ -1126,15 +1152,6 @@ export async function releaseVersion(bp: BoardPaths, version?: string): Promise<
     }
   }
   release.status = 'released';
-  release.date = now();
-  release.whatsappDraft = [
-    `Hello, version ${release.version.replace(/^v/, '')} of ${meta.project} is now live.`,
-    '',
-    "What's new:",
-    ...tickets.map((t) => `- ${t.title}`),
-    '',
-    'Release notes are in the changelog.',
-  ].join('\n');
   writeRelease(bp, release);
   for (const t of tickets) {
     updateTicket(bp, t.id, (x) => {
@@ -1244,7 +1261,7 @@ export function readCodeAgain(bp: BoardPaths): BoardMeta['blueprint'] {
 export function draftTechDecision(bp: BoardPaths, tech: string): TechDraft {
   const meta = readMeta(bp);
   if (meta.engine !== 'live') throw new BoardActionError('Writing a decision needs the live squad.');
-  if (!detectStack(path.dirname(path.dirname(bp.dir)), meta).some((t) => t.name === tech)) throw new BoardActionError(`${tech} is not in the code.`);
+  if (!detectStack(bp.root, meta).some((t) => t.name === tech)) throw new BoardActionError(`${tech} is not in the code.`);
   const drafts = (meta.techDrafts ?? []).filter((d) => d.tech !== tech || d.status !== 'failed');
   const open = drafts.find((d) => d.tech === tech);
   if (open) return open;

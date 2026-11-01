@@ -57,7 +57,7 @@ export interface Agent {
 }
 
 export function agentsDir(bp: BoardPaths): string {
-  return path.join(bp.dir, 'agents');
+  return bp.rulesDir;
 }
 
 function fileOf(bp: BoardPaths, role: AgentRole): string {

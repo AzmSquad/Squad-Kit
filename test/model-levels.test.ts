@@ -74,7 +74,7 @@ describe('model levels', () => {
 
   it('keeps the project choices in the agent file, as levels', () => {
     writeAgent(bp, 'builder', { levels: { builder: { effort: 'high' }, 'builder.fix': { level: 'strongest' } } });
-    const text = fs.readFileSync(path.join(bp.dir, 'agents', 'builder.md'), 'utf8');
+    const text = fs.readFileSync(path.join(bp.rulesDir, 'builder.md'), 'utf8');
     expect(text).toContain('effort: high');
     expect(text).toContain('level.fix: strongest');
     expect(readAgent(bp, 'builder').levels).toEqual({ builder: { effort: 'high' }, 'builder.fix': { level: 'strongest' } });

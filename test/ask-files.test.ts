@@ -80,7 +80,7 @@ describe('the "Ask you" card with files', () => {
     expect(t.agentQuestion).toBeUndefined();
     expect(t.waiting?.kind).toBe('plan');
     expect(fs.readFileSync(t.mockup!, 'utf8')).toContain('<button>Dark</button>');
-    expect(path.dirname(t.mockup!)).toBe(path.join(bp.dir, 'attachments', t.id));
+    expect(path.dirname(t.mockup!)).toBe(path.join(bp.ticketsDir, t.id));
   });
 
   it('asks for a mockup when the ticket has screens, and keeps none when nothing on screen changes', async () => {

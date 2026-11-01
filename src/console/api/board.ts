@@ -77,7 +77,7 @@ function mockupKey(id: string, file: string): string {
 function mockupFile(bp: ReturnType<typeof boardPaths>, id: string, asked: string): string | null {
   const t = readTicket(bp, id);
   if (!t || !/\.html?$/i.test(asked)) return null;
-  const file = allowedFile(asked.replace(/^file:\/\//, ''), ticketFolders(t, bp.dir));
+  const file = allowedFile(asked.replace(/^file:\/\//, ''), ticketFolders(t, bp));
   return file && fs.statSync(file).size <= 5 * 1024 * 1024 ? file : null;
 }
 
@@ -137,7 +137,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     return c.json({ type, module: fieldsOf.name, label: fieldsOf.label, fields: fieldsOf.fields, ...values, hasToken: saved.hasSecret, user: status.user, error: status.error });
   });
 
-  // The person's own sign-in for their own project, saved in .squad/secrets.yaml (never in git).
+  // The person's own sign-in for their own project, saved on this computer (never in .squad or git).
   app.put('/api/v1/tracker', async (c) => {
     const b = await body<Record<string, string | undefined>>(c);
     return act(c, async () => {
@@ -230,7 +230,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
 
   app.get('/api/v1/tickets/:id/conversations', (c) => {
     const t = readTicket(bp, c.req.param('id'));
-    return t ? c.json(ticketConversations(t, undefined, path.join(bp.dir, 'sessions'))) : c.json({ error: 'not found' }, 404);
+    return t ? c.json(ticketConversations(t, undefined, bp.chatsDir)) : c.json({ error: 'not found' }, 404);
   });
 
   // Only a ticket's own sessions can be read, by role, never an arbitrary file.
@@ -238,7 +238,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     const t = readTicket(bp, c.req.param('id'));
     const id = t?.sessions?.[c.req.param('key') as 'intake' | 'build' | 'review' | 'tester'];
     if (!id) return c.json({ error: 'not found' }, 404);
-    const conv = readConversation(id, Math.min(1000, Number(c.req.query('limit')) || 400), undefined, path.join(bp.dir, 'sessions'));
+    const conv = readConversation(id, Math.min(1000, Number(c.req.query('limit')) || 400), undefined, bp.chatsDir);
     if (!conv) return c.json({ sessionId: id, updates: [], total: 0 });
     return c.json({ ...conv, protocol: 'acp/v1', command: `cd ${conv.cwd ?? '.'} && claude --resume ${id}` });
   });
@@ -248,7 +248,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
   app.get('/api/v1/tickets/:id/file', (c) => {
     const t = readTicket(bp, c.req.param('id'));
     const asked = c.req.query('path') ?? '';
-    const file = t && asked ? allowedFile(asked.replace(/^file:\/\//, ''), ticketFolders(t, bp.dir)) : null;
+    const file = t && asked ? allowedFile(asked.replace(/^file:\/\//, ''), ticketFolders(t, bp)) : null;
     if (!file) return c.text('not found', 404);
     const size = fs.statSync(file).size;
     if (size > 100 * 1024 * 1024) return c.text('too large', 413);

@@ -56,7 +56,7 @@ export function architecture(bp: BoardPaths): Architecture {
     }));
   const meta = readMeta(bp);
   const notes = meta.blueprint?.stack ?? [];
-  const found = detectStack(path.dirname(path.dirname(bp.dir)), meta).map((t): StackItem => {
+  const found = detectStack(bp.root, meta).map((t): StackItem => {
     const note = notes.find((n) => n.name.toLowerCase() === t.name.toLowerCase());
     const chosen = [...new Set([...(note?.decision ? [note.decision] : []), ...decidedIn(t, decisions)])];
     const draft = meta.techDrafts?.find((d) => d.tech === t.name);

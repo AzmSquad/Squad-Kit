@@ -128,7 +128,7 @@ export async function flushTracker(bp: BoardPaths, ticketId: string): Promise<vo
 
 /** Where the project wiki is kept for the squad to read. */
 export function wikiDir(bp: BoardPaths): string {
-  return path.join(bp.dir, 'context', 'wiki');
+  return bp.wikiDir;
 }
 
 /**
@@ -153,6 +153,12 @@ export async function syncWiki(bp: BoardPaths, tracker: Tracker | null = tracker
   } catch {
     return 0;
   }
+}
+
+/** `.squad/` as a folder inside a repo, when it is in that repo: git moving the checkout must keep squad-kit's newer files. */
+function squadInside(bp: BoardPaths, repoDir: string): string | undefined {
+  const rel = path.relative(repoDir, bp.squadDir);
+  return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel : undefined;
 }
 
 /** Where a ticket's repo lives: its folder, remote name and remote URL. */
@@ -229,7 +235,7 @@ export async function publishTicket(bp: BoardPaths, ticketId: string): Promise<{
     merged = true;
     git(target.dir, ['fetch', target.remote, target.base], { env });
     const head = git(target.dir, ['rev-parse', 'FETCH_HEAD']);
-    const local = moveBase(target.dir, target.base, head);
+    const local = moveBase(target.dir, target.base, head, squadInside(bp, target.dir));
     if (local.note) note(bp, ticketId, local.note);
     movedLocal = local.moved;
   } catch (err) {
@@ -297,7 +303,7 @@ export function mergeLocally(bp: BoardPaths, t: Ticket): { commit: string; base:
   if (!t.branch) return null;
   const repo = repoFor(readMeta(bp), t);
   const dir = path.join(projectRoot(bp), repo.path);
-  const r = mergeIntoBase(dir, repo.base, t.branch, `Merge ${t.title} (${t.id})`);
+  const r = mergeIntoBase(dir, repo.base, t.branch, `Merge ${t.title} (${t.id})`, squadInside(bp, dir));
   return { commit: r.commit, base: repo.base, moved: r.moved, ...(r.note ? { note: r.note } : {}) };
 }
 

@@ -1,8 +1,8 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import yaml from 'js-yaml';
 import { EFFORTS, MODEL_LEVELS, type Effort, type ModelLevel } from '../modules/ai-tool/types.js';
+import { squadHome } from '../core/home.js';
 
 /**
  * Which model level each step runs on (ADR-001, section 3): strong models where a mistake is expensive, cheaper ones
@@ -103,10 +103,7 @@ export function parseEffort(v: string | undefined): Effort | undefined {
 
 /* ── This person's own choices, on this computer ─────────── */
 
-/** squad-kit's folder on this computer (ADR-001). SQUAD_KIT_HOME moves it, for tests. */
-export function squadHome(): string {
-  return process.env.SQUAD_KIT_HOME?.trim() || path.join(os.homedir(), '.squad-kit');
-}
+export { squadHome } from '../core/home.js';
 
 interface PersonSettings {
   levels?: LevelOverrides;

@@ -31,6 +31,8 @@ import { Watchdog, processTable, type Quiet } from './watchdog.js';
 import { isMediaNote, prepareMedia } from './media.js';
 import { allowedFile, ticketFolders } from './conversations.js';
 import { describeLevel, personLevels, resolveLevel } from './levels.js';
+import { ticketDir } from '../board/store.js';
+import { commitTicketDocs } from './project-git.js';
 
 /**
  * The live squad. Each step of a ticket is one real run of the role's AI tool in the project (or the
@@ -42,12 +44,12 @@ const MAX_CHECK_TRIES = 3;
 const MAX_REVIEW_ROUNDS = 2;
 
 export function projectRoot(bp: BoardPaths): string {
-  return path.dirname(path.dirname(bp.dir));
+  return bp.root;
 }
 
 /** squad-kit's own keys (tracker token, speech key): no agent may read them, whichever folder it works in. */
 export function secretFiles(bp: BoardPaths): string[] {
-  return [path.join(path.dirname(bp.dir), 'secrets.yaml')];
+  return [bp.secretsFile, path.join(bp.squadDir, 'secrets.yaml')];
 }
 
 export class LiveSquad {
@@ -328,7 +330,7 @@ export class LiveSquad {
       ...(lv.effort && tool.supportsEffort ? { effort: lv.effort } : {}),
       ...(lv.model ? { model: lv.model } : {}),
       ...(signal ? { signal } : {}),
-      logDir: path.join(this.bp.dir, 'sessions'),
+      logDir: this.bp.chatsDir,
       direct: this.meta().runner === 'direct',
       onFallback: (why) => {
         if (key) this.update(key, (x) => addActivity(x, 'squad', `ACP did not start (${why.slice(0, 160)}), so this step runs ${tool.label} directly`));
@@ -979,6 +981,9 @@ export class LiveSquad {
       x.baseCommit = x.baseCommit ?? wt.baseCommit;
       addActivity(x, 'builder', `Made a clean copy of ${repo.path === '.' ? 'the project' : repo.path} on branch ${wt.branch}`);
     });
+    // The ticket's documents so far go on its branch first (ADR-001), when the project keeps them in git.
+    const saved = commitTicketDocs(this.bp, t, t.specApproved ? 'spec and design approved' : 'plan approved');
+    if (saved) t = this.update(id, (x) => addActivity(x, 'squad', `Saved the spec and design on ${wt.branch} as commit ${saved}`));
     const setup = repo.commands.setup?.trim();
     if (setup) {
       this.update(id, (x) => (x.status = `Setting up the copy: ${setup}`));
@@ -1102,7 +1107,7 @@ export class LiveSquad {
     const who = { architect: 'Architect', builder: 'Builder', reviewer: 'Reviewer' }[from];
     this.update(id, (x) => {
       // Only files the board may show: inside the ticket's copy, its proof or its attachments.
-      const folders = ticketFolders(x, this.bp.dir);
+      const folders = ticketFolders(x, this.bp);
       const files = (q.files ?? []).map((f) => allowedFile(f.replace(/^file:\/\//, ''), folders)).filter((f): f is string => Boolean(f)).slice(0, 6);
       x.agentQuestion = {
         from,
@@ -1123,7 +1128,7 @@ export class LiveSquad {
 
   /** The Architect's mockup is text in its answer (it only reads); squad-kit saves it with the ticket's files. */
   private saveMockup(id: string, html: string): string {
-    const dir = path.join(this.bp.dir, 'attachments', id);
+    const dir = ticketDir(this.bp, id);
     fs.mkdirSync(dir, { recursive: true });
     const file = path.join(dir, 'mockup.html');
     fs.writeFileSync(file, html);

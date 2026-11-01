@@ -125,6 +125,9 @@ export async function startConsoleServer(opts: StartConsoleServerOptions): Promi
   })();
 
   const shutdown = (onClose: (err?: Error) => void) => {
+    // A process that outlives its board (a restart keeper, tests) must not stop it again on a later Ctrl-C.
+    process.off('SIGINT', stop);
+    process.off('SIGTERM', stop);
     stopSquad();
     nodeServer.close((err) => {
       onClose(err);

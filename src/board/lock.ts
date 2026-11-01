@@ -4,11 +4,11 @@ import type { BoardPaths } from './store.js';
 
 /** The console writes its pid here while its squad runs, so terminal commands don't run a second one. */
 function lockFile(bp: BoardPaths): string {
-  return path.join(bp.dir, 'squad.pid');
+  return bp.pidFile;
 }
 
 export function claimSquad(bp: BoardPaths): () => void {
-  if (!fs.existsSync(bp.dir)) return () => {};
+  fs.mkdirSync(bp.localDir, { recursive: true });
   fs.writeFileSync(lockFile(bp), String(process.pid), 'utf8');
   return () => {
     try {

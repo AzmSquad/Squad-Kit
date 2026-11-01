@@ -57,6 +57,7 @@ import {
 } from '../board/store.js';
 import type { AgentName, PlanPart, Stage, Ticket } from '../board/types.js';
 import { runConsole } from './console.js';
+import { openBoard } from '../board/move.js';
 
 const out = (s = '') => process.stdout.write(`${s}\n`);
 const cmd = (s: string) => kleur.green(s);
@@ -77,7 +78,8 @@ const STAGE_NAME: Record<Stage, string> = {
 const TRACK: Stage[] = ['tickets', 'specs', 'implement', 'test', 'review', 'release'];
 
 function board(): BoardPaths {
-  const bp = boardPaths(buildPaths(requireSquadRoot()).squadDir);
+  const { bp, moved } = openBoard(buildPaths(requireSquadRoot()).squadDir);
+  if (moved) ui.success(`Moved this board to the new layout first (${moved.tickets} tickets, all checked). A copy of the old files: ${moved.backup}`);
   if (!boardExists(bp)) {
     throw new Error('This project has no board yet. Run `squad demo` to try squad-kit v1 with a sample board.');
   }

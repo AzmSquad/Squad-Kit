@@ -36,7 +36,7 @@ beforeEach(() => {
   bp = boardPaths(path.join(tmp, '.squad'));
   seedDemoBoard(bp, { speed: 50 });
   writeMeta(bp, { ...readMeta(bp), engine: 'live', runner: 'direct' });
-  for (const d of listDecisions(bp)) fs.rmSync(path.join(bp.decisionsDir, `${d.id}.yaml`));
+  for (const d of listDecisions(bp)) fs.rmSync(path.join(bp.decisionsDir, `${d.id}.md`));
   writeDecision(bp, { ...base, id: 'ADR-001', title: 'One web app', why: 'Simple', chosen: 'Next.js', from: 'Project scan', tickets: [] });
   writeDecision(bp, { ...base, id: 'ADR-002', title: 'Plain CSS', why: 'Built on ADR-001', chosen: 'CSS modules', from: 'Project scan', tickets: [], area: 'Interface' });
 });
@@ -81,21 +81,21 @@ describe('decision links', () => {
     expect(t.decision?.replaces).toBe('ADR-002');
 
     t = actions.approve(bp, t.id);
-    expect(t.decision?.adr).toBe('ADR-003');
-    expect(t.activity[0]!.text).toContain('Decision saved as ADR-003, replacing ADR-002');
+    expect(t.decision?.adr).toBe('SK-154.1');
+    expect(t.activity[0]!.text).toContain('Decision saved as SK-154.1, replacing ADR-002');
     const all = listDecisions(bp);
     const get = (id: string) => all.find((d) => d.id === id)!;
     expect(get('ADR-001').tickets).toEqual([t.id]);
-    expect(get('ADR-002').replacedBy).toBe('ADR-003');
-    expect(get('ADR-003')).toMatchObject({ area: 'Interface', buildsOn: ['ADR-001'], replaces: 'ADR-002', tickets: [t.id] });
+    expect(get('ADR-002').replacedBy).toBe('SK-154.1');
+    expect(get('SK-154.1')).toMatchObject({ area: 'Interface', buildsOn: ['ADR-001'], replaces: 'ADR-002', tickets: [t.id] });
 
     // A replaced decision is no longer a rule for the next ticket.
     const next = actions.createTicket(bp, { title: 'Booking page' });
     const ctx = P.buildPrompt(readMeta(bp), listDecisions(bp), readTicket(bp, next.id)!);
     const rules = ctx.split('Replaced decisions')[0]!;
-    expect(rules).toContain('ADR-003 UI components');
+    expect(rules).toContain('SK-154.1 UI components');
     expect(rules).not.toContain('ADR-002 Plain CSS');
-    expect(ctx).toContain('- ADR-002 Plain CSS, replaced by ADR-003');
+    expect(ctx).toContain('- ADR-002 Plain CSS, replaced by SK-154.1');
   });
 
   it('the architecture view puts each ticket in order with what it made and followed', () => {
@@ -184,9 +184,9 @@ describe('stack and patterns', () => {
     expect(architecture(bp).stack.find((t) => t.name === 'Vitest')?.draft?.status).toBe('ready');
 
     const d = actions.approveTechDecision(bp, 'Vitest');
-    expect(d).toMatchObject({ id: 'ADR-003', title: 'How we test the rules', from: 'Code review', area: 'Rules', buildsOn: ['ADR-001'] });
+    expect(d).toMatchObject({ id: 'STACK.1', title: 'How we test the rules', from: 'Code review', area: 'Rules', buildsOn: ['ADR-001'] });
     a = architecture(bp);
-    expect(a.stack.find((t) => t.name === 'Vitest')).toMatchObject({ decisions: ['ADR-003'] });
+    expect(a.stack.find((t) => t.name === 'Vitest')).toMatchObject({ decisions: ['STACK.1'] });
     expect(a.stack.find((t) => t.name === 'Vitest')?.draft).toBeUndefined();
   });
 });
