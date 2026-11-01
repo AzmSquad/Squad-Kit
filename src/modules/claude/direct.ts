@@ -31,6 +31,8 @@ export interface RunOptions {
   appendSystemPrompt?: string;
   /** A model name or alias such as sonnet or opus; empty uses the person's default. */
   model?: string;
+  /** How hard the model thinks. */
+  effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   addDirs?: string[];
   timeoutMs?: number;
   /** Stops the run when the person presses Stop. */
@@ -132,6 +134,7 @@ export function runClaude(opts: RunOptions): Promise<RunResult> {
   if (opts.schema) args.push('--json-schema', JSON.stringify(opts.schema));
   if (opts.appendSystemPrompt) args.push('--append-system-prompt', opts.appendSystemPrompt);
   if (opts.model) args.push('--model', opts.model);
+  if (opts.effort) args.push('--effort', opts.effort);
   for (const d of opts.addDirs ?? []) args.push('--add-dir', d);
 
   return new Promise((resolve) => {

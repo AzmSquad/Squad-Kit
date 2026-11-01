@@ -414,6 +414,31 @@ export interface AgentInfo {
   stepList: { id: string; name: string }[];
   file: string;
   working: { id: string; title: string; status: string }[];
+  /** Each step's model level now, squad-kit's default, the team's choice and this person's own. */
+  levels: LevelRow[];
+  teamRole: LevelChoice | null;
+  youRole: LevelChoice | null;
+  /** The AI tool's model for each level, for example strongest: Opus. */
+  modelOf: Record<ModelLevel, string>;
+  supportsEffort: boolean;
+}
+
+export type ModelLevel = 'strongest' | 'balanced' | 'fast';
+export type Effort = 'high' | 'medium' | 'low';
+
+export interface LevelChoice {
+  level?: ModelLevel;
+  effort?: Effort;
+  model?: string;
+}
+
+export interface LevelRow {
+  step: string;
+  name: string;
+  standard: LevelChoice;
+  team: LevelChoice | null;
+  you: LevelChoice | null;
+  now: { level: ModelLevel; effort?: Effort; model?: string; modelName: string; from: 'squad-kit' | 'project' | 'you'; why?: string };
 }
 
 export interface CorePrompts {

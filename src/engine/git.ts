@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { squadHome } from './levels.js';
 
 /** Small git helpers. The squad never touches the person's own checkout: each ticket gets a worktree. */
 
@@ -62,7 +63,7 @@ export function remotes(dir: string): string[] {
 /** Worktrees live outside the project folder so searches in the project never see them. */
 export function worktreeRoot(projectRoot: string): string {
   const hash = createHash('sha1').update(path.resolve(projectRoot)).digest('hex').slice(0, 8);
-  return path.join(os.homedir(), '.squad-kit', 'worktrees', `${path.basename(projectRoot)}-${hash}`);
+  return path.join(squadHome(), 'worktrees', `${path.basename(projectRoot)}-${hash}`);
 }
 
 export function addWorktree(projectRoot: string, ticketId: string, base: string): { dir: string; branch: string; baseCommit: string } {

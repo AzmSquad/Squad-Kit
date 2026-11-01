@@ -6,6 +6,8 @@ export const codexTool: AiTool = {
   name: 'codex',
   label: 'Codex',
   canRun: false,
+  supportsEffort: false,
+  modelFor: () => '',
   ready() {
     try {
       execSync(process.platform === 'win32' ? 'where codex' : 'which codex', { stdio: 'ignore' });

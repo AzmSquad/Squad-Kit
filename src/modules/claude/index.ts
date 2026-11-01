@@ -28,6 +28,9 @@ const NO_GIT_WRITES = [
   'Bash(git tag:*)',
 ];
 
+/** Claude's model for each level, by the aliases Claude Code always points at the newest of each. */
+const LEVEL_MODEL = { strongest: 'opus', balanced: 'sonnet', fast: 'haiku' } as const;
+
 /** Claude Code's settings for one run of a role. */
 export function claudeRunOptions(r: AgentRun): RunOptions {
   const access: Pick<RunOptions, 'allowedTools' | 'disallowedTools' | 'permissionMode'> = r.permissions.includes('edit')
@@ -42,7 +45,8 @@ export function claudeRunOptions(r: AgentRun): RunOptions {
     ...(r.secretFiles ? { secretFiles: r.secretFiles } : {}),
     ...(r.schema ? { schema: r.schema } : {}),
     ...(r.instructions ? { appendSystemPrompt: r.instructions } : {}),
-    ...(r.model ? { model: r.model } : {}),
+    ...(r.model || r.level ? { model: r.model || LEVEL_MODEL[r.level!] } : {}),
+    ...(r.effort ? { effort: r.effort } : {}),
     ...(r.addDirs ? { addDirs: r.addDirs } : {}),
     ...(r.timeoutMs ? { timeoutMs: r.timeoutMs } : {}),
     ...(r.signal ? { signal: r.signal } : {}),
@@ -75,12 +79,14 @@ export function claudeLaunch(opts: RunOptions, adapter: string, bin: string): Ac
     ...(opts.schema ? { outputFormat: { type: 'json_schema', schema: opts.schema } } : {}),
     ...(opts.appendSystemPrompt ? { systemPrompt: { type: 'preset', preset: 'claude_code', append: opts.appendSystemPrompt } } : {}),
     ...(opts.model ? { model: opts.model } : {}),
+    ...(opts.effort ? { effort: opts.effort } : {}),
     ...(opts.addDirs?.length ? { additionalDirectories: opts.addDirs } : {}),
   };
   return {
     command: process.execPath,
     args: [adapter],
-    env: { ...claudeEnv(), CLAUDE_CODE_EXECUTABLE: bin },
+    // The adapter takes its model from ANTHROPIC_MODEL (an option alone does not change it), and each run starts its own adapter.
+    env: { ...claudeEnv(), CLAUDE_CODE_EXECUTABLE: bin, ...(opts.model ? { ANTHROPIC_MODEL: opts.model } : {}) },
     meta: { claudeCode: { options } },
     canResume: sessionExists,
     explain: plainError,
@@ -102,6 +108,8 @@ export const claudeTool: AiTool = {
   name: 'claude',
   label: 'Claude Code',
   canRun: true,
+  supportsEffort: true,
+  modelFor: (level) => ({ strongest: 'Opus', balanced: 'Sonnet', fast: 'Haiku' })[level],
   ready() {
     const bin = claudeBinary();
     return Boolean(bin && toolVersion(bin));

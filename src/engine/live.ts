@@ -30,6 +30,7 @@ import { agentInstructions, readAgent, type AgentRole } from './agents.js';
 import { Watchdog, processTable, type Quiet } from './watchdog.js';
 import { isMediaNote, prepareMedia } from './media.js';
 import { allowedFile, ticketFolders } from './conversations.js';
+import { describeLevel, personLevels, resolveLevel } from './levels.js';
 
 /**
  * The live squad. Each step of a ticket is one real run of the role's AI tool in the project (or the
@@ -298,7 +299,7 @@ export class LiveSquad {
     return aiTool(readAgent(this.bp, role).tool)?.label ?? 'its AI tool';
   }
 
-  private async runAgent(opts: AgentRun & { ticket?: string; role: AgentRole; step?: string }): Promise<AgentResult> {
+  private async runAgent(opts: AgentRun & { ticket?: string; role: AgentRole; step?: string; levelStep?: string }): Promise<AgentResult> {
     const signal = opts.ticket ? this.stops.get(opts.ticket)?.signal : undefined;
     // Each role runs as its own agent: the team's file for it sets the tool, the model and extra instructions.
     const agent = readAgent(this.bp, opts.role);
@@ -310,6 +311,11 @@ export class LiveSquad {
     const extra = agentInstructions(agent, opts.step);
     const instructions = [opts.instructions, extra].filter(Boolean).join('\n\n') || undefined;
     const key = opts.ticket;
+    // The model level for this step: squad-kit's default, the project's choice, then this person's own.
+    const ticket = key ? readTicket(this.bp, key) : null;
+    const levelStep = opts.levelStep ?? opts.step ?? 'chat';
+    const lv = resolveLevel({ role: opts.role, step: levelStep, express: ticket?.track === 'express', tries: ticket?.tries }, agent.levels, personLevels());
+    if (key && levelStep !== 'chat') this.update(key, (x) => addActivity(x, opts.role, `Runs on ${describeLevel(lv, tool)}`));
     opts = this.withNewNotes(opts);
     const watch = key ? { onActivity: () => this.dog.beat(key), onSpawn: (pid: number) => this.dog.track(key, pid) } : {};
     // Every role runs through the Agent Client Protocol unless the board says to run tools directly.
@@ -318,7 +324,9 @@ export class LiveSquad {
       ...watch,
       secretFiles: secretFiles(this.bp),
       ...(instructions ? { instructions } : {}),
-      ...(agent.model ? { model: agent.model } : {}),
+      level: lv.level,
+      ...(lv.effort && tool.supportsEffort ? { effort: lv.effort } : {}),
+      ...(lv.model ? { model: lv.model } : {}),
       ...(signal ? { signal } : {}),
       logDir: path.join(this.bp.dir, 'sessions'),
       direct: this.meta().runner === 'direct',
@@ -784,6 +792,7 @@ export class LiveSquad {
       const r = await this.runAgent({
         role: c.with,
         step,
+        levelStep: 'chat',
         ticket: id,
         cwd,
         ...(had ? { resume: had } : { sessionId: session }),

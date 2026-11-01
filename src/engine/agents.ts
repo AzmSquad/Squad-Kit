@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { BoardPaths } from '../board/store.js';
 import { AI_TOOLS } from '../modules/registry.js';
+import { DEFAULT_LEVELS, parseEffort, parseLevel, type LevelChoice, type LevelOverrides } from './levels.js';
 
 /**
  * One agent per role, each defined by a small file the team can read and edit: which AI tool runs it, an optional
@@ -48,6 +49,11 @@ export interface Agent {
   instructions: string;
   /** Extra instructions for one step, by step id. Written in the file under "## Step: <id>". */
   steps: Record<string, string>;
+  /**
+   * The project's model levels for this role ("builder") and its steps ("builder.fix"), from the file's `level:`,
+   * `effort:`, `level.<step>:` and `effort.<step>:` lines. Levels, not model names, so they work for every teammate.
+   */
+  levels: LevelOverrides;
 }
 
 export function agentsDir(bp: BoardPaths): string {
@@ -63,7 +69,32 @@ function render(a: Agent): string {
     .filter(([, text]) => text.trim())
     .map(([id, text]) => `\n## Step: ${id}\n${text.trim()}\n`)
     .join('');
-  return `---\ntool: ${a.tool}\nmodel: ${a.model}\n---\n${a.instructions.trim()}\n${steps}`;
+  const head = [`tool: ${a.tool}`, `model: ${a.model}`];
+  for (const [key, c] of Object.entries(a.levels).sort(([x], [y]) => x.length - y.length || x.localeCompare(y))) {
+    const step = key === a.role ? '' : key.slice(a.role.length + 1);
+    if (c.level) head.push(`level${step ? `.${step}` : ''}: ${c.level}`);
+    if (c.effort) head.push(`effort${step ? `.${step}` : ''}: ${c.effort}`);
+  }
+  return `---\n${head.join('\n')}\n---\n${a.instructions.trim()}\n${steps}`;
+}
+
+/** The steps a role's level can be set for: its own steps, plus talking it through (and filling in a ticket). */
+export function levelSteps(role: AgentRole): string[] {
+  return Object.keys(DEFAULT_LEVELS[role] ?? {});
+}
+
+function levelsOf(role: AgentRole, head: Record<string, string>): LevelOverrides {
+  const levels: LevelOverrides = {};
+  const put = (key: string, c: LevelChoice) => {
+    const clean = Object.fromEntries(Object.entries(c).filter(([, v]) => v)) as LevelChoice;
+    if (Object.keys(clean).length) levels[key] = { ...levels[key], ...clean };
+  };
+  put(role, { level: parseLevel(head.level), effort: parseEffort(head.effort), model: head.model || undefined });
+  for (const [k, v] of Object.entries(head)) {
+    const m = /^(level|effort)\.([\w-]+)$/.exec(k);
+    if (m) put(`${role}.${m[2]}`, m[1] === 'level' ? { level: parseLevel(v) } : { effort: parseEffort(v) });
+  }
+  return levels;
 }
 
 const STEP_HEAD = /^## Step: ([\w-]+)[ \t]*$/m;
@@ -83,6 +114,7 @@ function defaultAgent(role: AgentRole): Agent {
     tool: AGENT_TOOLS[0]!,
     model: '',
     steps: {},
+    levels: {},
     instructions: `<!-- Extra instructions for the ${name}, in plain words. The ${name} reads them before every run. For example: "Write the questions in simple English." For one step only, add a heading like "## Step: ${STEPS[role][0]!.id}" and write under it. -->`,
   };
 }
@@ -108,7 +140,7 @@ export function readAgent(bp: BoardPaths, role: AgentRole): Agent {
       .filter(([k]) => k),
   );
   const tool = head.tool && AGENT_TOOLS.includes(head.tool) ? head.tool : AGENT_TOOLS[0]!;
-  return { role, tool, model: head.model ?? '', ...splitSteps((m ? m[2] : text) ?? '') };
+  return { role, tool, model: head.model ?? '', levels: levelsOf(role, head), ...splitSteps((m ? m[2] : text) ?? '') };
 }
 
 export function writeAgent(bp: BoardPaths, role: AgentRole, change: Partial<Omit<Agent, 'role'>>): Agent {
@@ -118,8 +150,14 @@ export function writeAgent(bp: BoardPaths, role: AgentRole, change: Partial<Omit
   const known = new Set(STEPS[role].map((x) => x.id));
   const bad = Object.keys(change.steps ?? {}).find((k) => !known.has(k));
   if (bad) throw new Error(`The ${role} has no step "${bad}". Its steps: ${[...known].join(', ')}.`);
+  for (const [key, c] of Object.entries(change.levels ?? {})) {
+    const step = key === role ? '' : key.startsWith(`${role}.`) ? key.slice(role.length + 1) : null;
+    if (step === null || (step && !levelSteps(role).includes(step))) throw new Error(`The ${role} has no step "${key}" to set a level for.`);
+    if (c.level && !parseLevel(c.level)) throw new Error(`"${c.level}" is not a level. Use strongest, balanced or fast.`);
+    if (c.effort && !parseEffort(c.effort)) throw new Error(`"${c.effort}" is not an effort. Use high, medium or low.`);
+  }
   const current = readAgent(bp, role);
-  const next = { ...current, ...change, steps: { ...current.steps, ...(change.steps ?? {}) }, role };
+  const next = { ...current, ...change, steps: { ...current.steps, ...(change.steps ?? {}) }, levels: change.levels ?? current.levels, role };
   fs.mkdirSync(agentsDir(bp), { recursive: true });
   fs.writeFileSync(fileOf(bp, role), render(next), 'utf8');
   return next;

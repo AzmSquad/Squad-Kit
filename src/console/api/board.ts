@@ -48,7 +48,7 @@ import { seedDemoBoard } from '../../board/demo.js';
 import type { AgentName, PlanComment, PlanEdit } from '../../board/types.js';
 import { repoFor } from '../../engine/repos.js';
 import type { ProjectCommands, Release } from '../../board/types.js';
-import { guessTracker, speechModule, trackerFor, trackerModule, TRACKERS } from '../../modules/registry.js';
+import { aiTool, guessTracker, speechModule, trackerFor, trackerModule, TRACKERS } from '../../modules/registry.js';
 import type { Tracker } from '../../modules/tracker/types.js';
 import { findNestedRepos } from '../../engine/repos.js';
 import { git } from '../../engine/git.js';
@@ -57,7 +57,9 @@ import { buildStamp } from '../../board/console-info.js';
 import { timingSafeEqualHex } from '../auth.js';
 import type { NewTicketInput, UploadedFile } from '../../board/actions.js';
 import { draftTicket } from '../../engine/draft.js';
-import { AGENTS, STEPS, ensureAgents, readAgent, roleForPhase, writeAgent, type AgentRole, type AgentTool } from '../../engine/agents.js';
+import { AGENTS, STEPS, ensureAgents, levelSteps, readAgent, roleForPhase, writeAgent, type AgentRole, type AgentTool } from '../../engine/agents.js';
+import { DEFAULT_LEVELS, parseEffort, parseLevel, personLevels, resolveLevel, setPersonLevel, type LevelOverrides } from '../../engine/levels.js';
+import { MODEL_LEVELS } from '../../modules/ai-tool/types.js';
 import { loadConfig } from '../../core/config.js';
 import { installedEditors, openInEditor, ticketChanges } from '../../engine/changes.js';
 import { corePrompts } from '../../engine/core-prompts.js';
@@ -517,20 +519,59 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     if (!boardExists(bp)) return c.json([]);
     if (readMeta(bp).engine === 'live') ensureAgents(bp);
     const tickets = listTickets(bp).filter((t) => t.live && t.squad);
+    const mine = personLevels();
+    const STEP_NAME: Record<string, string> = { chat: 'Talking it through', draft: 'Filling in a new ticket' };
     return c.json(
-      AGENTS.map((a) => ({
-        ...a,
-        ...readAgent(bp, a.role),
-        file: `.squad/board/agents/${a.role}.md`,
-        stepList: STEPS[a.role],
+      AGENTS.map((a) => {
+        const agent = readAgent(bp, a.role);
+        const tool = aiTool(agent.tool);
+        // Each step's model level now, and who chose it: squad-kit, the project, or you.
+        const levels = levelSteps(a.role).map((step) => {
+          const now = resolveLevel({ role: a.role, step }, agent.levels, mine);
+          return {
+            step,
+            name: STEPS[a.role].find((x) => x.id === step)?.name ?? STEP_NAME[step] ?? step,
+            standard: DEFAULT_LEVELS[a.role]![step],
+            team: agent.levels[`${a.role}.${step}`] ?? null,
+            you: mine[`${a.role}.${step}`] ?? null,
+            now: { ...now, modelName: now.model || tool?.modelFor(now.level) || '' },
+          };
+        });
+        return {
+          ...a,
+          ...agent,
+          levels,
+          teamRole: agent.levels[a.role] ?? null,
+          youRole: mine[a.role] ?? null,
+          modelOf: Object.fromEntries(MODEL_LEVELS.map((l) => [l, tool?.modelFor(l) ?? ''])),
+          supportsEffort: tool?.supportsEffort ?? false,
+          file: `.squad/board/agents/${a.role}.md`,
+          stepList: STEPS[a.role],
         working: tickets.filter((t) => roleForPhase(t.squad?.phase) === a.role).map((t) => ({ id: t.id, title: t.title, status: t.status })),
-      })),
+        };
+      }),
     );
   });
 
+  // The team's choices go in the agent file, shared with the project.
   app.put('/api/v1/agents/:role', async (c) => {
-    const b = await body<{ tool?: AgentTool; model?: string; instructions?: string; steps?: Record<string, string> }>(c);
-    return act(c, () => writeAgent(bp, c.req.param('role') as AgentRole, { tool: b.tool, model: b.model?.trim(), instructions: b.instructions, steps: b.steps }));
+    const b = await body<{ tool?: AgentTool; model?: string; instructions?: string; steps?: Record<string, string>; levels?: LevelOverrides }>(c);
+    return act(c, () =>
+      writeAgent(bp, c.req.param('role') as AgentRole, { tool: b.tool, model: b.model?.trim(), instructions: b.instructions, steps: b.steps, ...(b.levels ? { levels: b.levels } : {}) }),
+    );
+  });
+
+  // This person's own choice for a role or one of its steps, kept on this computer only.
+  app.put('/api/v1/me/levels', async (c) => {
+    const b = await body<{ key?: string; level?: string; effort?: string; model?: string }>(c);
+    return act(c, () => {
+      const key = b.key ?? '';
+      const [role, step] = key.split('.');
+      if (!AGENTS.some((a) => a.role === role) || (step && !levelSteps(role as AgentRole).includes(step))) throw new Error(`"${key}" is not a role or one of its steps.`);
+      if (b.level && !parseLevel(b.level)) throw new Error(`"${b.level}" is not a level. Use strongest, balanced or fast.`);
+      if (b.effort && !parseEffort(b.effort)) throw new Error(`"${b.effort}" is not an effort. Use high, medium or low.`);
+      return setPersonLevel(key, { level: parseLevel(b.level), effort: parseEffort(b.effort), model: b.model });
+    });
   });
 
   // The core prompts, read only, filled in from a real ticket: what each step of the agent reads.

@@ -7,6 +7,7 @@ import type { Ticket, TicketBrief, Track } from '../board/types.js';
 import { AI_TOOLS, aiTool } from '../modules/registry.js';
 import type { AgentResult, AgentRun } from '../modules/ai-tool/types.js';
 import { agentInstructions, readAgent } from './agents.js';
+import { personLevels, resolveLevel } from './levels.js';
 import { projectRoot, secretFiles } from './live.js';
 import { rulesFiles } from './repos.js';
 import * as P from './prompts.js';
@@ -68,11 +69,15 @@ async function runAnalyst(bp: BoardPaths, opts: AgentRun): Promise<AgentResult> 
     throw new BoardActionError(`The Analyst is set to ${tool?.label ?? agent.tool}, which squad-kit cannot run yet. Switch it to ${can} in Squad and AI.`);
   }
   const extra = agentInstructions(agent);
+  // Filling in a ticket is a short, simple task: squad-kit's default is the fast level.
+  const lv = resolveLevel({ role: 'analyst', step: 'draft' }, agent.levels, personLevels());
   const r = await tool.run({
     ...opts,
     secretFiles: secretFiles(bp),
     ...(extra ? { instructions: extra } : {}),
-    ...(agent.model ? { model: agent.model } : {}),
+    level: lv.level,
+    ...(lv.effort && tool.supportsEffort ? { effort: lv.effort } : {}),
+    ...(lv.model ? { model: lv.model } : {}),
     logDir: path.join(bp.dir, 'sessions'),
     direct: readMeta(bp).runner === 'direct',
   });

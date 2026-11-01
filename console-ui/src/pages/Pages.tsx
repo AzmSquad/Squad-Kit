@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
-import { api } from '../api/client';
-import type { AgentInfo, CorePrompts, TrackerStatus } from '../api/types';
+import { api, send } from '../api/client';
+import type { AgentInfo, CorePrompts, Effort, LevelChoice, LevelRow, ModelLevel, TrackerStatus } from '../api/types';
 import { Bug, Check, RotateCcw, Terminal } from 'lucide-react';
 import type { ProjectCommands, RepoInfo } from '../api/types';
 import { useAct, useBoard } from '../lib/data';
@@ -135,11 +135,12 @@ export function SquadPage() {
           <h2>The squad</h2>
           <p className="note" style={{ marginTop: 2 }}>
             squad-kit is the lead. Each role is its own agent with its own session and tools, and the Reviewer always starts fresh, so every change
-            gets a real second opinion. Edit an agent to give it house rules or a different model.
+            gets a real second opinion. Strong models where a mistake is expensive, cheaper ones where the work is already clear. Edit an agent to
+            give it house rules or change its models.
           </p>
           <div style={{ marginTop: 10 }}>
             {(agents.data ?? []).map((a) => (
-              <div className="maprow" key={a.role} style={{ gridTemplateColumns: '34px 120px 1fr 200px 70px', alignItems: 'center' }}>
+              <div className="maprow" key={a.role} style={{ gridTemplateColumns: '34px 120px 1fr 250px 70px', alignItems: 'center' }}>
                 <Glyph role={a.role} />
                 <b>{a.name}</b>
                 <span style={{ fontSize: 13 }}>
@@ -156,7 +157,10 @@ export function SquadPage() {
                 </span>
                 <span className="pills">
                   <span className="pill">{TOOL_NAME[a.tool]}</span>
-                  {a.model && <span className="pill wait mono">{a.model}</span>}
+                  {(() => {
+                    const main = a.levels?.find((r) => r.step === a.stepList[0]?.id)?.now;
+                    return main ? <span className={`pill ${main.from === 'squad-kit' ? 'wait' : ''}`} title={`${a.stepList[0]?.name}: ${levelText(main)}`}>{main.modelName || main.level}{main.effort && a.supportsEffort ? ` · ${main.effort}` : ''}</span> : null;
+                  })()}
                   {a.instructions.replace(/<!--[\s\S]*?-->/g, '').trim() && <span className="pill ok">House rules</span>}
                 </span>
                 <button className="btn sm" onClick={() => setEditing(a)}>Edit</button>
@@ -205,14 +209,30 @@ function AgentDialog({ agent, onClose }: { agent: AgentInfo; onClose: () => void
   const clean = (x: string | undefined) => (x ?? '').replace(/<!--[\s\S]*?-->/g, '').trim();
   const [tool, setTool] = useState(agent.tool);
   const [model, setModel] = useState(agent.model);
+  const [myModel, setMyModel] = useState(agent.youRole?.model ?? '');
+  const [team, setTeam] = useState<Record<string, LevelChoice>>(() => Object.fromEntries(agent.levels.map((r) => [r.step, r.team ?? {}])));
+  const [you, setYou] = useState<Record<string, LevelChoice>>(() => Object.fromEntries(agent.levels.map((r) => [r.step, r.you ?? {}])));
   const [instructions, setInstructions] = useState(clean(agent.instructions));
   const [steps, setSteps] = useState<Record<string, string>>(() => Object.fromEntries(agent.stepList.map((s) => [s.id, clean(agent.steps?.[s.id])])));
   const core = useQuery({ queryKey: ['core-prompts', agent.role], queryFn: () => api<CorePrompts>(`/api/v1/agents/${agent.role}/prompts`) });
-  const save = () =>
+  const save = async () => {
+    // Your own choices stay on this computer; the team's go in the agent file.
+    const same = (a: LevelChoice | null | undefined, b: LevelChoice) => (a?.level ?? '') === (b.level ?? '') && (a?.effort ?? '') === (b.effort ?? '');
+    try {
+      for (const r of agent.levels) if (!same(r.you, you[r.step]!)) await send('/api/v1/me/levels', 'PUT', { key: `${agent.role}.${r.step}`, ...you[r.step] });
+      if ((agent.youRole?.model ?? '') !== myModel.trim()) await send('/api/v1/me/levels', 'PUT', { key: agent.role, ...agent.youRole, model: myModel.trim() });
+    } catch (err) {
+      act.reset();
+      return alert(err instanceof Error ? err.message : String(err));
+    }
+    const levels: Record<string, LevelChoice> = {};
+    if (agent.teamRole?.level || agent.teamRole?.effort) levels[agent.role] = { level: agent.teamRole.level, effort: agent.teamRole.effort };
+    for (const [step, c] of Object.entries(team)) if (c.level || c.effort) levels[`${agent.role}.${step}`] = c;
     act.mutate(
-      { path: `/api/v1/agents/${agent.role}`, method: 'PUT', body: { tool, model, instructions, steps }, done: `${agent.name} saved. It uses this from its next step.` },
+      { path: `/api/v1/agents/${agent.role}`, method: 'PUT', body: { tool, model, instructions, steps, levels }, done: `${agent.name} saved. It uses this from its next step.` },
       { onSuccess: onClose },
     );
+  };
   return (
     <Modal
       title={`Edit the ${agent.name}`}
@@ -235,10 +255,19 @@ function AgentDialog({ agent, onClose }: { agent: AgentInfo; onClose: () => void
           <option value="codex" disabled>Codex (coming soon)</option>
         </select>
       </div>
-      <div className="maprow" style={{ alignItems: 'center' }}>
-        <b>Model</b>
-        <input className="input mono" style={{ fontSize: 13 }} value={model} placeholder="Your default. Or: sonnet, opus" onChange={(e) => setModel(e.target.value)} />
-      </div>
+      <ModelLevels agent={agent} team={team} setTeam={setTeam} you={you} setYou={setYou} />
+      <details style={{ marginTop: 8 }}>
+        <summary className="note">Pin exact models (advanced)</summary>
+        <div className="maprow" style={{ alignItems: 'center' }}>
+          <b>For the team</b>
+          <input className="input mono" style={{ fontSize: 13 }} value={model} placeholder="Empty: use the levels above" onChange={(e) => setModel(e.target.value)} />
+        </div>
+        <div className="maprow" style={{ alignItems: 'center' }}>
+          <b>Just for me</b>
+          <input className="input mono" style={{ fontSize: 13 }} value={myModel} placeholder="Empty: use the levels above" onChange={(e) => setMyModel(e.target.value)} />
+        </div>
+        <p className="note" style={{ fontSize: 12.5 }}>A pinned model wins over every level. Levels are better for the team: they work whatever AI tool each person uses.</p>
+      </details>
       <div style={{ marginTop: 12 }}>
         <b style={{ display: 'block', marginBottom: 6 }}>House rules for every step</b>
         <textarea
@@ -275,6 +304,62 @@ function AgentDialog({ agent, onClose }: { agent: AgentInfo; onClose: () => void
         );
       })}
     </Modal>
+  );
+}
+
+function levelText(n: LevelRow['now']): string {
+  const who = n.from === 'project' ? 'set by the team' : n.from === 'you' ? 'set by you' : "squad-kit's default";
+  return `${n.modelName || n.level} (${n.model ? 'pinned' : n.level}${n.effort ? `, ${n.effort} effort` : ''}), ${who}${n.why ? `, ${n.why}` : ''}`;
+}
+
+const LEVEL_NAME: Record<ModelLevel, string> = { strongest: 'Strongest', balanced: 'Balanced', fast: 'Fast' };
+
+/** Pick a level and an effort, or leave either on the layer below. */
+function LevelPick({ value, onChange, below, agent }: { value: LevelChoice; onChange: (c: LevelChoice) => void; below: LevelChoice; agent: AgentInfo }) {
+  return (
+    <span style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+      <select className="input" style={{ fontSize: 12.5, padding: '4px 6px', width: '100%' }} value={value.level ?? ''} onChange={(e) => onChange({ ...value, level: (e.target.value || undefined) as ModelLevel | undefined })} aria-label="Level">
+        <option value="">Default{below.level ? ` (${below.level})` : ''}</option>
+        {(['strongest', 'balanced', 'fast'] as ModelLevel[]).map((l) => (
+          <option key={l} value={l}>{LEVEL_NAME[l]}{agent.modelOf[l] ? ` · ${agent.modelOf[l]}` : ''}</option>
+        ))}
+      </select>
+      {agent.supportsEffort && (
+        <select className="input" style={{ fontSize: 12.5, padding: '4px 6px', width: '100%' }} value={value.effort ?? ''} onChange={(e) => onChange({ ...value, effort: (e.target.value || undefined) as Effort | undefined })} aria-label="Effort">
+          <option value="">Default{below.effort ? ` (${below.effort} effort)` : ''}</option>
+          <option value="high">High effort</option>
+          <option value="medium">Medium effort</option>
+          <option value="low">Low effort</option>
+        </select>
+      )}
+    </span>
+  );
+}
+
+/**
+ * The model level of each step, in three layers: squad-kit's default, the team's choice (saved in the agent file)
+ * and your own (saved on this computer). The last one set wins.
+ */
+function ModelLevels({ agent, team, setTeam, you, setYou }: { agent: AgentInfo; team: Record<string, LevelChoice>; setTeam: (t: Record<string, LevelChoice>) => void; you: Record<string, LevelChoice>; setYou: (t: Record<string, LevelChoice>) => void }) {
+  return (
+    <div style={{ marginTop: 12 }}>
+      <b style={{ display: 'block', marginBottom: 2 }}>Models</b>
+      <p className="note" style={{ marginTop: 0, fontSize: 12.5 }}>
+        squad-kit picks a level for each step: strongest where a mistake is expensive, cheaper where the work is clear. Change it for the whole team, or
+        just for you. Fixes that keep failing move up to the strongest level on their own.
+      </p>
+      <div className="levels" role="table">
+        <div className="levrow head" role="row"><span>Step</span><span>For the team</span><span>Just for me</span><span>Now</span></div>
+        {agent.levels.map((r) => (
+          <div className="levrow" role="row" key={r.step}>
+            <span>{r.name}</span>
+            <LevelPick agent={agent} value={team[r.step] ?? {}} below={r.standard} onChange={(c) => setTeam({ ...team, [r.step]: c })} />
+            <LevelPick agent={agent} value={you[r.step] ?? {}} below={{ ...r.standard, ...(team[r.step] ?? {}) }} onChange={(c) => setYou({ ...you, [r.step]: c })} />
+            <span className="note" style={{ fontSize: 12.5 }}>{levelText(r.now)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

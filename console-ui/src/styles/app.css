@@ -630,6 +630,10 @@ ul.ticketnotes .grow, .addnote .grow { flex: 1; }
 
 /* An agent's steps: team instructions and the read-only core prompt */
 .agentstep { border-top: 1px solid var(--line); padding: 10px 0 4px; }
+.levels { display: flex; flex-direction: column; }
+.levrow { display: grid; grid-template-columns: 120px minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.levrow.head { font-size: 12px; color: var(--muted); font-weight: 600; padding-top: 4px; }
+@media (max-width: 760px) { .levrow { grid-template-columns: minmax(0, 1fr); gap: 4px; } .levrow.head { display: none; } }
 .agentstep > b { display: block; margin-bottom: 6px; }
 .agentstep details { margin-top: 6px; }
 .agentstep summary { cursor: pointer; font-size: 12.5px; color: var(--muted); }

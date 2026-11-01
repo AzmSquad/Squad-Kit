@@ -11,6 +11,17 @@
  */
 export type PermissionSet = 'read' | 'git-read' | 'edit';
 
+/**
+ * How strong a model a step needs (ADR-001): squad-kit speaks in levels, and each AI tool module maps them to its own
+ * models, so the defaults work with any AI company.
+ */
+export type ModelLevel = 'strongest' | 'balanced' | 'fast';
+export const MODEL_LEVELS: ModelLevel[] = ['strongest', 'balanced', 'fast'];
+
+/** How hard the model thinks, where the tool supports it. */
+export type Effort = 'high' | 'medium' | 'low';
+export const EFFORTS: Effort[] = ['high', 'medium', 'low'];
+
 export interface ToolEvent {
   name: string;
   input: Record<string, unknown>;
@@ -30,6 +41,10 @@ export interface AgentRun {
   schema?: object;
   /** Added to the tool's own instructions: the step's extras and the team's house rules. */
   instructions?: string;
+  /** The level the step needs; the module picks its model for it. */
+  level?: ModelLevel;
+  effort?: Effort;
+  /** An exact model someone picked; it wins over the level. */
   model?: string;
   addDirs?: string[];
   timeoutMs?: number;
@@ -64,6 +79,9 @@ export interface AiTool {
   readonly label: string;
   /** False for a tool squad-kit can find but cannot run yet. */
   readonly canRun: boolean;
+  /** The tool's model for a level, as people know it ("Opus"), or empty when it has none. */
+  modelFor(level: ModelLevel): string;
+  readonly supportsEffort: boolean;
   /** Installed and signed in, as far as squad-kit can tell without running it. */
   ready(): boolean;
   run(r: AgentRun): Promise<AgentResult>;
