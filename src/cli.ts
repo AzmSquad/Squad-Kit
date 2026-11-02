@@ -18,6 +18,7 @@ import {
   runBoard,
   runBug,
   runChange,
+  runPropose,
   runNote,
   runChat,
   runAgent,
@@ -249,6 +250,14 @@ program
   .command('change <ticket> [note...]')
   .description('Ask for a change to the spec or design, or send the proof back with a note')
   .action(wrapArgs(runChange));
+program
+  .command('propose <ticket> [text...]')
+  .description('Propose a change to the spec; the work goes on while the Analyst writes it, then you approve or decline it')
+  .option('--approve', 'Approve the change that waits (the proposal, or a big change\'s design update)')
+  .option('--decline', 'Decline the change that waits; any text is the reason')
+  .option('--retry', 'Let the Analyst write the change again after it could not')
+  .option('--as <kind>', 'For accepted work: make the change a new linked "ticket" or a "bug" report')
+  .action(wrapArgs(runPropose));
 program
   .command('changes <ticket>')
   .description("Show what a ticket changed against main, read from the ticket's own copy")

@@ -259,6 +259,8 @@ export const TICKET_HOME = {
   notes: 'project',
   proof: 'project',
   mockup: 'project',
+  changes: 'project',
+  changeOf: 'project',
   // Split: the questions' answers, the steps' titles and files inside the ticket's folder are the project's;
   // the talk about a question, the steps' progress and voice notes stay here.
   questions: 'project',

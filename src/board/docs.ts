@@ -1,5 +1,5 @@
 import yaml from 'js-yaml';
-import type { Blueprint, BoardMeta, Criterion, Decision, DecisionDraft, Lesson, ProofShot, Question, Release, Step, Ticket, TicketNote } from './types.js';
+import type { AgentName, Blueprint, BoardMeta, ChangePart, ChangeStatus, ChangeStep, Criterion, Decision, DecisionDraft, Lesson, ProofShot, Question, Release, SpecChange, Step, Ticket, TicketNote } from './types.js';
 
 /**
  * The project's documents as Markdown (ADR-001). squad-kit writes each in a fixed shape and reads it back from that
@@ -119,6 +119,7 @@ const HEADER_KEYS = [
   'mergedAt',
   'brief',
   'mockup',
+  'changeOf',
   'files',
 ] as const;
 
@@ -134,7 +135,7 @@ export function ticketDocs(t: TicketDocInput): TicketDocs {
   const all = t as unknown as Record<string, unknown>;
   for (const k of HEADER_KEYS) if (all[k] !== undefined) header[k] = all[k];
   const docs: TicketDocs = { 'ticket.md': withHeader(header, `# ${enc(t.title)}\n\n${t.ask ?? ''}`) };
-  if (t.story !== undefined || t.criteria || t.releaseNote !== undefined) docs['spec.md'] = specDoc(t);
+  if (t.story !== undefined || t.criteria || t.releaseNote !== undefined || t.changes?.length) docs['spec.md'] = specDoc(t);
   if (t.questions?.length) docs['questions.md'] = questionsDoc(t.title, t.questions);
   if (t.decision || t.steps) docs['design.md'] = designDoc(t.title, t.decision, t.steps);
   if (t.notes?.length) docs['notes.md'] = notesDoc(t.title, t.notes);
@@ -159,23 +160,113 @@ function specDoc(t: TicketDocInput): string {
   if (t.story !== undefined) parts.push(`## Story\n\n${escText(t.story)}`);
   if (t.criteria) parts.push(`## Done when\n\n${t.criteria.map((c, i) => `${i + 1}. **Given** ${enc(c.given)}, **when** ${enc(c.when)}, **then** ${enc(c.then)}`).join('\n')}`);
   if (t.releaseNote !== undefined) parts.push(`## Release note\n\n${escText(t.releaseNote)}`);
+  if (t.changes?.length) parts.push(`## Changes\n\n${t.changes.map(changeDoc).join('\n\n')}`);
   return `${parts.join('\n\n')}\n`;
 }
 
-function parseSpec(text: string): Pick<Ticket, 'story' | 'criteria' | 'releaseNote'> {
-  const out: Pick<Ticket, 'story' | 'criteria' | 'releaseNote'> = {};
-  for (const s of sections(text, /^## (Story|Done when|Release note)$/)) {
+const GIVEN = /^\*\*Given\*\* ([\s\S]*?), \*\*when\*\* ([\s\S]*?), \*\*then\*\* ([\s\S]*)$/;
+
+function parseCriterion(line: string): Criterion {
+  const m = line.match(GIVEN);
+  return m ? { given: dec(m[1]!), when: dec(m[2]!), then: dec(m[3]!) } : { given: '', when: '', then: line };
+}
+
+function parseSpec(text: string): Pick<Ticket, 'story' | 'criteria' | 'releaseNote' | 'changes'> {
+  const out: Pick<Ticket, 'story' | 'criteria' | 'releaseNote' | 'changes'> = {};
+  for (const s of sections(text, /^## (Story|Done when|Release note|Changes)$/)) {
     if (s.match[1] === 'Story') out.story = block(s.text);
     if (s.match[1] === 'Release note') out.releaseNote = block(s.text);
+    if (s.match[1] === 'Changes') out.changes = parseChanges(s.text);
     if (s.match[1] === 'Done when') {
-      out.criteria = items(s.text, /^\d+\. /).map((lines): Criterion => {
-        const line = lines.map((l, i) => (i ? l.slice(3) : l.replace(/^\d+\. /, ''))).join('\n');
-        const m = line.match(/^\*\*Given\*\* ([\s\S]*?), \*\*when\*\* ([\s\S]*?), \*\*then\*\* ([\s\S]*)$/);
-        return m ? { given: dec(m[1]!), when: dec(m[2]!), then: dec(m[3]!) } : { given: '', when: '', then: line };
-      });
+      out.criteria = items(s.text, /^\d+\. /).map((lines): Criterion => parseCriterion(lines.map((l, i) => (i ? l.slice(3) : l.replace(/^\d+\. /, ''))).join('\n')));
     }
   }
   return out;
+}
+
+/** A "done when" as one line of the spec. */
+export function criterionText(c: Criterion): string {
+  return `Given ${c.given}, when ${c.when}, then ${c.then}.`;
+}
+
+function criterionDoc(c: Criterion): string {
+  return `**Given** ${enc(c.given)}, **when** ${enc(c.when)}, **then** ${enc(c.then)}`;
+}
+
+/**
+ * One change in the spec's own record: what was asked, the old and new wording of each part it touches, the design
+ * update of a big one, and who decided. One line per fact, so it reads well and reads back the same.
+ */
+function changeDoc(c: SpecChange): string {
+  const lines = [`### ${c.id}: ${c.size ? `${c.size}, ` : ''}${c.status}`, '', `- Asked: ${enc(c.ask)}`, `- By: ${enc(c.by)}, ${c.at}`];
+  if (c.from) lines.push(`- In the chat with: ${c.from}`);
+  if (c.summary !== undefined) lines.push(`- What: ${enc(c.summary)}`);
+  if (c.why !== undefined) lines.push(`- Why: ${enc(c.why)}`);
+  for (const p of c.parts ?? []) {
+    if (p.part === 'story') lines.push(`- Story was: ${enc(p.before)}`, `- Story now: ${enc(p.after)}`);
+    else if (p.index === undefined) lines.push(`- New done when: ${criterionDoc(p.criterion ?? { given: '', when: '', then: p.after })}`);
+    else lines.push(`- Done when ${p.index + 1} was: ${enc(p.before)}`, p.criterion ? `- Done when ${p.index + 1} now: ${criterionDoc(p.criterion)}` : `- Done when ${p.index + 1} goes`);
+  }
+  if (c.design) {
+    lines.push(`- Design: ${enc(c.design.summary)}`, ...c.design.before.map((s) => `- Step was: ${enc(s)}`), ...c.design.steps.map((s, i) => `- Step ${i + 1}, ${s.change}: ${enc(s.title)}`));
+  }
+  if (c.decided) {
+    lines.push(`- ${c.decided.approved ? 'Approved' : 'Declined'} by: ${enc(c.decided.by)}, ${c.decided.at}`);
+    if (c.decided.reason) lines.push(`- Reason: ${enc(c.decided.reason)}`);
+  }
+  if (c.paused) lines.push(`- Paused: ${JSON.stringify(c.paused)}`);
+  if (c.error !== undefined) lines.push(`- Error: ${enc(c.error)}`);
+  return lines.join('\n');
+}
+
+function parseChanges(text: string): SpecChange[] {
+  return sections(text, /^### (c\d+): (?:(small|big), )?([a-z-]+)$/).map((s) => {
+    const c: SpecChange = { id: s.match[1]!, ask: '', by: '', at: '', status: s.match[3] as ChangeStatus, ...(s.match[2] ? { size: s.match[2] as 'small' | 'big' } : {}) };
+    const parts: ChangePart[] = [];
+    const design = { summary: '', before: [] as string[], steps: [] as ChangeStep[] };
+    let designed = false;
+    const at = (index: number) => {
+      let p = parts.find((x) => x.part === 'criterion' && x.index === index);
+      if (!p) parts.push((p = { part: 'criterion', index, before: '', after: '' }));
+      return p;
+    };
+    for (const line of s.text.split('\n')) {
+      let m: RegExpMatchArray | null;
+      if ((m = line.match(/^- Asked: ?(.*)$/))) c.ask = dec(m[1]!);
+      else if ((m = line.match(/^- By: (.*), (\S+)$/))) [c.by, c.at] = [dec(m[1]!), m[2]!];
+      else if ((m = line.match(/^- In the chat with: (\w+)$/))) c.from = m[1] as AgentName;
+      else if ((m = line.match(/^- What: ?(.*)$/))) c.summary = dec(m[1]!);
+      else if ((m = line.match(/^- Why: ?(.*)$/))) c.why = dec(m[1]!);
+      else if ((m = line.match(/^- Story was: ?(.*)$/))) parts.push({ part: 'story', before: dec(m[1]!), after: '' });
+      else if ((m = line.match(/^- Story now: ?(.*)$/))) {
+        const p = parts.find((x) => x.part === 'story');
+        if (p) p.after = dec(m[1]!);
+      } else if ((m = line.match(/^- New done when: (.*)$/))) {
+        const criterion = parseCriterion(m[1]!);
+        parts.push({ part: 'criterion', before: '', after: criterionText(criterion), criterion });
+      } else if ((m = line.match(/^- Done when (\d+) was: ?(.*)$/))) at(Number(m[1]) - 1).before = dec(m[2]!);
+      else if ((m = line.match(/^- Done when (\d+) now: (.*)$/))) {
+        const p = at(Number(m[1]) - 1);
+        p.criterion = parseCriterion(m[2]!);
+        p.after = criterionText(p.criterion);
+      } else if ((m = line.match(/^- Done when (\d+) goes$/))) at(Number(m[1]) - 1).after = '';
+      else if ((m = line.match(/^- Design: ?(.*)$/))) [design.summary, designed] = [dec(m[1]!), true];
+      else if ((m = line.match(/^- Step was: ?(.*)$/))) design.before.push(dec(m[1]!));
+      else if ((m = line.match(/^- Step \d+, (same|changed|new): (.*)$/))) design.steps.push({ title: dec(m[2]!), change: m[1] as ChangeStep['change'] });
+      else if ((m = line.match(/^- (Approved|Declined) by: (.*), (\S+)$/))) c.decided = { by: dec(m[2]!), at: m[3]!, approved: m[1] === 'Approved' };
+      else if ((m = line.match(/^- Reason: ?(.*)$/)) && c.decided) c.decided.reason = dec(m[1]!);
+      else if ((m = line.match(/^- Paused: (.*)$/))) {
+        try {
+          c.paused = JSON.parse(m[1]!) as SpecChange['paused'];
+        } catch {
+          // A hand edit broke it; the change goes on without it.
+        }
+      } else if ((m = line.match(/^- Error: ?(.*)$/))) c.error = dec(m[1]!);
+    }
+    if (parts.length) c.parts = parts;
+    if (designed) c.design = design;
+    return c;
+  });
 }
 
 function questionsDoc(title: string, qs: Question[]): string {

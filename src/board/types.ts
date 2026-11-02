@@ -16,8 +16,11 @@ export type Role = 'analyst' | 'architect' | 'spec' | 'builder' | 'tester' | 're
 /** Who wrote an activity line or a thread message. */
 export type Actor = Role | 'you' | 'squad';
 
-/** 'spec' waits for you to approve the what (story, done when); 'plan' the how (decision, steps). */
-export type WaitingKind = 'questions' | 'spec' | 'plan' | 'proof' | 'stuck' | 'release' | 'ask' | 'yours' | 'chat';
+/**
+ * 'spec' waits for you to approve the what (story, done when); 'plan' the how (decision, steps). 'change': the
+ * Builder paused for a big change, and the Architect's design update waits for you.
+ */
+export type WaitingKind = 'questions' | 'spec' | 'plan' | 'proof' | 'stuck' | 'release' | 'ask' | 'yours' | 'chat' | 'change';
 
 export interface Waiting {
   kind: WaitingKind;
@@ -191,8 +194,9 @@ export interface ChatMessage {
 }
 
 /**
- * Talking it through with one agent, in its own Claude Code session. The ticket waits while you talk; only you move
- * it on: write or update the spec or design from the talk, or Done.
+ * Talking it through with one agent, in its own Claude Code session. A ticket that was waiting for you stays with you
+ * while you talk; only you move it on: write or update the spec or design from the talk, or Done. A ticket the squad
+ * is working on goes on working: the chat is beside the work.
  */
 export interface AgentChat {
   with: AgentName;
@@ -204,6 +208,67 @@ export interface AgentChat {
   ready?: boolean;
   /** Where the ticket was when the chat started, to go back to it on Done. */
   before: { waiting: Waiting | null; phase?: string };
+  /**
+   * Asking beside the work: the squad was working (or the ticket is accepted), so the chat changes nothing on the
+   * ticket. The agent answers in a side conversation of its own, never in the one that is working.
+   */
+  beside?: boolean;
+  /** The side conversation's session id. */
+  side?: string;
+}
+
+/** One part of the spec a change touches. A "done when" counts from 0; a new one has no index yet. */
+export interface ChangePart {
+  part: 'story' | 'criterion';
+  index?: number;
+  /** The words now. Empty for a new "done when". */
+  before: string;
+  /** The words after the change. Empty when the "done when" goes. */
+  after: string;
+  /** The new "done when" itself, to put in the spec on approval. */
+  criterion?: Criterion;
+}
+
+/** One design step after a big change, and whether the Builder must do it again. */
+export interface ChangeStep {
+  title: string;
+  change: 'same' | 'changed' | 'new';
+}
+
+/**
+ * writing: the Analyst writes it into the spec. proposed: it waits for you. approved: a small one waits to reach the
+ * Builder, a big one for the Builder's current step to end. designing: the Architect updates the design.
+ * design-ready: the new design waits for you. building: the Builder works on it. done, declined, failed: closed.
+ */
+export type ChangeStatus = 'writing' | 'proposed' | 'approved' | 'designing' | 'design-ready' | 'building' | 'done' | 'declined' | 'failed';
+
+/**
+ * A change the person proposed to the spec. The Analyst writes the old and new wording of the parts it touches and
+ * says whether it is small or big; the person approves or declines. A big one also gets the Architect's new design,
+ * approved before the Builder redoes the steps it touches. One open change at a time per ticket.
+ */
+export interface SpecChange {
+  id: string;
+  /** What the person asked, in their words. */
+  ask: string;
+  by: string;
+  at: string;
+  /** The chat it came from, when it came from a message to an agent. */
+  from?: AgentName;
+  status: ChangeStatus;
+  size?: 'small' | 'big';
+  /** One line: what changes. */
+  summary?: string;
+  /** Why it is small or big, in plain words. */
+  why?: string;
+  parts?: ChangePart[];
+  /** A big change: the Architect's design update, with the steps as they were. */
+  design?: { summary: string; before: string[]; steps: ChangeStep[] };
+  /** Who approved or declined it, and why. */
+  decided?: { by: string; at: string; approved: boolean; reason?: string };
+  /** A big change: what waited while the design was updated, to go back to if the update is declined. */
+  paused?: { phase?: string; waiting?: Waiting };
+  error?: string;
 }
 
 export type Track = 'full' | 'express';
@@ -381,6 +446,10 @@ export interface Ticket {
   agentQuestion?: AgentQuestion;
   /** How many notes each agent session has been given, so a running agent gets new ones at its next step. */
   notesSeen?: Record<string, number>;
+  /** Changes the person proposed to the spec, oldest first. Kept in spec.md, the spec's own record. */
+  changes?: SpecChange[];
+  /** The accepted or released ticket this one changes: a change asked for after release becomes a new linked ticket. */
+  changeOf?: string;
   /** What each role used on this ticket, per step and model level. */
   usage?: UsageLine[];
   /**

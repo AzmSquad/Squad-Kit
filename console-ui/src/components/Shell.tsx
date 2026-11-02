@@ -3,6 +3,7 @@ import { ArrowUp, Bug, ChevronsUpDown, ExternalLink, Inbox, LayoutGrid, ListTodo
 import { useApps, useBoard } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { UpdateBanner } from './Restart';
+import { changeWaits } from './ChangeCard';
 
 const NAV = [
   { to: '/board', label: 'Board', icon: LayoutGrid },
@@ -21,7 +22,7 @@ export function Shell() {
   const path = useRouterState({ select: (s) => s.location.pathname });
   const meta = board.data?.ready ? board.data.meta : undefined;
   const tickets = board.data?.ready ? board.data.tickets : [];
-  const waiting = tickets.filter((t) => t.waiting || t.outdated?.length).length;
+  const waiting = tickets.filter((t) => t.waiting || t.outdated?.length || changeWaits(t)).length;
   const bugs = tickets.filter((t) => t.kind === 'bug').length;
   const initials = (meta?.user.name ?? 'You').slice(0, 2).toUpperCase();
 

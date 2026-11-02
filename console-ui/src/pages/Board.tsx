@@ -10,6 +10,7 @@ import { Cmd, Glyph, STAGE_NAME, actionLabel, outdatedLine } from '../components
 import { TicketDrawer } from './TicketDrawer';
 import { BoardCost } from '../components/Usage';
 import { isMine, ownerOf, useMe } from '../components/HandOver';
+import { changeWaits, openChange } from '../components/ChangeCard';
 
 const LANES: { stage: Stage; role: Actor; who: string }[] = [
   { stage: 'tickets', role: 'analyst', who: 'Analyst' },
@@ -47,10 +48,10 @@ export function BoardPage() {
   if (board.isLoading) return <div className="center">Loading the board…</div>;
   if (!data) return <NoBoard />;
 
-  const ORDER = ['chat', 'ask', 'questions', 'spec', 'plan', 'stuck', 'proof', 'yours', 'release'];
+  const ORDER = ['chat', 'ask', 'questions', 'spec', 'plan', 'change', 'stuck', 'proof', 'yours', 'release'];
   // A step that looks stuck needs the person as much as a question does, so it comes first.
   const waiting = data.tickets
-    .filter((t) => t.waiting || t.quiet?.kind === 'stuck' || t.outdated?.length)
+    .filter((t) => t.waiting || t.quiet?.kind === 'stuck' || t.outdated?.length || changeWaits(t))
     .sort((a, b) => (a.waiting ? ORDER.indexOf(a.waiting.kind) : -1) - (b.waiting ? ORDER.indexOf(b.waiting.kind) : -1));
 
   return (
@@ -117,9 +118,9 @@ export function BoardPage() {
                     <span>{STAGE_NAME[t.stage]}</span>
                   </div>
                   <h3>{t.title}</h3>
-                  <p>{t.waiting?.summary ?? (t.outdated?.length ? outdatedLine(t) : 'Looks stuck. Check what it is waiting on')}</p>
+                  <p>{t.waiting?.summary ?? (changeWaits(t) ? `Change ${openChange(t)!.id} to the spec waits for you` : t.outdated?.length ? outdatedLine(t) : 'Looks stuck. Check what it is waiting on')}</p>
                 </div>
-                <span className="btn sm pri">{t.waiting ? actionLabel(t) : 'Check it'}</span>
+                <span className="btn sm pri">{t.waiting ? actionLabel(t) : changeWaits(t) ? 'Check the change' : 'Check it'}</span>
               </button>
             ))}
           </div>
@@ -172,7 +173,7 @@ export function BoardPage() {
 }
 
 function Card({ t, selected, onOpen }: { t: Ticket; selected: boolean; onOpen(): void }) {
-  const you = Boolean(t.waiting) || t.quiet?.kind === 'stuck';
+  const you = Boolean(t.waiting) || t.quiet?.kind === 'stuck' || changeWaits(t);
   const me = useMe();
   return (
     <button className={`card ${you ? 'you' : ''} ${t.kind === 'bug' ? 'bug' : ''} ${selected ? 'sel' : ''}`} onClick={onOpen}>

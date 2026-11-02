@@ -1,5 +1,5 @@
 import { DECISION_AREAS } from '../board/types.js';
-import type { BoardMeta, Decision, Question, RepoInfo, Ticket, TicketNote } from '../board/types.js';
+import type { AgentName, BoardMeta, ChatMessage, Decision, Question, RepoInfo, SpecChange, Step, Ticket, TicketNote } from '../board/types.js';
 import { reposOf } from './repos.js';
 
 /** Role briefs for the live squad, and the JSON shapes each role must answer in. */
@@ -151,6 +151,42 @@ export const SPEC_SCHEMA = {
   required: ['story', 'criteria', 'releaseNote'],
 };
 
+
+/** A change the person proposed, written into the spec by the Analyst: only the parts it touches, and its size. */
+export const CHANGE_SCHEMA = {
+  type: 'object',
+  properties: {
+    summary: STR,
+    size: { type: 'string', enum: ['small', 'big'] },
+    why: STR,
+    story: STR,
+    criteria: {
+      type: 'array',
+      maxItems: 8,
+      items: {
+        type: 'object',
+        properties: { number: { type: 'integer' }, action: { type: 'string', enum: ['change', 'add', 'remove'] }, given: STR, when: STR, then: STR },
+        required: ['number', 'action'],
+      },
+    },
+  },
+  required: ['summary', 'size', 'why', 'story', 'criteria'],
+};
+
+/** A big change: the Architect's design update, every step marked as it stays, changes or is new. */
+export const CHANGE_DESIGN_SCHEMA = {
+  type: 'object',
+  properties: {
+    summary: STR,
+    steps: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 10,
+      items: { type: 'object', properties: { title: STR, change: { type: 'string', enum: ['same', 'changed', 'new'] } }, required: ['title', 'change'] },
+    },
+  },
+  required: ['summary', 'steps'],
+};
 
 /** A reply in a chat with the person, and whether the agent thinks it understands enough for the next step. */
 export const CHAT_SCHEMA = {
@@ -633,9 +669,12 @@ const CHAT_ROLE: Record<string, string> = {
  * One turn of a chat with the person. The agent only talks and reads: it changes no files, and it never moves the
  * ticket on. The person does that with a button.
  */
-export function chatPrompt(agent: string, message: string | null, next: string, attached = ''): string {
+export function chatPrompt(agent: string, message: string | null, next: string, attached = '', beside = false): string {
   const head = message === null
-    ? `The person wants to talk this ticket through with you before you go on. You are ${CHAT_ROLE[agent] ?? agent}.
+    ? beside
+      ? `The person wants to ask you about this ticket. You are ${CHAT_ROLE[agent] ?? agent}.
+Open the talk: say in two or three short lines where the ticket is now, then ask what they want to know.`
+      : `The person wants to talk this ticket through with you before you go on. You are ${CHAT_ROLE[agent] ?? agent}.
 Open the talk: say in a few short lines what you understand so far and where you are, then ask about what is most unclear.`
     : `The person says: "${message}"${attached ? `\n${attached}` : ''}`;
   return `${head}
@@ -643,8 +682,142 @@ Open the talk: say in a few short lines what you understand so far and where you
 Rules for this talk:
 - Answer in plain words, in the person's language, in a few short paragraphs at most. Ask one or two questions at a time.
 - Do not write or change any files. Read the code only when it helps you answer.
-- Do not start the next step yourself. ${next}
-- Set "ready" to true only when you think you understand enough for that next step; say so in your reply.`;
+- ${beside ? next : `Do not start the next step yourself. ${next}`}
+- ${beside ? 'Set "ready" to false.' : 'Set "ready" to true only when you think you understand enough for that next step; say so in your reply.'}`;
+}
+
+/** What a talk beside the work can do, told to the agent so it can say so. */
+export function besideNext(released: boolean): string {
+  return released
+    ? 'This ticket is accepted, so this talk is for questions only: nothing said here changes it. A change becomes a new linked ticket or a bug report; tell the person to press "Propose a change" for that.'
+    : 'This talk is beside the work: the squad keeps working, and nothing said here changes the ticket. To change what gets built, tell the person to press "Propose a change": the Analyst writes it into the spec and they approve it.';
+}
+
+/**
+ * The opening of a talk beside the work, in a side conversation of its own: who the agent is, the ticket as it stands,
+ * and where the squad is right now. The conversation that does the work is never touched.
+ */
+export function besidePrompt(meta: BoardMeta, decisions: Decision[], t: Ticket, agent: AgentName, released: boolean, ctx?: PromptContext): string {
+  const steps = (t.steps ?? []).map((s, i) => `${i + 1}. ${s.title} (${s.status === 'done' ? 'done' : s.status === 'doing' ? 'doing now' : 'to do'})`).join('\n');
+  const recent = t.activity.slice(0, 8).map((a) => `- ${a.who}: ${a.text}`).join('\n');
+  const where = released
+    ? `This ticket is ${t.stage === 'done' ? 'released' : 'accepted'}${t.release ? ` (${t.release})` : ''}.`
+    : 'The squad is working on this ticket right now, and goes on while you talk.';
+  return `You are ${CHAT_ROLE[agent] ?? agent}. ${where}
+Read the project${t.worktree ? ` and the ticket's copy of the code (${t.worktree})` : ''} when it helps you answer. Do not write or change any files.
+
+${projectContext(meta, decisions, ctx)}
+
+${ticketContext(t)}
+
+${t.story ? `The spec:\nStory: ${t.story}\nDone when:\n${doneWhen(t)}` : 'There is no spec yet.'}${t.decision ? `\n\nDecision: ${t.decision.title}. Why: ${t.decision.why}` : ''}${steps ? `\n\nThe design, step by step:\n${steps}` : ''}
+
+Where it is now: ${t.status}
+Latest activity:
+${recent || '- (none yet)'}`;
+}
+
+/** What the person and the agent said earlier in a chat on this ticket, for a side conversation that starts fresh. */
+export function earlierTalk(messages: ChatMessage[]): string {
+  if (!messages.length) return '';
+  return `\n\nEarlier in this chat (things may have moved on since):\n${messages.map((m) => `- ${m.who === 'you' ? 'The person' : m.who === 'squad' ? 'squad-kit' : 'You'}: ${m.text.replace(/\s+/g, ' ').slice(0, 500)}`).join('\n')}`;
+}
+
+/** The parts a change touches, in words for an agent: what each said and what it says now. */
+export function changeLines(c: SpecChange): string {
+  return (c.parts ?? [])
+    .map((p) => {
+      const name = p.part === 'story' ? 'The story' : p.index === undefined ? 'A new "done when"' : `"Done when" ${p.index + 1}`;
+      if (!p.before) return `- ${name}: "${p.after}"`;
+      if (!p.after) return `- ${name} goes: it said "${p.before}"`;
+      return `- ${name} said "${p.before}" and now says "${p.after}"`;
+    })
+    .join('\n');
+}
+
+function stepList(steps: Step[]): string {
+  return steps.map((s, i) => `${i + 1}. ${s.title}${s.status === 'done' ? ' (built)' : s.status === 'doing' ? ' (being built)' : ''}`).join('\n');
+}
+
+/** The Analyst writes a change the person proposed into the approved spec, and says whether it is small or big. */
+export function changePrompt(meta: BoardMeta, decisions: Decision[], t: Ticket, c: SpecChange, chat: ChatMessage[], ctx?: PromptContext): string {
+  const criteria = (t.criteria ?? []).map((x, i) => `${i + 1}. Given ${x.given}, when ${x.when}, then ${x.then}.`).join('\n');
+  const talk = chat.length
+    ? `\nIt came from their chat with the ${c.from}. The last messages:\n${chat.map((m) => `- ${m.who === 'you' ? 'Person' : m.who}: ${m.text.slice(0, 600)}`).join('\n')}\n`
+    : '';
+  return `You are the Analyst of a software squad. The person wants to change the approved spec of the ticket below.
+Read the project if it helps. Do not write or change any files.
+
+${projectContext(meta, decisions, ctx)}
+
+${ticketContext(t)}
+
+The approved spec:
+Story: ${t.story ?? '(none)'}
+Done when:
+${criteria || '(none)'}
+
+${t.steps?.length ? `The approved design${t.decision ? ` (${t.decision.title})` : ''}, step by step:\n${stepList(t.steps)}` : 'There is no approved design yet.'}
+Where the work is now: ${t.status}
+
+The change the person proposes:
+"${c.ask}"
+${talk}
+Write the change into the spec, as the Analyst:
+- story: the whole new story when the change touches it, else an empty string.
+- criteria: only the "done when" items that change. For each: number (its number above, or 0 for a new one), action
+  ("change", "add" or "remove"), and the new given, when and then for change and add. Every change shows in the
+  spec: at least one item here, or a new story.
+- size: "small" when the approved design still holds and the Builder can fit it into the work as it is (a wording, a
+  limit, one more check on a screen it builds anyway). "big" when the design must change: a new screen or page, other
+  data, a new technical decision, or steps to add or redo.
+- why: one or two plain sentences on why it is small or big.
+- summary: one line on what changes, like "The limit goes from 3 to 5 bookings a day".
+${PLAIN}`;
+}
+
+/**
+ * A big change: the Builder paused after its step, and the Architect updates the design for it. Every step is marked,
+ * so the Builder redoes only what the change touches.
+ */
+export function changeDesignPrompt(t: Ticket, c: SpecChange, fresh?: { meta: BoardMeta; decisions: Decision[]; ctx?: PromptContext }): string {
+  // A new conversation needs the project and the ticket first; the Architect's own one has them already.
+  const intro = fresh ? `You are the Architect of a software squad.\n\n${projectContext(fresh.meta, fresh.decisions, fresh.ctx)}\n\n${ticketContext(t)}\n\n` : '';
+  return `${intro}The person approved a big change to the spec of ${t.id} (change ${c.id}): ${c.summary ?? c.ask}
+${changeLines(c)}
+
+The Builder has built part of the approved design${t.worktree ? ` in ${t.worktree}` : ''} and paused after its step. As the
+Architect, update the design for this change. Read the code built so far first. Do not write or change any files.
+
+The design now, step by step:
+${stepList(t.steps ?? []) || '(no steps yet)'}
+
+- steps: the whole new list of steps, in order, one sentence each. Mark each one: "same" when it stays as it is (keep
+  its words exactly), "changed" when the Builder must redo it, "new" for a step to add. Leave out a step that is no
+  longer needed. Change as little as you can: the Builder redoes only the changed and new steps.
+- summary: one or two plain sentences on what changes in the design, and why.
+${PLAIN}`;
+}
+
+/** A small change reaches the Builder at the start of its next step, before what that step was going to do. */
+export function smallChangePrompt(c: SpecChange): string {
+  return `The person approved a small change to the spec while you worked (change ${c.id}): ${c.summary ?? c.ask}
+${changeLines(c)}
+
+Print ">> change" first. Make it part of the work now, and keep everything else as it is. Then run the tests.`;
+}
+
+/** After a big change's design update is approved: the Builder redoes only the steps it touches. */
+export function changeRedoPrompt(c: SpecChange, steps: Step[]): string {
+  const redo = steps.flatMap((s, i) => (s.status === 'done' ? [] : [i + 1]));
+  return `The person approved a big change to the spec (change ${c.id}): ${c.summary ?? c.ask}
+${changeLines(c)}
+
+The Architect updated the design for it${c.design?.summary ? `: ${c.design.summary}` : ''}. The person approved it. The steps now:
+${steps.map((s, i) => `${i + 1}. ${s.title}${s.status === 'done' ? ' (done, keep it)' : ' (do it now)'}`).join('\n')}
+
+Redo only ${redo.length === 1 ? 'step' : 'steps'} ${redo.join(', ')}. The other steps are done: leave their code as it is unless the change needs it.
+Before you start each step, print a line that says exactly ">> step N" (N is the step number). Then run the tests.`;
 }
 
 /** What the person's buttons do after the talk, told to the agent so it can say so. */

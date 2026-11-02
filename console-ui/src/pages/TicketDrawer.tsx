@@ -12,6 +12,7 @@ import { TakeOverButton, canTakeOver } from '../components/TakeOver';
 import { Attachments as AgentFiles, Mockup } from '../components/Attachments';
 import { Part, WhatChanged, type Review } from '../components/PlanReview';
 import { ChatPanel, TalkButton } from '../components/Chat';
+import { ChangeCard, ChangeHistory, ProposeChangeButton, changeWaits, shipped } from '../components/ChangeCard';
 import { Lightbox, type Picture } from '../components/Lightbox';
 import { TicketUsage } from '../components/Usage';
 import { HandOverButton, HandedOverBanner, NotYoursPanel, canHandOver, isMine, ownerOf, useMe } from '../components/HandOver';
@@ -60,6 +61,7 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
                 {t.priority === 'high' && t.kind !== 'bug' && <span className="prio">High priority</span>}
                 <span className="grow" />
                 {canHandOver(t, me) && <HandOverButton t={t} />}
+                {(isMine(t, me) || !me) && <ProposeChangeButton t={t} />}
                 {t.waiting?.kind === 'proof' && (
                   <Link to="/tickets/$id/proof" params={{ id: t.id }} className="iconbtn" aria-label="Open the proof page">
                     <ExternalLink size={15} />
@@ -113,7 +115,7 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
               ).map(([k, label]) => (
                 <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>
                   {label}
-                  {k === 'now' && (t.waiting || t.outdated?.length) && <span className="dot" />}
+                  {k === 'now' && (t.waiting || t.outdated?.length || changeWaits(t)) && <span className="dot" />}
                 </button>
               ))}
               <button className={`dev ${tab === 'developer' ? 'on' : ''}`} onClick={() => setTab('developer')}>
@@ -122,6 +124,7 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
             </div>
             {tab === 'now' && t.outdated?.length ? <OutdatedBanner t={t} /> : null}
             {tab === 'now' && <HandedOverBanner t={t} />}
+            {tab === 'now' && (isMine(t, me) || !me) && <ChangeCard t={t} />}
             {tab === 'now' && (isMine(t, me) || !me ? <NowPanel t={t} /> : <NotYoursPanel t={t} />)}
             {tab === 'story' && <StoryTab t={t} />}
             {tab === 'plan' && <PlanTab t={t} />}
@@ -143,6 +146,8 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
 }
 
 function NowPanel({ t }: { t: Ticket }) {
+  // A chat beside the work shows here while it is open; the work goes on behind it.
+  if (t.chat?.open && t.chat.beside) return <ChatPanel t={t} />;
   if (!t.waiting && t.quiet) return <QuietPanel t={t} />;
   switch (t.waiting?.kind) {
     case 'questions':
@@ -955,7 +960,9 @@ function WorkingPanel({ t }: { t: Ticket }) {
       ? { title: `Ready for ${t.release}`, text: 'It goes out with the next release. Nothing needed from you until then.' }
       : t.stage === 'done'
         ? { title: t.status, text: 'This ticket is live. Found a problem? Report a bug and it comes back around.' }
-        : { title: 'Nothing needed from you', text: `${nowLine(t)} You'll get a card when the squad needs you.` };
+        : t.waiting?.kind === 'change'
+          ? { title: 'The Builder paused for your change', text: 'The Architect updated the design. Approve it above, or decline the change and the Builder carries on.' }
+          : { title: 'Nothing needed from you', text: `${nowLine(t)} You'll get a card when the squad needs you.` };
   return (
     <>
       <div className="db">
@@ -995,6 +1002,7 @@ function WorkingPanel({ t }: { t: Ticket }) {
           </button>
         )}
         {canTakeOver(t) && <TakeOverButton t={t} />}
+        {!t.chat?.open && !t.takenOver && <TalkButton t={t} agent="analyst" label={shipped(t) ? 'Ask a question' : 'Ask the Analyst'} />}
         <span className="note">{t.live ? 'Updates live as the squad works.' : ''}</span>
         <span className="grow" />
         <Cmd text={t.live && t.stage !== 'release' ? `squad stop ${t.id}` : commandFor(t)} />
@@ -1113,6 +1121,7 @@ function StoryTab({ t }: { t: Ticket }) {
       <BriefList head="Edge cases" items={t.brief?.edgeCases} />
       <Attachments t={t} />
       <Notes t={t} />
+      <ChangeHistory t={t} />
       {t.story ? (
         <PlanBody t={{ ...t, decision: undefined, work: undefined }} />
       ) : (

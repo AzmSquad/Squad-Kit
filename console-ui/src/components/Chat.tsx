@@ -8,18 +8,19 @@ import { Cmd, Glyph } from './ui';
 import { Attachments } from './Attachments';
 import { Item, Markdown, merge, type Item as AcpItem } from './Conversation';
 import { readFile, type PickedFile } from './dialogs';
+import { ProposeFromMessage, shipped } from './ChangeCard';
 
 export const AGENT_TITLE: Record<AgentName, string> = { analyst: 'Analyst', architect: 'Architect', builder: 'Builder', reviewer: 'Reviewer', tester: 'Tester' };
 const SESSION: Record<AgentName, 'intake' | 'build' | 'review' | 'tester'> = { analyst: 'intake', architect: 'intake', builder: 'build', reviewer: 'review', tester: 'tester' };
 
-/** "Talk it through" from anywhere: opens the chat with one agent. Its work pauses while you talk. */
+/** "Talk it through" from anywhere: opens the chat with one agent. Asking never stops the work. */
 export function TalkButton({ t, agent, label, primary }: { t: Ticket; agent: AgentName; label?: string; primary?: boolean }) {
   const act = useAct();
   return (
     <button
       className={`btn ${primary ? 'pri' : ''}`}
       disabled={act.isPending}
-      onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/chat/start`, body: { with: agent }, done: `Talking with the ${AGENT_TITLE[agent]}. Its work waits.` })}
+      onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/chat/start`, body: { with: agent }, done: `Talking with the ${AGENT_TITLE[agent]}.${t.live || t.squad ? ' The work goes on.' : ''}` })}
     >
       <MessageCircle size={14} /> {label ?? `Talk to the ${AGENT_TITLE[agent]}`}
     </button>
@@ -39,9 +40,11 @@ export function ChatPanel({ t }: { t: Ticket }) {
   const fileInput = useRef<HTMLInputElement>(null);
   const end = useRef<HTMLDivElement>(null);
   const who = AGENT_TITLE[c.with];
+  // Beside the work the agent talks in a side conversation of its own.
+  const key = c.beside ? 'chat' : SESSION[c.with];
   const conv = useQuery({
-    queryKey: ['conversation', t.id, SESSION[c.with]],
-    queryFn: () => api<ConversationResponse>(`/api/v1/tickets/${t.id}/conversations/${SESSION[c.with]}`),
+    queryKey: ['conversation', t.id, key],
+    queryFn: () => api<ConversationResponse>(`/api/v1/tickets/${t.id}/conversations/${key}`),
     refetchInterval: c.thinking ? 1500 : 8000,
     retry: false,
   });
@@ -66,7 +69,7 @@ export function ChatPanel({ t }: { t: Ticket }) {
       },
     );
   };
-  const writes = c.with === 'analyst' || (c.with === 'architect' && Boolean(t.specApproved));
+  const writes = !c.beside && (c.with === 'analyst' || (c.with === 'architect' && Boolean(t.specApproved)));
   const what = c.with === 'analyst' ? 'spec' : 'design';
   const has = c.with === 'analyst' ? Boolean(t.story) : Boolean(t.steps);
   const later = c.with === 'builder' || c.with === 'reviewer' || c.with === 'tester';
@@ -82,8 +85,16 @@ export function ChatPanel({ t }: { t: Ticket }) {
             <MessageCircle size={15} />
           </span>
           <div>
-            <b>Talking it through with the {who}</b>
-            <span>{later ? `Its work is paused. Press Done and it carries on as you agreed.` : `Nothing is written until you press ${writes ? `${has ? 'Update' : 'Write'} the ${what}` : 'a button'}. You still approve it after.`}</span>
+            <b>{c.beside ? `Asking the ${who}` : `Talking it through with the ${who}`}</b>
+            <span>
+              {c.beside
+                ? shipped(t)
+                  ? 'This ticket is accepted: ask anything, nothing changes. A change becomes a new linked ticket or a bug.'
+                  : 'The work goes on while you talk; asking changes nothing. To change what gets built, propose a change.'
+                : later
+                  ? `Its work is paused. Press Done and it carries on as you agreed.`
+                  : `Nothing is written until you press ${writes ? `${has ? 'Update' : 'Write'} the ${what}` : 'a button'}. You still approve it after.`}
+            </span>
           </div>
         </div>
         <div className="chat">
@@ -97,7 +108,7 @@ export function ChatPanel({ t }: { t: Ticket }) {
         </div>
         {c.ready && !c.thinking && (
           <div className="chatready">
-            <Check size={14} strokeWidth={2.5} /> The {who} thinks it understands enough. {writes ? `Press ${has ? 'Update' : 'Write'} the ${what} when you are happy.` : later ? 'Press Done when you are happy.' : ''}
+            <Check size={14} strokeWidth={2.5} /> The {who} thinks it understands enough. {writes ? `Press ${has ? 'Update' : 'Write'} the ${what} when you are happy.` : later && !c.beside ? 'Press Done when you are happy.' : ''}
           </div>
         )}
         {drag && <div className="chatdrop">Drop files to add them to your message</div>}
@@ -150,7 +161,7 @@ export function ChatPanel({ t }: { t: Ticket }) {
           </button>
         )}
         <button className={`btn ${writes ? '' : 'pri'}`} disabled={c.thinking || act.isPending} onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/chat/done`, done: later ? `The ${who} carries on as you agreed.` : 'Done talking.' })}>
-          {later ? 'Done, carry on' : writes ? 'Done, no changes' : 'Done'}
+          {c.beside ? 'Done' : later ? 'Done, carry on' : writes ? 'Done, no changes' : 'Done'}
         </button>
         <span className="grow" />
         {session && conv.data?.cwd && <Cmd text={`cd "${conv.data.cwd}" && claude --resume ${session}`} />}
@@ -166,6 +177,7 @@ function Bubble({ m, t, used, cwd }: { m: ChatMessage; t: Ticket; used: Extract<
       <div className="bubble you">
         {m.text && <div className="btext">{m.text}</div>}
         {m.files && m.files.length > 0 && <Attachments ticket={t.id} files={m.files} />}
+        {m.text && <ProposeFromMessage t={t} text={m.text} from={t.chat?.with} />}
       </div>
     );
   }

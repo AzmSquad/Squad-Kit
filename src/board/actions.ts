@@ -36,7 +36,9 @@ import { aiTool, trackerFor, trackerModule } from '../modules/registry.js';
 import { readAgent } from '../engine/agents.js';
 import type { Tracker } from '../modules/tracker/types.js';
 import { localSetupFor, mergeLocally, opensPullRequest, syncWiki } from '../engine/sync.js';
-import type { AgentChat, AgentName, Criterion, PlanComment, PlanEdit, PlanPart, PlanSnapshot, StuckChoice, StuckOption, TicketNote, Track, TrackerEvent, WayOut } from './types.js';
+import type { AgentChat, AgentName, ChangePart, Criterion, PlanComment, PlanEdit, PlanPart, PlanSnapshot, SpecChange, StuckChoice, StuckOption, TicketNote, Track, TrackerEvent, WayOut } from './types.js';
+import { criterionText } from './docs.js';
+import { changeLines } from '../engine/prompts.js';
 import { endProcessTree } from '../engine/watchdog.js';
 import { readTicket, ticketFilesDir, ticketMediaDir } from './store.js';
 import { isMediaNote } from '../engine/media.js';
@@ -327,7 +329,13 @@ export function approve(bp: BoardPaths, id: string): Ticket {
   const kind = ticket.waiting?.kind;
   if (kind === 'spec') return approveSpec(bp, ticket, meta.speed);
   if (kind === 'plan') return approvePlan(bp, ticket, meta.speed);
-  if (kind === 'proof') return acceptProof(bp, ticket);
+  if (kind === 'proof') {
+    // The proof does not show a change that is still open, so it cannot be accepted yet.
+    const c = openChange(ticket);
+    if (c) throw new BoardActionError(`Change ${c.id} is still open. ${c.status === 'proposed' || c.status === 'failed' ? 'Approve or decline it first.' : 'The squad builds it first, then the proof comes again.'}`);
+    return acceptProof(bp, ticket);
+  }
+  if (kind === 'change') return approveChange(bp, ticket.id);
   if (kind === 'questions') throw new BoardActionError(`${ticket.id} needs answers first. Run: squad answer ${ticket.id}`);
   if (kind === 'stuck') throw new BoardActionError(`${ticket.id} needs a decision. Run: squad decide ${ticket.id}`);
   throw new BoardActionError(`${ticket.id} is not waiting for an approval right now.`);
@@ -726,8 +734,10 @@ function openChat(t: Ticket, agent: AgentName, before: AgentChat['before']): voi
 }
 
 /**
- * Talk it through: open a chat with any agent on the ticket. Its work pauses until you are done, so the two of you
- * never pull the ticket in different directions. The agent opens with where it is and what it is unsure of.
+ * Talk it through: open a chat with any agent on the ticket. Asking never stops the work: while the squad works on the
+ * ticket, the chat runs beside it and changes nothing; a change goes through the spec instead (proposeChange). A
+ * ticket that waits for you stays with you while you talk, so the two of you never pull it in different directions.
+ * An accepted or released ticket answers questions only. The agent opens with where it is and what it is unsure of.
  */
 export function startChat(bp: BoardPaths, id: string, agent: AgentName): Ticket {
   const meta = readMeta(bp);
@@ -735,13 +745,20 @@ export function startChat(bp: BoardPaths, id: string, agent: AgentName): Ticket 
   return updateTicket(bp, id, (t) => {
     if (t.chat?.open) throw new BoardActionError(`${t.id} already has a chat open with the ${AGENT_TITLE[t.chat.with]}.`);
     if (t.takenOver) throw new BoardActionError(`${t.id} is taken over. Give it back first.`);
-    if (t.stage === 'release' || t.stage === 'done') throw new BoardActionError(`${t.id} is accepted already. Report a bug or add a new ticket instead.`);
     const later = agent === 'builder' || agent === 'reviewer' || agent === 'tester';
     if (later && meta.engine === 'live' && !t.sessions?.[CHAT_SESSION[agent]]) {
       throw new BoardActionError(`The ${AGENT_TITLE[agent]} has not worked on ${t.id} yet, so there is nothing to talk through with it.`);
     }
-    if (t.live && meta.engine === 'live') t.stopRequested = true;
-    openChat(t, agent, { waiting: t.waiting, ...(t.squad?.phase ? { phase: t.squad.phase } : {}) });
+    const done = shipped(t);
+    if (done || t.live || t.squad) {
+      // Beside the work. Talking to the same agent again keeps the earlier messages; the agent starts a fresh side
+      // conversation that reads them, so what it knows about the ticket is never out of date.
+      const again = t.chat?.with === agent && t.chat.beside ? t.chat : undefined;
+      t.chat = { with: agent, open: true, messages: again?.messages ?? [], thinking: true, before: { waiting: t.waiting }, beside: true };
+      addActivity(t, 'you', `Started talking with the ${AGENT_TITLE[agent]}. ${done ? 'Questions only: the accepted work stays as it is' : 'The work goes on'}`);
+      return;
+    }
+    openChat(t, agent, { waiting: t.waiting });
     addActivity(t, 'you', `Started talking it through with the ${AGENT_TITLE[agent]}`);
   });
 }
@@ -772,6 +789,13 @@ export function chatWrite(bp: BoardPaths, id: string): Ticket {
     const c = t.chat;
     if (!c?.open) throw new BoardActionError(`${t.id} has no chat open.`);
     if (c.thinking) throw new BoardActionError(`The ${AGENT_TITLE[c.with]} is still answering. Wait a moment.`);
+    if (c.beside) {
+      throw new BoardActionError(
+        shipped(t)
+          ? `${t.id} is ${t.stage === 'done' ? 'released' : 'accepted'}, so this chat answers questions only. For a change, make a new linked ticket or report a bug.`
+          : 'The squad is working on this ticket, so this talk is for questions. To change the spec, propose a change: the Analyst writes it and you approve it.',
+      );
+    }
     if (c.with === 'architect' ? !t.specApproved : c.with !== 'analyst') {
       throw new BoardActionError(c.with === 'architect' ? 'The Architect writes the design once the spec is approved.' : `The ${AGENT_TITLE[c.with]} does not write the spec or design.`);
     }
@@ -798,6 +822,11 @@ export function chatDone(bp: BoardPaths, id: string): Ticket {
     if (!c?.open) throw new BoardActionError(`${t.id} has no chat open.`);
     if (c.thinking) throw new BoardActionError(`The ${AGENT_TITLE[c.with]} is still answering. Wait a moment.`);
     c.open = false;
+    // Beside the work nothing was paused, so nothing goes back: the ticket is wherever the squad took it.
+    if (c.beside) {
+      addActivity(t, 'you', `Done talking with the ${AGENT_TITLE[c.with]}`);
+      return;
+    }
     t.stopRequested = undefined;
     addActivity(t, 'you', `Done talking with the ${AGENT_TITLE[c.with]}`);
     const live = meta.engine === 'live';
@@ -821,16 +850,268 @@ export function chatDone(bp: BoardPaths, id: string): Ticket {
   });
 }
 
+/* ── A change goes through the spec ───────────────────── */
+
+/** Accepted (merged, or waiting for its release) or released: the work is for questions only. */
+export function shipped(t: Ticket): boolean {
+  return t.stage === 'release' || t.stage === 'done';
+}
+
+/** Thrown for a change asked on accepted work. It becomes a new linked ticket or a bug report instead. */
+export class ReleasedError extends BoardActionError {}
+
+function releasedLine(t: Ticket): string {
+  const when = t.stage === 'done' ? `released${t.release ? ` in ${t.release}` : ''}` : `accepted${t.release ? ` and goes out in ${t.release}` : ''}`;
+  return `${t.id} is ${when}, so it only answers questions. Make the change a new linked ticket or report a bug.`;
+}
+
+/** The change still open on a ticket, if any. There is at most one. */
+export function openChange(t: Ticket): SpecChange | undefined {
+  const c = t.changes?.at(-1);
+  return c && c.status !== 'done' && c.status !== 'declined' ? c : undefined;
+}
+
+/** A change the person must look at: the Analyst's proposal, or a proposal that could not be written. */
+export function changeNeedsYou(t: Ticket): boolean {
+  const s = openChange(t)?.status;
+  return s === 'proposed' || s === 'failed' || s === 'design-ready';
+}
+
+/** The Builder has started on the ticket's copy: from now on a change reaches the work through the Builder. */
+export function buildStarted(t: Ticket): boolean {
+  return Boolean(t.sessions?.build);
+}
+
+/**
+ * What an open change needs from the squad next: the Architect's design update (a big one), the Builder, or nothing
+ * yet. Only once the build has started; before that, the change lives in the spec and the design alone.
+ */
+export function changeWork(t: Ticket): 'design' | 'build' | null {
+  const c = openChange(t);
+  if (!c || !buildStarted(t)) return null;
+  if (c.size === 'big') return c.status === 'approved' || c.status === 'designing' ? 'design' : c.status === 'building' ? 'build' : null;
+  return c.status === 'approved' || c.status === 'building' ? 'build' : null;
+}
+
+/** The Analyst or the Architect is writing the spec or the design right now. */
+function writerNow(t: Ticket): string | null {
+  if (!t.live || (t.stage !== 'tickets' && t.stage !== 'specs')) return null;
+  return t.specApproved ? 'Architect is writing the design' : 'Analyst is writing the spec';
+}
+
+const SPEC_CHANGED = 'The spec changed';
+
+/** Puts the change's new wording into the spec. New "done when" items go at the end, so the others keep their numbers. */
+function applyChange(t: Ticket, c: SpecChange): void {
+  const criteria = [...(t.criteria ?? [])];
+  const gone = new Set<number>();
+  for (const p of c.parts ?? []) {
+    if (p.part === 'story') t.story = p.after;
+    else if (p.index === undefined) {
+      if (p.criterion) criteria.push({ ...p.criterion });
+    } else if (p.criterion) criteria[p.index] = { ...p.criterion };
+    else gone.add(p.index);
+  }
+  t.criteria = criteria.filter((_, i) => !gone.has(i));
+}
+
+/** The Analyst's answer when it writes a change into the spec. */
+export interface ChangeAnswer {
+  summary: string;
+  size: 'small' | 'big';
+  why: string;
+  /** The whole new story, or empty when the change does not touch it. */
+  story: string;
+  criteria: { number: number; action: 'change' | 'add' | 'remove'; given?: string; when?: string; then?: string }[];
+}
+
+/** Turns the Analyst's answer into old and new wording. The old words come from the ticket itself, never from the agent. */
+export function changeParts(t: Ticket, out: ChangeAnswer): ChangePart[] {
+  const parts: ChangePart[] = [];
+  const story = out.story?.trim();
+  if (story && story !== t.story?.trim()) parts.push({ part: 'story', before: t.story ?? '', after: story });
+  const criteria = t.criteria ?? [];
+  const used = new Set<number>();
+  for (const x of out.criteria ?? []) {
+    const c = { given: x.given?.trim() ?? '', when: x.when?.trim() ?? '', then: x.then?.trim() ?? '' };
+    const i = Math.round(x.number) - 1;
+    const old = criteria[i];
+    if (x.action === 'remove') {
+      if (old && !used.has(i)) parts.push({ part: 'criterion', index: i, before: criterionText(old), after: '' });
+      used.add(i);
+      continue;
+    }
+    if (!c.then) continue;
+    if (x.action === 'change' && old && !used.has(i)) {
+      if (criterionText(old) !== criterionText(c)) parts.push({ part: 'criterion', index: i, before: criterionText(old), after: criterionText(c), criterion: c });
+      used.add(i);
+    } else parts.push({ part: 'criterion', before: '', after: criterionText(c), criterion: c });
+  }
+  return parts;
+}
+
+/**
+ * The person proposes a change, from the ticket or from a message in a chat. The Analyst writes it into the spec
+ * beside the work: the old and new wording, and whether it is small or big. Nothing changes until the person approves.
+ */
+export function proposeChange(bp: BoardPaths, id: string, text: string, from?: AgentName): Ticket {
+  const ask = text?.trim();
+  if (!ask) throw new BoardActionError('Say in a line or two what should change.');
+  const meta = readMeta(bp);
+  return updateTicket(bp, id, (t) => {
+    if (shipped(t)) throw new ReleasedError(releasedLine(t));
+    const open = openChange(t);
+    if (open) throw new BoardActionError(`${t.id} already has change ${open.id} open. Approve or decline it first: one change at a time.`);
+    if (t.takenOver) throw new BoardActionError(`${t.id} is taken over. Give it back first.`);
+    // Before its approval the spec is changed right on its card, with comments, edits or a talk.
+    if (!t.specApproved && !['implement', 'test', 'review'].includes(t.stage)) {
+      throw new BoardActionError(
+        t.story
+          ? `The spec of ${t.id} still waits for your approval. Change it right there: comment on it, edit it or talk it through.`
+          : `The spec of ${t.id} is not written yet. Add a note or tell the Analyst, and it goes into the spec.`,
+      );
+    }
+    const c: SpecChange = { id: `c${(t.changes?.length ?? 0) + 1}`, ask, by: meta.user.name, at: now(), status: 'writing', ...(from && AGENT_TITLE[from] ? { from } : {}) };
+    t.changes = [...(t.changes ?? []), c];
+    addActivity(t, 'you', `Proposed change ${c.id}: ${ask}`);
+  });
+}
+
+/** The Analyst could not write the change: it tries again. */
+export function retryChange(bp: BoardPaths, id: string): Ticket {
+  return updateTicket(bp, id, (t) => {
+    const c = openChange(t);
+    if (c?.status !== 'failed') throw new BoardActionError(`${t.id} has no change to try again.`);
+    c.status = 'writing';
+    delete c.error;
+    addActivity(t, 'you', `Asked the Analyst to write change ${c.id} again`);
+  });
+}
+
+/**
+ * Approves the change that waits: the Analyst's proposal, or the Architect's design update for a big one. Before the
+ * build the change simply goes into the spec (and a big one back to the Architect's design, approved as usual). Once
+ * the Builder works: a small change goes into the spec now and reaches the Builder at the end of its current step; a
+ * big one pauses the Builder after that step, while the Architect updates the design.
+ */
+export function approveChange(bp: BoardPaths, id: string): Ticket {
+  const meta = readMeta(bp);
+  const live = meta.engine === 'live';
+  return updateTicket(bp, id, (t) => {
+    const c = openChange(t);
+    if (shipped(t)) throw new ReleasedError(releasedLine(t));
+    if (c?.status === 'design-ready') return approveChangeDesign(t, c, live ? 0.2 : 2, live ? 1 : meta.speed);
+    if (c?.status !== 'proposed') throw new BoardActionError(`${t.id} has no change waiting for you.`);
+    const busy = writerNow(t);
+    if (busy) throw new BoardActionError(`The ${busy} right now. Approve the change once it is ready for you.`);
+    c.decided = { by: meta.user.name, at: now(), approved: true };
+    const big = c.size === 'big';
+    const what = (c.summary ?? c.ask).replace(/\.+$/, '');
+    tellLater(t, meta.engine, { kind: 'note', text: `Change ${c.id} to the spec, approved by ${meta.user.name}: ${c.summary ?? c.ask}`, noteKind: 'note' });
+    if (!buildStarted(t)) {
+      const before = planSnapshot(t);
+      applyChange(t, c);
+      c.status = 'done';
+      if (big && t.steps) {
+        // The design was written from the old spec: the Architect updates it, and you approve it as any design.
+        t.planReview = { before, sent: [] };
+        t.changeRequest = `${SPEC_CHANGED} (change ${c.id}): ${c.summary ?? c.ask}\n${changeLines(c)}\nUpdate the design so it builds the new spec.`;
+        t.waiting = null;
+        t.live = true;
+        t.stage = 'specs';
+        t.status = 'Architect is updating the design for your change';
+        scheduleSquad(t, 'plan-rewrite', 2, meta.speed);
+        addActivity(t, 'you', `Approved change ${c.id} (big): ${what}. The spec says it now, and the Architect updates the design`);
+      } else addActivity(t, 'you', `Approved change ${c.id}: ${what}. The spec says it now`);
+      return;
+    }
+    c.status = 'approved';
+    if (big) {
+      addActivity(t, 'you', `Approved change ${c.id} (big): ${what}. The Builder pauses after its current step, and the Architect updates the design`);
+      return;
+    }
+    applyChange(t, c);
+    addActivity(t, 'you', `Approved change ${c.id} (small): ${what}. The spec says it now; it reaches the Builder at the end of its current step`);
+  });
+}
+
+/** The design update for a big change: the spec and the design change together, and the Builder redoes only what changed. */
+function approveChangeDesign(t: Ticket, c: SpecChange, seconds: number, speed: number): void {
+  const design = c.design!;
+  applyChange(t, c);
+  const old = t.steps ?? [];
+  t.steps = design.steps.map((s) => {
+    const kept = s.change === 'same' ? old.find((o) => o.title === s.title) : undefined;
+    return { title: s.title, status: kept ? (kept.status === 'done' ? 'done' : 'todo') : s.change === 'same' ? 'done' : 'todo' };
+  });
+  if (t.work) t.work = { ...t.work, steps: t.steps.length };
+  const redo = t.steps.flatMap((s, i) => (s.status === 'done' ? [] : [i + 1]));
+  c.status = 'building';
+  delete c.paused;
+  t.waiting = null;
+  t.live = true;
+  t.stage = 'implement';
+  t.status = `Builder is redoing ${redo.length === 1 ? 'step' : 'steps'} ${redo.join(', ')} for change ${c.id}`;
+  addActivity(t, 'you', `Approved the design update for change ${c.id}. The Builder redoes only ${redo.length === 1 ? 'step' : 'steps'} ${redo.join(', ') || 'none'}`);
+  scheduleSquad(t, 'change-build', seconds, speed);
+}
+
+/**
+ * Declines the change that waits. Declining a proposal changes nothing. Declining a big change's design update keeps
+ * the spec as it was, and the work carries on from where it paused.
+ */
+export function declineChange(bp: BoardPaths, id: string, reason?: string): Ticket {
+  const meta = readMeta(bp);
+  const live = meta.engine === 'live';
+  return updateTicket(bp, id, (t) => {
+    const c = openChange(t);
+    if (!c || (c.status !== 'proposed' && c.status !== 'design-ready' && c.status !== 'failed')) throw new BoardActionError(`${t.id} has no change waiting for you.`);
+    const why = reason?.trim();
+    const design = c.status === 'design-ready';
+    c.status = 'declined';
+    c.decided = { by: meta.user.name, at: now(), approved: false, ...(why ? { reason: why } : {}) };
+    addActivity(t, 'you', `Declined ${design ? `the design update for change ${c.id}; the spec stays as it was` : `change ${c.id}`}${why ? `: ${why}` : ''}`);
+    if (!design) return;
+    const paused = c.paused;
+    delete c.paused;
+    t.waiting = paused?.waiting ?? null;
+    if (t.waiting) {
+      t.live = false;
+      t.status = t.waiting.summary;
+      return;
+    }
+    t.live = true;
+    t.status = 'Carrying on';
+    scheduleSquad(t, paused?.phase ?? 'test', live ? 0.2 : 2, live ? 1 : meta.speed);
+  });
+}
+
+/**
+ * A change asked for after the ticket is accepted or released: it becomes a new ticket linked to it, or a bug report
+ * found in its release. The released ticket itself stays as it is.
+ */
+export function changeAfterRelease(bp: BoardPaths, id: string, text: string, as: 'ticket' | 'bug'): Ticket {
+  const ask = text?.trim();
+  if (!ask) throw new BoardActionError('Say in a line or two what should change.');
+  const t0 = requireTicket(bp, id);
+  if (!shipped(t0)) throw new BoardActionError(`${t0.id} is not accepted yet. Propose the change on it instead.`);
+  const line = ask.split('\n')[0]!.trim();
+  const title = line.length > 80 ? `${line.slice(0, 77).trimEnd()}…` : line;
+  const link = `A change to ${t0.id} "${t0.title}"${t0.release ? `, ${t0.stage === 'done' ? 'released in' : 'going out in'} ${t0.release}` : ''}.`;
+  const made = as === 'bug' ? reportBug(bp, { what: title, ...(t0.release && t0.stage === 'done' ? { foundIn: t0.release } : {}) }) : createTicket(bp, { title, ask: `${ask}\n\n${link}`, priority: t0.priority });
+  updateTicket(bp, t0.id, (x) => addActivity(x, 'you', `Asked for a change after release. It became ${as === 'bug' ? 'bug' : 'ticket'} ${made.id}: ${title}`));
+  return updateTicket(bp, made.id, (x) => {
+    x.changeOf = t0.id;
+    if (as === 'bug') x.ask = `${ask}\n\n${link}`;
+  });
+}
+
 /* ── Review a plan like a document ─────────────────────── */
 
 const PART_NAME = { story: 'the story', criterion: 'done when', decision: 'the decision', step: 'step' } as const;
 
 function partLabel(p: PlanPart): string {
   return p.part === 'criterion' || p.part === 'step' ? `${PART_NAME[p.part]} ${(p.index ?? 0) + 1}` : PART_NAME[p.part];
-}
-
-function criterionText(c: Criterion): string {
-  return `Given ${c.given}, when ${c.when}, then ${c.then}.`;
 }
 
 /** The words a part has now, to quote it back to the agent. */
@@ -918,6 +1199,7 @@ function toWriter(t: Ticket, note: string, speed: number, status?: string): void
 export function changeSummary(change: string | undefined): string {
   if (!change) return 'your change';
   if (change.startsWith('Start over')) return 'started over with your new direction';
+  if (change.startsWith(SPEC_CHANGED)) return 'for the change to the spec';
   if (change.includes('\n')) {
     const n = change.split('\n').filter((l) => l.startsWith('- On ')).length;
     return `with your ${n} ${n === 1 ? 'comment' : 'comments'}`;
@@ -1314,9 +1596,9 @@ export function keepWaiting(bp: BoardPaths, id: string): Ticket {
   });
 }
 
-/** Everything that needs the person: open questions, plans, proof, decisions, and steps that look stuck. */
+/** Everything that needs the person: open questions, plans, proof, decisions, changes, and steps that look stuck. */
 export function inbox(bp: BoardPaths): Ticket[] {
-  return listTickets(bp).filter((t) => t.waiting || t.quiet?.kind === 'stuck' || t.outdated?.length);
+  return listTickets(bp).filter((t) => t.waiting || t.quiet?.kind === 'stuck' || t.outdated?.length || changeNeedsYou(t));
 }
 
 /** Ask the Architect to read the code again for the architecture page: the stack, the patterns and the project map. */
@@ -1408,7 +1690,9 @@ export function updateForDecision(bp: BoardPaths, id: string, adr: string): Tick
     return follow;
   }
   if (t0.takenOver) throw new BoardActionError(`${id} is taken over. Give it back first.`);
-  if (t0.chat?.open) throw new BoardActionError(`${id} has a chat open. Finish it first.`);
+  if (t0.chat?.open && !t0.chat.beside) throw new BoardActionError(`${id} has a chat open. Finish it first.`);
+  const open = openChange(t0);
+  if (open) throw new BoardActionError(`${id} has change ${open.id} open. Finish it first: one change at a time.`);
   if (t0.live && meta.engine === 'live') throw new BoardActionError(`${id} is working right now. Press Stop first, then update the plan.`);
   // Accepted but not merged (its pull request could not merge): it leaves the draft release until it is accepted again.
   const draft = listReleases(bp).find((r) => r.status !== 'released' && r.tickets.includes(id));

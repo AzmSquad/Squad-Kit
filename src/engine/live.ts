@@ -16,9 +16,23 @@ import {
   writeMeta,
   type BoardPaths,
 } from '../board/store.js';
-import { CHAT_SESSION, applyPlanEdits, approveExpress, changeSummary, needsSpec, pullRequestClashed, wayOptions } from '../board/actions.js';
+import {
+  CHAT_SESSION,
+  applyPlanEdits,
+  approveExpress,
+  buildStarted,
+  changeParts,
+  changeSummary,
+  changeWork,
+  needsSpec,
+  openChange,
+  pullRequestClashed,
+  shipped,
+  wayOptions,
+  type ChangeAnswer,
+} from '../board/actions.js';
 import { scheduleSquad } from '../board/schedule.js';
-import type { BoardMeta, DecisionArea, ImpactCheck, PatternNote, ProjectCommands, Question, Role, StackNote, TechDraft, Ticket } from '../board/types.js';
+import type { BoardMeta, ChangeStep, DecisionArea, ImpactCheck, PatternNote, ProjectCommands, Question, Role, SpecChange, StackNote, TechDraft, Ticket } from '../board/types.js';
 import { detectStack } from '../board/stack.js';
 import { AI_TOOLS, aiTool, describeToolEvent } from '../modules/registry.js';
 import type { AgentResult, AgentRun, ToolEvent } from '../modules/ai-tool/types.js';
@@ -49,6 +63,10 @@ const MAX_CHECK_TRIES = 3;
 const MAX_REVIEW_ROUNDS = 2;
 /** How often the board looks for tickets teammates pushed: handed to you, or moved on by their owner. */
 const PICK_UP_MS = 2 * 60_000;
+
+/** The steps in which the Builder works. A small change goes into the next one of these as it starts. */
+const BUILDER_PHASES = new Set(['build', 'unstick', 'fix', 'answered-builder', 'chat-carry-builder', 'review-fix', 'update-base', 'change-build']);
+
 
 export function projectRoot(bp: BoardPaths): string {
   return bp.root;
@@ -186,25 +204,25 @@ export class LiveSquad {
       }
       // Someone else's ticket: their squad works on it, on their computer (ADR-001).
       if (!isMine(t, meta)) continue;
+      // Asking never stops the work: a chat reply and the Analyst writing a proposed change run beside the ticket's
+      // step. They never wait for it, never stop it and never count against the limit.
+      if (t.chat?.open && t.chat.thinking && !this.running.has(`__chat:${t.id}`)) this.launch(`__chat:${t.id}`, () => this.chatReply(t.id));
+      if (openChange(t)?.status === 'writing' && !this.running.has(`__change:${t.id}`)) this.launch(`__change:${t.id}`, () => this.writeChange(t.id));
       if (t.stopRequested) {
         this.stops.get(t.id)?.abort();
         if (!this.running.has(t.id)) this.stopped(t.id);
         continue;
       }
       if (this.running.has(t.id)) continue;
-      if (t.chat?.open && t.chat.thinking) {
-        if (this.mayStart(limit)) this.launch(t.id, () => this.chatReply(t.id));
-        continue;
-      }
       const q = t.questions?.find((x) => x.thinking);
       if (q) {
         if (this.mayStart(limit)) this.launch(t.id, () => this.reply(t.id, q.id));
         continue;
       }
       if (t.squad && Date.parse(t.squad.nextAt) <= Date.now() && this.mayStart(limit)) {
-        const phase = t.squad.phase;
+        const phase = this.phaseFor(t);
         this.launch(t.id, () => this.step(t.id, phase));
-      }
+      } else if (!t.squad) this.pickUpChange(t);
     }
   }
 
@@ -275,7 +293,7 @@ export class LiveSquad {
   private stopped(id: string, phase?: string): void {
     // Taken over, or talking it through: the person has the ticket now, so no stuck card, just quiet.
     const held = readTicket(this.bp, id);
-    if (held?.takenOver || held?.chat?.open) {
+    if (held?.takenOver || (held?.chat?.open && !held.chat.beside)) {
       this.update(id, (t) => {
         t.stopRequested = undefined;
         t.live = false;
@@ -322,8 +340,9 @@ export class LiveSquad {
         t.squad = null;
         t.live = false;
       }
-      // The same while you talk it through with an agent: nothing moves until you press a button.
-      else if (t.chat?.open) {
+      // The same while you talk through a ticket that waited for you: nothing moves until you press a button. A chat
+      // beside the work changes nothing: the step goes on.
+      else if (t.chat?.open && !t.chat.beside) {
         t.waiting = { kind: 'chat', summary: t.waiting?.kind === 'chat' ? t.waiting.summary : 'Talking it through' };
         t.squad = null;
         t.live = false;
@@ -357,8 +376,10 @@ export class LiveSquad {
     return aiTool(readAgent(this.bp, role).tool)?.label ?? 'its AI tool';
   }
 
-  private async runAgent(opts: AgentRun & { ticket?: string; role: AgentRole; step?: string; levelStep?: string }): Promise<AgentResult> {
-    const signal = opts.ticket ? this.stops.get(opts.ticket)?.signal : undefined;
+  /** `job` names a run beside the ticket's step (a chat reply, a proposed change): its own Stop and watchdog, not the step's. */
+  private async runAgent(opts: AgentRun & { ticket?: string; job?: string; role: AgentRole; step?: string; levelStep?: string }): Promise<AgentResult> {
+    const job = opts.job ?? opts.ticket;
+    const signal = job ? this.stops.get(job)?.signal : undefined;
     // Each role runs as its own agent: the team's file for it sets the tool, the model and extra instructions.
     const agent = readAgent(this.bp, opts.role);
     const tool = aiTool(agent.tool);
@@ -375,7 +396,7 @@ export class LiveSquad {
     const lv = resolveLevel({ role: opts.role, step: levelStep, express: ticket?.track === 'express', tries: ticket?.tries }, agent.levels, personLevels());
     if (key && levelStep !== 'chat') this.update(key, (x) => addActivity(x, opts.role, `Runs on ${describeLevel(lv, tool)}`));
     opts = this.withNewNotes(opts);
-    const watch = key ? { onActivity: () => this.dog.beat(key), onSpawn: (pid: number) => this.dog.track(key, pid) } : {};
+    const watch = job ? { onActivity: () => this.dog.beat(job), onSpawn: (pid: number) => this.dog.track(job, pid) } : {};
     // Every role runs through the Agent Client Protocol unless the board says to run tools directly.
     const r = await tool.run({
       ...opts,
@@ -401,6 +422,7 @@ export class LiveSquad {
         for (const k of Object.keys(x.sessions ?? {}) as (keyof NonNullable<Ticket['sessions']>)[]) {
           if (x.sessions?.[k] === asked) x.sessions[k] = r.sessionId;
         }
+        if (x.chat?.side === asked) x.chat.side = r.sessionId;
         if (x.notesSeen?.[asked] !== undefined) x.notesSeen[r.sessionId!] = x.notesSeen[asked];
       });
     }
@@ -428,7 +450,7 @@ export class LiveSquad {
   private fail(id: string, error: string, retryPhase: string): void {
     try {
       this.update(id, (t) => {
-        if (t.takenOver || t.chat?.open) return;
+        if (t.takenOver || (t.chat?.open && !t.chat.beside)) return;
         t.live = false;
         t.squad = null;
         t.retryPhase = retryPhase;
@@ -702,6 +724,10 @@ export class LiveSquad {
         return this.review(id, true, true);
       case 'chat-carry-tester':
         return this.proof(id);
+      case 'change-design':
+        return this.changeDesign(id);
+      case 'change-build':
+        return this.changeBuild(id);
       case 'test':
         return this.checks(id);
       case 'review':
@@ -844,17 +870,24 @@ export class LiveSquad {
 
   /**
    * One reply in a talk with the person, in the agent's own session (a new one for the Analyst when you talk first).
+   * Beside the work the agent talks in a side session of its own, so the session that works is never touched.
    * The agent only talks and reads; it never moves the ticket on.
    */
   private async chatReply(id: string): Promise<void> {
     const t = readTicket(this.bp, id)!;
     const c = t.chat!;
+    const beside = Boolean(c.beside);
     const key = CHAT_SESSION[c.with];
-    const had = t.sessions?.[key];
+    const had = beside ? c.side : t.sessions?.[key];
     const later = c.with === 'builder' || c.with === 'reviewer' || c.with === 'tester';
     const cwd = later && t.worktree && fs.existsSync(t.worktree) ? t.worktree : projectRoot(this.bp);
     const session = had ?? randomUUID();
-    if (!had) this.update(id, (x) => (x.sessions = { ...x.sessions, [key]: session }));
+    if (!had) {
+      this.update(id, (x) => {
+        if (!beside) x.sessions = { ...x.sessions, [key]: session };
+        else if (x.chat) x.chat.side = session;
+      });
+    }
     const last = c.messages[c.messages.length - 1];
     const message = last?.who === 'you' ? last.text : null;
     let attached = '';
@@ -864,27 +897,36 @@ export class LiveSquad {
       const files = [...last.files.filter((f) => !isMediaNote(f)), ...heard.added];
       attached = `The person attached: ${files.join(', ')}${heard.missingKey ? ' (voice notes could not be written out: no speech to text key)' : ''}`;
     }
-    const talk = P.chatPrompt(c.with, message, P.chatNext(c.with, Boolean(t.story), Boolean(t.specApproved)), attached);
+    const done = shipped(t);
+    const next = beside ? P.besideNext(done) : P.chatNext(c.with, Boolean(t.story), Boolean(t.specApproved));
+    const talk = P.chatPrompt(c.with, message, next, attached, beside);
     const step = { analyst: 'questions', architect: 'design', builder: 'build', reviewer: 'review', tester: 'proof' }[c.with];
+    // A side conversation starts fresh each time the chat opens, with what was said before in it.
+    const earlier = beside ? c.messages.slice(0, message === null ? undefined : -1).slice(-8) : [];
+    const opening = beside
+      ? `${P.besidePrompt(this.meta(), listDecisions(this.bp), t, c.with, done, this.ctx(t))}${P.earlierTalk(earlier)}`
+      : P.intakePrompt(this.meta(), listDecisions(this.bp), t, this.ctx(t));
     try {
       const r = await this.runAgent({
         role: c.with,
         step,
         levelStep: 'chat',
         ticket: id,
+        job: `__chat:${id}`,
         cwd,
         ...(had ? { resume: had } : { sessionId: session }),
-        prompt: had ? talk : `${P.intakePrompt(this.meta(), listDecisions(this.bp), t, this.ctx(t))}\n\n${talk}`,
+        prompt: had ? talk : `${opening}\n\n${talk}`,
         permissions: ['read'],
         schema: P.CHAT_SCHEMA,
         timeoutMs: 10 * 60_000,
-        addDirs: attachmentDirs(t),
+        // Beside the work, the Analyst and the Architect may read the code built so far to answer.
+        addDirs: [...attachmentDirs(t), ...(beside && t.worktree && cwd !== t.worktree && fs.existsSync(t.worktree) ? [t.worktree] : [])],
       });
       const out = (r.structured ?? {}) as { reply?: string; ready?: boolean };
       this.update(id, (x) => {
         if (!x.chat) return;
         x.chat.messages.push({ who: c.with, text: (out.reply ?? r.text ?? '').trim() || '(no answer)', at: now() });
-        x.chat.ready = Boolean(out.ready);
+        x.chat.ready = !beside && Boolean(out.ready);
         x.chat.thinking = false;
       });
     } catch (err) {
@@ -909,6 +951,185 @@ export class LiveSquad {
       x.stage = 'test';
       x.status = 'Running the project checks';
       x.gates = { checks: 'pending', review: 'pending', proof: 'pending' };
+      x.reviewRound = 0;
+      x.proof = undefined;
+      scheduleSquad(x, 'test', 0.2, 1);
+    });
+  }
+
+  /* ── a change goes through the spec ──────────────────── */
+
+  /**
+   * An approved change comes in between steps. A big one sends the ticket to the Architect first; a small one goes to
+   * the Builder: inside its next step when that is the Builder's, or as a step of its own before anything else.
+   */
+  private phaseFor(t: Ticket): string {
+    const phase = t.squad!.phase;
+    const work = changeWork(t);
+    if (!work || phase.startsWith('change-')) return phase;
+    if (work === 'design') return 'change-design';
+    return openChange(t)!.size === 'big' || !BUILDER_PHASES.has(phase) ? 'change-build' : phase;
+  }
+
+  /** An approved change on a ticket where nothing runs starts now, unless the ticket waits on you for something else. */
+  private pickUpChange(t: Ticket): void {
+    const work = changeWork(t);
+    if (!work || t.takenOver || (t.waiting && t.waiting.kind !== 'proof')) return;
+    this.update(t.id, (x) => {
+      const c = openChange(x);
+      if (!c) return;
+      // The proof waiting for you does not show the change: it comes again after.
+      if (work === 'design' && x.waiting) c.paused = { waiting: x.waiting };
+      x.waiting = null;
+      x.live = true;
+      scheduleSquad(x, work === 'design' ? 'change-design' : 'change-build', 0.2, 1);
+    });
+  }
+
+  /**
+   * The Analyst writes a proposed change into the spec, beside the work, in a conversation of its own: the old and new
+   * words of each part it touches, and whether it is small or big. The old words come from the ticket itself.
+   */
+  private async writeChange(id: string): Promise<void> {
+    const t = readTicket(this.bp, id);
+    const c = t ? openChange(t) : undefined;
+    if (!t || !c || c.status !== 'writing') return;
+    const set = (change: (x: Ticket, y: SpecChange) => void) =>
+      this.update(id, (x) => {
+        const y = x.changes?.find((z) => z.id === c.id);
+        if (y?.status === 'writing') change(x, y);
+      });
+    try {
+      const chat = c.from && t.chat?.with === c.from ? t.chat.messages.slice(-6) : [];
+      const r = await this.runAgent({
+        role: 'analyst',
+        step: 'spec',
+        ticket: id,
+        job: `__change:${id}`,
+        cwd: projectRoot(this.bp),
+        sessionId: randomUUID(),
+        prompt: P.changePrompt(this.meta(), listDecisions(this.bp), t, c, chat, this.ctx(t)),
+        permissions: ['read'],
+        schema: P.CHANGE_SCHEMA,
+        timeoutMs: 10 * 60_000,
+        addDirs: attachmentDirs(t),
+      });
+      const out = r.structured as ChangeAnswer;
+      set((x, y) => {
+        const parts = changeParts(x, out);
+        if (!parts.length) {
+          y.status = 'failed';
+          y.error = `The Analyst found nothing in the spec to change. It said: ${out.summary}`;
+          addActivity(x, 'analyst', `Found nothing in the spec to change for ${y.id}`);
+          return;
+        }
+        y.status = 'proposed';
+        y.size = out.size === 'big' ? 'big' : 'small';
+        y.summary = out.summary.trim();
+        y.why = out.why.trim();
+        y.parts = parts;
+        delete y.error;
+        addActivity(x, 'analyst', `Wrote change ${y.id} into the spec (${y.size}): ${y.summary}`);
+      });
+    } catch (err) {
+      // Closing the board is not a failure: the Analyst writes it again when the board opens.
+      if (this.closing) return;
+      set((x, y) => {
+        y.status = 'failed';
+        y.error = (err as Error).message;
+        addActivity(x, 'analyst', `Could not write change ${y.id}: ${y.error}`);
+      });
+    }
+  }
+
+  /**
+   * A big change: the Builder's step has ended, so it pauses here while the Architect updates the design. The update
+   * waits for you; on approval the Builder redoes only the steps it touches.
+   */
+  private async changeDesign(id: string): Promise<void> {
+    const t0 = this.update(id, (x) => {
+      const c = openChange(x)!;
+      if (x.squad && x.squad.phase !== 'change-design') {
+        c.paused = { phase: x.squad.phase };
+        if (c.status === 'approved') addActivity(x, 'builder', `Paused after its step for change ${c.id}`);
+      }
+      c.status = 'designing';
+      x.live = true;
+      x.status = `Architect is updating the design for change ${c.id}`;
+    });
+    const c = openChange(t0)!;
+    const root = projectRoot(this.bp);
+    // The Architect goes on in its own conversation when it has one; it reads the code built so far.
+    const had = t0.sessions?.intake;
+    const r = await this.runAgent({
+      role: 'architect',
+      step: 'design',
+      ticket: id,
+      cwd: root,
+      ...(had ? { resume: had } : { sessionId: randomUUID() }),
+      prompt: P.changeDesignPrompt(t0, c, had ? undefined : { meta: this.meta(), decisions: listDecisions(this.bp), ctx: this.ctx(t0) }),
+      permissions: ['read'],
+      schema: P.CHANGE_DESIGN_SCHEMA,
+      timeoutMs: 10 * 60_000,
+      addDirs: this.extraDirs(t0).concat(t0.worktree && fs.existsSync(t0.worktree) ? [t0.worktree] : []),
+      onTool: this.watcher(id, 'architect', root),
+    });
+    const out = r.structured as { summary: string; steps: { title: string; change: ChangeStep['change'] }[] };
+    const steps: ChangeStep[] = (out.steps ?? [])
+      .filter((s) => s.title?.trim())
+      .map((s) => ({ title: s.title.trim(), change: s.change === 'same' || s.change === 'new' ? s.change : 'changed' }));
+    if (!steps.length) throw new Error('The Architect wrote no steps for the design update.');
+    this.update(id, (x) => {
+      const y = openChange(x);
+      if (!y) return;
+      y.design = { summary: (out.summary ?? '').trim(), before: (x.steps ?? []).map((s) => s.title), steps };
+      y.status = 'design-ready';
+      x.live = false;
+      x.squad = null;
+      x.status = 'Design update ready for you';
+      x.waiting = { kind: 'change', summary: `The design update for change ${y.id} is ready: is this how to build it?` };
+      addActivity(x, 'architect', `Updated the design for change ${y.id}: ${y.design.summary}`);
+    });
+  }
+
+  /** The Builder makes an approved change: a small one as a step of its own, a big one by redoing only what it touches. */
+  private async changeBuild(id: string): Promise<void> {
+    await this.workspace(id);
+    const c = openChange(readTicket(this.bp, id)!);
+    if (c?.size === 'big' && c.status === 'building') {
+      const t = this.update(id, (x) => {
+        x.stage = 'implement';
+        x.live = true;
+        x.tries = 0;
+        x.reviewRound = 0;
+      });
+      const redo = (t.steps ?? []).filter((s) => s.status !== 'done').length;
+      this.update(id, (x) => addActivity(x, 'builder', `Started redoing ${redo} ${redo === 1 ? 'step' : 'steps'} for change ${c.id}`));
+      await this.runBuilder(id, P.changeRedoPrompt(c, t.steps ?? []), true, 'build');
+      this.update(id, (x) => {
+        for (const s of x.steps ?? []) {
+          s.status = 'done';
+          s.live = undefined;
+        }
+        const y = openChange(x);
+        if (y?.id === c.id) y.status = 'done';
+        x.progress = 100;
+        addActivity(x, 'builder', `Redid the steps for change ${c.id}`);
+      });
+    } else if (c && changeWork(readTicket(this.bp, id)!) === 'build') {
+      this.update(id, (x) => {
+        x.stage = 'implement';
+        x.live = true;
+        x.status = `Builder is making change ${c.id}`;
+      });
+      await this.runBuilder(id, '', true, 'build');
+    }
+    // The code changed, so every gate runs again.
+    this.update(id, (x) => {
+      x.stage = 'test';
+      x.status = 'Running the project checks';
+      x.gates = { checks: 'pending', review: 'pending', proof: 'pending' };
+      x.tries = 0;
       x.reviewRound = 0;
       x.proof = undefined;
       scheduleSquad(x, 'test', 0.2, 1);
@@ -1128,8 +1349,12 @@ export class LiveSquad {
     });
   }
 
-  /** Runs (or continues) the Builder's conversation and maps its ">> step N" lines to the plan. */
+  /**
+   * Runs (or continues) the Builder's conversation and maps its ">> step N" lines to the plan. An approved small change
+   * reaches the Builder here, at a safe moment: the start of a step, before that step's own work.
+   */
   private async runBuilder(id: string, prompt: string, resume: boolean, step: 'build' | 'fix' = 'fix'): Promise<void> {
+    const change = this.handChange(id);
     const t = readTicket(this.bp, id)!;
     const cwd = t.worktree!;
     const started = Date.now();
@@ -1140,7 +1365,7 @@ export class LiveSquad {
       ticket: id,
       cwd,
       ...(resume ? { resume: t.sessions!.build } : { sessionId: t.sessions!.build }),
-      prompt,
+      prompt: change ? [P.smallChangePrompt(change), prompt].filter(Boolean).join('\n\n') : prompt,
       permissions: ['edit'],
       schema: P.BUILD_SCHEMA,
       timeoutMs: 60 * 60_000,
@@ -1175,7 +1400,30 @@ export class LiveSquad {
         if (doing) doing.live = line;
       }),
     });
+    if (change) {
+      this.update(id, (x) => {
+        const c = x.changes?.find((y) => y.id === change.id);
+        if (c?.status === 'building') c.status = 'done';
+        addActivity(x, 'builder', `Made change ${change.id}: ${change.summary ?? change.ask}`);
+      });
+    }
     this.askIfNeeded(id, 'builder', (r.structured as { question?: AgentAsk } | undefined)?.question);
+    // Approved while this step ran: it reaches the Builder now, at the end of the step, before anything else runs.
+    const late = openChange(readTicket(this.bp, id)!);
+    if (late && late.size !== 'big' && late.status === 'approved') await this.runBuilder(id, '', true, step);
+  }
+
+  /** An approved small change the Builder has not had yet: it goes into the step that starts now. */
+  private handChange(id: string): SpecChange | undefined {
+    const t = readTicket(this.bp, id);
+    const c = t ? openChange(t) : undefined;
+    if (!t || !c || c.size === 'big' || changeWork(t) !== 'build') return undefined;
+    this.update(id, (x) => {
+      const y = openChange(x);
+      if (y) y.status = 'building';
+      addActivity(x, 'builder', `Took change ${c.id} into this step`);
+    });
+    return c;
   }
 
   /** The person answered the Builder: the same conversation carries on, then the checks run as after any build. */

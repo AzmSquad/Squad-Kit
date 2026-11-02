@@ -9,7 +9,7 @@ export type Role = 'analyst' | 'architect' | 'spec' | 'builder' | 'tester' | 're
 /** Who wrote an activity line or a thread message. */
 export type Actor = Role | 'you' | 'squad';
 
-export type WaitingKind = 'questions' | 'spec' | 'plan' | 'proof' | 'stuck' | 'release' | 'ask' | 'yours' | 'chat';
+export type WaitingKind = 'questions' | 'spec' | 'plan' | 'proof' | 'stuck' | 'release' | 'ask' | 'yours' | 'chat' | 'change';
 
 export interface Waiting {
   kind: WaitingKind;
@@ -51,6 +51,38 @@ export interface AgentChat {
   messages: ChatMessage[];
   thinking?: boolean;
   ready?: boolean;
+  /** Asking beside the work: the squad goes on, and the chat changes nothing on the ticket. */
+  beside?: boolean;
+  /** The side conversation's session id. */
+  side?: string;
+}
+
+/** One part of the spec a change touches. A "done when" counts from 0; a new one has no index. */
+export interface ChangePart {
+  part: 'story' | 'criterion';
+  index?: number;
+  before: string;
+  after: string;
+  criterion?: Criterion;
+}
+
+export type ChangeStatus = 'writing' | 'proposed' | 'approved' | 'designing' | 'design-ready' | 'building' | 'done' | 'declined' | 'failed';
+
+/** A change the person proposed to the spec. One open at a time per ticket. */
+export interface SpecChange {
+  id: string;
+  ask: string;
+  by: string;
+  at: string;
+  from?: AgentName;
+  status: ChangeStatus;
+  size?: 'small' | 'big';
+  summary?: string;
+  why?: string;
+  parts?: ChangePart[];
+  design?: { summary: string; before: string[]; steps: { title: string; change: 'same' | 'changed' | 'new' }[] };
+  decided?: { by: string; at: string; approved: boolean; reason?: string };
+  error?: string;
 }
 
 export interface PlanPart {
@@ -244,6 +276,10 @@ export interface Ticket {
   stopRequested?: boolean;
   /** The squad's review notes still to fix, passed to the Builder. */
   reviewNotes?: string[];
+  /** Changes proposed to the spec, oldest first. */
+  changes?: SpecChange[];
+  /** The accepted ticket this one changes. */
+  changeOf?: string;
   /** Whose ticket it is. Only the owner's squad works on it, on the owner's computer. */
   owner?: string;
   /** The last hand over: who gave it to whom, and when. */

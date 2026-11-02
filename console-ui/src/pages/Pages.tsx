@@ -11,12 +11,13 @@ import { BugDialog } from '../components/dialogs';
 import { useRestart } from '../components/Restart';
 import { SquadUsage } from '../components/Usage';
 import { Cmd, Glyph, Modal, STAGE_NAME, actionLabel, ago, commandFor, outdatedLine } from '../components/ui';
+import { changeWaits, openChange } from '../components/ChangeCard';
 
 /* ── Waiting for you ───────────────────────────────────── */
 
 export function InboxPage() {
   const board = useBoard();
-  const tickets = board.data?.ready ? board.data.tickets.filter((t) => t.waiting || t.outdated?.length) : [];
+  const tickets = board.data?.ready ? board.data.tickets.filter((t) => t.waiting || t.outdated?.length || changeWaits(t)) : [];
   return (
     <>
       <div className="top">
@@ -45,13 +46,13 @@ export function InboxPage() {
                       <span>{ago(t.activity[0]?.at ?? t.createdAt)}</span>
                     </div>
                     <h3>{t.title}</h3>
-                    <p>{t.waiting?.summary ?? outdatedLine(t)}</p>
+                    <p>{t.waiting?.summary ?? (changeWaits(t) ? `Change ${openChange(t)!.id} to the spec waits for you` : outdatedLine(t))}</p>
                   </div>
-                  <Cmd text={commandFor(t)} />
+                  <Cmd text={!t.waiting && changeWaits(t) ? `squad propose ${t.id} --approve` : commandFor(t)} />
                   {t.waiting?.kind === 'proof' ? (
                     <Link to="/tickets/$id/proof" params={{ id: t.id }} className="btn pri sm">{actionLabel(t)}</Link>
                   ) : (
-                    <Link to="/board" search={{ ticket: t.id }} className="btn pri sm">{t.waiting ? actionLabel(t) : 'Check it'}</Link>
+                    <Link to="/board" search={{ ticket: t.id }} className="btn pri sm">{t.waiting ? actionLabel(t) : changeWaits(t) ? 'Check the change' : 'Check it'}</Link>
                   )}
                 </div>
               ))}

@@ -41,6 +41,12 @@ import {
   endStuckCommand,
   keepWaiting,
   stopTicket,
+  proposeChange,
+  approveChange,
+  declineChange,
+  retryChange,
+  changeAfterRelease,
+  ReleasedError,
 } from '../../board/actions.js';
 import { architecture } from '../../board/architecture.js';
 import { projectApps } from '../../board/apps.js';
@@ -235,10 +241,11 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     return t ? c.json(ticketConversations(t, undefined, bp.chatsDir)) : c.json({ error: 'not found' }, 404);
   });
 
-  // Only a ticket's own sessions can be read, by role, never an arbitrary file.
+  // Only a ticket's own sessions can be read, by role, never an arbitrary file. "chat" is a talk beside the work.
   app.get('/api/v1/tickets/:id/conversations/:key', (c) => {
     const t = readTicket(bp, c.req.param('id'));
-    const id = t?.sessions?.[c.req.param('key') as 'intake' | 'build' | 'review' | 'tester'];
+    const key = c.req.param('key');
+    const id = key === 'chat' ? t?.chat?.side : t?.sessions?.[key as 'intake' | 'build' | 'review' | 'tester'];
     if (!id) return c.json({ error: 'not found' }, 404);
     const conv = readConversation(id, Math.min(1000, Number(c.req.query('limit')) || 400), undefined, bp.chatsDir);
     if (!conv) return c.json({ sessionId: id, updates: [], total: 0 });
@@ -395,6 +402,34 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
   app.post('/api/v1/tickets/:id/chat/write', (c) => act(c, () => chatWrite(bp, c.req.param('id'))));
 
   app.post('/api/v1/tickets/:id/chat/done', (c) => act(c, () => chatDone(bp, c.req.param('id'))));
+
+  // A change goes through the spec: propose it (from the ticket or a chat message), then approve or decline what the
+  // Analyst wrote, and for a big one the Architect's design update. Accepted work says no with 409 and offers a new
+  // linked ticket or a bug report instead.
+  app.post('/api/v1/tickets/:id/spec-change', async (c) => {
+    const b = await body<{ text?: string; from?: AgentName }>(c);
+    try {
+      return c.json(proposeChange(bp, c.req.param('id'), b.text ?? '', b.from));
+    } catch (err) {
+      if (err instanceof ReleasedError) return c.json({ error: err.message, released: true, choices: ['ticket', 'bug'] }, 409);
+      if (err instanceof Error) return c.json({ error: err.message }, 400);
+      throw err;
+    }
+  });
+
+  app.post('/api/v1/tickets/:id/spec-change/approve', (c) => act(c, () => approveChange(bp, c.req.param('id'))));
+
+  app.post('/api/v1/tickets/:id/spec-change/decline', async (c) => {
+    const b = await body<{ reason?: string }>(c);
+    return act(c, () => declineChange(bp, c.req.param('id'), b.reason));
+  });
+
+  app.post('/api/v1/tickets/:id/spec-change/retry', (c) => act(c, () => retryChange(bp, c.req.param('id'))));
+
+  app.post('/api/v1/tickets/:id/spec-change/new-ticket', async (c) => {
+    const b = await body<{ text?: string; as?: 'ticket' | 'bug' }>(c);
+    return act(c, () => changeAfterRelease(bp, c.req.param('id'), b.text ?? '', b.as === 'bug' ? 'bug' : 'ticket'));
+  });
 
   app.post('/api/v1/tickets/:id/take-over', (c) => act(c, () => takeOver(bp, c.req.param('id'))));
 

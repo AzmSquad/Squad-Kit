@@ -104,10 +104,9 @@ describe('talk it through with the Analyst first', () => {
 });
 
 describe('talk to an agent at work', () => {
-  it('pauses the Builder, keeps the ticket yours while you talk, and carries on in its session on Done', async () => {
-    live();
+  const building = () => {
     const t0 = actions.createTicket(bp, { title: 'Limit bookings' });
-    updateTicket(bp, t0.id, (x) => {
+    return updateTicket(bp, t0.id, (x) => {
       x.stage = 'implement';
       x.live = true;
       x.squad = { phase: 'build', nextAt: new Date().toISOString() };
@@ -115,18 +114,66 @@ describe('talk to an agent at work', () => {
       x.sessions = { build: 'b-1' };
       x.steps = [{ title: 'Add the limit', status: 'doing' }];
     });
+  };
+
+  it('asking the Builder while it builds changes nothing: it answers in a side conversation', async () => {
+    live();
+    const t0 = building();
     expect(() => actions.startChat(bp, t0.id, 'reviewer')).toThrow(/has not worked on/);
     let t = actions.startChat(bp, t0.id, 'builder');
-    expect(t.stopRequested).toBe(true);
-    expect(t.waiting?.kind).toBe('chat');
-    expect(t.chat!.before.phase).toBe('build');
+    expect(t.stopRequested).toBeUndefined();
+    expect(t.waiting).toBeNull();
+    expect(t.live).toBe(true);
+    expect(t.squad?.phase).toBe('build');
+    expect(t.chat).toMatchObject({ with: 'builder', open: true, beside: true });
     const squad = new LiveSquad(bp) as unknown as Squad;
-    squad.stopped(t0.id, 'build');
-    t = readTicket(bp, t0.id)!;
-    expect(t.stuck).toBeUndefined();
-    expect(t.waiting?.kind).toBe('chat');
 
-    answers.push({ reply: 'I am on step 1. Should the limit count cancelled bookings?', ready: false });
+    answers.push({ reply: 'I am on step 1, adding the limit.', ready: true });
+    await squad.chatReply(t0.id);
+    let call = calls.at(-1)!;
+    // Never the session that is building: a side one, in the ticket's copy, read only.
+    expect(call.resume).toBeUndefined();
+    expect(call.sessionId).toBeTruthy();
+    expect(call.sessionId).not.toBe('b-1');
+    expect(call.cwd).toBe(tmp);
+    expect(call.prompt).toContain('The squad is working on this ticket right now');
+    expect(call.prompt).toContain('This talk is beside the work');
+    t = readTicket(bp, t0.id)!;
+    expect(t.chat!.side).toBe(call.sessionId);
+    expect(t.chat!.ready).toBe(false);
+    expect(t.squad?.phase).toBe('build');
+    expect(t.live).toBe(true);
+
+    actions.sendChat(bp, t0.id, 'Do cancelled bookings count?');
+    answers.push({ reply: 'No, the plan counts only active ones.', ready: false });
+    await squad.chatReply(t0.id);
+    call = calls.at(-1)!;
+    expect(call.resume).toBe(t.chat!.side);
+    // Changes go through the spec, not through this talk.
+    expect(() => actions.chatWrite(bp, t0.id)).toThrow(/propose a change/);
+
+    t = actions.chatDone(bp, t0.id);
+    expect(t.chat!.open).toBe(false);
+    expect(t.squad?.phase).toBe('build');
+    expect(t.live).toBe(true);
+    expect(t.waiting).toBeNull();
+  });
+
+  it('talking to the Builder on a ticket that waits for you keeps it yours, and Done carries on in its session', async () => {
+    live();
+    const t0 = building();
+    updateTicket(bp, t0.id, (x) => {
+      x.live = false;
+      x.squad = null;
+      x.waiting = { kind: 'stuck', summary: 'The squad stopped and needs you' };
+    });
+    let t = actions.startChat(bp, t0.id, 'builder');
+    expect(t.chat!.beside).toBeUndefined();
+    expect(t.waiting?.kind).toBe('chat');
+    expect(t.chat!.before.waiting?.kind).toBe('stuck');
+    const squad = new LiveSquad(bp) as unknown as Squad;
+
+    answers.push({ reply: 'The tests failed on the limit. Should cancelled bookings count?', ready: false });
     await squad.chatReply(t0.id);
     expect(calls.at(-1)!.resume).toBe('b-1');
     expect(calls.at(-1)!.cwd).toBe(tmp);

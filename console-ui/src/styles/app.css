@@ -961,3 +961,6 @@ ul.ticketnotes .grow, .addnote .grow { flex: 1; }
 .fb-kind b { font: 500 12.5px 'JetBrains Mono', monospace; color: var(--text); word-break: break-all; }
 .fb-error { margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: var(--bug-soft); color: var(--bug); font-size: 13px; }
 .note.bad { color: var(--bug); }
+/* A change to the spec on its card: the old and new wording, side by side. */
+.changecard .changebody { display: flex; flex-direction: column; gap: 6px; max-height: 44vh; overflow-y: auto; }
+.changecard .changeparts { display: flex; flex-direction: column; margin: 2px 0 4px; font-size: 13px; }

@@ -14,7 +14,7 @@ import {
   type BoardPaths,
 } from './store.js';
 import { scheduleSquad } from './schedule.js';
-import { applyPlanEdits, approveExpress, changeSummary, needsSpec } from './actions.js';
+import { applyPlanEdits, approveExpress, changeParts, changeSummary, needsSpec, openChange } from './actions.js';
 import { AMBIENT, scriptFor } from './scripts.js';
 import type { BoardMeta, Question, Ticket } from './types.js';
 import { ticketDir } from './store.js';
@@ -50,6 +50,8 @@ export function tick(bp: BoardPaths): void {
     if (q && at - lastMessageAt(q) >= 2200 / meta.speed) reply(bp, t.id, q.id);
     const c = t.chat;
     if (c?.open && c.thinking && at - Date.parse(c.messages.at(-1)?.at ?? t.activity[0]?.at ?? new Date(0).toISOString()) >= 2200 / meta.speed) chatReply(bp, t.id);
+    const ch = openChange(t);
+    if (ch?.status === 'writing' && at - Date.parse(ch.at) >= 2200 / meta.speed) writeChange(bp, t.id);
     if (t.squad && Date.parse(t.squad.nextAt) <= at) advance(bp, t.id, meta);
   }
 }
@@ -93,6 +95,21 @@ function chatReply(bp: BoardPaths, id: string): void {
     c.messages.push({ who: c.with, text, at: now() });
     c.ready = !opening && said.length >= 2;
     c.thinking = false;
+  });
+}
+
+/** The demo Analyst writes a proposed change as one more "done when", so a proposal can be shown without Claude. */
+function writeChange(bp: BoardPaths, id: string): void {
+  updateTicket(bp, id, (t) => {
+    const c = openChange(t);
+    if (c?.status !== 'writing') return;
+    const why = 'The design still holds: it is one more check on the work as planned.';
+    c.parts = changeParts(t, { summary: c.ask, size: 'small', why, story: '', criteria: [{ number: 0, action: 'add', given: 'the change you asked for', when: 'the squad builds it', then: c.ask }] });
+    c.status = 'proposed';
+    c.size = 'small';
+    c.summary = c.ask;
+    c.why = why;
+    addActivity(t, 'analyst', `Wrote change ${c.id} into the spec (small): ${c.ask}`);
   });
 }
 

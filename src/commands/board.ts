@@ -34,6 +34,14 @@ import {
   stopTicket,
   endStuckCommand,
   keepWaiting,
+  proposeChange,
+  approveChange,
+  declineChange,
+  retryChange,
+  changeAfterRelease,
+  changeNeedsYou,
+  openChange,
+  ReleasedError,
   type AnswerInput,
   type NewTicketInput,
 } from '../board/actions.js';
@@ -104,7 +112,10 @@ function warnIfNoSquad(bp: BoardPaths): void {
 
 function nextCommand(t: Ticket): string {
   if (!t.waiting && t.quiet) return t.quiet.pid ? `squad unstick ${t.id}   or   squad unstick ${t.id} --keep-waiting` : `squad stop ${t.id}`;
+  if (!t.waiting && changeNeedsYou(t)) return `squad show ${t.id}   then   squad propose ${t.id} --approve   or   --decline`;
   switch (t.waiting?.kind) {
+    case 'change':
+      return `squad show ${t.id}   then   squad approve ${t.id}   or   squad propose ${t.id} --decline`;
     case 'questions':
       return `squad answer ${t.id}`;
     case 'spec':
@@ -146,7 +157,9 @@ export async function runInbox(): Promise<void> {
   }
   const w = Math.max(...items.map((t) => t.title.length));
   for (const t of items) {
-    out(`  ${id(t.id)}  ${t.title.padEnd(w)}   ${amber(t.waiting?.summary ?? `Looks stuck: ${t.quiet?.detail ?? ''}`)}`);
+    const change = openChange(t);
+    const line = t.waiting?.summary ?? (changeNeedsYou(t) && change ? `Change ${change.id} to the spec: ${change.summary ?? change.ask}` : `Looks stuck: ${t.quiet?.detail ?? ''}`);
+    out(`  ${id(t.id)}  ${t.title.padEnd(w)}   ${amber(line)}`);
     out(`  ${' '.repeat(t.id.length)}  ${cmd(nextCommand(t))}`);
   }
   out();
@@ -208,6 +221,17 @@ export async function runShow(ticketId: string): Promise<void> {
   if (t.waiting) {
     out();
     out(`  ${amber('Waiting for you:')} ${t.waiting.summary}`);
+  }
+  const change = openChange(t);
+  if (change) {
+    out();
+    out(`  ${amber(`Change ${change.id}${change.size ? ` (${change.size})` : ''}:`)} ${change.summary ?? change.ask}  ${kleur.gray(change.status)}`);
+    for (const p of change.parts ?? []) {
+      const name = p.part === 'story' ? 'Story' : p.index === undefined ? 'New done when' : `Done when ${p.index + 1}`;
+      if (p.before) out(`    ${kleur.gray(`${name}, was:`)} ${p.before}`);
+      out(`    ${kleur.gray(`${name}, ${p.before ? 'now' : 'new'}:`)} ${p.after || kleur.gray('(goes)')}`);
+    }
+    for (const [i, s] of (change.design?.steps ?? []).entries()) out(`    ${kleur.gray(`Step ${i + 1}, ${s.change}:`)} ${s.title}`);
   }
   if (t.story) {
     out();
@@ -391,6 +415,48 @@ export async function runChange(ticketId: string, words: string[]): Promise<void
           ? 'Sent to the Architect to update the design.'
           : 'Sent to the Spec writer to update the plan.',
   );
+}
+
+/**
+ * A change goes through the spec: propose it, then approve or decline what the Analyst wrote (and, for a big one, the
+ * Architect's design update). Accepted work only answers questions: the change becomes a new linked ticket or a bug.
+ */
+export async function runPropose(ticketId: string, words: string[], opts: { approve?: boolean; decline?: boolean; retry?: boolean; as?: string }): Promise<void> {
+  const bp = board();
+  warnIfNoSquad(bp);
+  if (opts.approve) {
+    const t = approveChange(bp, ticketId);
+    ui.success(t.activity[0]?.text ?? 'Approved.');
+    return;
+  }
+  if (opts.decline) {
+    declineChange(bp, ticketId, words.join(' '));
+    ui.success('Declined. The spec stays as it was.');
+    return;
+  }
+  if (opts.retry) {
+    retryChange(bp, ticketId);
+    ui.success('The Analyst writes the change again.');
+    return;
+  }
+  const text = words.join(' ') || (await input({ message: 'What should change?' }));
+  if (opts.as) {
+    if (opts.as !== 'ticket' && opts.as !== 'bug') throw new Error('--as is one of: ticket, bug.');
+    const made = changeAfterRelease(bp, ticketId, text, opts.as);
+    ui.success(`Made ${opts.as === 'bug' ? 'bug' : 'ticket'} ${made.id}, linked to ${ticketId.toUpperCase()}. Follow it: squad watch ${made.id}`);
+    return;
+  }
+  try {
+    proposeChange(bp, ticketId, text);
+  } catch (err) {
+    if (!(err instanceof ReleasedError)) throw err;
+    ui.warning(err.message);
+    ui.info(`As a new linked ticket: squad propose ${ticketId} --as ticket "${text}"`);
+    ui.info(`As a bug report: squad propose ${ticketId} --as bug "${text}"`);
+    return;
+  }
+  ui.success('Proposed. The Analyst writes it into the spec while the work goes on.');
+  ui.info(`Then approve it: squad propose ${ticketId} --approve, or decline it: squad propose ${ticketId} --decline`);
 }
 
 /** "story", "decision", "step 2" or "done when 1" (also "criterion 1"), as people write them. */
