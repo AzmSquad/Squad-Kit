@@ -35,7 +35,7 @@ function probeTrackerCredential(config: SquadConfig, overlay: SquadSecrets): Cre
 
 function formatCredentialStatus(s: CredStatus): string {
   if (s.state === 'present') {
-    return s.detail === 'env' ? 'set via environment variable' : 'set via .squad/secrets.yaml';
+    return s.detail === 'env' ? 'set via environment variable' : 'saved on this computer';
   }
   return `missing — ${s.hint}`;
 }

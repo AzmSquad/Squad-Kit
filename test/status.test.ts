@@ -57,7 +57,7 @@ describe('runStatus tracker + planner key rows', () => {
     await runStatus();
 
     const tk = rows.find((r) => r.k === 'tracker key');
-    expect(tk?.v).toContain('set via .squad/secrets.yaml');
+    expect(tk?.v).toContain('saved on this computer');
     const tr = rows.find((r) => r.k === 'tracker');
     expect(tr?.v).toContain('jira');
     expect(tr?.v).toContain('h.example.com');

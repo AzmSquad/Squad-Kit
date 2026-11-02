@@ -643,6 +643,35 @@ function ParallelSetting() {
   );
 }
 
+/** Whether squad-kit commits the project's documents with each ticket's code, so they travel with the branch. */
+function DocsInGitSetting({ on }: { on: boolean }) {
+  const act = useAct();
+  return (
+    <div className="maprow" style={{ alignItems: 'center' }}>
+      <b>Project documents in git</b>
+      <span style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <button
+          className="btn sm"
+          onClick={() =>
+            act.mutate({
+              path: '/api/v1/settings',
+              method: 'PUT',
+              body: { documentsInGit: !on },
+              done: on ? 'Project documents stay out of git' : 'Project documents go into git with each ticket',
+            })
+          }
+        >
+          {on ? 'On: turn it off' : 'Off: turn it on'}
+        </button>
+        <span className="note">
+          On: each ticket's spec, design and decisions are committed with its code, so they reach the team through the pull request. Hand over
+          needs it on.
+        </span>
+      </span>
+    </div>
+  );
+}
+
 function ScanAgain() {
   const act = useAct();
   return (
@@ -681,9 +710,13 @@ export function SettingsPage() {
             </span>
           </div>
           <div className="maprow">
-            <b>Board files</b>
-            <span className="mono" style={{ fontSize: 13 }}>.squad/board/</span>
+            <b>Project files</b>
+            <span className="note">
+              <span className="mono" style={{ fontSize: 13 }}>.squad/</span> in the project folder: specs, decisions and releases, shared with the team. Live
+              progress, chats and sign-ins stay on this computer.
+            </span>
           </div>
+          {meta?.engine === 'live' && <DocsInGitSetting on={meta.documentsInGit !== false} />}
           <RestartRow />
           {meta?.engine === 'live' && <ParallelSetting />}
           {meta?.engine === 'live' && <RunnerSetting />}

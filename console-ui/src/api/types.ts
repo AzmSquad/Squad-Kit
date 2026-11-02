@@ -394,6 +394,10 @@ export interface Lesson {
 }
 
 export interface BoardMeta {
+  /** The project's id: it names this computer's folder for the project. */
+  id?: string;
+  /** Off: squad-kit never commits the project's documents (ADR-001). */
+  documentsInGit?: boolean;
   project: string;
   key: string;
   nextNumber: number;

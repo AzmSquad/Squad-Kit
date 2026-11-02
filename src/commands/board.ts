@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { squadHome } from '../core/home.js';
 import kleur from 'kleur';
 import { confirm, input, select, Separator } from '@inquirer/prompts';
 import * as ui from '../ui/index.js';
@@ -946,18 +947,27 @@ export interface DemoOptions {
 }
 
 /** Sets up a sample board (and a minimal .squad/ if needed), then opens the console. */
+/**
+ * The sample board lives in its own folder on this computer, never in the project this terminal is in: seeding it
+ * replaces a board's tickets, decisions and files.
+ */
+export function demoFolder(): string {
+  return path.join(squadHome(), 'demo');
+}
+
 export async function runDemo(opts: DemoOptions): Promise<void> {
-  let root = findSquadRoot();
-  if (!root) {
-    root = process.cwd();
-    const paths = buildPaths(root);
+  const root = demoFolder();
+  const paths = buildPaths(root);
+  if (!fs.existsSync(paths.configFile)) {
     fs.mkdirSync(paths.squadDir, { recursive: true });
     saveConfig(paths.configFile, { ...DEFAULT_CONFIG, project: { ...DEFAULT_CONFIG.project, name: opts.project ?? 'Case portal' } });
   }
-  const bp = boardPaths(buildPaths(root).squadDir);
+  const bp = boardPaths(paths.squadDir);
   if (!opts.keep || !boardExists(bp)) {
     seedDemoBoard(bp, { speed: opts.speed, project: opts.project });
     ui.success('Sample board ready: 11 tickets, 4 releases and 5 saved decisions.');
   }
+  // The app opens the sample board from its own folder.
+  process.chdir(root);
   await runConsole({ port: opts.port, open: opts.open, token: opts.token });
 }

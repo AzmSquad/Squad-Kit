@@ -481,6 +481,8 @@ export class LiveSquad {
     const root = projectRoot(this.bp);
     const meta = this.meta();
     meta.scan = { status: 'running', at: now() };
+    // An AI tool installed since the board opened shows as ready now.
+    meta.tools = AI_TOOLS.map((t) => ({ name: t.label, ready: t.ready() }));
     writeMeta(this.bp, meta);
     const nested = findNestedRepos(root);
     await syncWiki(this.bp, undefined, true);

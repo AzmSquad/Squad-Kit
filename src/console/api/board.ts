@@ -540,6 +540,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
       git?: { base?: string; remote?: string };
       parallel?: number;
       runner?: 'acp' | 'direct';
+      documentsInGit?: boolean;
       repos?: { path: string; base?: string; remote?: string; commands?: ProjectCommands }[];
     }>(c);
     return act(c, () => {
@@ -552,6 +553,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
       if (b.git) meta.git = { base: b.git.base?.trim() || meta.git?.base || 'main', remote: b.git.remote?.trim() ?? meta.git?.remote ?? '' };
       if (typeof b.parallel === 'number' && b.parallel >= 1 && b.parallel <= 5) meta.parallel = Math.round(b.parallel);
       if (b.runner === 'acp' || b.runner === 'direct') meta.runner = b.runner;
+      if (typeof b.documentsInGit === 'boolean') meta.documentsInGit = b.documentsInGit;
       if (b.repos && meta.repos) {
         meta.repos = meta.repos.map((r) => {
           const u = b.repos!.find((x) => x.path === r.path);

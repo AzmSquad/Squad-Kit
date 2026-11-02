@@ -228,7 +228,7 @@ function ScanState({ meta }: { meta: BoardResponseMeta }) {
     { label: 'Project files and board', state: 'done', note: '.squad/ in this folder' },
     tool
       ? { label: `${tool.name} is ready`, state: 'done', note: 'The squad works with it' }
-      : { label: 'An AI tool', state: 'fail', note: 'Install Claude Code or Codex and sign in once' },
+      : { label: 'An AI tool', state: 'fail', note: 'Install Claude Code and sign in once, then press Try again' },
     {
       label: 'The Architect reads the project',
       state: failed ? 'fail' : scan.status === 'running' ? 'now' : 'todo',
