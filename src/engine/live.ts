@@ -499,10 +499,6 @@ export class LiveSquad {
       writeMeta(this.bp, m);
     };
     try {
-      const tool = aiTool(readAgent(this.bp, 'architect').tool);
-      if (tool && !tool.ready()) {
-        throw new Error(`${tool.label} is not installed on this computer. Install it and sign in once, then press Try again.`);
-      }
       const r = await this.runAgent({
         role: 'architect',
         step: 'scan',
@@ -552,7 +548,10 @@ export class LiveSquad {
       }
     } catch (err) {
       const fresh = this.meta();
-      fresh.scan = { status: 'failed', at: now(), error: (err as Error).message };
+      // The usual reason on a new computer, said plainly.
+      const tool = aiTool(readAgent(this.bp, 'architect').tool);
+      const missing = tool && !tool.ready() ? `${tool.label} is not installed on this computer. Install it and sign in once, then press Try again.` : null;
+      fresh.scan = { status: 'failed', at: now(), error: missing ?? (err as Error).message };
       writeMeta(this.bp, fresh);
     }
   }

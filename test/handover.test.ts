@@ -203,16 +203,18 @@ describe('hand over', () => {
     expect(sh(`git show ${after.branch}:.squad/tickets/${t.id}/spec.md`, bare)).toContain('I want holidays');
   });
 
-  it("stops this computer's squad on it: someone else's ticket never runs here", () => {
+  it("stops this computer's squad on it: someone else's ticket never runs here", async () => {
     building();
     updateTicket(bp, id, (x) => {
       x.owner = 'Sara';
       x.waiting = null;
       x.squad = { phase: 'build', nextAt: new Date(0).toISOString() };
     });
-    const squad = new LiveSquad(bp) as unknown as { tick(): void; running: Set<string> };
+    const squad = new LiveSquad(bp) as unknown as { tick(): void; running: Set<string>; pickingUp: boolean };
     squad.tick();
     expect(squad.running.has(id)).toBe(false);
+    // The tick also looks for pushed branches in the background; let it finish before the repo goes.
+    await vi.waitFor(() => expect(squad.pickingUp).toBe(false), { timeout: 15_000 });
   });
 });
 
