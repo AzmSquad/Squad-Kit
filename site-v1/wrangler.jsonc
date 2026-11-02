@@ -1,10 +1,8 @@
 {
   "name": "squad-kit-v1",
   "compatibility_date": "2026-10-01",
-  "assets": {
-    "directory": "./public",
-    "not_found_handling": "404-page"
-  },
+  // 1.0 is out: v1.squad-kit.com now redirects to squad-kit.com. The old coming-soon page stays in public/ for the record.
+  "main": "src/redirect.js",
   "routes": [{ "pattern": "v1.squad-kit.com", "custom_domain": true }],
   "workers_dev": false
 }
