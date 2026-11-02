@@ -78,7 +78,8 @@ beforeEach(() => {
 
 afterEach(() => {
   process.env.SQUAD_KIT_HOME = ownHome;
-  fs.rmSync(tmp, { recursive: true, force: true });
+  // A git step the squad started may still be writing in the repo for a moment: try again rather than fail.
+  fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 /** A ticket the Builder started on, with some work in its copy that is not committed yet. */
