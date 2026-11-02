@@ -1,226 +1,260 @@
 ---
 title: Getting started
-description: A complete first run, from zero to a planned story a cheap model can execute.
+description: Your first hour with squad-kit 1.0, from install to a released ticket.
 ---
 
-A complete first run: zero → planned story → executable.
+This guide takes you from nothing to a released ticket. It takes about an hour, most of it the squad's
+work. You need no terminal skills after step 2.
 
-**Already on squad-kit 0.1.x?** See [Migrating from 0.1.x](migrating-from-0.1.md) first.
+**Coming from squad-kit 0.x, or from an early 1.0 board?** Read [Moving to 1.0](migrating-to-1.0.md) first.
 
-## 0. Install
+## 1. What you need
 
-```bash
-pnpm add -g squad-kit           # or: npm install -g squad-kit
-squad --version
-```
+- **Node.js** 22 or newer. Check with `node --version`.
+- **git**. Check with `git --version`. On a Mac, if it is missing, run `xcode-select --install` once.
+- **An AI tool**, installed and signed in once. Today the squad runs on **Claude Code** only. Install it, run
+  `claude` once in a terminal and sign in with your own account. squad-kit uses that sign-in, so there is
+  nothing new to buy and no key to paste.
 
-## 1. Initialize in your project
-
-```bash
-cd your-project
-squad init
-```
-
-### Interactive prompts
-
-`init` walks you through (order matches the CLI):
-
-- **Project name** — defaults to the current directory name.
-- **Primary language** — e.g. `typescript`; used as a hint in planning.
-- **Issue tracker** — `none`, `github`, `jira`, or `azure`.
-- **Slash commands** — which agents get `squad-plan` (and friends): `claude-code`, `cursor`, `copilot`, `gemini`.
-- **Tracker id in filenames** — when the tracker is not `none`, you can require `NN-story-<slug>-<id>.md` names (`naming.includeTrackerId`).
-- **Jira or Azure** — if you pick either, you are prompted for host / org, email or PAT, and API token. Values are written to **`.squad/secrets.yaml`** (git-ignored, `0600` on POSIX).
-- **Direct planner (optional)** — “Enable automatic plan generation?” If yes, you choose **Anthropic**, **OpenAI**, or **Google**.
-  - Picking **Anthropic** then asks *“How should squad-kit authenticate with Anthropic?”*:
-    - **Use my Claude subscription (browser login)** — the default. Writes `planner.auth.anthropic: subscription`. **No API key is asked for.** Finish with `squad auth login` after init (or `claude` → `/login` if you already use Claude Code).
-    - **Use an Anthropic API key** — the 0.11.0 path; you are prompted for the key.
-    - **Decide automatically** — writes `auto`: a detected Claude login first, otherwise a resolvable API key.
-  - **OpenAI** and **Google** are API-key only: save the key into `.squad/secrets.yaml` or opt to **export the provider env var** instead (`OPENAI_API_KEY` / `GOOGLE_API_KEY`).
-
-  Full guide to the Anthropic options: [Anthropic authentication](auth.md).
-
-### What it creates
-
-```text
-.squad/
-├── config.yaml           # committed
-├── secrets.yaml          # git-ignored, chmod 0600 (if planner / tracker creds were saved)
-├── README.md
-├── stories/
-└── plans/
-    └── 00-index.md
-
-# plus agent slash-command files, e.g.
-.claude/commands/squad-plan.md
-.cursor/commands/squad-plan.md
-```
-
-Intake, plan meta-prompt, and skeletons are **not** copied here — they ship inside the `squad-kit` package. The 0.1.x local override under `.squad/prompts/` was **removed in 0.2.0**; the CLI you install owns those templates.
-
-### Non-interactive
+## 2. Install and open squad-kit
 
 ```bash
-squad init -y \
-  --tracker jira \
-  --planner anthropic \
-  --agents claude-code,cursor \
-  --name my-app
+npm i -g squad-kit
+squad
 ```
 
-For CI or headless runs where you do not want key prompts, use **`--skip-secrets-prompt`** (alias **`--no-prompt-secrets`**) to leave `.squad/secrets.yaml` unchanged and supply credentials via env or a later `squad config set …`.
+`squad` opens the app in your browser, at `127.0.0.1:4571`. Only you can open it: it listens on your computer
+only, and the link carries a private key.
 
-Jira and Azure in `-y` mode may need **`--tracker-workspace`** and, for Azure, **`--tracker-project`**. See `squad init --help`.
+The first page is **Home**. It has two parts:
 
-## 2. Create a story
+- **Projects**: one card for each project, with how many tickets are open, working and waiting for you.
+- **Waiting for you**: everything the squads need from you, from every project, in one list.
 
-### Without a tracker (manual intake)
+Keep the terminal open. Press Ctrl-C there when you are done. Run `squad` again later and the squad picks up
+where it was. If squad-kit is open already, `squad` just prints its link and opens it.
+
+## 3. Add a project
+
+On Home, press **Add project**. A folder browser opens inside the page. Go to your project's folder and press
+**Add this folder**. To start something new, press **New folder here**, give it a name, and add it.
+
+You can also do it from a terminal, in the project's folder:
 
 ```bash
-squad new-story checkout --title "Add guest checkout"
+cd ~/Workspace/leave-requests
+squad console
 ```
 
-This scaffolds `.squad/stories/checkout/<folder>/intake.md` and the feature’s `attachments/` folder. Fill in title, description, and acceptance criteria yourself.
+`squad console` adds the folder to the app and opens its board. If the app is not open yet, it starts it.
 
-### With a tracker id (auto-fetch for Jira or Azure)
+squad-kit works with any of these folders. The browser says which kind you picked before you add it.
 
-When the workspace tracker is **Jira** or **Azure DevOps** and credentials resolve (env → `.squad/secrets.yaml` → prompt), passing **`--id`** fetches the work item:
+| The folder | What squad-kit does |
+| --- | --- |
+| **An empty folder** | A new project. squad-kit makes a git repo with a short README in its first commit. On your first ticket, the Architect picks the stack with you. |
+| **Code with git** | Your repo, branches and history stay as they are. |
+| **Code without git** | squad-kit makes a repo, with your files in its first commit. Generated folders (`node_modules`, `dist`, `build` and the like) and `.env` files stay out. |
+| **A folder with several code repos** | squad-kit works across them. Each ticket works in one repo, which the Architect picks in the design. |
+| **A squad-kit 0.x project** | Your stories, plans and tracker settings stay. Your sign-ins move to this computer. See [Moving to 1.0](migrating-to-1.0.md). |
+
+A project needs its own folder: squad-kit will not set up your home folder or the top folder of the disk.
+
+### What happens next
+
+The board opens with a **Setting up your project** card:
+
+1. **Project files and board**: squad-kit made `.squad/` in the folder.
+2. **Your AI tool is ready**: for example "Claude Code is ready". If it says "An AI tool" in red, install
+   Claude Code and sign in, run `squad --restart`, then press **Try again** on the card.
+3. **The Architect reads the project**: it maps the code and finds how to install, test, build and run it.
+   This takes a few minutes. You can watch what it reads.
+4. **Ready for your first ticket**.
+
+Check what the Architect found in **Settings**, under **How the squad checks and runs this project**. These are
+the commands squad-kit runs itself before anything ships. Fix any that look wrong.
+
+## 4. Connect a tracker (optional)
+
+A tracker is where your team keeps its work items, sprints and bugs. You can skip this step and write tickets
+on the board instead.
+
+Today squad-kit works with **Azure DevOps**: Azure Boards for the work items, Azure Repos for the code.
+
+1. Open **Settings** and find **Azure DevOps**.
+2. Fill in your **Organization** and **Project**. If your code is on Azure Repos, they are filled in already.
+3. Paste a personal access token from Azure DevOps. It needs **Work Items** and **Code** (read, write and
+   manage).
+4. Press **Save and check**. It should say **Connected as** and your name.
+
+Your token stays on this computer. It never goes into the project folder.
+
+Now **Backlog** shows your sprint's stories and bugs, in backlog order.
+
+## 5. Write your first ticket
+
+On the board, press **New ticket**. There are two ways to write it:
+
+- **Write it**: a title and what you want, in plain words. Add what you already know: acceptance criteria,
+  business rules, edge cases, screenshots or documents. The Analyst asks you about the rest.
+- **From an idea or message**: paste an idea, a chat message or one line of business, with screenshots if you
+  have them. The Analyst fills in every field in about 20 seconds. You check each one before the ticket is made.
+
+Pick a **track**:
+
+- **Full** (the default): every step, with your approvals.
+- **Express**: for a typo or a small urgent fix. No questions, and the plan is approved on its own. The build,
+  checks, review and your **Looks right** still run.
+
+To report a bug, pick **Bug**. The form asks what happens, how to see it, what should happen, and how bad it is.
+
+**Or pull it from your tracker.** Press **Pull from Azure DevOps** on the board, or **Start** on a story in
+**Backlog**. The ticket gets the tracker's name, for example `AB-46` for work item `AB#46`. It brings the
+description, acceptance criteria, feature, epic and attachments with it. On the tracker, the item moves to in
+progress.
+
+A project without a tracker names its own tickets from the project name: "Leave requests" gives `LR-1`, `LR-2`.
+
+## 6. From the ask to a release
+
+The ticket's card moves across the board's columns: **Tickets**, **Specs**, **Implement**, **Test**,
+**Review**, **Release**, and **Bugs** for bug reports. A card gets a **You** tag when it needs you. It also
+shows up in **Waiting for you**, at the top of the board and on Home.
+
+Click a card to open the **ticket drawer** on the right. Its **Now** tab always shows what happens now and what
+you can do.
+
+### Answer the questions
+
+The Analyst asks about what to build. The Architect asks about how to build it. Each question has choices.
+Click one, or write your own answer. Then press **Send answers**.
+
+- Not sure what a question means? Press **Ask about this** and ask in one line.
+- In a hurry? Press **Skip, let the squad guess**. You will see its guesses in the spec.
+- Want to talk it over? Press **Talk it through instead** and chat with the Analyst.
+
+With a tracker, your answers are also posted on the work item as a comment.
+
+### Approve the spec
+
+The spec says **what** gets built: the story, a "done when" list (each one something the Tester must prove),
+business rules and edge cases. Read it like a document:
+
+- Point at any part to **comment** on it or **edit** it yourself. Your wording stays, even after a rewrite.
+- **Send back** sends all your comments at once. The new version shows **What changed**, old and new side by
+  side.
+- **Start over** writes it again from zero, with a new direction from you.
+- When it is right, press **Approve spec**.
+
+### Approve the design
+
+The design says **how** it gets built: the decision (the options, the one chosen and why) and the steps. It
+also says which saved decisions it follows. A ticket with screens gets a clickable mockup under **How it will
+look**.
+
+This part is technical. A developer can approve it for you. Review it the same way as the spec, then press
+**Approve design**. The decision is saved, named after the ticket: `AB-46.1` is the first decision of `AB-46`.
+Decisions the Architect found in the existing code are named `STACK.1`, `STACK.2`.
+
+### Watch the squad build
+
+Now the squad works on its own:
+
+1. The **Builder** writes the code in its own copy of the project. Your own folder is never touched while it
+   works.
+2. squad-kit runs the project's **tests, lint and build** itself. If they fail, the Builder fixes them, up to
+   3 tries.
+3. The **Reviewer** reads the changes in a fresh session, so the work gets a real second opinion.
+4. The **Tester** starts the app and takes a screenshot for each "done when".
+
+While it works, you can:
+
+- See the steps, the activity and the real agent conversation in the drawer's tabs.
+- Message an agent in the **Conversation** tab. It reads your message at its next step; the work goes on.
+- Ask any agent a question. Asking never stops the work.
+- Press **Propose a change** to change what gets built. See [Change something](#8-change-something) below.
+- Press **Stop**. The work so far is kept.
+- Developers can press **Take over** to work in the Builder's own session, then **Give back**.
+
+### Check the proof
+
+The **Proof** page shows each "done when" with its screenshot, and three results: the checks, the review and
+the proof. Nothing ships without all three.
+
+- If it is right, press **Looks right**. squad-kit saves the change as a commit on the ticket's branch. With a
+  code host (Azure Repos today), it opens a pull request with the screenshots and merges it. Without one, it
+  merges the branch into your main branch itself. On the tracker, the item moves to resolved.
+- If not, press **Something's wrong**, say what in one line, and press **Send back**. The ticket goes back to
+  the Builder with your note.
+
+### Release
+
+Open **Releases**. The squad has prepared the next release: the version, the tickets in it and the release
+notes. Edit the notes if you like, then press **Release**.
+
+squad-kit asks you once to confirm, and lists exactly which branch of which repo it will push, and where. Read
+it. Then it updates the changelog, sets the version, adds the git tag and pushes. On the tracker, the items
+close with the version as a tag.
+
+Found a problem later? Press **Report a bug** on the board. The bug becomes a ticket linked to the release, goes
+around the same loop, and the Tester adds a check so it cannot come back.
+
+## 7. What each card means
+
+These are the cards that land in **Waiting for you**. Each one names the button to press, and the terminal
+command that does the same.
+
+| Card | What it means | What you do |
+| --- | --- | --- |
+| **Questions** | The Analyst or the Architect needs answers before writing the spec. | **Answer**: pick a choice or write your own. Or skip and let the squad guess. |
+| **Spec** | The story and the "done when" list are ready. | **Review spec**: comment, edit, send back, start over, or **Approve spec**. |
+| **Design** | The decision and the steps are ready. | **Review design**: the same as the spec, then **Approve design**. |
+| **Proof** | The work is built, checked and reviewed, with screenshots. | **Check proof**: **Looks right**, or **Something's wrong**. |
+| **An agent asks you** | The Architect, Builder or Reviewer stopped in the middle of its work to ask you something, sometimes with screenshots or a mockup. | **Answer** on the card. |
+| **The squad is stuck** | A check keeps failing, or the review stays open, or the change clashes with newer code on main. | **Decide**: **Try again** (with a note), **Fix it yourself**, **Continue anyway** (with a reason that stays on the record), or send it back to the plan. |
+| **Looks stuck** or **taking long** | A step makes no progress. | End the stuck command, keep waiting, or stop. |
+| **A newer decision** | A decision approved after this ticket's design changes it. | **Update the plan**, or keep it as it is, with a reason. |
+| **A change** | A change you proposed is written into the spec, or its design update is ready. | Approve it or decline it. |
+| **You have this ticket** | You took the ticket over. | **Give back** when you are done. The checks, review and proof run again. |
+| **A chat is open** | You were talking a waiting ticket through with an agent. | **Open chat**, and finish the talk. |
+
+Only you can skip a failed check. Your reason shows on the ticket, the pull request and the release notes.
+
+## 8. Change something
+
+You can change your mind at any time, without stopping the squad.
+
+- **Ask** any agent anything. Open a chat from the ticket. The chat says so: the work goes on, and asking
+  changes nothing.
+- **Change** what gets built with **Propose a change**. The Analyst writes it into the spec, old and new side
+  by side, and says whether it is small or big. Nothing changes until you approve it.
+  - A **small** change reaches the Builder at the end of its current step. The work does not stop.
+  - A **big** change pauses the Builder after its current step. The Architect updates the design, you approve
+    it, and the Builder redoes only the steps the change touches.
+  - One change at a time per ticket.
+- **Released or accepted work** answers questions only. There the button reads **Ask for a change**, and the
+  change becomes a new ticket linked to it, or a bug report.
+
+## 9. Do it from the terminal
+
+Every button has a terminal command. Turn on **Show commands** in the sidebar to see each one next to its
+button. A few to start with:
 
 ```bash
-squad new-story checkout --id ENG-42
-# squad: fetching ENG-42 from Jira…
-# squad: wrote intake (… fields, … attachments)
+squad inbox                  # everything waiting for you
+squad board                  # every open ticket, by stage
+squad show AB-46             # one ticket: its spec, design, steps, checks, proof and cost
+squad answer AB-46           # answer its questions
+squad approve AB-46          # approve what it waits on: the spec, the design or the proof
+squad propose AB-46 "allow 5 bookings a day, not 3"
+squad pull 46                # start a ticket from a work item
+squad release                # release the tickets that are ready
 ```
 
-Auto-fetch typically fills in **title**, **description**, **labels**, and, when the tracker provides them, **acceptance-style content** from the description (e.g. from Jira ADF). **Attachments** are downloaded up to **10 MB each** by default. Override or skip with:
+Commands find the project from the folder you are in. From any other folder, add `--project <name>`. See them
+all with `squad --help`.
 
-- **`--no-fetch`** — never call the tracker; empty scaffold.
-- **`--no-attachments`** — metadata only.
-- **`--attachment-mb <n>`** — change the per-file size cap.
+## Next
 
-### Skip tracker for one story
-
-If the repo normally **requires** a tracker id for new stories, you can still do a one-off manual story:
-
-```bash
-squad new-story checkout --no-tracker --title "quick experiment"
-```
-
-The important part is **`--no-tracker`** when the workspace would otherwise require an id.
-
-### Resulting layout (examples)
-
-**Title-based folder:**
-
-```text
-.squad/stories/checkout/add-guest-checkout/
-├── intake.md
-└── attachments/
-```
-
-**Tracker-id folder (e.g. `ENG-42/`):**
-
-```text
-.squad/stories/checkout/ENG-42/
-├── intake.md
-└── attachments/
-```
-
-Open `intake.md`, review the **Source** block if it was auto-fetched, and add anything missing before planning.
-
-## 3. Generate a plan
-
-You need one concrete **`NN-story-*.md` plan file** per story. There are three supported paths.
-
-### Option A — inside your agent (unchanged from 0.1)
-
-In **Claude Code**, **Cursor**, **Copilot**, or **Gemini CLI**:
-
-```text
-/squad-plan .squad/stories/checkout/add-guest-checkout/intake.md
-```
-
-Use the real path to your `intake.md`. The agent runs the bundled meta-prompt, reads the intake and attachments, and should write a plan under `.squad/plans/<feature>/` and update the feature’s **`00-overview.md`** (and **`.squad/plans/00-index.md`** when you add a new feature — follow your installed slash-command text).
-
-### Option B — direct from the terminal (`0.2.0`)
-
-**Anthropic with no API key (0.12.0).** If you chose the subscription during `init`, sign in once and you are done:
-
-```bash
-squad auth login       # browser flow; stores a token in .squad/secrets.yaml
-squad auth status      # confirms mode, credential, and the signed-in account
-squad new-plan --api   # runs on your Claude plan
-```
-
-Already signed in through Claude Code (`claude`, then `/login`)? Skip `squad auth login` — squad-kit detects that credential automatically. There is **no per-token API bill** on this path, but planning **draws on your Claude plan's usage limits**, the same window Claude and Claude Code consume; hitting it means waiting for the reset, not a bigger invoice. Precedence, CI setup, and troubleshooting: [Anthropic authentication](auth.md).
-
-With the direct planner enabled and credentials set, the live terminal session mirrors the console-style activity feed: **stage pipeline** (scout → draft → validation), **budget meters** (reads, context KB, wall time), **extended thinking** (when the model supports it), **streaming validation findings**, and a final summary that includes **runtime** metadata plus the path to the persisted **`.events.jsonl`** timeline under `.squad/runs/` (when event persistence is enabled).
-
-```bash
-squad new-plan --api
-# interactive picker over un-planned intakes
-# → reads intake.md + only the repo files the planner requests (read_file / list_dir)
-# → writes .squad/plans/checkout/01-story-add-guest-checkout.md
-# → updates the feature's 00-overview.md
-```
-
-The planner does **not** map the whole repo up front. It uses **demand-driven context**: a tool-use loop with caps from **`planner.budget`** in `.squad/config.yaml` (file reads, context bytes, wall-clock). For how that relates to “plan once, execute cheap,” see [Where the direct planner fits](philosophy.md#where-the-direct-planner-fits) in the philosophy doc.
-
-### Option C — copy-paste (compose prompt to stdout / clipboard)
-
-```bash
-squad new-plan
-# prints the composed prompt to stdout; copies to the clipboard; paste into any chat
-```
-
-Use **`--copy`** to force this mode when the direct planner is configured, or **`--no-clipboard`** to print without touching the clipboard.
-
-`new-plan` may show an **interactive intake picker** when you omit the path. Filter with **`--feature <slug>`** or include already-planned stories with **`--all`**.
-
-## 4. Execute the plan
-
-Open a **new, scoped agent session**. Attach **only** the generated `NN-story-*.md` file. A smaller / cheaper model can usually follow it end to end. If something is wrong, **fix the plan** (or the intake) and regenerate — not the other way around.
-
-## 5. Track progress
-
-```bash
-squad status              # counts, next NN, planner + tracker rows
-squad list                # all stories and plan state
-squad list --feature auth  # filter by feature
-# attach a tracker id to an existing intake when you skipped one earlier:
-# squad tracker link .squad/stories/<feature>/<id>/intake.md ENG-42
-```
-
-## 6. When something feels off
-
-- **`squad doctor`** — read-only health check (config, credentials, resolved auth mode, model id probe via the provider’s **models API** — **no** paid completion calls, secrets stay masked in normal output).
-- **`squad auth status`** — which Anthropic credential resolved, and the Claude account behind it. Start here when a `--api` run complains about authentication; the fixes are in [auth.md](auth.md#troubleshooting).
-- **`squad doctor --fix`** — **non-destructive** repairs only (e.g. missing dirs, `.gitignore` block, `secrets.yaml` permissions on POSIX).
-- **`squad migrate`** — **one-shot, destructive** upgrades from 0.1.x layout (e.g. deleting the pre-0.2 local prompts copy — **removed in 0.2.0** in favour of package-bundled templates). Use when upgrading the **package**; confirm with the prompt, or pass **`--yes`** in automation. **`--dry-run`** shows the plan first.
-
-```bash
-squad doctor
-squad doctor --fix
-squad migrate --dry-run
-squad migrate            # or: squad migrate -y
-```
-
-For the full list of checks and all configuration knobs, see [customization.md](customization.md). For anything Anthropic-credential-shaped, see [auth.md](auth.md).
-
-## Multi-repo workspaces
-
-If the codebase spans several roots (e.g. `api/`, `web/`, `worker/`), list them in `.squad/config.yaml`:
-
-```yaml
-project:
-  projectRoots:
-    - api
-    - web
-    - worker
-```
-
-The meta-prompt and direct planner use this to anchor paths.
-
-## Prompts
-
-Intake template, plan **generate-plan** meta-prompt, and plan skeleton are **bundled inside the squad-kit npm package** (`templates/` in the source tree). They are **not** copied into `.squad/prompts/`, which was **removed in 0.2.0** — upgrade the CLI to change them. To customise beyond config and your own story text, **fork squad-kit** and patch `templates/prompts/`; see [customization.md](customization.md).
+- [The app](console.md): every page, in short.
+- [Moving to 1.0](migrating-to-1.0.md): for projects from squad-kit 0.x and from early 1.0 boards.

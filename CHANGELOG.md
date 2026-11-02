@@ -7,6 +7,103 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] — Unreleased
+
+squad-kit 1.0 is an agent harness for the whole software cycle. You write a ticket in plain words. A squad of
+AI agents (Analyst, Architect, Builder, Tester and Reviewer) takes it from that ask to a release, and you stay
+in control through buttons and approvals. It needs Node.js 22 or newer, git, and an AI tool installed and
+signed in: Claude Code today. Moving an existing project: [Moving to 1.0](docs/migrating-to-1.0.md).
+
+### The one app
+
+- **Plain `squad` opens one app for all your projects**, from any folder, in your browser at `127.0.0.1:4571`.
+  It runs on your computer only, behind a private link.
+- **Home** lists your projects and one **Waiting for you** list across all of them.
+- **Add project** opens a folder browser inside the page. It says what kind of folder you picked, and can make
+  a new one.
+- **`squad console`** in a folder adds that project to the app and opens its board, starting the app if needed.
+- Every project has its own board, at its own address. Every button has a terminal command, and commands take
+  `--project <name>` from any folder. New: `squad projects`, and `squad inbox` across every project.
+- `squad --restart` and **Restart the board** start a fresh app on the same link. Running work picks up where it
+  stopped.
+
+### Projects and files
+
+- **Any folder can be a project**: an empty folder (a new repo), code with git (kept as it is), code without git
+  (a new repo with your files in its first commit, without `node_modules`, `dist` or `.env`), or a folder with
+  several code repos.
+- **The project keeps its own memory in `.squad/`**, as Markdown people can read and edit: `config.yaml`, and
+  `tickets/<ID>/` with `ticket.md`, `spec.md`, `questions.md`, `design.md`, `notes.md`, `proof.md` and attached
+  files, plus `decisions/`, `releases/`, `rules/` and `knowledge/`.
+- **This computer keeps its own part in `~/.squad-kit/projects/<id>/`**: live progress, agent chats,
+  screenshots, voice notes, sign-ins and cost. Nothing secret, personal or big goes into the project folder.
+- **Git stays quiet.** `.squad/` goes in git's local ignore list, never in `.gitignore`. For a project whose
+  `.squad/` sits in its one repo, squad-kit commits each ticket's documents on the ticket's branch, and the
+  release commit carries the rest. `git log .squad/tickets/<ID>` shows each big moment of a ticket.
+
+### Tickets and the squad
+
+- **Write a ticket on the board** in plain words, with criteria, business rules, edge cases and files. Or paste
+  an idea or a chat message and the Analyst fills in the ticket for you to check. Bugs have their own form.
+- **Pull a ticket from your tracker.** Azure DevOps today: the backlog by sprint, comments, states, bugs, pull
+  requests on Azure Repos, and items closed with the version on release. Tickets keep the tracker's name, like
+  `AB-46`; a project without a tracker names its own (`LR-1`).
+- **The squad's loop**: questions, spec, design, build, checks, review, proof, release. You answer, approve the
+  spec, approve the design (a developer can do this part), check the proof and release.
+- **Full and Express tracks.** Express is for small fixes: no questions and the plan approved on its own; the
+  build, checks, review and your **Looks right** still run.
+- **squad-kit is the boss.** It runs the tests, lint and build itself, starts a fresh Reviewer, and does the git
+  and tracker work. Agents never merge, push or grade their own work. The Builder works in its own copy of the
+  code; your folder is never touched while it works.
+- **Decisions are saved and linked**, named by the ticket that made them (`AB-46.1`), or `STACK.1` for what the
+  Architect found in the existing code. The Architecture page shows how they build on each other.
+- **Every stop has a way out**: try again, fix it yourself, continue anyway (only you can, with a reason that
+  stays on the record), or go back to the plan. Nothing hangs silently.
+- **Model levels per role and step**: strongest, balanced or fast, with an effort. squad-kit sets the defaults;
+  the team and each person can change them on the Squad and AI page.
+- **One limit of tickets at once** (2 by default, up to 5), shared by all projects, because they share your AI
+  account.
+- AI tools plug in as modules. Claude Code runs every role today; Codex is found but cannot run yet.
+
+### Chat
+
+- **Talk to any agent** on a ticket, with screenshots, files and voice notes.
+- **Asking never stops the work.** While the squad works, the chat runs beside it and changes nothing.
+- **A change goes through the spec.** **Propose a change**: the Analyst writes the old and new wording and says
+  if it is small or big, and you approve. A small change reaches the Builder at the end of its current step. A
+  big one pauses it, the Architect updates the design for your approval, and the Builder redoes only what
+  changed. One change at a time per ticket. Terminal: `squad propose`.
+- **Released work is for questions only.** A change to it becomes a new linked ticket or a bug report.
+- A new chat window is coming in this release: a side panel with tabs, a full-screen page, a phone layout, and
+  Arabic and English shown the right way.
+
+### Teams
+
+- **An owner on each ticket**, kept in `ticket.md`, so two squads never build the same ticket.
+- **Hand over** (button and `squad hand-over`) pushes the ticket's branch with its code and documents, and names
+  the new owner. Their squad carries on from the branch, with a fresh session from the spec, design and code.
+- **A fresh clone shows the same board**: every ticket with its spec, answers, design, stage and owner, and
+  every decision. Live progress, chats and screenshots stay on the computer that made them.
+- Hand over and clones work for a project whose `.squad/` sits in its one repo.
+
+### Cost
+
+- **What each ticket and each role used**: runs, tokens, and the cost at the AI company's API prices, per role
+  and step. On the ticket's Cost tab, the Squad and AI page, the board's footer and in `squad show`.
+- Your own AI subscription pays for it. The numbers show where the cost goes, so the team can tune the levels.
+
+### Moving from 0.x
+
+- **Open a 0.x project** with `squad console` or Add project. Its `stories/`, `plans/` and tracker settings in
+  `config.yaml` stay as they are; `config.yaml` gains a `board:` section.
+- **Sign-ins move** from `.squad/secrets.yaml` to `~/.squad-kit/projects/<id>/secrets.yaml`. The 0.x commands
+  find them there.
+- **A board from an early 1.0 build** (`.squad/board/`) moves to the new layout on its own, once, with a backup
+  in `~/.squad-kit/backups/` and a field-by-field check. Tickets and decisions keep their names. It waits until
+  no board runs.
+- The 0.x commands (`new-story`, `new-plan`, `auth`, `config`, `doctor` and others) still ship. The 0.x console
+  pages are replaced by the 1.0 app.
+
 ## [0.12.4] — 2026-08-26
 
 ### Bug fixes

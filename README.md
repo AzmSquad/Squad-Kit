@@ -11,274 +11,163 @@
   <a href="https://squad-kit.com"><img src="https://img.shields.io/badge/site-squad--kit.com-7cffa0?labelColor=0a0a0c" alt="Website"></a>
 </p>
 
-**Plan once, execute cheap.** A 3-step SDD-style workflow CLI for AI-assisted coding: **raw story → good plan → implementation**. Your expensive model plans once. A cheap model executes many times. Squad-kit owns the folder conventions, the plan meta-prompt, and the agent slash-commands so the token cost goes where it pays off. Deeper product notes live on **[squad-kit.com](https://squad-kit.com)** and in [`docs/`](docs/philosophy.md).
+**You write the ticket. Your squad does the rest.**
 
-- **Visual console** — `squad console` opens a local, dark-modern web UI for stories, plans, live planner runs, config, secrets, tracker, and doctor. Loopback-only, token-gated. v0.6.0 redesigned the console with a near-monochrome Vercel/Geist palette, a Cmd+K command palette, Linear-style chord shortcuts (`g s`, `g p`, `?`), a portal-rendered dialog system, and a density toggle. Full tour: [`docs/console.md`](docs/console.md).
+squad-kit is an agent harness for the whole software cycle. You describe what you need in plain words. A
+squad of AI agents takes it from that ask to a release: the Analyst, the Architect, the Builder, the Tester
+and the Reviewer. You stay in control. The squad asks you when it needs you, and nothing important moves on
+without your approval.
 
-![Squad console dashboard](docs/images/console/dashboard.png)
+## Who it is for
 
-```
-.squad/
-├── stories/<feature>/<id>/  # intake + attachments (one per story)
-└── plans/<feature>/         # NN-story-<id>.md (one per executable plan)
-```
+- **Business analysts and project managers** who want to turn tickets into working software, and always see
+  where each ticket is. No terminal skills needed after the first step.
+- **Developers** who want the squad to do the routine work, while they approve designs and read the code.
+- **Teams** who want specs, decisions and releases kept with the project, in files anyone can read.
 
-## What's new in 0.12.0
+## How a ticket goes
 
-- **Plan on your Claude subscription.** `squad auth login` signs in with your Anthropic account and `squad new-plan --api` runs on your Claude plan — no API key, no per-token API bill. Usage draws on the same limits as Claude and Claude Code. Full guide: [`docs/auth.md`](docs/auth.md) · [on the site](https://squad-kit.com/docs/auth).
-- **`planner.auth.anthropic`** — `subscription` | `api-key` | `auto` (default `auto`). Existing API-key workspaces keep working; `squad doctor` gained `planner auth mode` and `planner auth vs. runtime` so the resolved mode is never a mystery.
-- **Console auth surface** — an Authentication control on Config, a Claude Account card on Secrets, an auth badge on Generate and on every run record.
+1. You write a ticket on the board, or pull one from your tracker (the tool where your team keeps its work
+   items).
+2. The Analyst asks you questions. You answer with a click.
+3. The Analyst writes the **spec**: the story and a "done when" list. You approve it.
+4. The Architect writes the **design**: the decision and the steps. You, or a developer, approve it.
+5. The Builder writes the code in its own copy of the project. Your own folder stays as it is.
+6. squad-kit runs the tests, lint and build itself. The Reviewer checks the work with fresh eyes. The Tester
+   takes a screenshot for each "done when".
+7. You check this **proof** and press **Looks right**.
+8. You press **Release**. squad-kit writes the changelog, sets the version and adds the git tag.
 
-## What's new in 0.11.0
+When the squad needs you, a card shows up in **Waiting for you**. Everything else, the squad handles. Every
+button also has a terminal command, so developers can do the same from the terminal.
 
-- **Persisted run history** — `--api` runs append to `.squad/runs/<id>.events.jsonl` (thinking text redacted on disk, old files rotated), and the console gained a runs index plus a full run report page.
-- **Richer live telemetry** — tool lifecycle, thinking deltas, and runtime metadata stream to both the CLI and the console; the CLI prints a stage pipeline and budget meters.
+## What you need
 
-## What's new in 0.10.0
-
-- **Anthropic planning moved to the Claude Agent SDK** by default so Opus 4.7 can use adaptive thinking and effort. OpenAI and Google stay on the Vercel AI SDK.
-- **Thinking, effort, and runtime are configurable** — `planner.runtime.anthropic`, `planner.providerOptions.anthropic`, and the `--anthropic-runtime` / `--effort` / `--scout-effort` / `--no-thinking` flags.
-- **`squad doctor` checks runtime wiring**, model-vs-runtime fit, and the Agent SDK binary.
-
-## What's new in 0.9.0
-
-- **Scout stage** — a cheap-tier model picks the files worth preloading before your plan model drafts, cutting the expensive model's read loop.
-- **LLM-free validation pass** flags missing paths, line ranges past EOF, and simple symbol problems; `--strict-validation` writes `*.partial.md` when it finds something.
-
-## What's new in 0.8.0
-
-- **Rate-limit handling you can watch** — the Generate page shows a countdown, auto-retry banner, and rerun control; the planner emits `rate_limit` events distinguishing "retrying" from "aborted".
-
-## What's new in 0.7.0
-
-- **GitHub Issues as a tracker** — owner/repo in config, PAT (or `GITHUB_TOKEN`) in secrets, search and import like Jira or Azure. **Linear was removed** as a tracker type in the same release.
-
-## What's new in 0.6.0
-
-- **Console redesign** — Geist-style flat dark UI, Cmd+K command palette, global keyboard shortcuts, portal dialogs, density toggle. Same CLI and `.squad/` on disk; no migration. See [`docs/console.md`](docs/console.md).
-
-## What's new in 0.5.0
-
-- **`squad console`** — local web UI on `127.0.0.1:4571` for the whole workflow (dashboard with run charts, stories, plans + diff, live Generate SSE, config/secrets editors, tracker search/import, graphical doctor). See [`docs/console.md`](docs/console.md).
-- **Run history** — last 20 planner runs under `.squad/runs/` power dashboard charts; **recent projects** list in `~/.squad/recent-projects.json` for quick handoff between repos.
-- **`pnpm size:guard`** — publish tarball must stay under 2.5 MB unpacked.
-
-## What's new in 0.4.0
-
-- **`squad new-plan --api` limits UX.** When a budget or cap stops the planner, the CLI asks before more API spend. Stop saves a `*.partial.md` with a clear status flag; exit code **2** when the run did not finish cleanly.
-- **`planner.maxOutputTokens`** in merged config (default **16384** tokens per model round).
-- **Shorter plan filenames** — new plans use the story folder id (`NN-story-<id-slug>.md`), not a long title slug; the overview table still shows the title.
-- **Richer intakes** when `squad new-story` fetches Jira / Azure work items (more fields wired into the template).
-- **`squad list`** reads `<!-- squad-kit: … -->` metadata from the first matching line near the top of a plan file, not only line 1.
-
-## What's new in 0.3.0
-
-- **Prompt caching** across Anthropic, OpenAI, and Google — ~70% fewer billed input tokens on
-  a typical planning run, and Anthropic Tier 1 ITPM pressure roughly 5× lower.
-
-## What's new in 0.2.0
-
-- **Direct planner.** `squad new-plan --api` runs Anthropic, OpenAI, or Google from your terminal and writes the plan file. Demand-driven context keeps tokens bounded.
-- **Tracker auto-fetch.** `squad new-story --id <ID>` pulls title, description, labels, and attachments (≤ 10 MB each) from Jira Cloud or Azure DevOps Services.
-- **Secrets split.** API tokens live in `.squad/secrets.yaml` (git-ignored, `0600` on POSIX). `.squad/config.yaml` never holds secrets; the loader rejects secret-shaped keys.
-- **Interactive-first UX.** Missing input prompts in a TTY; `-y` / `--yes` or `CI=1` opts out and fails fast.
-- **`squad doctor`.** Full read-only health check; `--fix` for non-destructive repairs, `--json` for scripting.
-- **`squad migrate`.** One-shot 0.1.x → 0.2.0 structural migrations (delete legacy `.squad/prompts/`, permissions, config normalisation). Destructive; use `--dry-run` first.
-- **`squad upgrade`.** Safe npm-backed self-update (`--check` to verify only).
-- **`squad config`.** `show`, `set planner` / `set tracker`, `unset …`, `remove-credential …` — edit config and secrets without hand-editing YAML.
-- **`squad rm`.** `rm story` / `rm plan` / `rm feature` with `--dry-run`, `--trash`, and cascading overview updates.
-- **Bundled prompts.** `generate-plan.md`, `intake.md`, and `story-skeleton.md` ship inside the npm package; upgrade the CLI to update them.
-
-Full list in [`CHANGELOG.md`](CHANGELOG.md).
-
-## Upgrading from 0.1.x
-
-Existing squad-kit users should run two commands, once per repo:
-
-```bash
-pnpm add -g squad-kit             # or: npm install -g squad-kit — or: squad upgrade
-cd your-project && squad migrate
-```
-
-`squad migrate` deletes the now-unused `.squad/prompts/` directory, appends the managed `.gitignore` block, tightens `.squad/secrets.yaml` permissions to `0600`, and normalises `.squad/config.yaml`. It is idempotent but destructive — run it with `--dry-run` first if you forked the prompt files.
-
-Full upgrade walkthrough, including what-if scenarios and how to recover customised prompts: [migration guide (repo)](docs/migrating-from-0.1.md) · [migration guide (site)](https://squad-kit.com/docs/migrating-from-0.1).
+- **Node.js** 22 or newer.
+- **git**.
+- **An AI tool**, installed and signed in once with your own account. Today that is **Claude Code**, the only
+  AI tool the squad runs on. squad-kit uses your existing sign-in, so there is nothing new to buy. squad-kit
+  also finds Codex, but cannot run it yet.
 
 ## Install
 
 ```bash
-npm install -g squad-kit
-# or
-pnpm add -g squad-kit
+npm i -g squad-kit
 ```
 
-Requires Node 18+.
-
-## Quickstart
+## Open squad-kit
 
 ```bash
-cd your-project
-squad init                                              # interactive: tracker, planner, agents, name
-squad new-story auth --title "SSO support"              # or: squad new-story auth --id ENG-42 to auto-fetch
-# → edit .squad/stories/auth/ENG-42/intake.md
-
-/squad-plan .squad/stories/auth/ENG-42/intake.md        # in your agent (Claude / Cursor / Copilot / Gemini)
-# → .squad/plans/auth/01-story-sso-support.md
-
-# new agent chat · attach ONLY the plan file · a cheap model ships it
+squad
 ```
 
-No slash commands in your agent? Skip the meta-prompt copy-paste entirely:
+This opens squad-kit in your browser. It runs on your computer only, at `127.0.0.1:4571`. It is one app for
+all your projects:
+
+- **Home** lists your projects, and one **Waiting for you** list for all of them.
+- Each project has its own **board**, with its tickets in columns, from a new ticket to its release.
+
+Keep the terminal open while you work. Press Ctrl-C there to stop squad-kit. The squad picks up where it was
+the next time you run `squad`.
+
+## Add a project
+
+On Home, press **Add project** and pick a folder in the folder browser. Or open a terminal in the folder and
+run:
 
 ```bash
-squad new-plan --api   # interactive picker, direct provider call, writes the plan file
+squad console
 ```
 
-### Plan on your Claude subscription
+Any folder works:
 
-If you already pay for **Claude Pro or Max**, you do not need an Anthropic API key to use the direct planner:
-
-```bash
-squad init             # choose Anthropic, then "Use my Claude subscription (browser login)"
-squad auth login       # browser sign-in; or just run `claude` and use /login
-squad new-plan --api   # plans on your Claude plan
-```
-
-**No API key is needed** on this path. Planning usage draws on your **Claude plan's usage limits** — the same limits Claude and Claude Code consume — so there is no per-token API bill, but a long planning run does consume part of your window. Opus planning against a **Pro** plan drains that window noticeably faster than against **Max**.
-
-Already signed in to Claude Code? squad-kit picks that login up automatically. Prefer an API key? Nothing changed — set `planner.auth.anthropic: api-key`. Details, CI setup, precedence, and troubleshooting: [`docs/auth.md`](docs/auth.md) · [on the site](https://squad-kit.com/docs/auth).
-
-Configuration, credential edits, and non-interactive flags: see [`docs/customization.md`](docs/customization.md) and `squad config show`. Full walkthrough: [`docs/getting-started.md`](docs/getting-started.md).
-
-## Commands
-
-| Command | What it does |
+| The folder | What squad-kit does |
 | --- | --- |
-| `squad init` | Scaffold `.squad/` with config, bundled prompts reference, and agent slash-commands. See [`docs/getting-started.md`](docs/getting-started.md). |
-| `squad new-story [feature] [--id ID] [--title …] [--no-tracker] [--no-fetch] [--no-attachments] [--attachment-mb n]` | Create a story intake. Auto-fetches from the configured tracker when `--id` is given. |
-| `squad new-plan [intake] [--api] [--copy] [--feature <slug>] [--all]` | Generate a plan from an intake. `--api` calls the configured planner; without `--api`, copy-paste mode prints the prompt to stdout and clipboard (`--no-clipboard` to skip the clipboard). |
-| `squad status` | Counts, next `NN`, planner and tracker rows (including credential source). |
-| `squad list [--feature <slug>]` | Table of stories and plan state. |
-| `squad tracker link [story] [id]` | Attach or update a tracker id on an intake. |
-| `squad auth <login\|status\|logout>` | Sign in to Anthropic with your Claude subscription, inspect the resolved auth, or clear the stored token. `login` takes `--token <v>` (CI) and `--print-only`; `status` takes `--json` and `--offline`. See [`docs/auth.md`](docs/auth.md) · [site](https://squad-kit.com/docs/auth). |
-| `squad config <show\|set\|unset\|remove-credential> …` | View and edit `.squad/config.yaml` and `.squad/secrets.yaml` interactively. See [`docs/customization.md`](docs/customization.md). |
-| `squad rm <story\|plan\|feature> [target] [--dry-run] [--trash] [-y]` | Safely delete with cascading overview updates. |
-| `squad doctor [--fix] [--json]` | Full health check; `--fix` applies non-destructive repairs. |
-| `squad migrate [--dry-run] [-y]` | One-shot 0.1.x → 0.2.0 structural migrations. Destructive. |
-| `squad upgrade [--check] [-y]` | Check npm and install a newer squad-kit release. |
-| `squad console [--port n] [--no-open]` | Start the loopback web console; see [`docs/console.md`](docs/console.md). |
+| An empty folder | Makes a new git repo. The Architect picks the stack with you on your first ticket. |
+| Code with git | Keeps your repo and its history as they are. |
+| Code without git | Makes a repo, with your files in its first commit. Generated folders like `node_modules` and `dist`, and `.env` files, stay out. |
+| A folder with several code repos | Works across them. Each ticket works in one repo. |
+| A squad-kit 0.x project | Keeps your stories, plans and tracker settings. Moves your sign-ins to this computer. |
 
-Deeper option lists: `squad <command> --help` and the `docs/` pages above.
+Then the Architect reads the project, which takes a few minutes. It maps the code and finds how to install,
+test, build and run it. You can follow it on the board.
 
-## Direct planner (optional)
+## Your first ticket
 
-Off by default. Enable during `squad init` (answer **yes** to *Enable automatic plan generation?*) or later with `squad config set planner`. Supported providers: Anthropic, OpenAI, Google.
+1. On the board, press **New ticket**.
+2. Write what you want in plain words. Add business rules, examples or screenshots if you have them. Or paste
+   an idea or a chat message, and the Analyst fills in the ticket for you to check.
+3. Press create. The card moves across the board as the squad works.
+4. Answer, approve and check when a card shows up in **Waiting for you**.
 
-### Credential resolution order
+The step-by-step guide is in [Getting started](docs/getting-started.md).
 
-**Anthropic — default: your Claude subscription**
+## Where your files live
 
-1. **`planner.auth.anthropic`** in `.squad/config.yaml` — `subscription` | `api-key` | `auto` (merged default: **`auto`**).
-2. **`subscription`** — the login created by `squad auth login` (or `claude` → `/login`), resolved in this order:
-   `CLAUDE_CODE_OAUTH_TOKEN` → `planner.anthropicOauthToken` in `.squad/secrets.yaml` → the OS credential store (macOS Keychain / `~/.claude/.credentials.json`).
-3. **`api-key`** — `ANTHROPIC_API_KEY` → `SQUAD_PLANNER_API_KEY` → `.squad/secrets.yaml`.
-4. **`auto`** — a detected Claude login first, otherwise the API key chain, otherwise fail naming both recovery paths.
+squad-kit keeps files in two places. The test is simple: does another person need it to carry on?
 
-In subscription mode squad-kit **clears `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` from the planner subprocess** (your shell is untouched): both outrank the login credential inside Claude Code, so an inherited one would silently bill API credits instead. If you have a key exported and it is being ignored, that is why.
+**Yes: in the project folder, in `.squad/`.** This is the project's memory. It is plain Markdown and YAML that
+people can read and edit.
 
-`auth: subscription` requires the Agent SDK runtime — `planner.runtime.anthropic: vercel` is a hard, early failure, never a silent downgrade.
-
-**OpenAI / Google — API key only, unchanged**
-
-1. Provider env var (`OPENAI_API_KEY`, `GOOGLE_API_KEY`).
-2. `.squad/secrets.yaml` under `planner.<provider>` (or cross-provider `SQUAD_PLANNER_API_KEY`).
-3. Interactive prompt (TTY only).
-4. Fail with a recovery hint.
-
-The deep page — both login paths, per-platform credential storage, CI, usage limits, and a troubleshooting table — is [`docs/auth.md`](docs/auth.md), also served at [squad-kit.com/docs/auth](https://squad-kit.com/docs/auth).
-
-Override the default plan-phase model without editing squad-kit:
-
-```yaml
-planner:
-  enabled: true
-  provider: anthropic
-  auth:
-    anthropic: subscription   # or api-key, or auto (default)
-  cache:
-    enabled: true   # default; turn off via squad config set planner
-  modelOverride:
-    anthropic: claude-opus-5-0      # riding a newer provider release early
+```
+.squad/
+  config.yaml        the project's settings
+  tickets/AB-46/     one folder per ticket: ticket.md, spec.md, questions.md,
+                     design.md, notes.md, proof.md, and files people attached
+  decisions/         what the squad decided, and why: AB-46.1.md, STACK.1.md
+  releases/          what each release carried
+  rules/             house rules for each role
+  knowledge/         what the squad learned about the project
 ```
 
-`squad status` marks the planner row `(override)` when a `modelOverride` is active, and shows a **planner auth** row with the resolved mode. `squad doctor` probes the provider's `/v1/models` endpoint (no paid completion) and tells you what to do if the id is no longer served — that probe and the API rate-tier check both **skip on subscription auth**, since there is no API key to list models with and no API rate tier to warn about.
+**No: on this computer, in `~/.squad-kit/`.** Live progress, agent chats, screenshots, sign-ins (tokens) and
+cost belong to you and this computer. They never go into the project folder.
 
-Slash commands inside your agent (`/squad-plan`) continue to work unchanged — the agent already has your repo in scope. The direct planner is an alternative path, not a replacement. For where keys live, see [Secrets](#secrets) below and [`docs/customization.md`](docs/customization.md).
+For a project whose `.squad/` sits inside its code repo, squad-kit commits each ticket's documents on the
+ticket's own branch, so they reach `main` with the code. `.squad/` stays out of your own `git status`.
 
-## Tracker auto-fetch
+## Work with your team
 
-`squad new-story <feature> --id <ID>` pulls the work item's title, description, labels, and attachments (≤ 10 MB each) straight into the intake. Supported trackers in 0.2.0: **Jira Cloud**, **Azure DevOps Services**.
+- **Tracker.** Connect your tracker in Settings, then pull work items onto the board. Tickets keep the tracker's
+  name, like `AB-46`. squad-kit moves the item along as the squad works, posts the answers and the plan as
+  comments, and opens a pull request for each finished ticket. Today this works with **Azure DevOps** (Azure
+  Boards and Azure Repos).
+- **Hand over.** Give a ticket to a teammate with **Hand over**. squad-kit pushes the ticket's branch with its
+  code and documents, and names the new owner. Their squad carries on from there.
+- **A new computer or a new teammate.** Clone the project and add it. The board comes back from `.squad/`:
+  every ticket with its spec, answers, design, stage and owner, and every decision.
 
-Credentials follow the same resolution order as the planner (env → `.squad/secrets.yaml` → prompt → fail). `squad init` prompts for them when a supported tracker is selected.
+Hand over and clones work for a project whose `.squad/` sits in its one code repo.
 
-Flags:
+## Talk to the squad
 
-- `--no-fetch` — scaffold an empty intake; never call the tracker.
-- `--no-attachments` — fetch metadata only.
-- `--attachment-mb <n>` — override the 10 MB per-file cap.
-- `--no-tracker` — skip the tracker id requirement for this story even when `naming.includeTrackerId: true`.
+Open a chat with any agent on a ticket. **Asking never stops the work**: the squad keeps working while you
+talk. To change what gets built, press **Propose a change**. The Analyst writes the change into the spec, old
+and new side by side, and you approve it. A released ticket answers questions only. A change to it becomes a new
+linked ticket or a bug report.
 
-Full example with Azure DevOps: [`docs/getting-started.md`](docs/getting-started.md).
+## Cost and models
 
-## Secrets
+- squad-kit picks a **model level** for each role and step: **strongest** where a mistake is expensive (spec,
+  design, review), **balanced** for building, **fast** for screenshots and small helpers. The team or each
+  person can change them on the **Squad and AI** page.
+- The board shows **what each ticket and each role used**, in tokens and in money at the AI company's API
+  prices. Your own AI subscription pays for it. This shows where the cost goes.
+- One **limit of tickets at once** (2 by default, up to 5) is shared by all your projects, because they use the
+  same AI account.
 
-squad-kit stores settings in two files:
+## Docs
 
-| File | Purpose | Git-tracked? | Editable by hand? |
-| --- | --- | --- | --- |
-| `.squad/config.yaml` | Project name, tracker, naming, agents, planner shape. | yes — commit it | yes, but `squad config set` is safer |
-| `.squad/secrets.yaml` | Planner + tracker API tokens, and the Claude OAuth token (`planner.anthropicOauthToken`). | **no** — auto-ignored, `0600` on POSIX | no — use `squad auth login` / `squad config set` / `squad init` |
+- [Getting started](docs/getting-started.md): your first hour, from install to a release.
+- [Moving to 1.0](docs/migrating-to-1.0.md): from squad-kit 0.x, and from early 1.0 boards.
+- [The app](docs/console.md): Home, the board, the ticket drawer, Squad and AI, and Settings.
+- [CHANGELOG](CHANGELOG.md): what changed in each version.
 
-`config.yaml` rejects credential-shaped key names at load time — `apiKey`, `api_key`, `token`, `oauthToken`, `anthropicOauthToken`, `secret`, `credential`, `credentials` — so accidental commits fail loud. Matching is on the **exact lowercased key name**, not a substring: a substring rule would reject the legitimate `planner.maxOutputTokens`. Any future credential-shaped key has to be added to that list by name.
-
-Rotate a credential with `squad config set planner` or `squad config set tracker`; remove one with `squad config remove-credential <section>`. `squad auth logout` removes only the Claude OAuth token squad-kit stored and never touches your global Claude Code login.
-
-## Why not Spec-Kit?
-
-Both aim at spec-driven development. They make different bets.
-
-| | squad-kit | Spec-Kit |
-| --- | --- | --- |
-| Commands | `init`, `new-story`, `new-plan`, `status`, `doctor`, `migrate`, `upgrade`, `list`, `rm`, `tracker link`, `auth`, `config` | `constitution`, `specify`, `clarify`, `plan`, `tasks`, `analyze`, `checklist`, `implement` |
-| `/implement` turn starts with | one plan file (~5–15 KB) | 5–7 command templates + cross-artifact reads (~15–25 KB) |
-| Model-tier awareness | Built into the philosophy (planner ≠ executor) | Not prescribed |
-| Generated artifacts per story | `intake.md`, `NN-story-<id>.md`, overview row | `spec.md`, `plan.md`, `data-model.md`, `contracts/`, `research.md`, `quickstart.md`, `tasks.md` |
-| Customization | Prompts ship with the CLI (fork squad-kit to change them). | Template override stack with presets/extensions |
-| Runtime | Node + TypeScript, npm-distributable | Python + `uv` |
-| Scope | Intentionally small | Broad, with safety nets (`clarify`, `analyze`) |
-
-Spec-Kit ships safety rails. Squad-kit ships the cheap path and gets out of the way. Pick squad-kit when your planner already produces trustworthy plans; pick Spec-Kit when you want the process to catch planning mistakes for you.
-
-See [`docs/philosophy.md`](docs/philosophy.md) for the token math and [`docs/vs-spec-kit.md`](docs/vs-spec-kit.md) for the full comparison.
-
-## Tradeoffs to know
-
-- **Quality depends on the planning model.** squad-kit has no safety-net commands. Use a strong model for `new-plan`.
-- **Plans are project-coupled.** They reference real file paths. That is the point — do not expect portability between projects.
-- **Global `NN` can collide on parallel branches.** Rebase-and-renumber is the resolution. Documented in [`docs/customization.md`](docs/customization.md).
-- **Anthropic Tier 1 + Opus** shares a tight input-token-per-minute bucket. **0.3.0** added prompt caching (on by default) so typical multi-turn plans stay viable; see [Prompt caching](docs/customization.md#prompt-caching) in the customization docs.
-- **Subscription planning is not free planning.** It removes the per-token API bill, not the cost: Agent SDK usage draws on your Claude plan's usage limits. Opus planning on **Pro** will exhaust a window much faster than on **Max**. See [`docs/auth.md`](docs/auth.md).
-
-## Non-goals for 0.2
-
-We ship lean on purpose. Current non-goals:
-
-- OpenAI-compatible generic endpoint (local models, OpenRouter, etc.); [Direct planner (optional)](#direct-planner-optional) covers hosted Anthropic, OpenAI, and Google
-- MCP server
-- `squad implement` (future release)
-- `/clarify`, `/analyze`, constitution-equivalent
-- Telemetry
+The 0.x planner commands (`squad new-story`, `squad new-plan`, `squad auth` and others) still ship. Their docs
+are kept as they were: [auth](docs/auth.md), [customization](docs/customization.md),
+[philosophy](docs/philosophy.md), [squad-kit vs Spec-Kit](docs/vs-spec-kit.md) and
+[migrating from 0.1](docs/migrating-from-0.1.md).
 
 ## License
 
-MIT. Contributions welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
+MIT. Contributions welcome. See [`CONTRIBUTING.md`](CONTRIBUTING.md).
