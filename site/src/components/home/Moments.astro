@@ -1,0 +1,77 @@
+---
+/** The four moments a person decides, in order, and what the squad does between them. */
+const moments = [
+  { title: "Answer its questions", body: "The Analyst reads the ticket and asks what it needs to know. Pick an answer, or type your own.", then: "writes the spec" },
+  { title: "Approve the spec", body: "The story and a “done when” list, in plain words. Change anything before you approve.", then: "designs it" },
+  { title: "Approve the design", body: "The Architect’s decision, the options it weighed, and why. It is kept for every ticket after.", then: "builds, tests and reviews" },
+  { title: "Check the proof", body: "A screenshot for each “done when”, before and after. If it looks right, say so.", then: null },
+];
+---
+
+<section id="how" class="moments" aria-labelledby="how-title">
+  <div class="container-page">
+    <div class="head">
+      <h2 id="how-title">You step in four times. The squad does everything between.</h2>
+      <p>
+        Every ticket takes the same path. The squad works on its own, and stops only when a person should
+        decide. No terminal skills needed after the first command.
+      </p>
+    </div>
+
+    <ol class="path">
+      {moments.map((m, i) => (
+        <li>
+          <div class="rail" aria-hidden="true">
+            <span class="num">{i + 1}</span>
+            {m.then && <span class="line"><em>The squad {m.then}</em></span>}
+          </div>
+          <h3>{m.title}</h3>
+          <p>{m.body}</p>
+          {m.then && <p class="then">Then the squad {m.then}.</p>}
+        </li>
+      ))}
+    </ol>
+
+    <p class="last">
+      Then you press <b>Release</b>. squad-kit writes the changelog, sets the version, adds the tag, and moves
+      the work item on your tracker.
+    </p>
+  </div>
+</section>
+
+<style>
+  .moments { padding: clamp(72px, 10vw, 128px) 0 clamp(40px, 6vw, 72px); }
+  .head { display: grid; gap: 18px 56px; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); align-items: end; }
+  h2 { font-size: clamp(34px, 4.6vw, 58px); line-height: 1.02; font-weight: 650; font-stretch: 86%; letter-spacing: -0.03em; text-wrap: balance; }
+  .head p { font-size: 18px; line-height: 1.6; color: var(--color-text-muted); max-width: 52ch; }
+  .path { margin-top: 56px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; list-style: none; padding: 0; }
+  .path li { padding-right: 28px; }
+  .rail { display: flex; align-items: center; height: 44px; }
+  .num {
+    width: 44px; height: 44px; border-radius: 50%; flex: none;
+    display: grid; place-items: center;
+    background: var(--color-you-soft); border: 1.5px solid var(--color-you); color: var(--color-you-ink);
+    font-weight: 700; font-size: 17px;
+  }
+  .line { position: relative; flex: 1; height: 3px; margin: 0 -28px 0 10px; background: var(--color-accent); border-radius: 99px; }
+  .line em {
+    position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%);
+    font-style: normal; font-size: 13px; font-weight: 600; color: var(--color-accent-dim); white-space: nowrap;
+  }
+  h3 { margin-top: 22px; font-size: 21px; font-weight: 650; letter-spacing: -0.015em; }
+  .path p { margin-top: 8px; font-size: 16px; line-height: 1.55; color: var(--color-text-muted); max-width: 30ch; }
+  .then { display: none; }
+  .last { margin-top: 48px; max-width: 70ch; font-size: 17px; line-height: 1.6; color: var(--color-text-muted); }
+  .last b { color: var(--color-text); }
+
+  @media (max-width: 900px) {
+    .head { grid-template-columns: 1fr; }
+    .path { grid-template-columns: 1fr; gap: 30px; }
+    .path li { padding: 0 0 0 60px; position: relative; }
+    .rail { position: absolute; left: 0; top: 0; height: 100%; flex-direction: column; align-items: center; width: 44px; }
+    .line { width: 3px; height: auto; flex: 1; margin: 8px 0 -22px; }
+    .line em { display: none; }
+    h3 { margin-top: 8px; }
+    .then { display: block; font-weight: 600; color: var(--color-accent-dim) !important; }
+  }
+</style>

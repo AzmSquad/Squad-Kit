@@ -1,76 +1,51 @@
 ---
+import { hasFilm } from "~/lib/film";
 const pathname = Astro.url.pathname;
-const isActive = (href: string) =>
-  href === "/" ? pathname === "/" : pathname.startsWith(href);
+const onDocs = pathname.startsWith("/docs");
+const links = [
+  { href: "/#how", label: "How it works" },
+  { href: "/#app", label: "The app" },
+  { href: "/#teams", label: "For teams" },
+  ...(hasFilm ? [{ href: "/#film", label: "Film" }] : []),
+];
 ---
 
-<header class="sticky top-0 z-50 border-b border-[var(--color-border)]/60 backdrop-blur-xl bg-[color-mix(in_oklab,var(--color-bg)_75%,transparent)]">
-  <nav class="container-page flex h-14 items-center justify-between">
-    <a href="/" class="flex items-center gap-2.5 group" aria-label="squad-kit home">
-      <img src="/logo.svg" alt="" width="28" height="28" class="h-7 w-7" />
-      <span class="font-semibold tracking-tight">squad-kit</span>
-      <span class="chip hidden sm:inline-flex !px-2 !py-0.5 !text-[10px]">v0.11.0</span>
+<header class="sticky top-0 z-50 border-b border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-bg)_88%,transparent)] backdrop-blur-xl">
+  <nav class="container-page flex h-16 items-center justify-between gap-4" aria-label="Main">
+    <a href="/" class="flex items-center gap-2.5" aria-label="squad-kit home">
+      <img src="/logo.svg" alt="" width="30" height="30" class="h-[30px] w-[30px]" />
+      <span class="text-[17px] font-semibold tracking-tight">squad-kit</span>
+      <span class="rounded-md border border-[var(--color-border-strong)] px-1.5 py-px text-[11px] font-semibold text-[var(--color-text-muted)]">1.0</span>
     </a>
 
     <div class="hidden md:flex items-center gap-1">
-      <a
-        href="/"
-        class={`px-3 py-2 text-sm rounded-md transition-colors ${
-          isActive("/") && pathname === "/"
-            ? "text-[var(--color-text)]"
-            : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-        }`}
-      >
-        Home
-      </a>
+      {links.map((l) => (
+        <a href={l.href} class="rounded-md px-3 py-2 text-[15px] text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)]">
+          {l.label}
+        </a>
+      ))}
       <a
         href="/docs/getting-started"
-        class={`px-3 py-2 text-sm rounded-md transition-colors ${
-          isActive("/docs")
-            ? "text-[var(--color-text)]"
-            : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-        }`}
+        class={`rounded-md px-3 py-2 text-[15px] transition-colors ${onDocs ? "text-[var(--color-text)] font-medium" : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"}`}
+        aria-current={onDocs ? "page" : undefined}
       >
         Docs
-      </a>
-      <a
-        href="/#compare"
-        class="px-3 py-2 text-sm rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
-      >
-        vs Spec-Kit
-      </a>
-      <a
-        href="/#install"
-        class="px-3 py-2 text-sm rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
-      >
-        Install
       </a>
     </div>
 
     <div class="flex items-center gap-2">
       <a
-        href="https://www.npmjs.com/package/squad-kit"
-        target="_blank"
-        rel="noopener"
-        class="hidden sm:inline-flex items-center gap-1.5 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
-        aria-label="npm"
-      >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <path d="M0 10.4V14h6.4v1.2h4V14h13.6V10.4H0zm4 2.8H2.8v-1.6H4v1.6zm5.6 0H6.8v-1.6h1.2v.4h1.2V10.4h1.2v2.8zm9.6 0h-1.2v-1.6h-1.2v1.6h-1.2v-1.6h-1.2v1.6h-2.4V10.4h7.2v2.8z" />
-        </svg>
-        npm
-      </a>
-      <a
         href="https://github.com/AzmSquad/Squad-Kit"
         target="_blank"
         rel="noopener"
-        class="inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-xs font-medium text-[var(--color-text)] hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface-hover)] transition-colors"
+        class="hidden sm:inline-flex items-center gap-2 rounded-[10px] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 py-2 text-sm font-semibold transition-colors hover:bg-[var(--color-surface-hover)]"
       >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
           <path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.9 1.2 1.9 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-6 0-1.2.5-2.3 1.3-3.1-.2-.4-.6-1.6 0-3.2 0 0 1-.3 3.4 1.2a11.5 11.5 0 0 1 6 0C17 4.7 18 5 18 5c.6 1.6.2 2.8 0 3.2a4.5 4.5 0 0 1 1.3 3.1c0 4.7-2.8 5.7-5.5 6 .4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3" />
         </svg>
         GitHub
       </a>
+      <a href="/#start" class="btn-primary !px-4 !py-2 !text-sm">Get started</a>
     </div>
   </nav>
 </header>

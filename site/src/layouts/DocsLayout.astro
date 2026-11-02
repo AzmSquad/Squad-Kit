@@ -9,14 +9,25 @@ interface Props {
 
 const { title, description, slug } = Astro.props;
 
-const nav = [
-  { slug: "getting-started", label: "Getting started" },
-  { slug: "auth", label: "Anthropic auth" },
-  { slug: "console", label: "Squad console" },
-  { slug: "philosophy", label: "Philosophy" },
-  { slug: "vs-spec-kit", label: "vs Spec-Kit" },
-  { slug: "customization", label: "Customization" },
-  { slug: "migrating-from-0.1", label: "Migrating from 0.1.x" },
+const groups = [
+  {
+    label: "squad-kit 1.0",
+    items: [
+      { slug: "getting-started", label: "Getting started" },
+      { slug: "migrating-to-1.0", label: "Moving to 1.0" },
+      { slug: "console", label: "The app" },
+    ],
+  },
+  {
+    label: "squad-kit 0.x",
+    items: [
+      { slug: "philosophy", label: "Philosophy" },
+      { slug: "customization", label: "Customization" },
+      { slug: "auth", label: "Anthropic auth" },
+      { slug: "vs-spec-kit", label: "vs Spec-Kit" },
+      { slug: "migrating-from-0.1", label: "Migrating from 0.1.x" },
+    ],
+  },
 ];
 ---
 
@@ -24,21 +35,24 @@ const nav = [
   <div class="container-page py-10 sm:py-14">
     <div class="grid lg:grid-cols-[220px_1fr] gap-10 lg:gap-14">
       <aside class="lg:sticky lg:top-24 lg:self-start">
-        <div class="text-xs font-mono uppercase tracking-wider text-[var(--color-text-dim)] mb-3 px-3">
-          Docs
-        </div>
-        <nav class="flex flex-row lg:flex-col gap-1 overflow-x-auto lg:overflow-x-visible pb-2 lg:pb-0">
-          {nav.map((item) => (
-            <a
-              href={`/docs/${item.slug}`}
-              class={`whitespace-nowrap rounded-md px-3 py-2 text-sm transition-colors ${
-                item.slug === slug
-                  ? "bg-[var(--color-surface)] text-[var(--color-text)] border border-[var(--color-border)]"
-                  : "text-[var(--color-text-muted)] hover:text-[var(--color-text)] border border-transparent"
-              }`}
-            >
-              {item.label}
-            </a>
+        <nav class="flex flex-row gap-6 overflow-x-auto pb-2 lg:flex-col lg:overflow-x-visible lg:pb-0" aria-label="Docs">
+          {groups.map((group) => (
+            <div class="flex flex-row gap-1 lg:flex-col">
+              <div class="hidden px-3 pb-1 text-[13px] font-semibold text-[var(--color-text-dim)] lg:block">{group.label}</div>
+              {group.items.map((item) => (
+                <a
+                  href={`/docs/${item.slug}`}
+                  aria-current={item.slug === slug ? "page" : undefined}
+                  class={`whitespace-nowrap rounded-md px-3 py-2 text-sm transition-colors ${
+                    item.slug === slug
+                      ? "bg-[var(--color-surface)] text-[var(--color-text)] border border-[var(--color-border)]"
+                      : "text-[var(--color-text-muted)] hover:text-[var(--color-text)] border border-transparent"
+                  }`}
+                >
+                  {item.label}
+                </a>
+              ))}
+            </div>
           ))}
         </nav>
         <div class="mt-8 hidden lg:block px-3 text-xs text-[var(--color-text-dim)] leading-relaxed">

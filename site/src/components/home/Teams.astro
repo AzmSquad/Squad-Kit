@@ -1,0 +1,87 @@
+---
+/** What a team gets: the project's memory in its own folder, hand over, its tracker and its AI accounts. */
+const tree = [
+  ["config.yaml", "the project’s settings"],
+  ["tickets/AB-46/", ""],
+  ["  spec.md", "the story and “done when”"],
+  ["  questions.md", "what the squad asked, what you answered"],
+  ["  design.md", "the decision and the steps"],
+  ["  proof.md", "each “done when” and its screenshot"],
+  ["decisions/AB-46.1.md", "what was decided, and why"],
+  ["releases/v1.4.0.md", "what the release carried"],
+  ["rules/", "how each role works on this project"],
+];
+const points = [
+  {
+    title: "Hand a ticket over",
+    body: "Hand over pushes the ticket’s branch with its spec and design, and names the new owner. On their computer the board shows the same tickets, and the squad carries on.",
+  },
+  {
+    title: "Bring your tracker",
+    body: "Pull work items from Azure DevOps. Tickets keep the tracker’s names, like AB-46, and the tracker hears about every step. More trackers plug in as modules.",
+  },
+  {
+    title: "Use your own AI account",
+    body: "The squad runs on Claude Code with the account you already have, so there is nothing new to buy. Each role and step gets a fitting model, and you can change any of them.",
+  },
+];
+---
+
+<section id="teams" class="teams" aria-labelledby="teams-title">
+  <div class="container-page">
+    <div class="memory">
+      <div>
+        <h2 id="teams-title">Your project keeps its memory</h2>
+        <p>
+          Specs, answers, designs, decisions and releases live in the project’s own <code>.squad</code> folder,
+          as files anyone can read. They travel with the code, so a new teammate, or a new computer, starts
+          with everything the squad knows.
+        </p>
+        <p>
+          Live progress, chats, screenshots and sign-ins stay on your computer. Nothing is sent anywhere
+          except to the AI tool and the tracker you chose.
+        </p>
+      </div>
+      <pre class="tree" aria-label="The .squad folder of a project"><span class="root">.squad/</span>
+{tree.map(([file, what]) => (
+  <span class="ln"><span class="f">  {file}</span>{what && <span class="w">{what}</span>}</span>
+))}</pre>
+    </div>
+
+    <ul class="points">
+      {points.map((p) => (
+        <li>
+          <h3>{p.title}</h3>
+          <p>{p.body}</p>
+        </li>
+      ))}
+    </ul>
+  </div>
+</section>
+
+<style>
+  .teams { padding: clamp(72px, 9vw, 120px) 0; border-top: 1px solid var(--color-border); }
+  .memory { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 48px; align-items: center; }
+  h2 { font-size: clamp(34px, 4.6vw, 58px); line-height: 1.02; font-weight: 650; font-stretch: 86%; letter-spacing: -0.03em; text-wrap: balance; }
+  .memory p { margin-top: 18px; font-size: 18px; line-height: 1.6; color: var(--color-text-muted); max-width: 54ch; }
+  .memory code { font-family: var(--font-mono); font-size: 0.9em; color: var(--color-text); background: var(--color-bg-elevated); border: 1px solid var(--color-border); border-radius: 5px; padding: 1px 6px; }
+  .tree {
+    margin: 0; padding: 22px 24px; overflow-x: auto;
+    background: var(--color-night); color: var(--color-night-text);
+    border-radius: 16px; font: 14px/1.9 var(--font-mono);
+  }
+  .tree .root { color: #7cd99b; }
+  .tree .ln { display: flex; gap: 18px; }
+  .tree .f { min-width: 22ch; white-space: pre; }
+  .tree .w { color: var(--color-night-muted); font-family: var(--font-sans); font-size: 14px; }
+  .points { margin-top: clamp(56px, 7vw, 88px); list-style: none; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px; }
+  .points li { border-top: 3px solid var(--color-text); padding-top: 18px; }
+  h3 { font-size: 22px; font-weight: 650; letter-spacing: -0.015em; }
+  .points p { margin-top: 10px; font-size: 16.5px; line-height: 1.6; color: var(--color-text-muted); }
+
+  @media (max-width: 900px) {
+    .memory { grid-template-columns: 1fr; }
+    .points { grid-template-columns: 1fr; gap: 28px; }
+    .tree .w { display: none; }
+  }
+</style>

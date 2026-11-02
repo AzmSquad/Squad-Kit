@@ -1,25 +1,39 @@
 ---
 const year = new Date().getFullYear();
+const links = [
+  { href: "/docs/getting-started", label: "Getting started" },
+  { href: "/docs/migrating-to-1.0", label: "Moving to 1.0" },
+  { href: "/docs/console", label: "The app" },
+  { href: "https://www.npmjs.com/package/squad-kit", label: "npm", external: true },
+  { href: "https://github.com/AzmSquad/Squad-Kit", label: "GitHub", external: true },
+  { href: "https://github.com/AzmSquad/Squad-Kit/releases", label: "Releases", external: true },
+  { href: "https://github.com/AzmSquad/Squad-Kit/issues", label: "Report a problem", external: true },
+];
 ---
 
-<footer class="mt-24 border-t border-[var(--color-border)] py-10">
-  <div class="container-page flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
-    <div class="flex items-center gap-3">
-      <img src="/logo.svg" alt="" width="28" height="28" class="h-7 w-7" />
+<footer class="border-t border-[var(--color-border)] py-12">
+  <div class="container-page flex flex-col gap-8 sm:flex-row sm:items-start sm:justify-between">
+    <div class="flex items-start gap-3">
+      <img src="/logo.svg" alt="" width="32" height="32" class="h-8 w-8" />
       <div>
-        <div class="text-sm font-medium">squad-kit</div>
-        <div class="text-xs text-[var(--color-text-dim)]">MIT · © {year} Momen Yasser</div>
+        <div class="font-semibold">squad-kit</div>
+        <p class="mt-1 max-w-xs text-sm text-[var(--color-text-muted)]">You write the ticket. Your squad does the rest.</p>
+        <p class="mt-3 text-xs text-[var(--color-text-dim)]">Free and open source, MIT license. © {year} Momen Yasser</p>
       </div>
     </div>
 
-    <div class="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-[var(--color-text-muted)]">
-      <a href="/docs/getting-started" class="hover:text-[var(--color-text)] transition-colors">Docs</a>
-      <a href="/docs/auth" class="hover:text-[var(--color-text)] transition-colors">Anthropic auth</a>
-      <a href="/docs/philosophy" class="hover:text-[var(--color-text)] transition-colors">Philosophy</a>
-      <a href="/docs/vs-spec-kit" class="hover:text-[var(--color-text)] transition-colors">vs Spec-Kit</a>
-      <a href="https://www.npmjs.com/package/squad-kit" target="_blank" rel="noopener" class="hover:text-[var(--color-text)] transition-colors">npm</a>
-      <a href="https://github.com/AzmSquad/Squad-Kit" target="_blank" rel="noopener" class="hover:text-[var(--color-text)] transition-colors">GitHub</a>
-      <a href="https://github.com/AzmSquad/Squad-Kit/issues" target="_blank" rel="noopener" class="hover:text-[var(--color-text)] transition-colors">Issues</a>
-    </div>
+    <ul class="grid grid-cols-2 gap-x-10 gap-y-2.5 text-sm sm:grid-cols-3">
+      {links.map((l) => (
+        <li>
+          <a
+            href={l.href}
+            class="text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)]"
+            {...(l.external ? { target: "_blank", rel: "noopener" } : {})}
+          >
+            {l.label}
+          </a>
+        </li>
+      ))}
+    </ul>
   </div>
 </footer>

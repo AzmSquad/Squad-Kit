@@ -1,0 +1,89 @@
+---
+/** Real screens from squad-kit 1.0, each with what it lets you do. */
+const rows = [
+  {
+    title: "Every project in one app",
+    body: "Run squad once. Add any folder: an empty one, code you already have, or a project from squad-kit 0.x. Everything waiting for you, from every project, lands in one list.",
+    img: "/shots/home.jpg",
+    alt: "squad-kit Home: the Mawid project with eight open tickets and a Waiting for you list of proofs to check and questions to answer.",
+  },
+  {
+    title: "Talk to any agent, in Arabic or English",
+    body: "Ask the Analyst a question while the Builder builds. Asking never stops the work. Write in Arabic, English or both: every line reads the right way.",
+    img: "/shots/chat.jpg",
+    alt: "The board with a chat beside it. The person writes to the Analyst in Arabic and the Analyst answers.",
+  },
+  {
+    title: "The spec grows while you talk",
+    body: "Open a talk full screen and watch the spec draft beside it. Add a business rule, a “done when” or a note from any message, then let the Analyst write the spec.",
+    img: "/shots/conversations.jpg",
+    alt: "The Conversations page: a list of talks, an Arabic answer from the Analyst with choices, and the spec draft with its story, done-when items and rules.",
+  },
+  {
+    title: "Proof you can check",
+    body: "Tests, lint and build run first, and a second session reviews the code. Then the Tester takes a screenshot for each “done when”, before and after. You press Looks right.",
+    img: "/shots/proof.jpg",
+    alt: "A ticket ready for review: every gate is green, and before and after screenshots for each done-when item.",
+  },
+  {
+    title: "Changes go through the spec",
+    body: "Changed your mind halfway? Propose it. The Analyst writes the old and new wording and says if it is small or big. Nothing changes until you approve, and the Builder redoes only what changed.",
+    img: "/shots/change.jpg",
+    alt: "The Propose a change window, with a change written in English and Arabic.",
+  },
+];
+---
+
+<section id="app" class="tour" aria-labelledby="app-title">
+  <div class="container-page">
+    <h2 id="app-title">Inside the app</h2>
+    <p class="sub">Real screens from squad-kit 1.0, on a real project.</p>
+
+    {rows.map((r) => (
+      <article class="row">
+        <div class="words">
+          <h3>{r.title}</h3>
+          <p>{r.body}</p>
+        </div>
+        <img class="shot" src={r.img} alt={r.alt} width="1440" height="900" loading="lazy" decoding="async" />
+      </article>
+    ))}
+
+    <div class="pair">
+      <article>
+        <h3>See what each role used</h3>
+        <p>The strongest model thinks and a cheaper one builds. Each ticket shows what every role used, at API prices, so you see where the money goes. You can change any role’s model.</p>
+        <img class="shot" src="/shots/cost.jpg" alt="A ticket's Cost tab: the Analyst, Architect, Builder, Reviewer and Tester, each with its model, what it did, its tokens and its cost." width="730" height="878" loading="lazy" decoding="async" />
+      </article>
+      <article>
+        <h3>On your phone, too</h3>
+        <p>Answer a question or check a talk from your phone, in light or dark. Arabic reads right to left, English left to right, in the same message.</p>
+        <img class="shot phone" src="/shots/phone.jpg" alt="squad-kit on a phone in dark mode: a talk with the Analyst, with an Arabic reply." width="780" height="1688" loading="lazy" decoding="async" />
+      </article>
+    </div>
+  </div>
+</section>
+
+<style>
+  .tour { padding: clamp(48px, 7vw, 96px) 0; border-top: 1px solid var(--color-border); }
+  h2 { font-size: clamp(34px, 4.6vw, 58px); line-height: 1.02; font-weight: 650; font-stretch: 86%; letter-spacing: -0.03em; }
+  .sub { margin-top: 12px; font-size: 18px; color: var(--color-text-muted); }
+  .row { margin-top: clamp(56px, 7vw, 96px); }
+  .words { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 12px 48px; align-items: start; margin-bottom: 24px; }
+  h3 { font-size: clamp(24px, 2.6vw, 32px); line-height: 1.12; font-weight: 650; letter-spacing: -0.02em; text-wrap: balance; }
+  .words p, .pair p { font-size: 17.5px; line-height: 1.6; color: var(--color-text-muted); max-width: 60ch; }
+  .shot {
+    display: block; width: 100%; height: auto;
+    border: 1px solid var(--color-border-strong); border-radius: 14px;
+    background: var(--color-surface);
+  }
+  .pair { margin-top: clamp(56px, 7vw, 96px); display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 40px; align-items: start; }
+  .pair p { margin-top: 10px; }
+  .pair .shot { margin-top: 24px; }
+  .pair .phone { max-width: 300px; border-radius: 28px; border-color: var(--color-night-line); }
+
+  @media (max-width: 860px) {
+    .words { grid-template-columns: 1fr; }
+    .pair { grid-template-columns: 1fr; }
+  }
+</style>

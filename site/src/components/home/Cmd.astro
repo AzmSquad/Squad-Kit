@@ -1,0 +1,30 @@
+---
+/** A real terminal command with a Copy button, shown the way the app shows one. */
+interface Props {
+  text: string;
+  class?: string;
+}
+const { text, class: extra = "" } = Astro.props;
+---
+
+<div class={`cmd ${extra}`} data-cmd={text}>
+  <span><span class="prompt" aria-hidden="true">&gt;_</span> {text}</span>
+  <button type="button" data-copy aria-label={`Copy: ${text}`}>Copy</button>
+</div>
+
+<script>
+  for (const el of document.querySelectorAll<HTMLElement>("[data-cmd]")) {
+    const button = el.querySelector<HTMLButtonElement>("[data-copy]");
+    if (!button || button.dataset.ready) continue;
+    button.dataset.ready = "1";
+    button.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(el.dataset.cmd ?? "");
+        button.textContent = "Copied";
+      } catch {
+        button.textContent = "Select and copy";
+      }
+      setTimeout(() => (button.textContent = "Copy"), 1600);
+    });
+  }
+</script>

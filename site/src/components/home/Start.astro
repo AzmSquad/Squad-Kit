@@ -1,0 +1,53 @@
+---
+import Cmd from "./Cmd.astro";
+---
+
+<section id="start" class="start" aria-labelledby="start-title">
+  <div class="container-page">
+    <h2 id="start-title">Start in three steps</h2>
+    <ol class="steps">
+      <li>
+        <h3>Install squad-kit</h3>
+        <Cmd text="npm i -g squad-kit" />
+        <p>You need Node.js 22 or newer, git, and Claude Code installed and signed in once.</p>
+      </li>
+      <li>
+        <h3>Open your project</h3>
+        <Cmd text="squad" />
+        <p>Press <b>Add project</b> and pick a folder. Or run <code>squad console</code> inside the folder. squad-kit sets up what is missing, and the Architect reads the project.</p>
+      </li>
+      <li>
+        <h3>Write your first ticket</h3>
+        <p class="plain">In plain words, the way you always do. The squad asks what it needs to know, and you approve the steps that matter.</p>
+      </li>
+    </ol>
+    <p class="more">
+      <a href="/docs/getting-started">Read the getting started guide</a>
+      <a href="/docs/migrating-to-1.0">Moving from squad-kit 0.x</a>
+    </p>
+  </div>
+</section>
+
+<style>
+  .start { padding: clamp(72px, 9vw, 120px) 0; border-top: 1px solid var(--color-border); }
+  h2 { font-size: clamp(34px, 4.6vw, 58px); line-height: 1.02; font-weight: 650; font-stretch: 86%; letter-spacing: -0.03em; }
+  .steps { margin-top: 44px; list-style: none; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px; counter-reset: step; }
+  .steps li { counter-increment: step; }
+  .steps li::before {
+    content: counter(step);
+    display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%;
+    background: var(--color-text); color: #fff; font-weight: 700; font-size: 16px;
+  }
+  h3 { margin: 18px 0 14px; font-size: 22px; font-weight: 650; letter-spacing: -0.015em; }
+  .steps p { margin-top: 14px; font-size: 16.5px; line-height: 1.6; color: var(--color-text-muted); }
+  .steps p.plain { margin-top: 0; }
+  .steps b { color: var(--color-text); }
+  .steps code { font-family: var(--font-mono); font-size: 0.88em; color: var(--color-text); background: var(--color-bg-elevated); border: 1px solid var(--color-border); border-radius: 5px; padding: 1px 6px; }
+  .more { margin-top: 48px; display: flex; flex-wrap: wrap; gap: 14px 28px; font-size: 17px; font-weight: 600; }
+  .more a { color: var(--color-accent-dim); text-decoration: underline; text-decoration-color: rgba(13, 138, 66, 0.3); text-underline-offset: 4px; }
+  .more a:hover { text-decoration-color: currentColor; }
+
+  @media (max-width: 900px) {
+    .steps { grid-template-columns: 1fr; gap: 32px; }
+  }
+</style>

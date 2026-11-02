@@ -15,8 +15,11 @@ const { Content, headings } = await render(doc);
 
 const titleFromHeading = headings.find((h) => h.depth === 1)?.text;
 const title = doc.data.title ?? titleFromHeading ?? doc.id;
+// A page whose Markdown has no heading of its own gets its title from the front matter.
+const showTitle = !titleFromHeading;
 ---
 
 <DocsLayout title={title} description={doc.data.description} slug={doc.data.slug ?? doc.id}>
+  {showTitle && <h1>{title}</h1>}
   <Content />
 </DocsLayout>
