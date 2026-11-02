@@ -141,7 +141,8 @@ async function releaseRepo(
     if (git(dir, ['status', '--porcelain'], { allowFail: true })) git(dir, [...commitArgsFor(dir), 'commit', '-m', `release ${version}`]);
 
     if (release.addons.tag) {
-      git(dir, ['tag', '-f', '-a', version, '-m', `Release ${version}`]);
+      // A tag needs a name like a commit does: the same fallback when this computer has none set.
+      git(dir, [...commitArgsFor(dir), 'tag', '-f', '-a', version, '-m', `Release ${version}`]);
       log.push({ ok: true, text: `Tagged ${version}` });
     }
 

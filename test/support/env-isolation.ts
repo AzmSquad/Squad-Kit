@@ -7,6 +7,13 @@ import path from 'node:path';
 // developer's own.
 process.env.SQUAD_KIT_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-home-'));
 
+// The same git settings on every machine: a laptop's own name or branch default never leaks into a test, and a CI
+// runner with none set behaves like a laptop.
+const gitConfig = path.join(process.env.SQUAD_KIT_HOME, 'gitconfig');
+fs.writeFileSync(gitConfig, '[user]\n\tname = Momen\n\temail = momen@example.com\n[init]\n\tdefaultBranch = main\n');
+process.env.GIT_CONFIG_GLOBAL = gitConfig;
+process.env.GIT_CONFIG_NOSYSTEM = '1';
+
 /**
  * Every env var that squad-kit reads to resolve planner or tracker credentials.
  * These leak in two realistic ways:
