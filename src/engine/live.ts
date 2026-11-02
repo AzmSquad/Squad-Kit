@@ -205,8 +205,13 @@ export class LiveSquad {
       // Someone else's ticket: their squad works on it, on their computer (ADR-001).
       if (!isMine(t, meta)) continue;
       // Asking never stops the work: a chat reply and the Analyst writing a proposed change run beside the ticket's
-      // step. They never wait for it, never stop it and never count against the limit.
-      if (t.chat?.open && t.chat.thinking && !this.running.has(`__chat:${t.id}`)) this.launch(`__chat:${t.id}`, () => this.chatReply(t.id));
+      // step. They never wait for it, never stop it and never count against the limit. Stop on a chat answer ends that
+      // answer only, never the ticket's step.
+      const chatKey = `__chat:${t.id}`;
+      if (t.chat?.stopping) {
+        this.stops.get(chatKey)?.abort();
+        if (!this.running.has(chatKey)) this.chatStopped(t.id);
+      } else if (t.chat?.open && t.chat.thinking && !this.running.has(chatKey)) this.launch(chatKey, () => this.chatReply(t.id));
       if (openChange(t)?.status === 'writing' && !this.running.has(`__change:${t.id}`)) this.launch(`__change:${t.id}`, () => this.writeChange(t.id));
       if (t.stopRequested) {
         this.stops.get(t.id)?.abort();
@@ -922,20 +927,41 @@ export class LiveSquad {
         // Beside the work, the Analyst and the Architect may read the code built so far to answer.
         addDirs: [...attachmentDirs(t), ...(beside && t.worktree && cwd !== t.worktree && fs.existsSync(t.worktree) ? [t.worktree] : [])],
       });
-      const out = (r.structured ?? {}) as { reply?: string; ready?: boolean };
+      const out = (r.structured ?? {}) as { reply?: string; ready?: boolean; options?: string[]; files?: string[] };
+      const options = (out.options ?? []).map((o) => String(o).trim()).filter(Boolean).slice(0, 4);
+      // Only files the board can show: inside the ticket's own folders.
+      const shown = (out.files ?? []).map((f) => allowedFile(String(f).replace(/^file:\/\//, ''), ticketFolders(t, this.bp))).filter((f): f is string => Boolean(f));
       this.update(id, (x) => {
         if (!x.chat) return;
-        x.chat.messages.push({ who: c.with, text: (out.reply ?? r.text ?? '').trim() || '(no answer)', at: now() });
+        x.chat.messages.push({
+          who: c.with,
+          text: (out.reply ?? r.text ?? '').trim() || '(no answer)',
+          at: now(),
+          ...(options.length ? { options } : {}),
+          ...(shown.length ? { files: [...new Set(shown)].slice(0, 8) } : {}),
+        });
         x.chat.ready = !beside && Boolean(out.ready);
         x.chat.thinking = false;
       });
     } catch (err) {
+      if (readTicket(this.bp, id)?.chat?.stopping) return this.chatStopped(id);
       this.update(id, (x) => {
         if (!x.chat) return;
-        x.chat.messages.push({ who: 'squad', text: `Could not answer: ${(err as Error).message}`, at: now() });
+        x.chat.messages.push({ who: 'squad', text: `Could not answer: ${(err as Error).message}`, at: now(), note: 'failed' });
         x.chat.thinking = false;
       });
     }
+  }
+
+  /** You pressed Stop on an answer: the talk stays open, with a way on. */
+  private chatStopped(id: string): void {
+    this.update(id, (x) => {
+      const c = x.chat;
+      if (!c) return;
+      if (c.thinking && c.open) c.messages.push({ who: 'squad', text: 'You stopped this answer. Ask again, or carry on.', at: now(), note: 'stopped' });
+      c.thinking = false;
+      c.stopping = undefined;
+    });
   }
 
   /** Done talking with the Builder: it carries on in the same session with what you agreed, then the checks run. */

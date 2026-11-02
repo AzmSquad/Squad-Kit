@@ -776,6 +776,7 @@ export function sendChat(bp: BoardPaths, id: string, text: string, uploads: Uplo
     c.messages.push({ who: 'you', text: msg, at: now(), ...(files.length ? { files } : {}) });
     if (files.length) t.attachments = [...(t.attachments ?? []), ...files];
     c.thinking = true;
+    c.stopping = undefined;
   });
 }
 
@@ -820,10 +821,12 @@ export function chatDone(bp: BoardPaths, id: string): Ticket {
   return updateTicket(bp, id, (t) => {
     const c = t.chat;
     if (!c?.open) throw new BoardActionError(`${t.id} has no chat open.`);
-    if (c.thinking) throw new BoardActionError(`The ${AGENT_TITLE[c.with]} is still answering. Wait a moment.`);
+    if (c.thinking && !c.beside) throw new BoardActionError(`The ${AGENT_TITLE[c.with]} is still answering. Wait a moment.`);
     c.open = false;
-    // Beside the work nothing was paused, so nothing goes back: the ticket is wherever the squad took it.
+    // Beside the work nothing was paused, so nothing goes back: the ticket is wherever the squad took it. An answer
+    // still being written is stopped.
     if (c.beside) {
+      if (c.thinking) c.stopping = true;
       addActivity(t, 'you', `Done talking with the ${AGENT_TITLE[c.with]}`);
       return;
     }
@@ -1103,6 +1106,29 @@ export function changeAfterRelease(bp: BoardPaths, id: string, text: string, as:
   return updateTicket(bp, made.id, (x) => {
     x.changeOf = t0.id;
     if (as === 'bug') x.ask = `${ask}\n\n${link}`;
+  });
+}
+
+/* ── Stop and try again on a chat answer ─────────────── */
+
+/** Stop the answer the agent is writing. The talk stays open; what was said so far is kept. */
+export function chatStop(bp: BoardPaths, id: string): Ticket {
+  return updateTicket(bp, id, (t) => {
+    const c = t.chat;
+    if (!c?.open || !c.thinking) throw new BoardActionError(`${t.id} has no answer being written.`);
+    c.stopping = true;
+  });
+}
+
+/** Ask the last question again, after a stop or an answer that failed. */
+export function chatRetry(bp: BoardPaths, id: string): Ticket {
+  return updateTicket(bp, id, (t) => {
+    const c = t.chat;
+    if (!c?.open) throw new BoardActionError(`${t.id} has no chat open.`);
+    if (c.thinking) throw new BoardActionError(`The ${AGENT_TITLE[c.with]} is still answering. Wait a moment.`);
+    while (c.messages.at(-1)?.who === 'squad') c.messages.pop();
+    c.thinking = true;
+    c.stopping = undefined;
   });
 }
 

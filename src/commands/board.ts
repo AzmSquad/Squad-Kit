@@ -23,6 +23,8 @@ import {
   takeOver,
   handOver,
   chatDone,
+  chatRetry,
+  chatStop,
   chatWrite,
   sendChat,
   startChat,
@@ -527,13 +529,23 @@ async function chatAnswer(bp: BoardPaths, id: string): Promise<boolean> {
 }
 
 /** Talk a ticket through with an agent. Without a message in a terminal, it keeps the talk going until /done or /write. */
-export async function runChat(ticketId: string, words: string[], opts: { with?: string; write?: boolean; done?: boolean }): Promise<void> {
+export async function runChat(ticketId: string, words: string[], opts: { with?: string; write?: boolean; done?: boolean; stop?: boolean; retry?: boolean }): Promise<void> {
   const bp = board();
   warnIfNoSquad(bp);
   let t = requireTicket(bp, ticketId);
   if (opts.done) {
     chatDone(bp, t.id);
     ui.success('Done talking. The squad carries on.');
+    return;
+  }
+  if (opts.stop) {
+    chatStop(bp, t.id);
+    ui.success('Stopping the answer. The talk stays open.');
+    return;
+  }
+  if (opts.retry) {
+    chatRetry(bp, t.id);
+    await chatAnswer(bp, t.id);
     return;
   }
   if (opts.write) {

@@ -284,6 +284,8 @@ program
   .option('--with <agent>', 'analyst, architect, builder, reviewer or tester', 'analyst')
   .option('--write', 'Write (or update) the spec or design from the talk')
   .option('--done', 'Done talking; the squad carries on')
+  .option('--stop', 'Stop the answer the agent is writing; the talk stays open')
+  .option('--retry', 'Ask the last question again, after a stop or a failed answer')
   .action(wrapArgs(runChat));
 program
   .command('agent <role>')

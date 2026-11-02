@@ -89,7 +89,7 @@ export function ConversationTab({ t }: { t: Ticket }) {
       {chosen && (
         <div className="convactions">
           <MessageAgent t={t} to={AGENT_OF[chosen] ?? 'builder'} />
-          {!t.chat?.open && !t.takenOver && t.stage !== 'release' && t.stage !== 'done' && <TalkButton t={t} agent={AGENT_OF[chosen] ?? 'builder'} />}
+          {!t.chat?.open && !t.takenOver && <TalkButton t={t} agent={AGENT_OF[chosen] ?? 'builder'} />}
         </div>
       )}
       {conv.data?.command && (

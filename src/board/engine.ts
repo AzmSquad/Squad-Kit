@@ -49,7 +49,8 @@ export function tick(bp: BoardPaths): void {
     const q = t.questions?.find((x) => x.thinking);
     if (q && at - lastMessageAt(q) >= 2200 / meta.speed) reply(bp, t.id, q.id);
     const c = t.chat;
-    if (c?.open && c.thinking && at - Date.parse(c.messages.at(-1)?.at ?? t.activity[0]?.at ?? new Date(0).toISOString()) >= 2200 / meta.speed) chatReply(bp, t.id);
+    if (c?.stopping) chatStopped(bp, t.id);
+    else if (c?.open && c.thinking && at - Date.parse(c.messages.at(-1)?.at ?? t.activity[0]?.at ?? new Date(0).toISOString()) >= 2200 / meta.speed) chatReply(bp, t.id);
     const ch = openChange(t);
     if (ch?.status === 'writing' && at - Date.parse(ch.at) >= 2200 / meta.speed) writeChange(bp, t.id);
     if (t.squad && Date.parse(t.squad.nextAt) <= at) advance(bp, t.id, meta);
@@ -76,6 +77,17 @@ function reply(bp: BoardPaths, id: string, qid: string): void {
   });
 }
 
+/** You pressed Stop on the answer: the talk stays open, with a way on. */
+function chatStopped(bp: BoardPaths, id: string): void {
+  updateTicket(bp, id, (t) => {
+    const c = t.chat;
+    if (!c) return;
+    if (c.thinking && c.open) c.messages.push({ who: 'squad', text: 'You stopped this answer. Ask again, or carry on.', at: now(), note: 'stopped' });
+    c.thinking = false;
+    c.stopping = undefined;
+  });
+}
+
 /** The demo agents talk back with short scripted lines, so the chat can be shown without Claude. */
 function chatReply(bp: BoardPaths, id: string): void {
   updateTicket(bp, id, (t) => {
@@ -85,7 +97,15 @@ function chatReply(bp: BoardPaths, id: string): void {
     const last = c.messages.at(-1);
     const opening = last?.who !== 'you';
     const name = c.with[0]!.toUpperCase() + c.with.slice(1);
-    const text = opening
+    const released = t.stage === 'release' || t.stage === 'done';
+    const where = released
+      ? `${t.id} is ${t.stage === 'done' ? 'released' : 'accepted'}, so I can only answer questions. To change it, add a new linked ticket or report a bug.`
+      : `${t.id} keeps going while we talk. Right now: ${t.status}.`;
+    const text = c.beside
+      ? opening
+        ? `I am the ${name} on ${t.id}. ${where} What would you like to know?`
+        : `About **${last.text}**: ${where}`
+      : opening
       ? c.with === 'analyst'
         ? `I read "${t.title}". As I understand it: ${t.ask || 'the ticket asks for a change'}.\n\nTwo things are not clear to me yet:\n1. **Who** uses this most?\n2. Is there a **rule** about it I must follow?`
         : `I am the ${name} on ${t.id}. ${t.status ? `Where I am: ${t.status}.` : ''} What would you like to talk through?`
@@ -93,7 +113,7 @@ function chatReply(bp: BoardPaths, id: string): void {
         ? `Got it: **${last.text}**${last.files?.length ? ` (I looked at ${last.files.length === 1 ? 'your file' : `your ${last.files.length} files`})` : ''}. Anything else I should know?`
         : `Thank you. I think I understand enough now. ${c.with === 'analyst' ? 'Press **Write the spec** when you are happy.' : c.with === 'architect' ? 'Press **Write the design** when you are happy.' : 'Press **Done** and I will carry on as we agreed.'}`;
     c.messages.push({ who: c.with, text, at: now() });
-    c.ready = !opening && said.length >= 2;
+    c.ready = !c.beside && !opening && said.length >= 2;
     c.thinking = false;
   });
 }

@@ -191,6 +191,10 @@ export interface ChatMessage {
   at: string;
   /** Screenshots, files or voice notes added to the message, as full paths. */
   files?: string[];
+  /** Short answers the agent offers to its question; the person taps one or writes their own. */
+  options?: string[];
+  /** A note from squad-kit: the person stopped the answer, or the agent could not answer. */
+  note?: 'stopped' | 'failed';
 }
 
 /**
@@ -215,6 +219,8 @@ export interface AgentChat {
   beside?: boolean;
   /** The side conversation's session id. */
   side?: string;
+  /** Set when the person presses Stop on the answer. */
+  stopping?: boolean;
 }
 
 /** One part of the spec a change touches. A "done when" counts from 0; a new one has no index yet. */

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { ContentBlock, PlanEntry, SessionUpdate, ToolCallContent, ToolKind } from '@agentclientprotocol/sdk';
-import type { Ticket } from '../board/types.js';
+import type { AgentName, ChatMessage, Ticket } from '../board/types.js';
 import { describeToolEvent } from '../modules/registry.js';
 import { ticketDir, ticketMediaDir, type BoardPaths } from '../board/store.js';
 
@@ -72,6 +72,7 @@ const MAX_IMAGE = 3_000_000;
 const MEDIA: Record<string, string> = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml',
   mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg',
+  weba: 'audio/webm', opus: 'audio/ogg', oga: 'audio/ogg', m4a: 'audio/mp4', aac: 'audio/aac',
   pdf: 'application/pdf', csv: 'text/csv', json: 'application/json', md: 'text/markdown', txt: 'text/plain',
   html: 'text/html', zip: 'application/zip', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', har: 'application/json', log: 'text/plain',
@@ -301,4 +302,63 @@ export function allowedFile(file: string, folders: string[]): string | null {
   } catch {
     return null;
   }
+}
+
+/** One ticket's talk with an agent, as the chat list shows it. */
+export interface ChatSummary {
+  id: string;
+  title: string;
+  stage: Ticket['stage'];
+  release?: string;
+  with: AgentName;
+  open: boolean;
+  thinking: boolean;
+  /** Beside the work: the ticket kept working, or it is accepted. */
+  beside: boolean;
+  /** The agent answered and waits for the person. */
+  yourTurn: boolean;
+  /** Agent messages since the person last wrote. */
+  fresh: number;
+  count: number;
+  at: string;
+  last?: { who: ChatMessage['who']; text: string; at: string };
+  /** The words around a search hit inside a message. */
+  match?: string;
+}
+
+/** Every ticket's talk, open ones first, then the latest. `q` looks in ticket numbers, titles and every message. */
+export function chatSummaries(tickets: Ticket[], q = ''): ChatSummary[] {
+  const needle = q.trim().toLowerCase();
+  const out: ChatSummary[] = [];
+  for (const t of tickets) {
+    const c = t.chat;
+    if (!c || (!c.open && !c.messages.length)) continue;
+    const last = c.messages.at(-1);
+    const mine = c.messages.map((m) => m.who).lastIndexOf('you');
+    const fresh = c.messages.slice(mine + 1).filter((m) => m.who !== 'you' && m.who !== 'squad').length;
+    let match: string | undefined;
+    if (needle && !`${t.id} ${t.title}`.toLowerCase().includes(needle)) {
+      const hit = c.messages.find((m) => m.text.toLowerCase().includes(needle));
+      if (!hit) continue;
+      const i = hit.text.toLowerCase().indexOf(needle);
+      match = `${i > 40 ? '…' : ''}${hit.text.slice(Math.max(0, i - 40), i + needle.length + 60).replace(/\s+/g, ' ').trim()}`;
+    }
+    out.push({
+      id: t.id,
+      title: t.title,
+      stage: t.stage,
+      ...(t.release ? { release: t.release } : {}),
+      with: c.with,
+      open: c.open,
+      thinking: Boolean(c.thinking),
+      beside: Boolean(c.beside),
+      yourTurn: c.open && !c.thinking && Boolean(last) && last!.who !== 'you',
+      fresh,
+      count: c.messages.length,
+      at: last?.at ?? t.activity[0]?.at ?? t.createdAt,
+      ...(last ? { last: { who: last.who, text: last.text.slice(0, 240), at: last.at } } : {}),
+      ...(match ? { match } : {}),
+    });
+  }
+  return out.sort((a, b) => Number(b.open) - Number(a.open) || b.at.localeCompare(a.at));
 }

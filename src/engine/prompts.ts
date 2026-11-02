@@ -191,7 +191,12 @@ export const CHANGE_DESIGN_SCHEMA = {
 /** A reply in a chat with the person, and whether the agent thinks it understands enough for the next step. */
 export const CHAT_SCHEMA = {
   type: 'object',
-  properties: { reply: STR, ready: { type: 'boolean' } },
+  properties: {
+    reply: STR,
+    ready: { type: 'boolean' },
+    options: { type: 'array', maxItems: 4, items: STR },
+    files: { type: 'array', maxItems: 8, items: STR },
+  },
   required: ['reply', 'ready'],
 };
 
@@ -683,7 +688,10 @@ Rules for this talk:
 - Answer in plain words, in the person's language, in a few short paragraphs at most. Ask one or two questions at a time.
 - Do not write or change any files. Read the code only when it helps you answer.
 - ${beside ? next : `Do not start the next step yourself. ${next}`}
-- ${beside ? 'Set "ready" to false.' : 'Set "ready" to true only when you think you understand enough for that next step; say so in your reply.'}`;
+- ${beside ? 'Set "ready" to false.' : 'Set "ready" to true only when you think you understand enough for that next step; say so in your reply.'}
+- The reply is Markdown: short lists, tables, checklists and code blocks are fine. A flow can be a \`\`\`mermaid flowchart.
+- When you ask one question with clear answers, put up to 4 short answers in "options", your recommended one first.
+- To show the person a picture, recording, PDF, Markdown file or HTML mockup that already exists in this ticket's folders, put its full path in "files".`;
 }
 
 /** What a talk beside the work can do, told to the agent so it can say so. */

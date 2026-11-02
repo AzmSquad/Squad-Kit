@@ -1,14 +1,16 @@
 import { Link, Outlet, useRouterState } from '@tanstack/react-router';
-import { ArrowUp, Bug, ChevronsUpDown, ExternalLink, Inbox, LayoutGrid, ListTodo, Moon, Network, Settings, Sun, Terminal, Users } from 'lucide-react';
+import { ArrowUp, Bug, ChevronsUpDown, ExternalLink, Inbox, LayoutGrid, ListTodo, MessagesSquare, Moon, Network, Settings, Sun, Terminal, Users } from 'lucide-react';
 import { useApps, useBoard } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { UpdateBanner } from './Restart';
 import { changeWaits } from './ChangeCard';
+import { ChatDock, useChats, useDocked } from './ChatDock';
 
 const NAV = [
   { to: '/board', label: 'Board', icon: LayoutGrid },
   { to: '/backlog', label: 'Backlog', icon: ListTodo },
   { to: '/inbox', label: 'Waiting for you', icon: Inbox, badge: 'you' as const },
+  { to: '/conversations', label: 'Conversations', icon: MessagesSquare, badge: 'chats' as const },
   { to: '/releases', label: 'Releases', icon: ArrowUp },
   { to: '/architecture', label: 'Architecture', icon: Network },
   { to: '/bugs', label: 'Bugs', icon: Bug, badge: 'bugs' as const },
@@ -25,9 +27,14 @@ export function Shell() {
   const waiting = tickets.filter((t) => t.waiting || t.outdated?.length || changeWaits(t)).length;
   const bugs = tickets.filter((t) => t.kind === 'bug').length;
   const initials = (meta?.user.name ?? 'You').slice(0, 2).toUpperCase();
+  const chats = useChats().data?.filter((c) => c.open).length ?? 0;
+  const docked = useDocked();
+
+  // The Conversations page is full screen: the list, the chat and the spec need the whole width.
+  if (path.startsWith('/conversations')) return <Outlet />;
 
   return (
-    <div className="app">
+    <div className={`app ${docked ? 'docked' : ''}`}>
       <aside className="side">
         {/* Home and the other projects are other pages of the app, outside this project's board. */}
         <a className="brand" href="/" title="All your projects">
@@ -44,13 +51,13 @@ export function Shell() {
           <ChevronsUpDown size={14} className="sw" />
         </a>
         {NAV.map((n) => {
-          const count = n.badge === 'you' ? waiting : n.badge === 'bugs' ? bugs : 0;
+          const count = n.badge === 'you' ? waiting : n.badge === 'bugs' ? bugs : n.badge === 'chats' ? chats : 0;
           const on = path.startsWith(n.to) || (n.to === '/inbox' && path.endsWith('/proof'));
           return (
             <Link key={n.to} to={n.to} className={`nav ${on ? 'on' : ''}`}>
               <n.icon size={16} />
               {n.label}
-              {count > 0 && <span className={`badge ${n.badge === 'you' ? 'you' : ''}`}>{count}</span>}
+              {count > 0 && <span className={`badge ${n.badge === 'you' ? 'you' : n.badge === 'chats' ? 'talk' : ''}`}>{count}</span>}
             </Link>
           );
         })}
@@ -86,6 +93,7 @@ export function Shell() {
         {board.data?.ready && board.data.console?.outdated && <UpdateBanner />}
         <Outlet />
       </main>
+      <ChatDock />
     </div>
   );
 }

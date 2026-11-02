@@ -43,6 +43,10 @@ export interface ChatMessage {
   text: string;
   at: string;
   files?: string[];
+  /** Short answers the agent offers to its question. */
+  options?: string[];
+  /** A note from squad-kit: you stopped the answer, or the agent could not answer. */
+  note?: 'stopped' | 'failed';
 }
 
 export interface AgentChat {
@@ -55,6 +59,27 @@ export interface AgentChat {
   beside?: boolean;
   /** The side conversation's session id. */
   side?: string;
+  stopping?: boolean;
+}
+
+/** One ticket's talk with an agent, as the chat tabs and the Conversations page list it. */
+export interface ChatSummary {
+  id: string;
+  title: string;
+  stage: Stage;
+  release?: string;
+  with: AgentName;
+  open: boolean;
+  thinking: boolean;
+  /** Beside the work: the squad goes on, or the ticket is accepted. */
+  beside: boolean;
+  yourTurn: boolean;
+  /** Agent messages since you last wrote. */
+  fresh: number;
+  count: number;
+  at: string;
+  last?: { who: ChatMessage['who']; text: string; at: string };
+  match?: string;
 }
 
 /** One part of the spec a change touches. A "done when" counts from 0; a new one has no index. */

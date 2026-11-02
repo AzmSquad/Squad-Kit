@@ -70,7 +70,7 @@ html, body, #root { height: 100%; }
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: 'Instrument Sans Variable', ui-sans-serif, system-ui, sans-serif;
+  font-family: 'Instrument Sans Variable', 'IBM Plex Sans Arabic', ui-sans-serif, system-ui, sans-serif;
   font-size: 14px;
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;

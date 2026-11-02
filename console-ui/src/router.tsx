@@ -8,6 +8,7 @@ import { ArchitecturePage, type ArchView } from './pages/Architecture';
 import { BugsPage, InboxPage, SettingsPage, SquadPage } from './pages/Pages';
 import { HomePage } from './pages/Home';
 import { PROJECT, PROJECT_BASE } from './api/client';
+import { ConversationsPage } from './pages/Conversations';
 
 // One app, many projects (ADR-001): a project's pages sit under /p/<project id>/ (the router's base), and the app's
 // Home, with every project and one Waiting for you list, at /.
@@ -58,11 +59,18 @@ const architecture = createRoute({
   }),
   component: ArchitecturePage,
 });
+// Every talk with an agent, full screen. `ticket` picks the talk.
+const conversations = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/conversations',
+  validateSearch: (s: Record<string, unknown>): { ticket?: string } => ({ ticket: typeof s.ticket === 'string' && s.ticket ? s.ticket : undefined }),
+  component: ConversationsPage,
+});
 const bugs = createRoute({ getParentRoute: () => rootRoute, path: '/bugs', component: BugsPage });
 const squad = createRoute({ getParentRoute: () => rootRoute, path: '/squad', component: SquadPage });
 const settings = createRoute({ getParentRoute: () => rootRoute, path: '/settings', component: SettingsPage });
 
-const routeTree = rootRoute.addChildren([index, board, backlog, proof, inbox, releases, decisions, architecture, bugs, squad, settings]);
+const routeTree = rootRoute.addChildren([index, board, backlog, proof, inbox, conversations, releases, decisions, architecture, bugs, squad, settings]);
 
 export const router = createRouter({ routeTree, defaultPreload: false, basepath: PROJECT_BASE || '/' });
 

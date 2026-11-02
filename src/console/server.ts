@@ -73,8 +73,17 @@ export async function startConsoleServer(opts: StartConsoleServerOptions): Promi
       },
       referrerPolicy: 'no-referrer',
   });
+  // A ticket's PDF opens beside the chat, inside the board's own page.
+  const FILE_PATH = /\/tickets\/[^/]+\/file$/;
   app.use('*', async (c, next) => {
-    if (!MOCKUP_PATH.test(c.req.path)) return strict(c, next);
+    if (!MOCKUP_PATH.test(c.req.path)) {
+      await strict(c, next);
+      const csp = c.res.headers.get('content-security-policy');
+      if (FILE_PATH.test(c.req.path) && c.res.headers.get('content-type') === 'application/pdf' && csp) {
+        c.res.headers.set('content-security-policy', csp.replace("frame-ancestors 'none'", "frame-ancestors 'self'"));
+      }
+      return;
+    }
     // An agent's HTML mockup: its own inline scripts may run, sealed in a sandbox with no network and no board origin.
     await next();
     c.res.headers.set('content-security-policy', MOCKUP_CSP);

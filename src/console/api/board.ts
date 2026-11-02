@@ -25,6 +25,8 @@ import {
   requestChange,
   addNote,
   chatDone,
+  chatRetry,
+  chatStop,
   chatWrite,
   sendChat,
   startChat,
@@ -59,7 +61,7 @@ import { aiTool, guessTracker, speechModule, trackerFor, trackerModule, TRACKERS
 import type { Tracker } from '../../modules/tracker/types.js';
 import { findNestedRepos } from '../../engine/repos.js';
 import { git } from '../../engine/git.js';
-import { allowedFile, mimeOf, readConversation, ticketConversations, ticketFolders } from '../../engine/conversations.js';
+import { allowedFile, chatSummaries, mimeOf, readConversation, ticketConversations, ticketFolders } from '../../engine/conversations.js';
 import { buildStamp } from '../../board/console-info.js';
 import { timingSafeEqualHex } from '../auth.js';
 import type { NewTicketInput, UploadedFile } from '../../board/actions.js';
@@ -430,6 +432,13 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     const b = await body<{ text?: string; as?: 'ticket' | 'bug' }>(c);
     return act(c, () => changeAfterRelease(bp, c.req.param('id'), b.text ?? '', b.as === 'bug' ? 'bug' : 'ticket'));
   });
+
+  app.post('/api/v1/tickets/:id/chat/stop', (c) => act(c, () => chatStop(bp, c.req.param('id'))));
+
+  app.post('/api/v1/tickets/:id/chat/retry', (c) => act(c, () => chatRetry(bp, c.req.param('id'))));
+
+  // Every ticket's talk with an agent, released ones too, for the chat tabs and the Conversations page.
+  app.get('/api/v1/conversations', (c) => c.json(boardExists(bp) ? chatSummaries(listTickets(bp), c.req.query('q') ?? '') : []));
 
   app.post('/api/v1/tickets/:id/take-over', (c) => act(c, () => takeOver(bp, c.req.param('id'))));
 

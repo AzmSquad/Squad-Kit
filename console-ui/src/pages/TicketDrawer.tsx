@@ -11,8 +11,9 @@ import { ChangesTab, OpenInEditor } from '../components/Changes';
 import { TakeOverButton, canTakeOver } from '../components/TakeOver';
 import { Attachments as AgentFiles, Mockup } from '../components/Attachments';
 import { Part, WhatChanged, type Review } from '../components/PlanReview';
-import { ChatPanel, TalkButton } from '../components/Chat';
+import { AGENT_TITLE, TalkButton } from '../components/Chat';
 import { ChangeCard, ChangeHistory, ProposeChangeButton, changeWaits, shipped } from '../components/ChangeCard';
+import { chatDock } from '../lib/chatDock';
 import { Lightbox, type Picture } from '../components/Lightbox';
 import { TicketUsage } from '../components/Usage';
 import { HandOverButton, HandedOverBanner, NotYoursPanel, canHandOver, isMine, ownerOf, useMe } from '../components/HandOver';
@@ -146,8 +147,6 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
 }
 
 function NowPanel({ t }: { t: Ticket }) {
-  // A chat beside the work shows here while it is open; the work goes on behind it.
-  if (t.chat?.open && t.chat.beside) return <ChatPanel t={t} />;
   if (!t.waiting && t.quiet) return <QuietPanel t={t} />;
   switch (t.waiting?.kind) {
     case 'questions':
@@ -164,10 +163,35 @@ function NowPanel({ t }: { t: Ticket }) {
     case 'yours':
       return <YoursPanel t={t} />;
     case 'chat':
-      return t.chat ? <ChatPanel t={t} /> : <WorkingPanel t={t} />;
+      return t.chat ? <ChatOpen t={t} /> : <WorkingPanel t={t} />;
     default:
       return <WorkingPanel t={t} />;
   }
+}
+
+/** The talk itself lives in the chat panel beside the board, so the board stays in view while you talk. */
+function ChatOpen({ t }: { t: Ticket }) {
+  const who = AGENT_TITLE[t.chat!.with];
+  return (
+    <div className="db">
+      <div className="youbox">
+        <span className="ring">
+          <MessageCircle size={15} />
+        </span>
+        <div>
+          <b>Talking it through with the {who}</b>
+          <span>The talk is open in the chat panel beside the board. Its work waits until you press a button there.</span>
+        </div>
+        <span className="grow" />
+        <button className="btn pri sm" onClick={() => chatDock.show(t.id)}>
+          Open the chat
+        </button>
+        <Link to="/conversations" search={{ ticket: t.id }} className="btn sm">
+          Full screen
+        </Link>
+      </div>
+    </div>
+  );
 }
 
 /* ── Questions ─────────────────────────────────────────── */
@@ -1002,7 +1026,14 @@ function WorkingPanel({ t }: { t: Ticket }) {
           </button>
         )}
         {canTakeOver(t) && <TakeOverButton t={t} />}
-        {!t.chat?.open && !t.takenOver && <TalkButton t={t} agent="analyst" label={shipped(t) ? 'Ask a question' : 'Ask the Analyst'} />}
+        {/* Asking never stops the work: the chat runs beside it, and on accepted work it answers questions only. */}
+        {t.chat?.open ? (
+          <button className="btn sm" onClick={() => chatDock.show(t.id)}>
+            <MessageCircle size={13} /> Open the chat
+          </button>
+        ) : (
+          !t.takenOver && <TalkButton t={t} agent="analyst" label={shipped(t) ? 'Ask a question' : 'Ask the Analyst'} />
+        )}
         <span className="note">{t.live ? 'Updates live as the squad works.' : ''}</span>
         <span className="grow" />
         <Cmd text={t.live && t.stage !== 'release' ? `squad stop ${t.id}` : commandFor(t)} />

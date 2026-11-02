@@ -68,4 +68,18 @@ describe('agent mockups', () => {
     const res = await fetch(`${base}/api/v1/board`, auth);
     expect(res.headers.get('content-security-policy')).toContain("script-src 'self'");
   });
+
+  it("lets a ticket's PDF open beside the chat, framed by the board only", async () => {
+    const pdf = path.join(path.dirname(mockup), 'rules.pdf');
+    fs.writeFileSync(pdf, '%PDF-1.4\n%%EOF\n');
+    const res = await fetch(`${base}/api/v1/tickets/SK-148/file?path=${encodeURIComponent(pdf)}`, auth);
+    expect(res.headers.get('content-type')).toBe('application/pdf');
+    const csp = res.headers.get('content-security-policy')!;
+    expect(csp).toContain("frame-ancestors 'self'");
+    expect(csp).toContain("script-src 'self'");
+    const png = path.join(path.dirname(mockup), 'shot.png');
+    fs.writeFileSync(png, 'png');
+    const pic = await fetch(`${base}/api/v1/tickets/SK-148/file?path=${encodeURIComponent(png)}`, auth);
+    expect(pic.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
+  });
 });
