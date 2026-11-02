@@ -33,7 +33,9 @@ import { isMediaNote, prepareMedia } from './media.js';
 import { allowedFile, ticketFolders } from './conversations.js';
 import { describeLevel, personLevels, resolveLevel } from './levels.js';
 import { ticketDir } from '../board/store.js';
-import { commitTicketDocs } from './project-git.js';
+import { commitTicketDocs, leaveProjectFiles } from './project-git.js';
+import { carryOn, fetchPushed, workSoFar } from './handover.js';
+import { isMine } from '../board/owner.js';
 import { recordUsage } from '../board/usage.js';
 import { parallelLimit } from '../core/settings.js';
 
@@ -45,6 +47,8 @@ import { parallelLimit } from '../core/settings.js';
 
 const MAX_CHECK_TRIES = 3;
 const MAX_REVIEW_ROUNDS = 2;
+/** How often the board looks for tickets teammates pushed: handed to you, or moved on by their owner. */
+const PICK_UP_MS = 2 * 60_000;
 
 export function projectRoot(bp: BoardPaths): string {
   return bp.root;
@@ -79,6 +83,8 @@ export class LiveSquad {
   private closing = false;
   private dog = new Watchdog();
   private lastWatch = 0;
+  private lastPickUp = 0;
+  private pickingUp = false;
 
   constructor(private bp: BoardPaths) {}
 
@@ -138,6 +144,7 @@ export class LiveSquad {
     }
     if (meta.engine !== 'live') return;
     this.watch();
+    this.pickUp();
     const limit = parallelLimit(meta.parallel);
     waiting.delete(this);
     if (meta.scan?.status === 'pending' && !this.running.has('__scan')) {
@@ -177,6 +184,8 @@ export class LiveSquad {
           .catch(() => undefined)
           .finally(() => this.localRuns.delete(ls.dir));
       }
+      // Someone else's ticket: their squad works on it, on their computer (ADR-001).
+      if (!isMine(t, meta)) continue;
       if (t.stopRequested) {
         this.stops.get(t.id)?.abort();
         if (!this.running.has(t.id)) this.stopped(t.id);
@@ -235,6 +244,16 @@ export class LiveSquad {
       const snoozed = t.quietSnoozedUntil && Date.parse(t.quietSnoozedUntil) > Date.now();
       this.setQuiet(id, snoozed ? null : this.dog.check(id, Date.now(), rows));
     }
+  }
+
+  /** Now and then, beside the squad's work: fetch, and bring in the tickets teammates pushed. */
+  private pickUp(): void {
+    if (this.pickingUp || Date.now() - this.lastPickUp < PICK_UP_MS) return;
+    this.pickingUp = true;
+    this.lastPickUp = Date.now();
+    fetchPushed(this.bp)
+      .catch(() => undefined)
+      .finally(() => (this.pickingUp = false));
   }
 
   private setQuiet(id: string, q: Quiet | null): void {
@@ -663,6 +682,8 @@ export class LiveSquad {
       case 'build':
       case 'unstick':
         return this.build(id);
+      case 'pick-up':
+        return this.pickedUp(id);
       case 'fix':
         return this.fixFromPerson(id);
       case 'answered-builder':
@@ -1034,10 +1055,16 @@ export class LiveSquad {
       x.worktree = wt.dir;
       x.branch = wt.branch;
       x.baseCommit = x.baseCommit ?? wt.baseCommit;
-      addActivity(x, 'builder', `Made a clean copy of ${repo.path === '.' ? 'the project' : repo.path} on branch ${wt.branch}`);
+      addActivity(
+        x,
+        'builder',
+        wt.pushed
+          ? `Made a copy of ${repo.path === '.' ? 'the project' : repo.path} from the pushed branch ${wt.pushed}, with the work so far`
+          : `Made a clean copy of ${repo.path === '.' ? 'the project' : repo.path} on branch ${wt.branch}`,
+      );
     });
     // The ticket's documents so far go on its branch first (ADR-001), when the project keeps them in git.
-    const saved = commitTicketDocs(this.bp, t, t.specApproved ? 'spec and design approved' : 'plan approved');
+    const saved = commitTicketDocs(this.bp, t, wt.pushed ? 'picked up from the pushed branch' : t.specApproved ? 'spec and design approved' : 'plan approved');
     if (saved) t = this.update(id, (x) => addActivity(x, 'squad', `Saved the spec and design on ${wt.branch} as commit ${saved}`));
     const setup = repo.commands.setup?.trim();
     if (setup) {
@@ -1049,14 +1076,30 @@ export class LiveSquad {
     return readTicket(this.bp, id)!;
   }
 
+  /** A ticket that came from a pushed branch: its copy of the code comes from that branch, then it carries on. */
+  private async pickedUp(id: string): Promise<void> {
+    const t = await this.workspace(id);
+    const next = carryOn(t, true);
+    this.update(id, (x) => {
+      x.status = next.status;
+      x.waiting = next.waiting ?? null;
+      x.live = Boolean(next.phase);
+      if (next.phase) scheduleSquad(x, next.phase, 0.2, 1);
+      else x.squad = null;
+    });
+  }
+
   private async build(id: string): Promise<void> {
     const t0 = await this.workspace(id);
     if (t0.replanFor) return this.rebuild(id, t0.replanFor);
     const meta = this.meta();
     const rc = repoFor(meta, t0).commands;
-    if (!t0.proof?.length && rc.start && rc.url && (t0.work?.screens ?? 0) > 0 && !meta.scan?.empty) {
+    // Work already in the copy (it came with a pushed branch): no "before" screens of it, and a fresh Builder reads it.
+    const sofar = t0.baseCommit ? workSoFar(t0.worktree!, t0.baseCommit) : [];
+    if (!sofar.length && !t0.proof?.length && rc.start && rc.url && (t0.work?.screens ?? 0) > 0 && !meta.scan?.empty) {
       await this.screens(id, 'before').catch(() => undefined);
     }
+    const had = t0.sessions?.build;
     const t = this.update(id, (x) => {
       x.stage = 'implement';
       x.live = true;
@@ -1065,9 +1108,13 @@ export class LiveSquad {
       x.tries = 0;
       x.reviewRound = 0;
     });
-    const resume = Boolean(t.activity.some((a) => a.who === 'builder' && a.text.startsWith('Started')));
-    this.update(id, (x) => addActivity(x, 'builder', resume ? 'Picked up where it stopped' : 'Started building'));
-    await this.runBuilder(id, resume ? 'Continue the steps that are not done yet, then run the tests.' : P.buildPrompt(meta, listDecisions(this.bp), t, this.ctx(t)), resume, 'build');
+    // Only a conversation saved on this computer can go on; a ticket picked up from a branch starts a fresh one.
+    const resume = Boolean(had) && t.activity.some((a) => a.who === 'builder' && a.text.startsWith('Started'));
+    this.update(id, (x) => addActivity(x, 'builder', resume ? 'Picked up where it stopped' : sofar.length ? 'Started again from the spec, the design and the work so far' : 'Started building'));
+    const base = repoFor(meta, t).base;
+    const intro = `This ticket is partly built already: the work so far is in this copy, on ${t.branch}. It was done in another session, maybe on another computer, so you have no conversation about it. Files changed so far: ${sofar.slice(0, 30).join(', ')}. Read the spec, the design and that code first (git log and git diff against ${base} show it). Keep what is done and right, then finish the steps that are not done yet. squad-kit does all the git.`;
+    const prompt = resume ? 'Continue the steps that are not done yet, then run the tests.' : `${sofar.length ? `${intro}\n\n` : ''}${P.buildPrompt(meta, listDecisions(this.bp), t, this.ctx(t))}`;
+    await this.runBuilder(id, prompt, resume, 'build');
     this.update(id, (x) => {
       for (const s of x.steps ?? []) {
         s.status = 'done';
@@ -1229,6 +1276,7 @@ export class LiveSquad {
     const baseSha = git(dir, ['rev-parse', base]);
     // Clashes from last time that are not fixed yet: the Builder fixes those first.
     if (merging() && unmerged().length) return { baseSha, clashes: unmerged() };
+    leaveProjectFiles(this.bp, t, base);
     commitAll(dir, `Work so far on ${t.title} (${t.id})`);
     let why = 'git did not merge it';
     try {

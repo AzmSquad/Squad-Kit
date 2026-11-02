@@ -2,7 +2,7 @@ import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { LAYOUT, boardExists, boardPaths, newProjectId, readMeta, writeMeta, type BoardPaths } from '../board/store.js';
+import { LAYOUT, boardExists, boardPaths, listDecisions, listTickets, newProjectId, readMeta, writeMeta, type BoardPaths } from '../board/store.js';
 import { DEFAULT_CONFIG, loadConfig, saveConfig } from '../core/config.js';
 import { SQUAD_DIR, buildPaths, type SquadPaths } from '../core/paths.js';
 import { openBoard } from '../board/move.js';
@@ -13,6 +13,7 @@ import { findNestedRepos } from './repos.js';
 import { projectRoot } from './live.js';
 import { ensureAgents } from './agents.js';
 import { hideSquadFromGit } from './project-git.js';
+import { pickUpPushed, projectFromPushed, type PickedUp } from './handover.js';
 
 /** A short ticket key from the project name: "moj-taqadi" becomes "MT", "Leave requests" becomes "LR". */
 export function keyFor(name: string): string {
@@ -21,9 +22,10 @@ export function keyFor(name: string): string {
   return key || 'SK';
 }
 
-function gitUser(): string {
+/** The person's first name from git, as the project's own repo sees it. */
+function gitUser(dir?: string): string {
   try {
-    return execSync('git config user.name', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim().split(/\s+/)[0] || 'You';
+    return execSync('git config user.name', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], ...(dir && fs.existsSync(dir) ? { cwd: dir } : {}) }).trim().split(/\s+/)[0] || 'You';
   } catch {
     return 'You';
   }
@@ -98,6 +100,37 @@ function keepOwnKnowledge(bp: BoardPaths): string[] {
 }
 
 /**
+ * A project this computer has none of its own files for (a clone, a copy, a new computer): this computer's part of
+ * the board starts fresh, and everything else comes from `.squad/`. The Architect reads the project again only when
+ * `.squad/` has nothing it learned.
+ */
+function thisComputer(bp: BoardPaths): boolean {
+  if (fs.existsSync(bp.localMetaFile)) return false;
+  const meta = readMeta(bp);
+  writeMeta(bp, {
+    ...meta,
+    user: meta.user ?? { name: gitUser(projectRoot(bp)), role: 'Project manager' },
+    roles: meta.roles ?? { analyst: 'Claude', architect: 'Claude', builder: 'Claude', tester: 'Claude', reviewer: 'Claude' },
+    tools: detectTools(),
+    speed: meta.speed ?? 1,
+    parallel: meta.parallel ?? 2,
+    map: meta.map ?? [],
+    lessons: meta.lessons ?? [],
+    ...(meta.engine === 'live' && !meta.scan ? { scan: { status: 'pending' as const } } : {}),
+  });
+  return true;
+}
+
+/** One line for each ticket picked up from a pushed branch. */
+function pickedUpLines(picked: PickedUp[]): string[] {
+  return picked.map((p) =>
+    p.mine
+      ? `Picked up ${p.id} from ${p.branch}${p.from ? `: ${p.from} handed it over to you` : ''}. The squad carries on from its documents and code`
+      : `${p.id} came from ${p.branch}: someone else owns it, so their squad works on it`,
+  );
+}
+
+/**
  * Opening the board in a project with no board yet starts a live one: the project gets a git repo if it has none,
  * its own id, and the rules for each role; then the Architect reads it first.
  */
@@ -106,13 +139,24 @@ export function ensureLiveBoard(bp: BoardPaths, projectName: string): BoardSetup
   if (boardExists(bp)) {
     // `.squad/` never shows in `git status`; squad-kit commits the documents itself (ADR-001).
     hideSquadFromGit(bp);
+    const fresh = thisComputer(bp);
     const meta = readMeta(bp);
+    const picked = meta.engine === 'live' ? pickUpPushed(bp) : [];
     if (meta.engine === 'live') {
       meta.tools = detectTools();
       writeMeta(bp, meta);
       ensureAgents(bp);
     }
-    return { bp, did: [] };
+    const n = listTickets(bp).length;
+    const d = listDecisions(bp).length;
+    const here = `This computer: new for this project. The board comes from .squad/: ${n} ${n === 1 ? 'ticket' : 'tickets'} and ${d} ${d === 1 ? 'decision' : 'decisions'}. Agent chats, live progress and screenshots stay on the computer they ran on`;
+    return { bp, did: [...(fresh ? [here] : []), ...pickedUpLines(picked)] };
+  }
+  // A fresh clone of a project that has not released yet: its settings came with a pushed ticket branch.
+  const from = isRepo(root) ? projectFromPushed(bp.squadDir) : null;
+  if (from && boardExists(boardPaths(bp.squadDir))) {
+    const next = ensureLiveBoard(boardPaths(bp.squadDir), projectName);
+    return { bp: next.bp, did: [`Project files: the settings, rules and knowledge came from the pushed branch ${from}`, ...next.did] };
   }
   const did: string[] = [];
   // A workspace of separate code repos needs no repo of its own; a plain folder becomes one.
@@ -153,7 +197,7 @@ export function ensureLiveBoard(bp: BoardPaths, projectName: string): BoardSetup
     key: keyFor(projectName),
     nextNumber: 1,
     engine: 'live',
-    user: { name: gitUser(), role: 'Project manager' },
+    user: { name: gitUser(root), role: 'Project manager' },
     roles: { analyst: 'Claude', architect: 'Claude', builder: 'Claude', tester: 'Claude', reviewer: 'Claude' },
     tools,
     speed: 1,

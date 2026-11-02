@@ -14,11 +14,13 @@ import { Part, WhatChanged, type Review } from '../components/PlanReview';
 import { ChatPanel, TalkButton } from '../components/Chat';
 import { Lightbox, type Picture } from '../components/Lightbox';
 import { TicketUsage } from '../components/Usage';
+import { HandOverButton, HandedOverBanner, NotYoursPanel, canHandOver, isMine, ownerOf, useMe } from '../components/HandOver';
 
 type Tab = 'now' | 'story' | 'plan' | 'activity' | 'conversation' | 'proof' | 'changes' | 'cost' | 'developer';
 
 export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
   const ticket = useTicket(id);
+  const me = useMe();
   const [tab, setTab] = useState<Tab>('now');
   useEffect(() => setTab('now'), [id]);
   useEffect(() => {
@@ -57,6 +59,7 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
                 {t.kind === 'bug' && <span className="prio">Bug{t.foundIn ? ` found in ${t.foundIn}` : ''}</span>}
                 {t.priority === 'high' && t.kind !== 'bug' && <span className="prio">High priority</span>}
                 <span className="grow" />
+                {canHandOver(t, me) && <HandOverButton t={t} />}
                 {t.waiting?.kind === 'proof' && (
                   <Link to="/tickets/$id/proof" params={{ id: t.id }} className="iconbtn" aria-label="Open the proof page">
                     <ExternalLink size={15} />
@@ -72,6 +75,10 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
                   Created by <b>{t.createdBy}</b> {ago(t.createdAt)}
                   {' · '}
                   <b>{t.track === 'express' ? 'Express' : 'Full'}</b> track
+                </span>
+                <span>
+                  Owner <b>{ownerOf(t)}</b>
+                  {isMine(t, me) ? ' (you)' : ''}
                 </span>
                 {t.repo && (
                   <span>
@@ -114,7 +121,8 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
               </button>
             </div>
             {tab === 'now' && t.outdated?.length ? <OutdatedBanner t={t} /> : null}
-            {tab === 'now' && <NowPanel t={t} />}
+            {tab === 'now' && <HandedOverBanner t={t} />}
+            {tab === 'now' && (isMine(t, me) || !me ? <NowPanel t={t} /> : <NotYoursPanel t={t} />)}
             {tab === 'story' && <StoryTab t={t} />}
             {tab === 'plan' && <PlanTab t={t} />}
             {tab === 'activity' && <ActivityTab t={t} />}

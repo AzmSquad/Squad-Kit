@@ -234,6 +234,8 @@ export const TICKET_HOME = {
   track: 'project',
   createdAt: 'project',
   createdBy: 'project',
+  owner: 'project',
+  handedOver: 'project',
   builder: 'project',
   reviewer: 'project',
   repo: 'project',

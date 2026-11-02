@@ -40,7 +40,9 @@ import type { AgentChat, AgentName, Criterion, PlanComment, PlanEdit, PlanPart, 
 import { endProcessTree } from '../engine/watchdog.js';
 import { readTicket, ticketFilesDir, ticketMediaDir } from './store.js';
 import { isMediaNote } from '../engine/media.js';
-import { stageTicketDocs } from '../engine/project-git.js';
+import { leaveProjectFiles, stageTicketDocs } from '../engine/project-git.js';
+import { pushHandOver, type HandOverPush } from '../engine/handover.js';
+import { isMine, ownerOf, sameName } from './owner.js';
 
 /** Every person-facing action lives here, so the board and the terminal do exactly the same thing. */
 
@@ -132,6 +134,7 @@ export function createTicket(bp: BoardPaths, input: NewTicketInput): Ticket {
     waiting: null,
     createdAt: now(),
     createdBy: meta.user.name,
+    owner: meta.user.name,
     builder: meta.roles.builder,
     reviewer: meta.roles.reviewer,
     activity: [],
@@ -422,6 +425,7 @@ function acceptProof(bp: BoardPaths, ticket: Ticket): Ticket {
   if (readMeta(bp).engine === 'live') {
     try {
       // The accepted ticket's documents go in the same commit as its code, when the project keeps them in git.
+      leaveProjectFiles(bp, ticket, repoFor(readMeta(bp), ticket).base);
       stageTicketDocs(bp, { ...ticket, stage: 'release', release: release.version, waiting: null });
       commit = commitTicket(ticket);
     } catch (err) {
@@ -605,6 +609,70 @@ export function giveBack(bp: BoardPaths, id: string, note?: string): Ticket {
     t.status = 'Running the project checks on your changes';
     addActivity(t, 'you', text ? `Gave it back: ${text}` : 'Gave it back');
     scheduleSquad(t, 'test', meta.engine === 'live' ? 0.2 : 2, meta.engine === 'live' ? 1 : meta.speed);
+  });
+}
+
+/* ── Hand over ─────────────────────────────────────────── */
+
+export interface HandOverInput {
+  /** The new owner's name, as their own board shows it. */
+  to: string;
+  /** A note for them. Every agent on the ticket reads it too. */
+  note?: string;
+}
+
+/**
+ * Hand over: the ticket goes to a teammate. squad-kit saves the work so far and the ticket's documents on its branch,
+ * pushes it, and names the new owner. Their squad carries on from that branch; this computer's squad stops working
+ * on it. Live progress, agent chats and screenshots stay on this computer.
+ */
+export async function handOver(bp: BoardPaths, id: string, input: HandOverInput): Promise<Ticket> {
+  const meta = readMeta(bp);
+  const to = (input.to ?? '').trim().replace(/\s+/g, ' ');
+  const t = requireTicket(bp, id);
+  if (!to) throw new BoardActionError('Write the name of the person who takes it over.');
+  if (!isMine(t, meta)) throw new BoardActionError(`${t.id} is ${ownerOf(t)}'s. Only they can hand it over.`);
+  if (sameName(to, meta.user.name)) throw new BoardActionError(`${t.id} is yours already. Pick someone else.`);
+  if (t.stage === 'release' || t.stage === 'done') throw new BoardActionError(`${t.id} is accepted already. It goes out with the release.`);
+  if (t.takenOver) throw new BoardActionError(`${t.id} is taken over. Give it back first.`);
+  if (t.chat?.open) throw new BoardActionError(`${t.id} has a chat open. Finish the talk first.`);
+  // A running step would go on writing here after the push: it finishes its step, or you stop it first.
+  if (t.live || t.squad || t.stopRequested || t.questions?.some((q) => q.thinking)) {
+    throw new BoardActionError(`${t.id} is working right now. Wait until it needs you, or press Stop first.`);
+  }
+  const at = now();
+  const handedOver = { from: meta.user.name, to, at };
+  const note = input.note?.trim();
+  const notes = note ? [...(t.notes ?? []), { at, by: meta.user.name, kind: 'note' as const, text: note }] : t.notes;
+  let pushed: HandOverPush | null = null;
+  if (meta.engine === 'live') {
+    try {
+      pushed = await pushHandOver(bp, { ...t, owner: to, handedOver, ...(notes ? { notes } : {}) });
+    } catch (err) {
+      throw new BoardActionError(`Could not hand ${t.id} over: ${(err as Error).message}`);
+    }
+  }
+  return updateTicket(bp, id, (x) => {
+    x.owner = to;
+    x.handedOver = handedOver;
+    if (notes) x.notes = notes;
+    if (pushed) {
+      x.branch = pushed.branch;
+      x.baseCommit = x.baseCommit ?? pushed.baseCommit;
+    }
+    x.live = false;
+    x.squad = null;
+    x.waiting = null;
+    x.stuck = undefined;
+    x.retryPhase = undefined;
+    x.agentQuestion = undefined;
+    x.quiet = undefined;
+    x.status = `With ${to}`;
+    addActivity(x, 'you', `Handed it over to ${to}${note ? `: ${note}` : ''}`);
+    if (pushed) {
+      addActivity(x, 'squad', `Saved the work so far and the documents on ${pushed.branch} (commit ${pushed.commit}) and pushed it to ${pushed.remote}${pushed.carried.length ? ', with the project settings, rules and knowledge, since the base has none yet' : ''}`);
+    }
+    tellLater(x, meta.engine, { kind: 'note', text: `Handed over to ${to} by ${meta.user.name}.`, noteKind: 'note' });
   });
 }
 
@@ -1193,6 +1261,7 @@ export function reportBug(bp: BoardPaths, input: BugInput): Ticket {
     waiting: null,
     createdAt: now(),
     createdBy: meta.user.name,
+    owner: meta.user.name,
     builder: meta.roles.builder,
     reviewer: meta.roles.reviewer,
     severity: input.severity ?? 'annoying',

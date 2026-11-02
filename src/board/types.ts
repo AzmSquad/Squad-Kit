@@ -383,6 +383,19 @@ export interface Ticket {
   notesSeen?: Record<string, number>;
   /** What each role used on this ticket, per step and model level. */
   usage?: UsageLine[];
+  /**
+   * Whose ticket it is: the person who made or pulled it, until they hand it over. Only the owner's squad works on
+   * it, on the owner's computer, so two squads never build the same ticket (ADR-001).
+   */
+  owner?: string;
+  /** The last hand over. The new owner's squad carries on from the pushed branch, not from the chats. */
+  handedOver?: HandOver;
+}
+
+export interface HandOver {
+  from: string;
+  to: string;
+  at: string;
 }
 
 export type TrackerEvent =

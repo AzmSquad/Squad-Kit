@@ -27,6 +27,7 @@ import {
   runMessage,
   runTakeOver,
   runGiveBack,
+  runHandOver,
   runReply,
   runChanges,
   runOpen,
@@ -308,6 +309,11 @@ program
   .command('give-back <ticket> [note...]')
   .description('Give a ticket back to the squad; the checks, review and proof run again')
   .action(wrapArgs(runGiveBack));
+program
+  .command('hand-over <ticket> [name...]')
+  .description("Hand a ticket to a teammate: push its branch with the code and documents, and name the new owner")
+  .option('--note <text>', 'A note for them; every agent on the ticket reads it too')
+  .action(wrapArgs(runHandOver));
 program
   .command('decide <ticket> [choice]')
   .description('Decide for the squad when it is stuck: try again, fix it yourself, continue anyway or back to the plan')

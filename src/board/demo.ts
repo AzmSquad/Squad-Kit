@@ -333,7 +333,8 @@ export function seedDemoBoard(bp: BoardPaths, opts: SeedOptions = {}): void {
   writeMeta(bp, demoMeta(user, speed, opts.project ?? 'Case portal'));
   for (const t of demoTickets(user)) {
     if (t.live && t.stage !== 'done' && !t.waiting) scheduleSquad(t, 'ambient', 3 + Math.random() * 4, speed, 0);
-    writeTicket(bp, t);
+    // The sample squad is yours: every ticket on the sample board is yours to work on and hand over.
+    writeTicket(bp, { ...t, owner: user });
   }
   for (const r of demoReleases()) writeRelease(bp, r);
   for (const d of demoDecisions(user)) writeDecision(bp, d);

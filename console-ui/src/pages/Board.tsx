@@ -9,6 +9,7 @@ import { BugDialog, NewTicketDialog, PullDialog } from '../components/dialogs';
 import { Cmd, Glyph, STAGE_NAME, actionLabel, outdatedLine } from '../components/ui';
 import { TicketDrawer } from './TicketDrawer';
 import { BoardCost } from '../components/Usage';
+import { isMine, ownerOf, useMe } from '../components/HandOver';
 
 const LANES: { stage: Stage; role: Actor; who: string }[] = [
   { stage: 'tickets', role: 'analyst', who: 'Analyst' },
@@ -38,7 +39,7 @@ export function BoardPage() {
     const q = query.trim().toLowerCase();
     return all.filter((t) => {
       if (view === 'bugs' && t.kind !== 'bug') return false;
-      if (view === 'mine' && t.createdBy !== data?.meta.user.name) return false;
+      if (view === 'mine' && !isMine(t, data?.meta.user?.name)) return false;
       return !q || t.title.toLowerCase().includes(q) || t.id.toLowerCase().includes(q);
     });
   }, [data, query, view]);
@@ -172,12 +173,14 @@ export function BoardPage() {
 
 function Card({ t, selected, onOpen }: { t: Ticket; selected: boolean; onOpen(): void }) {
   const you = Boolean(t.waiting) || t.quiet?.kind === 'stuck';
+  const me = useMe();
   return (
     <button className={`card ${you ? 'you' : ''} ${t.kind === 'bug' ? 'bug' : ''} ${selected ? 'sel' : ''}`} onClick={onOpen}>
       <div className="row1">
         <span className="id">{t.id}</span>
         {t.track === 'express' && <span className="prio express">Express</span>}
         {you ? <span className="youtag">You</span> : t.kind === 'bug' ? <span className="prio">Bug</span> : t.priority === 'high' ? <span className="prio">High</span> : null}
+        {me && !isMine(t, me) && <span className="prio owner" title="Their squad works on it">{ownerOf(t)}</span>}
       </div>
       <h4>{t.title}</h4>
       <div className="st">

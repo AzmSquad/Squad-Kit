@@ -33,6 +33,7 @@ import {
   startOver,
   giveBack,
   takeOver,
+  handOver,
   answerAgent,
   saveReleaseNotes,
   skipQuestions,
@@ -400,6 +401,12 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
   app.post('/api/v1/tickets/:id/give-back', async (c) => {
     const b = await body<{ note?: string }>(c);
     return act(c, () => giveBack(bp, c.req.param('id'), b.note));
+  });
+
+  // Hand over: push the ticket's branch with its code and documents, and name the new owner.
+  app.post('/api/v1/tickets/:id/hand-over', async (c) => {
+    const b = await body<{ to?: string; note?: string }>(c);
+    return act(c, () => handOver(bp, c.req.param('id'), { to: b.to ?? '', note: b.note }));
   });
 
   app.post('/api/v1/tickets/:id/decide', async (c) => {

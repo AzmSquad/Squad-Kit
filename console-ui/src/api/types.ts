@@ -244,6 +244,10 @@ export interface Ticket {
   stopRequested?: boolean;
   /** The squad's review notes still to fix, passed to the Builder. */
   reviewNotes?: string[];
+  /** Whose ticket it is. Only the owner's squad works on it, on the owner's computer. */
+  owner?: string;
+  /** The last hand over: who gave it to whom, and when. */
+  handedOver?: { from: string; to: string; at: string };
   /** What each role used on this ticket, per step and model level. */
   usage?: UsageLine[];
 }

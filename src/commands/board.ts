@@ -21,6 +21,7 @@ import {
   answerAgent,
   giveBack,
   takeOver,
+  handOver,
   chatDone,
   chatWrite,
   sendChat,
@@ -60,6 +61,7 @@ import { boardUsage, byRole, costWords, stepWords, tokenWords, totalOf } from '.
 import { runConsole } from './console.js';
 import { openBoard } from '../board/move.js';
 import { projectName, readProjects } from '../core/projects.js';
+import { isMine, ownerOf } from '../board/owner.js';
 
 const out = (s = '') => process.stdout.write(`${s}\n`);
 const cmd = (s: string) => kleur.green(s);
@@ -189,7 +191,7 @@ export async function runBoard(): Promise<void> {
     out(`  ${kleur.bold(STAGE_NAME[stage])} ${kleur.gray(String(here.length))}`);
     for (const t of here) {
       const mark = t.waiting ? amber('● you') : t.live ? kleur.green('● ') + kleur.gray('   ') : kleur.gray('○    ');
-      out(`    ${mark} ${id(t.id)}  ${t.title}  ${kleur.gray(t.status)}`);
+      out(`    ${mark} ${id(t.id)}  ${t.title}  ${kleur.gray(t.status)}${isMine(t, meta) ? '' : kleur.gray(`  (${ownerOf(t)})`)}`);
     }
   }
   out();
@@ -202,6 +204,7 @@ export async function runShow(ticketId: string): Promise<void> {
   out(`  ${id(t.id)}  ${kleur.bold(t.title)}${t.priority === 'high' ? kleur.red('  High priority') : ''}`);
   out(`  ${trackLine(t)}`);
   out(`  ${kleur.gray(t.status)}`);
+  out(`  ${kleur.gray('Owner:')} ${ownerOf(t)}${isMine(t, readMeta(bp)) ? kleur.gray(' (you)') : kleur.gray('. Their squad works on it; you see their work when they push')}`);
   if (t.waiting) {
     out();
     out(`  ${amber('Waiting for you:')} ${t.waiting.summary}`);
@@ -600,6 +603,17 @@ export async function runTakeOver(ticketId: string): Promise<void> {
 export async function runGiveBack(ticketId: string, words: string[]): Promise<void> {
   const t = giveBack(board(), ticketId, words.join(' '));
   ui.success(`Given back. The checks, review and proof run again on your changes. Follow it: squad watch ${t.id}`);
+}
+
+export async function runHandOver(ticketId: string, words: string[], opts: { note?: string }): Promise<void> {
+  const bp = board();
+  const to = words.join(' ').trim() || (await input({ message: 'Hand it over to (their name, as their board shows it)' }));
+  const t = await handOver(bp, ticketId, { to, note: opts.note });
+  ui.success(`${t.id} is ${t.owner}'s now.${t.branch && readMeta(bp).engine === 'live' ? ` The work so far and the documents are pushed on ${t.branch}.` : ''}`);
+  out();
+  out(`  ${t.owner}'s squad carries on from the branch: the Builder starts a fresh chat from the spec, the design and the code.`);
+  out(kleur.gray('  Live progress, agent chats and screenshots stay on this computer. Your squad stops working on it.'));
+  out();
 }
 
 export async function runDecide(ticketId: string, choice?: string, opts: { note?: string; reason?: string } = {}): Promise<void> {

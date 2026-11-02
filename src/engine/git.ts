@@ -72,7 +72,17 @@ export function worktreeRoot(projectRoot: string): string {
   return path.join(squadHome(), 'worktrees', `${path.basename(projectRoot)}-${hash}`);
 }
 
-export function addWorktree(projectRoot: string, ticketId: string, base: string): { dir: string; branch: string; baseCommit: string } {
+/** The ticket's branch as someone pushed it (a hand over, or your own other computer), when this computer has none. */
+export function pushedBranch(projectRoot: string, branch: string): string | null {
+  const refs = git(projectRoot, ['for-each-ref', '--format=%(refname)', `refs/remotes/*/${branch}`], { allowFail: true });
+  return refs.split('\n').filter(Boolean)[0] ?? null;
+}
+
+/**
+ * The ticket's copy of the code. A branch pushed from another computer is where its work so far is, so the copy
+ * starts from it, not from the base; `pushed` says so.
+ */
+export function addWorktree(projectRoot: string, ticketId: string, base: string): { dir: string; branch: string; baseCommit: string; pushed?: string } {
   const dir = path.join(worktreeRoot(projectRoot), ticketId.toLowerCase());
   const branch = `squad/${ticketId.toLowerCase()}`;
   const baseCommit = git(projectRoot, ['rev-parse', base]);
@@ -80,8 +90,11 @@ export function addWorktree(projectRoot: string, ticketId: string, base: string)
   fs.mkdirSync(path.dirname(dir), { recursive: true });
   git(projectRoot, ['worktree', 'prune'], { allowFail: true });
   const exists = git(projectRoot, ['rev-parse', '--verify', `refs/heads/${branch}`], { allowFail: true });
-  git(projectRoot, exists ? ['worktree', 'add', dir, branch] : ['worktree', 'add', '-b', branch, dir, base]);
-  return { dir, branch, baseCommit };
+  const pushed = exists ? null : pushedBranch(projectRoot, branch);
+  git(projectRoot, exists ? ['worktree', 'add', dir, branch] : ['worktree', 'add', '-b', branch, dir, pushed ?? base]);
+  if (!pushed) return { dir, branch, baseCommit };
+  // Where the ticket left the base, so its changes are measured from there and not against newer work in the base.
+  return { dir, branch, baseCommit: git(projectRoot, ['merge-base', base, pushed], { allowFail: true }) || baseCommit, pushed: pushed.replace(/^refs\/remotes\//, '') };
 }
 
 export function removeWorktree(projectRoot: string, dir: string): void {

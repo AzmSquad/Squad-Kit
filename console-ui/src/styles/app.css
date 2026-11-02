@@ -594,6 +594,7 @@ ul.ticketnotes .grow, .addnote .grow { flex: 1; }
 .tracks { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 @media (max-width: 640px) { .tracks { grid-template-columns: 1fr; } }
 .prio.express { color: var(--accent); background: var(--accent-soft, rgba(13, 138, 66, 0.12)); }
+.prio.owner { color: var(--muted); background: var(--surface-2); margin-left: auto; }
 
 /* Ways out of a stop */
 .waynote { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13.5px; background: var(--surface); color: var(--text); resize: vertical; }

@@ -97,6 +97,8 @@ const HEADER_KEYS = [
   'source',
   'priority',
   'stage',
+  'owner',
+  'handedOver',
   'track',
   'createdAt',
   'createdBy',

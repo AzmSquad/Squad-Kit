@@ -22,7 +22,7 @@ export function docsInGit(bp: BoardPaths): boolean {
 }
 
 /** `.squad/` as a path inside the repo, with forward slashes. */
-function squadInRepo(bp: BoardPaths, repo: string): string {
+export function squadInRepo(bp: BoardPaths, repo: string): string {
   return path.relative(repo, bp.squadDir).split(path.sep).join('/');
 }
 
@@ -77,6 +77,56 @@ export function stageTicketDocs(bp: BoardPaths, t: Ticket): string[] {
   }
   git(t.worktree, ['add', '-f', '--', ...paths]);
   return paths;
+}
+
+/**
+ * A hand over in a project that has not released yet: its base has no settings, rules or knowledge in git, so a
+ * fresh clone would know nothing of the board. The ticket's branch carries them, with the decisions the ticket
+ * follows, and stages them. Once the base has them (after the first release), a clone gets them from there.
+ */
+export function stageProjectFiles(bp: BoardPaths, t: Ticket, baseRef: string): string[] {
+  const repo = docsRepo(bp);
+  if (!repo || !docsInGit(bp) || !t.worktree || !fs.existsSync(t.worktree)) return [];
+  const squad = squadInRepo(bp, repo);
+  if (git(t.worktree, ['ls-tree', '--name-only', baseRef, '--', `${squad}/config.yaml`], { allowFail: true })) return [];
+  const into = (rel: string) => path.join(t.worktree!, squad, rel);
+  const paths: string[] = [];
+  if (fs.existsSync(bp.configFile)) {
+    write(into('config.yaml'), fs.readFileSync(bp.configFile, 'utf8'));
+    paths.push(`${squad}/config.yaml`);
+  }
+  for (const sub of ['rules', 'knowledge']) {
+    const from = path.join(bp.squadDir, sub);
+    if (!fs.existsSync(from)) continue;
+    // The tracker's wiki is copied again from the tracker on each computer.
+    fs.cpSync(from, into(sub), { recursive: true, filter: (f) => path.relative(bp.wikiDir, f).startsWith('..') });
+    paths.push(`${squad}/${sub}`);
+  }
+  for (const d of listDecisions(bp).filter((x) => t.follows?.includes(x.id) && x.from !== t.id)) {
+    write(into(path.posix.join('decisions', `${d.id}.md`)), decisionDoc(d));
+    paths.push(`${squad}/decisions/${d.id}.md`);
+  }
+  if (paths.length) git(t.worktree, ['add', '-f', '--', ...paths]);
+  return paths;
+}
+
+/**
+ * Before the ticket's branch meets the base (accepted, or the base brought in), the project files a hand over
+ * carried leave it again. They reach the base with the release, as always, so they never clash with it. The
+ * ticket's own folder and its own decisions stay.
+ */
+export function leaveProjectFiles(bp: BoardPaths, t: Ticket, base: string): string[] {
+  const repo = docsRepo(bp);
+  if (!repo || !t.worktree || !fs.existsSync(t.worktree)) return [];
+  const squad = squadInRepo(bp, repo);
+  const fork = git(t.worktree, ['merge-base', base, 'HEAD'], { allowFail: true });
+  if (!fork) return [];
+  const own = new Set(listDecisions(bp).filter((d) => d.from === t.id).map((d) => `${squad}/decisions/${d.id}.md`));
+  const carried = git(t.worktree, ['diff', '--name-only', '--diff-filter=A', fork, 'HEAD', '--', squad], { allowFail: true })
+    .split('\n')
+    .filter((f) => f && !f.startsWith(`${squad}/tickets/${t.id}/`) && !own.has(f));
+  if (carried.length) git(t.worktree, ['rm', '-q', '-f', '--', ...carried]);
+  return carried;
 }
 
 /** Commits a ticket's documents on its branch, at a big moment such as "spec and design approved". */
