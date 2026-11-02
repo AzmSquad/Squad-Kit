@@ -6,8 +6,18 @@ import tailwindcss from '@tailwindcss/vite';
 
 const consoleUiRoot = fileURLToPath(new URL('.', import.meta.url));
 
+/** Every browser the board supports reads woff2: the older woff copy of each font only adds weight to the package. */
+const woff2Only = {
+  name: 'woff2-only',
+  enforce: 'pre' as const,
+  transform(code: string, id: string) {
+    if (!id.includes('@fontsource') || !id.endsWith('.css')) return null;
+    return code.replace(/,\s*url\([^)]*\.woff\)\s*format\(['"]woff['"]\)/g, '');
+  },
+};
+
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [woff2Only, react(), tailwindcss()],
   resolve: {
     alias: { '~': path.join(consoleUiRoot, 'src') },
   },
