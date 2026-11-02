@@ -1,5 +1,4 @@
-import fs from 'node:fs';
-
-/** The film shows on the site once its file is in public/film/; until then nothing points to it. */
-export const filmFile = '/film/squad-kit-1.0.mp4';
-export const hasFilm = fs.existsSync(new URL(`../../public${filmFile}`, import.meta.url));
+/** The film lives on YouTube; the site shows its poster and loads the player only when someone presses play. */
+export const filmYouTubeId = '_EDKwX9j81Y';
+export const filmPoster = '/film/poster.jpg';
+export const hasFilm = Boolean(filmYouTubeId);
