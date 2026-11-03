@@ -2,23 +2,24 @@
 
 ## Supported versions
 
-Only the latest minor release of squad-kit receives security fixes.
+Only the latest 1.0 release of squad-kit receives security fixes. Update with the **Update now** button in the app,
+or `squad upgrade`.
 
 | Version | Supported |
 | ------- | --------- |
-| 0.2.x   | ✅        |
-| 0.1.x   | ❌        |
-| < 0.1   | ❌        |
+| 1.0.x   | ✅        |
+| < 1.0   | ❌        |
 
 ## Reporting a vulnerability
 
 **Please do not open a public GitHub issue for security reports.**
 
-Email the maintainer privately at **momenysr@gmail.com** with:
+Report it privately on GitHub: [Report a vulnerability](https://github.com/AzmSquad/Squad-Kit/security/advisories/new)
+(the repository's **Security** tab). Or email the maintainer at **momenysr@gmail.com**. Include:
 
 - A description of the issue and its impact.
 - Steps to reproduce (proof-of-concept preferred).
-- Affected version(s) and environment (OS, Node version).
+- Affected version(s) and environment (OS, Node version, AI tool and its version).
 - Any suggested mitigation, if you have one.
 
 You can expect:
@@ -29,7 +30,26 @@ You can expect:
 
 Credit will be given in the release notes unless you prefer to remain anonymous.
 
-## Handling credentials
+## How squad-kit 1.0 keeps you safe
+
+- **The app runs on your computer only.** It listens on `127.0.0.1`, behind a private link with a token kept in
+  `~/.squad-kit/app.json`. Nothing is hosted.
+- **Sign-ins stay on this computer.** Tracker tokens and keys live in `~/.squad-kit/projects/<id>/secrets.yaml`
+  (mode `0600` on POSIX), never in the project folder or in git. A project moved from 0.x has its
+  `.squad/secrets.yaml` moved there once.
+- **Agents never see your secrets.** No agent may read squad-kit's secret files, and the commands squad-kit runs for
+  you (tests, setup and release) start without the AI and tracker keys.
+- **Agents stay in their lane.** Every step runs with the permissions it needs and no more: the Builder edits only its
+  own copy of the code, the Tester cannot change code, and no agent may change the instruction files the next session
+  would follow, squad-kit's own `.squad/` folder, or git history. squad-kit checks after each step and puts back what
+  an agent changed outside its lane. Text from trackers and pasted messages reaches agents as data, never as orders.
+- **The engine owns git and the release.** Agents never merge, push or grade their own work.
+- **The npm package is built and published by GitHub Actions** from a release tag, with npm trusted publishing (no
+  npm token exists) and a signed provenance statement you can check on npmjs.com.
+
+## 0.x commands: credentials
+
+The 0.x commands that still ship (`new-plan`, `auth`, `config` and others) keep their own credential handling:
 
 squad-kit reads API tokens from (in order):
 
@@ -59,13 +79,21 @@ squad-kit runs the Agent SDK with `settingSources: []`, which prevents it from r
 
 ## Scope
 
-squad-kit is a local-only CLI. It can call **optional** network APIs (tracker fetch, direct planner) when the user enables those flows and provides credentials. It does not execute user code. Reports in scope include:
+squad-kit runs on your computer and starts AI agents (Claude Code today) that read and change code in their own copy
+of your project and run commands there. It calls network APIs you set up: your tracker, your code host and your AI
+tool. Reports in scope include:
 
-- Arbitrary file read/write outside the workspace caused by malformed input (e.g. path-traversal via feature slugs or intake paths).
-- Command injection via clipboard helpers or spawned processes.
-- Supply-chain concerns in shipped dependencies (`@inquirer/prompts`, `commander`, `fs-extra`, `js-yaml`, `kleur`).
+- A secret (a sign-in, a token, a key) reaching an agent, a log, a report file or git.
+- The app answering anyone other than you, from this computer or another one.
+- An agent getting past its permissions: writing outside its copy, changing instruction files, git history or
+  `.squad/`, or merging or pushing.
+- Arbitrary file read/write outside the project caused by malformed input (for example path traversal through a
+  ticket name or an attachment).
+- Command injection through anything squad-kit runs for you.
+- Supply-chain concerns in shipped dependencies or in how the package is built and published.
 
 Out of scope:
 
-- Content of user-authored intakes and plans under `.squad/stories/` and `.squad/plans/` (treat as trusted project input to your agents).
-- Vulnerabilities in the AI agents that consume squad-kit output (Claude Code, Cursor, Copilot, Gemini). Report those upstream.
+- Vulnerabilities in the AI tools themselves (Claude Code and others). Report those upstream.
+- What the code an agent writes does in your project. squad-kit checks it (tests, review, proof), and you approve it
+  before it merges.

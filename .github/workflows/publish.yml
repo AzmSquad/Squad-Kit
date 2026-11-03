@@ -1,15 +1,12 @@
 name: publish
 
 # Publishes to npm when a GitHub release is published, through npm's trusted publishing: npm trusts this workflow
-# by name, so there is no npm token anywhere. Run it by hand to publish a release that already exists.
+# by name, so there is no npm token anywhere. To publish a release that already exists, run it on its tag:
+# `gh workflow run publish.yml --ref v1.0.1`. The npm environment only lets release tags (v*) in.
 on:
   release:
     types: [published]
   workflow_dispatch:
-    inputs:
-      tag:
-        description: 'The release tag to publish, for example v1.0.1'
-        required: true
 
 permissions:
   contents: read
@@ -18,16 +15,15 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    environment: npm
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # Version comes from package.json "packageManager". Pinning it here as well makes
       # pnpm/action-setup abort with ERR_PNPM_BAD_PM_VERSION.
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
           cache: pnpm
@@ -37,7 +33,7 @@ jobs:
       - run: npm install -g npm@11
 
       - name: The tag matches the version in package.json
-        run: test "v$(node -p "require('./package.json').version")" = "${{ inputs.tag || github.event.release.tag_name }}"
+        run: test "refs/tags/v$(node -p "require('./package.json').version")" = "$GITHUB_REF"
 
       - run: pnpm install --frozen-lockfile
 
