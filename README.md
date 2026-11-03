@@ -1,6 +1,10 @@
 <p align="center">
   <a href="https://squad-kit.com">
-    <img src="https://squad-kit.com/logo-wordmark.svg?v=2" alt="squad-kit logo" width="360">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://squad-kit.com/readme/header-dark.png">
+      <source media="(prefers-color-scheme: light)" srcset="https://squad-kit.com/readme/header-light.png">
+      <img src="https://squad-kit.com/readme/header-light.png" alt="squad-kit: Your AI Engineering Squad. One Unified Harness." width="800">
+    </picture>
   </a>
 </p>
 
@@ -10,8 +14,6 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <a href="https://squad-kit.com"><img src="https://img.shields.io/badge/site-squad--kit.com-7cffa0?labelColor=0a0a0c" alt="Website"></a>
 </p>
-
-**Your AI Engineering Squad. One Unified Harness.**
 
 squad-kit is an agent harness for the whole software cycle. You describe what you need in plain words. A
 squad of AI agents takes it from that ask to a release: the Analyst, the Architect, the Builder, the Tester
