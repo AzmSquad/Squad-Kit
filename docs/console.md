@@ -152,3 +152,7 @@ Terminal: `squad config set quality best`, `squad agent builder`, `squad agent b
 - **How the squad checks and runs this project**: for each code repo, the setup, test, lint, build and start
   commands, the app address, a pipeline to run after a release, the release branch and where it pushes. The
   Architect fills these in; change them here. **Read the project again** asks the Architect to read the code again.
+- **About squad-kit**: your version, when the app last looked for a new one, **Check for updates**, and the
+  daily check (turn it off on a network without internet). When a new version is out, Home and every project
+  page show it with what is new. **Update now** waits until no agent is in the middle of a step, installs it,
+  and restarts the app on the same link. Terminal: `squad upgrade`.

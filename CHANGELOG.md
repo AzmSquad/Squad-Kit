@@ -7,6 +7,81 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] — 2026-11-03
+
+squad-kit 1.0.1 makes the squad steadier and easier to follow, from what we saw in the first trials. To get it
+from 1.0.0, run `squad upgrade` once. From now on the app updates itself with one button.
+
+### Easier to follow
+
+- **"From an idea or message" works and shows its progress.** The dialog no longer disappears behind a blurred
+  board. The Analyst works in the background with three steps and a clock, and you can press Cancel. You can
+  close the window: the draft waits for you under New ticket.
+- **Errors stay on screen** until you close them.
+- **The Conversation tab reads in plain words.** "Handed in its answer" replaces the raw answer, and a command
+  the step may not run shows in grey as skipped, not in red as a failure.
+- **A ticket waiting for a free place says so**: "Waiting for a free place", with the limit, instead of
+  looking as if it runs.
+- **"Resumed after sleep"** shows when the computer slept in the middle of a step.
+
+### The Update button
+
+- **The app looks for a new version** on start and once a day. When one is out, Home and every project show
+  it with what is new. **Update now** waits until no agent is in the middle of a step, installs, and restarts
+  the app on the same link. Every ticket carries on where it was.
+- **Settings › About squad-kit** shows your version, when it last checked, and a switch for the daily check.
+  Terminal: `squad upgrade`.
+
+### Quality
+
+- **A new Quality setting** on the Squad and AI page: **Best** (the default), **Balanced** or **Thrifty**.
+  On Best, the strongest model builds and reviews at high effort. On Claude Code that is Opus. Terminal:
+  `squad config set quality best`.
+- **A new "extra high" effort.** On Best, a Builder run that fails moves the next one up to extra high.
+- **The Reviewer is never weaker than the Builder** on Best and Balanced.
+- **Reading the project after a merge is cheaper.** The project map is only read again when files are added,
+  moved or removed, and that read runs on a lighter model.
+
+### No silent hangs
+
+- **Stop works at every moment**, also between two runs, and it ends the agent with everything it started. A
+  step that runs out of time ends the same way.
+- **Git that talks to a remote has a time limit**, and never waits for a password prompt nobody sees.
+- **Starting an agent has a time limit.** If it cannot start, the step says why instead of waiting.
+- **The Builder no longer waits for the "before" screenshots.** They are taken beside it, with their own time
+  limit.
+- **A test, lint or build command with no output for 5 minutes is stopped**, and the ticket says which one.
+
+### Agents stay in their lane
+
+- **Every agent runs with the permissions of its step.** The Tester can run the app but cannot change the code;
+  what it changes anyway, squad-kit puts back.
+- **No agent can change the instruction files** the next session would follow, such as `CLAUDE.md`, or
+  squad-kit's own `.squad/` folder. Agents read copies of the project's rules, never your own folder.
+- **No agent can rewrite git history.** squad-kit checks after each Builder and Tester step.
+- **Every answer is checked.** An incomplete answer is asked for once more, then the step says so plainly.
+- **Text from outside**, such as a tracker item or a pasted message, reaches the agents as data, never as
+  orders.
+- **Test, setup and release commands no longer get the AI and tracker keys.**
+
+### No lost work
+
+- **A release and a "Looks right" at the same moment** no longer get in each other's way.
+- **Stop keeps the step the ticket was at.**
+- **"Bring in the latest main"** uses the remote's main, not an old local copy.
+- **Only a real clash counts as a clash.** Other git errors say what went wrong. `squad doctor` checks the git
+  version.
+- **Tracker updates are kept until they are sent**, and retried when the tracker is down.
+- **A release whose push failed** says "not pushed yet", with **Push again** on the Releases page. Terminal:
+  `squad release <version> --push-again`.
+- **Withdraw change** takes back an approved change the squad has not built yet, and puts the spec back to how
+  it was. Terminal: `squad propose <ID> --withdraw`.
+
+### Fixes
+
+- **The Architect writes the stack**, with each part's role, from the code it reads. `stack.md` was empty.
+- **The Reviewer is told the checks already ran**, so it does not run them again.
+
 ## [1.0.0] — 2026-11-02
 
 squad-kit 1.0 is an agent harness for the whole software cycle. You write a ticket in plain words. A squad of
@@ -728,7 +803,8 @@ First public release.
 - Plan-generation meta-prompt (`generate-plan.md`), intake template (`intake.md`), and plan skeleton reference (`story-skeleton.md`).
 - Documentation: `docs/philosophy.md`, `docs/getting-started.md`, `docs/customization.md`, `docs/vs-spec-kit.md`.
 
-[Unreleased]: https://github.com/AzmSquad/squad-kit/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/AzmSquad/squad-kit/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.0.1
 [1.0.0]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.0.0
 [0.6.0]: https://github.com/AzmSquad/squad-kit/releases/tag/v0.6.0
 [0.5.0]: https://github.com/AzmSquad/squad-kit/releases/tag/v0.5.0

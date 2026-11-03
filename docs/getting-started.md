@@ -98,7 +98,9 @@ On the board, press **New ticket**. There are two ways to write it:
 - **Write it**: a title and what you want, in plain words. Add what you already know: acceptance criteria,
   business rules, edge cases, screenshots or documents. The Analyst asks you about the rest.
 - **From an idea or message**: paste an idea, a chat message or one line of business, with screenshots if you
-  have them. The Analyst fills in every field in about 20 seconds. You check each one before the ticket is made.
+  have them. The Analyst fills in every field, usually in under a minute, and you see each step it takes. Press
+  **Cancel** to stop it. You can close the window: the draft waits for you under **New ticket**. You check each
+  field before the ticket is made.
 
 Pick a **track**:
 
@@ -173,7 +175,11 @@ While it works, you can:
 - Message an agent in the **Conversation** tab. It reads your message at its next step; the work goes on.
 - Ask any agent a question. Asking never stops the work.
 - Press **Propose a change** to change what gets built. See [Change something](#8-change-something) below.
-- Press **Stop**. The work so far is kept.
+- Press **Stop**. The agent stops at once, and the work so far is kept. **Try again** carries on from the same
+  step.
+
+Only a limited number of tickets run at once (see **Tickets at once** in Settings). A ticket over the limit says
+**Waiting for a free place** and starts on its own when one is free.
 - Developers can press **Take over** to work in the Builder's own session, then **Give back**.
 
 ### Check the proof
@@ -195,6 +201,10 @@ notes. Edit the notes if you like, then press **Release**.
 squad-kit asks you once to confirm, and lists exactly which branch of which repo it will push, and where. Read
 it. Then it updates the changelog, sets the version, adds the git tag and pushes. On the tracker, the items
 close with the version as a tag.
+
+If the push fails (no network, or the remote refuses it), the release is made on your computer only and says
+**not pushed yet**. Fix the problem, then press **Push again** on the release. Terminal:
+`squad release <version> --push-again`.
 
 Found a problem later? Press **Report a bug** on the board. The bug becomes a ticket linked to the release, goes
 around the same loop, and the Tester adds a check so it cannot come back.
@@ -232,6 +242,7 @@ You can change your mind at any time, without stopping the squad.
   - A **big** change pauses the Builder after its current step. The Architect updates the design, you approve
     it, and the Builder redoes only the steps the change touches.
   - One change at a time per ticket.
+  - Changed your mind? **Withdraw change** takes back an approved change the squad has not built yet.
 - **Released or accepted work** answers questions only. There the button reads **Ask for a change**, and the
   change becomes a new ticket linked to it, or a bug report.
 
