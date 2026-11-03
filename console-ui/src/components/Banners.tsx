@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useRouterState } from '@tanstack/react-router';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { useBoard } from '../lib/data';
@@ -8,22 +8,24 @@ import { updateLine, useUpdate } from './Update';
 import { useUsageLimit } from './UsageLimit';
 
 /**
- * The banners over a project's pages: the update, the usage limit, squad-kit was updated, and Waiting for you. On a
- * phone with a ticket open they would take much of the height above it, so they fold into one slim row that names
- * each; a tap opens them all. They stay on the page while folded, so the tab title and the desktop notices go on.
+ * The banners over a project's pages: the update, the usage limit, squad-kit was updated, and Waiting for you. With a
+ * ticket open in a narrow board area (a phone, or the chat docked beside the board) they would take much of the height
+ * above it, so they fold into one slim row that names each; a tap opens them all. They stay on the page while folded,
+ * so the tab title and the desktop notices go on.
  */
 export function Banners({ children }: { children: ReactNode }) {
   const path = useRouterState({ select: (s) => s.location.pathname });
   const ticket = useRouterState({ select: (s) => (s.location.search as { ticket?: string }).ticket });
   const phone = useMedia(PHONE);
+  const narrow = useNarrow();
   const chips = useChips(path);
   const drawer = path.startsWith('/board') && Boolean(ticket);
   const [open, setOpen] = useState(false);
   // Each ticket opened starts folded again.
   useEffect(() => setOpen(false), [ticket]);
-  const fold = drawer && phone && chips.length > 0;
+  const fold = drawer && (phone || narrow.is) && chips.length > 0;
   return (
-    <div className={`banners ${fold && open ? 'unfolded' : ''}`}>
+    <div ref={narrow.ref} className={`banners ${fold && open ? 'unfolded' : ''}`}>
       {fold && open && (
         <button className="bless" onClick={() => setOpen(false)} aria-expanded>
           <ChevronUp size={14} aria-hidden /> Show less
@@ -67,4 +69,18 @@ function useChips(path: string): Chip[] {
   const waiting = board?.ready && !path.startsWith('/inbox') ? board.tickets.filter(needsYou).length : 0;
   if (waiting) chips.push({ key: 'waiting', text: `${waiting} need${waiting === 1 ? 's' : ''} you`, tone: 'you' });
   return chips;
+}
+
+/** The board area is narrow: the banners' own width is under the width the drawer needs to stand beside the board. */
+function useNarrow(): { ref: (el: HTMLDivElement | null) => void; is: boolean } {
+  const [is, setIs] = useState(false);
+  const watch = useRef<ResizeObserver | null>(null);
+  const ref = useCallback((el: HTMLDivElement | null) => {
+    watch.current?.disconnect();
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    watch.current = new ResizeObserver(([e]) => setIs((e?.contentRect.width ?? Infinity) < 820));
+    watch.current.observe(el);
+  }, []);
+  useEffect(() => () => watch.current?.disconnect(), []);
+  return { ref, is };
 }
