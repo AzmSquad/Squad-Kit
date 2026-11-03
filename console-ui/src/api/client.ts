@@ -41,10 +41,37 @@ export class UnauthorizedError extends Error {
   }
 }
 
+/** An answer that said no. 400 is a plain-words reason from squad-kit; 500 is a problem squad-kit did not expect. */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+/** True when the same action may work if sent again: no answer, or a problem squad-kit did not expect. */
+export function worthRetrying(err: unknown): boolean {
+  return err instanceof Error && (err.message === NO_ANSWER || (err instanceof ApiError && err.status >= 500));
+}
+
+/** The app did not answer at all (it stopped, or the computer went to sleep): say so in plain words. */
+export const NO_ANSWER = 'squad-kit did not answer, so nothing changed. Check that it still runs in its terminal, then try again.';
+
+async function reach(input: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch {
+    throw new Error(NO_ANSWER);
+  }
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const token = sessionStorage.getItem(TOKEN_KEY);
   if (!token) throw new UnauthorizedError();
-  const res = await fetch(apiPath(path), {
+  const res = await reach(apiPath(path), {
     ...init,
     headers: {
       'content-type': 'application/json',
@@ -72,14 +99,14 @@ async function safeText(res: Response): Promise<string> {
 export async function send<T>(path: string, method: 'POST' | 'PUT' | 'DELETE', payload: unknown = {}): Promise<T> {
   const token = sessionStorage.getItem(TOKEN_KEY);
   if (!token) throw new UnauthorizedError();
-  const res = await fetch(apiPath(path), {
+  const res = await reach(apiPath(path), {
     method,
     headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
     body: JSON.stringify(payload),
   });
   if (res.status === 401) throw new UnauthorizedError();
   const data = (await res.json().catch(() => ({}))) as { error?: string };
-  if (!res.ok) throw new Error(data.error ?? `${res.status} ${res.statusText}`);
+  if (!res.ok) throw new ApiError(data.error ?? `${res.status} ${res.statusText}`, res.status);
   return data as T;
 }
 

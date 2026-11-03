@@ -7,6 +7,7 @@ import * as ui from '../ui/index.js';
 import { isInteractive } from '../ui/tty.js';
 import { buildPaths, findSquadRoot, type SquadPaths } from '../core/paths.js';
 import { startConsoleServer, type ConsoleServer } from '../console/server.js';
+import { printErrors } from '../core/app-log.js';
 import { boardPaths } from '../board/store.js';
 import { isOwnFolder, prepareProject } from '../engine/setup.js';
 import { allEnded, killAll } from '../engine/process-group.js';
@@ -167,6 +168,8 @@ async function serveApp(a: { first?: SquadPaths; opts: AppOptions; underKeeper: 
   const token = opts.token ?? prior?.token ?? randomBytes(32).toString('hex');
   const build = buildStamp();
 
+  // Errors also print here, in the terminal that runs the app, as they reach the app log.
+  printErrors(true);
   const server: ConsoleServer = await startConsoleServer({ paths: a.first, app: true, requestedPort, token, build });
   const info = { pid: process.pid, port: server.port, token, startedAt: new Date().toISOString(), version: readInstalledPackage().version, build };
   writeAppInfo(info);

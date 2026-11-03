@@ -12,6 +12,9 @@ import { runMigrate } from './commands/migrate.js';
 import { runUpgrade } from './commands/upgrade.js';
 import { runApp, runConsole } from './commands/console.js';
 import { runProjects } from './commands/projects.js';
+import { runAsk, runTicketStatus, runWait } from './commands/now.js';
+import { runLogs, runReport, runTryNow } from './commands/support.js';
+import { runAppFind, runAppRestart, runAppSet, runAppStart, runAppStatus, runAppStop } from './commands/app.js';
 import {
   runAnswer,
   runApprove,
@@ -54,6 +57,7 @@ import {
   runConfigRemoveCredential,
 } from './commands/config/index.js';
 import { runRmFeature, runRmPlan, runRmStory } from './commands/rm/index.js';
+import { runArchive, runDelete } from './commands/delete.js';
 import { runAuthLogin, runAuthStatus, runAuthLogout } from './commands/auth/index.js';
 import { readInstalledPackage } from './core/package-info.js';
 import { chooseProject } from './core/paths.js';
@@ -178,7 +182,10 @@ program
   .option('--no-thinking', 'Anthropic Agent SDK: disable extended thinking for this run', false)
   .action(wrapArgs(runNewPlan));
 
-program.command('status').description('Show squad-kit workspace status').action(wrap(runStatus));
+program
+  .command('status [ticket]')
+  .description('Show squad-kit workspace status, or with a ticket what is happening on it now')
+  .action(wrapArgs((ticket?: string) => (ticket ? runTicketStatus(ticket) : runStatus())));
 
 program
   .command('doctor')
@@ -232,8 +239,36 @@ program
   .option('--remove <name>', 'Take a project out of squad-kit; its files stay in its folder')
   .action(wrap(runProjects));
 
+// Your apps: each app of the project, run from squad-kit's own copy of main (the board's sidebar does the same).
+const appCmd = program.command('app').description("Run your apps from squad-kit's own copy of main: start, stop, restart, status");
+appCmd.command('status').description('Show each app: running or not, its address, and a new version to run').action(wrap(runAppStatus));
+appCmd
+  .command('start [name]')
+  .description('Start the app on the newest main (outside squad-kit: here, until Ctrl-C)')
+  .option('--next-port', 'Its port is in use: run it on the next free port (when its start command takes a port)')
+  .option('--stop-other', 'Its port is in use by a program squad-kit started: stop that first')
+  .action(wrapArgs(runAppStart));
+appCmd.command('stop [name]').description('Stop the app, and everything it started').action(wrapArgs(runAppStop));
+appCmd
+  .command('restart [name]')
+  .description('Stop it, then start it on the newest main: run the new version after Looks right')
+  .option('--next-port', 'Its port is in use: run it on the next free port')
+  .option('--stop-other', 'Its port is in use by a program squad-kit started: stop that first')
+  .action(wrapArgs(runAppRestart));
+appCmd
+  .command('set [name]')
+  .description("Save how the app starts in the project's settings")
+  .option('--start <command>', 'The command that starts it, for example "npm run dev"')
+  .option('--url <address>', 'Where it answers, for example http://localhost:3000')
+  .action(wrapArgs(runAppSet));
+appCmd.command('find').description('Ask the Architect to read the project again and find how to start its apps').action(wrap(runAppFind));
+
 program.command('inbox').description('List everything waiting for you (outside a project folder: in every project)').action(wrap(runInbox));
-program.command('board').description('Show every open ticket by stage').action(wrap(runBoard));
+program
+  .command('board')
+  .description('Show every open ticket by stage')
+  .option('--archived', 'Show archived tickets too')
+  .action(wrap(runBoard));
 program
   .command('show <ticket>')
   .description('Show a ticket: its story, plan, steps, gates and proof')
@@ -336,7 +371,28 @@ program
 program
   .command('stop <ticket>')
   .description('Stop the squad on a ticket; the work so far is kept')
+  .option('--again', 'Stop the running step and start it again at once')
   .action(wrapArgs(runStop));
+program
+  .command('wait <ticket>')
+  .description('A slow step is fine: stay quiet about it for a while. Its time limit stays')
+  .option('--more <time>', 'How much longer, like 10m or 1h', '10m')
+  .action(wrapArgs(runWait));
+program
+  .command('ask <ticket> [question...]')
+  .description('Ask about a ticket: is there a problem, when will it be ready, what is it doing. Answered at once, no AI cost')
+  .action(wrapArgs(runAsk));
+program
+  .command('delete <ticket>')
+  .description('Delete a ticket that is not merged: its copy of the code, branch, files, chats and screenshots. Its cost stays in Usage')
+  .option('-y, --yes', 'Skip the confirmation prompt')
+  .option('--remote', 'Also delete its pushed branch on the remote')
+  .action(wrapArgs(runDelete));
+program
+  .command('archive <ticket>')
+  .description('Take a merged or released ticket off the board; its history stays')
+  .option('--undo', 'Bring an archived ticket back to the board')
+  .action(wrapArgs(runArchive));
 program
   .command('unstick <ticket>')
   .description('End the command a ticket looks stuck on, so the squad carries on')
@@ -346,6 +402,21 @@ program
   .command('watch <ticket>')
   .description('Follow a ticket live until it needs you')
   .action(wrapArgs(runWatch));
+program
+  .command('report [ticket]')
+  .description('Save one file to send to whoever helps you with squad-kit: the ticket, its conversations, the log and the versions. Never tokens or passwords')
+  .option('--note <text>', 'What happened, in your words')
+  .option('--out <folder>', 'Where to save it (default: your Downloads folder)')
+  .action(wrapArgs(runReport));
+program
+  .command('logs')
+  .description("Show where squad-kit's own log is")
+  .option('--tail [lines]', 'Print its last lines (40 by default)')
+  .action(wrap(runLogs));
+program
+  .command('try-now')
+  .description('Stop waiting for the AI usage limit to reset: the squad carries on now')
+  .action(wrap(runTryNow));
 program
   .command('release [version]')
   .description('Release the tickets that are ready')
@@ -511,7 +582,7 @@ config
   );
 
 // Commands that act on one project find it from the folder they run in, or take --project (ADR-001).
-const NOT_ON_ONE_PROJECT = new Set(['init', 'demo', 'upgrade', 'projects', 'help']);
+const NOT_ON_ONE_PROJECT = new Set(['init', 'demo', 'upgrade', 'projects', 'help', 'logs', 'try-now']);
 const leaves = (c: Command): Command[] => (c.commands.length ? c.commands.flatMap(leaves) : [c]);
 for (const c of program.commands.filter((x) => !NOT_ON_ONE_PROJECT.has(x.name())).flatMap(leaves)) {
   if (!c.options.some((o) => o.long === '--project')) c.option('--project <name>', 'The project: its name, id or folder (default: the one this folder is in)');

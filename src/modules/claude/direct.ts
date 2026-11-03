@@ -7,6 +7,8 @@ import { resolveClaudeBinary } from '../../core/claude-binary.js';
 import { childEnv } from '../../engine/agent-env.js';
 import { usageFrom } from '../../engine/acp-runner.js';
 import { track, whenExited } from '../../engine/process-group.js';
+import { resetWords } from '../../engine/usage-limit.js';
+import { claudeLimit } from './limit.js';
 
 /**
  * Runs the real Claude Code CLI headless (`claude -p`) in a project folder. squad-kit never
@@ -53,6 +55,8 @@ export interface RunResult {
   text: string;
   structured?: unknown;
   error?: string;
+  /** Claude Code's own words for the failure, for engineers. */
+  detail?: string;
   usage?: AgentUsage;
 }
 
@@ -235,12 +239,13 @@ export function runClaude(opts: RunOptions): Promise<RunResult> {
       } else if (event.type === 'result') {
         const isError = Boolean(event.is_error) || event.subtype !== 'success';
         const usage = claudeUsage(event, costBefore);
+        const said = typeof event.result === 'string' ? event.result : String(event.subtype);
         result = {
           ok: !isError,
           sessionId: event.session_id ?? sessionId,
           text: typeof event.result === 'string' ? event.result : lastText,
           structured: event.structured_output ?? undefined,
-          ...(isError ? { error: plainError(typeof event.result === 'string' ? event.result : String(event.subtype)) } : {}),
+          ...(isError ? { error: plainError(said), detail: said.trim().slice(-2000) } : {}),
           ...(usage ? { usage } : {}),
         };
       }
@@ -266,22 +271,38 @@ export function runClaude(opts: RunOptions): Promise<RunResult> {
       clearTimeout(timer);
       if (buffer) handle(buffer);
       if (result) return resolve(result);
-      resolve({ ok: false, sessionId, text: lastText, error: plainError(stderr.trim() || `Claude Code stopped (exit ${code}).`) });
+      const said = stderr.trim() || `Claude Code stopped (exit ${code}).`;
+      resolve({ ok: false, sessionId, text: lastText, error: plainError(said), detail: said.slice(-2000) });
     });
   });
 }
 
 /** Turn Claude Code failures into a sentence a project manager can act on. */
-export function plainError(raw: string): string {
+export function plainError(raw: string, now = Date.now()): string {
   const s = raw.toLowerCase();
   if (s.includes('exit 143') || s.includes('sigterm')) {
     return 'The squad was interrupted before it finished, for example because the board was closed. Press Try again to carry on.';
   }
-  if (s.includes('usage limit') || s.includes('rate limit') || s.includes('limit reached')) {
-    return 'Claude hit its usage limit. Wait for the limit to reset, then press Try again.';
+  const limit = claudeLimit(raw, now);
+  if (limit) {
+    return limit.resetsAt
+      ? `Claude's usage limit is reached. It resets ${resetWords(limit.resetsAt, now)}; press Try again after that.`
+      : "Claude's usage limit is reached. Press Try again once the limit resets.";
   }
   if (s.includes('not logged in') || s.includes('login') || s.includes('authenticat') || s.includes('oauth')) {
     return 'Claude Code is not logged in. Run `claude` in a terminal, log in, then press Try again.';
+  }
+  if (s.includes('credit balance') && s.includes('low')) {
+    return 'The Claude account has no credit left. Add credit or sign in with another account, then press Try again.';
+  }
+  if (s.includes('overloaded') || /\b529\b/.test(s)) {
+    return 'Claude is busy right now. Wait a few minutes, then press Try again.';
+  }
+  if (/\b(enotfound|econnreset|econnrefused|etimedout|getaddrinfo|fetch failed|network error)\b/.test(s)) {
+    return 'Claude Code could not reach the internet. Check the connection, then press Try again.';
+  }
+  if (/api error:? 5\d\d\b/.test(s)) {
+    return "Claude's service had a problem on its side. Wait a few minutes, then press Try again.";
   }
   return raw.split('\n').filter(Boolean).slice(-3).join(' ').slice(0, 400);
 }

@@ -120,11 +120,15 @@ A project without a tracker names its own tickets from the project name: "Leave 
 ## 6. From the ask to a release
 
 The ticket's card moves across the board's columns: **Tickets**, **Specs**, **Implement**, **Test**,
-**Review**, **Release**, and **Bugs** for bug reports. A card gets a **You** tag when it needs you. It also
-shows up in **Waiting for you**, at the top of the board and on Home.
+**Review**, **Release**, and **Bugs** for bug reports. Each card says what is happening in plain words, for
+example "Builder · step 3 of 6 · editing the booking page · 2 min · usually 2 to 4". A card gets a **You** tag
+when it needs you. It also shows up in the **Waiting for you** banner at the top of every page, with the button to
+press, and the browser tab shows the count. Turn on desktop notices when the banner asks, and you can work on
+something else until the squad needs you.
 
-Click a card to open the **ticket drawer** on the right. Its **Now** tab always shows what happens now and what
-you can do.
+Click a card to open the **ticket drawer** on the right. Its **Now** tab always shows what happens now, what comes
+next and what you can do. Type a question under **Ask about this ticket**, like "is there a problem?" or "when will
+it be ready?": the answer comes at once, in English or Arabic.
 
 ### Answer the questions
 
@@ -177,10 +181,14 @@ While it works, you can:
 - Press **Propose a change** to change what gets built. See [Change something](#8-change-something) below.
 - Press **Stop**. The agent stops at once, and the work so far is kept. **Try again** carries on from the same
   step.
+- Developers can press **Take over** to work in the Builder's own session, then **Give back**.
 
 Only a limited number of tickets run at once (see **Tickets at once** in Settings). A ticket over the limit says
-**Waiting for a free place** and starts on its own when one is free.
-- Developers can press **Take over** to work in the Builder's own session, then **Give back**.
+**Next in line: starts when a slot is free** and starts on its own.
+
+A step that takes more than twice its usual time says **Taking longer than usual**, with what it is doing.
+**Give it 10 more minutes**, **Stop and try again**, or **Stop**. If Claude's usage limit is reached, the squad
+pauses and carries on by itself when the limit resets.
 
 ### Check the proof
 
@@ -192,6 +200,9 @@ the proof. Nothing ships without all three.
   merges the branch into your main branch itself. On the tracker, the item moves to resolved.
 - If not, press **Something's wrong**, say what in one line, and press **Send back**. The ticket goes back to
   the Builder with your note.
+
+To try the change yourself, press **Run the new version** in **Your apps** in the sidebar. squad-kit starts the
+app from the newest `main` and gives you its address.
 
 ### Release
 
@@ -222,7 +233,7 @@ command that does the same.
 | **Proof** | The work is built, checked and reviewed, with screenshots. | **Check proof**: **Looks right**, or **Something's wrong**. |
 | **An agent asks you** | The Architect, Builder or Reviewer stopped in the middle of its work to ask you something, sometimes with screenshots or a mockup. | **Answer** on the card. |
 | **The squad is stuck** | A check keeps failing, or the review stays open, or the change clashes with newer code on main. | **Decide**: **Try again** (with a note), **Fix it yourself**, **Continue anyway** (with a reason that stays on the record), or send it back to the plan. |
-| **Looks stuck** or **taking long** | A step makes no progress. | End the stuck command, keep waiting, or stop. |
+| **Looks stuck** or **Taking longer than usual** | A step makes no progress, or runs past twice its usual time. | **End the stuck command**, **Give it 10 more minutes**, **Stop and try again**, or **Stop**. |
 | **A newer decision** | A decision approved after this ticket's design changes it. | **Update the plan**, or keep it as it is, with a reason. |
 | **A change** | A change you proposed is written into the spec, or its design update is ready. | Approve it or decline it. |
 | **You have this ticket** | You took the ticket over. | **Give back** when you are done. The checks, review and proof run again. |
@@ -246,6 +257,10 @@ You can change your mind at any time, without stopping the squad.
 - **Released or accepted work** answers questions only. There the button reads **Ask for a change**, and the
   change becomes a new ticket linked to it, or a bug report.
 
+Don't need a ticket any more? Open the **…** menu at the top of the ticket. **Delete** removes a ticket that is
+not merged: its copy of the code, its branch, its files and its chats. The tracker item and the cost stay.
+**Archive** takes a finished ticket off the board; its history stays.
+
 ## 9. Do it from the terminal
 
 Every button has a terminal command. Turn on **Show commands** in the sidebar to see each one next to its
@@ -264,6 +279,15 @@ squad release                # release the tickets that are ready
 
 Commands find the project from the folder you are in. From any other folder, add `--project <name>`. See them
 all with `squad --help`.
+
+## 10. When something goes wrong
+
+Every stop says what happened, what is safe, and the ways out, as buttons. Nothing is lost: the work so far is
+kept on the ticket's branch.
+
+If you need help, press **Report a problem** (on the error card, at the top of the ticket, or in Settings). It
+saves one file in your Downloads folder with the ticket, its conversations, the app log and the versions, and never
+your sign-ins or keys. Send that file to whoever helps you with squad-kit. From the terminal: `squad report AB-46`.
 
 ## Next
 

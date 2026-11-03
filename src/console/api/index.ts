@@ -13,6 +13,9 @@ import { mountCopyPlanPromptApi } from './copy-plan-prompt.js';
 import { mountDashboardApi } from './dashboard.js';
 import { mountProjectsApi } from './projects.js';
 import { mountBoardApi } from './board.js';
+import { onUnexpected } from './support.js';
+import { mountDeleteApi } from './delete.js';
+import { mountAppsApi } from './apps.js';
 
 export interface MountApiOptions {
   paths: SquadPaths;
@@ -34,4 +37,7 @@ export function mountApi(app: Hono, opts: MountApiOptions): void {
   mountDoctorApi(app, opts);
   mountCopyPlanPromptApi(app, opts);
   mountBoardApi(app, opts);
+  mountDeleteApi(app, opts);
+  mountAppsApi(app, opts);
+  app.onError(onUnexpected);
 }

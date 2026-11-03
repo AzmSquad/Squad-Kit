@@ -108,7 +108,7 @@ export function decidedIn(tech: Tech, decisions: Decision[]): string[] {
     .filter((d) => !d.replacedBy)
     .filter((d) => {
       const text = `${d.title} ${d.chosen}`.toLowerCase();
-      return words.some((w) => new RegExp(`(^|[^a-z])${w.replace(/[.+]/g, '\\$&')}([^a-z]|$)`).test(text));
+      return words.some((w) => new RegExp(`(^|[^a-z])${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z]|$)`).test(text));
     })
     .map((d) => d.id);
 }

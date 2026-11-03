@@ -43,6 +43,7 @@ import {
   startFromTracker,
   endStuckCommand,
   keepWaiting,
+  restartStep,
   stopTicket,
   proposeChange,
   approveChange,
@@ -53,7 +54,6 @@ import {
   ReleasedError,
 } from '../../board/actions.js';
 import { architecture } from '../../board/architecture.js';
-import { projectApps } from '../../board/apps.js';
 import { boardExists, boardPaths, listDecisions, listReleases, listTickets, readMeta, readRelease, readTicket, writeMeta } from '../../board/store.js';
 import { seedDemoBoard } from '../../board/demo.js';
 import type { AgentName, PlanComment, PlanEdit } from '../../board/types.js';
@@ -75,6 +75,10 @@ import { loadConfig } from '../../core/config.js';
 import { installedEditors, openInEditor, ticketChanges } from '../../engine/changes.js';
 import { corePrompts } from '../../engine/core-prompts.js';
 import { boardUsage } from '../../board/usage.js';
+import { liveNow } from '../../board/now.js';
+import { readUsual } from '../../board/usual.js';
+import { answerAsk } from '../../board/ask.js';
+import { withProblem } from '../../board/problem.js';
 
 const DAY = 86_400_000;
 
@@ -221,23 +225,46 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     const all = listTickets(bp);
     const recent = listReleases(bp).filter((r) => r.status === 'released' && r.date && Date.now() - Date.parse(r.date) < 30 * DAY);
     const ctl = opts.control;
+    const usual = readUsual(bp);
     return c.json({
       ready: true,
       meta,
       // A newer squad-kit build on disk than the one this board runs: offer a restart.
       console: ctl ? { startedAt: ctl.startedAt, outdated: ctl.build > 0 && buildStamp() > ctl.build } : null,
-      tickets: all.filter((t) => t.stage !== 'done'),
+      // Each ticket with what is happening on it now, in words: the card's line, its time and its usual time.
+      tickets: all.filter((t) => t.stage !== 'done' && !t.archived).map((t) => ({ ...t, now: liveNow(t, usual) })),
+      // Archived tickets leave the board; "Show archived" shows them again.
+      archived: all.filter((t) => t.stage !== 'done' && t.archived),
       stats: {
         released30: recent.reduce((n, r) => n + r.tickets.length, 0),
         bugs30: recent.reduce((n, r) => n + (r.bugs?.length ?? 0), 0),
-        open: all.filter((t) => t.stage !== 'done').length,
+        open: all.filter((t) => t.stage !== 'done' && !t.archived).length,
       },
     });
   });
 
   app.get('/api/v1/tickets/:id', (c) => {
     const t = readTicket(bp, c.req.param('id'));
-    return t ? c.json(t) : c.json({ error: 'not found' }, 404);
+    return t ? c.json({ ...withProblem(t), now: liveNow(t, readUsual(bp)) }) : c.json({ error: 'not found' }, 404);
+  });
+
+  // What is happening on a ticket now, from its live record. Asking about it is answered from the same record, at
+  // once and with no AI cost; anything it cannot answer offers a talk with an agent instead.
+  app.get('/api/v1/tickets/:id/status', (c) => {
+    const t = readTicket(bp, c.req.param('id'));
+    return t ? c.json(liveNow(t, readUsual(bp))) : c.json({ error: 'not found' }, 404);
+  });
+
+  app.post('/api/v1/tickets/:id/status/ask', async (c) => {
+    const b = await body<{ text?: string }>(c);
+    return act(c, () => {
+      const t = readTicket(bp, c.req.param('id'));
+      if (!t) throw new Error(`No ticket ${c.req.param('id').toUpperCase()} on this board.`);
+      const text = (b.text ?? '').trim();
+      if (!text) throw new Error('Write your question first.');
+      const usual = readUsual(bp);
+      return answerAsk(t, liveNow(t, usual), usual, text);
+    });
   });
 
   app.get('/api/v1/tickets/:id/conversations', (c) => {
@@ -364,7 +391,11 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
   app.post('/api/v1/tickets/:id/approve', (c) => act(c, () => approve(bp, c.req.param('id'))));
   app.post('/api/v1/tickets/:id/stop', (c) => act(c, () => stopTicket(bp, c.req.param('id'))));
   app.post('/api/v1/tickets/:id/unstick', (c) => act(c, () => endStuckCommand(bp, c.req.param('id'))));
-  app.post('/api/v1/tickets/:id/keep-waiting', (c) => act(c, () => keepWaiting(bp, c.req.param('id'))));
+  app.post('/api/v1/tickets/:id/keep-waiting', async (c) => {
+    const b = await body<{ minutes?: number }>(c);
+    return act(c, () => keepWaiting(bp, c.req.param('id'), b.minutes ?? 10));
+  });
+  app.post('/api/v1/tickets/:id/restart', (c) => act(c, () => restartStep(bp, c.req.param('id'))));
 
   app.post('/api/v1/tickets/:id/change', async (c) => {
     const b = await body<{ text?: string }>(c);
@@ -531,8 +562,6 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     const meta = readMeta(bp);
     return c.json({ decisions: listDecisions(bp), map: meta.map, lessons: meta.lessons });
   });
-
-  app.get('/api/v1/apps', async (c) => c.json({ apps: boardExists(bp) ? await projectApps(readMeta(bp)) : [] }));
 
   app.post('/api/v1/architecture/read', (c) => act(c, () => readCodeAgain(bp)));
   app.post('/api/v1/architecture/impact', async (c) => {

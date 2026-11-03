@@ -136,8 +136,15 @@ export interface StuckOption extends DecisionOption {
 }
 
 export interface StuckChoice {
+  /** What happened, in plain words. */
   question: string;
   options: StuckOption[];
+  /** The exact error behind it, for engineers: the Developer tab, the app log and Report a problem. */
+  detail?: string;
+  /** Filled in when the ticket is read (see board/problem.ts), never saved: "The Builder stopped". */
+  title?: string;
+  /** Filled in when the ticket is read: what is safe, "Nothing was merged or pushed." */
+  safe?: string[];
   /** What stopped: a failed gate the person can continue past, a clash with the base branch, or any other error. */
   gate?: 'checks' | 'review' | 'proof' | 'merge';
   /** For failed checks: which ones failed, so continuing past them is remembered for them. */
@@ -477,6 +484,65 @@ export interface Ticket {
   owner?: string;
   /** The last hand over. The new owner's squad carries on from the pushed branch, not from the chats. */
   handedOver?: HandOver;
+  /** The step running now: who, since when, and what it does. Shown on the card and the Now tab. */
+  clock?: StepClock;
+  /** How long the ticket spent in each stage, for the tracker under its title. */
+  stageTimes?: StageTimes;
+  /** "Stop and try again": once the running step has stopped, it starts again at once. */
+  retryOnStop?: boolean;
+  /** Archived: a merged or released ticket off the board. Its history stays in git and in `.squad/`. */
+  archived?: { by: string; at: string };
+  /** Delete was pressed. Kept until the last part of the ticket is gone, so a delete cut off half-way can finish. */
+  deleting?: Deleting;
+}
+
+/** A delete in progress: nothing starts on the ticket again, and what runs stops. */
+export interface Deleting {
+  at: string;
+  by: string;
+  /** Also delete the pushed branch on the remote. */
+  remote?: boolean;
+  remoteDone?: boolean;
+  /** A squad in another window stopped its runs on the ticket, so the delete may go on. */
+  stopped?: string;
+  /** Why the last try stopped half-way. */
+  error?: string;
+}
+
+/** A deleted ticket, on this computer: its cost stays in Usage, and its pushed branch does not bring it back. */
+export interface DeletedTicket {
+  id: string;
+  title: string;
+  at: string;
+  by: string;
+  usage?: UsageLine[];
+}
+
+/** The kinds of step squad-kit times. Each has a usual time, learned from the project's own history. */
+export type TimedStep = 'questions' | 'spec' | 'design' | 'build' | 'fix' | 'checks' | 'review' | 'proof';
+
+/**
+ * The step running now. The Builder's clock runs per plan step (`part`, from 1), the others per run. When a step ends
+ * well its time joins the project's usual times, kept on this computer.
+ */
+export interface StepClock {
+  /** The agent working, or squad-kit itself for the checks. */
+  who: AgentName | 'squad';
+  step: TimedStep;
+  since: string;
+  part?: number;
+  /** The latest action, in plain words, and when it happened: the step's last progress. */
+  doing?: string;
+  doingAt?: string;
+  /** The hard limit of the run, in minutes: squad-kit stops the step there and keeps the work. */
+  limit?: number;
+}
+
+/** The stage the ticket is in since when, and the seconds it spent in each stage before. */
+export interface StageTimes {
+  stage: Stage;
+  since: string;
+  spent: Partial<Record<Stage, number>>;
 }
 
 export interface HandOver {
@@ -633,6 +699,8 @@ export interface BoardMeta {
   runner?: 'acp' | 'direct';
   /** What the squad used on the project's own work, with no ticket: reading the project, filling in new tickets. */
   usage?: UsageLine[];
+  /** Tickets deleted on this computer, with what they used. */
+  deleted?: DeletedTicket[];
   /**
    * A workspace that holds several code repos (each with its own git). Without it, the project
    * folder itself is the one repo, using `commands` and `git`.

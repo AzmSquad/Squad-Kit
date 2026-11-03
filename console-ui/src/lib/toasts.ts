@@ -3,6 +3,8 @@ export interface Toast {
   id: number;
   text: string;
   kind: 'ok' | 'err';
+  /** An error's way out: the same action once more. */
+  retry?: () => void;
 }
 
 /**

@@ -9,6 +9,7 @@ import { runningConsole, writeConsoleInfo, type ConsoleInfo } from '../board/con
 import { inbox } from '../board/actions.js';
 import type { Ticket } from '../board/types.js';
 import { LiveSquad } from '../engine/live.js';
+import { stopApps } from '../engine/run-app.js';
 import { prepareProject } from '../engine/setup.js';
 import { forgetProject, projectName, readProjects, rememberProject } from '../core/projects.js';
 import { mountApi, type MountApiOptions } from './api/index.js';
@@ -141,6 +142,8 @@ export class OpenProjects {
       close: () => {
         stopTimer();
         stopLive();
+        // The apps squad-kit started for the project stop with its board, the whole process group.
+        stopApps(bp);
         releaseLock();
         writeConsoleInfo(bp, { ...this.opts.info(), pid: null });
       },

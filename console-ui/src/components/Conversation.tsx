@@ -126,7 +126,7 @@ function MessageAgent({ t, to }: { t: Ticket; to: keyof typeof AGENT_NAME }) {
   if (t.stage === 'done') return null;
   const send = () =>
     act.mutate(
-      { path: `/api/v1/tickets/${t.id}/notes`, body: { text, to }, done: `Sent. The ${AGENT_NAME[to]} reads it at its next step.` },
+      { path: `/api/v1/tickets/${t.id}/notes`, body: { text, to }, done: `Sent. ${t.now?.noteWhen ?? `The ${AGENT_NAME[to]} reads it at its next step.`}` },
       { onSuccess: () => setText('') },
     );
   return (

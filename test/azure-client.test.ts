@@ -167,5 +167,8 @@ describe('Azure helpers', () => {
 
   it('turns Azure HTML into plain text', () => {
     expect(htmlToText('<div>One<br>Two</div><ul><li>A</li><li>B</li></ul>')).toBe('One\nTwo\n- A\n- B');
+    // No tag is left, however tags nest; a written &lt; stays as text.
+    expect(htmlToText('<p>a<<b>>b <scr<i>ipt>c</p>')).toBe('a>b ipt>c');
+    expect(htmlToText('<p>&amp;lt;b&amp;gt; is &lt;b&gt;</p>')).toBe('&lt;b&gt; is <b>');
   });
 });

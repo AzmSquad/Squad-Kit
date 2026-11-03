@@ -1,0 +1,133 @@
+import type { BoardPaths } from './store.js';
+import type { AgentName, Stage, StepClock, Ticket, TimedStep } from './types.js';
+import { minutesWords, recordUsual, usualKey, usualOf, type Usual, type UsualBook } from './usual.js';
+
+/**
+ * The clock of the step running on a ticket. The engines start it when a step starts, move it on with the Builder's
+ * plan steps, write the latest action into it, and end it when the step ends well, which adds the step's time to the
+ * project's usual times. The board, the terminal and the Ask box all read it from the ticket.
+ */
+
+export const WHO: Record<AgentName | 'squad', string> = {
+  analyst: 'Analyst',
+  architect: 'Architect',
+  builder: 'Builder',
+  reviewer: 'Reviewer',
+  tester: 'Tester',
+  squad: 'squad-kit',
+};
+
+function iso(at: number): string {
+  return new Date(at).toISOString();
+}
+
+/** The first plan step not done yet, from 1. */
+function firstOpenStep(t: Ticket): number | undefined {
+  const steps = t.steps ?? [];
+  if (!steps.length) return undefined;
+  const i = steps.findIndex((s) => s.status !== 'done');
+  return i >= 0 ? i + 1 : steps.length;
+}
+
+const TIMED = new Set<string>(['questions', 'spec', 'design', 'build', 'fix', 'checks', 'review', 'proof']);
+
+/** The step of a run, when it is one squad-kit times. */
+export function timedStep(step: string | undefined): TimedStep | null {
+  return step && TIMED.has(step) ? (step as TimedStep) : null;
+}
+
+/**
+ * A step starts. One already on the clock goes on with its time (the Tester's clock starts with the app, before the
+ * Tester itself). A run while the ticket waits for you (an answer about one of its questions) is not a step.
+ */
+export function startStep(t: Ticket, c: Omit<StepClock, 'since'>, at = Date.now()): void {
+  if (t.waiting) return;
+  const same = t.clock?.who === c.who && t.clock.step === c.step ? t.clock : undefined;
+  const part = c.part ?? same?.part ?? (c.who === 'builder' && c.step === 'build' ? firstOpenStep(t) : undefined);
+  const limit = c.limit ?? same?.limit;
+  t.clock = {
+    ...same,
+    who: c.who,
+    step: c.step,
+    since: same?.since ?? iso(at),
+    ...(part ? { part } : {}),
+    ...(limit ? { limit } : {}),
+  };
+}
+
+/** Seconds the step on the clock has run. */
+export function stepSeconds(c: StepClock, at = Date.now()): number {
+  return Math.max(0, (at - Date.parse(c.since)) / 1000);
+}
+
+/** The step ended well: its time joins the usual times, and the clock stops. */
+export function endStep(bp: BoardPaths, t: Ticket, at = Date.now()): void {
+  const c = t.clock;
+  if (!c) return;
+  recordUsual(bp, usualKey(c.who, c.step, t.track), stepSeconds(c, at));
+  delete t.clock;
+}
+
+/** The Builder moved on to plan step `part` (from 1): the one before counts as done, and its clock starts again. */
+export function nextPart(bp: BoardPaths, t: Ticket, part: number, at = Date.now()): void {
+  const c = t.clock;
+  if (!c || c.step !== 'build' || c.part === part) return;
+  if (c.part !== undefined && part > c.part) recordUsual(bp, usualKey(c.who, c.step, t.track), stepSeconds(c, at));
+  c.part = part;
+  c.since = iso(at);
+}
+
+/** The step's latest action, in plain words: its last progress. */
+export function stepDoing(t: Ticket, line: string, at = Date.now()): void {
+  if (!t.clock || !line) return;
+  t.clock.doing = line;
+  t.clock.doingAt = iso(at);
+}
+
+/**
+ * Keeps how long the ticket spends in each stage, for the tracker under its title. A ticket from before this was kept
+ * starts counting now, so a stage it was in for hours never shows the wrong time.
+ */
+export function trackStage(t: Ticket, before: Stage, at = Date.now()): void {
+  const st = t.stageTimes ?? { stage: before, since: before === 'tickets' || before === 'bugs' ? t.createdAt : iso(at), spent: {} };
+  if (st.stage !== t.stage) {
+    const secs = Math.max(0, Math.round((at - Date.parse(st.since)) / 1000));
+    st.spent = { ...st.spent, [st.stage]: (st.spent[st.stage] ?? 0) + (Number.isFinite(secs) ? secs : 0) };
+    st.stage = t.stage;
+    st.since = iso(at);
+  }
+  t.stageTimes = st;
+}
+
+/** Never call a step slow before this, whatever its usual time: a step that usually takes seconds may take a few minutes. */
+export const SLOW_FLOOR_S = 5 * 60;
+
+/** "under a minute", "about 1 minute", "3 to 6 minutes". */
+export function usualSentence(u: Pick<Usual, 'low' | 'high'>): string {
+  if (u.high < 60) return 'under a minute';
+  const low = Math.max(1, Math.round(u.low / 60));
+  const high = Math.max(low, Math.round(u.high / 60));
+  return low === high ? `about ${low} minute${low === 1 ? '' : 's'}` : `${low} to ${high} minutes`;
+}
+
+/** When a step counts as slow: twice its usual time, and never before the floor. */
+export function slowAfter(u: Pick<Usual, 'high'>): number {
+  return Math.max(2 * u.high, SLOW_FLOOR_S);
+}
+
+/**
+ * Past twice its usual time a step is taking longer than usual, and the card says so in words. Null while the step
+ * is within its time, or when nothing on the ticket is timed.
+ */
+export function slowStep(t: Ticket, book: UsualBook, at = Date.now()): NonNullable<Ticket['quiet']> | null {
+  const c = t.clock;
+  if (!c || t.waiting) return null;
+  const u = usualOf(book, c.who, c.step, t.track);
+  const secs = stepSeconds(c, at);
+  if (secs < slowAfter(u)) return null;
+  const detail =
+    c.who === 'squad'
+      ? `The checks have been running for ${minutesWords(secs)}. They usually take ${usualSentence(u)}.`
+      : `The ${WHO[c.who]} has been on this step for ${minutesWords(secs)}. It usually takes ${usualSentence(u)}.`;
+  return { since: c.since, kind: 'long', detail };
+}

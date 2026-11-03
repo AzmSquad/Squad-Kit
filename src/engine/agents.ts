@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { BoardPaths } from '../board/store.js';
 import { AI_TOOLS } from '../modules/registry.js';
 import { DEFAULT_LEVELS, parseEffort, parseLevel, type LevelChoice, type LevelOverrides } from './levels.js';
+import { withoutComments } from '../utils/text.js';
 
 /**
  * One agent per role, each defined by a small file the team can read and edit: which AI tool runs it, an optional
@@ -168,7 +169,7 @@ export function writeAgent(bp: BoardPaths, role: AgentRole, change: Partial<Omit
  * the core prompt and never replace it. Comments in the file are left out.
  */
 export function agentInstructions(a: Agent, step?: string): string {
-  const clean = (x: string | undefined) => (x ?? '').replace(/<!--[\s\S]*?-->/g, '').trim();
+  const clean = (x: string | undefined) => withoutComments(x ?? '').trim();
   const general = clean(a.instructions);
   const forStep = step ? clean(a.steps[step]) : '';
   const name = AGENTS.find((x) => x.role === a.role)!.name;

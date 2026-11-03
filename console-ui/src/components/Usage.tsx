@@ -211,7 +211,9 @@ export function SquadUsage() {
       <h2 style={{ marginTop: 30 }}>What the squad used</h2>
       <p className="note" style={{ marginTop: 2 }}>
         Every ticket on this computer ({u.tickets} so far) and the project's own work, like reading the project and filling in new tickets
-        {u.project.runs ? ` (${money(u.project) ?? 'cost not reported'})` : ''}. {AT_API_PRICES} Change a role's model level with its Edit button above.
+        {u.project.runs ? ` (${money(u.project) ?? 'cost not reported'})` : ''}
+        {u.deleted?.tickets ? `, and ${u.deleted.tickets} deleted ${u.deleted.tickets === 1 ? 'ticket' : 'tickets'} (${money(u.deleted.total) ?? 'cost not reported'})` : ''}. {AT_API_PRICES} Change a role's
+        model level with its Edit button above.
       </p>
       <div style={{ marginTop: 10 }}>
         <UsageTable roles={u.roles} total={u.total} />

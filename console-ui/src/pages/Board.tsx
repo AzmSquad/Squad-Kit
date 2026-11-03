@@ -6,11 +6,14 @@ import { api } from '../api/client';
 import type { Actor, DraftJob, Stage, Ticket, TrackerStatus } from '../api/types';
 import { useAct, useBoard } from '../lib/data';
 import { BugDialog, NewTicketDialog, PullDialog } from '../components/dialogs';
-import { Cmd, Glyph, STAGE_NAME, actionLabel, outdatedLine } from '../components/ui';
+import { Cmd, Glyph, STAGE_NAME } from '../components/ui';
 import { TicketDrawer } from './TicketDrawer';
 import { BoardCost } from '../components/Usage';
 import { isMine, ownerOf, useMe } from '../components/HandOver';
 import { changeWaits, openChange } from '../components/ChangeCard';
+import { CardLine, isRunning } from '../components/LiveNow';
+import { ReportButton } from '../components/Report';
+import { needsYou } from '../lib/waiting';
 
 const LANES: { stage: Stage; role: Actor; who: string }[] = [
   { stage: 'tickets', role: 'analyst', who: 'Analyst' },
@@ -30,6 +33,7 @@ export function BoardPage() {
   const navigate = useNavigate({ from: '/board' });
   const [dialog, setDialog] = useState<'new' | 'pull' | 'bug' | null>(null);
   const [query, setQuery] = useState('');
+  const [showArchived, setShowArchived] = useState(false);
   // A draft from an idea waits under New ticket after the dialog closes; the button says so.
   const kept = useQuery({
     queryKey: ['ticket-draft-current'],
@@ -44,23 +48,21 @@ export function BoardPage() {
 
   const data = board.data?.ready ? board.data : null;
   const tickets = useMemo(() => {
-    const all = data?.tickets ?? [];
+    const all = [...(data?.tickets ?? []), ...(showArchived ? (data?.archived ?? []) : [])];
     const q = query.trim().toLowerCase();
     return all.filter((t) => {
       if (view === 'bugs' && t.kind !== 'bug') return false;
       if (view === 'mine' && !isMine(t, data?.meta.user?.name)) return false;
       return !q || t.title.toLowerCase().includes(q) || t.id.toLowerCase().includes(q);
     });
-  }, [data, query, view]);
+  }, [data, query, view, showArchived]);
 
   if (board.isLoading) return <div className="center">Loading the board…</div>;
   if (!data) return <NoBoard />;
 
-  const ORDER = ['chat', 'ask', 'questions', 'spec', 'plan', 'change', 'stuck', 'proof', 'yours', 'release'];
-  // A step that looks stuck needs the person as much as a question does, so it comes first.
-  const waiting = data.tickets
-    .filter((t) => t.waiting || t.quiet?.kind === 'stuck' || t.outdated?.length || changeWaits(t))
-    .sort((a, b) => (a.waiting ? ORDER.indexOf(a.waiting.kind) : -1) - (b.waiting ? ORDER.indexOf(b.waiting.kind) : -1));
+  // What needs the person shows in the banner at the top of every page. Here: setup, the first ticket, or all calm.
+  const setup = data.meta.engine === 'live' && Boolean(data.meta.scan && data.meta.scan.status !== 'done');
+  const waiting = data.tickets.filter(needsYou);
 
   return (
     <>
@@ -85,56 +87,34 @@ export function BoardPage() {
         </button>
       </div>
 
-      <section className="waiting" aria-label="Waiting for you">
-        <div className="wh">
-          <h2>
-            Waiting for you {waiting.length > 0 && <span className="count">{waiting.length}</span>}
-          </h2>
-          <p>{waiting.length ? 'Everything else is handled by the squad.' : ''}</p>
-          <span className="grow" />
-          {waiting.length > 3 && (
-            <Link to="/inbox" className="btn sm">
-              See all {waiting.length}
-            </Link>
-          )}
-          <Cmd text="squad inbox" />
-        </div>
-        {data.meta.engine === 'live' && data.meta.scan && data.meta.scan.status !== 'done' ? (
-          <ScanState meta={data.meta} />
-        ) : data.meta.engine === 'live' && data.tickets.length === 0 ? (
-          <div className="calmlane">
-            <span className="glyph"><Plus size={14} strokeWidth={2.5} /></span>
-            <span>
-              <b>Start with your first ticket.</b> Write what you want in plain words. The squad asks what it needs to know.
-            </span>
-            <span className="grow" style={{ flex: 1 }} />
-            <button className="btn pri sm" onClick={() => setDialog('new')}>
-              <Plus size={14} /> New ticket
-            </button>
+      {(setup || waiting.length === 0) && (
+        <section className="waiting" aria-label="Waiting for you">
+          <div className="wh">
+            <h2>Waiting for you</h2>
+            <span className="grow" />
+            <Cmd text="squad inbox" />
           </div>
-        ) : waiting.length === 0 ? (
-          <div className="calmlane">
-            <span className="glyph"><Check size={14} strokeWidth={2.5} /></span>
-            <span><b>Nothing needs you right now.</b> The squad is working. New questions and approvals show up here.</span>
-          </div>
-        ) : (
-          <div className="wcards">
-            {waiting.slice(0, 3).map((t) => (
-              <button key={t.id} className="wcard" onClick={() => open(t.id)}>
-                <div className="grow">
-                  <div className="meta">
-                    <span className="id">{t.id}</span>
-                    <span>{STAGE_NAME[t.stage]}</span>
-                  </div>
-                  <h3>{t.title}</h3>
-                  <p>{t.waiting?.summary ?? (changeWaits(t) ? `Change ${openChange(t)!.id} to the spec waits for you` : t.outdated?.length ? outdatedLine(t) : 'Looks stuck. Check what it is waiting on')}</p>
-                </div>
-                <span className="btn sm pri">{t.waiting ? actionLabel(t) : changeWaits(t) ? 'Check the change' : 'Check it'}</span>
+          {setup ? (
+            <ScanState meta={data.meta} />
+          ) : data.meta.engine === 'live' && data.tickets.length === 0 ? (
+            <div className="calmlane">
+              <span className="glyph"><Plus size={14} strokeWidth={2.5} /></span>
+              <span>
+                <b>Start with your first ticket.</b> Write what you want in plain words. The squad asks what it needs to know.
+              </span>
+              <span className="grow" style={{ flex: 1 }} />
+              <button className="btn pri sm" onClick={() => setDialog('new')}>
+                <Plus size={14} /> New ticket
               </button>
-            ))}
-          </div>
-        )}
-      </section>
+            </div>
+          ) : (
+            <div className="calmlane">
+              <span className="glyph"><Check size={14} strokeWidth={2.5} /></span>
+              <span><b>Nothing needs you right now.</b> The squad is working. New questions and approvals show up at the top of every page.</span>
+            </div>
+          )}
+        </section>
+      )}
 
       <div className="board">
         {LANES.map((lane) => {
@@ -170,6 +150,11 @@ export function BoardPage() {
         </span>
         <BoardCost />
         <span className="grow" />
+        {(data.archived?.length ?? 0) > 0 && (
+          <button className="btn sm quiet" title="squad board --archived" onClick={() => setShowArchived(!showArchived)}>
+            {showArchived ? 'Hide archived' : `Show archived (${data.archived!.length})`}
+          </button>
+        )}
         <button className="btn sm quiet" onClick={() => setDialog('bug')}>Report a bug</button>
       </div>
 
@@ -191,16 +176,24 @@ function Card({ t, selected, onOpen }: { t: Ticket; selected: boolean; onOpen():
         {t.track === 'express' && <span className="prio express">Express</span>}
         {you ? <span className="youtag">You</span> : t.kind === 'bug' ? <span className="prio">Bug</span> : t.priority === 'high' ? <span className="prio">High</span> : null}
         {me && !isMine(t, me) && <span className="prio owner" title="Their squad works on it">{ownerOf(t)}</span>}
+        {t.archived && <span className="prio owner">Archived</span>}
       </div>
       <h4>{t.title}</h4>
-      <div className="st">
-        {t.live && !you ? <span className="live" /> : t.stage === 'release' ? <Check size={13} strokeWidth={2.5} /> : null}
-        <span>{t.quiet ? (t.quiet.kind === 'stuck' ? `Looks stuck: ${t.quiet.command ?? 'no progress'}` : `Taking long: ${t.quiet.command ?? t.status}`) : t.status}</span>
-      </div>
-      {typeof t.progress === 'number' && !you && (
-        <div className="bar">
-          <i style={{ width: `${t.progress}%` }} />
-        </div>
+      {/* Running: who, which step, what it does, how long and the usual time, with the step bar. */}
+      {isRunning(t) && !you ? (
+        <CardLine t={t} />
+      ) : (
+        <>
+          <div className="st">
+            {t.live && !you ? <span className="live" /> : t.stage === 'release' ? <Check size={13} strokeWidth={2.5} /> : null}
+            <span>{t.quiet ? (t.quiet.kind === 'stuck' ? `Looks stuck: ${t.quiet.command ?? 'no progress'}` : `Taking long: ${t.quiet.command ?? t.status}`) : t.status}</span>
+          </div>
+          {typeof t.progress === 'number' && !you && (
+            <div className="bar">
+              <i style={{ width: `${t.progress}%` }} />
+            </div>
+          )}
+        </>
       )}
     </button>
   );
@@ -249,9 +242,12 @@ function ScanState({ meta }: { meta: BoardResponseMeta }) {
     <div className="setup">
       <div className="setup-head">
         <b>{failed ? 'The Architect could not read the project.' : 'Setting up your project'}</b>
-        <span>{failed ? 'Fix what the step below says, then try again.' : 'The Architect maps the project and finds how to test and run it. This takes a few minutes.'}</span>
+        <span>{failed ? 'Fix what the step below says, then try again. Nothing was lost: your project files are as they were.' : 'The Architect maps the project and finds how to test and run it. This takes a few minutes.'}</span>
         {failed && (
-          <button className="btn sm" onClick={() => act.mutate({ path: '/api/v1/scan', done: 'Reading the project again' })}>Try again</button>
+          <span className="drafterr-ways">
+            <button className="btn sm pri" onClick={() => act.mutate({ path: '/api/v1/scan', done: 'Reading the project again' })}>Try again</button>
+            <ReportButton small />
+          </span>
         )}
       </div>
       <ol className="setup-steps">

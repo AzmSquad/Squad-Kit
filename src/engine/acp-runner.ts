@@ -309,7 +309,9 @@ export async function runAcp(launch: AcpLaunch, opts: AcpRunOptions): Promise<Ag
   } catch (err) {
     if (err instanceof AcpStartError) throw err;
     const why = err instanceof TookTooLong ? err.message : launch.explain(`${(err as Error).message}\n${stderr}`);
-    return { ok: false, sessionId, text: lastText, error: stoppedBy ?? why, ...used() };
+    // The exact words stay for engineers: the Developer tab, the app log and Report a problem.
+    const detail = `${(err as Error).message}\n${stderr.slice(-1500)}`.trim();
+    return { ok: false, sessionId, text: lastText, error: stoppedBy ?? why, ...(stoppedBy ? {} : { detail }), ...used() };
   } finally {
     clearTimeout(timer);
     opts.signal?.removeEventListener('abort', onStop);

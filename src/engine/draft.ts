@@ -14,6 +14,8 @@ import { rulesFiles } from './repos.js';
 import * as P from './prompts.js';
 import { prepareMedia } from './media.js';
 import { recordUsage } from '../board/usage.js';
+import { startPause } from './usage-limit.js';
+import { log } from '../core/app-log.js';
 
 /** A ticket the Analyst filled in from a pasted idea or chat message. Nothing is saved until the person creates it. */
 export interface TicketDraft extends TicketBrief {
@@ -247,6 +249,12 @@ async function runAnalyst(bp: BoardPaths, opts: AgentRun): Promise<AgentResult> 
   });
   // A new ticket does not exist yet: the run counts on the project's own line.
   recordUsage(bp, undefined, { role: 'analyst', step: 'draft', level: lv.level, model: lv.model || tool.modelFor(lv.level) }, r.usage);
+  if (!r.ok) {
+    const project = readMeta(bp).project;
+    // The account's usage limit holds the whole queue too, not only this draft.
+    if (r.limit) startPause(r.limit, { project });
+    log.warn(`The Analyst could not fill in a new ticket: ${r.detail ?? r.error ?? 'no answer'}`, { project });
+  }
   if (!r.ok || !r.structured) throw new BoardActionError(r.error ?? 'The Analyst did not fill in the ticket. Try again.');
   return r;
 }

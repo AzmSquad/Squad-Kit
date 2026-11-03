@@ -32,7 +32,8 @@ The first page. It has:
 
 - **Projects**: one card per project, with its folder, how many tickets are open and working, and how many
   wait for you. **Open board** opens it. **Remove** takes it out of the app; its files stay in its folder.
-- **Waiting for you**: what every project needs from you, in one list, each with the button to act on it.
+- **Waiting for you**: what every project needs from you, in one list, each with the button to act on it. A
+  banner at the top shows the first ones, and the browser tab shows the count: "(3) squad-kit".
 - **Add project**: a folder browser inside the page. It says what kind of folder you picked (empty, code,
   several repos, already a squad-kit project) and what will happen. **New folder here** makes a folder for a
   new project.
@@ -47,16 +48,40 @@ Each project has its own board. The sidebar has the project's pages: **Board**, 
 you**, **Releases**, **Architecture**, **Bugs**, **Squad and AI** and **Settings**. Click the project name or the
 logo to go back to Home.
 
+On every page of a project:
+
+- **The Waiting for you banner**, at the top: the first two things that need you, each with its button
+  (Answer, Review spec, Check proof, Decide), and "and N more". The browser tab shows the count: "(2) roomflow".
+  Everything else, the squad handles.
+- **Desktop notices**, if you turn them on (the banner asks once; Settings › Desktop notices changes it): one
+  notice for each new question, approval, proof or stop. No sound. Clicking a notice opens the ticket.
+- **Claude's usage limit**: when it is reached, a banner says when the squad carries on, by itself. **Try now**
+  carries on at once (`squad try-now`).
+
+On a phone the sidebar folds away behind the menu button at the top.
+
 On the board:
 
-- **Waiting for you**, at the top: the cards that need you. Everything else, the squad handles.
 - **The columns**: Tickets (Analyst), Specs (Architect), Implement (Builder), Test (squad-kit runs the
-  checks), Review (Reviewer), Release, and Bugs. Each card shows what the squad does now, with a progress bar.
+  checks), Review (Reviewer), Release, and Bugs. Each card says what is happening in plain words, for example
+  "Builder · step 3 of 6 · editing the booking page", with how long it has run, how long that step usually takes
+  on this project, and a step bar. A ticket over the limit of tickets at once says "Next in line: starts when a
+  slot is free". A slow step says "Taking longer than usual".
 - **All tickets**, **Mine** and **Bugs** filter the cards. **Search tickets** finds one.
 - **New ticket** writes a ticket in plain words. **Pull from Azure DevOps** brings in a work item (or
   **Connect a tracker**, when there is none).
 - **The footer**: tickets released and bugs found in the last 30 days, open tickets, what the squad used, and
   **Report a bug**.
+- **Show archived**, under the board: archived tickets, each with **Unarchive**.
+
+**Your apps**, in the sidebar: each app of the project with its state (Not running, Starting, Running at its
+address, Stopped, Failed with the reason) and **Start**, **Open**, **Restart** and **Stop**. squad-kit runs the
+app from its own copy of `main` on this computer, never your own folder, and brings that copy up to date first
+(running the setup command when the dependencies changed). Your `.env` files come along: squad-kit copies them from
+your project folder into its copy each time, readable by you only. **Show output** has the last lines it printed. After
+**Looks right**, "RO-6 is in main" offers **Run the new version**. A busy port gets a plain message, and the fix
+when there is one. With no start command known: **Ask the Architect to find it**, or **Type it**. Closing or
+restarting squad-kit stops the apps it started. Terminal: `squad app start|stop|restart|status|set|find`.
 
 A new project shows a **Setting up your project** card while the Architect reads it.
 
@@ -70,7 +95,7 @@ The tabs:
 
 | Tab | What it shows |
 | --- | --- |
-| **Now** | What happens now, and what you can do: answer, approve, check, decide. |
+| **Now** | What happens now in one sentence, how long it has run against the usual time, what comes next, and what you can do: answer, approve, check, decide. **Ask about this ticket**: status questions are answered at once, in English or Arabic, at no AI cost; a question that would change the work offers **Propose a change** or a note the agent reads at its next step. |
 | **Story** | The ask as written, the spec, and notes. Add a note, a business rule or a "done when" item; every agent on the ticket reads it. |
 | **Plan** | The design: the decision and the steps. |
 | **Activity** | Everything that happened, with who and when. |
@@ -78,7 +103,33 @@ The tabs:
 | **Proof** | Each "done when" with its screenshot, and the checks and review results. |
 | **Changes** | What the ticket changed against main, file by file, from the squad's copy of the code. |
 | **Cost** | What each role used on this ticket: runs, tokens, and the cost at API prices. |
-| **Developer** | The branch, the squad's copy of the code, the files it touched, and the commands to open it yourself. |
+| **Developer** | The branch, the squad's copy of the code, the files it touched, the exact error when a step stopped, and the commands to open it yourself. |
+
+**A slow step** gets a card on the Now tab: **Taking longer than usual** (past twice the usual time) with what it
+is doing, its last progress and when squad-kit stops it, and **Give it 10 more minutes**, **Stop and try again**
+and **Stop**. **Looks stuck** (no progress for a while) says what squad-kit checked and offers **End the stuck
+command**. Terminal: `squad wait <ticket> --more 10m`, `squad stop <ticket> --again`, `squad unstick <ticket>`.
+
+**A stopped step** gets a card that says what happened, what is safe ("Nothing was merged or pushed"), and the ways
+out: **Try again**, **Fix it yourself**, **Continue anyway** (with a reason), **Send it back to the plan**, and
+**Report a problem**.
+
+The **…** menu at the top has **Delete** for a ticket that is not merged, and **Archive** for a merged or released
+one. The dialog lists what is removed and what stays:
+
+- **Delete** stops the squad on it, then removes its copy of the code, its branch, its files in `.squad/tickets/`,
+  its decisions that are not merged, its chats and screenshots. The tracker item stays (only the link goes), and
+  its cost stays in Usage. A pushed branch stays on the remote unless you tick the box. If it stops half-way,
+  **Delete again** finishes it. Only the ticket's owner can delete it, and not while it is in a release being made.
+- **Archive** takes it off the board. Its history stays in git and in `.squad/`.
+
+Terminal: `squad delete <ticket> [--remote] [--yes]`, `squad archive <ticket> [--undo]`, `squad board --archived`.
+
+**Report a problem** (the life-buoy at the top, every error card, the Developer tab and Settings) saves one `.zip`
+in your Downloads folder: a README, the versions (squad-kit, Node, git, the OS, the AI tool), the ticket's state,
+its conversations (without pictures), the project's settings and ticket list, and the last 24 hours of the app log.
+It never holds sign-ins, the board's token, `.env` files or anything that looks like a key. Send it to whoever helps
+you with squad-kit. Terminal: `squad report [ticket] [--note "what happened"]`.
 
 ## Chat
 
@@ -143,6 +194,10 @@ Terminal: `squad config set quality best`, `squad agent builder`, `squad agent b
 - **Theme** and **Terminal commands** (show or hide the command beside each button).
 - **Board**: **Restart the board**, on the same link. Running work picks up where it stopped.
 - **Tickets at once**: from 1 to 5, for all your projects.
+- **Desktop notices**: on or off, for this browser. If the browser blocked them, it says how to allow them.
+- **Report a problem**: a report for the whole app, without a ticket. The app log is in `~/.squad-kit/logs/`,
+  one file a day with every step, stop and error (never a key or a prompt), kept 14 days. Errors also print in the
+  terminal that runs the app. Terminal: `squad logs`, `squad logs --tail`.
 - **Talk to Claude**: through the Agent Client Protocol (ACP, the open standard for agents), or directly. If
   ACP cannot start, a step runs Claude Code directly.
 - **Azure DevOps**: organization, project and token, then **Save and check**. Your token stays on this

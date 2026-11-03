@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { Bug, Check, Loader2, PencilLine, Plus, TriangleAlert } from 'lucide-react';
 import type { AgentName, ChangePart, SpecChange, Ticket } from '../api/types';
 import { useAct } from '../lib/data';
+import { changeWaits, openChange } from '../lib/waiting';
+import { shellQuote } from '../lib/text';
 import { Cmd, Modal } from './ui';
 
 /**
@@ -11,17 +13,8 @@ import { Cmd, Modal } from './ui';
  * linked ticket or a bug report.
  */
 
-/** The change still open on a ticket, if any. There is at most one. */
-export function openChange(t: Ticket): SpecChange | undefined {
-  const c = t.changes?.at(-1);
-  return c && c.status !== 'done' && c.status !== 'declined' ? c : undefined;
-}
-
-/** A change waits for the person: the Analyst's proposal, one it could not write, or a big change's design update. */
-export function changeWaits(t: Ticket): boolean {
-  const s = openChange(t)?.status;
-  return s === 'proposed' || s === 'failed' || s === 'design-ready';
-}
+// The open change and whether it waits for the person live with the rest of Waiting for you.
+export { changeWaits, openChange };
 
 /** Accepted (merged, or waiting for its release) or released: the work is for questions only. */
 export function shipped(t: Ticket): boolean {
@@ -262,7 +255,7 @@ export function ProposeChange({ t, initial = '', from, onClose }: { t: Ticket; i
   const done = shipped(t);
   const open = openChange(t);
   const ready = Boolean(text.trim()) && !act.isPending;
-  const quoted = `"${text.trim().replace(/"/g, '\\"') || '…'}"`;
+  const quoted = shellQuote(text.trim() || '…');
   const after = (as: 'ticket' | 'bug') =>
     act.mutate(
       { path: `/api/v1/tickets/${t.id}/spec-change/new-ticket`, body: { text, as }, done: as === 'bug' ? `Reported a bug, linked to ${t.id}.` : `Made a new ticket, linked to ${t.id}.` },

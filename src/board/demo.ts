@@ -87,6 +87,8 @@ function demoTickets(user: string): Ticket[] {
         { title: 'Tests for every "done when"', status: 'done', minutes: 3 },
       ],
       gates: { checks: 'pass', checksText: '18 of 18 checks pass', review: 'pass', reviewBy: 'Claude', proof: 'pass' },
+      specApproved: { by: 'Momen', at: ago(30) },
+      stageTimes: { stage: 'review', since: ago(12), spent: { tickets: 35, specs: 250, implement: 960, test: 140 } },
       proof: [
         {
           criterion: 'Typing a full case number opens the case',
@@ -127,8 +129,15 @@ function demoTickets(user: string): Ticket[] {
       live: true,
       status: 'Reviewer is reading the login changes',
       squad: null,
+      clock: { who: 'reviewer', step: 'review', since: ago(1.2), limit: 15 },
     }),
-    base('SK-146', 'Filter cases by court', { stage: 'test', live: true, progress: 67, status: 'Running checks for the court filter' }),
+    base('SK-146', 'Filter cases by court', {
+      stage: 'test',
+      live: true,
+      progress: 67,
+      status: 'Running checks for the court filter',
+      clock: { who: 'squad', step: 'checks', since: ago(0.8), limit: 15 },
+    }),
     base('SK-147', 'Export case lists to PDF', {
       stage: 'release',
       release: 'v2.4.0',
@@ -169,8 +178,38 @@ function demoTickets(user: string): Ticket[] {
         [12, 'builder', 'Finished step 2: Build case notes autosave'],
       ]),
     }),
-    base('SK-151', 'Print the hearing schedule', { stage: 'tickets', live: true, status: 'Analyst is reading the ticket' }),
-    base('SK-153', 'Upload limit message', { stage: 'implement', live: true, progress: 66, status: 'Step 4 of 6 with Codex' }),
+    base('SK-151', 'Print the hearing schedule', {
+      stage: 'tickets',
+      live: true,
+      status: 'Analyst is reading the ticket',
+      clock: { who: 'analyst', step: 'questions', since: ago(0.6), limit: 10 },
+    }),
+    // A step that is taking longer than usual, to show the card with its ways on.
+    base('SK-153', 'Upload limit message', {
+      stage: 'implement',
+      live: true,
+      progress: 50,
+      status: 'Editing web/src/app/upload/upload.component.ts',
+      specApproved: { by: 'Momen', at: ago(30) },
+      work: { steps: 6, tests: 5, screens: 2 },
+      steps: [
+        { title: 'Read the upload code', status: 'done', minutes: 3 },
+        { title: 'Keep the limit in one setting', status: 'done', minutes: 4 },
+        { title: 'Check the size before uploading', status: 'done', minutes: 3 },
+        { title: 'Show the limit in plain words', status: 'doing', live: 'Editing web/src/app/upload/upload.component.ts' },
+        { title: 'Same check in the API', status: 'todo' },
+        { title: 'Tests for every "done when"', status: 'todo' },
+      ],
+      clock: { who: 'builder', step: 'build', part: 4, since: ago(14), doing: 'Editing web/src/app/upload/upload.component.ts', doingAt: ago(0.6), limit: 60 },
+      stageTimes: { stage: 'implement', since: ago(24), spent: { tickets: 40, specs: 290 } },
+      activity: log([
+        [14, 'builder', 'Started step 4: Show the limit in plain words'],
+        [14, 'builder', 'Finished step 3: Check the size before uploading'],
+        [17, 'builder', 'Finished step 2: Keep the limit in one setting'],
+        [21, 'builder', 'Finished step 1: Read the upload code'],
+        [24, 'builder', 'Started building'],
+      ]),
+    }),
   ];
 }
 

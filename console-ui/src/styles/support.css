@@ -1,0 +1,24 @@
+/* When something goes wrong (phase 10): the error card, Report a problem and the exact error. */
+.errcard { gap: 12px; margin-bottom: 0; }
+.errcard .errcard-title { font-size: 17px; }
+.errcard-what { font-size: 15px; line-height: 1.5; overflow-wrap: anywhere; }
+.safe-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.safe-list li { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; line-height: 1.45; }
+.safe-list svg { flex: none; margin-top: 2px; color: var(--accent); }
+.errcard-lbl { font-size: 14px; font-weight: 650; }
+.errcard-hint { font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+.errcard-hint .linkbtn { margin: 0 6px 0 0; }
+.errcard-confirm { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+.errcard-cmd { margin-top: 12px; }
+.exact-err { margin: 0; padding: 10px 12px; max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 500 12px 'JetBrains Mono', monospace; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; color: var(--text); }
+.report-never { background: var(--surface-2); border-radius: 10px; padding: 10px 12px; font-size: 13px; line-height: 1.5; margin-top: 14px; }
+.report-saved { display: flex; gap: 12px; align-items: flex-start; }
+.report-saved b { display: block; font-size: 15px; margin-bottom: 2px; }
+.report-saved .mono { font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+.report-ok { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--accent); color: var(--accent-ink); }
+.modal .mb > p.report-send { font-size: 15px; font-weight: 600; color: var(--text); margin: 16px 0 6px; }
+.report-err { color: var(--bug); font-size: 13.5px; margin-top: 8px; }
+.toast-act { flex: none; height: 28px; padding: 0 10px; border-radius: 7px; border: 1px solid rgba(255, 255, 255, 0.55); background: transparent; color: inherit; font: inherit; font-size: 12.5px; font-weight: 650; cursor: pointer; white-space: nowrap; }
+.toast-act:hover, .toast-act:focus-visible { background: rgba(255, 255, 255, 0.18); }
+.setup-safe { font-size: 13px; color: var(--muted); }
+@media (max-width: 760px) { .toast.err { flex-wrap: wrap; } }

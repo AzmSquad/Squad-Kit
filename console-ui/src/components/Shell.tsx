@@ -1,11 +1,15 @@
+import { useEffect, useState } from 'react';
 import { Link, Outlet, useRouterState } from '@tanstack/react-router';
-import { ArrowUp, Bug, ChevronsUpDown, ExternalLink, Inbox, LayoutGrid, ListTodo, MessagesSquare, Moon, Network, Settings, Sun, Terminal, Users } from 'lucide-react';
-import { useApps, useBoard } from '../lib/data';
+import { ArrowUp, Bug, ChevronsUpDown, Inbox, LayoutGrid, ListTodo, Menu, MessagesSquare, Moon, Network, Settings, Sun, Terminal, Users } from 'lucide-react';
+import { useBoard } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { UpdateBanner } from './Restart';
 import { AppUpdate } from './Update';
-import { changeWaits } from './ChangeCard';
+import { ProjectWaiting } from './Waiting';
+import { needsYou } from '../lib/waiting';
 import { ChatDock, useChats, useDocked } from './ChatDock';
+import { LimitBanner } from './UsageLimit';
+import { Apps } from './Apps';
 
 const NAV = [
   { to: '/board', label: 'Board', icon: LayoutGrid },
@@ -25,18 +29,41 @@ export function Shell() {
   const path = useRouterState({ select: (s) => s.location.pathname });
   const meta = board.data?.ready ? board.data.meta : undefined;
   const tickets = board.data?.ready ? board.data.tickets : [];
-  const waiting = tickets.filter((t) => t.waiting || t.outdated?.length || changeWaits(t)).length;
+  const waiting = tickets.filter(needsYou).length;
   const bugs = tickets.filter((t) => t.kind === 'bug').length;
   const initials = (meta?.user.name ?? 'You').slice(0, 2).toUpperCase();
   const chats = useChats().data?.filter((c) => c.open).length ?? 0;
   const docked = useDocked();
+  // On a phone the sidebar folds away behind a menu button, and closes again when you go to another page.
+  const [menu, setMenu] = useState(false);
+  useEffect(() => setMenu(false), [path]);
 
   // The Conversations page is full screen: the list, the chat and the spec need the whole width.
-  if (path.startsWith('/conversations')) return <Outlet />;
+  if (path.startsWith('/conversations'))
+    return (
+      <div className="fullpage">
+        <ProjectWaiting />
+        <div className="canvas-b">
+          <Outlet />
+        </div>
+      </div>
+    );
 
   return (
     <div className={`app ${docked ? 'docked' : ''}`}>
-      <aside className="side">
+      <header className="mtop">
+        <button className="iconbtn" onClick={() => setMenu(true)} aria-label="Open the menu" aria-expanded={menu}>
+          <Menu size={17} />
+        </button>
+        <b>{meta?.project ?? 'Your project'}</b>
+        {waiting > 0 && (
+          <Link to="/inbox" className="badge you" aria-label={`${waiting} waiting for you`}>
+            {waiting}
+          </Link>
+        )}
+      </header>
+      {menu && <div className="side-veil" onClick={() => setMenu(false)} />}
+      <aside className={`side ${menu ? 'open' : ''}`}>
         {/* Home and the other projects are other pages of the app, outside this project's board. */}
         <a className="brand" href="/" title="All your projects">
           <img src="/logo.svg" alt="" />
@@ -55,7 +82,7 @@ export function Shell() {
           const count = n.badge === 'you' ? waiting : n.badge === 'bugs' ? bugs : n.badge === 'chats' ? chats : 0;
           const on = path.startsWith(n.to) || (n.to === '/inbox' && path.endsWith('/proof'));
           return (
-            <Link key={n.to} to={n.to} className={`nav ${on ? 'on' : ''}`}>
+            <Link key={n.to} to={n.to} className={`nav ${on ? 'on' : ''}`} onClick={() => setMenu(false)}>
               <n.icon size={16} />
               {n.label}
               {count > 0 && <span className={`badge ${n.badge === 'you' ? 'you' : n.badge === 'chats' ? 'talk' : ''}`}>{count}</span>}
@@ -92,39 +119,15 @@ export function Shell() {
       </aside>
       <main className="canvas">
         <AppUpdate />
+        <LimitBanner />
         {board.data?.ready && board.data.console?.outdated && <UpdateBanner />}
-        <Outlet />
+        <ProjectWaiting />
+        {/* The page under the banner: a ticket drawer covers the page, never the banner. */}
+        <div className="canvas-b">
+          <Outlet />
+        </div>
       </main>
       <ChatDock />
     </div>
   );
 }
-
-/** Every app the project runs, one per code repo, with a button that opens it. */
-function Apps() {
-  const apps = useApps().data?.apps ?? [];
-  if (!apps.length) return null;
-  return (
-    <div className="apps">
-      <div className="apps-h">Your apps</div>
-      {apps.map((a) => (
-        <a
-          key={a.repo}
-          className={`app-row ${a.up ? 'up' : ''}`}
-          href={a.url}
-          target="_blank"
-          rel="noreferrer"
-          title={a.up ? `Open ${a.url}` : `Not running. Start it in ${a.repo === '.' ? 'the project folder' : `${a.repo}/`}${a.start ? ` with: ${a.start}` : ''}`}
-        >
-          <i />
-          <span className="nm">
-            <b>{a.name}</b>
-            <small>{a.up ? a.url.replace(/^https?:\/\//, '') : 'Not running'}</small>
-          </span>
-          <ExternalLink size={14} />
-        </a>
-      ))}
-    </div>
-  );
-}
-

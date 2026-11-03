@@ -81,6 +81,15 @@ describe('JiraClient', () => {
     expect(res.description).toBe('Rendered only');
   });
 
+  it('reads each HTML entity once, so a written &lt; stays as text', async () => {
+    const payload = loadMinimalIssue() as { renderedFields: { description: string } };
+    payload.renderedFields.description = '<p>Type <b>&amp;lt;br&amp;gt;</b> for a break, &lt;b&gt; for bold &amp; more</p>';
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(payload), { status: 200 })));
+    const client = new JiraClient({ host: 'x.atlassian.net', email: 'e@e.com', token: 't' });
+    const res = await client.fetchIssue('K-2');
+    expect(res.description).toBe('Type &lt;br&gt; for a break, <b> for bold & more');
+  });
+
   it('401 throws TrackerError auth', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 401 })));
     const client = new JiraClient({ host: 'h.atlassian.net', email: 'e', token: 't' });

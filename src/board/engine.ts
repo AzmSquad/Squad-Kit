@@ -18,6 +18,7 @@ import { applyPlanEdits, approveExpress, changeParts, changeSummary, needsSpec, 
 import { AMBIENT, scriptFor } from './scripts.js';
 import type { BoardMeta, Question, Ticket } from './types.js';
 import { ticketDir } from './store.js';
+import { keepDemoClock, stopDemoStep, watchDemoSlow } from './demo-clock.js';
 
 /**
  * The demo squad. It plays a recorded journey for each ticket on a timer and writes every
@@ -40,12 +41,29 @@ export function startDemoSquad(bp: BoardPaths, intervalMs = 500): () => void {
   return () => clearInterval(timer);
 }
 
+/** When each sample board last looked for slow steps. */
+const lastSlowLook = new Map<string, number>();
+
 export function tick(bp: BoardPaths): void {
   if (!boardExists(bp)) return;
   const meta = readMeta(bp);
   if (meta.engine !== 'demo') return;
   const at = Date.now();
-  for (const t of listTickets(bp)) {
+  const tickets = listTickets(bp);
+  if (at - (lastSlowLook.get(bp.root) ?? 0) >= 5000) {
+    lastSlowLook.set(bp.root, at);
+    watchDemoSlow(bp, tickets, at);
+  }
+  for (const t of tickets) {
+    // Being deleted: the sample squad leaves it alone, and says so for a delete started in another window.
+    if (t.deleting) {
+      if (!t.deleting.stopped) updateTicket(bp, t.id, (x) => x.deleting && (x.deleting.stopped = now()));
+      continue;
+    }
+    if (t.stopRequested) {
+      updateTicket(bp, t.id, (x) => stopDemoStep(bp, x, meta.speed));
+      continue;
+    }
     const q = t.questions?.find((x) => x.thinking);
     if (q && at - lastMessageAt(q) >= 2200 / meta.speed) reply(bp, t.id, q.id);
     const c = t.chat;
@@ -53,7 +71,10 @@ export function tick(bp: BoardPaths): void {
     else if (c?.open && c.thinking && at - Date.parse(c.messages.at(-1)?.at ?? t.activity[0]?.at ?? new Date(0).toISOString()) >= 2200 / meta.speed) chatReply(bp, t.id);
     const ch = openChange(t);
     if (ch?.status === 'writing' && at - Date.parse(ch.at) >= 2200 / meta.speed) writeChange(bp, t.id);
-    if (t.squad && Date.parse(t.squad.nextAt) <= at) advance(bp, t.id, meta);
+    if (t.squad && Date.parse(t.squad.nextAt) <= at) {
+      advance(bp, t.id, meta);
+      updateTicket(bp, t.id, (x) => keepDemoClock(bp, x));
+    }
   }
 }
 

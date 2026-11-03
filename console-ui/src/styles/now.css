@@ -1,0 +1,77 @@
+/* Live status: the card's line, the Now tab, the slow and stuck cards, and the Ask box. Uses the tokens in app.css. */
+
+/* The card's line on the board */
+.card .nl1 { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; color: var(--muted); line-height: 1.35; }
+.card .nl1 .live { margin-top: 4px; }
+.card .nl1 span { overflow-wrap: anywhere; min-width: 0; }
+.card .nl1 b { color: var(--text); font-weight: 650; }
+.card .nl1.quiet { color: var(--dim); }
+.card .nl2 { font-size: 11.5px; color: var(--dim); margin: 3px 0 0 13px; font-variant-numeric: tabular-nums; }
+.card .nl2.slow { display: flex; align-items: center; gap: 5px; color: var(--you-ink); font-weight: 600; }
+.card .nl2.slow.stuck { color: var(--bug); }
+
+.segbar { display: flex; gap: 3px; margin-top: 8px; }
+.segbar span { flex: 1; height: 4px; border-radius: 2px; background: var(--line); }
+.segbar span.d { background: var(--accent); }
+.segbar span.n { background: var(--accent); opacity: 0.45; }
+.segbar.big { margin-top: 10px; }
+.segbar.big span { height: 6px; border-radius: 3px; }
+
+/* The Now tab while the squad works */
+.nowcard { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; background: var(--surface); display: flex; flex-direction: column; gap: 6px; }
+.nowhead { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; color: var(--accent); }
+.nowsay { margin: 2px 0 0; font-size: 16px; font-weight: 600; line-height: 1.4; color: var(--text); }
+.nowmeta { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.nowmeta b { color: var(--text); font-weight: 650; }
+.nownext { font-size: 13px; line-height: 1.5; color: var(--muted); margin-top: 6px; }
+.nownext b { color: var(--text); font-weight: 650; }
+
+/* Taking longer than usual, looks stuck */
+.slowcard { border: 1.5px solid var(--you-line); border-radius: 14px; overflow: hidden; background: var(--surface); margin-bottom: 16px; }
+.slowhead { display: flex; align-items: center; gap: 9px; padding: 12px 16px; background: var(--you-soft); color: var(--you-ink); }
+.slowhead b { font-size: 15px; font-weight: 650; }
+.slowhead .where { font-size: 12.5px; }
+.slowcard.stuck { border-color: color-mix(in srgb, var(--bug) 45%, transparent); }
+.slowcard.stuck .slowhead { background: var(--bug-soft); color: var(--bug); }
+.slowbody { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+.slowsay { margin: 0; font-size: 15px; font-weight: 600; line-height: 1.4; }
+.facts { display: flex; flex-direction: column; gap: 6px; }
+.fact { display: flex; gap: 10px; font-size: 13.5px; line-height: 1.45; }
+.fact span:first-child { width: 128px; flex: none; color: var(--muted); }
+.fact span:last-child { min-width: 0; overflow-wrap: anywhere; }
+.ways { display: flex; gap: 8px; flex-wrap: wrap; }
+.slownote { margin: 0; font-size: 12.5px; }
+.slowfoot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); }
+
+/* Ask about this ticket */
+.askbox { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 4px; }
+.askbox .lbl { margin-top: 16px; }
+.askrow { display: flex; gap: 8px; }
+.askrow .input { flex: 1; }
+.askfoot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--dim); margin-top: 8px; }
+.askthread { display: flex; flex-direction: column; gap: 12px; margin-bottom: 12px; }
+.askturn { display: flex; flex-direction: column; gap: 8px; }
+.askme { align-self: flex-end; max-width: 80%; background: var(--surface-2); border-radius: 12px 12px 4px 12px; padding: 8px 12px; font-size: 13.5px; }
+.askme[dir='rtl'] { align-self: flex-start; border-radius: 12px 12px 12px 4px; font-family: 'IBM Plex Sans Arabic', 'Instrument Sans Variable', sans-serif; }
+.askit { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; font-size: 13.5px; line-height: 1.5; max-width: 92%; }
+.askit.ar { align-self: flex-end; font-family: 'IBM Plex Sans Arabic', 'Instrument Sans Variable', sans-serif; font-size: 14.5px; line-height: 1.7; }
+.askit p { margin: 4px 0 0; }
+.askit p.err { color: var(--bug); }
+.askit .who { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.askit .who b { font-weight: 650; }
+.askit .tag { font-size: 11px; font-weight: 650; padding: 1px 7px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); }
+.askoffers { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.btn.offer { height: auto; padding: 8px 11px; flex-direction: column; align-items: flex-start; gap: 2px; white-space: normal; text-align: start; max-width: 300px; }
+.btn.offer .ol { display: inline-flex; align-items: center; gap: 6px; font-weight: 650; }
+.btn.offer .on { font-weight: 450; font-size: 12px; color: var(--muted); line-height: 1.4; }
+
+/* The tracker under the title: how long each stage took */
+.ts .tnote { font-size: 11px; font-weight: 500; color: var(--dim); text-align: center; line-height: 1.3; min-height: 14px; }
+.ts.cur .tnote { color: var(--muted); }
+
+@media (max-width: 640px) {
+  .fact { flex-direction: column; gap: 1px; }
+  .fact span:first-child { width: auto; }
+  .askrow { flex-direction: column; }
+  .askme, .askit { max-width: 100%; }
+}

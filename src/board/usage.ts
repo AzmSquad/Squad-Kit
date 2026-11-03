@@ -100,14 +100,21 @@ export interface BoardUsage {
   roles: RoleUsage[];
   /** Tickets with anything counted. */
   tickets: number;
+  /** Deleted tickets: what they used stays in the total. */
+  deleted: { tickets: number; total: UsageTotal };
 }
 
-/** Everything the squad used on this board on this computer: every ticket, finished ones too, and the project's own line. */
+/** Everything the squad used on this board on this computer: every ticket, finished and deleted ones too, and the project's own line. */
 export function boardUsage(bp: BoardPaths): BoardUsage {
-  const tickets = listTickets(bp).filter((t) => t.usage?.length);
-  const project = readMeta(bp).usage ?? [];
-  const all = [...tickets.flatMap((t) => t.usage!), ...project];
-  return { total: totalOf(all), project: totalOf(project), roles: byRole(all), tickets: tickets.length };
+  const meta = readMeta(bp);
+  const all = listTickets(bp);
+  const tickets = all.filter((t) => t.usage?.length);
+  const project = meta.usage ?? [];
+  // A ticket being deleted still counts its own lines until its files go; then its line here takes over.
+  const gone = (meta.deleted ?? []).filter((d) => d.usage?.length && !all.some((t) => t.id === d.id && t.deleting?.at === d.at));
+  const deleted = gone.flatMap((d) => d.usage!);
+  const lines = [...tickets.flatMap((t) => t.usage!), ...project, ...deleted];
+  return { total: totalOf(lines), project: totalOf(project), roles: byRole(lines), tickets: tickets.length, deleted: { tickets: gone.length, total: totalOf(deleted) } };
 }
 
 /* ── In words, for the terminal ─────────────────────────── */

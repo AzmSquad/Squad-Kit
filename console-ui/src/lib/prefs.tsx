@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Check, CircleAlert, X } from 'lucide-react';
 import { toastLife, withToast, type Toast } from './toasts';
+import { report } from './report';
 
 type Theme = 'light' | 'dark';
 
@@ -9,7 +10,8 @@ interface Prefs {
   toggleTheme(): void;
   showCommands: boolean;
   toggleCommands(): void;
-  toast(text: string, kind?: 'ok' | 'err'): void;
+  /** An error toast offers Report a problem, and Try again when `retry` is given. */
+  toast(text: string, kind?: 'ok' | 'err', retry?: () => void): void;
 }
 
 const PrefsContext = createContext<Prefs | null>(null);
@@ -48,9 +50,9 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
 
   const dismiss = useCallback((id: number) => setToasts((t) => t.filter((x) => x.id !== id)), []);
   const toast = useCallback(
-    (text: string, kind: 'ok' | 'err' = 'ok') => {
+    (text: string, kind: 'ok' | 'err' = 'ok', retry?: () => void) => {
       const id = Date.now() + Math.random();
-      setToasts((t) => withToast(t, { id, text, kind }));
+      setToasts((t) => withToast(t, { id, text, kind, ...(retry ? { retry } : {}) }));
       const life = toastLife(kind);
       if (life !== null) setTimeout(() => dismiss(id), life);
     },
@@ -81,6 +83,26 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
             <div key={t.id} className="toast err" role="alert">
               <CircleAlert size={16} />
               <span className="grow">{t.text}</span>
+              {t.retry && (
+                <button
+                  className="toast-act"
+                  onClick={() => {
+                    dismiss(t.id);
+                    t.retry!();
+                  }}
+                >
+                  Try again
+                </button>
+              )}
+              <button
+                className="toast-act"
+                onClick={() => {
+                  dismiss(t.id);
+                  report.open();
+                }}
+              >
+                Report a problem
+              </button>
               <button className="toast-x" onClick={() => dismiss(t.id)} aria-label="Close this message">
                 <X size={15} />
               </button>

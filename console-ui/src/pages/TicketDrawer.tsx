@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { ArrowUp, Check, Code, Copy, Download, ExternalLink, GitPullRequest, Loader2, MessageCircle, Send, Square, TriangleAlert, X } from 'lucide-react';
+import { ArrowUp, Check, Code, Copy, Download, ExternalLink, GitPullRequest, LifeBuoy, Loader2, MessageCircle, Send, Square, TriangleAlert, X } from 'lucide-react';
 import { assetUrl, ticketFileUrl } from '../api/client';
 import type { PlanComment, Question, Ticket, TicketNote } from '../api/types';
 import { useAct, useTicket } from '../lib/data';
@@ -17,6 +17,11 @@ import { chatDock } from '../lib/chatDock';
 import { Lightbox, type Picture } from '../components/Lightbox';
 import { TicketUsage } from '../components/Usage';
 import { HandOverButton, HandedOverBanner, NotYoursPanel, canHandOver, isMine, ownerOf, useMe } from '../components/HandOver';
+import { AskBox, NowCard, SlowPanel, WorkSoFar, isRunning } from '../components/LiveNow';
+import { ExactError, StuckCard } from '../components/ErrorCard';
+import { report } from '../lib/report';
+import { shellQuote } from '../lib/text';
+import { DeleteArchiveBanner, TicketMenu } from '../components/DeleteTicket';
 
 type Tab = 'now' | 'story' | 'plan' | 'activity' | 'conversation' | 'proof' | 'changes' | 'cost' | 'developer';
 
@@ -68,6 +73,10 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
                     <ExternalLink size={15} />
                   </Link>
                 )}
+                <button className="iconbtn" onClick={() => report.open({ ticket: t.id })} aria-label="Report a problem" title="Report a problem">
+                  <LifeBuoy size={15} />
+                </button>
+                <TicketMenu t={t} onDeleted={onClose} />
                 <button className="iconbtn" onClick={onClose} aria-label="Close">
                   <X size={16} />
                 </button>
@@ -125,6 +134,7 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
             </div>
             {tab === 'now' && t.outdated?.length ? <OutdatedBanner t={t} /> : null}
             {tab === 'now' && <HandedOverBanner t={t} />}
+            {tab === 'now' && <DeleteArchiveBanner t={t} onDeleted={onClose} />}
             {tab === 'now' && (isMine(t, me) || !me) && <ChangeCard t={t} />}
             {tab === 'now' && (isMine(t, me) || !me ? <NowPanel t={t} /> : <NotYoursPanel t={t} />)}
             {tab === 'story' && <StoryTab t={t} />}
@@ -157,7 +167,8 @@ function NowPanel({ t }: { t: Ticket }) {
     case 'proof':
       return <ProofPanel t={t} />;
     case 'stuck':
-      return <StuckPanel t={t} />;
+      // Every stop has a way out: the plain error card (components/ErrorCard).
+      return <StuckCard t={t} extra={<RecentActivity t={t} />} />;
     case 'ask':
       return <AskPanel t={t} />;
     case 'yours':
@@ -544,7 +555,7 @@ function PlanPanel({ t }: { t: Ticket }) {
           <button className="btn quiet" onClick={() => setMode('over')}>Start over</button>
           <button className="btn quiet" onClick={() => setAskDev(true)}>Ask a developer</button>
           <span className="grow" />
-          <Cmd text={n > 0 ? `squad send-back ${t.id} ${comments.map((c) => `"${partName(c)}: ${c.text}"`).join(' ')}` : `squad approve ${t.id}`} />
+          <Cmd text={n > 0 ? `squad send-back ${t.id} ${comments.map((c) => shellQuote(`${partName(c)}: ${c.text}`)).join(' ')}` : `squad approve ${t.id}`} />
         </div>
       )}
       {askDev && <AskDeveloper t={t} onClose={() => setAskDev(false)} />}
@@ -758,133 +769,17 @@ function AskPanel({ t }: { t: Ticket }) {
   );
 }
 
-/* ── Stuck ─────────────────────────────────────────────── */
-
-/** Every stop has a way out: try again (with a note), fix it yourself in the copy, continue anyway (with a reason), or back to the plan. */
-function StuckPanel({ t }: { t: Ticket }) {
-  const act = useAct();
-  const [pick, setPick] = useState<number | null>(null);
-  const [text, setText] = useState('');
-  const opts = t.stuck?.options ?? [];
-  const way = pick === null ? undefined : (opts[pick]?.do ?? (pick === 0 ? 'retry' : undefined));
-  const needsReason = way === 'continue' && !text.trim();
-  const label = way === 'yourself' ? 'I fixed it, check again' : way === 'continue' ? 'Continue anyway' : way === 'retry' ? 'Try again' : 'Decide';
-  const flag = way === 'continue' ? ` --reason "${text.trim() || '…'}"` : way === 'retry' && text.trim() ? ` --note "${text.trim()}"` : '';
-  return (
-    <>
-      <div className="db">
-        <div className="youbox">
-          <span className="ring">!</span>
-          <div>
-            <b>The squad stopped and needs your decision</b>
-            <span>Read what happened, then pick a way out. Nothing is lost whatever you pick.</span>
-          </div>
-        </div>
-        <div className="lbl">What happened</div>
-        <p className="stuckq">{t.stuck?.question}</p>
-        <div className="opts2">
-          {opts.map((o, i) => (
-            <button
-              key={o.name}
-              className={`opt2 ${pick === i ? 'pick' : ''}`}
-              onClick={() => {
-                setPick(i);
-                setText('');
-              }}
-            >
-              <b>
-                {o.name}
-                {pick === i && (
-                  <span>
-                    <Check size={13} strokeWidth={2.5} /> Your pick
-                  </span>
-                )}
-              </b>
-              {o.note}
-            </button>
-          ))}
-        </div>
-        {way === 'retry' && (
-          <>
-            <div className="lbl">A note for the squad (optional)</div>
-            <textarea className="waynote" rows={2} value={text} onChange={(e) => setText(e.target.value)} placeholder="For example: the test server needs the VPN, it is on now" />
-          </>
-        )}
-        {way === 'continue' && (
-          <>
-            <div className="lbl">Why continue anyway?</div>
-            <textarea className="waynote" rows={2} value={text} onChange={(e) => setText(e.target.value)} placeholder="For example: the failing test is broken on main too, fixed in SK-160" />
-            <p className="note" style={{ fontSize: 12.5 }}>Only you can do this. Your reason shows on the ticket, the pull request and the release notes.</p>
-          </>
-        )}
-        {way === 'yourself' && (
-          <div className="stuckbox">
-            <p style={{ margin: '0 0 8px' }}>Open the ticket&apos;s copy, fix it, and save. Then press <b>I fixed it</b>: the checks, review and proof run again.</p>
-            <OpenInEditor t={t} />
-          </div>
-        )}
-        <RecentActivity t={t} />
-      </div>
-      <div className="df">
-        <button
-          className="btn pri"
-          disabled={pick === null || needsReason || act.isPending}
-          onClick={() =>
-            act.mutate({
-              path: `/api/v1/tickets/${t.id}/decide`,
-              body: { choice: pick, ...(way === 'continue' ? { reason: text } : way === 'retry' ? { note: text } : {}) },
-              done: way === 'yourself' ? 'OK. The checks run again on your fix.' : 'Decided. The squad carries on.',
-            })
-          }
-        >
-          <Check size={15} strokeWidth={2.5} /> {label}
-        </button>
-        <span className="grow" />
-        <Cmd text={`squad decide ${t.id}${pick !== null ? ` ${pick + 1}` : ''}${flag}`} />
-      </div>
-    </>
-  );
-}
-
 /* ── Working, ready, released ──────────────────────────── */
 
-/** The watchdog saw no progress: say what the step waits on and let the person decide. Nothing hangs silently. */
+/** The step is slow, or shows no progress: the card says what it does and what squad-kit checked, with the ways on. */
 function QuietPanel({ t }: { t: Ticket }) {
-  const act = useAct();
-  const q = t.quiet!;
-  const stuck = q.kind === 'stuck';
   return (
-    <>
-      <div className="db">
-        <div className="lbl">{stuck ? 'This step looks stuck' : 'This step is taking long'}</div>
-        <div className="stuckbox">
-          <p style={{ margin: 0 }}>{q.detail}</p>
-          {q.command && <p className="mono" style={{ fontSize: 12.5, margin: '8px 0 0', overflowWrap: 'anywhere' }}>{q.command}</p>}
-          <p className="note" style={{ margin: '8px 0 0', fontSize: 12.5 }}>No progress since {clock(q.since)}. Nothing is lost whatever you choose.</p>
-        </div>
-        <div className="lbl">What to do</div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {q.pid && (
-            <button className="btn pri" disabled={act.isPending} onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/unstick`, done: 'Ended the stuck command. The squad carries on.' })}>
-              End the stuck command
-            </button>
-          )}
-          <button className="btn" disabled={act.isPending} onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/keep-waiting`, done: 'OK. squad-kit stays quiet about it for 10 minutes.' })}>
-            Keep waiting
-          </button>
-          <button className="btn" disabled={act.isPending} onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/stop`, done: 'Stopping. The work so far is kept.' })}>
-            <Square size={13} /> Stop
-          </button>
-        </div>
-        <p className="note" style={{ marginTop: 10, fontSize: 12.5 }}>
-          Ending the command gives the squad an error back, and it carries on in the same conversation. See what it was doing in the Conversation tab.
-        </p>
-      </div>
-      <div className="foot">
-        <span className="grow" />
-        <Cmd text={q.pid ? `squad unstick ${t.id}` : `squad stop ${t.id}`} />
-      </div>
-    </>
+    <div className="db">
+      <SlowPanel t={t} />
+      {t.now && <NowCard t={t} />}
+      <WorkSoFar t={t} />
+      <AskBox t={t} />
+    </div>
   );
 }
 
@@ -987,22 +882,28 @@ function WorkingPanel({ t }: { t: Ticket }) {
         : t.waiting?.kind === 'change'
           ? { title: 'The Builder paused for your change', text: 'The Architect updated the design. Approve it above, or decline the change and the Builder carries on.' }
           : { title: 'Nothing needed from you', text: `${nowLine(t)} You'll get a card when the squad needs you.` };
+  // While the squad works: what it does now, how long, the usual time and what comes next, from the live record.
+  const running = isRunning(t);
   return (
     <>
       <div className="db">
-        <div className="calm">
-          <span className="ring">{t.stage === 'release' ? <ArrowUp size={18} /> : <Check size={18} strokeWidth={2.5} />}</span>
-          <div>
-            <b>{calm.title}</b>
-            <span>{calm.text}</span>
+        {running ? (
+          <NowCard t={t} />
+        ) : (
+          <div className="calm">
+            <span className="ring">{t.stage === 'release' ? <ArrowUp size={18} /> : <Check size={18} strokeWidth={2.5} />}</span>
+            <div>
+              <b>{calm.title}</b>
+              <span>{calm.text}</span>
+            </div>
+            {t.stage === 'release' && (
+              <>
+                <span className="grow" style={{ flex: 1 }} />
+                <Link to="/releases" className="btn sm">Open release</Link>
+              </>
+            )}
           </div>
-          {t.stage === 'release' && (
-            <>
-              <span className="grow" style={{ flex: 1 }} />
-              <Link to="/releases" className="btn sm">Open release</Link>
-            </>
-          )}
-        </div>
+        )}
         {t.localSetup && <LocalSetupLine t={t} />}
         {t.steps && t.steps.length > 0 && (
           <>
@@ -1017,7 +918,8 @@ function WorkingPanel({ t }: { t: Ticket }) {
           </>
         )}
         {(t.stage === 'release' || t.stage === 'done') && t.usage?.length ? <TicketUsage t={t} /> : null}
-        <RecentActivity t={t} />
+        {running ? <WorkSoFar t={t} /> : <RecentActivity t={t} />}
+        <AskBox t={t} />
       </div>
       <div className="df">
         {t.live && t.stage !== 'release' && t.stage !== 'done' && (
@@ -1319,6 +1221,7 @@ function DeveloperTab({ t }: { t: Ticket }) {
   }, [t]);
   return (
     <div className="db">
+      <ExactError t={t} />
       <div className="lbl">Branch</div>
       <p className="mono" style={{ fontSize: 13 }}>
         {t.repo ? `${t.repo}: ` : ''}

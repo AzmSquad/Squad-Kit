@@ -68,14 +68,17 @@ export const TRACK: { stage: Stage; name: string }[] = [
   { stage: 'release', name: 'Release' },
 ];
 
+/** Where the ticket is, with how long each finished stage took and the usual time of the ones to come. */
 export function Tracker({ ticket }: { ticket: Ticket }) {
   const stage = ticket.stage === 'bugs' ? 'tickets' : ticket.stage;
   const at = stage === 'done' ? TRACK.length : TRACK.findIndex((s) => s.stage === stage);
   const mode = ticket.waiting ? 'you' : 'work';
+  const notes = new Map((ticket.now?.stages ?? []).map((x) => [x.stage, x.note]));
   return (
     <div className="track" aria-label="Where this ticket is">
       {TRACK.map((s, i) => {
         const cls = i < at ? 'done' : i === at ? `cur ${mode}` : '';
+        const note = notes.get(s.stage);
         return (
           <div key={s.stage} className={`ts ${cls}`}>
             <span className="nd">{i < at ? <Check size={12} strokeWidth={3} /> : null}</span>
@@ -83,6 +86,7 @@ export function Tracker({ ticket }: { ticket: Ticket }) {
             {i === at && (
               <span className="tag">{mode === 'you' ? 'Your turn' : ticket.stage === 'release' ? 'Ready' : 'Working'}</span>
             )}
+            {notes.size > 0 && <span className="tnote">{i === at && note === 'your turn' ? '' : (note ?? '')}</span>}
           </div>
         );
       })}

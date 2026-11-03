@@ -8,6 +8,7 @@ import '@fontsource/jetbrains-mono/500.css';
 import '@fontsource/jetbrains-mono/600.css';
 import './styles/app.css';
 import './styles/chat.css';
+import './styles/support.css';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -15,6 +16,7 @@ import { RouterProvider } from '@tanstack/react-router';
 import { bootstrapToken } from './api/client';
 import { PrefsProvider, initialTheme } from './lib/prefs';
 import { router } from './router';
+import { ReportHost } from './components/Report';
 
 // Set the theme before the first paint so the board never flashes the wrong colors.
 document.documentElement.dataset.theme = initialTheme();
@@ -33,6 +35,7 @@ createRoot(el).render(
       <QueryClientProvider client={queryClient}>
         <PrefsProvider>
           <RouterProvider router={router} />
+          <ReportHost />
         </PrefsProvider>
       </QueryClientProvider>
     ) : (

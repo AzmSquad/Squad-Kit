@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, send } from '../api/client';
-import type { AppSettings, ArchitectureResponse, BoardResponse, ReleaseWithItems, Ticket, ProjectApp } from '../api/types';
+import { api, send, worthRetrying } from '../api/client';
+import type { AppSettings, AppsResponse, ArchitectureResponse, BoardResponse, ReleaseWithItems, Ticket, ProjectApp } from '../api/types';
 import { usePrefs } from './prefs';
 
 /** The squad writes to .squad/ on its own, so screens poll to stay live. */
@@ -23,8 +23,13 @@ export function useReleases() {
   return useQuery({ queryKey: ['releases'], queryFn: () => api<ReleaseWithItems[]>('/api/v1/releases'), refetchInterval: 2000 });
 }
 
+/** Your apps: every second while one starts, so Starting turns into Running at once. */
 export function useApps() {
-  return useQuery({ queryKey: ['apps'], queryFn: () => api<{ apps: ProjectApp[] }>('/api/v1/apps'), refetchInterval: 5000 });
+  return useQuery({
+    queryKey: ['apps'],
+    queryFn: () => api<AppsResponse>('/api/v1/apps'),
+    refetchInterval: (q) => (q.state.data?.apps.some((a) => a.state === 'starting') || q.state.data?.reading ? 1000 : 5000),
+  });
 }
 
 /** How many tickets run at once: one number for every project in the app, because they share the AI accounts. */
@@ -40,13 +45,15 @@ export function useArchitecture() {
 export function useAct<T = unknown>() {
   const qc = useQueryClient();
   const { toast } = usePrefs();
-  return useMutation({
+  const m = useMutation({
     mutationFn: ({ path, body, method = 'POST' }: { path: string; body?: unknown; method?: 'POST' | 'PUT'; done?: string }) =>
       send<T>(path, method, body),
     onSuccess: (_data, vars) => {
       void qc.invalidateQueries();
       if (vars.done) toast(vars.done);
     },
-    onError: (err) => toast(err instanceof Error ? err.message : String(err), 'err'),
+    // The error says what happened. When sending it again may help, Try again sends the same action once more.
+    onError: (err, vars) => toast(err instanceof Error ? err.message : String(err), 'err', worthRetrying(err) ? () => m.mutate(vars) : undefined),
   });
+  return m;
 }

@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { AcpStartError, runAcp, type AcpLaunch } from '../../engine/acp-runner.js';
 import type { AgentResult, AgentRun, AiTool } from '../ai-tool/types.js';
 import { claudeBinary, claudeEnv, costSoFar, deniedTools, describeTool, plainError, runClaude, sessionExists, toolVersion, type RunOptions } from './direct.js';
+import { claudeLimit } from './limit.js';
 
 /**
  * Claude Code as a squad-kit AI tool, on the person's own Claude login: over ACP through the official adapter, with
@@ -144,6 +145,31 @@ export async function runClaudeAcp(opts: RunOptions & { logDir?: string }): Prom
   return runAcp(claudeLaunch(opts, adapter, bin), { ...opts, ...(opts.logDir ? { logDir: opts.logDir } : {}) });
 }
 
+/** Claude Code's own limit message, when it ends a turn with it as its only answer instead of an error. */
+const SAID_LIMIT = /^(you've (hit|reached) your [\w' -]{0,40}limit\b|you're out of (extra )?usage|claude (ai )?usage limit reached|(5-hour|weekly|session) limit reached)/i;
+
+/** A stop on the usage limit says so to the engine, with the reset time when Claude said it, whichever way it ran. */
+export function withLimit(r: AgentResult): AgentResult {
+  if (r.limit) return r;
+  if (r.ok) {
+    const said = (r.text ?? '').trim();
+    if (r.structured !== undefined || said.length > 400 || !SAID_LIMIT.test(said)) return r;
+    return withLimit({ ...r, ok: false, error: plainError(said), detail: said });
+  }
+  const found = claudeLimit(r.detail ?? r.error ?? '');
+  return found ? { ...r, limit: { name: 'Claude', ...found } } : r;
+}
+
+/** The ACP adapter's version, from its package file. */
+function adapterVersion(): string | null {
+  try {
+    const require = createRequire(import.meta.url);
+    return (require('@agentclientprotocol/claude-agent-acp/package.json') as { version?: string }).version ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export const claudeTool: AiTool = {
   name: 'claude',
   label: 'Claude Code',
@@ -157,17 +183,23 @@ export const claudeTool: AiTool = {
     const bin = claudeBinary();
     return Boolean(bin && toolVersion(bin));
   },
+  version() {
+    const bin = claudeBinary();
+    const v = bin ? toolVersion(bin) : null;
+    const acp = adapterVersion();
+    return v ? `${v}${acp ? `, ACP adapter ${acp}` : ''}` : null;
+  },
   async run(r) {
     const opts = claudeRunOptions(r);
-    if (r.direct || !acpAdapterPath()) return runClaude(opts);
+    if (r.direct || !acpAdapterPath()) return withLimit(await runClaude(opts));
     try {
-      return await runClaudeAcp({ ...opts, ...(r.logDir ? { logDir: r.logDir } : {}) });
+      return withLimit(await runClaudeAcp({ ...opts, ...(r.logDir ? { logDir: r.logDir } : {}) }));
     } catch (err) {
       if (!(err instanceof AcpStartError)) throw err;
       // After a Stop nothing starts again, not even the other way.
       if (r.signal?.aborted) return { ok: false, sessionId: opts.resume ?? opts.sessionId ?? '', text: '', error: 'You stopped the squad.' };
       r.onFallback?.(err.message);
-      return runClaude(opts);
+      return withLimit(await runClaude(opts));
     }
   },
   describe: describeTool,

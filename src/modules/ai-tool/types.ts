@@ -85,12 +85,28 @@ export interface AgentUsage {
   costUsd?: number;
 }
 
+/**
+ * The AI account reached its usage limit. Nothing is wrong with the step: it can run again once the limit resets.
+ * Each module reads its tool's own message; the engine only sees this.
+ */
+export interface UsageLimit {
+  /** Whose limit, for people: "Claude". */
+  name: string;
+  /** When the limit resets (an ISO time), when the tool said. */
+  resetsAt?: string;
+}
+
 export interface AgentResult {
   ok: boolean;
   sessionId: string;
   text: string;
   structured?: unknown;
+  /** What went wrong, in plain words. */
   error?: string;
+  /** The tool's exact error, for engineers: the ticket's Developer tab and the app log. */
+  detail?: string;
+  /** Set when the run stopped on the account's usage limit. */
+  limit?: UsageLimit;
   /** Left out when the tool said nothing about what the run used. */
   usage?: AgentUsage;
 }
@@ -114,6 +130,8 @@ export interface AiTool {
   readonly instructionFiles?: readonly string[];
   /** Installed and signed in, as far as squad-kit can tell without running it. */
   ready(): boolean;
+  /** The installed version, for Report a problem, or null when it is not installed. */
+  version?(): string | null;
   run(r: AgentRun): Promise<AgentResult>;
   /** One plain-words line for what a tool call is doing, or null to leave it out. */
   describe(e: ToolEvent, cwd: string): string | null;

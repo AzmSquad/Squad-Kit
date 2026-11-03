@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { RunOptions, RunResult } from '../src/modules/claude/direct.js';
+import type { Decision } from '../src/board/types.js';
 
 const calls: RunOptions[] = [];
 const answers: unknown[] = [];
@@ -133,6 +134,11 @@ describe('stack and patterns', () => {
     const next = stack.find((t) => t.name === 'Next.js')!;
     expect(decidedIn(next, listDecisions(bp))).toEqual(['ADR-001']);
     expect(decidedIn(stack.find((t) => t.name === 'React')!, listDecisions(bp))).toEqual([]);
+  });
+
+  it('a technology named with signs a pattern would read, such as C++ (gcc), is found by its plain name', () => {
+    const decisions = [{ id: 'ADR-009', title: 'The language', chosen: 'C++ (gcc)' }] as Decision[];
+    expect(decidedIn({ name: 'C++ (gcc)', role: 'Language', repo: '.' }, decisions)).toEqual(['ADR-009']);
   });
 
   it('a merge queues one read of the code; the Architect fills in why, patterns and the map', async () => {

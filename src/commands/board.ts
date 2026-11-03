@@ -36,6 +36,7 @@ import {
   DECIDE_YOURSELF,
   skipQuestions,
   stopTicket,
+  restartStep,
   endStuckCommand,
   keepWaiting,
   proposeChange,
@@ -54,6 +55,7 @@ import { tick } from '../board/engine.js';
 import { squadRunsElsewhere } from '../board/lock.js';
 import { seedDemoBoard } from '../board/demo.js';
 import { repoFor } from '../engine/repos.js';
+import { projectApps } from '../board/apps.js';
 import { trackerFor } from '../modules/registry.js';
 import { openInEditor, ticketChanges } from '../engine/changes.js';
 import { AGENTS, STEPS, readAgent, writeAgent, type AgentRole } from '../engine/agents.js';
@@ -78,6 +80,11 @@ import { runConsole } from './console.js';
 import { openBoard } from '../board/move.js';
 import { projectName, readProjects } from '../core/projects.js';
 import { isMine, ownerOf } from '../board/owner.js';
+import { liveNow } from '../board/now.js';
+import { readUsual } from '../board/usual.js';
+import { nowLines } from './now.js';
+import { problemOf } from '../board/problem.js';
+import { withoutComments } from '../utils/text.js';
 
 const out = (s = '') => process.stdout.write(`${s}\n`);
 const cmd = (s: string) => kleur.green(s);
@@ -97,7 +104,7 @@ const STAGE_NAME: Record<Stage, string> = {
 };
 const TRACK: Stage[] = ['tickets', 'specs', 'implement', 'test', 'review', 'release'];
 
-function board(): BoardPaths {
+export function board(): BoardPaths {
   const { bp, moved } = openBoard(buildPaths(requireSquadRoot()).squadDir);
   if (moved) ui.success(`Moved this board to the new layout first (${moved.tickets} tickets, all checked). A copy of the old files: ${moved.backup}`);
   if (!boardExists(bp)) {
@@ -119,7 +126,7 @@ function warnIfNoSquad(bp: BoardPaths): void {
 }
 
 function nextCommand(t: Ticket): string {
-  if (!t.waiting && t.quiet) return t.quiet.pid ? `squad unstick ${t.id}   or   squad unstick ${t.id} --keep-waiting` : `squad stop ${t.id}`;
+  if (!t.waiting && t.quiet) return `${t.quiet.pid ? `squad unstick ${t.id}   or   ` : ''}squad wait ${t.id} --more 10m   or   squad stop ${t.id} --again`;
   if (!t.waiting && changeNeedsYou(t)) return `squad show ${t.id}   then   squad propose ${t.id} --approve   or   --decline`;
   switch (t.waiting?.kind) {
     case 'change':
@@ -165,12 +172,20 @@ export async function runInbox(): Promise<void> {
   }
   const w = Math.max(...items.map((t) => t.title.length));
   for (const t of items) {
-    const change = openChange(t);
-    const line = t.waiting?.summary ?? (changeNeedsYou(t) && change ? `Change ${change.id} to the spec: ${change.summary ?? change.ask}` : `Looks stuck: ${t.quiet?.detail ?? ''}`);
-    out(`  ${id(t.id)}  ${t.title.padEnd(w)}   ${amber(line)}`);
+    out(`  ${id(t.id)}  ${t.title.padEnd(w)}   ${amber(inboxLine(t))}`);
     out(`  ${' '.repeat(t.id.length)}  ${cmd(nextCommand(t))}`);
   }
   out();
+}
+
+/** Why a ticket waits for you, in one line: the same reasons, in the same order, as the board's banner. */
+export function inboxLine(t: Ticket): string {
+  if (t.waiting?.summary) return t.waiting.summary;
+  const change = openChange(t);
+  if (changeNeedsYou(t) && change) return `Change ${change.id} to the spec: ${change.summary ?? change.ask}`;
+  const o = t.outdated ?? [];
+  if (o.length) return o.length === 1 ? `${o[0]!.adr} came after this plan and changes it` : `${o.map((x) => x.adr).join(' and ')} came after this plan and change it`;
+  return `Looks stuck: ${t.quiet?.detail ?? 'no progress'}`;
 }
 
 function inboxEverywhere(): void {
@@ -192,17 +207,18 @@ function inboxEverywhere(): void {
     out();
     out(`  ${kleur.bold(g.name)}`);
     for (const t of g.items) {
-      out(`  ${id(t.id)}  ${t.title.padEnd(w)}   ${amber(t.waiting?.summary ?? `Looks stuck: ${t.quiet?.detail ?? ''}`)}`);
+      out(`  ${id(t.id)}  ${t.title.padEnd(w)}   ${amber(inboxLine(t))}`);
       out(`  ${' '.repeat(t.id.length)}  ${cmd(nextCommand(t).replace(/\bsquad ([a-z-]+) (\S+)/g, `squad $1 $2 --project ${ref}`))}`);
     }
   }
   out();
 }
 
-export async function runBoard(): Promise<void> {
+export async function runBoard(opts: { archived?: boolean } = {}): Promise<void> {
   const bp = board();
   const meta = readMeta(bp);
-  const tickets = listTickets(bp).filter((t) => t.stage !== 'done');
+  const open = listTickets(bp).filter((t) => t.stage !== 'done');
+  const tickets = open.filter((t) => opts.archived || !t.archived);
   out();
   const used = boardUsage(bp).total;
   out(`  ${kleur.bold(meta.project)}  ${kleur.gray(`${tickets.length} open tickets`)}${used.runs ? kleur.gray(`  ·  used ${costWords(used) ?? 'an unknown amount'} at API prices`) : ''}`);
@@ -212,8 +228,13 @@ export async function runBoard(): Promise<void> {
     out(`  ${kleur.bold(STAGE_NAME[stage])} ${kleur.gray(String(here.length))}`);
     for (const t of here) {
       const mark = t.waiting ? amber('● you') : t.live ? kleur.green('● ') + kleur.gray('   ') : kleur.gray('○    ');
-      out(`    ${mark} ${id(t.id)}  ${t.title}  ${kleur.gray(t.status)}${isMine(t, meta) ? '' : kleur.gray(`  (${ownerOf(t)})`)}`);
+      out(`    ${mark} ${id(t.id)}  ${t.title}  ${kleur.gray(t.status)}${isMine(t, meta) ? '' : kleur.gray(`  (${ownerOf(t)})`)}${t.archived ? kleur.gray('  (archived)') : ''}`);
     }
+  }
+  const hidden = open.length - tickets.length;
+  if (hidden) {
+    out();
+    out(kleur.gray(`  ${hidden} archived ${hidden === 1 ? 'ticket is' : 'tickets are'} not shown. Show them: squad board --archived`));
   }
   out();
 }
@@ -224,12 +245,15 @@ export async function runShow(ticketId: string): Promise<void> {
   out();
   out(`  ${id(t.id)}  ${kleur.bold(t.title)}${t.priority === 'high' ? kleur.red('  High priority') : ''}`);
   out(`  ${trackLine(t)}`);
-  out(`  ${kleur.gray(t.status)}`);
+  const usual = readUsual(bp);
+  for (const l of nowLines(t, liveNow(t, usual))) out(l);
   out(`  ${kleur.gray('Owner:')} ${ownerOf(t)}${isMine(t, readMeta(bp)) ? kleur.gray(' (you)') : kleur.gray('. Their squad works on it; you see their work when they push')}`);
   if (t.waiting) {
     out();
     out(`  ${amber('Waiting for you:')} ${t.waiting.summary}`);
   }
+  if (t.deleting) out(`  ${amber(t.deleting.error ? `Delete did not finish: ${t.deleting.error}.` : 'Being deleted.')} ${cmd(`squad delete ${t.id}`)}`);
+  if (t.archived) out(`  ${kleur.gray(`Archived by ${t.archived.by}. Bring it back:`)} ${cmd(`squad archive ${t.id} --undo`)}`);
   const change = openChange(t);
   if (change) {
     out();
@@ -286,10 +310,14 @@ export async function runShow(ticketId: string): Promise<void> {
     }
   }
   if (t.stuck && t.waiting?.kind === 'stuck') {
+    const problem = problemOf(t)!;
     out();
-    out(`  ${kleur.bold('The squad is stuck')}`);
-    out(`  ${t.stuck.question}`);
+    out(`  ${kleur.bold(problem.title)}`);
+    out(`  ${problem.what}`);
+    for (const line of problem.safe) out(`  ${kleur.green('✓')} ${line}`);
     t.stuck.options.forEach((o, i) => out(`    ${i + 1}. ${o.name}  ${kleur.gray(o.note)}`));
+    if (problem.detail) out(kleur.gray(`  The exact error: ${problem.detail.split('\n')[0]!.slice(0, 300)}`));
+    out(kleur.gray(`  Need help? ${cmd(`squad report ${t.id}`)} saves one file to send.`));
   }
   if (t.usage?.length) {
     out();
@@ -405,6 +433,9 @@ export async function runApprove(ticketId: string): Promise<void> {
     ui.warning(`${t.id} is saved, but it clashes with newer changes. Run: squad decide ${t.id}`);
   } else {
     ui.success(`Proof accepted. ${t.id} is ready for ${t.release}.`);
+    const repo = repoFor(readMeta(bp), t);
+    const app = t.mergedAt ? projectApps(readMeta(bp)).find((a) => a.repo === repo.path && a.start) : undefined;
+    if (app) ui.info(`${t.id} is in ${repo.base} · Run the new version: squad app restart${readMeta(bp).repos?.length ? ` ${app.name}` : ''}`);
     ui.info('Release it when you are ready: squad release');
   }
 }
@@ -612,7 +643,7 @@ export async function runAgent(role: string, opts: { step?: string; set?: string
     return;
   }
   const a = readAgent(bp, r);
-  const clean = (x: string) => x.replace(/<!--[\s\S]*?-->/g, '').trim();
+  const clean = (x: string) => withoutComments(x).trim();
   out();
   out(`  ${kleur.bold(AGENTS.find((x) => x.role === r)!.name)}  ${kleur.gray(`${a.tool}${a.model ? ` · ${a.model}` : ''}`)}`);
   out(`  ${kleur.gray('Every step:')} ${clean(a.instructions) || kleur.gray('nothing added')}`);
@@ -685,7 +716,7 @@ export async function runNote(ticketId: string, words: string[], opts: { criteri
   const text = words.join(' ') || (await input({ message: 'What should the squad know?' }));
   const kind = opts.criterion ? 'criterion' : opts.rule ? 'rule' : 'note';
   const t = addNote(bp, ticketId, { text, kind });
-  ui.success(`Added to ${t.id}. Every agent on it reads this${t.live ? ' from its next step' : ''}.`);
+  ui.success(`Added to ${t.id}. ${liveNow(t, readUsual(bp)).noteWhen}`);
 }
 
 export async function runMessage(ticketId: string, words: string[], opts: { to?: string }): Promise<void> {
@@ -694,7 +725,7 @@ export async function runMessage(ticketId: string, words: string[], opts: { to?:
   if (!['analyst', 'architect', 'builder', 'reviewer', 'tester'].includes(to)) throw new Error('--to is one of: analyst, architect, builder, reviewer, tester.');
   const text = words.join(' ') || (await input({ message: `Your message to the ${to}` }));
   const t = addNote(bp, ticketId, { text, to });
-  ui.success(`Sent. The ${to} reads it ${t.live ? 'at its next step' : 'when it works on the ticket again'}; the work goes on.`);
+  ui.success(`Sent. ${liveNow(t, readUsual(bp)).noteWhen}`);
 }
 
 export async function runTakeOver(ticketId: string): Promise<void> {
@@ -944,8 +975,13 @@ export async function runUnstick(ticketId: string, opts: { keepWaiting?: boolean
   ui.success(`Ended the stuck command on ${t.id}. The squad carries on from there.`);
 }
 
-export async function runStop(ticketId: string): Promise<void> {
+export async function runStop(ticketId: string, opts: { again?: boolean } = {}): Promise<void> {
   const bp = board();
+  if (opts.again) {
+    const t = restartStep(bp, ticketId);
+    ui.success(`Stopping the step on ${t.id}, then it starts again. The work so far is kept.`);
+    return;
+  }
   const t = stopTicket(bp, ticketId);
   ui.success(`Stopping the squad on ${t.id}. The work so far is kept.`);
 }

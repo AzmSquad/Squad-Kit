@@ -54,6 +54,8 @@ describe('team instructions per step', () => {
     expect(agentInstructions(a, 'fix')).toContain('Use our logger.\n\nFor the Fixes step:\nNever turn a test off.');
     expect(agentInstructions(a, 'build')).not.toContain('Never turn a test off.');
     expect(agentInstructions({ ...a, instructions: '<!-- a comment -->', steps: {} }, 'build')).toBe('');
+    // A comment split by another goes too: one pass would leave "<!-- b -->".
+    expect(agentInstructions({ ...a, instructions: '<!<!-- a -->-- b -->', steps: {} }, 'build')).toBe('');
   });
 
   it('the live squad tells each run which step it is in', async () => {

@@ -109,7 +109,7 @@ describe('a ticket waiting for a free place', () => {
     await until('one run', () => runs.length === 1);
     const [running] = squad.ticketIds();
     const waiting = running === first.id ? second.id : first.id;
-    await until('the waiting line', () => readTicket(bp, waiting)!.status === `Waiting for a free place: ${running} is running (limit 1)`);
+    await until('the waiting line', () => readTicket(bp, waiting)!.status === 'Next in line: starts when a slot is free (1 of 1 busy)');
     expect(readTicket(bp, waiting)!.quiet).toBeUndefined();
 
     runs[0]!.end();
@@ -119,11 +119,10 @@ describe('a ticket waiting for a free place', () => {
     expect(readTicket(bp, waiting)!.status).toBe(waiting === second.id ? said : first.status);
   });
 
-  it('reads plainly for one, two or more tickets running', () => {
-    expect(queuedText(['AB-3'], 1)).toBe('Waiting for a free place: AB-3 is running (limit 1)');
-    expect(queuedText(['AB-3', 'AB-5'], 2)).toBe('Waiting for a free place: AB-3 and AB-5 are running (limit 2)');
-    expect(queuedText(['AB-3', 'AB-5', 'CD-1'], 3)).toBe('Waiting for a free place: AB-3, AB-5 and CD-1 are running (limit 3)');
-    expect(queuedText([], 2)).toBe('Waiting for a free place (limit 2)');
+  it('reads plainly: next in line, with how many places are busy', () => {
+    expect(queuedText(['AB-3'], 1)).toBe('Next in line: starts when a slot is free (1 of 1 busy)');
+    expect(queuedText(['AB-3', 'AB-5'], 2)).toBe('Next in line: starts when a slot is free (2 of 2 busy)');
+    expect(queuedText(['AB-3', 'AB-5', 'CD-1'], 3)).toBe('Next in line: starts when a slot is free (3 of 3 busy)');
   });
 });
 

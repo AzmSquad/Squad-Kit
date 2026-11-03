@@ -176,10 +176,11 @@ describe.skipIf(process.platform === 'win32')('starting an agent over ACP', () =
     const script = path.join(dir, 'no-input.js');
     fs.writeFileSync(
       script,
-      `setTimeout(() => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: 900, method: 'session/request_permission', params: { options: [] } }) + '\\n'), 300);
+      `require('fs').closeSync(0);
+       setTimeout(() => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: 900, method: 'session/request_permission', params: { options: [] } }) + '\\n'), 300);
        setInterval(() => {}, 1000);`,
     );
-    const noInput: AcpLaunch = { ...launch(''), command: '/bin/sh', args: ['-c', `exec 0<&-; exec "${process.execPath}" "${script}"`] };
+    const noInput: AcpLaunch = { ...launch(''), args: [script] };
     const err = await runAcp(noInput, { cwd: dir, prompt: 'go', startLimits: { initializeMs: 1500 } }).catch((e: Error) => e);
     expect(err).toBeInstanceOf(AcpStartError);
     expect((err as Error).message).toContain('Fake tool did not start in 2 seconds');

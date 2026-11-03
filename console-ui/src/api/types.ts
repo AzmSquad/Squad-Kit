@@ -184,9 +184,16 @@ export interface ProofShot {
 export type WayOut = 'retry' | 'yourself' | 'continue' | 'plan' | 'skip-pr';
 
 export interface StuckChoice {
+  /** What happened, in plain words. */
   question: string;
   options: (DecisionOption & { do?: WayOut })[];
   gate?: 'checks' | 'review' | 'proof' | 'merge';
+  /** "The Builder stopped". */
+  title?: string;
+  /** What is safe: "Nothing was merged or pushed." */
+  safe?: string[];
+  /** The exact error, for engineers. */
+  detail?: string;
 }
 
 export interface GateOverride {
@@ -339,6 +346,86 @@ export interface Ticket {
   handedOver?: { from: string; to: string; at: string };
   /** What each role used on this ticket, per step and model level. */
   usage?: UsageLine[];
+  /** "Stop and try again": once the running step has stopped, it starts again at once. */
+  retryOnStop?: boolean;
+  /** The step running now, as the engine keeps it. */
+  clock?: { who: AgentName | 'squad'; step: TimedStep; since: string; part?: number; doing?: string; doingAt?: string; limit?: number };
+  /** What is happening now, in words, worked out by squad-kit from the live record. */
+  now?: LiveNow;
+  /** A merged or released ticket off the board. Its history stays. */
+  archived?: { by: string; at: string };
+  /** Delete was pressed. Still here when a delete stopped half-way: then `error` says why. */
+  deleting?: { at: string; by: string; remote?: boolean; error?: string };
+}
+
+/** What Delete would remove and what stays, in the engine's own words. */
+export interface DeletePlan {
+  id: string;
+  title: string;
+  summary: string;
+  refused?: string;
+  archive?: boolean;
+  removes: string[];
+  stays: string[];
+  warnings: string[];
+  pushed?: { remote: string; branch: string; why: string };
+  unfinished?: string;
+  remote: boolean;
+  base: string;
+  command: string;
+}
+
+export type TimedStep = 'questions' | 'spec' | 'design' | 'build' | 'fix' | 'checks' | 'review' | 'proof';
+
+/** The "Taking longer than usual" or "Looks stuck" card. */
+export interface SlowCard {
+  kind: 'long' | 'stuck';
+  title: string;
+  where: string;
+  text: string;
+  facts: { label: string; value: string }[];
+  limit?: string;
+  canEnd: boolean;
+}
+
+/** What is happening on a ticket now: the card's lines, the Now tab's sentence, and what comes next. */
+export interface LiveNow {
+  state: 'working' | 'queued' | 'you' | 'stopping' | 'idle' | 'ready' | 'done';
+  who?: string;
+  role?: AgentName | 'squad';
+  step?: TimedStep;
+  part?: { n: number; of: number };
+  doing?: string;
+  line: string;
+  time?: string;
+  bar?: ('done' | 'now' | 'todo')[];
+  sentence: string;
+  detail?: string;
+  next?: string;
+  then?: string;
+  since?: string;
+  seconds?: number;
+  usual?: { low: number; high: number; learned: boolean; runs: number };
+  lastAt?: string;
+  readyIn?: { seconds: number; what: string };
+  stages: { stage: Stage; note: string }[];
+  noteWhen: string;
+  slow?: SlowCard;
+}
+
+export type AskOffer =
+  | { do: 'propose'; label: string; note: string }
+  | { do: 'note'; label: string; note: string; to?: AgentName }
+  | { do: 'chat'; label: string; to: AgentName }
+  | { do: 'stop'; label: string };
+
+/** A status question answered from the live record. */
+export interface AskAnswer {
+  lang: 'en' | 'ar';
+  topic: 'problem' | 'when' | 'doing' | 'next' | 'cost' | 'change' | 'other';
+  instant: boolean;
+  lines: string[];
+  offers: AskOffer[];
 }
 
 /** What some runs used, added up. A count the AI tool never reported stays out, with the runs it is missing for. */
@@ -375,6 +462,8 @@ export interface BoardUsage {
   project: UsageTotal;
   roles: RoleUsage[];
   tickets: number;
+  /** Deleted tickets: what they used stays in the total. */
+  deleted?: { tickets: number; total: UsageTotal };
 }
 
 export interface Release {
@@ -483,6 +572,8 @@ export interface BoardResponse {
   /** The running board: when it started and whether a newer squad-kit is installed. */
   console?: { startedAt: string; outdated: boolean } | null;
   tickets: Ticket[];
+  /** Archived tickets, off the board until "Show archived". */
+  archived?: Ticket[];
   stats: { released30: number; bugs30: number; open: number };
 }
 
@@ -690,13 +781,48 @@ export interface ArchitectureResponse {
   reading?: { status: 'pending' | 'running' | 'done' | 'failed'; at?: string; error?: string };
 }
 
-/** One app the project runs: a code repo with a start command and a web address. */
+/** One app the project runs, from squad-kit's own copy of main, and how it is now. */
 export interface ProjectApp {
   name: string;
   repo: string;
-  url: string;
+  base: string;
+  url?: string;
   start?: string;
+  setup?: string;
+  state: 'not-running' | 'starting' | 'running' | 'stopped' | 'failed';
+  step?: 'update' | 'setup' | 'start';
+  address?: string;
+  startedAt?: string;
+  since?: string;
+  error?: string;
+  busy?: { port: number; program?: string; pid?: number; ours: boolean; nextPort?: number };
+  commit?: string;
+  dir: string;
+  elsewhere?: boolean;
+  /** Something answers at the app's address now. */
   up: boolean;
+  /** The newest tickets in the code it runs. */
+  includes: { id: string; title: string }[];
+  /** A ticket merged since it started: "RO-5 is in main · Run the new version". */
+  fresh?: { id: string; title: string; base: string; release?: string };
+}
+
+export interface AppsResponse {
+  apps: ProjectApp[];
+  live?: boolean;
+  /** The Architect is reading the project now ("Ask the Architect to find it"). */
+  reading?: boolean;
+  readError?: string;
+}
+
+export interface AppOutput {
+  name: string;
+  start: string | null;
+  url: string | null;
+  address: string | null;
+  dir: string;
+  commit: string | null;
+  lines: string[];
 }
 
 /* ── The one app (ADR-001): every project, one Waiting for you list, the folder browser ── */
@@ -782,4 +908,21 @@ export interface UpdateStatus {
     permission?: boolean;
     output?: string;
   };
+}
+
+/** The AI account's usage limit: every project's queue waits until it resets. */
+export interface UsageLimitStatus {
+  pause: { name: string; since: string; resetsAt?: string; until: string; project?: string; ticket?: string } | null;
+  /** "Claude's usage limit is reached. The squad carries on at 3:40 PM by itself". */
+  text?: string;
+}
+
+/** What Report a problem saves, before and after it is saved. */
+export interface ReportPlan {
+  name: string;
+  folder: string;
+  holds: string[];
+  never: string;
+  command: string;
+  file?: string;
 }

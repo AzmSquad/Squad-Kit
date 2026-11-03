@@ -8,6 +8,8 @@ import type { SquadPaths } from '../core/paths.js';
 import { readInstalledPackage } from '../core/package-info.js';
 import { mountAppApi } from './api/app.js';
 import { mountUpdateApi } from './api/update.js';
+import { mountSupportApi, onUnexpected } from './api/support.js';
+import { log } from '../core/app-log.js';
 import { UpdateService, runsNow, ticketsInProgress, type UpdateDeps } from './updates.js';
 import { mountStaticAssets } from './static-assets.js';
 import { authMiddleware } from './auth.js';
@@ -123,6 +125,8 @@ export async function startConsoleServer(opts: StartConsoleServerOptions): Promi
     ...opts.update,
   });
   mountUpdateApi(app, updates);
+  mountSupportApi(app, { projects });
+  app.onError(onUnexpected);
 
   // Every project's API names it: /p/<id>/api/v1/board reaches that project's /api/v1/board. This is the one place
   // the prefix is made, so each project keeps the routes one board always had. Its pages go to the board app below.
@@ -165,6 +169,7 @@ export async function startConsoleServer(opts: StartConsoleServerOptions): Promi
   // Each project runs its own squad; the tickets running at once are limited across all of them.
   if (opts.paths) projects.first = projects.openReady(opts.paths).id;
   if (opts.app) projects.openSaved();
+  log.info(`squad-kit ${readInstalledPackage().version} started on port ${actualPort} with ${projects.all().length} project${projects.all().length === 1 ? '' : 's'} open (Node ${process.version})`);
   const stopSquad = () => projects.closeAll();
 
   let resolveDone: () => void = () => {};
@@ -173,6 +178,7 @@ export async function startConsoleServer(opts: StartConsoleServerOptions): Promi
   });
 
   const shutdown = (onClose: (err?: Error) => void) => {
+    log.info('squad-kit stopped');
     // A process that outlives its board (a restart keeper, tests) must not stop it again on a later Ctrl-C.
     process.off('SIGINT', stop);
     process.off('SIGTERM', stop);

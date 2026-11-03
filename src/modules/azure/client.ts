@@ -5,6 +5,7 @@ import { loadConfig } from '../../core/config.js';
 import { loadSecrets } from '../../core/secrets.js';
 import { overlayTrackerEnv } from '../../tracker/env-overlay.js';
 import { ModuleError, kindOfStatus, type ModuleErrorKind } from '../errors.js';
+import { withoutTags } from '../../utils/text.js';
 
 /**
  * Azure Boards and Azure Repos for the live squad: the backlog, work item states and comments, bugs, and pull
@@ -444,11 +445,11 @@ function parseTags(raw: unknown): string[] {
 }
 
 export function htmlToText(html: string): string {
-  return html
+  const breaks = html
     .replace(/<\s*br\s*\/?>/gi, '\n')
     .replace(/<li[^>]*>/gi, '- ')
-    .replace(/<\/(p|div|li|h[1-6]|tr)>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
+    .replace(/<\/(p|div|li|h[1-6]|tr)>/gi, '\n');
+  return withoutTags(breaks)
     .replace(/&nbsp;/g, ' ')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')

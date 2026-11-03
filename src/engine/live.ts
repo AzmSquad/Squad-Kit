@@ -56,6 +56,12 @@ import { recordUsage } from '../board/usage.js';
 import { parallelLimit } from '../core/settings.js';
 import { answerProblem } from './answers.js';
 import { checkLane, watchLane, type Lane } from './lane.js';
+import { endStep, nextPart, slowStep, startStep, stepDoing, timedStep } from '../board/clock.js';
+import { readUsual } from '../board/usual.js';
+import { QUEUED, queuedLine } from '../board/now.js';
+import { LimitReached, activePause, isLimitText, limitText, startPause, type LimitPause } from './usage-limit.js';
+import { explainError, StepError } from '../board/problem.js';
+import { writeLog, type LogLevel } from '../core/app-log.js';
 
 /**
  * The live squad. Each step of a ticket is one real run of the role's AI tool in the project (or the
@@ -69,8 +75,6 @@ const MAX_REVIEW_ROUNDS = 2;
 const PICK_UP_MS = 2 * 60_000;
 /** The "before" screenshots run beside the build and stop after this long, so they never hold anything up. */
 const BEFORE_SHOTS_MS = 8 * 60_000;
-/** The card of a ticket ready for its next step while every place is taken. */
-const QUEUED = 'Waiting for a free place';
 const STOPPED = 'You stopped the squad.';
 
 /** The steps in which the Builder works. A small change goes into the next one of these as it starts. */
@@ -113,16 +117,17 @@ export function holdNewRuns(on: boolean): void {
   holding = on;
 }
 
+/** The end of the last usage-limit wait the squads saw, so its end is logged once. */
+let limitSeen: string | null = null;
+
 /** Every agent run going on now, by project folder: ticket steps, and the Architect's reads and chat answers beside them. */
 export function agentRuns(): { root: string; keys: string[] }[] {
   return [...squads].map((s) => s.runs()).filter((r) => r.keys.length > 0);
 }
 
-/** "Waiting for a free place: AB-3 and AB-5 are running (limit 2)". */
+/** The card of a ticket ready for its next step while every place is taken: "Next in line: starts when a slot is free (2 of 2 busy)". */
 export function queuedText(running: string[], limit: number): string {
-  if (!running.length) return `${QUEUED} (limit ${limit})`;
-  const names = running.length === 1 ? running[0]! : `${running.slice(0, -1).join(', ')} and ${running[running.length - 1]}`;
-  return `${QUEUED}: ${names} ${running.length === 1 ? 'is' : 'are'} running (limit ${limit})`;
+  return queuedLine(running.length, limit);
 }
 
 export class LiveSquad {
@@ -190,6 +195,8 @@ export class LiveSquad {
         if (t.squad && Date.parse(t.squad.nextAt) > Date.now()) {
           this.update(t.id, (x) => {
             if (x.squad) x.squad.nextAt = now();
+            // The step starts again from now; the time the app was closed is not its time.
+            delete x.clock;
           });
         }
       }
@@ -211,6 +218,13 @@ export class LiveSquad {
     this.pickUp();
     const limit = parallelLimit(meta.parallel);
     waiting.delete(this);
+    // The AI account's usage limit: nothing new starts in any project until it resets (E5).
+    const pause = activePause();
+    if (pause) limitSeen = pause.until;
+    else if (limitSeen) {
+      limitSeen = null;
+      this.log('info', 'The usage limit wait is over: the queue carries on');
+    }
     if (meta.scan?.status === 'pending' && !this.running.has('__scan')) {
       this.launch('__scan', () => this.scan());
       return;
@@ -233,6 +247,12 @@ export class LiveSquad {
       if (d.status === 'writing' && !this.running.has(key)) this.launch(key, () => this.writeTechDecision(d.tech));
     }
     for (const t of listTickets(this.bp)) {
+      // Being deleted (src/engine/delete.ts): nothing starts on it again, its tracker updates are not sent, and what
+      // runs stops.
+      if (t.deleting) {
+        this.letGo(t);
+        continue;
+      }
       // Tracker updates run beside the squad's work and never count against the parallel limit. One that failed waits
       // a little longer before each new try.
       if (trackerDue(t) && !this.syncing.has(t.id)) {
@@ -269,12 +289,14 @@ export class LiveSquad {
       if (this.running.has(t.id)) continue;
       const q = t.questions?.find((x) => x.thinking);
       if (q) {
-        if (this.mayStart(limit)) this.launch(t.id, () => this.reply(t.id, q.id));
+        if (pause) this.hold(t, limitText(pause));
+        else if (this.mayStart(limit)) this.launch(t.id, () => this.reply(t.id, q.id));
         else this.queue(t, limit);
         continue;
       }
       if (t.squad && Date.parse(t.squad.nextAt) <= Date.now()) {
-        if (this.mayStart(limit)) {
+        if (pause) this.hold(t, limitText(pause));
+        else if (this.mayStart(limit)) {
           const phase = this.phaseFor(t);
           this.launch(t.id, () => this.step(t.id, phase));
         } else this.queue(t, limit);
@@ -289,9 +311,13 @@ export class LiveSquad {
   private queue(t: Ticket, limit: number): void {
     const running: string[] = [];
     for (const s of squads) running.push(...s.ticketIds());
-    const text = queuedText(running, limit);
+    this.hold(t, queuedText(running, limit));
+  }
+
+  /** The card says why a ready ticket waits: for a free place, or for the usage limit to reset. */
+  private hold(t: Ticket, text: string): void {
     if (t.status === text && !t.quiet) return;
-    if (!t.status.startsWith(QUEUED)) this.beforeQueue.set(t.id, t.status);
+    if (!held(t.status)) this.beforeQueue.set(t.id, t.status);
     try {
       this.update(t.id, (x) => {
         x.status = text;
@@ -307,7 +333,7 @@ export class LiveSquad {
     const said = this.beforeQueue.get(id);
     this.beforeQueue.delete(id);
     try {
-      if (!readTicket(this.bp, id)?.status.startsWith(QUEUED)) return;
+      if (!held(readTicket(this.bp, id)?.status)) return;
       this.update(id, (x) => (x.status = said ?? 'Carrying on'));
     } catch {
       // The ticket was removed meanwhile.
@@ -316,6 +342,8 @@ export class LiveSquad {
 
   private launch(key: string, job: () => Promise<void>): void {
     if (holding) return;
+    // The Architect's reads beside the tickets wait for the usage limit too; a chat answer the person asked for does not.
+    if (key.startsWith('__') && !key.startsWith('__chat:') && activePause()) return;
     if (!key.startsWith('__')) this.unqueue(key);
     this.running.add(key);
     this.stops.set(key, new AbortController());
@@ -324,9 +352,13 @@ export class LiveSquad {
     job()
       .catch((err: Error) => {
         if (key.startsWith('__') || this.closing) return;
+        // Stopped for a delete: no stuck card on a ticket that is going.
+        if (readTicket(this.bp, key)?.deleting) return;
         if (readTicket(this.bp, key)?.stopRequested) return this.stopped(key, phase);
         if (err instanceof WaitingForYou) return;
-        this.fail(key, err.message, phase ?? 'analyst-read');
+        if (err instanceof LimitReached) return this.waitForLimit(key, phase ?? 'analyst-read', err.pause);
+        const { what, detail } = explainError(err);
+        this.fail(key, what, phase ?? 'analyst-read', detail);
       })
       .finally(() => {
         this.running.delete(key);
@@ -362,11 +394,13 @@ export class LiveSquad {
       return;
     }
     const rows = processTable();
+    const usual = readUsual(this.bp);
     for (const id of keys) {
       const t = readTicket(this.bp, id);
       if (!t) continue;
       const snoozed = t.quietSnoozedUntil && Date.parse(t.quietSnoozedUntil) > Date.now();
-      this.setQuiet(id, snoozed ? null : this.dog.check(id, Date.now(), rows));
+      // Quiet, or past twice its usual time: either way the person sees a card with what it is doing.
+      this.setQuiet(id, snoozed ? null : (this.dog.check(id, Date.now(), rows) ?? slowStep(t, usual)));
     }
   }
 
@@ -395,6 +429,23 @@ export class LiveSquad {
     }
   }
 
+  /**
+   * A ticket being deleted: its step, chat answer, change and before shots stop. Once none of them runs (and no
+   * tracker update is on its way), the ticket says so, for a delete started in another window.
+   */
+  private letGo(t: Ticket): void {
+    const keys = [t.id, `__chat:${t.id}`, `__change:${t.id}`, `__before:${t.id}`];
+    for (const k of keys) this.stops.get(k)?.abort();
+    if (t.deleting?.stopped || keys.some((k) => this.running.has(k)) || this.syncing.has(t.id)) return;
+    try {
+      updateTicket(this.bp, t.id, (x) => {
+        if (x.deleting) x.deleting.stopped = now();
+      });
+    } catch {
+      // Deleted meanwhile.
+    }
+  }
+
   /** The person pressed Stop: park the ticket with a way to pick it up again. */
   private stopped(id: string, phase?: string): void {
     // Taken over, or talking it through: the person has the ticket now, so no stuck card, just quiet.
@@ -402,9 +453,24 @@ export class LiveSquad {
     if (held?.takenOver || (held?.chat?.open && !held.chat.beside)) {
       this.update(id, (t) => {
         t.stopRequested = undefined;
+        t.retryOnStop = undefined;
         t.live = false;
         t.squad = null;
         addActivity(t, 'squad', 'Stopped the running step for you');
+      });
+      return;
+    }
+    // "Stop and try again": the step that ran starts again at once, with the work so far.
+    if (held?.retryOnStop) {
+      this.update(id, (t) => {
+        t.stopRequested = undefined;
+        t.retryOnStop = undefined;
+        delete t.quiet;
+        delete t.clock;
+        t.live = true;
+        t.status = 'Trying the step again';
+        addActivity(t, 'squad', 'Stopped the step and started it again, with the work so far');
+        scheduleSquad(t, phase ?? t.squad?.phase ?? t.retryPhase ?? 'analyst-read', 0.2, 1);
       });
       return;
     }
@@ -488,6 +554,7 @@ export class LiveSquad {
       this.update(id, (t) => {
         t.status = line;
         t.live = true;
+        stepDoing(t, line);
         // The activity list keeps the changes to project files; commands only show as the live line.
         if (logged < 40 && /^(Editing|Writing) /.test(line) && e.name !== 'Bash' && isInside(cwd, e.input.file_path)) {
           addActivity(t, role, line);
@@ -527,6 +594,13 @@ export class LiveSquad {
     const effort = effortOn(tool, lv.effort);
     if (key && levelStep !== 'chat') this.update(key, (x) => addActivity(x, opts.role, `Runs on ${describeLevel(lv, tool)}`));
     opts = this.withNewNotes(opts);
+    // The step's clock. A run beside the step (a chat answer, a change being written) has a job of its own and no clock.
+    const timed = key && job === key ? timedStep(levelStep) : null;
+    if (timed) this.update(key!, (x) => startStep(x, { who: opts.role, step: timed, limit: Math.round((opts.timeoutMs ?? 20 * 60_000) / 60_000) }));
+    const ended = (res: AgentResult): AgentResult => {
+      if (timed) this.update(key!, (x) => endStep(this.bp, x));
+      return res;
+    };
     const watch = job ? { onActivity: () => this.dog.beat(job), onSpawn: (pid: number) => this.dog.track(job, pid) } : {};
     // Every role runs through the Agent Client Protocol unless the board says to run tools directly.
     const run = (o: AgentRun) => tool.run({
@@ -542,6 +616,7 @@ export class LiveSquad {
       logDir: this.bp.chatsDir,
       direct: this.meta().runner === 'direct',
       onFallback: (why) => {
+        this.log('warn', `ACP did not start, so the ${opts.role} runs ${tool.label} directly: ${why}`, key);
         if (key) this.update(key, (x) => addActivity(x, 'squad', `ACP did not start (${why.slice(0, 160)}), so this step runs ${tool.label} directly`));
       },
     });
@@ -560,18 +635,46 @@ export class LiveSquad {
         if (x.notesSeen?.[asked] !== undefined) x.notesSeen[r.sessionId!] = x.notesSeen[asked];
       });
     }
-    if (!r.ok) throw new Error(r.error ?? `${tool.label} did not finish.`);
+    if (!r.ok) throw this.runFailed(r, tool.label, key, opts.role);
     // The answer is checked against its shape before anything uses it. A missing or broken one is asked for once more,
     // in the same conversation; then the step stops in words instead of failing on it further on.
     const problem = opts.schema ? answerProblem(opts.schema, r.structured) : null;
-    if (!opts.schema || !problem) return r;
+    if (!opts.schema || !problem) return ended(r);
     const who = AGENTS.find((a) => a.role === opts.role)?.name ?? opts.role;
     if (key && levelStep !== 'chat') this.update(key, (x) => addActivity(x, opts.role, `The answer was not complete (${problem}), so squad-kit asked for it again`));
     const again = await run(r.sessionId ? { ...opts, sessionId: undefined, resume: r.sessionId, prompt: P.answerAgainPrompt(problem) } : opts);
     recordUsage(this.bp, key, used, again.usage);
-    if (!again.ok) throw new Error(again.error ?? `${tool.label} did not finish.`);
+    if (!again.ok) throw this.runFailed(again, tool.label, key, opts.role);
     if (answerProblem(opts.schema, again.structured)) throw new Error(`The ${who} did not hand in a complete answer.`);
-    return again;
+    return ended(again);
+  }
+
+  /**
+   * A run that did not finish. On the usage limit the whole queue waits for the reset; anything else stops the step,
+   * with the tool's exact words kept for engineers.
+   */
+  private runFailed(r: AgentResult, label: string, ticket: string | undefined, role: AgentRole): Error {
+    if (r.limit) {
+      const pause = startPause(r.limit, { project: this.projectName(), ...(ticket ? { ticket } : {}) });
+      this.log('warn', `${r.limit.name}'s usage limit is reached${pause.resetsAt ? ` until ${pause.resetsAt}` : ''}. The queue waits until ${pause.until}`, ticket);
+      return new LimitReached(pause);
+    }
+    const what = r.error ?? `${label} did not finish.`;
+    this.log(what === STOPPED ? 'info' : 'error', `The ${role} run did not finish: ${r.detail ?? what}`, ticket);
+    return new StepError(what, r.detail);
+  }
+
+  private projectName(): string {
+    try {
+      return readMeta(this.bp).project || this.bp.projectId;
+    } catch {
+      return this.bp.projectId;
+    }
+  }
+
+  /** One line in the app log, with this project and the ticket. */
+  private log(level: LogLevel, text: string, ticket?: string): void {
+    writeLog({ level, project: this.projectName(), ...(ticket && !ticket.startsWith('__') ? { ticket } : {}), text });
   }
 
   /** What no agent may change: squad-kit's own folder, and the instructions and settings every AI tool loads. */
@@ -613,17 +716,20 @@ export class LiveSquad {
     return fresh.length ? { ...opts, prompt: `${opts.prompt}\n${P.notesText(fresh, true)}` } : opts;
   }
 
-  /** Something went wrong: stop and ask the person, with a way to try again. */
-  private fail(id: string, error: string, retryPhase: string): void {
+  /** Something went wrong: stop and ask the person, with a way to try again. The exact error stays for engineers. */
+  private fail(id: string, error: string, retryPhase: string, detail?: string): void {
+    this.log(error.startsWith(STOPPED) ? 'info' : 'error', `Stopped at ${retryPhase}: ${error}${detail ? ` (${detail})` : ''}`, id);
     try {
       this.update(id, (t) => {
         if (t.takenOver || (t.chat?.open && !t.chat.beside)) return;
         t.live = false;
         t.squad = null;
+        delete t.clock;
         t.retryPhase = retryPhase;
         t.status = 'Stopped, needs you';
         t.stuck = {
           question: error,
+          ...(detail ? { detail } : {}),
           options: wayOptions({
             publish: retryPhase === 'publish',
             copy: Boolean(t.worktree && fs.existsSync(t.worktree)) && ['implement', 'test', 'review'].includes(t.stage),
@@ -634,6 +740,37 @@ export class LiveSquad {
       });
     } catch {
       // The ticket was removed while it ran.
+    }
+  }
+
+  /**
+   * The AI account hit its usage limit. The ticket waits with the whole queue and runs the same step again by itself
+   * once the limit resets. Nothing failed, so it is not a failed try.
+   */
+  private waitForLimit(id: string, phase: string, pause: LimitPause): void {
+    try {
+      const t = readTicket(this.bp, id);
+      if (!t) return;
+      if (!held(t.status)) this.beforeQueue.set(id, t.status);
+      const text = limitText(pause);
+      const again = isLimitText(t.status);
+      this.update(id, (x) => {
+        // The step goes on where the limit cut it off, and the try it cut off does not count.
+        let next = phase;
+        if (phase === 'review' && x.reviewNotes?.length) next = 'review-fix';
+        else if (phase === 'review' && x.reviewRound) x.reviewRound -= 1;
+        if (phase === 'test') {
+          x.tries = Math.max(0, (x.tries ?? 0) - 1);
+          x.fails = Math.max(0, (x.fails ?? 0) - 1);
+        }
+        x.live = false;
+        x.squad = { ...(x.squad ?? {}), phase: next, nextAt: now() };
+        x.status = text;
+        delete x.quiet;
+        if (!again) addActivity(x, 'squad', `${text}, from this same step`);
+      });
+    } catch {
+      // The ticket was removed meanwhile.
     }
   }
 
@@ -710,6 +847,12 @@ export class LiveSquad {
       }
     } catch (err) {
       const fresh = this.meta();
+      // The usage limit: the read starts again by itself once it resets.
+      if (err instanceof LimitReached) {
+        fresh.scan = { status: 'pending', at: now() };
+        writeMeta(this.bp, fresh);
+        return;
+      }
       // The usual reason on a new computer, said plainly.
       const tool = aiTool(readAgent(this.bp, 'architect').tool);
       const missing = tool && !tool.ready() ? `${tool.label} is not installed on this computer. Install it and sign in once, then press Try again.` : null;
@@ -859,6 +1002,7 @@ export class LiveSquad {
     this.update(id, (t) => {
       if (t.squad) t.squad.nextAt = new Date(Date.now() + 3_600_000).toISOString();
     });
+    this.log('info', `Step ${phase} started`, id);
     switch (phase) {
       case 'analyst-read':
         return this.intake(id);
@@ -1040,6 +1184,8 @@ export class LiveSquad {
         qq.thinking = false;
       });
     } catch (err) {
+      // The usage limit: the answer comes once it resets.
+      if (err instanceof LimitReached) return;
       this.update(id, (x) => {
         const qq = x.questions?.find((y) => y.id === qid);
         if (!qq) return;
@@ -1234,8 +1380,8 @@ export class LiveSquad {
         addActivity(x, 'analyst', `Wrote change ${y.id} into the spec (${y.size}): ${y.summary}`);
       });
     } catch (err) {
-      // Closing the board is not a failure: the Analyst writes it again when the board opens.
-      if (this.closing) return;
+      // Closing the board is not a failure: the Analyst writes it again when the board opens. Nor is the usage limit.
+      if (this.closing || err instanceof LimitReached) return;
       set((x, y) => {
         y.status = 'failed';
         y.error = (err as Error).message;
@@ -1611,6 +1757,7 @@ export class LiveSquad {
           }
           x.progress = Math.round((n / Math.max(1, steps.length)) * 100);
           x.status = `Step ${n + 1} of ${steps.length} with ${this.toolLabel('builder')}`;
+          nextPart(this.bp, x, n + 1);
         });
       },
       onTool: this.watcher(id, 'builder', cwd, (line, x) => {
@@ -1639,7 +1786,7 @@ export class LiveSquad {
 
   /** The Builder's run itself failed (an error, a time limit): it counts like failed checks, unless you pressed Stop. */
   private builderFailed(id: string, err: unknown): never {
-    if (!(err instanceof WaitingForYou) && !readTicket(this.bp, id)?.stopRequested) this.update(id, (x) => (x.fails = (x.fails ?? 0) + 1));
+    if (!(err instanceof WaitingForYou) && !(err instanceof LimitReached) && !readTicket(this.bp, id)?.stopRequested) this.update(id, (x) => (x.fails = (x.fails ?? 0) + 1));
     throw err;
   }
 
@@ -1866,10 +2013,17 @@ export class LiveSquad {
       x.live = true;
       x.gates = { checks: 'pending', review: x.gates?.review ?? 'pending', proof: 'pending' };
       addActivity(x, 'tester', 'squad-kit is running the project checks');
+      startStep(x, { who: 'squad', step: 'checks', limit: 15 });
     });
-    const results = await runChecks(t.worktree!, commands, (name) => this.update(id, (x) => (x.status = `Running ${name}: ${commands[name as 'test']}`)), this.commandWatch(id));
+    const onStart = (name: string) =>
+      this.update(id, (x) => {
+        x.status = `Running ${name}: ${commands[name as 'test']}`;
+        stepDoing(x, x.status);
+      });
+    const results = await runChecks(t.worktree!, commands, onStart, this.commandWatch(id));
     // Stopped while a check ran: its result says nothing about the code, so it is no failed try.
     this.goOn(id);
+    this.update(id, (x) => endStep(this.bp, x));
     const failed = results.filter((r) => !r.ok);
     if (results.length === 0) {
       this.update(id, (x) => {
@@ -2037,6 +2191,7 @@ export class LiveSquad {
       try {
         await this.screens(id, 'after');
       } catch (err) {
+        if (err instanceof LimitReached) throw err;
         why = (err as Error).message;
         this.update(id, (x) => addActivity(x, 'tester', `Could not take screenshots: ${why}`));
       }
@@ -2137,6 +2292,7 @@ export class LiveSquad {
       if (!beside) {
         x.sessions = { ...x.sessions, tester: x.sessions?.tester ?? randomUUID() };
         x.status = when === 'before' ? 'Tester is taking before screenshots' : 'Tester is taking after screenshots';
+        startStep(x, { who: 'tester', step: 'proof' });
       }
       addActivity(x, 'tester', when === 'before' ? 'Taking screenshots before the change' : 'Taking screenshots after the change');
     });
@@ -2203,6 +2359,11 @@ export class LiveSquad {
       if (when === 'after') addActivity(x, 'tester', `Saved ${out.shots.length} screenshots${out.skipped ? `. Skipped: ${out.skipped}` : ''}`);
     });
   }
+}
+
+/** A card line that says the ticket waits: for a free place, or for the usage limit. */
+function held(status: string | undefined): boolean {
+  return Boolean(status && (status.startsWith(QUEUED) || isLimitText(status)));
 }
 
 function isInside(dir: string, file: unknown): boolean {

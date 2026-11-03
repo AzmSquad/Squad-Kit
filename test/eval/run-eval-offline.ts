@@ -72,7 +72,7 @@ async function main(): Promise<void> {
     '',
     '| Plan | Issues | Sample detail |',
     '|------|--------|---------------|',
-    ...rows.map((r) => `| \`${r.rel}\` | ${r.count} | ${(r.sampleDetail ?? '').replace(/\|/g, '\\|')} |`),
+    ...rows.map((r) => `| \`${r.rel}\` | ${r.count} | ${(r.sampleDetail ?? '').replace(/[\\|]/g, '\\$&')} |`),
     '',
     '## Issue details',
     '',

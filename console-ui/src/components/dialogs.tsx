@@ -5,7 +5,9 @@ import type { DraftJob, Release, Ticket, TicketDraft as Draft, Track } from '../
 import { api, send } from '../api/client';
 import { useAct } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
+import { shellQuote } from '../lib/text';
 import { Cmd, Modal } from './ui';
+import { ErrorCard } from './ErrorCard';
 
 export interface PickedFile {
   name: string;
@@ -27,10 +29,6 @@ export function readFile(f: File): Promise<PickedFile> {
     r.onerror = () => reject(new Error(`Could not read ${f.name}`));
     r.readAsDataURL(f);
   });
-}
-
-function quote(x: string): string {
-  return `"${x.replace(/"/g, '\\"')}"`;
 }
 
 /** A local preview for a picture that came back from the server, as the picker makes for a picked one. */
@@ -212,17 +210,17 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
   const stuck = Boolean(startError) || job?.status === 'failed' || job?.status === 'cancelled';
   const cmd =
     mode === 'paste'
-      ? `squad new --from ${quote(pasted.trim().split('\n')[0]?.slice(0, 40) || 'your message')}`
+      ? `squad new --from ${shellQuote(pasted.trim().split('\n')[0]?.slice(0, 40) || 'your message')}`
       : [
-          `squad new ${quote(title.trim() || 'Your title')}`,
+          `squad new ${shellQuote(title.trim() || 'Your title')}`,
           isBug ? `--bug --severity ${severity}` : '',
-          isBug && what.trim() ? `--ask ${quote(what.trim())}` : '',
+          isBug && what.trim() ? `--ask ${shellQuote(what.trim())}` : '',
           track === 'express' ? '--express' : '',
           talkFirst && track === 'full' ? '--talk' : '',
-          ...(isBug ? [] : criteria.filter((x) => x.trim()).map((x) => `--criteria ${quote(x)}`)),
-          ...(isBug ? [] : rules.filter((x) => x.trim()).map((x) => `--rule ${quote(x)}`)),
-          ...(isBug ? [] : edgeCases.filter((x) => x.trim()).map((x) => `--edge ${quote(x)}`)),
-          ...files.map((f) => `--attach ${quote(f.name)}`),
+          ...(isBug ? [] : criteria.filter((x) => x.trim()).map((x) => `--criteria ${shellQuote(x)}`)),
+          ...(isBug ? [] : rules.filter((x) => x.trim()).map((x) => `--rule ${shellQuote(x)}`)),
+          ...(isBug ? [] : edgeCases.filter((x) => x.trim()).map((x) => `--edge ${shellQuote(x)}`)),
+          ...files.map((f) => `--attach ${shellQuote(f.name)}`),
         ]
           .filter(Boolean)
           .join(' ');
@@ -490,10 +488,23 @@ function DraftStep({ state, children }: { state: 'done' | 'now' | 'todo'; childr
 
 /** The Analyst stopped. The error stays here until the person picks a way on; the text they pasted is kept. */
 function DraftStopped({ error, onRetry, onWrite }: { error: string | null; onRetry(): void; onWrite(): void }) {
+  if (error) {
+    return (
+      <ErrorCard
+        title="The Analyst could not finish"
+        what={error}
+        safe={['Your text and files are kept.', 'No ticket was made yet.']}
+        ways={[
+          { label: 'Try again', primary: true, icon: <RotateCcw size={14} />, onClick: onRetry },
+          { label: 'Write it myself with what I typed', icon: <PenLine size={14} />, onClick: onWrite },
+        ]}
+      />
+    );
+  }
   return (
-    <div className={`drafterr ${error ? '' : 'calm'}`} role={error ? 'alert' : 'status'}>
-      <b>{error ? 'The Analyst could not finish' : 'You stopped the Analyst'}</b>
-      <div>{error ?? 'Nothing was saved.'} Your text is kept.</div>
+    <div className="drafterr calm" role="status">
+      <b>You stopped the Analyst</b>
+      <div>Nothing was saved. Your text is kept.</div>
       <div className="drafterr-ways">
         <button className="btn pri" onClick={onRetry}>
           <RotateCcw size={14} /> Try again
@@ -670,7 +681,7 @@ export function BugDialog({ onClose, foundIn }: { onClose(): void; foundIn?: str
           </button>
           <button className="btn" onClick={onClose}>Cancel</button>
           <span className="grow" />
-          <Cmd text={`squad bug "${what.trim() || 'What happened'}"${foundIn ? ` --in ${foundIn}` : ''}`} />
+          <Cmd text={`squad bug ${shellQuote(what.trim() || 'What happened')}${foundIn ? ` --in ${foundIn}` : ''}`} />
         </>
       }
     >

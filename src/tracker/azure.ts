@@ -21,11 +21,12 @@ const HTML_STRIPPER_RE = [
   [/<\/(p|div|li|h[1-6])>/gi, '\n\n'] as const,
   [/<[^>]+>/g, ''] as const,
   [/&nbsp;/g, ' '] as const,
-  [/&amp;/g, '&'] as const,
   [/&lt;/g, '<'] as const,
   [/&gt;/g, '>'] as const,
   [/&quot;/g, '"'] as const,
   [/&#39;/g, "'"] as const,
+  // Last, so a written "&amp;lt;" reads "&lt;" and is not read twice into "<".
+  [/&amp;/g, '&'] as const,
   [/\n{3,}/g, '\n\n'] as const,
 ];
 

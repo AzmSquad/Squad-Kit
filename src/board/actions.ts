@@ -1777,13 +1777,30 @@ export function endStuckCommand(bp: BoardPaths, id: string): Ticket {
   });
 }
 
-/** "Keep waiting": the step is slow but fine. The watchdog stays quiet about it for 10 minutes. */
-export function keepWaiting(bp: BoardPaths, id: string): Ticket {
+/**
+ * "Give it 10 more minutes": the step is slow but fine. squad-kit stays quiet about it for that long, then asks again
+ * if it is still slow. The step's hard limit stays.
+ */
+export function keepWaiting(bp: BoardPaths, id: string, minutes = 10): Ticket {
+  const m = Math.round(minutes);
+  if (!Number.isFinite(m) || m < 1 || m > 120) throw new BoardActionError('Give it between 1 and 120 more minutes.');
   return updateTicket(bp, id, (t) => {
-    if (!t.quiet) throw new BoardActionError(`${t.id} is not quiet right now.`);
-    t.quietSnoozedUntil = new Date(Date.now() + 10 * 60_000).toISOString();
-    addActivity(t, 'you', 'Chose to keep waiting');
+    if (!t.quiet && !(t.live || t.squad)) throw new BoardActionError(`${t.id} is not running right now.`);
+    t.quietSnoozedUntil = new Date(Date.now() + m * 60_000).toISOString();
+    addActivity(t, 'you', `Gave it ${m} more minute${m === 1 ? '' : 's'}`);
     delete t.quiet;
+  });
+}
+
+/** "Stop and try again": the running step stops, then starts again at once. The work so far is kept. */
+export function restartStep(bp: BoardPaths, id: string): Ticket {
+  return updateTicket(bp, id, (t) => {
+    if (!t.live && !t.squad) throw new BoardActionError(`${t.id} is not running right now.`);
+    if (t.waiting) throw new BoardActionError(`${t.id} waits for you, so no step is running to try again.`);
+    t.stopRequested = true;
+    t.retryOnStop = true;
+    t.status = 'Stopping, then trying again…';
+    addActivity(t, 'you', 'Pressed Stop and try again');
   });
 }
 

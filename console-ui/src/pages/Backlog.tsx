@@ -5,6 +5,7 @@ import { Bug, ExternalLink, Play, Plug } from 'lucide-react';
 import { api } from '../api/client';
 import type { BacklogResponse, WorkItemRow } from '../api/types';
 import { useAct } from '../lib/data';
+import { shellQuote } from '../lib/text';
 import { Cmd, STAGE_NAME } from '../components/ui';
 
 /** The sprint's stories and bugs from Azure Boards. Starting one makes it a ticket the squad works on. */
@@ -34,7 +35,7 @@ export function BacklogPage() {
           </select>
         )}
         <span className="grow" />
-        <Cmd text={sprintName ? `squad backlog --sprint "${sprintName}"` : 'squad backlog'} />
+        <Cmd text={sprintName ? `squad backlog --sprint ${shellQuote(sprintName)}` : 'squad backlog'} />
       </div>
       <div className="scroll">
         <div className="page">

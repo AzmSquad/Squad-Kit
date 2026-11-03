@@ -117,6 +117,18 @@ svg.lucide { flex: none; }
 .me .theme { margin-left: auto; width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: var(--muted); border: 1px solid var(--line); }
 
 .canvas { flex: 1; margin: 10px 10px 10px 0; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; display: flex; flex-direction: column; overflow: hidden; position: relative; min-width: 0; }
+/* A phone: a top bar with the menu button, and the sidebar slides in over the page. */
+.mtop, .side-veil { display: none; }
+@media (max-width: 760px) {
+  .app { flex-direction: column; }
+  .mtop { display: flex; align-items: center; gap: 10px; padding: 10px 12px 8px; flex: none; }
+  .mtop b { flex: 1; min-width: 0; font-size: 15px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mtop .badge { font-size: 12px; font-weight: 650; padding: 2px 8px; border-radius: 99px; background: var(--you); color: #1d1203; }
+  .side { position: fixed; inset: 0 auto 0 0; z-index: 60; width: min(300px, 86vw); background: var(--bg); border-right: 1px solid var(--line); transform: translateX(-100%); transition: transform 0.2s ease, visibility 0s linear 0.2s; visibility: hidden; }
+  .side.open { transform: none; visibility: visible; transition: transform 0.2s ease; }
+  .side-veil { display: block; position: fixed; inset: 0; z-index: 59; background: var(--overlay); backdrop-filter: blur(2px); }
+  .canvas { margin: 0 8px 8px; border-radius: 12px; }
+}
 .top { height: 64px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 24px; border-bottom: 1px solid var(--line); min-width: 0; }
 .top .btn { flex: none; white-space: nowrap; }
 .top h1 { font-size: 22px; font-weight: 650; font-stretch: 88%; letter-spacing: -0.015em; margin-right: 12px; }
@@ -170,10 +182,7 @@ svg.lucide { flex: none; }
 .waiting { padding: 18px 24px 20px; border-bottom: 1px solid var(--line); background: var(--you-soft); flex: none; }
 .wh { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
 .wh h2 { font-size: 15.5px; font-weight: 650; display: flex; align-items: center; gap: 9px; }
-.count { display: grid; place-items: center; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 99px; background: var(--you); color: #1d1203; font-size: 12px; font-weight: 700; }
-.wh p { font-size: 13px; color: var(--muted); }
 .wh .grow { flex: 1; }
-.wcards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .wcard { position: relative; background: var(--surface); border: 1px solid var(--you-line); border-radius: 12px; padding: 13px 14px 13px 18px; display: flex; align-items: center; gap: 14px; overflow: hidden; text-align: left; transition: transform 0.12s, box-shadow 0.12s; }
 .wcard:hover { transform: translateY(-1px); box-shadow: 0 10px 24px -16px var(--you); }
 .wcard::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--you); }
@@ -184,6 +193,45 @@ svg.lucide { flex: none; }
 .wcard .grow { flex: 1; min-width: 0; }
 .calmlane { display: flex; align-items: center; gap: 12px; font-size: 13.5px; color: var(--muted); }
 .calmlane b { color: var(--text); font-weight: 600; }
+
+/* ── Waiting for you, at the top of every page ─────────── */
+/* One row of items whatever the count, in the page's flow: it never covers the page and never jumps as items come and go. */
+.ybar { flex: none; display: grid; gap: 10px; padding: 12px 20px 14px; background: var(--you-soft); border-bottom: 1px solid var(--you-line); animation: fade 0.2s ease-out; }
+.home .ybar { padding-inline: 28px; }
+.ybar-h { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.ybar-n { display: grid; place-items: center; min-width: 24px; height: 24px; padding: 0 7px; border-radius: 99px; background: var(--you); color: #1d1203; font-size: 12.5px; font-weight: 700; flex: none; }
+.ybar-t { font-size: 15px; font-weight: 650; white-space: nowrap; }
+.ybar-h .sub { font-size: 13px; color: var(--you-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ybar-h .grow { flex: 1; }
+.ybar-items { display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr); }
+.ybar-items.n2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.ybar-items.more { grid-template-columns: minmax(0, 1fr) auto; }
+.ybar-items.n2.more { grid-template-columns: repeat(2, minmax(0, 1fr)) auto; }
+.yitem { position: relative; display: flex; align-items: center; gap: 12px; min-width: 0; padding: 10px 12px 10px 16px; background: var(--surface); border: 1px solid var(--you-line); border-radius: 11px; overflow: hidden; animation: fade 0.3s ease-out; }
+.yitem::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--you); }
+.yitem .grow { flex: 1; min-width: 0; }
+.yitem .meta { font: 500 11.5px 'JetBrains Mono', monospace; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.yitem h3 { font-size: 14px; font-weight: 600; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.yitem p { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.yitem .btn { flex: none; }
+.ymore { align-self: center; padding: 0 6px; font-size: 13px; font-weight: 600; color: var(--you-ink); white-space: nowrap; text-decoration: underline; text-underline-offset: 3px; }
+.ymore-up { display: none; }
+.ybar-ask { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--you-ink); }
+.ybar-ask span { font-weight: 600; }
+@media (max-width: 760px) {
+  /* A phone: the items scroll sideways in their one row, each with its button under the words. No terminal here. */
+  .ybar { padding: 10px 16px 12px; }
+  .home .ybar { padding-inline: 16px; }
+  .ybar-h .sub, .ybar-h .term, .ymore-row { display: none; }
+  .ymore-up { display: inline; }
+  .ybar-items, .ybar-items.n2, .ybar-items.more, .ybar-items.n2.more { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(220px, 86%); overflow-x: auto; }
+  .yitem { flex-direction: column; align-items: stretch; gap: 8px; }
+  .yitem .btn { align-self: flex-start; }
+}
+/* The page under the banner. A ticket drawer and its veil cover the page, never the banner. */
+.canvas-b { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; overflow: hidden; }
+.fullpage { height: 100%; display: flex; flex-direction: column; }
+.canvas-b > .cpage { flex: 1; min-height: 0; height: auto; }
 
 /* ── First open: setting up the project ────────────────── */
 .setup { display: grid; gap: 12px; }
@@ -486,8 +534,7 @@ button.opt2:hover { border-color: var(--line-strong); }
 .scan span { color: var(--muted); }
 
 @media (max-width: 1280px) {
-  /* Narrow screens: the waiting cards stay in one row and scroll sideways, so the lanes keep their height. */
-  .wcards { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(260px, 1fr); overflow-x: auto; padding-bottom: 2px; }
+  /* Narrow screens: a waiting card puts its button under the words. */
   .wcard { flex-direction: column; align-items: flex-start; gap: 8px; padding: 11px 13px 11px 16px; }
   .wcard .grow { width: 100%; }
   .wcard p { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -933,18 +980,49 @@ ul.ticketnotes .grow, .addnote .grow { flex: 1; }
 .localsetup code { font: 500 11.5px 'JetBrains Mono', monospace; color: var(--dim); overflow-wrap: anywhere; }
 .localsetup pre { font: 500 11px 'JetBrains Mono', monospace; white-space: pre-wrap; max-height: 160px; overflow: auto; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); color: var(--text); margin-top: 4px; }
 
-/* Your apps, in the sidebar: one per code repo, opened from the board */
-.apps { display: flex; flex-direction: column; gap: 4px; padding: 10px 2px 12px; border-top: 1px solid var(--line); }
-.apps-h { font-size: 10.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); padding: 0 8px 4px; }
-.app-row { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 9px; color: var(--muted); text-decoration: none; }
-.app-row:hover { background: var(--surface); color: var(--text); }
-.app-row i { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--line-strong); }
-.app-row.up i { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+/* Your apps, in the sidebar: each app of the project, run from squad-kit's own copy of main */
+.apps { display: flex; flex-direction: column; gap: 8px; padding: 10px 2px 12px; border-top: 1px solid var(--line); }
+.apps-h { font-size: 10.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); padding: 0 8px; }
+.apps-note { padding: 0 8px; font-size: 11.5px; line-height: 1.45; color: var(--dim); }
+.apps .btn.go { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.apps .term { height: 26px; font-size: 11px; }
+.app-item { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.app-row { display: flex; align-items: center; gap: 10px; padding: 2px 4px 2px 8px; min-width: 0; }
+.app-row i { width: 9px; height: 9px; border-radius: 50%; flex: none; border: 2px solid var(--dim); }
+.app-item.running .app-row i { border: none; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.app-item.starting .app-row i { border-color: var(--accent); animation: pulse 1.6s ease-in-out infinite; }
+.app-item.failed .app-row i { border-color: var(--bug); background: var(--bug); }
 .app-row .nm { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.app-row b { font-size: 13px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.app-row small { font: 500 11px 'JetBrains Mono', monospace; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.app-row svg { flex: none; opacity: 0.6; }
-.app-row:hover svg { opacity: 1; }
+.app-row b { font-size: 13.5px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app-row small { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app-item.failed .app-row small { color: var(--bug); }
+.app-row .btn { flex: none; }
+.app-more { display: flex; flex-direction: column; gap: 6px; padding: 0 4px 0 8px; font-size: 12px; line-height: 1.45; color: var(--muted); overflow-wrap: anywhere; }
+.app-more a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.app-more .addr { font: 500 12px 'JetBrains Mono', monospace; color: var(--text); }
+.app-more.why { color: var(--bug); }
+.app-item > .term { margin: 0 2px; }
+.app-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+.app-warn { display: flex; flex-direction: column; gap: 6px; margin: 0 2px; padding: 10px; border-radius: 10px; border: 1px solid var(--you-line); background: var(--you-soft); font-size: 12px; line-height: 1.45; color: var(--you-ink); overflow-wrap: anywhere; }
+.app-warn > b { font-size: 13px; font-weight: 650; color: var(--text); }
+.app-warn .bad { color: var(--bug); }
+.app-new { display: flex; flex-direction: column; gap: 6px; margin: 0 2px; padding: 10px; border-radius: 12px; border: 1.5px solid var(--accent); background: var(--surface); }
+.app-new .hd { display: flex; align-items: center; gap: 8px; }
+.app-new .ok { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--accent); color: var(--accent-ink); }
+.app-new b { font-size: 14px; font-weight: 650; }
+.app-new p { font-size: 12.5px; line-height: 1.45; }
+.app-new small { font-size: 11.5px; color: var(--muted); }
+.app-type { display: flex; flex-direction: column; gap: 6px; margin: 0 2px; }
+.app-type label { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; font-weight: 600; color: var(--muted); }
+.app-type .input { height: 30px; padding: 4px 8px; font: 500 12px 'JetBrains Mono', monospace; }
+.app-link { align-self: flex-start; margin-left: 8px; font-size: 11.5px; color: var(--dim); text-decoration: underline; text-underline-offset: 2px; }
+.app-link:hover { color: var(--text); }
+.app-how { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px 16px; margin-bottom: 12px; }
+.app-how > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.app-how span { font-size: 12px; color: var(--muted); }
+.app-how code { font: 500 12.5px 'JetBrains Mono', monospace; overflow-wrap: anywhere; }
+.app-out { font: 500 11.5px 'JetBrains Mono', monospace; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 46vh; overflow: auto; padding: 10px 12px; border-radius: 10px; background: var(--term-bg); color: var(--term-ink); border: 1px solid var(--term-line); }
+@media (max-width: 640px) { .app-how { grid-template-columns: minmax(0, 1fr); } }
 
 /* A newer decision changes this ticket's plan */
 .outdated { flex: none; display: flex; flex-direction: column; gap: 10px; padding: 16px 28px 0; }
@@ -1018,3 +1096,35 @@ ul.ticketnotes .grow, .addnote .grow { flex: 1; }
 /* A change to the spec on its card: the old and new wording, side by side. */
 .changecard .changebody { display: flex; flex-direction: column; gap: 6px; max-height: 44vh; overflow-y: auto; }
 .changecard .changeparts { display: flex; flex-direction: column; margin: 2px 0 4px; font-size: 13px; }
+/* Delete and Archive: the ticket's overflow menu, and what goes and what stays. */
+.more { position: relative; display: inline-flex; }
+.more-menu { position: absolute; right: 0; top: calc(100% + 6px); min-width: 190px; padding: 5px; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--pop-shadow); z-index: 30; }
+.more-menu button { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 7px; font-size: 13.5px; font-weight: 550; color: var(--text); text-align: left; white-space: nowrap; }
+.more-menu button:hover { background: var(--surface-2); }
+.more-menu button.danger { color: var(--bug); }
+.rmlist { list-style: none; margin: 0 0 4px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.rmlist li { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; line-height: 1.45; }
+.rmlist svg { flex: none; margin-top: 2px; }
+.rmlist .x { color: var(--bug); }
+.rmlist .ok { color: var(--accent); }
+.rmlist .hide { color: var(--muted); }
+.rm-note { margin: 16px 0 6px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); color: var(--muted); font-size: 13px; line-height: 1.5; }
+.rm-note b { color: var(--text); }
+.rm-gap { margin-bottom: 12px; display: flex; flex-direction: column; gap: 4px; }
+.rm-banner { flex: none; margin: 16px 28px 0; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.rm-banner .grow { flex: 1; min-width: 200px; }
+.rm-cmd { margin-top: 8px; }
+.calm .rm-cmd .term { font-size: 12px; color: var(--term-ink); }
+.calm .rm-cmd .term span { font-size: inherit; color: inherit; }
+.calm .rm-cmd .term b { display: inline; font-size: inherit; }
+
+/* A phone: the ticket drawer takes the whole width, the page's top row wraps, and the board's numbers stack. */
+@media (max-width: 760px) {
+  .drawer { width: 100%; border-left: 0; }
+  .top { height: auto; flex-wrap: wrap; padding: 12px 16px; row-gap: 10px; }
+  .top .grow { display: none; }
+  .top .search { order: 9; width: 100%; flex-basis: 100%; }
+  .foot { flex-wrap: wrap; row-gap: 6px; padding: 10px 16px; }
+  .foot > span:not(.grow) { padding: 0 12px 0 0; }
+  .foot > span:not(.grow) + span:not(.grow) { border-left: 0; }
+}

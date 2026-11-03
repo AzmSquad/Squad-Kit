@@ -38,8 +38,9 @@ without your approval.
 7. You check this **proof** and press **Looks right**.
 8. You press **Release**. squad-kit writes the changelog, sets the version and adds the git tag.
 
-When the squad needs you, a card shows up in **Waiting for you**. Everything else, the squad handles. Every
-button also has a terminal command, so developers can do the same from the terminal.
+When the squad needs you, a banner shows on every page with the button to press, the browser tab shows how many
+things wait, and a desktop notice can tell you too. Everything else, the squad handles. Every button also has a
+terminal command, so developers can do the same from the terminal.
 
 ## What you need
 
@@ -98,9 +99,32 @@ test, build and run it. You can follow it on the board.
 2. Write what you want in plain words. Add business rules, examples or screenshots if you have them. Or paste
    an idea or a chat message, and the Analyst fills in the ticket for you to check.
 3. Press create. The card moves across the board as the squad works.
-4. Answer, approve and check when a card shows up in **Waiting for you**.
+4. Answer, approve and check when the **Waiting for you** banner asks you.
 
 The step-by-step guide is in [Getting started](docs/getting-started.md).
+
+## While the squad works
+
+- **Every card says what is happening**, for example "Builder · step 3 of 6 · editing the booking page", with how
+  long it has run and how long that step usually takes on this project. A ticket waiting for a free place says so.
+- **Ask about a ticket** on its **Now** tab: "is there a problem?", "when will it be ready?". Status questions are
+  answered at once, in English or Arabic, at no AI cost. Terminal: `squad ask`, `squad status`.
+- **A slow step says so**, with what it is doing and three ways out: **Give it 10 more minutes**, **Stop and try
+  again**, or **Stop**. A step that makes no progress says what squad-kit checked.
+- **Run your app** from **Your apps** in the sidebar: Start, Open, Restart and Stop, from squad-kit's own copy of
+  `main`. After **Looks right**, **Run the new version** shows the change. Terminal: `squad app start`.
+- **Remove a ticket** you no longer want with **Delete**, and take finished ones off the board with **Archive**.
+  The dialog lists what goes and what stays; the cost stays in Usage. Terminal: `squad delete`, `squad archive`.
+
+## When something goes wrong
+
+- **Every stop says what happened, what is safe, and the ways out**, as buttons: Try again, Fix it yourself,
+  Continue anyway, or Report a problem. The exact error is one click away in the ticket's Developer tab.
+- **Claude's usage limit pauses the squad** for every project, shows when it resets, and the squad carries on by
+  itself, from the same step. **Try now** carries on at once.
+- **Report a problem** saves one `.zip` to send to whoever helps you: the ticket, its conversations, the last day
+  of the app log and the versions. It never holds sign-ins, tokens or `.env` files. Terminal: `squad report`.
+- **The app log** is in `~/.squad-kit/logs/`, one file a day, kept 14 days. Terminal: `squad logs --tail`.
 
 ## Where your files live
 

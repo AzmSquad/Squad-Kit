@@ -5,6 +5,7 @@ import yaml from 'js-yaml';
 import { DEFAULT_CONFIG, loadConfig, saveConfig } from '../core/config.js';
 import { squadHome } from '../core/home.js';
 import type { Actor, BoardMeta, Decision, Question, Release, Step, Ticket } from './types.js';
+import { trackStage } from './clock.js';
 import {
   decisionDoc,
   lessonsDoc,
@@ -236,6 +237,7 @@ export const TICKET_HOME = {
   createdBy: 'project',
   owner: 'project',
   handedOver: 'project',
+  archived: 'project',
   builder: 'project',
   reviewer: 'project',
   repo: 'project',
@@ -297,6 +299,10 @@ export const TICKET_HOME = {
   chat: 'local',
   planReview: 'local',
   usage: 'local',
+  clock: 'local',
+  stageTimes: 'local',
+  retryOnStop: 'local',
+  deleting: 'local',
 } as const satisfies Record<keyof Ticket, 'project' | 'local'>;
 
 /** The live part of a ticket on this computer, plus the parts of split fields that stay here. */
@@ -323,6 +329,11 @@ const DOC_FILES = ['ticket.md', 'spec.md', 'questions.md', 'design.md', 'notes.m
 
 function stateFile(bp: BoardPaths, id: string): string {
   return path.join(bp.stateDir, `${id.toUpperCase()}.yaml`);
+}
+
+/** A ticket's live state on this computer. A delete cut off half-way may leave only this. */
+export function ticketStateFile(bp: BoardPaths, id: string): string {
+  return stateFile(bp, id);
 }
 
 function inside(dir: string, file: string): boolean {
@@ -424,10 +435,12 @@ export function writeTicket(bp: BoardPaths, ticket: Ticket): void {
   writeFile(stateFile(bp, ticket.id), dumpYaml(state));
 }
 
-/** Read, change and save one ticket. */
+/** Read, change and save one ticket. The time it spends in each stage is kept as it moves. */
 export function updateTicket(bp: BoardPaths, id: string, change: (t: Ticket) => void): Ticket {
   const ticket = requireTicket(bp, id);
+  const stage = ticket.stage;
   change(ticket);
+  trackStage(ticket, stage);
   writeTicket(bp, ticket);
   return ticket;
 }

@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import process from 'node:process';
 import { changelogBlobUrl, type InstalledPackage } from './package-info.js';
 import { detectPackageManager, installCommandFor, type PackageManager } from './package-manager.js';
+import { withoutTags } from '../utils/text.js';
 
 /**
  * The parts `squad upgrade` and the app's Update button share: the one install command for this computer, what is new
@@ -50,12 +51,13 @@ const NOTES_MAX = 5;
 /** The first top-level bullets of a release's notes, without Markdown, so they read as plain lines. */
 export function notesFromMarkdown(md: string, max = NOTES_MAX): string[] {
   const plain = (s: string) =>
-    s
-      .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
-      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-      .replace(/`([^`]+)`/g, '$1')
-      .replace(/(\*\*|__)(.+?)\1/g, '$2')
-      .replace(/<[^>]+>/g, '')
+    withoutTags(
+      s
+        .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+        .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+        .replace(/`([^`]+)`/g, '$1')
+        .replace(/(\*\*|__)(.+?)\1/g, '$2'),
+    )
       .replace(/\s+/g, ' ')
       .trim();
   const lines = md.split(/\r?\n/);

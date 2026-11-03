@@ -10,15 +10,19 @@ import { usePrefs } from '../lib/prefs';
 import { BugDialog } from '../components/dialogs';
 import { useRestart } from '../components/Restart';
 import { AboutUpdates } from '../components/Update';
+import { HelpRow } from '../components/Report';
 import { SquadUsage } from '../components/Usage';
 import { Cmd, Glyph, Modal, STAGE_NAME, actionLabel, ago, commandFor, outdatedLine } from '../components/ui';
 import { changeWaits, openChange } from '../components/ChangeCard';
+import { NoticeSetting } from '../components/Waiting';
+import { needsYou } from '../lib/waiting';
+import { withoutComments } from '../lib/text';
 
 /* ── Waiting for you ───────────────────────────────────── */
 
 export function InboxPage() {
   const board = useBoard();
-  const tickets = board.data?.ready ? board.data.tickets.filter((t) => t.waiting || t.outdated?.length || changeWaits(t)) : [];
+  const tickets = board.data?.ready ? board.data.tickets.filter(needsYou) : [];
   return (
     <>
       <div className="top">
@@ -47,7 +51,7 @@ export function InboxPage() {
                       <span>{ago(t.activity[0]?.at ?? t.createdAt)}</span>
                     </div>
                     <h3>{t.title}</h3>
-                    <p>{t.waiting?.summary ?? (changeWaits(t) ? `Change ${openChange(t)!.id} to the spec waits for you` : outdatedLine(t))}</p>
+                    <p>{t.waiting?.summary ?? (changeWaits(t) ? `Change ${openChange(t)!.id} to the spec waits for you` : t.outdated?.length ? outdatedLine(t) : `Looks stuck: ${t.quiet?.detail ?? 'no progress'}`)}</p>
                   </div>
                   <Cmd text={!t.waiting && changeWaits(t) ? `squad propose ${t.id} --approve` : commandFor(t)} />
                   {t.waiting?.kind === 'proof' ? (
@@ -168,7 +172,7 @@ export function SquadPage() {
                     const main = a.levels?.find((r) => r.step === head?.id)?.now;
                     return main ? <span className={`pill ${main.from === 'squad-kit' ? 'wait' : ''}`} title={`${head?.name}: ${levelText(main)}`}>{main.modelName || main.level}{main.effort && a.supportsEffort ? ` · ${EFFORT_NAME[main.effort]}` : ''}</span> : null;
                   })()}
-                  {a.instructions.replace(/<!--[\s\S]*?-->/g, '').trim() && <span className="pill ok">House rules</span>}
+                  {withoutComments(a.instructions).trim() && <span className="pill ok">House rules</span>}
                 </span>
                 <button className="btn sm" onClick={() => setEditing(a)}>Edit</button>
               </div>
@@ -255,7 +259,7 @@ function QualitySetting() {
  */
 function AgentDialog({ agent, onClose }: { agent: AgentInfo; onClose: () => void }) {
   const act = useAct();
-  const clean = (x: string | undefined) => (x ?? '').replace(/<!--[\s\S]*?-->/g, '').trim();
+  const clean = (x: string | undefined) => withoutComments(x ?? '').trim();
   const [tool, setTool] = useState(agent.tool);
   const [model, setModel] = useState(agent.model);
   const [myModel, setMyModel] = useState(agent.youRole?.model ?? '');
@@ -755,6 +759,7 @@ export function SettingsPage() {
               <span className="note">Every button shows the command that does the same thing.</span>
             </span>
           </div>
+          <NoticeSetting />
           <div className="maprow">
             <b>Project files</b>
             <span className="note">
@@ -782,6 +787,7 @@ export function SettingsPage() {
           )}
           <h2 style={{ marginTop: 26 }}>About squad-kit</h2>
           <AboutUpdates />
+          <HelpRow />
         </div>
       </div>
       {resetting && (

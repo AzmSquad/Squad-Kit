@@ -196,6 +196,9 @@ export function pickUpPushed(bp: BoardPaths): PickedUp[] {
     const theirs = readTicketDocs(on.docs);
     if (!theirs.title || !theirs.stage) continue;
     const local = readTicket(bp, on.id);
+    // Deleted on this computer: its branch left on the remote does not bring it back, unless it is handed over again.
+    const deleted = local ? undefined : meta.deleted?.filter((d) => d.id === on.id).at(-1);
+    if (deleted && !(theirs.handedOver?.at && theirs.handedOver.at > deleted.at)) continue;
     const newer = theirs.handedOver?.at && theirs.handedOver.at > (local?.handedOver?.at ?? '');
     const kind: PickedUp['kind'] | null = !local ? 'new' : newer ? 'handed' : !isMine(local, meta) && differs(bp, on.id, on.docs) ? 'follow' : null;
     if (!kind) continue;
@@ -257,7 +260,7 @@ function catchUp(repo: string, t: Ticket, ref: string): string | null {
 }
 
 /** What this computer knew of a ticket's running work: it belongs to the computer that did it. */
-const RUN_STATE = ['sessions', 'stuck', 'agentQuestion', 'chat', 'takenOver', 'retryPhase', 'reviewNotes', 'replanFor', 'quiet', 'quietSnoozedUntil', 'stopRequested', 'notesSeen', 'planReview', 'changeRequest', 'tries', 'fails', 'reviewRound'] as const;
+const RUN_STATE = ['sessions', 'stuck', 'agentQuestion', 'chat', 'takenOver', 'retryPhase', 'reviewNotes', 'replanFor', 'quiet', 'quietSnoozedUntil', 'stopRequested', 'retryOnStop', 'clock', 'notesSeen', 'planReview', 'changeRequest', 'tries', 'fails', 'reviewRound'] as const;
 
 /** The ticket just came from a branch: yours carries on from its documents; someone else's waits for its owner. */
 function received(bp: BoardPaths, repo: string, id: string, ref: string, kind: PickedUp['kind']): Ticket {

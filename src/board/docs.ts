@@ -100,6 +100,7 @@ const HEADER_KEYS = [
   'stage',
   'owner',
   'handedOver',
+  'archived',
   'track',
   'createdAt',
   'createdBy',

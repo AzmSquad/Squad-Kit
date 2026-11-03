@@ -7,6 +7,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+squad-kit 1.1 is about never wondering what the squad is doing, and always having a way out.
+
+### Always know what is happening
+
+- **Every card says what is happening** in plain words: "Builder · step 3 of 6 · editing the booking page", how
+  long it has run, and how long that step usually takes on this project. squad-kit learns the usual times from the
+  project's own history. A ticket over the limit says "Next in line: starts when a slot is free".
+- **The Now tab** says in one sentence what happens now and what comes next. The stage tracker shows how long each
+  stage took. Terminal: `squad status <ticket>`, and `squad show` prints the same.
+- **Ask about a ticket**: "is there a problem?", "when will it be ready?", "what is it doing?". Status questions are
+  answered at once from the live record, in English or Arabic, at no AI cost. A question that would change the work
+  offers Propose a change or a note, and says when the note will be read. Terminal: `squad ask <ticket> "..."`.
+
+### Waiting for you, loud
+
+- **A banner on every page** when something needs you, with the button to press on each item.
+- **The browser tab shows the count**: "(2) roomflow".
+- **Desktop notices**, asked for once: one notice per new question, approval, proof or stop. No sound. Settings ›
+  Desktop notices turns them on or off.
+
+### Time limits you can see
+
+- **"Taking longer than usual"** past twice a step's usual time, with what it is doing, its last progress and when
+  squad-kit stops it: **Give it 10 more minutes**, **Stop and try again**, **Stop**. Terminal:
+  `squad wait <ticket> --more 10m`, `squad stop <ticket> --again`.
+- **"Looks stuck"** says what squad-kit checked, and keeps **End the stuck command**.
+
+### Your apps
+
+- **Start, Open, Restart and Stop** your app from the sidebar. squad-kit runs it from its own copy of `main` (never
+  your folder), brings the copy up to date first, copies your `.env` files into it, and says Running only when the
+  address answers. **Show output**
+  has the last lines.
+- **Run the new version** after Looks right.
+- **A busy port** gets a plain message, and the fix when there is one. No start command: **Ask the Architect to find
+  it**, or **Type it**.
+- Terminal: `squad app start|stop|restart|status|set|find`.
+
+### Delete and Archive
+
+- **Delete** a ticket that is not merged: squad-kit stops the squad on it, then removes its copy of the code, its
+  branch, its files, its unmerged decisions, its chats and screenshots. The tracker item and the cost stay. A delete
+  cut off half-way finishes with **Delete again**.
+- **Archive** a merged or released ticket to take it off the board; **Show archived** and **Unarchive** bring it
+  back.
+- Terminal: `squad delete <ticket>`, `squad archive <ticket> [--undo]`, `squad board --archived`.
+
+### When something goes wrong
+
+- **Every stop says what happened, what is safe, and the ways out** as buttons. The exact error is in the
+  Developer tab and the app log.
+- **Claude's usage limit pauses the squad** for every project, shows when it resets, and carries on by itself from
+  the same step, without counting a failed try. **Try now** carries on at once (`squad try-now`).
+- **Report a problem** saves one `.zip` to send for help: the ticket, its conversations, the last day of the app
+  log and the versions. Never sign-ins, tokens or `.env` files. Terminal: `squad report [ticket]`.
+- **An app log** in `~/.squad-kit/logs/`, one file a day, kept 14 days. Terminal: `squad logs --tail`.
+
+### Also
+
+- **On a phone**, the sidebar folds away behind a menu button, and the ticket drawer takes the whole screen.
+- **`squad inbox`** names a newer decision that changes a plan correctly (it said "Looks stuck").
+- **Copied terminal commands quote pasted text safely.** A note or answer with `$(…)`, backticks or a trailing `\`
+  could run or break when the command beside its button was pasted into a terminal.
+- **Tracker text is decoded once.** A written `&amp;lt;` in a Jira or Azure DevOps item no longer turns into `<`.
+- **Security**: GitHub code scanning, secret scanning with push protection and Dependabot are on, the release
+  workflow's Actions are pinned to exact versions, npm publishing runs only from release tags, and `SECURITY.md`
+  describes 1.0. The issues code scanning found are fixed.
+
 ## [1.0.1] — 2026-11-03
 
 squad-kit 1.0.1 makes the squad steadier and easier to follow, from what we saw in the first trials. To get it

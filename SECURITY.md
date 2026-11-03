@@ -36,7 +36,8 @@ Credit will be given in the release notes unless you prefer to remain anonymous.
   `~/.squad-kit/app.json`. Nothing is hosted.
 - **Sign-ins stay on this computer.** Tracker tokens and keys live in `~/.squad-kit/projects/<id>/secrets.yaml`
   (mode `0600` on POSIX), never in the project folder or in git. A project moved from 0.x has its
-  `.squad/secrets.yaml` moved there once.
+  `.squad/secrets.yaml` moved there once. To run your app, squad-kit copies your project's `.env` files into its own
+  copy of the code in `~/.squad-kit/projects/<id>/apps/` (mode `0600`), never anywhere else.
 - **Agents never see your secrets.** No agent may read squad-kit's secret files, and the commands squad-kit runs for
   you (tests, setup and release) start without the AI and tracker keys.
 - **Agents stay in their lane.** Every step runs with the permissions it needs and no more: the Builder edits only its

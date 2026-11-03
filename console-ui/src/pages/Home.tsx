@@ -6,6 +6,9 @@ import type { AppProject, AppProjects, AppSettings, AppWaiting, FolderListing } 
 import { usePrefs } from '../lib/prefs';
 import { Cmd, Modal, STAGE_NAME, actionLabel, ago, commandFor, outdatedLine } from '../components/ui';
 import { AboutButton, AppUpdate } from '../components/Update';
+import { LimitBanner } from '../components/UsageLimit';
+import { HomeWaiting } from '../components/Waiting';
+import { changeWaits, openChange } from '../lib/waiting';
 
 /**
  * Home of the one app (ADR-001): one Waiting for you list across every project, then the projects, and Add project
@@ -49,6 +52,8 @@ export function HomePage() {
         </button>
       </header>
       <AppUpdate />
+      <LimitBanner />
+      <HomeWaiting />
       <div className="scroll">
         <div className="page home-page">
           <section className="home-projects">
@@ -74,7 +79,7 @@ export function HomePage() {
               </div>
             )}
           </section>
-          <section className="home-inbox">
+          <section className="home-inbox" id="waiting">
             <div className="home-h">
               <h2>Waiting for you</h2>
               {items.length > 0 && <span className="badge you">{items.length}</span>}
@@ -101,7 +106,7 @@ export function HomePage() {
                         <span>{ago(t.activity[0]?.at ?? t.createdAt)}</span>
                       </div>
                       <h3>{t.title}</h3>
-                      <p>{t.waiting?.summary ?? (t.outdated?.length ? outdatedLine(t) : `Looks stuck: ${t.quiet?.detail ?? ''}`)}</p>
+                      <p>{t.waiting?.summary ?? (changeWaits(t) ? `Change ${openChange(t)!.id} to the spec waits for you` : t.outdated?.length ? outdatedLine(t) : `Looks stuck: ${t.quiet?.detail ?? ''}`)}</p>
                     </div>
                     <Cmd text={forProject(commandFor(t), project.name)} />
                     <a

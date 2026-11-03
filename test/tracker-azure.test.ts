@@ -58,6 +58,14 @@ describe('AzureDevOpsClient', () => {
     );
   });
 
+  it('reads each HTML entity once, so a written &lt; stays as text', async () => {
+    const payload = loadMinimalWorkItem() as { fields: Record<string, unknown> };
+    payload.fields['System.Description'] = '<p>Type &amp;lt;br&amp;gt; for a break &amp; more</p>';
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(payload), { status: 200 })));
+    const client = new AzureDevOpsClient({ organization: 'myorg', project: 'myproject', pat: 'patsecret' });
+    expect((await client.fetchIssue('42')).description).toBe('Type &lt;br&gt; for a break & more');
+  });
+
   it('sends Basic auth with empty username and PAT', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify(loadMinimalWorkItem()), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
