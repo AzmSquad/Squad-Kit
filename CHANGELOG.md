@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] — 2026-11-03
+
+A security update. Nothing changes in how squad-kit works.
+
+### Security
+
+- **Packages with known security problems are updated.** The app's web server (hono 4.13, @hono/node-server 2), the
+  parts of the MCP SDK's server it pulls in (proxy-addr, body-parser, qs, ip-address), @modelcontextprotocol/sdk
+  1.32, fast-uri and js-yaml; in the app's screens, seroval and js-yaml; and the test tools (vitest 4, vite 6).
+- **The website's build tools** move to Astro 7.
+- **Still open:** zod 3, used only by the 0.x planner commands (`squad new-plan` with an API key). Its fix needs
+  zod 4, which those commands' AI library does not read yet. It is planned.
+
 ## [1.1.0] — 2026-11-03
 
 squad-kit 1.1 is about never wondering what the squad is doing, and always having a way out.
@@ -873,7 +886,8 @@ First public release.
 - Plan-generation meta-prompt (`generate-plan.md`), intake template (`intake.md`), and plan skeleton reference (`story-skeleton.md`).
 - Documentation: `docs/philosophy.md`, `docs/getting-started.md`, `docs/customization.md`, `docs/vs-spec-kit.md`.
 
-[Unreleased]: https://github.com/AzmSquad/squad-kit/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/AzmSquad/squad-kit/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.1.1
 [1.1.0]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.1.0
 [1.0.1]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.0.1
 [1.0.0]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.0.0
