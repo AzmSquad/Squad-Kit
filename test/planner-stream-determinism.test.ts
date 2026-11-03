@@ -1,21 +1,19 @@
 import { describe, it, expect } from 'vitest';
-import type { LanguageModelV1StreamPart } from '@ai-sdk/provider';
+import type { LanguageModelV2, LanguageModelV2StreamPart } from '@ai-sdk/provider';
 import { resolveModel } from '../src/planner/providers/index.js';
 import { runPlanner } from '../src/planner/loop.js';
 import { VercelRuntime } from '../src/planner/runtimes/vercel-runtime.js';
-import type { LanguageModelV1 } from 'ai';
 import { Budget } from '../src/planner/budget.js';
-import { MockLanguageModelV1, simulateReadableStream } from 'ai/test';
+import { MockLanguageModelV2, simulateReadableStream } from 'ai/test';
 
-function streamOk(chunks: LanguageModelV1StreamPart[]) {
+function streamOk(chunks: LanguageModelV2StreamPart[]) {
   return {
     stream: simulateReadableStream({ chunks }),
-    rawCall: { rawPrompt: [] as unknown[], rawSettings: {} },
   };
 }
 
 function tok(p: number, o: number) {
-  return { promptTokens: p, completionTokens: o, totalTokens: p + o };
+  return { inputTokens: p, outputTokens: o, totalTokens: p + o };
 }
 
 const budgetCfg = {
@@ -24,7 +22,7 @@ const budgetCfg = {
   maxDurationSeconds: 60,
 };
 
-function vercelRt(m: LanguageModelV1, id = 'mid') {
+function vercelRt(m: LanguageModelV2, id = 'mid') {
   return new VercelRuntime('anthropic', id, m, true);
 }
 
@@ -37,7 +35,7 @@ describe('planner stream / model resolution', () => {
 
   it('runPlanner sends system + user messages with expected shape on first step', async () => {
     let seenPrompt: unknown;
-    const model = new MockLanguageModelV1({
+    const model = new MockLanguageModelV2({
       provider: 'mock',
       modelId: 'mid',
       doStream: async (opts) => {

@@ -3,16 +3,16 @@ import { usageFromLanguageModelStep } from '../src/planner/usage-map.js';
 import type { LanguageModelUsage } from 'ai';
 
 describe('usageFromLanguageModelStep (Anthropic cache fields)', () => {
-  it('maps cacheCreationInputTokens and cacheReadInputTokens from provider metadata', () => {
+  it('maps cache writes from provider metadata and cache reads from the usage', () => {
     const usage: LanguageModelUsage = {
-      promptTokens: 100,
-      completionTokens: 50,
+      inputTokens: 100,
+      outputTokens: 50,
       totalTokens: 150,
+      cachedInputTokens: 800,
     };
     const meta = {
       anthropic: {
         cacheCreationInputTokens: 2000,
-        cacheReadInputTokens: 800,
       },
     };
     expect(usageFromLanguageModelStep(usage, meta)).toEqual({
@@ -25,8 +25,8 @@ describe('usageFromLanguageModelStep (Anthropic cache fields)', () => {
 
   it('treats missing cache fields as zero', () => {
     const usage: LanguageModelUsage = {
-      promptTokens: 10,
-      completionTokens: 5,
+      inputTokens: 10,
+      outputTokens: 5,
       totalTokens: 15,
     };
     expect(usageFromLanguageModelStep(usage, undefined)).toEqual({

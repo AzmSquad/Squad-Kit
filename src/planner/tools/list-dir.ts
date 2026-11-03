@@ -32,7 +32,7 @@ type EntryRow = { type: 'f' | 'd'; name: string; size: number | null };
 export function listDirToolFactory(root: string, budget: Budget, hooks: ListDirToolHooks) {
   return tool({
     description: LIST_DIR_TOOL_DESCRIPTION,
-    parameters: listDirSchema,
+    inputSchema: listDirSchema,
     execute: async (args, { toolCallId }) => {
       const tc: ToolCall = {
         id: toolCallId,

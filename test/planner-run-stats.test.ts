@@ -2,13 +2,13 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { LanguageModelV1StreamPart } from '@ai-sdk/provider';
-import { MockLanguageModelV1, simulateReadableStream } from 'ai/test';
+import type { LanguageModelV2, LanguageModelV2StreamPart } from '@ai-sdk/provider';
+import { MockLanguageModelV2, simulateReadableStream } from 'ai/test';
 import { runPlanner } from '../src/planner/loop.js';
 import { VercelRuntime } from '../src/planner/runtimes/vercel-runtime.js';
-import type { LanguageModelV1 } from 'ai';
 import { Budget } from '../src/planner/budget.js';
 import { READ_FILE_TOOL_NAME } from '../src/planner/tools/index.js';
+import { textParts } from './support/model-stream.js';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -21,17 +21,16 @@ const budgetCfg = {
 };
 
 function tok(p: number, o: number) {
-  return { promptTokens: p, completionTokens: o, totalTokens: p + o };
+  return { inputTokens: p, outputTokens: o, totalTokens: p + o };
 }
 
-function streamOk(chunks: LanguageModelV1StreamPart[]) {
+function streamOk(chunks: LanguageModelV2StreamPart[]) {
   return {
     stream: simulateReadableStream({ chunks }),
-    rawCall: { rawPrompt: [] as unknown[], rawSettings: {} },
   };
 }
 
-function vercelRt(m: LanguageModelV1, id = 'm') {
+function vercelRt(m: LanguageModelV2, id = 'm') {
   return new VercelRuntime('anthropic', id, m, true);
 }
 
@@ -40,9 +39,10 @@ describe('PlannerRunStats aggregation', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-stats-'));
     fs.writeFileSync(path.join(root, 'a.txt'), 'a', 'utf8');
     let i = 0;
-    const metaCreate = { anthropic: { cacheCreationInputTokens: 200, cacheReadInputTokens: 0 } };
-    const metaRead = { anthropic: { cacheCreationInputTokens: 0, cacheReadInputTokens: 400 } };
-    const model = new MockLanguageModelV1({
+    // Anthropic reports cache reads on the usage and cache writes in provider metadata.
+    const metaCreate = { anthropic: { cacheCreationInputTokens: 200 } };
+    const metaRead = { anthropic: { cacheCreationInputTokens: 0 } };
+    const model = new MockLanguageModelV2({
       provider: 'mock',
       modelId: 'm',
       doStream: async () => {
@@ -51,25 +51,24 @@ describe('PlannerRunStats aggregation', () => {
           return streamOk([
             {
               type: 'tool-call',
-              toolCallType: 'function',
               toolCallId: 't1',
               toolName: READ_FILE_TOOL_NAME,
-              args: JSON.stringify({ path: 'a.txt' }),
+              input: JSON.stringify({ path: 'a.txt' }),
             },
             {
               type: 'finish',
               finishReason: 'tool-calls',
-              usage: tok(100, 10),
+              usage: { ...tok(100, 10), cachedInputTokens: 0 },
               providerMetadata: metaCreate,
             },
           ]);
         }
         return streamOk([
-          { type: 'text-delta', textDelta: '# Done' },
+          ...textParts('# Done'),
           {
             type: 'finish',
             finishReason: 'stop',
-            usage: tok(500, 20),
+            usage: { ...tok(500, 20), cachedInputTokens: 400 },
             providerMetadata: metaRead,
           },
         ]);
@@ -96,12 +95,12 @@ describe('PlannerRunStats aggregation', () => {
   });
 
   it('cacheHitRatio is 0 when all token totals are zero', async () => {
-    const model = new MockLanguageModelV1({
+    const model = new MockLanguageModelV2({
       provider: 'mock',
       modelId: 'm',
       doStream: async () =>
         streamOk([
-          { type: 'text-delta', textDelta: 'x' },
+          ...textParts('x'),
           { type: 'finish', finishReason: 'stop', usage: tok(0, 0) },
         ]),
     });

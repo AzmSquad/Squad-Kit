@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import os from 'node:os';
-import type { LanguageModelV1StreamPart } from '@ai-sdk/provider';
-import { MockLanguageModelV1, simulateReadableStream } from 'ai/test';
+import type { LanguageModelV2StreamPart } from '@ai-sdk/provider';
+import { MockLanguageModelV2, simulateReadableStream } from 'ai/test';
 import { VercelRuntime } from '../src/planner/runtimes/vercel-runtime.js';
 import { PlannerEventBus } from '../src/planner/events.js';
 import { Budget } from '../src/planner/budget.js';
+import { textParts } from './support/model-stream.js';
 
 const budgetCfg = {
   maxFileReads: 25,
@@ -12,25 +13,24 @@ const budgetCfg = {
   maxDurationSeconds: 120,
 };
 
-function streamOk(chunks: LanguageModelV1StreamPart[]) {
+function streamOk(chunks: LanguageModelV2StreamPart[]) {
   return {
     stream: simulateReadableStream({ chunks }),
-    rawCall: { rawPrompt: [] as unknown[], rawSettings: {} },
   };
 }
 
 describe('VercelRuntime.runDraft', () => {
   it('streams assistant text and finishes normally on stop', async () => {
-    const model = new MockLanguageModelV1({
+    const model = new MockLanguageModelV2({
       provider: 'mock',
       modelId: 'm',
       doStream: async () =>
         streamOk([
-          { type: 'text-delta', textDelta: '# Plan\n' },
+          ...textParts('# Plan\n'),
           {
             type: 'finish',
             finishReason: 'stop',
-            usage: { promptTokens: 10, completionTokens: 5 },
+            usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
           },
         ]),
     });

@@ -1,5 +1,5 @@
-import type { LanguageModelV1 } from 'ai';
-import { APICallError, generateObject, NoObjectGeneratedError } from 'ai';
+import type { LanguageModelV2 } from '@ai-sdk/provider';
+import { APICallError, generateObject, NoObjectGeneratedError, stepCountIs } from 'ai';
 import { resolveModel } from '../providers/index.js';
 import type { ProviderName, ToolCall, ToolResult, Usage } from '../types.js';
 import type { ChatTurn } from '../types.js';
@@ -32,6 +32,15 @@ import { z } from 'zod';
 
 const MAX_RATE_LIMIT_RETRY_SEC = 90;
 
+/**
+ * Sampling the planner has always used: AI SDK 4 sent temperature 0 by default, AI SDK 5 sends none.
+ * Providers that do not take a temperature (OpenAI reasoning models) still drop it.
+ */
+const PLANNER_TEMPERATURE = 0;
+
+// AI SDK 5 prints provider warnings (such as a dropped temperature) to the terminal; the planner never did.
+globalThis.AI_SDK_LOG_WARNINGS ??= false;
+
 function isAbortError(e: unknown): boolean {
   return e instanceof Error && e.name === 'AbortError';
 }
@@ -56,6 +65,11 @@ async function sleepWithAbort(
       abort.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
     }),
   ]);
+}
+
+/** AI SDK 5 reports some tool failures as a message string; the loop always throws an `Error`. */
+function toolFailure(error: unknown): unknown {
+  return typeof error === 'string' ? new Error(error) : error;
 }
 
 function asToolInput(args: unknown): Record<string, unknown> {
@@ -215,20 +229,20 @@ export class VercelRuntime implements PlannerRuntime {
   readonly kind = 'vercel' as const;
   readonly providerName: ProviderName;
   readonly modelId: string;
-  readonly languageModel: LanguageModelV1;
+  readonly languageModel: LanguageModelV2;
 
   constructor(
     provider: ProviderName,
     modelId: string,
-    apiKeyOrModel: string | LanguageModelV1,
-    /** When `true`, the third argument must be a `LanguageModelV1` mock (tests only). */
+    apiKeyOrModel: string | LanguageModelV2,
+    /** When `true`, the third argument must be a `LanguageModelV2` mock (tests only). */
     injectModel?: true,
   ) {
     this.providerName = provider;
     this.modelId = modelId;
     if (injectModel === true) {
       if (typeof apiKeyOrModel === 'string') {
-        throw new Error('VercelRuntime: injectModel mode expects a LanguageModelV1 as third argument');
+        throw new Error('VercelRuntime: injectModel mode expects a LanguageModelV2 as third argument');
       }
       this.languageModel = apiKeyOrModel;
       return;
@@ -257,7 +271,8 @@ export class VercelRuntime implements PlannerRuntime {
           system: input.systemPrompt,
           prompt: input.userMessage,
           schema: input.schema,
-          maxTokens: input.maxOutputTokens,
+          maxOutputTokens: input.maxOutputTokens,
+          temperature: PLANNER_TEMPERATURE,
           abortSignal: input.abort,
         });
         const u = usageFromLanguageModelStep(usage, providerMetadata);
@@ -438,17 +453,22 @@ export class VercelRuntime implements PlannerRuntime {
         const stream = streamText({
           model: this.languageModel,
           messages,
+          // The system prompt travels as a message so it can carry the Anthropic cache marker.
+          allowSystemInMessages: true,
           tools,
           toolChoice: 'auto',
-          maxSteps: 1,
+          stopWhen: stepCountIs(1),
           maxRetries: 0,
-          maxTokens: maxOut.current,
+          maxOutputTokens: maxOut.current,
+          temperature: PLANNER_TEMPERATURE,
           abortSignal: input.abort,
+          // Failures are rethrown from the stream below; the SDK's default handler would also print them.
+          onError: () => {},
           onChunk: ({ chunk }) => {
             if (chunk.type === 'text-delta') {
-              accumulatedText += chunk.textDelta;
-              input.onAssistantText?.(chunk.textDelta);
-              bus.emit({ kind: 'assistant_text', runId, turn: iterations, delta: chunk.textDelta });
+              accumulatedText += chunk.text;
+              input.onAssistantText?.(chunk.text);
+              bus.emit({ kind: 'assistant_text', runId, turn: iterations, delta: chunk.text });
             }
           },
           onStepFinish: (step) => {
@@ -456,11 +476,13 @@ export class VercelRuntime implements PlannerRuntime {
             recordUsageAndEmit(bus, input.onUsage, input.budget, runId, iterations, u);
           },
         });
+        // AI SDK 5 reports a failed tool call, a bad tool input and a cancel as stream parts instead of
+        // failing the stream; each one still stops the turn.
         for await (const part of stream.fullStream) {
-          const p = part as { type?: string; error?: unknown };
-          if (p.type === 'error') {
-            throw p.error;
-          }
+          if (part.type === 'error') throw part.error;
+          if (part.type === 'tool-call' && part.invalid) throw toolFailure(part.error);
+          if (part.type === 'tool-error') throw toolFailure(part.error);
+          if (part.type === 'abort') throw new DOMException('Aborted', 'AbortError');
         }
         const steps = await stream.steps;
         const last = steps[steps.length - 1];
@@ -474,13 +496,13 @@ export class VercelRuntime implements PlannerRuntime {
                   {
                     toolCallId: tc.toolCallId,
                     toolName: tc.toolName,
-                    args: tc.args,
+                    args: tc.input,
                   },
                 ]
               : [],
           ),
-          toolResults: last.toolResults.flatMap((tr: { toolCallId: string; result: unknown } | undefined) =>
-            tr ? [{ toolCallId: tr.toolCallId, result: tr.result }] : [],
+          toolResults: last.toolResults.flatMap((tr) =>
+            tr ? [{ toolCallId: tr.toolCallId, result: tr.output }] : [],
           ),
           usage: last.usage,
           providerMetadata: last.providerMetadata,

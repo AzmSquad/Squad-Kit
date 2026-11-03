@@ -1,9 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { z } from 'zod';
 import { AgentSdkRuntime } from '../src/planner/runtimes/agent-sdk-runtime.js';
 import { PlannerEventBus, type PlannerEvent } from '../src/planner/events.js';
 import { Budget } from '../src/planner/budget.js';
 import type { PlannerToolDefinition } from '../src/planner/runtimes/planner-tool-def.js';
+import { buildPlannerToolDefinitions } from '../src/planner/tools/index.js';
 import { ScoutOutputSchema } from '../src/planner/stages/scout-schema.js';
 import { apiKeyAuth, subscriptionAuth } from './support/planner-auth-fixtures.js';
 
@@ -690,5 +694,93 @@ describe('AgentSdkRuntime auth-shaped SDK errors', () => {
     const out = await draft(new AgentSdkRuntime('m', apiKeyAuth('k')), new PlannerEventBus());
     expect(out.finishedNormally).toBe(false);
     expect(out.incompleteKind).toBe('max_iterations');
+  });
+});
+
+describe('AgentSdkRuntime — planner tool fields', () => {
+  let root: string;
+
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-sdk-fields-'));
+    fs.writeFileSync(path.join(root, 'hello.txt'), 'world\n', 'utf8');
+    queryMock.mockImplementation(() =>
+      (async function* () {
+        yield { type: 'result', subtype: 'success', result: 'ok', usage: {} };
+      })(),
+    );
+  });
+
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  function fieldsFor(name: string): string[] {
+    const call = toolMock.mock.calls.find((c) => c[0] === name);
+    expect(call).toBeDefined();
+    return Object.keys(call![2] as Record<string, unknown>);
+  }
+
+  it('hands the SDK flat fields for every planner tool, and read_file reads with them', async () => {
+    const budget = new Budget(budgetCfg);
+    const bus = new PlannerEventBus();
+    const tools = buildPlannerToolDefinitions({
+      root,
+      budget,
+      getTurn: () => 1,
+      runId: 'r',
+      bus,
+      getLimitCtx: () => ({
+        kind: 'file_or_context_reads',
+        budgetSnapshot: budget.snapshot(),
+        iterations: 1,
+        maxIterations: 8,
+        maxOutputTokens: 4096,
+      }),
+      extendSessionLimits: () => {},
+      getAccumulatedText: () => '',
+      setBudgetExhausted: () => {},
+    });
+    const rt = new AgentSdkRuntime('claude-opus-4-7', apiKeyAuth('sk-secret'));
+    await rt.runDraft({
+      systemPrompt: 's',
+      userMessage: 'u',
+      tools,
+      bus,
+      runId: 'r',
+      budget,
+      maxSteps: 4,
+      maxOutputTokens: 4096,
+    });
+
+    // The ranged read_file schema carries an "offset and limit together" rule; its fields still go flat.
+    expect(fieldsFor('read_file')).toEqual(['path', 'offset', 'limit']);
+    expect(fieldsFor('grep')).toEqual(['pattern', 'regex', 'path', 'caseInsensitive']);
+    expect(fieldsFor('list_dir')).toEqual(['path']);
+
+    const readHook = (toolMock.mock.results.find((_, i) => toolMock.mock.calls[i]![0] === 'read_file')!.value as {
+      exec: (a: unknown) => Promise<{ content: Array<{ text: string }>; isError?: boolean }>;
+    }).exec;
+    const out = await readHook({ path: 'hello.txt' });
+    expect(out.isError).toBe(false);
+    expect(out.content[0]!.text).toContain('world');
+    expect(budget.snapshot().reads).toBe(1);
+  });
+
+  it('hands the scout answer tool the scout schema fields', async () => {
+    const rt = new AgentSdkRuntime('claude-opus-4-7', apiKeyAuth('sk-secret'));
+    await rt.runScout({
+      systemPrompt: 's',
+      userMessage: 'u',
+      schema: ScoutOutputSchema,
+      bus: new PlannerEventBus(),
+      runId: 'r',
+      maxOutputTokens: 1024,
+    });
+    expect(fieldsFor('respond_with_scout_result')).toEqual([
+      'selectedFiles',
+      'reasoning',
+      'suggestedReadStrategy',
+      'readRanges',
+    ]);
   });
 });

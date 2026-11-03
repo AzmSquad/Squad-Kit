@@ -298,7 +298,7 @@ export function vercelToolsFromDefinitions(defs: PlannerToolDefinition[]) {
   for (const def of defs) {
     out[def.name] = tool({
       description: def.description,
-      parameters: def.parameters,
+      inputSchema: def.parameters,
       execute: async (args) => {
         const r = await def.execute(args);
         return typeof r === 'string' ? r : r;

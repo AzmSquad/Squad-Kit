@@ -200,7 +200,7 @@ export function readFileToolFactory(
 
   return tool({
     description,
-    parameters: params,
+    inputSchema: params,
     execute: async (args: { path: string; offset?: number; limit?: number }, { toolCallId }) => {
       const tc: ToolCall = {
         id: toolCallId,

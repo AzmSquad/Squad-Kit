@@ -10,10 +10,10 @@ describe.skipIf(!SHOULD_RUN)('Vercel runtime smoke', () => {
     const { text, usage } = await generateText({
       model,
       prompt: 'Reply with exactly the word PASS and nothing else.',
-      maxTokens: 16,
+      maxOutputTokens: 16,
     });
     expect(text.trim()).toBe('PASS');
-    expect(usage.promptTokens).toBeGreaterThan(0);
-    expect(usage.completionTokens).toBeGreaterThan(0);
+    expect(usage.inputTokens).toBeGreaterThan(0);
+    expect(usage.outputTokens).toBeGreaterThan(0);
   });
 });

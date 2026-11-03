@@ -2,19 +2,20 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { LanguageModelV1StreamPart } from '@ai-sdk/provider';
+import type { LanguageModelV2StreamPart } from '@ai-sdk/provider';
 import { buildPaths, SQUAD_DIR } from '../src/core/paths.js';
 import { DEFAULT_CONFIG, saveConfig } from '../src/core/config.js';
 import { SquadExit } from '../src/core/cli-exit.js';
 import { runNewPlan } from '../src/commands/new-plan.js';
-import { MockLanguageModelV1, simulateReadableStream } from 'ai/test';
+import { MockLanguageModelV2, simulateReadableStream } from 'ai/test';
 import { READ_FILE_TOOL_NAME } from '../src/planner/tools/index.js';
+import { textParts } from './support/model-stream.js';
 
 const { mockDoStream } = vi.hoisted(() => ({ mockDoStream: vi.fn() }));
 
 vi.mock('../src/planner/runtimes/index.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/planner/runtimes/index.js')>();
-  const { MockLanguageModelV1 } = await import('ai/test');
+  const { MockLanguageModelV2 } = await import('ai/test');
   const { VercelRuntime } = await import('../src/planner/runtimes/vercel-runtime.js');
   return {
     ...actual,
@@ -22,7 +23,7 @@ vi.mock('../src/planner/runtimes/index.js', async (importOriginal) => {
       new VercelRuntime(
         'anthropic',
         'claude-3-5-sonnet-latest',
-        new MockLanguageModelV1({
+        new MockLanguageModelV2({
           provider: 'anthropic.messages',
           modelId: 'claude-3-5-sonnet-latest',
           doStream: mockDoStream,
@@ -32,15 +33,14 @@ vi.mock('../src/planner/runtimes/index.js', async (importOriginal) => {
   };
 });
 
-function streamOk(chunks: LanguageModelV1StreamPart[]) {
+function streamOk(chunks: LanguageModelV2StreamPart[]) {
   return {
     stream: simulateReadableStream({ chunks }),
-    rawCall: { rawPrompt: [] as unknown[], rawSettings: {} },
   };
 }
 
 function tok(p: number, o: number) {
-  return { promptTokens: p, completionTokens: o, totalTokens: p + o };
+  return { inputTokens: p, outputTokens: o, totalTokens: p + o };
 }
 
 function writePlannerConfig(extra: Partial<NonNullable<typeof DEFAULT_CONFIG.planner>> = {}) {
@@ -99,17 +99,16 @@ describe('runNewPlan API path', () => {
         streamOk([
           {
             type: 'tool-call',
-            toolCallType: 'function',
             toolCallId: 'c1',
             toolName: READ_FILE_TOOL_NAME,
-            args: JSON.stringify({ path: 'only.txt' }),
+            input: JSON.stringify({ path: 'only.txt' }),
           },
           { type: 'finish', finishReason: 'tool-calls', usage: tok(5, 5) },
         ]),
       )
       .mockResolvedValueOnce(
         streamOk([
-          { type: 'text-delta', textDelta: '# Story 01 — Done\n\nBody.\n' },
+          ...textParts('# Story 01 — Done\n\nBody.\n'),
           { type: 'finish', finishReason: 'stop', usage: tok(10, 20) },
         ]),
       );
@@ -129,7 +128,7 @@ describe('runNewPlan API path', () => {
   it('writes a .partial.md plan and throws SquadExit(2) when the planner stops on max_tokens', async () => {
     mockDoStream.mockResolvedValueOnce(
       streamOk([
-        { type: 'text-delta', textDelta: '# truncated\n' },
+        ...textParts('# truncated\n'),
         { type: 'finish', finishReason: 'length', usage: tok(1, 1) },
       ]),
     );

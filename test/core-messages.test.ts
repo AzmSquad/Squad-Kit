@@ -26,8 +26,8 @@ describe('turnsToCoreMessages tool names', () => {
     const msgs = turnsToCoreMessages('system text', turns, { cacheEnabled: false, provider: 'openai' });
     const toolMsg = msgs.find((m) => m.role === 'tool');
     expect(toolMsg?.role).toBe('tool');
-    const parts = toolMsg!.content as Array<{ toolName?: string; isError?: boolean }>;
+    const parts = toolMsg!.content as Array<{ toolName?: string; output?: { type: string } }>;
     expect(parts.map((p) => p.toolName)).toEqual(['grep', 'list_dir', 'read_file']);
-    expect(parts[2]?.isError).toBe(true);
+    expect(parts.map((p) => p.output?.type)).toEqual(['json', 'json', 'error-json']);
   });
 });

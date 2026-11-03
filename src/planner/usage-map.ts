@@ -26,21 +26,21 @@ export function usageFromLanguageModelStep(
   providerMetadata: unknown,
 ): Usage {
   const out: Usage = {
-    inputTokens: usage.promptTokens,
-    outputTokens: usage.completionTokens,
+    inputTokens: usage.inputTokens ?? 0,
+    outputTokens: usage.outputTokens ?? 0,
   };
   const meta = providerMetadata as
     | {
         anthropic?: {
           cacheCreationInputTokens?: number | null;
-          cacheReadInputTokens?: number | null;
         };
       }
     | undefined;
   const a = meta?.anthropic;
   if (a) {
     out.cacheCreationTokens = a.cacheCreationInputTokens ?? 0;
-    out.cacheReadTokens = a.cacheReadInputTokens ?? 0;
+    // Anthropic cache reads arrive on the usage itself; cache writes stay in provider metadata.
+    out.cacheReadTokens = usage.cachedInputTokens ?? 0;
   }
   return out;
 }

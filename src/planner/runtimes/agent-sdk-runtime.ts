@@ -330,9 +330,8 @@ type PermissionDecision =
   | { behavior: 'deny'; message: string };
 
 /**
- * Structural stand-in for the SDK's `CanUseTool`. Declared locally rather than imported: a static
- * type import from the SDK pulls in its `zod/v4` type graph, which does not line up with the
- * `zod@^3` this package pins, and the runtime only imports the SDK dynamically.
+ * Structural stand-in for the SDK's `CanUseTool`. Declared locally rather than imported: the runtime
+ * only imports the SDK dynamically.
  */
 type CanUseToolFn = (toolName: string, input: Record<string, unknown>) => Promise<PermissionDecision>;
 
@@ -722,6 +721,11 @@ export class AgentSdkRuntime implements PlannerRuntime {
     return { output: parsed.data as z.infer<TSchema>, usage };
   }
 
+  /**
+   * The SDK takes a tool's fields, not a schema. With zod 4 a refined object (read_file's "offset and
+   * limit together" rule) is still an object, so the model sees the same flat fields the tool reads;
+   * `readFileTool` checks that rule itself.
+   */
   private zodToFieldsObject(schema: z.ZodType): Record<string, z.ZodType> {
     if (schema instanceof z.ZodObject) {
       return schema.shape as Record<string, z.ZodType>;

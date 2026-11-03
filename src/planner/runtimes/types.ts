@@ -1,5 +1,5 @@
 import type { z } from 'zod';
-import type { LanguageModelV1 } from 'ai';
+import type { LanguageModelV2 } from '@ai-sdk/provider';
 import type { Budget } from '../budget.js';
 import type { PlannerEventBus } from '../events.js';
 import type { Usage, ToolCall, ProviderName } from '../types.js';
@@ -31,7 +31,7 @@ export interface RunDraftInput {
 }
 
 export interface VercelDraftLoopConfig {
-  model: LanguageModelV1;
+  model: LanguageModelV2;
   provider: ProviderName;
   modelId: string;
   root: string;

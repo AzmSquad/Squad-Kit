@@ -2,16 +2,16 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { LanguageModelV1StreamPart } from '@ai-sdk/provider';
+import type { LanguageModelV2, LanguageModelV2StreamPart } from '@ai-sdk/provider';
 import { APICallError } from 'ai';
-import { MockLanguageModelV1, simulateReadableStream } from 'ai/test';
+import { MockLanguageModelV2, simulateReadableStream } from 'ai/test';
 import { runPlanner, buildScoutedContextSection } from '../src/planner/loop.js';
 import { VercelRuntime } from '../src/planner/runtimes/vercel-runtime.js';
-import type { LanguageModelV1 } from 'ai';
 import { PlannerEventBus, type PlannerEvent } from '../src/planner/events.js';
 import * as scoutStages from '../src/planner/stages/scout.js';
 import { Budget } from '../src/planner/budget.js';
 import { READ_FILE_TOOL_NAME } from '../src/planner/tools/index.js';
+import { textParts } from './support/model-stream.js';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -23,24 +23,23 @@ const budgetCfg = {
   maxDurationSeconds: 120,
 };
 
-function vercelTestRuntime(model: LanguageModelV1, modelId = 'm') {
+function vercelTestRuntime(model: LanguageModelV2, modelId = 'm') {
   return new VercelRuntime('anthropic', modelId, model, true);
 }
 
 function tok(p: number, o: number) {
-  return { promptTokens: p, completionTokens: o, totalTokens: p + o };
+  return { inputTokens: p, outputTokens: o, totalTokens: p + o };
 }
 
-function streamOk(chunks: LanguageModelV1StreamPart[]) {
+function streamOk(chunks: LanguageModelV2StreamPart[]) {
   return {
     stream: simulateReadableStream({ chunks }),
-    rawCall: { rawPrompt: [] as unknown[], rawSettings: {} },
   };
 }
 
-function queueStreamModel(rounds: LanguageModelV1StreamPart[][]) {
+function queueStreamModel(rounds: LanguageModelV2StreamPart[][]) {
   let i = 0;
-  return new MockLanguageModelV1({
+  return new MockLanguageModelV2({
     provider: 'mock',
     modelId: 'mock-model',
     doStream: async () => {
@@ -55,7 +54,7 @@ describe('runPlanner', () => {
   it('emits runtime_info right after started', async () => {
     const model = queueStreamModel([
       [
-        { type: 'text-delta', textDelta: '# plan\n' },
+        ...textParts('# plan\n'),
         { type: 'finish', finishReason: 'stop', usage: tok(1, 1) },
       ],
     ]);
@@ -80,7 +79,7 @@ describe('runPlanner', () => {
   it('returns planText and finishedNormally when assistant ends with end_turn and no tool calls', async () => {
     const model = queueStreamModel([
       [
-        { type: 'text-delta', textDelta: '# My plan\n' },
+        ...textParts('# My plan\n'),
         { type: 'finish', finishReason: 'stop', usage: tok(1, 2) },
       ],
     ]);
@@ -102,16 +101,17 @@ describe('runPlanner', () => {
 
   it('passes cacheReadTokens through onUsage unmodified', async () => {
     const onUsage = vi.fn();
+    // Anthropic reports cache reads on the usage and cache writes in provider metadata.
     const meta = {
-      anthropic: { cacheCreationInputTokens: 0, cacheReadInputTokens: 100 },
+      anthropic: { cacheCreationInputTokens: 0 },
     };
     const model = queueStreamModel([
       [
-        { type: 'text-delta', textDelta: '# My plan\n' },
+        ...textParts('# My plan\n'),
         {
           type: 'finish',
           finishReason: 'stop',
-          usage: tok(1, 2),
+          usage: { ...tok(1, 2), cachedInputTokens: 100 },
           providerMetadata: meta,
         },
       ],
@@ -137,18 +137,17 @@ describe('runPlanner', () => {
       fs.writeFileSync(path.join(root, 'hello.txt'), 'world', 'utf8');
       const model = queueStreamModel([
         [
-          { type: 'text-delta', textDelta: 'Reading…' },
+          ...textParts('Reading…'),
           {
             type: 'tool-call',
-            toolCallType: 'function',
             toolCallId: 't1',
             toolName: READ_FILE_TOOL_NAME,
-            args: JSON.stringify({ path: 'hello.txt' }),
+            input: JSON.stringify({ path: 'hello.txt' }),
           },
           { type: 'finish', finishReason: 'tool-calls', usage: tok(1, 1) },
         ],
         [
-          { type: 'text-delta', textDelta: '# Done\n' },
+          ...textParts('# Done\n'),
           { type: 'finish', finishReason: 'stop', usage: tok(2, 2) },
         ],
       ]);
@@ -174,7 +173,7 @@ describe('runPlanner', () => {
   it('returns finishedNormally false on max_tokens with no tool calls', async () => {
     const model = queueStreamModel([
       [
-        { type: 'text-delta', textDelta: 'partial only' },
+        ...textParts('partial only'),
         { type: 'finish', finishReason: 'length', usage: tok(1, 8) },
       ],
     ]);
@@ -196,11 +195,11 @@ describe('runPlanner', () => {
   it('continues after max_tokens when decideOnLimit returns continue', async () => {
     const model = queueStreamModel([
       [
-        { type: 'text-delta', textDelta: 'part-a' },
+        ...textParts('part-a'),
         { type: 'finish', finishReason: 'length', usage: tok(1, 1) },
       ],
       [
-        { type: 'text-delta', textDelta: 'part-b' },
+        ...textParts('part-b'),
         { type: 'finish', finishReason: 'stop', usage: tok(1, 1) },
       ],
     ]);
@@ -248,7 +247,7 @@ describe('runPlanner', () => {
     const busEvents: PlannerEvent[] = [];
     bus.subscribe((ev) => busEvents.push(ev));
     let n = 0;
-    const model = new MockLanguageModelV1({
+    const model = new MockLanguageModelV2({
       provider: 'mock',
       modelId: 'm',
       doStream: async () => {
@@ -264,7 +263,7 @@ describe('runPlanner', () => {
           });
         }
         return streamOk([
-          { type: 'text-delta', textDelta: '# after retry\n' },
+          ...textParts('# after retry\n'),
           { type: 'finish', finishReason: 'stop', usage: tok(1, 1) },
         ]);
       },
@@ -305,7 +304,7 @@ describe('runPlanner', () => {
   it('honours retry-after up to the 90s cap', async () => {
     const sleepCalls: number[] = [];
     let n = 0;
-    const model = new MockLanguageModelV1({
+    const model = new MockLanguageModelV2({
       provider: 'mock',
       modelId: 'm',
       doStream: async () => {
@@ -343,7 +342,7 @@ describe('runPlanner', () => {
     const busEvents: PlannerEvent[] = [];
     bus.subscribe((ev) => busEvents.push(ev));
     let sends = 0;
-    const model = new MockLanguageModelV1({
+    const model = new MockLanguageModelV2({
       provider: 'mock',
       modelId: 'm',
       doStream: async () => {
@@ -391,7 +390,7 @@ describe('runPlanner', () => {
   });
 
   it('throws an actionable rate-limit error when both attempts are rate-limited', async () => {
-    const model = new MockLanguageModelV1({
+    const model = new MockLanguageModelV2({
       provider: 'mock',
       modelId: 'm',
       doStream: async () => {
@@ -421,7 +420,7 @@ describe('runPlanner', () => {
 
   it('does not retry for a non-rate-limit error', async () => {
     const sleep = vi.fn(async () => undefined);
-    const model = new MockLanguageModelV1({
+    const model = new MockLanguageModelV2({
       provider: 'mock',
       modelId: 'm',
       doStream: async () => {
@@ -444,7 +443,7 @@ describe('runPlanner', () => {
   });
 
   it('preserves the model_not_found message verbatim without extra hint', async () => {
-    const model = new MockLanguageModelV1({
+    const model = new MockLanguageModelV2({
       provider: 'mock',
       modelId: 'm',
       doStream: async () => {
@@ -481,22 +480,20 @@ describe('runPlanner', () => {
         [
           {
             type: 'tool-call',
-            toolCallType: 'function',
             toolCallId: '1',
             toolName: READ_FILE_TOOL_NAME,
-            args: JSON.stringify({ path: 'a.txt' }),
+            input: JSON.stringify({ path: 'a.txt' }),
           },
           {
             type: 'tool-call',
-            toolCallType: 'function',
             toolCallId: '2',
             toolName: READ_FILE_TOOL_NAME,
-            args: JSON.stringify({ path: 'b.txt' }),
+            input: JSON.stringify({ path: 'b.txt' }),
           },
           { type: 'finish', finishReason: 'tool-calls', usage: tok(1, 1) },
         ],
         [
-          { type: 'text-delta', textDelta: '# Final\n' },
+          ...textParts('# Final\n'),
           { type: 'finish', finishReason: 'stop', usage: tok(1, 1) },
         ],
       ]);
@@ -522,7 +519,7 @@ describe('runPlanner', () => {
     vi.useFakeTimers({ now: 1_000, toFake: ['Date'] });
     const budget = new Budget({ ...budgetCfg, maxDurationSeconds: 1 });
     let call = 0;
-    const model = new MockLanguageModelV1({
+    const model = new MockLanguageModelV2({
       provider: 'mock',
       modelId: 'm',
       doStream: async () => {
@@ -532,16 +529,15 @@ describe('runPlanner', () => {
           return streamOk([
             {
               type: 'tool-call',
-              toolCallType: 'function',
               toolCallId: 't1',
               toolName: READ_FILE_TOOL_NAME,
-              args: JSON.stringify({ path: 'x.txt' }),
+              input: JSON.stringify({ path: 'x.txt' }),
             },
             { type: 'finish', finishReason: 'tool-calls', usage: tok(0, 0) },
           ]);
         }
         return streamOk([
-          { type: 'text-delta', textDelta: 'never' },
+          ...textParts('never'),
           { type: 'finish', finishReason: 'stop', usage: tok(0, 0) },
         ]);
       },

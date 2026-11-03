@@ -35,7 +35,7 @@ export interface GrepToolHooks {
 export function grepToolFactory(root: string, budget: Budget, hooks: GrepToolHooks) {
   return tool({
     description: GREP_TOOL_DESCRIPTION,
-    parameters: grepSchema,
+    inputSchema: grepSchema,
     execute: async (args, { toolCallId }) => {
       const tc: ToolCall = {
         id: toolCallId,

@@ -19,7 +19,7 @@ import { Budget } from '../src/planner/budget.js';
 import { PlannerEventBus } from '../src/planner/events.js';
 import { VercelRuntime } from '../src/planner/runtimes/vercel-runtime.js';
 
-const mockModel = {} as import('ai').LanguageModelV1;
+const mockModel = {} as import('@ai-sdk/provider').LanguageModelV2;
 
 beforeEach(() => {
   mockGenerateObject.mockReset();
@@ -27,7 +27,7 @@ beforeEach(() => {
 
 function okPayload(): {
   object: { selectedFiles: string[]; reasoning: string; suggestedReadStrategy: 'read_full' };
-  usage: { promptTokens: number; completionTokens: number };
+  usage: { inputTokens: number; outputTokens: number; totalTokens: number };
   warnings: [];
   finishReason: string;
   rawResponse: Record<string, never>;
@@ -39,7 +39,7 @@ function okPayload(): {
       reasoning: 'because',
       suggestedReadStrategy: 'read_full',
     },
-    usage: { promptTokens: 2, completionTokens: 3 },
+    usage: { inputTokens: 2, outputTokens: 3, totalTokens: 5 },
     warnings: [],
     finishReason: 'stop',
     rawResponse: {},
@@ -62,7 +62,7 @@ describe('runScout', () => {
       runId: 'test',
       maxTokens: 4096,
     });
-    expect(mockGenerateObject).toHaveBeenCalledWith(expect.objectContaining({ maxTokens: 4096 }));
+    expect(mockGenerateObject).toHaveBeenCalledWith(expect.objectContaining({ maxOutputTokens: 4096 }));
   });
 
   it('defaults maxTokens to 2048 when omitted', async () => {
@@ -78,7 +78,7 @@ describe('runScout', () => {
       bus,
       runId: 'test',
     });
-    expect(mockGenerateObject).toHaveBeenCalledWith(expect.objectContaining({ maxTokens: 2048 }));
+    expect(mockGenerateObject).toHaveBeenCalledWith(expect.objectContaining({ maxOutputTokens: 2048 }));
   });
 
   it('retries once on 429 within 90s retry-after cap', async () => {
