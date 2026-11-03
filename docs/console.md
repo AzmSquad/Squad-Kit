@@ -113,19 +113,30 @@ The five roles, each its own agent with its own session and tools. For each one 
 level and what it works on now. Below: the limit of tickets at once, what each role used, and your AI tools
 (**Ready** or **Not found**).
 
+**Quality**, for the whole project, sets the level each role starts from:
+
+- **Best** (the default): the strongest model builds and reviews, at high effort. Uses your plan's limits faster.
+- **Balanced**: the strongest model builds at medium effort.
+- **Thrifty**: a lighter model builds. Cheapest.
+
 **Edit** on a role opens:
 
-- **Models**, per step: a level (**Strongest**, **Balanced**, **Fast**) and an effort (high, medium, low).
+- **Models**, per step: a level (**Strongest**, **Balanced**, **Fast**) and an effort (extra high, high, medium,
+  low).
   **For the team** saves the choice in the project's rules, so it works for everyone, whatever AI tool they
   use. **Just for me** saves it on this computer. **Pin exact models** is there for advanced use.
 - **House rules**: your team's instructions, for every step or for one step only.
 - **Core prompt, read only**: exactly what the agent reads at each step, filled in from a real ticket. Your
   rules are added to it, never instead of it.
 
-On Claude Code, strongest is Opus, balanced is Sonnet and fast is Haiku. The Builder's fixes move up to
-strongest after 2 failed tries. The Express track runs every role on balanced.
+On Claude Code, strongest is Opus, balanced is Sonnet and fast is Haiku. A tool without extra high runs high
+instead. Any failed Builder run (the run itself, the checks or the review) moves the next one up: on Best to extra
+high after one, on Balanced to high after one, on Thrifty to strongest after two. On Best and Balanced the Reviewer
+is never on a weaker level or effort than the Builder. The Express track runs the Builder on balanced at high and
+the Reviewer on strongest (Thrifty: every role on balanced).
 
-Terminal: `squad agent builder`, `squad agent builder --step fix --set "..."`, `squad agent reviewer --prompt`.
+Terminal: `squad config set quality best`, `squad agent builder`, `squad agent builder --step fix --set "..."`,
+`squad agent reviewer --prompt`.
 
 ## Settings
 

@@ -64,13 +64,26 @@ export class AzureError extends ModuleError {
 
 type FetchLike = typeof fetch;
 
+/** The longest one call to Azure DevOps may take, so a stalled network never holds up the board. */
+const CALL_MS = 60_000;
+
+const late = (err: unknown) => (err as Error)?.name === 'TimeoutError';
+const seconds = (ms: number) => {
+  const s = Math.max(1, Math.round(ms / 1000));
+  return `${s} second${s === 1 ? '' : 's'}`;
+};
+
 export class Azure {
   private readonly auth: string;
   private readonly orgUrl: string;
   private readonly projUrl: string;
   private stateCache = new Map<string, { name: string; category: string }[]>();
 
-  constructor(readonly target: AzureTarget, private readonly http: FetchLike = fetch) {
+  constructor(
+    readonly target: AzureTarget,
+    private readonly http: FetchLike = fetch,
+    private readonly timeoutMs = CALL_MS,
+  ) {
     this.auth = 'Basic ' + Buffer.from(`:${target.pat}`).toString('base64');
     this.orgUrl = `https://dev.azure.com/${encodeURIComponent(target.organization)}`;
     this.projUrl = `${this.orgUrl}/${encodeURIComponent(target.project)}`;
@@ -84,6 +97,7 @@ export class Azure {
     const full = url.startsWith('http') ? url : `${this.projUrl}/${url}`;
     const sep = full.includes('?') ? '&' : '?';
     let res: Response;
+    const tooLong = () => new AzureError(`Azure DevOps did not answer within ${seconds(this.timeoutMs)}. Check the network, then try again.`, undefined, 'offline');
     try {
       res = await this.http(`${full}${full.includes('api-version=') ? '' : `${sep}api-version=7.1`}`, {
         method,
@@ -94,8 +108,10 @@ export class Azure {
           ...(body !== undefined ? { 'content-type': contentType } : {}),
         },
         body: body === undefined ? undefined : Buffer.isBuffer(body) ? body : JSON.stringify(body),
+        signal: AbortSignal.timeout(this.timeoutMs),
       });
     } catch (err) {
+      if (late(err)) throw tooLong();
       throw new AzureError(`Could not reach Azure DevOps: ${(err as Error).message}`, undefined, 'offline');
     }
     if (!res.ok) {
@@ -106,7 +122,9 @@ export class Azure {
       }
       throw new AzureError(`Azure DevOps said HTTP ${res.status}. ${detail}`.trim(), res.status);
     }
-    const text = await res.text();
+    const text = await res.text().catch((err: unknown) => {
+      throw late(err) ? tooLong() : err;
+    });
     return (text ? JSON.parse(text) : null) as T;
   }
 
@@ -218,7 +236,8 @@ export class Azure {
 
   /** Saves an attachment to a file and returns its path. */
   async download(url: string, file: string): Promise<string> {
-    const res = await this.http(url, { headers: { authorization: this.auth, 'X-TFS-FedAuthRedirect': 'Suppress' } });
+    // A file may be big: it gets more time than a call, but never forever.
+    const res = await this.http(url, { headers: { authorization: this.auth, 'X-TFS-FedAuthRedirect': 'Suppress' }, signal: AbortSignal.timeout(this.timeoutMs * 5) });
     if (!res.ok) throw new AzureError(`Could not download ${path.basename(file)} (HTTP ${res.status}).`, res.status);
     fs.writeFileSync(file, Buffer.from(await res.arrayBuffer()));
     return file;

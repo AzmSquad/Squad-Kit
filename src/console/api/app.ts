@@ -68,7 +68,7 @@ function listFolder(asked: string): FolderListing {
   return { path: dir, parent, home, kind, repos, canAdd: kind === 'project' || isOwnFolder(dir), folders, places };
 }
 
-async function body<T>(c: Context): Promise<T> {
+export async function body<T>(c: Context): Promise<T> {
   try {
     return (await c.req.json()) as T;
   } catch {
@@ -76,7 +76,7 @@ async function body<T>(c: Context): Promise<T> {
   }
 }
 
-async function act(c: Context, fn: () => unknown) {
+export async function act(c: Context, fn: () => unknown) {
   try {
     return c.json(((await fn()) as object) ?? { ok: true });
   } catch (err) {

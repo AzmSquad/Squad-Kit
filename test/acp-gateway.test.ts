@@ -32,13 +32,36 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
 });
 `;
 
+/** An adapter that starts each session in the person's own mode, here "bypass", until the client sets one. */
+const MODE_ADAPTER = `
+import readline from 'node:readline';
+const send = (m) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...m }) + '\\n');
+let mode = 'bypassPermissions';
+readline.createInterface({ input: process.stdin }).on('line', (line) => {
+  const msg = JSON.parse(line);
+  if (msg.method === 'initialize') return send({ id: msg.id, result: { protocolVersion: 1 } });
+  if (msg.method === 'session/new') return send({ id: msg.id, result: { sessionId: 's2' } });
+  if (msg.method === 'session/set_mode') {
+    mode = msg.params.sessionId === 's2' ? msg.params.modeId : 'wrong session';
+    return send({ id: msg.id, result: {} });
+  }
+  if (msg.method === 'session/prompt') {
+    send({ method: 'session/update', params: { sessionId: 's2', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'mode:' + mode } } } });
+    return send({ id: msg.id, result: { stopReason: 'end_turn' } });
+  }
+});
+`;
+
 let dir: string;
 let script: string;
+let modeScript: string;
 
 beforeAll(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-acp-'));
   script = path.join(dir, 'adapter.mjs');
   fs.writeFileSync(script, ADAPTER);
+  modeScript = path.join(dir, 'mode-adapter.mjs');
+  fs.writeFileSync(modeScript, MODE_ADAPTER);
 });
 
 const launch = (args: string[]): AcpLaunch => ({
@@ -60,6 +83,13 @@ describe('the agent gateway', () => {
     expect(r).toMatchObject({ ok: true, sessionId: 's1', text: 'permission:no', structured: { word: 'ok' } });
     expect(tools).toEqual([{ name: 'Write', input: { file_path: '/app/x.txt' } }]);
     expect(fs.readFileSync(path.join(logDir, 's1.jsonl'), 'utf8').trim().split('\n')).toHaveLength(3);
+  });
+
+  it("sets the step's own mode on the session before the prompt, whatever mode the person's settings start it in", async () => {
+    const own = await runAcp(launch([modeScript]), { cwd: dir, prompt: 'go', timeoutMs: 20_000 });
+    expect(own.text).toBe('mode:bypassPermissions');
+    const set = await runAcp({ ...launch([modeScript]), mode: 'default' }, { cwd: dir, prompt: 'go', timeoutMs: 20_000 });
+    expect(set).toMatchObject({ ok: true, text: 'mode:default' });
   });
 
   it('tells the caller when the adapter cannot start, so it can fall back', async () => {

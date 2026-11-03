@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { listDecisions, listReleases, listTickets, readMeta, type BoardPaths } from './store.js';
+import { reposOf } from '../engine/repos.js';
 import { decidedIn, detectStack, type Tech } from './stack.js';
 import type { BoardMeta, Blueprint, Decision, ImpactCheck, PatternNote, TechDraft, Ticket } from './types.js';
 
@@ -56,12 +57,20 @@ export function architecture(bp: BoardPaths): Architecture {
     }));
   const meta = readMeta(bp);
   const notes = meta.blueprint?.stack ?? [];
-  const found = detectStack(bp.root, meta).map((t): StackItem => {
+  const item = (t: Tech): StackItem => {
     const note = notes.find((n) => n.name.toLowerCase() === t.name.toLowerCase());
     const chosen = [...new Set([...(note?.decision ? [note.decision] : []), ...decidedIn(t, decisions)])];
     const draft = meta.techDrafts?.find((d) => d.tech === t.name);
     return { ...t, ...(note?.why ? { why: note.why } : {}), decisions: chosen, ...(draft ? { draft } : {}) };
-  });
+  };
+  const inPackages = detectStack(bp.root, meta);
+  const named = new Set(inPackages.map((t) => t.name.toLowerCase()));
+  // What the Architect saw in the code that no package file names, like Python in a project with none.
+  const repo = reposOf(meta)[0]?.path ?? '.';
+  const seen = notes
+    .filter((n) => n.role && !named.has(n.name.toLowerCase()))
+    .map((n): Tech => ({ name: n.name, role: n.role!, icon: n.name.toLowerCase().replace(/[^a-z0-9]/g, ''), repo }));
+  const found = [...inPackages, ...seen].map(item);
   const stack = found.map((t) => {
     if (t.decisions.length) return t;
     const parent = found.find((p) => t.comesWith?.includes(p.name) && p.decisions.length);

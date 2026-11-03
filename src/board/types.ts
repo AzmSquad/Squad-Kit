@@ -140,6 +140,8 @@ export interface StuckChoice {
   options: StuckOption[];
   /** What stopped: a failed gate the person can continue past, a clash with the base branch, or any other error. */
   gate?: 'checks' | 'review' | 'proof' | 'merge';
+  /** For failed checks: which ones failed, so continuing past them is remembered for them. */
+  checks?: string[];
 }
 
 /** The person went past a failed gate on purpose. Shown on the ticket, the pull request and the release notes. */
@@ -270,8 +272,10 @@ export interface SpecChange {
   parts?: ChangePart[];
   /** A big change: the Architect's design update, with the steps as they were. */
   design?: { summary: string; before: string[]; steps: ChangeStep[] };
-  /** Who approved or declined it, and why. */
-  decided?: { by: string; at: string; approved: boolean; reason?: string };
+  /** Who approved or declined it, and why. `withdrawn`: it was approved, then taken back before it was built. */
+  decided?: { by: string; at: string; approved: boolean; reason?: string; withdrawn?: boolean };
+  /** A small change approved while the Builder works goes into the spec at once: the spec before it, for a withdraw. */
+  specBefore?: { story?: string; criteria?: Criterion[] };
   /** A big change: what waited while the design was updated, to go back to if the update is declined. */
   paused?: { phase?: string; waiting?: Waiting };
   error?: string;
@@ -403,6 +407,8 @@ export interface Ticket {
   branch?: string;
   baseCommit?: string;
   tries?: number;
+  /** The Builder's runs that did not get through: the run itself failed, or the checks or the Reviewer turned it back. */
+  fails?: number;
   reviewRound?: number;
   /** Step to run again when the person picks "Try again" on a stuck card. */
   retryPhase?: string;
@@ -432,6 +438,12 @@ export interface Ticket {
   quietSnoozedUntil?: string;
   /** Updates still to send to the tracker; the live squad sends them, so terminal commands never wait on Azure. */
   trackerQueue?: TrackerEvent[];
+  /** The first queued update failed this many times; the next try waits until nextAt. */
+  trackerRetry?: { tries: number; nextAt: string };
+  /** The checks the person chose to continue past. While only these fail, the work goes on as they decided. */
+  checksContinued?: string[];
+  /** The plan the Builder's conversation was given, as a short hash: a resumed Builder gets the plan again when it changed. */
+  builtPlan?: string;
   notes?: TicketNote[];
   overrides?: GateOverride[];
   /** Full track: who approved the spec. The Architect writes the design only after this. */
@@ -495,6 +507,23 @@ export interface Release {
   titles?: Record<string, string>;
   /** What the release really did, in plain words, shown after releasing. */
   log?: { ok: boolean; text: string }[];
+  /**
+   * Repos whose push failed: the release commit and tag are made, but only on this computer. The release stays open
+   * (its tickets are not closed) until Push again sends them.
+   */
+  unpushed?: UnpushedRelease[];
+}
+
+export interface UnpushedRelease {
+  /** The repo's folder in the project, '.' for the project itself. */
+  repo: string;
+  remote: string;
+  base: string;
+  /** The release commit, pushed to the remote's base branch. */
+  commit: string;
+  /** The tag to push with it, when the release tags. */
+  tag?: string;
+  error: string;
 }
 
 export interface Decision {
@@ -530,7 +559,13 @@ export interface StackNote {
   name: string;
   why: string;
   decision?: string;
+  /** Set when the Architect found it in the code itself, not in a package file, so the page knows where it goes. */
+  role?: TechRole;
 }
+
+/** What a technology does in the project, for grouping on the architecture page. */
+export const TECH_ROLES = ['Language', 'Framework', 'Interface', 'Data', 'Testing', 'Tooling', 'Services'] as const;
+export type TechRole = (typeof TECH_ROLES)[number];
 
 /** A design pattern the code follows, where it is used, and the decision it comes from. */
 export interface PatternNote {
@@ -551,10 +586,15 @@ export interface TechDraft {
 export interface Blueprint {
   status: 'pending' | 'running' | 'done' | 'failed';
   at?: string;
+  /** Each repo's base commit when the code was read, by repo path. A merge compares against it. */
+  commits?: Record<string, string>;
   error?: string;
   stack: StackNote[];
   patterns: PatternNote[];
 }
+
+/** How strong the squad's models are, for the whole project. */
+export type Quality = 'best' | 'balanced' | 'thrifty';
 
 export interface BoardMeta {
   /** Links the project's files to this computer's files for it (ADR-001). */
@@ -563,6 +603,8 @@ export interface BoardMeta {
   layout?: number;
   /** One-repo projects: commit the project's documents on each ticket's branch (on by default). */
   documentsInGit?: boolean;
+  /** The Quality setting: the levels each role starts from. Left out means best. */
+  quality?: Quality;
   project: string;
   key: string;
   nextNumber: number;

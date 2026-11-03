@@ -6,6 +6,7 @@ import path from 'node:path';
 import { resolveClaudeBinary } from '../../core/claude-binary.js';
 import { childEnv } from '../../engine/agent-env.js';
 import { usageFrom } from '../../engine/acp-runner.js';
+import { track, whenExited } from '../../engine/process-group.js';
 
 /**
  * Runs the real Claude Code CLI headless (`claude -p`) in a project folder. squad-kit never
@@ -174,6 +175,8 @@ export function deniedTools(opts: RunOptions): string[] {
 export const WRITE_TOOLS = ['Edit', 'MultiEdit', 'Write', 'NotebookEdit'];
 
 export function runClaude(opts: RunOptions): Promise<RunResult> {
+  // Stopped before it began: nothing starts.
+  if (opts.signal?.aborted) return Promise.resolve({ ok: false, sessionId: opts.resume ?? opts.sessionId ?? '', text: '', error: 'You stopped the squad.' });
   const bin = claudeBinary();
   const sessionId = opts.resume ?? opts.sessionId ?? randomUUID();
   if (!bin) {
@@ -188,7 +191,8 @@ export function runClaude(opts: RunOptions): Promise<RunResult> {
   if (opts.allowedTools?.length) args.push('--allowedTools', opts.allowedTools.join(','));
   const denied = deniedTools(opts);
   if (denied.length) args.push('--disallowedTools', denied.join(','));
-  if (opts.permissionMode) args.push('--permission-mode', opts.permissionMode);
+  // Always a mode: without one, Claude Code starts in the person's own default mode, which may skip every permission.
+  args.push('--permission-mode', opts.permissionMode ?? 'default');
   if (opts.schema) args.push('--json-schema', JSON.stringify(opts.schema));
   if (opts.appendSystemPrompt) args.push('--append-system-prompt', opts.appendSystemPrompt);
   if (opts.model) args.push('--model', opts.model);
@@ -196,7 +200,7 @@ export function runClaude(opts: RunOptions): Promise<RunResult> {
   for (const d of opts.addDirs ?? []) args.push('--add-dir', d);
 
   return new Promise((resolve) => {
-    const child = spawn(bin, args, { cwd: opts.cwd, env: claudeEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = track(spawn(bin, args, { cwd: opts.cwd, env: claudeEnv(), stdio: ['ignore', 'pipe', 'pipe'] }));
     if (child.pid) opts.onSpawn?.(child.pid);
     opts.signal?.addEventListener('abort', () => {
       result = { ok: false, sessionId, text: lastText, error: 'You stopped the squad.' };
@@ -257,7 +261,8 @@ export function runClaude(opts: RunOptions): Promise<RunResult> {
       clearTimeout(timer);
       resolve({ ok: false, sessionId, text: '', error: `Could not start Claude Code: ${err.message}` });
     });
-    child.on('close', (code) => {
+    // Done once Claude Code exits, even when a command it started still holds its output open.
+    void whenExited(child).then((code) => {
       clearTimeout(timer);
       if (buffer) handle(buffer);
       if (result) return resolve(result);

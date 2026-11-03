@@ -236,7 +236,7 @@ function StackView({ data, picked, onPick }: { data: ArchitectureResponse; picke
           <b>{data.patterns.length}</b> design patterns
         </span>
       </div>
-      {data.stack.length === 0 && <p className="note">No package files found in the code yet.</p>}
+      {data.stack.length === 0 && <p className="note">None found yet. The Architect lists them when it reads the code.</p>}
       <section className="stack-group">
         <h3>Technologies</h3>
         <div className="techs">

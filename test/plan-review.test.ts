@@ -32,7 +32,7 @@ const SPEC = {
   ],
   releaseNote: '**Daily limit.**',
 };
-const DESIGN = { steps: ['Add the count query', 'Check it before saving', 'Write the tests'], tests: 3, screens: 0, decision: { title: 'Count in the database', options: [{ name: 'Query', note: '', chosen: true }, { name: 'Cache', note: '', chosen: false }], why: 'Simple' } };
+const DESIGN = { steps: ['Add the count query', 'Check it before saving', 'Write the tests'], tests: 3, screens: 0, decision: { title: 'Count in the database', options: [{ name: 'Query', note: '', chosen: true }, { name: 'Cache', note: '', chosen: false }], why: 'Simple', area: 'Data' } };
 
 beforeEach(() => {
   calls.length = 0;

@@ -7,6 +7,7 @@ export const codexTool: AiTool = {
   label: 'Codex',
   canRun: false,
   supportsEffort: false,
+  instructionFiles: ['AGENTS.md'],
   modelFor: () => '',
   ready() {
     try {

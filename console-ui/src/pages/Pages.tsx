@@ -2,13 +2,14 @@ import { useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { api, send } from '../api/client';
-import type { AgentInfo, CorePrompts, Effort, LevelChoice, LevelRow, ModelLevel, TrackerStatus } from '../api/types';
+import type { AgentInfo, CorePrompts, Effort, LevelChoice, LevelRow, ModelLevel, Quality, TrackerStatus } from '../api/types';
 import { Bug, Check, RotateCcw, Terminal } from 'lucide-react';
 import type { ProjectCommands, RepoInfo } from '../api/types';
 import { useAct, useAppSettings, useBoard } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { BugDialog } from '../components/dialogs';
 import { useRestart } from '../components/Restart';
+import { AboutUpdates } from '../components/Update';
 import { SquadUsage } from '../components/Usage';
 import { Cmd, Glyph, Modal, STAGE_NAME, actionLabel, ago, commandFor, outdatedLine } from '../components/ui';
 import { changeWaits, openChange } from '../components/ChangeCard';
@@ -141,6 +142,7 @@ export function SquadPage() {
             gets a real second opinion. Strong models where a mistake is expensive, cheaper ones where the work is already clear. Edit an agent to
             give it house rules or change its models.
           </p>
+          <QualitySetting />
           <div style={{ marginTop: 10 }}>
             {(agents.data ?? []).map((a) => (
               <div className="maprow" key={a.role} style={{ gridTemplateColumns: '34px 120px 1fr 250px 70px', alignItems: 'center' }}>
@@ -161,8 +163,10 @@ export function SquadPage() {
                 <span className="pills">
                   <span className="pill">{TOOL_NAME[a.tool]}</span>
                   {(() => {
-                    const main = a.levels?.find((r) => r.step === a.stepList[0]?.id)?.now;
-                    return main ? <span className={`pill ${main.from === 'squad-kit' ? 'wait' : ''}`} title={`${a.stepList[0]?.name}: ${levelText(main)}`}>{main.modelName || main.level}{main.effort && a.supportsEffort ? ` · ${main.effort}` : ''}</span> : null;
+                    // The step that matters most for the role: the Architect's design, not its quick read of the project.
+                    const head = a.stepList.find((x) => x.id === 'design') ?? a.stepList[0];
+                    const main = a.levels?.find((r) => r.step === head?.id)?.now;
+                    return main ? <span className={`pill ${main.from === 'squad-kit' ? 'wait' : ''}`} title={`${head?.name}: ${levelText(main)}`}>{main.modelName || main.level}{main.effort && a.supportsEffort ? ` · ${EFFORT_NAME[main.effort]}` : ''}</span> : null;
                   })()}
                   {a.instructions.replace(/<!--[\s\S]*?-->/g, '').trim() && <span className="pill ok">House rules</span>}
                 </span>
@@ -201,6 +205,47 @@ export function SquadPage() {
       </div>
       {editing && <AgentDialog agent={editing} onClose={() => setEditing(null)} />}
     </>
+  );
+}
+
+const QUALITY: { id: Quality; name: string; note: string }[] = [
+  { id: 'best', name: 'Best', note: "The strongest model builds and reviews. Uses your plan's limits faster." },
+  { id: 'balanced', name: 'Balanced', note: 'The strongest model at medium effort.' },
+  { id: 'thrifty', name: 'Thrifty', note: 'A lighter model builds. Cheapest.' },
+];
+
+/** The project's Quality setting: the level each role starts from, for the whole team. Edit on a role changes single steps. */
+function QualitySetting() {
+  const board = useBoard();
+  const act = useAct();
+  const meta = board.data?.ready ? board.data.meta : undefined;
+  if (!meta) return null;
+  const now = meta.quality ?? 'best';
+  return (
+    <div className="maprow" style={{ marginTop: 6 }}>
+      <b style={{ paddingTop: 4 }}>Quality</b>
+      <span style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
+        <span style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          {QUALITY.map((q) => (
+            <button
+              key={q.id}
+              className={`btn sm ${q.id === now ? 'pri' : ''}`}
+              aria-pressed={q.id === now}
+              onClick={() => act.mutate({ path: '/api/v1/settings', method: 'PUT', body: { quality: q.id }, done: `Quality is ${q.name} now. The squad uses it from its next step.` })}
+            >
+              {q.name}
+            </button>
+          ))}
+          <span className="grow" />
+          <Cmd text={`squad config set quality ${now}`} />
+        </span>
+        {QUALITY.map((q) => (
+          <span key={q.id} className="note" style={{ fontSize: 12.5, ...(q.id === now ? { color: 'var(--text)' } : {}) }}>
+            <b>{q.name}:</b> {q.note}
+          </span>
+        ))}
+      </span>
+    </div>
   );
 }
 
@@ -313,10 +358,11 @@ function AgentDialog({ agent, onClose }: { agent: AgentInfo; onClose: () => void
 
 function levelText(n: LevelRow['now']): string {
   const who = n.from === 'project' ? 'set by the team' : n.from === 'you' ? 'set by you' : "squad-kit's default";
-  return `${n.modelName || n.level} (${n.model ? 'pinned' : n.level}${n.effort ? `, ${n.effort} effort` : ''}), ${who}${n.why ? `, ${n.why}` : ''}`;
+  return `${n.modelName || n.level} (${n.model ? 'pinned' : n.level}${n.effort ? `, ${EFFORT_NAME[n.effort]} effort` : ''}), ${who}${n.why ? `, ${n.why}` : ''}`;
 }
 
 const LEVEL_NAME: Record<ModelLevel, string> = { strongest: 'Strongest', balanced: 'Balanced', fast: 'Fast' };
+const EFFORT_NAME: Record<Effort, string> = { xhigh: 'extra high', high: 'high', medium: 'medium', low: 'low' };
 
 /** Pick a level and an effort, or leave either on the layer below. */
 function LevelPick({ value, onChange, below, agent }: { value: LevelChoice; onChange: (c: LevelChoice) => void; below: LevelChoice; agent: AgentInfo }) {
@@ -330,10 +376,10 @@ function LevelPick({ value, onChange, below, agent }: { value: LevelChoice; onCh
       </select>
       {agent.supportsEffort && (
         <select className="input" style={{ fontSize: 12.5, padding: '4px 6px', width: '100%' }} value={value.effort ?? ''} onChange={(e) => onChange({ ...value, effort: (e.target.value || undefined) as Effort | undefined })} aria-label="Effort">
-          <option value="">Default{below.effort ? ` (${below.effort} effort)` : ''}</option>
-          <option value="high">High effort</option>
-          <option value="medium">Medium effort</option>
-          <option value="low">Low effort</option>
+          <option value="">Default{below.effort ? ` (${EFFORT_NAME[below.effort]} effort)` : ''}</option>
+          {agent.efforts.map((e) => (
+            <option key={e} value={e}>{EFFORT_NAME[e].charAt(0).toUpperCase()}{EFFORT_NAME[e].slice(1)} effort</option>
+          ))}
         </select>
       )}
     </span>
@@ -349,8 +395,8 @@ function ModelLevels({ agent, team, setTeam, you, setYou }: { agent: AgentInfo; 
     <div style={{ marginTop: 12 }}>
       <b style={{ display: 'block', marginBottom: 2 }}>Models</b>
       <p className="note" style={{ marginTop: 0, fontSize: 12.5 }}>
-        squad-kit picks a level for each step: strongest where a mistake is expensive, cheaper where the work is clear. Change it for the whole team, or
-        just for you. Fixes that keep failing move up to the strongest level on their own.
+        squad-kit picks a level for each step from the Quality setting: strongest where a mistake is expensive, cheaper where the work is clear. Change it
+        for the whole team, or just for you. After a failed try, the Builder moves up a level on its own.
       </p>
       <div className="levels" role="table">
         <div className="levrow head" role="row"><span>Step</span><span>For the team</span><span>Just for me</span><span>Now</span></div>
@@ -734,6 +780,8 @@ export function SettingsPage() {
               </span>
             </div>
           )}
+          <h2 style={{ marginTop: 26 }}>About squad-kit</h2>
+          <AboutUpdates />
         </div>
       </div>
       {resetting && (

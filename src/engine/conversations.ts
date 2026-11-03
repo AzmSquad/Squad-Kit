@@ -197,6 +197,8 @@ export function readConversation(id: string, limit = 400, base?: string, nativeD
   const updates: AcpEntry[] = [];
   const toolFiles = new Map<string, string>();
   const toolContent = new Map<string, ToolCallContent[]>();
+  // The calls that handed in the step's answer: their receipt ("Structured output provided successfully") is left out.
+  const answers = new Set<string>();
   let cwd: string | undefined;
   for (const raw of fs.readFileSync(file, 'utf8').split('\n')) {
     if (!raw.trim()) continue;
@@ -229,8 +231,9 @@ export function readConversation(id: string, limit = 400, base?: string, nativeD
           if (entries.length) push({ sessionUpdate: 'plan', entries });
           continue;
         }
+        if (b.name === 'StructuredOutput') answers.add(b.id);
         const title =
-          b.name === 'StructuredOutput' ? 'Gave squad-kit its answer' : (describeToolEvent({ name: b.name, input }, cwd ?? '/') ?? `Used ${b.name}`);
+          b.name === 'StructuredOutput' ? 'Handed in its answer' : (describeToolEvent({ name: b.name, input }, cwd ?? '/') ?? `Used ${b.name}`);
         const filePath = typeof input.file_path === 'string' ? input.file_path : typeof input.path === 'string' ? input.path : '';
         const command = typeof input.command === 'string' ? input.command : '';
         if (command) toolFiles.set(b.id, command);
@@ -254,7 +257,9 @@ export function readConversation(id: string, limit = 400, base?: string, nativeD
           toolCallId: b.tool_use_id,
           status: b.is_error ? 'failed' : 'completed',
           // In ACP an update replaces the call's content, so it carries the diff along with the result.
-          content: [...(toolContent.get(b.tool_use_id) ?? []), ...resultContent(b.content), ...filesIn(`${toolFiles.get(b.tool_use_id) ?? ''}\n${resultText}`, cwd)],
+          content: answers.has(b.tool_use_id)
+            ? []
+            : [...(toolContent.get(b.tool_use_id) ?? []), ...resultContent(b.content), ...filesIn(`${toolFiles.get(b.tool_use_id) ?? ''}\n${resultText}`, cwd)],
         });
       }
     }

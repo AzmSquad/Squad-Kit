@@ -7,9 +7,10 @@
 /**
  * What a step lets its agent do. Roles ask for these sets, never for one tool's own permission names; each module
  * turns them into its tool's settings. squad-kit's own secret files and git that changes history are always off
- * limits, whatever the set.
+ * limits, whatever the set. `run` may run any command (the app, a browser for screenshots) but has no file-editing
+ * tools: what it changes in the code anyway, squad-kit puts back.
  */
-export type PermissionSet = 'read' | 'git-read' | 'edit';
+export type PermissionSet = 'read' | 'git-read' | 'run' | 'edit';
 
 /**
  * How strong a model a step needs (ADR-001): squad-kit speaks in levels, and each AI tool module maps them to its own
@@ -18,9 +19,10 @@ export type PermissionSet = 'read' | 'git-read' | 'edit';
 export type ModelLevel = 'strongest' | 'balanced' | 'fast';
 export const MODEL_LEVELS: ModelLevel[] = ['strongest', 'balanced', 'fast'];
 
-/** How hard the model thinks, where the tool supports it. */
-export type Effort = 'high' | 'medium' | 'low';
-export const EFFORTS: Effort[] = ['high', 'medium', 'low'];
+/** How hard the model thinks, where the tool supports it. "xhigh" is extra high, which not every tool has. */
+export type Effort = 'xhigh' | 'high' | 'medium' | 'low';
+/** Hardest first. */
+export const EFFORTS: Effort[] = ['xhigh', 'high', 'medium', 'low'];
 
 export interface ToolEvent {
   name: string;
@@ -37,6 +39,11 @@ export interface AgentRun {
   permissions: PermissionSet[];
   /** Files no agent may read or change, such as squad-kit's own secrets.yaml. */
   secretFiles?: string[];
+  /**
+   * Files and folders no agent may change, by name at any depth (a folder ends with a slash): the instructions and
+   * settings later sessions load, and squad-kit's own folder.
+   */
+  protectedFiles?: string[];
   /** JSON Schema for the final answer; the answer comes back as `structured`. */
   schema?: object;
   /** Added to the tool's own instructions: the step's extras and the team's house rules. */
@@ -98,6 +105,13 @@ export interface AiTool {
   /** The tool's model for a level, as people know it ("Opus"), or empty when it has none. */
   modelFor(level: ModelLevel): string;
   readonly supportsEffort: boolean;
+  /** The efforts the tool takes, when it has more than high, medium and low. A step asking for one it lacks gets the next one down. */
+  readonly efforts?: readonly Effort[];
+  /**
+   * The files and folders the tool loads as instructions or settings from the folders it works in, by name at any
+   * depth (a folder ends with a slash). No agent may change them: the next session would follow what it wrote.
+   */
+  readonly instructionFiles?: readonly string[];
   /** Installed and signed in, as far as squad-kit can tell without running it. */
   ready(): boolean;
   run(r: AgentRun): Promise<AgentResult>;

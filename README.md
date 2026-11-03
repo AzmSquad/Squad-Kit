@@ -148,9 +148,10 @@ linked ticket or a bug report.
 
 ## Cost and models
 
-- squad-kit picks a **model level** for each role and step: **strongest** where a mistake is expensive (spec,
-  design, review), **balanced** for building, **fast** for screenshots and small helpers. The team or each
-  person can change them on the **Squad and AI** page.
+- squad-kit picks a **model level** for each role and step from the project's **Quality** setting: **Best**
+  (the default) builds and reviews on the strongest model, **Balanced** builds on it at medium effort, and
+  **Thrifty** builds on a lighter one. **Fast** stays for screenshots and small helpers. The team or each person
+  can change single steps on the **Squad and AI** page.
 - The board shows **what each ticket and each role used**, in tokens and in money at the AI company's API
   prices. Your own AI subscription pays for it. This shows where the cost goes.
 - One **limit of tickets at once** (2 by default, up to 5) is shared by all your projects, because they use the

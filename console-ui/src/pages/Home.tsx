@@ -5,6 +5,7 @@ import { api, send } from '../api/client';
 import type { AppProject, AppProjects, AppSettings, AppWaiting, FolderListing } from '../api/types';
 import { usePrefs } from '../lib/prefs';
 import { Cmd, Modal, STAGE_NAME, actionLabel, ago, commandFor, outdatedLine } from '../components/ui';
+import { AboutButton, AppUpdate } from '../components/Update';
 
 /**
  * Home of the one app (ADR-001): one Waiting for you list across every project, then the projects, and Add project
@@ -42,10 +43,12 @@ export function HomePage() {
         <b>squad-kit</b>
         <span className="grow" />
         {projects.data && <Shared s={projects.data} />}
+        <AboutButton />
         <button className="theme" onClick={toggleTheme} aria-label={theme === 'light' ? 'Switch to dark' : 'Switch to light'}>
           {theme === 'light' ? <Moon size={15} /> : <Sun size={15} />}
         </button>
       </header>
+      <AppUpdate />
       <div className="scroll">
         <div className="page home-page">
           <section className="home-projects">

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { BoardMeta, RepoInfo, Ticket } from '../board/types.js';
-import { currentBranch, remotes } from './git.js';
+import type { Blueprint, BoardMeta, RepoInfo, Ticket } from '../board/types.js';
+import { currentBranch, git, remotes } from './git.js';
 
 /**
  * A project is either one git repo, or a workspace folder holding several code repos (like a
@@ -16,6 +16,40 @@ export function reposOf(meta: BoardMeta): RepoInfo[] {
 export function repoFor(meta: BoardMeta, ticket: Ticket): RepoInfo {
   const all = reposOf(meta);
   return all.find((r) => r.path === ticket.repo) ?? all[0]!;
+}
+
+/** Each repo's base commit now, by repo path. Repos with no commit yet are left out. */
+export function baseCommits(root: string, meta: BoardMeta): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const r of reposOf(meta)) {
+    const sha = git(path.join(root, r.path), ['rev-parse', '--verify', '--quiet', `${r.base}^{commit}`], { allowFail: true });
+    if (sha) out[r.path] = sha;
+  }
+  return out;
+}
+
+/**
+ * Whether any repo's base has files added, moved or removed since the code was last read: since the base commit that
+ * read saw, or for a read made before squad-kit kept it, the last base commit before the read. Edits inside files do
+ * not count, and neither do squad-kit's own files (`skip`, the project's .squad folder). When git cannot tell, it counts
+ * as moved, so the read is never missed.
+ */
+export function filesMoved(root: string, meta: BoardMeta, read: Pick<Blueprint, 'commits' | 'at'>, skip?: string): boolean {
+  return reposOf(meta).some((r) => {
+    const dir = path.join(root, r.path);
+    const from = read.commits?.[r.path] ?? (read.at ? git(dir, ['rev-list', '-1', '--first-parent', `--before=${read.at}`, r.base], { allowFail: true }) : '');
+    if (!from) return true;
+    const own = skip ? path.relative(dir, skip) : '';
+    const keepOut = own && !own.startsWith('..') && !path.isAbsolute(own) ? [`:(exclude)${own}`] : [];
+    let changes: string;
+    try {
+      changes = git(dir, ['diff', '--name-status', '-M', from, r.base, '--', '.', ...keepOut]);
+    } catch {
+      return true;
+    }
+    // A for added, D for deleted, R for renamed or moved, C for copied. M (changed inside) leaves the map as it is.
+    return changes.split('\n').some((l) => /^[ADRC]/.test(l));
+  });
 }
 
 const SKIP = new Set(['node_modules', '.git', '.squad', 'dist', 'build', '.next', 'vendor']);

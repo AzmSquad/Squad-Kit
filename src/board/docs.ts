@@ -1,4 +1,5 @@
 import yaml from 'js-yaml';
+import { TECH_ROLES } from './types.js';
 import type { AgentName, Blueprint, BoardMeta, ChangePart, ChangeStatus, ChangeStep, Criterion, Decision, DecisionDraft, Lesson, ProofShot, Question, Release, SpecChange, Step, Ticket, TicketNote } from './types.js';
 
 /**
@@ -211,9 +212,10 @@ function changeDoc(c: SpecChange): string {
     lines.push(`- Design: ${enc(c.design.summary)}`, ...c.design.before.map((s) => `- Step was: ${enc(s)}`), ...c.design.steps.map((s, i) => `- Step ${i + 1}, ${s.change}: ${enc(s.title)}`));
   }
   if (c.decided) {
-    lines.push(`- ${c.decided.approved ? 'Approved' : 'Declined'} by: ${enc(c.decided.by)}, ${c.decided.at}`);
+    lines.push(`- ${c.decided.withdrawn ? 'Withdrawn' : c.decided.approved ? 'Approved' : 'Declined'} by: ${enc(c.decided.by)}, ${c.decided.at}`);
     if (c.decided.reason) lines.push(`- Reason: ${enc(c.decided.reason)}`);
   }
+  if (c.specBefore) lines.push(`- Spec before: ${JSON.stringify(c.specBefore)}`);
   if (c.paused) lines.push(`- Paused: ${JSON.stringify(c.paused)}`);
   if (c.error !== undefined) lines.push(`- Error: ${enc(c.error)}`);
   return lines.join('\n');
@@ -253,9 +255,16 @@ function parseChanges(text: string): SpecChange[] {
       else if ((m = line.match(/^- Design: ?(.*)$/))) [design.summary, designed] = [dec(m[1]!), true];
       else if ((m = line.match(/^- Step was: ?(.*)$/))) design.before.push(dec(m[1]!));
       else if ((m = line.match(/^- Step \d+, (same|changed|new): (.*)$/))) design.steps.push({ title: dec(m[2]!), change: m[1] as ChangeStep['change'] });
-      else if ((m = line.match(/^- (Approved|Declined) by: (.*), (\S+)$/))) c.decided = { by: dec(m[2]!), at: m[3]!, approved: m[1] === 'Approved' };
-      else if ((m = line.match(/^- Reason: ?(.*)$/)) && c.decided) c.decided.reason = dec(m[1]!);
-      else if ((m = line.match(/^- Paused: (.*)$/))) {
+      else if ((m = line.match(/^- (Approved|Declined|Withdrawn) by: (.*), (\S+)$/))) {
+        c.decided = { by: dec(m[2]!), at: m[3]!, approved: m[1] === 'Approved', ...(m[1] === 'Withdrawn' ? { withdrawn: true } : {}) };
+      } else if ((m = line.match(/^- Reason: ?(.*)$/)) && c.decided) c.decided.reason = dec(m[1]!);
+      else if ((m = line.match(/^- Spec before: (.*)$/))) {
+        try {
+          c.specBefore = JSON.parse(m[1]!) as SpecChange['specBefore'];
+        } catch {
+          // A hand edit broke it; the change can then no longer be withdrawn.
+        }
+      } else if ((m = line.match(/^- Paused: (.*)$/))) {
         try {
           c.paused = JSON.parse(m[1]!) as SpecChange['paused'];
         } catch {
@@ -421,9 +430,9 @@ export function parseDecisionDoc(text: string): Decision {
   return d;
 }
 
-/** A release's log stays on the computer that did it: it tells what happened after the release commit. */
+/** A release's log and its unpushed commits stay on the computer that did it: they tell what happened after the release commit. */
 export function releaseDoc(r: Release): string {
-  const { notes, log: _log, ...facts } = r;
+  const { notes, log: _log, unpushed: _unpushed, ...facts } = r;
   return withHeader(facts as Record<string, unknown>, `# ${enc(r.version)}\n\n## Notes\n\n${escText(notes)}`);
 }
 
@@ -463,7 +472,10 @@ export function parseLessonsDoc(text: string): Lesson[] {
 
 /** knowledge/stack.md: the technologies the code uses and the patterns it follows, with the decisions behind them. */
 export function stackDoc(b: Pick<Blueprint, 'stack' | 'patterns'>): string {
-  const stack = b.stack.map((n) => [`### ${enc(n.name)}`, '', ...(n.decision !== undefined ? [`- Decision: ${enc(n.decision)}`, ''] : []), escText(n.why)].join('\n'));
+  const stack = b.stack.map((n) => {
+    const facts = [...(n.role !== undefined ? [`- Role: ${n.role}`] : []), ...(n.decision !== undefined ? [`- Decision: ${enc(n.decision)}`] : [])];
+    return [`### ${enc(n.name)}`, '', ...(facts.length ? [...facts, ''] : []), escText(n.why)].join('\n');
+  });
   const patterns = b.patterns.map((p) =>
     [`### ${enc(p.name)}`, '', ...(p.decision !== undefined ? [`- Decision: ${enc(p.decision)}`] : []), `- Where: ${p.where.map(enc).join(' | ')}`, '', escText(p.what)].join('\n'),
   );
@@ -474,15 +486,17 @@ export function parseStackDoc(text: string): Pick<Blueprint, 'stack' | 'patterns
   const [, stackText = '', patternText = ''] = text.split(/^## (?:Stack|Patterns)$/m);
   const facts = (body: string) => {
     const lines = body.split('\n');
-    const decision = lines.find((l) => l.startsWith('- Decision: '));
-    const where = lines.find((l) => l.startsWith('- Where: '));
-    const rest = lines.filter((l) => !l.startsWith('- Decision: ') && !l.startsWith('- Where: '));
-    return { decision: decision ? dec(decision.slice(12)) : undefined, where: where ? where.slice(9).split(' | ').filter(Boolean).map(dec) : [], text: block(rest.join('\n')) };
+    const fact = (key: string) => lines.find((l) => l.startsWith(`- ${key}: `))?.slice(key.length + 4);
+    const decision = fact('Decision');
+    const where = fact('Where');
+    const role = TECH_ROLES.find((r) => r === fact('Role'));
+    const rest = lines.filter((l) => !/^- (Decision|Where|Role): /.test(l));
+    return { decision: decision !== undefined ? dec(decision) : undefined, role, where: where ? where.split(' | ').filter(Boolean).map(dec) : [], text: block(rest.join('\n')) };
   };
   return {
     stack: sections(stackText, /^### (.*)$/).map((s) => {
       const f = facts(s.text);
-      return { name: dec(s.match[1]!), why: f.text, ...(f.decision !== undefined ? { decision: f.decision } : {}) };
+      return { name: dec(s.match[1]!), why: f.text, ...(f.role ? { role: f.role } : {}), ...(f.decision !== undefined ? { decision: f.decision } : {}) };
     }),
     patterns: sections(patternText, /^### (.*)$/).map((s) => {
       const f = facts(s.text);

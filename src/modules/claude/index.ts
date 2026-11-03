@@ -15,7 +15,9 @@ const READ_SHELL = ['cat', 'ls', 'grep', 'rg', 'head', 'tail', 'wc', 'cd', 'pwd'
 export const READ_ONLY = ['Read', 'Glob', 'Grep', 'LS', ...READ_SHELL];
 const GIT_READ = ['git diff', 'git status', 'git log', 'git show'].map((c) => `Bash(${c}:*)`);
 const BUILD_TOOLS = ['Read', 'Edit', 'MultiEdit', 'Write', 'Glob', 'Grep', 'LS', 'Bash', 'TodoWrite'];
-/** Git that changes history is squad-kit's job, never an agent's. */
+/** A step that runs the app and a browser (the Tester): any command, but no file-editing tools. */
+const RUN_TOOLS = ['Read', 'Glob', 'Grep', 'LS', 'Bash', 'TodoWrite'];
+/** Git that changes history is squad-kit's job, never an agent's; so are pull requests and the repo on the code host. */
 const NO_GIT_WRITES = [
   'Bash(git commit:*)',
   'Bash(git push:*)',
@@ -26,16 +28,47 @@ const NO_GIT_WRITES = [
   'Bash(git merge:*)',
   'Bash(git branch:*)',
   'Bash(git tag:*)',
+  'Bash(git stash:*)',
+  'Bash(git clean:*)',
+  'Bash(git pull:*)',
+  'Bash(git cherry-pick:*)',
+  'Bash(git revert:*)',
+  'Bash(git am:*)',
+  'Bash(git update-ref:*)',
+  'Bash(git worktree:*)',
+  // The same commands on another folder's git.
+  'Bash(git -C:*)',
+  'Bash(gh pr:*)',
+  'Bash(gh repo:*)',
 ];
+/** The tools that change a file, each with its own rule. */
+const FILE_TOOLS = ['Edit', 'Write', 'MultiEdit'];
+
+/**
+ * Deny rules for files no agent may change, by name at any depth: under the folder it works in, and anywhere on disk
+ * (`//` is the root), so a folder above it or the person's own ~/.claude is covered too.
+ */
+function protectedRules(names: string[]): string[] {
+  return names.flatMap((n) => {
+    const pattern = n.endsWith('/') ? `**/${n}**` : `**/${n}`;
+    return [pattern, `//${pattern}`].flatMap((p) => FILE_TOOLS.map((t) => `${t}(${p})`));
+  });
+}
 
 /** Claude's model for each level, by the aliases Claude Code always points at the newest of each. */
 const LEVEL_MODEL = { strongest: 'opus', balanced: 'sonnet', fast: 'haiku' } as const;
 
 /** Claude Code's settings for one run of a role. */
 export function claudeRunOptions(r: AgentRun): RunOptions {
-  const access: Pick<RunOptions, 'allowedTools' | 'disallowedTools' | 'permissionMode'> = r.permissions.includes('edit')
-    ? { allowedTools: BUILD_TOOLS, disallowedTools: NO_GIT_WRITES, permissionMode: 'acceptEdits' }
-    : { allowedTools: [...new Set([...READ_ONLY, ...(r.permissions.includes('git-read') ? GIT_READ : [])])], disallowedTools: NO_GIT_WRITES };
+  const edits = r.permissions.includes('edit');
+  const access: Pick<RunOptions, 'allowedTools' | 'disallowedTools' | 'permissionMode'> = {
+    allowedTools: edits ? BUILD_TOOLS
+      : r.permissions.includes('run') ? RUN_TOOLS
+      : [...new Set([...READ_ONLY, ...(r.permissions.includes('git-read') ? GIT_READ : [])])],
+    disallowedTools: [...NO_GIT_WRITES, ...protectedRules(r.protectedFiles ?? [])],
+    // Always a mode of squad-kit's own: without one, the run starts in the person's default mode, maybe "bypass".
+    permissionMode: edits ? 'acceptEdits' : 'default',
+  };
   return {
     cwd: r.cwd,
     prompt: r.prompt,
@@ -75,6 +108,8 @@ export function claudeLaunch(opts: RunOptions, adapter: string, bin: string): Ac
   const options = {
     ...(opts.allowedTools?.length ? { allowedTools: opts.allowedTools } : {}),
     ...(denied.length ? { disallowedTools: denied } : {}),
+    // Left on, the adapter lets the person's own "bypass" default skip every rule above, the denied tools too.
+    allowDangerouslySkipPermissions: false,
     ...(opts.permissionMode ? { permissionMode: opts.permissionMode } : {}),
     ...(opts.schema ? { outputFormat: { type: 'json_schema', schema: opts.schema } } : {}),
     ...(opts.appendSystemPrompt ? { systemPrompt: { type: 'preset', preset: 'claude_code', append: opts.appendSystemPrompt } } : {}),
@@ -83,11 +118,14 @@ export function claudeLaunch(opts: RunOptions, adapter: string, bin: string): Ac
     ...(opts.addDirs?.length ? { additionalDirectories: opts.addDirs } : {}),
   };
   return {
+    label: 'Claude Code',
     command: process.execPath,
     args: [adapter],
     // The adapter takes its model from ANTHROPIC_MODEL (an option alone does not change it), and each run starts its own adapter.
     env: { ...claudeEnv(), CLAUDE_CODE_EXECUTABLE: bin, ...(opts.model ? { ANTHROPIC_MODEL: opts.model } : {}) },
     meta: { claudeCode: { options } },
+    // The adapter starts in the person's own default mode and ignores permissionMode above: the session gets it instead.
+    mode: opts.permissionMode ?? 'default',
     canResume: sessionExists,
     costSoFar,
     explain: plainError,
@@ -102,7 +140,8 @@ export async function runClaudeAcp(opts: RunOptions & { logDir?: string }): Prom
   if (!adapter) throw new AcpStartError('The Claude ACP adapter is not installed.');
   const bin = claudeBinary();
   if (!bin) return { ok: false, sessionId: opts.resume ?? opts.sessionId ?? '', text: '', error: 'Claude Code is not installed. Install it and log in, then try again.' };
-  return runAcp(claudeLaunch(opts, adapter, bin), { ...opts, expectStructured: Boolean(opts.schema), ...(opts.logDir ? { logDir: opts.logDir } : {}) });
+  // A missing answer is not an error here: squad-kit checks every answer against its shape and asks once more.
+  return runAcp(claudeLaunch(opts, adapter, bin), { ...opts, ...(opts.logDir ? { logDir: opts.logDir } : {}) });
 }
 
 export const claudeTool: AiTool = {
@@ -110,6 +149,9 @@ export const claudeTool: AiTool = {
   label: 'Claude Code',
   canRun: true,
   supportsEffort: true,
+  // Claude Code takes extra high too (`--effort xhigh`, and the same option over ACP).
+  efforts: ['xhigh', 'high', 'medium', 'low'],
+  instructionFiles: ['CLAUDE.md', 'CLAUDE.local.md', '.claude/'],
   modelFor: (level) => ({ strongest: 'Opus', balanced: 'Sonnet', fast: 'Haiku' })[level],
   ready() {
     const bin = claudeBinary();
@@ -122,6 +164,8 @@ export const claudeTool: AiTool = {
       return await runClaudeAcp({ ...opts, ...(r.logDir ? { logDir: r.logDir } : {}) });
     } catch (err) {
       if (!(err instanceof AcpStartError)) throw err;
+      // After a Stop nothing starts again, not even the other way.
+      if (r.signal?.aborted) return { ok: false, sessionId: opts.resume ?? opts.sessionId ?? '', text: '', error: 'You stopped the squad.' };
       r.onFallback?.(err.message);
       return runClaude(opts);
     }

@@ -37,6 +37,7 @@ import {
   runInbox,
   runNew,
   runPull,
+  runQuality,
   runBacklog,
   runUnstick,
   runRelease,
@@ -255,6 +256,7 @@ program
   .description('Propose a change to the spec; the work goes on while the Analyst writes it, then you approve or decline it')
   .option('--approve', 'Approve the change that waits (the proposal, or a big change\'s design update)')
   .option('--decline', 'Decline the change that waits; any text is the reason')
+  .option('--withdraw', 'Take back an approved change the squad has not built yet; any text is the reason')
   .option('--retry', 'Let the Analyst write the change again after it could not')
   .option('--as <kind>', 'For accepted work: make the change a new linked "ticket" or a "bug" report')
   .action(wrapArgs(runPropose));
@@ -348,6 +350,7 @@ program
   .command('release [version]')
   .description('Release the tickets that are ready')
   .option('-y, --yes', 'Skip the confirmation', false)
+  .option('--push-again', 'Send a release whose push failed: its commits and tag go to the remote now')
   .action(wrapArgs(runRelease));
 program
   .command('bug [what...]')
@@ -478,6 +481,10 @@ set
   .option('--type <name>', 'Skip the tracker-type prompt (none|jira|azure|github)')
   .option('-y, --yes', 'Fail fast instead of prompting for missing values', false)
   .action(wrap(runConfigSetTracker));
+set
+  .command('quality [setting]')
+  .description('Show or set how strong the squad\'s models are: best (default), balanced or thrifty')
+  .action(wrapArgs(runQuality));
 
 const unset = config.command('unset').description('Disable or clear a section');
 unset

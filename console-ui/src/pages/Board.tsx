@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { Check, Download, Plus, Search } from 'lucide-react';
 import { api } from '../api/client';
-import type { Actor, Stage, Ticket, TrackerStatus } from '../api/types';
+import type { Actor, DraftJob, Stage, Ticket, TrackerStatus } from '../api/types';
 import { useAct, useBoard } from '../lib/data';
 import { BugDialog, NewTicketDialog, PullDialog } from '../components/dialogs';
 import { Cmd, Glyph, STAGE_NAME, actionLabel, outdatedLine } from '../components/ui';
@@ -30,6 +30,14 @@ export function BoardPage() {
   const navigate = useNavigate({ from: '/board' });
   const [dialog, setDialog] = useState<'new' | 'pull' | 'bug' | null>(null);
   const [query, setQuery] = useState('');
+  // A draft from an idea waits under New ticket after the dialog closes; the button says so.
+  const kept = useQuery({
+    queryKey: ['ticket-draft-current'],
+    queryFn: () => api<{ draft: DraftJob | null }>('/api/v1/tickets/draft/current'),
+    enabled: dialog !== 'new',
+    refetchInterval: (q) => (q.state.data?.draft?.status === 'working' ? 2000 : 30_000),
+  });
+  const draftTag = { working: 'drafting…', done: 'draft ready', failed: 'draft stopped', cancelled: '' }[kept.data?.draft?.status ?? 'cancelled'];
   const view: View = search.view ?? 'all';
   const open = (id: string) => void navigate({ search: (s) => ({ ...s, ticket: id }) });
   const close = () => void navigate({ search: (s) => ({ ...s, ticket: undefined }) });
@@ -73,6 +81,7 @@ export function BoardPage() {
         <PullButton onPull={() => setDialog('pull')} />
         <button className="btn pri" onClick={() => setDialog('new')}>
           <Plus size={15} /> New ticket
+          {draftTag && <span className="btn-tag">{draftTag}</span>}
         </button>
       </div>
 

@@ -12,6 +12,7 @@ import {
   Globe,
   ListChecks,
   Loader2,
+  Minus,
   Pencil,
   Search,
   Send,
@@ -22,6 +23,7 @@ import {
 } from 'lucide-react';
 import { api, ticketFileUrl } from '../api/client';
 import type { AcpContentBlock, AcpToolContent, AcpToolKind, AcpToolStatus, AcpUpdate, ConversationResponse, ConversationSummary, Ticket } from '../api/types';
+import { merge, type Item } from '../lib/conversation';
 import { lineDiff } from '../lib/diff';
 import { usePrefs } from '../lib/prefs';
 import { Cmd, clock } from './ui';
@@ -77,8 +79,8 @@ export function ConversationTab({ t }: { t: Ticket }) {
         </label>
       </div>
       <p className="note" style={{ fontSize: 12.5, margin: '0 0 14px' }}>
-        A real Claude Code session on your subscription, read only, shown in the Agent Client Protocol format.{' '}
-        {conv.data && conv.data.total > (conv.data.updates.length ?? 0) ? `Showing the latest ${conv.data.updates.length} of ${conv.data.total} updates.` : ''}
+        Everything the {sessions.find((s) => s.key === chosen)?.label ?? 'agent'} did, step by step. Read only.{' '}
+        {conv.data && conv.data.total > (conv.data.updates.length ?? 0) ? `Showing the latest ${conv.data.updates.length} of ${conv.data.total} entries.` : ''}
       </p>
       <div className="conv">
         {items.map((it, i) => (
@@ -137,64 +139,6 @@ function MessageAgent({ t, to }: { t: Ticket; to: keyof typeof AGENT_NAME }) {
   );
 }
 
-/* ── Turning ACP updates into things to draw ───────────── */
-
-export type Item =
-  | { kind: 'message'; from: 'squad-kit' | 'claude-code' | 'agent' | 'thought'; content: AcpContentBlock; at?: string }
-  | { kind: 'plan'; entries: Extract<AcpUpdate, { sessionUpdate: 'plan' }>['entries']; at?: string }
-  | { kind: 'tool'; id: string; title: string; toolKind: AcpToolKind; status: AcpToolStatus; content: AcpToolContent[]; command?: string; at?: string };
-
-/** A tool call and its later updates become one row whose status and content grow as the agent works. */
-export function merge(updates: { at?: string; update: AcpUpdate }[]): Item[] {
-  const items: Item[] = [];
-  const tools = new Map<string, Extract<Item, { kind: 'tool' }>>();
-  for (const { at, update: u } of updates) {
-    switch (u.sessionUpdate) {
-      case 'user_message_chunk': {
-        const from = u.content.type === 'text' && u.content._meta?.squadKit?.from === 'claude-code' ? 'claude-code' : 'squad-kit';
-        items.push({ kind: 'message', from, content: u.content, at });
-        break;
-      }
-      case 'agent_message_chunk':
-        items.push({ kind: 'message', from: 'agent', content: u.content, at });
-        break;
-      case 'agent_thought_chunk':
-        items.push({ kind: 'message', from: 'thought', content: u.content, at });
-        break;
-      case 'plan':
-        items.push({ kind: 'plan', entries: u.entries, at });
-        break;
-      case 'tool_call': {
-        const row: Extract<Item, { kind: 'tool' }> = {
-          kind: 'tool',
-          id: u.toolCallId,
-          title: u.title,
-          toolKind: u.kind ?? 'other',
-          status: u.status ?? 'in_progress',
-          content: [...(u.content ?? [])],
-          command: u.rawInput?.command,
-          at,
-        };
-        tools.set(u.toolCallId, row);
-        items.push(row);
-        break;
-      }
-      case 'tool_call_update': {
-        // ACP: fields in an update replace the ones the call had.
-        const row = tools.get(u.toolCallId);
-        if (!row) break;
-        if (u.status) row.status = u.status;
-        if (u.title) row.title = u.title;
-        if (u.kind) row.toolKind = u.kind;
-        if (u.rawInput?.command) row.command = u.rawInput.command;
-        if (u.content) row.content = [...u.content];
-        break;
-      }
-    }
-  }
-  return items;
-}
-
 /* ── Drawing ───────────────────────────────────────────── */
 
 export function Item({ it, ticket, cwd }: { it: Item; ticket: string; cwd?: string }) {
@@ -242,23 +186,26 @@ const KIND_ICON: Record<AcpToolKind, LucideIcon> = {
 function ToolRow({ it, ticket, cwd }: { it: Extract<Item, { kind: 'tool' }>; ticket: string; cwd?: string }) {
   const hasMedia = it.content.some((c) => c.type === 'content' && (c.content.type === 'image' || c.content.type === 'resource_link'));
   const hasDiff = it.content.some((c) => c.type === 'diff');
-  const [open, setOpen] = useState(hasDiff || hasMedia || it.status === 'failed');
+  // A real failure opens by itself; a call squad-kit did not allow stays folded, since nothing went wrong.
+  const failed = it.status === 'failed' && !it.skipped;
+  const [open, setOpen] = useState(!it.skipped && (hasDiff || hasMedia || failed));
   useEffect(() => {
-    if (it.status === 'failed' || hasMedia) setOpen(true);
-  }, [it.status, hasMedia]);
-  const Icon = KIND_ICON[it.toolKind] ?? Wrench;
-  const body = it.content.length > 0 || it.command;
+    if (failed || hasMedia) setOpen(true);
+  }, [failed, hasMedia]);
+  const Icon = it.answer ? Send : it.skipped ? Minus : (KIND_ICON[it.toolKind] ?? Wrench);
+  const body = it.content.length > 0 || it.command || it.skipped;
   return (
-    <div className={`conv-tool ${it.status}`}>
+    <div className={`conv-tool ${it.skipped ? 'skipped' : it.status}`}>
       <button className="conv-tool-head" onClick={() => body && setOpen(!open)} aria-expanded={open}>
         <Icon size={14} />
         <span className="mono conv-tool-title">{it.title}</span>
         <span className="conv-at">{it.at ? clock(it.at) : ''}</span>
-        <StatusChip status={it.status} />
+        <StatusChip status={it.status} skipped={it.skipped} />
       </button>
       {open && body && (
         <div className="conv-tool-body">
-          {it.command && it.toolKind === 'execute' && <pre className="conv-cmd">$ {it.command}</pre>}
+          {it.skipped && <p className="note">By design, nothing went wrong: squad-kit lets each step do only what it needs, and this was not part of it.</p>}
+          {it.command && it.toolKind === 'execute' ? <pre className="conv-cmd">$ {it.command}</pre> : it.skipped && it.detail && <pre className="conv-cmd">{it.detail}</pre>}
           {it.content.map((c, i) => (
             <ToolContent key={i} c={c} ticket={ticket} cwd={cwd} />
           ))}
@@ -268,7 +215,8 @@ function ToolRow({ it, ticket, cwd }: { it: Extract<Item, { kind: 'tool' }>; tic
   );
 }
 
-function StatusChip({ status }: { status: AcpToolStatus }) {
+function StatusChip({ status, skipped }: { status: AcpToolStatus; skipped?: boolean }) {
+  if (skipped) return <span className="conv-status skip"><Minus size={12} /> Skipped</span>;
   if (status === 'completed') return <span className="conv-status ok"><Check size={12} /> Done</span>;
   if (status === 'failed') return <span className="conv-status bad"><X size={12} /> Failed</span>;
   return <span className="conv-status run"><Loader2 size={12} className="spin" /> Running</span>;

@@ -78,6 +78,18 @@ describe('conversations in ACP format', () => {
     expect(readConversation('../../etc/passwd', 400, base)).toBeNull();
   });
 
+  it('says the answer was handed in, without the tool’s receipt', () => {
+    const id = 'c0ffee00-2632-4011-89ff-8ec837feb166';
+    const lines = [
+      { type: 'assistant', cwd: work, message: { content: [{ type: 'tool_use', id: 's1', name: 'StructuredOutput', input: { approved: true } }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 's1', content: 'Structured output provided successfully' }] } },
+    ];
+    fs.writeFileSync(path.join(base, '-tmp-work', `${id}.jsonl`), lines.map((l) => JSON.stringify(l)).join('\n'));
+    const [call, done] = readConversation(id, 400, base)!.updates.map((e) => e.update) as any[];
+    expect(call).toMatchObject({ toolCallId: 's1', title: 'Handed in its answer' });
+    expect(done).toMatchObject({ toolCallId: 's1', status: 'completed', content: [] });
+  });
+
   it('lists a ticket’s conversations by role', () => {
     const t = { sessions: { intake: 'aaaaaaaa-1111', build: ID } } as unknown as Ticket;
     expect(ticketConversations(t, base)).toEqual([

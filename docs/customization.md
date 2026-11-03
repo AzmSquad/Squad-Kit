@@ -337,6 +337,8 @@ squad upgrade --yes       # skip confirmation
 
 **`squad upgrade`** fetches the **latest** release from npm and refuses **dev** installs and **major** version jumps (it prints a manual guide instead) so you do not jump across breaking changes by accident. Patch and minor updates within the same major are the sweet spot.
 
+**The Update button.** The app looks for a new version on start and once a day (Settings › About, "Check for updates every day"; turn it off on a network without internet). When one is out, Home and every project page show "squad-kit 1.0.2 is ready" with what is new from the GitHub release. **Update now** waits until no agent is in the middle of a step (or press **Update now anyway**), installs with the package manager that installed squad-kit, and restarts the app on the same link: every ticket carries on where it was. If the install needs permission, the app shows the one command to run in a terminal, then **Restart**. A source checkout and a new major version only get the command. API: `GET /api/v1/app/update`, `POST /api/v1/app/update` (`{ "now": true }` skips the wait), `POST /api/v1/app/update/check`.
+
 After installing a new **version** of the package, run **`squad migrate` once per repo** the first time the CLI reports structural drift, or when upgrading from **0.1.x** → **0.2.x**, so `.squad/` matches what the new CLI expects. The full 0.1.x → 0.2.x walkthrough (including what gets deleted) is on the site: [migration guide](https://squad-kit.com/docs/migrating-from-0.1) (a repo-local `docs/migrating-from-0.1.md` is maintained alongside the project).
 
 `npm install -g squad-kit@x` or `pnpm add -g squad-kit@x` is still valid if you pin versions in automation; **`squad upgrade`** is the interactive default.

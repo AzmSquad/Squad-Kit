@@ -171,7 +171,7 @@ describe('added up per ticket and per role', () => {
     answers.push({ structured: { empty: true, summary: 'An empty folder', map: [], decisions: [], commands: {} }, usage: { inputTokens: 3000, outputTokens: 200, costUsd: 0.3 } });
     await (new LiveSquad(bp) as unknown as Squad).scan();
     expect(readMeta(bp).scan?.status).toBe('done');
-    expect(readMeta(bp).usage).toEqual([{ role: 'architect', step: 'scan', level: 'strongest', model: 'Opus', runs: 1, inputTokens: 3000, outputTokens: 200, costUsd: 0.3 }]);
+    expect(readMeta(bp).usage).toEqual([{ role: 'architect', step: 'scan', level: 'balanced', model: 'Sonnet', runs: 1, inputTokens: 3000, outputTokens: 200, costUsd: 0.3 }]);
 
     const t = actions.createTicket(bp, { title: 'Opening hours' });
     updateTicket(bp, t.id, (x) => (x.squad = null));

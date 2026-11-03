@@ -106,7 +106,7 @@ export interface SpecChange {
   why?: string;
   parts?: ChangePart[];
   design?: { summary: string; before: string[]; steps: { title: string; change: 'same' | 'changed' | 'new' }[] };
-  decided?: { by: string; at: string; approved: boolean; reason?: string };
+  decided?: { by: string; at: string; approved: boolean; reason?: string; withdrawn?: boolean };
   error?: string;
 }
 
@@ -226,6 +226,34 @@ export interface TicketNote {
   kind: 'note' | 'criterion' | 'rule';
   text: string;
   to?: 'analyst' | 'architect' | 'builder' | 'reviewer' | 'tester';
+}
+
+/** The ticket fields the Analyst filled in from a pasted idea or message. */
+export interface TicketDraft {
+  title: string;
+  ask: string;
+  kind: Ticket['kind'];
+  track?: Track;
+  priority: Ticket['priority'];
+  criteria: string[];
+  rules: string[];
+  edgeCases: string[];
+  gaps: string[];
+}
+
+/** A draft the Analyst is writing (src/engine/draft.ts). It waits under New ticket until it is used. */
+export interface DraftJob {
+  id: string;
+  status: 'working' | 'done' | 'failed' | 'cancelled';
+  /** Reading the message, looking at the project, or writing the ticket. */
+  step: 'read' | 'look' | 'write';
+  looked: string[];
+  text: string;
+  files: { name: string; size: number }[];
+  startedAt: string;
+  endedAt?: string;
+  draft?: TicketDraft;
+  error?: string;
 }
 
 export interface Ticket {
@@ -363,6 +391,8 @@ export interface Release {
   titles?: Record<string, string>;
   /** What the release really did, in plain words, shown after releasing. */
   log?: { ok: boolean; text: string }[];
+  /** Repos whose push failed: the release is only on this computer until Push again sends it. */
+  unpushed?: { repo: string; remote: string; base: string; commit: string; tag?: string; error: string }[];
 }
 
 export interface Decision {
@@ -398,6 +428,8 @@ export interface BoardMeta {
   id?: string;
   /** Off: squad-kit never commits the project's documents (ADR-001). */
   documentsInGit?: boolean;
+  /** The Quality setting; left out means best. */
+  quality?: Quality;
   project: string;
   key: string;
   nextNumber: number;
@@ -532,10 +564,13 @@ export interface AgentInfo {
   /** The AI tool's model for each level, for example strongest: Opus. */
   modelOf: Record<ModelLevel, string>;
   supportsEffort: boolean;
+  /** The efforts the AI tool takes, hardest first. */
+  efforts: Effort[];
 }
 
 export type ModelLevel = 'strongest' | 'balanced' | 'fast';
-export type Effort = 'high' | 'medium' | 'low';
+export type Effort = 'xhigh' | 'high' | 'medium' | 'low';
+export type Quality = 'best' | 'balanced' | 'thrifty';
 
 export interface LevelChoice {
   level?: ModelLevel;
@@ -706,4 +741,45 @@ export interface FolderListing {
   canAdd: boolean;
   folders: { name: string; path: string; kind: 'project' | 'repo' | 'folder' }[];
   places: { name: string; path: string }[];
+}
+
+/** The Update button: where squad-kit stands against npm, and where an update is. */
+export type UpdateState = 'idle' | 'waiting' | 'installing' | 'restarting' | 'done' | 'failed';
+
+export interface UpdateWork {
+  project: string;
+  ticket?: string;
+  title: string;
+}
+
+export interface UpdateStatus {
+  current: string;
+  latest: string | null;
+  newer: boolean;
+  /** A new major version: read what changed and run the command; it never installs by itself. */
+  major: boolean;
+  checkedAt: string | null;
+  checkError?: string;
+  notes?: string[];
+  notesUrl: string;
+  /** A source checkout only gets the command. */
+  devInstall: boolean;
+  command: string;
+  daily: boolean;
+  later: string | null;
+  /** When the app started; a new value means it restarted. */
+  startedAt: string;
+  progress: {
+    state: UpdateState;
+    at?: string;
+    from?: string;
+    to?: string;
+    busy?: UpdateWork[];
+    waitedFor?: UpdateWork[];
+    now?: boolean;
+    carried?: UpdateWork[];
+    reason?: string;
+    permission?: boolean;
+    output?: string;
+  };
 }

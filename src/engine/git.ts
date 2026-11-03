@@ -7,16 +7,44 @@ import { squadHome } from '../core/home.js';
 
 /** Small git helpers. The squad never touches the person's own checkout: each ticket gets a worktree. */
 
-export function git(cwd: string, args: string[], opts: { allowFail?: boolean; env?: Record<string, string> } = {}): string {
+export function git(cwd: string, args: string[], opts: { allowFail?: boolean; env?: Record<string, string>; timeoutMs?: number } = {}): string {
   try {
     const env = opts.env ? { ...process.env, ...opts.env } : undefined;
-    return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024, ...(env ? { env } : {}) }).trim();
+    return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024, ...(env ? { env } : {}), ...(opts.timeoutMs ? { timeout: opts.timeoutMs } : {}) }).trim();
   } catch (err) {
     if (opts.allowFail) return '';
-    const e = err as { stderr?: Buffer | string; message: string };
+    const e = err as { stderr?: Buffer | string; message: string; code?: string };
+    if (e.code === 'ETIMEDOUT') {
+      const s = Math.max(1, Math.round((opts.timeoutMs ?? 0) / 1000));
+      throw new Error(`git ${args[0]} gave up after ${s} second${s === 1 ? '' : 's'}. Check the network, and that git can reach the remote without asking for a password.`);
+    }
     const detail = (e.stderr ? e.stderr.toString() : e.message).trim().split('\n').slice(-3).join(' ');
     throw new Error(`git ${args[0]} failed: ${detail}`);
   }
+}
+
+/** The longest git over the network may take. */
+export const NETWORK_GIT_MS = 120_000;
+
+const SSH_SAFE = ['-o BatchMode=yes', '-o ConnectTimeout=15'];
+
+/**
+ * The environment for git over the network. git never asks for a password in the background (a code host module
+ * signs in through its own variables), and ssh gives up instead of asking, or waiting on a host that does not answer.
+ * The person's own ssh command (GIT_SSH_COMMAND or core.sshCommand) keeps its options; theirs come first, so they win.
+ */
+export function networkGitEnv(cwd: string, env: Record<string, string> = {}): Record<string, string> {
+  const all = { ...process.env, ...env };
+  const own = all.GIT_SSH_COMMAND?.trim() || git(cwd, ['config', '--get', 'core.sshCommand'], { allowFail: true });
+  // A program in GIT_SSH (such as plink) may not take ssh's options, so it is left as it is.
+  const ssh = own || (all.GIT_SSH ? '' : 'ssh');
+  const add = SSH_SAFE.filter((o) => !ssh.toLowerCase().includes(o.slice(3, o.indexOf('=')).toLowerCase()));
+  return { ...env, GIT_TERMINAL_PROMPT: '0', ...(ssh ? { GIT_SSH_COMMAND: [ssh, ...add].join(' ') } : {}) };
+}
+
+/** git over the network (fetch, push, ls-remote, pull): it never asks for a password and gives up after two minutes. */
+export function netGit(cwd: string, args: string[], opts: { allowFail?: boolean; env?: Record<string, string>; timeoutMs?: number } = {}): string {
+  return git(cwd, args, { ...opts, env: networkGitEnv(cwd, opts.env), timeoutMs: opts.timeoutMs ?? NETWORK_GIT_MS });
 }
 
 export function isRepo(dir: string): boolean {
@@ -79,19 +107,39 @@ export function pushedBranch(projectRoot: string, branch: string): string | null
 }
 
 /**
- * The ticket's copy of the code. A branch pushed from another computer is where its work so far is, so the copy
- * starts from it, not from the base; `pushed` says so.
+ * The newest base to build on. The remote's copy (as last fetched) has the team's work; the local one has work
+ * accepted here and not pushed yet. When one holds the other, that one; when both moved on, a merge of the two that no
+ * branch points at, so the ticket gets both. No remote, or the two clash: the local base, as before.
  */
-export function addWorktree(projectRoot: string, ticketId: string, base: string): { dir: string; branch: string; baseCommit: string; pushed?: string } {
+export function latestBase(dir: string, base: string, remote?: string): { ref: string; sha: string } {
+  const here = git(dir, ['rev-parse', base]);
+  const there = remote ? git(dir, ['rev-parse', '--verify', '-q', `refs/remotes/${remote}/${base}`], { allowFail: true }) : '';
+  if (!there || there === here || isAncestor(dir, there, here)) return { ref: base, sha: here };
+  if (isAncestor(dir, here, there)) return { ref: `${remote}/${base}`, sha: there };
+  try {
+    const tree = git(dir, ['merge-tree', '--write-tree', here, there]).split('\n')[0]!.trim();
+    const sha = git(dir, [...authorArgs(dir), 'commit-tree', tree, '-p', here, '-p', there, '-m', `Merge ${remote}/${base} into ${base}`]);
+    return { ref: `${base} and ${remote}/${base}`, sha };
+  } catch {
+    return { ref: base, sha: here };
+  }
+}
+
+/**
+ * The ticket's copy of the code. A branch pushed from another computer is where its work so far is, so the copy
+ * starts from it, not from the base; `pushed` says so. With `remote`, a new copy starts from the newest base.
+ */
+export function addWorktree(projectRoot: string, ticketId: string, base: string, remote?: string): { dir: string; branch: string; baseCommit: string; pushed?: string } {
   const dir = path.join(worktreeRoot(projectRoot), ticketId.toLowerCase());
   const branch = `squad/${ticketId.toLowerCase()}`;
-  const baseCommit = git(projectRoot, ['rev-parse', base]);
+  let baseCommit = git(projectRoot, ['rev-parse', base]);
   if (fs.existsSync(path.join(dir, '.git'))) return { dir, branch, baseCommit };
   fs.mkdirSync(path.dirname(dir), { recursive: true });
   git(projectRoot, ['worktree', 'prune'], { allowFail: true });
   const exists = git(projectRoot, ['rev-parse', '--verify', `refs/heads/${branch}`], { allowFail: true });
   const pushed = exists ? null : pushedBranch(projectRoot, branch);
-  git(projectRoot, exists ? ['worktree', 'add', dir, branch] : ['worktree', 'add', '-b', branch, dir, pushed ?? base]);
+  if (!exists && !pushed && remote) baseCommit = latestBase(projectRoot, base, remote).sha;
+  git(projectRoot, exists ? ['worktree', 'add', dir, branch] : ['worktree', 'add', '-b', branch, dir, pushed ?? baseCommit]);
   if (!pushed) return { dir, branch, baseCommit };
   // Where the ticket left the base, so its changes are measured from there and not against newer work in the base.
   return { dir, branch, baseCommit: git(projectRoot, ['merge-base', base, pushed], { allowFail: true }) || baseCommit, pushed: pushed.replace(/^refs\/remotes\//, '') };
@@ -99,6 +147,22 @@ export function addWorktree(projectRoot: string, ticketId: string, base: string)
 
 export function removeWorktree(projectRoot: string, dir: string): void {
   git(projectRoot, ['worktree', 'remove', '--force', dir], { allowFail: true });
+}
+
+/** A throwaway copy of the code as it was at one commit, on no branch, beside the ticket copies. */
+export function addSnapshot(projectRoot: string, name: string, commit: string): string {
+  const dir = path.join(worktreeRoot(projectRoot), name);
+  dropSnapshot(projectRoot, dir);
+  fs.mkdirSync(path.dirname(dir), { recursive: true });
+  git(projectRoot, ['worktree', 'add', '--detach', dir, commit]);
+  return dir;
+}
+
+/** Removes a throwaway copy, with whatever its setup added (node_modules and the like). */
+export function dropSnapshot(projectRoot: string, dir: string): void {
+  removeWorktree(projectRoot, dir);
+  fs.rmSync(dir, { recursive: true, force: true });
+  git(projectRoot, ['worktree', 'prune'], { allowFail: true });
 }
 
 /** Files changed in a worktree compared with where the ticket started, including new files. */
@@ -145,9 +209,31 @@ export function moveBase(dir: string, base: string, commit: string, keep?: strin
   }
 }
 
+/** The branch changes the same lines as newer work in the base: a person decides. Any other git failure is not this. */
+export class MergeClash extends Error {}
+
+/** The oldest git that can merge without a checkout (`merge-tree --write-tree`). */
+export const MIN_GIT = [2, 38] as const;
+export const GIT_UPDATE = 'Update git: on a Mac run brew install git (or xcode-select --install); on Linux use your package manager';
+
+/** The installed git's version, like "2.41.0", or null when git does not run. */
+export function gitVersion(): string | null {
+  try {
+    return execFileSync('git', ['--version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).match(/(\d+\.\d+(?:\.\d+)?)/)?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function gitIsNewEnough(version: string): boolean {
+  const [major = 0, minor = 0] = version.split('.').map(Number);
+  return major > MIN_GIT[0] || (major === MIN_GIT[0] && minor >= MIN_GIT[1]);
+}
+
 /**
  * Merge a ticket's branch into the base branch with a merge commit, without checking anything out, so the next
- * tickets start from it. Throws when the branch clashes with changes already in the base.
+ * tickets start from it. Throws a MergeClash when the branch clashes with changes already in the base; any other
+ * failure (an older git, most often) throws a plain error that says so.
  */
 export function mergeIntoBase(dir: string, base: string, branch: string, message: string, keep?: string): { commit: string; moved: boolean; note?: string } {
   const baseSha = git(dir, ['rev-parse', base]);
@@ -156,9 +242,19 @@ export function mergeIntoBase(dir: string, base: string, branch: string, message
   if (isAncestor(dir, branchSha, baseSha)) return { commit: baseSha, moved: true };
   let tree: string;
   try {
-    tree = git(dir, ['merge-tree', '--write-tree', baseSha, branchSha]).split('\n')[0]!.trim();
-  } catch {
-    throw new Error(`${branch} clashes with changes already in ${base}.`);
+    tree = execFileSync('git', ['merge-tree', '--write-tree', baseSha, branchSha], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024 }).split('\n')[0]!.trim();
+  } catch (err) {
+    const e = err as { status?: number | null; stderr?: Buffer | string; message: string };
+    // Exit code 1 is git's "the merge has conflicts"; anything else means the merge could not be tried.
+    if (e.status === 1) throw new MergeClash(`${branch} clashes with changes already in ${base}.`);
+    const version = gitVersion();
+    const detail = (e.stderr ? e.stderr.toString() : e.message).trim().split('\n').slice(-2).join(' ');
+    const old = version && !gitIsNewEnough(version);
+    throw new Error(
+      old
+        ? `git ${version} cannot merge ${branch} into ${base}: squad-kit needs git ${MIN_GIT.join('.')} or newer. ${GIT_UPDATE}, then try again.`
+        : `git could not merge ${branch} into ${base} (git ${version ?? 'not found'}): ${detail}`,
+    );
   }
   const commit = git(dir, [...authorArgs(dir), 'commit-tree', tree, '-p', baseSha, '-p', branchSha, '-m', message]);
   return { commit, ...moveBase(dir, base, commit, keep) };

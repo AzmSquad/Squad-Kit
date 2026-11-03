@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { performance } from 'node:perf_hooks';
 
 /**
  * Nothing the squad runs may hang without the person knowing. Every running step reports progress; when it goes
@@ -61,13 +62,25 @@ export function descendants(rows: ProcRow[], root: number): ProcRow[] {
   return out;
 }
 
-const SHELL = /^(\S*\/)?(zsh|bash|sh|dash|fish)(\s|$)|^(\S*\/)?(tail|head|tee|cat|sleep)(\s|$)/;
+const SHELL = /^(\S*\/)?(zsh|bash|sh|dash|fish)(\s|$)/;
+const SHELL_OR_PIPE = /^(\S*\/)?(zsh|bash|sh|dash|fish)(\s|$)|^(\S*\/)?(tail|head|tee|cat|sleep)(\s|$)/;
 
-/** The command the step is really waiting on: the oldest process under it that is not a shell or a pipe helper. */
+/**
+ * The command the step is really waiting on: the youngest process under it that a shell started and that is not a
+ * shell or a pipe helper itself. The agent's own processes (an adapter, the AI tool, its helpers and servers) are not
+ * started from a shell, so they never count, and ending "the stuck command" never ends the agent.
+ */
 export function waitingOn(rows: ProcRow[], root: number): ProcRow | null {
-  const kids = descendants(rows, root).filter((r) => !SHELL.test(r.command));
+  const byPid = new Map(rows.map((r) => [r.pid, r]));
+  const fromShell = (r: ProcRow): boolean => {
+    for (let up = byPid.get(r.ppid); up; up = up.pid === root ? undefined : byPid.get(up.ppid)) {
+      if (SHELL.test(up.command)) return true;
+    }
+    return false;
+  };
+  const kids = descendants(rows, root).filter((r) => !SHELL_OR_PIPE.test(r.command) && fromShell(r));
   if (!kids.length) return null;
-  return kids.reduce((a, b) => (b.elapsedSec > a.elapsedSec ? b : a));
+  return kids.reduce((a, b) => (b.elapsedSec <= a.elapsedSec ? b : a));
 }
 
 function short(command: string): string {
@@ -80,10 +93,18 @@ function mins(sec: number): string {
   return `${m} minute${m === 1 ? '' : 's'}`;
 }
 
+/** The computer slept when the wall clock moved on this much more than the app could run. */
+const SLEEP_MS = 60_000;
+/** Nothing keeps the app from looking this long (the longest wait, git over the network, is 2 minutes), except sleep. */
+const NO_LOOK_MS = 10 * 60_000;
+
 export class Watchdog {
   private beats = new Map<string, { at: number; pid?: number }>();
   /** Last CPU reading per process, to see if it is doing anything. */
   private cpu = new Map<number, { cpuSec: number; at: number; idleSince: number }>();
+  /** The last look, on the wall clock and on the clock that stops while the computer sleeps. */
+  private wall = Date.now();
+  private awake = performance.now();
 
   constructor(
     private readonly quietMs = 3 * 60_000,
@@ -91,6 +112,27 @@ export class Watchdog {
     private readonly longMs = 12 * 60_000,
     private readonly table: () => ProcRow[] = processTable,
   ) {}
+
+  /**
+   * After the computer sleeps, the wall clock has moved on while nothing could run, so every step would look quiet
+   * for as long as it slept. Called at each look: returns how long the computer slept (0 when it did not), and takes
+   * that time out of every step's quiet time.
+   */
+  resumed(now = Date.now(), awake = performance.now()): number {
+    const wallGap = now - this.wall;
+    const ranGap = awake - this.awake;
+    this.wall = now;
+    this.awake = awake;
+    // Where the running clock counts sleep too, a gap far longer than any look needs is sleep all the same.
+    const slept = Math.max(wallGap - ranGap, wallGap >= NO_LOOK_MS ? wallGap : 0);
+    if (slept < SLEEP_MS) return 0;
+    for (const b of this.beats.values()) b.at = Math.min(now, b.at + slept);
+    for (const c of this.cpu.values()) {
+      c.at = Math.min(now, c.at + slept);
+      c.idleSince = Math.min(now, c.idleSince + slept);
+    }
+    return slept;
+  }
 
   /** The step did something visible: a tool call, a line of output. */
   beat(key: string, pid?: number): void {

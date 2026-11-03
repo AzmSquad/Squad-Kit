@@ -13,7 +13,7 @@ vi.mock('../src/modules/claude/direct.js', async (orig) => ({
   runClaude: async (opts: RunOptions): Promise<RunResult> => {
     calls.push(opts);
     fs.appendFileSync(path.join(opts.cwd, 'hours.ts'), '// finished\n');
-    return { ok: true, structured: {}, sessionId: opts.resume ?? opts.sessionId } as RunResult;
+    return { ok: true, structured: { summary: 'Finished' }, sessionId: opts.resume ?? opts.sessionId } as RunResult;
   },
 }));
 

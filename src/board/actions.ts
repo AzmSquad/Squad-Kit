@@ -13,6 +13,7 @@ import {
   updateTicket,
   writeDecision,
   writeRelease,
+  removeRelease,
   listReleases,
   writeTicket,
   writeMeta,
@@ -22,11 +23,12 @@ import {
 } from './store.js';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { BoardMeta, Decision, ImpactCheck, Release, TechDraft, Ticket } from './types.js';
+import type { BoardMeta, Decision, ImpactCheck, Release, TechDraft, Ticket, UnpushedRelease } from './types.js';
 import { detectStack } from './stack.js';
 import { scheduleSquad } from './schedule.js';
-import { PullRequestClash, commitTicket, liveRelease } from '../engine/release.js';
-import { git } from '../engine/git.js';
+import { PullRequestClash, commitTicket, liveRelease, pushAgain } from '../engine/release.js';
+import { MergeClash, git } from '../engine/git.js';
+import { holdRelease, releaseGoingOut } from './lock.js';
 import { repoFor, reposOf } from '../engine/repos.js';
 import { buildPaths } from '../core/paths.js';
 import { loadConfig } from '../core/config.js';
@@ -35,7 +37,7 @@ import { clientFor, overlayTrackerEnv } from '../tracker/index.js';
 import { aiTool, trackerFor, trackerModule } from '../modules/registry.js';
 import { readAgent } from '../engine/agents.js';
 import type { Tracker } from '../modules/tracker/types.js';
-import { localSetupFor, mergeLocally, opensPullRequest, syncWiki } from '../engine/sync.js';
+import { localSetupFor, mapAfterMerge, mergeLocally, opensPullRequest, syncWiki } from '../engine/sync.js';
 import type { AgentChat, AgentName, ChangePart, Criterion, PlanComment, PlanEdit, PlanPart, PlanSnapshot, SpecChange, StuckChoice, StuckOption, TicketNote, Track, TrackerEvent, WayOut } from './types.js';
 import { criterionText } from './docs.js';
 import { changeLines } from '../engine/prompts.js';
@@ -448,13 +450,15 @@ function acceptProof(bp: BoardPaths, ticket: Ticket): Ticket {
     try {
       merged = mergeLocally(bp, ticket);
     } catch (err) {
-      return clashed(bp, ticket.id, commit, (err as Error).message);
+      // Only a real clash is a clash card. Anything else (an older git) leaves the proof waiting, with git's reason.
+      if (err instanceof MergeClash) return clashed(bp, ticket.id, commit, err.message);
+      throw new BoardActionError(`The change is saved on ${ticket.branch}, but it could not be merged: ${(err as Error).message}`);
     }
   }
   if (!release.tickets.includes(ticket.id)) release.tickets.push(ticket.id);
   writeRelease(bp, release);
   // New code on the base: the architecture page reads it again.
-  if (merged?.moved) codeChanged(bp);
+  if (merged?.moved) mapAfterMerge(bp);
   return updateTicket(bp, ticket.id, (t) => {
     t.waiting = null;
     t.stage = 'release';
@@ -1033,8 +1037,54 @@ export function approveChange(bp: BoardPaths, id: string): Ticket {
       addActivity(t, 'you', `Approved change ${c.id} (big): ${what}. The Builder pauses after its current step, and the Architect updates the design`);
       return;
     }
+    // Kept so the change can still be withdrawn until the Builder takes it.
+    c.specBefore = { ...(t.story !== undefined ? { story: t.story } : {}), ...(t.criteria ? { criteria: t.criteria.map((x) => ({ ...x })) } : {}) };
     applyChange(t, c);
     addActivity(t, 'you', `Approved change ${c.id} (small): ${what}. The spec says it now; it reaches the Builder at the end of its current step`);
+  });
+}
+
+/**
+ * Withdraws an approved change the squad has not built yet: a small one before the Builder takes it into a step, a
+ * big one before its design update is ready. The spec goes back to how it was, and the ticket goes back to what it
+ * did before the change came in. Once the Builder works on it, a new change undoes it instead.
+ */
+export function withdrawChange(bp: BoardPaths, id: string, reason?: string): Ticket {
+  const meta = readMeta(bp);
+  const live = meta.engine === 'live';
+  return updateTicket(bp, id, (t) => {
+    const c = openChange(t);
+    if (c?.status === 'building') throw new BoardActionError(`The Builder is making change ${c.id} already. Once it is done, propose a new change to undo it.`);
+    if (c?.status !== 'approved' && c?.status !== 'designing') throw new BoardActionError(`${t.id} has no approved change to withdraw.`);
+    const why = reason?.trim();
+    const back = Boolean(c.specBefore);
+    if (c.specBefore) {
+      if (c.specBefore.story !== undefined) t.story = c.specBefore.story;
+      else delete t.story;
+      if (c.specBefore.criteria) t.criteria = c.specBefore.criteria;
+      else delete t.criteria;
+      delete c.specBefore;
+    }
+    c.status = 'declined';
+    c.decided = { by: meta.user.name, at: now(), approved: false, withdrawn: true, ...(why ? { reason: why } : {}) };
+    addActivity(t, 'you', `Withdrew change ${c.id}${back ? '; the spec is back to how it was' : ''}${why ? `: ${why}` : ''}`);
+    tellLater(t, meta.engine, { kind: 'note', text: `Change ${c.id} to the spec was withdrawn by ${meta.user.name}${why ? `: ${why}` : ''}`, noteKind: 'note' });
+    // What the ticket did before the change came in: what waited for you, or the step it paused after.
+    const paused = c.paused;
+    delete c.paused;
+    if (paused?.waiting) {
+      t.waiting = paused.waiting;
+      t.live = false;
+      t.squad = null;
+      t.status = paused.waiting.summary;
+    } else if (paused?.phase) {
+      t.live = true;
+      t.status = 'Carrying on';
+      scheduleSquad(t, paused.phase, live ? 0.2 : 2, live ? 1 : meta.speed);
+    } else if (t.squad?.phase.startsWith('change-')) {
+      t.squad = null;
+      t.live = false;
+    }
   });
 }
 
@@ -1347,6 +1397,13 @@ export function decideStuck(bp: BoardPaths, id: string, choice: number, input: {
     if (way === 'continue') {
       t.overrides = [...(t.overrides ?? []), { gate: gate as 'checks' | 'review' | 'proof', reason: reason!, by: meta.user.name, at: now() }];
       t.gates = { ...(t.gates ?? { checks: 'pending', review: 'pending', proof: 'pending' }), [gate as string]: 'skipped' };
+      // Remembered: a later round where only these checks fail again goes on, instead of stopping on them once more.
+      if (gate === 'checks') {
+        // Cards from before this was kept name the failed checks only in the gate's line: "lint, test failed".
+        const failed = t.stuck.checks ?? (t.gates.checksText?.replace(/ failed$/, '').split(', ').filter(Boolean) ?? []);
+        t.checksContinued = [...new Set([...(t.checksContinued ?? []), ...failed])];
+        t.tries = 0;
+      }
       tellLater(t, meta.engine, { kind: 'note', text: `Continued anyway past the failed ${gate}: ${reason}`, noteKind: 'note' });
     }
     if (meta.engine !== 'live') {
@@ -1379,6 +1436,7 @@ export function decideStuck(bp: BoardPaths, id: string, choice: number, input: {
         return;
       case 'yourself':
         t.tries = 0;
+        t.checksContinued = undefined;
         t.reviewRound = 0;
         t.reviewNotes = undefined;
         t.proof = undefined;
@@ -1422,13 +1480,16 @@ function bump(version: string, part: 'minor' | 'patch'): string {
 }
 
 export function ensureDraftRelease(bp: BoardPaths, part: 'minor' | 'patch'): Release {
-  const draft = draftRelease(bp);
+  // The release going out takes no more tickets: what is accepted meanwhile goes into the one after it.
+  const going = releaseGoingOut(bp);
+  const draft = listReleases(bp).find((r) => r.status === 'draft' && r.version !== going);
   if (draft) return draft;
   const meta = readMeta(bp);
   const live = meta.engine === 'live';
   const last = latestRelease(bp);
   // The first release on a live board continues the project's own version, not 0.0.0.
-  const from = last?.version ?? (live ? projectVersion(bp.root, meta) : 'v0.0.0');
+  const done = last?.version ?? (live ? projectVersion(bp.root, meta) : 'v0.0.0');
+  const from = going ? newer(going, done) : done;
   const release: Release = {
     version: bump(from, part),
     status: 'draft',
@@ -1488,6 +1549,7 @@ export function composeNotes(bp: BoardPaths, release: Release): string {
 export function saveReleaseNotes(bp: BoardPaths, version: string, notes: string): Release {
   const release = readRelease(bp, version);
   if (!release || release.status !== 'draft') throw new BoardActionError(`${version} is not a draft release.`);
+  if (releaseGoingOut(bp) === release.version) throw new BoardActionError(`${release.version} is going out right now with the notes it had. Edit the notes of the next release instead.`);
   release.notes = notes;
   writeRelease(bp, release);
   return release;
@@ -1497,6 +1559,22 @@ export async function releaseVersion(bp: BoardPaths, version?: string): Promise<
   const release = version ? readRelease(bp, version) : draftRelease(bp);
   if (!release || release.status !== 'draft') throw new BoardActionError('There is no release ready to go out.');
   if (release.tickets.length === 0) throw new BoardActionError(`${release.version} has no tickets yet.`);
+  // One release at a time, and "Looks right" meanwhile knows this one takes no more tickets.
+  let free: () => void;
+  try {
+    free = holdRelease(bp, release.version);
+  } catch (err) {
+    throw new BoardActionError((err as Error).message);
+  }
+  try {
+    // What it sends is read once the lock is held: a ticket accepted just before still goes with it.
+    return await sendRelease(bp, readRelease(bp, release.version) ?? release);
+  } finally {
+    free();
+  }
+}
+
+async function sendRelease(bp: BoardPaths, release: Release): Promise<Release> {
   const meta = readMeta(bp);
   if (!release.notes.trim()) release.notes = composeNotes(bp, release);
   const tickets = listTickets(bp).filter((t) => release.tickets.includes(t.id));
@@ -1510,11 +1588,15 @@ export async function releaseVersion(bp: BoardPaths, version?: string): Promise<
     '',
     'Release notes are in the changelog.',
   ].join('\n');
+  let unpushed: UnpushedRelease[] = [];
   if (meta.engine === 'live') {
     try {
-      release.log = await liveRelease(bp, release, tickets);
+      const done = await liveRelease(bp, release, tickets);
+      release.log = done.log;
+      unpushed = done.unpushed;
       if (meta.scan?.empty) writeMeta(bp, { ...readMeta(bp), scan: { ...meta.scan, empty: false } });
     } catch (err) {
+      foldNewerDrafts(bp, release.version);
       if (err instanceof PullRequestClash) {
         // Nothing changed yet: the clashing tickets leave the release with a way out, and the rest can go.
         for (const id of err.tickets) pullRequestClashed(bp, id);
@@ -1527,18 +1609,101 @@ export async function releaseVersion(bp: BoardPaths, version?: string): Promise<
       throw new BoardActionError(`The release did not go out: ${(err as Error).message}`);
     }
   }
+  // Read again before saving: a ticket that joined the file while the release went out is not in it, so it waits for
+  // the next release instead of being dropped or marked released.
+  const later = (readRelease(bp, release.version)?.tickets ?? []).filter((id) => !release.tickets.includes(id));
   release.status = 'released';
+  if (unpushed.length) release.unpushed = unpushed;
+  else delete release.unpushed;
   writeRelease(bp, release);
-  for (const t of tickets) {
-    updateTicket(bp, t.id, (x) => {
+  if (later.length) joinNextRelease(bp, later);
+  closeReleased(bp, release);
+  return release;
+}
+
+/**
+ * The release's tickets close once their repo has the release, and the tracker hears it then. A repo whose push
+ * failed keeps its tickets open, waiting for Push again.
+ */
+function closeReleased(bp: BoardPaths, release: Release): void {
+  const meta = readMeta(bp);
+  for (const id of release.tickets) {
+    const t = readTicket(bp, id);
+    if (!t || t.stage === 'done') continue;
+    const waits = release.unpushed?.length ? release.unpushed.find((u) => u.repo === repoFor(meta, t).path) : undefined;
+    updateTicket(bp, id, (x) => {
+      x.live = false;
+      if (waits) {
+        const status = `In ${release.version} · not pushed to ${waits.remote} yet`;
+        if (x.status === status) return;
+        x.status = status;
+        addActivity(x, 'release', `Released in ${release.version} on this computer only: the push to ${waits.remote} failed. Push again sends it`);
+        return;
+      }
       x.stage = 'done';
       x.status = `Released in ${release.version}`;
-      x.live = false;
       addActivity(x, 'release', `Released in ${release.version}`);
       tellLater(x, meta.engine, { kind: 'released', version: release.version });
     });
   }
-  return release;
+}
+
+/** Tickets accepted while a release went out: they go into the next draft, which says so on each of them. */
+function joinNextRelease(bp: BoardPaths, ids: string[]): void {
+  const tickets = ids.map((id) => readTicket(bp, id)).filter((t): t is Ticket => Boolean(t));
+  if (!tickets.length) return;
+  const next = ensureDraftRelease(bp, tickets.every((t) => t.kind === 'bug') ? 'patch' : 'minor');
+  writeRelease(bp, { ...next, tickets: [...new Set([...next.tickets, ...tickets.map((t) => t.id)])] });
+  for (const t of tickets) moveToRelease(bp, t.id, t.release, next.version);
+}
+
+function moveToRelease(bp: BoardPaths, id: string, from: string | undefined, to: string): void {
+  updateTicket(bp, id, (x) => {
+    x.release = to;
+    if (from && from !== to) x.status = x.status.split(from).join(to);
+    addActivity(x, 'release', `Moved to release ${to}`);
+  });
+}
+
+/**
+ * A release that did not go out takes back the tickets accepted while it was going: they went into a newer draft,
+ * which is folded into this one, so there is only one release to send.
+ */
+function foldNewerDrafts(bp: BoardPaths, version: string): void {
+  for (const d of listReleases(bp).filter((r) => r.status === 'draft' && r.version !== version && newer(r.version, version) === r.version)) {
+    const into = readRelease(bp, version);
+    if (!into) return;
+    writeRelease(bp, { ...into, tickets: [...new Set([...into.tickets, ...d.tickets])] });
+    removeRelease(bp, d.version);
+    for (const id of d.tickets) moveToRelease(bp, id, d.version, version);
+  }
+}
+
+/**
+ * "Push again" on a release whose push failed: the release commits and tags go to their remotes now, and the
+ * tickets of every repo that got them close.
+ */
+export async function pushReleaseAgain(bp: BoardPaths, version: string): Promise<Release> {
+  const release = readRelease(bp, version);
+  if (!release) throw new BoardActionError(`There is no release ${version}.`);
+  if (!release.unpushed?.length) throw new BoardActionError(`${release.version} is pushed already. Nothing is left to send.`);
+  let free: () => void;
+  try {
+    free = holdRelease(bp, release.version);
+  } catch (err) {
+    throw new BoardActionError((err as Error).message);
+  }
+  try {
+    const done = await pushAgain(bp, release);
+    release.log = [...(release.log ?? []), ...done.log];
+    if (done.unpushed.length) release.unpushed = done.unpushed;
+    else delete release.unpushed;
+    writeRelease(bp, release);
+    closeReleased(bp, release);
+    return release;
+  } finally {
+    free();
+  }
 }
 
 export interface BugInput {
@@ -1638,7 +1803,9 @@ export function readCodeAgain(bp: BoardPaths): BoardMeta['blueprint'] {
 export function draftTechDecision(bp: BoardPaths, tech: string): TechDraft {
   const meta = readMeta(bp);
   if (meta.engine !== 'live') throw new BoardActionError('Writing a decision needs the live squad.');
-  if (!detectStack(bp.root, meta).some((t) => t.name === tech)) throw new BoardActionError(`${tech} is not in the code.`);
+  // In a package file, or seen in the code by the Architect (a project without package files).
+  const inCode = detectStack(bp.root, meta).some((t) => t.name === tech) || Boolean(meta.blueprint?.stack.some((n) => n.role && n.name === tech));
+  if (!inCode) throw new BoardActionError(`${tech} is not in the code.`);
   const drafts = (meta.techDrafts ?? []).filter((d) => d.tech !== tech || d.status !== 'failed');
   const open = drafts.find((d) => d.tech === tech);
   if (open) return open;

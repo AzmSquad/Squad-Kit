@@ -6,6 +6,8 @@ import path from 'node:path';
 // squad-kit keeps each project's local files in ~/.squad-kit (ADR-001). Tests use a temp folder instead, never the
 // developer's own.
 process.env.SQUAD_KIT_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-home-'));
+// An app a test starts never asks npm for a new squad-kit; the update tests pass their own registry.
+fs.writeFileSync(path.join(process.env.SQUAD_KIT_HOME, 'settings.yaml'), 'checkForUpdates: false\n');
 
 // The same git settings on every machine: a laptop's own name or branch default never leaks into a test, and a CI
 // runner with none set behaves like a laptop.

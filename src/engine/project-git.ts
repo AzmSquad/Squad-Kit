@@ -133,7 +133,8 @@ export function leaveProjectFiles(bp: BoardPaths, t: Ticket, base: string): stri
 export function commitTicketDocs(bp: BoardPaths, t: Ticket, moment: string): string | null {
   const paths = stageTicketDocs(bp, t);
   if (!paths.length || !git(t.worktree!, ['diff', '--cached', '--name-only', '--', ...paths], { allowFail: true })) return null;
-  git(t.worktree!, [...commitArgsFor(t.worktree!), 'commit', '-m', `${t.id}: ${moment}`, '--', ...paths]);
+  // squad-kit's own bookkeeping: the project's commit hooks (tests, linters) are for code, and could wait forever.
+  git(t.worktree!, [...commitArgsFor(t.worktree!), 'commit', '--no-verify', '-m', `${t.id}: ${moment}`, '--', ...paths]);
   return git(t.worktree!, ['rev-parse', '--short', 'HEAD']);
 }
 

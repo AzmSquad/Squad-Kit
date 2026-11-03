@@ -45,3 +45,13 @@ export function setParallelLimit(n: number): number {
   writeSettings({ parallel: n });
   return n;
 }
+
+/** The app looks for a new squad-kit on start and once a day. On unless the person turned it off (offline networks). */
+export function checkForUpdates(): boolean {
+  return readSettings().checkForUpdates !== false;
+}
+
+export function setCheckForUpdates(on: boolean): boolean {
+  writeSettings({ checkForUpdates: on });
+  return on;
+}

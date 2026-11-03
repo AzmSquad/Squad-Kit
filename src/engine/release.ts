@@ -1,9 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { readMeta, type BoardPaths } from '../board/store.js';
-import type { Release, Ticket } from '../board/types.js';
+import type { Release, Ticket, UnpushedRelease } from '../board/types.js';
 import { runCommand, tail } from './checks.js';
-import { commitArgsFor, currentBranch, git, keepingFiles, remotes, removeWorktree, worktreeRoot } from './git.js';
+import { MergeClash, commitArgsFor, currentBranch, git, isAncestor, keepingFiles, mergeIntoBase, netGit, remotes, removeWorktree, worktreeRoot } from './git.js';
 import { projectRoot } from './live.js';
 import { repoFor } from './repos.js';
 import type { RepoInfo } from '../board/types.js';
@@ -18,6 +18,12 @@ import { docsInGit, docsRepo, stageReleaseDocs } from './project-git.js';
  */
 
 export type ReleaseLog = { ok: boolean; text: string }[];
+
+/** What a release did: its log, and the repos whose push failed (the release commit is only on this computer). */
+export interface ReleaseResult {
+  log: ReleaseLog;
+  unpushed: UnpushedRelease[];
+}
 
 /** Pull requests the code host cannot merge because newer changes in the base clash with them. Thrown before anything changes. */
 export class PullRequestClash extends Error {
@@ -37,7 +43,7 @@ export function commitTicket(ticket: Ticket): string | null {
   return git(ticket.worktree, ['rev-parse', '--short', 'HEAD']);
 }
 
-export async function liveRelease(bp: BoardPaths, release: Release, tickets: Ticket[]): Promise<ReleaseLog> {
+export async function liveRelease(bp: BoardPaths, release: Release, tickets: Ticket[]): Promise<ReleaseResult> {
   const root = projectRoot(bp);
   const meta = readMeta(bp);
   const groups = new Map<string, { repo: RepoInfo; tickets: Ticket[] }>();
@@ -48,6 +54,7 @@ export async function liveRelease(bp: BoardPaths, release: Release, tickets: Tic
     groups.set(repo.path, g);
   }
   const log: ReleaseLog = [];
+  const unpushed: UnpushedRelease[] = [];
   const multi = groups.size > 1 || Boolean(meta.repos?.length);
   const plans = [...groups.values()].map(({ repo, tickets: list }) => {
     const repoRoot = path.join(root, repo.path);
@@ -68,10 +75,11 @@ export async function liveRelease(bp: BoardPaths, release: Release, tickets: Tic
     // The project's shared files go out with the release when `.squad/` sits in this repo (ADR-001).
     const docs = docsInGit(bp) && path.resolve(docsRepo(bp)!) === path.resolve(repoRoot) ? (dir: string) => stageReleaseDocs(bp, dir, release, list) : undefined;
     const keep = path.relative(repoRoot, bp.squadDir);
-    const repoLog = await releaseRepo(repoRoot, repo, release, list, meta.commands?.deploy, host, env, docs, keep && !keep.startsWith('..') ? keep : undefined);
-    log.push(...repoLog.map((l) => (multi ? { ...l, text: `${repo.path}: ${l.text}` } : l)));
+    const done = await releaseRepo(repoRoot, repo, release, list, meta.commands?.deploy, host, env, docs, keep && !keep.startsWith('..') ? keep : undefined);
+    log.push(...done.log.map((l) => (multi ? { ...l, text: `${repo.path}: ${l.text}` } : l)));
+    if (done.unpushed) unpushed.push(done.unpushed);
   }
-  return log;
+  return { log, unpushed };
 }
 
 async function releaseRepo(
@@ -84,13 +92,14 @@ async function releaseRepo(
   env: Record<string, string>,
   docs?: (dir: string) => void,
   keep?: string,
-): Promise<ReleaseLog> {
+): Promise<{ log: ReleaseLog; unpushed?: UnpushedRelease }> {
   const base = repo.base || currentBranch(root);
   const remote = repo.remote || remotes(root)[0];
   const version = release.version;
   const branch = `release/${version}`;
   const dir = path.join(worktreeRoot(root), `release-${version}`);
   const log: ReleaseLog = [];
+  let unpushed: UnpushedRelease | undefined;
 
   // Accepted work is normally merged already. A pull request still waiting on the host is merged now.
   for (const t of tickets.filter((x) => x.mergedAt)) log.push({ ok: true, text: `Already in ${base}: ${t.id} ${t.title}` });
@@ -101,7 +110,7 @@ async function releaseRepo(
   }
   let start = base;
   if ((viaPr.length || tickets.some((t) => t.pr && t.mergedAt)) && remote) {
-    git(root, ['fetch', remote, base], { env });
+    netGit(root, ['fetch', remote, base], { env });
     start = 'FETCH_HEAD';
   }
 
@@ -150,35 +159,19 @@ async function releaseRepo(
     if (remote) {
       try {
         await pushRelease(dir, remote, base, version, release.notes, host, env, log);
-        if (release.addons.tag) git(dir, ['push', '-f', remote, `refs/tags/${version}`], { env });
+        if (release.addons.tag) netGit(dir, ['push', '-f', remote, `refs/tags/${version}`], { env });
         log.push({ ok: true, text: `Pushed ${base}${release.addons.tag ? ` and ${version}` : ''} to ${remote}` });
       } catch (err) {
-        log.push({ ok: false, text: `Push to ${remote} failed: ${(err as Error).message}` });
+        const error = (err as Error).message;
+        // The release commit and tag are kept here: Push again sends them once the remote takes them.
+        unpushed = { repo: repo.path, remote, base, commit: head, ...(release.addons.tag ? { tag: version } : {}), error };
+        log.push({ ok: false, text: `Push to ${remote} failed, so the release is only on this computer: ${error}. Press Push again, or run: squad release ${version} --push-again` });
       }
     } else {
       log.push({ ok: false, text: 'No git remote is set, so nothing was pushed. Add one with: git remote add origin <url>' });
     }
 
-    // Move the local base branch too, without disturbing work in progress.
-    if (currentBranch(root) === base) {
-      // squad-kit's own .squad/ files do not count: they are kept as they are while the checkout moves.
-      const dirty = git(root, ['status', '--porcelain', '--untracked-files=no', '--', '.', ...(keep ? [`:(exclude)${keep}`] : [])], { allowFail: true });
-      if (dirty) log.push({ ok: false, text: `Your ${base} checkout has changes, so it was not updated. Run: git merge ${branch}` });
-      else {
-        try {
-          keepingFiles(root, keep, git(root, ['rev-parse', 'HEAD']), head, () => git(root, ['merge', '--ff-only', head]));
-          log.push({ ok: true, text: `Your ${base} checkout now has the release` });
-        } catch (err) {
-          // Usually untracked files in the checkout that the release also adds.
-          log.push({
-            ok: false,
-            text: `Your ${base} checkout was not updated (${(err as Error).message.replace(/^git merge failed: /, '')}). Run: git merge --ff-only ${head.slice(0, 8)}`,
-          });
-        }
-      }
-    } else {
-      git(root, ['update-ref', `refs/heads/${base}`, head], { allowFail: true });
-    }
+    moveLocalBase(root, base, head, version, keep, log);
 
     if (release.addons.pipeline) {
       const deploy = repo.commands.deploy?.trim() || deployFallback?.trim();
@@ -194,22 +187,104 @@ async function releaseRepo(
   }
 
   for (const t of tickets) if (t.worktree) removeWorktree(root, t.worktree);
-  return log;
+  return { log, ...(unpushed ? { unpushed } : {}) };
 }
 
 /**
- * Push the release commit to the base branch. When the branch only accepts pull requests, the release commit goes
- * through its own small PR, which is merged at once.
+ * Moves the local base branch to the release, without disturbing work in progress. It moves only from where it was:
+ * work accepted into the base while the release went out is not in the release, so then the release is merged into
+ * the base instead of taking its place.
  */
-async function pushRelease(dir: string, remote: string, base: string, version: string, notes: string, host: RepoHost | null, env: Record<string, string>, log: ReleaseLog): Promise<void> {
+function moveLocalBase(root: string, base: string, head: string, version: string, keep: string | undefined, log: ReleaseLog, again = false): void {
+  const branch = `release/${version}`;
+  const before = git(root, ['rev-parse', base]);
+  if (!isAncestor(root, before, head)) {
+    try {
+      const r = mergeIntoBase(root, base, head, `Merge release ${version} into ${base}`, keep);
+      log.push(
+        r.moved
+          ? { ok: true, text: `${base} has work accepted while the release went out, so the release was merged into it` }
+          : { ok: false, text: r.note ?? `Your ${base} checkout was not updated. Run: git merge ${branch}` },
+      );
+    } catch (err) {
+      const why = err instanceof MergeClash ? `it has work accepted while the release went out, and the two clash` : (err as Error).message;
+      log.push({ ok: false, text: `${base} on this computer was not moved: ${why}. Run: git merge ${branch}` });
+    }
+    return;
+  }
+  if (currentBranch(root) === base) {
+    // squad-kit's own .squad/ files do not count: they are kept as they are while the checkout moves.
+    const dirty = git(root, ['status', '--porcelain', '--untracked-files=no', '--', '.', ...(keep ? [`:(exclude)${keep}`] : [])], { allowFail: true });
+    if (dirty) log.push({ ok: false, text: `Your ${base} checkout has changes, so it was not updated. Run: git merge ${branch}` });
+    else {
+      try {
+        keepingFiles(root, keep, before, head, () => git(root, ['merge', '--ff-only', head]));
+        log.push({ ok: true, text: `Your ${base} checkout now has the release` });
+      } catch (err) {
+        // Usually untracked files in the checkout that the release also adds.
+        log.push({
+          ok: false,
+          text: `Your ${base} checkout was not updated (${(err as Error).message.replace(/^git merge failed: /, '')}). Run: git merge --ff-only ${head.slice(0, 8)}`,
+        });
+      }
+    }
+    return;
+  }
   try {
-    git(dir, ['push', remote, `HEAD:refs/heads/${base}`], { env });
+    // Only if it is still where it was: a merge on accept in between moves it, and then the release is merged in.
+    git(root, ['update-ref', `refs/heads/${base}`, head, before]);
+  } catch (err) {
+    if (!again) return moveLocalBase(root, base, head, version, keep, log, true);
+    log.push({ ok: false, text: `${base} on this computer was not moved (${(err as Error).message}). Run: git merge ${branch}` });
+  }
+}
+
+/**
+ * Push again: sends the release commits and tags that did not reach their remote. What still fails stays in the
+ * result, with git's reason.
+ */
+export async function pushAgain(bp: BoardPaths, release: Release): Promise<ReleaseResult> {
+  const root = projectRoot(bp);
+  const list = release.unpushed ?? [];
+  const multi = list.length > 1 || Boolean(readMeta(bp).repos?.length);
+  const log: ReleaseLog = [];
+  const unpushed: UnpushedRelease[] = [];
+  for (const u of list) {
+    const repoRoot = path.join(root, u.repo);
+    const url = git(repoRoot, ['config', '--get', `remote.${u.remote}.url`], { allowFail: true });
+    const host = url ? repoHostFor(bp, url) : null;
+    const env = host?.gitEnv() ?? {};
+    const lines: ReleaseLog = [];
+    try {
+      // A later release may have taken this commit to the remote already: then only the tag is left to send.
+      netGit(repoRoot, ['fetch', u.remote, u.base], { env, allowFail: true });
+      const there = git(repoRoot, ['rev-parse', '--verify', '-q', `refs/remotes/${u.remote}/${u.base}`], { allowFail: true });
+      if (!there || !isAncestor(repoRoot, u.commit, there)) await pushRelease(repoRoot, u.remote, u.base, release.version, release.notes, host, env, lines, u.commit);
+      if (u.tag) netGit(repoRoot, ['push', '-f', u.remote, `refs/tags/${u.tag}`], { env });
+      lines.push({ ok: true, text: `Pushed ${u.base}${u.tag ? ` and ${u.tag}` : ''} to ${u.remote}` });
+    } catch (err) {
+      const error = (err as Error).message;
+      unpushed.push({ ...u, error });
+      lines.push({ ok: false, text: `Push to ${u.remote} failed again: ${error}` });
+    }
+    log.push(...lines.map((l) => (multi ? { ...l, text: `${u.repo}: ${l.text}` } : l)));
+  }
+  return { log, unpushed };
+}
+
+/**
+ * Push the release commit (`ref`, the release worktree's HEAD by default) to the base branch. When the branch only
+ * accepts pull requests, the release commit goes through its own small PR, which is merged at once.
+ */
+async function pushRelease(dir: string, remote: string, base: string, version: string, notes: string, host: RepoHost | null, env: Record<string, string>, log: ReleaseLog, ref = 'HEAD'): Promise<void> {
+  try {
+    netGit(dir, ['push', remote, `${ref}:refs/heads/${base}`], { env });
     return;
   } catch (err) {
     if (!host || !host.refusedPush((err as Error).message)) throw err;
   }
   const branch = `release/${version}`;
-  git(dir, ['push', '-f', remote, `HEAD:refs/heads/${branch}`], { env });
+  netGit(dir, ['push', '-f', remote, `${ref}:refs/heads/${branch}`], { env });
   const pr = (await host.findPullRequest(branch)) ?? (await host.openPullRequest({ source: branch, target: base, title: `Release ${version}`, description: notes, items: [] }));
   await host.merge(pr.id, `Release ${version}`);
   log.push({ ok: true, text: `${base} only takes pull requests, so the release went through pull request ${pr.id}` });

@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   addActivity,
   boardExists,
@@ -26,32 +26,36 @@ import {
   changeWork,
   needsSpec,
   openChange,
+  planSnapshot,
   pullRequestClashed,
   shipped,
   wayOptions,
   type ChangeAnswer,
 } from '../board/actions.js';
 import { scheduleSquad } from '../board/schedule.js';
-import type { BoardMeta, ChangeStep, DecisionArea, ImpactCheck, PatternNote, ProjectCommands, Question, Role, SpecChange, StackNote, TechDraft, Ticket } from '../board/types.js';
+import { releaseGoingOut } from '../board/lock.js';
+import { TECH_ROLES, type BoardMeta, type ChangeStep, type DecisionArea, type ImpactCheck, type PatternNote, type ProjectCommands, type Question, type Role, type SpecChange, type StackNote, type TechDraft, type Ticket } from '../board/types.js';
 import { detectStack } from '../board/stack.js';
 import { AI_TOOLS, aiTool, describeToolEvent } from '../modules/registry.js';
 import type { AgentResult, AgentRun, ToolEvent } from '../modules/ai-tool/types.js';
 import { runChecks, runCommand, startApp, tail, testCount, type RunningApp } from './checks.js';
-import { addWorktree, commitAll, git, isAncestor } from './git.js';
+import { addSnapshot, addWorktree, commitAll, dropSnapshot, git, isAncestor, latestBase } from './git.js';
 import * as P from './prompts.js';
-import { findNestedRepos, repoFor, rulesFiles } from './repos.js';
-import { flushTracker, publishTicket, syncWiki } from './sync.js';
-import { agentInstructions, readAgent, type AgentRole } from './agents.js';
+import { baseCommits, findNestedRepos, repoFor, rulesFiles } from './repos.js';
+import { flushTracker, publishTicket, syncWiki, trackerDue } from './sync.js';
+import { AGENTS, agentInstructions, readAgent, type AgentRole } from './agents.js';
 import { Watchdog, processTable, type Quiet } from './watchdog.js';
 import { isMediaNote, prepareMedia } from './media.js';
 import { allowedFile, ticketFolders } from './conversations.js';
-import { describeLevel, personLevels, resolveLevel } from './levels.js';
+import { builderLevel, describeLevel, effortOn, personLevels, resolveLevel } from './levels.js';
 import { ticketDir } from '../board/store.js';
 import { commitTicketDocs, leaveProjectFiles } from './project-git.js';
-import { carryOn, fetchPushed, workSoFar } from './handover.js';
+import { carryOn, fetchBase, fetchPushed, workSoFar } from './handover.js';
 import { isMine } from '../board/owner.js';
 import { recordUsage } from '../board/usage.js';
 import { parallelLimit } from '../core/settings.js';
+import { answerProblem } from './answers.js';
+import { checkLane, watchLane, type Lane } from './lane.js';
 
 /**
  * The live squad. Each step of a ticket is one real run of the role's AI tool in the project (or the
@@ -63,6 +67,11 @@ const MAX_CHECK_TRIES = 3;
 const MAX_REVIEW_ROUNDS = 2;
 /** How often the board looks for tickets teammates pushed: handed to you, or moved on by their owner. */
 const PICK_UP_MS = 2 * 60_000;
+/** The "before" screenshots run beside the build and stop after this long, so they never hold anything up. */
+const BEFORE_SHOTS_MS = 8 * 60_000;
+/** The card of a ticket ready for its next step while every place is taken. */
+const QUEUED = 'Waiting for a free place';
+const STOPPED = 'You stopped the squad.';
 
 /** The steps in which the Builder works. A small change goes into the next one of these as it starts. */
 const BUILDER_PHASES = new Set(['build', 'unstick', 'fix', 'answered-builder', 'chat-carry-builder', 'review-fix', 'update-base', 'change-build']);
@@ -70,6 +79,11 @@ const BUILDER_PHASES = new Set(['build', 'unstick', 'fix', 'answered-builder', '
 
 export function projectRoot(bp: BoardPaths): string {
   return bp.root;
+}
+
+/** The plan in one short key: the story, the done-when items, the decision and the steps. */
+function planKey(t: Ticket): string {
+  return createHash('sha1').update(JSON.stringify(planSnapshot(t))).digest('hex').slice(0, 12);
 }
 
 /** squad-kit's own keys (tracker token, speech key): no agent may read them, whichever folder it works in. */
@@ -92,6 +106,25 @@ export function ticketsRunning(): number {
   return n;
 }
 
+/** While an update waits for a safe moment, no new run starts; the running ones finish their step. */
+let holding = false;
+
+export function holdNewRuns(on: boolean): void {
+  holding = on;
+}
+
+/** Every agent run going on now, by project folder: ticket steps, and the Architect's reads and chat answers beside them. */
+export function agentRuns(): { root: string; keys: string[] }[] {
+  return [...squads].map((s) => s.runs()).filter((r) => r.keys.length > 0);
+}
+
+/** "Waiting for a free place: AB-3 and AB-5 are running (limit 2)". */
+export function queuedText(running: string[], limit: number): string {
+  if (!running.length) return `${QUEUED} (limit ${limit})`;
+  const names = running.length === 1 ? running[0]! : `${running.slice(0, -1).join(', ')} and ${running[running.length - 1]}`;
+  return `${QUEUED}: ${names} ${running.length === 1 ? 'is' : 'are'} running (limit ${limit})`;
+}
+
 export class LiveSquad {
   private running = new Set<string>();
   private timer: NodeJS.Timeout | null = null;
@@ -103,6 +136,10 @@ export class LiveSquad {
   private lastWatch = 0;
   private lastPickUp = 0;
   private pickingUp = false;
+  /** What a waiting ticket's card said before it waited for a free place, to say again when its step starts. */
+  private beforeQueue = new Map<string, string>();
+  /** "Before" screenshots running beside a ticket's build, until they end. */
+  private beforeShotsOf = new Map<string, Promise<void>>();
 
   constructor(private bp: BoardPaths) {}
 
@@ -121,7 +158,16 @@ export class LiveSquad {
   }
 
   ticketsRunning(): number {
-    return [...this.running].filter((k) => !k.startsWith('__')).length;
+    return this.ticketIds().length;
+  }
+
+  /** The tickets this squad runs a step of right now. */
+  ticketIds(): string[] {
+    return [...this.running].filter((k) => !k.startsWith('__'));
+  }
+
+  runs(): { root: string; keys: string[] } {
+    return { root: this.bp.root, keys: [...this.running] };
   }
 
   /** A free place in the app's one limit. While squads wait for one, it goes to the squad with fewer tickets running. */
@@ -187,8 +233,9 @@ export class LiveSquad {
       if (d.status === 'writing' && !this.running.has(key)) this.launch(key, () => this.writeTechDecision(d.tech));
     }
     for (const t of listTickets(this.bp)) {
-      // Tracker updates run beside the squad's work and never count against the parallel limit.
-      if (t.trackerQueue?.length && !this.syncing.has(t.id)) {
+      // Tracker updates run beside the squad's work and never count against the parallel limit. One that failed waits
+      // a little longer before each new try.
+      if (trackerDue(t) && !this.syncing.has(t.id)) {
         this.syncing.add(t.id);
         flushTracker(this.bp, t.id)
           .catch(() => undefined)
@@ -215,6 +262,7 @@ export class LiveSquad {
       if (openChange(t)?.status === 'writing' && !this.running.has(`__change:${t.id}`)) this.launch(`__change:${t.id}`, () => this.writeChange(t.id));
       if (t.stopRequested) {
         this.stops.get(t.id)?.abort();
+        this.stops.get(`__before:${t.id}`)?.abort();
         if (!this.running.has(t.id)) this.stopped(t.id);
         continue;
       }
@@ -222,16 +270,53 @@ export class LiveSquad {
       const q = t.questions?.find((x) => x.thinking);
       if (q) {
         if (this.mayStart(limit)) this.launch(t.id, () => this.reply(t.id, q.id));
+        else this.queue(t, limit);
         continue;
       }
-      if (t.squad && Date.parse(t.squad.nextAt) <= Date.now() && this.mayStart(limit)) {
-        const phase = this.phaseFor(t);
-        this.launch(t.id, () => this.step(t.id, phase));
+      if (t.squad && Date.parse(t.squad.nextAt) <= Date.now()) {
+        if (this.mayStart(limit)) {
+          const phase = this.phaseFor(t);
+          this.launch(t.id, () => this.step(t.id, phase));
+        } else this.queue(t, limit);
       } else if (!t.squad) this.pickUpChange(t);
     }
   }
 
+  /**
+   * Every place is taken: the card says the ticket waits and for whom, instead of showing its last step as if it
+   * still ran. Nothing runs for it, so the watchdog has nothing to say about it.
+   */
+  private queue(t: Ticket, limit: number): void {
+    const running: string[] = [];
+    for (const s of squads) running.push(...s.ticketIds());
+    const text = queuedText(running, limit);
+    if (t.status === text && !t.quiet) return;
+    if (!t.status.startsWith(QUEUED)) this.beforeQueue.set(t.id, t.status);
+    try {
+      this.update(t.id, (x) => {
+        x.status = text;
+        delete x.quiet;
+      });
+    } catch {
+      // The ticket was removed meanwhile.
+    }
+  }
+
+  /** The ticket got its place: its card says what it said before it waited. */
+  private unqueue(id: string): void {
+    const said = this.beforeQueue.get(id);
+    this.beforeQueue.delete(id);
+    try {
+      if (!readTicket(this.bp, id)?.status.startsWith(QUEUED)) return;
+      this.update(id, (x) => (x.status = said ?? 'Carrying on'));
+    } catch {
+      // The ticket was removed meanwhile.
+    }
+  }
+
   private launch(key: string, job: () => Promise<void>): void {
+    if (holding) return;
+    if (!key.startsWith('__')) this.unqueue(key);
     this.running.add(key);
     this.stops.set(key, new AbortController());
     this.dog.beat(key);
@@ -258,8 +343,24 @@ export class LiveSquad {
   private watch(): void {
     if (Date.now() - this.lastWatch < 15_000) return;
     this.lastWatch = Date.now();
+    const slept = this.dog.resumed();
     const keys = [...this.running].filter((k) => !k.startsWith('__'));
     if (!keys.length) return;
+    if (slept) {
+      // The steps were not quiet: the computer was asleep. Look again at the next turn.
+      const m = Math.max(1, Math.round(slept / 60_000));
+      for (const id of keys) {
+        try {
+          this.update(id, (x) => {
+            addActivity(x, 'squad', `Resumed after sleep: the computer slept for about ${m} minute${m === 1 ? '' : 's'}`);
+            delete x.quiet;
+          });
+        } catch {
+          // The ticket was removed meanwhile.
+        }
+      }
+      return;
+    }
     const rows = processTable();
     for (const id of keys) {
       const t = readTicket(this.bp, id);
@@ -307,7 +408,9 @@ export class LiveSquad {
       });
       return;
     }
-    this.fail(id, 'You stopped the squad. Nothing was lost; the work so far is kept.', phase ?? readTicket(this.bp, id)?.retryPhase ?? 'analyst-read');
+    // The step that ran, else the one that was next (a Stop between steps, or while it waited for a free place): Carry
+    // on runs that one, never the Analyst from the start.
+    this.fail(id, 'You stopped the squad. Nothing was lost; the work so far is kept.', phase ?? held?.squad?.phase ?? held?.retryPhase ?? 'analyst-read');
     this.update(id, (t) => {
       t.stopRequested = undefined;
       if (t.stuck) t.stuck.options[0] = { name: 'Carry on', note: 'Run the stopped step again.' };
@@ -316,9 +419,15 @@ export class LiveSquad {
 
   /* ── helpers ─────────────────────────────────────────── */
 
-  /** Commands squad-kit runs itself (setup, checks) report to the watchdog too. */
+  /** Commands squad-kit runs itself (setup, checks) report to the watchdog too, and end on the ticket's Stop. */
   private commandWatch(id: string) {
-    return { onSpawn: (pid: number) => this.dog.track(id, pid), onOutput: () => this.dog.beat(id) };
+    const signal = this.stops.get(id)?.signal;
+    return { onSpawn: (pid: number) => this.dog.track(id, pid), onOutput: () => this.dog.beat(id), ...(signal ? { signal } : {}) };
+  }
+
+  /** Between the parts of a step: once the person pressed Stop, nothing new starts. */
+  private goOn(id: string): void {
+    if (this.stops.get(id)?.signal.aborted) throw new Error(STOPPED);
   }
 
   private meta(): BoardMeta {
@@ -327,13 +436,26 @@ export class LiveSquad {
 
   private ctx(t?: Ticket): P.PromptContext {
     const meta = this.meta();
-    return { rules: rulesFiles(projectRoot(this.bp)), ...(t ? { repo: repoFor(meta, t) } : {}) };
+    return { rules: this.ruleCopies().files, ...(t ? { repo: repoFor(meta, t) } : {}) };
   }
 
-  /** Roles working in a worktree still need to read the project's rule files. */
+  /** Roles working in a worktree still need to read the project's rule files: they get copies, never the person's own checkout. */
   private extraDirs(t: Ticket): string[] {
+    const rules = this.ruleCopies();
+    return [...attachmentDirs(t), ...(rules.files.length ? [rules.dir] : [])];
+  }
+
+  /** The project's rule files, copied into this computer's folder for the project, where an agent may read them freely. */
+  private ruleCopies(): { dir: string; files: string[] } {
     const root = projectRoot(this.bp);
-    return [...attachmentDirs(t), ...(rulesFiles(root).length ? [root] : [])];
+    const dir = path.join(this.bp.localDir, 'rules-read');
+    const files = rulesFiles(root).map((from) => {
+      const to = path.join(dir, path.relative(root, from));
+      fs.mkdirSync(path.dirname(to), { recursive: true });
+      fs.copyFileSync(from, to);
+      return to;
+    });
+    return { dir, files };
   }
 
   private update(id: string, change: (t: Ticket) => void): Ticket {
@@ -398,18 +520,23 @@ export class LiveSquad {
     // The model level for this step: squad-kit's default, the project's choice, then this person's own.
     const ticket = key ? readTicket(this.bp, key) : null;
     const levelStep = opts.levelStep ?? opts.step ?? 'chat';
-    const lv = resolveLevel({ role: opts.role, step: levelStep, express: ticket?.track === 'express', tries: ticket?.tries }, agent.levels, personLevels());
+    const on = { quality: this.meta().quality, express: ticket?.track === 'express', fails: ticket?.fails };
+    // The Reviewer is never on a weaker level than the Builder whose work it checks.
+    const floor = opts.role === 'reviewer' ? { builder: builderLevel(on, readAgent(this.bp, 'builder').levels, personLevels()) } : {};
+    const lv = resolveLevel({ role: opts.role, step: levelStep, ...on, ...floor }, agent.levels, personLevels());
+    const effort = effortOn(tool, lv.effort);
     if (key && levelStep !== 'chat') this.update(key, (x) => addActivity(x, opts.role, `Runs on ${describeLevel(lv, tool)}`));
     opts = this.withNewNotes(opts);
     const watch = job ? { onActivity: () => this.dog.beat(job), onSpawn: (pid: number) => this.dog.track(job, pid) } : {};
     // Every role runs through the Agent Client Protocol unless the board says to run tools directly.
-    const r = await tool.run({
-      ...opts,
+    const run = (o: AgentRun) => tool.run({
+      ...o,
       ...watch,
       secretFiles: secretFiles(this.bp),
+      protectedFiles: this.protectedFiles(),
       ...(instructions ? { instructions } : {}),
       level: lv.level,
-      ...(lv.effort && tool.supportsEffort ? { effort: lv.effort } : {}),
+      ...(effort ? { effort } : {}),
       ...(lv.model ? { model: lv.model } : {}),
       ...(signal ? { signal } : {}),
       logDir: this.bp.chatsDir,
@@ -418,8 +545,10 @@ export class LiveSquad {
         if (key) this.update(key, (x) => addActivity(x, 'squad', `ACP did not start (${why.slice(0, 160)}), so this step runs ${tool.label} directly`));
       },
     });
+    const r = await run(opts);
     // What the run used, counted on the ticket (or the project's own line) even when the run failed.
-    recordUsage(this.bp, key, { role: opts.role, step: levelStep, level: lv.level, model: lv.model || tool.modelFor(lv.level) }, r.usage);
+    const used = { role: opts.role, step: levelStep, level: lv.level, model: lv.model || tool.modelFor(lv.level) };
+    recordUsage(this.bp, key, used, r.usage);
     // ACP picks the id of a new conversation; keep the ticket pointing at it for follow-ups.
     const asked = opts.resume ?? opts.sessionId;
     if (key && asked && r.sessionId && r.sessionId !== asked) {
@@ -432,7 +561,40 @@ export class LiveSquad {
       });
     }
     if (!r.ok) throw new Error(r.error ?? `${tool.label} did not finish.`);
-    return r;
+    // The answer is checked against its shape before anything uses it. A missing or broken one is asked for once more,
+    // in the same conversation; then the step stops in words instead of failing on it further on.
+    const problem = opts.schema ? answerProblem(opts.schema, r.structured) : null;
+    if (!opts.schema || !problem) return r;
+    const who = AGENTS.find((a) => a.role === opts.role)?.name ?? opts.role;
+    if (key && levelStep !== 'chat') this.update(key, (x) => addActivity(x, opts.role, `The answer was not complete (${problem}), so squad-kit asked for it again`));
+    const again = await run(r.sessionId ? { ...opts, sessionId: undefined, resume: r.sessionId, prompt: P.answerAgainPrompt(problem) } : opts);
+    recordUsage(this.bp, key, used, again.usage);
+    if (!again.ok) throw new Error(again.error ?? `${tool.label} did not finish.`);
+    if (answerProblem(opts.schema, again.structured)) throw new Error(`The ${who} did not hand in a complete answer.`);
+    return again;
+  }
+
+  /** What no agent may change: squad-kit's own folder, and the instructions and settings every AI tool loads. */
+  private protectedFiles(): string[] {
+    return [...new Set([`${path.basename(this.bp.squadDir)}/`, ...AI_TOOLS.flatMap((t) => t.instructionFiles ?? [])])];
+  }
+
+  /**
+   * After a Builder or Tester step, in the ticket's copy: what the step may not change goes back, with a line saying
+   * so, and a branch or commit that moved stops the ticket. `skip` holds folders the step may write in.
+   */
+  private keepLane(id: string, role: 'builder' | 'tester', lane: Lane, skip: string[] = []): void {
+    const who = role === 'builder' ? 'Builder' : 'Tester';
+    const c = checkLane(lane, skip);
+    const some = (files: string[]) => `${files.slice(0, 6).join(', ')}${files.length > 6 ? ` and ${files.length - 6} more` : ''}`;
+    if (c.putBack.length) this.update(id, (x) => addActivity(x, role, `The ${who} changed files; squad-kit put them back: ${some(c.putBack)}`));
+    if (c.restored.length) {
+      this.update(id, (x) => addActivity(x, role, `The ${who} changed ${some(c.restored)}, which later steps read as instructions; squad-kit put ${c.restored.length === 1 ? 'it' : 'them'} back`));
+    }
+    if (c.moved) {
+      this.update(id, (x) => addActivity(x, 'squad', `Stopped the ${who}: ${c.moved}`));
+      throw new Error(`The ${who} changed git history; squad-kit stopped it.`);
+    }
   }
 
   /**
@@ -578,6 +740,8 @@ export class LiveSquad {
     const decisions = listDecisions(this.bp);
     meta.blueprint = { stack: [], patterns: [], ...meta.blueprint, status: 'running' };
     writeMeta(this.bp, meta);
+    // The code this read sees, so the next merge can tell whether files came, went or moved since.
+    const commits = baseCommits(root, meta);
     try {
       const r = await this.runAgent({
         role: 'architect',
@@ -592,12 +756,14 @@ export class LiveSquad {
       // Only links to decisions that exist, so a made-up id never shows on the page.
       const known = new Set(decisions.map((d) => d.id));
       const link = (id?: string) => (id && known.has(id) ? { decision: id } : {});
+      const role = (r?: string) => TECH_ROLES.find((x) => x === r);
       const fresh = this.meta();
       if (out.map.length) fresh.map = out.map;
       fresh.blueprint = {
         status: 'done',
         at: now(),
-        stack: out.stack.map((x) => ({ name: x.name, why: x.why, ...link(x.decision) })),
+        commits,
+        stack: out.stack.map((x) => ({ name: x.name, why: x.why, ...(role(x.role) ? { role: role(x.role) } : {}), ...link(x.decision) })),
         patterns: out.patterns.map((x) => ({ name: x.name, what: x.what, where: x.where ?? [], ...link(x.decision) })),
       };
       writeMeta(this.bp, fresh);
@@ -745,6 +911,15 @@ export class LiveSquad {
       case 'proof':
         return this.proof(id);
       case 'publish': {
+        // A release going out moves the base on the code host: the pull request merges once it is out (one lock).
+        const going = releaseGoingOut(this.bp);
+        if (going) {
+          this.update(id, (t) => {
+            t.status = `Merges once ${going} is out`;
+            if (t.squad) t.squad.nextAt = new Date(Date.now() + 15_000).toISOString();
+          });
+          return;
+        }
         const { clash } = await publishTicket(this.bp, id);
         if (clash) pullRequestClashed(this.bp, id);
         return;
@@ -1005,8 +1180,8 @@ export class LiveSquad {
     this.update(t.id, (x) => {
       const c = openChange(x);
       if (!c) return;
-      // The proof waiting for you does not show the change: it comes again after.
-      if (work === 'design' && x.waiting) c.paused = { waiting: x.waiting };
+      // The proof waiting for you does not show the change: it comes again after. Kept, so a withdrawn change gives it back.
+      if (x.waiting) c.paused = { waiting: x.waiting };
       x.waiting = null;
       x.live = true;
       scheduleSquad(x, work === 'design' ? 'change-design' : 'change-build', 0.2, 1);
@@ -1298,7 +1473,8 @@ export class LiveSquad {
     let t = readTicket(this.bp, id)!;
     if (t.worktree && fs.existsSync(t.worktree)) return t;
     const repo = repoFor(meta, t);
-    const wt = addWorktree(path.join(root, repo.path), id, repo.base);
+    // A new copy starts from the newest base, the remote's when the team moved it on.
+    const wt = addWorktree(path.join(root, repo.path), id, repo.base, await fetchBase(this.bp, t));
     t = this.update(id, (x) => {
       x.worktree = wt.dir;
       x.branch = wt.branch;
@@ -1318,6 +1494,7 @@ export class LiveSquad {
     if (setup) {
       this.update(id, (x) => (x.status = `Setting up the copy: ${setup}`));
       const r = await runCommand(wt.dir, setup, 20 * 60_000, this.commandWatch(id));
+      this.goOn(id);
       // A new project has nothing to set up yet; the Builder creates it in this ticket.
       if (!r.ok && !meta.scan?.empty) throw new Error(`Setting up the project failed (${setup}): ${tail(r.output, 6)}`);
     }
@@ -1339,13 +1516,15 @@ export class LiveSquad {
 
   private async build(id: string): Promise<void> {
     const t0 = await this.workspace(id);
+    this.goOn(id);
     if (t0.replanFor) return this.rebuild(id, t0.replanFor);
     const meta = this.meta();
     const rc = repoFor(meta, t0).commands;
     // Work already in the copy (it came with a pushed branch): no "before" screens of it, and a fresh Builder reads it.
     const sofar = t0.baseCommit ? workSoFar(t0.worktree!, t0.baseCommit) : [];
-    if (!sofar.length && !t0.proof?.length && rc.start && rc.url && (t0.work?.screens ?? 0) > 0 && !meta.scan?.empty) {
-      await this.screens(id, 'before').catch(() => undefined);
+    if (!sofar.length && !t0.proof?.length && t0.baseCommit && rc.start && rc.url && (t0.work?.screens ?? 0) > 0 && !meta.scan?.empty) {
+      // Beside the build, never before it: the Builder starts now.
+      this.shootBefore(id);
     }
     const had = t0.sessions?.build;
     const t = this.update(id, (x) => {
@@ -1361,7 +1540,18 @@ export class LiveSquad {
     this.update(id, (x) => addActivity(x, 'builder', resume ? 'Picked up where it stopped' : sofar.length ? 'Started again from the spec, the design and the work so far' : 'Started building'));
     const base = repoFor(meta, t).base;
     const intro = `This ticket is partly built already: the work so far is in this copy, on ${t.branch}. It was done in another session, maybe on another computer, so you have no conversation about it. Files changed so far: ${sofar.slice(0, 30).join(', ')}. Read the spec, the design and that code first (git log and git diff against ${base} show it). Keep what is done and right, then finish the steps that are not done yet. squad-kit does all the git.`;
-    const prompt = resume ? 'Continue the steps that are not done yet, then run the tests.' : `${sofar.length ? `${intro}\n\n` : ''}${P.buildPrompt(meta, listDecisions(this.bp), t, this.ctx(t))}`;
+    // The plan changed since this conversation got it (sent back to the plan, a new design): it gets the new one.
+    const plan = planKey(t);
+    const replanned = resume && t.builtPlan !== undefined && t.builtPlan !== plan;
+    const changed = 'The plan changed since you last worked on this ticket. From now on follow the plan below, not the earlier one: keep the work that still fits it, change what does not, then finish the steps that are not done yet.';
+    const prompt =
+      resume && !replanned
+        ? 'Continue the steps that are not done yet, then run the tests.'
+        : `${replanned ? `${changed}\n\n` : sofar.length ? `${intro}\n\n` : ''}${P.buildPrompt(meta, listDecisions(this.bp), t, this.ctx(t))}`;
+    this.update(id, (x) => {
+      x.builtPlan = plan;
+      if (replanned) addActivity(x, 'builder', 'Got the new plan');
+    });
     await this.runBuilder(id, prompt, resume, 'build');
     this.update(id, (x) => {
       for (const s of x.steps ?? []) {
@@ -1386,6 +1576,7 @@ export class LiveSquad {
     const cwd = t.worktree!;
     const started = Date.now();
     let current = -1;
+    const lane = watchLane(cwd, this.protectedFiles());
     const r = await this.runAgent({
         role: 'builder',
         step,
@@ -1426,11 +1617,17 @@ export class LiveSquad {
         const doing = x.steps?.find((s) => s.status === 'doing');
         if (doing) doing.live = line;
       }),
-    });
+    })
+      .finally(() => this.keepLane(id, 'builder', lane))
+      .catch((err: unknown) => this.builderFailed(id, err));
     if (change) {
       this.update(id, (x) => {
         const c = x.changes?.find((y) => y.id === change.id);
-        if (c?.status === 'building') c.status = 'done';
+        if (c?.status === 'building') {
+          c.status = 'done';
+          delete c.paused;
+          delete c.specBefore;
+        }
         addActivity(x, 'builder', `Made change ${change.id}: ${change.summary ?? change.ask}`);
       });
     }
@@ -1438,6 +1635,12 @@ export class LiveSquad {
     // Approved while this step ran: it reaches the Builder now, at the end of the step, before anything else runs.
     const late = openChange(readTicket(this.bp, id)!);
     if (late && late.size !== 'big' && late.status === 'approved') await this.runBuilder(id, '', true, step);
+  }
+
+  /** The Builder's run itself failed (an error, a time limit): it counts like failed checks, unless you pressed Stop. */
+  private builderFailed(id: string, err: unknown): never {
+    if (!(err instanceof WaitingForYou) && !readTicket(this.bp, id)?.stopRequested) this.update(id, (x) => (x.fails = (x.fails ?? 0) + 1));
+    throw err;
   }
 
   /** An approved small change the Builder has not had yet: it goes into the step that starts now. */
@@ -1544,30 +1747,32 @@ export class LiveSquad {
    * Brings the latest base into the ticket's copy. Work not saved yet is committed first, or git refuses to merge over
    * it; if the base still is not in the copy, the step fails with git's reason instead of saying it worked.
    */
-  private bringInBase(t: Ticket, base: string): { baseSha: string; clashes: string[] } {
+  private bringInBase(t: Ticket, base: string, remote?: string): { baseSha: string; clashes: string[]; from: string } {
     const dir = t.worktree!;
     const unmerged = () => git(dir, ['diff', '--name-only', '--diff-filter=U'], { allowFail: true }).split('\n').filter(Boolean);
     const merging = () => git(dir, ['rev-parse', '-q', '--verify', 'MERGE_HEAD'], { allowFail: true }) !== '';
-    const baseSha = git(dir, ['rev-parse', base]);
+    // The newest base: the remote's when the team moved it on (fetched just before), with work accepted here kept.
+    const latest = latestBase(dir, base, remote);
     // Clashes from last time that are not fixed yet: the Builder fixes those first.
-    if (merging() && unmerged().length) return { baseSha, clashes: unmerged() };
+    if (merging() && unmerged().length) return { baseSha: git(dir, ['rev-parse', 'MERGE_HEAD']), clashes: unmerged(), from: latest.ref };
+    const baseSha = latest.sha;
     leaveProjectFiles(this.bp, t, base);
     commitAll(dir, `Work so far on ${t.title} (${t.id})`);
     let why = 'git did not merge it';
     try {
-      git(dir, ['merge', '--no-commit', '--no-ff', base]);
+      git(dir, ['merge', '--no-commit', '--no-ff', '-m', `Merge ${latest.ref} into ${t.branch ?? 'this ticket'}`, baseSha]);
     } catch (err) {
       why = (err as Error).message;
     }
     const clashes = unmerged();
-    if (!merging() && !isAncestor(dir, baseSha, 'HEAD')) throw new Error(`Could not bring the latest ${base} into this ticket: ${why}`);
-    return { baseSha, clashes };
+    if (!merging() && !isAncestor(dir, baseSha, 'HEAD')) throw new Error(`Could not bring the latest ${latest.ref} into this ticket: ${why}`);
+    return { baseSha, clashes, from: latest.ref };
   }
 
   private async rebuild(id: string, adr: string): Promise<void> {
     const t = readTicket(this.bp, id)!;
     const base = repoFor(this.meta(), t).base;
-    const { baseSha, clashes } = this.bringInBase(t, base);
+    const { baseSha, clashes, from } = this.bringInBase(t, base, await fetchBase(this.bp, t));
     const t1 = this.update(id, (x) => {
       x.baseCommit = baseSha;
       x.stage = 'implement';
@@ -1578,10 +1783,11 @@ export class LiveSquad {
       x.gates = { checks: 'pending', review: 'pending', proof: 'pending' };
       x.sessions = { ...x.sessions, build: x.sessions?.build ?? randomUUID() };
       x.status = `Redoing the work to follow ${adr}`;
-      addActivity(x, 'squad', `Brought the latest ${base} into this ticket${clashes.length ? `. Clashes in ${clashes.join(', ')}` : ''}`);
+      addActivity(x, 'squad', `Brought the latest ${from} into this ticket${clashes.length ? `. Clashes in ${clashes.join(', ')}` : ''}`);
       addActivity(x, 'builder', `Started redoing the work to follow ${adr}`);
     });
     const meta = this.meta();
+    this.update(id, (x) => (x.builtPlan = planKey(t1)));
     const intro = `The plan changed to follow ${adr}, a decision approved after you started. The latest ${base} is now in this copy${clashes.length ? `, with clashes in ${clashes.join(', ')} to fix first` : ''}. Stay on this branch: it already has the latest ${base}, so a plan that says to start from ${base} is met, and squad-kit does all the git. Redo the work to the new plan below: keep what still fits, change what does not.`;
     await this.runBuilder(id, `${intro}\n\n${P.buildPrompt(meta, listDecisions(this.bp), t1, this.ctx(t1))}`, Boolean(t.sessions?.build), 'build');
     this.update(id, (x) => {
@@ -1601,7 +1807,7 @@ export class LiveSquad {
   private async updateBase(id: string): Promise<void> {
     const t = await this.workspace(id);
     const base = repoFor(this.meta(), t).base;
-    const { baseSha, clashes } = this.bringInBase(t, base);
+    const { baseSha, clashes, from } = this.bringInBase(t, base, await fetchBase(this.bp, t));
     this.update(id, (x) => {
       x.baseCommit = baseSha;
       x.stage = 'implement';
@@ -1611,7 +1817,7 @@ export class LiveSquad {
       x.proof = undefined;
       x.gates = { checks: 'pending', review: 'pending', proof: 'pending' };
       x.status = clashes.length ? `Builder is fixing ${clashes.length} clashing ${clashes.length === 1 ? 'file' : 'files'}` : 'Running the project checks';
-      addActivity(x, 'squad', `Brought the latest ${base} into this ticket${clashes.length ? `. Clashes in ${clashes.join(', ')}` : ''}`);
+      addActivity(x, 'squad', `Brought the latest ${from} into this ticket${clashes.length ? `. Clashes in ${clashes.join(', ')}` : ''}`);
     });
     if (clashes.length) {
       await this.runBuilder(id, P.clashPrompt(base, clashes), Boolean(t.sessions?.build));
@@ -1631,6 +1837,7 @@ export class LiveSquad {
       x.live = true;
       x.status = 'Builder is fixing what you found';
       x.tries = 0;
+      x.fails = 0;
       x.reviewRound = 0;
       x.steps = [...(x.steps ?? []), { title: `Fix: ${x.changeRequest ?? 'what you found'}`, status: 'doing' }];
     });
@@ -1661,10 +1868,13 @@ export class LiveSquad {
       addActivity(x, 'tester', 'squad-kit is running the project checks');
     });
     const results = await runChecks(t.worktree!, commands, (name) => this.update(id, (x) => (x.status = `Running ${name}: ${commands[name as 'test']}`)), this.commandWatch(id));
+    // Stopped while a check ran: its result says nothing about the code, so it is no failed try.
+    this.goOn(id);
     const failed = results.filter((r) => !r.ok);
     if (results.length === 0) {
       this.update(id, (x) => {
         x.gates = { ...x.gates!, checks: 'pass', checksText: 'No checks set up yet' };
+        x.tries = 0;
         addActivity(x, 'tester', 'No test, lint or build commands are set up, so there was nothing to run');
         scheduleSquad(x, 'review', 0.2, 1, 1);
       });
@@ -1675,6 +1885,9 @@ export class LiveSquad {
       const names = results.map((r) => r.name).join(', ');
       this.update(id, (x) => {
         x.gates = { ...x.gates!, checks: 'pass', checksText: tests ? `${tests} tests pass, ${names} OK` : `${names} pass` };
+        // A pass starts the count again: a later round that fails has its own tries, and nothing is continued past.
+        x.tries = 0;
+        x.checksContinued = undefined;
         addActivity(x, 'tester', `All checks pass: ${names}`);
         x.stage = 'review';
         x.status = 'Reviewer is reading the changes';
@@ -1685,9 +1898,25 @@ export class LiveSquad {
       }
       return;
     }
+    // You chose to continue past these very checks: they still fail, so the work goes on as you decided. A check
+    // that failed only now is new, and goes through the fixes as usual.
+    const past = t.checksContinued;
+    if (past?.length && failed.every((f) => past.includes(f.name))) {
+      const names = failed.map((f) => f.name).join(', ');
+      this.update(id, (x) => {
+        x.tries = 0;
+        x.gates = { ...x.gates!, checks: 'skipped', checksText: `${names} still failed, continued anyway` };
+        addActivity(x, 'tester', `Checks still fail: ${names}. You continued anyway past them, so the work goes on`);
+        x.stage = 'review';
+        x.status = 'Reviewer is reading the changes';
+        scheduleSquad(x, 'review', 0.2, 1, (x.reviewRound ?? 0) + 1);
+      });
+      return;
+    }
     const tries = (t.tries ?? 0) + 1;
     this.update(id, (x) => {
       x.tries = tries;
+      x.fails = (x.fails ?? 0) + 1;
       x.gates = { ...x.gates!, checks: 'fail', checksText: `${failed.map((f) => f.name).join(', ')} failed` };
       addActivity(x, 'tester', `Checks failed: ${failed.map((f) => f.name).join(', ')} (try ${tries} of ${MAX_CHECK_TRIES})`);
     });
@@ -1699,6 +1928,7 @@ export class LiveSquad {
         x.status = `Stuck after ${tries} check runs`;
         x.stuck = {
           gate: 'checks',
+          checks: failed.map((f) => f.name),
           question: `The checks still fail after ${tries} tries. ${failed[0]!.name} says: ${tail(failed[0]!.output, 3).slice(0, 300)}`,
           options: wayOptions({ gate: 'checks', copy: Boolean(x.worktree && fs.existsSync(x.worktree)) }),
         };
@@ -1706,6 +1936,7 @@ export class LiveSquad {
       });
       return;
     }
+    this.goOn(id);
     this.update(id, (x) => {
       x.stage = 'implement';
       x.status = 'Builder is fixing the failed checks';
@@ -1719,6 +1950,7 @@ export class LiveSquad {
   }
 
   private async review(id: string, answered = false, carry = false): Promise<void> {
+    this.goOn(id);
     const meta = this.meta();
     const t0 = this.update(id, (x) => {
       x.stage = 'review';
@@ -1755,6 +1987,8 @@ export class LiveSquad {
       });
       return;
     }
+    // Review notes count as a failed Builder run: in a project with no tests they are the only sign of one.
+    this.update(id, (x) => (x.fails = (x.fails ?? 0) + 1));
     // The engine never waves a review through: after the last round, you decide.
     if (round >= MAX_REVIEW_ROUNDS) {
       this.update(id, (x) => {
@@ -1774,6 +2008,7 @@ export class LiveSquad {
       });
       return;
     }
+    this.goOn(id);
     this.update(id, (x) => {
       x.reviewNotes = out.comments;
       addActivity(x, 'reviewer', `Asked for ${out.comments.length} ${out.comments.length === 1 ? 'fix' : 'fixes'}: ${out.comments.join(' ')}`);
@@ -1795,6 +2030,9 @@ export class LiveSquad {
     const rc = repoFor(meta, t).commands;
     const canShow = Boolean(rc.start && rc.url) && (t.work?.screens ?? 0) > 0;
     let why = '';
+    // The "before" screenshots still running beside the build end first (8 minutes at most), so both sets pair up.
+    await this.beforeShotsOf.get(id);
+    this.goOn(id);
     if (canShow) {
       try {
         await this.screens(id, 'after');
@@ -1836,51 +2074,111 @@ export class LiveSquad {
     });
   }
 
-  /** The Tester takes screenshots for each "done when", before or after the change. */
-  private async screens(id: string, when: 'before' | 'after'): Promise<void> {
+  /**
+   * The "before" screenshots, beside the build: from a copy of the code at the ticket's base, so they show the app as
+   * it was while the Builder changes the ticket's own copy. They stop after 8 minutes, or on the ticket's Stop, and
+   * say so when they could not be taken. The copy is removed after.
+   */
+  private shootBefore(id: string): void {
+    const key = `__before:${id}`;
+    if (this.running.has(key)) return;
+    let ended = () => {};
+    this.beforeShotsOf.set(id, new Promise<void>((resolve) => (ended = resolve)));
+    this.launch(key, () =>
+      this.beforeShots(id, key).finally(() => {
+        this.beforeShotsOf.delete(id);
+        ended();
+      }),
+    );
+  }
+
+  private async beforeShots(id: string, key: string): Promise<void> {
+    // Their own Stop: the ticket's Stop (whichever step runs then), the board closing, or the time running out.
+    const own = this.stops.get(key)!;
+    let cutOff = false;
+    const timer = setTimeout(() => {
+      cutOff = true;
+      own.abort();
+    }, BEFORE_SHOTS_MS);
+    const t = readTicket(this.bp, id)!;
+    const repo = repoFor(this.meta(), t);
+    const root = path.join(projectRoot(this.bp), repo.path);
+    let dir: string | null = null;
+    try {
+      dir = addSnapshot(root, `${id.toLowerCase()}-before`, t.baseCommit!);
+      const setup = repo.commands.setup?.trim();
+      if (setup) {
+        const r = await runCommand(dir, setup, BEFORE_SHOTS_MS, { signal: own.signal });
+        if (own.signal.aborted) throw new Error(STOPPED);
+        if (!r.ok) throw new Error(`setting up a copy of the code as it was failed (${setup}): ${tail(r.output, 3)}`);
+      }
+      await this.screens(id, 'before', { cwd: dir, job: key, signal: own.signal });
+    } catch (err) {
+      // A Stop, or the board closing, says so elsewhere.
+      if (cutOff || !own.signal.aborted) {
+        const why = (err as Error).message;
+        this.update(id, (x) =>
+          addActivity(x, 'tester', cutOff ? 'Stopped the before screenshots after 8 minutes, so the proof shows the screens after the change only' : `Could not take the before screenshots: ${why.slice(0, 300)}`),
+        );
+      }
+    } finally {
+      clearTimeout(timer);
+      if (dir) dropSnapshot(root, dir);
+    }
+  }
+
+  /**
+   * The Tester takes screenshots for each "done when", before or after the change. Before-shots run `beside` the build,
+   * in their own copy of the code, with their own Stop and conversation, and leave the card's line to the Builder.
+   */
+  private async screens(id: string, when: 'before' | 'after', beside?: { cwd: string; job: string; signal: AbortSignal }): Promise<void> {
     const meta = this.meta();
     const t = this.update(id, (x) => {
-      x.sessions = { ...x.sessions, tester: x.sessions?.tester ?? randomUUID() };
-      x.status = when === 'before' ? 'Tester is taking before screenshots' : 'Tester is taking after screenshots';
+      if (!beside) {
+        x.sessions = { ...x.sessions, tester: x.sessions?.tester ?? randomUUID() };
+        x.status = when === 'before' ? 'Tester is taking before screenshots' : 'Tester is taking after screenshots';
+      }
       addActivity(x, 'tester', when === 'before' ? 'Taking screenshots before the change' : 'Taking screenshots after the change');
     });
     fs.mkdirSync(this.bp.proofDir, { recursive: true });
     const rc = repoFor(meta, t).commands;
+    const cwd = beside?.cwd ?? t.worktree!;
     let app: RunningApp | null = null;
     if (rc.start && rc.url) {
-      this.update(id, (x) => (x.status = `Starting the app: ${rc.start}`));
+      if (!beside) this.update(id, (x) => (x.status = `Starting the app: ${rc.start}`));
       try {
-        app = await startApp(t.worktree!, rc.start, rc.url);
+        app = await startApp(cwd, rc.start, rc.url, undefined, beside?.signal ?? this.stops.get(id)?.signal);
         const at = app.url;
         this.update(id, (x) => addActivity(x, 'tester', `squad-kit started the app at ${at}${at !== rc.url ? ` (${rc.url} was used by another program)` : ''}`));
       } catch (err) {
+        if ((beside?.signal ?? this.stops.get(id)?.signal)?.aborted) throw err;
         // The Tester can still try on its own; it sees the error in the activity.
         this.update(id, (x) => addActivity(x, 'tester', (err as Error).message.slice(0, 300)));
       }
     }
     try {
-      await this.shoot(id, t, when, meta, app !== null, app?.url);
+      await this.shoot(id, t, when, meta, app !== null, app?.url, beside);
     } finally {
       app?.stop();
     }
   }
 
-  private async shoot(id: string, t: Ticket, when: 'before' | 'after', meta: BoardMeta, appRunning: boolean, appUrl?: string): Promise<void> {
+  private async shoot(id: string, t: Ticket, when: 'before' | 'after', meta: BoardMeta, appRunning: boolean, appUrl?: string, beside?: { cwd: string; job: string }): Promise<void> {
+    // The Tester runs the app and a browser, so it has a shell; it may not change the code that gets merged.
+    const lane = watchLane(beside?.cwd ?? t.worktree!, this.protectedFiles(), true);
     const r = await this.runAgent({
         role: 'tester',
         step: 'proof',
       ticket: id,
-      cwd: t.worktree!,
-      ...(t.activity.some((a) => a.text === 'Taking screenshots before the change') && when === 'after'
-        ? { resume: t.sessions!.tester }
-        : { sessionId: t.sessions!.tester }),
+      // The before-shots ran in a copy that is gone now, so the after-shots have a conversation of their own.
+      ...(beside ? { job: beside.job, cwd: beside.cwd, sessionId: randomUUID() } : { cwd: t.worktree!, sessionId: t.sessions!.tester }),
       prompt: P.proofPrompt(meta, t, this.bp.proofDir, when, this.ctx(t), appRunning, appUrl),
-      permissions: ['edit'],
+      permissions: ['run'],
       schema: P.PROOF_SCHEMA,
       timeoutMs: 20 * 60_000,
       addDirs: [this.bp.proofDir, ...this.extraDirs(t)],
-      onTool: this.watcher(id, 'tester', t.worktree!),
-    });
+      ...(beside ? {} : { onTool: this.watcher(id, 'tester', t.worktree!) }),
+    }).finally(() => this.keepLane(id, 'tester', lane, [this.bp.proofDir]));
     const out = r.structured as { shots: { criterion: number; file: string; note?: string }[]; skipped?: string };
     this.update(id, (x) => {
       const proof = x.proof ?? [];

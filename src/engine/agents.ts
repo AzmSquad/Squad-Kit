@@ -154,7 +154,7 @@ export function writeAgent(bp: BoardPaths, role: AgentRole, change: Partial<Omit
     const step = key === role ? '' : key.startsWith(`${role}.`) ? key.slice(role.length + 1) : null;
     if (step === null || (step && !levelSteps(role).includes(step))) throw new Error(`The ${role} has no step "${key}" to set a level for.`);
     if (c.level && !parseLevel(c.level)) throw new Error(`"${c.level}" is not a level. Use strongest, balanced or fast.`);
-    if (c.effort && !parseEffort(c.effort)) throw new Error(`"${c.effort}" is not an effort. Use high, medium or low.`);
+    if (c.effort && !parseEffort(c.effort)) throw new Error(`"${c.effort}" is not an effort. Use xhigh (extra high), high, medium or low.`);
   }
   const current = readAgent(bp, role);
   const next = { ...current, ...change, steps: { ...current.steps, ...(change.steps ?? {}) }, levels: change.levels ?? current.levels, role };

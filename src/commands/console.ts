@@ -9,6 +9,7 @@ import { buildPaths, findSquadRoot, type SquadPaths } from '../core/paths.js';
 import { startConsoleServer, type ConsoleServer } from '../console/server.js';
 import { boardPaths } from '../board/store.js';
 import { isOwnFolder, prepareProject } from '../engine/setup.js';
+import { allEnded, killAll } from '../engine/process-group.js';
 import { readInstalledPackage } from '../core/package-info.js';
 import {
   buildStamp,
@@ -169,6 +170,8 @@ async function serveApp(a: { first?: SquadPaths; opts: AppOptions; underKeeper: 
   const server: ConsoleServer = await startConsoleServer({ paths: a.first, app: true, requestedPort, token, build });
   const info = { pid: process.pid, port: server.port, token, startedAt: new Date().toISOString(), version: readInstalledPackage().version, build };
   writeAppInfo(info);
+  // The Update button: look for a new squad-kit now and once a day (Settings › About turns it off).
+  server.updates.watch();
 
   const firstId = a.first ? server.projects.first : null;
   const url = `http://127.0.0.1:${server.port}${firstId ? `/p/${firstId}/board` : '/'}?t=${token}`;
@@ -215,12 +218,26 @@ async function serveApp(a: { first?: SquadPaths; opts: AppOptions; underKeeper: 
   ui.info('console stopped');
 }
 
+/** How long a restart waits for the running agents, checks and apps to end after their Stop. */
+const RESTART_WAIT_MS = 10_000;
+
+/**
+ * The board stopped every run as it closed. A restart waits for them to end first (10 seconds at most), so the new
+ * board never finds a half-ended step or an app still holding its port; whatever is left then is killed.
+ */
+export async function endRuns(waitMs = RESTART_WAIT_MS): Promise<boolean> {
+  if (await allEnded(waitMs)) return true;
+  killAll();
+  return allEnded(1000);
+}
+
 /**
  * Restart from the board: a fresh process loads the newest squad-kit, in this same terminal, on the same link
  * (app.json keeps the port and token). It never leaves the old board alive as the parent of the new one.
  */
 async function restartBoard(underKeeper: boolean, command: string[]): Promise<void> {
   const args = [...process.execArgv, process.argv[1]!, ...command];
+  await endRuns();
   await new Promise<void>((done) => process.stdout.write('', () => done()));
   // Node 22.15+ swaps this process for the new board: same pid, same terminal, nothing left behind.
   if (typeof process.execve === 'function' && process.platform !== 'win32') {

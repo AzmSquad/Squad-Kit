@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { AgentResult, AgentUsage, ToolEvent } from '../modules/ai-tool/types.js';
+import { OWN_GROUP, endGroup, track } from './process-group.js';
 
 /**
  * The agent gateway: runs a role through the Agent Client Protocol (ACP). squad-kit is the ACP client and talks
@@ -11,12 +12,16 @@ import type { AgentResult, AgentUsage, ToolEvent } from '../modules/ai-tool/type
  */
 
 export interface AcpLaunch {
+  /** The tool's name for people, such as "Claude Code". */
+  label?: string;
   /** The command that starts the adapter, its arguments and its environment. */
   command: string;
   args: string[];
   env: NodeJS.ProcessEnv;
   /** Session settings the adapter reads from `_meta` on session/new and session/resume. */
   meta: Record<string, unknown>;
+  /** The session mode the run works in (session/set_mode), whatever the person's own settings start it in. */
+  mode?: string;
   /** True when the tool already saved a conversation with this id, so it is resumed rather than started. */
   canResume(id: string): boolean;
   /** A failure in words a person can act on. */
@@ -75,10 +80,24 @@ export interface AcpRunOptions {
   onText?(text: string): void;
   onActivity?(): void;
   onSpawn?(pid: number): void;
+  /** How long the adapter may take to start, and then to open the session. Tests use less. */
+  startLimits?: { initializeMs?: number; sessionMs?: number };
 }
 
 /** Raised when the adapter could not start, before any work began, so the caller can fall back safely. */
 export class AcpStartError extends Error {}
+
+/** A start step that took longer than its limit; its message is already plain. */
+class TookTooLong extends Error {}
+
+/** The promise, or a TookTooLong once `ms` pass without an answer. */
+function deadline<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new TookTooLong(message)), ms)));
+  return Promise.race([work, late]).finally(() => clearTimeout(timer));
+}
+
+const STOPPED = 'You stopped the squad.';
 
 /**
  * squad-kit gives each step its tools up front, so a permission question means the agent wants something it was not
@@ -103,14 +122,16 @@ class Rpc {
     private onRequest: (method: string, params: Record<string, any>) => unknown,
   ) {
     child.stdout.on('data', (chunk: Buffer) => this.read(chunk.toString('utf8')));
-    child.on('exit', () => {
-      for (const p of this.pending.values()) p.reject(new Error('The ACP adapter stopped.'));
+    const gone = (err?: Error) => {
+      for (const p of this.pending.values()) p.reject(new Error(err ? `The ACP adapter could not run: ${err.message}` : 'The ACP adapter stopped.'));
       this.pending.clear();
-    });
+    };
+    child.on('exit', () => gone());
+    child.on('error', (err) => gone(err));
   }
 
   private write(msg: object): void {
-    if (!this.child.stdin.destroyed) this.child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', ...msg })}\n`);
+    if (this.child.stdin.writable) this.child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', ...msg })}\n`);
   }
 
   request<T = any>(method: string, params: object): Promise<T> {
@@ -157,7 +178,13 @@ class Rpc {
 
 /** One step of one role, with the session saved for follow-ups. */
 export async function runAcp(launch: AcpLaunch, opts: AcpRunOptions): Promise<AgentResult> {
-  const child = spawn(launch.command, launch.args, { cwd: opts.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'] });
+  // Stopped before it began: nothing starts.
+  if (opts.signal?.aborted) return { ok: false, sessionId: opts.resume ?? opts.sessionId ?? '', text: '', error: STOPPED };
+  // Its own process group, so stopping it ends the tool it drives and the commands that tool runs too.
+  const child = track(spawn(launch.command, launch.args, { cwd: opts.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], detached: OWN_GROUP }));
+  // An adapter that cannot start, or dies while squad-kit writes to it, must never take the app down with it.
+  child.on('error', () => undefined);
+  child.stdin.on('error', () => undefined);
   if (child.pid) opts.onSpawn?.(child.pid);
   let stderr = '';
   child.stderr.on('data', (d: Buffer) => (stderr = (stderr + d.toString('utf8')).slice(-4000)));
@@ -209,41 +236,63 @@ export async function runAcp(launch: AcpLaunch, opts: AcpRunOptions): Promise<Ag
     },
   );
 
+  let stoppedBy: string | null = null;
+  // Ask the agent to stop, then end the whole group: the adapter, the tool and the commands it ran.
   const stop = (reason: string) => {
+    if (stoppedBy) return;
+    stoppedBy = reason;
     try {
       if (sessionId) rpc.notify('session/cancel', { sessionId });
     } catch {
       // Already gone.
     }
-    setTimeout(() => child.kill('SIGTERM'), 1500);
-    return reason;
+    setTimeout(() => endGroup(child), 1500);
   };
-  let stoppedBy: string | null = null;
-  opts.signal?.addEventListener('abort', () => (stoppedBy = stop('You stopped the squad.')));
-  const timer = setTimeout(() => (stoppedBy = stop(`It took longer than ${Math.round((opts.timeoutMs ?? 20 * 60_000) / 60_000)} minutes, so squad-kit stopped it.`)), opts.timeoutMs ?? 20 * 60_000);
-  const exited = new Promise<void>((resolve) => child.on('exit', () => resolve()));
+  const onStop = () => stop(STOPPED);
+  opts.signal?.addEventListener('abort', onStop, { once: true });
+  const timer = setTimeout(() => stop(`It took longer than ${Math.round((opts.timeoutMs ?? 20 * 60_000) / 60_000)} minutes, so squad-kit stopped it.`), opts.timeoutMs ?? 20 * 60_000);
+  const exited = new Promise<void>((resolve) => {
+    child.on('exit', () => resolve());
+    child.on('error', () => resolve());
+  });
 
   const meta = launch.meta;
+  // A start that hangs ends with a plain message instead of waiting for the whole step's time.
+  const name = launch.label ?? 'The AI tool';
+  const initializeMs = opts.startLimits?.initializeMs ?? 30_000;
+  const sessionMs = opts.startLimits?.sessionMs ?? 60_000;
+  const late = (ms: number, what: string) => {
+    const s = Math.max(1, Math.round(ms / 1000));
+    return `${name} did not ${what} in ${s} second${s === 1 ? '' : 's'}. Check that it opens in a terminal and is logged in, then press Try again.`;
+  };
 
   try {
     try {
-      await rpc.request('initialize', {
-        protocolVersion: 1,
-        clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
-        clientInfo: { name: 'squad-kit', version: '1' },
-      });
+      await deadline(
+        rpc.request('initialize', {
+          protocolVersion: 1,
+          clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+          clientInfo: { name: 'squad-kit', version: '1' },
+        }),
+        initializeMs,
+        late(initializeMs, 'start'),
+      );
     } catch (err) {
-      throw new AcpStartError(`The ACP adapter did not start: ${(err as Error).message} ${stderr.slice(-300)}`.trim());
+      // A Stop is not a failed start: the caller must not try another way.
+      if (stoppedBy) throw err;
+      const why = err instanceof TookTooLong ? err.message : `The ACP adapter did not start: ${(err as Error).message}`;
+      throw new AcpStartError(`${why} ${stderr.slice(-300)}`.trim());
     }
     const existing = sessionId && launch.canResume(sessionId);
     if (existing) {
       costBefore = launch.costSoFar?.(sessionId);
       // Continue the saved conversation under the same id.
-      await rpc.request('session/resume', { sessionId, cwd: opts.cwd, mcpServers: [], _meta: meta });
+      await deadline(rpc.request('session/resume', { sessionId, cwd: opts.cwd, mcpServers: [], _meta: meta }), sessionMs, late(sessionMs, 'open its session'));
     } else {
-      const s = await rpc.request<{ sessionId: string }>('session/new', { cwd: opts.cwd, mcpServers: [], _meta: meta });
+      const s = await deadline(rpc.request<{ sessionId: string }>('session/new', { cwd: opts.cwd, mcpServers: [], _meta: meta }), sessionMs, late(sessionMs, 'open a session'));
       sessionId = s.sessionId;
     }
+    if (launch.mode) await rpc.request('session/set_mode', { sessionId, modeId: launch.mode });
     const res = await rpc.request<{ stopReason: string; usage?: AcpTokens | null }>('session/prompt', { sessionId, prompt: [{ type: 'text', text: opts.prompt }] });
     tokens = res.usage ?? undefined;
     if (stoppedBy) return { ok: false, sessionId, text: lastText, error: stoppedBy, ...used() };
@@ -259,12 +308,16 @@ export async function runAcp(launch: AcpLaunch, opts: AcpRunOptions): Promise<Ag
     return { ok: true, sessionId, text: lastText, ...(structured !== undefined ? { structured } : {}), ...used() };
   } catch (err) {
     if (err instanceof AcpStartError) throw err;
-    return { ok: false, sessionId, text: lastText, error: stoppedBy ?? launch.explain(`${(err as Error).message}\n${stderr}`), ...used() };
+    const why = err instanceof TookTooLong ? err.message : launch.explain(`${(err as Error).message}\n${stderr}`);
+    return { ok: false, sessionId, text: lastText, error: stoppedBy ?? why, ...used() };
   } finally {
     clearTimeout(timer);
+    opts.signal?.removeEventListener('abort', onStop);
     child.stdin.end();
-    // Give the adapter a moment to close its tool cleanly, then make sure nothing is left running.
+    // Give the adapter a moment to close its tool cleanly, then make sure nothing it started is left running.
     await Promise.race([exited, new Promise((r) => setTimeout(r, 3000))]);
-    if (child.exitCode === null) child.kill('SIGTERM');
+    endGroup(child);
+    child.stdout.destroy();
+    child.stderr.destroy();
   }
 }

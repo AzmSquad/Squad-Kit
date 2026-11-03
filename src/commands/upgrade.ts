@@ -4,7 +4,7 @@ import { confirm } from '@inquirer/prompts';
 import * as ui from '../ui/index.js';
 import { changelogBlobUrl, readInstalledPackage } from '../core/package-info.js';
 import { fetchLatest, isNewer } from '../core/registry.js';
-import { detectPackageManager, installCommandFor } from '../core/package-manager.js';
+import { fetchReleaseNotes, isMajorBump, upgradePlan } from '../core/update.js';
 
 const REGISTRY_HOST = 'registry.npmjs.org';
 
@@ -44,9 +44,7 @@ export async function runUpgrade(opts: UpgradeOptions): Promise<void> {
     return;
   }
 
-  const [installedMajor = 0] = installed.version.split('.').map((n) => parseInt(n, 10) || 0);
-  const [latestMajor = 0] = latest.split('.').map((n) => parseInt(n, 10) || 0);
-  if (latestMajor > installedMajor) {
+  if (isMajorBump(latest, installed.version)) {
     ui.blank();
     ui.failure(
       `Major version change detected (${installed.version} → ${latest}). Run \`squad upgrade --check\` after you install a specific version, and review: ${changelogBlobUrl(installed.repositoryUrl, latest)}`,
@@ -54,12 +52,18 @@ export async function runUpgrade(opts: UpgradeOptions): Promise<void> {
     process.exit(1);
   }
 
-  const pm = detectPackageManager(installed.root);
-  const { cmd, args } = installCommandFor(pm.pm, installed.name, latest);
+  // The same command and notes the app's Update button uses.
+  const pm = upgradePlan(installed, latest);
+  const { cmd, args } = pm;
+  const notes = await fetchReleaseNotes(installed.repositoryUrl, latest);
 
   ui.blank();
   ui.info(`Detected package manager: ${pm.pm} (${pm.reason})`);
-  ui.info(`Changelog: ${changelogBlobUrl(installed.repositoryUrl, latest)}`);
+  if (notes.lines.length) {
+    ui.info(`What is new in ${latest}:`);
+    for (const line of notes.lines) ui.info(`  · ${line}`);
+  }
+  ui.info(`Changelog: ${notes.url}`);
 
   if (opts.check) {
     ui.blank();

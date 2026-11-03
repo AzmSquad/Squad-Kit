@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process';
 import net from 'node:net';
 import type { ProjectCommands } from '../board/types.js';
-import { withIpv4First } from './agent-env.js';
+import { childEnv } from './agent-env.js';
+import { OWN_GROUP, endGroup, track, whenExited } from './process-group.js';
 
 /** squad-kit runs the project's own checks itself, so the AI never grades its own work. */
 
@@ -18,42 +19,83 @@ export interface CommandWatch {
   onSpawn?(pid: number): void;
   /** Called whenever the command prints something. */
   onOutput?(): void;
+  /** Stops the command, and everything it started, when the person presses Stop. */
+  signal?: AbortSignal;
+  /** Stops a command that prints nothing for this long. */
+  silentMs?: number;
 }
 
+/** A check that prints nothing for this long is waiting for something that never comes. */
+export const CHECK_SILENT_MS = 5 * 60_000;
+
+const STOPPED = 'You stopped the squad.';
+
+function minutes(ms: number): string {
+  const m = Math.max(1, Math.round(ms / 60_000));
+  return `${m} minute${m === 1 ? '' : 's'}`;
+}
+
+/**
+ * Runs one command of the project in its own process group, with the environment every agent gets (squad-kit's own
+ * keys stay out). A timeout or Stop ends the whole group, and the result comes back once the command exits, even when
+ * something it started keeps its output open.
+ */
 export function runCommand(cwd: string, command: string, timeoutMs = 15 * 60_000, watch: CommandWatch = {}): Promise<{ ok: boolean; output: string; seconds: number }> {
   const started = Date.now();
+  if (watch.signal?.aborted) return Promise.resolve({ ok: false, output: STOPPED, seconds: 0 });
   return new Promise((resolve) => {
-    const child = spawn(command, { cwd, shell: true, stdio: ['ignore', 'pipe', 'pipe'], env: withIpv4First({ ...process.env, CI: '1', FORCE_COLOR: '0' }) });
+    const child = track(spawn(command, { cwd, shell: true, detached: OWN_GROUP, stdio: ['ignore', 'pipe', 'pipe'], env: { ...childEnv(), CI: '1', FORCE_COLOR: '0' } }));
     if (child.pid) watch.onSpawn?.(child.pid);
     let out = '';
+    // Why squad-kit ended the command, when it did.
+    let ended = '';
+    const end = (why: string) => {
+      if (ended) return;
+      ended = why;
+      endGroup(child);
+    };
+    let silent: NodeJS.Timeout | undefined;
+    const heard = () => {
+      if (!watch.silentMs) return;
+      clearTimeout(silent);
+      const ms = watch.silentMs;
+      silent = setTimeout(() => end(`The command printed nothing for ${minutes(ms)}; it may be waiting in watch mode or for input.`), ms);
+    };
     const keep = (chunk: Buffer) => {
       out = (out + chunk.toString('utf8')).slice(-12_000);
       watch.onOutput?.();
+      heard();
     };
     child.stdout.on('data', keep);
     child.stderr.on('data', keep);
-    const timer = setTimeout(() => {
-      child.kill('SIGTERM');
-      out += `\n(stopped after ${Math.round(timeoutMs / 60000)} minutes)`;
-    }, timeoutMs);
-    child.on('error', (err) => {
+    heard();
+    const timer = setTimeout(() => end(`stopped after ${Math.round(timeoutMs / 60000)} minutes`), timeoutMs);
+    const onStop = () => end(STOPPED);
+    watch.signal?.addEventListener('abort', onStop, { once: true });
+    let done = false;
+    const finish = (ok: boolean, output: string) => {
+      if (done) return;
+      done = true;
       clearTimeout(timer);
-      resolve({ ok: false, output: err.message, seconds: (Date.now() - started) / 1000 });
-    });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      resolve({ ok: code === 0, output: out.trim(), seconds: (Date.now() - started) / 1000 });
-    });
+      clearTimeout(silent);
+      watch.signal?.removeEventListener('abort', onStop);
+      resolve({ ok, output, seconds: (Date.now() - started) / 1000 });
+    };
+    child.on('error', (err) => finish(false, err.message));
+    // Something the command started still holds its output after it exited: end it too.
+    whenExited(child, 1000, () => endGroup(child)).then((code) => finish(code === 0 && !ended, `${out.trim()}${ended ? `\n(${ended})` : ''}`.trim()));
   });
 }
 
+/** The project's checks, one after another. After a Stop, the ones not run yet never start. */
 export async function runChecks(cwd: string, commands: ProjectCommands, onStart?: (name: string) => void, watch: CommandWatch = {}): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
   for (const name of ['test', 'lint', 'build'] as const) {
     const command = commands[name]?.trim();
     if (!command) continue;
+    if (watch.signal?.aborted) break;
     onStart?.(name);
-    const r = await runCommand(cwd, command, undefined, watch);
+    const r = await runCommand(cwd, command, undefined, { silentMs: CHECK_SILENT_MS, ...watch });
     results.push({ name, command, ...r });
   }
   return results;
@@ -90,14 +132,15 @@ function freePort(): Promise<number> {
 /**
  * Starts the ticket's copy of the app and waits until it answers. When something else already answers at the app's
  * address (often the person's own "npm run dev"), the copy starts on a free port instead (PORT), so the Tester never
- * looks at the wrong app. The address the app really runs at comes back in `url`.
+ * looks at the wrong app. The address the app really runs at comes back in `url`. Stop ends the wait and the app.
  */
-export async function startApp(cwd: string, command: string, url: string, waitMs = 3 * 60_000): Promise<RunningApp> {
+export async function startApp(cwd: string, command: string, url: string, waitMs = 3 * 60_000, signal?: AbortSignal): Promise<RunningApp> {
+  if (signal?.aborted) throw new Error(STOPPED);
   const taken = await answers(url);
   const port = taken ? await freePort() : null;
   const target = port ? url.replace(/(:\/\/[^/:]+)(:\d+)?/, `$1:${port}`) : url;
-  const env = withIpv4First({ ...process.env, CI: '1', FORCE_COLOR: '0', BROWSER: 'none', ...(port ? { PORT: String(port) } : {}) });
-  const child = spawn(command, { cwd, shell: true, detached: true, stdio: ['ignore', 'pipe', 'pipe'], env });
+  const env = { ...childEnv(), CI: '1', FORCE_COLOR: '0', BROWSER: 'none', ...(port ? { PORT: String(port) } : {}) };
+  const child = track(spawn(command, { cwd, shell: true, detached: OWN_GROUP, stdio: ['ignore', 'pipe', 'pipe'], env }));
   let out = '';
   let exited: number | null = null;
   const keep = (chunk: Buffer) => {
@@ -105,18 +148,20 @@ export async function startApp(cwd: string, command: string, url: string, waitMs
   };
   child.stdout.on('data', keep);
   child.stderr.on('data', keep);
+  child.on('error', (err) => {
+    out += `\n${err.message}`;
+    exited = -1;
+  });
   child.on('exit', (code) => (exited = code ?? 0));
-  const stop = () => {
-    try {
-      // The whole process group: the shell, npm, and the server it started.
-      if (child.pid) process.kill(-child.pid, 'SIGTERM');
-    } catch {
-      // Already gone.
-    }
-  };
+  // The whole process group: the shell, npm, and the server it started.
+  const stop = () => endGroup(child);
   const busy = port ? ` ${new URL(url).host} is used by another program (maybe your own "npm run dev"), so squad-kit tried port ${port}.` : '';
   const until = Date.now() + waitMs;
   while (Date.now() < until) {
+    if (signal?.aborted) {
+      stop();
+      throw new Error(STOPPED);
+    }
     if (exited !== null) throw new Error(`The app stopped while starting (${command}):${busy} ${tail(out, 8)}`);
     if (await answers(target)) return { url: target, stop };
     await new Promise((r) => setTimeout(r, 2000));

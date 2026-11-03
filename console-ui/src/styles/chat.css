@@ -169,6 +169,7 @@ body.cresizing iframe { pointer-events: none; }
 .cstep svg { flex: none; }
 .cstep.completed svg { color: var(--accent); }
 .cstep.failed svg { color: var(--bug); }
+.cstep.skipped svg { color: var(--dim); }
 .cstep.more { color: var(--dim); }
 .cstep-t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; direction: ltr; unicode-bidi: isolate; }
 .cstep-n { flex: none; }

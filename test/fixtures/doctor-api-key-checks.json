@@ -2,6 +2,7 @@
   "note": "squad doctor rows for an API-key Anthropic workspace (ANTHROPIC_API_KEY set, no Claude login, /v1/models stubbed to list the pinned plan model, Agent SDK platform binary present). `v0110` was captured by running the 0.11.0 doctor engine (unchanged through story 16) against that workspace; `current` is what this build produces. Regenerate `current` deliberately with UPDATE_DOCTOR_FIXTURE=1 vitest run test/doctor-auth.test.ts.",
   "intendedDeltas": [
     "agent-sdk-binary-present",
+    "git-version",
     "planner-auth-mode",
     "planner-auth-runtime-fit"
   ],
@@ -148,6 +149,12 @@
       "id": "legacy-prompts",
       "name": "legacy .squad/prompts/ directory",
       "status": "ok"
+    },
+    {
+      "id": "git-version",
+      "name": "git version",
+      "status": "ok",
+      "detail": "git 2.38 or newer"
     },
     {
       "id": "planner-config",

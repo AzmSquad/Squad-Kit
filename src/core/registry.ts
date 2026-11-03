@@ -5,11 +5,11 @@ export interface RegistryInfo {
   versions: string[];
 }
 
-export async function fetchLatest(packageName: string, timeoutMs = 5000): Promise<RegistryInfo> {
+export async function fetchLatest(packageName: string, timeoutMs = 5000, fetchImpl: typeof fetch = fetch): Promise<RegistryInfo> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(`${REGISTRY_BASE}/${encodeURIComponent(packageName)}`, {
+    const res = await fetchImpl(`${REGISTRY_BASE}/${encodeURIComponent(packageName)}`, {
       headers: { accept: 'application/json' },
       signal: controller.signal,
     });

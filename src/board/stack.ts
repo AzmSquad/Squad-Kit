@@ -1,10 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { BoardMeta, Decision } from './types.js';
+import type { BoardMeta, Decision, TechRole } from './types.js';
 import { reposOf } from '../engine/repos.js';
 
-/** What a technology does in the project, for grouping on the architecture page. */
-export type TechRole = 'Language' | 'Framework' | 'Interface' | 'Data' | 'Testing' | 'Tooling' | 'Services';
+export type { TechRole } from './types.js';
 
 /** One technology the code really uses, read from its package files. */
 export interface Tech {

@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -19,6 +20,7 @@ const { seedDemoBoard } = await import('../src/board/demo.js');
 const actions = await import('../src/board/actions.js');
 const { architecture } = await import('../src/board/architecture.js');
 const { codeChanged } = await import('../src/board/store.js');
+const { mapAfterMerge } = await import('../src/engine/sync.js');
 const { detectStack, decidedIn } = await import('../src/board/stack.js');
 const { LiveSquad } = await import('../src/engine/live.js');
 const P = await import('../src/engine/prompts.js');
@@ -163,6 +165,44 @@ describe('stack and patterns', () => {
     expect(a.reading?.status).toBe('done');
   });
 
+  it('a project with no package files: the Architect names what it sees, and the Stack section is filled', async () => {
+    // Like RoomFlow: plain Python, no package files, so the package files list nothing.
+    fs.mkdirSync(path.join(tmp, 'roomflow'));
+    fs.writeFileSync(path.join(tmp, 'roomflow', 'app.py'), 'import sqlite3\n');
+    expect(detectStack(tmp, readMeta(bp))).toEqual([]);
+    answers.push({
+      map: [{ area: 'Server', detail: 'Python standard library, in roomflow/app.py' }],
+      stack: [
+        { name: 'Python', role: 'Language', why: 'The whole app is written in it.' },
+        { name: 'SQLite', role: 'Data', why: 'Keeps the bookings in one file.', decision: 'ADR-001' },
+        // No role: kept in the notes, left off the stack map.
+        { name: 'Made-up', why: 'A role that does not exist is dropped.' },
+      ],
+      patterns: [{ name: 'All rules in one place', what: 'store.py checks every rule.', where: ['roomflow/store.py'] }],
+    });
+    await (new LiveSquad(bp) as unknown as { readBlueprint(): Promise<void> }).readBlueprint();
+    expect(calls[0]!.prompt).toContain('Technologies found in the package files: none.');
+    expect(calls[0]!.prompt).toContain('a project may have no package files at all');
+    expect((P.BLUEPRINT_SCHEMA.properties.stack.items.properties as Record<string, unknown>).role).toBeDefined();
+
+    const doc = fs.readFileSync(path.join(bp.knowledgeDir, 'stack.md'), 'utf8');
+    expect(doc).toContain('## Stack\n\n### Python\n\n- Role: Language\n\nThe whole app is written in it.');
+    expect(doc).toContain('### SQLite\n\n- Role: Data\n- Decision: ADR-001\n\nKeeps the bookings in one file.');
+    // Read back from the file, the same as it was written.
+    expect(readMeta(bp).blueprint?.stack).toEqual([
+      { name: 'Python', why: 'The whole app is written in it.', role: 'Language' },
+      { name: 'SQLite', why: 'Keeps the bookings in one file.', role: 'Data', decision: 'ADR-001' },
+      { name: 'Made-up', why: 'A role that does not exist is dropped.' },
+    ]);
+
+    const a = architecture(bp);
+    expect(a.stack.map((t) => t.name)).toEqual(['Python', 'SQLite']);
+    expect(a.stack[0]).toMatchObject({ role: 'Language', icon: 'python', why: 'The whole app is written in it.', decisions: [] });
+    expect(a.stack[1]).toMatchObject({ role: 'Data', decisions: ['ADR-001'] });
+    // A technology seen only in the code can still get its decision written.
+    expect(actions.draftTechDecision(bp, 'Python').status).toBe('writing');
+  });
+
   it('React comes with Next.js; a tool picked while building gets a decision the person approves', async () => {
     code();
     let a = architecture(bp);
@@ -188,6 +228,71 @@ describe('stack and patterns', () => {
     a = architecture(bp);
     expect(a.stack.find((t) => t.name === 'Vitest')).toMatchObject({ decisions: ['STACK.1'] });
     expect(a.stack.find((t) => t.name === 'Vitest')?.draft).toBeUndefined();
+  });
+});
+
+describe('the project map after a merge', () => {
+  const sh = (args: string[], env: Record<string, string> = {}) =>
+    execFileSync('git', args, { cwd: tmp, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] }).toString().trim();
+  const commit = (message: string, date?: string) => {
+    sh(['add', '-A']);
+    sh(['commit', '-q', '-m', message], date ? { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date } : {});
+  };
+  const status = () => readMeta(bp).blueprint?.status;
+
+  beforeEach(() => {
+    fs.mkdirSync(path.join(tmp, 'roomflow'));
+    fs.writeFileSync(path.join(tmp, 'roomflow', 'app.py'), 'print(1)\n');
+    fs.writeFileSync(path.join(tmp, 'roomflow', 'store.py'), 'rules = []\n');
+    sh(['init', '-q', '-b', 'main']);
+    commit('start', '2026-11-01T10:00:00Z');
+  });
+
+  it('reads the code again only when files were added, moved or removed since the last read', async () => {
+    answers.push({ map: [{ area: 'Server', detail: 'roomflow/app.py' }], stack: [], patterns: [] });
+    await (new LiveSquad(bp) as unknown as { readBlueprint(): Promise<void> }).readBlueprint();
+    expect(readMeta(bp).blueprint).toMatchObject({ status: 'done', commits: { '.': sh(['rev-parse', 'main']) } });
+
+    // Edits inside files, and squad-kit's own ticket files, leave the map as it is: no run of the Architect.
+    fs.writeFileSync(path.join(tmp, 'roomflow', 'app.py'), 'print(2)\n');
+    fs.mkdirSync(path.join(tmp, '.squad', 'tickets', 'RO-9'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, '.squad', 'tickets', 'RO-9', 'ticket.md'), '# RO-9\n');
+    commit('Merge RO-9');
+    mapAfterMerge(bp);
+    expect(status()).toBe('done');
+
+    // A new file is read again.
+    fs.writeFileSync(path.join(tmp, 'roomflow', 'login.html'), '<form></form>\n');
+    commit('Merge RO-10');
+    mapAfterMerge(bp);
+    expect(status()).toBe('pending');
+  });
+
+  it('a moved or removed file counts too, and a read without its commit goes by its time', () => {
+    writeMeta(bp, { ...readMeta(bp), blueprint: { status: 'done', commits: { '.': sh(['rev-parse', 'main']) }, stack: [], patterns: [] } });
+    sh(['mv', 'roomflow/store.py', 'roomflow/rules.py']);
+    commit('Merge RO-11', '2026-11-01T11:00:00Z');
+    mapAfterMerge(bp);
+    expect(status()).toBe('pending');
+
+    // An older read kept no commit: the last commit on the base before it stands in.
+    writeMeta(bp, { ...readMeta(bp), blueprint: { status: 'done', at: '2026-11-01T12:00:00Z', stack: [], patterns: [] } });
+    fs.writeFileSync(path.join(tmp, 'roomflow', 'app.py'), 'print(3)\n');
+    commit('Merge RO-12', '2026-11-01T13:00:00Z');
+    mapAfterMerge(bp);
+    expect(status()).toBe('done');
+    fs.rmSync(path.join(tmp, 'roomflow', 'rules.py'));
+    commit('Merge RO-13', '2026-11-01T14:00:00Z');
+    mapAfterMerge(bp);
+    expect(status()).toBe('pending');
+  });
+
+  it('a failed or missing read is tried again after a merge', () => {
+    mapAfterMerge(bp);
+    expect(status()).toBe('pending');
+    writeMeta(bp, { ...readMeta(bp), blueprint: { status: 'failed', error: 'x', commits: { '.': sh(['rev-parse', 'main']) }, stack: [], patterns: [] } });
+    mapAfterMerge(bp);
+    expect(status()).toBe('pending');
   });
 });
 

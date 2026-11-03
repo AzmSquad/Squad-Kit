@@ -7,6 +7,8 @@ import * as ui from '../ui/index.js';
 import type { SquadPaths } from '../core/paths.js';
 import { readInstalledPackage } from '../core/package-info.js';
 import { mountAppApi } from './api/app.js';
+import { mountUpdateApi } from './api/update.js';
+import { UpdateService, runsNow, ticketsInProgress, type UpdateDeps } from './updates.js';
 import { mountStaticAssets } from './static-assets.js';
 import { authMiddleware } from './auth.js';
 import { OpenProjects, type OpenProject } from './open-projects.js';
@@ -21,6 +23,8 @@ export interface StartConsoleServerOptions {
   token: string;
   /** When the running squad-kit code was built; the board compares it with the code on disk to spot updates. */
   build?: number;
+  /** The Update button's registry, installer and restart; tests and checks pass fakes. */
+  update?: UpdateDeps;
 }
 
 export interface ConsoleServer {
@@ -33,6 +37,8 @@ export interface ConsoleServer {
   restartRequested(): boolean;
   /** The projects open in this app, each with its own squad. */
   projects: OpenProjects;
+  /** The Update button; `watch()` looks for a new squad-kit on start and once a day. */
+  updates: UpdateService;
 }
 
 export async function startConsoleServer(opts: StartConsoleServerOptions): Promise<ConsoleServer> {
@@ -110,6 +116,13 @@ export async function startConsoleServer(opts: StartConsoleServerOptions): Promi
   // API: token-gated. The app's own calls first; each project checks the token again for its own.
   app.use('/api/*', authMiddleware(opts.token));
   mountAppApi(app, { projects });
+  const updates = new UpdateService({
+    busy: () => runsNow(projects),
+    carrying: () => ticketsInProgress(projects),
+    restart: control.restart,
+    ...opts.update,
+  });
+  mountUpdateApi(app, updates);
 
   // Every project's API names it: /p/<id>/api/v1/board reaches that project's /api/v1/board. This is the one place
   // the prefix is made, so each project keeps the routes one board always had. Its pages go to the board app below.
@@ -185,6 +198,7 @@ export async function startConsoleServer(opts: StartConsoleServerOptions): Promi
     done,
     restartRequested: () => restart,
     projects,
+    updates,
     close: () =>
       new Promise<void>((resolve, reject) => {
         shutdown((err) => {

@@ -119,9 +119,12 @@ function effect(t: Ticket, c: SpecChange): string {
 export function ChangeCard({ t }: { t: Ticket }) {
   const act = useAct<Ticket>();
   const [declining, setDeclining] = useState(false);
+  const [withdrawing, setWithdrawing] = useState(false);
   const [reason, setReason] = useState('');
   const c = openChange(t);
   if (!c) return null;
+  // Approved, and the squad has not built it yet: it can still be taken back.
+  const canWithdraw = c.status === 'approved' || c.status === 'designing';
   const busy = c.status === 'writing' || c.status === 'designing' || c.status === 'building';
   const redo = (t.steps ?? []).flatMap((s, i) => (s.status === 'done' ? [] : [i + 1]));
   const head = {
@@ -136,7 +139,15 @@ export function ChangeCard({ t }: { t: Ticket }) {
     declined: '',
   }[c.status];
   const decide = (path: string, done: string, body?: unknown) =>
-    act.mutate({ path: `/api/v1/tickets/${t.id}/spec-change/${path}`, body, done }, { onSuccess: () => setDeclining(false) });
+    act.mutate(
+      { path: `/api/v1/tickets/${t.id}/spec-change/${path}`, body, done },
+      {
+        onSuccess: () => {
+          setDeclining(false);
+          setWithdrawing(false);
+        },
+      },
+    );
 
   return (
     <div className="outdated" aria-label="Change to the spec">
@@ -176,7 +187,25 @@ export function ChangeCard({ t }: { t: Ticket }) {
             </>
           )}
         </div>
-        {declining ? (
+        {withdrawing ? (
+          <div className="row">
+            <input className="input" autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why take it back? (optional, it stays in the spec's record)" />
+            <button className="btn sm" disabled={act.isPending} onClick={() => decide('withdraw', 'Withdrawn. The spec is back to how it was.', { reason })}>
+              Withdraw
+            </button>
+            <button className="btn sm quiet" onClick={() => setWithdrawing(false)}>
+              Cancel
+            </button>
+          </div>
+        ) : canWithdraw ? (
+          <div className="row">
+            <button className="btn sm" disabled={act.isPending} onClick={() => setWithdrawing(true)}>
+              Withdraw change
+            </button>
+            <span className="grow" />
+            <Cmd text={`squad propose ${t.id} --withdraw`} />
+          </div>
+        ) : declining ? (
           <div className="row">
             <input className="input" autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why not? (optional, it stays in the spec's record)" />
             <button className="btn sm" disabled={act.isPending} onClick={() => decide('decline', 'Declined. Nothing changes.', { reason })}>
@@ -336,7 +365,7 @@ export function ChangeHistory({ t }: { t: Ticket }) {
       <ul className="ticketnotes">
         {all.map((c) => (
           <li key={c.id}>
-            <span className={`pill ${c.status === 'done' ? 'ok' : c.status === 'declined' ? 'wait' : 'you'}`}>{STATUS_WORD[c.status]}</span>
+            <span className={`pill ${c.status === 'done' ? 'ok' : c.status === 'declined' ? 'wait' : 'you'}`}>{c.decided?.withdrawn ? 'Withdrawn' : STATUS_WORD[c.status]}</span>
             <span className="grow">
               {c.id}: {c.summary ?? c.ask}
               {c.size ? ` (${c.size})` : ''}

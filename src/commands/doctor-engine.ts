@@ -26,6 +26,7 @@ import {
 } from '../core/probes.js';
 import { readLastRun } from '../core/last-run.js';
 import { formatTokenK } from '../ui/planner-cache-summary.js';
+import { GIT_UPDATE, MIN_GIT, gitIsNewEnough, gitVersion } from '../engine/git.js';
 
 export interface CheckResult {
   id: string;
@@ -115,6 +116,22 @@ async function checkDirStructure(paths: SquadPaths, _ctx: DoctorContext, fix: bo
     fixable: true,
     fixHint: 'squad doctor --fix',
   };
+}
+
+/** Merging accepted work without touching the person's checkout needs `git merge-tree --write-tree` (git 2.38). */
+export function checkGitVersion(version: string | null = gitVersion()): CheckResult {
+  const name = 'git version';
+  if (!version) return { id: 'git-version', name, status: 'fail', detail: 'git does not run here', fixHint: 'Install git: on a Mac run xcode-select --install' };
+  if (!gitIsNewEnough(version)) {
+    return {
+      id: 'git-version',
+      name,
+      status: 'fail',
+      detail: `git ${version} is too old: squad-kit needs git ${MIN_GIT.join('.')} or newer to merge accepted work`,
+      fixHint: GIT_UPDATE,
+    };
+  }
+  return { id: 'git-version', name, status: 'ok', detail: `git ${MIN_GIT.join('.')} or newer` };
 }
 
 async function checkConfigReadable(_paths: SquadPaths, ctx: DoctorContext): Promise<CheckResult> {
@@ -909,6 +926,7 @@ export async function runAllChecks(paths: SquadPaths, ctx: DoctorContext, fix: b
   await add('.squad/secrets.yaml permissions', () => checkSecretsPermissions(paths, ctx, fix));
   await add('.squad/secrets.yaml parseable', () => checkSecretsParseable(paths, ctx));
   await add('legacy .squad/prompts/ directory', () => checkLegacyPrompts(paths, ctx));
+  await add('git version', async () => checkGitVersion());
   await add('planner configuration', () => checkPlannerConfig(paths, ctx));
   await add('planner auth mode', () => checkPlannerAuthMode(paths, ctx, fix));
   await add('planner credential resolves', () => checkPlannerCredential(paths, ctx));

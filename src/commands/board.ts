@@ -15,6 +15,7 @@ import {
   decideStuck,
   inbox,
   pullTicket,
+  pushReleaseAgain,
   releaseVersion,
   reportBug,
   requestChange,
@@ -40,6 +41,7 @@ import {
   proposeChange,
   approveChange,
   declineChange,
+  withdrawChange,
   retryChange,
   changeAfterRelease,
   changeNeedsYou,
@@ -61,12 +63,15 @@ import {
   boardExists,
   boardPaths,
   draftRelease,
+  listReleases,
   listTickets,
   readMeta,
   readTicket,
   requireTicket,
+  writeMeta,
   type BoardPaths,
 } from '../board/store.js';
+import { DEFAULT_QUALITY, QUALITIES, QUALITY_NOTE, parseQuality } from '../engine/levels.js';
 import type { AgentName, PlanPart, Stage, Ticket, UsageLine, UsageTotal } from '../board/types.js';
 import { boardUsage, byRole, costWords, stepWords, tokenWords, totalOf } from '../board/usage.js';
 import { runConsole } from './console.js';
@@ -424,7 +429,7 @@ export async function runChange(ticketId: string, words: string[]): Promise<void
  * A change goes through the spec: propose it, then approve or decline what the Analyst wrote (and, for a big one, the
  * Architect's design update). Accepted work only answers questions: the change becomes a new linked ticket or a bug.
  */
-export async function runPropose(ticketId: string, words: string[], opts: { approve?: boolean; decline?: boolean; retry?: boolean; as?: string }): Promise<void> {
+export async function runPropose(ticketId: string, words: string[], opts: { approve?: boolean; decline?: boolean; withdraw?: boolean; retry?: boolean; as?: string }): Promise<void> {
   const bp = board();
   warnIfNoSquad(bp);
   if (opts.approve) {
@@ -435,6 +440,11 @@ export async function runPropose(ticketId: string, words: string[], opts: { appr
   if (opts.decline) {
     declineChange(bp, ticketId, words.join(' '));
     ui.success('Declined. The spec stays as it was.');
+    return;
+  }
+  if (opts.withdraw) {
+    withdrawChange(bp, ticketId, words.join(' '));
+    ui.success('Withdrawn. The spec is back to how it was, and the work carries on without it.');
     return;
   }
   if (opts.retry) {
@@ -612,6 +622,24 @@ export async function runAgent(role: string, opts: { step?: string; set?: string
   ui.info(`Add to a step: squad agent ${r} --step ${steps[0]!.id} --set "..."`);
 }
 
+/** Shows the project's Quality setting, or sets it: best, balanced or thrifty. The whole team shares it. */
+export async function runQuality(setting: string | undefined): Promise<void> {
+  const bp = board();
+  const meta = readMeta(bp);
+  if (setting === undefined) {
+    const now = meta.quality ?? DEFAULT_QUALITY;
+    out();
+    for (const q of QUALITIES) out(`  ${q === now ? kleur.bold(`● ${q}`) : `○ ${q}`}${' '.repeat(10 - q.length)}${kleur.gray(QUALITY_NOTE[q])}`);
+    out();
+    ui.info(`Change it: ${cmd('squad config set quality best')} (or balanced, thrifty)`);
+    return;
+  }
+  const q = parseQuality(setting);
+  if (!q) throw new Error(`"${setting}" is not a Quality setting. Use best, balanced or thrifty.`);
+  writeMeta(bp, { ...meta, quality: q });
+  ui.success(`Quality is ${q} now: ${QUALITY_NOTE[q]} The squad uses it from its next step.`);
+}
+
 export async function runReply(ticketId: string, words: string[]): Promise<void> {
   const bp = board();
   const t = requireTicket(bp, ticketId);
@@ -767,8 +795,9 @@ function roleLabel(who: string): string {
   return kleur.bold(`${names[who] ?? 'Squad'}  `);
 }
 
-export async function runRelease(version: string | undefined, opts: { yes?: boolean }): Promise<void> {
+export async function runRelease(version: string | undefined, opts: { yes?: boolean; pushAgain?: boolean }): Promise<void> {
   const bp = board();
+  if (opts.pushAgain) return runPushAgain(bp, version);
   const draft = draftRelease(bp);
   if (!draft || (version && draft.version !== (version.startsWith('v') ? version : `v${version}`))) {
     throw new Error('There is no release ready to go out.');
@@ -796,7 +825,8 @@ export async function runRelease(version: string | undefined, opts: { yes?: bool
   }
   const spin = ui.spinner(`Releasing ${draft.version}…`);
   const r = await releaseVersion(bp, draft.version).finally(() => spin.stop());
-  ui.success(`Released ${r.version}.`);
+  if (r.unpushed?.length) ui.warning(`Released ${r.version} on this computer, but the push failed. Send it with: squad release ${r.version} --push-again`);
+  else ui.success(`Released ${r.version}.`);
   if (r.log) {
     for (const l of r.log) (l.ok ? ui.success : ui.warning)(l.text);
   } else {
@@ -812,6 +842,20 @@ export async function runRelease(version: string | undefined, opts: { yes?: bool
     for (const l of r.whatsappDraft.split('\n')) out(`  ${l}`);
     out();
   }
+}
+
+/** A release whose push failed: send its commits and tags again (the newest such release, or the one named). */
+async function runPushAgain(bp: BoardPaths, version: string | undefined): Promise<void> {
+  const v = version && (version.startsWith('v') ? version : `v${version}`);
+  const target = listReleases(bp).find((r) => r.unpushed?.length && (!v || r.version === v));
+  if (!target) throw new Error(v ? `${v} has nothing left to push.` : 'Every release is pushed already.');
+  const spin = ui.spinner(`Pushing ${target.version}…`);
+  const r = await pushReleaseAgain(bp, target.version).finally(() => spin.stop());
+  if (r.unpushed?.length) {
+    for (const u of r.unpushed) ui.warning(`${u.repo === '.' ? '' : `${u.repo}: `}Push to ${u.remote} failed again: ${u.error}`);
+    throw new Error(`${r.version} is still not pushed. Fix the problem above, then run: squad release ${r.version} --push-again`);
+  }
+  ui.success(`Pushed ${r.version}. Its tickets are closed.`);
 }
 
 export async function runBug(words: string[], opts: { in?: string; severity?: string; how?: string; expected?: string }): Promise<void> {

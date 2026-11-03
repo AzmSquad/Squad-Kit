@@ -433,9 +433,32 @@ button.opt2:hover { border-color: var(--line-strong); }
 .donelist div { display: flex; gap: 9px; align-items: center; font-size: 13.5px; }
 .donelist svg { color: var(--accent); }
 .note { font-size: 12px; color: var(--dim); }
+.btn-tag { font-size: 11.5px; font-weight: 650; padding: 1px 7px; border-radius: 99px; background: color-mix(in srgb, currentColor 18%, transparent); }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+/* New ticket from an idea: the Analyst's steps while it works, and the ways on when it stops. */
+.drafting { border: 1.5px solid var(--accent); border-radius: 12px; padding: 14px 16px; background: var(--accent-soft); display: flex; flex-direction: column; gap: 10px; margin-bottom: 8px; }
+.drafting-head { display: flex; align-items: center; gap: 8px; }
+.drafting-head b { font-size: 15px; }
+.drafting-head .grow { flex: 1; }
+.drafting-clock { font-size: 13px; color: var(--accent); font-variant-numeric: tabular-nums; }
+.drafting .note { font-size: 12.5px; color: var(--muted); }
+.dstep { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+.dstep .dot { width: 20px; height: 20px; border-radius: 50%; flex: none; display: grid; place-items: center; border: 2px solid var(--line-strong); box-sizing: border-box; color: var(--accent); }
+.dstep.done .dot { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.dstep.now .dot { border-color: var(--accent); }
+.dstep.todo { color: var(--muted); }
+.drafterr { border: 1.5px solid var(--bug); border-radius: 12px; padding: 14px 16px; background: var(--bug-soft); display: flex; flex-direction: column; gap: 8px; font-size: 14px; line-height: 1.5; margin-bottom: 8px; }
+.drafterr b { font-size: 15px; color: var(--bug); }
+.drafterr.calm { border-color: var(--line-strong); background: var(--surface-2); }
+.drafterr.calm b { color: var(--text); }
+.drafterr-ways { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
 .toasts { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; z-index: 60; align-items: center; }
 .toast { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 11px; background: var(--btn-bg); color: var(--btn-ink); font-size: 13.5px; font-weight: 550; box-shadow: var(--pop-shadow); animation: pop 0.2s; max-width: 560px; }
-.toast.err { background: var(--bug); color: #fff; }
+.toast.err { background: var(--bug); color: #fff; padding-right: 6px; }
+.toast .grow { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.toast svg { flex: none; }
+.toast-x { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 7px; border: 0; background: transparent; color: inherit; cursor: pointer; flex: none; }
+.toast-x:hover, .toast-x:focus-visible { background: rgba(255, 255, 255, 0.18); }
 .center { flex: 1; display: grid; place-items: center; text-align: center; color: var(--muted); padding: 40px; }
 .center h2 { color: var(--text); font-size: 20px; margin-bottom: 6px; }
 
@@ -490,11 +513,15 @@ button.opt2 b { width: 100%; }
 .conv-tool.failed { border-color: var(--bug); }
 .conv-tool-head { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 11px; background: none; border: 0; cursor: pointer; color: var(--accent); text-align: left; font: inherit; }
 .conv-tool.failed .conv-tool-head { color: var(--bug); }
+/* A call squad-kit did not allow, by design: grey and folded, never a red failure. */
+.conv-tool.skipped { border-style: dashed; }
+.conv-tool.skipped .conv-tool-head, .conv-tool.skipped .conv-tool-title { color: var(--muted); }
 .conv-tool-title { font-size: 12.5px; overflow-wrap: anywhere; color: var(--text); }
 .conv-status { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 650; padding: 2px 7px; border-radius: 99px; flex: none; }
 .conv-status.ok { color: var(--accent); background: var(--accent-soft); }
 .conv-status.bad { color: var(--bug); background: var(--bug-soft); }
 .conv-status.run { color: var(--you-ink); background: var(--you-soft); }
+.conv-status.skip { color: var(--muted); background: var(--surface-2); }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
@@ -536,6 +563,33 @@ button.opt2 b { width: 100%; }
 
 /* squad-kit was updated: restart banner */
 .updatebar { display: flex; align-items: center; gap: 10px; padding: 10px 18px; background: var(--you-soft); color: var(--you-ink); border-bottom: 1px solid var(--you-line); font-size: 13.5px; }
+/* The Update button: a new squad-kit is ready, the update's steps, the note after it, and Settings › About */
+.upd { flex: none; display: flex; align-items: flex-start; gap: 12px; padding: 14px 20px; background: var(--accent-soft); border-bottom: 1px solid var(--line); font-size: 13.5px; }
+.upd.failed { background: var(--you-soft); border-bottom-color: var(--you-line); }
+.upd.steps { display: grid; gap: 12px; }
+.upd-ic { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--surface); color: var(--accent); border: 1px solid var(--line); }
+.upd-ic.ok { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.upd.failed .upd-ic { color: var(--you-ink); border-color: var(--you-line); }
+.upd-main { flex: 1; min-width: 0; display: grid; gap: 6px; }
+.upd-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.upd-head .upd-acts { margin-left: auto; }
+.upd-title { font-size: 15px; font-weight: 650; color: var(--text); }
+.upd-sub { font-size: 13px; color: var(--muted); }
+.upd.failed .upd-title, .upd.failed .upd-sub { color: var(--you-ink); }
+.upd-notes { margin: 0; padding-left: 18px; line-height: 1.5; }
+.upd-acts { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.upd-cmd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.upd-cmd .term { padding-right: 11px; }
+.upd-out summary { cursor: pointer; font-size: 12.5px; }
+.upd-out pre { margin-top: 6px; padding: 8px 10px; max-height: 160px; overflow: auto; white-space: pre-wrap; font: 500 11.5px 'JetBrains Mono', monospace; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+@media (max-width: 760px) { .upd { flex-direction: column; } .upd-acts { justify-content: flex-start; } }
+.about-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.about-daily { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+.about-acts { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 12px 0; }
+.about-acts .grow { flex: 1; }
+.about .upd-cmd { margin-bottom: 12px; }
+.about .note.bad { color: var(--bug); }
+.about-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--you); flex: none; }
 .stuckbox { background: var(--you-soft); border: 1px solid var(--you-line); color: var(--you-ink); border-radius: 12px; padding: 14px 16px; font-size: 14px; line-height: 1.5; }
 
 /* Picture viewer */

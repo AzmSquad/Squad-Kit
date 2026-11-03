@@ -15,6 +15,7 @@ import {
   MessageCircle,
   Mic,
   Minimize2,
+  Minus,
   Paperclip,
   PencilLine,
   Plus,
@@ -34,7 +35,7 @@ import { chatDock } from '../lib/chatDock';
 import { detect, firstWords, langLabel, textClass, wordCount } from '../lib/lang';
 import { ChatMarkdown, Folded, lineCount } from './ChatMarkdown';
 import { AUDIO, ChatFiles, type OpenDoc } from './ChatFiles';
-import { merge, type Item as AcpItem } from './Conversation';
+import { merge, type Item as AcpItem } from '../lib/conversation';
 import { readFile, type PickedFile } from './dialogs';
 import { ProposeChange, canPropose, shipped } from './ChangeCard';
 import { TakeOverButton, canTakeOver } from './TakeOver';
@@ -689,8 +690,8 @@ function stepLine(s: Tool): { title: string; plus?: number; minus?: number } {
 function StepRow({ s }: { s: Tool }) {
   const l = stepLine(s);
   return (
-    <div className={`cstep ${s.status}`}>
-      {s.status === 'completed' ? <Check size={13} strokeWidth={2.5} /> : s.status === 'failed' ? <X size={13} /> : <Loader2 size={13} className="spin" />}
+    <div className={`cstep ${s.skipped ? 'skipped' : s.status}`}>
+      {s.skipped ? <Minus size={13} /> : s.status === 'completed' ? <Check size={13} strokeWidth={2.5} /> : s.status === 'failed' ? <X size={13} /> : <Loader2 size={13} className="spin" />}
       <span className="cstep-t">{l.title}</span>
       {l.plus !== undefined && (
         <span className="cstep-n">

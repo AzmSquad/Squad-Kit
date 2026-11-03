@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Check, X } from 'lucide-react';
+import { Check, CircleAlert, X } from 'lucide-react';
+import { toastLife, withToast, type Toast } from './toasts';
 
 type Theme = 'light' | 'dark';
 
@@ -35,12 +36,6 @@ export function initialTheme(): Theme {
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
-interface Toast {
-  id: number;
-  text: string;
-  kind: 'ok' | 'err';
-}
-
 export function PrefsProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(initialTheme);
   const [showCommands, setShowCommands] = useState(stored('sk.commands') !== 'off');
@@ -51,11 +46,16 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
     store('sk.theme', theme);
   }, [theme]);
 
-  const toast = useCallback((text: string, kind: 'ok' | 'err' = 'ok') => {
-    const id = Date.now() + Math.random();
-    setToasts((t) => [...t, { id, text, kind }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), kind === 'err' ? 5000 : 3200);
-  }, []);
+  const dismiss = useCallback((id: number) => setToasts((t) => t.filter((x) => x.id !== id)), []);
+  const toast = useCallback(
+    (text: string, kind: 'ok' | 'err' = 'ok') => {
+      const id = Date.now() + Math.random();
+      setToasts((t) => withToast(t, { id, text, kind }));
+      const life = toastLife(kind);
+      if (life !== null) setTimeout(() => dismiss(id), life);
+    },
+    [dismiss],
+  );
 
   const value = useMemo<Prefs>(
     () => ({
@@ -76,12 +76,22 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
     <PrefsContext.Provider value={value}>
       {children}
       <div className="toasts" role="status" aria-live="polite">
-        {toasts.map((t) => (
-          <div key={t.id} className={`toast ${t.kind === 'err' ? 'err' : ''}`}>
-            {t.kind === 'err' ? <X size={16} /> : <Check size={16} />}
-            {t.text}
-          </div>
-        ))}
+        {toasts.map((t) =>
+          t.kind === 'err' ? (
+            <div key={t.id} className="toast err" role="alert">
+              <CircleAlert size={16} />
+              <span className="grow">{t.text}</span>
+              <button className="toast-x" onClick={() => dismiss(t.id)} aria-label="Close this message">
+                <X size={15} />
+              </button>
+            </div>
+          ) : (
+            <div key={t.id} className="toast">
+              <Check size={16} />
+              {t.text}
+            </div>
+          ),
+        )}
       </div>
     </PrefsContext.Provider>
   );

@@ -30,7 +30,7 @@ const SPEC = {
   releaseNote: '**Daily limit.** At most 3 bookings a day.',
 };
 const DESIGN = {
-  decision: { title: 'Count bookings in the database', options: [{ name: 'Query', note: 'Simple', chosen: true }, { name: 'Cache', note: 'Fast', chosen: false }], why: 'Few bookings a day' },
+  decision: { title: 'Count bookings in the database', options: [{ name: 'Query', note: 'Simple', chosen: true }, { name: 'Cache', note: 'Fast', chosen: false }], why: 'Few bookings a day', area: 'Data' },
   steps: ['Add the count query', 'Check it before saving', 'Write the tests'],
   tests: 3,
   screens: 1,

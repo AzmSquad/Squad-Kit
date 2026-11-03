@@ -3,6 +3,7 @@ import { ArrowUp, Bug, ChevronsUpDown, ExternalLink, Inbox, LayoutGrid, ListTodo
 import { useApps, useBoard } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { UpdateBanner } from './Restart';
+import { AppUpdate } from './Update';
 import { changeWaits } from './ChangeCard';
 import { ChatDock, useChats, useDocked } from './ChatDock';
 
@@ -90,6 +91,7 @@ export function Shell() {
         </div>
       </aside>
       <main className="canvas">
+        <AppUpdate />
         {board.data?.ready && board.data.console?.outdated && <UpdateBanner />}
         <Outlet />
       </main>

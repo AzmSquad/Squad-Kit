@@ -1,12 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { addActivity, codeChanged, listTickets, readMeta, requireTicket, updateTicket, type BoardPaths } from '../board/store.js';
+import { addActivity, codeChanged, listTickets, readMeta, readTicket, requireTicket, updateTicket, type BoardPaths } from '../board/store.js';
 import type { LocalSetup, Ticket, TrackerEvent } from '../board/types.js';
 import { repoHostFor, trackerFor } from '../modules/registry.js';
 import type { Tracker } from '../modules/tracker/types.js';
-import { currentBranch, git, mergeIntoBase, moveBase, remotes } from './git.js';
+import { currentBranch, git, mergeIntoBase, moveBase, netGit, remotes } from './git.js';
 import { projectRoot } from './live.js';
-import { repoFor } from './repos.js';
+import { filesMoved, repoFor } from './repos.js';
 
 /**
  * Keeps the tracker and the code host in step with the board: item states and comments on the tracker, and the
@@ -27,18 +27,21 @@ function note(bp: BoardPaths, id: string, text: string): void {
   }
 }
 
-/** Tell the tracker what just happened on the board. Resolves even when the tracker is unreachable. */
-export async function tellTracker(bp: BoardPaths, ticketId: string, event: TrackerEvent, tracker: Tracker | null = trackerFor(bp)): Promise<void> {
+/**
+ * Tell the tracker what just happened on the board. Resolves even when the tracker is unreachable: false then, so the
+ * update is kept and sent again. `again` is a retry: its failure is not noted a second time.
+ */
+export async function tellTracker(bp: BoardPaths, ticketId: string, event: TrackerEvent, tracker: Tracker | null = trackerFor(bp), again = false): Promise<boolean> {
   let t: Ticket;
   try {
     t = requireTicket(bp, ticketId);
   } catch {
-    return;
+    return true;
   }
-  if (!tracker || readMeta(bp).engine !== 'live') return;
-  if (event.kind === 'file-bug') return fileBug(bp, t, tracker);
+  if (!tracker || readMeta(bp).engine !== 'live') return true;
+  if (event.kind === 'file-bug') return fileBug(bp, t, tracker, again);
   const id = itemId(t, tracker);
-  if (!id) return;
+  if (!id) return true;
   const ref = tracker.refOf(id);
   try {
     switch (event.kind) {
@@ -50,7 +53,7 @@ export async function tellTracker(bp: BoardPaths, ticketId: string, event: Track
       }
       case 'answered': {
         const answered = (t.questions ?? []).filter((q) => q.answer);
-        if (!answered.length) return;
+        if (!answered.length) return true;
         const items = answered.map((q, i) => `${i + 1}. ${q.text}\n   **${q.answer!.choice.replace(/:$/, '')}${q.answer!.value ? `: ${q.answer!.value}` : ''}**`).join('\n');
         await tracker.comment(id, `**Questions answered** by ${readMeta(bp).user.name}\n\n${items}`);
         note(bp, ticketId, `Posted the answers on ${ref}`);
@@ -83,14 +86,16 @@ export async function tellTracker(bp: BoardPaths, ticketId: string, event: Track
         break;
       }
     }
+    return true;
   } catch (err) {
-    note(bp, ticketId, `Could not update ${ref} on ${tracker.label}: ${(err as Error).message}`);
+    if (!again) note(bp, ticketId, `Could not update ${ref} on ${tracker.label}: ${(err as Error).message}. The update is kept and sent again later`);
+    return false;
   }
 }
 
 /** A bug reported on the board becomes a bug on the tracker, linked to the items of the release it was found in. */
-async function fileBug(bp: BoardPaths, t: Ticket, tracker: Tracker): Promise<void> {
-  if (!tracker.abilities.bugs || itemId(t, tracker)) return;
+async function fileBug(bp: BoardPaths, t: Ticket, tracker: Tracker, again = false): Promise<boolean> {
+  if (!tracker.abilities.bugs || itemId(t, tracker)) return true;
   try {
     const related = listTickets(bp)
       .filter((x) => t.foundIn && x.release === t.foundIn && x.id !== t.id)
@@ -107,22 +112,50 @@ async function fileBug(bp: BoardPaths, t: Ticket, tracker: Tracker): Promise<voi
       x.source = { type: tracker.name, ref: bug.ref, id: bug.id, url: bug.url, itemType: bug.type || 'Bug' };
       addActivity(x, 'release', `Filed as Bug ${bug.ref} on ${tracker.label}${related.length ? `, linked to ${related.map((n) => tracker.refOf(n)).join(', ')}` : ''}`);
     });
+    return true;
   } catch (err) {
-    note(bp, t.id, `Could not file the bug on ${tracker.label}: ${(err as Error).message}`);
+    if (!again) note(bp, t.id, `Could not file the bug on ${tracker.label}: ${(err as Error).message}. It is kept and filed again later`);
+    return false;
   }
 }
 
-/** Send a ticket's queued tracker updates, oldest first. */
-export async function flushTracker(bp: BoardPaths, ticketId: string): Promise<void> {
-  const tracker = trackerFor(bp);
+/** How long a tracker update that failed waits before the next try: 30 seconds, doubling, at most 30 minutes. */
+export function trackerRetryDelay(tries: number): number {
+  return Math.min(30 * 60_000, 30_000 * 2 ** Math.max(0, tries - 1));
+}
+
+/** The ticket has tracker updates to send now: none failed, or the wait after the last failure is over. */
+export function trackerDue(t: Ticket): boolean {
+  return Boolean(t.trackerQueue?.length) && (!t.trackerRetry || Date.parse(t.trackerRetry.nextAt) <= Date.now());
+}
+
+/**
+ * Send a ticket's queued tracker updates, oldest first. Each one leaves the queue only once the tracker has it; one
+ * that fails stays first, and the queue waits a little longer after each failure. The work never waits on it.
+ */
+export async function flushTracker(bp: BoardPaths, ticketId: string, tracker: Tracker | null = trackerFor(bp)): Promise<void> {
   for (;;) {
-    let event: TrackerEvent | undefined;
-    updateTicket(bp, ticketId, (t) => {
-      event = t.trackerQueue?.shift();
-      if (!t.trackerQueue?.length) delete t.trackerQueue;
-    });
-    if (!event) return;
-    await tellTracker(bp, ticketId, event, tracker);
+    const t = readTicket(bp, ticketId);
+    const event = t?.trackerQueue?.[0];
+    if (!t || !event || !trackerDue(t)) return;
+    const sent = await tellTracker(bp, ticketId, event, tracker, Boolean(t.trackerRetry));
+    try {
+      updateTicket(bp, ticketId, (x) => {
+        if (!sent) {
+          const tries = (x.trackerRetry?.tries ?? 0) + 1;
+          x.trackerRetry = { tries, nextAt: new Date(Date.now() + trackerRetryDelay(tries)).toISOString() };
+          return;
+        }
+        // Updates queued while this one was sent stay behind it.
+        if (JSON.stringify(x.trackerQueue?.[0]) === JSON.stringify(event)) x.trackerQueue!.shift();
+        if (!x.trackerQueue?.length) delete x.trackerQueue;
+        delete x.trackerRetry;
+      });
+    } catch {
+      // The ticket was removed meanwhile.
+      return;
+    }
+    if (!sent) return;
   }
 }
 
@@ -192,12 +225,12 @@ export async function publishTicket(bp: BoardPaths, ticketId: string): Promise<{
   const env = host.gitEnv();
 
   // A brand-new repo has no base branch yet, and a PR needs one to point at.
-  const remoteBase = git(target.dir, ['ls-remote', '--heads', target.remote, target.base], { allowFail: true, env });
+  const remoteBase = netGit(target.dir, ['ls-remote', '--heads', target.remote, target.base], { allowFail: true, env });
   if (!remoteBase) {
-    git(target.dir, ['push', target.remote, `${target.base}:refs/heads/${target.base}`], { env });
+    netGit(target.dir, ['push', target.remote, `${target.base}:refs/heads/${target.base}`], { env });
     note(bp, ticketId, `Pushed ${target.base} to ${host.label} (the repo was empty)`);
   }
-  git(t.worktree ?? target.dir, ['push', '--force-with-lease', target.remote, `${t.branch}:refs/heads/${t.branch}`], { env });
+  netGit(t.worktree ?? target.dir, ['push', '--force-with-lease', target.remote, `${t.branch}:refs/heads/${t.branch}`], { env });
 
   const tracker = trackerFor(bp);
   const item = tracker ? itemId(t, tracker) : null;
@@ -233,7 +266,7 @@ export async function publishTicket(bp: BoardPaths, ticketId: string): Promise<{
   try {
     await host.merge(opened.id, `Merge ${t.title} (${t.id})`);
     merged = true;
-    git(target.dir, ['fetch', target.remote, target.base], { env });
+    netGit(target.dir, ['fetch', target.remote, target.base], { env });
     const head = git(target.dir, ['rev-parse', 'FETCH_HEAD']);
     const local = moveBase(target.dir, target.base, head, squadInside(bp, target.dir));
     if (local.note) note(bp, ticketId, local.note);
@@ -258,7 +291,7 @@ export async function publishTicket(bp: BoardPaths, ticketId: string): Promise<{
       addActivity(x, 'release', `Pull request ${opened.id} is open but not merged yet: ${why}`);
     }
   });
-  if (merged) codeChanged(bp);
+  if (merged) mapAfterMerge(bp);
 
   // A clash is not done yet: the item stays where it is until the ticket is accepted again.
   if (tracker && item && !clash) {
@@ -276,6 +309,16 @@ export async function publishTicket(bp: BoardPaths, ticketId: string): Promise<{
     }
   }
   return { clash };
+}
+
+/**
+ * A merge moved the base. The Architect reads the code again (project map, stack and patterns) only when files were
+ * added, moved or removed since its last read: edits inside files leave all three as they were.
+ */
+export function mapAfterMerge(bp: BoardPaths): void {
+  const meta = readMeta(bp);
+  if (meta.blueprint?.status === 'done' && !filesMoved(projectRoot(bp), meta, meta.blueprint, bp.squadDir)) return;
+  codeChanged(bp);
 }
 
 /**

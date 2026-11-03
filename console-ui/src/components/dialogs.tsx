@@ -1,23 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Bug, Check, Copy, Download, Loader2, Paperclip, Plus, Rocket, Sparkles, X } from 'lucide-react';
-import type { Release, Ticket, Track } from '../api/types';
+import { Bug, Check, Copy, Download, Loader2, Paperclip, PenLine, Plus, Rocket, RotateCcw, Sparkles, X } from 'lucide-react';
+import type { DraftJob, Release, Ticket, TicketDraft as Draft, Track } from '../api/types';
 import { api, send } from '../api/client';
 import { useAct } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { Cmd, Modal } from './ui';
-
-interface Draft {
-  title: string;
-  ask: string;
-  kind: Ticket['kind'];
-  track?: Track;
-  priority: Ticket['priority'];
-  criteria: string[];
-  rules: string[];
-  edgeCases: string[];
-  gaps: string[];
-}
 
 export interface PickedFile {
   name: string;
@@ -45,6 +33,12 @@ function quote(x: string): string {
   return `"${x.replace(/"/g, '\\"')}"`;
 }
 
+/** A local preview for a picture that came back from the server, as the picker makes for a picked one. */
+function previewOf(f: { name: string; data: string }): { preview?: string } {
+  const ext = /\.(png|jpe?g|gif|webp)$/i.exec(f.name)?.[1]?.toLowerCase();
+  return ext ? { preview: `data:image/${ext === 'jpg' ? 'jpeg' : ext};base64,${f.data}` } : {};
+}
+
 /**
  * A new ticket, written by hand or filled in by the Analyst from a pasted idea or chat message. Either way the person
  * sees every field, with its acceptance criteria, business rules, edge cases and files, before it is created.
@@ -54,7 +48,10 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
   const { toast } = usePrefs();
   const [mode, setMode] = useState<'write' | 'paste'>('write');
   const [pasted, setPasted] = useState('');
-  const [drafting, setDrafting] = useState(false);
+  // The Analyst's draft, kept on the server: closing the dialog leaves it working, and it waits here next time.
+  const [job, setJob] = useState<DraftJob | null>(null);
+  const [startError, setStartError] = useState<string | null>(null);
+  const drafting = job?.status === 'working';
   const [gaps, setGaps] = useState<string[] | null>(null);
   const [title, setTitle] = useState('');
   const [ask, setAsk] = useState('');
@@ -87,29 +84,103 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
   };
   const upload = files.map(({ name, data }) => ({ name, data }));
 
-  const fill = async () => {
-    setDrafting(true);
-    try {
-      const d = await send<Draft>('/api/v1/tickets/draft', 'POST', { text: pasted, files: upload });
-      setTitle(d.title);
-      setAsk(d.ask);
-      if (d.kind === 'bug') setWhat(d.ask);
-      setKind(d.kind);
-      setPriority(d.priority);
-      if (d.track) {
-        setTrack(d.track);
-        setSuggested(d.track);
-      }
-      setCriteria(d.criteria);
-      setRules(d.rules);
-      setEdgeCases(d.edgeCases);
-      setGaps(d.gaps);
-      setMode('write');
-    } catch (err) {
-      toast(err instanceof Error ? err.message : String(err), 'err');
-    } finally {
-      setDrafting(false);
+  const takeDraft = (d: Draft) => {
+    setTitle(d.title);
+    setAsk(d.ask);
+    if (d.kind === 'bug') setWhat(d.ask);
+    setKind(d.kind);
+    setPriority(d.priority);
+    if (d.track) {
+      setTrack(d.track);
+      setSuggested(d.track);
     }
+    setCriteria(d.criteria);
+    setRules(d.rules);
+    setEdgeCases(d.edgeCases);
+    setGaps(d.gaps);
+    setMode('write');
+  };
+
+  // Opened again: the draft that waits under New ticket comes back, with the text and files it was made from.
+  useEffect(() => {
+    let live = true;
+    void api<{ draft: DraftJob | null }>('/api/v1/tickets/draft/current')
+      .then(async ({ draft }) => {
+        if (!live || !draft) return;
+        setPasted(draft.text);
+        setMode('paste');
+        setJob(draft);
+        if (draft.files.length) {
+          const back = await api<{ files: { name: string; data: string }[] }>(`/api/v1/tickets/draft/${draft.id}/files`).catch(() => ({ files: [] }));
+          if (live) setFiles(back.files.map((f, i) => ({ ...f, size: draft.files[i]?.size ?? 0, ...previewOf(f) })));
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  // While the Analyst works, ask how it goes every second.
+  const poll = useQuery({
+    queryKey: ['ticket-draft', job?.id],
+    queryFn: () => api<DraftJob>(`/api/v1/tickets/draft/${job!.id}`),
+    enabled: drafting,
+    refetchInterval: 1000,
+    retry: false,
+  });
+  useEffect(() => {
+    // An answer still on its way after Cancel does not bring the draft back to life.
+    if (poll.data && job?.status === 'working' && poll.data.id === job.id) setJob(poll.data);
+  }, [poll.data]);
+  useEffect(() => {
+    // The app restarted and forgot it: say so where the person is looking, with the text still here.
+    if (poll.isError && drafting) setJob((j) => j && { ...j, status: 'failed', error: 'squad-kit lost this draft, maybe because it restarted.' });
+  }, [poll.isError]);
+  const used = useRef<string | null>(null);
+  useEffect(() => {
+    if (job?.status === 'done' && job.draft && used.current !== job.id) {
+      used.current = job.id;
+      takeDraft(job.draft);
+    }
+  }, [job]);
+
+  const fill = async () => {
+    setStartError(null);
+    try {
+      setJob(await send<DraftJob>('/api/v1/tickets/draft', 'POST', { text: pasted, files: upload }));
+    } catch (err) {
+      setStartError(err instanceof Error ? err.message : String(err));
+    }
+  };
+  const cancel = async () => {
+    if (!job) return;
+    try {
+      setJob(await send<DraftJob>(`/api/v1/tickets/draft/${job.id}/cancel`, 'POST'));
+    } catch {
+      setJob({ ...job, status: 'cancelled' });
+    }
+  };
+  /** The draft no longer waits under New ticket: it was used, or put aside. */
+  const letGo = () => {
+    if (job) void send(`/api/v1/tickets/draft/${job.id}/dismiss`, 'POST').catch(() => undefined);
+    setJob(null);
+  };
+  // The Analyst could not help: the person writes the ticket, starting from what they pasted.
+  const writeMyself = () => {
+    letGo();
+    setStartError(null);
+    if (!ask.trim()) setAsk(pasted.trim());
+    if (!what.trim()) setWhat(pasted.trim());
+    setMode('write');
+  };
+  const discard = () => {
+    letGo();
+    setGaps(null);
+    setSuggested(null);
+    for (const clear of [setTitle, setAsk, setWhat, setExpected, setWhere]) clear('');
+    for (const clear of [setCriteria, setRules, setEdgeCases, setSteps]) clear([]);
+    setMode('paste');
   };
 
   const bugSteps = steps.filter((x) => x.trim());
@@ -130,12 +201,15 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
       { path: '/api/v1/tickets', body },
       {
         onSuccess: (t) => {
+          letGo();
           onCreated(t);
           onClose();
         },
       },
     );
 
+  // The Analyst stopped (an error, or the person pressed Cancel): the ways on show inside the dialog, not in a toast.
+  const stuck = Boolean(startError) || job?.status === 'failed' || job?.status === 'cancelled';
   const cmd =
     mode === 'paste'
       ? `squad new --from ${quote(pasted.trim().split('\n')[0]?.slice(0, 40) || 'your message')}`
@@ -162,22 +236,28 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
       footer={
         <>
           {mode === 'paste' ? (
-            <button className="btn pri" disabled={(!pasted.trim() && !files.length) || drafting} onClick={() => void fill()}>
-              {drafting ? <Loader2 size={15} className="spin" /> : <Sparkles size={15} />} {drafting ? 'The Analyst is reading it…' : 'Fill in the ticket'}
-            </button>
+            stuck ? null : (
+              <button className="btn pri" disabled={(!pasted.trim() && !files.length) || drafting} onClick={() => void fill()}>
+                {drafting ? <Loader2 size={15} className="spin" /> : <Sparkles size={15} />} {drafting ? 'Filling in…' : 'Fill in the ticket'}
+              </button>
+            )
           ) : (
             <button className="btn pri" disabled={!title.trim() || act.isPending} onClick={submit}>
               <Plus size={15} /> Create ticket
             </button>
           )}
-          <button className="btn" onClick={onClose}>Cancel</button>
+          {/* While the Analyst works, Cancel stops it; closing the window (the cross) leaves it working. */}
+          <button className="btn" onClick={drafting ? () => void cancel() : onClose}>Cancel</button>
           <span className="grow" />
           <Cmd text={cmd} />
         </>
       }
     >
       <div className="seg" style={{ marginBottom: 14, width: 'fit-content' }}>
-        <button className={mode === 'write' ? 'on' : ''} onClick={() => setMode('write')}>Write it</button>
+        {/* The draft fills in this form when it is ready, so writing it waits until the Analyst is done or cancelled. */}
+        <button className={mode === 'write' ? 'on' : ''} disabled={drafting} title={drafting ? 'Press Cancel first to write it yourself' : undefined} onClick={() => setMode('write')}>
+          Write it
+        </button>
         <button className={mode === 'paste' ? 'on' : ''} onClick={() => setMode('paste')}>
           <Sparkles size={13} style={{ verticalAlign: '-2px', marginRight: 5 }} />
           From an idea or message
@@ -186,14 +266,15 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
 
       {mode === 'paste' ? (
         <>
-          <p>Paste an idea, a WhatsApp message or one line of business. Add screenshots if you have them. The Analyst fills in the ticket, and you check every field before it is created.</p>
+          {!drafting && <p>Paste an idea, a WhatsApp message or one line of business. Add screenshots if you have them. The Analyst fills in the ticket, and you check every field before it is created.</p>}
           <div className="field">
             <label htmlFor="nt-paste">The idea or message</label>
             <textarea
               id="nt-paste"
               className="textarea"
-              style={{ minHeight: 150 }}
+              style={{ minHeight: drafting ? 70 : 150 }}
               autoFocus
+              readOnly={drafting}
               value={pasted}
               onChange={(e) => setPasted(e.target.value)}
               onPaste={(e) => {
@@ -206,13 +287,28 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
               placeholder="For example: the manager says clerks should not book more than 3 appointments a day for the same person"
             />
           </div>
-          <FilePicker files={files} onAdd={addFiles} onRemove={(i) => setFiles((now) => now.filter((_, k) => k !== i))} />
+          {drafting && job ? (
+            <>
+              {files.length > 0 && <p className="note" style={{ margin: '-6px 0 12px' }}>With {files.map((f) => f.name).join(', ')}</p>}
+              <DraftProgress job={job} />
+            </>
+          ) : (
+            <FilePicker files={files} onAdd={addFiles} onRemove={(i) => setFiles((now) => now.filter((_, k) => k !== i))} />
+          )}
+          {stuck && (
+            <DraftStopped
+              error={startError ?? (job?.status === 'failed' ? (job.error ?? 'Something went wrong.') : null)}
+              onRetry={() => void fill()}
+              onWrite={writeMyself}
+            />
+          )}
         </>
       ) : (
         <>
           {gaps ? (
             <div className="drafted">
-              <b><Sparkles size={13} /> The Analyst filled this in from your message.</b> Check it and change anything.
+              <b><Sparkles size={13} /> The Analyst filled this in from your message.</b> Check it and change anything.{' '}
+              <button className="linkbtn" onClick={discard}>Discard this draft</button>
               {gaps.length > 0 && (
                 <>
                   <div style={{ marginTop: 6 }}>Still unclear, so the Analyst will ask you after you create it:</div>
@@ -325,6 +421,88 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
         </>
       )}
     </Modal>
+  );
+}
+
+/** The usual time a draft takes, said up front; past this the dialog says it is taking longer. */
+const USUAL_SECONDS = 60;
+
+function useNow(on: boolean): number {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!on) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [on]);
+  return now;
+}
+
+/** The Analyst at work: three steps, what it is looking at, and a clock against the usual time. */
+function DraftProgress({ job }: { job: DraftJob }) {
+  const now = useNow(true);
+  const seconds = Math.max(0, Math.floor((now - Date.parse(job.startedAt)) / 1000));
+  const order = ['read', 'look', 'write'] as const;
+  const at = order.indexOf(job.step);
+  const state = (i: number) => (i < at ? 'done' : i === at ? 'now' : 'todo');
+  const shown = job.looked.slice(-3);
+  const more = job.looked.length - shown.length;
+  return (
+    <div className="drafting" role="status" aria-live="polite">
+      <div className="drafting-head">
+        <b>The Analyst is filling in your ticket</b>
+        <span className="grow" />
+        <span className="mono drafting-clock" aria-label={`${seconds} seconds so far`}>
+          {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, '0')}
+        </span>
+      </div>
+      <DraftStep state={state(0)}>Read your message</DraftStep>
+      <DraftStep state={state(1)}>
+        Looking at the project
+        {shown.length > 0 && (
+          <span className="note">
+            : {shown.join(', ')}
+            {more > 0 ? ` and ${more} more` : ''}
+          </span>
+        )}
+      </DraftStep>
+      <DraftStep state={state(2)}>Writing the ticket for you to check</DraftStep>
+      <p className="note">
+        {seconds > 2 * USUAL_SECONDS ? 'This one is taking longer than usual. You can wait, or press Cancel.' : 'Usually under a minute.'} You can close this window: the draft
+        waits for you under New ticket.
+      </p>
+    </div>
+  );
+}
+
+function DraftStep({ state, children }: { state: 'done' | 'now' | 'todo'; children: ReactNode }) {
+  return (
+    <div className={`dstep ${state}`}>
+      <span className="dot" aria-hidden="true">
+        {state === 'done' ? <Check size={12} strokeWidth={3} /> : state === 'now' ? <Loader2 size={12} className="spin" /> : null}
+      </span>
+      <span>
+        {children}
+        <span className="sr-only">{state === 'done' ? ' (done)' : state === 'now' ? ' (now)' : ''}</span>
+      </span>
+    </div>
+  );
+}
+
+/** The Analyst stopped. The error stays here until the person picks a way on; the text they pasted is kept. */
+function DraftStopped({ error, onRetry, onWrite }: { error: string | null; onRetry(): void; onWrite(): void }) {
+  return (
+    <div className={`drafterr ${error ? '' : 'calm'}`} role={error ? 'alert' : 'status'}>
+      <b>{error ? 'The Analyst could not finish' : 'You stopped the Analyst'}</b>
+      <div>{error ?? 'Nothing was saved.'} Your text is kept.</div>
+      <div className="drafterr-ways">
+        <button className="btn pri" onClick={onRetry}>
+          <RotateCcw size={14} /> Try again
+        </button>
+        <button className="btn" onClick={onWrite}>
+          <PenLine size={14} /> Write it myself with what I typed
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -535,7 +713,7 @@ export function ReleasedDialog({ release, demo, onClose }: { release: Release; d
   ].filter(Boolean) as string[];
   return (
     <Modal
-      title={`${release.version} is released`}
+      title={release.unpushed?.length ? `${release.version} is made, but not pushed yet` : `${release.version} is released`}
       onClose={onClose}
       icon={<span className="glyph"><Rocket size={15} /></span>}
       footer={
@@ -550,7 +728,13 @@ export function ReleasedDialog({ release, demo, onClose }: { release: Release; d
       }
     >
       <div className="donelist">
-        <div><Check size={16} /> {release.tickets.length} tickets released</div>
+        {release.unpushed?.length ? (
+          <div style={{ color: 'var(--you-ink)' }}>
+            <span style={{ width: 16, textAlign: 'center', fontWeight: 800 }}>!</span> The push failed, so its tickets stay open. Press Push again on the release once the remote is reachable.
+          </div>
+        ) : (
+          <div><Check size={16} /> {release.tickets.length} tickets released</div>
+        )}
         {release.log
           ? release.log.map((l) => (
               <div key={l.text} style={l.ok ? undefined : { color: 'var(--you-ink)' }}>

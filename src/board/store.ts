@@ -161,7 +161,7 @@ function cached<T>(key: string, files: string[], read: () => T): T {
 /* ── Board settings ─────────────────────────────────────── */
 
 /** The board's settings that belong to the project, kept in `.squad/config.yaml` under `board:`. */
-const PROJECT_META = ['id', 'layout', 'documentsInGit', 'project', 'key', 'nextNumber', 'engine', 'commands', 'git', 'repos'] as const;
+const PROJECT_META = ['id', 'layout', 'documentsInGit', 'quality', 'project', 'key', 'nextNumber', 'engine', 'commands', 'git', 'repos'] as const;
 /** What the project knows, kept in `.squad/knowledge/` as Markdown. */
 const KNOWLEDGE_META = ['map', 'lessons'] as const;
 
@@ -276,6 +276,7 @@ export const TICKET_HOME = {
   worktree: 'local',
   baseCommit: 'local',
   tries: 'local',
+  fails: 'local',
   reviewRound: 'local',
   retryPhase: 'local',
   stopRequested: 'local',
@@ -285,6 +286,9 @@ export const TICKET_HOME = {
   quiet: 'local',
   quietSnoozedUntil: 'local',
   trackerQueue: 'local',
+  trackerRetry: 'local',
+  checksContinued: 'local',
+  builtPlan: 'local',
   notesSeen: 'local',
   takenOver: 'local',
   stuck: 'local',
@@ -510,8 +514,8 @@ function releaseStateFile(bp: BoardPaths, version: string): string {
 }
 
 function withReleaseState(bp: BoardPaths, r: Release): Release {
-  const state = readYaml<Pick<Release, 'log'>>(releaseStateFile(bp, r.version));
-  return state?.log ? { ...r, log: state.log } : r;
+  const state = readYaml<Pick<Release, 'log' | 'unpushed'>>(releaseStateFile(bp, r.version));
+  return { ...r, ...(state?.log ? { log: state.log } : {}), ...(state?.unpushed?.length ? { unpushed: state.unpushed } : {}) };
 }
 
 export function listReleases(bp: BoardPaths): Release[] {
@@ -530,8 +534,15 @@ export function readRelease(bp: BoardPaths, version: string): Release | null {
 
 export function writeRelease(bp: BoardPaths, release: Release): void {
   writeFile(path.join(bp.releasesDir, `${release.version}.md`), releaseDoc(release));
-  if (release.log) writeFile(releaseStateFile(bp, release.version), dumpYaml({ log: release.log }));
-  else fs.rmSync(releaseStateFile(bp, release.version), { force: true });
+  if (release.log || release.unpushed?.length) {
+    writeFile(releaseStateFile(bp, release.version), dumpYaml({ ...(release.log ? { log: release.log } : {}), ...(release.unpushed?.length ? { unpushed: release.unpushed } : {}) }));
+  } else fs.rmSync(releaseStateFile(bp, release.version), { force: true });
+}
+
+/** A draft that is folded into another one: its file goes. */
+export function removeRelease(bp: BoardPaths, version: string): void {
+  fs.rmSync(path.join(bp.releasesDir, `${version}.md`), { force: true });
+  fs.rmSync(releaseStateFile(bp, version), { force: true });
 }
 
 export function draftRelease(bp: BoardPaths): Release | null {

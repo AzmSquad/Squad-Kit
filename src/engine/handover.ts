@@ -8,7 +8,7 @@ import { isMine, ownerOf, sameName } from '../board/owner.js';
 import { scheduleSquad } from '../board/schedule.js';
 import type { Ticket, Waiting } from '../board/types.js';
 import { repoHostFor } from '../modules/registry.js';
-import { addWorktree, changedFiles, commitAll, commitArgsFor, git, isAncestor, isRepo, remotes, removeWorktree } from './git.js';
+import { addWorktree, changedFiles, commitAll, commitArgsFor, git, isAncestor, isRepo, networkGitEnv, remotes, removeWorktree } from './git.js';
 import { docsInGit, docsRepo, squadInRepo, stageProjectFiles, stageTicketDocs } from './project-git.js';
 import { repoTarget } from './sync.js';
 
@@ -30,12 +30,23 @@ function gitEnv(bp: BoardPaths, t: Ticket): Record<string, string> {
 /** git over the network, without holding up the board while it waits. */
 function gitLater(cwd: string, args: string[], env: Record<string, string>, timeoutMs = 120_000): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile('git', args, { cwd, encoding: 'utf8', timeout: timeoutMs, env: { ...process.env, ...env } }, (err, stdout, stderr) => {
+    execFile('git', args, { cwd, encoding: 'utf8', timeout: timeoutMs, env: { ...process.env, ...networkGitEnv(cwd, env) } }, (err, stdout, stderr) => {
       if (!err) return resolve(stdout.trim());
       const detail = (stderr || err.message).trim().split('\n').slice(-3).join(' ');
       reject(new Error(`git ${args[0]} failed: ${detail}`));
     });
   });
+}
+
+/**
+ * Fetches the ticket's base branch from its remote, so "the latest base" is the team's and not an old copy on this
+ * computer. Returns the remote's name, or undefined when the repo has none. Never throws: offline, the last fetch counts.
+ */
+export async function fetchBase(bp: BoardPaths, t: Ticket): Promise<string | undefined> {
+  const target = repoTarget(bp, t);
+  if (!target) return undefined;
+  await gitLater(target.dir, ['fetch', '--quiet', target.remote, target.base], gitEnv(bp, t), 60_000).catch(() => undefined);
+  return target.remote;
 }
 
 /* ── Hand over ───────────────────────────────────────────── */
@@ -73,7 +84,7 @@ export async function pushHandOver(bp: BoardPaths, t: Ticket): Promise<HandOverP
     const carried = stageProjectFiles(bp, ticket, baseRef);
     const paths = [...stageTicketDocs(bp, ticket), ...carried];
     if (paths.length && git(copy.dir, ['diff', '--cached', '--name-only', '--', ...paths], { allowFail: true })) {
-      git(copy.dir, [...commitArgsFor(copy.dir), 'commit', '-m', `${t.id}: handed over to ${t.owner}`, '--', ...paths]);
+      git(copy.dir, [...commitArgsFor(copy.dir), 'commit', '--no-verify', '-m', `${t.id}: handed over to ${t.owner}`, '--', ...paths]);
     }
     await gitLater(copy.dir, ['push', target.remote, `${copy.branch}:refs/heads/${copy.branch}`], env).catch((err: Error) => {
       if (/rejected|non-fast-forward|fetch first/i.test(err.message)) {
@@ -246,7 +257,7 @@ function catchUp(repo: string, t: Ticket, ref: string): string | null {
 }
 
 /** What this computer knew of a ticket's running work: it belongs to the computer that did it. */
-const RUN_STATE = ['sessions', 'stuck', 'agentQuestion', 'chat', 'takenOver', 'retryPhase', 'reviewNotes', 'replanFor', 'quiet', 'quietSnoozedUntil', 'stopRequested', 'notesSeen', 'planReview', 'changeRequest', 'tries', 'reviewRound'] as const;
+const RUN_STATE = ['sessions', 'stuck', 'agentQuestion', 'chat', 'takenOver', 'retryPhase', 'reviewNotes', 'replanFor', 'quiet', 'quietSnoozedUntil', 'stopRequested', 'notesSeen', 'planReview', 'changeRequest', 'tries', 'fails', 'reviewRound'] as const;
 
 /** The ticket just came from a branch: yours carries on from its documents; someone else's waits for its owner. */
 function received(bp: BoardPaths, repo: string, id: string, ref: string, kind: PickedUp['kind']): Ticket {

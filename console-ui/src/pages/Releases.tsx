@@ -36,7 +36,7 @@ export function ReleasesPage() {
                   </span>
                 ) : null}
               </b>
-              {r.status === 'draft' ? 'Next release' : dateShort(r.date)} · {r.items.length} tickets
+              {r.status === 'draft' ? 'Next release' : r.unpushed?.length ? 'Not pushed yet' : dateShort(r.date)} · {r.items.length} tickets
             </button>
           ))}
         </div>
@@ -57,6 +57,7 @@ function ReleaseDetail({ r, onReleased }: { r: ReleaseWithItems; onReleased(r: R
     if (!editing) setNotes(r.notes);
   }, [r.notes, editing]);
   const draft = r.status === 'draft';
+  const unpushed = r.unpushed ?? [];
   const part = r.version.endsWith('.0') ? 'New features, nothing breaks for users.' : 'Fixes only, nothing new to learn.';
 
   return (
@@ -65,6 +66,33 @@ function ReleaseDetail({ r, onReleased }: { r: ReleaseWithItems; onReleased(r: R
       <p className="note" style={{ marginTop: 2 }}>
         {draft ? 'The squad prepared this release. Read it, edit the notes if you like, then release.' : `Released ${dateShort(r.date)}`}
       </p>
+
+      {unpushed.length > 0 && (
+        <div className="box" style={{ marginTop: 10, color: 'var(--you-ink)' }}>
+          <b>Not pushed yet.</b> The release is made on this computer, but it did not reach the remote, so its tickets stay open.
+          {unpushed.map((u) => (
+            <div key={u.repo} className="mono" style={{ fontSize: 12.5, marginTop: 6 }}>
+              {u.repo === '.' ? 'project' : u.repo}: {u.base} → {u.remote}: {u.error}
+            </div>
+          ))}
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 10 }}>
+            <button
+              className="btn pri"
+              disabled={act.isPending}
+              onClick={() =>
+                act.mutate(
+                  { path: `/api/v1/releases/${r.version}/push` },
+                  { onSuccess: (rel) => (rel.unpushed?.length ? undefined : onReleased(rel)) },
+                )
+              }
+            >
+              <Rocket size={15} /> Push again
+            </button>
+            <span className="grow" />
+            <Cmd text={`squad release ${r.version} --push-again`} />
+          </div>
+        </div>
+      )}
 
       <div className="lbl">What's inside</div>
       {r.items.map((it) => (

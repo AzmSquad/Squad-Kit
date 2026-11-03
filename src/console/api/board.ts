@@ -21,6 +21,7 @@ import {
   approveTechDecision,
   discardTechDecision,
   releaseVersion,
+  pushReleaseAgain,
   reportBug,
   requestChange,
   addNote,
@@ -46,6 +47,7 @@ import {
   proposeChange,
   approveChange,
   declineChange,
+  withdrawChange,
   retryChange,
   changeAfterRelease,
   ReleasedError,
@@ -65,9 +67,9 @@ import { allowedFile, chatSummaries, mimeOf, readConversation, ticketConversatio
 import { buildStamp } from '../../board/console-info.js';
 import { timingSafeEqualHex } from '../auth.js';
 import type { NewTicketInput, UploadedFile } from '../../board/actions.js';
-import { draftTicket } from '../../engine/draft.js';
+import { cancelDraft, currentDraft, dismissDraft, draftFiles, draftJob, startDraft } from '../../engine/draft.js';
 import { AGENTS, STEPS, ensureAgents, levelSteps, readAgent, roleForPhase, writeAgent, type AgentRole, type AgentTool } from '../../engine/agents.js';
-import { DEFAULT_LEVELS, parseEffort, parseLevel, personLevels, resolveLevel, setPersonLevel, type LevelOverrides } from '../../engine/levels.js';
+import { builderLevel, effortOn, parseEffort, parseLevel, parseQuality, personLevels, resolveLevel, setPersonLevel, standardLevel, toolEfforts, type LevelOverrides } from '../../engine/levels.js';
 import { MODEL_LEVELS } from '../../modules/ai-tool/types.js';
 import { loadConfig } from '../../core/config.js';
 import { installedEditors, openInEditor, ticketChanges } from '../../engine/changes.js';
@@ -315,10 +317,24 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
   });
 
   // Fills in a ticket from a pasted idea or chat message. Nothing is saved: the person checks it, then creates it.
+  // The Analyst works in the background: this answers at once with the draft's id, and the dialog asks how it goes.
   app.post('/api/v1/tickets/draft', async (c) => {
     const b = await body<{ text?: string; files?: UploadedFile[] }>(c);
-    return act(c, () => draftTicket(bp, { text: b.text ?? '', files: b.files }));
+    return act(c, () => startDraft(bp, { text: b.text ?? '', files: b.files }));
   });
+
+  // The draft waiting under New ticket, if any, so the dialog opened again shows it.
+  app.get('/api/v1/tickets/draft/current', (c) => c.json({ draft: currentDraft(bp) }));
+  app.get('/api/v1/tickets/draft/:id', (c) => {
+    try {
+      return c.json(draftJob(bp, c.req.param('id')));
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 404);
+    }
+  });
+  app.get('/api/v1/tickets/draft/:id/files', (c) => act(c, () => draftFiles(bp, c.req.param('id'))));
+  app.post('/api/v1/tickets/draft/:id/cancel', (c) => act(c, () => cancelDraft(bp, c.req.param('id'))));
+  app.post('/api/v1/tickets/draft/:id/dismiss', (c) => act(c, () => dismissDraft(bp, c.req.param('id'))));
 
   app.post('/api/v1/pull', async (c) => {
     const b = await body<{ ref?: string }>(c);
@@ -428,6 +444,12 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
 
   app.post('/api/v1/tickets/:id/spec-change/retry', (c) => act(c, () => retryChange(bp, c.req.param('id'))));
 
+  // An approved change the squad has not built yet can be taken back: the spec and the work go back to before it.
+  app.post('/api/v1/tickets/:id/spec-change/withdraw', async (c) => {
+    const b = await body<{ reason?: string }>(c);
+    return act(c, () => withdrawChange(bp, c.req.param('id'), b.reason));
+  });
+
   app.post('/api/v1/tickets/:id/spec-change/new-ticket', async (c) => {
     const b = await body<{ text?: string; as?: 'ticket' | 'bug' }>(c);
     return act(c, () => changeAfterRelease(bp, c.req.param('id'), b.text ?? '', b.as === 'bug' ? 'bug' : 'ticket'));
@@ -491,6 +513,9 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
 
   app.post('/api/v1/releases/:v/release', (c) => act(c, () => releaseVersion(bp, c.req.param('v'))));
 
+  // The push of a release failed: it stays open until its commits and tags reach the remote.
+  app.post('/api/v1/releases/:v/push', (c) => act(c, () => pushReleaseAgain(bp, c.req.param('v'))));
+
   app.get('/api/v1/releases/:v', (c) => {
     const r = readRelease(bp, c.req.param('v'));
     return r ? c.json(withNotes(bp, r)) : c.json({ error: 'not found' }, 404);
@@ -541,10 +566,16 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
       parallel?: number;
       runner?: 'acp' | 'direct';
       documentsInGit?: boolean;
+      quality?: string;
       repos?: { path: string; base?: string; remote?: string; commands?: ProjectCommands }[];
     }>(c);
     return act(c, () => {
       const meta = readMeta(bp);
+      if (b.quality !== undefined) {
+        const q = parseQuality(b.quality);
+        if (!q) throw new Error(`"${b.quality}" is not a Quality setting. Use best, balanced or thrifty.`);
+        meta.quality = q;
+      }
       if (b.commands) {
         meta.commands = Object.fromEntries(
           Object.entries(b.commands).map(([k, v]) => [k, String(v ?? '').trim()]).filter(([, v]) => v),
@@ -574,21 +605,24 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     if (readMeta(bp).engine === 'live') ensureAgents(bp);
     const tickets = listTickets(bp).filter((t) => t.live && t.squad);
     const mine = personLevels();
+    const quality = readMeta(bp).quality;
     const STEP_NAME: Record<string, string> = { chat: 'Talking it through', draft: 'Filling in a new ticket' };
     return c.json(
       AGENTS.map((a) => {
         const agent = readAgent(bp, a.role);
         const tool = aiTool(agent.tool);
-        // Each step's model level now, and who chose it: squad-kit, the project, or you.
+        const floor = a.role === 'reviewer' ? { builder: builderLevel({ quality }, readAgent(bp, 'builder').levels, mine) } : {};
+        // Each step's model level now, and who chose it: squad-kit for the Quality setting, the project, or you.
         const levels = levelSteps(a.role).map((step) => {
-          const now = resolveLevel({ role: a.role, step }, agent.levels, mine);
+          const now = resolveLevel({ role: a.role, step, quality, ...floor }, agent.levels, mine);
+          const effort = tool ? effortOn(tool, now.effort) : now.effort;
           return {
             step,
             name: STEPS[a.role].find((x) => x.id === step)?.name ?? STEP_NAME[step] ?? step,
-            standard: DEFAULT_LEVELS[a.role]![step],
+            standard: standardLevel({ role: a.role, step, quality }),
             team: agent.levels[`${a.role}.${step}`] ?? null,
             you: mine[`${a.role}.${step}`] ?? null,
-            now: { ...now, modelName: now.model || tool?.modelFor(now.level) || '' },
+            now: { ...now, effort, modelName: now.model || tool?.modelFor(now.level) || '' },
           };
         });
         return {
@@ -599,6 +633,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
           youRole: mine[a.role] ?? null,
           modelOf: Object.fromEntries(MODEL_LEVELS.map((l) => [l, tool?.modelFor(l) ?? ''])),
           supportsEffort: tool?.supportsEffort ?? false,
+          efforts: tool ? toolEfforts(tool) : [],
           file: `.squad/board/agents/${a.role}.md`,
           stepList: STEPS[a.role],
         working: tickets.filter((t) => roleForPhase(t.squad?.phase) === a.role).map((t) => ({ id: t.id, title: t.title, status: t.status })),
@@ -626,7 +661,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
       const [role, step] = key.split('.');
       if (!AGENTS.some((a) => a.role === role) || (step && !levelSteps(role as AgentRole).includes(step))) throw new Error(`"${key}" is not a role or one of its steps.`);
       if (b.level && !parseLevel(b.level)) throw new Error(`"${b.level}" is not a level. Use strongest, balanced or fast.`);
-      if (b.effort && !parseEffort(b.effort)) throw new Error(`"${b.effort}" is not an effort. Use high, medium or low.`);
+      if (b.effort && !parseEffort(b.effort)) throw new Error(`"${b.effort}" is not an effort. Use xhigh (extra high), high, medium or low.`);
       return setPersonLevel(key, { level: parseLevel(b.level), effort: parseEffort(b.effort), model: b.model });
     });
   });
