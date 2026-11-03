@@ -218,7 +218,8 @@ describe('hand over', () => {
   });
 });
 
-describe('a new computer', () => {
+// Each one clones, hands over and runs squad steps with real git: on a busy machine that takes longer than the default 5 s.
+describe('a new computer', { timeout: 20_000 }, () => {
   it('shows the same board from a clone, and the handed-over ticket carries on from its pushed branch', async () => {
     building();
     await actions.handOver(bp, id, { to: 'Sara' });
