@@ -148,7 +148,7 @@ svg.lucide { flex: none; }
 .iconbtn:hover { color: var(--text); }
 .term { display: inline-flex; align-items: center; gap: 10px; height: 30px; padding: 0 6px 0 11px; border-radius: 8px; background: var(--term-bg); color: var(--term-ink); font: 500 12px 'JetBrains Mono', monospace; border: 1px solid var(--term-line); white-space: nowrap; max-width: 100%; }
 .term b { color: var(--mint); font-weight: 600; }
-.term span { overflow: hidden; text-overflow: ellipsis; }
+.term span { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .term button { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 5px; color: #8fa699; }
 .term button:hover { color: var(--mint); background: rgba(124, 255, 160, 0.1); }
 .pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; padding: 5px 10px; border-radius: 99px; background: var(--surface-2); color: var(--text); white-space: nowrap; }
@@ -414,8 +414,8 @@ button.opt2:hover { border-color: var(--line-strong); }
 .stickybar { flex: none; border-top: 1px solid var(--line); padding: 12px 24px; display: flex; align-items: center; gap: 10px; background: var(--surface); }
 .stickybar .grow { flex: 1; }
 
-/* Dialogs and toasts */
-.modal-veil { position: fixed; inset: 0; background: var(--overlay); backdrop-filter: blur(3px); display: grid; place-items: center; z-index: 50; animation: fade 0.15s; padding: 20px; }
+/* Dialogs and toasts. The veil's one column is the screen's width, so a long command in a dialog cannot widen it and push the dialog off screen. */
+.modal-veil { position: fixed; inset: 0; background: var(--overlay); backdrop-filter: blur(3px); display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; z-index: 50; animation: fade 0.15s; padding: 20px; }
 .modal { width: min(560px, 100%); background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--pop-shadow); animation: pop 0.18s cubic-bezier(0.2, 0.8, 0.2, 1); max-height: calc(100vh - 40px); display: flex; flex-direction: column; }
 @keyframes pop { from { transform: scale(0.97); opacity: 0; } }
 .modal header { display: flex; align-items: center; gap: 10px; padding: 18px 22px 0; }
