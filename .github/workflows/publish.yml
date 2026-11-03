@@ -1,0 +1,51 @@
+name: publish
+
+# Publishes to npm when a GitHub release is published, through npm's trusted publishing: npm trusts this workflow
+# by name, so there is no npm token anywhere. Run it by hand to publish a release that already exists.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'The release tag to publish, for example v1.0.1'
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      # Version comes from package.json "packageManager". Pinning it here as well makes
+      # pnpm/action-setup abort with ERR_PNPM_BAD_PM_VERSION.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+          registry-url: 'https://registry.npmjs.org'
+
+      # Trusted publishing needs npm 11.5.1 or newer; Node 22 comes with npm 10.
+      - run: npm install -g npm@11
+
+      - name: The tag matches the version in package.json
+        run: test "v$(node -p "require('./package.json').version")" = "${{ inputs.tag || github.event.release.tag_name }}"
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm lint
+      - run: pnpm build
+      - run: pnpm test
+      - run: pnpm size:guard
+
+      # The checks above are prepublishOnly's, without verify:models: that one checks the 0.x planner's model ids
+      # and needs an API key for each AI company.
+      - run: npm publish --ignore-scripts
