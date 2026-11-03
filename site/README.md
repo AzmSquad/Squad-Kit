@@ -2,7 +2,7 @@
 
 The public landing page + documentation for [squad-kit](https://www.npmjs.com/package/squad-kit).
 
-Built with **Astro 5 + Tailwind CSS v4**. Ships essentially zero JavaScript — the entire site is static HTML with small, inline interactivity where needed.
+Built with **Astro 7 + Tailwind CSS v4**. Ships essentially zero JavaScript — the entire site is static HTML with small, inline interactivity where needed.
 
 ## Local dev
 

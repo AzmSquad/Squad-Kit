@@ -12,11 +12,12 @@
     "check": "astro check"
   },
   "dependencies": {
-    "@astrojs/check": "^0.9.4",
-    "@astrojs/mdx": "^4.0.3",
-    "@astrojs/sitemap": "^3.2.1",
+    "@astrojs/check": "^0.9.12",
+    "@astrojs/markdown-remark": "^7.3.5",
+    "@astrojs/mdx": "^8.0.3",
+    "@astrojs/sitemap": "^3.7.4",
     "@tailwindcss/vite": "^4.0.0",
-    "astro": "^5.1.1",
+    "astro": "^7.3.8",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.2"
   }
