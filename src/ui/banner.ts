@@ -5,7 +5,7 @@ import { isInteractive } from './tty.js';
 export function banner(): void {
   if (!isInteractive()) return;
   const title = primary('squad');
-  const tagline = dim('You write the ticket. Your squad does the rest.');
+  const tagline = dim('Your AI Engineering Squad. One Unified Harness.');
   const body = `${title}  ${accent('·')}  ${tagline}`;
   const boxed = boxen(body, {
     padding: { top: 0, bottom: 0, left: 2, right: 2 },
@@ -18,7 +18,7 @@ export function banner(): void {
 
 export function bannerMinimal(): void {
   if (!isInteractive()) return;
-  const line = `  ${primary('▸')} ${primary('squad')} ${dim('· You write the ticket. Your squad does the rest.')}`;
+  const line = `  ${primary('▸')} ${primary('squad')} ${dim('· Your AI Engineering Squad. One Unified Harness.')}`;
   process.stderr.write(line + '\n');
   process.stderr.write('  ' + dim('─'.repeat(58)) + '\n\n');
 }

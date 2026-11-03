@@ -1,17 +1,7 @@
 ---
 import Cmd from "./Cmd.astro";
+import Film from "./Film.astro";
 import { hasFilm } from "~/lib/film";
-
-/** The board's stages, as the app names them, and who works in each. */
-const lanes = [
-  { name: "Tickets", who: "Analyst", card: { id: "SK-151", title: "Export invoices as PDF", note: "In the queue", kind: "idle" } },
-  { name: "Specs", who: "Analyst, Architect", card: { id: "SK-148", title: "Dark mode for the dashboard", note: "Writing the spec", kind: "work" } },
-  { name: "Implement", who: "Builder", card: { id: "SK-143", title: "Search across all projects", note: "Step 4 of 7", kind: "work" } },
-  { name: "Test", who: "Tester", card: { id: "SK-140", title: "Faster dashboard loading", note: "18 of 18 checks pass", kind: "work" } },
-  { name: "Review", who: "Reviewer", card: null },
-  { name: "Release", who: "You", card: { id: "SK-136", title: "Onboarding checklist", note: "Released in v1.3.0", kind: "done" } },
-  { name: "Bugs", who: "Triage", card: { id: "SK-152", title: "Sign-in button cut off on iPad", note: "Found after v1.3.0", kind: "bug" } },
-];
 ---
 
 <section class="hero" aria-labelledby="hero-title">
@@ -19,57 +9,19 @@ const lanes = [
     <a class="news" href="https://github.com/AzmSquad/Squad-Kit/releases/tag/v1.0.0" target="_blank" rel="noopener">
       <span class="dot" aria-hidden="true"></span><span>squad-kit 1.0 is out<span class="more">: one app for all your projects</span></span>
     </a>
-    <h1 id="hero-title">You write the ticket.<br />Your squad does the rest.</h1>
+    <h1 id="hero-title">Your Engineering Squad.<br />One Powerful AI Harness.</h1>
     <p class="lead">
-      A squad of AI agents takes your ticket from plain words to a release. The Analyst asks, the Architect
-      designs, the Builder builds, the Tester proves it works and the Reviewer checks it. You decide at the
-      moments that matter.
+      Your AI Engineering Squad transforms ideas into production-ready software. Powered by a unified agentic
+      harness, specialized AI agents collaborate across analysis, architecture, development, testing, and review,
+      following engineering best practices, while you lead the decisions that matter.
     </p>
     <div class="actions">
       <a href="#start" class="btn-primary">Get started</a>
-      {hasFilm && <a href="#film" class="btn-secondary">Watch the film</a>}
       <Cmd text="npm i -g squad-kit" class="install" />
     </div>
   </div>
 
-  <figure class="board-wrap" aria-label="A ticket moving through the squad-kit board">
-    <div class="board-scroll" data-board-scroll>
-      <div class="board" data-board>
-        {lanes.map((lane, i) => (
-          <section class="lane" data-lane={i}>
-            <header>
-              <b>{lane.name}</b>
-              <small>{lane.who}</small>
-            </header>
-            <div class="slot" data-slot={i}>
-              {i === 0 && (
-                <article class="tk hero-card is-work" data-hero-card aria-hidden="true">
-                  <span class="cid">AB-46</span>
-                  <span class="you-tag">Your turn</span>
-                  <h3>Booking page in Arabic and English</h3>
-                  <p class="note"><span class="pip"></span><span data-note>Analyst is reading the ticket</span></p>
-                  <div class="bar" aria-hidden="true"><i data-bar></i></div>
-                  <span class="press" data-press></span>
-                </article>
-              )}
-              {lane.card && (
-                <article class={`tk is-${lane.card.kind}`} aria-hidden="true">
-                  <span class="cid">{lane.card.id}</span>
-                  <h3>{lane.card.title}</h3>
-                  <p class="note"><span class="pip"></span>{lane.card.note}</p>
-                </article>
-              )}
-            </div>
-          </section>
-        ))}
-      </div>
-    </div>
-    <figcaption class="legend">
-      <span class="key work" data-key="work"><i></i>The squad is working</span>
-      <span class="key you" data-key="you"><i></i>Your turn</span>
-      <span class="say" data-say aria-live="polite">The Analyst is reading the ticket.</span>
-    </figcaption>
-  </figure>
+  {hasFilm && <Film />}
 </section>
 
 <style>
@@ -103,7 +55,7 @@ const lanes = [
   .news .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--color-accent); box-shadow: 0 0 0 3px var(--color-accent-glow); }
   h1 {
     margin-top: 24px;
-    font-size: clamp(38px, 7.2vw, 100px);
+    font-size: clamp(38px, 6.2vw, 88px);
     line-height: 0.96;
     font-weight: 650;
     font-stretch: 84%;
@@ -127,189 +79,4 @@ const lanes = [
     gap: 12px;
   }
 
-  /* The board: the app's own lanes, cards and colors. */
-  .board-wrap { margin: clamp(36px, 4.5vw, 56px) auto 0; max-width: 1320px; padding: 0 20px; }
-  .board-scroll {
-    overflow-x: auto;
-    border: 1px solid var(--color-border);
-    border-radius: 18px;
-    background: var(--color-surface);
-    padding: 12px;
-    scrollbar-width: thin;
-  }
-  .board {
-    display: grid;
-    grid-template-columns: repeat(7, minmax(158px, 1fr));
-    gap: 10px;
-    min-height: 236px;
-  }
-  .lane {
-    background: var(--color-bg-elevated);
-    border-radius: 12px;
-    padding: 10px 8px 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    transition: background 0.4s;
-  }
-  .lane.is-here { background: #e6efe9; }
-  .lane header { padding: 2px 4px 4px; }
-  .lane b { display: block; font-size: 14.5px; font-weight: 650; font-stretch: 92%; }
-  .lane small { display: block; font-size: 12px; color: var(--color-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .slot { display: flex; flex-direction: column; gap: 8px; }
-  .tk {
-    position: relative;
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: 10px;
-    padding: 9px 10px 10px;
-    text-align: left;
-  }
-  .tk .cid { font: 500 11px var(--font-mono); color: var(--color-text-dim); }
-  .tk h3 { margin-top: 3px; font-size: 13.5px; line-height: 1.3; font-weight: 600; letter-spacing: -0.005em; }
-  .tk .note { margin-top: 6px; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--color-text-muted); }
-  .pip { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--color-border-strong); }
-  .is-work .pip { background: var(--color-accent); }
-  .is-done .pip { background: var(--color-accent); }
-  .is-done .note { color: var(--color-accent-dim); }
-  .is-bug { border-left: 3px solid #d4442a; }
-  .is-bug .pip { background: #d4442a; }
-
-  .hero-card { border-color: var(--color-accent); box-shadow: 0 8px 22px -14px rgba(13, 138, 66, 0.55); z-index: 2; }
-  .hero-card .you-tag {
-    position: absolute; top: 8px; right: 8px;
-    font-size: 10.5px; font-weight: 700; color: #1d1203; background: var(--color-you);
-    border-radius: 5px; padding: 1px 6px; opacity: 0; transition: opacity 0.3s;
-  }
-  .hero-card.is-you { border-color: var(--color-you-line); background: var(--color-you-soft); box-shadow: 0 10px 26px -14px rgba(225, 154, 43, 0.8); }
-  .hero-card.is-you .you-tag { opacity: 1; }
-  .hero-card.is-you .note { color: var(--color-you-ink); font-weight: 600; }
-  .hero-card.is-you .pip { background: var(--color-you); }
-  .hero-card .bar { display: none; margin-top: 8px; height: 4px; border-radius: 99px; background: var(--color-accent-glow); overflow: hidden; }
-  .hero-card .bar i { display: block; height: 100%; width: 0; background: var(--color-accent); transition: width 0.9s ease; }
-  .hero-card.has-bar .bar { display: block; }
-  .hero-card.is-done { border-color: var(--color-accent); }
-  .press {
-    display: none;
-    margin-top: 9px;
-    font-size: 12px; font-weight: 600; color: #fff; background: var(--color-text);
-    border-radius: 7px; padding: 5px 10px; width: fit-content;
-    transition: transform 0.12s, background 0.2s;
-  }
-  .hero-card.is-you .press { display: block; }
-  .press.pressed { transform: scale(0.94); background: var(--color-accent); }
-
-  .legend {
-    margin-top: 14px;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 10px 20px;
-    font-size: 14px;
-    color: var(--color-text-muted);
-  }
-  .key { display: inline-flex; align-items: center; gap: 8px; transition: color 0.3s; }
-  .key i { width: 10px; height: 10px; border-radius: 3px; }
-  .key.work i { background: var(--color-accent); }
-  .key.you i { background: var(--color-you); }
-  .key.on { color: var(--color-text); font-weight: 600; }
-  .say { margin-left: auto; color: var(--color-text); }
-  @media (max-width: 720px) {
-    .say { margin-left: 0; width: 100%; }
-  }
 </style>
-
-<script>
-  type Step = { lane: number; kind: "work" | "you" | "done"; note: string; say: string; press?: string; bar?: number; hold: number };
-
-  // AB-46's real path through the board: the squad works (green), and stops for you four times (amber).
-  const steps: Step[] = [
-    { lane: 0, kind: "work", note: "Analyst is reading the ticket", say: "The Analyst is reading the ticket.", hold: 1700 },
-    { lane: 0, kind: "you", note: "4 questions for you", say: "Your turn: answer the Analyst's questions.", press: "Answer", hold: 2300 },
-    { lane: 1, kind: "work", note: "Analyst is writing the spec", say: "The Analyst writes the spec from your answers.", hold: 1500 },
-    { lane: 1, kind: "you", note: "Spec ready for you", say: "Your turn: approve the spec.", press: "Approve", hold: 2300 },
-    { lane: 1, kind: "work", note: "Architect is choosing the design", say: "The Architect chooses the design.", hold: 1500 },
-    { lane: 1, kind: "you", note: "Design ready for you", say: "Your turn: approve the design.", press: "Approve", hold: 2300 },
-    { lane: 2, kind: "work", note: "Step 2 of 6", say: "The Builder builds it, step by step.", bar: 33, hold: 1300 },
-    { lane: 2, kind: "work", note: "Step 6 of 6", say: "The Builder builds it, step by step.", bar: 100, hold: 1100 },
-    { lane: 3, kind: "work", note: "16 tests pass, build OK", say: "squad-kit runs the tests, lint and build.", hold: 1500 },
-    { lane: 4, kind: "work", note: "A second session reviews", say: "The Reviewer checks the work with fresh eyes.", hold: 1500 },
-    { lane: 4, kind: "you", note: "Proof ready to check", say: "Your turn: check the proof.", press: "Looks right", hold: 2400 },
-    { lane: 5, kind: "done", note: "Released in v1.4.0", say: "Released, with the changelog and the version tag.", hold: 2600 },
-  ];
-
-  const board = document.querySelector<HTMLElement>("[data-board]");
-  const card = document.querySelector<HTMLElement>("[data-hero-card]");
-  const scroller = document.querySelector<HTMLElement>("[data-board-scroll]");
-  const say = document.querySelector<HTMLElement>("[data-say]");
-
-  if (board && card && scroller && say) {
-    const note = card.querySelector<HTMLElement>("[data-note]")!;
-    const bar = card.querySelector<HTMLElement>("[data-bar]")!;
-    const press = card.querySelector<HTMLElement>("[data-press]")!;
-    const keys = { work: document.querySelector<HTMLElement>('[data-key="work"]')!, you: document.querySelector<HTMLElement>('[data-key="you"]')! };
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    let at = 0;
-    let visible = true;
-    let timer = 0;
-
-    const moveTo = (lane: number, animate: boolean) => {
-      const slot = board.querySelector<HTMLElement>(`[data-slot="${lane}"]`)!;
-      if (card.parentElement === slot) return;
-      const before = card.getBoundingClientRect();
-      slot.prepend(card);
-      const after = card.getBoundingClientRect();
-      if (animate) {
-        card.animate(
-          [{ transform: `translate(${before.left - after.left}px, ${before.top - after.top}px)` }, { transform: "translate(0, 0)" }],
-          { duration: 650, easing: "cubic-bezier(.2,.8,.2,1)" },
-        );
-      }
-      // On a narrow screen the board scrolls sideways: keep the ticket in view.
-      if (scroller.scrollWidth > scroller.clientWidth) {
-        scroller.scrollTo({ left: Math.max(0, slot.parentElement!.offsetLeft - 24), behavior: animate ? "smooth" : "auto" });
-      }
-    };
-
-    const show = (i: number, animate: boolean) => {
-      const s = steps[i]!;
-      moveTo(s.lane, animate);
-      board.querySelectorAll(".lane").forEach((l, n) => l.classList.toggle("is-here", n === s.lane));
-      card.classList.toggle("is-you", s.kind === "you");
-      card.classList.toggle("is-work", s.kind === "work");
-      card.classList.toggle("is-done", s.kind === "done");
-      card.classList.toggle("has-bar", s.bar !== undefined);
-      bar.style.width = `${s.bar ?? 0}%`;
-      note.textContent = s.note;
-      press.textContent = s.press ?? "";
-      press.classList.remove("pressed");
-      say.textContent = s.say;
-      keys.work.classList.toggle("on", s.kind !== "you");
-      keys.you.classList.toggle("on", s.kind === "you");
-    };
-
-    const tick = () => {
-      if (!visible || document.hidden) {
-        timer = window.setTimeout(tick, 600);
-        return;
-      }
-      const s = steps[at]!;
-      if (s.press) window.setTimeout(() => press.classList.add("pressed"), s.hold - 520);
-      timer = window.setTimeout(() => {
-        at = (at + 1) % steps.length;
-        show(at, true);
-        tick();
-      }, s.hold);
-    };
-
-    if (reduced) {
-      // One still frame: the moment the squad waits for you.
-      show(3, false);
-    } else {
-      show(0, false);
-      new IntersectionObserver(([e]) => (visible = Boolean(e?.isIntersecting)), { threshold: 0.2 }).observe(board);
-      tick();
-    }
-    window.addEventListener("pagehide", () => window.clearTimeout(timer));
-  }
-</script>

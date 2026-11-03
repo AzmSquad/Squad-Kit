@@ -6,14 +6,21 @@ import Footer from "~/components/Footer.astro";
 interface Props {
   title?: string;
   description?: string;
+  /** What link previews (WhatsApp, LinkedIn, X) show, when it differs from the page's own title and description. */
+  ogTitle?: string;
+  ogDescription?: string;
   ogImage?: string;
 }
 
+const pitch =
+  "Your AI Engineering Squad transforms ideas into production-ready software. Powered by a unified agentic harness, specialized AI agents collaborate across analysis, architecture, development, testing, and review, following engineering best practices, while you lead the decisions that matter.";
+
 const {
-  title = "squad-kit: you write the ticket, your squad does the rest",
-  description = "A squad of AI agents takes your ticket from plain words to a release: questions, spec, design, code, tests, review and proof. You approve the steps that matter.",
+  title = "Your Engineering Squad. One Powerful AI Harness.",
+  description = pitch,
   ogImage = "/og.png",
 } = Astro.props;
+const { ogTitle = title, ogDescription = description } = Astro.props;
 
 const canonical = new URL(Astro.url.pathname, Astro.site).toString();
 const siteOrigin = Astro.site ? new URL(Astro.site).origin : "https://squad-kit.com";
@@ -24,8 +31,7 @@ const ogImageMime = ogImageLower.endsWith(".png")
   : ogImageLower.endsWith(".svg")
     ? "image/svg+xml"
     : null;
-const ogImageAlt =
-  "squad-kit 1.0. You write the ticket. Your squad does the rest.";
+const ogImageAlt = "squad-kit. Your AI Engineering Squad. One Unified Harness.";
 
 const jsonLd = {
   "@context": "https://schema.org",
@@ -35,8 +41,7 @@ const jsonLd = {
       "@id": `${siteOrigin}/#website`,
       url: `${siteOrigin}/`,
       name: "squad-kit",
-      description:
-        "A squad of AI agents takes your ticket from plain words to a release, and you approve the steps that matter.",
+      description: pitch,
       publisher: { "@id": `${siteOrigin}/#organization` },
       inLanguage: "en",
     },
@@ -58,8 +63,7 @@ const jsonLd = {
         priceCurrency: "USD",
       },
       url: `${siteOrigin}/`,
-      description:
-        "You write the ticket. Your squad does the rest. AI agents for analysis, design, building, testing, review and release, with your approval at each step that matters.",
+      description: pitch,
       license: "https://opensource.org/licenses/MIT",
       codeRepository: "https://github.com/AzmSquad/Squad-Kit",
       downloadUrl: "https://www.npmjs.com/package/squad-kit",
@@ -81,8 +85,8 @@ const jsonLd = {
     <meta name="description" content={description} />
 
     <meta property="og:type" content="website" />
-    <meta property="og:title" content={title} />
-    <meta property="og:description" content={description} />
+    <meta property="og:title" content={ogTitle} />
+    <meta property="og:description" content={ogDescription} />
     <meta property="og:url" content={canonical} />
     <meta property="og:image" content={ogImageAbsolute} />
     <meta property="og:image:alt" content={ogImageAlt} />
@@ -91,8 +95,8 @@ const jsonLd = {
     {ogImageMime && <meta property="og:image:type" content={ogImageMime} />}
 
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content={title} />
-    <meta name="twitter:description" content={description} />
+    <meta name="twitter:title" content={ogTitle} />
+    <meta name="twitter:description" content={ogDescription} />
     <meta name="twitter:image" content={ogImageAbsolute} />
     <meta name="twitter:image:alt" content={ogImageAlt} />
 

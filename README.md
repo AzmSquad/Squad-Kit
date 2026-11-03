@@ -11,7 +11,7 @@
   <a href="https://squad-kit.com"><img src="https://img.shields.io/badge/site-squad--kit.com-7cffa0?labelColor=0a0a0c" alt="Website"></a>
 </p>
 
-**You write the ticket. Your squad does the rest.**
+**Your AI Engineering Squad. One Unified Harness.**
 
 squad-kit is an agent harness for the whole software cycle. You describe what you need in plain words. A
 squad of AI agents takes it from that ask to a release: the Analyst, the Architect, the Builder, the Tester

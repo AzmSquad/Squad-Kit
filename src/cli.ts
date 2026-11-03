@@ -68,7 +68,7 @@ const program = new Command();
 
 program
   .name('squad')
-  .description('You write the ticket. Your squad does the rest. Run squad on its own to open squad-kit with all your projects.')
+  .description('Your AI Engineering Squad. One Unified Harness. Run squad on its own to open squad-kit with all your projects.')
   .version(readInstalledPackage().version)
   // squad's own options come before a command, so `squad console --port` stays the console's.
   .enablePositionalOptions()

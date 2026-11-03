@@ -3,17 +3,19 @@ import Layout from "~/layouts/Layout.astro";
 import Hero from "~/components/home/Hero.astro";
 import Moments from "~/components/home/Moments.astro";
 import Tour from "~/components/home/Tour.astro";
-import Film from "~/components/home/Film.astro";
+import Board from "~/components/home/Board.astro";
 import Teams from "~/components/home/Teams.astro";
 import Start from "~/components/home/Start.astro";
-import { hasFilm } from "~/lib/film";
 ---
 
-<Layout>
+<Layout
+  ogTitle="Your AI Engineering Squad. One Unified Harness."
+  ogDescription="Watch Ideas Evolve into Robust, Scalable Solutions"
+>
   <Hero />
+  <Board />
   <Moments />
   <Tour />
-  {hasFilm && <Film />}
   <Teams />
   <Start />
 </Layout>
