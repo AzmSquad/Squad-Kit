@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-11-03
+
 squad-kit 1.1 is about never wondering what the squad is doing, and always having a way out.
 
 ### Always know what is happening
@@ -871,7 +873,8 @@ First public release.
 - Plan-generation meta-prompt (`generate-plan.md`), intake template (`intake.md`), and plan skeleton reference (`story-skeleton.md`).
 - Documentation: `docs/philosophy.md`, `docs/getting-started.md`, `docs/customization.md`, `docs/vs-spec-kit.md`.
 
-[Unreleased]: https://github.com/AzmSquad/squad-kit/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/AzmSquad/squad-kit/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.1.0
 [1.0.1]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.0.1
 [1.0.0]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.0.0
 [0.6.0]: https://github.com/AzmSquad/squad-kit/releases/tag/v0.6.0

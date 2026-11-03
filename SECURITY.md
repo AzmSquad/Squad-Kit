@@ -2,13 +2,13 @@
 
 ## Supported versions
 
-Only the latest 1.0 release of squad-kit receives security fixes. Update with the **Update now** button in the app,
+Only the latest release of squad-kit receives security fixes. Update with the **Update now** button in the app,
 or `squad upgrade`.
 
 | Version | Supported |
 | ------- | --------- |
-| 1.0.x   | ✅        |
-| < 1.0   | ❌        |
+| 1.1.x   | ✅        |
+| < 1.1   | ❌        |
 
 ## Reporting a vulnerability
 
@@ -30,7 +30,7 @@ You can expect:
 
 Credit will be given in the release notes unless you prefer to remain anonymous.
 
-## How squad-kit 1.0 keeps you safe
+## How squad-kit keeps you safe
 
 - **The app runs on your computer only.** It listens on `127.0.0.1`, behind a private link with a token kept in
   `~/.squad-kit/app.json`. Nothing is hosted.
