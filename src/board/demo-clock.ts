@@ -1,4 +1,5 @@
-import { addActivity, updateTicket, type BoardPaths } from './store.js';
+import { addActivity, readMeta, updateTicket, type BoardPaths } from './store.js';
+import { countSampleStep } from './demo-cost.js';
 import { needsSpec, wayOptions } from './actions.js';
 import { endStep, nextPart, slowStep, startStep, stepDoing } from './clock.js';
 import { readUsual } from './usual.js';
@@ -54,15 +55,22 @@ export function demoStep(t: Ticket): Omit<StepClock, 'since'> | null {
   }
 }
 
+/** A sample step ended well: its time joins the usual times and the history, and what it used is counted. */
+function endDemoStep(bp: BoardPaths, t: Ticket): void {
+  const c = t.clock;
+  if (c) countSampleStep(bp, t, c.who, c.step, readMeta(bp).quality);
+  endStep(bp, t);
+}
+
 /** After each step the sample squad plays: a new step starts its clock, a finished one adds its time to the usual times. */
 export function keepDemoClock(bp: BoardPaths, t: Ticket): void {
   const next = demoStep(t);
   const c = t.clock;
   if (!next) {
-    if (c) endStep(bp, t);
+    if (c) endDemoStep(bp, t);
     return;
   }
-  if (c && (c.who !== next.who || c.step !== next.step)) endStep(bp, t);
+  if (c && (c.who !== next.who || c.step !== next.step)) endDemoStep(bp, t);
   if (t.clock && next.part) nextPart(bp, t, next.part);
   if (!t.clock) startStep(t, next);
   // The Builder's line is on its step while the card says "Step 3 of 6"; elsewhere the card's line is the action.

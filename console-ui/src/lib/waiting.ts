@@ -20,7 +20,13 @@ export function changeWaits(t: Ticket): boolean {
 
 /** Everything that needs the person: questions, plans, proof, decisions, changes, and steps that look stuck. Same rule as `inbox()` on the server. */
 export function needsYou(t: Ticket): boolean {
-  return Boolean(t.waiting || t.quiet?.kind === 'stuck' || t.outdated?.length || changeWaits(t));
+  return Boolean(t.waiting || t.quiet?.kind === 'stuck' || t.outdated?.length || changeWaits(t) || t.testChange);
+}
+
+/** "The Architect suggests changing the test command from …": the same words as `squad inbox`. */
+export function testChangeLine(t: Ticket): string {
+  const c = t.testChange;
+  return c ? `The Architect suggests changing the test command from "${c.from}" to "${c.to}"` : '';
 }
 
 /** The browser tab says how many things wait: "(2) roomflow". Nothing waiting, no number. */
@@ -64,7 +70,7 @@ export class BannerOrder {
 /* ── Desktop notices ───────────────────────────────────── */
 
 /** Why a ticket needs the person. One ticket can wait for more than one thing; each is its own notice. */
-export type WaitReason = WaitingKind | 'quiet' | 'outdated';
+export type WaitReason = WaitingKind | 'quiet' | 'outdated' | 'test-command';
 
 export function reasonsOf(t: Ticket): WaitReason[] {
   const out = new Set<WaitReason>();
@@ -72,6 +78,8 @@ export function reasonsOf(t: Ticket): WaitReason[] {
   if (changeWaits(t)) out.add('change');
   if (t.quiet?.kind === 'stuck') out.add('quiet');
   if (t.outdated?.length) out.add('outdated');
+  // With the design waiting, the change to the test command is part of it.
+  if (t.testChange && t.waiting?.kind !== 'plan') out.add('test-command');
   return [...out];
 }
 
@@ -102,7 +110,9 @@ export function noticeKey(projectId: string, t: Ticket, r: WaitReason): string {
           ? t.quiet?.since
           : r === 'outdated'
             ? t.outdated?.map((o) => o.adr).join('+')
-            : undefined;
+            : r === 'test-command'
+              ? t.testChange?.to
+              : undefined;
   return `${projectId}/${t.id}/${r}${extra ? `/${extra}` : ''}`;
 }
 
@@ -180,10 +190,12 @@ export function noticeText(n: Notice): { title: string; body: string } {
     spec: 'the spec is ready for you',
     plan: t.specApproved ? 'the design is ready for you' : 'the plan is ready for you',
     change: 'a change waits for you',
+    depends: 'it needs a ticket that is not merged yet',
     proof: 'the proof is ready to check',
     stuck: 'the squad stopped and needs you',
     quiet: 'a step looks stuck',
     outdated: 'a newer decision changes the plan',
+    'test-command': 'a new test command waits for you',
     yours: 'you took it over',
     chat: 'your talk with the squad',
     release: 'ready to release',

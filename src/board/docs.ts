@@ -122,6 +122,8 @@ const HEADER_KEYS = [
   'brief',
   'mockup',
   'changeOf',
+  'dependsOn',
+  'dependency',
   'files',
 ] as const;
 

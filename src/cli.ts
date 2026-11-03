@@ -15,6 +15,7 @@ import { runProjects } from './commands/projects.js';
 import { runAsk, runTicketStatus, runWait } from './commands/now.js';
 import { runLogs, runReport, runTryNow } from './commands/support.js';
 import { runAppFind, runAppRestart, runAppSet, runAppStart, runAppStatus, runAppStop } from './commands/app.js';
+import { runOverview, runSetup } from './commands/overview.js';
 import {
   runAnswer,
   runApprove,
@@ -36,6 +37,7 @@ import {
   runChanges,
   runOpen,
   runDecide,
+  runTestCommand,
   runDemo,
   runInbox,
   runNew,
@@ -48,6 +50,7 @@ import {
   runStop,
   runWatch,
 } from './commands/board.js';
+import { runHosts } from './commands/sandbox.js';
 import {
   runConfigShow,
   runConfigSetPlanner,
@@ -58,6 +61,8 @@ import {
 } from './commands/config/index.js';
 import { runRmFeature, runRmPlan, runRmStory } from './commands/rm/index.js';
 import { runArchive, runDelete } from './commands/delete.js';
+import { runBranches, runBringIn, runBuild, runDepends } from './commands/depends.js';
+import { runConfigBudget, runConfigPayment, runCost } from './commands/cost.js';
 import { runAuthLogin, runAuthStatus, runAuthLogout } from './commands/auth/index.js';
 import { readInstalledPackage } from './core/package-info.js';
 import { chooseProject } from './core/paths.js';
@@ -230,6 +235,7 @@ program
   .option('--port <number>', 'Port to bind on 127.0.0.1', (v) => parseInt(v, 10))
   .option('--no-open', 'Do not open the browser; print the URL instead')
   .option('--keep', 'Keep the current sample board instead of starting fresh', false)
+  .option('--first-run', 'Start the sample project at its first open: the setup, then the Overview to approve', false)
   .option('--token <hex>', 'Reuse a specific session token (advanced)')
   .action(wrap(runDemo));
 
@@ -238,6 +244,24 @@ program
   .description('List the projects in squad-kit, with what waits for you in each')
   .option('--remove <name>', 'Take a project out of squad-kit; its files stay in its folder')
   .action(wrap(runProjects));
+
+// The first run and the Overview: the setup page and the Overview page, button for button.
+program
+  .command('setup')
+  .description("Show the project's first run step by step: what squad-kit read, ran and opened, with each step's time")
+  .option('--follow', 'Keep printing each step until the overview is ready')
+  .option('--stop', 'Stop the step running now; the setup waits until you start it again')
+  .option('--again [step]', 'Try again from a step: tool, read, commands, tests or app (default: read)')
+  .action(wrap(runSetup));
+program
+  .command('overview')
+  .description('What squad-kit understood about the project: who uses it, what it does, its parts, its rules and three ticket ideas')
+  .option('--approve', 'Looks right, start working: the rules it found become the rules every agent follows')
+  .option('--idea <n>', 'Make ticket idea 1, 2 or 3 a ticket')
+  .option('--again', 'Read the project again, and check the overview again')
+  .option('--with-talk', 'With --again: the Architect reads it again with what you told it')
+  .option('--wrong [what...]', 'Something is wrong: tell the Architect what')
+  .action(wrap(runOverview));
 
 // Your apps: each app of the project, run from squad-kit's own copy of main (the board's sidebar does the same).
 const appCmd = program.command('app').description("Run your apps from squad-kit's own copy of main: start, stop, restart, status");
@@ -369,6 +393,12 @@ program
   .option('--reason <text>', 'With "Continue anyway": why. It shows on the ticket, the pull request and the release notes')
   .action(wrapArgs(runDecide));
 program
+  .command('test-command <ticket>')
+  .description("The Architect's design changes the test command: use the new one, or keep the current one")
+  .option('--use', 'Use the new test command for the project')
+  .option('--keep', 'Keep the current test command')
+  .action(wrapArgs(runTestCommand));
+program
   .command('stop <ticket>')
   .description('Stop the squad on a ticket; the work so far is kept')
   .option('--again', 'Stop the running step and start it again at once')
@@ -397,6 +427,7 @@ program
   .command('unstick <ticket>')
   .description('End the command a ticket looks stuck on, so the squad carries on')
   .option('--keep-waiting', 'It is just slow: stay quiet about it for 10 minutes')
+  .option('--free-port', "The app's port is held by a program squad-kit started: stop it and try the step again")
   .action(wrapArgs(runUnstick));
 program
   .command('watch <ticket>')
@@ -414,6 +445,10 @@ program
   .option('--tail [lines]', 'Print its last lines (40 by default)')
   .action(wrap(runLogs));
 program
+  .command('cost [ticket]')
+  .description("What the squad's work costs, the way you pay: a ticket's cost, or the month, the budgets and the averages per Quality setting")
+  .action(wrapArgs(runCost));
+program
   .command('try-now')
   .description('Stop waiting for the AI usage limit to reset: the squad carries on now')
   .action(wrap(runTryNow));
@@ -422,7 +457,32 @@ program
   .description('Release the tickets that are ready')
   .option('-y, --yes', 'Skip the confirmation', false)
   .option('--push-again', 'Send a release whose push failed: its commits and tag go to the remote now')
+  .option('--without <ticket>', 'Take a ticket out of the release before it is made; it goes out with the next one (repeat for more)', more, [])
+  .option('--put-back <ticket>', 'Put a ticket you took out back into the release (repeat for more)', more, [])
   .action(wrapArgs(runRelease));
+program
+  .command('depends <ticket>')
+  .description('Show or set the open tickets a ticket needs; it waits for them before it is built')
+  .option('--on <ticket>', 'A ticket it depends on (repeat for more)', more, [])
+  .option('--none', 'It depends on no other ticket')
+  .action(wrapArgs(runDepends));
+program
+  .command('build <ticket>')
+  .description('Choose how to build a ticket whose dependency is not merged yet')
+  .option('--on-branch', "Start its copy from the dependency's branch; main comes in once that one is merged")
+  .option('--anyway', 'Build from main without it; this stays on the record')
+  .option('--wait', 'Wait: the build starts by itself once the dependency is merged')
+  .action(wrapArgs(runBuild));
+program
+  .command('bring-in <ticket>')
+  .description("Bring the latest main into a ticket's copy of the code; the checks, review and proof run again")
+  .action(wrapArgs(runBringIn));
+program
+  .command('branches')
+  .description('Show the old branches of released tickets')
+  .option('--clean', 'Delete them on this computer (never one with work that is not in main)')
+  .option('--remote', 'With --clean: delete them on the remote too')
+  .action(wrap(runBranches));
 program
   .command('bug [what...]')
   .description('Report a bug; it becomes a ticket linked to the release')
@@ -556,6 +616,21 @@ set
   .command('quality [setting]')
   .description('Show or set how strong the squad\'s models are: best (default), balanced or thrifty')
   .action(wrapArgs(runQuality));
+set
+  .command('hosts [hosts...]')
+  .description('Show or set the hosts the Builder and Tester may reach besides the package registries')
+  .option('--clear', 'Allow only the package registries again', false)
+  .action(wrapArgs(runHosts));
+set
+  .command('payment [how]')
+  .description('Show or set how you pay for the AI: subscription, api-key, or auto to let squad-kit find out')
+  .action(wrapArgs(runConfigPayment));
+set
+  .command('budget')
+  .description('Show or set the budgets for an API key, in US dollars: --ticket 5 --month 50 (off takes one away)')
+  .option('--ticket <usd>', 'The budget per ticket')
+  .option('--month <usd>', 'The budget per month, for this project')
+  .action(wrap(runConfigBudget));
 
 const unset = config.command('unset').description('Disable or clear a section');
 unset

@@ -92,8 +92,10 @@ Any folder works:
 | A folder with several code repos | Works across them. Each ticket works in one repo. |
 | A squad-kit 0.x project | Keeps your stories, plans and tracker settings. Moves your sign-ins to this computer. |
 
-Then the Architect reads the project, which takes a few minutes. It maps the code and finds how to install,
-test, build and run it. You can follow it on the board.
+Then a setup page shows each step live while the Architect reads the project, finds how to test and run it, and
+squad-kit tries the tests and opens the app once. It takes a few minutes, and you can leave the page. Then the
+**Overview** opens: what the project is, who uses it, how its parts fit, the rules found, and ideas for a first
+ticket. Approve it with **Looks right, start working**, and the squad follows those rules.
 
 ## Your first ticket
 
@@ -115,8 +117,18 @@ The step-by-step guide is in [Getting started](docs/getting-started.md).
   again**, or **Stop**. A step that makes no progress says what squad-kit checked.
 - **Run your app** from **Your apps** in the sidebar: Start, Open, Restart and Stop, from squad-kit's own copy of
   `main`. After **Looks right**, **Run the new version** shows the change. Terminal: `squad app start`.
+- **Tickets that need each other**: when a design depends on a ticket that is not merged yet, it waits with
+  **Build on its branch**, **Build anyway** or **Wait**.
 - **Remove a ticket** you no longer want with **Delete**, and take finished ones off the board with **Archive**.
   The dialog lists what goes and what stays; the cost stays in Usage. Terminal: `squad delete`, `squad archive`.
+
+## Checks you can trust
+
+- **Not checked, never a fake pass**: a project with no tests shows "Not checked" in orange.
+- **Weakened tests stop the ticket**: deleted or skipped tests, fewer tests, or a changed test setup.
+- **Proof is checked**: each screenshot must be a real, new picture.
+- **The Builder works in a sandbox** where the computer allows it: its copy only, no keys or `.env` files, and only
+  the package registries and websites you allow.
 
 ## When something goes wrong
 
@@ -178,8 +190,9 @@ linked ticket or a bug report.
   (the default) builds and reviews on the strongest model, **Balanced** builds on it at medium effort, and
   **Thrifty** builds on a lighter one. **Fast** stays for screenshots and small helpers. The team or each person
   can change single steps on the **Squad and AI** page.
-- The board shows **what each ticket and each role used**, in tokens and in money at the AI company's API
-  prices. Your own AI subscription pays for it. This shows where the cost goes.
+- The board shows **what each ticket and each role used**, the way you pay. On a Claude subscription it says the
+  work is included in your plan, and shows its size and its value at API prices (a value, not a bill). With an API
+  key it shows real dollars, against a budget per ticket and per month.
 - One **limit of tickets at once** (2 by default, up to 5) is shared by all your projects, because they use the
   same AI account.
 

@@ -14,6 +14,7 @@ import { projectRoot } from './live.js';
 import { ensureAgents } from './agents.js';
 import { hideSquadFromGit } from './project-git.js';
 import { pickUpPushed, projectFromPushed, type PickedUp } from './handover.js';
+import { newSetup, type FolderKind } from '../board/setup-state.js';
 
 /** A short ticket key from the project name: "moj-taqadi" becomes "MT", "Leave requests" becomes "LR". */
 export function keyFor(name: string): string {
@@ -159,10 +160,14 @@ export function ensureLiveBoard(bp: BoardPaths, projectName: string): BoardSetup
     return { bp: next.bp, did: [`Project files: the settings, rules and knowledge came from the pushed branch ${from}`, ...next.did] };
   }
   const did: string[] = [];
+  const started = Date.now();
   // A workspace of separate code repos needs no repo of its own; a plain folder becomes one.
   const nested = findNestedRepos(root);
   const hadRepo = isRepo(root);
   const hadFiles = fs.readdirSync(root).some((f) => f !== SQUAD_DIR);
+  // squad-kit 0.x kept stories and plans in .squad/; they stay where they are.
+  const older = ['stories', 'plans'].some((d) => fs.existsSync(path.join(bp.squadDir, d)));
+  const kind: FolderKind = older ? 'older' : nested.length ? 'repos' : hadRepo ? (hadFiles ? 'repo' : 'empty') : hadFiles ? 'files' : 'empty';
   if (hadRepo || nested.length === 0) ensureRepo(root, projectName);
   // A freshly cloned empty repo has nothing to branch from yet, so it gets its first commit too.
   for (const r of nested) ensureRepo(path.join(root, r.path), projectName);
@@ -207,6 +212,8 @@ export function ensureLiveBoard(bp: BoardPaths, projectName: string): BoardSetup
     git: { base: currentBranch(root), remote: remotes(root)[0] ?? '' },
     scan: { status: 'pending' },
     parallel: 2,
+    // The first run, step by step: the person follows it on the setup page, the board and in the terminal.
+    setup: newSetup(kind, started),
   };
   writeMeta(next, meta);
   ensureAgents(next);

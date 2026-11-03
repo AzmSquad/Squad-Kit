@@ -5,6 +5,7 @@ import type { AiTool } from '../ai-tool/types.js';
 export const codexTool: AiTool = {
   name: 'codex',
   label: 'Codex',
+  plan: 'ChatGPT',
   canRun: false,
   supportsEffort: false,
   instructionFiles: ['AGENTS.md'],

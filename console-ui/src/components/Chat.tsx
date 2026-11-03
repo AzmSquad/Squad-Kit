@@ -60,6 +60,7 @@ const PHASE_ROLE: Record<string, AgentName> = {
   fix: 'builder',
   test: 'builder',
   'review-fix': 'builder',
+  'restore-tests': 'builder',
   'update-base': 'builder',
   'answered-builder': 'builder',
   'chat-carry-builder': 'builder',
@@ -448,7 +449,8 @@ export function ChatView({ id, size, onOpenDoc, onFull, onPanel }: { id: string;
             );
           })}
           {pending && <Sending p={pending} />}
-          {c.thinking && <Thinking role={c.with} steps={stepsFor(lastYou?.at ?? messages.at(-1)?.at)} hasMessage={Boolean(lastYou)} />}
+          {/* While the answer waits for the usage limit, the note says until when instead of the dots. */}
+          {c.thinking && messages.at(-1)?.note !== 'waits' && <Thinking role={c.with} steps={stepsFor(lastYou?.at ?? messages.at(-1)?.at)} hasMessage={Boolean(lastYou)} />}
         </div>
       </div>
       {c.open ? (

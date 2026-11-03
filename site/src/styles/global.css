@@ -234,4 +234,16 @@
   .prose-docs td {
     color: var(--color-text-muted);
   }
+  /* On a phone a wide table scrolls inside its own box, and a long link or path in code wraps, so the page itself
+     never scrolls sideways. Wider screens keep the tables as they are. */
+  @media (width < 40rem) {
+    .prose-docs table {
+      display: block;
+      max-width: 100%;
+      overflow-x: auto;
+    }
+    .prose-docs code:not(pre code) {
+      overflow-wrap: anywhere;
+    }
+  }
 }

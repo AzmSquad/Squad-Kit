@@ -15,13 +15,17 @@ import { AGENT_TITLE, TalkButton } from '../components/Chat';
 import { ChangeCard, ChangeHistory, ProposeChangeButton, changeWaits, shipped } from '../components/ChangeCard';
 import { chatDock } from '../lib/chatDock';
 import { Lightbox, type Picture } from '../components/Lightbox';
-import { TicketUsage } from '../components/Usage';
+import { CostTab, TicketUsage } from '../components/Usage';
 import { HandOverButton, HandedOverBanner, NotYoursPanel, canHandOver, isMine, ownerOf, useMe } from '../components/HandOver';
 import { AskBox, NowCard, SlowPanel, WorkSoFar, isRunning } from '../components/LiveNow';
 import { ExactError, StuckCard } from '../components/ErrorCard';
+import { TestCommandCard } from '../components/TestCommand';
+import { GatePill, NotCheckedNote } from '../components/Gates';
+import { checksWords, noShotsText, overrideWhat, proofLead } from '../lib/gates';
 import { report } from '../lib/report';
 import { shellQuote } from '../lib/text';
 import { DeleteArchiveBanner, TicketMenu } from '../components/DeleteTicket';
+import { BringInButton, DependsCard, DependsLine, waitsForDependency } from '../components/Depends';
 
 type Tab = 'now' | 'story' | 'plan' | 'activity' | 'conversation' | 'proof' | 'changes' | 'cost' | 'developer';
 
@@ -125,7 +129,7 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
               ).map(([k, label]) => (
                 <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>
                   {label}
-                  {k === 'now' && (t.waiting || t.outdated?.length || changeWaits(t)) && <span className="dot" />}
+                  {k === 'now' && (t.waiting || t.outdated?.length || changeWaits(t) || t.testChange) && <span className="dot" />}
                 </button>
               ))}
               <button className={`dev ${tab === 'developer' ? 'on' : ''}`} onClick={() => setTab('developer')}>
@@ -133,6 +137,8 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
               </button>
             </div>
             {tab === 'now' && t.outdated?.length ? <OutdatedBanner t={t} /> : null}
+            {/* With the design waiting, the change shows in it; otherwise (Express, or a design approved before) here. */}
+            {tab === 'now' && t.testChange && t.waiting?.kind !== 'plan' && (isMine(t, me) || !me) ? <TestCommandCard t={t} banner /> : null}
             {tab === 'now' && <HandedOverBanner t={t} />}
             {tab === 'now' && <DeleteArchiveBanner t={t} onDeleted={onClose} />}
             {tab === 'now' && (isMine(t, me) || !me) && <ChangeCard t={t} />}
@@ -140,12 +146,12 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
             {tab === 'story' && <StoryTab t={t} />}
             {tab === 'plan' && <PlanTab t={t} />}
             {tab === 'activity' && <ActivityTab t={t} />}
-            {tab === 'conversation' && <ConversationTab t={t} />}
+            {tab === 'conversation' && <ConversationTab t={t} onTab={setTab} />}
             {tab === 'proof' && <ProofTab t={t} />}
             {tab === 'changes' && <ChangesTab t={t} />}
             {tab === 'cost' && (
               <div className="db">
-                <TicketUsage t={t} />
+                <CostTab t={t} />
               </div>
             )}
             {tab === 'developer' && <DeveloperTab t={t} />}
@@ -158,6 +164,8 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
 
 function NowPanel({ t }: { t: Ticket }) {
   if (!t.waiting && t.quiet) return <QuietPanel t={t} />;
+  // It needs a ticket that is not merged yet: the ways to build (components/Depends).
+  if (waitsForDependency(t)) return <DependsCard t={t} />;
   switch (t.waiting?.kind) {
     case 'questions':
       return <QuestionsPanel t={t} />;
@@ -426,6 +434,7 @@ function PlanBody({ t, review }: { t: Ticket; review?: Review }) {
           </div>
         </>
       )}
+      {t.work && <DependsLine t={t} />}
       {t.mockup && t.work && (
         <>
           <div className="lbl">How it will look</div>
@@ -442,6 +451,7 @@ function PlanBody({ t, review }: { t: Ticket; review?: Review }) {
           </div>
         </>
       )}
+      {t.work && <TestCommandCard t={t} />}
       {review && t.work && t.steps && (
         <>
           <div className="lbl">Build steps</div>
@@ -593,22 +603,17 @@ function AskDeveloper({ t, onClose }: { t: Ticket; onClose(): void }) {
 
 function GatePills({ t }: { t: Ticket }) {
   const g = t.gates;
-  const pill = (state: string | undefined, text: string) => (
-    <span className={`pill ${state === 'pass' ? 'ok' : state === 'skipped' ? 'skip' : 'wait'}`}>
-      {state === 'pass' && <Check size={13} strokeWidth={2.5} />}
-      {text}
-    </span>
-  );
   return (
     <>
       <div className="pills">
-        {pill(g?.checks, g?.checks === 'skipped' ? 'Checks failed, you continued' : (g?.checksText ?? 'All checks pass'))}
-        {pill(g?.review, g?.review === 'pass' ? `Review approved by ${g.reviewBy}` : g?.review === 'skipped' ? 'Review notes open, you continued' : 'Review approved')}
-        {pill(g?.proof, g?.proof === 'skipped' ? 'No screenshots, you continued' : 'Proof made')}
+        <GatePill state={g?.checks} text={checksWords(g)} />
+        <GatePill state={g?.review} text={g?.review === 'pass' ? `Review approved by ${g.reviewBy}` : g?.review === 'skipped' ? 'Review notes open, you continued' : 'Review approved'} />
+        <GatePill state={g?.proof} text={g?.proof === 'skipped' ? 'No screenshots, you continued' : 'Proof made'} />
       </div>
+      <NotCheckedNote g={g} />
       {t.overrides?.map((o) => (
         <p className="note override" key={o.at}>
-          <b>Continued anyway</b> past the {o.gate === 'checks' ? 'failed checks' : o.gate === 'proof' ? 'missing screenshots' : 'open review'}, by {o.by}: {o.reason}
+          <b>Continued anyway</b> past the {overrideWhat(o)}, by {o.by}: {o.reason}
         </p>
       ))}
     </>
@@ -619,9 +624,7 @@ function ProofShots({ t }: { t: Ticket }) {
   const [zoom, setZoom] = useState<number | null>(null);
   if (!t.proof?.length) {
     return (
-      <p className="note">
-        {t.gates?.proof === 'skipped' || (t.work?.screens ?? 0) > 0 ? 'No screenshots were taken for this ticket. See the activity for why.' : 'No screens change in this ticket, so the passing checks are the proof.'}
-      </p>
+      <p className="note">{noShotsText(t)}</p>
     );
   }
   const pictures: Picture[] = t.proof.flatMap((p) => [
@@ -688,7 +691,7 @@ function ProofPanel({ t }: { t: Ticket }) {
           <span className="ring"><Check size={18} strokeWidth={2.5} /></span>
           <div>
             <b>Check that it works the way you want</b>
-            <span>Every gate is green. Compare the screens before and after each "done when".</span>
+            <span>{proofLead(t.gates)}</span>
           </div>
           <span className="grow" />
           <Link to="/tickets/$id/proof" params={{ id: t.id }} className="btn sm">
@@ -763,7 +766,7 @@ function AskPanel({ t }: { t: Ticket }) {
           <Send size={15} /> Send answer
         </button>
         <span className="grow" />
-        <Cmd text={`squad reply ${t.id}${answer ? ` "${answer.length > 40 ? `${answer.slice(0, 40)}…` : answer}"` : ''}`} />
+        <Cmd text={`squad reply ${t.id}${answer ? ` ${shellQuote(answer.length > 40 ? `${answer.slice(0, 40)}…` : answer)}` : ''}`} />
       </div>
     </>
   );
@@ -928,6 +931,7 @@ function WorkingPanel({ t }: { t: Ticket }) {
           </button>
         )}
         {canTakeOver(t) && <TakeOverButton t={t} />}
+        <BringInButton t={t} />
         {/* Asking never stops the work: the chat runs beside it, and on accepted work it answers questions only. */}
         {t.chat?.open ? (
           <button className="btn sm" onClick={() => chatDock.show(t.id)}>
@@ -964,7 +968,7 @@ function YoursPanel({ t }: { t: Ticket }) {
           </div>
         </div>
         <div className="lbl">1. Open the Builder&apos;s session in Claude Code</div>
-        <Cmd text={`cd "${k.cwd}" && claude --resume ${k.session}`} />
+        <Cmd text={`cd ${shellQuote(k.cwd)} && claude --resume ${k.session}`} />
         <p className="note" style={{ fontSize: 12.5, marginTop: 6 }}>
           It is the same conversation the Builder had, in the ticket&apos;s own copy of the code. Your folder is not touched. Or just edit the files:
         </p>
@@ -979,7 +983,7 @@ function YoursPanel({ t }: { t: Ticket }) {
           <Check size={15} strokeWidth={2.5} /> Give back
         </button>
         <span className="grow" />
-        <Cmd text={`squad give-back ${t.id}${note.trim() ? ` "${note.trim()}"` : ''}`} />
+        <Cmd text={`squad give-back ${t.id}${note.trim() ? ` ${shellQuote(note.trim())}` : ''}`} />
       </div>
     </>
   );
@@ -1123,7 +1127,7 @@ function Notes({ t }: { t: Ticket }) {
             </button>
             <span className="note">Every agent on this ticket reads it{t.live ? ', the one working now from its next step' : ''}.</span>
             <span className="grow" />
-            <Cmd text={`squad note ${t.id}${kind === 'note' ? '' : ` --${kind}`} "${text.trim() || '…'}"`} />
+            <Cmd text={`squad note ${t.id}${kind === 'note' ? '' : ` --${kind}`} ${shellQuote(text.trim() || '…')}`} />
           </div>
         </div>
       )}

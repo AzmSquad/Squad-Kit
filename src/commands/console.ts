@@ -10,6 +10,8 @@ import { startConsoleServer, type ConsoleServer } from '../console/server.js';
 import { printErrors } from '../core/app-log.js';
 import { boardPaths } from '../board/store.js';
 import { isOwnFolder, prepareProject } from '../engine/setup.js';
+import { setupView } from '../board/first-run.js';
+import { followSetup } from './overview.js';
 import { allEnded, killAll } from '../engine/process-group.js';
 import { readInstalledPackage } from '../core/package-info.js';
 import {
@@ -104,8 +106,10 @@ export async function runConsole(opts: ConsoleOptions): Promise<void> {
   // Set up what is missing, and move a board from before ADR-001 once, now that nothing runs it.
   const ready = prepareProject(root);
   for (const line of ready.did) ui.success(line);
-  if (ready.fresh) ui.info('The Architect reads the project now. Follow it on the board.');
-  await serveApp({ first: ready.paths, opts, underKeeper, title: 'squad console', restartWith: ['console', '--no-open', '--project', root] });
+  // A new project, or one still getting set up: the setup page opens, and this terminal prints each step as it goes.
+  const sv = setupView(ready.bp);
+  const follow = sv && !sv.ready && !sv.approved ? ready.bp : undefined;
+  await serveApp({ first: ready.paths, follow, opts, underKeeper, title: 'squad console', restartWith: ['console', '--no-open', '--project', root] });
 }
 
 /** Plain `squad`, from any folder: the one app, with Home, every project and one Waiting for you list. */
@@ -145,19 +149,34 @@ async function addToRunningApp(app: ConsoleInfo & { pid: number }, root: string,
   if (!res.ok || !data.url) {
     throw new Error(`${data.error ?? `squad-kit could not add this project (${res.status}).`}${olderBuild(app) ? ' It runs an older squad-kit. Restart it: squad console --restart' : ''}`);
   }
-  const link = `${base}${data.url}?t=${app.token}`;
+  const bp = boardPaths(buildPaths(root).squadDir);
+  const setup = data.did?.length ? setupView(bp) : null;
+  const fresh = Boolean(setup && !setup.ready && !setup.approved);
+  const link = `${base}${fresh ? data.url.replace(/\/board$/, '/setup') : data.url}?t=${app.token}`;
   ui.banner();
   ui.blank();
   for (const line of data.did ?? []) ui.success(line);
-  if (data.did?.length && data.setup?.status === 'pending') ui.info('The Architect reads the project now. Follow it on the board.');
   ui.info(data.added ? `Added ${data.name} to squad-kit, which is open already.` : `${data.name} is open in squad-kit.`);
   ui.info(`Open it: ${link}`);
   if (olderBuild(app)) ui.warning('squad-kit runs an older version. Restart it to use the new one: squad console --restart');
   if (opts.open !== false) await open(link).catch(() => undefined);
+  if (fresh) await followHere(bp);
+}
+
+/** The setup's steps, printed here as they go, until the overview is ready. Ctrl-C stops watching, not the setup. */
+async function followHere(bp: ReturnType<typeof boardPaths>): Promise<void> {
+  ui.blank();
+  ui.step('Getting to know the project (Ctrl-C stops watching; the setup keeps going):');
+  await new Promise<void>((done) => {
+    const stop = followSetup(bp, () => {
+      stop();
+      done();
+    });
+  });
 }
 
 /** Starts the app, prints its link, and runs until Ctrl-C (or a restart from the board). */
-async function serveApp(a: { first?: SquadPaths; opts: AppOptions; underKeeper: boolean; title: string; restartWith: string[] }): Promise<void> {
+async function serveApp(a: { first?: SquadPaths; follow?: ReturnType<typeof boardPaths>; opts: AppOptions; underKeeper: boolean; title: string; restartWith: string[] }): Promise<void> {
   const { opts } = a;
   // The same port and link as last time, so an open browser tab keeps working after a restart. The first time, a
   // project's own board from before the one app gives its port and link.
@@ -177,7 +196,7 @@ async function serveApp(a: { first?: SquadPaths; opts: AppOptions; underKeeper: 
   server.updates.watch();
 
   const firstId = a.first ? server.projects.first : null;
-  const url = `http://127.0.0.1:${server.port}${firstId ? `/p/${firstId}/board` : '/'}?t=${token}`;
+  const url = `http://127.0.0.1:${server.port}${firstId ? `/p/${firstId}/${a.follow ? 'setup' : 'board'}` : '/'}?t=${token}`;
   const rows = server.projects.summaries();
 
   ui.banner();
@@ -209,9 +228,17 @@ async function serveApp(a: { first?: SquadPaths; opts: AppOptions; underKeeper: 
   } else {
     ui.info('Browser auto-open disabled (--no-open). Copy the URL above into your browser.');
   }
+  // A new project: each step of its setup prints here as it goes.
+  let stopFollow = () => {};
+  if (a.follow) {
+    ui.blank();
+    ui.step('Getting to know the project:');
+    stopFollow = followSetup(a.follow, () => stopFollow());
+  }
 
   // Block until SIGINT/SIGTERM. The server attaches its own listeners that resolve `done`.
   await server.done;
+  stopFollow();
   writeAppInfo({ ...info, pid: null });
   if (server.restartRequested()) {
     ui.info('Restarting the board…');

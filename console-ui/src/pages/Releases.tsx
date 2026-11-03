@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { ArrowRight, Check, PenLine, Rocket } from 'lucide-react';
-import type { Release, ReleaseWithItems } from '../api/types';
+import { useQuery } from '@tanstack/react-query';
+import { ArrowRight, Check, GitBranch, PenLine, Rocket, Undo2 } from 'lucide-react';
+import { api } from '../api/client';
+import type { BranchPlan, Release, ReleaseWithItems } from '../api/types';
 import { useAct, useBoard, useReleases } from '../lib/data';
 import { BugDialog, ReleasedDialog } from '../components/dialogs';
 import { Cmd, Modal, NotesView, dateShort } from '../components/ui';
+import { GatePill } from '../components/Gates';
 
 export function ReleasesPage() {
   const releases = useReleases();
@@ -22,7 +25,7 @@ export function ReleasesPage() {
         <span className="grow" />
         <Cmd text="squad release" />
       </div>
-      <div className="split">
+      <div className="split rel">
         <div className="listcol">
           {list.map((r) => (
             <button key={r.version} className={`litem ${current?.version === r.version ? (r.status === 'draft' ? 'on' : 'on plain') : ''}`} onClick={() => setSelected(r.version)}>
@@ -36,19 +39,21 @@ export function ReleasesPage() {
                   </span>
                 ) : null}
               </b>
-              {r.status === 'draft' ? 'Next release' : r.unpushed?.length ? 'Not pushed yet' : dateShort(r.date)} · {r.items.length} tickets
+              {r.status === 'draft' ? 'Next release' : r.unpushed?.length ? 'Not pushed yet' : dateShort(r.date)} · {r.items.length} {r.items.length === 1 ? 'ticket' : 'tickets'}
             </button>
           ))}
         </div>
-        {current ? <ReleaseDetail r={current} onReleased={setDone} /> : <div className="center">No releases yet.</div>}
+        {current ? <ReleaseDetail r={current} onReleased={setDone} live={!demo} /> : <div className="center">No releases yet.</div>}
       </div>
       {done && <ReleasedDialog release={done} demo={demo} onClose={() => setDone(null)} />}
     </>
   );
 }
 
-function ReleaseDetail({ r, onReleased }: { r: ReleaseWithItems; onReleased(r: Release): void }) {
+function ReleaseDetail({ r, onReleased, live }: { r: ReleaseWithItems; onReleased(r: Release): void; live: boolean }) {
   const act = useAct<Release>();
+  const board = useBoard();
+  const titleOf = (id: string) => (board.data?.ready ? board.data.tickets.find((t) => t.id === id)?.title : undefined) ?? r.titles?.[id] ?? id;
   const [editing, setEditing] = useState(false);
   const [notes, setNotes] = useState(r.notes);
   const [confirming, setConfirming] = useState(false);
@@ -94,21 +99,80 @@ function ReleaseDetail({ r, onReleased }: { r: ReleaseWithItems; onReleased(r: R
         </div>
       )}
 
+      {draft && r.log && r.log.length > 0 && (
+        <div className="box" style={{ marginTop: 10 }}>
+          <b>Last time it did not go out.</b>
+          {r.log.map((l) => (
+            <div className="checkrow" key={l.text} style={l.ok ? undefined : { color: 'var(--you-ink)' }}>
+              <span className={`cbx ${l.ok ? 'on' : ''}`}>{l.ok ? <Check size={11} strokeWidth={3} /> : '!'}</span>
+              {l.text}
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="lbl">What's inside</div>
       {r.items.map((it) => (
         <div className="trow" key={it.id}>
           <span className="mono">{it.id}</span>
           <b>{it.title}</b>
-          {it.gates ? (
-            <span className="pill ok">
-              <Check size={13} strokeWidth={2.5} /> Checks, review, proof
-            </span>
-          ) : (
-            <span />
-          )}
+          <span style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+            {it.gates?.checks === 'unchecked' ? (
+              <GatePill state="unchecked" text="Not checked · review, proof" />
+            ) : (
+              it.gates && (
+                <span className="pill ok">
+                  <Check size={13} strokeWidth={2.5} /> Checks, review, proof
+                </span>
+              )
+            )}
+            {draft && r.items.length > 1 && (
+              <button
+                className="btn sm quiet"
+                title={`squad release --without ${it.id}`}
+                disabled={act.isPending}
+                onClick={() => act.mutate({ path: `/api/v1/releases/${r.version}/take-out`, body: { ticket: it.id }, done: `${it.id} goes out with the next release` })}
+              >
+                Take out
+              </button>
+            )}
+          </span>
         </div>
       ))}
       {r.items.length === 0 && <p className="note">No tickets yet. Tickets join after you check their proof.</p>}
+      {draft && r.items.length > 1 && (
+        <div style={{ marginTop: 2 }}>
+          <Cmd text={`squad release --without ${r.items[r.items.length - 1]!.id}`} />
+        </div>
+      )}
+      {(r.out?.length ?? 0) > 0 && (
+        <>
+          <div className="lbl">{draft ? 'Taken out of this release' : 'Left out of this release'}</div>
+          {r.out!.map((id) => (
+            <div className="trow" key={id}>
+              <span className="mono">{id}</span>
+              <b>{titleOf(id)}</b>
+              {draft ? (
+                <button
+                  className="btn sm"
+                  disabled={act.isPending}
+                  onClick={() => act.mutate({ path: `/api/v1/releases/${r.version}/put-back`, body: { ticket: id }, done: `${id} is back in ${r.version}` })}
+                >
+                  <Undo2 size={13} /> Put back
+                </button>
+              ) : (
+                <span className="note">Goes out with the next release</span>
+              )}
+            </div>
+          ))}
+          {draft && <p className="note">Its code stays in main. This release leaves it out, and it goes out with the next one.</p>}
+          {draft && (
+            <div style={{ marginTop: 6 }}>
+              <Cmd text={`squad release --put-back ${r.out![0]}`} />
+            </div>
+          )}
+        </>
+      )}
 
       {!draft && r.bugs && r.bugs.length > 0 && (
         <>
@@ -249,7 +313,44 @@ function ReleaseDetail({ r, onReleased }: { r: ReleaseWithItems; onReleased(r: R
           )}
         </Modal>
       )}
+      {!draft && live && <OldBranches />}
       {bug && <BugDialog foundIn={r.version} onClose={() => setBug(false)} />}
+    </div>
+  );
+}
+
+/**
+ * Old ticket branches. After each release squad-kit deletes the released tickets' branches on this computer; the
+ * ones on the remote stay until you ask. A branch with work that is not in main always stays.
+ */
+function OldBranches() {
+  const act = useAct();
+  const plan = useQuery({ queryKey: ['branches'], queryFn: () => api<BranchPlan>('/api/v1/branches'), refetchInterval: 30_000 });
+  const p = plan.data;
+  if (!p || (!p.here.length && !p.remote.length)) return null;
+  const remote = p.remote[0]?.remote ?? 'the remote';
+  return (
+    <div className="box" style={{ marginTop: 18 }}>
+      <b>
+        <GitBranch size={14} /> Old ticket branches
+      </b>
+      <p className="note" style={{ margin: '4px 0 8px' }}>
+        {[p.here.length ? `${p.here.length} on this computer` : '', p.remote.length ? `${p.remote.length} on ${remote}` : ''].filter(Boolean).join(' and ')}, from released tickets. Their work is in main, so nothing is lost.
+      </p>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        {p.here.length > 0 && (
+          <button className="btn sm" disabled={act.isPending} onClick={() => act.mutate({ path: '/api/v1/branches/clean', body: { remote: false }, done: 'Deleted the old branches on this computer' })}>
+            Delete them here
+          </button>
+        )}
+        {p.remote.length > 0 && (
+          <button className="btn sm" disabled={act.isPending} onClick={() => act.mutate({ path: '/api/v1/branches/clean', body: { remote: true }, done: `Deleted the old branches here and on ${remote}` })}>
+            Delete them {p.here.length ? 'here and ' : ''}on {remote}
+          </button>
+        )}
+        <span className="grow" style={{ flex: 1 }} />
+        <Cmd text={p.remote.length ? 'squad branches --clean --remote' : 'squad branches --clean'} />
+      </div>
     </div>
   );
 }

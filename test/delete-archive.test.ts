@@ -257,7 +257,8 @@ describe('Delete', () => {
     expect(fs.existsSync(ticketStateFile(bp, 'AP-5'))).toBe(false);
   });
 
-  it('keeps a pushed branch unless asked, and that branch does not bring the ticket back', async () => {
+  // Pushes twice and fetches: on a busy machine it takes longer than the default limit.
+  it('keeps a pushed branch unless asked, and that branch does not bring the ticket back', { timeout: 60_000 }, async () => {
     for (const id of ['AP-1', 'AP-3']) {
       const t = built(id, { handedOver: { from: 'Ali', to: 'Momen', at: '2026-11-01T10:00:00.000Z' }, story: 'As an owner, I want hours.' });
       commitTicketDocs(bp, t, 'handed over');
@@ -266,11 +267,15 @@ describe('Delete', () => {
     const plan = deletePlan(bp, 'AP-1');
     expect(plan.pushed).toEqual({ remote: 'origin', branch: 'squad/ap-1', why: 'squad-kit pushed it when the ticket was handed over.' });
     expect(plan.remote).toBe(false);
-    expect(plan.stays).toContain('The branch squad/ap-1 on origin. Teammates can still see the ticket from it.');
+    expect(plan.stays).toContain("The branch squad/ap-1 on origin, with a note that you deleted AP-1, so teammates' boards show it as deleted.");
     expect(deletePlan(bp, 'AP-1', { remote: true }).removes).toContain('The branch squad/ap-1 on origin');
 
-    await deleteTicket(bp, 'AP-1');
+    const kept = await deleteTicket(bp, 'AP-1');
     expect(sh('git ls-remote --heads origin squad/ap-1', project)).toContain('squad/ap-1');
+    // The branch stays, with the delete's note in place of the ticket's files, so teammates' boards see it.
+    expect(kept.notes).toEqual(["Left a note on squad/ap-1 on origin, so teammates' boards show AP-1 as deleted"]);
+    expect(sh('git ls-tree -r --name-only squad/ap-1 .squad/tickets/AP-1/', bare)).toBe('.squad/tickets/AP-1/deleted.md');
+    expect(sh('git show squad/ap-1:hours.ts', bare)).toContain('hours');
     // The board looks for pushed tickets now and then: a deleted one stays deleted.
     expect(pickUpPushed(bp).map((p) => p.id)).toEqual([]);
     expect(readTicket(bp, 'AP-1')).toBeNull();

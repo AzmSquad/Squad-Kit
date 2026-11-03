@@ -3,7 +3,7 @@ import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { BellRing } from 'lucide-react';
 import { PROJECT, api } from '../api/client';
-import type { AppWaiting, Ticket } from '../api/types';
+import type { AppProjects, AppWaiting, Ticket } from '../api/types';
 import { useBoard } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import {
@@ -17,11 +17,14 @@ import {
   noticesOf,
   openChange,
   tabTitle,
+  testChangeLine,
   waitedFor,
   waitingSince,
   type Notice,
 } from '../lib/waiting';
+import { ASKING, HOW_TO_ALLOW, afterAsking, askPermission, type Asked } from '../lib/notices';
 import { Cmd, STAGE_NAME, actionLabel, outdatedLine } from './ui';
+import { dropWish, readWishes, readyText, readyToTell } from '../lib/overview';
 
 /**
  * Waiting for you, loud. A banner at the top of every page while something needs the person, the count in the browser
@@ -135,7 +138,9 @@ function WaitingBanner({ items, home }: { items: Item[]; home?: boolean }) {
 function BannerItem({ it, now }: { it: Item; now: number }) {
   const t = it.ticket;
   const change = changeWaits(t) ? openChange(t) : undefined;
-  const line = t.waiting?.summary ?? (change ? `Change ${change.id} to the spec waits for you` : t.outdated?.length ? outdatedLine(t) : `Looks stuck: ${t.quiet?.detail ?? 'no progress'}`);
+  const line =
+    t.waiting?.summary ??
+    (change ? `Change ${change.id} to the spec waits for you` : t.testChange ? testChangeLine(t) : t.outdated?.length ? outdatedLine(t) : `Looks stuck: ${t.quiet?.detail ?? 'no progress'}`);
   const label = t.waiting ? actionLabel(t) : change ? 'Check the change' : 'Check it';
   // An agent's question says itself; anything else names the ticket.
   const detail = t.waiting?.kind === 'ask' && t.agentQuestion ? `“${t.agentQuestion.text}”` : t.title;
@@ -168,7 +173,8 @@ function BannerItem({ it, now }: { it: Item; now: number }) {
 
 const CHOICE = 'sk.notices';
 type Choice = 'on' | 'off' | null;
-type Permission = NotificationPermission | 'none';
+/** `none`: this browser has no notices; `insecure`: it shows them only on a secure page. */
+type Permission = NotificationPermission | 'none' | 'insecure';
 
 function storage(): Storage | null {
   try {
@@ -184,7 +190,16 @@ function readChoice(): Choice {
 }
 
 function readPermission(): Permission {
-  return typeof Notification === 'undefined' ? 'none' : Notification.permission;
+  if (typeof Notification === 'undefined') return window.isSecureContext === false ? 'insecure' : 'none';
+  if (window.isSecureContext === false) return 'insecure';
+  return Notification.permission;
+}
+
+/** The browser is asking the person right now (after Turn on), so both places say where to look. */
+let asking = false;
+function setAsking(on: boolean) {
+  asking = on;
+  emit();
 }
 
 // One small store, so the banner's question and Settings agree, and a change in another tab or in the browser's own
@@ -203,7 +218,7 @@ function subscribe(l: () => void) {
     document.removeEventListener('visibilitychange', l);
   };
 }
-const snapshot = () => `${readChoice() ?? ''}|${readPermission()}`;
+const snapshot = () => `${readChoice() ?? ''}|${readPermission()}|${asking ? 'asking' : ''}`;
 
 function saveChoice(c: 'on' | 'off') {
   try {
@@ -214,44 +229,40 @@ function saveChoice(c: 'on' | 'off') {
   emit();
 }
 
-/** Older browsers answer the permission question through a callback, newer ones through a promise. */
-function askBrowser(): Promise<NotificationPermission> {
-  return new Promise((resolve) => {
-    try {
-      const p = Notification.requestPermission(resolve);
-      if (p) void p.then(resolve, () => resolve(Notification.permission));
-    } catch {
-      resolve(Notification.permission);
-    }
-  });
+/** One notice at once, so the person sees it working. */
+function testNotice() {
+  try {
+    new Notification('Desktop notices are on', { body: 'squad-kit shows one like this for each new thing that needs you.', tag: 'sk-notices-on', silent: true });
+  } catch {
+    // A browser that shows notices only from a service worker: the toast says what to check.
+  }
 }
-
-const BLOCKED = 'Your browser blocks notices from this page. To allow them, click the icon left of the address, allow notifications, then reload the page.';
 
 /** The person's choice for this browser, and what the browser itself allows. */
 export function useNotices() {
   const { toast } = usePrefs();
-  const [choiceText, permission] = useSyncExternalStore(subscribe, snapshot).split('|') as [string, Permission];
+  const [choiceText, permission, askingText] = useSyncExternalStore(subscribe, snapshot).split('|') as [string, Permission, string];
   const choice = (choiceText || null) as Choice;
   const turnOn = async () => {
-    if (readPermission() === 'none') return toast("This browser can't show desktop notices.", 'err');
-    // The browser asks only now, after the person pressed Turn on: never when a page loads.
-    const got = Notification.permission === 'default' ? await askBrowser() : Notification.permission;
-    if (got === 'granted') {
-      saveChoice('on');
-      toast('Desktop notices are on. One for each new thing that needs you.');
-    } else if (got === 'denied') {
-      // They wanted them: once the browser allows it, notices start without asking again.
-      saveChoice('on');
-      toast(BLOCKED, 'err');
-    } else {
-      saveChoice('off');
-      toast('No desktop notices for now. Turn them on in Settings any time.');
+    if (asking) return;
+    // The browser asks only now, after the person pressed Turn on: never when a page loads. It always ends in an
+    // answer the person sees, even when the browser never answers (src/lib/notices.ts).
+    setAsking(true);
+    let got: Asked = 'error';
+    try {
+      got = await askPermission(typeof Notification === 'undefined' ? undefined : Notification, { secure: window.isSecureContext !== false });
+    } finally {
+      setAsking(false);
     }
+    const r = afterAsking(got);
+    if (r.choice) saveChoice(r.choice);
+    if (r.test) testNotice();
+    toast(r.say, r.bad ? 'err' : undefined);
   };
   return {
     choice,
     permission,
+    asking: askingText === 'asking',
     on: choice === 'on' && permission === 'granted',
     /** Asked once: not after an answer, and not when the browser already said no or has no notices. */
     canAsk: choice === null && (permission === 'default' || permission === 'granted'),
@@ -270,17 +281,19 @@ export function useNotices() {
 /** The question in the banner, the first time something needs the person. */
 function NoticeAsk() {
   const n = useNotices();
-  if (!n.canAsk) return null;
+  if (!n.canAsk && !n.asking) return null;
   return (
-    <div className="ybar-ask">
+    <div className="ybar-ask" aria-live="polite">
       <BellRing size={15} />
-      <span>Get a desktop notice when the squad needs you?</span>
-      <button className="btn sm" onClick={() => void n.turnOn()}>
-        Turn on
+      <span>{n.asking ? ASKING : 'Get a desktop notice when the squad needs you?'}</span>
+      <button className="btn sm" disabled={n.asking} onClick={() => void n.turnOn()}>
+        {n.asking ? 'Waiting for your browser…' : 'Turn on'}
       </button>
-      <button className="btn sm quiet" onClick={n.notNow}>
-        Not now
-      </button>
+      {!n.asking && (
+        <button className="btn sm quiet" onClick={n.notNow}>
+          Not now
+        </button>
+      )}
     </div>
   );
 }
@@ -294,17 +307,25 @@ export function NoticeSetting() {
       <span style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         {n.permission === 'none' ? (
           <span className="note">This browser can't show desktop notices. The banner and the tab title still show what needs you.</span>
+        ) : n.permission === 'insecure' ? (
+          <span className="note">Your browser shows desktop notices only on a secure page. Open the board on this computer, at its 127.0.0.1 or localhost address, to turn them on.</span>
         ) : n.permission === 'denied' ? (
           <>
             <span className="pill you">Blocked by your browser</span>
-            <span className="note">To allow them, click the icon left of the address, allow notifications, then reload this page.</span>
+            <span className="note">{HOW_TO_ALLOW}</span>
           </>
         ) : (
           <>
-            <button className="btn sm" onClick={() => (n.on ? n.turnOff() : void n.turnOn())}>
-              {n.on ? 'On: turn them off' : 'Off: turn them on'}
+            <button className="btn sm" disabled={n.asking} onClick={() => (n.on ? n.turnOff() : void n.turnOn())}>
+              {n.asking ? 'Waiting for your browser…' : n.on ? 'On: turn them off' : 'Off: turn them on'}
             </button>
-            <span className="note">A notice for each new question, approval, proof and failure, in this browser. No sounds.</span>
+            <span className="note" aria-live="polite">
+              {n.asking
+                ? ASKING
+                : n.choice === 'on' && n.permission === 'default'
+                  ? `You turned them on, but your browser has not allowed them yet. ${HOW_TO_ALLOW}`
+                  : 'A notice for each new question, approval, proof and failure, in this browser. No sounds.'}
+            </span>
           </>
         )}
       </span>
@@ -317,6 +338,7 @@ const watch = new NoticeWatch();
 
 /** A desktop notice for each new item in any project, when the person turned them on. Clicking one opens the item. */
 function useDesktopNotices() {
+  useSetupNotices();
   const waiting = useAppWaiting();
   const navigate = useNavigate();
   const data = waiting.data;
@@ -335,14 +357,38 @@ function useDesktopNotices() {
 
 function show(n: Notice, open: (n: Notice) => void) {
   const { title, body } = noticeText(n);
+  showNotice(title, body, n.key, () => open(n));
+}
+
+function showNotice(title: string, body: string, tag: string, open: () => void) {
   try {
-    const note = new Notification(title, { body, tag: n.key, silent: true });
+    const note = new Notification(title, { body, tag, silent: true });
     note.onclick = () => {
       window.focus();
       note.close();
-      open(n);
+      open();
     };
   } catch {
     // A browser that shows notices only from a service worker: the banner and the tab title still say it.
   }
+}
+
+/**
+ * "Notify me when it is ready" on the setup page: one desktop notice when that project's overview is ready, from any
+ * page of the app, so the person can leave the setup page. Clicking it opens the Overview.
+ */
+function useSetupNotices() {
+  const wished = readWishes(storage()).length > 0;
+  const projects = useQuery({ queryKey: ['app', 'projects'], queryFn: () => api<AppProjects>('/api/v1/app/projects'), refetchInterval: 2000, enabled: wished });
+  const data = projects.data;
+  useEffect(() => {
+    if (!data) return;
+    const store = storage();
+    for (const p of readyToTell(data.projects, readWishes(store))) {
+      dropWish(store, p.id);
+      if (readChoice() !== 'on' || readPermission() !== 'granted' || !claimNotice(`setup/${p.id}`, Date.now(), store)) continue;
+      const { title, body } = readyText(p.name);
+      showNotice(title, body, `setup/${p.id}`, () => window.location.assign(`/p/${encodeURIComponent(p.id)}/overview`));
+    }
+  }, [data]);
 }

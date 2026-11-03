@@ -112,6 +112,7 @@ const YOUR_PART_AR: Record<WaitingKind, string> = {
   yours: 'إعادة التذكرة إلى الفريق',
   chat: 'إنهاء المحادثة',
   change: 'البت في تحديث التصميم',
+  depends: 'اختيار طريقة البناء',
 };
 
 /** The English "what it needs you for" of the live record, in Arabic. */
@@ -323,7 +324,8 @@ function rangeEn(u: Pick<Usual, 'low' | 'high'>): string {
 }
 
 function lowerFirst(s: string): string {
-  return s.charAt(0).toLowerCase() + s.slice(1);
+  // A ticket name or an abbreviation keeps its capitals: "SK-152 needs SK-146", "PDF".
+  return /^[A-Z][A-Z0-9]+\b/.test(s) ? s : s.charAt(0).toLowerCase() + s.slice(1);
 }
 
 function whenLines(t: Ticket, now: LiveNow, book: UsualBook, lang: AskLang): string[] {

@@ -7,6 +7,11 @@ export function shellQuote(x: string): string {
   return /["$`\\!]/.test(x) ? `'${x.replace(/'/g, `'\\''`)}'` : `"${x}"`;
 }
 
+/** One word of a command: a plain name or address stays as it is ("Sara", "http://localhost:3000"); anything else is quoted. */
+export function shellArg(x: string): string {
+  return /^[\w@%+=:,./#-]+$/.test(x) && !x.startsWith('#') ? x : shellQuote(x);
+}
+
 /** The text without its HTML comments, such as the hints in a template, removed again until none is left. */
 export function withoutComments(text: string): string {
   let before: string;

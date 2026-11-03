@@ -1,4 +1,5 @@
 import { DECISION_AREAS, TECH_ROLES } from '../board/types.js';
+import { PART_KINDS } from '../board/overview.js';
 import type { AgentName, BoardMeta, ChatMessage, Decision, Question, RepoInfo, SpecChange, Step, Ticket, TicketNote } from '../board/types.js';
 import { reposOf } from './repos.js';
 
@@ -11,6 +12,28 @@ const COMMANDS = {
   properties: { setup: STR, test: STR, lint: STR, build: STR, start: STR, url: STR },
 } as const;
 
+/** The parts of the code and the arrows between them, for the overview's picture. */
+const PARTS = {
+  type: 'array',
+  maxItems: 10,
+  items: {
+    type: 'object',
+    properties: { id: STR, name: STR, what: STR, files: { type: 'array', maxItems: 4, items: STR }, kind: { type: 'string', enum: [...PART_KINDS] } },
+    required: ['id', 'name', 'what', 'files'],
+  },
+} as const;
+
+const LINKS = {
+  type: 'array',
+  maxItems: 20,
+  items: { type: 'object', properties: { from: STR, to: STR, label: STR }, required: ['from', 'to'] },
+} as const;
+
+/**
+ * The first read of a project. Besides the map, the decisions and the commands it hands in what the overview shows
+ * the person before the first ticket: who uses it, what it can do today, what is worth knowing, three ticket ideas,
+ * and the parts of the code with the links between them.
+ */
 export const SCAN_SCHEMA = {
   type: 'object',
   properties: {
@@ -23,7 +46,15 @@ export const SCAN_SCHEMA = {
       type: 'array',
       items: { type: 'object', properties: { path: STR, summary: STR, commands: COMMANDS }, required: ['path', 'summary', 'commands'] },
     },
+    users: STR,
+    can: { type: 'array', maxItems: 8, items: STR },
+    worth: { type: 'array', maxItems: 6, items: STR },
+    ideas: { type: 'array', maxItems: 3, items: { type: 'object', properties: { title: STR, why: STR }, required: ['title', 'why'] } },
+    parts: PARTS,
+    links: LINKS,
   },
+  // The overview's parts are not required, so an answer in the older shape still fits; scanProblem (answers.ts) asks
+  // for them once more when a project with code leaves them out.
   required: ['empty', 'summary', 'map', 'decisions', 'commands'],
 };
 
@@ -44,6 +75,9 @@ export const BLUEPRINT_SCHEMA = {
         required: ['name', 'what', 'where'],
       },
     },
+    // The overview's picture, brought up to date with the code.
+    parts: PARTS,
+    links: LINKS,
   },
   required: ['map', 'stack', 'patterns'],
 };
@@ -126,6 +160,7 @@ export const PLAN_SCHEMA = {
       required: ['title', 'options', 'why', 'area'],
     },
     follows: { type: 'array', maxItems: 12, items: STR },
+    dependsOn: { type: 'array', maxItems: 5, items: STR },
     steps: { type: 'array', minItems: 1, maxItems: 8, items: STR },
     tests: { type: 'integer' },
     screens: { type: 'integer' },
@@ -296,8 +331,13 @@ function reposText(meta: BoardMeta): string {
 
 function projectContext(meta: BoardMeta, decisions: Decision[], ctx?: PromptContext): string {
   const map = meta.map.length ? meta.map.map((m) => `- ${m.area}: ${m.detail}`).join('\n') : '- (not read yet)';
-  const rules = decisions.filter((d) => !d.replacedBy);
+  const rules = decisions.filter((d) => !d.replacedBy && !d.proposed);
   const adrs = rules.length ? rules.map((d) => `- ${d.id} ${d.title}. Chosen: ${d.chosen}. Why: ${d.why}`).join('\n') : '- (none yet)';
+  // Found in the code by the first read, not approved by the person yet: how the code is today, not rules.
+  const found = decisions.filter((d) => !d.replacedBy && d.proposed);
+  const proposed = found.length
+    ? `\n\nFound in the code, not approved by the person yet (keep to them unless the ticket asks otherwise):\n${found.map((d) => `- ${d.id} ${d.title}. Why: ${d.why}`).join('\n')}`
+    : '';
   const old = decisions.filter((d) => d.replacedBy);
   const replaced = old.length ? `\n\nReplaced decisions, no longer rules (do not follow):\n${old.map((d) => `- ${d.id} ${d.title}, replaced by ${d.replacedBy}`).join('\n')}` : '';
   const lessons = meta.lessons.length ? meta.lessons.map((l) => `- ${l.text}`).join('\n') : '- (none yet)';
@@ -306,7 +346,7 @@ function projectContext(meta: BoardMeta, decisions: Decision[], ctx?: PromptCont
   return [
     `Project: ${meta.project}${reposText(meta)}`,
     `Project map:\n${map}`,
-    `Saved decisions every ticket must follow:\n${adrs}${replaced}`,
+    `Saved decisions every ticket must follow:\n${adrs}${proposed}${replaced}`,
     `Lessons from past tickets:\n${lessons}`,
     `${ctx?.repo && meta.repos?.length ? `Commands for ${ctx.repo.path}` : 'Project commands'}:\n${commands}${rulesText(ctx)}`,
   ].join('\n\n');
@@ -322,6 +362,40 @@ function ticketContext(t: Ticket): string {
   const keep = brief ? '\nKeep every acceptance criterion, follow every business rule and handle every edge case the person wrote there.' : '';
   const text = asData('The ticket as it was written', `Title: ${t.title}\nWhat was asked:\n${t.ask}${brief}`);
   return `Ticket ${t.id}: ${t.kind === 'bug' ? 'a bug report.' : 'a feature request.'}\n${text}${keep}${files}${notesText(t.notes ?? [])}`;
+}
+
+/** Another open ticket on the board, for the Analyst and the Architect: what it is, where it is, and what its branch changed. */
+export interface OpenTicket {
+  id: string;
+  title: string;
+  stage: Ticket['stage'];
+  /** Files its branch (or its copy of the code) changed against the base, a few at most. */
+  files: string[];
+}
+
+const STAGE_WORDS: Record<Ticket['stage'], string> = {
+  tickets: 'new, being read',
+  specs: 'being specified and designed',
+  implement: 'being built',
+  test: 'being built, in checks',
+  review: 'built, in review',
+  release: 'accepted, not merged yet',
+  bugs: 'a bug, being sorted',
+  done: 'released',
+};
+
+/**
+ * The other open tickets, fenced as data (their titles come from people and trackers). The Architect names in
+ * dependsOn the ones this ticket needs; the Analyst keeps the spec clear of what they already do.
+ */
+export function openTicketsText(list: OpenTicket[] | undefined, role: 'analyst' | 'architect'): string {
+  if (!list?.length) return '';
+  const lines = list.map((o) => `- ${o.id}: ${o.title} (${STAGE_WORDS[o.stage]})${o.files.length ? `. Its branch changed: ${o.files.join(', ')}` : '. No code yet'}`).join('\n');
+  const use =
+    role === 'architect'
+      ? 'None of them is merged into the main branch yet, so their code is not in the code you read. If this ticket needs code one of them adds or changes, name it in dependsOn, and design as if that code were there.'
+      : 'None of them is merged yet. Do not write into this spec what one of them already does; if this ticket needs one of them first, say so in the story.';
+  return `\n\n${asData('The other open tickets on the board', lines)}\n${use}`;
 }
 
 const NOTE_HEAD = { note: 'Note', criterion: 'Acceptance criterion (must be done and proven)', rule: 'Business rule (follow it)' } as const;
@@ -353,23 +427,42 @@ function answersText(t: Ticket): string {
     .join('\n');
 }
 
-export function scanPrompt(meta: BoardMeta, nested: RepoInfo[], ctx?: PromptContext): string {
+export function scanPrompt(meta: BoardMeta, nested: RepoInfo[], ctx?: PromptContext, corrections = ''): string {
   const repos = nested.length
     ? `\nThis folder is a workspace with several code repos inside, each with its own git:\n${nested.map((r) => `- ${r.path}`).join('\n')}
 For each repo, fill one entry in repos with its path, a one-line summary, and its commands (run inside that repo's folder).
 Leave the top-level commands empty.\n`
     : '';
+  const fix = corrections
+    ? `\n\nYou read this project before, and the person said some of it was wrong. Read it again with what they said in mind.\n${asData('What the person said', corrections)}\n`
+    : '';
   return `You are the Architect of a software squad, reading this project for the first time.
 Look at the files (README, package files, project files, folders). Do not change anything.${rulesText(ctx)}
-${repos}
+${repos}${fix}
 Produce:
 - empty: true if the folder has no real code yet.
 - summary: one sentence on what this project is.
 - map: 4 to 8 rows of "area" and "detail", like "Front end: Angular 17, in web/".
 - decisions: the technical choices already made (language, frameworks, database, test tools), each with a short why.
+  The person checks them before they become the rules every ticket follows.
 - commands: only the ones you are sure of from the files. setup installs dependencies, test runs the tests,
   lint checks code style, build builds it, start runs the app for a browser, url is where it opens.
   Leave a command empty if the project does not have it.
+- users: who uses the project and how they get in, in one or two sentences, from what the code shows (sign-in, roles,
+  pages), like "Office staff who book rooms. They pick their name from a list; there are no accounts."
+- can: 3 to 8 things it can do today, one short line each, in the words of the people who use it, like "Book a room
+  in 15-minute steps". Only what the code really does.
+- worth: 2 to 5 things worth knowing before the first ticket: surprises, gaps and risks, like "The login screen
+  checks no password." or "No test opens the pages in a real browser yet."
+- ideas: three good first tickets from what you saw, each a short title (what to do, like "Check a real password at
+  login") and why, in one sentence.
+- parts: 3 to 8 parts of the code for a picture of how it fits together, in the order a request flows: who uses it
+  first (kind people), then screens, server, logic and data; tests last (kind tests); outside services as outside.
+  For each: id, a short word like "pages"; name, a plain name like "Pages"; what, a few words like "Login page and
+  booking page"; files, up to 3 real folder or file paths.
+- links: how the parts connect: from and to are part ids, label is a word or two, like "uses", "calls", "stores in"
+  or "checks".
+If the folder has no real code yet, leave users, can, worth, parts and links empty, and give three ideas for how to start.
 
 Project name: ${meta.project}. ${PLAIN}
 ${LOOK}`;
@@ -396,6 +489,9 @@ Produce:
 - patterns: 4 to 8 design patterns the code really follows, the ones a new developer must keep, like "One rules file
   per feature, shared by the form and the server". name: a short name. what: one or two plain sentences, what it is
   and why. where: up to 4 real file or folder paths that show it. decision: the saved decision it comes from, if any.
+- parts and links: 3 to 8 parts of the code for a picture of how it fits together, in the order a request flows (who
+  uses it first as kind people, tests last as kind tests), each with id (a short word), name (plain), what (a few
+  words) and files (up to 3 real paths); and links between them by id, each labelled with a word or two like "calls".
 Only what you can see in the code. ${PLAIN}
 ${LOOK}`;
 }
@@ -473,7 +569,7 @@ export function replyPrompt(q: Question, n: number, ask: string): string {
 Answer as the ${role} in 2 or 3 plain sentences. Explain why you ask and what each option would mean. Do not ask new questions and do not change files.`;
 }
 
-export function planPrompt(t: Ticket, change?: string, meta?: BoardMeta): string {
+export function planPrompt(t: Ticket, change?: string, meta?: BoardMeta, others?: OpenTicket[]): string {
   const repo = meta?.repos?.length
     ? `\n- repo: the folder of the ONE code repo this ticket changes, exactly as written in the list (${meta.repos.map((r) => r.path).join(', ')}).`
     : '';
@@ -490,12 +586,28 @@ export function planPrompt(t: Ticket, change?: string, meta?: BoardMeta): string
   mark the chosen one, and say why in plain words tied to the person's answers. If the client forces a technology,
   check it against the business needs and write the result in clientCheck ("no conflict" or the conflict).
 ${DECISION_LINKS}
+${DEPENDS_RULE}
 - steps: 3 to 7 small steps in order, one sentence each. The last step writes the tests.
 - tests: how many tests you expect to add. screens: how many "done when" can be shown in a screenshot (0 without a UI).
 - releaseNote: one line for release notes, like "**Dark mode.** Switch the dashboard to dark."
 - commands: only if the project has no way yet to set up, test, build or start it, or this ticket changes that.
-  For a new project, choose simple, common tools and give every command, including start and url.${repo}
+  For a new project, choose simple, common tools and give every command, including start and url.${repo}${testLine(t, meta)}${openTicketsText(others, 'architect')}
 ${PLAIN}`;
+}
+
+/**
+ * A project with no test command: the Architect suggests one with the design. squad-kit does not use it on its own;
+ * the person approves it when the checks find no tests.
+ */
+function testLine(t: Ticket, meta?: BoardMeta): string {
+  if (!meta) return '';
+  const repos = reposOf(meta);
+  const repo = repos.find((r) => r.path === t.repo);
+  if (repo ? repo.commands.test?.trim() : repos.some((r) => r.commands.test?.trim())) return '';
+  return `
+- commands.test: this project has no test command yet, so squad-kit cannot check that the work does what it should.
+  Suggest the one command that runs the project's tests, the tests this ticket adds included (like "npm test" or
+  "pytest"), with common tools the project already uses where it can. The person approves it before squad-kit runs it.`;
 }
 
 /** A one-line change is quoted; a review (comments, edits) or a new direction is passed as it is. */
@@ -503,7 +615,7 @@ function changeText(change: string): string {
   return change.includes('\n') ? change : `They asked for this change: "${change}"`;
 }
 
-export function specPrompt(t: Ticket, change?: string, fromChat = false): string {
+export function specPrompt(t: Ticket, change?: string, fromChat = false, others?: OpenTicket[]): string {
   const head = fromChat
     ? `You and the person talked it through in this conversation. Now write the spec from everything you agreed${t.story ? ', the whole spec again' : ''}. Where the talk changed something, follow the talk. Write what to build and how we know it is done, not how to build it.`
     : change
@@ -513,11 +625,11 @@ export function specPrompt(t: Ticket, change?: string, fromChat = false): string
 
 - story: "As a <who>, I want <what>, so <why>."
 - criteria: 2 to 5 "done when" checks in Given / When / Then form. Each must be testable, in the person's words.
-- releaseNote: one line for release notes, like "**Dark mode.** Switch the dashboard to dark."
+- releaseNote: one line for release notes, like "**Dark mode.** Switch the dashboard to dark."${openTicketsText(others, 'analyst')}
 ${PLAIN}`;
 }
 
-export function designPrompt(t: Ticket, change?: string, meta?: BoardMeta, fromChat = false): string {
+export function designPrompt(t: Ticket, change?: string, meta?: BoardMeta, fromChat = false, others?: OpenTicket[]): string {
   const repo = meta?.repos?.length
     ? `\n- repo: the folder of the ONE code repo this ticket changes, exactly as written in the list (${meta.repos.map((r) => r.path).join(', ')}).`
     : '';
@@ -537,12 +649,13 @@ ${doneWhen(t)}
   mark the chosen one, and say why in plain words tied to the spec. If the client forces a technology,
   check it against the business needs and write the result in clientCheck ("no conflict" or the conflict).
 ${DECISION_LINKS}
+${DEPENDS_RULE}
 - steps: 3 to 7 small steps in order, one sentence each. The last step writes the tests.
 - tests: how many tests you expect to add. screens: how many "done when" can be shown in a screenshot (0 without a UI).
 - commands: only if the project has no way yet to set up, test, build or start it, or this ticket changes that.
-  For a new project, choose simple, common tools and give every command, including start and url.${repo}
+  For a new project, choose simple, common tools and give every command, including start and url.${repo}${testLine(t, meta)}
 ${MOCKUP_RULE}
-${ASK_RULE}
+${ASK_RULE}${openTicketsText(others, 'architect')}
 ${PLAIN}`;
 }
 
@@ -550,6 +663,10 @@ const DECISION_LINKS = `  area: one of ${DECISION_AREAS.join(', ')}. replaces: o
   (like "ADR-004"); the old one stops being a rule once this is approved.
 - follows: the ids of the saved decisions this ticket's design relies on (like ["ADR-003", "ADR-005"]). Only real
   ones from the list, only those that shape this ticket. Empty if none.`;
+
+const DEPENDS_RULE = `- dependsOn: the ids of other open tickets (from the list of open tickets, if there is one) whose code this ticket
+  needs and that are not merged yet, like ["RO-1"]. squad-kit then waits for them, or builds on their branch. Empty if
+  none.`;
 
 const MOCKUP_RULE = `- mockup: when screens is 1 or more, one self-contained HTML page showing how the main screen will look after this
   ticket, using the project's own look where you can see it (colors, fonts, layout). Inline CSS and a little inline
@@ -568,7 +685,7 @@ ${ticketContext(t)}
 
 Story: ${t.story}
 Done when:
-${criteria}${decision}
+${criteria}${decision}${dependencyText(t)}
 
 Steps:
 ${steps}
@@ -581,6 +698,20 @@ Rules:
 - Wait for every command to finish (installs too). Never leave anything running in the background; this step ends when you answer.
 - If the plan does not cover a small choice, take the simplest one and say so in notes.
 ${ASK_RULE}`;
+}
+
+/** A ticket that depends on unmerged work: what is in this copy and what is not, so the Builder never has to guess. */
+export function dependencyText(t: Ticket): string {
+  const c = t.dependency;
+  if (!c?.on.length) return '';
+  const on = c.on.join(' and ');
+  if (c.way === 'branch' && !c.caughtUp) {
+    return `\n\nThis ticket depends on ${on}, which is not merged into the main branch yet. squad-kit started this copy from ${on}'s branch, so its work so far is here. Build on it. Change ${on}'s part only where this plan needs it; squad-kit brings in the main branch once ${on} is merged.`;
+  }
+  if (c.way === 'anyway') {
+    return `\n\nThis ticket depends on ${on}, which is not merged yet, so its code is not in this copy. The person chose to build without it: do not wait for it and do not ask about it. Build what this plan needs on the code that is here, and keep it easy to join with ${on} later.`;
+  }
+  return `\n\nThis ticket depends on ${on}. It is merged now, so its code is in this copy.`;
 }
 
 const ASK_RULE = `- Ask the person only when something important is unclear and a wrong guess would waste the work or break a business rule:
@@ -609,6 +740,15 @@ ${text}
 Print ">> fix" first. Fix the cause in the code. Do not delete or weaken tests to make them pass. Run the checks again before you finish.`;
 }
 
+/** "Send it back to the Builder" after the tests were made weaker: it puts them back, then the checks run again. */
+export function weakenedFixPrompt(points: string[]): string {
+  return `squad-kit compared your work with the code it started from and the tests were made weaker, so passing them would prove little:
+${points.map((p) => `- ${p}`).join('\n')}
+
+Print ">> fix" first. Put back every test, test script and test setting you removed, switched off or changed, unless the
+plan says to change it. Make the code pass the tests as they were, then run the tests again. Never weaken a test to make it pass.`;
+}
+
 export function reviewFixPrompt(comments: string[]): string {
   return `The Reviewer asked for these changes:\n${comments.map((c) => `- ${c}`).join('\n')}\n\nPrint ">> fix" first, then make the changes and run the tests again.`;
 }
@@ -629,22 +769,41 @@ function checksRan(t: Ticket, meta: BoardMeta, ctx?: PromptContext): string {
   const c = ctx?.repo?.commands ?? reposOf(meta)[0]?.commands ?? {};
   const ran = (['test', 'lint', 'build'] as const).filter((k) => c[k]?.trim()).map((k) => `${k}: ${c[k]!.trim()}`);
   const result = t.gates?.checksText?.trim();
+  const each = t.gates?.ran?.length
+    ? `\nEach check squad-kit ran:\n${t.gates.ran.map((r) => `- ${r.name === 'start' ? 'the app starts' : r.name} (${r.command}): ${r.ok ? 'passed' : 'failed'}${r.tests !== undefined ? `, ${r.tests} tests` : ''}`).join('\n')}`
+    : '';
+  const weakened = (t.overrides ?? []).filter((o) => o.gate === 'checks' && o.weakened?.length);
+  const past = weakened.length
+    ? `\nThe tests were made weaker in this change, and the person chose to go on anyway (${weakened.map((o) => o.reason).join('; ')}): ${weakened.flatMap((o) => o.weakened!).join(' ')} Look closely at whether the tests still check every "done when".`
+    : '';
+  if (t.gates?.checks === 'unchecked') {
+    return `squad-kit ran the project checks on this copy, but no tests ran${result ? ` (${result})` : ''}, so nothing checked that the work does what it should. Do not run them yourself. Read the code with extra care against every "done when", and say in a comment if tests are missing.${each}${past}`;
+  }
   if (!ran.length) {
     return 'This project has no test, lint or build commands set up yet, so squad-kit had no checks to run. Do not try to run them yourself. If the change needs tests and has none, say so in a comment.';
   }
   const how = `(${ran.join('; ')})`;
-  if (t.gates?.checks === 'skipped') return `squad-kit ran the project checks on this copy ${how}, and they did not pass: ${result ?? 'some failed'}. The person chose to go on anyway. Do not run them yourself.`;
-  if (t.gates?.checks === 'pass' && result) return `squad-kit already ran the project checks on this copy before your review ${how}, and they pass: ${result}. Do not run them yourself; take this result as given.`;
-  return `squad-kit runs the project checks itself ${how}. Do not run them yourself.`;
+  if (t.gates?.checks === 'skipped') return `squad-kit ran the project checks on this copy ${how}, and they did not pass: ${result ?? 'some failed'}. The person chose to go on anyway. Do not run them yourself.${each}${past}`;
+  if (t.gates?.checks === 'pass' && result) return `squad-kit already ran the project checks on this copy before your review ${how}, and they pass: ${result}. Do not run them yourself; take this result as given.${each}${past}`;
+  return `squad-kit runs the project checks itself ${how}. Do not run them yourself.${each}${past}`;
 }
 
-export function reviewPrompt(meta: BoardMeta, decisions: Decision[], t: Ticket, round: number, ctx?: PromptContext): string {
+/**
+ * The Reviewer's brief. Every round gets the whole ticket, the check results and the whole change since the base, so
+ * a later round never judges the fix alone (its conversation may also be a new one). `files` lists what changed.
+ */
+export function reviewPrompt(meta: BoardMeta, decisions: Decision[], t: Ticket, round: number, ctx?: PromptContext, files: string[] = []): string {
   const criteria = doneWhen(t);
-  if (round > 1) {
-    return `The Builder made changes after your review. Look again at what changed since commit ${t.baseCommit} (run "git status" and "git diff ${t.baseCommit}", and read new files). Approve if your comments are handled.
-${checksRan(t, meta, ctx)}`;
-  }
-  return `You are the Reviewer of a software squad: a second pair of eyes on the Builder's work. Do not edit files.
+  const again = round > 1;
+  const changed = files.length ? `\nFiles changed since ${t.baseCommit} (${files.length}): ${files.slice(0, 60).join(', ')}${files.length > 60 ? `, and ${files.length - 60} more` : ''}` : '';
+  const asked = again && t.reviewAsked?.length ? `\nIn your last round you asked for:\n${t.reviewAsked.map((c) => `- ${c}`).join('\n')}\nThe Builder says these are fixed. Check each one in the code.` : '';
+  const head = again
+    ? `You are the Reviewer of a software squad. This is review round ${round}: the Builder changed the code after your last review. Do not edit files.`
+    : 'You are the Reviewer of a software squad: a second pair of eyes on the Builder\'s work. Do not edit files.';
+  const look = again
+    ? `Review the whole change again, not only the fix: run "git status" and "git diff ${t.baseCommit}", and read new files. A fix can break something that was right before.`
+    : `Look at everything that changed since commit ${t.baseCommit}: run "git status" and "git diff ${t.baseCommit}", and read new files.`;
+  return `${head}
 
 ${projectContext(meta, decisions, ctx)}
 
@@ -654,10 +813,11 @@ Story: ${t.story}
 Done when:
 ${criteria}
 
-Look at everything that changed since commit ${t.baseCommit}: run "git status" and "git diff ${t.baseCommit}", and read new files.
+${look}${changed}${asked}
 ${checksRan(t, meta, ctx)}
 Check: does it do every "done when"? Does it follow the saved decisions? Real bugs, security holes, missing tests?
-Approve unless there is a real problem. Small style notes do not block. Each comment is one concrete sentence.
+Were tests deleted, switched off or made weaker? That is a real problem unless the plan asks for it.
+${again ? 'Approve when your notes are handled and nothing else is wrong.' : 'Approve unless there is a real problem.'} Small style notes do not block. Each comment is one concrete sentence.
 ${ASK_RULE}
 ${LOOK}`;
 }
@@ -684,6 +844,60 @@ Use the project's Playwright if it has one, or "npx -y playwright screenshot --v
 If you need clicks or typing first, write a short Playwright script with the shell (this step has no file-editing tools), in a temporary folder outside the project.
 If browsers are missing, run "npx -y playwright install chromium".
 Do not change project files: squad-kit puts back anything changed in the project. In shots, give the "done when" number and file name for each screenshot.${rulesText(ctx)}`;
+}
+
+/** The screenshots failed squad-kit's check: the Tester takes them again, told what was wrong. */
+export function proofAgainPrompt(problems: string[]): string {
+  return `squad-kit checked your last screenshots and some do not prove anything yet:
+${problems.map((p) => `- ${p}`).join('\n')}
+
+Take those again now. Each must be a new 1280x800 PNG of the screen after it has fully loaded, and an "after" must show
+the change: open the screen, state or data where the "done when" can be seen, not the same view as before the change.`;
+}
+
+/** The first run's proof: one screenshot of the app squad-kit opened, so the person sees it works here. */
+export const SETUP_SHOT_SCHEMA = {
+  type: 'object',
+  properties: { file: STR, note: STR, skipped: STR },
+  required: ['file'],
+};
+
+export function setupShotPrompt(url: string, file: string): string {
+  return `You are the Tester of a software squad. squad-kit just opened this project's app for the first time, at ${url}; it
+started the app and will stop it, so do not start or stop it yourself.
+Save one 1280x800 PNG screenshot of the first page people see there, as ${file}.
+Use "npx -y playwright screenshot --viewport-size=1280,800 ${url} ${file}". If browsers are missing, run "npx -y playwright install chromium" first.
+Do not change any project files. In file, give the file you saved. If the page does not load, leave file empty and say why in skipped.`;
+}
+
+/**
+ * "Something is wrong" on the overview: the person tells the Architect what it got wrong. The Architect talks and
+ * reads only; the person then has it read the project again with what they said.
+ */
+export function overviewTalkPrompt(meta: BoardMeta, decisions: Decision[], understood: string, messages: ChatMessage[]): string {
+  const last = messages.at(-1);
+  const head =
+    last?.who === 'you'
+      ? `The person says: "${last.text}"`
+      : 'The person pressed "Something is wrong" on the overview. Open the talk: in two short lines, ask what squad-kit got wrong.';
+  const found = decisions.filter((d) => !d.replacedBy).map((d) => `- ${d.id} ${d.title}${d.proposed ? ' (proposed, not approved yet)' : ''}`).join('\n') || '- (none)';
+  return `You are the Architect of a software squad. You read project ${meta.project} and wrote an overview of it for the
+person to check before the first ticket. They think something in it is wrong.
+
+${asData('What you wrote about the project', understood)}
+
+The rules you found in the code:
+${found}${earlierTalk(messages.slice(0, -1))}
+
+${head}
+
+Rules for this talk:
+- Answer in plain words, in the person's language, in a few short lines. Ask one question at a time.
+- Do not write or change any files. Read the code only when it helps you answer.
+- Say plainly what you would change in the overview or the rules. When you both agree, tell the person to press
+  "Read it again with this": you then read the project again with what they said.
+- Set "ready" to true once you know what to change.
+${LOOK}`;
 }
 
 /** The answer was missing or did not fit its shape: the agent hands it in again, in the same conversation. */

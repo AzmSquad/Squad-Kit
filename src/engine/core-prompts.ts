@@ -5,6 +5,7 @@ import type { Ticket } from '../board/types.js';
 import { STEPS, agentInstructions, readAgent, type AgentRole } from './agents.js';
 import * as P from './prompts.js';
 import { repoFor, rulesFiles } from './repos.js';
+import { openTicketsFor } from './depends.js';
 
 /**
  * The core prompts of a role, read only, filled in from a real ticket so the team sees exactly what the agent reads.
@@ -62,9 +63,9 @@ export function corePrompts(bp: BoardPaths, role: AgentRole, ticketId?: string):
   const ctx: P.PromptContext = { rules: rulesFiles(root), repo: repoFor(meta, t) };
   const text: Record<string, () => string> = {
     questions: () => P.intakePrompt(meta, decisions, t, ctx),
-    spec: () => P.specPrompt(t),
+    spec: () => P.specPrompt(t, undefined, false, openTicketsFor(bp, t)),
     scan: () => P.scanPrompt(meta, [], ctx),
-    design: () => P.designPrompt(t, undefined, meta),
+    design: () => P.designPrompt(t, undefined, meta, false, openTicketsFor(bp, t)),
     blueprint: () => P.blueprintPrompt(meta, decisions, detectStack(root, meta).map((x) => x.name)),
     build: () => P.buildPrompt(meta, decisions, t, ctx),
     fix: () =>

@@ -1,3 +1,5 @@
+import type { SetupState } from './setup-state.js';
+
 /** The 7 stages a ticket moves through. `done` means released and off the board. */
 export type Stage = 'tickets' | 'specs' | 'implement' | 'test' | 'review' | 'release' | 'bugs' | 'done';
 
@@ -18,9 +20,10 @@ export type Actor = Role | 'you' | 'squad';
 
 /**
  * 'spec' waits for you to approve the what (story, done when); 'plan' the how (decision, steps). 'change': the
- * Builder paused for a big change, and the Architect's design update waits for you.
+ * Builder paused for a big change, and the Architect's design update waits for you. 'depends': the design needs a
+ * ticket that is not merged yet, and you choose how to build.
  */
-export type WaitingKind = 'questions' | 'spec' | 'plan' | 'proof' | 'stuck' | 'release' | 'ask' | 'yours' | 'chat' | 'change';
+export type WaitingKind = 'questions' | 'spec' | 'plan' | 'proof' | 'stuck' | 'release' | 'ask' | 'yours' | 'chat' | 'change' | 'depends';
 
 export interface Waiting {
   kind: WaitingKind;
@@ -107,12 +110,17 @@ export interface Step {
   live?: string;
 }
 
-/** 'skipped': the person pressed Continue anyway, with a reason (see Ticket.overrides). The engine never skips a gate itself. */
-export type GateState = 'pending' | 'pass' | 'fail' | 'skipped';
+/**
+ * 'skipped': the person pressed Continue anyway, with a reason (see Ticket.overrides). The engine never skips a gate itself.
+ * 'unchecked': the checks ran, but no tests did, so they prove little ("Not checked", never a green pass).
+ */
+export type GateState = 'pending' | 'pass' | 'fail' | 'skipped' | 'unchecked';
 
 export interface Gates {
   checks: GateState;
   checksText?: string;
+  /** Each check squad-kit ran last, for the Reviewer: "test (npm test): passed, 18 tests". */
+  ran?: { name: string; command: string; ok: boolean; tests?: number }[];
   review: GateState;
   reviewBy?: string;
   proof: GateState;
@@ -127,8 +135,8 @@ export interface ProofShot {
   note?: string;
 }
 
-/** The ways out of a stop. Every stop has at least Try again and one more. */
-export type WayOut = 'retry' | 'yourself' | 'continue' | 'plan' | 'skip-pr';
+/** The ways out of a stop. Every stop has at least Try again and one more; a step paused on a cap has Give it more and Stop. */
+export type WayOut = 'retry' | 'yourself' | 'continue' | 'plan' | 'skip-pr' | 'more' | 'stop' | 'add-test' | 'no-tests';
 
 export interface StuckOption extends DecisionOption {
   /** What the choice does. Older boards have no `do`: their first choice tries again, the second goes to the plan. */
@@ -145,15 +153,23 @@ export interface StuckChoice {
   title?: string;
   /** Filled in when the ticket is read: what is safe, "Nothing was merged or pushed." */
   safe?: string[];
-  /** What stopped: a failed gate the person can continue past, a clash with the base branch, or any other error. */
-  gate?: 'checks' | 'review' | 'proof' | 'merge';
-  /** For failed checks: which ones failed, so continuing past them is remembered for them. */
+  /** What stopped: a failed gate the person can continue past, a clash with the base branch, a step's cap, or any other error. */
+  gate?: 'checks' | 'review' | 'proof' | 'merge' | 'cap';
+  /** Why the gate stopped, when it is not a plain failure: tests made weaker, no tests at all, or screenshots that failed squad-kit's check. */
+  kind?: 'weakened' | 'no-tests' | 'bad-proof';
+  /** For failed checks: which ones failed (for weakened tests: what was weakened), so continuing past them is remembered for them. */
   checks?: string[];
+  /** The plain reasons, one per line on the card: "test/booking.test.ts was deleted (4 tests)". */
+  points?: string[];
+  /** The ticket stopped between two steps at its own budget, or at the month's (API key only). */
+  budget?: 'ticket' | 'month';
 }
 
 /** The person went past a failed gate on purpose. Shown on the ticket, the pull request and the release notes. */
 export interface GateOverride {
   gate: 'checks' | 'review' | 'proof';
+  /** Continued past tests made weaker, not past failing checks: what was weakened. */
+  weakened?: string[];
   reason: string;
   by: string;
   at: string;
@@ -202,8 +218,8 @@ export interface ChatMessage {
   files?: string[];
   /** Short answers the agent offers to its question; the person taps one or writes their own. */
   options?: string[];
-  /** A note from squad-kit: the person stopped the answer, or the agent could not answer. */
-  note?: 'stopped' | 'failed';
+  /** A note from squad-kit: the person stopped the answer, the agent could not answer, or the answer waits for the usage limit. */
+  note?: 'stopped' | 'failed' | 'waits';
 }
 
 /**
@@ -356,6 +372,25 @@ export interface UsageLine extends UsageTotal {
   model: string;
 }
 
+/**
+ * How a ticket builds while a ticket it depends on is not merged. branch: its copy starts from that ticket's branch,
+ * and brings in the base once that ticket merges. anyway: from the base, without it. wait: it starts by itself once
+ * that ticket merges. Kept on the ticket's record.
+ */
+export interface DependencyChoice {
+  /** The tickets it needed, not merged when the person chose. */
+  on: string[];
+  way: 'branch' | 'anyway' | 'wait';
+  by: string;
+  at: string;
+  /** branch: the commit of the dependency's work the copy started from. */
+  from?: string;
+  /** branch: the dependency merged, and the base came into the copy. */
+  caughtUp?: string;
+  /** wait: the dependency merged, and the build started. */
+  started?: string;
+}
+
 /** After a merge moved the person's own checkout: the project's setup runs there, so the app keeps working. */
 export interface LocalSetup {
   status: 'pending' | 'running' | 'done' | 'failed';
@@ -419,6 +454,8 @@ export interface Ticket {
   reviewRound?: number;
   /** Step to run again when the person picks "Try again" on a stuck card. */
   retryPhase?: string;
+  /** A step that reached its caps, and how many times the person pressed Give it more on it: each time doubles them. */
+  capRaise?: { role: string; step: string; times: number };
   attachments?: string[];
   /** What the person added when writing the ticket by hand: their own acceptance criteria, business rules and edge cases. */
   brief?: TicketBrief;
@@ -440,7 +477,7 @@ export interface Ticket {
   /** The plan is being redone to follow this decision: the build brings in the latest base first. */
   replanFor?: string;
   /** Set by the watchdog when a running step shows no progress: what it waits on, and whether that looks stuck. */
-  quiet?: { since: string; kind: 'stuck' | 'long'; detail: string; command?: string; pid?: number };
+  quiet?: { since: string; kind: 'stuck' | 'long'; detail: string; command?: string; pid?: number; port?: QuietPort };
   /** "Keep waiting": the watchdog stays quiet about this ticket until then. */
   quietSnoozedUntil?: string;
   /** Updates still to send to the tracker; the live squad sends them, so terminal commands never wait on Azure. */
@@ -449,6 +486,14 @@ export interface Ticket {
   trackerRetry?: { tries: number; nextAt: string };
   /** The checks the person chose to continue past. While only these fail, the work goes on as they decided. */
   checksContinued?: string[];
+  /** The weakened tests the person chose to continue past (see engine/weakened.ts). Only new ones stop the ticket again. */
+  weakenedContinued?: string[];
+  /** The test command the Architect suggested for a project with none. The person approves it before squad-kit uses it. */
+  testSuggestion?: string;
+  /** The design changes a test command the project has: it waits for the person, the checks keep the current one. */
+  testChange?: TestChange;
+  /** The Reviewer's notes from its last round, shown to it again with the whole change in the next round. */
+  reviewAsked?: string[];
   /** The plan the Builder's conversation was given, as a short hash: a resumed Builder gets the plan again when it changed. */
   builtPlan?: string;
   notes?: TicketNote[];
@@ -477,6 +522,12 @@ export interface Ticket {
   changeOf?: string;
   /** What each role used on this ticket, per step and model level. */
   usage?: UsageLine[];
+  /** The steps that ended well, oldest first: who, which step, from when to when. "What happened" draws them. */
+  history?: StepRun[];
+  /** The Quality setting the squad last ran this ticket on, for the cost and time per Quality setting. */
+  quality?: Quality;
+  /** The person let the ticket go on past a budget: its own, or the month's ("2026-11"). */
+  budgetOk?: { ticket?: boolean; month?: string };
   /**
    * Whose ticket it is: the person who made or pulled it, until they hand it over. Only the owner's squad works on
    * it, on the owner's computer, so two squads never build the same ticket (ADR-001).
@@ -494,6 +545,39 @@ export interface Ticket {
   archived?: { by: string; at: string };
   /** Delete was pressed. Kept until the last part of the ticket is gone, so a delete cut off half-way can finish. */
   deleting?: Deleting;
+  /** Open tickets whose code this one needs, as its design names them ("depends on RO-1"). */
+  dependsOn?: string[];
+  /** How the person chose to build while one of them was not merged. */
+  dependency?: DependencyChoice;
+  /** "Bring in latest main" was pressed while a step ran: the base comes into the copy before the next checks. */
+  baseWanted?: { by: string; at: string };
+  /** Someone else's ticket, last seen on the remote here ("origin/squad/ro-5"): proof it came from there. */
+  seenOn?: string;
+  /** Its owner deleted it on their computer, and the remote shows it: Remove from my board cleans this computer only. */
+  ownerDeleted?: OwnerDeleted;
+}
+
+/**
+ * The app's port, while a step that needs the app looks stuck: something listens on it and the app does not answer.
+ * `ours` when squad-kit started that program (one of this project's apps, or a copy it ran for a check), so squad-kit
+ * may stop it; a program of the person's own is never stopped.
+ */
+export interface QuietPort {
+  port: number;
+  pid?: number;
+  program?: string;
+  ours: boolean;
+  /** The project's app it is, when it is one squad-kit runs from Your apps. */
+  app?: string;
+}
+
+/** How this board knows the owner deleted a ticket: their delete's note on its branch, or its branch gone unmerged. */
+export interface OwnerDeleted {
+  by: string;
+  at: string;
+  how: 'note' | 'gone';
+  /** The branch it was on, as this computer saw it. */
+  branch: string;
 }
 
 /** A delete in progress: nothing starts on the ticket again, and what runs stops. */
@@ -516,6 +600,8 @@ export interface DeletedTicket {
   at: string;
   by: string;
   usage?: UsageLine[];
+  /** Removed from this board after its owner deleted it: if it is pushed again, it comes back. */
+  fromBoard?: boolean;
 }
 
 /** The kinds of step squad-kit times. Each has a usual time, learned from the project's own history. */
@@ -536,6 +622,16 @@ export interface StepClock {
   doingAt?: string;
   /** The hard limit of the run, in minutes: squad-kit stops the step there and keeps the work. */
   limit?: number;
+  /** When the whole step began. `since` starts again with each of the Builder's plan steps. */
+  began?: string;
+}
+
+/** A step that ended well, kept on the ticket for "What happened" and the time each ticket took. */
+export interface StepRun {
+  who: AgentName | 'squad';
+  step: TimedStep;
+  from: string;
+  to: string;
 }
 
 /** The stage the ticket is in since when, and the seconds it spent in each stage before. */
@@ -578,6 +674,11 @@ export interface Release {
    * (its tickets are not closed) until Push again sends them.
    */
   unpushed?: UnpushedRelease[];
+  /**
+   * Tickets taken out before the release was made. Their code stays in the base; the release leaves it out (its tag
+   * does not have it), and they go out with the next release.
+   */
+  out?: string[];
 }
 
 export interface UnpushedRelease {
@@ -611,6 +712,8 @@ export interface Decision {
   replaces?: string;
   /** Set when a newer decision changed this one. A replaced decision is no longer a rule. */
   replacedBy?: string;
+  /** Found in the code by the first read and not approved by the person yet: a proposal, not a rule. */
+  proposed?: boolean;
 }
 
 export interface Lesson {
@@ -659,8 +762,26 @@ export interface Blueprint {
   patterns: PatternNote[];
 }
 
+/** A change to the test command, from the Architect's design. Only the person can make it (squad test-command). */
+export interface TestChange {
+  from: string;
+  to: string;
+  /** The code repo whose command it is, in a workspace with several. */
+  repo?: string;
+  at: string;
+}
+
 /** How strong the squad's models are, for the whole project. */
 export type Quality = 'best' | 'balanced' | 'thrifty';
+
+/** How the person pays for the AI: a subscription with usage limits, or per use with an API key or a cloud account. */
+export type Payment = 'subscription' | 'api-key';
+
+/** Spending limits in US dollars, for a person who pays per use. Kept for this project on this computer. */
+export interface Budget {
+  ticketUsd?: number;
+  monthUsd?: number;
+}
 
 export interface BoardMeta {
   /** Links the project's files to this computer's files for it (ADR-001). */
@@ -685,8 +806,12 @@ export interface BoardMeta {
   lessons: Lesson[];
   /** Live engine: how to set up, check and run the project. Empty means "not set up". */
   commands?: ProjectCommands;
+  /** The person chose to go on without tests in this project: the checks show "Not checked", and squad-kit asks once. */
+  noTests?: { by: string; at: string; ticket: string };
   git?: { base: string; remote: string };
   scan?: { status: 'pending' | 'running' | 'done' | 'failed'; at?: string; error?: string; summary?: string; empty?: boolean; now?: string };
+  /** The project's first run, step by step, on this computer (src/board/setup-state.ts). */
+  setup?: SetupState;
   /** What the Architect last read from the code: why each technology is there, and the design patterns it follows. */
   blueprint?: Blueprint;
   /** Decisions the Architect is writing, or has written, for technologies that were picked without one. */
@@ -697,10 +822,14 @@ export interface BoardMeta {
   parallel?: number;
   /** How squad-kit talks to Claude: through the Agent Client Protocol (default), or by running Claude Code directly. */
   runner?: 'acp' | 'direct';
+  /** Hosts the Builder's and Tester's commands may reach besides the package registries, such as a private package server. */
+  allowedHosts?: string[];
   /** What the squad used on the project's own work, with no ticket: reading the project, filling in new tickets. */
   usage?: UsageLine[];
   /** Tickets deleted on this computer, with what they used. */
   deleted?: DeletedTicket[];
+  /** Spending limits, used when the person pays per use. */
+  budget?: Budget;
   /**
    * A workspace that holds several code repos (each with its own git). Without it, the project
    * folder itself is the one repo, using `commands` and `git`.

@@ -50,6 +50,7 @@ export function startStep(t: Ticket, c: Omit<StepClock, 'since'>, at = Date.now(
     who: c.who,
     step: c.step,
     since: same?.since ?? iso(at),
+    began: same?.began ?? same?.since ?? iso(at),
     ...(part ? { part } : {}),
     ...(limit ? { limit } : {}),
   };
@@ -60,11 +61,15 @@ export function stepSeconds(c: StepClock, at = Date.now()): number {
   return Math.max(0, (at - Date.parse(c.since)) / 1000);
 }
 
-/** The step ended well: its time joins the usual times, and the clock stops. */
+/** The steps a ticket keeps in its history, newest last. */
+const HISTORY = 80;
+
+/** The step ended well: its time joins the usual times and the ticket's history, and the clock stops. */
 export function endStep(bp: BoardPaths, t: Ticket, at = Date.now()): void {
   const c = t.clock;
   if (!c) return;
   recordUsual(bp, usualKey(c.who, c.step, t.track), stepSeconds(c, at));
+  t.history = [...(t.history ?? []), { who: c.who, step: c.step, from: c.began ?? c.since, to: iso(at) }].slice(-HISTORY);
   delete t.clock;
 }
 

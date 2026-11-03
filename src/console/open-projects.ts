@@ -11,6 +11,7 @@ import type { Ticket } from '../board/types.js';
 import { LiveSquad } from '../engine/live.js';
 import { stopApps } from '../engine/run-app.js';
 import { prepareProject } from '../engine/setup.js';
+import { setupLine, setupView } from '../board/first-run.js';
 import { forgetProject, projectName, readProjects, rememberProject } from '../core/projects.js';
 import { mountApi, type MountApiOptions } from './api/index.js';
 import { authMiddleware } from './auth.js';
@@ -46,8 +47,8 @@ export interface ProjectSummary {
   open: boolean;
   why?: string;
   engine?: 'demo' | 'live';
-  /** The Architect's first read of the project. */
-  setup?: { status: 'pending' | 'running' | 'done' | 'failed'; now?: string; error?: string };
+  /** The Architect's first read of the project, and the setup's step in one line while it runs. */
+  setup?: { status: 'pending' | 'running' | 'done' | 'failed'; now?: string; error?: string; line?: string; ready?: boolean; approved?: boolean };
   tickets: number;
   waiting: number;
   working: number;
@@ -62,6 +63,12 @@ export interface OpenProjectsOptions {
   info(): ConsoleInfo;
   /** Keep the app's list in ~/.squad-kit/projects.json. Off when one board is served on its own (tests). */
   remember: boolean;
+}
+
+/** The setup in one line for the project's card on Home, while it runs or waits for the person. */
+function setupSummary(bp: BoardPaths): { line?: string; ready?: boolean; approved?: boolean } {
+  const v = setupView(bp);
+  return v ? { line: setupLine(v), ready: v.ready, approved: v.approved } : {};
 }
 
 export class OpenProjects {
@@ -185,7 +192,7 @@ export class OpenProjects {
           name: meta.project || base.name,
           open: true,
           engine: meta.engine,
-          ...(meta.engine === 'live' && meta.scan ? { setup: { status: meta.scan.status, now: meta.scan.now, error: meta.scan.error } } : {}),
+          ...(meta.scan && (meta.engine === 'live' || meta.setup) ? { setup: { status: meta.scan.status, now: meta.scan.now, error: meta.scan.error, ...setupSummary(p.bp) } } : {}),
           tickets: open.length,
           waiting: inbox(p.bp).length,
           working: open.filter((t) => t.live && t.squad && !t.waiting).length,

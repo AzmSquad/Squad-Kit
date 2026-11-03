@@ -33,7 +33,9 @@ const groups = [
 
 <Layout title={`${title} · squad-kit docs`} description={description}>
   <div class="container-page py-10 sm:py-14">
-    <div class="grid lg:grid-cols-[220px_1fr] gap-10 lg:gap-14">
+    {/* grid-cols-1 (minmax(0, 1fr)) keeps a phone's one column at the screen's width: the docs link row then scrolls
+        inside itself instead of widening the whole page. */}
+    <div class="grid grid-cols-1 lg:grid-cols-[220px_1fr] gap-10 lg:gap-14">
       <aside class="lg:sticky lg:top-24 lg:self-start">
         <nav class="flex flex-row gap-6 overflow-x-auto pb-2 lg:flex-col lg:overflow-x-visible lg:pb-0" aria-label="Docs">
           {groups.map((group) => (
@@ -55,6 +57,15 @@ const groups = [
             </div>
           ))}
         </nav>
+        <script>
+          // On a phone the link row scrolls sideways: bring the open page's link into view.
+          const nav = document.querySelector<HTMLElement>('nav[aria-label="Docs"]');
+          const here = nav?.querySelector<HTMLElement>('[aria-current="page"]');
+          if (nav && here && nav.scrollWidth > nav.clientWidth) {
+            const left = here.getBoundingClientRect().left - nav.getBoundingClientRect().left + nav.scrollLeft;
+            nav.scrollLeft = left - (nav.clientWidth - here.offsetWidth) / 2;
+          }
+        </script>
         <div class="mt-8 hidden lg:block px-3 text-xs text-[var(--color-text-dim)] leading-relaxed">
           Prefer the repo? See <a href="https://github.com/AzmSquad/Squad-Kit/tree/main/docs" target="_blank" rel="noopener" class="text-[var(--color-accent)] hover:underline">docs/ on GitHub</a>.
         </div>

@@ -7,6 +7,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+squad-kit 1.2 is about trust: squad-kit shows that it understands your project, says what the work really cost, and
+makes the squad's work harder to fake.
+
+### First run and Overview
+
+- **Add project says what it found** (code with or without git, an empty folder, several repos, an older
+  squad-kit) and what happens next, before you confirm.
+- **A setup page with live steps**: project memory, the AI tool, the Architect reading the code, how to test and run
+  it, trying the tests, opening the app once with a screenshot, and your overview. Each step has its time; a failure
+  has a way out and never stops the setup. **Notify me when it is ready**. Quality is asked once here.
+- **The Overview page**, first in the sidebar: what the project is, who uses it, what it can do today, how its parts
+  fit together, things worth knowing, the rules found, the proof, and three ideas for a first ticket. It stays up to
+  date after every merged ticket.
+- **The rules the Architect found are proposals until you approve them** with **Looks right, start working**. They
+  used to be saved as approved without being shown. **Something is wrong** opens a talk with the Architect.
+- Terminal: `squad setup`, `squad overview`, `squad demo --first-run`.
+
+### Conversation and Cost
+
+- **Conversation opens on "What happened"**: one card per step with its time, a one-line summary and what it handed
+  in, drawn as the real thing. **Full log** keeps the detail, in plain words, with **Open it in Claude Code**.
+- **Cost follows how you pay.** On a subscription: "Included in your Claude plan. No extra charge.", the size of the
+  work and where it went, with the API-price figure shown as a value, not a bill. With an API key: real dollars, a
+  budget per ticket and per month, a warning at 80% and a pause at 100%.
+- **Averages per Quality setting** (cost and squad time per accepted ticket) on the Squad and AI page.
+- Terminal: `squad cost`, `squad config set payment`, `squad config set budget`.
+
+### Stronger gates
+
+- **"Not checked" instead of a green pass** when a project has no tests. You are asked once per project, with the
+  Architect's suggested test command. A project without tests also checks that the app starts.
+- **Weakened tests stop the ticket**: deleted tests, fewer tests, a changed test setup, or new skip/only markers, in
+  the common languages. **Continue anyway** needs a reason that stays on the record.
+- **Proof is verified**: each screenshot must be a real image taken in this step, and "after" must differ from
+  "before".
+- **The Reviewer sees the whole change and the check results** in every round, not only the fix.
+- **A change to an existing test command needs your approval.**
+
+### The Builder's sandbox and limits
+
+- **The Builder's and Tester's commands run in Claude Code's sandbox** where the computer allows it: they write only
+  in the ticket's copy, its proof folder and a private package cache, can't read your keys, sign-ins or `.env`
+  files, and reach only package registries and the websites you allow (Settings, `squad config set hosts`). A
+  blocked command says what and why. `squad doctor` shows whether the sandbox runs here.
+- **Turn and spend caps per step** from the Quality setting. Reaching one keeps the work and offers **Give it more**
+  or **Stop**.
+
+### Tickets that depend on each other
+
+- **The Analyst and the Architect see the other open tickets** and the files they change.
+- **A design can depend on another ticket.** The ticket then waits before building: **Build on its branch**, **Build
+  anyway**, or **Wait** (it starts by itself when the other one merges). Terminal: `squad depends`, `squad build`.
+- **Bring in latest main** is a button on a ticket being built (`squad bring-in`).
+
+### Releases
+
+- **Take a ticket out of the next release** before you release it (`squad release --without`).
+- **Released tickets' branches are cleaned up** on this computer, and on the remote when you ask (`squad branches`).
+  A branch with unmerged work is never deleted.
+- **A release cut off by a restart finishes or rolls back** cleanly on the next start.
+
+### Also
+
+- **The update banner shows what is new in every release since your version**, and **Check for updates** reads the
+  notes again.
+- **Desktop notices: Turn on always answers.** It says when the browser is asking, explains how to allow notices
+  when the browser stays silent (for example in Arc), and sends one test notice.
+- **A ticket a teammate deleted** shows "Deleted by <owner>" with **Remove from my board**.
+- **A chat message sent during Claude's usage limit waits** and is answered when the squad carries on.
+- **Free the port and try again** on a stuck Tester step, for programs squad-kit itself started.
+- **On a phone**, the banners fold into one slim row while a ticket is open, and the website's docs pages fit.
+- **Every command squad-kit suggests you copy quotes your text safely**, on the board and in the terminal.
+
+### Security
+
+- **zod 4, the AI SDK 5 and diff 8** for the 0.x planner commands. This closes the last high alert. The planner's
+  file-read tool on the Claude Agent SDK path now works with ranged reads.
+
 ## [1.1.1] — 2026-11-03
 
 A security update. Nothing changes in how squad-kit works.

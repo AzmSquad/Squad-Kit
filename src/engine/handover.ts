@@ -11,6 +11,7 @@ import { repoHostFor } from '../modules/registry.js';
 import { addWorktree, changedFiles, commitAll, commitArgsFor, git, isAncestor, isRepo, networkGitEnv, remotes, removeWorktree } from './git.js';
 import { docsInGit, docsRepo, squadInRepo, stageProjectFiles, stageTicketDocs } from './project-git.js';
 import { repoTarget } from './sync.js';
+import { spotOwnerDeletes } from './teammate-delete.js';
 
 /**
  * Hand over, and a new computer (ADR-001). A ticket's documents and code travel on its pushed branch; live progress,
@@ -198,7 +199,8 @@ export function pickUpPushed(bp: BoardPaths): PickedUp[] {
     const local = readTicket(bp, on.id);
     // Deleted on this computer: its branch left on the remote does not bring it back, unless it is handed over again.
     const deleted = local ? undefined : meta.deleted?.filter((d) => d.id === on.id).at(-1);
-    if (deleted && !(theirs.handedOver?.at && theirs.handedOver.at > deleted.at)) continue;
+    // Removed from this board after its owner deleted it: pushed again, it is back.
+    if (deleted && !deleted.fromBoard && !(theirs.handedOver?.at && theirs.handedOver.at > deleted.at)) continue;
     const newer = theirs.handedOver?.at && theirs.handedOver.at > (local?.handedOver?.at ?? '');
     const kind: PickedUp['kind'] | null = !local ? 'new' : newer ? 'handed' : !isMine(local, meta) && differs(bp, on.id, on.docs) ? 'follow' : null;
     if (!kind) continue;
@@ -225,22 +227,36 @@ export function pickUpPushed(bp: BoardPaths): PickedUp[] {
   return out;
 }
 
-/** Fetches the remote, then picks up what was pushed. Never throws: a remote that cannot be reached is tried later. */
+/**
+ * Fetches the remote, then picks up what was pushed, and spots tickets their owners deleted. The fetch prunes, so a
+ * branch deleted on the remote is gone here too. Never throws: a remote that cannot be reached is tried later.
+ */
 export async function fetchPushed(bp: BoardPaths): Promise<PickedUp[]> {
   const repo = docsRepo(bp);
   if (!repo || !boardExists(bp) || !docsInGit(bp)) return [];
   const meta = readMeta(bp);
   const remote = meta.git?.remote || remotes(repo)[0];
+  let fetched = false;
   if (remote) {
     const url = git(repo, ['config', '--get', `remote.${remote}.url`], { allowFail: true });
     const env = { GIT_TERMINAL_PROMPT: '0', ...(url ? (repoHostFor(bp, url)?.gitEnv() ?? {}) : {}) };
-    await gitLater(repo, ['fetch', '--quiet', remote], env, 60_000).catch(() => undefined);
+    fetched = await gitLater(repo, ['fetch', '--quiet', '--prune', remote], env, 60_000).then(
+      () => true,
+      () => false,
+    );
+  }
+  let picked: PickedUp[] = [];
+  try {
+    picked = pickUpPushed(bp);
+  } catch {
+    // A half-written ticket file; the next look tries again.
   }
   try {
-    return pickUpPushed(bp);
+    spotOwnerDeletes(bp, { fetched });
   } catch {
-    return [];
+    // The same.
   }
+  return picked;
 }
 
 /** The local branch catches up with the pushed one, so a ticket handed back to you carries on from the newest work. */
@@ -268,6 +284,8 @@ function received(bp: BoardPaths, repo: string, id: string, ref: string, kind: P
   const branch = ref.replace(/^refs\/remotes\/[^/]+\//, '');
   return updateTicket(bp, id, (t) => {
     for (const k of RUN_STATE) delete t[k];
+    t.seenOn = ref.replace(/^refs\/remotes\//, '');
+    delete t.ownerDeleted;
     t.live = false;
     t.squad = null;
     t.waiting = null;

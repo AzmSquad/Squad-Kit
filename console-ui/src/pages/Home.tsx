@@ -4,11 +4,12 @@ import { Check, ChevronRight, CornerLeftUp, Folder, FolderCheck, FolderGit2, Fol
 import { api, send } from '../api/client';
 import type { AppProject, AppProjects, AppSettings, AppWaiting, FolderListing } from '../api/types';
 import { usePrefs } from '../lib/prefs';
+import { shellArg, shellQuote } from '../lib/text';
 import { Cmd, Modal, STAGE_NAME, actionLabel, ago, commandFor, outdatedLine } from '../components/ui';
 import { AboutButton, AppUpdate } from '../components/Update';
 import { LimitBanner } from '../components/UsageLimit';
 import { HomeWaiting } from '../components/Waiting';
-import { changeWaits, openChange } from '../lib/waiting';
+import { changeWaits, openChange, testChangeLine } from '../lib/waiting';
 
 /**
  * Home of the one app (ADR-001): one Waiting for you list across every project, then the projects, and Add project
@@ -22,8 +23,8 @@ const boardOf = (id: string) => `/p/${encodeURIComponent(id)}`;
 
 /** The same command a project's board shows, naming the project, for a terminal in any folder. */
 function forProject(command: string, name: string): string {
-  const ref = /\s/.test(name) ? `"${name}"` : name;
-  return command.replace(/\bsquad ([a-z-]+) (\S+)/g, `squad $1 $2 --project ${ref}`);
+  const ref = shellArg(name);
+  return command.replace(/\bsquad ([a-z-]+) (\S+)/g, (_m, verb: string, arg: string) => `squad ${verb} ${arg} --project ${ref}`);
 }
 
 function tilde(p: string, home?: string): string {
@@ -106,7 +107,7 @@ export function HomePage() {
                         <span>{ago(t.activity[0]?.at ?? t.createdAt)}</span>
                       </div>
                       <h3>{t.title}</h3>
-                      <p>{t.waiting?.summary ?? (changeWaits(t) ? `Change ${openChange(t)!.id} to the spec waits for you` : t.outdated?.length ? outdatedLine(t) : `Looks stuck: ${t.quiet?.detail ?? ''}`)}</p>
+                      <p>{t.waiting?.summary ?? (changeWaits(t) ? `Change ${openChange(t)!.id} to the spec waits for you` : t.testChange ? testChangeLine(t) : t.outdated?.length ? outdatedLine(t) : `Looks stuck: ${t.quiet?.detail ?? ''}`)}</p>
                     </div>
                     <Cmd text={forProject(commandFor(t), project.name)} />
                     <a
@@ -178,6 +179,10 @@ function ProjectCard({ p, onRemove }: { p: AppProject; onRemove(): void }) {
   };
   const state = !p.open ? (
     <span className="bad">Could not open: {p.why}</span>
+  ) : p.setup?.ready && !p.setup.approved ? (
+    <span className="you">Your project overview is ready to check</span>
+  ) : p.setup?.line && !p.setup.approved ? (
+    <span className={p.setup.status === 'failed' ? 'bad' : 'you'}>{p.setup.line}</span>
   ) : setup?.status === 'failed' ? (
     <span className="bad">The Architect could not read the project</span>
   ) : setup ? (
@@ -202,8 +207,8 @@ function ProjectCard({ p, onRemove }: { p: AppProject; onRemove(): void }) {
       </div>
       <div className="acts">
         {p.open ? (
-          <a className="btn sm pri" href={p.url}>
-            Open board
+          <a className="btn sm pri" href={p.setup?.line && !p.setup.approved ? p.url.replace(/\/board$/, p.setup.ready ? '/overview' : '/setup') : p.url}>
+            {p.setup?.line && !p.setup.approved ? (p.setup.ready ? 'Check it' : 'See the setup') : 'Open board'}
           </a>
         ) : (
           <button className="btn sm" disabled={busy} onClick={() => void retry()}>
@@ -218,13 +223,40 @@ function ProjectCard({ p, onRemove }: { p: AppProject; onRemove(): void }) {
   );
 }
 
-const KIND_NOTE: Record<FolderListing['kind'], (l: FolderListing) => string> = {
-  project: () => 'This folder has squad-kit already. Adding it opens its board.',
-  repo: () => 'A code repo. The Architect reads its code first, then you write the first ticket.',
-  repos: (l) => `A folder with ${l.repos} code ${l.repos === 1 ? 'repo' : 'repos'} inside. The squad works across them; the Architect reads them first.`,
-  empty: () => 'An empty folder: a new project. squad-kit makes a repo here, and the Architect picks the stack with you.',
-  files: () => 'Files that are not in a repo yet. squad-kit makes one, with these files in its first commit, then the Architect reads them.',
-};
+/** The other kinds of folder, said in a line each under what squad-kit found here. */
+const ALSO: { kind: FolderListing['kind']; name: string; text: string }[] = [
+  { kind: 'empty', name: 'An empty folder', text: 'Start from an idea. The Architect proposes the stack for you to approve.' },
+  { kind: 'older', name: 'An older squad-kit', text: 'Your specs, plans and decisions are moved to the new layout. Nothing is lost.' },
+  { kind: 'repos', name: 'Several repos', text: 'squad-kit reads each one and shows you how they fit together.' },
+];
+
+/** What squad-kit found in the folder, and what happens once the person adds it. */
+function Found({ l }: { l: FolderListing }) {
+  const look = l.look;
+  if (!look) return null;
+  return (
+    <div className="ob-found" aria-live="polite">
+      <div className="ob-found-c">
+        <b>{look.title}</b>
+        <div>{look.found}</div>
+        <div>{look.next}</div>
+        <div className="note">{look.safe}</div>
+      </div>
+      <div className="ob-also">
+        <div className="ob-k">squad-kit also handles</div>
+        {ALSO.filter((a) => a.kind !== look.kind)
+          .slice(0, 2)
+          .map((a) => (
+            <div key={a.kind} className="ob-also-r">
+              <b>{a.name}</b>
+              <span>{a.text}</span>
+            </div>
+          ))}
+      </div>
+      <div className="note">{look.takes}</div>
+    </div>
+  );
+}
 
 /** Add project: the app lists folders itself, because a page cannot read a real folder path. Starts at home. */
 function AddProject({ onClose }: { onClose(): void }) {
@@ -249,8 +281,9 @@ function AddProject({ onClose }: { onClose(): void }) {
     setError(null);
     try {
       const res = await send<AppProject & { did: string[] }>('/api/v1/app/projects', 'POST', { folder: l.path });
-      // The project's board shows the Architect reading it, step by step.
-      window.location.assign(res.url);
+      // A new project lands on its setup page, where squad-kit gets to know it step by step.
+      const setup = res.setup && !res.setup.ready && !res.setup.approved && res.setup.line;
+      window.location.assign(setup ? res.url.replace(/\/board$/, '/setup') : res.url);
     } catch (err) {
       setBusy(false);
       setError(err instanceof Error ? err.message : String(err));
@@ -276,13 +309,13 @@ function AddProject({ onClose }: { onClose(): void }) {
       footer={
         <>
           <button className="btn pri" disabled={!l?.canAdd || busy || listing.isFetching} onClick={() => void add()}>
-            {busy ? 'Adding…' : 'Add this folder'}
+            {busy ? 'Adding…' : l?.kind === 'project' ? 'Open it' : 'Add and get to know it'}
           </button>
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
           <span className="grow" />
-          {l && <Cmd text={`cd "${l.path}" && squad console`} />}
+          {l && <Cmd text={`cd ${shellQuote(l.path)} && squad console`} />}
         </>
       }
     >
@@ -350,9 +383,10 @@ function AddProject({ onClose }: { onClose(): void }) {
       {l && (
         <p className="fb-kind">
           <b>{tilde(l.path, l.home)}</b>
-          <span>{l.canAdd ? KIND_NOTE[l.kind](l) : "This folder can't be a project. Open a folder inside it, or make a new one here."}</span>
+          {!l.canAdd && <span>This folder can't be a project. Open a folder inside it, or make a new one here.</span>}
         </p>
       )}
+      {l?.canAdd && <Found l={l} />}
       {error && <p className="fb-error">{error}</p>}
     </Modal>
   );

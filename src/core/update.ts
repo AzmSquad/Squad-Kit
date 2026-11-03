@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import process from 'node:process';
 import { changelogBlobUrl, type InstalledPackage } from './package-info.js';
 import { detectPackageManager, installCommandFor, type PackageManager } from './package-manager.js';
+import { isNewer } from './registry.js';
 import { withoutTags } from '../utils/text.js';
 
 /**
@@ -106,6 +107,63 @@ export async function fetchReleaseNotes(
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** A few lines per release when several are shown together, so the banner stays short. */
+export const NOTES_PER_RELEASE = 3;
+/** One page of GitHub's release list covers the releases a person skips; older ones are behind the changelog link. */
+const RELEASES_PAGE = 30;
+
+const plainVersion = (v: string) => /^\d+\.\d+\.\d+$/.test(v);
+
+/**
+ * What is new in every release after `from` up to and including `to`, newest first: a person on 1.0.1 updating to
+ * 1.1.1 reads 1.1.1 and 1.1.0 too. One call to GitHub's release list; with no network or no list it falls back to the
+ * one release `to`, and with nothing at all to its changelog link. Drafts and pre-releases are left out.
+ */
+export async function fetchReleasesBetween(
+  repositoryUrl: string | undefined,
+  from: string,
+  to: string,
+  opts: { fetch?: typeof fetch; timeoutMs?: number; perRelease?: number } = {},
+): Promise<ReleaseNotes[]> {
+  const per = opts.perRelease ?? NOTES_PER_RELEASE;
+  const only = async () => {
+    const one = await fetchReleaseNotes(repositoryUrl, to, opts);
+    return [{ ...one, lines: one.lines.slice(0, per) }];
+  };
+  const gh = githubRepo(repositoryUrl ?? 'https://github.com/AzmSquad/squad-kit');
+  if (!gh) return only();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 5000);
+  let list: unknown;
+  try {
+    const res = await (opts.fetch ?? fetch)(`https://api.github.com/repos/${gh.owner}/${gh.repo}/releases?per_page=${RELEASES_PAGE}`, {
+      headers: { accept: 'application/vnd.github+json', 'user-agent': 'squad-kit' },
+      signal: controller.signal,
+    });
+    list = res.ok ? await res.json() : null;
+  } catch {
+    list = null;
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!Array.isArray(list)) return only();
+  const found: ReleaseNotes[] = [];
+  for (const r of list as Array<Record<string, unknown>>) {
+    if (!r || typeof r !== 'object' || r.draft === true || r.prerelease === true || typeof r.tag_name !== 'string') continue;
+    const version = r.tag_name.replace(/^v/, '');
+    if (!plainVersion(version) || !isNewer(version, from) || isNewer(version, to)) continue;
+    if (found.some((f) => f.version === version)) continue;
+    found.push({
+      version,
+      lines: typeof r.body === 'string' ? notesFromMarkdown(r.body, per) : [],
+      url: typeof r.html_url === 'string' && r.html_url.startsWith('https://github.com/') ? r.html_url : changelogBlobUrl(repositoryUrl, version),
+    });
+  }
+  // The newest is often on npm a little before its GitHub release: the older ones still show, and the app asks again.
+  if (!found.length) return only();
+  return found.sort((a, b) => (isNewer(a.version, b.version) ? -1 : isNewer(b.version, a.version) ? 1 : 0));
 }
 
 export interface InstallResult {

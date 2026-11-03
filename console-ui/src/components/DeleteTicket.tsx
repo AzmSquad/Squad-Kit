@@ -66,6 +66,10 @@ export function TicketMenu({ t, onDeleted }: { t: Ticket; onDeleted(): void }) {
             <button role="menuitem" onClick={pick(() => setDialog('archive'))}>
               <Archive size={15} /> Archive…
             </button>
+          ) : t.ownerDeleted ? (
+            <button role="menuitem" className="danger" onClick={pick(() => setDialog('delete'))}>
+              <Trash2 size={15} /> Remove from my board…
+            </button>
           ) : (
             <button role="menuitem" className="danger" onClick={pick(() => setDialog('delete'))}>
               <Trash2 size={15} /> Delete ticket…
@@ -107,9 +111,11 @@ export function DeleteDialog({ t, onClose, onDeleted }: { t: Ticket; onClose(): 
     placeholderData: keepPreviousData,
   });
   const p = plan.data;
+  // Someone else's ticket that its owner deleted: it only leaves this board.
+  const local = Boolean(p?.local ?? t.ownerDeleted);
   const submit = () =>
     act.mutate(
-      { path: `/api/v1/tickets/${t.id}/delete`, body: { remote }, done: `Deleted ${t.id}. Its cost stays in Usage.` },
+      { path: `/api/v1/tickets/${t.id}/delete`, body: { remote }, done: local ? `Removed ${t.id} from your board.` : `Deleted ${t.id}. Its cost stays in Usage.` },
       {
         onSuccess: (r) => {
           if (r.notes.length) toast(`${r.notes.join('. ')}.`);
@@ -122,13 +128,22 @@ export function DeleteDialog({ t, onClose, onDeleted }: { t: Ticket; onClose(): 
     );
   return (
     <Modal
-      title={`Delete ${t.id}?`}
+      title={local ? `Remove ${t.id} from your board?` : `Delete ${t.id}?`}
       onClose={onClose}
       icon={<span className="glyph"><Trash2 size={15} /></span>}
       footer={
         <>
           <button className="btn danger" disabled={!p || Boolean(p.refused) || act.isPending} onClick={submit}>
-            <Trash2 size={15} /> {act.isPending ? 'Stopping the squad and deleting…' : p?.unfinished ? 'Delete again' : `Delete ${t.id}`}
+            <Trash2 size={15} />{' '}
+            {local
+              ? act.isPending
+                ? 'Removing…'
+                : 'Remove from my board'
+              : act.isPending
+                ? 'Stopping the squad and deleting…'
+                : p?.unfinished
+                  ? 'Delete again'
+                  : `Delete ${t.id}`}
           </button>
           <button className="btn" onClick={onClose}>
             Cancel
@@ -167,9 +182,15 @@ export function DeleteDialog({ t, onClose, onDeleted }: { t: Ticket; onClose(): 
               </span>
             </label>
           )}
-          <p className="rm-note">
-            A ticket that is already merged cannot be deleted, because its code is in {p.base}. Use <b>Archive</b> to hide it from the board. Its history stays.
-          </p>
+          {local ? (
+            <p className="rm-note">
+              Only {p.local?.by ?? 'its owner'} could delete {t.id}. This cleans your computer only.
+            </p>
+          ) : (
+            <p className="rm-note">
+              A ticket that is already merged cannot be deleted, because its code is in {p.base}. Use <b>Archive</b> to hide it from the board. Its history stays.
+            </p>
+          )}
         </>
       )}
     </Modal>
@@ -210,10 +231,29 @@ function ArchiveDialog({ t, onClose }: { t: Ticket; onClose(): void }) {
   );
 }
 
-/** On the Now tab: a ticket that is archived, or a delete that has not finished, with the way on. */
+/** On the Now tab: a ticket that is archived, deleted by its owner, or a delete that has not finished, with the way on. */
 export function DeleteArchiveBanner({ t, onDeleted }: { t: Ticket; onDeleted(): void }) {
   const [again, setAgain] = useState(false);
   const unarchive = useUnarchive(t);
+  if (t.ownerDeleted && !t.deleting) {
+    const d = t.ownerDeleted;
+    return (
+      <div className="stuckbox rm-banner">
+        <span className="grow">
+          <b>Deleted by {d.by}.</b>{' '}
+          {d.how === 'note'
+            ? `${d.by} deleted ${t.id} on their computer ${ago(d.at)}.`
+            : `Its branch ${d.branch} is gone from the remote and it never reached the main code, so ${d.by} deleted it.`}{' '}
+          Only {d.by} could delete it. Removing it here cleans your computer only.
+        </span>
+        <button className="btn sm" onClick={() => setAgain(true)}>
+          <Trash2 size={13} /> Remove from my board
+        </button>
+        <Cmd text={`squad delete ${t.id}`} />
+        {again && onTop(<DeleteDialog t={t} onClose={() => setAgain(false)} onDeleted={onDeleted} />)}
+      </div>
+    );
+  }
   if (t.deleting) {
     // A delete still going (another window started it) shows as such for a while; after that, or after an error, it can be finished.
     const stalled = Boolean(t.deleting.error) || Date.now() - Date.parse(t.deleting.at) > 90_000;

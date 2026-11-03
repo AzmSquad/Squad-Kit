@@ -8,6 +8,7 @@ import { liveNow, type LiveNow } from '../board/now.js';
 import { readUsual } from '../board/usual.js';
 import { answerAsk, type AskOffer } from '../board/ask.js';
 import type { Ticket } from '../board/types.js';
+import { shellQuote } from '../utils/text.js';
 
 /**
  * The live status in the terminal: the same words as the board's card and Now tab, the Ask box as `squad ask`, and
@@ -65,8 +66,9 @@ export async function runTicketStatus(ticketId: string): Promise<void> {
   out();
 }
 
-function offerCommand(t: Ticket, o: AskOffer, question: string): string {
-  const q = `"${question.replace(/"/g, '\\"')}"`;
+/** The command for one of the ways on an answer, with the person's question quoted for a shell. */
+export function offerCommand(t: Pick<Ticket, 'id'>, o: AskOffer, question: string): string {
+  const q = shellQuote(question);
   switch (o.do) {
     case 'propose':
       return `squad propose ${t.id} ${q}`;

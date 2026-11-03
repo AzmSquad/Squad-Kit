@@ -118,9 +118,10 @@ describe('one app, many projects', () => {
   it('adds an empty folder as a new project: a new repo, and the Architect reads it first', async () => {
     const dir = path.join(tmp, 'coffee-shop');
     fs.mkdirSync(dir);
-    const res = await json<{ id: string; did: string[]; setup: { status: string }; added: boolean; url: string }>(call('POST', '/api/v1/app/projects', { folder: dir }));
+    const res = await json<{ id: string; did: string[]; setup: { status: string; line: string }; added: boolean; url: string }>(call('POST', '/api/v1/app/projects', { folder: dir }));
     expect(res.did).toContain('Git: made a new repo for the project');
-    expect(res.setup).toEqual({ status: 'pending' });
+    expect(res.setup).toMatchObject({ status: 'pending', ready: false, approved: false });
+    expect(res.setup.line).toMatch(/^Getting to know the project: step 2 of 7 · Checking /);
     expect(res.added).toBe(true);
     expect(squads.started).toContain(dir);
     expect(fs.existsSync(path.join(dir, '.git'))).toBe(true);

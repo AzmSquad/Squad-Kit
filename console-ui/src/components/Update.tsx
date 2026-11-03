@@ -94,15 +94,58 @@ function CopyCommand({ text }: { text: string }) {
   );
 }
 
-function Notes({ lines }: { lines?: string[] }) {
-  if (!lines?.length) return null;
+/** Releases shown in the banner; older ones are behind the release notes link. */
+const RELEASES_SHOWN = 3;
+
+/**
+ * What is new: a few lines of each release since the person's version, newest first, so someone skipping a release
+ * still reads it. One release reads as a plain list, as before.
+ */
+function Notes({ s }: { s: UpdateStatus }) {
+  const releases = s.releases?.length ? s.releases : s.notes?.length ? [{ version: s.latest ?? s.current, lines: s.notes, url: s.notesUrl }] : [];
+  if (!releases.length) return null;
+  if (releases.length === 1) {
+    return (
+      <ul className="upd-notes" aria-label="What is new">
+        {releases[0]!.lines.slice(0, 3).map((l) => (
+          <li key={l}>{l}</li>
+        ))}
+      </ul>
+    );
+  }
+  const shown = releases.slice(0, RELEASES_SHOWN);
+  const more = releases.length - shown.length;
   return (
-    <ul className="upd-notes" aria-label="What is new">
-      {lines.slice(0, 3).map((l) => (
-        <li key={l}>{l}</li>
+    <div className="upd-rels" aria-label="What is new">
+      {shown.map((r) => (
+        <div key={r.version} className="upd-rel">
+          <a className="upd-ver" href={r.url} target="_blank" rel="noreferrer" title={`What is new in ${r.version}`}>
+            {r.version}
+          </a>
+          <ul className="upd-notes">
+            {r.lines.slice(0, 3).map((l) => (
+              <li key={l}>{l}</li>
+            ))}
+          </ul>
+        </div>
       ))}
-    </ul>
+      {more > 0 && (
+        <a className="upd-more" href={s.notesUrl} target="_blank" rel="noreferrer">
+          And {more} older {more === 1 ? 'release' : 'releases'}
+        </a>
+      )}
+    </div>
   );
+}
+
+/** The banner's message in a few words, when it shows: for the folded banners over an open ticket on a phone. */
+export function updateLine(s: UpdateStatus): string | null {
+  const state = s.progress.state;
+  if (RUNNING.includes(state)) return `Updating to ${s.progress.to}`;
+  if (state === 'done') return `On ${s.current} now`;
+  if (state === 'failed') return 'Update needs you';
+  if (!s.newer || !s.latest || s.later === s.latest) return null;
+  return `${s.latest} is ready`;
 }
 
 /** The slot at the top of Home and of every project page. */
@@ -128,7 +171,7 @@ function UpdateReady({ s }: { s: UpdateStatus }) {
       </span>
       <div className="upd-main">
         <b className="upd-title">squad-kit {s.latest} is ready</b>
-        <Notes lines={s.notes} />
+        <Notes s={s} />
         <span className="upd-sub">
           {s.devInstall
             ? 'This squad-kit runs from its source folder, so it does not update itself. To use the new version, run:'
@@ -144,7 +187,7 @@ function UpdateReady({ s }: { s: UpdateStatus }) {
             <ArrowUp size={14} /> Update now
           </button>
         )}
-        {(!s.notes?.length || byHand) && (
+        {(!(s.notes?.length || s.releases?.length) || byHand) && (
           <a className="btn sm" href={s.notesUrl} target="_blank" rel="noreferrer">
             What is new
           </a>
@@ -226,7 +269,7 @@ function Updated({ s }: { s: UpdateStatus }) {
         <span className="upd-sub">
           {carried.length ? `${names(carried)} carried on where ${carried.length === 1 ? 'it was' : 'they were'}. Nothing was lost.` : 'Your tickets and work are kept.'}
         </span>
-        <Notes lines={s.notes} />
+        <Notes s={s} />
       </div>
       <div className="upd-acts">
         <a className="btn sm" href={s.notesUrl} target="_blank" rel="noreferrer">

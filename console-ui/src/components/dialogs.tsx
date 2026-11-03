@@ -5,7 +5,7 @@ import type { DraftJob, Release, Ticket, TicketDraft as Draft, Track } from '../
 import { api, send } from '../api/client';
 import { useAct } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
-import { shellQuote } from '../lib/text';
+import { shellArg, shellQuote } from '../lib/text';
 import { Cmd, Modal } from './ui';
 import { ErrorCard } from './ErrorCard';
 
@@ -639,7 +639,7 @@ export function PullDialog({ onClose, onCreated }: { onClose(): void; onCreated(
           </button>
           <button className="btn" onClick={onClose}>Cancel</button>
           <span className="grow" />
-          <Cmd text={`squad pull ${ref.trim() || 'AB#4133'}`} />
+          <Cmd text={`squad pull ${ref.trim() ? shellArg(ref.trim()) : 'AB#4133'}`} />
         </>
       }
     >

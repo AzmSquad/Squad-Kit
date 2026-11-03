@@ -19,6 +19,8 @@ import { AMBIENT, scriptFor } from './scripts.js';
 import type { BoardMeta, Question, Ticket } from './types.js';
 import { ticketDir } from './store.js';
 import { keepDemoClock, stopDemoStep, watchDemoSlow } from './demo-clock.js';
+import { wakeIfReady } from './depends.js';
+import { playDemoSetup } from './demo-setup.js';
 
 /**
  * The demo squad. It plays a recorded journey for each ticket on a timer and writes every
@@ -48,6 +50,8 @@ export function tick(bp: BoardPaths): void {
   if (!boardExists(bp)) return;
   const meta = readMeta(bp);
   if (meta.engine !== 'demo') return;
+  // The first run and the Overview's talk, played on the same timer.
+  playDemoSetup(bp, meta);
   const at = Date.now();
   const tickets = listTickets(bp);
   if (at - (lastSlowLook.get(bp.root) ?? 0) >= 5000) {
@@ -64,6 +68,8 @@ export function tick(bp: BoardPaths): void {
       updateTicket(bp, t.id, (x) => stopDemoStep(bp, x, meta.speed));
       continue;
     }
+    // "Wait" for a ticket it depends on: once that one is merged, the build starts (board/depends.ts).
+    if (wakeIfReady(bp, t)) continue;
     const q = t.questions?.find((x) => x.thinking);
     if (q && at - lastMessageAt(q) >= 2200 / meta.speed) reply(bp, t.id, q.id);
     const c = t.chat;

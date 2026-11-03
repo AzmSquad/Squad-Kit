@@ -9,6 +9,8 @@ import { BugsPage, InboxPage, SettingsPage, SquadPage } from './pages/Pages';
 import { HomePage } from './pages/Home';
 import { PROJECT, PROJECT_BASE } from './api/client';
 import { ConversationsPage } from './pages/Conversations';
+import { OverviewPage } from './pages/Overview';
+import { SetupPage } from './pages/Setup';
 
 // One app, many projects (ADR-001): a project's pages sit under /p/<project id>/ (the router's base), and the app's
 // Home, with every project and one Waiting for you list, at /.
@@ -23,9 +25,13 @@ const index = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
   beforeLoad: () => {
-    if (PROJECT) throw redirect({ to: '/board' });
+    // The Overview is the project's home: the handover the first time, then the project at a glance.
+    if (PROJECT) throw redirect({ to: '/overview' });
   },
 });
+// The first run, full page: squad-kit gets to know the project, step by step.
+const setup = createRoute({ getParentRoute: () => rootRoute, path: '/setup', component: SetupPage });
+const overview = createRoute({ getParentRoute: () => rootRoute, path: '/overview', component: OverviewPage });
 
 const board = createRoute({
   getParentRoute: () => rootRoute,
@@ -70,7 +76,7 @@ const bugs = createRoute({ getParentRoute: () => rootRoute, path: '/bugs', compo
 const squad = createRoute({ getParentRoute: () => rootRoute, path: '/squad', component: SquadPage });
 const settings = createRoute({ getParentRoute: () => rootRoute, path: '/settings', component: SettingsPage });
 
-const routeTree = rootRoute.addChildren([index, board, backlog, proof, inbox, conversations, releases, decisions, architecture, bugs, squad, settings]);
+const routeTree = rootRoute.addChildren([index, setup, overview, board, backlog, proof, inbox, conversations, releases, decisions, architecture, bugs, squad, settings]);
 
 export const router = createRouter({ routeTree, defaultPreload: false, basepath: PROJECT_BASE || '/' });
 

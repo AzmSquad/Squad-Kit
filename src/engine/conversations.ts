@@ -5,6 +5,8 @@ import type { ContentBlock, PlanEntry, SessionUpdate, ToolCallContent, ToolKind 
 import type { AgentName, ChatMessage, Ticket } from '../board/types.js';
 import { describeToolEvent } from '../modules/registry.js';
 import { ticketDir, ticketMediaDir, type BoardPaths } from '../board/store.js';
+import { outputOf } from './acp-runner.js';
+import { blockedIn, blockedLine } from './sandbox.js';
 
 /**
  * The real conversations behind a ticket, in the Agent Client Protocol (ACP) format: messages, thoughts, tool calls
@@ -32,8 +34,27 @@ export interface Conversation {
   total: number;
 }
 
-/** squad-kit's own notes on a message, kept in ACP's reserved `_meta` field. */
+/**
+ * squad-kit's own notes, kept in ACP's reserved `_meta` field: who wrote a message, and on a tool call's result what
+ * the sandbox refused, in plain words.
+ */
 export type SquadMeta = { squadKit: { from: 'squad-kit' | 'claude-code' } };
+export type BlockedMeta = { squadKit: { blocked: string[] } };
+
+/** The plain words for what the sandbox refused in a command's output, as a tool call's `_meta`, or nothing. */
+function blockedMeta(output: string): BlockedMeta | null {
+  const found = blockedIn(output);
+  return found.length ? { squadKit: { blocked: found.map((b) => blockedLine(b)) } } : null;
+}
+
+/** Each command result that the sandbox refused something in gets the plain words for it, never a silent failure. */
+function withBlocked(updates: AcpEntry[]): AcpEntry[] {
+  return updates.map((e) => {
+    const u = e.update as Record<string, any>;
+    const meta = u.sessionUpdate === 'tool_call_update' ? blockedMeta(outputOf(u)) : null;
+    return meta ? { ...e, update: { ...u, _meta: { ...(u._meta ?? {}), ...meta } } as SessionUpdate } : e;
+  });
+}
 
 /** Where Claude Code saved a session, or null if it never started. */
 export function sessionFile(id: string, base = path.join(os.homedir(), '.claude', 'projects')): string | null {
@@ -190,7 +211,7 @@ export function readConversation(id: string, limit = 400, base?: string, nativeD
       }
     }
     const cwd = cwdOf(id, base);
-    return { sessionId: id, ...(cwd ? { cwd } : {}), updates: updates.slice(-limit), total: updates.length };
+    return { sessionId: id, ...(cwd ? { cwd } : {}), updates: withBlocked(updates.slice(-limit)), total: updates.length };
   }
   const file = sessionFile(id, base);
   if (!file) return null;
@@ -252,9 +273,12 @@ export function readConversation(id: string, limit = 400, base?: string, nativeD
         });
       } else if (b.type === 'tool_result' && b.tool_use_id) {
         const resultText = typeof b.content === 'string' ? b.content : Array.isArray(b.content) ? (b.content as Block[]).map((c) => c.text ?? '').join('\n') : '';
+        // From the whole output: the result shown is cut short, and the sandbox says what it refused at the end.
+        const blocked = blockedMeta(resultText);
         push({
           sessionUpdate: 'tool_call_update',
           toolCallId: b.tool_use_id,
+          ...(blocked ? { _meta: blocked } : {}),
           status: b.is_error ? 'failed' : 'completed',
           // In ACP an update replaces the call's content, so it carries the diff along with the result.
           content: answers.has(b.tool_use_id)

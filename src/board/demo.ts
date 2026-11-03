@@ -5,8 +5,10 @@ import { fileURLToPath } from 'node:url';
 import { scriptFor } from './scripts.js';
 import { scheduleSquad } from './schedule.js';
 import { writeDecision, writeMeta, writeRelease, writeTicket, type BoardPaths } from './store.js';
-import type { Activity, BoardMeta, Decision, Release, Ticket } from './types.js';
+import type { Activity, AgentName, BoardMeta, Decision, Release, StepRun, Ticket, TimedStep } from './types.js';
+import { countSampleHistory } from './demo-cost.js';
 import { clearBoard } from './store.js';
+import { seedDoneSetup, seedFreshSetup } from './demo-setup.js';
 
 /** Minutes before now, as an ISO time, so the seeded board always looks fresh. */
 function ago(minutes: number): string {
@@ -49,6 +51,10 @@ function base(id: string, title: string, over: Partial<Ticket>): Ticket {
 const log = (entries: [number, Activity['who'], string][]): Activity[] =>
   entries.map(([m, who, text]) => ({ at: ago(m), who, text }));
 
+/** Steps that ended well, from and to in minutes before now, oldest first. */
+const ran = (entries: [AgentName | 'squad', TimedStep, number, number][]): StepRun[] =>
+  entries.map(([who, step, from, to]) => ({ who, step, from: ago(from), to: ago(to) }));
+
 function demoTickets(user: string): Ticket[] {
   const darkMode = base('SK-148', 'Dark mode for the dashboard', {
     ask: 'Staff on night shifts say the white screen hurts their eyes. Add a dark mode to the dashboard.',
@@ -75,6 +81,30 @@ function demoTickets(user: string): Ticket[] {
       stage: 'review',
       status: 'Proof ready to check',
       waiting: { kind: 'proof', summary: 'The proof is ready for you to check' },
+      createdAt: ago(46),
+      quality: 'best',
+      questions: [
+        { id: 'q1', from: 'analyst', text: 'Should a part of a number find cases too, or only the full number?', options: ['Only the full number', 'Part of a number too'], answer: { choice: 'Part of a number too' } },
+        { id: 'q2', from: 'architect', text: 'Where should the search box go?', options: ['Above the case list', 'In the top bar on every page'], answer: { choice: 'Above the case list' } },
+      ],
+      decision: {
+        title: 'Where the case search lives',
+        options: [
+          { name: 'A search box above the case list', note: 'One place, next to the cases it finds.', chosen: true },
+          { name: 'A search box in the top bar', note: 'On every page, but far from the list.' },
+        ],
+        why: 'Clerks search while they look at the list, and Angular Material has the search field already.',
+      },
+      follows: ['ADR-011'],
+      history: ran([
+        ['analyst', 'questions', 44.6, 44.1],
+        ['analyst', 'spec', 39.8, 39.65],
+        ['architect', 'design', 35.8, 35.1],
+        ['builder', 'build', 29.5, 14.5],
+        ['squad', 'checks', 14.4, 13.2],
+        ['tester', 'proof', 13.1, 11.9],
+        ['reviewer', 'review', 5.3, 3],
+      ]),
       story: 'As a clerk, I want to search by case number, so I find a case in seconds.',
       criteria: [
         { given: "I'm on the case list", when: 'I type a full case number', then: 'that case opens at once' },
@@ -87,7 +117,7 @@ function demoTickets(user: string): Ticket[] {
         { title: 'Tests for every "done when"', status: 'done', minutes: 3 },
       ],
       gates: { checks: 'pass', checksText: '18 of 18 checks pass', review: 'pass', reviewBy: 'Claude', proof: 'pass' },
-      specApproved: { by: 'Momen', at: ago(30) },
+      specApproved: { by: 'Momen', at: ago(36) },
       stageTimes: { stage: 'review', since: ago(12), spent: { tickets: 35, specs: 250, implement: 960, test: 140 } },
       proof: [
         {
@@ -101,10 +131,22 @@ function demoTickets(user: string): Ticket[] {
       ],
       releaseNote: '**Search by case number.** Type a case number and jump straight to the case.',
       activity: log([
-        [3, 'reviewer', 'Approved the changes'],
-        [5, 'reviewer', 'Reading the changes (round 1 of 2, Claude)'],
-        [7, 'tester', 'All 18 checks pass'],
-        [25, 'you', 'Approved the plan'],
+        [3, 'reviewer', 'Approved: meets both "done when" points and follows ADR-011'],
+        [5.3, 'reviewer', 'Reading the changes (round 1 of 2, Claude)'],
+        [11.9, 'tester', 'Saved 1 screenshot'],
+        [13.1, 'tester', 'Taking screenshots after the change'],
+        [13.2, 'tester', 'All 18 checks pass'],
+        [14.4, 'tester', 'squad-kit is running the project checks'],
+        [14.5, 'builder', 'Finished all steps'],
+        [29.5, 'builder', 'Started building'],
+        [30, 'you', 'Approved the design'],
+        [35.1, 'architect', 'Wrote the design'],
+        [36, 'you', 'Approved the spec'],
+        [39.65, 'analyst', 'Wrote the spec'],
+        [40, 'you', 'Answered 2 questions'],
+        [44.1, 'analyst', 'Asked 2 questions'],
+        [44.11, 'analyst', 'Read the case list page, the case search in the API and saved decision ADR-011'],
+        [45, 'you', 'Pulled AB#4098 from Azure DevOps'],
       ]),
     }),
     base('SK-140', 'Date shows in the wrong format', {
@@ -121,6 +163,20 @@ function demoTickets(user: string): Ticket[] {
       stage: 'release',
       release: 'v2.4.0',
       status: 'Ready for v2.4.0',
+      quality: 'best',
+      mergedAt: ago(20 * 60),
+      story: 'As a clerk, I want a warning before I am logged out, so I can save my work.',
+      criteria: [{ given: 'I have been idle for 14 minutes', when: 'one minute is left', then: 'I see a warning with a Stay signed in button' }],
+      history: ran([
+        ['analyst', 'questions', 24 * 60, 24 * 60 - 0.6],
+        ['analyst', 'spec', 23.5 * 60, 23.5 * 60 - 0.2],
+        ['architect', 'design', 23 * 60, 23 * 60 - 0.8],
+        ['builder', 'build', 22.5 * 60, 22.5 * 60 - 11],
+        ['squad', 'checks', 22.3 * 60, 22.3 * 60 - 1.1],
+        ['tester', 'proof', 22.2 * 60, 22.2 * 60 - 1.4],
+        ['reviewer', 'review', 22 * 60, 22 * 60 - 2.2],
+      ]),
+      activity: log([[20 * 60, 'you', 'Checked the proof. Looks right']]),
       gates: { checks: 'pass', checksText: '16 of 16 checks pass', review: 'pass', reviewBy: 'Claude', proof: 'pass' },
       releaseNote: '**Session timeout warning.** You get a warning one minute before you are logged out.',
     }),
@@ -142,8 +198,60 @@ function demoTickets(user: string): Ticket[] {
       stage: 'release',
       release: 'v2.4.0',
       status: 'Ready for v2.4.0',
+      quality: 'best',
+      mergedAt: ago(26 * 60),
+      history: ran([
+        ['analyst', 'questions', 30 * 60, 30 * 60 - 0.7],
+        ['analyst', 'spec', 29.6 * 60, 29.6 * 60 - 0.3],
+        ['architect', 'design', 29.2 * 60, 29.2 * 60 - 1],
+        ['builder', 'build', 28.8 * 60, 28.8 * 60 - 18],
+        ['squad', 'checks', 28.4 * 60, 28.4 * 60 - 1.3],
+        ['builder', 'fix', 28.3 * 60, 28.3 * 60 - 4],
+        ['squad', 'checks', 28.2 * 60, 28.2 * 60 - 1.2],
+        ['tester', 'proof', 28.1 * 60, 28.1 * 60 - 1.6],
+        ['reviewer', 'review', 27.9 * 60, 27.9 * 60 - 2.4],
+      ]),
+      activity: log([[26 * 60, 'you', 'Checked the proof. Looks right']]),
       gates: { checks: 'pass', checksText: '16 of 16 checks pass', review: 'pass', reviewBy: 'Claude', proof: 'pass' },
       releaseNote: '**Export to PDF.** Download any case list as a PDF, ready to print.',
+    }),
+    // Released in v2.3.1: off the board, but their cost and time count for the averages per Quality setting.
+    base('SK-138', 'Fix: calendar week starts on Sunday', {
+      kind: 'bug',
+      stage: 'done',
+      release: 'v2.3.1',
+      status: 'Released in v2.3.1',
+      quality: 'best',
+      createdAt: daysAgo(19),
+      mergedAt: daysAgo(18),
+      gates: { checks: 'pass', checksText: '15 of 15 checks pass', review: 'pass', reviewBy: 'Claude', proof: 'pass' },
+      history: ran([
+        ['analyst', 'questions', 19 * 1440 - 10, 19 * 1440 - 10.5],
+        ['analyst', 'spec', 19 * 1440 - 30, 19 * 1440 - 30.2],
+        ['architect', 'design', 19 * 1440 - 40, 19 * 1440 - 40.7],
+        ['builder', 'build', 19 * 1440 - 50, 19 * 1440 - 58],
+        ['squad', 'checks', 19 * 1440 - 59, 19 * 1440 - 60],
+        ['tester', 'proof', 19 * 1440 - 61, 19 * 1440 - 62.2],
+        ['reviewer', 'review', 19 * 1440 - 63, 19 * 1440 - 65],
+      ]),
+    }),
+    base('SK-141', 'Fix: logout button on small screens', {
+      kind: 'bug',
+      stage: 'done',
+      track: 'express',
+      release: 'v2.3.1',
+      status: 'Released in v2.3.1',
+      quality: 'best',
+      createdAt: daysAgo(18),
+      mergedAt: daysAgo(17.9),
+      gates: { checks: 'pass', checksText: '15 of 15 checks pass', review: 'pass', reviewBy: 'Claude', proof: 'pass' },
+      history: ran([
+        ['architect', 'design', 18 * 1440 - 5, 18 * 1440 - 5.4],
+        ['builder', 'build', 18 * 1440 - 6, 18 * 1440 - 9],
+        ['squad', 'checks', 18 * 1440 - 9.2, 18 * 1440 - 10.1],
+        ['tester', 'proof', 18 * 1440 - 10.3, 18 * 1440 - 11.2],
+        ['reviewer', 'review', 18 * 1440 - 11.5, 18 * 1440 - 12.6],
+      ]),
     }),
     darkMode,
     base('SK-149', 'Arabic names in PDF exports', {
@@ -176,6 +284,109 @@ function demoTickets(user: string): Ticket[] {
       activity: log([
         [2, 'tester', 'Checks failed 3 times. Stopped and asked you'],
         [12, 'builder', 'Finished step 2: Build case notes autosave'],
+      ]),
+    }),
+    // Squad-kit's stronger gates: no tests ran, so the checks say "Not checked", never a green pass.
+    base('SK-142', 'Highlight the case you picked', {
+      ask: 'After a search, clerks lose track of the case they opened. Highlight it in the list.',
+      stage: 'review',
+      status: 'Proof ready to check',
+      waiting: { kind: 'proof', summary: 'The proof is ready for you to check' },
+      story: 'As a clerk, I want the case I picked to stand out in the list, so I do not lose my place.',
+      criteria: [{ given: 'I picked a case from the search', when: 'the case list shows', then: 'that row is highlighted' }],
+      steps: [
+        { title: 'Remember the picked case', status: 'done', minutes: 2 },
+        { title: 'Highlight its row in the list', status: 'done', minutes: 3 },
+        { title: 'Check the colors in dark mode', status: 'done', minutes: 2 },
+      ],
+      work: { steps: 3, tests: 0, screens: 1 },
+      gates: {
+        checks: 'unchecked',
+        checksText: 'No tests ran · build passes, the app starts',
+        review: 'pass',
+        reviewBy: 'Claude',
+        proof: 'pass',
+      },
+      specApproved: { by: 'Momen', at: ago(40) },
+      stageTimes: { stage: 'review', since: ago(6), spent: { tickets: 30, specs: 200, implement: 420, test: 90 } },
+      proof: [
+        {
+          criterion: 'That row is highlighted',
+          before: 'sk139-before.png',
+          after: 'sk139-after.png',
+          beforeLabel: 'Before',
+          afterLabel: 'After',
+          note: 'Recorded by the Tester in Chrome at 1280 by 800',
+        },
+      ],
+      releaseNote: '**Highlight the picked case.** The case you opened stands out in the list.',
+      activity: log([
+        [3, 'reviewer', 'Approved the changes'],
+        [5, 'tester', 'Not checked: No tests ran · build passes, the app starts. You chose to go on without tests in this project'],
+        [6, 'tester', 'squad-kit is running the project checks'],
+      ]),
+    }),
+    // The tests were made weaker: squad-kit stops before the checks, and only you can go on.
+    base('SK-144', 'Hearing reminders by email', {
+      stage: 'test',
+      status: 'The tests were made weaker',
+      waiting: { kind: 'stuck', summary: 'The tests were made weaker: needs one decision' },
+      retryPhase: 'restore-tests',
+      gates: { checks: 'fail', checksText: 'Tests were weakened', review: 'pending', proof: 'pending' },
+      stuck: {
+        gate: 'checks',
+        kind: 'weakened',
+        question: 'This change makes the tests weaker than on main, so passing checks would prove little.',
+        points: [
+          'web/src/app/reminders/reminder.service.spec.ts has fewer tests: 6 before, 4 now.',
+          'In web/src/app/hearings/hearing-list.spec.ts: tests switched off with it.skip.',
+          'The test scripts or settings in web/package.json changed: "test" was "jest", now "jest --passWithNoTests".',
+        ],
+        checks: ['fewer:web/src/app/reminders/reminder.service.spec.ts:4', 'skip:web/src/app/hearings/hearing-list.spec.ts:it.skip:1', 'config:web/package.json:5d1c0a2e'],
+        detail: 'fewer: web/src/app/reminders/reminder.service.spec.ts\nskip: web/src/app/hearings/hearing-list.spec.ts\nconfig: web/package.json',
+        options: [
+          { do: 'retry', name: 'Send it back to the Builder', note: 'It puts the tests back as they were, then the checks run again.' },
+          { do: 'yourself', name: 'Fix it yourself', note: "Open the ticket's copy in your editor and fix it. Then the checks, review and proof run again." },
+          { do: 'continue', name: 'Continue anyway', note: 'Go on with the tests as they are now; the checks still run. Write why: it shows on the ticket, the pull request and the release notes.' },
+          { do: 'plan', name: 'Send it back to the plan', note: 'The Spec writer rewrites the plan with what went wrong.' },
+        ],
+      },
+      story: 'As a clerk, I want hearing reminders sent by email too, so people without SMS still come.',
+      specApproved: { by: 'Momen', at: ago(70) },
+      steps: [
+        { title: 'Add email to the reminder service', status: 'done', minutes: 6 },
+        { title: 'Send at the same times as SMS', status: 'done', minutes: 4 },
+        { title: 'Tests for every "done when"', status: 'done', minutes: 3 },
+      ],
+      progress: 100,
+      activity: log([
+        [2, 'tester', 'Stopped before the checks: the tests were made weaker.'],
+        [4, 'builder', 'Finished all steps'],
+      ]),
+    }),
+    // Its design needs SK-146, which is not merged yet: the build waits for the person to choose how to build.
+    base('SK-152', 'Court filter on the hearing calendar', {
+      ask: 'Clerks want the court filter from the case list on the hearing calendar too.',
+      stage: 'implement',
+      status: 'SK-152 needs SK-146, which is not merged yet',
+      waiting: { kind: 'depends', summary: 'SK-152 needs SK-146, which is not merged yet' },
+      dependsOn: ['SK-146'],
+      specApproved: { by: 'Momen', at: ago(22) },
+      story: "As a clerk, I want to filter the hearing calendar by court, so I see only my court's hearings.",
+      criteria: [
+        { given: 'I am on the hearing calendar', when: 'I pick a court', then: "I see only that court's hearings" },
+        { given: 'I picked a court', when: 'I move to the next week', then: 'the calendar keeps my court' },
+      ],
+      work: { steps: 3, tests: 3, screens: 1 },
+      steps: [
+        { title: 'Use the court filter from SK-146 on the calendar', status: 'todo' },
+        { title: 'Keep the chosen court when the week changes', status: 'todo' },
+        { title: 'Tests for every "done when"', status: 'todo' },
+      ],
+      activity: log([
+        [1, 'squad', 'SK-152 needs SK-146, which is not merged yet, so the build waits for you to choose how to build'],
+        [2, 'you', 'Approved the design'],
+        [6, 'architect', 'Wrote the design. It uses the court filter that SK-146 adds'],
       ]),
     }),
     base('SK-151', 'Print the hearing schedule', {
@@ -362,16 +573,29 @@ function demoAssetsDir(): string {
 export interface SeedOptions {
   speed?: number;
   project?: string;
+  /** The sample project at its first open: no tickets yet, the setup about to start, then the Overview to approve. */
+  firstRun?: boolean;
 }
+
+/** How big each seeded sample ticket's work was, against a usual one. */
+const SAMPLE_SIZE: Record<string, number> = { 'SK-138': 0.8, 'SK-141': 0.45, 'SK-147': 1.3 };
 
 /** Writes a full demo board: tickets in every stage, past releases, decisions and proof images. */
 export function seedDemoBoard(bp: BoardPaths, opts: SeedOptions = {}): void {
   clearBoard(bp);
   const user = gitUserName();
   const speed = opts.speed ?? 1;
-  writeMeta(bp, demoMeta(user, speed, opts.project ?? 'Case portal'));
+  const meta = demoMeta(user, speed, opts.project ?? 'Case portal');
+  if (opts.firstRun) {
+    writeMeta(bp, { ...meta, nextNumber: 1, lessons: [] });
+    seedFreshSetup(bp);
+    return;
+  }
+  writeMeta(bp, meta);
   for (const t of demoTickets(user)) {
     if (t.live && t.stage !== 'done' && !t.waiting) scheduleSquad(t, 'ambient', 3 + Math.random() * 4, speed, 0);
+    // The steps the sample tickets already took are counted, so the Cost tab and the averages have something to show.
+    if (t.history?.length) countSampleHistory(bp, t, SAMPLE_SIZE[t.id] ?? 1);
     // The sample squad is yours: every ticket on the sample board is yours to work on and hand over.
     writeTicket(bp, { ...t, owner: user });
   }
@@ -382,4 +606,6 @@ export function seedDemoBoard(bp: BoardPaths, opts: SeedOptions = {}): void {
   if (fs.existsSync(assets)) {
     for (const f of fs.readdirSync(assets)) fs.copyFileSync(path.join(assets, f), path.join(bp.proofDir, f));
   }
+  // Its first run long ago: every setup step done, and the Overview approved, kept up to date since.
+  seedDoneSetup(bp, user, daysAgo(60));
 }

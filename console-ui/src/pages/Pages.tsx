@@ -11,11 +11,12 @@ import { BugDialog } from '../components/dialogs';
 import { useRestart } from '../components/Restart';
 import { AboutUpdates } from '../components/Update';
 import { HelpRow } from '../components/Report';
-import { SquadUsage } from '../components/Usage';
+import { PaymentSettings, QualityMetrics, SquadUsage } from '../components/Usage';
+import { AllowedHosts, SandboxRows } from '../components/Sandbox';
 import { Cmd, Glyph, Modal, STAGE_NAME, actionLabel, ago, commandFor, outdatedLine } from '../components/ui';
 import { changeWaits, openChange } from '../components/ChangeCard';
 import { NoticeSetting } from '../components/Waiting';
-import { needsYou } from '../lib/waiting';
+import { needsYou, testChangeLine } from '../lib/waiting';
 import { withoutComments } from '../lib/text';
 
 /* ── Waiting for you ───────────────────────────────────── */
@@ -51,9 +52,9 @@ export function InboxPage() {
                       <span>{ago(t.activity[0]?.at ?? t.createdAt)}</span>
                     </div>
                     <h3>{t.title}</h3>
-                    <p>{t.waiting?.summary ?? (changeWaits(t) ? `Change ${openChange(t)!.id} to the spec waits for you` : t.outdated?.length ? outdatedLine(t) : `Looks stuck: ${t.quiet?.detail ?? 'no progress'}`)}</p>
+                    <p>{t.waiting?.summary ?? (changeWaits(t) ? `Change ${openChange(t)!.id} to the spec waits for you` : t.testChange ? testChangeLine(t) : t.outdated?.length ? outdatedLine(t) : `Looks stuck: ${t.quiet?.detail ?? 'no progress'}`)}</p>
                   </div>
-                  <Cmd text={!t.waiting && changeWaits(t) ? `squad propose ${t.id} --approve` : commandFor(t)} />
+                  <Cmd text={!t.waiting && changeWaits(t) ? `squad propose ${t.id} --approve` : !t.waiting && t.testChange ? `squad test-command ${t.id} --use` : commandFor(t)} />
                   {t.waiting?.kind === 'proof' ? (
                     <Link to="/tickets/$id/proof" params={{ id: t.id }} className="btn pri sm">{actionLabel(t)}</Link>
                   ) : (
@@ -147,6 +148,7 @@ export function SquadPage() {
             give it house rules or change its models.
           </p>
           <QualitySetting />
+          <QualityMetrics />
           <div style={{ marginTop: 10 }}>
             {(agents.data ?? []).map((a) => (
               <div className="maprow" key={a.role} style={{ gridTemplateColumns: '34px 120px 1fr 250px 70px', alignItems: 'center' }}>
@@ -196,6 +198,7 @@ export function SquadPage() {
               <span className={`pill ${t.ready ? 'ok' : 'wait'}`}>{t.ready ? 'Ready' : 'Not found'}</span>
             </div>
           ))}
+          <SandboxRows />
           <div className="toolrow off">
             <span className="logo"><Terminal size={18} /></span>
             <span>
@@ -771,6 +774,7 @@ export function SettingsPage() {
           <RestartRow />
           {meta?.engine === 'live' && <ParallelSetting />}
           {meta?.engine === 'live' && <RunnerSetting />}
+          {meta?.engine === 'live' && <AllowedHosts hosts={meta.allowedHosts ?? []} />}
           {meta?.engine === 'live' && <AzureSettings />}
           {meta?.engine === 'live' && <SpeechSettings />}
           {meta?.engine === 'live' && <ProjectSettings />}
@@ -785,6 +789,7 @@ export function SettingsPage() {
               </span>
             </div>
           )}
+          {meta && <PaymentSettings />}
           <h2 style={{ marginTop: 26 }}>About squad-kit</h2>
           <AboutUpdates />
           <HelpRow />

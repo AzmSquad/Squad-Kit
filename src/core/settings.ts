@@ -55,3 +55,21 @@ export function setCheckForUpdates(on: boolean): boolean {
   writeSettings({ checkForUpdates: on });
   return on;
 }
+
+/**
+ * How this person pays for the AI, when they said so themselves: it wins over what the AI tool module finds. One
+ * answer for every project, since they all use the same AI login. Undefined: squad-kit finds out.
+ */
+export function paymentChoice(): 'subscription' | 'api-key' | undefined {
+  const p = readSettings().payment;
+  return p === 'subscription' || p === 'api-key' ? p : undefined;
+}
+
+/** Sets it, or with "auto" goes back to finding out. */
+export function setPaymentChoice(p: 'subscription' | 'api-key' | 'auto'): void {
+  const all = readSettings();
+  delete all.payment;
+  if (p !== 'auto') all.payment = p;
+  fs.mkdirSync(squadHome(), { recursive: true });
+  fs.writeFileSync(settingsFile(), yaml.dump(all), 'utf8');
+}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, Outlet, useRouterState } from '@tanstack/react-router';
-import { ArrowUp, Bug, ChevronsUpDown, Inbox, LayoutGrid, ListTodo, Menu, MessagesSquare, Moon, Network, Settings, Sun, Terminal, Users } from 'lucide-react';
+import { ArrowUp, Bug, ChevronsUpDown, Compass, Inbox, LayoutGrid, ListTodo, Menu, MessagesSquare, Moon, Network, Settings, Sun, Terminal, Users } from 'lucide-react';
 import { useBoard } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { UpdateBanner } from './Restart';
@@ -9,9 +9,13 @@ import { ProjectWaiting } from './Waiting';
 import { needsYou } from '../lib/waiting';
 import { ChatDock, useChats, useDocked } from './ChatDock';
 import { LimitBanner } from './UsageLimit';
+import { BudgetBanner } from './Usage';
 import { Apps } from './Apps';
+import { Banners } from './Banners';
+import { useOverviewWaits } from './Setup';
 
 const NAV = [
+  { to: '/overview', label: 'Overview', icon: Compass, badge: 'setup' as const },
   { to: '/board', label: 'Board', icon: LayoutGrid },
   { to: '/backlog', label: 'Backlog', icon: ListTodo },
   { to: '/inbox', label: 'Waiting for you', icon: Inbox, badge: 'you' as const },
@@ -34,12 +38,13 @@ export function Shell() {
   const initials = (meta?.user.name ?? 'You').slice(0, 2).toUpperCase();
   const chats = useChats().data?.filter((c) => c.open).length ?? 0;
   const docked = useDocked();
+  const setupWaits = useOverviewWaits();
   // On a phone the sidebar folds away behind a menu button, and closes again when you go to another page.
   const [menu, setMenu] = useState(false);
   useEffect(() => setMenu(false), [path]);
 
-  // The Conversations page is full screen: the list, the chat and the spec need the whole width.
-  if (path.startsWith('/conversations'))
+  // The Conversations page is full screen: the list, the chat and the spec need the whole width. So is the setup.
+  if (path.startsWith('/conversations') || path.startsWith('/setup'))
     return (
       <div className="fullpage">
         <ProjectWaiting />
@@ -80,6 +85,15 @@ export function Shell() {
         </a>
         {NAV.map((n) => {
           const count = n.badge === 'you' ? waiting : n.badge === 'bugs' ? bugs : n.badge === 'chats' ? chats : 0;
+          // The overview waits for the person to check it: marked like anything else that waits for them.
+          if (n.badge === 'setup')
+            return (
+              <Link key={n.to} to={n.to} className={`nav ${path.startsWith(n.to) ? 'on' : ''}`} onClick={() => setMenu(false)}>
+                <n.icon size={16} />
+                {n.label}
+                {setupWaits && <span className="badge you" aria-label="Waits for you">1</span>}
+              </Link>
+            );
           const on = path.startsWith(n.to) || (n.to === '/inbox' && path.endsWith('/proof'));
           return (
             <Link key={n.to} to={n.to} className={`nav ${on ? 'on' : ''}`} onClick={() => setMenu(false)}>
@@ -118,10 +132,13 @@ export function Shell() {
         </div>
       </aside>
       <main className="canvas">
-        <AppUpdate />
-        <LimitBanner />
-        {board.data?.ready && board.data.console?.outdated && <UpdateBanner />}
-        <ProjectWaiting />
+        <Banners>
+          <AppUpdate />
+          <LimitBanner />
+          {board.data?.ready && <BudgetBanner />}
+          {board.data?.ready && board.data.console?.outdated && <UpdateBanner />}
+          <ProjectWaiting />
+        </Banners>
         {/* The page under the banner: a ticket drawer covers the page, never the banner. */}
         <div className="canvas-b">
           <Outlet />

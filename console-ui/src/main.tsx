@@ -9,6 +9,7 @@ import '@fontsource/jetbrains-mono/600.css';
 import './styles/app.css';
 import './styles/chat.css';
 import './styles/support.css';
+import './styles/onboard.css';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';

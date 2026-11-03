@@ -44,8 +44,14 @@ Terminal: `squad projects`, `squad inbox`.
 
 ## The board
 
-Each project has its own board. The sidebar has the project's pages: **Board**, **Backlog**, **Waiting for
-you**, **Releases**, **Architecture**, **Bugs**, **Squad and AI** and **Settings**. Click the project name or the
+Each project has its own board. The sidebar has the project's pages: **Overview**, **Board**, **Backlog**,
+**Waiting for you**, **Releases**, **Architecture**, **Bugs**, **Squad and AI** and **Settings**.
+
+**Overview** is the project's home: what it is, who uses it, what it can do today (with what each merged ticket
+added), how its parts fit together, things worth knowing, the rules the Architect found, the proof that squad-kit can
+work here, and ideas for tickets. The first time, it is the handover after setup: **Looks right, start working**
+approves the rules (until then they are proposals), **Something is wrong** opens a talk with the Architect. A new
+project opens on a **setup page** with live steps instead. Terminal: `squad setup`, `squad overview`. Click the project name or the
 logo to go back to Home.
 
 On every page of a project:
@@ -99,10 +105,10 @@ The tabs:
 | **Story** | The ask as written, the spec, and notes. Add a note, a business rule or a "done when" item; every agent on the ticket reads it. |
 | **Plan** | The design: the decision and the steps. |
 | **Activity** | Everything that happened, with who and when. |
-| **Conversation** | Each agent's real session: messages, plans, commands, changes, pictures. Message an agent here, or talk to it. |
-| **Proof** | Each "done when" with its screenshot, and the checks and review results. |
+| **Conversation** | **What happened** (the default): one card per step with its time, a one-line summary and what it handed in (the questions, the spec, the design, the changed files, the review, the screenshots), each with a link to its tab. **Full log**: each agent's real session in plain words, with **Open it in Claude Code** for engineers. Message an agent here, or talk to it. A command the sandbox blocked says what and why, with a link to allow it. |
+| **Proof** | Each "done when" with its screenshot, and the checks and review results. **Not checked** (orange) means the project has no tests. squad-kit checks each screenshot is a real, new picture, and that "after" differs from "before". |
 | **Changes** | What the ticket changed against main, file by file, from the squad's copy of the code. |
-| **Cost** | What each role used on this ticket: runs, tokens, and the cost at API prices. |
+| **Cost** | Depends on how you pay for Claude. On a subscription: "Included in your Claude plan. No extra charge.", the size of the work against the project's usual ticket, where the work went, and its value at API prices (a value, not a bill). With an API key: real dollars, against a budget per ticket and per month, with a warning at 80% and a pause at 100%. Models and tokens are under **Details for engineers**. Terminal: `squad cost [ticket]`. |
 | **Developer** | The branch, the squad's copy of the code, the files it touched, the exact error when a step stopped, and the commands to open it yourself. |
 
 **A slow step** gets a card on the Now tab: **Taking longer than usual** (past twice the usual time) with what it
@@ -170,6 +176,23 @@ level and what it works on now. Below: the limit of tickets at once, what each r
 - **Balanced**: the strongest model builds at medium effort.
 - **Thrifty**: a lighter model builds. Cheapest.
 
+Under the picker, once a setting has 3 accepted tickets: the average cost value and squad time per accepted ticket
+for each setting on this project.
+
+Each Quality setting also caps every step: a number of agent turns and, where the AI tool supports it, a spend
+(Best: the Builder 300 turns and $60, fixes 150 and $30; Balanced and Thrifty less). Reaching a cap keeps the work
+and asks: **Give it more** or **Stop**. It never counts as a failed try.
+
+**Sandbox**: on Mac and most Linux computers, the Builder's and Tester's commands run in Claude Code's sandbox. They
+can write only in the ticket's copy, its proof folder, temp folders and the package caches. npm, pnpm, Yarn, Rust
+and Go use their own caches, which check every package against the lock file. .NET, Java and Ruby packages go into a
+download folder for that ticket only, never your own caches; it is removed when the ticket is released or deleted
+(the first build of a ticket downloads its packages again). They can't read your keys and sign-ins (`~/.ssh`,
+`~/.aws`, the GitHub and cloud sign-ins, squad-kit's files) or the project's `.env` files. They can reach the package
+registries and the websites you allow in Settings. A blocked command shows in the Conversation tab with what and
+why. Where the sandbox can't run (Windows, some Linux setups), steps run as before, and this page and `squad doctor`
+say so.
+
 **Edit** on a role opens:
 
 - **Models**, per step: a level (**Strongest**, **Balanced**, **Fast**) and an effort (extra high, high, medium,
@@ -194,7 +217,13 @@ Terminal: `squad config set quality best`, `squad agent builder`, `squad agent b
 - **Theme** and **Terminal commands** (show or hide the command beside each button).
 - **Board**: **Restart the board**, on the same link. Running work picks up where it stopped.
 - **Tickets at once**: from 1 to 5, for all your projects.
-- **Desktop notices**: on or off, for this browser. If the browser blocked them, it says how to allow them.
+- **Desktop notices**: on or off, for this browser. **Turn on** says at once that the browser is asking; if the
+  browser doesn't answer, it says how to allow notices for the page (and, on a Mac, in System Settings ›
+  Notifications). When they are on, it sends one test notice.
+- **How you pay for Claude**: squad-kit finds out (subscription or API key); change it here if it is wrong. With an
+  API key: a budget per ticket and per month. Terminal: `squad config set payment`, `squad config set budget`.
+- **Websites the squad may reach**: on top of the package registries, for the sandbox. Shared by the team.
+  Terminal: `squad config set hosts`.
 - **Report a problem**: a report for the whole app, without a ticket. The app log is in `~/.squad-kit/logs/`,
   one file a day with every step, stop and error (never a key or a prompt), kept 14 days. Errors also print in the
   terminal that runs the app. Terminal: `squad logs`, `squad logs --tail`.
@@ -210,4 +239,5 @@ Terminal: `squad config set quality best`, `squad agent builder`, `squad agent b
 - **About squad-kit**: your version, when the app last looked for a new one, **Check for updates**, and the
   daily check (turn it off on a network without internet). When a new version is out, Home and every project
   page show it with what is new. **Update now** waits until no agent is in the middle of a step, installs it,
-  and restarts the app on the same link. Terminal: `squad upgrade`.
+  and restarts the app on the same link. The banner shows what is new in every release since your version.
+  **Check for updates** also reads the notes again. Terminal: `squad upgrade`.

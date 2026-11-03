@@ -43,6 +43,12 @@ vi.mock('../src/core/claude-binary.js', async (importOriginal) => {
   return { ...actual, resolveClaudeBinary: () => h.state.binary };
 });
 
+// Whether the sandbox runs depends on the computer; the fixture holds the row for a Mac.
+vi.mock('../src/engine/sandbox.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/engine/sandbox.js')>();
+  return { ...actual, sandboxStatus: () => [{ tool: 'Claude Code', available: true, why: "Claude Code's sandbox (macOS Seatbelt)" }] };
+});
+
 const NO_LOGIN: LoginProbe = { present: false, hint: 'none', detail: 'no Claude login detected' };
 const KEYCHAIN_LOGIN: LoginProbe = { present: true, hint: 'credential-store', detail: 'macOS Keychain' };
 const BUNDLED_BINARY: ClaudeBinary = { path: '/pkg/claude', source: 'bundled' };

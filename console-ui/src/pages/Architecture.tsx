@@ -832,9 +832,14 @@ function Detail({ pick, decisions, tickets, impact, onPick }: { pick: Pick; deci
   return (
     <aside className="sidepanel arch-side">
       <span className="note mono">
-        {d.id} · {d.area ?? 'Other'} · approved by {d.approvedBy} · {dateShort(d.date)}
+        {d.id} · {d.area ?? 'Other'} · {d.proposed ? 'found in the code, not approved yet' : `approved by ${d.approvedBy}`} · {dateShort(d.date)}
       </span>
       <h3>{d.title}</h3>
+      {d.proposed && (
+        <div className="box" style={{ borderColor: 'var(--you-line)', background: 'var(--you-soft)', marginTop: 8 }}>
+          <b>Proposed, not a rule yet.</b> It becomes one when you approve the <Link to="/overview">Overview</Link>.
+        </div>
+      )}
       {d.replacedBy && (
         <div className="box" style={{ borderColor: 'var(--you-line)', background: 'var(--you-soft)', marginTop: 8 }}>
           <b>No longer a rule.</b> Replaced by {adr(d.replacedBy)}.

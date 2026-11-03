@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { RunOptions, RunResult } from '../src/modules/claude/direct.js';
+import { pngBytes } from './support/png.js';
 
 /**
  * No silent hangs in the live squad (E1): a ticket waiting for a free place says so, Stop during the checks ends
@@ -201,7 +202,7 @@ describe.skipIf(process.platform === 'win32')('the "before" screenshots', () => 
 
     const file = `${t.id.toLowerCase()}-before-1.png`;
     fs.mkdirSync(bp.proofDir, { recursive: true });
-    fs.writeFileSync(path.join(bp.proofDir, file), 'png');
+    fs.writeFileSync(path.join(bp.proofDir, file), pngBytes());
     tester.end({ ok: true, structured: { shots: [{ criterion: 1, file }] } });
     await squad.beforeShotsOf.get(t.id);
     expect(readTicket(bp, t.id)!.proof).toEqual([expect.objectContaining({ criterion: 'It says new', before: file })]);

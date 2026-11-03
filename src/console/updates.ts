@@ -5,7 +5,7 @@ import { changelogBlobUrl, readInstalledPackage, type InstalledPackage } from '.
 import { projectName } from '../core/projects.js';
 import { fetchLatest, isNewer } from '../core/registry.js';
 import { checkForUpdates, setCheckForUpdates } from '../core/settings.js';
-import { INSTALL_TIMEOUT_MS, fetchReleaseNotes, isMajorBump, runInstall, upgradePlan, whyInstallFailed, type InstallResult, type ReleaseNotes } from '../core/update.js';
+import { INSTALL_TIMEOUT_MS, fetchReleasesBetween, isMajorBump, runInstall, upgradePlan, whyInstallFailed, type InstallResult, type ReleaseNotes } from '../core/update.js';
 import { boardExists, listTickets, readMeta, readTicket } from '../board/store.js';
 import { agentRuns, holdNewRuns } from '../engine/live.js';
 import type { OpenProject, OpenProjects } from './open-projects.js';
@@ -58,6 +58,11 @@ export interface UpdateStatus {
   checkError?: string;
   /** A few lines of what is new in the latest version, or in this one right after an update. */
   notes?: string[];
+  /**
+   * What is new in every release the person gets, newest first: from their version up to the latest, or right after
+   * an update from the version they had. Only releases with notes; the rest are behind notesUrl.
+   */
+  releases?: ReleaseNotes[];
   notesUrl: string;
   /** A source checkout never installs itself: it only gets the command. */
   devInstall: boolean;
@@ -72,11 +77,22 @@ export interface UpdateStatus {
   progress: UpdateProgress;
 }
 
+/** The release notes from one look at GitHub: every release after `from` up to `to`. */
+interface SavedReleases {
+  from: string;
+  to: string;
+  /** When they were read. A day later, or on Check for updates, they are read again: a release can be edited. */
+  at: string;
+  items: ReleaseNotes[];
+}
+
 interface Saved {
   checkedAt?: string;
   latest?: string;
   checkError?: string;
+  /** One release's notes, as squad-kit 1.1 kept them. Still read, so the note after an update from 1.1 shows them. */
   notes?: ReleaseNotes;
+  releases?: SavedReleases;
   later?: string;
   progress?: UpdateProgress;
 }
@@ -180,13 +196,17 @@ export class UpdateService {
     return this.now() - at >= (this.saved.checkError ? HOUR : DAY);
   }
 
-  /** Ask npm for the latest version, and GitHub for what is new in it. */
-  check(): Promise<UpdateStatus> {
-    this.checking ??= this.look().finally(() => (this.checking = null));
+  /**
+   * Ask npm for the latest version, and GitHub for what is new up to it. The notes are kept and read again a day later;
+   * `fresh` (the person pressed Check for updates) reads them again now, so an edited release shows.
+   */
+  check(opts: { fresh?: boolean } = {}): Promise<UpdateStatus> {
+    if (opts.fresh && this.checking) return this.checking.then(() => this.check(opts));
+    this.checking ??= this.look(opts.fresh === true).finally(() => (this.checking = null));
     return this.checking;
   }
 
-  private async look(): Promise<UpdateStatus> {
+  private async look(fresh: boolean): Promise<UpdateStatus> {
     const installed = this.installed();
     let latest: string;
     try {
@@ -196,11 +216,32 @@ export class UpdateService {
       return this.status();
     }
     this.save({ checkedAt: this.stamp(), latest, checkError: undefined });
-    // Notes once per version; again while its release has none yet (it is often published a little after npm).
-    if (isNewer(latest, installed.version) && (this.saved.notes?.version !== latest || !this.saved.notes.lines.length)) {
-      this.save({ notes: await fetchReleaseNotes(installed.repositoryUrl, latest, { fetch: this.deps.fetch }) });
+    // What is new before an update, or right after one when the person updated by hand and nothing was read yet.
+    const p = this.progress();
+    const range = isNewer(latest, installed.version) ? { from: installed.version, to: latest } : p.state === 'done' && p.from ? { from: p.from, to: installed.version } : null;
+    if (range && (fresh || this.notesStale(range))) {
+      const items = await fetchReleasesBetween(installed.repositoryUrl, range.from, range.to, { fetch: this.deps.fetch });
+      this.save({ releases: { ...range, at: this.stamp(), items } });
     }
     return this.status();
+  }
+
+  /** Read the notes again for a new range, a day later, and while the newest release has none yet (it is often published a little after npm). */
+  private notesStale(range: { from: string; to: string }): boolean {
+    const r = this.saved.releases;
+    if (!r || r.from !== range.from || r.to !== range.to) return true;
+    if (!r.items.find((i) => i.version === range.to)?.lines.length) return true;
+    const at = Date.parse(r.at);
+    return !Number.isFinite(at) || this.now() - at >= DAY;
+  }
+
+  /** The kept notes for the releases after `from` up to `to`, newest first. */
+  private releasesFor(from: string | undefined, to: string): ReleaseNotes[] {
+    const r = this.saved.releases;
+    if (r && r.to === to) {
+      return r.items.filter((i) => (!from || isNewer(i.version, from)) && !isNewer(i.version, to));
+    }
+    return this.saved.notes?.version === to ? [this.saved.notes] : [];
   }
 
   status(): UpdateStatus {
@@ -211,7 +252,9 @@ export class UpdateService {
     // The note after an update stays a day, unless the person closes it first.
     if (progress.state === 'done' && this.now() - Date.parse(progress.at ?? '') > DAY) progress = { state: 'idle' };
     const about = progress.state === 'done' ? installed.version : (latest ?? installed.version);
-    const notes = this.saved.notes?.version === about ? this.saved.notes : undefined;
+    const releases = this.releasesFor(progress.state === 'done' ? progress.from : installed.version, about);
+    const notes = releases.find((r) => r.version === about);
+    const withLines = releases.filter((r) => r.lines.length);
     const target = progress.to ?? (newer && latest ? latest : 'latest');
     return {
       current: installed.version,
@@ -221,6 +264,7 @@ export class UpdateService {
       checkedAt: this.saved.checkedAt ?? null,
       ...(this.saved.checkError ? { checkError: this.saved.checkError } : {}),
       ...(notes?.lines.length ? { notes: notes.lines } : {}),
+      ...(withLines.length ? { releases: withLines } : {}),
       notesUrl: notes?.url ?? changelogBlobUrl(installed.repositoryUrl, about),
       devInstall: installed.isDevInstall,
       command: upgradePlan(installed, target).text,
@@ -354,6 +398,8 @@ function besideLabel(key: string): string {
   if (key.startsWith('__impact:')) return `The Architect checks what ${key.slice(9)} changes`;
   if (key.startsWith('__tech:')) return `The Architect writes the ${key.slice(7)} decision`;
   if (key === '__blueprint') return 'The Architect reads the code for the architecture page';
+  if (key === '__setup') return 'squad-kit tries the project once: its tests and its app';
+  if (key === '__talk') return 'The Architect answers about the overview';
   return 'The Architect reads the project';
 }
 

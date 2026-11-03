@@ -8,6 +8,7 @@ import { findProject, forgetProject, projectName, readProjects } from '../core/p
 import { boardExists, boardPaths, listTickets, readMeta } from '../board/store.js';
 import { inbox } from '../board/actions.js';
 import { runningApp } from '../board/console-info.js';
+import { setupLine, setupView } from '../board/first-run.js';
 
 const out = (s = '') => process.stdout.write(`${s}\n`);
 const home = (p: string) => (p.startsWith(os.homedir()) ? `~${p.slice(os.homedir().length)}` : p);
@@ -18,6 +19,12 @@ function stateOf(root: string): string {
   const bp = boardPaths(path.join(root, SQUAD_DIR));
   if (!boardExists(bp)) return kleur.gray('no board yet: run squad console in its folder');
   const meta = readMeta(bp);
+  // The first run, step by step, until the person checked the overview: `squad setup` and `squad overview` there.
+  const setup = setupView(bp);
+  if (setup && !setup.approved) {
+    const line = setupLine(setup);
+    return setup.steps.some((s) => s.state === 'failed' && s.id === 'read') ? kleur.red(line) : kleur.yellow(line);
+  }
   if (meta.engine === 'live' && meta.scan && meta.scan.status !== 'done') {
     return meta.scan.status === 'failed' ? kleur.red('the Architect could not read it') : kleur.yellow('setting up: the Architect reads it');
   }

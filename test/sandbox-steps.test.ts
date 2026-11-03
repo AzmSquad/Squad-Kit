@@ -1,0 +1,253 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { execSync } from 'node:child_process';
+import { Hono } from 'hono';
+import type { RunOptions, RunResult } from '../src/modules/claude/direct.js';
+import type { SandboxSupport } from '../src/modules/ai-tool/types.js';
+
+/**
+ * The Builder and the Tester run their commands in the sandbox, read-only steps do not need one, a computer without
+ * it runs the steps as before, what it refused shows on the ticket, and a step that reaches its cap pauses with the
+ * work kept and two ways out: Give it more, or Stop.
+ */
+
+const h = vi.hoisted(() => ({
+  support: { available: true, why: "Claude Code's sandbox (macOS Seatbelt)" } as SandboxSupport,
+  calls: [] as RunOptions[],
+  /** What the fake Claude Code does with a run before it answers; it may change the answer. */
+  run: null as ((opts: RunOptions) => Partial<RunResult> | void) | null,
+}));
+
+vi.mock('../src/modules/claude/direct.js', async (orig) => ({
+  ...(await orig<typeof import('../src/modules/claude/direct.js')>()),
+  runClaude: async (opts: RunOptions): Promise<RunResult> => {
+    h.calls.push(opts);
+    const extra = h.run?.(opts) ?? {};
+    return { ok: true, structured: { summary: 'Built it', shots: [] }, sessionId: opts.resume ?? opts.sessionId ?? 's-1', text: '', ...extra };
+  },
+}));
+
+vi.mock('../src/modules/claude/sandbox.js', async (orig) => ({
+  ...(await orig<typeof import('../src/modules/claude/sandbox.js')>()),
+  claudeSandboxSupport: () => h.support,
+}));
+
+const { boardPaths, readMeta, readTicket, writeMeta, writeTicket } = await import('../src/board/store.js');
+const { LiveSquad } = await import('../src/engine/live.js');
+const { addWorktree } = await import('../src/engine/git.js');
+const actions = await import('../src/board/actions.js');
+const { problemOf } = await import('../src/board/problem.js');
+const { squadHome } = await import('../src/core/home.js');
+const { buildPaths } = await import('../src/core/paths.js');
+const { mountApi } = await import('../src/console/api/index.js');
+
+let tmp: string;
+let project: string;
+let wt: string;
+let bp: ReturnType<typeof boardPaths>;
+type Squad = {
+  runBuilder(id: string, prompt: string, resume: boolean, step?: string): Promise<void>;
+  shoot(id: string, t: unknown, when: 'before' | 'after', meta: unknown, appRunning: boolean, appUrl?: string): Promise<void>;
+  review(id: string): Promise<void>;
+  launch(key: string, job: () => Promise<void>): void;
+  running: Set<string>;
+};
+
+const sh = (cmd: string, cwd: string) => execSync(cmd, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+const activity = () => readTicket(bp, 'AP-1')!.activity.map((a) => a.text);
+const squad = () => new LiveSquad(bp) as unknown as Squad;
+const setMeta = (more: Record<string, unknown>) => writeMeta(bp, { ...readMeta(bp), ...more });
+
+/** Runs a step the way the squad does (so a stop becomes its card), and waits for it to end. */
+async function step(s: Squad, job: () => Promise<void>): Promise<void> {
+  s.launch('AP-1', job);
+  await vi.waitFor(() => expect(s.running.has('AP-1')).toBe(false), { timeout: 10_000 });
+}
+
+beforeEach(() => {
+  h.calls.length = 0;
+  h.run = null;
+  h.support = { available: true, why: "Claude Code's sandbox (macOS Seatbelt)" };
+  tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'squad-box-')));
+  project = path.join(tmp, 'app');
+  fs.mkdirSync(project);
+  sh('git init -q -b main', project);
+  fs.writeFileSync(path.join(project, 'limit.txt'), 'limit = 2\n');
+  sh('git add -A && git -c user.name=t -c user.email=t@t commit -qm start', project);
+  bp = boardPaths(path.join(project, '.squad'));
+  writeMeta(bp, {
+    project: 'App',
+    key: 'AP',
+    nextNumber: 2,
+    engine: 'live',
+    runner: 'direct',
+    user: { name: 'Momen', role: 'Project manager' },
+    roles: { analyst: 'Claude', architect: 'Claude', builder: 'Claude', tester: 'Claude', reviewer: 'Claude' },
+    tools: [],
+    speed: 1,
+    map: [],
+    lessons: [],
+    commands: {},
+    git: { base: 'main', remote: 'origin' },
+    scan: { status: 'done', empty: false },
+  });
+  const copy = addWorktree(project, 'AP-1', 'main');
+  wt = copy.dir;
+  // The Builder's work so far, not committed yet.
+  fs.writeFileSync(path.join(wt, 'limit.txt'), 'limit = 3\n');
+  writeTicket(bp, {
+    id: 'AP-1',
+    title: 'Raise the limit',
+    ask: 'Let people book 3 a day',
+    kind: 'feature',
+    source: { type: 'manual' },
+    priority: 'normal',
+    stage: 'implement',
+    status: '',
+    waiting: null,
+    createdAt: new Date().toISOString(),
+    createdBy: 'Momen',
+    activity: [],
+    worktree: wt,
+    branch: copy.branch,
+    baseCommit: copy.baseCommit,
+    squad: { phase: 'build', nextAt: new Date().toISOString() },
+    sessions: { build: 'b-1', tester: 't-1', review: 'r-1' },
+    criteria: [{ given: 'a person with 2 bookings', when: 'they book again', then: 'it works' }],
+  });
+});
+
+afterEach(() => {
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+describe('the sandbox', () => {
+  it("keeps the Builder's commands to its copy, the proof folder and temp folders, the registries and the project's hosts", async () => {
+    setMeta({ allowedHosts: ['nexus.example.com'] });
+    await squad().runBuilder('AP-1', 'Build it', false, 'build');
+    const box = h.calls[0]!.sandbox!;
+    expect(box).toMatchObject({ enabled: true, allowUnsandboxedCommands: false, failIfUnavailable: false, network: { strictAllowlist: true } });
+    expect(box.filesystem.allowWrite).toEqual(expect.arrayContaining([bp.proofDir, os.tmpdir()]));
+    expect(box.filesystem.denyRead).toEqual(
+      expect.arrayContaining([path.join(os.homedir(), '.ssh'), path.join(os.homedir(), '.aws'), fs.realpathSync(squadHome()), bp.secretsFile, `${project}/**/.env`]),
+    );
+    // Its own copy sits inside squad-kit's folder: that one stays readable.
+    expect(box.filesystem.allowRead).toContain(wt);
+    expect(box.network.allowedDomains).toEqual(expect.arrayContaining(['registry.npmjs.org', 'pypi.org', 'github.com', 'nexus.example.com']));
+    expect(box).not.toHaveProperty('excludedCommands');
+    // The Builder's work goes on as before.
+    expect(fs.readFileSync(path.join(wt, 'limit.txt'), 'utf8')).toBe('limit = 3\n');
+  });
+
+  it("lets the Tester's browser commands out, and its screenshots into the proof folder", async () => {
+    await squad().shoot('AP-1', readTicket(bp, 'AP-1')!, 'after', {}, true, 'http://localhost:4999');
+    const box = h.calls[0]!.sandbox!;
+    expect(box.excludedCommands).toEqual(['npx playwright screenshot:*', 'npx -y playwright screenshot:*', 'npx playwright install:*', 'npx -y playwright install:*']);
+    expect(box.filesystem.allowWrite).toContain(bp.proofDir);
+    expect(box.filesystem.allowRead).toContain(bp.proofDir);
+  });
+
+  it('is not used by steps that only read: they have no free shell to keep in', async () => {
+    await squad().review('AP-1').catch(() => undefined);
+    expect(h.calls[0]!.sandbox).toBeUndefined();
+  });
+
+  it('on a computer without it, the step runs as before', async () => {
+    h.support = { available: false, why: 'socat is not installed', fix: 'Install it, for example: sudo apt install socat' };
+    await squad().runBuilder('AP-1', 'Build it', false, 'build');
+    expect(h.calls).toHaveLength(1);
+    expect(h.calls[0]!.sandbox).toBeUndefined();
+    expect(h.calls[0]!.maxTurns).toBe(300);
+    expect(activity()).not.toContain(expect.stringContaining('blocked'));
+  });
+
+  it('says on the ticket in plain words what it refused, each thing once', async () => {
+    h.run = (opts) => {
+      for (let i = 0; i < 3; i += 1) opts.onBlocked?.({ kind: 'host', target: 'example.com' });
+      opts.onBlocked?.({ kind: 'read', target: path.join(os.homedir(), '.ssh', 'id_rsa') });
+    };
+    await squad().runBuilder('AP-1', 'Build it', false, 'build');
+    const lines = activity().filter((a) => a.includes('was blocked'));
+    expect(lines).toEqual(['Reading ~/.ssh/id_rsa was blocked: keys and sign-ins stay private.', 'Reaching example.com was blocked: not a package registry. Allow it in Settings.']);
+  });
+});
+
+describe('the board', () => {
+  it('says whether this computer has the sandbox, and keeps the hosts the project allows', async () => {
+    const app = new Hono();
+    mountApi(app, { paths: buildPaths(project) });
+    const put = (allowedHosts: unknown) =>
+      app.request('/api/v1/settings', { method: 'PUT', body: JSON.stringify({ allowedHosts }), headers: { 'content-type': 'application/json' } });
+    expect((await put(['https://Nexus.Example.com/repo', '*.corp.example.com'])).status).toBe(200);
+    expect(readMeta(bp).allowedHosts).toEqual(['nexus.example.com', '*.corp.example.com']);
+    const bad = await put(['*']);
+    expect(bad.status).toBe(400);
+    expect(((await bad.json()) as { error: string }).error).toBe('"*" is not a host name. Write it like nexus.example.com, or *.example.com for all of its subdomains.');
+    h.support = { available: false, why: 'socat is not installed', fix: 'Install it, for example: sudo apt install socat' };
+    const info = (await (await app.request('/api/v1/sandbox')).json()) as { tools: unknown[]; registries: string[]; allowedHosts: string[] };
+    expect(info.tools).toEqual([{ tool: 'Claude Code', available: false, why: 'socat is not installed', fix: 'Install it, for example: sudo apt install socat' }]);
+    expect(info.registries).toContain('registry.npmjs.org');
+    expect(info.allowedHosts).toEqual(['nexus.example.com', '*.corp.example.com']);
+  });
+});
+
+describe('caps', () => {
+  it('come from the Quality setting for each step', async () => {
+    await squad().runBuilder('AP-1', 'Build it', false, 'build');
+    setMeta({ quality: 'thrifty' });
+    await squad().runBuilder('AP-1', 'Build it', true, 'fix');
+    await squad().shoot('AP-1', readTicket(bp, 'AP-1')!, 'after', {}, true, 'http://localhost:4999');
+    expect(h.calls.map((c) => [c.maxTurns, c.maxBudgetUsd])).toEqual([
+      [300, 60],
+      [90, 9],
+      [48, 3],
+    ]);
+  });
+
+  it('pause the step with the work kept, not as a failed try, and Give it more carries on with twice the room', async () => {
+    h.run = () => ({ ok: false, capped: { by: 'turns' }, error: 'It used the 300 turns this step may take.', structured: undefined });
+    const s = squad();
+    await step(s, () => s.runBuilder('AP-1', 'Build it', false, 'build'));
+    let t = readTicket(bp, 'AP-1')!;
+    expect(t.waiting).toEqual({ kind: 'stuck', summary: 'The Builder reached its limit for this step' });
+    expect(t.stuck).toMatchObject({ gate: 'cap', question: 'The Builder used the 300 turns one step may take on Best, so squad-kit paused it. Its work so far is kept.' });
+    expect(t.stuck!.options.map((o) => [o.do, o.name])).toEqual([
+      ['more', 'Give it more'],
+      ['stop', 'Stop'],
+    ]);
+    expect(problemOf(t)).toMatchObject({ title: 'The Builder reached its limit for this step', safe: ["The changes are kept in the ticket's own copy of the code.", 'Nothing was merged or pushed.'] });
+    expect(t.fails ?? 0).toBe(0);
+    expect(t.retryPhase).toBe('build');
+    expect(fs.readFileSync(path.join(wt, 'limit.txt'), 'utf8')).toBe('limit = 3\n');
+
+    t = actions.decideStuck(bp, 'AP-1', 0);
+    expect(t).toMatchObject({ waiting: null, capRaise: { role: 'builder', step: 'build', times: 1 }, squad: { phase: 'build' } });
+    h.run = null;
+    await squad().runBuilder('AP-1', 'Continue', true, 'build');
+    expect([h.calls[1]!.maxTurns, h.calls[1]!.maxBudgetUsd]).toEqual([600, 120]);
+    // Done with the step: the next one has its usual caps again.
+    expect(readTicket(bp, 'AP-1')!.capRaise).toBeUndefined();
+  });
+
+  it('a spend cap says so, and Stop leaves the usual ways out', async () => {
+    setMeta({ quality: 'balanced' });
+    h.run = () => ({ ok: false, capped: { by: 'spend' }, error: 'It reached the $36 this step may spend.', structured: undefined });
+    const s = squad();
+    await step(s, () => s.runBuilder('AP-1', 'Build it', false, 'build'));
+    expect(readTicket(bp, 'AP-1')!.stuck!.question).toBe('The Builder reached the $36 one step may spend on Balanced, so squad-kit paused it. Its work so far is kept.');
+    const t = actions.decideStuck(bp, 'AP-1', 1);
+    expect(t.waiting).toEqual({ kind: 'stuck', summary: 'The squad stopped and needs you' });
+    expect(t.stuck!.question).toBe('You stopped the squad. Nothing was lost; the work so far is kept.');
+    expect(t.stuck!.options.map((o) => o.name)).toEqual(['Carry on', 'Fix it yourself', 'Send it back to the plan']);
+    expect(t.retryPhase).toBe('build');
+    expect(t.capRaise).toBeUndefined();
+    expect(problemOf(t)!.title).toBe('You stopped the squad');
+  });
+
+  it('Give it more and Stop belong to a paused step only', () => {
+    writeTicket(bp, { ...readTicket(bp, 'AP-1')!, waiting: { kind: 'stuck', summary: 'x' }, stuck: { question: 'It failed', options: [{ do: 'more', name: 'Give it more', note: '' }] } });
+    expect(() => actions.decideStuck(bp, 'AP-1', 0)).toThrow('Only a step paused at its limit can be given more or stopped here.');
+  });
+});

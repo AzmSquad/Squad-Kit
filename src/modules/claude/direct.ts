@@ -9,6 +9,7 @@ import { usageFrom } from '../../engine/acp-runner.js';
 import { track, whenExited } from '../../engine/process-group.js';
 import { resetWords } from '../../engine/usage-limit.js';
 import { claudeLimit } from './limit.js';
+import { claudeBlocked, type ClaudeSandbox } from './sandbox.js';
 
 /**
  * Runs the real Claude Code CLI headless (`claude -p`) in a project folder. squad-kit never
@@ -16,7 +17,7 @@ import { claudeLimit } from './limit.js';
  */
 
 export type { ToolEvent } from '../ai-tool/types.js';
-import type { AgentUsage, ToolEvent } from '../ai-tool/types.js';
+import type { AgentUsage, BlockedAction, ToolEvent } from '../ai-tool/types.js';
 
 export interface RunOptions {
   cwd: string;
@@ -38,10 +39,19 @@ export interface RunOptions {
   /** How hard the model thinks. */
   effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   addDirs?: string[];
+  /** Claude Code's sandbox for the run's shell commands. */
+  sandbox?: ClaudeSandbox;
+  /** More environment for Claude Code and the commands it runs. */
+  env?: Record<string, string>;
+  /** Claude Code's own caps: agent turns, and spend in US dollars. */
+  maxTurns?: number;
+  maxBudgetUsd?: number;
   timeoutMs?: number;
   /** Stops the run when the person presses Stop. */
   signal?: AbortSignal;
   onTool?(event: ToolEvent): void;
+  /** The sandbox refused a command something. */
+  onBlocked?(action: BlockedAction): void;
   onText?(text: string): void;
   /** Any sign of life from Claude Code (a message, a tool call, a tool result), for the watchdog. */
   onActivity?(): void;
@@ -58,6 +68,8 @@ export interface RunResult {
   /** Claude Code's own words for the failure, for engineers. */
   detail?: string;
   usage?: AgentUsage;
+  /** The run stopped on one of its caps. */
+  capped?: { by: 'turns' | 'spend' };
 }
 
 let cachedBinary: string | null = null;
@@ -202,9 +214,13 @@ export function runClaude(opts: RunOptions): Promise<RunResult> {
   if (opts.model) args.push('--model', opts.model);
   if (opts.effort) args.push('--effort', opts.effort);
   for (const d of opts.addDirs ?? []) args.push('--add-dir', d);
+  // The sandbox goes in as the run's own settings: with them, a repo's .claude/settings.json cannot widen it.
+  if (opts.sandbox) args.push('--settings', JSON.stringify({ sandbox: opts.sandbox }));
+  if (opts.maxTurns) args.push('--max-turns', String(opts.maxTurns));
+  if (opts.maxBudgetUsd) args.push('--max-budget-usd', String(opts.maxBudgetUsd));
 
   return new Promise((resolve) => {
-    const child = track(spawn(bin, args, { cwd: opts.cwd, env: claudeEnv(), stdio: ['ignore', 'pipe', 'pipe'] }));
+    const child = track(spawn(bin, args, { cwd: opts.cwd, env: { ...claudeEnv(), ...opts.env }, stdio: ['ignore', 'pipe', 'pipe'] }));
     if (child.pid) opts.onSpawn?.(child.pid);
     opts.signal?.addEventListener('abort', () => {
       result = { ok: false, sessionId, text: lastText, error: 'You stopped the squad.' };
@@ -236,10 +252,20 @@ export function runClaude(opts: RunOptions): Promise<RunResult> {
             opts.onText?.(part.text);
           }
         }
+      } else if (event.type === 'user') {
+        // What a command's result says the sandbox refused.
+        if (!opts.onBlocked) return;
+        for (const part of event.message?.content ?? []) {
+          if (part?.type !== 'tool_result') continue;
+          const out = typeof part.content === 'string' ? part.content : Array.isArray(part.content) ? part.content.map((c: { text?: string }) => c?.text ?? '').join('\n') : '';
+          for (const b of claudeBlocked(out)) opts.onBlocked(b);
+        }
       } else if (event.type === 'result') {
         const isError = Boolean(event.is_error) || event.subtype !== 'success';
         const usage = claudeUsage(event, costBefore);
-        const said = typeof event.result === 'string' ? event.result : String(event.subtype);
+        const errors = Array.isArray(event.errors) ? event.errors.filter((e: unknown) => typeof e === 'string') : [];
+        const said = typeof event.result === 'string' ? event.result : [String(event.subtype), ...errors].join(': ');
+        const capped = event.subtype === 'error_max_turns' ? 'turns' : event.subtype === 'error_max_budget_usd' ? 'spend' : null;
         result = {
           ok: !isError,
           sessionId: event.session_id ?? sessionId,
@@ -247,6 +273,7 @@ export function runClaude(opts: RunOptions): Promise<RunResult> {
           structured: event.structured_output ?? undefined,
           ...(isError ? { error: plainError(said), detail: said.trim().slice(-2000) } : {}),
           ...(usage ? { usage } : {}),
+          ...(capped ? { capped: { by: capped } } : {}),
         };
       }
     };

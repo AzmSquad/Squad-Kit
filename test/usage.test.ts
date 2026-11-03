@@ -26,7 +26,7 @@ vi.mock('../src/modules/claude/direct.js', async (orig) => ({
 const { claudeUsage, costSoFar } = await import('../src/modules/claude/direct.js');
 const { runAcp, usageFrom } = await import('../src/engine/acp-runner.js');
 const { addRun, boardUsage, byRole, costWords, tokenWords, totalOf } = await import('../src/board/usage.js');
-const { boardPaths, readMeta, readTicket, updateTicket, writeMeta, splitTicket } = await import('../src/board/store.js');
+const { boardPaths, listTickets, readMeta, readTicket, updateTicket, writeMeta, splitTicket } = await import('../src/board/store.js');
 const { seedDemoBoard } = await import('../src/board/demo.js');
 const actions = await import('../src/board/actions.js');
 const { LiveSquad } = await import('../src/engine/live.js');
@@ -168,6 +168,8 @@ describe('added up per ticket and per role', () => {
   });
 
   it("counts the project's first read, which has no ticket, on the project's own line, and in the board's total", async () => {
+    // The sample board's own sample cost is set aside, so only these runs count.
+    for (const x of listTickets(bp)) updateTicket(bp, x.id, (y) => delete y.usage);
     answers.push({ structured: { empty: true, summary: 'An empty folder', map: [], decisions: [], commands: {} }, usage: { inputTokens: 3000, outputTokens: 200, costUsd: 0.3 } });
     await (new LiveSquad(bp) as unknown as Squad).scan();
     expect(readMeta(bp).scan?.status).toBe('done');

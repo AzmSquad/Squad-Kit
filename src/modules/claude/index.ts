@@ -5,6 +5,8 @@ import { AcpStartError, runAcp, type AcpLaunch } from '../../engine/acp-runner.j
 import type { AgentResult, AgentRun, AiTool } from '../ai-tool/types.js';
 import { claudeBinary, claudeEnv, costSoFar, deniedTools, describeTool, plainError, runClaude, sessionExists, toolVersion, type RunOptions } from './direct.js';
 import { claudeLimit } from './limit.js';
+import { claudeBlocked, claudeSandbox, claudeSandboxSupport, withCap } from './sandbox.js';
+import { claudeBilling, claudeResume } from './billing.js';
 
 /**
  * Claude Code as a squad-kit AI tool, on the person's own Claude login: over ACP through the official adapter, with
@@ -82,9 +84,14 @@ export function claudeRunOptions(r: AgentRun): RunOptions {
     ...(r.model || r.level ? { model: r.model || LEVEL_MODEL[r.level!] } : {}),
     ...(r.effort ? { effort: r.effort } : {}),
     ...(r.addDirs ? { addDirs: r.addDirs } : {}),
+    ...(r.sandbox ? { sandbox: claudeSandbox(r.sandbox) } : {}),
+    ...(r.env ? { env: r.env } : {}),
+    ...(r.caps?.turns ? { maxTurns: r.caps.turns } : {}),
+    ...(r.caps?.spendUsd ? { maxBudgetUsd: r.caps.spendUsd } : {}),
     ...(r.timeoutMs ? { timeoutMs: r.timeoutMs } : {}),
     ...(r.signal ? { signal: r.signal } : {}),
     ...(r.onTool ? { onTool: r.onTool } : {}),
+    ...(r.onBlocked ? { onBlocked: r.onBlocked } : {}),
     ...(r.onText ? { onText: r.onText } : {}),
     ...(r.onActivity ? { onActivity: r.onActivity } : {}),
     ...(r.onSpawn ? { onSpawn: r.onSpawn } : {}),
@@ -117,13 +124,18 @@ export function claudeLaunch(opts: RunOptions, adapter: string, bin: string): Ac
     ...(opts.model ? { model: opts.model } : {}),
     ...(opts.effort ? { effort: opts.effort } : {}),
     ...(opts.addDirs?.length ? { additionalDirectories: opts.addDirs } : {}),
+    // The Agent SDK's own options: it puts the sandbox in the run's settings and passes the caps to Claude Code.
+    ...(opts.sandbox ? { sandbox: opts.sandbox } : {}),
+    ...(opts.maxTurns ? { maxTurns: opts.maxTurns } : {}),
+    ...(opts.maxBudgetUsd ? { maxBudgetUsd: opts.maxBudgetUsd } : {}),
   };
   return {
     label: 'Claude Code',
     command: process.execPath,
     args: [adapter],
     // The adapter takes its model from ANTHROPIC_MODEL (an option alone does not change it), and each run starts its own adapter.
-    env: { ...claudeEnv(), CLAUDE_CODE_EXECUTABLE: bin, ...(opts.model ? { ANTHROPIC_MODEL: opts.model } : {}) },
+    // The run's own environment reaches Claude Code through the adapter, and from there the commands it runs.
+    env: { ...claudeEnv(), ...opts.env, CLAUDE_CODE_EXECUTABLE: bin, ...(opts.model ? { ANTHROPIC_MODEL: opts.model } : {}) },
     meta: { claudeCode: { options } },
     // The adapter starts in the person's own default mode and ignores permissionMode above: the session gets it instead.
     mode: opts.permissionMode ?? 'default',
@@ -132,6 +144,7 @@ export function claudeLaunch(opts: RunOptions, adapter: string, bin: string): Ac
     explain: plainError,
     toolName: (update) => update._meta?.claudeCode?.toolName,
     structuredTool: 'StructuredOutput',
+    blocked: claudeBlocked,
   };
 }
 
@@ -173,6 +186,7 @@ function adapterVersion(): string | null {
 export const claudeTool: AiTool = {
   name: 'claude',
   label: 'Claude Code',
+  plan: 'Claude',
   canRun: true,
   supportsEffort: true,
   // Claude Code takes extra high too (`--effort xhigh`, and the same option over ACP).
@@ -189,18 +203,25 @@ export const claudeTool: AiTool = {
     const acp = adapterVersion();
     return v ? `${v}${acp ? `, ACP adapter ${acp}` : ''}` : null;
   },
+  sandbox: claudeSandboxSupport,
+  // `--max-turns` and `--max-budget-usd`, and the Agent SDK's maxTurns and maxBudgetUsd over ACP.
+  caps: { turns: true, spend: true },
+  blocked: claudeBlocked,
   async run(r) {
     const opts = claudeRunOptions(r);
-    if (r.direct || !acpAdapterPath()) return withLimit(await runClaude(opts));
+    const done = (res: AgentResult) => withCap(withLimit(res), r.caps);
+    if (r.direct || !acpAdapterPath()) return done(await runClaude(opts));
     try {
-      return withLimit(await runClaudeAcp({ ...opts, ...(r.logDir ? { logDir: r.logDir } : {}) }));
+      return done(await runClaudeAcp({ ...opts, ...(r.logDir ? { logDir: r.logDir } : {}) }));
     } catch (err) {
       if (!(err instanceof AcpStartError)) throw err;
       // After a Stop nothing starts again, not even the other way.
       if (r.signal?.aborted) return { ok: false, sessionId: opts.resume ?? opts.sessionId ?? '', text: '', error: 'You stopped the squad.' };
       r.onFallback?.(err.message);
-      return withLimit(await runClaude(opts));
+      return done(await runClaude(opts));
     }
   },
   describe: describeTool,
+  billing: () => claudeBilling(),
+  resumeCommand: claudeResume,
 };

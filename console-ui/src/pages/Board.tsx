@@ -4,7 +4,7 @@ import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { Check, Download, Plus, Search } from 'lucide-react';
 import { api } from '../api/client';
 import type { Actor, DraftJob, Stage, Ticket, TrackerStatus } from '../api/types';
-import { useAct, useBoard } from '../lib/data';
+import { useBoard } from '../lib/data';
 import { BugDialog, NewTicketDialog, PullDialog } from '../components/dialogs';
 import { Cmd, Glyph, STAGE_NAME } from '../components/ui';
 import { TicketDrawer } from './TicketDrawer';
@@ -12,8 +12,10 @@ import { BoardCost } from '../components/Usage';
 import { isMine, ownerOf, useMe } from '../components/HandOver';
 import { changeWaits, openChange } from '../components/ChangeCard';
 import { CardLine, isRunning } from '../components/LiveNow';
-import { ReportButton } from '../components/Report';
+import { DependsTag } from '../components/Depends';
 import { needsYou } from '../lib/waiting';
+import { NOT_CHECKED_WHY } from '../lib/gates';
+import { SetupCard, useSetupWaits } from '../components/Setup';
 
 const LANES: { stage: Stage; role: Actor; who: string }[] = [
   { stage: 'tickets', role: 'analyst', who: 'Analyst' },
@@ -29,6 +31,8 @@ type View = 'all' | 'mine' | 'bugs';
 
 export function BoardPage() {
   const board = useBoard();
+  // The setup runs, or its overview waits for the person: the board shows it first.
+  const setup = useSetupWaits();
   const search = useSearch({ from: '/board' });
   const navigate = useNavigate({ from: '/board' });
   const [dialog, setDialog] = useState<'new' | 'pull' | 'bug' | null>(null);
@@ -61,7 +65,6 @@ export function BoardPage() {
   if (!data) return <NoBoard />;
 
   // What needs the person shows in the banner at the top of every page. Here: setup, the first ticket, or all calm.
-  const setup = data.meta.engine === 'live' && Boolean(data.meta.scan && data.meta.scan.status !== 'done');
   const waiting = data.tickets.filter(needsYou);
 
   return (
@@ -95,7 +98,7 @@ export function BoardPage() {
             <Cmd text="squad inbox" />
           </div>
           {setup ? (
-            <ScanState meta={data.meta} />
+            <SetupCard />
           ) : data.meta.engine === 'live' && data.tickets.length === 0 ? (
             <div className="calmlane">
               <span className="glyph"><Plus size={14} strokeWidth={2.5} /></span>
@@ -167,7 +170,7 @@ export function BoardPage() {
 }
 
 function Card({ t, selected, onOpen }: { t: Ticket; selected: boolean; onOpen(): void }) {
-  const you = Boolean(t.waiting) || t.quiet?.kind === 'stuck' || changeWaits(t);
+  const you = Boolean(t.waiting) || t.quiet?.kind === 'stuck' || changeWaits(t) || Boolean(t.testChange);
   const me = useMe();
   return (
     <button className={`card ${you ? 'you' : ''} ${t.kind === 'bug' ? 'bug' : ''} ${selected ? 'sel' : ''}`} onClick={onOpen}>
@@ -177,6 +180,12 @@ function Card({ t, selected, onOpen }: { t: Ticket; selected: boolean; onOpen():
         {you ? <span className="youtag">You</span> : t.kind === 'bug' ? <span className="prio">Bug</span> : t.priority === 'high' ? <span className="prio">High</span> : null}
         {me && !isMine(t, me) && <span className="prio owner" title="Their squad works on it">{ownerOf(t)}</span>}
         {t.archived && <span className="prio owner">Archived</span>}
+        {t.gates?.checks === 'unchecked' && (
+          <span className="prio unchecked" title={NOT_CHECKED_WHY}>
+            Not checked
+          </span>
+        )}
+        <DependsTag t={t} />
       </div>
       <h4>{t.title}</h4>
       {/* Running: who, which step, what it does, how long and the usual time, with the step bar. */}
@@ -217,60 +226,6 @@ function PullButton({ onPull }: { onPull(): void }) {
     </button>
   );
 }
-
-type SetupStep = { label: string; state: 'done' | 'now' | 'todo' | 'fail'; note?: string };
-
-/** A project's first open: what squad-kit set up, then the Architect reading the project, step by step. */
-function ScanState({ meta }: { meta: BoardResponseMeta }) {
-  const act = useAct();
-  const scan = meta.scan!;
-  const failed = scan.status === 'failed';
-  const tool = meta.tools.find((t) => t.ready);
-  const steps: SetupStep[] = [
-    { label: 'Project files and board', state: 'done', note: '.squad/ in this folder' },
-    tool
-      ? { label: `${tool.name} is ready`, state: 'done', note: 'The squad works with it' }
-      : { label: 'An AI tool', state: 'fail', note: 'Install Claude Code and sign in once, then press Try again' },
-    {
-      label: 'The Architect reads the project',
-      state: failed ? 'fail' : scan.status === 'running' ? 'now' : 'todo',
-      note: failed ? scan.error : scan.status === 'running' ? (scan.now ?? 'Starting…') : 'Starts in a moment',
-    },
-    { label: 'Ready for your first ticket', state: 'todo', note: 'Write it, or pull it from your tracker' },
-  ];
-  return (
-    <div className="setup">
-      <div className="setup-head">
-        <b>{failed ? 'The Architect could not read the project.' : 'Setting up your project'}</b>
-        <span>{failed ? 'Fix what the step below says, then try again. Nothing was lost: your project files are as they were.' : 'The Architect maps the project and finds how to test and run it. This takes a few minutes.'}</span>
-        {failed && (
-          <span className="drafterr-ways">
-            <button className="btn sm pri" onClick={() => act.mutate({ path: '/api/v1/scan', done: 'Reading the project again' })}>Try again</button>
-            <ReportButton small />
-          </span>
-        )}
-      </div>
-      <ol className="setup-steps">
-        {steps.map((st) => (
-          <li key={st.label} className={st.state}>
-            <span className="mark">{st.state === 'done' ? <Check size={12} strokeWidth={3} /> : st.state === 'fail' ? '!' : st.state === 'now' ? <span className="live" /> : null}</span>
-            <span className="txt">
-              <b>{st.label}</b>
-              {st.note && <small title={st.note}>{st.note}</small>}
-            </span>
-          </li>
-        ))}
-      </ol>
-      {!failed && (
-        <div className="setup-bar" aria-hidden>
-          <i />
-        </div>
-      )}
-    </div>
-  );
-}
-
-type BoardResponseMeta = NonNullable<ReturnType<typeof useBoard>['data']>['meta'];
 
 function NoBoard() {
   return (

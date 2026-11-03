@@ -27,6 +27,9 @@ import { currentBranch, dropSnapshot, git, isRepo, networkGitEnv, removeWorktree
 import { agentRuns } from './live.js';
 import { repoFor } from './repos.js';
 import { repoTarget } from './sync.js';
+import { deleteNoteCommit, localCopy } from './teammate-delete.js';
+import { docsRepo, squadInRepo } from './project-git.js';
+import { dropTicketCache, ticketCacheDir } from './sandbox.js';
 
 /**
  * Delete and Archive. Delete is for a ticket that never reached the base: the squad stops first, then its copy of the
@@ -56,6 +59,8 @@ export interface DeletePlan {
   unfinished?: string;
   /** The earlier Delete's choice for the pushed branch, so pressing it again does the same. */
   remote: boolean;
+  /** Someone else's ticket their owner deleted: it only leaves this board, and nothing changes on the remote. */
+  local?: { by: string };
   /** The branch a merged ticket's code is in. */
   base: string;
   command: string;
@@ -131,7 +136,8 @@ function pushedTo(bp: BoardPaths, dir: string, t: Ticket): DeletePlan['pushed'] 
 /** Why the ticket cannot be deleted, or undefined when it can. */
 function refusal(bp: BoardPaths, meta: BoardMeta, t: Ticket): { why: string; archive?: boolean } | undefined {
   const base = repoFor(meta, t).base;
-  if (!isMine(t, meta)) return { why: `${t.id} is ${ownerOf(t)}'s. Only ${ownerOf(t)} can delete it.` };
+  // Someone else's ticket that its owner deleted can leave this board: that touches this computer only.
+  if (!isMine(t, meta) && !t.ownerDeleted) return { why: `${t.id} is ${ownerOf(t)}'s. Only ${ownerOf(t)} can delete it.` };
   if (isMerged(t, meta)) {
     return { why: `${t.id} is merged already: its code is in ${base}, so it cannot be deleted. Archive it to hide it from the board. Its history stays.`, archive: true };
   }
@@ -152,6 +158,7 @@ export function deletePlan(bp: BoardPaths, id: string, opts: { remote?: boolean 
   const dir = repoDir(bp, meta, t);
   const base = repoFor(meta, t).base;
   const no = refusal(bp, meta, t);
+  if (!no && !isMine(t, meta) && t.ownerDeleted) return removePlan(bp, meta, t, dir, base);
   const pushed = no ? undefined : pushedTo(bp, dir, t);
   const remote = Boolean(pushed && (opts.remote ?? t.deleting?.remote));
   const removes: string[] = ['The ticket, its spec, notes and questions'];
@@ -162,6 +169,7 @@ export function deletePlan(bp: BoardPaths, id: string, opts: { remote?: boolean 
   const copy = inGit && fs.existsSync(copyOf(dir, t));
   const branch = inGit && hasBranch(dir, branchOf(t));
   if (copy || branch) removes.push(copy && branch ? `Its copy of the code and the branch ${branchOf(t)}` : copy ? 'Its copy of the code' : `The branch ${branchOf(t)}`);
+  if (fs.existsSync(ticketCacheDir(bp, t.id))) removes.push('The packages its Builder and Tester downloaded for it');
   const chats = Boolean(Object.values(t.sessions ?? {}).some(Boolean) || t.chat);
   const shots = Boolean(t.proof?.length);
   if (chats || shots) removes.push(chats && shots ? 'Its agent conversations and screenshots' : chats ? 'Its agent conversations' : 'Its screenshots');
@@ -182,7 +190,7 @@ export function deletePlan(bp: BoardPaths, id: string, opts: { remote?: boolean 
   stays.push('The cost it used, still counted in Usage');
   for (const k of kept) stays.push(`Its decision ${k.d.id}, "${k.d.title}", because ${and(k.by)} ${k.by.length === 1 ? 'follows' : 'follow'} it`);
   if (pushed && !remote) {
-    stays.push(`The branch ${pushed.branch} on ${pushed.remote}. Teammates can still see the ticket from it.`);
+    stays.push(`The branch ${pushed.branch} on ${pushed.remote}, with a note that you deleted ${t.id}, so teammates' boards show it as deleted.`);
     if (t.pr) stays.push(`Pull request ${t.pr.id}, still open. Close it on the code host if you no longer need it.`);
   }
 
@@ -205,6 +213,38 @@ export function deletePlan(bp: BoardPaths, id: string, opts: { remote?: boolean 
     remote,
     base,
     command: `squad delete ${t.id}${remote ? ' --remote' : ''}`,
+  };
+}
+
+/** Remove from my board: someone else's ticket that its owner deleted leaves this computer, and nothing else changes. */
+function removePlan(bp: BoardPaths, meta: BoardMeta, t: Ticket, dir: string, base: string): DeletePlan {
+  const by = t.ownerDeleted!.by;
+  const local = localCopy(dir, t, base, copyOf(dir, t));
+  const removes = [`${t.id} from your board: its files, notes and questions on this computer`];
+  if (local.copy || local.branch) removes.push(local.copy && local.branch ? `Its copy of the code and the branch ${local.branch} on this computer` : local.copy ? 'Its copy of the code on this computer' : `The branch ${local.branch} on this computer`);
+  const chats = Boolean(Object.values(t.sessions ?? {}).some(Boolean) || t.chat);
+  const shots = Boolean(t.proof?.length);
+  if (chats || shots) removes.push(chats && shots ? 'Its agent conversations and screenshots on this computer' : chats ? 'Its agent conversations on this computer' : 'Its screenshots on this computer');
+  const { going } = decisionsOf(bp, t);
+  for (const d of going) removes.push(`Its decision ${d.id}, "${d.title}", on this computer`);
+  const stays = [
+    `Everything on the remote: squad-kit pushes and deletes nothing there. ${by}'s delete is theirs.`,
+    `Your ${base} code and every other ticket`,
+    ...local.kept,
+    ...(t.usage?.length ? ['The cost it used on this computer, still counted in Usage'] : []),
+  ];
+  const warnings = t.chat?.open ? ['A chat is open on it. Removing it ends the chat.'] : [];
+  return {
+    id: t.id,
+    title: t.title,
+    summary: [t.title, `Deleted by ${by}`].join(' · '),
+    removes,
+    stays,
+    warnings,
+    remote: false,
+    local: { by },
+    base,
+    command: `squad delete ${t.id}`,
   };
 }
 
@@ -273,19 +313,53 @@ async function removeRemote(bp: BoardPaths, t: Ticket): Promise<string[]> {
   return notes;
 }
 
-/** Its copy of the code (and a "before" copy left behind), then its local branch. */
-function removeCopy(bp: BoardPaths, meta: BoardMeta, t: Ticket): void {
+/**
+ * Its copy of the code (and a "before" copy left behind), then its local branch. For someone else's ticket, only the
+ * parts that hold no unpushed work (`localCopy`); the rest stays.
+ */
+function removeCopy(bp: BoardPaths, meta: BoardMeta, t: Ticket, opts: { safe?: boolean } = {}): string[] {
   const dir = repoDir(bp, meta, t);
-  if (!isRepo(dir)) return;
+  if (!isRepo(dir)) return [];
   const root = worktreeRoot(dir);
   const copy = copyOf(dir, t);
-  removeWorktree(dir, copy);
-  // By hand only inside squad-kit's own folder of copies, never anywhere else.
-  if (inside(root, copy)) fs.rmSync(copy, { recursive: true, force: true });
+  const keep = opts.safe ? localCopy(dir, t, repoFor(meta, t).base, copy) : null;
+  if (!keep || keep.copy) {
+    removeWorktree(dir, copy);
+    // By hand only inside squad-kit's own folder of copies, never anywhere else.
+    if (inside(root, copy)) fs.rmSync(copy, { recursive: true, force: true });
+  }
   const before = path.join(root, `${t.id.toLowerCase()}-before`);
   if (fs.existsSync(before)) dropSnapshot(dir, before);
   git(dir, ['worktree', 'prune'], { allowFail: true });
-  if (hasBranch(dir, branchOf(t))) git(dir, ['branch', '-D', branchOf(t)]);
+  if ((!keep || keep.branch) && hasBranch(dir, branchOf(t))) git(dir, ['branch', '-D', branchOf(t)]);
+  return keep?.kept ?? [];
+}
+
+/**
+ * The branch stays on the remote: a note on it tells the team's boards the ticket is deleted. Built on the remote's own
+ * tip (fetched first) and pushed without force, so it never carries this computer's unpushed work and never overwrites
+ * a teammate's. It is a courtesy: when it cannot be pushed, the delete still goes on, and says so.
+ */
+async function leaveNote(bp: BoardPaths, t: Ticket, by: string, at: string): Promise<string[]> {
+  const target = repoTarget(bp, t);
+  const repo = docsRepo(bp);
+  if (!target || !repo || repo !== target.dir) return [];
+  const branch = branchOf(t);
+  const host = repoHostFor(bp, target.url);
+  const env = { GIT_TERMINAL_PROMPT: '0', ...(host?.gitEnv() ?? {}) };
+  const ref = `refs/remotes/${target.remote}/${branch}`;
+  try {
+    await gitLater(target.dir, ['fetch', '--quiet', target.remote, `+refs/heads/${branch}:${ref}`], env);
+    const tip = git(target.dir, ['rev-parse', '--verify', '-q', ref], { allowFail: true });
+    if (!tip) return [];
+    const note = deleteNoteCommit(target.dir, tip, squadInRepo(bp, repo), t, by, at);
+    if (!note) return [];
+    await gitLater(target.dir, ['push', target.remote, `${note}:refs/heads/${branch}`], env);
+    git(target.dir, ['update-ref', ref, note], { allowFail: true });
+    return [`Left a note on ${branch} on ${target.remote}, so teammates' boards show ${t.id} as deleted`];
+  } catch (err) {
+    return [`Teammates still see ${t.id}: squad-kit could not leave a note on ${branch} on ${target.remote} (${(err as Error).message})`];
+  }
 }
 
 /**
@@ -336,10 +410,10 @@ function removeChatsAndShots(bp: BoardPaths, t: Ticket): void {
  * The board keeps a line for each deleted ticket on this computer: its cost stays in Usage, and its pushed branch
  * does not bring it back. Saved under the delete's own time, so a delete run again writes the same line, not a second.
  */
-function keepRecord(bp: BoardPaths, t: Ticket, mark: Deleting): void {
+function keepRecord(bp: BoardPaths, t: Ticket, mark: Deleting, fromBoard = false): void {
   const meta = readMeta(bp);
   const rest = (meta.deleted ?? []).filter((d) => !(d.id === t.id && d.at === mark.at));
-  writeMeta(bp, { ...meta, deleted: [...rest, { id: t.id, title: t.title, at: mark.at, by: mark.by, ...(t.usage?.length ? { usage: t.usage } : {}) }] });
+  writeMeta(bp, { ...meta, deleted: [...rest, { id: t.id, title: t.title, at: mark.at, by: mark.by, ...(t.usage?.length ? { usage: t.usage } : {}), ...(fromBoard ? { fromBoard } : {}) }] });
 }
 
 /**
@@ -360,12 +434,15 @@ export async function deleteTicket(bp: BoardPaths, id: string, opts: { remote?: 
   const meta = readMeta(bp);
   const no = refusal(bp, meta, first);
   if (no) throw new BoardActionError(no.why);
-  const remote = Boolean(opts.remote ?? first.deleting?.remote) && Boolean(pushedTo(bp, repoDir(bp, meta, first), first));
+  // Someone else's, deleted by its owner: Remove from my board, this computer only.
+  const local = !isMine(first, meta);
+  const pushed = local ? undefined : pushedTo(bp, repoDir(bp, meta, first), first);
+  const remote = Boolean(opts.remote ?? first.deleting?.remote) && Boolean(pushed);
   const mark: Deleting = { at: first.deleting?.at ?? now(), by: meta.user.name, ...(remote ? { remote } : {}), ...(first.deleting?.remoteDone ? { remoteDone: true } : {}) };
   updateTicket(bp, first.id, (x) => {
-    if (!x.deleting) addActivity(x, 'you', 'Pressed Delete');
+    if (!x.deleting) addActivity(x, 'you', local ? 'Pressed Remove from my board' : 'Pressed Delete');
     x.deleting = { ...mark };
-    x.status = 'Deleting…';
+    x.status = local ? 'Removing…' : 'Deleting…';
     x.waiting = null;
     x.live = false;
     x.squad = null;
@@ -377,11 +454,16 @@ export async function deleteTicket(bp: BoardPaths, id: string, opts: { remote?: 
     if (remote && !t.deleting?.remoteDone) {
       notes.push(...(await removeRemote(bp, t)));
       updateTicket(bp, t.id, (x) => (x.deleting = { ...mark, ...x.deleting, remoteDone: true }));
+    } else if (pushed && !remote && !t.deleting?.remoteDone) {
+      notes.push(...(await leaveNote(bp, t, mark.by, mark.at)));
+      updateTicket(bp, t.id, (x) => (x.deleting = { ...mark, ...x.deleting, remoteDone: true }));
     }
-    removeCopy(bp, meta, t);
+    notes.push(...removeCopy(bp, meta, t, { safe: local }).map((k) => `Kept ${k.charAt(0).toLowerCase()}${k.slice(1)}`));
+    // Its own package cache: on this computer only, and of no use once the ticket is gone.
+    dropTicketCache(bp, t.id);
     unlinkDecisions(bp, t);
     removeChatsAndShots(bp, t);
-    keepRecord(bp, t, mark);
+    keepRecord(bp, t, mark, local);
     removeTicket(bp, t.id);
     return { id: t.id, title: t.title, notes };
   } catch (err) {

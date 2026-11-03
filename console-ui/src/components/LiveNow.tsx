@@ -5,7 +5,7 @@ import { useAct } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { send } from '../api/client';
 import { detect } from '../lib/lang';
-import { Cmd, Glyph, ROLE_NAME, clock } from './ui';
+import { Cmd, Glyph, Modal, ROLE_NAME, clock } from './ui';
 import { ProposeChange } from './ChangeCard';
 import { TalkButton } from './Chat';
 import '../styles/now.css';
@@ -129,6 +129,7 @@ export function WorkSoFar({ t }: { t: Ticket }) {
 /** The step is slow or quiet: say what it does and what squad-kit checked, with the ways on. Nothing hangs silently. */
 export function SlowPanel({ t }: { t: Ticket }) {
   const act = useAct();
+  const [freeing, setFreeing] = useState(false);
   const s = t.now?.slow;
   const busy = act.isPending || t.stopRequested;
   if (!s) return null;
@@ -137,6 +138,8 @@ export function SlowPanel({ t }: { t: Ticket }) {
   const again = () => act.mutate({ path: `/api/v1/tickets/${t.id}/restart`, done: 'Stopping the step. It starts again at once, with the work so far.' });
   const stop = () => act.mutate({ path: `/api/v1/tickets/${t.id}/stop`, done: 'Stopping. The work so far is kept.' });
   const end = () => act.mutate({ path: `/api/v1/tickets/${t.id}/unstick`, done: 'Ended the stuck command. The squad carries on.' });
+  const free = () =>
+    act.mutate({ path: `/api/v1/tickets/${t.id}/free-port`, done: `Freed port ${s?.freePort?.port}. The step starts again, with the work so far.` }, { onSettled: () => setFreeing(false) });
   return (
     <section className={`slowcard ${stuck ? 'stuck' : ''}`} aria-label={s.title}>
       <div className="slowhead">
@@ -156,7 +159,12 @@ export function SlowPanel({ t }: { t: Ticket }) {
           ))}
         </div>
         <div className="ways">
-          {stuck && s.canEnd && (
+          {s.freePort && (
+            <button className="btn pri" disabled={busy} onClick={() => setFreeing(true)}>
+              Free the port and try again
+            </button>
+          )}
+          {stuck && s.canEnd && !s.freePort && (
             <button className="btn pri" disabled={busy} onClick={end}>
               End the stuck command
             </button>
@@ -182,9 +190,33 @@ export function SlowPanel({ t }: { t: Ticket }) {
         <div className="slowfoot">
           <span>{s.limit ?? 'Nothing is lost whatever you choose.'}</span>
           <span className="grow" />
-          <Cmd text={stuck && s.canEnd ? `squad unstick ${t.id}` : `squad wait ${t.id} --more 10m`} />
+          <Cmd text={s.freePort ? `squad unstick ${t.id} --free-port` : stuck && s.canEnd ? `squad unstick ${t.id}` : `squad wait ${t.id} --more 10m`} />
         </div>
       </div>
+      {freeing && s.freePort && (
+        <Modal
+          title={`Free port ${s.freePort.port}?`}
+          onClose={() => setFreeing(false)}
+          footer={
+            <>
+              <button className="btn pri" disabled={act.isPending} onClick={free}>
+                {act.isPending ? 'Stopping it…' : 'Stop it and try again'}
+              </button>
+              <button className="btn" onClick={() => setFreeing(false)}>
+                Cancel
+              </button>
+              <span className="grow" />
+              <Cmd text={`squad unstick ${t.id} --free-port`} />
+            </>
+          }
+        >
+          <p>
+            squad-kit stops {s.freePort.what} on port {s.freePort.port}, then starts this step again.{' '}
+            {s.freePort.what.startsWith('your app') ? 'You can start it again from Your apps afterwards.' : 'squad-kit started that program itself, so nothing of yours is closed.'}
+          </p>
+          <p className="note">The work so far is kept. squad-kit checks again that it started the program before it stops it.</p>
+        </Modal>
+      )}
     </section>
   );
 }

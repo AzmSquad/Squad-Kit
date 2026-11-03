@@ -29,6 +29,48 @@ export interface ToolEvent {
   input: Record<string, unknown>;
 }
 
+/**
+ * What a step's shell commands may reach, kept by the operating system where the AI tool has a sandbox. The engine
+ * says which folders and hosts; each module turns that into its tool's own sandbox settings. The folder the run works
+ * in is always writable.
+ */
+export interface SandboxAsk {
+  /** Folders its commands may write in besides the one it works in: the proof folder, temp folders, package caches. */
+  write: string[];
+  /** Files and folders its commands may not read: keys, sign-ins, squad-kit's own files, the project's .env files. */
+  noRead: string[];
+  /** Folders inside those that the step still needs: the ticket's copy, its attachments. */
+  read: string[];
+  /** The only hosts its commands may reach; "*.example.com" covers every subdomain. */
+  hosts: string[];
+  /** Commands that run outside the sandbox, by how they start: a browser, which cannot run inside it everywhere. */
+  outside?: string[];
+}
+
+/** Whether a tool can keep a step's commands in its sandbox on this computer, in words for people. */
+export interface SandboxSupport {
+  available: boolean;
+  /** What keeps the commands in ("macOS Seatbelt"), or why there is no sandbox here. */
+  why: string;
+  /** What the person can do about it, when something can be done. */
+  fix?: string;
+}
+
+/** The most one run may use before the tool stops it. Each tool keeps the caps it has and leaves out the others. */
+export interface RunCaps {
+  /** Agent turns: one model reply and the tool calls in it. */
+  turns?: number;
+  /** Spend in US dollars at the AI company's API prices, as the tool counts it. */
+  spendUsd?: number;
+}
+
+/** Something a sandboxed command tried and was refused. */
+export interface BlockedAction {
+  kind: 'host' | 'read' | 'write';
+  /** The host, or the file. */
+  target: string;
+}
+
 export interface AgentRun {
   cwd: string;
   prompt: string;
@@ -61,7 +103,15 @@ export interface AgentRun {
   logDir?: string;
   /** Run the tool its direct way instead of over ACP, when it has one. */
   direct?: boolean;
+  /** Keep the run's shell commands in the tool's sandbox; left out, they run as the tool runs them. */
+  sandbox?: SandboxAsk;
+  /** More environment for the run's shell commands, such as where package managers keep their downloads. */
+  env?: Record<string, string>;
+  /** The most this run may use; reaching it stops the run with `capped`, not a failure. */
+  caps?: RunCaps;
   onTool?(event: ToolEvent): void;
+  /** A sandboxed command was refused something. */
+  onBlocked?(action: BlockedAction): void;
   onText?(text: string): void;
   /** Any sign of life, for the watchdog. */
   onActivity?(): void;
@@ -96,6 +146,16 @@ export interface UsageLimit {
   resetsAt?: string;
 }
 
+/**
+ * How the person pays for the tool's AI. A subscription has usage limits and no charge per run; per use (an API key, or
+ * a cloud account) costs real money for every run. The Cost tab and the budgets follow it.
+ */
+export interface Billing {
+  kind: 'subscription' | 'api-key';
+  /** For people: "Claude Pro", "Anthropic API key", "AWS Bedrock". */
+  label: string;
+}
+
 export interface AgentResult {
   ok: boolean;
   sessionId: string;
@@ -107,6 +167,8 @@ export interface AgentResult {
   detail?: string;
   /** Set when the run stopped on the account's usage limit. */
   limit?: UsageLimit;
+  /** Set when the run stopped on one of its caps. The work so far is kept; the run can go on with more. */
+  capped?: { by: 'turns' | 'spend' };
   /** Left out when the tool said nothing about what the run used. */
   usage?: AgentUsage;
 }
@@ -116,6 +178,8 @@ export interface AiTool {
   readonly name: string;
   /** For people, for example "Claude Code". */
   readonly label: string;
+  /** Whose plan pays for it, for people: "Claude" in "Included in your Claude plan". */
+  readonly plan?: string;
   /** False for a tool squad-kit can find but cannot run yet. */
   readonly canRun: boolean;
   /** The tool's model for a level, as people know it ("Opus"), or empty when it has none. */
@@ -132,7 +196,17 @@ export interface AiTool {
   ready(): boolean;
   /** The installed version, for Report a problem, or null when it is not installed. */
   version?(): string | null;
+  /** Its sandbox on this computer. Left out, the tool has none and `sandbox` on a run is ignored. */
+  sandbox?(): SandboxSupport;
+  /** The caps it keeps on a run; any other cap in `caps` is ignored. */
+  readonly caps?: { turns: boolean; spend: boolean };
+  /** What its sandbox refused, from a command's output as the tool reports it. */
+  blocked?(output: string): BlockedAction[];
   run(r: AgentRun): Promise<AgentResult>;
   /** One plain-words line for what a tool call is doing, or null to leave it out. */
   describe(e: ToolEvent, cwd: string): string | null;
+  /** How the person pays, as the tool says without running a model, or null when it cannot tell. */
+  billing?(): Promise<Billing | null>;
+  /** The terminal command that opens a saved conversation in the tool, to read it or carry on in it. */
+  resumeCommand?(sessionId: string, cwd?: string): string;
 }

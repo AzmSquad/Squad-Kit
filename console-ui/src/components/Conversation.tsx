@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { Link } from '@tanstack/react-router';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Highlight, themes } from 'prism-react-renderer';
@@ -16,6 +17,7 @@ import {
   Pencil,
   Search,
   Send,
+  ShieldAlert,
   Terminal,
   Wrench,
   X,
@@ -30,19 +32,61 @@ import { Cmd, clock } from './ui';
 import { useAct } from '../lib/data';
 import { TakeOverButton, canTakeOver } from './TakeOver';
 import { TalkButton } from './Chat';
+import { WhatHappened, took, useHappened, type HappenedTab } from './WhatHappened';
 
 /**
- * The real conversation behind each role on a ticket, drawn from Agent Client Protocol (ACP) updates: messages,
- * thoughts, the plan, tool calls with their status, diffs of every edit, command output, pictures, recordings and files.
+ * The Conversation tab. "What happened" first: one card per step, for everyone. "Full log" for engineers: the real
+ * conversation behind each role, drawn from Agent Client Protocol (ACP) updates (messages, thoughts, the plan, tool
+ * calls with their status, diffs of every edit, command output, pictures, recordings and files), in plain names.
  */
-export function ConversationTab({ t }: { t: Ticket }) {
+export function ConversationTab({ t, onTab }: { t: Ticket; onTab?: (tab: HappenedTab) => void }) {
+  const [view, setView] = useState<'happened' | 'log'>('happened');
+  const [key, setKey] = useState<string | null>(null);
+  const happened = useHappened(t);
+  const steps = happened.data?.steps ?? [];
+  return (
+    <div className="db">
+      <div className="convbar">
+        <div className="seg" role="group" aria-label="View">
+          <button className={view === 'happened' ? 'on' : ''} aria-pressed={view === 'happened'} onClick={() => setView('happened')}>
+            What happened
+          </button>
+          <button className={view === 'log' ? 'on' : ''} aria-pressed={view === 'log'} onClick={() => setView('log')}>
+            Full log
+          </button>
+        </div>
+        <span className="grow" />
+        {view === 'happened' && steps.length > 0 && (
+          <span className="note convcount">
+            {steps.length} {steps.length === 1 ? 'step' : 'steps'}
+            {happened.data!.seconds >= 1 ? ` · ${took(happened.data!.seconds)} in all` : ''}
+          </span>
+        )}
+      </div>
+      {view === 'happened' ? (
+        <WhatHappened
+          t={t}
+          onTab={onTab}
+          onLog={(k) => {
+            setKey(k);
+            setView('log');
+          }}
+        />
+      ) : (
+        <FullLog t={t} chosenKey={key} setKey={setKey} />
+      )}
+    </div>
+  );
+}
+
+/** Every role's conversation, the one working now first, read only, with a way to open it in a terminal. */
+function FullLog({ t, chosenKey: key, setKey }: { t: Ticket; chosenKey: string | null; setKey: (k: string) => void }) {
   const list = useQuery({
     queryKey: ['conversations', t.id],
     queryFn: () => api<ConversationSummary[]>(`/api/v1/tickets/${t.id}/conversations`),
     refetchInterval: 3000,
   });
   const sessions = list.data ?? [];
-  const [key, setKey] = useState<string | null>(null);
   // Follow the role that is working now; the person can pick another one.
   const chosen = key ?? sessions.filter((s) => s.started).at(-1)?.key ?? null;
   const conv = useQuery({
@@ -59,14 +103,10 @@ export function ConversationTab({ t }: { t: Ticket }) {
   }, [items.length, follow, chosen]);
 
   if (!sessions.length) {
-    return (
-      <div className="db">
-        <p className="note">No conversation yet. It starts when the Analyst reads the ticket.</p>
-      </div>
-    );
+    return <p className="note">No conversation yet. It starts when the Analyst reads the ticket.</p>;
   }
   return (
-    <div className="db">
+    <>
       <div className="pills" style={{ marginBottom: 6 }}>
         {sessions.map((s) => (
           <button key={s.key} className={`btn sm ${s.key === chosen ? 'pri' : ''}`} disabled={!s.started} onClick={() => setKey(s.key)}>
@@ -96,7 +136,7 @@ export function ConversationTab({ t }: { t: Ticket }) {
       )}
       {conv.data?.command && (
         <>
-          <div className="lbl">Open it in Claude Code</div>
+          <div className="lbl">Open it in {conv.data.tool ?? 'a terminal'}</div>
           <Cmd text={conv.data.command} />
           <p className="note" style={{ fontSize: 12.5, marginTop: 6 }}>
             {chosen === 'build' && canTakeOver(t) ? (
@@ -112,7 +152,7 @@ export function ConversationTab({ t }: { t: Ticket }) {
           </p>
         </>
       )}
-    </div>
+    </>
   );
 }
 
@@ -198,10 +238,11 @@ function ToolRow({ it, ticket, cwd }: { it: Extract<Item, { kind: 'tool' }>; tic
     <div className={`conv-tool ${it.skipped ? 'skipped' : it.status}`}>
       <button className="conv-tool-head" onClick={() => body && setOpen(!open)} aria-expanded={open}>
         <Icon size={14} />
-        <span className="mono conv-tool-title">{it.title}</span>
+        <span className="mono conv-tool-title">{cwd ? it.title.split(`${cwd}/`).join('') : it.title}</span>
         <span className="conv-at">{it.at ? clock(it.at) : ''}</span>
         <StatusChip status={it.status} skipped={it.skipped} />
       </button>
+      {it.blocked?.map((line) => <BlockedLine key={line} line={line} />)}
       {open && body && (
         <div className="conv-tool-body">
           {it.skipped && <p className="note">By design, nothing went wrong: squad-kit lets each step do only what it needs, and this was not part of it.</p>}
@@ -212,6 +253,24 @@ function ToolRow({ it, ticket, cwd }: { it: Extract<Item, { kind: 'tool' }>; tic
         </div>
       )}
     </div>
+  );
+}
+
+/** What the sandbox refused, always in view, never folded away: a blocked command is never a silent failure. */
+function BlockedLine({ line }: { line: string }) {
+  const settings = line.endsWith('Allow it in Settings.');
+  return (
+    <p className="conv-blocked">
+      <ShieldAlert size={13} aria-hidden="true" />
+      <span>
+        {settings ? line.slice(0, -'Settings.'.length) : line}
+        {settings && (
+          <>
+            <Link to="/settings">Settings</Link>.
+          </>
+        )}
+      </span>
+    </p>
   );
 }
 

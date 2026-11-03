@@ -6,6 +6,7 @@ import { boardExists, readMeta, writeMeta, type BoardPaths } from '../board/stor
 import { runningConsole } from '../board/console-info.js';
 import { findApp, withAppCommands, type AppTicket, type NewVersion } from '../board/apps.js';
 import { AppRunner, type AppStatus, type StartOptions } from '../engine/run-app.js';
+import { shellArg } from '../utils/text.js';
 
 /**
  * `squad app`: Your apps from the terminal. With the board open, each command is the board's own REST call, so the
@@ -50,7 +51,7 @@ function boardApi(bp: BoardPaths): BoardApi | null {
 
 /** The name to put in a command: none when the project has one app. */
 function refOf(bp: BoardPaths, name: string): string {
-  return readMeta(bp).repos?.length ? ` ${/\s/.test(name) ? `"${name}"` : name}` : '';
+  return readMeta(bp).repos?.length ? ` ${shellArg(name)}` : '';
 }
 
 const at = (url?: string) => (url ?? '').replace(/^https?:\/\//, '');

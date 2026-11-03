@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { ArrowRightLeft, Square, UserRound } from 'lucide-react';
 import type { Ticket } from '../api/types';
 import { useAct, useBoard } from '../lib/data';
-import { shellQuote } from '../lib/text';
+import { shellArg, shellQuote } from '../lib/text';
 import { Cmd, Modal, ago } from './ui';
 
 /**
@@ -86,7 +86,7 @@ function HandOverDialog({ t, onClose }: { t: Ticket; onClose(): void }) {
           </button>
           <button className="btn" onClick={onClose}>Cancel</button>
           <span className="grow" />
-          <Cmd text={`squad hand-over ${t.id} ${to.trim() || 'Name'}${note.trim() ? ` --note ${shellQuote(note.trim())}` : ''}`} />
+          <Cmd text={`squad hand-over ${t.id} ${to.trim() ? shellArg(to.trim()) : 'Name'}${note.trim() ? ` --note ${shellQuote(note.trim())}` : ''}`} />
         </>
       }
     >

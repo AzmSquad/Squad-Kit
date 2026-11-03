@@ -449,7 +449,10 @@ button.opt2:hover { border-color: var(--line-strong); }
 .lesson .mono { font-size: 12px; color: var(--dim); }
 
 /* Proof page */
-.gatebar { display: flex; gap: 8px; align-items: center; padding: 10px 24px; border-bottom: 1px solid var(--line); background: var(--accent-soft); flex: none; font-size: 13px; color: var(--muted); }
+.gatebar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 24px; border-bottom: 1px solid var(--line); background: var(--accent-soft); flex: none; font-size: 13px; color: var(--muted); }
+/* The proof page: gates with "Not checked" are not all green, so the bar is not green either. */
+.gatebar.unchecked { background: var(--you-soft); }
+.gatebar-why { padding: 8px 24px 10px; margin: 0; border-bottom: 1px solid var(--line); background: var(--you-soft); flex: none; }
 .critlist { width: 300px; flex: none; border-right: 1px solid var(--line); padding: 18px 16px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
 .crit { border: 1px solid var(--line); border-radius: 11px; padding: 10px 12px; font-size: 13px; display: grid; grid-template-columns: 18px 1fr; gap: 8px; text-align: left; background: var(--surface); }
 .crit svg { color: var(--accent); margin-top: 2px; }
@@ -573,6 +576,10 @@ button.opt2 b { width: 100%; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
 .conv-tool-body { border-top: 1px solid var(--line); padding: 8px 11px 10px; display: flex; flex-direction: column; gap: 8px; }
+/* What the sandbox refused a command: in view on the row, in the waiting colours, with the way to allow it. */
+.conv-blocked { display: flex; gap: 7px; align-items: flex-start; margin: 0; padding: 7px 11px; border-top: 1px solid var(--you-line); background: var(--you-soft); color: var(--you-ink); font-size: 12.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.conv-blocked svg { flex: none; margin-top: 2px; }
+.conv-blocked a { color: inherit; font-weight: 650; text-decoration: underline; }
 .conv-cmd { margin: 0; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
 .conv-out pre { margin: 0; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 420px; overflow: auto; }
 .conv-diff { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
@@ -609,6 +616,16 @@ button.opt2 b { width: 100%; }
 .linkbtn { background: none; border: 0; padding: 0; margin-top: 4px; color: var(--accent); font-weight: 600; font-size: 12.5px; cursor: pointer; align-self: flex-start; }
 
 /* squad-kit was updated: restart banner */
+/* The banners over a project's pages; folded into one row over an open ticket on a phone (Banners.tsx) */
+.banners { flex: none; display: flex; flex-direction: column; min-width: 0; }
+.banners.unfolded { max-height: 70%; overflow-y: auto; }
+.banners-all { display: flex; flex-direction: column; min-width: 0; }
+.banners-all[hidden] { display: none; }
+.bslim { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; padding: 6px 12px 6px 14px; background: var(--you-soft); color: var(--you-ink); border: 0; border-bottom: 1px solid var(--you-line); font: inherit; text-align: left; cursor: pointer; }
+.bchips { flex: 1; min-width: 0; display: flex; gap: 6px; overflow: hidden; }
+.bchip { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 3px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--surface); border: 1px solid var(--you-line); color: var(--you-ink); }
+.bchip.acc { border-color: var(--line); color: var(--accent); }
+.bless { position: sticky; top: 0; z-index: 1; align-self: stretch; display: flex; align-items: center; justify-content: center; gap: 4px; padding: 6px; background: var(--surface-2); color: var(--muted); border: 0; border-bottom: 1px solid var(--line); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }
 .updatebar { display: flex; align-items: center; gap: 10px; padding: 10px 18px; background: var(--you-soft); color: var(--you-ink); border-bottom: 1px solid var(--you-line); font-size: 13.5px; }
 /* The Update button: a new squad-kit is ready, the update's steps, the note after it, and Settings › About */
 .upd { flex: none; display: flex; align-items: flex-start; gap: 12px; padding: 14px 20px; background: var(--accent-soft); border-bottom: 1px solid var(--line); font-size: 13.5px; }
@@ -624,6 +641,12 @@ button.opt2 b { width: 100%; }
 .upd-sub { font-size: 13px; color: var(--muted); }
 .upd.failed .upd-title, .upd.failed .upd-sub { color: var(--you-ink); }
 .upd-notes { margin: 0; padding-left: 18px; line-height: 1.5; }
+.upd-rels { display: grid; gap: 8px; }
+.upd-rel { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; align-items: baseline; }
+.upd-ver { font: 600 12px 'JetBrains Mono', monospace; color: var(--accent); text-decoration: none; padding: 1px 7px; border-radius: 6px; background: var(--surface); border: 1px solid var(--line); }
+.upd-ver:hover { text-decoration: underline; }
+.upd-more { font-size: 12.5px; color: var(--accent); font-weight: 600; }
+@media (max-width: 520px) { .upd-rel { grid-template-columns: 1fr; } .upd-rel .upd-ver { justify-self: start; } }
 .upd-acts { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .upd-cmd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
 .upd-cmd .term { padding-right: 11px; }
@@ -700,6 +723,11 @@ ul.ticketnotes .grow, .addnote .grow { flex: 1; }
 /* Ways out of a stop */
 .waynote { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13.5px; background: var(--surface); color: var(--text); resize: vertical; }
 .pill.skip { background: var(--you-soft); color: var(--you-ink); }
+/* Not checked: no tests ran. Orange like a gate you went past, outlined so it never reads as a pass. */
+.pill.unchecked { background: var(--you-soft); color: var(--you-ink); box-shadow: inset 0 0 0 1px var(--you-line); }
+.prio.unchecked { color: var(--you-ink); background: var(--you-soft); box-shadow: inset 0 0 0 1px var(--you-line); }
+.note.unchecked-why { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; line-height: 1.5; margin: 8px 0 0; color: var(--you-ink); }
+.note.unchecked-why svg { flex: none; margin-top: 3px; }
 .note.override { font-size: 12.5px; margin: 8px 0 0; }
 
 /* Spec, then design: two approvals */
@@ -1128,3 +1156,18 @@ ul.ticketnotes .grow, .addnote .grow { flex: 1; }
   .foot > span:not(.grow) { padding: 0 12px 0 0; }
   .foot > span:not(.grow) + span:not(.grow) { border-left: 0; }
 }
+
+/* Releases on a phone: the releases scroll sideways above the open one, and the open one takes the full width. */
+@media (max-width: 760px) {
+  .split.rel { flex-direction: column; overflow-y: auto; }
+  .split.rel .listcol { width: auto; flex-direction: row; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--line); padding: 10px 12px; }
+  .split.rel .litem { flex: none; width: 168px; }
+  .split.rel .detail { overflow: visible; padding: 18px 16px 32px; }
+  .split.rel .grid2 { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .split.rel .trow { grid-template-columns: 56px minmax(0, 1fr); }
+  .split.rel .trow > :nth-child(3) { grid-column: 1 / -1; justify-content: flex-start !important; }
+}
+/* The Architect's change to the test command: it waits for the person, beside the design or in Now. */
+.outdated-item.testchange code { font: 500 12px 'JetBrains Mono', monospace; padding: 1px 6px; border-radius: 5px; background: var(--surface); overflow-wrap: anywhere; }
+.db > .outdated-item.testchange { margin: 14px 0 4px; }
+.outdated-item.testchange .row { flex-wrap: wrap; }

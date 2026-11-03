@@ -5,6 +5,7 @@ import { useAct } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { stuckTitle, wayButtons } from '../lib/problem';
 import type { ReportAsk } from '../lib/report';
+import { shellQuote } from '../lib/text';
 import { OpenInEditor } from './Changes';
 import { ReportButton } from './Report';
 import { Cmd } from './ui';
@@ -31,6 +32,7 @@ export function ErrorCard({
   ways,
   report,
   hint,
+  calm,
   children,
 }: {
   title: string;
@@ -40,10 +42,12 @@ export function ErrorCard({
   /** What Report a problem covers; false leaves it out. */
   report?: ReportAsk | false;
   hint?: ReactNode;
+  /** A decision more than an error (a step paused at its limit, no tests yet): the card is grey, not red. */
+  calm?: boolean;
   children?: ReactNode;
 }) {
   return (
-    <div className="drafterr errcard" role="alert">
+    <div className={`drafterr errcard${calm ? ' calm' : ''}`} role="alert">
       <b className="errcard-title">{title}</b>
       <div className="errcard-what">{what}</div>
       {safe.length > 0 && (
@@ -102,13 +106,27 @@ export function StuckCard({ t, extra }: { t: Ticket; extra?: ReactNode }) {
     },
   }));
   const cmd = pending
-    ? `squad decide ${t.id} ${pending.index + 1}${pending.needs === 'reason' ? ` --reason "${text.trim() || '…'}"` : ''}`
-    : `squad decide ${t.id}${retry && note ? ` ${retry.index + 1} --note "${note}"` : ''}`;
+    ? `squad decide ${t.id} ${pending.index + 1}${pending.needs === 'reason' ? ` --reason ${shellQuote(text.trim() || '…')}` : ''}`
+    : `squad decide ${t.id}${retry && note ? ` ${retry.index + 1} --note ${shellQuote(note)}` : ''}`;
   return (
     <div className="db">
       <ErrorCard
         title={stuckTitle(t.stuck)}
-        what={t.stuck?.question ?? ''}
+        calm={t.stuck?.kind === 'no-tests' || t.stuck?.gate === 'cap'}
+        what={
+          t.stuck?.points?.length ? (
+            <>
+              {t.stuck.question}
+              <ul className="errcard-points">
+                {t.stuck.points.map((p) => (
+                  <li key={p}>{p}</li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            (t.stuck?.question ?? '')
+          )
+        }
         safe={t.stuck?.safe ?? ['Nothing was lost: the work so far is kept.']}
         ways={ways}
         report={{ ticket: t.id }}

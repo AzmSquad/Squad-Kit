@@ -27,6 +27,7 @@ import {
 import { readLastRun } from '../core/last-run.js';
 import { formatTokenK } from '../ui/planner-cache-summary.js';
 import { GIT_UPDATE, MIN_GIT, gitIsNewEnough, gitVersion } from '../engine/git.js';
+import { sandboxStatus } from '../engine/sandbox.js';
 
 export interface CheckResult {
   id: string;
@@ -132,6 +133,21 @@ export function checkGitVersion(version: string | null = gitVersion()): CheckRes
     };
   }
   return { id: 'git-version', name, status: 'ok', detail: `git ${MIN_GIT.join('.')} or newer` };
+}
+
+/** The Builder's and Tester's commands run in their AI tool's sandbox where it has one; without it they run as before. */
+export function checkAgentSandbox(rows: ReturnType<typeof sandboxStatus> = sandboxStatus()): CheckResult {
+  const name = 'sandbox for the Builder and Tester';
+  if (!rows.length) return { id: 'agent-sandbox', name, status: 'skip', detail: 'no AI tool squad-kit can run' };
+  const off = rows.filter((r) => !r.available);
+  if (!off.length) return { id: 'agent-sandbox', name, status: 'ok', detail: rows.map((r) => r.why).join('; ') };
+  return {
+    id: 'agent-sandbox',
+    name,
+    status: 'warn',
+    detail: `${off.map((r) => `${r.tool}: ${r.why}`).join('; ')}. Steps run without it, as before`,
+    ...(off.find((r) => r.fix) ? { fixHint: off.find((r) => r.fix)!.fix! } : {}),
+  };
 }
 
 async function checkConfigReadable(_paths: SquadPaths, ctx: DoctorContext): Promise<CheckResult> {
@@ -927,6 +943,7 @@ export async function runAllChecks(paths: SquadPaths, ctx: DoctorContext, fix: b
   await add('.squad/secrets.yaml parseable', () => checkSecretsParseable(paths, ctx));
   await add('legacy .squad/prompts/ directory', () => checkLegacyPrompts(paths, ctx));
   await add('git version', async () => checkGitVersion());
+  await add('sandbox for the Builder and Tester', async () => checkAgentSandbox());
   await add('planner configuration', () => checkPlannerConfig(paths, ctx));
   await add('planner auth mode', () => checkPlannerAuthMode(paths, ctx, fix));
   await add('planner credential resolves', () => checkPlannerCredential(paths, ctx));

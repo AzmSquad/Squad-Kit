@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
+import type { QuietPort } from '../board/types.js';
 
 /**
  * Nothing the squad runs may hang without the person knowing. Every running step reports progress; when it goes
@@ -22,6 +23,8 @@ export interface Quiet {
   detail: string;
   command?: string;
   pid?: number;
+  /** The app's port is held by a program, added after the watchdog's look (src/engine/free-port.ts). */
+  port?: QuietPort;
 }
 
 /** "1-02:03:04", "02:03:04", "03:04" or "03:04.56" in seconds. */

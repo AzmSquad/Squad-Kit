@@ -1,3 +1,5 @@
+import type { FirstLook, FolderKind } from './onboard-types';
+
 // Mirrors src/board/types.ts on the server. Keep the two in step.
 
 /** The 7 stages a ticket moves through. `done` means released and off the board. */
@@ -9,7 +11,7 @@ export type Role = 'analyst' | 'architect' | 'spec' | 'builder' | 'tester' | 're
 /** Who wrote an activity line or a thread message. */
 export type Actor = Role | 'you' | 'squad';
 
-export type WaitingKind = 'questions' | 'spec' | 'plan' | 'proof' | 'stuck' | 'release' | 'ask' | 'yours' | 'chat' | 'change';
+export type WaitingKind = 'questions' | 'spec' | 'plan' | 'proof' | 'stuck' | 'release' | 'ask' | 'yours' | 'chat' | 'change' | 'depends';
 
 export interface Waiting {
   kind: WaitingKind;
@@ -46,7 +48,7 @@ export interface ChatMessage {
   /** Short answers the agent offers to its question. */
   options?: string[];
   /** A note from squad-kit: you stopped the answer, or the agent could not answer. */
-  note?: 'stopped' | 'failed';
+  note?: 'stopped' | 'failed' | 'waits';
 }
 
 export interface AgentChat {
@@ -162,7 +164,8 @@ export interface Step {
   live?: string;
 }
 
-export type GateState = 'pending' | 'pass' | 'fail' | 'skipped';
+/** 'unchecked': the checks ran, but no tests did ("Not checked", never a green pass). */
+export type GateState = 'pending' | 'pass' | 'fail' | 'skipped' | 'unchecked';
 
 export interface Gates {
   checks: GateState;
@@ -181,13 +184,27 @@ export interface ProofShot {
   note?: string;
 }
 
-export type WayOut = 'retry' | 'yourself' | 'continue' | 'plan' | 'skip-pr';
+export type WayOut = 'retry' | 'yourself' | 'continue' | 'plan' | 'skip-pr' | 'more' | 'stop' | 'add-test' | 'no-tests';
+
+/** GET /api/v1/sandbox: whether the Builder's and Tester's commands run in a sandbox here, and what they may reach. */
+export interface SandboxInfo {
+  tools: { tool: string; available: boolean; why: string; fix?: string }[];
+  registries: string[];
+  allowedHosts: string[];
+}
 
 export interface StuckChoice {
   /** What happened, in plain words. */
   question: string;
   options: (DecisionOption & { do?: WayOut })[];
-  gate?: 'checks' | 'review' | 'proof' | 'merge';
+  /** 'cap': the step reached its turn or spend cap; Give it more or Stop. */
+  gate?: 'checks' | 'review' | 'proof' | 'merge' | 'cap';
+  /** Why the gate stopped, when it is not a plain failure. */
+  kind?: 'weakened' | 'no-tests' | 'bad-proof';
+  /** The plain reasons, one per line: "test/booking.test.ts was deleted (4 tests)". */
+  points?: string[];
+  /** The ticket stopped between two steps at its budget, or the month's. */
+  budget?: 'ticket' | 'month';
   /** "The Builder stopped". */
   title?: string;
   /** What is safe: "Nothing was merged or pushed." */
@@ -198,6 +215,8 @@ export interface StuckChoice {
 
 export interface GateOverride {
   gate: 'checks' | 'review' | 'proof';
+  /** Continued past tests made weaker: what was weakened. */
+  weakened?: string[];
   reason: string;
   by: string;
   at: string;
@@ -273,11 +292,13 @@ export interface Ticket {
   /** Installing packages and running migrations in the person's own checkout, after the merge moved it. */
   /** Decisions approved after this ticket was planned that change it, waiting for the person. */
   outdated?: { adr: string; why: string; change: string; at: string }[];
+  /** The Architect's design changes the test command: it waits for the person (squad test-command). */
+  testChange?: { from: string; to: string; repo?: string; at: string };
   replanFor?: string;
   /** When the change went into the base branch. */
   mergedAt?: string;
   localSetup?: { status: 'pending' | 'running' | 'done' | 'failed'; dir: string; command: string; at?: string; seconds?: number; output?: string };
-  quiet?: { since: string; kind: 'stuck' | 'long'; detail: string; command?: string; pid?: number };
+  quiet?: { since: string; kind: 'stuck' | 'long'; detail: string; command?: string; pid?: number; port?: { port: number; pid?: number; program?: string; ours: boolean; app?: string } };
   priority: 'high' | 'normal' | 'low';
   stage: Stage;
   /** One line under the card title: what is happening now. */
@@ -346,16 +367,41 @@ export interface Ticket {
   handedOver?: { from: string; to: string; at: string };
   /** What each role used on this ticket, per step and model level. */
   usage?: UsageLine[];
+  /** The steps that ended well, oldest first. */
+  history?: { who: AgentName | 'squad'; step: TimedStep; from: string; to: string }[];
+  /** The Quality setting the squad last ran it on. */
+  quality?: Quality;
+  /** The person let it go on past a budget. */
+  budgetOk?: { ticket?: boolean; month?: string };
   /** "Stop and try again": once the running step has stopped, it starts again at once. */
   retryOnStop?: boolean;
   /** The step running now, as the engine keeps it. */
-  clock?: { who: AgentName | 'squad'; step: TimedStep; since: string; part?: number; doing?: string; doingAt?: string; limit?: number };
+  clock?: { who: AgentName | 'squad'; step: TimedStep; since: string; part?: number; doing?: string; doingAt?: string; limit?: number; began?: string };
   /** What is happening now, in words, worked out by squad-kit from the live record. */
   now?: LiveNow;
   /** A merged or released ticket off the board. Its history stays. */
   archived?: { by: string; at: string };
   /** Delete was pressed. Still here when a delete stopped half-way: then `error` says why. */
   deleting?: { at: string; by: string; remote?: boolean; error?: string };
+  /** Open tickets whose code this one needs, as its design names them ("depends on RO-1"). */
+  dependsOn?: string[];
+  /** How the person chose to build while one of them was not merged. */
+  dependency?: DependencyChoice;
+  /** "Bring in latest main" was pressed while a step ran: it comes in before the next checks. */
+  baseWanted?: { by: string; at: string };
+  /** Someone else's ticket that its owner deleted on their computer, as the remote shows it. */
+  ownerDeleted?: { by: string; at: string; how: 'note' | 'gone'; branch: string };
+}
+
+/** branch: built on the dependency's branch; anyway: from main without it; wait: starts once it is merged. */
+export interface DependencyChoice {
+  on: string[];
+  way: 'branch' | 'anyway' | 'wait';
+  by: string;
+  at: string;
+  from?: string;
+  caughtUp?: string;
+  started?: string;
 }
 
 /** What Delete would remove and what stays, in the engine's own words. */
@@ -371,6 +417,8 @@ export interface DeletePlan {
   pushed?: { remote: string; branch: string; why: string };
   unfinished?: string;
   remote: boolean;
+  /** Someone else's ticket their owner deleted: it only leaves this board. */
+  local?: { by: string };
   base: string;
   command: string;
 }
@@ -386,6 +434,8 @@ export interface SlowCard {
   facts: { label: string; value: string }[];
   limit?: string;
   canEnd: boolean;
+  /** The app's port is held by a program squad-kit started: it may stop it, after a confirm. */
+  freePort?: { port: number; what: string };
 }
 
 /** What is happening on a ticket now: the card's lines, the Now tab's sentence, and what comes next. */
@@ -482,6 +532,15 @@ export interface Release {
   log?: { ok: boolean; text: string }[];
   /** Repos whose push failed: the release is only on this computer until Push again sends it. */
   unpushed?: { repo: string; remote: string; base: string; commit: string; tag?: string; error: string }[];
+  /** Tickets taken out before the release was made: they go out with the next one. */
+  out?: string[];
+}
+
+/** Old branches of released tickets, here and on the remote, and the ones that stay. */
+export interface BranchPlan {
+  here: { repo: string; branch: string; ticket: string }[];
+  remote: { repo: string; branch: string; ticket: string; remote?: string }[];
+  kept: { branch: string; why: string }[];
 }
 
 export interface Decision {
@@ -503,6 +562,8 @@ export interface Decision {
   replaces?: string;
   /** Set when a newer decision changed this one. A replaced decision is no longer a rule. */
   replacedBy?: string;
+  /** Found by the first read and not approved yet: a proposal, not a rule. */
+  proposed?: boolean;
 }
 
 export interface Lesson {
@@ -538,8 +599,12 @@ export interface BoardMeta {
   /** How many squad jobs may run at the same time. */
   parallel?: number;
   runner?: 'acp' | 'direct';
+  /** Hosts the Builder's and Tester's commands may reach besides the package registries. */
+  allowedHosts?: string[];
   /** What the squad used on the project's own work, with no ticket. */
   usage?: UsageLine[];
+  /** Spending limits in US dollars, used when the person pays per use. */
+  budget?: { ticketUsd?: number; monthUsd?: number };
   /**
    * A workspace that holds several code repos (each with its own git). Without it, the project
    * folder itself is the one repo, using `commands` and `git`.
@@ -709,14 +774,16 @@ export type AcpToolStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
 export type AcpUpdate =
   | { sessionUpdate: 'user_message_chunk' | 'agent_message_chunk' | 'agent_thought_chunk'; content: AcpContentBlock }
   | { sessionUpdate: 'tool_call'; toolCallId: string; title: string; kind?: AcpToolKind; status?: AcpToolStatus; content?: AcpToolContent[]; locations?: { path: string; line?: number | null }[]; rawInput?: { command?: string; path?: string } }
-  | { sessionUpdate: 'tool_call_update'; toolCallId: string; title?: string | null; kind?: AcpToolKind | null; status?: AcpToolStatus | null; content?: AcpToolContent[] | null; rawInput?: { command?: string; path?: string } | null }
+  | { sessionUpdate: 'tool_call_update'; toolCallId: string; title?: string | null; kind?: AcpToolKind | null; status?: AcpToolStatus | null; content?: AcpToolContent[] | null; rawInput?: { command?: string; path?: string } | null; _meta?: { squadKit?: { blocked?: string[] } } | null }
   | { sessionUpdate: 'plan'; entries: { content: string; priority: string; status: 'pending' | 'in_progress' | 'completed' }[] };
 
 export interface ConversationResponse {
   sessionId: string;
   protocol?: string;
   cwd?: string;
+  /** The terminal command that opens the session in its AI tool, and the tool's name. */
   command?: string;
+  tool?: string;
   total: number;
   updates: { at?: string; update: AcpUpdate }[];
 }
@@ -835,7 +902,7 @@ export interface AppProject {
   open: boolean;
   why?: string;
   engine?: 'demo' | 'live';
-  setup?: { status: 'pending' | 'running' | 'done' | 'failed'; now?: string; error?: string };
+  setup?: { status: 'pending' | 'running' | 'done' | 'failed'; now?: string; error?: string; line?: string; ready?: boolean; approved?: boolean };
   tickets: number;
   waiting: number;
   working: number;
@@ -861,12 +928,14 @@ export interface FolderListing {
   path: string;
   parent: string | null;
   home: string;
-  kind: 'project' | 'repo' | 'repos' | 'empty' | 'files';
+  kind: FolderKind;
   repos: number;
   /** A home folder or the disk's top folder can't be a project; a folder inside it can. */
   canAdd: boolean;
   folders: { name: string; path: string; kind: 'project' | 'repo' | 'folder' }[];
   places: { name: string; path: string }[];
+  /** What squad-kit found in the folder and what adding it does. */
+  look?: FirstLook;
 }
 
 /** The Update button: where squad-kit stands against npm, and where an update is. */
@@ -887,6 +956,8 @@ export interface UpdateStatus {
   checkedAt: string | null;
   checkError?: string;
   notes?: string[];
+  /** What is new in every release the person gets, newest first (only releases with notes). */
+  releases?: { version: string; lines: string[]; url: string }[];
   notesUrl: string;
   /** A source checkout only gets the command. */
   devInstall: boolean;

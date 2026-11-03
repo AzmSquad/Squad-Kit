@@ -62,17 +62,35 @@ A project needs its own folder: squad-kit will not set up your home folder or th
 
 ### What happens next
 
-The board opens with a **Setting up your project** card:
+Before you confirm, squad-kit says what it found in the folder and what will happen next. Press **Add and get to
+know it**. A setup page opens with live steps, each with its time:
 
-1. **Project files and board**: squad-kit made `.squad/` in the folder.
-2. **Your AI tool is ready**: for example "Claude Code is ready". If it says "An AI tool" in red, install
-   Claude Code and sign in, run `squad --restart`, then press **Try again** on the card.
-3. **The Architect reads the project**: it maps the code and finds how to install, test, build and run it.
-   This takes a few minutes. You can watch what it reads.
-4. **Ready for your first ticket**.
+1. **Project memory**: squad-kit made `.squad/` in the folder.
+2. **Your AI tool is ready**: for example "Claude Code is ready". If not, install Claude Code and sign in, then
+   press **Start again**.
+3. **The Architect reads the code**: what the project is, who uses it, what it can do today, and how its parts fit.
+   Press **See what the Architect is reading** to watch.
+4. **How to test and run it**: the setup, test, build and start commands.
+5. **Trying the tests** and **opening the app once**, in squad-kit's own copy of the code, with a screenshot. If
+   one fails, the page says why and offers a way out; the setup carries on.
+6. **Your overview**.
 
-Check what the Architect found in **Settings**, under **How the squad checks and runs this project**. These are
-the commands squad-kit runs itself before anything ships. Fix any that look wrong.
+You can leave the page: the setup carries on, the board shows where it is, and **Notify me when it is ready** sends
+a desktop notice. The page also asks once how strong the squad's models should be (**Quality**: Best, the default,
+Balanced or Thrifty).
+
+Then the **Overview** opens, first in the sidebar. It is the project's handover: what it is, who uses it, what it
+can do today, how its parts fit together, things worth knowing, the rules the Architect found, the proof (tests
+and a screenshot of the app), and three ideas for a first ticket. Read it, then:
+
+- **Looks right, start working** approves the rules. Until you approve them, the squad treats them as proposals.
+- **Something is wrong** opens a talk with the Architect, then **Read it again with this**.
+- An idea becomes a new ticket with one click.
+
+After that, the Overview is the project's home. It stays up to date after every merged ticket.
+
+Terminal: `squad setup --follow`, `squad overview`, `squad overview --approve`. To see it all without AI, run
+`squad demo --first-run`.
 
 ## 4. Connect a tracker (optional)
 
@@ -162,16 +180,25 @@ This part is technical. A developer can approve it for you. Review it the same w
 **Approve design**. The decision is saved, named after the ticket: `AB-46.1` is the first decision of `AB-46`.
 Decisions the Architect found in the existing code are named `STACK.1`, `STACK.2`.
 
+The Analyst and the Architect see the project's other open tickets and the files they change. If this ticket needs
+another one that is not merged yet, the design says so ("depends on AB-45"), and before building the ticket waits
+with a card: **Build on AB-45's branch**, **Build anyway** (from main), or **Wait** (it starts by itself when AB-45
+merges). Terminal: `squad build <ticket> --on-branch | --anyway | --wait`.
+
 ### Watch the squad build
 
 Now the squad works on its own:
 
 1. The **Builder** writes the code in its own copy of the project. Your own folder is never touched while it
-   works.
+   works. Its commands run in a sandbox where the computer allows it: they can only write in that copy, can't read
+   your keys or sign-ins, and can only reach package registries and the websites you allow.
 2. squad-kit runs the project's **tests, lint and build** itself. If they fail, the Builder fixes them, up to
-   3 tries.
-3. The **Reviewer** reads the changes in a fresh session, so the work gets a real second opinion.
-4. The **Tester** starts the app and takes a screenshot for each "done when".
+   3 tries. If the change deleted tests, has fewer tests, changed the test setup or skips tests, the ticket stops
+   and says so. A project with no tests shows **Not checked** in orange, never a green pass.
+3. The **Reviewer** reads the whole change in a fresh session, with the check results, so the work gets a real
+   second opinion.
+4. The **Tester** starts the app and takes a screenshot for each "done when". squad-kit checks each picture is
+   real and new.
 
 While it works, you can:
 
@@ -182,6 +209,7 @@ While it works, you can:
 - Press **Stop**. The agent stops at once, and the work so far is kept. **Try again** carries on from the same
   step.
 - Developers can press **Take over** to work in the Builder's own session, then **Give back**.
+- Press **Bring in latest main** to give the Builder the newest work from main.
 
 Only a limited number of tickets run at once (see **Tickets at once** in Settings). A ticket over the limit says
 **Next in line: starts when a slot is free** and starts on its own.
@@ -213,6 +241,10 @@ squad-kit asks you once to confirm, and lists exactly which branch of which repo
 it. Then it updates the changelog, sets the version, adds the git tag and pushes. On the tracker, the items
 close with the version as a tag.
 
+Need to leave a ticket out? Press **Take out** on it before you release: its code stays in main and joins the next
+release. After a release, squad-kit deletes the released tickets' branches on your computer (on the remote only
+when you ask). A release cut off by a restart finishes or rolls back cleanly the next time.
+
 If the push fails (no network, or the remote refuses it), the release is made on your computer only and says
 **not pushed yet**. Fix the problem, then press **Push again** on the release. Terminal:
 `squad release <version> --push-again`.
@@ -238,6 +270,12 @@ command that does the same.
 | **A change** | A change you proposed is written into the spec, or its design update is ready. | Approve it or decline it. |
 | **You have this ticket** | You took the ticket over. | **Give back** when you are done. The checks, review and proof run again. |
 | **A chat is open** | You were talking a waiting ticket through with an agent. | **Open chat**, and finish the talk. |
+| **No tests** | The project has no tests, so the checks can't prove the work. Asked once per project. | Use the Architect's suggested test command, go on without tests (the gate shows **Not checked**), or add one in Settings. |
+| **Tests weakened** | The change deleted tests, has fewer tests, changed the test setup, or skips tests. | **Send it back to the Builder**, **Fix it yourself**, or **Continue anyway** with a reason. |
+| **Needs another ticket** | The design depends on a ticket that is not merged yet. | **Build on its branch**, **Build anyway**, or **Wait**. |
+| **New test command** | The Architect's design changes the project's test command. It is never applied on its own. | **Use the new command**, or **Keep the current one** (`squad test-command <ticket> --use \| --keep`). |
+| **Reached its limit** | A step used the turns or the spend its Quality setting allows. The work is kept. | **Give it more**, or **Stop**. |
+| **Budget** | With an API key: a ticket or the month reached its budget. | **Carry on**, **Do the rest yourself**, or send it back to the plan. |
 
 Only you can skip a failed check. Your reason shows on the ticket, the pull request and the release notes.
 

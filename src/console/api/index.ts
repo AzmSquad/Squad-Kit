@@ -16,6 +16,8 @@ import { mountBoardApi } from './board.js';
 import { onUnexpected } from './support.js';
 import { mountDeleteApi } from './delete.js';
 import { mountAppsApi } from './apps.js';
+import { mountDependsApi } from './depends.js';
+import { mountOverviewApi } from './overview.js';
 
 export interface MountApiOptions {
   paths: SquadPaths;
@@ -39,5 +41,7 @@ export function mountApi(app: Hono, opts: MountApiOptions): void {
   mountBoardApi(app, opts);
   mountDeleteApi(app, opts);
   mountAppsApi(app, opts);
+  mountDependsApi(app, opts);
+  mountOverviewApi(app, opts);
   app.onError(onUnexpected);
 }

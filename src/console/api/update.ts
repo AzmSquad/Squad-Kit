@@ -9,7 +9,8 @@ import { act, body } from './app.js';
 export function mountUpdateApi(app: Hono, updates: UpdateService): void {
   app.get('/api/v1/app/update', (c) => c.json(updates.status()));
 
-  app.post('/api/v1/app/update/check', (c) => act(c, () => updates.check()));
+  // Check for updates: the person asks, so the release notes are read again too (a release can be edited).
+  app.post('/api/v1/app/update/check', (c) => act(c, () => updates.check({ fresh: true })));
 
   // Update now. { now: true } does not wait for running steps: they stop and pick up again after the restart.
   app.post('/api/v1/app/update', async (c) => {

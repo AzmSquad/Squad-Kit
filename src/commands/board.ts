@@ -13,6 +13,7 @@ import {
   composeNotes,
   createTicket,
   decideStuck,
+  decideTestCommand,
   inbox,
   pullTicket,
   pushReleaseAgain,
@@ -84,7 +85,12 @@ import { liveNow } from '../board/now.js';
 import { readUsual } from '../board/usual.js';
 import { nowLines } from './now.js';
 import { problemOf } from '../board/problem.js';
-import { withoutComments } from '../utils/text.js';
+import { shellArg, shellQuote, withoutComments } from '../utils/text.js';
+import { freePortAndRetry } from '../engine/free-port.js';
+import { putBackInRelease, takeOutOfRelease } from '../board/release-tidy.js';
+import { costLines, happenedLines } from './cost.js';
+import { ticketCost } from '../board/cost.js';
+import { howPaid } from '../board/payment.js';
 
 const out = (s = '') => process.stdout.write(`${s}\n`);
 const cmd = (s: string) => kleur.green(s);
@@ -128,7 +134,10 @@ function warnIfNoSquad(bp: BoardPaths): void {
 function nextCommand(t: Ticket): string {
   if (!t.waiting && t.quiet) return `${t.quiet.pid ? `squad unstick ${t.id}   or   ` : ''}squad wait ${t.id} --more 10m   or   squad stop ${t.id} --again`;
   if (!t.waiting && changeNeedsYou(t)) return `squad show ${t.id}   then   squad propose ${t.id} --approve   or   --decline`;
+  if (!t.waiting && t.testChange) return `squad test-command ${t.id} --use   or   --keep`;
   switch (t.waiting?.kind) {
+    case 'depends':
+      return `squad build ${t.id} --on-branch   or   --anyway   or   --wait`;
     case 'change':
       return `squad show ${t.id}   then   squad approve ${t.id}   or   squad propose ${t.id} --decline`;
     case 'questions':
@@ -141,7 +150,7 @@ function nextCommand(t: Ticket): string {
     case 'stuck':
       return `squad decide ${t.id}`;
     case 'yours':
-      return `cd "${t.takenOver?.cwd}" && claude --resume ${t.takenOver?.session}   then   squad give-back ${t.id}`;
+      return `cd ${shellQuote(t.takenOver?.cwd ?? '')} && claude --resume ${t.takenOver?.session}   then   squad give-back ${t.id}`;
     default:
       return `squad watch ${t.id}`;
   }
@@ -183,6 +192,7 @@ export function inboxLine(t: Ticket): string {
   if (t.waiting?.summary) return t.waiting.summary;
   const change = openChange(t);
   if (changeNeedsYou(t) && change) return `Change ${change.id} to the spec: ${change.summary ?? change.ask}`;
+  if (t.testChange) return testChangeLine(t.testChange);
   const o = t.outdated ?? [];
   if (o.length) return o.length === 1 ? `${o[0]!.adr} came after this plan and changes it` : `${o.map((x) => x.adr).join(' and ')} came after this plan and change it`;
   return `Looks stuck: ${t.quiet?.detail ?? 'no progress'}`;
@@ -202,13 +212,13 @@ function inboxEverywhere(): void {
     out(kleur.gray('  Nothing needs you right now. The squads are working.'));
   }
   for (const g of groups.filter((x) => x.items.length)) {
-    const ref = /\s/.test(g.name) ? `"${g.name}"` : g.name;
+    const ref = shellArg(g.name);
     const w = Math.max(...g.items.map((t) => t.title.length));
     out();
     out(`  ${kleur.bold(g.name)}`);
     for (const t of g.items) {
       out(`  ${id(t.id)}  ${t.title.padEnd(w)}   ${amber(inboxLine(t))}`);
-      out(`  ${' '.repeat(t.id.length)}  ${cmd(nextCommand(t).replace(/\bsquad ([a-z-]+) (\S+)/g, `squad $1 $2 --project ${ref}`))}`);
+      out(`  ${' '.repeat(t.id.length)}  ${cmd(nextCommand(t).replace(/\bsquad ([a-z-]+) (\S+)/g, (_m, verb: string, arg: string) => `squad ${verb} ${arg} --project ${ref}`))}`);
     }
   }
   out();
@@ -252,6 +262,7 @@ export async function runShow(ticketId: string): Promise<void> {
     out();
     out(`  ${amber('Waiting for you:')} ${t.waiting.summary}`);
   }
+  if (t.dependsOn?.length) out(`  ${kleur.gray('Depends on:')} ${t.dependsOn.join(', ')}${t.dependency ? kleur.gray(`  (${t.dependency.way === 'branch' ? 'built on its branch' : t.dependency.way === 'anyway' ? 'built without it' : 'waits for it'})`) : ''}  ${cmd(`squad depends ${t.id}`)}`);
   if (t.deleting) out(`  ${amber(t.deleting.error ? `Delete did not finish: ${t.deleting.error}.` : 'Being deleted.')} ${cmd(`squad delete ${t.id}`)}`);
   if (t.archived) out(`  ${kleur.gray(`Archived by ${t.archived.by}. Bring it back:`)} ${cmd(`squad archive ${t.id} --undo`)}`);
   const change = openChange(t);
@@ -297,7 +308,7 @@ export async function runShow(ticketId: string): Promise<void> {
     out(`  ${kleur.bold('The work')}  ${t.work.steps} small steps, ${t.work.tests} new tests, ${t.work.screens} before and after screens`);
   }
   if (t.gates) {
-    const g = (ok: string, label: string) => (ok === 'pass' ? kleur.green(`✓ ${label}`) : kleur.gray(`○ ${label}`));
+    const g = (ok: string, label: string) => (ok === 'pass' ? kleur.green(`✓ ${label}`) : ok === 'unchecked' ? kleur.yellow(`! Not checked: ${label}`) : kleur.gray(`○ ${label}`));
     out();
     out(`  ${kleur.bold('Gates')}  ${g(t.gates.checks, t.gates.checksText ?? 'All checks pass')}   ${g(t.gates.review, 'Review approved')}   ${g(t.gates.proof, 'Proof made')}`);
   }
@@ -309,19 +320,31 @@ export async function runShow(ticketId: string): Promise<void> {
       out(kleur.gray(`      ${path.join(bp.proofDir, p.before)}  →  ${path.join(bp.proofDir, p.after)}`));
     }
   }
+  if (t.testChange) {
+    out();
+    out(`  ${amber(`${testChangeLine(t.testChange)}.`)} ${kleur.gray('The checks keep the current one until you choose.')}`);
+    out(`  ${cmd(`squad test-command ${t.id} --use`)}   or   ${cmd(`squad test-command ${t.id} --keep`)}`);
+  }
   if (t.stuck && t.waiting?.kind === 'stuck') {
     const problem = problemOf(t)!;
     out();
     out(`  ${kleur.bold(problem.title)}`);
     out(`  ${problem.what}`);
+    for (const line of t.stuck.points ?? []) out(`  - ${line}`);
     for (const line of problem.safe) out(`  ${kleur.green('✓')} ${line}`);
     t.stuck.options.forEach((o, i) => out(`    ${i + 1}. ${o.name}  ${kleur.gray(o.note)}`));
     if (problem.detail) out(kleur.gray(`  The exact error: ${problem.detail.split('\n')[0]!.slice(0, 300)}`));
     out(kleur.gray(`  Need help? ${cmd(`squad report ${t.id}`)} saves one file to send.`));
   }
+  const happened = happenedLines(bp, t);
+  if (happened.length) {
+    out();
+    for (const l of happened) out(l);
+  }
   if (t.usage?.length) {
     out();
-    out(`  ${kleur.bold('What it used')}  ${usedWords(totalOf(t.usage))}`);
+    for (const l of costLines(ticketCost(bp, t, await howPaid(bp)))) out(l);
+    out(kleur.gray(`  Each role: ${usedWords(totalOf(t.usage))}`));
     for (const row of usageRows(t.usage)) out(row);
   }
   out();
@@ -336,7 +359,7 @@ function time(iso: string): string {
   return new Date(iso).toTimeString().slice(0, 5);
 }
 
-/** "$1.23 at API prices, 9 runs": what it would cost, even though the person's own AI subscription pays for it. */
+/** "$1.23 at API prices, 9 runs": what it would cost at the AI company's API prices. */
 function usedWords(t: UsageTotal): string {
   const cost = costWords(t);
   return `${cost ? `${cost} at API prices` : 'cost not reported'}${kleur.gray(`, ${t.runs} ${t.runs === 1 ? 'run' : 'runs'}`)}`;
@@ -495,8 +518,8 @@ export async function runPropose(ticketId: string, words: string[], opts: { appr
   } catch (err) {
     if (!(err instanceof ReleasedError)) throw err;
     ui.warning(err.message);
-    ui.info(`As a new linked ticket: squad propose ${ticketId} --as ticket "${text}"`);
-    ui.info(`As a bug report: squad propose ${ticketId} --as bug "${text}"`);
+    ui.info(`As a new linked ticket: squad propose ${ticketId} --as ticket ${shellQuote(text)}`);
+    ui.info(`As a bug report: squad propose ${ticketId} --as bug ${shellQuote(text)}`);
     return;
   }
   ui.success('Proposed. The Analyst writes it into the spec while the work goes on.');
@@ -733,7 +756,7 @@ export async function runTakeOver(ticketId: string): Promise<void> {
   ui.success(`${t.id} is yours. The squad stops and waits.`);
   out();
   out(`  Open the Builder's session in its copy of the code:`);
-  out(`    ${kleur.bold(`cd "${t.takenOver!.cwd}" && claude --resume ${t.takenOver!.session}`)}`);
+  out(`    ${kleur.bold(`cd ${shellQuote(t.takenOver!.cwd)} && claude --resume ${t.takenOver!.session}`)}`);
   out();
   ui.info(`When you are done: squad give-back ${t.id} "what you changed"`);
 }
@@ -754,6 +777,33 @@ export async function runHandOver(ticketId: string, words: string[], opts: { not
   out();
 }
 
+/** "The Architect suggests changing the test command from `npm test` to `vitest run`". */
+export function testChangeLine(c: { from: string; to: string }): string {
+  return `The Architect suggests changing the test command from "${c.from}" to "${c.to}"`;
+}
+
+/** The Architect's change to the test command: use it, or keep the current one. Without a choice, it says what waits. */
+export async function runTestCommand(ticketId: string, opts: { use?: boolean; keep?: boolean }): Promise<void> {
+  const bp = board();
+  const t = requireTicket(bp, ticketId);
+  if (opts.use && opts.keep) throw new Error('Pick one: --use or --keep.');
+  if (!opts.use && !opts.keep) {
+    if (!t.testChange) {
+      ui.info(`${t.id} has no change to the test command waiting.`);
+      return;
+    }
+    out();
+    out(`  ${testChangeLine(t.testChange)}.`);
+    out(kleur.gray('  The checks keep using the current one until you choose.'));
+    out(`  ${cmd(`squad test-command ${t.id} --use`)}   or   ${cmd(`squad test-command ${t.id} --keep`)}`);
+    out();
+    return;
+  }
+  const c = t.testChange;
+  decideTestCommand(bp, t.id, Boolean(opts.use));
+  ui.success(opts.use ? `The test command is now "${c?.to}".` : `Kept the test command "${c?.from}".`);
+}
+
 export async function runDecide(ticketId: string, choice?: string, opts: { note?: string; reason?: string } = {}): Promise<void> {
   const bp = board();
   const t = requireTicket(bp, ticketId);
@@ -763,6 +813,7 @@ export async function runDecide(ticketId: string, choice?: string, opts: { note?
   if (ask) {
     out();
     out(`  ${t.stuck.question}`);
+    for (const line of t.stuck.points ?? []) out(`  - ${line}`);
     index = await select({
       message: 'What should happen?',
       choices: t.stuck.options.map((o, i) => ({ name: `${o.name}  ${kleur.gray(o.note)}`, value: i })),
@@ -826,18 +877,29 @@ function roleLabel(who: string): string {
   return kleur.bold(`${names[who] ?? 'Squad'}  `);
 }
 
-export async function runRelease(version: string | undefined, opts: { yes?: boolean; pushAgain?: boolean }): Promise<void> {
+export async function runRelease(version: string | undefined, opts: { yes?: boolean; pushAgain?: boolean; without?: string[]; putBack?: string[] }): Promise<void> {
   const bp = board();
   if (opts.pushAgain) return runPushAgain(bp, version);
-  const draft = draftRelease(bp);
+  let draft = draftRelease(bp);
   if (!draft || (version && draft.version !== (version.startsWith('v') ? version : `v${version}`))) {
     throw new Error('There is no release ready to go out.');
   }
-  const tickets = listTickets(bp).filter((t) => draft.tickets.includes(t.id));
+  // Put back, or take out before it is made: its code stays in main, and it goes out with the next release.
+  if (opts.putBack?.length) {
+    for (const x of opts.putBack) putBackInRelease(bp, draft.version, x);
+    ui.success(`${opts.putBack.map((x) => x.toUpperCase()).join(', ')} ${opts.putBack.length === 1 ? 'is' : 'are'} back in ${draft.version}.`);
+    return;
+  }
+  for (const x of opts.without ?? []) {
+    draft = takeOutOfRelease(bp, draft.version, x);
+    ui.success(`Took ${x.toUpperCase()} out of ${draft.version}. It goes out with the next release. Put it back: ${cmd(`squad release --put-back ${x.toUpperCase()}`)}`);
+  }
+  const tickets = listTickets(bp).filter((t) => draft!.tickets.includes(t.id));
   out();
   out(`  ${kleur.bold(`Release ${draft.version}`)}  ${kleur.gray(`${draft.from} → ${draft.version}`)}`);
   out();
   for (const t of tickets) out(`    ${kleur.green('✓')} ${id(t.id)}  ${t.title}`);
+  for (const x of draft.out ?? []) out(kleur.gray(`    ○ ${x}  taken out: it goes out with the next release`));
   out();
   for (const l of (draft.notes.trim() || composeNotes(bp, draft)).split('\n')) out(`  ${kleur.gray(l.replace(/\*\*/g, ''))}`);
   out();
@@ -964,8 +1026,18 @@ export async function runNew(words: string[], opts: NewOptions): Promise<void> {
   ui.success(t.track === 'express' ? `${t.id} created on the Express track. The squad goes straight to the plan.` : `${t.id} created. The Analyst is reading it.`);
 }
 
-export async function runUnstick(ticketId: string, opts: { keepWaiting?: boolean }): Promise<void> {
+export async function runUnstick(ticketId: string, opts: { keepWaiting?: boolean; freePort?: boolean }): Promise<void> {
   const bp = board();
+  if (opts.freePort) {
+    const port = requireTicket(bp, ticketId).quiet?.port;
+    if (port?.ours && !(await confirm({ message: `Stop the program on port ${port.port}, which squad-kit started, and try the step again?`, default: true }))) {
+      ui.info('Nothing was stopped.');
+      return;
+    }
+    const t = await freePortAndRetry(bp, ticketId);
+    ui.success(`Freed ${port ? `port ${port.port}` : 'the port'} on ${t.id}. The step starts again, with the work so far.`);
+    return;
+  }
   if (opts.keepWaiting) {
     const t = keepWaiting(bp, ticketId);
     ui.success(`OK, waiting. squad-kit stays quiet about ${t.id} for 10 minutes.`);
@@ -1024,6 +1096,7 @@ export interface DemoOptions {
   open?: boolean;
   keep?: boolean;
   token?: string;
+  firstRun?: boolean;
 }
 
 /** Sets up a sample board (and a minimal .squad/ if needed), then opens the console. */
@@ -1043,9 +1116,12 @@ export async function runDemo(opts: DemoOptions): Promise<void> {
     saveConfig(paths.configFile, { ...DEFAULT_CONFIG, project: { ...DEFAULT_CONFIG.project, name: opts.project ?? 'Case portal' } });
   }
   const bp = boardPaths(paths.squadDir);
-  if (!opts.keep || !boardExists(bp)) {
+  if (opts.firstRun) {
+    seedDemoBoard(bp, { speed: opts.speed, project: opts.project, firstRun: true });
+    ui.success('Sample project at its first open: follow the setup, then check the Overview.');
+  } else if (!opts.keep || !boardExists(bp)) {
     seedDemoBoard(bp, { speed: opts.speed, project: opts.project });
-    ui.success('Sample board ready: 11 tickets, 4 releases and 5 saved decisions.');
+    ui.success('Sample board ready: 14 tickets, 4 releases and 5 saved decisions.');
   }
   // The app opens the sample board from its own folder.
   process.chdir(root);

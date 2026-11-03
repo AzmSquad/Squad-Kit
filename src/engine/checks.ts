@@ -87,8 +87,13 @@ export function runCommand(cwd: string, command: string, timeoutMs = 15 * 60_000
   });
 }
 
-/** The project's checks, one after another. After a Stop, the ones not run yet never start. */
-export async function runChecks(cwd: string, commands: ProjectCommands, onStart?: (name: string) => void, watch: CommandWatch = {}): Promise<CheckResult[]> {
+/**
+ * The project's checks, one after another. When no tests ran (none set up, or none found) and the project says how it
+ * starts, "start" checks that the app starts and answers at its address, then stops it: then it is the one check of
+ * what the app does. With tests, the Tester starts the app for the proof anyway. After a Stop, the ones not run yet
+ * never start.
+ */
+export async function runChecks(cwd: string, commands: ProjectCommands, onStart?: (name: string) => void, watch: CommandWatch = {}, appWaitMs?: number): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
   for (const name of ['test', 'lint', 'build'] as const) {
     const command = commands[name]?.trim();
@@ -97,6 +102,21 @@ export async function runChecks(cwd: string, commands: ProjectCommands, onStart?
     onStart?.(name);
     const r = await runCommand(cwd, command, undefined, { silentMs: CHECK_SILENT_MS, ...watch });
     results.push({ name, command, ...r });
+  }
+  const start = commands.start?.trim();
+  const url = commands.url?.trim();
+  const tested = results.some((r) => r.name === 'test' && testCount(r.output) !== 0);
+  if (start && url && !tested && !watch.signal?.aborted) {
+    onStart?.('start');
+    const began = Date.now();
+    const seconds = () => (Date.now() - began) / 1000;
+    try {
+      const app = await startApp(cwd, start, url, appWaitMs, watch.signal);
+      app.stop();
+      results.push({ name: 'start', command: start, ok: true, output: `The app answered at ${app.url}.`, seconds: seconds() });
+    } catch (err) {
+      results.push({ name: 'start', command: start, ok: false, output: (err as Error).message, seconds: seconds() });
+    }
   }
   return results;
 }

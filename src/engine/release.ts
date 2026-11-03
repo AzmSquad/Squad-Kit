@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { readMeta, type BoardPaths } from '../board/store.js';
+import { readMeta, readTicket, type BoardPaths } from '../board/store.js';
 import type { Release, Ticket, UnpushedRelease } from '../board/types.js';
 import { runCommand, tail } from './checks.js';
 import { MergeClash, commitArgsFor, currentBranch, git, isAncestor, keepingFiles, mergeIntoBase, netGit, remotes, removeWorktree, worktreeRoot } from './git.js';
@@ -10,6 +10,9 @@ import type { RepoInfo } from '../board/types.js';
 import { repoHostFor } from '../modules/registry.js';
 import type { RepoHost } from '../modules/code-host/types.js';
 import { docsInGit, docsRepo, stageReleaseDocs } from './project-git.js';
+import { bringBack, leaveOut, leaveOutProblem } from './leave-out.js';
+import { noteRepo, notePrMerged, startJournal, type RepoJournal } from './release-resume.js';
+import { dropTicketCache } from './sandbox.js';
 
 /**
  * A real release: merge every ready ticket (its pull request on the code host, or its branch locally), write the
@@ -56,28 +59,45 @@ export async function liveRelease(bp: BoardPaths, release: Release, tickets: Tic
   const log: ReleaseLog = [];
   const unpushed: UnpushedRelease[] = [];
   const multi = groups.size > 1 || Boolean(meta.repos?.length);
+  // Tickets taken out before the release was made: merged already, so the release leaves their code out.
+  const leaving = (release.out ?? [])
+    .filter((id) => !release.tickets.includes(id))
+    .map((id) => readTicket(bp, id))
+    .filter((t): t is Ticket => Boolean(t?.mergedAt && t.stage !== 'done'));
   const plans = [...groups.values()].map(({ repo, tickets: list }) => {
     const repoRoot = path.join(root, repo.path);
     const remote = repo.remote || remotes(repoRoot)[0];
     const url = remote ? git(repoRoot, ['config', '--get', `remote.${remote}.url`], { allowFail: true }) : '';
     const host = url ? repoHostFor(bp, url) : null;
-    return { repo, repoRoot, list, host, env: host?.gitEnv() ?? {} };
+    return { repo, repoRoot, list, host, env: host?.gitEnv() ?? {}, leave: leaving.filter((t) => repoFor(meta, t).path === repo.path) };
   });
   // One pull request the host cannot merge would stop the release halfway: look for those first, before anything changes.
-  for (const { repo, repoRoot, list, host } of plans) {
+  for (const { repo, repoRoot, list, host, leave } of plans) {
     const clashing: string[] = [];
     for (const t of list.filter((x) => host && x.pr?.host === host.host && !x.mergedAt)) {
       if ((await host!.mergeState(t.pr!.id)) === 'clash') clashing.push(t.id);
     }
     if (clashing.length) throw new PullRequestClash(clashing, repo.base || currentBranch(repoRoot));
+    // A ticket taken out that cannot be left out (later work changed the same lines) stops it here too.
+    const problem = leave.length ? leaveOutProblem(repoRoot, repo.base || currentBranch(repoRoot), leave) : null;
+    if (problem) throw new Error(`${problem} Put it back into ${release.version}, or take that work out too.`);
   }
-  for (const { repo, repoRoot, list, host, env } of plans) {
+  // From here on the release writes down each step, so a restart half-way can finish it or undo it (release-resume.ts).
+  startJournal(bp, release.version, tickets.map((t) => t.id));
+  for (const { repo, repoRoot, list, host, env, leave } of plans) {
     // The project's shared files go out with the release when `.squad/` sits in this repo (ADR-001).
     const docs = docsInGit(bp) && path.resolve(docsRepo(bp)!) === path.resolve(repoRoot) ? (dir: string) => stageReleaseDocs(bp, dir, release, list) : undefined;
     const keep = path.relative(repoRoot, bp.squadDir);
-    const done = await releaseRepo(repoRoot, repo, release, list, meta.commands?.deploy, host, env, docs, keep && !keep.startsWith('..') ? keep : undefined);
+    const note = (patch: Partial<RepoJournal> & { base: string }) => noteRepo(bp, repo.path, patch);
+    const done = await releaseRepo(repoRoot, repo, release, list, meta.commands?.deploy, host, env, docs, keep && !keep.startsWith('..') ? keep : undefined, {
+      leave,
+      note,
+      merged: (id) => notePrMerged(bp, id),
+    });
     log.push(...done.log.map((l) => (multi ? { ...l, text: `${repo.path}: ${l.text}` } : l)));
     if (done.unpushed) unpushed.push(done.unpushed);
+    // Their copies of the code went with the release, so their own package caches go too.
+    for (const t of list) dropTicketCache(bp, t.id);
   }
   return { log, unpushed };
 }
@@ -92,6 +112,7 @@ async function releaseRepo(
   env: Record<string, string>,
   docs?: (dir: string) => void,
   keep?: string,
+  extra: { leave?: Ticket[]; note?: (patch: Partial<RepoJournal> & { base: string }) => void; merged?: (id: string) => void } = {},
 ): Promise<{ log: ReleaseLog; unpushed?: UnpushedRelease }> {
   const base = repo.base || currentBranch(root);
   const remote = repo.remote || remotes(root)[0];
@@ -104,8 +125,10 @@ async function releaseRepo(
   // Accepted work is normally merged already. A pull request still waiting on the host is merged now.
   for (const t of tickets.filter((x) => x.mergedAt)) log.push({ ok: true, text: `Already in ${base}: ${t.id} ${t.title}` });
   const viaPr = tickets.filter((t) => host && t.pr?.host === host.host && !t.mergedAt);
+  const note = extra.note ?? (() => undefined);
   for (const t of viaPr) {
     await host!.merge(t.pr!.id, `Merge ${t.title} (${t.id})`);
+    extra.merged?.(t.id);
     log.push({ ok: true, text: `Merged pull request ${t.pr!.id}: ${t.title}` });
   }
   let start = base;
@@ -119,6 +142,7 @@ async function releaseRepo(
   git(root, ['branch', '-D', branch], { allowFail: true });
   fs.mkdirSync(path.dirname(dir), { recursive: true });
   git(root, ['worktree', 'add', '-b', branch, dir, start]);
+  note({ base, ...(remote ? { remote } : {}), dir, branch });
 
   try {
     for (const t of tickets) {
@@ -131,6 +155,7 @@ async function releaseRepo(
         throw new Error(`${t.id} clashes with other changes in ${base}, so the release stopped. ${(err as Error).message}`);
       }
     }
+    const reverts = extra.leave?.length ? leaveOut(dir, root, base, extra.leave, version, log) : [];
 
     if (release.addons.changelog) {
       writeChangelog(dir, version, release.notes);
@@ -148,17 +173,23 @@ async function releaseRepo(
     docs?.(dir);
     git(dir, ['add', '-A']);
     if (git(dir, ['status', '--porcelain'], { allowFail: true })) git(dir, [...commitArgsFor(dir), 'commit', '-m', `release ${version}`]);
+    // Written before the tag is made, so a restart right after it finds the tag and knows it is this release's.
+    note({ base, commit: git(dir, ['rev-parse', 'HEAD']), ...(release.addons.tag ? { tag: version } : {}) });
 
     if (release.addons.tag) {
       // A tag needs a name like a commit does: the same fallback when this computer has none set.
       git(dir, [...commitArgsFor(dir), 'tag', '-f', '-a', version, '-m', `Release ${version}`]);
       log.push({ ok: true, text: `Tagged ${version}` });
     }
+    // The tag has the release without the work taken out of it; the base gets that work back right after.
+    if (reverts.length) bringBack(dir, reverts, version, base);
 
     const head = git(dir, ['rev-parse', 'HEAD']);
+    note({ base, head });
     if (remote) {
       try {
         await pushRelease(dir, remote, base, version, release.notes, host, env, log);
+        note({ base, pushed: true });
         if (release.addons.tag) netGit(dir, ['push', '-f', remote, `refs/tags/${version}`], { env });
         log.push({ ok: true, text: `Pushed ${base}${release.addons.tag ? ` and ${version}` : ''} to ${remote}` });
       } catch (err) {
@@ -172,6 +203,7 @@ async function releaseRepo(
     }
 
     moveLocalBase(root, base, head, version, keep, log);
+    note({ base, moved: true });
 
     if (release.addons.pipeline) {
       const deploy = repo.commands.deploy?.trim() || deployFallback?.trim();
@@ -185,6 +217,10 @@ async function releaseRepo(
   } finally {
     removeWorktree(root, dir);
   }
+  // The release's own branch is done with once the release is out and the local base has it. It stays when the push
+  // failed (Push again) or the base did not move (the log says to merge it).
+  const tip = git(root, ['rev-parse', '--verify', '-q', `refs/heads/${branch}`], { allowFail: true });
+  if (!unpushed && tip && isAncestor(root, tip, base)) git(root, ['branch', '-D', branch], { allowFail: true });
 
   for (const t of tickets) if (t.worktree) removeWorktree(root, t.worktree);
   return { log, ...(unpushed ? { unpushed } : {}) };
@@ -195,7 +231,7 @@ async function releaseRepo(
  * work accepted into the base while the release went out is not in the release, so then the release is merged into
  * the base instead of taking its place.
  */
-function moveLocalBase(root: string, base: string, head: string, version: string, keep: string | undefined, log: ReleaseLog, again = false): void {
+export function moveLocalBase(root: string, base: string, head: string, version: string, keep: string | undefined, log: ReleaseLog, again = false): void {
   const branch = `release/${version}`;
   const before = git(root, ['rev-parse', base]);
   if (!isAncestor(root, before, head)) {

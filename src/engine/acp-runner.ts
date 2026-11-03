@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { AgentResult, AgentUsage, ToolEvent } from '../modules/ai-tool/types.js';
+import type { AgentResult, AgentUsage, BlockedAction, ToolEvent } from '../modules/ai-tool/types.js';
 import { OWN_GROUP, endGroup, track } from './process-group.js';
 
 /**
@@ -30,6 +30,8 @@ export interface AcpLaunch {
   toolName(update: Record<string, any>): string | undefined;
   /** The tool call that carries the structured answer, when the tool answers that way. */
   structuredTool?: string;
+  /** What the tool's sandbox refused, from a command's output as the tool reports it. */
+  blocked?(output: string): BlockedAction[];
   /**
    * What a saved conversation had cost before this run, by the tool's own record. ACP reports the cost of a whole
    * session, so a run that continues one costs the difference. Without it, a continued run's cost stays unknown.
@@ -77,6 +79,7 @@ export interface AcpRunOptions {
   /** Folder for the ACP updates of each session, one `<sessionId>.jsonl` file per session, one JSON line per update. */
   logDir?: string;
   onTool?(event: ToolEvent): void;
+  onBlocked?(action: BlockedAction): void;
   onText?(text: string): void;
   onActivity?(): void;
   onSpawn?(pid: number): void;
@@ -107,6 +110,21 @@ export function answerPermission(params: Record<string, any>): { outcome: { outc
   const options = (params.options ?? []) as { optionId: string; kind: string }[];
   const no = options.find((o) => o.kind === 'reject_once') ?? options.find((o) => o.kind.startsWith('reject'));
   return no ? { outcome: { outcome: 'selected', optionId: no.optionId } } : { outcome: { outcome: 'cancelled' } };
+}
+
+/** The text of a tool call's result: its content, and its raw output when the agent sends one. */
+export function outputOf(update: Record<string, any>): string {
+  const parts: string[] = [];
+  for (const c of Array.isArray(update.content) ? update.content : []) {
+    if (c?.type === 'content' && c.content?.type === 'text' && typeof c.content.text === 'string') parts.push(c.content.text);
+  }
+  // Raw output can be a string or the tool's own shape: every string in it counts.
+  const strings = (v: unknown, depth = 0): void => {
+    if (typeof v === 'string') parts.push(v);
+    else if (v && typeof v === 'object' && depth < 4) for (const x of Object.values(v)) strings(x, depth + 1);
+  };
+  strings(update.rawOutput);
+  return parts.join('\n');
 }
 
 type Pending = { resolve(v: unknown): void; reject(e: Error): void };
@@ -227,6 +245,9 @@ export async function runAcp(launch: AcpLaunch, opts: AcpRunOptions): Promise<Ag
           t.reported = true;
           opts.onTool?.({ name: t.name, input: t.input });
         }
+        if (update.sessionUpdate === 'tool_call_update' && launch.blocked && opts.onBlocked) {
+          for (const b of launch.blocked(outputOf(update))) opts.onBlocked(b);
+        }
         tools.set(update.toolCallId, t);
       }
     },
@@ -296,6 +317,8 @@ export async function runAcp(launch: AcpLaunch, opts: AcpRunOptions): Promise<Ag
     const res = await rpc.request<{ stopReason: string; usage?: AcpTokens | null }>('session/prompt', { sessionId, prompt: [{ type: 'text', text: opts.prompt }] });
     tokens = res.usage ?? undefined;
     if (stoppedBy) return { ok: false, sessionId, text: lastText, error: stoppedBy, ...used() };
+    // ACP's word for a cap the run was given (its turns, or its spend): the work so far is kept and can go on.
+    if (res.stopReason === 'max_turn_requests') return { ok: false, sessionId, text: lastText, error: 'The step reached the most it may do in one run.', capped: { by: 'turns' }, ...used() };
     if (res.stopReason !== 'end_turn') {
       const why =
         res.stopReason === 'max_tokens' ? 'The answer was cut off because it got too long.'

@@ -6,6 +6,7 @@ import { SQUAD_DIR } from '../../core/paths.js';
 import { MAX_PARALLEL, parallelLimit, setParallelLimit } from '../../core/settings.js';
 import { ticketsRunning } from '../../engine/live.js';
 import { isOwnFolder } from '../../engine/setup.js';
+import { firstLook, type FirstLook } from '../../engine/first-look.js';
 import type { OpenProjects } from '../open-projects.js';
 
 /**
@@ -14,7 +15,7 @@ import type { OpenProjects } from '../open-projects.js';
  * /p/<project id>/api/v1/.
  */
 
-export type FolderKind = 'project' | 'repo' | 'repos' | 'empty' | 'files';
+export type FolderKind = 'project' | 'repo' | 'repos' | 'empty' | 'files' | 'older';
 
 export interface FolderListing {
   path: string;
@@ -29,6 +30,8 @@ export interface FolderListing {
   folders: { name: string; path: string; kind: 'project' | 'repo' | 'folder' }[];
   /** Folders people often start from. */
   places: { name: string; path: string }[];
+  /** What adding this folder means: what squad-kit found in it and what happens next. Only for a folder that can be added. */
+  look?: FirstLook;
 }
 
 /** Folders nobody picks as a project, kept out of the list. */
@@ -65,7 +68,9 @@ function listFolder(asked: string): FolderListing {
       .map((name) => ({ name, path: path.join(home, name) }))
       .filter((p) => fs.existsSync(p.path)),
   ];
-  return { path: dir, parent, home, kind, repos, canAdd: kind === 'project' || isOwnFolder(dir), folders, places };
+  const canAdd = kind === 'project' || isOwnFolder(dir);
+  const look = canAdd ? firstLook(dir) : undefined;
+  return { path: dir, parent, home, kind: look?.kind ?? kind, repos, canAdd, folders, places, ...(look ? { look } : {}) };
 }
 
 export async function body<T>(c: Context): Promise<T> {

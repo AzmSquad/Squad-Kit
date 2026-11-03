@@ -162,7 +162,7 @@ function cached<T>(key: string, files: string[], read: () => T): T {
 /* ── Board settings ─────────────────────────────────────── */
 
 /** The board's settings that belong to the project, kept in `.squad/config.yaml` under `board:`. */
-const PROJECT_META = ['id', 'layout', 'documentsInGit', 'quality', 'project', 'key', 'nextNumber', 'engine', 'commands', 'git', 'repos'] as const;
+const PROJECT_META = ['id', 'layout', 'documentsInGit', 'quality', 'allowedHosts', 'project', 'key', 'nextNumber', 'engine', 'commands', 'noTests', 'git', 'repos'] as const;
 /** What the project knows, kept in `.squad/knowledge/` as Markdown. */
 const KNOWLEDGE_META = ['map', 'lessons'] as const;
 
@@ -263,6 +263,8 @@ export const TICKET_HOME = {
   mockup: 'project',
   changes: 'project',
   changeOf: 'project',
+  dependsOn: 'project',
+  dependency: 'project',
   // Split: the questions' answers, the steps' titles and files inside the ticket's folder are the project's;
   // the talk about a question, the steps' progress and voice notes stay here.
   questions: 'project',
@@ -281,6 +283,7 @@ export const TICKET_HOME = {
   fails: 'local',
   reviewRound: 'local',
   retryPhase: 'local',
+  capRaise: 'local',
   stopRequested: 'local',
   reviewNotes: 'local',
   localSetup: 'local',
@@ -290,6 +293,10 @@ export const TICKET_HOME = {
   trackerQueue: 'local',
   trackerRetry: 'local',
   checksContinued: 'local',
+  weakenedContinued: 'local',
+  testSuggestion: 'local',
+  testChange: 'local',
+  reviewAsked: 'local',
   builtPlan: 'local',
   notesSeen: 'local',
   takenOver: 'local',
@@ -299,10 +306,16 @@ export const TICKET_HOME = {
   chat: 'local',
   planReview: 'local',
   usage: 'local',
+  history: 'local',
+  quality: 'local',
+  budgetOk: 'local',
   clock: 'local',
   stageTimes: 'local',
   retryOnStop: 'local',
   deleting: 'local',
+  baseWanted: 'local',
+  seenOn: 'local',
+  ownerDeleted: 'local',
 } as const satisfies Record<keyof Ticket, 'project' | 'local'>;
 
 /** The live part of a ticket on this computer, plus the parts of split fields that stay here. */

@@ -1,5 +1,8 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import type { AgentUsage } from '../modules/ai-tool/types.js';
 import { STEPS } from '../engine/agents.js';
+import { DEFAULT_QUALITY } from '../engine/levels.js';
 import { listTickets, readMeta, updateTicket, writeMeta, type BoardPaths } from './store.js';
 import type { AgentName, UsageLine, UsageTotal } from './types.js';
 
@@ -79,17 +82,65 @@ export function byRole(lines: UsageLine[] | undefined): RoleUsage[] {
   return out;
 }
 
-/** Counts one run on its ticket, or on the project's own line when it had no ticket. */
+/**
+ * Counts one run on its ticket, or on the project's own line when it had no ticket, and in the month's total. The
+ * ticket also keeps the Quality setting it ran on, for the cost and time per Quality setting.
+ */
 export function recordUsage(bp: BoardPaths, ticketId: string | undefined, key: UsageKey, usage: AgentUsage | undefined): void {
+  addToMonth(bp, usage);
   try {
+    const meta = readMeta(bp);
     if (ticketId) {
-      updateTicket(bp, ticketId, (t) => (t.usage = addRun(t.usage, key, usage)));
+      updateTicket(bp, ticketId, (t) => {
+        t.usage = addRun(t.usage, key, usage);
+        t.quality = meta.quality ?? DEFAULT_QUALITY;
+      });
       return;
     }
-    const meta = readMeta(bp);
     writeMeta(bp, { ...meta, usage: addRun(meta.usage, key, usage) });
   } catch {
     // The ticket was removed while it ran; nothing to count it on.
+  }
+}
+
+/* ── Per month ──────────────────────────────────────────── */
+
+/** "2026-11", in this computer's time zone: the month a person's bill or plan counts in. */
+export function monthKey(at = Date.now()): string {
+  const d = new Date(at);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+/** What the squad used each month on this project, on this computer. Tickets keep their own totals; this one has dates. */
+export function monthsFile(bp: BoardPaths): string {
+  return path.join(bp.localDir, 'usage-months.json');
+}
+
+export function readMonths(bp: BoardPaths): Record<string, UsageTotal> {
+  try {
+    const raw = JSON.parse(fs.readFileSync(monthsFile(bp), 'utf8')) as unknown;
+    if (!raw || typeof raw !== 'object') return {};
+    return Object.fromEntries(Object.entries(raw).filter(([k, v]) => /^\d{4}-\d{2}$/.test(k) && v && typeof v === 'object' && typeof (v as UsageTotal).runs === 'number')) as Record<string, UsageTotal>;
+  } catch {
+    // Nothing counted yet, or a broken file: the month starts from nothing.
+    return {};
+  }
+}
+
+/** One run joins its month. Counting is a help, never a reason for a step to fail. */
+export function addToMonth(bp: BoardPaths, usage: AgentUsage | undefined, at = Date.now()): void {
+  try {
+    const months = readMonths(bp);
+    const key = monthKey(at);
+    const t = months[key] ?? { runs: 0 };
+    addTo(t, usage, 1);
+    months[key] = t;
+    fs.mkdirSync(path.dirname(monthsFile(bp)), { recursive: true });
+    const tmp = `${monthsFile(bp)}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, `${JSON.stringify(months, null, 1)}\n`);
+    fs.renameSync(tmp, monthsFile(bp));
+  } catch {
+    // A full disk or a folder removed: the month's total misses this run.
   }
 }
 

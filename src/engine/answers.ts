@@ -76,3 +76,54 @@ function fits(type: string, v: unknown): boolean {
       return true;
   }
 }
+
+/**
+ * The design's "depends on" list, checked against the board: each name must be another open ticket, not this one.
+ * A wrong name is asked for once more, like a broken answer; after that, names that are not open tickets are left out.
+ */
+export function dependsProblem(value: unknown, open: string[], self: string): string | null {
+  const list = (value as { dependsOn?: unknown } | null)?.dependsOn;
+  if (list === undefined || list === null) return null;
+  if (!Array.isArray(list)) return 'dependsOn is not a list';
+  const known = new Set(open.map((x) => x.toUpperCase()));
+  for (const item of list) {
+    if (typeof item !== 'string') return 'dependsOn has an item that is not text';
+    const name = item.trim().toUpperCase();
+    if (name === self.toUpperCase()) return `dependsOn names ${self}, this ticket itself`;
+    if (!known.has(name)) return `dependsOn names ${item.trim() || 'an empty name'}, which is not an open ticket on this board${open.length ? ` (open: ${open.join(', ')})` : ' (there are none)'}`;
+  }
+  return null;
+}
+
+/** What the overview needs from the read of a project that has code. */
+const OVERVIEW_PARTS = ['users', 'can', 'worth', 'ideas', 'parts', 'links'] as const;
+
+/**
+ * What the shapes cannot say about the first read of a project: a project with code hands in the overview's parts
+ * (who uses it, what it can do, what is worth knowing, ticket ideas, the parts of the code and their links), no two
+ * parts share an id, and every link joins two parts the answer has. Null when it holds. squad-kit asks once more;
+ * after that it keeps what fits, so an answer in the older shape still works.
+ */
+export function scanProblem(value: unknown): string | null {
+  if (!value || typeof value !== 'object') return null;
+  const v = value as Record<string, unknown>;
+  if (v.empty !== true) for (const key of OVERVIEW_PARTS) if (v[key] === undefined || v[key] === null) return `${key} is missing`;
+  return partsProblem(value);
+}
+
+/** No two parts of the code share an id, and every link joins two parts the answer has. */
+export function partsProblem(value: unknown): string | null {
+  if (!value || typeof value !== 'object') return null;
+  const v = value as { parts?: unknown; links?: unknown };
+  const ids = (Array.isArray(v.parts) ? v.parts : []).map((p) => (p && typeof p === 'object' ? (p as { id?: unknown }).id : undefined));
+  const twice = ids.find((id, i) => ids.indexOf(id) !== i);
+  if (twice !== undefined) return `two parts have the id "${String(twice)}"`;
+  const known = new Set(ids);
+  for (const [i, l] of (Array.isArray(v.links) ? v.links : []).entries()) {
+    const link = (l && typeof l === 'object' ? l : {}) as Record<string, unknown>;
+    for (const end of ['from', 'to'] as const) {
+      if (!known.has(link[end])) return `links[${i}].${end} names no part ("${String(link[end])}")`;
+    }
+  }
+  return null;
+}

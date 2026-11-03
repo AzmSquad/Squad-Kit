@@ -5,6 +5,8 @@ import { assetUrl } from '../api/client';
 import { useTicket } from '../lib/data';
 import { ProofDecision } from './TicketDrawer';
 import { Lightbox, type Picture } from '../components/Lightbox';
+import { GatePill as Gate, NotCheckedNote } from '../components/Gates';
+import { checksWords, noShotsText } from '../lib/gates';
 
 export function ProofPage() {
   const { id } = useParams({ from: '/tickets/$id/proof' });
@@ -35,13 +37,14 @@ export function ProofPage() {
           / <b>Proof</b>
         </span>
       </div>
-      <div className="gatebar">
+      <div className={`gatebar ${g?.checks === 'unchecked' ? 'unchecked' : ''}`}>
         {/* Each gate as it really is: green only when it passed; a gate you continued past says so. */}
-        <Gate state={g?.checks} text={g?.checks === 'skipped' ? 'Checks failed, you continued' : (g?.checksText ?? 'All checks pass')} />
+        <Gate state={g?.checks} text={checksWords(g)} />
         <Gate state={g?.review} text={g?.review === 'skipped' ? 'Review notes open, you continued' : `Review approved${g?.reviewBy ? ` by ${g.reviewBy}` : ''}`} />
         <Gate state={g?.proof} text={g?.proof === 'skipped' ? 'No screenshots, you continued' : 'Proof made'} />
         <span style={{ marginLeft: 6 }}>Nothing ships without these three.</span>
       </div>
+      <NotCheckedNote g={g} className="gatebar-why" />
       <div className="split">
         <div className="critlist">
           <div className="lbl" style={{ marginTop: 0 }}>Done when · {shots.length}</div>
@@ -52,9 +55,7 @@ export function ProofPage() {
             </button>
           ))}
           {shots.length === 0 && (
-            <p className="note">
-              {g?.proof === 'skipped' || (t.work?.screens ?? 0) > 0 ? 'No screenshots were taken for this ticket. See the activity for why.' : 'No screens change in this ticket, so the passing checks are the proof.'}
-            </p>
+            <p className="note">{noShotsText(t)}</p>
           )}
         </div>
         <div className="stage">
@@ -95,14 +96,5 @@ export function ProofPage() {
         </div>
       )}
     </>
-  );
-}
-
-function Gate({ state, text }: { state?: string; text: string }) {
-  return (
-    <span className={`pill ${state === 'pass' ? 'ok' : state === 'skipped' ? 'skip' : 'wait'}`}>
-      {state === 'pass' && <Check size={13} strokeWidth={2.5} />}
-      {text}
-    </span>
   );
 }

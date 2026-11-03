@@ -11,6 +11,7 @@ import {
   composeNotes,
   createTicket,
   decideStuck,
+  decideTestCommand,
   pullTicket,
   readCodeAgain,
   setUpLocalCopy,
@@ -79,8 +80,14 @@ import { liveNow } from '../../board/now.js';
 import { readUsual } from '../../board/usual.js';
 import { answerAsk } from '../../board/ask.js';
 import { withProblem } from '../../board/problem.js';
+import { PACKAGE_HOSTS, parseHosts, sandboxStatus } from '../../engine/sandbox.js';
+import { mountCostApi } from './cost.js';
+import { freePortAndRetry } from '../../engine/free-port.js';
 
 const DAY = 86_400_000;
+
+/** The role behind each of a ticket's conversations. */
+const SESSION_ROLE: Record<string, AgentRole> = { intake: 'analyst', build: 'builder', review: 'reviewer', tester: 'tester' };
 
 /** Signs mockup links for this run of the board only. */
 const MOCKUP_SECRET = randomBytes(32);
@@ -279,8 +286,12 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     const id = key === 'chat' ? t?.chat?.side : t?.sessions?.[key as 'intake' | 'build' | 'review' | 'tester'];
     if (!id) return c.json({ error: 'not found' }, 404);
     const conv = readConversation(id, Math.min(1000, Number(c.req.query('limit')) || 400), undefined, bp.chatsDir);
-    if (!conv) return c.json({ sessionId: id, updates: [], total: 0 });
-    return c.json({ ...conv, protocol: 'acp/v1', command: `cd ${conv.cwd ?? '.'} && claude --resume ${id}` });
+    // The AI tool that ran the role says how to open the session in a terminal.
+    const role: AgentRole = key === 'chat' ? (t?.chat?.with ?? 'analyst') : (SESSION_ROLE[key] ?? 'builder');
+    const tool = aiTool(readAgent(bp, role).tool);
+    const open = tool?.resumeCommand ? { command: tool.resumeCommand(id, conv?.cwd), tool: tool.label } : {};
+    if (!conv) return c.json({ sessionId: id, updates: [], total: 0, ...open });
+    return c.json({ ...conv, protocol: 'acp/v1', ...open });
   });
 
   // Pictures, recordings and documents the squad made, shown in the conversation. Only files inside the ticket's own
@@ -391,6 +402,8 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
   app.post('/api/v1/tickets/:id/approve', (c) => act(c, () => approve(bp, c.req.param('id'))));
   app.post('/api/v1/tickets/:id/stop', (c) => act(c, () => stopTicket(bp, c.req.param('id'))));
   app.post('/api/v1/tickets/:id/unstick', (c) => act(c, () => endStuckCommand(bp, c.req.param('id'))));
+  // Free the port and try again: only a program squad-kit started on the app's port (src/engine/free-port.ts).
+  app.post('/api/v1/tickets/:id/free-port', (c) => act(c, () => freePortAndRetry(bp, c.req.param('id'))));
   app.post('/api/v1/tickets/:id/keep-waiting', async (c) => {
     const b = await body<{ minutes?: number }>(c);
     return act(c, () => keepWaiting(bp, c.req.param('id'), b.minutes ?? 10));
@@ -511,6 +524,15 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     return act(c, () => decideStuck(bp, c.req.param('id'), Number(b.choice), { note: b.note, reason: b.reason }));
   });
 
+  // The Architect's change to the test command: { use: true } takes it, { use: false } keeps the current one.
+  app.post('/api/v1/tickets/:id/test-command', async (c) => {
+    const b = await body<{ use?: boolean }>(c);
+    return act(c, () => {
+      if (typeof b.use !== 'boolean') throw new BoardActionError('Say { "use": true } to use the new test command, or { "use": false } to keep the current one.');
+      return decideTestCommand(bp, c.req.param('id'), b.use);
+    });
+  });
+
   app.get('/api/v1/releases', (c) => {
     const tickets = listTickets(bp);
     const meta = readMeta(bp);
@@ -596,10 +618,16 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
       runner?: 'acp' | 'direct';
       documentsInGit?: boolean;
       quality?: string;
+      allowedHosts?: string[];
       repos?: { path: string; base?: string; remote?: string; commands?: ProjectCommands }[];
     }>(c);
     return act(c, () => {
       const meta = readMeta(bp);
+      if (b.allowedHosts !== undefined) {
+        const { hosts, bad } = parseHosts(Array.isArray(b.allowedHosts) ? b.allowedHosts : []);
+        if (bad.length) throw new Error(`"${bad[0]}" is not a host name. Write it like nexus.example.com, or *.example.com for all of its subdomains.`);
+        meta.allowedHosts = hosts;
+      }
       if (b.quality !== undefined) {
         const q = parseQuality(b.quality);
         if (!q) throw new Error(`"${b.quality}" is not a Quality setting. Use best, balanced or thrifty.`);
@@ -628,6 +656,9 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
       return meta;
     });
   });
+
+  // Whether the Builder's and Tester's commands run in a sandbox on this computer, and the hosts they may reach.
+  app.get('/api/v1/sandbox', (c) => c.json({ tools: sandboxStatus(), registries: PACKAGE_HOSTS, allowedHosts: boardExists(bp) ? (readMeta(bp).allowedHosts ?? []) : [] }));
 
   app.get('/api/v1/agents', (c) => {
     if (!boardExists(bp)) return c.json([]);
@@ -717,6 +748,8 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
       return meta;
     }),
   );
+
+  mountCostApi(app, bp);
 
   app.post('/api/v1/demo/reset', (c) => {
     if (boardExists(bp) && readMeta(bp).engine !== 'demo') return c.json({ error: 'Only a demo board can be reset.' }, 400);

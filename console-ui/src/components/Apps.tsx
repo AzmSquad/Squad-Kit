@@ -4,7 +4,7 @@ import { Check } from 'lucide-react';
 import { api } from '../api/client';
 import type { AppOutput, ProjectApp } from '../api/types';
 import { useAct, useApps } from '../lib/data';
-import { shellQuote } from '../lib/text';
+import { shellArg, shellQuote } from '../lib/text';
 import { Cmd, Modal } from './ui';
 
 /**
@@ -67,7 +67,7 @@ function AppItem({ a, named, live, reading, readError }: { a: ProjectApp; named:
   const [typing, setTyping] = useState(false);
   const [output, setOutput] = useState(false);
   // The terminal names the app only when the project has more than one.
-  const ref = named ? ` ${/\s/.test(a.name) ? `"${a.name}"` : a.name}` : '';
+  const ref = named ? ` ${shellArg(a.name)}` : '';
   const call = (verb: string, done: string, body?: object) => act.mutate({ path: `/api/v1/apps/${encodeURIComponent(a.name)}/${verb}`, body, done });
   const start = (body?: object) => call('start', `Starting ${a.name}`, body);
   const busy = a.state === 'failed' ? a.busy : undefined;
@@ -259,7 +259,7 @@ function TypeIt({ a, cmdRef, onDone }: { a: ProjectApp; cmdRef: string; onDone()
           Cancel
         </button>
       </div>
-      <Cmd text={`squad app set${cmdRef} --start ${shellQuote(start.trim() || 'npm run dev')}${url.trim() ? ` --url ${url.trim()}` : ''}`} />
+      <Cmd text={`squad app set${cmdRef} --start ${shellQuote(start.trim() || 'npm run dev')}${url.trim() ? ` --url ${shellArg(url.trim())}` : ''}`} />
     </form>
   );
 }

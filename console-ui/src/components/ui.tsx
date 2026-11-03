@@ -84,7 +84,7 @@ export function Tracker({ ticket }: { ticket: Ticket }) {
             <span className="nd">{i < at ? <Check size={12} strokeWidth={3} /> : null}</span>
             {s.name}
             {i === at && (
-              <span className="tag">{mode === 'you' ? 'Your turn' : ticket.stage === 'release' ? 'Ready' : 'Working'}</span>
+              <span className="tag">{mode === 'you' ? 'Your turn' : ticket.stage === 'release' ? 'Ready' : ticket.dependency?.way === 'wait' && !ticket.dependency.started && !ticket.squad ? 'Waiting' : 'Working'}</span>
             )}
             {notes.size > 0 && <span className="tnote">{i === at && note === 'your turn' ? '' : (note ?? '')}</span>}
           </div>
@@ -185,6 +185,8 @@ export function commandFor(t: Ticket): string {
       return `squad give-back ${t.id}`;
     case 'chat':
       return `squad chat ${t.id}`;
+    case 'depends':
+      return `squad build ${t.id} --on-branch`;
     case 'change':
     case 'spec':
     case 'plan':
@@ -221,6 +223,8 @@ export function actionLabel(t: Ticket): string {
       return 'Open chat';
     case 'change':
       return 'Review design update';
+    case 'depends':
+      return 'Choose';
     default:
       return 'Open';
   }

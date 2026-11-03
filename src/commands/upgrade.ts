@@ -4,7 +4,7 @@ import { confirm } from '@inquirer/prompts';
 import * as ui from '../ui/index.js';
 import { changelogBlobUrl, readInstalledPackage } from '../core/package-info.js';
 import { fetchLatest, isNewer } from '../core/registry.js';
-import { fetchReleaseNotes, isMajorBump, upgradePlan } from '../core/update.js';
+import { fetchReleasesBetween, isMajorBump, upgradePlan } from '../core/update.js';
 
 const REGISTRY_HOST = 'registry.npmjs.org';
 
@@ -55,15 +55,18 @@ export async function runUpgrade(opts: UpgradeOptions): Promise<void> {
   // The same command and notes the app's Update button uses.
   const pm = upgradePlan(installed, latest);
   const { cmd, args } = pm;
-  const notes = await fetchReleaseNotes(installed.repositoryUrl, latest);
+  const releases = await fetchReleasesBetween(installed.repositoryUrl, installed.version, latest);
+  const newest = releases.find((r) => r.version === latest);
 
   ui.blank();
   ui.info(`Detected package manager: ${pm.pm} (${pm.reason})`);
-  if (notes.lines.length) {
-    ui.info(`What is new in ${latest}:`);
-    for (const line of notes.lines) ui.info(`  · ${line}`);
+  // Every release since this version, newest first, so nothing in between is missed.
+  for (const r of releases) {
+    if (!r.lines.length) continue;
+    ui.info(`What is new in ${r.version}:`);
+    for (const line of r.lines) ui.info(`  · ${line}`);
   }
-  ui.info(`Changelog: ${notes.url}`);
+  ui.info(`Changelog: ${newest?.url ?? changelogBlobUrl(installed.repositoryUrl, latest)}`);
 
   if (opts.check) {
     ui.blank();

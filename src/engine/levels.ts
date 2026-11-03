@@ -62,9 +62,37 @@ const BALANCED: Record<string, Record<string, LevelChoice>> = {
   builder: { ...THRIFTY.builder, build: strong('medium'), fix: strong('medium') },
 };
 
+/**
+ * The most one run of a step may use before its AI tool stops it: agent turns, and spend at the AI company's API
+ * prices (on a subscription it is the plan's limits that it saves). Generous on purpose: a cap catches an agent going
+ * round in circles, not a big ticket. Reaching one pauses the step with its work kept, and Give it more doubles it.
+ */
+export interface StepCaps {
+  turns: number;
+  spendUsd: number;
+}
+
+/** Best's caps, by role and by role and step ("builder.fix"); "chat" is any role talking a ticket through. */
+const BEST_CAPS: Record<string, StepCaps> = {
+  analyst: { turns: 80, spendUsd: 15 },
+  architect: { turns: 120, spendUsd: 20 },
+  builder: { turns: 300, spendUsd: 60 },
+  'builder.fix': { turns: 150, spendUsd: 30 },
+  reviewer: { turns: 120, spendUsd: 20 },
+  tester: { turns: 80, spendUsd: 10 },
+  chat: { turns: 40, spendUsd: 8 },
+};
+
+/** The same caps with fewer turns and less spend, for the cheaper settings. */
+function scaled(caps: Record<string, StepCaps>, turns: number, spend: number): Record<string, StepCaps> {
+  return Object.fromEntries(Object.entries(caps).map(([k, c]) => [k, { turns: Math.round(c.turns * turns), spendUsd: Math.round(c.spendUsd * spend) }]));
+}
+
 interface Preset {
   /** Each role's level per step. */
   levels: Record<string, Record<string, LevelChoice>>;
+  /** Each step's caps (see StepCaps). */
+  caps: Record<string, StepCaps>;
   /** The Express track has little to decide: each role's level for every step of it. */
   express: Record<string, LevelChoice>;
   /** The Builder's level once this many of its runs failed on a ticket. */
@@ -78,10 +106,11 @@ const EXPRESS: Record<string, LevelChoice> = { analyst: balanced('high'), archit
 
 /** squad-kit's defaults for each Quality setting. They ship inside squad-kit and improve with each release. */
 export const QUALITY_PRESETS: Record<Quality, Preset> = {
-  best: { levels: BEST, express: EXPRESS, stepUp: { after: 1, to: strong('xhigh') }, reviewerFloor: true },
-  balanced: { levels: BALANCED, express: EXPRESS, stepUp: { after: 1, to: strong('high') }, reviewerFloor: true },
+  best: { levels: BEST, caps: BEST_CAPS, express: EXPRESS, stepUp: { after: 1, to: strong('xhigh') }, reviewerFloor: true },
+  balanced: { levels: BALANCED, caps: scaled(BEST_CAPS, 0.8, 0.6), express: EXPRESS, stepUp: { after: 1, to: strong('high') }, reviewerFloor: true },
   thrifty: {
     levels: THRIFTY,
+    caps: scaled(BEST_CAPS, 0.6, 0.3),
     express: Object.fromEntries(Object.keys(THRIFTY).map((role) => [role, balanced('medium')])),
     stepUp: { after: 2, to: strong('high') },
     reviewerFloor: false,
@@ -162,6 +191,17 @@ export function resolveLevel(ctx: LevelContext, project?: LevelOverrides, person
     if (up.level !== r.level || up.effort !== r.effort) r = { ...up, why: 'as strong as the Builder' };
   }
   return r;
+}
+
+/**
+ * The caps for one run of a step, from the project's Quality setting. `more` is how many times the person pressed
+ * Give it more on this step: each time doubles them.
+ */
+export function stepCaps(ctx: Pick<LevelContext, 'role' | 'step' | 'quality'>, more = 0): StepCaps {
+  const caps = QUALITY_PRESETS[ctx.quality ?? DEFAULT_QUALITY].caps;
+  const c = ctx.step === 'chat' ? caps.chat! : (caps[`${ctx.role}.${ctx.step}`] ?? caps[ctx.role] ?? caps.analyst!);
+  const k = 2 ** Math.max(0, Math.min(more, 6));
+  return { turns: c.turns * k, spendUsd: c.spendUsd * k };
 }
 
 /** The strongest level the Builder runs on for a ticket now, over its build and fix steps: the Reviewer's floor. */

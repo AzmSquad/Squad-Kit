@@ -241,7 +241,7 @@ async function nextFreePort(from: number): Promise<number | undefined> {
 }
 
 /** The program listening on a port, when the system can tell (lsof on a Mac and on Linux). */
-function whoListens(port: number): { pid: number; program: string } | null {
+export function whoListens(port: number): { pid: number; program: string } | null {
   if (process.platform === 'win32') return null;
   try {
     const out = execFileSync('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-Fpc'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000 });
@@ -281,7 +281,7 @@ function signalPid(pid: number, signal: NodeJS.Signals): void {
 }
 
 /** Stops a process group squad-kit started, from any process: TERM, then KILL when it is still there. */
-async function endPid(pid: number): Promise<void> {
+export async function endPid(pid: number): Promise<void> {
   signalPid(pid, 'SIGTERM');
   const until = Date.now() + KILL_AFTER_MS;
   while (groupAlive(pid) && Date.now() < until) await sleep(100);
@@ -313,6 +313,29 @@ export function lastWords(output: string): string {
     .filter(Boolean);
   const said = [...lines].reverse().find((l) => /error|cannot|can't|not found|failed|denied|EADDRINUSE|in use|missing/i.test(l));
   return (said ?? lines.at(-1) ?? 'it printed nothing').slice(0, 200);
+}
+
+/**
+ * The process group listening on a port, when squad-kit started it: one of this project's apps (its group is kept in
+ * apps.json), or anything this squad-kit process runs (a ticket's copy of the app for the Tester, a check). Null for a
+ * program of the person's own, which squad-kit never stops.
+ */
+export function squadKitOn(bp: BoardPaths, port: number): { group: number; holder: { pid: number; program: string }; app?: string } | null {
+  const holder = whoListens(port);
+  if (!holder) return null;
+  const group = psField(holder.pid, 'pgid') ?? holder.pid;
+  let records: Record<string, AppRecord> = {};
+  try {
+    records = JSON.parse(fs.readFileSync(path.join(bp.localDir, 'apps.json'), 'utf8')) as Record<string, AppRecord>;
+  } catch {
+    // No app started yet.
+  }
+  const repo = Object.entries(records).find(([, r]) => r.pid === group)?.[0];
+  if (repo !== undefined) {
+    const app = projectApps(readMeta(bp)).find((a) => a.repo === repo);
+    return { group, holder, ...(app ? { app: app.name } : {}) };
+  }
+  return psField(group, 'ppid') === process.pid ? { group, holder } : null;
 }
 
 export class AppError extends Error {}
@@ -371,12 +394,7 @@ export class AppRunner {
    * squad-kit runs (a ticket's copy of the app for the Tester, a check). Null for a program of the person's own.
    */
   private oursOn(port: number): { group: number; holder: { pid: number; program: string } } | null {
-    const holder = whoListens(port);
-    if (!holder) return null;
-    const group = psField(holder.pid, 'pgid') ?? holder.pid;
-    const recorded = Object.values(this.records()).some((r) => r.pid === group);
-    const leader = psField(group, 'ppid');
-    return recorded || leader === process.pid ? { group, holder } : null;
+    return squadKitOn(this.bp, port);
   }
 
   private keep(repo: string, text: string): void {

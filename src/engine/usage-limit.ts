@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { squadHome } from '../core/home.js';
+import type { AgentChat, ChatMessage } from '../board/types.js';
 import type { UsageLimit } from '../modules/ai-tool/types.js';
 
 /**
@@ -102,6 +103,28 @@ export function limitText(p: LimitPause, now = Date.now()): string {
 /** True for a card line written by {@link limitText}. */
 export function isLimitText(status: string | undefined): boolean {
   return Boolean(status && / usage limit is reached\. The squad carries on /.test(status));
+}
+
+/**
+ * What a chat says while its answer waits for the limit: "Claude's usage limit is reached. Your message waits and gets
+ * its answer at 3:40 PM". A chat just opened, with no message yet, waits the same way.
+ */
+export function chatWaitText(p: LimitPause, hasMessage: boolean, now = Date.now()): string {
+  const when = p.resetsAt ? resetWords(p.resetsAt, now) : 'once the limit resets';
+  return hasMessage ? `${p.name}'s usage limit is reached. Your message waits and gets its answer ${when}` : `${p.name}'s usage limit is reached. The chat waits and the answer comes ${when}`;
+}
+
+/**
+ * The chat's answer waits for the reset: it stays "answering" (so Stop still works) and gets one line saying until
+ * when, kept up to date if the reset moves. When the squad carries on, the answer comes by itself. Returns the line to
+ * add or replace, or null when the chat says so already.
+ */
+export function chatWaitNote(c: Pick<AgentChat, 'messages'>, p: LimitPause, now = Date.now()): { message: ChatMessage; replace: boolean } | null {
+  const last = c.messages.at(-1);
+  const hasMessage = [...c.messages].reverse().find((m) => m.note !== 'waits')?.who === 'you';
+  const text = chatWaitText(p, hasMessage, now);
+  if (last?.note === 'waits' && last.text === text) return null;
+  return { message: { who: 'squad', text, at: new Date(now).toISOString(), note: 'waits' }, replace: last?.note === 'waits' };
 }
 
 /**

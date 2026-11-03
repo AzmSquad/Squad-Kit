@@ -47,6 +47,9 @@ import { isMediaNote } from '../engine/media.js';
 import { leaveProjectFiles, stageTicketDocs } from '../engine/project-git.js';
 import { pushHandOver, type HandOverPush } from '../engine/handover.js';
 import { isMine, ownerOf, sameName } from './owner.js';
+import { holdForDependency, refuseBeforeDependency } from './depends.js';
+import { afterRelease, settleRelease } from './release-tidy.js';
+import { clearJournal, readJournal } from '../engine/release-resume.js';
 
 /** Every person-facing action lives here, so the board and the terminal do exactly the same thing. */
 
@@ -335,6 +338,7 @@ export function approve(bp: BoardPaths, id: string): Ticket {
     // The proof does not show a change that is still open, so it cannot be accepted yet.
     const c = openChange(ticket);
     if (c) throw new BoardActionError(`Change ${c.id} is still open. ${c.status === 'proposed' || c.status === 'failed' ? 'Approve or decline it first.' : 'The squad builds it first, then the proof comes again.'}`);
+    refuseBeforeDependency(bp, ticket);
     return acceptProof(bp, ticket);
   }
   if (kind === 'change') return approveChange(bp, ticket.id);
@@ -407,6 +411,8 @@ function approvePlan(bp: BoardPaths, ticket: Ticket, speed: number, express = fa
     const approved = express ? 'Express track: approved the plan on its own' : t.specApproved ? 'Approved the design' : 'Approved the plan';
     addActivity(t, express ? 'squad' : 'you', adr ? `${approved}. Decision saved as ${adr}${t.decision?.replaces ? `, replacing ${t.decision.replaces}` : ''}` : approved);
     scheduleSquad(t, 'build', 2, speed, 0);
+    // A ticket it depends on is not merged yet: the build waits for the person's choice (board/depends.ts).
+    holdForDependency(bp, t);
     tellLater(t, meta.engine, { kind: 'planned' });
   });
 }
@@ -1328,7 +1334,17 @@ export function startOver(bp: BoardPaths, id: string, direction: string): Ticket
 }
 
 /** The choices on a stuck card. Every stop has a way out: try again, do it yourself, go around it, or back to the plan. */
-export function wayOptions(stop: { gate?: StuckChoice['gate']; publish?: boolean; copy?: boolean; base?: string }): StuckOption[] {
+export function wayOptions(stop: { gate?: StuckChoice['gate']; kind?: StuckChoice['kind']; publish?: boolean; copy?: boolean; base?: string; test?: string }): StuckOption[] {
+  // No tests: asked once per project. Use the suggested test command, go on without tests, or add one and check again.
+  if (stop.kind === 'no-tests') {
+    return [
+      ...(stop.test
+        ? [{ do: 'add-test' as const, name: `Use "${stop.test}" for tests`, note: 'Saves it as the test command in Settings. The checks run again with it; the Builder writes the tests if there are none yet.' }]
+        : []),
+      { do: 'no-tests', name: 'Go on without tests', note: 'This ticket and later ones show "Not checked" instead of a pass. squad-kit asks once per project.' },
+      { do: 'retry', name: 'Check again', note: 'After you add a test command in Settings.' },
+    ];
+  }
   if (stop.publish) {
     return [
       { do: 'retry', name: 'Try again', note: 'Push the branch and open the pull request again.' },
@@ -1336,7 +1352,9 @@ export function wayOptions(stop: { gate?: StuckChoice['gate']; publish?: boolean
     ];
   }
   const retry: StuckOption =
-    stop.gate === 'checks'
+    stop.kind === 'weakened'
+      ? { do: 'retry', name: 'Send it back to the Builder', note: 'It puts the tests back as they were, then the checks run again.' }
+      : stop.gate === 'checks'
       ? { do: 'retry', name: 'Let the Builder try 3 more times', note: 'It gets the full error and tries again.' }
       : stop.gate === 'review'
         ? { do: 'retry', name: 'Let the Builder fix the notes', note: 'Then the Reviewer gets two more rounds.' }
@@ -1354,11 +1372,41 @@ export function wayOptions(stop: { gate?: StuckChoice['gate']; publish?: boolean
     });
   }
   if (stop.gate === 'checks' || stop.gate === 'review' || stop.gate === 'proof') {
-    const what = { checks: 'with the checks failing', review: 'with the review notes open', proof: 'without screenshots' }[stop.gate];
+    const what =
+      stop.kind === 'weakened'
+        ? 'with the tests as they are now; the checks still run'
+        : stop.kind === 'bad-proof'
+          ? 'with the screenshots as they are'
+          : { checks: 'with the checks failing', review: 'with the review notes open', proof: 'without screenshots' }[stop.gate];
     out.push({ do: 'continue', name: 'Continue anyway', note: `Go on ${what}. Write why: it shows on the ticket, the pull request and the release notes.` });
   }
   out.push({ do: 'plan', name: 'Send it back to the plan', note: 'The Spec writer rewrites the plan with what went wrong.' });
   return out;
+}
+
+/** The project's test command, in the settings of the ticket's repo (the first one, or the project's own). */
+function saveTestCommand(bp: BoardPaths, meta: BoardMeta, repoPath: string | undefined, command: string): void {
+  const repo = meta.repos?.find((r) => r.path === repoPath) ?? meta.repos?.[0];
+  writeMeta(bp, repo ? { ...meta, repos: meta.repos!.map((r) => (r === repo ? { ...r, commands: { ...r.commands, test: command } } : r)) } : { ...meta, commands: { ...(meta.commands ?? {}), test: command } });
+}
+
+/**
+ * The Architect's design changes the test command. It is never applied on its own: Use saves the new one in the
+ * settings of the ticket's repo, Keep drops it. Either way the checks from now on run the command you chose.
+ */
+export function decideTestCommand(bp: BoardPaths, id: string, use: boolean): Ticket {
+  const meta = readMeta(bp);
+  return updateTicket(bp, id, (t) => {
+    const c = t.testChange;
+    if (!c) throw new BoardActionError(`${t.id} has no change to the test command waiting.`);
+    if (use) {
+      saveTestCommand(bp, meta, c.repo ?? t.repo, c.to);
+      addActivity(t, 'you', `Changed the test command from "${c.from}" to "${c.to}"`);
+    } else {
+      addActivity(t, 'you', `Kept the test command "${c.from}"; the Architect's "${c.to}" is not used`);
+    }
+    delete t.testChange;
+  });
 }
 
 /** Older stuck cards have no `do` on their options: the first tried again, the second went to the plan or skipped the PR. */
@@ -1378,10 +1426,12 @@ export function decideStuck(bp: BoardPaths, id: string, choice: number, input: {
     const gate = t.stuck.gate;
     const reason = input.reason?.trim();
     const note = input.note?.trim();
+    const kind = t.stuck.kind;
     if (way === 'continue') {
       if (gate !== 'checks' && gate !== 'review' && gate !== 'proof') throw new BoardActionError('Only a failed check, review or proof can be continued past.');
       if (!reason) throw new BoardActionError('Write why you continue anyway. It shows on the ticket, the pull request and the release notes.');
     }
+    if ((way === 'more' || way === 'stop') && gate !== 'cap') throw new BoardActionError('Only a step paused at its limit can be given more or stopped here.');
     if (way === 'yourself' && meta.engine === 'live' && !(t.worktree && fs.existsSync(t.worktree))) {
       throw new BoardActionError(`${t.id} has no copy of the code to fix. Try again or send it back to the plan.`);
     }
@@ -1395,16 +1445,33 @@ export function decideStuck(bp: BoardPaths, id: string, choice: number, input: {
       tellLater(t, meta.engine, { kind: 'note', text: note, noteKind: 'note' });
     }
     if (way === 'continue') {
-      t.overrides = [...(t.overrides ?? []), { gate: gate as 'checks' | 'review' | 'proof', reason: reason!, by: meta.user.name, at: now() }];
+      const weakened = kind === 'weakened' ? (t.stuck.points ?? []) : [];
+      t.overrides = [...(t.overrides ?? []), { gate: gate as 'checks' | 'review' | 'proof', ...(weakened.length ? { weakened } : {}), reason: reason!, by: meta.user.name, at: now() }];
       t.gates = { ...(t.gates ?? { checks: 'pending', review: 'pending', proof: 'pending' }), [gate as string]: 'skipped' };
-      // Remembered: a later round where only these checks fail again goes on, instead of stopping on them once more.
-      if (gate === 'checks') {
+      if (kind === 'weakened') {
+        // Remembered: only tests weakened again, in a new way, stop the ticket again.
+        t.weakenedContinued = [...new Set([...(t.weakenedContinued ?? []), ...(t.stuck.checks ?? [])])];
+      } else if (gate === 'checks') {
+        // Remembered: a later round where only these checks fail again goes on, instead of stopping on them once more.
         // Cards from before this was kept name the failed checks only in the gate's line: "lint, test failed".
         const failed = t.stuck.checks ?? (t.gates.checksText?.replace(/ failed$/, '').split(', ').filter(Boolean) ?? []);
         t.checksContinued = [...new Set([...(t.checksContinued ?? []), ...failed])];
         t.tries = 0;
       }
-      tellLater(t, meta.engine, { kind: 'note', text: `Continued anyway past the failed ${gate}: ${reason}`, noteKind: 'note' });
+      tellLater(t, meta.engine, { kind: 'note', text: `Continued anyway past ${kind === 'weakened' ? 'the weakened tests' : `the failed ${gate}`}: ${reason}`, noteKind: 'note' });
+    }
+    // No tests: the person's answer is the project's, so later tickets never ask again.
+    if (way === 'add-test') {
+      const command = t.testSuggestion?.trim();
+      if (!command) throw new BoardActionError(`${t.id} has no suggested test command. Add one in Settings, then press Check again.`);
+      saveTestCommand(bp, meta, t.repo, command);
+      t.testSuggestion = undefined;
+      addActivity(t, 'you', `Saved "${command}" as the project's test command`);
+    }
+    if (way === 'no-tests') {
+      writeMeta(bp, { ...meta, noTests: { by: meta.user.name, at: now(), ticket: t.id } });
+      t.gates = { ...(t.gates ?? { checks: 'pending', review: 'pending', proof: 'pending' }), checks: 'unchecked' };
+      addActivity(t, 'you', 'Going on without tests in this project: the checks show "Not checked" from now on');
     }
     if (meta.engine !== 'live') {
       t.status = 'Builder is trying your choice';
@@ -1434,6 +1501,27 @@ export function decideStuck(bp: BoardPaths, id: string, choice: number, input: {
           scheduleSquad(t, retryPhase ?? 'analyst-read', 0.5, 1);
         }
         return;
+      case 'more':
+        // The same step goes on in its own conversation, with twice the caps each time.
+        t.capRaise = { role: t.capRaise?.role ?? '', step: t.capRaise?.step ?? '', times: (t.capRaise?.times ?? 0) + 1 };
+        t.status = 'Carrying on with more room';
+        scheduleSquad(t, retryPhase ?? 'analyst-read', 0.2, 1);
+        return;
+      case 'stop':
+        // As if the person pressed Stop: the card says so and offers carrying on later, fixing it, or the plan.
+        t.live = false;
+        t.retryPhase = retryPhase;
+        t.capRaise = undefined;
+        t.status = 'Stopped, needs you';
+        t.stuck = {
+          question: 'You stopped the squad. Nothing was lost; the work so far is kept.',
+          options: [
+            { do: 'retry', name: 'Carry on', note: 'Run the stopped step again.' },
+            ...wayOptions({ copy: Boolean(t.worktree && fs.existsSync(t.worktree)) && ['implement', 'test', 'review'].includes(t.stage) }).slice(1),
+          ],
+        };
+        t.waiting = { kind: 'stuck', summary: 'The squad stopped and needs you' };
+        return;
       case 'yourself':
         t.tries = 0;
         t.checksContinued = undefined;
@@ -1447,17 +1535,35 @@ export function decideStuck(bp: BoardPaths, id: string, choice: number, input: {
         addActivity(t, 'you', 'Fixed it myself in the ticket\'s copy');
         scheduleSquad(t, 'test', 0.2, 1);
         return;
+      case 'add-test':
+        t.tries = 0;
+        t.stage = 'test';
+        t.status = 'Running the project checks with the new test command';
+        scheduleSquad(t, 'test', 0.2, 1);
+        return;
+      case 'no-tests':
+        t.tries = 0;
+        t.stage = 'review';
+        t.status = 'Reviewer is reading the changes';
+        scheduleSquad(t, 'review', 0.2, 1);
+        return;
       case 'continue':
-        if (gate === 'checks') {
+        if (kind === 'weakened') {
+          // Past the weakened tests, the checks themselves still run.
+          t.stage = 'test';
+          t.status = 'Running the project checks';
+          scheduleSquad(t, 'test', 0.2, 1);
+        } else if (gate === 'checks') {
           t.stage = 'review';
           t.status = 'Reviewer is reading the changes';
           scheduleSquad(t, 'review', 0.2, 1);
         } else if (gate === 'proof') {
-          // No screenshots, on the record: you still check the work and press Looks right.
+          // No screenshots, on the record: you still check the work and press Looks right. Rows with no after go.
           t.live = false;
           t.stage = 'review';
           t.status = 'Proof ready to check';
-          t.waiting = { kind: 'proof', summary: 'Ready for you to check, without screenshots' };
+          if (t.proof) t.proof = t.proof.filter((p) => p.after);
+          t.waiting = { kind: 'proof', summary: kind === 'bad-proof' ? 'Ready for you to check: the screenshots did not pass the check' : 'Ready for you to check, without screenshots' };
         } else {
           t.reviewNotes = undefined;
           t.status = 'Recording the proof';
@@ -1542,7 +1648,9 @@ function projectVersion(root: string, meta: ReturnType<typeof readMeta>): string
 export function composeNotes(bp: BoardPaths, release: Release): string {
   const tickets = listTickets(bp).filter((t) => release.tickets.includes(t.id));
   const lines = tickets.map((t) => `- ${t.releaseNote ?? `**${t.title}.**`}`);
-  const skipped = tickets.flatMap((t) => (t.overrides ?? []).map((o) => `- ${t.id} ${t.title}: went out with ${o.gate === 'checks' ? 'failing checks' : o.gate === 'proof' ? 'no screenshots' : 'open review notes'}. ${o.by}: ${o.reason}`));
+  const skipped = tickets.flatMap((t) =>
+    (t.overrides ?? []).map((o) => `- ${t.id} ${t.title}: went out with ${o.weakened?.length ? 'weakened tests' : o.gate === 'checks' ? 'failing checks' : o.gate === 'proof' ? 'no screenshots' : 'open review notes'}. ${o.by}: ${o.reason}`),
+  );
   return [`### What's new in ${release.version.replace(/^v/, '')}`, '', ...lines, ...(skipped.length ? ['', '### Continued anyway', '', ...skipped] : [])].join('\n');
 }
 
@@ -1567,6 +1675,11 @@ export async function releaseVersion(bp: BoardPaths, version?: string): Promise<
     throw new BoardActionError((err as Error).message);
   }
   try {
+    // A release cut off by a restart is finished or undone first (board/release-tidy.ts).
+    if (readJournal(bp)) {
+      const cut = await settleRelease(bp, `${readJournal(bp)!.version} was cut off while it went out (the app closed or the computer restarted).`);
+      if (cut?.version === release.version && cut.status === 'released') return cut;
+    }
     // What it sends is read once the lock is held: a ticket accepted just before still goes with it.
     return await sendRelease(bp, readRelease(bp, release.version) ?? release);
   } finally {
@@ -1596,6 +1709,9 @@ async function sendRelease(bp: BoardPaths, release: Release): Promise<Release> {
       unpushed = done.unpushed;
       if (meta.scan?.empty) writeMeta(bp, { ...readMeta(bp), scan: { ...meta.scan, empty: false } });
     } catch (err) {
+      // Stopped half-way: what reached the remote is finished, the rest undone, so nothing stays half-done.
+      const settled = await settleRelease(bp, `The release stopped: ${(err as Error).message}`).catch(() => null);
+      if (settled?.status === 'released') return settled;
       foldNewerDrafts(bp, release.version);
       if (err instanceof PullRequestClash) {
         // Nothing changed yet: the clashing tickets leave the release with a way out, and the rest can go.
@@ -1618,6 +1734,8 @@ async function sendRelease(bp: BoardPaths, release: Release): Promise<Release> {
   writeRelease(bp, release);
   if (later.length) joinNextRelease(bp, later);
   closeReleased(bp, release);
+  clearJournal(bp);
+  afterRelease(bp, release);
   return release;
 }
 
@@ -1625,7 +1743,7 @@ async function sendRelease(bp: BoardPaths, release: Release): Promise<Release> {
  * The release's tickets close once their repo has the release, and the tracker hears it then. A repo whose push
  * failed keeps its tickets open, waiting for Push again.
  */
-function closeReleased(bp: BoardPaths, release: Release): void {
+export function closeReleased(bp: BoardPaths, release: Release): void {
   const meta = readMeta(bp);
   for (const id of release.tickets) {
     const t = readTicket(bp, id);
@@ -1649,7 +1767,7 @@ function closeReleased(bp: BoardPaths, release: Release): void {
 }
 
 /** Tickets accepted while a release went out: they go into the next draft, which says so on each of them. */
-function joinNextRelease(bp: BoardPaths, ids: string[]): void {
+export function joinNextRelease(bp: BoardPaths, ids: string[]): void {
   const tickets = ids.map((id) => readTicket(bp, id)).filter((t): t is Ticket => Boolean(t));
   if (!tickets.length) return;
   const next = ensureDraftRelease(bp, tickets.every((t) => t.kind === 'bug') ? 'patch' : 'minor');
@@ -1806,7 +1924,7 @@ export function restartStep(bp: BoardPaths, id: string): Ticket {
 
 /** Everything that needs the person: open questions, plans, proof, decisions, changes, and steps that look stuck. */
 export function inbox(bp: BoardPaths): Ticket[] {
-  return listTickets(bp).filter((t) => t.waiting || t.quiet?.kind === 'stuck' || t.outdated?.length || changeNeedsYou(t));
+  return listTickets(bp).filter((t) => t.waiting || t.quiet?.kind === 'stuck' || t.outdated?.length || changeNeedsYou(t) || t.testChange);
 }
 
 /** Ask the Architect to read the code again for the architecture page: the stack, the patterns and the project map. */

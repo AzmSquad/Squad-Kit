@@ -1,0 +1,103 @@
+/* The Conversation tab's "What happened" and the Cost tab. Uses the tokens in app.css. */
+
+.convbar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+.convbar .seg { width: fit-content; }
+.convbar .grow, .hhd .grow { flex: 1; }
+.convcount { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* What happened: one card per step */
+.happened { display: flex; flex-direction: column; gap: 10px; }
+.hstep { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; background: var(--surface); }
+.hstep.now { border: 1.5px solid var(--accent); }
+.hhd { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); flex-wrap: wrap; font-variant-numeric: tabular-nums; }
+.hhd b { color: var(--text); font-size: 13.5px; font-weight: 650; }
+.hstep.now .hhd b { color: var(--accent); }
+.hok { width: 18px; height: 18px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; flex: none; }
+.hring { width: 18px; height: 18px; border-radius: 50%; border: 2.5px solid var(--accent); flex: none; animation: hpulse 1.6s ease-in-out infinite; }
+@keyframes hpulse { 50% { opacity: 0.45; } }
+.hat { font-size: 11.5px; color: var(--dim); }
+.hsum { margin: 0; font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+.hgot { background: var(--surface-2); border-radius: 9px; padding: 9px 11px; font-size: 13px; line-height: 1.5; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.hgot > b { font-size: 12px; color: var(--muted); font-weight: 650; }
+.hgot .linkbtn { margin-top: 2px; }
+.hlink { display: flex; }
+.hlist { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 3px; }
+.hlist li { overflow-wrap: anywhere; }
+.hans { display: block; color: var(--muted); font-size: 12.5px; }
+.hstory { margin: 0; overflow-wrap: anywhere; }
+.hsub { font-size: 12px; color: var(--muted); font-weight: 600; margin-top: 2px; }
+.hfiles { display: flex; flex-direction: column; gap: 2px; overflow-wrap: anywhere; }
+.hfiles .mono { font-size: 12.5px; }
+.hshots { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+.hshots .zoom { width: 148px; display: flex; flex-direction: column; gap: 3px; }
+.hshots img { width: 148px; height: 92px; object-fit: cover; object-position: top; border-radius: 7px; border: 1px solid var(--line); background: var(--surface); }
+.hshots small { font-size: 11.5px; color: var(--muted); line-height: 1.3; }
+.hverdict { font-size: 13px; }
+.hverdict .hlist { margin-top: 6px; }
+.hmore { font-size: 12.5px; margin-top: 0; }
+.hskip { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--muted); }
+.happened-foot { margin-top: 6px; font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+
+/* The Cost tab */
+.costs { display: flex; flex-direction: column; gap: 12px; }
+.costcard { border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; display: flex; flex-direction: column; gap: 9px; background: var(--surface); font-size: 13.5px; line-height: 1.5; }
+.costcard h3 { margin: 0; font-size: 15px; font-weight: 650; }
+.costcard p { margin: 0; }
+.costcard .muted { color: var(--muted); }
+.costcard a { color: var(--accent); font-weight: 600; }
+.costcard.paid { border: 1.5px solid var(--accent); background: var(--accent-soft); }
+.costcard.warn { border-color: var(--you-line); }
+.costcard.over { border: 1.5px solid var(--you); }
+.paidhead { display: flex; align-items: center; gap: 10px; }
+.paidhead b { font-size: 16.5px; font-weight: 650; line-height: 1.3; }
+.paidic { width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; flex: none; }
+.paidic.money { background: var(--surface-2); color: var(--text); border: 1px solid var(--line); }
+.sizes { display: flex; gap: 6px; }
+.sizes span { flex: 1; text-align: center; padding: 8px 0; border-radius: 8px; font-size: 13px; font-weight: 600; color: var(--muted); background: var(--surface-2); }
+.sizes span.on { background: var(--btn-bg); color: var(--btn-ink); }
+.wbars { display: flex; flex-direction: column; gap: 8px; }
+.wbar { display: grid; grid-template-columns: 160px 1fr; gap: 12px; align-items: center; }
+.wbarline { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.wbarline i { display: block; height: 10px; border-radius: 5px; background: var(--accent); flex: none; max-width: calc(100% - 92px); }
+.wbarline small { color: var(--muted); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.costcard .bigusd { font-size: 20px; font-weight: 700; }
+.costcard.tip { background: var(--you-soft); border-color: var(--you-line); }
+.costcard.tip h3, .costcard.tip p { color: var(--you-ink); }
+.costdetails { font-size: 13.5px; }
+.costdetails summary { cursor: pointer; font-weight: 600; }
+.costdetails > .note { margin: 8px 0 10px; font-size: 13px; color: var(--muted); line-height: 1.6; }
+.budgets { display: flex; flex-direction: column; gap: 8px; }
+.budgetrow { display: grid; grid-template-columns: 1fr 160px; gap: 12px; align-items: center; font-size: 13px; }
+.meter { display: block; height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+.meter i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+.meter.warn i { background: var(--you); }
+.meter.over i { background: var(--bug); }
+.budgetsay { display: flex; align-items: flex-start; gap: 7px; color: var(--you-ink); font-size: 13px; }
+.budgetsay svg { flex: none; margin-top: 2px; }
+
+/* Settings and the Squad page */
+.moneyin { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.moneyin .input { width: 120px; }
+.qstats { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.qstat { display: flex; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.qstat b { width: 72px; flex: none; font-weight: 600; }
+
+/* The budget notice stays one short row on a phone, so the ticket under it keeps its room. The ticket's tab row
+   scrolls sideways on its own, so Conversation and Cost are reachable without the drawer sliding off the screen. */
+@media (max-width: 760px) {
+  .drawer .tabs { overflow-x: auto; scrollbar-width: none; padding: 0 16px; gap: 18px; }
+  .drawer .tabs::-webkit-scrollbar { display: none; }
+  .drawer .tabs button { flex: none; }
+  .upd.budgetbar { flex-direction: row; align-items: center; padding: 10px 16px; gap: 10px; }
+  .budgetbar .upd-ic, .budgetbar .upd-sub, .budgetbar .upd-acts .btn:not(:first-child) { display: none; }
+  .budgetbar .upd-title { font-size: 13.5px; }
+  .budgetbar .upd-acts { flex-wrap: nowrap; }
+}
+
+@media (max-width: 640px) {
+  .wbar { grid-template-columns: 1fr; gap: 3px; }
+  .budgetrow { grid-template-columns: 1fr; gap: 4px; }
+  .hshots .zoom, .hshots img { width: 120px; }
+  .hshots img { height: 76px; }
+  .paidhead b { font-size: 15px; }
+}

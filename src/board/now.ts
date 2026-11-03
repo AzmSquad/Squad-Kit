@@ -1,4 +1,4 @@
-import type { AgentName, Stage, StepClock, Ticket, TimedStep, WaitingKind } from './types.js';
+import type { AgentName, QuietPort, Stage, StepClock, Ticket, TimedStep, WaitingKind } from './types.js';
 import { WHO, stepSeconds } from './clock.js';
 import { durationWords, middle, minutesWords, rangeWords, usualOf, usualWords, type Usual, type UsualBook } from './usual.js';
 
@@ -24,6 +24,26 @@ export interface SlowCard {
   limit?: string;
   /** The command it waits on can be ended. */
   canEnd: boolean;
+  /** The app's port is held by a program squad-kit started: "Free the port and try again" stops it, after a confirm. */
+  freePort?: { port: number; what: string };
+}
+
+/** "node (process 4123)", or "your app shop". */
+function portHolder(p: QuietPort): string {
+  if (p.app) return `your app ${p.app}`;
+  return [p.program || 'a program', p.pid ? `(process ${p.pid})` : ''].filter(Boolean).join(' ');
+}
+
+/** The card's line about the app's port, in plain words; for a program of the person's own, what to do. */
+export function portWords(p: QuietPort): string {
+  if (p.ours) return `Port ${p.port} is used by ${portHolder(p)}, which squad-kit ${p.app ? 'runs' : 'started'}, and the app does not answer there.`;
+  return `Port ${p.port} is used by another program${p.program || p.pid ? `, ${portHolder(p)}` : ''}, and the app does not answer there. Close that program, then press Stop and try again.`;
+}
+
+/** The port's line and action, for the card. */
+function portParts(q: NonNullable<Ticket['quiet']>): Pick<SlowCard, 'freePort'> & { fact?: SlowCard['facts'][number] } {
+  if (!q.port) return {};
+  return { fact: { label: "The app's port", value: portWords(q.port) }, ...(q.port.ours ? { freePort: { port: q.port.port, what: portHolder(q.port) } } : {}) };
 }
 
 export interface LiveNow {
@@ -86,10 +106,12 @@ export const YOUR_PART: Record<WaitingKind, string> = {
   yours: 'give it back',
   chat: 'finish the talk',
   change: 'decide on the design update',
+  depends: 'choose how to build it',
 };
 
 function lowerFirst(s: string): string {
-  return s.charAt(0).toLowerCase() + s.slice(1);
+  // A ticket name or an abbreviation keeps its capitals: "SK-152 needs SK-146", "PDF".
+  return /^[A-Z][A-Z0-9]+\b/.test(s) ? s : s.charAt(0).toLowerCase() + s.slice(1);
 }
 
 function upperFirst(s: string): string {
@@ -269,6 +291,7 @@ function slowCard(t: Ticket, c: Omit<StepClock, 'since'> & { since?: string }, p
   const who = WHO[c.who];
   const where = `${t.id} · ${part ? `step ${part.n} of ${part.of}` : who}`;
   const limit = c.limit ? `If you do nothing, squad-kit stops this step at ${c.limit} minutes. All work is kept.` : undefined;
+  const port = portParts(q);
   if (q.kind === 'stuck') {
     const quiet = Math.max(0, (at - Date.parse(q.since)) / 1000);
     return {
@@ -276,12 +299,10 @@ function slowCard(t: Ticket, c: Omit<StepClock, 'since'> & { since?: string }, p
       title: 'Looks stuck',
       where,
       text: `No progress for ${minutesWords(quiet)}.${c.doing ? ` ${c.who === 'squad' ? 'squad-kit' : `The ${who}`} was ${lowerFirst(c.doing)}.` : ''}`,
-      facts: [
-        { label: 'What we checked', value: q.detail },
-        { label: 'Your work', value: 'Safe. Everything done so far is kept.' },
-      ],
+      facts: [{ label: 'What we checked', value: q.detail }, ...(port.fact ? [port.fact] : []), { label: 'Your work', value: 'Safe. Everything done so far is kept.' }],
       ...(limit ? { limit } : {}),
       canEnd: Boolean(q.pid),
+      ...(port.freePort ? { freePort: port.freePort } : {}),
     };
   }
   const facts: SlowCard['facts'] = [];
@@ -292,7 +313,8 @@ function slowCard(t: Ticket, c: Omit<StepClock, 'since'> & { since?: string }, p
   }
   if ((t.tries ?? 0) > 0) facts.push({ label: 'Why it may be slow', value: `The checks failed ${t.tries === 1 ? 'once' : `${t.tries} times`}, so the Builder is fixing them (try ${(t.tries ?? 0) + 1} of 3).` });
   else if ((t.reviewRound ?? 0) > 1) facts.push({ label: 'Why it may be slow', value: `The Reviewer asked for changes, so this is round ${t.reviewRound} of 2.` });
-  return { kind: 'long', title: 'Taking longer than usual', where, text: q.detail, facts, ...(limit ? { limit } : {}), canEnd: Boolean(q.pid) };
+  if (port.fact) facts.push(port.fact);
+  return { kind: 'long', title: 'Taking longer than usual', where, text: q.detail, facts, ...(limit ? { limit } : {}), canEnd: Boolean(q.pid), ...(port.freePort ? { freePort: port.freePort } : {}) };
 }
 
 /** What is happening on the ticket now. `at` is the time to read it at, for tests. */

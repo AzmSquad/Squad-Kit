@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
 import type { RunOptions, RunResult } from '../src/modules/claude/direct.js';
+import { pngBytes } from './support/png.js';
 
 /**
  * Agents stay in their lane: what the Builder and the Tester change in the ticket's copy that they may not, squad-kit
@@ -148,7 +149,7 @@ describe('the Tester', () => {
       fs.rmSync(path.join(cwd, 'AGENTS.md'));
       fs.writeFileSync(path.join(cwd, 'node_modules', 'cache.json'), '{}');
       fs.mkdirSync(bp.proofDir, { recursive: true });
-      fs.writeFileSync(path.join(bp.proofDir, 'ap-1-after-1.png'), 'png');
+      fs.writeFileSync(path.join(bp.proofDir, 'ap-1-after-1.png'), pngBytes());
     };
     answers.push({ shots: [{ criterion: 1, file: 'ap-1-after-1.png' }] });
     const t = readTicket(bp, 'AP-1')!;

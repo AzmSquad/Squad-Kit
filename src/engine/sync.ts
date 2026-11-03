@@ -7,6 +7,7 @@ import type { Tracker } from '../modules/tracker/types.js';
 import { currentBranch, git, mergeIntoBase, moveBase, netGit, remotes } from './git.js';
 import { projectRoot } from './live.js';
 import { filesMoved, repoFor } from './repos.js';
+import { overviewAfterMerge } from '../board/overview.js';
 
 /**
  * Keeps the tracker and the code host in step with the board: item states and comments on the tracker, and the
@@ -316,6 +317,8 @@ export async function publishTicket(bp: BoardPaths, ticketId: string): Promise<{
  * added, moved or removed since its last read: edits inside files leave all three as they were.
  */
 export function mapAfterMerge(bp: BoardPaths): void {
+  // The overview, the project's home, is brought up to date after every merged ticket.
+  overviewAfterMerge(bp);
   const meta = readMeta(bp);
   if (meta.blueprint?.status === 'done' && !filesMoved(projectRoot(bp), meta, meta.blueprint, bp.squadDir)) return;
   codeChanged(bp);
@@ -362,14 +365,14 @@ export function prDescription(t: Ticket, item: string | null, shots: { label: st
   const g = t.gates;
   if (g) {
     lines.push('### Checks');
-    lines.push(`- Tests, lint and build: ${g.checks === 'pass' ? 'pass' : g.checks === 'skipped' ? 'failed, continued anyway' : g.checks}${g.checksText ? ` (${g.checksText})` : ''}`);
+    lines.push(`- Tests, lint and build: ${g.checks === 'pass' ? 'pass' : g.checks === 'skipped' ? 'failed, continued anyway' : g.checks === 'unchecked' ? 'not checked, no tests ran' : g.checks}${g.checksText ? ` (${g.checksText})` : ''}`);
     lines.push(`- Code review: ${g.review === 'pass' ? 'approved' : g.review === 'skipped' ? 'notes still open, continued anyway' : g.review}${t.reviewRound ? ` after ${t.reviewRound} round${t.reviewRound > 1 ? 's' : ''}` : ''}`);
     lines.push(`- Proof: ${g.proof === 'pass' ? `checked by ${t.createdBy}` : g.proof === 'skipped' ? 'no screenshots, continued anyway' : g.proof}`);
     lines.push('');
   }
   if (t.overrides?.length) {
     lines.push('### Continued anyway');
-    for (const o of t.overrides) lines.push(`- **${o.gate === 'checks' ? 'Failed checks' : o.gate === 'proof' ? 'No screenshots' : 'Open review notes'}**, by ${o.by}: ${o.reason}`);
+    for (const o of t.overrides) lines.push(`- **${o.weakened?.length ? 'Weakened tests' : o.gate === 'checks' ? 'Failed checks' : o.gate === 'proof' ? 'No screenshots' : 'Open review notes'}**, by ${o.by}: ${o.reason}`);
     lines.push('');
   }
   if (shots.length) {

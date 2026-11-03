@@ -4,7 +4,8 @@
     "agent-sdk-binary-present",
     "git-version",
     "planner-auth-mode",
-    "planner-auth-runtime-fit"
+    "planner-auth-runtime-fit",
+    "agent-sandbox"
   ],
   "v0110": [
     {
@@ -155,6 +156,12 @@
       "name": "git version",
       "status": "ok",
       "detail": "git 2.38 or newer"
+    },
+    {
+      "id": "agent-sandbox",
+      "name": "sandbox for the Builder and Tester",
+      "status": "ok",
+      "detail": "Claude Code's sandbox (macOS Seatbelt)"
     },
     {
       "id": "planner-config",
