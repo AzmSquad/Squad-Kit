@@ -52,7 +52,7 @@
     "@anthropic-ai/claude-agent-sdk": "^0.2.126",
     "@hono/node-server": "^2.1.6",
     "@inquirer/prompts": "^7.2.0",
-    "ai": "^4.3.19",
+    "ai": "^5.0.52",
     "boxen": "^8.0.1",
     "commander": "^12.1.0",
     "diff": "^7.0.0",
