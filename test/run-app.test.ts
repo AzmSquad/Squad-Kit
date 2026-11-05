@@ -47,11 +47,21 @@ const fs = require('fs');
 const { spawn } = require('child_process');
 const at = process.argv.indexOf('--port');
 const port = Number(at > 0 ? process.argv[at + 1] : process.env.PORT || require('./port.json'));
-const helper = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
-fs.writeFileSync('helper.pid', String(helper.pid));
+spawn(process.execPath, ['-e', "setInterval(() => require('fs').appendFileSync('helper.beat', 'x'), 100)"], { stdio: 'ignore' });
 console.log('starting the app');
 setTimeout(() => http.createServer((q, r) => r.end(fs.readFileSync('version.txt', 'utf8').trim())).listen(port, '127.0.0.1'), 500);
 `;
+
+/**
+ * Is a program still working? It adds to its file every 100 ms. A process number would not do: inside the guard on
+ * Linux a program has a number of its own, which means nothing outside.
+ */
+async function beating(file: string): Promise<boolean> {
+  const size = () => (fs.existsSync(file) ? fs.statSync(file).size : 0);
+  const before = size();
+  await sleep(600);
+  return size() > before;
+}
 
 function alive(pid: number): boolean {
   try {
@@ -102,7 +112,7 @@ beforeEach(async () => {
   fs.writeFileSync(path.join(project, 'version.txt'), 'v1\n');
   fs.writeFileSync(path.join(project, 'port.json'), String(port));
   fs.writeFileSync(path.join(project, 'package.json'), '{ "name": "roomflow" }\n');
-  fs.writeFileSync(path.join(project, '.gitignore'), 'helper.pid\nnode_modules\n.squad\n');
+  fs.writeFileSync(path.join(project, '.gitignore'), 'helper.beat\nnode_modules\n.squad\n');
   sh('git add -A && git commit -qm start', project);
   bp = boardPaths(path.join(project, '.squad'));
   writeMeta(bp, {
@@ -152,12 +162,12 @@ describe('your apps run from squad-kit’s own copy of main', () => {
     // Only one copy per app.
     expect(() => apps.start()).toThrow(`roomflow is already running at http://localhost:${port}.`);
 
-    const helper = Number(fs.readFileSync(path.join(s.dir, 'helper.pid'), 'utf8'));
-    expect(alive(helper)).toBe(true);
+    const helper = path.join(s.dir, 'helper.beat');
+    expect(await beating(helper)).toBe(true);
     const stopped = await apps.stop();
     expect(stopped.state).toBe('stopped');
     expect(await answers(`http://127.0.0.1:${port}`)).toBe(false);
-    expect(alive(helper)).toBe(false);
+    expect(await beating(helper)).toBe(false);
     await expect(apps.stop()).rejects.toThrow('roomflow is not running.');
   }, 40_000);
 
@@ -330,12 +340,13 @@ describe('your apps run from squad-kit’s own copy of main', () => {
     const apps = appRunner(bp);
     apps.start();
     const s = await apps.settled();
-    const helper = Number(fs.readFileSync(path.join(s.dir, 'helper.pid'), 'utf8'));
+    const helper = path.join(s.dir, 'helper.beat');
+    expect(await beating(helper)).toBe(true);
     stopApps(bp);
     await apps.exited();
     const until = Date.now() + 3000;
-    while (alive(helper) && Date.now() < until) await sleep(100);
-    expect(alive(helper)).toBe(false);
+    while ((await beating(helper)) && Date.now() < until) await sleep(100);
+    expect(await beating(helper)).toBe(false);
     expect(await answers(`http://127.0.0.1:${port}`)).toBe(false);
     expect(JSON.parse(fs.readFileSync(path.join(bp.localDir, 'apps.json'), 'utf8'))['.'].pid).toBeUndefined();
   }, 30_000);

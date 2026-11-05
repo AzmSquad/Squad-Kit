@@ -69,15 +69,6 @@ async function until(what: string, check: () => boolean, ms = 10_000): Promise<v
   throw new Error(`Timed out waiting for ${what}`);
 }
 
-function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /** A live project with one commit (page.txt says "old"), its Architect done. */
 function liveProject(name: string, commands: Record<string, string> = {}) {
   const dir = path.join(tmp, name);
@@ -138,8 +129,9 @@ describe('a ticket waiting for a free place', () => {
 
 describe.skipIf(process.platform === 'win32')('Stop during the checks', () => {
   it('ends the running check at once and parks the ticket, without counting a failed try', async () => {
-    const pidFile = path.join(tmp, 'check.pid');
-    const bp = liveProject('checks', { test: `echo $$ > ${pidFile}; exec sleep 30`, lint: 'echo lint' });
+    // It adds to its file while it works. A process number would not do: inside the guard on Linux it means nothing outside.
+    const beat = path.join(tmp, 'check.beat');
+    const bp = liveProject('checks', { test: `while true; do echo x >> ${beat}; sleep 0.1; done`, lint: 'echo lint' });
     const t = createTicket(bp, { title: 'checked' });
     const wt = addWorktree(bp.root, t.id, 'main');
     updateTicket(bp, t.id, (x) => {
@@ -150,9 +142,14 @@ describe.skipIf(process.platform === 'win32')('Stop during the checks', () => {
       x.squad = { phase: 'test', nextAt: new Date().toISOString() };
     });
     stops.push(new LiveSquad(bp).start(25));
-    await until('the test command', () => fs.existsSync(pidFile) && fs.readFileSync(pidFile, 'utf8').trim() !== '');
-    const pid = Number(fs.readFileSync(pidFile, 'utf8'));
-    expect(alive(pid)).toBe(true);
+    await until('the test command', () => fs.existsSync(beat));
+    const size = () => fs.statSync(beat).size;
+    const beating = async () => {
+      const before = size();
+      await sleep(600);
+      return size() > before;
+    };
+    expect(await beating()).toBe(true);
 
     const pressed = Date.now();
     stopTicket(bp, t.id);
@@ -163,7 +160,7 @@ describe.skipIf(process.platform === 'win32')('Stop during the checks', () => {
     expect(after.tries ?? 0).toBe(0);
     expect(after.gates?.checks).toBe('pending');
     expect(after.activity.some((a) => a.text.startsWith('Checks failed'))).toBe(false);
-    expect(alive(pid)).toBe(false);
+    expect(await beating()).toBe(false);
   });
 });
 
