@@ -4,6 +4,8 @@ import { ArrowUp, Check, Copy, Info, RefreshCw } from 'lucide-react';
 import { api, send } from '../api/client';
 import type { UpdateState, UpdateStatus, UpdateWork } from '../api/types';
 import { usePrefs } from '../lib/prefs';
+import { expectRestart } from '../lib/reach';
+import { withPermission } from '../lib/ticket-trouble';
 import { Cmd, Modal, clock } from './ui';
 
 /**
@@ -14,6 +16,8 @@ import { Cmd, Modal, clock } from './ui';
 
 const KEY = ['app', 'update'];
 const RUNNING: UpdateState[] = ['waiting', 'installing', 'restarting'];
+/** The longest the new app may take to answer after an update. */
+const UPDATE_RESTART_MS = 2 * 60_000;
 
 export function useUpdate() {
   const q = useQuery({
@@ -204,6 +208,17 @@ function UpdateReady({ s }: { s: UpdateStatus }) {
 /** The update's steps. They come from the app, so a reload, or the restart itself, shows the same place. */
 function Updating({ s }: { s: UpdateStatus }) {
   const p = s.progress;
+  // The restart is the person's own, so no message about it. An app that does not come back in time gets the usual one,
+  // with what to do, instead of "this page reloads on its own" for good.
+  useEffect(() => {
+    if (p.state !== 'restarting') return;
+    expectRestart(true);
+    const late = window.setTimeout(() => expectRestart(false), UPDATE_RESTART_MS);
+    return () => {
+      window.clearTimeout(late);
+      expectRestart(false);
+    };
+  }, [p.state]);
   const { pending, call } = useUpdateCall();
   const at = RUNNING.indexOf(p.state);
   const mark = (i: number) => (i < at ? 'done' : i === at ? 'now' : 'todo');
@@ -297,7 +312,8 @@ function UpdateFailed({ s }: { s: UpdateStatus }) {
         <span className="upd-sub">
           {p.reason} {p.permission ? 'Run this once in a terminal, then press Restart:' : 'Try again, or run this in a terminal, then press Restart:'}
         </span>
-        <CopyCommand text={s.command} />
+        {/* The same command just failed for lack of permission: the way out asks for it. */}
+        <CopyCommand text={p.permission ? withPermission(s.command) : s.command} />
         {p.output && (
           <details className="upd-out">
             <summary>What the installer said</summary>

@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 
 /**
  * Every program squad-kit starts (a check command, the app for the Tester, an agent's adapter) leads its own process
@@ -12,6 +12,24 @@ export const OWN_GROUP = process.platform !== 'win32';
 
 /** How long a stopped group gets to end by itself before it is killed. */
 export const KILL_AFTER_MS = 5000;
+
+/**
+ * True when the process with this number started well after the one squad-kit wrote down: after a crash or a reboot the
+ * number is free, and another program may have it. Never signal, or trust, a number this says is taken over. An unknown
+ * answer counts as not taken over, as before. A board that restarted in place keeps its number and its older start, so
+ * only a later start counts.
+ */
+export function takenOver(pid: number, since: string | undefined): boolean {
+  if (!since || process.platform === 'win32') return false;
+  const at = Date.parse(since);
+  if (!Number.isFinite(at)) return false;
+  try {
+    const started = Date.parse(execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000 }).trim());
+    return Number.isFinite(started) && started > at + 60_000;
+  } catch {
+    return false;
+  }
+}
 
 /** The children squad-kit started that still run, so a restart can wait for them to end. */
 const running = new Set<ChildProcess>();

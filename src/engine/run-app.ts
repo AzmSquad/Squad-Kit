@@ -9,7 +9,7 @@ import type { RepoInfo } from '../board/types.js';
 import { runCommand, tail } from './checks.js';
 import { guardSupport, projectGuardFor, spawnProject, type GuardSpec } from './project-guard.js';
 import { git, latestBase } from './git.js';
-import { KILL_AFTER_MS, OWN_GROUP, endGroup, endTree } from './process-group.js';
+import { KILL_AFTER_MS, OWN_GROUP, endGroup, endTree, takenOver } from './process-group.js';
 import { portSettings } from './port-vars.js';
 import { reposOf } from './repos.js';
 
@@ -228,7 +228,9 @@ function connects(host: string, port: number): Promise<boolean> {
       s.destroy();
       resolve(yes);
     };
-    s.setTimeout(800, () => done(false));
+    // When this process was busy (a git call that waits, on a busy computer), the timer comes up before an answer that
+    // is already here. That answer goes first, or a port in use reads as free.
+    s.setTimeout(800, () => setImmediate(() => done(false)));
     s.once('connect', () => done(true));
     s.once('error', () => done(false));
   });
@@ -389,7 +391,7 @@ export class AppRunner {
   /** A run squad-kit started outside this board that still runs. */
   private elsewhere(repo: string): AppRecord | null {
     const r = this.records()[repo];
-    return r?.pid && groupAlive(r.pid) && !this.runs.get(repo)?.child ? r : null;
+    return r?.pid && groupAlive(r.pid) && !takenOver(r.pid, r.startedAt) && !this.runs.get(repo)?.child ? r : null;
   }
 
   /**

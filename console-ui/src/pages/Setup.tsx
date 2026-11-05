@@ -14,7 +14,7 @@ export function SetupPage() {
   const act = useAct();
   const { theme, toggleTheme } = usePrefs();
   const s = q.data?.setup;
-  const running = s ? s.steps.some((x) => x.state === 'now' || x.state === 'todo') && !s.steps.some((x) => x.state === 'stopped') : false;
+  const running = s ? s.steps.some((x) => x.state === 'now' || x.state === 'todo') && !s.steps.some((x) => x.state === 'stopped' || (x.id === 'read' && x.state === 'failed')) : false;
 
   return (
     <div className="ob-setup">

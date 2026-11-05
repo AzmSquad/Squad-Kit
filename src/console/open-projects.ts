@@ -129,8 +129,13 @@ export class OpenProjects {
     const bp = boardPaths(paths.squadDir);
     const id = bp.projectId;
     const same = this.open.get(id);
-    if (same && same.root !== bp.root) throw new Error(`The same project is open already from ${same.root}. squad-kit can run one copy of a project at a time.`);
-    if (same) return same;
+    if (same && same.root !== bp.root) {
+      if (fs.existsSync(path.join(same.root, SQUAD_DIR))) throw new Error(`The same project is open already from ${same.root}. squad-kit can run one copy of a project at a time.`);
+      // Its folder moved while the app ran: Add from Home follows it, and the squad at the old place ends.
+      same.close();
+      this.open.delete(id);
+    }
+    if (this.open.get(id)) return this.open.get(id)!;
 
     const api = new Hono();
     api.use('/api/*', authMiddleware(this.opts.token));

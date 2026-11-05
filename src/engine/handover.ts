@@ -2,13 +2,15 @@ import { execFile, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import yaml from 'js-yaml';
-import { addActivity, boardExists, listDecisions, listTickets, readMeta, readTicket, ticketDir, updateTicket, type BoardPaths } from '../board/store.js';
+import { addActivity, boardExists, listDecisions, listTickets, now, readMeta, readTicket, ticketDir, updateTicket, type BoardPaths } from '../board/store.js';
 import { readTicketDocs, ticketDocs } from '../board/docs.js';
 import { isMine, ownerOf, sameName } from '../board/owner.js';
 import { scheduleSquad } from '../board/schedule.js';
 import type { Ticket, Waiting } from '../board/types.js';
 import { repoHostFor } from '../modules/registry.js';
-import { addWorktree, changedFiles, commitAll, commitArgsFor, git, gitEnv as ownGitEnv, isAncestor, isRepo, networkGitEnv, remotes, removeWorktree } from './git.js';
+import { addWorktree, changedFiles, commitAll, commitArgsFor, conventionalWords, git, gitArgs, gitEnv as ownGitEnv, isAncestor, isRepo, networkGitEnv, remotes, removeWorktree } from './git.js';
+import { guardSupport, ticketGuard } from './project-guard.js';
+import { writeLog } from '../core/app-log.js';
 import { docsInGit, docsRepo, squadInRepo, stageProjectFiles, stageTicketDocs } from './project-git.js';
 import { repoTarget } from './sync.js';
 import { spotOwnerDeletes } from './teammate-delete.js';
@@ -31,7 +33,7 @@ function gitEnv(bp: BoardPaths, t: Ticket): Record<string, string> {
 /** git over the network, without holding up the board while it waits. */
 function gitLater(cwd: string, args: string[], env: Record<string, string>, timeoutMs = 120_000): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile('git', args, { cwd, encoding: 'utf8', timeout: timeoutMs, env: ownGitEnv(networkGitEnv(cwd, env)) }, (err, stdout, stderr) => {
+    execFile('git', gitArgs(args), { cwd, encoding: 'utf8', timeout: timeoutMs, env: ownGitEnv(networkGitEnv(cwd, env)) }, (err, stdout, stderr) => {
       if (!err) return resolve(stdout.trim());
       const detail = (stderr || err.message).trim().split('\n').slice(-3).join(' ');
       reject(new Error(`git ${args[0]} failed: ${detail}`));
@@ -60,6 +62,8 @@ export interface HandOverPush {
   /** The project files the branch carries because the base has none yet. */
   carried: string[];
   baseCommit?: string;
+  /** The project's own check said no to the work so far: it still runs on the whole change at accept. */
+  hookOwed?: boolean;
 }
 
 /**
@@ -79,13 +83,22 @@ export async function pushHandOver(bp: BoardPaths, t: Ticket): Promise<HandOverP
   const copy = had ? { dir: t.worktree!, branch: t.branch!, baseCommit: t.baseCommit } : addWorktree(target.dir, t.id, target.base);
   const ticket: Ticket = { ...t, worktree: copy.dir, branch: copy.branch, baseCommit: t.baseCommit ?? copy.baseCommit };
   try {
-    if (had) commitAll(copy.dir, `${t.title} (${t.id}): work so far`);
+    // The hook's words go on the ticket's record in the app log; the work still travels, since nothing reaches the base.
+    if (had) {
+      const allow = readMeta(bp).guard;
+      const saved = await commitAll(copy.dir, `${t.title} (${t.id}): work so far`, conventionalWords('chore', `work so far on ${t.title}`, t.id), guardSupport().on ? { guard: ticketGuard(bp, { cwd: copy.dir, id: t.id, ...(allow ? { allow } : {}) }) } : {});
+      if (saved.hookSaid !== undefined) {
+        writeLog({ level: 'warn', project: readMeta(bp).project, ticket: t.id, text: `Saved the work so far for the hand over without the project's own check, which said no: ${saved.hookSaid}` });
+        // Goes with the ticket's documents: the check still runs on the whole change, on whichever computer accepts it.
+        ticket.hookOwed = true;
+      }
+    }
     const remoteBase = `refs/remotes/${target.remote}/${target.base}`;
     const baseRef = git(target.dir, ['rev-parse', '--verify', '-q', remoteBase], { allowFail: true }) ? remoteBase : target.base;
     const carried = stageProjectFiles(bp, ticket, baseRef);
     const paths = [...stageTicketDocs(bp, ticket), ...carried];
     if (paths.length && git(copy.dir, ['diff', '--cached', '--name-only', '--', ...paths], { allowFail: true })) {
-      git(copy.dir, [...commitArgsFor(copy.dir), 'commit', '--no-verify', '-m', `${t.id}: handed over to ${t.owner}`, '--', ...paths]);
+      git(copy.dir, [...commitArgsFor(copy.dir), 'commit', '-m', `${t.id}: handed over to ${t.owner}`, '--', ...paths]);
     }
     await gitLater(copy.dir, ['push', target.remote, `${copy.branch}:refs/heads/${copy.branch}`], env).catch((err: Error) => {
       if (/rejected|non-fast-forward|fetch first/i.test(err.message)) {
@@ -99,6 +112,7 @@ export async function pushHandOver(bp: BoardPaths, t: Ticket): Promise<HandOverP
       commit: git(copy.dir, ['rev-parse', '--short', 'HEAD']),
       carried,
       ...(ticket.baseCommit ? { baseCommit: ticket.baseCommit } : {}),
+      ...(ticket.hookOwed ? { hookOwed: true } : {}),
     };
   } finally {
     // A copy made only to push is removed again; the branch stays.
@@ -133,7 +147,7 @@ function filesOn(repo: string, ref: string, dir: string): string[] {
 }
 
 function blob(repo: string, ref: string, file: string): Buffer {
-  return execFileSync('git', ['cat-file', 'blob', `${ref}:${file}`], { cwd: repo, maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'], env: ownGitEnv() });
+  return execFileSync('git', gitArgs(['cat-file', 'blob', `${ref}:${file}`]), { cwd: repo, maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'], env: ownGitEnv() });
 }
 
 /** The ticket on a ticket branch: the folder named like the branch (squad/ab-80 carries AB-80). */
@@ -173,6 +187,13 @@ function bringIn(bp: BoardPaths, repo: string, ref: string, squad: string, id: s
   }
 }
 
+const SAME_NAME = "A teammate's different ticket has this same name, on";
+
+/** Both came from one item on the tracker: the name is the item's, and no one's own count. */
+function sameTrackerItem(a: Pick<Ticket, 'source'>, b: { source?: Ticket['source'] | undefined }): boolean {
+  return Boolean(a.source?.id) && a.source.type === b.source?.type && a.source.id === b.source?.id;
+}
+
 /**
  * Brings in the tickets on pushed ticket branches: one this board does not have, one handed over again since this
  * board last saw it, and someone else's ticket that moved on. A ticket you own and work on here stays as it is.
@@ -201,6 +222,15 @@ export function pickUpPushed(bp: BoardPaths): PickedUp[] {
     const deleted = local ? undefined : meta.deleted?.filter((d) => d.id === on.id).at(-1);
     // Removed from this board after its owner deleted it: pushed again, it is back.
     if (deleted && !deleted.fromBoard && !(theirs.handedOver?.at && theirs.handedOver.at > deleted.at)) continue;
+    // The same name, but another ticket: each computer counts on its own. Writing it over this one would lose this one.
+    // Two people who pulled one tracker item have the same ticket, made at two times: its hand over still counts.
+    if (local && theirs.createdAt && local.createdAt && theirs.createdAt !== local.createdAt && !sameTrackerItem(local, theirs)) {
+      if (!local.activity.some((a) => a.text.startsWith(SAME_NAME))) {
+        writeLog({ level: 'warn', project: readMeta(bp).project, ticket: on.id, text: `Did not bring in ${ref}: another ticket of the same name` });
+        updateTicket(bp, on.id, (x) => addActivity(x, 'squad', `${SAME_NAME} the shared copy of the code. It was not brought in, so this ticket stays as it is. Tell your teammate to make theirs a new ticket here.`));
+      }
+      continue;
+    }
     const newer = theirs.handedOver?.at && theirs.handedOver.at > (local?.handedOver?.at ?? '');
     const kind: PickedUp['kind'] | null = !local ? 'new' : newer ? 'handed' : !isMine(local, meta) && differs(bp, on.id, on.docs) ? 'follow' : null;
     if (!kind) continue;
@@ -279,6 +309,38 @@ function catchUp(repo: string, t: Ticket, ref: string): string | null {
 const RUN_STATE = ['sessions', 'stuck', 'agentQuestion', 'chat', 'takenOver', 'retryPhase', 'reviewNotes', 'replanFor', 'interrupted', 'quiet', 'quietSnoozedUntil', 'stopRequested', 'retryOnStop', 'clock', 'notesSeen', 'planReview', 'changeRequest', 'tries', 'fails', 'reviewRound'] as const;
 
 /** The ticket just came from a branch: yours carries on from its documents; someone else's waits for its owner. */
+/**
+ * The way out of a ticket nobody can touch: it was handed to a misspelled name, or to someone who left. The person says
+ * why, the record keeps it, and it carries on here from what this computer has. If its owner is really working on it,
+ * their next push tells them: nothing is forced.
+ */
+export function takeBack(bp: BoardPaths, id: string, reason: string): Ticket {
+  const meta = readMeta(bp);
+  const why = reason.trim();
+  if (!why) throw new Error('Write why you take it. It stays on the ticket.');
+  return updateTicket(bp, id, (t) => {
+    if (isMine(t, meta)) throw new Error(`${t.id} is yours already.`);
+    if (t.stage === 'done') throw new Error(`${t.id} is released. Add a new ticket instead.`);
+    const from = ownerOf(t);
+    t.owner = meta.user.name;
+    t.handedOver = { from, to: meta.user.name, at: now() };
+    delete t.ownerDeleted;
+    for (const k of RUN_STATE) delete t[k];
+    t.live = false;
+    t.squad = null;
+    t.waiting = null;
+    t.progress = undefined;
+    addActivity(t, 'you', `Took it from ${from}. Why: ${why}`);
+    const next = carryOn(t, false);
+    t.status = next.status;
+    t.waiting = next.waiting ?? null;
+    if (next.phase) {
+      t.live = true;
+      scheduleSquad(t, next.phase, 0.5, 1);
+    }
+  });
+}
+
 function received(bp: BoardPaths, repo: string, id: string, ref: string, kind: PickedUp['kind']): Ticket {
   const meta = readMeta(bp);
   const branch = ref.replace(/^refs\/remotes\/[^/]+\//, '');

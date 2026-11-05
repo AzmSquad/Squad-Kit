@@ -17,6 +17,18 @@ const woff2Only = {
   },
 };
 
+/**
+ * The dev server in front of a running board. The board answers only at its own address and takes writes only from its
+ * own pages (src/console/auth.ts), so this says it comes from there: it is the board's own page, on a developer's port.
+ */
+const toBoard = {
+  target: 'http://127.0.0.1:4571',
+  changeOrigin: true,
+  configure: (proxy: { on(event: 'proxyReq', fn: (req: { removeHeader(name: string): void }) => void): void }) => {
+    proxy.on('proxyReq', (req) => req.removeHeader('origin'));
+  },
+};
+
 export default defineConfig({
   plugins: [woff2Only, react(), tailwindcss()],
   resolve: {
@@ -34,10 +46,10 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': { target: 'http://127.0.0.1:4571', changeOrigin: false },
+      '/api': toBoard,
       // Each project's API in the one app: /p/<project id>/api/…
-      '^/p/[^/]+/(api|mockup)/': { target: 'http://127.0.0.1:4571', changeOrigin: false },
-      '/healthz': { target: 'http://127.0.0.1:4571', changeOrigin: false },
+      '^/p/[^/]+/(api|mockup)/': toBoard,
+      '/healthz': toBoard,
     },
   },
   test: {

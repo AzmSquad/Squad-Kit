@@ -2,12 +2,13 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Bug, Check, Copy, Download, Loader2, Paperclip, PenLine, Plus, Rocket, RotateCcw, Sparkles, X } from 'lucide-react';
 import type { DraftJob, Release, Ticket, TicketDraft as Draft, Track } from '../api/types';
-import { api, send } from '../api/client';
+import { api, send, PROJECT } from '../api/client';
 import { useAct } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { shellArg, shellQuote } from '../lib/text';
-import { Cmd, Modal } from './ui';
+import { Cmd, Modal, DraftNote } from './ui';
 import { ErrorCard } from './ErrorCard';
+import { clearDrafts, useDraft } from '../lib/drafts';
 
 export interface PickedFile {
   name: string;
@@ -41,32 +42,36 @@ function previewOf(f: { name: string; data: string }): { preview?: string } {
  * A new ticket, written by hand or filled in by the Analyst from a pasted idea or chat message. Either way the person
  * sees every field, with its acceptance criteria, business rules, edge cases and files, before it is created.
  */
+const NEW_TICKET = 'new-ticket';
+
 export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCreated(t: Ticket): void }) {
   const act = useAct<Ticket>();
   const { toast } = usePrefs();
-  const [mode, setMode] = useState<'write' | 'paste'>('write');
-  const [pasted, setPasted] = useState('');
+  // Closing it by accident loses nothing: it opens again with what was typed. Files cannot be kept that way, so Esc, the
+  // cross and a click outside ask first when there are any.
+  const [mode, setMode] = useDraft<'write' | 'paste'>(NEW_TICKET, 'mode', 'write');
+  const [pasted, setPasted] = useDraft(NEW_TICKET, 'pasted', '');
   // The Analyst's draft, kept on the server: closing the dialog leaves it working, and it waits here next time.
   const [job, setJob] = useState<DraftJob | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
   const drafting = job?.status === 'working';
   const [gaps, setGaps] = useState<string[] | null>(null);
-  const [title, setTitle] = useState('');
-  const [ask, setAsk] = useState('');
-  const [kind, setKind] = useState<Ticket['kind']>('feature');
-  const [priority, setPriority] = useState<Ticket['priority']>('normal');
-  const [track, setTrack] = useState<Track>('full');
+  const [title, setTitle] = useDraft(NEW_TICKET, 'title', '');
+  const [ask, setAsk] = useDraft(NEW_TICKET, 'ask', '');
+  const [kind, setKind] = useDraft<Ticket['kind']>(NEW_TICKET, 'kind', 'feature');
+  const [priority, setPriority] = useDraft<Ticket['priority']>(NEW_TICKET, 'priority', 'normal');
+  const [track, setTrack] = useDraft<Track>(NEW_TICKET, 'track', 'full');
   const [talkFirst, setTalkFirst] = useState(false);
   const [suggested, setSuggested] = useState<Track | null>(null);
-  const [criteria, setCriteria] = useState<string[]>([]);
-  const [rules, setRules] = useState<string[]>([]);
-  const [edgeCases, setEdgeCases] = useState<string[]>([]);
+  const [criteria, setCriteria] = useDraft<string[]>(NEW_TICKET, 'criteria', []);
+  const [rules, setRules] = useDraft<string[]>(NEW_TICKET, 'rules', []);
+  const [edgeCases, setEdgeCases] = useDraft<string[]>(NEW_TICKET, 'edge-cases', []);
   // The bug template: what happens, how to see it, what should happen, where, and how bad.
-  const [what, setWhat] = useState('');
-  const [steps, setSteps] = useState<string[]>([]);
-  const [expected, setExpected] = useState('');
-  const [where, setWhere] = useState('');
-  const [severity, setSeverity] = useState<NonNullable<Ticket['severity']>>('annoying');
+  const [what, setWhat] = useDraft(NEW_TICKET, 'what', '');
+  const [steps, setSteps] = useDraft<string[]>(NEW_TICKET, 'steps', []);
+  const [expected, setExpected] = useDraft(NEW_TICKET, 'expected', '');
+  const [where, setWhere] = useDraft(NEW_TICKET, 'where', '');
+  const [severity, setSeverity] = useDraft<NonNullable<Ticket['severity']>>(NEW_TICKET, 'severity', 'annoying');
   const isBug = kind === 'bug';
   const [files, setFiles] = useState<PickedFile[]>([]);
 
@@ -180,6 +185,19 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
     for (const clear of [setCriteria, setRules, setEdgeCases, setSteps]) clear([]);
     setMode('paste');
   };
+  /** Clear on the draft line: an empty form again. */
+  const clearAll = () => {
+    discard();
+    setPasted('');
+    setFiles([]);
+    setMode('write');
+    setKind('feature');
+    setPriority('normal');
+    setTrack('full');
+    setSeverity('annoying');
+    clearDrafts(PROJECT, NEW_TICKET);
+  };
+  const typed = Boolean(pasted || title || ask || what || expected || where || criteria.length || rules.length || edgeCases.length || steps.length);
 
   const bugSteps = steps.filter((x) => x.trim());
   const bugAsk = [
@@ -200,6 +218,8 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
       {
         onSuccess: (t) => {
           letGo();
+          // The effects saving the fields ran already, and nothing changes them again before the dialog goes.
+          clearDrafts(PROJECT, NEW_TICKET);
           onCreated(t);
           onClose();
         },
@@ -230,6 +250,7 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
       title="New ticket"
       wide
       onClose={onClose}
+      losing={files.length ? (files.length === 1 ? 'the attached file' : `the ${files.length} attached files`) : null}
       icon={<span className="glyph"><Plus size={15} /></span>}
       footer={
         <>
@@ -246,6 +267,7 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
           )}
           {/* While the Analyst works, Cancel stops it; closing the window (the cross) leaves it working. */}
           <button className="btn" onClick={drafting ? () => void cancel() : onClose}>Cancel</button>
+          {typed && !drafting && <DraftNote onClear={clearAll} />}
           <span className="grow" />
           <Cmd text={cmd} />
         </>
@@ -660,14 +682,25 @@ const SEVERITY: { value: NonNullable<Ticket['severity']>; label: string }[] = [
 
 export function BugDialog({ onClose, foundIn }: { onClose(): void; foundIn?: string }) {
   const act = useAct<Ticket>();
-  const [what, setWhat] = useState('');
-  const [how, setHow] = useState('');
-  const [expected, setExpected] = useState('');
+  // Closing it by accident loses nothing: it opens again with what was typed.
+  const [what, setWhat, clearWhat] = useDraft('report-bug', 'what', '');
+  const [how, setHow, clearHow] = useDraft('report-bug', 'how', '');
+  const [expected, setExpected, clearExpected] = useDraft('report-bug', 'expected', '');
   const [severity, setSeverity] = useState<NonNullable<Ticket['severity']>>('annoying');
+  const clear = () => {
+    clearWhat();
+    clearHow();
+    clearExpected();
+  };
   const submit = () =>
     act.mutate(
       { path: '/api/v1/bugs', body: { what, how, expected, severity, foundIn }, done: 'Bug reported. Triage is sorting it.' },
-      { onSuccess: onClose },
+      {
+        onSuccess: () => {
+          clear();
+          onClose();
+        },
+      },
     );
   return (
     <Modal
@@ -680,6 +713,7 @@ export function BugDialog({ onClose, foundIn }: { onClose(): void; foundIn?: str
             <Bug size={15} /> Report bug
           </button>
           <button className="btn" onClick={onClose}>Cancel</button>
+          {(what || how || expected) && <DraftNote onClear={clear} />}
           <span className="grow" />
           <Cmd text={`squad bug ${shellQuote(what.trim() || 'What happened')}${foundIn ? ` --in ${foundIn}` : ''}`} />
         </>

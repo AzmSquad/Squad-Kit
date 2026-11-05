@@ -2,6 +2,7 @@ import type { Context, Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { log } from '../../core/app-log.js';
 import { activePause, endPause, limitText } from '../../engine/usage-limit.js';
+import { saveTroubles } from '../../engine/save-trouble.js';
 import { planReport, writeReport, type ReportInput } from '../../engine/report.js';
 import type { OpenProjects } from '../open-projects.js';
 import { act, body } from './app.js';
@@ -28,6 +29,12 @@ export function mountSupportApi(app: Hono, opts: { projects: OpenProjects }): vo
   };
 
   app.get('/api/v1/app/usage-limit', (c) => c.json(limit()));
+
+  // squad-kit cannot save its files (a full disk, a folder that moved): the squad waits, and every page says why.
+  app.get('/api/v1/app/save-trouble', (c) => {
+    const all = saveTroubles();
+    return c.json({ text: all[0]?.text ?? null, detail: all.map((t) => `${t.root}: ${t.detail}`).join('\n'), projects: all.map((t) => t.root) });
+  });
 
   // Try now: the queue starts again at once. If the limit is still there, the first step finds it and waits again.
   app.post('/api/v1/app/usage-limit/try-now', (c) =>

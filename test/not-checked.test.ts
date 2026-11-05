@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Hono } from 'hono';
 import type { RunOptions, RunResult } from '../src/modules/claude/direct.js';
+import { freePort } from './support/tiny-app.js';
 
 /**
  * "Not checked" (E5): a project with no tests never gets a green pass. The person is asked once per project: use the
@@ -80,15 +81,6 @@ function built(title = 'Limit bookings', suggestion?: string): Ticket {
     x.steps = [{ title: 'Refuse the fourth booking', status: 'done' }];
     x.gates = { checks: 'pending', review: 'pending', proof: 'pending' };
     if (suggestion) x.testSuggestion = suggestion;
-  });
-}
-
-function freePort(): Promise<number> {
-  return new Promise((resolve) => {
-    const s = net.createServer().listen(0, '127.0.0.1', () => {
-      const port = (s.address() as net.AddressInfo).port;
-      s.close(() => resolve(port));
-    });
   });
 }
 

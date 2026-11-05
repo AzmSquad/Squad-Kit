@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { squadHome } from '../core/home.js';
+import { takenOver } from '../engine/process-group.js';
 import type { BoardPaths } from './store.js';
 
 /**
@@ -57,7 +58,7 @@ export function writeAppInfo(info: ConsoleInfo): void {
 /** The app, when it runs in another process. */
 export function runningApp(): (ConsoleInfo & { pid: number }) | null {
   const info = readAppInfo();
-  return info && isAlive(info.pid) ? (info as ConsoleInfo & { pid: number }) : null;
+  return info && isAlive(info.pid) && !takenOver(info.pid, info.startedAt) ? (info as ConsoleInfo & { pid: number }) : null;
 }
 
 export function isAlive(pid: number | null | undefined): pid is number {
@@ -73,7 +74,7 @@ export function isAlive(pid: number | null | undefined): pid is number {
 /** The board already running for this project, if any. Older boards only left their pid in squad.pid. */
 export function runningConsole(bp: BoardPaths): (Partial<ConsoleInfo> & { pid: number }) | null {
   const info = readConsoleInfo(bp);
-  if (info && isAlive(info.pid)) return info as ConsoleInfo & { pid: number };
+  if (info && isAlive(info.pid) && !takenOver(info.pid, info.startedAt)) return info as ConsoleInfo & { pid: number };
   // A board started before the move kept its files in .squad/board.
   for (const file of [bp.pidFile, path.join(bp.legacyDir, 'console.json'), path.join(bp.legacyDir, 'squad.pid')]) {
     try {

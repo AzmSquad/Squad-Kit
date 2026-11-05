@@ -6,6 +6,7 @@ import { SKIP_CHOICE, afterTitle, clockWords, jobBusy, readSteps, refShort, type
 import { useReqAct } from '../lib/requirementsData';
 import { Cmd, ROLE_NAME } from './ui';
 import { ErrorCard } from './ErrorCard';
+import { useDraft } from '../lib/drafts';
 
 /**
  * The breakdown before there is one to edit: the Analyst reading the document live, its questions, and the card when
@@ -96,7 +97,6 @@ export function FailedCard({ v }: { v: BreakdownView }) {
       title={title}
       what={afterTitle(v.error ?? v.state.job?.error ?? 'The read did not get through.', title)}
       safe={['Your document is saved.', ...(v.epics.length ? ['What the Analyst wrote so far is kept.'] : [])]}
-      report={false}
       hint={<Cmd text={`squad requirements retry ${v.id}`} />}
       ways={
         v.mine
@@ -201,8 +201,8 @@ function QuestionCard({
   onOpenRef(ref: BrdRef): void;
 }) {
   const act = useReqAct();
-  const [asking, setAsking] = useState(false);
-  const [text, setText] = useState('');
+  const [text, setText] = useDraft(v.id, `ask-${q.id}`, '');
+  const [asking, setAsking] = useState(Boolean(text));
   const name = `q-${v.id}-${q.id}`;
   const ask = () => {
     if (!text.trim()) return;

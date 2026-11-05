@@ -5,6 +5,7 @@ import { useAct } from '../lib/data';
 import { changeWaits, openChange } from '../lib/waiting';
 import { shellQuote } from '../lib/text';
 import { Cmd, Modal } from './ui';
+import { useDraft } from '../lib/drafts';
 
 /**
  * A change goes through the spec. The person proposes it (from the ticket or a chat message); the Analyst writes the
@@ -113,7 +114,7 @@ export function ChangeCard({ t }: { t: Ticket }) {
   const act = useAct<Ticket>();
   const [declining, setDeclining] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
-  const [reason, setReason] = useState('');
+  const [reason, setReason, clearReason] = useDraft(t.id, 'change-reason', '');
   const c = openChange(t);
   if (!c) return null;
   // Approved, and the squad has not built it yet: it can still be taken back.
@@ -138,6 +139,7 @@ export function ChangeCard({ t }: { t: Ticket }) {
         onSuccess: () => {
           setDeclining(false);
           setWithdrawing(false);
+          clearReason();
         },
       },
     );
@@ -251,15 +253,19 @@ export function ChangeCard({ t }: { t: Ticket }) {
  */
 export function ProposeChange({ t, initial = '', from, onClose }: { t: Ticket; initial?: string; from?: AgentName; onClose(): void }) {
   const act = useAct<Ticket>();
-  const [text, setText] = useState(initial);
+  const [text, setText, clearText] = useDraft(t.id, 'propose', initial);
   const done = shipped(t);
   const open = openChange(t);
+  const sent = () => {
+    clearText();
+    onClose();
+  };
   const ready = Boolean(text.trim()) && !act.isPending;
   const quoted = shellQuote(text.trim() || '…');
   const after = (as: 'ticket' | 'bug') =>
     act.mutate(
       { path: `/api/v1/tickets/${t.id}/spec-change/new-ticket`, body: { text, as }, done: as === 'bug' ? `Reported a bug, linked to ${t.id}.` : `Made a new ticket, linked to ${t.id}.` },
-      { onSuccess: onClose },
+      { onSuccess: sent },
     );
   return (
     <Modal
@@ -284,7 +290,7 @@ export function ProposeChange({ t, initial = '', from, onClose }: { t: Ticket; i
               onClick={() =>
                 act.mutate(
                   { path: `/api/v1/tickets/${t.id}/spec-change`, body: { text, ...(from ? { from } : {}) }, done: 'Proposed. The Analyst writes it into the spec; the work goes on.' },
-                  { onSuccess: onClose },
+                  { onSuccess: sent },
                 )
               }
             >

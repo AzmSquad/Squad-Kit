@@ -9,6 +9,7 @@ import { ProjectWaiting } from './Waiting';
 import { needsYou } from '../lib/waiting';
 import { ChatDock, useChats, useDocked } from './ChatDock';
 import { LimitBanner } from './UsageLimit';
+import { SaveTroubleBanner } from './SaveTrouble';
 import { BudgetBanner } from './Usage';
 import { Apps } from './Apps';
 import { Banners } from './Banners';
@@ -56,6 +57,8 @@ export function Shell() {
   if (path.startsWith('/conversations') || path.startsWith('/setup'))
     return (
       <div className="fullpage">
+        <SaveTroubleBanner />
+        <LimitBanner />
         <ProjectWaiting />
         <div className="canvas-b">
           <Outlet />
@@ -150,6 +153,7 @@ export function Shell() {
       </aside>
       <main className="canvas">
         <Banners>
+          <SaveTroubleBanner />
           <AppUpdate />
           <LimitBanner />
           {board.data?.ready && <BudgetBanner />}

@@ -125,7 +125,7 @@ export function settleRepos(bp: BoardPaths, j: ReleaseJournal): SettledRepo[] {
         try {
           netGit(root, ['push', '-f', r.remote, `refs/tags/${r.tag}`], { env });
         } catch (err) {
-          unpushed = { repo: r.repo, remote: r.remote, base: r.base, commit: r.head!, tag: r.tag, error: (err as Error).message };
+          unpushed = { repo: r.repo, remote: r.remote, base: r.base, commit: r.head!, tag: r.tag, error: (err as Error).message, plain: `The release reached ${r.remote}, but its tag did not. Press Push again.` };
         }
       }
       const keep = path.relative(root, bp.squadDir);

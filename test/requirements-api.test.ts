@@ -10,6 +10,7 @@ import { mountRequirementsApi } from '../src/console/api/requirements.js';
 import { buildPaths, chooseProject } from '../src/core/paths.js';
 import { setPaymentChoice } from '../src/core/settings.js';
 import { allStories, breakdownView, findItem, readBreakdown, readBreakdownState } from '../src/board/requirements.js';
+import { breakdownDir } from '../src/board/requirements-paths.js';
 import { SKIP_CHOICE, addBreakdown, approveProblems } from '../src/board/requirements-actions.js';
 import { requirementsCommand } from '../src/commands/requirements.js';
 import type { BreakdownView } from '../src/board/requirements-types.js';
@@ -128,6 +129,15 @@ describe('the routes', () => {
     expect(file.status).toBe(200);
     expect(file.headers.get('content-type')).toBe('image/png');
     expect((await app.request('/api/v1/requirements/BR-2/file?path=../../config.yaml')).status).toBe(404);
+    // What can carry scripts downloads, instead of opening at the board's own address, where its token is.
+    const dir = breakdownDir(bp, 'BR-2');
+    for (const name of ['page.html', 'logo.svg']) {
+      fs.writeFileSync(path.join(dir, 'source', name), '<script>1</script>');
+      const res = await app.request(`/api/v1/requirements/BR-2/file?path=source/${name}`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-disposition')).toBe(`attachment; filename="${name}"`);
+    }
+    expect((await app.request('/api/v1/requirements/BR-2/file?path=source/pay.png')).headers.get('content-disposition')).toBeNull();
   });
 
   it('edits, adds, moves, removes and redoes parts', async () => {

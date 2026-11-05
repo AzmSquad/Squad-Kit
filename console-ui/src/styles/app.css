@@ -178,6 +178,11 @@ svg.lucide { flex: none; }
 .glyph.you { background: var(--you-soft); color: var(--you); }
 .live { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); flex: none; animation: pulse 1.6s ease-in-out infinite; }
 @keyframes pulse { 50% { box-shadow: 0 0 0 5px transparent; } }
+/* The app stopped: over every page and dialog, and nothing on the page pulses as if it still worked. */
+.appdown { position: fixed; top: 0; left: 0; right: 0; z-index: 90; display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 10px 16px; background: var(--you-soft); color: var(--you-ink); border-bottom: 1px solid var(--you-line); box-shadow: var(--card-shadow); }
+.appdown .upd-main { flex: 1 1 260px; min-width: 0; }
+html[data-app-down] .live, html[data-app-down] .typing i, html[data-app-down] .setup-bar i, html[data-app-down] .steps .sd.now::after { animation: none !important; }
+html[data-app-down] .live { background: var(--dim); box-shadow: none; }
 
 /* ── Waiting lane ──────────────────────────────────────── */
 .waiting { padding: 18px 24px 20px; border-bottom: 1px solid var(--line); background: var(--you-soft); flex: none; }
@@ -604,6 +609,8 @@ button.opt2 b { width: 100%; }
 .md-code { position: relative; border: 1px solid var(--line); border-radius: 8px; margin: 0 0 8px; overflow: hidden; }
 .md-code pre { margin: 0; padding: 10px 12px; font-family: 'JetBrains Mono', monospace; font-size: 12px; overflow-x: auto; background: transparent !important; }
 .md-lang { position: absolute; top: 4px; right: 8px; font-size: 11px; color: var(--muted); }
+.draftnote { font-size: 12.5px; }
+.draftnote .linkbtn { margin: 0; }
 .linkbtn { background: none; border: 0; padding: 0; margin-top: 4px; color: var(--accent); font-weight: 600; font-size: 12.5px; cursor: pointer; align-self: flex-start; }
 
 /* squad-kit was updated: restart banner */

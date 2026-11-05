@@ -37,7 +37,9 @@ function stateOf(root: string): string {
 export async function runProjects(opts: { remove?: string }): Promise<void> {
   const app = runningApp();
   if (opts.remove) {
-    const root = findProject(opts.remove);
+    // A project whose folder is gone can still be taken off the list: by its id, its folder or its folder's name.
+    const gone = readProjects().find((p) => !fs.existsSync(p.root) && (p.id === opts.remove || p.root === path.resolve(opts.remove!) || path.basename(p.root).toLowerCase() === opts.remove!.toLowerCase()));
+    const root = gone?.root ?? findProject(opts.remove);
     const entry = readProjects().find((p) => p.root === root);
     if (!entry) throw new Error(`${projectName(root)} is not in squad-kit.`);
     if (app) {

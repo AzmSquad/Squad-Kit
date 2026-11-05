@@ -18,6 +18,7 @@ import { isMine, useMe } from './HandOver';
 import { BrdViewer, useOpenRef } from './BreakdownDialogs';
 import { STOP_WORDS, doingWords, optionsOf, placeOf, requirementsPath, sourceRef, waitsLine, type Source, type StopKind } from '../lib/auto';
 import '../styles/auto.css';
+import { useDraft } from '../lib/drafts';
 
 /**
  * Builds by itself, on the ticket's side: the link back to its breakdown ("From BR-1 › Payments › … › S-14"), the
@@ -104,7 +105,7 @@ export function StopPanel({ t, extra }: { t: Ticket; extra?: ReactNode }) {
   const v = useBreakdownView(t.breakdown?.id).data;
   const options = optionsOf(q.options);
   const [pick, setPick] = useState<string | null>(() => options.find((o) => o.suggested)?.text ?? null);
-  const [own, setOwn] = useState('');
+  const [own, setOwn] = useDraft(t.id, 'stop-own', '');
   const who = AGENT_TITLE[q.from];
   const answer = pick === '' ? own.trim() : pick;
   const line = waitsLine(v, t);
@@ -265,7 +266,7 @@ export function DecidedForYou({ t }: { t: Ticket }) {
 function ChangeDecided({ t, d, onClose }: { t: Ticket; d: Decided; onClose(): void }) {
   const act = useAct<Ticket>();
   const { toast } = usePrefs();
-  const [text, setText] = useState('');
+  const [text, setText, clearText] = useDraft(t.id, `decided-${d.id}`, '');
   const done = shipped(t);
   const words = text.trim();
   return (
@@ -285,6 +286,7 @@ function ChangeDecided({ t, d, onClose }: { t: Ticket; d: Decided; onClose(): vo
                   // What it became comes back on the ticket: a small change on it, or a new linked ticket.
                   onSuccess: (r) => {
                     toast(changedWords(t.id, r?.decided?.find((x) => x.id === d.id)?.changed?.ticket));
+                    clearText();
                     onClose();
                   },
                 },

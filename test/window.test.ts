@@ -74,6 +74,15 @@ async function tester(more: Partial<ConstructorParameters<typeof AgentWindow>[0]
 
 const refused = (a: { isError?: boolean; content: unknown[] }) => a.isError === true && textOf(a as never).startsWith('squad-kit refused this');
 
+describe('the door with no board', () => {
+  it('keeps a connection through the time an agent thinks, so its next call is not cut off', async () => {
+    const { access } = await tester();
+    const res = await fetch(access.url, { method: 'POST', headers: { authorization: 'Bearer not-a-key', 'content-type': 'application/json' }, body: '{}' });
+    await res.text();
+    expect(res.headers.get('keep-alive')).toBe('timeout=120');
+  });
+});
+
 describe('take_screenshots', () => {
   it('opens the app, does the steps, saves the picture in the proof folder with the ticket naming, and hands it back', async () => {
     const { w, access } = await tester();

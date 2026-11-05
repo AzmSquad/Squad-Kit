@@ -4,6 +4,7 @@ import type { Ticket } from '../api/types';
 import { useAct, useBoard } from '../lib/data';
 import { shellArg, shellQuote } from '../lib/text';
 import { Cmd, Modal, ago } from './ui';
+import { useDraft } from '../lib/drafts';
 
 /**
  * Owners and hand over (ADR-001). Each ticket has one owner; only the owner's squad works on it, on their computer.
@@ -51,8 +52,8 @@ export function HandOverDialog({ t, onClose }: { t: Ticket; onClose(): void }) {
   const stop = useAct();
   const board = useBoard();
   const me = useMe();
-  const [to, setTo] = useState('');
-  const [note, setNote] = useState('');
+  const [to, setTo, clearTo] = useDraft(t.id, 'hand-over-to', '');
+  const [note, setNote, clearNote] = useDraft(t.id, 'hand-over-note', '');
   const live = board.data?.ready ? board.data.meta.engine === 'live' : true;
   const branch = t.branch ?? `squad/${t.id.toLowerCase()}`;
   const working = Boolean(t.live || t.squad || t.stopRequested);
@@ -72,7 +73,13 @@ export function HandOverDialog({ t, onClose }: { t: Ticket; onClose(): void }) {
     to.trim() &&
     act.mutate(
       { path: `/api/v1/tickets/${t.id}/hand-over`, body: { to, note }, done: `Handed ${t.id} over to ${to.trim()}. Their squad carries on from the branch.` },
-      { onSuccess: onClose },
+      {
+        onSuccess: () => {
+          clearTo();
+          clearNote();
+          onClose();
+        },
+      },
     );
   return (
     <Modal
@@ -161,6 +168,9 @@ export function HandedOverBanner({ t }: { t: Ticket }) {
 export function NotYoursPanel({ t }: { t: Ticket }) {
   const owner = ownerOf(t);
   const h = t.handedOver;
+  const act = useAct();
+  const [taking, setTaking] = useState(false);
+  const [why, setWhy, clearWhy] = useDraft(t.id, 'take-back', '');
   return (
     <>
       <div className="db">
@@ -178,10 +188,30 @@ export function NotYoursPanel({ t }: { t: Ticket }) {
           Live progress and agent chats stay on {owner}&apos;s computer. The spec, the design and the notes here are as {owner} last pushed them.
         </p>
       </div>
-      <div className="df">
-        <span className="grow" />
-        <Cmd text={`squad show ${t.id}`} />
-      </div>
+      {taking ? (
+        <div className="df">
+          <input className="input" style={{ flex: 1 }} autoFocus value={why} onChange={(e) => setWhy(e.target.value)} placeholder={`Why you take it from ${owner}, for example: the name was misspelled`} />
+          <button
+            className="btn pri"
+            disabled={!why.trim() || act.isPending}
+            onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/take-back`, body: { reason: why }, done: `${t.id} is yours now. The reason stays on the ticket.` }, { onSuccess: clearWhy })}
+          >
+            Take it
+          </button>
+          <button className="btn" onClick={() => setTaking(false)}>Cancel</button>
+          <Cmd text={`squad take-back ${t.id} --reason ${shellQuote(why.trim() || '…')}`} />
+        </div>
+      ) : (
+        <div className="df">
+          {t.stage !== 'done' && (
+            <button className="btn quiet" title={`When ${owner} cannot work on it: the name was misspelled, or they left. If ${owner} is working on it, talk to them first.`} onClick={() => setTaking(true)}>
+              {owner} cannot work on it? Take it
+            </button>
+          )}
+          <span className="grow" />
+          <Cmd text={`squad show ${t.id}`} />
+        </div>
+      )}
     </>
   );
 }

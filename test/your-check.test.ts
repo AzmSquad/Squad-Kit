@@ -6,6 +6,7 @@ import net from 'node:net';
 import { execSync } from 'node:child_process';
 import { Hono } from 'hono';
 import type { RunOptions, RunResult } from '../src/modules/claude/direct.js';
+import { freePort } from './support/tiny-app.js';
 
 /**
  * Your check at review: Ask a question is a questions-only chat that leaves the ticket waiting for Looks right, and
@@ -43,15 +44,6 @@ let port: number;
 const runners: InstanceType<typeof TryRunner>[] = [];
 
 const sh = (cmd: string, cwd: string) => execSync(cmd, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-
-function freePort(): Promise<number> {
-  return new Promise((resolve) => {
-    const srv = net.createServer().listen(0, '127.0.0.1', () => {
-      const p = (srv.address() as net.AddressInfo).port;
-      srv.close(() => resolve(p));
-    });
-  });
-}
 
 async function answersAt(url: string): Promise<string | null> {
   for (const u of [url, url.replace('://localhost', '://127.0.0.1')]) {

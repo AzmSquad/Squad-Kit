@@ -35,6 +35,7 @@ import {
   runTakeOver,
   runGiveBack,
   runHandOver,
+  runTakeBack,
   runReply,
   runChanges,
   runOpen,
@@ -403,6 +404,11 @@ program
   .option('--note <text>', 'A note for them; every agent on the ticket reads it too')
   .action(wrapArgs(runHandOver));
 program
+  .command('take-back <ticket>')
+  .description('Take a ticket from its owner when they cannot work on it: a misspelled name, or someone who left')
+  .requiredOption('--reason <text>', 'Why. It stays on the ticket')
+  .action(wrapArgs(runTakeBack));
+program
   .command('decide <ticket> [choice]')
   .description('Decide for the squad when it is stuck: try again, fix it yourself, continue anyway or back to the plan')
   .option('--note <text>', 'With "Try again": a note the squad reads first')
@@ -473,6 +479,9 @@ program
   .description('Release the tickets that are ready')
   .option('-y, --yes', 'Skip the confirmation', false)
   .option('--push-again', 'Send a release whose push failed: its commits and tag go to the remote now')
+  .option('--mark-sent', 'Close a release whose push failed because it reached the remote another way, such as merged by hand. Needs --reason')
+  .option('--reason <how>', 'With --mark-sent: how it reached the remote. It stays in the release log')
+  .option('--anyway', 'With --mark-sent: mark it even when squad-kit cannot find it on the remote, or cannot reach the remote')
   .option('--without <ticket>', 'Take a ticket out of the release before it is made; it goes out with the next one (repeat for more)', more, [])
   .option('--put-back <ticket>', 'Put a ticket you took out back into the release (repeat for more)', more, [])
   .action(wrapArgs(runRelease));

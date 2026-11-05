@@ -35,6 +35,8 @@ let fullOn = '';
 /** The app prints its errors in the terminal it runs in; tests and one-off commands stay quiet. */
 export function printErrors(on: boolean): void {
   toTerminal = on;
+  // The terminal closed, or the program after a pipe ended: no more lines there, and the log file keeps them all.
+  if (on) process.stderr.once('error', () => (toTerminal = false));
 }
 
 export function logsDir(): string {
@@ -70,7 +72,14 @@ function sizeOf(file: string): number {
 export function writeLog(e: LogEntry, at = new Date()): void {
   const level = e.level ?? 'info';
   const line = logLine(e, at);
-  if (toTerminal && level === 'error') process.stderr.write(`${kleur.red('squad-kit error')} ${line.slice(25)}\n`);
+  if (toTerminal && level === 'error') {
+    try {
+      if (process.stderr.writable) process.stderr.write(`${kleur.red('squad-kit error')} ${line.slice(25)}\n`);
+      else toTerminal = false;
+    } catch {
+      toTerminal = false;
+    }
+  }
   try {
     fs.mkdirSync(logsDir(), { recursive: true });
     const day = dayName(at);

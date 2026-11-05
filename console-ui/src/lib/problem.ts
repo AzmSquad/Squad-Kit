@@ -25,7 +25,7 @@ export function wayButtons(stuck: StuckChoice | undefined): WayButton[] {
       label: o.name,
       note: o.note,
       way,
-      needs: way === 'continue' ? 'reason' : way === 'yourself' ? 'fix' : null,
+      needs: way === 'continue' || way === 'skip-hooks' ? 'reason' : way === 'yourself' ? 'fix' : null,
       primary: i === 0,
     };
   });

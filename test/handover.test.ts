@@ -381,3 +381,66 @@ describe('where a ticket carries on from its documents alone', () => {
     expect(carryOn({ ...base, stage: 'release' }, true).phase).toBeUndefined();
   });
 });
+
+describe("the project's own check on a hand over", () => {
+  it('the work still travels when it says no, and the check is still owed on the other computer', async () => {
+    const mine = building();
+    const hooks = path.join(project, '.git', 'hooks');
+    fs.mkdirSync(hooks, { recursive: true });
+    fs.writeFileSync(path.join(hooks, 'pre-commit'), '#!/bin/sh\necho "not finished"; exit 1\n', { mode: 0o755 });
+    const handed = await actions.handOver(bp, mine.id, { to: 'Sara Ali' });
+    expect(handed.hookOwed).toBe(true);
+    const { root, bpB } = cloneOnB('Sara Ali');
+    sh('git fetch -q origin', root);
+    pickUpPushed(bpB);
+    expect(readTicket(bpB, id)!.hookOwed).toBe(true);
+    on(homeA);
+  });
+});
+
+describe('the same ticket name on two computers', () => {
+  it("a teammate's different ticket never writes over this one, and this computer's next number goes around it", async () => {
+    const mine = building();
+    const handed = await actions.handOver(bp, mine.id, { to: 'Sara Ali' });
+    expect(handed.owner).toBe('Sara Ali');
+    const { root, bpB } = cloneOnB('Other Person');
+    // On the other computer, its own counter made a different ticket with the same name, before it saw this one.
+    const local = { ...readTicket(bpB, id)!, title: 'Their own ticket', createdAt: '2020-01-01T00:00:00.000Z', createdBy: 'Other Person', owner: 'Other Person' };
+    writeTicket(bpB, local);
+    sh('git fetch -q origin', root);
+    expect(pickUpPushed(bpB)).toEqual([]);
+    const kept = readTicket(bpB, id)!;
+    expect(kept.title).toBe('Their own ticket');
+    expect(kept.activity[0]?.text).toContain("A teammate's different ticket has this same name, on the shared copy of the code");
+    // Asked once: the next look adds nothing.
+    pickUpPushed(bpB);
+    expect(readTicket(bpB, id)!.activity.filter((a) => a.text.includes('same name'))).toHaveLength(1);
+    on(homeA);
+  });
+
+  it('a tracker item both people pulled is one ticket: its hand over still comes in', async () => {
+    const mine = building();
+    updateTicket(bp, mine.id, (x) => (x.source = { type: 'azure', ref: 'AB-80', id: '80', url: 'https://x/80' }));
+    await actions.handOver(bp, mine.id, { to: 'Sara Ali' });
+    const { root, bpB } = cloneOnB('Sara Ali');
+    // Sara pulled the same item herself, a little later: the same name, made at another time.
+    const local = { ...readTicket(bpB, id)!, title: 'Pulled here too', createdAt: '2020-01-01T00:00:00.000Z', source: { type: 'azure' as const, ref: 'AB-80', id: '80', url: 'https://x/80' }, handedOver: undefined };
+    writeTicket(bpB, local);
+    sh('git fetch -q origin', root);
+    const picked = pickUpPushed(bpB);
+    expect(picked.map((p) => [p.id, p.kind])).toEqual([[id, 'handed']]);
+    const came = readTicket(bpB, id)!;
+    expect(came.title).toBe(mine.title);
+    expect(came.activity.some((a) => a.text.includes('same name'))).toBe(false);
+    on(homeA);
+  });
+
+  it('the next ticket here skips a number a teammate pushed', () => {
+    const { root, bpB } = cloneOnB('Other Person');
+    writeMeta(bpB, { ...readMeta(bpB), key: 'AP', nextNumber: 5 });
+    sh('git push -q origin main:refs/heads/squad/ap-5', project);
+    sh('git fetch -q origin', root);
+    expect(actions.createTicket(bpB, { title: 'A new one' }).id).toBe('AP-6');
+    on(homeA);
+  });
+});

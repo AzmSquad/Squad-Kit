@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { ArrowUp, Bug, Check, Code, Copy, Eye, Search, SquareCheck, Triangle, User, X, PenLine, Users } from 'lucide-react';
 import type { Actor, Stage, Ticket } from '../api/types';
 import { usePrefs } from '../lib/prefs';
@@ -112,6 +112,7 @@ export function Modal({
   footer,
   icon,
   wide,
+  losing,
 }: {
   title: string;
   wide?: boolean;
@@ -119,27 +120,51 @@ export function Modal({
   children: ReactNode;
   footer?: ReactNode;
   icon?: ReactNode;
+  /** What closing by accident would lose, such as attached files: Esc, the cross and a click outside ask first. Typed text needs no asking: it stays as a draft. */
+  losing?: string | null;
 }) {
+  const [asking, setAsking] = useState(false);
+  const leave = useCallback(() => (losing ? setAsking(true) : onClose()), [losing, onClose]);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && leave();
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [leave]);
   return (
-    <div className="modal-veil" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="modal-veil" onMouseDown={(e) => e.target === e.currentTarget && leave()}>
       <div className={`modal ${wide ? 'wide' : ''}`} role="dialog" aria-modal="true" aria-label={title}>
         <header>
           {icon}
           <h3>{title}</h3>
           <span className="grow" />
-          <button className="iconbtn" onClick={onClose} aria-label="Close">
+          <button className="iconbtn" onClick={leave} aria-label="Close">
             <X size={16} />
           </button>
         </header>
         <div className="mb">{children}</div>
-        {footer && <footer>{footer}</footer>}
+        {asking ? (
+          <footer role="alertdialog" aria-label="Close this window?">
+            <span className="grow">Close and lose {losing}? What you typed stays as a draft.</span>
+            <button className="btn pri" autoFocus onClick={() => setAsking(false)}>Keep working</button>
+            <button className="btn" onClick={onClose}>Close</button>
+          </footer>
+        ) : (
+          footer && <footer>{footer}</footer>
+        )}
       </div>
     </div>
+  );
+}
+
+/** Beside the buttons of a dialog with typed text: it stays when the dialog closes, until it is sent or cleared. */
+export function DraftNote({ onClear }: { onClear(): void }) {
+  return (
+    <span className="note draftnote">
+      Kept as a draft on this computer.{' '}
+      <button type="button" className="linkbtn" onClick={onClear}>
+        Clear
+      </button>
+    </span>
   );
 }
 

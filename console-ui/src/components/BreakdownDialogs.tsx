@@ -10,6 +10,7 @@ import { actionError, rememberSendPlan, reqFileUrl, sendPlanOf, useReqAct, useSe
 import { shellQuote } from '../lib/text';
 import { readFile, type PickedFile } from './dialogs';
 import { Cmd, Modal } from './ui';
+import { useDraft } from '../lib/drafts';
 
 /**
  * The Requirements page's dialogs: Add a BRD, Send to the tracker, Ask the Analyst, Add a part, the parts left out,
@@ -64,9 +65,10 @@ export function AddBrdDialog({ onClose }: { onClose(): void }) {
   const act = useReqAct<BreakdownView>();
   const navigate = useNavigate();
   const [file, setFile] = useState<PickedFile | null>(null);
-  const [paste, setPaste] = useState(false);
-  const [text, setText] = useState('');
-  const [name, setName] = useState('');
+  // A pasted BRD can be pages long: closing the dialog by accident keeps it. Files ask first (`losing` below).
+  const [paste, setPaste, clearPaste] = useDraft('add-brd', 'paste', false);
+  const [text, setText, clearText] = useDraft('add-brd', 'text', '');
+  const [name, setName, clearName] = useDraft('add-brd', 'name', '');
   const [named, setNamed] = useState(false);
   const [extra, setExtra] = useState<PickedFile[]>([]);
   const [over, setOver] = useState(false);
@@ -114,6 +116,9 @@ export function AddBrdDialog({ onClose }: { onClose(): void }) {
       { path: '/api/v1/requirements', body },
       {
         onSuccess: (v) => {
+          clearPaste();
+          clearText();
+          clearName();
           onClose();
           void navigate({ to: '/requirements/$id', params: { id: v.id } });
         },
@@ -126,6 +131,7 @@ export function AddBrdDialog({ onClose }: { onClose(): void }) {
     <Modal
       title="Add a BRD"
       onClose={onClose}
+      losing={file || extra.length ? (file ? `the file ${file.name}` : 'the attached files') : null}
       footer={
         <>
           <span className="rq-fcmd">
@@ -461,8 +467,8 @@ export function AddPartDialog({ v, level, under, onClose, onAdded }: { v: Breakd
     [v.epics, level],
   );
   const [where, setWhere] = useState(under && places.some((p) => p.key === under) ? under : (places.at(level === 'story' ? 0 : -1)?.key ?? ''));
-  const [title, setTitle] = useState('');
-  const [about, setAbout] = useState('');
+  const [title, setTitle, clearTitle] = useDraft(v.id, `add-${level}-title`, '');
+  const [about, setAbout, clearAbout] = useDraft(v.id, `add-${level}-about`, '');
   const word = level === 'epic' ? 'an epic' : `a ${level}`;
   const add = () =>
     act.mutate(
@@ -472,6 +478,8 @@ export function AddPartDialog({ v, level, under, onClose, onAdded }: { v: Breakd
       },
       {
         onSuccess: (r) => {
+          clearTitle();
+          clearAbout();
           onAdded(r.key);
           onClose();
         },

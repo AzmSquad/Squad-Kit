@@ -497,3 +497,24 @@ describe('the live squad', () => {
     expect(readBreakdown(bp, other)!.status).toBe('reading');
   });
 });
+
+describe('the computer sleeps during a step', () => {
+  it('starts the step again by itself, with no stop and no technical words', async () => {
+    const id = add();
+    const wall = Date.now();
+    await runBreakdownJob(bp, id, {
+      run: async () => {
+        // Ten minutes on the wall clock pass in no time for the app.
+        vi.spyOn(Date, 'now').mockReturnValue(wall + 10 * 60_000);
+        throw new Error('The run was cut off');
+      },
+    } as never);
+    vi.spyOn(Date, 'now').mockRestore();
+    const { readBreakdownState } = await import('../src/board/requirements.js');
+    const job = readBreakdownState(bp, id).job!;
+    expect(job.status).toBe('pending');
+    expect(job.error).toBeUndefined();
+    expect(job.now).toBe('The computer slept, so this step starts again');
+    expect(readBreakdown(bp, id)!.status).not.toBe('failed');
+  });
+});

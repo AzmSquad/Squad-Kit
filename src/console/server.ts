@@ -1,4 +1,7 @@
+import fs from 'node:fs';
+import type { Server as HttpServer } from 'node:http';
 import { createServer } from 'node:net';
+import { isatty } from 'node:tty';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
@@ -12,10 +15,10 @@ import { mountSupportApi, onUnexpected } from './api/support.js';
 import { log } from '../core/app-log.js';
 import { UpdateService, runsNow, ticketsInProgress, type UpdateDeps } from './updates.js';
 import { mountStaticAssets } from './static-assets.js';
-import { authMiddleware } from './auth.js';
+import { authMiddleware, ownAddressOnly } from './auth.js';
 import { OpenProjects, type OpenProject } from './open-projects.js';
 import type { ConsoleInfo } from '../board/console-info.js';
-import { answerWindow, windowAt } from '../engine/window-server.js';
+import { KEEP_IDLE_MS, answerWindow, closeServer, windowAt } from '../engine/window-server.js';
 
 export interface StartConsoleServerOptions {
   /** The project to open first. Its API also answers at the addresses one board had, without the /p/<id> prefix. */
@@ -28,6 +31,8 @@ export interface StartConsoleServerOptions {
   build?: number;
   /** The Update button's registry, installer and restart; tests and checks pass fakes. */
   update?: UpdateDeps;
+  /** Started to outlive its terminal (startedToOutlive): closing the terminal does not stop it. */
+  keepOnHangup?: boolean;
 }
 
 export interface ConsoleServer {
@@ -55,6 +60,9 @@ export async function startConsoleServer(opts: StartConsoleServerOptions): Promi
   const startedAt = new Date().toISOString();
   let restart = false;
   let stopForRestart: () => void = () => {};
+
+  // Before anything else, on every route: only this computer's own address, and writes only from the board's pages.
+  app.use('*', ownAddressOnly(bindPort));
 
   // Public health endpoint (no auth) — used by tests and external uptime checks.
   app.get('/healthz', (c) =>
@@ -164,6 +172,8 @@ export async function startConsoleServer(opts: StartConsoleServerOptions): Promi
   mountStaticAssets(app, { paths: opts.paths });
 
   const nodeServer = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: bindPort });
+  // Agents reach their window here too: see KEEP_IDLE_MS.
+  (nodeServer as unknown as HttpServer).keepAliveTimeout = KEEP_IDLE_MS;
   actualPort = (() => {
     const addr = nodeServer.address();
     if (addr && typeof addr === 'object') return addr.port;
@@ -189,11 +199,10 @@ export async function startConsoleServer(opts: StartConsoleServerOptions): Promi
     // A process that outlives its board (a restart keeper, tests) must not stop it again on a later Ctrl-C.
     process.off('SIGINT', stop);
     process.off('SIGTERM', stop);
+    process.off('SIGHUP', onHangup);
     stopSquad();
     windowAt(null);
-    nodeServer.close((err) => {
-      onClose(err);
-    });
+    closeServer(nodeServer as unknown as HttpServer, onClose);
   };
 
   const stop = () => {
@@ -206,6 +215,12 @@ export async function startConsoleServer(opts: StartConsoleServerOptions): Promi
   stopForRestart = stop;
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
+  // The terminal closed: the same clean stop, or the agents (in their own process groups) would go on, and go on spending.
+  // Started to outlive its terminal, it goes on: Node sets this signal back to "end the process" as it starts, so the
+  // listener is what keeps it running.
+  const onHangup = opts.keepOnHangup ? () => log.info('The terminal closed; squad-kit keeps running, as it was started to outlive it') : stop;
+  if (opts.keepOnHangup) process.on('SIGHUP', onHangup);
+  else process.once('SIGHUP', onHangup);
 
   return {
     port: actualPort,
@@ -225,6 +240,24 @@ export async function startConsoleServer(opts: StartConsoleServerOptions): Promi
         });
       }),
   };
+}
+
+/**
+ * True when squad-kit was started to outlive its terminal, such as with nohup: its output goes to files, not to a
+ * terminal and not down a pipe (`nohup squad > app.log 2>&1 &`, or nohup's own nohup.out). What nohup itself did to the
+ * signal cannot be read: Node resets it before any of this runs. A pipe does not count: `squad | tee` ends with its
+ * terminal, and the agents must not go on spending after it.
+ */
+export function startedToOutlive(fds: number[] = [1, 2], info: { isatty(fd: number): boolean; fstat(fd: number): { isFIFO(): boolean; isSocket(): boolean } } = { isatty, fstat: fs.fstatSync }): boolean {
+  return fds.every((fd) => {
+    try {
+      if (info.isatty(fd)) return false;
+      const st = info.fstat(fd);
+      return !st.isFIFO() && !st.isSocket();
+    } catch {
+      return false;
+    }
+  });
 }
 
 /** Picks a free port, lets the OS choose the number, then returns it (avoids passing `0` into URLs). */

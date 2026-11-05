@@ -9,6 +9,7 @@ import { Cmd, Glyph, Modal, ROLE_NAME, clock } from './ui';
 import { ProposeChange } from './ChangeCard';
 import { TalkButton } from './Chat';
 import '../styles/now.css';
+import { useDraft } from '../lib/drafts';
 
 /**
  * What is happening on a ticket now, as squad-kit works it out from the live record: the card's line on the board,
@@ -235,7 +236,7 @@ type Said = { q: string; a?: AskAnswer; error?: string; at: string };
 
 /** A status question gets its answer at once from the live record. Anything else offers an agent or a change. */
 export function AskBox({ t }: { t: Ticket }) {
-  const [text, setText] = useState('');
+  const [text, setText] = useDraft(t.id, 'status-ask', '');
   const [said, setSaid] = useState<Said[]>([]);
   const [busy, setBusy] = useState(false);
   const ask = async () => {

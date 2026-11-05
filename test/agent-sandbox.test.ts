@@ -111,6 +111,7 @@ const ask: SandboxAsk = {
   write: ['/w/proof', '/tmp'],
   noRead: ['/home/me/.ssh', '/home/me/.squad-kit'],
   read: ['/home/me/.squad-kit/worktrees/app-1/ap-1'],
+  noWrite: ['/home/me/.squad-kit/worktrees/app-1/ap-1/.git'],
   hosts: ['registry.npmjs.org', 'nexus.example.com'],
 };
 
@@ -126,6 +127,7 @@ describe("Claude Code's sandbox settings", () => {
       network: { allowedDomains: ['registry.npmjs.org', 'nexus.example.com'], strictAllowlist: true, allowLocalBinding: true },
       filesystem: {
         allowWrite: ['/w/proof', '/tmp'],
+        denyWrite: ['/home/me/.squad-kit/worktrees/app-1/ap-1/.git'],
         denyRead: ['/home/me/.ssh', '/home/me/.squad-kit', '/home/me/.claude/.credentials.json', '/home/me/.claude/projects', '/home/me/.claude.json'],
         allowRead: ['/home/me/.squad-kit/worktrees/app-1/ap-1'],
       },

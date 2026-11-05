@@ -144,5 +144,5 @@ describe('the limit of tickets at once', () => {
     await until('the first read', () => runs.length === 2);
     expect(ticketsRunning()).toBe(1);
     expect(runs[1]!.cwd).toBe(fresh.root);
-  }, 20_000);
+  }, 60_000);
 });

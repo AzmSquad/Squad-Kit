@@ -23,7 +23,7 @@ import {
 } from '../board/store.js';
 import type { BoardMeta, Decision, Deleting, Ticket } from '../board/types.js';
 import { repoHostFor, trackerModule } from '../modules/registry.js';
-import { currentBranch, dropSnapshot, git, gitEnv, isRepo, networkGitEnv, removeWorktree, worktreeRoot } from './git.js';
+import { currentBranch, dropSnapshot, git, gitArgs, gitEnv, isRepo, networkGitEnv, removeWorktree, worktreeRoot } from './git.js';
 import { agentRuns } from './live.js';
 import { repoFor } from './repos.js';
 import { repoTarget } from './sync.js';
@@ -281,7 +281,7 @@ async function waitForStop(bp: BoardPaths, id: string, mark: Deleting, ms: numbe
 /** git over the network, without holding up the board while it waits. */
 function gitLater(cwd: string, args: string[], env: Record<string, string>): Promise<void> {
   return new Promise((resolve, reject) => {
-    execFile('git', args, { cwd, encoding: 'utf8', timeout: 120_000, env: gitEnv(networkGitEnv(cwd, env)) }, (err, _out, stderr) => {
+    execFile('git', gitArgs(args), { cwd, encoding: 'utf8', timeout: 120_000, env: gitEnv(networkGitEnv(cwd, env)) }, (err, _out, stderr) => {
       if (!err) return resolve();
       reject(new Error((stderr || err.message).trim().split('\n').slice(-2).join(' ')));
     });

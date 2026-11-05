@@ -1,9 +1,13 @@
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { squadHome } from '../core/home.js';
+import { NOT_A_PROJECT_FOLDER, isOwnFolder } from '../core/paths.js';
+import { OWN_GROUP, endGroup, track, whenExited } from './process-group.js';
+import { hookFiles, isHookFile } from './hook-files.js';
+import { commitGuard, guardBlockedDetail, guardBlockedPath, projectEnv, spawnProject, type GuardSpec } from './project-guard.js';
 
 /** Small git helpers. The squad never touches the person's own checkout: each ticket gets a worktree. */
 
@@ -22,20 +26,113 @@ export function gitEnv(extra: Record<string, string | undefined> = {}): NodeJS.P
   return env;
 }
 
-export function git(cwd: string, args: string[], opts: { allowFail?: boolean; env?: Record<string, string>; timeoutMs?: number } = {}): string {
+/* ── how the engine starts git: one place ────────────────── */
+
+/**
+ * A program a repo's settings could start from inside squad-kit, where the guard does not reach. A nested repo's
+ * settings count too: git passes these down to it.
+ */
+const PROGRAMS_OFF = ['-c', 'core.fsmonitor=false'];
+
+/** Hooks are the project's code: they run only in the guard, in one place (commitChecked). */
+const HOOKS_OFF = ['-c', `core.hooksPath=${os.devNull}`];
+
+/**
+ * git-lfs uploads a project's large files from a `pre-push` hook, and hooks are off. So a push gets this one instead,
+ * squad-kit's own: it does what git-lfs's hook does and runs nothing of the project's. Without it, a push would send
+ * pointers to files the remote never got. It lives in squad-kit's folder, which no agent or project command can reach.
+ */
+const LFS_PRE_PUSH = `#!/bin/sh
+command -v git-lfs >/dev/null 2>&1 || exit 0
+git grep -q 'filter=lfs' HEAD -- ':(glob)**/.gitattributes' || exit 0
+exec git lfs pre-push "$@"
+`;
+
+function pushHooks(): string[] {
+  const dir = path.join(squadHome(), 'git-hooks');
+  const file = path.join(dir, 'pre-push');
+  fs.mkdirSync(dir, { recursive: true });
+  if (!fs.existsSync(file) || fs.readFileSync(file, 'utf8') !== LFS_PRE_PUSH) fs.writeFileSync(file, LFS_PRE_PUSH, { mode: 0o755 });
+  return ['-c', `core.hooksPath=${dir}`];
+}
+
+/** Commands that would otherwise start a diff program, or look inside a nested repo with that repo's own settings. */
+const COMMAND_OFF: Record<string, string[]> = {
+  status: ['--ignore-submodules=dirty'],
+  diff: ['--ignore-submodules=dirty', '--no-ext-diff', '--no-textconv'],
+  show: ['--no-ext-diff', '--no-textconv'],
+  log: ['--no-ext-diff', '--no-textconv'],
+};
+
+/**
+ * Every git the engine runs starts from these arguments: hooks off, and nothing a repo's settings can name is started
+ * by it. The rest git could start needs a line in a settings file: a pager (never, the output here is no terminal),
+ * ssh, a proxy, a credential helper, a filter or a merge driver (the person's own, git-lfs for one, so they stay on).
+ * No project command or agent can write those files: the guard and the agent's sandbox keep them read only, and the
+ * link in a copy's `.git` too, so a copy cannot be pointed at other settings.
+ */
+export function gitArgs(args: string[]): string[] {
+  let at = 0;
+  while (args[at] === '-c') at += 2;
+  const hooks = args[at] === 'push' ? pushHooks() : HOOKS_OFF;
+  return [...PROGRAMS_OFF, ...hooks, ...args.slice(0, at + 1), ...(COMMAND_OFF[args[at] ?? ''] ?? []), ...args.slice(at + 1)];
+}
+
+/** The word git's messages name a command by. */
+function commandOf(args: string[]): string {
+  const at = args.lastIndexOf('-c');
+  return args[at < 0 ? 0 : at + 2] ?? 'command';
+}
+
+function runGit(cwd: string, full: string[], opts: { allowFail?: boolean; env?: Record<string, string>; timeoutMs?: number }): string {
   try {
     const env = gitEnv(opts.env);
-    return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024, env, ...(opts.timeoutMs ? { timeout: opts.timeoutMs } : {}) }).trim();
+    return execFileSync('git', full, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024, env, ...(opts.timeoutMs ? { timeout: opts.timeoutMs } : {}) }).trim();
   } catch (err) {
     if (opts.allowFail) return '';
     const e = err as { stderr?: Buffer | string; message: string; code?: string };
     if (e.code === 'ETIMEDOUT') {
       const s = Math.max(1, Math.round((opts.timeoutMs ?? 0) / 1000));
-      throw new Error(`git ${args[0]} gave up after ${s} second${s === 1 ? '' : 's'}. Check the network, and that git can reach the remote without asking for a password.`);
+      throw new Error(`git ${commandOf(full)} gave up after ${s} second${s === 1 ? '' : 's'}. Check the network, and that git can reach the remote without asking for a password.`);
     }
     const detail = (e.stderr ? e.stderr.toString() : e.message).trim().split('\n').slice(-3).join(' ');
-    throw new Error(`git ${args[0]} failed: ${detail}`);
+    throw new Error(`git ${commandOf(full)} failed: ${detail}`);
   }
+}
+
+export function git(cwd: string, args: string[], opts: { allowFail?: boolean; env?: Record<string, string>; timeoutMs?: number } = {}): string {
+  return runGit(cwd, gitArgs(args), opts);
+}
+
+/** The project's own core.hooksPath, which every other git here has masked. Only ever read, never used to run anything. */
+export function projectHooksPath(dir: string): string {
+  return runGit(dir, [...PROGRAMS_OFF, 'config', '--get', 'core.hooksPath'], { allowFail: true });
+}
+
+/** The nested repos in a folder: submodules, and any folder with a `.git` of its own that is not ignored. */
+function nestedRepos(dir: string, env?: Record<string, string>): string[] {
+  const o = env ? { allowFail: true, env } : { allowFail: true };
+  const links = git(dir, ['ls-files', '-z', '--stage'], o).split('\0').filter((l) => l.startsWith('160000 ')).map((l) => l.slice(l.indexOf('\t') + 1));
+  const fresh = git(dir, ['ls-files', '-z', '--others', '--exclude-standard'], o).split('\0').filter((f) => f.endsWith('/')).map((f) => f.slice(0, -1));
+  return [...links, ...fresh];
+}
+
+/**
+ * Stages all the work in a folder, and nothing of a nested repo. git would otherwise look inside it with that repo's own
+ * settings, and anything in the copy can write those: this is the one way the engine stages everything.
+ */
+export function stageAll(dir: string, env?: Record<string, string>): void {
+  const out = nestedRepos(dir, env).map((p) => `:(top,exclude,literal)${p}`);
+  git(dir, ['add', '-A', ...(out.length ? ['--', ':/', ...out] : [])], env ? { env } : {});
+}
+
+function isMerging(dir: string): boolean {
+  return git(dir, ['rev-parse', '-q', '--verify', 'MERGE_HEAD'], { allowFail: true }) !== '';
+}
+
+/** True when a commit would hold something: what is staged, or a merge to finish. */
+export function somethingToSave(dir: string): boolean {
+  return git(dir, ['diff', '--cached', '--name-only'], { allowFail: true }) !== '' || isMerging(dir);
 }
 
 /** The tracked files in a folder that differ from the last commit, by their paths from that folder. */
@@ -85,6 +182,16 @@ export function netGit(cwd: string, args: string[], opts: { allowFail?: boolean;
   return git(cwd, args, { ...opts, env: networkGitEnv(cwd, opts.env), timeoutMs: opts.timeoutMs ?? NETWORK_GIT_MS });
 }
 
+/** netGit beside everything else, so a slow remote never holds up the board. */
+export function netGitLater(cwd: string, args: string[], opts: { env?: Record<string, string>; timeoutMs?: number } = {}): Promise<string> {
+  return new Promise((done, fail) => {
+    execFile('git', gitArgs(args), { cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, env: gitEnv(networkGitEnv(cwd, opts.env)), timeout: opts.timeoutMs ?? NETWORK_GIT_MS }, (err, stdout, stderr) => {
+      if (err) fail(new Error(`git ${args[0]} failed: ${(stderr || err.message).trim().split('\n').slice(-3).join(' ')}`));
+      else done(stdout.trim());
+    });
+  });
+}
+
 export function isRepo(dir: string): boolean {
   return git(dir, ['rev-parse', '--is-inside-work-tree'], { allowFail: true }) === 'true';
 }
@@ -102,12 +209,14 @@ const FIRST_COMMIT_SKIPS = ['/.squad/', 'node_modules/', 'dist/', 'build/', '.ne
  * commit holds the files already there, so the squad's copies start from the real code.
  */
 export function ensureRepo(dir: string, projectName: string): void {
+  // Everything on the computer sits under these: a first commit here would take it all.
+  if (!isOwnFolder(dir) && !hasCommits(dir)) throw new Error(NOT_A_PROJECT_FOLDER);
   if (!isRepo(dir)) git(dir, ['init', '-b', 'main']);
   if (!hasCommits(dir)) {
     const readme = path.join(dir, 'README.md');
     if (!fs.readdirSync(dir).some((f) => f !== '.git' && f !== '.squad') && !fs.existsSync(readme)) fs.writeFileSync(readme, `# ${projectName}\n`, 'utf8');
     excludeLocal(dir, FIRST_COMMIT_SKIPS);
-    git(dir, ['add', '-A']);
+    stageAll(dir);
     git(dir, authorArgs(dir).concat(['commit', '--allow-empty', '-m', 'start the project']));
   }
 }
@@ -183,6 +292,18 @@ export function addWorktree(projectRoot: string, ticketId: string, base: string,
   return { dir, branch, baseCommit: git(projectRoot, ['merge-base', base, pushed], { allowFail: true }) || baseCommit, pushed: pushed.replace(/^refs\/remotes\//, '') };
 }
 
+/**
+ * The project's folder moved: a ticket's copy (kept outside it) still points at the old place, so git cannot work there
+ * and the work sits out of reach. git can repair the link from the repo. True when the copy works now; it only runs git
+ * more than once when the link is broken.
+ */
+export function repairCopyLink(repoRoot: string, dir: string): boolean {
+  if (!fs.existsSync(path.join(dir, '.git'))) return false;
+  if (git(dir, ['rev-parse', '--git-dir'], { allowFail: true })) return true;
+  git(repoRoot, ['worktree', 'repair'], { allowFail: true });
+  return git(dir, ['rev-parse', '--git-dir'], { allowFail: true }) !== '';
+}
+
 export function removeWorktree(projectRoot: string, dir: string): void {
   git(projectRoot, ['worktree', 'remove', '--force', dir], { allowFail: true });
 }
@@ -210,11 +331,411 @@ export function changedFiles(dir: string, baseCommit: string): string[] {
   return [...new Set([...tracked, ...untracked].filter(Boolean))];
 }
 
-export function commitAll(dir: string, message: string): string | null {
-  git(dir, ['add', '-A']);
-  if (!git(dir, ['status', '--porcelain'], { allowFail: true })) return null;
-  git(dir, authorArgs(dir).concat(['commit', '-m', message]));
-  return git(dir, ['rev-parse', '--short', 'HEAD']);
+/** The longest a project's own commit hooks may run on a finished change. */
+export const HOOK_MS = 5 * 60_000;
+/** The longest they may run on a save with no finished work in it: the work so far, or a release's own commit. */
+export const SHORT_HOOK_MS = 60_000;
+
+/** How a commit with the project's hooks runs. */
+export interface HookRun {
+  /** The guard for its hooks, which are the project's own code. Left out where this computer has no guard (Windows). */
+  guard?: GuardSpec;
+  /** Ends a hook that is still running: the ticket's Stop, or the board closing. */
+  signal?: AbortSignal;
+  /** A copy with no packages and no story's work in it (a release's own): what the install step made stays out of it. */
+  noRunner?: boolean;
+  /** Work was saved earlier without the hooks: they look at all of it since this commit, not only at what is new. */
+  from?: string;
+}
+
+/** The ticket's Stop ended a hook while it ran, so nothing was saved. No hook said no, and no card is due. */
+export class CommitStopped extends Error {
+  constructor() {
+    super("Stopped while the project's own check ran.");
+    this.name = 'CommitStopped';
+  }
+}
+
+/** A project's own commit hook said no to a commit, or did not finish in time. */
+export class HookRefused extends Error {
+  constructor(
+    /** What the hook printed, for the engineer details and for the Builder. */
+    readonly said: string,
+    readonly timedOut: boolean,
+    readonly limitMs: number,
+  ) {
+    super(`The project's commit hook ${timedOut ? `did not finish in ${Math.round(limitMs / 60_000)} minutes` : 'said no'}: ${said}`);
+    this.name = 'HookRefused';
+  }
+}
+
+/** Where git really looks for this folder's hooks (husky sets core.hooksPath). */
+function hookFolder(dir: string): string {
+  return runGit(dir, [...PROGRAMS_OFF, 'rev-parse', '--git-path', 'hooks'], { allowFail: true });
+}
+
+function hasHook(dir: string, where: string, name: string): boolean {
+  try {
+    fs.accessSync(path.resolve(dir, where, name), fs.constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The hooks that can refuse a commit in this folder, wherever the project keeps them. */
+export function commitHooks(dir: string): string[] {
+  const where = hookFolder(dir);
+  return where ? ['pre-commit', 'prepare-commit-msg', 'commit-msg'].filter((name) => hasHook(dir, where, name)) : [];
+}
+
+/** The same commit in the form tools like commitlint ask for: "feat: add a login page (SK-1)". */
+export function conventionalWords(type: 'feat' | 'fix' | 'chore', text: string, id?: string): string {
+  const tail = id ? ` (${id})` : '';
+  const room = Math.max(10, 72 - type.length - 2 - tail.length);
+  const subject = text.replace(/\s+/g, ' ').trim().replace(/[.!?]+$/, '');
+  return `${type}: ${subject.charAt(0).toLowerCase()}${subject.slice(1, room).trimEnd()}${tail}`;
+}
+
+interface CommitTry {
+  ok: boolean;
+  said: string;
+  timedOut: boolean;
+  /** The ticket's Stop ended it. */
+  stopped?: boolean;
+}
+
+function commitArgs(dir: string, message: string): string[] {
+  return [...authorArgs(dir), 'commit', '-m', message];
+}
+
+/** What a commit's hooks run with: the environment of the project's own commands, with git answering in English. */
+function hookEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...projectEnv(), ...GIT_LOCALE };
+  delete env.LANGUAGE;
+  return env;
+}
+
+function quoted(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * Where the copy's HEAD stands while the hooks run: a branch of its own, named after the real one. The hooks can only
+ * ever move this one, in the guard or not, so a hook, a Stop or a crash can never move a real branch.
+ */
+const STAND_IN = 'refs/heads/squad/saving';
+
+/** Empties the stand-in's folder: a killed git may have left a lock there, and a hook anything at all. Only this copy uses it. */
+function clearStandIn(dir: string, ref: string): void {
+  const common = path.resolve(dir, git(dir, ['rev-parse', '--git-common-dir']));
+  for (const at of ['', 'logs']) fs.rmSync(path.join(common, at, path.posix.dirname(ref)), { recursive: true, force: true });
+}
+
+function standInFor(dir: string, start: string): string {
+  const head = git(dir, ['symbolic-ref', '-q', 'HEAD'], { allowFail: true });
+  const name = head ? head.replace(/^refs\/heads\//, '') : `detached/${git(dir, ['rev-parse', 'HEAD'])}`;
+  const ref = `${STAND_IN}/${name}/now`;
+  clearStandIn(dir, ref);
+  git(dir, ['update-ref', ref, start]);
+  git(dir, ['symbolic-ref', 'HEAD', ref]);
+  return ref;
+}
+
+/**
+ * What git writes or believes in the copy's own folder when it commits. The hooks could write here, and the next commit
+ * runs outside the guard: it would follow a link planted in these and write through it, and a merge left here would make
+ * it a merge. All of it is git's own notes for this copy, which it makes again.
+ */
+const WRITTEN_BY_A_COMMIT = ['COMMIT_EDITMSG', 'ORIG_HEAD', 'logs/HEAD'];
+const A_MERGE_IN_PROGRESS = ['MERGE_HEAD', 'MERGE_MODE', 'MERGE_MSG', 'SQUASH_MSG', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'AUTO_MERGE'];
+
+function dropHookLeftovers(dir: string, merging: boolean): void {
+  const own = git(dir, ['rev-parse', '--absolute-git-dir']);
+  const logs = path.join(own, 'logs');
+  if (fs.lstatSync(logs, { throwIfNoEntry: false })?.isSymbolicLink()) fs.rmSync(logs, { force: true });
+  for (const name of [...WRITTEN_BY_A_COMMIT, ...(merging ? [] : A_MERGE_IN_PROGRESS)]) fs.rmSync(path.join(own, name), { force: true });
+}
+
+/** Back on the real branch, or the commit it was detached at. The index stays: it holds what the hooks left. */
+function backFrom(dir: string, ref: string, merging = false): void {
+  // First: moving HEAD below writes to the reflog, through any link left there.
+  dropHookLeftovers(dir, merging);
+  const name = ref.slice(STAND_IN.length + 1, -'/now'.length);
+  const detached = /^detached\/([0-9a-f]+)$/.exec(name);
+  if (detached) git(dir, ['update-ref', '--no-deref', 'HEAD', detached[1]!]);
+  else git(dir, ['symbolic-ref', 'HEAD', `refs/heads/${name}`]);
+  // A hook can make the stand-in a link to another branch. Without --no-deref, that branch would be the one deleted.
+  git(dir, ['update-ref', '--no-deref', '-d', ref], { allowFail: true });
+  clearStandIn(dir, ref);
+}
+
+/** The hook files as they are staged now, by path. */
+function stagedHookFiles(dir: string): Map<string, string> {
+  const names = hookFiles(dir);
+  const staged = new Map<string, string>();
+  for (const line of git(dir, ['ls-files', '-s', '-z'], { allowFail: true }).split('\0')) {
+    const entry = /^(\d+) ([0-9a-f]+) \d+\t(.*)$/s.exec(line);
+    if (entry && isHookFile(entry[3]!, names)) staged.set(entry[3]!, `${entry[1]},${entry[2]}`);
+  }
+  return staged;
+}
+
+/** A hook may change what is staged, as a formatter does, but not the check itself: it would run on every teammate's next commit. */
+function keepHookFiles(dir: string, before: Map<string, string>): void {
+  const now = stagedHookFiles(dir);
+  for (const rel of new Set([...before.keys(), ...now.keys()])) {
+    const was = before.get(rel);
+    if (was === now.get(rel)) continue;
+    if (was) {
+      git(dir, ['update-index', '--add', '--cacheinfo', `${was},${rel}`]);
+      git(dir, ['checkout-index', '-f', '--', rel]);
+    } else {
+      git(dir, ['update-index', '--force-remove', '--', rel]);
+      fs.rmSync(path.join(dir, rel), { force: true });
+    }
+  }
+}
+
+/** A lock this old has no git behind it: a kill or a crash left it. */
+const STALE_LOCK_MS = 2 * 60_000;
+
+/**
+ * What a crash or a kill can leave in a copy, put right: HEAD still on the stand-in (the real branch never moved, so this
+ * is all it takes) and a dead lock on the index. Safe to call at any time no commit runs in the copy.
+ */
+export function settleCopy(dir: string): void {
+  const head = git(dir, ['symbolic-ref', '-q', 'HEAD'], { allowFail: true });
+  if (head.startsWith(`${STAND_IN}/`) && head.endsWith('/now')) backFrom(dir, head);
+  const own = git(dir, ['rev-parse', '--absolute-git-dir'], { allowFail: true });
+  if (!own) return;
+  for (const name of ['index.lock', 'HEAD.lock']) {
+    const lock = path.join(own, name);
+    try {
+      if (Date.now() - fs.statSync(lock).mtimeMs > STALE_LOCK_MS) fs.rmSync(lock, { force: true });
+    } catch {
+      // No lock.
+    }
+  }
+}
+
+function realOf(p: string): string {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return p;
+  }
+}
+
+/** The commit the hooks run on, as git's own arguments. It is never signed: the commit that counts comes after it, outside the guard. */
+function trialArgs(dir: string, message: string): string[] {
+  return [...PROGRAMS_OFF, '-c', 'gc.auto=0', '-c', 'maintenance.auto=false', '-c', 'commit.gpgsign=false', ...commitArgs(dir, message)];
+}
+
+/** The commit and its hooks as one guarded command, with what they need written in git's own folder. */
+function guardedTrial(dir: string, message: string, guard: GuardSpec): { line: string; guard: GuardSpec } {
+  const own = realOf(git(dir, ['rev-parse', '--absolute-git-dir']));
+  const common = realOf(path.resolve(dir, git(dir, ['rev-parse', '--git-common-dir'])));
+  const folder = path.posix.dirname(git(dir, ['symbolic-ref', 'HEAD']));
+  // The places the guard opens must be there. On Linux what is not there yet could be made by the command itself.
+  for (const at of [folder, `logs/${folder}`, 'logs/refs', ...(process.platform === 'linux' ? ['refs/replace'] : [])]) fs.mkdirSync(path.join(common, at), { recursive: true });
+  return { line: ['git', ...trialArgs(dir, message)].map(quoted).join(' '), guard: commitGuard(guard, { common, own, folder }) };
+}
+
+/**
+ * The hooks' commit beside everything else, in its own process group: a hook that hangs, or that a Stop ends, goes with
+ * all it started.
+ */
+function hooksCommit(dir: string, message: string, limitMs: number, how: HookRun): Promise<CommitTry> {
+  return new Promise((done) => {
+    const run = how.guard ? guardedTrial(dir, message, how.guard) : null;
+    const child = run ? spawnProject(run.line, { cwd: dir, guard: run.guard, env: hookEnv() }) : track(spawn('git', trialArgs(dir, message), { cwd: dir, env: hookEnv(), stdio: ['ignore', 'pipe', 'pipe'], detached: OWN_GROUP }));
+    let said = '';
+    let timedOut = false;
+    let stopped = false;
+    const keep = (d: Buffer) => (said = `${said}${d.toString('utf8')}`.slice(-4000));
+    child.stdout?.on('data', keep);
+    child.stderr?.on('data', keep);
+    const timer = setTimeout(() => {
+      timedOut = true;
+      endGroup(child, 2000);
+    }, limitMs);
+    const onStop = () => {
+      stopped = true;
+      endGroup(child, 2000);
+    };
+    if (how.signal?.aborted) onStop();
+    else how.signal?.addEventListener('abort', onStop, { once: true });
+    const end = () => {
+      clearTimeout(timer);
+      how.signal?.removeEventListener('abort', onStop);
+    };
+    child.on('error', (err) => {
+      end();
+      done({ ok: false, said: err.message, timedOut: false });
+    });
+    void whenExited(child).then((code) => {
+      end();
+      done({ ok: code === 0 && !timedOut && !stopped, said: said.trim(), timedOut, ...(stopped ? { stopped } : {}) });
+    });
+  });
+}
+
+/** For engineers, first: the file the guard kept from the hook, when that is why it said no. Then what the hook printed. */
+function hookSaid(said: string, how: HookRun): string {
+  const blocked = how.guard ? guardBlockedPath(said, how.guard) : null;
+  return blocked ? `${guardBlockedDetail(blocked, 'the commit hook')}\n${said}` : said;
+}
+
+/**
+ * git's own trouble, looked at directly: whatever a hook prints, it never counts as this. Null when git could commit here,
+ * so what stopped the commit was the hook.
+ */
+function gitTrouble(dir: string): string | null {
+  const own = git(dir, ['rev-parse', '--absolute-git-dir'], { allowFail: true });
+  if (!own) return 'this folder is no longer a git repository';
+  if (fs.existsSync(path.join(own, 'index.lock'))) return 'another git process holds the index (index.lock)';
+  try {
+    git(dir, ['write-tree']);
+    return null;
+  } catch (err) {
+    return (err as Error).message;
+  }
+}
+
+/** What a refusal leads to: a Stop or a hook that hung ends it, and so does git's own trouble. Anything else is the hook's word. */
+function hookOutcome(dir: string, t: CommitTry, limitMs: number, how: HookRun): void {
+  if (t.stopped) throw new CommitStopped();
+  if (t.timedOut) throw new HookRefused(hookSaid(t.said, how), true, limitMs);
+  const trouble = gitTrouble(dir);
+  if (trouble) throw new Error(`git commit failed: ${trouble}`);
+}
+
+/**
+ * The hooks look at the change. A hook that fixed files and said no (a formatter), or that only refused the words
+ * (commitlint), gets one more try with the fixed files staged and the words in the usual form; then it is a HookRefused,
+ * and a person decides. The commit they make is only for them: it stays on the stand-in. What they say goes on: the words
+ * for the real commit, or null when they left nothing to save.
+ */
+async function hooksLook(dir: string, start: string, message: string, words: string, limitMs: number, how: HookRun, whole: boolean): Promise<string | null> {
+  const merging = isMerging(dir);
+  const stagedBefore = stagedHookFiles(dir);
+  const standIn = standInFor(dir, start);
+  try {
+    let last = await hooksCommit(dir, message, limitMs, how);
+    if (!last.ok) {
+      hookOutcome(dir, last, limitMs, how);
+      stageAll(dir);
+      last = await hooksCommit(dir, commitHooks(dir).includes('commit-msg') ? words : message, limitMs, how);
+    }
+    if (!last.ok) {
+      hookOutcome(dir, last, limitMs, how);
+      // The hook fixed everything itself (a formatter), so nothing is left to save. On a whole change it would mean throwing the work away.
+      if (!whole && !somethingToSave(dir)) return null;
+      throw new HookRefused(hookSaid(last.said, how), false, limitMs);
+    }
+    return git(dir, ['log', '-1', '--format=%B'], { allowFail: true }) || message;
+  } finally {
+    backFrom(dir, standIn, merging);
+    keepHookFiles(dir, stagedBefore);
+  }
+}
+
+/**
+ * A project may keep what runs its hooks in a folder git ignores: an install step makes it in the person's checkout (a
+ * hook manager's generated folder), and a new copy has none. git then skips every hook without a word, so the check
+ * would look passed when it never ran. It comes from the person's checkout, which the agents never write in.
+ */
+export function bringHookRunner(dir: string): void {
+  const where = projectHooksPath(dir);
+  if (!where || path.isAbsolute(where) || where.startsWith('~')) return;
+  const root = checkoutOf(dir);
+  if (path.resolve(root) === path.resolve(dir)) return;
+  // An agent can leave a link here. What follows runs outside the guard and must not write through it.
+  if (fs.lstatSync(path.join(dir, where), { throwIfNoEntry: false })?.isSymbolicLink()) fs.rmSync(path.join(dir, where), { force: true });
+  const inCopy = `${realOf(dir)}${path.sep}`;
+  const ignored = git(root, ['ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--', where], { allowFail: true }).split('\0').filter(Boolean);
+  for (const rel of ignored) {
+    const to = path.join(dir, rel);
+    try {
+      fs.mkdirSync(path.dirname(to), { recursive: true });
+      if (!`${realOf(path.dirname(to))}${path.sep}`.startsWith(inCopy)) continue;
+      fs.rmSync(to, { force: true });
+      fs.copyFileSync(path.join(root, rel), to);
+    } catch {
+      // It went while being copied: the hook manager's own install makes it again.
+    }
+  }
+}
+
+/**
+ * The person's own checkout of the repo this copy belongs to. It is not always the folder above git's: a submodule's
+ * git folder sits inside the parent's, and git's settings say where its checkout is.
+ */
+function checkoutOf(dir: string): string {
+  const common = path.resolve(dir, git(dir, ['rev-parse', '--git-common-dir'], { allowFail: true }) || '.git');
+  const set = git(dir, ['config', '--file', path.join(common, 'config'), '--get', 'core.worktree'], { allowFail: true });
+  return set ? path.resolve(common, set) : path.dirname(common);
+}
+
+/**
+ * The one way a commit runs with the project's hooks on, in their guard where this computer has one. The hooks look at
+ * what is staged, on a stand-in branch; then the real commit goes on the real branch, outside the guard, with the
+ * person's signature when their git signs. So a refusal, a Stop or a crash leaves every branch where it was.
+ *
+ * With `from`, or a merge not finished yet, all of it is saved first, so nothing can be lost whatever the hooks do. They
+ * see everything since it started as staged, and the commit that passed goes on top of the branch's last one, so a branch
+ * already pushed still moves forward.
+ */
+export async function commitChecked(dir: string, message: string, words: string, limitMs = HOOK_MS, how: HookRun = {}): Promise<void> {
+  settleCopy(dir);
+  if (!how.noRunner) bringHookRunner(dir);
+  const where = hookFolder(dir);
+  if (!commitHooks(dir).length && !(where && hasHook(dir, where, 'post-commit'))) {
+    if (somethingToSave(dir)) commitWithoutHooks(dir, message);
+    return;
+  }
+  const merging = isMerging(dir);
+  const whole = Boolean(how.from) || merging;
+  if (whole && somethingToSave(dir)) commitWithoutHooks(dir, `Work so far: ${message}`);
+  const tip = git(dir, ['rev-parse', 'HEAD']);
+  let start = tip;
+  if (how.from) {
+    // Where it started, as far as git can still tell; failing that, everything, so that no work goes unseen.
+    start = git(dir, ['merge-base', how.from, tip], { allowFail: true }) || git(dir, ['rev-list', '--max-parents=0', tip]).split('\n').at(-1)!;
+  } else if (merging) {
+    start = git(dir, ['rev-parse', `${tip}^1`]);
+  }
+  // Nothing to show them: all of it passed before, or was never there.
+  if (whole && (start === tip || !git(dir, ['diff', '--name-only', start, tip], { allowFail: true }))) return;
+  const saying = await hooksLook(dir, start, message, words, limitMs, how, whole);
+  if (saying === null || (!whole && !somethingToSave(dir))) return;
+  git(dir, [...authorArgs(dir), 'commit', ...(whole ? ['--allow-empty'] : []), '-m', saying]);
+}
+
+/**
+ * The work so far on a ticket's own branch, not its finished change. The project's commit hooks get a short try. When
+ * they say no (unfinished work often fails them) the work is still saved, since nothing goes to the base here, and
+ * `hookSaid` tells the caller, which marks the ticket hookOwed: the hooks see this work again when the change is
+ * accepted. A hook only looks at what is staged, so nothing else would ever show it to them.
+ */
+export async function commitAll(dir: string, message: string, words = message, how: HookRun = {}): Promise<{ commit: string | null; hookSaid?: string }> {
+  stageAll(dir);
+  if (!somethingToSave(dir)) return { commit: null };
+  let said: string | undefined;
+  try {
+    await commitChecked(dir, message, words, SHORT_HOOK_MS, how);
+  } catch (err) {
+    if (!(err instanceof HookRefused)) throw err;
+    said = err.said;
+    if (somethingToSave(dir)) commitWithoutHooks(dir, message);
+  }
+  return { commit: git(dir, ['rev-parse', '--short', 'HEAD']), ...(said !== undefined ? { hookSaid: said } : {}) };
+}
+
+/** A commit with the project's hooks off, like every other git the engine runs. The caller keeps the record of why. */
+export function commitWithoutHooks(dir: string, message: string): void {
+  git(dir, commitArgs(dir, message));
 }
 
 /** Use the person's git identity; fall back to a squad-kit one so a commit never fails on a fresh machine. */
@@ -280,7 +801,7 @@ export function mergeIntoBase(dir: string, base: string, branch: string, message
   if (isAncestor(dir, branchSha, baseSha)) return { commit: baseSha, moved: true };
   let tree: string;
   try {
-    tree = execFileSync('git', ['merge-tree', '--write-tree', baseSha, branchSha], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024, env: gitEnv() }).split('\n')[0]!.trim();
+    tree = execFileSync('git', gitArgs(['merge-tree', '--write-tree', baseSha, branchSha]), { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024, env: gitEnv() }).split('\n')[0]!.trim();
   } catch (err) {
     const e = err as { status?: number | null; stderr?: Buffer | string; message: string };
     // Exit code 1 is git's "the merge has conflicts"; anything else means the merge could not be tried.
@@ -328,7 +849,7 @@ export function keepingFiles<T>(dir: string, keep: string | undefined, from: str
 
 export function isAncestor(dir: string, a: string, b: string): boolean {
   try {
-    execFileSync('git', ['merge-base', '--is-ancestor', a, b], { cwd: dir, stdio: 'ignore', env: gitEnv() });
+    execFileSync('git', gitArgs(['merge-base', '--is-ancestor', a, b]), { cwd: dir, stdio: 'ignore', env: gitEnv() });
     return true;
   } catch {
     return false;

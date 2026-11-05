@@ -105,10 +105,11 @@ export async function runUpgrade(opts: UpgradeOptions): Promise<void> {
   ui.info('Run `squad migrate` to update your .squad/ structure if needed.');
 }
 
-function spawnInherit(cmd: string, args: string[]): Promise<number> {
+export function spawnInherit(cmd: string, args: string[]): Promise<number> {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { stdio: 'inherit', shell: process.platform === 'win32' });
-    child.on('exit', (code) => resolve(code ?? 0));
+    // Ended by a signal there is no exit code, and the install did not finish.
+    child.on('exit', (code) => resolve(code ?? 1));
     child.on('error', (err) => reject(err));
   });
 }

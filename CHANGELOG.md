@@ -7,6 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] — 2026-11-05
+
+A patch about not losing work and never reaching a dead end. It also moves the project's commit hooks into the guard.
+Nothing changes in how you work with the squad.
+
+### What you type stays
+
+- **Text you type survives** a reload, a closed tab or a dialog closed by mistake: answers, comments, new tickets, bugs
+  and the BRD box are kept for each project, ticket and field, and cleared once sent.
+- **Skip** asks first. Dialogs with files in them ask before closing. Enter works in an **Other** answer.
+
+### When something goes wrong
+
+- **The app going down shows at once.** Within 5 seconds a banner sits over every page, nothing pulses as if it were
+  still working, and the banner goes by itself when the app is back. An update that does not come back gets it after 2
+  minutes.
+- **One error no longer takes the app down.** Each squad turn is guarded, and an error in the screens shows a page with
+  a way back. A full disk or a moved folder holds that project with one banner, and it carries on by itself.
+- **A network blip waits and tries again**, 4 times over about 15 minutes, and never lowers the model level. A merge cut
+  off by a blip is tried again too.
+- **A moved folder is found.** The story copies' links are repaired when the squad starts, at **Looks right** and when a
+  step opens a copy. Home follows a folder moved while the app runs.
+- **A refused release has a way out.** A teammate's push is merged and sent, never forced. A real clash gets the clash
+  card, and a protected main gets plain words and an engineer's steps.
+- **It reached it another way**: a new button on the Releases page, for a release merged by hand. It needs a reason and
+  looks on the remote first. If the release is not there, it warns and asks a second time. Terminal:
+  `squad release --mark-sent --reason "…" [--anyway]`. `squad release` also takes the version with or without the `v`.
+- **Take it**: a new button on a ticket whose owner cannot work on it. Terminal: `squad take-back <ticket> --reason "…"`.
+- **A ticket is never overwritten** by another with the same id, and new ids skip the ones already pushed.
+- **The home folder is refused** by `squad init`, setup and the first commit, and a leftover `~/.squad` is ignored.
+- **The link lasts across tabs.** With no key in the link, the page says to run `squad`.
+- **Stop and closing the board** end a running hook, and closing takes seconds. `squad | tee` stops cleanly, and a run
+  whose output goes to files keeps running when its terminal closes.
+- **An agent's tool calls** no longer fail with a dropped connection after 5 quiet seconds.
+
+### The project's commit hooks
+
+- **They run once, when a change is saved, in the guard, on a stand-in branch.** A hook cannot move a real branch, plant
+  a hook or change a git setting. The real commit is made after, outside the guard, with your signature if your git
+  signs. A crash or a failed signature no longer moves a branch or leaves an unsigned commit.
+- **Every refusal gets a card**: **Let the Builder fix it**, **Fix it yourself**, **Try the save again**, or **Save
+  without this check**. Saving without it needs a reason, which stays on the ticket, the pull request and the release
+  notes. Builds by itself never skips a hook.
+- **Refused code cannot slip through.** Work saved past a refusal is checked whole at **Looks right**, and the branch
+  goes back as it was if the hook still says no.
+- **The Builder cannot change the check to pass it.** Hook files, their settings and their `package.json` keys go back,
+  with one plain line. What a hook calls, like lint rules and tests, stays the Builder's, and the Reviewer reads it.
+- **husky 9 now runs in a story's copy.** Before, its hooks silently never ran there.
+- **squad-kit runs no other hook**: no `pre-push`, `post-merge` or `post-checkout`, since the project's own checks have
+  run by then. Your own terminal still runs them. Git LFS files still upload when squad-kit pushes.
+- **A hook folder with a common name** (`hooks`) no longer costs you work in `src/hooks`. `npx` works in a hook with no
+  packages installed.
+
+### Security
+
+- **`.git` and git's own folder are read only** for the project's commands and for agents.
+- **squad-kit's own git starts nothing a repo names by itself**: no file monitor, no diff program, and nothing from a
+  nested repo, which also stays out of commits.
+- **The app answers only at its own address.** Host and Origin are checked on every route, a key in the link works for
+  reads only, and HTML and SVG from a project download instead of opening at the board's address.
+
+### Known limits
+
+- **A hook built to do harm could change a file in git's store of objects.** A project with no commit hooks is not
+  affected. The next patch closes this by running hooks in a throwaway git folder. See [SECURITY.md](SECURITY.md).
+- A hook that reads the branch name sees the stand-in, `squad/saving/<branch>/now`. A strict one says no, and you get
+  the card.
+- Setup in your own checkout no longer installs husky's hooks. On a fresh clone they stay off until you install them.
+- Stop in the middle of lint-staged leaves its backup in `git stash list`. Your work is safe.
+
 ## [1.2.0] — 2026-11-05
 
 squad-kit 1.2 is about trust: squad-kit shows that it understands your project, says what the work really cost, and
@@ -1071,7 +1141,8 @@ First public release.
 - Plan-generation meta-prompt (`generate-plan.md`), intake template (`intake.md`), and plan skeleton reference (`story-skeleton.md`).
 - Documentation: `docs/philosophy.md`, `docs/getting-started.md`, `docs/customization.md`, `docs/vs-spec-kit.md`.
 
-[Unreleased]: https://github.com/AzmSquad/squad-kit/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/AzmSquad/squad-kit/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.2.1
 [1.2.0]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.2.0
 [1.1.1]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.1.1
 [1.1.0]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.1.0

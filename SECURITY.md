@@ -33,7 +33,8 @@ Credit will be given in the release notes unless you prefer to remain anonymous.
 ## How squad-kit keeps you safe
 
 - **The app runs on your computer only.** It listens on `127.0.0.1`, behind a private link with a token kept in
-  `~/.squad-kit/app.json`. Nothing is hosted.
+  `~/.squad-kit/app.json`. Nothing is hosted. It answers only at its own address (Host and Origin are checked on every
+  route), and a token in a link works for reads only.
 - **Sign-ins stay on this computer.** Tracker tokens and keys live in `~/.squad-kit/projects/<id>/secrets.yaml`
   (mode `0600` on POSIX), never in the project folder or in git. A project moved from 0.x has its
   `.squad/secrets.yaml` moved there once. To run your app, squad-kit copies your project's `.env` files into its own
@@ -48,6 +49,22 @@ Credit will be given in the release notes unless you prefer to remain anonymous.
   squad-kit's tools. squad-kit checks every field, does the job itself, and refuses and logs what breaks a check.
 - **The project's own commands run in a guard** on Mac and Linux: the tests, setup, the app and the release pipeline
   can't read your keys, sign-ins, browser profiles, squad-kit's own folder or the `.env` files in your project folder.
+  They can't change the copy's link to git or git's own folder either, so nothing they write can make squad-kit's own
+  git, which runs outside the guard, start a program of theirs.
+- **The project's commit hooks run in the same guard, once, on a stand-in.** They look at the change on a branch of
+  their own, so a hook cannot move a real branch, plant a hook, change a git setting or reach another ticket. The real
+  commit is made after, outside the guard, with your signature if your git signs.
+  **Known gap, being closed next:** while they run, hooks share git's store of objects, so a hook built to do harm could
+  change a file stored there. A project with no commit hooks is not affected.
+- **squad-kit runs no other hook.** Every other git it runs has hooks off: it does not run a project's `pre-push`,
+  `post-merge`, `post-checkout` or `post-commit` outside that one commit (a `post-commit` runs on the stand-in). The
+  project's own checks have already run in the guard by then. Pushing from your own terminal still runs your hooks.
+  A project that uses Git LFS still gets its large files uploaded: a push runs squad-kit's own small `pre-push`, kept in
+  its own folder, which does only that.
+- **squad-kit's git starts nothing a repo names by itself:** no file monitor (`core.fsmonitor`), no diff program
+  (`diff.external`, textconv), and it never looks inside a nested repo. Programs named in your own git settings for the
+  network, credentials, filters and merges stay on (`core.sshCommand`, git-lfs): they need a line in a settings file,
+  and neither the guard nor an agent's sandbox can write those files.
 - **Windows is less protected and not fully tested yet.** There, the agents' own commands and the project's own
   commands have no guard, so they can reach other files on the computer, squad-kit's own too. Use it on projects you
   trust. Settings says so.

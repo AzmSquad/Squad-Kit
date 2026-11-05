@@ -10,15 +10,18 @@ import { buildPaths, findSquadRoot, requireSquadRoot } from '../core/paths.js';
 import { DEFAULT_CONFIG, saveConfig } from '../core/config.js';
 import {
   answerQuestions,
-  approve,
+  approveBeside,
   askAbout,
   composeNotes,
   createTicket,
-  decideStuck,
+  decideStuckBeside,
   decideTestCommand,
+  endSaves,
   inbox,
   pullTicket,
   pushReleaseAgain,
+  markReleaseSent,
+  SentNotSure,
   releaseVersion,
   reportBug,
   requestChange,
@@ -91,6 +94,7 @@ import { problemOf } from '../board/problem.js';
 import { shellArg, shellQuote, withoutComments } from '../utils/text.js';
 import { freePortAndRetry } from '../engine/free-port.js';
 import { putBackInRelease, takeOutOfRelease } from '../board/release-tidy.js';
+import { takeBack } from '../engine/handover.js';
 import { costLines, happenedLines } from './cost.js';
 import { ticketCost } from '../board/cost.js';
 import { howPaid } from '../board/payment.js';
@@ -462,10 +466,23 @@ async function waitForReply(bp: BoardPaths, ticketId: string, qid: string): Prom
   return 'The squad has not answered yet. Check the board in a moment.';
 }
 
+/** Ctrl-C while the project's own check runs: it ends with the command, and nothing is merged. */
+async function endingSaves<T>(bp: BoardPaths, run: () => Promise<T>): Promise<T> {
+  const end = () => endSaves(bp);
+  process.once('SIGINT', end);
+  process.once('SIGTERM', end);
+  try {
+    return await run();
+  } finally {
+    process.off('SIGINT', end);
+    process.off('SIGTERM', end);
+  }
+}
+
 export async function runApprove(ticketId: string): Promise<void> {
   const bp = board();
   const was = requireTicket(bp, ticketId).waiting?.kind;
-  const t = approve(bp, ticketId);
+  const t = await endingSaves(bp, () => approveBeside(bp, ticketId));
   if (was === 'spec') {
     ui.success('Spec approved. The Architect is designing how to build it; you approve that next.');
     ui.info(`Follow it live: squad watch ${t.id}`);
@@ -791,6 +808,11 @@ export async function runGiveBack(ticketId: string, words: string[]): Promise<vo
   ui.success(`Given back. The checks, review and proof run again on your changes. Follow it: squad watch ${t.id}`);
 }
 
+export async function runTakeBack(ticketId: string, opts: { reason: string }): Promise<void> {
+  const t = takeBack(board(), ticketId, opts.reason);
+  ui.success(`${t.id} is yours now. The reason stays on the ticket.`);
+}
+
 export async function runHandOver(ticketId: string, words: string[], opts: { note?: string }): Promise<void> {
   const bp = board();
   const to = words.join(' ').trim() || (await input({ message: 'Hand it over to (their name, as their board shows it)' }));
@@ -846,13 +868,13 @@ export async function runDecide(ticketId: string, choice?: string, opts: { note?
   }
   const way = t.stuck.options[index]?.do;
   let { note, reason } = opts;
-  if (way === 'continue' && !reason?.trim()) {
+  if ((way === 'continue' || way === 'skip-hooks') && !reason?.trim()) {
     if (!ask) throw new Error('Add --reason "why". It shows on the ticket, the pull request and the release notes.');
-    reason = await input({ message: 'Why continue anyway? (shows on the ticket, the pull request and the release notes)', validate: (v) => (v.trim() ? true : 'Write a short reason.') });
+    reason = await input({ message: `${way === 'continue' ? 'Why continue anyway?' : "Why save without the project's own check?"} (shows on the ticket, the pull request and the release notes)`, validate: (v) => (v.trim() ? true : 'Write a short reason.') });
   }
   if (way === 'retry' && ask && note === undefined) note = await input({ message: 'A note for the squad (optional, Enter to skip)' });
   if (way === 'yourself' && t.worktree) out(`  The ticket's copy: ${t.worktree}`);
-  decideStuck(bp, t.id, index, { note, reason });
+  await endingSaves(bp, () => decideStuckBeside(bp, t.id, index, { note, reason }));
   ui.success(way === 'yourself' ? 'OK. The checks, review and proof run again on your fix.' : `Decided: "${t.stuck.options[index]?.name}".`);
 }
 
@@ -902,11 +924,36 @@ function roleLabel(who: string): string {
   return kleur.bold(`${names[who] ?? 'Squad'}  `);
 }
 
-export async function runRelease(version: string | undefined, opts: { yes?: boolean; pushAgain?: boolean; without?: string[]; putBack?: string[] }): Promise<void> {
+/** 1.5.0 and v1.5.0 are one release, in every command. */
+function withV(version: string | undefined): string | undefined {
+  return version && (version.startsWith('v') ? version : `v${version}`);
+}
+
+export async function runRelease(version: string | undefined, opts: { yes?: boolean; pushAgain?: boolean; markSent?: boolean; reason?: string; anyway?: boolean; without?: string[]; putBack?: string[] }): Promise<void> {
   const bp = board();
-  if (opts.pushAgain) return runPushAgain(bp, version);
+  const named = withV(version);
+  // Words that do nothing here say so, or a person would think they counted.
+  if (!opts.markSent) {
+    if (opts.reason !== undefined) ui.warning('--reason only counts with --mark-sent, so it is left out here.');
+    if (opts.anyway) ui.warning('--anyway only counts with --mark-sent, so it is left out here.');
+  }
+  if (opts.pushAgain) return runPushAgain(bp, named);
+  if (opts.markSent) {
+    const target = listReleases(bp).find((r) => r.unpushed?.length && (!named || r.version === named));
+    if (!target) throw new Error(named ? `${named} has nothing left to push.` : 'Every release is pushed already.');
+    if (!opts.reason?.trim()) throw new Error(`Say how it got there: ${cmd(`squad release ${target.version} --mark-sent --reason "<how>"`)}`);
+    try {
+      const r = await markReleaseSent(bp, target.version, { reason: opts.reason, ...(opts.anyway ? { anyway: true } : {}) });
+      ui.success(`${r.version} is marked as sent. Its tickets are closed.`);
+      for (const l of (r.log ?? []).slice(-1)) if (!l.ok) ui.warning(l.text);
+    } catch (err) {
+      if (err instanceof SentNotSure) throw new Error(`${err.message} To mark it anyway, add: ${cmd('--anyway')}`);
+      throw err;
+    }
+    return;
+  }
   let draft = draftRelease(bp);
-  if (!draft || (version && draft.version !== (version.startsWith('v') ? version : `v${version}`))) {
+  if (!draft || (named && draft.version !== named)) {
     throw new Error('There is no release ready to go out.');
   }
   // Put back, or take out before it is made: its code stays in main, and it goes out with the next release.
@@ -964,13 +1011,12 @@ export async function runRelease(version: string | undefined, opts: { yes?: bool
 
 /** A release whose push failed: send its commits and tags again (the newest such release, or the one named). */
 async function runPushAgain(bp: BoardPaths, version: string | undefined): Promise<void> {
-  const v = version && (version.startsWith('v') ? version : `v${version}`);
-  const target = listReleases(bp).find((r) => r.unpushed?.length && (!v || r.version === v));
-  if (!target) throw new Error(v ? `${v} has nothing left to push.` : 'Every release is pushed already.');
+  const target = listReleases(bp).find((r) => r.unpushed?.length && (!version || r.version === version));
+  if (!target) throw new Error(version ? `${version} has nothing left to push.` : 'Every release is pushed already.');
   const spin = ui.spinner(`Pushing ${target.version}…`);
   const r = await pushReleaseAgain(bp, target.version).finally(() => spin.stop());
   if (r.unpushed?.length) {
-    for (const u of r.unpushed) ui.warning(`${u.repo === '.' ? '' : `${u.repo}: `}Push to ${u.remote} failed again: ${u.error}`);
+    for (const u of r.unpushed) ui.warning(`${u.repo === '.' ? '' : `${u.repo}: `}${u.plain ?? `Push to ${u.remote} failed again: ${u.error}`}`);
     throw new Error(`${r.version} is still not pushed. Fix the problem above, then run: squad release ${r.version} --push-again`);
   }
   ui.success(`Pushed ${r.version}. Its tickets are closed.`);

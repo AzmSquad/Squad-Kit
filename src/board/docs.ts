@@ -124,6 +124,7 @@ const HEADER_KEYS = [
   'changeOf',
   'dependsOn',
   'dependency',
+  'hookOwed',
   'breakdown',
   'decided',
   'offScreen',

@@ -1,6 +1,6 @@
 import net from 'node:net';
 import type { ProjectCommands } from '../board/types.js';
-import { endGroup, whenExited } from './process-group.js';
+import { KILL_AFTER_MS, endGroup, whenExited } from './process-group.js';
 import { appPortVariables } from './port-vars.js';
 import { guardBlockedPath, spawnProject, type GuardSpec } from './project-guard.js';
 
@@ -171,7 +171,7 @@ async function answers(url: string): Promise<boolean> {
 }
 
 /** True when a program holds the port, whether or not it answers. */
-function held(port: number | null): Promise<boolean> {
+export function held(port: number | null): Promise<boolean> {
   if (!port) return Promise.resolve(false);
   return new Promise((resolve) => {
     const s = net.connect({ host: '127.0.0.1', port });
@@ -179,10 +179,21 @@ function held(port: number | null): Promise<boolean> {
       s.destroy();
       resolve(yes);
     };
-    s.setTimeout(800, () => done(false));
+    // When this process was busy (a git call that waits, on a busy computer), the timer comes up before an answer that
+    // is already here. That answer goes first, or a port in use reads as free.
+    s.setTimeout(800, () => setImmediate(() => done(false)));
     s.once('connect', () => done(true));
     s.once('error', () => done(false));
   });
+}
+
+/** Apps squad-kit just stopped, by the port each had, until each is gone. */
+const stopping = new Map<number, Promise<void>>();
+
+/** Ended with its whole process group and off its port, or the time for that is over: the group is killed by then. */
+async function goneFrom(port: number | null, exited: () => boolean): Promise<void> {
+  const until = Date.now() + KILL_AFTER_MS + 1000;
+  while (Date.now() < until && (!exited() || (await held(port)))) await new Promise((r) => setTimeout(r, 50));
 }
 
 function freePort(): Promise<number> {
@@ -214,6 +225,10 @@ function portOf(url: string): number | null {
  */
 export async function startApp(cwd: string, command: string, url: string, waitMs = 3 * 60_000, signal?: AbortSignal, guard?: GuardSpec): Promise<RunningApp> {
   if (signal?.aborted) throw new Error(STOPPED);
+  // The app squad-kit stopped a moment ago (the last round of screenshots) is no other program: on a busy computer it may
+  // still be on its way out, and its port is about to be free. Going around it would break an app that cannot move.
+  await stopping.get(portOf(url) ?? 0);
+  if (signal?.aborted) throw new Error(STOPPED);
   const taken = (await answers(url)) || (await held(portOf(url)));
   const port = taken ? await freePort() : null;
   const target = port ? url.replace(/(:\/\/[^/:]+)(:\d+)?/, `$1:${port}`) : url;
@@ -234,7 +249,13 @@ export async function startApp(cwd: string, command: string, url: string, waitMs
   });
   child.on('exit', (code) => (exited = code ?? 0));
   // The whole process group: the shell, npm, and the server it started.
-  const stop = () => endGroup(child);
+  const stop = () => {
+    endGroup(child);
+    const at = portOf(target);
+    if (!at || stopping.has(at)) return;
+    const gone = goneFrom(at, () => exited !== null).finally(() => stopping.delete(at));
+    stopping.set(at, gone);
+  };
   // A Stop while it starts ends it at once, not at the next look.
   signal?.addEventListener('abort', stop, { once: true });
   const busy = port ? ` ${new URL(url).host} is used by another program (maybe your own "npm run dev"), so squad-kit tried port ${port}${own.length ? ` (set as PORT and ${own.join(', ')})` : ''}.` : '';

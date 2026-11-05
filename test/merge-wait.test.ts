@@ -116,6 +116,13 @@ describe('a pull request that waits for its approver', () => {
     expect(await recheckMerge(bp, id)).toBe('waiting');
   });
 
+  it('a merge a network blip cut off is asked again, when the host says it can merge', async () => {
+    const id = waitingPr();
+    states.push('mergeable');
+    expect(await recheckMerge(bp, id)).toBe('merged');
+    expect(readTicket(bp, id)!.mergedAt).toBeTruthy();
+  });
+
   it('says when newer work clashes with it, and leaves other tracks alone', async () => {
     const id = waitingPr();
     states.push('clash');

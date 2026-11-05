@@ -6,6 +6,7 @@ import net from 'node:net';
 import { execSync } from 'node:child_process';
 import yaml from 'js-yaml';
 import type { BoardPaths } from '../src/board/store.js';
+import { freePort } from './support/tiny-app.js';
 
 /**
  * Your apps through the board's REST API: every button is one call. Looks right merges a ticket, the sidebar offers
@@ -46,15 +47,6 @@ let bp: BoardPaths;
 let port: number;
 let server: Awaited<ReturnType<typeof startConsoleServer>> | null;
 let api: string;
-
-function freePort(): Promise<number> {
-  return new Promise((resolve) => {
-    const srv = net.createServer().listen(0, '127.0.0.1', () => {
-      const p = (srv.address() as net.AddressInfo).port;
-      srv.close(() => resolve(p));
-    });
-  });
-}
 
 interface App {
   name: string;

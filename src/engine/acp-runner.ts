@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { COULD_NOT_SAVE, asError } from '../core/file-trouble.js';
 import type { AgentResult, AgentUsage, BlockedAction, RunWindow, ToolEvent } from '../modules/ai-tool/types.js';
 import { OWN_GROUP, endGroup, track } from './process-group.js';
 
@@ -217,6 +218,7 @@ class Rpc {
 export async function runAcp(launch: AcpLaunch, opts: AcpRunOptions): Promise<AgentResult> {
   // Stopped before it began: nothing starts.
   if (opts.signal?.aborted) return { ok: false, sessionId: opts.resume ?? opts.sessionId ?? '', text: '', error: STOPPED };
+  if (opts.logDir) fs.mkdirSync(opts.logDir, { recursive: true });
   // Its own process group, so stopping it ends the tool it drives and the commands that tool runs too.
   const child = track(spawn(launch.command, launch.args, { cwd: opts.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], detached: OWN_GROUP }));
   // An adapter that cannot start, or dies while squad-kit writes to it, must never take the app down with it.
@@ -225,7 +227,6 @@ export async function runAcp(launch: AcpLaunch, opts: AcpRunOptions): Promise<Ag
   if (child.pid) opts.onSpawn?.(child.pid);
   let stderr = '';
   child.stderr.on('data', (d: Buffer) => (stderr = (stderr + d.toString('utf8')).slice(-4000)));
-  if (opts.logDir) fs.mkdirSync(opts.logDir, { recursive: true });
 
   // Tool calls arrive first as a stub, then their details (name, input, diff) in updates.
   const tools = new Map<string, { name?: string; input?: Record<string, unknown>; reported?: boolean; structured?: unknown }>();
@@ -236,38 +237,23 @@ export async function runAcp(launch: AcpLaunch, opts: AcpRunOptions): Promise<Ag
   let cost: number | undefined;
   let costBefore: number | undefined = 0;
   let tokens: AcpTokens | undefined;
+  // What the agent reports is saved as it arrives. When saving fails (a full disk, a folder that moved) the run stops
+  // here: an error on this stream has nothing above it, so it would end the whole app.
+  let saveError: Error | undefined;
   const used = () => {
     const u = usageFrom(tokens, cost, costBefore);
-    return u ? { usage: u } : {};
+    return { ...(u ? { usage: u } : {}), ...(saveError ? { saveError } : {}) };
   };
 
   const rpc = new Rpc(
     child,
     (method, params) => {
-      if (method !== 'session/update') return;
-      const update = params.update as Record<string, any>;
-      opts.onActivity?.();
-      if (opts.logDir && sessionId) fs.appendFileSync(path.join(opts.logDir, `${sessionId}.jsonl`), `${JSON.stringify({ at: new Date().toISOString(), update })}\n`);
-      if (update.sessionUpdate === 'usage_update' && update.cost?.currency === 'USD' && count(update.cost.amount)) cost = update.cost.amount;
-      if (update.sessionUpdate === 'agent_message_chunk' && update.content?.type === 'text') {
-        lastText = update.content.text;
-        opts.onText?.(update.content.text);
-      }
-      if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
-        const t = tools.get(update.toolCallId) ?? {};
-        const name = launch.toolName(update) ?? (update.sessionUpdate === 'tool_call' ? undefined : t.name);
-        if (name) t.name = name;
-        if (update.rawInput && Object.keys(update.rawInput).length) t.input = update.rawInput;
-        if (launch.structuredTool && t.name === launch.structuredTool && t.input) structured = t.input;
-        // Report each tool once, when its name and input are known, the way the direct runner does.
-        if (!t.reported && t.name && t.input && t.name !== launch.structuredTool) {
-          t.reported = true;
-          opts.onTool?.({ name: t.name, input: t.input });
-        }
-        if (update.sessionUpdate === 'tool_call_update' && launch.blocked && opts.onBlocked) {
-          for (const b of launch.blocked(outputOf(update))) opts.onBlocked(b);
-        }
-        tools.set(update.toolCallId, t);
+      if (method !== 'session/update' || saveError) return;
+      try {
+        onUpdate(params);
+      } catch (err) {
+        saveError = asError(err);
+        stop(COULD_NOT_SAVE);
       }
     },
     (method, params) => {
@@ -275,6 +261,33 @@ export async function runAcp(launch: AcpLaunch, opts: AcpRunOptions): Promise<Ag
       throw new Error(`squad-kit does not offer ${method}`);
     },
   );
+
+  function onUpdate(params: Record<string, any>): void {
+    const update = params.update as Record<string, any>;
+    opts.onActivity?.();
+    if (opts.logDir && sessionId) fs.appendFileSync(path.join(opts.logDir, `${sessionId}.jsonl`), `${JSON.stringify({ at: new Date().toISOString(), update })}\n`);
+    if (update.sessionUpdate === 'usage_update' && update.cost?.currency === 'USD' && count(update.cost.amount)) cost = update.cost.amount;
+    if (update.sessionUpdate === 'agent_message_chunk' && update.content?.type === 'text') {
+      lastText = update.content.text;
+      opts.onText?.(update.content.text);
+    }
+    if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
+      const t = tools.get(update.toolCallId) ?? {};
+      const name = launch.toolName(update) ?? (update.sessionUpdate === 'tool_call' ? undefined : t.name);
+      if (name) t.name = name;
+      if (update.rawInput && Object.keys(update.rawInput).length) t.input = update.rawInput;
+      if (launch.structuredTool && t.name === launch.structuredTool && t.input) structured = t.input;
+      // Report each tool once, when its name and input are known, the way the direct runner does.
+      if (!t.reported && t.name && t.input && t.name !== launch.structuredTool) {
+        t.reported = true;
+        opts.onTool?.({ name: t.name, input: t.input });
+      }
+      if (update.sessionUpdate === 'tool_call_update' && launch.blocked && opts.onBlocked) {
+        for (const b of launch.blocked(outputOf(update))) opts.onBlocked(b);
+      }
+      tools.set(update.toolCallId, t);
+    }
+  }
 
   let stoppedBy: string | null = null;
   // Ask the agent to stop, then end the whole group: the adapter, the tool and the commands it ran.

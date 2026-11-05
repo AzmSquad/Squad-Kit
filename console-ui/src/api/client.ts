@@ -1,4 +1,49 @@
+import { noteAnswer, noteNoAnswer } from '../lib/reach';
+
 const TOKEN_KEY = 'squad.console.token';
+
+/**
+ * The link's token, kept for the whole browser and not one tab: a new tab or a bookmark on this address opens the board
+ * too. It only opens this computer's board, and an address with another port is another place to the browser. Browser
+ * storage may refuse (a private window): then it lives in memory, and this tab still works.
+ */
+let tokenInMemory: string | null = null;
+
+function stored(area: () => Storage): string | null {
+  try {
+    return area().getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function currentToken(): string | null {
+  return tokenInMemory ?? stored(() => localStorage) ?? stored(() => sessionStorage);
+}
+
+function saveToken(token: string): void {
+  tokenInMemory = token;
+  try {
+    localStorage.setItem(TOKEN_KEY, token);
+  } catch {
+    // Only this tab, then.
+  }
+}
+
+/**
+ * The board said no to this token: it runs with a new one now. The old one goes, so it stays in no browser. Only that
+ * one: a tab on an old link never takes away the newer token another tab just saved.
+ */
+function forgetToken(used: string): void {
+  if (tokenInMemory === used) tokenInMemory = null;
+  for (const area of [() => localStorage, () => sessionStorage]) {
+    try {
+      if (area().getItem(TOKEN_KEY) === used) area().removeItem(TOKEN_KEY);
+    } catch {
+      // Browser storage refused: nothing kept there.
+    }
+  }
+}
 
 /**
  * The project this page shows (ADR-001): every board address starts with /p/<project id>. The app's Home has none.
@@ -26,17 +71,17 @@ export function bootstrapToken(): string | null {
   const url = new URL(window.location.href);
   const fromUrl = url.searchParams.get('t');
   if (fromUrl) {
-    sessionStorage.setItem(TOKEN_KEY, fromUrl);
+    saveToken(fromUrl);
     url.searchParams.delete('t');
     window.history.replaceState({}, '', url.toString());
     return fromUrl;
   }
-  return sessionStorage.getItem(TOKEN_KEY);
+  return currentToken();
 }
 
 export class UnauthorizedError extends Error {
   constructor() {
-    super('Session token missing or invalid. Reopen squad console.');
+    super("This page's link is out of date. Run squad in a terminal: it opens the board with a fresh link.");
     this.name = 'UnauthorizedError';
   }
 }
@@ -61,15 +106,19 @@ export function worthRetrying(err: unknown): boolean {
 export const NO_ANSWER = 'squad-kit did not answer, so nothing changed. Check that it still runs in its terminal, then try again.';
 
 async function reach(input: string, init: RequestInit): Promise<Response> {
+  let res: Response;
   try {
-    return await fetch(input, init);
+    res = await fetch(input, init);
   } catch {
+    noteNoAnswer();
     throw new Error(NO_ANSWER);
   }
+  noteAnswer(res.status);
+  return res;
 }
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = sessionStorage.getItem(TOKEN_KEY);
+  const token = currentToken();
   if (!token) throw new UnauthorizedError();
   const res = await reach(apiPath(path), {
     ...init,
@@ -79,7 +128,10 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
       ...(init?.headers ?? {}),
     },
   });
-  if (res.status === 401) throw new UnauthorizedError();
+  if (res.status === 401) {
+    forgetToken(token);
+    throw new UnauthorizedError();
+  }
   if (!res.ok) {
     const detail = await safeText(res);
     throw new Error(`${res.status} ${res.statusText}: ${detail}`);
@@ -97,14 +149,17 @@ async function safeText(res: Response): Promise<string> {
 
 /** API errors carry the server's plain-words message, so the UI can show it as is. */
 export async function send<T>(path: string, method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', payload: unknown = {}): Promise<T> {
-  const token = sessionStorage.getItem(TOKEN_KEY);
+  const token = currentToken();
   if (!token) throw new UnauthorizedError();
   const res = await reach(apiPath(path), {
     method,
     headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
     body: JSON.stringify(payload),
   });
-  if (res.status === 401) throw new UnauthorizedError();
+  if (res.status === 401) {
+    forgetToken(token);
+    throw new UnauthorizedError();
+  }
   const data = (await res.json().catch(() => ({}))) as { error?: string };
   if (!res.ok) throw new ApiError(data.error ?? `${res.status} ${res.statusText}`, res.status);
   return data as T;
@@ -113,11 +168,11 @@ export async function send<T>(path: string, method: 'POST' | 'PUT' | 'PATCH' | '
 /** Images can't send a header, so they carry the session token in the query string. */
 /** A file the squad made for a ticket (picture, recording, document), served only from the ticket's own folders. */
 export function ticketFileUrl(ticketId: string, file: string): string {
-  const token = sessionStorage.getItem(TOKEN_KEY) ?? '';
+  const token = currentToken() ?? '';
   return `${apiPath(`/api/v1/tickets/${encodeURIComponent(ticketId)}/file`)}?path=${encodeURIComponent(file.replace(/^file:\/\//, ''))}&t=${encodeURIComponent(token)}`;
 }
 
 export function assetUrl(path: string): string {
-  const token = sessionStorage.getItem(TOKEN_KEY) ?? '';
+  const token = currentToken() ?? '';
   return `${apiPath(path)}?t=${encodeURIComponent(token)}`;
 }

@@ -6,8 +6,9 @@ import open from 'open';
 import * as ui from '../ui/index.js';
 import { isInteractive } from '../ui/tty.js';
 import { buildPaths, findSquadRoot, type SquadPaths } from '../core/paths.js';
-import { startConsoleServer, type ConsoleServer } from '../console/server.js';
+import { startConsoleServer, startedToOutlive, type ConsoleServer } from '../console/server.js';
 import { printErrors } from '../core/app-log.js';
+import { installCrashNet } from '../core/crash-net.js';
 import { boardPaths } from '../board/store.js';
 import { isOwnFolder, prepareProject } from '../engine/setup.js';
 import { setupView } from '../board/first-run.js';
@@ -189,7 +190,9 @@ async function serveApp(a: { first?: SquadPaths; follow?: ReturnType<typeof boar
 
   // Errors also print here, in the terminal that runs the app, as they reach the app log.
   printErrors(true);
-  const server: ConsoleServer = await startConsoleServer({ paths: a.first, app: true, requestedPort, token, build });
+  const server: ConsoleServer = await startConsoleServer({ paths: a.first, app: true, requestedPort, token, build, keepOnHangup: startedToOutlive() });
+  // From here on, one error nobody caught no longer ends every project's squad.
+  installCrashNet();
   const info = { pid: process.pid, port: server.port, token, startedAt: new Date().toISOString(), version: readInstalledPackage().version, build };
   writeAppInfo(info);
   // The Update button: look for a new squad-kit now and once a day (Settings › About turns it off).

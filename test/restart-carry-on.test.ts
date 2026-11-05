@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { stepSeconds } from '../src/board/clock.js';
 import type { RunOptions, RunResult } from '../src/modules/claude/direct.js';
+import { freePort } from './support/tiny-app.js';
 
 /**
  * An interruption is not a failure, and nothing is left behind (the Mawid MA-5 incident). A board restart in the middle
@@ -77,16 +78,6 @@ function alive(pid: number): boolean {
   } catch {
     return false;
   }
-}
-
-function freePort(): Promise<number> {
-  return new Promise((resolve) => {
-    const srv = net.createServer();
-    srv.listen(0, '127.0.0.1', () => {
-      const p = (srv.address() as net.AddressInfo).port;
-      srv.close(() => resolve(p));
-    });
-  });
 }
 
 const SERVE = (p: number) => `require('http').createServer((q, s) => s.end('ok')).listen(${p}, '127.0.0.1')`;

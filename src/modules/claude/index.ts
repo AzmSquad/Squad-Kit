@@ -3,7 +3,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { AcpStartError, runAcp, type AcpLaunch } from '../../engine/acp-runner.js';
 import type { AgentResult, AgentRun, AiTool } from '../ai-tool/types.js';
-import { claudeBinary, claudeEnv, costSoFar, deniedTools, describeTool, ownWords, plainError, runClaude, sessionExists, toolVersion, type RunOptions } from './direct.js';
+import { claudeBinary, claudeEnv, costSoFar, deniedTools, describeTool, ownWords, passing, plainError, runClaude, sessionExists, toolVersion, type RunOptions } from './direct.js';
 import { claudeLimit } from './limit.js';
 import { CLAUDE_ENV, claudeBlocked, claudePrivateFiles, claudeSandbox, claudeSandboxSupport, withCap } from './sandbox.js';
 import { claudeBilling, claudeResume } from './billing.js';
@@ -53,7 +53,9 @@ const FILE_TOOLS = ['Edit', 'Write', 'MultiEdit'];
  */
 function protectedRules(names: string[]): string[] {
   return names.flatMap((n) => {
-    const pattern = n.endsWith('/') ? `**/${n}**` : `**/${n}`;
+    // A name that starts with "/" counts from the top of the copy: the rule is a little wider, and only ever on a hook's name.
+    const name = n.replace(/^\//, '');
+    const pattern = name.endsWith('/') ? `**/${name}**` : `**/${name}`;
     return [pattern, `//${pattern}`].flatMap((p) => FILE_TOOLS.map((t) => `${t}(${p})`));
   });
 }
@@ -234,6 +236,7 @@ export const claudeTool: AiTool = {
     }
   },
   ownWords,
+  passing,
   describe: describeTool,
   billing: () => claudeBilling(),
   resumeCommand: claudeResume,

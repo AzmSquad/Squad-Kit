@@ -5,7 +5,7 @@ import path from 'node:path';
 import yaml from 'js-yaml';
 import { squadHome } from '../core/home.js';
 import { readInstalledPackage } from '../core/package-info.js';
-import { recentLines } from '../core/app-log.js';
+import { recentLines, writeLog } from '../core/app-log.js';
 import { isSecretFile, knownSecrets, scrubSecrets } from '../core/scrub.js';
 import { zip, type ZipEntry } from '../core/zip.js';
 import { gitEnv } from './git.js';
@@ -266,10 +266,23 @@ export function reportEntries(input: ReportInput): ZipEntry[] {
 export function writeReport(input: ReportInput): ReportResult {
   const plan = planReport(input);
   const data = zip(reportEntries(input));
-  fs.mkdirSync(plan.folder, { recursive: true });
-  let name = plan.name;
-  for (let n = 2; fs.existsSync(path.join(plan.folder, name)); n += 1) name = plan.name.replace(/\.zip$/, `-${n}.zip`);
-  const file = path.join(plan.folder, name);
-  fs.writeFileSync(file, data);
-  return { ...plan, name, file, bytes: data.length };
+  // Downloads may refuse (a Mac's privacy settings, a full disk): squad-kit's own folder then holds it, and the answer says where.
+  const folders = [...new Set([plan.folder, path.join(squadHome(), 'reports')])];
+  for (const folder of folders) {
+    try {
+      fs.mkdirSync(folder, { recursive: true });
+      let name = plan.name;
+      for (let n = 2; fs.existsSync(path.join(folder, name)); n += 1) name = plan.name.replace(/\.zip$/, `-${n}.zip`);
+      const file = path.join(folder, name);
+      fs.writeFileSync(file, data);
+      return { ...plan, folder, name, file, bytes: data.length };
+    } catch (err) {
+      if (folder === folders.at(-1)) {
+        // Where it tried and why are for engineers: the person gets what to do.
+        writeLog({ level: 'error', text: `Could not save a problem report in ${folders.join(' or in ')}: ${(err as NodeJS.ErrnoException).code ?? (err as Error).message}` });
+        throw new Error('squad-kit could not save the report. Check that the disk has room, then try again. An engineer can see why in squad-kit\'s log.');
+      }
+    }
+  }
+  throw new Error('squad-kit could not save the report.');
 }

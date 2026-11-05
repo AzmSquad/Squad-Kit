@@ -87,6 +87,10 @@ describe('a stop shows only squad-kit’s own words', () => {
     expect(recentLines(60_000).join('\n')).toContain('status code 529');
 
     const t2 = ticket();
+    // Its new tries are used up: a problem that passes by itself waits first (test/ways-on.test.ts).
+    updateTicket(bp, t2.id, (x) => {
+      x.blips = 4;
+    });
     result = { ok: false, error: 'Claude is busy right now. Wait a few minutes, then press Try again.', detail: 'API Error: 529 overloaded' };
     s.launch(t2.id, () => s.review(t2.id));
     await vi.waitFor(() => expect(s.running.has(t2.id)).toBe(false), { timeout: 10_000 });
@@ -97,8 +101,8 @@ describe('a stop shows only squad-kit’s own words', () => {
     expect(ownRunWords('You stopped the squad.')).toBe(true);
     expect(ownRunWords('It took longer than 20 minutes, so squad-kit stopped it.')).toBe(true);
     expect(ownRunWords('Claude Code did not start in 30 seconds. Check that it opens in a terminal and is logged in, then press Try again.')).toBe(true);
-    expect(ownRunWords("Claude Code is not logged in. Run `claude` in a terminal, log in, then press Try again.", claudeTool)).toBe(true);
-    expect(ownRunWords("Claude Code is not logged in. Run `claude` in a terminal, log in, then press Try again.")).toBe(false);
+    expect(ownRunWords("Claude Code is signed out on this computer. Open the Terminal app, type claude and press Enter, then sign in when it asks. Then press Try again.", claudeTool)).toBe(true);
+    expect(ownRunWords("Claude Code is signed out on this computer. Open the Terminal app, type claude and press Enter, then sign in when it asks. Then press Try again.")).toBe(false);
     for (const raw of ['TypeError: x is not a function', 'write EPIPE', 'Error: spawn claude ENOENT', 'The agent stopped early (end_of_stream).']) expect(ownRunWords(raw, claudeTool), raw).toBe(false);
   });
 });

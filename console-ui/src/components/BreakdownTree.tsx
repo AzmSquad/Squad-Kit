@@ -26,6 +26,8 @@ import { usePrefs } from '../lib/prefs';
 import { shellQuote } from '../lib/text';
 import { needOptions } from './BreakdownDialogs';
 import { Cmd } from './ui';
+import { clearDraft, draftKey, readDraft, useDraft, writeDraft } from '../lib/drafts';
+import { PROJECT } from '../api/client';
 
 /**
  * The breakdown as a tree: epics, features and stories with their level, needs, place in the BRD and size, and once
@@ -328,11 +330,19 @@ interface StoryDraft {
 const draftOf = (s: BreakdownStory): StoryDraft => ({ title: s.title, story: s.story, criteria: s.criteria.map((c) => ({ ...c })), size: s.size, needs: [...s.dependsOn] });
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
-/** The panel's own copy of a part: it follows the server until the person types, and comes back after Save. */
-function useDraft<T>(key: string, server: T): [T, (d: T | ((x: T) => T)) => void, boolean, () => void] {
-  const [d, setD] = useState(server);
+/**
+ * The panel's own copy of a part: it follows the server until the person types, and comes back after Save. What is typed
+ * stays on this computer until it is saved or undone, so another row, the cross or a reload lose nothing.
+ */
+function usePanelDraft<T>(scope: string, key: string, server: T): [T, (d: T | ((x: T) => T)) => void, boolean, () => void] {
+  const kept = draftKey(PROJECT, scope, `panel-${key}`);
+  const [d, setD] = useState<T>(() => readDraft<T>(kept) ?? server);
   const [from, setFrom] = useState({ key, server });
   const dirty = !same(d, from.server);
+  useEffect(() => {
+    if (dirty && key === from.key) writeDraft(kept, d);
+    else clearDraft(kept);
+  }, [kept, d, dirty]);
   useEffect(() => {
     if (key !== from.key) {
       setD(server);
@@ -358,7 +368,7 @@ function StoryPanel({ v, f, onClose, onSelect, onAsk, onOpenRef, onOpenTicket }:
   const busy = beingRedone(v, s.key);
   const editable = canEdit(v) && !started && !busy;
   const server = useMemo(() => draftOf(s), [s]);
-  const [d, setD, dirty, reset] = useDraft(s.key, server);
+  const [d, setD, dirty, reset] = usePanelDraft(v.id, s.key, server);
   const [removing, setRemoving] = useState(false);
   // A Save found a "done when" check half written: it is marked where it is until it is finished or removed.
   const [tried, setTried] = useState(false);
@@ -602,7 +612,7 @@ function GroupPanel({ v, f, onClose, onSelect, onAsk, onOpenRef, onOpenTicket, o
   const item = f.item as BreakdownEpic | BreakdownFeature;
   const about = epic ? ((item as BreakdownEpic).goal ?? '') : ((item as BreakdownFeature).summary ?? '');
   const server = useMemo(() => ({ title: item.title, about }), [item.title, about]);
-  const [d, setD, dirty, reset] = useDraft(item.key, server);
+  const [d, setD, dirty, reset] = usePanelDraft(v.id, item.key, server);
   const [removing, setRemoving] = useState(false);
   const busy = beingRedone(v, item.key);
   const stories = storiesUnder(item);
@@ -721,8 +731,8 @@ function GroupPanel({ v, f, onClose, onSelect, onAsk, onOpenRef, onOpenTicket, o
 export function DecidedEntry({ v, d, compact, onSelect, onOpenTicket }: { v: BreakdownView; d: Decided; compact?: boolean; onSelect?(key: string): void; onOpenTicket?(id: string): void }) {
   const act = useReqAct();
   const { toast } = usePrefs();
-  const [editing, setEditing] = useState(false);
-  const [text, setText] = useState('');
+  const [text, setText] = useDraft(d.ticket ?? v.id, `decided-${d.id}`, '');
+  const [editing, setEditing] = useState(Boolean(text));
   const path = d.ticket ? `/api/v1/tickets/${encodeURIComponent(d.ticket)}/decided/${d.id}` : `${base(v.id)}/decided/${d.id}`;
   const command = d.ticket ? `squad decided ${d.ticket} ${d.id} ${shellQuote(text.trim() || '<text>')}` : `squad requirements decided ${v.id} ${d.id} ${shellQuote(text.trim() || '<text>')}`;
   const change = () =>

@@ -9,6 +9,7 @@ import { shellQuote } from '../lib/text';
 import { OpenInEditor } from './Changes';
 import { ReportButton } from './Report';
 import { Cmd } from './ui';
+import { useDraft } from '../lib/drafts';
 
 /**
  * Every error the person sees, one way (phase 10): what happened in plain words, what is safe, and the ways out as
@@ -82,11 +83,19 @@ export function ErrorCard({
  */
 export function StuckCard({ t, extra }: { t: Ticket; extra?: ReactNode }) {
   const act = useAct();
-  const [open, setOpen] = useState<'reason' | 'fix' | 'note' | null>(null);
-  const [text, setText] = useState('');
+  const [open, setOpen, clearOpen] = useDraft<'reason' | 'fix' | 'note' | null>(t.id, 'stuck-open', null);
+  const [text, setText, clearText] = useDraft(t.id, 'stuck-text', '');
   const buttons = wayButtons(t.stuck);
   const decide = (index: number, body: { note?: string; reason?: string }, done: string) =>
-    act.mutate({ path: `/api/v1/tickets/${t.id}/decide`, body: { choice: index, ...body }, done });
+    act.mutate(
+      { path: `/api/v1/tickets/${t.id}/decide`, body: { choice: index, ...body }, done },
+      {
+        onSuccess: () => {
+          clearOpen();
+          clearText();
+        },
+      },
+    );
   const retry = buttons.find((b) => b.way === 'retry');
   const pending = open === 'reason' || open === 'fix' ? buttons.find((b) => b.needs === open) : undefined;
   const note = open === 'note' && text.trim() ? text.trim() : '';
@@ -152,8 +161,8 @@ export function StuckCard({ t, extra }: { t: Ticket; extra?: ReactNode }) {
       )}
       {open === 'reason' && pending && (
         <>
-          <div className="lbl">Why continue anyway?</div>
-          <textarea className="waynote" rows={2} value={text} onChange={(e) => setText(e.target.value)} placeholder="For example: the failing test is broken on main too, fixed in SK-160" />
+          <div className="lbl">{pending.way === 'skip-hooks' ? 'Why save it without the check?' : 'Why continue anyway?'}</div>
+          <textarea className="waynote" rows={2} value={text} onChange={(e) => setText(e.target.value)} placeholder={pending.way === 'skip-hooks' ? 'For example: the check needs a licence this laptop does not have' : 'For example: the failing test is broken on main too, fixed in SK-160'} />
           <p className="note" style={{ fontSize: 12.5 }}>Only you can do this. Your reason shows on the ticket, the pull request and the release notes.</p>
           <div className="errcard-confirm">
             <button className="btn pri" disabled={!text.trim() || act.isPending} onClick={() => decide(pending.index, { reason: text }, 'Decided. The squad carries on.')}>

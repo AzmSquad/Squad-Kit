@@ -31,6 +31,7 @@ export function leaveOutProblem(root: string, base: string, tickets: Ticket[]): 
   try {
     for (const { t, merge } of found) {
       try {
+        // A check in a throwaway copy, and later a revert of accepted work: the project's hooks have nothing to say on it.
         git(dir, [...commitArgsFor(dir), 'revert', '--no-edit', '-m', '1', merge!]);
       } catch {
         git(dir, ['revert', '--abort'], { allowFail: true });
@@ -56,7 +57,7 @@ export function leaveOut(dir: string, root: string, base: string, tickets: Ticke
       throw new Error(`${t.id} cannot be left out of ${version}: work merged into ${base} after it changed the same lines. Put it back, or take that work out too.`);
     }
     if (!git(dir, ['status', '--porcelain'], { allowFail: true })) continue;
-    git(dir, [...commitArgsFor(dir), 'commit', '--no-verify', '-m', `Leave ${t.id} out of ${version}: it goes out with the next release`]);
+    git(dir, [...commitArgsFor(dir), 'commit', '-m', `Leave ${t.id} out of ${version}: it goes out with the next release`]);
     done.push(git(dir, ['rev-parse', 'HEAD']));
     log.push({ ok: true, text: `Left ${t.id} ${t.title} out: its code stays in ${base} and goes out with the next release` });
   }
@@ -72,6 +73,6 @@ export function bringBack(dir: string, reverts: string[], version: string, base:
       git(dir, ['revert', '--abort'], { allowFail: true });
       throw new Error(`The work left out of ${version} could not come back into ${base}: ${(err as Error).message}`);
     }
-    if (git(dir, ['status', '--porcelain'], { allowFail: true })) git(dir, [...commitArgsFor(dir), 'commit', '--no-verify', '-m', `Bring back the work left out of ${version}`]);
+    if (git(dir, ['status', '--porcelain'], { allowFail: true })) git(dir, [...commitArgsFor(dir), 'commit', '-m', `Bring back the work left out of ${version}`]);
   }
 }

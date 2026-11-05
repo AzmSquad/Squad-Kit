@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { LAYOUT, boardExists, boardPaths, listDecisions, listTickets, newProjectId, readMeta, writeMeta, type BoardPaths } from '../board/store.js';
 import { DEFAULT_CONFIG, loadConfig, saveConfig } from '../core/config.js';
-import { SQUAD_DIR, buildPaths, type SquadPaths } from '../core/paths.js';
+import { SQUAD_DIR, buildPaths, type SquadPaths, isOwnFolder } from '../core/paths.js';
 import { openBoard } from '../board/move.js';
 import type { BoardMeta } from '../board/types.js';
 import { AI_TOOLS } from '../modules/registry.js';
@@ -231,11 +231,7 @@ export function requireGit(): void {
   }
 }
 
-/** A home folder or the disk's top folder is never set up: a project needs its own folder. */
-export function isOwnFolder(dir: string): boolean {
-  const abs = path.resolve(dir);
-  return abs !== path.resolve(os.homedir()) && abs !== path.parse(abs).root;
-}
+export { isOwnFolder };
 
 export interface ReadyProject {
   paths: SquadPaths;
@@ -252,8 +248,9 @@ export interface ReadyProject {
  */
 export function prepareProject(root: string): ReadyProject {
   const did: string[] = [];
+  // Even with a `.squad` there already: setting up here would put the whole folder into git.
+  if (!isOwnFolder(root)) throw new Error("squad-kit works inside a project folder. Pick the project's own folder, or a new, empty one.");
   if (!fs.existsSync(path.join(root, SQUAD_DIR, 'config.yaml'))) {
-    if (!isOwnFolder(root)) throw new Error("squad-kit works inside a project folder. Pick the project's own folder, or a new, empty one.");
     setupProject(root);
     did.push('Project files: .squad/ with the settings and a README');
   }

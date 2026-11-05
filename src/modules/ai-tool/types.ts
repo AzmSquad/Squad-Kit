@@ -41,6 +41,8 @@ export interface SandboxAsk {
   noRead: string[];
   /** Folders inside those that the step still needs: the ticket's copy, its attachments. */
   read: string[];
+  /** Files in a place it may write that it may never change: the copy's `.git`, which says where git's settings are. */
+  noWrite: string[];
   /** The only hosts its commands may reach; "*.example.com" covers every subdomain. */
   hosts: string[];
 }
@@ -183,6 +185,8 @@ export interface AgentResult {
   limit?: UsageLimit;
   /** Set when the run stopped on one of its caps. The work so far is kept; the run can go on with more. */
   capped?: { by: 'turns' | 'spend' };
+  /** What the run reported could not be saved (a full disk, a folder that moved), so it was stopped. The exact error. */
+  saveError?: Error;
   /** Left out when the tool said nothing about what the run used. */
   usage?: AgentUsage;
 }
@@ -229,6 +233,8 @@ export interface AiTool {
    * the person's stop as they are (engine/plain-stop.ts).
    */
   ownWords?(said: string): boolean;
+  /** True when these words are about a network or service problem that passes by itself, so the step just runs again later. */
+  passing?(said: string): boolean;
   /** One plain-words line for what a tool call is doing, or null to leave it out. */
   describe(e: ToolEvent, cwd: string): string | null;
   /** How the person pays, as the tool says without running a model, or null when it cannot tell. */

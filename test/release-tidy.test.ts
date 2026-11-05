@@ -265,7 +265,7 @@ describe('a release cut off by a restart', () => {
     const mainBefore = sh('git rev-parse main', project);
     const remoteBefore = sh('git rev-parse main', remote);
     const marker = path.join(tmp, 'pushing');
-    hook(path.join(project, '.git', 'hooks', 'pre-push'), marker);
+    hook(path.join(remote, 'hooks', 'pre-receive'), marker);
     await releaseCutAt(marker);
 
     // Half-done: a tag here, a release branch, the journal; the remote has nothing.
@@ -273,7 +273,7 @@ describe('a release cut off by a restart', () => {
     expect(readJournal(bp)?.version).toBe('v1.5.0');
     expect(sh('git rev-parse main', remote)).toBe(remoteBefore);
 
-    fs.rmSync(path.join(project, '.git', 'hooks', 'pre-push'));
+    fs.rmSync(path.join(remote, 'hooks', 'pre-receive'));
     const settled = await resumeCutRelease(bp);
     expect(settled).toMatchObject({ version: 'v1.5.0', status: 'draft', tickets: ['AP-1'] });
     expect(settled!.log?.some((l) => l.text.startsWith('Nothing had reached origin yet, so squad-kit undid it'))).toBe(true);

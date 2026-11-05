@@ -18,7 +18,7 @@ export interface ClaudeSandbox {
   autoAllowBashIfSandboxed: boolean;
   allowUnsandboxedCommands: boolean;
   network: { allowedDomains: string[]; strictAllowlist: boolean; allowLocalBinding?: boolean };
-  filesystem: { allowWrite: string[]; denyRead: string[]; allowRead: string[] };
+  filesystem: { allowWrite: string[]; denyWrite: string[]; denyRead: string[]; allowRead: string[] };
 }
 
 /** Claude Code's own sign-in and the person's other conversations: Claude Code reads them, its commands never need to. */
@@ -57,7 +57,7 @@ export function claudeSandbox(ask: SandboxAsk, platform: NodeJS.Platform = proce
       ...(platform === 'darwin' ? { allowLocalBinding: true } : {}),
     },
     // No command runs outside it: pictures and the app go through squad-kit's own tools instead.
-    filesystem: { allowWrite: ask.write, denyRead: [...new Set([...ask.noRead, ...claudePrivate(home)])], allowRead: ask.read },
+    filesystem: { allowWrite: ask.write, denyWrite: ask.noWrite, denyRead: [...new Set([...ask.noRead, ...claudePrivate(home)])], allowRead: ask.read },
   };
 }
 

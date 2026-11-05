@@ -23,6 +23,7 @@ import {
   changeParts,
   changeSummary,
   changeWork,
+  endSaves,
   needsSpec,
   openChange,
   planSnapshot,
@@ -51,7 +52,7 @@ import { ALL_TOOLS, AgentWindow, toolsFor, tooManyMistakesWords, tooManyWords, t
 import { closeWindow, openWindow, windowAccess } from './window-server.js';
 import { TECHNICAL_TRIES, askText, judgeQuestion, judgeReply, questionBackPrompt, refusedAskLine, refusedReplyLine, stoppedQuestion } from './question-filter.js';
 import { TECHNICAL_STOP, ownRunWords, ownWords } from './plain-stop.js';
-import { addSnapshot, addWorktree, changedTracked, commitAll, dropSnapshot, git, isAncestor, isLockFile, latestBase, putBackTracked } from './git.js';
+import { addSnapshot, addWorktree, changedTracked, commitAll, conventionalWords, dropSnapshot, git, isAncestor, isLockFile, latestBase, putBackTracked, repairCopyLink, settleCopy } from './git.js';
 import * as P from './prompts.js';
 import { baseCommits, findNestedRepos, repoFor, rulesFiles } from './repos.js';
 import { flushTracker, publishTicket, recheckMerge, syncWiki, trackerDue } from './sync.js';
@@ -73,14 +74,17 @@ import { howPaid } from '../board/payment.js';
 import { parallelLimit } from '../core/settings.js';
 import { answerProblem, dependsProblem, scanProblem } from './answers.js';
 import { checkLane, watchLane, type Lane } from './lane.js';
+import { hookFiles, isHookFile } from './hook-files.js';
 import { endStep, nextPart, pauseClock, resumeClock, slowStep, startStep, stepDoing, timedStep } from '../board/clock.js';
 import { readUsual } from '../board/usual.js';
 import { QUEUED, queuedLine } from '../board/now.js';
 import { watchPort } from './free-port.js';
 import { LimitReached, activePause, chatWaitNote, isLimitText, limitText, startPause, type LimitPause } from './usage-limit.js';
+import { forgetSaveTrouble, isSaveTrouble, noteSaveTrouble, stillHeld, endTurnTrouble, noteTurnTrouble } from './save-trouble.js';
+import { fileTroubleWords, isDiskTrouble } from '../core/file-trouble.js';
 import { explainError, StepError } from '../board/problem.js';
 import { readAgainDone, readIdea, readSaid, saveBlueprintParts, talkReply } from './onboard-live.js';
-import { readFailed, readStarted, readingNow, resumeSetup, runSetupProof, saveScan, type ScanAnswer } from './onboard.js';
+import { readFailed, readStarted, readingNow, resumeSetup, runSetupProof, saveScan, settleSetupStop, type ScanAnswer } from './onboard.js';
 import { nextProofStep } from '../board/setup-state.js';
 import { writeLog, type LogLevel } from '../core/app-log.js';
 import { designDepends, holdBuild, wakeIfReady } from '../board/depends.js';
@@ -93,7 +97,7 @@ import { appPortVariables } from './port-vars.js';
 import { judgeTestChange } from './test-change.js';
 import { trackTask } from './process-group.js';
 import { endPid, nextFreePort, portTaken, squadKitOn } from './run-app.js';
-import { APPROVING, NO_QUESTIONS, acceptByItself, acceptNext, addDecided, afterPullRequest, askWords, cleanSources, mergeWait, mergesByItself, resumeAccept, waitForLanding } from '../board/auto.js';
+import { APPROVING, NO_QUESTIONS, acceptByItselfBeside, acceptNext, addDecided, afterPullRequest, askWords, cleanSources, mergeWait, mergesByItself, resumeAccept, waitForLanding } from '../board/auto.js';
 import * as A from './auto-prompts.js';
 import type { DecidedBy } from '../board/requirements-types.js';
 import { breakdownJobs, holdBreakdownJob } from '../board/requirements.js';
@@ -174,6 +178,15 @@ export function queuedText(running: string[], limit: number): string {
   return queuedLine(running.length, limit);
 }
 
+/** A step stopped on a network or service problem that usually passes by itself. */
+class PassingTrouble extends StepError {}
+
+/** How long a step waits before each new try after such a problem: about 15 minutes in all, then a plain stop. */
+const BLIP_WAITS_MIN = [1, 2, 4, 8];
+
+/** Turns of a squad that failed in a row before the board says so: one can be bad luck, a few mean nothing moves. */
+export const TURNS_BEFORE_BANNER = 3;
+
 export class LiveSquad {
   private running = new Set<string>();
   private timer: NodeJS.Timeout | null = null;
@@ -183,6 +196,8 @@ export class LiveSquad {
   /** Builds by itself: merges that wait (a pull request's approver, the person's checkout), and when each was looked at. */
   private mergeLooks = new Map<string, number>();
   private closing = false;
+  /** Turns of the squad in a row that failed. */
+  private turnsFailed = 0;
   private dog = new Watchdog();
   private lastWatch = 0;
   private lastPickUp = 0;
@@ -203,9 +218,10 @@ export class LiveSquad {
   start(intervalMs = 1000): () => void {
     this.resumeAfterRestart();
     squads.add(this);
-    this.timer = setInterval(() => this.tick(), intervalMs);
+    this.timer = setInterval(() => this.safeTick(), intervalMs);
     return () => {
       // Closing the board: stop running steps quietly; they resume when the board opens again.
+      forgetSaveTrouble(this.bp);
       squads.delete(this);
       waiting.delete(this);
       this.closing = true;
@@ -213,6 +229,7 @@ export class LiveSquad {
       // Cut off, not failed: each step carries on from where it was when the board opens again (engine/interrupt.ts).
       for (const id of this.ticketIds()) this.cutOff(id, 'restart');
       for (const c of this.stops.values()) c.abort();
+      endSaves(this.bp);
       // What their runs leave behind in squad-kit's copies stops too, once they have ended. A restart waits for it.
       if (this.isLive()) trackTask(this.clearAfterClose());
     };
@@ -271,6 +288,20 @@ export class LiveSquad {
     return false;
   }
 
+  /** The project's folder moved: an open ticket's copy gets its link to the repo back, so its work stays in reach. */
+  private mendCopy(t: Ticket): boolean {
+    if (!t.worktree || t.stage === 'done' || !fs.existsSync(t.worktree)) return false;
+    const repo = path.join(projectRoot(this.bp), repoFor(readMeta(this.bp), t).path);
+    if (git(t.worktree, ['rev-parse', '--git-dir'], { allowFail: true })) {
+      settleCopy(t.worktree);
+      return false;
+    }
+    const mended = repairCopyLink(repo, t.worktree);
+    this.log(mended ? 'info' : 'warn', mended ? `The project's folder moved; reconnected the copy at ${t.worktree}` : `The copy at ${t.worktree} has lost its link to the repo, and git could not repair it`, t.id);
+    if (mended) this.update(t.id, (x) => addActivity(x, 'squad', "The project's folder moved, so squad-kit reconnected this ticket's copy of the code"));
+    return mended;
+  }
+
   /** A step that was running when the console stopped is picked up again right away. */
   private resumeAfterRestart(): void {
     try {
@@ -279,6 +310,7 @@ export class LiveSquad {
       void resumeCutRelease(this.bp).then((r) => r && this.log('warn', `Settled ${r.version}, which a restart cut off: ${r.status === 'released' ? 'finished' : 'undone'}`));
       resumeSetup(this.bp);
       for (const t of listTickets(this.bp)) {
+        this.mendCopy(t);
         if (t.squad && Date.parse(t.squad.nextAt) > Date.now()) {
           // A board that ended without closing (a crash, a kill) kept no record that it cut the step off.
           const cut = !t.interrupted && Date.parse(t.squad.nextAt) - Date.now() > 10 * 60_000;
@@ -297,7 +329,53 @@ export class LiveSquad {
     }
   }
 
+  /** One turn. Whatever it finds wrong stays inside this project: nothing above a timer would catch it. */
+  private safeTick(): void {
+    try {
+      this.tick();
+      this.turnsFailed = 0;
+      endTurnTrouble(this.bp);
+    } catch (err) {
+      if (this.holdForSaving(err)) return;
+      this.turnsFailed += 1;
+      // Said on the first one and when the banner comes: a turn runs every second.
+      if (this.turnsFailed === 1 || this.turnsFailed === TURNS_BEFORE_BANNER) this.log('error', `A turn of the squad failed: ${(err as Error).stack ?? (err as Error).message}`);
+      if (this.turnsFailed >= TURNS_BEFORE_BANNER) noteTurnTrouble(this.bp, err);
+    }
+  }
+
+  /**
+   * True when saving does not work right now, so a failure says nothing about the work: the squad holds this project
+   * until a test write gets through, with one line in the log and one banner on every page.
+   */
+  private holdForSaving(err: unknown): boolean {
+    if (!isSaveTrouble(this.bp, err)) return false;
+    if (noteSaveTrouble(this.bp, err)) this.log('error', `squad-kit cannot save its files for this project, so its squad waits: ${(err as Error).message}`);
+    return true;
+  }
+
+  /** A held squad starts nothing. When saving works again, what the trouble cut off carries on. */
+  private savingHeld(): boolean {
+    const { held, fixed } = stillHeld(this.bp);
+    if (fixed) this.carryOnAfterTrouble();
+    return held;
+  }
+
+  private carryOnAfterTrouble(): void {
+    this.log('info', 'squad-kit can save its files again, so the squad carries on');
+    for (const t of listTickets(this.bp)) {
+      if (t.squad && !this.running.has(t.id) && Date.parse(t.squad.nextAt) > Date.now()) {
+        this.update(t.id, (x) => {
+          if (x.squad) x.squad.nextAt = now();
+        });
+      }
+    }
+  }
+
   private tick(): void {
+    // A squad that starts nothing right now never holds a free place back from the others.
+    waiting.delete(this);
+    if (this.savingHeld()) return;
     if (!boardExists(this.bp)) return;
     let meta: BoardMeta;
     try {
@@ -309,7 +387,6 @@ export class LiveSquad {
     this.watch();
     this.pickUp();
     const limit = parallelLimit(meta.parallel);
-    waiting.delete(this);
     // The AI account's usage limit: nothing new starts in any project until it resets (E5).
     const pause = activePause();
     if (pause) limitSeen = pause.until;
@@ -321,6 +398,11 @@ export class LiveSquad {
     if (meta.setup?.stopping) {
       this.stops.get('__scan')?.abort();
       this.stops.get('__setup')?.abort();
+      // Nothing runs, so nothing would answer the Stop (the usage limit holds the read).
+      if (!this.running.has('__scan') && !this.running.has('__setup')) {
+        settleSetupStop(this.bp);
+        return;
+      }
     }
     // "Something is wrong": the Architect answers the person beside everything else.
     this.talk();
@@ -510,6 +592,41 @@ export class LiveSquad {
     }
   }
 
+  /**
+   * The network or the AI service had a problem: it says nothing about the work and usually passes by itself, so the
+   * step runs again a little later, with no stop card and no failed try. Only when it does not pass is it a stop.
+   */
+  private waitOutBlip(id: string, phase: string, err: PassingTrouble): void {
+    const tries = readTicket(this.bp, id)?.blips ?? 0;
+    const minutes = BLIP_WAITS_MIN[tries];
+    if (minutes === undefined) {
+      this.update(id, (x) => delete x.blips);
+      return this.fail(id, err.message, phase, err.detail);
+    }
+    this.log('warn', `A network or service problem at ${phase}, so it runs again in ${minutes} min: ${err.detail ?? err.message}`, id);
+    try {
+      this.update(id, (x) => {
+        if (x.takenOver || (x.chat?.open && !x.chat.beside)) return;
+        // The step goes on where the problem cut it off, and the try it cut off does not count.
+        let next = phase;
+        if (phase === 'review' && x.reviewNotes?.length) next = 'review-fix';
+        else if (phase === 'review' && x.reviewRound) x.reviewRound -= 1;
+        if (phase === 'test') {
+          x.tries = Math.max(0, (x.tries ?? 0) - 1);
+          x.fails = Math.max(0, (x.fails ?? 0) - 1);
+        }
+        x.blips = tries + 1;
+        x.live = false;
+        x.squad = { ...(x.squad ?? {}), phase: next, nextAt: new Date(Date.now() + minutes * 60_000).toISOString() };
+        x.status = `Waiting for the connection. Tries again in ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
+        delete x.quiet;
+        if (!tries) addActivity(x, 'squad', 'The connection or the AI service had a problem, so squad-kit tries again by itself. Not a failed try');
+      });
+    } catch {
+      // The ticket was removed meanwhile.
+    }
+  }
+
   private launch(key: string, job: () => Promise<void>): void {
     if (holding) return;
     // The Architect's reads beside the tickets, the chat answers and the overview's talk wait for the usage limit too.
@@ -526,24 +643,30 @@ export class LiveSquad {
         // The step got through: an interruption of it is over.
         try {
           if (!key.startsWith('__') && phase && carriesOn(readTicket(this.bp, key) ?? {}, phase)) updateTicket(this.bp, key, (x) => delete x.interrupted);
+          if (!key.startsWith('__') && readTicket(this.bp, key)?.blips) updateTicket(this.bp, key, (x) => delete x.blips);
         } catch {
           // The ticket was removed meanwhile.
         }
       })
       .catch((err: Error) => {
-        if (key.startsWith('__') || this.closing) return;
+        if (this.closing) return;
+        // A full disk or a folder that moved: the stop card could not be saved either, and the next turn would start
+        // the same step again. The squad holds this project and the step carries on when saving works again.
+        if (this.holdForSaving(err)) return;
+        if (key.startsWith('__')) return;
         // Stopped for a delete: no stuck card on a ticket that is going.
         if (readTicket(this.bp, key)?.deleting) return;
         if (readTicket(this.bp, key)?.stopRequested) return this.stopped(key, phase);
         if (err instanceof WaitingForYou) return;
         if (err instanceof LimitReached) return this.waitForLimit(key, phase ?? 'analyst-read', err.pause);
         if (err instanceof CapReached) return this.capPause(key, phase ?? 'analyst-read', err);
+        if (err instanceof PassingTrouble) return this.waitOutBlip(key, phase ?? 'analyst-read', err);
         // The computer slept and the run did not get through: that says nothing about the work, so the step carries on.
         if (err instanceof CutOff || sleptSince(mark)) return this.carryOnAfterSleep(key, phase ?? 'analyst-read');
         const { what, detail } = explainError(err);
         // Only squad-kit's own plain words reach the person (engine/plain-stop.ts): anything else is one plain
         // sentence, with the exact words for engineers.
-        const own = ownWords(err);
+        const own = isDiskTrouble(err) ? fileTroubleWords(err) : ownWords(err);
         if (own) this.fail(key, own, phase ?? 'analyst-read', detail);
         else this.fail(key, TECHNICAL_STOP, phase ?? 'analyst-read', [what, detail].filter(Boolean).join('\n'));
       })
@@ -1019,7 +1142,7 @@ export class LiveSquad {
       ...o,
       ...watch,
       secretFiles: secretFiles(this.bp),
-      protectedFiles: this.protectedFiles(),
+      protectedFiles: this.protectedFiles(opts.cwd),
       ...(Object.keys(runCaps).length ? { caps: runCaps } : {}),
       ...(sandbox ? { sandbox, onBlocked } : {}),
       ...(sandbox && cache ? { env: packageCacheEnv(cache) } : {}),
@@ -1120,6 +1243,8 @@ export class LiveSquad {
    * with the tool's exact words kept for engineers.
    */
   private runFailed(r: AgentResult, tool: AiTool, ticket: string | undefined, role: AgentRole): Error {
+    // What the run reported could not be saved: the exact error goes on, so the step can tell a full disk from a stop.
+    if (r.saveError) return r.saveError;
     if (r.limit) {
       const pause = startPause(r.limit, { project: this.projectName(), ...(ticket ? { ticket } : {}) });
       this.log('warn', `${r.limit.name}'s usage limit is reached${pause.resetsAt ? ` until ${pause.resetsAt}` : ''}. The queue waits until ${pause.until}`, ticket);
@@ -1131,6 +1256,7 @@ export class LiveSquad {
     const who = AGENTS.find((a) => a.role === role)?.name ?? role;
     const plain = ownRunWords(said, tool) ? said : `The ${who} stopped before it finished, on something technical. Press Try again.`;
     const detail = plain === said ? r.detail : [said, r.detail].filter(Boolean).join('\n');
+    if (tool.passing?.(said)) return new PassingTrouble(plain, detail);
     return new StepError(plain, detail);
   }
 
@@ -1176,9 +1302,12 @@ export class LiveSquad {
     writeLog({ level, project: this.projectName(), ...(ticket && !ticket.startsWith('__') ? { ticket } : {}), text });
   }
 
-  /** What no agent may change: squad-kit's own folder, and the instructions and settings every AI tool loads. */
-  private protectedFiles(): string[] {
-    return [...new Set([`${path.basename(this.bp.squadDir)}/`, ...AI_TOOLS.flatMap((t) => t.instructionFiles ?? [])])];
+  /**
+   * What no agent may change: squad-kit's own folder, the instructions and settings every AI tool loads, the project's
+   * commit hooks with their settings, wherever `cwd`'s repo keeps them, and the copy's link to git's folder.
+   */
+  private protectedFiles(cwd?: string): string[] {
+    return [...new Set([`${path.basename(this.bp.squadDir)}/`, '.git', ...AI_TOOLS.flatMap((t) => t.instructionFiles ?? []), ...hookFiles(cwd ?? projectRoot(this.bp))])];
   }
 
   /**
@@ -1191,8 +1320,14 @@ export class LiveSquad {
     const some = (files: string[]) => `${files.slice(0, 6).join(', ')}${files.length > 6 ? ` and ${files.length - 6} more` : ''}`;
     // The Reviewer only reads: what changed there is the app's work, while the Reviewer looked at it.
     if (c.putBack.length) this.update(id, (x) => addActivity(x, role, `${role === 'reviewer' ? 'The app changed files while the Reviewer looked at it' : `The ${who} changed files`}; squad-kit put them back: ${some(c.putBack)}`));
-    if (c.restored.length) {
-      this.update(id, (x) => addActivity(x, role, `The ${who} changed ${some(c.restored)}, which later steps read as instructions; squad-kit put ${c.restored.length === 1 ? 'it' : 'them'} back`));
+    const hookNames = hookFiles(lane.dir);
+    const hooks = c.restored.filter((f) => isHookFile(f, hookNames));
+    const instructions = c.restored.filter((f) => !hooks.includes(f));
+    if (instructions.length) {
+      this.update(id, (x) => addActivity(x, role, `The ${who} changed ${some(instructions)}, which later steps read as instructions; squad-kit put ${instructions.length === 1 ? 'it' : 'them'} back`));
+    }
+    if (hooks.length) {
+      this.update(id, (x) => addActivity(x, role, `The ${who} changed the project's own check (${some(hooks)}); squad-kit put it back. Changing that check stays with you or an engineer`));
     }
     if (c.moved) {
       this.update(id, (x) => addActivity(x, 'squad', `Stopped the ${who}: ${c.moved}`));
@@ -1653,7 +1788,7 @@ export class LiveSquad {
         return;
       case 'accept':
         // Builds by itself: the squad's own Looks right, once the checks, the review and the proof passed.
-        acceptByItself(this.bp, id);
+        await acceptByItselfBeside(this.bp, id, this.stops.get(id)?.signal);
         return;
       case 'build':
       case 'unstick':
@@ -2314,7 +2449,10 @@ export class LiveSquad {
     const root = projectRoot(this.bp);
     const meta = this.meta();
     let t = readTicket(this.bp, id)!;
-    if (t.worktree && fs.existsSync(t.worktree)) return t;
+    if (t.worktree && fs.existsSync(t.worktree)) {
+      this.mendCopy(t);
+      return t;
+    }
     const repo = repoFor(meta, t);
     // A new copy starts from the newest base, the remote's when the team moved it on; or from the work of the ticket
     // it depends on, when the person chose to build on that ticket's branch.
@@ -2433,7 +2571,7 @@ export class LiveSquad {
     const cwd = t.worktree!;
     const started = Date.now();
     let current = -1;
-    const lane = watchLane(cwd, this.protectedFiles());
+    const lane = watchLane(cwd, this.protectedFiles(cwd));
     const r = await this.runAgent({
         role: 'builder',
         step,
@@ -2509,6 +2647,8 @@ export class LiveSquad {
    * the computer sleeping under it.
    */
   private builderFailed(id: string, err: unknown): never {
+    // A network or service problem says nothing about the work: no failed try, so no higher level either.
+    if (err instanceof PassingTrouble) throw err;
     if (err instanceof WaitingForYou || err instanceof LimitReached || err instanceof CapReached) throw err;
     const ended = this.closing || Boolean(this.stops.get(id)?.signal.aborted) || Boolean(readTicket(this.bp, id)?.stopRequested);
     if (ended) throw err;
@@ -2721,7 +2861,7 @@ export class LiveSquad {
    * Brings the latest base into the ticket's copy. Work not saved yet is committed first, or git refuses to merge over
    * it; if the base still is not in the copy, the step fails with git's reason instead of saying it worked.
    */
-  private bringInBase(t: Ticket, base: string, remote?: string): { baseSha: string; clashes: string[]; from: string } {
+  private async bringInBase(t: Ticket, base: string, remote?: string): Promise<{ baseSha: string; clashes: string[]; from: string }> {
     const dir = t.worktree!;
     const unmerged = () => git(dir, ['diff', '--name-only', '--diff-filter=U'], { allowFail: true }).split('\n').filter(Boolean);
     const merging = () => git(dir, ['rev-parse', '-q', '--verify', 'MERGE_HEAD'], { allowFail: true }) !== '';
@@ -2731,7 +2871,16 @@ export class LiveSquad {
     if (merging() && unmerged().length) return { baseSha: git(dir, ['rev-parse', 'MERGE_HEAD']), clashes: unmerged(), from: latest.ref };
     const baseSha = latest.sha;
     leaveProjectFiles(this.bp, t, base);
-    commitAll(dir, `Work so far on ${t.title} (${t.id})`);
+    const guard = this.guardFor(dir, t.id);
+    const signal = this.stops.get(t.id)?.signal;
+    const saved = await commitAll(dir, `Work so far on ${t.title} (${t.id})`, conventionalWords('chore', `work so far on ${t.title}`, t.id), { ...(guard ? { guard } : {}), ...(signal ? { signal } : {}) });
+    if (saved.hookSaid !== undefined) {
+      this.log('warn', `The project's own check said no to the work so far: ${saved.hookSaid}`, t.id);
+      this.update(t.id, (x) => {
+        x.hookOwed = true;
+        addActivity(x, 'squad', "Saved the work so far without the project's own check, as it is not finished. The check runs on the whole change before it goes in");
+      });
+    }
     let why = 'git did not merge it';
     try {
       git(dir, ['merge', '--no-commit', '--no-ff', '-m', `Merge ${latest.ref} into ${t.branch ?? 'this ticket'}`, baseSha]);
@@ -2751,7 +2900,7 @@ export class LiveSquad {
     // it off: it carries on where it was. The base comes in again only when something new arrived on it since.
     const cut = t.builtPlan === planKey(t) && t.sessions?.build ? carriesOn(t, 'build') : undefined;
     const moved = !cut || this.baseMoved(t, base, remote);
-    const { baseSha, clashes, from } = moved ? this.bringInBase(t, base, remote) : { baseSha: t.baseCommit!, clashes: [] as string[], from: base };
+    const { baseSha, clashes, from } = moved ? await this.bringInBase(t, base, remote) : { baseSha: t.baseCommit!, clashes: [] as string[], from: base };
     const t1 = this.update(id, (x) => {
       x.baseCommit = baseSha;
       x.stage = 'implement';
@@ -2797,7 +2946,7 @@ export class LiveSquad {
   private async updateBase(id: string): Promise<void> {
     const t = await this.workspace(id);
     const base = repoFor(this.meta(), t).base;
-    const { baseSha, clashes, from } = this.bringInBase(t, base, await fetchBase(this.bp, t));
+    const { baseSha, clashes, from } = await this.bringInBase(t, base, await fetchBase(this.bp, t));
     this.update(id, (x) => {
       x.baseCommit = baseSha;
       x.stage = 'implement';
@@ -2829,7 +2978,7 @@ export class LiveSquad {
       x.tries = 0;
       x.fails = 0;
       x.reviewRound = 0;
-      x.steps = [...(x.steps ?? []), { title: `Fix: ${x.changeRequest ?? 'what you found'}`, status: 'doing' }];
+      x.steps = [...(x.steps ?? []), { title: `Fix: ${x.changeRequest?.split('\n')[0] ?? 'what you found'}`, status: 'doing' }];
     });
     await this.runBuilder(id, P.changeFixPrompt(t.changeRequest ?? ''), Boolean(t.sessions?.build));
     this.update(id, (x) => {
@@ -2907,8 +3056,12 @@ export class LiveSquad {
     };
     const mark = sleepMark();
     const guard = this.guardFor(t.worktree!, id);
+    // The checks run the Builder's code, which may write in its copy: never in the project's own check.
+    const hookLane = watchLane(t.worktree!, hookFiles(t.worktree!));
     commands = await this.tryTestChange(id, t.worktree!, commands, guard, mark);
     const results = await runChecks(t.worktree!, commands, onStart, { ...this.commandWatch(id), ...(guard ? { guard } : {}) });
+    const hooksBack = checkLane(hookLane).restored;
+    if (hooksBack.length) this.update(id, (x) => addActivity(x, 'squad', `The project's checks changed the check that runs on every save (${hooksBack.slice(0, 6).join(', ')}); squad-kit put it back`));
     // A check that needed a file outside its copy, which the guard blocked: one plain sentence, not a failed try.
     if (guard && !this.stops.get(id)?.signal.aborted) {
       const hit = results.find((r) => !r.ok && guardBlockedPath(r.output, guard));
@@ -3150,7 +3303,7 @@ export class LiveSquad {
     const goOn = answered && Boolean(t0.sessions?.review);
     // The Reviewer may look at the app's pages, and the app runs in the ticket's copy: what it changes there goes back.
     const rc = repoFor(meta, t0).commands;
-    const lane = rc.start?.trim() && rc.url?.trim() ? watchLane(t0.worktree!, this.protectedFiles(), true) : null;
+    const lane = rc.start?.trim() && rc.url?.trim() ? watchLane(t0.worktree!, this.protectedFiles(t0.worktree!), true) : null;
     const r = await this.runAgent({
         role: 'reviewer',
         step: 'review',
@@ -3267,7 +3420,7 @@ export class LiveSquad {
           bad = [...again.problems, ...still];
         }
       } catch (err) {
-        if (err instanceof LimitReached || err instanceof CapReached || err instanceof CutOff) throw err;
+        if (err instanceof LimitReached || err instanceof CapReached || err instanceof CutOff || err instanceof PassingTrouble) throw err;
         if (this.stops.get(id)?.signal.aborted) throw err;
         const e = explainError(err);
         // Only squad-kit's own plain words reach the person; the rest is for engineers.
@@ -3322,7 +3475,7 @@ export class LiveSquad {
       try {
         judged = await this.judge(id, round);
       } catch (err) {
-        if (err instanceof LimitReached || err instanceof CapReached || err instanceof CutOff) throw err;
+        if (err instanceof LimitReached || err instanceof CapReached || err instanceof CutOff || err instanceof PassingTrouble) throw err;
         if (this.stops.get(id)?.signal.aborted) throw err;
         return this.checkStop(id, err);
       }
@@ -3758,7 +3911,7 @@ export class LiveSquad {
 
   private async shoot(id: string, t: Ticket, when: 'before' | 'after', meta: BoardMeta, win: AgentWindow, appUrl: string, beside?: { cwd: string; job: string }, again: string[] = []): Promise<ShotRound> {
     // The Tester only reads the code: squad-kit takes the pictures. The lane still puts back anything changed.
-    const lane = watchLane(beside?.cwd ?? t.worktree!, this.protectedFiles(), true);
+    const lane = watchLane(beside?.cwd ?? t.worktree!, this.protectedFiles(beside?.cwd ?? t.worktree!), true);
     // A picture saved before this moment was not taken in this step.
     const since = Date.now();
     const prompt = P.proofPrompt(meta, t, when, this.ctx(t), appUrl, when === 'after' ? this.beforeSizes(t) : undefined);

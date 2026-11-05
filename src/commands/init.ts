@@ -3,7 +3,7 @@ import path from 'node:path';
 import { input, select, checkbox, confirm, password } from '@inquirer/prompts';
 import * as ui from '../ui/index.js';
 import { isInteractive } from '../ui/tty.js';
-import { buildPaths, SQUAD_DIR } from '../core/paths.js';
+import { buildPaths, SQUAD_DIR, NOT_A_PROJECT_FOLDER, isOwnFolder } from '../core/paths.js';
 import { ensureGitignore } from '../core/gitignore.js';
 import {
   DEFAULT_PLANNER_MAX_OUTPUT_TOKENS,
@@ -55,6 +55,7 @@ const AGENT_INSTALL: Record<AgentName, { subdir: string; srcDir: string }> = {
 
 export async function runInit(opts: InitOptions): Promise<void> {
   const root = process.cwd();
+  if (!isOwnFolder(root)) throw new Error(NOT_A_PROJECT_FOLDER);
   const paths = buildPaths(root);
 
   if (!opts.yes) {

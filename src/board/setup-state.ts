@@ -183,7 +183,12 @@ export function nextProofStep(s: SetupState | undefined): SetupStepId | null {
 
 /** The step running now, else the first one to do. */
 export function currentStep(s: SetupState): SetupStep | undefined {
-  return s.steps.find((x) => x.state === 'now') ?? s.steps.find((x) => x.state === 'todo' || x.state === 'stopped');
+  const running = s.steps.find((x) => x.state === 'now');
+  if (running) return running;
+  // The read failed: nothing after it can run, so that is where the setup stands, not at the next step to do.
+  const read = s.steps.find((x) => x.id === 'read');
+  if (read?.state === 'failed') return read;
+  return s.steps.find((x) => x.state === 'todo' || x.state === 'stopped');
 }
 
 /** Every step is over, whatever way: the overview can be checked. */

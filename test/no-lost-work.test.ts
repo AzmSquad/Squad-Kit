@@ -173,8 +173,8 @@ describe('a push that fails keeps the release open', () => {
 
     const release = await actions.releaseVersion(bp);
     expect(release.status).toBe('released');
-    expect(release.unpushed).toEqual([{ repo: '.', remote: 'origin', base: 'main', commit: expect.any(String), tag: 'v1.5.0', error: expect.stringMatching(/git push failed/) }]);
-    expect(release.log?.find((l) => !l.ok)?.text).toMatch(/Push to origin failed, so the release is only on this computer: .*squad release v1\.5\.0 --push-again/);
+    expect(release.unpushed).toEqual([{ repo: '.', remote: 'origin', base: 'main', commit: expect.any(String), tag: 'v1.5.0', error: expect.stringMatching(/git push failed/), plain: expect.stringMatching(/could not reach your team's shared copy of the code/) }]);
+    expect(release.log?.find((l) => !l.ok)?.text).toMatch(/could not reach your team's shared copy of the code, so the release is only on this computer\..*squad release v1\.5\.0 --push-again/);
     const head = release.unpushed![0]!.commit;
     // Kept on this computer only, like the log.
     expect(readRelease(bp, 'v1.5.0')!.unpushed).toHaveLength(1);
@@ -286,7 +286,7 @@ describe('only a real clash is a clash', () => {
       // git 2.30 has no `merge-tree --write-tree`: it says so and exits 129.
       fs.writeFileSync(
         path.join(bin, 'git'),
-        `#!/bin/sh\ncase "$1" in\n  --version) echo "git version 2.30.1"; exit 0;;\n  merge-tree) echo "error: unknown option \\\`write-tree'" >&2; exit 129;;\nesac\nexec "${real}" "$@"\n`,
+        `#!/bin/sh\nfor a in "$@"; do\n  case "$a" in\n    --version) echo "git version 2.30.1"; exit 0;;\n    merge-tree) echo "error: unknown option \\\`write-tree'" >&2; exit 129;;\n  esac\ndone\nexec "${real}" "$@"\n`,
         { mode: 0o755 },
       );
       process.env.PATH = `${bin}${path.delimiter}${path0}`;

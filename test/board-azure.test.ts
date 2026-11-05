@@ -215,6 +215,31 @@ describe('Azure Boards and Repos', () => {
   });
 });
 
+describe('a branch with someone else\'s work on it', () => {
+  it('is never written over when a pull request goes out: taken back or not, nothing is forced', async () => {
+    const t = actions.createTicket(bp, { title: 'Owner signs up' });
+    const wt = addWorktree(project, t.id, 'main');
+    fs.writeFileSync(path.join(wt.dir, 'mine.txt'), 'mine\n');
+    sh('git add -A && git -c user.name=t -c user.email=t@t commit -qm mine', wt.dir);
+    updateTicket(bp, t.id, (x) => {
+      x.worktree = wt.dir;
+      x.branch = wt.branch;
+      x.baseCommit = wt.baseCommit;
+    });
+    // Whoever had it pushed their own work to that branch, and this computer knows of it from its last look.
+    const theirs = path.join(tmp, 'theirs');
+    sh(`git clone -q "${remote}" "${theirs}"`, tmp);
+    sh(`git checkout -q -b ${wt.branch}`, theirs);
+    fs.writeFileSync(path.join(theirs, 'theirs.txt'), 'theirs\n');
+    sh(`git add -A && git -c user.name=t -c user.email=t@t commit -qm theirs && git push -q origin ${wt.branch}`, theirs);
+    const tip = sh(`git rev-parse ${wt.branch}`, theirs);
+    sh('git fetch -q origin', project);
+    vi.stubGlobal('fetch', async () => new Response('{}', { status: 200 }));
+    await expect(publishTicket(bp, t.id)).rejects.toThrow(/has newer work on this ticket from someone else, and squad-kit does not write over it/);
+    expect(sh(`git rev-parse ${wt.branch}`, remote)).toBe(tip);
+  });
+});
+
 describe('a pull request that clashes with newer changes in main', () => {
   async function accepted() {
     const t = await actions.startFromTracker(bp, trackerFor(bp)!, '35');

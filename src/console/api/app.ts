@@ -7,6 +7,7 @@ import { MAX_PARALLEL, parallelLimit, setParallelLimit } from '../../core/settin
 import { ticketsRunning } from '../../engine/live.js';
 import { isOwnFolder } from '../../engine/setup.js';
 import { firstLook, type FirstLook } from '../../engine/first-look.js';
+import { fileTroubleWords, isDiskTrouble } from '../../core/file-trouble.js';
 import type { OpenProjects } from '../open-projects.js';
 
 /**
@@ -85,7 +86,7 @@ export async function act(c: Context, fn: () => unknown) {
   try {
     return c.json(((await fn()) as object) ?? { ok: true });
   } catch (err) {
-    return c.json({ error: (err as Error).message }, 400);
+    return c.json({ error: isDiskTrouble(err) ? fileTroubleWords(err) : (err as Error).message }, 400);
   }
 }
 

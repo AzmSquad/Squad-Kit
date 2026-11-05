@@ -4,7 +4,7 @@ import path from 'node:path';
 import { addActivity, now, readMeta, updateTicket, type BoardPaths } from '../board/store.js';
 import type { BoardMeta, Ticket } from '../board/types.js';
 import { depsReady, openOnBoard, unmergedDeps } from '../board/depends.js';
-import { changedFiles, commitArgsFor, git, isAncestor, pushedBranch, removeWorktree, worktreeRoot } from './git.js';
+import { changedFiles, commitArgsFor, git, isAncestor, pushedBranch, removeWorktree, stageAll, worktreeRoot } from './git.js';
 import type { OpenTicket } from './prompts.js';
 import { repoFor } from './repos.js';
 
@@ -115,7 +115,7 @@ function workOf(bp: BoardPaths, root: string, dep: Ticket, base: string): string
   const env = { GIT_INDEX_FILE: index };
   try {
     git(cwd, ['read-tree', tip], { env });
-    if (copy) git(cwd, ['add', '-A'], { env });
+    if (copy) stageAll(cwd, env);
     const squad = squadIn(bp, root);
     if (squad) git(cwd, ['reset', '-q', fork, '--', squad], { env, allowFail: true });
     const tree = git(cwd, ['write-tree'], { env });

@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowRight, Check, GitBranch, PenLine, Rocket, Undo2 } from 'lucide-react';
-import { api } from '../api/client';
+import { ApiError, api, send } from '../api/client';
 import type { BranchPlan, Release, ReleaseWithItems } from '../api/types';
 import { useAct, useBoard, useReleases } from '../lib/data';
 import { BugDialog, ReleasedDialog } from '../components/dialogs';
 import { Cmd, Modal, NotesView, dateShort } from '../components/ui';
+import { usePrefs } from '../lib/prefs';
+import { shellQuote } from '../lib/text';
 import { GatePill } from '../components/Gates';
 
 export function ReleasesPage() {
@@ -58,6 +60,7 @@ function ReleaseDetail({ r, onReleased, live }: { r: ReleaseWithItems; onRelease
   const [notes, setNotes] = useState(r.notes);
   const [confirming, setConfirming] = useState(false);
   const [bug, setBug] = useState(false);
+  const [marking, setMarking] = useState(false);
   useEffect(() => {
     if (!editing) setNotes(r.notes);
   }, [r.notes, editing]);
@@ -74,10 +77,16 @@ function ReleaseDetail({ r, onReleased, live }: { r: ReleaseWithItems; onRelease
 
       {unpushed.length > 0 && (
         <div className="box" style={{ marginTop: 10, color: 'var(--you-ink)' }}>
-          <b>Not pushed yet.</b> The release is made on this computer, but it did not reach the remote, so its tickets stay open.
+          <b>Not pushed yet.</b> The release is made on this computer, but it did not reach your team's shared copy of the code, so its tickets stay open.
           {unpushed.map((u) => (
-            <div key={u.repo} className="mono" style={{ fontSize: 12.5, marginTop: 6 }}>
-              {u.repo === '.' ? 'project' : u.repo}: {u.base} → {u.remote}: {u.error}
+            <div key={u.repo} style={{ marginTop: 6 }}>
+              {u.plain ?? 'An engineer can see why below.'}
+              <details style={{ marginTop: 4 }}>
+                <summary className="note">For engineers</summary>
+                <div className="mono" style={{ fontSize: 12.5, marginTop: 4 }}>
+                  {u.repo === '.' ? 'project' : u.repo}: {u.base} → {u.remote}: {u.error}
+                </div>
+              </details>
             </div>
           ))}
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 10 }}>
@@ -92,6 +101,9 @@ function ReleaseDetail({ r, onReleased, live }: { r: ReleaseWithItems; onRelease
               }
             >
               <Rocket size={15} /> Push again
+            </button>
+            <button className="btn quiet" disabled={act.isPending} title="An engineer brought it in by hand, so Push again cannot see it. You say how; its tickets close." onClick={() => setMarking(true)}>
+              It reached it another way
             </button>
             <span className="grow" />
             <Cmd text={`squad release ${r.version} --push-again`} />
@@ -315,6 +327,7 @@ function ReleaseDetail({ r, onReleased, live }: { r: ReleaseWithItems; onRelease
       )}
       {!draft && live && <OldBranches />}
       {bug && <BugDialog foundIn={r.version} onClose={() => setBug(false)} />}
+      {marking && <MarkSentDialog version={r.version} onClose={() => setMarking(false)} onDone={onReleased} />}
     </div>
   );
 }
@@ -328,14 +341,13 @@ function OldBranches() {
   const plan = useQuery({ queryKey: ['branches'], queryFn: () => api<BranchPlan>('/api/v1/branches'), refetchInterval: 30_000 });
   const p = plan.data;
   if (!p || (!p.here.length && !p.remote.length)) return null;
-  const remote = p.remote[0]?.remote ?? 'the remote';
   return (
     <div className="box" style={{ marginTop: 18 }}>
       <b>
         <GitBranch size={14} /> Old ticket branches
       </b>
       <p className="note" style={{ margin: '4px 0 8px' }}>
-        {[p.here.length ? `${p.here.length} on this computer` : '', p.remote.length ? `${p.remote.length} on ${remote}` : ''].filter(Boolean).join(' and ')}, from released tickets. Their work is in main, so nothing is lost.
+        {[p.here.length ? `${p.here.length} on this computer` : '', p.remote.length ? `${p.remote.length} in your team's shared copy of the code` : ''].filter(Boolean).join(' and ')}, from released tickets. Their work is in main, so nothing is lost.
       </p>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         {p.here.length > 0 && (
@@ -344,13 +356,70 @@ function OldBranches() {
           </button>
         )}
         {p.remote.length > 0 && (
-          <button className="btn sm" disabled={act.isPending} onClick={() => act.mutate({ path: '/api/v1/branches/clean', body: { remote: true }, done: `Deleted the old branches here and on ${remote}` })}>
-            Delete them {p.here.length ? 'here and ' : ''}on {remote}
+          <button className="btn sm" disabled={act.isPending} onClick={() => act.mutate({ path: '/api/v1/branches/clean', body: { remote: true }, done: "Deleted the old branches here and in the shared copy of the code" })}>
+            Delete them {p.here.length ? 'here and ' : ''}in the shared copy
           </button>
         )}
         <span className="grow" style={{ flex: 1 }} />
         <Cmd text={p.remote.length ? 'squad branches --clean --remote' : 'squad branches --clean'} />
       </div>
     </div>
+  );
+}
+
+/**
+ * "It reached it another way": its tickets close and nothing checks after this, so the person says how. When squad-kit
+ * does not find the release in the shared copy of the code, or cannot reach it, it says so, and only a second press goes on.
+ */
+function MarkSentDialog({ version, onClose, onDone }: { version: string; onClose(): void; onDone(r: Release): void }) {
+  const qc = useQueryClient();
+  const { toast } = usePrefs();
+  const [reason, setReason] = useState('');
+  const [warning, setWarning] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const mark = async (anyway: boolean) => {
+    setBusy(true);
+    try {
+      const rel = await send<Release>(`/api/v1/releases/${version}/mark-sent`, 'POST', { reason, ...(anyway ? { anyway } : {}) });
+      void qc.invalidateQueries();
+      onDone(rel);
+      onClose();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) setWarning(err.message);
+      else toast(err instanceof Error ? err.message : String(err), 'err');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal
+      title="It reached it another way"
+      onClose={onClose}
+      footer={
+        <>
+          <span className="grow" />
+          <button className="btn" onClick={onClose}>
+            Cancel
+          </button>
+          {warning ? (
+            <button className="btn pri" disabled={busy || !reason.trim()} onClick={() => void mark(true)}>
+              Mark it anyway
+            </button>
+          ) : (
+            <button className="btn pri" disabled={busy || !reason.trim()} onClick={() => void mark(false)}>
+              {busy ? 'Looking for it…' : 'Mark it as sent'}
+            </button>
+          )}
+        </>
+      }
+    >
+      <p className="note">{version}'s tickets close, and nothing checks after this. squad-kit looks in your team's shared copy of the code first.</p>
+      <div className="lbl">How did it get there?</div>
+      <textarea className="waynote" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="For example: Sara merged it by hand" />
+      {warning && <div className="box" style={{ marginTop: 10 }}>{warning}</div>}
+      <div style={{ marginTop: 10 }}>
+        <Cmd text={`squad release ${version} --mark-sent --reason ${shellQuote(reason.trim() || 'how it got there')}${warning ? ' --anyway' : ''}`} />
+      </div>
+    </Modal>
   );
 }

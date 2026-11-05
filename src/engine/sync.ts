@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { addActivity, codeChanged, listTickets, readMeta, readTicket, requireTicket, updateTicket, type BoardPaths } from '../board/store.js';
 import type { LocalSetup, Ticket, TrackerEvent } from '../board/types.js';
+import { StepError } from '../board/problem.js';
 import { repoHostFor, trackerFor } from '../modules/registry.js';
 import type { Tracker } from '../modules/tracker/types.js';
 import { MergeClash, currentBranch, git, mergeIntoBase, moveBase, netGit, remotes } from './git.js';
@@ -233,7 +234,13 @@ export async function publishTicket(bp: BoardPaths, ticketId: string): Promise<{
     netGit(target.dir, ['push', target.remote, `${target.base}:refs/heads/${target.base}`], { env });
     note(bp, ticketId, `Pushed ${target.base} to ${host.label} (the repo was empty)`);
   }
-  netGit(t.worktree ?? target.dir, ['push', '--force-with-lease', target.remote, `${t.branch}:refs/heads/${t.branch}`], { env });
+  // Never forced: when someone else's work is on that branch (the ticket was taken back from them), it stays there.
+  try {
+    netGit(t.worktree ?? target.dir, ['push', target.remote, `${t.branch}:refs/heads/${t.branch}`], { env });
+  } catch (err) {
+    if (/rejected|fast-forward|fetch first|before pushing again/i.test((err as Error).message)) throw new StepError(`${target.remote} has newer work on this ticket from someone else, and squad-kit does not write over it. Bring in their work, then press Try again.`, (err as Error).message);
+    throw err;
+  }
 
   const tracker = trackerFor(bp);
   const item = tracker ? itemId(t, tracker) : null;
@@ -339,7 +346,12 @@ export async function recheckMerge(bp: BoardPaths, id: string): Promise<'merged'
     if (!target || !host || !t.pr) return 'waiting';
     const state = await host.mergeState(t.pr.id).catch(() => null);
     if (state === 'clash') return 'clash';
-    if (state !== 'merged') return 'waiting';
+    if (state !== 'merged') {
+      // The host says it can merge, so a network blip cut off the merge itself: it is asked again. One that waits for an
+      // approver is left to wait.
+      const merged = state === 'mergeable' && (await host.merge(t.pr.id, `Merge ${t.title} (${t.id})`).then(() => true, () => false));
+      if (!merged) return 'waiting';
+    }
     try {
       const env = host.gitEnv();
       netGit(target.dir, ['fetch', target.remote, target.base], { env });
@@ -433,7 +445,7 @@ export function prDescription(t: Ticket, item: string | null, shots: { label: st
   }
   if (t.overrides?.length) {
     lines.push('### Continued anyway');
-    for (const o of t.overrides) lines.push(`- **${o.weakened?.length ? 'Weakened tests' : o.gate === 'checks' ? 'Failed checks' : o.gate === 'proof' ? 'No screenshots' : 'Open review notes'}**, by ${o.by}: ${o.reason}`);
+    for (const o of t.overrides) lines.push(`- **${o.weakened?.length ? 'Weakened tests' : o.gate === 'hooks' ? "Saved without the project's own check" : o.gate === 'checks' ? 'Failed checks' : o.gate === 'proof' ? 'No screenshots' : 'Open review notes'}**, by ${o.by}: ${o.reason}`);
     lines.push('');
   }
   if (shots.length) {

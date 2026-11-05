@@ -16,7 +16,7 @@ vi.mock('../src/modules/claude/direct.js', async (orig) => ({
     answers.shift()?.(opts) ?? new Promise((resolve) => opts.signal?.addEventListener('abort', () => resolve({ ok: false, sessionId: '', text: '', error: 'You stopped the squad.' }))),
 }));
 
-const { boardPaths, readMeta, readTicket, writeMeta } = await import('../src/board/store.js');
+const { boardPaths, readMeta, readTicket, writeMeta, updateTicket } = await import('../src/board/store.js');
 const { createTicket, wayOptions } = await import('../src/board/actions.js');
 const { LiveSquad } = await import('../src/engine/live.js');
 const { ensureLiveBoard, setupProject } = await import('../src/engine/setup.js');
@@ -129,6 +129,10 @@ describe('a step that fails on the live board', () => {
     const { bp } = ensureLiveBoard(boardPaths(path.join(dir, '.squad')), 'roomflow');
     writeMeta(bp, { ...readMeta(bp), scan: { status: 'done' }, runner: 'direct', speed: 100 });
     const t = createTicket(bp, { title: 'Show room capacity' });
+    // Its new tries are used up: a problem that passes by itself waits first (test/ways-on.test.ts).
+    updateTicket(bp, t.id, (x) => {
+      x.blips = 4;
+    });
     answers.push(async (opts) => ({ ok: false, sessionId: opts.sessionId ?? '', text: '', error: 'Claude is busy right now. Wait a few minutes, then press Try again.', detail: 'API Error: 529 {"type":"overloaded_error"}' }));
     stop = new LiveSquad(bp).start(25);
     for (let i = 0; i < 400 && readTicket(bp, t.id)?.waiting?.kind !== 'stuck'; i += 1) await new Promise((r) => setTimeout(r, 20));

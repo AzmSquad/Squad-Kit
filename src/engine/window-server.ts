@@ -19,6 +19,14 @@ export const WINDOW_NAME = 'squad';
 const PROTOCOLS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 const MAX_BODY = 1024 * 1024;
 
+/**
+ * How long a connection may sit idle before this side closes it. An agent thinks between its calls, and at Node's own 5
+ * seconds its next call often went out just as the connection closed: "read ECONNRESET", and a tool call that failed
+ * for nothing, more often the busier the computer was. A client that keeps connections goes by this number and closes
+ * first, so nobody is caught in the middle.
+ */
+export const KEEP_IDLE_MS = 120_000;
+
 const windows = new Map<string, AgentWindow>();
 let board: string | null = null;
 let own: Promise<string> | null = null;
@@ -62,6 +70,7 @@ export async function windowAccess(w: AgentWindow): Promise<RunWindow> {
 function ownBase(): Promise<string> {
   own ??= new Promise<string>((resolve, reject) => {
     const srv = http.createServer((req, res) => void serveNode(req, res));
+    srv.keepAliveTimeout = KEEP_IDLE_MS;
     srv.once('error', reject);
     srv.listen(0, '127.0.0.1', () => {
       const a = srv.address();
@@ -73,12 +82,24 @@ function ownBase(): Promise<string> {
   return own;
 }
 
+/**
+ * Closes a server with connections kept open (KEEP_IDLE_MS). What is idle goes at once. An answer still going out when
+ * it closes leaves its connection idle right after, and that goes then too, or closing would wait out all that time.
+ */
+export function closeServer(s: http.Server, done: (err?: Error) => void): void {
+  const sweep = setInterval(() => s.closeIdleConnections(), 100);
+  s.close((err) => {
+    clearInterval(sweep);
+    done(err);
+  });
+}
+
 /** Closes squad-kit's own door, for tests. */
 export async function closeOwnDoor(): Promise<void> {
   const s = ownServer;
   own = null;
   ownServer = null;
-  if (s) await new Promise<void>((r) => s.close(() => r()));
+  if (s) await new Promise<void>((r) => closeServer(s, () => r()));
 }
 
 async function serveNode(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {

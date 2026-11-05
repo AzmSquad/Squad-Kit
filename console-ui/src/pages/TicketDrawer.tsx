@@ -33,6 +33,9 @@ import { BreakdownPlace, DecidedForYou, StopPanel, TrackWords } from '../compone
 import { YourCheck } from '../components/YourCheck';
 import { AskButton, useAskAgent } from '../components/AskQuestion';
 import { pageOf, waitsAtReview } from '../lib/review';
+import { useDraft } from '../lib/drafts';
+import { useReach } from '../lib/reach';
+import { ticketTrouble } from '../lib/ticket-trouble';
 
 type Tab = 'now' | 'story' | 'plan' | 'activity' | 'conversation' | 'proof' | 'changes' | 'cost' | 'developer';
 
@@ -56,7 +59,16 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
       <div className="veil" onClick={onClose} />
       <aside className={`drawer ${ticketFull ? 'full' : ''}`} aria-label={t ? `${t.id} ${t.title}` : 'Ticket'}>
         {!t ? (
-          <div className="center">{ticket.isError ? `No ticket ${id}.` : 'Loading…'}</div>
+          <div className="center">
+            {ticket.isError ? (
+              <div>
+                <p>{ticketTrouble(ticket.error, id)}</p>
+                <button className="btn" onClick={onClose}>Close</button>
+              </div>
+            ) : (
+              'Loading…'
+            )}
+          </div>
         ) : (
           <>
             <div className="dh">
@@ -176,7 +188,8 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
             {tab === 'now' && <HandedOverBanner t={t} />}
             {tab === 'now' && <DeleteArchiveBanner t={t} onDeleted={onClose} />}
             {tab === 'now' && (isMine(t, me) || !me) && <ChangeCard t={t} />}
-            {tab === 'now' && (isMine(t, me) || !me ? <NowPanel t={t} /> : <NotYoursPanel t={t} />)}
+            {/* A panel of its own per ticket: what is typed on one never shows on another. */}
+            {tab === 'now' && (isMine(t, me) || !me ? <NowPanel key={t.id} t={t} /> : <NotYoursPanel t={t} />)}
             {tab === 'story' && <StoryTab t={t} />}
             {tab === 'plan' && <PlanTab t={t} />}
             {tab === 'activity' && <ActivityTab t={t} />}
@@ -269,9 +282,12 @@ type Answers = Record<string, { choice: string; value?: string }>;
 
 function QuestionsPanel({ t }: { t: Ticket }) {
   const act = useAct();
-  const [answers, setAnswers] = useState<Answers>(() =>
-    Object.fromEntries((t.questions ?? []).filter((q) => q.answer).map((q) => [q.id, q.answer!])),
-  );
+  const saved: Answers = Object.fromEntries((t.questions ?? []).filter((q) => q.answer).map((q) => [q.id, q.answer!]));
+  // Kept on this computer until sent: another tab, Esc, a click outside or a reload lose nothing.
+  const [answers, setAnswers, clearAnswers] = useDraft<Answers>(t.id, 'answers', saved);
+  // Skip throws the picks away, so it asks once when there are any.
+  const [askSkip, setAskSkip] = useState(false);
+  const picks = Object.keys(answers).length;
   const questions = t.questions ?? [];
   const groups: { from: 'analyst' | 'architect'; label: string }[] = [
     { from: 'analyst', label: 'From the Analyst, about what to build' },
@@ -312,13 +328,21 @@ function QuestionsPanel({ t }: { t: Ticket }) {
         <button
           className="btn pri"
           disabled={!ready || act.isPending}
-          onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/answers`, body: { answers }, done: 'Answers sent. The Architect is choosing the design.' })}
+          onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/answers`, body: { answers }, done: 'Answers sent. The Architect is choosing the design.' }, { onSuccess: clearAnswers })}
         >
           <Send size={15} /> Send answers
         </button>
-        <button className="btn" onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/skip`, done: 'The squad made its own guesses. You will see them in the plan.' })}>
-          Skip, let the squad guess
+        <button
+          className="btn"
+          disabled={act.isPending}
+          onClick={() => {
+            if (picks > 0 && !askSkip) return setAskSkip(true);
+            act.mutate({ path: `/api/v1/tickets/${t.id}/skip`, done: 'The squad made its own guesses. You will see them in the plan.' }, { onSuccess: clearAnswers });
+          }}
+        >
+          {askSkip ? `Skip and lose your ${picks === 1 ? 'answer' : `${picks} answers`}?` : 'Skip, let the squad guess'}
         </button>
+        {askSkip && <button className="btn quiet" onClick={() => setAskSkip(false)}>Keep them</button>}
         <TalkButton t={t} agent="analyst" label="Talk it through instead" />
         <span className="grow" />
         <Cmd text={`squad answer ${t.id}`} />
@@ -341,8 +365,8 @@ function QuestionBlock({
   onAnswer(a: { choice: string; value?: string }): void;
 }) {
   const act = useAct();
-  const [asking, setAsking] = useState(false);
-  const [text, setText] = useState('');
+  const [text, setText] = useDraft(t.id, `ask-${q.id}`, '');
+  const [asking, setAsking] = useState(Boolean(text));
   const send = () => {
     if (!text.trim()) return;
     act.mutate({ path: `/api/v1/tickets/${t.id}/ask`, body: { questionId: q.id, text } });
@@ -376,7 +400,7 @@ function QuestionBlock({
           const on = answer?.choice === o;
           const typed = o === q.inputOption || o === 'Other';
           return (
-            <div key={o} className={`choice ${on ? 'on' : ''}`} role="radio" aria-checked={on} tabIndex={0} onClick={() => !on && onAnswer({ choice: o })} onKeyDown={(e) => e.key === 'Enter' && onAnswer({ choice: o })}>
+            <div key={o} className={`choice ${on ? 'on' : ''}`} role="radio" aria-checked={on} tabIndex={0} onClick={() => !on && onAnswer({ choice: o })} onKeyDown={(e) => e.target === e.currentTarget && e.key === 'Enter' && !on && onAnswer({ choice: o })}>
               <span className="rd" />
               {o === 'Other' ? 'Other' : o.replace(/:$/, '')}
               {typed && on && (
@@ -526,10 +550,17 @@ function PlanBody({ t, review }: { t: Ticket; review?: Review }) {
  */
 function PlanPanel({ t }: { t: Ticket }) {
   const act = useAct();
-  const [mode, setMode] = useState<'change' | 'over' | null>(null);
-  const [note, setNote] = useState('');
+  // Comments and the note stay until sent. A spec and the design after it each have their own.
+  const place = `plan-${t.waiting?.kind ?? 'plan'}`;
+  const [mode, setMode, clearMode] = useDraft<'change' | 'over' | null>(t.id, `${place}-mode`, null);
+  const [note, setNote, clearNote] = useDraft(t.id, `${place}-note`, '');
   const [askDev, setAskDev] = useState(false);
-  const [comments, setComments] = useState<PlanComment[]>([]);
+  const [comments, setComments, clearComments] = useDraft<PlanComment[]>(t.id, `${place}-comments`, []);
+  const sent = () => {
+    clearMode();
+    clearNote();
+    clearComments();
+  };
   const spec = t.waiting?.kind === 'spec';
   const design = !spec && Boolean(t.specApproved);
   const who = spec ? 'the Analyst' : design ? 'the Architect' : 'the Spec writer';
@@ -542,8 +573,8 @@ function PlanPanel({ t }: { t: Ticket }) {
   };
   const send = () =>
     mode === 'over'
-      ? act.mutate({ path: `/api/v1/tickets/${t.id}/plan/start-over`, body: { direction: note }, done: `Starting over. ${who[0]!.toUpperCase()}${who.slice(1)} writes it again.` })
-      : act.mutate({ path: `/api/v1/tickets/${t.id}/change`, body: { text: note }, done: `Sent to ${who}.` });
+      ? act.mutate({ path: `/api/v1/tickets/${t.id}/plan/start-over`, body: { direction: note }, done: `Starting over. ${who[0]!.toUpperCase()}${who.slice(1)} writes it again.` }, { onSuccess: sent })
+      : act.mutate({ path: `/api/v1/tickets/${t.id}/change`, body: { text: note }, done: `Sent to ${who}.` }, { onSuccess: sent });
   const n = comments.length;
   return (
     <>
@@ -574,7 +605,7 @@ function PlanPanel({ t }: { t: Ticket }) {
             value={note}
             onChange={(e) => setNote(e.target.value)}
             placeholder={mode === 'over' ? 'What is the new direction? It is written again from zero.' : 'What should change? One line is enough.'}
-            onKeyDown={(e) => e.key === 'Enter' && note.trim() && send()}
+            onKeyDown={(e) => e.key === 'Enter' && note.trim() && !act.isPending && send()}
           />
           <button className="btn pri" disabled={!note.trim() || act.isPending} onClick={send}>
             {mode === 'over' ? 'Start over' : 'Send'}
@@ -590,7 +621,7 @@ function PlanPanel({ t }: { t: Ticket }) {
               onClick={() =>
                 act.mutate(
                   { path: `/api/v1/tickets/${t.id}/plan/send-back`, body: { comments }, done: `Sent back to ${who} with ${n} ${n === 1 ? 'comment' : 'comments'}.` },
-                  { onSuccess: () => setComments([]) },
+                  { onSuccess: sent },
                 )
               }
             >
@@ -601,10 +632,13 @@ function PlanPanel({ t }: { t: Ticket }) {
               className="btn pri"
               disabled={act.isPending}
               onClick={() =>
-                act.mutate({
-                  path: `/api/v1/tickets/${t.id}/approve`,
-                  done: spec ? 'Spec approved. The Architect is designing how to build it.' : 'Plan approved. The Builder started.',
-                })
+                act.mutate(
+                  {
+                    path: `/api/v1/tickets/${t.id}/approve`,
+                    done: spec ? 'Spec approved. The Architect is designing how to build it.' : 'Plan approved. The Builder started.',
+                  },
+                  { onSuccess: sent },
+                )
               }
             >
               <Check size={15} strokeWidth={2.5} /> {spec ? 'Approve spec' : design ? 'Approve design' : 'Approve plan'}
@@ -722,13 +756,16 @@ function ProofShots({ t }: { t: Ticket }) {
 
 export function ProofDecision({ t, sticky }: { t: Ticket; sticky?: boolean }) {
   const act = useAct();
-  const [wrong, setWrong] = useState(false);
-  const [note, setNote] = useState('');
-  const sendBack = () => act.mutate({ path: `/api/v1/tickets/${t.id}/change`, body: { text: note }, done: 'Sent back to the Builder with your note.' });
+  const [note, setNote, clearNote] = useDraft(t.id, 'proof-wrong', '');
+  const [wrong, setWrong] = useState(Boolean(note));
+  const sendBack = () => {
+    if (act.isPending) return;
+    act.mutate({ path: `/api/v1/tickets/${t.id}/change`, body: { text: note }, done: 'Sent back to the Builder with your note.' }, { onSuccess: clearNote });
+  };
   return wrong ? (
     <div className={sticky ? 'stickybar' : 'df'}>
       <input className="input" style={{ flex: 1 }} autoFocus value={note} onChange={(e) => setNote(e.target.value)} placeholder="What's wrong? Tell the squad in one line." onKeyDown={(e) => e.key === 'Enter' && note.trim() && sendBack()} />
-      <button className="btn pri" disabled={!note.trim()} onClick={sendBack}>Send back</button>
+      <button className="btn pri" disabled={!note.trim() || act.isPending} onClick={sendBack}>Send back</button>
       <button className="btn" onClick={() => setWrong(false)}>Cancel</button>
     </div>
   ) : (
@@ -778,8 +815,8 @@ const DECIDE_YOURSELF = 'Decide yourself: take the simplest choice that fits the
 function AskPanel({ t }: { t: Ticket }) {
   const act = useAct();
   const q = t.agentQuestion;
-  const [pick, setPick] = useState<string | null>(null);
-  const [own, setOwn] = useState('');
+  const [pick, setPick, clearPick] = useDraft<string | null>(t.id, 'agent-pick', null);
+  const [own, setOwn, clearOwn] = useDraft(t.id, 'agent-own', '');
   if (!q) return <WorkingPanel t={t} />;
   // A busy port another program holds: one plain choice instead of the agent's words.
   if (q.port) return <PortAskPanel t={t} />;
@@ -827,7 +864,17 @@ function AskPanel({ t }: { t: Ticket }) {
         <button
           className="btn pri"
           disabled={!answer || act.isPending}
-          onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/reply`, body: { text: answer }, done: `Sent. The ${who} carries on.` })}
+          onClick={() =>
+            act.mutate(
+              { path: `/api/v1/tickets/${t.id}/reply`, body: { text: answer }, done: `Sent. The ${who} carries on.` },
+              {
+                onSuccess: () => {
+                  clearPick();
+                  clearOwn();
+                },
+              },
+            )
+          }
         >
           <Send size={15} /> Send answer
         </button>
@@ -856,7 +903,7 @@ function QuietPanel({ t }: { t: Ticket }) {
 function OutdatedBanner({ t }: { t: Ticket }) {
   const act = useAct<Ticket>();
   const [keeping, setKeeping] = useState<string | null>(null);
-  const [reason, setReason] = useState('');
+  const [reason, setReason, clearReason] = useDraft(t.id, 'keep-reason', '');
   const merged = Boolean(t.mergedAt) || t.stage === 'done';
   return (
     <div className="outdated">
@@ -875,7 +922,7 @@ function OutdatedBanner({ t }: { t: Ticket }) {
           {keeping === o.adr ? (
             <div className="row">
               <input className="input" autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why the plan stays as it is" />
-              <button className="btn sm" disabled={!reason.trim() || act.isPending} onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/decision-update`, body: { adr: o.adr, do: 'keep', reason }, done: 'Kept the plan. The reason is on the ticket.' }, { onSuccess: () => setKeeping(null) })}>
+              <button className="btn sm" disabled={!reason.trim() || act.isPending} onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/decision-update`, body: { adr: o.adr, do: 'keep', reason }, done: 'Kept the plan. The reason is on the ticket.' }, { onSuccess: () => { setKeeping(null); clearReason(); } })}>
                 Keep it
               </button>
               <button className="btn sm quiet" onClick={() => setKeeping(null)}>Cancel</button>
@@ -947,6 +994,7 @@ function LocalSetupLine({ t }: { t: Ticket }) {
 }
 
 function WorkingPanel({ t }: { t: Ticket }) {
+  const reach = useReach();
   const me = useMe();
   const stop = useAct();
   const asks = useAskAgent(t);
@@ -1011,7 +1059,7 @@ function WorkingPanel({ t }: { t: Ticket }) {
             Analyst gets its own button only while someone else answers those. */}
         {!t.chat?.open && !t.takenOver && !shipped(t) && asks !== 'analyst' && <TalkButton t={t} agent="analyst" label="Ask the Analyst" />}
         {(isMine(t, me) || !me) && <ProposeChangeButton t={t} />}
-        <span className="note">{t.live ? 'Updates live as the squad works.' : ''}</span>
+        <span className="note">{t.live ? (reach === 'down' ? 'Not updating: squad-kit has stopped.' : 'Updates live as the squad works.') : ''}</span>
         <span className="grow" />
         <Cmd text={t.live && t.stage !== 'release' ? `squad stop ${t.id}` : commandFor(t)} />
       </div>
@@ -1024,7 +1072,7 @@ function WorkingPanel({ t }: { t: Ticket }) {
 /** The ticket is yours: work in the Builder's session, then give it back so the checks and review run again. */
 function YoursPanel({ t }: { t: Ticket }) {
   const act = useAct();
-  const [note, setNote] = useState('');
+  const [note, setNote, clearNote] = useDraft(t.id, 'give-back', '');
   const k = t.takenOver!;
   return (
     <>
@@ -1050,7 +1098,7 @@ function YoursPanel({ t }: { t: Ticket }) {
         <RecentActivity t={t} />
       </div>
       <div className="df">
-        <button className="btn pri" disabled={act.isPending} onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/give-back`, body: { note }, done: 'Given back. The checks run on your changes.' })}>
+        <button className="btn pri" disabled={act.isPending} onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/give-back`, body: { note }, done: 'Given back. The checks run on your changes.' }, { onSuccess: clearNote })}>
           <Check size={15} strokeWidth={2.5} /> Give back
         </button>
         <span className="grow" />
@@ -1150,7 +1198,7 @@ const NOTE_KINDS = [
 function Notes({ t }: { t: Ticket }) {
   const act = useAct();
   const [kind, setKind] = useState<TicketNote['kind']>('note');
-  const [text, setText] = useState('');
+  const [text, setText] = useDraft(t.id, 'note', '');
   const notes = t.notes ?? [];
   const open = t.stage !== 'done';
   const pick = NOTE_KINDS.find((k) => k.kind === kind)!;

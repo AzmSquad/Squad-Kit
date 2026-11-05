@@ -41,6 +41,7 @@ import { ProposeChange, canPropose, shipped } from './ChangeCard';
 import { TakeOverButton, canTakeOver } from './TakeOver';
 import { STAGE_NAME, clock, dateShort } from './ui';
 import { squadWorks, waitsAtReview, whereItStands } from '../lib/review';
+import { useDraft } from '../lib/drafts';
 
 export const AGENT_TITLE: Record<AgentName, string> = { analyst: 'Analyst', architect: 'Architect', builder: 'Builder', reviewer: 'Reviewer', tester: 'Tester' };
 export const SESSION: Record<AgentName, 'intake' | 'build' | 'review' | 'tester'> = { analyst: 'intake', architect: 'intake', builder: 'build', reviewer: 'review', tester: 'tester' };
@@ -334,7 +335,8 @@ export function ChatView({ id, size, onOpenDoc, onFull, onPanel }: { id: string;
   const t = ticket.data;
   const c = t?.chat;
   const thread = useRef<HTMLDivElement>(null);
-  const [text, setText] = useState('');
+  // Kept on this computer until sent: another tab, Minimize, Full screen or a reload lose nothing.
+  const [text, setText] = useDraft(id, 'chat', '');
   const input = useRef<HTMLTextAreaElement>(null);
   // A tapped choice is sent like a typed message.
   const sendRef = useRef<((words: string) => void) | null>(null);

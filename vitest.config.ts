@@ -8,8 +8,11 @@ export default defineConfig({
     // In Vitest 4 restoreMocks only undoes vi.spyOn; mockReset also clears every vi.fn() before each test, as before.
     restoreMocks: true,
     mockReset: true,
-    // Vitest 4 also fails a test that blocks on sync git calls past its timeout; the default 5s is too short for those.
-    testTimeout: 20_000,
+    // Vitest 4 also fails a test that blocks on sync git calls past its timeout. The longest ones run the whole squad
+    // several times over with real git, and on a busy computer or a small CI machine that takes a while: no test here is
+    // about this limit, it only catches one that hangs. GitHub's checks run these, so a slow machine must not fail a release.
+    testTimeout: 60_000,
+    hookTimeout: 60_000,
     setupFiles: ['test/support/env-isolation.ts'],
   },
 });

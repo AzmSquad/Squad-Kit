@@ -7,6 +7,7 @@ import { execSync } from 'node:child_process';
 import type { RunOptions, RunResult } from '../src/modules/claude/direct.js';
 import type { BrowserModule } from '../src/modules/browser/types.js';
 import { fakeBrowser } from './fakes/browser.js';
+import { freePort } from './support/tiny-app.js';
 
 /**
  * The first run on the live engine, end to end, with the AI tool faked at its boundary (Claude Code run directly):
@@ -56,16 +57,6 @@ async function until(what: string, check: () => boolean, tries = 1500): Promise<
     await sleep(20);
   }
   throw new Error(`Timed out waiting for ${what}`);
-}
-
-function freePort(): Promise<number> {
-  return new Promise((resolve) => {
-    const srv = net.createServer();
-    srv.listen(0, '127.0.0.1', () => {
-      const port = (srv.address() as net.AddressInfo).port;
-      srv.close(() => resolve(port));
-    });
-  });
 }
 
 /** A small app with code in git: what a project manager would add. */

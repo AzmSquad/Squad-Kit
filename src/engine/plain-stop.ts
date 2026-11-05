@@ -25,6 +25,7 @@ const RUN_WORDS: RegExp[] = [
   /^The agent declined to do this step\.$/,
   /^The step was cancelled\.$/,
   /^The agent finished without giving squad-kit its answer\.$/,
+  /^squad-kit could not save what the agent was doing, so it stopped the run\. The work so far is kept\.$/,
   /^[\w .-]{1,40} did not (start|open its session|open a session) in \d+ seconds?\. Check that it opens in a terminal and is logged in, then press Try again\.$/,
 ];
 

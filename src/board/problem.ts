@@ -60,6 +60,7 @@ function title(t: Ticket): string {
   const s = t.stuck!;
   if (STOPPED.test(s.question)) return 'You stopped the squad';
   if (s.budget) return s.budget === 'ticket' ? 'This ticket reached its budget' : "This month's budget is reached";
+  if (s.kind === 'hook') return "The project's own check said no";
   if (s.gate === 'checks') return s.kind === 'weakened' ? 'The tests were made weaker' : s.kind === 'no-tests' ? 'No tests to check the work' : s.kind === 'guard' ? 'A file was blocked' : 'The checks still fail';
   if (s.gate === 'review') return 'The review is still open';
   if (s.gate === 'proof') return s.kind === 'bad-proof' ? 'The screenshots did not pass the check' : s.kind === 'broken' ? 'A "done when" is not working yet' : s.kind === 'not-shown' ? 'A "done when" is not shown yet' : 'No screenshots yet';

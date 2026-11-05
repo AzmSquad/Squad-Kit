@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import yaml from 'js-yaml';
 import { DEFAULT_CONFIG, loadConfig, saveConfig } from '../core/config.js';
 import { squadHome } from '../core/home.js';
+import { git } from '../engine/git.js';
 import type { Actor, BoardMeta, Decision, Question, Release, Step, Ticket } from './types.js';
 import { pauseClock, trackStage, waitsNow } from './clock.js';
 import { clearStaleStop, oldStop } from './stale-stop.js';
@@ -248,6 +249,7 @@ export const TICKET_HOME = {
   gates: 'project',
   specApproved: 'project',
   overrides: 'project',
+  blips: 'local',
   outdated: 'project',
   release: 'project',
   foundIn: 'project',
@@ -284,6 +286,8 @@ export const TICKET_HOME = {
   sessions: 'local',
   worktree: 'local',
   baseCommit: 'local',
+  hookOwed: 'project',
+  hookFixTried: 'local',
   tries: 'local',
   fails: 'local',
   reviewRound: 'local',
@@ -482,11 +486,20 @@ export function removeTicket(bp: BoardPaths, id: string): void {
   fs.rmSync(ticketMediaDir(bp, id), { recursive: true, force: true });
 }
 
+/** The tickets with a branch here or on a remote, as last fetched: "sk-12" for squad/sk-12. */
+function branchNumbers(bp: BoardPaths): Set<string> {
+  if (!fs.existsSync(path.join(bp.root, '.git'))) return new Set();
+  const refs = git(bp.root, ['for-each-ref', '--format=%(refname)', 'refs/heads/squad', 'refs/remotes/*/squad/*'], { allowFail: true });
+  return new Set(refs.split('\n').map((r) => r.split('/squad/')[1] ?? '').filter(Boolean));
+}
+
 /** The name of a ticket made on the board, for a project with no tracker: the project key and a number. */
 export function nextTicketId(bp: BoardPaths): string {
   const meta = readMeta(bp);
   let id = `${meta.key}-${meta.nextNumber}`;
-  while (fs.existsSync(ticketDir(bp, id))) {
+  // A teammate's ticket that reached a remote holds its number too: each computer counts on its own.
+  const taken = branchNumbers(bp);
+  while (fs.existsSync(ticketDir(bp, id)) || taken.has(id.toLowerCase())) {
     meta.nextNumber += 1;
     id = `${meta.key}-${meta.nextNumber}`;
   }

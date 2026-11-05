@@ -33,6 +33,7 @@ import { useAct } from '../lib/data';
 import { TakeOverButton, canTakeOver } from './TakeOver';
 import { TalkButton } from './Chat';
 import { WhatHappened, took, useHappened, type HappenedTab } from './WhatHappened';
+import { useDraft } from '../lib/drafts';
 
 /**
  * The Conversation tab. "What happened" first: one card per step, for everyone. "Full log" for engineers: the real
@@ -162,7 +163,7 @@ const AGENT_NAME = { analyst: 'Analyst', architect: 'Architect', builder: 'Build
 /** Message the agent: it reads it at its next step (a safe moment), and the work goes on. */
 function MessageAgent({ t, to }: { t: Ticket; to: keyof typeof AGENT_NAME }) {
   const act = useAct();
-  const [text, setText] = useState('');
+  const [text, setText] = useDraft(t.id, `message-${to}`, '');
   if (t.stage === 'done') return null;
   const send = () =>
     act.mutate(

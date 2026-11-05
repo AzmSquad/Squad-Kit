@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { addActivity, listTickets, now, readMeta, readTicket, requireTicket, updateTicket, type BoardPaths } from './store.js';
 import type { AgentQuestion, Ticket } from './types.js';
 import type { Decided, DecidedBy } from './requirements-types.js';
-import { BoardActionError, acceptProof, changeAfterRelease, openChange, proposeChange, shipped } from './actions.js';
+import { BoardActionError, acceptProof, changeAfterRelease, openChange, proposeChange, saveBeforeAccept, shipped } from './actions.js';
 import { isMerged, refuseBeforeDependency } from './depends.js';
 import { scheduleSquad } from './schedule.js';
 import { git, isAncestor, remotes } from '../engine/git.js';
@@ -204,6 +204,30 @@ export function acceptNext(t: Ticket, seconds: number, speed: number): void {
   t.waiting = null;
   t.status = ACCEPTING;
   scheduleSquad(t, 'accept', seconds, speed);
+}
+
+/**
+ * The accept step from the live squad: the project's hooks run beside everything else first, so a slow one never holds
+ * up the board. When the ticket will not be accepted now (a change still open, a "done when" not met) nothing is saved.
+ * The step's Stop ends a hook that is running. A Stop or a delete that came while the hook ran never ends in a merge:
+ * the ticket is left as it is, and the squad's next turn takes it from there.
+ */
+export async function acceptByItselfBeside(bp: BoardPaths, id: string, signal?: AbortSignal): Promise<Ticket> {
+  const t = requireTicket(bp, id);
+  const blocked = t.track !== 'auto' || shipped(t) || Boolean(openChange(t)) || (t.proof ?? []).some((p) => p.shows && p.shows !== 'met' && p.shows !== 'off-screen');
+  if (!blocked && !beforeDependency(bp, t) && !(await saveBeforeAccept(bp, id, signal))) return requireTicket(bp, id);
+  const now = requireTicket(bp, id);
+  if (signal?.aborted || now.stopRequested || now.deleting) return now;
+  return acceptByItself(bp, id);
+}
+
+function beforeDependency(bp: BoardPaths, t: Ticket): boolean {
+  try {
+    refuseBeforeDependency(bp, t);
+    return false;
+  } catch {
+    return true;
+  }
 }
 
 /**

@@ -26,8 +26,9 @@ import path from 'node:path';
 import type { BoardMeta, Decision, ImpactCheck, Release, TechDraft, Ticket, UnpushedRelease } from './types.js';
 import { detectStack } from './stack.js';
 import { scheduleSquad } from './schedule.js';
-import { PullRequestClash, commitTicket, liveRelease, pushAgain } from '../engine/release.js';
-import { MergeClash, git } from '../engine/git.js';
+import { PullRequestClash, commitTicket, commitWithoutCheck, hooksStillOwed, liveRelease, onTheRemote, pushAgain } from '../engine/release.js';
+import { CommitStopped, HookRefused, MergeClash, addWorktree, git, pushedBranch, repairCopyLink, settleCopy, type HookRun } from '../engine/git.js';
+import { guardSupport, ticketGuard } from '../engine/project-guard.js';
 import { holdRelease, releaseGoingOut } from './lock.js';
 import { repoFor, reposOf } from '../engine/repos.js';
 import { buildPaths } from '../core/paths.js';
@@ -464,16 +465,21 @@ function testNameFor(ticket: Ticket): string {
  * Looks right: commit, merge or pull request, and the draft release. `byItself` is the squad's own accept on the
  * Builds by itself track (board/auto.ts): the same steps, with the squad as the actor and this line on the record.
  */
-export function acceptProof(bp: BoardPaths, ticket: Ticket, byItself?: string): Ticket {
+export function acceptProof(bp: BoardPaths, ticket: Ticket, byItself?: string, opts: { noHooks?: boolean } = {}): Ticket {
   let commit: string | null = null;
   const release = ensureDraftRelease(bp, ticket.kind === 'bug' ? 'patch' : 'minor');
   if (readMeta(bp).engine === 'live') {
     try {
+      repairCopy(bp, ticket);
       // The accepted ticket's documents go in the same commit as its code, when the project keeps them in git.
       leaveProjectFiles(bp, ticket, repoFor(readMeta(bp), ticket).base);
-      stageTicketDocs(bp, { ...ticket, stage: 'release', release: release.version, waiting: null });
-      commit = commitTicket(ticket);
+      stageTicketDocs(bp, { ...ticket, stage: 'release', release: release.version, waiting: null, hookOwed: undefined });
+      // The hooks run in one place, beside everything else (saveBeside). Past here they had their say, or the person went past them.
+      const saved = takeSaved(bp, ticket.id);
+      if (saved === undefined && !opts.noHooks && hooksStillOwed(ticket)) throw new BoardActionError(`The project's own check has not looked at ${ticket.id} yet, so it is not accepted. Press Looks right on the board, or run: squad approve ${ticket.id}`);
+      commit = commitWithoutCheck(ticket) ?? saved ?? null;
     } catch (err) {
+      if (err instanceof BoardActionError) throw err;
       throw actionFailed(bp, ticket.id, 'squad-kit could not save the change, so the proof stays as it is. Press Looks right to try again.', err);
     }
   }
@@ -522,6 +528,162 @@ export function acceptProof(bp: BoardPaths, ticket: Ticket, byItself?: string): 
     if (merged) addActivity(t, 'release', merged.moved ? `Merged into ${merged.base}` : `Could not move ${merged.base} yet. ${merged.note ?? ''}`.trim());
     addActivity(t, 'release', `Added to release ${release.version}`);
   });
+}
+
+/**
+ * A project folder that moved leaves the ticket's copy with a dead link to its repo: mended before git works there, with
+ * whatever a crash left in it.
+ */
+function repairCopy(bp: BoardPaths, t: Ticket): void {
+  if (!t.worktree || !repairCopyLink(path.join(bp.root, repoFor(readMeta(bp), t).path), t.worktree)) return;
+  settleCopy(t.worktree);
+}
+
+/* ── The project's own commit hooks ──────────────────── */
+
+/** The project's commit hook said no: the ticket has a stop card with ways out, and this says so. */
+export class HookStopped extends BoardActionError {}
+
+/** Tickets whose change is being saved, each with what ends its hook, and the commit each got: null when it had nothing to save. */
+const savingNow = new Map<string, AbortController>();
+const savedCommits = new Map<string, string | null>();
+const saveKey = (bp: BoardPaths, id: string) => `${bp.squadDir}\0${id}`;
+
+/** The hooks' say on this ticket, for the accept right after them. Undefined when they had none. */
+function takeSaved(bp: BoardPaths, id: string): string | null | undefined {
+  const commit = savedCommits.get(saveKey(bp, id));
+  savedCommits.delete(saveKey(bp, id));
+  return commit;
+}
+
+/** The board is closing, or the terminal command was stopped: a hook running on a save ends, and nothing is merged. */
+export function endSaves(bp: BoardPaths): void {
+  for (const [key, stop] of savingNow) if (key.startsWith(`${bp.squadDir}\0`)) stop.abort();
+}
+
+/** How the project's commit hooks run for a ticket: in the project's guard, where this computer has one. */
+function hookRun(bp: BoardPaths, t: Ticket): HookRun {
+  if (!t.worktree || !guardSupport().on) return {};
+  const allow = readMeta(bp).guard;
+  return { guard: ticketGuard(bp, { cwd: t.worktree, id: t.id, ...(allow ? { allow } : {}) }) };
+}
+
+/** The Builder went round once and it still says no: what is left is the person's or an engineer's. */
+const HOOK_STILL_NO = " The Builder tried, and it still says no. If the check itself is what needs changing, that is for you or an engineer: change it in the ticket's copy, or save without it and say why.";
+
+/** The stop for a hook that said no. Only the person can go past it, with a reason on the record. */
+function hookStopped(bp: BoardPaths, id: string, err: HookRefused, byItself?: string): HookStopped {
+  const words = err.timedOut
+    ? `This project has its own check that runs on every save. It did not finish in ${Math.round(err.limitMs / 60_000)} minutes, so the change is not saved yet. It is safe in the ticket's copy.`
+    : "This project has its own check that runs on every save, and it said no. The change is not saved yet. It is safe in the ticket's copy.";
+  const plain = `${words}${requireTicket(bp, id).hookFixTried ? HOOK_STILL_NO : ''}`;
+  writeLog({ level: 'warn', project: readMeta(bp).project, ticket: id, text: `${plain} ${err.said}` });
+  updateTicket(bp, id, (t) => {
+    t.waiting = { kind: 'stuck', summary: "The project's own check said no and needs one decision" };
+    t.live = false;
+    t.squad = null;
+    t.status = "Stopped: the project's own check said no";
+    t.stuck = { kind: 'hook', question: plain, ...(err.said ? { detail: `A commit hook said no:\n${err.said}` } : {}), options: wayOptions({ kind: 'hook', copy: Boolean(t.worktree && fs.existsSync(t.worktree)) }) };
+    if (byItself) addActivity(t, 'squad', `Not accepted by itself: the project's own check said no`);
+    else addActivity(t, 'you', 'Checked the proof. Looks right');
+    addActivity(t, 'release', "The project's own check said no, so the change is not saved yet");
+  });
+  return new HookStopped(`${plain} See the ways out on the ticket.`);
+}
+
+/**
+ * Work the hooks still owe a look (hookOwed) with no copy of the code left: they would have nothing to look at, and the
+ * branch would merge unseen. The copy is made again from the branch; with no branch either, it is a stop card.
+ */
+function copyForTheHooks(bp: BoardPaths, ticket: Ticket): Ticket {
+  if (!ticket.hookOwed || (ticket.worktree && fs.existsSync(ticket.worktree))) return ticket;
+  const repo = repoFor(readMeta(bp), ticket);
+  const root = path.join(bp.root, repo.path);
+  const branch = ticket.branch ?? `squad/${ticket.id.toLowerCase()}`;
+  if (!git(root, ['rev-parse', '--verify', '-q', `refs/heads/${branch}`], { allowFail: true }) && !pushedBranch(root, branch)) {
+    throw new HookRefused("The ticket's copy of the code and its branch are gone, so the project's own check has nothing to look at.", false, 0);
+  }
+  const wt = addWorktree(root, ticket.id, repo.base);
+  return updateTicket(bp, ticket.id, (t) => {
+    t.worktree = wt.dir;
+    t.branch = wt.branch;
+    addActivity(t, 'squad', "This ticket's copy of the code was gone, so squad-kit made it again for the project's own check");
+  });
+}
+
+/** Saves the accepted change with the hooks running beside everything else, so a slow hook never holds up the board. */
+async function saveBeside(bp: BoardPaths, ticket: Ticket, byItself?: string, signal?: AbortSignal): Promise<void> {
+  const key = saveKey(bp, ticket.id);
+  if (savingNow.has(key)) throw new BoardActionError(`${ticket.id} is being saved: the project's own check is still running.`);
+  const closing = new AbortController();
+  savingNow.set(key, closing);
+  try {
+    const release = ensureDraftRelease(bp, ticket.kind === 'bug' ? 'patch' : 'minor');
+    const copy = copyForTheHooks(bp, ticket);
+    repairCopy(bp, copy);
+    leaveProjectFiles(bp, copy, repoFor(readMeta(bp), copy).base);
+    stageTicketDocs(bp, { ...copy, stage: 'release', release: release.version, waiting: null, hookOwed: undefined });
+    savedCommits.set(key, await commitTicket(copy, { ...hookRun(bp, copy), signal: signal ? AbortSignal.any([signal, closing.signal]) : closing.signal }));
+    if (copy.hookOwed) updateTicket(bp, copy.id, (t) => delete t.hookOwed);
+  } catch (err) {
+    if (err instanceof CommitStopped) throw err;
+    if (err instanceof HookRefused) throw hookStopped(bp, ticket.id, err, byItself);
+    throw actionFailed(bp, ticket.id, `squad-kit could not save the change. It is safe in the ticket's copy, and an engineer can see why in squad-kit's log. ${byItself ? 'Press Try again.' : 'Press Looks right to try again.'}`, err);
+  } finally {
+    savingNow.delete(key);
+  }
+}
+
+/** Looks right from the board or the squad: `approve`, with the project's hooks running beside everything else. */
+export async function approveBeside(bp: BoardPaths, id: string): Promise<Ticket> {
+  const ticket = requireTicket(bp, id);
+  if (ticket.waiting?.kind === 'proof' && readMeta(bp).engine === 'live' && !openChange(ticket)) {
+    refuseBeforeDependency(bp, ticket);
+    await saveBeside(bp, ticket);
+  }
+  return approve(bp, id);
+}
+
+/** `decideStuck`, with "Try the save again" running the project's hooks beside everything else. */
+export async function decideStuckBeside(bp: BoardPaths, id: string, choice: number, input: { note?: string; reason?: string } = {}): Promise<Ticket> {
+  const ticket = requireTicket(bp, id);
+  if (ticket.waiting?.kind === 'stuck' && ticket.stuck?.options[choice]?.do === 'save-again') await saveBeside(bp, ticket);
+  return decideStuck(bp, id, choice, input);
+}
+
+/**
+ * The Builds by itself step: its commit, with the hooks beside everything else, before the accept. A refusal leaves its
+ * card. The step's Stop ends a hook that is running (CommitStopped goes on up, to the step's own Stop handling).
+ */
+export async function saveBeforeAccept(bp: BoardPaths, id: string, signal?: AbortSignal): Promise<boolean> {
+  const ticket = requireTicket(bp, id);
+  try {
+    await saveBeside(bp, ticket, 'the squad', signal);
+    return true;
+  } catch (err) {
+    if (err instanceof HookStopped) return false;
+    throw err;
+  }
+}
+
+/** The way out of a hook card that saves: back to the proof, with the hooks on, or off with a reason on the record. */
+function saveFromHookCard(bp: BoardPaths, id: string, choice: number, way: 'save-again' | 'skip-hooks', reason?: string): Ticket {
+  const meta = readMeta(bp);
+  const why = reason?.trim();
+  if (way === 'skip-hooks' && !why) throw new BoardActionError('Write why you save it without the check. It shows on the ticket, the pull request and the release notes.');
+  const ticket = updateTicket(bp, id, (t) => {
+    const option = t.stuck!.options[choice]!;
+    t.stuck!.options.forEach((o, i) => (o.chosen = i === choice));
+    addActivity(t, 'you', `Decided: ${option.name}${why ? `. Why: ${why}` : ''}`);
+    if (way === 'skip-hooks') {
+      t.overrides = [...(t.overrides ?? []), { gate: 'hooks', reason: why!, by: meta.user.name, at: now() }];
+      delete t.hookOwed;
+      tellLater(t, meta.engine, { kind: 'note', text: `Saved without the project's own check: ${why}`, noteKind: 'note' });
+    }
+    t.waiting = { kind: 'proof', summary: 'The proof is ready for you to check' };
+    t.status = 'Proof ready to check';
+  });
+  return acceptProof(bp, ticket, undefined, { noHooks: way === 'skip-hooks' });
 }
 
 /** The accepted branch clashes with the base: not a dead end, a stuck card with ways out. */
@@ -712,6 +874,7 @@ export async function handOver(bp: BoardPaths, id: string, input: HandOverInput)
     if (pushed) {
       x.branch = pushed.branch;
       x.baseCommit = x.baseCommit ?? pushed.baseCommit;
+      if (pushed.hookOwed) x.hookOwed = true;
     }
     x.live = false;
     x.squad = null;
@@ -1404,6 +1567,16 @@ export function wayOptions(stop: { gate?: StuckChoice['gate']; kind?: StuckChoic
       { do: 'retry', name: 'Check again', note: 'After an engineer adds tests to the project.' },
     ];
   }
+  // The project's own commit hook said no. Its words go to the Builder or an engineer; only the person can go past it.
+  if (stop.kind === 'hook') {
+    return [
+      { do: 'retry', name: 'Let the Builder fix it', note: "It gets the check's words and fixes the code. Then the checks, the review and the proof run again. It cannot change the check itself: that stays with you or an engineer." },
+      ...(stop.copy ? [{ do: 'yourself' as const, name: 'Fix it yourself', note: "Open the ticket's copy in your editor and fix it. Then the checks, review and proof run again." }] : []),
+      { do: 'save-again', name: 'Try the save again', note: 'After an engineer fixed the check, or when it was a one-off.' },
+      { do: 'skip-hooks', name: 'Save without this check', note: "Go on without the project's own check, this once. Write why: it shows on the ticket, the pull request and the release notes." },
+      { do: 'plan', name: 'Send it back to the plan', note: 'The Spec writer rewrites the plan with what went wrong.' },
+    ];
+  }
   if (stop.publish) {
     return [
       { do: 'retry', name: 'Try again', note: 'Push the branch and open the pull request again.' },
@@ -1483,6 +1656,9 @@ function wayOf(t: Ticket, option: StuckOption, choice: number): WayOut {
 
 export function decideStuck(bp: BoardPaths, id: string, choice: number, input: { note?: string; reason?: string } = {}): Ticket {
   const meta = readMeta(bp);
+  const before = requireTicket(bp, id);
+  const save = before.waiting?.kind === 'stuck' ? before.stuck?.options[choice]?.do : undefined;
+  if (save === 'save-again' || save === 'skip-hooks') return saveFromHookCard(bp, id, choice, save, input.reason);
   return updateTicket(bp, id, (t) => {
     if (t.waiting?.kind !== 'stuck' || !t.stuck) throw new BoardActionError(`${t.id} is not stuck.`);
     const option = t.stuck.options[choice];
@@ -1561,6 +1737,14 @@ export function decideStuck(bp: BoardPaths, id: string, choice: number, input: {
           t.stage = 'implement';
           t.status = 'Builder is fixing the review notes';
           scheduleSquad(t, 'review-fix', 0.5, 1);
+        } else if (kind === 'hook') {
+          // The hook's own words go to the Builder. The first line names the step on the card.
+          t.changeRequest = `Fix what the project's own check found\nsquad-kit tried to save this change and the project's own commit hook refused it. Fix what it says in the code. Do not change or remove the hook or its settings: squad-kit puts them back. If only a change to the hook itself could fix this, leave it and say so in your summary: that is for the person or an engineer to decide. Do not commit: squad-kit does the git. What the hook said:\n${t.stuck.detail ?? '(it said nothing)'}`;
+          t.hookFixTried = true;
+          t.stage = 'implement';
+          t.status = "Builder is fixing what the project's own check found";
+          t.gates = { checks: 'pending', review: 'pending', proof: 'pending' };
+          scheduleSquad(t, 'fix', 0.5, 1);
         } else if (gate === 'merge') {
           // The person asked for this one: on a track that merges by itself the count starts over, with this try first.
           if (t.selfAccept?.baseTried) t.selfAccept.baseTries = 1;
@@ -1732,7 +1916,7 @@ export function composeNotes(bp: BoardPaths, release: Release): string {
   const tickets = listTickets(bp).filter((t) => release.tickets.includes(t.id));
   const lines = tickets.map((t) => `- ${[t.releaseNote ?? `**${t.title}.**`, alsoChangedLine(t.alsoChanged)].filter(Boolean).join(' ')}`);
   const skipped = tickets.flatMap((t) =>
-    (t.overrides ?? []).map((o) => `- ${t.id} ${t.title}: went out with ${o.weakened?.length ? 'weakened tests' : o.gate === 'checks' ? 'failing checks' : o.gate === 'proof' ? 'an unfinished proof' : 'open review notes'}. ${o.by}: ${o.reason}`),
+    (t.overrides ?? []).map((o) => `- ${t.id} ${t.title}: went out ${o.weakened?.length ? 'with weakened tests' : o.gate === 'checks' ? 'with failing checks' : o.gate === 'proof' ? 'with an unfinished proof' : o.gate === 'hooks' ? "without the project's own check" : 'with open review notes'}. ${o.by}: ${o.reason}`),
   );
   return [`### What's new in ${release.version.replace(/^v/, '')}`, '', ...lines, ...(skipped.length ? ['', '### Continued anyway', '', ...skipped] : [])].join('\n');
 }
@@ -1798,11 +1982,12 @@ async function sendRelease(bp: BoardPaths, release: Release): Promise<Release> {
       foldNewerDrafts(bp, release.version);
       if (err instanceof PullRequestClash) {
         // Nothing changed yet: the clashing tickets leave the release with a way out, and the rest can go.
+        const withPr = err.tickets.every((id) => readTicket(bp, id)?.pr);
         for (const id of err.tickets) pullRequestClashed(bp, id);
         const one = err.tickets.length === 1;
         const left = readRelease(bp, release.version)?.tickets.length ?? 0;
         throw new BoardActionError(
-          `The release did not go out: the pull request of ${err.tickets.join(', ')} clashes with newer changes in ${err.base}. ${one ? 'It' : 'They'} left ${release.version} and ${one ? 'waits' : 'wait'} for you with ways out.${left ? ' Press Release again to send the rest.' : ''}`,
+          `The release did not go out: ${withPr ? 'the pull request of ' : ''}${err.tickets.join(', ')} ${one || withPr ? 'clashes' : 'clash'} with newer changes in ${err.base}. ${one ? 'It' : 'They'} left ${release.version} and ${one ? 'waits' : 'wait'} for you with ways out.${left ? ' Press Release again to send the rest.' : ''}`,
         );
       }
       throw new BoardActionError(`The release did not go out: ${(err as Error).message}`);
@@ -1899,6 +2084,57 @@ export async function pushReleaseAgain(bp: BoardPaths, version: string): Promise
     release.log = [...(release.log ?? []), ...done.log];
     if (done.unpushed.length) release.unpushed = done.unpushed;
     else delete release.unpushed;
+    writeRelease(bp, release);
+    closeReleased(bp, release);
+    return release;
+  } finally {
+    free();
+  }
+}
+
+/** squad-kit looked, and the release is not on its remote, or it could not ask: it goes only on a second, clear yes. */
+export class SentNotSure extends BoardActionError {}
+
+/**
+ * "It reached the remote another way": an engineer merged the release by hand, or squashed it, so Push again can never
+ * see it. Its tickets close, and nothing checks after this, so the person says why, and squad-kit looks on the
+ * remote first. Not there, or no answer: it says so, and only `anyway` goes on. The release's log keeps who said it,
+ * why, and what squad-kit found.
+ */
+export async function markReleaseSent(bp: BoardPaths, version: string, input: { reason?: string; anyway?: boolean } = {}): Promise<Release> {
+  const first = readRelease(bp, version);
+  if (!first) throw new BoardActionError(`There is no release ${version}.`);
+  if (!first.unpushed?.length) throw new BoardActionError(`${first.version} is pushed already. Nothing is left to send.`);
+  const why = input.reason?.trim();
+  if (!why) throw new BoardActionError("Write how it got there. It stays in the release's log, and its tickets close.");
+  let free: () => void;
+  try {
+    free = holdRelease(bp, first.version);
+  } catch (err) {
+    throw new BoardActionError((err as Error).message);
+  }
+  try {
+    const looks = await Promise.all(first.unpushed.map(async (u) => ({ u, ...(await onTheRemote(bp, u)) })));
+    const absent = looks.filter((l) => l.there === 'no');
+    const silent = looks.filter((l) => l.there === 'no-answer');
+    if ((absent.length || silent.length) && !input.anyway) {
+      throw new SentNotSure(
+        silent.length
+          ? `squad-kit could not reach your team's shared copy of the code, so it cannot check that ${first.version} is there. Its tickets close if you mark it. Do that only if you are sure.`
+          : `squad-kit looked in your team's shared copy of the code and did not find ${first.version} there. A merge by hand can look like this too, so you can still mark it. Its tickets close if you do.`,
+      );
+    }
+    const found = silent.length ? ' squad-kit could not check that' : absent.length ? ' squad-kit did not find it there' : ' squad-kit found it there';
+    const meta = readMeta(bp);
+    const release = readRelease(bp, version)!;
+    // Marking it sends nothing: a version tag made here stays here until someone sends it, and the record says so.
+    const tags = first.unpushed.filter((u) => u.tag);
+    release.log = [
+      ...(release.log ?? []),
+      { ok: true, text: `${meta.user.name} said it reached the shared copy of the code another way: ${why}.${found}` },
+      ...(tags.length ? [{ ok: false, text: `Its version tag is only on this computer: squad-kit sent nothing. An engineer can send it: ${tags.map((u) => `git push ${u.remote} ${u.tag}`).join(' ; ')}` }] : []),
+    ];
+    delete release.unpushed;
     writeRelease(bp, release);
     closeReleased(bp, release);
     return release;

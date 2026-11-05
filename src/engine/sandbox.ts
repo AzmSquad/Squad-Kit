@@ -126,6 +126,22 @@ export function packageCacheEnv(dir: string, env: NodeJS.ProcessEnv = process.en
   };
 }
 
+/**
+ * What no project command or agent may write in a copy, or in a person's own checkout: its `.git`, and the git folder a
+ * copy's `.git` points at (a project in a temp folder would otherwise have it writable). From there a command could
+ * plant a hook or a setting, or point the copy at another folder, and squad-kit's own git, which runs outside any guard,
+ * would believe it.
+ */
+export function gitPlaces(cwd: string): string[] {
+  const link = path.join(cwd, '.git');
+  try {
+    const own = path.resolve(cwd, /^gitdir: (.*)$/m.exec(fs.readFileSync(link, 'utf8'))![1]!);
+    return [link, own, path.resolve(own, fs.readFileSync(path.join(own, 'commondir'), 'utf8').trim())];
+  } catch {
+    return [link];
+  }
+}
+
 /** A path and, when it is a link (/tmp on a Mac), where it really is. */
 function withReal(dirs: string[]): string[] {
   const out = new Set<string>();
@@ -170,6 +186,7 @@ export function sandboxAsk(o: SandboxFor): SandboxAsk {
     noRead: [...new Set([...PRIVATE.map((p) => path.join(home, p)), ...withReal([squadHome()]), ...o.secrets, ...env])],
     // The step's own folders, inside squad-kit's: its copy, its proof folder, its package cache, its attachments.
     read: [...new Set(withReal([o.cwd, o.proof, ...(o.cache ? [o.cache] : []), ...o.read]))],
+    noWrite: [...new Set(withReal(gitPlaces(o.cwd)))],
     hosts: [...new Set([...PACKAGE_HOSTS, ...(o.hosts ?? [])])],
   };
 }

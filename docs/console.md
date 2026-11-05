@@ -23,8 +23,13 @@ in it also has a terminal command: turn on **Show commands** in the sidebar to s
 Press Ctrl-C in the terminal to stop the app. The squad picks up where it was next time.
 
 **Only you can open it.** The app listens on `127.0.0.1` only, so it cannot be reached from other computers,
-and the link carries a private key that every request must send. Mockups the squad makes run sealed off: no
-network, no access to the board.
+and the link carries a private key that every request must send. The key in a link works for reads only, and the app
+answers only at its own address: a page on another site, or on another port of this computer, gets nothing. Mockups
+the squad makes run sealed off: no network, no access to the board. HTML and SVG from a project download instead of
+opening at the board's address.
+
+**If the app stops**, a banner shows over every page within 5 seconds and goes by itself when the app is back. What you
+were typing stays. A run whose output goes to files keeps running when its terminal closes.
 
 ## Home
 
@@ -104,7 +109,8 @@ Click a card to open it on the right. **Ask a question** is at the top of every 
 [Chat](#chat)). The button next to Close makes it **Full width** (the choice is remembered in this browser); **Hand
 over** and **Propose a change** are in the **⋯** menu, and Propose a change is also on the bottom bar. At the top: the
 ticket's name and title, links to its tracker item and
-pull request, who made it, its **owner**, its track (Full, Express or Builds by itself) and its repo. A row of
+pull request, who made it, its **owner** (when they cannot work on it, **Take it** moves it to you, with a reason;
+terminal: `squad take-back <ticket> --reason "…"`), its track (Full, Express or Builds by itself) and its repo. A row of
 steps shows how far it is. A ticket built from a breakdown says where it comes from ("From BR-1 › Payments ›
 Invoices and refunds › S-14") and lists what the squad **decided for you**, each with **Change**. When it stops
 for a gap or a clash, the card says which (**Missing in the BRD**, **Two parts clash**), marks the option the
@@ -279,7 +285,9 @@ answers shows in **Waiting for you** and in the sidebar's count. The whole flow 
 - **Backlog**: your tracker's sprint, in backlog order. **Start** puts an item on the board.
 - **Waiting for you**: this project's cards, all of them.
 - **Releases**: the next release, ready to read and release, and every past release with its notes and the
-  bugs found after it.
+  bugs found after it. A release whose push was refused says why in plain words. **It reached it another way** closes
+  one that was merged by hand: it needs a reason, looks on the remote and asks again if it cannot find it. Terminal:
+  `squad release --mark-sent --reason "…" [--anyway]`.
 - **Architecture**: every decision. **Map** shows how decisions build on each other, **Timeline** shows them per
   ticket (press **Play the history**), **Stack** shows each technology in the code and why it is there, plus
   **All decisions**, **Project map** and **Lessons**.
@@ -321,6 +329,15 @@ profiles, squad-kit's own folder or the `.env` files in your project folder, and
 code-host keys. When a project truly needs a file outside its copy, the check stops with one plain sentence ("A check
 needed a file outside its copy, and squad-kit blocked it. An engineer can allow it in Settings."), and the file's path
 is in the details. On Linux the guard needs bubblewrap, and this page and `squad doctor` say how to turn it on.
+
+**The project's own commit hooks** run in that guard too, at one moment only: when a change is saved. They look at it on
+a stand-in branch, so while they run the copy's branch reads `squad/saving/<branch>/now` (a hook that reads the branch
+name sees that). A hook can use git's stash, as lint-staged does, but cannot move a real branch, fetch, or change a git
+setting: a hook that needs those says no, and the ticket gets the usual card with **Save without this check**. npm and
+npx get a cache folder of the copy's own, so `npx` in a hook works with no packages installed. No other hook runs:
+squad-kit runs no `pre-push`, `post-merge` or `post-checkout`, since the project's own checks have run by then. A push
+from your own terminal still runs yours. A project that uses Git LFS still gets its large files uploaded when squad-kit
+pushes.
 
 **Windows: less protected.** On Windows, squad-kit does not guard the agents' own commands or the project's own tests
 and app, so they can reach other files on the computer. Screenshots and the app still go through the window. Use it on

@@ -4,6 +4,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { freePort } from './support/tiny-app.js';
 
 /**
  * "Stop it and try again" on the Looks stuck card. A step that needs the app waits while a program holds the app's
@@ -33,16 +34,6 @@ let bp: BoardPaths;
 let port: number;
 const started: number[] = [];
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-function freePort(): Promise<number> {
-  return new Promise((resolve) => {
-    const srv = net.createServer();
-    srv.listen(0, '127.0.0.1', () => {
-      const p = (srv.address() as net.AddressInfo).port;
-      srv.close(() => resolve(p));
-    });
-  });
-}
 
 /** A program that holds the port and never answers: it takes the connection and says nothing. */
 const HOLD = (p: number) => `require('net').createServer(() => {}).listen(${p}, '127.0.0.1')`;

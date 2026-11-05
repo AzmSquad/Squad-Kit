@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ApiError, PROJECT, api, apiPath, send, worthRetrying } from '../api/client';
+import { ApiError, PROJECT, api, apiPath, currentToken, send, worthRetrying } from '../api/client';
 import type { BreakdownRow, BreakdownView, SendPreview } from '../api/requirements-types';
 import { jobBusy, type SendPlanned } from './requirements';
 import { usePrefs } from './prefs';
@@ -9,7 +9,6 @@ import { usePrefs } from './prefs';
  * fast while something moves on it (the Analyst, the build, a send) and slowly when it waits for the person.
  */
 
-const TOKEN_KEY = 'squad.console.token';
 
 export function useBreakdowns(poll = 3000) {
   return useQuery({ queryKey: ['requirements'], queryFn: () => api<{ breakdowns: BreakdownRow[] }>('/api/v1/requirements'), refetchInterval: poll });
@@ -91,7 +90,7 @@ export function actionError(err: unknown): string {
 
 /** A file of the breakdown (the document, its text, its pictures) as a link: links cannot send a header. */
 export function reqFileUrl(id: string, file: string): string {
-  const token = sessionStorage.getItem(TOKEN_KEY) ?? '';
+  const token = currentToken() ?? '';
   return `${apiPath(`/api/v1/requirements/${encodeURIComponent(id)}/file`)}?path=${encodeURIComponent(file)}&t=${encodeURIComponent(token)}`;
 }
 

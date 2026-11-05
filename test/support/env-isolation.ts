@@ -11,10 +11,19 @@ fs.writeFileSync(path.join(process.env.SQUAD_KIT_HOME, 'settings.yaml'), 'checkF
 
 // The same git settings on every machine: a laptop's own name or branch default never leaks into a test, and a CI
 // runner with none set behaves like a laptop.
-const gitConfig = path.join(process.env.SQUAD_KIT_HOME, 'gitconfig');
+// Beside squad-kit's folder, not in it: a commit runs in the project's guard, which hides that folder from git too.
+const gitConfig = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'squad-gitconfig-')), 'gitconfig');
 fs.writeFileSync(gitConfig, '[user]\n\tname = Momen\n\temail = momen@example.com\n[init]\n\tdefaultBranch = main\n');
 process.env.GIT_CONFIG_GLOBAL = gitConfig;
 process.env.GIT_CONFIG_NOSYSTEM = '1';
+
+// A test never touches the person's clipboard: these stand-ins come first on the PATH, and only say what they were given.
+const standIns = path.join(process.env.SQUAD_KIT_HOME, 'stand-in-bin');
+fs.mkdirSync(standIns, { recursive: true });
+for (const tool of ['pbcopy', 'xclip', 'xsel', 'wl-copy', 'termux-clipboard-set']) {
+  fs.writeFileSync(path.join(standIns, tool), '#!/bin/sh\ncat > "$SQUAD_KIT_HOME/clipboard.txt"\n', { mode: 0o755 });
+}
+process.env.PATH = `${standIns}${path.delimiter}${process.env.PATH ?? ''}`;
 
 // A locale for git, as a person's terminal has. Started with none (an app opened from the Dock, an editor's test
 // runner), git on a Mac asks the system for the person's languages on every start, through one shared system service:

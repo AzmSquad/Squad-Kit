@@ -6,11 +6,11 @@ import type { SquadPaths } from '../../core/paths.js';
 import {
   BoardActionError,
   answerQuestions,
-  approve,
+  approveBeside,
   askAbout,
   composeNotes,
   createTicket,
-  decideStuck,
+  decideStuckBeside,
   decideTestCommand,
   pullTicket,
   readCodeAgain,
@@ -22,6 +22,8 @@ import {
   approveTechDecision,
   discardTechDecision,
   releaseVersion,
+  markReleaseSent,
+  SentNotSure,
   pushReleaseAgain,
   reportBug,
   requestChange,
@@ -87,6 +89,8 @@ import { mountCostApi } from './cost.js';
 import { freePortAndRetry } from '../../engine/free-port.js';
 import { changeDecided } from '../../board/auto.js';
 import { lookAgain } from '../../engine/try-app.js';
+import { takeBack } from '../../engine/handover.js';
+import { fileTroubleWords, isDiskTrouble } from '../../core/file-trouble.js';
 
 const DAY = 86_400_000;
 
@@ -125,6 +129,7 @@ async function act(c: Context, fn: () => unknown) {
   try {
     return c.json(((await fn()) as object) ?? { ok: true });
   } catch (err) {
+    if (isDiskTrouble(err)) return c.json({ error: fileTroubleWords(err) }, 400);
     if (err instanceof BoardActionError || err instanceof Error) return c.json({ error: err.message }, 400);
     throw err;
   }
@@ -408,7 +413,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
   });
 
   // Looks right, and Something's wrong below, stop the copy of the app being tried at once (engine/try-app.ts).
-  app.post('/api/v1/tickets/:id/approve', (c) => act(c, () => tried(approve(bp, c.req.param('id')))));
+  app.post('/api/v1/tickets/:id/approve', (c) => act(c, async () => tried(await approveBeside(bp, c.req.param('id')))));
   app.post('/api/v1/tickets/:id/stop', (c) => act(c, () => stopTicket(bp, c.req.param('id'))));
   app.post('/api/v1/tickets/:id/unstick', (c) => act(c, () => endStuckCommand(bp, c.req.param('id'))));
   // Free the port and try again: only a program squad-kit started on the app's port (src/engine/free-port.ts).
@@ -536,9 +541,15 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     return act(c, () => handOver(bp, c.req.param('id'), { to: b.to ?? '', note: b.note }));
   });
 
+  // A ticket nobody can touch: handed to a misspelled name, or to someone who left.
+  app.post('/api/v1/tickets/:id/take-back', async (c) => {
+    const b = await body<{ reason?: string }>(c);
+    return act(c, () => takeBack(bp, c.req.param('id'), b.reason ?? ''));
+  });
+
   app.post('/api/v1/tickets/:id/decide', async (c) => {
     const b = await body<{ choice?: number; note?: string; reason?: string }>(c);
-    return act(c, () => decideStuck(bp, c.req.param('id'), Number(b.choice), { note: b.note, reason: b.reason }));
+    return act(c, () => decideStuckBeside(bp, c.req.param('id'), Number(b.choice), { note: b.note, reason: b.reason }));
   });
 
   // The Architect's change to the test command: { use: true } takes it, { use: false } keeps the current one.
@@ -585,6 +596,19 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
 
   // The push of a release failed: it stays open until its commits and tags reach the remote.
   app.post('/api/v1/releases/:v/push', (c) => act(c, () => pushReleaseAgain(bp, c.req.param('v'))));
+  // It reached the remote another way (merged by hand, or a pull request squashed it): the person says so.
+  // Not there, or no answer from the remote: 409, with the words to show. The same call with `anyway` is the second yes.
+  app.post('/api/v1/releases/:v/mark-sent', async (c) => {
+    const b = (await c.req.json().catch(() => ({}))) as { reason?: string; anyway?: boolean };
+    try {
+      return c.json(await markReleaseSent(bp, c.req.param('v'), { ...(b.reason ? { reason: b.reason } : {}), ...(b.anyway === true ? { anyway: true } : {}) }));
+    } catch (err) {
+      if (err instanceof SentNotSure) return c.json({ error: err.message }, 409);
+      return act(c, () => {
+        throw err;
+      });
+    }
+  });
 
   app.get('/api/v1/releases/:v', (c) => {
     const r = readRelease(bp, c.req.param('v'));

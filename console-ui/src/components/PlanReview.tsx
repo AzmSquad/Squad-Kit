@@ -2,6 +2,8 @@ import { useState, type ReactNode } from 'react';
 import { MessageSquare, Pencil, X } from 'lucide-react';
 import type { Criterion, PlanComment, PlanPart, Ticket } from '../api/types';
 import { useAct } from '../lib/data';
+import { clearDraft, draftKey, useDraft } from '../lib/drafts';
+import { PROJECT } from '../api/client';
 
 /** Review a spec or design like a document: comment on any part, or edit it yourself. */
 export interface Review {
@@ -15,8 +17,8 @@ export interface Review {
 const same = (a: PlanPart, b: PlanPart) => a.part === b.part && (a.index ?? 0) === (b.index ?? 0);
 
 export function Part({ review, at, children }: { review?: Review; at: PlanPart; children: ReactNode }) {
-  const [mode, setMode] = useState<'comment' | 'edit' | null>(null);
-  const [text, setText] = useState('');
+  const [text, setText] = useDraft(review?.t.id ?? 'none', `comment-${at.part}-${at.index ?? 0}`, '');
+  const [mode, setMode] = useState<'comment' | 'edit' | null>(text ? 'comment' : null);
   if (!review) return <>{children}</>;
   const mine = review.comments.map((c, i) => ({ c, i })).filter(({ c }) => same(c, at));
   const done = () => {
@@ -75,12 +77,18 @@ function EditPart({ review, at, onDone }: { review: Review; at: PlanPart; onDone
   const act = useAct();
   const t = review.t;
   const i = at.index ?? 0;
-  const [text, setText] = useState(at.part === 'story' ? (t.story ?? '') : at.part === 'step' ? (t.steps?.[i]?.title ?? '') : '');
-  const [c, setC] = useState<Criterion>(t.criteria?.[i] ?? { given: '', when: '', then: '' });
+  const [text, setText] = useDraft(t.id, `edit-${at.part}-${i}`, at.part === 'story' ? (t.story ?? '') : at.part === 'step' ? (t.steps?.[i]?.title ?? '') : '');
+  const [c, setC] = useDraft<Criterion>(t.id, `edit-criterion-${i}`, t.criteria?.[i] ?? { given: '', when: '', then: '' });
   const save = () =>
     act.mutate(
       { path: `/api/v1/tickets/${t.id}/plan/edit`, body: at.part === 'criterion' ? { ...at, criterion: c } : { ...at, text }, done: 'Edited. Your wording stays.' },
-      { onSuccess: onDone },
+      {
+        onSuccess: () => {
+          clearDraft(draftKey(PROJECT, t.id, `edit-${at.part}-${i}`));
+          clearDraft(draftKey(PROJECT, t.id, `edit-criterion-${i}`));
+          onDone();
+        },
+      },
     );
   return (
     <div className="editpart">

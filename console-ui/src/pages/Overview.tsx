@@ -12,6 +12,7 @@ import { SetupCard } from '../components/Setup';
 import { NewTicketDialog } from '../components/dialogs';
 import { Avatar } from '../components/Chat';
 import { ChatMarkdown } from '../components/ChatMarkdown';
+import { useDraft } from '../lib/drafts';
 
 /**
  * The Overview, first in the sidebar. The first time it is the handover: what squad-kit found, how the code fits
@@ -205,7 +206,7 @@ function Handover({ v, onChange }: { v: OverviewView; onChange?(): void }) {
 /** "Something is wrong": a talk with the Architect, then the read again with what was said. */
 function Talk({ t }: { t: OverviewTalk }) {
   const act = useAct();
-  const [text, setText] = useState('');
+  const [text, setText] = useDraft('overview', 'talk', '');
   const said = t.messages.some((m) => m.who === 'you');
   const send = (msg = text) => {
     if (!msg.trim() || t.thinking) return;

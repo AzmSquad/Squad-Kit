@@ -167,7 +167,7 @@ export interface OffScreen {
 }
 
 /** The ways out of a stop. Every stop has at least Try again and one more; a step paused on a cap has Give it more and Stop. */
-export type WayOut = 'retry' | 'yourself' | 'continue' | 'plan' | 'skip-pr' | 'more' | 'stop' | 'add-test' | 'no-tests';
+export type WayOut = 'retry' | 'yourself' | 'continue' | 'plan' | 'skip-pr' | 'more' | 'stop' | 'add-test' | 'no-tests' | 'save-again' | 'skip-hooks';
 
 export interface StuckOption extends DecisionOption {
   /** What the choice does. Older boards have no `do`: their first choice tries again, the second goes to the plan. */
@@ -190,9 +190,10 @@ export interface StuckChoice {
    * Why the gate stopped, when it is not a plain failure: tests made weaker, no tests at all, screenshots that failed
    * squad-kit's check, a project command that needed a file outside its copy and squad-kit's guard blocked it,
    * screenshots that show a "done when" does not work after the Builder's last round ('broken'), or a "done when" the
-   * Tester could not show on a screen after its last retake ('not-shown').
+   * Tester could not show on a screen after its last retake ('not-shown'). 'hook': the project's own commit hook said
+   * no when squad-kit saved the accepted change.
    */
-  kind?: 'weakened' | 'no-tests' | 'bad-proof' | 'guard' | 'broken' | 'not-shown';
+  kind?: 'weakened' | 'no-tests' | 'bad-proof' | 'guard' | 'broken' | 'not-shown' | 'hook';
   /** For failed checks: which ones failed (for weakened tests: what was weakened), so continuing past them is remembered for them. */
   checks?: string[];
   /** The plain reasons, one per line on the card: "test/booking.test.ts was deleted (4 tests)". */
@@ -203,7 +204,8 @@ export interface StuckChoice {
 
 /** The person went past a failed gate on purpose. Shown on the ticket, the pull request and the release notes. */
 export interface GateOverride {
-  gate: 'checks' | 'review' | 'proof';
+  /** 'hooks': the person saved the change without the project's commit hooks. */
+  gate: 'checks' | 'review' | 'proof' | 'hooks';
   /** Continued past tests made weaker, not past failing checks: what was weakened. */
   weakened?: string[];
   reason: string;
@@ -534,7 +536,15 @@ export interface Ticket {
   worktree?: string;
   branch?: string;
   baseCommit?: string;
+  /**
+   * Work was saved on its branch with the project's commit hooks saying no (the work so far, before the base came in or
+   * a hand over). They look only at what is staged, so at accept they run on the whole change, and this ends when they
+   * pass or when the person goes past them.
+   */
+  hookOwed?: boolean;
   tries?: number;
+  /** "Let the Builder fix it" was chosen on the project's own check: the next refusal says what is left. */
+  hookFixTried?: boolean;
   /** The Builder's runs that did not get through: the run itself failed, or the checks or the Reviewer turned it back. */
   fails?: number;
   reviewRound?: number;
@@ -588,6 +598,8 @@ export interface Ticket {
   builtPlan?: string;
   notes?: TicketNote[];
   overrides?: GateOverride[];
+  /** New tries so far after a network or service problem that usually passes by itself. */
+  blips?: number;
   /** Full track: who approved the spec. The Architect writes the design only after this. */
   specApproved?: { by: string; at: string };
   /** The Architect's HTML mockup of the main screen, approved with the design. */
@@ -794,7 +806,10 @@ export interface UnpushedRelease {
   commit: string;
   /** The tag to push with it, when the release tags. */
   tag?: string;
+  /** git's own words, for engineers. */
   error: string;
+  /** What the person reads: what happened and what to do. Older releases have only `error`. */
+  plain?: string;
 }
 
 export interface Decision {

@@ -1,5 +1,6 @@
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 import yaml from 'js-yaml';
 import { squadHome } from './home.js';
 
@@ -61,11 +62,25 @@ export function chooseProject(root: string | null): void {
   chosenProject = root;
 }
 
+/** A home folder or the disk's top folder is never a project: everything else on the computer sits under it. */
+export function isOwnFolder(dir: string): boolean {
+  const abs = path.resolve(dir);
+  return abs !== path.resolve(os.homedir()) && abs !== path.parse(abs).root;
+}
+
+/** Said wherever a project folder is needed and the terminal is in a home folder or the disk's top folder. */
+export const NOT_A_PROJECT_FOLDER =
+  'squad-kit works inside a project folder, not your home folder. Open the terminal in your project folder (or a new, empty one) and run the command there. To open squad-kit with all your projects, run: squad';
+
+/**
+ * The nearest project at or above a folder. A `.squad` left in the home folder or the disk's top folder does not count:
+ * otherwise every folder under it would open it.
+ */
 export function findSquadRoot(startDir: string = chosenProject ?? process.cwd()): string | null {
   let current = path.resolve(startDir);
   const { root } = path.parse(current);
   while (true) {
-    if (fs.existsSync(path.join(current, SQUAD_DIR, 'config.yaml'))) {
+    if (isOwnFolder(current) && fs.existsSync(path.join(current, SQUAD_DIR, 'config.yaml'))) {
       return current;
     }
     if (current === root) return null;
@@ -76,6 +91,7 @@ export function findSquadRoot(startDir: string = chosenProject ?? process.cwd())
 export function requireSquadRoot(startDir: string = chosenProject ?? process.cwd()): string {
   const root = findSquadRoot(startDir);
   if (!root) {
+    if (!isOwnFolder(startDir)) throw new Error(NOT_A_PROJECT_FOLDER);
     throw new Error(
       `No .squad/ directory found (searched upward from ${startDir}). Run \`squad init\` first.`,
     );

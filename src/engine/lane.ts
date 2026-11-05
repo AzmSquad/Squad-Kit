@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { git } from './git.js';
+import { git, stageAll } from './git.js';
+import { HOOK_PACKAGE_KEYS } from './hook-files.js';
 
 /**
  * Agents stay in their lane. A rule for an agent's tools can be got around with the shell, so squad-kit also looks at
@@ -11,8 +12,8 @@ import { git } from './git.js';
  * be where squad-kit left them.
  */
 
-/** A protected file as it was: its bytes, or where a link pointed. */
-type Kept = { data: Buffer } | { link: string };
+/** A protected file as it was: its bytes and whether it can run (a hook that cannot is skipped without a word), or where a link pointed. */
+type Kept = { data: Buffer; mode: number } | { link: string };
 
 export interface Lane {
   dir: string;
@@ -21,8 +22,12 @@ export interface Lane {
   /** The protected names, as AgentRun.protectedFiles gives them. */
   names: string[];
   kept: Map<string, Kept>;
+  /** The hook settings in the copy's package.json, as they were. */
+  hookSettings?: string;
   /** Every file in the copy as a git tree, when the whole copy must stay as it was. */
   tree?: string;
+  /** The copy's `.git` file as it was: it says where git's folder and settings are. */
+  gitLink?: Buffer;
 }
 
 export interface LaneCheck {
@@ -36,7 +41,9 @@ export interface LaneCheck {
 
 /** The copy before a step. `wholeCopy` watches every file git sees, not just the protected ones. */
 export function watchLane(dir: string, names: string[], wholeCopy = false): Lane {
-  const lane: Lane = { dir, ...placeOf(dir), names, kept: readKept(dir, names) };
+  const settings = hookSettings(dir);
+  const link = gitLinkOf(dir);
+  const lane: Lane = { dir, ...placeOf(dir), names, kept: readKept(dir, names), ...(settings ? { hookSettings: settings } : {}), ...(link ? { gitLink: link } : {}) };
   if (wholeCopy) {
     const tree = treeOf(dir);
     if (tree) lane.tree = tree;
@@ -52,12 +59,69 @@ export function checkLane(lane: Lane, skip: string[] = []): LaneCheck {
   const out: LaneCheck = { restored: [], putBack: [] };
   const { dir } = lane;
   if (!fs.existsSync(dir)) return out;
+  // First of all: every git below would believe it.
+  const relinked = putGitLinkBack(lane);
   const { head, branch } = placeOf(dir);
-  if (branch !== lane.branch) out.moved = branch ? `the copy is on ${branch}, not ${lane.branch}` : `the copy left ${lane.branch}`;
+  if (relinked) out.moved = "the copy's link to its git folder was changed";
+  else if (branch !== lane.branch) out.moved = branch ? `the copy is on ${branch}, not ${lane.branch}` : `the copy left ${lane.branch}`;
   else if (head !== lane.head) out.moved = `${branch || 'HEAD'} moved from ${head8(lane.head)} to ${head8(head)}`;
   if (lane.tree && !out.moved) out.putBack = putTreeBack(dir, lane.tree, skip);
-  out.restored = putKeptBack(dir, lane.kept, readKept(dir, lane.names));
+  out.restored = [...putKeptBack(dir, lane.kept, readKept(dir, lane.names)), ...putSettingsBack(dir, lane.hookSettings)];
   return out;
+}
+
+/** The `.git` file of a copy, which a command must not change. A person's own checkout has a folder there instead. */
+function gitLinkOf(dir: string): Buffer | undefined {
+  try {
+    const file = path.join(dir, '.git');
+    return fs.lstatSync(file).isFile() ? fs.readFileSync(file) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Puts the `.git` file back when a step changed it. True when it had to. */
+function putGitLinkBack(lane: Lane): boolean {
+  if (!lane.gitLink || gitLinkOf(lane.dir)?.equals(lane.gitLink)) return false;
+  const file = path.join(lane.dir, '.git');
+  fs.rmSync(file, { force: true, recursive: true });
+  fs.writeFileSync(file, lane.gitLink);
+  return true;
+}
+
+function readPackage(dir: string): Record<string, unknown> | null {
+  try {
+    const json = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')) as unknown;
+    return json && typeof json === 'object' && !Array.isArray(json) ? (json as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The hook settings of the copy's package.json, in one string to compare. Undefined when it has none. */
+function hookSettings(dir: string): string | undefined {
+  const pkg = readPackage(dir);
+  const kept = Object.fromEntries(HOOK_PACKAGE_KEYS.filter((k) => pkg?.[k] !== undefined).map((k) => [k, pkg![k]]));
+  return Object.keys(kept).length ? JSON.stringify(kept) : undefined;
+}
+
+/** Only the hook settings go back: the rest of package.json is the step's work. The ones it changed, by name. */
+function putSettingsBack(dir: string, before: string | undefined): string[] {
+  const after = hookSettings(dir);
+  if (after === before) return [];
+  const pkg = readPackage(dir);
+  if (!pkg) return [];
+  const was = (before ? JSON.parse(before) : {}) as Record<string, unknown>;
+  const now = (after ? JSON.parse(after) : {}) as Record<string, unknown>;
+  const changed = HOOK_PACKAGE_KEYS.filter((k) => JSON.stringify(was[k]) !== JSON.stringify(now[k]));
+  for (const k of changed) {
+    if (was[k] === undefined) delete pkg[k];
+    else pkg[k] = was[k];
+  }
+  const file = path.join(dir, 'package.json');
+  const indent = /^\{\r?\n([ \t]+)/.exec(fs.readFileSync(file, 'utf8'))?.[1] ?? '  ';
+  fs.writeFileSync(file, `${JSON.stringify(pkg, null, indent)}\n`);
+  return changed.map((k) => `package.json (${k})`);
 }
 
 /** The last commit and the branch the copy is on (empty when it is on none). */
@@ -75,14 +139,20 @@ function listed(out: string): string[] {
 }
 
 /**
+ * What a hook manager's install makes in an ignored folder of its own. It comes new from the person's checkout before
+ * every commit (bringHookRunner), so there is nothing to watch: an `npm install` that makes it changes no check.
+ */
+const HOOK_RUNNER = /(?:^|\/)\.husky\/_\//;
+
+/**
  * The protected files in the copy. At its top, ignored files count too (a local settings file usually is ignored);
- * deeper down only the files git sees, so installed packages never count.
+ * deeper down only the files git sees, so installed packages never count. A name that starts with "/" is only at the top.
  */
 function protectedPaths(dir: string, names: string[]): string[] {
-  const top = names.map((n) => n.replace(/\/$/, ''));
-  const deep = names.map((n) => (n.endsWith('/') ? `:(glob)**/${n}**` : `:(glob)**/${n}`));
+  const top = names.map((n) => n.replace(/^\//, '').replace(/\/$/, ''));
+  const deep = names.filter((n) => !n.startsWith('/')).map((n) => (n.endsWith('/') ? `:(glob)**/${n}**` : `:(glob)**/${n}`));
   const ls = (args: string[]) => listed(git(dir, ['ls-files', '-z', '--cached', '--others', ...args], { allowFail: true }));
-  return [...new Set([...ls(['--', ...top]), ...ls(['--exclude-standard', '--', ...deep])])];
+  return [...new Set([...ls(['--', ...top]), ...(deep.length ? ls(['--exclude-standard', '--', ...deep]) : [])])].filter((f) => !HOOK_RUNNER.test(f));
 }
 
 function readKept(dir: string, names: string[]): Map<string, Kept> {
@@ -93,7 +163,7 @@ function readKept(dir: string, names: string[]): Map<string, Kept> {
     try {
       const st = fs.lstatSync(file);
       if (st.isSymbolicLink()) kept.set(rel, { link: fs.readlinkSync(file) });
-      else if (st.isFile()) kept.set(rel, { data: fs.readFileSync(file) });
+      else if (st.isFile()) kept.set(rel, { data: fs.readFileSync(file), mode: st.mode & 0o777 });
     } catch {
       // Listed by git but not on disk: it was not there.
     }
@@ -104,7 +174,7 @@ function readKept(dir: string, names: string[]): Map<string, Kept> {
 function same(a: Kept | undefined, b: Kept | undefined): boolean {
   if (!a || !b) return a === b;
   if ('link' in a || 'link' in b) return 'link' in a && 'link' in b && a.link === b.link;
-  return a.data.equals(b.data);
+  return a.data.equals(b.data) && a.mode === b.mode;
 }
 
 function putKeptBack(dir: string, before: Map<string, Kept>, after: Map<string, Kept>): string[] {
@@ -118,7 +188,10 @@ function putKeptBack(dir: string, before: Map<string, Kept>, after: Map<string, 
     makeParents(dir, rel);
     fs.rmSync(file, { force: true, recursive: true });
     if ('link' in was) fs.symlinkSync(was.link, file);
-    else fs.writeFileSync(file, was.data);
+    else {
+      fs.writeFileSync(file, was.data);
+      fs.chmodSync(file, was.mode);
+    }
   }
   return [...changed, ...added].sort();
 }
@@ -162,7 +235,7 @@ function treeOf(dir: string): string | undefined {
       fs.utimesSync(tmp, st.atime, st.mtime);
     }
     const env = { GIT_INDEX_FILE: tmp };
-    git(dir, ['add', '-A'], { env });
+    stageAll(dir, env);
     return git(dir, ['write-tree'], { env }) || undefined;
   } catch {
     return undefined;
@@ -174,7 +247,7 @@ function treeOf(dir: string): string | undefined {
 function putTreeBack(dir: string, before: string, skip: string[]): string[] {
   const after = treeOf(dir);
   if (!after || after === before) return [];
-  const rows = listed(git(dir, ['diff', '--name-status', '--no-renames', '--no-ext-diff', '-z', before, after]));
+  const rows = listed(git(dir, ['diff', '--name-status', '--no-renames', '-z', before, after]));
   const added: string[] = [];
   const back: string[] = [];
   for (let i = 0; i + 1 < rows.length; i += 2) {

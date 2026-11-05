@@ -20,6 +20,7 @@ import { needsYou, testChangeLine, testChangeWaits } from '../lib/waiting';
 import { withoutComments } from '../lib/text';
 import { BreakdownWaitCard, WaitStopTag, useBreakdownWaits } from '../components/BreakdownWaits';
 import { stopKind } from '../lib/auto';
+import { useDraft } from '../lib/drafts';
 
 /* ── Waiting for you ───────────────────────────────────── */
 
@@ -275,7 +276,7 @@ function AgentDialog({ agent, onClose }: { agent: AgentInfo; onClose: () => void
   const [myModel, setMyModel] = useState(agent.youRole?.model ?? '');
   const [team, setTeam] = useState<Record<string, LevelChoice>>(() => Object.fromEntries(agent.levels.map((r) => [r.step, r.team ?? {}])));
   const [you, setYou] = useState<Record<string, LevelChoice>>(() => Object.fromEntries(agent.levels.map((r) => [r.step, r.you ?? {}])));
-  const [instructions, setInstructions] = useState(clean(agent.instructions));
+  const [instructions, setInstructions, clearInstructions] = useDraft(`agent-${agent.role}`, 'instructions', clean(agent.instructions));
   const [steps, setSteps] = useState<Record<string, string>>(() => Object.fromEntries(agent.stepList.map((s) => [s.id, clean(agent.steps?.[s.id])])));
   const core = useQuery({ queryKey: ['core-prompts', agent.role], queryFn: () => api<CorePrompts>(`/api/v1/agents/${agent.role}/prompts`) });
   const save = async () => {
@@ -293,7 +294,12 @@ function AgentDialog({ agent, onClose }: { agent: AgentInfo; onClose: () => void
     for (const [step, c] of Object.entries(team)) if (c.level || c.effort) levels[`${agent.role}.${step}`] = c;
     act.mutate(
       { path: `/api/v1/agents/${agent.role}`, method: 'PUT', body: { tool, model, instructions, steps, levels }, done: `${agent.name} saved. It uses this from its next step.` },
-      { onSuccess: onClose },
+      {
+        onSuccess: () => {
+          clearInstructions();
+          onClose();
+        },
+      },
     );
   };
   return (

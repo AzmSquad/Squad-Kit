@@ -6,7 +6,8 @@ import net from 'node:net';
 import http from 'node:http';
 import { execSync, spawn } from 'node:child_process';
 import { boardPaths, readMeta, writeMeta, type BoardPaths } from '../src/board/store.js';
-import { AppRunner, stopApps, appRunner } from '../src/engine/run-app.js';
+import { AppRunner, portTaken, stopApps, appRunner } from '../src/engine/run-app.js';
+import { freePort } from './support/tiny-app.js';
 
 /**
  * Your apps: squad-kit runs the app from its own copy of main, never the person's checkout, waits for the address,
@@ -30,15 +31,6 @@ const hasLsof = (() => {
     return false;
   }
 })();
-
-function freePort(): Promise<number> {
-  return new Promise((resolve) => {
-    const srv = net.createServer().listen(0, '127.0.0.1', () => {
-      const p = (srv.address() as net.AddressInfo).port;
-      srv.close(() => resolve(p));
-    });
-  });
-}
 
 /** The app serves version.txt, after a short start, and starts a helper process of its own. */
 const SERVER = `
@@ -73,7 +65,7 @@ function alive(pid: number): boolean {
 }
 
 async function text(url: string): Promise<string> {
-  return fetch(url, { signal: AbortSignal.timeout(2000) }).then((r) => r.text());
+  return fetch(url, { signal: AbortSignal.timeout(20_000) }).then((r) => r.text());
 }
 
 async function answers(url: string): Promise<boolean> {
@@ -193,6 +185,20 @@ describe('your apps run from squad-kit’s own copy of main', () => {
     expect(await text(`http://127.0.0.1:${port}`)).toBe('v3');
     expect(fs.readFileSync(setups, 'utf8')).toBe('set-up\nset-up\n');
   }, 60_000);
+
+  it('a moment when this process was busy does not make a port in use read as free', async () => {
+    const yours = http.createServer((q, r) => r.end('yours')).listen(port, '127.0.0.1');
+    try {
+      await new Promise((r) => yours.once('listening', r));
+      const asked = portTaken(port);
+      // What a git call that waits does to the process, on a busy computer.
+      const until = Date.now() + 1200;
+      while (Date.now() < until);
+      expect(await asked).toBe(true);
+    } finally {
+      yours.close();
+    }
+  });
 
   it('a busy port: the app goes around it by itself when it can move, and the other program is left alone', async () => {
     const yours = http.createServer((q, r) => r.end('yours')).listen(port, '127.0.0.1');

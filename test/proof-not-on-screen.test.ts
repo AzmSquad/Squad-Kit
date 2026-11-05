@@ -25,6 +25,9 @@ type Shows = 'met' | 'broken' | 'not-shown';
 type Plan = { pic?: [Shows, string]; off?: string };
 let say: (round: number) => Record<number, Plan> = () => ({});
 let checks: (run: number) => Record<number, FakeCheck> = () => ({});
+/** Which agent run the network cuts off, for the blip tests. */
+let offline: ((opts: RunOptions) => boolean) | null = null;
+const OFFLINE = 'Claude Code could not reach the internet. Check the connection, then press Try again.';
 const calls: RunOptions[] = [];
 const h = vi.hoisted(() => ({ browser: null as BrowserModule | null }));
 
@@ -32,6 +35,7 @@ vi.mock('../src/modules/claude/direct.js', async (orig) => ({
   ...(await orig<typeof import('../src/modules/claude/direct.js')>()),
   runClaude: async (opts: RunOptions): Promise<RunResult> => {
     calls.push(opts);
+    if (offline?.(opts)) return { ok: false, sessionId: 's', text: '', error: OFFLINE } as RunResult;
     const answer = isProofCheck(opts) ? checkAnswer(opts, checks(calls.filter(isProofCheck).length)) : opts.schema === P.PROOF_SCHEMA ? await shoot(opts) : { summary: 'Fixed it' };
     return { ok: true, structured: answer, text: '', sessionId: opts.resume ?? opts.sessionId ?? 's-1' } as RunResult;
   },
@@ -116,6 +120,7 @@ beforeEach(async () => {
   calls.length = 0;
   say = () => ({});
   checks = () => ({});
+  offline = null;
   tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'squad-off-screen-')));
   project = path.join(tmp, 'app');
   fs.mkdirSync(project);
@@ -397,6 +402,43 @@ describe('the gate still needs something on a screen', () => {
     expect(t.proofRound).toBe(1);
     expect(t.squad?.phase).toBe('test');
     expect(row(id, NAME)?.shows).toBe('off-screen');
+  });
+});
+
+describe('a network blip at the proof', () => {
+  /** The step from the squad's own turn, as it really runs: its failure goes through the step's handling. */
+  async function proofStep(id: string) {
+    updateTicket(bp, id, (x) => {
+      x.squad = { phase: 'proof', nextAt: new Date(Date.now() - 1000).toISOString() };
+    });
+    const live = new LiveSquad(bp) as unknown as { tick(): void; running: Set<string> };
+    live.tick();
+    for (let i = 0; i < 400 && live.running.size; i += 1) await new Promise((r) => setTimeout(r, 25));
+  }
+
+  const waitsItOut = (id: string) => {
+    const t = ticket(id);
+    expect(t.stuck).toBeUndefined();
+    expect(t.waiting).toBeNull();
+    expect(t.blips).toBe(1);
+    expect(t.status).toBe('Waiting for the connection. Tries again in 1 minute');
+    expect(t.squad?.phase).toBe('proof');
+    expect(lines(id).join('\n')).toContain('Not a failed try');
+  };
+
+  it('at the Tester: it waits and tries again, with no stop', async () => {
+    const id = story();
+    offline = (o) => o.schema === P.PROOF_SCHEMA;
+    await proofStep(id);
+    waitsItOut(id);
+  });
+
+  it('at the picture check: it waits and tries again, with no stop', async () => {
+    const id = story();
+    say = () => ({ 1: MET, 2: UPCOMING });
+    offline = (o) => isProofCheck(o);
+    await proofStep(id);
+    waitsItOut(id);
   });
 });
 

@@ -4,6 +4,7 @@ import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { resolveClaudeBinary } from '../../core/claude-binary.js';
+import { COULD_NOT_SAVE, asError } from '../../core/file-trouble.js';
 import { childEnv } from '../../engine/agent-env.js';
 import { usageFrom } from '../../engine/acp-runner.js';
 import { track, whenExited } from '../../engine/process-group.js';
@@ -72,6 +73,8 @@ export interface RunResult {
   usage?: AgentUsage;
   /** The run stopped on one of its caps. */
   capped?: { by: 'turns' | 'spend' };
+  /** What the run reported could not be saved (a full disk, a folder that moved), so it was stopped. The exact error. */
+  saveError?: Error;
 }
 
 let cachedBinary: string | null = null;
@@ -287,12 +290,27 @@ export function runClaude(opts: RunOptions): Promise<RunResult> {
       }
     };
 
+    // What the agent reports is saved as it arrives. When saving fails (a full disk, a folder that moved) the run stops
+    // here: an error on this stream has nothing above it, so it would end the whole app.
+    let saveError: Error | undefined;
+    const saving = (line: string) => {
+      if (saveError) return;
+      try {
+        handle(line);
+      } catch (err) {
+        saveError = asError(err);
+        result = { ok: false, sessionId, text: lastText, error: COULD_NOT_SAVE, saveError };
+        child.kill('SIGTERM');
+      }
+    };
+
     child.stdout.on('data', (chunk: Buffer) => {
       buffer += chunk.toString('utf8');
       let nl: number;
       while ((nl = buffer.indexOf('\n')) >= 0) {
-        handle(buffer.slice(0, nl));
+        const line = buffer.slice(0, nl);
         buffer = buffer.slice(nl + 1);
+        saving(line);
       }
     });
     child.stderr.on('data', (chunk: Buffer) => {
@@ -305,7 +323,7 @@ export function runClaude(opts: RunOptions): Promise<RunResult> {
     // Done once Claude Code exits, even when a command it started still holds its output open.
     void whenExited(child).then((code) => {
       clearTimeout(timer);
-      if (buffer) handle(buffer);
+      if (buffer) saving(buffer);
       if (result) return resolve(result);
       const said = stderr.trim() || `Claude Code stopped (exit ${code}).`;
       resolve({ ok: false, sessionId, text: lastText, error: plainError(said), detail: said.slice(-2000) });
@@ -318,13 +336,24 @@ export function runClaude(opts: RunOptions): Promise<RunResult> {
 const OWN_WORDS = [
   /^The squad was interrupted before it finished, for example because the board was closed\. Press Try again to carry on\.$/,
   /^Claude's usage limit is reached\. (It resets .{1,80}; press Try again after that|Press Try again once the limit resets)\.$/,
-  /^Claude Code is not logged in\. Run `claude` in a terminal, log in, then press Try again\.$/,
+  /^Claude Code is signed out on this computer\. Open the Terminal app, type claude and press Enter, then sign in when it asks\. Then press Try again\.$/,
   /^The Claude account has no credit left\. Add credit or sign in with another account, then press Try again\.$/,
   /^Claude is busy right now\. Wait a few minutes, then press Try again\.$/,
   /^Claude Code could not reach the internet\. Check the connection, then press Try again\.$/,
   /^Claude's service had a problem on its side\. Wait a few minutes, then press Try again\.$/,
   /^Claude Code is not installed\. Install it and log in, then try again\.$/,
 ];
+
+/** A network or service problem that passes by itself: the step can simply run again a little later. */
+const PASSING = [
+  /^Claude is busy right now\. /,
+  /^Claude Code could not reach the internet\. /,
+  /^Claude's service had a problem on its side\. /,
+];
+
+export function passing(said: string): boolean {
+  return PASSING.some((re) => re.test(said.trim()));
+}
 
 /** True when an error is one of the module's own plain sentences above, not Claude Code's raw words. */
 export function ownWords(said: string): boolean {
@@ -343,7 +372,7 @@ export function plainError(raw: string, now = Date.now()): string {
       : "Claude's usage limit is reached. Press Try again once the limit resets.";
   }
   if (s.includes('not logged in') || s.includes('login') || s.includes('authenticat') || s.includes('oauth')) {
-    return 'Claude Code is not logged in. Run `claude` in a terminal, log in, then press Try again.';
+    return 'Claude Code is signed out on this computer. Open the Terminal app, type claude and press Enter, then sign in when it asks. Then press Try again.';
   }
   if (s.includes('credit balance') && s.includes('low')) {
     return 'The Claude account has no credit left. Add credit or sign in with another account, then press Try again.';
@@ -351,7 +380,7 @@ export function plainError(raw: string, now = Date.now()): string {
   if (s.includes('overloaded') || /\b529\b/.test(s)) {
     return 'Claude is busy right now. Wait a few minutes, then press Try again.';
   }
-  if (/\b(enotfound|econnreset|econnrefused|etimedout|getaddrinfo|fetch failed|network error)\b/.test(s)) {
+  if (/\b(enotfound|econnreset|econnrefused|etimedout|getaddrinfo|fetch failed|network error|connection error|socket hang up)\b/.test(s)) {
     return 'Claude Code could not reach the internet. Check the connection, then press Try again.';
   }
   if (/api error:? 5\d\d\b/.test(s)) {

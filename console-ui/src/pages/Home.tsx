@@ -8,6 +8,7 @@ import { shellArg, shellQuote } from '../lib/text';
 import { Cmd, Modal, STAGE_NAME, actionLabel, ago, commandFor, outdatedLine } from '../components/ui';
 import { AboutButton, AppUpdate } from '../components/Update';
 import { LimitBanner } from '../components/UsageLimit';
+import { SaveTroubleBanner } from '../components/SaveTrouble';
 import { HomeWaiting } from '../components/Waiting';
 import { BreakdownWaitCard, useAllBreakdownWaits } from '../components/BreakdownWaits';
 import { changeWaits, openChange, testChangeLine, testChangeWaits } from '../lib/waiting';
@@ -57,6 +58,7 @@ export function HomePage() {
         </button>
       </header>
       <AppUpdate />
+      <SaveTroubleBanner />
       <LimitBanner />
       <HomeWaiting />
       <div className="scroll">
@@ -276,6 +278,9 @@ function AddProject({ onClose }: { onClose(): void }) {
     queryFn: () => api<FolderListing>(`/api/v1/app/folders${at ? `?path=${encodeURIComponent(at)}` : ''}`),
   });
   const l = listing.data;
+  // After a folder that cannot be read, Up still leads somewhere: the folder above the one asked for.
+  const parentOf = (p: string) => p.replace(/[/\\][^/\\]+[/\\]?$/, '') || '/';
+  const up = l?.parent ?? (listing.isError && at ? parentOf(at) : null);
   const go = (p: string) => {
     setError(null);
     setNewName(null);
@@ -338,7 +343,7 @@ function AddProject({ onClose }: { onClose(): void }) {
       )}
       <div className="fb">
         <div className="fb-bar">
-          <button className="iconbtn" disabled={!l?.parent} onClick={() => l?.parent && go(l.parent)} aria-label="Up one folder" title="Up one folder">
+          <button className="iconbtn" disabled={!up} onClick={() => up && go(up)} aria-label="Up one folder" title="Up one folder">
             <CornerLeftUp size={15} />
           </button>
           <span className="crumbs mono">

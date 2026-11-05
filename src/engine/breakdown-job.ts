@@ -29,6 +29,7 @@ import { personLevels, resolveLevel } from './levels.js';
 import { LimitReached, limitText } from './usage-limit.js';
 import { TECHNICAL_STOP, ownWords } from './plain-stop.js';
 import * as B from './breakdown-prompts.js';
+import { sleepMark, sleptSince } from './interrupt.js';
 
 /**
  * The Analyst's work on a breakdown, as a stored job: what it does next lives in this computer's state file
@@ -671,6 +672,7 @@ function failed(ctx: Ctx, job: BreakdownJob, err: unknown): void {
  */
 export async function runBreakdownJob(bp: BoardPaths, id: string, deps: BreakdownJobDeps): Promise<void> {
   const ctx: Ctx = { bp, id, deps, project: readMeta(bp).project };
+  const mark = sleepMark();
   for (let steps = 0; steps < 6; steps += 1) {
     const job = readBreakdownState(bp, id).job;
     const b = readBreakdown(bp, id);
@@ -683,6 +685,16 @@ export async function runBreakdownJob(bp: BoardPaths, id: string, deps: Breakdow
     try {
       if (!(await STEPS[job.step](ctx, b, job))) return;
     } catch (err) {
+      // The computer slept and the run did not get through: that says nothing about the document, so the step starts
+      // again by itself, as a ticket's does.
+      if (sleptSince(mark) && !(err instanceof LimitReached) && !(err instanceof Stopped)) {
+        updateBreakdownState(bp, id, (s) => {
+          if (!s.job || s.job.status === 'stopping') return;
+          s.job.status = 'pending';
+          s.job.now = 'The computer slept, so this step starts again';
+        });
+        return;
+      }
       failed(ctx, job, err);
       return;
     }

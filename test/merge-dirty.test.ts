@@ -221,7 +221,7 @@ describe('your own checkout after the merge', () => {
 
 
 describe('bringing the latest main into a ticket that has unsaved work', () => {
-  type Bring = { bringInBase(t: ReturnType<typeof readTicket> & object, base: string): { baseSha: string; clashes: string[] } };
+  type Bring = { bringInBase(t: ReturnType<typeof readTicket> & object, base: string): Promise<{ baseSha: string; clashes: string[] }> };
   const bring = () => (new LiveSquad(bp) as unknown as Bring).bringInBase(readTicket(bp, 'AP-1')!, 'main');
 
   function ticketWithWork(ticketLine: string, mainLine: string) {
@@ -237,9 +237,9 @@ describe('bringing the latest main into a ticket that has unsaved work', () => {
     return wt;
   }
 
-  it('saves the work first, so main comes in and both changes are kept', () => {
+  it('saves the work first, so main comes in and both changes are kept', async () => {
     const wt = ticketWithWork('limit = 3', 'next = yes');
-    const { baseSha, clashes } = bring();
+    const { baseSha, clashes } = await bring();
     expect(clashes).toEqual([]);
     expect(sh('git rev-parse MERGE_HEAD', wt)).toBe(baseSha);
     expect(fs.readFileSync(path.join(wt, 'limit.txt'), 'utf8')).toBe('limit = 3\nshift = 1\nnext = yes\n');
@@ -247,13 +247,13 @@ describe('bringing the latest main into a ticket that has unsaved work', () => {
     expect(sh('git log --format=%s -1', wt)).toBe('Work so far on Raise the limit (AP-1)');
   });
 
-  it('gives the clashing files to the Builder, and the same ones again until they are fixed', () => {
+  it('gives the clashing files to the Builder, and the same ones again until they are fixed', async () => {
     const wt = ticketWithWork('limit = 3', 'next = yes');
     fs.writeFileSync(path.join(project, 'limit.txt'), 'limit = 5\nshift = 1\nnext = yes\n');
     sh('git -c user.name=t -c user.email=t@t commit -qam "main limit"', project);
-    expect(bring().clashes).toEqual(['limit.txt']);
+    expect((await bring()).clashes).toEqual(['limit.txt']);
     const head = sh('git rev-parse HEAD', wt);
-    expect(bring().clashes).toEqual(['limit.txt']);
+    expect((await bring()).clashes).toEqual(['limit.txt']);
     expect(sh('git rev-parse HEAD', wt)).toBe(head);
   });
 });

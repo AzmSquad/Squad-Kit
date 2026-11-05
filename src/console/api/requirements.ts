@@ -111,7 +111,10 @@ export function mountRequirementsApi(app: Hono, opts: { paths: SquadPaths }): vo
     const file = path.resolve(dir, asked);
     const rel = path.relative(dir, file);
     if (!asked || rel.startsWith('..') || path.isAbsolute(rel) || !/^(source|text|media)[\\/]/.test(rel) || !fs.existsSync(file) || !fs.statSync(file).isFile()) return c.json({ error: 'not found' }, 404);
-    return new Response(fs.readFileSync(file), { headers: { 'content-type': mimeOf(file), 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'" } });
+    // SVG and HTML can carry scripts, so they download instead of opening at the board's own address, where its token is.
+    const type = mimeOf(file);
+    const scripts = type === 'image/svg+xml' || type === 'text/html';
+    return new Response(fs.readFileSync(file), { headers: { 'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', ...(scripts ? { 'content-disposition': `attachment; filename="${path.basename(file).replace(/"/g, '')}"` } : {}) } });
   });
 
   // Rename: `squad requirements rename BR-1 "<name>"`.

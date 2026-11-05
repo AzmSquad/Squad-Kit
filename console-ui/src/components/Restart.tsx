@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { send } from '../api/client';
 import { usePrefs } from '../lib/prefs';
+import { expectRestart } from '../lib/reach';
 
 /** Restart the board in place: it stops, a fresh one starts on the same link, and this page comes back by itself. */
 export function useRestart() {
@@ -9,11 +10,13 @@ export function useRestart() {
   const [restarting, setRestarting] = useState(false);
   const restart = async () => {
     setRestarting(true);
+    expectRestart(true);
     const before = await fetch('/healthz').then((r) => r.json() as Promise<{ startedAt?: string }>).catch(() => ({ startedAt: undefined }));
     try {
       await send('/api/v1/restart', 'POST');
     } catch (err) {
       setRestarting(false);
+      expectRestart(false);
       toast(err instanceof Error ? err.message : String(err), 'err');
       return;
     }
@@ -27,6 +30,7 @@ export function useRestart() {
       }
     }
     setRestarting(false);
+    expectRestart(false);
     toast('The board did not come back. Run squad console in your terminal.', 'err');
   };
   return { restarting, restart };

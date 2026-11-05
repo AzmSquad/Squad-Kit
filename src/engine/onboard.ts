@@ -3,7 +3,7 @@ import path from 'node:path';
 import { listDecisions, nextDecisionId, now, readMeta, writeDecision, writeMeta, type BoardPaths } from '../board/store.js';
 import type { BoardMeta, ProjectCommands, RepoInfo } from '../board/types.js';
 import { cleanOverview, readOverview, writeOverview } from '../board/overview.js';
-import { begin, finish, learnSetupTime, nextProofStep, readWords, stepOf, type SetupState, type SetupStepId, type SetupTestRun } from '../board/setup-state.js';
+import { begin, currentStep, finish, learnSetupTime, nextProofStep, readWords, stepOf, type SetupState, type SetupStepId, type SetupTestRun } from '../board/setup-state.js';
 import { runCommand, startApp, tail, testCount, CHECK_SILENT_MS, type RunningApp } from './checks.js';
 import { addSnapshot, dropSnapshot, git, worktreeRoot } from './git.js';
 import { reposOf } from './repos.js';
@@ -101,6 +101,24 @@ export function readingNow(bp: BoardPaths, line: string, opened: number, read = 
   });
 }
 
+
+/**
+ * Stop was pressed while nothing runs: the usage limit holds the read, say. Nothing would ever answer it, so the step
+ * stands stopped now, and Start again works at once.
+ */
+export function settleSetupStop(bp: BoardPaths): void {
+  withSetup(bp, (s) => {
+    if (!s.stopping) return;
+    const step = s.steps.find((x) => x.state === 'now') ?? currentStep(s);
+    if (step) {
+      step.state = 'stopped';
+      step.note = 'You stopped it.';
+    }
+    delete s.stopping;
+  });
+  const meta = readMeta(bp);
+  if (meta.scan?.status === 'pending' || meta.scan?.status === 'running') writeMeta(bp, { ...meta, scan: { status: 'failed', at: now(), error: 'You stopped it. Press Start again when you are ready.' } });
+}
 
 export function readFailed(bp: BoardPaths, error: string): void {
   withSetup(bp, (s) => {

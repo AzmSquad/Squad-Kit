@@ -8,7 +8,7 @@ import { AI_TOOLS, BROWSERS } from '../modules/registry.js';
 import { squadHome } from '../core/home.js';
 import { childEnv } from './agent-env.js';
 import { OWN_GROUP, track } from './process-group.js';
-import { PACKAGE_CACHES, PRIVATE, packageCacheEnv, projectCacheDir, ticketCacheDir } from './sandbox.js';
+import { PACKAGE_CACHES, PRIVATE, gitPlaces, packageCacheEnv, projectCacheDir, ticketCacheDir } from './sandbox.js';
 
 /**
  * squad-kit's own guard for the project's own commands: the checks (test, lint, build), the app's start, the setup
@@ -37,8 +37,14 @@ export interface GuardSpec {
   read: string[];
   /** Files and folders no command may read: keys, sign-ins, squad-kit's own folder, browser profiles, .env files. */
   noRead: string[];
-  /** squad-kit's own files a command may read but never change (the screenshot browser build it runs itself). */
+  /** What a command may read but never change: squad-kit's own browser build, the copy's `.git` and git's folder. */
   noWrite: string[];
+  /** Folders inside `noWrite` a commit's hooks may write in after all. */
+  writeBack?: string[];
+  /** Single files inside `noWrite` they may write: git makes these by name, in folders they may not write in. */
+  writeFiles?: string[];
+  /** Inside those again, what stays read only: these have the last word. */
+  lastNoWrite?: string[];
   /** The copy's own package cache for NuGet, Maven, Gradle and Ruby, so those tools never write the person's shared ones. */
   cache?: string;
   /** What an engineer allowed this project in Settings, on top of the above. */
@@ -110,17 +116,26 @@ export function projectGuardFor(bp: BoardPaths, o: { cwd: string; read?: string[
   return buildGuard({ cwd: o.cwd, root: bp.root, cache, extraWrite: [bp.proofDir, cache], extraRead: [cache, ...(o.read ?? [])], home, platform: o.platform ?? process.platform, ...(o.allow ? { allow: o.allow } : {}) });
 }
 
+/** Where a path really is, or will be when it is made: the deepest folder that is there, followed through its links. */
+function realPlace(p: string): string {
+  const rest: string[] = [];
+  for (let at = p; ; at = path.dirname(at)) {
+    try {
+      return path.join(fs.realpathSync(at), ...rest);
+    } catch {
+      if (at === path.dirname(at)) return p;
+      rest.unshift(path.basename(at));
+    }
+  }
+}
+
 /** A path and, when it is a link (/tmp on a Mac), where it really is. */
 function withReal(dirs: string[]): string[] {
   const out = new Set<string>();
   for (const d of dirs) {
     if (!d) continue;
     out.add(d);
-    try {
-      out.add(fs.realpathSync(d));
-    } catch {
-      // Not there yet.
-    }
+    out.add(realPlace(d));
   }
   return [...out];
 }
@@ -159,7 +174,7 @@ export function buildGuard(o: { cwd: string; root: string; cache?: string; extra
     write: [...new Set(withReal([...(o.extraWrite ?? []), ...temp, ...writableCaches(home)]))],
     read: [...new Set(withReal([...(o.extraRead ?? [])]))],
     noRead: [...new Set(noRead)],
-    noWrite: [...new Set(withReal(squadOwnFiles()))],
+    noWrite: [...new Set(withReal([...squadOwnFiles(), ...gitPlaces(real(o.cwd))]))],
     ...(o.cache ? { cache: real(o.cache) } : {}),
     ...(o.allow ? { allow: { ...(o.allow.allowRead ? { allowRead: withReal(o.allow.allowRead.map((p) => allowPath(p, home))) } : {}), ...(o.allow.allowWrite ? { allowWrite: withReal(o.allow.allowWrite.map((p) => allowPath(p, home))) } : {}) } } : {}),
   };
@@ -233,8 +248,11 @@ export function profileText(spec: GuardSpec): string {
   for (const w of writable) lines.push(`(allow file-write* (subpath ${sb(w)}))`);
   // Devices and the terminal every tool writes to.
   for (const dev of ['/dev/null', '/dev/zero', '/dev/dtracehelper', '/dev/tty', '/dev/random', '/dev/urandom', '/dev/fd', '/dev/stdout', '/dev/stderr']) lines.push(`(allow file-write* (subpath ${sb(dev)}))`);
-  // squad-kit runs its own screenshot browser from a shared cache: a command may read it, never change it.
+  // Read only whatever came before, even a temp folder they sit in: squad-kit's own screenshot browser, the copy's `.git`, git's folder.
   for (const n of spec.noWrite) lines.push(`(deny file-write* (subpath ${sb(n)}))`);
+  for (const w of spec.writeBack ?? []) lines.push(`(allow file-write* (subpath ${sb(w)}))`);
+  for (const f of spec.writeFiles ?? []) lines.push(`(allow file-write* (literal ${sb(f)}))`);
+  for (const n of spec.lastNoWrite ?? []) lines.push(`(deny file-write* (subpath ${sb(n)}))`);
 
   // No new background jobs that outlive the command and squad-kit's own process-group stop.
   lines.push('(deny job-creation)');
@@ -263,9 +281,36 @@ export function bubblewrapArgs(spec: GuardSpec, command: string): string[] {
   args.push('--bind', spec.cwd, spec.cwd);
   for (const w of [...spec.write, ...(spec.allow?.allowWrite ?? [])]) args.push('--bind-try', w, w);
   for (const r of [...spec.read, ...(spec.allow?.allowRead ?? [])]) args.push('--ro-bind-try', r, r);
-  // squad-kit's own browser build stays read-only even inside a writable cache.
+  // Read only whatever came before, even a temp folder they sit in: squad-kit's own browser build, the copy's `.git`, git's folder.
   for (const n of spec.noWrite) args.push('--ro-bind-try', n, n);
+  args.push(...singleFileMounts(spec.writeFiles ?? []));
+  for (const w of spec.writeBack ?? []) args.push('--bind-try', w, w);
+  for (const n of spec.lastNoWrite ?? []) args.push('--ro-bind-try', n, n);
   args.push('/bin/sh', '-c', command);
+  return args;
+}
+
+/**
+ * A mount cannot open a file that is not there yet, and git makes these by name. So their folder is opened, and all
+ * that is in it already goes back to read only, outer folders first. A new name in such a folder can be made: harmless
+ * for the ones this is for, as what matters there is made up front to be read only (guardedTrial).
+ */
+function singleFileMounts(files: string[]): string[] {
+  const args: string[] = [];
+  const folders = [...new Set(files.map((f) => path.dirname(f)))].sort((a, b) => a.length - b.length);
+  for (const folder of folders) {
+    args.push('--bind-try', folder, folder);
+    let inside: string[] = [];
+    try {
+      inside = fs.readdirSync(folder);
+    } catch {
+      // Not there: bubblewrap skips it too.
+    }
+    for (const name of inside) {
+      const at = path.join(folder, name);
+      if (!files.includes(at)) args.push('--ro-bind-try', at, at);
+    }
+  }
   return args;
 }
 
@@ -369,7 +414,7 @@ export interface SpawnProjectOptions {
  */
 export function spawnProject(command: string, o: SpawnProjectOptions): ChildProcess {
   // NuGet, Maven, Gradle and Ruby write into the copy's own cache, never the person's shared ones, like the agent sandbox.
-  const caches = o.guard?.cache ? packageCacheEnv(o.guard.cache) : {};
+  const caches = o.guard?.cache ? { ...packageCacheEnv(o.guard.cache), ...npmCacheEnv(o.guard.cache) } : {};
   const env = { ...projectEnv(), ...caches, ...(o.env ?? {}) };
   const stdio = o.stdio ?? ['ignore', 'pipe', 'pipe'];
   const base: SpawnOptions = { cwd: o.cwd, detached: OWN_GROUP, stdio, env };
@@ -384,6 +429,54 @@ export function spawnProject(command: string, o: SpawnProjectOptions): ChildProc
     return track(spawn('bwrap', bubblewrapArgs(o.guard, command), base));
   }
   return track(spawn(command, { ...base, shell: true }));
+}
+
+/**
+ * npm keeps what npx downloads beside its own cache, and that stays read only: a command could leave something there
+ * that the person's own builds run later, unchecked. So a command's npm gets a cache folder of the copy's own, where
+ * npx works, with the shared store of packages linked in: those are checked against the lock file, and stay shared.
+ */
+function npmCacheEnv(cache: string): Record<string, string> {
+  const dir = path.join(cache, 'npm');
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const shared = path.join(os.homedir(), '.npm', '_cacache');
+    const link = path.join(dir, '_cacache');
+    if (fs.existsSync(shared) && !fs.lstatSync(link, { throwIfNoEntry: false })) fs.symlinkSync(shared, link);
+    return { npm_config_cache: dir };
+  } catch {
+    // A cache folder it cannot make: npm as it is, with npx read only.
+    return {};
+  }
+}
+
+/** Where a copy's commit writes in git's own folder. */
+export interface CommitPlaces {
+  /** The repo's git folder, shared by all its copies. */
+  common: string;
+  /** The copy's own part of it. */
+  own: string;
+  /** The folder of the branch the commit goes on, from git's folder: a stand-in with a folder to itself (git.ts). */
+  folder: string;
+}
+
+/**
+ * The guard for the commit the project's hooks run on, which are the project's own code, like its tests: everything a
+ * project command gets, and only what a commit needs in git's own folder. New objects, the copy's own index and HEAD,
+ * the stand-in branch; and git's stash, as tools like lint-staged keep a backup with it, which also needs the lock on
+ * the packed refs. So a hook can plant no hook, change no setting, and touch no real branch, not even the copy's own.
+ */
+export function commitGuard(guard: GuardSpec, at: CommitPlaces): GuardSpec {
+  const inGit = (...p: string[]) => path.join(at.common, ...p);
+  return {
+    ...guard,
+    // All of git's folder first, wherever the project sits.
+    noWrite: [...new Set([...guard.noWrite, at.common])],
+    writeBack: [at.own, inGit('objects'), inGit(at.folder), inGit('logs', at.folder)],
+    writeFiles: ['refs/stash', 'refs/stash.lock', 'logs/refs/stash', 'logs/refs/stash.lock', 'packed-refs.lock'].map((p) => inGit(p)),
+    // Where git's folder is, and more of its settings; which branch the copy is on; and another store of objects to believe.
+    lastNoWrite: [path.join(at.own, 'commondir'), path.join(at.own, 'gitdir'), path.join(at.own, 'config.worktree'), path.join(at.own, 'HEAD'), inGit('objects', 'info')],
+  };
 }
 
 /** The proof folder and the caches inside squad-kit's own folder: a folder not there yet could not be written in at all. */
@@ -408,35 +501,54 @@ function writeProfile(guard: GuardSpec): string {
 
 /* ── when the guard blocked a file the project needed ────── */
 
-/** "Operation not permitted" on a path, or Node's "EPERM: operation not permitted, open '<path>'". */
-const EPERM_LINES = [/EACCES|EPERM[^\n]*?['"]([^'"\n]+)['"]/i, /operation not permitted[^\n]*?['"]([^'"\n]+)['"]/i, /([^\s'":]+): Operation not permitted/i, /Operation not permitted[^\n]*?(\/[^\s'":]+)/i];
+/**
+ * A path a command was refused, from what it printed: "Operation not permitted" on a Mac, "Read-only file system" on
+ * Linux, in Node's words, the shell's, git's ('<path>': ...) and npm's.
+ */
+const BLOCKED_LINES = [
+  /(?:EPERM|EROFS)[^\n]*?['"]([^'"\n]+)['"]/i,
+  /(?:operation not permitted|read-only file system)[^\n]*?['"]([^'"\n]+)['"]/i,
+  /['"]([^'"\n]+)['"]: (?:Operation not permitted|Read-only file system)/i,
+  /([^\s'":]+): (?:Operation not permitted|Read-only file system)/i,
+  /(?:Operation not permitted|Read-only file system)[^\n]*?(\/[^\s'":]+)/i,
+];
+
+/** npm says it on lines of its own: the failed step, then the path it was refused. */
+const NPM_REFUSED = /npm (?:error|ERR!) code (?:EPERM|EROFS|EACCES)[\s\S]*?npm (?:error|ERR!) path (\/[^\n]+)/;
 
 /**
  * A path a command was refused by the guard, from its output, or null when nothing points to the guard. Only a path
- * the guard actually hides counts, so an ordinary "Operation not permitted" from the project's own code is not
- * mistaken for the guard blocking it.
+ * the guard really blocks counts, so an ordinary "Operation not permitted" from the project's own code is not mistaken
+ * for the guard blocking it.
  */
 export function guardBlockedPath(output: string, guard: GuardSpec): string | null {
   if (!output) return null;
+  const npm = NPM_REFUSED.exec(output)?.[1]?.trim();
+  if (npm && isBlocked(npm, guard)) return npm;
   for (const line of output.split('\n')) {
-    for (const re of EPERM_LINES) {
-      const m = re.exec(line);
-      const target = m?.[1]?.trim();
-      if (target && target.startsWith('/') && isHidden(target, guard)) return target;
+    for (const re of BLOCKED_LINES) {
+      const said = re.exec(line)?.[1]?.trim();
+      const target = said && path.resolve(guard.cwd, said);
+      if (target && isBlocked(target, guard)) return target;
     }
   }
   return null;
 }
 
-/** True when the path is one the guard denies: under a hidden place, or a .env in the person's project folder. */
-function isHidden(target: string, guard: GuardSpec): boolean {
+/**
+ * True when the guard denies this path: under what it hides, a .env in the person's project folder, or anywhere a
+ * command may read but not write. The copy and the places it may write are never the guard blocking it.
+ */
+function isBlocked(target: string, guard: GuardSpec): boolean {
   const under = (base: string) => target === base || target.startsWith(`${base.replace(/\/$/, '')}/`);
+  if (guard.noWrite.some(under)) return true;
   // The copy and the few places the command may use are never the guard blocking it.
   if ([guard.cwd, ...guard.read, ...(guard.cache ? [guard.cache] : []), ...(guard.allow?.allowRead ?? []), ...(guard.allow?.allowWrite ?? [])].some(under)) return false;
   // A private place squad-kit hides, or a .env in the person's project folder outside the copy.
   if (guard.noRead.some(under)) return true;
   if (under(guard.root) && /\/\.env(\.|$)/.test(target)) return true;
-  return false;
+  // Anywhere else a command may read, but write only in the places it was given. The system's own answer for themselves.
+  return !guard.write.some(under) && !/^\/(?:dev|proc|sys)\//.test(target);
 }
 
 /** The one plain sentence the person sees when the guard blocked a file the project needed. */

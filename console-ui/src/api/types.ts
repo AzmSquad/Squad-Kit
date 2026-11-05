@@ -217,7 +217,7 @@ export interface OffScreen {
   why: string;
 }
 
-export type WayOut = 'retry' | 'yourself' | 'continue' | 'plan' | 'skip-pr' | 'more' | 'stop' | 'add-test' | 'no-tests';
+export type WayOut = 'retry' | 'yourself' | 'continue' | 'plan' | 'skip-pr' | 'more' | 'stop' | 'add-test' | 'no-tests' | 'save-again' | 'skip-hooks';
 
 /** GET /api/v1/sandbox: whether the Builder's and Tester's commands run in a sandbox here, and what they may reach. */
 export interface SandboxInfo {
@@ -237,7 +237,7 @@ export interface StuckChoice {
   /** 'cap': the step reached its turn or spend cap; Give it more or Stop. */
   gate?: 'checks' | 'review' | 'proof' | 'merge' | 'cap';
   /** Why the gate stopped, when it is not a plain failure. 'guard': a project command needed a file squad-kit's guard blocked. */
-  kind?: 'weakened' | 'no-tests' | 'bad-proof' | 'guard' | 'broken' | 'not-shown';
+  kind?: 'weakened' | 'no-tests' | 'bad-proof' | 'guard' | 'broken' | 'not-shown' | 'hook';
   /** The plain reasons, one per line: "test/booking.test.ts was deleted (4 tests)". */
   points?: string[];
   /** The ticket stopped between two steps at its budget, or the month's. */
@@ -251,7 +251,7 @@ export interface StuckChoice {
 }
 
 export interface GateOverride {
-  gate: 'checks' | 'review' | 'proof';
+  gate: 'checks' | 'review' | 'proof' | 'hooks';
   /** Continued past tests made weaker: what was weakened. */
   weakened?: string[];
   reason: string;
@@ -597,7 +597,7 @@ export interface Release {
   /** What the release really did, in plain words, shown after releasing. */
   log?: { ok: boolean; text: string }[];
   /** Repos whose push failed: the release is only on this computer until Push again sends it. */
-  unpushed?: { repo: string; remote: string; base: string; commit: string; tag?: string; error: string }[];
+  unpushed?: { repo: string; remote: string; base: string; commit: string; tag?: string; error: string; plain?: string }[];
   /** Tickets taken out before the release was made: they go out with the next one. */
   out?: string[];
 }

@@ -1,5 +1,6 @@
 import { createRootRoute, createRoute, createRouter, redirect } from '@tanstack/react-router';
 import { Shell } from './components/Shell';
+import { CrashPage } from './components/Crash';
 import { BoardPage } from './pages/Board';
 import { ProofPage } from './pages/Proof';
 import { ReleasesPage } from './pages/Releases';
@@ -93,7 +94,7 @@ const settings = createRoute({ getParentRoute: () => rootRoute, path: '/settings
 
 const routeTree = rootRoute.addChildren([index, setup, overview, requirements, breakdown, board, backlog, proof, inbox, conversations, releases, decisions, architecture, bugs, squad, settings]);
 
-export const router = createRouter({ routeTree, defaultPreload: false, basepath: PROJECT_BASE || '/' });
+export const router = createRouter({ routeTree, defaultPreload: false, basepath: PROJECT_BASE || '/', defaultErrorComponent: CrashPage });
 
 declare module '@tanstack/react-router' {
   interface Register {
