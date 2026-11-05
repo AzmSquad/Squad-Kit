@@ -1,5 +1,3 @@
-import { useSyncExternalStore } from 'react';
-
 /**
  * Whether the app still answers. The page is only a view: when the app stops (its terminal closed, a crash) nothing
  * else on the page would change, so the person would wait for nothing. Every call to the app reports here, and a slow
@@ -55,11 +53,7 @@ export function resetReach(): void {
   restarting = false;
 }
 
-function subscribe(listener: () => void): () => void {
+export function subscribeReach(listener: () => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
-}
-
-export function useReach(): Reach {
-  return useSyncExternalStore(subscribe, currentReach);
 }

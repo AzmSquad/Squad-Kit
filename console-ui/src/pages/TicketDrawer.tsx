@@ -34,7 +34,7 @@ import { YourCheck } from '../components/YourCheck';
 import { AskButton, useAskAgent } from '../components/AskQuestion';
 import { pageOf, waitsAtReview } from '../lib/review';
 import { useDraft } from '../lib/drafts';
-import { useReach } from '../lib/reach';
+import { useReach } from '../lib/use-reach';
 import { ticketTrouble } from '../lib/ticket-trouble';
 
 type Tab = 'now' | 'story' | 'plan' | 'activity' | 'conversation' | 'proof' | 'changes' | 'cost' | 'developer';

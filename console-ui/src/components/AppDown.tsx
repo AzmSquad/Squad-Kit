@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { TriangleAlert } from 'lucide-react';
-import { noteAlive, noteNoAnswer, useReach } from '../lib/reach';
+import { noteAlive, noteNoAnswer } from '../lib/reach';
+import { useReach } from '../lib/use-reach';
 import { Cmd } from './ui';
 
 /** How often the page looks for the app when nothing else on it is asking. */
