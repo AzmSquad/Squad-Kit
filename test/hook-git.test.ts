@@ -181,6 +181,7 @@ describe('in the real guard, the real git folder is read only, to the byte', () 
   });
 
   it('the reflog, and what the next commit would write through or believe', async () => {
+    if (!guarded()) return;
     const rc = path.join(scratch, 'shell-settings');
     fs.writeFileSync(rc, '# mine\n');
     fs.writeFileSync(path.join(own, 'COMMIT_EDITMSG'), 'old\n');
