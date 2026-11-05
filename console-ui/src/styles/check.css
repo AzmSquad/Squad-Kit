@@ -1,0 +1,44 @@
+/* Your check at review: Where to look and Try it yourself (components/YourCheck.tsx). */
+.yourcheck { display: flex; flex-direction: column; gap: 10px; margin-top: 22px; }
+.yourcheck > .lbl { margin: 0 0 -2px; }
+
+.lookpages { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); overflow: hidden; }
+.lookpages li { display: flex; align-items: center; gap: 12px; padding: 9px 12px; min-width: 0; }
+.lookpages li + li { border-top: 1px solid var(--line); }
+.lookpages code { flex: none; max-width: 55%; font: 600 12.5px 'JetBrains Mono', ui-monospace, Menlo, monospace; color: var(--text); overflow-wrap: anywhere; }
+.lookpages .what { flex: 1; min-width: 0; font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lookpages .btn { flex: none; }
+.lookpages-none { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--muted); }
+
+.trybox { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); min-width: 0; }
+.trybox-row { display: flex; align-items: center; gap: 12px; min-width: 0; flex-wrap: wrap; }
+.trybox .ring { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--surface-2); color: var(--accent); }
+.trybox-t { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 220px; }
+.trybox-t b { font-size: 13.5px; font-weight: 650; }
+.trybox-t span { font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+.trybox-t .mono { font-size: 12px; color: var(--text); }
+.trybox .grow { display: none; }
+.trybox-acts { display: flex; gap: 8px; flex: none; margin-left: auto; }
+.trybox .term { align-self: flex-start; }
+.trybox.running { border-color: var(--accent); background: var(--accent-soft); }
+.trybox.running .ring { background: var(--accent); color: var(--accent-ink); }
+.trybox.failed { border-color: var(--you-line); background: var(--you-soft); }
+.trybox.failed .ring { color: var(--you-ink); }
+.trybox-why { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--you-ink); }
+.trybox-why.quiet { color: var(--muted); }
+
+/* The page each after picture was taken on, under its "done when". */
+.critpage { margin: -3px 0 9px 23px; font-size: 12px; color: var(--muted); }
+.critpage code { font: 600 12px 'JetBrains Mono', ui-monospace, Menlo, monospace; color: var(--text); }
+.stage .critpage { margin: -6px 0 0; }
+.crit .critpage-s { display: block; margin-top: 3px; font: 500 11.5px 'JetBrains Mono', ui-monospace, Menlo, monospace; color: var(--dim); }
+.critlist .yourcheck { margin-top: 12px; }
+.critlist .trybox-t { flex-basis: 160px; }
+
+/* The full proof page on a phone: the list above the pictures, one scroll. */
+@media (max-width: 760px) {
+  .split.proofsplit { flex-direction: column; overflow-y: auto; }
+  .split.proofsplit .critlist { width: auto; border-right: 0; border-bottom: 1px solid var(--line); overflow: visible; padding: 14px 16px; }
+  .split.proofsplit .stage { overflow: visible; padding: 16px; }
+  .lookpages .what { white-space: normal; }
+}

@@ -36,8 +36,10 @@ without your approval.
 4. The Architect writes the **design**: the decision and the steps. You, or a developer, approve it.
 5. The Builder writes the code in its own copy of the project. Your own folder stays as it is.
 6. squad-kit runs the tests, lint and build itself. The Reviewer checks the work with fresh eyes. The Tester
-   takes a screenshot for each "done when".
-7. You check this **proof** and press **Looks right**.
+   shows each "done when" in one or more screenshots, one per part or case, taken with squad-kit's own browser.
+7. You check this **proof**: each "done when" says **Met**, **Not working yet**, **Not shown yet** or **Not on a
+   screen**. **Where to look** names the pages, and **Try it yourself** runs the ticket's own copy of the app, with
+   nothing merged. Then press **Looks right**.
 8. You press **Release**. squad-kit writes the changelog, sets the version and adds the git tag.
 
 When the squad needs you, a banner shows on every page with the button to press, the browser tab shows how many
@@ -51,6 +53,10 @@ terminal command, so developers can do the same from the terminal.
 - **An AI tool**, installed and signed in once with your own account. Today that is **Claude Code**, the only
   AI tool the squad runs on. squad-kit uses your existing sign-in, so there is nothing new to buy. squad-kit
   also finds Codex, but cannot run it yet.
+
+There is nothing else to install. squad-kit installs its own browser for the screenshots the first time it needs
+one, so there is no `npx playwright` to run. **Windows** works, but it is less protected and not fully tested yet:
+use it on projects you trust.
 
 ## Install
 
@@ -86,7 +92,7 @@ Any folder works:
 
 | The folder | What squad-kit does |
 | --- | --- |
-| An empty folder | Makes a new git repo. The Architect picks the stack with you on your first ticket. |
+| An empty folder | Makes a new git repo and asks "What do you want to build?". The Architect picks the technology when your first ticket is planned, and squad-kit finds how to test and run it after the first build. |
 | Code with git | Keeps your repo and its history as they are. |
 | Code without git | Makes a repo, with your files in its first commit. Generated folders like `node_modules` and `dist`, and `.env` files, stay out. |
 | A folder with several code repos | Works across them. Each ticket works in one repo. |
@@ -116,7 +122,8 @@ The step-by-step guide is in [Getting started](docs/getting-started.md).
 - **A slow step says so**, with what it is doing and three ways out: **Give it 10 more minutes**, **Stop and try
   again**, or **Stop**. A step that makes no progress says what squad-kit checked.
 - **Run your app** from **Your apps** in the sidebar: Start, Open, Restart and Stop, from squad-kit's own copy of
-  `main`. After **Looks right**, **Run the new version** shows the change. Terminal: `squad app start`.
+  `main`. If another program holds its port, it moves to a free one by itself. After **Looks right**, **Run the new
+  version** shows the change. Terminal: `squad app start`.
 - **Tickets that need each other**: when a design depends on a ticket that is not merged yet, it waits with
   **Build on its branch**, **Build anyway** or **Wait**.
 - **Remove a ticket** you no longer want with **Delete**, and take finished ones off the board with **Archive**.
@@ -126,9 +133,14 @@ The step-by-step guide is in [Getting started](docs/getting-started.md).
 
 - **Not checked, never a fake pass**: a project with no tests shows "Not checked" in orange.
 - **Weakened tests stop the ticket**: deleted or skipped tests, fewer tests, or a changed test setup.
-- **Proof is checked**: each screenshot must be a real, new picture.
+- **Proof is checked**: each screenshot must be a real, new picture, and squad-kit's own check looks at all the
+  pictures of each "done when" together before it says **Met**.
 - **The Builder works in a sandbox** where the computer allows it: its copy only, no keys or `.env` files, and only
   the package registries and websites you allow.
+- **The project's own commands run in a guard** on Mac and Linux: the tests, the setup and the app work normally, but
+  can't read your keys, your sign-ins or squad-kit's own files.
+- **Agents get fixed tools, no free commands**, for screenshots, the app and the checks. squad-kit checks each
+  request and does the job itself.
 
 ## When something goes wrong
 
@@ -179,10 +191,19 @@ Hand over and clones work for a project whose `.squad/` sits in its one code rep
 
 ## Talk to the squad
 
-Open a chat with any agent on a ticket. **Asking never stops the work**: the squad keeps working while you
-talk. To change what gets built, press **Propose a change**. The Analyst writes the change into the spec, old
+**Ask a question** is at the top of every ticket, in every state: working, in the queue, waiting for another ticket,
+stopped, at review, taken over or released. Whoever knows the ticket best answers: the Analyst before the build, the
+Builder during and after it, the Tester once there are screenshots. It answers questions only, like "how do I test
+this?" or "where is the new page?", and the ticket stays exactly where it is. Terminal: `squad chat <ticket> --ask`.
+
+You can also open a chat with any agent on a ticket. **Asking never stops the work**: the squad keeps working while
+you talk. To change what gets built, press **Propose a change**. The Analyst writes the change into the spec, old
 and new side by side, and you approve it. A released ticket answers questions only. A change to it becomes a new
 linked ticket or a bug report.
+
+**The squad asks you only about the business.** Technical questions stay with the agent and squad-kit. Nobody may ask
+you for a password or a key, to change squad-kit's settings, or to change git history: squad-kit refuses it and
+writes one line in the ticket's activity.
 
 ## Cost and models
 
@@ -201,6 +222,8 @@ linked ticket or a bug report.
 - [Getting started](docs/getting-started.md): your first hour, from install to a release.
 - [Moving to 1.0](docs/migrating-to-1.0.md): from squad-kit 0.x, and from early 1.0 boards.
 - [The app](docs/console.md): Home, the board, the ticket drawer, Squad and AI, and Settings.
+- [From a BRD to a built product](docs/requirements.md): upload a requirements document, approve the breakdown,
+  send it to Azure DevOps and let the squad build it.
 - [CHANGELOG](CHANGELOG.md): what changed in each version.
 
 The 0.x planner commands (`squad new-story`, `squad new-plan`, `squad auth` and others) still ship. Their docs

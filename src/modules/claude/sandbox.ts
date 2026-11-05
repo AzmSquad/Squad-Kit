@@ -19,13 +19,24 @@ export interface ClaudeSandbox {
   allowUnsandboxedCommands: boolean;
   network: { allowedDomains: string[]; strictAllowlist: boolean; allowLocalBinding?: boolean };
   filesystem: { allowWrite: string[]; denyRead: string[]; allowRead: string[] };
-  excludedCommands?: string[];
 }
 
 /** Claude Code's own sign-in and the person's other conversations: Claude Code reads them, its commands never need to. */
-function claudePrivate(home: string): string[] {
+export function claudePrivate(home: string): string[] {
   return [path.join(home, '.claude', '.credentials.json'), path.join(home, '.claude', 'projects'), path.join(home, '.claude.json')];
 }
+
+/**
+ * What the project's own commands never read of Claude's: Claude Code's sign-in and conversations, and the Claude
+ * desktop app's folder on a Mac (its settings can hold keys for the tools it connects to).
+ */
+export function claudePrivateFiles(home: string, platform: NodeJS.Platform = process.platform): string[] {
+  const desktop = platform === 'darwin' ? ['Claude', 'Claude-3p'].map((d) => path.join(home, 'Library', 'Application Support', d)) : [path.join(home, '.config', 'Claude')];
+  return [...claudePrivate(home), ...desktop];
+}
+
+/** Claude's keys and Claude Code's own settings in the environment. */
+export const CLAUDE_ENV = ['ANTHROPIC_*', 'CLAUDE_*', 'CLAUDECODE'];
 
 /** Claude Code's sandbox settings for what a step asked. */
 export function claudeSandbox(ask: SandboxAsk, platform: NodeJS.Platform = process.platform, home = os.homedir()): ClaudeSandbox {
@@ -45,9 +56,8 @@ export function claudeSandbox(ask: SandboxAsk, platform: NodeJS.Platform = proce
       // macOS: tests may listen on this computer's own ports and reach them, as the app's own tests do.
       ...(platform === 'darwin' ? { allowLocalBinding: true } : {}),
     },
+    // No command runs outside it: pictures and the app go through squad-kit's own tools instead.
     filesystem: { allowWrite: ask.write, denyRead: [...new Set([...ask.noRead, ...claudePrivate(home)])], allowRead: ask.read },
-    // Claude Code's permission-rule form: "npx playwright:*" is every command that starts with "npx playwright".
-    ...(ask.outside?.length ? { excludedCommands: ask.outside.map((c) => `${c}:*`) } : {}),
   };
 }
 

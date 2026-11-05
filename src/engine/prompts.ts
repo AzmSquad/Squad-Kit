@@ -2,6 +2,9 @@ import { DECISION_AREAS, TECH_ROLES } from '../board/types.js';
 import { PART_KINDS } from '../board/overview.js';
 import type { AgentName, BoardMeta, ChatMessage, Decision, Question, RepoInfo, SpecChange, Step, Ticket, TicketNote } from '../board/types.js';
 import { reposOf } from './repos.js';
+import { autoAskRule } from './auto-prompts.js';
+import { pagesOf, squadWorks, waitsAtReview, whereItStands } from '../board/at-review.js';
+import { MAX_PICTURES, MAX_PICTURES_PER_DONE_WHEN, criterionText } from './proof-verdict.js';
 
 /** Role briefs for the live squad, and the JSON shapes each role must answer in. */
 
@@ -121,11 +124,12 @@ export const QUESTIONS_SCHEMA = {
         type: 'object',
         properties: {
           from: { type: 'string', enum: ['analyst', 'architect'] },
+          kind: { type: 'string', enum: ['gap', 'clash'] },
           text: STR,
           options: { type: 'array', minItems: 2, maxItems: 4, items: STR },
           typedOption: STR,
         },
-        required: ['from', 'text', 'options'],
+        required: ['from', 'kind', 'text', 'options'],
       },
     },
   },
@@ -235,42 +239,96 @@ export const CHAT_SCHEMA = {
   required: ['reply', 'ready'],
 };
 
-/** Filled only when the agent must stop and ask the person. */
+/**
+ * Filled only when the agent must stop and ask the person. kind: why it asks, a gap in the business or a clash between
+ * two requirements; squad-kit still reads the words itself (engine/question-filter.ts). sources: on the Builds by itself
+ * track, where it comes from: the BRD's place, an answer, a ticket's built code (see auto-prompts.ts).
+ */
 const QUESTION = {
   type: 'object',
-  properties: { text: STR, options: { type: 'array', maxItems: 4, items: STR }, why: STR, files: { type: 'array', maxItems: 6, items: STR } },
-  required: ['text'],
+  properties: {
+    text: STR,
+    options: { type: 'array', maxItems: 4, items: STR },
+    why: STR,
+    files: { type: 'array', maxItems: 6, items: STR },
+    kind: { type: 'string', enum: ['gap', 'clash'] },
+    sources: {
+      type: 'array',
+      maxItems: 4,
+      items: { type: 'object', properties: { text: STR, ticket: STR, section: STR, page: { type: 'integer' } }, required: ['text'] },
+    },
+  },
+  required: ['text', 'kind'],
 };
+
+/** Builds by itself: the small choices the agent made instead of asking ("Decided for you"). */
+const DECIDED = { type: 'array', maxItems: 6, items: STR } as const;
 
 /** Full track, step two: the how, written from the approved spec. */
 export const DESIGN_SCHEMA = {
   type: 'object',
-  properties: { ...Object.fromEntries(Object.entries(PLAN_SCHEMA.properties).filter(([k]) => !['story', 'criteria', 'releaseNote'].includes(k))), question: QUESTION },
+  properties: { ...Object.fromEntries(Object.entries(PLAN_SCHEMA.properties).filter(([k]) => !['story', 'criteria', 'releaseNote'].includes(k))), question: QUESTION, decided: DECIDED },
   required: ['steps', 'tests', 'screens'],
 };
 
 export const BUILD_SCHEMA = {
   type: 'object',
-  properties: { summary: STR, testsAdded: { type: 'integer' }, notes: STR, question: QUESTION },
+  properties: { summary: STR, testsAdded: { type: 'integer' }, notes: STR, question: QUESTION, decided: DECIDED },
   required: ['summary'],
 };
 
 export const REVIEW_SCHEMA = {
   type: 'object',
-  properties: { approved: { type: 'boolean' }, summary: STR, comments: { type: 'array', items: STR }, question: QUESTION },
+  properties: { approved: { type: 'boolean' }, summary: STR, comments: { type: 'array', items: STR }, alsoChanged: { type: 'array', items: STR }, question: QUESTION, decided: DECIDED },
   required: ['approved', 'summary', 'comments'],
 };
 
+/**
+ * The Tester's answer: the pictures squad-kit took for each "done when" that shows on a screen (by file name, one per
+ * part or case, several naming the same "done when"), what each shows (met, broken or not shown), and one plain note;
+ * and every "done when" that shows on no screen, or has a part that cannot be shown, with why. The shape cannot count
+ * per "done when": the live squad does.
+ */
 export const PROOF_SCHEMA = {
   type: 'object',
   properties: {
     shots: {
       type: 'array',
-      items: { type: 'object', properties: { criterion: { type: 'integer' }, file: STR, note: STR }, required: ['criterion', 'file'] },
+      maxItems: MAX_PICTURES,
+      items: {
+        type: 'object',
+        properties: { criterion: { type: 'integer' }, file: STR, shows: { type: 'string', enum: ['met', 'broken', 'not-shown'] }, note: STR },
+        required: ['criterion', 'file', 'shows', 'note'],
+      },
     },
-    skipped: STR,
+    offScreen: {
+      type: 'array',
+      maxItems: 20,
+      items: { type: 'object', properties: { criterion: { type: 'integer' }, why: STR }, required: ['criterion', 'why'] },
+    },
   },
-  required: ['shots'],
+  required: ['shots', 'offScreen'],
+};
+
+/**
+ * squad-kit's own check of the proof: once per "done when", whether all its pictures together show it met, broken or
+ * not clearly (with exact advice on what is missing, and whether that can be shown at all), and whether the "done when"
+ * itself says the screen stays as it was.
+ */
+export const PROOF_CHECK_SCHEMA = {
+  type: 'object',
+  properties: {
+    checks: {
+      type: 'array',
+      maxItems: MAX_PICTURES,
+      items: {
+        type: 'object',
+        properties: { criterion: { type: 'integer' }, shows: { type: 'string', enum: ['met', 'broken', 'not-shown'] }, why: STR, advice: STR, noChange: { type: 'boolean' }, canShow: { type: 'boolean' }, canShowWhy: STR },
+        required: ['criterion', 'shows', 'why', 'noChange'],
+      },
+    },
+  },
+  required: ['checks'],
 };
 
 export const DRAFT_SCHEMA = {
@@ -291,6 +349,10 @@ export const DRAFT_SCHEMA = {
 
 const PLAIN = 'Write for a project manager who may not be a developer: plain words, short sentences, no jargon.';
 
+/** The rule every "done when" example follows, for the Analyst and the Spec writer. */
+export const EXAMPLES_FIT =
+  'Each example in a "done when" must follow every other rule of the story: a date on an open day, a time inside opening hours, an amount under the limit, and so on.';
+
 /**
  * How a step that only reads looks at the code. Its shell takes simple read commands only, and anything else is
  * refused, so it is told up front instead of finding out with its first command.
@@ -304,6 +366,8 @@ or scripts.`;
 export interface PromptContext {
   rules: string[];
   repo?: RepoInfo;
+  /** Leave the app's saved address out: a talk with the person gets it only while the copy really runs there. */
+  noAddress?: boolean;
 }
 
 /**
@@ -329,7 +393,7 @@ function reposText(meta: BoardMeta): string {
     .join('\n')}`;
 }
 
-function projectContext(meta: BoardMeta, decisions: Decision[], ctx?: PromptContext): string {
+export function projectContext(meta: BoardMeta, decisions: Decision[], ctx?: PromptContext): string {
   const map = meta.map.length ? meta.map.map((m) => `- ${m.area}: ${m.detail}`).join('\n') : '- (not read yet)';
   const rules = decisions.filter((d) => !d.replacedBy && !d.proposed);
   const adrs = rules.length ? rules.map((d) => `- ${d.id} ${d.title}. Chosen: ${d.chosen}. Why: ${d.why}`).join('\n') : '- (none yet)';
@@ -342,7 +406,7 @@ function projectContext(meta: BoardMeta, decisions: Decision[], ctx?: PromptCont
   const replaced = old.length ? `\n\nReplaced decisions, no longer rules (do not follow):\n${old.map((d) => `- ${d.id} ${d.title}, replaced by ${d.replacedBy}`).join('\n')}` : '';
   const lessons = meta.lessons.length ? meta.lessons.map((l) => `- ${l.text}`).join('\n') : '- (none yet)';
   const c = ctx?.repo?.commands ?? reposOf(meta)[0]?.commands ?? {};
-  const commands = Object.entries(c).filter(([, v]) => v).map(([k, v]) => `- ${k}: ${v}`).join('\n') || '- (none set up yet)';
+  const commands = Object.entries(c).filter(([k, v]) => v && !(ctx?.noAddress && k === 'url')).map(([k, v]) => `- ${k}: ${v}`).join('\n') || '- (none set up yet)';
   return [
     `Project: ${meta.project}${reposText(meta)}`,
     `Project map:\n${map}`,
@@ -353,7 +417,7 @@ function projectContext(meta: BoardMeta, decisions: Decision[], ctx?: PromptCont
 }
 
 /** The ticket as it was written, maybe in the tracker, fenced as data; what squad-kit asks of it stays outside. */
-function ticketContext(t: Ticket): string {
+export function ticketContext(t: Ticket): string {
   const files = t.attachments?.length ? `\nAttached files (read them):\n${t.attachments.map((a) => `- ${a}`).join('\n')}` : '';
   const list = (head: string, items?: string[]) => (items?.length ? `\n${head}:\n${items.map((x) => `- ${x}`).join('\n')}` : '');
   const brief = t.brief
@@ -411,9 +475,16 @@ export function notesText(notes: TicketNote[], fresh = false): string {
 
 /** The plan's "done when" list, plus every acceptance criterion the person added later as a note. */
 function doneWhen(t: Ticket): string {
+  return doneWhenItems(t)
+    .map((c, i) => `${i + 1}. ${c}`)
+    .join('\n');
+}
+
+/** Each "done when" in full words, in order: the plan's, then the ones the person added. */
+export function doneWhenItems(t: Ticket): string[] {
   const plan = (t.criteria ?? []).map((c) => `Given ${c.given}, when ${c.when}, then ${c.then}.`);
   const added = (t.notes ?? []).filter((n) => n.kind === 'criterion').map((n) => `${n.text} (added by the person)`);
-  return [...plan, ...added].map((c, i) => `${i + 1}. ${c}`).join('\n');
+  return [...plan, ...added];
 }
 
 function answersText(t: Ticket): string {
@@ -427,7 +498,7 @@ function answersText(t: Ticket): string {
     .join('\n');
 }
 
-export function scanPrompt(meta: BoardMeta, nested: RepoInfo[], ctx?: PromptContext, corrections = ''): string {
+export function scanPrompt(meta: BoardMeta, nested: RepoInfo[], ctx?: PromptContext, corrections = '', idea = ''): string {
   const repos = nested.length
     ? `\nThis folder is a workspace with several code repos inside, each with its own git:\n${nested.map((r) => `- ${r.path}`).join('\n')}
 For each repo, fill one entry in repos with its path, a one-line summary, and its commands (run inside that repo's folder).
@@ -436,18 +507,22 @@ Leave the top-level commands empty.\n`
   const fix = corrections
     ? `\n\nYou read this project before, and the person said some of it was wrong. Read it again with what they said in mind.\n${asData('What the person said', corrections)}\n`
     : '';
+  const wants = idea
+    ? `\n\nThis project has no code yet. The person said what they want to build.\n${asData('What the person wants to build', idea)}\nIn summary, say that in one plain sentence, in their language. In ideas, give up to three first stories for it: what people will be able to do, never about technology or setting things up.\n`
+    : '';
   return `You are the Architect of a software squad, reading this project for the first time.
 Look at the files (README, package files, project files, folders). Do not change anything.${rulesText(ctx)}
-${repos}${fix}
+${repos}${fix}${wants}
 Produce:
 - empty: true if the folder has no real code yet.
 - summary: one sentence on what this project is.
 - map: 4 to 8 rows of "area" and "detail", like "Front end: Angular 17, in web/".
 - decisions: the technical choices already made (language, frameworks, database, test tools), each with a short why.
   The person checks them before they become the rules every ticket follows.
-- commands: only the ones you are sure of from the files. setup installs dependencies, test runs the tests,
+- commands: only the ones you are sure of from the files. setup installs dependencies, test runs all the tests,
   lint checks code style, build builds it, start runs the app for a browser, url is where it opens.
-  Leave a command empty if the project does not have it.
+  Leave a command empty if the project does not have it. When the project has a separate script for browser or
+  end-to-end tests, test runs it too: "npm test && npm run test:e2e".
 - users: who uses the project and how they get in, in one or two sentences, from what the code shows (sign-in, roles,
   pages), like "Office staff who book rooms. They pick their name from a list; there are no accounts."
 - can: 3 to 8 things it can do today, one short line each, in the words of the people who use it, like "Book a room
@@ -462,7 +537,9 @@ Produce:
   booking page"; files, up to 3 real folder or file paths.
 - links: how the parts connect: from and to are part ids, label is a word or two, like "uses", "calls", "stores in"
   or "checks".
-If the folder has no real code yet, leave users, can, worth, parts and links empty, and give three ideas for how to start.
+If the folder has no real code yet, leave map, decisions, commands, users, can, worth, parts and links empty. The .squad
+folder is squad-kit's own and says nothing about the project. Choose no technology now: you pick it yourself when the
+first story is planned. Give ideas only for what the person said they want to build.
 
 Project name: ${meta.project}. ${PLAIN}
 ${LOOK}`;
@@ -554,9 +631,16 @@ ${ticketContext(t)}
 Your job now: ask the person only the questions whose answers change what gets built or how.
 - The Analyst asks about the business: who uses it, what rules apply, what "done" looks like.
 - The Architect asks business questions that decide the technical design, for example "do staff share computers?",
-  never "which database?". If no saved decision settles the technology this ticket needs, the Architect asks first:
-  "Must you use a technology the client chose?" with options ["No, you choose", "Yes:"] and typedOption "Yes:".
+  never "which database?". ${
+    meta.scan?.empty
+      ? 'This project has no code yet: the Architect picks the technology itself when it plans this ticket, and asks nothing about it.'
+      : `If no saved decision settles the technology this ticket needs, the Architect asks first:
+  "Must you use a technology the client chose?" with options ["No, you choose", "Yes:"] and typedOption "Yes:".`
+  }
 - Each question has 2 to 4 short options. Use typedOption only for an option that needs a typed value.
+- Each question has a kind: "gap" (something the business has not said that changes what gets built) or "clash" (two
+  requirements that disagree). Ask about the business only: never about files, settings, commands, ports, installs or
+  other technical things. Decide those yourself; squad-kit turns technical questions back to you.
 - Ask at most 5 questions in total. If the ticket is already clear, ask none.
 - summary: one sentence on what you understood.
 ${PLAIN}
@@ -581,10 +665,10 @@ export function planPrompt(t: Ticket, change?: string, meta?: BoardMeta, others?
   return `${head}
 
 - story: "As a <who>, I want <what>, so <why>."
-- criteria: 2 to 5 "done when" checks in Given / When / Then form. Each must be testable.
+- criteria: 2 to 5 "done when" checks in Given / When / Then form. Each must be testable. ${EXAMPLES_FIT}
 - decision: only if this ticket makes a technical choice later tickets must follow. Give 2 options you considered,
   mark the chosen one, and say why in plain words tied to the person's answers. If the client forces a technology,
-  check it against the business needs and write the result in clientCheck ("no conflict" or the conflict).
+  check it against the business needs and write the result in clientCheck ("no conflict" or the conflict).${firstTechnology(meta)}
 ${DECISION_LINKS}
 ${DEPENDS_RULE}
 - steps: 3 to 7 small steps in order, one sentence each. The last step writes the tests.
@@ -593,6 +677,13 @@ ${DEPENDS_RULE}
 - commands: only if the project has no way yet to set up, test, build or start it, or this ticket changes that.
   For a new project, choose simple, common tools and give every command, including start and url.${repo}${testLine(t, meta)}${openTicketsText(others, 'architect')}
 ${PLAIN}`;
+}
+
+/** A project with no code: the Architect picks the technology itself now, and it is saved as a decision engineers can see. */
+function firstTechnology(meta?: BoardMeta): string {
+  return meta?.scan?.empty
+    ? `\n  This project has no code yet, so this ticket picks its technology. Choose it yourself, simple and common, and never ask the person: make it the decision (the language, the framework and where the data is kept), so engineers can see it.`
+    : '';
 }
 
 /**
@@ -625,6 +716,7 @@ export function specPrompt(t: Ticket, change?: string, fromChat = false, others?
 
 - story: "As a <who>, I want <what>, so <why>."
 - criteria: 2 to 5 "done when" checks in Given / When / Then form. Each must be testable, in the person's words.
+  ${EXAMPLES_FIT}
 - releaseNote: one line for release notes, like "**Dark mode.** Switch the dashboard to dark."${openTicketsText(others, 'analyst')}
 ${PLAIN}`;
 }
@@ -647,7 +739,7 @@ ${doneWhen(t)}
 
 - decision: only if this ticket makes a technical choice later tickets must follow. Give 2 options you considered,
   mark the chosen one, and say why in plain words tied to the spec. If the client forces a technology,
-  check it against the business needs and write the result in clientCheck ("no conflict" or the conflict).
+  check it against the business needs and write the result in clientCheck ("no conflict" or the conflict).${firstTechnology(meta)}
 ${DECISION_LINKS}
 ${DEPENDS_RULE}
 - steps: 3 to 7 small steps in order, one sentence each. The last step writes the tests.
@@ -655,7 +747,7 @@ ${DEPENDS_RULE}
 - commands: only if the project has no way yet to set up, test, build or start it, or this ticket changes that.
   For a new project, choose simple, common tools and give every command, including start and url.${repo}${testLine(t, meta)}
 ${MOCKUP_RULE}
-${ASK_RULE}${openTicketsText(others, 'architect')}
+${askRule(t)}${openTicketsText(others, 'architect')}
 ${PLAIN}`;
 }
 
@@ -693,11 +785,12 @@ ${steps}
 Rules:
 - Before you start each step, print a line that says exactly ">> step N" (N is the step number).
 - Follow the saved decisions and the project's existing style.
-- Write tests that check every "done when", and run the tests before you finish.
+- Write tests that check every "done when", and run the tests before you finish. A browser cannot start in your shell:
+  run tests that open a browser with squad-kit's run_checks tool, never yourself.
 - Never commit, push, switch branches, or change files outside this folder.
 - Wait for every command to finish (installs too). Never leave anything running in the background; this step ends when you answer.
 - If the plan does not cover a small choice, take the simplest one and say so in notes.
-${ASK_RULE}`;
+${askRule(t)}`;
 }
 
 /** A ticket that depends on unmerged work: what is in this copy and what is not, so the Builder never has to guess. */
@@ -714,11 +807,26 @@ export function dependencyText(t: Ticket): string {
   return `\n\nThis ticket depends on ${on}. It is merged now, so its code is in this copy.`;
 }
 
+/** Technical trouble is never the person's: it goes to i_am_stuck. Some asks are never allowed at all. Every ask rule has it. */
+export const TECH_RULE = `- Never ask the person a technical question (files, settings, commands, the terminal, ports, installs, the browser,
+  permissions, git): squad-kit sends it back to you. When something technical is in your way, call squad-kit's
+  i_am_stuck tool. Never ask the person to change squad-kit's settings or its .squad folder, to hand over a password
+  or a key, or to change git history: squad-kit refuses it and counts it.`;
+
 const ASK_RULE = `- Ask the person only when something important is unclear and a wrong guess would waste the work or break a business rule:
   then stop, fill "question" (one plain sentence, 2 to 4 short options, and why it matters), and leave the rest for later.
-  They answer in this same conversation. Never ask about code style or small choices.
+  Say why you ask in question.kind: "gap" (the story misses something that changes what gets built) or "clash" (two
+  requirements disagree). They answer in this same conversation. Never ask about code style or small choices.
   To show what you mean, put full paths of files you made in "files": screenshots, a wireframe, or one self-contained
-  HTML page as a clickable mockup (inline CSS, no links to other sites).`;
+  HTML page as a clickable mockup (inline CSS, no links to other sites).
+- Product and technical choices are yours: decide them, and list the ones the person may care about in "decided", in
+  short plain sentences.
+${TECH_RULE}`;
+
+/** When to ask the person: the usual rule, or on the Builds by itself track only for a gap or a clash. */
+function askRule(t: Ticket): string {
+  return t.track === 'auto' ? autoAskRule() : ASK_RULE;
+}
 
 /** The person's answer to a question an agent asked mid-work. It goes back into the same conversation. */
 export function answerPrompt(q: { text: string; answer?: string }, role: 'architect' | 'builder' | 'reviewer'): string {
@@ -731,13 +839,22 @@ export function answerPrompt(q: { text: string; answer?: string }, role: 'archit
   return `You asked: "${q.text}"\nThe person answered: "${q.answer ?? ''}"\n\n${next}`;
 }
 
-export function fixChecksPrompt(failures: { name: string; command: string; output: string }[]): string {
+/** Every fix of the Builder's: what is broken in the product, nothing for a picture's sake. */
+const FIX_ONLY_BROKEN = 'Fix only what is broken in the product. Never change the product just to make a picture clearer.';
+
+export function fixChecksPrompt(failures: { name: string; command: string; output: string }[], known: { name: string; command: string; output?: string }[] = []): string {
   const text = failures.map((f) => `"${f.name}" (${f.command}) failed. ${asData('Its output', f.output)}`).join('\n\n');
+  const before = known.length
+    ? `\n\nThese checks already failed before this story started: ${known.map((k) => `${k.name} (${k.command})`).join(', ')}. Fix what this story broke. Do not change other screens or rules to make an old failure pass, unless the plan asks.${known
+        .filter((k) => k.output)
+        .map((k) => `\n${asData(`What "${k.name}" printed then`, k.output!)}`)
+        .join('')}`
+    : '';
   return `squad-kit ran the project checks and some failed.
 
-${text}
+${text}${before}
 
-Print ">> fix" first. Fix the cause in the code. Do not delete or weaken tests to make them pass. Run the checks again before you finish.`;
+Print ">> fix" first. Fix the cause in the code. Do not delete or weaken tests to make them pass. ${FIX_ONLY_BROKEN} Run the checks again before you finish.`;
 }
 
 /** "Send it back to the Builder" after the tests were made weaker: it puts them back, then the checks run again. */
@@ -750,7 +867,7 @@ plan says to change it. Make the code pass the tests as they were, then run the 
 }
 
 export function reviewFixPrompt(comments: string[]): string {
-  return `The Reviewer asked for these changes:\n${comments.map((c) => `- ${c}`).join('\n')}\n\nPrint ">> fix" first, then make the changes and run the tests again.`;
+  return `The Reviewer asked for these changes:\n${comments.map((c) => `- ${c}`).join('\n')}\n\nPrint ">> fix" first, then make the changes and run the tests again. ${FIX_ONLY_BROKEN}`;
 }
 
 export function clashPrompt(base: string, files: string[]): string {
@@ -770,7 +887,7 @@ function checksRan(t: Ticket, meta: BoardMeta, ctx?: PromptContext): string {
   const ran = (['test', 'lint', 'build'] as const).filter((k) => c[k]?.trim()).map((k) => `${k}: ${c[k]!.trim()}`);
   const result = t.gates?.checksText?.trim();
   const each = t.gates?.ran?.length
-    ? `\nEach check squad-kit ran:\n${t.gates.ran.map((r) => `- ${r.name === 'start' ? 'the app starts' : r.name} (${r.command}): ${r.ok ? 'passed' : 'failed'}${r.tests !== undefined ? `, ${r.tests} tests` : ''}`).join('\n')}`
+    ? `\nEach check squad-kit ran:\n${t.gates.ran.map((r) => `- ${r.name === 'start' ? 'the app starts' : r.name} (${r.command}): ${r.ok ? 'passed' : 'failed'}${r.tests !== undefined ? `, ${r.tests} tests` : ''}${r.failedOnce ? '; it failed once first, and passed when run again' : ''}`).join('\n')}`
     : '';
   const weakened = (t.overrides ?? []).filter((o) => o.gate === 'checks' && o.weakened?.length);
   const past = weakened.length
@@ -817,57 +934,249 @@ ${look}${changed}${asked}
 ${checksRan(t, meta, ctx)}
 Check: does it do every "done when"? Does it follow the saved decisions? Real bugs, security holes, missing tests?
 Were tests deleted, switched off or made weaker? That is a real problem unless the plan asks for it.
+${notOnScreenRule(t)}
 ${again ? 'Approve when your notes are handled and nothing else is wrong.' : 'Approve unless there is a real problem.'} Small style notes do not block. Each comment is one concrete sentence.
-${ASK_RULE}
+alsoChanged: each thing this change touches that the story, its "done when" and the plan did not ask for, as a short
+plain phrase for a project manager, like "the Services screen". Leave it out when there is none. It does not block
+your approval by itself: squad-kit shows it to the person.${canLook(meta, ctx) ? `
+To see a page of the app as it is now, call look_at_page, at the size you need (phone or desktop): squad-kit opens the
+page in its own browser, starting this story's app when needed, and gives back what is on it. It saves no pictures.
+Never start the app or a browser of your own.` : ''}
+${askRule(t)}
 ${LOOK}`;
 }
 
-export function proofPrompt(meta: BoardMeta, t: Ticket, outDir: string, when: 'before' | 'after', ctx?: PromptContext, appRunning = false, appUrl?: string): string {
+/**
+ * A "done when" that ends as Not on a screen has no picture that proves it, or only of a part, so the code and the tests
+ * are the only proof of the rest. Those the last round of screenshots could not show are named.
+ */
+function notOnScreenRule(t: Ticket): string {
+  const known = [...(t.proof ?? []).filter((p) => p.shows === 'off-screen').map((p) => ({ criterion: p.criterion, why: p.why ?? '' })), ...(t.offScreen ?? [])];
+  const named = [...new Map(known.map((o) => [o.criterion, o])).values()];
+  const list = named.length ? `\nThe last screenshots could not show these:\n${named.map((o) => `- ${o.criterion}${o.why ? `: ${o.why}` : ''}`).join('\n')}` : '';
+  return `A "done when" can end as "Not on a screen", when the app has no way to show it (an old record it cannot make, what happens after a restart, an email). The screenshots do not prove those, so check them here: find the code that does it and a test that covers it. A "Not on a screen" with no code, or with no test where one could be written, is a real problem.${list}`;
+}
+
+/** The project can start its app, so the Reviewer can look at its pages through squad-kit. */
+function canLook(meta: BoardMeta, ctx?: PromptContext): boolean {
+  const c = ctx?.repo?.commands ?? meta.commands ?? {};
+  return Boolean(c.start?.trim() && c.url?.trim());
+}
+
+/**
+ * The Tester's brief for the proof: it takes the pictures with squad-kit's own tools (the window), looks at each one,
+ * takes a wrong one again, and hands in the files per "done when", one per part or case, with one plain note each. It
+ * never runs a browser or the app itself, and only reads the code.
+ */
+export function proofPrompt(meta: BoardMeta, t: Ticket, when: 'before' | 'after', ctx?: PromptContext, appUrl?: string, beforeSizes: Record<string, string> = {}): string {
   const criteria = doneWhen(t);
-  const base = ctx?.repo?.commands ?? meta.commands ?? {};
-  // squad-kit may run the ticket's copy on another port when the usual one is taken.
-  const c = appUrl ? { ...base, url: appUrl } : base;
+  // Each "done when"'s before picture, so the after picture it pairs with is taken at the same size.
+  const paired = doneWhenItems(t).flatMap((_, i) => {
+    const size = beforeSizes[criterionText(t, i + 1) ?? ''];
+    return size ? [`- "done when" ${i + 1}: ${size}`] : [];
+  });
+  const url = appUrl ?? (ctx?.repo?.commands ?? meta.commands ?? {}).url ?? 'its usual address';
   return `You are the Tester of a software squad. Take screenshots that show each "done when" below ${
-    when === 'before' ? 'as the app is BEFORE the change (some may not exist yet; show the closest screen)' : 'working AFTER the change'
+    when === 'before' ? 'as the app is BEFORE the change (a screen may not exist yet: show the closest one)' : 'working AFTER the change'
   }.
 
 Done when:
 ${criteria}
 
+The app is running at ${url}; squad-kit started it and stops it. Use squad-kit's tools, never a browser or the app of
+your own (your shell only reads):
+- look_at_page: opens a page and gives back its address and what is on it (roles, names, text). Use it to find the
+  names of the fields and buttons.
+- take_screenshots: for each shot, the page to open (a path in the app starting with "/", never a full address), the
+  steps to do there first (fill, click, select, press, wait and so on, each naming its part of the page one way: role
+  and name is best), and the size ("phone" for a phone screen; desktop by default). The pictures come back to you
+  with their file names. Look at each one: when it does not show the "done when" (wrong page, an error, still
+  loading, the wrong data), take it again with better steps.
+- start_app, stop_app, app_status: the app, should it stop. run_checks: the project's own saved tests, lint and build,
+  should you need them. i_am_stuck: anything technical in your way.
+Read the code first for the pages, the labels, and the test sign-ins or sample data in the project's own seed,
+fixture or example files. Use only those, never a real person's details.
+When an example in a "done when" breaks another rule of the story (a date when the office is closed, a time outside
+opening hours), use the nearest example that fits every rule, and say so in the note.
 ${
-  appRunning
-    ? `The app is already running at ${c.url}; squad-kit started it and will stop it. Do not start or stop it yourself.`
-    : `How to run the app: ${c.setup ? `set up with "${c.setup}", then ` : ''}start it with "${c.start}" and wait until ${c.url} answers. Stop it when you are done.`
-}
-For each "done when" that shows on a screen, save one 1280x800 PNG named ${t.id.toLowerCase()}-${when}-<number>.png in ${outDir}.
-Use the project's Playwright if it has one, or "npx -y playwright screenshot --viewport-size=1280,800 <url> <file>".
-If you need clicks or typing first, write a short Playwright script with the shell (this step has no file-editing tools), in a temporary folder outside the project.
-If browsers are missing, run "npx -y playwright install chromium".
-Do not change project files: squad-kit puts back anything changed in the project. In shots, give the "done when" number and file name for each screenshot.${rulesText(ctx)}`;
+    when === 'after'
+      ? `Each picture must show the RESULT of its "done when", not the page before it: the message it shows, the saved
+item in the list, the refused booking with its reason, the page at phone width. Do the steps (fill, click, then wait
+for the answer) in take_screenshots, so the picture is taken after them. The picture shows only what fits the window:
+when the part that matters is lower down, add a hover step on it, so it comes into view.
+A "done when" with several parts, cases or pages gets one picture per part or case, at most ${MAX_PICTURES_PER_DONE_WHEN} for one "done when".
+For example: "refused when empty, spaces or 61 characters" gets one picture per message when the messages differ, and
+"shows on the day view and in Upcoming bookings" gets one picture of each place. Each picture must show the result of
+its own part, with its own note. The "done when" is judged over all its pictures together, so every part must be in
+one of them. Plan the pictures first: a step takes at most ${MAX_PICTURES}.
+A "done when" that says the screen stays as it was (looks the same as before, unchanged, as today, still shows ...)
+is on a screen too: its picture is the screen as it is now, and it may be the same as the picture from before.${
+          paired.length
+            ? `
+The first picture you name for a "done when" sits beside its picture from before the change, so take it at the same
+size, unless the "done when" itself names another. The sizes from before:
+${paired.join('\n')}`
+            : ''
+        }`
+      : 'Each picture shows the screen where the "done when" will happen, as it is now.'
+  }
+
+In shots, ${
+    when === 'after' ? 'one entry per picture, at least one for each "done when" that shows on a screen' : 'one for each "done when" that shows on a screen'
+  }: criterion (its number), file (a file name from the list
+of pictures take_screenshots gives you, the pictures you took in this step, never an older one), shows and note.
+- shows: ${
+    when === 'after'
+      ? `"met" when the picture shows the "done when", or its part of it, works as written.
+  "broken" when the picture shows it does not work as written: an error, the wrong result, text cut off by the page, a
+  page wider than a phone screen. Say what the picture shows. A "broken" goes back to the Builder to fix.
+  "not-shown" when the picture does not show it clearly: the part that matters is out of view, it is still loading,
+  the steps did not reach the result. Take it again first; hand in "not-shown" only when you cannot get it into a
+  picture. A picture you framed badly is never "broken".`
+      : '"not-shown": the change is not made yet.'
+  }
+- note: one plain sentence for the person, what the picture shows${when === 'after' ? ', and for "broken" what is wrong' : ''}.
+offScreen: each "done when" that cannot show on any screen (it happens after a restart, it is about speed, it is an
+email), with why in plain words for a project manager. A "done when" about what a page shows, or how it looks at a
+size, is on a screen: it needs a picture. Every "done when" is in shots or in offScreen.
+When a part of a "done when" truly cannot be shown (it needs an old record, the app has none, and its screens cannot
+make one), hand in the pictures of the parts that can be shown, and also put it in offScreen, saying which part and
+why. squad-kit's check reads your reason and looks at the code and the sample data itself. "I did not try" or "it takes
+too long" is no reason: it sends you back to take the picture.
+Never wait for the clock. Do not sleep or pause to let a booking end, a day pass or a timer run out: when a part needs
+time to pass, it is one of those parts that cannot be shown.
+Never ask the person anything technical. Do not change project files: squad-kit puts back anything changed.${notesText((t.notes ?? []).filter((n) => n.kind !== 'criterion'))}${rulesText(ctx)}
+${LOOK}`;
 }
 
-/** The screenshots failed squad-kit's check: the Tester takes them again, told what was wrong. */
+/** The screenshots failed squad-kit's check: the Tester takes what is missing, told what was wrong. Its good pictures stay. */
 export function proofAgainPrompt(problems: string[]): string {
   return `squad-kit checked your last screenshots and some do not prove anything yet:
 ${problems.map((p) => `- ${p}`).join('\n')}
 
-Take those again now. Each must be a new 1280x800 PNG of the screen after it has fully loaded, and an "after" must show
-the change: open the screen, state or data where the "done when" can be seen, not the same view as before the change.`;
+Take what is missing now with take_screenshots, and hand in the new files. squad-kit keeps your other pictures of each
+"done when" and adds the new ones beside them, so take only what is listed here, not the rest again. An "after" must
+show the change: open the screen, state or data where the "done when" can be seen, not the same view as before the
+change, do the steps that lead to its result (the message, the saved item, the refused booking), and let it finish
+loading (a wait step). Only pictures you take from now on count, so name only those in your answer, and only for the
+"done when" listed here. If what is missing truly cannot be shown, because the app has no such data and no way to make
+it on a screen, put that "done when" in offScreen with which part and why; your pictures of it stay.`;
 }
 
-/** The first run's proof: one screenshot of the app squad-kit opened, so the person sees it works here. */
-export const SETUP_SHOT_SCHEMA = {
-  type: 'object',
-  properties: { file: STR, note: STR, skipped: STR },
-  required: ['file'],
-};
+/** A picture of the proof for squad-kit's own check: the file and where it was taken. */
+export interface PictureFile {
+  file: string;
+  page?: string;
+  size?: string;
+  note?: string;
+}
 
-export function setupShotPrompt(url: string, file: string): string {
-  return `You are the Tester of a software squad. squad-kit just opened this project's app for the first time, at ${url}; it
-started the app and will stop it, so do not start or stop it yourself.
-Save one 1280x800 PNG screenshot of the first page people see there, as ${file}.
-Use "npx -y playwright screenshot --viewport-size=1280,800 ${url} ${file}". If browsers are missing, run "npx -y playwright install chromium" first.
-Do not change any project files. In file, give the file you saved. If the page does not load, leave file empty and say why in skipped.`;
+/** One "done when" for squad-kit's own check: its number, its main picture and the others, or none with the Tester's reason. */
+export interface PictureToCheck extends Omit<PictureFile, 'file'> {
+  criterion: number;
+  /** The main picture. None when the Tester says it shows on no screen. */
+  file?: string;
+  /** Why the Tester says it, or a part of it, cannot be shown on a screen. */
+  offScreen?: string;
+  /** The Tester's own verdict on this "done when". */
+  said?: string;
+  /** The main picture is the very same as the one from before the change. */
+  same?: boolean;
+  /** The other pictures of this "done when", judged together with the main one. */
+  more?: PictureFile[];
+}
+
+/**
+ * squad-kit's own check of the proof, in one short run for all pictures: a Reviewer looks at all the pictures of each
+ * "done when" together and says once met, broken or not shown, with one plain sentence, and for not shown exact advice
+ * on what is missing and whether it can be shown at all. A "done when" the Tester says cannot be shown is judged too,
+ * by its reason. It only reads; the pictures are in the proof folder, which it may read.
+ */
+export function proofCheckPrompt(t: Ticket, pictures: PictureToCheck[]): string {
+  const items = doneWhenItems(t);
+  const where = (p: Omit<PictureFile, 'file'> & { file?: string }) => `${p.file}${p.size || p.page ? ` (${[p.size, p.page ? `page ${p.page}` : ''].filter(Boolean).join(', ')})` : ''}`;
+  const list = pictures
+    .map((p) =>
+      [
+        `${p.criterion}. Done when: ${items[p.criterion - 1] ?? '(not in the list)'}`,
+        ...(p.file ? [`   Picture: ${where(p)}`] : ['   No picture.']),
+        ...(p.note || p.said ? [`   The Tester says${p.said ? ` ${p.said}` : ''}${p.note ? `: ${p.note}` : ''}`] : []),
+        ...(p.same ? ['   This picture is the very same as the one from before the change.'] : []),
+        ...(p.more ?? []).flatMap((m) => [`   Also this picture: ${where(m)}`, ...(m.note ? [`   The Tester says: ${m.note}`] : [])]),
+        ...(p.offScreen ? [`   The Tester says this cannot be shown on a screen: ${p.offScreen}`] : []),
+      ].join('\n'),
+    )
+    .join('\n');
+  return `You check the proof of a software squad's work: screenshots the Tester took, one or more per "done when". Do not
+edit files, and do not take the Tester's word for anything: judge from each picture itself.
+
+Story: ${t.story ?? t.title}
+
+Open every picture below with your tool for reading files (like Read) and look at it closely, next to its "done when".
+A "done when" with several parts or cases can have several pictures. Judge them together, and answer once for each
+"done when": no one picture has to show all of it. When two pictures show the same part, go by the clearer one, since
+the Tester may have taken it again.
+- met: the picture shows the result of the "done when" as written: the message, the saved item, the refused booking.
+  With several pictures, they show every part of it together.
+- broken: a picture itself shows it does not work as written: an error, the wrong result, text cut off by the page,
+  or a page wider than the phone screen (it would scroll sideways) where it should fit. Say what the picture shows.
+- not-shown: the pictures do not show it clearly: they show only the page before the action, one is still loading, the
+  part that matters is out of view, or one part of the "done when" is in none of them. This is a problem with the
+  pictures, never with the product, so it is never "broken". The Builder only gets what is broken and never changes
+  the product to make a picture clearer.
+A "done when" with no picture is not-shown. Some have no picture, or pictures of only a part, with the Tester's reason
+why it cannot be shown on a screen. Do not take the reason on trust: read the code and the project's seed or sample
+data, and judge it.
+A picture is taken at one of two sizes: "phone" (390 wide) or "desktop" (1280 wide). When a "done when" names another
+width, judge the nearest size, and do not fault the picture for its size, or for being at another size than the
+picture from before the change.
+${EXAMPLES_FIT} When the Tester used the nearest example that fits, judge that example.
+
+${list}
+
+In checks, one for each "done when" above, whatever the number of its pictures:
+- criterion: its number.
+- shows: met, broken or not-shown.
+- why: one plain sentence for a project manager, what the pictures show.
+- advice: for not-shown only, exactly what the Tester should add: only the part that is missing, never a part a picture
+  already shows, since squad-kit keeps those pictures. Say the part of the page, the state after which action, and the
+  size (phone or desktop).
+- canShow: for not-shown only. Can what is missing be shown at all, with this app's data and squad-kit's tools (they
+  open pages, fill in forms and press buttons), given the Tester's reason? true when it can, even with more steps or
+  by making the data through the app's own screens. A reason like "I did not try", "it takes too long" or "too many
+  steps" is always true. false only when it truly cannot: the app has no such data and its screens cannot make it, or
+  it happens away from any screen (after a restart, in an email).
+- canShowWhy: for canShow false only, one or two plain sentences for a project manager: what the pictures show, then
+  which part could not be shown and why. For example: "Shown for upcoming bookings. Past bookings could not be shown:
+  the app has none yet." With no picture, only the second part.
+- noChange: true when the "done when" itself says the screen stays as it was (looks the same as before, unchanged, as
+  today, still shows ...), else false. For those, a picture the same as the one from before is the proof, not a fault:
+  judge what it shows.`;
+}
+
+/** The screenshots show a "done when" does not work: the Builder fixes it, told what the pictures show. */
+export function proofFixPrompt(notes: string[]): string {
+  return `squad-kit looked at the screenshots of your work, and they show these "done when" do not work yet:
+${notes.map((n) => `- ${n}`).join('\n')}
+
+Print ">> fix" first. Fix the code so each one works as written, add or update a test for it where you can, and run
+the tests again. ${FIX_ONLY_BROKEN} The checks, the review and the screenshots run again after you.`;
+}
+
+/** What every agent with squad-kit's own tools is told about them, beside its step's own instructions. */
+export function windowRule(tools: string[]): string {
+  const app = tools.includes('take_screenshots');
+  const look = !app && tools.includes('look_at_page');
+  const checks = tools.includes('run_checks');
+  const named = [
+    ...(app ? ["take_screenshots and look_at_page (its own browser on this story's app)", "start_app, stop_app and app_status (this story's app, started with the project's own start command)"] : look ? ["look_at_page (its own browser on this story's app, which it starts for you when needed)"] : []),
+    ...(checks ? ["run_checks (the project's own saved tests, lint and build, in this story's copy)"] : []),
+    'i_am_stuck',
+  ];
+  return `squad-kit gives you tools of its own in this step: ${named.length > 1 ? `${named.slice(0, -1).join(', ')} and ${named.at(-1)}` : named[0]}. squad-kit checks every field and does the work itself.
+When something technical is in your way (the app does not start, a port is busy, the browser does not work, a
+command or a file is refused), call i_am_stuck: squad-kit tries its fixes and tells you what it did. Never take it to
+the person, and never ask them to edit settings or files, run commands, or hand over a password or a key.${app ? '\nFor pictures and pages of the app, use take_screenshots and look_at_page, never a browser of your own.' : look ? '\nFor pages of the app, use look_at_page, never a browser or an app of your own.' : ''}${checks ? "\nA browser cannot start in your shell, so run tests that open a browser with run_checks, never yourself." : ''}`;
 }
 
 /**
@@ -901,8 +1210,8 @@ ${LOOK}`;
 }
 
 /** The answer was missing or did not fit its shape: the agent hands it in again, in the same conversation. */
-export function answerAgainPrompt(problem: string): string {
-  return `squad-kit did not get a complete answer from you (${problem}). Do not do the work again: hand in your whole answer now, in the shape this step asks for.`;
+export function answerAgainPrompt(problem: string, help?: string): string {
+  return `squad-kit did not get a complete answer from you (${problem}). Do not do the work again: hand in your whole answer now, in the shape this step asks for.${help ? `\n${help}` : ''}`;
 }
 
 /** Turns a rough idea, a forwarded chat message or one line of business into a ticket the person checks before saving. */
@@ -961,27 +1270,98 @@ Rules for this talk:
 - To show the person a picture, recording, PDF, Markdown file or HTML mockup that already exists in this ticket's folders, put its full path in "files".`;
 }
 
-/** What a talk beside the work can do, told to the agent so it can say so. */
-export function besideNext(released: boolean): string {
-  return released
-    ? 'This ticket is accepted, so this talk is for questions only: nothing said here changes it. A change becomes a new linked ticket or a bug report; tell the person to press "Propose a change" for that.'
-    : 'This talk is beside the work: the squad keeps working, and nothing said here changes the ticket. To change what gets built, tell the person to press "Propose a change": the Analyst writes it into the spec and they approve it.';
+/**
+ * What a talk beside the work can do, told to the agent so it can say so. `review` is a ticket that waits for the
+ * person's check: the proof is ready, or it stopped at a gate. `stands` is where a ticket the squad is not working on
+ * stands now ("RO-7 waits in the queue"): Ask a question leaves it there.
+ */
+export function besideNext(released: boolean, review?: 'proof' | 'stuck', stands?: string): string {
+  if (released) {
+    return 'This ticket is accepted, so this talk is for questions only: nothing said here changes it. A change becomes a new linked ticket or a bug report; tell the person to press "Propose a change" for that.';
+  }
+  if (review === 'proof') {
+    return 'This ticket waits for the person to check the work, and nothing is merged yet. This talk is for questions only: nothing said here changes the ticket or moves it on. When they want something changed, tell them to press "Something\'s wrong" and say what. To click through the change themselves, "Try it yourself" runs this ticket\'s own copy of the app.';
+  }
+  if (review === 'stuck') {
+    return 'This ticket stopped at a check and waits for the person to pick a way out on its card. This talk is for questions only: nothing said here changes the ticket or moves it on. To click through the change so far, "Try it yourself" runs this ticket\'s own copy of the app.';
+  }
+  if (stands) {
+    return `This talk is for questions only: nothing said here changes the ticket or moves it on, and it stays where it is ("${stands}"). When the person wants something changed, tell them which of the ticket's own buttons on its card does it; never say this talk changed anything.`;
+  }
+  return 'This talk is beside the work: the squad keeps working, and nothing said here changes the ticket. To change what gets built, tell the person to press "Propose a change": the Analyst writes it into the spec and they approve it.';
+}
+
+/** What an agent needs to tell the person where to look in the app. */
+export interface ReviewLook {
+  /** The address of this ticket's own copy, only while it runs now. */
+  tryUrl?: string;
+  /** Try it yourself can start this ticket's copy now. */
+  canTry?: boolean;
+  /** The ticket is accepted: its change is in the app under Your apps. */
+  accepted?: boolean;
+  /** The files the ticket changed, in its own copy of the code. */
+  changed: string[];
+}
+
+/**
+ * Whether this ticket's own copy of the app runs right now, as a plain fact: with the one address that works, or that
+ * none does and what the person does then. An agent never gives a local address it was not handed.
+ */
+export function copyNow(look: ReviewLook): string {
+  const at = look.tryUrl?.replace(/\/+$/, '');
+  if (at) return `This ticket's own copy of the app is running now, at ${at}. That is the one address that works: give full addresses there.`;
+  const how = look.accepted
+    ? 'tell the person to press Start under Your apps in the sidebar, then open the page'
+    : look.canTry
+      ? 'tell the person to press **Try it yourself**, then open the page'
+      : 'tell the person it can be tried once the ticket waits for their check';
+  return `This ticket's own copy of the app is NOT running now, so no address works. Never say the app is running, and never give a local address (localhost, 127.0.0.1 or a port), whatever the code, the README or the project's settings say. To see it, ${how}. Name each page by its path, like /book, and by what it is called.`;
+}
+
+/**
+ * Where to look: whether the ticket's own copy runs now, each "done when" the Tester proved with the pages of its after
+ * pictures, and the files it changed, for the agent to read the routes and answer "which page do I open?".
+ */
+export function whereToLook(t: Ticket, look: ReviewLook): string {
+  const at = look.tryUrl?.replace(/\/+$/, '');
+  const shots = (t.proof ?? []).map((p) => {
+    const pages = pagesOf(p);
+    return `  - "${p.criterion}": ${pages.length ? `${pages.length > 1 ? 'pages' : 'page'} ${pages.join(', ')}` : 'no page saved'}`;
+  });
+  const first = (t.proof ?? []).flatMap(pagesOf)[0];
+  const lines = [
+    'Where to look in the app. The person will ask which page to open and what to do there.',
+    `- ${copyNow(look)}`,
+    ...(shots.length ? ['- The proof, with the pages its after pictures were taken on:', ...shots] : ['- No screenshots were taken, so no page is saved: find the pages in the code.']),
+    ...(look.changed.length
+      ? [`- The files this ticket changed${t.worktree ? `, in its copy of the code (${t.worktree})` : ''}:`, ...look.changed.map((f) => `  - ${f}`)]
+      : ['- No changed files could be read.']),
+    `Read the routes or pages in those files to find which page shows each change.${at ? ` Give full addresses the person can open${first ? `, like ${at}${first}` : `, starting with ${at}`}.` : ''} Say what to click or type there.`,
+  ];
+  return lines.join('\n');
 }
 
 /**
  * The opening of a talk beside the work, in a side conversation of its own: who the agent is, the ticket as it stands,
- * and where the squad is right now. The conversation that does the work is never touched.
+ * and where the squad is right now, said plainly in every state. `look` is where to look in the app, when the ticket
+ * has a copy of the code or pages in its proof. The conversation that does the work is never touched.
  */
-export function besidePrompt(meta: BoardMeta, decisions: Decision[], t: Ticket, agent: AgentName, released: boolean, ctx?: PromptContext): string {
+export function besidePrompt(meta: BoardMeta, decisions: Decision[], t: Ticket, agent: AgentName, released: boolean, ctx?: PromptContext, look?: ReviewLook): string {
   const steps = (t.steps ?? []).map((s, i) => `${i + 1}. ${s.title} (${s.status === 'done' ? 'done' : s.status === 'doing' ? 'doing now' : 'to do'})`).join('\n');
   const recent = t.activity.slice(0, 8).map((a) => `- ${a.who}: ${a.text}`).join('\n');
   const where = released
     ? `This ticket is ${t.stage === 'done' ? 'released' : 'accepted'}${t.release ? ` (${t.release})` : ''}.`
-    : 'The squad is working on this ticket right now, and goes on while you talk.';
+    : waitsAtReview(t)
+      ? t.waiting?.kind === 'proof'
+        ? "The work on this ticket is done and waits for the person to check it: Looks right merges it, Something's wrong sends it back to the Builder. Nothing is merged yet."
+        : 'This ticket stopped at a check and waits for the person to decide how to go on. Nothing is merged yet.'
+      : squadWorks(t)
+        ? 'The squad is working on this ticket right now, and goes on while you talk.'
+        : `Where the ticket stands, as the person sees it: "${whereItStands(t)}". Talking here never moves it or changes it.`;
   return `You are ${CHAT_ROLE[agent] ?? agent}. ${where}
 Read the project${t.worktree ? ` and the ticket's copy of the code (${t.worktree})` : ''} when it helps you answer. Do not write or change any files.
 
-${projectContext(meta, decisions, ctx)}
+${projectContext(meta, decisions, { rules: [], ...ctx, noAddress: true })}
 
 ${ticketContext(t)}
 
@@ -990,7 +1370,7 @@ ${t.story ? `The spec:\nStory: ${t.story}\nDone when:\n${doneWhen(t)}` : 'There 
 Where it is now: ${t.status}
 Latest activity:
 ${recent || '- (none yet)'}
-
+${look ? `\n${whereToLook(t, look)}\n` : ''}
 ${LOOK}`;
 }
 

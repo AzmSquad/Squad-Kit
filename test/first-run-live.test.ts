@@ -5,18 +5,25 @@ import os from 'node:os';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
 import type { RunOptions, RunResult } from '../src/modules/claude/direct.js';
+import type { BrowserModule } from '../src/modules/browser/types.js';
+import { fakeBrowser } from './fakes/browser.js';
 
 /**
  * The first run on the live engine, end to end, with the AI tool faked at its boundary (Claude Code run directly):
  * Add makes the project files and the setup, the Architect's read hands in the overview, squad-kit installs, runs the
- * tests and opens the app once in its own copy, the Tester takes the screenshot, and the overview waits. The rules the
+ * tests and opens the app once in its own copy, squad-kit takes the screenshot with its own browser (no agent: the
+ * browser here is a fake), and the overview waits. The rules the
  * read found stay proposed until the person approves; a ticket idea becomes the first ticket. A failing test run never
  * blocks the setup, and an answer in the older shape still loads.
  */
 
 const runs: RunOptions[] = [];
 let scanAnswers: unknown[] = [];
-const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+const h = vi.hoisted(() => ({ browser: null as BrowserModule | null }));
+vi.mock('../src/modules/registry.js', async (orig) => ({
+  ...(await orig<typeof import('../src/modules/registry.js')>()),
+  shotBrowser: () => h.browser!,
+}));
 
 vi.mock('../src/modules/claude/direct.js', async (orig) => ({
   ...(await orig<typeof import('../src/modules/claude/direct.js')>()),
@@ -24,11 +31,6 @@ vi.mock('../src/modules/claude/direct.js', async (orig) => ({
     runs.push(opts);
     const ok = (structured: unknown): RunResult => ({ ok: true, sessionId: opts.sessionId ?? opts.resume ?? 's', text: '', structured });
     if (opts.prompt.includes('reading this project for the first time') || opts.prompt.includes('did not get a complete answer')) return ok(scanAnswers.shift());
-    const shot = /Save one 1280x800 PNG screenshot of the first page people see there, as (\S+)\.\n/.exec(opts.prompt);
-    if (shot) {
-      fs.writeFileSync(shot[1]!, PNG);
-      return ok({ file: shot[1] });
-    }
     if (opts.prompt.includes('Something is wrong')) return ok({ reply: 'What did I get wrong?', ready: false });
     return ok({ summary: 'Clear', questions: [] });
   },
@@ -158,24 +160,27 @@ describe('the first run on the live engine', () => {
     expect(first.steps[0]!.seconds).toBeGreaterThanOrEqual(1);
     expect(first.steps.every((s) => s.usual.startsWith('usually '))).toBe(true);
 
+    const browser = fakeBrowser({ '/': { has: ['text:RoomFlow'] } });
+    h.browser = browser.module;
     stops.push(new LiveSquad(bp).start(25));
     await until('the overview to be ready', () => Boolean(setupView(bp)?.ready), 3000);
     const v = setupView(bp)!;
     expect(v.steps.find((s) => s.id === 'tool')!.state).not.toBe('todo');
     for (const id of ['read', 'commands', 'tests', 'app', 'overview']) expect(v.steps.find((s) => s.id === id)!.state).toBe('done');
     expect(v.steps.find((s) => s.id === 'read')!.label).toBe('The Architect read your code');
-    expect(v.steps.find((s) => s.id === 'commands')!.note).toBe(`Tests: ${commands.test} · Starts with: ${commands.start}`);
+    expect(v.steps.find((s) => s.id === 'commands')!.note).toBe('Found how to run the tests and start the app');
     expect(v.steps.find((s) => s.id === 'tests')!.note).toBe('Ran your tests: 3 pass');
-    expect(v.steps.find((s) => s.id === 'app')!.note).toBe(`Opened it at 127.0.0.1:${port}`);
+    expect(v.steps.find((s) => s.id === 'app')!.note).toBe('Opened the app');
     expect(v.steps.every((s) => typeof s.seconds === 'number')).toBe(true);
 
     // squad-kit's own copy got the install; the person's folder did not.
     expect(fs.existsSync(path.join(dir, 'installed.txt'))).toBe(false);
     expect(fs.readFileSync(path.join(setupCopyDir(bp, reposOf(readMeta(bp))[0]!), 'installed.txt'), 'utf8')).toBe('yes');
-    // The Tester's screenshot is in the proof folder, where the board shows proof.
+    // squad-kit's own screenshot is in the proof folder, where the board shows proof.
     expect(fs.existsSync(path.join(bp.proofDir, 'setup-app.png'))).toBe(true);
-    // One read by the Architect, one screenshot by the Tester: nothing else ran.
-    expect(runs.map((r) => (r.prompt.includes('screenshot') ? 'shot' : r.prompt.includes('reading this project') ? 'scan' : 'other'))).toEqual(['scan', 'shot']);
+    expect(browser.log).toEqual(['goto /']);
+    // One read by the Architect, and no agent for the screenshot: nothing else ran.
+    expect(runs.map((r) => (r.prompt.includes('screenshot') ? 'shot' : r.prompt.includes('reading this project') ? 'scan' : 'other'))).toEqual(['scan']);
 
     // What the read found: the overview in .squad/knowledge, the rules as proposals, not approved by anyone.
     const o = readOverview(bp);
@@ -220,6 +225,8 @@ describe('the first run on the live engine', () => {
     const dir = roomflow();
     scanAnswers = [answer({ test: 'node -e "console.error(\'2 failing\'); process.exit(1)"', start: 'node -e "process.exit(3)"', url: 'http://127.0.0.1:9' })];
     const { bp } = add(dir);
+    const browser = fakeBrowser({ '/': { has: ['text:RoomFlow'] } });
+    h.browser = browser.module;
     stops.push(new LiveSquad(bp).start(25));
     await until('the overview to be ready', () => Boolean(setupView(bp)?.ready), 3000);
     const v = setupView(bp)!;
@@ -230,8 +237,10 @@ describe('the first run on the live engine', () => {
     expect(tests.ways[0]).toMatchObject({ do: 'again', step: 'tests', command: 'squad setup --again tests' });
     const app = v.steps.find((s) => s.id === 'app')!;
     expect(app.state).toBe('failed');
-    expect(app.error).toContain('The setup goes on');
-    expect(app.ways.map((w) => w.label)).toEqual(['Try again', 'Set how it starts']);
+    // One plain sentence for the person; what the app printed is behind See what failed.
+    expect(app.error).toBe('squad-kit could not start the app in its own copy. The setup goes on: this does not stop you.');
+    expect(app.output).toContain('The app stopped while starting');
+    expect(app.ways.map((w) => w.label)).toEqual(['Try again', 'See what failed', 'Set how it starts']);
     expect(v.steps.find((s) => s.id === 'overview')!.state).toBe('done');
     expect(overviewView(bp).handover).toBe('ready');
   }, 60_000);
@@ -241,6 +250,8 @@ describe('the first run on the live engine', () => {
     const old = { empty: false, summary: 'An app.', map: [{ area: 'Server', detail: 'server.js' }], decisions: [{ title: 'Node.js', why: 'server.js' }], commands: {} };
     scanAnswers = [old, old];
     const { bp } = add(dir);
+    const browser = fakeBrowser({ '/': { has: ['text:RoomFlow'] } });
+    h.browser = browser.module;
     stops.push(new LiveSquad(bp).start(25));
     await until('the overview to be ready', () => Boolean(setupView(bp)?.ready), 3000);
     expect(runs.filter((r) => r.prompt.includes('did not get a complete answer from you (users is missing)'))).toHaveLength(1);
@@ -251,16 +262,18 @@ describe('the first run on the live engine', () => {
     expect(setupView(bp)!.steps.find((s) => s.id === 'app')).toMatchObject({ state: 'skipped', ways: [{ do: 'settings', label: 'Set how it starts' }] });
   }, 60_000);
 
-  it('skips the tries for an empty folder and offers ideas to start from', async () => {
+  it('skips the tries for an empty folder, and offers no ideas before the person said what they want', async () => {
     const dir = path.join(tmp, 'new-idea');
     fs.mkdirSync(dir);
     scanAnswers = [{ empty: true, summary: 'An empty folder for a new project.', map: [], decisions: [], commands: {}, ideas: [{ title: 'Start with the booking page', why: 'It is the heart of it.' }] }];
     const { bp } = add(dir);
     expect(setupView(bp)!.kind).toBe('empty');
+    const browser = fakeBrowser({ '/': { has: ['text:RoomFlow'] } });
+    h.browser = browser.module;
     stops.push(new LiveSquad(bp).start(25));
     await until('the overview to be ready', () => Boolean(setupView(bp)?.ready), 3000);
     const v = setupView(bp)!;
     for (const id of ['commands', 'tests', 'app']) expect(v.steps.find((s) => s.id === id)).toMatchObject({ state: 'skipped', note: 'Nothing to run yet: the project has no code' });
-    expect(overviewView(bp)).toMatchObject({ empty: true, ideas: [{ title: 'Start with the booking page' }] });
+    expect(overviewView(bp)).toMatchObject({ empty: true, ideas: [] });
   }, 60_000);
 });

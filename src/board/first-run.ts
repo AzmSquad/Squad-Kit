@@ -99,7 +99,8 @@ function waysOf(id: SetupStepId, state: SetupStepState, output?: string): SetupW
   const seeOutput: SetupWay[] = output ? [{ do: 'output', label: 'See what failed' }] : [];
   if (state === 'failed') {
     if (id === 'tool' || id === 'read') return [again('read')];
-    if (id === 'app') return [again('app'), { do: 'settings', label: 'Set how it starts' }];
+    // What the app printed is for engineers, one press away: the sentence above it stays plain.
+    if (id === 'app') return [again('app'), ...seeOutput, { do: 'settings', label: 'Set how it starts' }];
     return [again(id), ...seeOutput];
   }
   if (state === 'skipped' && id === 'app') return [{ do: 'settings', label: 'Set how it starts' }];
@@ -172,7 +173,7 @@ export function setupView(bp: BoardPaths): SetupView | null {
 /** One line for a card or the terminal: "Getting to know the project: step 3 of 7, the Architect is reading your code". */
 export function setupLine(v: SetupView): string {
   if (v.approved) return 'Set up';
-  if (v.ready) return 'Your project overview is ready to check';
+  if (v.ready) return v.empty ? 'One question for you: what do you want to build?' : 'Your project overview is ready to check';
   const cur = v.steps.find((x) => x.id === v.current);
   if (cur?.state === 'stopped') return `Stopped at: ${cur.label.toLowerCase()}`;
   if (cur?.state === 'failed') return `${cur.label}: ${cur.error ?? 'it did not work'}`;
@@ -275,6 +276,8 @@ export interface OverviewView {
   setup?: { done: number; total: number; line: string };
   talk?: OverviewTalk;
   empty: boolean;
+  /** On a project with no code: what the person said they want to build. */
+  idea?: string;
   /** Read by an older squad-kit: who uses it, what it can do and the rest come with the next read. */
   old: boolean;
   /** The terminal command for this page. */
@@ -338,7 +341,9 @@ export function overviewView(bp: BoardPaths): OverviewView {
     since,
     ...(sv && !sv.ready && !sv.approved ? { setup: { done: sv.done, total: sv.total, line: setupLine(sv) } } : {}),
     ...(talk ? { talk } : {}),
-    empty: Boolean(meta.scan?.empty),
+    // Still so while the Architect reads a folder that started empty, so the page does not flash a project's cards.
+    empty: Boolean(meta.scan?.empty) || (meta.scan?.status !== 'done' && meta.setup?.kind === 'empty' && !meta.setup.approvedAt),
+    ...(talk?.idea ? { idea: talk.idea } : {}),
     old: !fs.existsSync(path.join(bp.knowledgeDir, 'overview.md')) && meta.scan?.status === 'done',
     command: 'squad overview',
   };
@@ -448,6 +453,19 @@ export function corrections(t: OverviewTalk | null): string {
     .filter((m) => m.who === 'you')
     .map((m) => `- ${m.text.replace(/\s+/g, ' ').trim()}`)
     .join('\n');
+}
+
+/**
+ * "What do you want to build?" on a project with no code: the person's words go to the Architect's read, as "Read it
+ * again with this" does. It writes the overview from them, with first stories for what they want.
+ */
+export function tellIdea(bp: BoardPaths, text: string): SetupView {
+  const idea = text.trim();
+  if (!idea) throw new BoardActionError('Write what you want to build first.');
+  if (!readMeta(bp).scan?.empty) throw new BoardActionError('This project has code already. Use Something is wrong to tell the Architect what it got wrong.');
+  const t = readTalk(bp);
+  writeTalk(bp, { open: false, thinking: false, reread: true, idea, messages: [...(t?.messages ?? []), { who: 'you', text: idea, at: now() }] });
+  return setupAgain(bp, 'read');
 }
 
 /** "Read it again with this": the Architect reads the whole project again, with what the person said. */

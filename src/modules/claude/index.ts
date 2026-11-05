@@ -3,9 +3,9 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { AcpStartError, runAcp, type AcpLaunch } from '../../engine/acp-runner.js';
 import type { AgentResult, AgentRun, AiTool } from '../ai-tool/types.js';
-import { claudeBinary, claudeEnv, costSoFar, deniedTools, describeTool, plainError, runClaude, sessionExists, toolVersion, type RunOptions } from './direct.js';
+import { claudeBinary, claudeEnv, costSoFar, deniedTools, describeTool, ownWords, plainError, runClaude, sessionExists, toolVersion, type RunOptions } from './direct.js';
 import { claudeLimit } from './limit.js';
-import { claudeBlocked, claudeSandbox, claudeSandboxSupport, withCap } from './sandbox.js';
+import { CLAUDE_ENV, claudeBlocked, claudePrivateFiles, claudeSandbox, claudeSandboxSupport, withCap } from './sandbox.js';
 import { claudeBilling, claudeResume } from './billing.js';
 
 /**
@@ -58,16 +58,22 @@ function protectedRules(names: string[]): string[] {
   });
 }
 
+/** Claude Code's names for the window's tools: mcp__<server>__<tool>. They are allowed outright, so no prompt asks. */
+export function windowTools(w: AgentRun['window']): string[] {
+  return w ? w.tools.map((t) => `mcp__${w.name}__${t}`) : [];
+}
+
 /** Claude's model for each level, by the aliases Claude Code always points at the newest of each. */
 const LEVEL_MODEL = { strongest: 'opus', balanced: 'sonnet', fast: 'haiku' } as const;
 
 /** Claude Code's settings for one run of a role. */
 export function claudeRunOptions(r: AgentRun): RunOptions {
   const edits = r.permissions.includes('edit');
+  const own = edits ? BUILD_TOOLS
+    : r.permissions.includes('run') ? RUN_TOOLS
+    : [...new Set([...READ_ONLY, ...(r.permissions.includes('git-read') ? GIT_READ : [])])];
   const access: Pick<RunOptions, 'allowedTools' | 'disallowedTools' | 'permissionMode'> = {
-    allowedTools: edits ? BUILD_TOOLS
-      : r.permissions.includes('run') ? RUN_TOOLS
-      : [...new Set([...READ_ONLY, ...(r.permissions.includes('git-read') ? GIT_READ : [])])],
+    allowedTools: [...own, ...windowTools(r.window)],
     disallowedTools: [...NO_GIT_WRITES, ...protectedRules(r.protectedFiles ?? [])],
     // Always a mode of squad-kit's own: without one, the run starts in the person's default mode, maybe "bypass".
     permissionMode: edits ? 'acceptEdits' : 'default',
@@ -88,6 +94,7 @@ export function claudeRunOptions(r: AgentRun): RunOptions {
     ...(r.env ? { env: r.env } : {}),
     ...(r.caps?.turns ? { maxTurns: r.caps.turns } : {}),
     ...(r.caps?.spendUsd ? { maxBudgetUsd: r.caps.spendUsd } : {}),
+    ...(r.window ? { window: r.window } : {}),
     ...(r.timeoutMs ? { timeoutMs: r.timeoutMs } : {}),
     ...(r.signal ? { signal: r.signal } : {}),
     ...(r.onTool ? { onTool: r.onTool } : {}),
@@ -109,6 +116,9 @@ export function acpAdapterPath(): string | null {
     return null;
   }
 }
+
+/** A window call may take a few minutes (squad-kit caps each at about 2): Claude Code waits that long for it. */
+export const WINDOW_ENV = { MCP_TOOL_TIMEOUT: '240000' };
 
 /** How the gateway starts the Claude adapter and what it sends it. */
 export function claudeLaunch(opts: RunOptions, adapter: string, bin: string): AcpLaunch {
@@ -135,7 +145,7 @@ export function claudeLaunch(opts: RunOptions, adapter: string, bin: string): Ac
     args: [adapter],
     // The adapter takes its model from ANTHROPIC_MODEL (an option alone does not change it), and each run starts its own adapter.
     // The run's own environment reaches Claude Code through the adapter, and from there the commands it runs.
-    env: { ...claudeEnv(), ...opts.env, CLAUDE_CODE_EXECUTABLE: bin, ...(opts.model ? { ANTHROPIC_MODEL: opts.model } : {}) },
+    env: { ...claudeEnv(), ...opts.env, CLAUDE_CODE_EXECUTABLE: bin, ...(opts.model ? { ANTHROPIC_MODEL: opts.model } : {}), ...(opts.window ? WINDOW_ENV : {}) },
     meta: { claudeCode: { options } },
     // The adapter starts in the person's own default mode and ignores permissionMode above: the session gets it instead.
     mode: opts.permissionMode ?? 'default',
@@ -192,6 +202,8 @@ export const claudeTool: AiTool = {
   // Claude Code takes extra high too (`--effort xhigh`, and the same option over ACP).
   efforts: ['xhigh', 'high', 'medium', 'low'],
   instructionFiles: ['CLAUDE.md', 'CLAUDE.local.md', '.claude/'],
+  privateFiles: (home) => claudePrivateFiles(home),
+  secretEnv: CLAUDE_ENV,
   modelFor: (level) => ({ strongest: 'Opus', balanced: 'Sonnet', fast: 'Haiku' })[level],
   ready() {
     const bin = claudeBinary();
@@ -221,6 +233,7 @@ export const claudeTool: AiTool = {
       return done(await runClaude(opts));
     }
   },
+  ownWords,
   describe: describeTool,
   billing: () => claudeBilling(),
   resumeCommand: claudeResume,

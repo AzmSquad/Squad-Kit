@@ -4,6 +4,8 @@ import { squadHome } from '../core/home.js';
 import kleur from 'kleur';
 import { confirm, input, select, Separator } from '@inquirer/prompts';
 import * as ui from '../ui/index.js';
+import { whereItStands } from '../board/at-review.js';
+import { alsoChangedLine } from '../board/also-changed.js';
 import { buildPaths, findSquadRoot, requireSquadRoot } from '../core/paths.js';
 import { DEFAULT_CONFIG, saveConfig } from '../core/config.js';
 import {
@@ -31,6 +33,7 @@ import {
   chatWrite,
   sendChat,
   startChat,
+  askQuestion,
   editPlan,
   sendBack,
   startOver,
@@ -91,6 +94,7 @@ import { putBackInRelease, takeOutOfRelease } from '../board/release-tidy.js';
 import { costLines, happenedLines } from './cost.js';
 import { ticketCost } from '../board/cost.js';
 import { howPaid } from '../board/payment.js';
+import { breakdownWaits } from '../board/requirements.js';
 
 const out = (s = '') => process.stdout.write(`${s}\n`);
 const cmd = (s: string) => kleur.green(s);
@@ -134,7 +138,7 @@ function warnIfNoSquad(bp: BoardPaths): void {
 function nextCommand(t: Ticket): string {
   if (!t.waiting && t.quiet) return `${t.quiet.pid ? `squad unstick ${t.id}   or   ` : ''}squad wait ${t.id} --more 10m   or   squad stop ${t.id} --again`;
   if (!t.waiting && changeNeedsYou(t)) return `squad show ${t.id}   then   squad propose ${t.id} --approve   or   --decline`;
-  if (!t.waiting && t.testChange) return `squad test-command ${t.id} --use   or   --keep`;
+  if (!t.waiting && t.testChange?.ask) return `squad test-command ${t.id} --use   or   --keep`;
   switch (t.waiting?.kind) {
     case 'depends':
       return `squad build ${t.id} --on-branch   or   --anyway   or   --wait`;
@@ -171,15 +175,21 @@ export async function runInbox(): Promise<void> {
   if (!findSquadRoot()) return inboxEverywhere();
   const bp = board();
   const items = inbox(bp);
+  // A breakdown whose Analyst has questions waits for you too.
+  const brds = breakdownWaits(bp);
   out();
-  out(`  ${kleur.bold('Waiting for you')} ${amber(`(${items.length})`)}`);
+  out(`  ${kleur.bold('Waiting for you')} ${amber(`(${items.length + brds.length})`)}`);
   out();
-  if (items.length === 0) {
+  if (items.length + brds.length === 0) {
     out(kleur.gray('  Nothing needs you right now. The squad is working.'));
     out();
     return;
   }
-  const w = Math.max(...items.map((t) => t.title.length));
+  const w = Math.max(...items.map((t) => t.title.length), ...brds.map((b) => b.title.length));
+  for (const b of brds) {
+    out(`  ${id(b.id)}  ${b.title.padEnd(w)}   ${amber(`The Analyst has ${b.questions} ${b.questions === 1 ? 'question' : 'questions'}`)}`);
+    out(`  ${' '.repeat(b.id.length)}  ${cmd(`squad requirements answer ${b.id}`)}`);
+  }
   for (const t of items) {
     out(`  ${id(t.id)}  ${t.title.padEnd(w)}   ${amber(inboxLine(t))}`);
     out(`  ${' '.repeat(t.id.length)}  ${cmd(nextCommand(t))}`);
@@ -192,7 +202,7 @@ export function inboxLine(t: Ticket): string {
   if (t.waiting?.summary) return t.waiting.summary;
   const change = openChange(t);
   if (changeNeedsYou(t) && change) return `Change ${change.id} to the spec: ${change.summary ?? change.ask}`;
-  if (t.testChange) return testChangeLine(t.testChange);
+  if (t.testChange?.ask) return testChangeLine(t.testChange);
   const o = t.outdated ?? [];
   if (o.length) return o.length === 1 ? `${o[0]!.adr} came after this plan and changes it` : `${o.map((x) => x.adr).join(' and ')} came after this plan and change it`;
   return `Looks stuck: ${t.quiet?.detail ?? 'no progress'}`;
@@ -312,17 +322,27 @@ export async function runShow(ticketId: string): Promise<void> {
     out();
     out(`  ${kleur.bold('Gates')}  ${g(t.gates.checks, t.gates.checksText ?? 'All checks pass')}   ${g(t.gates.review, 'Review approved')}   ${g(t.gates.proof, 'Proof made')}`);
   }
-  if (t.waiting?.kind === 'proof' && t.proof?.length) {
+  if ((t.waiting?.kind === 'proof' || t.stuck?.gate === 'proof') && t.proof?.length) {
     out();
     out(`  ${kleur.bold('Proof')}  ${kleur.gray('before and after screens, open them on the board or here:')}`);
     for (const p of t.proof) {
-      out(`    ${kleur.green('✓')} ${p.criterion}`);
+      // Met, Not working yet, Not shown yet or Not on a screen: the Tester's verdict and squad-kit's own check of the picture.
+      const open = p.shows === 'broken' || p.shows === 'not-shown' || p.shows === 'off-screen';
+      const paint = p.shows === 'broken' ? kleur.red : p.shows === 'off-screen' ? kleur.gray : kleur.yellow;
+      out(`    ${p.shows === 'broken' ? kleur.red('✗') : p.shows === 'not-shown' ? kleur.yellow('?') : p.shows === 'off-screen' ? kleur.gray('-') : kleur.green('✓')} ${p.criterion}${p.shows ? `  ${open ? paint(p.shows === 'broken' ? 'Not working yet' : p.shows === 'off-screen' ? 'Not on a screen' : 'Not shown yet') : kleur.green('Met')}` : ''}`);
+      if (open && p.why) out(`      ${p.why}`);
       out(kleur.gray(`      ${path.join(bp.proofDir, p.before)}  →  ${path.join(bp.proofDir, p.after)}`));
+      for (const m of p.more ?? []) out(kleur.gray(`      ${path.join(bp.proofDir, m.after)}${m.note ? `  ${m.note}` : ''}`));
     }
+    for (const o of t.offScreen ?? []) out(kleur.gray(`    - ${o.criterion}: not on a screen. ${o.why}`));
+  }
+  if (t.alsoChanged?.length) {
+    out();
+    out(`  ${amber(alsoChangedLine(t.alsoChanged))}`);
   }
   if (t.testChange) {
     out();
-    out(`  ${amber(`${testChangeLine(t.testChange)}.`)} ${kleur.gray('The checks keep the current one until you choose.')}`);
+    out(`  ${amber(`${testChangeLine(t.testChange)}.`)} ${kleur.gray(t.testChange.ask ? `squad-kit cannot tell (${t.testChange.ran ?? 'it tried both'}), so the checks keep the current one until you choose.` : 'squad-kit tries it at the next checks and keeps what works. You can choose now.')}`);
     out(`  ${cmd(`squad test-command ${t.id} --use`)}   or   ${cmd(`squad test-command ${t.id} --keep`)}`);
   }
   if (t.stuck && t.waiting?.kind === 'stuck') {
@@ -593,8 +613,11 @@ async function chatAnswer(bp: BoardPaths, id: string): Promise<boolean> {
   }
 }
 
-/** Talk a ticket through with an agent. Without a message in a terminal, it keeps the talk going until /done or /write. */
-export async function runChat(ticketId: string, words: string[], opts: { with?: string; write?: boolean; done?: boolean; stop?: boolean; retry?: boolean }): Promise<void> {
+/**
+ * Talk a ticket through with an agent. Without a message in a terminal, it keeps the talk going until /done or /write.
+ * `--ask` is Ask a question: questions only, with whoever knows the story best, and the ticket stays where it is.
+ */
+export async function runChat(ticketId: string, words: string[], opts: { with?: string; write?: boolean; done?: boolean; stop?: boolean; retry?: boolean; ask?: boolean }): Promise<void> {
   const bp = board();
   warnIfNoSquad(bp);
   let t = requireTicket(bp, ticketId);
@@ -619,7 +642,9 @@ export async function runChat(ticketId: string, words: string[], opts: { with?: 
     return;
   }
   if (!t.chat?.open) {
-    t = startChat(bp, t.id, (opts.with ?? 'analyst').toLowerCase() as AgentName);
+    const agent = opts.with?.toLowerCase() as AgentName | undefined;
+    t = opts.ask ? askQuestion(bp, t.id, agent) : startChat(bp, t.id, agent ?? 'analyst');
+    if (opts.ask) ui.info(`Questions only: ${whereItStands(t)}. Asking changes nothing.`);
     await chatAnswer(bp, t.id);
   }
   const text = words.join(' ');
@@ -794,7 +819,7 @@ export async function runTestCommand(ticketId: string, opts: { use?: boolean; ke
     }
     out();
     out(`  ${testChangeLine(t.testChange)}.`);
-    out(kleur.gray('  The checks keep using the current one until you choose.'));
+    out(kleur.gray(t.testChange.ask ? '  squad-kit cannot tell, so the checks keep using the current one until you choose.' : '  squad-kit tries it at the next checks and keeps what works. You can choose now.'));
     out(`  ${cmd(`squad test-command ${t.id} --use`)}   or   ${cmd(`squad test-command ${t.id} --keep`)}`);
     out();
     return;

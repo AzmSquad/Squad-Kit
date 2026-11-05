@@ -3,7 +3,9 @@ import path from 'node:path';
 import { listDecisions, listReleases, listTickets, readMeta, splitTicket, ticketDir, type BoardPaths } from '../board/store.js';
 import { decisionDoc, releaseDoc } from '../board/docs.js';
 import type { Release, Ticket } from '../board/types.js';
-import { commitArgsFor, git, isRepo } from './git.js';
+import { commitArgsFor, git, isRepo, latestBase, remotes } from './git.js';
+import { repoFor } from './repos.js';
+import { BREAKDOWN_ID, breakdownDir } from '../board/requirements-paths.js';
 
 /**
  * The project's documents in git, for a project whose `.squad/` sits inside its one repo (ADR-001). squad-kit keeps
@@ -56,9 +58,54 @@ function writeTicketFolder(bp: BoardPaths, t: Ticket, to: string): void {
   }
 }
 
+/** The newest base the branch meets: the remote's copy as last fetched (the team's merges) with work accepted here. */
+function newestBase(bp: BoardPaths, t: Ticket, base: string): string {
+  try {
+    return latestBase(t.worktree!, base, repoFor(readMeta(bp), t).remote || remotes(t.worktree!)[0]).sha;
+  } catch {
+    return base;
+  }
+}
+
+interface BreakdownCopy {
+  folder: string;
+  way: 'now' | 'base';
+  /** The newest base, which 'base' takes the folder from. */
+  from: string;
+}
+
 /**
- * Writes a ticket's documents as they are now (and the decisions it made) into its own copy and stages them, so the
- * next commit there carries them. Returns the staged paths, or nothing when documents do not go into git.
+ * A story's branch carries its breakdown's folder (`.squad/requirements/BR-1/`, the document and its parts), so the
+ * breakdown is in git once its first story merges. Stories build side by side, so a branch never brings a copy that
+ * could clash with another story's: it brings the folder as it is now while the newest base has none yet, or still
+ * has the copy the branch started from ('now'). Otherwise it keeps the newest base's copy ('base'), and a later story
+ * or the release brings the newer one. The newest base is the remote's when the team moved it on, so a story merged
+ * from another computer counts too.
+ */
+function breakdownCopy(bp: BoardPaths, t: Ticket, squad: string, base: string): BreakdownCopy | null {
+  if (!t.breakdown || !t.worktree || !BREAKDOWN_ID.test(t.breakdown.id)) return null;
+  const folder = path.posix.join(squad, 'requirements', t.breakdown.id);
+  const tree = (ref: string) => git(t.worktree!, ['rev-parse', '-q', '--verify', `${ref}:${folder}`], { allowFail: true });
+  const from = newestBase(bp, t, base);
+  const atBase = tree(from);
+  if (!atBase) return { folder, way: 'now', from };
+  const fork = git(t.worktree, ['merge-base', from, 'HEAD'], { allowFail: true });
+  return { folder, way: fork && tree(fork) === atBase ? 'now' : 'base', from };
+}
+
+/** The breakdown's folder in the ticket's copy, as it is now or as the newest base has it, staged. */
+function writeBreakdownCopy(bp: BoardPaths, t: Ticket, copy: BreakdownCopy): void {
+  const to = path.join(t.worktree!, copy.folder);
+  fs.rmSync(to, { recursive: true, force: true });
+  git(t.worktree!, ['rm', '-r', '-q', '--cached', '--ignore-unmatch', '--', copy.folder], { allowFail: true });
+  if (copy.way === 'base') git(t.worktree!, ['checkout', copy.from, '--', copy.folder]);
+  else if (fs.existsSync(breakdownDir(bp, t.breakdown!.id))) fs.cpSync(breakdownDir(bp, t.breakdown!.id), to, { recursive: true });
+}
+
+/**
+ * Writes a ticket's documents as they are now (and the decisions it made, and a story's breakdown) into its own copy
+ * and stages them, so the next commit there carries them. Returns the staged paths, or nothing when documents do not
+ * go into git.
  */
 export function stageTicketDocs(bp: BoardPaths, t: Ticket): string[] {
   const repo = docsRepo(bp);
@@ -74,6 +121,12 @@ export function stageTicketDocs(bp: BoardPaths, t: Ticket): string[] {
     const file = path.posix.join(squad, 'decisions', `${d.id}.md`);
     write(path.join(t.worktree, file), decisionDoc(d));
     paths.push(file);
+  }
+  const base = repoFor(readMeta(bp), t).base;
+  const copy = breakdownCopy(bp, t, squad, base);
+  if (copy) {
+    writeBreakdownCopy(bp, t, copy);
+    if (fs.existsSync(path.join(t.worktree, copy.folder))) paths.push(copy.folder);
   }
   git(t.worktree, ['add', '-f', '--', ...paths]);
   return paths;
@@ -122,10 +175,13 @@ export function leaveProjectFiles(bp: BoardPaths, t: Ticket, base: string): stri
   const fork = git(t.worktree, ['merge-base', base, 'HEAD'], { allowFail: true });
   if (!fork) return [];
   const own = new Set(listDecisions(bp).filter((d) => d.from === t.id).map((d) => `${squad}/decisions/${d.id}.md`));
+  // A story's breakdown stays too, as the base has it when the base has a newer copy, so the two never clash on it.
+  const copy = breakdownCopy(bp, t, squad, base);
   const carried = git(t.worktree, ['diff', '--name-only', '--diff-filter=A', fork, 'HEAD', '--', squad], { allowFail: true })
     .split('\n')
-    .filter((f) => f && !f.startsWith(`${squad}/tickets/${t.id}/`) && !own.has(f));
+    .filter((f) => f && !f.startsWith(`${squad}/tickets/${t.id}/`) && !own.has(f) && !(copy && f.startsWith(`${copy.folder}/`)));
   if (carried.length) git(t.worktree, ['rm', '-q', '-f', '--', ...carried]);
+  if (copy?.way === 'base' && git(t.worktree, ['rev-parse', '-q', '--verify', `HEAD:${copy.folder}`], { allowFail: true })) writeBreakdownCopy(bp, t, copy);
   return carried;
 }
 
@@ -156,6 +212,13 @@ export function stageReleaseDocs(bp: BoardPaths, dir: string, release: Release, 
   const released = [...going, ...listTickets(bp).filter((t) => t.stage === 'done' && !going.some((g) => g.id === t.id))];
   const ids = new Set(released.map((t) => t.id));
   for (const t of released) writeTicketFolder(bp, t, into(path.posix.join('tickets', t.id)));
+  // The breakdowns of the released stories, as they are now.
+  for (const id of new Set(released.map((t) => t.breakdown?.id).filter((x): x is string => Boolean(x) && BREAKDOWN_ID.test(x!)))) {
+    const from = breakdownDir(bp, id);
+    if (!fs.existsSync(from)) continue;
+    fs.rmSync(into(path.posix.join('requirements', id)), { recursive: true, force: true });
+    fs.cpSync(from, into(path.posix.join('requirements', id)), { recursive: true });
+  }
   for (const d of listDecisions(bp)) {
     if (ids.has(d.from) || d.id.startsWith('STACK.') || fs.existsSync(into(path.posix.join('decisions', `${d.id}.md`)))) write(into(path.posix.join('decisions', `${d.id}.md`)), decisionDoc(d));
   }

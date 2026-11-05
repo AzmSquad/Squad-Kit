@@ -41,10 +41,12 @@ export function SetupPage() {
             <>
               <div className="ob-head">
                 <div className="ob-proj">{s.project}</div>
-                <h2>{s.approved ? 'Your project is set up' : s.ready ? 'squad-kit knows your project now' : 'Getting to know your project'}</h2>
+                <h2>{s.approved ? 'Your project is set up' : s.ready ? (s.empty ? 'Your new project is ready' : 'squad-kit knows your project now') : 'Getting to know your project'}</h2>
                 <p>
                   {s.ready || s.approved
-                    ? 'Check what it understood on the Overview, then start your first ticket.'
+                    ? s.empty
+                      ? 'Tell the Architect what you want to build, on the Overview.'
+                      : 'Check what it understood on the Overview, then start your first ticket.'
                     : s.kind === 'empty'
                       ? 'A few seconds for a new project. You can leave this page: we will tell you when it is ready.'
                       : 'About 3 to 5 minutes. You can leave this page: we will tell you when it is ready.'}
@@ -57,11 +59,11 @@ export function SetupPage() {
                     <Check size={16} strokeWidth={2.5} />
                   </span>
                   <span className="grow">
-                    <b>Your project overview is ready</b>
-                    <span>What squad-kit understood, for you to check before the first ticket.</span>
+                    <b>{s.empty ? 'One question for you' : 'Your project overview is ready'}</b>
+                    <span>{s.empty ? 'What do you want to build?' : 'What squad-kit understood, for you to check before the first ticket.'}</span>
                   </span>
                   <Link to="/overview" className="btn pri">
-                    Check what squad-kit understood <ArrowRight size={15} />
+                    {s.empty ? 'Answer it' : 'Check what squad-kit understood'} <ArrowRight size={15} />
                   </Link>
                 </div>
               )}

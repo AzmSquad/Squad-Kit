@@ -4,10 +4,12 @@ import { addActivity, codeChanged, listTickets, readMeta, readTicket, requireTic
 import type { LocalSetup, Ticket, TrackerEvent } from '../board/types.js';
 import { repoHostFor, trackerFor } from '../modules/registry.js';
 import type { Tracker } from '../modules/tracker/types.js';
-import { currentBranch, git, mergeIntoBase, moveBase, netGit, remotes } from './git.js';
+import { MergeClash, currentBranch, git, mergeIntoBase, moveBase, netGit, remotes } from './git.js';
 import { projectRoot } from './live.js';
 import { filesMoved, repoFor } from './repos.js';
 import { overviewAfterMerge } from '../board/overview.js';
+import { mergeWait } from '../board/auto.js';
+import { clearStaleStop } from '../board/stale-stop.js';
 
 /**
  * Keeps the tracker and the code host in step with the board: item states and comments on the tracker, and the
@@ -241,11 +243,14 @@ export async function publishTicket(bp: BoardPaths, ticketId: string): Promise<{
   }
   // Screenshots go into the PR so reviewers see the proof where they review the code.
   const shots: { label: string; url: string }[] = [];
-  for (const shot of host.abilities.attachImages ? (t.proof ?? []).slice(0, 6) : []) {
+  // Each "done when"'s main picture first, then its others while there is room.
+  const rows = t.proof ?? [];
+  const pictures = [...rows.map((p) => ({ label: p.criterion, after: p.after })), ...rows.flatMap((p) => (p.more ?? []).map((m) => ({ label: p.criterion, after: m.after })))].slice(0, 6);
+  for (const shot of host.abilities.attachImages ? pictures : []) {
     const file = path.join(bp.proofDir, shot.after);
     if (!shot.after || !fs.existsSync(file)) continue;
     try {
-      shots.push({ label: shot.criterion, url: await host.attachImage(pr.id, file) });
+      shots.push({ label: shot.label, url: await host.attachImage(pr.id, file) });
     } catch {
       // A missing screenshot should not block the PR.
     }
@@ -283,6 +288,8 @@ export async function publishTicket(bp: BoardPaths, ticketId: string): Promise<{
     x.progress = undefined;
     if (merged) {
       x.mergedAt = new Date().toISOString();
+      // Merged: a stop it went past (a clash it settled, a pull request that did not open) is over.
+      clearStaleStop(x);
       const ls = movedLocal ? localSetupFor(bp, x) : undefined;
       if (ls) x.localSetup = ls;
       x.status = `Merged into ${target.base} · goes out in ${x.release ?? 'the next release'}`;
@@ -310,6 +317,60 @@ export async function publishTicket(bp: BoardPaths, ticketId: string): Promise<{
     }
   }
   return { clash };
+}
+
+/**
+ * Builds by itself: an accepted story whose change is not in the base yet (board/auto.ts mergeWait), looked at again.
+ * Its pull request is asked about through the code host module: once the host has merged it (someone approved and
+ * completed it there), the ticket is merged here too and the person's checkout follows. With no pull request, the
+ * merge into the base is tried again, now that the person's own copy may be free. 'clash': newer work in the base
+ * clashes with it now; the caller gives the clash card. Nothing changes while it still waits.
+ */
+export async function recheckMerge(bp: BoardPaths, id: string): Promise<'merged' | 'clash' | 'waiting'> {
+  const t = readTicket(bp, id);
+  const wait = mergeWait(t);
+  if (!t || !wait) return 'waiting';
+  const base = repoFor(readMeta(bp), t).base;
+  let line: string;
+  let moved = false;
+  if (wait === 'pr') {
+    const target = repoTarget(bp, t);
+    const host = target && repoHostFor(bp, target.url);
+    if (!target || !host || !t.pr) return 'waiting';
+    const state = await host.mergeState(t.pr.id).catch(() => null);
+    if (state === 'clash') return 'clash';
+    if (state !== 'merged') return 'waiting';
+    try {
+      const env = host.gitEnv();
+      netGit(target.dir, ['fetch', target.remote, target.base], { env });
+      const local = moveBase(target.dir, target.base, git(target.dir, ['rev-parse', 'FETCH_HEAD']), squadInside(bp, target.dir));
+      if (local.note) note(bp, id, local.note);
+      moved = local.moved;
+    } catch {
+      // The person's checkout catches up with the next fetch; the change is in the base on the host already.
+    }
+    line = `Pull request ${t.pr.id} was approved and merged on ${host.label}`;
+  } else {
+    try {
+      const r = mergeLocally(bp, t);
+      if (!r?.moved) return 'waiting';
+      moved = true;
+    } catch (err) {
+      return err instanceof MergeClash ? 'clash' : 'waiting';
+    }
+    line = `Merged into ${base}: your own copy of ${base} was free again`;
+  }
+  updateTicket(bp, id, (x) => {
+    if (x.mergedAt) return;
+    x.mergedAt = new Date().toISOString();
+    clearStaleStop(x);
+    const ls = moved ? localSetupFor(bp, x) : undefined;
+    if (ls) x.localSetup = ls;
+    x.status = `Merged into ${base} · goes out in ${x.release ?? 'the next release'}`;
+    addActivity(x, 'release', line);
+  });
+  mapAfterMerge(bp);
+  return 'merged';
 }
 
 /**

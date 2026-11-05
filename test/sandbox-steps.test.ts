@@ -25,7 +25,7 @@ vi.mock('../src/modules/claude/direct.js', async (orig) => ({
   runClaude: async (opts: RunOptions): Promise<RunResult> => {
     h.calls.push(opts);
     const extra = h.run?.(opts) ?? {};
-    return { ok: true, structured: { summary: 'Built it', shots: [] }, sessionId: opts.resume ?? opts.sessionId ?? 's-1', text: '', ...extra };
+    return { ok: true, structured: { summary: 'Built it', shots: [], offScreen: [{ criterion: 1, why: 'It is about the saved data.' }] }, sessionId: opts.resume ?? opts.sessionId ?? 's-1', text: '', ...extra };
   },
 }));
 
@@ -42,6 +42,7 @@ const { problemOf } = await import('../src/board/problem.js');
 const { squadHome } = await import('../src/core/home.js');
 const { buildPaths } = await import('../src/core/paths.js');
 const { mountApi } = await import('../src/console/api/index.js');
+const { AgentWindow, ALL_TOOLS } = await import('../src/engine/window.js');
 
 let tmp: string;
 let project: string;
@@ -49,7 +50,7 @@ let wt: string;
 let bp: ReturnType<typeof boardPaths>;
 type Squad = {
   runBuilder(id: string, prompt: string, resume: boolean, step?: string): Promise<void>;
-  shoot(id: string, t: unknown, when: 'before' | 'after', meta: unknown, appRunning: boolean, appUrl?: string): Promise<void>;
+  shoot(id: string, t: unknown, when: 'before' | 'after', meta: unknown, win: unknown, appUrl: string): Promise<void>;
   review(id: string): Promise<void>;
   launch(key: string, job: () => Promise<void>): void;
   running: Set<string>;
@@ -141,12 +142,20 @@ describe('the sandbox', () => {
     expect(fs.readFileSync(path.join(wt, 'limit.txt'), 'utf8')).toBe('limit = 3\n');
   });
 
-  it("lets the Tester's browser commands out, and its screenshots into the proof folder", async () => {
-    await squad().shoot('AP-1', readTicket(bp, 'AP-1')!, 'after', {}, true, 'http://localhost:4999');
-    const box = h.calls[0]!.sandbox!;
-    expect(box.excludedCommands).toEqual(['npx playwright screenshot:*', 'npx -y playwright screenshot:*', 'npx playwright install:*', 'npx -y playwright install:*']);
-    expect(box.filesystem.allowWrite).toContain(bp.proofDir);
+  it("keeps the Tester's commands in it too, with no browser let out: squad-kit's own tools take the pictures", async () => {
+    const win = new AgentWindow({ ticket: 'AP-1', step: 'proof', who: 'Tester', tools: ALL_TOOLS, proofDir: bp.proofDir, prefix: 'ap-1-after', say: () => undefined });
+    await squad().shoot('AP-1', readTicket(bp, 'AP-1')!, 'after', readMeta(bp), win, 'http://127.0.0.1:4999');
+    await win.close();
+    const call = h.calls[0]!;
+    const box = call.sandbox!;
+    expect(box).not.toHaveProperty('excludedCommands');
     expect(box.filesystem.allowRead).toContain(bp.proofDir);
+    // It only reads; the pictures, the pages and the app go through the window, its tools allowed outright.
+    expect(call.allowedTools).not.toContain('Bash');
+    expect(call.allowedTools).toEqual(expect.arrayContaining(['mcp__squad__take_screenshots', 'mcp__squad__look_at_page', 'mcp__squad__i_am_stuck']));
+    expect(call.window).toMatchObject({ name: 'squad', key: win.key, tools: ALL_TOOLS });
+    expect(call.appendSystemPrompt).toContain('call i_am_stuck');
+    expect(call.prompt).not.toMatch(/playwright|npx/i);
   });
 
   it('is not used by steps that only read: they have no free shell to keep in', async () => {
@@ -198,7 +207,9 @@ describe('caps', () => {
     await squad().runBuilder('AP-1', 'Build it', false, 'build');
     setMeta({ quality: 'thrifty' });
     await squad().runBuilder('AP-1', 'Build it', true, 'fix');
-    await squad().shoot('AP-1', readTicket(bp, 'AP-1')!, 'after', {}, true, 'http://localhost:4999');
+    const win = new AgentWindow({ ticket: 'AP-1', step: 'proof', who: 'Tester', tools: ALL_TOOLS, proofDir: bp.proofDir, prefix: 'ap-1-after', say: () => undefined });
+    await squad().shoot('AP-1', readTicket(bp, 'AP-1')!, 'after', {}, win, 'http://127.0.0.1:4999');
+    await win.close();
     expect(h.calls.map((c) => [c.maxTurns, c.maxBudgetUsd])).toEqual([
       [300, 60],
       [90, 9],

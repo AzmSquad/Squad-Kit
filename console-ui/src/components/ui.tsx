@@ -38,8 +38,11 @@ export function Glyph({ role, small, size }: { role: Actor; small?: boolean; siz
   );
 }
 
-/** The terminal command for an action, one click to copy. Hidden when "Show commands" is off. */
-export function Cmd({ text }: { text: string }) {
+/**
+ * The terminal command for an action, one click to copy. Hidden when "Show commands" is off. `keep`: the end of the
+ * command (an id and its options) that stays in sight when the command is cut short; the start gives way first.
+ */
+export function Cmd({ text, keep }: { text: string; keep?: string }) {
   const { showCommands, toast } = usePrefs();
   if (!showCommands) return null;
   const copy = () => {
@@ -48,10 +51,18 @@ export function Cmd({ text }: { text: string }) {
       () => toast('Could not copy. Select the text instead.', 'err'),
     );
   };
+  const cut = keep && text.endsWith(keep) && text.length > keep.length ? text.length - keep.length : 0;
   return (
     <span className="term" title="The same action in the terminal">
       <b>&gt;_</b>
-      <span>{text}</span>
+      {cut ? (
+        <>
+          <span>{text.slice(0, cut).trimEnd()}</span>
+          <span className="term-keep">{keep}</span>
+        </>
+      ) : (
+        <span>{text}</span>
+      )}
       <button onClick={copy} aria-label={`Copy ${text}`}>
         <Copy size={13} />
       </button>

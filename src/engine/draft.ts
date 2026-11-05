@@ -108,19 +108,15 @@ export async function draftTicket(bp: BoardPaths, input: DraftInput, opts: Draft
   }
 }
 
-/** What one tool call looked at, in a few words: the file it read, else the tool's own plain line. */
+/** What one tool call looked at, in a few words: the person's own file or a saved decision by name, else "the code", with no raw path or pattern. */
 function lookedAt(bp: BoardPaths, e: ToolEvent, root: string, uploads: string): string | null {
   const file = [e.input.file_path, e.input.path, e.input.notebook_path].find((p): p is string => typeof p === 'string' && p.length > 0);
-  if (!file) {
-    const line = describeToolEvent(e, root);
-    return line ? line.charAt(0).toLowerCase() + line.slice(1) : null;
-  }
+  if (!file) return describeToolEvent(e, root) ? 'the code' : null;
   const abs = path.resolve(root, file);
   const inside = (dir: string) => abs === dir || abs.startsWith(dir + path.sep);
   if (inside(uploads)) return `your file ${path.basename(abs)}`;
   if (inside(bp.decisionsDir)) return `saved decision ${path.basename(abs, '.md')}`;
-  const rel = path.relative(root, abs);
-  return !rel ? 'the project folder' : rel.startsWith('..') ? path.basename(abs) : rel;
+  return 'the code';
 }
 
 /* ── Drafts the dialog can leave and come back to ─────────── */

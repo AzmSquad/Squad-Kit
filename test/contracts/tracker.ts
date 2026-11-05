@@ -94,3 +94,62 @@ export function trackerContract(name: string, make: () => TrackerFixture): void 
     });
   });
 }
+
+/** What a tracker that makes items must do (abilities.create): sending a breakdown relies on it. */
+export function trackerCreateContract(name: string, make: () => Tracker): void {
+  describe(`${name} making items`, () => {
+    it('says which item types it uses for each level', async () => {
+      const tracker = make();
+      expect(tracker.abilities.create).toBe(true);
+      const levels = await tracker.levels();
+      expect([levels.epic, levels.feature, levels.story, levels.process].every(Boolean)).toBe(true);
+    });
+
+    it('makes an epic, a feature under it and a story under that, with its criteria and tags', async () => {
+      const tracker = make();
+      const levels = await tracker.levels();
+      const epic = await tracker.createItem({ level: 'epic', title: 'Booking', markdown: 'Guests book rooms online.', tags: ['squad-kit', 'BR-1'] });
+      expect(epic).toMatchObject({ ref: tracker.refOf(epic.id), type: levels.epic, title: 'Booking', isBug: false });
+      const feature = await tracker.createItem({ level: 'feature', title: 'Holding', markdown: 'Hold a slot while paying.', parent: epic.id });
+      const story = await tracker.createItem({
+        level: 'story',
+        title: 'Hold a slot',
+        markdown: 'As a guest, I want to hold a slot, so that nobody takes it.',
+        acceptance: '**Given** a free slot\n**When** I hold it\n**Then** it is mine for 10 minutes',
+        parent: feature.id,
+        tags: ['squad-kit', 'BR-1'],
+      });
+      const got = await tracker.get(story.id);
+      expect(got).toMatchObject({ type: levels.story, title: 'Hold a slot' });
+      expect(got.parents.map((p) => p.id)).toEqual([feature.id, epic.id]);
+      expect(got.tags).toEqual(expect.arrayContaining(['squad-kit', 'BR-1']));
+      expect(`${got.description}\n${got.acceptanceCriteria}`).toContain('I hold it');
+    });
+
+    it('changes an item, and a new parent replaces the old one', async () => {
+      const tracker = make();
+      const epic = await tracker.createItem({ level: 'epic', title: 'Booking', markdown: 'x' });
+      const first = await tracker.createItem({ level: 'feature', title: 'Search', markdown: 'x', parent: epic.id });
+      const second = await tracker.createItem({ level: 'feature', title: 'Holding', markdown: 'x', parent: epic.id });
+      const story = await tracker.createItem({ level: 'story', title: 'Hold a slot', markdown: 'x', parent: first.id });
+      await tracker.updateItem(story.id, { title: 'Hold a room', markdown: 'As a guest, I want to hold a room.', acceptance: '**Given** a room', parent: second.id });
+      const got = await tracker.get(story.id);
+      expect(got.title).toBe('Hold a room');
+      expect(got.description).toContain('hold a room');
+      expect(got.parents.map((p) => p.id)).toEqual([second.id, epic.id]);
+    });
+
+    it('adds only the dependency links it does not have, and they show as what the item depends on', async () => {
+      const tracker = make();
+      const epic = await tracker.createItem({ level: 'epic', title: 'Front desk', markdown: 'x' });
+      const checkIn = await tracker.createItem({ level: 'story', title: 'Check in', markdown: 'x', parent: epic.id });
+      const pay = await tracker.createItem({ level: 'story', title: 'Pay', markdown: 'x', parent: epic.id });
+      const checkOut = await tracker.createItem({ level: 'story', title: 'Check out', markdown: 'x', parent: epic.id });
+      await tracker.linkDepends(checkOut.id, [checkIn.id]);
+      await tracker.linkDepends(checkOut.id, [checkIn.id, pay.id]);
+      await tracker.linkDepends(checkOut.id, [checkIn.id]);
+      const got = await tracker.get(checkOut.id);
+      expect(got.dependsOn.map((d) => d.ref).sort()).toEqual([tracker.refOf(checkIn.id), tracker.refOf(pay.id)].sort());
+    });
+  });
+}

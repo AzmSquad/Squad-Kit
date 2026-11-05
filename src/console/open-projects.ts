@@ -10,6 +10,7 @@ import { inbox } from '../board/actions.js';
 import type { Ticket } from '../board/types.js';
 import { LiveSquad } from '../engine/live.js';
 import { stopApps } from '../engine/run-app.js';
+import { stopTries } from '../engine/try-app.js';
 import { prepareProject } from '../engine/setup.js';
 import { setupLine, setupView } from '../board/first-run.js';
 import { forgetProject, projectName, readProjects, rememberProject } from '../core/projects.js';
@@ -118,7 +119,7 @@ export class OpenProjects {
 
   private prepareAndOpen(root: string): { project: OpenProject; did: string[] } {
     const elsewhere = runningConsole(boardPaths(path.join(root, SQUAD_DIR)));
-    if (elsewhere) throw new Error(`Its board is open in another squad-kit (process ${elsewhere.pid}). Close that one first (Ctrl-C in its terminal), then add it here.`);
+    if (elsewhere) throw new Error('Its board is open in another squad-kit. Close that one first, then add it here.');
     const ready = prepareProject(root);
     return { project: this.openReady(ready.paths), did: ready.did };
   }
@@ -149,8 +150,10 @@ export class OpenProjects {
       close: () => {
         stopTimer();
         stopLive();
-        // The apps squad-kit started for the project stop with its board, the whole process group.
+        // The apps squad-kit started for the project stop with its board, the whole process group, and so does the
+        // ticket's copy the person was trying.
         stopApps(bp);
+        stopTries(bp);
         releaseLock();
         writeConsoleInfo(bp, { ...this.opts.info(), pid: null });
       },

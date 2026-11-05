@@ -96,7 +96,7 @@ async function safeText(res: Response): Promise<string> {
 }
 
 /** API errors carry the server's plain-words message, so the UI can show it as is. */
-export async function send<T>(path: string, method: 'POST' | 'PUT' | 'DELETE', payload: unknown = {}): Promise<T> {
+export async function send<T>(path: string, method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', payload: unknown = {}): Promise<T> {
   const token = sessionStorage.getItem(TOKEN_KEY);
   if (!token) throw new UnauthorizedError();
   const res = await reach(apiPath(path), {

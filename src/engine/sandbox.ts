@@ -47,7 +47,7 @@ export const PACKAGE_HOSTS = [
   'codeload.github.com',
   'objects.githubusercontent.com',
   'release-assets.githubusercontent.com',
-  // The Tester's browser
+  // Browsers for the project's own browser tests
   'cdn.playwright.dev',
   'playwright.download.prss.microsoft.com',
   'playwright.azureedge.net',
@@ -59,7 +59,7 @@ export const PACKAGE_HOSTS = [
  * own builds later run unchecked. The shared caches of NuGet, Maven, Gradle and RubyGems/Bundler stay read only:
  * those tools get the ticket's own cache instead (ticketCacheDir), and npx and browsers get none.
  */
-const PACKAGE_CACHES = [
+export const PACKAGE_CACHES = [
   '.npm/_cacache',
   '.yarn/berry/cache',
   'Library/Caches/Yarn',
@@ -73,11 +73,8 @@ const PACKAGE_CACHES = [
   'go/pkg/mod',
 ];
 
-/** Keys and sign-ins in the person's home folder. */
-const PRIVATE = ['.ssh', '.aws', '.gnupg', '.config/gh', '.azure', '.kube', '.docker/config.json', '.netrc', '.git-credentials'];
-
-/** The browser commands the Tester's prompt names. A browser cannot run inside every sandbox; these only load a page or install the browser. */
-const BROWSER = ['npx playwright screenshot', 'npx -y playwright screenshot', 'npx playwright install', 'npx -y playwright install'];
+/** Keys and sign-ins in the person's home folder. The guard for the project's own commands keeps them out too. */
+export const PRIVATE = ['.ssh', '.aws', '.gnupg', '.config/gh', '.azure', '.kube', '.docker/config.json', '.netrc', '.git-credentials'];
 
 /**
  * The ticket's own package cache on this computer, for the package managers whose shared caches stay read only
@@ -87,6 +84,14 @@ const BROWSER = ['npx playwright screenshot', 'npx -y playwright screenshot', 'n
  */
 export function ticketCacheDir(bp: Pick<BoardPaths, 'localDir'>, id: string): string {
   return path.join(bp.localDir, 'caches', id.toLowerCase());
+}
+
+/**
+ * The project's own package cache on this computer, for the commands squad-kit runs with no ticket: the first setup,
+ * Your apps, your checkout's setup after a merge and the release pipeline. The same package managers as a ticket's.
+ */
+export function projectCacheDir(bp: Pick<BoardPaths, 'localDir'>): string {
+  return path.join(bp.localDir, 'caches', 'project');
 }
 
 /** Removes a ticket's own package cache, with its copy of the code. */
@@ -148,8 +153,6 @@ export interface SandboxFor {
   secrets: string[];
   /** Hosts the project allows on top of the package registries. */
   hosts?: string[];
-  /** The step uses a browser (the Tester). */
-  browser?: boolean;
   /** The ticket's own package cache (ticketCacheDir). */
   cache?: string;
   home?: string;
@@ -168,7 +171,6 @@ export function sandboxAsk(o: SandboxFor): SandboxAsk {
     // The step's own folders, inside squad-kit's: its copy, its proof folder, its package cache, its attachments.
     read: [...new Set(withReal([o.cwd, o.proof, ...(o.cache ? [o.cache] : []), ...o.read]))],
     hosts: [...new Set([...PACKAGE_HOSTS, ...(o.hosts ?? [])])],
-    ...(o.browser ? { outside: BROWSER } : {}),
   };
 }
 
@@ -180,6 +182,25 @@ export function sandboxOf(tool: AiTool): SandboxSupport {
 /** Each AI tool squad-kit can run, and whether its steps run in a sandbox on this computer. */
 export function sandboxStatus(): ({ tool: string } & SandboxSupport)[] {
   return AI_TOOLS.filter((t) => t.canRun).map((t) => ({ tool: t.label, ...sandboxOf(t) }));
+}
+
+/** What Settings says when the agents' own commands have no guard here, in plain words. */
+export interface GuardNote {
+  title: string;
+  text: string;
+}
+
+/**
+ * Windows has no guard for the agents' own commands yet (decision 1 of the agent's room plan): Settings says so
+ * plainly. Those commands can read any file there, squad-kit's own too, so the note promises nothing it cannot keep.
+ * The window still does the screenshots and the app. Null where a guard runs, or where the tools say why not.
+ */
+export function guardNote(platform: NodeJS.Platform = process.platform, tools: SandboxSupport[] = sandboxStatus()): GuardNote | null {
+  if (platform !== 'win32' || tools.some((t) => t.available)) return null;
+  return {
+    title: 'Windows: less protected',
+    text: "On Windows, squad-kit does not guard the agents' own commands, or the project's own tests and app, so they can reach other files on this computer. Use it on projects you trust.",
+  };
 }
 
 /** A path for people: inside the home folder as ~/… */

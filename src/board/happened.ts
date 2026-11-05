@@ -94,8 +94,12 @@ const AFTER: Partial<Record<TimedStep, { re: RegExp; who: Activity['who'][]; not
   design: [
     { re: /^Approved the (design|plan)/, who: ['you'], note: 'you approved' },
     { re: /^Express track: approved the plan on its own/, who: ['squad'], note: 'approved on its own (Express track)' },
+    { re: /^Builds by itself: approved the plan on its own/, who: ['squad'], note: 'approved on its own (Builds by itself)' },
   ],
-  proof: [{ re: /^Checked the proof\. Looks right/, who: ['you'], note: 'you checked it: Looks right' }],
+  proof: [
+    { re: /^Checked the proof\. Looks right/, who: ['you'], note: 'you checked it: Looks right' },
+    { re: /^(.+ passed: a|A)ccepted by itself/, who: ['squad'], note: 'accepted by itself' },
+  ],
 };
 
 /** Lines the watcher writes for tool calls, and squad-kit's own notes: never a step's summary. */
@@ -193,6 +197,8 @@ function summaryOf(t: Ticket, run: Run, log: Activity[]): string {
       return line ? `${line.split(':')[0]}.` : 'Read the changes.';
     case 'proof': {
       const n = t.proof?.length ?? 0;
+      const pictures = (t.proof ?? []).reduce((sum, p) => sum + 1 + (p.more?.length ?? 0), 0);
+      if (pictures > n) return `Opened the app and took ${plural(pictures, 'screenshot')} of the ${plural(n, '"done when" point')} it could show.`;
       if (n) return `Opened the app and took ${plural(n, 'screenshot')}, one for each "done when" point it could show.`;
       return line ? line.replace(/\.?$/, '.') : 'Checked the change.';
     }
@@ -261,7 +267,7 @@ function handedIn(t: Ticket, run: Run, files: FileList | null, conv: Conversatio
       return { kind: 'verdict', approved, notes };
     }
     case 'proof':
-      return t.proof?.length ? { kind: 'shots', shots: t.proof.map((p) => ({ criterion: p.criterion, file: p.after })) } : undefined;
+      return t.proof?.length ? { kind: 'shots', shots: t.proof.flatMap((p) => [p.after, ...(p.more ?? []).map((m) => m.after)].map((file) => ({ criterion: p.criterion, file }))) } : undefined;
   }
 }
 

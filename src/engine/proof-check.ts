@@ -195,6 +195,17 @@ export function samePicture(a: Buffer, b: Buffer): boolean {
   return Buffer.from(pa.pixels.buffer, pa.pixels.byteOffset, pa.pixels.byteLength).equals(Buffer.from(pb.pixels.buffer, pb.pixels.byteOffset, pb.pixels.byteLength));
 }
 
+/** The size a saved screenshot was taken at, from its width: 390 for a phone, 1280 for a desktop (engine/shots.ts). Null when it cannot be read. */
+export function shotSizeOf(file: string): 'phone' | 'desktop' | null {
+  try {
+    const p = readPicture(fs.readFileSync(file));
+    if (!p) return null;
+    return p.width < 800 ? 'phone' : 'desktop';
+  } catch {
+    return null;
+  }
+}
+
 /**
  * What is wrong with one screenshot, in plain words, or null when it is fine. `since` is when the step started: a file
  * saved before it was not taken in this step.

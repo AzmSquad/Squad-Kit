@@ -32,6 +32,7 @@ import {
   chatWrite,
   sendChat,
   startChat,
+  askQuestion,
   editPlan,
   sendBack,
   startOver,
@@ -80,9 +81,12 @@ import { liveNow } from '../../board/now.js';
 import { readUsual } from '../../board/usual.js';
 import { answerAsk } from '../../board/ask.js';
 import { withProblem } from '../../board/problem.js';
-import { PACKAGE_HOSTS, parseHosts, sandboxStatus } from '../../engine/sandbox.js';
+import { PACKAGE_HOSTS, guardNote, parseHosts, sandboxStatus } from '../../engine/sandbox.js';
+import { allowPath, guardSupport } from '../../engine/project-guard.js';
 import { mountCostApi } from './cost.js';
 import { freePortAndRetry } from '../../engine/free-port.js';
+import { changeDecided } from '../../board/auto.js';
+import { lookAgain } from '../../engine/try-app.js';
 
 const DAY = 86_400_000;
 
@@ -128,6 +132,10 @@ async function act(c: Context, fn: () => unknown) {
 
 export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { startedAt: string; build: number; restart(): void } }): void {
   const bp = boardPaths(opts.paths.squadDir);
+  const tried = <T>(t: T): T => {
+    lookAgain(bp);
+    return t;
+  };
   // Who the tracker sign-in belongs to, checked at most once a minute.
   let connection: { at: number; key: string; user?: string; error?: string } | null = null;
 
@@ -399,7 +407,8 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     return act(c, () => askAbout(bp, c.req.param('id'), b.questionId ?? '', b.text ?? ''));
   });
 
-  app.post('/api/v1/tickets/:id/approve', (c) => act(c, () => approve(bp, c.req.param('id'))));
+  // Looks right, and Something's wrong below, stop the copy of the app being tried at once (engine/try-app.ts).
+  app.post('/api/v1/tickets/:id/approve', (c) => act(c, () => tried(approve(bp, c.req.param('id')))));
   app.post('/api/v1/tickets/:id/stop', (c) => act(c, () => stopTicket(bp, c.req.param('id'))));
   app.post('/api/v1/tickets/:id/unstick', (c) => act(c, () => endStuckCommand(bp, c.req.param('id'))));
   // Free the port and try again: only a program squad-kit started on the app's port (src/engine/free-port.ts).
@@ -412,7 +421,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
 
   app.post('/api/v1/tickets/:id/change', async (c) => {
     const b = await body<{ text?: string }>(c);
-    return act(c, () => requestChange(bp, c.req.param('id'), b.text ?? ''));
+    return act(c, () => tried(requestChange(bp, c.req.param('id'), b.text ?? '')));
   });
 
   // Everything the ticket changed against main, read from its own copy.
@@ -450,10 +459,11 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     return act(c, () => startOver(bp, c.req.param('id'), b.direction ?? ''));
   });
 
-  // Talk it through with an agent: start, send (with files), write the spec or design from it, or Done.
+  // Talk it through with an agent: start, send (with files), write the spec or design from it, or Done. `ask` is Ask a
+  // question: questions only in every state, with whoever knows the story best unless `with` names the agent.
   app.post('/api/v1/tickets/:id/chat/start', async (c) => {
-    const b = await body<{ with?: AgentName }>(c);
-    return act(c, () => startChat(bp, c.req.param('id'), b.with ?? 'analyst'));
+    const b = await body<{ with?: AgentName; ask?: boolean }>(c);
+    return act(c, () => (b.ask ? askQuestion(bp, c.req.param('id'), b.with) : startChat(bp, c.req.param('id'), b.with ?? 'analyst')));
   });
 
   app.post('/api/v1/tickets/:id/chat/send', async (c) => {
@@ -497,6 +507,13 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
   app.post('/api/v1/tickets/:id/spec-change/new-ticket', async (c) => {
     const b = await body<{ text?: string; as?: 'ticket' | 'bug' }>(c);
     return act(c, () => changeAfterRelease(bp, c.req.param('id'), b.text ?? '', b.as === 'bug' ? 'bug' : 'ticket'));
+  });
+
+  // Change what the squad decided for you (Builds by itself): a small change on the ticket, or a new linked ticket
+  // once it is accepted.
+  app.post('/api/v1/tickets/:id/decided/:did', async (c) => {
+    const b = await body<{ text?: string }>(c);
+    return act(c, () => changeDecided(bp, c.req.param('id'), c.req.param('did'), b.text ?? ''));
   });
 
   app.post('/api/v1/tickets/:id/chat/stop', (c) => act(c, () => chatStop(bp, c.req.param('id'))));
@@ -619,6 +636,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
       documentsInGit?: boolean;
       quality?: string;
       allowedHosts?: string[];
+      guard?: { allowRead?: string[]; allowWrite?: string[] };
       repos?: { path: string; base?: string; remote?: string; commands?: ProjectCommands }[];
     }>(c);
     return act(c, () => {
@@ -627,6 +645,12 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
         const { hosts, bad } = parseHosts(Array.isArray(b.allowedHosts) ? b.allowedHosts : []);
         if (bad.length) throw new Error(`"${bad[0]}" is not a host name. Write it like nexus.example.com, or *.example.com for all of its subdomains.`);
         meta.allowedHosts = hosts;
+      }
+      if (b.guard !== undefined) {
+        const clean = (list: unknown): string[] => [...new Set((Array.isArray(list) ? list : []).map((p) => String(p).trim()).filter(Boolean).map((p) => allowPath(p)))];
+        const read = clean(b.guard.allowRead);
+        const write = clean(b.guard.allowWrite);
+        meta.guard = read.length || write.length ? { ...(read.length ? { allowRead: read } : {}), ...(write.length ? { allowWrite: write } : {}) } : undefined;
       }
       if (b.quality !== undefined) {
         const q = parseQuality(b.quality);
@@ -658,7 +682,14 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
   });
 
   // Whether the Builder's and Tester's commands run in a sandbox on this computer, and the hosts they may reach.
-  app.get('/api/v1/sandbox', (c) => c.json({ tools: sandboxStatus(), registries: PACKAGE_HOSTS, allowedHosts: boardExists(bp) ? (readMeta(bp).allowedHosts ?? []) : [] }));
+  app.get('/api/v1/sandbox', (c) => {
+    const tools = sandboxStatus();
+    const note = guardNote(process.platform, tools);
+    const g = guardSupport();
+    const allow = boardExists(bp) ? readMeta(bp).guard : undefined;
+    const guard = { on: g.on, why: g.why, ...(g.fix ? { fix: g.fix } : {}), allowRead: allow?.allowRead ?? [], allowWrite: allow?.allowWrite ?? [] };
+    return c.json({ tools, registries: PACKAGE_HOSTS, allowedHosts: boardExists(bp) ? (readMeta(bp).allowedHosts ?? []) : [], guard, ...(note ? { note } : {}) });
+  });
 
   app.get('/api/v1/agents', (c) => {
     if (!boardExists(bp)) return c.json([]);

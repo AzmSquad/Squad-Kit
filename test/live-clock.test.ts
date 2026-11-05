@@ -120,7 +120,7 @@ describe('the Builder on the clock', () => {
       return { ok: true, structured: { summary: 'Done' } };
     };
     await (new LiveSquad(bp) as unknown as { build(id: string): Promise<void> }).build(id);
-    expect(during).toEqual({ line: 'Builder · step 2 of 3 · editing booking.tsx', time: '1 s · usually 2 to 4 min', doing: 'Editing src/booking.tsx' });
+    expect(during).toEqual({ line: 'Builder · step 2 of 3 · writing the code', time: '1 s · usually 2 to 4 min', doing: 'Writing the code' });
     const done = readTicket(bp, id)!;
     expect(done.clock).toBeUndefined();
     expect(done.stage).toBe('test');

@@ -37,6 +37,8 @@ export interface SetupTestRun {
   passed?: number;
   seconds?: number;
   output?: string;
+  /** It failed here, and this very command passed later on a story: it is no longer known to fail. */
+  passedSince?: string;
 }
 
 /** squad-kit's own proof that it can work here: what it read, ran and opened. */
@@ -64,6 +66,8 @@ export interface OverviewTalk {
   stopping?: boolean;
   /** The next read takes what the person said into account. */
   reread?: boolean;
+  /** On a project with no code: what the person said they want to build. */
+  idea?: string;
 }
 
 export interface SetupState {
@@ -138,6 +142,11 @@ export function finish(s: SetupState, id: SetupStepId, state: Exclude<SetupStepS
   else delete st.error;
   if (extra.output !== undefined) st.output = extra.output;
   else delete st.output;
+}
+
+/** What the read says when it is done: "Read the project: 98 files". */
+export function readWords(files: number | undefined): string {
+  return files ? `Read the project: ${files} ${files === 1 ? 'file' : 'files'}` : 'Read the project';
 }
 
 /** Try again from this step: it and every step after it are to do again. Approval is asked again only after a new read. */

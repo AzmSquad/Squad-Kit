@@ -4,6 +4,7 @@ import { ChevronDown, ChevronUp } from 'lucide-react';
 import { useBoard } from '../lib/data';
 import { PHONE, useMedia } from '../lib/chatDock';
 import { needsYou } from '../lib/waiting';
+import { useBreakdownWaits } from './BreakdownWaits';
 import { updateLine, useUpdate } from './Update';
 import { useUsageLimit } from './UsageLimit';
 
@@ -66,7 +67,9 @@ function useChips(path: string): Chip[] {
   if (u) chips.push({ key: 'update', text: u, tone: update?.progress.state === 'failed' ? 'you' : 'acc' });
   if (limit?.pause && limit.text) chips.push({ key: 'limit', text: 'Usage limit', tone: 'you' });
   if (board?.ready && board.console?.outdated) chips.push({ key: 'restart', text: 'Restart to update', tone: 'you' });
-  const waiting = board?.ready && !path.startsWith('/inbox') ? board.tickets.filter(needsYou).length : 0;
+  // A breakdown whose Analyst has questions counts too, as in the banner (components/BreakdownWaits).
+  const breakdowns = useBreakdownWaits().length;
+  const waiting = board?.ready && !path.startsWith('/inbox') ? board.tickets.filter(needsYou).length + breakdowns : 0;
   if (waiting) chips.push({ key: 'waiting', text: `${waiting} need${waiting === 1 ? 's' : ''} you`, tone: 'you' });
   return chips;
 }

@@ -52,8 +52,8 @@ function statusLine(a: ProjectApp): string {
 }
 
 function stepLine(a: ProjectApp): string {
-  if (a.step === 'setup') return `Setting it up first: ${a.setup}`;
-  if (a.step === 'start') return `Starting: ${a.start}`;
+  if (a.step === 'setup') return 'Setting it up first';
+  if (a.step === 'start') return 'Starting it';
   return `Getting the newest ${a.base}`;
 }
 
@@ -144,7 +144,7 @@ function AppItem({ a, named, live, reading, readError }: { a: ProjectApp; named:
 
       {a.state !== 'running' && a.state !== 'starting' && a.start && a.up && !busy && (
         <p className="app-more">
-          Something else answers at {bare(a.url)}.{' '}
+          Something else answers at this app&apos;s address.{' '}
           <a href={a.url} target="_blank" rel="noreferrer">
             Open it
           </a>
@@ -154,32 +154,15 @@ function AppItem({ a, named, live, reading, readError }: { a: ProjectApp; named:
       {busy && (
         <div className="app-warn">
           <b>{a.error}</b>
-          <span>
-            {busy.program ? `It is ${busy.program} (process ${busy.pid}). ` : 'squad-kit cannot tell which program it is. '}
-            {busy.ours
-              ? 'squad-kit started it, so it can stop it for you.'
-              : busy.nextPort
-                ? `${a.name} can run on port ${busy.nextPort} instead.`
-                : 'Close that program, then press Try again. Or give the app another address.'}
-          </span>
-          <div className="app-acts">
-            {busy.ours && (
+          <span>{busy.ours ? 'squad-kit started it, so it can stop it for you.' : 'squad-kit leaves it alone. Close that program, then press Try again, or ask an engineer to look at what failed.'}</span>
+          {busy.ours && (
+            <div className="app-acts">
               <button className="btn sm" disabled={act.isPending} onClick={() => start({ stopOther: true })}>
                 Stop it and start
               </button>
-            )}
-            {busy.nextPort && (
-              <button className="btn sm" disabled={act.isPending} onClick={() => start({ nextPort: true })}>
-                Use port {busy.nextPort}
-              </button>
-            )}
-            {!busy.ours && (
-              <button className="btn sm" onClick={() => setTyping(true)}>
-                Change the address
-              </button>
-            )}
-          </div>
-          <Cmd text={busy.ours ? `squad app start${ref} --stop-other` : busy.nextPort ? `squad app start${ref} --next-port` : `squad app set${ref} --url http://localhost:${busy.port + 1}`} />
+            </div>
+          )}
+          <Cmd text={busy.ours ? `squad app start${ref} --stop-other` : `squad app start${ref}`} />
         </div>
       )}
 
@@ -207,7 +190,7 @@ function AppItem({ a, named, live, reading, readError }: { a: ProjectApp; named:
 
       {a.start && (
         <button className="app-link" onClick={() => setOutput(true)}>
-          Show output
+          {a.state === 'failed' ? 'See what failed' : 'Show output'}
         </button>
       )}
       {output && (
@@ -264,7 +247,7 @@ function TypeIt({ a, cmdRef, onDone }: { a: ProjectApp; cmdRef: string; onDone()
   );
 }
 
-/** For engineers: how the app starts, and the last lines it and its setup printed. */
+/** For engineers: what failed, how the app starts, and the last lines it and its setup printed. */
 function AppOutputView({ a, cmdRef, onClose, onChange }: { a: ProjectApp; cmdRef: string; onClose(): void; onChange(): void }) {
   const q = useQuery({
     queryKey: ['apps', a.name, 'output'],
@@ -274,7 +257,7 @@ function AppOutputView({ a, cmdRef, onClose, onChange }: { a: ProjectApp; cmdRef
   const text = (q.data?.lines ?? []).join('\n').trim();
   return (
     <Modal
-      title={`${a.name}: how it starts`}
+      title={a.state === 'failed' ? `${a.name}: what failed` : `${a.name}: how it starts`}
       wide
       onClose={onClose}
       footer={
@@ -290,6 +273,11 @@ function AppOutputView({ a, cmdRef, onClose, onChange }: { a: ProjectApp; cmdRef
         </>
       }
     >
+      {a.state === 'failed' && a.detail && (
+        <pre className="app-out" style={{ marginBottom: 12 }}>
+          {a.detail}
+        </pre>
+      )}
       <div className="app-how">
         <div>
           <span>Start command</span>

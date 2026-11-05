@@ -1,6 +1,6 @@
 import yaml from 'js-yaml';
 import { TECH_ROLES } from './types.js';
-import type { AgentName, Blueprint, BoardMeta, ChangePart, ChangeStatus, ChangeStep, Criterion, Decision, DecisionDraft, Lesson, ProofShot, Question, Release, SpecChange, Step, Ticket, TicketNote } from './types.js';
+import type { AgentName, Blueprint, BoardMeta, ChangePart, ChangeStatus, ChangeStep, Criterion, Decision, DecisionDraft, Lesson, ProofPicture, ProofShot, Question, Release, SpecChange, Step, Ticket, TicketNote } from './types.js';
 
 /**
  * The project's documents as Markdown (ADR-001). squad-kit writes each in a fixed shape and reads it back from that
@@ -26,7 +26,7 @@ export function dec(s: string): string {
 }
 
 /** Free text: a line that looks like part of the shape gets a backslash in front. */
-const MARKER = /^(\\*)(#|- \[|\d+\. |Answer:|Chosen:|To:|- (Area|Saved as|Replaces|Check with the client|Before|After|Decision|Where):)/;
+const MARKER = /^(\\*)(#|- \[|\d+\. |Answer:|Chosen:|To:|- (Area|Saved as|Replaces|Check with the client|Before|After|Decision|Where|More):)/;
 
 function escText(text: string): string {
   return text
@@ -124,6 +124,10 @@ const HEADER_KEYS = [
   'changeOf',
   'dependsOn',
   'dependency',
+  'breakdown',
+  'decided',
+  'offScreen',
+  'alsoChanged',
   'files',
 ] as const;
 
@@ -391,25 +395,63 @@ function proofDoc(title: string, shots: ProofShot[]): string {
   return `${[
     `# ${enc(title)}: proof`,
     ...shots.map((p) =>
-      [`### ${enc(p.criterion)}`, '', `- Before: ${enc(p.before)} (${enc(p.beforeLabel)})`, `- After: ${enc(p.after)} (${enc(p.afterLabel)})`, ...(p.note !== undefined ? ['', escText(p.note)] : [])].join('\n'),
+      [
+        `### ${enc(p.criterion)}`,
+        '',
+        `- Before: ${enc(p.before)} (${enc(p.beforeLabel)})`,
+        `- After: ${enc(p.after)} (${enc(p.afterLabel)})`,
+        // Where the after picture was taken: the page to look at in the app.
+        ...(p.page ? [`- Page: ${enc(p.page)}`] : []),
+        // What the picture shows: the "done when" met, or not yet and why.
+        ...(p.shows ? [`- Shows: ${SHOWS_WORDS[p.shows]}`] : []),
+        ...(p.why ? [`- Why: ${enc(p.why)}`] : []),
+        // The other pictures of this "done when", each with its own page and note.
+        ...(p.more ?? []).flatMap((m) => [`- More: ${enc(m.after)}`, ...(m.page ? [`  - Page: ${enc(m.page)}`] : []), ...(m.note ? [`  - Note: ${enc(m.note)}`] : [])]),
+        ...(p.note !== undefined ? ['', escText(p.note)] : []),
+      ].join('\n'),
     ),
   ].join('\n\n')}\n`;
 }
+
+/** What a proof row's "Shows:" line says. */
+const SHOWS_WORDS: Record<NonNullable<ProofShot['shows']>, string> = { met: 'met', broken: 'not working', 'not-shown': 'not shown', 'off-screen': 'not on a screen' };
 
 function parseProof(text: string): ProofShot[] {
   return sections(text, /^### (.*)$/).map((s) => {
     const shot: ProofShot = { criterion: dec(s.match[1]!), before: '', after: '', beforeLabel: '', afterLabel: '' };
     const rest: string[] = [];
+    let said = '';
+    let more: ProofPicture | null = null;
     for (const line of s.text.split('\n')) {
       const m = line.match(/^- (Before|After): (.*) \((.*)\)$/);
-      if (m && m[1] === 'Before') [shot.before, shot.beforeLabel] = [dec(m[2]!), dec(m[3]!)];
+      const also = line.match(/^- More: (.+)$/);
+      const of = more && line.match(/^ {2}- (Page|Note): (.+)$/);
+      // A picture's page and note come right under it; anything else ends it.
+      if (!also && !of) more = null;
+      if (also) (shot.more ??= []).push((more = { after: dec(also[1]!) }));
+      else if (of) more![of[1] === 'Page' ? 'page' : 'note'] = dec(of[2]!);
+      else if (m && m[1] === 'Before') [shot.before, shot.beforeLabel] = [dec(m[2]!), dec(m[3]!)];
       else if (m && m[1] === 'After') [shot.after, shot.afterLabel] = [dec(m[2]!), dec(m[3]!)];
+      else if (/^- Page: \S/.test(line) && !shot.page) shot.page = dec(line.slice('- Page: '.length));
+      else if (/^- Shows: /.test(line) && !shot.shows) said = line.slice('- Shows: '.length).trim();
+      else if (/^- Why: \S/.test(line) && !shot.why) shot.why = dec(line.slice('- Why: '.length));
       else rest.push(line);
     }
+    const shows = showsOf(said, shot.why);
+    if (shows) shot.shows = shows;
     const note = block(rest.join('\n'));
     if (note || rest.some((l) => l.trim())) shot.note = note;
     return shot;
   });
+}
+
+/**
+ * A row's verdict from its line. "not met" is from before the three verdicts, when a picture that did not show it
+ * clearly counted as not met too: its reason tells them apart.
+ */
+function showsOf(said: string, why: string | undefined): ProofShot['shows'] {
+  if (said === 'not met') return why && /^(The screenshot does not show clearly|No screenshot shows it)/.test(why) ? 'not-shown' : 'broken';
+  return (Object.keys(SHOWS_WORDS) as NonNullable<ProofShot['shows']>[]).find((k) => SHOWS_WORDS[k] === said);
 }
 
 /* ── Decisions and releases ──────────────────────────────── */

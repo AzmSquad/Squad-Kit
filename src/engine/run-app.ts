@@ -1,4 +1,4 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
@@ -6,10 +6,11 @@ import path from 'node:path';
 import { findApp, isUp, projectApps, type ProjectApp } from '../board/apps.js';
 import { readMeta, type BoardPaths } from '../board/store.js';
 import type { RepoInfo } from '../board/types.js';
-import { childEnv } from './agent-env.js';
-import { runCommand } from './checks.js';
+import { runCommand, tail } from './checks.js';
+import { guardSupport, projectGuardFor, spawnProject, type GuardSpec } from './project-guard.js';
 import { git, latestBase } from './git.js';
-import { KILL_AFTER_MS, OWN_GROUP, endGroup, track } from './process-group.js';
+import { KILL_AFTER_MS, OWN_GROUP, endGroup, endTree } from './process-group.js';
+import { portSettings } from './port-vars.js';
 import { reposOf } from './repos.js';
 
 /**
@@ -28,8 +29,6 @@ export interface BusyPort {
   pid?: number;
   /** squad-kit started it (an earlier run, or `squad app start` in a terminal), so squad-kit may stop it. */
   ours: boolean;
-  /** The next free port, when the start command takes a port setting. */
-  nextPort?: number;
 }
 
 export interface AppStatus extends ProjectApp {
@@ -42,8 +41,10 @@ export interface AppStatus extends ProjectApp {
   startedAt?: string;
   /** When it began to answer. */
   since?: string;
-  /** Why it failed, in one line. */
+  /** Why it failed, in one plain sentence with no command, port or process in it. */
   error?: string;
+  /** What failed, for engineers ("See what failed"): the command and what it printed, the port and the program. */
+  detail?: string;
   busy?: BusyPort;
   /** The main commit the copy holds. */
   commit?: string;
@@ -56,7 +57,7 @@ export interface AppStatus extends ProjectApp {
 }
 
 export interface StartOptions {
-  /** The port is in use and the start command takes a port setting: run it on the next free port. */
+  /** Kept for the terminal's --next-port: an app that takes a port setting moves to the next free port by itself. */
   nextPort?: boolean;
   /** The port is in use by a program squad-kit started earlier: stop that program first. */
   stopOther?: boolean;
@@ -90,6 +91,7 @@ interface Run {
   startedAt: string;
   since?: string;
   error?: string;
+  detail?: string;
   busy?: BusyPort;
   commit?: string;
   stop: AbortController;
@@ -98,6 +100,9 @@ interface Run {
   /** Resolves once the app's program has exited. */
   exited: Promise<void>;
 }
+
+/** A start that went wrong before anything of the app ran; the exact error is for engineers. */
+const CANNOT_START = 'squad-kit could not start it.';
 
 export const APP_WAIT_MS = 3 * 60_000;
 const SETUP_MS = 20 * 60_000;
@@ -235,7 +240,7 @@ export async function portTaken(port: number): Promise<boolean> {
 }
 
 /** The first port after `from` that nothing listens on. */
-async function nextFreePort(from: number): Promise<number | undefined> {
+export async function nextFreePort(from: number): Promise<number | undefined> {
   for (let p = from + 1; p < from + 50 && p < 65536; p += 1) if (!(await portTaken(p))) return p;
   return undefined;
 }
@@ -273,6 +278,8 @@ function groupAlive(pid: number): boolean {
 }
 
 function signalPid(pid: number, signal: NodeJS.Signals): void {
+  // Windows has no groups: the whole tree under the shell goes at once.
+  if (process.platform === 'win32') return endTree(pid);
   try {
     process.kill(OWN_GROUP ? -pid : pid, signal);
   } catch {
@@ -302,17 +309,6 @@ export function addressIn(output: string): string | undefined {
 export function busyIn(output: string): number | undefined {
   const m = /(?:EADDRINUSE|address already in use)[^\n]*?:(\d{2,5})\b|port (\d{2,5}) is (?:already )?in use/i.exec(output);
   return m ? Number(m[1] ?? m[2]) : undefined;
-}
-
-/** The last line the app printed that says something, for a one-line reason. */
-export function lastWords(output: string): string {
-  const lines = output
-    .replace(/\x1b\[[0-9;]*m/g, '')
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean);
-  const said = [...lines].reverse().find((l) => /error|cannot|can't|not found|failed|denied|EADDRINUSE|in use|missing/i.test(l));
-  return (said ?? lines.at(-1) ?? 'it printed nothing').slice(0, 200);
 }
 
 /**
@@ -349,6 +345,13 @@ export class AppRunner {
     private bp: BoardPaths,
     private opts: RunnerOptions = {},
   ) {}
+
+  /** squad-kit's own guard for an app copy's commands on this computer, or null where there is none (Windows). */
+  private guardFor(cwd: string): GuardSpec | undefined {
+    if (!guardSupport().on) return undefined;
+    const allow = readMeta(this.bp).guard;
+    return projectGuardFor(this.bp, { cwd, ...(allow ? { allow } : {}) });
+  }
 
   private find(ref?: string): ProjectApp {
     try {
@@ -425,6 +428,7 @@ export class AppRunner {
         startedAt: run.startedAt,
         ...(run.since && run.state === 'running' ? { since: run.since } : {}),
         ...(run.error ? { error: run.error } : {}),
+        ...(run.detail ? { detail: run.detail } : {}),
         ...(run.busy ? { busy: run.busy } : {}),
         ...(run.commit ? { commit: run.commit } : {}),
         up: at ? await isUp(at) : false,
@@ -481,7 +485,7 @@ export class AppRunner {
     this.runs.set(app.repo, run);
     this.output.set(app.repo, '');
     void this.launch(app, run, opts, exit)
-      .catch((err) => this.fail(run, (err as Error).message))
+      .catch((err) => this.fail(run, CANNOT_START, { detail: (err as Error).message }))
       .finally(() => {
         if (!run.child) exit();
         settle();
@@ -501,11 +505,12 @@ export class AppRunner {
     await this.runs.get(this.find(ref).repo)?.exited;
   }
 
-  private fail(run: Run, error: string, busy?: BusyPort): void {
+  private fail(run: Run, error: string, more: { detail?: string; busy?: BusyPort } = {}): void {
     if (run.stop.signal.aborted) return;
     run.state = 'failed';
     run.error = error;
-    if (busy) run.busy = busy;
+    if (more.detail) run.detail = more.detail;
+    if (more.busy) run.busy = more.busy;
   }
 
   private async launch(app: ProjectApp, run: Run, opts: StartOptions, exited: () => void): Promise<void> {
@@ -519,7 +524,7 @@ export class AppRunner {
     try {
       copy = updateCopy(this.bp.root, repo, dir);
     } catch (err) {
-      return this.fail(run, `Could not get the newest ${repo.base} ready: ${(err as Error).message}`);
+      return this.fail(run, `squad-kit could not get the newest ${repo.base} ready.`, { detail: (err as Error).message });
     }
     run.commit = copy.commit;
     if (signal.aborted) return;
@@ -527,24 +532,26 @@ export class AppRunner {
       const env = copyEnvFiles(path.join(this.bp.root, repo.path), dir);
       if (env.length) this.keep(app.repo, `Copied from your project folder: ${env.join(', ')}\n`);
     } catch (err) {
-      return this.fail(run, `Could not copy your .env files into squad-kit's copy: ${(err as Error).message}`);
+      return this.fail(run, "squad-kit could not copy this project's settings into its own copy.", { detail: `Could not copy your .env files: ${(err as Error).message}` });
     }
 
-    // Something else on the app's port: say what, and the way out.
+    // Something else on the app's port: squad-kit goes around it when the app takes a port setting. Only when it cannot
+    // does the person read about it, in plain words. The program is left alone unless they press Stop it and start.
     let url = app.url;
     let command = app.start!;
+    let moved: Record<string, string> = {};
     const port = url && isLocal(url) ? portOf(url) : null;
     if (port && (await portTaken(port))) {
-      const movable = onPort(command, port, port + 1) !== null;
       const ours = opts.stopOther ? this.oursOn(port) : null;
       const freed = ours ? await this.freePort(app, port, ours) : false;
-      if (!freed && opts.nextPort && movable) {
-        const next = await nextFreePort(port);
-        if (!next) return this.fail(run, `Port ${port} is in use, and so are the next 50 ports.`);
-        command = onPort(command, port, next)!;
+      if (!freed) {
+        const own = portSettings(dir, port);
+        const next = onPort(command, port, port + 1) !== null || own.reads ? await nextFreePort(port) : undefined;
+        if (!next) return this.fail(run, ...(await this.busyPort(app, port)));
+        command = onPort(command, port, next) ?? command;
         url = withPort(url!, next);
-      } else if (!freed) {
-        return this.fail(run, ...(await this.busyPort(app, port, movable)));
+        moved = Object.fromEntries(own.vars.map((name) => [name, String(next)]));
+        this.keep(app.repo, `Port ${port} is used by another program, so ${app.name} runs on port ${next}${own.vars.length ? ` (set as PORT and ${own.vars.join(', ')})` : ''}\n`);
       }
     }
 
@@ -554,23 +561,24 @@ export class AppRunner {
     if (setup && (copy.fresh || this.records()[app.repo]?.setupFor !== deps)) {
       run.step = 'setup';
       this.keep(app.repo, `$ ${setup}\n`);
-      const r = await runCommand(dir, setup, SETUP_MS, { signal });
+      const r = await runCommand(dir, setup, SETUP_MS, { signal, ...(this.guardFor(dir) ? { guard: this.guardFor(dir)! } : {}) });
       this.keep(app.repo, `${r.output}\n`);
       if (signal.aborted) return;
-      if (!r.ok) return this.fail(run, `Setting it up failed (${setup}): ${lastWords(r.output)}`);
+      // One plain sentence; the command and what it printed are behind "See what failed", for engineers.
+      if (!r.ok) return this.fail(run, `squad-kit could not set up ${app.name}.`, { detail: `${setup}\n${tail(r.output, 30)}` });
       this.record(app.repo, (rec) => (rec.setupFor = deps));
     }
 
     run.step = 'start';
     this.keep(app.repo, `$ ${command}\n`);
     const env = {
-      ...childEnv(),
       CI: '1',
       FORCE_COLOR: '0',
       BROWSER: 'none',
       ...(url && (url !== app.url || /\$\{?PORT\b|%PORT%/.test(command)) ? { PORT: String(portOf(url)) } : {}),
+      ...moved,
     };
-    const child = track(spawn(command, { cwd: dir, shell: true, detached: OWN_GROUP, stdio: ['ignore', 'pipe', 'pipe'], env }));
+    const child = spawnProject(command, { cwd: dir, env, ...(this.guardFor(dir) ? { guard: this.guardFor(dir)! } : {}) });
     run.child = child;
     let printed = '';
     const heard = (chunk: Buffer) => {
@@ -588,7 +596,8 @@ export class AppRunner {
       this.record(app.repo, (rec) => delete rec.pid);
       if (run.state === 'running' && !signal.aborted) {
         run.state = 'failed';
-        run.error = `It stopped by itself: ${lastWords(printed)}`;
+        run.error = 'It stopped by itself.';
+        run.detail = `${command}\n${tail(printed, 30)}`;
       }
     };
     child.once('error', (err) => {
@@ -603,8 +612,8 @@ export class AppRunner {
     while (!signal.aborted) {
       if (ended) {
         const taken = busyIn(printed);
-        if (taken) return this.fail(run, ...(await this.busyPort(app, taken, onPort(command, taken, taken + 1) !== null)));
-        return this.fail(run, `It stopped while starting: ${lastWords(printed)}`);
+        if (taken) return this.fail(run, ...(await this.busyPort(app, taken)));
+        return this.fail(run, 'It stopped while starting.', { detail: `${command}\n${tail(printed, 30)}` });
       }
       url ??= addressIn(printed);
       if (url) run.address = url;
@@ -619,7 +628,10 @@ export class AppRunner {
         await Promise.race([run.exited, sleep(KILL_AFTER_MS + 1000)]);
         const mins = Math.round((this.opts.waitMs ?? APP_WAIT_MS) / 60_000);
         const wait = mins >= 1 ? `${mins} minute${mins === 1 ? '' : 's'}` : `${Math.round((this.opts.waitMs ?? APP_WAIT_MS) / 1000)} seconds`;
-        return this.fail(run, url ? `It did not answer at ${url.replace(/^https?:\/\//, '')} within ${wait}.` : `It did not say its address within ${wait}. Type the app's address, like http://localhost:3000`);
+        const printedLast = tail(printed, 30);
+        return url
+          ? this.fail(run, `It did not answer within ${wait}.`, { detail: `${command}\nIt did not answer at ${url}.\n${printedLast}` })
+          : this.fail(run, `squad-kit could not tell where it runs after ${wait}.`, { detail: `${command}\nIt printed no address. Set the app's address, like http://localhost:3000\n${printedLast}` });
       }
       await sleep(400);
     }
@@ -642,13 +654,16 @@ export class AppRunner {
     return !(await portTaken(port));
   }
 
-  /** "Port 3000 is in use by another program", with what the system can tell about that program. */
-  private async busyPort(app: ProjectApp, port: number, movable: boolean): Promise<[string, BusyPort]> {
+  /** One plain sentence about a program in the way. What the system can tell about it is for engineers. */
+  private async busyPort(app: ProjectApp, port: number): Promise<[string, { detail: string; busy: BusyPort }]> {
     const ours = this.oursOn(port);
     const holder = ours?.holder ?? whoListens(port);
-    const nextPort = movable ? await nextFreePort(port) : undefined;
-    const busy: BusyPort = { port, ours: Boolean(ours), ...(holder ? { pid: holder.pid, ...(holder.program ? { program: holder.program } : {}) } : {}), ...(nextPort ? { nextPort } : {}) };
-    return [ours ? `Port ${port} is in use by a program squad-kit started` : `Port ${port} is in use by another program`, busy];
+    const busy: BusyPort = { port, ours: Boolean(ours), ...(holder ? { pid: holder.pid, ...(holder.program ? { program: holder.program } : {}) } : {}) };
+    const who = holder ? `${holder.program || 'A program'} (process ${holder.pid})` : 'A program the system does not name';
+    return [
+      ours ? `Something squad-kit started earlier is using what ${app.name} needs.` : `Another program on this computer is using what ${app.name} needs.`,
+      { detail: `${who} listens on port ${port}, the port in ${app.name}'s address.`, busy },
+    ];
   }
 
   /** Stops the app and everything it started. */

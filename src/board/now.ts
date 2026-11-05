@@ -24,26 +24,38 @@ export interface SlowCard {
   limit?: string;
   /** The command it waits on can be ended. */
   canEnd: boolean;
-  /** The app's port is held by a program squad-kit started: "Free the port and try again" stops it, after a confirm. */
+  /** A program squad-kit started holds up the app: "Stop it and try again" stops it, after a confirm. */
   freePort?: { port: number; what: string };
+  /** The command, the port and the process, for engineers. */
+  detail?: string;
 }
 
-/** "node (process 4123)", or "your app shop". */
+/** "your app shop", or what squad-kit started. The program and its process are for engineers (portDetail). */
 function portHolder(p: QuietPort): string {
-  if (p.app) return `your app ${p.app}`;
-  return [p.program || 'a program', p.pid ? `(process ${p.pid})` : ''].filter(Boolean).join(' ');
+  return p.app ? `your app ${p.app}` : 'a program squad-kit started earlier';
 }
 
-/** The card's line about the app's port, in plain words; for a program of the person's own, what to do. */
+/** The card's line about what holds the app up, in plain words; for a program of the person's own, what to do. */
 export function portWords(p: QuietPort): string {
-  if (p.ours) return `Port ${p.port} is used by ${portHolder(p)}, which squad-kit ${p.app ? 'runs' : 'started'}, and the app does not answer there.`;
-  return `Port ${p.port} is used by another program${p.program || p.pid ? `, ${portHolder(p)}` : ''}, and the app does not answer there. Close that program, then press Stop and try again.`;
+  if (p.ours) return `${upperFirst(portHolder(p))} is in the way, so the app does not answer.`;
+  return 'Another program on this computer is in the way, so the app does not answer. squad-kit leaves it alone. Close that program, then press Stop and try again.';
+}
+
+/** The same, for engineers: the port, the program and its process. */
+export function portDetail(p: QuietPort): string {
+  return `${p.program || 'A program'}${p.pid ? ` (process ${p.pid})` : ''} listens on port ${p.port}, the port in the app's address${p.app ? `: your app ${p.app}, which squad-kit runs from Your apps` : p.ours ? ', and squad-kit started it' : ''}.`;
 }
 
 /** The port's line and action, for the card. */
 function portParts(q: NonNullable<Ticket['quiet']>): Pick<SlowCard, 'freePort'> & { fact?: SlowCard['facts'][number] } {
   if (!q.port) return {};
-  return { fact: { label: "The app's port", value: portWords(q.port) }, ...(q.port.ours ? { freePort: { port: q.port.port, what: portHolder(q.port) } } : {}) };
+  return { fact: { label: 'What is in the way', value: portWords(q.port) }, ...(q.port.ours ? { freePort: { port: q.port.port, what: portHolder(q.port) } } : {}) };
+}
+
+/** What a quiet step waits on, for engineers: the command and its process, and what holds the app's port. */
+function slowDetail(q: NonNullable<Ticket['quiet']>): string | undefined {
+  const lines = [q.command ? `Waiting on: ${q.command}${q.pid ? ` (process ${q.pid})` : ''}` : '', q.port ? portDetail(q.port) : ''].filter(Boolean);
+  return lines.length ? lines.join('\n') : undefined;
 }
 
 export interface LiveNow {
@@ -84,6 +96,9 @@ export interface LiveNow {
   /** The "Taking longer than usual" or "Looks stuck" card. */
   slow?: SlowCard;
 }
+
+/** Said on the card and the Now tab while a step carries on after a restart, until its first new action. */
+export const RESUMED = 'resumed after a restart';
 
 /** The queued card: "Next in line: starts when a slot is free (2 of 2 busy)". */
 export const QUEUED = 'Next in line';
@@ -156,7 +171,12 @@ function guessClock(t: Ticket): Omit<StepClock, 'since'> {
 const SENTENCE: Record<TimedStep, (t: Ticket) => string> = {
   questions: () => 'The Analyst is reading the ticket to see what it needs to ask you.',
   spec: (t) => (t.questions?.some((q) => q.answer) ? 'The Analyst is writing the spec from your answers.' : 'The Analyst is writing the spec: the story and the "done when" list.'),
-  design: (t) => (t.track === 'express' ? 'The Architect is writing the plan.' : 'The Architect is choosing how to build it and writing the design.'),
+  design: (t) =>
+    t.track === 'express'
+      ? 'The Architect is writing the plan.'
+      : t.track === 'auto'
+        ? 'The Architect is reading the part of the BRD and the code, and writing the design.'
+        : 'The Architect is choosing how to build it and writing the design.',
   build: () => 'The Builder is writing the code.',
   fix: () => 'The Builder is fixing what the checks or the Reviewer found.',
   checks: () => "squad-kit is running the project's own checks, so the squad never grades its own work.",
@@ -168,17 +188,20 @@ function screens(t: Ticket): boolean {
   return (t.work?.screens ?? 0) > 0;
 }
 
+/** Builds by itself: what it needs from the person at the end of the steps. Nothing: it merges by itself. */
+export const MERGES_BY_ITSELF = 'nothing: it is accepted and merged by itself';
+
 /** The steps still to come after this one before the ticket needs the person, and what it then needs them for. */
 function ahead(t: Ticket, step: TimedStep, part?: { n: number; of: number }): { steps: TimedStep[]; builds: number; what: string } {
   const after = ['review', ...(screens(t) ? ['proof' as const] : [])] as TimedStep[];
-  const proof = { what: 'check the proof' };
+  const proof = { what: t.track === 'auto' ? MERGES_BY_ITSELF : 'check the proof' };
   switch (step) {
     case 'questions':
       return { steps: [], builds: 0, what: 'answer its questions, or approve the spec' };
     case 'spec':
       return { steps: [], builds: 0, what: 'approve the spec' };
     case 'design':
-      if (t.track !== 'express') return { steps: [], builds: 0, what: 'approve the design' };
+      if (t.track !== 'express' && t.track !== 'auto') return { steps: [], builds: 0, what: 'approve the design' };
       return { steps: ['checks', ...after], builds: t.work?.steps ?? t.steps?.length ?? 0, ...proof };
     case 'build':
       return { steps: ['checks', ...after], builds: part ? part.of - part.n : 0, ...proof };
@@ -195,6 +218,7 @@ function ahead(t: Ticket, step: TimedStep, part?: { n: number; of: number }): { 
 
 function nextWords(t: Ticket, step: TimedStep, part?: { n: number; of: number }): string {
   const shots = screens(t) ? ', then the Tester takes a screenshot for each "done when"' : '';
+  const ready = t.track === 'auto' ? 'The squad accepts it by itself and merges it.' : 'The proof is ready for you to check.';
   switch (step) {
     case 'questions':
       return 'The Analyst asks you what it needs to know, or writes the spec straight away.';
@@ -203,7 +227,9 @@ function nextWords(t: Ticket, step: TimedStep, part?: { n: number; of: number })
     case 'design':
       return t.track === 'express'
         ? 'Express track: the plan is approved on its own, then the Builder starts and the checks and the Reviewer follow.'
-        : 'You read the design and approve it. Then the Builder starts.';
+        : t.track === 'auto'
+          ? 'Builds by itself: the plan is approved on its own, then the Builder starts and the checks and the Reviewer follow.'
+          : 'You read the design and approve it. Then the Builder starts.';
     case 'build':
       return part && part.n < part.of
         ? `The Builder goes on with step ${part.n + 1} of ${part.of}. Then the checks run on their own, a fresh Reviewer reads the work${shots}.`
@@ -213,9 +239,9 @@ function nextWords(t: Ticket, step: TimedStep, part?: { n: number; of: number })
     case 'checks':
       return `The Reviewer, a fresh agent, reads the changes${shots}.`;
     case 'review':
-      return screens(t) ? 'The Tester takes a screenshot for each "done when".' : 'The proof is ready for you to check.';
+      return screens(t) ? 'The Tester takes a screenshot for each "done when".' : ready;
     case 'proof':
-      return 'The proof is ready for you to check.';
+      return ready;
   }
 }
 
@@ -229,7 +255,7 @@ export function inAbout(seconds: number): string {
 function barOf(t: Ticket, step: TimedStep, part?: { n: number; of: number }): LiveNow['bar'] {
   if (part) return Array.from({ length: part.of }, (_, i) => (i + 1 < part.n ? 'done' : i + 1 === part.n ? 'now' : 'todo'));
   const group: TimedStep[] = ['questions', 'spec', 'design'].includes(step)
-    ? t.track === 'express'
+    ? t.track === 'express' || t.track === 'auto'
       ? ['design']
       : ['questions', 'spec', 'design']
     : ['checks', 'review', ...(screens(t) ? ['proof' as const] : [])];
@@ -247,16 +273,17 @@ function stageNotes(t: Ticket, state: NowState, book: UsualBook, at: number): Li
     let note = '';
     if (i < cur) {
       const spent = st?.spent[s];
-      note = spent !== undefined ? `${durationWords(spent)}${s === 'specs' && t.track !== 'express' && t.specApproved ? ', you approved' : ''}` : '';
+      const yours = t.track !== 'express' && t.track !== 'auto' && t.specApproved;
+      note = spent !== undefined ? `${durationWords(spent)}${s === 'specs' && yours ? ', you approved' : ''}` : '';
     } else if (i === cur) {
       const inStage = st?.stage === t.stage ? (at - Date.parse(st.since)) / 1000 : undefined;
       if (state === 'you') note = 'your turn';
       else if (state === 'ready') note = t.release ? `in ${t.release}` : 'accepted';
       else if (state === 'queued') note = 'next in line';
       else if (state === 'working' || state === 'stopping') note = inStage !== undefined ? `now · ${durationWords(inStage)}` : 'now';
-    } else if (s === 'review') note = 'you check proof';
-    else if (s === 'release') note = 'on Looks right';
-    else if (s === 'specs') note = about(t.track === 'express' ? usual('architect', 'design') : usual('analyst', 'spec') + usual('architect', 'design'));
+    } else if (s === 'review') note = t.track === 'auto' ? 'accepted by itself' : 'you check proof';
+    else if (s === 'release') note = t.track === 'auto' ? 'merges by itself' : 'on Looks right';
+    else if (s === 'specs') note = about(t.track === 'express' || t.track === 'auto' ? usual('architect', 'design') : usual('analyst', 'spec') + usual('architect', 'design'));
     else if (s === 'implement') note = about((t.work?.steps ?? t.steps?.length ?? 0) * usual('builder', 'build'));
     else if (s === 'test') note = about(usual('squad', 'checks'));
     return { stage: s, note };
@@ -292,6 +319,7 @@ function slowCard(t: Ticket, c: Omit<StepClock, 'since'> & { since?: string }, p
   const where = `${t.id} · ${part ? `step ${part.n} of ${part.of}` : who}`;
   const limit = c.limit ? `If you do nothing, squad-kit stops this step at ${c.limit} minutes. All work is kept.` : undefined;
   const port = portParts(q);
+  const detail = slowDetail(q);
   if (q.kind === 'stuck') {
     const quiet = Math.max(0, (at - Date.parse(q.since)) / 1000);
     return {
@@ -303,6 +331,7 @@ function slowCard(t: Ticket, c: Omit<StepClock, 'since'> & { since?: string }, p
       ...(limit ? { limit } : {}),
       canEnd: Boolean(q.pid),
       ...(port.freePort ? { freePort: port.freePort } : {}),
+      ...(detail ? { detail } : {}),
     };
   }
   const facts: SlowCard['facts'] = [];
@@ -314,7 +343,7 @@ function slowCard(t: Ticket, c: Omit<StepClock, 'since'> & { since?: string }, p
   if ((t.tries ?? 0) > 0) facts.push({ label: 'Why it may be slow', value: `The checks failed ${t.tries === 1 ? 'once' : `${t.tries} times`}, so the Builder is fixing them (try ${(t.tries ?? 0) + 1} of 3).` });
   else if ((t.reviewRound ?? 0) > 1) facts.push({ label: 'Why it may be slow', value: `The Reviewer asked for changes, so this is round ${t.reviewRound} of 2.` });
   if (port.fact) facts.push(port.fact);
-  return { kind: 'long', title: 'Taking longer than usual', where, text: q.detail, facts, ...(limit ? { limit } : {}), canEnd: Boolean(q.pid), ...(port.freePort ? { freePort: port.freePort } : {}) };
+  return { kind: 'long', title: 'Taking longer than usual', where, text: q.detail, facts, ...(limit ? { limit } : {}), canEnd: Boolean(q.pid), ...(port.freePort ? { freePort: port.freePort } : {}), ...(detail ? { detail } : {}) };
 }
 
 /** What is happening on the ticket now. `at` is the time to read it at, for tests. */
@@ -352,7 +381,9 @@ export function liveNow(t: Ticket, book: UsualBook, at = Date.now()): LiveNow {
   const said = t.clock?.doing ?? (part ? steps[part.n - 1]?.live : undefined) ?? fromStatus;
   // "Reviewer is checking the session handling" on the Reviewer's card reads "checking the session handling".
   const raw = said.startsWith(`${who} is `) ? said.slice(who.length + 4) : said;
-  const doing = raw ? shortDoing(raw) : undefined;
+  // Carried on after a restart: the card says so, instead of the last action from before it, until a new one.
+  const resumed = t.clock?.resumed && !(t.clock.doingAt && Date.parse(t.clock.doingAt) > Date.parse(t.clock.resumed));
+  const doing = resumed ? RESUMED : raw ? shortDoing(raw) : undefined;
   const lastAt = t.clock?.doingAt ?? since;
   if (state === 'stopping') return { ...base, who, role: c.who, step: c.step, line: 'Stopping…', sentence: `The ${who} is stopping. The work so far is kept.`, noteWhen: noteWhenWords(t, { state }) };
 
@@ -360,13 +391,13 @@ export function liveNow(t: Ticket, book: UsualBook, at = Date.now()): LiveNow {
   const time = seconds !== undefined ? `${durationWords(seconds)} · ${usualWords(usual)}` : usualWords(usual);
   const title = part ? steps[part.n - 1]?.title : undefined;
   const sentence = part && title ? `The ${who} is on step ${part.n} of ${part.of}: ${lowerFirst(title.replace(/\.$/, ''))}.` : t.status.startsWith(`${who} is `) && c.who !== 'squad' ? `The ${t.status.replace(/\.$/, '')}.` : SENTENCE[c.step](t);
-  const detail = [part ? `Step ${part.n} of ${part.of}` : '', seconds !== undefined ? `${durationWords(seconds)} so far` : '', `this step usually takes ${rangeWords(usual)}`].filter(Boolean).join(' · ');
+  const detail = [part ? `Step ${part.n} of ${part.of}` : '', seconds !== undefined ? `${durationWords(seconds)} so far` : '', resumed ? RESUMED : '', `this step usually takes ${rangeWords(usual)}`].filter(Boolean).join(' · ');
 
   // What is left before the ticket needs the person: the rest of this step, then each step after it, at their usual times.
   const go = ahead(t, c.step, part);
   const left = Math.max(0, middle(usual) - (seconds ?? 0)) + go.builds * middle(usualOf(book, 'builder', 'build', t.track)) + go.steps.reduce((n, s) => n + middle(usualOf(book, s === 'checks' ? 'squad' : s === 'review' ? 'reviewer' : 'tester', s, t.track)), 0);
   const then = nextWords(t, c.step, part);
-  const next = `${then} You will be asked to ${go.what} ${inAbout(left)}. Nothing is needed from you now.`;
+  const next = t.track === 'auto' ? `${then} It is accepted and merged by itself ${inAbout(left)}. Nothing is needed from you now.` : `${then} You will be asked to ${go.what} ${inAbout(left)}. Nothing is needed from you now.`;
   const now: LiveNow = {
     ...base,
     who,

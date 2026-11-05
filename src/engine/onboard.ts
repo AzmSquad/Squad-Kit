@@ -3,12 +3,15 @@ import path from 'node:path';
 import { listDecisions, nextDecisionId, now, readMeta, writeDecision, writeMeta, type BoardPaths } from '../board/store.js';
 import type { BoardMeta, ProjectCommands, RepoInfo } from '../board/types.js';
 import { cleanOverview, readOverview, writeOverview } from '../board/overview.js';
-import { begin, finish, learnSetupTime, nextProofStep, stepOf, type SetupState, type SetupStepId, type SetupTestRun } from '../board/setup-state.js';
+import { begin, finish, learnSetupTime, nextProofStep, readWords, stepOf, type SetupState, type SetupStepId, type SetupTestRun } from '../board/setup-state.js';
 import { runCommand, startApp, tail, testCount, CHECK_SILENT_MS, type RunningApp } from './checks.js';
 import { addSnapshot, dropSnapshot, git, worktreeRoot } from './git.js';
 import { reposOf } from './repos.js';
+import { guardSupport, projectGuardFor, type GuardSpec } from './project-guard.js';
 import { copyEnvFiles } from './run-app.js';
 import { countFiles, gitState } from './first-look.js';
+import { DOING } from './plain-doing.js';
+import { withBrowserTests } from './find-commands.js';
 
 /**
  * The first run on the live engine: the Architect reads the project, then squad-kit proves it can work here, on its
@@ -47,6 +50,25 @@ function clean(c: ProjectCommands): ProjectCommands {
   return Object.fromEntries(Object.entries(c ?? {}).filter(([, v]) => typeof v === 'string' && v.trim())) as ProjectCommands;
 }
 
+/** An idea for a first story that is about technology, not about what people will do. */
+const TECHNICAL_IDEA = /\b(tech(nology)?\s*stack|the\s+stack|technolog(y|ies)|framework|programming\s+language|database|repo(sitory)?|boilerplate|scaffold|set\s*up|install|tooling|hosting|deploy)\b/i;
+
+/**
+ * What a read of a project with no code may say: no rules, no map, no commands and no parts, as nothing was found. The
+ * Architect picks the technology when the first story is planned. First stories come only from what the person said
+ * they want to build, and never about technology.
+ */
+function noCodeAnswer(out: ScanAnswer, idea: string): ScanAnswer {
+  const ideas = idea ? (out.ideas ?? []).filter((i) => i?.title && !TECHNICAL_IDEA.test(`${i.title} ${i.why ?? ''}`)) : [];
+  return { empty: true, summary: out.summary, map: [], decisions: [], commands: {}, users: '', can: [], worth: [], ideas, parts: [], links: [] };
+}
+
+/** The Architect's test command, with the project's separate browser tests when it left them out. */
+function withAllTests(dir: string, c: ProjectCommands): ProjectCommands {
+  const test = withBrowserTests(dir, c.test);
+  return test ? { ...c, test } : c;
+}
+
 /* ── The read ──────────────────────────────────────────── */
 
 /** The read starts: the AI tool's step says whether it is ready, and the Architect starts reading. */
@@ -67,17 +89,18 @@ export function readStarted(bp: BoardPaths, tool: { label: string; ready: boolea
 }
 
 /** What the Architect reads right now, and how many files it opened so far. */
-export function readingNow(bp: BoardPaths, line: string, opened: number): void {
+export function readingNow(bp: BoardPaths, line: string, opened: number, read = line): void {
   withSetup(bp, (s) => {
     const st = stepOf(s, 'read');
     if (st.state !== 'now') return;
-    const total = s.proof?.files;
-    // It may open files git does not count (the project's own notes): then the count alone.
-    st.note = `${line}${opened ? ` · ${opened}${total && opened <= total ? ` of ${total}` : ''} files` : ''}`;
-    s.reads = [...(s.reads ?? []), line].slice(-8);
+    // Plain words, with how many it opened itself. It reads more through the shell, so never "1 of 98".
+    st.note = `${line}${opened ? ` · ${opened} ${opened === 1 ? 'file' : 'files'}` : ''}`;
+    // What it opened, for engineers: behind "See what the Architect is reading".
+    if (s.reads?.at(-1) !== read) s.reads = [...(s.reads ?? []), read].slice(-8);
     s.proof = { ...s.proof, read: opened };
   });
 }
+
 
 export function readFailed(bp: BoardPaths, error: string): void {
   withSetup(bp, (s) => {
@@ -91,26 +114,26 @@ export function readFailed(bp: BoardPaths, error: string): void {
  * The Architect handed in its read. The map, the commands and the repos are saved as before; the overview goes to
  * `knowledge/overview.md`; and the technical choices it found become proposed decisions (STACK.1, STACK.2): the person
  * approves them on the overview, and only then are they rules. A choice found before stays as it is; a proposal the
- * new read no longer finds goes.
+ * new read no longer finds goes. `idea` is what the person wants to build, on a project with no code.
  */
-export function saveScan(bp: BoardPaths, out: ScanAnswer, nested: RepoInfo[], at = now()): void {
+export function saveScan(bp: BoardPaths, answer: ScanAnswer, nested: RepoInfo[], at = now(), idea = ''): void {
   const fresh = readMeta(bp);
+  // A folder squad-kit made itself, with nothing in it but its README, has no code, whatever the answer says.
+  const none = answer.empty || (fresh.setup?.kind === 'empty' && countFiles(bp.root) <= 1);
+  const out = none ? noCodeAnswer(answer, idea) : answer;
   fresh.map = out.map ?? [];
-  fresh.commands = { ...clean(out.commands), ...clean(fresh.commands ?? {}) };
+  fresh.commands = { ...withAllTests(bp.root, clean(out.commands)), ...clean(fresh.commands ?? {}) };
   if (nested.length) {
     fresh.repos = nested.map((r) => {
       const found = out.repos?.find((x) => x.path.replace(/\/$/, '') === r.path);
       const kept = fresh.repos?.find((x) => x.path === r.path);
-      return { ...r, summary: found?.summary ?? kept?.summary, commands: { ...clean(found?.commands ?? {}), ...clean(kept?.commands ?? {}) } };
+      return { ...r, summary: found?.summary ?? kept?.summary, commands: { ...withAllTests(path.join(bp.root, r.path), clean(found?.commands ?? {})), ...clean(kept?.commands ?? {}) } };
     });
   }
   fresh.scan = { status: 'done', at, summary: out.summary, empty: out.empty };
   if (fresh.setup) {
     const s = fresh.setup;
-    const opened = s.proof?.read ?? 0;
-    const total = s.proof?.files ?? 0;
-    const note = !opened ? 'Read the project' : opened === total ? `Read all ${total} files` : opened < total ? `Read ${opened} of ${total} files` : `Read ${opened} files`;
-    finish(s, 'read', 'done', { note });
+    finish(s, 'read', 'done', { note: readWords(s.proof?.files) });
     learnSetupTime(bp, stepOf(s, 'read'));
     if (out.empty) {
       for (const id of ['commands', 'tests', 'app'] as const) finish(s, id, 'skipped', { note: 'Nothing to run yet: the project has no code' }, Date.parse(at));
@@ -150,8 +173,11 @@ export function saveScan(bp: BoardPaths, out: ScanAnswer, nested: RepoInfo[], at
 /* ── squad-kit's own proof, on its own copy ────────────── */
 
 export interface ProofDeps {
-  /** The Tester takes one screenshot of the app squad-kit opened. The file it saved, or why it could not. */
-  shoot(o: { cwd: string; url: string; file: string }): Promise<{ file?: string; why?: string }>;
+  /**
+   * squad-kit takes one screenshot of the app it opened, with its own browser. The file it saved, or why it could
+   * not, in plain words. `onLine` shows what it does meanwhile, like setting up its browser the first time.
+   */
+  shoot(o: { cwd: string; url: string; file: string; onLine?: (text: string) => void }): Promise<{ file?: string; why?: string }>;
   /** The person's Stop, or the board closing. */
   signal: AbortSignal;
 }
@@ -174,6 +200,13 @@ function ensureCopy(bp: BoardPaths, repo: RepoInfo): { dir: string; fresh: boole
 }
 
 /** The copies go once the person approved the overview, or a new setup starts. */
+/** squad-kit's own guard for a setup copy's commands on this computer, or null where there is none (Windows). */
+function guardFor(bp: BoardPaths, cwd: string): GuardSpec | undefined {
+  if (!guardSupport().on) return undefined;
+  const allow = readMeta(bp).guard;
+  return projectGuardFor(bp, { cwd, ...(allow ? { allow } : {}) });
+}
+
 export function dropSetupCopies(bp: BoardPaths): void {
   let meta: BoardMeta;
   try {
@@ -187,13 +220,15 @@ export function dropSetupCopies(bp: BoardPaths): void {
   }
 }
 
-/** "Tests: npm test · Starts with: npm run dev", per repo when there are several. */
+/** What the step found, in plain words. The commands themselves are in Settings, under How the squad checks and runs this project. */
 export function commandsLine(meta: BoardMeta): string {
   const repos = reposOf(meta);
-  const one = (c: ProjectCommands) => [c.test && `Tests: ${c.test}`, c.start && `Starts with: ${c.start}`].filter(Boolean).join(' · ');
-  const lines = repos.map((r) => ({ r, text: one(r.commands) })).filter((x) => x.text);
-  if (!lines.length) return 'No test or start command found. You can add them in Settings.';
-  return repos.length > 1 ? lines.map((x) => `${x.r.path}: ${x.text}`).join(' · ') : lines[0]!.text;
+  const tests = repos.some((r) => r.commands.test?.trim());
+  const start = repos.some((r) => r.commands.start?.trim());
+  if (tests && start) return 'Found how to run the tests and start the app';
+  if (tests) return 'Found how to run the tests';
+  if (start) return 'Found how to start the app';
+  return 'Found no tests and no app to start yet.';
 }
 
 type Step = (bp: BoardPaths, deps: ProofDeps, copies: Map<string, string>) => Promise<void>;
@@ -214,10 +249,10 @@ const commandsStep: Step = async (bp, deps, copies) => {
     copies.set(repo.path, copy.dir);
     const setup = repo.commands.setup?.trim();
     if (!setup) continue;
-    withSetup(bp, (s) => (stepOf(s, 'commands').note = `Installing what it needs: ${setup}`));
-    const r = await runCommand(copy.dir, setup, 20 * 60_000, { silentMs: CHECK_SILENT_MS, signal: deps.signal });
+    withSetup(bp, (s) => (stepOf(s, 'commands').note = 'Installing what it needs'));
+    const r = await runCommand(copy.dir, setup, 20 * 60_000, { silentMs: CHECK_SILENT_MS, signal: deps.signal, ...(guardFor(bp, copy.dir) ? { guard: guardFor(bp, copy.dir)! } : {}) });
     if (deps.signal.aborted) throw new Error(STOPPED);
-    if (!r.ok) failures.push({ error: `Installing what it needs did not work (${setup}).`, output: tail(r.output, 30) });
+    if (!r.ok) failures.push({ error: 'Installing what it needs did not work.', output: `${setup}:\n${tail(r.output, 30)}` });
   }
   const fresh = readMeta(bp);
   withSetup(bp, (s) => {
@@ -235,7 +270,7 @@ async function copyFor(bp: BoardPaths, repo: RepoInfo, copies: Map<string, strin
   const copy = ensureCopy(bp, repo);
   copies.set(repo.path, copy.dir);
   const setup = repo.commands.setup?.trim();
-  if (copy.fresh && setup) await runCommand(copy.dir, setup, 20 * 60_000, { silentMs: CHECK_SILENT_MS, signal });
+  if (copy.fresh && setup) await runCommand(copy.dir, setup, 20 * 60_000, { silentMs: CHECK_SILENT_MS, signal, ...(guardFor(bp, copy.dir) ? { guard: guardFor(bp, copy.dir)! } : {}) });
   return copy.dir;
 }
 
@@ -252,7 +287,7 @@ const testsStep: Step = async (bp, deps, copies) => {
   const runs: SetupTestRun[] = [];
   for (const repo of repos) {
     const command = repo.commands.test!.trim();
-    withSetup(bp, (s) => begin(s, 'tests', `Running ${command}${repos.length > 1 ? ` in ${repo.path}` : ''}`));
+    withSetup(bp, (s) => begin(s, 'tests', `${DOING.tests}${repos.length > 1 ? ` in ${repo.path}` : ''}`));
     let dir: string;
     try {
       dir = await copyFor(bp, repo, copies, deps.signal);
@@ -260,7 +295,7 @@ const testsStep: Step = async (bp, deps, copies) => {
       runs.push({ ok: false, command, repo: repo.path, output: (err as Error).message });
       continue;
     }
-    const r = await runCommand(dir, command, 15 * 60_000, { silentMs: CHECK_SILENT_MS, signal: deps.signal });
+    const r = await runCommand(dir, command, 15 * 60_000, { silentMs: CHECK_SILENT_MS, signal: deps.signal, ...(guardFor(bp, dir) ? { guard: guardFor(bp, dir)! } : {}) });
     if (deps.signal.aborted) throw new Error(STOPPED);
     const passed = testCount(r.output);
     runs.push({ ok: r.ok, command, repo: repo.path, seconds: Math.round(r.seconds), ...(passed !== null ? { passed } : {}), ...(r.ok ? {} : { output: tail(r.output, 30) }) });
@@ -273,8 +308,8 @@ const testsStep: Step = async (bp, deps, copies) => {
       const f = failed[0]!;
       finish(s, 'tests', 'failed', {
         note: runs.length > 1 ? `${failed.length} of ${runs.length} test runs did not pass` : 'Your tests did not pass here',
-        error: `The tests did not pass in squad-kit's copy (${f.command}). The setup goes on: this does not stop you.`,
-        output: f.output ?? '',
+        error: "The tests did not pass in squad-kit's copy. The setup goes on: this does not stop you.",
+        output: `${f.command}:\n${f.output ?? ''}`,
       });
     } else finish(s, 'tests', 'done', { note: passed ? `Ran your tests: ${passed} pass` : 'Ran your tests: they pass' });
     learnSetupTime(bp, stepOf(s, 'tests'));
@@ -287,34 +322,34 @@ const appStep: Step = async (bp, deps, copies) => {
   if (!repo) {
     withSetup(bp, (s) => {
       begin(s, 'app');
-      finish(s, 'app', 'skipped', { note: 'No app to open: squad-kit found no start command. You can set it in Settings.' });
+      finish(s, 'app', 'skipped', { note: 'No app to open yet.' });
     });
     return;
   }
   const start = repo.commands.start!.trim();
   const url = repo.commands.url!.trim();
-  withSetup(bp, (s) => begin(s, 'app', `Starting it: ${start}`));
+  withSetup(bp, (s) => begin(s, 'app', DOING.start));
   let app: RunningApp | null = null;
   try {
     const dir = await copyFor(bp, repo, copies, deps.signal);
-    app = await startApp(dir, start, url, 3 * 60_000, deps.signal);
+    app = await startApp(dir, start, url, 3 * 60_000, deps.signal, guardFor(bp, dir));
     const at = app.url;
-    withSetup(bp, (s) => (stepOf(s, 'app').note = `Taking a screenshot at ${at}`));
+    withSetup(bp, (s) => (stepOf(s, 'app').note = 'Taking a screenshot'));
     fs.mkdirSync(bp.proofDir, { recursive: true });
     const file = path.join(bp.proofDir, 'setup-app.png');
     fs.rmSync(file, { force: true });
     let shot: { file?: string; why?: string };
     try {
-      shot = await deps.shoot({ cwd: dir, url: at, file });
+      shot = await deps.shoot({ cwd: dir, url: at, file, onLine: (t) => withSetup(bp, (s) => (stepOf(s, 'app').note = t)) });
     } catch (err) {
       if (deps.signal.aborted) throw err;
       shot = { why: (err as Error).message };
     }
     const saved = fs.existsSync(file) ? path.basename(file) : undefined;
-    const host = at.replace(/^https?:\/\//, '').replace(/\/$/, '');
     withSetup(bp, (s) => {
       s.proof = { ...s.proof, app: { ok: true, url: at, command: start, repo: repo.path, ...(saved ? { shot: saved } : {}) } };
-      finish(s, 'app', 'done', { note: saved ? `Opened it at ${host}` : `Opened it at ${host}. No screenshot: ${(shot.why ?? 'the Tester saved none').slice(0, 200)}` });
+      // The exact address and why there is no picture stay in the proof, for engineers.
+      finish(s, 'app', 'done', { note: saved ? 'Opened the app' : 'Opened the app. No screenshot this time.', ...(saved ? {} : { output: `${at}: ${(shot.why ?? 'squad-kit saved none').slice(0, 400)}` }) });
       learnSetupTime(bp, stepOf(s, 'app'));
     });
   } catch (err) {
@@ -322,7 +357,8 @@ const appStep: Step = async (bp, deps, copies) => {
     const error = (err as Error).message;
     withSetup(bp, (s) => {
       s.proof = { ...s.proof, app: { ok: false, url, command: start, repo: repo.path, error } };
-      finish(s, 'app', 'failed', { note: 'The app did not open here', error: `${error.slice(0, 600)} The setup goes on: this does not stop you.` });
+      // One plain sentence; what the app printed is behind "See what failed", for engineers.
+      finish(s, 'app', 'failed', { note: 'The app did not open here', error: 'squad-kit could not start the app in its own copy. The setup goes on: this does not stop you.', output: error.slice(-4000) });
     });
   } finally {
     app?.stop();
@@ -330,9 +366,9 @@ const appStep: Step = async (bp, deps, copies) => {
 };
 
 const overviewStep: Step = async (bp) => {
-  withSetup(bp, (s) => {
+  withSetup(bp, (s, meta) => {
     begin(s, 'overview');
-    finish(s, 'overview', 'done', { note: 'What squad-kit understood, for you to check' });
+    finish(s, 'overview', 'done', { note: meta.scan?.empty ? 'One question for you: what do you want to build?' : 'What squad-kit understood, for you to check' });
     s.readyAt = now();
   });
 };

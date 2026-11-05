@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { appNews, findApp, projectApps, withAppCommands } from '../src/board/apps.js';
-import { addressIn, busyIn, lastWords, onPort } from '../src/engine/run-app.js';
+import { addressIn, busyIn, onPort } from '../src/engine/run-app.js';
 import type { BoardMeta, Ticket } from '../src/board/types.js';
 
 const meta = (extra: Partial<BoardMeta>) => ({ project: 'Mawid', engine: 'live', commands: {}, git: { base: 'main', remote: '' }, ...extra }) as BoardMeta;
@@ -81,12 +81,10 @@ describe('reading what an app says', () => {
     expect(onPort('python -m roomflow', 8000, 8001)).toBeNull();
   });
 
-  it('finds the address a dev server prints, a busy port, and the line that says what went wrong', () => {
+  it('finds the address a dev server prints and a busy port', () => {
     expect(addressIn('  VITE v5 ready\n  ➜  Local:   \x1b[36mhttp://localhost:5173/\x1b[39m\n')).toBe('http://localhost:5173');
     expect(addressIn('Listening on http://0.0.0.0:8000')).toBe('http://127.0.0.1:8000');
     expect(busyIn('Error: listen EADDRINUSE: address already in use :::3000')).toBe(3000);
     expect(busyIn('Error: That port is already in use.\nPort 8000 is in use')).toBe(8000);
-    expect(lastWords('Starting…\nError: Cannot find module "express"\n    at Module._resolve\n')).toBe('Error: Cannot find module "express"');
-    expect(lastWords('')).toBe('it printed nothing');
   });
 });

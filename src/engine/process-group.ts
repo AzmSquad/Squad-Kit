@@ -1,9 +1,10 @@
-import type { ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 
 /**
  * Every program squad-kit starts (a check command, the app for the Tester, an agent's adapter) leads its own process
  * group, so ending it ends everything it started: a test runner's workers, the server npm started, the tool an adapter
- * drives. Stopping asks first (TERM), then makes sure (KILL) a few seconds later.
+ * drives. Stopping asks first (TERM), then makes sure (KILL) a few seconds later. Windows has no process groups:
+ * there taskkill ends the program and every program under it (`/T`), at once (`/F`).
  */
 
 /** Spawn option: the child leads a process group of its own. Windows has no process groups. */
@@ -31,9 +32,19 @@ export function track<T extends ChildProcess>(child: T): T {
   return child;
 }
 
-/** Sends a signal to the child's whole group, or to the child alone where there are no groups. */
-export function signalGroup(child: ChildProcess, signal: NodeJS.Signals): void {
+/** How a group is ended on this computer: tests pass another platform and a fake spawn. */
+export interface GroupWay {
+  platform?: NodeJS.Platform;
+  spawn?: (command: string, args: string[], o: { stdio: 'ignore'; windowsHide: boolean }) => Pick<ChildProcess, 'on' | 'unref'>;
+}
+
+/**
+ * Sends a signal to the child's whole group. On Windows the child is `cmd.exe` running the command, and killing it
+ * alone would leave the app it started running: taskkill ends the whole tree instead, whatever the signal.
+ */
+export function signalGroup(child: ChildProcess, signal: NodeJS.Signals, way: GroupWay = {}): void {
   if (!child.pid) return;
+  if ((way.platform ?? process.platform) === 'win32') return endTree(child.pid, way);
   try {
     if (OWN_GROUP) process.kill(-child.pid, signal);
     else child.kill(signal);
@@ -42,10 +53,22 @@ export function signalGroup(child: ChildProcess, signal: NodeJS.Signals): void {
   }
 }
 
-/** Ends the child's group: TERM now, then KILL for anything still there after `killAfterMs`. */
-export function endGroup(child: ChildProcess, killAfterMs = KILL_AFTER_MS): void {
-  signalGroup(child, 'SIGTERM');
-  setTimeout(() => signalGroup(child, 'SIGKILL'), killAfterMs).unref();
+/** Windows: ends a program and every program under it, at once, with taskkill. */
+export function endTree(pid: number, way: GroupWay = {}): void {
+  try {
+    const tk = (way.spawn ?? spawn)('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+    tk.on('error', () => undefined);
+    tk.unref();
+  } catch {
+    // taskkill is part of Windows; without it there is nothing more to try.
+  }
+}
+
+/** Ends the child's group: TERM now, then KILL for anything still there after `killAfterMs`. On Windows, taskkill once. */
+export function endGroup(child: ChildProcess, killAfterMs = KILL_AFTER_MS, way: GroupWay = {}): void {
+  signalGroup(child, 'SIGTERM', way);
+  if ((way.platform ?? process.platform) === 'win32') return;
+  setTimeout(() => signalGroup(child, 'SIGKILL', way), killAfterMs).unref();
 }
 
 /**
@@ -72,11 +95,25 @@ export function whenExited(child: ChildProcess, graceMs = 1000, left?: () => voi
   });
 }
 
-/** Waits until every child squad-kit started has ended, for at most `ms`. True when none is left. */
+/** The process ids of the children squad-kit started that still run: each leads its own group. */
+export function runningPids(): number[] {
+  return [...running].map((c) => c.pid).filter((p): p is number => typeof p === 'number');
+}
+
+/** Clean-ups still going on as squad-kit closes (see engine/leftovers.ts): a restart waits for them too. */
+const tasks = new Set<Promise<unknown>>();
+
+export function trackTask<T>(task: Promise<T>): Promise<T> {
+  tasks.add(task);
+  void task.catch(() => undefined).finally(() => tasks.delete(task));
+  return task;
+}
+
+/** Waits until every child squad-kit started has ended, and every clean-up with it, for at most `ms`. True when none is left. */
 export async function allEnded(ms: number): Promise<boolean> {
   const end = Date.now() + ms;
-  while (running.size && Date.now() < end) await new Promise((r) => setTimeout(r, 100));
-  return running.size === 0;
+  while ((running.size || tasks.size) && Date.now() < end) await new Promise((r) => setTimeout(r, 100));
+  return running.size === 0 && tasks.size === 0;
 }
 
 /** Kills whatever squad-kit started that still runs, at once. */

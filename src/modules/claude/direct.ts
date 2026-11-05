@@ -17,7 +17,7 @@ import { claudeBlocked, type ClaudeSandbox } from './sandbox.js';
  */
 
 export type { ToolEvent } from '../ai-tool/types.js';
-import type { AgentUsage, BlockedAction, ToolEvent } from '../ai-tool/types.js';
+import type { AgentUsage, BlockedAction, RunWindow, ToolEvent } from '../ai-tool/types.js';
 
 export interface RunOptions {
   cwd: string;
@@ -43,6 +43,8 @@ export interface RunOptions {
   sandbox?: ClaudeSandbox;
   /** More environment for Claude Code and the commands it runs. */
   env?: Record<string, string>;
+  /** squad-kit's own tools for this run, over MCP (the window). */
+  window?: RunWindow;
   /** Claude Code's own caps: agent turns, and spend in US dollars. */
   maxTurns?: number;
   maxBudgetUsd?: number;
@@ -164,6 +166,11 @@ export function claudeUsage(result: Record<string, any>, before: number | undefi
   );
 }
 
+/** The window as Claude Code's MCP settings (--mcp-config): one HTTP server with the run's key. */
+export function windowConfig(w: RunWindow): { mcpServers: Record<string, unknown> } {
+  return { mcpServers: { [w.name]: { type: 'http', url: w.url, headers: { Authorization: `Bearer ${w.key}` } } } };
+}
+
 /** The environment Claude Code starts with: every agent's, and no background tasks. */
 export function claudeEnv(): NodeJS.ProcessEnv {
   // A step is one run: a command left running in the background would outlive it and the step would end too early.
@@ -218,9 +225,11 @@ export function runClaude(opts: RunOptions): Promise<RunResult> {
   if (opts.sandbox) args.push('--settings', JSON.stringify({ sandbox: opts.sandbox }));
   if (opts.maxTurns) args.push('--max-turns', String(opts.maxTurns));
   if (opts.maxBudgetUsd) args.push('--max-budget-usd', String(opts.maxBudgetUsd));
+  // squad-kit's own tools for the run: Claude Code reaches MCP over HTTP itself.
+  if (opts.window) args.push('--mcp-config', JSON.stringify(windowConfig(opts.window)));
 
   return new Promise((resolve) => {
-    const child = track(spawn(bin, args, { cwd: opts.cwd, env: { ...claudeEnv(), ...opts.env }, stdio: ['ignore', 'pipe', 'pipe'] }));
+    const child = track(spawn(bin, args, { cwd: opts.cwd, env: { ...claudeEnv(), ...opts.env, ...(opts.window ? { MCP_TOOL_TIMEOUT: '240000' } : {}) }, stdio: ['ignore', 'pipe', 'pipe'] }));
     if (child.pid) opts.onSpawn?.(child.pid);
     opts.signal?.addEventListener('abort', () => {
       result = { ok: false, sessionId, text: lastText, error: 'You stopped the squad.' };
@@ -305,6 +314,23 @@ export function runClaude(opts: RunOptions): Promise<RunResult> {
 }
 
 /** Turn Claude Code failures into a sentence a project manager can act on. */
+/** The module's own plain sentences for a run that did not get through: plainError's, and a missing Claude Code. */
+const OWN_WORDS = [
+  /^The squad was interrupted before it finished, for example because the board was closed\. Press Try again to carry on\.$/,
+  /^Claude's usage limit is reached\. (It resets .{1,80}; press Try again after that|Press Try again once the limit resets)\.$/,
+  /^Claude Code is not logged in\. Run `claude` in a terminal, log in, then press Try again\.$/,
+  /^The Claude account has no credit left\. Add credit or sign in with another account, then press Try again\.$/,
+  /^Claude is busy right now\. Wait a few minutes, then press Try again\.$/,
+  /^Claude Code could not reach the internet\. Check the connection, then press Try again\.$/,
+  /^Claude's service had a problem on its side\. Wait a few minutes, then press Try again\.$/,
+  /^Claude Code is not installed\. Install it and log in, then try again\.$/,
+];
+
+/** True when an error is one of the module's own plain sentences above, not Claude Code's raw words. */
+export function ownWords(said: string): boolean {
+  return OWN_WORDS.some((re) => re.test(said.trim()));
+}
+
 export function plainError(raw: string, now = Date.now()): string {
   const s = raw.toLowerCase();
   if (s.includes('exit 143') || s.includes('sigterm')) {

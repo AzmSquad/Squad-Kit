@@ -8,7 +8,7 @@ import { SQUAD_DIR, buildPaths, type SquadPaths } from '../core/paths.js';
 import { openBoard } from '../board/move.js';
 import type { BoardMeta } from '../board/types.js';
 import { AI_TOOLS } from '../modules/registry.js';
-import { currentBranch, ensureRepo, isRepo, remotes } from './git.js';
+import { currentBranch, ensureRepo, gitEnv, isRepo, remotes } from './git.js';
 import { findNestedRepos } from './repos.js';
 import { projectRoot } from './live.js';
 import { ensureAgents } from './agents.js';
@@ -26,7 +26,7 @@ export function keyFor(name: string): string {
 /** The person's first name from git, as the project's own repo sees it. */
 function gitUser(dir?: string): string {
   try {
-    return execSync('git config user.name', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], ...(dir && fs.existsSync(dir) ? { cwd: dir } : {}) }).trim().split(/\s+/)[0] || 'You';
+    return execSync('git config user.name', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: gitEnv(), ...(dir && fs.existsSync(dir) ? { cwd: dir } : {}) }).trim().split(/\s+/)[0] || 'You';
   } catch {
     return 'You';
   }
@@ -225,7 +225,7 @@ export function ensureLiveBoard(bp: BoardPaths, projectName: string): BoardSetup
 /** Every project squad-kit works on is a git repo; on a Mac, git comes with the developer tools. */
 export function requireGit(): void {
   try {
-    execSync('git --version', { stdio: 'ignore' });
+    execSync('git --version', { stdio: 'ignore', env: gitEnv() });
   } catch {
     throw new Error('squad-kit needs git. On a Mac, run this once, then run squad console again: xcode-select --install');
   }

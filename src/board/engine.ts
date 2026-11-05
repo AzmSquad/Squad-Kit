@@ -21,6 +21,13 @@ import { ticketDir } from './store.js';
 import { keepDemoClock, stopDemoStep, watchDemoSlow } from './demo-clock.js';
 import { wakeIfReady } from './depends.js';
 import { playDemoSetup } from './demo-setup.js';
+import { APPROVING, NO_QUESTIONS, acceptByItself, acceptNext, resumeAccept } from './auto.js';
+import { demoClash, demoDecided } from './demo-auto.js';
+import { repoFor } from '../engine/repos.js';
+import { proofPages, squadWorks, waitsAtReview, whereItStands } from './at-review.js';
+import { playDemoBreakdowns, playDemoQueue } from './demo-requirements.js';
+import { demoSendJobs, startSends } from './requirements-send.js';
+import { clearStaleStop } from './stale-stop.js';
 
 /**
  * The demo squad. It plays a recorded journey for each ticket on a timer and writes every
@@ -33,7 +40,7 @@ export function startDemoSquad(bp: BoardPaths, intervalMs = 500): () => void {
     if (busy) return;
     busy = true;
     try {
-      tick(bp);
+      tick(bp, { sends: true });
     } catch {
       // A half-written file or a ticket removed mid-step; the next tick tries again.
     } finally {
@@ -46,12 +53,17 @@ export function startDemoSquad(bp: BoardPaths, intervalMs = 500): () => void {
 /** When each sample board last looked for slow steps. */
 const lastSlowLook = new Map<string, number>();
 
-export function tick(bp: BoardPaths): void {
+/** `sends`: also run the sends to the sample tracker, in the board's own process only, so a terminal never waits on one. */
+export function tick(bp: BoardPaths, opts: { sends?: boolean } = {}): void {
   if (!boardExists(bp)) return;
   const meta = readMeta(bp);
   if (meta.engine !== 'demo') return;
   // The first run and the Overview's talk, played on the same timer.
   playDemoSetup(bp, meta);
+  // The Analyst's work on the breakdowns, scripted; their sends to the sample tracker, and Build continuously.
+  playDemoBreakdowns(bp, meta);
+  if (opts.sends) startSends(bp, meta, demoSendJobs(bp));
+  playDemoQueue(bp);
   const at = Date.now();
   const tickets = listTickets(bp);
   if (at - (lastSlowLook.get(bp.root) ?? 0) >= 5000) {
@@ -70,6 +82,8 @@ export function tick(bp: BoardPaths): void {
     }
     // "Wait" for a ticket it depends on: once that one is merged, the build starts (board/depends.ts).
     if (wakeIfReady(bp, t)) continue;
+    // Builds by itself: the change it waited for is settled, so it is accepted now (board/auto.ts).
+    if (resumeAccept(bp, t)) continue;
     const q = t.questions?.find((x) => x.thinking);
     if (q && at - lastMessageAt(q) >= 2200 / meta.speed) reply(bp, t.id, q.id);
     const c = t.chat;
@@ -125,9 +139,14 @@ function chatReply(bp: BoardPaths, id: string): void {
     const opening = last?.who !== 'you';
     const name = c.with[0]!.toUpperCase() + c.with.slice(1);
     const released = t.stage === 'release' || t.stage === 'done';
+    const pages = proofPages(t);
     const where = released
       ? `${t.id} is ${t.stage === 'done' ? 'released' : 'accepted'}, so I can only answer questions. To change it, add a new linked ticket or report a bug.`
-      : `${t.id} keeps going while we talk. Right now: ${t.status}.`;
+      : waitsAtReview(t)
+        ? `${whereItStands(t)}. Nothing changes while we talk.${pages.length ? ` Where to look: ${pages.map((p) => `\`${p}\``).join(', ')}.` : ''} ${t.waiting?.kind === 'proof' ? "To ask for a change, press **Something's wrong**." : 'To go on, pick a way out on its card.'}`
+        : squadWorks(t)
+          ? `${t.id} keeps going while we talk. Right now: ${t.status}.`
+          : `${whereItStands(t)}. Nothing changes while we talk.${pages.length ? ` Where to look: ${pages.map((p) => `\`${p}\``).join(', ')}.` : ''} To change something, use its own buttons.`;
     const text = c.beside
       ? opening
         ? `I am the ${name} on ${t.id}. ${where} What would you like to know?`
@@ -162,8 +181,21 @@ function writeChange(bp: BoardPaths, id: string): void {
 
 function advance(bp: BoardPaths, id: string, meta: BoardMeta): void {
   const speed = meta.speed;
-  if (readTicket(bp, id)?.squad?.phase === 'express-approve') {
+  const phase = readTicket(bp, id)?.squad?.phase;
+  if (phase === 'express-approve') {
     approveExpress(bp, id);
+    return;
+  }
+  // Builds by itself: the squad's own Looks right. The sample board has no git, so it shows the merge itself.
+  if (phase === 'accept') {
+    acceptByItself(bp, id);
+    updateTicket(bp, id, (x) => {
+      if (x.track !== 'auto' || x.stage !== 'release' || x.mergedAt) return;
+      const base = repoFor(meta, x).base;
+      x.mergedAt = now();
+      x.status = `Merged into ${base} · goes out in ${x.release ?? 'the next release'}`;
+      addActivity(x, 'release', `Merged into ${base}`);
+    });
     return;
   }
   updateTicket(bp, id, (t) => {
@@ -174,11 +206,11 @@ function advance(bp: BoardPaths, id: string, meta: BoardMeta): void {
     switch (state.phase) {
       case 'analyst-read': {
         const line = script.analystLines[i];
-        if (t.track === 'express') {
+        if (t.track === 'express' || t.track === 'auto') {
           t.questions = [];
           t.stage = 'specs';
-          t.status = 'Spec writer is writing the plan';
-          addActivity(t, 'squad', 'Express track: no questions, straight to the plan');
+          t.status = t.track === 'auto' ? 'Architect is choosing the design' : 'Spec writer is writing the plan';
+          addActivity(t, 'squad', t.track === 'auto' ? NO_QUESTIONS : 'Express track: no questions, straight to the plan');
           scheduleSquad(t, 'plan-write', 1.5, speed, 0);
           return;
         }
@@ -289,6 +321,8 @@ function advance(bp: BoardPaths, id: string, meta: BoardMeta): void {
           scheduleSquad(t, state.phase, 2, speed, i + 1);
           return;
         }
+        // Builds by itself: a story about refunds stops here with a clash, as on the canvas.
+        if (state.phase === 'plan-write' && demoClash(bp, t)) return;
         if (!design) {
           t.story = script.story(t);
           t.criteria = script.criteria(t);
@@ -310,6 +344,13 @@ function advance(bp: BoardPaths, id: string, meta: BoardMeta): void {
         if (t.track === 'express' && state.phase === 'plan-write') {
           addActivity(t, 'spec', 'Wrote the plan');
           t.status = 'Express track: approving the plan';
+          scheduleSquad(t, 'express-approve', 1, speed, 0);
+          return;
+        }
+        if (t.track === 'auto' && state.phase === 'plan-write') {
+          addActivity(t, 'architect', 'Wrote the design');
+          demoDecided(t, 'architect');
+          t.status = APPROVING;
           scheduleSquad(t, 'express-approve', 1, speed, 0);
           return;
         }
@@ -403,6 +444,7 @@ function buildStep(t: Ticket, i: number, speed: number): void {
   const step = steps[i];
   const plan = scriptFor(t).steps[i];
   if (!step) {
+    if (t.track === 'auto') demoDecided(t, 'builder');
     t.stage = 'test';
     t.status = `Running ${scriptFor(t).tests} checks`;
     t.progress = 0;
@@ -454,6 +496,7 @@ function testStep(bp: BoardPaths, t: Ticket, i: number, speed: number, total: nu
   }
   if (i === rounds) {
     gates.checks = 'pass';
+    clearStaleStop(t);
     gates.checksText = `${total} of ${total} checks pass`;
     addActivity(t, 'tester', `All ${total} checks pass`);
     markDecisionChecked(bp, t.id);
@@ -494,7 +537,10 @@ function reviewStep(t: Ticket, i: number, speed: number, fix?: { ask: string; fi
   }
   gates.review = 'pass';
   gates.reviewBy = t.reviewer ?? 'second AI';
+  clearStaleStop(t);
   addActivity(t, 'reviewer', 'Approved the changes');
+  // Builds by itself: no Looks right to wait for, the squad accepts it as its next step.
+  if (t.track === 'auto') return acceptNext(t, 1.5, speed);
   t.live = false;
   t.status = 'Proof ready to check';
   t.waiting = { kind: 'proof', summary: 'The proof is ready for you to check' };

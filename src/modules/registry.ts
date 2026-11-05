@@ -12,6 +12,8 @@ import { munsitSpeech } from './munsit/speech.js';
 import type { AiTool, ToolEvent } from './ai-tool/types.js';
 import { claudeTool } from './claude/index.js';
 import { codexTool } from './codex/index.js';
+import type { BrowserModule } from './browser/types.js';
+import { playwrightBrowser } from './playwright/index.js';
 
 /**
  * The one place that knows which products squad-kit has modules for (ADR-002). The engine asks here for "this
@@ -22,6 +24,7 @@ export const TRACKERS: TrackerModule[] = [azureTracker];
 export const CODE_HOSTS: CodeHostModule[] = [azureCodeHost];
 export const SPEECH: SpeechModule[] = [munsitSpeech];
 export const AI_TOOLS: AiTool[] = [claudeTool, codexTool];
+export const BROWSERS: BrowserModule[] = [playwrightBrowser];
 
 function rootOf(bp: BoardPaths): string {
   return bp.root;
@@ -73,6 +76,11 @@ export function speechFor(bp: BoardPaths, opts: { key?: string; fetch?: typeof f
 /** The speech service people set a key for in Settings. */
 export function speechModule(): SpeechModule {
   return SPEECH[0]!;
+}
+
+/** The browser squad-kit drives itself, for the screenshots and the pages agents ask to see. */
+export function shotBrowser(): BrowserModule {
+  return BROWSERS[0]!;
 }
 
 /** The AI tool an agent file names. */

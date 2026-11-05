@@ -64,7 +64,7 @@ describe("what Add project says it found", () => {
       kind: 'empty',
       title: 'An empty folder',
       found: 'Nothing here yet: a new project.',
-      next: 'Start from an idea. squad-kit makes a git repo here, and the Architect proposes the stack for you to approve.',
+      next: 'Start from an idea: squad-kit makes a git repo here, and asks what you want to build.',
       takes: 'Takes a few seconds.',
     });
   });
@@ -81,7 +81,7 @@ describe("what Add project says it found", () => {
     expect(look.next).toContain('how they fit together');
   });
 
-  it('an older squad-kit: its files move to the new layout, and nothing is lost', () => {
+  it('an older squad-kit: it says what really happens to its files', () => {
     const dir = path.join(tmp, 'legacy');
     fs.mkdirSync(path.join(dir, '.squad'), { recursive: true });
     saveConfig(path.join(dir, '.squad', 'config.yaml'), { ...DEFAULT_CONFIG, project: { ...DEFAULT_CONFIG.project, name: 'legacy' } });
@@ -91,12 +91,17 @@ describe("what Add project says it found", () => {
     const look = firstLook(dir);
     expect(look).toMatchObject({ kind: 'older', title: 'An older squad-kit project' });
     expect(look.found).toBe('squad-kit 0.x files are here, with 1 story, in a TypeScript project with 1 file, on git branch main.');
-    expect(look.next).toContain('Nothing is lost');
+    // Nothing moves and no copy is made: every old file stays, notes it would write over get a new name, sign-ins move out.
+    expect(look.next).toContain('Your specs, plans and decisions stay where they are.');
+    expect(look.next).toContain('moves sign-ins out of the project');
+    expect(look.next).not.toMatch(/new layout|full copy/);
+    expect(look.safe).toBe("Your code is not changed. squad-kit only works in the project's .squad folder.");
 
-    // A board from before the two homes of ADR-001 is an older squad-kit too.
+    // A board from before the two homes of ADR-001 is an older squad-kit too, and that one really is moved, with a copy.
     const one = path.join(tmp, 'one-board');
     put(path.join(one, '.squad', 'board', 'board.yaml'), 'project: one\n');
-    expect(firstLook(one).kind).toBe('older');
+    expect(firstLook(one)).toMatchObject({ kind: 'older' });
+    expect(firstLook(one).next).toContain('a full copy is kept first');
   });
 
   it('a squad-kit project: adding it only opens it', () => {

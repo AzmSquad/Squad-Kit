@@ -11,6 +11,7 @@ import { PROJECT, PROJECT_BASE } from './api/client';
 import { ConversationsPage } from './pages/Conversations';
 import { OverviewPage } from './pages/Overview';
 import { SetupPage } from './pages/Setup';
+import { BreakdownPage, RequirementsPage } from './pages/Requirements';
 
 // One app, many projects (ADR-001): a project's pages sit under /p/<project id>/ (the router's base), and the app's
 // Home, with every project and one Waiting for you list, at /.
@@ -32,6 +33,20 @@ const index = createRoute({
 // The first run, full page: squad-kit gets to know the project, step by step.
 const setup = createRoute({ getParentRoute: () => rootRoute, path: '/setup', component: SetupPage });
 const overview = createRoute({ getParentRoute: () => rootRoute, path: '/overview', component: OverviewPage });
+
+// Requirements: every BRD added, and one breakdown. `item` opens a part (a link can open S-14), `ticket` a story's ticket.
+const requirements = createRoute({ getParentRoute: () => rootRoute, path: '/requirements', component: RequirementsPage });
+const breakdown = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/requirements/$id',
+  validateSearch: (s: Record<string, unknown>): { item?: string; view?: 'map'; ticket?: string; decided?: boolean } => ({
+    item: typeof s.item === 'string' && s.item ? s.item : undefined,
+    view: s.view === 'map' ? 'map' : undefined,
+    ticket: typeof s.ticket === 'string' && s.ticket ? s.ticket : undefined,
+    decided: s.decided === true || s.decided === 'true' ? true : undefined,
+  }),
+  component: BreakdownPage,
+});
 
 const board = createRoute({
   getParentRoute: () => rootRoute,
@@ -76,7 +91,7 @@ const bugs = createRoute({ getParentRoute: () => rootRoute, path: '/bugs', compo
 const squad = createRoute({ getParentRoute: () => rootRoute, path: '/squad', component: SquadPage });
 const settings = createRoute({ getParentRoute: () => rootRoute, path: '/settings', component: SettingsPage });
 
-const routeTree = rootRoute.addChildren([index, setup, overview, board, backlog, proof, inbox, conversations, releases, decisions, architecture, bugs, squad, settings]);
+const routeTree = rootRoute.addChildren([index, setup, overview, requirements, breakdown, board, backlog, proof, inbox, conversations, releases, decisions, architecture, bugs, squad, settings]);
 
 export const router = createRouter({ routeTree, defaultPreload: false, basepath: PROJECT_BASE || '/' });
 

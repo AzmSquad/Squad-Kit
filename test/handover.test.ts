@@ -218,8 +218,9 @@ describe('hand over', () => {
   });
 });
 
-// Each one clones, hands over and runs squad steps with real git: on a busy machine that takes longer than the default 5 s.
-describe('a new computer', { timeout: 20_000 }, () => {
+// Each one clones, hands over, releases and runs squad steps with real git: two computers and a remote, a few hundred
+// git calls. About 10 s on a quiet Mac, so it gets the release tests' limit (release-tidy) for a busy one.
+describe('a new computer', { timeout: 60_000 }, () => {
   it('shows the same board from a clone, and the handed-over ticket carries on from its pushed branch', async () => {
     building();
     await actions.handOver(bp, id, { to: 'Sara' });

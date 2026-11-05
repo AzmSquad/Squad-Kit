@@ -8,7 +8,7 @@ import { isMine, ownerOf, sameName } from '../board/owner.js';
 import { scheduleSquad } from '../board/schedule.js';
 import type { Ticket, Waiting } from '../board/types.js';
 import { repoHostFor } from '../modules/registry.js';
-import { addWorktree, changedFiles, commitAll, commitArgsFor, git, isAncestor, isRepo, networkGitEnv, remotes, removeWorktree } from './git.js';
+import { addWorktree, changedFiles, commitAll, commitArgsFor, git, gitEnv as ownGitEnv, isAncestor, isRepo, networkGitEnv, remotes, removeWorktree } from './git.js';
 import { docsInGit, docsRepo, squadInRepo, stageProjectFiles, stageTicketDocs } from './project-git.js';
 import { repoTarget } from './sync.js';
 import { spotOwnerDeletes } from './teammate-delete.js';
@@ -31,7 +31,7 @@ function gitEnv(bp: BoardPaths, t: Ticket): Record<string, string> {
 /** git over the network, without holding up the board while it waits. */
 function gitLater(cwd: string, args: string[], env: Record<string, string>, timeoutMs = 120_000): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile('git', args, { cwd, encoding: 'utf8', timeout: timeoutMs, env: { ...process.env, ...networkGitEnv(cwd, env) } }, (err, stdout, stderr) => {
+    execFile('git', args, { cwd, encoding: 'utf8', timeout: timeoutMs, env: ownGitEnv(networkGitEnv(cwd, env)) }, (err, stdout, stderr) => {
       if (!err) return resolve(stdout.trim());
       const detail = (stderr || err.message).trim().split('\n').slice(-3).join(' ');
       reject(new Error(`git ${args[0]} failed: ${detail}`));
@@ -133,7 +133,7 @@ function filesOn(repo: string, ref: string, dir: string): string[] {
 }
 
 function blob(repo: string, ref: string, file: string): Buffer {
-  return execFileSync('git', ['cat-file', 'blob', `${ref}:${file}`], { cwd: repo, maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
+  return execFileSync('git', ['cat-file', 'blob', `${ref}:${file}`], { cwd: repo, maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'], env: ownGitEnv() });
 }
 
 /** The ticket on a ticket branch: the folder named like the branch (squad/ab-80 carries AB-80). */
@@ -276,7 +276,7 @@ function catchUp(repo: string, t: Ticket, ref: string): string | null {
 }
 
 /** What this computer knew of a ticket's running work: it belongs to the computer that did it. */
-const RUN_STATE = ['sessions', 'stuck', 'agentQuestion', 'chat', 'takenOver', 'retryPhase', 'reviewNotes', 'replanFor', 'quiet', 'quietSnoozedUntil', 'stopRequested', 'retryOnStop', 'clock', 'notesSeen', 'planReview', 'changeRequest', 'tries', 'fails', 'reviewRound'] as const;
+const RUN_STATE = ['sessions', 'stuck', 'agentQuestion', 'chat', 'takenOver', 'retryPhase', 'reviewNotes', 'replanFor', 'interrupted', 'quiet', 'quietSnoozedUntil', 'stopRequested', 'retryOnStop', 'clock', 'notesSeen', 'planReview', 'changeRequest', 'tries', 'fails', 'reviewRound'] as const;
 
 /** The ticket just came from a branch: yours carries on from its documents; someone else's waits for its owner. */
 function received(bp: BoardPaths, repo: string, id: string, ref: string, kind: PickedUp['kind']): Ticket {
@@ -358,6 +358,7 @@ export function carryOn(t: Ticket, copy: boolean): { phase?: string; waiting?: W
       if (spec) return { waiting: { kind: 'spec', summary: 'The spec is ready: is this what you want?' }, status: 'Spec ready for you' };
       if (!t.steps) return { phase: 'plan-write', status: 'Architect is choosing the design' };
       if (t.track === 'express') return { phase: 'express-approve', status: 'Express track: approving the plan' };
+      if (t.track === 'auto') return { phase: 'express-approve', status: 'Builds by itself: approving the plan' };
       return t.specApproved
         ? { waiting: { kind: 'plan', summary: 'The design is ready: is this how to build it?' }, status: 'Design ready for you' }
         : { waiting: { kind: 'plan', summary: 'The plan is ready for your approval' }, status: 'Plan ready for you' };

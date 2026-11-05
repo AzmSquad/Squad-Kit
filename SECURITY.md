@@ -7,8 +7,8 @@ or `squad upgrade`.
 
 | Version | Supported |
 | ------- | --------- |
-| 1.1.x   | ✅        |
-| < 1.1   | ❌        |
+| 1.2.x   | ✅        |
+| < 1.2   | ❌        |
 
 ## Reporting a vulnerability
 
@@ -44,6 +44,13 @@ Credit will be given in the release notes unless you prefer to remain anonymous.
   own copy of the code, the Tester cannot change code, and no agent may change the instruction files the next session
   would follow, squad-kit's own `.squad/` folder, or git history. squad-kit checks after each step and puts back what
   an agent changed outside its lane. Text from trackers and pasted messages reaches agents as data, never as orders.
+- **Agents get fixed tools, no free commands.** For screenshots, the app and the checks, an agent presses one of
+  squad-kit's tools. squad-kit checks every field, does the job itself, and refuses and logs what breaks a check.
+- **The project's own commands run in a guard** on Mac and Linux: the tests, setup, the app and the release pipeline
+  can't read your keys, sign-ins, browser profiles, squad-kit's own folder or the `.env` files in your project folder.
+- **Windows is less protected and not fully tested yet.** There, the agents' own commands and the project's own
+  commands have no guard, so they can reach other files on the computer, squad-kit's own too. Use it on projects you
+  trust. Settings says so.
 - **The engine owns git and the release.** Agents never merge, push or grade their own work.
 - **The npm package is built and published by GitHub Actions** from a release tag, with npm trusted publishing (no
   npm token exists) and a signed provenance statement you can check on npmjs.com.

@@ -80,8 +80,11 @@ export function setBudget(bp: BoardPaths, change: { ticketUsd?: number | null; m
   return next;
 }
 
-/** The phases that run no AI, so they never wait on a budget: the checks, an Express approval, the pull request. */
-const NO_AI = new Set(['test', 'express-approve', 'publish']);
+/**
+ * The phases that run no AI, so they never wait on a budget: the checks, a plan that approves itself (Express, Builds
+ * by itself), the squad's own accept (Builds by itself) and the pull request.
+ */
+const NO_AI = new Set(['test', 'express-approve', 'accept', 'publish']);
 
 const usd = (n: number) => `$${n.toFixed(2)}`;
 

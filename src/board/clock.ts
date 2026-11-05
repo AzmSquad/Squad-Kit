@@ -5,7 +5,8 @@ import { minutesWords, recordUsual, usualKey, usualOf, type Usual, type UsualBoo
 /**
  * The clock of the step running on a ticket. The engines start it when a step starts, move it on with the Builder's
  * plan steps, write the latest action into it, and end it when the step ends well, which adds the step's time to the
- * project's usual times. The board, the terminal and the Ask box all read it from the ticket.
+ * project's usual times. It counts only the time the step really runs: it stops while the ticket waits for the person,
+ * for another story or for a free place. The board, the terminal and the Ask box all read it from the ticket.
  */
 
 export const WHO: Record<AgentName | 'squad', string> = {
@@ -38,38 +39,62 @@ export function timedStep(step: string | undefined): TimedStep | null {
 
 /**
  * A step starts. One already on the clock goes on with its time (the Tester's clock starts with the app, before the
- * Tester itself). A run while the ticket waits for you (an answer about one of its questions) is not a step.
+ * Tester itself), without the time it waited. A run while the ticket waits for you (an answer about one of its
+ * questions) is not a step.
  */
 export function startStep(t: Ticket, c: Omit<StepClock, 'since'>, at = Date.now()): void {
   if (t.waiting) return;
   const same = t.clock?.who === c.who && t.clock.step === c.step ? t.clock : undefined;
   const part = c.part ?? same?.part ?? (c.who === 'builder' && c.step === 'build' ? firstOpenStep(t) : undefined);
   const limit = c.limit ?? same?.limit;
+  // What it waited moves its start on, so the time so far is the time it ran.
+  const waited = same?.paused ? Math.max(0, at - Date.parse(same.paused)) : 0;
+  const since = same ? iso(Date.parse(same.since) + waited) : iso(at);
+  const { paused: _paused, ...goesOn } = same ?? ({} as Partial<StepClock>);
   t.clock = {
-    ...same,
+    ...goesOn,
     who: c.who,
     step: c.step,
-    since: same?.since ?? iso(at),
-    began: same?.began ?? same?.since ?? iso(at),
+    since,
+    began: same?.began ? iso(Date.parse(same.began) + waited) : since,
     ...(part ? { part } : {}),
     ...(limit ? { limit } : {}),
   };
 }
 
-/** Seconds the step on the clock has run. */
+/** The ticket's step does not run now: it waits for the person or for another story. */
+export function waitsNow(t: Pick<Ticket, 'waiting' | 'live' | 'squad'>): boolean {
+  return Boolean(t.waiting) || (!t.live && !t.squad);
+}
+
+/** The step does not run for now (a wait, a place in the queue): its clock stands still until the step starts again. */
+export function pauseClock(t: Ticket, at = Date.now()): void {
+  if (t.clock && !t.clock.paused) t.clock.paused = iso(at);
+}
+
+/** Seconds the step on the clock has run; a clock that stands still counts up to when it stopped. */
 export function stepSeconds(c: StepClock, at = Date.now()): number {
-  return Math.max(0, (at - Date.parse(c.since)) / 1000);
+  const end = c.paused ? Math.min(at, Date.parse(c.paused)) : at;
+  return Math.max(0, (end - Date.parse(c.since)) / 1000);
 }
 
 /** The steps a ticket keeps in its history, newest last. */
 const HISTORY = 80;
 
+/**
+ * The board restarted while the step ran: it carries on with its time so far, and says once that it resumed. The time
+ * of a part cut off like this says little about the step, so it does not teach the usual times.
+ */
+export function resumeClock(t: Ticket, at = Date.now()): void {
+  if (t.clock) t.clock.resumed = iso(at);
+}
+
 /** The step ended well: its time joins the usual times and the ticket's history, and the clock stops. */
 export function endStep(bp: BoardPaths, t: Ticket, at = Date.now()): void {
   const c = t.clock;
   if (!c) return;
-  recordUsual(bp, usualKey(c.who, c.step, t.track), stepSeconds(c, at));
-  t.history = [...(t.history ?? []), { who: c.who, step: c.step, from: c.began ?? c.since, to: iso(at) }].slice(-HISTORY);
+  if (!c.resumed) recordUsual(bp, usualKey(c.who, c.step, t.track), stepSeconds(c, at));
+  t.history = [...(t.history ?? []), { who: c.who, step: c.step, from: c.began ?? c.since, to: iso(c.paused ? Math.min(at, Date.parse(c.paused)) : at) }].slice(-HISTORY);
   delete t.clock;
 }
 
@@ -77,9 +102,11 @@ export function endStep(bp: BoardPaths, t: Ticket, at = Date.now()): void {
 export function nextPart(bp: BoardPaths, t: Ticket, part: number, at = Date.now()): void {
   const c = t.clock;
   if (!c || c.step !== 'build' || c.part === part) return;
-  if (c.part !== undefined && part > c.part) recordUsual(bp, usualKey(c.who, c.step, t.track), stepSeconds(c, at));
+  if (c.part !== undefined && part > c.part && !c.resumed) recordUsual(bp, usualKey(c.who, c.step, t.track), stepSeconds(c, at));
   c.part = part;
   c.since = iso(at);
+  delete c.resumed;
+  delete c.paused;
 }
 
 /** The step's latest action, in plain words: its last progress. */
@@ -126,7 +153,7 @@ export function slowAfter(u: Pick<Usual, 'high'>): number {
  */
 export function slowStep(t: Ticket, book: UsualBook, at = Date.now()): NonNullable<Ticket['quiet']> | null {
   const c = t.clock;
-  if (!c || t.waiting) return null;
+  if (!c || t.waiting || c.paused) return null;
   const u = usualOf(book, c.who, c.step, t.track);
   const secs = stepSeconds(c, at);
   if (secs < slowAfter(u)) return null;

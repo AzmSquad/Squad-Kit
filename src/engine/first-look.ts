@@ -197,8 +197,10 @@ export function firstLook(dir: string): FirstLook {
       found: legacy
         ? `A board from an older squad-kit is here, in ${describeCode(files.length, code.language, code.web, tests).replace(/^An? /, 'a ')}${onBranch}.`
         : `squad-kit 0.x files are here${stories ? `, with ${plural(stories, 'story', 'stories')}` : ''}, in ${describeCode(files.length, code.language, code.web, tests).replace(/^An? /, 'a ')}${onBranch}.`,
-      next: 'Your specs, plans and decisions are moved to the new layout. Nothing is lost: a full copy is kept first. Then squad-kit reads the code and shows you what it understood.',
-      safe: SAFE,
+      next: legacy
+        ? 'Your specs, plans and decisions are moved to the new layout. Nothing is lost: a full copy is kept first. Then squad-kit reads the code and shows you what it understood.'
+        : 'Your specs, plans and decisions stay where they are. squad-kit adds its own files beside them, keeps any notes of yours it would write over under a new name, and moves sign-ins out of the project to this computer. Then it reads the code and shows you what it understood.',
+      safe: "Your code is not changed. squad-kit only works in the project's .squad folder.",
       takes: TAKES,
     };
   }
@@ -220,8 +222,8 @@ export function firstLook(dir: string): FirstLook {
       title: 'An empty folder',
       found: 'Nothing here yet: a new project.',
       next: repo
-        ? 'Start from an idea. The Architect proposes the stack for you to approve.'
-        : 'Start from an idea. squad-kit makes a git repo here, and the Architect proposes the stack for you to approve.',
+        ? 'Start from an idea: squad-kit asks what you want to build.'
+        : 'Start from an idea: squad-kit makes a git repo here, and asks what you want to build.',
       safe: "squad-kit adds a .squad folder for the project's memory.",
       takes: 'Takes a few seconds.',
     };

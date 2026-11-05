@@ -39,18 +39,22 @@ export function OverviewPage() {
   const act = useAct();
   const navigate = useNavigate();
   const [writing, setWriting] = useState(false);
+  // "Change what I said", on a project with no code.
+  const [changing, setChanging] = useState(false);
   const v = q.data;
   if (q.isLoading) return <div className="center">Loading the overview…</div>;
   if (!v) return <div className="center">No overview yet.</div>;
   const opened = (t: Ticket) => void navigate({ to: '/board', search: { ticket: t.id } });
+  // A project with no code: one plain question first. There is nothing to check or read yet.
+  const asking = v.empty && v.handover === 'ready' && (!v.idea || changing);
 
   return (
     <>
       <div className="top">
         <h1>{v.project}</h1>
-        {v.readAt && <span className="note ob-read">{readWhen(v.readAt)}</span>}
+        {v.readAt && !v.empty && <span className="note ob-read">{readWhen(v.readAt)}</span>}
         <span className="grow" />
-        {v.handover !== 'reading' && (
+        {v.handover !== 'reading' && !v.empty && (
           <button className="btn" disabled={act.isPending} onClick={() => act.mutate({ path: '/api/v1/overview/read-again', done: 'The Architect reads the project again' })}>
             <RefreshCw size={14} /> Read it again
           </button>
@@ -60,7 +64,8 @@ export function OverviewPage() {
       <div className="scroll">
         <div className="page ob-page">
           {v.handover === 'reading' && <SetupCard />}
-          {v.handover === 'ready' && !v.talk?.open && <Handover v={v} />}
+          {asking && <AskIdea v={v} onSent={() => setChanging(false)} onWrite={() => setWriting(true)} />}
+          {v.handover === 'ready' && !asking && !v.talk?.open && <Handover v={v} {...(v.empty ? { onChange: () => setChanging(true) } : {})} />}
           {v.talk?.open && <Talk t={v.talk} />}
           {v.handover === 'approved' && v.approved && (
             <div className="calmlane ob-approved">
@@ -68,7 +73,7 @@ export function OverviewPage() {
                 <Check size={14} strokeWidth={2.5} />
               </span>
               <span>
-                <b>{v.approved.by} approved this on {dateShort(v.approved.at)}.</b> The squad follows these rules. This page stays up to date after every merged ticket.
+                <b>{v.approved.by} approved this on {dateShort(v.approved.at)}.</b> {v.rules.length ? 'The squad follows these rules. ' : ''}This page stays up to date after every merged ticket.
               </span>
             </div>
           )}
@@ -84,19 +89,31 @@ export function OverviewPage() {
             </div>
           )}
 
-          <div className="ob-row2">
-            <WhatItIs v={v} />
-            <Proof v={v} />
-          </div>
-          {v.parts.length > 0 ? <Parts v={v} /> : v.map.length > 0 ? <MapCard v={v} /> : null}
-          <div className="ob-row3">
-            <Rules v={v} />
-            <Worth v={v} />
-            <Ideas v={v} onCreated={opened} onWrite={() => setWriting(true)} />
-          </div>
-          <p className="note ob-foot">
-            Kept in .squad/knowledge, updated after every merged ticket. Decisions and their history are on the <Link to="/architecture">Architecture page</Link>.
-          </p>
+          {v.empty ? (
+            !asking &&
+            v.handover !== 'reading' && (
+              <div className="ob-row2">
+                <WhatItIs v={v} />
+                <Ideas v={v} onCreated={opened} onWrite={() => setWriting(true)} />
+              </div>
+            )
+          ) : (
+            <>
+              <div className="ob-row2">
+                <WhatItIs v={v} />
+                <Proof v={v} />
+              </div>
+              {v.parts.length > 0 ? <Parts v={v} /> : v.map.length > 0 ? <MapCard v={v} /> : null}
+              <div className="ob-row3">
+                <Rules v={v} />
+                <Worth v={v} />
+                <Ideas v={v} onCreated={opened} onWrite={() => setWriting(true)} />
+              </div>
+              <p className="note ob-foot">
+                Kept in .squad/knowledge, updated after every merged ticket. Decisions and their history are on the <Link to="/architecture">Architecture page</Link>.
+              </p>
+            </>
+          )}
         </div>
       </div>
       {writing && <NewTicketDialog onClose={() => setWriting(false)} onCreated={opened} />}
@@ -104,21 +121,79 @@ export function OverviewPage() {
   );
 }
 
-/** The handover: check what squad-kit understood, then start. */
-function Handover({ v }: { v: OverviewView }) {
+/**
+ * A project with no code: "What do you want to build?". The answer goes to the Architect's read, in Arabic or English,
+ * and the overview comes back with first stories for it. The technology is the Architect's choice, with the first story.
+ */
+function AskIdea({ v, onSent, onWrite }: { v: OverviewView; onSent(): void; onWrite(): void }) {
+  const act = useAct();
+  const [text, setText] = useState(v.idea ?? '');
+  const send = () => {
+    if (!text.trim() || act.isPending) return;
+    act.mutate({ path: '/api/v1/overview/idea', body: { text }, done: 'The Architect is reading what you want to build' }, { onSuccess: onSent });
+  };
+  return (
+    <section className="ob-talk ob-ask" aria-label="What do you want to build?">
+      <div className="ob-talk-h">
+        <Avatar role="architect" small />
+        <h2>What do you want to build?</h2>
+      </div>
+      <p className="note">Say it in your own words, in Arabic or English. The Architect picks the technology itself when your first story is planned.</p>
+      <div className="cbox ob-talk-box">
+        <textarea
+          className="cta t-mx"
+          rows={3}
+          dir="auto"
+          value={text}
+          placeholder="For example: a page where staff write down visitors' names and see today's list"
+          aria-label="What you want to build"
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              send();
+            }
+          }}
+        />
+        <div className="crow">
+          <span className="grow" />
+          <button className="csend" aria-label="Send" disabled={!text.trim() || act.isPending} onClick={send}>
+            <ArrowUp size={17} />
+          </button>
+        </div>
+      </div>
+      <div className="ob-talk-f">
+        <button className="ob-link" onClick={onWrite}>
+          Or write your first ticket yourself.
+        </button>
+        <span className="grow" />
+        <Cmd text={'squad overview --build "…"'} />
+      </div>
+    </section>
+  );
+}
+
+/** The handover: check what squad-kit understood, then start. A project with no code changes what it said instead. */
+function Handover({ v, onChange }: { v: OverviewView; onChange?(): void }) {
   const act = useAct();
   const n = v.proposed;
   return (
     <section className="ob-hand" aria-label="Check the overview">
       <div className="grow">
-        <b>{v.approved && n ? `squad-kit found ${n} new ${n === 1 ? 'rule' : 'rules'} in your code. Check them, then carry on.` : 'squad-kit has read your project. Check what it understood, then start.'}</b>
+        <b>{v.empty ? 'The Architect wrote down what you want to build. Check it, then start.' : v.approved && n ? `squad-kit found ${n} new ${n === 1 ? 'rule' : 'rules'} in your code. Check them, then carry on.` : 'squad-kit has read your project. Check what it understood, then start.'}</b>
         <span>{n ? `When you approve, the ${n} ${n === 1 ? 'rule' : 'rules'} below become the rules every agent follows.` : 'When you approve, this page becomes the project’s home.'}</span>
       </div>
       <span className="ob-hand-acts">
-        <button className="btn" disabled={act.isPending} onClick={() => act.mutate({ path: '/api/v1/overview/talk', body: {} })}>
-          <MessageCircle size={14} /> Something is wrong
-        </button>
-        <button className="btn pri" disabled={act.isPending} onClick={() => act.mutate({ path: '/api/v1/overview/approve', done: 'Approved. The squad follows these rules now. Start with a ticket.' })}>
+        {onChange ? (
+          <button className="btn" disabled={act.isPending} onClick={onChange}>
+            <MessageCircle size={14} /> Change what I said
+          </button>
+        ) : (
+          <button className="btn" disabled={act.isPending} onClick={() => act.mutate({ path: '/api/v1/overview/talk', body: {} })}>
+            <MessageCircle size={14} /> Something is wrong
+          </button>
+        )}
+        <button className="btn pri" disabled={act.isPending} onClick={() => act.mutate({ path: '/api/v1/overview/approve', done: v.empty ? 'Approved. Start with your first story.' : 'Approved. The squad follows these rules now. Start with a ticket.' })}>
           <Check size={15} /> Looks right, start working
         </button>
         <Cmd text="squad overview --approve" />
@@ -248,8 +323,14 @@ function WhatItIs({ v }: { v: OverviewView }) {
   return (
     <section className="ob-c">
       <h3>What it is</h3>
-      {v.summary ? <p className="ob-lead">{v.summary}</p> : <p className="note">squad-kit has not read the project yet.</p>}
-      {v.empty && <p>A new project with no code yet. Start from an idea: write what you want, and the Architect proposes the stack for you to approve.</p>}
+      {v.summary ? (
+        <p className="ob-lead" dir="auto">
+          {v.summary}
+        </p>
+      ) : (
+        <p className="note">squad-kit has not read the project yet.</p>
+      )}
+      {v.empty && <p>No code yet. The Architect picks the technology when your first story is planned, and saves it as a decision engineers can see.</p>}
       {(v.users || can.length > 0) && (
         <div className="ob-two">
           {v.users && (
@@ -293,21 +374,21 @@ function Proof({ v }: { v: OverviewView }) {
         <ul className="ob-proof">
           {p.files !== undefined && (
             <li className="ok">
-              <Check size={14} /> {p.read && p.read < p.files ? `Read ${p.read} of ${p.files} files` : p.read && p.read > p.files ? `Read ${p.read} files` : `Read all ${p.files} files`}
+              <Check size={14} /> {p.files ? `Read the project: ${p.files} ${p.files === 1 ? 'file' : 'files'}` : 'Read the project'}
             </li>
           )}
           {(p.tests ?? []).map((t, i) => (
             <li key={i} className={t.ok ? 'ok' : 'bad'}>
               {t.ok ? <Check size={14} /> : <CircleAlert size={14} />}
               <span>
-                {t.ok ? `Ran your tests${t.repo && t.repo !== '.' ? ` in ${t.repo}` : ''}: ${t.passed !== undefined ? `${t.passed} pass` : 'they pass'}` : `Your tests did not pass here (${t.command})`}
+                {t.ok ? `Ran your tests${t.repo && t.repo !== '.' ? ` in ${t.repo}` : ''}: ${t.passed !== undefined ? `${t.passed} pass` : 'they pass'}` : 'Your tests did not pass here'}
                 {!t.ok && t.output && (
                   <button className="btn sm quiet" onClick={() => setOpen(open === i ? null : i)}>
                     {open === i ? 'Hide' : 'See what failed'}
                   </button>
                 )}
               </span>
-              {open === i && t.output && <pre className="ob-out">{t.output}</pre>}
+              {open === i && t.output && <pre className="ob-out">{`${t.command}:\n${t.output}`}</pre>}
             </li>
           ))}
           {p.tests?.length === 0 && (
@@ -318,7 +399,7 @@ function Proof({ v }: { v: OverviewView }) {
           {p.app && (
             <li className={p.app.ok ? 'ok' : 'bad'}>
               {p.app.ok ? <Check size={14} /> : <CircleAlert size={14} />}
-              <span>{p.app.ok ? `Opened the app at ${(p.app.url ?? '').replace(/^https?:\/\//, '')}` : `The app did not open: ${p.app.error ?? ''}`}</span>
+              <span>{p.app.ok ? 'Opened the app' : 'The app did not open here'}</span>
             </li>
           )}
           {p.app?.shot && (
@@ -443,11 +524,11 @@ function Ideas({ v, onCreated, onWrite }: { v: OverviewView; onCreated(t: Ticket
   const act = useAct<Ticket>();
   return (
     <section className="ob-c">
-      <h3>Good first tickets</h3>
+      <h3>{v.empty ? 'Your first stories' : 'Good first tickets'}</h3>
       <ul className="ob-ideas">
         {v.ideas.map((idea, i) => (
           <li key={i}>
-            <span>
+            <span dir="auto">
               <b>{idea.title}</b>
               {idea.why && <small>{idea.why}</small>}
             </span>
@@ -469,7 +550,7 @@ function Ideas({ v, onCreated, onWrite }: { v: OverviewView; onCreated(t: Ticket
         ))}
       </ul>
       <p className="note">
-        {v.ideas.length ? 'Ideas from what the Architect saw. Or ' : ''}
+        {v.ideas.length ? (v.empty ? 'Ideas from what you said. Or ' : 'Ideas from what the Architect saw. Or ') : ''}
         <button className="ob-link" onClick={onWrite}>
           {v.ideas.length ? 'write your own.' : 'Write your first ticket.'}
         </button>

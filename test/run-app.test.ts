@@ -86,6 +86,11 @@ function setCommands(commands: Record<string, string>): void {
   writeMeta(bp, { ...meta, commands: { ...meta.commands, ...commands } });
 }
 
+/** The project's app reads no port setting, so squad-kit cannot move it. */
+function noPortSetting(): void {
+  commit('server.js', SERVER.replace("process.env.PORT || require('./port.json')", "require('./port.json')"), 'read the port from one file');
+}
+
 beforeEach(async () => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-apps-'));
   project = path.join(tmp, 'roomflow');
@@ -179,29 +184,50 @@ describe('your apps run from squad-kit’s own copy of main', () => {
     expect(fs.readFileSync(setups, 'utf8')).toBe('set-up\nset-up\n');
   }, 60_000);
 
-  it('a busy port says so plainly, which program holds it, and offers the next free port only when the command takes one', async () => {
+  it('a busy port: the app goes around it by itself when it can move, and the other program is left alone', async () => {
     const yours = http.createServer((q, r) => r.end('yours')).listen(port, '127.0.0.1');
     try {
+      // The app reads PORT, so nobody is asked.
+      const apps = runner();
+      apps.start();
+      const moved = await apps.settled();
+      expect(moved.state).toBe('running');
+      expect(moved.error).toBeUndefined();
+      const to = Number(new URL(moved.address!).port);
+      expect(to).toBeGreaterThan(port);
+      expect(moved.address).toBe(`http://localhost:${to}`);
+      expect(await text(`http://127.0.0.1:${to}`)).toBe('v1');
+      expect(await text(`http://127.0.0.1:${port}`)).toBe('yours');
+      expect(apps.lines().join('\n')).toContain(`Port ${port} is used by another program, so roomflow runs on port ${to}`);
+      await apps.stop();
+
+      // A start command with a port setting moves too.
+      setCommands({ start: `node server.js --port ${port}` });
+      apps.start();
+      const flag = await apps.settled();
+      expect(flag.state).toBe('running');
+      expect(Number(new URL(flag.address!).port)).toBeGreaterThan(port);
+      expect(await text(`http://127.0.0.1:${port}`)).toBe('yours');
+    } finally {
+      yours.close();
+    }
+  }, 40_000);
+
+  it('a busy port it cannot go around: one plain sentence, and the port and the program are for engineers', async () => {
+    const yours = http.createServer((q, r) => r.end('yours')).listen(port, '127.0.0.1');
+    try {
+      noPortSetting();
       const apps = runner();
       apps.start();
       const s = await apps.settled();
       expect(s.state).toBe('failed');
-      expect(s.error).toBe(`Port ${port} is in use by another program`);
+      expect(s.error).toBe('Another program on this computer is using what roomflow needs.');
       expect(s.busy).toMatchObject({ port, ours: false });
-      expect(s.busy?.nextPort).toBeUndefined();
-      if (hasLsof) expect(s.busy).toMatchObject({ pid: process.pid, program: expect.stringMatching(/node/i) });
-      expect(await text(`http://127.0.0.1:${port}`)).toBe('yours');
-
-      // A start command with a port setting can move.
-      setCommands({ start: `node server.js --port ${port}` });
-      apps.start();
-      const busy = await apps.settled();
-      expect(busy.busy?.nextPort).toBeGreaterThan(port);
-      apps.start(undefined, { nextPort: true });
-      const moved = await apps.settled();
-      expect(moved.state).toBe('running');
-      expect(moved.address).toBe(`http://localhost:${busy.busy!.nextPort}`);
-      expect(await text(`http://127.0.0.1:${busy.busy!.nextPort}`)).toBe('v1');
+      expect(s.detail).toContain(`listens on port ${port}`);
+      if (hasLsof) {
+        expect(s.busy).toMatchObject({ pid: process.pid, program: expect.stringMatching(/node/i) });
+        expect(s.detail).toContain(`(process ${process.pid})`);
+      }
       expect(await text(`http://127.0.0.1:${port}`)).toBe('yours');
     } finally {
       yours.close();
@@ -212,10 +238,11 @@ describe('your apps run from squad-kit’s own copy of main', () => {
     const other = spawn(process.execPath, ['-e', `require('http').createServer((q, r) => r.end('old')).listen(${port}, '127.0.0.1')`], { detached: true, stdio: 'ignore' });
     try {
       while (!(await answers(`http://127.0.0.1:${port}`))) await sleep(100);
+      noPortSetting();
       const apps = runner();
       apps.start();
       const s = await apps.settled();
-      expect(s.error).toBe(`Port ${port} is in use by a program squad-kit started`);
+      expect(s.error).toBe('Something squad-kit started earlier is using what roomflow needs.');
       expect(s.busy).toMatchObject({ port, ours: true, pid: other.pid });
       apps.start(undefined, { stopOther: true });
       expect((await apps.settled()).state).toBe('running');
@@ -226,13 +253,25 @@ describe('your apps run from squad-kit’s own copy of main', () => {
     }
   }, 40_000);
 
-  it('a crash while starting fails with one line, and a crash on a taken port says the port', async () => {
+  it('a setup that fails says one plain sentence: the command and what it printed are for engineers', async () => {
+    setCommands({ setup: `node -e "console.error('npm ERR! network'); process.exit(3)"` });
+    const apps = runner();
+    apps.start();
+    const s = await apps.settled();
+    expect(s.state).toBe('failed');
+    expect(s.error).toBe('squad-kit could not set up roomflow.');
+    expect(s.detail).toContain('process.exit(3)');
+    expect(s.detail).toContain('npm ERR! network');
+  }, 30_000);
+
+  it('a crash while starting fails with one plain sentence, what it printed is for engineers, and a taken port is said the same way', async () => {
     setCommands({ start: `node -e "console.log('booting'); console.error('Error: Cannot find module express'); process.exit(1)"` });
     const apps = runner();
     apps.start();
     const s = await apps.settled();
     expect(s.state).toBe('failed');
-    expect(s.error).toBe('It stopped while starting: Error: Cannot find module express');
+    expect(s.error).toBe('It stopped while starting.');
+    expect(s.detail).toContain('Error: Cannot find module express');
 
     // The app's real port differs from its address: the crash names the port that is taken.
     const taken = await freePort();
@@ -241,8 +280,9 @@ describe('your apps run from squad-kit’s own copy of main', () => {
       setCommands({ start: `node -e "require('http').createServer().listen(${taken}, '127.0.0.1')"` });
       apps.start();
       const busy = await apps.settled();
-      expect(busy.error).toBe(`Port ${taken} is in use by another program`);
+      expect(busy.error).toBe('Another program on this computer is using what roomflow needs.');
       expect(busy.busy?.port).toBe(taken);
+      expect(busy.detail).toContain(`listens on port ${taken}`);
     } finally {
       yours.close();
     }
@@ -254,7 +294,8 @@ describe('your apps run from squad-kit’s own copy of main', () => {
     apps.start();
     const s = await apps.settled();
     expect(s.state).toBe('failed');
-    expect(s.error).toBe(`It did not answer at localhost:${port} within 2 seconds.`);
+    expect(s.error).toBe('It did not answer within 2 seconds.');
+    expect(s.detail).toContain(`It did not answer at http://localhost:${port}.`);
   }, 30_000);
 
   it('an app with no address set runs at the address it prints', async () => {

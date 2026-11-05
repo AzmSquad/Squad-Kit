@@ -10,6 +10,9 @@ interface Prefs {
   toggleTheme(): void;
   showCommands: boolean;
   toggleCommands(): void;
+  /** An open ticket covers the whole board area instead of the side panel. Remembered in this browser. */
+  ticketFull: boolean;
+  toggleTicketFull(): void;
   /** An error toast offers Report a problem, and Try again when `retry` is given. */
   toast(text: string, kind?: 'ok' | 'err', retry?: () => void): void;
 }
@@ -41,6 +44,7 @@ export function initialTheme(): Theme {
 export function PrefsProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(initialTheme);
   const [showCommands, setShowCommands] = useState(stored('sk.commands') !== 'off');
+  const [ticketFull, setTicketFull] = useState(stored('sk.ticketFull') === 'on');
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   useEffect(() => {
@@ -69,9 +73,15 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
           store('sk.commands', s ? 'off' : 'on');
           return !s;
         }),
+      ticketFull,
+      toggleTicketFull: () =>
+        setTicketFull((f) => {
+          store('sk.ticketFull', f ? 'off' : 'on');
+          return !f;
+        }),
       toast,
     }),
-    [theme, showCommands, toast],
+    [theme, showCommands, ticketFull, toast],
   );
 
   return (

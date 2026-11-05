@@ -58,7 +58,7 @@ describe('model levels', () => {
     expect(resolveLevel({ role: 'builder', step: 'build' })).toMatchObject({ level: 'strongest', effort: 'high' });
     expect(resolveLevel({ role: 'builder', step: 'fix' })).toMatchObject({ level: 'strongest', effort: 'high' });
     expect(resolveLevel({ role: 'reviewer', step: 'review' })).toMatchObject({ level: 'strongest', effort: 'high' });
-    expect(resolveLevel({ role: 'tester', step: 'proof' })).toMatchObject({ level: 'fast', effort: 'low' });
+    expect(resolveLevel({ role: 'tester', step: 'proof' })).toMatchObject({ level: 'balanced', effort: 'medium' });
     expect(resolveLevel({ role: 'analyst', step: 'draft' })).toMatchObject({ level: 'fast', effort: 'low' });
     // Reading the project is well-defined work: balanced in every setting.
     for (const quality of ['best', 'balanced', 'thrifty'] as const) {
@@ -77,7 +77,7 @@ describe('model levels', () => {
     expect(resolveLevel({ role: 'builder', step: 'fix', quality: 'thrifty' })).toMatchObject({ level: 'balanced', effort: 'medium' });
     expect(resolveLevel({ role: 'reviewer', step: 'review', quality: 'thrifty' })).toMatchObject({ level: 'strongest', effort: 'medium' });
     expect(resolveLevel({ role: 'analyst', step: 'questions', quality: 'thrifty' })).toMatchObject({ level: 'strongest', effort: 'high' });
-    expect(resolveLevel({ role: 'tester', step: 'proof', quality: 'thrifty' })).toMatchObject({ level: 'fast', effort: 'low' });
+    expect(resolveLevel({ role: 'tester', step: 'proof', quality: 'thrifty' })).toMatchObject({ level: 'balanced', effort: 'medium' });
     expect(parseQuality(' Thrifty ')).toBe('thrifty');
     expect(parseQuality('cheap')).toBeUndefined();
   });
@@ -86,12 +86,23 @@ describe('model levels', () => {
     expect(resolveLevel({ role: 'builder', step: 'build', express: true })).toMatchObject({ level: 'balanced', effort: 'high', why: 'Express track' });
     expect(resolveLevel({ role: 'reviewer', step: 'review', express: true })).toMatchObject({ level: 'strongest', effort: 'high' });
     expect(resolveLevel({ role: 'architect', step: 'design', express: true })).toMatchObject({ level: 'balanced', effort: 'high' });
-    expect(resolveLevel({ role: 'tester', step: 'proof', express: true })).toMatchObject({ level: 'fast', effort: 'low' });
+    expect(resolveLevel({ role: 'tester', step: 'proof', express: true })).toMatchObject({ level: 'balanced', effort: 'medium', why: 'Express track' });
     expect(resolveLevel({ role: 'builder', step: 'build', express: true, quality: 'balanced' })).toMatchObject({ level: 'balanced', effort: 'high' });
     // Thrifty keeps the rule from before: every role balanced.
     expect(resolveLevel({ role: 'analyst', step: 'spec', express: true, quality: 'thrifty' })).toMatchObject({ level: 'balanced', effort: 'medium', why: 'Express track' });
     expect(resolveLevel({ role: 'tester', step: 'proof', express: true, quality: 'thrifty' })).toMatchObject({ level: 'balanced', effort: 'medium' });
     expect(standardLevel({ role: 'reviewer', step: 'review', express: true, quality: 'thrifty' })).toEqual({ level: 'balanced', effort: 'medium' });
+  });
+
+  it('the Tester takes the proof balanced at medium effort on every track and setting; its chat level stays', () => {
+    for (const quality of ['best', 'balanced', 'thrifty'] as const) {
+      for (const express of [false, true]) expect(standardLevel({ role: 'tester', step: 'proof', quality, express }), `${quality} ${express}`).toEqual({ level: 'balanced', effort: 'medium' });
+      expect(standardLevel({ role: 'tester', step: 'chat', quality })).toEqual({ level: 'fast', effort: 'low' });
+    }
+    expect(standardLevel({ role: 'tester', step: 'chat', express: true })).toEqual({ level: 'fast', effort: 'low' });
+    expect(standardLevel({ role: 'tester', step: 'chat', express: true, quality: 'balanced' })).toEqual({ level: 'fast', effort: 'low' });
+    // Express on Thrifty runs every role balanced, as before.
+    expect(standardLevel({ role: 'tester', step: 'chat', express: true, quality: 'thrifty' })).toEqual({ level: 'balanced', effort: 'medium' });
   });
 
   it('lets the project change a role, and one step of it more precisely', () => {
@@ -262,7 +273,8 @@ describe('the live squad steps up after any failed Builder run', () => {
     const id = building('Opening hours');
     updateTicket(bp, id, (x) => (x.reviewNotes = ['Use the shared clock.']));
     builderFails = true;
-    await expect(squad().reviewFix(id)).rejects.toThrow(/time limit/);
+    // The tool's raw words are not squad-kit's: the stop is the plain technical one.
+    await expect(squad().reviewFix(id)).rejects.toThrow(/on something technical/);
     expect(readTicket(bp, id)!.fails).toBe(1);
     expect(calls.at(-1)).toMatchObject({ model: 'opus', effort: 'high' });
     await squad().reviewFix(id);

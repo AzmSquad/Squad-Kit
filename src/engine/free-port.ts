@@ -1,15 +1,16 @@
 import { BoardActionError, restartStep } from '../board/actions.js';
 import { isUp } from '../board/apps.js';
+import { writeLog } from '../core/app-log.js';
 import { addActivity, readMeta, readTicket, requireTicket, updateTicket, type BoardPaths } from '../board/store.js';
 import type { QuietPort, Ticket } from '../board/types.js';
 import { repoFor } from './repos.js';
 import { endPid, portTaken, squadKitOn, whoListens } from './run-app.js';
 
 /**
- * "Free the port and try again" on the Looks stuck card. A step that needs the app (the Tester's, or squad-kit
- * starting the app for it) goes quiet while a program holds the app's port and the app never answers. When squad-kit
- * itself started that program, it may stop it, after the person confirms, and start the step again. A program of the
- * person's own is never stopped: the card names it and says to close it.
+ * "Stop it and try again" on the Looks stuck card. A step that needs the app (the Tester's, or squad-kit starting the
+ * app for it) goes quiet while a program holds the app's port and the app never answers. When squad-kit itself started
+ * that program, it may stop it, after the person confirms, and start the step again. A program of the person's own is
+ * never stopped. The words here reach the person: the port and the process are in the card's details for engineers.
  */
 
 /** The port in an app's address, or null when it names none. */
@@ -65,35 +66,31 @@ export function watchPort(bp: BoardPaths, id: string, now = Date.now()): void {
     .catch(() => undefined);
 }
 
-/** "node (process 4123)". */
-function named(p: Pick<QuietPort, 'program' | 'pid'>): string {
-  return [p.program || 'a program', p.pid ? `(process ${p.pid})` : ''].filter(Boolean).join(' ');
-}
-
 /**
- * Free the port and try again: stops the program on the port, only when squad-kit started it (checked again now, by
- * its process group, never from what the card said), then the step starts again with the work so far.
+ * Stop it and try again: stops the program on the port, only when squad-kit started it (checked again now, by its
+ * process group, never from what the card said), then the step starts again with the work so far.
  */
 export async function freePortAndRetry(bp: BoardPaths, id: string, opts: { waitMs?: number } = {}): Promise<Ticket> {
   const t = requireTicket(bp, id);
   const port = t.quiet?.port?.port;
-  if (!port) throw new BoardActionError(`${t.id} is not waiting on a busy port.`);
+  if (!port) throw new BoardActionError(`${t.id} is not held up by another program.`);
   const ours = squadKitOn(bp, port);
   if (!ours) {
-    const other = whoListens(port);
     throw new BoardActionError(
-      other
-        ? `Port ${port} is used by ${named(other)}, which squad-kit did not start, so squad-kit leaves it alone. Close it yourself, then press Stop and try again.`
-        : `Nothing squad-kit started is on port ${port} now. Press Stop and try again.`,
+      whoListens(port)
+        ? 'squad-kit did not start the program in the way, so it leaves it alone. Close it yourself, then press Stop and try again.'
+        : 'Nothing squad-kit started is in the way now. Press Stop and try again.',
     );
   }
   await endPid(ours.group);
   const until = Date.now() + (opts.waitMs ?? 3000);
   while ((await portTaken(port)) && Date.now() < until) await new Promise((r) => setTimeout(r, 100));
-  const what = ours.app ? `your app ${ours.app}` : named(ours.holder);
-  if (await portTaken(port)) throw new BoardActionError(`squad-kit stopped ${what}, but port ${port} is still in use. Press Stop and try again in a moment.`);
+  const what = ours.app ? `your app ${ours.app}` : 'a program squad-kit started earlier';
+  if (await portTaken(port)) throw new BoardActionError(`squad-kit stopped ${what}, but something is still in the way. Press Stop and try again in a moment.`);
+  // The port and the process are for engineers.
+  writeLog({ level: 'info', project: readMeta(bp).project, ticket: t.id, text: `Freed port ${port}: stopped ${ours.holder.program || 'a program'} (process ${ours.holder.pid}), which squad-kit started` });
   updateTicket(bp, t.id, (x) => {
-    addActivity(x, 'you', `Freed port ${port}: stopped ${what}, which squad-kit started`);
+    addActivity(x, 'you', `Stopped ${what}, which was in the way`);
     delete x.quiet;
   });
   const now = requireTicket(bp, t.id);

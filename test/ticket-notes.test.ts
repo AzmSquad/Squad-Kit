@@ -47,7 +47,7 @@ describe('notes on a ticket', () => {
     });
     const meta = readMeta(bp);
     expect(intakePrompt(meta, [], saved)).toContain('Business rule (follow it): At most 3 bookings a day');
-    for (const p of [buildPrompt(meta, [], saved), reviewPrompt(meta, [], saved, 1), proofPrompt(meta, saved, '/tmp/out', 'after')]) {
+    for (const p of [buildPrompt(meta, [], saved), reviewPrompt(meta, [], saved, 1), proofPrompt(meta, saved, 'after')]) {
       expect(p).toContain('1. Given a person, when they book, then it saves.');
       expect(p).toContain('2. The clerk sees an error on the 4th booking (added by the person)');
     }

@@ -3,8 +3,8 @@ import { testCount, type CheckResult } from './checks.js';
 
 /**
  * "Not checked": a project with no tests gets no green pass. Lint, build and the app starting still run and must pass,
- * but only tests show that the work does what it should, so the gate says so. The person is asked once per project:
- * use the test command the Architect suggests, or go on without tests.
+ * but only tests show that the work does what it should, so the gate says so. When a project truly has none, the person
+ * is asked once per project: have the Builder add tests, or go on without them.
  */
 
 /** A check's name in words: the app start is "the app starts". */
@@ -30,16 +30,20 @@ export function notCheckedText(results: CheckResult[]): string {
 export function ranOf(results: CheckResult[]): NonNullable<Gates['ran']> {
   return results.map((r) => {
     const tests = r.name === 'test' ? testCount(r.output) : null;
-    return { name: r.name, command: r.command, ok: r.ok, ...(tests !== null ? { tests } : {}) };
+    return { name: r.name, command: r.command, ok: r.ok, ...(tests !== null ? { tests } : {}), ...(r.failedFirst !== undefined ? { failedOnce: true } : {}) };
   });
 }
 
-/** The card's plain words when no tests ran. */
-export function noTestsQuestion(results: CheckResult[], suggestion?: string): string {
+/** The card's plain words when no tests ran. It never names a command: engineers get those in the details. */
+export function noTestsQuestion(results: CheckResult[]): string {
+  const why = results.some((r) => r.name === 'test') ? "The project's tests found nothing to run" : 'This project has no tests yet';
+  return `${why}, so squad-kit cannot check that the work does what it should.`;
+}
+
+/** For engineers, in the Developer tab: the commands behind the card. */
+export function noTestsDetail(results: CheckResult[], suggestion?: string): string {
   const test = results.find((r) => r.name === 'test');
-  const why = test ? `The test command (${test.command}) found no tests` : 'This project has no tests yet';
-  const then = suggestion ? ` The Architect suggests this test command: ${suggestion}` : ' You can add a test command in Settings.';
-  return `${why}, so squad-kit cannot check that the work does what it should.${then}`;
+  return [test ? `The test command (${test.command}) found no tests.` : 'No test command is saved. Add one in Settings, under How the squad checks and runs this project.', suggestion ? `The Architect suggests: ${suggestion}` : ''].filter(Boolean).join('\n');
 }
 
 /**

@@ -15,6 +15,7 @@ import { mountStaticAssets } from './static-assets.js';
 import { authMiddleware } from './auth.js';
 import { OpenProjects, type OpenProject } from './open-projects.js';
 import type { ConsoleInfo } from '../board/console-info.js';
+import { answerWindow, windowAt } from '../engine/window-server.js';
 
 export interface StartConsoleServerOptions {
   /** The project to open first. Its API also answers at the addresses one board had, without the /p/<id> prefix. */
@@ -156,6 +157,9 @@ export async function startConsoleServer(opts: StartConsoleServerOptions): Promi
     return c.text('not found', 404);
   });
 
+  // squad-kit's own tools for each agent run (the window), over MCP. Each run's key opens only its own tools.
+  app.all('/mcp', (c) => answerWindow(c.req.raw));
+
   // Static SPA: public reads from project/dist/console-ui.
   mountStaticAssets(app, { paths: opts.paths });
 
@@ -165,6 +169,9 @@ export async function startConsoleServer(opts: StartConsoleServerOptions): Promi
     if (addr && typeof addr === 'object') return addr.port;
     return bindPort;
   })();
+
+  // Agent runs reach their window at the board's own address.
+  windowAt(`http://127.0.0.1:${actualPort}`);
 
   // Each project runs its own squad; the tickets running at once are limited across all of them.
   if (opts.paths) projects.first = projects.openReady(opts.paths).id;
@@ -183,6 +190,7 @@ export async function startConsoleServer(opts: StartConsoleServerOptions): Promi
     process.off('SIGINT', stop);
     process.off('SIGTERM', stop);
     stopSquad();
+    windowAt(null);
     nodeServer.close((err) => {
       onClose(err);
     });

@@ -7,10 +7,25 @@ import { squadHome } from '../core/home.js';
 
 /** Small git helpers. The squad never touches the person's own checkout: each ticket gets a worktree. */
 
+/** English, so squad-kit can read what git says: a Mac always has en_US.UTF-8; elsewhere C is always there. */
+const GIT_LOCALE: Record<string, string> = process.platform === 'darwin' ? { LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' } : { LC_ALL: 'C' };
+
+/**
+ * The environment for squad-kit's own git calls: git answers in English, and fast. Started with no language set (the
+ * app opened from the Dock), git on a Mac asks the system for the person's languages on every call, through one
+ * shared system service, which can take long when that service is busy. LANGUAGE would still pick git's words, so it
+ * goes. The project's own commands (tests, the app) keep the person's language.
+ */
+export function gitEnv(extra: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, ...extra, ...GIT_LOCALE };
+  delete env.LANGUAGE;
+  return env;
+}
+
 export function git(cwd: string, args: string[], opts: { allowFail?: boolean; env?: Record<string, string>; timeoutMs?: number } = {}): string {
   try {
-    const env = opts.env ? { ...process.env, ...opts.env } : undefined;
-    return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024, ...(env ? { env } : {}), ...(opts.timeoutMs ? { timeout: opts.timeoutMs } : {}) }).trim();
+    const env = gitEnv(opts.env);
+    return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024, env, ...(opts.timeoutMs ? { timeout: opts.timeoutMs } : {}) }).trim();
   } catch (err) {
     if (opts.allowFail) return '';
     const e = err as { stderr?: Buffer | string; message: string; code?: string };
@@ -21,6 +36,29 @@ export function git(cwd: string, args: string[], opts: { allowFail?: boolean; en
     const detail = (e.stderr ? e.stderr.toString() : e.message).trim().split('\n').slice(-3).join(' ');
     throw new Error(`git ${args[0]} failed: ${detail}`);
   }
+}
+
+/** The tracked files in a folder that differ from the last commit, by their paths from that folder. */
+export function changedTracked(dir: string): string[] {
+  return git(dir, ['diff', '--name-only', '--relative', '-z', 'HEAD'], { allowFail: true }).split('\0').filter(Boolean);
+}
+
+/** True for a file a package tool writes itself: package-lock.json, pnpm-lock.yaml, yarn.lock, go.sum and the like. */
+export function isLockFile(file: string): boolean {
+  return /(?:\.lockb?|[-.]lock\.(?:json|ya?ml)|^go\.sum|^npm-shrinkwrap\.json|^Package\.resolved)$/.test(path.basename(file));
+}
+
+/**
+ * Puts back every tracked file that differs from the last commit, in a copy of the code that was just made: a setup
+ * command may rewrite one (often a lock file), and that is not the story's work. Untracked and ignored files stay
+ * (installed packages, a local database). In the person's own folder, `keep` names what already differed before the
+ * setup ran and `only` limits it further, so their own changes stay. The files it put back.
+ */
+export function putBackTracked(dir: string, opts: { keep?: string[]; only?: (file: string) => boolean } = {}): string[] {
+  const keep = new Set(opts.keep);
+  const changed = changedTracked(dir).filter((f) => !keep.has(f) && (opts.only?.(f) ?? true));
+  if (changed.length) git(dir, ['checkout', 'HEAD', '--', ...changed], { allowFail: true });
+  return changed;
 }
 
 /** The longest git over the network may take. */
@@ -219,7 +257,7 @@ export const GIT_UPDATE = 'Update git: on a Mac run brew install git (or xcode-s
 /** The installed git's version, like "2.41.0", or null when git does not run. */
 export function gitVersion(): string | null {
   try {
-    return execFileSync('git', ['--version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).match(/(\d+\.\d+(?:\.\d+)?)/)?.[1] ?? null;
+    return execFileSync('git', ['--version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: gitEnv() }).match(/(\d+\.\d+(?:\.\d+)?)/)?.[1] ?? null;
   } catch {
     return null;
   }
@@ -242,7 +280,7 @@ export function mergeIntoBase(dir: string, base: string, branch: string, message
   if (isAncestor(dir, branchSha, baseSha)) return { commit: baseSha, moved: true };
   let tree: string;
   try {
-    tree = execFileSync('git', ['merge-tree', '--write-tree', baseSha, branchSha], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024 }).split('\n')[0]!.trim();
+    tree = execFileSync('git', ['merge-tree', '--write-tree', baseSha, branchSha], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024, env: gitEnv() }).split('\n')[0]!.trim();
   } catch (err) {
     const e = err as { status?: number | null; stderr?: Buffer | string; message: string };
     // Exit code 1 is git's "the merge has conflicts"; anything else means the merge could not be tried.
@@ -290,7 +328,7 @@ export function keepingFiles<T>(dir: string, keep: string | undefined, from: str
 
 export function isAncestor(dir: string, a: string, b: string): boolean {
   try {
-    execFileSync('git', ['merge-base', '--is-ancestor', a, b], { cwd: dir, stdio: 'ignore' });
+    execFileSync('git', ['merge-base', '--is-ancestor', a, b], { cwd: dir, stdio: 'ignore', env: gitEnv() });
     return true;
   } catch {
     return false;

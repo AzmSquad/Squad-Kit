@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { ArrowUp, Check, Code, Copy, Download, ExternalLink, GitPullRequest, LifeBuoy, Loader2, MessageCircle, Send, Square, TriangleAlert, X } from 'lucide-react';
+import { ArrowRightLeft, ArrowUp, Check, Code, Copy, Download, ExternalLink, GitPullRequest, LifeBuoy, Loader2, Maximize2, MessageCircle, Minimize2, PencilLine, Send, Square, TriangleAlert, X } from 'lucide-react';
 import { assetUrl, ticketFileUrl } from '../api/client';
 import type { PlanComment, Question, Ticket, TicketNote } from '../api/types';
 import { useAct, useTicket } from '../lib/data';
@@ -12,26 +12,36 @@ import { TakeOverButton, canTakeOver } from '../components/TakeOver';
 import { Attachments as AgentFiles, Mockup } from '../components/Attachments';
 import { Part, WhatChanged, type Review } from '../components/PlanReview';
 import { AGENT_TITLE, TalkButton } from '../components/Chat';
-import { ChangeCard, ChangeHistory, ProposeChangeButton, changeWaits, shipped } from '../components/ChangeCard';
-import { chatDock } from '../lib/chatDock';
+import { ChangeCard, ChangeHistory, ProposeChange, ProposeChangeButton, canPropose, changeWaits, shipped } from '../components/ChangeCard';
 import { Lightbox, type Picture } from '../components/Lightbox';
 import { CostTab, TicketUsage } from '../components/Usage';
-import { HandOverButton, HandedOverBanner, NotYoursPanel, canHandOver, isMine, ownerOf, useMe } from '../components/HandOver';
+import { HandOverDialog, HandedOverBanner, NotYoursPanel, canHandOver, isMine, ownerOf, useMe } from '../components/HandOver';
 import { AskBox, NowCard, SlowPanel, WorkSoFar, isRunning } from '../components/LiveNow';
+import { PortAskPanel } from '../components/PortAsk';
 import { ExactError, StuckCard } from '../components/ErrorCard';
 import { TestCommandCard } from '../components/TestCommand';
 import { GatePill, NotCheckedNote } from '../components/Gates';
-import { checksWords, noShotsText, overrideWhat, proofLead } from '../lib/gates';
+import { checksWords, noShotsText, overrideWhat, proofLead, proofWords } from '../lib/gates';
+import { testChangeWaits } from '../lib/waiting';
+import { AlsoChanged, MorePictures, OffScreenList, VerdictIcon, VerdictTag } from '../components/Verdict';
+import { proofViewer, verdictClass, verdictNote } from '../lib/verdict';
 import { report } from '../lib/report';
 import { shellQuote } from '../lib/text';
 import { DeleteArchiveBanner, TicketMenu } from '../components/DeleteTicket';
 import { BringInButton, DependsCard, DependsLine, waitsForDependency } from '../components/Depends';
+import { BreakdownPlace, DecidedForYou, StopPanel, TrackWords } from '../components/AutoTicket';
+import { YourCheck } from '../components/YourCheck';
+import { AskButton, useAskAgent } from '../components/AskQuestion';
+import { pageOf, waitsAtReview } from '../lib/review';
 
 type Tab = 'now' | 'story' | 'plan' | 'activity' | 'conversation' | 'proof' | 'changes' | 'cost' | 'developer';
 
 export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
   const ticket = useTicket(id);
   const me = useMe();
+  const { ticketFull, toggleTicketFull } = usePrefs();
+  // Hand over and Propose a change live in the ⋯ menu, so the header stays one row at any width.
+  const [menuDialog, setMenuDialog] = useState<'hand-over' | 'propose' | null>(null);
   const [tab, setTab] = useState<Tab>('now');
   useEffect(() => setTab('now'), [id]);
   useEffect(() => {
@@ -44,7 +54,7 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
   return (
     <>
       <div className="veil" onClick={onClose} />
-      <aside className="drawer" aria-label={t ? `${t.id} ${t.title}` : 'Ticket'}>
+      <aside className={`drawer ${ticketFull ? 'full' : ''}`} aria-label={t ? `${t.id} ${t.title}` : 'Ticket'}>
         {!t ? (
           <div className="center">{ticket.isError ? `No ticket ${id}.` : 'Loading…'}</div>
         ) : (
@@ -70,27 +80,51 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
                 {t.kind === 'bug' && <span className="prio">Bug{t.foundIn ? ` found in ${t.foundIn}` : ''}</span>}
                 {t.priority === 'high' && t.kind !== 'bug' && <span className="prio">High priority</span>}
                 <span className="grow" />
-                {canHandOver(t, me) && <HandOverButton t={t} />}
-                {(isMine(t, me) || !me) && <ProposeChangeButton t={t} />}
-                {t.waiting?.kind === 'proof' && (
-                  <Link to="/tickets/$id/proof" params={{ id: t.id }} className="iconbtn" aria-label="Open the proof page">
-                    <ExternalLink size={15} />
-                  </Link>
-                )}
-                <button className="iconbtn" onClick={() => report.open({ ticket: t.id })} aria-label="Report a problem" title="Report a problem">
-                  <LifeBuoy size={15} />
-                </button>
-                <TicketMenu t={t} onDeleted={onClose} />
-                <button className="iconbtn" onClick={onClose} aria-label="Close">
-                  <X size={16} />
-                </button>
+                {/* The actions stay together: when the row is too narrow, they move under the id as one group. */}
+                <span className="dacts">
+                  {/* Ask a question, in every state: questions only, and the story stays where it is. */}
+                  <AskButton t={t} />
+                  {t.waiting?.kind === 'proof' && (
+                    <Link to="/tickets/$id/proof" params={{ id: t.id }} className="iconbtn" aria-label="Open the proof page">
+                      <ExternalLink size={15} />
+                    </Link>
+                  )}
+                  <button className="iconbtn" onClick={() => report.open({ ticket: t.id })} aria-label="Report a problem" title="Report a problem">
+                    <LifeBuoy size={15} />
+                  </button>
+                  <TicketMenu
+                    t={t}
+                    onDeleted={onClose}
+                    items={[
+                      ...((isMine(t, me) || !me) && canPropose(t)
+                        ? [{ key: 'propose', label: <><PencilLine size={15} /> {shipped(t) ? 'Ask for a change…' : 'Propose a change…'}</>, onPick: () => setMenuDialog('propose') }]
+                        : []),
+                      ...(canHandOver(t, me) ? [{ key: 'hand-over', label: <><ArrowRightLeft size={15} /> Hand over…</>, onPick: () => setMenuDialog('hand-over') }] : []),
+                    ]}
+                  />
+                  <button
+                    className="iconbtn fullbtn"
+                    onClick={toggleTicketFull}
+                    aria-pressed={ticketFull}
+                    aria-label={ticketFull ? 'Back to the side panel' : 'Full width'}
+                    title={ticketFull ? 'Back to the side panel' : 'Full width'}
+                  >
+                    {ticketFull ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+                  </button>
+                  <button className="iconbtn" onClick={onClose} aria-label="Close">
+                    <X size={16} />
+                  </button>
+                </span>
               </div>
+              {menuDialog === 'hand-over' && <HandOverDialog t={t} onClose={() => setMenuDialog(null)} />}
+              {menuDialog === 'propose' && <ProposeChange t={t} onClose={() => setMenuDialog(null)} />}
               <h2>{t.title}</h2>
+              <BreakdownPlace t={t} />
               <div className="sub">
                 <span>
                   Created by <b>{t.createdBy}</b> {ago(t.createdAt)}
                   {' · '}
-                  <b>{t.track === 'express' ? 'Express' : 'Full'}</b> track
+                  <TrackWords t={t} />
                 </span>
                 <span>
                   Owner <b>{ownerOf(t)}</b>
@@ -129,7 +163,7 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
               ).map(([k, label]) => (
                 <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>
                   {label}
-                  {k === 'now' && (t.waiting || t.outdated?.length || changeWaits(t) || t.testChange) && <span className="dot" />}
+                  {k === 'now' && (t.waiting || t.outdated?.length || changeWaits(t) || testChangeWaits(t)) && <span className="dot" />}
                 </button>
               ))}
               <button className={`dev ${tab === 'developer' ? 'on' : ''}`} onClick={() => setTab('developer')}>
@@ -138,7 +172,7 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
             </div>
             {tab === 'now' && t.outdated?.length ? <OutdatedBanner t={t} /> : null}
             {/* With the design waiting, the change shows in it; otherwise (Express, or a design approved before) here. */}
-            {tab === 'now' && t.testChange && t.waiting?.kind !== 'plan' && (isMine(t, me) || !me) ? <TestCommandCard t={t} banner /> : null}
+            {tab === 'now' && testChangeWaits(t) && t.waiting?.kind !== 'plan' && (isMine(t, me) || !me) ? <TestCommandCard t={t} banner /> : null}
             {tab === 'now' && <HandedOverBanner t={t} />}
             {tab === 'now' && <DeleteArchiveBanner t={t} onDeleted={onClose} />}
             {tab === 'now' && (isMine(t, me) || !me) && <ChangeCard t={t} />}
@@ -175,8 +209,27 @@ function NowPanel({ t }: { t: Ticket }) {
     case 'proof':
       return <ProofPanel t={t} />;
     case 'stuck':
-      // Every stop has a way out: the plain error card (components/ErrorCard).
-      return <StuckCard t={t} extra={<RecentActivity t={t} />} />;
+      // Every stop has a way out: the plain error card (components/ErrorCard). Stopped at a gate, the person can also
+      // ask a question and try the ticket's own copy of the app.
+      return (
+        <StuckCard
+          t={t}
+          extra={
+            <>
+              <AlsoChanged t={t} />
+              {/* Stopped at the proof: what each screenshot shows, Met, Not working yet or Not shown yet. */}
+              {t.stuck?.gate === 'proof' && t.proof?.some((p) => p.after) && (
+                <>
+                  <div className="lbl">What the screenshots show</div>
+                  <ProofShots t={t} />
+                </>
+              )}
+              {waitsAtReview(t) && <YourCheck t={t} />}
+              <RecentActivity t={t} />
+            </>
+          }
+        />
+      );
     case 'ask':
       return <AskPanel t={t} />;
     case 'yours':
@@ -188,7 +241,7 @@ function NowPanel({ t }: { t: Ticket }) {
   }
 }
 
-/** The talk itself lives in the chat panel beside the board, so the board stays in view while you talk. */
+/** The talk itself lives in the chat panel beside the board, so the board stays in view while you talk. Open the chat is at the top. */
 function ChatOpen({ t }: { t: Ticket }) {
   const who = AGENT_TITLE[t.chat!.with];
   return (
@@ -202,9 +255,6 @@ function ChatOpen({ t }: { t: Ticket }) {
           <span>The talk is open in the chat panel beside the board. Its work waits until you press a button there.</span>
         </div>
         <span className="grow" />
-        <button className="btn pri sm" onClick={() => chatDock.show(t.id)}>
-          Open the chat
-        </button>
         <Link to="/conversations" search={{ ticket: t.id }} className="btn sm">
           Full screen
         </Link>
@@ -608,7 +658,7 @@ function GatePills({ t }: { t: Ticket }) {
       <div className="pills">
         <GatePill state={g?.checks} text={checksWords(g)} />
         <GatePill state={g?.review} text={g?.review === 'pass' ? `Review approved by ${g.reviewBy}` : g?.review === 'skipped' ? 'Review notes open, you continued' : 'Review approved'} />
-        <GatePill state={g?.proof} text={g?.proof === 'skipped' ? 'No screenshots, you continued' : 'Proof made'} />
+        <GatePill state={g?.proof} text={proofWords(t)} />
       </div>
       <NotCheckedNote g={g} />
       {t.overrides?.map((o) => (
@@ -624,38 +674,48 @@ function ProofShots({ t }: { t: Ticket }) {
   const [zoom, setZoom] = useState<number | null>(null);
   if (!t.proof?.length) {
     return (
-      <p className="note">{noShotsText(t)}</p>
+      <>
+        <p className="note">{noShotsText(t)}</p>
+        <OffScreenList t={t} />
+      </>
     );
   }
-  const pictures: Picture[] = t.proof.flatMap((p) => [
-    { src: assetUrl(`/api/v1/proof/${p.before}`), caption: `${p.criterion} · ${p.beforeLabel}` },
-    { src: assetUrl(`/api/v1/proof/${p.after}`), caption: `${p.criterion} · ${p.afterLabel}` },
-  ]);
+  const { pictures, starts } = proofViewer(t.proof, (file) => assetUrl(`/api/v1/proof/${file}`));
   return (
     <>
       {zoom !== null && <Lightbox pictures={pictures} start={zoom} onClose={() => setZoom(null)} />}
       {t.proof.map((p, k) => (
-        <div className="critrow" key={p.criterion}>
+        <div className={`critrow ${verdictClass(p.shows)}`} key={p.criterion}>
           <h5>
-            <Check size={15} strokeWidth={2.5} />
+            <VerdictIcon shows={p.shows} />
             {p.criterion}
+            <VerdictTag shows={p.shows} />
           </h5>
+          {verdictNote(p) && <p className="verdictnote">{verdictNote(p)}</p>}
+          {pageOf(p) && (
+            <p className="critpage">
+              Page <code>{pageOf(p)}</code>
+            </p>
+          )}
           <div className="proofmini">
             <div>
               <small>{p.beforeLabel}</small>
-              <button className="zoom" onClick={() => setZoom(k * 2)} aria-label={`Open ${p.beforeLabel} full size`}>
+              <button className="zoom" onClick={() => setZoom(starts[k]!)} aria-label={`Open ${p.beforeLabel} full size`}>
                 <img src={assetUrl(`/api/v1/proof/${p.before}`)} alt={`${p.criterion}, ${p.beforeLabel}`} />
               </button>
             </div>
             <div>
               <small>{p.afterLabel}</small>
-              <button className="zoom" onClick={() => setZoom(k * 2 + 1)} aria-label={`Open ${p.afterLabel} full size`}>
+              <button className="zoom" onClick={() => setZoom(starts[k]! + 1)} aria-label={`Open ${p.afterLabel} full size`}>
                 <img src={assetUrl(`/api/v1/proof/${p.after}`)} alt={`${p.criterion}, ${p.afterLabel}`} />
               </button>
             </div>
           </div>
+          {p.more?.length && p.why && p.note ? <p className="note proofmore-main">{p.note}</p> : null}
+          <MorePictures shot={p} first={starts[k]! + 2} onOpen={setZoom} />
         </div>
       ))}
+      <OffScreenList t={t} />
     </>
   );
 }
@@ -700,8 +760,10 @@ function ProofPanel({ t }: { t: Ticket }) {
         </div>
         <div className="lbl">Gates, checked by squad-kit</div>
         <GatePills t={t} />
+        <AlsoChanged t={t} />
         <div className="lbl">Before and after</div>
         <ProofShots t={t} />
+        <YourCheck t={t} />
       </div>
       <ProofDecision t={t} />
     </>
@@ -719,6 +781,10 @@ function AskPanel({ t }: { t: Ticket }) {
   const [pick, setPick] = useState<string | null>(null);
   const [own, setOwn] = useState('');
   if (!q) return <WorkingPanel t={t} />;
+  // A busy port another program holds: one plain choice instead of the agent's words.
+  if (q.port) return <PortAskPanel t={t} />;
+  // Builds by itself: a part missing in the BRD, or two parts that clash (components/AutoTicket).
+  if (q.kind) return <StopPanel t={t} extra={<><AlsoChanged t={t} /><RecentActivity t={t} /></>} />;
   const who = { architect: 'Architect', builder: 'Builder', reviewer: 'Reviewer' }[q.from];
   const answer = pick === '' ? own.trim() : pick;
   const choices = [...q.options, DECIDE_YOURSELF];
@@ -861,10 +927,15 @@ function LocalSetupLine({ t }: { t: Ticket }) {
             ? 'The merge changed your own folder, so the squad installs new packages and runs the database changes there.'
             : ls.status === 'done'
               ? `New packages and database changes are in your own folder${ls.at ? `, ${ago(ls.at)}` : ''}${ls.seconds !== undefined ? ` (${ls.seconds} s)` : ''}.`
-              : 'The setup stopped in your own folder. Run it there, or try again.'}
+              : 'squad-kit could not finish setting it up. Try again, or ask an engineer to look at what failed.'}
         </span>
-        <code>{ls.command}</code>
-        {ls.status === 'failed' && ls.output && <pre>{ls.output}</pre>}
+        {ls.status === 'failed' && (
+          <details className="costdetails">
+            <summary>See what failed</summary>
+            <code>{ls.command}</code>
+            {ls.output && <pre>{ls.output}</pre>}
+          </details>
+        )}
       </div>
       {ls.status === 'failed' && (
         <button className="btn sm" disabled={again.isPending} onClick={() => again.mutate({ path: `/api/v1/tickets/${t.id}/local-setup`, done: 'Running the setup again' })}>
@@ -876,7 +947,9 @@ function LocalSetupLine({ t }: { t: Ticket }) {
 }
 
 function WorkingPanel({ t }: { t: Ticket }) {
+  const me = useMe();
   const stop = useAct();
+  const asks = useAskAgent(t);
   const calm =
     t.stage === 'release'
       ? { title: `Ready for ${t.release}`, text: 'It goes out with the next release. Nothing needed from you until then.' }
@@ -920,7 +993,9 @@ function WorkingPanel({ t }: { t: Ticket }) {
             <GatePills t={t} />
           </>
         )}
+        <AlsoChanged t={t} />
         {(t.stage === 'release' || t.stage === 'done') && t.usage?.length ? <TicketUsage t={t} /> : null}
+        <DecidedForYou t={t} />
         {running ? <WorkSoFar t={t} /> : <RecentActivity t={t} />}
         <AskBox t={t} />
       </div>
@@ -932,14 +1007,10 @@ function WorkingPanel({ t }: { t: Ticket }) {
         )}
         {canTakeOver(t) && <TakeOverButton t={t} />}
         <BringInButton t={t} />
-        {/* Asking never stops the work: the chat runs beside it, and on accepted work it answers questions only. */}
-        {t.chat?.open ? (
-          <button className="btn sm" onClick={() => chatDock.show(t.id)}>
-            <MessageCircle size={13} /> Open the chat
-          </button>
-        ) : (
-          !t.takenOver && <TalkButton t={t} agent="analyst" label={shipped(t) ? 'Ask a question' : 'Ask the Analyst'} />
-        )}
+        {/* Asking never stops the work: the chat runs beside it. Ask a question and Open the chat are at the top; the
+            Analyst gets its own button only while someone else answers those. */}
+        {!t.chat?.open && !t.takenOver && !shipped(t) && asks !== 'analyst' && <TalkButton t={t} agent="analyst" label="Ask the Analyst" />}
+        {(isMine(t, me) || !me) && <ProposeChangeButton t={t} />}
         <span className="note">{t.live ? 'Updates live as the squad works.' : ''}</span>
         <span className="grow" />
         <Cmd text={t.live && t.stage !== 'release' ? `squad stop ${t.id}` : commandFor(t)} />
@@ -1059,6 +1130,7 @@ function StoryTab({ t }: { t: Ticket }) {
       <Attachments t={t} />
       <Notes t={t} />
       <ChangeHistory t={t} />
+      <DecidedForYou t={t} />
       {t.story ? (
         <PlanBody t={{ ...t, decision: undefined, work: undefined }} />
       ) : (
@@ -1210,8 +1282,9 @@ function ProofTab({ t }: { t: Ticket }) {
     <div className="db">
       <div className="lbl">Gates, checked by squad-kit</div>
       <GatePills t={t} />
+      <AlsoChanged t={t} />
       <div className="lbl">Before and after</div>
-      {t.gates.proof === 'pass' ? <ProofShots t={t} /> : <p className="note">The screens are recorded after all checks pass.</p>}
+      {t.gates.proof === 'pass' || t.proof?.some((p) => p.shows) ? <ProofShots t={t} /> : <p className="note">The screens are recorded after all checks pass.</p>}
     </div>
   );
 }
@@ -1236,6 +1309,45 @@ function DeveloperTab({ t }: { t: Ticket }) {
           <div className="lbl">The ticket's copy of the code</div>
           <p className="mono" style={{ fontSize: 12.5, overflowWrap: 'anywhere' }}>{t.worktree}</p>
           <OpenInEditor t={t} />
+        </>
+      )}
+      {t.gates?.ran?.length ? (
+        <>
+          <div className="lbl">The checks that ran</div>
+          <div className="feed">
+            {t.gates.ran.map((r) => (
+              <div key={r.name} className="mono" style={{ fontSize: 12.5, overflowWrap: 'anywhere' }}>
+                {r.name}: {r.command} ({r.failedOnce ? 'failed once, passed when run again' : r.ok ? 'passed' : 'failed'})
+              </div>
+            ))}
+          </div>
+        </>
+      ) : null}
+      {t.testChange || t.testDecided ? (
+        <>
+          <div className="lbl">How the tests run</div>
+          <div className="feed">
+            {t.testDecided && (
+              <div className="mono" style={{ fontSize: 12.5, overflowWrap: 'anywhere' }}>
+                {t.testDecided.kept === 'new' ? `Kept the new one: ${t.testDecided.to} (was ${t.testDecided.from})` : `Kept the current one: ${t.testDecided.from} (not ${t.testDecided.to})`}, by {t.testDecided.by === 'you' ? 'you' : 'squad-kit'}
+                {t.testDecided.ran ? `. ${t.testDecided.ran}` : ''}
+              </div>
+            )}
+            {t.testChange && (
+              <div className="mono" style={{ fontSize: 12.5, overflowWrap: 'anywhere' }}>
+                {t.testChange.ask ? 'Waiting for a choice' : 'Tried at the next checks'}: {t.testChange.from} or {t.testChange.to}
+                {t.testChange.ran ? `. ${t.testChange.ran}` : ''}
+              </div>
+            )}
+          </div>
+        </>
+      ) : null}
+      {t.localSetup && (
+        <>
+          <div className="lbl">Setting up your own copy</div>
+          <p className="mono" style={{ fontSize: 12.5, overflowWrap: 'anywhere' }}>
+            {t.localSetup.command} in {t.localSetup.dir} ({t.localSetup.status})
+          </p>
         </>
       )}
       <div className="lbl">Files the squad touched</div>

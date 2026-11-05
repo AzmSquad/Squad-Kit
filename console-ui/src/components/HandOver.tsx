@@ -46,7 +46,7 @@ export function HandOverButton({ t }: { t: Ticket }) {
   );
 }
 
-function HandOverDialog({ t, onClose }: { t: Ticket; onClose(): void }) {
+export function HandOverDialog({ t, onClose }: { t: Ticket; onClose(): void }) {
   const act = useAct();
   const stop = useAct();
   const board = useBoard();

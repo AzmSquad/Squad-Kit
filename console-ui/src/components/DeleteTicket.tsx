@@ -30,7 +30,14 @@ function useDemo(): boolean {
 }
 
 /** The "…" button in the ticket's header: Delete for a ticket not merged, Archive or Unarchive for a merged one. */
-export function TicketMenu({ t, onDeleted }: { t: Ticket; onDeleted(): void }) {
+/** A menu item the drawer adds above Delete and Archive. */
+export interface MenuItem {
+  key: string;
+  label: ReactNode;
+  onPick(): void;
+}
+
+export function TicketMenu({ t, onDeleted, items = [] }: { t: Ticket; onDeleted(): void; items?: MenuItem[] }) {
   const [open, setOpen] = useState(false);
   const [dialog, setDialog] = useState<'delete' | 'archive' | null>(null);
   const merged = isMerged(t, useDemo());
@@ -58,6 +65,11 @@ export function TicketMenu({ t, onDeleted }: { t: Ticket; onDeleted(): void }) {
       </button>
       {open && (
         <div className="more-menu" role="menu">
+          {items.map((it) => (
+            <button key={it.key} role="menuitem" onClick={pick(it.onPick)}>
+              {it.label}
+            </button>
+          ))}
           {t.archived ? (
             <button role="menuitem" onClick={pick(unarchive)}>
               <ArchiveRestore size={15} /> Unarchive

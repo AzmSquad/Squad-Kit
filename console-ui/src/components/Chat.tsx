@@ -40,6 +40,7 @@ import { readFile, type PickedFile } from './dialogs';
 import { ProposeChange, canPropose, shipped } from './ChangeCard';
 import { TakeOverButton, canTakeOver } from './TakeOver';
 import { STAGE_NAME, clock, dateShort } from './ui';
+import { squadWorks, waitsAtReview, whereItStands } from '../lib/review';
 
 export const AGENT_TITLE: Record<AgentName, string> = { analyst: 'Analyst', architect: 'Architect', builder: 'Builder', reviewer: 'Reviewer', tester: 'Tester' };
 export const SESSION: Record<AgentName, 'intake' | 'build' | 'review' | 'tester'> = { analyst: 'intake', architect: 'intake', builder: 'build', reviewer: 'review', tester: 'tester' };
@@ -62,6 +63,7 @@ const PHASE_ROLE: Record<string, AgentName> = {
   'review-fix': 'builder',
   'restore-tests': 'builder',
   'update-base': 'builder',
+  'proof-fix': 'builder',
   'answered-builder': 'builder',
   'chat-carry-builder': 'builder',
   review: 'reviewer',
@@ -85,11 +87,11 @@ export function Avatar({ role, small, live }: { role: AgentName; small?: boolean
 }
 
 /** Open a talk with one agent from anywhere. It opens in the chat panel beside the board. */
-export function TalkButton({ t, agent, label, primary }: { t: Ticket; agent: AgentName; label?: string; primary?: boolean }) {
+export function TalkButton({ t, agent, label, primary, small }: { t: Ticket; agent: AgentName; label?: string; primary?: boolean; small?: boolean }) {
   const act = useAct();
   return (
     <button
-      className={`btn ${primary ? 'pri' : ''}`}
+      className={`btn ${primary ? 'pri' : ''} ${small ? 'sm' : ''}`}
       disabled={act.isPending}
       onClick={() =>
         act.mutate(
@@ -119,15 +121,17 @@ export function stageLine(t: Ticket): { text: string; tone: 'you' | 'work' | 'do
 }
 
 /**
- * What the talk may do, in the words the header uses. A chat beside the work (the squad works on the ticket, or it is
- * accepted) changes nothing: asking never stops the work, and accepted work answers questions only.
+ * What the talk may do, in the words the header uses. A chat beside the work (Ask a question in any state, or a talk
+ * while the squad works, at your check or on accepted work) answers questions only and changes nothing: asking never
+ * stops the work, and the ticket stays where it is. `still` is a ticket the squad is not working on right now.
  */
-function talkKind(t: Ticket): { kind: 'talk' | 'working' | 'released'; note: string } {
+function talkKind(t: Ticket): { kind: 'talk' | 'working' | 'review' | 'released' | 'still'; note: string } {
   const c = t.chat!;
   const who = AGENT_TITLE[c.with];
-  if (c.beside && shipped(t)) return { kind: 'released', note: 'Questions only' };
-  if (c.beside) return { kind: 'working', note: 'Asking never stops the work' };
-  return { kind: 'talk', note: `The ${who} waits while you talk` };
+  if (!c.beside) return { kind: 'talk', note: `The ${who} waits while you talk` };
+  if (shipped(t)) return { kind: 'released', note: 'Questions only' };
+  if (waitsAtReview(t)) return { kind: 'review', note: 'Questions only' };
+  return { kind: squadWorks(t) ? 'working' : 'still', note: 'Questions only' };
 }
 
 /** The button that ends the talk the way it was meant to end. */
@@ -154,7 +158,6 @@ function ChatHeader({ t, size, onFull, onPanel }: { t: Ticket; size: ChatSize; o
   const primary = c.open ? primaryOf(t) : null;
   const busy = act.isPending || Boolean(c.thinking);
   const later = c.with === 'builder' || c.with === 'reviewer' || c.with === 'tester';
-  const worker = workingRole(t);
   const run = (path: string, done: string) => act.mutate({ path: `/api/v1/tickets/${t.id}/chat/${path}`, done });
 
   const buttons = (
@@ -190,28 +193,46 @@ function ChatHeader({ t, size, onFull, onPanel }: { t: Ticket; size: ChatSize; o
           Done
         </button>
       )}
-      {!c.open && !t.takenOver && (
-        <button className="btn" disabled={act.isPending} onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/chat/start`, body: { with: c.with } }, { onSuccess: () => chatDock.show(t.id) })}>
-          <MessageCircle size={14} /> Talk to the {who} again
+      {!c.open && (c.beside || !t.takenOver) && (
+        <button
+          className="btn"
+          disabled={act.isPending}
+          onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/chat/start`, body: { with: c.with, ...(c.beside ? { ask: true } : {}) } }, { onSuccess: () => chatDock.show(t.id) })}
+        >
+          <MessageCircle size={14} /> {c.beside ? `Ask the ${who} again` : `Talk to the ${who} again`}
         </button>
       )}
     </>
   );
 
+  // Questions only: one plain line of where the story stands ("RO-7 waits in the queue"), which the talk never changes.
+  const stands = c.beside ? whereItStands(t) : '';
   const banner =
     c.open && kind.kind === 'working' ? (
       <div className="cbanner work">
         <span className="livedot" aria-hidden="true" />
         <span>
-          <b>{worker ? `The ${AGENT_TITLE[worker]} keeps working` : t.live || t.squad ? 'The squad keeps working' : 'Nothing waits for this talk'}</b>
-          {t.status ? <> · {t.status}</> : null}. Your questions change nothing on {t.id}; a change goes through the spec.
+          <b>{stands}</b>
+          {t.status ? <> · {t.status}</> : null}. Asking never stops the work; a change goes through the spec.
+        </span>
+      </div>
+    ) : c.open && kind.kind === 'review' ? (
+      <div className="cbanner done">
+        <span>
+          <b>{stands}.</b> Your questions change nothing on it.{' '}
+          {t.waiting?.kind === 'proof' ? "To ask for a change, press Something's wrong." : 'To go on, pick a way out on its card.'}
         </span>
       </div>
     ) : c.open && kind.kind === 'released' ? (
       <div className="cbanner done">
         <span>
-          <b>{t.id} is {t.stage === 'done' ? `released${t.release ? ` in ${t.release}` : ''}` : `accepted${t.release ? ` for ${t.release}` : ''}`}.</b> Ask anything about it. A change becomes a new
-          linked ticket or a bug report.
+          <b>{stands}.</b> Ask anything about it. A change becomes a new linked ticket or a bug report.
+        </span>
+      </div>
+    ) : c.open && kind.kind === 'still' ? (
+      <div className="cbanner done">
+        <span>
+          <b>{stands}.</b> Your questions change nothing on it.
         </span>
       </div>
     ) : null;
@@ -401,9 +422,11 @@ export function ChatView({ id, size, onOpenDoc, onFull, onPanel }: { id: string;
   const opening =
     kind.kind === 'working'
       ? `You are asking the ${who}. ${worker ? `The ${AGENT_TITLE[worker]}` : 'The squad'} keeps working on ${t.id}, and this talk changes nothing.`
-      : kind.kind === 'released'
-        ? `${t.id} is ${t.stage === 'done' ? 'released' : 'accepted'}. Ask the ${who} anything about it.`
-        : `You started talking with the ${who}. Its work on ${t.id} waits until you press ${primary ? primary.label : 'Done'}${primary && primary.label !== 'Back to work' ? ' or Done' : ''}.`;
+      : kind.kind === 'review' || kind.kind === 'still'
+        ? `You are asking the ${who} about ${t.id}. It stays where it is, and this talk changes nothing.`
+        : kind.kind === 'released'
+          ? `${t.id} is ${t.stage === 'done' ? 'released' : 'accepted'}. Ask the ${who} anything about it.`
+          : `You started talking with the ${who}. Its work on ${t.id} waits until you press ${primary ? primary.label : 'Done'}${primary && primary.label !== 'Back to work' ? ' or Done' : ''}.`;
   const lastAgent = [...messages].reverse().find(isAgent);
   const focus = (with_?: string) => {
     if (with_ !== undefined) setText(with_);

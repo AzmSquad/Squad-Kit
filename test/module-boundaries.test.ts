@@ -4,13 +4,13 @@ import path from 'node:path';
 
 /**
  * ADR-002: the engine only knows the module interfaces and the registry, and a product folder never uses another
- * one. Adding a tracker, code host, AI tool or speech service then never touches the engine.
+ * one. Adding a tracker, code host, AI tool, speech service or browser then never touches the engine.
  */
 
 const SRC = path.resolve(__dirname, '../src');
 const MODULES = path.join(SRC, 'modules');
 /** The folders that hold one kind's interface, not a product. */
-const KINDS = new Set(['tracker', 'code-host', 'ai-tool', 'speech']);
+const KINDS = new Set(['tracker', 'code-host', 'ai-tool', 'speech', 'browser']);
 const PRODUCTS = fs
   .readdirSync(MODULES, { withFileTypes: true })
   .filter((d) => d.isDirectory() && !KINDS.has(d.name))

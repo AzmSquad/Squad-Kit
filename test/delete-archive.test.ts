@@ -129,13 +129,13 @@ describe('Delete', () => {
     const t = built('AP-1', {
       source: { type: 'azure', ref: 'AB#7', id: '7' },
       sessions: { intake: 'session-intake-1', build: 'session-build-1' },
-      proof: [{ criterion: 'Hours show', before: 'ap-1-before-1.png', after: 'ap-1-after-1.png', beforeLabel: 'Before', afterLabel: 'After' }],
+      proof: [{ criterion: 'Hours show', before: 'ap-1-before-1.png', after: 'ap-1-after-1.png', beforeLabel: 'Before', afterLabel: 'After', more: [{ after: 'named-extra.png' }, { after: 'shared-extra.png' }] }],
       trackerQueue: [{ kind: 'started' }],
       usage: usage(1.5),
       follows: ['STACK.1'],
       decision: { title: 'Hours in one file', options: [{ name: 'One file', note: '', chosen: true }], why: 'Simple', adr: 'AP-1.1', replaces: 'STACK.2' },
     });
-    ticket('AP-2', { usage: usage(0.25), proof: [{ criterion: 'x', before: 'shared.png', after: 'shared.png', beforeLabel: 'Before', afterLabel: 'After' }] });
+    ticket('AP-2', { usage: usage(0.25), proof: [{ criterion: 'x', before: 'shared.png', after: 'shared.png', beforeLabel: 'Before', afterLabel: 'After', more: [{ after: 'shared-extra.png' }] }] });
     decision('STACK.1', 'Project scan', { tickets: ['AP-1'] });
     decision('STACK.2', 'Project scan', { tickets: [], replacedBy: 'AP-1.1' });
     decision('AP-1.1', 'AP-1', { replaces: 'STACK.2', buildsOn: ['STACK.1'] });
@@ -143,7 +143,7 @@ describe('Delete', () => {
     fs.mkdirSync(bp.chatsDir, { recursive: true });
     for (const s of ['session-intake-1', 'session-build-1', 'session-other-9']) fs.writeFileSync(path.join(bp.chatsDir, `${s}.jsonl`), '{}\n');
     fs.mkdirSync(bp.proofDir, { recursive: true });
-    for (const f of ['ap-1-before-1.png', 'ap-1-after-1.png', 'ap-1-after-2.png', 'shared.png', 'ap-10-after-1.png']) fs.writeFileSync(path.join(bp.proofDir, f), 'png');
+    for (const f of ['ap-1-before-1.png', 'ap-1-after-1.png', 'ap-1-after-2.png', 'shared.png', 'shared-extra.png', 'named-extra.png', 'ap-10-after-1.png']) fs.writeFileSync(path.join(bp.proofDir, f), 'png');
     fs.mkdirSync(ticketMediaDir(bp, 'AP-1'), { recursive: true });
     fs.writeFileSync(path.join(ticketMediaDir(bp, 'AP-1'), 'note.ogg'), 'voice');
     const before = addSnapshot(project, 'ap-1-before', t.baseCommit!);
@@ -181,7 +181,7 @@ describe('Delete', () => {
     expect(sh('git worktree list', project)).not.toContain(worktreeRoot(project));
     // Its conversations and screenshots, never another ticket's.
     expect(fs.readdirSync(bp.chatsDir)).toEqual(['session-other-9.jsonl']);
-    expect(fs.readdirSync(bp.proofDir).sort()).toEqual(['ap-10-after-1.png', 'shared.png']);
+    expect(fs.readdirSync(bp.proofDir).sort()).toEqual(['ap-10-after-1.png', 'shared-extra.png', 'shared.png']);
     // Its decision goes with every link to it: the one it replaced is a rule again.
     const ds = listDecisions(bp);
     expect(ds.map((d) => d.id).sort()).toEqual(['STACK.1', 'STACK.2']);

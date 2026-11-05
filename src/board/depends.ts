@@ -89,6 +89,14 @@ export function holdForDependency(bp: BoardPaths, t: Ticket): boolean {
     return true;
   }
   const line = dependsLine(t, deps);
+  // Builds by itself never asks how to build around it: it waits, and starts by itself once that ticket merges.
+  if (t.track === 'auto') {
+    t.dependency = { on: deps.map((d) => d.id), way: 'wait', by: 'the squad', at: now() };
+    t.waiting = null;
+    t.status = waitLine(deps);
+    addActivity(t, 'squad', `${line}. Builds by itself: it waits, and the build starts by itself once ${deps.length === 1 ? 'it merges' : 'they merge'}`);
+    return true;
+  }
   t.waiting = { kind: 'depends', summary: line };
   t.status = line;
   addActivity(t, 'squad', `${line}, so the build waits for you to choose how to build`);

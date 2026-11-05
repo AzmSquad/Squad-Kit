@@ -1,3 +1,4 @@
+import type { Decided } from './requirements-types.js';
 import type { SetupState } from './setup-state.js';
 
 /** The 7 stages a ticket moves through. `done` means released and off the board. */
@@ -120,19 +121,49 @@ export interface Gates {
   checks: GateState;
   checksText?: string;
   /** Each check squad-kit ran last, for the Reviewer: "test (npm test): passed, 18 tests". */
-  ran?: { name: string; command: string; ok: boolean; tests?: number }[];
+  ran?: { name: string; command: string; ok: boolean; tests?: number; failedOnce?: boolean }[];
   review: GateState;
   reviewBy?: string;
   proof: GateState;
 }
 
+/** Another after picture of a "done when": a part or case its main picture does not show. */
+export interface ProofPicture {
+  after: string;
+  /** Where it was taken, like a row's page. */
+  page?: string;
+  /** What it shows, one plain sentence from the Tester. */
+  note?: string;
+}
+
 export interface ProofShot {
   criterion: string;
   before: string;
+  /** The main after picture: the one the before pairs with. */
   after: string;
   beforeLabel: string;
   afterLabel: string;
+  /** What the main after picture shows. */
   note?: string;
+  /** Where the main after picture was taken, as the address in the app without the host, like "/test/sign-up". */
+  page?: string;
+  /** The other after pictures of this "done when", one per part or case. Rows with one picture have none. */
+  more?: ProofPicture[];
+  /**
+   * What all its after pictures show together, from the Tester's verdict and squad-kit's own check of them: the "done
+   * when" is met, "broken" (a picture shows it does not work) or "not-shown" (the pictures do not show all of it clearly).
+   * "off-screen": the Tester and the check agree the rest of it cannot be shown at all, so the pictures that show a part
+   * stay and it does not stop the story. Only broken goes back to the Builder. Rows from before verdicts have none.
+   */
+  shows?: 'met' | 'broken' | 'not-shown' | 'off-screen';
+  /** Why it is not met yet, in plain words: the Tester's note or squad-kit's check. For "off-screen", which part could not be shown. */
+  why?: string;
+}
+
+/** A "done when" that shows on no screen (it happens on a restart, in an email), with why in plain words. */
+export interface OffScreen {
+  criterion: string;
+  why: string;
 }
 
 /** The ways out of a stop. Every stop has at least Try again and one more; a step paused on a cap has Give it more and Stop. */
@@ -155,8 +186,13 @@ export interface StuckChoice {
   safe?: string[];
   /** What stopped: a failed gate the person can continue past, a clash with the base branch, a step's cap, or any other error. */
   gate?: 'checks' | 'review' | 'proof' | 'merge' | 'cap';
-  /** Why the gate stopped, when it is not a plain failure: tests made weaker, no tests at all, or screenshots that failed squad-kit's check. */
-  kind?: 'weakened' | 'no-tests' | 'bad-proof';
+  /**
+   * Why the gate stopped, when it is not a plain failure: tests made weaker, no tests at all, screenshots that failed
+   * squad-kit's check, a project command that needed a file outside its copy and squad-kit's guard blocked it,
+   * screenshots that show a "done when" does not work after the Builder's last round ('broken'), or a "done when" the
+   * Tester could not show on a screen after its last retake ('not-shown').
+   */
+  kind?: 'weakened' | 'no-tests' | 'bad-proof' | 'guard' | 'broken' | 'not-shown';
   /** For failed checks: which ones failed (for weakened tests: what was weakened), so continuing past them is remembered for them. */
   checks?: string[];
   /** The plain reasons, one per line on the card: "test/booking.test.ts was deleted (4 tests)". */
@@ -304,7 +340,13 @@ export interface SpecChange {
   error?: string;
 }
 
-export type Track = 'full' | 'express';
+/**
+ * full: every step. express: no questions, the plan is approved on its own. auto ("Builds by itself"): a story from an
+ * approved breakdown. Its story and done-when are approved already, the plan is approved on its own, small choices are
+ * logged in `decided` instead of asked, and it merges when the checks and the Reviewer pass. It stops only for a
+ * critical gap, a clash or a check that cannot be fixed. Release stays the person's.
+ */
+export type Track = 'full' | 'express' | 'auto';
 
 export interface AgentQuestion {
   from: 'architect' | 'builder' | 'reviewer';
@@ -315,8 +357,42 @@ export interface AgentQuestion {
   why?: string;
   /** Pictures, wireframes, an HTML mockup or other files the agent attached, as full paths it may show. */
   files?: string[];
+  /** Builds by itself: why it stopped. gap: something the person must say is missing. clash: two things disagree. */
+  kind?: 'gap' | 'clash';
+  /**
+   * Where the stop comes from, so the person sees it before deciding: a place in the BRD, an earlier answer, or a
+   * ticket whose built code it clashes with ("BRD 4.2, page 18", "RO-12 Cancel and refund").
+   */
+  sources?: { text: string; ticket?: string; page?: number; section?: string }[];
   at: string;
   answer?: string;
+  /** The question was about a busy port that another program holds: squad-kit asks in plain words, with the details for engineers. */
+  port?: PortAsk;
+}
+
+/**
+ * A program squad-kit did not start, in the Builder's way, after going around it did not work. The person reads plain
+ * words ("Stop it" or "Skip the browser tests"); this is what engineers see in the details, and what "Stop it" stops.
+ */
+export interface PortAsk {
+  port?: number;
+  pid: number;
+  program?: string;
+  /** One of the project's apps squad-kit runs from Your apps, when it is one. */
+  app?: string;
+  /** What the agent asked, word for word. */
+  asked: string;
+}
+
+/**
+ * A run that did not end by itself: the board restarted or closed, you pressed Stop, or the computer slept. It is not
+ * a failed try: the step carries on from where it was.
+ */
+export interface Interruption {
+  at: string;
+  by: 'restart' | 'stop' | 'sleep';
+  /** The step it cut off. */
+  phase: string;
 }
 
 export interface TicketBrief {
@@ -434,10 +510,20 @@ export interface Ticket {
   steps?: Step[];
   gates?: Gates;
   proof?: ProofShot[];
+  /**
+   * The "done when" items that show on no screen, with why. While the proof runs: what the Tester says, a part of one
+   * with pictures too, for squad-kit's check to judge. After it: those with no picture that the check agreed with. They
+   * do not fail the proof, unless every "done when" ends that way.
+   */
+  offScreen?: OffScreen[];
+  /** Rounds of screenshots that showed a "done when" does not work, since the last met proof (2 at most, then a stop). */
+  proofRound?: number;
   stuck?: StuckChoice;
   release?: string;
   /** One line for the release notes, written by the squad. */
   releaseNote?: string;
+  /** What the change touches that the plan did not include, in the Reviewer's plain words (board/also-changed.ts). */
+  alsoChanged?: string[];
   foundIn?: string;
   severity?: 'stops-work' | 'annoying' | 'small';
   changeRequest?: string;
@@ -476,6 +562,8 @@ export interface Ticket {
   outdated?: Outdated[];
   /** The plan is being redone to follow this decision: the build brings in the latest base first. */
   replanFor?: string;
+  /** The last run that was cut off instead of ending (see Interruption), until its step ends. */
+  interrupted?: Interruption;
   /** Set by the watchdog when a running step shows no progress: what it waits on, and whether that looks stuck. */
   quiet?: { since: string; kind: 'stuck' | 'long'; detail: string; command?: string; pid?: number; port?: QuietPort };
   /** "Keep waiting": the watchdog stays quiet about this ticket until then. */
@@ -490,8 +578,10 @@ export interface Ticket {
   weakenedContinued?: string[];
   /** The test command the Architect suggested for a project with none. The person approves it before squad-kit uses it. */
   testSuggestion?: string;
-  /** The design changes a test command the project has: it waits for the person, the checks keep the current one. */
+  /** The design changes a test command the project has: squad-kit tries it at the checks, which keep the current one until then. */
   testChange?: TestChange;
+  /** How the last change to the test command was settled, for the Developer tab. */
+  testDecided?: TestDecided;
   /** The Reviewer's notes from its last round, shown to it again with the whole change in the next round. */
   reviewAsked?: string[];
   /** The plan the Builder's conversation was given, as a short hash: a resumed Builder gets the plan again when it changed. */
@@ -553,6 +643,16 @@ export interface Ticket {
   baseWanted?: { by: string; at: string };
   /** Someone else's ticket, last seen on the remote here ("origin/squad/ro-5"): proof it came from there. */
   seenOn?: string;
+  /** The breakdown story this ticket builds (BR-1, S-14). */
+  breakdown?: { id: string; item: string };
+  /** Small choices the squad made on its own instead of asking (Builds by itself), so the person can change them. */
+  decided?: Decided[];
+  /**
+   * Builds by itself, on this computer. After its merge clashed: when the latest base last came in and how many times
+   * in all (3 at most, then the clash card, and a restart keeps the count), and since when it waits for another story
+   * that is landing. And the open change it waits for before it is accepted by itself.
+   */
+  selfAccept?: { baseTried?: string; baseTries?: number; landingSince?: string; waitsFor?: string };
   /** Its owner deleted it on their computer, and the remote shows it: Remove from my board cleans this computer only. */
   ownerDeleted?: OwnerDeleted;
 }
@@ -624,6 +724,10 @@ export interface StepClock {
   limit?: number;
   /** When the whole step began. `since` starts again with each of the Builder's plan steps. */
   began?: string;
+  /** When the step carried on after a restart: its time so far is kept, and that part does not teach the usual times. */
+  resumed?: string;
+  /** Since when the step does not run: it waits for the person, another story or a free place. That time does not count. */
+  paused?: string;
 }
 
 /** A step that ended well, kept on the ticket for "What happened" and the time each ticket took. */
@@ -762,12 +866,29 @@ export interface Blueprint {
   patterns: PatternNote[];
 }
 
-/** A change to the test command, from the Architect's design. Only the person can make it (squad test-command). */
+/** A change to the test command, from the Architect's design. squad-kit settles it by trying it (engine/test-change.ts). */
 export interface TestChange {
   from: string;
   to: string;
   /** The code repo whose command it is, in a workspace with several. */
   repo?: string;
+  at: string;
+  /** squad-kit tried it and cannot tell: it waits for the person, in plain words (squad test-command). */
+  ask?: boolean;
+  /** What the tries showed, for engineers. */
+  ran?: string;
+}
+
+/** A change to the test command that is settled: who settled it, which one stayed and why. */
+export interface TestDecided {
+  from: string;
+  to: string;
+  kept: 'new' | 'current';
+  by: 'squad' | 'you';
+  /** One plain clause. */
+  why?: string;
+  /** What the tries showed, for engineers. */
+  ran?: string;
   at: string;
 }
 
@@ -824,6 +945,8 @@ export interface BoardMeta {
   runner?: 'acp' | 'direct';
   /** Hosts the Builder's and Tester's commands may reach besides the package registries, such as a private package server. */
   allowedHosts?: string[];
+  /** What an engineer lets the project's own commands (tests, setup, the app) reach outside their copy. */
+  guard?: ProjectGuard;
   /** What the squad used on the project's own work, with no ticket: reading the project, filling in new tickets. */
   usage?: UsageLine[];
   /** Tickets deleted on this computer, with what they used. */
@@ -835,6 +958,16 @@ export interface BoardMeta {
    * folder itself is the one repo, using `commands` and `git`.
    */
   repos?: RepoInfo[];
+}
+
+/**
+ * Files and folders outside the copy the project's own commands may still use, as typed: "~/.npmrc", "/opt/shared".
+ * squad-kit's own folder never goes in. Agents cannot change it: it lives in .squad/.
+ */
+export interface ProjectGuard {
+  allowRead?: string[];
+  /** Writing there; reading it too. */
+  allowWrite?: string[];
 }
 
 export interface RepoInfo {

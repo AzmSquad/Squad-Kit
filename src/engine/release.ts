@@ -13,6 +13,7 @@ import { docsInGit, docsRepo, stageReleaseDocs } from './project-git.js';
 import { bringBack, leaveOut, leaveOutProblem } from './leave-out.js';
 import { noteRepo, notePrMerged, startJournal, type RepoJournal } from './release-resume.js';
 import { dropTicketCache } from './sandbox.js';
+import { guardSupport, projectGuardFor } from './project-guard.js';
 
 /**
  * A real release: merge every ready ticket (its pull request on the code host, or its branch locally), write the
@@ -93,6 +94,7 @@ export async function liveRelease(bp: BoardPaths, release: Release, tickets: Tic
       leave,
       note,
       merged: (id) => notePrMerged(bp, id),
+      guardFor: (dir) => (guardSupport().on ? projectGuardFor(bp, { cwd: dir, ...(meta.guard ? { allow: meta.guard } : {}) }) : undefined),
     });
     log.push(...done.log.map((l) => (multi ? { ...l, text: `${repo.path}: ${l.text}` } : l)));
     if (done.unpushed) unpushed.push(done.unpushed);
@@ -112,7 +114,7 @@ async function releaseRepo(
   env: Record<string, string>,
   docs?: (dir: string) => void,
   keep?: string,
-  extra: { leave?: Ticket[]; note?: (patch: Partial<RepoJournal> & { base: string }) => void; merged?: (id: string) => void } = {},
+  extra: { leave?: Ticket[]; note?: (patch: Partial<RepoJournal> & { base: string }) => void; merged?: (id: string) => void; guardFor?: (dir: string) => ReturnType<typeof projectGuardFor> | undefined } = {},
 ): Promise<{ log: ReleaseLog; unpushed?: UnpushedRelease }> {
   const base = repo.base || currentBranch(root);
   const remote = repo.remote || remotes(root)[0];
@@ -208,7 +210,7 @@ async function releaseRepo(
     if (release.addons.pipeline) {
       const deploy = repo.commands.deploy?.trim() || deployFallback?.trim();
       if (deploy) {
-        const r = await runCommand(dir, deploy, 20 * 60_000);
+        const r = await runCommand(dir, deploy, 20 * 60_000, extra.guardFor?.(dir) ? { guard: extra.guardFor!(dir)! } : {});
         log.push({ ok: r.ok, text: r.ok ? `Ran the pipeline: ${deploy}` : `Pipeline failed: ${tail(r.output, 3)}` });
       } else {
         log.push({ ok: false, text: 'No pipeline command is set up in Settings, so no pipeline ran' });

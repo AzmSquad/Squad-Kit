@@ -87,6 +87,7 @@ export function sizeWhy(t: Ticket): string {
   const q = t.questions?.length ?? 0;
   if (q) parts.push(`${q} ${q === 1 ? 'question' : 'questions'}`);
   if (t.track === 'express') parts.push('the Express track');
+  else if (t.track === 'auto') parts.push('a design written from the breakdown');
   else if (t.decision || t.steps?.length) parts.push('a design');
   if (t.mockup) parts.push('a mockup');
   const fixes = runsOf(t, 'fix');
@@ -178,9 +179,12 @@ export function engineerDetails(lines: UsageLine[] | undefined): { models: strin
   return { models, tokens };
 }
 
-/** The Express track tip, from the latest accepted Express ticket, or a general one when there is none yet. */
+/**
+ * The Express track tip, from the latest accepted Express ticket, or a general one when there is none yet. None on an
+ * Express ticket, nor on a story that builds by itself (its track comes with the breakdown).
+ */
 export function expressTip(t: Ticket, all: Ticket[]): string | null {
-  if (t.track === 'express') return null;
+  if (t.track === 'express' || t.track === 'auto') return null;
   const mine = totalOf(t.usage).costUsd;
   const x = all
     .filter((o) => o.id !== t.id && o.track === 'express' && accepted(o) && (totalOf(o.usage).costUsd ?? 0) > 0)

@@ -8,6 +8,7 @@ import { readInstalledPackage } from '../core/package-info.js';
 import { recentLines } from '../core/app-log.js';
 import { isSecretFile, knownSecrets, scrubSecrets } from '../core/scrub.js';
 import { zip, type ZipEntry } from '../core/zip.js';
+import { gitEnv } from './git.js';
 import { boardExists, listTickets, readMeta, readTicket, type BoardPaths } from '../board/store.js';
 import { withProblem } from '../board/problem.js';
 import type { Ticket } from '../board/types.js';
@@ -67,7 +68,7 @@ const MAX_CONVERSATION = 3 * 1024 * 1024;
 
 function run(cmd: string, args: string[]): string | null {
   try {
-    return execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 8000 }).trim() || null;
+    return execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 8000, ...(cmd === 'git' ? { env: gitEnv() } : {}) }).trim() || null;
   } catch {
     return null;
   }

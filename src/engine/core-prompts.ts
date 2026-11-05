@@ -72,10 +72,16 @@ export function corePrompts(bp: BoardPaths, role: AgentRole, ticketId?: string):
       [
         P.fixChecksPrompt([{ name: 'Tests', command: repoFor(meta, t).commands.test ?? 'npm test', output: '(the failing output goes here)' }]),
         P.reviewFixPrompt(['(the Reviewer\'s comments go here)']),
+        P.proofFixPrompt(['(what the screenshots show does not work yet goes here)']),
         P.changeFixPrompt('(what you found goes here)'),
       ].join('\n\n────────\n\n'),
-    review: () => P.reviewPrompt(meta, decisions, t, 1, ctx),
-    proof: () => P.proofPrompt(meta, t, '<the proof folder>', 'after', ctx),
+    // The review, then squad-kit's own check of the screenshots, which the Reviewer also does.
+    review: () =>
+      [
+        P.reviewPrompt(meta, decisions, t, 1, ctx),
+        P.proofCheckPrompt(t, [{ criterion: 1, file: '(the picture for "done when" 1 goes here)', note: '(what the Tester says it shows goes here)' }]),
+      ].join('\n\n────────\n\n'),
+    proof: () => P.proofPrompt(meta, t, 'after', ctx),
   };
   const agent = readAgent(bp, role);
   return {

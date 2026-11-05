@@ -154,7 +154,7 @@ describe('slow and stuck steps', () => {
 
   it('shows the Looks stuck card with what squad-kit checked, and whether the stuck command can be ended', () => {
     const t = building({
-      quiet: { since: ago(200), kind: 'stuck', detail: 'npm test has run for 6 minutes and has done nothing for 3 minutes. It may be waiting on the network or on a question.', command: 'npm test', pid: 4242 },
+      quiet: { since: ago(200), kind: 'stuck', detail: 'A command has run for 6 minutes and has done nothing for 3 minutes. It may be waiting on the network or on a question.', command: 'npm test', pid: 4242 },
     });
     const s = liveNow(t, {}, AT).slow!;
     expect(s.title).toBe('Looks stuck');
@@ -162,5 +162,8 @@ describe('slow and stuck steps', () => {
     expect(s.facts[0]).toEqual({ label: 'What we checked', value: t.quiet!.detail });
     expect(s.facts[1]).toEqual({ label: 'Your work', value: 'Safe. Everything done so far is kept.' });
     expect(s.canEnd).toBe(true);
+    // The command and its process are for engineers: in the details, not the facts.
+    expect(JSON.stringify(s.facts)).not.toMatch(/npm test|4242/);
+    expect(s.detail).toBe('Waiting on: npm test (process 4242)');
   });
 });

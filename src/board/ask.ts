@@ -177,8 +177,12 @@ function screens(t: Ticket): boolean {
   return (t.work?.screens ?? 0) > 0;
 }
 
+/** Builds by itself: the work is accepted and merged with no one pressing Looks right. */
+const MERGES_AR = 'يقبل الفريق العمل ويدمجه تلقائيًا.';
+
 function thenAr(t: Ticket, now: LiveNow): string {
   const shots = screens(t) ? '، ثم يلتقط المختبِر صورة لكل شرط إنجاز' : '';
+  const ready = t.track === 'auto' ? MERGES_AR : 'الإثبات جاهز لتراجعه.';
   const p = now.part;
   switch (now.step) {
     case 'questions':
@@ -186,7 +190,11 @@ function thenAr(t: Ticket, now: LiveNow): string {
     case 'spec':
       return 'تقرأ المواصفات وتوافق عليها، ثم يكتب المعماري التصميم.';
     case 'design':
-      return t.track === 'express' ? 'المسار السريع: تُعتمد الخطة تلقائيًا، ثم يبدأ المطوّر وتليه الفحوصات والمراجعة.' : 'تقرأ التصميم وتوافق عليه، ثم يبدأ المطوّر.';
+      return t.track === 'express'
+        ? 'المسار السريع: تُعتمد الخطة تلقائيًا، ثم يبدأ المطوّر وتليه الفحوصات والمراجعة.'
+        : t.track === 'auto'
+          ? 'مسار «Builds by itself»: تُعتمد الخطة تلقائيًا، ثم يبدأ المطوّر وتليه الفحوصات والمراجعة.'
+          : 'تقرأ التصميم وتوافق عليه، ثم يبدأ المطوّر.';
     case 'build':
       return p && p.n < p.of ? `يكمل المطوّر الخطوة ${p.n + 1} من ${p.of}، ثم تعمل الفحوصات تلقائيًا ويقرأ مراجع جديد العمل${shots}.` : `تعمل الفحوصات تلقائيًا ويقرأ مراجع جديد العمل${shots}.`;
     case 'fix':
@@ -194,9 +202,9 @@ function thenAr(t: Ticket, now: LiveNow): string {
     case 'checks':
       return `يقرأ المراجع، وهو وكيل جديد، التغييرات${shots}.`;
     case 'review':
-      return screens(t) ? 'يلتقط المختبِر صورة لكل شرط إنجاز.' : 'الإثبات جاهز لتراجعه.';
+      return screens(t) ? 'يلتقط المختبِر صورة لكل شرط إنجاز.' : ready;
     default:
-      return 'الإثبات جاهز لتراجعه.';
+      return ready;
   }
 }
 
@@ -338,6 +346,7 @@ function whenLines(t: Ticket, now: LiveNow, book: UsualBook, lang: AskLang): str
         : [`It is taking longer than usual, so it is hard to say. ${now.slow?.text ?? `${who} has been on this step for ${minutesWords(now.seconds ?? 0)}.`}`];
     }
     const what = now.readyIn.what;
+    if (t.track === 'auto') return ar ? [`غالبًا ${arIn(now.readyIn.seconds)}. بعدها ${MERGES_AR}`] : [`Probably ${inAbout(now.readyIn.seconds)}. Then it is accepted and merged by itself.`];
     return ar ? [`غالبًا ${arIn(now.readyIn.seconds)}. بعدها سنطلب منك ${NEED_AR[what] ?? what}.`] : [`Probably ${inAbout(now.readyIn.seconds)}. Then you will be asked to ${what}.`];
   }
   if (now.state === 'you') return ar ? [`التذكرة بانتظارك الآن: تحتاج ${t.waiting ? YOUR_PART_AR[t.waiting.kind] : YOUR_PART_AR.yours}.`] : [`It is waiting for you now: ${lowerFirst(t.waiting?.summary ?? 'give it back when you are done')}.`];
@@ -361,6 +370,7 @@ function nextLines(t: Ticket, now: LiveNow, lang: AskLang): string[] {
   const ar = lang === 'ar';
   if (now.state === 'working' && now.readyIn) {
     if (!ar) return [now.next ?? ''];
+    if (t.track === 'auto') return [thenAr(t, now), `يُقبل العمل ويُدمج تلقائيًا ${arIn(now.readyIn.seconds)}. لا شيء مطلوب منك الآن.`];
     return [thenAr(t, now), `بعدها سنطلب منك ${NEED_AR[now.readyIn.what] ?? now.readyIn.what} ${arIn(now.readyIn.seconds)}. لا شيء مطلوب منك الآن.`];
   }
   if (now.state === 'you') return ar ? [`يتابع الفريق بعد ${t.waiting ? YOUR_PART_AR[t.waiting.kind] : YOUR_PART_AR.yours}.`] : [now.next ?? now.sentence];

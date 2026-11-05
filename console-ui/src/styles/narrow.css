@@ -3,20 +3,22 @@
 .canvas { container: canvas / inline-size; }
 .drawer { container: drawer / inline-size; }
 
+/* Full width: the open ticket covers the whole board area. The sidebar and the banners stay. */
+.canvas .drawer.full { width: 100%; border-left: 0; }
+/* The ticket's id and its tracker link never break inside, at any width; the header wraps between them instead. */
+.drawer .dtop { flex-wrap: wrap; row-gap: 8px; }
+.drawer .dtop .idtag, .drawer .dtop .src { white-space: nowrap; flex: none; }
+.drawer .dacts { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+
 @container canvas (max-width: 820px) {
   /* The ticket takes the whole board area. */
   .canvas .drawer { width: 100%; border-left: 0; }
-  /* The Waiting for you banner: its items scroll sideways in one row, each with its button under the words. */
-  .canvas .ybar { padding: 10px 16px 12px; }
-  .canvas .ybar-h .sub, .canvas .ybar-h .term, .canvas .ymore-row { display: none; }
-  .canvas .ymore-up { display: inline; }
-  .canvas .ybar-items,
-  .canvas .ybar-items.n2,
-  .canvas .ybar-items.more,
-  .canvas .ybar-items.n2.more { display: flex; gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 2px; }
-  .canvas .ybar-items > .yitem { flex: 0 0 min(86%, 340px); scroll-snap-align: start; }
-  .canvas .yitem { flex-direction: column; align-items: stretch; gap: 8px; }
-  .canvas .yitem .btn { align-self: flex-start; }
+  /* It already fills the board area here. */
+  .canvas .drawer .fullbtn { display: none; }
+  /* The Waiting for you banner: its items scroll sideways in the row, and the notice question waits for more room. */
+  .canvas .ybar-ask { display: none; }
+  .canvas .ybar-items { overflow-x: auto; scrollbar-width: none; scroll-snap-type: x mandatory; }
+  .canvas .ybar-items > .yitem { flex: 0 0 min(86%, 320px); scroll-snap-align: start; }
 }
 
 @container drawer (max-width: 640px) {
@@ -27,6 +29,7 @@
   .drawer .dtop .btn { flex: none; white-space: nowrap; }
   /* The buttons go together on their own row, under the id, with Close at its end. */
   .drawer .dtop .grow { flex-basis: 100%; height: 0; }
+  .drawer .dacts { margin-left: 0; flex-wrap: wrap; }
   .drawer .dh h2 { font-size: 23px; }
   /* The stages: short names, and the times under them only for the stage you are in. */
   .drawer .ts { font-size: 11px; min-width: 0; text-align: center; }
@@ -40,4 +43,12 @@
   .drawer .youbox { flex-wrap: wrap; row-gap: 12px; }
   .drawer .youbox > div { flex: 1 1 220px; min-width: 0; }
   .drawer .youbox > .grow { display: none; }
+}
+
+/* With a ticket open, the small "conversations" card shrinks to its avatar and Open button and sits above the
+   ticket's bottom bar, so it never covers the ticket's buttons. */
+.app:has(.drawer) .cmini { bottom: 104px; }
+.app:has(.drawer) .cmini > div { display: none; }
+@media (max-width: 760px) {
+  .app:has(.drawer) .cmini { bottom: 150px; }
 }

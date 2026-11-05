@@ -1,4 +1,5 @@
 import type { FirstLook, FolderKind } from './onboard-types';
+import type { Decided } from './requirements-types';
 
 // Mirrors src/board/types.ts on the server. Keep the two in step.
 
@@ -170,18 +171,50 @@ export type GateState = 'pending' | 'pass' | 'fail' | 'skipped' | 'unchecked';
 export interface Gates {
   checks: GateState;
   checksText?: string;
+  /** What the checks ran, for engineers. */
+  ran?: { name: string; command: string; ok: boolean; tests?: number; failedOnce?: boolean }[];
   review: GateState;
   reviewBy?: string;
   proof: GateState;
 }
 
+/** Another after picture of a "done when": a part or case its main picture does not show. */
+export interface ProofPicture {
+  after: string;
+  /** Where it was taken, like a row's page. */
+  page?: string;
+  /** What it shows, one plain sentence from the Tester. */
+  note?: string;
+}
+
 export interface ProofShot {
   criterion: string;
   before: string;
+  /** The main after picture: the one the before pairs with. */
   after: string;
   beforeLabel: string;
   afterLabel: string;
+  /** What the main after picture shows. */
   note?: string;
+  /** Where the main after picture was taken, as the address in the app without the host, like "/test/sign-up". */
+  page?: string;
+  /** The other after pictures of this "done when", one per part or case. Rows with one picture have none. */
+  more?: ProofPicture[];
+  /**
+   * What all its after pictures show together, from the Tester's verdict and squad-kit's own check of them: the "done
+   * when" is met, "broken" (a picture shows it does not work) or "not-shown" (the pictures do not show all of it clearly).
+   * "off-screen": the Tester and the check agree the rest of it cannot be shown at all, so the pictures that show a part
+   * stay and it does not stop the story. Only broken goes back to the Builder. Rows from before verdicts have none.
+   */
+  shows?: 'met' | 'broken' | 'not-shown' | 'off-screen';
+  /** Why it is not met yet, in plain words: the Tester's note or squad-kit's check. */
+  why?: string;
+}
+
+/** A "done when" that shows on no screen (it happens on a restart, in an email), with why in plain words. */
+export interface OffScreen {
+  criterion: string;
+  why: string;
 }
 
 export type WayOut = 'retry' | 'yourself' | 'continue' | 'plan' | 'skip-pr' | 'more' | 'stop' | 'add-test' | 'no-tests';
@@ -191,6 +224,10 @@ export interface SandboxInfo {
   tools: { tool: string; available: boolean; why: string; fix?: string }[];
   registries: string[];
   allowedHosts: string[];
+  /** Set where the agents' own commands or the project's own have no guard (Windows today): "Windows: less protected", in plain words. */
+  note?: { title: string; text: string };
+  /** squad-kit's own guard for the project's tests, setup and app on this computer, and what an engineer allowed. */
+  guard?: { on: boolean; why: string; fix?: string; allowRead: string[]; allowWrite: string[] };
 }
 
 export interface StuckChoice {
@@ -199,8 +236,8 @@ export interface StuckChoice {
   options: (DecisionOption & { do?: WayOut })[];
   /** 'cap': the step reached its turn or spend cap; Give it more or Stop. */
   gate?: 'checks' | 'review' | 'proof' | 'merge' | 'cap';
-  /** Why the gate stopped, when it is not a plain failure. */
-  kind?: 'weakened' | 'no-tests' | 'bad-proof';
+  /** Why the gate stopped, when it is not a plain failure. 'guard': a project command needed a file squad-kit's guard blocked. */
+  kind?: 'weakened' | 'no-tests' | 'bad-proof' | 'guard' | 'broken' | 'not-shown';
   /** The plain reasons, one per line: "test/booking.test.ts was deleted (4 tests)". */
   points?: string[];
   /** The ticket stopped between two steps at its budget, or the month's. */
@@ -244,7 +281,8 @@ export interface TicketSessions {
   tester?: string;
 }
 
-export type Track = 'full' | 'express';
+/** auto: "Builds by itself", a story started from an approved breakdown. */
+export type Track = 'full' | 'express' | 'auto';
 
 export interface TicketNote {
   at: string;
@@ -292,8 +330,10 @@ export interface Ticket {
   /** Installing packages and running migrations in the person's own checkout, after the merge moved it. */
   /** Decisions approved after this ticket was planned that change it, waiting for the person. */
   outdated?: { adr: string; why: string; change: string; at: string }[];
-  /** The Architect's design changes the test command: it waits for the person (squad test-command). */
-  testChange?: { from: string; to: string; repo?: string; at: string };
+  /** The design changes the test command: squad-kit tries it at the checks. `ask`: it cannot tell, so the person chooses. */
+  testChange?: { from: string; to: string; repo?: string; at: string; ask?: boolean; ran?: string };
+  /** How the last change to the test command was settled, for the Developer tab. */
+  testDecided?: { from: string; to: string; kept: 'new' | 'current'; by: 'squad' | 'you'; why?: string; ran?: string; at: string };
   replanFor?: string;
   /** When the change went into the base branch. */
   mergedAt?: string;
@@ -322,10 +362,16 @@ export interface Ticket {
   steps?: Step[];
   gates?: Gates;
   proof?: ProofShot[];
+  /** The "done when" items the Tester said show on no screen, with why. They do not fail the proof. */
+  offScreen?: OffScreen[];
+  /** Rounds of screenshots that showed a "done when" does not work, since the last met proof (2 at most, then a stop). */
+  proofRound?: number;
   stuck?: StuckChoice;
   release?: string;
   /** One line for the release notes, written by the squad. */
   releaseNote?: string;
+  /** What the change touches that the plan did not include, in the Reviewer's plain words. */
+  alsoChanged?: string[];
   foundIn?: string;
   severity?: 'stops-work' | 'annoying' | 'small';
   changeRequest?: string;
@@ -347,7 +393,21 @@ export interface Ticket {
   specApproved?: { by: string; at: string };
   takenOver?: { by: string; at: string; session: string; cwd: string };
   track?: Track;
-  agentQuestion?: { from: 'architect' | 'builder' | 'reviewer'; text: string; options: string[]; why?: string; files?: string[]; at: string; answer?: string };
+  agentQuestion?: {
+    from: 'architect' | 'builder' | 'reviewer';
+    text: string;
+    options: string[];
+    why?: string;
+    files?: string[];
+    /** Builds by itself: why it stopped. gap: something is missing. clash: two things disagree. */
+    kind?: 'gap' | 'clash';
+    /** Where the stop comes from: a place in the BRD, an earlier answer, or a ticket it clashes with. */
+    sources?: { text: string; ticket?: string; page?: number; section?: string }[];
+    at: string;
+    answer?: string;
+    /** A busy port another program holds: asked in plain words, the details are for engineers. */
+    port?: { port?: number; pid: number; program?: string; app?: string; asked: string };
+  };
   mockup?: string;
   chat?: AgentChat;
   planReview?: { before?: PlanSnapshot; sent?: PlanComment[]; edits?: (PlanPart & { text?: string; criterion?: Criterion })[] };
@@ -376,7 +436,7 @@ export interface Ticket {
   /** "Stop and try again": once the running step has stopped, it starts again at once. */
   retryOnStop?: boolean;
   /** The step running now, as the engine keeps it. */
-  clock?: { who: AgentName | 'squad'; step: TimedStep; since: string; part?: number; doing?: string; doingAt?: string; limit?: number; began?: string };
+  clock?: { who: AgentName | 'squad'; step: TimedStep; since: string; part?: number; doing?: string; doingAt?: string; limit?: number; began?: string; resumed?: string; paused?: string };
   /** What is happening now, in words, worked out by squad-kit from the live record. */
   now?: LiveNow;
   /** A merged or released ticket off the board. Its history stays. */
@@ -387,6 +447,10 @@ export interface Ticket {
   dependsOn?: string[];
   /** How the person chose to build while one of them was not merged. */
   dependency?: DependencyChoice;
+  /** The breakdown story this ticket builds (BR-1, S-14). */
+  breakdown?: { id: string; item: string };
+  /** Small choices the squad made on its own instead of asking (Builds by itself). */
+  decided?: Decided[];
   /** "Bring in latest main" was pressed while a step ran: it comes in before the next checks. */
   baseWanted?: { by: string; at: string };
   /** Someone else's ticket that its owner deleted on their computer, as the remote shows it. */
@@ -434,8 +498,10 @@ export interface SlowCard {
   facts: { label: string; value: string }[];
   limit?: string;
   canEnd: boolean;
-  /** The app's port is held by a program squad-kit started: it may stop it, after a confirm. */
+  /** A program squad-kit started holds up the app: it may stop it, after a confirm. */
   freePort?: { port: number; what: string };
+  /** The command, the port and the process, for engineers. */
+  detail?: string;
 }
 
 /** What is happening on a ticket now: the card's lines, the Now tab's sentence, and what comes next. */
@@ -601,6 +667,8 @@ export interface BoardMeta {
   runner?: 'acp' | 'direct';
   /** Hosts the Builder's and Tester's commands may reach besides the package registries. */
   allowedHosts?: string[];
+  /** What an engineer lets the project's own commands (tests, setup, the app) reach outside their copy. */
+  guard?: { allowRead?: string[]; allowWrite?: string[] };
   /** What the squad used on the project's own work, with no ticket. */
   usage?: UsageLine[];
   /** Spending limits in US dollars, used when the person pays per use. */
@@ -861,8 +929,11 @@ export interface ProjectApp {
   address?: string;
   startedAt?: string;
   since?: string;
+  /** Why it failed, in one plain sentence. */
   error?: string;
-  busy?: { port: number; program?: string; pid?: number; ours: boolean; nextPort?: number };
+  /** What failed, for engineers ("See what failed"). */
+  detail?: string;
+  busy?: { port: number; program?: string; pid?: number; ours: boolean };
   commit?: string;
   dir: string;
   elsewhere?: boolean;
@@ -996,4 +1067,22 @@ export interface ReportPlan {
   never: string;
   command: string;
   file?: string;
+}
+
+/** Try it yourself: the ticket's own copy of the app, while it waits for your check (src/engine/try-app.ts). */
+export interface TryStatus {
+  ticket: string;
+  state: 'off' | 'starting' | 'running' | 'failed';
+  url?: string;
+  /** Each page of "Where to look" at the copy's address, while it runs. */
+  pages?: { page: string; url: string }[];
+  since?: string;
+  /** Why it did not start, in plain words. */
+  error?: string;
+  /** What it printed, for engineers ("See what failed"). */
+  detail?: string;
+  /** Another ticket's copy runs now: starting this one stops it. */
+  other?: string;
+  can: boolean;
+  why?: string;
 }

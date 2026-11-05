@@ -16,14 +16,17 @@ import { AllowedHosts, SandboxRows } from '../components/Sandbox';
 import { Cmd, Glyph, Modal, STAGE_NAME, actionLabel, ago, commandFor, outdatedLine } from '../components/ui';
 import { changeWaits, openChange } from '../components/ChangeCard';
 import { NoticeSetting } from '../components/Waiting';
-import { needsYou, testChangeLine } from '../lib/waiting';
+import { needsYou, testChangeLine, testChangeWaits } from '../lib/waiting';
 import { withoutComments } from '../lib/text';
+import { BreakdownWaitCard, WaitStopTag, useBreakdownWaits } from '../components/BreakdownWaits';
+import { stopKind } from '../lib/auto';
 
 /* ── Waiting for you ───────────────────────────────────── */
 
 export function InboxPage() {
   const board = useBoard();
   const tickets = board.data?.ready ? board.data.tickets.filter(needsYou) : [];
+  const breakdowns = useBreakdownWaits();
   return (
     <>
       <div className="top">
@@ -33,7 +36,7 @@ export function InboxPage() {
       </div>
       <div className="scroll">
         <div className="page">
-          {tickets.length === 0 ? (
+          {tickets.length + breakdowns.length === 0 ? (
             <div className="calm">
               <span className="ring"><Check size={18} strokeWidth={2.5} /></span>
               <div>
@@ -43,18 +46,22 @@ export function InboxPage() {
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {breakdowns.map((w) => (
+                <BreakdownWaitCard key={w.id} w={w} />
+              ))}
               {tickets.map((t) => (
                 <div key={t.id} className="wcard" style={{ padding: '16px 18px 16px 22px' }}>
                   <div className="grow">
                     <div className="meta">
                       <span className="id">{t.id}</span>
+                      <WaitStopTag t={t} />
                       <span>{STAGE_NAME[t.stage]}</span>
                       <span>{ago(t.activity[0]?.at ?? t.createdAt)}</span>
                     </div>
                     <h3>{t.title}</h3>
-                    <p>{t.waiting?.summary ?? (changeWaits(t) ? `Change ${openChange(t)!.id} to the spec waits for you` : t.testChange ? testChangeLine(t) : t.outdated?.length ? outdatedLine(t) : `Looks stuck: ${t.quiet?.detail ?? 'no progress'}`)}</p>
+                    <p>{stopKind(t) && t.agentQuestion ? `“${t.agentQuestion.text}”` : t.waiting?.summary ?? (changeWaits(t) ? `Change ${openChange(t)!.id} to the spec waits for you` : testChangeWaits(t) ? testChangeLine(t) : t.outdated?.length ? outdatedLine(t) : `Looks stuck: ${t.quiet?.detail ?? 'no progress'}`)}</p>
                   </div>
-                  <Cmd text={!t.waiting && changeWaits(t) ? `squad propose ${t.id} --approve` : !t.waiting && t.testChange ? `squad test-command ${t.id} --use` : commandFor(t)} />
+                  <Cmd text={!t.waiting && changeWaits(t) ? `squad propose ${t.id} --approve` : !t.waiting && testChangeWaits(t) ? `squad test-command ${t.id} --use` : commandFor(t)} />
                   {t.waiting?.kind === 'proof' ? (
                     <Link to="/tickets/$id/proof" params={{ id: t.id }} className="btn pri sm">{actionLabel(t)}</Link>
                   ) : (

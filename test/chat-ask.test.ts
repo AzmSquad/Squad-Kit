@@ -150,7 +150,8 @@ describe('stop and try again', () => {
     vi.spyOn(LiveSquad.prototype as unknown as { runAgent(): Promise<unknown> }, 'runAgent').mockRejectedValueOnce(new Error('The connection dropped'));
     await (new LiveSquad(bp) as unknown as Squad).chatReply(t0.id);
     const last = readTicket(bp, t0.id)!.chat!.messages.at(-1)!;
-    expect(last).toMatchObject({ who: 'squad', note: 'failed', text: 'Could not answer: The connection dropped' });
+    // The raw error stays for engineers (the app log): the person reads one plain line.
+    expect(last).toMatchObject({ who: 'squad', note: 'failed', text: 'Could not answer this time. Press Try again.' });
     const t = actions.chatRetry(bp, t0.id);
     expect(t.chat!.thinking).toBe(true);
     expect(t.chat!.messages.some((m) => m.who === 'squad')).toBe(false);

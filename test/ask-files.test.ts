@@ -61,7 +61,7 @@ describe('the "Ask you" card with files', () => {
     const wire = path.join(copy, 'wireframe.png');
     fs.writeFileSync(wire, 'png');
     const squad = new LiveSquad(bp) as unknown as Steps;
-    answers.push({ ...DESIGN, question: { text: 'Should the switch sit in the top bar or in settings?', options: ['Top bar', 'Settings'], files: [wire, '/etc/hosts'] } });
+    answers.push({ ...DESIGN, question: { text: 'Should the switch sit in the top bar or in settings?', options: ['Top bar', 'Settings'], files: [wire, '/etc/hosts'], kind: 'gap' } });
     await expect(squad.step(t0.id, 'plan-write')).rejects.toThrow(/Waiting for your answer/);
     let t = readTicket(bp, t0.id)!;
     expect(t.waiting?.kind).toBe('ask');

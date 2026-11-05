@@ -4,13 +4,22 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { RunOptions, RunResult } from '../src/modules/claude/direct.js';
-import { pngBytes } from './support/png.js';
+import type { BrowserModule } from '../src/modules/browser/types.js';
+import { fakeBrowser } from './fakes/browser.js';
+import { tinyApp } from './support/tiny-app.js';
+import { callTool, savedFiles } from './support/window.js';
 
 /**
  * No silent hangs in the live squad (E1): a ticket waiting for a free place says so, Stop during the checks ends
  * them at once, the Builder never waits for the "before" screenshots, and a restart waits for runs to end.
  * Every agent run here is a fake that the test answers.
  */
+
+const h = vi.hoisted(() => ({ browser: null as BrowserModule | null }));
+vi.mock('../src/modules/registry.js', async (orig) => ({
+  ...(await orig<typeof import('../src/modules/registry.js')>()),
+  shotBrowser: () => h.browser!,
+}));
 
 type Run = { opts: RunOptions; page?: string; end(r?: Partial<RunResult>): void };
 const runs: Run[] = [];
@@ -159,9 +168,11 @@ describe.skipIf(process.platform === 'win32')('Stop during the checks', () => {
 });
 
 describe.skipIf(process.platform === 'win32')('the "before" screenshots', () => {
-  /** A ticket ready to build, with one screen to show, and an app that cannot start (so no real browser is needed). */
-  function readyToBuild() {
-    const bp = liveProject('shots', { start: 'exit 3', url: 'http://127.0.0.1:47393' });
+  /** A ticket ready to build, with one screen to show, a tiny app, and squad-kit's browser faked. */
+  async function readyToBuild() {
+    const app = await tinyApp();
+    h.browser = fakeBrowser({ '/': { has: ['text:ok'] } }).module;
+    const bp = liveProject('shots', { start: app.start, url: app.url });
     const t = createTicket(bp, { title: 'Say new' });
     const wt = addWorktree(bp.root, t.id, 'main');
     updateTicket(bp, t.id, (x) => {
@@ -179,7 +190,7 @@ describe.skipIf(process.platform === 'win32')('the "before" screenshots', () => 
   type Squad = { build(id: string): Promise<void>; beforeShotsOf: Map<string, Promise<void>> };
 
   it('run beside the build, from a copy of the code as it was, and the copy goes after', async () => {
-    const { bp, t, wt } = readyToBuild();
+    const { bp, t, wt } = await readyToBuild();
     // The Builder changes the ticket's copy and finishes at once; the Tester waits for the test.
     answer = (opts) => {
       if (opts.cwd !== wt.dir) return null;
@@ -200,10 +211,10 @@ describe.skipIf(process.platform === 'win32')('the "before" screenshots', () => 
     expect(tester.page).toBe('old');
     expect(fs.readFileSync(path.join(wt.dir, 'page.txt'), 'utf8')).toBe('new');
 
-    const file = `${t.id.toLowerCase()}-before-1.png`;
-    fs.mkdirSync(bp.proofDir, { recursive: true });
-    fs.writeFileSync(path.join(bp.proofDir, file), pngBytes());
-    tester.end({ ok: true, structured: { shots: [{ criterion: 1, file }] } });
+    // The Tester takes the picture with squad-kit's own tools, over the run's window.
+    const [file] = savedFiles(await callTool(tester.opts.window!, 'take_screenshots', { shots: [{ page: '/' }] }));
+    expect(file).toBe(`${t.id.toLowerCase()}-before-1.png`);
+    tester.end({ ok: true, structured: { shots: [{ criterion: 1, file, shows: 'not-shown', note: 'The page as it was.' }], offScreen: [] } });
     await squad.beforeShotsOf.get(t.id);
     expect(readTicket(bp, t.id)!.proof).toEqual([expect.objectContaining({ criterion: 'It says new', before: file })]);
     expect(fs.existsSync(snapshotOf(bp, t.id))).toBe(false);
@@ -211,18 +222,20 @@ describe.skipIf(process.platform === 'win32')('the "before" screenshots', () => 
   }, 20_000);
 
   it('say so when they could not be taken', async () => {
-    const { bp, t, wt } = readyToBuild();
+    const { bp, t, wt } = await readyToBuild();
     answer = (opts) => (opts.cwd === wt.dir ? { ok: true, structured: { summary: 'Done' } } : { ok: false, error: 'No browser here.' });
     const squad = new LiveSquad(bp) as unknown as Squad;
     await squad.build(t.id);
     await squad.beforeShotsOf.get(t.id);
     const lines = readTicket(bp, t.id)!.activity.map((a) => a.text);
-    expect(lines).toContain('Could not take the before screenshots: No browser here.');
+    expect(lines).toContain('Could not take the before screenshots, so the proof shows the screens after the change only');
+    // The tool's own words are for engineers, never the activity.
+    expect(lines.join('\n')).not.toContain('No browser here.');
     expect(fs.existsSync(snapshotOf(bp, t.id))).toBe(false);
   }, 20_000);
 
   it('end on Stop, quietly, and the copy goes', async () => {
-    const { bp, t, wt } = readyToBuild();
+    const { bp, t, wt } = await readyToBuild();
     answer = (opts) => (opts.cwd === wt.dir ? { ok: true, structured: { summary: 'Done' } } : null);
     const squad = new LiveSquad(bp) as unknown as Squad & { stops: Map<string, AbortController> };
     await squad.build(t.id);

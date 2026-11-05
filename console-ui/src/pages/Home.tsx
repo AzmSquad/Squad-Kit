@@ -9,7 +9,8 @@ import { Cmd, Modal, STAGE_NAME, actionLabel, ago, commandFor, outdatedLine } fr
 import { AboutButton, AppUpdate } from '../components/Update';
 import { LimitBanner } from '../components/UsageLimit';
 import { HomeWaiting } from '../components/Waiting';
-import { changeWaits, openChange, testChangeLine } from '../lib/waiting';
+import { BreakdownWaitCard, useAllBreakdownWaits } from '../components/BreakdownWaits';
+import { changeWaits, openChange, testChangeLine, testChangeWaits } from '../lib/waiting';
 
 /**
  * Home of the one app (ADR-001): one Waiting for you list across every project, then the projects, and Add project
@@ -39,6 +40,9 @@ export function HomePage() {
   const [removing, setRemoving] = useState<AppProject | null>(null);
   const list = projects.data?.projects ?? [];
   const items = waiting.data?.items ?? [];
+  // Breakdowns whose Analyst has questions, in every project: the same cards a project's Waiting for you shows.
+  const breakdowns = useAllBreakdownWaits();
+  const count = items.length + breakdowns.length;
 
   return (
     <div className="home">
@@ -83,11 +87,11 @@ export function HomePage() {
           <section className="home-inbox" id="waiting">
             <div className="home-h">
               <h2>Waiting for you</h2>
-              {items.length > 0 && <span className="badge you">{items.length}</span>}
+              {count > 0 && <span className="badge you">{count}</span>}
               <span className="grow" />
               <Cmd text="squad inbox" />
             </div>
-            {items.length === 0 ? (
+            {count === 0 ? (
               <div className="calm">
                 <span className="ring"><Check size={18} strokeWidth={2.5} /></span>
                 <div>
@@ -97,6 +101,9 @@ export function HomePage() {
               </div>
             ) : (
               <div className="home-waiting">
+                {breakdowns.map((w) => (
+                  <BreakdownWaitCard key={`${w.project?.id ?? ''}/${w.id}`} w={w} />
+                ))}
                 {items.map(({ project, ticket: t }) => (
                   <div key={`${project.id}/${t.id}`} className="wcard">
                     <div className="grow">
@@ -107,7 +114,7 @@ export function HomePage() {
                         <span>{ago(t.activity[0]?.at ?? t.createdAt)}</span>
                       </div>
                       <h3>{t.title}</h3>
-                      <p>{t.waiting?.summary ?? (changeWaits(t) ? `Change ${openChange(t)!.id} to the spec waits for you` : t.testChange ? testChangeLine(t) : t.outdated?.length ? outdatedLine(t) : `Looks stuck: ${t.quiet?.detail ?? ''}`)}</p>
+                      <p>{t.waiting?.summary ?? (changeWaits(t) ? `Change ${openChange(t)!.id} to the spec waits for you` : testChangeWaits(t) ? testChangeLine(t) : t.outdated?.length ? outdatedLine(t) : `Looks stuck: ${t.quiet?.detail ?? ''}`)}</p>
                     </div>
                     <Cmd text={forProject(commandFor(t), project.name)} />
                     <a
@@ -180,7 +187,7 @@ function ProjectCard({ p, onRemove }: { p: AppProject; onRemove(): void }) {
   const state = !p.open ? (
     <span className="bad">Could not open: {p.why}</span>
   ) : p.setup?.ready && !p.setup.approved ? (
-    <span className="you">Your project overview is ready to check</span>
+    <span className="you">{p.setup.line ?? 'Your project overview is ready to check'}</span>
   ) : p.setup?.line && !p.setup.approved ? (
     <span className={p.setup.status === 'failed' ? 'bad' : 'you'}>{p.setup.line}</span>
   ) : setup?.status === 'failed' ? (
@@ -225,8 +232,8 @@ function ProjectCard({ p, onRemove }: { p: AppProject; onRemove(): void }) {
 
 /** The other kinds of folder, said in a line each under what squad-kit found here. */
 const ALSO: { kind: FolderListing['kind']; name: string; text: string }[] = [
-  { kind: 'empty', name: 'An empty folder', text: 'Start from an idea. The Architect proposes the stack for you to approve.' },
-  { kind: 'older', name: 'An older squad-kit', text: 'Your specs, plans and decisions are moved to the new layout. Nothing is lost.' },
+  { kind: 'empty', name: 'An empty folder', text: 'Start from an idea: squad-kit asks what you want to build.' },
+  { kind: 'older', name: 'An older squad-kit', text: 'Your specs, plans and decisions stay where they are. squad-kit adds its own files beside them.' },
   { kind: 'repos', name: 'Several repos', text: 'squad-kit reads each one and shows you how they fit together.' },
 ];
 

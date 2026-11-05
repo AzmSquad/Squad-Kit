@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fakeAzureDevOps } from './fakes/azure-devops.js';
-import { trackerContract } from './contracts/tracker.js';
+import { trackerContract, trackerCreateContract } from './contracts/tracker.js';
 import { codeHostContract } from './contracts/code-host.js';
 import { speechContract } from './contracts/speech.js';
 import { Azure } from '../src/modules/azure/client.js';
@@ -11,6 +11,7 @@ import { AzureTracker } from '../src/modules/azure/tracker.js';
 import { AzureRepo } from '../src/modules/azure/code-host.js';
 import { munsitSpeech } from '../src/modules/munsit/speech.js';
 import { AI_TOOLS } from '../src/modules/registry.js';
+import { demoTracker } from '../src/board/demo-tracker.js';
 
 /** Every product module runs the shared tests of its kind (ADR-002). */
 
@@ -25,6 +26,12 @@ trackerContract('Azure Boards', () => {
     refused: new AzureTracker(new Azure(target('wrong'), fake.fetch)),
   };
 });
+
+for (const process of ['Agile', 'Scrum', 'CMMI', 'Basic'] as const) {
+  trackerCreateContract(`Azure Boards (${process})`, () => new AzureTracker(new Azure(target('secret'), fakeAzureDevOps('secret', { process }).fetch)));
+}
+
+trackerCreateContract('The demo tracker', () => demoTracker());
 
 codeHostContract('Azure Repos', () => {
   const fake = fakeAzureDevOps('secret');

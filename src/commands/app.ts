@@ -25,12 +25,12 @@ function board(): BoardPaths {
   return bp;
 }
 
-interface BoardApi {
+export interface BoardApi {
   call<T>(method: 'GET' | 'POST' | 'PUT', path: string, payload?: unknown): Promise<T>;
 }
 
 /** The open board's API for this project, or null when squad-kit is not open. */
-function boardApi(bp: BoardPaths): BoardApi | null {
+export function boardApi(bp: BoardPaths): BoardApi | null {
   const c = runningConsole(bp);
   if (!c?.port || !c.token) return null;
   const base = `http://127.0.0.1:${c.port}/p/${encodeURIComponent(bp.projectId)}/api/v1`;
@@ -85,14 +85,13 @@ function stepLine(s: AppView): string {
   return `Getting the newest ${s.base}`;
 }
 
-/** The busy port, in plain words, with the way out. */
+/** The busy port: the plain sentence, the program and the port for engineers, and the way out. */
 function busyLines(s: AppView, ref: string): void {
   const b = s.busy!;
-  const who = b.program ? ` It is ${b.program} (process ${b.pid}).` : '';
-  ui.failure(`${s.error}.${who}`);
+  ui.failure(s.error ?? 'Another program is in the way.');
+  if (s.detail) out(kleur.gray(`  ${s.detail}`));
   if (b.ours) out(`  squad-kit started it. Stop it and start ${s.name}: ${cmd(`squad app start${ref} --stop-other`)}`);
-  if (b.nextPort) out(`  Or run ${s.name} on port ${b.nextPort} instead: ${cmd(`squad app start${ref} --next-port`)}`);
-  if (!b.ours && !b.nextPort) {
+  else {
     out(`  Close that program, then start again: ${cmd(`squad app start${ref}`)}`);
     out(`  Or give ${s.name} another address: ${cmd(`squad app set${ref} --url http://localhost:${b.port + 1}`)}`);
   }
@@ -118,7 +117,8 @@ function report(bp: BoardPaths, s: AppView, lines: string[] = []): boolean {
   }
   ui.failure(`${s.name} did not start: ${s.error ?? 'it stopped'}`);
   const last = lines.filter((l) => l.trim()).slice(-12);
-  if (last.length) {
+  if (s.detail) for (const l of s.detail.split('\n').slice(-12)) out(kleur.gray(`  ${l}`));
+  else if (last.length) {
     out(kleur.gray('  The last lines it printed:'));
     for (const l of last) out(kleur.gray(`    ${l}`));
   }

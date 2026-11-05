@@ -60,7 +60,7 @@ describe('an agent asks you in the middle of its work', () => {
   it('the Reviewer pauses the ticket, and your answer goes back into the same session', async () => {
     const t = inReview();
     const squad = new LiveSquad(bp) as unknown as { review(id: string, answered?: boolean): Promise<void> };
-    answers.push({ approved: false, summary: '', comments: [], question: { text: 'Should cancelled bookings count?', options: ['Yes', 'No'], why: 'It changes the limit' } });
+    answers.push({ approved: false, summary: '', comments: [], question: { text: 'Should cancelled bookings count?', options: ['Yes', 'No'], why: 'It changes the limit', kind: 'gap' } });
     await expect(squad.review(t.id)).rejects.toThrow(/Waiting for your answer/);
     let saved = readTicket(bp, t.id)!;
     expect(saved.waiting?.kind).toBe('ask');

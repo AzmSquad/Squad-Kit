@@ -19,7 +19,7 @@ export function demoStep(t: Ticket): Omit<StepClock, 'since'> | null {
   const part = doing >= 0 ? doing + 1 : open >= 0 ? open + 1 : undefined;
   switch (s.phase) {
     case 'analyst-read':
-      return t.track === 'express' ? null : { who: 'analyst', step: 'questions' };
+      return t.track === 'express' || t.track === 'auto' ? null : { who: 'analyst', step: 'questions' };
     case 'plan-write':
     case 'spec-rewrite':
     case 'plan-rewrite':

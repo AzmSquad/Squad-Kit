@@ -18,6 +18,7 @@ import {
   openChange,
   tabTitle,
   testChangeLine,
+  testChangeWaits,
   waitedFor,
   waitingSince,
   type Notice,
@@ -25,6 +26,8 @@ import {
 import { ASKING, HOW_TO_ALLOW, afterAsking, askPermission, type Asked } from '../lib/notices';
 import { Cmd, STAGE_NAME, actionLabel, outdatedLine } from './ui';
 import { dropWish, readWishes, readyText, readyToTell } from '../lib/overview';
+import { BreakdownBannerItem, WaitStopTag, useAllBreakdownWaits, useBreakdownWaits, type BreakdownWait } from './BreakdownWaits';
+import { stopKind } from '../lib/auto';
 
 /**
  * Waiting for you, loud. A banner at the top of every page while something needs the person, the count in the browser
@@ -54,10 +57,12 @@ export function ProjectWaiting() {
   const path = useRouterState({ select: (s) => s.location.pathname });
   const data = board.data?.ready ? board.data : null;
   const items = useMemo<Item[]>(() => (data?.tickets ?? []).filter(needsYou).map((t) => ({ key: t.id, since: waitingSince(t), ticket: t })), [data]);
-  useTabTitle(data?.meta.project, items.length);
+  // A breakdown whose Analyst has questions waits for you too (components/BreakdownWaits).
+  const breakdowns = useBreakdownWaits();
+  useTabTitle(data?.meta.project, items.length + breakdowns.length);
   useDesktopNotices();
   if (path.startsWith('/inbox')) return null;
-  return <WaitingBanner items={items} />;
+  return <WaitingBanner items={items} breakdowns={breakdowns} />;
 }
 
 /** Home: every project's items. "and N more" goes to the list on the same page. */
@@ -67,9 +72,11 @@ export function HomeWaiting() {
     () => (waiting.data?.items ?? []).map(({ project, ticket }) => ({ key: `${project.id}/${ticket.id}`, since: waitingSince(ticket), ticket, project })),
     [waiting.data],
   );
-  useTabTitle('squad-kit', items.length);
+  // Breakdowns whose Analyst has questions, from every project (components/BreakdownWaits).
+  const breakdowns = useAllBreakdownWaits();
+  useTabTitle('squad-kit', items.length + breakdowns.length);
   useDesktopNotices();
-  return <WaitingBanner items={items} home />;
+  return <WaitingBanner items={items} breakdowns={breakdowns} home />;
 }
 
 function useTabTitle(name: string | undefined, count: number) {
@@ -92,14 +99,16 @@ function useNow(ms: number): number {
  * The first one or two items with their action, and "and N more". One row, whatever the count, so the page under it
  * never jumps while items come and go.
  */
-function WaitingBanner({ items, home }: { items: Item[]; home?: boolean }) {
+function WaitingBanner({ items, home, breakdowns = [] }: { items: Item[]; home?: boolean; breakdowns?: BreakdownWait[] }) {
   const [order] = useState(() => new BannerOrder());
   const now = useNow(30_000);
   const sorted = useMemo(() => order.sort(items), [order, items]);
-  if (!sorted.length) return null;
+  const total = sorted.length + breakdowns.length;
+  if (!total) return null;
   const shown = sorted.slice(0, 2);
-  const rest = sorted.length - shown.length;
-  const count = sorted.length === 1 ? '1 thing needs you' : `${sorted.length} things need you`;
+  const shownBrds = breakdowns.slice(0, 2 - shown.length);
+  const rest = total - shown.length - shownBrds.length;
+  const count = total === 1 ? '1 thing needs you' : `${total} things need you`;
   // Beside the items; on a phone, where the items scroll sideways, in the top line.
   const more = (where: string) =>
     rest > 0 &&
@@ -112,24 +121,25 @@ function WaitingBanner({ items, home }: { items: Item[]; home?: boolean }) {
         and {rest} more
       </Link>
     ));
+  // One slim row: the count, the first two items with their buttons, and the rest behind a link. Calm, so it never
+  // takes the page's height; the Waiting for you page has the full list.
   return (
     <section className="ybar" aria-label="Waiting for you">
-      <div className="ybar-h">
-        <span className="ybar-n" aria-hidden>
-          {sorted.length}
-        </span>
-        <b className="ybar-t" aria-live="polite">{count}</b>
-        <span className="sub">{home ? 'The squads keep working on everything else meanwhile.' : 'The squad keeps working on everything else meanwhile.'}</span>
-        <span className="grow" />
-        {more('ymore-up')}
-        <Cmd text="squad inbox" />
-      </div>
-      <div className={`ybar-items ${shown.length > 1 ? 'n2' : ''} ${rest ? 'more' : ''}`}>
+      <span className="ybar-n" aria-hidden>
+        {total}
+      </span>
+      <b className="ybar-t" aria-live="polite" title={home ? 'The squads keep working on everything else meanwhile.' : 'The squad keeps working on everything else meanwhile.'}>
+        {count}
+      </b>
+      <div className="ybar-items">
         {shown.map((it) => (
           <BannerItem key={it.key} it={it} now={now} />
         ))}
-        {more('ymore-row')}
+        {shownBrds.map((w) => (
+          <BreakdownBannerItem key={`${w.project?.id ?? ''}/${w.id}`} w={w} />
+        ))}
       </div>
+      {more('ymore-row')}
       <NoticeAsk />
     </section>
   );
@@ -140,18 +150,16 @@ function BannerItem({ it, now }: { it: Item; now: number }) {
   const change = changeWaits(t) ? openChange(t) : undefined;
   const line =
     t.waiting?.summary ??
-    (change ? `Change ${change.id} to the spec waits for you` : t.testChange ? testChangeLine(t) : t.outdated?.length ? outdatedLine(t) : `Looks stuck: ${t.quiet?.detail ?? 'no progress'}`);
+    (change ? `Change ${change.id} to the spec waits for you` : testChangeWaits(t) ? testChangeLine(t) : t.outdated?.length ? outdatedLine(t) : `Looks stuck: ${t.quiet?.detail ?? 'no progress'}`);
   const label = t.waiting ? actionLabel(t) : change ? 'Check the change' : 'Check it';
   // An agent's question says itself; anything else names the ticket.
   const detail = t.waiting?.kind === 'ask' && t.agentQuestion ? `“${t.agentQuestion.text}”` : t.title;
   const meta = [it.project?.name, t.id, STAGE_NAME[t.stage], waitedFor(it.since, now)].filter(Boolean).join(' · ');
   return (
-    <div className="yitem">
-      <div className="grow">
-        <div className="meta">{meta}</div>
-        <h3 title={line}>{line}</h3>
-        <p title={detail}>{detail}</p>
-      </div>
+    <div className="yitem" title={`${meta}\n${line}\n${detail}`}>
+      <span className="yid">{it.project ? `${it.project.name} · ${t.id}` : t.id}</span>
+      {/* A story that builds by itself says which stop it is at, with its title. */}
+      <span className="yline">{stopKind(t) ? <><WaitStopTag t={t} />{t.title}</> : line}</span>
       {it.project ? (
         <a className="btn sm you" href={itemHref(it.project.id, t)}>
           {label}
@@ -283,14 +291,13 @@ function NoticeAsk() {
   const n = useNotices();
   if (!n.canAsk && !n.asking) return null;
   return (
-    <div className="ybar-ask" aria-live="polite">
-      <BellRing size={15} />
-      <span>{n.asking ? ASKING : 'Get a desktop notice when the squad needs you?'}</span>
-      <button className="btn sm" disabled={n.asking} onClick={() => void n.turnOn()}>
-        {n.asking ? 'Waiting for your browser…' : 'Turn on'}
+    <div className="ybar-ask" aria-live="polite" title={n.asking ? ASKING : 'Get a desktop notice when the squad needs you'}>
+      <BellRing size={14} />
+      <button className="linkbtn" disabled={n.asking} onClick={() => void n.turnOn()}>
+        {n.asking ? 'Waiting for your browser…' : 'Desktop notices'}
       </button>
       {!n.asking && (
-        <button className="btn sm quiet" onClick={n.notNow}>
+        <button className="linkbtn quiet" onClick={n.notNow} aria-label="No desktop notices">
           Not now
         </button>
       )}

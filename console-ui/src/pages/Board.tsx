@@ -13,9 +13,10 @@ import { isMine, ownerOf, useMe } from '../components/HandOver';
 import { changeWaits, openChange } from '../components/ChangeCard';
 import { CardLine, isRunning } from '../components/LiveNow';
 import { DependsTag } from '../components/Depends';
-import { needsYou } from '../lib/waiting';
+import { needsYou, testChangeWaits } from '../lib/waiting';
 import { NOT_CHECKED_WHY } from '../lib/gates';
 import { SetupCard, useSetupWaits } from '../components/Setup';
+import { CardAutoTag, CardBreakdownKey } from '../components/AutoTicket';
 
 const LANES: { stage: Stage; role: Actor; who: string }[] = [
   { stage: 'tickets', role: 'analyst', who: 'Analyst' },
@@ -170,13 +171,14 @@ export function BoardPage() {
 }
 
 function Card({ t, selected, onOpen }: { t: Ticket; selected: boolean; onOpen(): void }) {
-  const you = Boolean(t.waiting) || t.quiet?.kind === 'stuck' || changeWaits(t) || Boolean(t.testChange);
+  const you = Boolean(t.waiting) || t.quiet?.kind === 'stuck' || changeWaits(t) || testChangeWaits(t);
   const me = useMe();
   return (
     <button className={`card ${you ? 'you' : ''} ${t.kind === 'bug' ? 'bug' : ''} ${selected ? 'sel' : ''}`} onClick={onOpen}>
       <div className="row1">
         <span className="id">{t.id}</span>
         {t.track === 'express' && <span className="prio express">Express</span>}
+        <CardAutoTag t={t} />
         {you ? <span className="youtag">You</span> : t.kind === 'bug' ? <span className="prio">Bug</span> : t.priority === 'high' ? <span className="prio">High</span> : null}
         {me && !isMine(t, me) && <span className="prio owner" title="Their squad works on it">{ownerOf(t)}</span>}
         {t.archived && <span className="prio owner">Archived</span>}
@@ -188,6 +190,7 @@ function Card({ t, selected, onOpen }: { t: Ticket; selected: boolean; onOpen():
         <DependsTag t={t} />
       </div>
       <h4>{t.title}</h4>
+      <CardBreakdownKey t={t} />
       {/* Running: who, which step, what it does, how long and the usual time, with the step bar. */}
       {isRunning(t) && !you ? (
         <CardLine t={t} />

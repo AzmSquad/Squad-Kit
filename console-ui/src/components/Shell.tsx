@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, Outlet, useRouterState } from '@tanstack/react-router';
-import { ArrowUp, Bug, ChevronsUpDown, Compass, Inbox, LayoutGrid, ListTodo, Menu, MessagesSquare, Moon, Network, Settings, Sun, Terminal, Users } from 'lucide-react';
+import { ArrowUp, Bug, ChevronsUpDown, Compass, Inbox, LayoutGrid, ListTodo, ListTree, Menu, MessagesSquare, Moon, Network, Settings, Sun, Terminal, Users } from 'lucide-react';
 import { useBoard } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { UpdateBanner } from './Restart';
@@ -13,9 +13,13 @@ import { BudgetBanner } from './Usage';
 import { Apps } from './Apps';
 import { Banners } from './Banners';
 import { useOverviewWaits } from './Setup';
+import { useBreakdowns } from '../lib/requirementsData';
+import { requirementsWaiting } from '../lib/requirements';
+import { useBreakdownWaits } from './BreakdownWaits';
 
 const NAV = [
   { to: '/overview', label: 'Overview', icon: Compass, badge: 'setup' as const },
+  { to: '/requirements', label: 'Requirements', icon: ListTree, badge: 'reqs' as const },
   { to: '/board', label: 'Board', icon: LayoutGrid },
   { to: '/backlog', label: 'Backlog', icon: ListTodo },
   { to: '/inbox', label: 'Waiting for you', icon: Inbox, badge: 'you' as const },
@@ -33,12 +37,17 @@ export function Shell() {
   const path = useRouterState({ select: (s) => s.location.pathname });
   const meta = board.data?.ready ? board.data.meta : undefined;
   const tickets = board.data?.ready ? board.data.tickets : [];
-  const waiting = tickets.filter(needsYou).length;
+  // A breakdown whose Analyst has questions counts as one thing that waits for you.
+  const breakdownWaits = useBreakdownWaits().length;
+  const waiting = tickets.filter(needsYou).length + breakdownWaits;
   const bugs = tickets.filter((t) => t.kind === 'bug').length;
   const initials = (meta?.user.name ?? 'You').slice(0, 2).toUpperCase();
   const chats = useChats().data?.filter((c) => c.open).length ?? 0;
   const docked = useDocked();
   const setupWaits = useOverviewWaits();
+  // Requirements: questions from the Analyst and stories that need the person. "New" until then, in 1.2.
+  const breakdowns = useBreakdowns(5000);
+  const reqs = requirementsWaiting(breakdowns.data?.breakdowns ?? [], meta?.user.name);
   // On a phone the sidebar folds away behind a menu button, and closes again when you go to another page.
   const [menu, setMenu] = useState(false);
   useEffect(() => setMenu(false), [path]);
@@ -92,6 +101,14 @@ export function Shell() {
                 <n.icon size={16} />
                 {n.label}
                 {setupWaits && <span className="badge you" aria-label="Waits for you">1</span>}
+              </Link>
+            );
+          if (n.badge === 'reqs')
+            return (
+              <Link key={n.to} to={n.to} className={`nav ${path.startsWith(n.to) ? 'on' : ''}`} onClick={() => setMenu(false)}>
+                <n.icon size={16} />
+                {n.label}
+                {reqs > 0 ? <span className="badge you" aria-label={`${reqs} ${reqs === 1 ? 'needs' : 'need'} you`}>{reqs}</span> : <span className="badge new">New</span>}
               </Link>
             );
           const on = path.startsWith(n.to) || (n.to === '/inbox' && path.endsWith('/proof'));

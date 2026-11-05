@@ -79,6 +79,8 @@ export class Azure {
   private readonly orgUrl: string;
   private readonly projUrl: string;
   private stateCache = new Map<string, { name: string; category: string }[]>();
+  private typeCache: Promise<WorkItemType[]> | null = null;
+  private fieldCache = new Map<string, Promise<string[]>>();
 
   constructor(
     readonly target: AzureTarget,
@@ -92,6 +94,11 @@ export class Azure {
 
   webUrl(id: number): string {
     return `${this.projUrl}/_workitems/edit/${id}`;
+  }
+
+  /** How a link from one work item to another names its target. */
+  itemApiUrl(id: number): string {
+    return `${this.orgUrl}/_apis/wit/workItems/${id}`;
   }
 
   private async call<T>(method: string, url: string, body?: unknown, contentType = 'application/json'): Promise<T> {
@@ -177,6 +184,22 @@ export class Azure {
     }
     const order = new Map(ids.map((id, n) => [id, n]));
     return rows.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+  }
+
+  /**
+   * The newest items of a type that carry a tag and have this text in their description: an item squad-kit made and
+   * could not save the link of. One query, then the descriptions of at most 50 items.
+   */
+  async findByTagAndText(type: string, tag: string, text: string): Promise<WorkItemRow | null> {
+    const q = (v: string) => `'${v.replace(/'/g, "''")}'`;
+    const wiql = await this.call<{ workItems: { id: number }[] }>('POST', '_apis/wit/wiql?$top=50', {
+      query: `SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project AND [System.WorkItemType] = ${q(type)} AND [System.Tags] CONTAINS ${q(tag)} ORDER BY [System.Id] DESC`,
+    });
+    const ids = wiql.workItems.map((w) => w.id).slice(0, 50);
+    if (!ids.length) return null;
+    const batch = await this.call<{ value: RawItem[] }>('POST', '_apis/wit/workitemsbatch', { ids, fields: [...ROW_FIELDS, 'System.Description'] });
+    const hit = batch.value.find((w) => str(w.fields?.['System.Description']).includes(text));
+    return hit ? this.row(hit) : null;
   }
 
   async getWorkItem(id: number): Promise<WorkItem> {
@@ -296,6 +319,55 @@ export class Azure {
     await this.call('PATCH', `_apis/wit/workitems/${id}`, ops, 'application/json-patch+json');
   }
 
+  // ---- Making items (a breakdown's send) ----
+
+  /** The project's work item types that are turned on, with the fields each one has when Azure lists them. */
+  workItemTypes(): Promise<WorkItemType[]> {
+    this.typeCache ??= this.call<{ value: RawType[] }>('GET', '_apis/wit/workitemtypes')
+      .then((data) =>
+        (data?.value ?? [])
+          .filter((t) => !t.isDisabled)
+          .map((t) => ({ name: t.name, ...(t.fields ? { fields: t.fields.map((f) => f.referenceName) } : {}) })),
+      )
+      .catch((err: unknown) => {
+        this.typeCache = null;
+        throw err;
+      });
+    return this.typeCache;
+  }
+
+  /** True when the work item type has the field ("Microsoft.VSTS.Common.AcceptanceCriteria"). */
+  async typeHasField(type: string, field: string): Promise<boolean> {
+    const listed = (await this.workItemTypes()).find((t) => t.name.toLowerCase() === type.toLowerCase());
+    if (listed?.fields) return listed.fields.includes(field);
+    if (!this.fieldCache.has(type)) {
+      this.fieldCache.set(
+        type,
+        this.call<{ value: { referenceName: string }[] }>('GET', `_apis/wit/workitemtypes/${encodeURIComponent(type)}/fields`).then((d) => (d?.value ?? []).map((f) => f.referenceName)),
+      );
+    }
+    return (await this.fieldCache.get(type)!).includes(field);
+  }
+
+  /** Makes a work item of a type. The ops set its fields and links; squad-kit never sets an iteration here. */
+  async createWorkItem(type: string, ops: PatchOp[]): Promise<WorkItemRow> {
+    const raw = await this.call<RawItem>('POST', `_apis/wit/workitems/$${encodeURIComponent(type)}`, ops, 'application/json-patch+json');
+    return this.row(raw);
+  }
+
+  async updateWorkItem(id: number, ops: PatchOp[]): Promise<void> {
+    if (ops.length) await this.patch(id, ops);
+  }
+
+  /** A work item's type and its links, in Azure's order: a link is removed by its place in this list. */
+  async linksOf(id: number): Promise<{ type: string; relations: { rel: string; id: number }[] }> {
+    const raw = await this.call<RawItem>('GET', `_apis/wit/workitems/${id}?$expand=relations`);
+    return {
+      type: str(raw.fields?.['System.WorkItemType']),
+      relations: (raw.relations ?? []).map((r) => ({ rel: r.rel, id: Number(r.url.split('/').pop()) })),
+    };
+  }
+
   // ---- Azure Repos ----
 
   async createPullRequest(input: { repo: string; source: string; target: string; title: string; description: string; workItemIds: number[] }): Promise<PullRequest> {
@@ -403,7 +475,47 @@ const ROW_FIELDS = [
   'Microsoft.VSTS.Common.Priority',
 ];
 
-type PatchOp = { op: 'add' | 'replace'; path: string; value: unknown };
+export type PatchOp = { op: 'add' | 'replace'; path: string; value: unknown } | { op: 'remove'; path: string };
+
+export interface WorkItemType {
+  name: string;
+  /** The fields' reference names, when Azure listed them with the type. */
+  fields?: string[];
+}
+
+interface RawType {
+  name: string;
+  isDisabled?: boolean;
+  fields?: { referenceName: string }[];
+}
+
+/** The four processes Azure DevOps comes with; a project's own process inherits one of them and keeps its type names. */
+export type AzureProcess = 'Agile' | 'Scrum' | 'CMMI' | 'Basic';
+
+/**
+ * The work item type for each level of a breakdown, per process. Basic has only Epic, Issue and Task: a feature
+ * becomes an Issue under its epic, and a story a Task under its Issue (or under the epic, when the breakdown skips
+ * features).
+ */
+export const PROCESS_TYPES: Record<AzureProcess, { epic: string; feature: string; story: string }> = {
+  Agile: { epic: 'Epic', feature: 'Feature', story: 'User Story' },
+  Scrum: { epic: 'Epic', feature: 'Feature', story: 'Product Backlog Item' },
+  CMMI: { epic: 'Epic', feature: 'Feature', story: 'Requirement' },
+  Basic: { epic: 'Epic', feature: 'Issue', story: 'Task' },
+};
+
+/**
+ * The process a project follows, from its work item types. Its story type tells: Agile has User Story, Scrum Product
+ * Backlog Item, CMMI Requirement. Agile and CMMI have an Issue type too, so Basic is the one left with Issue and Task.
+ */
+export function processOf(types: string[]): AzureProcess | null {
+  const has = (name: string) => types.some((t) => t.toLowerCase() === name.toLowerCase());
+  if (has('User Story')) return 'Agile';
+  if (has('Product Backlog Item')) return 'Scrum';
+  if (has('Requirement')) return 'CMMI';
+  if (has('Issue') && has('Task')) return 'Basic';
+  return null;
+}
 
 interface RawItem {
   id: number;

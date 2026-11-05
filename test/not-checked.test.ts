@@ -32,7 +32,7 @@ const { holdTestCommand, notCheckedText } = await import('../src/engine/not-chec
 const { prDescription } = await import('../src/engine/sync.js');
 const P = await import('../src/engine/prompts.js');
 const { checksWords, noShotsText, notCheckedWhy, proofLead } = await import('../console-ui/src/lib/gates.js');
-const { needsYou, noticeText, reasonsOf } = await import('../console-ui/src/lib/waiting.js');
+const { needsYou, noticeText, reasonsOf, testChangeLine } = await import('../console-ui/src/lib/waiting.js');
 const { mountBoardApi } = await import('../src/console/api/board.js');
 const { buildPaths, chooseProject } = await import('../src/core/paths.js');
 const { inboxLine, runTestCommand } = await import('../src/commands/board.js');
@@ -102,10 +102,12 @@ describe('a project with no tests', () => {
     expect(t.gates).toMatchObject({ checks: 'unchecked', checksText: 'No tests ran' });
     expect(t.waiting?.kind).toBe('stuck');
     expect(t.stuck).toMatchObject({ gate: 'checks', kind: 'no-tests' });
-    expect(t.stuck!.question).toBe('This project has no tests yet, so squad-kit cannot check that the work does what it should. The Architect suggests this test command: npm test');
+    // Plain words for the person: no command in the question or on a button. Engineers get it in the details.
+    expect(t.stuck!.question).toBe('This project has no tests yet, so squad-kit cannot check that the work does what it should.');
+    expect(t.stuck!.detail).toContain('The Architect suggests: npm test');
     expect(withProblem(t).stuck!.title).toBe('No tests to check the work');
     expect(t.stuck!.options.map((o) => [o.do, o.name])).toEqual([
-      ['add-test', 'Use "npm test" for tests'],
+      ['add-test', 'Have the Builder add tests'],
       ['no-tests', 'Go on without tests'],
       ['retry', 'Check again'],
     ]);
@@ -138,7 +140,8 @@ describe('a project with no tests', () => {
     expect(readMeta(bp).commands?.test).toBe('echo "Tests  4 passed"');
     expect(readMeta(bp).noTests).toBeUndefined();
     expect(t.testSuggestion).toBeUndefined();
-    expect(t.activity[0]!.text).toBe('Saved "echo "Tests  4 passed"" as the project\'s test command');
+    // The exact command is for engineers: in the log, and in the Developer tab once the checks ran it.
+    expect(t.activity[0]!.text).toBe('Found how to test this project');
     expect(t.squad?.phase).toBe('test');
     await squad.checks(t0.id);
     t = get(t0.id);
@@ -150,7 +153,8 @@ describe('a project with no tests', () => {
     const t0 = built();
     await squad.checks(t0.id);
     let t = get(t0.id);
-    expect(t.stuck!.question).toContain('You can add a test command in Settings.');
+    expect(t.stuck!.question).not.toMatch(/command|Settings/);
+    expect(t.stuck!.detail).toContain('Add one in Settings');
     expect(t.stuck!.options.map((o) => o.do)).toEqual(['no-tests', 'retry']);
     commands({ test: 'echo "Tests  2 passed"' });
     t = actions.decideStuck(bp, t0.id, 1);
@@ -265,7 +269,7 @@ describe('the board shows "Not checked" as its own state', () => {
     const g = { checks: 'unchecked' as const, checksText: 'No tests ran · build passes, the app starts', review: 'pass' as const, proof: 'pass' as const };
     expect(checksWords(g)).toBe('Not checked: no tests ran');
     expect(notCheckedWhy(g)).toBe(
-      'No tests ran, so squad-kit could not check that the work does what it should. Passed: build passes, the app starts. Check the proof with extra care. To turn tests on, add a test command in Settings.',
+      'No tests ran, so squad-kit could not check that the work does what it should. Passed: build passes, the app starts. Check the proof with extra care. To turn tests on, have an engineer add tests to the project.',
     );
     expect(notCheckedWhy({ ...g, checks: 'pass' })).toBeNull();
     expect(checksWords({ ...g, checks: 'skipped', checksText: '4 tests pass, test OK; tests weakened, you continued' })).toBe('Tests weakened, you continued');
@@ -289,7 +293,7 @@ describe('a change to the test command the project has', () => {
     ...(repo ? { repo } : {}),
   });
 
-  it('is held, not applied: the checks keep the current one, and on Express it waits for you on its own', async () => {
+  it('is held, not applied, until squad-kit tries it: the person is not asked, and the words name no command', async () => {
     commands({ test: 'pnpm test' });
     reply = () => plan({ test: 'pnpm vitest run --passWithNoTests', build: 'pnpm build' });
     const t0 = actions.createTicket(bp, { title: 'Fix the typo', track: 'express' });
@@ -300,27 +304,35 @@ describe('a change to the test command the project has', () => {
     let t = get(t0.id);
     expect(t.testChange).toMatchObject({ from: 'pnpm test', to: 'pnpm vitest run --passWithNoTests' });
     expect(t.testSuggestion).toBeUndefined();
-    expect(t.activity.map((a) => a.text)).toContain(
-      'Suggests changing the test command from "pnpm test" to "pnpm vitest run --passWithNoTests". It waits for your approval; the checks keep using "pnpm test"',
-    );
+    expect(t.activity.map((a) => a.text)).toContain('The design changes how the tests run. squad-kit tries the new way after the build');
+    expect(t.activity.map((a) => a.text).join(' ')).not.toContain('pnpm');
 
-    // Express approves its own plan and builds on: the change is a decision in Waiting for you, never applied silently.
+    // Express approves its own plan and builds on, and nobody waits on the change.
     await squad.step(t0.id, 'express-approve');
     t = get(t0.id);
     expect(t.waiting).toBeNull();
     expect(t.squad?.phase).toBe('build');
-    expect(actions.inbox(bp).map((x) => x.id)).toContain(t0.id);
-    expect(inboxLine(t)).toBe('The Architect suggests changing the test command from "pnpm test" to "pnpm vitest run --passWithNoTests"');
+    expect(actions.inbox(bp).map((x) => x.id)).not.toContain(t0.id);
+    expect(needsYou(t as never)).toBe(false);
+    expect(reasonsOf(t as never)).toEqual([]);
+    expect(readMeta(bp).commands?.test).toBe('pnpm test');
+  });
+
+  it('when squad-kit cannot tell, it is one plain item in Waiting for you, and the terminal has the commands', () => {
+    commands({ test: 'npm test' });
+    const t = updateTicket(bp, built().id, (x) => (x.testChange = { from: 'npm test', to: 'npm run all', at: new Date().toISOString(), ask: true }));
+    expect(actions.inbox(bp).map((x) => x.id)).toContain(t.id);
     expect(needsYou(t as never)).toBe(true);
     expect(reasonsOf(t as never)).toEqual(['test-command']);
-    expect(noticeText({ key: 'k', project: { id: 'p', name: 'Case portal' }, ticket: t as never, reason: 'test-command' }).title).toBe(`${t0.id}: a new test command waits for you`);
-    expect(readMeta(bp).commands?.test).toBe('pnpm test');
+    expect(testChangeLine(t as never)).toBe('squad-kit cannot tell which way of testing to keep');
+    expect(noticeText({ key: 'k', project: { id: 'p', name: 'Case portal' }, ticket: t as never, reason: 'test-command' }).title).toBe(`${t.id}: a choice about the tests waits for you`);
+    expect(inboxLine(t)).toBe('The Architect suggests changing the test command from "npm test" to "npm run all"');
   });
 
   it('with the design waiting, it is part of the design: one item, one notice', () => {
     const t = updateTicket(bp, built().id, (x) => {
       x.waiting = { kind: 'plan', summary: 'The design is ready' };
-      x.testChange = { from: 'npm test', to: 'npm run test:all', at: new Date().toISOString() };
+      x.testChange = { from: 'npm test', to: 'npm run test:all', at: new Date().toISOString(), ask: true };
     });
     expect(reasonsOf(t as never)).toEqual(['plan']);
     expect(actions.inbox(bp).filter((x) => x.id === t.id)).toHaveLength(1);
@@ -343,7 +355,8 @@ describe('a change to the test command the project has', () => {
 
     const t = actions.decideTestCommand(bp, t0.id, true);
     expect(t.testChange).toBeUndefined();
-    expect(t.activity[0]!.text).toBe('Changed the test command from "dotnet test" to "dotnet test --filter Booking"');
+    expect(t.activity[0]!.text).toBe('Chose the new way of testing this project');
+    expect(t.testDecided).toMatchObject({ from: 'dotnet test', to: 'dotnet test --filter Booking', kept: 'new', by: 'you' });
     expect(readMeta(bp).repos!.map((r) => r.commands.test)).toEqual(['npm test', 'dotnet test --filter Booking']);
     expect(actions.inbox(bp).map((x) => x.id)).not.toContain(t0.id);
     expect(() => actions.decideTestCommand(bp, t0.id, true)).toThrow('has no change to the test command waiting');
@@ -352,7 +365,8 @@ describe('a change to the test command the project has', () => {
     updateTicket(bp, t0.id, (x) => (x.testChange = { from: 'dotnet test --filter Booking', to: 'dotnet test --no-build', repo: 'api', at: new Date().toISOString() }));
     const kept = actions.decideTestCommand(bp, t0.id, false);
     expect(kept.testChange).toBeUndefined();
-    expect(kept.activity[0]!.text).toBe('Kept the test command "dotnet test --filter Booking"; the Architect\'s "dotnet test --no-build" is not used');
+    expect(kept.activity[0]!.text).toBe('Kept the current way of testing this project');
+    expect(kept.testDecided).toMatchObject({ from: 'dotnet test --filter Booking', to: 'dotnet test --no-build', kept: 'current', by: 'you' });
     expect(readMeta(bp).repos!.map((r) => r.commands.test)).toEqual(['npm test', 'dotnet test --filter Booking']);
   });
 

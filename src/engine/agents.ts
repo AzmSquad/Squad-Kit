@@ -15,7 +15,7 @@ export type AgentRole = 'analyst' | 'architect' | 'builder' | 'reviewer' | 'test
 export const AGENTS: { role: AgentRole; name: string; job: string; phases: string[] }[] = [
   { role: 'analyst', name: 'Analyst', job: 'Reads the ticket and asks the questions that matter', phases: ['analyst-read', 'triage'] },
   { role: 'architect', name: 'Architect', job: 'Reads the project, chooses how to build it, and writes the plan', phases: ['plan-write', 'plan-rewrite'] },
-  { role: 'builder', name: 'Builder', job: 'Writes the code in small steps and fixes what the checks find', phases: ['build', 'unstick', 'fix', 'test'] },
+  { role: 'builder', name: 'Builder', job: 'Writes the code in small steps and fixes what the checks find', phases: ['build', 'unstick', 'fix', 'test', 'proof-fix'] },
   { role: 'reviewer', name: 'Reviewer', job: "Reviews the Builder's work in a fresh session, up to 2 rounds", phases: ['review'] },
   { role: 'tester', name: 'Tester', job: 'Runs the app and records before and after screenshots', phases: ['proof'] },
 ];

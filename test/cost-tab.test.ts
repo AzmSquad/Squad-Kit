@@ -131,7 +131,7 @@ describe('the Cost tab on a subscription', () => {
     // The month counts every step the squad took this month, from the sample board's seeded steps.
     expect(c.month.month).toBe(monthKey());
     expect(c.month.total.costUsd).toBeGreaterThan(c.total.costUsd!);
-    expect(c.details.models).toBe('Opus for questions, spec, design, the build and review · Haiku for screenshots');
+    expect(c.details.models).toBe('Opus for questions, spec, design, the build and review · Sonnet for screenshots');
     expect(c.details.tokens).toMatch(/^[\d.]+M tokens read \(\d+% from cache\), [\d.]+k written$/);
     expect(c.seconds).toBeGreaterThan(0);
   });

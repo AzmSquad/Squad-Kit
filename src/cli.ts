@@ -15,6 +15,8 @@ import { runProjects } from './commands/projects.js';
 import { runAsk, runTicketStatus, runWait } from './commands/now.js';
 import { runLogs, runReport, runTryNow } from './commands/support.js';
 import { runAppFind, runAppRestart, runAppSet, runAppStart, runAppStatus, runAppStop } from './commands/app.js';
+import { runTry } from './commands/try.js';
+import { runMcpBridge } from './commands/mcp-bridge.js';
 import { runOverview, runSetup } from './commands/overview.js';
 import {
   runAnswer,
@@ -50,7 +52,7 @@ import {
   runStop,
   runWatch,
 } from './commands/board.js';
-import { runHosts } from './commands/sandbox.js';
+import { runGuardAllow, runHosts } from './commands/sandbox.js';
 import {
   runConfigShow,
   runConfigSetPlanner,
@@ -62,8 +64,10 @@ import {
 import { runRmFeature, runRmPlan, runRmStory } from './commands/rm/index.js';
 import { runArchive, runDelete } from './commands/delete.js';
 import { runBranches, runBringIn, runBuild, runDepends } from './commands/depends.js';
+import { runDecided } from './commands/decided.js';
 import { runConfigBudget, runConfigPayment, runCost } from './commands/cost.js';
 import { runAuthLogin, runAuthStatus, runAuthLogout } from './commands/auth/index.js';
+import { requirementsCommand } from './commands/requirements.js';
 import { readInstalledPackage } from './core/package-info.js';
 import { chooseProject } from './core/paths.js';
 import { findProject } from './core/projects.js';
@@ -261,6 +265,7 @@ program
   .option('--again', 'Read the project again, and check the overview again')
   .option('--with-talk', 'With --again: the Architect reads it again with what you told it')
   .option('--wrong [what...]', 'Something is wrong: tell the Architect what')
+  .option('--build <what...>', 'A project with no code: tell the Architect what you want to build')
   .action(wrap(runOverview));
 
 // Your apps: each app of the project, run from squad-kit's own copy of main (the board's sidebar does the same).
@@ -269,14 +274,14 @@ appCmd.command('status').description('Show each app: running or not, its address
 appCmd
   .command('start [name]')
   .description('Start the app on the newest main (outside squad-kit: here, until Ctrl-C)')
-  .option('--next-port', 'Its port is in use: run it on the next free port (when its start command takes a port)')
+  .option('--next-port', 'No longer needed: squad-kit moves the app to a free port by itself')
   .option('--stop-other', 'Its port is in use by a program squad-kit started: stop that first')
   .action(wrapArgs(runAppStart));
 appCmd.command('stop [name]').description('Stop the app, and everything it started').action(wrapArgs(runAppStop));
 appCmd
   .command('restart [name]')
   .description('Stop it, then start it on the newest main: run the new version after Looks right')
-  .option('--next-port', 'Its port is in use: run it on the next free port')
+  .option('--next-port', 'No longer needed: squad-kit moves the app to a free port by itself')
   .option('--stop-other', 'Its port is in use by a program squad-kit started: stop that first')
   .action(wrapArgs(runAppRestart));
 appCmd
@@ -311,6 +316,12 @@ program
   .description('Ask for a change to the spec or design, or send the proof back with a note')
   .action(wrapArgs(runChange));
 program
+  .command('try <ticket>')
+  .description("Try it yourself: run the ticket's own copy of the app, with the change in it, before Looks right. Nothing is merged")
+  .option('--stop', 'Stop the copy, and everything it started')
+  .option('--status', 'Show whether the copy runs, and its address')
+  .action(wrapArgs(runTry));
+program
   .command('propose <ticket> [text...]')
   .description('Propose a change to the spec; the work goes on while the Analyst writes it, then you approve or decline it')
   .option('--approve', 'Approve the change that waits (the proposal, or a big change\'s design update)')
@@ -334,6 +345,10 @@ program
   .description('Answer a question the Builder or Reviewer asked in the middle of its work')
   .action(wrapArgs(runReply));
 program
+  .command('decided <ticket> [id] [text...]')
+  .description('Show what the squad decided for you on a ticket that builds by itself, or change one (d2 "<text>")')
+  .action(wrapArgs(runDecided));
+program
   .command('note <ticket> [text...]')
   .description('Add a note, business rule or acceptance criterion to a ticket; every agent on it reads it')
   .option('--criterion', 'An acceptance criterion: it joins the "done when" list and must be proven', false)
@@ -342,7 +357,8 @@ program
 program
   .command('chat <ticket> [message...]')
   .description('Talk a ticket through with an agent. /write writes the spec or design from the talk, /done ends it')
-  .option('--with <agent>', 'analyst, architect, builder, reviewer or tester', 'analyst')
+  .option('--with <agent>', 'analyst, architect, builder, reviewer or tester (default: analyst)')
+  .option('--ask', 'Ask a question: questions only, with whoever knows the story best; the ticket stays where it is')
   .option('--write', 'Write (or update) the spec or design from the talk')
   .option('--done', 'Done talking; the squad carries on')
   .option('--stop', 'Stop the answer the agent is writing; the talk stays open')
@@ -517,6 +533,7 @@ program
   .option('--sprint <name>', 'Which sprint, for example "Sprint 1" (default: the current one)')
   .option('--all', 'Everything open, in every sprint')
   .action(wrapArgs(runBacklog));
+program.addCommand(requirementsCommand());
 
 program
   .command('list')
@@ -622,6 +639,16 @@ set
   .option('--clear', 'Allow only the package registries again', false)
   .action(wrapArgs(runHosts));
 set
+  .command('allow-read [paths...]')
+  .description("Show or set files outside its copy that the project's own commands (tests, setup, the app) may read")
+  .option('--clear', 'Allow none again', false)
+  .action(wrapArgs((paths: string[], opts: { clear?: boolean }) => runGuardAllow('read', paths, opts)));
+set
+  .command('allow-write [paths...]')
+  .description("Show or set folders outside its copy that the project's own commands may write in")
+  .option('--clear', 'Allow none again', false)
+  .action(wrapArgs((paths: string[], opts: { clear?: boolean }) => runGuardAllow('write', paths, opts)));
+set
   .command('payment [how]')
   .description('Show or set how you pay for the AI: subscription, api-key, or auto to let squad-kit find out')
   .action(wrapArgs(runConfigPayment));
@@ -656,8 +683,14 @@ config
     ),
   );
 
+// squad-kit's own tools for an agent that takes MCP only over stdio: started by squad-kit for one run, never by people.
+program
+  .command('mcp-bridge', { hidden: true })
+  .description("Forward an agent's calls to squad-kit's own tools for its run (started by squad-kit)")
+  .action(wrap(runMcpBridge));
+
 // Commands that act on one project find it from the folder they run in, or take --project (ADR-001).
-const NOT_ON_ONE_PROJECT = new Set(['init', 'demo', 'upgrade', 'projects', 'help', 'logs', 'try-now']);
+const NOT_ON_ONE_PROJECT = new Set(['init', 'demo', 'upgrade', 'projects', 'help', 'logs', 'try-now', 'mcp-bridge']);
 const leaves = (c: Command): Command[] => (c.commands.length ? c.commands.flatMap(leaves) : [c]);
 for (const c of program.commands.filter((x) => !NOT_ON_ONE_PROJECT.has(x.name())).flatMap(leaves)) {
   if (!c.options.some((o) => o.long === '--project')) c.option('--project <name>', 'The project: its name, id or folder (default: the one this folder is in)');

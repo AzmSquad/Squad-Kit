@@ -6,7 +6,7 @@ import { execSync } from 'node:child_process';
 import { boardPaths, readMeta, readTicket, writeMeta, writeTicket, type BoardPaths } from '../src/board/store.js';
 import { LiveSquad } from '../src/engine/live.js';
 import * as actions from '../src/board/actions.js';
-import { addWorktree } from '../src/engine/git.js';
+import { addWorktree, changedTracked, isLockFile, putBackTracked } from '../src/engine/git.js';
 
 let tmp: string;
 let project: string;
@@ -104,7 +104,9 @@ describe('your own checkout after the merge', () => {
     const after = readTicket(bp, 'AP-1')!;
     expect(after.localSetup?.status).toBe('done');
     expect(fs.readFileSync(path.join(project, 'setup.log'), 'utf8')).toBe('installed\n');
-    expect(after.activity[0]!.text).toMatch(/^Your copy of the code is ready: ran echo installed > setup.log \(\d+ s\)$/);
+    // The exact command is for engineers: on the ticket for the Developer tab, and in the log.
+    expect(after.activity[0]!.text).toBe('Your copy is ready');
+    expect(after.localSetup?.command).toBe('echo installed > setup.log');
   });
 
   it('says so when the setup fails, and can try again', async () => {
@@ -114,7 +116,88 @@ describe('your own checkout after the merge', () => {
     await run('AP-1');
     const t = readTicket(bp, 'AP-1')!;
     expect(t.localSetup).toMatchObject({ status: 'failed', output: expect.stringContaining('no network') });
+    expect(t.activity[0]!.text).toBe('Your copy could not be set up');
     expect(actions.setUpLocalCopy(bp, 'AP-1').localSetup?.status).toBe('pending');
+  });
+
+  describe('a tracked file the setup rewrites', () => {
+    const LOCK = '{ "v": 2 }\n';
+    const REWRITE = 'printf "{ \\"v\\": 3 }\\n" > package-lock.json';
+    const file = (name: string) => fs.readFileSync(path.join(project, name), 'utf8');
+    const changed = () => sh("git diff --name-only HEAD -- . ':!.squad'", project).split('\n').filter(Boolean);
+    const merged = (command: string) => {
+      fs.writeFileSync(path.join(project, 'package-lock.json'), LOCK);
+      fs.writeFileSync(path.join(project, 'notes.txt'), 'mine\n');
+      sh('git add package-lock.json notes.txt && git -c user.name=t -c user.email=t@t commit -qm files', project);
+      setup(command);
+      proofReady();
+      actions.approve(bp, 'AP-1');
+    };
+
+    it('puts back the lock file it rewrote, so your folder shows no change you did not make', async () => {
+      merged(REWRITE);
+      await run('AP-1');
+      expect(readTicket(bp, 'AP-1')!.localSetup?.status).toBe('done');
+      expect(file('package-lock.json')).toBe(LOCK);
+      expect(changed()).toEqual([]);
+      expect(readTicket(bp, 'AP-1')!.activity[0]!.text).toBe('Your copy is ready');
+    });
+
+    it('puts it back when the setup failed too: try again starts clean', async () => {
+      merged(`${REWRITE}; exit 3`);
+      await run('AP-1');
+      expect(readTicket(bp, 'AP-1')!.localSetup?.status).toBe('failed');
+      expect(file('package-lock.json')).toBe(LOCK);
+    });
+
+    it('never touches your own change: not in another file, and not in the lock file, even when the setup rewrote it too', async () => {
+      merged(REWRITE);
+      // Your changes, made before the setup ran.
+      fs.writeFileSync(path.join(project, 'notes.txt'), 'my own words\n');
+      fs.writeFileSync(path.join(project, 'package-lock.json'), '{ "v": "mine" }\n');
+      await run('AP-1');
+      expect(file('notes.txt')).toBe('my own words\n');
+      // It differed before the setup ran, so it is yours: squad-kit cannot tell the two apart and leaves it.
+      expect(file('package-lock.json')).toBe('{ "v": 3 }\n');
+      expect(changed().sort()).toEqual(['notes.txt', 'package-lock.json']);
+    });
+
+    it('only your untouched lock file goes back when you changed something else', async () => {
+      merged(REWRITE);
+      fs.writeFileSync(path.join(project, 'notes.txt'), 'my own words\n');
+      await run('AP-1');
+      expect(file('notes.txt')).toBe('my own words\n');
+      expect(file('package-lock.json')).toBe(LOCK);
+      expect(changed()).toEqual(['notes.txt']);
+    });
+
+    it('leaves any other file that changed while it ran: it may be yours, or a database the setup moved on', async () => {
+      merged('printf "saved while it ran\\n" > notes.txt');
+      await run('AP-1');
+      expect(readTicket(bp, 'AP-1')!.localSetup?.status).toBe('done');
+      expect(file('notes.txt')).toBe('saved while it ran\n');
+      expect(changed()).toEqual(['notes.txt']);
+    });
+  });
+
+  it('knows a lock file by its name, in any folder, and paths are from the folder it is given', () => {
+    for (const f of ['package-lock.json', 'web/pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb', 'Gemfile.lock', 'poetry.lock', 'Pipfile.lock', 'uv.lock', 'Cargo.lock', 'composer.lock', 'go.sum', 'packages.lock.json', 'npm-shrinkwrap.json']) {
+      expect(isLockFile(f), f).toBe(true);
+    }
+    for (const f of ['package.json', 'src/lock.ts', 'go.mod', 'prisma/dev.db', 'notes.txt', 'lockfile.md']) expect(isLockFile(f), f).toBe(false);
+
+    fs.mkdirSync(path.join(project, 'web'));
+    fs.writeFileSync(path.join(project, 'web', 'yarn.lock'), 'one\n');
+    fs.writeFileSync(path.join(project, 'outside.lock'), 'one\n');
+    sh('git add -A && git -c user.name=t -c user.email=t@t commit -qm files', project);
+    fs.writeFileSync(path.join(project, 'web', 'yarn.lock'), 'two\n');
+    fs.writeFileSync(path.join(project, 'outside.lock'), 'two\n');
+    const web = path.join(project, 'web');
+    expect(changedTracked(web)).toEqual(['yarn.lock']);
+    expect(putBackTracked(web, { only: isLockFile })).toEqual(['yarn.lock']);
+    expect(fs.readFileSync(path.join(web, 'yarn.lock'), 'utf8')).toBe('one\n');
+    // Outside the folder it was given: not its business.
+    expect(fs.readFileSync(path.join(project, 'outside.lock'), 'utf8')).toBe('two\n');
   });
 
   it('can be started for a ticket merged before this step existed', () => {

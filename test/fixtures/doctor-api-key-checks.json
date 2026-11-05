@@ -5,7 +5,8 @@
     "git-version",
     "planner-auth-mode",
     "planner-auth-runtime-fit",
-    "agent-sandbox"
+    "agent-sandbox",
+    "project-guard"
   ],
   "v0110": [
     {
@@ -162,6 +163,12 @@
       "name": "sandbox for the Builder and Tester",
       "status": "ok",
       "detail": "Claude Code's sandbox (macOS Seatbelt)"
+    },
+    {
+      "id": "project-guard",
+      "name": "guard for the project's own commands",
+      "status": "ok",
+      "detail": "squad-kit's guard (macOS Seatbelt)"
     },
     {
       "id": "planner-config",

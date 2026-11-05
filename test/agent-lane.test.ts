@@ -30,6 +30,7 @@ const { addWorktree } = await import('../src/engine/git.js');
 const { deniedTools } = await import('../src/modules/claude/direct.js');
 const { answerProblem } = await import('../src/engine/answers.js');
 const P = await import('../src/engine/prompts.js');
+const { AgentWindow, ALL_TOOLS } = await import('../src/engine/window.js');
 
 let tmp: string;
 let project: string;
@@ -37,7 +38,7 @@ let wt: string;
 let bp: ReturnType<typeof boardPaths>;
 type Squad = {
   runBuilder(id: string, prompt: string, resume: boolean, step?: string): Promise<void>;
-  shoot(id: string, t: unknown, when: 'before' | 'after', meta: unknown, appRunning: boolean, appUrl?: string): Promise<void>;
+  shoot(id: string, t: unknown, when: 'before' | 'after', meta: unknown, win: unknown, appUrl: string): Promise<void>;
   review(id: string): Promise<void>;
 };
 
@@ -46,6 +47,8 @@ const read = (rel: string) => fs.readFileSync(path.join(wt, rel), 'utf8');
 const has = (rel: string) => fs.existsSync(path.join(wt, rel));
 const activity = () => readTicket(bp, 'AP-1')!.activity.map((a) => a.text);
 const squad = () => new LiveSquad(bp) as unknown as Squad;
+/** squad-kit's own tools for the Tester's step, with no app behind them. */
+const testerWindow = () => new AgentWindow({ ticket: 'AP-1', step: 'proof', who: 'Tester', tools: ALL_TOOLS, proofDir: bp.proofDir, prefix: 'ap-1-after', say: () => undefined });
 
 beforeEach(() => {
   calls.length = 0;
@@ -141,19 +144,23 @@ describe('the Builder', () => {
 });
 
 describe('the Tester', () => {
-  it('runs commands but cannot change the code that gets merged: its changes are put back, its screenshots kept', async () => {
+  it('cannot change the code that gets merged: its changes are put back, the pictures squad-kit took kept', async () => {
     fs.mkdirSync(path.join(wt, 'node_modules'), { recursive: true });
+    const win = testerWindow();
     work = (cwd) => {
       fs.writeFileSync(path.join(cwd, 'limit.txt'), 'limit = 99\n');
       fs.writeFileSync(path.join(cwd, 'notes.txt'), 'scratch\n');
       fs.rmSync(path.join(cwd, 'AGENTS.md'));
       fs.writeFileSync(path.join(cwd, 'node_modules', 'cache.json'), '{}');
+      // squad-kit's own browser took this picture for the Tester, through the window.
       fs.mkdirSync(bp.proofDir, { recursive: true });
       fs.writeFileSync(path.join(bp.proofDir, 'ap-1-after-1.png'), pngBytes());
+      win.pictures.set('ap-1-after-1.png', { file: 'ap-1-after-1.png', page: '/book', size: 'desktop' });
     };
-    answers.push({ shots: [{ criterion: 1, file: 'ap-1-after-1.png' }] });
+    answers.push({ shots: [{ criterion: 1, file: 'ap-1-after-1.png', shows: 'met', note: 'The booking is saved.' }], offScreen: [] });
     const t = readTicket(bp, 'AP-1')!;
-    await squad().shoot('AP-1', t, 'after', {}, true, 'http://localhost:4999');
+    await squad().shoot('AP-1', t, 'after', {}, win, 'http://127.0.0.1:4999');
+    await win.close();
     // Back to the Builder's version, not to the last commit.
     expect(read('limit.txt')).toBe('limit = 3\n');
     expect(read('AGENTS.md')).toBe('Use tabs.\n');
@@ -161,18 +168,36 @@ describe('the Tester', () => {
     // Ignored files and the proof folder are not the code.
     expect(has('node_modules/cache.json')).toBe(true);
     expect(fs.existsSync(path.join(bp.proofDir, 'ap-1-after-1.png'))).toBe(true);
-    expect(readTicket(bp, 'AP-1')!.proof?.[0]?.after).toBe('ap-1-after-1.png');
+    expect(readTicket(bp, 'AP-1')!.proof?.[0]).toMatchObject({ after: 'ap-1-after-1.png', page: '/book', note: 'The booking is saved.' });
     expect(activity()).toContain('The Tester changed files; squad-kit put them back: AGENTS.md, limit.txt, notes.txt');
-    // A shell, no file-editing tools, and never the person's own permission mode.
+    // It only reads: no free shell, no file-editing tools, and never the person's own permission mode.
     const c = calls[0]!;
-    expect(c.allowedTools).toContain('Bash');
+    expect(c.allowedTools).not.toContain('Bash');
+    expect(c.allowedTools).toContain('mcp__squad__take_screenshots');
     expect(c.permissionMode).toBe('default');
     expect(deniedTools(c)).toEqual(expect.arrayContaining(['Edit', 'Write', 'MultiEdit']));
   });
 
+  it('a picture squad-kit did not take is left out of the proof', async () => {
+    work = () => {
+      fs.mkdirSync(bp.proofDir, { recursive: true });
+      fs.writeFileSync(path.join(bp.proofDir, 'own.png'), pngBytes());
+    };
+    // Asked once more to name a picture it took, it names the same file again.
+    const own = { shots: [{ criterion: 1, file: 'own.png', shows: 'met', note: 'Made it myself.' }], offScreen: [] };
+    answers.push(own, own);
+    const win = testerWindow();
+    await squad().shoot('AP-1', readTicket(bp, 'AP-1')!, 'after', {}, win, 'http://127.0.0.1:4999');
+    await win.close();
+    expect(readTicket(bp, 'AP-1')!.proof ?? []).toEqual([]);
+    expect(activity()).toContain('The Tester named own.png for "done when" 1, which squad-kit did not take in this step, so it is left out');
+  });
+
   it('changes nothing it did not touch', async () => {
-    answers.push({ shots: [] });
-    await squad().shoot('AP-1', readTicket(bp, 'AP-1')!, 'after', {}, true, 'http://localhost:4999');
+    answers.push({ shots: [], offScreen: [{ criterion: 1, why: 'It is about the saved data, not a screen.' }] });
+    const win = testerWindow();
+    await squad().shoot('AP-1', readTicket(bp, 'AP-1')!, 'after', {}, win, 'http://127.0.0.1:4999');
+    await win.close();
     expect(read('limit.txt')).toBe('limit = 3\n');
     expect(activity().some((a) => a.includes('put them back'))).toBe(false);
   });
@@ -187,9 +212,21 @@ describe('answers are checked before use', () => {
     expect(answerProblem(P.REVIEW_SCHEMA, { ...review, approved: 'yes' })).toBe('approved is not true or false');
     expect(answerProblem(P.REVIEW_SCHEMA, { ...review, comments: 'none' })).toBe('comments is not a list');
     expect(answerProblem(P.REVIEW_SCHEMA, { ...review, question: null })).toBeNull();
-    expect(answerProblem(P.PROOF_SCHEMA, { shots: [{ criterion: 1.5, file: 'a.png' }] })).toBe('shots[0].criterion is not a whole number');
-    expect(answerProblem(P.QUESTIONS_SCHEMA, { summary: 'x', questions: [{ from: 'tester', text: 'Why?', options: ['a', 'b'] }] })).toBe('questions[0].from is not one of analyst, architect');
-    expect(answerProblem(P.QUESTIONS_SCHEMA, { summary: 'x', questions: [{ from: 'analyst', text: 'Why?', options: ['a'] }] })).toBe('questions[0].options has fewer than 2 items');
+    expect(answerProblem(P.PROOF_SCHEMA, { shots: [{ criterion: 1.5, file: 'a.png', shows: 'met', note: 'Saved.' }], offScreen: [] })).toBe('shots[0].criterion is not a whole number');
+    expect(answerProblem(P.PROOF_SCHEMA, { shots: [{ criterion: 1, file: 'a.png', shows: 'met' }], offScreen: [] })).toBe('shots[0].note is missing');
+    // Each picture says what it shows, and the answer lists what shows on no screen.
+    expect(answerProblem(P.PROOF_SCHEMA, { shots: [{ criterion: 1, file: 'a.png', shows: 'maybe', note: 'Saved.' }], offScreen: [] })).toBe('shots[0].shows is not one of met, broken, not-shown');
+    expect(answerProblem(P.PROOF_SCHEMA, { shots: [] })).toBe('offScreen is missing');
+    expect(answerProblem(P.PROOF_CHECK_SCHEMA, { checks: [{ criterion: 1, shows: 'not-shown', why: 'Still loading.', advice: 'Wait for the list, on a phone.', noChange: false }] })).toBeNull();
+    // Advice is for what is not shown only; every check says whether the "done when" is a no-change one.
+    expect(answerProblem(P.PROOF_CHECK_SCHEMA, { checks: [{ criterion: 1, shows: 'met', why: 'Fine.', noChange: true }] })).toBeNull();
+    expect(answerProblem(P.PROOF_CHECK_SCHEMA, { checks: [{ criterion: 1, shows: 'met', why: 'Fine.' }] })).toBe('checks[0].noChange is missing');
+    expect(answerProblem(P.PROOF_CHECK_SCHEMA, { checks: [{ criterion: 1, shows: 'yes', why: 'Fine.', noChange: false }] })).toBe('checks[0].shows is not one of met, broken, not-shown');
+    expect(answerProblem(P.QUESTIONS_SCHEMA, { summary: 'x', questions: [{ from: 'tester', kind: 'gap', text: 'Why?', options: ['a', 'b'] }] })).toBe('questions[0].from is not one of analyst, architect');
+    expect(answerProblem(P.QUESTIONS_SCHEMA, { summary: 'x', questions: [{ from: 'analyst', kind: 'gap', text: 'Why?', options: ['a'] }] })).toBe('questions[0].options has fewer than 2 items');
+    // Every question says why it is asked: a gap or a clash.
+    expect(answerProblem(P.QUESTIONS_SCHEMA, { summary: 'x', questions: [{ from: 'analyst', text: 'Why?', options: ['a', 'b'] }] })).toBe('questions[0].kind is missing');
+    expect(answerProblem(P.BUILD_SCHEMA, { summary: 'x', question: { text: 'Refund or credit?' } })).toBe('question.kind is missing');
   });
 
   it('asks once more in the same conversation when the answer is incomplete', async () => {

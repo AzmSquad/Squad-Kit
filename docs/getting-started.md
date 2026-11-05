@@ -16,6 +16,9 @@ work. You need no terminal skills after step 2.
   `claude` once in a terminal and sign in with your own account. squad-kit uses that sign-in, so there is
   nothing new to buy and no key to paste.
 
+There is nothing else to install. squad-kit installs its own browser for the screenshots the first time it needs
+one. **Windows** works, but it is less protected and not fully tested yet: use it on projects you trust.
+
 ## 2. Install and open squad-kit
 
 ```bash
@@ -52,7 +55,7 @@ squad-kit works with any of these folders. The browser says which kind you picke
 
 | The folder | What squad-kit does |
 | --- | --- |
-| **An empty folder** | A new project. squad-kit makes a git repo with a short README in its first commit. On your first ticket, the Architect picks the stack with you. |
+| **An empty folder** | A new project. squad-kit makes a git repo with a short README in its first commit, then asks "What do you want to build?". The Architect picks the technology itself when your first ticket is planned. |
 | **Code with git** | Your repo, branches and history stay as they are. |
 | **Code without git** | squad-kit makes a repo, with your files in its first commit. Generated folders (`node_modules`, `dist`, `build` and the like) and `.env` files stay out. |
 | **A folder with several code repos** | squad-kit works across them. Each ticket works in one repo, which the Architect picks in the design. |
@@ -89,8 +92,15 @@ and a screenshot of the app), and three ideas for a first ticket. Read it, then:
 
 After that, the Overview is the project's home. It stays up to date after every merged ticket.
 
-Terminal: `squad setup --follow`, `squad overview`, `squad overview --approve`. To see it all without AI, run
-`squad demo --first-run`.
+**An empty folder has nothing to read yet**, so the steps that test and open the app are skipped, and the Overview
+asks **What do you want to build?** Say it in your own words, in English or Arabic. The Architect writes it down with
+ideas for your first stories, and you check it and press **Looks right, start working**. Or write your first ticket
+yourself. You are not asked about the technology: the Architect picks it when your first ticket is planned, and saves
+it as a decision engineers can see. After the first build, squad-kit reads how to test and run the project from its
+files, and saves that in Settings. Nobody is asked.
+
+Terminal: `squad setup --follow`, `squad overview`, `squad overview --approve`, `squad overview --build "what you
+want"`. To see it all without AI, run `squad demo --first-run`.
 
 ## 4. Connect a tracker (optional)
 
@@ -192,19 +202,24 @@ Now the squad works on its own:
 1. The **Builder** writes the code in its own copy of the project. Your own folder is never touched while it
    works. Its commands run in a sandbox where the computer allows it: they can only write in that copy, can't read
    your keys or sign-ins, and can only reach package registries and the websites you allow.
-2. squad-kit runs the project's **tests, lint and build** itself. If they fail, the Builder fixes them, up to
-   3 tries. If the change deleted tests, has fewer tests, changed the test setup or skips tests, the ticket stops
-   and says so. A project with no tests shows **Not checked** in orange, never a green pass.
+2. squad-kit runs the project's **tests, lint and build** itself, in its own guard on Mac and Linux: they work
+   normally, but can't read your keys or sign-ins. A check that fails runs once more first, as a test can fail once for
+   no reason in the code. If it still fails, the Builder fixes it, up to 3 tries, and is told which checks already
+   failed before this ticket started. If the change deleted tests, has fewer tests, changed the test setup or skips
+   tests, the ticket stops and says so. A project with no tests shows **Not checked** in orange, never a green pass.
 3. The **Reviewer** reads the whole change in a fresh session, with the check results, so the work gets a real
    second opinion.
-4. The **Tester** starts the app and takes a screenshot for each "done when". squad-kit checks each picture is
-   real and new.
+4. The **Tester** shows each "done when" in one or more screenshots, one for each part or case. squad-kit starts the
+   ticket's own copy of the app and takes the pictures with its own browser. There is nothing to install: the first
+   time, one line says "Setting up squad-kit's screenshot browser. This happens only once." squad-kit checks each
+   picture is real and new, then looks at all the pictures of each "done when" together.
 
 While it works, you can:
 
 - See the steps, the activity and the real agent conversation in the drawer's tabs.
 - Message an agent in the **Conversation** tab. It reads your message at its next step; the work goes on.
-- Ask any agent a question. Asking never stops the work.
+- Press **Ask a question** at the top of the ticket, in any state. Asking never stops the work, and the ticket stays
+  where it is.
 - Press **Propose a change** to change what gets built. See [Change something](#8-change-something) below.
 - Press **Stop**. The agent stops at once, and the work so far is kept. **Try again** carries on from the same
   step.
@@ -215,13 +230,33 @@ Only a limited number of tickets run at once (see **Tickets at once** in Setting
 **Next in line: starts when a slot is free** and starts on its own.
 
 A step that takes more than twice its usual time says **Taking longer than usual**, with what it is doing.
-**Give it 10 more minutes**, **Stop and try again**, or **Stop**. If Claude's usage limit is reached, the squad
-pauses and carries on by itself when the limit resets.
+**Give it 10 more minutes**, **Stop and try again**, or **Stop**. Only the time a step really runs counts, not the
+time it waits for you, for another ticket or for a free place. If Claude's usage limit is reached, the squad pauses
+and carries on by itself when the limit resets.
 
 ### Check the proof
 
-The **Proof** page shows each "done when" with its screenshot, and three results: the checks, the review and
-the proof. Nothing ships without all three.
+The **Proof** page shows each "done when" with its screenshots, one or more, one for each part or case, and three
+results: the checks, the review and the proof. Nothing ships without all three.
+
+Each "done when" says what its pictures show:
+
+- **Met**: they show it works as written.
+- **Not working yet**: a picture shows it does not work.
+- **Not shown yet**: the pictures do not show it clearly.
+- **Not on a screen**: it cannot be shown at all, like an email or what happens after a restart. Look at these
+  yourself: nobody saw them on a screen.
+
+**Also changed, not in the plan** lists anything the change touched beyond its plan, so nothing surprises you.
+
+Before you decide, you can check it yourself:
+
+- **Where to look** lists the pages to open, with what each one shows.
+- **Try it yourself** runs this ticket's own copy of the app, with the change in it and nothing merged. Press **Open**
+  to click through it, and **Stop** when you are done. Terminal: `squad try <ticket>`.
+- **Ask a question**, like "how do I test this?". The ticket keeps waiting for you.
+
+Then:
 
 - If it is right, press **Looks right**. squad-kit saves the change as a commit on the ticket's branch. With a
   code host (Azure Repos today), it opens a pull request with the screenshots and merges it. Without one, it
@@ -229,8 +264,8 @@ the proof. Nothing ships without all three.
 - If not, press **Something's wrong**, say what in one line, and press **Send back**. The ticket goes back to
   the Builder with your note.
 
-To try the change yourself, press **Run the new version** in **Your apps** in the sidebar. squad-kit starts the
-app from the newest `main` and gives you its address.
+After **Looks right**, press **Run the new version** in **Your apps** in the sidebar. squad-kit starts the app from
+the newest `main` and gives you its address.
 
 ### Release
 
@@ -273,7 +308,7 @@ command that does the same.
 | **No tests** | The project has no tests, so the checks can't prove the work. Asked once per project. | Use the Architect's suggested test command, go on without tests (the gate shows **Not checked**), or add one in Settings. |
 | **Tests weakened** | The change deleted tests, has fewer tests, changed the test setup, or skips tests. | **Send it back to the Builder**, **Fix it yourself**, or **Continue anyway** with a reason. |
 | **Needs another ticket** | The design depends on a ticket that is not merged yet. | **Build on its branch**, **Build anyway**, or **Wait**. |
-| **New test command** | The Architect's design changes the project's test command. It is never applied on its own. | **Use the new command**, or **Keep the current one** (`squad test-command <ticket> --use \| --keep`). |
+| **A choice about the tests** | The Architect's design changes how the tests run. squad-kit tries the new way itself and keeps it only when it passes and runs at least as many tests. This card shows only when it cannot tell. | **Keep the current way**, or **Use the new way** (`squad test-command <ticket> --keep \| --use`). |
 | **Reached its limit** | A step used the turns or the spend its Quality setting allows. The work is kept. | **Give it more**, or **Stop**. |
 | **Budget** | With an API key: a ticket or the month reached its budget. | **Carry on**, **Do the rest yourself**, or send it back to the plan. |
 
@@ -283,8 +318,8 @@ Only you can skip a failed check. Your reason shows on the ticket, the pull requ
 
 You can change your mind at any time, without stopping the squad.
 
-- **Ask** any agent anything. Open a chat from the ticket. The chat says so: the work goes on, and asking
-  changes nothing.
+- **Ask** anything with **Ask a question** at the top of the ticket, or open a chat with any agent. The chat says so:
+  the work goes on, and asking changes nothing.
 - **Change** what gets built with **Propose a change**. The Analyst writes it into the spec, old and new side
   by side, and says whether it is small or big. Nothing changes until you approve it.
   - A **small** change reaches the Builder at the end of its current step. The work does not stop.
@@ -320,8 +355,8 @@ all with `squad --help`.
 
 ## 10. When something goes wrong
 
-Every stop says what happened, what is safe, and the ways out, as buttons. Nothing is lost: the work so far is
-kept on the ticket's branch.
+Every stop says what happened, what is safe, and the ways out, as buttons, in plain words. The exact error is in the
+ticket's Developer tab, for engineers. Nothing is lost: the work so far is kept on the ticket's branch.
 
 If you need help, press **Report a problem** (on the error card, at the top of the ticket, or in Settings). It
 saves one file in your Downloads folder with the ticket, its conversations, the app log and the versions, and never

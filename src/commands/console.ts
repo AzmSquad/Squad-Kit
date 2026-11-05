@@ -245,6 +245,8 @@ async function serveApp(a: { first?: SquadPaths; follow?: ReturnType<typeof boar
     await restartBoard(a.underKeeper, a.restartWith);
     return;
   }
+  // Quitting leaves nothing behind either: the runs end, and what they left in squad-kit's copies is stopped.
+  await endRuns();
   ui.info('console stopped');
 }
 
@@ -252,8 +254,9 @@ async function serveApp(a: { first?: SquadPaths; follow?: ReturnType<typeof boar
 const RESTART_WAIT_MS = 10_000;
 
 /**
- * The board stopped every run as it closed. A restart waits for them to end first (10 seconds at most), so the new
- * board never finds a half-ended step or an app still holding its port; whatever is left then is killed.
+ * The board stopped every run as it closed. A restart or a quit waits for them to end first (10 seconds at most), and
+ * for squad-kit to stop what they left running in its copies (engine/leftovers.ts), so the new board never finds a
+ * half-ended step or a server still holding its port; whatever is left then is killed.
  */
 export async function endRuns(waitMs = RESTART_WAIT_MS): Promise<boolean> {
   if (await allEnded(waitMs)) return true;

@@ -68,6 +68,7 @@ const FOUND: { title: string; why: string }[] = [
   { title: 'Jest for logic, Playwright for screens', why: 'Both run in the checks today.' },
 ];
 
+/** What the Architect opens, behind "See what the Architect is reading". The step itself says it in plain words. */
 const READS = [
   'Reading README.md',
   'Reading web/package.json',
@@ -135,13 +136,13 @@ function doneNote(id: SetupStepId): string {
     case 'tool':
       return 'The squad works with it';
     case 'read':
-      return `Read ${DEMO_FILES} of ${DEMO_FILES} files`;
+      return `Read the project: ${DEMO_FILES} files`;
     case 'commands':
-      return 'Tests: npm test · Starts with: npm start';
+      return 'Found how to run the tests and start the app';
     case 'tests':
       return 'Ran your tests: 18 pass';
     case 'app':
-      return 'Opened it at localhost:4200';
+      return 'Opened the app';
     case 'overview':
       return 'What squad-kit understood, for you to check';
     default:
@@ -184,9 +185,9 @@ function readDone(bp: BoardPaths, meta: BoardMeta): void {
 /** What a step says while it runs on the sample board. */
 const START_NOTE: Partial<Record<SetupStepId, string>> = {
   read: 'Starting…',
-  commands: 'Installing what it needs: npm install',
-  tests: 'Running npm test',
-  app: 'Starting it: npm start',
+  commands: 'Installing what it needs',
+  tests: 'Running the tests',
+  app: 'Starting the app',
 };
 
 /** One turn of the sample setup: the step on now moves on with its time; the next one starts when it ends. */
@@ -220,13 +221,13 @@ export function playDemoSetup(bp: BoardPaths, meta: BoardMeta, at = Date.now()):
     if (cur.id === 'read') {
       const i = Math.min(READS.length - 1, Math.floor((took / need) * READS.length));
       const opened = Math.round((took / need) * DEMO_FILES * 0.6);
-      cur.note = `${READS[i]} · ${opened} of ${DEMO_FILES} files`;
+      cur.note = `Reading the code · ${opened} files`;
       if (s.reads?.at(-1) !== READS[i]) s.reads = [...(s.reads ?? []), READS[i]!].slice(-8);
       s.proof = { ...s.proof, read: opened };
-      meta.scan = { ...meta.scan!, status: 'running', now: READS[i] };
+      meta.scan = { ...meta.scan!, status: 'running', now: 'Reading the code' };
       writeMeta(bp, meta);
     } else if (cur.id === 'app' && took >= need / 2 && cur.note?.startsWith('Starting')) {
-      cur.note = 'Taking a screenshot at localhost:4200';
+      cur.note = 'Taking a screenshot';
       writeMeta(bp, meta);
     }
     return;

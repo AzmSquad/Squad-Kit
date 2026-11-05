@@ -171,15 +171,17 @@ export class Watchdog {
       this.cpu.set(watched.pid, { cpuSec: watched.cpuSec, at: now, idleSince: now });
     }
     const idleFor = now - (this.cpu.get(watched.pid)?.idleSince ?? now);
-    const what = proc ? short(proc.command) : 'Claude Code';
+    // Plain words on the card; the command and its process are kept beside them, for engineers.
+    const what = proc ? 'A command' : 'The AI tool';
+    const command = proc ? short(proc.command) : '';
     if (idleFor >= this.idleMs) {
       return {
         since,
         kind: 'stuck',
         detail: proc
           ? `${what} has run for ${mins(proc.elapsedSec)} and has done nothing for ${mins(idleFor / 1000)}. It may be waiting on the network or on a question.`
-          : `Claude Code has not answered for ${mins(quietFor / 1000)}. It may be waiting on the model or the network.`,
-        ...(proc ? { command: what, pid: proc.pid } : {}),
+          : `${what} has not answered for ${mins(quietFor / 1000)}. It may be waiting on the model or the network.`,
+        ...(proc ? { command, pid: proc.pid } : {}),
       };
     }
     if (quietFor >= this.longMs) {
@@ -187,7 +189,7 @@ export class Watchdog {
         since,
         kind: 'long',
         detail: `${what} has been working for ${mins(quietFor / 1000)} with no other progress.`,
-        ...(proc ? { command: what, pid: proc.pid } : {}),
+        ...(proc ? { command, pid: proc.pid } : {}),
       };
     }
     return null;

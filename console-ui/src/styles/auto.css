@@ -1,0 +1,61 @@
+/* Builds by itself, on the ticket side: the link back to the breakdown, the track chip, the stop card with its tag,
+   Decided for you, and the breakdowns that wait in Waiting for you. A clash is coral, a gap is blue. */
+
+:root,
+:root[data-theme='light'] {
+  --clash-soft: #fde8df;
+  --clash-ink: #8f2d0c;
+  --gap-soft: #e6edf8;
+  --gap-ink: #244a85;
+}
+
+:root[data-theme='dark'] {
+  --clash-soft: rgba(255, 123, 92, 0.16);
+  --clash-ink: #ffb39e;
+  --gap-soft: rgba(143, 176, 255, 0.16);
+  --gap-ink: #bcd0ff;
+}
+
+/* "From BR-1 › Payments › Invoices and refunds › S-14" under the title. */
+.brdplace { font-size: 12.5px; color: var(--muted); margin: -2px 0 8px; overflow-wrap: anywhere; }
+.brdplace a { color: var(--accent); font-weight: 600; text-decoration: none; }
+.brdplace a:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+/* The track: "Builds by itself" as a chip, beside who created the ticket. */
+.autochip { display: inline-flex; align-items: center; font-size: 12px; font-weight: 650; color: var(--accent); background: var(--accent-soft); border-radius: 99px; padding: 1px 9px; white-space: nowrap; }
+.prio.auto { color: var(--accent); background: var(--accent-soft); }
+.card .bkey { font: 500 10.5px 'JetBrains Mono', monospace; color: var(--dim); margin: -4px 0 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card .row1 .id { white-space: nowrap; }
+
+/* The three stops. */
+.stoptag { display: inline-flex; align-items: center; height: 21px; padding: 0 8px; border-radius: 6px; font-size: 11.5px; font-weight: 700; white-space: nowrap; flex: none; background: var(--you-soft); color: var(--you-ink); }
+.stoptag.clash { background: var(--clash-soft); color: var(--clash-ink); }
+.stoptag.gap { background: var(--gap-soft); color: var(--gap-ink); }
+.stoptag.check { background: var(--bug-soft); color: var(--bug); }
+
+/* The stop card on the ticket. */
+.stopcard { border: 1.5px solid var(--you-line); background: var(--you-soft); border-radius: 13px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.stopcard .stophead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); }
+.stopcard .stuckq { margin: 0; }
+.stopcard .opts2 { margin: 0; }
+.stopcard .opt2 { background: var(--surface); }
+.stopcard .stopwhy { font-size: 12.5px; color: var(--you-ink); line-height: 1.45; }
+/* Where the stop comes from: places in the BRD open the document, tickets open the ticket. */
+.stopcard .stopsrc { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin: -4px 0 0; overflow-wrap: anywhere; }
+.stopcard .stopsrc a, .stopcard .stopsrc .linkbtn { color: var(--accent); font-weight: 600; font-size: inherit; text-decoration: underline; text-underline-offset: 3px; margin: 0; padding: 0; }
+.rec { font-size: 11px; font-weight: 700; color: var(--accent); background: var(--accent-soft); border-radius: 99px; padding: 1px 7px; white-space: nowrap; flex: none; }
+.opt2 .optfoot { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+.opt2 .yourpick { display: inline-flex; align-items: center; gap: 4px; color: var(--accent); font-size: 12px; font-weight: 600; }
+
+/* Decided for you on this story. */
+ul.decided { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+ul.decided li { display: flex; flex-direction: column; gap: 2px; padding: 9px 0; border-top: 1px solid var(--line); font-size: 13px; line-height: 1.45; }
+ul.decided li:first-child { border-top: 0; padding-top: 2px; }
+ul.decided .dwho { font: 500 11px 'JetBrains Mono', monospace; color: var(--muted); }
+ul.decided .was { color: var(--muted); text-decoration: line-through; }
+ul.decided .became { font-size: 12.5px; color: var(--muted); }
+ul.decided .linkbtn { margin-top: 2px; }
+.decidedq { font-size: 13.5px; line-height: 1.45; padding: 10px 12px; border-radius: 9px; background: var(--surface-2); margin-bottom: 12px; }
+
+/* A breakdown waiting for answers, in Waiting for you. */
+.yitem .yline .stoptag, .wcard .meta .stoptag { margin-right: 6px; }

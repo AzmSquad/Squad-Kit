@@ -46,7 +46,8 @@ const THRIFTY: Record<string, Record<string, LevelChoice>> = {
   architect: { scan: balanced('medium'), design: strong('high'), blueprint: balanced('medium'), chat: strong('medium') },
   builder: { build: balanced('medium'), fix: balanced('medium'), chat: balanced('medium') },
   reviewer: { review: strong('medium'), chat: strong('medium') },
-  tester: { proof: fast('low'), chat: fast('low') },
+  // The proof judges each "done when" from its picture, so a picture badly framed costs more than a stronger model.
+  tester: { proof: balanced('medium'), chat: fast('low') },
 };
 
 /** Best: the strongest model builds and reviews, at high effort. */
@@ -93,7 +94,7 @@ interface Preset {
   levels: Record<string, Record<string, LevelChoice>>;
   /** Each step's caps (see StepCaps). */
   caps: Record<string, StepCaps>;
-  /** The Express track has little to decide: each role's level for every step of it. */
+  /** The Express track has little to decide: each role's level for every step of it, or for one step ("tester.proof"). */
   express: Record<string, LevelChoice>;
   /** The Builder's level once this many of its runs failed on a ticket. */
   stepUp: { after: number; to: LevelChoice };
@@ -102,7 +103,7 @@ interface Preset {
 }
 
 /** The Express track on Best and Balanced: the plan and the build on balanced at high, the review still on the strongest. */
-const EXPRESS: Record<string, LevelChoice> = { analyst: balanced('high'), architect: balanced('high'), builder: balanced('high'), reviewer: strong('high'), tester: fast('low') };
+const EXPRESS: Record<string, LevelChoice> = { analyst: balanced('high'), architect: balanced('high'), builder: balanced('high'), reviewer: strong('high'), tester: fast('low'), 'tester.proof': balanced('medium') };
 
 /** squad-kit's defaults for each Quality setting. They ship inside squad-kit and improve with each release. */
 export const QUALITY_PRESETS: Record<Quality, Preset> = {
@@ -154,7 +155,7 @@ function choiceIn(layer: LevelOverrides | undefined, role: string, step: string)
 /** squad-kit's own level for a step, before the project's and the person's choices. */
 export function standardLevel(ctx: Pick<LevelContext, 'role' | 'step' | 'quality' | 'express'>): LevelChoice {
   const preset = QUALITY_PRESETS[ctx.quality ?? DEFAULT_QUALITY];
-  return (ctx.express ? preset.express[ctx.role] : undefined) ?? preset.levels[ctx.role]?.[ctx.step] ?? balanced('medium');
+  return (ctx.express ? (preset.express[`${ctx.role}.${ctx.step}`] ?? preset.express[ctx.role]) : undefined) ?? preset.levels[ctx.role]?.[ctx.step] ?? balanced('medium');
 }
 
 /** A choice raised to at least the floor's level and effort, each on its own. */

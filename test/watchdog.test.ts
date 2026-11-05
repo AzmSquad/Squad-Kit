@@ -34,7 +34,9 @@ describe('watchdog', () => {
     // Two more minutes and no more CPU used: stuck.
     const q = dog.check('MA-1', t0 + 6 * MIN + 1000, rows(5.2));
     expect(q).toMatchObject({ kind: 'stuck', pid: 12, command: 'npm install --no-audit' });
-    expect(q?.detail).toMatch(/npm install --no-audit has run for 11 minutes and has done nothing for 2 minutes/);
+    // Plain words on the card; the command itself is kept beside them, for engineers.
+    expect(q?.detail).toMatch(/^A command has run for 11 minutes and has done nothing for 2 minutes/);
+    expect(q?.detail).not.toContain('npm');
     // A new sign of life clears it.
     dog.beat('MA-1');
     expect(dog.check('MA-1', Date.now(), rows(5.2))).toBeNull();
@@ -74,7 +76,7 @@ describe('watchdog', () => {
     expect(quiet.check('MA-2', t0 + 4 * MIN, [adapter, claude, server])).toBeNull();
     const q = quiet.check('MA-2', t0 + 7 * MIN, [adapter, claude, server]);
     expect(q?.pid).toBeUndefined();
-    expect(q?.detail).toMatch(/Claude Code has not answered/);
+    expect(q?.detail).toMatch(/The AI tool has not answered/);
   });
 
   it('after the computer sleeps, counts the sleep out instead of calling the step long', () => {
@@ -101,6 +103,6 @@ describe('watchdog', () => {
     dog.track('MA-1', 10);
     const rows = [row(10, 1, '/Users/me/.local/bin/claude -p ...', 3)];
     expect(dog.check('MA-1', t0 + 4 * MIN, rows)).toBeNull();
-    expect(dog.check('MA-1', t0 + 7 * MIN, rows)).toMatchObject({ kind: 'stuck', detail: expect.stringMatching(/Claude Code has not answered/) });
+    expect(dog.check('MA-1', t0 + 7 * MIN, rows)).toMatchObject({ kind: 'stuck', detail: expect.stringMatching(/The AI tool has not answered/) });
   });
 });

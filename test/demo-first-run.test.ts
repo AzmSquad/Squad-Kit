@@ -67,7 +67,7 @@ describe('the first run on the sample board', () => {
     expect(readMeta(bp).scan?.status).toBe('running');
     at = play(start + 9000, at);
     const reading = setupView(bp)!;
-    expect(reading.steps.find((s) => s.id === 'read')!.note).toMatch(/ of 214 files$/);
+    expect(reading.steps.find((s) => s.id === 'read')!.note).toMatch(/^(Reading the code · \d+|Read the project: 214) files$/);
     expect(reading.reads.length).toBeGreaterThan(0);
 
     play(start + 40_000, at);

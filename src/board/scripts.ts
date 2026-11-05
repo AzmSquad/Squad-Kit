@@ -44,8 +44,8 @@ const darkMode: TicketScript = {
     q4: 'If staff share desks, a choice saved in the browser is lost when they move. Then I would save the theme in each person\'s account instead.',
   },
   planLines: [
-    { who: 'architect', text: 'Reading web/src/app/core/theme.service.ts' },
-    { who: 'architect', text: 'Reading api/Users/Account.cs' },
+    { who: 'architect', text: 'Reading the code for the theme' },
+    { who: 'architect', text: 'Reading the code for accounts' },
     { who: 'architect', text: 'Checking Angular Material for dark theme support' },
     { who: 'spec', text: 'Writing the plan: 6 small steps and 9 tests' },
   ],
@@ -85,12 +85,12 @@ const darkMode: TicketScript = {
     };
   },
   steps: [
-    { title: 'Add a theme setting to each account', live: ['Reading api/Users/Account.cs', 'Editing api/Users/Preferences.cs', 'Adding a theme column to the database'] },
-    { title: 'Theme switch in the header', live: ['Editing web/src/app/header/header.component.ts', 'Placing the switch next to the user menu'] },
-    { title: 'Dark colors for every page', live: ['Editing web/src/styles/themes.scss', 'Checking 14 pages for hard-coded colors'] },
-    { title: 'Save the choice in the account', live: ['Editing api/Users/PreferencesController.cs', 'Editing web/src/app/core/theme.service.ts'] },
-    { title: 'Follow the computer theme for new users', live: ['Reading the browser theme setting', 'Editing web/src/app/core/theme.service.ts'] },
-    { title: 'Tests for every "done when"', live: ['Writing theme-follows-account.spec.ts', 'Writing 9 new tests'] },
+    { title: 'Add a theme setting to each account', live: ['Reading the code for accounts', 'Writing the code for saved settings', 'Adding a theme column to the database'] },
+    { title: 'Theme switch in the header', live: ['Writing the code for the header', 'Placing the switch next to the user menu'] },
+    { title: 'Dark colors for every page', live: ['Writing the dark colors', 'Checking 14 pages for fixed colors'] },
+    { title: 'Save the choice in the account', live: ['Writing the code that saves the choice', 'Writing the code for the theme'] },
+    { title: 'Follow the computer theme for new users', live: ['Reading the browser theme setting', 'Writing the code for the theme'] },
+    { title: 'Tests for every "done when"', live: ['Writing the test for the saved theme', 'Writing 9 new tests'] },
   ],
   tests: 21,
   reviewFix: {
@@ -105,6 +105,7 @@ const darkMode: TicketScript = {
       beforeLabel: 'Before',
       afterLabel: 'After',
       note: 'Recorded by the Tester in Chrome at 1440 by 900',
+      shows: 'met',
     },
     {
       criterion: 'Still dark on another computer',
@@ -113,6 +114,7 @@ const darkMode: TicketScript = {
       beforeLabel: 'Computer A',
       afterLabel: 'Computer B',
       note: 'Same account, logged in on a second browser',
+      shows: 'met',
     },
     {
       criterion: 'New users follow their computer theme',
@@ -121,6 +123,7 @@ const darkMode: TicketScript = {
       beforeLabel: 'Computer set to light',
       afterLabel: 'Computer set to dark',
       note: 'A new account on two computers with different settings',
+      shows: 'met',
     },
   ],
   releaseNote: () => '**Dark mode.** Switch the dashboard to dark. Your choice follows you to any computer.',
@@ -208,7 +211,7 @@ export function scriptFor(t: Ticket): TicketScript {
 /** Status lines for tickets that work in the background of the demo board. */
 export const AMBIENT: Record<string, string[]> = {
   'SK-151': ['Analyst is reading the ticket', 'Analyst is checking the hearing calendar'],
-  'SK-153': ['Editing web/src/app/upload/upload.component.ts', 'Editing api/Files/UploadLimits.cs'],
+  'SK-153': ['Writing the code for the upload page', 'Writing the code for the upload limits'],
   'SK-146': ['Running checks for the court filter', 'Checking filters on 3 screen sizes'],
   'SK-145': ['Reviewer is reading the login changes', 'Reviewer is checking the session handling'],
 };

@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { AgentResult, AgentUsage, BlockedAction, ToolEvent } from '../modules/ai-tool/types.js';
+import type { AgentResult, AgentUsage, BlockedAction, RunWindow, ToolEvent } from '../modules/ai-tool/types.js';
 import { OWN_GROUP, endGroup, track } from './process-group.js';
 
 /**
@@ -85,6 +85,25 @@ export interface AcpRunOptions {
   onSpawn?(pid: number): void;
   /** How long the adapter may take to start, and then to open the session. Tests use less. */
   startLimits?: { initializeMs?: number; sessionMs?: number };
+  /** squad-kit's own tools for this run (the window), offered to the agent as an MCP server. */
+  window?: RunWindow;
+}
+
+/**
+ * The window as an ACP MCP server: over HTTP when the agent says it takes MCP over HTTP, else through squad-kit's
+ * stdio bridge, which forwards each message to the same address with the same key.
+ */
+export function windowServer(w: RunWindow, http: boolean): Record<string, unknown> {
+  if (http) return { type: 'http', name: w.name, url: w.url, headers: [{ name: 'Authorization', value: `Bearer ${w.key}` }] };
+  return {
+    name: w.name,
+    command: w.bridge.command,
+    args: w.bridge.args,
+    env: [
+      { name: 'SQUAD_WINDOW_URL', value: w.url },
+      { name: 'SQUAD_WINDOW_KEY', value: w.key },
+    ],
+  };
 }
 
 /** Raised when the adapter could not start, before any work began, so the caller can fall back safely. */
@@ -288,9 +307,10 @@ export async function runAcp(launch: AcpLaunch, opts: AcpRunOptions): Promise<Ag
   };
 
   try {
+    let mcpHttp = false;
     try {
-      await deadline(
-        rpc.request('initialize', {
+      const init = await deadline(
+        rpc.request<{ agentCapabilities?: { mcpCapabilities?: { http?: boolean } } }>('initialize', {
           protocolVersion: 1,
           clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
           clientInfo: { name: 'squad-kit', version: '1' },
@@ -298,19 +318,21 @@ export async function runAcp(launch: AcpLaunch, opts: AcpRunOptions): Promise<Ag
         initializeMs,
         late(initializeMs, 'start'),
       );
+      mcpHttp = init?.agentCapabilities?.mcpCapabilities?.http === true;
     } catch (err) {
       // A Stop is not a failed start: the caller must not try another way.
       if (stoppedBy) throw err;
       const why = err instanceof TookTooLong ? err.message : `The ACP adapter did not start: ${(err as Error).message}`;
       throw new AcpStartError(`${why} ${stderr.slice(-300)}`.trim());
     }
+    const mcpServers = opts.window ? [windowServer(opts.window, mcpHttp)] : [];
     const existing = sessionId && launch.canResume(sessionId);
     if (existing) {
       costBefore = launch.costSoFar?.(sessionId);
       // Continue the saved conversation under the same id.
-      await deadline(rpc.request('session/resume', { sessionId, cwd: opts.cwd, mcpServers: [], _meta: meta }), sessionMs, late(sessionMs, 'open its session'));
+      await deadline(rpc.request('session/resume', { sessionId, cwd: opts.cwd, mcpServers, _meta: meta }), sessionMs, late(sessionMs, 'open its session'));
     } else {
-      const s = await deadline(rpc.request<{ sessionId: string }>('session/new', { cwd: opts.cwd, mcpServers: [], _meta: meta }), sessionMs, late(sessionMs, 'open a session'));
+      const s = await deadline(rpc.request<{ sessionId: string }>('session/new', { cwd: opts.cwd, mcpServers, _meta: meta }), sessionMs, late(sessionMs, 'open a session'));
       sessionId = s.sessionId;
     }
     if (launch.mode) await rpc.request('session/set_mode', { sessionId, modeId: launch.mode });

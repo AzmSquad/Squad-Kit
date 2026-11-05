@@ -2,6 +2,8 @@ import { listDecisions, now, readMeta, type BoardPaths } from '../board/store.js
 import { cleanOverview, hasOverview, readOverview, writeOverview } from '../board/overview.js';
 import { corrections, readTalk, writeTalk } from '../board/first-run.js';
 import type { AgentResult } from '../modules/ai-tool/types.js';
+import { writeLog } from '../core/app-log.js';
+import { ownWords } from './plain-stop.js';
 import * as P from './prompts.js';
 
 /**
@@ -68,6 +70,9 @@ export function talkReply(bp: BoardPaths, c: TalkControl): void {
     } catch (err) {
       const fresh = readTalk(bp) ?? t;
       const stopped = Boolean(fresh.stopping) || (err as Error).message === STOPPED;
+      // squad-kit's own words reach the person; anything else is one plain line, the exact words in the app log.
+      const own = ownWords(err);
+      if (!stopped) writeLog({ level: 'warn', text: `The Architect could not answer in the talk: ${(err as Error)?.message ?? String(err)}` });
       writeTalk(bp, {
         ...fresh,
         thinking: false,
@@ -76,7 +81,7 @@ export function talkReply(bp: BoardPaths, c: TalkControl): void {
           ...fresh.messages,
           stopped
             ? { who: 'squad', text: 'You stopped this answer. Ask again, or carry on.', at: now(), note: 'stopped' }
-            : { who: 'squad', text: `The Architect could not answer: ${(err as Error).message}`, at: now(), note: 'failed' },
+            : { who: 'squad', text: own ? `The Architect could not answer: ${own}` : 'The Architect could not answer this time. Press Try again.', at: now(), note: 'failed' },
         ],
       });
     }
@@ -87,6 +92,12 @@ export function talkReply(bp: BoardPaths, c: TalkControl): void {
 export function readSaid(bp: BoardPaths): string {
   const t = readTalk(bp);
   return t?.reread ? corrections(t) : '';
+}
+
+/** What the person said they want to build on a project with no code, when the next read takes it in. */
+export function readIdea(bp: BoardPaths): string {
+  const t = readTalk(bp);
+  return t?.reread ? (t.idea ?? '') : '';
 }
 
 /** The read with what they said is done. */

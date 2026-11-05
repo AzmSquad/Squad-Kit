@@ -155,7 +155,7 @@ describe('tracker updates are kept until they are sent', () => {
   const tracker = {
     name: 'fake',
     label: 'Fake Boards',
-    abilities: { tags: false, bugs: false, wiki: false },
+    abilities: { tags: false, bugs: false, wiki: false, create: false },
     refOf: (id: string) => `FB#${id}`,
     parseRef: (ref: string) => ref,
     moveTo: async (_id: string, state: string) => {

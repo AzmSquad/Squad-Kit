@@ -5,7 +5,8 @@ import yaml from 'js-yaml';
 import { DEFAULT_CONFIG, loadConfig, saveConfig } from '../core/config.js';
 import { squadHome } from '../core/home.js';
 import type { Actor, BoardMeta, Decision, Question, Release, Step, Ticket } from './types.js';
-import { trackStage } from './clock.js';
+import { pauseClock, trackStage, waitsNow } from './clock.js';
+import { clearStaleStop, oldStop } from './stale-stop.js';
 import {
   decisionDoc,
   lessonsDoc,
@@ -162,7 +163,7 @@ function cached<T>(key: string, files: string[], read: () => T): T {
 /* ── Board settings ─────────────────────────────────────── */
 
 /** The board's settings that belong to the project, kept in `.squad/config.yaml` under `board:`. */
-const PROJECT_META = ['id', 'layout', 'documentsInGit', 'quality', 'allowedHosts', 'project', 'key', 'nextNumber', 'engine', 'commands', 'noTests', 'git', 'repos'] as const;
+const PROJECT_META = ['id', 'layout', 'documentsInGit', 'quality', 'allowedHosts', 'guard', 'project', 'key', 'nextNumber', 'engine', 'commands', 'noTests', 'git', 'repos'] as const;
 /** What the project knows, kept in `.squad/knowledge/` as Markdown. */
 const KNOWLEDGE_META = ['map', 'lessons'] as const;
 
@@ -257,14 +258,18 @@ export const TICKET_HOME = {
   story: 'project',
   criteria: 'project',
   releaseNote: 'project',
+  alsoChanged: 'project',
   decision: 'project',
   notes: 'project',
   proof: 'project',
+  offScreen: 'project',
   mockup: 'project',
   changes: 'project',
   changeOf: 'project',
   dependsOn: 'project',
   dependency: 'project',
+  breakdown: 'project',
+  decided: 'project',
   // Split: the questions' answers, the steps' titles and files inside the ticket's folder are the project's;
   // the talk about a question, the steps' progress and voice notes stay here.
   questions: 'project',
@@ -282,12 +287,15 @@ export const TICKET_HOME = {
   tries: 'local',
   fails: 'local',
   reviewRound: 'local',
+  proofRound: 'local',
   retryPhase: 'local',
   capRaise: 'local',
   stopRequested: 'local',
   reviewNotes: 'local',
   localSetup: 'local',
   replanFor: 'local',
+  interrupted: 'local',
+  selfAccept: 'local',
   quiet: 'local',
   quietSnoozedUntil: 'local',
   trackerQueue: 'local',
@@ -296,6 +304,7 @@ export const TICKET_HOME = {
   weakenedContinued: 'local',
   testSuggestion: 'local',
   testChange: 'local',
+  testDecided: 'local',
   reviewAsked: 'local',
   builtPlan: 'local',
   notesSeen: 'local',
@@ -393,6 +402,10 @@ function joinTicket(bp: BoardPaths, id: string, docs: Record<string, string>, st
   t.activity ??= [];
   t.waiting ??= null;
   t.status ??= '';
+  // A stop from before the three verdicts: "not met" is what is now called broken.
+  if ((t.stuck?.kind as string | undefined) === 'not-met') t.stuck!.kind = 'broken';
+  // A ticket past review never shows a stop from before it; the next save drops it for good.
+  if (oldStop(t)) clearStaleStop(t);
   return t;
 }
 
@@ -448,12 +461,16 @@ export function writeTicket(bp: BoardPaths, ticket: Ticket): void {
   writeFile(stateFile(bp, ticket.id), dumpYaml(state));
 }
 
-/** Read, change and save one ticket. The time it spends in each stage is kept as it moves. */
+/**
+ * Read, change and save one ticket. The time it spends in each stage is kept as it moves, and its step's clock stands
+ * still while it waits.
+ */
 export function updateTicket(bp: BoardPaths, id: string, change: (t: Ticket) => void): Ticket {
   const ticket = requireTicket(bp, id);
   const stage = ticket.stage;
   change(ticket);
   trackStage(ticket, stage);
+  if (waitsNow(ticket)) pauseClock(ticket);
   writeTicket(bp, ticket);
   return ticket;
 }

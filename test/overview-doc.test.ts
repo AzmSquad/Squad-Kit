@@ -154,6 +154,7 @@ describe("the read's answer checks", () => {
 
   it('saving the read keeps a choice found before, and drops a proposal the new read no longer finds', () => {
     const bp = liveBoard();
+    for (const f of ['pyproject.toml', 'app.py']) fs.writeFileSync(path.join(bp.root, f), '');
     const answer = { ...base, decisions: [{ title: 'Python 3.10', why: 'pyproject says so' }, { title: 'SQLite', why: 'roomflow.db' }], ...parts };
     saveScan(bp, answer, []);
     expect(listDecisions(bp).map((d) => [d.title, d.proposed])).toEqual(expect.arrayContaining([['Python 3.10', true], ['SQLite', true]]));

@@ -30,21 +30,31 @@ import {
   shipped,
   wayOptions,
   type ChangeAnswer,
+  saveTestCommand,
 } from '../board/actions.js';
 import { scheduleSquad } from '../board/schedule.js';
 import { releaseGoingOut } from '../board/lock.js';
-import { TECH_ROLES, type BoardMeta, type ChangeStep, type DecisionArea, type ImpactCheck, type PatternNote, type ProjectCommands, type Question, type Role, type SpecChange, type StackNote, type TechDraft, type Ticket } from '../board/types.js';
+import { TECH_ROLES, type BoardMeta, type ChangeStep, type DecisionArea, type ImpactCheck, type OffScreen, type PatternNote, type PortAsk, type ProjectCommands, type ProofPicture, type ProofShot, type Question, type Role, type SpecChange, type StackNote, type TechDraft, type Ticket } from '../board/types.js';
 import { detectStack } from '../board/stack.js';
 import { AI_TOOLS, aiTool, describeToolEvent } from '../modules/registry.js';
-import type { AgentResult, AgentRun, BlockedAction, ToolEvent } from '../modules/ai-tool/types.js';
-import { runChecks, runCommand, startApp, tail, testCount, type CheckResult, type RunningApp } from './checks.js';
+import { CHECK_DOING, DOING, plainToolLine } from './plain-doing.js';
+import type { AgentResult, AgentRun, AiTool, BlockedAction, ToolEvent } from '../modules/ai-tool/types.js';
+import { CHECK_SILENT_MS, failedOnceLine, runChecks, runCommand, startApp, tail, testCount, type CheckResult, type RunningApp } from './checks.js';
+import { forgetKnownFailure, knownFailures } from './known-failures.js';
+import { alsoChangedLine, cleanAlsoChanged } from '../board/also-changed.js';
 import { weakenedChecks, type Weakening } from './weakened.js';
-import { checkWords, holdTestCommand, noTestsQuestion, noTestsRan, notCheckedText, ranOf } from './not-checked.js';
-import { samePicture, shotProblem } from './proof-check.js';
-import { addSnapshot, addWorktree, commitAll, dropSnapshot, git, isAncestor, latestBase } from './git.js';
+import { checkWords, holdTestCommand, noTestsDetail, noTestsQuestion, noTestsRan, notCheckedText, ranOf } from './not-checked.js';
+import { findCommands } from './find-commands.js';
+import { samePicture, shotProblem, shotSizeOf } from './proof-check.js';
+import { ShotsUnavailable, isPlain, plainParts, prepareShots, shotsErrorDetail, takeOne, type ShotSize } from './shots.js';
+import { ALL_TOOLS, AgentWindow, toolsFor, tooManyMistakesWords, tooManyWords, type WindowChecks, type WindowSetup } from './window.js';
+import { closeWindow, openWindow, windowAccess } from './window-server.js';
+import { TECHNICAL_TRIES, askText, judgeQuestion, judgeReply, questionBackPrompt, refusedAskLine, refusedReplyLine, stoppedQuestion } from './question-filter.js';
+import { TECHNICAL_STOP, ownRunWords, ownWords } from './plain-stop.js';
+import { addSnapshot, addWorktree, changedTracked, commitAll, dropSnapshot, git, isAncestor, isLockFile, latestBase, putBackTracked } from './git.js';
 import * as P from './prompts.js';
 import { baseCommits, findNestedRepos, repoFor, rulesFiles } from './repos.js';
-import { flushTracker, publishTicket, syncWiki, trackerDue } from './sync.js';
+import { flushTracker, publishTicket, recheckMerge, syncWiki, trackerDue } from './sync.js';
 import { AGENTS, agentInstructions, readAgent, type AgentRole } from './agents.js';
 import { Watchdog, processTable, type Quiet } from './watchdog.js';
 import { isMediaNote, prepareMedia } from './media.js';
@@ -52,6 +62,7 @@ import { allowedFile, ticketFolders } from './conversations.js';
 import { DEFAULT_QUALITY, builderLevel, describeLevel, effortOn, personLevels, resolveLevel, stepCaps } from './levels.js';
 import { CapReached, capCard } from './caps.js';
 import { blockedLine, packageCacheEnv, sandboxAsk, sandboxOf, ticketCacheDir } from './sandbox.js';
+import { GUARD_BLOCKED, guardBlockedDetail, guardBlockedPath, guardSupport, ticketGuard, type GuardSpec } from './project-guard.js';
 import { ticketDir } from '../board/store.js';
 import { commitTicketDocs, leaveProjectFiles } from './project-git.js';
 import { carryOn, fetchBase, fetchPushed, workSoFar } from './handover.js';
@@ -62,19 +73,39 @@ import { howPaid } from '../board/payment.js';
 import { parallelLimit } from '../core/settings.js';
 import { answerProblem, dependsProblem, scanProblem } from './answers.js';
 import { checkLane, watchLane, type Lane } from './lane.js';
-import { endStep, nextPart, slowStep, startStep, stepDoing, timedStep } from '../board/clock.js';
+import { endStep, nextPart, pauseClock, resumeClock, slowStep, startStep, stepDoing, timedStep } from '../board/clock.js';
 import { readUsual } from '../board/usual.js';
 import { QUEUED, queuedLine } from '../board/now.js';
 import { watchPort } from './free-port.js';
 import { LimitReached, activePause, chatWaitNote, isLimitText, limitText, startPause, type LimitPause } from './usage-limit.js';
 import { explainError, StepError } from '../board/problem.js';
-import { readAgainDone, readSaid, saveBlueprintParts, talkReply } from './onboard-live.js';
+import { readAgainDone, readIdea, readSaid, saveBlueprintParts, talkReply } from './onboard-live.js';
 import { readFailed, readStarted, readingNow, resumeSetup, runSetupProof, saveScan, type ScanAnswer } from './onboard.js';
 import { nextProofStep } from '../board/setup-state.js';
 import { writeLog, type LogLevel } from '../core/app-log.js';
 import { designDepends, holdBuild, wakeIfReady } from '../board/depends.js';
 import { resumeCutRelease } from '../board/release-tidy.js';
 import { addWorktreeOn, catchUp, dependencyToStartFrom, openTicketsFor } from './depends.js';
+import { copyWords, endProcess, folderOf, listenerOn, ownedBySquadKit, processes, projectCopies, runsEnded, stopLeftovers, stoppedLines, ticketCopies, workingFolders, type Leftover, type LookOptions } from './leftovers.js';
+import { CutOff, carriesOn, carryOnLine, carryOnPrompt, markInterrupted, sleepMark, sleptSince, type SleepMark } from './interrupt.js';
+import { STOP_IT, cardAnswer, goAroundAnswer, inTheWay, ownWorkAnswer, portCard, settledAnswer, type AroundIt } from './port-ask.js';
+import { appPortVariables } from './port-vars.js';
+import { judgeTestChange } from './test-change.js';
+import { trackTask } from './process-group.js';
+import { endPid, nextFreePort, portTaken, squadKitOn } from './run-app.js';
+import { APPROVING, NO_QUESTIONS, acceptByItself, acceptNext, addDecided, afterPullRequest, askWords, cleanSources, mergeWait, mergesByItself, resumeAccept, waitForLanding } from '../board/auto.js';
+import * as A from './auto-prompts.js';
+import type { DecidedBy } from '../board/requirements-types.js';
+import { breakdownJobs, holdBreakdownJob } from '../board/requirements.js';
+import { breakdownStopped } from '../board/requirements-actions.js';
+import { breakdownDir } from '../board/requirements-paths.js';
+import { proofPages, rowPictures, squadWorks, waitsAtReview, whereItStands } from '../board/at-review.js';
+import { reviewLook } from './review-look.js';
+import { runBreakdownJob } from './breakdown-job.js';
+import { fillBuildQueue, placesLeft } from '../board/requirements-build.js';
+import { startSends } from '../board/requirements-send.js';
+import { clearStaleStop } from '../board/stale-stop.js';
+import { CHECK_FAILED, MAX_PICTURES_PER_DONE_WHEN, MAX_PROOF_ROUNDS, MAX_RETAKES, addPictures, afterLastRetake, brokenRows, brokenStop, cannotShowLine, checkVerdicts, criterionText, doneWhenCount, fixLine, fromReason, makeMain, notShownStop, offScreenNumbers, reasonRefusedLine, retakeLine, together, verdictOf, type CheckVerdict, type Judged, type OpenRow } from './proof-verdict.js';
 
 /**
  * The live squad. Each step of a ticket is one real run of the role's AI tool in the project (or the
@@ -149,15 +180,23 @@ export class LiveSquad {
   private stops = new Map<string, AbortController>();
   private syncing = new Set<string>();
   private localRuns = new Set<string>();
+  /** Builds by itself: merges that wait (a pull request's approver, the person's checkout), and when each was looked at. */
+  private mergeLooks = new Map<string, number>();
   private closing = false;
   private dog = new Watchdog();
   private lastWatch = 0;
   private lastPickUp = 0;
   private pickingUp = false;
+  /** A turn of Build continuously is running. */
+  private queueing = false;
   /** What a waiting ticket's card said before it waited for a free place, to say again when its step starts. */
   private beforeQueue = new Map<string, string>();
   /** "Before" screenshots running beside a ticket's build, until they end. */
   private beforeShotsOf = new Map<string, Promise<void>>();
+  /** What the last board left running in squad-kit's copies, being stopped as this one starts: steps wait for it. */
+  private swept: Promise<unknown> | null = null;
+  /** When each ticket's step started, on both clocks, to tell a run the computer's sleep cut off. */
+  private marks = new Map<string, SleepMark>();
 
   constructor(private bp: BoardPaths) {}
 
@@ -171,8 +210,40 @@ export class LiveSquad {
       waiting.delete(this);
       this.closing = true;
       if (this.timer) clearInterval(this.timer);
+      // Cut off, not failed: each step carries on from where it was when the board opens again (engine/interrupt.ts).
+      for (const id of this.ticketIds()) this.cutOff(id, 'restart');
       for (const c of this.stops.values()) c.abort();
+      // What their runs leave behind in squad-kit's copies stops too, once they have ended. A restart waits for it.
+      if (this.isLive()) trackTask(this.clearAfterClose());
     };
+  }
+
+  private isLive(): boolean {
+    try {
+      return boardExists(this.bp) && readMeta(this.bp).engine === 'live';
+    } catch {
+      return false;
+    }
+  }
+
+  /** The step running on a ticket was cut off: kept as such on the ticket, never as a failed try. */
+  private cutOff(id: string, by: 'restart' | 'stop' | 'sleep'): void {
+    try {
+      this.update(id, (x) => {
+        if (!x.squad) return;
+        x.squad.phase = markInterrupted(x, x.squad.phase, by);
+        // Nothing runs now, so its clock stands still until the step carries on.
+        pauseClock(x);
+      });
+    } catch {
+      // The ticket was removed meanwhile.
+    }
+  }
+
+  private async clearAfterClose(): Promise<void> {
+    await runsEnded(projectCopies(this.bp), 6000);
+    // Every run was stopped: only a ticket the person took over keeps what runs in its copy.
+    await this.clearCopies(projectCopies(this.bp), { busy: this.busyCopies(undefined, false), graceMs: 2500 }).catch(() => undefined);
   }
 
   ticketsRunning(): number {
@@ -209,13 +280,18 @@ export class LiveSquad {
       resumeSetup(this.bp);
       for (const t of listTickets(this.bp)) {
         if (t.squad && Date.parse(t.squad.nextAt) > Date.now()) {
+          // A board that ended without closing (a crash, a kill) kept no record that it cut the step off.
+          const cut = !t.interrupted && Date.parse(t.squad.nextAt) - Date.now() > 10 * 60_000;
           this.update(t.id, (x) => {
+            if (cut && x.squad) x.squad.phase = markInterrupted(x, x.squad.phase, 'restart');
             if (x.squad) x.squad.nextAt = now();
-            // The step starts again from now; the time the app was closed is not its time.
-            delete x.clock;
+            // The step carries on with its time so far, and says once that it resumed after a restart.
+            resumeClock(x);
           });
         }
       }
+      // What the last board's runs left running in squad-kit's copies stops before any step carries on.
+      this.swept = this.clearCopies(projectCopies(this.bp), { busy: this.busyCopies() }).catch(() => undefined);
     } catch {
       // Unreadable board; the tick will report it.
     }
@@ -273,6 +349,18 @@ export class LiveSquad {
       const key = `__tech:${d.tech}`;
       if (d.status === 'writing' && !this.running.has(key)) this.launch(key, () => this.writeTechDecision(d.tech));
     }
+    // The Analyst's work on my breakdowns, beside the tickets. A step cut off by a restart starts again; the usage limit holds it.
+    for (const j of breakdownJobs(this.bp, meta)) {
+      const key = `__breakdown:${j.id}`;
+      if (j.job.status === 'stopping') {
+        this.stops.get(key)?.abort();
+        if (!this.running.has(key)) breakdownStopped(this.bp, j.id);
+      } else if (this.running.has(key)) continue;
+      else if (pause) holdBreakdownJob(this.bp, j.id, limitText(pause));
+      else this.launch(key, () => this.breakdownJob(j.id));
+    }
+    // Sending a breakdown to the tracker (`__send:<id>`): no AI runs, so neither limit holds it (board/requirements-send.ts).
+    startSends(this.bp, meta, { running: this.running, stops: this.stops });
     for (const t of listTickets(this.bp)) {
       // Being deleted (src/engine/delete.ts): nothing starts on it again, its tracker updates are not sent, and what
       // runs stops.
@@ -296,13 +384,9 @@ export class LiveSquad {
           .catch(() => undefined)
           .finally(() => this.localRuns.delete(ls.dir));
       }
-      // Someone else's ticket: their squad works on it, on their computer (ADR-001).
-      if (!isMine(t, meta)) continue;
-      // It waited for a ticket it depends on, and that one is merged now: its build starts.
-      if (wakeIfReady(this.bp, t)) continue;
       // Asking never stops the work: a chat reply and the Analyst writing a proposed change run beside the ticket's
       // step. They never wait for it, never stop it and never count against the limit. Stop on a chat answer ends that
-      // answer only, never the ticket's step.
+      // answer only, never the ticket's step. A question on someone else's ticket is answered here too.
       const chatKey = `__chat:${t.id}`;
       if (t.chat?.stopping) {
         this.stops.get(chatKey)?.abort();
@@ -312,6 +396,14 @@ export class LiveSquad {
         if (pause) this.chatWaits(t, pause);
         else this.launch(chatKey, () => this.chatReply(t.id));
       }
+      // Someone else's ticket: their squad works on it, on their computer (ADR-001).
+      if (!isMine(t, meta)) continue;
+      // It waited for a ticket it depends on, and that one is merged now: its build starts.
+      if (wakeIfReady(this.bp, t)) continue;
+      // Builds by itself: the change it waited for is settled, so it is accepted now (board/auto.ts).
+      if (resumeAccept(this.bp, t)) continue;
+      // Builds by itself: a merge that waits for a pull request's approver or the person's checkout is looked at again.
+      if (mergeWait(t)) this.lookAtMerge(t.id);
       if (openChange(t)?.status === 'writing' && !this.running.has(`__change:${t.id}`)) this.launch(`__change:${t.id}`, () => this.writeChange(t.id));
       if (t.stopRequested) {
         this.stops.get(t.id)?.abort();
@@ -336,6 +428,48 @@ export class LiveSquad {
         } else this.queue(t, limit);
       } else if (!t.squad) this.pickUpChange(t);
     }
+    // Build continuously: the next stories of my breakdowns start while a place is free (board/requirements-build.ts).
+    this.buildQueue(limit, meta, pause);
+  }
+
+  /**
+   * A merge that waits is looked at again every 2 minutes, beside the work and never counted against the limit: merged
+   * on the code host (or the person's copy free again) merges it here; a clash gives the clash card, and on this
+   * track brings in the base again (board/auto.ts).
+   */
+  private lookAtMerge(id: string): void {
+    const last = this.mergeLooks.get(id);
+    if (last !== undefined && (last < 0 || Date.now() - last < 2 * 60_000)) return;
+    this.mergeLooks.set(id, -1);
+    recheckMerge(this.bp, id)
+      .then((r) => (r === 'clash' ? this.pullRequestClash(id) : undefined))
+      .catch(() => undefined)
+      .finally(() => this.mergeLooks.set(id, Date.now()));
+  }
+
+  /**
+   * The change clashes with newer work on the code host or here: the clash card, and on a track that merges by itself
+   * the latest base comes in again. The base is fetched first, so "has it moved" is about the team's base.
+   */
+  private async pullRequestClash(id: string): Promise<void> {
+    const t = pullRequestClashed(this.bp, id);
+    if (mergesByItself(t)) await fetchBase(this.bp, t);
+    afterPullRequest(this.bp, id, true);
+  }
+
+  /** One turn of the breakdowns' queue at a time. A place is free when the app's one limit has room for one more. */
+  private buildQueue(limit: number, meta: BoardMeta, pause: LimitPause | null): void {
+    if (this.queueing || holding) return;
+    this.queueing = true;
+    const free = () => {
+      let others = 0;
+      for (const s of squads) if (s !== this) others += s.ticketsRunning();
+      return placesLeft(limit, listTickets(this.bp), meta, others, [...waiting].some((s) => s !== this));
+    };
+    void fillBuildQueue(this.bp, { free, pause, payment: async () => (await howPaid(this.bp)).payment })
+      .then((turns) => turns.forEach((x) => x.started.length && this.log('info', `Build continuously started ${x.started.join(', ')} from ${x.id}`)))
+      .catch((err: Error) => this.log('warn', `Build continuously could not start a story: ${err.message}`))
+      .finally(() => (this.queueing = false));
   }
 
   /**
@@ -356,6 +490,8 @@ export class LiveSquad {
       this.update(t.id, (x) => {
         x.status = text;
         delete x.quiet;
+        // Nothing runs for it now, so its step's clock stands still until the step starts again.
+        pauseClock(x);
       });
     } catch {
       // The ticket was removed meanwhile.
@@ -383,7 +519,17 @@ export class LiveSquad {
     this.stops.set(key, new AbortController());
     this.dog.beat(key);
     const phase = readTicket(this.bp, key)?.squad?.phase;
+    const mark = sleepMark();
+    if (!key.startsWith('__')) this.marks.set(key, mark);
     job()
+      .then(() => {
+        // The step got through: an interruption of it is over.
+        try {
+          if (!key.startsWith('__') && phase && carriesOn(readTicket(this.bp, key) ?? {}, phase)) updateTicket(this.bp, key, (x) => delete x.interrupted);
+        } catch {
+          // The ticket was removed meanwhile.
+        }
+      })
       .catch((err: Error) => {
         if (key.startsWith('__') || this.closing) return;
         // Stopped for a delete: no stuck card on a ticket that is going.
@@ -392,15 +538,108 @@ export class LiveSquad {
         if (err instanceof WaitingForYou) return;
         if (err instanceof LimitReached) return this.waitForLimit(key, phase ?? 'analyst-read', err.pause);
         if (err instanceof CapReached) return this.capPause(key, phase ?? 'analyst-read', err);
+        // The computer slept and the run did not get through: that says nothing about the work, so the step carries on.
+        if (err instanceof CutOff || sleptSince(mark)) return this.carryOnAfterSleep(key, phase ?? 'analyst-read');
         const { what, detail } = explainError(err);
-        this.fail(key, what, phase ?? 'analyst-read', detail);
+        // Only squad-kit's own plain words reach the person (engine/plain-stop.ts): anything else is one plain
+        // sentence, with the exact words for engineers.
+        const own = ownWords(err);
+        if (own) this.fail(key, own, phase ?? 'analyst-read', detail);
+        else this.fail(key, TECHNICAL_STOP, phase ?? 'analyst-read', [what, detail].filter(Boolean).join('\n'));
       })
-      .finally(() => {
+      .finally(async () => {
+        // Nothing the step started is left running in the ticket's copy once it ends, however it ended.
+        if (!key.startsWith('__')) await this.clearAfterStep(key).catch(() => undefined);
         this.running.delete(key);
         this.stops.delete(key);
+        this.marks.delete(key);
         this.dog.forget(key);
         if (!key.startsWith('__')) this.setQuiet(key, null);
       });
+  }
+
+  /** The computer slept during the step and its run did not get through: the same step runs again, from where it was. */
+  private carryOnAfterSleep(id: string, phase: string): void {
+    try {
+      this.update(id, (x) => {
+        if (x.takenOver || (x.chat?.open && !x.chat.beside)) return;
+        const next = markInterrupted(x, phase, 'sleep');
+        x.live = true;
+        delete x.quiet;
+        x.squad = { ...(x.squad ?? {}), phase: next, nextAt: now() };
+        addActivity(x, 'squad', 'The computer slept and cut off the step, so it carries on from where it was. Not a failed try');
+      });
+    } catch {
+      // The ticket was removed meanwhile.
+    }
+  }
+
+  /* ── what squad-kit's copies leave running ──────────── */
+
+  /**
+   * Copies to leave alone while sweeping: those of steps running now (other than `except`), the copy the before
+   * screenshots or the setup work in, and a ticket the person took over.
+   */
+  private busyCopies(except?: string, runs = true): string[] {
+    const tickets = listTickets(this.bp);
+    const out: string[] = tickets.filter((t) => t.takenOver).flatMap((t) => [t.takenOver!.cwd, ...ticketCopies(this.bp, t)]);
+    for (const k of runs ? this.running : []) {
+      if (k === '__setup') out.push(...projectCopies(this.bp).map((r) => path.join(r, 'setup-copy')));
+      if (k.startsWith('__before:')) {
+        const t = tickets.find((x) => x.id === k.slice(9));
+        if (t) out.push(...ticketCopies(this.bp, t).filter((d) => d !== t.worktree));
+      }
+      const t = !k.startsWith('__') && k !== except ? tickets.find((x) => x.id === k) : undefined;
+      if (t) out.push(...ticketCopies(this.bp, t));
+    }
+    return out;
+  }
+
+  /**
+   * Stops what squad-kit's copies `dirs` have left running, and says so in one plain line each: on ticket `forId`
+   * when it is for that ticket's next step, else on the ticket whose copy it was in.
+   */
+  private async clearCopies(dirs: string[], opts: LookOptions & { graceMs?: number; only?: number[] }, forId?: string): Promise<Leftover[]> {
+    const found = await stopLeftovers(dirs, opts);
+    if (!found.length) return found;
+    const tickets = listTickets(this.bp);
+    const ids = tickets.map((t) => t.id);
+    this.log('info', `Stopped ${found.length} program${found.length === 1 ? '' : 's'} left running in squad-kit's copies: ${found.map((p) => `${p.pid} ${p.command.slice(0, 80)} in ${p.cwd}`).join('; ')}`, forId);
+    const say = (id: string, list: Leftover[]) => {
+      const t = tickets.find((x) => x.id === id);
+      const lines = stoppedLines(list, (cwd) => copyWords(this.bp, cwd, t, ids));
+      try {
+        if (lines.length) updateTicket(this.bp, id, (x) => lines.forEach((l) => addActivity(x, 'squad', l)));
+      } catch {
+        // The ticket was removed meanwhile.
+      }
+    };
+    if (forId) say(forId, found);
+    else for (const t of tickets) {
+      const mine = found.filter((p) => folderOf(p.cwd, ticketCopies(this.bp, t)));
+      if (mine.length) say(t.id, mine);
+    }
+    return found;
+  }
+
+  /** A step ended: once its runs have ended, what they left running in the ticket's copy stops. */
+  private async clearAfterStep(id: string): Promise<void> {
+    if (this.closing) return;
+    const t = readTicket(this.bp, id);
+    if (!t?.worktree || t.takenOver || !fs.existsSync(t.worktree)) return;
+    await runsEnded([t.worktree], 6000);
+    await this.clearCopies([t.worktree], {}, id);
+  }
+
+  /**
+   * Before the checks, and before squad-kit starts the app for the Tester: nothing left running in the ticket's copy,
+   * and no port held by a server another of squad-kit's copies of this project left behind.
+   */
+  private async clearBeforeApp(id: string): Promise<void> {
+    const t = readTicket(this.bp, id);
+    if (!t?.worktree) return;
+    await this.clearCopies([t.worktree], {}, id);
+    await this.clearCopies(projectCopies(this.bp), { busy: [t.worktree, ...this.busyCopies(id)], listening: true }, id);
   }
 
   /**
@@ -514,7 +753,10 @@ export class LiveSquad {
     }
     // The step that ran, else the one that was next (a Stop between steps, or while it waited for a free place): Carry
     // on runs that one, never the Analyst from the start.
-    this.fail(id, 'You stopped the squad. Nothing was lost; the work so far is kept.', phase ?? held?.squad?.phase ?? held?.retryPhase ?? 'analyst-read');
+    let at = phase ?? held?.squad?.phase ?? held?.retryPhase ?? 'analyst-read';
+    // A step that ran was cut off, not failed: Carry on goes on with it from where it was.
+    if (phase) this.update(id, (t) => (at = markInterrupted(t, phase, 'stop')));
+    this.fail(id, 'You stopped the squad. Nothing was lost; the work so far is kept.', at);
     this.update(id, (t) => {
       t.stopRequested = undefined;
       if (t.stuck) t.stuck.options[0] = { name: 'Carry on', note: 'Run the stopped step again.' };
@@ -527,6 +769,23 @@ export class LiveSquad {
   private commandWatch(id: string) {
     const signal = this.stops.get(id)?.signal;
     return { onSpawn: (pid: number) => this.dog.track(id, pid), onOutput: () => this.dog.beat(id), ...(signal ? { signal } : {}) };
+  }
+
+  /**
+   * squad-kit's own guard for a project command run in a copy (engine/project-guard.ts): its tests, setup and app
+   * cannot read the person's keys, squad-kit's own folder or the project's .env outside the copy. Null where this
+   * computer has no guard (Windows): the command runs as before, and Settings says "less protected".
+   */
+  private guardFor(cwd: string, id: string): GuardSpec | undefined {
+    if (!guardSupport().on) return undefined;
+    const allow = this.meta().guard;
+    return ticketGuard(this.bp, { cwd, id, ...(allow ? { allow } : {}) });
+  }
+
+  /** The watchdog hooks and the guard together, for a command run in a ticket's copy. */
+  private guardedWatch(id: string, cwd: string) {
+    const guard = this.guardFor(cwd, id);
+    return { ...this.commandWatch(id), ...(guard ? { guard } : {}) };
   }
 
   /** Between the parts of a step: once the person pressed Stop, nothing new starts. */
@@ -589,16 +848,18 @@ export class LiveSquad {
       const line = describeToolEvent(e, cwd);
       if (!line || Date.now() - last < 700) return;
       last = Date.now();
+      // The status and the card get plain words; the exact command stays in the Conversation tab's full log.
+      const plain = plainToolLine(e, cwd) ?? DOING.other;
       this.update(id, (t) => {
-        t.status = line;
+        t.status = plain;
         t.live = true;
-        stepDoing(t, line);
+        stepDoing(t, plain);
         // The activity list keeps the changes to project files; commands only show as the live line.
         if (logged < 40 && /^(Editing|Writing) /.test(line) && e.name !== 'Bash' && isInside(cwd, e.input.file_path)) {
           addActivity(t, role, line);
           logged += 1;
         }
-        onLine?.(line, t);
+        onLine?.(plain, t);
       });
     };
   }
@@ -610,21 +871,112 @@ export class LiveSquad {
 
   /**
    * `job` names a run beside the ticket's step (a chat reply, a proposed change): its own Stop and watchdog, not the
-   * step's. `box` keeps the run's shell commands in its AI tool's sandbox, where it has one; `browser` lets it open one.
+   * step's. `box` keeps the run's shell commands in its AI tool's sandbox, where it has one.
    * `check` finds what the answer's shape cannot say (a name that is not an open ticket): the run is asked once more.
+   * `window` is squad-kit's own tools for the run (engine/window.ts), when the caller made them; a ticket's run gets
+   * its own otherwise. Their key works for this run only, and they close with it. A question in the answer that may
+   * not reach the person goes back to the agent first (engine/question-filter.ts). `reply` marks a reply in a talk
+   * with the person (a chat answer is one too): one that asks for what is not allowed is replaced with a plain line.
    */
-  private async runAgent(opts: AgentRun & { ticket?: string; job?: string; role: AgentRole; step?: string; levelStep?: string; box?: { browser?: boolean }; check?: (answer: unknown) => string | null }): Promise<AgentResult> {
+  private async runAgent(opts: AgentRun & { ticket?: string; job?: string; role: AgentRole; step?: string; levelStep?: string; box?: object; check?: (answer: unknown) => string | null; checkHelp?: () => string; win?: AgentWindow; reply?: boolean }): Promise<AgentResult> {
     const job = opts.job ?? opts.ticket;
-    const signal = job ? this.stops.get(job)?.signal : undefined;
+    const jobSignal = job ? this.stops.get(job)?.signal : undefined;
+    // The run's own Stop: the job's Stop, or squad-kit stopping an agent that kept asking for what it may not do.
+    const runStop = new AbortController();
+    const onJobStop = () => runStop.abort();
+    if (jobSignal?.aborted) runStop.abort();
+    jobSignal?.addEventListener('abort', onJobStop, { once: true });
+    const signal = runStop.signal;
+    const mine = !opts.win && opts.ticket ? this.windowFor(opts as AgentRun & { ticket: string; role: AgentRole; step?: string }, signal) : undefined;
+    const win = opts.win ?? mine;
+    win?.whenTooMany(() => runStop.abort());
+    if (mine) openWindow(mine);
+    try {
+      return await this.runWith({ ...opts, ...(win ? { win } : {}) }, signal);
+    } finally {
+      jobSignal?.removeEventListener('abort', onJobStop);
+      if (mine) await closeWindow(mine);
+    }
+  }
+
+  /**
+   * squad-kit's own tools for a ticket's run: every tool for the Builder in the ticket's copy of an app, Look at a page
+   * for the Reviewer's review there (read only: squad-kit starts the app for it), else I am stuck.
+   */
+  private windowFor(opts: AgentRun & { ticket: string; role: AgentRole; step?: string }, signal: AbortSignal): AgentWindow {
+    const id = opts.ticket;
+    const t = readTicket(this.bp, id);
+    const rc = t ? repoFor(this.meta(), t).commands : {};
+    const inCopy = Boolean(t?.worktree && opts.cwd === t.worktree);
+    const here = inCopy && Boolean(rc.start?.trim() && rc.url?.trim());
+    const builds = inCopy && opts.permissions.includes('edit');
+    const app = here && builds;
+    const look = here && opts.role === 'reviewer' && opts.step === 'review';
+    const who = AGENTS.find((a) => a.role === opts.role)?.name ?? opts.role;
+    return new AgentWindow({
+      ...this.windowBase(id, opts.role, opts.cwd, (opts as { job?: string }).job ?? id),
+      step: opts.step ?? 'chat',
+      who,
+      tools: toolsFor({ app, look, checks: builds }),
+      ...(app || look ? { app: { cwd: opts.cwd, start: rc.start!.trim(), url: rc.url!.trim(), ...(this.guardFor(opts.cwd, id) ? { guard: this.guardFor(opts.cwd, id)! } : {}) } } : {}),
+      ...(builds ? { checks: this.windowChecks(id, opts.cwd) } : {}),
+      prefix: `${id.toLowerCase()}-${opts.role}`,
+      signal,
+    });
+  }
+
+  /** The project's own saved checks for an agent's run_checks, in the ticket's copy, inside squad-kit's guard. */
+  private windowChecks(id: string, cwd: string): WindowChecks {
+    const guard = this.guardFor(cwd, id);
+    return {
+      cwd,
+      // A project the Builder is setting up may say how by now.
+      commands: () => this.saveFoundCommands(id, cwd),
+      ...(guard ? { guard } : {}),
+      onStart: (name) =>
+        this.update(id, (x) => {
+          x.status = CHECK_DOING[name]!;
+          stepDoing(x, x.status);
+        }),
+    };
+  }
+
+  /** What every window of a ticket shares: its lines on the ticket, the app log, and squad-kit's own fixes. */
+  private windowBase(id: string, role: AgentRole, cwd: string, job = id): Pick<WindowSetup, 'ticket' | 'proofDir' | 'say' | 'log' | 'beat' | 'beforeStart' | 'inTheWay'> {
+    return {
+      ticket: id,
+      proofDir: this.bp.proofDir,
+      // A long call (the app starting, ten pictures) is the step working, not hanging.
+      beat: () => this.dog.beat(job),
+      say: (text) => {
+        try {
+          this.update(id, (x) => addActivity(x, role, text));
+        } catch {
+          // The ticket was removed meanwhile.
+        }
+      },
+      log: (text) => this.log('warn', text, id),
+      // Nothing squad-kit left running in its other copies may hold the app's address.
+      beforeStart: async () => {
+        await this.clearCopies(projectCopies(this.bp), { busy: [cwd, ...this.busyCopies(id)], listening: true }, id);
+      },
+      inTheWay: async (text) => (await this.inTheWay(id, { text }))?.answer ?? null,
+    };
+  }
+
+  private async runWith(opts: AgentRun & { ticket?: string; job?: string; role: AgentRole; step?: string; levelStep?: string; box?: object; check?: (answer: unknown) => string | null; checkHelp?: () => string; win?: AgentWindow; reply?: boolean }, signal: AbortSignal): Promise<AgentResult> {
+    const job = opts.job ?? opts.ticket;
     // Each role runs as its own agent: the team's file for it sets the tool, the model and extra instructions.
     const agent = readAgent(this.bp, opts.role);
     const tool = aiTool(agent.tool);
     if (!tool?.canRun) {
       const can = AI_TOOLS.filter((t) => t.canRun).map((t) => t.label).join(' or ');
-      throw new Error(`The ${opts.role} agent is set to ${tool?.label ?? agent.tool}, which squad-kit cannot run yet. Switch it to ${can} in Squad and AI.`);
+      throw new StepError(`The ${opts.role} agent is set to ${tool?.label ?? agent.tool}, which squad-kit cannot run yet. Switch it to ${can} in Squad and AI.`);
     }
     const extra = agentInstructions(agent, opts.step);
-    const instructions = [opts.instructions, extra].filter(Boolean).join('\n\n') || undefined;
+    const win = opts.win;
+    const instructions = [opts.instructions, extra, win ? P.windowRule(win.tools) : ''].filter(Boolean).join('\n\n') || undefined;
+    const access = win ? await windowAccess(win) : undefined;
     const key = opts.ticket;
     // The model level for this step: squad-kit's default, the project's choice, then this person's own.
     const ticket = key ? readTicket(this.bp, key) : null;
@@ -637,7 +989,7 @@ export class LiveSquad {
     if (key && levelStep !== 'chat') this.update(key, (x) => addActivity(x, opts.role, `Runs on ${describeLevel(lv, tool)}`));
     opts = this.withNewNotes(opts);
     // The step's clock. A run beside the step (a chat answer, a change being written) has a job of its own and no clock.
-    const timed = key && job === key ? timedStep(levelStep) : null;
+    const timed = key && job === key ? timedStep(opts.step ?? levelStep) : null;
     if (timed) this.update(key!, (x) => startStep(x, { who: opts.role, step: timed, limit: Math.round((opts.timeoutMs ?? 20 * 60_000) / 60_000) }));
     const ended = (res: AgentResult): AgentResult => {
       if (timed) this.update(key!, (x) => endStep(this.bp, x));
@@ -654,7 +1006,7 @@ export class LiveSquad {
     // A sandboxed step of a ticket gets the ticket's own package cache for the tools whose shared caches stay read only.
     const cache = boxed && key ? ticketCacheDir(this.bp, key) : undefined;
     if (cache) fs.mkdirSync(cache, { recursive: true });
-    const sandbox = boxed ? this.sandboxFor(opts.cwd, opts.addDirs ?? [], opts.box?.browser, cache) : undefined;
+    const sandbox = boxed ? this.sandboxFor(opts.cwd, opts.addDirs ?? [], cache) : undefined;
     // What the sandbox refused shows on the ticket in plain words, each thing once a run.
     const refused = new Set<string>();
     const onBlocked = (b: BlockedAction) => {
@@ -663,7 +1015,7 @@ export class LiveSquad {
       this.update(key, (x) => addActivity(x, opts.role, blockedLine(b)));
     };
     // Every role runs through the Agent Client Protocol unless the board says to run tools directly.
-    const run = (o: AgentRun) => tool.run({
+    const run = ({ win: _own, reply: _reply, check: _check, checkHelp: _help, ...o }: AgentRun & { win?: unknown; reply?: unknown; check?: unknown; checkHelp?: unknown }) => tool.run({
       ...o,
       ...watch,
       secretFiles: secretFiles(this.bp),
@@ -675,12 +1027,13 @@ export class LiveSquad {
       level: lv.level,
       ...(effort ? { effort } : {}),
       ...(lv.model ? { model: lv.model } : {}),
-      ...(signal ? { signal } : {}),
+      signal,
+      ...(access ? { window: access } : {}),
       logDir: this.bp.chatsDir,
       direct: this.meta().runner === 'direct',
       onFallback: (why) => {
         this.log('warn', `ACP did not start, so the ${opts.role} runs ${tool.label} directly: ${why}`, key);
-        if (key) this.update(key, (x) => addActivity(x, 'squad', `ACP did not start (${why.slice(0, 160)}), so this step runs ${tool.label} directly`));
+        if (key) this.update(key, (x) => addActivity(x, 'squad', 'squad-kit runs this step another way, as the usual way did not start'));
       },
     });
     const r = await run(opts);
@@ -699,37 +1052,115 @@ export class LiveSquad {
       });
     }
     const capped = (res: AgentResult) => new CapReached(opts.role, levelStep, res.capped!.by, caps, quality, AGENTS.find((a) => a.role === opts.role)?.name ?? opts.role);
+    const who = AGENTS.find((a) => a.role === opts.role)?.name ?? opts.role;
+    // squad-kit stopped an agent that kept asking for things it may not do: a plain stop, the details for engineers.
+    // Or kept calling squad-kit's tools in the wrong shape: a plain stop of its own, not "may not do".
+    const tooMany = () => (win?.tooMany ? new StepError(tooManyWords(who), win.refusalDetail()) : win?.tooManyMistakes ? new StepError(tooManyMistakesWords(who), win.mistakeDetail()) : null);
+    if (tooMany()) throw tooMany();
     if (r.capped) throw capped(r);
-    if (!r.ok) throw this.runFailed(r, tool.label, key, opts.role);
+    if (!r.ok) throw this.runFailed(r, tool, key, opts.role);
     if (raise && key) this.update(key, (x) => delete x.capRaise);
     // The answer is checked against its shape before anything uses it. A missing or broken one is asked for once more,
     // in the same conversation; then the step stops in words instead of failing on it further on.
     // `check` covers what the shape cannot say (a ticket name that is not on the board): asked once more, then let be.
     const problem = opts.schema ? (answerProblem(opts.schema, r.structured) ?? opts.check?.(r.structured) ?? null) : null;
-    if (!opts.schema || !problem) return ended(r);
-    const who = AGENTS.find((a) => a.role === opts.role)?.name ?? opts.role;
-    if (key && levelStep !== 'chat') this.update(key, (x) => addActivity(x, opts.role, `The answer was not complete (${problem}), so squad-kit asked for it again`));
-    const again = await run(r.sessionId ? { ...opts, sessionId: undefined, resume: r.sessionId, prompt: P.answerAgainPrompt(problem) } : opts);
-    recordUsage(this.bp, key, used, again.usage);
-    if (again.capped) throw capped(again);
-    if (!again.ok) throw this.runFailed(again, tool.label, key, opts.role);
-    if (answerProblem(opts.schema, again.structured)) throw new Error(`The ${who} did not hand in a complete answer.`);
-    return ended(again);
+    let done = r;
+    if (opts.schema && problem) {
+      if (key && levelStep !== 'chat') this.update(key, (x) => addActivity(x, opts.role, `The answer was not complete (${problem}), so squad-kit asked for it again`));
+      const again = await run(r.sessionId ? { ...opts, sessionId: undefined, resume: r.sessionId, prompt: P.answerAgainPrompt(problem, opts.checkHelp?.()) } : opts);
+      recordUsage(this.bp, key, used, again.usage);
+      if (tooMany()) throw tooMany();
+      if (again.capped) throw capped(again);
+      if (!again.ok) throw this.runFailed(again, tool, key, opts.role);
+      const broken = answerProblem(opts.schema, again.structured);
+      if (broken) throw new StepError(`The ${who} did not hand in a complete answer.`, broken);
+      done = again;
+    }
+    // A question for the person passes squad-kit's filter first: a technical one goes back to the agent (twice at
+    // most), one that is not allowed is refused and counted (by the window; with none, it goes back twice at most
+    // too). Neither ever reaches the person, and no run asks again without end.
+    // A busy port in the Builder's way is squad-kit's to settle first (runBuilder): it never reaches the person as the
+    // Builder wrote it, only as squad-kit's own plain card when another program holds it.
+    const settles = opts.role === 'builder' ? (q: { text: string; options?: string[]; why?: string }) => Boolean(inTheWay(askText(q))) : undefined;
+    for (let back = 0; ; ) {
+      const found = opts.schema ? stoppedQuestion(done.structured, settles) : null;
+      if (!found) return ended(opts.reply || opts.schema === P.CHAT_SCHEMA ? this.plainReply(done, who, opts.role, key) : done);
+      const say = (text: string) => key && this.update(key, (x) => addActivity(x, opts.role, text));
+      if (found.verdict.kind === 'not-allowed') {
+        const line = refusedAskLine(who, found.verdict.what);
+        if (win) win.refuse('question', `${found.verdict.why}: "${found.q.text.slice(0, 200)}"`, line);
+        else {
+          say(line);
+          this.log('warn', `Refused the ${who}'s question in ${job ?? 'a run'}: ${found.verdict.why}: "${found.q.text.slice(0, 200)}"`, key);
+          if (back >= TECHNICAL_TRIES) throw new StepError(tooManyWords(who), `${found.verdict.why}\n${found.q.text}`);
+          back += 1;
+        }
+        if (tooMany()) throw tooMany();
+      } else {
+        if (back >= TECHNICAL_TRIES) {
+          throw new StepError(`The ${who} kept asking a technical question, which squad-kit does not pass on to you, so it stopped this step. Press Try again.`, `${found.verdict.why}\n${found.q.text}`);
+        }
+        back += 1;
+        say(`The ${who} asked a technical question, so squad-kit sent it back to it to decide: ${found.q.text.slice(0, 300)}`);
+      }
+      if (!done.sessionId) throw new StepError(`The ${who} stopped on a question squad-kit does not pass on to you. Press Try again.`, found.q.text);
+      const next = await run({ ...opts, sessionId: undefined, resume: done.sessionId, prompt: questionBackPrompt(found) });
+      recordUsage(this.bp, key, used, next.usage);
+      if (tooMany()) throw tooMany();
+      if (next.capped) throw capped(next);
+      if (!next.ok) throw this.runFailed(next, tool, key, opts.role);
+      const broken = answerProblem(opts.schema!, next.structured);
+      if (broken) throw new StepError(`The ${who} did not hand in a complete answer.`, broken);
+      done = next;
+    }
   }
 
   /**
    * A run that did not finish. On the usage limit the whole queue waits for the reset; anything else stops the step,
    * with the tool's exact words kept for engineers.
    */
-  private runFailed(r: AgentResult, label: string, ticket: string | undefined, role: AgentRole): Error {
+  private runFailed(r: AgentResult, tool: AiTool, ticket: string | undefined, role: AgentRole): Error {
     if (r.limit) {
       const pause = startPause(r.limit, { project: this.projectName(), ...(ticket ? { ticket } : {}) });
       this.log('warn', `${r.limit.name}'s usage limit is reached${pause.resetsAt ? ` until ${pause.resetsAt}` : ''}. The queue waits until ${pause.until}`, ticket);
       return new LimitReached(pause);
     }
-    const what = r.error ?? `${label} did not finish.`;
-    this.log(what === STOPPED ? 'info' : 'error', `The ${role} run did not finish: ${r.detail ?? what}`, ticket);
-    return new StepError(what, r.detail);
+    const said = r.error ?? `${tool.label} did not finish.`;
+    this.log(said === STOPPED ? 'info' : 'error', `The ${role} run did not finish: ${r.detail ?? said}`, ticket);
+    // Only squad-kit's own sentences reach the person as they are; the tool's own words stay for engineers.
+    const who = AGENTS.find((a) => a.role === role)?.name ?? role;
+    const plain = ownRunWords(said, tool) ? said : `The ${who} stopped before it finished, on something technical. Press Try again.`;
+    const detail = plain === said ? r.detail : [said, r.detail].filter(Boolean).join('\n');
+    return new StepError(plain, detail);
+  }
+
+  /**
+   * A reply in a talk with the person that asks them for what is not allowed (a secret, a change to squad-kit's
+   * settings, to git history) is replaced with one plain line and logged. Technical words stay: the person asked.
+   */
+  private plainReply(r: AgentResult, who: string, role: AgentRole, ticket?: string): AgentResult {
+    const out = r.structured && typeof r.structured === 'object' ? (r.structured as { reply?: unknown; options?: unknown }) : null;
+    const said = [typeof out?.reply === 'string' ? out.reply : r.text, ...(Array.isArray(out?.options) ? out.options : [])].filter((x): x is string => typeof x === 'string').join('\n');
+    const verdict = judgeReply(said);
+    if (verdict.pass) return r;
+    const line = refusedReplyLine(who, verdict.what);
+    this.log('warn', `Left out the ${who}'s reply: ${verdict.why}: "${said.slice(0, 400)}"`, ticket);
+    if (ticket) {
+      try {
+        this.update(ticket, (x) => addActivity(x, role, refusedAskLine(who, verdict.what)));
+      } catch {
+        // The ticket was removed meanwhile.
+      }
+    }
+    return { ...r, text: line, ...(out ? { structured: { ...out, reply: line, options: [] } } : {}) };
+  }
+
+  /** What the person reads when an answer in a talk did not come: squad-kit's own words, or one plain line. */
+  private couldNotAnswer(err: unknown, ticket: string, line: string): string {
+    const own = ownWords(err);
+    const { what, detail } = explainError(err);
+    this.log('warn', `Could not answer: ${[what, detail].filter(Boolean).join('\n')}`, ticket);
+    return own ? `Could not answer: ${own}` : line;
   }
 
   private projectName(): string {
@@ -751,20 +1182,21 @@ export class LiveSquad {
   }
 
   /**
-   * After a Builder or Tester step, in the ticket's copy: what the step may not change goes back, with a line saying
-   * so, and a branch or commit that moved stops the ticket. `skip` holds folders the step may write in.
+   * After a Builder, Tester or Reviewer step, in the ticket's copy: what the step may not change goes back, with a
+   * line saying so, and a branch or commit that moved stops the ticket. `skip` holds folders the step may write in.
    */
-  private keepLane(id: string, role: 'builder' | 'tester', lane: Lane, skip: string[] = []): void {
-    const who = role === 'builder' ? 'Builder' : 'Tester';
+  private keepLane(id: string, role: 'builder' | 'tester' | 'reviewer', lane: Lane, skip: string[] = []): void {
+    const who = role === 'builder' ? 'Builder' : role === 'tester' ? 'Tester' : 'Reviewer';
     const c = checkLane(lane, skip);
     const some = (files: string[]) => `${files.slice(0, 6).join(', ')}${files.length > 6 ? ` and ${files.length - 6} more` : ''}`;
-    if (c.putBack.length) this.update(id, (x) => addActivity(x, role, `The ${who} changed files; squad-kit put them back: ${some(c.putBack)}`));
+    // The Reviewer only reads: what changed there is the app's work, while the Reviewer looked at it.
+    if (c.putBack.length) this.update(id, (x) => addActivity(x, role, `${role === 'reviewer' ? 'The app changed files while the Reviewer looked at it' : `The ${who} changed files`}; squad-kit put them back: ${some(c.putBack)}`));
     if (c.restored.length) {
       this.update(id, (x) => addActivity(x, role, `The ${who} changed ${some(c.restored)}, which later steps read as instructions; squad-kit put ${c.restored.length === 1 ? 'it' : 'them'} back`));
     }
     if (c.moved) {
       this.update(id, (x) => addActivity(x, 'squad', `Stopped the ${who}: ${c.moved}`));
-      throw new Error(`The ${who} changed git history; squad-kit stopped it.`);
+      throw new StepError(`The ${who} changed git history; squad-kit stopped it.`, c.moved);
     }
   }
 
@@ -782,6 +1214,39 @@ export class LiveSquad {
     this.update(t.id, (x) => (x.notesSeen = { ...x.notesSeen, [session]: notes.length }));
     const fresh = notes.slice(seen);
     return fresh.length ? { ...opts, prompt: `${opts.prompt}\n${P.notesText(fresh, true)}` } : opts;
+  }
+
+  /**
+   * squad-kit's own guard blocked a file a project command needed outside its copy. The person sees one plain
+   * sentence (never the path, never "sandbox") and Try again; Ask a question is at the top of the story as always.
+   * Engineers get the exact path and the command. An engineer allows the file in Settings or with a terminal command.
+   */
+  private guardStop(id: string, retryPhase: string, target: string, command: string, output: string): void {
+    this.log('warn', `Guard blocked ${target} at ${retryPhase}: ${command}`, id);
+    try {
+      this.update(id, (x) => {
+        if (x.takenOver || (x.chat?.open && !x.chat.beside)) return;
+        x.live = false;
+        x.squad = null;
+        delete x.clock;
+        x.retryPhase = retryPhase;
+        x.status = 'Stopped: a file was blocked';
+        x.stuck = {
+          gate: 'checks',
+          kind: 'guard',
+          question: GUARD_BLOCKED,
+          detail: `${guardBlockedDetail(target, command)}\n\n${tail(output, 20)}`,
+          options: [
+            { do: 'retry', name: 'Try again', note: 'After an engineer allows the file in Settings.' },
+            { do: 'plan', name: 'Send it back to the plan', note: 'The Spec writer rewrites the plan so it does not need that file.' },
+          ],
+        };
+        x.waiting = { kind: 'stuck', summary: 'A file was blocked; an engineer can allow it' };
+        addActivity(x, 'squad', 'A check needed a file outside its copy, and squad-kit blocked it');
+      });
+    } catch {
+      // The ticket was removed while it ran.
+    }
   }
 
   /** Something went wrong: stop and ask the person, with a way to try again. The exact error stays for engineers. */
@@ -847,7 +1312,7 @@ export class LiveSquad {
    * What a Builder or Tester step's commands may reach in the sandbox: its copy, the proof folder, the ticket's own
    * package cache and the registries.
    */
-  private sandboxFor(cwd: string, read: string[], browser?: boolean, cache?: string) {
+  private sandboxFor(cwd: string, read: string[], cache?: string) {
     return sandboxAsk({
       cwd,
       root: projectRoot(this.bp),
@@ -855,7 +1320,6 @@ export class LiveSquad {
       proof: this.bp.proofDir,
       secrets: secretFiles(this.bp),
       hosts: this.meta().allowedHosts ?? [],
-      ...(browser ? { browser } : {}),
       ...(cache ? { cache } : {}),
     });
   }
@@ -914,21 +1378,22 @@ export class LiveSquad {
       last = Date.now();
       const m = this.meta();
       if (m.scan?.status !== 'running') return;
-      // Shell lines mean little to most people here; files and searches read well as they are.
-      const shown = line.startsWith('Running ') ? 'Reading the project files' : line;
+      // Plain words on the setup page and the board; what it opened stays behind "See what the Architect is reading".
+      const shown = DOING.read;
       m.scan = { ...m.scan, now: shown };
       writeMeta(this.bp, m);
-      readingNow(this.bp, shown, opened.size);
+      readingNow(this.bp, shown, opened.size, line.startsWith('Running ') ? shown : line);
     };
-    // Read again after "Something is wrong": what the person said goes with it.
-    const said = readSaid(this.bp);
+    // Read again after "Something is wrong": what the person said goes with it. On a project with no code, what they want to build.
+    const idea = readIdea(this.bp);
+    const said = idea ? '' : readSaid(this.bp);
     try {
       const r = await this.runAgent({
         role: 'architect',
         step: 'scan',
         job: '__scan',
         cwd: root,
-        prompt: P.scanPrompt(meta, nested, this.ctx(), said),
+        prompt: P.scanPrompt(meta, nested, this.ctx(), said, idea),
         permissions: ['read'],
         schema: P.SCAN_SCHEMA,
         check: scanProblem,
@@ -936,8 +1401,8 @@ export class LiveSquad {
         onTool,
       });
       if (opened.size) readingNow(this.bp, 'Handing in what it found', opened.size);
-      saveScan(this.bp, r.structured as ScanAnswer, nested);
-      if (said) readAgainDone(this.bp);
+      saveScan(this.bp, r.structured as ScanAnswer, nested, undefined, idea);
+      if (said || idea) readAgainDone(this.bp);
     } catch (err) {
       const fresh = this.meta();
       // The usage limit: the read starts again by itself once it resets.
@@ -956,22 +1421,18 @@ export class LiveSquad {
     }
   }
 
-  /** The first run's proof: the Tester takes one screenshot of the app squad-kit opened. */
-  private async setupShot(o: { cwd: string; url: string; file: string }): Promise<{ file?: string; why?: string }> {
-    const r = await this.runAgent({
-      role: 'tester',
-      step: 'proof',
-      job: '__setup',
-      cwd: o.cwd,
-      prompt: P.setupShotPrompt(o.url, o.file),
-      permissions: ['run'],
-      schema: P.SETUP_SHOT_SCHEMA,
-      timeoutMs: 5 * 60_000,
-      addDirs: [this.bp.proofDir],
-      box: { browser: true },
-    });
-    const out = (r.structured ?? {}) as { file?: string; skipped?: string };
-    return { ...(out.file ? { file: out.file } : {}), ...(out.skipped ? { why: out.skipped } : {}) };
+  /** The first run's proof: squad-kit takes one picture of the app it opened, with its own browser. No agent runs. */
+  private async setupShot(o: { cwd: string; url: string; file: string; onLine?: (text: string) => void }): Promise<{ file?: string; why?: string }> {
+    const signal = this.stops.get('__setup')?.signal;
+    try {
+      await takeOne(o.url, o.file, { ...(signal ? { signal } : {}), ...(o.onLine ? { onLine: o.onLine } : {}) });
+      return { file: o.file };
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      this.log('warn', `The first run's screenshot did not work: ${shotsErrorDetail(err)}`);
+      // The person reads squad-kit's own plain words; the exact error is in the app log.
+      return { why: err instanceof ShotsUnavailable ? err.message : 'squad-kit could not take the picture this time' };
+    }
   }
 
   /** "Something is wrong" on the overview: the Architect's answer, or its Stop. */
@@ -990,12 +1451,29 @@ export class LiveSquad {
     const ls = readTicket(this.bp, id)?.localSetup;
     if (!ls) return;
     this.update(id, (x) => (x.localSetup = { dir: ls.dir, command: ls.command, status: 'running', at: now() }));
-    const r = await runCommand(ls.dir, ls.command, 20 * 60_000);
+    // The person's own changes stay: what differed before the setup ran is theirs.
+    const theirs = changedTracked(ls.dir);
+    const r = await runCommand(ls.dir, ls.command, 20 * 60_000, this.guardFor(ls.dir, id) ? { guard: this.guardFor(ls.dir, id)! } : {});
     const seconds = Math.round(r.seconds);
+    this.putBackLockFiles(id, ls.dir, theirs);
     this.update(id, (x) => {
       x.localSetup = { dir: ls.dir, command: ls.command, status: r.ok ? 'done' : 'failed', at: now(), seconds, ...(r.ok ? {} : { output: tail(r.output, 12) }) };
-      addActivity(x, 'release', r.ok ? `Your copy of the code is ready: ran ${ls.command} (${seconds} s)` : `Setting up your copy failed (${ls.command}): ${tail(r.output, 2)}`);
+      addActivity(x, 'release', r.ok ? 'Your copy is ready' : 'Your copy could not be set up');
     });
+    // The exact command is for engineers: here, and in the ticket's Developer tab.
+    this.log(r.ok ? 'info' : 'warn', r.ok ? `Your copy is ready: ran ${ls.command} (${seconds} s)` : `Setting up your copy failed (${ls.command}): ${tail(r.output, 2)}`, id);
+  }
+
+  /**
+   * A lock file the setup rewrote goes back, as in a story's copy, so the person's folder shows no change they did not
+   * make. Only lock files here: this folder is the person's, so a file they saved while the setup ran looks just the
+   * same as one the setup wrote, and a database the setup moved on must stay. The rest is said to engineers.
+   */
+  private putBackLockFiles(id: string, dir: string, theirs: string[]): void {
+    const back = putBackTracked(dir, { keep: theirs, only: isLockFile });
+    if (back.length) this.log('info', `The setup command changed ${back.join(', ')} in your folder; squad-kit put ${back.length === 1 ? 'it' : 'them'} back`, id);
+    const left = changedTracked(dir).filter((f) => !theirs.includes(f));
+    if (left.length) this.log('info', `${left.join(', ')} changed in your folder while the setup command ran; squad-kit left ${left.length === 1 ? 'it' : 'them'} as they are`, id);
   }
 
   /* ── stack and patterns, for the architecture page ──── */
@@ -1121,12 +1599,41 @@ export class LiveSquad {
     }
   }
 
+  /** One step of the Analyst's work on a breakdown: read only, in the project, with the breakdown's folder beside it. */
+  private breakdownJob(id: string): Promise<void> {
+    const key = `__breakdown:${id}`;
+    const signal = this.stops.get(key)?.signal;
+    return runBreakdownJob(this.bp, id, {
+      ...(signal ? { signal } : {}),
+      run: (o) =>
+        this.runAgent({
+          role: 'analyst',
+          job: key,
+          step: o.step,
+          cwd: projectRoot(this.bp),
+          prompt: o.prompt,
+          permissions: ['read'],
+          addDirs: [breakdownDir(this.bp, id)],
+          timeoutMs: o.timeoutMs,
+          ...(o.schema ? { schema: o.schema } : { reply: true }),
+          ...(o.sessionId ? { sessionId: o.sessionId } : {}),
+          ...(o.resume ? { resume: o.resume } : {}),
+          ...(o.onTool ? { onTool: o.onTool } : {}),
+          ...(o.onText ? { onText: o.onText } : {}),
+        }),
+    });
+  }
+
   /* ── one step of a ticket ────────────────────────────── */
 
   private async step(id: string, phase: string): Promise<void> {
     this.update(id, (t) => {
       if (t.squad) t.squad.nextAt = new Date(Date.now() + 3_600_000).toISOString();
+      // Another step than the one cut off: that interruption is over.
+      if (t.interrupted && !carriesOn(t, phase)) delete t.interrupted;
     });
+    // What the last board left running in squad-kit's copies is stopped first.
+    await this.swept;
     // On an API key past a budget, the ticket waits for the person here, between two steps.
     if (await budgetStop(this.bp, id, phase, async () => (await howPaid(this.bp)).payment)) return;
     this.log('info', `Step ${phase} started`, id);
@@ -1143,6 +1650,10 @@ export class LiveSquad {
         return this.plan(id, readTicket(this.bp, id)?.changeRequest);
       case 'express-approve':
         approveExpress(this.bp, id);
+        return;
+      case 'accept':
+        // Builds by itself: the squad's own Looks right, once the checks, the review and the proof passed.
+        acceptByItself(this.bp, id);
         return;
       case 'build':
       case 'unstick':
@@ -1180,9 +1691,13 @@ export class LiveSquad {
       case 'restore-tests':
         return this.restoreTests(id);
       case 'update-base':
+        // Builds by itself: a story landing right now goes first, so the base comes in once, with its work too.
+        if (waitForLanding(this.bp, id)) return;
         return this.updateBase(id);
       case 'proof':
         return this.proof(id);
+      case 'proof-fix':
+        return this.proofFix(id);
       case 'publish': {
         // A release going out moves the base on the code host: the pull request merges once it is out (one lock).
         const going = releaseGoingOut(this.bp);
@@ -1194,7 +1709,9 @@ export class LiveSquad {
           return;
         }
         const { clash } = await publishTicket(this.bp, id);
-        if (clash) pullRequestClashed(this.bp, id);
+        // Builds by itself: a clash brings in the base again; a pull request waiting for its approver is a normal wait.
+        if (clash) return this.pullRequestClash(id);
+        afterPullRequest(this.bp, id, false);
         return;
       }
       default:
@@ -1231,13 +1748,14 @@ export class LiveSquad {
     const root = projectRoot(this.bp);
     const meta = this.meta();
     await this.hearNotes(id);
-    if (readTicket(this.bp, id)?.track === 'express') {
+    const track = readTicket(this.bp, id)?.track;
+    if (track === 'express' || track === 'auto') {
       this.update(id, (t) => {
         t.questions = [];
         t.stage = 'specs';
         t.live = true;
-        t.status = 'Spec writer is writing the plan';
-        addActivity(t, 'squad', 'Express track: no questions, straight to the plan');
+        t.status = track === 'auto' ? 'Architect is choosing the design' : 'Spec writer is writing the plan';
+        addActivity(t, 'squad', track === 'auto' ? NO_QUESTIONS : 'Express track: no questions, straight to the plan');
         scheduleSquad(t, 'plan-write', 0.2, 1);
       });
       return;
@@ -1305,6 +1823,7 @@ export class LiveSquad {
         prompt: P.replyPrompt(q, n, ask),
         permissions: ['read'],
         timeoutMs: 5 * 60_000,
+        reply: true,
       });
       this.update(id, (x) => {
         const qq = x.questions?.find((y) => y.id === qid);
@@ -1318,7 +1837,7 @@ export class LiveSquad {
       this.update(id, (x) => {
         const qq = x.questions?.find((y) => y.id === qid);
         if (!qq) return;
-        qq.thread = [...(qq.thread ?? []), { who: 'squad', text: `Could not answer: ${(err as Error).message}`, at: now() }];
+        qq.thread = [...(qq.thread ?? []), { who: 'squad', text: this.couldNotAnswer(err, id, 'Could not answer this time. Ask again in a moment.'), at: now() }];
         qq.thinking = false;
       });
     }
@@ -1356,13 +1875,19 @@ export class LiveSquad {
       attached = `The person attached: ${files.join(', ')}${heard.missingKey ? ' (voice notes could not be written out: no speech to text key)' : ''}`;
     }
     const done = shipped(t);
-    const next = beside ? P.besideNext(done) : P.chatNext(c.with, Boolean(t.story), Boolean(t.specApproved));
+    // Waiting for your check at review: questions only, with what the agent needs to say where to look.
+    const review = beside && !done && waitsAtReview(t) ? (t.waiting?.kind === 'proof' ? 'proof' : 'stuck') : undefined;
+    // Ask a question on a ticket the squad is not working on: it stays where it is, and the agent says so plainly.
+    const stands = beside && !done && !review && !squadWorks(t) ? whereItStands(t) : undefined;
+    // Where to look, in every state: once the ticket has a copy of the code or pages in its proof.
+    const look = beside && (review || (t.worktree && fs.existsSync(t.worktree)) || proofPages(t).length) ? reviewLook(this.bp, t) : undefined;
+    const next = beside ? P.besideNext(done, review, stands) : P.chatNext(c.with, Boolean(t.story), Boolean(t.specApproved));
     const talk = P.chatPrompt(c.with, message, next, attached, beside);
     const step = { analyst: 'questions', architect: 'design', builder: 'build', reviewer: 'review', tester: 'proof' }[c.with];
     // A side conversation starts fresh each time the chat opens, with what was said before in it.
     const earlier = beside ? said.slice(0, message === null ? undefined : -1).slice(-8) : [];
     const opening = beside
-      ? `${P.besidePrompt(this.meta(), listDecisions(this.bp), t, c.with, done, this.ctx(t))}${P.earlierTalk(earlier)}`
+      ? `${P.besidePrompt(this.meta(), listDecisions(this.bp), t, c.with, done, this.ctx(t), look)}${P.earlierTalk(earlier)}`
       : P.intakePrompt(this.meta(), listDecisions(this.bp), t, this.ctx(t));
     try {
       const r = await this.runAgent({
@@ -1373,7 +1898,8 @@ export class LiveSquad {
         job: `__chat:${id}`,
         cwd,
         ...(had ? { resume: had } : { sessionId: session }),
-        prompt: had ? talk : `${opening}\n\n${talk}`,
+        // Each answer hears whether the copy runs now: the person may have pressed Try it yourself since the opening.
+        prompt: had ? (look ? `${P.copyNow(look)}\n\n${talk}` : talk) : `${opening}\n\n${talk}`,
         permissions: ['read'],
         schema: P.CHAT_SCHEMA,
         timeoutMs: 10 * 60_000,
@@ -1402,7 +1928,7 @@ export class LiveSquad {
       if (err instanceof LimitReached && after) return this.chatWaits(after, err.pause);
       this.update(id, (x) => {
         if (!x.chat) return;
-        x.chat.messages.push({ who: 'squad', text: `Could not answer: ${(err as Error).message}`, at: now(), note: 'failed' });
+        x.chat.messages.push({ who: 'squad', text: this.couldNotAnswer(err, id, 'Could not answer this time. Press Try again.'), at: now(), note: 'failed' });
         x.chat.thinking = false;
       });
     }
@@ -1571,7 +2097,7 @@ export class LiveSquad {
     const steps: ChangeStep[] = (out.steps ?? [])
       .filter((s) => s.title?.trim())
       .map((s) => ({ title: s.title.trim(), change: s.change === 'same' || s.change === 'new' ? s.change : 'changed' }));
-    if (!steps.length) throw new Error('The Architect wrote no steps for the design update.');
+    if (!steps.length) throw new StepError('The Architect wrote no steps for the design update.');
     this.update(id, (x) => {
       const y = openChange(x);
       if (!y) return;
@@ -1597,8 +2123,11 @@ export class LiveSquad {
         x.reviewRound = 0;
       });
       const redo = (t.steps ?? []).filter((s) => s.status !== 'done').length;
-      this.update(id, (x) => addActivity(x, 'builder', `Started redoing ${redo} ${redo === 1 ? 'step' : 'steps'} for change ${c.id}`));
-      await this.runBuilder(id, P.changeRedoPrompt(c, t.steps ?? []), true, 'build');
+      // Cut off by a restart, a Stop or sleep: the redo carries on where it was, in the same conversation.
+      const handed = t.activity.some((a) => a.who === 'builder' && a.text.startsWith('Started redoing') && a.text.endsWith(`for change ${c.id}`));
+      const cut = handed ? carriesOn(t, 'change-build') : undefined;
+      this.update(id, (x) => addActivity(x, 'builder', cut ? carryOnLine(x, cut.by) : `Started redoing ${redo} ${redo === 1 ? 'step' : 'steps'} for change ${c.id}`));
+      await this.runBuilder(id, cut ? carryOnPrompt(t, cut.by) : P.changeRedoPrompt(c, t.steps ?? []), true, 'build');
       this.update(id, (x) => {
         for (const s of x.steps ?? []) {
           s.status = 'done';
@@ -1682,25 +2211,29 @@ export class LiveSquad {
       t.status = change ? (t.specApproved ? 'Architect is updating the design' : 'Spec writer is updating the plan') : 'Architect is choosing the design';
       t.sessions = { ...t.sessions, intake: t.sessions?.intake ?? randomUUID() };
     });
-    const resume = fromChat || Boolean(readTicket(this.bp, id)?.activity.some((a) => a.who === 'analyst'));
+    // An answer to the Architect's own question goes on in its conversation (Builds by itself has no Analyst lines).
+    const resume = fromChat || answered || Boolean(readTicket(this.bp, id)?.activity.some((a) => a.who === 'analyst'));
     // Full track: the spec is approved, so the Architect writes only the design. Express writes both at once.
     const design = Boolean(t0.specApproved);
     const asked = answered ? t0.agentQuestion : undefined;
     // The other open tickets and the files their branches changed: the design names the ones it needs (E5).
     const others = openTicketsFor(this.bp, t0);
     const ask = `${asked ? `${P.answerPrompt(asked, 'architect')}\n\n` : ''}${design ? P.designPrompt(t0, change, this.meta(), fromChat, others) : P.planPrompt(t0, change, this.meta(), others)}`;
+    // Builds by itself: the Architect plans with the breakdown in view, and may read the document's text and pictures.
+    const brd = t0.track === 'auto' ? A.breakdownFor(this.bp, t0) : null;
+    const brief = brd ? A.autoArchitectPrompt(this.meta(), listDecisions(this.bp), t0, this.ctx(), brd.text) : P.intakePrompt(this.meta(), listDecisions(this.bp), t0, this.ctx());
     const r = await this.runAgent({
       role: 'architect',
       step: 'design',
       ticket: id,
       cwd: root,
       ...(resume ? { resume: t0.sessions!.intake } : { sessionId: t0.sessions!.intake }),
-      prompt: resume ? ask : `${P.intakePrompt(this.meta(), listDecisions(this.bp), t0, this.ctx())}\n\n${ask}`,
+      prompt: resume ? ask : `${brief}\n\n${ask}`,
       permissions: ['read'],
       schema: design ? P.DESIGN_SCHEMA : P.PLAN_SCHEMA,
       check: (a) => dependsProblem(a, others.map((o) => o.id), id),
       timeoutMs: 10 * 60_000,
-      addDirs: attachmentDirs(t0),
+      addDirs: [...attachmentDirs(t0), ...(brd?.dirs ?? [])],
       onTool: this.watcher(id, 'architect', root),
     });
     const out = r.structured as {
@@ -1717,12 +2250,14 @@ export class LiveSquad {
       releaseNote?: string;
       commands?: ProjectCommands;
       repo?: string;
+      decided?: string[];
     };
     if (design) this.askIfNeeded(id, 'architect', out.question);
     const mockup = out.mockup?.trim() && out.screens > 0 ? this.saveMockup(id, out.mockup) : undefined;
     const meta = this.meta();
     const repo = meta.repos?.length ? (meta.repos.find((r) => r.path === out.repo?.replace(/\/$/, ''))?.path ?? meta.repos[0]!.path) : undefined;
-    // A new or different test command waits for the person (see not-checked.ts); the others apply at once.
+    // A new test command waits for the checks to want it, a different one for squad-kit to try it (see not-checked.ts);
+    // the others apply at once.
     const held = holdTestCommand((repo && meta.repos ? meta.repos.find((r) => r.path === repo)?.commands : meta.commands) ?? {}, clean(out.commands ?? {}));
     if (Object.values(held.apply).some(Boolean)) {
       if (repo && meta.repos) {
@@ -1732,13 +2267,14 @@ export class LiveSquad {
       }
       writeMeta(this.bp, meta);
     }
+    if (held.change) this.log('info', `The design changes the test command from "${held.change.from}" to "${held.change.to}"`, id);
     this.update(id, (t) => {
       if (repo) t.repo = repo;
       if (held.suggest) t.testSuggestion = held.suggest;
-      // A different test command waits for you, beside the design; the checks keep the current one until then.
+      // A different test command is tried at the checks, after the build; until then the checks keep the current one.
       if (held.change) {
         t.testChange = { ...held.change, ...(repo ? { repo } : {}), at: now() };
-        addActivity(t, 'architect', `Suggests changing the test command from "${held.change.from}" to "${held.change.to}". It waits for your approval; the checks keep using "${held.change.from}"`);
+        addActivity(t, 'architect', 'The design changes how the tests run. squad-kit tries the new way after the build');
       } else delete t.testChange;
       if (!design) {
         t.story = out.story;
@@ -1760,8 +2296,9 @@ export class LiveSquad {
       applyPlanEdits(t);
       t.work = { steps: out.steps.length, tests: Math.max(0, out.tests), screens: Math.max(0, out.screens) };
       addActivity(t, design ? 'architect' : 'spec', change ? `Updated the ${design ? 'design' : 'plan'}: ${changeSummary(change)}` : design ? 'Wrote the design' : 'Wrote the plan');
-      if (t.track === 'express' && !change) {
-        t.status = 'Express track: approving the plan';
+      if (design) addDecided(t, 'architect', out.decided);
+      if ((t.track === 'express' || t.track === 'auto') && !change) {
+        t.status = t.track === 'auto' ? APPROVING : 'Express track: approving the plan';
         scheduleSquad(t, 'express-approve', 0.2, 1);
         return;
       }
@@ -1804,11 +2341,15 @@ export class LiveSquad {
     if (saved) t = this.update(id, (x) => addActivity(x, 'squad', `Saved the spec and design on ${wt.branch} as commit ${saved}`));
     const setup = repo.commands.setup?.trim();
     if (setup) {
-      this.update(id, (x) => (x.status = `Setting up the copy: ${setup}`));
-      const r = await runCommand(wt.dir, setup, 20 * 60_000, this.commandWatch(id));
+      this.update(id, (x) => (x.status = DOING.setup));
+      this.log('info', `Setting up the copy: ${setup}`, id);
+      const r = await runCommand(wt.dir, setup, 20 * 60_000, this.guardedWatch(id, wt.dir));
       this.goOn(id);
       // A new project has nothing to set up yet; the Builder creates it in this ticket.
-      if (!r.ok && !meta.scan?.empty) throw new Error(`Setting up the project failed (${setup}): ${tail(r.output, 6)}`);
+      if (!r.ok && !meta.scan?.empty) throw new StepError("Setting up the ticket's copy of the code did not work. Press Try again.", `${setup}:\n${tail(r.output, 30)}`);
+      // What the setup rewrote (a lock file, often) is not the story's work: it goes back before anyone reads the copy.
+      const back = putBackTracked(wt.dir);
+      if (back.length) this.log('info', `The setup command changed ${back.join(', ')}; squad-kit put ${back.length === 1 ? 'it' : 'them'} back`, id);
     }
     return readTicket(this.bp, id)!;
   }
@@ -1844,14 +2385,16 @@ export class LiveSquad {
     const t = this.update(id, (x) => {
       x.stage = 'implement';
       x.live = true;
-      x.status = `Step 1 of ${x.steps?.length ?? 1} with ${this.toolLabel('builder')}`;
+      x.status = `Step ${openStep(x)} of ${x.steps?.length ?? 1}`;
       x.sessions = { ...x.sessions, build: x.sessions?.build ?? randomUUID() };
       x.tries = 0;
       x.reviewRound = 0;
     });
     // Only a conversation saved on this computer can go on; a ticket picked up from a branch starts a fresh one.
     const resume = Boolean(had) && t.activity.some((a) => a.who === 'builder' && a.text.startsWith('Started'));
-    this.update(id, (x) => addActivity(x, 'builder', resume ? 'Picked up where it stopped' : sofar.length ? 'Started again from the spec, the design and the work so far' : 'Started building'));
+    // Cut off by a restart, a Stop or sleep: it carries on with the step it was on, and says why, once.
+    const cut = resume ? carriesOn(t, 'build') : undefined;
+    this.update(id, (x) => addActivity(x, 'builder', cut ? carryOnLine(x, cut.by) : resume ? 'Picked up where it stopped' : sofar.length ? 'Started again from the spec, the design and the work so far' : 'Started building'));
     const base = repoFor(meta, t).base;
     const intro = `This ticket is partly built already: the work so far is in this copy, on ${t.branch}. It was done in another session, maybe on another computer, so you have no conversation about it. Files changed so far: ${sofar.slice(0, 30).join(', ')}. Read the spec, the design and that code first (git log and git diff against ${base} show it). Keep what is done and right, then finish the steps that are not done yet. squad-kit does all the git.`;
     // The plan changed since this conversation got it (sent back to the plan, a new design): it gets the new one.
@@ -1860,7 +2403,7 @@ export class LiveSquad {
     const changed = 'The plan changed since you last worked on this ticket. From now on follow the plan below, not the earlier one: keep the work that still fits it, change what does not, then finish the steps that are not done yet.';
     const prompt =
       resume && !replanned
-        ? 'Continue the steps that are not done yet, then run the tests.'
+        ? cut ? carryOnPrompt(t, cut.by) : 'Continue the steps that are not done yet, then run the tests.'
         : `${replanned ? `${changed}\n\n` : sofar.length ? `${intro}\n\n` : ''}${P.buildPrompt(meta, listDecisions(this.bp), t, this.ctx(t))}`;
     this.update(id, (x) => {
       x.builtPlan = plan;
@@ -1884,7 +2427,7 @@ export class LiveSquad {
    * Runs (or continues) the Builder's conversation and maps its ">> step N" lines to the plan. An approved small change
    * reaches the Builder here, at a safe moment: the start of a step, before that step's own work.
    */
-  private async runBuilder(id: string, prompt: string, resume: boolean, step: 'build' | 'fix' = 'fix'): Promise<void> {
+  private async runBuilder(id: string, prompt: string, resume: boolean, step: 'build' | 'fix' = 'fix', settled = 0, told = new Set<string>()): Promise<void> {
     const change = this.handChange(id);
     const t = readTicket(this.bp, id)!;
     const cwd = t.worktree!;
@@ -1925,7 +2468,7 @@ export class LiveSquad {
             addActivity(x, 'builder', `Started step ${n + 1}: ${s.title}`);
           }
           x.progress = Math.round((n / Math.max(1, steps.length)) * 100);
-          x.status = `Step ${n + 1} of ${steps.length} with ${this.toolLabel('builder')}`;
+          x.status = `Step ${n + 1} of ${steps.length}`;
           nextPart(this.bp, x, n + 1);
         });
       },
@@ -1947,15 +2490,30 @@ export class LiveSquad {
         addActivity(x, 'builder', `Made change ${change.id}: ${change.summary ?? change.ask}`);
       });
     }
-    this.askIfNeeded(id, 'builder', (r.structured as { question?: AgentAsk } | undefined)?.question);
+    const asked = (r.structured as { question?: AgentAsk } | undefined)?.question;
+    // A busy port or a program in the way is the engine's to settle first, twice a step at most; the person only
+    // sees it when the program is not squad-kit's and going around it did not work. Never in the Builder's own words.
+    const way = asked?.text?.trim() ? await this.inTheWay(id, asked, told) : null;
+    if (way?.answer && settled >= 2) throw new StepError('The Builder kept asking a technical question, which squad-kit does not pass on to you, so it stopped this step. Press Try again.', asked!.text);
+    if (way?.answer) return this.runBuilder(id, way.answer, true, step, settled + 1, told);
+    this.askIfNeeded(id, 'builder', way?.ask ?? asked);
+    this.saveDecided(id, 'builder', r.structured);
     // Approved while this step ran: it reaches the Builder now, at the end of the step, before anything else runs.
     const late = openChange(readTicket(this.bp, id)!);
     if (late && late.size !== 'big' && late.status === 'approved') await this.runBuilder(id, '', true, step);
   }
 
-  /** The Builder's run itself failed (an error, a time limit): it counts like failed checks, unless you pressed Stop. */
+  /**
+   * The Builder's run itself failed (an error, a time limit): it counts like failed checks. A run that was cut off
+   * never counts (engine/interrupt.ts): the board closing or restarting, a Stop or a delete (squad-kit ended it), or
+   * the computer sleeping under it.
+   */
   private builderFailed(id: string, err: unknown): never {
-    if (!(err instanceof WaitingForYou) && !(err instanceof LimitReached) && !(err instanceof CapReached) && !readTicket(this.bp, id)?.stopRequested) this.update(id, (x) => (x.fails = (x.fails ?? 0) + 1));
+    if (err instanceof WaitingForYou || err instanceof LimitReached || err instanceof CapReached) throw err;
+    const ended = this.closing || Boolean(this.stops.get(id)?.signal.aborted) || Boolean(readTicket(this.bp, id)?.stopRequested);
+    if (ended) throw err;
+    if (sleptSince(this.marks.get(id))) throw new CutOff('sleep');
+    this.update(id, (x) => (x.fails = (x.fails ?? 0) + 1));
     throw err;
   }
 
@@ -1972,6 +2530,91 @@ export class LiveSquad {
     return c;
   }
 
+  /**
+   * The Builder asked about a busy port or a program in its way (engine/port-ask.ts). A squad-kit leftover holds it:
+   * squad-kit stops it and answers the Builder itself. squad-kit's work on another ticket holds it: the Builder is told
+   * to leave it alone. Another program holds it: the Builder is told to go around it, with a free port. Only when it asks
+   * again about that same program does the person get one plain choice, with the details for engineers. `told` keeps
+   * what the Builder was told to go around in this step; left out, the agent is always told (it cannot ask the person).
+   * Null when the question is about something else.
+   */
+  private async inTheWay(id: string, q: AgentAsk, told?: Set<string>): Promise<{ answer?: string; ask?: AgentAsk } | null> {
+    const hit = inTheWay([q.text, q.why, ...(q.options ?? [])].filter(Boolean).join('\n'));
+    if (!hit) return null;
+    const copies = projectCopies(this.bp);
+    const busy = this.busyCopies(id);
+    const outside: PortAsk[] = [];
+    const settled: string[] = [];
+    const holders = hit.ports.length
+      ? hit.ports.map((port) => ({ port, holder: listenerOn(port) }))
+      : hit.pids.map((pid) => ({ port: undefined, holder: processes().find((r) => r.pid === pid) ? { pid, program: '' } : null }));
+    for (const { port, holder } of holders) {
+      if (!holder) {
+        // Taken, by a program the system will not name (another user's): only the person can do something about it.
+        if (port && (await portTaken(port))) outside.push({ port, pid: 0, asked: q.text.trim() });
+        else settled.push(port ? `Port ${port} is free now; carry on. Run what you needed it for again, then go on with the work.` : 'That program has ended; carry on with the work.');
+        continue;
+      }
+      if ((await this.clearCopies(copies, { busy, only: [holder.pid] }, id)).length) {
+        settled.push(settledAnswer({ ...(port ? { port } : {}) }));
+        continue;
+      }
+      // One of the project's apps squad-kit runs from Your apps: the person's to stop, from the card.
+      const app = port ? squadKitOn(this.bp, port)?.app : undefined;
+      const cwd = workingFolders([holder.pid]).get(holder.pid);
+      if (!app && (ownedBySquadKit(holder.pid) || (cwd && folderOf(cwd, copies)))) {
+        settled.push(ownWorkAnswer(await this.aroundIt(id, port)));
+        continue;
+      }
+      outside.push({ ...(port ? { port } : {}), pid: holder.pid, ...(holder.program ? { program: holder.program } : {}), ...(app ? { app } : {}), asked: q.text.trim() });
+    }
+    const key = (p: PortAsk) => (p.port ? `port ${p.port}` : `process ${p.pid}`);
+    const again = outside.find((p) => told?.has(key(p)));
+    if (again) {
+      const card = portCard(again);
+      this.log('info', `The Builder asked again about ${key(again)}, held by ${again.program || 'a program'}${again.pid ? ` (process ${again.pid})` : ''}: it asks the person`, id);
+      return { ask: { text: card.text, options: card.options, why: card.why, port: again } };
+    }
+    // First the way around it: another port. Nothing that is not squad-kit's is stopped without the person's press.
+    for (const p of outside) {
+      told?.add(key(p));
+      settled.push(goAroundAnswer(await this.aroundIt(id, p.port)));
+    }
+    this.log('info', `Asked about ${[...hit.ports.map((p) => `port ${p}`), ...hit.pids.map((p) => `process ${p}`)].join(', ')}: ${settled.join(' ')}`, id);
+    this.update(id, (x) =>
+      addActivity(x, 'squad', outside.length ? 'Another program on this computer was in the way, so squad-kit showed how to go around it. The work carries on' : 'Something squad-kit left running was in the way. squad-kit dealt with it, and the work carries on'),
+    );
+    return { answer: settled.join('\n') };
+  }
+
+  /** The busy port, a free one near it, and the app's own port settings to set it in, for the agent to run on. */
+  private async aroundIt(id: string, port?: number): Promise<AroundIt> {
+    if (!port) return {};
+    const free = await nextFreePort(port);
+    const cwd = readTicket(this.bp, id)?.worktree;
+    const vars = cwd && fs.existsSync(cwd) ? appPortVariables(cwd, port) : [];
+    return { port, ...(free ? { free } : {}), ...(vars.length ? { vars } : {}) };
+  }
+
+  /** The person chose on the plain card about a program in the way. "Stop it" stops that program, checked again first. */
+  private async portAnswer(id: string, p: PortAsk, choice: string): Promise<string> {
+    if (choice !== STOP_IT) return cardAnswer(p, choice, null);
+    // Checked again now, never from what the card said: only the very program the person saw is stopped.
+    const now = p.port ? listenerOn(p.port) : processes().find((r) => r.pid === p.pid) ?? null;
+    let stopped = !now && !(p.port && (await portTaken(p.port)));
+    const app = p.port ? squadKitOn(this.bp, p.port) : null;
+    // squad-kit itself and what it runs now are never stopped this way; one of Your apps stops as a whole.
+    if (p.pid > 0 && now?.pid === p.pid && (app?.app || !ownedBySquadKit(p.pid))) {
+      if (app?.app) await endPid(app.group);
+      else await endProcess(p.pid);
+      stopped = p.port ? !(await portTaken(p.port)) : !processes().some((r) => r.pid === p.pid);
+    }
+    // The port and the process are for engineers: on the card's details, and here.
+    this.log('info', `${stopped ? 'Stopped' : 'Could not stop'} ${p.port ? `the program on port ${p.port}` : 'the program in the way'} (process ${p.pid}), as the person asked`, id);
+    this.update(id, (x) => addActivity(x, 'squad', stopped ? 'Stopped the other program, as you asked' : 'Could not stop the other program, so the Builder goes on without it'));
+    return cardAnswer(p, choice, stopped);
+  }
+
   /** The person answered the Builder: the same conversation carries on, then the checks run as after any build. */
   private async builderAnswered(id: string): Promise<void> {
     const t = await this.workspace(id);
@@ -1979,7 +2622,8 @@ export class LiveSquad {
       x.stage = 'implement';
       x.live = true;
     });
-    await this.runBuilder(id, P.answerPrompt(t.agentQuestion ?? { text: '' }, 'builder'), true, 'build');
+    const q = t.agentQuestion;
+    await this.runBuilder(id, q?.port ? await this.portAnswer(id, q.port, q.answer ?? '') : P.answerPrompt(q ?? { text: '' }, 'builder'), true, 'build');
     this.update(id, (x) => {
       for (const s of x.steps ?? []) {
         s.status = 'done';
@@ -2005,21 +2649,35 @@ export class LiveSquad {
       // Only files the board may show: inside the ticket's copy, its proof or its attachments.
       const folders = ticketFolders(x, this.bp);
       const files = (q.files ?? []).map((f) => allowedFile(f.replace(/^file:\/\//, ''), folders)).filter((f): f is string => Boolean(f)).slice(0, 6);
+      // Builds by itself: why it stops, a gap or a clash, and where that comes from. Other tracks keep their usual words.
+      const kind = x.track === 'auto' && (q.kind === 'gap' || q.kind === 'clash') ? q.kind : undefined;
+      const sources = kind ? cleanSources(q.sources) : [];
       x.agentQuestion = {
         from,
         text: q.text.trim(),
         options: (q.options ?? []).filter((o) => o.trim()).slice(0, 4),
         ...(q.why ? { why: q.why } : {}),
         ...(files.length ? { files } : {}),
+        ...(q.port ? { port: q.port } : {}),
+        ...(kind ? { kind } : {}),
+        ...(sources.length ? { sources } : {}),
         at: now(),
       };
+      const words = askWords(who, kind);
       x.live = false;
       x.squad = null;
-      x.status = `${who} has a question for you`;
-      x.waiting = { kind: 'ask', summary: `The ${who} needs an answer to carry on` };
+      x.status = words.status;
+      x.waiting = { kind: 'ask', summary: words.summary };
       addActivity(x, from, `Asked you: ${q.text.trim()}${files.length ? ` (with ${files.length} ${files.length === 1 ? 'file' : 'files'})` : ''}`);
     });
     throw new WaitingForYou();
+  }
+
+  /** Builds by itself: the small choices an agent made instead of asking go on the ticket as "Decided for you". */
+  private saveDecided(id: string, by: DecidedBy, out: unknown): void {
+    const decided = (out as { decided?: unknown } | undefined)?.decided;
+    if (!Array.isArray(decided) || !decided.length || readTicket(this.bp, id)?.track !== 'auto') return;
+    this.update(id, (x) => addDecided(x, by, decided));
   }
 
   /** The Architect's mockup is text in its answer (it only reads); squad-kit saves it with the ticket's files. */
@@ -2081,14 +2739,19 @@ export class LiveSquad {
       why = (err as Error).message;
     }
     const clashes = unmerged();
-    if (!merging() && !isAncestor(dir, baseSha, 'HEAD')) throw new Error(`Could not bring the latest ${latest.ref} into this ticket: ${why}`);
+    if (!merging() && !isAncestor(dir, baseSha, 'HEAD')) throw new StepError(`squad-kit could not bring the latest ${latest.ref} into this ticket. Press Try again.`, why);
     return { baseSha, clashes, from: latest.ref };
   }
 
   private async rebuild(id: string, adr: string): Promise<void> {
     const t = readTicket(this.bp, id)!;
     const base = repoFor(this.meta(), t).base;
-    const { baseSha, clashes, from } = this.bringInBase(t, base, await fetchBase(this.bp, t));
+    const remote = await fetchBase(this.bp, t);
+    // The redo was handed to the Builder already (its conversation has this plan) and a restart, a Stop or sleep cut
+    // it off: it carries on where it was. The base comes in again only when something new arrived on it since.
+    const cut = t.builtPlan === planKey(t) && t.sessions?.build ? carriesOn(t, 'build') : undefined;
+    const moved = !cut || this.baseMoved(t, base, remote);
+    const { baseSha, clashes, from } = moved ? this.bringInBase(t, base, remote) : { baseSha: t.baseCommit!, clashes: [] as string[], from: base };
     const t1 = this.update(id, (x) => {
       x.baseCommit = baseSha;
       x.stage = 'implement';
@@ -2098,14 +2761,15 @@ export class LiveSquad {
       x.proof = undefined;
       x.gates = { checks: 'pending', review: 'pending', proof: 'pending' };
       x.sessions = { ...x.sessions, build: x.sessions?.build ?? randomUUID() };
-      x.status = `Redoing the work to follow ${adr}`;
-      addActivity(x, 'squad', `Brought the latest ${from} into this ticket${clashes.length ? `. Clashes in ${clashes.join(', ')}` : ''}`);
-      addActivity(x, 'builder', `Started redoing the work to follow ${adr}`);
+      x.status = cut ? `Step ${openStep(x)} of ${x.steps?.length ?? 1}` : `Redoing the work to follow ${adr}`;
+      if (moved) addActivity(x, 'squad', `Brought the latest ${from} into this ticket${clashes.length ? `. Clashes in ${clashes.join(', ')}` : ''}`);
+      addActivity(x, 'builder', cut ? carryOnLine(x, cut.by) : `Started redoing the work to follow ${adr}`);
     });
     const meta = this.meta();
     this.update(id, (x) => (x.builtPlan = planKey(t1)));
     const intro = `The plan changed to follow ${adr}, a decision approved after you started. The latest ${base} is now in this copy${clashes.length ? `, with clashes in ${clashes.join(', ')} to fix first` : ''}. Stay on this branch: it already has the latest ${base}, so a plan that says to start from ${base} is met, and squad-kit does all the git. Redo the work to the new plan below: keep what still fits, change what does not.`;
-    await this.runBuilder(id, `${intro}\n\n${P.buildPrompt(meta, listDecisions(this.bp), t1, this.ctx(t1))}`, Boolean(t.sessions?.build), 'build');
+    const newer = moved && cut ? ` squad-kit brought the latest ${base} into this copy meanwhile${clashes.length ? `, with clashes in ${clashes.join(', ')} to fix first` : ''}.` : '';
+    await this.runBuilder(id, cut ? `${carryOnPrompt(t1, cut.by)}${newer}` : `${intro}\n\n${P.buildPrompt(meta, listDecisions(this.bp), t1, this.ctx(t1))}`, Boolean(t.sessions?.build), 'build');
     this.update(id, (x) => {
       for (const s of x.steps ?? []) {
         s.status = 'done';
@@ -2118,6 +2782,16 @@ export class LiveSquad {
       x.status = 'Running the project checks';
       scheduleSquad(x, 'test', 0.2, 1);
     });
+  }
+
+  /** Something new arrived on the base since the ticket's copy last took it in. */
+  private baseMoved(t: Ticket, base: string, remote?: string): boolean {
+    try {
+      const latest = latestBase(t.worktree!, base, remote).sha;
+      return latest !== t.baseCommit && !isAncestor(t.worktree!, latest, 'HEAD');
+    } catch {
+      return true;
+    }
   }
 
   private async updateBase(id: string): Promise<void> {
@@ -2173,15 +2847,49 @@ export class LiveSquad {
     });
   }
 
-  private async checks(id: string): Promise<void> {
+  /**
+   * How to test and run the project, found in the story's copy and saved, with a line on the story. It asks nobody. A
+   * project that started empty, or has nothing saved at all, gets every command it lacks. Any other only gets a test
+   * command when it has none, as the Builder may have written the project's first tests. The person's choice to go on
+   * without tests stands. The commands saved now.
+   */
+  private saveFoundCommands(id: string, cwd: string): ProjectCommands {
     const meta = this.meta();
     const t = readTicket(this.bp, id)!;
     const repo = repoFor(meta, t);
-    const commands = repo.commands;
+    const has = (k: keyof ProjectCommands) => Boolean(repo.commands[k]?.trim());
+    const fresh = Boolean(meta.scan?.empty) || !(['test', 'lint', 'build', 'start', 'url'] as const).some(has);
+    const wanted = (fresh ? (['setup', 'test', 'lint', 'build', 'start', 'url'] as const) : (['test'] as const)).filter((k) => !has(k) && !(k === 'test' && meta.noTests));
+    if (!wanted.length || !fs.existsSync(cwd)) return repo.commands;
+    const found = findCommands(cwd);
+    const add = Object.fromEntries(wanted.filter((k) => found[k]?.trim()).map((k) => [k, found[k]!.trim()])) as ProjectCommands;
+    if (!Object.keys(add).length) return repo.commands;
+    if (meta.repos?.length) meta.repos = meta.repos.map((r) => (r.path === repo.path ? { ...r, commands: { ...r.commands, ...add } } : r));
+    else meta.commands = { ...(meta.commands ?? {}), ...add };
+    writeMeta(this.bp, meta);
+    // The exact commands are for engineers: in the log and in Settings.
+    this.log('info', `Found and saved: ${Object.entries(add).map(([k, v]) => `${k}: ${v}`).join(', ')}`, id);
+    this.update(id, (x) => {
+      if (add.test) delete x.testSuggestion;
+      addActivity(x, 'squad', add.test && Object.keys(add).length === 1 ? 'squad-kit found the tests in the project, and runs them from now on' : 'squad-kit found how to test and run the project, and saved it');
+    });
+    return { ...repo.commands, ...add };
+  }
+
+  private async checks(id: string): Promise<void> {
+    const t = readTicket(this.bp, id)!;
+    // A project the Builder just set up says now how it is tested and run.
+    if (t.worktree) this.saveFoundCommands(id, t.worktree);
+    const meta = this.meta();
+    const repo = repoFor(meta, t);
+    let commands = repo.commands;
     // Tests made weaker first: passing them would prove little, and only you can go past it.
     const weak = t.worktree && t.baseCommit ? weakenedChecks(t.worktree, t.baseCommit, { skip: [`${path.basename(this.bp.squadDir)}/`], testCommand: commands.test }) : [];
     const fresh = weak.filter((w) => !(t.weakenedContinued ?? []).includes(w.key));
     if (fresh.length) return this.weakenedStop(id, fresh, repo.base);
+    // No old server of squad-kit's own copies may hold a port the checks need.
+    await this.clearBeforeApp(id);
+    this.goOn(id);
     this.update(id, (x) => {
       x.stage = 'test';
       x.live = true;
@@ -2189,28 +2897,56 @@ export class LiveSquad {
       addActivity(x, 'tester', 'squad-kit is running the project checks');
       startStep(x, { who: 'squad', step: 'checks', limit: 15 });
     });
-    const onStart = (name: string) =>
+    const onStart = (name: string) => {
+      // The exact command is for engineers: here, and in the ticket's Developer tab once it ran.
+      this.log('info', `Running ${name}: ${commands[name as 'test' | 'start']}`, id);
       this.update(id, (x) => {
-        x.status = name === 'start' ? `Checking that the app starts: ${commands.start}` : `Running ${name}: ${commands[name as 'test']}`;
+        x.status = CHECK_DOING[name] ?? DOING.check;
         stepDoing(x, x.status);
       });
-    const results = await runChecks(t.worktree!, commands, onStart, this.commandWatch(id));
+    };
+    const mark = sleepMark();
+    const guard = this.guardFor(t.worktree!, id);
+    commands = await this.tryTestChange(id, t.worktree!, commands, guard, mark);
+    const results = await runChecks(t.worktree!, commands, onStart, { ...this.commandWatch(id), ...(guard ? { guard } : {}) });
+    // A check that needed a file outside its copy, which the guard blocked: one plain sentence, not a failed try.
+    if (guard && !this.stops.get(id)?.signal.aborted) {
+      const hit = results.find((r) => !r.ok && guardBlockedPath(r.output, guard));
+      if (hit) return this.guardStop(id, 'test', guardBlockedPath(hit.output, guard)!, hit.command, hit.output);
+    }
     // Stopped while a check ran: its result says nothing about the code, so it is no failed try.
     this.goOn(id);
+    // Nor when the computer slept under them: they run again, and no try is counted.
+    if (sleptSince(mark)) {
+      this.update(id, (x) => {
+        delete x.clock;
+        addActivity(x, 'squad', 'The computer slept while the checks ran, so squad-kit runs them again. Not a failed try');
+        scheduleSquad(x, 'test', 0.2, 1);
+      });
+      return;
+    }
     this.update(id, (x) => endStep(this.bp, x));
+    // Failed once, then passed: no failed try and no Builder. One plain line here; the Developer tab and the log say more.
+    for (const r of results.filter((x) => x.failedFirst !== undefined)) {
+      this.log('warn', `${r.name} failed once and passed when run again (${r.command}):\n${r.failedFirst}`, id);
+      this.update(id, (x) => addActivity(x, 'tester', failedOnceLine(r.name)));
+    }
+    const test = results.find((r) => r.name === 'test');
+    if (test?.ok && test.failedFirst === undefined) forgetKnownFailure(this.bp, t, test.command);
     const failed = results.filter((r) => !r.ok);
     const ran = ranOf(results);
     // Weakened tests you continued past are still there: the gate is never a plain pass.
     const around = weak.length > 0;
     if (failed.length === 0 && noTestsRan(results)) return this.notChecked(id, results, around);
     if (failed.length === 0) {
-      const tests = results.map((r) => testCount(r.output)).find((n) => n !== null);
+      const tests = test ? testCount(test.output) : null;
       const names = results.map((r) => checkWords(r.name)).join(', ');
-      const text = tests ? `${tests} tests pass, ${names} OK` : `${names} pass`;
+      const text = tests ? `${tests} ${tests === 1 ? 'test passes' : 'tests pass'}, ${names} OK` : `${names} pass`;
       this.update(id, (x) => {
         x.gates = { ...x.gates!, checks: around ? 'skipped' : 'pass', checksText: around ? `${text}; tests weakened, you continued` : text, ran };
         // A pass starts the count again: a later round that fails has its own tries, and nothing is continued past.
         x.tries = 0;
+        clearStaleStop(x);
         x.checksContinued = undefined;
         addActivity(x, 'tester', `All checks pass: ${names}`);
         x.stage = 'review';
@@ -2230,6 +2966,7 @@ export class LiveSquad {
       this.update(id, (x) => {
         x.tries = 0;
         x.gates = { ...x.gates!, checks: 'skipped', checksText: `${names} still failed, continued anyway`, ran };
+        clearStaleStop(x);
         addActivity(x, 'tester', `Checks still fail: ${names}. You continued anyway past them, so the work goes on`);
         x.stage = 'review';
         x.status = 'Reviewer is reading the changes';
@@ -2250,10 +2987,12 @@ export class LiveSquad {
         x.squad = null;
         x.retryPhase = 'test';
         x.status = `Stuck after ${tries} check runs`;
+        // One plain sentence; what each check printed is for engineers.
         x.stuck = {
           gate: 'checks',
           checks: failed.map((f) => f.name),
-          question: `The checks still fail after ${tries} tries. ${failed[0]!.name} says: ${tail(failed[0]!.output, 3).slice(0, 300)}`,
+          question: `The checks still fail after ${tries} tries: ${checkNames(failed.map((f) => f.name))} did not pass.`,
+          detail: failed.map((f) => `${f.name} (${f.command}):\n${tail(f.output, 30)}`).join('\n\n').slice(-6000),
           options: wayOptions({ gate: 'checks', copy: Boolean(x.worktree && fs.existsSync(x.worktree)) }),
         };
         x.waiting = { kind: 'stuck', summary: 'The squad is stuck and needs one decision' };
@@ -2265,7 +3004,7 @@ export class LiveSquad {
       x.stage = 'implement';
       x.status = 'Builder is fixing the failed checks';
     });
-    await this.runBuilder(id, P.fixChecksPrompt(failed.map((f) => ({ name: f.name, command: f.command, output: tail(f.output, 60) }))), true);
+    await this.runBuilder(id, P.fixChecksPrompt(failed.map((f) => ({ name: f.name, command: f.command, output: tail(f.output, 60) })), knownFailures(this.bp, t, failed)), true);
     this.update(id, (x) => {
       addActivity(x, 'builder', 'Fixed the failed checks');
       x.stage = 'test';
@@ -2274,9 +3013,48 @@ export class LiveSquad {
   }
 
   /**
+   * The design changes how the tests run (engine/test-change.ts): squad-kit tries the new way in the ticket's copy and
+   * keeps what works, with one plain line on the story. The commands go to the log and the Developer tab. When it cannot
+   * tell, the person gets one plain sentence and the checks keep the current one meanwhile. The commands the checks use now.
+   */
+  private async tryTestChange(id: string, cwd: string, commands: ProjectCommands, guard: GuardSpec | undefined, mark: SleepMark): Promise<ProjectCommands> {
+    const c = readTicket(this.bp, id)?.testChange;
+    if (!c || c.ask) return commands;
+    const from = commands.test?.trim();
+    // Another ticket changed it meanwhile: to this very command, or away from the one it was tried against.
+    if (!from || from === c.to) {
+      this.update(id, (x) => delete x.testChange);
+      return commands;
+    }
+    const verdict = await judgeTestChange({ from, to: c.to }, (command) => {
+      this.log('info', `Trying the test command: ${command}`, id);
+      return runCommand(cwd, command, undefined, { silentMs: CHECK_SILENT_MS, ...this.commandWatch(id), ...(guard ? { guard } : {}) });
+    });
+    // Stopped, or the computer slept under it: the runs say nothing, so the next checks try again.
+    this.goOn(id);
+    if (sleptSince(mark)) return commands;
+    this.log('info', `The test command: from "${from}" to "${c.to}": ${'ask' in verdict ? 'squad-kit cannot tell' : `squad-kit keeps the ${verdict.keep} one`} (${verdict.why}; ${verdict.ran})`, id);
+    if ('ask' in verdict) {
+      this.update(id, (x) => {
+        x.testChange = { ...c, from, ask: true, ran: verdict.ran };
+        addActivity(x, 'squad', 'squad-kit cannot tell which way of testing to keep, so it asks you. The checks keep the current way for now');
+      });
+      return commands;
+    }
+    const keepNew = verdict.keep === 'new';
+    if (keepNew) saveTestCommand(this.bp, this.meta(), c.repo ?? readTicket(this.bp, id)?.repo, c.to);
+    this.update(id, (x) => {
+      delete x.testChange;
+      x.testDecided = { from, to: c.to, kept: verdict.keep, by: 'squad', why: verdict.why, ran: verdict.ran, at: now() };
+      addActivity(x, 'squad', keepNew ? `squad-kit keeps the new way of testing: ${verdict.why}` : `squad-kit keeps the current way of testing: ${verdict.why}`);
+    });
+    return keepNew ? { ...commands, test: c.to } : commands;
+  }
+
+  /**
    * The checks passed, but no tests ran. Once you said to go on without tests in this project, the gate says
    * "Not checked" and the review goes on. Until then the ticket waits for one decision: use the test command the
-   * Architect suggested, go on without tests, or add one in Settings and check again.
+   * Architect suggested so the Builder adds tests, go on without tests, or add one in Settings and check again.
    */
   private notChecked(id: string, results: CheckResult[], around: boolean): void {
     const meta = this.meta();
@@ -2287,6 +3065,7 @@ export class LiveSquad {
         x.gates = { ...x.gates!, checks: 'unchecked', checksText: text, ran };
         x.tries = 0;
         x.checksContinued = undefined;
+        clearStaleStop(x);
         addActivity(x, 'tester', `Not checked: ${text}. You chose to go on without tests in this project`);
         x.stage = 'review';
         x.status = 'Reviewer is reading the changes';
@@ -2304,7 +3083,8 @@ export class LiveSquad {
       x.stuck = {
         gate: 'checks',
         kind: 'no-tests',
-        question: noTestsQuestion(results, x.testSuggestion),
+        question: noTestsQuestion(results),
+        detail: noTestsDetail(results, x.testSuggestion),
         options: wayOptions({ gate: 'checks', kind: 'no-tests', test: x.testSuggestion }),
       };
       x.waiting = { kind: 'stuck', summary: 'No tests to check the work: needs one decision' };
@@ -2368,6 +3148,9 @@ export class LiveSquad {
     });
     const round = t0.reviewRound!;
     const goOn = answered && Boolean(t0.sessions?.review);
+    // The Reviewer may look at the app's pages, and the app runs in the ticket's copy: what it changes there goes back.
+    const rc = repoFor(meta, t0).commands;
+    const lane = rc.start?.trim() && rc.url?.trim() ? watchLane(t0.worktree!, this.protectedFiles(), true) : null;
     const r = await this.runAgent({
         role: 'reviewer',
         step: 'review',
@@ -2384,14 +3167,24 @@ export class LiveSquad {
       schema: P.REVIEW_SCHEMA,
       timeoutMs: 15 * 60_000,
       onTool: this.watcher(id, 'reviewer', t0.worktree!),
-    });
-    const out = r.structured as { approved: boolean; summary: string; comments: string[]; question?: AgentAsk };
+    }).finally(() => lane && this.keepLane(id, 'reviewer', lane));
+    const out = r.structured as { approved: boolean; summary: string; comments: string[]; alsoChanged?: string[]; question?: AgentAsk };
     this.askIfNeeded(id, 'reviewer', out.question);
+    this.saveDecided(id, 'reviewer', out);
     if (goOn) this.update(id, (x) => (x.agentQuestion = undefined));
+    // Each round reads the whole change, so its list replaces the last one.
+    const also = cleanAlsoChanged(out.alsoChanged);
+    this.update(id, (x) => {
+      if (also.length) {
+        x.alsoChanged = also;
+        addActivity(x, 'reviewer', alsoChangedLine(also));
+      } else delete x.alsoChanged;
+    });
     if (out.approved) {
       this.update(id, (x) => {
         x.gates = { ...(x.gates ?? { checks: 'pass', proof: 'pending' }), review: 'pass', reviewBy: `a second ${this.toolLabel('reviewer')} session` } as Ticket['gates'];
         x.reviewAsked = undefined;
+        clearStaleStop(x);
         addActivity(x, 'reviewer', `Approved: ${out.summary}`);
         x.status = 'Recording the proof';
         scheduleSquad(x, 'proof', 0.2, 1);
@@ -2410,9 +3203,11 @@ export class LiveSquad {
         x.retryPhase = 'review-fix';
         x.status = `Review still open after ${round} rounds`;
         addActivity(x, 'reviewer', `Still asks for ${out.comments.length} ${out.comments.length === 1 ? 'fix' : 'fixes'} after ${round} rounds: ${out.comments.join(' ')}`);
+        // Its notes are the Reviewer's own words, often about code: they are in the activity and the details.
         x.stuck = {
           gate: 'review',
-          question: `The Reviewer still asks for changes after ${round} rounds: ${out.comments.join(' ')}`.slice(0, 600),
+          question: `The Reviewer still asks for ${out.comments.length === 1 ? 'a change' : `${out.comments.length} changes`} after ${round} rounds.`,
+          ...(out.comments.length ? { detail: out.comments.map((c) => `- ${c}`).join('\n') } : {}),
           options: wayOptions({ gate: 'review', copy: Boolean(x.worktree && fs.existsSync(x.worktree)) }),
         };
         x.waiting = { kind: 'stuck', summary: 'The review is still open and needs one decision' };
@@ -2437,45 +3232,70 @@ export class LiveSquad {
     });
   }
 
+  /**
+   * The proof: the Tester's screenshots, squad-kit's own checks of each picture, then squad-kit's check of what the
+   * pictures of each "done when" show together. It passes only when every "done when" that shows on a screen is judged
+   * met; one the Tester and the check agree cannot be shown does not fail it, unless every one ends that way. Not shown:
+   * the Tester adds what is missing, told what to show (judge), then a plain stop (cannotShow). Broken: back to the
+   * Builder once, then a plain stop (notWorking).
+   */
   private async proof(id: string): Promise<void> {
     const meta = this.meta();
     const t = readTicket(this.bp, id)!;
     const rc = repoFor(meta, t).commands;
     const canShow = Boolean(rc.start && rc.url) && (t.work?.screens ?? 0) > 0;
+    // Why no picture was taken, in the person's words, and the exact error for engineers.
     let why = '';
+    let detail = '';
     let bad: ShotProblem[] = [];
+    let round: ShotRound | null = null;
     // The "before" screenshots still running beside the build end first (8 minutes at most), so both sets pair up.
     await this.beforeShotsOf.get(id);
     this.goOn(id);
     if (canShow) {
       try {
-        bad = await this.screens(id, 'after');
+        round = await this.screens(id, 'after');
+        bad = round.problems;
         // squad-kit checks every picture itself. One that proves nothing goes back to the Tester once, with why.
         if (bad.length) {
           this.update(id, (x) => addActivity(x, 'tester', `The screenshots did not pass squad-kit's check, so the Tester takes them again: ${bad.map((b) => b.text).join(' ')}`));
           const again = await this.screens(id, 'after', undefined, bad.map((b) => b.text));
+          round = { ...again, sizes: { ...round.sizes, ...again.sizes } };
           // A picture that failed and was not taken again still counts against the proof.
           const rows = readTicket(this.bp, id)?.proof ?? [];
-          const still = bad.filter((b) => !b.same && !rows.some((p) => p.criterion === b.criterion && p.after) && !again.some((a) => a.criterion === b.criterion));
-          bad = [...again, ...still];
+          const still = bad.filter((b) => !rows.some((p) => p.criterion === b.criterion && p.after) && !again.problems.some((a) => a.criterion === b.criterion));
+          bad = [...again.problems, ...still];
         }
       } catch (err) {
-        if (err instanceof LimitReached || err instanceof CapReached) throw err;
-        why = (err as Error).message;
-        this.update(id, (x) => addActivity(x, 'tester', `Could not take screenshots: ${why}`));
+        if (err instanceof LimitReached || err instanceof CapReached || err instanceof CutOff) throw err;
+        if (this.stops.get(id)?.signal.aborted) throw err;
+        const e = explainError(err);
+        // Only squad-kit's own plain words reach the person; the rest is for engineers.
+        why = ownWords(err) ?? NO_PICTURES;
+        detail = [e.what === why ? '' : e.what, e.detail ?? ''].filter(Boolean).join('\n');
+        // The exact words go to the app log and the stop's details, never to the activity.
+        this.log('warn', `Could not take screenshots: ${detail || why}`, id);
+        this.update(id, (x) => addActivity(x, 'tester', 'Could not take the screenshots this time'));
       }
     }
-    // The ticket has screens but nothing was shot, or a picture failed the check: the gate does not pass on its own. You decide.
-    const shot = (readTicket(this.bp, id)?.proof ?? []).some((p) => p.after);
+    // The ticket has screens but nothing was shot, or a picture failed the check: the gate does not pass on its own. You
+    // decide. A plan with screens needs at least one picture, even when the Tester says each "done when" shows on none.
+    const now = readTicket(this.bp, id)!;
+    const shot = (now.proof ?? []).some((p) => p.after);
     if (canShow && (!shot || bad.length)) {
       this.update(id, (x) => {
-        const said = x.activity.find((a) => a.who === 'tester' && /screenshot/i.test(a.text) && !/^Taking screenshots/.test(a.text))?.text;
+        const named = (n: number) => criterionText(x, n) ?? `"Done when" ${n}`;
+        const missing = round ? missingShots(x, round) : [];
+        const stuck = round?.stuck.length ? round.stuck : [];
         x.live = false;
         x.squad = null;
+        delete x.clock;
         x.stage = 'review';
         x.retryPhase = 'proof';
         x.gates = { ...(x.gates ?? { checks: 'pass', review: 'pass' }), proof: 'fail' } as Ticket['gates'];
         x.status = bad.length ? 'Screenshots did not pass the check' : 'No screenshots yet';
+        const said = round?.said ? ` The Tester says: ${round.said}` : '';
+        const technical = stuck.length ? stuck.map((s) => `${s.what}${s.why ? `: ${s.why}` : ''}`).join('\n') : '';
         x.stuck = bad.length
           ? {
               gate: 'proof',
@@ -2486,26 +3306,328 @@ export class LiveSquad {
             }
           : {
               gate: 'proof',
-              question: `The Tester could not take the screenshots. ${(why || said || 'It saved none.').slice(0, 600)}`,
+              // Plain words for the person; the exact errors are in the activity and the engineer details.
+              question: why || (stuck.length ? STUCK_PICTURES : `The Tester took no screenshots, so the proof is not ready yet.${said}`),
+              ...(!why && missing.length ? { points: missing.map((m) => `${named(m.criterion)}: ${m.why}`) } : {}),
+              ...(detail || technical ? { detail: [detail, technical].filter(Boolean).join('\n') } : {}),
               options: wayOptions({ gate: 'proof' }),
             };
         x.waiting = { kind: 'stuck', summary: bad.length ? 'The screenshots did not pass the check: needs one decision' : 'No screenshots yet: needs one decision' };
       });
       return;
     }
+    // What each picture shows: the Tester's verdict and squad-kit's own look at it, together.
+    if (canShow && round && doneWhenCount(now) > 0) {
+      let judged: ProofJudged;
+      try {
+        judged = await this.judge(id, round);
+      } catch (err) {
+        if (err instanceof LimitReached || err instanceof CapReached || err instanceof CutOff) throw err;
+        if (this.stops.get(id)?.signal.aborted) throw err;
+        return this.checkStop(id, err);
+      }
+      if (judged.broken.length) return this.notWorking(id, judged.broken, judged.notShown);
+      if (judged.notShown.length) return this.cannotShow(id, judged.notShown);
+      // Every "done when" ended as not on a screen: nothing shows the work, so the person decides.
+      if (judged.offScreen.length === doneWhenCount(now)) return this.cannotShow(id, judged.offScreen, false);
+    }
     this.update(id, (x) => {
       x.proof = (x.proof ?? []).filter((p) => p.after);
       const shots = x.proof;
       x.gates = { ...(x.gates ?? { checks: 'pass', review: 'pass' }), proof: 'pass' } as Ticket['gates'];
+      x.proofRound = undefined;
+      clearStaleStop(x);
       if (!shots.length) {
         const proof = x.gates?.checks === 'unchecked' ? 'and no tests ran, so read the changes yourself' : 'so the checks are the proof';
         addActivity(x, 'tester', canShow ? `No screenshots were taken, ${proof}` : `No screens to show, ${proof}`);
       }
+      // Builds by itself: no Looks right to wait for, the squad accepts it as its next step (board/auto.ts).
+      if (x.track === 'auto') return acceptNext(x, 0.2, 1);
       x.live = false;
       x.stage = 'review';
       x.status = 'Proof ready to check';
       x.waiting = { kind: 'proof', summary: 'The proof is ready for you to check' };
       x.squad = null;
+    });
+  }
+
+  /**
+   * squad-kit's own look at the proof, in one short Reviewer run for all the pictures, and for what the Tester says cannot
+   * be shown. Each row, over all its pictures, is met, broken, not shown or not on a screen (together, in
+   * proof-verdict.ts). What is not shown, and a "done when" with no picture and no reason, go back to the Tester in its
+   * own conversation, told exactly what to show, MAX_RETAKES times at most: its new pictures join the row's. Not on a
+   * screen takes two voices: the check says it cannot be shown, and the Tester said so too or could not show it in its
+   * last retake. Returns the rows broken, still not shown and not on a screen, in the order of the "done when" list.
+   */
+  private async judge(id: string, first: ShotRound): Promise<ProofJudged> {
+    const sizes = { ...first.sizes };
+    const rowOf = (x: Ticket, n: number) => (x.proof ?? []).find((p) => p.after && p.criterion === criterionText(x, n));
+    const reasonOf = (x: Ticket, n: number) => x.offScreen?.find((o) => o.criterion === criterionText(x, n))?.why;
+    const t = readTicket(this.bp, id)!;
+    const numbers = Array.from({ length: doneWhenCount(t) }, (_, i) => i + 1);
+    const toFile = (p: ProofPicture): P.PictureFile => ({ file: p.after, ...(p.page ? { page: p.page } : {}), ...(sizes[p.after] ? { size: sizes[p.after] } : {}), ...(p.note ? { note: p.note } : {}) });
+    const toCheck = (x: Ticket, which: number[]): P.PictureToCheck[] =>
+      which.flatMap((n) => {
+        const row = rowOf(x, n);
+        const reason = reasonOf(x, n);
+        const off = reason ? { offScreen: reason } : {};
+        if (!row) return reason ? [{ criterion: n, ...off }] : [];
+        return [{ criterion: n, ...toFile(row), ...off, ...(row.shows ? { said: SAID[row.shows] } : {}), ...(this.sameAsBefore(row) ? { same: true } : {}), ...(row.more?.length ? { more: row.more.map(toFile) } : {}) }];
+      });
+    const verdicts = await this.checkPictures(id, toCheck(t, numbers));
+    const verdict = (x: Ticket, n: number) => {
+      const row = rowOf(x, n);
+      if (row) return together(row, verdicts.get(n), this.sameAsBefore(row));
+      const reason = reasonOf(x, n);
+      return reason ? fromReason(reason, verdicts.get(n)) : null;
+    };
+    // Only the check says it cannot be shown: the Tester gets a retake first, and may say so too.
+    const isOpen = (x: Ticket, n: number) => {
+      const v = verdict(x, n);
+      return !v || v.shows === 'not-shown' || (v.shows === 'off-screen' && !reasonOf(x, n));
+    };
+    for (let retake = 1; retake <= MAX_RETAKES; retake += 1) {
+      const x = readTicket(this.bp, id)!;
+      const open = numbers.filter((n) => isOpen(x, n));
+      if (!open.length) break;
+      const asks = open.map((n) => {
+        const v = verdict(x, n);
+        const text = criterionText(x, n)!;
+        const reason = reasonOf(x, n);
+        if (!v) return `"Done when" ${n} ("${text}") has no screenshot, and you did not say it shows on no screen. Take one, or put it in offScreen with why.`;
+        if (v.shows === 'off-screen') return cannotShowLine(n, text, v.why);
+        return reason ? reasonRefusedLine(n, text, reason, v.why, v.advice) : retakeLine(n, text, v.why, v.advice);
+      });
+      const which = open.length === 1 ? `"done when" ${open[0]}` : `${open.length} "done when"`;
+      this.update(id, (y) => addActivity(y, 'tester', `The screenshots do not show ${which} clearly yet, so the Tester takes ${open.length === 1 ? 'it' : 'them'} again (try ${retake} of ${MAX_RETAKES})`));
+      // What the check has seen of it: its pictures and the Tester's reason.
+      const had = (z: Ticket, n: number) => `${rowOf(z, n) ? rowPictures(rowOf(z, n)!).map((p) => p.after).sort().join(' ') : ''}|${reasonOf(z, n) ?? ''}`;
+      const before = new Map(numbers.map((n) => [n, had(x, n)]));
+      const again = await this.screens(id, 'after', undefined, asks);
+      Object.assign(sizes, again.sizes);
+      const y = readTicket(this.bp, id)!;
+      // A row with a new picture or a new reason is looked at again, all its pictures together; one with neither still does not show it.
+      const fresh = [...before].filter(([n, seen]) => had(y, n) !== seen).map(([n]) => n);
+      for (const [n, v] of await this.checkPictures(id, toCheck(y, fresh))) verdicts.set(n, v);
+    }
+    const out: ProofJudged = { broken: [], notShown: [], offScreen: [] };
+    this.update(id, (x) => {
+      const stays: OffScreen[] = [];
+      for (const n of numbers) {
+        const row = rowOf(x, n);
+        const text = criterionText(x, n)!;
+        // No retake is left: pictures of a part and the Tester's reason for the rest never stop the story.
+        const v = row ? afterLastRetake(verdict(x, n)!, reasonOf(x, n)) : verdict(x, n);
+        const said = v ? plainParts(v.why, technicalWords).kept : '';
+        if (!row) {
+          if (v?.shows === 'off-screen') {
+            const why = (said || reasonOf(x, n)!).slice(0, 600);
+            stays.push({ criterion: text, why });
+            out.offScreen.push({ criterion: n, text, why });
+          } else out.notShown.push({ criterion: n, text, why: (said || 'No screenshot shows it.').slice(0, 600) });
+          continue;
+        }
+        row.shows = v!.shows;
+        if (v!.shows === 'met') {
+          delete row.why;
+          continue;
+        }
+        row.why = (said || (v!.shows === 'broken' ? 'The screenshot shows it does not work as written.' : v!.shows === 'off-screen' ? 'The screenshots show a part of it. The rest cannot be shown on a screen.' : 'The screenshot does not show it clearly.')).slice(0, 600);
+        (v!.shows === 'broken' ? out.broken : v!.shows === 'off-screen' ? out.offScreen : out.notShown).push({ criterion: n, text, why: row.why });
+      }
+      // Agreed on, and with no picture, it stays on the list; a row with pictures says it itself; the rest are not on a list.
+      if (stays.length) x.offScreen = stays;
+      else delete x.offScreen;
+      const met = (x.proof ?? []).filter((p) => p.shows === 'met').length;
+      const open = [out.broken.length ? `${out.broken.length} not working yet` : '', out.notShown.length ? `${out.notShown.length} not shown yet` : '', out.offScreen.length ? `${out.offScreen.length} not on a screen` : ''].filter(Boolean);
+      addActivity(x, 'reviewer', open.length ? `Checked the screenshots: ${[`${met} met`, ...open].join(', ')}` : `Checked the screenshots: each "done when" on a screen is met`);
+      for (const r of out.offScreen) addActivity(x, 'reviewer', `"Done when" ${r.criterion} is not on a screen: ${r.why}`);
+    });
+    return out;
+  }
+
+  /** The main after is the very same picture as the before, where both were taken of the screen. */
+  private sameAsBefore(p: ProofShot): boolean {
+    if (p.beforeLabel !== 'Before' || !p.before || !p.after || p.before === p.after) return false;
+    try {
+      return samePicture(fs.readFileSync(path.join(this.bp.proofDir, p.before)), fs.readFileSync(path.join(this.bp.proofDir, p.after)));
+    } catch {
+      // A picture removed meanwhile is missing from the proof, which says so on its own.
+      return false;
+    }
+  }
+
+  /**
+   * The before pairs with the main picture, and an after the same as the before shows nothing: when the main one is the
+   * same and another of the row's is not, that other one becomes the main one. No picture is lost, and a retake that
+   * adds a real change is not held back by the old main picture.
+   */
+  private pairWithBefore(row: ProofShot): void {
+    if (!row.more?.length || !this.sameAsBefore(row)) return;
+    const at = row.more.findIndex((m) => !this.sameAsBefore({ ...row, after: m.after }));
+    if (at >= 0) makeMain(row, at);
+  }
+
+  /** The size of each "done when"'s before picture, by its words, so the after picture it pairs with can match. */
+  private beforeSizes(t: Ticket): Record<string, ShotSize> {
+    const rows = (t.proof ?? []).filter((p) => p.before && p.beforeLabel !== 'New screen');
+    return Object.fromEntries(rows.flatMap((p) => {
+      const size = shotSizeOf(path.join(this.bp.proofDir, p.before));
+      return size ? [[p.criterion, size]] : [];
+    }));
+  }
+
+  /** True when two saved pictures are the same file, or have the very same bytes. */
+  private sameFile(a: string, b: string): boolean {
+    if (a === b) return true;
+    try {
+      return fs.readFileSync(path.join(this.bp.proofDir, a)).equals(fs.readFileSync(path.join(this.bp.proofDir, b)));
+    } catch {
+      return false;
+    }
+  }
+
+  /** One short Reviewer run for all the pictures: met, broken or not shown once per "done when", in one plain sentence. */
+  private async checkPictures(id: string, pictures: P.PictureToCheck[]): Promise<Map<number, CheckVerdict>> {
+    if (!pictures.length) return new Map();
+    const t = this.update(id, (x) => {
+      x.status = 'Reviewer is checking the screenshots';
+      x.live = true;
+    });
+    const asked = pictures.map((p) => p.criterion);
+    const full = (file: string) => path.join(this.bp.proofDir, file);
+    const r = await this.runAgent({
+      role: 'reviewer',
+      step: 'proof-check',
+      // At the level the project's Quality setting gives a review.
+      levelStep: 'review',
+      ticket: id,
+      cwd: t.worktree!,
+      sessionId: randomUUID(),
+      prompt: P.proofCheckPrompt(t, pictures.map((p) => ({ ...p, ...(p.file ? { file: full(p.file) } : {}), ...(p.more ? { more: p.more.map((m) => ({ ...m, file: full(m.file) })) } : {}) }))),
+      // The pictures are in the proof folder, which the check may read.
+      addDirs: [...this.extraDirs(t), this.bp.proofDir],
+      permissions: ['read'],
+      schema: P.PROOF_CHECK_SCHEMA,
+      // Up to 40 pictures to open and read.
+      timeoutMs: 15 * 60_000,
+      check: (answer) => {
+        const left = asked.filter((n) => !checkVerdicts(answer, asked, true).has(n));
+        return left.length ? `checks has no verdict for "done when" ${left.join(', ')}` : null;
+      },
+      onTool: this.watcher(id, 'reviewer', t.worktree!),
+    });
+    return checkVerdicts(r.structured, asked);
+  }
+
+  /** squad-kit could not check the screenshots (the Reviewer's run did not get through): a plain stop with Try again. */
+  private checkStop(id: string, err: unknown): void {
+    const e = explainError(err);
+    this.log('warn', `Could not check the screenshots: ${[e.what, e.detail].filter(Boolean).join(': ')}`, id);
+    this.update(id, (x) => {
+      x.live = false;
+      x.squad = null;
+      delete x.clock;
+      x.stage = 'review';
+      x.retryPhase = 'proof';
+      x.gates = { ...(x.gates ?? { checks: 'pass', review: 'pass' }), proof: 'fail' } as Ticket['gates'];
+      x.status = 'The screenshots are not checked yet';
+      addActivity(x, 'reviewer', 'Could not check the screenshots this time');
+      x.stuck = {
+        gate: 'proof',
+        question: ownWords(err) ?? CHECK_FAILED,
+        detail: [e.what, e.detail].filter(Boolean).join('\n'),
+        options: wayOptions({ gate: 'proof' }),
+      };
+      x.waiting = { kind: 'stuck', summary: 'The screenshots are not checked yet: needs one decision' };
+    });
+  }
+
+  /**
+   * The screenshots show a "done when" does not work. The first round goes back to the Builder with what they show,
+   * like review notes, and the checks, the review and the proof run again; after the last round it is a plain stop
+   * with its ways out (Let the Builder try again, Continue anyway, Send it back to the plan). Builds by itself never
+   * accepts it: the proof did not pass. What is only not shown never reaches the Builder.
+   */
+  private async notWorking(id: string, rows: OpenRow[], notShown: OpenRow[]): Promise<void> {
+    const t0 = this.update(id, (x) => {
+      x.proofRound = (x.proofRound ?? 0) + 1;
+      // A "done when" that does not work is a Builder run that did not get through, as review notes are.
+      x.fails = (x.fails ?? 0) + 1;
+      x.gates = { ...(x.gates ?? { checks: 'pass', review: 'pass' }), proof: 'fail' } as Ticket['gates'];
+    });
+    const round = t0.proofRound!;
+    if (round >= MAX_PROOF_ROUNDS) {
+      const stop = brokenStop(rows);
+      this.update(id, (x) => {
+        x.live = false;
+        x.squad = null;
+        delete x.clock;
+        x.stage = 'review';
+        x.retryPhase = 'proof-fix';
+        x.status = 'The screenshots show it is not working yet';
+        addActivity(x, 'tester', `Still not working after ${round} rounds: ${rows.map((r) => `"done when" ${r.criterion}`).join(', ')}`);
+        x.stuck = { gate: 'proof', kind: 'broken', question: stop.question, points: [...stop.points, ...notShown.map((r) => `"Done when" ${r.criterion}, ${r.text}: ${r.why}`)], options: wayOptions({ gate: 'proof', kind: 'broken' }) };
+        x.waiting = { kind: 'stuck', summary: 'The screenshots show it is not working yet: needs one decision' };
+      });
+      return;
+    }
+    this.goOn(id);
+    this.update(id, (x) => {
+      addActivity(x, 'tester', `The screenshots show ${rows.length === 1 ? 'one "done when"' : `${rows.length} "done when"`} not working yet, so the Builder fixes ${rows.length === 1 ? 'it' : 'them'}: ${rows.map((r) => `"done when" ${r.criterion}: ${r.why}`).join(' ')}`);
+      x.stage = 'implement';
+      x.live = true;
+      x.status = 'Builder is fixing what the screenshots show';
+    });
+    await this.runBuilder(id, P.proofFixPrompt(rows.map(fixLine)), true);
+    this.afterProofFix(id);
+  }
+
+  /**
+   * The Tester could not show a "done when" on a screen, after its last retake, or none of them can be shown (`retook`
+   * false): a plain stop, and the product is not touched. The ways out are Take the screenshots again, Continue anyway
+   * and Send it back to the plan.
+   */
+  private cannotShow(id: string, rows: OpenRow[], retook = true): void {
+    const stop = notShownStop(rows);
+    this.update(id, (x) => {
+      x.live = false;
+      x.squad = null;
+      delete x.clock;
+      x.stage = 'review';
+      x.retryPhase = 'proof';
+      x.gates = { ...(x.gates ?? { checks: 'pass', review: 'pass' }), proof: 'fail' } as Ticket['gates'];
+      x.status = 'The screenshots do not show it yet';
+      addActivity(x, 'tester', retook ? `Could not show ${rows.map((r) => `"done when" ${r.criterion}`).join(', ')} on a screen after ${MAX_RETAKES} more tries` : 'Every "done when" ended as not on a screen, so the screenshots do not show the work');
+      x.stuck = { gate: 'proof', kind: 'not-shown', question: stop.question, points: stop.points, options: wayOptions({ gate: 'proof', kind: 'not-shown' }) };
+      x.waiting = { kind: 'stuck', summary: 'The screenshots do not show it yet: needs one decision' };
+    });
+  }
+
+  /** "Let the Builder try again" after the screenshots still showed a "done when" not working: it fixes them, two more rounds. */
+  private async proofFix(id: string): Promise<void> {
+    const t = await this.workspace(id);
+    const rows = brokenRows(t);
+    // Nothing is broken, only not shown (a stop from before the three verdicts): the Tester takes the pictures again.
+    if (!rows.length) return this.proof(id);
+    this.update(id, (x) => {
+      x.stage = 'implement';
+      x.live = true;
+      x.status = 'Builder is fixing what the screenshots show';
+    });
+    await this.runBuilder(id, P.proofFixPrompt(rows.map(fixLine)), Boolean(t.sessions?.build));
+    this.afterProofFix(id);
+  }
+
+  /** After the Builder's fix for the proof: the checks, a fresh review and the proof run again. */
+  private afterProofFix(id: string): void {
+    this.update(id, (x) => {
+      addActivity(x, 'builder', 'Fixed what the screenshots showed');
+      // The review starts again: a fresh Reviewer reads the whole change, with its own rounds.
+      x.reviewRound = 0;
+      x.stage = 'test';
+      x.status = 'Running the project checks';
+      scheduleSquad(x, 'test', 0.2, 1);
     });
   }
 
@@ -2543,149 +3665,326 @@ export class LiveSquad {
       dir = addSnapshot(root, `${id.toLowerCase()}-before`, t.baseCommit!);
       const setup = repo.commands.setup?.trim();
       if (setup) {
-        const r = await runCommand(dir, setup, BEFORE_SHOTS_MS, { signal: own.signal });
+        const r = await runCommand(dir, setup, BEFORE_SHOTS_MS, { signal: own.signal, ...(this.guardFor(dir, id) ? { guard: this.guardFor(dir, id)! } : {}) });
         if (own.signal.aborted) throw new Error(STOPPED);
         if (!r.ok) throw new Error(`setting up a copy of the code as it was failed (${setup}): ${tail(r.output, 3)}`);
       }
-      const left = await this.screens(id, 'before', { cwd: dir, job: key, signal: own.signal });
+      const left = (await this.screens(id, 'before', { cwd: dir, job: key, signal: own.signal })).problems;
       if (left.length) this.update(id, (x) => addActivity(x, 'tester', `Left out before screenshots that did not pass squad-kit's check: ${left.map((b) => b.text).join(' ')}`));
     } catch (err) {
       // A Stop, or the board closing, says so elsewhere.
       if (cutOff || !own.signal.aborted) {
-        const why = (err as Error).message;
+        // The exact words go to the app log; the activity says it plainly.
+        const e = explainError(err);
+        if (!cutOff) this.log('warn', `Could not take the before screenshots: ${[e.what, e.detail].filter(Boolean).join(': ')}`, id);
         this.update(id, (x) =>
-          addActivity(x, 'tester', cutOff ? 'Stopped the before screenshots after 8 minutes, so the proof shows the screens after the change only' : `Could not take the before screenshots: ${why.slice(0, 300)}`),
+          addActivity(x, 'tester', cutOff ? 'Stopped the before screenshots after 8 minutes, so the proof shows the screens after the change only' : 'Could not take the before screenshots, so the proof shows the screens after the change only'),
         );
       }
     } finally {
       clearTimeout(timer);
-      if (dir) dropSnapshot(root, dir);
+      if (dir) {
+        // Nothing the before screenshots started outlives their copy.
+        await runsEnded([dir], 6000);
+        await this.clearCopies([dir], {}, id).catch(() => undefined);
+        dropSnapshot(root, dir);
+      }
     }
   }
 
   /**
-   * The Tester takes screenshots for each "done when", before or after the change. Before-shots run `beside` the build,
-   * in their own copy of the code, with their own Stop and conversation, and leave the card's line to the Builder.
+   * The Tester takes screenshots for each "done when", before or after the change, with squad-kit's own tools (the
+   * window): squad-kit starts the app first and the Tester takes, looks at and retakes the pictures through it.
+   * Before-shots run `beside` the build, in their own copy of the code, with their own Stop and conversation, and leave
+   * the card's line to the Builder. An app that does not start stops here, in plain words: no agent is asked to.
    */
-  private async screens(id: string, when: 'before' | 'after', beside?: { cwd: string; job: string; signal: AbortSignal }, again: string[] = []): Promise<ShotProblem[]> {
+  private async screens(id: string, when: 'before' | 'after', beside?: { cwd: string; job: string; signal: AbortSignal }, again: string[] = []): Promise<ShotRound> {
     const meta = this.meta();
+    // squad-kit's browser is on this computer before any clock starts: the first time, it is downloaded.
+    await this.readyBrowser(id, beside?.signal ?? this.stops.get(id)?.signal, beside?.job ?? id);
     const t = this.update(id, (x) => {
       if (!beside) {
         x.sessions = { ...x.sessions, tester: x.sessions?.tester ?? randomUUID() };
         x.status = when === 'before' ? 'Tester is taking before screenshots' : again.length ? 'Tester is taking the screenshots again' : 'Tester is taking after screenshots';
         startStep(x, { who: 'tester', step: 'proof' });
       }
-      // A new round of after-shots: the last round's no longer count (the before-shots stay). A retake keeps the good ones.
+      // A new round of after-shots: the last round's no longer count (the before-shots stay). A retake adds to the rows.
       if (when === 'after' && !beside && !again.length && x.proof?.length) {
         x.proof = x.proof.filter((p) => p.beforeLabel !== 'New screen').map((p) => ({ criterion: p.criterion, before: p.before, after: '', beforeLabel: p.beforeLabel, afterLabel: p.afterLabel }));
       }
+      if (when === 'after' && !beside && !again.length) delete x.offScreen;
       addActivity(x, 'tester', when === 'before' ? 'Taking screenshots before the change' : 'Taking screenshots after the change');
     });
     fs.mkdirSync(this.bp.proofDir, { recursive: true });
     const rc = repoFor(meta, t).commands;
     const cwd = beside?.cwd ?? t.worktree!;
-    let app: RunningApp | null = null;
-    if (rc.start && rc.url) {
-      if (!beside) this.update(id, (x) => (x.status = `Starting the app: ${rc.start}`));
-      try {
-        app = await startApp(cwd, rc.start, rc.url, undefined, beside?.signal ?? this.stops.get(id)?.signal);
-        const at = app.url;
-        this.update(id, (x) => addActivity(x, 'tester', `squad-kit started the app at ${at}${at !== rc.url ? ` (${rc.url} was used by another program)` : ''}`));
-      } catch (err) {
-        if ((beside?.signal ?? this.stops.get(id)?.signal)?.aborted) throw err;
-        // The Tester can still try on its own; it sees the error in the activity.
-        this.update(id, (x) => addActivity(x, 'tester', (err as Error).message.slice(0, 300)));
-      }
-    }
+    const signal = beside?.signal ?? this.stops.get(id)?.signal;
+    const start = rc.start?.trim() ?? '';
+    const url = rc.url?.trim() ?? '';
+    // No old server of squad-kit's own copies may hold the app's port.
+    if (!beside) await this.clearBeforeApp(id);
+    if (!beside) this.update(id, (x) => (x.status = 'Starting the app'));
+    let app: RunningApp;
     try {
-      return await this.shoot(id, t, when, meta, app !== null, app?.url, beside, again);
+      app = await startApp(cwd, start, url, undefined, signal, this.guardFor(cwd, id));
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      throw new StepError(NO_APP, (err as Error).message);
+    }
+    const at = app.url;
+    // The address goes to the log; the story gets one plain line.
+    this.log('info', `squad-kit started the app at ${at}${at !== url ? ` (${url} was used by another program)` : ''}`, id);
+    this.update(id, (x) => addActivity(x, 'tester', 'squad-kit started the app'));
+    const win = new AgentWindow({
+      ...this.windowBase(id, 'tester', cwd, beside?.job ?? id),
+      step: 'proof',
+      who: 'Tester',
+      // A copy of the code as it was has nothing to check; the story's own copy does.
+      tools: beside ? ALL_TOOLS.filter((x) => x !== 'run_checks') : ALL_TOOLS,
+      app: { cwd, start, url, ...(this.guardFor(cwd, id) ? { guard: this.guardFor(cwd, id)! } : {}) },
+      ...(beside ? {} : { checks: this.windowChecks(id, cwd) }),
+      running: app,
+      prefix: `${id.toLowerCase()}-${when}`,
+      ...(signal ? { signal } : {}),
+    });
+    openWindow(win);
+    try {
+      return await this.shoot(id, t, when, meta, win, at, beside, again);
     } finally {
-      app?.stop();
+      // The app squad-kit started stops with the window, and the window's key stops working.
+      await closeWindow(win);
     }
   }
 
-  private async shoot(id: string, t: Ticket, when: 'before' | 'after', meta: BoardMeta, appRunning: boolean, appUrl?: string, beside?: { cwd: string; job: string }, again: string[] = []): Promise<ShotProblem[]> {
-    // The Tester runs the app and a browser, so it has a shell; it may not change the code that gets merged.
+  private async shoot(id: string, t: Ticket, when: 'before' | 'after', meta: BoardMeta, win: AgentWindow, appUrl: string, beside?: { cwd: string; job: string }, again: string[] = []): Promise<ShotRound> {
+    // The Tester only reads the code: squad-kit takes the pictures. The lane still puts back anything changed.
     const lane = watchLane(beside?.cwd ?? t.worktree!, this.protectedFiles(), true);
     // A picture saved before this moment was not taken in this step.
     const since = Date.now();
-    const prompt = P.proofPrompt(meta, t, this.bp.proofDir, when, this.ctx(t), appRunning, appUrl);
+    const prompt = P.proofPrompt(meta, t, when, this.ctx(t), appUrl, when === 'after' ? this.beforeSizes(t) : undefined);
+    // A new round of after-shots names every "done when": a picture, or why it shows on no screen.
+    const count = doneWhenCount(t);
+    const complete = (answer: unknown): string | null => {
+      const a = (answer ?? {}) as { shots?: { criterion?: unknown }[]; offScreen?: { criterion?: unknown }[] };
+      const named = new Set([...(a.shots ?? []), ...(a.offScreen ?? [])].map((x) => Number(x?.criterion)));
+      const left = Array.from({ length: count }, (_, i) => i + 1).filter((n) => !named.has(n));
+      return left.length ? `every "done when" must be in shots or in offScreen, and ${left.map((n) => `"done when" ${n}`).join(', ')} ${left.length === 1 ? 'is' : 'are'} in neither` : null;
+    };
+    // Only pictures taken in this step count: a file it names from outside them is asked for once more, with the list.
+    const realFiles = (answer: unknown): string | null => {
+      const wrong = [...new Set(((answer ?? {}) as { shots?: { file?: unknown }[] }).shots?.map((x) => path.basename(String(x?.file ?? ''))) ?? [])].filter((f) => !win.pictures.has(f));
+      return wrong.length ? `it names ${wrong.join(', ')}, which squad-kit did not take in this step` : null;
+    };
+    // A "done when" gets one picture per part or case, so an answer may name it several times, up to a limit.
+    const notTooMany = (answer: unknown): string | null => {
+      const named = ((answer ?? {}) as { shots?: { criterion?: unknown }[] }).shots?.map((x) => Number(x?.criterion)) ?? [];
+      const over = [...new Set(named)].filter((n) => named.filter((m) => m === n).length > MAX_PICTURES_PER_DONE_WHEN);
+      return over.length ? `one "done when" takes at most ${MAX_PICTURES_PER_DONE_WHEN} pictures, one per part or case, and ${over.map((n) => `"done when" ${n}`).join(', ')} ${over.length === 1 ? 'has' : 'have'} more` : null;
+    };
+    const check = (answer: unknown): string | null => realFiles(answer) ?? notTooMany(answer) ?? (when === 'after' && !again.length && count ? complete(answer) : null);
     const r = await this.runAgent({
-        role: 'tester',
-        step: 'proof',
+      role: 'tester',
+      step: 'proof',
       ticket: id,
       // The before-shots ran in a copy that is gone now, so the after-shots have a conversation of their own.
       ...(beside ? { job: beside.job, cwd: beside.cwd, sessionId: randomUUID() } : { cwd: t.worktree!, sessionId: t.sessions!.tester }),
-      prompt: again.length ? `${P.proofAgainPrompt(again)}\n\n${prompt}` : prompt,
-      permissions: ['run'],
+      prompt: again.length ? `${prompt}\n\n${P.proofAgainPrompt(again)}` : prompt,
+      permissions: ['read'],
       schema: P.PROOF_SCHEMA,
-      timeoutMs: 20 * 60_000,
-      addDirs: [this.bp.proofDir, ...this.extraDirs(t)],
-      box: { browser: true },
+      check,
+      checkHelp: () => win.pictureList(),
+      // Up to 40 pictures, with a look at each.
+      timeoutMs: 30 * 60_000,
+      addDirs: this.extraDirs(t),
+      box: {},
+      win,
       ...(beside ? {} : { onTool: this.watcher(id, 'tester', t.worktree!) }),
     }).finally(() => this.keepLane(id, 'tester', lane, [this.bp.proofDir]));
-    const out = r.structured as { shots: { criterion: number; file: string; note?: string }[]; skipped?: string };
-    const named = (n: number) => {
-      const c = t.criteria?.[n - 1];
-      return c ? `${c.then.charAt(0).toUpperCase()}${c.then.slice(1)}` : null;
+    const out = (r.structured ?? { shots: [] }) as {
+      shots: { criterion: number; file: string; shows?: string; note?: string }[];
+      offScreen?: { criterion: number; why?: string }[];
+      /** Older answers: one line for what shows on no screen. */
+      skipped?: string;
     };
+    const say = (text: string) => this.update(id, (x) => addActivity(x, 'tester', text));
+    // Only pictures squad-kit took in this step count, each with the page it was taken at and the Tester's verdict.
+    const shots: { criterion: number; file: string; page: string; size: string; shows: Judged; note?: string }[] = [];
+    for (const s of out.shots ?? []) {
+      const file = path.basename(String(s.file ?? ''));
+      const taken = win.pictures.get(file);
+      if (!taken) {
+        say(`The Tester named ${file || 'a picture'} for "done when" ${s.criterion}, which squad-kit did not take in this step, so it is left out`);
+        continue;
+      }
+      // Asked once more already (notTooMany): the first ones stay.
+      if (shots.filter((x) => x.criterion === s.criterion).length >= MAX_PICTURES_PER_DONE_WHEN) {
+        say(`The Tester named more than ${MAX_PICTURES_PER_DONE_WHEN} pictures for "done when" ${s.criterion}, so squad-kit kept the first ${MAX_PICTURES_PER_DONE_WHEN}`);
+        continue;
+      }
+      const note = s.note ? this.plainNote(win, s.note) : '';
+      shots.push({ criterion: s.criterion, file, page: taken.page, size: taken.size, shows: verdictOf(s.shows) ?? 'not-shown', ...(note ? { note } : {}) });
+    }
+    // Each "done when" that shows on no screen, with why in plain words.
+    const off: { criterion: number; why: string }[] = [];
+    for (const o of when === 'after' ? (out.offScreen ?? []) : []) {
+      const n = Number(o?.criterion);
+      // Pictures of a part and a reason for the rest go together: squad-kit's check judges both.
+      if (!criterionText(t, n) || off.some((x) => x.criterion === n)) continue;
+      const refused = win.refusals.length;
+      const why = this.plainNote(win, String(o.why ?? ''));
+      // A reason that asked for what nobody may ask is no reason: that "done when" still needs a picture.
+      if (win.refusals.length > refused) continue;
+      off.push({ criterion: n, why });
+    }
+    const skipped = [...off.map((o) => o.why), this.plainNote(win, out.skipped ?? '')].filter(Boolean).join(' ');
+    if (win.tooMany) throw new StepError(tooManyWords('Tester'), win.refusalDetail());
+    if (win.tooManyMistakes) throw new StepError(tooManyMistakesWords('Tester'), win.mistakeDetail());
+    const named = (n: number) => criterionText(t, n);
     // squad-kit looks at each picture itself: a real image, a sensible size, not blank, saved in this step.
     const problems: ShotProblem[] = [];
     const rejected = new Set<string>();
-    for (const s of out.shots) {
-      const file = path.basename(s.file);
-      const full = path.join(this.bp.proofDir, file);
+    for (const s of shots) {
+      const full = path.join(this.bp.proofDir, s.file);
       const criterion = named(s.criterion);
       if (!criterion || !fs.existsSync(full)) continue;
       const bad = shotProblem(full, since);
       if (!bad) continue;
-      rejected.add(file);
-      problems.push({ criterion, text: `The ${when} screenshot for "${criterion}" (${file}): ${bad}.` });
+      rejected.add(s.file);
+      problems.push({ criterion, text: `The ${when} screenshot for "${criterion}" (${s.file}): ${bad}.` });
     }
-    const x2 = this.update(id, (x) => {
+    this.update(id, (x) => {
       const proof = x.proof ?? [];
-      for (const s of out.shots) {
-        const file = path.basename(s.file);
-        if (rejected.has(file) || !fs.existsSync(path.join(this.bp.proofDir, file))) continue;
-        const criterion = named(s.criterion);
-        if (!criterion) continue;
+      const usable = shots.filter((s) => !rejected.has(s.file) && named(s.criterion) && fs.existsSync(path.join(this.bp.proofDir, s.file)));
+      for (const n of new Set(usable.map((s) => s.criterion))) {
+        const criterion = named(n)!;
+        const own = usable.filter((s) => s.criterion === n);
         let row = proof.find((p) => p.criterion === criterion);
         if (!row) {
           row = { criterion, before: '', after: '', beforeLabel: 'Before', afterLabel: 'After' };
           proof.push(row);
         }
-        if (when === 'before') row.before = file;
+        // One before pairs with the main after. The Tester's own verdict stands until squad-kit's check of them (judge).
+        if (when === 'before') row.before = own[0]!.file;
         else {
-          row.after = file;
-          if (s.note) row.note = s.note;
+          addPictures(row, own, (a, b) => this.sameFile(a, b));
+          this.pairWithBefore(row);
         }
       }
       x.proof = proof.map((p) => (p.before ? p : { ...p, before: p.after, beforeLabel: 'New screen', afterLabel: 'After' }));
-      if (when === 'after') addActivity(x, 'tester', `Saved ${out.shots.length - rejected.size} screenshots${out.skipped ? `. Skipped: ${out.skipped}` : ''}`);
-    });
-    // Where a screen should change, the after must not be the very same picture as the before.
-    if (when === 'after') {
-      for (const p of x2.proof ?? []) {
-        if (p.beforeLabel !== 'Before' || !p.before || !p.after || p.before === p.after) continue;
-        try {
-          if (samePicture(fs.readFileSync(path.join(this.bp.proofDir, p.before)), fs.readFileSync(path.join(this.bp.proofDir, p.after)))) {
-            problems.push({ criterion: p.criterion, same: true, text: `The after screenshot for "${p.criterion}" is the same as the before one, so it does not show the change.` });
-          }
-        } catch {
-          // A picture removed meanwhile is missing from the proof, which says so on its own.
-        }
+      if (when === 'after') {
+        // A new round says again what shows on no screen; a retake adds to it. squad-kit's check judges them next (judge).
+        const kept = again.length ? (x.offScreen ?? []) : [];
+        const added = off.map((o) => ({ criterion: named(o.criterion)!, why: o.why || 'The Tester says it does not show on a screen.' }));
+        const all = [...kept.filter((k) => !added.some((a) => a.criterion === k.criterion)), ...added];
+        if (all.length) x.offScreen = all;
+        else delete x.offScreen;
+        const notOn = off.length ? `. Not on a screen: ${off.map((o) => `"done when" ${o.criterion}`).join(', ')}` : skipped ? `. Skipped: ${skipped}` : '';
+        addActivity(x, 'tester', `Saved ${shots.length - rejected.size} screenshots${notOn}`);
       }
-    }
-    return problems;
+    });
+    return { problems, planned: shots.map((s) => s.criterion), said: skipped, stuck: win.stuck, sizes: Object.fromEntries(shots.map((s) => [s.file, s.size])) };
   }
+
+  /** Sets up squad-kit's screenshot browser when this computer lacks it, on its own limit, saying so on the ticket. */
+  private async readyBrowser(id: string, signal: AbortSignal | undefined, job: string): Promise<void> {
+    // Setting it up the first time is the step working, not hanging.
+    const beat = setInterval(() => this.dog.beat(job), 20_000);
+    try {
+      await prepareShots({ ...(signal ? { signal } : {}), onLine: (text) => this.update(id, (x) => addActivity(x, 'tester', text)) });
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      throw new StepError((err as Error).message, shotsErrorDetail(err));
+    } finally {
+      clearInterval(beat);
+    }
+  }
+
+  /**
+   * The Tester's words for the person (a picture's note, why a "done when" shows on no screen): its plain sentences
+   * stay, and each technical one goes to the app log (shots.ts plainParts), so "390 px" or "1280 wide" never hides a
+   * note. A note with nothing plain left says so in the activity; an ask that is not allowed is refused and counted.
+   */
+  private plainNote(win: AgentWindow, text: string): string {
+    const said = text.trim();
+    if (!said) return '';
+    const verdict = judgeQuestion({ text: said });
+    if (!verdict.pass && verdict.kind === 'not-allowed') {
+      win.refuse('note', `${verdict.why}: "${said.slice(0, 200)}"`, refusedAskLine('Tester', verdict.what));
+      return '';
+    }
+    const { kept, left } = plainParts(said, technicalWords);
+    // Its technical words go to the app log, not to the activity.
+    if (left) this.log('info', `Left out of the Tester's note: ${left.slice(0, 600)}`, win.ticket);
+    if (kept) return kept.slice(0, 600);
+    this.update(win.ticket, (x) => addActivity(x, 'tester', 'The Tester wrote something technical, so it stays out of the proof.'));
+    return '';
+  }
+}
+
+/** The person's words when the app did not start for the screenshots. */
+const NO_APP = 'squad-kit could not start the app, so it took no screenshots. Press Try again to try once more.';
+/** When the Tester's run did not get through, for a reason only engineers need. */
+const NO_PICTURES = 'squad-kit could not take the screenshots this time. Press Try again to try once more.';
+/** When the Tester got stuck on something technical that squad-kit could not fix. */
+const STUCK_PICTURES = 'The Tester got stuck on something technical that squad-kit could not fix, so there are no screenshots yet. Press Try again to try once more.';
+
+/** What squad-kit's check of the proof ended with: the "done when" not working, not shown, and not on a screen. */
+interface ProofJudged {
+  broken: OpenRow[];
+  notShown: OpenRow[];
+  offScreen: OpenRow[];
+}
+
+/** One round of screenshots: the pictures that failed squad-kit's check, what was taken, the Tester's plain words and its technical trouble. */
+interface ShotRound {
+  problems: ShotProblem[];
+  /** The "done when" numbers it handed a picture in for. */
+  planned: number[];
+  said: string;
+  stuck: { what: string; why: string }[];
+  /** Each picture's size ("phone", "desktop"), by file name, for squad-kit's check of what it shows. */
+  sizes: Record<string, string>;
+}
+
+/** True when one sentence has the question filter's technical words: a port, a process, the sandbox. */
+function technicalWords(sentence: string): boolean {
+  const v = judgeQuestion({ text: sentence });
+  return !v.pass && v.kind === 'technical';
+}
+
+/** "the tests and the build": the checks that failed, in words for people. */
+function checkNames(names: string[]): string {
+  const words: Record<string, string> = { test: 'the tests', lint: 'the lint check', build: 'the build', start: 'starting the app' };
+  const w = [...new Set(names.map((n) => words[n] ?? `the ${n} check`))];
+  return w.length > 1 ? `${w.slice(0, -1).join(', ')} and ${w.at(-1)}` : (w[0] ?? 'a check');
+}
+
+/** The "done when" with no picture after a round (and not said to show on no screen), each with why in plain words. */
+function missingShots(t: Ticket, round: ShotRound): { criterion: number; why: string }[] {
+  const count = doneWhenCount(t);
+  const off = offScreenNumbers(t);
+  const out: { criterion: number; why: string }[] = [];
+  for (let n = 1; n <= count; n += 1) {
+    const row = (t.proof ?? []).find((p) => p.criterion === criterionText(t, n));
+    if (row?.after || off.has(n)) continue;
+    out.push({ criterion: n, why: round.planned.includes(n) ? 'squad-kit could not use the picture the Tester took.' : 'The Tester took no picture of it.' });
+  }
+  return out;
 }
 
 /** A proof picture that failed squad-kit's check, for the row of one "done when". */
 interface ShotProblem {
   criterion: string;
   text: string;
-  /** The after is the same picture as the before (the row keeps both, so you can see it). */
-  same?: boolean;
+}
+
+/** A row's verdict as the Tester said it, for squad-kit's check. */
+const SAID: Record<NonNullable<ProofShot['shows']>, string> = { met: 'it is met', broken: 'it is broken', 'not-shown': 'it is not shown', 'off-screen': 'it is not on a screen' };
+
+/** The first of the Builder's plan steps not done yet, from 1. */
+function openStep(t: Ticket): number {
+  const i = (t.steps ?? []).findIndex((s) => s.status !== 'done');
+  return i >= 0 ? i + 1 : 1;
 }
 
 /** A card line that says the ticket waits: for a free place, or for the usage limit. */
@@ -2717,4 +4016,10 @@ interface AgentAsk {
   options?: string[];
   why?: string;
   files?: string[];
+  /** Builds by itself: a critical gap or a clash, the only reasons it stops. */
+  kind?: 'gap' | 'clash';
+  /** Builds by itself: where the gap or the clash comes from. */
+  sources?: unknown;
+  /** Set by squad-kit, never by the agent: the plain card about a busy port (see inTheWay). */
+  port?: PortAsk;
 }

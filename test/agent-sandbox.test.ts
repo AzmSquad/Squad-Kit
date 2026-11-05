@@ -112,7 +112,6 @@ const ask: SandboxAsk = {
   noRead: ['/home/me/.ssh', '/home/me/.squad-kit'],
   read: ['/home/me/.squad-kit/worktrees/app-1/ap-1'],
   hosts: ['registry.npmjs.org', 'nexus.example.com'],
-  outside: ['npx playwright screenshot'],
 };
 
 const optionsOf = (launch: ReturnType<typeof claudeLaunch>) => (launch.meta as { claudeCode: { options: Record<string, unknown> } }).claudeCode.options;
@@ -130,11 +129,11 @@ describe("Claude Code's sandbox settings", () => {
         denyRead: ['/home/me/.ssh', '/home/me/.squad-kit', '/home/me/.claude/.credentials.json', '/home/me/.claude/projects', '/home/me/.claude.json'],
         allowRead: ['/home/me/.squad-kit/worktrees/app-1/ap-1'],
       },
-      excludedCommands: ['npx playwright screenshot:*'],
     });
     // Listening on local ports is a macOS setting; a Linux sandbox has its own network.
     expect(claudeSandbox(ask, 'linux', '/home/me').network).toEqual({ allowedDomains: ask.hosts, strictAllowlist: true });
-    expect(claudeSandbox({ ...ask, outside: [] }, 'linux', '/home/me')).not.toHaveProperty('excludedCommands');
+    // No command runs outside it: the browser and the app go through squad-kit's own tools.
+    expect(claudeSandbox(ask, 'darwin', '/home/me')).not.toHaveProperty('excludedCommands');
   });
 
   it('go over ACP as the Agent SDK options, with the caps, and only when a step asks', () => {
@@ -232,14 +231,8 @@ describe("a step's sandbox", () => {
     expect(a.read).toEqual(expect.arrayContaining([cwd, proof, '/files']));
     expect(a.hosts).toEqual([...PACKAGE_HOSTS, 'nexus.example.com']);
     expect(a.hosts).toEqual(expect.arrayContaining(['registry.npmjs.org', 'pypi.org', 'repo1.maven.org', 'api.nuget.org', 'rubygems.org', 'crates.io', 'proxy.golang.org', 'objects.githubusercontent.com']));
-    expect(a.outside).toBeUndefined();
-    // The Tester's browser runs outside it, for its screenshot and install commands only.
-    expect(sandboxAsk({ cwd, root: '/work/app', read: [], proof, secrets: [], browser: true, home }).outside).toEqual([
-      'npx playwright screenshot',
-      'npx -y playwright screenshot',
-      'npx playwright install',
-      'npx -y playwright install',
-    ]);
+    // Nothing runs outside it, not even a browser: squad-kit's own tools take the pictures.
+    expect(a).not.toHaveProperty('outside');
   });
 
   it("takes host names only for the project's own list", () => {

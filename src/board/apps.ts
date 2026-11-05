@@ -28,7 +28,9 @@ export function projectApps(meta: BoardMeta): ProjectApp[] {
     ...(r.commands.setup?.trim() ? { setup: r.commands.setup.trim() } : {}),
   }));
   const known = all.filter((a) => a.url || a.start);
-  if (known.length || meta.engine !== 'live' || meta.scan?.empty) return known;
+  // A folder that started empty has no app to find while the Architect reads what the person wants to build.
+  const noCode = meta.scan?.empty || (meta.setup?.kind === 'empty' && meta.scan?.status !== 'done');
+  if (known.length || meta.engine !== 'live' || noCode) return known;
   return all;
 }
 

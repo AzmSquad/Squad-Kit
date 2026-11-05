@@ -48,6 +48,11 @@ vi.mock('../src/engine/sandbox.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/engine/sandbox.js')>();
   return { ...actual, sandboxStatus: () => [{ tool: 'Claude Code', available: true, why: "Claude Code's sandbox (macOS Seatbelt)" }] };
 });
+// The guard for the project's own commands likewise depends on the computer; the fixture holds the Mac row.
+vi.mock('../src/engine/project-guard.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/engine/project-guard.js')>();
+  return { ...actual, guardSupport: () => ({ on: true, why: "squad-kit's guard (macOS Seatbelt)" }) };
+});
 
 const NO_LOGIN: LoginProbe = { present: false, hint: 'none', detail: 'no Claude login detected' };
 const KEYCHAIN_LOGIN: LoginProbe = { present: true, hint: 'credential-store', detail: 'macOS Keychain' };

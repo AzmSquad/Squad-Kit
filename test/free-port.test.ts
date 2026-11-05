@@ -6,10 +6,10 @@ import path from 'node:path';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 
 /**
- * "Free the port and try again" on the Looks stuck card. A step that needs the app waits while a program holds the
- * app's port and the app never answers. squad-kit stops that program only when it started it itself (it knows its
- * process groups), after a confirm; a program of the person's own is named on the card and never stopped. Real
- * processes and ports; no agent runs.
+ * "Stop it and try again" on the Looks stuck card. A step that needs the app waits while a program holds the app's
+ * port and the app never answers. squad-kit stops that program only when it started it itself (it knows its process
+ * groups), after a confirm; a program of the person's own is never stopped. The card has plain words: the port and the
+ * process are in its details, for engineers. Real processes and ports; no agent runs.
  */
 
 const { boardPaths, readTicket, writeMeta, writeTicket } = await import('../src/board/store.js');
@@ -136,7 +136,7 @@ describe('the app port on the Looks stuck card', () => {
     expect(portOf('not a url')).toBeNull();
   });
 
-  it.skipIf(!hasLsof)('a program squad-kit started: the card offers Free the port, and it stops only that program', async () => {
+  it.skipIf(!hasLsof)('a program squad-kit started: the card offers to stop it, and it stops only that program', async () => {
     const child = await oursHolds();
     const t = stuckTester();
     const p = await lookAtPort(bp, t);
@@ -145,8 +145,11 @@ describe('the app port on the Looks stuck card', () => {
     // The card: what holds the port, and the way out.
     const card = liveNow({ ...t, quiet: { ...t.quiet!, port: p! } }, {}).slow!;
     expect(card.title).toBe('Looks stuck');
-    expect(card.freePort).toEqual({ port, what: expect.stringContaining(`(process ${child.pid})`) });
-    expect(card.facts.find((f) => f.label === "The app's port")?.value).toMatch(new RegExp(`^Port ${port} is used by .+, which squad-kit started, and the app does not answer there\\.$`));
+    expect(card.freePort).toEqual({ port, what: 'a program squad-kit started earlier' });
+    expect(card.facts.find((f) => f.label === 'What is in the way')?.value).toBe('A program squad-kit started earlier is in the way, so the app does not answer.');
+    // The port and the process are for engineers.
+    expect(JSON.stringify(card.facts)).not.toMatch(new RegExp(`${port}|${child.pid}`));
+    expect(card.detail).toMatch(new RegExp(`\\(process ${child.pid}\\) listens on port ${port}`));
 
     writeTicket(bp, { ...t, quiet: { ...t.quiet!, port: p! } });
     const exited = new Promise((r) => child.once('exit', r));
@@ -156,21 +159,22 @@ describe('the app port on the Looks stuck card', () => {
     // The step starts again, with the work so far.
     expect(after).toMatchObject({ stopRequested: true, retryOnStop: true });
     expect(after.quiet).toBeUndefined();
-    expect(after.activity.map((a) => a.text)).toEqual(expect.arrayContaining([expect.stringMatching(new RegExp(`^Freed port ${port}: stopped .+, which squad-kit started$`))]));
+    expect(after.activity.map((a) => a.text)).toContain('Stopped a program squad-kit started earlier, which was in the way');
   });
 
-  it.skipIf(!hasLsof)("a program of the person's own: the card names it and says what to do, and squad-kit never stops it", async () => {
+  it.skipIf(!hasLsof)("a program of the person's own: the card says what to do in plain words, and squad-kit never stops it", async () => {
     const pid = await theirsHolds();
     const t = stuckTester();
     const p = await lookAtPort(bp, t);
     expect(p).toMatchObject({ port, ours: false, pid });
     const card = liveNow({ ...t, quiet: { ...t.quiet!, port: p! } }, {}).slow!;
     expect(card.freePort).toBeUndefined();
-    expect(card.facts.find((f) => f.label === "The app's port")?.value).toMatch(/is used by another program, .+\. Close that program, then press Stop and try again\.$/);
+    expect(card.facts.find((f) => f.label === 'What is in the way')?.value).toBe('Another program on this computer is in the way, so the app does not answer. squad-kit leaves it alone. Close that program, then press Stop and try again.');
+    expect(card.detail).toContain(`(process ${pid}) listens on port ${port}`);
 
     // Even when asked (an old card, or the terminal), it is checked again and left alone.
     writeTicket(bp, { ...t, quiet: { ...t.quiet!, port: { ...p!, ours: true } } });
-    await expect(freePortAndRetry(bp, t.id)).rejects.toThrow(new RegExp(`Port ${port} is used by .+, which squad-kit did not start, so squad-kit leaves it alone`));
+    await expect(freePortAndRetry(bp, t.id)).rejects.toThrow('squad-kit did not start the program in the way, so it leaves it alone');
     expect(await portTaken(port)).toBe(true);
     expect(() => process.kill(pid, 0)).not.toThrow();
     expect(readTicket(bp, t.id)!.stopRequested).toBeUndefined();

@@ -135,6 +135,8 @@
 .ob-talk-h { display: flex; align-items: center; gap: 10px; }
 .ob-talk-h b { font-size: 14.5px; font-weight: 650; }
 .ob-talk-h .grow { flex: 1; }
+.ob-ask h2 { margin: 0; font-size: 18px; font-weight: 650; }
+.ob-ask > .note { margin: 0; }
 .ob-thread { max-height: 420px; overflow-y: auto; padding: 4px 2px; gap: 16px; }
 .ob-talk-f { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .ob-talk-f .grow { flex: 1; }

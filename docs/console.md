@@ -44,15 +44,18 @@ Terminal: `squad projects`, `squad inbox`.
 
 ## The board
 
-Each project has its own board. The sidebar has the project's pages: **Overview**, **Board**, **Backlog**,
-**Waiting for you**, **Releases**, **Architecture**, **Bugs**, **Squad and AI** and **Settings**.
+Each project has its own board. The sidebar has the project's pages: **Overview**, **Requirements**, **Board**,
+**Backlog**, **Waiting for you**, **Conversations**, **Releases**, **Architecture**, **Bugs**, **Squad and AI** and
+**Settings**.
 
 **Overview** is the project's home: what it is, who uses it, what it can do today (with what each merged ticket
 added), how its parts fit together, things worth knowing, the rules the Architect found, the proof that squad-kit can
 work here, and ideas for tickets. The first time, it is the handover after setup: **Looks right, start working**
 approves the rules (until then they are proposals), **Something is wrong** opens a talk with the Architect. A new
-project opens on a **setup page** with live steps instead. Terminal: `squad setup`, `squad overview`. Click the project name or the
-logo to go back to Home.
+project opens on a **setup page** with live steps instead. An empty project has no code to read, so the Overview asks
+**What do you want to build?** The Architect writes down your answer with ideas for first stories, and picks the
+technology when your first story is planned. Terminal: `squad setup`, `squad overview`, `squad overview --build "what
+you want"`. Click the project name or the logo to go back to Home.
 
 On every page of a project:
 
@@ -84,18 +87,28 @@ On the board:
 address, Stopped, Failed with the reason) and **Start**, **Open**, **Restart** and **Stop**. squad-kit runs the
 app from its own copy of `main` on this computer, never your own folder, and brings that copy up to date first
 (running the setup command when the dependencies changed). Your `.env` files come along: squad-kit copies them from
-your project folder into its copy each time, readable by you only. **Show output** has the last lines it printed. After
-**Looks right**, "RO-6 is in main" offers **Run the new version**. A busy port gets a plain message, and the fix
-when there is one. With no start command known: **Ask the Architect to find it**, or **Type it**. Closing or
-restarting squad-kit stops the apps it started. Terminal: `squad app start|stop|restart|status|set|find`.
+your project folder into its copy each time, readable by you only. **Show output** has the last lines it printed; when
+it failed, **See what failed** has the command and what it printed. After **Looks right**, "RO-6 is in main" offers
+**Run the new version**. When another program holds the app's port, squad-kit moves the app to a free port by itself
+and shows the new address, as long as its start command or its code takes a port setting (`PORT`, or its own, like
+`APP_PORT`). When it cannot move, one plain sentence says what is in the way, and **Stop it and start** is there for a
+program squad-kit started itself. With no start command known: **Ask the Architect to find it**, or **Type it**. Closing
+or restarting squad-kit stops the apps it started. Terminal: `squad app start|stop|restart|status|set|find`.
+`--next-port` is still accepted, and now does nothing.
 
 A new project shows a **Setting up your project** card while the Architect reads it.
 
 ## The ticket drawer
 
-Click a card to open it on the right. At the top: the ticket's name and title, links to its tracker item and
-pull request, who made it, its **owner**, its track (Full or Express) and its repo. A row of steps shows how
-far it is. Buttons: **Hand over** and **Propose a change**.
+Click a card to open it on the right. **Ask a question** is at the top of every ticket, in every state (see
+[Chat](#chat)). The button next to Close makes it **Full width** (the choice is remembered in this browser); **Hand
+over** and **Propose a change** are in the **⋯** menu, and Propose a change is also on the bottom bar. At the top: the
+ticket's name and title, links to its tracker item and
+pull request, who made it, its **owner**, its track (Full, Express or Builds by itself) and its repo. A row of
+steps shows how far it is. A ticket built from a breakdown says where it comes from ("From BR-1 › Payments ›
+Invoices and refunds › S-14") and lists what the squad **decided for you**, each with **Change**. When it stops
+for a gap or a clash, the card says which (**Missing in the BRD**, **Two parts clash**), marks the option the
+Architect suggests, and says which stories wait for your answer.
 
 The tabs:
 
@@ -106,19 +119,22 @@ The tabs:
 | **Plan** | The design: the decision and the steps. |
 | **Activity** | Everything that happened, with who and when. |
 | **Conversation** | **What happened** (the default): one card per step with its time, a one-line summary and what it handed in (the questions, the spec, the design, the changed files, the review, the screenshots), each with a link to its tab. **Full log**: each agent's real session in plain words, with **Open it in Claude Code** for engineers. Message an agent here, or talk to it. A command the sandbox blocked says what and why, with a link to allow it. |
-| **Proof** | Each "done when" with its screenshot, and the checks and review results. **Not checked** (orange) means the project has no tests. squad-kit checks each screenshot is a real, new picture, and that "after" differs from "before". |
+| **Proof** | Each "done when" with its screenshots, one or more, and what they show: **Met**, **Not working yet**, **Not shown yet** or **Not on a screen**, with why. Also the checks and review results. **Not checked** (orange) means the project has no tests. See [The Tester and the proof](#the-tester-and-the-proof). |
 | **Changes** | What the ticket changed against main, file by file, from the squad's copy of the code. |
 | **Cost** | Depends on how you pay for Claude. On a subscription: "Included in your Claude plan. No extra charge.", the size of the work against the project's usual ticket, where the work went, and its value at API prices (a value, not a bill). With an API key: real dollars, against a budget per ticket and per month, with a warning at 80% and a pause at 100%. Models and tokens are under **Details for engineers**. Terminal: `squad cost [ticket]`. |
-| **Developer** | The branch, the squad's copy of the code, the files it touched, the exact error when a step stopped, and the commands to open it yourself. |
+| **Developer** | The branch, the squad's copy of the code, the files it touched, the checks that ran with their commands (a check that failed and then passed says "failed once, passed when run again"), how the tests run, the exact error when a step stopped, and the commands to open it yourself. |
 
 **A slow step** gets a card on the Now tab: **Taking longer than usual** (past twice the usual time) with what it
 is doing, its last progress and when squad-kit stops it, and **Give it 10 more minutes**, **Stop and try again**
-and **Stop**. **Looks stuck** (no progress for a while) says what squad-kit checked and offers **End the stuck
-command**. Terminal: `squad wait <ticket> --more 10m`, `squad stop <ticket> --again`, `squad unstick <ticket>`.
+and **Stop**. The step timer counts only the time a step really runs: it stands still while the ticket waits for you,
+for another story or for a free place. **Looks stuck** (no progress for a while) says what squad-kit checked and offers
+**End the stuck command**. Terminal: `squad wait <ticket> --more 10m`, `squad stop <ticket> --again`,
+`squad unstick <ticket>`.
 
-**A stopped step** gets a card that says what happened, what is safe ("Nothing was merged or pushed"), and the ways
-out: **Try again**, **Fix it yourself**, **Continue anyway** (with a reason), **Send it back to the plan**, and
-**Report a problem**.
+**A stopped step** gets a card that says what happened, in squad-kit's own plain words, what is safe ("Nothing was
+merged or pushed"), and the ways out: **Try again**, **Fix it yourself**, **Continue anyway** (with a reason), **Send
+it back to the plan**, and **Report a problem**. A tool's raw error never shows there: the exact words are in the
+Developer tab and the app log.
 
 The **…** menu at the top has **Delete** for a ticket that is not merged, and **Archive** for a merged or released
 one. The dialog lists what is removed and what stays:
@@ -137,21 +153,126 @@ its conversations (without pictures), the project's settings and ticket list, an
 It never holds sign-ins, the board's token, `.env` files or anything that looks like a key. Send it to whoever helps
 you with squad-kit. Terminal: `squad report [ticket] [--note "what happened"]`.
 
+## The Tester and the proof
+
+After the checks and the review, the Tester shows that the work does what the spec says. squad-kit starts the
+ticket's own copy of the app and opens its own browser. The Tester says which pages to open, which steps to do and at
+which size (desktop or phone), and squad-kit takes the pictures. It uses its own browser so an agent's sandbox can't
+stop it, and there is nothing to install: no `npx playwright`. squad-kit installs it the first time a proof needs it,
+and one line says "Setting up squad-kit's screenshot browser. This happens only once."
+
+Each "done when" gets **one or more pictures**, one for each part or case, up to 6. squad-kit checks each picture is a
+real image taken in this step. Then its own check, a separate short Reviewer run, looks at all the pictures of each
+"done when" together, and with the Tester's word that gives the verdict:
+
+| Verdict | What it means | What happens next |
+| --- | --- | --- |
+| **Met** | The pictures show it works as written, and squad-kit's check agrees with the Tester. | Nothing more. |
+| **Not working yet** | A picture shows it does not work. | It goes back to the Builder once, and the checks, the review and the screenshots run again. If it still does not work, a plain stop: **Let the Builder try again**, **Continue anyway** or **Send it back to the plan**. |
+| **Not shown yet** | The pictures do not show it clearly: it is out of view, still loading, or the same as before the change. | The Tester takes what is missing, up to 2 more times, told exactly what to show. Its good pictures stay. Then a plain stop: **Take the screenshots again**, **Continue anyway** or **Send it back to the plan**. A picture problem never goes to the Builder. |
+| **Not on a screen** | It, or a part of it, can't be shown at all: an email, what happens after a restart, an old record the app cannot make. | The Tester and the check agree on this. After the last retake, a "done when" whose pictures show a part of it also ends here, with the Tester's reason. It keeps its pictures and its reason, and does not stop the ticket, unless every "done when" ends this way. The Reviewer checks these in the code and the tests. |
+
+A "done when" that says the screen stays as it was may have the same picture as before. Any other "after" that is the
+same as its "before" is Not shown yet.
+
+**Also changed, not in the plan** lists what the change touches that the story and the plan did not ask for, in the
+Reviewer's words. It never blocks, as it may well be right. You see it at your check, on a stop, on the ticket and in
+the release notes.
+
+### Your check
+
+When the proof is ready, or a check stopped the ticket, the row of steps says **Your turn** and the ticket shows:
+
+- **Where to look**: each page the proof names, with the "done when" it shows. While the ticket's copy runs, each page
+  has **Open**. With no page saved, it says so: ask a question, or try it yourself.
+- **Not on a screen, so look at these yourself**: each "done when" nobody saw on a screen, with why.
+- **Try it yourself**: runs this ticket's own copy of the app, with the change in it. Nothing is merged. It shows
+  **Starting…**, then **Running** with **Open** and **Stop**, on a free port when the usual one is taken. One copy per
+  project runs at a time: trying another stops the first. It stops by itself when the ticket moves on, when the ticket
+  is deleted and when the board closes. Terminal: `squad try <ticket> [--stop] [--status]`. With the board closed, the
+  copy runs in that terminal until Ctrl-C.
+- **Ask a question**, at the top of the ticket. The ticket keeps waiting for you.
+
+**See what failed**: when something does not start, one plain sentence comes first, and **See what failed** has the
+command and what it printed, for engineers. It is on Try it yourself, Your apps, the setup after a merge, and the
+tests on the Overview.
+
+## The window
+
+Agents don't get free commands for the app, the browser or the checks. squad-kit gives them a few fixed tools, "the
+window". An agent presses a tool and fills in its fields. squad-kit checks every field, does the job itself and hands
+back the result. Each run has its own key, which stops working when the run ends.
+
+| Tool | What squad-kit does | Who has it |
+| --- | --- | --- |
+| `take_screenshots` | Opens its own browser on this story's app, does the steps and takes the pictures. At most 10 in one call and 40 in one step. | Tester, Builder |
+| `look_at_page` | Opens a page, does the steps, and gives back the address and what is on the page. It saves no pictures. | Tester, Builder, Reviewer |
+| `start_app`, `stop_app`, `app_status` | Starts this story's copy with the project's own start command, on a free port when the usual one is taken. Stops only what squad-kit started. Says whether it runs, with its last lines. | Tester, Builder |
+| `run_checks` | Runs the project's saved test, lint or build command, inside the guard, where a browser can start. | Tester, Builder |
+| `i_am_stuck` | Tries squad-kit's own fixes (see below). | Every agent on a ticket |
+
+The Builder has the app and browser tools once the project has a start command and an address. Until then it has
+`run_checks` and `i_am_stuck`. The Reviewer uses `look_at_page` in its review, to see a page of the app as it is now:
+squad-kit starts the app when needed.
+
+**What it refuses**: another website, a command, a program squad-kit did not start, or more pictures than a step may
+take. The refusal goes in the ticket's activity, like "The Tester asked to open another website. squad-kit refused."
+Three refusals in one step stop the agent: "The Tester kept asking for things it may not do, so squad-kit stopped it."
+
+**`i_am_stuck`**: when something technical is in an agent's way (the app does not start, a port is busy, the browser
+does not work, a command or a file is refused), it calls this instead of asking you. squad-kit tries its known fixes:
+it starts its browser again or sets it up, deals with what holds the port, starts the app again, or tells the agent
+how to run a browser test. One plain line goes in the activity, and the agent carries on with what it can. If there
+are no screenshots in the end, you get one plain sentence and **Try again**.
+
+### Who answers an agent's questions
+
+squad-kit reads each question an agent asks, with its choices and everything shown with it, before it reaches you. It
+does not trust the agent's own label.
+
+- **The business** (something missing that changes what gets built, or two requirements that clash) comes to you.
+- **Anything technical** (ports, commands, files, settings, installs) never does. It goes back to the agent, to decide
+  it or call `i_am_stuck`, and one line goes in the activity. An agent that keeps asking stops with a plain message and
+  **Try again**.
+- **What nobody may ask of you** (changing squad-kit's settings, `.squad/` or the files agents load as instructions,
+  handing over a password or a key, changing git history) is refused and logged, never shown as a question.
+
+One choice can still reach you in plain words: when another program on this computer holds what the browser tests need
+and going around it did not work, a card offers **Stop it** or **Skip the browser tests**. squad-kit never stops a
+program it did not start without your press.
+
+The same rule reads an agent's answer in a chat, where technical words are fine, because you asked. An answer that
+asks you to do one of the things nobody may ask is left out, and you read one plain line instead.
+
 ## Chat
 
 Open a chat with any agent on a ticket: **Ask the Analyst** on the Now tab, **Talk it through** on a spec or
 design, or **Talk to the Builder** (or any agent) in the Conversation tab. Add screenshots, files or a voice
 note to a message.
 
+**Ask a question** is at the top of every ticket, in every state: working, in the queue, waiting for another ticket,
+stopped at any step, at review, taken over or released. It goes to whoever knows the ticket best at that point: the
+Analyst before the build, the Builder during and after it, the Tester once there are screenshots. It answers questions
+only, like "how do I test this?" or "where is the new page?", and the ticket stays exactly where it is. To change
+something, use the ticket's own buttons. With a chat open already, the button opens that chat.
+
 - **Asking never stops the work.** While the squad works, the chat runs beside it and changes nothing.
-- **A change goes through the spec.** Press **Propose a change**: the Analyst writes it into the spec, old and
-  new, and you approve it.
+- **A change goes through the spec.** Press **Propose a change**: the Analyst writes it into the spec, old
+  and new, and you approve it.
 - **Released work is for questions only.** A change to it becomes a new linked ticket or a bug report.
 
-A new chat window is on its way: a side panel with tabs, a full-screen page for all conversations, a phone
-layout, and Arabic and English (and both mixed) shown the right way.
+A chat opens in a side panel beside the board, and takes the whole screen on a phone. **Conversations** in the sidebar
+is a full-screen page with all of them.
 
-Terminal: `squad chat <ticket>`, `squad message <ticket>`, `squad propose <ticket>`.
+Terminal: `squad chat <ticket>`, `squad chat <ticket> --ask`, `squad message <ticket>`, `squad propose <ticket>`.
+
+## Requirements
+
+Upload a requirements document (a BRD) and the Analyst breaks it into epics, features and stories. You review it
+as a **tree** (the main view, with a side panel to edit each part) or a **map** (boxes and lines, for presenting),
+approve it, send it to Azure DevOps if you like, and press **Build continuously**. A breakdown waiting for your
+answers shows in **Waiting for you** and in the sidebar's count. The whole flow is in
+[From a BRD to a built product](requirements.md).
 
 ## Other pages
 
@@ -193,6 +314,18 @@ registries and the websites you allow in Settings. A blocked command shows in th
 why. Where the sandbox can't run (Windows, some Linux setups), steps run as before, and this page and `squad doctor`
 say so.
 
+**Guard for the project's own commands**: the Builder writes the code the tests run, so squad-kit runs the project's
+own tests, lint, build, setup, app and release pipeline in a guard of its own, on Mac and Linux. They work normally,
+browser tests too, and can reach the network for packages and tests. They can't read your keys, sign-ins, browser
+profiles, squad-kit's own folder or the `.env` files in your project folder, and they start without the AI, cloud and
+code-host keys. When a project truly needs a file outside its copy, the check stops with one plain sentence ("A check
+needed a file outside its copy, and squad-kit blocked it. An engineer can allow it in Settings."), and the file's path
+is in the details. On Linux the guard needs bubblewrap, and this page and `squad doctor` say how to turn it on.
+
+**Windows: less protected.** On Windows, squad-kit does not guard the agents' own commands or the project's own tests
+and app, so they can reach other files on the computer. Screenshots and the app still go through the window. Use it on
+projects you trust. Windows is also not fully tested yet. This page and Settings say so.
+
 **Edit** on a role opens:
 
 - **Models**, per step: a level (**Strongest**, **Balanced**, **Fast**) and an effort (extra high, high, medium,
@@ -222,8 +355,13 @@ Terminal: `squad config set quality best`, `squad agent builder`, `squad agent b
   Notifications). When they are on, it sends one test notice.
 - **How you pay for Claude**: squad-kit finds out (subscription or API key); change it here if it is wrong. With an
   API key: a budget per ticket and per month. Terminal: `squad config set payment`, `squad config set budget`.
+- **Windows: less protected**, on Windows only. See [Squad and AI](#squad-and-ai).
 - **Websites the squad may reach**: on top of the package registries, for the sandbox. Shared by the team.
   Terminal: `squad config set hosts`.
+- **Also read** and **Also write**, for engineers, where the guard runs: files or folders outside its copy that the
+  project's own commands may use. Add one only when a check stopped because squad-kit blocked a file the project truly
+  needs. Shared by the team, and agents can't change it. Write the full path, or start it with `~` for your home folder.
+  Terminal: `squad config set allow-read <path>`, `squad config set allow-write <path>`, and `--clear` on either.
 - **Report a problem**: a report for the whole app, without a ticket. The app log is in `~/.squad-kit/logs/`,
   one file a day with every step, stop and error (never a key or a prompt), kept 14 days. Errors also print in the
   terminal that runs the app. Terminal: `squad logs`, `squad logs --tail`.

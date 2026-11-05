@@ -12,11 +12,12 @@ import {
   setupView,
   startTalk,
   stopSetup,
+  tellIdea,
   ticketFromIdea,
   type SetupStepView,
   type SetupView,
 } from '../board/first-run.js';
-import { SETUP_STEPS, type SetupStepId } from '../board/setup-state.js';
+import { SETUP_STEPS, readWords, type SetupStepId } from '../board/setup-state.js';
 import { durationWords } from '../board/usual.js';
 import { squadRunsElsewhere } from '../board/lock.js';
 import { tick } from '../board/engine.js';
@@ -63,7 +64,7 @@ function printSetup(v: SetupView): void {
   out();
   for (const st of v.steps) for (const l of stepLines(st)) out(l);
   out();
-  if (v.ready && !v.approved) out(`  Check what squad-kit understood: ${cmd('squad overview')}   then   ${cmd('squad overview --approve')}`);
+  if (v.ready && !v.approved) out(v.empty ? `  What do you want to build? ${cmd('squad overview --build "what you want"')}` : `  Check what squad-kit understood: ${cmd('squad overview')}   then   ${cmd('squad overview --approve')}`);
   else if (!v.ready) out(`  Follow it: ${cmd('squad setup --follow')}   Stop: ${cmd('squad setup --stop')}`);
   if (!v.qualityAsked && !v.approved) out(kleur.gray(`  Quality is ${v.quality}. To change it: squad config set quality best|balanced|thrifty`));
   out();
@@ -104,7 +105,7 @@ export function followSetup(bp: BoardPaths, onDone?: () => void, playDemo = fals
     if (v.ready || v.approved) {
       ended = true;
       out();
-      ui.success(v.approved ? 'Set up.' : `squad-kit knows ${v.project} now. Check what it understood on the Overview, or here: squad overview`);
+      ui.success(v.approved ? 'Set up.' : v.empty ? `${v.project} is ready. One question for you on the Overview, or here: squad overview --build "what you want"` : `squad-kit knows ${v.project} now. Check what it understood on the Overview, or here: squad overview`);
       // After the caller has its stop.
       setTimeout(() => onDone?.(), 0);
     }
@@ -169,6 +170,8 @@ export interface OverviewOptions {
   wrong?: string[] | boolean;
   /** "Read it again with this", after the talk. */
   withTalk?: boolean;
+  /** "What do you want to build?", on a project with no code. */
+  build?: string[];
 }
 
 const list = (head: string, items: string[]) => {
@@ -201,6 +204,12 @@ export async function runOverview(opts: OverviewOptions): Promise<void> {
     return;
   }
   if (opts.wrong) return talk(bp, Array.isArray(opts.wrong) ? opts.wrong.join(' ') : '');
+  if (opts.build) {
+    tellIdea(bp, opts.build.join(' '));
+    ui.success('The Architect reads what you want to build. Follow it: squad setup --follow');
+    noSquadNote(bp);
+    return;
+  }
 
   const v = overviewView(bp);
   out();
@@ -210,8 +219,11 @@ export async function runOverview(opts: OverviewOptions): Promise<void> {
     out(`  ${kleur.yellow(v.setup?.line ?? 'squad-kit is getting to know the project.')}  ${cmd('squad setup')}`);
     out();
   }
-  if (v.handover === 'ready') {
-    out(`  ${kleur.yellow('squad-kit has read your project. Check what it understood, then start.')}`);
+  if (v.handover === 'ready' && v.empty && !v.idea) {
+    out(`  ${kleur.yellow('What do you want to build?')}  ${cmd('squad overview --build "what you want"')}`);
+    out();
+  } else if (v.handover === 'ready') {
+    out(`  ${kleur.yellow(v.empty ? 'The Architect wrote down what you want to build. Check it, then start.' : 'squad-kit has read your project. Check what it understood, then start.')}`);
     if (v.proposed) out(kleur.gray(`  When you approve, the ${v.proposed} ${v.proposed === 1 ? 'rule' : 'rules'} below become the rules every agent follows.`));
     out();
   }
@@ -221,9 +233,9 @@ export async function runOverview(opts: OverviewOptions): Promise<void> {
   if (v.proof) {
     const p = v.proof;
     list('Proof squad-kit can work here', [
-      ...(p.files ? [`Read ${p.read ?? p.files} of ${p.files} files`] : []),
+      ...(p.files ? [readWords(p.files)] : []),
       ...(p.tests ?? []).map((t) => (t.ok ? `Ran your tests: ${t.passed ?? 'they'} pass` : `Your tests did not pass here (${t.command})`)),
-      ...(p.app ? [p.app.ok ? `Opened the app at ${p.app.url}` : `The app did not open: ${p.app.error ?? ''}`] : []),
+      ...(p.app ? [p.app.ok ? 'Opened the app' : 'The app did not open here'] : []),
       ...(p.branch ? [`On git branch ${p.branch}${p.unsaved ? `, ${p.unsaved} changes not saved in git` : ', nothing unsaved'}`] : []),
     ]);
   }
@@ -247,7 +259,9 @@ export async function runOverview(opts: OverviewOptions): Promise<void> {
     out();
   }
   if (v.old) out(kleur.gray('  Read by an older squad-kit. Who uses it, what it can do and ticket ideas come with the next read: squad overview --again')), out();
-  if (v.handover === 'ready') out(`  Looks right: ${cmd('squad overview --approve')}   Something is wrong: ${cmd('squad overview --wrong "what is wrong"')}`);
+  if (v.empty) {
+    if (v.handover === 'ready' && v.idea) out(`  Looks right: ${cmd('squad overview --approve')}   Change what you said: ${cmd('squad overview --build "what you want"')}`);
+  } else if (v.handover === 'ready') out(`  Looks right: ${cmd('squad overview --approve')}   Something is wrong: ${cmd('squad overview --wrong "what is wrong"')}`);
   else out(kleur.gray(`  Read it again: squad overview --again`));
   out();
 }

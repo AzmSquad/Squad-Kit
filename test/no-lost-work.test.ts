@@ -306,7 +306,8 @@ describe('only a real clash is a clash', () => {
       expect(thrown).toBeInstanceOf(Error);
       expect(thrown).not.toBeInstanceOf(MergeClash);
       expect((thrown as Error).message).toMatch(/^git 2\.30\.1 cannot merge squad\/ap-1 into main: squad-kit needs git 2\.38 or newer\. Update git: on a Mac run brew install git/);
-      expect(() => actions.approve(bp, 'AP-1')).toThrow(/could not be merged: git 2\.30\.1 cannot merge/);
+      // Plain words on the button's message; git's own go to the log, and squad doctor says the fix.
+      expect(() => actions.approve(bp, 'AP-1')).toThrow(/^The change is saved, but it could not be merged/);
       const t = readTicket(bp, 'AP-1')!;
       expect(t.waiting?.kind).toBe('proof');
       expect(t.stuck).toBeUndefined();

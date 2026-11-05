@@ -23,13 +23,14 @@ import {
 } from '../board/store.js';
 import type { BoardMeta, Decision, Deleting, Ticket } from '../board/types.js';
 import { repoHostFor, trackerModule } from '../modules/registry.js';
-import { currentBranch, dropSnapshot, git, isRepo, networkGitEnv, removeWorktree, worktreeRoot } from './git.js';
+import { currentBranch, dropSnapshot, git, gitEnv, isRepo, networkGitEnv, removeWorktree, worktreeRoot } from './git.js';
 import { agentRuns } from './live.js';
 import { repoFor } from './repos.js';
 import { repoTarget } from './sync.js';
 import { deleteNoteCommit, localCopy } from './teammate-delete.js';
 import { docsRepo, squadInRepo } from './project-git.js';
 import { dropTicketCache, ticketCacheDir } from './sandbox.js';
+import { stopTry } from './try-app.js';
 
 /**
  * Delete and Archive. Delete is for a ticket that never reached the base: the squad stops first, then its copy of the
@@ -280,7 +281,7 @@ async function waitForStop(bp: BoardPaths, id: string, mark: Deleting, ms: numbe
 /** git over the network, without holding up the board while it waits. */
 function gitLater(cwd: string, args: string[], env: Record<string, string>): Promise<void> {
   return new Promise((resolve, reject) => {
-    execFile('git', args, { cwd, encoding: 'utf8', timeout: 120_000, env: { ...process.env, ...networkGitEnv(cwd, env) } }, (err, _out, stderr) => {
+    execFile('git', args, { cwd, encoding: 'utf8', timeout: 120_000, env: gitEnv(networkGitEnv(cwd, env)) }, (err, _out, stderr) => {
       if (!err) return resolve();
       reject(new Error((stderr || err.message).trim().split('\n').slice(-2).join(' ')));
     });
@@ -398,9 +399,9 @@ function removeChatsAndShots(bp: BoardPaths, t: Ticket): void {
   const sessions = [...Object.values(t.sessions ?? {}), t.chat?.side].filter((s): s is string => typeof s === 'string' && /^[\w-]{8,64}$/.test(s));
   for (const s of sessions) fs.rmSync(path.join(bp.chatsDir, `${s}.jsonl`), { force: true });
   if (!fs.existsSync(bp.proofDir)) return;
-  const shown = new Set(listTickets(bp).filter((x) => x.id !== t.id).flatMap((x) => (x.proof ?? []).flatMap((p) => [p.before, p.after])));
+  const shown = new Set(listTickets(bp).filter((x) => x.id !== t.id).flatMap((x) => (x.proof ?? []).flatMap((p) => [p.before, p.after, ...(p.more ?? []).map((m) => m.after)])));
   const own = new RegExp(`^${t.id.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-(before|after)-`);
-  const named = (t.proof ?? []).flatMap((p) => [p.before, p.after]).filter(Boolean).map((f) => path.basename(f));
+  const named = (t.proof ?? []).flatMap((p) => [p.before, p.after, ...(p.more ?? []).map((m) => m.after)]).filter(Boolean).map((f) => path.basename(f));
   for (const f of new Set([...named, ...fs.readdirSync(bp.proofDir).filter((f) => own.test(f))])) {
     if (!shown.has(f)) fs.rmSync(path.join(bp.proofDir, f), { force: true });
   }
@@ -458,6 +459,8 @@ export async function deleteTicket(bp: BoardPaths, id: string, opts: { remote?: 
       notes.push(...(await leaveNote(bp, t, mark.by, mark.at)));
       updateTicket(bp, t.id, (x) => (x.deleting = { ...mark, ...x.deleting, remoteDone: true }));
     }
+    // The copy of the app the person was trying stops before its copy of the code goes.
+    await stopTry(bp, t.id);
     notes.push(...removeCopy(bp, meta, t, { safe: local }).map((k) => `Kept ${k.charAt(0).toLowerCase()}${k.slice(1)}`));
     // Its own package cache: on this computer only, and of no use once the ticket is gone.
     dropTicketCache(bp, t.id);

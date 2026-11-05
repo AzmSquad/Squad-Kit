@@ -55,7 +55,7 @@ describe('a draft from an idea', () => {
     expect(D.draftJob(bp, started.id)).toMatchObject({
       status: 'working',
       step: 'look',
-      looked: ['roomflow/app.py', 'searching for "booking"', 'saved decision ADR-001', 'your file chat.png'],
+      looked: ['the code', 'saved decision ADR-001', 'your file chat.png'],
     });
     calls[0]!.onText?.('I have what I need.');
     expect(D.draftJob(bp, started.id).step).toBe('write');

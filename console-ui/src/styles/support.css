@@ -10,6 +10,11 @@
 .errcard-hint .linkbtn { margin: 0 6px 0 0; }
 .errcard-confirm { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
 .errcard-cmd { margin-top: 12px; }
+/* A card's own text styles must not reach into a command chip inside it (a calm card's grey, its bold title): the
+   chip keeps its own look, like .calm .rm-cmd .term in app.css. */
+.errcard .term, .errcard.calm .term { font-size: 12px; color: var(--term-ink); }
+.errcard .term span, .errcard.calm .term span { font-size: inherit; color: inherit; }
+.errcard .term b, .errcard.calm .term b { display: inline; font-size: inherit; font-weight: 600; color: var(--mint); }
 .exact-err { margin: 0; padding: 10px 12px; max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 500 12px 'JetBrains Mono', monospace; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; color: var(--text); }
 .report-never { background: var(--surface-2); border-radius: 10px; padding: 10px 12px; font-size: 13px; line-height: 1.5; margin-top: 14px; }
 .report-saved { display: flex; gap: 12px; align-items: flex-start; }

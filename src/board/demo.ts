@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { gitEnv } from '../engine/git.js';
 import { scriptFor } from './scripts.js';
 import { scheduleSquad } from './schedule.js';
 import { writeDecision, writeMeta, writeRelease, writeTicket, type BoardPaths } from './store.js';
@@ -9,6 +10,7 @@ import type { Activity, AgentName, BoardMeta, Decision, Release, StepRun, Ticket
 import { countSampleHistory } from './demo-cost.js';
 import { clearBoard } from './store.js';
 import { seedDoneSetup, seedFreshSetup } from './demo-setup.js';
+import { clearDemoRequirements, seedDemoRequirements } from './demo-requirements.js';
 
 /** Minutes before now, as an ISO time, so the seeded board always looks fresh. */
 function ago(minutes: number): string {
@@ -21,7 +23,7 @@ function daysAgo(days: number): string {
 
 function gitUserName(): string {
   try {
-    const name = execSync('git config user.name', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    const name = execSync('git config user.name', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: gitEnv() }).trim();
     return name.split(/\s+/)[0] || 'You';
   } catch {
     return 'You';
@@ -126,7 +128,23 @@ function demoTickets(user: string): Ticket[] {
           after: 'sk139-after.png',
           beforeLabel: 'Before',
           afterLabel: 'After',
-          note: 'Recorded by the Tester in Chrome at 1440 by 900',
+          note: 'Case 2024/118 typed in full opens straight away, at 1440 by 900.',
+          page: '/cases',
+          shows: 'met',
+        },
+        {
+          criterion: 'I see the matching cases',
+          before: 'sk139-before.png',
+          after: 'sk139-after.png',
+          beforeLabel: 'Before',
+          afterLabel: 'After',
+          note: 'Typing "2024/1" lists the three cases that start with it.',
+          page: '/cases',
+          more: [
+            { after: 'sk148-light.png', page: '/cases?q=1446', note: 'Typing "1446" lists the cases of that year.' },
+            { after: 'sk148-dark-b.png', page: '/hearings?q=1446', note: 'The same search on the hearings list shows the matching hearings.' },
+          ],
+          shows: 'met',
         },
       ],
       releaseNote: '**Search by case number.** Type a case number and jump straight to the case.',
@@ -265,7 +283,8 @@ function demoTickets(user: string): Ticket[] {
       waiting: { kind: 'stuck', summary: 'The squad is stuck and needs one decision' },
       stuck: {
         gate: 'checks',
-        question: 'The checks still fail after 3 tries. autosave.spec.ts says: two clerks editing the same case notes overwrite each other.',
+        question: 'The checks still fail after 3 tries: the tests show two clerks editing the same case notes overwrite each other.',
+        detail: 'test (npm test):\nautosave.spec.ts: two clerks editing the same case notes overwrite each other.',
         options: [
           { do: 'retry', name: 'Let the Builder try 3 more times', note: 'It gets the full error and tries again.' },
           { do: 'yourself', name: 'Fix it yourself', note: "Open the ticket's copy in your editor and fix it. Then the checks, review and proof run again." },
@@ -317,6 +336,7 @@ function demoTickets(user: string): Ticket[] {
           beforeLabel: 'Before',
           afterLabel: 'After',
           note: 'Recorded by the Tester in Chrome at 1280 by 800',
+          shows: 'met',
         },
       ],
       releaseNote: '**Highlight the picked case.** The case you opened stands out in the list.',
@@ -362,6 +382,142 @@ function demoTickets(user: string): Ticket[] {
       activity: log([
         [2, 'tester', 'Stopped before the checks: the tests were made weaker.'],
         [4, 'builder', 'Finished all steps'],
+      ]),
+    }),
+    // The screenshots still show a "done when" not working after the Builder's second round: a plain stop with ways out.
+    // Each row shows its own verdict: met, not working yet, not shown yet.
+    base('SK-135', 'Case search on a phone', {
+      ask: 'Clerks in court use their phones. The case search must work on a phone screen.',
+      stage: 'review',
+      status: 'The screenshots show it is not working yet',
+      waiting: { kind: 'stuck', summary: 'The screenshots show it is not working yet: needs one decision' },
+      retryPhase: 'proof-fix',
+      proofRound: 2,
+      story: 'As a clerk in court, I want to search cases on my phone, so I find a case without a laptop.',
+      criteria: [
+        { given: "I'm on the case list on a phone", when: 'I open it', then: 'the search box shows above the list' },
+        { given: "I'm on the case list on a phone", when: 'I scroll the results', then: 'the page fits the screen and does not scroll sideways' },
+        { given: 'I searched on a phone', when: 'I open a case', then: 'the back button returns to my results' },
+      ],
+      specApproved: { by: 'Momen', at: ago(90) },
+      steps: [
+        { title: 'Search box on small screens', status: 'done', minutes: 4 },
+        { title: 'Results list on small screens', status: 'done', minutes: 5 },
+        { title: 'Tests for every "done when"', status: 'done', minutes: 3 },
+      ],
+      work: { steps: 3, tests: 6, screens: 3 },
+      gates: { checks: 'pass', checksText: '14 of 14 checks pass', review: 'pass', reviewBy: 'Claude', proof: 'fail' },
+      proof: [
+        {
+          criterion: 'The search box shows above the list',
+          before: 'sk139-before.png',
+          after: 'sk139-after.png',
+          beforeLabel: 'Before',
+          afterLabel: 'After',
+          note: 'The search box sits above the case list on a phone screen.',
+          page: '/cases',
+          shows: 'met',
+        },
+        {
+          criterion: 'The page fits the screen and does not scroll sideways',
+          before: 'sk139-before.png',
+          after: 'sk139-after.png',
+          beforeLabel: 'Before',
+          afterLabel: 'After',
+          note: 'The results list is wider than the phone screen.',
+          page: '/cases',
+          shows: 'broken',
+          why: 'At phone width the results list runs off the right edge, so the page scrolls sideways.',
+        },
+        {
+          criterion: 'The back button returns to my results',
+          before: 'sk139-before.png',
+          after: 'sk139-after.png',
+          beforeLabel: 'Before',
+          afterLabel: 'After',
+          note: 'The case page is open.',
+          page: '/cases/4417',
+          more: [{ after: 'sk148-light.png', page: '/cases', note: 'The results before opening the case.' }],
+          shows: 'not-shown',
+          why: 'The pictures show the case page and the results before it, but not the results after pressing the back button.',
+        },
+      ],
+      stuck: {
+        gate: 'proof',
+        kind: 'broken',
+        question: 'The screenshots show "done when" 2 is not working yet: at phone width the results list runs off the right edge, so the page scrolls sideways.',
+        points: ['"Done when" 2: The page fits the screen and does not scroll sideways', '"Done when" 3, The back button returns to my results: The pictures show the case page and the results before it, but not the results after pressing the back button.'],
+        options: [
+          { do: 'retry', name: 'Let the Builder try again', note: 'It gets what the screenshots show. Then the checks, the review and the screenshots run again.' },
+          { do: 'continue', name: 'Continue anyway', note: 'Go on with a "done when" not working yet. Write why: it shows on the ticket, the pull request and the release notes.' },
+          { do: 'plan', name: 'Send it back to the plan', note: 'The Spec writer rewrites the plan with what went wrong.' },
+        ],
+      },
+      activity: log([
+        [3, 'tester', 'Still not working after 2 rounds: "done when" 2'],
+        [4, 'reviewer', 'Checked the screenshots: 1 met, 1 not working yet, 1 not shown yet'],
+        [12, 'builder', 'Fixed what the screenshots showed'],
+        [20, 'tester', 'The screenshots show one "done when" not working yet, so the Builder fixes it: "done when" 2: At phone width the results list runs off the right edge.'],
+      ]),
+    }),
+    // The Tester could not get a "done when" into a picture, even with squad-kit's advice: a plain stop, and the product is not touched.
+    base('SK-155', 'Hearing room on the case page', {
+      ask: 'Clerks want to see the hearing room on the case page, with the room number.',
+      stage: 'review',
+      status: 'The screenshots do not show it yet',
+      waiting: { kind: 'stuck', summary: 'The screenshots do not show it yet: needs one decision' },
+      retryPhase: 'proof',
+      story: 'As a clerk, I want to see the hearing room on the case page, so I know where to go.',
+      criteria: [
+        { given: 'a case with a hearing', when: 'I open the case page', then: 'the hearing room shows with its number' },
+        { given: 'a case with no hearing yet', when: 'I open the case page', then: 'it says no room yet' },
+      ],
+      specApproved: { by: 'Momen', at: ago(70) },
+      steps: [
+        { title: 'Add the hearing room to the case page', status: 'done', minutes: 3 },
+        { title: 'Tests for every "done when"', status: 'done', minutes: 2 },
+      ],
+      work: { steps: 2, tests: 3, screens: 2 },
+      gates: { checks: 'pass', checksText: '9 of 9 checks pass', review: 'pass', reviewBy: 'Claude', proof: 'fail' },
+      proof: [
+        {
+          criterion: 'The hearing room shows with its number',
+          before: 'sk139-before.png',
+          after: 'sk139-after.png',
+          beforeLabel: 'Before',
+          afterLabel: 'After',
+          note: 'Room 4 shows under the hearing date.',
+          page: '/cases/4417',
+          shows: 'met',
+        },
+        {
+          criterion: 'It says no room yet',
+          before: 'sk139-before.png',
+          after: 'sk139-after.png',
+          beforeLabel: 'Before',
+          afterLabel: 'After',
+          note: 'The case page is open.',
+          page: '/cases/4502',
+          shows: 'not-shown',
+          why: 'The picture shows a case with a hearing, so the words for a case with no hearing are not in it.',
+        },
+      ],
+      stuck: {
+        gate: 'proof',
+        kind: 'not-shown',
+        question: 'The squad could not show "done when" 2 on a screen. Try it yourself, or ask a question.',
+        points: ['"Done when" 2, It says no room yet: The picture shows a case with a hearing, so the words for a case with no hearing are not in it.'],
+        options: [
+          { do: 'retry', name: 'Take the screenshots again', note: 'Only the proof runs again. Nothing is rebuilt. You can add a note for the Tester.' },
+          { do: 'continue', name: 'Continue anyway', note: 'Go on with a "done when" not shown yet. Write why: it shows on the ticket, the pull request and the release notes.' },
+          { do: 'plan', name: 'Send it back to the plan', note: 'The Spec writer rewrites the plan with what went wrong.' },
+        ],
+      },
+      activity: log([
+        [3, 'tester', 'Could not show "done when" 2 on a screen after 2 more tries'],
+        [4, 'reviewer', 'Checked the screenshots: 1 met, 1 not shown yet'],
+        [8, 'tester', 'The screenshots do not show "done when" 2 clearly yet, so the Tester takes it again (try 2 of 2)'],
+        [11, 'tester', 'The screenshots do not show "done when" 2 clearly yet, so the Tester takes it again (try 1 of 2)'],
       ]),
     }),
     // Its design needs SK-146, which is not merged yet: the build waits for the person to choose how to build.
@@ -583,6 +739,7 @@ const SAMPLE_SIZE: Record<string, number> = { 'SK-138': 0.8, 'SK-141': 0.45, 'SK
 /** Writes a full demo board: tickets in every stage, past releases, decisions and proof images. */
 export function seedDemoBoard(bp: BoardPaths, opts: SeedOptions = {}): void {
   clearBoard(bp);
+  clearDemoRequirements(bp);
   const user = gitUserName();
   const speed = opts.speed ?? 1;
   const meta = demoMeta(user, speed, opts.project ?? 'Case portal');
@@ -601,6 +758,8 @@ export function seedDemoBoard(bp: BoardPaths, opts: SeedOptions = {}): void {
   }
   for (const r of demoReleases()) writeRelease(bp, r);
   for (const d of demoDecisions(user)) writeDecision(bp, d);
+  // The court portal's BRD, broken down and ready to approve, for the Requirements page.
+  seedDemoRequirements(bp, user);
   const assets = demoAssetsDir();
   fs.mkdirSync(bp.proofDir, { recursive: true });
   if (fs.existsSync(assets)) {

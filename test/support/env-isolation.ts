@@ -16,6 +16,12 @@ fs.writeFileSync(gitConfig, '[user]\n\tname = Momen\n\temail = momen@example.com
 process.env.GIT_CONFIG_GLOBAL = gitConfig;
 process.env.GIT_CONFIG_NOSYSTEM = '1';
 
+// A locale for git, as a person's terminal has. Started with none (an app opened from the Dock, an editor's test
+// runner), git on a Mac asks the system for the person's languages on every start, through one shared system service:
+// about 8 ms more per git call when quiet, and far more when other work keeps that service busy. The release and
+// handover tests run hundreds of git calls each, so that wait alone could push them past their time limits.
+if (!process.env.LC_ALL && !process.env.LANG) process.env.LANG = 'en_US.UTF-8';
+
 /**
  * Every env var that squad-kit reads to resolve planner or tracker credentials.
  * These leak in two realistic ways:

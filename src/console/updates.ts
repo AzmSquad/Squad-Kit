@@ -400,6 +400,8 @@ function besideLabel(key: string): string {
   if (key === '__blueprint') return 'The Architect reads the code for the architecture page';
   if (key === '__setup') return 'squad-kit tries the project once: its tests and its app';
   if (key === '__talk') return 'The Architect answers about the overview';
+  if (key.startsWith('__breakdown:')) return `The Analyst works on ${key.slice(12)}`;
+  if (key.startsWith('__send:')) return `Sending ${key.slice(7)} to the tracker`;
   return 'The Architect reads the project';
 }
 

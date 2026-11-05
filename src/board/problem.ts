@@ -44,7 +44,7 @@ const STOPPED = /^You stopped the squad\b/;
 const ROLE_OF: [string, string[]][] = [
   ['Analyst', ['analyst-read', 'triage', 'spec-rewrite', 'chat-spec']],
   ['Architect', ['plan-rewrite', 'answered-architect', 'chat-design', 'change-design']],
-  ['Builder', ['build', 'unstick', 'pick-up', 'fix', 'answered-builder', 'chat-carry-builder', 'change-build', 'review-fix', 'restore-tests', 'update-base']],
+  ['Builder', ['build', 'unstick', 'pick-up', 'fix', 'answered-builder', 'chat-carry-builder', 'change-build', 'review-fix', 'restore-tests', 'update-base', 'proof-fix']],
   ['Reviewer', ['review', 'answered-reviewer', 'chat-carry-reviewer']],
   ['Tester', ['proof', 'chat-carry-tester']],
 ];
@@ -60,9 +60,9 @@ function title(t: Ticket): string {
   const s = t.stuck!;
   if (STOPPED.test(s.question)) return 'You stopped the squad';
   if (s.budget) return s.budget === 'ticket' ? 'This ticket reached its budget' : "This month's budget is reached";
-  if (s.gate === 'checks') return s.kind === 'weakened' ? 'The tests were made weaker' : s.kind === 'no-tests' ? 'No tests to check the work' : 'The checks still fail';
+  if (s.gate === 'checks') return s.kind === 'weakened' ? 'The tests were made weaker' : s.kind === 'no-tests' ? 'No tests to check the work' : s.kind === 'guard' ? 'A file was blocked' : 'The checks still fail';
   if (s.gate === 'review') return 'The review is still open';
-  if (s.gate === 'proof') return s.kind === 'bad-proof' ? 'The screenshots did not pass the check' : 'No screenshots yet';
+  if (s.gate === 'proof') return s.kind === 'bad-proof' ? 'The screenshots did not pass the check' : s.kind === 'broken' ? 'A "done when" is not working yet' : s.kind === 'not-shown' ? 'A "done when" is not shown yet' : 'No screenshots yet';
   if (s.gate === 'merge') return 'The change clashes with newer code';
   if (s.gate === 'cap') {
     const role = t.capRaise?.role;

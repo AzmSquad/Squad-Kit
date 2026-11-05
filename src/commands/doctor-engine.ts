@@ -28,6 +28,7 @@ import { readLastRun } from '../core/last-run.js';
 import { formatTokenK } from '../ui/planner-cache-summary.js';
 import { GIT_UPDATE, MIN_GIT, gitIsNewEnough, gitVersion } from '../engine/git.js';
 import { sandboxStatus } from '../engine/sandbox.js';
+import { guardSupport } from '../engine/project-guard.js';
 
 export interface CheckResult {
   id: string;
@@ -148,6 +149,13 @@ export function checkAgentSandbox(rows: ReturnType<typeof sandboxStatus> = sandb
     detail: `${off.map((r) => `${r.tool}: ${r.why}`).join('; ')}. Steps run without it, as before`,
     ...(off.find((r) => r.fix) ? { fixHint: off.find((r) => r.fix)!.fix! } : {}),
   };
+}
+
+/** squad-kit's own guard for the project's own commands (tests, setup, the app). Without it they run as before. */
+export function checkProjectGuard(support = guardSupport()): CheckResult {
+  const name = "guard for the project's own commands";
+  if (support.on) return { id: 'project-guard', name, status: 'ok', detail: support.why };
+  return { id: 'project-guard', name, status: 'warn', detail: `${support.why}. The project's tests, setup and app run without it, as before`, ...(support.fix ? { fixHint: support.fix } : {}) };
 }
 
 async function checkConfigReadable(_paths: SquadPaths, ctx: DoctorContext): Promise<CheckResult> {
@@ -944,6 +952,7 @@ export async function runAllChecks(paths: SquadPaths, ctx: DoctorContext, fix: b
   await add('legacy .squad/prompts/ directory', () => checkLegacyPrompts(paths, ctx));
   await add('git version', async () => checkGitVersion());
   await add('sandbox for the Builder and Tester', async () => checkAgentSandbox());
+  await add("guard for the project's own commands", async () => checkProjectGuard());
   await add('planner configuration', () => checkPlannerConfig(paths, ctx));
   await add('planner auth mode', () => checkPlannerAuthMode(paths, ctx, fix));
   await add('planner credential resolves', () => checkPlannerCredential(paths, ctx));

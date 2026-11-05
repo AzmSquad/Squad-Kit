@@ -20,13 +20,17 @@ export function changeWaits(t: Ticket): boolean {
 
 /** Everything that needs the person: questions, plans, proof, decisions, changes, and steps that look stuck. Same rule as `inbox()` on the server. */
 export function needsYou(t: Ticket): boolean {
-  return Boolean(t.waiting || t.quiet?.kind === 'stuck' || t.outdated?.length || changeWaits(t) || t.testChange);
+  return Boolean(t.waiting || t.quiet?.kind === 'stuck' || t.outdated?.length || changeWaits(t) || testChangeWaits(t));
 }
 
-/** "The Architect suggests changing the test command from …": the same words as `squad inbox`. */
+/** squad-kit settles a change to the test command itself; it waits for the person only when squad-kit cannot tell. */
+export function testChangeWaits(t: Ticket): boolean {
+  return Boolean(t.testChange?.ask);
+}
+
+/** The line in Waiting for you. It never names a command: engineers get those in the details. */
 export function testChangeLine(t: Ticket): string {
-  const c = t.testChange;
-  return c ? `The Architect suggests changing the test command from "${c.from}" to "${c.to}"` : '';
+  return testChangeWaits(t) ? 'squad-kit cannot tell which way of testing to keep' : '';
 }
 
 /** The browser tab says how many things wait: "(2) roomflow". Nothing waiting, no number. */
@@ -79,7 +83,7 @@ export function reasonsOf(t: Ticket): WaitReason[] {
   if (t.quiet?.kind === 'stuck') out.add('quiet');
   if (t.outdated?.length) out.add('outdated');
   // With the design waiting, the change to the test command is part of it.
-  if (t.testChange && t.waiting?.kind !== 'plan') out.add('test-command');
+  if (testChangeWaits(t) && t.waiting?.kind !== 'plan') out.add('test-command');
   return [...out];
 }
 
@@ -195,7 +199,7 @@ export function noticeText(n: Notice): { title: string; body: string } {
     stuck: 'the squad stopped and needs you',
     quiet: 'a step looks stuck',
     outdated: 'a newer decision changes the plan',
-    'test-command': 'a new test command waits for you',
+    'test-command': 'a choice about the tests waits for you',
     yours: 'you took it over',
     chat: 'your talk with the squad',
     release: 'ready to release',

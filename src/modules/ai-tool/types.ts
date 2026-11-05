@@ -43,8 +43,6 @@ export interface SandboxAsk {
   read: string[];
   /** The only hosts its commands may reach; "*.example.com" covers every subdomain. */
   hosts: string[];
-  /** Commands that run outside the sandbox, by how they start: a browser, which cannot run inside it everywhere. */
-  outside?: string[];
 }
 
 /** Whether a tool can keep a step's commands in its sandbox on this computer, in words for people. */
@@ -69,6 +67,20 @@ export interface BlockedAction {
   kind: 'host' | 'read' | 'write';
   /** The host, or the file. */
   target: string;
+}
+
+/**
+ * squad-kit's own tools for one run (the window), over MCP: where they answer, the run's key, the tool names, and the
+ * command of the stdio bridge for an agent that cannot reach MCP over HTTP. The bridge reads the address and the key
+ * from SQUAD_WINDOW_URL and SQUAD_WINDOW_KEY.
+ */
+export interface RunWindow {
+  /** The server's name, as the agent sees its tools under it. */
+  name: string;
+  url: string;
+  key: string;
+  tools: string[];
+  bridge: { command: string; args: string[] };
 }
 
 export interface AgentRun {
@@ -109,6 +121,8 @@ export interface AgentRun {
   env?: Record<string, string>;
   /** The most this run may use; reaching it stops the run with `capped`, not a failure. */
   caps?: RunCaps;
+  /** squad-kit's own tools for this run, over MCP. */
+  window?: RunWindow;
   onTool?(event: ToolEvent): void;
   /** A sandboxed command was refused something. */
   onBlocked?(action: BlockedAction): void;
@@ -192,6 +206,13 @@ export interface AiTool {
    * depth (a folder ends with a slash). No agent may change them: the next session would follow what it wrote.
    */
   readonly instructionFiles?: readonly string[];
+  /**
+   * The tool's own sign-in, history and settings with keys in them, under the person's home folder: the project's
+   * own commands (tests, setup, the app) never read them, whatever an engineer allows.
+   */
+  privateFiles?(home: string): string[];
+  /** The tool's keys and settings in the environment, by name, or by prefix with a trailing "*": kept out of the project's own commands. */
+  readonly secretEnv?: readonly string[];
   /** Installed and signed in, as far as squad-kit can tell without running it. */
   ready(): boolean;
   /** The installed version, for Report a problem, or null when it is not installed. */
@@ -203,6 +224,11 @@ export interface AiTool {
   /** What its sandbox refused, from a command's output as the tool reports it. */
   blocked?(output: string): BlockedAction[];
   run(r: AgentRun): Promise<AgentResult>;
+  /**
+   * True when a run's `error` is one of the module's own plain sentences, not the tool's raw words: only those reach
+   * the person's stop as they are (engine/plain-stop.ts).
+   */
+  ownWords?(said: string): boolean;
   /** One plain-words line for what a tool call is doing, or null to leave it out. */
   describe(e: ToolEvent, cwd: string): string | null;
   /** How the person pays, as the tool says without running a model, or null when it cannot tell. */

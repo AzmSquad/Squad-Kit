@@ -139,7 +139,7 @@ export function SlowPanel({ t }: { t: Ticket }) {
   const stop = () => act.mutate({ path: `/api/v1/tickets/${t.id}/stop`, done: 'Stopping. The work so far is kept.' });
   const end = () => act.mutate({ path: `/api/v1/tickets/${t.id}/unstick`, done: 'Ended the stuck command. The squad carries on.' });
   const free = () =>
-    act.mutate({ path: `/api/v1/tickets/${t.id}/free-port`, done: `Freed port ${s?.freePort?.port}. The step starts again, with the work so far.` }, { onSettled: () => setFreeing(false) });
+    act.mutate({ path: `/api/v1/tickets/${t.id}/free-port`, done: 'Stopped it. The step starts again, with the work so far.' }, { onSettled: () => setFreeing(false) });
   return (
     <section className={`slowcard ${stuck ? 'stuck' : ''}`} aria-label={s.title}>
       <div className="slowhead">
@@ -161,7 +161,7 @@ export function SlowPanel({ t }: { t: Ticket }) {
         <div className="ways">
           {s.freePort && (
             <button className="btn pri" disabled={busy} onClick={() => setFreeing(true)}>
-              Free the port and try again
+              Stop it and try again
             </button>
           )}
           {stuck && s.canEnd && !s.freePort && (
@@ -187,6 +187,14 @@ export function SlowPanel({ t }: { t: Ticket }) {
           </button>
         </div>
         {stuck && s.canEnd && <p className="note slownote">Ending the command gives the squad an error back, and it carries on in the same conversation.</p>}
+        {s.detail && (
+          <details className="costdetails slownote">
+            <summary>Details for engineers</summary>
+            <p className="note" style={{ whiteSpace: 'pre-line', overflowWrap: 'anywhere' }}>
+              {s.detail}
+            </p>
+          </details>
+        )}
         <div className="slowfoot">
           <span>{s.limit ?? 'Nothing is lost whatever you choose.'}</span>
           <span className="grow" />
@@ -195,7 +203,7 @@ export function SlowPanel({ t }: { t: Ticket }) {
       </div>
       {freeing && s.freePort && (
         <Modal
-          title={`Free port ${s.freePort.port}?`}
+          title="Stop it and try again?"
           onClose={() => setFreeing(false)}
           footer={
             <>
@@ -211,7 +219,7 @@ export function SlowPanel({ t }: { t: Ticket }) {
           }
         >
           <p>
-            squad-kit stops {s.freePort.what} on port {s.freePort.port}, then starts this step again.{' '}
+            squad-kit stops {s.freePort.what}, then starts this step again.{' '}
             {s.freePort.what.startsWith('your app') ? 'You can start it again from Your apps afterwards.' : 'squad-kit started that program itself, so nothing of yours is closed.'}
           </p>
           <p className="note">The work so far is kept. squad-kit checks again that it started the program before it stops it.</p>

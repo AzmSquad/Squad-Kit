@@ -14,6 +14,7 @@ import {
   startTalk,
   stopSetup,
   stopTalk,
+  tellIdea,
   ticketFromIdea,
 } from '../../board/first-run.js';
 import type { SetupStepId } from '../../board/setup-state.js';
@@ -61,6 +62,11 @@ export function mountOverviewApi(app: Hono, opts: { paths: SquadPaths }): void {
   app.post('/api/v1/overview/approve', (c) => act(c, () => approveOverview(bp)));
   // A ticket idea becomes a ticket.
   app.post('/api/v1/overview/ideas/:n', (c) => act(c, () => ticketFromIdea(bp, Number(c.req.param('n')))));
+  // "What do you want to build?" on a project with no code: the answer goes to the Architect's read.
+  app.post('/api/v1/overview/idea', async (c) => {
+    const b = await body<{ text?: string }>(c);
+    return act(c, () => tellIdea(bp, b.text ?? ''));
+  });
   // "Read it again": the whole setup from the read, so the overview is checked again.
   app.post('/api/v1/overview/read-again', (c) => act(c, () => setupAgain(bp, 'read')));
 

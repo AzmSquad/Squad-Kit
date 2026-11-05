@@ -7,10 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-squad-kit 1.2 is about trust: squad-kit shows that it understands your project, says what the work really cost, and
-makes the squad's work harder to fake.
+## [1.2.0] — 2026-11-05
 
-### First run and Overview
+squad-kit 1.2 is about trust: squad-kit shows that it understands your project, says what the work really cost, and
+makes the squad's work harder to fake. It also takes a whole requirements document and builds it, story by story.
+Windows is less protected and not fully tested yet (see What's safer).
+
+### What's new
+
+#### From a BRD to a built product
+
+- **A new Requirements page** (after Overview). **Add a BRD**: a PDF, Word or Markdown file, or pasted text, with
+  mockups if you have them. The Analyst reads it live and asks only about what is **missing in the BRD** or where
+  **two parts clash**. Then it writes epics, features and stories, each with its checks (Given, When, Then), size,
+  needs and its place in the document.
+- **Review it as a tree or a map.** Rename, rewrite, move, add or remove any part, or ask the Analyst to redo one.
+  An estimate from this project's own tickets: "20 stories, about $140 and 6 hours, 2 at a time". Nothing is built
+  or sent before **Approve breakdown**.
+- **Send to Azure DevOps**: epics, features and stories with parent and dependency links, into the backlog. **Send
+  changes** updates only what changed. squad-kit never deletes there, and a cut-off send makes no doubles.
+- **Build continuously**: each story becomes a ticket on the new **Builds by itself** track, in the order its needs
+  allow, within the parallel limit and the budgets. No questions, the plan is approved by itself, small choices are
+  listed under **Decided for you** (press **Change** on any), and it merges by itself once the checks, the review
+  and the screenshots pass. It stops only for a gap, a clash or a failed check, and then only that story and the
+  ones that need it wait. Releases stay your button.
+- Terminal: `squad requirements add|show|answer|edit|move|approve|send|build|start|…`, `squad decided`. See
+  [From a BRD to a built product](docs/requirements.md).
+
+#### Proof you can read
+
+- **squad-kit takes the screenshots itself, with its own browser.** The Tester says which pages, steps and sizes.
+  squad-kit opens the story's own copy of the app, does the steps and takes the pictures.
+- **One or more pictures for each "done when"**: one per part or case, up to 6.
+- **Each "done when" gets a verdict**, from the Tester and squad-kit's own check of all its pictures together:
+  **Met**, **Not working yet** (a picture shows it does not work), **Not shown yet** (the pictures do not show it
+  clearly) or **Not on a screen** (it cannot be shown at all, like an email or what happens after a restart). Not
+  working yet goes back to the Builder once, then it is a plain stop. Not shown yet goes back to the Tester up to 2
+  more times, keeps the good pictures and never reaches the Builder. Not on a screen keeps its reason and does not
+  stop the story, unless every "done when" ends that way.
+- **Also changed, not in the plan**: what the change touches beyond its plan, in the Reviewer's words. It never
+  blocks. You see it at your check, on a stop, on the ticket and in the release notes.
+
+#### Your turn
+
+- **Where to look**: each page the proof names, with the "done when" it shows.
+- **Try it yourself**: runs the story's own copy of the app, with the change in it and nothing merged, so you can
+  click through it before **Looks right**. It stops by itself when the story moves on. Terminal: `squad try <ticket>`.
+- **Ask a question** on every story, in every state: working, in the queue, waiting for another story, stopped, at
+  review, taken over or released. Whoever knows the story best answers: the Analyst before the build, the Builder
+  during and after it, the Tester once there are screenshots. It answers questions only, and the story stays exactly
+  where it is. Terminal: `squad chat <ticket> --ask`.
+
+#### First run and Overview
 
 - **Add project says what it found** (code with or without git, an empty folder, several repos, an older
   squad-kit) and what happens next, before you confirm.
@@ -22,9 +70,14 @@ makes the squad's work harder to fake.
   date after every merged ticket.
 - **The rules the Architect found are proposals until you approve them** with **Looks right, start working**. They
   used to be saved as approved without being shown. **Something is wrong** opens a talk with the Architect.
+- **An empty project asks "What do you want to build?"**, in your own words, in English or Arabic. The Architect
+  writes down what you want with first stories for it, and picks the technology itself when your first story is
+  planned. Terminal: `squad overview --build "what you want"`.
+- **squad-kit finds the commands of a project that started empty.** After the first build it reads how to test and
+  run the project from its files, and saves that. Nobody is asked.
 - Terminal: `squad setup`, `squad overview`, `squad demo --first-run`.
 
-### Conversation and Cost
+#### Conversation and Cost
 
 - **Conversation opens on "What happened"**: one card per step with its time, a one-line summary and what it handed
   in, drawn as the real thing. **Full log** keeps the detail, in plain words, with **Open it in Claude Code**.
@@ -34,56 +87,110 @@ makes the squad's work harder to fake.
 - **Averages per Quality setting** (cost and squad time per accepted ticket) on the Squad and AI page.
 - Terminal: `squad cost`, `squad config set payment`, `squad config set budget`.
 
-### Stronger gates
-
-- **"Not checked" instead of a green pass** when a project has no tests. You are asked once per project, with the
-  Architect's suggested test command. A project without tests also checks that the app starts.
-- **Weakened tests stop the ticket**: deleted tests, fewer tests, a changed test setup, or new skip/only markers, in
-  the common languages. **Continue anyway** needs a reason that stays on the record.
-- **Proof is verified**: each screenshot must be a real image taken in this step, and "after" must differ from
-  "before".
-- **The Reviewer sees the whole change and the check results** in every round, not only the fix.
-- **A change to an existing test command needs your approval.**
-
-### The Builder's sandbox and limits
-
-- **The Builder's and Tester's commands run in Claude Code's sandbox** where the computer allows it: they write only
-  in the ticket's copy, its proof folder and a private package cache, can't read your keys, sign-ins or `.env`
-  files, and reach only package registries and the websites you allow (Settings, `squad config set hosts`). A
-  blocked command says what and why. `squad doctor` shows whether the sandbox runs here.
-- **Turn and spend caps per step** from the Quality setting. Reaching one keeps the work and offers **Give it more**
-  or **Stop**.
-
-### Tickets that depend on each other
+#### Tickets that depend on each other
 
 - **The Analyst and the Architect see the other open tickets** and the files they change.
 - **A design can depend on another ticket.** The ticket then waits before building: **Build on its branch**, **Build
   anyway**, or **Wait** (it starts by itself when the other one merges). Terminal: `squad depends`, `squad build`.
 - **Bring in latest main** is a button on a ticket being built (`squad bring-in`).
 
-### Releases
+#### Releases
 
 - **Take a ticket out of the next release** before you release it (`squad release --without`).
 - **Released tickets' branches are cleaned up** on this computer, and on the remote when you ask (`squad branches`).
   A branch with unmerged work is never deleted.
 - **A release cut off by a restart finishes or rolls back** cleanly on the next start.
 
-### Also
+#### Also
 
+- **The ticket can go full width** (the button next to Close; remembered in this browser). **Hand over** and
+  **Propose a change** moved to the ⋯ menu, and Propose a change is also on the ticket's bottom bar, so the header is
+  one row at any width.
+- **The Waiting for you banner is one slim, calm row**, and stays readable beside a docked chat.
 - **The update banner shows what is new in every release since your version**, and **Check for updates** reads the
   notes again.
+- **Free the port and try again** on a stuck Tester step, for programs squad-kit itself started.
+
+### What's safer
+
+- **Agents get fixed tools, "the window"**: `take_screenshots`, `look_at_page`, `start_app`, `stop_app`, `app_status`,
+  `run_checks` and `i_am_stuck`. An agent fills in the fields, squad-kit checks them, does the job itself and hands
+  back the result. There is no free command: only this story's app on this computer, only the project's saved
+  commands, only what squad-kit started. A request outside that is refused and written in the activity, and three
+  refusals in one step stop the agent.
+- **`i_am_stuck`**: when something technical is in an agent's way, squad-kit tries its own fixes (its browser, a free
+  port, starting the app again) and writes one plain line. It is never a question to you.
+- **Technical questions never reach you.** squad-kit reads each question an agent asks, with its choices and
+  everything shown with it, and does not trust the agent's label. A question about ports, commands, files or settings
+  goes back to the agent to decide. An agent that keeps asking stops in plain words. When another program holds a
+  port and going around it did not work, you get one plain card with no port in it: **Stop it** (with a confirm) or
+  **Skip the browser tests**.
+- **Some asks are refused and logged.** Asking you to change squad-kit's settings or protected files, to hand over a
+  password or a key, or to change git history never reaches you. One plain line goes in the activity. A reply in a
+  chat that asks for any of these is left out too.
+- **A second guard for the project's own commands.** The tests, lint, build, setup, the app's start and the release
+  pipeline run in squad-kit's own guard on Mac and Linux. They work normally, browser tests too, and can reach the
+  network, but they can't read your keys, sign-ins, browser profiles, squad-kit's own folder or the `.env` files in
+  your project folder. If a project truly needs a file outside its copy, one plain sentence says so, and an engineer
+  can allow it in Settings or with `squad config set allow-read <path>` and `squad config set allow-write <path>`.
+  `squad doctor` shows whether the guard runs here.
+- **Windows is less protected and not fully tested yet.** There, the agents' own commands and the project's own
+  commands have no guard, so they can reach other files on the computer. Use it on projects you trust. Settings and
+  the Squad and AI page say "Windows: less protected".
+- **"Not checked" instead of a green pass** when a project has no tests. You are asked once per project, with the
+  Architect's suggested test command. A project without tests also checks that the app starts.
+- **Weakened tests stop the ticket**: deleted tests, fewer tests, a changed test setup, or new skip/only markers, in
+  the common languages. **Continue anyway** needs a reason that stays on the record.
+- **Proof is verified**: each screenshot must be a real image taken in this step, and "after" must differ from
+  "before", unless the "done when" says the screen stays as it was.
+- **The Reviewer sees the whole change and the check results** in every round, not only the fix. In its review it can
+  also look at a page of the app itself (`look_at_page`).
+- **A change to the test command is tried first.** squad-kit runs the new command and the current one in the ticket's
+  copy, and keeps the new one only when it passes and runs at least as many tests. You choose only when it cannot
+  tell. Terminal: `squad test-command <ticket> --use | --keep`.
+- **The Builder's and Tester's commands run in Claude Code's sandbox** where the computer allows it: they write only
+  in the ticket's copy, its proof folder and a private package cache, can't read your keys, sign-ins or `.env`
+  files, and reach only package registries and the websites you allow (Settings, `squad config set hosts`). A
+  blocked command says what and why. `squad doctor` shows whether the sandbox runs here.
+- **Turn and spend caps per step** from the Quality setting. Reaching one keeps the work and offers **Give it more**
+  or **Stop**.
+- **Every command squad-kit suggests you copy quotes your text safely**, on the board and in the terminal.
+- **zod 4, the AI SDK 5 and diff 8** for the 0.x planner commands. This closes the last high alert. The planner's
+  file-read tool on the Claude Agent SDK path now works with ranged reads.
+
+### What's fixed
+
+- **Plain stop messages.** A stop says what happened in squad-kit's own plain words, with **Try again**. A tool's raw
+  error never reaches you: the exact words are in the ticket's Developer tab and the app log.
+- **A failed check runs once more** before anyone is sent to fix it, so a flaky test costs no Builder run. If it passes
+  then, the activity and the Developer tab say "failed once, passed when run again". Not after a Stop, a command
+  squad-kit had to end, or a file the guard blocked.
+- **The Builder is told about old failures**: the checks that already failed on the first run, before any story
+  touched the code. It fixes what its story broke and leaves other screens alone. The checks must still pass.
+- **A clash no longer stops a story too soon on Builds by itself.** While main keeps moving, squad-kit brings it in
+  again by itself, up to 3 times, with the checks, the review and the proof each time. If main has not moved, or after
+  the third time, you get the clash card. Other tracks show the card at the first clash, as before.
+- **Apps move to a free port by themselves** when another program holds the usual one: Your apps, the story's own copy
+  and Try it yourself. In Your apps this works when the start command or the app's code takes a port setting; if not,
+  one plain sentence says what is in the way. `--next-port` on `squad app start` and `squad app restart` is still
+  accepted, and now does nothing.
+- **squad-kit installs its own screenshot browser.** No `npx playwright`, and nothing to install by hand. The first
+  time, one line says "Setting up squad-kit's screenshot browser. This happens only once."
+- **The step timer counts only running time.** It stands still while a ticket waits for you, for another story or for
+  a free place, so "Taking longer than usual" no longer shows on a step that was only waiting.
+- **A restart is not a failure.** Restarting the board, Stop or the computer sleeping no longer counts as a failed
+  try or raises the model's effort. The Builder carries on with the same step in the same conversation, instead of
+  starting the work again, and the step's clock keeps its time ("resumed after a restart").
+- **Nothing is left behind.** When a step ends, on Stop, and when the board restarts or quits, squad-kit stops every
+  program it started for the ticket, including test servers that left their process group. It finds them by where
+  they run: inside squad-kit's own copy of the code, never your folders or Your apps.
+- **squad-kit clears its own leftovers before the checks** and says so in one activity line. If an agent asks about a
+  busy port that squad-kit caused, squad-kit answers it and you never see the question.
 - **Desktop notices: Turn on always answers.** It says when the browser is asking, explains how to allow notices
   when the browser stays silent (for example in Arc), and sends one test notice.
 - **A ticket a teammate deleted** shows "Deleted by <owner>" with **Remove from my board**.
 - **A chat message sent during Claude's usage limit waits** and is answered when the squad carries on.
-- **Free the port and try again** on a stuck Tester step, for programs squad-kit itself started.
 - **On a phone**, the banners fold into one slim row while a ticket is open, and the website's docs pages fit.
-- **Every command squad-kit suggests you copy quotes your text safely**, on the board and in the terminal.
-
-### Security
-
-- **zod 4, the AI SDK 5 and diff 8** for the 0.x planner commands. This closes the last high alert. The planner's
-  file-read tool on the Claude Agent SDK path now works with ranged reads.
 
 ## [1.1.1] — 2026-11-03
 
@@ -964,7 +1071,8 @@ First public release.
 - Plan-generation meta-prompt (`generate-plan.md`), intake template (`intake.md`), and plan skeleton reference (`story-skeleton.md`).
 - Documentation: `docs/philosophy.md`, `docs/getting-started.md`, `docs/customization.md`, `docs/vs-spec-kit.md`.
 
-[Unreleased]: https://github.com/AzmSquad/squad-kit/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/AzmSquad/squad-kit/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.2.0
 [1.1.1]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.1.1
 [1.1.0]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.1.0
 [1.0.1]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.0.1

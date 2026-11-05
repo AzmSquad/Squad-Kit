@@ -35,12 +35,14 @@ async function until(id: string, done: (t: Ticket) => boolean): Promise<Ticket> 
 describe('board flow', () => {
   it('seeds a board with something waiting for each kind of stop', () => {
     expect(actions.inbox(bp).map((t) => `${t.id}:${t.waiting!.kind}`)).toEqual([
+      'SK-135:stuck',
       'SK-139:proof',
       'SK-142:proof',
       'SK-144:stuck',
       'SK-148:questions',
       'SK-150:stuck',
       'SK-152:depends',
+      'SK-155:stuck',
     ]);
   });
 

@@ -11,7 +11,8 @@ Moving is one step: open the project in 1.0. squad-kit does the rest, once, and 
 says what happens, so nothing surprises you.
 
 - [From squad-kit 0.x](#from-squad-kit-0x): a project with `.squad/stories/` and `.squad/plans/`.
-- [From an early 1.0 board](#from-an-early-10-board): a project with a `.squad/board/` folder.
+- [From an early 1.0 board](#from-an-early-10-board): a project with a `.squad/board/board.yaml` file. Only this kind
+  is moved, and only this kind gets a backup copy.
 
 ## Before you start
 
@@ -45,7 +46,12 @@ The terminal shows each thing squad-kit did, for example:
 ✓ AI tools: Claude Code ready, Codex not installed
 ```
 
-Then the board opens, and the Architect reads the project for a few minutes.
+Then a setup page opens with live steps while the Architect reads the project for a few minutes, and the
+**Overview** shows you what it understood.
+
+squad-kit adds its own files beside your old ones, in the same `.squad/` folder. It makes no backup copy for a 0.x
+project: it only adds files, adds one section to `config.yaml` and moves `secrets.yaml`. **Your stories and plans do
+not become tickets.** They stay where they are, and you start new work on the board.
 
 ### What stays
 
@@ -57,6 +63,8 @@ Then the board opens, and the Architect reads the project for a few minutes.
   `project.before-squad-kit.md` and so on, and tells you.
 - **The 0.x commands** (`squad new-story`, `squad new-plan`, `squad list`, `squad auth`, `squad config`,
   `squad doctor`) still ship and still work on your stories and plans.
+- **Nothing is moved into a new layout.** A `.squad/board/` folder without a `board.yaml` file in it is left as it is
+  too.
 
 ### What moves
 
@@ -96,8 +104,8 @@ After the first open, `git status` shows `.squad/config.yaml` as changed. That i
 
 ## From an early 1.0 board
 
-The first 1.0 builds kept the whole board in `.squad/board/`: specs and decisions next to live progress, agent
-chats, screenshots and tokens. 1.0 splits these into two homes:
+The first 1.0 builds kept the whole board in `.squad/board/`, with its settings in `.squad/board/board.yaml`: specs
+and decisions next to live progress, agent chats, screenshots and tokens. 1.0 splits these into two homes:
 
 - the **project's memory** in `.squad/`
 - **this computer's part** in `~/.squad-kit/projects/<id>/`
@@ -182,7 +190,7 @@ fixed.
 | The squad's copies of the code, one per ticket | `~/.squad-kit/worktrees/` |
 | Your settings: tickets at once, your own model choices | `~/.squad-kit/settings.yaml` |
 | The app's list of projects | `~/.squad-kit/projects.json` |
-| Backups made by a move | `~/.squad-kit/backups/` |
+| Backups made by moving an early 1.0 board | `~/.squad-kit/backups/` |
 | 0.x stories and plans | `.squad/stories/`, `.squad/plans/`, unchanged |
 
 The project's id in `config.yaml` links the two homes. If you move the project folder, or clone it on a

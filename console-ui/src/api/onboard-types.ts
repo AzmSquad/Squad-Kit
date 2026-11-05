@@ -104,6 +104,7 @@ export interface OverviewTalk {
   messages: ChatMessage[];
   stopping?: boolean;
   reread?: boolean;
+  idea?: string;
 }
 
 export interface OverviewRule {
@@ -138,6 +139,8 @@ export interface OverviewView {
   setup?: { done: number; total: number; line: string };
   talk?: OverviewTalk;
   empty: boolean;
+  /** On a project with no code: what the person said they want to build. */
+  idea?: string;
   old: boolean;
   command: string;
 }
