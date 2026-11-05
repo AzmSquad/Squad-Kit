@@ -13,6 +13,7 @@ import path from 'node:path';
 const {
   allowPath,
   buildGuard,
+  makeOwnFolders,
   profileText,
   bubblewrapArgs,
   projectEnv,
@@ -136,10 +137,32 @@ describe('the bubblewrap arguments (Linux)', () => {
     expect(args.slice(0, 3)).toEqual(['--ro-bind', '/', '/']);
     const joined = args.join(' ');
     expect(joined).toContain(`--bind ${cwd} ${cwd}`);
-    expect(joined).toContain(`--bind ${cache} ${cache}`);
+    expect(joined).toContain(`--bind-try ${cache} ${cache}`);
     expect(joined).toContain(`--tmpfs ${path.join(home, '.ssh')}`);
     // The command runs through a shell at the end.
     expect(args.slice(-3)).toEqual(['/bin/sh', '-c', 'npm test']);
+  });
+
+  it('does not stop at a folder that is not on this computer', () => {
+    const gone = path.join(base, 'not-there-yet');
+    const spec = buildGuard({ cwd, root, cache, extraWrite: [gone], extraRead: [], home, platform: 'linux', allow: { allowWrite: [path.join(base, 'nor-this')] } });
+    spec.noRead.push(path.join(base, 'no-private-folder'), path.join(base, 'no-private-file.json'));
+    const args = bubblewrapArgs(spec, 'true');
+    const bound = args.flatMap((a, i) => (a === '--bind' ? [args[i + 1]] : []));
+    expect(bound).toEqual([spec.cwd]);
+    const joined = args.join(' ');
+    expect(joined).toContain(`--bind-try ${gone}`);
+    expect(joined).not.toContain('no-private-folder');
+    expect(joined).not.toContain('no-private-file.json');
+  });
+
+  it('makes squad-kit own folders before the command runs, and no others', () => {
+    const own = path.join(base, 'own-home');
+    const proof = path.join(own, 'proof');
+    const elsewhere = path.join(base, 'elsewhere');
+    makeOwnFolders({ write: [proof, elsewhere] } as never, own);
+    expect(fs.existsSync(proof)).toBe(true);
+    expect(fs.existsSync(elsewhere)).toBe(false);
   });
 });
 

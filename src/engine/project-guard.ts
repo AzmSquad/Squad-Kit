@@ -252,12 +252,16 @@ export function bubblewrapArgs(spec: GuardSpec, command: string): string[] {
   const args = ['--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--tmpfs', '/tmp', '--die-with-parent', '--new-session', '--unshare-pid', '--unshare-uts', '--unshare-ipc'];
   // Hide each private place first: a folder behind an empty tmpfs, a single file behind /dev/null. A later mount wins,
   // so the copy and the caches below override a private mount above them (a cache inside squad-kit's own folder).
+  // What is not on this computer has nothing to hide, and the rest of the computer is read-only, so bubblewrap could
+  // not make a place to mount it on anyway.
   for (const d of spec.noRead) {
+    if (!fs.existsSync(d)) continue;
     if (looksLikeFile(d)) args.push('--ro-bind-try', '/dev/null', d);
     else args.push('--tmpfs', d);
   }
-  const writable = [spec.cwd, ...spec.write, ...(spec.allow?.allowWrite ?? [])];
-  for (const w of writable) args.push('--bind', w, w);
+  // The copy must be there. The others may not be on this computer: bubblewrap stops at a folder it cannot find.
+  args.push('--bind', spec.cwd, spec.cwd);
+  for (const w of [...spec.write, ...(spec.allow?.allowWrite ?? [])]) args.push('--bind-try', w, w);
   for (const r of [...spec.read, ...(spec.allow?.allowRead ?? [])]) args.push('--ro-bind-try', r, r);
   // squad-kit's own browser build stays read-only even inside a writable cache.
   for (const n of spec.noWrite) args.push('--ro-bind-try', n, n);
@@ -376,9 +380,22 @@ export function spawnProject(command: string, o: SpawnProjectOptions): ChildProc
     return child;
   }
   if (o.guard && process.platform === 'linux') {
+    makeOwnFolders(o.guard);
     return track(spawn('bwrap', bubblewrapArgs(o.guard, command), base));
   }
   return track(spawn(command, { ...base, shell: true }));
+}
+
+/** The proof folder and the caches inside squad-kit's own folder: a folder not there yet could not be written in at all. */
+export function makeOwnFolders(guard: GuardSpec, home: string = squadHome()): void {
+  for (const w of guard.write) {
+    if (path.relative(home, w).startsWith('..')) continue;
+    try {
+      fs.mkdirSync(w, { recursive: true });
+    } catch {
+      // Bubblewrap skips a folder it cannot find.
+    }
+  }
 }
 
 /** Writes the profile to a temp file squad-kit owns; the file is removed when the command ends. */
