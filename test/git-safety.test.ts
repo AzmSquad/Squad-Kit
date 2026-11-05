@@ -140,7 +140,9 @@ describe('finding 1: nothing a hook planted runs outside its guard', () => {
     fs.writeFileSync(path.join(dir, 'scripts', 'lint.sh'), `#!/bin/sh\nprintf '#!/bin/sh\\ncat "${secret}" > "${leak}"\\n' > .githooks/pre-push\nchmod +x .githooks/pre-push\nexit 0\n`);
     stageAll(dir);
     await commitChecked(dir, 'Work', 'feat: work', 60_000, guardSupport().on ? { guard: guardOf(dir) } : {});
-    expect(exists(path.join(dir, '.githooks', 'pre-push'))).toBe(true);
+    // What it planted in the copy is not the check, so it does not stay; and were one there, the push would still not run it.
+    expect(exists(path.join(dir, '.githooks', 'pre-push'))).toBe(false);
+    script(path.join(dir, '.githooks', 'pre-push'), `cat "${secret}" > "${leak}"`);
     netGit(dir, ['push', 'origin', 'squad/ap-1:refs/heads/squad/ap-1']);
     expect(exists(leak)).toBe(false);
     expect(sh('git rev-parse squad/ap-1', remote)).toBe(sh('git rev-parse squad/ap-1', project));
@@ -211,8 +213,8 @@ describe('finding 2: a command in the guard cannot repoint git, and git starts n
     script(path.join(tmp, 'evil.sh'), `cat "${secret}" > "${leak}" 2>&1\nexit 0`);
     const out = path.join(tmp, 'tries');
     hook('pre-commit', [
-      'D=$(git rev-parse --absolute-git-dir)',
-      'C=$(git rev-parse --git-common-dir)',
+      `D="${sh('git rev-parse --absolute-git-dir', dir)}"`,
+      `C="${path.join(project, '.git')}"`,
       `cp -R "$C" "${evil}" 2>/dev/null`,
       `printf '[core]\\n\\tfsmonitor = "${tmp}/evil.sh"\\n' >> "${evil}/config"`,
       `printf '${evil}\\n' > "$D/commondir" 2>> "${out}" || echo COMMONDIR-REFUSED >> "${out}"`,
@@ -346,7 +348,9 @@ describe('finding 3: a hook refusal always has a way out', () => {
     await expect(actions.approveBeside(bp, 'AP-1')).rejects.toBeInstanceOf(actions.HookStopped);
     let t = readTicket(bp, 'AP-1')!;
     expect(t.stuck?.kind).toBe('hook');
-    expect(t.stuck?.detail).toContain("squad-kit's guard blocked");
+    // Its folder has no remote, as it has none of the repo's settings. Past it, the real one is read only.
+    expect(t.stuck?.detail).toContain('cannot check the base');
+    expect(sh('git for-each-ref refs/remotes', project)).toBe(sh('git rev-parse main', project) + ' commit\trefs/remotes/origin/main');
     t = actions.decideStuck(bp, 'AP-1', t.stuck!.options.findIndex((o) => o.do === 'skip-hooks'), { reason: 'the check needs the network' });
     expect(t.mergedAt).toBeTruthy();
   });
@@ -492,9 +496,11 @@ describe('finding 5: hook debt with the copy gone', () => {
   });
 });
 
-describe('finding 6: the commit guard opens only what a commit needs', () => {
+describe('finding 6: the commit guard opens nothing of the real git folder', () => {
   it('a hook reaches no real branch, no other copy, no replacement, no other store of objects', async () => {
     if (!guarded()) return;
+    // git as a tool could reach it, past the throwaway folder: it finds the real one from the copy.
+    const real = 'env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_EXEC_PATH "$(git --exec-path)/git"';
     const a = ticket('AP-1');
     const b = ticket('AP-2');
     fs.writeFileSync(path.join(b, 'b.txt'), 'b work\n');
@@ -504,14 +510,14 @@ describe('finding 6: the commit guard opens only what a commit needs', () => {
     const out = path.join(tmp, 'tries');
     const common = path.join(project, '.git');
     hook('pre-commit', [
-      `git update-ref -d refs/heads/squad/ap-2 2>> "${out}" || echo DELETE-B-REFUSED >> "${out}"`,
-      `git update-ref refs/heads/squad/ap-2 ${mine} 2>> "${out}" || echo MOVE-B-REFUSED >> "${out}"`,
-      `git update-ref refs/heads/squad/ap-1 ${mine}~0 2>> "${out}"; echo x > "${common}/refs/heads/squad/ap-1" 2>> "${out}" || echo MOVE-MINE-REFUSED >> "${out}"`,
-      `git update-ref refs/heads/main ${before} 2>> "${out}" || echo MOVE-MAIN-REFUSED >> "${out}"`,
-      `git symbolic-ref HEAD refs/heads/main 2>> "${out}" || echo HEAD-REFUSED >> "${out}"`,
-      `git replace ${mine} ${before} 2>> "${out}" || echo REPLACE-REFUSED >> "${out}"`,
+      `${real} update-ref -d refs/heads/squad/ap-2 2>> "${out}" || echo DELETE-B-REFUSED >> "${out}"`,
+      `${real} update-ref refs/heads/squad/ap-2 ${mine} 2>> "${out}" || echo MOVE-B-REFUSED >> "${out}"`,
+      `${real} update-ref refs/heads/squad/ap-1 ${mine}~0 2>> "${out}"; echo x > "${common}/refs/heads/squad/ap-1" 2>> "${out}" || echo MOVE-MINE-REFUSED >> "${out}"`,
+      `${real} update-ref refs/heads/main ${before} 2>> "${out}" || echo MOVE-MAIN-REFUSED >> "${out}"`,
+      `${real} symbolic-ref HEAD refs/heads/main 2>> "${out}" || echo HEAD-REFUSED >> "${out}"`,
+      `${real} replace ${mine} ${before} 2>> "${out}" || echo REPLACE-REFUSED >> "${out}"`,
       `echo /elsewhere > "${common}/objects/info/alternates" 2>> "${out}" || echo ALTERNATES-REFUSED >> "${out}"`,
-      `git update-ref refs/tags/v9 ${mine} 2>> "${out}" || echo TAG-REFUSED >> "${out}"`,
+      `${real} update-ref refs/tags/v9 ${mine} 2>> "${out}" || echo TAG-REFUSED >> "${out}"`,
       `echo x > "${common}/packed-refs" 2>> "${out}" || echo PACKED-REFUSED >> "${out}"`,
       `echo x > "${common}/shallow" 2>> "${out}" || echo SHALLOW-REFUSED >> "${out}"`,
       'exit 0',

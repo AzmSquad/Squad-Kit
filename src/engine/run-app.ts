@@ -7,7 +7,7 @@ import { findApp, isUp, projectApps, type ProjectApp } from '../board/apps.js';
 import { readMeta, type BoardPaths } from '../board/store.js';
 import type { RepoInfo } from '../board/types.js';
 import { runCommand, tail } from './checks.js';
-import { guardSupport, projectGuardFor, spawnProject, type GuardSpec } from './project-guard.js';
+import { dockerBlockedWords, guardSupport, projectGuardFor, spawnProject, type GuardSpec } from './project-guard.js';
 import { git, latestBase } from './git.js';
 import { KILL_AFTER_MS, OWN_GROUP, endGroup, endTree, takenOver } from './process-group.js';
 import { portSettings } from './port-vars.js';
@@ -567,7 +567,7 @@ export class AppRunner {
       this.keep(app.repo, `${r.output}\n`);
       if (signal.aborted) return;
       // One plain sentence; the command and what it printed are behind "See what failed", for engineers.
-      if (!r.ok) return this.fail(run, `squad-kit could not set up ${app.name}.`, { detail: `${setup}\n${tail(r.output, 30)}` });
+      if (!r.ok) return this.fail(run, dockerBlockedWords(r.output, this.guardFor(dir)) ?? `squad-kit could not set up ${app.name}.`, { detail: `${setup}\n${tail(r.output, 30)}` });
       this.record(app.repo, (rec) => (rec.setupFor = deps));
     }
 
@@ -615,7 +615,7 @@ export class AppRunner {
       if (ended) {
         const taken = busyIn(printed);
         if (taken) return this.fail(run, ...(await this.busyPort(app, taken)));
-        return this.fail(run, 'It stopped while starting.', { detail: `${command}\n${tail(printed, 30)}` });
+        return this.fail(run, dockerBlockedWords(printed, this.guardFor(dir)) ?? 'It stopped while starting.', { detail: `${command}\n${tail(printed, 30)}` });
       }
       url ??= addressIn(printed);
       if (url) run.address = url;

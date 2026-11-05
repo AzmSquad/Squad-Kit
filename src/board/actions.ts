@@ -27,7 +27,7 @@ import type { BoardMeta, Decision, ImpactCheck, Release, TechDraft, Ticket, Unpu
 import { detectStack } from './stack.js';
 import { scheduleSquad } from './schedule.js';
 import { PullRequestClash, commitTicket, commitWithoutCheck, hooksStillOwed, liveRelease, onTheRemote, pushAgain } from '../engine/release.js';
-import { CommitStopped, HookRefused, MergeClash, addWorktree, git, pushedBranch, repairCopyLink, settleCopy, type HookRun } from '../engine/git.js';
+import { CommitStopped, HookRefused, MergeClash, addWorktree, cutOffWords, git, pushedBranch, repairCopyLink, settleCopy, type HookRun } from '../engine/git.js';
 import { guardSupport, ticketGuard } from '../engine/project-guard.js';
 import { holdRelease, releaseGoingOut } from './lock.js';
 import { repoFor, reposOf } from '../engine/repos.js';
@@ -536,7 +536,8 @@ export function acceptProof(bp: BoardPaths, ticket: Ticket, byItself?: string, o
  */
 function repairCopy(bp: BoardPaths, t: Ticket): void {
   if (!t.worktree || !repairCopyLink(path.join(bp.root, repoFor(readMeta(bp), t).path), t.worktree)) return;
-  settleCopy(t.worktree);
+  const onDisk = settleCopy(t.worktree);
+  if (onDisk) updateTicket(bp, t.id, (x) => addActivity(x, 'squad', cutOffWords(onDisk)));
 }
 
 /* ── The project's own commit hooks ──────────────────── */
@@ -626,6 +627,8 @@ async function saveBeside(bp: BoardPaths, ticket: Ticket, byItself?: string, sig
     savedCommits.set(key, await commitTicket(copy, { ...hookRun(bp, copy), signal: signal ? AbortSignal.any([signal, closing.signal]) : closing.signal }));
     if (copy.hookOwed) updateTicket(bp, copy.id, (t) => delete t.hookOwed);
   } catch (err) {
+    // A merge was finished before the hooks looked at it: no later save would show it to them.
+    if ((err instanceof CommitStopped || err instanceof HookRefused) && err.owed) updateTicket(bp, ticket.id, (t) => (t.hookOwed = true));
     if (err instanceof CommitStopped) throw err;
     if (err instanceof HookRefused) throw hookStopped(bp, ticket.id, err, byItself);
     throw actionFailed(bp, ticket.id, `squad-kit could not save the change. It is safe in the ticket's copy, and an engineer can see why in squad-kit's log. ${byItself ? 'Press Try again.' : 'Press Looks right to try again.'}`, err);

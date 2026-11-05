@@ -36,9 +36,11 @@ beforeEach(() => {
   base = fs.mkdtempSync(path.join(process.cwd(), '.guardtest-'));
   home = path.join(base, 'home');
   root = path.join(base, 'project');
-  cwd = path.join(root, 'copy');
+  // Beside the project, as a real copy is: a command in the project's own folder does not read its .env files.
+  cwd = path.join(base, 'copy');
   cache = path.join(home, 'projects', 'p', 'caches', 'ma-12');
   fs.mkdirSync(cwd, { recursive: true });
+  fs.mkdirSync(root);
   fs.mkdirSync(cache, { recursive: true });
   fs.mkdirSync(path.join(home, '.ssh'), { recursive: true });
 });

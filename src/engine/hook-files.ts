@@ -44,5 +44,5 @@ export function hookFiles(dir: string): string[] {
 export function isHookFile(rel: string, names: string[] = HOOK_FILES): boolean {
   const file = rel.split(path.sep).join('/');
   if (file.startsWith('package.json (')) return true;
-  return names.some((n) => (n.startsWith('/') ? file === n.slice(1) : n.endsWith('/') ? `/${file}`.includes(`/${n}`) : path.posix.basename(file) === n));
+  return names.some((n) => (n.startsWith('/') ? file === n.slice(1) : n.endsWith('/') ? `/${file}/`.includes(`/${n}`) : path.posix.basename(file) === n));
 }

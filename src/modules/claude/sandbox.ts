@@ -53,6 +53,7 @@ export function claudeSandbox(ask: SandboxAsk, platform: NodeJS.Platform = proce
       allowedDomains: ask.hosts,
       // Any other host is refused at once instead of asked about.
       strictAllowlist: true,
+      // No Unix socket is opened here, so its commands cannot reach Docker's: a container could read any folder.
       // macOS: tests may listen on this computer's own ports and reach them, as the app's own tests do.
       ...(platform === 'darwin' ? { allowLocalBinding: true } : {}),
     },

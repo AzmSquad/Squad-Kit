@@ -325,19 +325,48 @@ say so.
 **Guard for the project's own commands**: the Builder writes the code the tests run, so squad-kit runs the project's
 own tests, lint, build, setup, app and release pipeline in a guard of its own, on Mac and Linux. They work normally,
 browser tests too, and can reach the network for packages and tests. They can't read your keys, sign-ins, browser
-profiles, squad-kit's own folder or the `.env` files in your project folder, and they start without the AI, cloud and
-code-host keys. When a project truly needs a file outside its copy, the check stops with one plain sentence ("A check
-needed a file outside its copy, and squad-kit blocked it. An engineer can allow it in Settings."), and the file's path
-is in the details. On Linux the guard needs bubblewrap, and this page and `squad doctor` say how to turn it on.
+profiles or squad-kit's own folder in the places the guard knows, or the `.env` files in your project folder (on Linux, the
+ones it finds 3 folders down), and they start without the AI, cloud and code-host keys. When a project truly needs a file
+outside its copy, the check stops with one plain sentence ("A check needed a file outside its copy, and squad-kit blocked
+it. An engineer can allow it in Settings."), and the file's path is in the details. On Linux the guard needs bubblewrap, and
+this page and `squad doctor` say how to turn it on.
 
-**The project's own commit hooks** run in that guard too, at one moment only: when a change is saved. They look at it on
-a stand-in branch, so while they run the copy's branch reads `squad/saving/<branch>/now` (a hook that reads the branch
-name sees that). A hook can use git's stash, as lint-staged does, but cannot move a real branch, fetch, or change a git
-setting: a hook that needs those says no, and the ticket gets the usual card with **Save without this check**. npm and
-npx get a cache folder of the copy's own, so `npx` in a hook works with no packages installed. No other hook runs:
-squad-kit runs no `pre-push`, `post-merge` or `post-checkout`, since the project's own checks have run by then. A push
-from your own terminal still runs yours. A project that uses Git LFS still gets its large files uploaded when squad-kit
-pushes.
+**The guard stops accidents and most bad behaviour, but it is not a wall against code built on purpose to break out.** A
+command can still reach the network. On a Mac it can talk to other local services and read the environment of your other
+programs, so use squad-kit's sign-ins, not keys exported in a shell. On Linux it can reach your session's bus and gpg agent
+under `/run/user`. It can use a key loaded in an ssh agent, though not read it. Use squad-kit on projects and tickets you
+trust, and read what the Builder changes. `SECURITY.md` has the full list.
+
+**Caches**: package caches stay open. All of `~/.cache` and `~/Library/Caches` stay read only, as your own tools run programs
+from there, and a command's other tools keep their caches with the copy, so a ticket's first build may download again.
+Playwright gets a folder with the copy, with the browsers this computer has already linked in, so its tests run and `playwright
+install` downloads only what is missing. Puppeteer and Electron download to the copy's cache. On a Mac, Chrome's own sandbox
+cannot start inside the guard, so a project that opens Chrome through Puppeteer needs `args: ['--no-sandbox']` there; Playwright
+needs nothing. Another tool that installs itself there (Cypress) gets the blocked-file sentence until an engineer allows that
+folder.
+
+**Docker in the guard**: a container can mount any folder on this computer, so the project's own commands can't reach
+Docker, or colima, lima, Rancher Desktop, OrbStack, Finch or Podman. A check that tries stops with one plain sentence ("A
+check tried to use Docker, which is not open to the project's own commands. An engineer can allow it in Settings."), and
+the socket is in the details; so does a setup or an app's start. If your project's tests talk to Docker directly, they get
+that refusal until a person allows it: allow the socket's folder in Settings, or run `squad config set allow-write <folder>`,
+and point the tests at it with `DOCKER_HOST`. That opens everything the guard hides to those tests, so it is a choice for a
+project you trust. On a Mac, Docker's own port on this computer (2375 and 2376) is refused too, and has no setting to open
+it. On Linux that port stays open. 1.2.0 and 1.2.1 had no such rule.
+
+**The project's own commit hooks** run in that guard too, at one moment only: when a change is saved. They look at it in
+a throwaway git folder that squad-kit makes outside the project, so the real one stays read only, all of it. A hook sees
+your branch by its real name, the other branches and tags, the repo's own filters and git's stash, as lint-staged uses it;
+its stash, its objects and any commit of its own go when the folder goes. Only the files in the copy and the commit's words
+come back, and squad-kit stages the files itself and makes the real commit. **So what a hook staged counts for nothing:** a
+file it force-adds with `git add -f` stays out if git ignores it, a file it takes out with `git rm --cached` goes back in, and
+a report file it leaves in the copy goes in. The folder has none of the repo's other settings, so a hook that needs a remote
+or fetches says no, and the ticket gets the usual card with **Save without this check**. A Stop, a hook that runs out of time
+or a crash puts the files back as they were staged and removes new ones. What was on disk then is kept in
+`refs/squad/on-disk/<ticket>`, so an edit made in that moment is not lost, and the ticket says so after a crash. npm and npx
+get a cache folder of the copy's own, so `npx` in a hook works with no packages installed. No other hook runs: squad-kit runs
+no `pre-push`, `post-merge` or `post-checkout`, since the project's own checks have run by then. A push from your own
+terminal still runs yours. A project that uses Git LFS still gets its large files uploaded when squad-kit pushes.
 
 **Windows: less protected.** On Windows, squad-kit does not guard the agents' own commands or the project's own tests
 and app, so they can reach other files on the computer. Screenshots and the app still go through the window. Use it on

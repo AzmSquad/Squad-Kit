@@ -203,7 +203,8 @@ Now the squad works on its own:
    works. Its commands run in a sandbox where the computer allows it: they can only write in that copy, can't read
    your keys or sign-ins, and can only reach package registries and the websites you allow.
 2. squad-kit runs the project's **tests, lint and build** itself, in its own guard on Mac and Linux: they work
-   normally, but can't read your keys or sign-ins. A check that fails runs once more first, as a test can fail once for
+   normally, but can't read the usual places for keys and sign-ins. `SECURITY.md` says what the guard stops and what it
+   does not. A check that fails runs once more first, as a test can fail once for
    no reason in the code. If it still fails, the Builder fixes it, up to 3 tries, and is told which checks already
    failed before this ticket started. If the change deleted tests, has fewer tests, changed the test setup or skips
    tests, the ticket stops and says so. A project with no tests shows **Not checked** in orange, never a green pass.

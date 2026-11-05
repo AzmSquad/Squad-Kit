@@ -41,6 +41,7 @@ vi.mock('../src/modules/claude/sandbox.js', async (orig) => ({
 
 const { boardPaths, listTickets, readMeta, readTicket, removeTicket, updateTicket, writeMeta } = await import('../src/board/store.js');
 const { seedDemoBoard } = await import('../src/board/demo.js');
+const { GUARD_BLOCKED_DOCKER, guardSupport } = await import('../src/engine/project-guard.js');
 const actions = await import('../src/board/actions.js');
 const { LiveSquad } = await import('../src/engine/live.js');
 const { isPlain } = await import('../src/engine/shots.js');
@@ -121,6 +122,13 @@ describe('the proof through the window', () => {
     expect(run.prompt).toContain('use the nearest example that fits every rule, and say so in the note');
     // The window closed with the run: its app stopped and its key no longer works.
     expect(openWindows()).toBe(0);
+  });
+
+  it('an app that tries Docker to start: the stop says so, where the guard runs', async () => {
+    if (!guardSupport().on) return;
+    writeMeta(bp, { ...readMeta(bp), commands: { start: 'node -e "console.error(\'Cannot connect to the Docker daemon at unix:///var/run/docker.sock.\'); process.exit(1)"', url: 'http://127.0.0.1:47391' } });
+    await (new LiveSquad(bp) as unknown as Squad).proof(id);
+    expect(ticket().stuck?.question).toBe(GUARD_BLOCKED_DOCKER);
   });
 
   it('an app that does not start: a plain stop with Try again, the output for engineers, and no Tester', async () => {

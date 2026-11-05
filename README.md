@@ -138,7 +138,9 @@ The step-by-step guide is in [Getting started](docs/getting-started.md).
 - **The Builder works in a sandbox** where the computer allows it: its copy only, no keys or `.env` files, and only
   the package registries and websites you allow.
 - **The project's own commands run in a guard** on Mac and Linux: the tests, the setup and the app work normally, but
-  can't read your keys, your sign-ins or squad-kit's own files.
+  can't read the usual places for keys and sign-ins, or squad-kit's own files. The guard stops accidents and most bad
+  behaviour. It is not a wall against code built on purpose to break out, so use squad-kit on projects you trust and read
+  what the Builder changes.
 - **Agents get fixed tools, no free commands**, for screenshots, the app and the checks. squad-kit checks each
   request and does the job itself.
 

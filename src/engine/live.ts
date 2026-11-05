@@ -52,7 +52,7 @@ import { ALL_TOOLS, AgentWindow, toolsFor, tooManyMistakesWords, tooManyWords, t
 import { closeWindow, openWindow, windowAccess } from './window-server.js';
 import { TECHNICAL_TRIES, askText, judgeQuestion, judgeReply, questionBackPrompt, refusedAskLine, refusedReplyLine, stoppedQuestion } from './question-filter.js';
 import { TECHNICAL_STOP, ownRunWords, ownWords } from './plain-stop.js';
-import { addSnapshot, addWorktree, changedTracked, commitAll, conventionalWords, dropSnapshot, git, isAncestor, isLockFile, latestBase, putBackTracked, repairCopyLink, settleCopy } from './git.js';
+import { addSnapshot, addWorktree, changedTracked, commitAll, conventionalWords, cutOffWords, dropSnapshot, git, isAncestor, isLockFile, latestBase, putBackTracked, repairCopyLink, settleCopy } from './git.js';
 import * as P from './prompts.js';
 import { baseCommits, findNestedRepos, repoFor, rulesFiles } from './repos.js';
 import { flushTracker, publishTicket, recheckMerge, syncWiki, trackerDue } from './sync.js';
@@ -63,7 +63,7 @@ import { allowedFile, ticketFolders } from './conversations.js';
 import { DEFAULT_QUALITY, builderLevel, describeLevel, effortOn, personLevels, resolveLevel, stepCaps } from './levels.js';
 import { CapReached, capCard } from './caps.js';
 import { blockedLine, packageCacheEnv, sandboxAsk, sandboxOf, ticketCacheDir } from './sandbox.js';
-import { GUARD_BLOCKED, guardBlockedDetail, guardBlockedPath, guardSupport, ticketGuard, type GuardSpec } from './project-guard.js';
+import { GUARD_BLOCKED, GUARD_BLOCKED_DOCKER, blockedDocker, dockerBlockedWords, guardBlockedDetail, guardBlockedPath, guardSupport, ticketGuard, type GuardSpec } from './project-guard.js';
 import { ticketDir } from '../board/store.js';
 import { commitTicketDocs, leaveProjectFiles } from './project-git.js';
 import { carryOn, fetchBase, fetchPushed, workSoFar } from './handover.js';
@@ -293,7 +293,8 @@ export class LiveSquad {
     if (!t.worktree || t.stage === 'done' || !fs.existsSync(t.worktree)) return false;
     const repo = path.join(projectRoot(this.bp), repoFor(readMeta(this.bp), t).path);
     if (git(t.worktree, ['rev-parse', '--git-dir'], { allowFail: true })) {
-      settleCopy(t.worktree);
+      const onDisk = settleCopy(t.worktree);
+      if (onDisk) this.update(t.id, (x) => addActivity(x, 'squad', cutOffWords(onDisk)));
       return false;
     }
     const mended = repairCopyLink(repo, t.worktree);
@@ -1356,8 +1357,9 @@ export class LiveSquad {
    * sentence (never the path, never "sandbox") and Try again; Ask a question is at the top of the story as always.
    * Engineers get the exact path and the command. An engineer allows the file in Settings or with a terminal command.
    */
-  private guardStop(id: string, retryPhase: string, target: string, command: string, output: string): void {
+  private guardStop(id: string, retryPhase: string, target: string, command: string, output: string, guard: GuardSpec): void {
     this.log('warn', `Guard blocked ${target} at ${retryPhase}: ${command}`, id);
+    const docker = blockedDocker(target, guard);
     try {
       this.update(id, (x) => {
         if (x.takenOver || (x.chat?.open && !x.chat.beside)) return;
@@ -1365,19 +1367,19 @@ export class LiveSquad {
         x.squad = null;
         delete x.clock;
         x.retryPhase = retryPhase;
-        x.status = 'Stopped: a file was blocked';
+        x.status = docker ? 'Stopped: Docker was blocked' : 'Stopped: a file was blocked';
         x.stuck = {
           gate: 'checks',
           kind: 'guard',
-          question: GUARD_BLOCKED,
-          detail: `${guardBlockedDetail(target, command)}\n\n${tail(output, 20)}`,
+          question: docker ? GUARD_BLOCKED_DOCKER : GUARD_BLOCKED,
+          detail: `${guardBlockedDetail(target, command, guard)}\n\n${tail(output, 20)}`,
           options: [
-            { do: 'retry', name: 'Try again', note: 'After an engineer allows the file in Settings.' },
-            { do: 'plan', name: 'Send it back to the plan', note: 'The Spec writer rewrites the plan so it does not need that file.' },
+            { do: 'retry', name: 'Try again', note: `After an engineer allows ${docker ? 'Docker' : 'the file'} in Settings.` },
+            { do: 'plan', name: 'Send it back to the plan', note: `The Spec writer rewrites the plan so it does not need ${docker ? 'Docker' : 'that file'}.` },
           ],
         };
-        x.waiting = { kind: 'stuck', summary: 'A file was blocked; an engineer can allow it' };
-        addActivity(x, 'squad', 'A check needed a file outside its copy, and squad-kit blocked it');
+        x.waiting = { kind: 'stuck', summary: docker ? 'Docker was blocked; an engineer can allow it' : 'A file was blocked; an engineer can allow it' };
+        addActivity(x, 'squad', docker ? "A check tried to use Docker, which is not open to the project's own commands" : 'A check needed a file outside its copy, and squad-kit blocked it');
       });
     } catch {
       // The ticket was removed while it ran.
@@ -2484,7 +2486,7 @@ export class LiveSquad {
       const r = await runCommand(wt.dir, setup, 20 * 60_000, this.guardedWatch(id, wt.dir));
       this.goOn(id);
       // A new project has nothing to set up yet; the Builder creates it in this ticket.
-      if (!r.ok && !meta.scan?.empty) throw new StepError("Setting up the ticket's copy of the code did not work. Press Try again.", `${setup}:\n${tail(r.output, 30)}`);
+      if (!r.ok && !meta.scan?.empty) throw new StepError(dockerBlockedWords(r.output, this.guardFor(wt.dir, id)) ?? "Setting up the ticket's copy of the code did not work. Press Try again.", `${setup}:\n${tail(r.output, 30)}`);
       // What the setup rewrote (a lock file, often) is not the story's work: it goes back before anyone reads the copy.
       const back = putBackTracked(wt.dir);
       if (back.length) this.log('info', `The setup command changed ${back.join(', ')}; squad-kit put ${back.length === 1 ? 'it' : 'them'} back`, id);
@@ -3065,7 +3067,7 @@ export class LiveSquad {
     // A check that needed a file outside its copy, which the guard blocked: one plain sentence, not a failed try.
     if (guard && !this.stops.get(id)?.signal.aborted) {
       const hit = results.find((r) => !r.ok && guardBlockedPath(r.output, guard));
-      if (hit) return this.guardStop(id, 'test', guardBlockedPath(hit.output, guard)!, hit.command, hit.output);
+      if (hit) return this.guardStop(id, 'test', guardBlockedPath(hit.output, guard)!, hit.command, hit.output, guard);
     }
     // Stopped while a check ran: its result says nothing about the code, so it is no failed try.
     this.goOn(id);
@@ -3882,7 +3884,7 @@ export class LiveSquad {
       app = await startApp(cwd, start, url, undefined, signal, this.guardFor(cwd, id));
     } catch (err) {
       if (signal?.aborted) throw err;
-      throw new StepError(NO_APP, (err as Error).message);
+      throw new StepError(dockerBlockedWords((err as Error).message, this.guardFor(cwd, id)) ?? NO_APP, (err as Error).message);
     }
     const at = app.url;
     // The address goes to the log; the story gets one plain line.

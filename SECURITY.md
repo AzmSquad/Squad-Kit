@@ -39,7 +39,7 @@ Credit will be given in the release notes unless you prefer to remain anonymous.
   (mode `0600` on POSIX), never in the project folder or in git. A project moved from 0.x has its
   `.squad/secrets.yaml` moved there once. To run your app, squad-kit copies your project's `.env` files into its own
   copy of the code in `~/.squad-kit/projects/<id>/apps/` (mode `0600`), never anywhere else.
-- **Agents never see your secrets.** No agent may read squad-kit's secret files, and the commands squad-kit runs for
+- **Agents are kept from your secrets.** No agent may read squad-kit's secret files, and the commands squad-kit runs for
   you (tests, setup and release) start without the AI and tracker keys.
 - **Agents stay in their lane.** Every step runs with the permissions it needs and no more: the Builder edits only its
   own copy of the code, the Tester cannot change code, and no agent may change the instruction files the next session
@@ -47,17 +47,48 @@ Credit will be given in the release notes unless you prefer to remain anonymous.
   an agent changed outside its lane. Text from trackers and pasted messages reaches agents as data, never as orders.
 - **Agents get fixed tools, no free commands.** For screenshots, the app and the checks, an agent presses one of
   squad-kit's tools. squad-kit checks every field, does the job itself, and refuses and logs what breaks a check.
-- **The project's own commands run in a guard** on Mac and Linux: the tests, setup, the app and the release pipeline
-  can't read your keys, sign-ins, browser profiles, squad-kit's own folder or the `.env` files in your project folder.
-  They can't change the copy's link to git or git's own folder either, so nothing they write can make squad-kit's own
-  git, which runs outside the guard, start a program of theirs.
-- **The project's commit hooks run in the same guard, once, on a stand-in.** They look at the change on a branch of
-  their own, so a hook cannot move a real branch, plant a hook, change a git setting or reach another ticket. The real
-  commit is made after, outside the guard, with your signature if your git signs.
-  **Known gap, being closed next:** while they run, hooks share git's store of objects, so a hook built to do harm could
-  change a file stored there. A project with no commit hooks is not affected.
+- **The project's own commands run in a guard** on Mac and Linux: the tests, setup, the app, the release pipeline and the
+  commit hooks. **The guard stops accidents and most bad behaviour, but it is not a wall against code built on purpose to
+  break out.** On a Mac its rules start from allowing everything and block a list. Use squad-kit on projects and tickets you
+  trust, and read what the Builder changes.
+
+  What it stops:
+  - Reading the usual places for keys and sign-ins (`~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.azure`, `~/.kube`, `~/.docker`, the
+    GitHub and cloud sign-ins, the keys into a runtime's virtual machine, an `.npmrc` with a token), browser profiles and
+    squad-kit's own folder. A place it does not know about is not hidden.
+  - Reading the `.env` files in your project folder. On a Mac, all of them. On Linux, the ones it finds 3 folders down when
+    a command starts, outside folders such as `node_modules`.
+  - Writing outside its copy, the proof folder, the temp folder and the package caches. `~/.cache` and
+    `~/Library/Caches` stay read only: your own tools run programs from there. The copy cannot be moved, and git's own
+    folder cannot be changed or moved, so nothing written there can make squad-kit's own git start a program.
+  - Reaching a container runtime. A container can mount any folder, so a command that reaches Docker could read everything
+    above. Connections to the sockets of Docker Desktop, colima, lima, Rancher Desktop, OrbStack, Finch and Podman are
+    refused where the guard knows them. A runtime that listens somewhere else is not covered. **1.2.0 and 1.2.1 did not
+    have this**: there, a command could read hidden files through Docker when Docker was running. If a project's own tests
+    need Docker, an engineer can allow its socket's folder in Settings, knowing that this opens what the guard hides.
+  - Signalling other programs. On a Mac a signal reaches only what the command started. On Linux other programs are not
+    visible at all.
+
+  What it does not stop:
+  - **The network.** A command can reach the network, so what it can read it can send.
+  - **Other local services.** On a Mac a command can still talk to other services on this computer, and to programs that
+    listen on a local port. On Linux it can reach your session's bus and gpg agent under `/run/user`, and Docker's own port
+    if you turned that on (on a Mac, ports 2375 and 2376 are refused).
+  - **Other programs' environments, on a Mac.** A command can read the environment of your other programs, so keys you
+    exported in a shell can be seen. Use squad-kit's sign-ins, not exported keys.
+  - **An ssh agent.** A command cannot read a key loaded in it, but it can ask the agent to use it.
+  - **What a command leaves running, on a Mac.** A process that leaves its group lives on after the command, with the same
+    guard around it, and can change the copy's files.
+- **The project's commit hooks run once, on a throwaway git folder.** squad-kit makes that folder outside the project for
+  each run. It reads git's store of objects and writes only its own. Its settings are squad-kit's, with your branch by its
+  real name and the repo's own filters, which run only in the guard. On Mac and Linux the real git folder stays read only to
+  the hooks, all of it: objects, branches, settings, the stash and the hooks. Only two things come out: the files in the
+  copy and the commit's words. squad-kit's own git then stages the files and makes the real commit, outside the guard, with
+  your signature if your git signs. So nothing a hook puts in its git folder reaches the real store, and squad-kit's git
+  never reads a setting a hook wrote. The folder goes after each run, and at the next start after a crash. A hook that
+  reaches past it to the real folder can read there, and its writes are refused.
 - **squad-kit runs no other hook.** Every other git it runs has hooks off: it does not run a project's `pre-push`,
-  `post-merge`, `post-checkout` or `post-commit` outside that one commit (a `post-commit` runs on the stand-in). The
+  `post-merge`, `post-checkout` or `post-commit` outside that one commit (a `post-commit` runs on the throwaway folder). The
   project's own checks have already run in the guard by then. Pushing from your own terminal still runs your hooks.
   A project that uses Git LFS still gets its large files uploaded: a push runs squad-kit's own small `pre-push`, kept in
   its own folder, which does only that.
@@ -65,9 +96,8 @@ Credit will be given in the release notes unless you prefer to remain anonymous.
   (`diff.external`, textconv), and it never looks inside a nested repo. Programs named in your own git settings for the
   network, credentials, filters and merges stay on (`core.sshCommand`, git-lfs): they need a line in a settings file,
   and neither the guard nor an agent's sandbox can write those files.
-- **Windows is less protected and not fully tested yet.** There, the agents' own commands and the project's own
-  commands have no guard, so they can reach other files on the computer, squad-kit's own too. Use it on projects you
-  trust. Settings says so.
+- **Windows has no guard and is not fully tested yet.** There, the agents' own commands and the project's own commands
+  can reach other files on the computer, squad-kit's own too. Use it on projects you trust. Settings says so.
 - **The engine owns git and the release.** Agents never merge, push or grade their own work.
 - **The npm package is built and published by GitHub Actions** from a release tag, with npm trusted publishing (no
   npm token exists) and a signed provenance statement you can check on npmjs.com.

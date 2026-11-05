@@ -28,7 +28,7 @@ const auto = await import('../src/board/auto.js');
 const { LiveSquad } = await import('../src/engine/live.js');
 const { addWorktree, bringHookRunner, commitHooks } = await import('../src/engine/git.js');
 const { ensureLiveBoard, setupProject } = await import('../src/engine/setup.js');
-const { guardSupport, commitGuard, buildGuard, profileText, bubblewrapArgs } = await import('../src/engine/project-guard.js');
+const { GUARD_BLOCKED_DOCKER, guardSupport, commitGuard, buildGuard, profileText, bubblewrapArgs } = await import('../src/engine/project-guard.js');
 const { HOOK_FILES, hookFiles, isHookFile } = await import('../src/engine/hook-files.js');
 const { checkLane, watchLane } = await import('../src/engine/lane.js');
 const { squadHome } = await import('../src/core/home.js');
@@ -122,7 +122,7 @@ describe('a hook runs in the project guard', () => {
       `{ echo planted > "${git}/hooks/post-merge"; } 2>> "${out}" || echo PLANT-REFUSED >> "${out}"`,
       `{ echo '[core]' >> "${git}/config"; } 2>> "${out}" || echo CONFIG-REFUSED >> "${out}"`,
       `git update-ref refs/heads/main HEAD~0 2>> "${out}" && echo MAIN-SAME >> "${out}"`,
-      `git update-ref refs/heads/stolen HEAD 2>> "${out}" || echo BRANCH-REFUSED >> "${out}"`,
+      `env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_EXEC_PATH "$(git --exec-path)/git" update-ref refs/heads/stolen HEAD 2>> "${out}" || echo BRANCH-REFUSED >> "${out}"`,
       `git worktree list > /dev/null 2>> "${out}"`,
       'exit 0',
     ].join('\n');
@@ -154,6 +154,66 @@ describe('a hook runs in the project guard', () => {
     expect(t.stuck?.detail).toContain(`squad-kit's guard blocked ${hidden}`);
   });
 
+  const NO_DOCKER = 'Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?';
+
+  it('a check that tries Docker stops with one plain sentence that says so, not a raw error', async () => {
+    if (!guarded()) return;
+    ticket('AP-1', { stage: 'implement' });
+    writeMeta(bp, { ...readMeta(bp), commands: { test: `echo "${NO_DOCKER}"; exit 1` } });
+    await (new LiveSquad(bp) as unknown as { step(id: string, phase: string): Promise<void> }).step('AP-1', 'test');
+    const t = readTicket(bp, 'AP-1')!;
+    expect(t.stuck?.kind).toBe('guard');
+    expect(t.stuck?.question).toBe(GUARD_BLOCKED_DOCKER);
+    expect(t.status).toBe('Stopped: Docker was blocked');
+    expect(t.waiting?.summary).toContain('Docker');
+    expect(t.stuck?.options.map((o) => o.do)).toEqual(['retry', 'plan']);
+    expect(t.stuck?.detail).toContain('Docker is not open');
+    expect(t.stuck?.detail).toContain('/var/run/docker.sock');
+    expect(t.activity.some((a) => a.text.includes('tried to use Docker'))).toBe(true);
+  });
+
+  it('a setup that tries Docker says so too, not a raw error', async () => {
+    if (!guarded()) return;
+    writeMeta(bp, { ...readMeta(bp), commands: { setup: `echo "${NO_DOCKER}"; exit 1` } });
+    const t0 = actions.createTicket(bp, { title: 'Needs setup', track: 'express' });
+    updateTicket(bp, t0.id, (x) => {
+      x.stage = 'implement';
+      x.gates = { checks: 'pending', review: 'pending', proof: 'pending' };
+    });
+    const err = await (new LiveSquad(bp) as unknown as { workspace(id: string): Promise<unknown> }).workspace(t0.id).catch((e: unknown) => e);
+    expect((err as Error).message).toBe(GUARD_BLOCKED_DOCKER);
+  });
+
+  it('a hook that says no while a merge is being finished: Try again runs it again, as it never said yes', async () => {
+    const dir = ticket('AP-1', { waiting: { kind: 'proof', summary: '' }, track: undefined });
+    sh('git add -A && git -c user.name=t -c user.email=t@t commit -qm mine', dir);
+    fs.writeFileSync(path.join(project, 'theirs.txt'), 'theirs\n');
+    sh('git add theirs.txt && git -c user.name=t -c user.email=t@t commit -qm theirs', project);
+    sh('git merge --no-commit --no-ff main', dir);
+    const runs = path.join(tmp, 'runs');
+    fs.mkdirSync(path.join(project, '.git', 'hooks'), { recursive: true });
+    fs.writeFileSync(path.join(project, '.git', 'hooks', 'pre-commit'), `#!/bin/sh\necho run >> "${runs}"\nexit 1\n`, { mode: 0o755 });
+    await expect(actions.approveBeside(bp, 'AP-1')).rejects.toBeInstanceOf(actions.HookStopped);
+    expect(readTicket(bp, 'AP-1')!.hookOwed).toBe(true);
+    const first = fs.readFileSync(runs, 'utf8').split('\n').filter(Boolean).length;
+    updateTicket(bp, 'AP-1', (x) => {
+      x.waiting = { kind: 'proof', summary: '' };
+      delete x.stuck;
+    });
+    await expect(actions.approveBeside(bp, 'AP-1')).rejects.toBeInstanceOf(actions.HookStopped);
+    expect(fs.readFileSync(runs, 'utf8').split('\n').filter(Boolean).length).toBeGreaterThan(first);
+    expect(readTicket(bp, 'AP-1')!.mergedAt).toBeUndefined();
+  });
+
+  it('a hook that tries Docker gets the usual hook card, with the same words for engineers', async () => {
+    if (!guarded()) return;
+    huskyStyle(`echo "${NO_DOCKER}"; exit 1`);
+    ticket('AP-1');
+    const t = await auto.acceptByItselfBeside(bp, 'AP-1');
+    expect(t.stuck?.kind).toBe('hook');
+    expect(t.stuck?.detail).toContain('Docker is not open');
+  });
+
   it("a person's signed commits stay signed: the signature comes after the hooks, outside the guard", async () => {
     if (!guarded()) return;
     const gpg = path.join(tmp, 'fake-gpg');
@@ -168,39 +228,40 @@ describe('a hook runs in the project guard', () => {
     void dir;
   });
 
-  it('the guard keeps the shape on both systems: all of git\'s folder read only, then only what a commit needs', () => {
+  it('the guard keeps the shape on both systems: all of git\'s folder read only, and only the throwaway one opened', () => {
     const common = path.join(tmp, 'repo', '.git');
     const own = path.join(common, 'worktrees', 'ap-1');
-    const folder = 'refs/heads/squad/saving/squad/ap-1';
-    fs.mkdirSync(path.join(common, 'refs', 'heads'), { recursive: true });
-    fs.mkdirSync(path.join(common, 'logs', 'refs'), { recursive: true });
-    fs.writeFileSync(path.join(common, 'config'), '');
-    const spec = commitGuard(buildGuard({ cwd: path.join(tmp, 'copy'), root: path.join(tmp, 'repo'), home: path.join(tmp, 'home'), platform: 'darwin' }), { common, own, folder });
+    const home = path.join(tmp, 'home');
+    const gitDir = path.join(squadHome(), 'hook-git', 'ap-1-abc', 'git-xyz');
+    const spec = commitGuard(buildGuard({ cwd: path.join(tmp, 'copy'), root: path.join(tmp, 'repo'), home, platform: 'darwin' }), { common, own, gitDir });
+    expect(spec.noWrite).toEqual(expect.arrayContaining([common, own]));
     const text = profileText(spec);
     const deny = text.lastIndexOf(`(deny file-write* (subpath "${common}"))`);
     expect(deny).toBeGreaterThan(-1);
-    // The last word: later rules win in the profile, and later mounts in bubblewrap.
-    for (const place of [own, path.join(common, 'objects'), path.join(common, folder), path.join(common, 'logs', folder)]) {
-      expect(text.lastIndexOf(`(allow file-write* (subpath "${place}"))`)).toBeGreaterThan(deny);
+    expect(text.lastIndexOf(`(deny file-write* (subpath "${own}"))`)).toBeGreaterThan(-1);
+    // squad-kit's folder stays hidden, and the throwaway folder comes back, to read and to write, after every deny.
+    expect(text.indexOf(`(deny file-read* (subpath "${squadHome()}"))`)).toBeGreaterThan(-1);
+    expect(text.lastIndexOf(`(allow file-read* (subpath "${gitDir}"))`)).toBeGreaterThan(text.indexOf(`(deny file-read* (subpath "${squadHome()}"))`));
+    expect(text.lastIndexOf(`(allow file-write* (subpath "${gitDir}"))`)).toBeGreaterThan(deny);
+    // Nothing of git's folder comes back. A hook's write there has no way in the profile.
+    for (const shut of ['objects', 'refs', 'refs/heads', 'refs/stash', 'refs/stash.lock', 'logs', 'packed-refs.lock', 'config', 'hooks', 'worktrees']) {
+      expect(text).not.toContain(`(allow file-write* (subpath "${path.join(common, shut)}"))`);
+      expect(text).not.toContain(`(allow file-write* (literal "${path.join(common, shut)}"))`);
     }
-    expect(text.lastIndexOf(`(allow file-write* (literal "${path.join(common, 'refs/stash.lock')}"))`)).toBeGreaterThan(deny);
-    for (const closed of [path.join(own, 'commondir'), path.join(own, 'gitdir'), path.join(own, 'config.worktree'), path.join(common, 'objects/info')]) {
-      expect(text.lastIndexOf(`(deny file-write* (subpath "${closed}"))`)).toBeGreaterThan(text.lastIndexOf(`(allow file-write* (subpath "${own}"))`));
-    }
-    // Nothing else of git's folder comes back: no folder of real branches, no settings, no hooks.
-    for (const shut of ['refs/heads', 'refs/heads/squad', 'refs/replace', 'config', 'hooks', 'worktrees']) {
-      expect(text.lastIndexOf(`(allow file-write* (subpath "${path.join(common, shut)}"))`)).toBe(-1);
-    }
+    expect(text).not.toContain(`(allow file-write* (subpath "${own}"))`);
+    // Later mounts win in bubblewrap: git's folder read only, the throwaway folder last, and no mount of git's folder after that.
     const args = bubblewrapArgs(spec, 'x');
     const at = (flag: string, place: string) => args.findIndex((a, i) => a === place && args[i - 1] === flag);
     const ro = at('--ro-bind-try', common);
     expect(ro).toBeGreaterThan(-1);
-    expect(at('--bind-try', common)).toBeGreaterThan(ro);
-    // Git's folder opened for the single files, and what is in it already shut again, deeper folders after.
-    expect(at('--ro-bind-try', path.join(common, 'config'))).toBeGreaterThan(at('--bind-try', common));
-    expect(at('--ro-bind-try', path.join(common, 'refs', 'heads'))).toBeGreaterThan(at('--bind-try', path.join(common, 'refs')));
-    expect(at('--bind-try', own)).toBeGreaterThan(at('--ro-bind-try', path.join(common, 'refs', 'heads')));
-    expect(at('--ro-bind-try', path.join(own, 'commondir'))).toBeGreaterThan(at('--bind-try', own));
+    expect(at('--ro-bind-try', own)).toBeGreaterThan(-1);
+    const hidden = fs.realpathSync(squadHome());
+    expect(at('--tmpfs', hidden)).toBeGreaterThan(-1);
+    const open = at('--bind', gitDir);
+    expect(open).toBeGreaterThan(at('--tmpfs', hidden));
+    expect(open).toBeGreaterThan(ro);
+    expect(args.some((a, i) => a.startsWith(common) && /^--bind/.test(args[i - 1] ?? ''))).toBe(false);
+    expect(args.slice(-3)).toEqual(['/bin/sh', '-c', 'x']);
   });
 });
 

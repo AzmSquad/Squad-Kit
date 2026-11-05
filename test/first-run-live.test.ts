@@ -40,6 +40,7 @@ vi.mock('../src/modules/claude/direct.js', async (orig) => ({
 const { boardPaths, listDecisions, listTickets, readMeta, writeMeta } = await import('../src/board/store.js');
 const { prepareProject } = await import('../src/engine/setup.js');
 const { LiveSquad } = await import('../src/engine/live.js');
+const { GUARD_BLOCKED_DOCKER, guardSupport } = await import('../src/engine/project-guard.js');
 const { approveOverview, overviewView, setupView, ticketFromIdea } = await import('../src/board/first-run.js');
 const { readOverview } = await import('../src/board/overview.js');
 const { setupCopyDir } = await import('../src/engine/onboard.js');
@@ -210,6 +211,30 @@ describe('the first run on the live engine', () => {
     expect(ticketFromIdea(bp, 1).id).toBe(t.id);
     expect(listTickets(bp)).toHaveLength(1);
     expect(readOverview(bp).ideas[0]!.ticket).toBe(t.id);
+  }, 60_000);
+
+  it('a setup that tries Docker says so, where the guard runs', async () => {
+    if (!guardSupport().on) return;
+    const dir = roomflow();
+    scanAnswers = [answer({ setup: 'node -e "console.error(\'Cannot connect to the Docker daemon at unix:///var/run/docker.sock.\'); process.exit(1)"' })];
+    const { bp } = add(dir);
+    const browser = fakeBrowser({ '/': { has: ['text:RoomFlow'] } });
+    h.browser = browser.module;
+    stops.push(new LiveSquad(bp).start(25));
+    await until('the setup to fail', () => setupView(bp)?.steps.find((s) => s.id === 'commands')?.state === 'failed', 3000);
+    expect(setupView(bp)!.steps.find((s) => s.id === 'commands')!.error).toBe(GUARD_BLOCKED_DOCKER);
+  }, 60_000);
+
+  it('an app that tries Docker to start says so too, and the setup goes on', async () => {
+    if (!guardSupport().on) return;
+    const dir = roomflow();
+    scanAnswers = [answer({ test: 'node -e 0', start: 'node -e "console.error(\'Cannot connect to the Docker daemon at unix:///var/run/docker.sock.\'); process.exit(1)"', url: 'http://127.0.0.1:9' })];
+    const { bp } = add(dir);
+    const browser = fakeBrowser({ '/': { has: ['text:RoomFlow'] } });
+    h.browser = browser.module;
+    stops.push(new LiveSquad(bp).start(25));
+    await until('the app step to fail', () => setupView(bp)?.steps.find((s) => s.id === 'app')?.state === 'failed', 3000);
+    expect(setupView(bp)!.steps.find((s) => s.id === 'app')!.error).toBe(GUARD_BLOCKED_DOCKER);
   }, 60_000);
 
   it('never blocks on failing tests or an app that does not open: each says so, with a way out, and the overview still comes', async () => {

@@ -7,7 +7,7 @@ import { begin, currentStep, finish, learnSetupTime, nextProofStep, readWords, s
 import { runCommand, startApp, tail, testCount, CHECK_SILENT_MS, type RunningApp } from './checks.js';
 import { addSnapshot, dropSnapshot, git, worktreeRoot } from './git.js';
 import { reposOf } from './repos.js';
-import { guardSupport, projectGuardFor, type GuardSpec } from './project-guard.js';
+import { dockerBlockedWords, guardSupport, projectGuardFor, type GuardSpec } from './project-guard.js';
 import { copyEnvFiles } from './run-app.js';
 import { countFiles, gitState } from './first-look.js';
 import { DOING } from './plain-doing.js';
@@ -270,7 +270,7 @@ const commandsStep: Step = async (bp, deps, copies) => {
     withSetup(bp, (s) => (stepOf(s, 'commands').note = 'Installing what it needs'));
     const r = await runCommand(copy.dir, setup, 20 * 60_000, { silentMs: CHECK_SILENT_MS, signal: deps.signal, ...(guardFor(bp, copy.dir) ? { guard: guardFor(bp, copy.dir)! } : {}) });
     if (deps.signal.aborted) throw new Error(STOPPED);
-    if (!r.ok) failures.push({ error: 'Installing what it needs did not work.', output: `${setup}:\n${tail(r.output, 30)}` });
+    if (!r.ok) failures.push({ error: dockerBlockedWords(r.output, guardFor(bp, copy.dir)) ?? 'Installing what it needs did not work.', output: `${setup}:\n${tail(r.output, 30)}` });
   }
   const fresh = readMeta(bp);
   withSetup(bp, (s) => {
@@ -348,8 +348,9 @@ const appStep: Step = async (bp, deps, copies) => {
   const url = repo.commands.url!.trim();
   withSetup(bp, (s) => begin(s, 'app', DOING.start));
   let app: RunningApp | null = null;
+  let dir = '';
   try {
-    const dir = await copyFor(bp, repo, copies, deps.signal);
+    dir = await copyFor(bp, repo, copies, deps.signal);
     app = await startApp(dir, start, url, 3 * 60_000, deps.signal, guardFor(bp, dir));
     const at = app.url;
     withSetup(bp, (s) => (stepOf(s, 'app').note = 'Taking a screenshot'));
@@ -376,7 +377,7 @@ const appStep: Step = async (bp, deps, copies) => {
     withSetup(bp, (s) => {
       s.proof = { ...s.proof, app: { ok: false, url, command: start, repo: repo.path, error } };
       // One plain sentence; what the app printed is behind "See what failed", for engineers.
-      finish(s, 'app', 'failed', { note: 'The app did not open here', error: 'squad-kit could not start the app in its own copy. The setup goes on: this does not stop you.', output: error.slice(-4000) });
+      finish(s, 'app', 'failed', { note: 'The app did not open here', error: (dir ? dockerBlockedWords(error, guardFor(bp, dir)) : null) ?? 'squad-kit could not start the app in its own copy. The setup goes on: this does not stop you.', output: error.slice(-4000) });
     });
   } finally {
     app?.stop();

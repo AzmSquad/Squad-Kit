@@ -7,6 +7,7 @@ import http from 'node:http';
 import { execSync, spawn } from 'node:child_process';
 import { boardPaths, readMeta, writeMeta, type BoardPaths } from '../src/board/store.js';
 import { AppRunner, portTaken, stopApps, appRunner } from '../src/engine/run-app.js';
+import { GUARD_BLOCKED_DOCKER, guardSupport } from '../src/engine/project-guard.js';
 import { freePort } from './support/tiny-app.js';
 
 /**
@@ -268,6 +269,27 @@ describe('your apps run from squad-kit’s own copy of main', () => {
       if (alive(other.pid!)) process.kill(other.pid!);
     }
   }, 40_000);
+
+  it('a setup or a start that tries Docker says so, where the guard runs', async () => {
+    if (!guardSupport().on) return;
+    const words = "console.error('Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?'); process.exit(1)";
+    setCommands({ setup: `node -e "${words}"` });
+    let s = await (() => {
+      const apps = runner();
+      apps.start();
+      return apps.settled();
+    })();
+    expect(s.state).toBe('failed');
+    expect(s.error).toBe(GUARD_BLOCKED_DOCKER);
+    setCommands({ setup: 'node -e 0', start: `node -e "${words}"` });
+    s = await (() => {
+      const apps = runner();
+      apps.start();
+      return apps.settled();
+    })();
+    expect(s.state).toBe('failed');
+    expect(s.error).toBe(GUARD_BLOCKED_DOCKER);
+  }, 30_000);
 
   it('a setup that fails says one plain sentence: the command and what it printed are for engineers', async () => {
     setCommands({ setup: `node -e "console.error('npm ERR! network'); process.exit(3)"` });

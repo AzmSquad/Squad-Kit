@@ -6,7 +6,7 @@ import { execSync } from 'node:child_process';
 import { boardPaths, readRelease, readTicket, writeMeta, writeTicket, type BoardPaths } from '../src/board/store.js';
 import '../src/engine/live.js';
 import * as actions from '../src/board/actions.js';
-import { addWorktree, commitAll, commitChecked, commitHooks, conventionalWords } from '../src/engine/git.js';
+import { HookRefused, addWorktree, commitAll, commitChecked, commitHooks, conventionalWords } from '../src/engine/git.js';
 import { problemOf } from '../src/board/problem.js';
 
 /**
@@ -221,7 +221,9 @@ describe('Looks right on a repo with commit hooks', () => {
     hook('pre-commit', 'exit 0');
     const gitDir = sh('git rev-parse --git-dir', copy);
     fs.writeFileSync(path.join(path.resolve(copy, gitDir), 'index.lock'), '');
-    await expect(commitChecked(copy, 'm', 'chore: m')).rejects.toThrow(/git commit failed/);
+    const err = await commitChecked(copy, 'm', 'chore: m').catch((e: unknown) => e);
+    expect(err).not.toBeInstanceOf(HookRefused);
+    expect((err as Error).message).toMatch(/^git (?:add|commit) failed/);
     fs.rmSync(path.join(path.resolve(copy, gitDir), 'index.lock'));
   });
 });

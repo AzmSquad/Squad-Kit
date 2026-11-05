@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.2] — 2026-11-05
+
+A patch about the guard. It closes what a review of 1.2.1 found open, moves commit hooks to a throwaway git folder, and says
+plainly what the guard is and is not. Nothing changes in how you work with the squad.
+
+### What the guard promises
+
+- **1.2.1 and earlier promised too much.** The guard stops accidents and most bad behaviour, but it is not a wall against
+  code built on purpose to break out. `SECURITY.md` now says what it stops and what it does not. Use squad-kit on projects and
+  tickets you trust, read what the Builder changes, and use squad-kit's sign-ins, not keys exported in a shell.
+- **It closes more.** A command can no longer move its copy or the folders above git's own. It can no longer write in
+  all of `~/.cache` or `~/Library/Caches`, where your own tools run programs from. On a Mac it can no longer signal other
+  programs, or swap the guard's rules for a later command. A `.env` in your own checkout stays hidden, and so do sockets
+  under `~/.ssh` and `~/.gnupg` and the keys into a runtime's virtual machine. On Linux the guard ran for real for the first
+  time: a `.env` is hidden 3 folders down, and a socket behind `/var/run` no longer stops every command.
+- **A project's own browsers still work.** Playwright gets a folder with the copy, with the browsers this computer has already
+  linked in, so `playwright install` no longer waits on a read-only folder. Puppeteer and Electron download to the copy's
+  cache. On a Mac, Puppeteer's Chrome needs `args: ['--no-sandbox']`, as it did before: its own sandbox cannot start inside
+  the guard. Cypress gets a card until an engineer allows its folder.
+
+### The guard and Docker
+
+- **The project's own commands can no longer reach Docker.** In 1.2.0 and 1.2.1, a command in the guard could connect to
+  Docker's socket, start a container with a hidden folder mounted in it, and read what the guard hides. Now the sockets of
+  Docker Desktop, colima, lima, Rancher Desktop, OrbStack, Finch and Podman are refused, and on a Mac so is Docker's own
+  port on this computer. On Linux that port stays open.
+- **A project whose tests talk to Docker directly now gets a refusal** until a person allows it. The card says Docker is
+  not open to the project's own commands, in a check, a setup or an app's start, and an engineer can allow its socket's
+  folder in Settings.
+
+### The project's commit hooks
+
+- **They run on a throwaway git folder.** squad-kit makes it outside the project for each run, and on Mac and Linux the real
+  git folder is now read only to them, all of it. Only the files in the copy and the commit's words come back, and
+  squad-kit stages the files itself and makes the real commit from those. So **what a hook staged counts for nothing**: a
+  file it force-adds stays out if git ignores it, a file it takes out of the commit goes back in, and a report file it
+  leaves goes in.
+- **The limits 1.2.1 listed are gone.** A hook sees your branch by its real name, not a stand-in's. lint-staged's backup
+  stays out of your `git stash list`, even when a Stop cuts it off. A hook can no longer change a file in git's store of
+  objects.
+- **A Stop, a hook that runs out of time and a crash** put the files back as they were staged and remove new ones. What was
+  on disk then is kept in `refs/squad/on-disk/<ticket>`, so no work is lost half-way through a formatter.
+- **A hook's folder has only the repo's filters of its settings.** A hook that needs a remote, or fetches, gets the usual card
+  with **Save without this check**.
+- **What a hook leaves in its group ends when the commit does**, or at the next start after a crash.
+- **A hook's "no" on a merge being finished holds.** Try again runs the hook again, instead of passing it by.
+
 ## [1.2.1] — 2026-11-05
 
 A patch about not losing work and never reaching a dead end. It also moves the project's commit hooks into the guard.
