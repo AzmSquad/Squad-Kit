@@ -220,8 +220,8 @@ export function SetupCard() {
           <Check size={16} strokeWidth={2.5} />
         </span>
         <span className="grow">
-          <b>{s.empty ? 'One question for you' : 'Your project overview is ready'}</b>
-          <span>{s.empty ? 'What do you want to build?' : 'squad-kit has read your project. Check what it understood, then start working.'}</span>
+          <b>{s.empty ? (s.idea ? 'Your first stories are ready' : 'One question for you') : 'Your project overview is ready'}</b>
+          <span>{s.empty ? (s.idea ? 'What the Architect understood from what you said, for you to check.' : 'What do you want to build?') : 'squad-kit has read your project. Check what it understood, then start working.'}</span>
         </span>
         <Link to="/overview" className="btn you sm">
           Check it <ArrowRight size={14} />

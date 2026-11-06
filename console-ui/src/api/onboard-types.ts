@@ -56,6 +56,10 @@ export interface SetupView {
   qualityAsked: boolean;
   tool: string;
   empty: boolean;
+  /** On a project with no code: the person already said what they want to build, so nothing is asked. */
+  idea: boolean;
+  /** New project with a BRD, until its first release: the BRD the Analyst has. */
+  brd?: { id: string; title: string };
 }
 
 export interface SetupTestRun {
@@ -137,6 +141,8 @@ export interface OverviewView {
   approved?: { by: string; at: string };
   since: { id: string; title: string; at: string }[];
   setup?: { done: number; total: number; line: string };
+  /** New project with a BRD, until its first release: there is nothing to check here yet, and the work starts there. */
+  brd?: { id: string; title: string };
   talk?: OverviewTalk;
   empty: boolean;
   /** On a project with no code: what the person said they want to build. */

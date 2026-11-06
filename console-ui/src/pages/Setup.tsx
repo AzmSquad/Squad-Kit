@@ -59,11 +59,11 @@ export function SetupPage() {
                     <Check size={16} strokeWidth={2.5} />
                   </span>
                   <span className="grow">
-                    <b>{s.empty ? 'One question for you' : 'Your project overview is ready'}</b>
-                    <span>{s.empty ? 'What do you want to build?' : 'What squad-kit understood, for you to check before the first ticket.'}</span>
+                    <b>{s.empty ? (s.idea ? 'Your first stories are ready' : 'One question for you') : 'Your project overview is ready'}</b>
+                    <span>{s.empty ? (s.idea ? 'What the Architect understood from what you said, for you to check.' : 'What do you want to build?') : 'What squad-kit understood, for you to check before the first ticket.'}</span>
                   </span>
                   <Link to="/overview" className="btn pri">
-                    {s.empty ? 'Answer it' : 'Check what squad-kit understood'} <ArrowRight size={15} />
+                    {s.empty && !s.idea ? 'Answer it' : 'Check what squad-kit understood'} <ArrowRight size={15} />
                   </Link>
                 </div>
               )}

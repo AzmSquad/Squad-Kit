@@ -39,13 +39,16 @@ The first page. It has:
   wait for you. **Open board** opens it. **Remove** takes it out of the app; its files stay in its folder.
 - **Waiting for you**: what every project needs from you, in one list, each with the button to act on it. A
   banner at the top shows the first ones, and the browser tab shows the count: "(3) squad-kit".
+- **New project**: for when you have only a BRD or an idea. Give it a name and the BRD or the idea, and squad-kit makes
+  the folder (in Documents, unless you pick another place), git and the board. A BRD goes straight to the Analyst, who asks
+  only about real gaps. An idea goes to the Architect, who writes first stories from it.
 - **Add project**: a folder browser inside the page. It says what kind of folder you picked (empty, code,
   several repos, already a squad-kit project) and what will happen. **New folder here** makes a folder for a
   new project.
 - **Tickets at once**, at the top: how many tickets the squads work on at the same time, across all projects.
   They share your AI account, so this is one number for all of them.
 
-Terminal: `squad projects`, `squad inbox`.
+Terminal: `squad projects`, `squad projects --new "Visitor log" --brd brd.pdf` (or `--idea "what you want"`), `squad inbox`.
 
 ## The board
 

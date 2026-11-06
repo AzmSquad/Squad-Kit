@@ -248,6 +248,10 @@ program
   .command('projects')
   .description('List the projects in squad-kit, with what waits for you in each')
   .option('--remove <name>', 'Take a project out of squad-kit; its files stay in its folder')
+  .option('--new <name>', 'Start a new project from a BRD (--brd) or an idea (--idea); squad-kit makes its folder')
+  .option('--where <folder>', 'With --new: the folder it goes in (default: Documents)')
+  .option('--idea <text>', 'With --new: what you want to build')
+  .option('--brd <file>', 'With --new: the BRD, as a PDF, Word, Markdown or text file')
   .action(wrap(runProjects));
 
 // The first run and the Overview: the setup page and the Overview page, button for button.

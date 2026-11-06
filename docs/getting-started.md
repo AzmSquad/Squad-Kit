@@ -37,10 +37,13 @@ The first page is **Home**. It has two parts:
 Keep the terminal open. Press Ctrl-C there when you are done. Run `squad` again later and the squad picks up
 where it was. If squad-kit is open already, `squad` just prints its link and opens it.
 
-## 3. Add a project
+## 3. Start or add a project
 
-On Home, press **Add project**. A folder browser opens inside the page. Go to your project's folder and press
-**Add this folder**. To start something new, press **New folder here**, give it a name, and add it.
+**You have only a BRD or an idea?** On Home, press **New project**. Give it a name and your BRD or your idea. squad-kit makes
+the folder for you, and the squad starts from what you gave.
+
+**You already have a project?** Press **Add project**. A folder browser opens inside the page. Go to your project's folder and
+press **Add this folder**.
 
 You can also do it from a terminal, in the project's folder:
 

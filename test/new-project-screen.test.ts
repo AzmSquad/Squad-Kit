@@ -181,6 +181,7 @@ describe('the Architect picks the technology with the first story', () => {
     const meta = readMeta(bp);
     for (const p of [designPrompt(t, undefined, meta), planPrompt(t, undefined, meta)]) {
       expect(p).toContain('This project has no code yet, so this ticket picks its technology');
+      expect(p).toContain('pick what installs with no compiler');
       expect(p).toContain('never ask the person');
       expect(p).toContain('so engineers can see it');
     }

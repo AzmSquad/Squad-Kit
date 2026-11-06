@@ -682,7 +682,7 @@ ${PLAIN}`;
 /** A project with no code: the Architect picks the technology itself now, and it is saved as a decision engineers can see. */
 function firstTechnology(meta?: BoardMeta): string {
   return meta?.scan?.empty
-    ? `\n  This project has no code yet, so this ticket picks its technology. Choose it yourself, simple and common, and never ask the person: make it the decision (the language, the framework and where the data is kept), so engineers can see it.`
+    ? `\n  This project has no code yet, so this ticket picks its technology. Choose it yourself, simple and common, and never ask the person: make it the decision (the language, the framework and where the data is kept), so engineers can see it. The person may have no developer tools, so pick what installs with no compiler: no package that builds native code, and where the language has a built-in way to keep data, like node:sqlite in Node 22, use that.`
     : '';
 }
 
@@ -777,7 +777,7 @@ ${ticketContext(t)}
 
 Story: ${t.story}
 Done when:
-${criteria}${decision}${dependencyText(t)}
+${criteria}${decision}${dependencyText(t)}${setupTroubleText(t)}
 
 Steps:
 ${steps}
@@ -791,6 +791,16 @@ Rules:
 - Wait for every command to finish (installs too). Never leave anything running in the background; this step ends when you answer.
 - If the plan does not cover a small choice, take the simplest one and say so in notes.
 ${askRule(t)}`;
+}
+
+/**
+ * The setup command failed in this copy. The person cannot help with that, so the Builder sorts it out, in the project:
+ * the next story's copy and the person's own checkout run the same command.
+ */
+export function setupTroubleText(t: Ticket): string {
+  const s = t.setupTrouble;
+  if (!s) return '';
+  return `\n\nsquad-kit ran the project's setup command in this copy, \`${s.command}\`, and it failed, so the copy does not work yet. Sort this out before the steps, without asking the person. Fix it in the project, so that the same command works in a clean copy on any computer: a package that cannot be built here gets replaced by one that installs with no compiler, and you say so in notes. A setting only in your own shell is not a fix.\n${asData('What the command printed', s.output)}`;
 }
 
 /** A ticket that depends on unmerged work: what is in this copy and what is not, so the Builder never has to guess. */

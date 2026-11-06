@@ -7,6 +7,7 @@ import { MAX_PARALLEL, parallelLimit, setParallelLimit } from '../../core/settin
 import { ticketsRunning } from '../../engine/live.js';
 import { isOwnFolder } from '../../engine/setup.js';
 import { firstLook, type FirstLook } from '../../engine/first-look.js';
+import { defaultPlace, whyNotHere, type NewProjectInput } from '../../engine/new-project.js';
 import { fileTroubleWords, isDiskTrouble } from '../../core/file-trouble.js';
 import type { OpenProjects } from '../open-projects.js';
 
@@ -33,6 +34,10 @@ export interface FolderListing {
   places: { name: string; path: string }[];
   /** What adding this folder means: what squad-kit found in it and what happens next. Only for a folder that can be added. */
   look?: FirstLook;
+  /** Where a new project goes unless the person picks another place. */
+  place: string;
+  /** Why a new project cannot go in this folder. */
+  notHere?: string;
 }
 
 /** Folders nobody picks as a project, kept out of the list. */
@@ -71,7 +76,8 @@ function listFolder(asked: string): FolderListing {
   ];
   const canAdd = kind === 'project' || isOwnFolder(dir);
   const look = canAdd ? firstLook(dir) : undefined;
-  return { path: dir, parent, home, kind: look?.kind ?? kind, repos, canAdd, folders, places, ...(look ? { look } : {}) };
+  const notHere = whyNotHere(dir);
+  return { path: dir, parent, home, kind: look?.kind ?? kind, repos, canAdd, folders, places, ...(look ? { look } : {}), place: defaultPlace(), ...(notHere ? { notHere } : {}) };
 }
 
 export async function body<T>(c: Context): Promise<T> {
@@ -104,6 +110,18 @@ export function mountAppApi(app: Hono, opts: { projects: OpenProjects }): void {
       const { project, did, added } = projects.add(b.folder.trim());
       const row = projects.summaries().find((p) => p.id === project.id);
       return { ...row, did, added };
+    });
+  });
+
+  // New project: the folder, git and the board in one step, from a BRD or an idea.
+  app.post('/api/v1/app/projects/new', async (c) => {
+    const b = await body<NewProjectInput>(c);
+    const str = (v: unknown) => (typeof v === 'string' ? v : undefined);
+    const words = { name: str(b.name), where: str(b.where), idea: str(b.idea), text: str(b.text) };
+    return act(c, () => {
+      const { project, did, opens } = projects.create({ ...words, ...(b.file ? { file: b.file } : {}), ...(Array.isArray(b.with) ? { with: b.with } : {}) } as NewProjectInput);
+      const row = projects.summaries().find((p) => p.id === project.id);
+      return { ...row, did, opens };
     });
   });
 

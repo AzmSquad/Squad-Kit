@@ -297,6 +297,7 @@ export const TICKET_HOME = {
   stopRequested: 'local',
   reviewNotes: 'local',
   localSetup: 'local',
+  setupTrouble: 'local',
   replanFor: 'local',
   interrupted: 'local',
   selfAccept: 'local',

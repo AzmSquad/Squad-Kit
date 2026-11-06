@@ -4,14 +4,18 @@ import { BoardActionError, createTicket } from './actions.js';
 import { listDecisions, listTickets, now, readMeta, readTicket, writeDecision, writeMeta, type BoardPaths } from './store.js';
 import type { BoardMeta, Decision, Quality, Ticket } from './types.js';
 import { readOverview, writeOverview, type CodePart, type PartLink, type TicketIdea } from './overview.js';
+import { listBreakdowns } from './requirements.js';
 import {
   SETUP_STEPS,
   currentStep,
+  finish,
+  readTalk,
   resetFrom,
   setupOver,
   setupUsual,
   stepOf,
   usualText,
+  writeTalk,
   type FolderKind,
   type OverviewTalk,
   type SetupProof,
@@ -22,6 +26,8 @@ import { aiTool } from '../modules/registry.js';
 import { readAgent } from '../engine/agents.js';
 import { dropSetupCopies } from '../engine/onboard.js';
 import { DEFAULT_QUALITY, parseQuality } from '../engine/levels.js';
+
+export { readTalk, writeTalk };
 
 /**
  * The first run and the Overview, as the board, the terminal and REST see them: the setup's steps in plain words with
@@ -41,6 +47,9 @@ const LABEL: Record<SetupStepId, (tool: string, state: SetupStepState) => string
   app: () => 'Opening the app once',
   overview: () => 'Your project overview',
 };
+
+/** The read on a project with no code, once the person said what they want to build. */
+const IDEA_READ = { todo: 'The Architect reads what you want to build', now: 'The Architect is reading what you want to build', done: 'The Architect read what you want to build' };
 
 /** What a step does, before it has its own words. */
 const HINT: Record<SetupStepId, string> = {
@@ -90,6 +99,10 @@ export interface SetupView {
   qualityAsked: boolean;
   tool: string;
   empty: boolean;
+  /** On a project with no code: the person already said what they want to build, so nothing is asked. */
+  idea: boolean;
+  /** New project with a BRD, until its first release: the BRD the Analyst has, where the work starts. */
+  brd?: { id: string; title: string };
 }
 
 const again = (step: SetupStepId, label = 'Try again'): SetupWay => ({ do: 'again', step, label, command: `squad setup --again ${step}` });
@@ -135,11 +148,12 @@ export function setupView(bp: BoardPaths): SetupView | null {
       ],
     };
   }
+  const idea = Boolean(readTalk(bp)?.idea);
   const steps: SetupStepView[] = s.steps
     .filter((st) => SETUP_STEPS.includes(st.id))
     .map((st) => ({
       id: st.id,
-      label: LABEL[st.id](tool, st.state),
+      label: st.id === 'read' && idea ? IDEA_READ[st.state === 'done' || st.state === 'now' ? st.state : 'todo'] : LABEL[st.id](tool, st.state),
       state: st.state,
       note: st.note ?? (st.state === 'todo' || st.id === 'files' ? HINT[st.id] : undefined),
       ...(st.error ? { error: st.error } : {}),
@@ -150,6 +164,7 @@ export function setupView(bp: BoardPaths): SetupView | null {
       ways: waysOf(st.id, st.state, st.output),
     }));
   const over = setupOver(s);
+  const brd = s.fromBrd && meta.scan?.empty ? listBreakdowns(bp)[0] : undefined;
   return {
     project: meta.project,
     engine: meta.engine,
@@ -167,13 +182,15 @@ export function setupView(bp: BoardPaths): SetupView | null {
     qualityAsked: Boolean(s.qualityAt),
     tool,
     empty: Boolean(meta.scan?.empty),
+    idea,
+    ...(brd ? { brd: { id: brd.id, title: brd.title } } : {}),
   };
 }
 
 /** One line for a card or the terminal: "Getting to know the project: step 3 of 7, the Architect is reading your code". */
 export function setupLine(v: SetupView): string {
   if (v.approved) return 'Set up';
-  if (v.ready) return v.empty ? 'One question for you: what do you want to build?' : 'Your project overview is ready to check';
+  if (v.ready) return v.empty ? (v.idea ? 'Your first stories are ready to check' : 'One question for you: what do you want to build?') : 'Your project overview is ready to check';
   const cur = v.steps.find((x) => x.id === v.current);
   if (cur?.state === 'stopped') return `Stopped at: ${cur.label.toLowerCase()}`;
   if (cur?.state === 'failed') return `${cur.label}: ${cur.error ?? 'it did not work'}`;
@@ -274,6 +291,8 @@ export interface OverviewView {
   /** Tickets merged since the read: what the project can do now that it could not then. */
   since: { id: string; title: string; at: string }[];
   setup?: { done: number; total: number; line: string };
+  /** New project with a BRD, until its first release: there is nothing to check here yet, and the work starts there. */
+  brd?: { id: string; title: string };
   talk?: OverviewTalk;
   empty: boolean;
   /** On a project with no code: what the person said they want to build. */
@@ -337,9 +356,10 @@ export function overviewView(bp: BoardPaths): OverviewView {
     proposed,
     ...(s?.proof ? { proof: s.proof } : {}),
     handover,
-    ...(o.approved ? { approved: o.approved } : s?.approvedAt ? { approved: { by: meta.user.name, at: s.approvedAt } } : {}),
+    ...(o.approved ? { approved: o.approved } : s?.approvedAt && !s.fromBrd ? { approved: { by: meta.user.name, at: s.approvedAt } } : {}),
     since,
     ...(sv && !sv.ready && !sv.approved ? { setup: { done: sv.done, total: sv.total, line: setupLine(sv) } } : {}),
+    ...(sv?.brd ? { brd: sv.brd } : {}),
     ...(talk ? { talk } : {}),
     // Still so while the Architect reads a folder that started empty, so the page does not flash a project's cards.
     empty: Boolean(meta.scan?.empty) || (meta.scan?.status !== 'done' && meta.setup?.kind === 'empty' && !meta.setup.approvedAt),
@@ -388,26 +408,6 @@ export function ticketFromIdea(bp: BoardPaths, n: number): Ticket {
 }
 
 /* ── Something is wrong: a talk with the Architect ─────── */
-
-function talkFile(bp: BoardPaths): string {
-  return path.join(bp.localDir, 'overview-talk.json');
-}
-
-export function readTalk(bp: BoardPaths): OverviewTalk | null {
-  try {
-    const t = JSON.parse(fs.readFileSync(talkFile(bp), 'utf8')) as OverviewTalk;
-    return Array.isArray(t.messages) ? t : null;
-  } catch {
-    return null;
-  }
-}
-
-export function writeTalk(bp: BoardPaths, t: OverviewTalk): void {
-  fs.mkdirSync(path.dirname(talkFile(bp)), { recursive: true });
-  const tmp = `${talkFile(bp)}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, `${JSON.stringify(t, null, 1)}\n`);
-  fs.renameSync(tmp, talkFile(bp));
-}
 
 /** "Something is wrong": the talk opens, and the Architect asks what it got wrong. Your first words may come with it. */
 export function startTalk(bp: BoardPaths, text?: string): OverviewTalk {
@@ -466,6 +466,35 @@ export function tellIdea(bp: BoardPaths, text: string): SetupView {
   const t = readTalk(bp);
   writeTalk(bp, { open: false, thinking: false, reread: true, idea, messages: [...(t?.messages ?? []), { who: 'you', text: idea, at: now() }] });
   return setupAgain(bp, 'read');
+}
+
+/**
+ * New project with an idea: it goes in before the first read, so that read takes it in. The person is not asked what
+ * they just said, and the Architect does not read an empty folder twice.
+ */
+export function startWithIdea(bp: BoardPaths, text: string): void {
+  const idea = text.trim();
+  if (!idea) throw new BoardActionError('Write what you want to build first.');
+  writeTalk(bp, { open: false, thinking: false, reread: true, idea, messages: [{ who: 'you', text: idea, at: now() }] });
+}
+
+/**
+ * New project with a BRD: there is no code to read and nothing to check yet, so the setup is over before it starts and
+ * no AI runs for it. The Analyst takes the BRD from here. The Architect picks the technology when the first story is
+ * planned, as on any project with no code.
+ */
+export function skipFirstRead(bp: BoardPaths): void {
+  const meta = readMeta(bp);
+  const s = meta.setup;
+  if (!s) throw new BoardActionError('This project has no setup running.');
+  const at = now();
+  for (const st of s.steps) if (st.state === 'todo') finish(s, st.id, st.id === 'overview' ? 'done' : 'skipped', { note: 'Nothing to read yet: the project has no code' });
+  s.readyAt = at;
+  s.approvedAt = at;
+  s.fromBrd = true;
+  meta.scan = { status: 'done', at, empty: true, summary: 'A new project, started from a BRD.' };
+  writeMeta(bp, meta);
+  writeOverview(bp, { ...readOverview(bp), readAt: at });
 }
 
 /** "Read it again with this": the Architect reads the whole project again, with what the person said. */

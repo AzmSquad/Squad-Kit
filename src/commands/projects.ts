@@ -9,6 +9,8 @@ import { boardExists, boardPaths, listTickets, readMeta } from '../board/store.j
 import { inbox } from '../board/actions.js';
 import { runningApp } from '../board/console-info.js';
 import { setupLine, setupView } from '../board/first-run.js';
+import { makeNewProject, type NewProjectInput } from '../engine/new-project.js';
+import { rememberProject } from '../core/projects.js';
 
 const out = (s = '') => process.stdout.write(`${s}\n`);
 const home = (p: string) => (p.startsWith(os.homedir()) ? `~${p.slice(os.homedir().length)}` : p);
@@ -33,8 +35,47 @@ function stateOf(root: string): string {
   return `${kleur.gray(`${open} open`)}${waiting ? kleur.yellow(` · ${waiting} waiting for you`) : ''}`;
 }
 
-/** `squad projects`: the app's list of projects, or `--remove` to take one out. Its files stay in its folder. */
-export async function runProjects(opts: { remove?: string }): Promise<void> {
+export interface ProjectsOptions {
+  remove?: string;
+  new?: string;
+  where?: string;
+  idea?: string;
+  brd?: string;
+}
+
+/** `squad projects --new`: the same New project as the app's button, through the running app when there is one. */
+async function newProject(name: string, opts: ProjectsOptions): Promise<void> {
+  if (opts.brd && !fs.existsSync(opts.brd)) throw new Error(`There is no file at ${opts.brd}.`);
+  const input: NewProjectInput = {
+    name,
+    ...(opts.where ? { where: path.resolve(opts.where) } : {}),
+    ...(opts.idea ? { idea: opts.idea } : {}),
+    ...(opts.brd ? { file: { name: path.basename(opts.brd), data: fs.readFileSync(opts.brd).toString('base64') } } : {}),
+  };
+  const app = runningApp();
+  let root: string;
+  if (app) {
+    const res = await fetch(`http://127.0.0.1:${app.port}/api/v1/app/projects/new`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${app.token}`, 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const made = (await res.json()) as { root?: string; error?: string };
+    if (!res.ok || !made.root) throw new Error(made.error ?? 'squad-kit could not make the project.');
+    root = made.root;
+  } else {
+    const made = makeNewProject(input);
+    rememberProject(made.bp.projectId, made.bp.root);
+    root = made.bp.root;
+  }
+  ui.success(`${path.basename(root)} is ready in ${home(root)}.`);
+  out(opts.idea ? '  The Architect reads what you want to build. Follow it in its folder with: squad setup --follow' : '  The Analyst reads your BRD. Follow it in its folder with: squad requirements');
+  if (!app) out('  Its squad starts when you open squad-kit: squad');
+}
+
+/** `squad projects`: the app's list of projects, `--new` to start one, or `--remove` to take one out. Its files stay in its folder. */
+export async function runProjects(opts: ProjectsOptions): Promise<void> {
+  if (opts.new !== undefined) return newProject(opts.new, opts);
   const app = runningApp();
   if (opts.remove) {
     // A project whose folder is gone can still be taken off the list: by its id, its folder or its folder's name.

@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **New project**, on Home and with `squad projects --new`: give a name and a BRD or an idea, and squad-kit makes the folder,
+  git and the board. A BRD goes straight to the Analyst. An idea goes into the first read, so you are not asked again.
+- GitHub's checks run on a Mac as well as Linux.
+
+### Changed
+
+- A folder that is a git repo around other code repos, with no code of its own, is a workspace: squad-kit finds the repos
+  inside and leaves its documents out of the outer repo.
+- A release on a project with no remote says "Saved on this computer only", not a git command.
+- When the project's setup command fails in a story's copy, the story no longer stops and asks you to press Try again. The
+  Builder gets what the command printed and fixes it in the project.
+- On a project with no code, the Architect picks technology that installs with no compiler.
+
+### Fixed
+
+- After you say what you want to build, Home and the setup page no longer ask you the same question.
+
 ## [1.2.2] — 2026-11-05
 
 A patch about the guard. It closes what a review of 1.2.1 found open, moves commit hooks to a throwaway git folder, and says

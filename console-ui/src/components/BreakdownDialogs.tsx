@@ -58,7 +58,58 @@ function sizeWords(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-const stem = (name: string) => name.replace(/\.[^.]+$/, '');
+export const stem = (name: string) => name.replace(/\.[^.]+$/, '');
+
+/** A BRD the person picked, once squad-kit can read that kind of file. Throws in plain words. */
+export async function readBrd(f: File): Promise<PickedFile> {
+  if (!kindOf(f.name)) throw new Error(`${f.name}: squad-kit reads PDF, Word (.docx), Markdown and text files. Save the BRD as one of those, or paste the text.`);
+  if (f.size > MAX_FILE) throw new Error(`${f.name} is larger than 10 MB.`);
+  return readFile(f);
+}
+
+/** Drop or choose the BRD, and the file once it is picked. */
+export function BrdDrop({ file, onPick, onClear, hint }: { file: PickedFile | null; onPick(files: FileList | null): void; onClear(): void; hint?: string }) {
+  const [over, setOver] = useState(false);
+  const kind = file ? kindOf(file.name) : null;
+  return (
+    <>
+      <label
+        className={`rq-drop ${over ? 'over' : ''}`}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setOver(true);
+        }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setOver(false);
+          onPick(e.dataTransfer.files);
+        }}
+      >
+        <input type="file" className="sr-only" accept=".pdf,.docx,.md,.markdown,.txt" onChange={(e) => onPick(e.target.files)} />
+        <Upload size={24} aria-hidden="true" />
+        <b>
+          Drop your BRD here, or <u>choose a file</u>
+        </b>
+        <span>{hint ?? 'PDF, Word, Markdown or text, up to 10 MB'}</span>
+      </label>
+      {file && kind && (
+        <div className="rq-file">
+          <span className={`rq-ftag ${kind}`}>{KIND_TAG[kind]}</span>
+          <div className="grow">
+            <b>{file.name}</b>
+            <span>
+              {sizeWords(file.size)}, {KIND_WORD[kind]}
+            </span>
+          </div>
+          <button className="iconbtn" aria-label="Remove the file" onClick={onClear}>
+            <X size={14} />
+          </button>
+        </div>
+      )}
+    </>
+  );
+}
 
 /** Add a BRD: drop or choose the document (or paste its text), name it, add mockups. Nothing is built or sent. */
 export function AddBrdDialog({ onClose }: { onClose(): void }) {
@@ -71,7 +122,6 @@ export function AddBrdDialog({ onClose }: { onClose(): void }) {
   const [name, setName, clearName] = useDraft('add-brd', 'name', '');
   const [named, setNamed] = useState(false);
   const [extra, setExtra] = useState<PickedFile[]>([]);
-  const [over, setOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const extraInput = useRef<HTMLInputElement>(null);
 
@@ -79,10 +129,8 @@ export function AddBrdDialog({ onClose }: { onClose(): void }) {
     const f = list ? [...list][0] : undefined;
     if (!f) return;
     setError(null);
-    if (!kindOf(f.name)) return setError(`${f.name}: squad-kit reads PDF, Word (.docx), Markdown and text files. Save the BRD as one of those, or paste the text.`);
-    if (f.size > MAX_FILE) return setError(`${f.name} is larger than 10 MB.`);
     try {
-      const read = await readFile(f);
+      const read = await readBrd(f);
       setFile(read);
       setPaste(false);
       if (!named) setName(stem(f.name));
@@ -101,7 +149,6 @@ export function AddBrdDialog({ onClose }: { onClose(): void }) {
     setExtra((now) => [...now, ...read].slice(0, MAX_FILES - 1));
   };
 
-  const kind = file ? kindOf(file.name) : null;
   const can = paste ? Boolean(text.trim()) : Boolean(file);
   const command = paste
     ? `squad requirements add --paste${name.trim() ? ` --name ${shellQuote(name.trim())}` : ''}`
@@ -161,40 +208,7 @@ export function AddBrdDialog({ onClose }: { onClose(): void }) {
           </div>
         ) : (
           <>
-            <label
-              className={`rq-drop ${over ? 'over' : ''}`}
-              onDragOver={(e) => {
-                e.preventDefault();
-                setOver(true);
-              }}
-              onDragLeave={() => setOver(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                setOver(false);
-                void pick(e.dataTransfer.files);
-              }}
-            >
-              <input type="file" className="sr-only" accept=".pdf,.docx,.md,.markdown,.txt" onChange={(e) => void pick(e.target.files)} />
-              <Upload size={24} aria-hidden="true" />
-              <b>
-                Drop your BRD here, or <u>choose a file</u>
-              </b>
-              <span>PDF, Word, Markdown or text, up to 10 MB</span>
-            </label>
-            {file && kind && (
-              <div className="rq-file">
-                <span className={`rq-ftag ${kind}`}>{KIND_TAG[kind]}</span>
-                <div className="grow">
-                  <b>{file.name}</b>
-                  <span>
-                    {sizeWords(file.size)}, {KIND_WORD[kind]}
-                  </span>
-                </div>
-                <button className="iconbtn" aria-label="Remove the file" onClick={() => setFile(null)}>
-                  <X size={14} />
-                </button>
-              </div>
-            )}
+            <BrdDrop file={file} onPick={(f) => void pick(f)} onClear={() => setFile(null)} />
             <div className="rq-hint">
               No file?{' '}
               <button className="rq-link" onClick={() => setPaste(true)}>

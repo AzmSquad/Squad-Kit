@@ -254,7 +254,7 @@ async function releaseRepo(
         log.push({ ok: false, text: `${plain} Press Push again, or run: squad release ${version} --push-again` });
       }
     } else {
-      log.push({ ok: false, text: 'No git remote is set, so nothing was pushed. Add one with: git remote add origin <url>' });
+      log.push({ ok: true, text: 'Saved on this computer only: this project has no online copy to send it to.' });
     }
 
     moveLocalBase(root, base, sent, version, keep, log);

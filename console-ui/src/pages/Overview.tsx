@@ -68,6 +68,17 @@ export function OverviewPage() {
           {asking && <AskIdea v={v} onSent={() => setChanging(false)} onWrite={() => setWriting(true)} />}
           {v.handover === 'ready' && !asking && !v.talk?.open && <Handover v={v} {...(v.empty ? { onChange: () => setChanging(true) } : {})} />}
           {v.talk?.open && <Talk t={v.talk} />}
+          {v.brd && (
+            <div className="ob-card ready">
+              <span className="grow">
+                <b>Your stories start from your BRD</b>
+                <span>There is no code yet. The Analyst reads {v.brd.title} and asks only about real gaps. You approve the stories, then the squad builds them.</span>
+              </span>
+              <Link to="/requirements/$id" params={{ id: v.brd.id }} className="btn pri">
+                Open the BRD <ArrowRight size={15} />
+              </Link>
+            </div>
+          )}
           {v.handover === 'approved' && v.approved && (
             <div className="calmlane ob-approved">
               <span className="glyph">
@@ -92,6 +103,7 @@ export function OverviewPage() {
 
           {v.empty ? (
             !asking &&
+            !v.brd &&
             v.handover !== 'reading' && (
               <div className="ob-row2">
                 <WhatItIs v={v} />

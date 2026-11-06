@@ -1101,6 +1101,15 @@ ul.ticketnotes .grow, .addnote .grow { flex: 1; }
 .home-empty svg { color: var(--accent); }
 .home-empty b { color: var(--text); font-size: 15px; }
 .home-empty:hover { border-color: var(--accent); }
+.home-projects .home-h { flex-wrap: wrap; }
+.home-cmd { margin-top: 12px; }
+.home-cmd:empty { display: none; }
+.home-starts { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.np { display: flex; flex-direction: column; gap: 14px; margin-top: 12px; }
+.np .seg { width: fit-content; }
+.np-where { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 10px; font-size: 13.5px; }
+.np-where .grow { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.np-pick { display: flex; gap: 8px; margin-top: 10px; }
 .places { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
 .fb { border: 1px solid var(--line-strong); border-radius: 12px; overflow: hidden; }
 .fb-bar { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); background: var(--lane); }

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, ChevronRight, CornerLeftUp, Folder, FolderCheck, FolderGit2, FolderPlus, Moon, Plus, Sun } from 'lucide-react';
+import { Check, FolderPlus, Moon, Plus, Sparkles, Sun } from 'lucide-react';
 import { api, send } from '../api/client';
 import type { AppProject, AppProjects, AppSettings, AppWaiting, FolderListing } from '../api/types';
 import { usePrefs } from '../lib/prefs';
@@ -10,6 +10,8 @@ import { AboutButton, AppUpdate } from '../components/Update';
 import { LimitBanner } from '../components/UsageLimit';
 import { SaveTroubleBanner } from '../components/SaveTrouble';
 import { HomeWaiting } from '../components/Waiting';
+import { FolderBrowser, useFolders } from '../components/FolderBrowser';
+import { NewProject } from '../components/NewProject';
 import { BreakdownWaitCard, useAllBreakdownWaits } from '../components/BreakdownWaits';
 import { changeWaits, openChange, testChangeLine, testChangeWaits } from '../lib/waiting';
 
@@ -38,6 +40,7 @@ export function HomePage() {
   const projects = useQuery({ queryKey: ['app', 'projects'], queryFn: () => api<AppProjects>('/api/v1/app/projects'), refetchInterval: LIVE_MS });
   const waiting = useQuery({ queryKey: ['app', 'waiting'], queryFn: () => api<AppWaiting>('/api/v1/app/waiting'), refetchInterval: LIVE_MS });
   const [adding, setAdding] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [removing, setRemoving] = useState<AppProject | null>(null);
   const list = projects.data?.projects ?? [];
   const items = waiting.data?.items ?? [];
@@ -67,17 +70,26 @@ export function HomePage() {
             <div className="home-h">
               <h2>Projects</h2>
               <span className="grow" />
-              <Cmd text="squad projects" />
-              <button className="btn pri" onClick={() => setAdding(true)}>
-                <Plus size={15} /> Add project
+              <button className="btn" onClick={() => setAdding(true)}>
+                <FolderPlus size={15} /> Add project
+              </button>
+              <button className="btn pri" onClick={() => setCreating(true)}>
+                <Plus size={15} /> New project
               </button>
             </div>
             {projects.isLoading ? null : list.length === 0 ? (
-              <button className="home-empty" onClick={() => setAdding(true)}>
-                <FolderPlus size={22} />
-                <b>Add your first project</b>
-                <span>Pick its folder: one repo, a folder with several repos, or a new, empty folder for a new project.</span>
-              </button>
+              <div className="home-starts">
+                <button className="home-empty" onClick={() => setCreating(true)}>
+                  <Sparkles size={22} />
+                  <b>Start a new project</b>
+                  <span>You have a BRD or an idea. You don't need a folder, code or any technical knowledge.</span>
+                </button>
+                <button className="home-empty" onClick={() => setAdding(true)}>
+                  <FolderPlus size={22} />
+                  <b>Add a project you already have</b>
+                  <span>Pick its folder: one repo, or a folder with several repos.</span>
+                </button>
+              </div>
             ) : (
               <div className="pcards">
                 {list.map((p) => (
@@ -85,6 +97,9 @@ export function HomePage() {
                 ))}
               </div>
             )}
+            <div className="home-cmd">
+              <Cmd text="squad projects" />
+            </div>
           </section>
           <section className="home-inbox" id="waiting">
             <div className="home-h">
@@ -98,7 +113,7 @@ export function HomePage() {
                 <span className="ring"><Check size={18} strokeWidth={2.5} /></span>
                 <div>
                   <b>Nothing needs you right now</b>
-                  <span>{list.length ? 'The squads are working. Questions, plans, proof and decisions from every project land here.' : 'Add a project to start.'}</span>
+                  <span>{list.length ? 'The squads are working. Questions, plans, proof and decisions from every project land here.' : 'Start a project to begin.'}</span>
                 </div>
               </div>
             ) : (
@@ -134,6 +149,7 @@ export function HomePage() {
         </div>
       </div>
       {adding && <AddProject onClose={() => setAdding(false)} />}
+      {creating && <NewProject onClose={() => setCreating(false)} />}
       {removing && <RemoveProject p={removing} onClose={() => setRemoving(null)} />}
     </div>
   );
@@ -173,6 +189,8 @@ function ProjectCard({ p, onRemove }: { p: AppProject; onRemove(): void }) {
   const { toast } = usePrefs();
   const [busy, setBusy] = useState(false);
   const setup = p.setup && p.setup.status !== 'done' ? p.setup : null;
+  // New project with a BRD: the work starts at the BRD, until there are stories on the board.
+  const brd = p.open && p.tickets === 0 ? p.setup?.brd : undefined;
   // A project that could not open: open it again once what stopped it is fixed.
   const retry = async () => {
     setBusy(true);
@@ -194,6 +212,8 @@ function ProjectCard({ p, onRemove }: { p: AppProject; onRemove(): void }) {
     <span className={p.setup.status === 'failed' ? 'bad' : 'you'}>{p.setup.line}</span>
   ) : setup?.status === 'failed' ? (
     <span className="bad">The Architect could not read the project</span>
+  ) : brd ? (
+    <span className="you">Your stories start from your BRD</span>
   ) : setup ? (
     <span className="you">Setting up: {setup.status === 'running' ? (setup.now ?? 'the Architect reads the project') : 'the Architect reads the project next'}</span>
   ) : (
@@ -216,8 +236,8 @@ function ProjectCard({ p, onRemove }: { p: AppProject; onRemove(): void }) {
       </div>
       <div className="acts">
         {p.open ? (
-          <a className="btn sm pri" href={p.setup?.line && !p.setup.approved ? p.url.replace(/\/board$/, p.setup.ready ? '/overview' : '/setup') : p.url}>
-            {p.setup?.line && !p.setup.approved ? (p.setup.ready ? 'Check it' : 'See the setup') : 'Open board'}
+          <a className="btn sm pri" href={brd ? p.url.replace(/\/board$/, `/requirements/${encodeURIComponent(brd.id)}`) : p.setup?.line && !p.setup.approved ? p.url.replace(/\/board$/, p.setup.ready ? '/overview' : '/setup') : p.url}>
+            {brd ? 'Open the BRD' : p.setup?.line && !p.setup.approved ? (p.setup.ready ? 'Check it' : 'See the setup') : 'Open board'}
           </a>
         ) : (
           <button className="btn sm" disabled={busy} onClick={() => void retry()}>
@@ -267,23 +287,14 @@ function Found({ l }: { l: FolderListing }) {
   );
 }
 
-/** Add project: the app lists folders itself, because a page cannot read a real folder path. Starts at home. */
+/** Add project: pick the folder of a project you already have. */
 function AddProject({ onClose }: { onClose(): void }) {
-  const [at, setAt] = useState<string>('');
-  const [newName, setNewName] = useState<string | null>(null);
+  const { at, setAt, listing } = useFolders();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const listing = useQuery({
-    queryKey: ['app', 'folders', at],
-    queryFn: () => api<FolderListing>(`/api/v1/app/folders${at ? `?path=${encodeURIComponent(at)}` : ''}`),
-  });
   const l = listing.data;
-  // After a folder that cannot be read, Up still leads somewhere: the folder above the one asked for.
-  const parentOf = (p: string) => p.replace(/[/\\][^/\\]+[/\\]?$/, '') || '/';
-  const up = l?.parent ?? (listing.isError && at ? parentOf(at) : null);
   const go = (p: string) => {
     setError(null);
-    setNewName(null);
     setAt(p);
   };
 
@@ -302,17 +313,6 @@ function AddProject({ onClose }: { onClose(): void }) {
     }
   };
 
-  const makeFolder = async () => {
-    if (!l || !newName?.trim()) return;
-    try {
-      const made = await send<FolderListing>('/api/v1/app/folders', 'POST', { parent: l.path, name: newName.trim() });
-      go(made.path);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  };
-
-  const crumbs = l ? crumbsOf(l.path) : [];
   return (
     <Modal
       title="Add a project"
@@ -332,66 +332,7 @@ function AddProject({ onClose }: { onClose(): void }) {
       }
     >
       <p className="note">Pick the project's folder: one repo, a folder with several repos, or a new, empty folder for a new project.</p>
-      {l && (
-        <div className="places">
-          {l.places.map((p) => (
-            <button key={p.path} className={`btn sm ${p.path === l.path ? 'pri' : ''}`} onClick={() => go(p.path)}>
-              {p.name}
-            </button>
-          ))}
-        </div>
-      )}
-      <div className="fb">
-        <div className="fb-bar">
-          <button className="iconbtn" disabled={!up} onClick={() => up && go(up)} aria-label="Up one folder" title="Up one folder">
-            <CornerLeftUp size={15} />
-          </button>
-          <span className="crumbs mono">
-            {crumbs.map((c, i) => (
-              <span key={c.path}>
-                {i > 0 && <ChevronRight size={12} />}
-                <button onClick={() => go(c.path)}>{c.name}</button>
-              </span>
-            ))}
-          </span>
-        </div>
-        <div className="fb-list" role="list">
-          {listing.isError && <p className="note bad">{(listing.error as Error).message}</p>}
-          {l && l.folders.length === 0 && <p className="note">No folders inside.</p>}
-          {l?.folders.map((f) => (
-            <button key={f.path} role="listitem" className="fb-row" onClick={() => go(f.path)}>
-              {f.kind === 'project' ? <FolderCheck size={16} /> : f.kind === 'repo' ? <FolderGit2 size={16} /> : <Folder size={16} />}
-              <span className="nm">{f.name}</span>
-              {f.kind === 'project' && <span className="pill ok sm">squad-kit project</span>}
-              {f.kind === 'repo' && <span className="pill sm">code repo</span>}
-            </button>
-          ))}
-        </div>
-        <div className="fb-new">
-          {newName === null ? (
-            <button className="btn sm" disabled={!l} onClick={() => setNewName('')}>
-              <FolderPlus size={14} /> New folder here
-            </button>
-          ) : (
-            <>
-              <input
-                className="input"
-                autoFocus
-                placeholder="Name of the new folder"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && void makeFolder()}
-              />
-              <button className="btn sm pri" disabled={!newName.trim()} onClick={() => void makeFolder()}>
-                Make it
-              </button>
-              <button className="btn sm" onClick={() => setNewName(null)}>
-                Cancel
-              </button>
-            </>
-          )}
-        </div>
-      </div>
+      <FolderBrowser at={at} go={go} listing={listing} onError={setError} />
       {l && (
         <p className="fb-kind">
           <b>{tilde(l.path, l.home)}</b>
@@ -402,11 +343,6 @@ function AddProject({ onClose }: { onClose(): void }) {
       {error && <p className="fb-error">{error}</p>}
     </Modal>
   );
-}
-
-function crumbsOf(p: string): { name: string; path: string }[] {
-  const parts = p.split('/').filter(Boolean);
-  return [{ name: '/', path: '/' }, ...parts.map((name, i) => ({ name, path: `/${parts.slice(0, i + 1).join('/')}` }))];
 }
 
 function RemoveProject({ p, onClose }: { p: AppProject; onClose(): void }) {

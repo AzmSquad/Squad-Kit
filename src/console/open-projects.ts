@@ -12,6 +12,7 @@ import { LiveSquad } from '../engine/live.js';
 import { stopApps } from '../engine/run-app.js';
 import { stopTries } from '../engine/try-app.js';
 import { prepareProject } from '../engine/setup.js';
+import { dropNewProject, makeNewProject, type NewProjectInput } from '../engine/new-project.js';
 import { setupLine, setupView } from '../board/first-run.js';
 import { forgetProject, projectName, readProjects, rememberProject } from '../core/projects.js';
 import { mountApi, type MountApiOptions } from './api/index.js';
@@ -67,9 +68,9 @@ export interface OpenProjectsOptions {
 }
 
 /** The setup in one line for the project's card on Home, while it runs or waits for the person. */
-function setupSummary(bp: BoardPaths): { line?: string; ready?: boolean; approved?: boolean } {
+function setupSummary(bp: BoardPaths): { line?: string; ready?: boolean; approved?: boolean; brd?: { id: string; title: string } } {
   const v = setupView(bp);
-  return v ? { line: setupLine(v), ready: v.ready, approved: v.approved } : {};
+  return v ? { line: setupLine(v), ready: v.ready, approved: v.approved, ...(v.brd ? { brd: v.brd } : {}) } : {};
 }
 
 export class OpenProjects {
@@ -115,6 +116,18 @@ export class OpenProjects {
     const known = this.all().find((p) => p.root === root);
     if (known) return { project: known, did: [], added: false };
     return { ...this.prepareAndOpen(root), added: true };
+  }
+
+  /** New project: made on disk with what the person gave, and only then its squad starts. */
+  create(input: NewProjectInput): { project: OpenProject; did: string[]; opens: string } {
+    const made = makeNewProject(input);
+    try {
+      return { project: this.openReady(made.paths), did: made.did, opens: made.opens };
+    } catch (err) {
+      if (this.open.has(made.bp.projectId)) this.remove(made.bp.projectId);
+      dropNewProject(made.bp.root, made.bp);
+      throw err;
+    }
   }
 
   private prepareAndOpen(root: string): { project: OpenProject; did: string[] } {

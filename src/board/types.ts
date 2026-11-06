@@ -568,6 +568,8 @@ export interface Ticket {
   mergedAt?: string;
   /** Installing packages and running migrations in the person's own checkout, after the merge moved it. */
   localSetup?: LocalSetup;
+  /** The project's setup command failed in this ticket's copy: the Builder sorts it out first. */
+  setupTrouble?: { command: string; output: string };
   /** Decisions approved after this ticket was planned that change it, waiting for the person. */
   outdated?: Outdated[];
   /** The plan is being redone to follow this decision: the build brings in the latest base first. */

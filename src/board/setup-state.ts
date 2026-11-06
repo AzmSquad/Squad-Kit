@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import type { BoardPaths } from './store.js';
 import type { ChatMessage } from './types.js';
 import { rangeWords, readUsual, recordUsual } from './usual.js';
@@ -85,6 +87,28 @@ export interface SetupState {
   readyAt?: string;
   /** The person approved the overview: the rules the read found are rules now. */
   approvedAt?: string;
+  /** New project with a BRD: nothing was read and nothing was approved. The Analyst has the BRD. */
+  fromBrd?: boolean;
+}
+
+function talkFile(bp: BoardPaths): string {
+  return path.join(bp.localDir, 'overview-talk.json');
+}
+
+export function readTalk(bp: BoardPaths): OverviewTalk | null {
+  try {
+    const t = JSON.parse(fs.readFileSync(talkFile(bp), 'utf8')) as OverviewTalk;
+    return Array.isArray(t.messages) ? t : null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeTalk(bp: BoardPaths, t: OverviewTalk): void {
+  fs.mkdirSync(path.dirname(talkFile(bp)), { recursive: true });
+  const tmp = `${talkFile(bp)}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, `${JSON.stringify(t, null, 1)}\n`);
+  fs.renameSync(tmp, talkFile(bp));
 }
 
 /** squad-kit's guess, in seconds, until this computer has set up a few projects of its own. */

@@ -202,7 +202,7 @@ describe('the proof through the window', () => {
     });
     await (new LiveSquad(bp) as unknown as Squad).proof(id);
     const t = ticket();
-    expect(lines()).toContain("The Tester asked you to change squad-kit's settings. squad-kit refused.");
+    expect(lines()).toContain("The Tester asked to change squad-kit's settings. squad-kit refused, and did not bother you with it.");
     expect(t.stuck?.question).toBe('The Tester took no screenshots, so the proof is not ready yet. The Tester says: It needs a second person signed in at the same time.');
     expect(JSON.stringify(t.stuck)).not.toContain('.squad');
     // A reason that was refused is no reason: that "done when" still needs its picture.

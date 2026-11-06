@@ -3,7 +3,7 @@ import path from 'node:path';
 import { listDecisions, nextDecisionId, now, readMeta, writeDecision, writeMeta, type BoardPaths } from '../board/store.js';
 import type { BoardMeta, ProjectCommands, RepoInfo } from '../board/types.js';
 import { cleanOverview, readOverview, writeOverview } from '../board/overview.js';
-import { begin, currentStep, finish, learnSetupTime, nextProofStep, readWords, stepOf, type SetupState, type SetupStepId, type SetupTestRun } from '../board/setup-state.js';
+import { begin, currentStep, finish, learnSetupTime, nextProofStep, readTalk, readWords, stepOf, type SetupState, type SetupStepId, type SetupTestRun } from '../board/setup-state.js';
 import { runCommand, startApp, tail, testCount, CHECK_SILENT_MS, type RunningApp } from './checks.js';
 import { addSnapshot, dropSnapshot, git, worktreeRoot } from './git.js';
 import { reposOf } from './repos.js';
@@ -387,7 +387,8 @@ const appStep: Step = async (bp, deps, copies) => {
 const overviewStep: Step = async (bp) => {
   withSetup(bp, (s, meta) => {
     begin(s, 'overview');
-    finish(s, 'overview', 'done', { note: meta.scan?.empty ? 'One question for you: what do you want to build?' : 'What squad-kit understood, for you to check' });
+    const empty = readTalk(bp)?.idea ? 'Your first stories, for you to check' : 'One question for you: what do you want to build?';
+    finish(s, 'overview', 'done', { note: meta.scan?.empty ? empty : 'What squad-kit understood, for you to check' });
     s.readyAt = now();
   });
 };

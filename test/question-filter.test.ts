@@ -135,7 +135,7 @@ describe('the filter in the squad', () => {
     const saved = readTicket(bp, t.id)!;
     expect(saved.agentQuestion).toBeUndefined();
     expect(saved.waiting?.kind).not.toBe('ask');
-    expect(lines(t.id)).toContain("The Reviewer asked you to change squad-kit's settings. squad-kit refused.");
+    expect(lines(t.id)).toContain("The Reviewer asked to change squad-kit's settings. squad-kit refused, and did not bother you with it.");
     expect(lines(t.id).join('\n')).not.toContain('.squad/config.json');
     // It went back to the same conversation, told why.
     expect(calls).toHaveLength(2);
@@ -180,9 +180,9 @@ describe('the filter in the squad', () => {
     expect(saved.stuck?.detail).toContain('asks the person for a secret');
     expect(lines(t.id)).toEqual(
       expect.arrayContaining([
-        "The Reviewer asked you to change squad-kit's settings. squad-kit refused.",
-        'The Reviewer asked you for a password or a key. squad-kit refused.',
-        'The Reviewer asked you to change the history of the code. squad-kit refused.',
+        "The Reviewer asked to change squad-kit's settings. squad-kit refused, and did not bother you with it.",
+        'The Reviewer asked for a password or a key. squad-kit refused, and did not bother you with it.',
+        'The Reviewer asked to change the history of the code. squad-kit refused, and did not bother you with it.',
       ]),
     );
   });
@@ -330,7 +330,7 @@ describe('the filter in talks and in runs with no ticket', () => {
     expect(last).toMatchObject({ who: 'builder', text: refusedReplyLine('Builder', 'secret') });
     expect(last.options).toBeUndefined();
     expect(JSON.stringify(readTicket(bp, t.id))).not.toContain('Stripe test key');
-    expect(readTicket(bp, t.id)!.activity.map((a) => a.text)).toContain('The Builder asked you for a password or a key. squad-kit refused.');
+    expect(readTicket(bp, t.id)!.activity.map((a) => a.text)).toContain('The Builder asked for a password or a key. squad-kit refused, and did not bother you with it.');
     expect(recentLines(60_000).join('\n')).toContain('Stripe test key');
     // The person asked how to test: technical words in the answer are fine.
     answers.push({ reply: 'Run npm test in the terminal, then open /book on port 5173.', ready: false });

@@ -973,7 +973,7 @@ export interface AppProject {
   open: boolean;
   why?: string;
   engine?: 'demo' | 'live';
-  setup?: { status: 'pending' | 'running' | 'done' | 'failed'; now?: string; error?: string; line?: string; ready?: boolean; approved?: boolean };
+  setup?: { status: 'pending' | 'running' | 'done' | 'failed'; now?: string; error?: string; line?: string; ready?: boolean; approved?: boolean; brd?: { id: string; title: string } };
   tickets: number;
   waiting: number;
   working: number;
@@ -1007,6 +1007,10 @@ export interface FolderListing {
   places: { name: string; path: string }[];
   /** What squad-kit found in the folder and what adding it does. */
   look?: FirstLook;
+  /** Where a new project goes unless the person picks another place. */
+  place: string;
+  /** Why a new project cannot go in this folder. */
+  notHere?: string;
 }
 
 /** The Update button: where squad-kit stands against npm, and where an update is. */

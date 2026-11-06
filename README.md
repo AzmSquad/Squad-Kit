@@ -79,9 +79,11 @@ all your projects:
 Keep the terminal open while you work. Press Ctrl-C there to stop squad-kit. The squad picks up where it was
 the next time you run `squad`.
 
-## Add a project
+## Start or add a project
 
-On Home, press **Add project** and pick a folder in the folder browser. Or open a terminal in the folder and
+Have only a BRD or an idea? On Home, press **New project**: squad-kit makes the folder and the squad starts from what you gave.
+
+Already have a project? Press **Add project** and pick a folder in the folder browser. Or open a terminal in the folder and
 run:
 
 ```bash

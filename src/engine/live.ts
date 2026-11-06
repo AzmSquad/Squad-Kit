@@ -2486,7 +2486,15 @@ export class LiveSquad {
       const r = await runCommand(wt.dir, setup, 20 * 60_000, this.guardedWatch(id, wt.dir));
       this.goOn(id);
       // A new project has nothing to set up yet; the Builder creates it in this ticket.
-      if (!r.ok && !meta.scan?.empty) throw new StepError(dockerBlockedWords(r.output, this.guardFor(wt.dir, id)) ?? "Setting up the ticket's copy of the code did not work. Press Try again.", `${setup}:\n${tail(r.output, 30)}`);
+      if (!r.ok && !meta.scan?.empty) {
+        // Only an engineer can allow Docker. Anything else is technical, so it never stops the story for the person.
+        const docker = dockerBlockedWords(r.output, this.guardFor(wt.dir, id));
+        if (docker) throw new StepError(docker, `${setup}:\n${tail(r.output, 30)}`);
+        this.update(id, (x) => {
+          x.setupTrouble = { command: setup, output: tail(r.output, 30) };
+          addActivity(x, 'squad', 'Setting up the copy did not work on this computer. The Builder sorts that out first.');
+        });
+      }
       // What the setup rewrote (a lock file, often) is not the story's work: it goes back before anyone reads the copy.
       const back = putBackTracked(wt.dir);
       if (back.length) this.log('info', `The setup command changed ${back.join(', ')}; squad-kit put ${back.length === 1 ? 'it' : 'them'} back`, id);

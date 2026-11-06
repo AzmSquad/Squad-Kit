@@ -26,9 +26,9 @@ export const TECHNICAL_TRIES = 2;
 
 /** The plain activity line for a refused ask. */
 export function refusedAskLine(who: string, what: NotAllowed): string {
-  if (what === 'settings') return `The ${who} asked you to change squad-kit's settings. squad-kit refused.`;
-  if (what === 'secret') return `The ${who} asked you for a password or a key. squad-kit refused.`;
-  return `The ${who} asked you to change the history of the code. squad-kit refused.`;
+  if (what === 'settings') return `The ${who} asked to change squad-kit's settings. squad-kit refused, and did not bother you with it.`;
+  if (what === 'secret') return `The ${who} asked for a password or a key. squad-kit refused, and did not bother you with it.`;
+  return `The ${who} asked to change the history of the code. squad-kit refused, and did not bother you with it.`;
 }
 
 /** What the agent is told when its ask is refused. */
