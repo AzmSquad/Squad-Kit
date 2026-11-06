@@ -841,6 +841,59 @@ export interface LevelRow {
   now: { level: ModelLevel; effort?: Effort; model?: string; modelName: string; from: 'squad-kit' | 'project' | 'you'; why?: string };
 }
 
+export interface StoryLink {
+  id: string;
+  title: string;
+  at: string;
+}
+
+export interface HarnessNeed {
+  id: string;
+  summary: string;
+  row: string;
+  proof: boolean;
+}
+
+/** One gate, or one rule that is always on, as /api/v1/harness gives it. */
+export interface HarnessRow {
+  id: string;
+  name: string;
+  what: string;
+  fail?: string;
+  then?: string;
+  you?: boolean;
+  skip?: Track[];
+  note?: Partial<Record<Track, string>>;
+  d?: [string, string][];
+  seen?: { passed?: number; stopped?: number; week?: number; last?: StoryLink; did?: string };
+  needs?: HarnessNeed[];
+  cells?: Record<Track, { word: string; note?: string }>;
+}
+
+export interface HarnessStage {
+  id: string;
+  name: string;
+  about: string;
+  on: Record<Track, { kind: 'you' | 'squad' | 'skip'; sub: string; off?: boolean }>;
+  gates: HarnessRow[];
+  stopped?: number;
+}
+
+/** Everything the Harness page shows, with the engine's real values and what really happened on this project's stories. */
+export interface HarnessView {
+  quality: Quality;
+  qualityNote: Record<Quality, string>;
+  range: { days: number; weekDays: number; stories: number };
+  tiles: { working: number; stopped: number; needs: HarnessNeed[] };
+  tracks: { id: Track; name: string; words: string }[];
+  stages: HarnessStage[];
+  alwaysOn: HarnessRow[];
+  limits: { id: string; group: string; n: string; name: string; what: string; hit?: StoryLink }[];
+  caps: { key: string; name: string; turns: number; spendUsd: number }[];
+  agents: Record<string, { can: [string, boolean][] }>;
+  safety: { hidden: string[]; locked: string[]; sites: string[]; refused: string[]; tools: string[]; local: string[]; lockedByYou: string[] };
+}
+
 export interface CorePrompts {
   ticket: { id: string; title: string };
   prompts: { step: string; name: string; prompt: string; team: string }[];

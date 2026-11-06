@@ -115,7 +115,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const holderOf = (run: Pick<TryRun, 'ticket'>): string => `try:${run.ticket}`;
 
 /** How long a copy someone is trying stays once a story waits for the product. */
-const TRY_YIELDS_AFTER_MS = 15 * 60_000;
+export const TRY_YIELDS_AFTER_MS = 15 * 60_000;
 
 /** The ticket copies of one project's app: one runs at a time. The board's buttons and the terminal share it. */
 export class TryRunner {

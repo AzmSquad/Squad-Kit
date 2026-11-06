@@ -13,6 +13,9 @@ interface Prefs {
   /** An open ticket covers the whole board area instead of the side panel. Remembered in this browser. */
   ticketFull: boolean;
   toggleTicketFull(): void;
+  /** The Harness page opens what really runs behind every row. Remembered in this browser. */
+  engineers: boolean;
+  toggleEngineers(): void;
   /** An error toast offers Report a problem, and Try again when `retry` is given. */
   toast(text: string, kind?: 'ok' | 'err', retry?: () => void): void;
 }
@@ -45,6 +48,7 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(initialTheme);
   const [showCommands, setShowCommands] = useState(stored('sk.commands') !== 'off');
   const [ticketFull, setTicketFull] = useState(stored('sk.ticketFull') === 'on');
+  const [engineers, setEngineers] = useState(stored('sk.engineers') === 'on');
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   useEffect(() => {
@@ -79,9 +83,15 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
           store('sk.ticketFull', f ? 'off' : 'on');
           return !f;
         }),
+      engineers,
+      toggleEngineers: () =>
+        setEngineers((e) => {
+          store('sk.engineers', e ? 'off' : 'on');
+          return !e;
+        }),
       toast,
     }),
-    [theme, showCommands, ticketFull, toast],
+    [theme, showCommands, ticketFull, engineers, toast],
   );
 
   return (

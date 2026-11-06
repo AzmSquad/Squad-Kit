@@ -82,6 +82,7 @@ import { MODEL_LEVELS } from '../../modules/ai-tool/types.js';
 import { loadConfig } from '../../core/config.js';
 import { installedEditors, openInEditor, ticketChanges } from '../../engine/changes.js';
 import { corePrompts } from '../../engine/core-prompts.js';
+import { harnessView } from '../../engine/harness.js';
 import { boardUsage } from '../../board/usage.js';
 import { liveNow } from '../../board/now.js';
 import { readUsual } from '../../board/usual.js';
@@ -815,6 +816,9 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
       }),
     );
   });
+
+  // Every gate, limit and safety rule, with the engine's real values and what really happened, for the Harness page.
+  app.get('/api/v1/harness', (c) => c.json(boardExists(bp) ? harnessView(readMeta(bp), bp) : harnessView()));
 
   // What the squad used on this board, on this computer: the total, each role at each level, and the project's own line.
   app.get('/api/v1/usage', (c) => (boardExists(bp) ? c.json(boardUsage(bp)) : c.json({ total: { runs: 0 }, project: { runs: 0 }, roles: [], tickets: 0 })));

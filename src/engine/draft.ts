@@ -90,7 +90,7 @@ export async function draftTicket(bp: BoardPaths, input: DraftInput, opts: Draft
       permissions: ['read'],
       schema: P.DRAFT_SCHEMA,
       addDirs: [dir],
-      timeoutMs: 4 * 60_000,
+      timeoutMs: DRAFT_MS,
       ...(opts.signal ? { signal: opts.signal } : {}),
       // The first sign of life means the message is read and the Analyst is looking around; words mean it is writing.
       onActivity: () => {
@@ -137,6 +137,9 @@ export interface DraftJob extends DraftProgress {
   draft?: TicketDraft;
   error?: string;
 }
+
+/** The longest filling in a new ticket may take. */
+const DRAFT_MS = 4 * 60_000;
 
 const drafts = new Map<string, { job: DraftJob; files: UploadedFile[]; stop: AbortController }>();
 /** A finished draft nobody came back for is let go after a day. */
@@ -227,7 +230,7 @@ async function runAnalyst(bp: BoardPaths, opts: AgentRun): Promise<AgentResult> 
   const tool = aiTool(agent.tool);
   if (!tool?.canRun) {
     const can = AI_TOOLS.filter((t) => t.canRun).map((t) => t.label).join(' or ');
-    throw new BoardActionError(`The Analyst is set to ${tool?.label ?? agent.tool}, which squad-kit cannot run yet. Switch it to ${can} in Squad and AI.`);
+    throw new BoardActionError(`The Analyst is set to ${tool?.label ?? agent.tool}, which squad-kit cannot run yet. Switch it to ${can} on the Harness page, under Agents.`);
   }
   const extra = agentInstructions(agent);
   // Filling in a ticket is a short, simple task: squad-kit's default is the fast level.

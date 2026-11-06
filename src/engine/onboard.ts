@@ -5,7 +5,8 @@ import type { BoardMeta, ProjectCommands, RepoInfo } from '../board/types.js';
 import { cleanOverview, readOverview, writeOverview } from '../board/overview.js';
 import { cleanParts, partsAfterRead, repoInUse } from '../board/parts.js';
 import { begin, currentStep, finish, learnSetupTime, nextProofStep, readTalk, readWords, stepOf, type SetupState, type SetupStepId, type SetupTestRun } from '../board/setup-state.js';
-import { runCommand, startApp, tail, testCount, CHECK_SILENT_MS, type RunningApp } from './checks.js';
+import { runCommand, startApp, tail, testCount, CHECK_MS, CHECK_SILENT_MS, type RunningApp } from './checks.js';
+import { APP_WAIT_MS, SETUP_MS } from './run-app.js';
 import { addSnapshot, dropSnapshot, git, worktreeRoot } from './git.js';
 import { reposOf } from './repos.js';
 import { dockerBlockedWords, guardSupport, projectGuardFor, type GuardSpec } from './project-guard.js';
@@ -278,7 +279,7 @@ const commandsStep: Step = async (bp, deps, copies) => {
     const setup = repo.commands.setup?.trim();
     if (!setup) continue;
     withSetup(bp, (s) => (stepOf(s, 'commands').note = 'Installing what it needs'));
-    const r = await runCommand(copy.dir, setup, 20 * 60_000, { silentMs: CHECK_SILENT_MS, signal: deps.signal, ...(guardFor(bp, copy.dir) ? { guard: guardFor(bp, copy.dir)! } : {}) });
+    const r = await runCommand(copy.dir, setup, SETUP_MS, { silentMs: CHECK_SILENT_MS, signal: deps.signal, ...(guardFor(bp, copy.dir) ? { guard: guardFor(bp, copy.dir)! } : {}) });
     if (deps.signal.aborted) throw new Error(STOPPED);
     if (!r.ok) failures.push({ error: dockerBlockedWords(r.output, guardFor(bp, copy.dir)) ?? 'Installing what it needs did not work.', output: `${setup}:\n${tail(r.output, 30)}` });
   }
@@ -298,7 +299,7 @@ async function copyFor(bp: BoardPaths, repo: RepoInfo, copies: Map<string, strin
   const copy = ensureCopy(bp, repo);
   copies.set(repo.path, copy.dir);
   const setup = repo.commands.setup?.trim();
-  if (copy.fresh && setup) await runCommand(copy.dir, setup, 20 * 60_000, { silentMs: CHECK_SILENT_MS, signal, ...(guardFor(bp, copy.dir) ? { guard: guardFor(bp, copy.dir)! } : {}) });
+  if (copy.fresh && setup) await runCommand(copy.dir, setup, SETUP_MS, { silentMs: CHECK_SILENT_MS, signal, ...(guardFor(bp, copy.dir) ? { guard: guardFor(bp, copy.dir)! } : {}) });
   return copy.dir;
 }
 
@@ -324,7 +325,7 @@ const testsStep: Step = async (bp, deps, copies) => {
       runs.push({ ok: false, command, repo: repo.path, output: (err as Error).message });
       continue;
     }
-    const r = await runCommand(dir, command, 15 * 60_000, { silentMs: CHECK_SILENT_MS, signal: deps.signal, ...(guardFor(bp, dir) ? { guard: guardFor(bp, dir)! } : {}) });
+    const r = await runCommand(dir, command, CHECK_MS, { silentMs: CHECK_SILENT_MS, signal: deps.signal, ...(guardFor(bp, dir) ? { guard: guardFor(bp, dir)! } : {}) });
     if (deps.signal.aborted) throw new Error(STOPPED);
     const passed = testCount(r.output);
     runs.push({ ok: r.ok, command, repo: repo.path, seconds: Math.round(r.seconds), ...(passed !== null ? { passed } : {}), ...(r.ok ? {} : { output: tail(r.output, 30) }) });
@@ -363,7 +364,7 @@ const appStep: Step = async (bp, deps, copies) => {
   let dir = '';
   try {
     dir = await copyFor(bp, repo, copies, deps.signal);
-    app = await startApp(dir, start, url, 3 * 60_000, deps.signal, guardFor(bp, dir));
+    app = await startApp(dir, start, url, APP_WAIT_MS, deps.signal, guardFor(bp, dir));
     const at = app.url;
     withSetup(bp, (s) => (stepOf(s, 'app').note = 'Taking a screenshot'));
     fs.mkdirSync(bp.proofDir, { recursive: true });

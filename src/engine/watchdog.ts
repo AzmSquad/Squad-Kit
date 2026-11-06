@@ -96,6 +96,11 @@ function mins(sec: number): string {
   return `${m} minute${m === 1 ? '' : 's'}`;
 }
 
+/** A step with no progress for this long gets a look; a process idle this long looks stuck; quiet but busy this long is "taking long". */
+export const QUIET_MS = 3 * 60_000;
+const IDLE_MS = 2 * 60_000;
+export const LONG_MS = 12 * 60_000;
+
 /** The computer slept when the wall clock moved on this much more than the app could run. */
 const SLEEP_MS = 60_000;
 /** Nothing keeps the app from looking this long (the longest wait, git over the network, is 2 minutes), except sleep. */
@@ -110,9 +115,9 @@ export class Watchdog {
   private awake = performance.now();
 
   constructor(
-    private readonly quietMs = 3 * 60_000,
-    private readonly idleMs = 2 * 60_000,
-    private readonly longMs = 12 * 60_000,
+    private readonly quietMs = QUIET_MS,
+    private readonly idleMs = IDLE_MS,
+    private readonly longMs = LONG_MS,
     private readonly table: () => ProcRow[] = processTable,
   ) {}
 

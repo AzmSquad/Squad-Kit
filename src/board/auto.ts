@@ -80,7 +80,7 @@ export const STOP_WORDS = { gap: 'Missing in the BRD', clash: 'Two parts clash',
 export type StopKind = 'gap' | 'clash' | 'check' | 'other';
 
 /** At most this many entries from one answer of one agent. */
-const MAX_DECIDED = 6;
+export const MAX_DECIDED = 6;
 
 /**
  * The card's line and the Waiting for you summary when an agent asks: "Needs you: two parts clash" and "Two parts

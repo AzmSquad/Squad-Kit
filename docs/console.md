@@ -1,6 +1,6 @@
 ---
 title: The app
-description: A short tour of the squad-kit 1.0 app - Home, the board, the ticket drawer, Squad and AI, and Settings.
+description: A short tour of the squad-kit 1.0 app - Home, the board, the ticket drawer, the Harness page and Settings.
 ---
 
 This page is about squad-kit **1.0**. The pages of the 0.x console (stories, plans, the plan generator) are
@@ -53,7 +53,7 @@ Terminal: `squad projects`, `squad projects --new "Visitor log" --brd brd.pdf` (
 ## The board
 
 Each project has its own board. The sidebar has the project's pages: **Overview**, **Requirements**, **Board**,
-**Backlog**, **Waiting for you**, **Conversations**, **Releases**, **Architecture**, **Bugs**, **Squad and AI** and
+**Backlog**, **Waiting for you**, **Conversations**, **Releases**, **Architecture**, **Bugs**, **Harness** and
 **Settings**.
 
 On a project with several repos, one story can change several parts of the product. The Architect names the parts, the story
@@ -309,11 +309,33 @@ answers shows in **Waiting for you** and in the sidebar's count. The whole flow 
   **All decisions**, **Project map** and **Lessons**.
 - **Bugs**: each bug, linked to the release it was found in.
 
-## Squad and AI
+## Harness
 
-The five roles, each its own agent with its own session and tools. For each one you see its AI tool, its model
-level and what it works on now. Below: the limit of tickets at once, what each role used, and your AI tools
-(**Ready** or **Not found**).
+Everything the engine does, with the real values from the engine and what really happened on this project's stories. At
+the top: how many gates are working, how many stopped something this week, and how many need you. Press one to filter the
+list; with one story waiting, **needs you** opens it. Five tabs:
+
+- **The line**: the stages from Setup to Release for each track, with a red number where a stage stopped something this
+  week, and each gate: what it checks, what happens if it fails, which tracks skip it, and how often it passed and stopped.
+  One search covers every stage, and each gate has a link of its own. **Details** opens what really runs, and **For
+  engineers** opens it on every row and is remembered in this browser.
+- **Compare tracks**: what each track does at each gate, made from the engine's own data. **Only what differs** leaves out
+  the rest.
+- **Limits**: tries, rounds, pictures, refusals, time limits, and the most one run can use on your Quality setting, with
+  when a limit was last reached.
+- **Safety**: what is hidden, what no agent can change, where agents can go, which questions never reach you and what
+  agents can ask squad-kit to do. **Websites the squad may reach** is here: on top of the package registries, for the
+  sandbox, shared by the team. Terminal: `squad config set hosts`.
+- **Agents**: see below. `/squad` opens this tab, so old links still work.
+
+Every number counts stories, from the project's own stories on this computer, in the last 30 days; this week is the last 7.
+A gate with no record shows no number.
+
+### Agents
+
+The five roles, each its own agent with its own session and tools. For each one you see what it can do, its AI tool, its
+model level, your team's rules for it, its core prompts and what it works on now. Below: the limit of tickets at once,
+what each role used, and your AI tools (**Ready** or **Not found**).
 
 **Quality**, for the whole project, sets the level each role starts from:
 
@@ -334,7 +356,7 @@ and Go use their own caches, which check every package against the lock file. .N
 download folder for that ticket only, never your own caches; it is removed when the ticket is released or deleted
 (the first build of a ticket downloads its packages again). They can't read your keys and sign-ins (`~/.ssh`,
 `~/.aws`, the GitHub and cloud sign-ins, squad-kit's files) or the project's `.env` files. They can reach the package
-registries and the websites you allow in Settings. A blocked command shows in the Conversation tab with what and
+registries and the websites you allow under Safety. A blocked command shows in the Conversation tab with what and
 why. Where the sandbox can't run (Windows, some Linux setups), steps run as before, and this page and `squad doctor`
 say so.
 
@@ -386,7 +408,7 @@ terminal still runs yours. A project that uses Git LFS still gets its large file
 
 **Windows: less protected.** On Windows, squad-kit does not guard the agents' own commands or the project's own tests
 and app, so they can reach other files on the computer. Screenshots and the app still go through the window. Use it on
-projects you trust. Windows is also not fully tested yet. This page and Settings say so.
+projects you trust. Windows is also not fully tested yet. The Agents and Safety tabs say so.
 
 **Edit** on a role opens:
 
@@ -417,9 +439,6 @@ Terminal: `squad config set quality best`, `squad agent builder`, `squad agent b
   Notifications). When they are on, it sends one test notice.
 - **How you pay for Claude**: squad-kit finds out (subscription or API key); change it here if it is wrong. With an
   API key: a budget per ticket and per month. Terminal: `squad config set payment`, `squad config set budget`.
-- **Windows: less protected**, on Windows only. See [Squad and AI](#squad-and-ai).
-- **Websites the squad may reach**: on top of the package registries, for the sandbox. Shared by the team.
-  Terminal: `squad config set hosts`.
 - **Also read** and **Also write**, for engineers, where the guard runs: files or folders outside its copy that the
   project's own commands may use. Add one only when a check stopped because squad-kit blocked a file the project truly
   needs. Shared by the team, and agents can't change it. Write the full path, or start it with `~` for your home folder.

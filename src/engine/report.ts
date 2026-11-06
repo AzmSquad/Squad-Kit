@@ -62,7 +62,7 @@ export interface ReportResult extends ReportPlan {
 }
 
 const DAY = 86_400_000;
-const NEVER = 'Never included: your tokens, passwords, secrets.yaml, console.json or .env files.';
+export const NEVER = 'Never included: your tokens, passwords, secrets.yaml, console.json or .env files.';
 /** One conversation keeps its last 3 MB; the oldest updates go first. */
 const MAX_CONVERSATION = 3 * 1024 * 1024;
 

@@ -6,7 +6,8 @@ import { ProofPage } from './pages/Proof';
 import { ReleasesPage } from './pages/Releases';
 import { BacklogPage } from './pages/Backlog';
 import { ArchitecturePage, type ArchView } from './pages/Architecture';
-import { BugsPage, InboxPage, SettingsPage, SquadPage } from './pages/Pages';
+import { BugsPage, InboxPage, SettingsPage } from './pages/Pages';
+import { HarnessPage, type HarnessTab } from './pages/Harness';
 import { HomePage } from './pages/Home';
 import { PROJECT, PROJECT_BASE } from './api/client';
 import { ConversationsPage } from './pages/Conversations';
@@ -89,10 +90,25 @@ const conversations = createRoute({
   component: ConversationsPage,
 });
 const bugs = createRoute({ getParentRoute: () => rootRoute, path: '/bugs', component: BugsPage });
-const squad = createRoute({ getParentRoute: () => rootRoute, path: '/squad', component: SquadPage });
+const harness = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/harness',
+  validateSearch: (s: Record<string, unknown>): { tab?: HarnessTab } => ({
+    tab: ['compare', 'limits', 'safety', 'agents'].includes(s.tab as string) ? (s.tab as HarnessTab) : undefined,
+  }),
+  component: HarnessPage,
+});
+// The page that was here is the Harness page's Agents tab now; old links still work.
+const squad = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/squad',
+  beforeLoad: () => {
+    throw redirect({ to: '/harness', search: { tab: 'agents' } });
+  },
+});
 const settings = createRoute({ getParentRoute: () => rootRoute, path: '/settings', component: SettingsPage });
 
-const routeTree = rootRoute.addChildren([index, setup, overview, requirements, breakdown, board, backlog, proof, inbox, conversations, releases, decisions, architecture, bugs, squad, settings]);
+const routeTree = rootRoute.addChildren([index, setup, overview, requirements, breakdown, board, backlog, proof, inbox, conversations, releases, decisions, architecture, bugs, harness, squad, settings]);
 
 export const router = createRouter({ routeTree, defaultPreload: false, basepath: PROJECT_BASE || '/', defaultErrorComponent: CrashPage });
 

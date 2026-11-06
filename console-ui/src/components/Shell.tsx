@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, Outlet, useRouterState } from '@tanstack/react-router';
-import { ArrowUp, Bug, ChevronsUpDown, Compass, Inbox, LayoutGrid, ListTodo, ListTree, Menu, MessagesSquare, Moon, Network, Settings, Sun, Terminal, Users } from 'lucide-react';
+import { ArrowUp, Bug, ChevronsUpDown, Compass, Inbox, LayoutGrid, ListTodo, ListTree, Menu, MessagesSquare, Moon, Network, Settings, ShieldCheck, Sun, Terminal } from 'lucide-react';
 import { useBoard } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { UpdateBanner } from './Restart';
@@ -28,7 +28,7 @@ const NAV = [
   { to: '/releases', label: 'Releases', icon: ArrowUp },
   { to: '/architecture', label: 'Architecture', icon: Network },
   { to: '/bugs', label: 'Bugs', icon: Bug, badge: 'bugs' as const },
-  { to: '/squad', label: 'Squad and AI', icon: Users },
+  { to: '/harness', label: 'Harness', icon: ShieldCheck },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
 

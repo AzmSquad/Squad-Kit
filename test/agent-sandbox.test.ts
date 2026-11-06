@@ -301,7 +301,7 @@ describe('what the sandbox refused', () => {
   });
 
   it('is said in plain words, with the way to allow a host', () => {
-    expect(blockedLine({ kind: 'host', target: 'example.com' })).toBe('Reaching example.com was blocked: not a package registry. Allow it in Settings.');
+    expect(blockedLine({ kind: 'host', target: 'example.com' })).toBe('Reaching example.com was blocked: not a package registry. Allow it on the Harness page, under Safety.');
     expect(blockedLine({ kind: 'read', target: '/Users/me/.ssh/id_rsa' }, '/Users/me')).toBe('Reading ~/.ssh/id_rsa was blocked: keys and sign-ins stay private.');
     expect(blockedLine({ kind: 'read', target: '/Users/me/app/.env.local' }, '/Users/me')).toBe("Reading ~/app/.env.local was blocked: the project's .env files stay private.");
     expect(blockedLine({ kind: 'read', target: path.join(squadHome(), 'projects', 'x', 'secrets.yaml') }, '/nowhere')).toMatch(/was blocked: squad-kit's own files stay private\.$/);
@@ -337,7 +337,7 @@ describe('what the sandbox refused', () => {
     const fromLog = readConversation(id, 400, projects, chats)!;
     const blockedOf = (c: NonNullable<ReturnType<typeof readConversation>>) =>
       c.updates.map((e) => (e.update as { _meta?: { squadKit?: { blocked?: string[] } } })._meta?.squadKit?.blocked).filter(Boolean);
-    const words = ['Reaching example.com was blocked: not a package registry. Allow it in Settings.', expect.stringContaining('Reading /Users/me/.ssh/id_rsa was blocked'), expect.stringContaining('Writing /Users/me/Documents/notes.txt was blocked')];
+    const words = ['Reaching example.com was blocked: not a package registry. Allow it on the Harness page, under Safety.', expect.stringContaining('Reading /Users/me/.ssh/id_rsa was blocked'), expect.stringContaining('Writing /Users/me/Documents/notes.txt was blocked')];
     expect(blockedOf(fromLog)).toEqual([words]);
 
     // A direct run: the output is long, so what is shown is cut short, but the refusal at its end still counts.

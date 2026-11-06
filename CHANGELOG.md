@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The Harness page** shows everything the engine does, with the real values from the engine and what really happened: how
+  often each gate passed and stopped, the last story it stopped, and what needs you now, counted from the project's own stories.
+  Search it, compare the tracks, and open what really runs behind each row. It replaces Squad and AI: all of that is on its
+  Agents tab, and `/squad` opens it. The allowed websites moved from Settings to Safety.
 - **New project**, on Home and with `squad projects --new`: give a name and a BRD or an idea, and squad-kit makes the folder,
   git and the board. A BRD goes straight to the Analyst. An idea goes into the first read, so you are not asked again.
 - GitHub's checks run on a Mac as well as Linux.

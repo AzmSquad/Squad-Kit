@@ -10,7 +10,7 @@ import { readMeta, writeMeta, type BoardPaths } from './store.js';
  * or with `squad parts`, and a new read keeps what the engineer said. A project with one part sees none of this.
  */
 
-const MAX_PARTS = 30;
+export const MAX_PARTS = 30;
 
 export const repoPaths = (meta: BoardMeta): string[] => (meta.repos?.length ? meta.repos.map((r) => r.path) : ['.']);
 

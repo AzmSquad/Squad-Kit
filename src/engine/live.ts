@@ -102,7 +102,7 @@ import { STOP_IT, cardAnswer, goAroundAnswer, inTheWay, ownWorkAnswer, portCard,
 import { appPortVariables } from './port-vars.js';
 import { judgeTestChange } from './test-change.js';
 import { trackTask } from './process-group.js';
-import { endPid, nextFreePort, portTaken, squadKitOn } from './run-app.js';
+import { SETUP_MS, endPid, nextFreePort, portTaken, squadKitOn } from './run-app.js';
 import { APPROVING, NO_QUESTIONS, acceptByItselfBeside, acceptNext, addDecided, afterPullRequest, askWords, cleanSources, mergeWait, mergesByItself, resumeAccept, waitForLanding } from '../board/auto.js';
 import * as A from './auto-prompts.js';
 import type { DecidedBy } from '../board/requirements-types.js';
@@ -115,6 +115,7 @@ import { runBreakdownJob } from './breakdown-job.js';
 import { fillBuildQueue, placesLeft } from '../board/requirements-build.js';
 import { startSends } from '../board/requirements-send.js';
 import { clearStaleStop } from '../board/stale-stop.js';
+import { RUN_MS } from './acp-runner.js';
 import { CHECK_FAILED, MAX_PICTURES_PER_DONE_WHEN, MAX_PROOF_ROUNDS, MAX_RETAKES, addPictures, isApiProof, afterLastRetake, brokenRows, brokenStop, cannotShowLine, checkVerdicts, criterionText, doneWhenCount, fixLine, fromReason, makeMain, notShownStop, offScreenNumbers, reasonRefusedLine, retakeLine, together, verdictOf, type CheckVerdict, type Judged, type OpenRow } from './proof-verdict.js';
 
 /**
@@ -123,12 +124,18 @@ import { CHECK_FAILED, MAX_PICTURES_PER_DONE_WHEN, MAX_PROOF_ROUNDS, MAX_RETAKES
  * back, so the board and the terminal always show the true state.
  */
 
-const MAX_CHECK_TRIES = 3;
-const MAX_REVIEW_ROUNDS = 2;
+export const MAX_CHECK_TRIES = 3;
+export const MAX_REVIEW_ROUNDS = 2;
+/** The longest one run may take: writing words (questions, a spec, a design, a read of the project), answering about a question, the Builder, the Reviewer and the picture check, and the Tester. */
+export const WORDS_STEP_MS = 10 * 60_000;
+const ANSWER_STEP_MS = 5 * 60_000;
+export const BUILD_STEP_MS = 60 * 60_000;
+export const REVIEW_STEP_MS = 15 * 60_000;
+export const PROOF_STEP_MS = 30 * 60_000;
 /** How often the board looks for tickets teammates pushed: handed to you, or moved on by their owner. */
 const PICK_UP_MS = 2 * 60_000;
 /** The "before" screenshots run beside the build and stop after this long, so they never hold anything up. */
-const BEFORE_SHOTS_MS = 8 * 60_000;
+export const BEFORE_SHOTS_MS = 8 * 60_000;
 const STOPPED = 'You stopped the squad.';
 
 /** The steps in which the Builder works. A small change goes into the next one of these as it starts. */
@@ -188,7 +195,7 @@ export function queuedText(running: string[], limit: number): string {
 class PassingTrouble extends StepError {}
 
 /** How long a step waits before each new try after such a problem: about 15 minutes in all, then a plain stop. */
-const BLIP_WAITS_MIN = [1, 2, 4, 8];
+export const BLIP_WAITS_MIN = [1, 2, 4, 8];
 
 /** Turns of a squad that failed in a row before the board says so: one can be bad luck, a few mean nothing moves. */
 export const TURNS_BEFORE_BANNER = 3;
@@ -1171,7 +1178,7 @@ export class LiveSquad {
     const tool = aiTool(agent.tool);
     if (!tool?.canRun) {
       const can = AI_TOOLS.filter((t) => t.canRun).map((t) => t.label).join(' or ');
-      throw new StepError(`The ${opts.role} agent is set to ${tool?.label ?? agent.tool}, which squad-kit cannot run yet. Switch it to ${can} in Squad and AI.`);
+      throw new StepError(`The ${opts.role} agent is set to ${tool?.label ?? agent.tool}, which squad-kit cannot run yet. Switch it to ${can} on the Harness page, under Agents.`);
     }
     const extra = agentInstructions(agent, opts.step);
     const win = opts.win;
@@ -1190,7 +1197,7 @@ export class LiveSquad {
     opts = this.withNewNotes(opts);
     // The step's clock. A run beside the step (a chat answer, a change being written) has a job of its own and no clock.
     const timed = key && job === key ? timedStep(opts.step ?? levelStep) : null;
-    if (timed) this.update(key!, (x) => startStep(x, { who: opts.role, step: timed, limit: Math.round((opts.timeoutMs ?? 20 * 60_000) / 60_000) }));
+    if (timed) this.update(key!, (x) => startStep(x, { who: opts.role, step: timed, limit: Math.round((opts.timeoutMs ?? RUN_MS) / 60_000) }));
     const ended = (res: AgentResult): AgentResult => {
       if (timed) this.update(key!, (x) => endStep(this.bp, x));
       return res;
@@ -1634,7 +1641,7 @@ export class LiveSquad {
         permissions: ['read'],
         schema: P.SCAN_SCHEMA,
         check: scanProblem,
-        timeoutMs: 10 * 60_000,
+        timeoutMs: WORDS_STEP_MS,
         onTool,
       });
       if (opened.size) readingNow(this.bp, 'Handing in what it found', opened.size);
@@ -1678,7 +1685,7 @@ export class LiveSquad {
       running: this.running.has('__talk'),
       stop: () => this.stops.get('__talk')?.abort(),
       launch: (job) => this.launch('__talk', job),
-      run: (o) => this.runAgent({ role: 'architect', step: 'chat', levelStep: 'chat', job: '__talk', cwd: projectRoot(this.bp), permissions: ['read'], schema: P.CHAT_SCHEMA, timeoutMs: 10 * 60_000, prompt: o.prompt }),
+      run: (o) => this.runAgent({ role: 'architect', step: 'chat', levelStep: 'chat', job: '__talk', cwd: projectRoot(this.bp), permissions: ['read'], schema: P.CHAT_SCHEMA, timeoutMs: WORDS_STEP_MS, prompt: o.prompt }),
     });
   }
 
@@ -1690,7 +1697,7 @@ export class LiveSquad {
     this.update(id, (x) => (x.localSetup = { dir: ls.dir, command: ls.command, status: 'running', at: now() }));
     // The person's own changes stay: what differed before the setup ran is theirs.
     const theirs = changedTracked(ls.dir);
-    const r = await runCommand(ls.dir, ls.command, 20 * 60_000, this.guardFor(ls.dir, id) ? { guard: this.guardFor(ls.dir, id)! } : {});
+    const r = await runCommand(ls.dir, ls.command, SETUP_MS, this.guardFor(ls.dir, id) ? { guard: this.guardFor(ls.dir, id)! } : {});
     const seconds = Math.round(r.seconds);
     this.putBackLockFiles(id, ls.dir, theirs);
     this.update(id, (x) => {
@@ -1731,7 +1738,7 @@ export class LiveSquad {
         prompt: P.blueprintPrompt(meta, decisions, detectStack(root, meta).map((x) => x.name)),
         permissions: ['read'],
         schema: P.BLUEPRINT_SCHEMA,
-        timeoutMs: 10 * 60_000,
+        timeoutMs: WORDS_STEP_MS,
       });
       const out = r.structured as { map: BoardMeta['map']; stack: StackNote[]; patterns: PatternNote[] };
       // Only links to decisions that exist, so a made-up id never shows on the page.
@@ -1789,7 +1796,7 @@ export class LiveSquad {
         prompt: P.impactPrompt(d, open),
         permissions: ['read'],
         schema: P.IMPACT_SCHEMA,
-        timeoutMs: 10 * 60_000,
+        timeoutMs: WORDS_STEP_MS,
       });
       const out = (r.structured as { tickets: { id: string; affected: boolean; why: string; change: string }[] }).tickets;
       const affected = out.filter((x) => x.affected && x.change.trim() && open.some((t) => t.id === x.id));
@@ -1821,7 +1828,7 @@ export class LiveSquad {
         prompt: P.techDecisionPrompt(listDecisions(this.bp), tech, this.meta().blueprint?.stack.find((s) => s.name === tech)?.why),
         permissions: ['read'],
         schema: P.TECH_DECISION_SCHEMA,
-        timeoutMs: 10 * 60_000,
+        timeoutMs: WORDS_STEP_MS,
       });
       const out = r.structured as NonNullable<TechDraft['decision']>;
       set((d) => {
@@ -2014,7 +2021,7 @@ export class LiveSquad {
       prompt: P.intakePrompt(meta, listDecisions(this.bp), t0, this.ctx()),
       permissions: ['read'],
       schema: P.QUESTIONS_SCHEMA,
-      timeoutMs: 10 * 60_000,
+      timeoutMs: WORDS_STEP_MS,
       addDirs: attachmentDirs(t0),
       onTool: this.watcher(id, 'analyst', root),
     });
@@ -2059,7 +2066,7 @@ export class LiveSquad {
         resume: t.sessions?.intake,
         prompt: P.replyPrompt(q, n, ask),
         permissions: ['read'],
-        timeoutMs: 5 * 60_000,
+        timeoutMs: ANSWER_STEP_MS,
         reply: true,
       });
       this.update(id, (x) => {
@@ -2139,7 +2146,7 @@ export class LiveSquad {
         prompt: had ? (look ? `${P.copyNow(look)}\n\n${talk}` : talk) : `${opening}\n\n${talk}`,
         permissions: ['read'],
         schema: P.CHAT_SCHEMA,
-        timeoutMs: 10 * 60_000,
+        timeoutMs: WORDS_STEP_MS,
         // Beside the work, the Analyst and the Architect may read the code built so far to answer.
         addDirs: [...attachmentDirs(t), ...(beside && t.worktree && cwd !== workFolder(t) && fs.existsSync(t.worktree) ? [workFolder(t)!] : [])],
       });
@@ -2267,7 +2274,7 @@ export class LiveSquad {
         prompt: P.changePrompt(this.meta(), listDecisions(this.bp), t, c, chat, this.ctx(t)),
         permissions: ['read'],
         schema: P.CHANGE_SCHEMA,
-        timeoutMs: 10 * 60_000,
+        timeoutMs: WORDS_STEP_MS,
         addDirs: attachmentDirs(t),
       });
       const out = r.structured as ChangeAnswer;
@@ -2326,7 +2333,7 @@ export class LiveSquad {
       prompt: P.changeDesignPrompt(t0, c, had ? undefined : { meta: this.meta(), decisions: listDecisions(this.bp), ctx: this.ctx(t0) }),
       permissions: ['read'],
       schema: P.CHANGE_DESIGN_SCHEMA,
-      timeoutMs: 10 * 60_000,
+      timeoutMs: WORDS_STEP_MS,
       addDirs: this.extraDirs(t0).concat(t0.worktree && fs.existsSync(t0.worktree) ? [workFolder(t0)!] : []),
       onTool: this.watcher(id, 'architect', root),
     });
@@ -2418,7 +2425,7 @@ export class LiveSquad {
         : `${P.intakePrompt(this.meta(), listDecisions(this.bp), t0, this.ctx())}\n\n${P.specPrompt(t0, change, false, others)}`,
       permissions: ['read'],
       schema: P.SPEC_SCHEMA,
-      timeoutMs: 10 * 60_000,
+      timeoutMs: WORDS_STEP_MS,
       addDirs: attachmentDirs(t0),
       onTool: this.watcher(id, 'analyst', root),
     });
@@ -2469,7 +2476,7 @@ export class LiveSquad {
       permissions: ['read'],
       schema: design ? P.DESIGN_SCHEMA : P.PLAN_SCHEMA,
       check: (a) => dependsProblem(a, others.map((o) => o.id), id),
-      timeoutMs: 10 * 60_000,
+      timeoutMs: WORDS_STEP_MS,
       addDirs: [...attachmentDirs(t0), ...(brd?.dirs ?? [])],
       onTool: this.watcher(id, 'architect', root),
     });
@@ -2623,7 +2630,7 @@ export class LiveSquad {
     if (!setup) return;
     this.update(id, (x) => (x.status = DOING.setup));
     this.log('info', `Setting up the copy: ${setup}`, id);
-    const r = await runCommand(dir, setup, 20 * 60_000, this.guardedWatch(id, dir));
+    const r = await runCommand(dir, setup, SETUP_MS, this.guardedWatch(id, dir));
     this.goOn(id);
     // A setup can write the same files, like cp .env.example .env.dev: the values kept for stories go back over them.
     this.placeLocalFiles(id, dir, repo.path);
@@ -2784,7 +2791,7 @@ export class LiveSquad {
       prompt: change ? [P.smallChangePrompt(change), prompt].filter(Boolean).join('\n\n') : prompt,
       permissions: ['edit'],
       schema: P.BUILD_SCHEMA,
-      timeoutMs: 60 * 60_000,
+      timeoutMs: BUILD_STEP_MS,
       addDirs: this.extraDirs(t),
       box: {},
       onText: (text) => {
@@ -3558,7 +3565,7 @@ export class LiveSquad {
       addDirs: this.extraDirs(t0),
       permissions: ['read', 'git-read'],
       schema: P.REVIEW_SCHEMA,
-      timeoutMs: 15 * 60_000,
+      timeoutMs: REVIEW_STEP_MS,
       onTool: this.watcher(id, 'reviewer', workFolder(t0)!),
     }).finally(() => this.keepLanes(id, 'reviewer', lanes));
     const out = r.structured as { approved: boolean; summary: string; comments: string[]; alsoChanged?: string[]; question?: AgentAsk };
@@ -3688,6 +3695,7 @@ export class LiveSquad {
         x.retryPhase = 'proof';
         x.gates = { ...(x.gates ?? { checks: 'pass', review: 'pass' }), proof: 'fail' } as Ticket['gates'];
         x.status = bad.length ? 'Screenshots did not pass the check' : 'No screenshots yet';
+        if (!bad.length && !why) addActivity(x, 'tester', 'No screenshots yet, so it waits for you');
         const said = round?.said ? ` The Tester says: ${round.said}` : '';
         const technical = stuck.length ? stuck.map((s) => `${s.what}${s.why ? `: ${s.why}` : ''}`).join('\n') : '';
         x.stuck = bad.length
@@ -3904,7 +3912,7 @@ export class LiveSquad {
       permissions: ['read'],
       schema: P.PROOF_CHECK_SCHEMA,
       // Up to 40 pictures to open and read.
-      timeoutMs: 15 * 60_000,
+      timeoutMs: REVIEW_STEP_MS,
       check: (answer) => {
         const left = asked.filter((n) => !checkVerdicts(answer, asked, true).has(n));
         return left.length ? `checks has no verdict for "done when" ${left.join(', ')}` : null;
@@ -4195,7 +4203,7 @@ export class LiveSquad {
       check,
       checkHelp: () => win.pictureList(),
       // Up to 40 pictures, with a look at each.
-      timeoutMs: 30 * 60_000,
+      timeoutMs: PROOF_STEP_MS,
       addDirs: this.extraDirs(t),
       box: {},
       win,

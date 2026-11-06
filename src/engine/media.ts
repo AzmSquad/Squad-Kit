@@ -13,7 +13,7 @@ import { speechFor, speechModule } from '../modules/registry.js';
 
 export const AUDIO_FILE = /\.(ogg|opus|oga|m4a|mp3|wav|aac|amr|flac|weba)$/i;
 export const VIDEO_FILE = /\.(mp4|mov|m4v|webm)$/i;
-const MAX_NOTE_BYTES = 100 * 1024 * 1024;
+export const MAX_NOTE_BYTES = 100 * 1024 * 1024;
 
 export function isMediaNote(file: string): boolean {
   return AUDIO_FILE.test(file) || VIDEO_FILE.test(file);

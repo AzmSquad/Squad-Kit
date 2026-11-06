@@ -202,14 +202,14 @@ export function sandboxStatus(): ({ tool: string } & SandboxSupport)[] {
   return AI_TOOLS.filter((t) => t.canRun).map((t) => ({ tool: t.label, ...sandboxOf(t) }));
 }
 
-/** What Settings says when the agents' own commands have no guard here, in plain words. */
+/** What the Harness page says when the agents' own commands have no guard here, in plain words. */
 export interface GuardNote {
   title: string;
   text: string;
 }
 
 /**
- * Windows has no guard for the agents' own commands yet (decision 1 of the agent's room plan): Settings says so
+ * Windows has no guard for the agents' own commands yet (decision 1 of the agent's room plan): the Harness page says so
  * plainly. Those commands can read any file there, squad-kit's own too, so the note promises nothing it cannot keep.
  * The window still does the screenshots and the app. Null where a guard runs, or where the tools say why not.
  */
@@ -228,7 +228,7 @@ function shown(file: string, home: string): string {
 
 /** One line in plain words for something the sandbox refused, with what to do when the person can allow it. */
 export function blockedLine(b: BlockedAction, home = os.homedir()): string {
-  if (b.kind === 'host') return `Reaching ${b.target} was blocked: not a package registry. Allow it in Settings.`;
+  if (b.kind === 'host') return `Reaching ${b.target} was blocked: not a package registry. Allow it on the Harness page, under Safety.`;
   const file = shown(b.target, home);
   if (b.kind === 'write') return `Writing ${file} was blocked: the squad writes only in the ticket's copy, the proof folder and temp folders.`;
   const base = path.basename(b.target);

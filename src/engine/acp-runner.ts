@@ -122,6 +122,9 @@ function deadline<T>(work: Promise<T>, ms: number, message: string): Promise<T> 
 
 const STOPPED = 'You stopped the squad.';
 
+/** The longest a run may take when its step sets no limit of its own. */
+export const RUN_MS = 20 * 60_000;
+
 /**
  * squad-kit gives each step its tools up front, so a permission question means the agent wants something it was not
  * given, such as writing files in a step that only reads, even when the person asked it to in a chat. The answer is no.
@@ -303,7 +306,7 @@ export async function runAcp(launch: AcpLaunch, opts: AcpRunOptions): Promise<Ag
   };
   const onStop = () => stop(STOPPED);
   opts.signal?.addEventListener('abort', onStop, { once: true });
-  const timer = setTimeout(() => stop(`It took longer than ${Math.round((opts.timeoutMs ?? 20 * 60_000) / 60_000)} minutes, so squad-kit stopped it.`), opts.timeoutMs ?? 20 * 60_000);
+  const timer = setTimeout(() => stop(`It took longer than ${Math.round((opts.timeoutMs ?? RUN_MS) / 60_000)} minutes, so squad-kit stopped it.`), opts.timeoutMs ?? RUN_MS);
   const exited = new Promise<void>((resolve) => {
     child.on('exit', () => resolve());
     child.on('error', () => resolve());

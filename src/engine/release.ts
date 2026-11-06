@@ -41,6 +41,9 @@ export class PullRequestClash extends Error {
   }
 }
 
+/** The longest a project's release pipeline may run. */
+export const PIPELINE_MS = 20 * 60_000;
+
 const ticketMessage = (t: Ticket) => `${t.title} (${t.id})`;
 const ticketWords = (t: Ticket) => conventionalWords(t.kind === 'bug' ? 'fix' : 'feat', t.title, t.id);
 
@@ -290,7 +293,7 @@ async function releaseRepo(
         try {
           // What reached the remote, with a teammate's newer work when it went out together with that.
           if (sent !== head) git(dir, ['checkout', '--quiet', '--detach', sent]);
-          const r = await runCommand(dir, deploy, 20 * 60_000, extra.guardFor?.(dir) ? { guard: extra.guardFor!(dir)! } : {});
+          const r = await runCommand(dir, deploy, PIPELINE_MS, extra.guardFor?.(dir) ? { guard: extra.guardFor!(dir)! } : {});
           log.push({ ok: r.ok, text: r.ok ? `Ran the pipeline: ${deploy}` : `Pipeline failed: ${tail(r.output, 3)}` });
         } catch (err) {
           // The release is out by now: this stops only the pipeline.

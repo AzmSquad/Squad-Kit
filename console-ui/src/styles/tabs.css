@@ -75,7 +75,7 @@
 .budgetsay { display: flex; align-items: flex-start; gap: 7px; color: var(--you-ink); font-size: 13px; }
 .budgetsay svg { flex: none; margin-top: 2px; }
 
-/* Settings and the Squad page */
+/* Settings and the Harness page */
 .moneyin { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .moneyin .input { width: 120px; }
 .qstats { display: flex; flex-direction: column; gap: 4px; min-width: 0; }

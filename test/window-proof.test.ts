@@ -235,14 +235,14 @@ describe('no browser is let out of the sandbox any more', () => {
 });
 
 describe('Windows', () => {
-  it('Settings says "Windows: less protected" in one plain sentence where the agents\' commands have no guard', async () => {
+  it('The Harness page says "Windows: less protected" in one plain sentence where the agents\' commands have no guard', async () => {
     expect(guardNote('win32', [{ available: false, why: "Claude Code's sandbox does not run on Windows yet" }])).toEqual({
       title: 'Windows: less protected',
       text: "On Windows, squad-kit does not guard the agents' own commands, or the project's own tests and app, so they can reach other files on this computer. Use it on projects you trust.",
     });
     expect(guardNote('darwin', [{ available: true, why: 'macOS Seatbelt' }])).toBeNull();
     expect(guardNote('linux', [{ available: false, why: 'socat is not installed' }])).toBeNull();
-    // On the board: the sandbox call carries it, for Settings and the Squad page.
+    // On the board: the sandbox call carries it, for the Harness page.
     const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
     Object.defineProperty(process, 'platform', { value: 'win32' });
     h.support = { available: false, why: "Claude Code's sandbox does not run on Windows yet" };

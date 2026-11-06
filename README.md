@@ -214,7 +214,7 @@ writes one line in the ticket's activity.
 - squad-kit picks a **model level** for each role and step from the project's **Quality** setting: **Best**
   (the default) builds and reviews on the strongest model, **Balanced** builds on it at medium effort, and
   **Thrifty** builds on a lighter one. **Fast** stays for screenshots and small helpers. The team or each person
-  can change single steps on the **Squad and AI** page.
+  can change single steps on the **Harness** page.
 - The board shows **what each ticket and each role used**, the way you pay. On a Claude subscription it says the
   work is included in your plan, and shows its size and its value at API prices (a value, not a bill). With an API
   key it shows real dollars, against a budget per ticket and per month.
@@ -225,7 +225,7 @@ writes one line in the ticket's activity.
 
 - [Getting started](docs/getting-started.md): your first hour, from install to a release.
 - [Moving to 1.0](docs/migrating-to-1.0.md): from squad-kit 0.x, and from early 1.0 boards.
-- [The app](docs/console.md): Home, the board, the ticket drawer, Squad and AI, and Settings.
+- [The app](docs/console.md): Home, the board, the ticket drawer, the Harness page and Settings.
 - [From a BRD to a built product](docs/requirements.md): upload a requirements document, approve the breakdown,
   send it to Azure DevOps and let the squad build it.
 - [CHANGELOG](CHANGELOG.md): what changed in each version.

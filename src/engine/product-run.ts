@@ -10,15 +10,13 @@ import { fillOwnCopy } from './local-files.js';
 import { leaveProduct, waitForProduct, type HoldKind, type ProductHold } from './product-lock.js';
 import { dockerBlockedWords, guardSupport, ticketGuard, type GuardSpec } from './project-guard.js';
 import { repoFor, reposOf } from './repos.js';
-import { dependencyPrint, updateCopy } from './run-app.js';
+import { SETUP_MS, dependencyPrint, updateCopy } from './run-app.js';
 
 /**
  * The whole product, for a story. Everything a story's change touches runs together, each part on its usual address: the
  * parts the story changed from its own copies, the others from a copy of the newest main. Those use the values kept for
  * stories too, never the person's own. A project with one part starts its one app as it always did.
  */
-
-const SETUP_MS = 20 * 60_000;
 
 /** A part squad-kit starts, and where. */
 export interface ProductPlace {

@@ -69,6 +69,10 @@ export interface BreakdownJobDeps {
 }
 
 const MINUTE = 60_000;
+/** The longest a first read of a document may take, writing its outline or stories, and answering about a question. */
+export const BRD_READ_MS = 30 * MINUTE;
+export const BRD_WRITE_MS = 15 * MINUTE;
+const BRD_ANSWER_MS = 5 * MINUTE;
 
 /** "Ask about this" got no answer, in the words a ticket's question gets (engine/live.ts). */
 const NO_ANSWER = 'Could not answer this time. Ask again in a moment.';
@@ -263,7 +267,7 @@ async function readStep(ctx: Ctx, b: Breakdown): Promise<boolean> {
     prompt: B.readPrompt(ctx.project, b, docs),
     schema: B.READ_SCHEMA,
     sessionId: randomUUID(),
-    timeoutMs: 30 * MINUTE,
+    timeoutMs: BRD_READ_MS,
     onTool: (e) => {
       const n = Math.min(of || Infinity, readUpTo(e, b.source.kind));
       if (n > done) {
@@ -326,7 +330,7 @@ async function replyStep(ctx: Ctx, b: Breakdown, job: BreakdownJob): Promise<boo
   const said = [...(q.thread ?? [])].reverse().find((m) => m.who === 'you')?.text ?? '';
   const session = readBreakdownState(ctx.bp, ctx.id).sessions?.read;
   const context = session ? '' : `You are the Analyst who read the business requirements document below and asked the person questions about it.\n\n${B.documentText(b, documentFiles(ctx.bp, b))}`;
-  const r = await ask(ctx, { step: 'questions', prompt: B.replyPrompt(q, b.questions.indexOf(q) + 1, said, context), ...(session ? { resume: session } : {}), timeoutMs: 5 * MINUTE });
+  const r = await ask(ctx, { step: 'questions', prompt: B.replyPrompt(q, b.questions.indexOf(q) + 1, said, context), ...(session ? { resume: session } : {}), timeoutMs: BRD_ANSWER_MS });
   updateBreakdown(ctx.bp, ctx.id, (x) => {
     const y = x.questions.find((z) => z.id === q.id);
     if (!y) return;
@@ -343,7 +347,7 @@ async function draftStep(ctx: Ctx, b0: Breakdown): Promise<boolean> {
   let session = readBreakdownState(ctx.bp, ctx.id).sessions?.read;
   if (!b0.epics.length) {
     setNow(ctx, 'Writing the outline: epics and features');
-    const r = await ask(ctx, { step: 'spec', prompt: B.outlinePrompt(ctx.project, b0, docs, SKIP_CHOICE, Boolean(session)), schema: B.OUTLINE_SCHEMA, ...(session ? { resume: session } : {}), timeoutMs: 15 * MINUTE });
+    const r = await ask(ctx, { step: 'spec', prompt: B.outlinePrompt(ctx.project, b0, docs, SKIP_CHOICE, Boolean(session)), schema: B.OUTLINE_SCHEMA, ...(session ? { resume: session } : {}), timeoutMs: BRD_WRITE_MS });
     session = readBreakdownState(ctx.bp, ctx.id).sessions?.read;
     const out = r.structured as B.OutlineAnswer;
     const b = updateBreakdown(ctx.bp, ctx.id, (x) => {
@@ -386,7 +390,7 @@ async function draftStep(ctx: Ctx, b0: Breakdown): Promise<boolean> {
     const epic = b.epics[i]!;
     setNow(ctx, `Writing the stories of ${epic.title} (epic ${i + 1} of ${b.epics.length})`, { found: counts(b) });
     const first = b.next.story;
-    const r = await ask(ctx, { step: 'spec', prompt: B.storiesPrompt(ctx.project, b, epic, i + 1, b.epics.length, first, docs, SKIP_CHOICE, Boolean(session)), schema: B.STORIES_SCHEMA, ...(session ? { resume: session } : {}), timeoutMs: 15 * MINUTE });
+    const r = await ask(ctx, { step: 'spec', prompt: B.storiesPrompt(ctx.project, b, epic, i + 1, b.epics.length, first, docs, SKIP_CHOICE, Boolean(session)), schema: B.STORIES_SCHEMA, ...(session ? { resume: session } : {}), timeoutMs: BRD_WRITE_MS });
     session = readBreakdownState(ctx.bp, ctx.id).sessions?.read;
     const out = r.structured as B.StoriesAnswer;
     let made = 0;
@@ -547,7 +551,7 @@ async function redoStep(ctx: Ctx, b: Breakdown, job: BreakdownJob): Promise<bool
   const level = target?.level;
   const schema = whole ? B.WHOLE_REDO_SCHEMA : level === 'epic' ? B.EPIC_REDO_SCHEMA : level === 'feature' ? B.FEATURE_REDO_SCHEMA : B.STORY_REDO_SCHEMA;
   setNow(ctx, `Redoing ${whole ? 'the breakdown' : target!.item.key}`);
-  const r = await ask(ctx, { step: 'spec', prompt: B.redoPrompt(ctx.project, b, target?.item ?? null, job.ask ?? '', documentFiles(ctx.bp, b), Boolean(session)), schema, ...(session ? { resume: session } : {}), timeoutMs: 15 * MINUTE });
+  const r = await ask(ctx, { step: 'spec', prompt: B.redoPrompt(ctx.project, b, target?.item ?? null, job.ask ?? '', documentFiles(ctx.bp, b), Boolean(session)), schema, ...(session ? { resume: session } : {}), timeoutMs: BRD_WRITE_MS });
   const out = r.structured as { story?: B.StoryOut; feature?: B.FeatureOut; epic?: B.EpicOut; epics?: B.EpicOut[]; leftOut?: B.OutlineAnswer['leftOut']; summary?: string; decided?: B.DecidedOut[] };
   let cut = 0;
   let kept: BreakdownStory[] = [];

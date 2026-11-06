@@ -112,7 +112,7 @@ interface Run {
 const CANNOT_START = 'squad-kit could not start it.';
 
 export const APP_WAIT_MS = 3 * 60_000;
-const SETUP_MS = 20 * 60_000;
+export const SETUP_MS = 20 * 60_000;
 const OUTPUT_KEEP = 60_000;
 
 /** squad-kit's own copy of an app's code, in the project's folder on this computer. */

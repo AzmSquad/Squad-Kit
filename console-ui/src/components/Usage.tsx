@@ -200,7 +200,7 @@ export function TicketUsage({ t }: { t: Ticket }) {
       {lines.length ? (
         <>
           <UsageTable roles={byRole(lines)} total={total} steps />
-          <p className="note" style={{ marginTop: 8 }}>{pricesNote(pay)} Each role's model level can be changed on the Squad page.</p>
+          <p className="note" style={{ marginTop: 8 }}>{pricesNote(pay)} Each role's model level can be changed on the Harness page, under Agents.</p>
         </>
       ) : (
         <p className="note">Nothing yet. Each run of a role is counted here as the squad works.</p>
@@ -233,7 +233,7 @@ export function BoardCost() {
   );
 }
 
-/** Each role across the whole board, and the project's own work, for the Squad page. */
+/** Each role across the whole board, and the project's own work, for the Harness page. */
 export function SquadUsage() {
   const u = useBoardUsage().data;
   const pay = useCost().data?.payment;
@@ -578,7 +578,7 @@ export function PaymentSettings() {
   );
 }
 
-/* ── Squad and AI ──────────────────────────────────────── */
+/* ── The Harness page's Agents tab ──────────────────────────────────────── */
 
 const QUALITY_NAME: Record<Quality, string> = { best: 'Best', balanced: 'Balanced', thrifty: 'Thrifty' };
 

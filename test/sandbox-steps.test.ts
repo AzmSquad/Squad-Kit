@@ -262,7 +262,7 @@ describe('the sandbox', () => {
     };
     await squad().runBuilder('AP-1', 'Build it', false, 'build');
     const lines = activity().filter((a) => a.includes('was blocked'));
-    expect(lines).toEqual(['Reading ~/.ssh/id_rsa was blocked: keys and sign-ins stay private.', 'Reaching example.com was blocked: not a package registry. Allow it in Settings.']);
+    expect(lines).toEqual(['Reading ~/.ssh/id_rsa was blocked: keys and sign-ins stay private.', 'Reaching example.com was blocked: not a package registry. Allow it on the Harness page, under Safety.']);
   });
 });
 

@@ -33,6 +33,8 @@ export interface CommandWatch {
 
 /** A check that prints nothing for this long is waiting for something that never comes. */
 export const CHECK_SILENT_MS = 5 * 60_000;
+/** The longest one check may run, printing or not. */
+export const CHECK_MS = 15 * 60_000;
 
 const STOPPED = 'You stopped the squad.';
 
@@ -46,7 +48,7 @@ function minutes(ms: number): string {
  * keys stay out). A timeout or Stop ends the whole group, and the result comes back once the command exits, even when
  * something it started keeps its output open.
  */
-export function runCommand(cwd: string, command: string, timeoutMs = 15 * 60_000, watch: CommandWatch = {}): Promise<{ ok: boolean; output: string; seconds: number; ended?: boolean }> {
+export function runCommand(cwd: string, command: string, timeoutMs = CHECK_MS, watch: CommandWatch = {}): Promise<{ ok: boolean; output: string; seconds: number; ended?: boolean }> {
   const started = Date.now();
   if (watch.signal?.aborted) return Promise.resolve({ ok: false, output: STOPPED, seconds: 0 });
   return new Promise((resolve) => {

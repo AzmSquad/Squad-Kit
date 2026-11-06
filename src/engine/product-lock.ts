@@ -60,7 +60,7 @@ export function leaveProduct(bp: BoardPaths, holder: string): void {
   if (productHold(bp)?.holder === holder) fs.rmSync(lockFile(bp), { force: true });
 }
 
-const WAIT_LIMIT_MS = 45 * 60_000;
+export const WAIT_LIMIT_MS = 45 * 60_000;
 const LOOK_EVERY_MS = 2000;
 
 /** Waits for its turn. `onWait` hears once who it waits for. A Stop, or waiting too long, ends with the reason. */
