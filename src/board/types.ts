@@ -975,6 +975,8 @@ export interface BoardMeta {
    * folder itself is the one repo, using `commands` and `git`.
    */
   repos?: RepoInfo[];
+  /** What the product is made of (src/board/parts.ts). Left out, a repo is one part, and a project with no repos is one part. */
+  parts?: ProductPart[];
 }
 
 /**
@@ -985,6 +987,28 @@ export interface ProjectGuard {
   allowRead?: string[];
   /** Writing there; reading it too. */
   allowWrite?: string[];
+}
+
+/** One thing that runs when the whole product is up: a part of it, or a service the parts share. */
+export interface ProductPart {
+  /** A short word the other parts name it by, like "api". */
+  id: string;
+  /** Its plain name, like "Web app". */
+  name: string;
+  /** A service the parts share, like a database. It has no repo here. */
+  shared?: boolean;
+  /** The repo it lives in, as in RepoInfo.path; "." is the project folder. */
+  repo?: string;
+  /** The folder inside that repo, when it is not the repo's top folder. */
+  folder?: string;
+  /** The ids of what it cannot run without. */
+  needs: string[];
+  /** Where it answers when it runs. A repo with one part keeps this as the repo's App address. */
+  url?: string;
+  /** Not used, like an old app: no story starts it. */
+  off?: boolean;
+  /** An engineer added or changed it, so a new read leaves it as it is. */
+  byHand?: boolean;
 }
 
 export interface RepoInfo {

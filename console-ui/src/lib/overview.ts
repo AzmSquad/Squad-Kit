@@ -1,4 +1,5 @@
 import type { CodePart, PartLink, SetupStepView } from '../api/onboard-types';
+import type { ProductPart } from '../api/types';
 import type { KeyStore } from './waiting';
 
 /**
@@ -88,4 +89,9 @@ export function readyToTell<P extends { id: string; name: string; setup?: { read
 
 export function readyText(name: string): { title: string; body: string } {
   return { title: `${name} is ready`, body: 'squad-kit has read your project. Check what it understood, then start.' };
+}
+
+/** The plain names of the parts in a repo, so the person never needs the repo's name. Empty when squad-kit knows none. */
+export function partNames(parts: ProductPart[] | undefined, repo: string | undefined): string[] {
+  return (parts ?? []).filter((p) => p.repo === repo && !p.shared).map((p) => p.name);
 }

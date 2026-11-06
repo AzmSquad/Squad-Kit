@@ -58,6 +58,7 @@ import {
   ReleasedError,
 } from '../../board/actions.js';
 import { architecture } from '../../board/architecture.js';
+import { addPart, changePart, partsOf, removePart, repoPaths, severalParts, type PartChange } from '../../board/parts.js';
 import { boardExists, boardPaths, listDecisions, listReleases, listTickets, readMeta, readRelease, readTicket, writeMeta } from '../../board/store.js';
 import { seedDemoBoard } from '../../board/demo.js';
 import type { AgentName, PlanComment, PlanEdit } from '../../board/types.js';
@@ -704,6 +705,36 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
       return meta;
     });
   });
+
+  // What the product is made of. An engineer corrects it here; the Architect found it when it read the project.
+  const partChange = (b: Record<string, unknown>): PartChange => ({
+    ...(typeof b.name === 'string' ? { name: b.name } : {}),
+    ...(typeof b.shared === 'boolean' ? { shared: b.shared } : {}),
+    ...(typeof b.repo === 'string' ? { repo: b.repo } : {}),
+    ...(typeof b.folder === 'string' ? { folder: b.folder } : {}),
+    ...(Array.isArray(b.needs) ? { needs: b.needs.map(String) } : {}),
+    ...(typeof b.url === 'string' ? { url: b.url } : {}),
+    ...(typeof b.off === 'boolean' ? { off: b.off } : {}),
+  });
+  app.get('/api/v1/parts', (c) => {
+    if (!boardExists(bp)) return c.json({ parts: [], repos: [], several: false });
+    const meta = readMeta(bp);
+    return c.json({ parts: partsOf(meta), repos: repoPaths(meta), several: severalParts(meta) });
+  });
+  app.post('/api/v1/parts', async (c) => {
+    const b = await body<Record<string, unknown>>(c);
+    return act(c, () => addPart(bp, partChange(b)));
+  });
+  app.put('/api/v1/parts/:id', async (c) => {
+    const b = await body<Record<string, unknown>>(c);
+    return act(c, () => changePart(bp, c.req.param('id'), partChange(b)));
+  });
+  app.post('/api/v1/parts/:id/remove', (c) =>
+    act(c, () => {
+      removePart(bp, c.req.param('id'));
+      return { ok: true };
+    }),
+  );
 
   // Whether the Builder's and Tester's commands run in a sandbox on this computer, and the hosts they may reach.
   app.get('/api/v1/sandbox', (c) => {

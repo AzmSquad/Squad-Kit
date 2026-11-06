@@ -3,6 +3,7 @@ import path from 'node:path';
 import { listDecisions, nextDecisionId, now, readMeta, writeDecision, writeMeta, type BoardPaths } from '../board/store.js';
 import type { BoardMeta, ProjectCommands, RepoInfo } from '../board/types.js';
 import { cleanOverview, readOverview, writeOverview } from '../board/overview.js';
+import { cleanParts, partsAfterRead, repoInUse } from '../board/parts.js';
 import { begin, currentStep, finish, learnSetupTime, nextProofStep, readTalk, readWords, stepOf, type SetupState, type SetupStepId, type SetupTestRun } from '../board/setup-state.js';
 import { runCommand, startApp, tail, testCount, CHECK_SILENT_MS, type RunningApp } from './checks.js';
 import { addSnapshot, dropSnapshot, git, worktreeRoot } from './git.js';
@@ -36,6 +37,8 @@ export interface ScanAnswer {
   ideas?: { title: string; why: string }[];
   parts?: unknown[];
   links?: unknown[];
+  /** What runs when the whole product is up. Not the picture's parts: those are the code as a person would draw it. */
+  runs?: unknown[];
 }
 
 /** Changes the setup in place, when the project has one. */
@@ -148,6 +151,9 @@ export function saveScan(bp: BoardPaths, answer: ScanAnswer, nested: RepoInfo[],
       return { ...r, summary: found?.summary ?? kept?.summary, commands: { ...withAllTests(path.join(bp.root, r.path), clean(found?.commands ?? {})), ...clean(kept?.commands ?? {}) } };
     });
   }
+  const parts = partsAfterRead(cleanParts(out.runs, fresh, bp.root), fresh.parts);
+  if (parts.length) fresh.parts = parts;
+  else delete fresh.parts;
   fresh.scan = { status: 'done', at, summary: out.summary, empty: out.empty };
   if (fresh.setup) {
     const s = fresh.setup;
@@ -256,7 +262,7 @@ const commandsStep: Step = async (bp, deps, copies) => {
   withSetup(bp, (s) => begin(s, 'commands', "Making squad-kit's own copy of the code"));
   const meta = readMeta(bp);
   const failures: { error: string; output?: string }[] = [];
-  for (const repo of reposOf(meta)) {
+  for (const repo of reposOf(meta).filter((r) => repoInUse(meta, r.path))) {
     let copy: { dir: string; fresh: boolean };
     try {
       copy = ensureCopy(bp, repo);
@@ -294,7 +300,8 @@ async function copyFor(bp: BoardPaths, repo: RepoInfo, copies: Map<string, strin
 
 /** Trying the tests, in squad-kit's copy. */
 const testsStep: Step = async (bp, deps, copies) => {
-  const repos = reposOf(readMeta(bp)).filter((r) => r.commands.test?.trim());
+  const meta = readMeta(bp);
+  const repos = reposOf(meta).filter((r) => r.commands.test?.trim() && repoInUse(meta, r.path));
   if (!repos.length) {
     withSetup(bp, (s) => {
       begin(s, 'tests');
@@ -336,7 +343,8 @@ const testsStep: Step = async (bp, deps, copies) => {
 
 /** Opening the app once, with a screenshot the person sees on the overview. */
 const appStep: Step = async (bp, deps, copies) => {
-  const repo = reposOf(readMeta(bp)).find((r) => r.commands.start?.trim() && r.commands.url?.trim());
+  const meta = readMeta(bp);
+  const repo = reposOf(meta).find((r) => r.commands.start?.trim() && r.commands.url?.trim() && repoInUse(meta, r.path));
   if (!repo) {
     withSetup(bp, (s) => {
       begin(s, 'app');

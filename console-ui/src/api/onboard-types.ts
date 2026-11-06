@@ -133,6 +133,8 @@ export interface OverviewView {
   ideas: TicketIdea[];
   parts: CodePart[];
   links: PartLink[];
+  /** The product's parts in one sentence, when it has several. */
+  product?: string;
   map: { area: string; detail: string }[];
   rules: OverviewRule[];
   proposed: number;

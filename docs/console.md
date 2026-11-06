@@ -411,6 +411,11 @@ Terminal: `squad config set quality best`, `squad agent builder`, `squad agent b
   project's own commands may use. Add one only when a check stopped because squad-kit blocked a file the project truly
   needs. Shared by the team, and agents can't change it. Write the full path, or start it with `~` for your home folder.
   Terminal: `squad config set allow-read <path>`, `squad config set allow-write <path>`, and `--clear` on either.
+- **What the product is made of**, for engineers, on a product with several parts: each part that runs by itself, the
+  services they share, where each one is, its address and what it cannot run without. The Architect finds these when it
+  reads the project, and a new read keeps what you correct. Mark an old app or another product in the same folder
+  **Not used**. A project with one part does not show this. Terminal: `squad parts`, `squad parts --set api --needs db`,
+  `squad parts --off <part>`, `squad parts --add "PDF service" --repo pdf-service`.
 - **Report a problem**: a report for the whole app, without a ticket. The app log is in `~/.squad-kit/logs/`,
   one file a day with every step, stop and error (never a key or a prompt), kept 14 days. Errors also print in the
   terminal that runs the app. Terminal: `squad logs`, `squad logs --tail`.

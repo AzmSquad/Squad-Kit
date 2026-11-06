@@ -473,6 +473,11 @@ function Parts({ v }: { v: OverviewView }) {
           <div className="ob-below">{below.map(node)}</div>
         </>
       )}
+      {v.product && (
+        <p className="ob-product">
+          {v.product} <Link to="/settings" className="ob-more">An engineer can correct this in Settings</Link>
+        </p>
+      )}
     </section>
   );
 }

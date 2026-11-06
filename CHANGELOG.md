@@ -12,8 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **New project**, on Home and with `squad projects --new`: give a name and a BRD or an idea, and squad-kit makes the folder,
   git and the board. A BRD goes straight to the Analyst. An idea goes into the first read, so you are not asked again.
 - GitHub's checks run on a Mac as well as Linux.
+- **What the product is made of:** the first read now finds the parts that run by themselves and the services they share.
+  On a product with several parts, the Overview says so in one sentence. An engineer corrects the list in Settings or with
+  `squad parts`, and a new read keeps it. A project with one part sees no change.
 
 ### Changed
+
+- The ticket drawer, the release dialog and Your apps name the parts of the product. Repo names stay in the engineer details.
+- A part marked Not used leaves the Overview picture and Your apps, and the first run does not install or test a repo with nothing else in use.
 
 - A folder that is a git repo around other code repos, with no code of its own, is a workspace: squad-kit finds the repos
   inside and leaves its documents out of the outer repo.

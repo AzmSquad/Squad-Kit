@@ -4,6 +4,7 @@ import { BoardActionError, createTicket } from './actions.js';
 import { listDecisions, listTickets, now, readMeta, readTicket, writeDecision, writeMeta, type BoardPaths } from './store.js';
 import type { BoardMeta, Decision, Quality, Ticket } from './types.js';
 import { readOverview, writeOverview, type CodePart, type PartLink, type TicketIdea } from './overview.js';
+import { pictureInUse, productLine } from './parts.js';
 import { listBreakdowns } from './requirements.js';
 import {
   SETUP_STEPS,
@@ -279,6 +280,8 @@ export interface OverviewView {
   ideas: TicketIdea[];
   parts: CodePart[];
   links: PartLink[];
+  /** The product's parts in one sentence, when it has several. */
+  product?: string;
   /** The project map, for a project read before overviews existed. */
   map: BoardMeta['map'];
   rules: { id: string; title: string; chosen: string; why: string; proposed: boolean; fromScan: boolean }[];
@@ -349,8 +352,8 @@ export function overviewView(bp: BoardPaths): OverviewView {
     can: o.can,
     worth: o.worth,
     ideas: o.ideas,
-    parts: o.parts,
-    links: o.links,
+    ...pictureInUse(meta, o),
+    ...(productLine(meta) ? { product: productLine(meta)! } : {}),
     map: meta.map,
     rules,
     proposed,

@@ -1180,3 +1180,18 @@ ul.ticketnotes .grow, .addnote .grow { flex: 1; }
 .outdated-item.testchange code { font: 500 12px 'JetBrains Mono', monospace; padding: 1px 6px; border-radius: 5px; background: var(--surface); overflow-wrap: anywhere; }
 .db > .outdated-item.testchange { margin: 14px 0 4px; }
 .outdated-item.testchange .row { flex-wrap: wrap; }
+/* Settings: what the product is made of. */
+.part-row { border-bottom: 1px solid var(--line); padding: 10px 0; }
+.part-row.off > .part-head b { color: var(--muted); font-weight: 550; }
+.part-head { display: flex; align-items: center; gap: 12px; font-size: 13.5px; }
+.part-head > .grow { flex: 1; min-width: 0; }
+.part-head .note { margin-top: 3px; overflow-wrap: anywhere; }
+.part-form { margin-top: 6px; }
+.part-f { align-items: center; padding: 8px 0; border-bottom: 0; }
+.part-where { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; min-width: 0; }
+.part-needs { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.part-needs label, .part-off { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.part-add { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; align-items: center; margin-top: 12px; }
+.part-add > .part-row { flex: 1 0 100%; }
+.part-acts { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+@media (max-width: 560px) { .part-where { grid-template-columns: 1fr; } }

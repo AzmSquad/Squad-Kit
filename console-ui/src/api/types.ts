@@ -678,6 +678,20 @@ export interface BoardMeta {
    * folder itself is the one repo, using `commands` and `git`.
    */
   repos?: RepoInfo[];
+  parts?: ProductPart[];
+}
+
+/** One thing that runs when the whole product is up: a part of it, or a service the parts share. */
+export interface ProductPart {
+  id: string;
+  name: string;
+  shared?: boolean;
+  repo?: string;
+  folder?: string;
+  needs: string[];
+  url?: string;
+  off?: boolean;
+  byHand?: boolean;
 }
 
 export interface RepoInfo {

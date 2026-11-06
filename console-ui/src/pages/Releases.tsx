@@ -5,6 +5,7 @@ import { ArrowRight, Check, GitBranch, PenLine, Rocket, Undo2 } from 'lucide-rea
 import { ApiError, api, send } from '../api/client';
 import type { BranchPlan, Release, ReleaseWithItems } from '../api/types';
 import { useAct, useBoard, useReleases } from '../lib/data';
+import { partNames } from '../lib/overview';
 import { BugDialog, ReleasedDialog } from '../components/dialogs';
 import { Cmd, Modal, NotesView, dateShort } from '../components/ui';
 import { usePrefs } from '../lib/prefs';
@@ -59,6 +60,9 @@ function ReleaseDetail({ r, onReleased, live }: { r: ReleaseWithItems; onRelease
   const [editing, setEditing] = useState(false);
   const [notes, setNotes] = useState(r.notes);
   const [confirming, setConfirming] = useState(false);
+  // A product with several parts: the person reads which parts go out, and the branches stay with the engineer's details.
+  const meta = board.data?.ready ? board.data.meta : undefined;
+  const partsOut = meta?.repos?.length ? [...new Set(r.targets.flatMap((g) => partNames(meta.parts, g.repo)))] : [];
   const [bug, setBug] = useState(false);
   const [marking, setMarking] = useState(false);
   useEffect(() => {
@@ -314,13 +318,18 @@ function ReleaseDetail({ r, onReleased, live }: { r: ReleaseWithItems; onRelease
           </p>
           {r.targets.length > 0 && (
             <div className="box" style={{ marginBottom: 6 }}>
-              <b>This release changes these branches:</b>
-              {r.targets.map((g) => (
-                <div key={g.repo} className="mono" style={{ fontSize: 12.5, marginTop: 6 }}>
-                  {g.repo === '.' ? 'project' : g.repo}: {g.branch} {g.remote ? `→ pushed to ${g.remote}` : '(no remote, stays on this Mac)'}
-                </div>
-              ))}
-              <p className="note" style={{ marginTop: 6 }}>Change the branch or remote in Settings first if this is not right.</p>
+              {partsOut.length > 0 ? (
+                <details>
+                  <summary><b>This release changes {partsOut.join(', ')}</b></summary>
+                  <div className="note" style={{ marginTop: 6 }}>For engineers:</div>
+                  <BranchTargets r={r} />
+                </details>
+              ) : (
+                <>
+                  <b>This release changes these branches:</b>
+                  <BranchTargets r={r} />
+                </>
+              )}
             </div>
           )}
         </Modal>
@@ -336,6 +345,20 @@ function ReleaseDetail({ r, onReleased, live }: { r: ReleaseWithItems; onRelease
  * Old ticket branches. After each release squad-kit deletes the released tickets' branches on this computer; the
  * ones on the remote stay until you ask. A branch with work that is not in main always stays.
  */
+/** The branches a release changes, and where to correct them. */
+function BranchTargets({ r }: { r: ReleaseWithItems }) {
+  return (
+    <>
+      {r.targets.map((g) => (
+        <div key={g.repo} className="mono" style={{ fontSize: 12.5, marginTop: 6 }}>
+          {g.repo === '.' ? 'project' : g.repo}: {g.branch} {g.remote ? `→ pushed to ${g.remote}` : '(no remote, stays on this Mac)'}
+        </div>
+      ))}
+      <p className="note" style={{ marginTop: 6 }}>Change the branch or remote in Settings first if this is not right.</p>
+    </>
+  );
+}
+
 function OldBranches() {
   const act = useAct();
   const plan = useQuery({ queryKey: ['branches'], queryFn: () => api<BranchPlan>('/api/v1/branches'), refetchInterval: 30_000 });

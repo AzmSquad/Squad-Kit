@@ -246,6 +246,7 @@ export async function runOverview(opts: OverviewOptions): Promise<void> {
       out(`    ${part.name}${part.what ? kleur.gray(`: ${part.what}`) : ''}${part.files.length ? kleur.gray(` (${part.files.join(', ')})`) : ''}`);
       if (to.length) out(kleur.gray(`      ${to.join(' · ')}`));
     }
+    if (v.product) out(`    ${v.product} ${kleur.gray('An engineer can correct this:')} ${cmd('squad parts')}`);
     out();
   } else if (v.map.length) list('Project map', v.map.map((m) => `${m.area}: ${m.detail}`));
   list(

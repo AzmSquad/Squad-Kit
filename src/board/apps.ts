@@ -1,4 +1,5 @@
 import { repoFor, reposOf } from '../engine/repos.js';
+import { repoInUse, repoLabel } from './parts.js';
 import type { BoardMeta, ProjectCommands, Ticket } from './types.js';
 
 /** One app the project runs: a code repo with a start command and a web address. Either may not be known yet. */
@@ -19,8 +20,8 @@ export interface ProjectApp {
  * with no code yet, lists only what it knows.
  */
 export function projectApps(meta: BoardMeta): ProjectApp[] {
-  const all = reposOf(meta).map((r) => ({
-    name: r.path === '.' ? meta.project : r.path,
+  const all = reposOf(meta).filter((r) => repoInUse(meta, r.path)).map((r) => ({
+    name: r.path === '.' ? meta.project : (repoLabel(meta, r.path) ?? r.path),
     repo: r.path,
     base: r.base,
     ...(r.commands.url?.trim() ? { url: r.commands.url.trim() } : {}),

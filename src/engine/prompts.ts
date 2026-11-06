@@ -32,6 +32,17 @@ const LINKS = {
   items: { type: 'object', properties: { from: STR, to: STR, label: STR }, required: ['from', 'to'] },
 } as const;
 
+/** What runs when the whole product is up, for the engine; the picture's parts above are for people. */
+const RUNS = {
+  type: 'array',
+  maxItems: 30,
+  items: {
+    type: 'object',
+    properties: { id: STR, name: STR, shared: { type: 'boolean' }, repo: STR, folder: STR, needs: { type: 'array', items: STR }, url: STR },
+    required: ['id', 'name'],
+  },
+} as const;
+
 /**
  * The first read of a project. Besides the map, the decisions and the commands it hands in what the overview shows
  * the person before the first ticket: who uses it, what it can do today, what is worth knowing, three ticket ideas,
@@ -55,6 +66,7 @@ export const SCAN_SCHEMA = {
     ideas: { type: 'array', maxItems: 3, items: { type: 'object', properties: { title: STR, why: STR }, required: ['title', 'why'] } },
     parts: PARTS,
     links: LINKS,
+    runs: RUNS,
   },
   // The overview's parts are not required, so an answer in the older shape still fits; scanProblem (answers.ts) asks
   // for them once more when a project with code leaves them out.
@@ -507,12 +519,15 @@ Leave the top-level commands empty.\n`
   const fix = corrections
     ? `\n\nYou read this project before, and the person said some of it was wrong. Read it again with what they said in mind.\n${asData('What the person said', corrections)}\n`
     : '';
+  const known = meta.parts?.length
+    ? `\n\nYou found these parts before. In runs, keep the same id and name for each one still there.\n${asData('The parts found before', meta.parts.map((p) => `- ${p.id}: ${p.name}`).join('\n'))}\n`
+    : '';
   const wants = idea
     ? `\n\nThis project has no code yet. The person said what they want to build.\n${asData('What the person wants to build', idea)}\nIn summary, say that in one plain sentence, in their language. In ideas, give up to three first stories for it: what people will be able to do, never about technology or setting things up.\n`
     : '';
   return `You are the Architect of a software squad, reading this project for the first time.
 Look at the files (README, package files, project files, folders). Do not change anything.${rulesText(ctx)}
-${repos}${fix}${wants}
+${repos}${fix}${known}${wants}
 Produce:
 - empty: true if the folder has no real code yet.
 - summary: one sentence on what this project is.
@@ -535,9 +550,17 @@ Produce:
   first (kind people), then screens, server, logic and data; tests last (kind tests); outside services as outside.
   For each: id, a short word like "pages"; name, a plain name like "Pages"; what, a few words like "Login page and
   booking page"; files, up to 3 real folder or file paths.
+  When the product has several parts that run by themselves, each of those gets its own box, named as in runs.
 - links: how the parts connect: from and to are part ids, label is a word or two, like "uses", "calls", "stores in"
   or "checks".
-If the folder has no real code yet, leave map, decisions, commands, users, can, worth, parts and links empty. The .squad
+- runs: what runs when the whole product is up. Each part that starts by itself (a web app, an API, a worker, a PDF
+  service), and each service they share (a database, Redis, a queue). Look in compose files, launch settings, config
+  examples and how the code connects, so no service is missed. A library, a folder of tests or an old app another part
+  replaced is not one. For each: id, a short word like "api"; name, a plain name like "Web app" or "Database"; ${nested.length ? 'repo, the folder of its repo, exactly as in the list above' : 'repo, "."'};
+  folder, only when several parts share that repo; needs, the ids of what it cannot run without, and nothing from
+  another product that only sits in the same folder; url, where it answers when it runs, like http://localhost:5180,
+  when the project's files show it; shared, true for a service, which has no repo.
+If the folder has no real code yet, leave map, decisions, commands, users, can, worth, parts, links and runs empty. The .squad
 folder is squad-kit's own and says nothing about the project. Choose no technology now: you pick it yourself when the
 first story is planned. Give ideas only for what the person said they want to build.
 

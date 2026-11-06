@@ -166,3 +166,4 @@
   .ob-setup .cpage-h { flex-wrap: wrap; row-gap: 8px; }
   .ob-setup .cpage-h .grow { display: none; }
 }
+.ob-c p.ob-product { font-size: 13px; color: var(--muted); margin-top: 4px; }

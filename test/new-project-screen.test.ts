@@ -89,7 +89,7 @@ describe('the first read of an empty folder', () => {
   it('the Architect is told to leave it all empty, and that .squad says nothing about the project', () => {
     const bp = emptyProject();
     const p = scanPrompt(readMeta(bp), []);
-    expect(p).toContain('leave map, decisions, commands, users, can, worth, parts and links empty');
+    expect(p).toContain('leave map, decisions, commands, users, can, worth, parts, links and runs empty');
     expect(p).toContain("folder is squad-kit's own and says nothing about the project");
     expect(p).toContain('you pick it yourself when the');
     expect(p).not.toContain('give three ideas for how to start');

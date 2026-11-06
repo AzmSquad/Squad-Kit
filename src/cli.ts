@@ -12,6 +12,7 @@ import { runMigrate } from './commands/migrate.js';
 import { runUpgrade } from './commands/upgrade.js';
 import { runApp, runConsole } from './commands/console.js';
 import { runProjects } from './commands/projects.js';
+import { runParts } from './commands/parts.js';
 import { runAsk, runTicketStatus, runWait } from './commands/now.js';
 import { runLogs, runReport, runTryNow } from './commands/support.js';
 import { runAppFind, runAppRestart, runAppSet, runAppStart, runAppStatus, runAppStop } from './commands/app.js';
@@ -253,6 +254,22 @@ program
   .option('--idea <text>', 'With --new: what you want to build')
   .option('--brd <file>', 'With --new: the BRD, as a PDF, Word, Markdown or text file')
   .action(wrap(runProjects));
+
+program
+  .command('parts')
+  .description("What the product is made of: its parts, what each needs and where it opens. The same as Settings")
+  .option('--add <name>', 'Add a part')
+  .option('--set <part>', 'Change a part: its id or name')
+  .option('--off <part>', 'Mark a part Not used: no story starts it')
+  .option('--on <part>', 'Use a part again')
+  .option('--remove <part>', 'Take out a part an engineer added or changed')
+  .option('--name <name>', 'With --set: its new name')
+  .option('--shared', 'With --add: a service the parts share, like a database')
+  .option('--repo <folder>', 'With --add or --set: the repo it is in')
+  .option('--folder <folder>', 'With --add or --set: the folder inside that repo')
+  .option('--needs <parts>', 'With --add or --set: what it cannot run without, separated by commas ("" for nothing)')
+  .option('--url <address>', 'With --add or --set: where it opens ("" for none)')
+  .action(wrap(runParts));
 
 // The first run and the Overview: the setup page and the Overview page, button for button.
 program

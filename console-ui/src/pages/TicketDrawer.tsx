@@ -3,7 +3,8 @@ import { Link } from '@tanstack/react-router';
 import { ArrowRightLeft, ArrowUp, Check, Code, Copy, Download, ExternalLink, GitPullRequest, LifeBuoy, Loader2, Maximize2, MessageCircle, Minimize2, PencilLine, Send, Square, TriangleAlert, X } from 'lucide-react';
 import { assetUrl, ticketFileUrl } from '../api/client';
 import type { PlanComment, Question, Ticket, TicketNote } from '../api/types';
-import { useAct, useTicket } from '../lib/data';
+import { useAct, useBoard, useTicket } from '../lib/data';
+import { partNames } from '../lib/overview';
 import { usePrefs } from '../lib/prefs';
 import { Cmd, Glyph, Modal, ROLE_NAME, Tracker, ago, clock, commandFor } from '../components/ui';
 import { ConversationTab } from '../components/Conversation';
@@ -54,6 +55,8 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
   }, [onClose]);
 
   const t = ticket.data;
+  const board = useBoard();
+  const parts = partNames(board.data?.ready ? board.data.meta.parts : undefined, t?.repo);
   return (
     <>
       <div className="veil" onClick={onClose} />
@@ -142,9 +145,9 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
                   Owner <b>{ownerOf(t)}</b>
                   {isMine(t, me) ? ' (you)' : ''}
                 </span>
-                {t.repo && (
+                {parts.length > 0 && (
                   <span>
-                    Repo <b className="mono" style={{ fontSize: 12.5 }}>{t.repo}</b>
+                    {parts.length > 1 ? 'Parts' : 'Part'} <b>{parts.join(', ')}</b>
                   </span>
                 )}
                 {t.builder && (
