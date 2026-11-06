@@ -293,7 +293,7 @@ describe('a ticket whose dependency is not merged waits before building', () => 
     expect(t.baseCommit).toBe(t.dependency!.from);
     expect(changedFiles(t.worktree!, t.baseCommit!).filter((f) => !f.startsWith('.squad/'))).toEqual(['booking.ts']);
     expect(calls.at(-1)!.prompt).toContain("squad-kit started this copy from RO-1's branch, so its work so far is here.");
-    expect(t.activity.some((a) => a.text === "Made a copy of the project from RO-1's work so far, on branch squad/ro-2")).toBe(true);
+    expect(t.activity.some((a) => a.text === "Made a copy of the project from RO-1's work so far")).toBe(true);
     // RO-1 is untouched: same branch, same commit, its file still not committed.
     expect(sh('git rev-parse HEAD', ro1.worktree!)).toBe(ro1Head);
     expect(sh('git status --porcelain', ro1.worktree!)).toBe('?? login.ts');

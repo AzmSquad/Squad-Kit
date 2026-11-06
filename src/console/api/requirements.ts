@@ -26,7 +26,7 @@ import {
   stopBreakdown,
 } from '../../board/requirements-actions.js';
 import { breakdownDir } from '../../board/requirements-paths.js';
-import { mimeOf } from '../../engine/conversations.js';
+import { dispositionOf, mimeOf } from '../../engine/conversations.js';
 import { mountBuildSendApi } from './requirements-build.js';
 
 /**
@@ -114,7 +114,7 @@ export function mountRequirementsApi(app: Hono, opts: { paths: SquadPaths }): vo
     // SVG and HTML can carry scripts, so they download instead of opening at the board's own address, where its token is.
     const type = mimeOf(file);
     const scripts = type === 'image/svg+xml' || type === 'text/html';
-    return new Response(fs.readFileSync(file), { headers: { 'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', ...(scripts ? { 'content-disposition': `attachment; filename="${path.basename(file).replace(/"/g, '')}"` } : {}) } });
+    return new Response(fs.readFileSync(file), { headers: { 'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', ...(scripts ? { 'content-disposition': dispositionOf('attachment', file) } : {}) } });
   });
 
   // Rename: `squad requirements rename BR-1 "<name>"`.

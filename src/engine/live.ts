@@ -2581,15 +2581,15 @@ export class LiveSquad {
         x,
         'builder',
         wt.from
-          ? `Made a copy of ${named} from ${wt.from}, on branch ${wt.branch}`
+          ? `Made a copy of ${named} from ${wt.from}`
           : wt.pushed
           ? `Made a copy of ${named} from the pushed branch ${wt.pushed}, with the work so far`
-          : `Made a clean copy of ${named} on branch ${wt.branch}`,
+          : `Made a clean copy of ${named}`,
       );
     });
     // The ticket's documents so far go on its branch first (ADR-001), when the project keeps them in git.
     const saved = commitTicketDocs(this.bp, t, wt.pushed ? 'picked up from the pushed branch' : t.specApproved ? 'spec and design approved' : 'plan approved');
-    if (saved) t = this.update(id, (x) => addActivity(x, 'squad', `Saved the spec and design on ${wt.branch} as commit ${saved}`));
+    if (saved) t = this.update(id, (x) => addActivity(x, 'squad', 'Saved the spec and design'));
     await this.setUpCopy(id, wt.dir, repo);
     return this.addWantedCopies(id);
   }
@@ -2610,7 +2610,7 @@ export class LiveSquad {
     const wt = addWorktree(path.join(projectRoot(this.bp), repo.path), id, repo.base, await fetchBase(this.bp, { ...t, repo: repo.path }), path.join(t.storyDir, repo.path));
     this.update(id, (x) => {
       x.copies = [...(x.copies ?? []), { repo: repo.path, dir: wt.dir, baseCommit: wt.baseCommit }];
-      addActivity(x, 'builder', `Made a clean copy of ${repoLabel(this.meta(), repo.path) ?? repo.path} on branch ${wt.branch}`);
+      addActivity(x, 'builder', `Made a clean copy of ${repoLabel(this.meta(), repo.path) ?? repo.path}`);
     });
     await this.setUpCopy(id, wt.dir, repo);
   }

@@ -119,7 +119,7 @@ export function saveTicketUploads(bp: BoardPaths, id: string, files: UploadedFil
 
 export function saveUploads(dir: string, files: UploadedFile[]): string[] {
   if (files.length > MAX_UPLOADS) throw new BoardActionError(`Add at most ${MAX_UPLOADS} files.`);
-  const decoded = files.map((f) => ({ name: path.basename(f.name).replace(/[^\w.\- ]+/g, '_').slice(-120) || 'file', data: Buffer.from(f.data, 'base64') }));
+  const decoded = files.map((f) => ({ name: path.basename(f.name).replace(/[^\p{L}\p{M}\p{N}_.\- ]+/gu, '_').slice(-120) || 'file', data: Buffer.from(f.data, 'base64') }));
   const big = decoded.find((f) => f.data.length > MAX_UPLOAD_BYTES);
   if (big) throw new BoardActionError(`${big.name} is larger than 10 MB.`);
   if (!decoded.length) return [];
@@ -541,7 +541,7 @@ export function acceptProof(bp: BoardPaths, ticket: Ticket, byItself?: string, o
     t.squad = openPr ? { phase: 'publish', nextAt: now() } : null;
     if (byItself) addActivity(t, 'squad', byItself);
     else addActivity(t, 'you', 'Checked the proof. Looks right');
-    if (commit) addActivity(t, 'release', `Saved the change as commit ${commit} on ${t.branch}`);
+    if (commit) addActivity(t, 'release', 'Saved the change');
     if (merged) addActivity(t, 'release', merged.moved ? `Merged into ${merged.base}` : `Could not move ${merged.base} yet. ${merged.note ?? ''}`.trim());
     addActivity(t, 'release', `Added to release ${release.version}`);
   });
@@ -720,7 +720,7 @@ function clashed(bp: BoardPaths, id: string, commit: string | null, error: strin
     clashCard(t, base, `The change is saved, but it cannot go into ${base} yet: newer work changed the same lines.`, error);
     if (byItself) addActivity(t, 'squad', byItself);
     else addActivity(t, 'you', 'Checked the proof. Looks right');
-    if (commit) addActivity(t, 'release', `Saved the change as commit ${commit} on ${t.branch}`);
+    if (commit) addActivity(t, 'release', 'Saved the change');
     // git's own words are for the activity and the engineer details, never the sentence above.
     addActivity(t, 'release', `Could not merge into ${base}: ${error}`);
   });

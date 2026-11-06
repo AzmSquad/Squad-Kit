@@ -99,6 +99,12 @@ const MEDIA: Record<string, string> = {
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', har: 'application/json', log: 'text/plain',
 };
 
+/** The Content-Disposition for a file. A header takes plain letters only, and a person's file can have an Arabic name. */
+export function dispositionOf(kind: 'inline' | 'attachment', file: string): string {
+  const name = path.basename(file);
+  return /^[\x20-\x7e]+$/.test(name) ? `${kind}; filename="${name.replace(/"/g, '')}"` : `${kind}; filename*=UTF-8''${encodeURIComponent(name)}`;
+}
+
 export function mimeOf(file: string): string {
   return MEDIA[path.extname(file).slice(1).toLowerCase()] ?? 'application/octet-stream';
 }

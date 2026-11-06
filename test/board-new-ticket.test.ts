@@ -56,6 +56,9 @@ describe('a ticket written by hand', () => {
     const dir = path.join(bp.ticketsDir, t.id, 'files');
     expect(saved.attachments!.map((f) => path.relative(dir, f))).toEqual(['chat.png', 'chat-2.png', 'evil name_.txt']);
     expect(fs.readFileSync(saved.attachments![1]!, 'utf8')).toBe('second');
+    // A file's own name stays, in any language: "صورة 1" is how the story names it.
+    const arabic = actions.createTicket(bp, { title: 'Arabic names', files: [{ name: 'صورة 1.PNG', data: Buffer.from('x').toString('base64') }] });
+    expect(readTicket(bp, arabic.id)!.attachments!.map((f) => path.basename(f))).toEqual(['صورة 1.PNG']);
 
     const prompt = intakePrompt(readMeta(bp), [], saved);
     expect(prompt).toContain('At most 3 bookings a day per person');

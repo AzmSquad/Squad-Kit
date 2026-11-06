@@ -504,6 +504,44 @@ describe('Your apps', () => {
     }
   });
 
+  it('Start on the web app runs what it needs first: a person should not have to know its API must run too', async () => {
+    const apps = new AppRunner(bp);
+    apps.start('Web app');
+    expect(await until(async () => (await get(webPort)) !== null, 20_000)).toBe(true);
+    expect(await get(apiPort)).not.toBeNull();
+    expect((await apps.settled('API')).state).toBe('running');
+    await apps.stop('Web app');
+    await apps.stop('API');
+  });
+
+  it('when what it needs will not start, it says which, in plain words', async () => {
+    const meta = readMeta(bp);
+    writeMeta(bp, { ...meta, repos: meta.repos!.map((r) => (r.path === 'api-server' ? { ...r, commands: { ...r.commands, start: 'node -e "process.exit(4)"' } } : r)) });
+    const apps = new AppRunner(bp);
+    apps.start('Web app');
+    const web = await apps.settled('Web app');
+    expect(web.state).toBe('failed');
+    expect(web.error).toBe('API did not start, so Web app cannot work yet. See what API says.');
+    expect(await get(webPort)).toBeNull();
+  });
+
+  it('two parts that need each other do not wait for ever', async () => {
+    const meta = readMeta(bp);
+    // This web app starts by itself: the usual one waits for its API, and that would be a real wait.
+    const start = `node -e "require('http').createServer((q,s)=>s.end('x')).listen(${webPort})"`;
+    writeMeta(bp, {
+      ...meta,
+      parts: meta.parts!.map((p) => (p.id === 'api' ? { ...p, needs: ['web'] } : p)),
+      repos: meta.repos!.map((r) => (r.path === 'web-ui' ? { ...r, commands: { ...r.commands, start } } : r)),
+    });
+    const apps = new AppRunner(bp);
+    apps.start('API');
+    expect(await until(async () => (await get(apiPort)) !== null, 20_000)).toBe(true);
+    expect(await get(webPort)).toBe('x');
+    await apps.stop('Web app');
+    await apps.stop('API');
+  });
+
   it('a setup that writes a local file gives back the person own', async () => {
     fs.writeFileSync(path.join(root, 'web-ui', '.env.dev'), 'KEY=REAL\n');
     addLocalFile(bp, 'web-ui', '.env.dev');

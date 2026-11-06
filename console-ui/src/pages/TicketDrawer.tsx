@@ -1149,9 +1149,14 @@ function Steps({ t }: { t: Ticket }) {
   );
 }
 
+/** Lines about how the work is done, in tools and file names. They wait behind "Show every step". */
+const WORKING_LINE = /^(Reading|Running|Editing|Writing|Looking|Searching|Listing|Runs on|Started step|Finished step|Stopped a program|Setting up squad-kit's screenshot browser)\b|^squad-kit (asked|ran|started|stopped|is running)\b/;
+
 function RecentActivity({ t, all }: { t: Ticket; all?: boolean }) {
-  const items = all ? t.activity : t.activity.slice(0, 4);
-  if (!items.length) return null;
+  const [every, setEvery] = useState(false);
+  const plain = t.activity.filter((a) => !WORKING_LINE.test(a.text));
+  const items = all ? (every ? t.activity : plain) : plain.slice(0, 4);
+  if (!items.length && !(all && t.activity.length)) return null;
   return (
     <>
       {!all && <div className="lbl">Latest activity</div>}
@@ -1166,6 +1171,11 @@ function RecentActivity({ t, all }: { t: Ticket; all?: boolean }) {
           </div>
         ))}
       </div>
+      {all && plain.length < t.activity.length && (
+        <button className="btn sm ghost" onClick={() => setEvery((v) => !v)}>
+          {every ? 'Show only what matters' : 'Show every step'}
+        </button>
+      )}
     </>
   );
 }

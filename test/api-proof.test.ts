@@ -101,7 +101,8 @@ describe('asking', () => {
     // It counts as taken in this step, and the list says what it is.
     expect(w.pictures.has('ap-1-after-api-1.api.json')).toBe(true);
     expect(w.pictureList()).toContain('the saved answer to GET /price on API');
-    expect(lines).toContain('squad-kit asked API for the Tester: GET /price answered 200');
+    expect(lines).toContain('squad-kit asked API for the Tester, and kept the answer');
+    expect(lines.join(' ')).not.toContain('/price');
   });
 
   it('sends a body and headers, and keeps a query', async () => {

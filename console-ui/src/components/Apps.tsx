@@ -21,7 +21,7 @@ export function Apps() {
     <div className="apps">
       <div className="apps-h">Your apps</div>
       {apps.map((a) => (
-        <AppItem key={a.repo} a={a} named={apps.length > 1} live={q.data?.live ?? false} reading={q.data?.reading ?? false} readError={q.data?.readError} />
+        <AppItem key={a.repo} a={a} together={apps.filter((x) => x.start && x.fresh && x.fresh.id === a.fresh?.id)} named={apps.length > 1} live={q.data?.live ?? false} reading={q.data?.reading ?? false} readError={q.data?.readError} />
       ))}
       {idle && <p className="apps-note">Starts the latest main, with every ticket you approved. No terminal needed.</p>}
     </div>
@@ -62,7 +62,7 @@ function runningFor(iso?: string): string {
   return m < 1 ? 'Running' : `Running for ${m} min`;
 }
 
-function AppItem({ a, named, live, reading, readError }: { a: ProjectApp; named: boolean; live: boolean; reading: boolean; readError?: string }) {
+function AppItem({ a, together, named, live, reading, readError }: { a: ProjectApp; together: ProjectApp[]; named: boolean; live: boolean; reading: boolean; readError?: string }) {
   const act = useAct();
   const [typing, setTyping] = useState(false);
   const [output, setOutput] = useState(false);
@@ -71,10 +71,18 @@ function AppItem({ a, named, live, reading, readError }: { a: ProjectApp; named:
   const call = (verb: string, done: string, body?: object) => act.mutate({ path: `/api/v1/apps/${encodeURIComponent(a.name)}/${verb}`, body, done });
   const start = (body?: object) => call('start', `Starting ${a.name}`, body);
   const busy = a.state === 'failed' ? a.busy : undefined;
+  // One story can change several parts of a product: one box for it, and its buttons take them all.
+  const forAll = async (verb: string, done: string, body?: object) => {
+    try {
+      for (const [i, x] of together.entries()) await act.mutateAsync({ path: `/api/v1/apps/${encodeURIComponent(x.name)}/${verb}`, body, ...(i === together.length - 1 ? { done } : {}) });
+    } catch {
+      // The action's own error message already said what happened.
+    }
+  };
 
   return (
     <div className={`app-item ${a.state}`}>
-      {a.fresh && a.start && (
+      {a.fresh && a.start && together[0] === a && (
         <div className="app-new" role="status">
           <div className="hd">
             <span className="ok">
@@ -86,10 +94,10 @@ function AppItem({ a, named, live, reading, readError }: { a: ProjectApp; named:
           </div>
           <p>Try the new version yourself.</p>
           <div className="app-acts">
-            <button className="btn sm go" disabled={act.isPending} onClick={() => call('restart', `Starting the new version of ${a.name}`)}>
+            <button className="btn sm go" disabled={act.isPending} onClick={() => void forAll('restart', together.length > 1 ? 'Starting the new version' : `Starting the new version of ${a.name}`)}>
               Run the new version
             </button>
-            <button className="btn sm" disabled={act.isPending} onClick={() => call('not-now', 'Fine. It stays as it is.', { ticket: a.fresh!.id })}>
+            <button className="btn sm" disabled={act.isPending} onClick={() => void forAll('not-now', 'Fine. It stays as it is.', { ticket: a.fresh!.id })}>
               Not now
             </button>
           </div>
@@ -144,7 +152,7 @@ function AppItem({ a, named, live, reading, readError }: { a: ProjectApp; named:
 
       {a.state !== 'running' && a.state !== 'starting' && a.start && a.up && !busy && (
         <p className="app-more">
-          Something else answers at this app&apos;s address.{' '}
+          It looks like this app is already open on this computer.{' '}
           <a href={a.url} target="_blank" rel="noreferrer">
             Open it
           </a>

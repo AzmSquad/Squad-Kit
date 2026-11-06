@@ -138,6 +138,11 @@ describe('the routes', () => {
       expect(res.headers.get('content-disposition')).toBe(`attachment; filename="${name}"`);
     }
     expect((await app.request('/api/v1/requirements/BR-2/file?path=source/pay.png')).headers.get('content-disposition')).toBeNull();
+    // A header takes plain letters only: an Arabic name must not break the answer.
+    fs.writeFileSync(path.join(dir, 'source', 'صورة 1.svg'), '<svg/>');
+    const arabic = await app.request(`/api/v1/requirements/BR-2/file?path=${encodeURIComponent('source/صورة 1.svg')}`);
+    expect(arabic.status).toBe(200);
+    expect(arabic.headers.get('content-disposition')).toBe(`attachment; filename*=UTF-8''${encodeURIComponent('صورة 1.svg')}`);
   });
 
   it('edits, adds, moves, removes and redoes parts', async () => {

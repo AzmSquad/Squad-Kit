@@ -394,7 +394,7 @@ function Proof({ v }: { v: OverviewView }) {
             <li key={i} className={t.ok ? 'ok' : 'bad'}>
               {t.ok ? <Check size={14} /> : <CircleAlert size={14} />}
               <span>
-                {t.ok ? `Ran your tests${t.repo && t.repo !== '.' ? ` in ${t.repo}` : ''}: ${t.passed !== undefined ? `${t.passed} pass` : 'they pass'}` : 'Your tests did not pass here'}
+                {t.ok ? `Ran your tests: ${t.passed !== undefined ? `${t.passed} pass` : 'they pass'}` : 'Your tests did not pass here'}
                 {!t.ok && t.output && (
                   <button className="btn sm quiet" onClick={() => setOpen(open === i ? null : i)}>
                     {open === i ? 'Hide' : 'See what failed'}
@@ -441,7 +441,7 @@ function Parts({ v }: { v: OverviewView }) {
       <button key={p.id} className={`ob-node k-${p.kind ?? 'part'} ${open === p.id ? 'on' : ''}`} onClick={() => setOpen(open === p.id ? null : p.id)} aria-expanded={open === p.id}>
         <b>{p.name}</b>
         {p.what && <span>{p.what}</span>}
-        {p.files.length > 0 && <code>{open === p.id ? p.files.join('\n') : p.files[0]}</code>}
+        {p.files.length > 0 && open === p.id && <code>{p.files.join('\n')}</code>}
         {open === p.id && uses && <small>{uses}</small>}
       </button>
     );

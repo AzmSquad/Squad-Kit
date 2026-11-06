@@ -185,7 +185,7 @@ describe('Looks right on a repo with commit hooks', () => {
     fs.writeFileSync(go, '');
     const t = await first;
     expect(t.mergedAt).toBeTruthy();
-    expect(t.activity.map((a) => a.text).join('\n')).toMatch(/Saved the change as commit [0-9a-f]+ on squad\/ap-1/);
+    expect(t.activity.map((a) => a.text).join('\n')).toContain('Saved the change');
   });
 
   it('a hook that says no from the board gives the same card', async () => {

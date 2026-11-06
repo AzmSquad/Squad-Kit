@@ -13,7 +13,7 @@ import { git, latestBase } from './git.js';
 import { KILL_AFTER_MS, OWN_GROUP, endGroup, endTree, takenOver } from './process-group.js';
 import { portSettings } from './port-vars.js';
 import { reposOf } from './repos.js';
-import { runsAsProduct } from '../board/parts.js';
+import { partsOf, runsAsProduct } from '../board/parts.js';
 import { leaveProduct, takeProduct } from './product-lock.js';
 
 /**
@@ -64,6 +64,8 @@ export interface StartOptions {
   nextPort?: boolean;
   /** The port is in use by a program squad-kit started earlier: stop that program first. */
   stopOther?: boolean;
+  /** The apps that asked for this one to run first, so two parts that need each other do not wait forever. */
+  asked?: string[];
 }
 
 export interface RunnerOptions {
@@ -535,6 +537,27 @@ export class AppRunner {
     if (![...this.runs.values()].some((r) => r.state === 'starting' || r.state === 'running')) leaveProduct(this.bp, YOUR_APPS);
   }
 
+  /** The other parts of a product that this one needs, and that squad-kit can start. */
+  private needsOf(app: ProjectApp, opts: StartOptions): ProjectApp[] {
+    const meta = readMeta(this.bp);
+    if (!runsAsProduct(meta)) return [];
+    const parts = partsOf(meta);
+    const me = parts.find((p) => p.repo === app.repo && !p.shared);
+    const repos = (me?.needs ?? []).flatMap((id) => {
+      const p = parts.find((x) => x.id === id);
+      return p?.repo && !p.shared && !p.off && !p.noRun && p.repo !== app.repo && !opts.asked?.includes(p.repo) ? [p.repo] : [];
+    });
+    return projectApps(meta).filter((a) => a.start && repos.includes(a.repo));
+  }
+
+  /** A part this one needs is up: already running, answering at its address, or started now. False when it would not start. */
+  private async needReady(need: ProjectApp, app: ProjectApp, opts: StartOptions): Promise<boolean> {
+    const now = this.runs.get(need.repo);
+    if (now?.state === 'running' || this.elsewhere(need.repo) || (now?.state !== 'starting' && need.url && (await isUp(need.url)))) return true;
+    if (now?.state !== 'starting') this.start(need.name, { ...opts, asked: [...(opts.asked ?? []), app.repo] });
+    return (await this.settled(need.name)).state === 'running';
+  }
+
   private async launch(app: ProjectApp, run: Run, opts: StartOptions, exited: () => void): Promise<void> {
     const repo = this.repoOf(app);
     const dir = appCopyDir(this.bp, app);
@@ -544,6 +567,11 @@ export class AppRunner {
     if (fixed) {
       const other = takeProduct(this.bp, YOUR_APPS, 'apps');
       if (other) return this.fail(run, `The squad is running the product for ${other.holder.replace(/^try:/, '')} right now, on the same addresses. Start this again when that is done.`);
+    }
+    // What this part needs runs first: a web app without its API looks broken, and a person should not have to know why.
+    for (const need of this.needsOf(app, opts)) {
+      if (signal.aborted) return;
+      if (!(await this.needReady(need, app, opts))) return this.fail(run, `${need.name} did not start, so ${app.name} cannot work yet. See what ${need.name} says.`);
     }
     await this.elsewhereStopped(app, opts);
 

@@ -71,7 +71,7 @@ import { aiTool, guessTracker, speechModule, trackerFor, trackerModule, TRACKERS
 import type { Tracker } from '../../modules/tracker/types.js';
 import { findNestedRepos } from '../../engine/repos.js';
 import { git } from '../../engine/git.js';
-import { allowedFile, chatSummaries, mimeOf, readConversation, ticketConversations, ticketFolders } from '../../engine/conversations.js';
+import { allowedFile, chatSummaries, dispositionOf, mimeOf, readConversation, ticketConversations, ticketFolders } from '../../engine/conversations.js';
 import { buildStamp } from '../../board/console-info.js';
 import { timingSafeEqualHex } from '../auth.js';
 import type { NewTicketInput, UploadedFile } from '../../board/actions.js';
@@ -327,7 +327,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
         'content-type': type,
         'content-length': String(size),
         // SVG and HTML can carry scripts, so they download instead of opening in the board.
-        'content-disposition': `${inline ? 'inline' : 'attachment'}; filename="${path.basename(file).replace(/"/g, '')}"`,
+        'content-disposition': dispositionOf(inline ? 'inline' : 'attachment', file),
         'x-content-type-options': 'nosniff',
         'cache-control': 'private, max-age=300',
       },

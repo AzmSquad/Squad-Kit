@@ -1106,7 +1106,8 @@ export class AgentWindow {
     const file = `${stem}.api.json`;
     fs.writeFileSync(path.join(this.s.proofDir, file), JSON.stringify(record, null, 2));
     this.pictures.set(file, { file, page: '', size: 'answer', call: `${method} ${asked} on ${part.name}` });
-    this.s.say(`squad-kit asked ${part.name} for the ${this.s.who}: ${method} ${asked} answered ${res.status}`);
+    // The exact call and answer are in the saved file, for engineers: an address can hold someone's email.
+    this.s.say(`squad-kit asked ${part.name} for the ${this.s.who}, and kept the answer`);
     const sheets = record.sheets as Sheet[] | undefined;
     const kept = `A file of ${bytes.length} bytes (${type}), saved as ${record.file as string}. squad-kit keeps it for the person to open.`;
     const shown = text ? String(record.answer).slice(0, 8000) : sheets ? `${kept}\n\nWhat it holds:\n\n${sheetsText(sheets).slice(0, 8000)}` : kept;

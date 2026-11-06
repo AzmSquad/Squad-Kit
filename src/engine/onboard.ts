@@ -271,7 +271,7 @@ const commandsStep: Step = async (bp, deps, copies) => {
     try {
       copy = ensureCopy(bp, repo);
     } catch (err) {
-      failures.push({ error: `squad-kit could not make its copy of ${repo.path === '.' ? 'the code' : repo.path}: ${(err as Error).message}` });
+      failures.push({ error: `squad-kit could not make its copy of the code: ${(err as Error).message}` });
       continue;
     }
     copies.set(repo.path, copy.dir);
@@ -316,7 +316,7 @@ const testsStep: Step = async (bp, deps, copies) => {
   const runs: SetupTestRun[] = [];
   for (const repo of repos) {
     const command = repo.commands.test!.trim();
-    withSetup(bp, (s) => begin(s, 'tests', `${DOING.tests}${repos.length > 1 ? ` in ${repo.path}` : ''}`));
+    withSetup(bp, (s) => begin(s, 'tests', DOING.tests));
     let dir: string;
     try {
       dir = await copyFor(bp, repo, copies, deps.signal);
