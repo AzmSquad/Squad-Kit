@@ -1,3 +1,4 @@
+import { copyViews } from '../engine/copies.js';
 import { repoFor, reposOf } from '../engine/repos.js';
 import { repoLabel, repoRuns } from './parts.js';
 import type { BoardMeta, ProjectCommands, Ticket } from './types.js';
@@ -91,7 +92,7 @@ export function appNews(
   now = Date.now(),
 ): { includes: AppTicket[]; fresh?: NewVersion } {
   const merged = tickets
-    .filter((t) => t.mergedAt && repoFor(meta, t).path === app.repo)
+    .filter((t) => t.mergedAt && copyViews(meta, t).some((v) => repoFor(meta, v).path === app.repo))
     .sort((a, b) => b.mergedAt!.localeCompare(a.mergedAt!));
   const runs = app.state === 'running' || app.state === 'starting';
   const since = app.startedAt;

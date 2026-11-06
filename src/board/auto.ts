@@ -8,6 +8,7 @@ import { scheduleSquad } from './schedule.js';
 import { git, isAncestor, remotes } from '../engine/git.js';
 import { repoFor } from '../engine/repos.js';
 import { saysTheSame } from './same-words.js';
+import { copyViews } from '../engine/copies.js';
 
 /**
  * Builds by itself (the 'auto' track): a story from an approved breakdown. Its story and done-when were approved with
@@ -302,7 +303,11 @@ function baseTries(t: Ticket): number {
  * or on the remote (the team's, as last fetched) is not in the ticket's branch. When git cannot say, it counts as moved,
  * and the count of tries still ends it.
  */
-function baseMoved(bp: BoardPaths, t: Ticket): boolean {
+function baseMoved(bp: BoardPaths, story: Ticket): boolean {
+  return copyViews(readMeta(bp), story).some((t) => oneBaseMoved(bp, t));
+}
+
+function oneBaseMoved(bp: BoardPaths, t: Ticket): boolean {
   if (!t.worktree || !t.branch || !fs.existsSync(t.worktree)) return true;
   try {
     const repo = repoFor(readMeta(bp), t);

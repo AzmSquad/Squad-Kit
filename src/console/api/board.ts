@@ -58,6 +58,7 @@ import {
   ReleasedError,
 } from '../../board/actions.js';
 import { architecture } from '../../board/architecture.js';
+import { copyViews } from '../../engine/copies.js';
 import { isApiProof } from '../../engine/proof-verdict.js';
 import { addPart, changePart, partsOf, removePart, repoPaths, severalParts, type PartChange } from '../../board/parts.js';
 import { addLocalFile, addLockedFile, lockDockerFiles, projectFilesView, removeProjectFile, useMyFile } from '../../board/project-files.js';
@@ -573,8 +574,10 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
       if (meta.engine !== 'live') return [];
       const seen = new Map<string, { repo: string; branch: string; remote: string }>();
       for (const t of tickets.filter((x) => r.tickets.includes(x.id))) {
-        const repo = repoFor(meta, t);
-        seen.set(repo.path, { repo: repo.path, branch: repo.base, remote: repo.remote });
+        for (const view of copyViews(meta, t)) {
+          const repo = repoFor(meta, view);
+          seen.set(repo.path, { repo: repo.path, branch: repo.base, remote: repo.remote });
+        }
       }
       return [...seen.values()];
     };
@@ -664,6 +667,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
       git?: { base?: string; remote?: string };
       parallel?: number;
       atOnce?: number | null;
+      delivery?: 'pr' | 'push' | null;
       runner?: 'acp' | 'direct';
       documentsInGit?: boolean;
       quality?: string;
@@ -696,6 +700,8 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
       }
       if (b.git) meta.git = { base: b.git.base?.trim() || meta.git?.base || 'main', remote: b.git.remote?.trim() ?? meta.git?.remote ?? '' };
       if (typeof b.parallel === 'number' && b.parallel >= 1 && b.parallel <= 5) meta.parallel = Math.round(b.parallel);
+      if (b.delivery === null) delete meta.delivery;
+      else if (b.delivery === 'pr' || b.delivery === 'push') meta.delivery = b.delivery;
       if (b.atOnce === null) delete meta.atOnce;
       else if (typeof b.atOnce === 'number' && b.atOnce >= 1 && b.atOnce <= 5) meta.atOnce = Math.round(b.atOnce);
       if (b.runner === 'acp' || b.runner === 'direct') meta.runner = b.runner;

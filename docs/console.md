@@ -62,6 +62,10 @@ For the proof and Try it yourself, squad-kit runs everything the change touches,
 time. If another program holds one of those addresses, it says so. A part that runs in Docker needs its compose files locked in
 Settings: squad-kit then runs its own `docker compose up`, under a project name of its own, and stops it without removing data.
 
+Looks right on a story across parts saves every part and tries every merge first. If one clashes, nothing moves. A release sends the
+parts in order, what others rely on first. If one fails to go out, what relies on it waits, and **Push again** finishes it. There is no
+undo. A story across parts does not open pull requests yet: it goes out by push.
+
 A "done when" no page shows, like what an API answers, is proved by asking: squad-kit makes the call and saves it, and the proof
 shows what was asked and what it answered. squad-kit's own check reads the saved answer, not the Tester's words about it.
 

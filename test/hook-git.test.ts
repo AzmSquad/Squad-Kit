@@ -712,6 +712,8 @@ describe('a crash at each point', () => {
     process.kill(child.pid!, 'SIGKILL');
     await ended;
     const hookPid = Number(said('hook').trim());
+    // It writes its number just before it becomes the sleep: on a slow computer, a look can fall in between.
+    for (let i = 0; i < 100 && !sh(`ps -o command= -p ${hookPid}`, scratch).includes('sleep 55'); i += 1) await new Promise((r) => setTimeout(r, 50));
     expect(sh(`ps -o command= -p ${hookPid}`, scratch)).toContain('sleep 55');
     process.kill(hookPid, 'SIGKILL');
     return ended;
@@ -773,6 +775,8 @@ describe('a crash at each point', () => {
     process.kill(child.pid!, 'SIGKILL');
     await ended;
     const hookPid = Number(said('hook').trim());
+    // It writes its number just before it becomes the sleep: on a slow computer, a look can fall in between.
+    for (let i = 0; i < 100 && !sh(`ps -o command= -p ${hookPid}`, scratch).includes('sleep 55'); i += 1) await new Promise((r) => setTimeout(r, 50));
     expect(sh(`ps -o command= -p ${hookPid}`, scratch)).toContain('sleep 55');
     settleCopy(copy);
     for (let i = 0; i < 100 && spawnSync('ps', ['-o', 'pid=', '-p', String(hookPid)], { encoding: 'utf8' }).stdout.trim(); i += 1) await new Promise((r) => setTimeout(r, 50));

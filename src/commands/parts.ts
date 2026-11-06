@@ -23,6 +23,7 @@ export interface PartsOptions {
   needs?: string;
   url?: string;
   atOnce?: string;
+  delivery?: string;
 }
 
 function whereOf(p: ProductPart): string {
@@ -53,6 +54,13 @@ export async function runParts(opts: PartsOptions): Promise<void> {
     const { atOnce: _old, ...rest } = readMeta(bp);
     writeMeta(bp, opts.atOnce === 'all' ? rest : { ...rest, atOnce: n });
     ui.success(opts.atOnce === 'all' ? 'This project follows the limit every project shares.' : `${n === 1 ? 'One story' : `${n} stories`} of this project run at once.`);
+    return;
+  }
+  if (opts.delivery !== undefined) {
+    if (!['pr', 'push', 'auto'].includes(opts.delivery)) throw new Error('Say pr, push, or auto: a pull request when a code host is signed in.');
+    const { delivery: _old, ...rest } = readMeta(bp);
+    writeMeta(bp, opts.delivery === 'auto' ? rest : { ...rest, delivery: opts.delivery as 'pr' | 'push' });
+    ui.success(opts.delivery === 'push' ? 'Finished work goes out pushed to the branch, as one plain commit per story, with no pull request.' : opts.delivery === 'pr' ? 'Finished work goes out by pull request.' : 'Finished work goes out by pull request when a code host is signed in.');
     return;
   }
   const change: PartChange = {

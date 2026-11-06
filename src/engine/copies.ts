@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { partsOf, repoLabel } from '../board/parts.js';
+import { partsOf, partsToRun, repoLabel } from '../board/parts.js';
 import type { BoardMeta, RepoInfo, Ticket } from '../board/types.js';
 import { worktreeRoot } from './git.js';
 import { repoFor, reposOf } from './repos.js';
@@ -44,6 +44,43 @@ export function reposOfParts(meta: BoardMeta, parts: string[] | undefined): stri
   const known = partsOf(meta);
   const repos = (parts ?? []).map((id) => known.find((p) => p.id === id && !p.shared && !p.off)?.repo).filter((r): r is string => Boolean(r));
   return [...new Set(repos)].filter((r) => reposOf(meta).some((x) => x.path === r));
+}
+
+/** The repos in the order they go: what the others rely on first, with those where nothing starts before them. */
+export function repoOrder(meta: BoardMeta): string[] {
+  const parts = partsOf(meta);
+  const quiet = parts.filter((p) => p.noRun && p.repo).map((p) => p.repo!);
+  const running = partsToRun(meta, parts.map((p) => p.id)).map((p) => p.repo).filter((r): r is string => Boolean(r));
+  return [...new Set([...quiet, ...running])];
+}
+
+/** Whether anything in repo `later` relies, through what it needs, on a part in repo `first`. */
+export function repoReliesOn(meta: BoardMeta, later: string, first: string): boolean {
+  const parts = partsOf(meta);
+  const seen = new Set<string>();
+  const reach = (id: string): boolean => {
+    if (seen.has(id)) return false;
+    seen.add(id);
+    const p = parts.find((x) => x.id === id);
+    return Boolean(p) && (p!.repo === first || p!.needs.some(reach));
+  };
+  return parts.filter((p) => p.repo === later).some((p) => p.needs.some(reach));
+}
+
+/**
+ * A story as the code for one repo sees it, once per copy, in the order they go. Accepting and releasing a repo's copy is
+ * well tried, so a story across parts goes through that same code, a copy at a time. With one copy, it is the story itself.
+ */
+export function copyViews(meta: BoardMeta, t: Ticket): Ticket[] {
+  if (!t.copies?.length) return [t];
+  const { copies, ...one } = t;
+  const views: Ticket[] = [one, ...copies.map((c) => ({ ...one, repo: c.repo, worktree: c.dir, ...(c.baseCommit ? { baseCommit: c.baseCommit } : {}) }))];
+  const order = repoOrder(meta);
+  const place = (v: Ticket) => {
+    const at = order.indexOf(v.repo ?? '');
+    return at < 0 ? order.length : at;
+  };
+  return views.map((v, i) => ({ v, i })).sort((a, b) => place(a.v) - place(b.v) || a.i - b.i).map((x) => x.v);
 }
 
 /** The first copy that can start an app, for the steps that open one. Running every part together comes with the product run. */

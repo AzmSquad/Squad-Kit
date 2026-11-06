@@ -3,7 +3,7 @@ import path from 'node:path';
 import { readMeta, readTicket, type BoardPaths } from '../board/store.js';
 import type { Release, Ticket, UnpushedRelease } from '../board/types.js';
 import { runCommand, tail } from './checks.js';
-import { HOOK_MS, HookRefused, MergeClash, SHORT_HOOK_MS, bringHookRunner, commitArgsFor, commitChecked, commitHooks, commitWithoutHooks, conventionalWords, currentBranch, git, isAncestor, keepingFiles, mergeIntoBase, netGit, netGitLater, remotes, removeWorktree, somethingToSave, stageAll, worktreeRoot, type HookRun } from './git.js';
+import { HOOK_MS, HookRefused, MergeClash, SHORT_HOOK_MS, bringHookRunner, commitArgsFor, copyDirsIn, mergeWouldClash, commitChecked, commitHooks, commitWithoutHooks, conventionalWords, currentBranch, git, isAncestor, keepingFiles, mergeIntoBase, netGit, netGitLater, remotes, removeWorktree, somethingToSave, stageAll, worktreeRoot, type HookRun } from './git.js';
 import { projectRoot } from './live.js';
 import { repoFor } from './repos.js';
 import type { RepoInfo } from '../board/types.js';
@@ -14,6 +14,8 @@ import { bringBack, leaveOut, leaveOutProblem } from './leave-out.js';
 import { noteRepo, notePrMerged, startJournal, type RepoJournal } from './release-resume.js';
 import { dropTicketCache } from './sandbox.js';
 import { guardSupport, projectGuardFor } from './project-guard.js';
+import { copyViews, repoOrder, repoReliesOn } from './copies.js';
+import { repoLabel } from '../board/parts.js';
 
 /**
  * A real release: merge every ready ticket (its pull request on the code host, or its branch locally), write the
@@ -97,11 +99,14 @@ export async function liveRelease(bp: BoardPaths, release: Release, tickets: Tic
   const root = projectRoot(bp);
   const meta = readMeta(bp);
   const groups = new Map<string, { repo: RepoInfo; tickets: Ticket[] }>();
+  // A story across parts is in the group of each repo it changed, and its copy there is what that repo's release sees.
   for (const t of tickets) {
-    const repo = repoFor(meta, t);
-    const g = groups.get(repo.path) ?? { repo, tickets: [] };
-    g.tickets.push(t);
-    groups.set(repo.path, g);
+    for (const view of copyViews(meta, t)) {
+      const repo = repoFor(meta, view);
+      const g = groups.get(repo.path) ?? { repo, tickets: [] };
+      g.tickets.push(view);
+      groups.set(repo.path, g);
+    }
   }
   const log: ReleaseLog = [];
   const unpushed: UnpushedRelease[] = [];
@@ -110,8 +115,13 @@ export async function liveRelease(bp: BoardPaths, release: Release, tickets: Tic
   const leaving = (release.out ?? [])
     .filter((id) => !release.tickets.includes(id))
     .map((id) => readTicket(bp, id))
-    .filter((t): t is Ticket => Boolean(t?.mergedAt && t.stage !== 'done'));
-  const plans = [...groups.values()].map(({ repo, tickets: list }) => {
+    .filter((t): t is Ticket => Boolean(t?.mergedAt && t.stage !== 'done'))
+    .flatMap((t) => copyViews(meta, t));
+  // What the others rely on goes first.
+  const order = repoOrder(meta);
+  const place = (repo: string) => (order.includes(repo) ? order.indexOf(repo) : order.length);
+  const inOrder = [...groups.values()].sort((a, b) => place(a.repo.path) - place(b.repo.path));
+  const plans = inOrder.map(({ repo, tickets: list }) => {
     const repoRoot = path.join(root, repo.path);
     const remote = repo.remote || remotes(repoRoot)[0];
     const url = remote ? git(repoRoot, ['config', '--get', `remote.${remote}.url`], { allowFail: true }) : '';
@@ -124,6 +134,11 @@ export async function liveRelease(bp: BoardPaths, release: Release, tickets: Tic
     for (const t of list.filter((x) => host && x.pr?.host === host.host && !x.mergedAt)) {
       if ((await host!.mergeState(t.pr!.id)) === 'clash') clashing.push(t.id);
     }
+    // So would a merge that clashes in one repo after another repo has gone out.
+    const base = repo.base || currentBranch(repoRoot);
+    for (const t of list.filter((x) => x.branch && !x.mergedAt && !x.pr)) {
+      if (mergeWouldClash(repoRoot, base, t.branch!)) clashing.push(t.id);
+    }
     if (clashing.length) throw new PullRequestClash(clashing, repo.base || currentBranch(repoRoot));
     // A ticket taken out that cannot be left out (later work changed the same lines) stops it here too.
     const problem = leave.length ? leaveOutProblem(repoRoot, repo.base || currentBranch(repoRoot), leave) : null;
@@ -131,7 +146,10 @@ export async function liveRelease(bp: BoardPaths, release: Release, tickets: Tic
   }
   // From here on the release writes down each step, so a restart half-way can finish it or undo it (release-resume.ts).
   startJournal(bp, release.version, tickets.map((t) => t.id));
+  const named = (r: string) => repoLabel(meta, r) ?? r;
   for (const { repo, repoRoot, list, host, env, leave } of plans) {
+    // A part whose push failed: what relies on it does not go out before it does.
+    const waitsFor = unpushed.find((u) => repoReliesOn(meta, repo.path, u.repo))?.repo;
     // The project's shared files go out with the release when `.squad/` sits in this repo (ADR-001).
     const docs = docsInGit(bp) && path.resolve(docsRepo(bp)!) === path.resolve(repoRoot) ? (dir: string) => stageReleaseDocs(bp, dir, release, list) : undefined;
     const keep = path.relative(repoRoot, bp.squadDir);
@@ -139,6 +157,7 @@ export async function liveRelease(bp: BoardPaths, release: Release, tickets: Tic
     const done = await releaseRepo(repoRoot, repo, release, list, meta.commands?.deploy, host, env, docs, keep && !keep.startsWith('..') ? keep : undefined, {
       leave,
       note,
+      ...(waitsFor ? { holdPush: { plain: `${named(repo.path)} did not go out yet: it goes after ${named(waitsFor)}.` } } : {}),
       merged: (id) => notePrMerged(bp, id),
       guardFor: (dir) => (guardSupport().on ? projectGuardFor(bp, { cwd: dir, ...(meta.guard ? { allow: meta.guard } : {}) }) : undefined),
     });
@@ -147,6 +166,8 @@ export async function liveRelease(bp: BoardPaths, release: Release, tickets: Tic
     // Their copies of the code went with the release, so their own package caches go too.
     for (const t of list) dropTicketCache(bp, t.id);
   }
+  // A story's folder goes with its last copy.
+  for (const t of tickets) if (t.storyDir && !copyDirsIn(t.storyDir).length) fs.rmSync(t.storyDir, { recursive: true, force: true });
   return { log, unpushed };
 }
 
@@ -160,7 +181,7 @@ async function releaseRepo(
   env: Record<string, string>,
   docs?: (dir: string) => void,
   keep?: string,
-  extra: { leave?: Ticket[]; note?: (patch: Partial<RepoJournal> & { base: string }) => void; merged?: (id: string) => void; guardFor?: (dir: string) => ReturnType<typeof projectGuardFor> | undefined } = {},
+  extra: { holdPush?: { plain: string }; leave?: Ticket[]; note?: (patch: Partial<RepoJournal> & { base: string }) => void; merged?: (id: string) => void; guardFor?: (dir: string) => ReturnType<typeof projectGuardFor> | undefined } = {},
 ): Promise<{ log: ReleaseLog; unpushed?: UnpushedRelease }> {
   const base = repo.base || currentBranch(root);
   const remote = repo.remote || remotes(root)[0];
@@ -240,7 +261,10 @@ async function releaseRepo(
     note({ base, head });
     // What reached the remote: the release itself, or the release merged with a teammate's newer work.
     let sent = head;
-    if (remote) {
+    if (remote && extra.holdPush) {
+      unpushed = { repo: repo.path, remote, base, commit: head, ...(release.addons.tag ? { tag: version } : {}), error: extra.holdPush.plain, plain: extra.holdPush.plain };
+      log.push({ ok: false, text: extra.holdPush.plain });
+    } else if (remote) {
       try {
         sent = await pushRelease(dir, remote, base, version, release.notes, host, env, log);
         note({ base, head: sent, pushed: true });
@@ -348,6 +372,11 @@ export async function pushAgain(bp: BoardPaths, release: Release): Promise<Relea
   const log: ReleaseLog = [];
   const unpushed: UnpushedRelease[] = [];
   for (const u of list) {
+    // What relies on a part still not out waits for it, as in the release.
+    if (unpushed.some((x) => repoReliesOn(readMeta(bp), u.repo, x.repo))) {
+      unpushed.push(u);
+      continue;
+    }
     const repoRoot = path.join(root, u.repo);
     const url = git(repoRoot, ['config', '--get', `remote.${u.remote}.url`], { allowFail: true });
     const host = url ? repoHostFor(bp, url) : null;

@@ -43,7 +43,6 @@ const { changedFiles } = await import('../src/engine/review-look.js');
 const { addLocalFile, storyFile } = await import('../src/board/project-files.js');
 const { deniedTools } = await import('../src/modules/claude/direct.js');
 const { deleteTicket } = await import('../src/engine/delete.js');
-const actions = await import('../src/board/actions.js');
 const P = await import('../src/engine/prompts.js');
 
 type Squad = {
@@ -589,16 +588,5 @@ describe('deleting the story', () => {
     await deleteTicket(bp, 'AP-1', {});
     expect(fs.existsSync(t.storyDir!)).toBe(false);
     for (const r of ['api-server', 'web-ui']) expect(sh('git branch --list squad/ap-1', path.join(root, r))).toBe('');
-  });
-});
-
-describe('accepting', () => {
-  it('never saves one copy and loses the others without a word', async () => {
-    story({ stage: 'review', waiting: { kind: 'proof', summary: 'The proof is ready' }, gates: { checks: 'pass', review: 'pass', proof: 'pass' } } as never);
-    const t = await squad().workspace('AP-1');
-    fs.writeFileSync(path.join(t.copies![0]!.dir, 'page.js'), 'new\n');
-    expect(() => actions.approve(bp, 'AP-1')).toThrow('changes several parts');
-    expect(fs.existsSync(path.join(t.copies![0]!.dir, 'page.js'))).toBe(true);
-    expect(get().mergedAt).toBeUndefined();
   });
 });

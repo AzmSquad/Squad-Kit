@@ -983,6 +983,8 @@ export interface BoardMeta {
   repos?: RepoInfo[];
   /** What the product is made of (src/board/parts.ts). Left out, a repo is one part, and a project with no repos is one part. */
   parts?: ProductPart[];
+  /** How finished work goes out: by pull request, or pushed to the branch as one plain commit per story. Left out, a pull request when a code host is signed in. */
+  delivery?: 'pr' | 'push';
   /** How many of this project's stories run at once, under the app's own limit: a heavy product may take only one. */
   atOnce?: number;
   /** Files git does not carry, like .env.dev: in each story's copy for the project's commands, and hidden from agents (src/board/project-files.ts). */

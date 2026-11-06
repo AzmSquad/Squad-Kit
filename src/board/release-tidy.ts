@@ -8,8 +8,10 @@ import { repoFor } from '../engine/repos.js';
 import { leaveOutProblem } from '../engine/leave-out.js';
 import { cleanBranches } from '../engine/branches.js';
 import { clearJournal, journalAlive, readJournal, settleRepos } from '../engine/release-resume.js';
-import { removeWorktree } from '../engine/git.js';
+import { copyDirsIn, removeWorktree } from '../engine/git.js';
 import { dropTicketCache } from '../engine/sandbox.js';
+import fs from 'node:fs';
+import { copyViews } from '../engine/copies.js';
 
 /**
  * Three release fixes. Take a ticket out of the next release before it is made (its code stays in the base; the
@@ -134,7 +136,7 @@ export async function settleRelease(bp: BoardPaths, why: string): Promise<Releas
   // Out there for at least one repo: it is released there. Tickets of a repo it never reached wait for the next one.
   const going = j.tickets.filter((id) => {
     const t = readTicket(bp, id);
-    return t && reached.has(repoFor(meta, t).path);
+    return t && copyViews(meta, t).every((v) => reached.has(repoFor(meta, v).path));
   });
   const rest = release.tickets.filter((id) => !going.includes(id));
   const unpushed = repos.flatMap((r) => (r.unpushed ? [r.unpushed] : []));
@@ -146,7 +148,8 @@ export async function settleRelease(bp: BoardPaths, why: string): Promise<Releas
   writeRelease(bp, done);
   for (const id of going) {
     const t = readTicket(bp, id);
-    if (t?.worktree) removeWorktree(path.join(bp.root, repoFor(meta, t).path), t.worktree);
+    for (const v of t?.worktree ? copyViews(meta, t) : []) removeWorktree(path.join(bp.root, repoFor(meta, v).path), v.worktree!);
+    if (t?.storyDir && !copyDirsIn(t.storyDir).length) fs.rmSync(t.storyDir, { recursive: true, force: true });
     dropTicketCache(bp, id);
   }
   if (rest.length) joinNextRelease(bp, rest);

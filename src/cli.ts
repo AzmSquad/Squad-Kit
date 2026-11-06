@@ -270,6 +270,7 @@ program
   .option('--folder <folder>', 'With --add or --set: the folder inside that repo')
   .option('--needs <parts>', 'With --add or --set: what it cannot run without, separated by commas ("" for nothing)')
   .option('--url <address>', 'With --add or --set: where it opens ("" for none)')
+  .option('--delivery <how>', 'How finished work goes out: pr, push (one plain commit per story, no pull request), or auto')
   .option('--at-once <n>', 'How many of this project\'s stories run at once, 1 to 5 ("all" for the app\'s own limit)')
   .action(wrap(runParts));
 

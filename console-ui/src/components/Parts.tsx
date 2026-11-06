@@ -173,6 +173,23 @@ function StoriesAtOnce() {
   );
 }
 
+/** How finished work leaves this computer: a team may take pull requests, or only plain pushes to one branch. */
+function Delivery() {
+  const board = useBoard();
+  const act = useAct();
+  const now = board.data?.ready ? board.data.meta.delivery : undefined;
+  const set = (delivery: 'pr' | 'push' | null, done: string) => act.mutate({ path: '/api/v1/settings', method: 'PUT', body: { delivery }, done });
+  return (
+    <div className="maprow part-f">
+      <b>How work goes out</b>
+      <div className="seg" style={{ justifySelf: 'start' }}>
+        <button className={now === undefined ? 'on' : ''} onClick={() => set(null, 'Finished work goes out by pull request when a code host is signed in')}>Pull request if signed in</button>
+        <button className={now === 'push' ? 'on' : ''} onClick={() => set('push', 'Finished work goes out pushed to the branch, as one plain commit per story')}>Push, one plain commit</button>
+      </div>
+    </div>
+  );
+}
+
 export function PartsSettings() {
   const q = useQuery({ queryKey: ['parts'], queryFn: () => api<PartsView>('/api/v1/parts') });
   const view = q.data;
@@ -191,6 +208,7 @@ export function PartsSettings() {
         <Cmd text="squad parts" />
       </div>
       <StoriesAtOnce />
+      <Delivery />
     </div>
   );
 }

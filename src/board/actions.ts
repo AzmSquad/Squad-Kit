@@ -27,7 +27,7 @@ import type { BoardMeta, Decision, ImpactCheck, Release, TechDraft, Ticket, Unpu
 import { detectStack } from './stack.js';
 import { scheduleSquad } from './schedule.js';
 import { PullRequestClash, commitTicket, commitWithoutCheck, hooksStillOwed, liveRelease, onTheRemote, pushAgain } from '../engine/release.js';
-import { CommitStopped, HookRefused, MergeClash, addWorktree, cutOffWords, git, pushedBranch, repairCopyLink, settleCopy, type HookRun } from '../engine/git.js';
+import { CommitStopped, HookRefused, MergeClash, addWorktree, mergeWouldClash, cutOffWords, git, pushedBranch, repairCopyLink, settleCopy, type HookRun } from '../engine/git.js';
 import { guardSupport, ticketGuard } from '../engine/project-guard.js';
 import { holdRelease, releaseGoingOut } from './lock.js';
 import { repoFor, reposOf } from '../engine/repos.js';
@@ -56,6 +56,8 @@ import { afterRelease, settleRelease } from './release-tidy.js';
 import { askAgent, squadWorks, waitsAtReview, whereItStands } from './at-review.js';
 import { clearJournal, readJournal } from '../engine/release-resume.js';
 import { clearStaleStop } from './stale-stop.js';
+import { copyViews } from '../engine/copies.js';
+import { repoLabel } from './parts.js';
 
 /** Every person-facing action lives here, so the board and the terminal do exactly the same thing. */
 
@@ -468,18 +470,19 @@ function testNameFor(ticket: Ticket): string {
 export function acceptProof(bp: BoardPaths, ticket: Ticket, byItself?: string, opts: { noHooks?: boolean } = {}): Ticket {
   let commit: string | null = null;
   const release = ensureDraftRelease(bp, ticket.kind === 'bug' ? 'patch' : 'minor');
-  // Accepting saves one copy. Until it saves them all, a story across parts must not lose the others without a word.
-  if (ticket.copies?.length) throw new BoardActionError(`${ticket.id} changes several parts of the product, and squad-kit cannot accept that yet. Its work is safe in its copies.`);
+  const views = copyViews(readMeta(bp), ticket);
   if (readMeta(bp).engine === 'live') {
     try {
-      repairCopy(bp, ticket);
-      // The accepted ticket's documents go in the same commit as its code, when the project keeps them in git.
-      leaveProjectFiles(bp, ticket, repoFor(readMeta(bp), ticket).base);
-      stageTicketDocs(bp, { ...ticket, stage: 'release', release: release.version, waiting: null, hookOwed: undefined });
-      // The hooks run in one place, beside everything else (saveBeside). Past here they had their say, or the person went past them.
-      const saved = takeSaved(bp, ticket.id);
-      if (saved === undefined && !opts.noHooks && hooksStillOwed(ticket)) throw new BoardActionError(`The project's own check has not looked at ${ticket.id} yet, so it is not accepted. Press Looks right on the board, or run: squad approve ${ticket.id}`);
-      commit = commitWithoutCheck(ticket) ?? saved ?? null;
+      for (const view of views) {
+        repairCopy(bp, view);
+        // The accepted ticket's documents go in the same commit as its code, when the project keeps them in git.
+        leaveProjectFiles(bp, view, repoFor(readMeta(bp), view).base);
+        stageTicketDocs(bp, { ...view, stage: 'release', release: release.version, waiting: null, hookOwed: undefined });
+        // The hooks run in one place, beside everything else (saveBeside). Past here they had their say, or the person went past them.
+        const saved = takeSaved(bp, ticket.id, views.length > 1 ? view.repo : undefined);
+        if (saved === undefined && !opts.noHooks && hooksStillOwed(view)) throw new BoardActionError(`The project's own check has not looked at ${ticket.id} yet, so it cannot be accepted. Press Looks right.`);
+        commit = commitWithoutCheck(view) ?? saved ?? commit;
+      }
     } catch (err) {
       if (err instanceof BoardActionError) throw err;
       throw actionFailed(bp, ticket.id, 'squad-kit could not save the change, so the proof stays as it is. Press Looks right to try again.', err);
@@ -490,8 +493,20 @@ export function acceptProof(bp: BoardPaths, ticket: Ticket, byItself?: string, o
   // build on it. With a code host module the live squad opens the PR and merges it.
   let merged: ReturnType<typeof mergeLocally> = null;
   if (readMeta(bp).engine === 'live' && !openPr && !ticket.mergedAt) {
+    const meta = readMeta(bp);
     try {
-      merged = mergeLocally(bp, ticket);
+      // Across parts, every merge is tried first: if one clashes, nothing moves in any of them.
+      if (views.length > 1) {
+        for (const view of views) {
+          const repo = repoFor(meta, view);
+          if (view.branch && mergeWouldClash(path.join(bp.root, repo.path), repo.base, view.branch)) throw new MergeClash(`In ${repoLabel(meta, repo.path) ?? repo.path}: ${view.branch} clashes with changes already in ${repo.base}.`);
+        }
+      }
+      for (const view of views) {
+        const one = mergeLocally(bp, view);
+        // Moved only when every one of them moved. A merge already in is skipped next time, so Try again finishes the rest.
+        merged = !merged || !one ? (merged ?? one) : { ...one, moved: merged.moved && one.moved, ...(merged.note ? { note: merged.note } : {}) };
+      }
     } catch (err) {
       // Only a real clash is a clash card. Anything else (an older git) leaves the proof waiting, with git's reason.
       if (err instanceof MergeClash) return clashed(bp, ticket.id, commit, err.message, byItself);
@@ -553,9 +568,10 @@ const savedCommits = new Map<string, string | null>();
 const saveKey = (bp: BoardPaths, id: string) => `${bp.squadDir}\0${id}`;
 
 /** The hooks' say on this ticket, for the accept right after them. Undefined when they had none. */
-function takeSaved(bp: BoardPaths, id: string): string | null | undefined {
-  const commit = savedCommits.get(saveKey(bp, id));
-  savedCommits.delete(saveKey(bp, id));
+function takeSaved(bp: BoardPaths, id: string, repo?: string): string | null | undefined {
+  const key = `${saveKey(bp, id)}${repo ? `\0${repo}` : ''}`;
+  const commit = savedCommits.get(key);
+  savedCommits.delete(key);
   return commit;
 }
 
@@ -622,12 +638,17 @@ async function saveBeside(bp: BoardPaths, ticket: Ticket, byItself?: string, sig
   savingNow.set(key, closing);
   try {
     const release = ensureDraftRelease(bp, ticket.kind === 'bug' ? 'patch' : 'minor');
-    const copy = copyForTheHooks(bp, ticket);
-    repairCopy(bp, copy);
-    leaveProjectFiles(bp, copy, repoFor(readMeta(bp), copy).base);
-    stageTicketDocs(bp, { ...copy, stage: 'release', release: release.version, waiting: null, hookOwed: undefined });
-    savedCommits.set(key, await commitTicket(copy, { ...hookRun(bp, copy), signal: signal ? AbortSignal.any([signal, closing.signal]) : closing.signal }));
-    if (copy.hookOwed) updateTicket(bp, copy.id, (t) => delete t.hookOwed);
+    const views = copyViews(readMeta(bp), ticket);
+    // Every copy is saved, with the project's own check on each, before anything goes in.
+    for (const view of views) {
+      const copy = views.length === 1 ? copyForTheHooks(bp, view) : view;
+      repairCopy(bp, copy);
+      leaveProjectFiles(bp, copy, repoFor(readMeta(bp), copy).base);
+      stageTicketDocs(bp, { ...copy, stage: 'release', release: release.version, waiting: null, hookOwed: undefined });
+      const saved = await commitTicket(copy, { ...hookRun(bp, copy), signal: signal ? AbortSignal.any([signal, closing.signal]) : closing.signal });
+      savedCommits.set(views.length === 1 ? key : `${key}\0${view.repo}`, saved);
+    }
+    if (ticket.hookOwed) updateTicket(bp, ticket.id, (t) => delete t.hookOwed);
   } catch (err) {
     // A merge was finished before the hooks looked at it: no later save would show it to them.
     if ((err instanceof CommitStopped || err instanceof HookRefused) && err.owed) updateTicket(bp, ticket.id, (t) => (t.hookOwed = true));
@@ -2021,7 +2042,7 @@ export function closeReleased(bp: BoardPaths, release: Release): void {
   for (const id of release.tickets) {
     const t = readTicket(bp, id);
     if (!t || t.stage === 'done') continue;
-    const waits = release.unpushed?.length ? release.unpushed.find((u) => u.repo === repoFor(meta, t).path) : undefined;
+    const waits = release.unpushed?.length ? release.unpushed.find((u) => copyViews(meta, t).some((v) => repoFor(meta, v).path === u.repo)) : undefined;
     updateTicket(bp, id, (x) => {
       x.live = false;
       if (waits) {

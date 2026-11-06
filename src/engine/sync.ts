@@ -212,7 +212,10 @@ export function repoTarget(bp: BoardPaths, t: Ticket): { dir: string; base: stri
 
 /** True when accepting the proof should open a pull request: the repo's code host has a module and a saved sign-in. */
 export function opensPullRequest(bp: BoardPaths, t: Ticket): boolean {
-  if (readMeta(bp).engine !== 'live' || !t.branch) return false;
+  const meta = readMeta(bp);
+  if (meta.engine !== 'live' || !t.branch) return false;
+  // A story across parts goes out together at the release. So does a project that pushes to a branch, by its own choice.
+  if (meta.delivery === 'push' || t.copies?.length) return false;
   const target = repoTarget(bp, t);
   return Boolean(target && repoHostFor(bp, target.url));
 }
@@ -420,9 +423,11 @@ export function localSetupFor(bp: BoardPaths, t: Ticket): LocalSetup | undefined
 
 export function mergeLocally(bp: BoardPaths, t: Ticket): { commit: string; base: string; moved: boolean; note?: string } | null {
   if (!t.branch) return null;
-  const repo = repoFor(readMeta(bp), t);
+  const meta = readMeta(bp);
+  const repo = repoFor(meta, t);
   const dir = path.join(projectRoot(bp), repo.path);
-  const r = mergeIntoBase(dir, repo.base, t.branch, `Merge ${t.title} (${t.id})`, squadInside(bp, dir));
+  const plain = meta.delivery === 'push';
+  const r = mergeIntoBase(dir, repo.base, t.branch, plain ? `${t.id}: ${t.title}` : `Merge ${t.title} (${t.id})`, squadInside(bp, dir), plain);
   return { commit: r.commit, base: repo.base, moved: r.moved, ...(r.note ? { note: r.note } : {}) };
 }
 

@@ -24,6 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   addresses and saves exactly what was asked and answered. Your proof says "Asked" and "It answered", with the raw answer for
   engineers. An answer that is a file, like an Excel sheet, is saved for you to open. A picture still comes first when a page
   shows it.
+- **Accept and release across parts.** Looks right saves every part and tries every merge first: if one clashes, nothing moves, and
+  one card says which. A release sends what others rely on first. If a part fails to go out, what relies on it waits, the release
+  stays open, and Push again finishes it, in order. Nothing is undone. Parts of another product in the same folder are not held back.
+- **How work goes out,** in Settings and with `squad parts --delivery`: by pull request, or pushed to the branch as one plain commit
+  per story, with the story's id first and no story branch on the remote. A story across parts goes out by push for now, with no pull
+  request.
 - **Stories at once, per project,** in Settings and with `squad parts --at-once`, for a product too heavy to run twice.
 - A part can run in Docker: squad-kit opens Docker for its own `docker compose up` only, when an engineer locked every compose
   file it names, under a project name of its own so it never touches a stack you run yourself.

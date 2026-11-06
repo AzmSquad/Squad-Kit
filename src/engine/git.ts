@@ -846,11 +846,34 @@ export function gitIsNewEnough(version: string): boolean {
  * tickets start from it. Throws a MergeClash when the branch clashes with changes already in the base; any other
  * failure (an older git, most often) throws a plain error that says so.
  */
-export function mergeIntoBase(dir: string, base: string, branch: string, message: string, keep?: string): { commit: string; moved: boolean; note?: string } {
+export function mergeIntoBase(dir: string, base: string, branch: string, message: string, keep?: string, oneCommit = false): { commit: string; moved: boolean; note?: string } {
   const baseSha = git(dir, ['rev-parse', base]);
   const branchSha = git(dir, ['rev-parse', branch]);
   // Already in the base (merged before, or nothing new): nothing to do.
   if (isAncestor(dir, branchSha, baseSha)) return { commit: baseSha, moved: true };
+  const tree = mergedTree(dir, base, branch, baseSha, branchSha);
+  // As one plain commit, the base's history has no sign of the branch, so "already in" means the merge changes nothing.
+  if (oneCommit && tree === git(dir, ['rev-parse', `${baseSha}^{tree}`])) return { commit: baseSha, moved: true };
+  const commit = git(dir, [...authorArgs(dir), 'commit-tree', tree, '-p', baseSha, ...(oneCommit ? [] : ['-p', branchSha]), '-m', message]);
+  return { commit, ...moveBase(dir, base, commit, keep) };
+}
+
+/** Whether merging a branch would clash. Nothing moves: it is for looking at every repo before any of them changes. */
+export function mergeWouldClash(dir: string, base: string, branch: string): boolean {
+  const baseSha = git(dir, ['rev-parse', base]);
+  const branchSha = git(dir, ['rev-parse', branch]);
+  if (isAncestor(dir, branchSha, baseSha)) return false;
+  try {
+    mergedTree(dir, base, branch, baseSha, branchSha);
+    return false;
+  } catch (err) {
+    if (err instanceof MergeClash) return true;
+    throw err;
+  }
+}
+
+/** The files as they would be after the merge, with nothing moved. A clash says so. */
+function mergedTree(dir: string, base: string, branch: string, baseSha: string, branchSha: string): string {
   let tree: string;
   try {
     tree = execFileSync('git', gitArgs(['merge-tree', '--write-tree', baseSha, branchSha]), { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024, env: gitEnv() }).split('\n')[0]!.trim();
@@ -867,8 +890,7 @@ export function mergeIntoBase(dir: string, base: string, branch: string, message
         : `git could not merge ${branch} into ${base} (git ${version ?? 'not found'}): ${detail}`,
     );
   }
-  const commit = git(dir, [...authorArgs(dir), 'commit-tree', tree, '-p', baseSha, '-p', branchSha, '-m', message]);
-  return { commit, ...moveBase(dir, base, commit, keep) };
+  return tree;
 }
 
 /**
