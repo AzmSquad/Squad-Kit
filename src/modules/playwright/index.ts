@@ -413,7 +413,8 @@ export function wrapBrowser(browser: PwBrowser): Browser {
         ignoreHTTPSErrors: true,
       });
       // Only the app opens at the top of the page. Its fonts, scripts and pictures may load from the internet, but
-      // nothing else on this computer or a private network: not the person's other apps, not the board itself.
+      // nothing else on this computer or a private network, past the other parts of its own product: not the person's
+      // other apps, not the board itself.
       const stopped: { at: string | null } = { at: null };
       await context.route('**/*', async (route) => {
         const req = route.request();
@@ -428,7 +429,7 @@ export function wrapBrowser(browser: PwBrowser): Browser {
           stopped.at = url;
           return route.abort('blockedbyclient').catch(() => undefined);
         }
-        if (blockedFrom(url, o.origin)) return route.abort('blockedbyclient').catch(() => undefined);
+        if (blockedFrom(url, o.origin, o.also)) return route.abort('blockedbyclient').catch(() => undefined);
         return route.continue().catch(() => undefined);
       });
       const page = await context.newPage();

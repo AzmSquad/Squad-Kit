@@ -131,6 +131,11 @@ describe("squad-kit's own Playwright", () => {
     expect(blockedFrom('http://localhost:5000/', 'http://127.0.0.1:5000')).toBe(false);
     expect(blockedFrom('http://localhost:5001/', 'http://127.0.0.1:5000')).toBe(true);
     expect(blockedFrom('data:text/plain,hi', 'http://127.0.0.1:5000')).toBe(false);
+    // The other parts of the same product: a web app calls its API. Nothing else on this computer.
+    expect(blockedFrom('http://localhost:5180/api/x', 'http://localhost:3000', ['http://localhost:5180'])).toBe(false);
+    expect(blockedFrom('http://127.0.0.1:5180/api/x', 'http://localhost:3000', ['http://localhost:5180'])).toBe(false);
+    expect(blockedFrom('http://localhost:4141/', 'http://localhost:3000', ['http://localhost:5180'])).toBe(true);
+    expect(blockedFrom('http://10.0.0.1:5180/', 'http://localhost:3000', ['http://localhost:5180'])).toBe(true);
   });
 });
 

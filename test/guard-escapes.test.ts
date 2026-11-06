@@ -165,6 +165,14 @@ describe.runIf(onMac)('caches the person\'s own tools run from', () => {
     expect(r.said.split('\n')).toHaveLength(6);
     expect(fs.existsSync(path.join(cache, 'xdg', 'tool'))).toBe(true);
   });
+
+  it("pnpm's store goes to the cache: in the copy, it would be thousands of files a commit could take", async () => {
+    const cache = path.join(base, 'cache');
+    fs.mkdirSync(cache);
+    const r = await run(`printf '%s\\n' "$pnpm_config_store_dir" "$npm_config_store_dir"`, guardFor({ cache }));
+    expect(r.code).toBe(0);
+    expect(r.said.trim().split('\n')).toEqual([path.join(cache, 'pnpm-store'), path.join(cache, 'pnpm-store')]);
+  });
 });
 
 describe.runIf(onMac)('a project\'s own browsers', () => {

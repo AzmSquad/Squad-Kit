@@ -494,6 +494,8 @@ async function snapshotOf(page: BrowserPage): Promise<string> {
 export interface PageRun {
   /** The app's origin on this computer. */
   origin: string;
+  /** The other parts of the same product, which a page may call. */
+  also?: string[];
   stepMs?: number;
   /** When the whole call must end, as Date.now() counts. */
   deadline: number;
@@ -510,7 +512,7 @@ async function walk(browser: Browser, ask: ShotAsk, c: PageRun): Promise<{ page:
   try {
     // No step runs past the call's own end.
     const left = () => Math.max(1000, Math.min(stepMs, c.deadline - Date.now()));
-    page = await within(browser.page({ origin: c.origin, ...SIZES[phone ? 'phone' : 'desktop'], phone }), left(), 'opening a page');
+    page = await within(browser.page({ origin: c.origin, ...(c.also?.length ? { also: c.also } : {}), ...SIZES[phone ? 'phone' : 'desktop'], phone }), left(), 'opening a page');
     let status = await open(page, c.origin, ask.page, left());
     stillInApp(page, c.origin);
     for (const [i, raw] of (ask.steps ?? []).entries()) {

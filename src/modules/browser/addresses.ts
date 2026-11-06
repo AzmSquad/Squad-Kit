@@ -84,8 +84,11 @@ export function isAppAddress(url: string, origin: string): boolean {
   return loop(u) && loop(o) && u.protocol === o.protocol && u.port === o.port;
 }
 
-/** True when the browser may not load `url` while it shows the app at `origin`: on this computer or a private network, and not the app. */
-export function blockedFrom(url: string, origin: string): boolean {
+/**
+ * True when the browser may not load `url` while it shows the app at `origin`: on this computer or a private network,
+ * and neither the app nor `also`, the other parts of the same product, such as the API its web app calls.
+ */
+export function blockedFrom(url: string, origin: string, also: string[] = []): boolean {
   let u: URL;
   try {
     u = new URL(url);
@@ -93,5 +96,5 @@ export function blockedFrom(url: string, origin: string): boolean {
     return false;
   }
   if (!/^(https?|wss?):$/.test(u.protocol)) return false;
-  return !isAppAddress(url, origin) && isLocalHost(u.hostname);
+  return !isAppAddress(url, origin) && !also.some((a) => isAppAddress(url, a)) && isLocalHost(u.hostname);
 }

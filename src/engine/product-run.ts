@@ -4,7 +4,7 @@ import { partsOf, partsToRun } from '../board/parts.js';
 import { readMeta, type BoardPaths } from '../board/store.js';
 import type { BoardMeta, ProductPart, RepoInfo, Ticket } from '../board/types.js';
 import { AddressTaken, CHECK_SILENT_MS, runCommand, startApp, tail, type RunningApp } from './checks.js';
-import { composeRun, dockerGuard } from './compose-run.js';
+import { DOCKER_STOP_MS, DOCKER_WAIT_MS, composeRun, dockerGuard } from './compose-run.js';
 import { copiesOf } from './copies.js';
 import { fillOwnCopy } from './local-files.js';
 import { leaveProduct, waitForProduct, type HoldKind, type ProductHold } from './product-lock.js';
@@ -19,9 +19,6 @@ import { dependencyPrint, updateCopy } from './run-app.js';
  */
 
 const SETUP_MS = 20 * 60_000;
-/** The first build of a stack takes far longer than an app's start. */
-const DOCKER_WAIT_MS = 20 * 60_000;
-const DOCKER_STOP_MS = 2 * 60_000;
 
 /** A part squad-kit starts, and where. */
 export interface ProductPlace {
@@ -106,6 +103,8 @@ async function readyMainCopy(bp: BoardPaths, t: Ticket, place: ProductPlace, sig
   const guard = guardOf(bp, t, dir);
   const r = await runCommand(dir, setup, SETUP_MS, { silentMs: CHECK_SILENT_MS, ...(signal ? { signal } : {}), ...(guard ? { guard } : {}) });
   if (!r.ok) throw new ProductError(dockerBlockedWords(r.output, guard) ?? `squad-kit could not set up ${place.part.name}.`, `${setup}\n${tail(r.output, 30)}`);
+  // A setup can write the same files, like cp .env.example .env.dev: the values kept for stories go back over them.
+  fillOwnCopy(bp, repo.path, dir);
   fs.writeFileSync(mark, print);
 }
 

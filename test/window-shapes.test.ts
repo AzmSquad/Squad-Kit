@@ -69,6 +69,36 @@ async function tester() {
 const refused = (a: { isError?: boolean; content: unknown[] }) => a.isError === true && textOf(a as never).startsWith('squad-kit refused this');
 const wrongShape = (a: { isError?: boolean; content: unknown[] }) => a.isError === true && textOf(a as never).startsWith('This call is in the wrong shape, so squad-kit did nothing');
 
+describe('a page of a product', () => {
+  it('may call the other parts of the product, and only when there are any', async () => {
+    const app = await tinyApp();
+    const cwd = path.join(tmp, 'copy');
+    fs.mkdirSync(cwd, { recursive: true });
+    const w = new AgentWindow({
+      ticket: 'RO-12',
+      step: 'proof',
+      who: 'Tester',
+      tools: ALL_TOOLS,
+      app: { cwd, start: app.start, url: app.url, reach: () => [app.url, 'http://localhost:5180/api', 'https://example.com/'] },
+      proofDir: path.join(tmp, 'proof'),
+      prefix: 'ro-12-after',
+      say: (t) => lines.push(t),
+      limits: { appWaitMs: 15_000 },
+    });
+    openWindow(w);
+    opened.push(w);
+    const access = await windowAccess(w);
+    expect((await callTool(access, 'take_screenshots', { shots: [{ page: '/' }] })).isError).toBeUndefined();
+    expect((await callTool(access, 'look_at_page', { page: '/' })).isError).toBeUndefined();
+    const own = new URL(app.url).origin;
+    expect(fake.also).toEqual([[own, 'http://localhost:5180'], [own, 'http://localhost:5180']]);
+
+    const { access: alone } = await tester();
+    await callTool(alone, 'look_at_page', { page: '/' });
+    expect(fake.also.at(-1)).toBeUndefined();
+  });
+});
+
 describe("the exact calls from RO-8, RO-12 and RO-13's log", () => {
   it('look_at_page with "path" instead of "page" is taken as the page, with the same checks', async () => {
     const { w, access } = await tester();

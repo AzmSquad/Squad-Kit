@@ -70,7 +70,7 @@ const auto = await import('../src/board/auto.js');
 const { withProblem } = await import('../src/board/problem.js');
 const { LiveSquad } = await import('../src/engine/live.js');
 const { addWorktree } = await import('../src/engine/git.js');
-const { MAX_PROOF_ROUNDS, MAX_RETAKES, brokenStop, checkVerdicts, drawnFromPicture, notShownStop, together } = await import('../src/engine/proof-verdict.js');
+const { MAX_PROOF_ROUNDS, MAX_RETAKES, brokenStop, checkVerdicts, criterionText, drawnFromPicture, notShownStop, together } = await import('../src/engine/proof-verdict.js');
 const P = await import('../src/engine/prompts.js');
 
 type Squad = { proof(id: string): Promise<void>; step(id: string, phase: string): Promise<void> };
@@ -602,6 +602,21 @@ describe('the proof shows each "done when" is met', () => {
     expect(t.waiting?.kind).toBe('stuck');
     expect(t.stuck?.options[0]).toMatchObject({ do: 'retry', name: 'Take the screenshots again' });
     expect(t.squad ?? null).toBeNull();
+  });
+});
+
+describe('two "done when" that end in the same words', () => {
+  it('each has its own row, told apart by what comes before', () => {
+    const t = {
+      criteria: [
+        { given: 'an admin on the first evaluation', when: 'they select a violation', then: 'the tab does not appear' },
+        { given: 'a user who is no admin', when: 'they select a violation', then: 'the tab does not appear' },
+        { given: 'an admin on a later one', when: 'they select a violation', then: 'the tab appears' },
+      ],
+    };
+    expect(criterionText(t, 1)).toBe('The tab does not appear (an admin on the first evaluation, they select a violation)');
+    expect(criterionText(t, 2)).toBe('The tab does not appear (a user who is no admin, they select a violation)');
+    expect(criterionText(t, 3)).toBe('The tab appears');
   });
 });
 

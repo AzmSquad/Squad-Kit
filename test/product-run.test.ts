@@ -227,6 +227,26 @@ describe('running it', () => {
     expect(await get(webPort)).toBe('web main KEY=TEST');
   });
 
+  it('a setup that writes a local file never replaces the values kept for stories', async () => {
+    fs.writeFileSync(path.join(root, 'web-ui', '.env.dev'), 'KEY=REAL\n');
+    fs.writeFileSync(path.join(root, 'api-server', '.env.dev'), 'KEY=REAL\n');
+    addLocalFile(bp, 'web-ui', '.env.dev');
+    addLocalFile(bp, 'api-server', '.env.dev');
+    for (const repo of ['web-ui', 'api-server']) {
+      const f = storyFile(bp, { repo, path: '.env.dev' });
+      fs.mkdirSync(path.dirname(f), { recursive: true });
+      fs.writeFileSync(f, 'KEY=TEST\n');
+    }
+    const setup = 'node -e "require(\'fs\').writeFileSync(\'.env.dev\',\'KEY=EXAMPLE\\n\')"';
+    const meta = readMeta(bp);
+    writeMeta(bp, { ...meta, repos: meta.repos!.map((r) => ({ ...r, commands: { ...r.commands, setup } })) });
+    story();
+    const t = await squad().workspace('AP-1');
+    expect(fs.readFileSync(path.join(t.worktree!, '.env.dev'), 'utf8')).toBe('KEY=TEST\n');
+    await startProduct(bp, t, 'AP-1', 'story');
+    expect(await get(webPort)).toBe('web main KEY=TEST');
+  });
+
   it('a copy of main sets up once, and again when what it needs changes', async () => {
     const meta = readMeta(bp);
     writeMeta(bp, { ...meta, repos: meta.repos!.map((r) => (r.path === 'web-ui' ? { ...r, commands: { ...r.commands, setup: 'node -e "require(\'fs\').appendFileSync(\'setup-ran.txt\',\'x\')"' } } : r)) });
@@ -336,6 +356,12 @@ describe('one at a time', () => {
 });
 
 describe("the agent's window", () => {
+  it('a page may call every part that runs, which is how a web app reaches its API', async () => {
+    story();
+    const s = squad() as unknown as { productApp(id: string): { reach?: () => string[] } };
+    expect(s.productApp('AP-1').reach?.().sort()).toEqual([`http://localhost:${apiPort}`, `http://localhost:${webPort}`].sort());
+  });
+
   it('start_app brings up the whole product, and it all stops with the run', async () => {
     story();
     const s = squad();
@@ -442,5 +468,55 @@ describe('Your apps', () => {
     expect(productHold(bp)?.holder).toBe('Your apps');
     await apps.stop('API');
     expect(productHold(bp)).toBeNull();
+  });
+
+  it('a part in Docker starts through the one opening, under its own name, and Stop keeps its data', async () => {
+    const bin = path.join(root, 'fake-docker');
+    const said = path.join(root, 'docker-said.txt');
+    const socket = path.join(root, 'docker.sock');
+    fs.mkdirSync(bin);
+    fs.writeFileSync(socket, '');
+    fs.writeFileSync(path.join(bin, 'docker'), `#!/bin/sh\necho "$COMPOSE_PROJECT_NAME $*" >> "${said}"\ncase " $* " in *" up "*) exec node server.js ;; esac\n`, { mode: 0o755 });
+    const api = path.join(root, 'api-server');
+    fs.writeFileSync(path.join(api, 'docker-compose.yml'), 'services: {}\n');
+    sh('git add -A && git -c user.name=t -c user.email=t@t commit -qm compose', api);
+    const meta = readMeta(bp);
+    writeMeta(bp, {
+      ...meta,
+      lockedFiles: [{ repo: 'api-server', path: 'docker-compose.yml' }],
+      repos: meta.repos!.map((r) => (r.path === 'api-server' ? { ...r, commands: { ...r.commands, start: 'docker compose up --build' } } : r)),
+    });
+    const was = { path: process.env.PATH, host: process.env.DOCKER_HOST };
+    process.env.PATH = `${bin}${path.delimiter}${was.path}`;
+    process.env.DOCKER_HOST = `unix://${socket}`;
+    try {
+      const apps = new AppRunner(bp);
+      apps.start('API');
+      expect(await until(async () => (await get(apiPort)) !== null, 20_000)).toBe(true);
+      await apps.stop('API');
+      const lines = fs.readFileSync(said, 'utf8').trim().split('\n');
+      expect(lines[0]).toMatch(/^squad-[0-9a-f]+ compose up --build$/);
+      expect(lines.at(-1)).toMatch(/^squad-[0-9a-f]+ compose stop$/);
+    } finally {
+      process.env.PATH = was.path;
+      if (was.host === undefined) delete process.env.DOCKER_HOST;
+      else process.env.DOCKER_HOST = was.host;
+    }
+  });
+
+  it('a setup that writes a local file gives back the person own', async () => {
+    fs.writeFileSync(path.join(root, 'web-ui', '.env.dev'), 'KEY=REAL\n');
+    addLocalFile(bp, 'web-ui', '.env.dev');
+    const setup = 'node -e "require(\'fs\').writeFileSync(\'.env.dev\',\'KEY=EXAMPLE\\n\')"';
+    const meta = readMeta(bp);
+    writeMeta(bp, { ...meta, repos: meta.repos!.map((r) => (r.path === 'web-ui' ? { ...r, commands: { ...r.commands, setup } } : r)) });
+    const apps = new AppRunner(bp);
+    apps.start('API');
+    expect(await until(async () => (await get(apiPort)) !== null, 20_000)).toBe(true);
+    apps.start('Web app');
+    expect(await until(async () => (await get(webPort)) !== null, 20_000)).toBe(true);
+    expect(await get(webPort)).toBe('web main KEY=REAL');
+    await apps.stop('Web app');
+    await apps.stop('API');
   });
 });

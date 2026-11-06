@@ -13,6 +13,10 @@ import type { GuardSpec } from './project-guard.js';
  * compose would otherwise take the folder's name, the same as the person's own stack, and take over its containers.
  */
 
+/** A first build can take a long time, and stopping a database should not be rushed. */
+export const DOCKER_WAIT_MS = 20 * 60_000;
+export const DOCKER_STOP_MS = 2 * 60_000;
+
 export interface ComposeRun {
   /** The plain command to run: in the foreground, so squad-kit hears what it prints and when it ends. */
   command: string;

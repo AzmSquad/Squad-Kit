@@ -73,9 +73,10 @@ export interface BrowserPage {
 export interface Browser {
   /**
    * A fresh page, with nothing kept from another one, where only `origin` may open at the top, and nothing on this
-   * computer or a private network but `origin` may load at all (browser/addresses.ts).
+   * computer or a private network but `origin` and `also`, the other parts of the same product, may load at all
+   * (browser/addresses.ts).
    */
-  page(o: { origin: string; width: number; height: number; phone?: boolean }): Promise<BrowserPage>;
+  page(o: { origin: string; also?: string[]; width: number; height: number; phone?: boolean }): Promise<BrowserPage>;
   close(): Promise<void>;
 }
 

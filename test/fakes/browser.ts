@@ -31,6 +31,8 @@ export interface FakeBrowser {
   log: string[];
   /** Window sizes of the pages opened. */
   sizes: { width: number; height: number }[];
+  /** What each page opened may call past the app itself. */
+  also: (string[] | undefined)[];
 }
 
 export function targetKey(t: BrowserTarget): string {
@@ -51,6 +53,7 @@ export function fakeBrowser(app: Record<string, FakeScreen>, opts: { fail?: Erro
     open: 0,
     log: [],
     sizes: [],
+    also: [],
     module: {
       name: 'fake',
       label: 'Fake browser',
@@ -67,6 +70,7 @@ export function fakeBrowser(app: Record<string, FakeScreen>, opts: { fail?: Erro
     async page(o) {
       if (opts.pageMs) await new Promise((r) => setTimeout(r, opts.pageMs));
       fake.sizes.push({ width: o.width, height: o.height });
+      fake.also.push(o.also);
       let at = 'about:blank';
       const screen = () => app[new URL(at).pathname];
       const page: BrowserPage = {

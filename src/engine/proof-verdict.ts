@@ -61,7 +61,12 @@ export interface OpenRow {
 /** The "then" of a "done when", by its number from 1, or a criterion the person added. */
 export function criterionText(t: Pick<Ticket, 'criteria' | 'notes'>, n: number): string | null {
   const c = t.criteria?.[n - 1];
-  if (c) return `${c.then.charAt(0).toUpperCase()}${c.then.slice(1)}`;
+  if (c) {
+    const text = `${c.then.charAt(0).toUpperCase()}${c.then.slice(1)}`;
+    // Two can end in the same words. Each needs its own row, or one row would stand for both and one verdict would be lost.
+    const alike = t.criteria!.some((o, i) => i !== n - 1 && o.then.trim() === c.then.trim());
+    return alike ? `${text} (${c.given}, ${c.when})` : text;
+  }
   const added = (t.notes ?? []).filter((x) => x.kind === 'criterion')[n - 1 - (t.criteria?.length ?? 0)];
   return added?.text.trim() || null;
 }

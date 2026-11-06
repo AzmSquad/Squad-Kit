@@ -497,10 +497,12 @@ export function spawnProject(command: string, o: SpawnProjectOptions): ChildProc
 /**
  * The caches a command's tools would keep in `~/.cache` or `~/Library/Caches`, which stay read only: in the copy's own. A
  * Mac's tools look in their own places, so they are named one by one. The first build of a ticket downloads again.
+ * pnpm's store has to be named too: it cannot link from its usual store here, so it would make a .pnpm-store in the copy,
+ * thousands of files a commit could take. pnpm reads the first name from version 11, and the second before it.
  */
 function ownCacheEnv(cache: string): Record<string, string> {
   const at = (p: string) => path.join(cache, p);
-  return { XDG_CACHE_HOME: at('xdg'), GOCACHE: at('go-build'), PIP_CACHE_DIR: at('pip'), POETRY_CACHE_DIR: at('poetry'), DENO_DIR: at('deno'), npm_config_devdir: at('node-gyp'), PUPPETEER_CACHE_DIR: at('puppeteer'), electron_config_cache: at('electron') };
+  return { XDG_CACHE_HOME: at('xdg'), GOCACHE: at('go-build'), PIP_CACHE_DIR: at('pip'), POETRY_CACHE_DIR: at('poetry'), DENO_DIR: at('deno'), npm_config_devdir: at('node-gyp'), PUPPETEER_CACHE_DIR: at('puppeteer'), electron_config_cache: at('electron'), pnpm_config_store_dir: at('pnpm-store'), npm_config_store_dir: at('pnpm-store') };
 }
 
 /**

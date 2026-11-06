@@ -7,6 +7,7 @@ import { findApp, isUp, projectApps, type ProjectApp } from '../board/apps.js';
 import { readMeta, type BoardPaths } from '../board/store.js';
 import type { RepoInfo } from '../board/types.js';
 import { runCommand, tail } from './checks.js';
+import { DOCKER_STOP_MS, DOCKER_WAIT_MS, composeRun, dockerGuard } from './compose-run.js';
 import { dockerBlockedWords, guardSupport, projectGuardFor, spawnProject, type GuardSpec } from './project-guard.js';
 import { git, latestBase } from './git.js';
 import { KILL_AFTER_MS, OWN_GROUP, endGroup, endTree, takenOver } from './process-group.js';
@@ -101,6 +102,8 @@ interface Run {
   settled: Promise<void>;
   /** Resolves once the app's program has exited. */
   exited: Promise<void>;
+  /** A part in Docker: this stops its stack and keeps its data, once its program is gone. */
+  afterStop?: () => Promise<unknown>;
 }
 
 /** A start that went wrong before anything of the app ran; the exact error is for engineers. */
@@ -553,8 +556,8 @@ export class AppRunner {
     }
     run.commit = copy.commit;
     if (signal.aborted) return;
+    const named = (readMeta(this.bp).localFiles ?? []).filter((f) => f.repo === repo.path).map((f) => f.path);
     try {
-      const named = (readMeta(this.bp).localFiles ?? []).filter((f) => f.repo === repo.path).map((f) => f.path);
       const env = copyEnvFiles(path.join(this.bp.root, repo.path), dir, named);
       if (env.length) this.keep(app.repo, `Copied from your project folder: ${env.join(', ')}\n`);
     } catch (err) {
@@ -593,7 +596,24 @@ export class AppRunner {
       // One plain sentence; the command and what it printed are behind "See what failed", for engineers.
       if (!r.ok) return this.fail(run, dockerBlockedWords(r.output, this.guardFor(dir)) ?? `squad-kit could not set up ${app.name}.`, { detail: `${setup}\n${tail(r.output, 30)}` });
       this.record(app.repo, (rec) => (rec.setupFor = deps));
+      // A setup can write the same files, like cp .env.example .env.dev: the person's own go back over them.
+      try {
+        copyEnvFiles(path.join(this.bp.root, repo.path), dir, named);
+      } catch (err) {
+        return this.fail(run, "squad-kit could not copy this project's settings into its own copy.", { detail: `Could not copy your .env files: ${(err as Error).message}` });
+      }
     }
+
+    // A part that runs in Docker gets the one opening compose-run.ts allows, as it does for a story.
+    const compose = composeRun(readMeta(this.bp), repo.path, command, dir, this.bp.root);
+    if (compose && 'why' in compose) return this.fail(run, compose.why);
+    const ownGuard = this.guardFor(dir);
+    const guard = compose && ownGuard ? dockerGuard(ownGuard, compose) : ownGuard;
+    if (compose) {
+      command = compose.command;
+      run.afterStop = () => runCommand(dir, compose.stop, DOCKER_STOP_MS, { ...(guard ? { guard } : {}), env: compose.env });
+    }
+    const waitMs = this.opts.waitMs ?? (compose ? DOCKER_WAIT_MS : APP_WAIT_MS);
 
     run.step = 'start';
     this.keep(app.repo, `$ ${command}\n`);
@@ -603,8 +623,9 @@ export class AppRunner {
       BROWSER: 'none',
       ...(url && (url !== app.url || /\$\{?PORT\b|%PORT%/.test(command)) ? { PORT: String(portOf(url)) } : {}),
       ...moved,
+      ...(compose ? compose.env : {}),
     };
-    const child = spawnProject(command, { cwd: dir, env, ...(this.guardFor(dir) ? { guard: this.guardFor(dir)! } : {}) });
+    const child = spawnProject(command, { cwd: dir, env, ...(guard ? { guard } : {}) });
     run.child = child;
     let printed = '';
     const heard = (chunk: Buffer) => {
@@ -635,12 +656,12 @@ export class AppRunner {
     if (child.pid) this.record(app.repo, (rec) => Object.assign(rec, { pid: child.pid, url, commit: copy.commit, startedAt: run.startedAt }));
 
     // Running only once the address answers.
-    const until = Date.now() + (this.opts.waitMs ?? APP_WAIT_MS);
+    const until = Date.now() + waitMs;
     while (!signal.aborted) {
       if (ended) {
         const taken = busyIn(printed);
         if (taken) return this.fail(run, ...(await this.busyPort(app, taken)));
-        return this.fail(run, dockerBlockedWords(printed, this.guardFor(dir)) ?? 'It stopped while starting.', { detail: `${command}\n${tail(printed, 30)}` });
+        return this.fail(run, dockerBlockedWords(printed, guard) ?? 'It stopped while starting.', { detail: `${command}\n${tail(printed, 30)}` });
       }
       url ??= addressIn(printed);
       if (url) run.address = url;
@@ -653,8 +674,9 @@ export class AppRunner {
       if (Date.now() > until) {
         endGroup(child);
         await Promise.race([run.exited, sleep(KILL_AFTER_MS + 1000)]);
-        const mins = Math.round((this.opts.waitMs ?? APP_WAIT_MS) / 60_000);
-        const wait = mins >= 1 ? `${mins} minute${mins === 1 ? '' : 's'}` : `${Math.round((this.opts.waitMs ?? APP_WAIT_MS) / 1000)} seconds`;
+        await run.afterStop?.();
+        const mins = Math.round(waitMs / 60_000);
+        const wait = mins >= 1 ? `${mins} minute${mins === 1 ? '' : 's'}` : `${Math.round(waitMs / 1000)} seconds`;
         const printedLast = tail(printed, 30);
         return url
           ? this.fail(run, `It did not answer within ${wait}.`, { detail: `${command}\nIt did not answer at ${url}.\n${printedLast}` })
@@ -708,6 +730,7 @@ export class AppRunner {
         }
       }
       await run.settled;
+      await run.afterStop?.();
       run.state = 'stopped';
       delete run.error;
       delete run.busy;

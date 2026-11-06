@@ -1098,9 +1098,13 @@ export class LiveSquad {
   }
 
   /** On a product, a window's app keeps its address, and what it relies on starts first and stops with it. */
-  private productApp(id: string): { run?: () => Promise<RunningApp>; after?: () => void } {
+  private productApp(id: string): { run?: () => Promise<RunningApp>; after?: () => void; reach?: () => string[] } {
     if (!runsAsProduct(this.meta())) return {};
-    return { run: () => this.startProductFor(id), after: () => stopProduct(this.bp, id) };
+    return {
+      run: () => this.startProductFor(id),
+      after: () => stopProduct(this.bp, id),
+      reach: () => productPlan(this.bp, this.meta(), readTicket(this.bp, id)!).places.map((p) => p.url),
+    };
   }
 
   /** The story's whole product, up and running, and the part a person opens. It waits its turn, and says so. */
@@ -2621,6 +2625,8 @@ export class LiveSquad {
     this.log('info', `Setting up the copy: ${setup}`, id);
     const r = await runCommand(dir, setup, 20 * 60_000, this.guardedWatch(id, dir));
     this.goOn(id);
+    // A setup can write the same files, like cp .env.example .env.dev: the values kept for stories go back over them.
+    this.placeLocalFiles(id, dir, repo.path);
     // A new project has nothing to set up yet; the Builder creates it in this ticket.
     if (!r.ok && !meta.scan?.empty) {
       // Only an engineer can allow Docker. Anything else is technical, so it never stops the story for the person.

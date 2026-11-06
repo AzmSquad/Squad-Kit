@@ -98,6 +98,8 @@ export interface WindowApp {
   run?(): Promise<RunningApp>;
   /** And this stops all of it. */
   after?(): void;
+  /** The addresses of the product's parts. A page may call these, as a web app calls its API. */
+  reach?(): string[];
 }
 
 /** The project's checks an agent may ask squad-kit to run. */
@@ -789,7 +791,7 @@ export class AgentWindow {
           continue;
         }
         this.s.beat?.();
-        const r = await shootOne(this.session, ask, { origin, stepMs: this.s.limits?.stepMs ?? STEP_MS, deadline, signal: this.signal });
+        const r = await shootOne(this.session, ask, { origin, ...this.alsoReach(), stepMs: this.s.limits?.stepMs ?? STEP_MS, deadline, signal: this.signal });
         if (this.over) break;
         if ('png' in r) {
           const file = this.save(r.png);
@@ -839,7 +841,7 @@ export class AgentWindow {
     if (notReady) return notReady;
     const ask: ShotAsk = { page: String(fields.page).trim(), steps: (fields.steps as BrowserStep[]) ?? [], ...(fields.size ? { size: fields.size as ShotSize } : {}) };
     try {
-      const r = await lookAt(this.session, ask, { origin, stepMs: this.s.limits?.stepMs ?? STEP_MS, deadline: by(clock, SHOOT_SHARE), signal: this.signal });
+      const r = await lookAt(this.session, ask, { origin, ...this.alsoReach(), stepMs: this.s.limits?.stepMs ?? STEP_MS, deadline: by(clock, SHOOT_SHARE), signal: this.signal });
       if (this.over) return error(STOPPED_CALL);
       if ('why' in r) return error(this.failedText(1, ask, r));
       return ok(`The page is at ${r.page}.${statusWords(r.status)}\nWhat it shows (its accessibility tree: roles, names and text), cut short:\n${r.snapshot || '(nothing readable)'}`);
@@ -866,6 +868,12 @@ export class AgentWindow {
       return error(`squad-kit's browser could not start: ${shotsErrorDetail(err).slice(0, 600)}. Call i_am_stuck so squad-kit tries to set it up again.`);
     }
     throw err;
+  }
+
+  /** What a page may call past the app itself: the other parts of its product. */
+  private alsoReach(): { also?: string[] } {
+    const also = (this.s.app?.reach?.() ?? []).map(appOrigin).filter((o): o is string => Boolean(o));
+    return also.length ? { also } : {};
   }
 
   /** The app's origin, started first when it is not running and waited for until `at`; or the error for the agent. */
