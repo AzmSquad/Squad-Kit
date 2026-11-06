@@ -9,7 +9,7 @@ import { openBoard } from '../board/move.js';
 import type { BoardMeta } from '../board/types.js';
 import { AI_TOOLS } from '../modules/registry.js';
 import { currentBranch, ensureRepo, gitEnv, isRepo, remotes } from './git.js';
-import { findNestedRepos } from './repos.js';
+import { workspaceRepos } from './repos.js';
 import { projectRoot } from './live.js';
 import { ensureAgents } from './agents.js';
 import { hideSquadFromGit } from './project-git.js';
@@ -161,14 +161,14 @@ export function ensureLiveBoard(bp: BoardPaths, projectName: string): BoardSetup
   }
   const did: string[] = [];
   const started = Date.now();
-  // A workspace of separate code repos needs no repo of its own; a plain folder becomes one.
-  const nested = findNestedRepos(root);
+  // A workspace of separate code repos needs no repo of its own, and one it has stays as it is; a plain folder becomes one.
+  const nested = workspaceRepos(root);
   const hadRepo = isRepo(root);
   const hadFiles = fs.readdirSync(root).some((f) => f !== SQUAD_DIR);
   // squad-kit 0.x kept stories and plans in .squad/; they stay where they are.
   const older = ['stories', 'plans'].some((d) => fs.existsSync(path.join(bp.squadDir, d)));
   const kind: FolderKind = older ? 'older' : nested.length ? 'repos' : hadRepo ? (hadFiles ? 'repo' : 'empty') : hadFiles ? 'files' : 'empty';
-  if (hadRepo || nested.length === 0) ensureRepo(root, projectName);
+  if (nested.length === 0) ensureRepo(root, projectName);
   // A freshly cloned empty repo has nothing to branch from yet, so it gets its first commit too.
   for (const r of nested) ensureRepo(path.join(root, r.path), projectName);
   did.push(
@@ -210,6 +210,7 @@ export function ensureLiveBoard(bp: BoardPaths, projectName: string): BoardSetup
     lessons: [],
     commands: {},
     git: { base: currentBranch(root), remote: remotes(root)[0] ?? '' },
+    ...(nested.length ? { repos: nested } : {}),
     scan: { status: 'pending' },
     parallel: 2,
     // The first run, step by step: the person follows it on the setup page, the board and in the terminal.

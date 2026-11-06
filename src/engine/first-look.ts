@@ -4,7 +4,7 @@ import yaml from 'js-yaml';
 import { SQUAD_DIR } from '../core/paths.js';
 import type { FolderKind } from '../board/setup-state.js';
 import { git, isRepo } from './git.js';
-import { findNestedRepos } from './repos.js';
+import { LANG, workspaceRepos } from './repos.js';
 
 /**
  * Add project says what it found before the person confirms: existing code with git, code without git, an empty
@@ -38,34 +38,14 @@ export interface FirstLook {
 const NOISE = new Set(['node_modules', 'dist', 'build', 'coverage', '__pycache__', 'vendor', 'target', 'bin', 'obj', 'venv', SQUAD_DIR]);
 const MAX_FILES = 5000;
 
-const LANG: Record<string, string> = {
-  '.py': 'Python',
-  '.ts': 'TypeScript',
-  '.tsx': 'TypeScript',
-  '.js': 'JavaScript',
-  '.jsx': 'JavaScript',
-  '.mjs': 'JavaScript',
-  '.vue': 'JavaScript',
-  '.cs': 'C#',
-  '.java': 'Java',
-  '.kt': 'Kotlin',
-  '.go': 'Go',
-  '.rb': 'Ruby',
-  '.php': 'PHP',
-  '.rs': 'Rust',
-  '.swift': 'Swift',
-  '.dart': 'Dart',
-  '.html': 'HTML',
-};
-
 const WEB_FILE = /\.(html?|vue|jsx|tsx|svelte|cshtml|razor)$/i;
 const WEB_DEPS = /"(react|vue|@angular\/core|next|nuxt|svelte|express|hono|fastify|koa|@nestjs\/core)"/;
 const WEB_PY = /^(flask|django|fastapi|starlette|bottle|tornado)\b/im;
 const TEST_FILE = /(^|\/)(tests?|__tests__|specs?|e2e)\/|[._-](test|spec)\.[a-z]+$|(^|\/)test_[^/]+\.py$|_test\.(go|py)$|Tests?\.(cs|java|kt)$/i;
 
-/** The folder's own files, as git knows them, or as found on disk when it is not in git. At most 5000. */
+/** The folder's own files, as git knows them, or as found on disk when it is not in git or is a workspace. At most 5000. */
 function filesOf(dir: string): string[] {
-  if (isRepo(dir)) {
+  if (isRepo(dir) && !workspaceRepos(dir).length) {
     const out = git(dir, ['ls-files', '--cached', '--others', '--exclude-standard'], { allowFail: true });
     const list = out.split('\n').filter((f) => f && !f.startsWith(`${SQUAD_DIR}/`));
     if (list.length) return list.slice(0, MAX_FILES);
@@ -147,9 +127,9 @@ function describeCode(n: number, language: string | undefined, web: boolean, tes
 const SAFE = "Your code is not changed. squad-kit only adds a .squad folder for the project's memory.";
 const TAKES = 'Takes about 3 to 5 minutes. You can keep working meanwhile.';
 
-/** The branch the person's folder is on, and how many changes there are not saved in git. Nothing outside git. */
+/** The branch the person's folder is on, and how many changes there are not saved in git. Nothing outside git, or for a workspace. */
 export function gitState(dir: string): { branch?: string; unsaved: number } {
-  if (!isRepo(dir)) return { unsaved: 0 };
+  if (!isRepo(dir) || workspaceRepos(dir).length) return { unsaved: 0 };
   const branch = git(dir, ['rev-parse', '--abbrev-ref', 'HEAD'], { allowFail: true });
   const unsaved = git(dir, ['status', '--porcelain'], { allowFail: true }).split('\n').filter((l) => l.trim() && !l.slice(3).startsWith(`${SQUAD_DIR}/`)).length;
   return { ...(branch && branch !== 'HEAD' ? { branch } : {}), unsaved };
@@ -170,7 +150,7 @@ export function firstLook(dir: string): FirstLook {
   const tests = files.some((f) => TEST_FILE.test(f));
   const repo = isRepo(abs);
   const { branch, unsaved } = gitState(abs);
-  const nested = repo ? [] : findNestedRepos(abs).map((r) => r.path);
+  const nested = workspaceRepos(abs).map((r) => r.path);
   const base = { files: files.length, ...code, tests, ...(branch ? { branch } : {}), unsaved, repos: nested };
   const onBranch = base.branch ? `, on git branch ${base.branch}` : '';
   const unsavedNote = unsaved ? ` ${plural(unsaved, 'change is', 'changes are')} not saved in git yet: squad-kit works from what is saved.` : '';

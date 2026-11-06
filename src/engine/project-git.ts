@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { listDecisions, listReleases, listTickets, readMeta, splitTicket, ticketDir, type BoardPaths } from '../board/store.js';
+import { boardExists, listDecisions, listReleases, listTickets, readMeta, splitTicket, ticketDir, type BoardPaths } from '../board/store.js';
 import { decisionDoc, releaseDoc } from '../board/docs.js';
 import type { Release, Ticket } from '../board/types.js';
 import { commitArgsFor, git, isRepo, latestBase, remotes } from './git.js';
@@ -14,9 +14,14 @@ import { BREAKDOWN_ID, breakdownDir } from '../board/requirements-paths.js';
  * `.squad/` in no repo, and "Put project documents in git" off commits nothing.
  */
 
-/** The repo that holds `.squad/`, or null when it sits in no repo. */
+/**
+ * The repo that takes the project's documents, or null when there is none. A workspace's stories work in its code
+ * repos, and squad-kit's own files never enter their history. A root repo around them takes none either: no story
+ * branches from it.
+ */
 export function docsRepo(bp: BoardPaths): string | null {
-  return isRepo(bp.root) ? bp.root : null;
+  if (!isRepo(bp.root)) return null;
+  return boardExists(bp) && readMeta(bp).repos?.some((r) => r.path !== '.') ? null : bp.root;
 }
 
 export function docsInGit(bp: BoardPaths): boolean {
@@ -30,8 +35,8 @@ export function squadInRepo(bp: BoardPaths, repo: string): string {
 
 /** Keeps `.squad/` out of `git status`, in git's local ignore list: it is never committed and .gitignore is not changed. */
 export function hideSquadFromGit(bp: BoardPaths): void {
-  const repo = docsRepo(bp);
-  if (!repo) return;
+  if (!isRepo(bp.root)) return;
+  const repo = bp.root;
   const common = git(repo, ['rev-parse', '--git-common-dir'], { allowFail: true });
   if (!common) return;
   const exclude = path.join(path.resolve(repo, common), 'info', 'exclude');

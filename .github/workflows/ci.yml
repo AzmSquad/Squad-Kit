@@ -28,3 +28,27 @@ jobs:
       - run: pnpm lint
       - run: pnpm build
       - run: pnpm test
+
+  # The same checks on a Mac. Report only for now: a failure here shows on the run but blocks nothing, until its
+  # results are known. Its own job, so the check named "test" stays what it always was.
+  test-mac:
+    runs-on: macos-latest
+    continue-on-error: true
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # Version comes from package.json "packageManager". Pinning it here as well makes
+      # pnpm/action-setup abort with ERR_PNPM_BAD_PM_VERSION.
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm lint
+      - run: pnpm build
+      - run: pnpm test

@@ -54,7 +54,7 @@ import { TECHNICAL_TRIES, askText, judgeQuestion, judgeReply, questionBackPrompt
 import { TECHNICAL_STOP, ownRunWords, ownWords } from './plain-stop.js';
 import { addSnapshot, addWorktree, changedTracked, commitAll, conventionalWords, cutOffWords, dropSnapshot, git, isAncestor, isLockFile, latestBase, putBackTracked, repairCopyLink, settleCopy } from './git.js';
 import * as P from './prompts.js';
-import { baseCommits, findNestedRepos, repoFor, rulesFiles } from './repos.js';
+import { baseCommits, repoFor, rulesFiles, workspaceRepos } from './repos.js';
 import { flushTracker, publishTicket, recheckMerge, syncWiki, trackerDue } from './sync.js';
 import { AGENTS, agentInstructions, readAgent, type AgentRole } from './agents.js';
 import { Watchdog, processTable, type Quiet } from './watchdog.js';
@@ -1503,7 +1503,7 @@ export class LiveSquad {
     writeMeta(this.bp, meta);
     const architect = aiTool(readAgent(this.bp, 'architect').tool);
     readStarted(this.bp, { label: architect?.label ?? 'The AI tool', ready: Boolean(architect?.ready()) });
-    const nested = findNestedRepos(root);
+    const nested = workspaceRepos(root);
     await syncWiki(this.bp, undefined, true);
     // What the Architect is reading right now, for the setup page and the board's setup card.
     let last = 0;
