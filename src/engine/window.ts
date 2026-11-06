@@ -28,6 +28,7 @@ import {
   type ShotAsk,
   type ShotSize,
 } from './shots.js';
+import { readWorkbook, sheetsText, type Sheet } from './spreadsheet.js';
 
 /**
  * The window: squad-kit's own tools for an agent, served over MCP for one run (engine/window-server.ts). The agent
@@ -1099,12 +1100,16 @@ export class AgentWindow {
       fs.writeFileSync(path.join(this.s.proofDir, name), bytes);
       record.file = name;
       record.bytes = bytes.length;
+      const sheets = own === 'xlsx' ? readWorkbook(bytes) : null;
+      if (sheets) record.sheets = sheets;
     }
     const file = `${stem}.api.json`;
     fs.writeFileSync(path.join(this.s.proofDir, file), JSON.stringify(record, null, 2));
     this.pictures.set(file, { file, page: '', size: 'answer', call: `${method} ${asked} on ${part.name}` });
     this.s.say(`squad-kit asked ${part.name} for the ${this.s.who}: ${method} ${asked} answered ${res.status}`);
-    const shown = text ? String(record.answer).slice(0, 8000) : `A file of ${bytes.length} bytes (${type}), saved as ${record.file as string}. squad-kit keeps it for the person to open.`;
+    const sheets = record.sheets as Sheet[] | undefined;
+    const kept = `A file of ${bytes.length} bytes (${type}), saved as ${record.file as string}. squad-kit keeps it for the person to open.`;
+    const shown = text ? String(record.answer).slice(0, 8000) : sheets ? `${kept}\n\nWhat it holds:\n\n${sheetsText(sheets).slice(0, 8000)}` : kept;
     return ok(`${part.name} answered ${res.status}${contentType ? ` (${contentType})` : ''}. Saved as ${file}: name that file in your answer for the "done when" it proves.\n\n${shown}${text && bytes.length > 8000 ? '\n(cut here)' : ''}`);
   }
 

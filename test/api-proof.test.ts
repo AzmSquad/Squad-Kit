@@ -5,6 +5,7 @@ import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { callTool, rpc, textOf } from './support/window.js';
+import { tinyWorkbook } from './support/xlsx.js';
 
 /**
  * Proof for what no page shows: the Tester asks the product's API through squad-kit, which reaches only the product's own
@@ -46,6 +47,7 @@ beforeEach(async () => {
       seen.push({ method: q.method!, url: q.url!, body, headers: q.headers });
       if (q.url === '/price') return s.setHeader('content-type', 'application/json').end('{"cents":200,"sale":150}');
       if (q.url === '/big') return s.setHeader('content-type', 'text/plain').end(big);
+      if (q.url === '/workbook') return s.setHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet').end(tinyWorkbook([['Totals', [['Judgments', 'First'], ['1', '2']]]]));
       if (q.url === '/report') return s.setHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet').end(Buffer.from([0x50, 0x4b, 3, 4, 0, 255]));
       if (q.url === '/away') return s.writeHead(302, { location: otherBase }).end();
       if (q.url === '/broken') return s.writeHead(500, { 'content-type': 'application/json' }).end('{"error":"boom"}');
@@ -133,6 +135,18 @@ describe('asking', () => {
     expect(r.file).toBe('ap-1-after-api-1-answer.xlsx');
     expect(r.answer).toBeUndefined();
     expect(fs.readFileSync(path.join(proof, r.file)).length).toBe(6);
+    expect(r.sheets).toBeUndefined();
+  });
+
+  it('an Excel answer also says what it holds, so the Tester and the check can read the numbers', async () => {
+    const { access } = await tester();
+    const a = await callTool(access, 'ask_api', { part: 'api', path: '/workbook' });
+    expect(textOf(a)).toContain('Sheet "Totals", 2 rows');
+    expect(textOf(a)).toContain('Judgments | First');
+    expect(textOf(a)).toContain('1 | 2');
+    const r = record('ap-1-after-api-1.api.json');
+    expect(r.file).toBe('ap-1-after-api-1-answer.xlsx');
+    expect(r.sheets).toEqual([{ name: 'Totals', rows: [['Judgments', 'First'], ['1', '2']], total: 2 }]);
   });
 });
 

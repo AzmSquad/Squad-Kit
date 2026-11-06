@@ -1201,4 +1201,9 @@ ul.ticketnotes .grow, .addnote .grow { flex: 1; }
 /* A proof that is no picture: what was asked and what the API answered. */
 .apiproof { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-top: 8px; font-size: 13.5px; }
 .apiproof .maprow { padding: 8px 0; }
+.apiproof-sheet { margin-top: 10px; }
+.apiproof-table { overflow-x: auto; margin-top: 4px; }
+.apiproof-table table { border-collapse: collapse; font-size: 12.5px; }
+.apiproof-table th, .apiproof-table td { border: 1px solid var(--line); padding: 4px 8px; text-align: start; }
+.apiproof-table th { font-weight: 600; background: var(--surface-2); }
 .apiproof-raw { font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; margin-top: 6px; }

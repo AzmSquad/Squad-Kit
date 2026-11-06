@@ -17,7 +17,11 @@ interface ApiRecord {
   cut?: boolean;
   file?: string;
   bytes?: number;
+  sheets?: { name: string; rows: string[][]; total: number }[];
 }
+
+/** How much of each sheet the proof shows. The whole file is one click away. */
+const SHEET_ROWS = 12;
 
 export function ApiProof({ file, note }: { file: string; note?: string }) {
   const q = useQuery({ queryKey: ['api-proof', file], queryFn: async () => (await fetch(assetUrl(`/api/v1/proof/${file}`))).json() as Promise<ApiRecord> });
@@ -37,6 +41,21 @@ export function ApiProof({ file, note }: { file: string; note?: string }) {
           {r.file ? ' with a file' : ''}
         </span>
       </div>
+      {r.sheets?.map((s, i) => (
+        <div className="apiproof-sheet" key={i}>
+          <b dir="auto">{s.name}</b>
+          <div className="apiproof-table">
+            <table dir="auto">
+              <tbody>
+                {s.rows.slice(0, SHEET_ROWS).map((row, y) => (
+                  <tr key={y}>{row.map((cell, x) => (y === 0 ? <th key={x}>{cell}</th> : <td key={x}>{cell}</td>))}</tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {s.total > SHEET_ROWS && <p className="note">The first {SHEET_ROWS} of {s.total} rows. The file has them all.</p>}
+        </div>
+      ))}
       {r.file && (
         <p>
           <a className="btn sm" href={assetUrl(`/api/v1/proof/${r.file}`)} download={r.file}>Open the file it answered with</a>

@@ -1202,8 +1202,10 @@ A "done when" with no picture is not-shown. Some have no picture, or pictures of
 why it cannot be shown on a screen. Do not take the reason on trust: read the code and the project's seed or sample
 data, and judge it.
 A file ending in .api.json is no picture: squad-kit asked the product's API and saved the call, with what was asked and
-what it answered. Read it, and judge by what was answered, not by what the Tester says about it. An answer that is a saved
-file (an Excel sheet, a PDF) cannot be opened here: judge by its status, type and size, and the person opens it.
+what it answered. Read it, and judge by what was answered, not by what the Tester says about it. An Excel answer has its
+sheets in the record, under "sheets": judge by those rows. Numbers the "done when" names are met only when the rows show
+them, and what the local data cannot show goes to off-screen with the reason. Any other saved file (a PDF) cannot be
+opened here: judge by its status, type and size, and the person opens it.
 A picture is taken at one of two sizes: "phone" (390 wide) or "desktop" (1280 wide). When a "done when" names another
 width, judge the nearest size, and do not fault the picture for its size, or for being at another size than the
 picture from before the change.

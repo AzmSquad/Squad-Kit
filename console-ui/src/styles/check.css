@@ -29,7 +29,7 @@
 
 /* The page each after picture was taken on, under its "done when". */
 .critpage { margin: -3px 0 9px 23px; font-size: 12px; color: var(--muted); }
-.critpage code { font: 600 12px 'JetBrains Mono', ui-monospace, Menlo, monospace; color: var(--text); }
+.critpage code { font: 600 12px 'JetBrains Mono', ui-monospace, Menlo, monospace; color: var(--text); overflow-wrap: anywhere; }
 .stage .critpage { margin: -6px 0 0; }
 .crit > span { min-width: 0; }
 .crit .critpage-s { display: block; margin-top: 3px; font: 500 11.5px 'JetBrains Mono', ui-monospace, Menlo, monospace; color: var(--dim); overflow-wrap: anywhere; }
