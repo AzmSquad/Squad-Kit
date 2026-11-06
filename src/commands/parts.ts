@@ -37,7 +37,7 @@ function printParts(parts: ProductPart[]): void {
   const wide = Math.max(...parts.map((p) => p.id.length));
   for (const p of parts) {
     const needs = p.needs.map((n) => parts.find((x) => x.id === n)?.name ?? n).join(', ');
-    out(`  ${kleur.cyan(p.id.padEnd(wide))}  ${kleur.bold(p.name)}${p.off ? kleur.yellow('  not used') : ''}`);
+    out(`  ${kleur.cyan(p.id.padEnd(wide))}  ${kleur.bold(p.name)}${p.off ? kleur.yellow('  not used') : p.noRun ? kleur.gray('  nothing starts here') : ''}`);
     out(`  ${' '.repeat(wide)}  ${kleur.gray([whereOf(p), p.url, needs ? `needs ${needs}` : ''].filter(Boolean).join(' · '))}`);
   }
   out();

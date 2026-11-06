@@ -300,7 +300,7 @@ describe('the Builder is told', () => {
     addLocalFile(bp, '.', '.env.dev');
     addLockedFile(bp, '.', 'docker-compose.yml');
     const text = offLimitsText(readMeta(bp));
-    expect(text).toContain('.env.dev: you cannot read these');
+    expect(text).toContain('.env.dev: these exist, and you cannot read them. Never treat one as missing.');
     expect(text).toContain('run_checks and start_app');
     expect(text).toContain('docker-compose.yml: you can read these');
     expect(text).toContain('say so in notes');

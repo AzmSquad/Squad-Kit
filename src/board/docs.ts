@@ -107,6 +107,7 @@ const HEADER_KEYS = [
   'builder',
   'reviewer',
   'repo',
+  'parts',
   'branch',
   'follows',
   'work',

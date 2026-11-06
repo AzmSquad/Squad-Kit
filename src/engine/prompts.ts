@@ -1,6 +1,7 @@
 import { DECISION_AREAS, TECH_ROLES } from '../board/types.js';
+import { partsOf } from '../board/parts.js';
 import { PART_KINDS } from '../board/overview.js';
-import type { AgentName, BoardMeta, ChatMessage, Decision, Question, RepoInfo, SpecChange, Step, Ticket, TicketNote } from '../board/types.js';
+import type { AgentName, BoardMeta, ChatMessage, Decision, ProjectCommands, Question, RepoInfo, SpecChange, Step, Ticket, TicketNote } from '../board/types.js';
 import { reposOf } from './repos.js';
 import { autoAskRule } from './auto-prompts.js';
 import { pagesOf, squadWorks, waitsAtReview, whereItStands } from '../board/at-review.js';
@@ -183,6 +184,7 @@ export const PLAN_SCHEMA = {
     releaseNote: STR,
     commands: COMMANDS,
     repo: STR,
+    parts: { type: 'array', maxItems: 12, items: STR },
     mockup: STR,
   },
   required: ['story', 'criteria', 'steps', 'tests', 'screens', 'releaseNote'],
@@ -378,6 +380,8 @@ or scripts.`;
 export interface PromptContext {
   rules: string[];
   repo?: RepoInfo;
+  /** A story's folder on a workspace: its copies, each in a folder of its own. */
+  copies?: { folder: string; name: string; commands: ProjectCommands; baseCommit?: string }[];
   /** Leave the app's saved address out: a talk with the person gets it only while the copy really runs there. */
   noAddress?: boolean;
 }
@@ -405,6 +409,20 @@ function reposText(meta: BoardMeta): string {
     .join('\n')}`;
 }
 
+/** A story's folder, for an agent working in it: each part in a folder of its own, each its own git repo. */
+function storyFolderText(copies: NonNullable<PromptContext['copies']>): string {
+  const lines = copies.map((c) => {
+    const commands = Object.entries(c.commands).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join('; ') || 'no commands set up yet';
+    return `- ${c.folder}/ is ${c.name}. Commands, from inside that folder: ${commands}.`;
+  });
+  return `This folder holds this story's copy of each part it changes, side by side. Each one is its own git repo on the same branch name, and the folder around them is not a repo:\n${lines.join('\n')}\nWork through them in that order. git works only with the folder named, as in: git -C ${copies[0]!.folder} status.`;
+}
+
+/** Where squad-kit writes what a part changed, for the Reviewer: git cannot run in a story's folder for a step that only reads. */
+export function changesFile(folder: string): string {
+  return `.changes/${folder}.diff`;
+}
+
 export function projectContext(meta: BoardMeta, decisions: Decision[], ctx?: PromptContext): string {
   const map = meta.map.length ? meta.map.map((m) => `- ${m.area}: ${m.detail}`).join('\n') : '- (not read yet)';
   const rules = decisions.filter((d) => !d.replacedBy && !d.proposed);
@@ -420,11 +438,12 @@ export function projectContext(meta: BoardMeta, decisions: Decision[], ctx?: Pro
   const c = ctx?.repo?.commands ?? reposOf(meta)[0]?.commands ?? {};
   const commands = Object.entries(c).filter(([k, v]) => v && !(ctx?.noAddress && k === 'url')).map(([k, v]) => `- ${k}: ${v}`).join('\n') || '- (none set up yet)';
   return [
-    `Project: ${meta.project}${reposText(meta)}`,
+    `Project: ${meta.project}${reposText(meta)}${offLimitsText(meta)}`,
+    ...(ctx?.copies?.length ? [storyFolderText(ctx.copies)] : []),
     `Project map:\n${map}`,
     `Saved decisions every ticket must follow:\n${adrs}${proposed}${replaced}`,
     `Lessons from past tickets:\n${lessons}`,
-    `${ctx?.repo && meta.repos?.length ? `Commands for ${ctx.repo.path}` : 'Project commands'}:\n${commands}${rulesText(ctx)}`,
+    ...(ctx?.copies?.length ? [rulesText(ctx).trim()].filter(Boolean) : [`${ctx?.repo && meta.repos?.length ? `Commands for ${ctx.repo.path}` : 'Project commands'}:\n${commands}${rulesText(ctx)}`]),
   ].join('\n\n');
 }
 
@@ -676,10 +695,15 @@ export function replyPrompt(q: Question, n: number, ask: string): string {
 Answer as the ${role} in 2 or 3 plain sentences. Explain why you ask and what each option would mean. Do not ask new questions and do not change files.`;
 }
 
+/** On a workspace, the Architect says which parts of the product a story changes. It is one story and one approval. */
+function partsRule(meta?: BoardMeta): string {
+  if (!meta?.repos?.length) return '';
+  const list = partsOf(meta).filter((p) => !p.shared && !p.off);
+  return `\n- parts: the ids of the parts of the product this story changes, in the order to build them: what the others rely on first, so the API before the web app. Only what must change. The parts:\n${list.map((p) => `  - ${p.id}: ${p.name}${p.needs.length ? ` (needs ${p.needs.join(', ')})` : ''}${p.noRun ? ' (nothing starts here by itself, and a story can still change it)' : ''}`).join('\n')}${offLimitsText(meta)}`;
+}
+
 export function planPrompt(t: Ticket, change?: string, meta?: BoardMeta, others?: OpenTicket[]): string {
-  const repo = meta?.repos?.length
-    ? `\n- repo: the folder of the ONE code repo this ticket changes, exactly as written in the list (${meta.repos.map((r) => r.path).join(', ')}).`
-    : '';
+  const repo = partsRule(meta);
   const head = change
     ? `The person read your plan.\n${changeText(change)}\n\nWrite the whole plan again with this.`
     : t.track === 'express'
@@ -745,9 +769,7 @@ ${PLAIN}`;
 }
 
 export function designPrompt(t: Ticket, change?: string, meta?: BoardMeta, fromChat = false, others?: OpenTicket[]): string {
-  const repo = meta?.repos?.length
-    ? `\n- repo: the folder of the ONE code repo this ticket changes, exactly as written in the list (${meta.repos.map((r) => r.path).join(', ')}).`
-    : '';
+  const repo = partsRule(meta);
   const head = fromChat
     ? `You and the person talked it through in this conversation. Now write the design from everything you agreed${t.steps ? ', the whole design again' : ''}. Where the talk changed something, follow the talk.`
     : change
@@ -800,7 +822,7 @@ ${ticketContext(t)}
 
 Story: ${t.story}
 Done when:
-${criteria}${decision}${dependencyText(t)}${setupTroubleText(t)}${offLimitsText(meta)}
+${criteria}${decision}${dependencyText(t)}${setupTroubleText(t)}
 
 Steps:
 ${steps}
@@ -825,7 +847,7 @@ export function offLimitsText(meta: BoardMeta): string {
   const local = (meta.localFiles ?? []).map((f) => f.path);
   const locked = (meta.lockedFiles ?? []).map((f) => f.path);
   if (!local.length && !locked.length) return '';
-  return `\n\nFiles only an engineer changes:${local.length ? `\n- ${local.join(', ')}: you cannot read these. squad-kit's run_checks and start_app can use them, so run what needs them with those tools.` : ''}${locked.length ? `\n- ${locked.join(', ')}: you can read these, and a change to one is put back.` : ''}\nIf the story cannot work without changing one, do the rest and say so in notes.`;
+  return `\n\nFiles only an engineer changes:${local.length ? `\n- ${local.join(', ')}: these exist, and you cannot read them. Never treat one as missing. squad-kit's run_checks and start_app can use them, so run what needs them with those tools.` : ''}${locked.length ? `\n- ${locked.join(', ')}: you can read these, and a change to one is put back.` : ''}\nIf the story cannot work without changing one, do the rest and say so in notes.`;
 }
 
 export function setupTroubleText(t: Ticket): string {
@@ -958,7 +980,10 @@ export function reviewPrompt(meta: BoardMeta, decisions: Decision[], t: Ticket, 
   const head = again
     ? `You are the Reviewer of a software squad. This is review round ${round}: the Builder changed the code after your last review. Do not edit files.`
     : 'You are the Reviewer of a software squad: a second pair of eyes on the Builder\'s work. Do not edit files.';
-  const look = again
+  const inFolders = ctx?.copies?.length ? ctx.copies.map((c) => changesFile(c.folder)).join(', ') : '';
+  const look = inFolders
+    ? `${again ? 'Review the whole change again, not only the fix. A fix can break something that was right before.' : 'Look at everything that changed in every part.'} squad-kit wrote what changed in each part to a file in this folder, so read each one: ${inFolders}. Each ends with the new files, which you read in the part's folder.`
+    : again
     ? `Review the whole change again, not only the fix: run "git status" and "git diff ${t.baseCommit}", and read new files. A fix can break something that was right before.`
     : `Look at everything that changed since commit ${t.baseCommit}: run "git status" and "git diff ${t.baseCommit}", and read new files.`;
   return `${head}
@@ -1375,7 +1400,7 @@ export function whereToLook(t: Ticket, look: ReviewLook): string {
     `- ${copyNow(look)}`,
     ...(shots.length ? ['- The proof, with the pages its after pictures were taken on:', ...shots] : ['- No screenshots were taken, so no page is saved: find the pages in the code.']),
     ...(look.changed.length
-      ? [`- The files this ticket changed${t.worktree ? `, in its copy of the code (${t.worktree})` : ''}:`, ...look.changed.map((f) => `  - ${f}`)]
+      ? [`- The files this ticket changed${t.worktree ? `, in its copy of the code (${t.storyDir ?? t.worktree})` : ''}:`, ...look.changed.map((f) => `  - ${f}`)]
       : ['- No changed files could be read.']),
     `Read the routes or pages in those files to find which page shows each change.${at ? ` Give full addresses the person can open${first ? `, like ${at}${first}` : `, starting with ${at}`}.` : ''} Say what to click or type there.`,
   ];
@@ -1400,7 +1425,7 @@ export function besidePrompt(meta: BoardMeta, decisions: Decision[], t: Ticket, 
         ? 'The squad is working on this ticket right now, and goes on while you talk.'
         : `Where the ticket stands, as the person sees it: "${whereItStands(t)}". Talking here never moves it or changes it.`;
   return `You are ${CHAT_ROLE[agent] ?? agent}. ${where}
-Read the project${t.worktree ? ` and the ticket's copy of the code (${t.worktree})` : ''} when it helps you answer. Do not write or change any files.
+Read the project${t.worktree ? ` and the ticket's copy of the code (${t.storyDir ?? t.worktree})` : ''} when it helps you answer. Do not write or change any files.
 
 ${projectContext(meta, decisions, { rules: [], ...ctx, noAddress: true })}
 

@@ -108,6 +108,7 @@ function PartRow({ part, view }: { part: ProductPart; view: PartsView }) {
         <div className="grow">
           <b>{part.name}</b>
           {part.off && <span className="pill sm" style={{ marginLeft: 8 }}>Not used</span>}
+          {part.noRun && !part.off && <span className="pill sm" style={{ marginLeft: 8 }}>Nothing starts here</span>}
           <div className="note">
             {[where, part.url, needs.length > 0 ? `Needs ${needs.join(', ')}` : ''].filter(Boolean).join(' · ')}
           </div>

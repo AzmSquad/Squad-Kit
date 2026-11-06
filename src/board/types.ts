@@ -570,6 +570,12 @@ export interface Ticket {
   localSetup?: LocalSetup;
   /** The project's setup command failed in this ticket's copy: the Builder sorts it out first. */
   setupTrouble?: { command: string; output: string };
+  /** The product's parts this story changes, by their ids, in the order to build them. */
+  parts?: string[];
+  /** The folder holding the story's copies side by side, on a workspace of several repos (src/engine/copies.ts). */
+  storyDir?: string;
+  /** The story's copies of its other repos, beside `worktree`, on the same branch name. */
+  copies?: StoryCopy[];
   /** Decisions approved after this ticket was planned that change it, waiting for the person. */
   outdated?: Outdated[];
   /** The plan is being redone to follow this decision: the build brings in the latest base first. */
@@ -983,6 +989,13 @@ export interface BoardMeta {
   lockedFiles?: ProjectFile[];
 }
 
+/** A story's copy of one more repo. */
+export interface StoryCopy {
+  repo: string;
+  dir: string;
+  baseCommit?: string;
+}
+
 /** A file an engineer named, in one of the project's repos. */
 export interface ProjectFile {
   /** As in RepoInfo.path; "." is the project folder. */
@@ -1017,8 +1030,10 @@ export interface ProductPart {
   needs: string[];
   /** Where it answers when it runs. A repo with one part keeps this as the repo's App address. */
   url?: string;
-  /** Not used, like an old app: no story starts it. */
+  /** Not used, like an old app: no story starts it. Only an engineer says this. */
   off?: boolean;
+  /** The read found nothing here that starts by itself, like a library. A story may still change it. */
+  noRun?: boolean;
   /** An engineer added or changed it, so a new read leaves it as it is. */
   byHand?: boolean;
 }

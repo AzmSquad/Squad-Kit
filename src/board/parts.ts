@@ -55,7 +55,7 @@ const wordsOf = (names: string[]): string => (names.length < 2 ? names.join('') 
 /** The product in one plain sentence, for a product with several parts. Only once the Architect named them: a repo's name says nothing to a person. */
 export function productLine(meta: BoardMeta): string | undefined {
   if (!meta.parts?.length || !severalParts(meta)) return undefined;
-  const on = partsOf(meta).filter((p) => !p.off);
+  const on = partsOf(meta).filter((p) => !p.off && !p.noRun);
   const running = on.filter((p) => !p.shared).map((p) => p.name);
   const shared = on.filter((p) => p.shared).map((p) => p.name);
   const first = running.length === 1 ? `The product has one part in use: ${running[0]}.` : `The product has ${running.length} parts: ${wordsOf(running)}.`;
@@ -79,6 +79,12 @@ export function pictureInUse(meta: BoardMeta, picture: { parts: CodePart[]; link
 export function repoInUse(meta: BoardMeta, repo: string): boolean {
   const parts = (meta.parts ?? []).filter((p) => p.repo === repo);
   return !parts.length || parts.some((p) => !p.off);
+}
+
+/** Whether anything in this repo starts by itself, for the list of apps a person can open. */
+export function repoRuns(meta: BoardMeta, repo: string): boolean {
+  const parts = (meta.parts ?? []).filter((p) => p.repo === repo);
+  return !parts.length || parts.some((p) => !p.off && !p.noRun);
 }
 
 /** What a person calls this repo: its parts' names, once the Architect named them. */
@@ -110,7 +116,8 @@ function reaches(parts: ProductPart[], from: string, to: string, seen = new Set<
 
 /**
  * The Architect's list as squad-kit can use it, whatever it said. Nothing here can stop a read: what does not fit is
- * left out. A repo it left out runs nothing, so it counts as Not used, where an engineer can see it and say otherwise.
+ * left out. A repo it left out starts nothing by itself, like a library: a story may still change it, and only an engineer
+ * can say it is not used.
  */
 export function cleanParts(found: unknown, meta: BoardMeta, root: string): ProductPart[] {
   const repos = repoPaths(meta);
@@ -138,7 +145,7 @@ export function cleanParts(found: unknown, meta: BoardMeta, root: string): Produ
   for (const repo of meta.repos?.length ? repos : []) {
     if (parts.some((p) => p.repo === repo)) continue;
     const p = partOfRepo(meta, repo);
-    parts.push({ ...p, id: parts.some((x) => x.id === p.id) ? `${p.id}-repo` : p.id, off: true });
+    parts.push({ ...p, id: parts.some((x) => x.id === p.id) ? `${p.id}-repo` : p.id, noRun: true });
   }
   // What each needs, one at a time, leaving out a need that could never be met: a loop, or a part it does not have.
   for (const raw of Array.isArray(found) ? found : []) {

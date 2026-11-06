@@ -83,12 +83,15 @@ describe('what the read finds', () => {
     expect(partsOf(meta).every((p) => !p.off)).toBe(true);
   });
 
-  it('counts a repo it left out as Not used, where an engineer can see it', () => {
+  it('a repo it left out starts nothing by itself, and is not marked Not used: only an engineer says that', () => {
     const meta = twoRepos();
     writeMeta(bp, { ...meta, parts: cleanParts([{ id: 'web', name: 'Web app', repo: 'web-ui' }, { id: 'site', name: 'Site', repo: 'web-ui', folder: '.' }], meta, root) });
     const left = partsOf(readMeta(bp)).find((p) => p.repo === 'api-server');
-    expect(left).toMatchObject({ id: 'api-server', name: 'Api server', off: true });
+    expect(left).toMatchObject({ id: 'api-server', name: 'Api server', noRun: true });
+    expect(left?.off).toBeUndefined();
+    expect(repoInUse(readMeta(bp), 'api-server')).toBe(true);
     expect(productLine(readMeta(bp))).toBe('The product has 2 parts: Web app and Site.');
+    expect(projectApps({ ...readMeta(bp), repos: [{ path: 'api-server', base: 'main', remote: '', commands: { start: 'node .', url: 'http://localhost:1' } }, { path: 'web-ui', base: 'main', remote: '', commands: { start: 'node .', url: 'http://localhost:2' } }] }).map((a) => a.repo)).toEqual(['web-ui']);
   });
 
   it('never takes an id twice when a repo is left out', () => {

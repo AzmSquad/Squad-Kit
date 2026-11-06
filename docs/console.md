@@ -56,6 +56,9 @@ Each project has its own board. The sidebar has the project's pages: **Overview*
 **Backlog**, **Waiting for you**, **Conversations**, **Releases**, **Architecture**, **Bugs**, **Squad and AI** and
 **Settings**.
 
+On a project with several repos, one story can change several parts of the product. The Architect names the parts, the story
+gets one folder with a copy of each, and each changed part runs its own checks. You still see one story, with one approval.
+
 **Overview** is the project's home: what it is, who uses it, what it can do today (with what each merged ticket
 added), how its parts fit together, things worth knowing, the rules the Architect found, the proof that squad-kit can
 work here, and ideas for tickets. The first time, it is the handover after setup: **Looks right, start working**

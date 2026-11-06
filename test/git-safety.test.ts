@@ -626,7 +626,8 @@ describe('finding 8: a crash while the hooks look at the whole change', () => {
     process.kill(child.pid!, 'SIGKILL');
     await ended;
     const hookPid = Number(fs.readFileSync(path.join(tmp, 'hook'), 'utf8'));
-    expect(sh(`ps -o command= -p ${hookPid}`, tmp)).toContain('sleep 120');
+    // It writes its number just before it becomes the sleep: on a slow computer, a look can fall in between.
+    await until(() => sh(`ps -o command= -p ${hookPid}`, tmp).includes('sleep 120'));
     process.kill(hookPid, 'SIGKILL');
     // The real branch is where it was, whatever the copy's HEAD says.
     expect(sh('git rev-parse squad/ap-1', project)).toBe(tip);

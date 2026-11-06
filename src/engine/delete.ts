@@ -23,9 +23,9 @@ import {
 } from '../board/store.js';
 import type { BoardMeta, Decision, Deleting, Ticket } from '../board/types.js';
 import { repoHostFor, trackerModule } from '../modules/registry.js';
-import { currentBranch, dropSnapshot, git, gitArgs, gitEnv, isRepo, networkGitEnv, removeWorktree, worktreeRoot } from './git.js';
+import { copyDirsIn, currentBranch, dropSnapshot, git, gitArgs, gitEnv, isRepo, networkGitEnv, removeWorktree, worktreeRoot } from './git.js';
 import { agentRuns } from './live.js';
-import { repoFor } from './repos.js';
+import { repoFor, reposOf } from './repos.js';
 import { repoTarget } from './sync.js';
 import { deleteNoteCommit, localCopy } from './teammate-delete.js';
 import { docsRepo, squadInRepo } from './project-git.js';
@@ -169,7 +169,7 @@ export function deletePlan(bp: BoardPaths, id: string, opts: { remote?: boolean 
   const inGit = isRepo(dir);
   const copy = inGit && fs.existsSync(copyOf(dir, t));
   const branch = inGit && hasBranch(dir, branchOf(t));
-  if (copy || branch) removes.push(copy && branch ? `Its copy of the code and the branch ${branchOf(t)}` : copy ? 'Its copy of the code' : `The branch ${branchOf(t)}`);
+  if (copy || branch) removes.push(t.copies?.length ? `Its copies of the code and the branch ${branchOf(t)} in each` : copy && branch ? `Its copy of the code and the branch ${branchOf(t)}` : copy ? 'Its copy of the code' : `The branch ${branchOf(t)}`);
   if (fs.existsSync(ticketCacheDir(bp, t.id))) removes.push('The packages its Builder and Tester downloaded for it');
   const chats = Boolean(Object.values(t.sessions ?? {}).some(Boolean) || t.chat);
   const shots = Boolean(t.proof?.length);
@@ -319,21 +319,28 @@ async function removeRemote(bp: BoardPaths, t: Ticket): Promise<string[]> {
  * parts that hold no unpushed work (`localCopy`); the rest stays.
  */
 function removeCopy(bp: BoardPaths, meta: BoardMeta, t: Ticket, opts: { safe?: boolean } = {}): string[] {
+  const projectCopies = worktreeRoot(bp.root);
+  const one = (dir: string, base: string, copy: string): string[] => {
+    if (!isRepo(dir)) return [];
+    const root = worktreeRoot(dir);
+    const keep = opts.safe ? localCopy(dir, t, base, copy) : null;
+    if (!keep || keep.copy) {
+      removeWorktree(dir, copy);
+      // By hand only inside squad-kit's own folder of copies, never anywhere else.
+      if (inside(root, copy) || inside(projectCopies, copy)) fs.rmSync(copy, { recursive: true, force: true });
+    }
+    const before = path.join(root, `${t.id.toLowerCase()}-before`);
+    if (fs.existsSync(before)) dropSnapshot(dir, before);
+    git(dir, ['worktree', 'prune'], { allowFail: true });
+    if ((!keep || keep.branch) && hasBranch(dir, branchOf(t))) git(dir, ['branch', '-D', branchOf(t)]);
+    return keep?.kept ?? [];
+  };
   const dir = repoDir(bp, meta, t);
-  if (!isRepo(dir)) return [];
-  const root = worktreeRoot(dir);
-  const copy = copyOf(dir, t);
-  const keep = opts.safe ? localCopy(dir, t, repoFor(meta, t).base, copy) : null;
-  if (!keep || keep.copy) {
-    removeWorktree(dir, copy);
-    // By hand only inside squad-kit's own folder of copies, never anywhere else.
-    if (inside(root, copy)) fs.rmSync(copy, { recursive: true, force: true });
-  }
-  const before = path.join(root, `${t.id.toLowerCase()}-before`);
-  if (fs.existsSync(before)) dropSnapshot(dir, before);
-  git(dir, ['worktree', 'prune'], { allowFail: true });
-  if ((!keep || keep.branch) && hasBranch(dir, branchOf(t))) git(dir, ['branch', '-D', branchOf(t)]);
-  return keep?.kept ?? [];
+  const kept = one(dir, repoFor(meta, t).base, copyOf(dir, t));
+  for (const c of t.copies ?? []) kept.push(...one(path.join(bp.root, c.repo), reposOf(meta).find((r) => r.path === c.repo)?.base ?? repoFor(meta, t).base, c.dir));
+  // The story's folder goes with its last copy.
+  if (t.storyDir && inside(projectCopies, t.storyDir) && fs.existsSync(t.storyDir) && !copyDirsIn(t.storyDir).length) fs.rmSync(t.storyDir, { recursive: true, force: true });
+  return kept;
 }
 
 /**

@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **New project**, on Home and with `squad projects --new`: give a name and a BRD or an idea, and squad-kit makes the folder,
   git and the board. A BRD goes straight to the Analyst. An idea goes into the first read, so you are not asked again.
 - GitHub's checks run on a Mac as well as Linux.
+- **One story across the parts of a product.** On a project with several repos, the Architect names the parts a story changes.
+  The story gets one folder with a copy of each, side by side, and one Builder session works in it. Each changed part runs
+  its own checks ("API ✓, Web app ✓"), and the Reviewer reads all of it. If the Builder finds it needs another part, squad-kit
+  adds its copy without asking you. A project with one repo works as before.
 - **What the product is made of:** the first read now finds the parts that run by themselves and the services they share.
   On a product with several parts, the Overview says so in one sentence. An engineer corrects the list in Settings or with
   `squad parts`, and a new read keeps it. A project with one part sees no change.

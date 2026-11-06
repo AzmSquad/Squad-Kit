@@ -68,14 +68,14 @@ export function dependencyToStartFrom(bp: BoardPaths, t: Ticket): Ticket | null 
  * moves: not its copy, its index or its branch. squad-kit's own `.squad/` files stay as the base has them, so its
  * documents never travel on this branch.
  */
-export function addWorktreeOn(bp: BoardPaths, t: Ticket, dep: Ticket): { dir: string; branch: string; baseCommit: string; from: string } {
+export function addWorktreeOn(bp: BoardPaths, t: Ticket, dep: Ticket, at?: string): { dir: string; branch: string; baseCommit: string; from: string } {
   const meta = readMeta(bp);
   const repo = repoFor(meta, t);
   if (repoFor(meta, dep).path !== repo.path) throw new Error(`${dep.id} changes another repo (${repoFor(meta, dep).path}), so ${t.id} cannot start from its branch. Build anyway, or wait for it.`);
   const root = path.join(bp.root, repo.path);
   const start = workOf(bp, root, dep, repo.base);
   if (!start) throw new Error(`${dep.id} has no code yet to build on. Wait for it, or build anyway.`);
-  const dir = path.join(worktreeRoot(root), t.id.toLowerCase());
+  const dir = at ?? path.join(worktreeRoot(root), t.id.toLowerCase());
   const branch = `squad/${t.id.toLowerCase()}`;
   const from = `${dep.id}'s work so far`;
   if (fs.existsSync(path.join(dir, '.git'))) return { dir, branch, baseCommit: start, from };

@@ -68,6 +68,8 @@ export function hiddenFiles(bp: BoardPaths, cwd?: string): string[] {
   for (const f of local) {
     out.add(path.join(bp.root, f.repo, f.path));
     if (cwd) out.add(path.join(cwd, f.path));
+    // A story's folder holds each repo's copy under the repo's name.
+    if (cwd && f.repo !== '.') out.add(path.join(cwd, f.repo, f.path));
   }
   if (local.length) out.add(`${storyFilesDir(bp)}/**`);
   return [...out];

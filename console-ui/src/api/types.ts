@@ -379,6 +379,11 @@ export interface Ticket {
   squad?: SquadState | null;
   /** Live engine only: where the ticket's code lives and how far the squad got. */
   sessions?: TicketSessions;
+  /** The product's parts this story changes, by their ids. */
+  parts?: string[];
+  /** The folder holding the story's copies, on a workspace of several repos. */
+  storyDir?: string;
+  copies?: { repo: string; dir: string; baseCommit?: string }[];
   worktree?: string;
   branch?: string;
   baseCommit?: string;
@@ -699,6 +704,7 @@ export interface ProductPart {
   needs: string[];
   url?: string;
   off?: boolean;
+  noRun?: boolean;
   byHand?: boolean;
 }
 

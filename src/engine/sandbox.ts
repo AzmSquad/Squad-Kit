@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { copyDirsIn } from './git.js';
 import type { AiTool, BlockedAction, SandboxAsk, SandboxSupport } from '../modules/ai-tool/types.js';
 import { AI_TOOLS } from '../modules/registry.js';
 import { squadHome } from '../core/home.js';
@@ -186,7 +187,7 @@ export function sandboxAsk(o: SandboxFor): SandboxAsk {
     noRead: [...new Set([...PRIVATE.map((p) => path.join(home, p)), ...withReal([squadHome()]), ...o.secrets, ...env])],
     // The step's own folders, inside squad-kit's: its copy, its proof folder, its package cache, its attachments.
     read: [...new Set(withReal([o.cwd, o.proof, ...(o.cache ? [o.cache] : []), ...o.read]))],
-    noWrite: [...new Set(withReal(gitPlaces(o.cwd)))],
+    noWrite: [...new Set(withReal([...gitPlaces(o.cwd), ...copyDirsIn(o.cwd).flatMap(gitPlaces)]))],
     hosts: [...new Set([...PACKAGE_HOSTS, ...(o.hosts ?? [])])],
   };
 }

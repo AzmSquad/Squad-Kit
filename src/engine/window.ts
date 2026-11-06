@@ -40,7 +40,7 @@ import {
  * window starts outlives its run.
  */
 
-export type WindowTool = 'take_screenshots' | 'look_at_page' | 'start_app' | 'stop_app' | 'app_status' | 'run_checks' | 'i_am_stuck';
+export type WindowTool = 'take_screenshots' | 'look_at_page' | 'start_app' | 'stop_app' | 'app_status' | 'run_checks' | 'add_part' | 'i_am_stuck';
 
 export const APP_TOOLS: WindowTool[] = ['take_screenshots', 'look_at_page', 'start_app', 'stop_app', 'app_status'];
 export const ALL_TOOLS: WindowTool[] = [...APP_TOOLS, 'run_checks', 'i_am_stuck'];
@@ -111,6 +111,8 @@ export interface WindowChecks {
   guard?: GuardSpec;
   /** A check starts: the card's line says so. */
   onStart?(name: CheckName): void;
+  /** A story with several parts: each part's own checks, by the part's id. run_checks must then say which. */
+  parts?(): Record<string, WindowChecks>;
 }
 
 export interface WindowSetup {
@@ -123,6 +125,8 @@ export interface WindowSetup {
   app?: WindowApp;
   /** The project's own checks. Left out, run_checks answers that this step has none. */
   checks?: WindowChecks;
+  /** Adds a part's copy to the story's folder, and says what it did. Left out, add_part answers that this step cannot. */
+  addPart?(part: string): Promise<string>;
   /** An app squad-kit already started for this step. The window owns it from now on and stops it at the end. */
   running?: RunningApp;
   proofDir: string;
@@ -268,6 +272,15 @@ const DEFS: Record<WindowTool, Omit<ToolDef, 'name'>> = {
       additionalProperties: false,
     },
   },
+  add_part: {
+    description: "Call this when the story needs a part of the product it has no copy of yet, to read it or change it. squad-kit adds that part's copy to this story's folder, on the same branch name, and says where. The person is not asked.",
+    inputSchema: {
+      type: 'object',
+      properties: { part: { type: 'string', description: 'The id of the part.' } },
+      required: ['part'],
+      additionalProperties: false,
+    },
+  },
   i_am_stuck: {
     description: `Call this when something technical is in your way: the app does not start, a port is busy, the browser does not work, a command or a file is refused. squad-kit tries its known fixes (its browser, a free port, starting the app again) and says what it did. Never ask the person about it. Example: ${EXAMPLES.stuck}`,
     inputSchema: {
@@ -276,6 +289,20 @@ const DEFS: Record<WindowTool, Omit<ToolDef, 'name'>> = {
       required: ['what', 'why'],
       additionalProperties: false,
     },
+  },
+};
+
+/** run_checks on a story with several parts: squad-kit takes the folder from its own list of parts, never a path. */
+const RUN_CHECKS_BY_PART: Omit<ToolDef, 'name'> = {
+  ...DEFS.run_checks,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      which: { type: 'string', enum: CHECK_NAMES, description: 'Which check to run. Left out, all of them.' },
+      part: { type: 'string', description: 'The id of the part to run them in. There is no other way to choose a folder.' },
+    },
+    required: ['part'],
+    additionalProperties: false,
   },
 };
 
@@ -539,7 +566,7 @@ export class AgentWindow {
 
   /** The tools this run may use, as MCP lists them. */
   listTools(): ToolDef[] {
-    return this.s.tools.map((name) => ({ name, ...DEFS[name] }));
+    return this.s.tools.map((name) => ({ name, ...(name === 'run_checks' && this.s.checks?.parts ? RUN_CHECKS_BY_PART : DEFS[name]) }));
   }
 
   /**
@@ -627,6 +654,8 @@ export class AgentWindow {
           return await this.status(args);
         case 'run_checks':
           return await this.runChecks(args, clock);
+        case 'add_part':
+          return await this.addPart(args);
         case 'i_am_stuck':
           return await this.iAmStuck(args, clock);
       }
@@ -906,12 +935,19 @@ export class AgentWindow {
    * comes from the project's settings. A long run goes on in the background, past this call: the next call gets its result.
    */
   private async runChecks(args: Record<string, unknown>, clock: CallClock): Promise<ToolResult> {
-    const extra = extraFields(args, ['which']);
-    if (extra.length) return this.mistake('run_checks', `run_checks takes only "which", and got "${short(extra[0]!, 40)}"`, `Use: ${EXAMPLES.checks}, or {} for all of them.`);
+    const byPart = Boolean(this.s.checks?.parts);
+    const extra = extraFields(args, byPart ? ['which', 'part'] : ['which']);
+    if (extra.length) return this.mistake('run_checks', `run_checks takes only ${byPart ? '"which" and "part"' : '"which"'}, and got "${short(extra[0]!, 40)}"`, `Use: ${EXAMPLES.checks}, or {} for all of them.`);
     const which = args.which as CheckName | undefined;
     if (which !== undefined && !CHECK_NAMES.includes(which)) return this.mistake('run_checks', 'which is "test", "lint" or "build"', `Use: ${EXAMPLES.checks}, or {} for all of them.`);
-    const c = this.s.checks;
-    if (!c) return ok('This step has no checks squad-kit can run.');
+    const whole = this.s.checks;
+    if (!whole) return ok('This step has no checks squad-kit can run.');
+    const parts = whole.parts?.();
+    const part = typeof args.part === 'string' ? args.part.trim() : '';
+    // A story with several parts: squad-kit takes the folder from its own list, never from what the agent sends.
+    if (parts && Object.keys(parts).length > 1 && !part) return this.mistake('run_checks', 'part is missing, and this story has several', `Say which: ${Object.keys(parts).join(', ')}.`);
+    if (parts && part && !parts[part]) return this.mistake('run_checks', `this story has no copy of the part "${short(part, 40)}"`, `Its parts: ${Object.keys(parts).join(', ')}. Call add_part for another.`);
+    const c = parts ? (parts[part] ?? Object.values(parts)[0] ?? whole) : whole;
     const job = this.checksJob ?? this.startChecks(c, which);
     if (!job) return ok(`The project has no saved ${which ? `${which} command` : 'test, lint or build command'} yet. Add the script to the project's own files (package.json and the like): squad-kit finds it there, then call this again.`);
     const r = await settleBy(job.done, by(clock, START_SHARE), this.signal);
@@ -948,6 +984,15 @@ export class AgentWindow {
     const job = { ...(which ? { which } : {}), done };
     this.checksJob = job;
     return job;
+  }
+
+  private async addPart(args: Record<string, unknown>): Promise<ToolResult> {
+    const extra = extraFields(args, ['part']);
+    if (extra.length) return this.mistake('add_part', `add_part takes only "part", and got "${short(extra[0]!, 40)}"`, 'Use: { "part": "api" }.');
+    const part = typeof args.part === 'string' ? args.part.trim() : '';
+    if (!part) return this.mistake('add_part', 'part is missing', 'Use: { "part": "api" }.');
+    if (!this.s.addPart) return ok('This step cannot add a part.');
+    return ok(await this.s.addPart(part));
   }
 
   private async iAmStuck(args: Record<string, unknown>, clock: CallClock): Promise<ToolResult> {
@@ -1081,9 +1126,9 @@ export class AgentWindow {
  * am stuck" for a step that reads it (no pictures saved, no starting or stopping the app), the project's checks for a
  * step that builds in a copy with no app yet, else only "I am stuck".
  */
-export function toolsFor(o: { app: boolean; look?: boolean; checks?: boolean }): WindowTool[] {
-  if (o.app) return ALL_TOOLS;
-  return [...(o.look ? (['look_at_page'] as const) : []), ...(o.checks ? (['run_checks'] as const) : []), 'i_am_stuck'];
+export function toolsFor(o: { app: boolean; look?: boolean; checks?: boolean; parts?: boolean }): WindowTool[] {
+  if (o.app) return o.parts ? [...APP_TOOLS, 'run_checks', 'add_part', 'i_am_stuck'] : ALL_TOOLS;
+  return [...(o.look ? (['look_at_page'] as const) : []), ...(o.checks ? (['run_checks'] as const) : []), ...(o.parts ? (['add_part'] as const) : []), 'i_am_stuck'];
 }
 
 /** One check's result, as the agent reads it. */

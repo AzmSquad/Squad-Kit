@@ -297,19 +297,20 @@ export function projectCopies(bp: BoardPaths): string[] {
   } catch {
     // An unreadable board: the project folder itself stands.
   }
-  return [...new Set(repos.map((r) => worktreeRoot(path.join(bp.root, r))))];
+  // A workspace's story folders sit under the project's own name.
+  return [...new Set([...repos.map((r) => worktreeRoot(path.join(bp.root, r))), ...(repos.length > 1 || repos[0] !== '.' ? [worktreeRoot(bp.root)] : [])])];
 }
 
 /** A ticket's own copies: its worktree, and the copy of the code as it was that its before screenshots run in. */
-export function ticketCopies(bp: BoardPaths, t: Pick<Ticket, 'id' | 'worktree'>): string[] {
+export function ticketCopies(bp: BoardPaths, t: Pick<Ticket, 'id' | 'worktree' | 'storyDir'>): string[] {
   const roots = projectCopies(bp);
   const name = t.id.toLowerCase();
-  const own = t.worktree ? [t.worktree] : roots.map((r) => path.join(r, name));
+  const own = t.storyDir ? [t.storyDir] : t.worktree ? [t.worktree] : roots.map((r) => path.join(r, name));
   return [...new Set([...own, ...[...roots, ...own.map((w) => path.dirname(w))].map((r) => path.join(r, `${name}-before`))])];
 }
 
 /** Whose copy a folder is, in words: "this ticket's copy", "MA-4's copy". */
-export function copyWords(bp: BoardPaths, cwd: string, t?: Pick<Ticket, 'id' | 'worktree'>, ids: string[] = []): string {
+export function copyWords(bp: BoardPaths, cwd: string, t?: Pick<Ticket, 'id' | 'worktree' | 'storyDir'>, ids: string[] = []): string {
   if (t && folderOf(cwd, ticketCopies(bp, t))) return "this ticket's copy";
   const root = folderOf(cwd, projectCopies(bp));
   const first = root ? path.relative(spellings(root).find((s) => folderOf(cwd, [s])) ?? root, cwd).split(path.sep)[0] ?? '' : '';

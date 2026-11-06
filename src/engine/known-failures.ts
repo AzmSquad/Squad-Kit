@@ -18,10 +18,10 @@ export interface KnownFailure {
 /** Which of these failed checks already failed before any story touched the code. */
 export function knownFailures(bp: BoardPaths, t: Ticket, failed: { name: string; command: string }[]): KnownFailure[] {
   const meta = readMeta(bp);
-  const repo = repoFor(meta, t).path;
+  const repos = [repoFor(meta, t).path, ...(t.copies ?? []).map((c) => c.repo)];
   const runs = meta.setup?.proof?.tests ?? [];
   return failed.flatMap((f) => {
-    const run = runs.find((r) => !r.ok && !r.passedSince && r.command.trim() === f.command.trim() && (r.repo ?? '.') === repo);
+    const run = runs.find((r) => !r.ok && !r.passedSince && r.command.trim() === f.command.trim() && repos.includes(r.repo ?? '.'));
     return run ? [{ name: f.name, command: f.command, ...(run.output ? { output: run.output } : {}) }] : [];
   });
 }

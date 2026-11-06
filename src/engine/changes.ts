@@ -39,12 +39,18 @@ export function ticketChanges(bp: BoardPaths, id: string): TicketChanges {
   const t = requireTicket(bp, id);
   if (!t.baseCommit) return { from: 'none', files: [] };
   if (t.worktree && fs.existsSync(t.worktree)) {
-    const raw = git(t.worktree, ['diff', '--no-color', '--find-renames', t.baseCommit], { allowFail: true });
-    const files = splitDiff(raw);
-    for (const f of git(t.worktree, ['ls-files', '--others', '--exclude-standard'], { allowFail: true }).split('\n').filter(Boolean)) {
-      files.push(newFile(t.worktree, f));
-    }
-    return cap({ from: 'copy', base: t.baseCommit, branch: t.branch, files });
+    const inCopy = (dir: string, base: string): FileChange[] => {
+      const raw = git(dir, ['diff', '--no-color', '--find-renames', base], { allowFail: true });
+      const files = splitDiff(raw);
+      for (const f of git(dir, ['ls-files', '--others', '--exclude-standard'], { allowFail: true }).split('\n').filter(Boolean)) {
+        files.push(newFile(dir, f));
+      }
+      // In a story's folder, each file says which part it is in.
+      const where = t.storyDir ? path.relative(t.storyDir, dir) : '';
+      return where ? files.map((x) => ({ ...x, path: `${where}/${x.path}` })) : files;
+    };
+    const others = (t.copies ?? []).filter((c) => fs.existsSync(c.dir) && c.baseCommit).flatMap((c) => inCopy(c.dir, c.baseCommit!));
+    return cap({ from: 'copy', base: t.baseCommit, branch: t.branch, files: [...inCopy(t.worktree, t.baseCommit), ...others] });
   }
   const dir = repoDir(bp, t);
   if (t.branch && git(dir, ['rev-parse', '--verify', '--quiet', t.branch], { allowFail: true })) {
@@ -142,7 +148,7 @@ function onPath(bin: string): boolean {
 /** The folder to open: the ticket's copy while it exists, else the project's repo (after the change was merged). */
 export function editorFolder(bp: BoardPaths, id: string): string {
   const t = requireTicket(bp, id);
-  if (t.worktree && fs.existsSync(t.worktree)) return t.worktree;
+  if (t.worktree && fs.existsSync(t.worktree)) return t.storyDir ?? t.worktree;
   return repoDir(bp, t);
 }
 

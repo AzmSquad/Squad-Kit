@@ -468,6 +468,8 @@ function testNameFor(ticket: Ticket): string {
 export function acceptProof(bp: BoardPaths, ticket: Ticket, byItself?: string, opts: { noHooks?: boolean } = {}): Ticket {
   let commit: string | null = null;
   const release = ensureDraftRelease(bp, ticket.kind === 'bug' ? 'patch' : 'minor');
+  // Accepting saves one copy. Until it saves them all, a story across parts must not lose the others without a word.
+  if (ticket.copies?.length) throw new BoardActionError(`${ticket.id} changes several parts of the product, and squad-kit cannot accept that yet. Its work is safe in its copies.`);
   if (readMeta(bp).engine === 'live') {
     try {
       repairCopy(bp, ticket);
@@ -785,7 +787,7 @@ export function takeOver(bp: BoardPaths, id: string): Ticket {
     const demo = meta.engine !== 'live';
     const building = ['implement', 'test', 'review'].includes(t.stage);
     const session = t.sessions?.build ?? (demo && building ? 'demo-session' : undefined);
-    const cwd = t.worktree ?? (demo ? bp.root : undefined);
+    const cwd = t.storyDir ?? t.worktree ?? (demo ? bp.root : undefined);
     if (!session || !cwd || (!demo && !fs.existsSync(cwd))) {
       throw new BoardActionError(`${t.id} has no code yet. You can take over once the Builder has started.`);
     }

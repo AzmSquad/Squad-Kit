@@ -312,7 +312,7 @@ export function ticketConversations(t: Ticket, base?: string, nativeDir?: string
 /** Folders a ticket's files may be shown from: its copy of the code, its proof and its attachments. */
 /** The folders a ticket's files may be shown from: its copy, the screenshots, its folder and its voice notes. */
 export function ticketFolders(t: Ticket, bp: BoardPaths): string[] {
-  return [t.worktree, bp.proofDir, ticketDir(bp, t.id), ticketMediaDir(bp, t.id)].filter((d): d is string => Boolean(d));
+  return [t.storyDir ?? t.worktree, bp.proofDir, ticketDir(bp, t.id), ticketMediaDir(bp, t.id)].filter((d): d is string => Boolean(d));
 }
 
 /** The real path of a file if it sits inside one of the allowed folders, else null. */

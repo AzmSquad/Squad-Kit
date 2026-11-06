@@ -298,8 +298,8 @@ export function latestBase(dir: string, base: string, remote?: string): { ref: s
  * The ticket's copy of the code. A branch pushed from another computer is where its work so far is, so the copy
  * starts from it, not from the base; `pushed` says so. With `remote`, a new copy starts from the newest base.
  */
-export function addWorktree(projectRoot: string, ticketId: string, base: string, remote?: string): { dir: string; branch: string; baseCommit: string; pushed?: string } {
-  const dir = path.join(worktreeRoot(projectRoot), ticketId.toLowerCase());
+export function addWorktree(projectRoot: string, ticketId: string, base: string, remote?: string, at?: string): { dir: string; branch: string; baseCommit: string; pushed?: string } {
+  const dir = at ?? path.join(worktreeRoot(projectRoot), ticketId.toLowerCase());
   const branch = `squad/${ticketId.toLowerCase()}`;
   let baseCommit = git(projectRoot, ['rev-parse', base]);
   if (fs.existsSync(path.join(dir, '.git'))) return { dir, branch, baseCommit };
@@ -312,6 +312,16 @@ export function addWorktree(projectRoot: string, ticketId: string, base: string,
   if (!pushed) return { dir, branch, baseCommit };
   // Where the ticket left the base, so its changes are measured from there and not against newer work in the base.
   return { dir, branch, baseCommit: git(projectRoot, ['merge-base', base, pushed], { allowFail: true }) || baseCommit, pushed: pushed.replace(/^refs\/remotes\//, '') };
+}
+
+/** The git copies a folder holds: itself, or on a story's folder, the copies inside it. */
+export function copyDirsIn(folder: string): string[] {
+  if (fs.existsSync(path.join(folder, '.git'))) return [folder];
+  try {
+    return fs.readdirSync(folder, { withFileTypes: true }).filter((d) => d.isDirectory() && fs.existsSync(path.join(folder, d.name, '.git'))).map((d) => path.join(folder, d.name));
+  } catch {
+    return [];
+  }
 }
 
 /**

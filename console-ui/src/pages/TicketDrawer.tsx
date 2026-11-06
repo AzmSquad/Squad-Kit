@@ -56,7 +56,8 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
 
   const t = ticket.data;
   const board = useBoard();
-  const parts = partNames(board.data?.ready ? board.data.meta.parts : undefined, t?.repo);
+  const known = board.data?.ready ? board.data.meta.parts : undefined;
+  const parts = t?.parts?.length ? t.parts.map((id) => known?.find((p) => p.id === id)?.name ?? id) : partNames(known, t?.repo);
   return (
     <>
       <div className="veil" onClick={onClose} />
@@ -1358,7 +1359,7 @@ function DeveloperTab({ t }: { t: Ticket }) {
       {t.worktree && (
         <>
           <div className="lbl">The ticket's copy of the code</div>
-          <p className="mono" style={{ fontSize: 12.5, overflowWrap: 'anywhere' }}>{t.worktree}</p>
+          <p className="mono" style={{ fontSize: 12.5, overflowWrap: 'anywhere' }}>{t.storyDir ?? t.worktree}</p>
           <OpenInEditor t={t} />
         </>
       )}
