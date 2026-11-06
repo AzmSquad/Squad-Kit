@@ -40,7 +40,7 @@ import {
  * window starts outlives its run.
  */
 
-export type WindowTool = 'take_screenshots' | 'look_at_page' | 'start_app' | 'stop_app' | 'app_status' | 'run_checks' | 'add_part' | 'i_am_stuck';
+export type WindowTool = 'take_screenshots' | 'look_at_page' | 'start_app' | 'stop_app' | 'app_status' | 'run_checks' | 'add_part' | 'ask_api' | 'i_am_stuck';
 
 export const APP_TOOLS: WindowTool[] = ['take_screenshots', 'look_at_page', 'start_app', 'stop_app', 'app_status'];
 export const ALL_TOOLS: WindowTool[] = [...APP_TOOLS, 'run_checks', 'i_am_stuck'];
@@ -129,6 +129,8 @@ export interface WindowSetup {
   app?: WindowApp;
   /** The project's own checks. Left out, run_checks answers that this step has none. */
   checks?: WindowChecks;
+  /** The running product's parts the Tester may ask, by id. There is no field for a host: only these addresses. */
+  api?(): Record<string, { name: string; url: string }>;
   /** Adds a part's copy to the story's folder, and says what it did. Left out, add_part answers that this step cannot. */
   addPart?(part: string): Promise<string>;
   /** An app squad-kit already started for this step. The window owns it from now on and stops it at the end. */
@@ -172,7 +174,9 @@ export interface TakenPicture {
   file: string;
   /** Where it was taken, as the path in the app. */
   page: string;
-  size: ShotSize;
+  size: ShotSize | 'answer';
+  /** A saved call to the API, not a picture: what was asked. */
+  call?: string;
 }
 
 export interface StuckReport {
@@ -235,6 +239,22 @@ const PAGE = { type: 'string', maxLength: MAX_PAGE, description: 'The page to op
 const SIZE = { type: 'string', enum: ['desktop', 'phone'], description: 'desktop is 1280x800 (the default), phone is 390x844.' } as const;
 const NONE = { type: 'object', properties: {}, additionalProperties: false } as const;
 
+const API_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
+export const MAX_API_CALLS = 20;
+/** What is kept of an answer: enough to judge it, and no more. A file it answers with is saved whole. */
+const MAX_API_ANSWER = 100 * 1024;
+const MAX_API_FILE = 50 * 1024 * 1024;
+const MAX_API_BODY = 100 * 1024;
+const API_WAIT_MS = 60_000;
+const API_TEXT = /^(text\/|application\/(json|xml|problem\+json|[\w.+-]*\+json|[\w.+-]*\+xml|javascript|x-www-form-urlencoded))/i;
+const API_FILE_TYPES: Record<string, string> = {
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+  'application/vnd.ms-excel': 'xls',
+  'application/pdf': 'pdf',
+  'application/zip': 'zip',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+};
+
 const DEFS: Record<WindowTool, Omit<ToolDef, 'name'>> = {
   take_screenshots: {
     description: `squad-kit opens its own browser on this story's app (it starts the app if needed), does the steps, and takes one picture per shot, after its steps. The pictures come back to you, with each file name and the page it ended on, and are saved in the proof folder. Limits: at most ${MAX_SHOTS_PER_CALL} shots in one call, and at most ${MAX_PICTURES} pictures in all in this step, counting each one you take again, so plan one picture per part or case of each "done when". Asking for more is refused, and refused requests can stop the step. Look at each picture and take a wrong one again. Each answer lists every picture you took in this step: name those files in your final answer, no others. Example: ${EXAMPLES.shots}`,
@@ -273,6 +293,21 @@ const DEFS: Record<WindowTool, Omit<ToolDef, 'name'>> = {
     inputSchema: {
       type: 'object',
       properties: { which: { type: 'string', enum: CHECK_NAMES, description: 'Which check to run. Left out, all of them.' } },
+      additionalProperties: false,
+    },
+  },
+  ask_api: {
+    description: `squad-kit asks the running product's API for you, on this computer, and saves exactly what was asked and answered. Use it for a "done when" no page of the app shows. It has no field for a host: it only reaches the parts of this product. Name the saved file in your answer like a picture. At most ${MAX_API_CALLS} calls in a step.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        part: { type: 'string', description: 'The id of the part to ask.' },
+        method: { type: 'string', enum: API_METHODS, description: 'GET unless said otherwise.' },
+        path: { type: 'string', description: 'The path on that part, with any query, like /price?item=3.' },
+        body: { description: 'What to send, for POST, PUT or PATCH: text, or an object sent as JSON.' },
+        headers: { type: 'object', description: 'More headers, when the part needs them.', additionalProperties: { type: 'string' } },
+      },
+      required: ['part', 'path'],
       additionalProperties: false,
     },
   },
@@ -493,6 +528,7 @@ export class AgentWindow {
   readonly stuck: StuckReport[] = [];
   /** Every picture this run took, by file name. */
   readonly pictures = new Map<string, TakenPicture>();
+  private apiCalls = 0;
   private imageBytesSent = 0;
   private app: RunningApp | null;
   /** The app squad-kit is starting for this run. It starts in the background, so a slow start never holds a call. */
@@ -564,7 +600,7 @@ export class AgentWindow {
   /** The exact pictures this run took (name, page, size), for the agent to pick from in its final answer. */
   pictureList(): string {
     if (!this.pictures.size) return 'You took no pictures in this step yet.';
-    const rows = [...this.pictures.values()].map((p) => `- ${p.file}: ${p.page}, ${p.size}`);
+    const rows = [...this.pictures.values()].map((p) => (p.call ? `- ${p.file}: the saved answer to ${p.call}` : `- ${p.file}: ${p.page}, ${p.size}`));
     return `The pictures you took in this step. In your final answer, name only these files:\n${rows.join('\n')}`;
   }
 
@@ -660,6 +696,8 @@ export class AgentWindow {
           return await this.runChecks(args, clock);
         case 'add_part':
           return await this.addPart(args);
+        case 'ask_api':
+          return await this.askApi(args, clock);
         case 'i_am_stuck':
           return await this.iAmStuck(args, clock);
       }
@@ -989,6 +1027,77 @@ export class AgentWindow {
     const job = { ...(which ? { which } : {}), done };
     this.checksJob = job;
     return job;
+  }
+
+  /** The API, asked by squad-kit: only a part of this product, only its own address, and the call is saved as it happened. */
+  private async askApi(args: Record<string, unknown>, clock: CallClock): Promise<ToolResult> {
+    const example = '{ "part": "api", "method": "GET", "path": "/price?item=3" }';
+    const extra = extraFields(args, ['part', 'method', 'path', 'body', 'headers']);
+    if (extra.length) return this.refuse('ask_api', `ask_api has no field "${short(extra[0]!, 40)}"`, `The ${this.s.who} asked the API in a way squad-kit does not offer. squad-kit refused.`);
+    const parts = this.s.api?.() ?? {};
+    if (!Object.keys(parts).length) return ok('This step has no API squad-kit can ask.');
+    const id = typeof args.part === 'string' ? args.part.trim() : '';
+    const part = parts[id];
+    if (!part) return this.mistake('ask_api', id ? `this product has no part "${short(id, 40)}"` : 'part is missing', `Its parts: ${Object.keys(parts).join(', ')}. Use: ${example}.`);
+    const method = typeof args.method === 'string' ? args.method.toUpperCase() : 'GET';
+    if (!API_METHODS.includes(method)) return this.mistake('ask_api', `method is one of ${API_METHODS.join(', ')}`, `Use: ${example}.`);
+    const asked = typeof args.path === 'string' ? args.path.trim() : '';
+    let origin: string;
+    let target: URL;
+    try {
+      origin = new URL(part.url).origin;
+      target = new URL(asked, origin);
+    } catch {
+      return this.mistake('ask_api', 'path is not a path on this part', `Use: ${example}.`);
+    }
+    if (!asked.startsWith('/') || asked.startsWith('//') || target.origin !== origin) {
+      return this.refuse('ask_api', `the path "${short(asked, 80)}" leaves ${origin}`, `The ${this.s.who} asked to reach another address with the API tool. squad-kit refused.`);
+    }
+    if (this.apiCalls >= MAX_API_CALLS) return this.mistake('ask_api', `this step has made its ${MAX_API_CALLS} calls`, 'Hand in what you have, and put the rest in offScreen with why.');
+    const body = args.body === undefined || args.body === null ? undefined : typeof args.body === 'string' ? args.body : JSON.stringify(args.body);
+    if (body && Buffer.byteLength(body) > MAX_API_BODY) return this.mistake('ask_api', 'body is too long', 'Send less.');
+    if (body && (method === 'GET')) return this.mistake('ask_api', 'a GET sends no body', `Use another method, or put it in the path. ${example}.`);
+    const headers: Record<string, string> = {};
+    for (const [k, v] of Object.entries((args.headers ?? {}) as Record<string, unknown>)) {
+      if (typeof v !== 'string' || /^(host|connection|content-length|transfer-encoding)$/i.test(k) || /[\r\n]/.test(k + v)) return this.mistake('ask_api', `the header "${short(k, 40)}" cannot be sent`, 'Leave it out.');
+      headers[k] = v;
+    }
+    if (body && !Object.keys(headers).some((k) => /^content-type$/i.test(k))) headers['content-type'] = typeof args.body === 'string' ? 'text/plain' : 'application/json';
+    const up = await this.ensureApp(by(clock, START_SHARE));
+    if ('fail' in up) return up.fail;
+    this.apiCalls += 1;
+    const n = this.apiCalls;
+    let res: Response;
+    try {
+      res = await fetch(target, { method, headers, redirect: 'manual', ...(body ? { body } : {}), signal: AbortSignal.any([this.signal, AbortSignal.timeout(API_WAIT_MS)]) });
+    } catch (err) {
+      if (this.over) return error(STOPPED_CALL);
+      return error(`${part.name} did not answer ${method} ${asked}: ${(err as Error).message}. Is that the right address on it? Call i_am_stuck if it keeps happening.`);
+    }
+    const contentType = res.headers.get('content-type') ?? '';
+    const type = contentType.split(';')[0]!.trim().toLowerCase();
+    const bytes = Buffer.from(await res.arrayBuffer());
+    const text = !type || API_TEXT.test(type);
+    const stem = `${this.s.prefix ?? this.s.ticket.toLowerCase()}-api-${n}`;
+    const record: Record<string, unknown> = { part: part.name, method, path: asked, ...(body ? { body: body.slice(0, MAX_API_ANSWER) } : {}), status: res.status, contentType };
+    if (text) {
+      const answer = bytes.subarray(0, MAX_API_ANSWER).toString('utf8');
+      record.answer = answer;
+      if (bytes.length > MAX_API_ANSWER) record.cut = true;
+    } else {
+      const own = API_FILE_TYPES[type] ?? 'bin';
+      const name = `${stem}-answer.${own}`;
+      if (bytes.length > MAX_API_FILE) return error(`${part.name} answered with a file of ${bytes.length} bytes, too big to keep. Say so in your answer.`);
+      fs.writeFileSync(path.join(this.s.proofDir, name), bytes);
+      record.file = name;
+      record.bytes = bytes.length;
+    }
+    const file = `${stem}.api.json`;
+    fs.writeFileSync(path.join(this.s.proofDir, file), JSON.stringify(record, null, 2));
+    this.pictures.set(file, { file, page: '', size: 'answer', call: `${method} ${asked} on ${part.name}` });
+    this.s.say(`squad-kit asked ${part.name} for the ${this.s.who}: ${method} ${asked} answered ${res.status}`);
+    const shown = text ? String(record.answer).slice(0, 8000) : `A file of ${bytes.length} bytes (${type}), saved as ${record.file as string}. squad-kit keeps it for the person to open.`;
+    return ok(`${part.name} answered ${res.status}${contentType ? ` (${contentType})` : ''}. Saved as ${file}: name that file in your answer for the "done when" it proves.\n\n${shown}${text && bytes.length > 8000 ? '\n(cut here)' : ''}`);
   }
 
   private async addPart(args: Record<string, unknown>): Promise<ToolResult> {

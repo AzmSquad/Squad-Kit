@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   everything the change touches, in the order the parts need each other, on their usual addresses. The parts a story changed
   run from its copies, the others from a copy of the newest main, with the values kept for stories. One story at a time runs
   it, and the next waits with a plain line. Your apps waits its turn too.
+- **Proof for what no page shows.** The Tester can ask the product's API through squad-kit, which reaches only the product's own
+  addresses and saves exactly what was asked and answered. Your proof says "Asked" and "It answered", with the raw answer for
+  engineers. An answer that is a file, like an Excel sheet, is saved for you to open. A picture still comes first when a page
+  shows it.
 - **Stories at once, per project,** in Settings and with `squad parts --at-once`, for a product too heavy to run twice.
 - A part can run in Docker: squad-kit opens Docker for its own `docker compose up` only, when an engineer locked every compose
   file it names, under a project name of its own so it never touches a stack you run yourself.

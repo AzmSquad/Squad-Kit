@@ -1198,3 +1198,7 @@ ul.ticketnotes .grow, .addnote .grow { flex: 1; }
 .part-file-add .input { flex: 1 1 180px; min-width: 0; font-size: 13px; }
 .part-acts { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
 @media (max-width: 560px) { .part-where { grid-template-columns: 1fr; } }
+/* A proof that is no picture: what was asked and what the API answered. */
+.apiproof { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-top: 8px; font-size: 13.5px; }
+.apiproof .maprow { padding: 8px 0; }
+.apiproof-raw { font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; margin-top: 6px; }

@@ -5,6 +5,7 @@ import { assetUrl, ticketFileUrl } from '../api/client';
 import type { PlanComment, Question, Ticket, TicketNote } from '../api/types';
 import { useAct, useBoard, useTicket } from '../lib/data';
 import { partNames } from '../lib/overview';
+import { ApiProof } from '../components/ApiProof';
 import { usePrefs } from '../lib/prefs';
 import { Cmd, Glyph, Modal, ROLE_NAME, Tracker, ago, clock, commandFor } from '../components/ui';
 import { ConversationTab } from '../components/Conversation';
@@ -25,7 +26,7 @@ import { GatePill, NotCheckedNote } from '../components/Gates';
 import { checksWords, noShotsText, overrideWhat, proofLead, proofWords } from '../lib/gates';
 import { testChangeWaits } from '../lib/waiting';
 import { AlsoChanged, MorePictures, OffScreenList, VerdictIcon, VerdictTag } from '../components/Verdict';
-import { proofViewer, verdictClass, verdictNote } from '../lib/verdict';
+import { isApiProof, proofViewer, verdictClass, verdictNote } from '../lib/verdict';
 import { report } from '../lib/report';
 import { shellQuote } from '../lib/text';
 import { DeleteArchiveBanner, TicketMenu } from '../components/DeleteTicket';
@@ -735,7 +736,7 @@ function ProofShots({ t }: { t: Ticket }) {
               Page <code>{pageOf(p)}</code>
             </p>
           )}
-          <div className="proofmini">
+          {isApiProof(p.after) ? <ApiProof file={p.after} {...(p.note ? { note: p.note } : {})} /> : <div className="proofmini">
             <div>
               <small>{p.beforeLabel}</small>
               <button className="zoom" onClick={() => setZoom(starts[k]!)} aria-label={`Open ${p.beforeLabel} full size`}>
@@ -748,7 +749,7 @@ function ProofShots({ t }: { t: Ticket }) {
                 <img src={assetUrl(`/api/v1/proof/${p.after}`)} alt={`${p.criterion}, ${p.afterLabel}`} />
               </button>
             </div>
-          </div>
+          </div>}
           {p.more?.length && p.why && p.note ? <p className="note proofmore-main">{p.note}</p> : null}
           <MorePictures shot={p} first={starts[k]! + 2} onOpen={setZoom} />
         </div>

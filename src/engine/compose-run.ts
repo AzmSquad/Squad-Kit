@@ -29,9 +29,9 @@ const VALUE_FLAGS = new Set(['-f', '--file', '--env-file', '--profile', '--paral
 const isCompose = (command: string): boolean => /^\s*(docker\s+compose|docker-compose)(\s|$)/.test(command);
 
 /** Docker's socket on this computer, where it really is. */
-export function dockerSocket(env: NodeJS.ProcessEnv = process.env, home = os.homedir()): string | null {
+export function dockerSocket(env: NodeJS.ProcessEnv = process.env, home = os.homedir(), system = '/var/run/docker.sock'): string | null {
   const named = /^unix:\/\/(\/.+)$/.exec(env.DOCKER_HOST?.trim() ?? '')?.[1];
-  for (const place of [named, path.join(home, '.docker', 'run', 'docker.sock'), '/var/run/docker.sock']) {
+  for (const place of [named, path.join(home, '.docker', 'run', 'docker.sock'), system]) {
     if (!place) continue;
     try {
       return fs.realpathSync(place);

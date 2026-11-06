@@ -181,6 +181,7 @@ export const PLAN_SCHEMA = {
     steps: { type: 'array', minItems: 1, maxItems: 8, items: STR },
     tests: { type: 'integer' },
     screens: { type: 'integer' },
+    asks: { type: 'integer' },
     releaseNote: STR,
     commands: COMMANDS,
     repo: STR,
@@ -720,6 +721,7 @@ ${DECISION_LINKS}
 ${DEPENDS_RULE}
 - steps: 3 to 7 small steps in order, one sentence each. The last step writes the tests.
 - tests: how many tests you expect to add. screens: how many "done when" can be shown in a screenshot (0 without a UI).
+  asks: how many "done when" no page shows, but asking the running API would (0 when none).
 - releaseNote: one line for release notes, like "**Dark mode.** Switch the dashboard to dark."
 - commands: only if the project has no way yet to set up, test, build or start it, or this ticket changes that.
   For a new project, choose simple, common tools and give every command, including start and url.${repo}${testLine(t, meta)}${openTicketsText(others, 'architect')}
@@ -789,6 +791,7 @@ ${DECISION_LINKS}
 ${DEPENDS_RULE}
 - steps: 3 to 7 small steps in order, one sentence each. The last step writes the tests.
 - tests: how many tests you expect to add. screens: how many "done when" can be shown in a screenshot (0 without a UI).
+  asks: how many "done when" no page shows, but asking the running API would (0 when none).
 - commands: only if the project has no way yet to set up, test, build or start it, or this ticket changes that.
   For a new project, choose simple, common tools and give every command, including start and url.${repo}${testLine(t, meta)}
 ${MOCKUP_RULE}
@@ -1034,7 +1037,7 @@ function canLook(meta: BoardMeta, ctx?: PromptContext): boolean {
  * takes a wrong one again, and hands in the files per "done when", one per part or case, with one plain note each. It
  * never runs a browser or the app itself, and only reads the code.
  */
-export function proofPrompt(meta: BoardMeta, t: Ticket, when: 'before' | 'after', ctx?: PromptContext, appUrl?: string, beforeSizes: Record<string, string> = {}): string {
+export function proofPrompt(meta: BoardMeta, t: Ticket, when: 'before' | 'after', ctx?: PromptContext, appUrl?: string, beforeSizes: Record<string, string> = {}, apiParts: string[] = []): string {
   const criteria = doneWhen(t);
   // Each "done when"'s before picture, so the after picture it pairs with is taken at the same size.
   const paired = doneWhenItems(t).flatMap((_, i) => {
@@ -1109,7 +1112,12 @@ When a part of a "done when" truly cannot be shown (it needs an old record, the 
 make one), hand in the pictures of the parts that can be shown, and also put it in offScreen, saying which part and
 why. squad-kit's check reads your reason and looks at the code and the sample data itself. "I did not try" or "it takes
 too long" is no reason: it sends you back to take the picture.
-Never wait for the clock. Do not sleep or pause to let a booking end, a day pass or a timer run out: when a part needs
+${apiParts.length ? `A "done when" about what the API answers: when a page of the app shows it, a picture comes first. When no page shows it, call
+ask_api with part (${apiParts.join(', ')}), path, and method and body when it needs them. squad-kit makes the call and saves it as
+a file in your list, with exactly what was asked and answered. Name that file in shots like a picture, with shows judged
+by the answer, and a note for a project manager like "Asked for the sale price of an item of 200 cents. It answered 150."
+Never quote raw data in the note. A "done when" the API can show is never offScreen.
+` : ''}Never wait for the clock. Do not sleep or pause to let a booking end, a day pass or a timer run out: when a part needs
 time to pass, it is one of those parts that cannot be shown.
 Never ask the person anything technical. Do not change project files: squad-kit puts back anything changed.${notesText((t.notes ?? []).filter((n) => n.kind !== 'criterion'))}${rulesText(ctx)}
 ${LOOK}`;
@@ -1193,6 +1201,9 @@ the Tester may have taken it again.
 A "done when" with no picture is not-shown. Some have no picture, or pictures of only a part, with the Tester's reason
 why it cannot be shown on a screen. Do not take the reason on trust: read the code and the project's seed or sample
 data, and judge it.
+A file ending in .api.json is no picture: squad-kit asked the product's API and saved the call, with what was asked and
+what it answered. Read it, and judge by what was answered, not by what the Tester says about it. An answer that is a saved
+file (an Excel sheet, a PDF) cannot be opened here: judge by its status, type and size, and the person opens it.
 A picture is taken at one of two sizes: "phone" (390 wide) or "desktop" (1280 wide). When a "done when" names another
 width, judge the nearest size, and do not fault the picture for its size, or for being at another size than the
 picture from before the change.

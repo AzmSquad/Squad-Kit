@@ -62,6 +62,9 @@ For the proof and Try it yourself, squad-kit runs everything the change touches,
 time. If another program holds one of those addresses, it says so. A part that runs in Docker needs its compose files locked in
 Settings: squad-kit then runs its own `docker compose up`, under a project name of its own, and stops it without removing data.
 
+A "done when" no page shows, like what an API answers, is proved by asking: squad-kit makes the call and saves it, and the proof
+shows what was asked and what it answered. squad-kit's own check reads the saved answer, not the Tester's words about it.
+
 **Overview** is the project's home: what it is, who uses it, what it can do today (with what each merged ticket
 added), how its parts fit together, things worth knowing, the rules the Architect found, the proof that squad-kit can
 work here, and ideas for tickets. The first time, it is the handover after setup: **Looks right, start working**

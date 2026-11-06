@@ -107,7 +107,8 @@ describe('what it refuses', () => {
   });
 
   it('says so when Docker is nowhere', () => {
-    expect(dockerSocket({ DOCKER_HOST: 'unix:///no/such/socket' }, '/no/such/home') === null || process.platform === 'darwin').toBe(true);
+    expect(dockerSocket({ DOCKER_HOST: 'unix:///no/such/socket' }, '/no/such/home', '/no/such/system')).toBeNull();
+    expect(dockerSocket({ DOCKER_HOST: `unix://${fakeSocket}` }, '/no/such/home', '/no/such/system')).toBe(fs.realpathSync(fakeSocket));
   });
 });
 

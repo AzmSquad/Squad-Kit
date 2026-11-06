@@ -32,7 +32,14 @@ export function notOnScreen(t: Pick<Ticket, 'proof' | 'offScreen'>): OffScreen[]
  * Every picture of the proof in order, for the viewer: each row's before and after, then its others. `starts` says
  * where each row begins; its others begin two after that.
  */
-export function proofViewer(rows: ProofShot[], src: (file: string) => string): { pictures: { src: string; caption: string }[]; starts: number[] } {
+/** A proof that is no picture: squad-kit asked the product's API, and saved what it answered. */
+export const isApiProof = (file: string): boolean => file.endsWith('.api.json');
+
+/** What the picture viewer shows in place of a saved answer, so its places stay in order. */
+const NO_PICTURE = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="200"><text x="24" y="100" font-family="sans-serif" font-size="20">An answer from the API, not a picture</text></svg>')}`;
+
+export function proofViewer(rows: ProofShot[], rawSrc: (file: string) => string): { pictures: { src: string; caption: string }[]; starts: number[] } {
+  const src = (file: string) => (isApiProof(file) ? NO_PICTURE : rawSrc(file));
   const pictures: { src: string; caption: string }[] = [];
   const starts: number[] = [];
   for (const r of rows) {

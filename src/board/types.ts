@@ -508,7 +508,7 @@ export interface Ticket {
   decision?: DecisionDraft;
   /** Saved decisions (ADR ids) this ticket's design follows. Each one lists the ticket once the design is approved. */
   follows?: string[];
-  work?: { steps: number; tests: number; screens: number };
+  work?: { steps: number; tests: number; screens: number; asks?: number };
   steps?: Step[];
   gates?: Gates;
   proof?: ProofShot[];

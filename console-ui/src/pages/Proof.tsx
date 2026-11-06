@@ -7,10 +7,11 @@ import { Lightbox } from '../components/Lightbox';
 import { GatePill as Gate, NotCheckedNote } from '../components/Gates';
 import { checksWords, noShotsText, proofWords } from '../lib/gates';
 import { AlsoChanged, MorePictures, OffScreenList, VerdictIcon, VerdictTag } from '../components/Verdict';
-import { proofViewer, verdictClass, verdictNote } from '../lib/verdict';
+import { isApiProof, proofViewer, verdictClass, verdictNote } from '../lib/verdict';
 import { pageOf, pagesOf, waitsAtReview } from '../lib/review';
 import { YourCheck } from '../components/YourCheck';
 import { AskButton } from '../components/AskQuestion';
+import { ApiProof } from '../components/ApiProof';
 
 export function ProofPage() {
   const { id } = useParams({ from: '/tickets/$id/proof' });
@@ -83,7 +84,7 @@ export function ProofPage() {
                   Page <code>{pageOf(shot)}</code>
                 </p>
               )}
-              <div className="ba">
+              {isApiProof(shot.after) ? <ApiProof file={shot.after} {...(shot.note ? { note: shot.note } : {})} /> : <div className="ba">
                 <div>
                   <div className="cap">
                     <span>{shot.beforeLabel}</span>
@@ -100,8 +101,8 @@ export function ProofPage() {
                     <img src={assetUrl(`/api/v1/proof/${shot.after}`)} alt={`${shot.criterion}, ${shot.afterLabel}`} />
                   </button>
                 </div>
-              </div>
-              {shot.note && <p className="note">{shot.note}</p>}
+              </div>}
+              {shot.note && !isApiProof(shot.after) && <p className="note">{shot.note}</p>}
               <MorePictures shot={shot} first={at + 2} onOpen={setZoom} />
             </>
           ) : (

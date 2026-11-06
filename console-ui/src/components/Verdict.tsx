@@ -2,8 +2,9 @@ import { Check, EyeOff, MonitorOff, X } from 'lucide-react';
 import { assetUrl } from '../api/client';
 import type { ProofShot, Ticket } from '../api/types';
 import { pageOf, waitsAtReview } from '../lib/review';
-import { notOnScreen, verdictClass, verdictWord } from '../lib/verdict';
+import { isApiProof, notOnScreen, verdictClass, verdictWord } from '../lib/verdict';
 import '../styles/verdict.css';
+import { ApiProof } from './ApiProof';
 
 /**
  * What each proof picture shows: its "done when" is Met, Not working yet, Not shown yet or Not on a screen, with why.
@@ -38,9 +39,9 @@ export function MorePictures({ shot, first, onOpen }: { shot: ProofShot; first: 
       <div className="proofmore-row">
         {shot.more.map((m, i) => (
           <figure key={m.after}>
-            <button className="zoom" onClick={() => onOpen(first + i)} aria-label={`Open picture ${i + 2} of this "done when" full size`}>
+            {isApiProof(m.after) ? <ApiProof file={m.after} /> : <button className="zoom" onClick={() => onOpen(first + i)} aria-label={`Open picture ${i + 2} of this "done when" full size`}>
               <img src={assetUrl(`/api/v1/proof/${m.after}`)} alt={`${shot.criterion}, ${m.note || `picture ${i + 2}`}`} loading="lazy" />
-            </button>
+            </button>}
             <figcaption>
               {m.note && <span>{m.note}</span>}
               {pageOf(m) && <code>{pageOf(m)}</code>}

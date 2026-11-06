@@ -14,6 +14,9 @@ import type { ProofPicture, ProofShot, Ticket } from '../board/types.js';
  * place.
  */
 
+/** A proof that is no picture: squad-kit asked the product's API and saved the call (AgentWindow, ask_api). */
+export const isApiProof = (file: string): boolean => file.endsWith('.api.json');
+
 /** The most pictures one step may take, and so the most one answer of the Tester's may name. */
 export const MAX_PICTURES = 40;
 

@@ -267,7 +267,7 @@ function handedIn(t: Ticket, run: Run, files: FileList | null, conv: Conversatio
       return { kind: 'verdict', approved, notes };
     }
     case 'proof':
-      return t.proof?.length ? { kind: 'shots', shots: t.proof.flatMap((p) => [p.after, ...(p.more ?? []).map((m) => m.after)].map((file) => ({ criterion: p.criterion, file }))) } : undefined;
+      return t.proof?.length ? { kind: 'shots', shots: t.proof.flatMap((p) => [p.after, ...(p.more ?? []).map((m) => m.after)].filter((file) => !file.endsWith('.api.json')).map((file) => ({ criterion: p.criterion, file }))) } : undefined;
   }
 }
 

@@ -115,7 +115,7 @@ import { runBreakdownJob } from './breakdown-job.js';
 import { fillBuildQueue, placesLeft } from '../board/requirements-build.js';
 import { startSends } from '../board/requirements-send.js';
 import { clearStaleStop } from '../board/stale-stop.js';
-import { CHECK_FAILED, MAX_PICTURES_PER_DONE_WHEN, MAX_PROOF_ROUNDS, MAX_RETAKES, addPictures, afterLastRetake, brokenRows, brokenStop, cannotShowLine, checkVerdicts, criterionText, doneWhenCount, fixLine, fromReason, makeMain, notShownStop, offScreenNumbers, reasonRefusedLine, retakeLine, together, verdictOf, type CheckVerdict, type Judged, type OpenRow } from './proof-verdict.js';
+import { CHECK_FAILED, MAX_PICTURES_PER_DONE_WHEN, MAX_PROOF_ROUNDS, MAX_RETAKES, addPictures, isApiProof, afterLastRetake, brokenRows, brokenStop, cannotShowLine, checkVerdicts, criterionText, doneWhenCount, fixLine, fromReason, makeMain, notShownStop, offScreenNumbers, reasonRefusedLine, retakeLine, together, verdictOf, type CheckVerdict, type Judged, type OpenRow } from './proof-verdict.js';
 
 /**
  * The live squad. Each step of a ticket is one real run of the role's AI tool in the project (or the
@@ -1111,6 +1111,14 @@ export class LiveSquad {
       onWait: (hold) => this.update(id, (x) => (x.status = waitWords(hold))),
       log: (text) => this.log('info', text, id),
     });
+  }
+
+  /** What the Tester may ask: the running parts of the product, or the one app, each only on its own address. */
+  private apiParts(t: Ticket): Record<string, { name: string; url: string }> {
+    const meta = this.meta();
+    if (runsAsProduct(meta)) return Object.fromEntries(productPlan(this.bp, meta, t).places.map((p) => [p.part.id, { name: p.part.name, url: p.url }]));
+    const c = (this.appOf(t)?.repo ?? repoFor(meta, t)).commands;
+    return c.start?.trim() && c.url?.trim() ? { app: { name: 'the app', url: c.url.trim() } } : {};
   }
 
   /** A story's folder: run_checks takes the part, and runs in that part's copy. Read at each call, as a copy may be new. */
@@ -2472,6 +2480,7 @@ export class LiveSquad {
       steps: string[];
       tests: number;
       screens: number;
+      asks?: number;
       releaseNote?: string;
       commands?: ProjectCommands;
       repo?: string;
@@ -2524,7 +2533,7 @@ export class LiveSquad {
       if (t.decision?.replaces && !known.has(t.decision.replaces)) delete t.decision.replaces;
       t.steps = out.steps.map((s) => ({ title: s, status: 'todo' }));
       applyPlanEdits(t);
-      t.work = { steps: out.steps.length, tests: Math.max(0, out.tests), screens: Math.max(0, out.screens) };
+      t.work = { steps: out.steps.length, tests: Math.max(0, out.tests), screens: Math.max(0, out.screens), ...(out.asks ? { asks: Math.max(0, out.asks) } : {}) };
       addActivity(t, design ? 'architect' : 'spec', change ? `Updated the ${design ? 'design' : 'plan'}: ${changeSummary(change)}` : design ? 'Wrote the design' : 'Wrote the plan');
       if (design) addDecided(t, 'architect', out.decided);
       if ((t.track === 'express' || t.track === 'auto') && !change) {
@@ -3622,7 +3631,7 @@ export class LiveSquad {
     const t = readTicket(this.bp, id)!;
     const rc = (this.appOf(t)?.repo ?? repoFor(meta, t)).commands;
     // A product that cannot run yet says why, instead of having nothing to show.
-    const canShow = (Boolean(rc.start && rc.url) || Boolean(runsAsProduct(meta) && productPlan(this.bp, meta, t).why)) && (t.work?.screens ?? 0) > 0;
+    const canShow = (Boolean(rc.start && rc.url) || Boolean(runsAsProduct(meta) && productPlan(this.bp, meta, t).why)) && (t.work?.screens ?? 0) + (t.work?.asks ?? 0) > 0;
     // Why no picture was taken, in the person's words, and the exact error for engineers.
     let why = '';
     let detail = '';
@@ -4125,7 +4134,8 @@ export class LiveSquad {
       step: 'proof',
       who: 'Tester',
       // A copy of the code as it was has nothing to check; the story's own copy does.
-      tools: beside ? ALL_TOOLS.filter((x) => x !== 'run_checks') : ALL_TOOLS,
+      tools: beside ? ALL_TOOLS.filter((x) => x !== 'run_checks') : [...ALL_TOOLS, 'ask_api'],
+      ...(beside ? {} : { api: () => this.apiParts(t) }),
       app: { cwd, start, url, ...(this.guardFor(cwd, id) ? { guard: this.guardFor(cwd, id)! } : {}), ...(product ? this.productApp(id) : {}) },
       ...(beside ? {} : { checks: this.windowChecks(id, cwd) }),
       running: app,
@@ -4146,7 +4156,7 @@ export class LiveSquad {
     const lanes = beside ? [watchLane(beside.cwd, this.protectedFiles(beside.cwd), true)] : this.watchCopies(t, true);
     // A picture saved before this moment was not taken in this step.
     const since = Date.now();
-    const prompt = P.proofPrompt(meta, t, when, this.ctx(t), appUrl, when === 'after' ? this.beforeSizes(t) : undefined);
+    const prompt = P.proofPrompt(meta, t, when, this.ctx(t), appUrl, when === 'after' ? this.beforeSizes(t) : undefined, beside ? [] : Object.keys(this.apiParts(t)));
     // A new round of after-shots names every "done when": a picture, or why it shows on no screen.
     const count = doneWhenCount(t);
     const complete = (answer: unknown): string | null => {
@@ -4232,7 +4242,7 @@ export class LiveSquad {
       const full = path.join(this.bp.proofDir, s.file);
       const criterion = named(s.criterion);
       if (!criterion || !fs.existsSync(full)) continue;
-      const bad = shotProblem(full, since);
+      const bad = isApiProof(s.file) ? null : shotProblem(full, since);
       if (!bad) continue;
       rejected.add(s.file);
       problems.push({ criterion, text: `The ${when} screenshot for "${criterion}" (${s.file}): ${bad}.` });
@@ -4264,7 +4274,9 @@ export class LiveSquad {
         if (all.length) x.offScreen = all;
         else delete x.offScreen;
         const notOn = off.length ? `. Not on a screen: ${off.map((o) => `"done when" ${o.criterion}`).join(', ')}` : skipped ? `. Skipped: ${skipped}` : '';
-        addActivity(x, 'tester', `Saved ${shots.length - rejected.size} screenshots${notOn}`);
+        const answers = shots.filter((s) => isApiProof(s.file)).length;
+        const pictures = shots.length - answers - rejected.size;
+        addActivity(x, 'tester', `Saved ${pictures} ${answers && pictures === 1 ? 'screenshot' : 'screenshots'}${answers ? ` and ${answers} ${answers === 1 ? 'answer' : 'answers'} from the API` : ''}${notOn}`);
       }
     });
     return { problems, planned: shots.map((s) => s.criterion), said: skipped, stuck: win.stuck, sizes: Object.fromEntries(shots.map((s) => [s.file, s.size])) };
