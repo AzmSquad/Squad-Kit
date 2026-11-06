@@ -3,7 +3,10 @@ import { isUp } from '../board/apps.js';
 import { pageUrl, proofPages, waitsAtReview } from '../board/at-review.js';
 import { addActivity, readMeta, readTicket, updateTicket, type BoardPaths } from '../board/store.js';
 import type { Ticket } from '../board/types.js';
+import { runsAsProduct } from '../board/parts.js';
 import { startApp, type RunningApp } from './checks.js';
+import { productHold } from './product-lock.js';
+import { ProductError, productPlan, startProduct, stopProduct, waitWords } from './product-run.js';
 import { guardSupport, ticketGuard } from './project-guard.js';
 import { KILL_AFTER_MS } from './process-group.js';
 import { repoFor } from './repos.js';
@@ -59,6 +62,10 @@ interface TryRun {
   /** Where the ticket stood when the copy started: when it changes, the ticket has moved on. */
   mark: string;
   cwd: string;
+  /** The story's own copy. On a product, what a person opens may run from a copy of main. */
+  copy: string;
+  /** The whole product runs for it, and it holds the running product. */
+  product: boolean;
   url?: string;
   since?: string;
   error?: string;
@@ -81,7 +88,9 @@ function markOf(t: Ticket): string {
 export function tryBlocked(bp: BoardPaths, t: Ticket): string | null {
   if (!waitsAtReview(t)) return `${t.id} does not wait for your check now, so there is nothing to try.`;
   if (!t.worktree || !fs.existsSync(t.worktree)) return `${t.id} has no copy of the code on this computer to run.`;
-  const rc = repoFor(readMeta(bp), t).commands;
+  const meta = readMeta(bp);
+  if (runsAsProduct(meta)) return productPlan(bp, meta, t).why ?? null;
+  const rc = repoFor(meta, t).commands;
   if (!rc.start?.trim()) return 'squad-kit does not know how to start the app yet. Set its start command in Settings, under How the squad checks and runs this project.';
   if (!rc.url?.trim()) return "squad-kit does not know the app's address yet. Set it in Settings, under How the squad checks and runs this project.";
   return null;
@@ -94,13 +103,19 @@ export function tryBlocked(bp: BoardPaths, t: Ticket): string | null {
 function movedOn(t: Ticket | null, run: TryRun): { note?: string } | null {
   if (!t || t.deleting) return {};
   if (t.stage === 'release' || t.stage === 'done') return { note: 'Stopped the copy of the app you were trying: the ticket is accepted' };
-  if (t.live || t.squad || !waitsAtReview(t) || markOf(t) !== run.mark || t.worktree !== run.cwd || !fs.existsSync(run.cwd)) {
+  if (t.live || t.squad || !waitsAtReview(t) || markOf(t) !== run.mark || t.worktree !== run.copy || !fs.existsSync(run.cwd)) {
     return { note: 'Stopped the copy of the app you were trying: the ticket moved on' };
   }
   return null;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Who holds the running product for this copy: never the story itself, whose own steps come back to it. */
+const holderOf = (run: Pick<TryRun, 'ticket'>): string => `try:${run.ticket}`;
+
+/** How long a copy someone is trying stays once a story waits for the product. */
+const TRY_YIELDS_AFTER_MS = 15 * 60_000;
 
 /** The ticket copies of one project's app: one runs at a time. The board's buttons and the terminal share it. */
 export class TryRunner {
@@ -159,13 +174,18 @@ export class TryRunner {
     if (why) throw new TryError(why);
     const now = this.run;
     if (now?.ticket === t.id && (now.state === 'starting' || now.state === 'running')) return this.status(t.id);
-    const rc = repoFor(readMeta(this.bp), t).commands;
+    const meta = readMeta(this.bp);
+    const product = runsAsProduct(meta);
+    const front = product ? productPlan(this.bp, meta, t).front : undefined;
+    const rc = (front?.repo ?? repoFor(meta, t)).commands;
     let settle!: () => void;
     const run: TryRun = {
       ticket: t.id,
       state: 'starting',
       mark: markOf(t),
-      cwd: t.worktree!,
+      cwd: front?.dir ?? t.worktree!,
+      copy: t.worktree!,
+      product,
       stop: new AbortController(),
       settled: new Promise<void>((r) => (settle = r)),
       missed: 0,
@@ -182,7 +202,9 @@ export class TryRunner {
     try {
       const allow = readMeta(this.bp).guard;
       const guard = guardSupport().on ? ticketGuard(this.bp, { cwd: run.cwd, id: run.ticket, ...(allow ? { allow } : {}) }) : undefined;
-      const app = await startApp(run.cwd, command, url, this.opts.waitMs, run.stop.signal, guard);
+      const app = run.product
+        ? await startProduct(this.bp, this.ticket(run.ticket), holderOf(run), 'try', { signal: run.stop.signal, ...(this.opts.waitMs ? { waitMs: this.opts.waitMs } : {}), onWait: (hold) => this.note(run.ticket, waitWords(hold)) })
+        : await startApp(run.cwd, command, url, this.opts.waitMs, run.stop.signal, guard);
       if (run.stop.signal.aborted) return app.stop();
       run.app = app;
       run.url = app.url;
@@ -190,11 +212,13 @@ export class TryRunner {
       run.state = 'running';
       this.note(run.ticket, "Started this story's own copy of the app for you to try. Nothing is merged.");
     } catch (err) {
+      if (run.product) stopProduct(this.bp, holderOf(run));
       if (run.stop.signal.aborted) return;
       run.state = 'failed';
-      run.error = 'The app did not start.';
+      const plain = err instanceof ProductError ? err : null;
+      run.error = plain?.message ?? 'The app did not start.';
       // One plain sentence; what it printed is behind "See what failed", for engineers.
-      run.detail = (err as Error).message.slice(-4000);
+      run.detail = (plain?.detail ?? (err as Error).message).slice(-4000);
       this.note(run.ticket, 'Try it yourself: the app did not start.');
     }
   }
@@ -211,6 +235,7 @@ export class TryRunner {
     run.stop.abort();
     run.app?.stop();
     await run.settled;
+    if (run.product) stopProduct(this.bp, holderOf(run));
     if (this.run === run) this.run = undefined;
     if (run.app && run.url) {
       const until = Date.now() + KILL_AFTER_MS + 1500;
@@ -262,6 +287,12 @@ export class TryRunner {
         return;
       }
       if (run.state !== 'running' || !run.url) return;
+      // A forgotten copy never keeps the squad from its work: once a story wants the product, it ends after a while.
+      if (run.product && productHold(this.bp)?.wanted && Date.now() - Date.parse(run.since ?? '') > TRY_YIELDS_AFTER_MS) {
+        if (this.run === run) this.run = undefined;
+        await this.end(run, `Stopped the copy of the app you were trying: ${productHold(this.bp)?.wanted ?? 'a story'} needs the product now. Press Try it yourself again later.`);
+        return;
+      }
       if (await isUp(run.url)) run.missed = 0;
       else if (++run.missed >= 2 && this.run === run) {
         run.app?.stop();

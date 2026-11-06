@@ -41,6 +41,8 @@ export interface GuardSpec {
   noWrite: string[];
   /** Where a container runtime listens: no command connects here, unless an engineer allowed it. */
   noConnect: string[];
+  /** The one socket squad-kit opened for its own `docker compose up` (compose-run.ts). No other command gets this. */
+  openSocket?: string;
   /** The throwaway git folder a commit's hooks run on (git.ts): theirs to read and write, whatever else is closed. */
   hookGit?: string;
   /** The copy's own package cache for NuGet, Maven, Gradle and Ruby, so those tools never write the person's shared ones. */
@@ -306,6 +308,7 @@ export function profileText(spec: GuardSpec): string {
   for (const s of spec.noConnect) lines.push(`(deny network-outbound (subpath ${sb(s)}))`);
   for (const port of RUNTIME_PORTS) lines.push(`(deny network-outbound (remote tcp "localhost:${port}"))`);
   for (const a of [...allowRead, ...allowWrite]) lines.push(`(allow network-outbound (subpath ${sb(a)}))`);
+  if (spec.openSocket) lines.push(`(allow network-outbound (literal ${sb(spec.openSocket)}))`);
 
   // Signals only to what the command itself started: not to squad-kit, and not to the person's own programs.
   lines.push('(deny signal)', '(allow signal (target same-sandbox))');

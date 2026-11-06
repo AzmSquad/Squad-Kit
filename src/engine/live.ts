@@ -55,7 +55,7 @@ import { TECHNICAL_STOP, ownRunWords, ownWords } from './plain-stop.js';
 import { addSnapshot, addWorktree, changedTracked, copyDirsIn, commitAll, conventionalWords, cutOffWords, dropSnapshot, git, isAncestor, isLockFile, latestBase, putBackTracked, repairCopyLink, settleCopy } from './git.js';
 import * as P from './prompts.js';
 import { baseCommits, repoFor, reposOf, rulesFiles, workspaceRepos } from './repos.js';
-import { partsOf, repoLabel } from '../board/parts.js';
+import { partsOf, repoLabel, runsAsProduct } from '../board/parts.js';
 import { flushTracker, publishTicket, recheckMerge, syncWiki, trackerDue } from './sync.js';
 import { AGENTS, agentInstructions, readAgent, type AgentRole } from './agents.js';
 import { Watchdog, processTable, type Quiet } from './watchdog.js';
@@ -66,6 +66,8 @@ import { CapReached, capCard } from './caps.js';
 import { blockedLine, packageCacheEnv, sandboxAsk, sandboxOf, ticketCacheDir } from './sandbox.js';
 import { hiddenFiles, placeStoryFiles } from './local-files.js';
 import { appCopyOf, copiesOf, reposOfParts, storyCopyDir, workFolder } from './copies.js';
+import { ProductError, productCopiesDir, productPlan, startProduct, stopProduct, waitWords } from './product-run.js';
+import { productHold } from './product-lock.js';
 import { offLimits } from '../board/project-files.js';
 import { GUARD_BLOCKED, GUARD_BLOCKED_DOCKER, blockedDocker, dockerBlockedWords, guardBlockedDetail, guardBlockedPath, guardSupport, ticketGuard, type GuardSpec } from './project-guard.js';
 import { ticketDir } from '../board/store.js';
@@ -285,6 +287,9 @@ export class LiveSquad {
   /** A free place in the app's one limit. While squads wait for one, it goes to the squad with fewer tickets running. */
   private mayStart(limit: number): boolean {
     const mine = this.ticketsRunning();
+    // A heavy product takes fewer at once than the app allows. That place is no one else's to give up.
+    const own = this.meta().atOnce;
+    if (own && mine >= own) return false;
     const busy = ticketsRunning() + (squads.has(this) ? 0 : mine);
     if (busy < limit && ![...waiting].some((s) => s !== this && s.ticketsRunning() < mine)) {
       waiting.delete(this);
@@ -727,6 +732,8 @@ export class LiveSquad {
       const t = !k.startsWith('__') && k !== except ? tickets.find((x) => x.id === k) : undefined;
       if (t) out.push(...ticketCopies(this.bp, t));
     }
+    // The running product is someone's, while they hold it.
+    if (productHold(this.bp)) out.push(productCopiesDir(this.bp));
     return out;
   }
 
@@ -762,6 +769,7 @@ export class LiveSquad {
     if (this.closing) return;
     const t = readTicket(this.bp, id);
     if (!t?.worktree || t.takenOver || !fs.existsSync(t.worktree)) return;
+    stopProduct(this.bp, id);
     await runsEnded([workFolder(t)!], 6000);
     await this.clearCopies([workFolder(t)!], {}, id);
   }
@@ -937,7 +945,7 @@ export class LiveSquad {
     const copies = t?.storyDir ? copiesOf(meta, t) : [];
     return {
       rules: this.ruleCopies().files,
-      ...(t ? { repo: appCopyOf(meta, t)?.repo ?? repoFor(meta, t) } : {}),
+      ...(t ? { repo: this.appOf(t)?.repo ?? repoFor(meta, t) } : {}),
       ...(copies.length ? { copies: copies.map((c) => ({ folder: c.repo.path, name: c.label, commands: c.repo.commands, ...(c.baseCommit ? { baseCommit: c.baseCommit } : {}) })) } : {}),
     };
   }
@@ -1046,8 +1054,8 @@ export class LiveSquad {
   private windowFor(opts: AgentRun & { ticket: string; role: AgentRole; step?: string }, signal: AbortSignal): AgentWindow {
     const id = opts.ticket;
     const t = readTicket(this.bp, id);
-    const appCopy = t ? appCopyOf(this.meta(), t) : undefined;
-    const rc = appCopy?.repo.commands ?? (t ? repoFor(this.meta(), t).commands : {});
+    const appCopy = t ? this.appOf(t) : undefined;
+    const rc = appCopy?.repo.commands ?? (t && !runsAsProduct(this.meta()) ? repoFor(this.meta(), t).commands : {});
     const inCopy = Boolean(t?.worktree && opts.cwd === workFolder(t));
     const here = inCopy && Boolean(rc.start?.trim() && rc.url?.trim());
     const builds = inCopy && opts.permissions.includes('edit');
@@ -1059,7 +1067,7 @@ export class LiveSquad {
       step: opts.step ?? 'chat',
       who,
       tools: toolsFor({ app, look, checks: builds, parts: builds && Boolean(t?.storyDir) }),
-      ...(app || look ? { app: { cwd: appCopy!.dir, start: rc.start!.trim(), url: rc.url!.trim(), ...(this.guardFor(appCopy!.dir, id) ? { guard: this.guardFor(appCopy!.dir, id)! } : {}) } } : {}),
+      ...(app || look ? { app: { cwd: appCopy!.dir, start: rc.start!.trim(), url: rc.url!.trim(), ...(runsAsProduct(this.meta()) || !this.guardFor(appCopy!.dir, id) ? {} : { guard: this.guardFor(appCopy!.dir, id)! }), ...this.productApp(id) } } : {}),
       ...(builds ? { checks: t?.storyDir ? this.windowChecksByPart(id, t) : this.windowChecks(id, opts.cwd) } : {}),
       ...(builds && t?.storyDir ? { addPart: (part: string) => this.addPart(id, part, this.lanesOf.get(id)) } : {}),
       prefix: `${id.toLowerCase()}-${opts.role}`,
@@ -1081,6 +1089,28 @@ export class LiveSquad {
           stepDoing(x, x.status);
         }),
     };
+  }
+
+  /** The copy the story's app runs from: on a product, the part a person opens, which may be a copy of main. */
+  private appOf(t: Ticket): { repo: RepoInfo; dir: string } | undefined {
+    const meta = this.meta();
+    return runsAsProduct(meta) ? productPlan(this.bp, meta, t).front : appCopyOf(meta, t);
+  }
+
+  /** On a product, a window's app keeps its address, and what it relies on starts first and stops with it. */
+  private productApp(id: string): { run?: () => Promise<RunningApp>; after?: () => void } {
+    if (!runsAsProduct(this.meta())) return {};
+    return { run: () => this.startProductFor(id), after: () => stopProduct(this.bp, id) };
+  }
+
+  /** The story's whole product, up and running, and the part a person opens. It waits its turn, and says so. */
+  private startProductFor(id: string): Promise<RunningApp> {
+    const signal = this.stops.get(id)?.signal;
+    return startProduct(this.bp, readTicket(this.bp, id)!, id, 'story', {
+      ...(signal ? { signal } : {}),
+      onWait: (hold) => this.update(id, (x) => (x.status = waitWords(hold))),
+      log: (text) => this.log('info', text, id),
+    });
   }
 
   /** A story's folder: run_checks takes the part, and runs in that part's copy. Read at each call, as a copy may be new. */
@@ -2668,10 +2698,11 @@ export class LiveSquad {
     this.goOn(id);
     if (t0.replanFor) return this.rebuild(id, t0.replanFor);
     const meta = this.meta();
-    const rc = (appCopyOf(meta, t0)?.repo ?? repoFor(meta, t0)).commands;
+    const rc = (this.appOf(t0)?.repo ?? repoFor(meta, t0)).commands;
     // Work already in the copy (it came with a pushed branch): no "before" screens of it, and a fresh Builder reads it.
     const sofar = t0.baseCommit ? workSoFar(t0.worktree!, t0.baseCommit) : [];
-    if (!sofar.length && !t0.proof?.length && t0.baseCommit && rc.start && rc.url && (t0.work?.screens ?? 0) > 0 && !meta.scan?.empty) {
+    // On a product, "before" pictures would need the whole product running beside the build, on the same addresses.
+    if (!sofar.length && !t0.proof?.length && t0.baseCommit && rc.start && rc.url && (t0.work?.screens ?? 0) > 0 && !meta.scan?.empty && !runsAsProduct(meta)) {
       // Beside the build, never before it: the Builder starts now.
       this.shootBefore(id);
     }
@@ -3496,7 +3527,7 @@ export class LiveSquad {
     const goOn = answered && Boolean(t0.sessions?.review);
     this.writeChanges(t0);
     // The Reviewer may look at the app's pages, and the app runs in the ticket's copy: what it changes there goes back.
-    const rc = appCopyOf(meta, t0)?.repo.commands ?? {};
+    const rc = this.appOf(t0)?.repo.commands ?? {};
     const lanes = rc.start?.trim() && rc.url?.trim() ? this.watchCopies(t0, true) : [];
     const r = await this.runAgent({
         role: 'reviewer',
@@ -3589,8 +3620,9 @@ export class LiveSquad {
   private async proof(id: string): Promise<void> {
     const meta = this.meta();
     const t = readTicket(this.bp, id)!;
-    const rc = (appCopyOf(meta, t)?.repo ?? repoFor(meta, t)).commands;
-    const canShow = Boolean(rc.start && rc.url) && (t.work?.screens ?? 0) > 0;
+    const rc = (this.appOf(t)?.repo ?? repoFor(meta, t)).commands;
+    // A product that cannot run yet says why, instead of having nothing to show.
+    const canShow = (Boolean(rc.start && rc.url) || Boolean(runsAsProduct(meta) && productPlan(this.bp, meta, t).why)) && (t.work?.screens ?? 0) > 0;
     // Why no picture was taken, in the person's words, and the exact error for engineers.
     let why = '';
     let detail = '';
@@ -4047,6 +4079,9 @@ export class LiveSquad {
    */
   private async screens(id: string, when: 'before' | 'after', beside?: { cwd: string; job: string; signal: AbortSignal }, again: string[] = []): Promise<ShotRound> {
     const meta = this.meta();
+    // A product that cannot run yet says why, before anything else starts.
+    const cannot = !beside && runsAsProduct(meta) ? productPlan(this.bp, meta, readTicket(this.bp, id)!).why : undefined;
+    if (cannot) throw new StepError(cannot, cannot);
     // squad-kit's browser is on this computer before any clock starts: the first time, it is downloaded.
     await this.readyBrowser(id, beside?.signal ?? this.stops.get(id)?.signal, beside?.job ?? id);
     const t = this.update(id, (x) => {
@@ -4063,7 +4098,8 @@ export class LiveSquad {
       addActivity(x, 'tester', when === 'before' ? 'Taking screenshots before the change' : 'Taking screenshots after the change');
     });
     fs.mkdirSync(this.bp.proofDir, { recursive: true });
-    const appCopy = appCopyOf(meta, t);
+    const product = !beside && runsAsProduct(meta);
+    const appCopy = this.appOf(t);
     const rc = (appCopy?.repo ?? repoFor(meta, t)).commands;
     const cwd = beside?.cwd ?? appCopy?.dir ?? t.worktree!;
     const signal = beside?.signal ?? this.stops.get(id)?.signal;
@@ -4074,9 +4110,10 @@ export class LiveSquad {
     if (!beside) this.update(id, (x) => (x.status = 'Starting the app'));
     let app: RunningApp;
     try {
-      app = await startApp(cwd, start, url, undefined, signal, this.guardFor(cwd, id));
+      app = product ? await this.startProductFor(id) : await startApp(cwd, start, url, undefined, signal, this.guardFor(cwd, id));
     } catch (err) {
       if (signal?.aborted) throw err;
+      if (err instanceof ProductError) throw new StepError(err.message, err.detail ?? err.message);
       throw new StepError(dockerBlockedWords((err as Error).message, this.guardFor(cwd, id)) ?? NO_APP, (err as Error).message);
     }
     const at = app.url;
@@ -4089,7 +4126,7 @@ export class LiveSquad {
       who: 'Tester',
       // A copy of the code as it was has nothing to check; the story's own copy does.
       tools: beside ? ALL_TOOLS.filter((x) => x !== 'run_checks') : ALL_TOOLS,
-      app: { cwd, start, url, ...(this.guardFor(cwd, id) ? { guard: this.guardFor(cwd, id)! } : {}) },
+      app: { cwd, start, url, ...(this.guardFor(cwd, id) ? { guard: this.guardFor(cwd, id)! } : {}), ...(product ? this.productApp(id) : {}) },
       ...(beside ? {} : { checks: this.windowChecks(id, cwd) }),
       running: app,
       prefix: `${id.toLowerCase()}-${when}`,

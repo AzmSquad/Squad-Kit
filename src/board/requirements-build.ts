@@ -242,7 +242,7 @@ async function queueTurn(bp: BoardPaths, b: Breakdown, meta: BoardMeta, room: Qu
   }
   if (!held) {
     const busy = stories.filter(({ story }) => working(tickets.get(story.key))).length;
-    const places = Math.min(parallelLimit(meta.parallel) - busy, room.free());
+    const places = Math.min(Math.min(parallelLimit(meta.parallel), meta.atOnce ?? Infinity) - busy, room.free());
     for (const { story } of ready.slice(0, Math.max(0, places))) {
       try {
         const t = startStory(bp, b.id, story.key, { by: 'squad' });

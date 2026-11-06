@@ -4,7 +4,7 @@ import { repoPaths } from '../board/parts.js';
 import { storyFile, storyFilesDir } from '../board/project-files.js';
 import { readMeta, type BoardPaths } from '../board/store.js';
 import { markPlaced } from './git.js';
-import { localEnvFiles } from './run-app.js';
+import { copyEnvFiles, localEnvFiles } from './run-app.js';
 
 /**
  * Local files in a story's copy. The project's own tests and app need them, and no agent may read them. A command can
@@ -42,6 +42,16 @@ export function placeStoryFiles(bp: BoardPaths, repo: string, dir: string): { pl
   }
   markPlaced(dir, out.placed);
   return out;
+}
+
+/**
+ * squad-kit's own copy for its own runs, with no agent in it: the project's .env files, as an app needs them to start, and
+ * for what an engineer named as local, the values kept for stories instead of the person's own.
+ */
+export function fillOwnCopy(bp: BoardPaths, repo: string, dir: string): void {
+  copyEnvFiles(path.join(bp.root, repo), dir);
+  for (const f of localFileNames(bp, repo)) fs.rmSync(path.join(dir, f), { force: true });
+  placeStoryFiles(bp, repo, dir);
 }
 
 /** The names of a repo's local files, for squad-kit's own copies that run the person's own version of the app. */

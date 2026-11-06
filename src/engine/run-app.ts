@@ -12,6 +12,8 @@ import { git, latestBase } from './git.js';
 import { KILL_AFTER_MS, OWN_GROUP, endGroup, endTree, takenOver } from './process-group.js';
 import { portSettings } from './port-vars.js';
 import { reposOf } from './repos.js';
+import { runsAsProduct } from '../board/parts.js';
+import { leaveProduct, takeProduct } from './product-lock.js';
 
 /**
  * Your apps: squad-kit runs each app of the project from its own copy of main, never the person's checkout, so a
@@ -109,6 +111,9 @@ const SETUP_MS = 20 * 60_000;
 const OUTPUT_KEEP = 60_000;
 
 /** squad-kit's own copy of an app's code, in the project's folder on this computer. */
+/** Who holds the running product when a person runs it from Your apps. */
+const YOUR_APPS = 'Your apps';
+
 export function appCopyDir(bp: BoardPaths, app: ProjectApp): string {
   return path.join(bp.localDir, 'apps', app.name.replace(/[^\w.-]+/g, '-') || 'app');
 }
@@ -519,12 +524,24 @@ export class AppRunner {
     run.error = error;
     if (more.detail) run.detail = more.detail;
     if (more.busy) run.busy = more.busy;
+    this.leaveIfIdle();
+  }
+
+  /** The running product is free again once none of Your apps runs. */
+  private leaveIfIdle(): void {
+    if (![...this.runs.values()].some((r) => r.state === 'starting' || r.state === 'running')) leaveProduct(this.bp, YOUR_APPS);
   }
 
   private async launch(app: ProjectApp, run: Run, opts: StartOptions, exited: () => void): Promise<void> {
     const repo = this.repoOf(app);
     const dir = appCopyDir(this.bp, app);
     const { signal } = run.stop;
+    // A product's parts keep their addresses, so Your apps and a story cannot run it at the same time.
+    const fixed = runsAsProduct(readMeta(this.bp));
+    if (fixed) {
+      const other = takeProduct(this.bp, YOUR_APPS, 'apps');
+      if (other) return this.fail(run, `The squad is running the product for ${other.holder.replace(/^try:/, '')} right now, on the same addresses. Start this again when that is done.`);
+    }
     await this.elsewhereStopped(app, opts);
 
     // The newest main, every time: the work accepted since the last Start comes with it.
@@ -555,7 +572,7 @@ export class AppRunner {
       const freed = ours ? await this.freePort(app, port, ours) : false;
       if (!freed) {
         const own = portSettings(dir, port);
-        const next = onPort(command, port, port + 1) !== null || own.reads ? await nextFreePort(port) : undefined;
+        const next = !fixed && (onPort(command, port, port + 1) !== null || own.reads) ? await nextFreePort(port) : undefined;
         if (!next) return this.fail(run, ...(await this.busyPort(app, port)));
         command = onPort(command, port, next) ?? command;
         url = withPort(url!, next);
@@ -607,6 +624,7 @@ export class AppRunner {
         run.state = 'failed';
         run.error = 'It stopped by itself.';
         run.detail = `${command}\n${tail(printed, 30)}`;
+        this.leaveIfIdle();
       }
     };
     child.once('error', (err) => {
@@ -693,6 +711,7 @@ export class AppRunner {
       run.state = 'stopped';
       delete run.error;
       delete run.busy;
+      this.leaveIfIdle();
       return this.view(app);
     }
     const away = this.elsewhere(app.repo);

@@ -298,7 +298,7 @@ export function projectCopies(bp: BoardPaths): string[] {
     // An unreadable board: the project folder itself stands.
   }
   // A workspace's story folders sit under the project's own name.
-  return [...new Set([...repos.map((r) => worktreeRoot(path.join(bp.root, r))), ...(repos.length > 1 || repos[0] !== '.' ? [worktreeRoot(bp.root)] : [])])];
+  return [...new Set([...repos.map((r) => worktreeRoot(path.join(bp.root, r))), ...(repos.length > 1 || repos[0] !== '.' ? [worktreeRoot(bp.root), path.join(bp.localDir, 'product')] : [])])];
 }
 
 /** A ticket's own copies: its worktree, and the copy of the code as it was that its before screenshots run in. */

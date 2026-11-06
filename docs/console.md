@@ -58,6 +58,9 @@ Each project has its own board. The sidebar has the project's pages: **Overview*
 
 On a project with several repos, one story can change several parts of the product. The Architect names the parts, the story
 gets one folder with a copy of each, and each changed part runs its own checks. You still see one story, with one approval.
+For the proof and Try it yourself, squad-kit runs everything the change touches, on the parts' usual addresses, one story at a
+time. If another program holds one of those addresses, it says so. A part that runs in Docker needs its compose files locked in
+Settings: squad-kit then runs its own `docker compose up`, under a project name of its own, and stops it without removing data.
 
 **Overview** is the project's home: what it is, who uses it, what it can do today (with what each merged ticket
 added), how its parts fit together, things worth knowing, the rules the Architect found, the proof that squad-kit can

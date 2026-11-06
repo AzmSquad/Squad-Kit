@@ -9,8 +9,7 @@ import { runCommand, startApp, tail, testCount, CHECK_SILENT_MS, type RunningApp
 import { addSnapshot, dropSnapshot, git, worktreeRoot } from './git.js';
 import { reposOf } from './repos.js';
 import { dockerBlockedWords, guardSupport, projectGuardFor, type GuardSpec } from './project-guard.js';
-import { copyEnvFiles } from './run-app.js';
-import { localFileNames, placeStoryFiles } from './local-files.js';
+import { fillOwnCopy, placeStoryFiles } from './local-files.js';
 import { countFiles, gitState } from './first-look.js';
 import { DOING } from './plain-doing.js';
 import { withBrowserTests } from './find-commands.js';
@@ -224,9 +223,7 @@ function ensureCopy(bp: BoardPaths, repo: RepoInfo): { dir: string; fresh: boole
   addSnapshot(src, path.basename(dir), commit);
   // The app needs the person's .env files to start; git never carries them. A file an engineer named as local uses the
   // values kept for squad-kit's own runs instead: what a failing test prints here is saved with the setup.
-  copyEnvFiles(src, dir);
-  for (const f of localFileNames(bp, repo.path)) fs.rmSync(path.join(dir, f), { force: true });
-  placeStoryFiles(bp, repo.path, dir);
+  fillOwnCopy(bp, repo.path, dir);
   return { dir, fresh: true };
 }
 

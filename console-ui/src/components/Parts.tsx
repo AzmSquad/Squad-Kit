@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { ProductPart } from '../api/types';
-import { useAct } from '../lib/data';
+import { useAct, useBoard } from '../lib/data';
 import { Cmd } from './ui';
 
 /**
@@ -154,6 +154,25 @@ function AddPart({ view }: { view: PartsView }) {
   );
 }
 
+/** A product too heavy to run twice on one computer takes one story at a time, whatever the other projects do. */
+function StoriesAtOnce() {
+  const board = useBoard();
+  const act = useAct();
+  const now = board.data?.ready ? board.data.meta.atOnce : undefined;
+  const set = (atOnce: number | null) => act.mutate({ path: '/api/v1/settings', method: 'PUT', body: { atOnce }, done: atOnce ? `${atOnce === 1 ? 'One story' : `${atOnce} stories`} of this project run at once` : 'This project follows the limit every project shares' });
+  return (
+    <div className="maprow part-f" style={{ marginTop: 10 }}>
+      <b>Stories at once</b>
+      <div className="seg" style={{ justifySelf: 'start' }}>
+        <button className={now === undefined ? 'on' : ''} onClick={() => set(null)}>As for all projects</button>
+        {[1, 2, 3].map((n) => (
+          <button key={n} className={now === n ? 'on' : ''} onClick={() => set(n)}>{n}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function PartsSettings() {
   const q = useQuery({ queryKey: ['parts'], queryFn: () => api<PartsView>('/api/v1/parts') });
   const view = q.data;
@@ -171,6 +190,7 @@ export function PartsSettings() {
         <AddPart view={view} />
         <Cmd text="squad parts" />
       </div>
+      <StoriesAtOnce />
     </div>
   );
 }

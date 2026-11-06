@@ -1,6 +1,6 @@
 import kleur from 'kleur';
 import * as ui from '../ui/index.js';
-import { readMeta } from '../board/store.js';
+import { readMeta, writeMeta } from '../board/store.js';
 import { addPart, changePart, partsOf, removePart, type PartChange } from '../board/parts.js';
 import type { ProductPart } from '../board/types.js';
 import { board } from './board.js';
@@ -22,6 +22,7 @@ export interface PartsOptions {
   folder?: string;
   needs?: string;
   url?: string;
+  atOnce?: string;
 }
 
 function whereOf(p: ProductPart): string {
@@ -46,6 +47,14 @@ function printParts(parts: ProductPart[]): void {
 
 export async function runParts(opts: PartsOptions): Promise<void> {
   const bp = board();
+  if (opts.atOnce !== undefined) {
+    const n = Number(opts.atOnce);
+    if (opts.atOnce !== 'all' && !(Number.isInteger(n) && n >= 1 && n <= 5)) throw new Error('Say a number from 1 to 5, or all for the limit every project shares.');
+    const { atOnce: _old, ...rest } = readMeta(bp);
+    writeMeta(bp, opts.atOnce === 'all' ? rest : { ...rest, atOnce: n });
+    ui.success(opts.atOnce === 'all' ? 'This project follows the limit every project shares.' : `${n === 1 ? 'One story' : `${n} stories`} of this project run at once.`);
+    return;
+  }
   const change: PartChange = {
     ...(opts.name !== undefined ? { name: opts.name } : {}),
     ...(opts.shared ? { shared: true } : {}),

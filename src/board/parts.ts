@@ -62,6 +62,44 @@ export function productLine(meta: BoardMeta): string | undefined {
   return shared.length ? `${first} ${running.length === 1 ? 'It uses' : 'They share'} ${wordsOf(shared)}.` : first;
 }
 
+/**
+ * Whether stories run the whole product: several parts that start by themselves, once the Architect named them. Those keep
+ * their usual addresses. A project with one part moves to a free port when its own is taken, as it always did.
+ */
+export function runsAsProduct(meta: BoardMeta): boolean {
+  return Boolean(meta.parts?.length) && partsOf(meta).filter((p) => !p.shared && !p.off && !p.noRun).length > 1;
+}
+
+/**
+ * What must run for a story, first things first: the parts it changed, what relies on them (a web app shows what its API
+ * changed), and what all of those need. A part of another product in the same folder is none of these.
+ */
+export function partsToRun(meta: BoardMeta, changed: string[]): ProductPart[] {
+  const parts = partsOf(meta).filter((p) => !p.off);
+  const want = new Set(changed.filter((id) => parts.some((p) => p.id === id)));
+  const grow = (more: (p: ProductPart) => string[]) => {
+    for (let before = -1; before !== want.size; ) {
+      before = want.size;
+      for (const p of parts) for (const id of more(p)) if (parts.some((x) => x.id === id)) want.add(id);
+    }
+  };
+  grow((p) => (p.needs.some((n) => want.has(n)) ? [p.id] : []));
+  grow((p) => (want.has(p.id) ? p.needs : []));
+  const ordered: ProductPart[] = [];
+  const seen = new Set<string>();
+  const visit = (p: ProductPart) => {
+    if (seen.has(p.id)) return;
+    seen.add(p.id);
+    for (const n of p.needs) {
+      const dep = parts.find((x) => x.id === n);
+      if (dep && want.has(dep.id)) visit(dep);
+    }
+    ordered.push(p);
+  };
+  parts.filter((p) => want.has(p.id)).forEach(visit);
+  return ordered.filter((p) => !p.shared && !p.noRun);
+}
+
 /** The overview's picture as an engineer corrected it: under the names they gave, without what they marked Not used. */
 export function pictureInUse(meta: BoardMeta, picture: { parts: CodePart[]; links: PartLink[] }): { parts: CodePart[]; links: PartLink[] } {
   const known = partsOf(meta);

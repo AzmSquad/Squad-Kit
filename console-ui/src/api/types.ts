@@ -684,6 +684,7 @@ export interface BoardMeta {
    */
   repos?: RepoInfo[];
   parts?: ProductPart[];
+  atOnce?: number;
   localFiles?: ProjectFile[];
   lockedFiles?: ProjectFile[];
 }

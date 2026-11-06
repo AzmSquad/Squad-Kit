@@ -45,6 +45,9 @@ Credit will be given in the release notes unless you prefer to remain anonymous.
   in a story's copy for the project's own tests and app, and agents are refused it by its exact path. The project's own
   commands can still read it, and a test the Builder wrote is one of those. So stories use values kept for them on this
   computer: give them local test values, never real ones. A file with secrets that is already in git is not covered.
+- **Docker stays closed, with one opening.** Project commands cannot reach Docker. squad-kit opens that one socket for its own
+  `docker compose up`, from the project's settings, when an engineer locked every compose file the command names. A story
+  cannot change those files. What runs inside the containers is the story's code, and the image builds run its Dockerfile.
 - **Agents stay in their lane.** Every step runs with the permissions it needs and no more: the Builder edits only its
   own copy of the code, the Tester cannot change code, and no agent may change the instruction files the next session
   would follow, squad-kit's own `.squad/` folder, or git history. squad-kit checks after each step and puts back what

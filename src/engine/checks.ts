@@ -17,6 +17,8 @@ export interface CheckResult {
 }
 
 export interface CommandWatch {
+  /** More environment for the command. */
+  env?: Record<string, string>;
   /** Called with the process id once the command starts. */
   onSpawn?(pid: number): void;
   /** Called whenever the command prints something. */
@@ -48,7 +50,7 @@ export function runCommand(cwd: string, command: string, timeoutMs = 15 * 60_000
   const started = Date.now();
   if (watch.signal?.aborted) return Promise.resolve({ ok: false, output: STOPPED, seconds: 0 });
   return new Promise((resolve) => {
-    const child = spawnProject(command, { cwd, env: { CI: '1', FORCE_COLOR: '0' }, ...(watch.guard ? { guard: watch.guard } : {}) });
+    const child = spawnProject(command, { cwd, env: { CI: '1', FORCE_COLOR: '0', ...watch.env }, ...(watch.guard ? { guard: watch.guard } : {}) });
     if (child.pid) watch.onSpawn?.(child.pid);
     let out = '';
     // Why squad-kit ended the command, when it did.
@@ -149,6 +151,9 @@ export async function runChecks(cwd: string, commands: ProjectCommands, onStart?
   return results;
 }
 
+/** The address an app must keep is taken by another program. */
+export class AddressTaken extends Error {}
+
 export interface RunningApp {
   url: string;
   stop(): void;
@@ -223,18 +228,20 @@ function portOf(url: string): number | null {
  * instead: PORT, and the app's own port variables found in its code (like ROOMFLOW_PORT), so the Tester never looks at
  * the wrong app. The address the app really runs at comes back in `url`. Stop ends the wait and the app.
  */
-export async function startApp(cwd: string, command: string, url: string, waitMs = 3 * 60_000, signal?: AbortSignal, guard?: GuardSpec): Promise<RunningApp> {
+export async function startApp(cwd: string, command: string, url: string, waitMs = 3 * 60_000, signal?: AbortSignal, guard?: GuardSpec, more: { fixed?: boolean; env?: Record<string, string> } = {}): Promise<RunningApp> {
   if (signal?.aborted) throw new Error(STOPPED);
   // The app squad-kit stopped a moment ago (the last round of screenshots) is no other program: on a busy computer it may
   // still be on its way out, and its port is about to be free. Going around it would break an app that cannot move.
   await stopping.get(portOf(url) ?? 0);
   if (signal?.aborted) throw new Error(STOPPED);
   const taken = (await answers(url)) || (await held(portOf(url)));
+  // A part of a product keeps its address: what calls it knows it by that.
+  if (taken && more.fixed) throw new AddressTaken(`${url} is used by another program (${command}).`);
   const port = taken ? await freePort() : null;
   const target = port ? url.replace(/(:\/\/[^/:]+)(:\d+)?/, `$1:${port}`) : url;
   const own = port ? appPortVariables(cwd, portOf(url)) : [];
   const moved = port ? Object.fromEntries(['PORT', ...own].map((name) => [name, String(port)])) : {};
-  const env = { CI: '1', FORCE_COLOR: '0', BROWSER: 'none', ...moved };
+  const env = { CI: '1', FORCE_COLOR: '0', BROWSER: 'none', ...moved, ...more.env };
   const child = spawnProject(command, { cwd, env, ...(guard ? { guard } : {}) });
   let out = '';
   let exited: number | null = null;

@@ -94,6 +94,10 @@ export interface WindowApp {
   url: string;
   /** squad-kit's own guard for the app (engine/project-guard.ts): the app cannot read secrets. Null where none. */
   guard?: GuardSpec;
+  /** A product: this starts all of it and answers with the part a person opens, in place of `start`. */
+  run?(): Promise<RunningApp>;
+  /** And this stops all of it. */
+  after?(): void;
 }
 
 /** The project's checks an agent may ask squad-kit to run. */
@@ -849,7 +853,7 @@ export class AgentWindow {
     if (this.over) return { fail: error(STOPPED_CALL) };
     if (r === 'late') return { fail: error(this.s.tools.includes('app_status') ? STILL_STARTING : 'The app is still starting. Call this again in a moment.'), late: true };
     if ('err' in r) {
-      const why = (r.err as Error)?.message ?? String(r.err);
+      const why = (r.err as { detail?: string })?.detail ?? (r.err as Error)?.message ?? String(r.err);
       return { fail: error(`squad-kit could not start the app: ${why.slice(0, 1500)}\nCall i_am_stuck if you think squad-kit can fix it; otherwise say in your answer what is missing.`) };
     }
     return { app: r.ok };
@@ -865,7 +869,7 @@ export class AgentWindow {
       try {
         await this.s.beforeStart?.().catch(() => undefined);
         if (this.over) throw new Error(STOPPED);
-        const app = await startApp(a.cwd, a.start, a.url, this.s.limits?.appWaitMs, this.signal, a.guard);
+        const app = a.run ? await a.run() : await startApp(a.cwd, a.start, a.url, this.s.limits?.appWaitMs, this.signal, a.guard);
         if (this.over) {
           app.stop();
           throw new Error(STOPPED);
@@ -910,6 +914,7 @@ export class AgentWindow {
       return ok('squad-kit has not started the app in this step, so there is nothing to stop. squad-kit stops only what it started.');
     }
     const at = this.app.url;
+    this.s.app?.after?.();
     this.app.stop();
     this.app = null;
     this.s.say(`squad-kit stopped the app for the ${this.s.who}`);
@@ -1108,6 +1113,7 @@ export class AgentWindow {
     await this.session.close();
     this.app?.stop();
     this.app = null;
+    this.s.app?.after?.();
   }
 
   /** What a stopped run says to engineers: every refusal. */
