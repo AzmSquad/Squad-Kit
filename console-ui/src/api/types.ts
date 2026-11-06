@@ -679,6 +679,14 @@ export interface BoardMeta {
    */
   repos?: RepoInfo[];
   parts?: ProductPart[];
+  localFiles?: ProjectFile[];
+  lockedFiles?: ProjectFile[];
+}
+
+/** A file an engineer named, in one of the project's repos. */
+export interface ProjectFile {
+  repo: string;
+  path: string;
 }
 
 /** One thing that runs when the whole product is up: a part of it, or a service the parts share. */

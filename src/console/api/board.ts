@@ -59,6 +59,7 @@ import {
 } from '../../board/actions.js';
 import { architecture } from '../../board/architecture.js';
 import { addPart, changePart, partsOf, removePart, repoPaths, severalParts, type PartChange } from '../../board/parts.js';
+import { addLocalFile, addLockedFile, lockDockerFiles, projectFilesView, removeProjectFile, useMyFile } from '../../board/project-files.js';
 import { boardExists, boardPaths, listDecisions, listReleases, listTickets, readMeta, readRelease, readTicket, writeMeta } from '../../board/store.js';
 import { seedDemoBoard } from '../../board/demo.js';
 import type { AgentName, PlanComment, PlanEdit } from '../../board/types.js';
@@ -735,6 +736,19 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
       return { ok: true };
     }),
   );
+
+  // The files agents may not touch: names only. What a file holds never passes through here.
+  app.get('/api/v1/project-files', (c) => (boardExists(bp) ? c.json(projectFilesView(bp)) : c.json({ local: [], locked: [], repos: [], docker: [] })));
+  const fileRoute = (route: string, run: (repo: string | undefined, file: string | undefined) => unknown) =>
+    app.post(`/api/v1/project-files/${route}`, async (c) => {
+      const b = await body<{ repo?: unknown; path?: unknown }>(c);
+      return act(c, () => run(typeof b.repo === 'string' ? b.repo : undefined, typeof b.path === 'string' ? b.path : undefined));
+    });
+  fileRoute('local', (repo, file) => addLocalFile(bp, repo, file));
+  fileRoute('locked', (repo, file) => addLockedFile(bp, repo, file));
+  fileRoute('use-mine', (repo, file) => useMyFile(bp, repo, file));
+  fileRoute('remove', (repo, file) => removeProjectFile(bp, repo, file));
+  app.post('/api/v1/project-files/lock-docker', (c) => act(c, () => ({ locked: lockDockerFiles(bp) })));
 
   // Whether the Builder's and Tester's commands run in a sandbox on this computer, and the hosts they may reach.
   app.get('/api/v1/sandbox', (c) => {

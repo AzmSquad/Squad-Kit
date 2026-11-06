@@ -15,9 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **What the product is made of:** the first read now finds the parts that run by themselves and the services they share.
   On a product with several parts, the Overview says so in one sentence. An engineer corrects the list in Settings or with
   `squad parts`, and a new read keeps it. A project with one part sees no change.
+- **Files agents may not touch**, in Settings and with `squad files`. A local file, like `.env.dev`, goes in each story's copy
+  for the project's own tests and app, with values kept for stories, and no agent can read it. A locked file, like
+  `docker-compose.yml`, can be read and never changed.
 
 ### Changed
 
+- Agents can no longer read a project's untracked `.env` files in the project folder with their own file tools. Before, only
+  their shell commands were refused.
 - The ticket drawer, the release dialog and Your apps name the parts of the product. Repo names stay in the engineer details.
 - A part marked Not used leaves the Overview picture and Your apps, and the first run does not install or test a repo with nothing else in use.
 
@@ -30,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- On a narrow window, a long error message no longer breaks its words letter by letter.
 - After you say what you want to build, Home and the setup page no longer ask you the same question.
 
 ## [1.2.2] — 2026-11-05

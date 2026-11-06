@@ -977,6 +977,18 @@ export interface BoardMeta {
   repos?: RepoInfo[];
   /** What the product is made of (src/board/parts.ts). Left out, a repo is one part, and a project with no repos is one part. */
   parts?: ProductPart[];
+  /** Files git does not carry, like .env.dev: in each story's copy for the project's commands, and hidden from agents (src/board/project-files.ts). */
+  localFiles?: ProjectFile[];
+  /** Files in git, like docker-compose.yml, that agents can read and never change. */
+  lockedFiles?: ProjectFile[];
+}
+
+/** A file an engineer named, in one of the project's repos. */
+export interface ProjectFile {
+  /** As in RepoInfo.path; "." is the project folder. */
+  repo: string;
+  /** Its path inside that repo. */
+  path: string;
 }
 
 /**

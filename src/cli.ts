@@ -13,6 +13,7 @@ import { runUpgrade } from './commands/upgrade.js';
 import { runApp, runConsole } from './commands/console.js';
 import { runProjects } from './commands/projects.js';
 import { runParts } from './commands/parts.js';
+import { runFiles } from './commands/files.js';
 import { runAsk, runTicketStatus, runWait } from './commands/now.js';
 import { runLogs, runReport, runTryNow } from './commands/support.js';
 import { runAppFind, runAppRestart, runAppSet, runAppStart, runAppStatus, runAppStop } from './commands/app.js';
@@ -270,6 +271,17 @@ program
   .option('--needs <parts>', 'With --add or --set: what it cannot run without, separated by commas ("" for nothing)')
   .option('--url <address>', 'With --add or --set: where it opens ("" for none)')
   .action(wrap(runParts));
+
+program
+  .command('files')
+  .description('The files agents may not touch: local files they cannot read, and locked files they cannot change. The same as Settings')
+  .option('--local <path>', 'A file git does not carry, like .env.dev: in each story\'s copy, and no agent can read it')
+  .option('--lock <path>', 'A file in git, like docker-compose.yml: agents can read it and never change it')
+  .option('--lock-docker', 'Lock every Docker file in git')
+  .option('--use-mine <path>', "Start a local file's values for stories from the one in your folder")
+  .option('--remove <path>', 'Take a file off the list')
+  .option('--repo <folder>', 'The repo the file is in, when the project has several')
+  .action(wrap(runFiles));
 
 // The first run and the Overview: the setup page and the Overview page, button for button.
 program

@@ -10,6 +10,7 @@ import { addSnapshot, dropSnapshot, git, worktreeRoot } from './git.js';
 import { reposOf } from './repos.js';
 import { dockerBlockedWords, guardSupport, projectGuardFor, type GuardSpec } from './project-guard.js';
 import { copyEnvFiles } from './run-app.js';
+import { localFileNames, placeStoryFiles } from './local-files.js';
 import { countFiles, gitState } from './first-look.js';
 import { DOING } from './plain-doing.js';
 import { withBrowserTests } from './find-commands.js';
@@ -214,12 +215,18 @@ export function setupCopyDir(bp: BoardPaths, repo: RepoInfo): string {
 /** Makes the copy, or keeps the one there. True when it is new, so it still needs its setup command. */
 function ensureCopy(bp: BoardPaths, repo: RepoInfo): { dir: string; fresh: boolean } {
   const dir = setupCopyDir(bp, repo);
-  if (fs.existsSync(path.join(dir, '.git'))) return { dir, fresh: false };
+  if (fs.existsSync(path.join(dir, '.git'))) {
+    placeStoryFiles(bp, repo.path, dir);
+    return { dir, fresh: false };
+  }
   const src = path.join(bp.root, repo.path);
   const commit = git(src, ['rev-parse', '--verify', `${repo.base}^{commit}`], { allowFail: true }) || git(src, ['rev-parse', 'HEAD']);
   addSnapshot(src, path.basename(dir), commit);
-  // The app needs the person's .env files to start; git never carries them.
+  // The app needs the person's .env files to start; git never carries them. A file an engineer named as local uses the
+  // values kept for squad-kit's own runs instead: what a failing test prints here is saved with the setup.
   copyEnvFiles(src, dir);
+  for (const f of localFileNames(bp, repo.path)) fs.rmSync(path.join(dir, f), { force: true });
+  placeStoryFiles(bp, repo.path, dir);
   return { dir, fresh: true };
 }
 

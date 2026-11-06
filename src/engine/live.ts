@@ -63,6 +63,8 @@ import { allowedFile, ticketFolders } from './conversations.js';
 import { DEFAULT_QUALITY, builderLevel, describeLevel, effortOn, personLevels, resolveLevel, stepCaps } from './levels.js';
 import { CapReached, capCard } from './caps.js';
 import { blockedLine, packageCacheEnv, sandboxAsk, sandboxOf, ticketCacheDir } from './sandbox.js';
+import { hiddenFiles, placeStoryFiles } from './local-files.js';
+import { offLimits } from '../board/project-files.js';
 import { GUARD_BLOCKED, GUARD_BLOCKED_DOCKER, blockedDocker, dockerBlockedWords, guardBlockedDetail, guardBlockedPath, guardSupport, ticketGuard, type GuardSpec } from './project-guard.js';
 import { ticketDir } from '../board/store.js';
 import { commitTicketDocs, leaveProjectFiles } from './project-git.js';
@@ -139,8 +141,8 @@ function planKey(t: Ticket): string {
 }
 
 /** squad-kit's own keys (tracker token, speech key): no agent may read them, whichever folder it works in. */
-export function secretFiles(bp: BoardPaths): string[] {
-  return [bp.secretsFile, path.join(bp.squadDir, 'secrets.yaml')];
+export function secretFiles(bp: BoardPaths, cwd?: string): string[] {
+  return [bp.secretsFile, path.join(bp.squadDir, 'secrets.yaml'), ...hiddenFiles(bp, cwd)];
 }
 
 /**
@@ -1142,7 +1144,7 @@ export class LiveSquad {
     const run = ({ win: _own, reply: _reply, check: _check, checkHelp: _help, ...o }: AgentRun & { win?: unknown; reply?: unknown; check?: unknown; checkHelp?: unknown }) => tool.run({
       ...o,
       ...watch,
-      secretFiles: secretFiles(this.bp),
+      secretFiles: secretFiles(this.bp, opts.cwd),
       protectedFiles: this.protectedFiles(opts.cwd),
       ...(Object.keys(runCaps).length ? { caps: runCaps } : {}),
       ...(sandbox ? { sandbox, onBlocked } : {}),
@@ -1308,7 +1310,7 @@ export class LiveSquad {
    * commit hooks with their settings, wherever `cwd`'s repo keeps them, and the copy's link to git's folder.
    */
   private protectedFiles(cwd?: string): string[] {
-    return [...new Set([`${path.basename(this.bp.squadDir)}/`, '.git', ...AI_TOOLS.flatMap((t) => t.instructionFiles ?? []), ...hookFiles(cwd ?? projectRoot(this.bp))])];
+    return [...new Set([`${path.basename(this.bp.squadDir)}/`, '.git', ...AI_TOOLS.flatMap((t) => t.instructionFiles ?? []), ...hookFiles(cwd ?? projectRoot(this.bp)), ...offLimits(this.meta()).map((f) => `/${f}`)])];
   }
 
   /**
@@ -1323,7 +1325,12 @@ export class LiveSquad {
     if (c.putBack.length) this.update(id, (x) => addActivity(x, role, `${role === 'reviewer' ? 'The app changed files while the Reviewer looked at it' : `The ${who} changed files`}; squad-kit put them back: ${some(c.putBack)}`));
     const hookNames = hookFiles(lane.dir);
     const hooks = c.restored.filter((f) => isHookFile(f, hookNames));
-    const instructions = c.restored.filter((f) => !hooks.includes(f));
+    const named = new Set(offLimits(this.meta()));
+    const engineers = c.restored.filter((f) => named.has(f) && !hooks.includes(f));
+    const instructions = c.restored.filter((f) => !hooks.includes(f) && !engineers.includes(f));
+    if (engineers.length) {
+      this.update(id, (x) => addActivity(x, role, `The ${who} changed ${some(engineers)}, which only an engineer changes; squad-kit put ${engineers.length === 1 ? 'it' : 'them'} back`));
+    }
     if (instructions.length) {
       this.update(id, (x) => addActivity(x, role, `The ${who} changed ${some(instructions)}, which later steps read as instructions; squad-kit put ${instructions.length === 1 ? 'it' : 'them'} back`));
     }
@@ -1455,7 +1462,7 @@ export class LiveSquad {
       root: projectRoot(this.bp),
       read,
       proof: this.bp.proofDir,
-      secrets: secretFiles(this.bp),
+      secrets: secretFiles(this.bp, cwd),
       hosts: this.meta().allowedHosts ?? [],
       ...(cache ? { cache } : {}),
     });
@@ -2451,11 +2458,12 @@ export class LiveSquad {
     const root = projectRoot(this.bp);
     const meta = this.meta();
     let t = readTicket(this.bp, id)!;
+    const repo = repoFor(meta, t);
     if (t.worktree && fs.existsSync(t.worktree)) {
       this.mendCopy(t);
+      this.placeLocalFiles(id, t.worktree, repo.path);
       return t;
     }
-    const repo = repoFor(meta, t);
     // A new copy starts from the newest base, the remote's when the team moved it on; or from the work of the ticket
     // it depends on, when the person chose to build on that ticket's branch.
     const dep = dependencyToStartFrom(this.bp, t);
@@ -2479,6 +2487,7 @@ export class LiveSquad {
     // The ticket's documents so far go on its branch first (ADR-001), when the project keeps them in git.
     const saved = commitTicketDocs(this.bp, t, wt.pushed ? 'picked up from the pushed branch' : t.specApproved ? 'spec and design approved' : 'plan approved');
     if (saved) t = this.update(id, (x) => addActivity(x, 'squad', `Saved the spec and design on ${wt.branch} as commit ${saved}`));
+    this.placeLocalFiles(id, wt.dir, repo.path);
     const setup = repo.commands.setup?.trim();
     if (setup) {
       this.update(id, (x) => (x.status = DOING.setup));
@@ -2500,6 +2509,14 @@ export class LiveSquad {
       if (back.length) this.log('info', `The setup command changed ${back.join(', ')}; squad-kit put ${back.length === 1 ? 'it' : 'them'} back`, id);
     }
     return readTicket(this.bp, id)!;
+  }
+
+  /** A repo's local files go in the story's copy. One with no values yet is said once: the app may not start without it. */
+  private placeLocalFiles(id: string, dir: string, repo: string): void {
+    const { missing } = placeStoryFiles(this.bp, repo, dir);
+    if (!missing.length) return;
+    const line = `An engineer has not given stories their values for ${missing.join(', ')} yet, so the app may not start here.`;
+    if (!readTicket(this.bp, id)?.activity.some((a) => a.text === line)) this.update(id, (x) => addActivity(x, 'squad', line));
   }
 
   /** A ticket that came from a pushed branch: its copy of the code comes from that branch, then it carries on. */

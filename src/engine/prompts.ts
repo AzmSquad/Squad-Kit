@@ -800,7 +800,7 @@ ${ticketContext(t)}
 
 Story: ${t.story}
 Done when:
-${criteria}${decision}${dependencyText(t)}${setupTroubleText(t)}
+${criteria}${decision}${dependencyText(t)}${setupTroubleText(t)}${offLimitsText(meta)}
 
 Steps:
 ${steps}
@@ -820,6 +820,14 @@ ${askRule(t)}`;
  * The setup command failed in this copy. The person cannot help with that, so the Builder sorts it out, in the project:
  * the next story's copy and the person's own checkout run the same command.
  */
+/** The files an engineer keeps agents off, so the Builder does not spend its time on them. */
+export function offLimitsText(meta: BoardMeta): string {
+  const local = (meta.localFiles ?? []).map((f) => f.path);
+  const locked = (meta.lockedFiles ?? []).map((f) => f.path);
+  if (!local.length && !locked.length) return '';
+  return `\n\nFiles only an engineer changes:${local.length ? `\n- ${local.join(', ')}: you cannot read these. squad-kit's run_checks and start_app can use them, so run what needs them with those tools.` : ''}${locked.length ? `\n- ${locked.join(', ')}: you can read these, and a change to one is put back.` : ''}\nIf the story cannot work without changing one, do the rest and say so in notes.`;
+}
+
 export function setupTroubleText(t: Ticket): string {
   const s = t.setupTrouble;
   if (!s) return '';

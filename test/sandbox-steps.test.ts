@@ -43,12 +43,15 @@ const { squadHome } = await import('../src/core/home.js');
 const { buildPaths } = await import('../src/core/paths.js');
 const { mountApi } = await import('../src/console/api/index.js');
 const { AgentWindow, ALL_TOOLS } = await import('../src/engine/window.js');
+const { addLocalFile, addLockedFile, storyFile } = await import('../src/board/project-files.js');
+const { deniedTools } = await import('../src/modules/claude/direct.js');
 
 let tmp: string;
 let project: string;
 let wt: string;
 let bp: ReturnType<typeof boardPaths>;
 type Squad = {
+  workspace(id: string): Promise<unknown>;
   runBuilder(id: string, prompt: string, resume: boolean, step?: string): Promise<void>;
   shoot(id: string, t: unknown, when: 'before' | 'after', meta: unknown, win: unknown, appUrl: string): Promise<void>;
   review(id: string): Promise<void>;
@@ -122,6 +125,86 @@ beforeEach(() => {
 
 afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+describe('files agents may not touch', () => {
+  const REAL = 'REAL-VALUE-9931';
+  const TEST = 'TEST-VALUE-6127';
+  const ignore = () => {
+    fs.writeFileSync(path.join(project, '.gitignore'), '.env.dev\n.squad/\n');
+    fs.writeFileSync(path.join(project, 'docker-compose.yml'), 'services: {}\n');
+    sh('git add -A && git -c user.name=t -c user.email=t@t commit -qm files', project);
+    sh('git pull -q --no-rebase --no-edit . main', wt);
+    fs.writeFileSync(path.join(project, '.env.dev'), `KEY=${REAL}\n`);
+    addLocalFile(bp, '.', '.env.dev');
+    addLockedFile(bp, '.', 'docker-compose.yml');
+    const f = storyFile(bp, { repo: '.', path: '.env.dev' });
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    fs.writeFileSync(f, `KEY=${TEST}\n`);
+  };
+
+  /** A Builder step as the squad runs it: the copy made ready first. */
+  const build = async () => {
+    const s = squad();
+    await s.workspace('AP-1');
+    await s.runBuilder('AP-1', 'Build it', false, 'build');
+  };
+
+  it("are refused by exact path: the Builder's file tools and its commands", async () => {
+    ignore();
+    await build();
+    const call = h.calls[0]!;
+    const inCopy = path.join(wt, '.env.dev');
+    expect(call.secretFiles).toEqual(expect.arrayContaining([inCopy, path.join(project, '.env.dev')]));
+    expect(deniedTools(call)).toEqual(expect.arrayContaining([`Read(/${inCopy})`, `Edit(/${inCopy})`, `Read(/${path.join(project, '.env.dev')})`]));
+    expect(call.sandbox!.filesystem.denyRead).toEqual(expect.arrayContaining([inCopy, path.join(project, '.env.dev')]));
+    // The copy is otherwise as readable as ever.
+    expect(call.sandbox!.filesystem.allowRead).toContain(wt);
+    // Nothing in the prompt carries a value.
+    expect(call.prompt).not.toContain(TEST);
+    expect(call.prompt).not.toContain(REAL);
+  });
+
+  it("the story's values are in the copy for the project's own commands, never the person's", async () => {
+    ignore();
+    await build();
+    expect(fs.readFileSync(path.join(wt, '.env.dev'), 'utf8')).toContain(TEST);
+  });
+
+  it('what the Builder changed goes back, with a plain line, and its other work stays', async () => {
+    ignore();
+    h.run = () => {
+      fs.writeFileSync(path.join(wt, '.env.dev'), 'KEY=CHANGED\n');
+      fs.writeFileSync(path.join(wt, 'docker-compose.yml'), 'services: { evil: { volumes: ["/:/host"] } }\n');
+      fs.writeFileSync(path.join(wt, 'limit.txt'), 'limit = 4\n');
+    };
+    await build();
+    expect(fs.readFileSync(path.join(wt, '.env.dev'), 'utf8')).toContain(TEST);
+    expect(fs.readFileSync(path.join(wt, 'docker-compose.yml'), 'utf8')).toBe('services: {}\n');
+    expect(fs.readFileSync(path.join(wt, 'limit.txt'), 'utf8')).toBe('limit = 4\n');
+    expect(activity().some((a) => a.includes('which only an engineer changes') && a.includes('docker-compose.yml'))).toBe(true);
+  });
+
+  it('a deleted locked file comes back', async () => {
+    ignore();
+    h.run = () => fs.rmSync(path.join(wt, 'docker-compose.yml'));
+    await build();
+    expect(fs.readFileSync(path.join(wt, 'docker-compose.yml'), 'utf8')).toBe('services: {}\n');
+  });
+
+  it('a local file with no values is said once, and the story goes on', async () => {
+    ignore();
+    fs.rmSync(storyFile(bp, { repo: '.', path: '.env.dev' }));
+    await build();
+    await build();
+    expect(activity().filter((a) => a.includes('has not given stories their values for .env.dev'))).toHaveLength(1);
+    expect(fs.existsSync(path.join(wt, '.env.dev'))).toBe(false);
+  });
+
+  it('a project with none of these runs as before', async () => {
+    await build();
+    expect(h.calls[0]!.secretFiles).toEqual([bp.secretsFile, path.join(bp.squadDir, 'secrets.yaml')]);
+  });
 });
 
 describe('the sandbox', () => {

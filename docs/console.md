@@ -416,6 +416,12 @@ Terminal: `squad config set quality best`, `squad agent builder`, `squad agent b
   reads the project, and a new read keeps what you correct. Mark an old app or another product in the same folder
   **Not used**. A project with one part does not show this. Terminal: `squad parts`, `squad parts --set api --needs db`,
   `squad parts --off <part>`, `squad parts --add "PDF service" --repo pdf-service`.
+- **Files agents may not touch**, for engineers. **Local files** are files git does not carry, like `.env.dev` or
+  `public/config.js`. squad-kit puts them in each story's copy for the project's own tests and app, and no agent can read
+  them. A test could still read and send what is in them, so stories use their own values, kept on this computer: start
+  from the file in your folder, then change any real values to test values. **Locked files** are in git, like
+  `docker-compose.yml`: agents can read them, and squad-kit puts back any change. Only the names are shared with the team.
+  Terminal: `squad files`, `squad files --local .env.dev`, `squad files --use-mine .env.dev`, `squad files --lock-docker`.
 - **Report a problem**: a report for the whole app, without a ticket. The app log is in `~/.squad-kit/logs/`,
   one file a day with every step, stop and error (never a key or a prompt), kept 14 days. Errors also print in the
   terminal that runs the app. Terminal: `squad logs`, `squad logs --tail`.

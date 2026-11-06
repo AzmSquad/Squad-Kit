@@ -200,7 +200,8 @@ describe('Looks right on a repo with commit hooks', () => {
     fs.writeFileSync(path.join(copy, 'x'), 'x');
     sh('git add -A', copy);
     hook('pre-commit', `sleep 30 & echo $! > "${tmp}/pid"; wait`);
-    await expect(commitChecked(copy, 'm', 'chore: m', 500)).rejects.toMatchObject({ timedOut: true });
+    // Long enough for the hook to start on a busy computer: the limit is what ends it, not what stops it starting.
+    await expect(commitChecked(copy, 'm', 'chore: m', 4000)).rejects.toMatchObject({ timedOut: true });
     const pid = Number(fs.readFileSync(path.join(tmp, 'pid'), 'utf8'));
     await new Promise((r) => setTimeout(r, 300));
     expect(() => process.kill(pid, 0)).toThrow();

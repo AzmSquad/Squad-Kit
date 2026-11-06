@@ -123,8 +123,29 @@ function nestedRepos(dir: string, env?: Record<string, string>): string[] {
  * settings, and anything in the copy can write those: this is the one way the engine stages everything.
  */
 export function stageAll(dir: string, env?: Record<string, string>): void {
-  const out = nestedRepos(dir, env).map((p) => `:(top,exclude,literal)${p}`);
+  const out = [...nestedRepos(dir, env), ...placedIn(dir)].map((p) => `:(top,exclude,literal)${p}`);
   git(dir, ['add', '-A', ...(out.length ? ['--', ':/', ...out] : [])], env ? { env } : {});
+}
+
+/** The list of local files squad-kit placed in a copy, in the copy's own git folder, where no agent writes. */
+function placedList(dir: string): string | null {
+  const gitDir = git(dir, ['rev-parse', '--absolute-git-dir'], { allowFail: true });
+  return gitDir ? path.join(gitDir, 'squad-placed') : null;
+}
+
+/** Says which local files are in this copy: none ever goes in a commit, even when a story takes it out of .gitignore. */
+export function markPlaced(dir: string, files: string[]): void {
+  const list = placedList(dir);
+  if (!list) return;
+  if (files.length) fs.writeFileSync(list, files.join('\n'));
+  else fs.rmSync(list, { force: true });
+}
+
+/** The placed files git would save now. One it ignores stays out by itself, and git refuses to be told to leave it out. */
+function placedIn(dir: string): string[] {
+  const list = placedList(dir);
+  if (!list || !fs.existsSync(list)) return [];
+  return fs.readFileSync(list, 'utf8').split('\n').filter((f) => f && !git(dir, ['check-ignore', '--', f], { allowFail: true }));
 }
 
 function isMerging(dir: string): boolean {

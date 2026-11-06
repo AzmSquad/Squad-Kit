@@ -41,6 +41,10 @@ Credit will be given in the release notes unless you prefer to remain anonymous.
   copy of the code in `~/.squad-kit/projects/<id>/apps/` (mode `0600`), never anywhere else.
 - **Agents are kept from your secrets.** No agent may read squad-kit's secret files, and the commands squad-kit runs for
   you (tests, setup and release) start without the AI and tracker keys.
+- **Local files stay out of agents' reach.** An engineer can name files git does not carry, like `.env.dev`. Each one goes
+  in a story's copy for the project's own tests and app, and agents are refused it by its exact path. The project's own
+  commands can still read it, and a test the Builder wrote is one of those. So stories use values kept for them on this
+  computer: give them local test values, never real ones. A file with secrets that is already in git is not covered.
 - **Agents stay in their lane.** Every step runs with the permissions it needs and no more: the Builder edits only its
   own copy of the code, the Tester cannot change code, and no agent may change the instruction files the next session
   would follow, squad-kit's own `.squad/` folder, or git history. squad-kit checks after each step and puts back what

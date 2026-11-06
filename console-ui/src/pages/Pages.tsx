@@ -14,6 +14,7 @@ import { HelpRow } from '../components/Report';
 import { PaymentSettings, QualityMetrics, SquadUsage } from '../components/Usage';
 import { AllowedHosts, SandboxRows } from '../components/Sandbox';
 import { PartsSettings } from '../components/Parts';
+import { ProjectFiles } from '../components/ProjectFiles';
 import { Cmd, Glyph, Modal, STAGE_NAME, actionLabel, ago, commandFor, outdatedLine } from '../components/ui';
 import { changeWaits, openChange } from '../components/ChangeCard';
 import { NoticeSetting } from '../components/Waiting';
@@ -468,6 +469,7 @@ function ProjectSettings() {
   return (
     <>
       <PartsSettings />
+      <ProjectFiles />
       <h2 style={{ marginTop: 6 }}>How the squad checks and runs this project</h2>
       <p className="note" style={{ margin: '2px 0 10px' }}>
         The Architect filled these in when it read the project. squad-kit runs Test, Lint and Build itself before anything ships.

@@ -144,16 +144,22 @@ const ENV_EXAMPLE = /\.(example|sample|template|dist)$/;
  * carries them and the app needs them to start. They stay on this computer, readable by this user only. Says which
  * ones it copied.
  */
-export function copyEnvFiles(src: string, dir: string): string[] {
+/** The project's untracked .env files in a repo, by their paths in it. */
+export function localEnvFiles(src: string): string[] {
   const list = (args: string[]) =>
     git(src, ['ls-files', '-z', '--others', '--exclude-standard', ...args], { allowFail: true })
       .split('\0')
       .filter((f) => f && !f.endsWith('/'));
   // Untracked files, and ignored ones with ignored folders (node_modules) folded into one line.
-  const files = [...new Set([...list([]), ...list(['--ignored', '--directory'])])].filter((f) => {
+  return [...new Set([...list([]), ...list(['--ignored', '--directory'])])].filter((f) => {
     const name = path.basename(f);
     return ENV_FILE.test(name) && !ENV_EXAMPLE.test(name);
   });
+}
+
+/** Copies the .env files, and the local files an engineer named, into squad-kit's own copy that runs the person's own version. */
+export function copyEnvFiles(src: string, dir: string, named: string[] = []): string[] {
+  const files = [...new Set([...localEnvFiles(src), ...named.filter((f) => fs.existsSync(path.join(src, f)))])];
   for (const f of files) {
     const to = path.join(dir, f);
     fs.mkdirSync(path.dirname(to), { recursive: true });
@@ -531,7 +537,8 @@ export class AppRunner {
     run.commit = copy.commit;
     if (signal.aborted) return;
     try {
-      const env = copyEnvFiles(path.join(this.bp.root, repo.path), dir);
+      const named = (readMeta(this.bp).localFiles ?? []).filter((f) => f.repo === repo.path).map((f) => f.path);
+      const env = copyEnvFiles(path.join(this.bp.root, repo.path), dir, named);
       if (env.length) this.keep(app.repo, `Copied from your project folder: ${env.join(', ')}\n`);
     } catch (err) {
       return this.fail(run, "squad-kit could not copy this project's settings into its own copy.", { detail: `Could not copy your .env files: ${(err as Error).message}` });

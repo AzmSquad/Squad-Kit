@@ -26,6 +26,7 @@
 .toast-act { flex: none; height: 28px; padding: 0 10px; border-radius: 7px; border: 1px solid rgba(255, 255, 255, 0.55); background: transparent; color: inherit; font: inherit; font-size: 12.5px; font-weight: 650; cursor: pointer; white-space: nowrap; }
 .toast-act:hover, .toast-act:focus-visible { background: rgba(255, 255, 255, 0.18); }
 .setup-safe { font-size: 13px; color: var(--muted); }
-@media (max-width: 760px) { .toast.err { flex-wrap: wrap; } }
+/* A phone: the words get their own line, and the buttons go under them. */
+@media (max-width: 760px) { .toast.err { flex-wrap: wrap; justify-content: flex-end; padding-right: 8px; } .toast.err .grow { flex-basis: calc(100% - 40px); } }
 .errcard-points { margin: 8px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
 .errcard-points li { overflow-wrap: anywhere; }

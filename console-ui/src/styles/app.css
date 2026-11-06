@@ -499,8 +499,9 @@ button.opt2:hover { border-color: var(--line-strong); }
 .drafterr.calm { border-color: var(--line-strong); background: var(--surface-2); }
 .drafterr.calm b { color: var(--text); }
 .drafterr-ways { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
-.toasts { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; z-index: 60; align-items: center; }
-.toast { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 11px; background: var(--btn-bg); color: var(--btn-ink); font-size: 13.5px; font-weight: 550; box-shadow: var(--pop-shadow); animation: pop 0.2s; max-width: 560px; }
+/* Both edges, not left: 50%: from the middle a message only gets half the screen, and a narrow one breaks its text letter by letter. */
+.toasts { position: fixed; bottom: 18px; left: 16px; right: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 60; align-items: center; pointer-events: none; }
+.toast { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 11px; background: var(--btn-bg); color: var(--btn-ink); font-size: 13.5px; font-weight: 550; box-shadow: var(--pop-shadow); animation: pop 0.2s; max-width: min(560px, 100%); pointer-events: auto; }
 .toast.err { background: var(--bug); color: #fff; padding-right: 6px; }
 .toast .grow { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .toast svg { flex: none; }
@@ -1193,5 +1194,7 @@ ul.ticketnotes .grow, .addnote .grow { flex: 1; }
 .part-needs label, .part-off { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 .part-add { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; align-items: center; margin-top: 12px; }
 .part-add > .part-row { flex: 1 0 100%; }
+.part-file-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+.part-file-add .input { flex: 1 1 180px; min-width: 0; font-size: 13px; }
 .part-acts { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
 @media (max-width: 560px) { .part-where { grid-template-columns: 1fr; } }
