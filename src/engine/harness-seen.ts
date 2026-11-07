@@ -1,6 +1,7 @@
 import { inbox } from '../board/actions.js';
 import { listTickets, type BoardPaths } from '../board/store.js';
 import type { BoardMeta, GateOverride, StuckChoice, Ticket, WaitingKind } from '../board/types.js';
+import { HARNESS_FILE_GATE } from '../board/additions.js';
 import { readPause } from './usage-limit.js';
 
 /**
@@ -114,9 +115,12 @@ const lineAt = (t: Ticket, re: RegExp): string | undefined => t.activity.find((a
 
 const stopRow = (s: StuckChoice): string => s.kind ?? s.gate ?? (s.budget ? 'budget' : 'ways-out');
 
-const overrideRow = (o: GateOverride): string => (o.weakened?.length ? 'weakened' : o.gate === 'hooks' ? 'hook' : o.gate);
+const overrideRow = (o: GateOverride): string => (o.added ? 'gate-cant-run' : o.weakened?.length ? 'weakened' : o.gate === 'hooks' ? 'hook' : o.gate);
 
 function needRow(t: Ticket): string {
+  // A story held by one of the team's gates waits at that gate's own row.
+  const gate = t.waiting?.kind === 'stuck' ? t.stuck?.added?.find((g) => g.id !== HARNESS_FILE_GATE) : undefined;
+  if (gate) return `add:${gate.id}`;
   if (t.waiting) return t.waiting.kind === 'stuck' ? (t.stuck ? stopRow(t.stuck) : 'ways-out') : WAIT_ROW[t.waiting.kind];
   if (t.quiet?.kind === 'stuck') return 'watchdog';
   if (t.outdated?.length) return 'decisions';
@@ -134,6 +138,8 @@ export function harnessSeen(bp: BoardPaths, meta: BoardMeta, now = Date.now()) {
   const weekIds: Record<string, string[]> = {};
   const hits: Record<string, StoryLink> = {};
   const did: Record<string, number> = {};
+  // What the team's additions did that is no pass and no stop: the story's own record says it.
+  const said: Record<string, { would: number; warned: number; cant?: StoryLink }> = {};
   const tickets = listTickets(bp).filter((t) => !t.deleting);
   let counted = 0;
   let wentPast = 0;
@@ -148,6 +154,7 @@ export function harnessSeen(bp: BoardPaths, meta: BoardMeta, now = Date.now()) {
     // A stop from before these lines, or one that wrote none, is still a stop: its card or what you went past says so.
     if (t.stuck && t.waiting?.kind === 'stuck' && stopRow(t.stuck) !== 'ways-out') stop(stopRow(t.stuck), t.activity[0]?.at ?? t.createdAt);
     for (const o of t.overrides ?? []) stop(overrideRow(o), o.at);
+    for (const r of t.added ?? []) if (r.stopped) stop(`add:${r.id}`, r.stopped);
     if (t.overrides?.some((o) => fresh(o.at))) wentPast += 1;
     for (const [row, at] of stops) {
       const r = (rows[row] ??= {});
@@ -162,6 +169,16 @@ export function harnessSeen(bp: BoardPaths, meta: BoardMeta, now = Date.now()) {
     for (const [row, at] of Object.entries(PASSED).map(([row, of]) => [row, of(t)] as const)) {
       if (!stops.has(row) && fresh(at)) (rows[row] ??= {}).passed = (rows[row]!.passed ?? 0) + 1;
     }
+    for (const r of (t.added ?? []).filter((x) => fresh(x.at))) {
+      const row = `add:${r.id}`;
+      const s = (said[row] ??= { would: 0, warned: 0 });
+      const no = r.answers?.some((a) => a.answer === 'no');
+      if (r.result === 'would-stop' || (no && r.state === 'try')) s.would += 1;
+      if (r.result === 'warned') s.warned += 1;
+      if (r.result === 'cant-run' && !(s.cant?.at! > r.at)) s.cant = { id: t.id, title: t.title, at: r.at };
+      const fine = r.result === 'passed' || Boolean(r.answers?.length && r.answers.every((a) => a.answer === 'yes'));
+      if (fine && !stops.has(row)) (rows[row] ??= {}).passed = (rows[row]!.passed ?? 0) + 1;
+    }
     for (const [row, [re]] of Object.entries(DID_LINES)) if (lines.some((a) => re.test(a.text))) did[row] = (did[row] ?? 0) + 1;
     for (const [limit, re] of Object.entries(HIT_LINES)) {
       const at = lines.find((a) => re.test(a.text))?.at;
@@ -170,6 +187,10 @@ export function harnessSeen(bp: BoardPaths, meta: BoardMeta, now = Date.now()) {
   }
   for (const row of Object.keys(PASSED)) {
     if (rows[row]) rows[row] = { passed: 0, stopped: 0, ...rows[row] };
+  }
+  for (const [row, s] of Object.entries(said)) {
+    const words = [s.would ? `Would have stopped ${storyWord(s.would)}` : '', s.warned ? `Warned on ${storyWord(s.warned)}` : '', s.cant ? `Could not run on ${s.cant.id}` : ''].filter(Boolean);
+    rows[row] = { passed: 0, stopped: 0, ...rows[row], ...(words.length ? { did: words.join('. ') } : {}) };
   }
   for (const [row, n] of Object.entries(did)) (rows[row] ??= {}).did = `${DID_LINES[row]![1]} ${storyWord(n)}`;
   if (wentPast) (rows['ways-out'] ??= {}).did = `You went past a check on ${storyWord(wentPast)}`;

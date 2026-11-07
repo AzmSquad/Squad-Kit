@@ -3,7 +3,9 @@ import type { BoardPaths } from '../board/store.js';
 import { BUILDS_BY_ITSELF, MAX_BASE_TRIES, MAX_DECIDED, MAX_LANDING_WAIT_MS } from '../board/auto.js';
 import { MAX_UPLOADS, MAX_UPLOAD_BYTES } from '../board/actions.js';
 import { WARN_AT } from '../board/budget.js';
-import { MAX_PARTS } from '../board/parts.js';
+import { MAX_CHECKLIST_QUESTIONS, MAX_RULES, MAX_RULE_CHARS, MAX_TYPED_CHARS, readHarness, ruleNote, type Addition } from '../board/additions.js';
+import { MAX_FOLDER_FILES, MAX_FOLDER_FILE_BYTES } from '../board/additions-folder.js';
+import { MAX_PARTS, partsOf, severalParts } from '../board/parts.js';
 import { parallelLimit } from '../core/settings.js';
 import type { AgentRole } from './agents.js';
 import { BRD_READ_MS, BRD_WRITE_MS } from './breakdown-job.js';
@@ -23,6 +25,7 @@ import { MAX_PICTURES, MAX_PICTURES_PER_DONE_WHEN, MAX_PROOF_ROUNDS, MAX_RETAKES
 import { TECHNICAL_TRIES, type NotAllowed } from './question-filter.js';
 import { PIPELINE_MS } from './release.js';
 import { NEVER } from './report.js';
+import { docsInGit } from './project-git.js';
 import { APP_WAIT_MS, SETUP_MS } from './run-app.js';
 import { PACKAGE_HOSTS, PRIVATE, sandboxStatus } from './sandbox.js';
 import { TRY_YIELDS_AFTER_MS } from './try-app.js';
@@ -57,6 +60,8 @@ export interface HarnessRow {
   needs?: Need[];
   /** What each track does here, made from `on`, `skip` and `note`. */
   cells?: Record<Track, { word: string; note?: string }>;
+  /** Added by the team (board/additions.ts), not one of squad-kit's own. */
+  team?: { state: Addition['state']; kind: Addition['kind'] };
 }
 
 export interface HarnessStage {
@@ -96,7 +101,7 @@ function lineStages(): HarnessStage[] {
       g('tool-ready', 'Your AI tool is here', 'It must be installed, or nothing runs.', 'It says what to do.'),
       g('first-run', 'A first run on untouched code', "Your tests and app run once in squad-kit's own copy. What already fails is noted, so the Builder leaves other screens alone.", 'The setup goes on. A story must still pass its checks.'),
       y('overview', 'You confirm what it found', 'The Architect explains your project in plain words.', 'You say what is wrong, and it reads again.'),
-      g('project-rules', "Your project's own rules", "Every agent first reads your rule files and your team's wiki."),
+      g('project-rules', "Your project's own rules", "Every agent first reads your rule files and your team's wiki. squad-kit runs the process, and those files cover the code."),
     ]),
     stage('breakdown', 'Breakdown', 'Your requirements become a tree of stories. Skip it if you start from one story.', on({ ...skip('Optional'), off: true }, { ...skip('Optional'), off: true }, you('You approve')), [
       g('brd-questions', 'Only real gaps and clashes', `At most ${MAX_QUESTIONS} questions on a document, where it leaves a gap or disagrees with itself.`, 'A technical one goes back to the agent.'),
@@ -122,10 +127,11 @@ function lineStages(): HarnessStage[] {
       g('local-files', 'Test values, not your own', 'A file marked local gets values kept for stories. No agent can read it.'),
     ]),
     stage('checks', 'Checks', "squad-kit runs your project's own checks. No agent is asked if they passed.", on(squad('squad-kit')), [
-      g('checks', "Your project's own checks", "Test, lint and build. The Builder's word doesn't count. A failed check runs once more, so a flaky test doesn't stop the story.", `The Builder fixes it, up to ${MAX_CHECK_TRIES} tries. Then a card.`),
-      g('weakened', 'Weakened tests', 'Tests deleted, switched off or reduced, or test settings changed.', 'It stops. Only you can go past it, with a reason on the record.'),
+      g('checks', "Your project's own checks", "Test, lint and build, plus scripts/check when your project has one. The Builder's word doesn't count. A failed check runs once more, so a flaky test doesn't stop the story.", `The Builder fixes it, up to ${MAX_CHECK_TRIES} tries. Then a card.`),
+      g('weakened', 'Weakened tests', "Tests deleted, switched off or reduced, test settings changed, or a change to what a must-pass gate of your team runs.", 'It stops. Only you can go past it, with a reason on the record.'),
       g('no-tests', 'No tests, no green', 'No tests never means a green pass. Lint, build and the app starting must still pass.', 'Asked once per project: add tests, or go on without.'),
       g('test-change', 'Test commands stay strong', 'A new test command stays only if it passes and runs at least as many tests.', "If squad-kit can't tell, you choose."),
+      g('gate-cant-run', "A check that can't run", "One of your team's gates that can't run, or a file of additions that can't be read, says nothing about the code. It never counts against the story, and it is never dropped without a word.", "It retries by itself, then a card: try again, let an engineer look, or go on with a reason. On Builds by itself it waits for a person."),
     ]),
     stage('review', 'Review', "A Reviewer that never saw the build reads the Builder's work.", on(squad('Reviewer')), [
       g('review', 'A fresh Reviewer', 'It checks every "done when" and saved decision, and looks for bugs, security holes and missing or weakened tests. It changes nothing.', `Back to the Builder, up to ${MAX_REVIEW_ROUNDS} rounds. Then you decide.`),
@@ -235,6 +241,12 @@ function limitRows(meta?: BoardMeta): HarnessLimit[] {
     size({ parallel: parallelLimit(meta?.parallel) }, 'Stories at once', 'Across your projects. Change it in Settings.'),
     size({ MAX_PARTS }, 'Parts of one product'),
     size({ MAX_UPLOADS }, 'Files on one story'),
+    size({ MAX_RULES }, 'Rules your team can add', 'Remove one to add another.'),
+    size({ MAX_RULE_CHARS }, 'Characters in one rule', 'Agents read every rule at every step, so each stays short.'),
+    size({ MAX_CHECKLIST_QUESTIONS }, 'Questions on one checklist'),
+    size({ MAX_TYPED_CHARS }, 'Characters in a name, a question or a command'),
+    size({ MAX_FOLDER_FILES }, 'Files looked at in a folder you bring in', 'The rest are left out, and the sheet says so.'),
+    row('sizes', (b) => `${b / 1000} KB`)({ MAX_FOLDER_FILE_BYTES }, 'Largest file read in that folder', 'A bigger one is left out.'),
     bytes({ MAX_UPLOAD_BYTES }, 'One file'),
     bytes({ MAX_NOTE_BYTES }, 'One voice or video note'),
   ];
@@ -285,6 +297,7 @@ function rowDetails(meta: BoardMeta | undefined, root: string | undefined): Reco
     'tool-ready': code('engine/onboard.ts', ['Found', meta?.tools?.map((t) => `${t.name}: ${t.ready ? 'ready' : 'not found'}`).join(', ') || 'Not looked yet']),
     'first-run': code('engine/onboard.ts', ['Runs', run('setup', 'test', 'start')], ['See it in', 'The Overview page']),
     overview: code('board/first-run.ts', ['See it in', 'The Overview page']),
+    'gate-cant-run': code('engine/gate-run.ts', ['File', '.squad/harness.yaml']),
     'project-rules': code('engine/repos.ts', ['Reads', (root ? rulesFiles(root).map((f) => f.slice(root.length + 1)) : []).join(', ') || 'None found yet']),
     'brd-questions': code('engine/breakdown-job.ts', ['Limit', `${MAX_QUESTIONS} questions`]),
     'brd-approve': code('board/requirements-actions.ts', ['See it in', 'The Requirements page']),
@@ -351,21 +364,48 @@ function trackCell(stage: HarnessStage, g: HarnessRow, track: Track): { word: st
   return { word: g.you ? 'You' : 'Runs', ...note };
 }
 
+const RULE_STAGE: Record<string, string> = { all: 'build', analyst: 'story', architect: 'plan', builder: 'build', reviewer: 'review', tester: 'proof' };
+
+const additionStage = (a: Addition): string => (a.kind === 'gate' ? a.when : a.kind === 'checklist' ? (a.agent === 'reviewer' ? 'review' : 'proof') : RULE_STAGE[a.agents.length === 1 ? a.agents[0]! : 'all']!);
+
+/** One of the team's additions as a row on the line, in the same shape as squad-kit's own. */
+function additionRow(a: Addition): HarnessRow {
+  const by: [string, string][] = [['Added by', a.added_by], ['From', a.from === 'typed' ? 'Typed here' : `The folder ${a.from}`]];
+  const team = { state: a.state, kind: a.kind };
+  const row = { id: `add:${a.id}`, name: a.name, team };
+  if (a.kind === 'rule') return { ...row, what: a.text, d: by };
+  if (a.kind === 'checklist') {
+    const fail = a.state === 'try' ? 'The answers show on the story. A no stops nothing.' : a.agent === 'reviewer' ? 'A no counts as a review finding.' : 'A no goes the same way as a "done when" not shown.';
+    return { ...row, what: `The ${a.agent === 'reviewer' ? 'Reviewer' : 'Tester'} answers: ${a.questions.join(' ')}`, fail, d: by };
+  }
+  const fail = a.state === 'try' ? 'It is noted as "would have stopped". Nothing stops.' : a.on_fail === 'warn' ? 'It is noted. Nothing stops.' : { checks: `The Builder fixes it, up to ${MAX_CHECK_TRIES} tries. Then a card.`, merge: 'The change is not saved, and a card has the ways out.', release: 'The release does not go out, and the page has the ways out.' }[a.when];
+  return { ...row, what: "A command squad-kit runs itself. No agent is asked if it passed.", fail, d: [['Command', a.command], ...(a.part ? ([['Part', a.part]] as [string, string][]) : []), ...by] };
+}
+
 /** Everything the Harness page shows, for this project: the words, the real values, and what really happened on its stories. */
 export function harnessView(meta?: BoardMeta, bp?: BoardPaths) {
   const quality = meta?.quality ?? DEFAULT_QUALITY;
   const caps = QUALITY_PRESETS[quality].caps;
   const seen = meta && bp ? harnessSeen(bp, meta) : undefined;
   const details = rowDetails(meta, bp?.root);
+  // A story still waiting on an addition that is off or gone now: its card is real, so it stays in sight.
+  const addedOn = new Set(bp ? readHarness(bp).additions.filter((a) => a.state !== 'off').map((a) => `add:${a.id}`) : []);
+  const waiting = seen?.needs.map((n) => (n.row.startsWith('add:') && !addedOn.has(n.row) ? { ...n, row: 'gate-cant-run' } : n));
   const fill = (r: HarnessRow): HarnessRow => {
-    const needs = seen?.needs.filter((n) => n.row === r.id);
-    return { ...r, d: details[r.id] ?? [], ...(seen?.rows[r.id] ? { seen: seen.rows[r.id]! } : {}), ...(needs?.length ? { needs } : {}) };
+    const needs = waiting?.filter((n) => n.row === r.id);
+    return { ...r, d: details[r.id] ?? r.d ?? [], ...(seen?.rows[r.id] ? { seen: seen.rows[r.id]! } : {}), ...(needs?.length ? { needs } : {}) };
   };
-  const stages = lineStages().map((s) => ({
-    ...s,
-    gates: s.gates.map((g) => ({ ...fill(g), cells: { full: trackCell(s, g, 'full'), express: trackCell(s, g, 'express'), auto: trackCell(s, g, 'auto') } })),
-    stopped: new Set(s.gates.flatMap((g) => seen?.weekIds[g.id] ?? [])).size,
-  }));
+  const file = bp ? readHarness(bp) : { additions: [], log: [] };
+  const live = file.additions.filter((a) => a.state !== 'off');
+  // An addition runs on every track, as the stage's own gates do.
+  const addedCell = (a: Addition) => ({ word: 'Runs', ...(a.state === 'try' ? { note: 'Try first' } : {}) });
+  const stages = lineStages().map((s) => {
+    const gates = [
+      ...s.gates.map((g) => ({ ...fill(g), cells: { full: trackCell(s, g, 'full'), express: trackCell(s, g, 'express'), auto: trackCell(s, g, 'auto') } })),
+      ...live.filter((a) => additionStage(a) === s.id).map((a) => ({ ...fill(additionRow(a)), cells: { full: addedCell(a), express: addedCell(a), auto: addedCell(a) } })),
+    ];
+    return { ...s, gates, stopped: new Set(gates.flatMap((g) => seen?.weekIds[g.id] ?? [])).size };
+  });
   const always = alwaysOnRows().map(fill);
   const rows = [...stages.flatMap((s) => s.gates), ...always];
   const offHere = (sandboxStatus().some((t) => t.available) ? 0 : 1) + (guardSupport().on ? 0 : 1);
@@ -385,6 +425,16 @@ export function harnessView(meta?: BoardMeta, bp?: BoardPaths) {
     limits: limitRows(meta).map((l) => (seen?.hits[l.id] ? { ...l, hit: seen.hits[l.id]! } : l)),
     caps: Object.keys(HARNESS_CAP_NAME).map((key) => ({ key, name: HARNESS_CAP_NAME[key], ...caps[key]! })),
     agents: agentPowers(),
+    additions: {
+      items: file.additions.map((a) => ({ ...a, stage: additionStage(a), ...(seen?.rows[`add:${a.id}`] ? { seen: seen.rows[`add:${a.id}`]! } : {}), ...(a.kind === 'rule' && ruleNote(a.text) ? { note: ruleNote(a.text)! } : {}), ...(a.kind === 'gate' && a.part && meta && !partsOf(meta).some((p) => p.id === a.part) ? { partGone: true } : {}) })),
+      log: file.log.slice(-200).reverse(),
+      ...('broken' in file && file.broken ? { broken: file.broken } : {}),
+      parts: meta && severalParts(meta) ? partsOf(meta).filter((p) => !p.shared).map((p) => ({ id: p.id, name: p.name })) : [],
+      guarded: guardSupport().on,
+      demo: meta?.engine !== 'live',
+      shared: bp ? docsInGit(bp) : false,
+      limits: { rules: MAX_RULES, ruleChars: MAX_RULE_CHARS, questions: MAX_CHECKLIST_QUESTIONS },
+    },
     safety: {
       hidden: [...PRIVATE.map((p) => HARNESS_PRIVATE_NAME[p] ?? p), "Your AI tools' sign-ins", 'Browser sign-ins', 'Keys in package settings', '.env files', "squad-kit's own folder and keys"],
       locked: ["squad-kit's own folder", 'AI instruction files', 'Commit hooks and their settings', 'Code history: commit, push, branches'],

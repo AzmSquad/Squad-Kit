@@ -1,6 +1,6 @@
 import { Check, EyeOff, MonitorOff, X } from 'lucide-react';
 import { assetUrl } from '../api/client';
-import type { ProofShot, Ticket } from '../api/types';
+import type { AddedResult, ProofShot, Ticket } from '../api/types';
 import { pageOf, waitsAtReview } from '../lib/review';
 import { isApiProof, notOnScreen, verdictClass, verdictWord } from '../lib/verdict';
 import '../styles/verdict.css';
@@ -54,12 +54,54 @@ export function MorePictures({ shot, first, onOpen }: { shot: ProofShot; first: 
 }
 
 /** What the change touches that the plan did not include, in the Reviewer's words. It never blocks: the person should see it. */
-export function AlsoChanged({ t, className }: { t: Pick<Ticket, 'alsoChanged'>; className?: string }) {
-  if (!t.alsoChanged?.length) return null;
+export function AlsoChanged({ t, className }: { t: Pick<Ticket, 'alsoChanged' | 'added'>; className?: string }) {
   return (
-    <p className={`note alsochanged${className ? ` ${className}` : ''}`}>
-      <b>Also changed, not in the plan:</b> {t.alsoChanged.join('; ')}.
-    </p>
+    <>
+      {Boolean(t.alsoChanged?.length) && (
+        <p className={`note alsochanged${className ? ` ${className}` : ''}`}>
+          <b>Also changed, not in the plan:</b> {t.alsoChanged!.join('; ')}.
+        </p>
+      )}
+      <TeamResults t={t} />
+    </>
+  );
+}
+
+const GATE_WORD: Record<NonNullable<AddedResult['result']>, [string, string]> = {
+  passed: ['Passed', 'ok'],
+  failed: ['Did not pass', 'bug'],
+  warned: ['Did not pass, warn only', 'you'],
+  'would-stop': ['Would have stopped', 'you'],
+  'cant-run': ['Could not run', 'you'],
+};
+
+/** What the team's own gates and checklists did on this story. No record of one, nothing here. */
+function TeamResults({ t }: { t: Pick<Ticket, 'added'> }) {
+  if (!t.added?.length) return null;
+  return (
+    <div className="teamres">
+      <div className="lbl">Added by your team</div>
+      {t.added.map((r) => (
+        <div key={r.id}>
+          <div className="teamtop">
+            <b dir="auto">{r.name}</b>
+            {r.result && <span className={`pill ${GATE_WORD[r.result][1]}`}>{GATE_WORD[r.result][0]}</span>}
+            {r.state === 'try' && <small>On Try first, it stops nothing</small>}
+          </div>
+          {r.why && <p className="note">{r.why}</p>}
+          {r.answers && (
+            <ol dir="auto">
+              {r.answers.map((a) => (
+                <li key={a.question}>
+                  {a.question} <b className={a.answer === 'no' ? 'no' : ''}>{a.answer === 'yes' ? 'Yes' : a.answer === 'no' ? 'No' : 'Not answered'}</b>
+                  {a.why && <small> {a.why}</small>}
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      ))}
+    </div>
   );
 }
 

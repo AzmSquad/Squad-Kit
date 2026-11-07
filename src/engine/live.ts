@@ -30,6 +30,7 @@ import {
   pullRequestClashed,
   shipped,
   wayOptions,
+  gateCantRunCard,
   type ChangeAnswer,
   saveTestCommand,
 } from '../board/actions.js';
@@ -54,6 +55,8 @@ import { TECHNICAL_TRIES, askText, judgeQuestion, judgeReply, questionBackPrompt
 import { TECHNICAL_STOP, ownRunWords, ownWords } from './plain-stop.js';
 import { addSnapshot, addWorktree, changedTracked, copyDirsIn, commitAll, conventionalWords, cutOffWords, dropSnapshot, git, isAncestor, isLockFile, latestBase, putBackTracked, repairCopyLink, settleCopy } from './git.js';
 import * as P from './prompts.js';
+import { answerLists, checklistAsk, checklistsFor, rulesFor, type ListNo } from '../board/additions.js';
+import { gatesChanged, noteGates, runGatesAt, type GateDone } from './gate-run.js';
 import { baseCommits, repoFor, reposOf, rulesFiles, workspaceRepos } from './repos.js';
 import { partsOf, repoLabel, runsAsProduct } from '../board/parts.js';
 import { flushTracker, publishTicket, recheckMerge, syncWiki, trackerDue } from './sync.js';
@@ -125,6 +128,7 @@ import { CHECK_FAILED, MAX_PICTURES_PER_DONE_WHEN, MAX_PROOF_ROUNDS, MAX_RETAKES
  */
 
 export const MAX_CHECK_TRIES = 3;
+const PROJECT_CHECKS = ['test', 'lint', 'build', 'check', 'start'];
 export const MAX_REVIEW_ROUNDS = 2;
 /** The longest one run may take: writing words (questions, a spec, a design, a read of the project), answering about a question, the Builder, the Reviewer and the picture check, and the Tester. */
 export const WORDS_STEP_MS = 10 * 60_000;
@@ -221,6 +225,8 @@ export class LiveSquad {
   private queueing = false;
   /** What a waiting ticket's card said before it waited for a free place, to say again when its step starts. */
   private beforeQueue = new Map<string, string>();
+  /** The Tester's noes on a team's list that is on, in this proof. */
+  private listNoes = new Map<string, ListNo[]>();
   /** "Before" screenshots running beside a ticket's build, until they end. */
   private beforeShotsOf = new Map<string, Promise<void>>();
   /** What the last board left running in squad-kit's copies, being stopped as this one starts: steps wait for it. */
@@ -1182,7 +1188,7 @@ export class LiveSquad {
     }
     const extra = agentInstructions(agent, opts.step);
     const win = opts.win;
-    const instructions = [opts.instructions, extra, win ? P.windowRule(win.tools) : ''].filter(Boolean).join('\n\n') || undefined;
+    const instructions = [opts.instructions, P.PROCESS_RULE, extra, rulesFor(this.bp, opts.role), win ? P.windowRule(win.tools) : ''].filter(Boolean).join('\n\n');
     const access = win ? await windowAccess(win) : undefined;
     const key = opts.ticket;
     // The model level for this step: squad-kit's default, the project's choice, then this person's own.
@@ -3268,7 +3274,7 @@ export class LiveSquad {
     const copies = copiesOf(meta, t);
     const several = copies.length > 1;
     // Tests made weaker first: passing them would prove little, and only you can go past it.
-    const weak = copies.flatMap((c) => (c.baseCommit ? weakenedChecks(c.dir, c.baseCommit, { skip: [`${path.basename(this.bp.squadDir)}/`], testCommand: c.repo.commands.test }) : []));
+    const weak = copies.flatMap((c) => (c.baseCommit ? weakenedChecks(c.dir, c.baseCommit, { skip: [`${path.basename(this.bp.squadDir)}/`], testCommand: c.repo.commands.test }).concat(gatesChanged(this.bp, c.dir, c.repo.path, c.baseCommit)) : []));
     const fresh = weak.filter((w) => !(t.weakenedContinued ?? []).includes(w.key));
     if (fresh.length) return this.weakenedStop(id, fresh, repoFor(meta, t).base);
     // No old server of squad-kit's own copies may hold a port the checks need.
@@ -3287,9 +3293,9 @@ export class LiveSquad {
     const results: (CheckResult & { part?: string })[] = [];
     for (const c of changed.length ? changed : copies.slice(0, 1)) {
       let commands = c.repo.commands;
-      const onStart = (name: string) => {
+      const onStart = (name: string, command?: string) => {
         // The exact command is for engineers: here, and in the ticket's Developer tab once it ran.
-        this.log('info', `Running ${name}: ${commands[name as 'test' | 'start']}`, id);
+        this.log('info', `Running ${name}: ${command ?? commands[name as 'test' | 'start']}`, id);
         this.update(id, (x) => {
           x.status = CHECK_DOING[name] ?? DOING.check;
           stepDoing(x, x.status);
@@ -3310,6 +3316,30 @@ export class LiveSquad {
       results.push(...ran.map((r) => (several ? { ...r, part: c.label } : r)));
       this.goOn(id);
     }
+    // The team's own gates, by squad-kit's own hand. A must-pass one goes the way of a project check; the others only say.
+    const gates = await runGatesAt(
+      this.bp,
+      'checks',
+      (changed.length ? changed : copies.slice(0, 1)).map((c) => ({ dir: c.dir, repo: c.repo.path, ...(several ? { label: c.label } : {}) })),
+      t.addedSkipped ?? [],
+      (dir) => {
+        const guard = this.guardFor(dir, id);
+        return { ...this.commandWatch(id), ...(guard ? { guard } : {}) };
+      },
+      (name) =>
+        this.update(id, (x) => {
+          x.status = `Running your team's gate: ${name}`;
+          stepDoing(x, x.status);
+        }),
+    );
+    this.goOn(id);
+    this.update(id, (x) => noteGates(x, gates, (text) => addActivity(x, 'tester', text)));
+    results.push(
+      ...gates
+        .filter((g) => g.stops && g.result !== 'cant-run')
+        // A gate named like one of the project's checks must not pass for it.
+        .map((g) => ({ name: PROJECT_CHECKS.includes(g.name.toLowerCase()) ? `${g.name} (your team's gate)` : g.name, command: g.command, ok: g.result === 'passed', output: g.output, seconds: g.seconds, ...(g.failedFirst !== undefined ? { failedFirst: g.failedFirst } : {}), ...(g.label ? { part: g.label } : {}) })),
+    );
     /** A check as a person reads it: on a story with several parts, it says whose. */
     const shown = (r: CheckResult & { part?: string }) => (r.part ? `${r.part}: ${r.name}` : r.name);
     // Stopped while a check ran: its result says nothing about the code, so it is no failed try.
@@ -3332,6 +3362,9 @@ export class LiveSquad {
     const test = results.find((r) => r.name === 'test');
     if (test?.ok && test.failedFirst === undefined) forgetKnownFailure(this.bp, t, test.command);
     const failed = results.filter((r) => !r.ok);
+    // A gate that could not run says nothing about the code: no failed try, no stronger model, no Builder. Only a card.
+    const cant = gates.filter((g) => g.stops && g.result === 'cant-run');
+    if (cant.length && !failed.length) return this.gateCantRun(id, cant);
     const ran = ranOf(results);
     // Weakened tests you continued past are still there: the gate is never a plain pass.
     const around = weak.length > 0;
@@ -3491,6 +3524,20 @@ export class LiveSquad {
     });
   }
 
+  /** A gate of the team's could not run: a card, and nothing counts against the story. */
+  private gateCantRun(id: string, cant: GateDone[]): void {
+    this.update(id, (x) => {
+      x.live = false;
+      x.squad = null;
+      delete x.clock;
+      x.retryPhase = 'test';
+      x.status = 'Stopped: a check could not run';
+      x.stuck = gateCantRunCard(cant, { auto: x.track === 'auto' });
+      x.waiting = { kind: 'stuck', summary: 'A check of your team could not run and needs one decision' };
+      for (const g of cant) addActivity(x, 'tester', `"${g.name}" could not run: ${g.why} Not a failed try`);
+    });
+  }
+
   /** The tests were made weaker: the ticket stops with what was weakened. Send it back, fix it, or continue with a reason. */
   private weakenedStop(id: string, found: Weakening[], base: string): void {
     this.update(id, (x) => {
@@ -3506,7 +3553,7 @@ export class LiveSquad {
       x.stuck = {
         gate: 'checks',
         kind: 'weakened',
-        question: `This change makes the tests weaker than on ${base}, so passing checks would prove little.`,
+        question: found.every((w) => w.key.startsWith('gate:')) ? 'This change touches what your checks run, so passing them would prove little.' : `This change makes the tests weaker than on ${base}, so passing checks would prove little.`,
         points: found.map((w) => w.text),
         checks: found.map((w) => w.key),
         detail: found.map((w) => `${w.kind}: ${w.file}`).join('\n'),
@@ -3551,6 +3598,7 @@ export class LiveSquad {
     // The Reviewer may look at the app's pages, and the app runs in the ticket's copy: what it changes there goes back.
     const rc = this.appOf(t0)?.repo.commands ?? {};
     const lanes = rc.start?.trim() && rc.url?.trim() ? this.watchCopies(t0, true) : [];
+    const lists = goOn ? [] : checklistsFor(this.bp, 'reviewer');
     const r = await this.runAgent({
         role: 'reviewer',
         step: 'review',
@@ -3561,14 +3609,14 @@ export class LiveSquad {
         ? carry
           ? P.chatCarryOnPrompt('reviewer')
           : P.answerPrompt(t0.agentQuestion ?? { text: '' }, 'reviewer')
-        : P.reviewPrompt(meta, listDecisions(this.bp), t0, round, this.ctx(t0), copiesOf(meta, t0).flatMap((c) => (c.baseCommit ? workSoFar(c.dir, c.baseCommit).map((f) => (t0.storyDir ? `${c.repo.path}/${f}` : f)) : []))),
+        : `${P.reviewPrompt(meta, listDecisions(this.bp), t0, round, this.ctx(t0), copiesOf(meta, t0).flatMap((c) => (c.baseCommit ? workSoFar(c.dir, c.baseCommit).map((f) => (t0.storyDir ? `${c.repo.path}/${f}` : f)) : [])))}${checklistAsk(lists)}`,
       addDirs: this.extraDirs(t0),
       permissions: ['read', 'git-read'],
       schema: P.REVIEW_SCHEMA,
       timeoutMs: REVIEW_STEP_MS,
       onTool: this.watcher(id, 'reviewer', workFolder(t0)!),
     }).finally(() => this.keepLanes(id, 'reviewer', lanes));
-    const out = r.structured as { approved: boolean; summary: string; comments: string[]; alsoChanged?: string[]; question?: AgentAsk };
+    const out = r.structured as { approved: boolean; summary: string; comments: string[]; alsoChanged?: string[]; question?: AgentAsk; checklist?: { n?: unknown; answer?: unknown; why?: unknown }[] };
     this.askIfNeeded(id, 'reviewer', out.question);
     this.saveDecided(id, 'reviewer', out);
     if (goOn) this.update(id, (x) => (x.agentQuestion = undefined));
@@ -3579,6 +3627,12 @@ export class LiveSquad {
         x.alsoChanged = also;
         addActivity(x, 'reviewer', alsoChangedLine(also));
       } else delete x.alsoChanged;
+      // A no on a list that is on is a review finding, like any other.
+      const noes = answerLists(this.bp, x, lists, out.checklist);
+      if (noes.length) {
+        out.approved = false;
+        out.comments = [...(out.comments ?? []), ...noes.map((n) => `Your team's checklist "${n.list}" asks: ${n.question} The answer is no${n.why ? `: ${n.why}` : '.'}`)];
+      }
     });
     if (out.approved) {
       this.update(id, (x) => {
@@ -3640,6 +3694,7 @@ export class LiveSquad {
    * Builder once, then a plain stop (notWorking).
    */
   private async proof(id: string): Promise<void> {
+    this.listNoes.delete(id);
     const meta = this.meta();
     const t = readTicket(this.bp, id)!;
     const rc = (this.appOf(t)?.repo ?? repoFor(meta, t)).commands;
@@ -3729,10 +3784,12 @@ export class LiveSquad {
         return this.checkStop(id, err);
       }
       if (judged.broken.length) return this.notWorking(id, judged.broken, judged.notShown);
-      if (judged.notShown.length) return this.cannotShow(id, judged.notShown);
+      if (judged.notShown.length) return this.cannotShow(id, judged.notShown, true, this.listNoes.get(id));
       // Every "done when" ended as not on a screen: nothing shows the work, so the person decides.
-      if (judged.offScreen.length === doneWhenCount(now)) return this.cannotShow(id, judged.offScreen, false);
+      if (judged.offScreen.length === doneWhenCount(now)) return this.cannotShow(id, judged.offScreen, false, this.listNoes.get(id));
     }
+    // A no on a team's list that is on goes the same way as a "done when" not shown.
+    if (this.listNoes.get(id)?.length) return this.cannotShow(id, [], true, this.listNoes.get(id));
     this.update(id, (x) => {
       x.proof = (x.proof ?? []).filter((p) => p.after);
       const shots = x.proof;
@@ -3791,17 +3848,18 @@ export class LiveSquad {
     for (let retake = 1; retake <= MAX_RETAKES; retake += 1) {
       const x = readTicket(this.bp, id)!;
       const open = numbers.filter((n) => isOpen(x, n));
-      if (!open.length) break;
-      const asks = open.map((n) => {
+      const noes = this.listNoes.get(id) ?? [];
+      if (!open.length && !noes.length) break;
+      const asks = [...noes.map((no) => `Your team's checklist "${no.list}" asks: ${no.question} You answered no${no.why ? ` (${no.why})` : ''}. Look again, show it if you can, and answer this question again in "checklist".`), ...open.map((n) => {
         const v = verdict(x, n);
         const text = criterionText(x, n)!;
         const reason = reasonOf(x, n);
         if (!v) return `"Done when" ${n} ("${text}") has no screenshot, and you did not say it shows on no screen. Take one, or put it in offScreen with why.`;
         if (v.shows === 'off-screen') return cannotShowLine(n, text, v.why);
         return reason ? reasonRefusedLine(n, text, reason, v.why, v.advice) : retakeLine(n, text, v.why, v.advice);
-      });
-      const which = open.length === 1 ? `"done when" ${open[0]}` : `${open.length} "done when"`;
-      this.update(id, (y) => addActivity(y, 'tester', `The screenshots do not show ${which} clearly yet, so the Tester takes ${open.length === 1 ? 'it' : 'them'} again (try ${retake} of ${MAX_RETAKES})`));
+      })];
+      const which = open.length === 1 ? `"done when" ${open[0]}` : open.length ? `${open.length} "done when"` : "your team's checklist";
+      this.update(id, (y) => addActivity(y, 'tester', open.length ? `The screenshots do not show ${which} clearly yet, so the Tester takes ${open.length === 1 ? 'it' : 'them'} again (try ${retake} of ${MAX_RETAKES})` : `The Tester answered no on ${which}, so it looks again (try ${retake} of ${MAX_RETAKES})`));
       // What the check has seen of it: its pictures and the Tester's reason.
       const had = (z: Ticket, n: number) => `${rowOf(z, n) ? rowPictures(rowOf(z, n)!).map((p) => p.after).sort().join(' ') : ''}|${reasonOf(z, n) ?? ''}`;
       const before = new Map(numbers.map((n) => [n, had(x, n)]));
@@ -3990,8 +4048,9 @@ export class LiveSquad {
    * false): a plain stop, and the product is not touched. The ways out are Take the screenshots again, Continue anyway
    * and Send it back to the plan.
    */
-  private cannotShow(id: string, rows: OpenRow[], retook = true): void {
-    const stop = notShownStop(rows);
+  private cannotShow(id: string, rows: OpenRow[], retook = true, noes: ListNo[] = []): void {
+    const stop = rows.length ? notShownStop(rows) : { question: "The Tester still answers no on your team's checklist.", points: [] };
+    const listWords = noes.map((n) => `Your team's checklist "${n.list}": ${n.question}${n.why ? ` (${n.why})` : ''}`);
     this.update(id, (x) => {
       x.live = false;
       x.squad = null;
@@ -3999,10 +4058,11 @@ export class LiveSquad {
       x.stage = 'review';
       x.retryPhase = 'proof';
       x.gates = { ...(x.gates ?? { checks: 'pass', review: 'pass' }), proof: 'fail' } as Ticket['gates'];
-      x.status = 'The screenshots do not show it yet';
-      addActivity(x, 'tester', retook ? `Could not show ${rows.map((r) => `"done when" ${r.criterion}`).join(', ')} on a screen after ${MAX_RETAKES} more tries` : 'Every "done when" ended as not on a screen, so the screenshots do not show the work');
-      x.stuck = { gate: 'proof', kind: 'not-shown', question: stop.question, points: stop.points, options: wayOptions({ gate: 'proof', kind: 'not-shown' }) };
-      x.waiting = { kind: 'stuck', summary: 'The screenshots do not show it yet: needs one decision' };
+      const listOnly = !rows.length;
+      x.status = listOnly ? "A no on your team's checklist" : 'The screenshots do not show it yet';
+      addActivity(x, 'tester', listOnly ? `The Tester still answers no on your team's checklist after ${MAX_RETAKES} more tries` : retook ? `Could not show ${rows.map((r) => `"done when" ${r.criterion}`).join(', ')} on a screen after ${MAX_RETAKES} more tries` : 'Every "done when" ended as not on a screen, so the screenshots do not show the work');
+      x.stuck = { gate: 'proof', kind: 'not-shown', question: stop.question, points: [...stop.points, ...listWords], options: wayOptions({ gate: 'proof', kind: 'not-shown' }) };
+      x.waiting = { kind: 'stuck', summary: `${x.status}: needs one decision` };
     });
   }
 
@@ -4170,7 +4230,8 @@ export class LiveSquad {
     const lanes = beside ? [watchLane(beside.cwd, this.protectedFiles(beside.cwd), true)] : this.watchCopies(t, true);
     // A picture saved before this moment was not taken in this step.
     const since = Date.now();
-    const prompt = P.proofPrompt(meta, t, when, this.ctx(t), appUrl, when === 'after' ? this.beforeSizes(t) : undefined, beside ? [] : Object.keys(this.apiParts(t)));
+    const lists = when === 'after' && !beside ? checklistsFor(this.bp, 'tester') : [];
+    const prompt = `${P.proofPrompt(meta, t, when, this.ctx(t), appUrl, when === 'after' ? this.beforeSizes(t) : undefined, beside ? [] : Object.keys(this.apiParts(t)))}${checklistAsk(lists)}`;
     // A new round of after-shots names every "done when": a picture, or why it shows on no screen.
     const count = doneWhenCount(t);
     const complete = (answer: unknown): string | null => {
@@ -4212,10 +4273,12 @@ export class LiveSquad {
     const out = (r.structured ?? { shots: [] }) as {
       shots: { criterion: number; file: string; shows?: string; note?: string }[];
       offScreen?: { criterion: number; why?: string }[];
+      checklist?: { n?: unknown; answer?: unknown; why?: unknown }[];
       /** Older answers: one line for what shows on no screen. */
       skipped?: string;
     };
     const say = (text: string) => this.update(id, (x) => addActivity(x, 'tester', text));
+    if (lists.length) this.update(id, (x) => this.listNoes.set(id, answerLists(this.bp, x, lists, out.checklist)));
     // Only pictures squad-kit took in this step count, each with the page it was taken at and the Tester's verdict.
     const shots: { criterion: number; file: string; page: string; size: string; shows: Judged; note?: string }[] = [];
     for (const s of out.shots ?? []) {

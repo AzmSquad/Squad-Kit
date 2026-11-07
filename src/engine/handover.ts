@@ -11,7 +11,9 @@ import { repoHostFor } from '../modules/registry.js';
 import { addWorktree, changedFiles, commitAll, commitArgsFor, conventionalWords, git, gitArgs, gitEnv as ownGitEnv, isAncestor, isRepo, networkGitEnv, remotes, removeWorktree } from './git.js';
 import { guardSupport, ticketGuard } from './project-guard.js';
 import { writeLog } from '../core/app-log.js';
+import { mergeHarness } from '../board/additions.js';
 import { docsInGit, docsRepo, squadInRepo, stageProjectFiles, stageTicketDocs } from './project-git.js';
+import { reposOf } from './repos.js';
 import { repoTarget } from './sync.js';
 import { spotOwnerDeletes } from './teammate-delete.js';
 
@@ -275,6 +277,7 @@ export async function fetchPushed(bp: BoardPaths): Promise<PickedUp[]> {
       () => false,
     );
   }
+  if (fetched) teamAdditions(bp, repo, remote!);
   let picked: PickedUp[] = [];
   try {
     picked = pickUpPushed(bp);
@@ -287,6 +290,16 @@ export async function fetchPushed(bp: BoardPaths): Promise<PickedUp[]> {
     // The same.
   }
   return picked;
+}
+
+/** What a teammate added reaches the base with their release, and from there this computer. Nothing there yet: nothing to do. */
+function teamAdditions(bp: BoardPaths, repo: string, remote: string): void {
+  try {
+    const base = reposOf(readMeta(bp))[0]!.base;
+    mergeHarness(bp, blob(repo, `${remote}/${base}`, `${squadInRepo(bp, repo)}/harness.yaml`).toString('utf8'));
+  } catch {
+    // The base has no such file yet, or someone is saving it: the next look tries again.
+  }
 }
 
 /** The local branch catches up with the pushed one, so a ticket handed back to you carries on from the newest work. */
@@ -460,6 +473,15 @@ export function projectFromPushed(squadDir: string): string | null {
         if (fs.existsSync(to) && sub !== 'config.yaml') continue;
         fs.mkdirSync(path.dirname(to), { recursive: true });
         fs.writeFileSync(to, blob(root, ref, `${squad}/${rel}`));
+      }
+    }
+    // The team's additions come with the settings, so a new computer never runs without its gates.
+    const added = path.join(squadDir, 'harness.yaml');
+    if (!fs.existsSync(added)) {
+      try {
+        fs.writeFileSync(added, blob(root, ref, `${squad}/harness.yaml`));
+      } catch {
+        // This branch carries none.
       }
     }
     return ref.replace(/^refs\/remotes\//, '');

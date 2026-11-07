@@ -11,5 +11,7 @@ export default defineConfig({
   /** Omit from `dist/` by default so the npm tarball stays under size:guard; set `SQUAD_TSUP_SOURCEMAP=1` for local maps. */
   sourcemap: process.env.SQUAD_TSUP_SOURCEMAP === '1',
   shims: true,
+  /** Spaces only: names stay, so a stack trace still says which function. The package has a 4 MB limit. */
+  minifyWhitespace: true,
   banner: { js: '#!/usr/bin/env node' },
 });

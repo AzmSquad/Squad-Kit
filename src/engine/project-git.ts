@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { harnessFile, mergeHarness } from '../board/additions.js';
 import { boardExists, listDecisions, listReleases, listTickets, readMeta, splitTicket, ticketDir, type BoardPaths } from '../board/store.js';
 import { decisionDoc, releaseDoc } from '../board/docs.js';
 import type { Release, Ticket } from '../board/types.js';
@@ -153,6 +154,10 @@ export function stageProjectFiles(bp: BoardPaths, t: Ticket, baseRef: string): s
     write(into('config.yaml'), fs.readFileSync(bp.configFile, 'utf8'));
     paths.push(`${squad}/config.yaml`);
   }
+  if (fs.existsSync(harnessFile(bp))) {
+    write(into('harness.yaml'), fs.readFileSync(harnessFile(bp), 'utf8'));
+    paths.push(`${squad}/harness.yaml`);
+  }
   for (const sub of ['rules', 'knowledge']) {
     const from = path.join(bp.squadDir, sub);
     if (!fs.existsSync(from)) continue;
@@ -186,6 +191,9 @@ export function leaveProjectFiles(bp: BoardPaths, t: Ticket, base: string): stri
     .split('\n')
     .filter((f) => f && !f.startsWith(`${squad}/tickets/${t.id}/`) && !own.has(f) && !(copy && f.startsWith(`${copy.folder}/`)));
   if (carried.length) git(t.worktree, ['rm', '-q', '-f', '--', ...carried]);
+  // What a team added changes on the board only: a story's change to the file never travels with it.
+  const added = `${squad}/harness.yaml`;
+  if (git(t.worktree, ['rev-parse', '-q', '--verify', `${base}:${added}`], { allowFail: true })) git(t.worktree, ['restore', `--source=${base}`, '--staged', '--worktree', '--', added], { allowFail: true });
   if (copy?.way === 'base' && git(t.worktree, ['rev-parse', '-q', '--verify', `HEAD:${copy.folder}`], { allowFail: true })) writeBreakdownCopy(bp, t, copy);
   return carried;
 }
@@ -232,5 +240,9 @@ export function stageReleaseDocs(bp: BoardPaths, dir: string, release: Release, 
     if (fs.existsSync(from)) fs.cpSync(from, into(sub), { recursive: true });
   }
   if (fs.existsSync(bp.configFile)) fs.copyFileSync(bp.configFile, into('config.yaml'));
+  // Put together with the base's copy: one person's release never takes away what a teammate added.
+  const atBase = into('harness.yaml');
+  const team = mergeHarness(bp, fs.existsSync(atBase) ? fs.readFileSync(atBase, 'utf8') : '');
+  if (team) write(atBase, team);
   git(dir, ['add', '-f', '--', squad]);
 }

@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Your additions** on the Harness page: add a rule, a checklist or a gate, type it or bring it in from a folder, and try it
+  first. Saved in `.squad/harness.yaml`, shared through git. Additions only make the squad stricter; squad-kit's own gates have
+  no off switch. Gates run by squad-kit itself in the guard, with the checks, before merge or before release.
+- **A project's `scripts/check`** runs as one more check, and every agent is told squad-kit runs the process, so a repo's own
+  rule like "open your own pull request" can't stall a step.
 - **The Harness page** shows everything the engine does, with the real values from the engine and what really happened: how
   often each gate passed and stopped, the last story it stopped, and what needs you now, counted from the project's own stories.
   Search it, compare the tracks, and open what really runs behind each row. It replaces Squad and AI: all of that is on its

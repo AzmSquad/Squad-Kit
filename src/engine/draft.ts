@@ -8,6 +8,7 @@ import type { Ticket, TicketBrief, Track } from '../board/types.js';
 import { AI_TOOLS, aiTool, describeToolEvent } from '../modules/registry.js';
 import type { AgentResult, AgentRun, ToolEvent } from '../modules/ai-tool/types.js';
 import { agentInstructions, readAgent } from './agents.js';
+import { rulesFor } from '../board/additions.js';
 import { effortOn, personLevels, resolveLevel } from './levels.js';
 import { projectRoot, secretFiles } from './live.js';
 import { rulesFiles } from './repos.js';
@@ -232,7 +233,7 @@ async function runAnalyst(bp: BoardPaths, opts: AgentRun): Promise<AgentResult> 
     const can = AI_TOOLS.filter((t) => t.canRun).map((t) => t.label).join(' or ');
     throw new BoardActionError(`The Analyst is set to ${tool?.label ?? agent.tool}, which squad-kit cannot run yet. Switch it to ${can} on the Harness page, under Agents.`);
   }
-  const extra = agentInstructions(agent);
+  const extra = [agentInstructions(agent), rulesFor(bp, 'analyst')].filter(Boolean).join('\n\n');
   // Filling in a ticket is a short, simple task: squad-kit's default is the fast level.
   const lv = resolveLevel({ role: 'analyst', step: 'draft', quality: readMeta(bp).quality }, agent.levels, personLevels());
   const effort = effortOn(tool, lv.effort);

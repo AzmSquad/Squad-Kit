@@ -450,7 +450,7 @@ export function prDescription(t: Ticket, item: string | null, shots: { label: st
   }
   if (t.overrides?.length) {
     lines.push('### Continued anyway');
-    for (const o of t.overrides) lines.push(`- **${o.weakened?.length ? 'Weakened tests' : o.gate === 'hooks' ? "Saved without the project's own check" : o.gate === 'checks' ? 'Failed checks' : o.gate === 'proof' ? 'No screenshots' : 'Open review notes'}**, by ${o.by}: ${o.reason}`);
+    for (const o of t.overrides) lines.push(`- **${o.added ? `Without your team's check "${o.added}"` : o.weakened?.length ? 'Weakened tests' : o.gate === 'hooks' ? "Saved without the project's own check" : o.gate === 'checks' ? 'Failed checks' : o.gate === 'proof' ? 'No screenshots' : 'Open review notes'}**, by ${o.by}: ${o.reason}`);
     lines.push('');
   }
   if (shots.length) {

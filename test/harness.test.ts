@@ -44,6 +44,9 @@ const LIMIT_NAME = /^MAX_|_(MS|TRIES|ROUNDS|TO_STOP|MIN|S|AFTER|LIMIT)$/;
 
 /** Limits a person doesn't need to see, by file and name, each with why. */
 const EXCUSED: Record<string, string> = {
+  'gate-run.ts:OLD_COPY_MS': 'When a copy left by an app that ended gets cleaned up. Nobody waits on this, and it stops nothing.',
+  'additions.ts:LOCK_LEFT_MS': 'A lock a closed program left behind. A save takes a moment, and nobody waits on this.',
+  'additions.ts:LOCK_WAIT_MS': 'How long one save waits for another. It ends in a plain "try again".',
   // How often squad-kit looks at something. Nothing waits on them, and nothing stops at them.
   'try-app.ts:WATCH_MS': 'How often it looks at a copy someone is trying.',
   'product-lock.ts:LOOK_EVERY_MS': 'How often a waiting story looks again. WAIT_LIMIT_MS is the limit.',

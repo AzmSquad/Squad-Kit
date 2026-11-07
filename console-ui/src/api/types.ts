@@ -217,7 +217,7 @@ export interface OffScreen {
   why: string;
 }
 
-export type WayOut = 'retry' | 'yourself' | 'continue' | 'plan' | 'skip-pr' | 'more' | 'stop' | 'add-test' | 'no-tests' | 'save-again' | 'skip-hooks';
+export type WayOut = 'retry' | 'yourself' | 'continue' | 'plan' | 'skip-pr' | 'more' | 'stop' | 'add-test' | 'no-tests' | 'save-again' | 'skip-hooks' | 'engineer';
 
 /** GET /api/v1/sandbox: whether the Builder's and Tester's commands run in a sandbox here, and what they may reach. */
 export interface SandboxInfo {
@@ -237,7 +237,7 @@ export interface StuckChoice {
   /** 'cap': the step reached its turn or spend cap; Give it more or Stop. */
   gate?: 'checks' | 'review' | 'proof' | 'merge' | 'cap';
   /** Why the gate stopped, when it is not a plain failure. 'guard': a project command needed a file squad-kit's guard blocked. */
-  kind?: 'weakened' | 'no-tests' | 'bad-proof' | 'guard' | 'broken' | 'not-shown' | 'hook';
+  kind?: 'weakened' | 'no-tests' | 'bad-proof' | 'guard' | 'broken' | 'not-shown' | 'hook' | 'gate-cant-run';
   /** The plain reasons, one per line: "test/booking.test.ts was deleted (4 tests)". */
   points?: string[];
   /** The ticket stopped between two steps at its budget, or the month's. */
@@ -252,6 +252,7 @@ export interface StuckChoice {
 
 export interface GateOverride {
   gate: 'checks' | 'review' | 'proof' | 'hooks';
+  added?: string;
   /** Continued past tests made weaker: what was weakened. */
   weakened?: string[];
   reason: string;
@@ -372,6 +373,7 @@ export interface Ticket {
   releaseNote?: string;
   /** What the change touches that the plan did not include, in the Reviewer's plain words. */
   alsoChanged?: string[];
+  added?: AddedResult[];
   foundIn?: string;
   severity?: 'stops-work' | 'annoying' | 'small';
   changeRequest?: string;
@@ -605,6 +607,7 @@ export interface Release {
   unpushed?: { repo: string; remote: string; base: string; commit: string; tag?: string; error: string; plain?: string }[];
   /** Tickets taken out before the release was made: they go out with the next one. */
   out?: string[];
+  gateStop?: { id: string; name: string; result: 'failed' | 'cant-run'; why?: string; output?: string }[];
 }
 
 /** Old branches of released tickets, here and on the remote, and the ones that stay. */
@@ -868,6 +871,84 @@ export interface HarnessRow {
   seen?: { passed?: number; stopped?: number; week?: number; last?: StoryLink; did?: string };
   needs?: HarnessNeed[];
   cells?: Record<Track, { word: string; note?: string }>;
+  team?: { state: AdditionState; kind: HarnessAddition['kind'] };
+}
+
+export type AdditionState = 'try' | 'on' | 'off';
+
+/** What a team added to its harness, from .squad/harness.yaml. */
+export interface HarnessAddition {
+  id: string;
+  kind: 'rule' | 'checklist' | 'gate';
+  name: string;
+  state: AdditionState;
+  from: string;
+  added_by: string;
+  added_at: string;
+  stage: string;
+  agents?: string[];
+  text?: string;
+  note?: string;
+  agent?: 'reviewer' | 'tester';
+  questions?: string[];
+  when?: 'checks' | 'merge' | 'release';
+  command?: string;
+  part?: string;
+  partGone?: boolean;
+  on_fail?: 'stop' | 'warn';
+  tried?: { at: string; by: string; result: 'passed' | 'failed'; seconds: number };
+  seen?: HarnessRow['seen'];
+}
+
+export interface HarnessLogLine {
+  at: string;
+  by: string;
+  did: 'added' | AdditionState | 'removed' | 'tried';
+  name: string;
+  kind: HarnessAddition['kind'];
+  from?: string;
+}
+
+export interface GateTryAnswer {
+  result: 'passed' | 'failed' | 'cant-run';
+  seconds: number;
+  why?: string;
+  output: string;
+}
+
+export interface FolderFind {
+  key: string;
+  kind: HarnessAddition['kind'];
+  name: string;
+  source: string;
+  text?: string;
+  questions?: string[];
+  command?: string;
+  when?: 'checks' | 'merge' | 'release';
+  out?: string;
+  already?: boolean;
+}
+
+export interface FolderLook {
+  name: string;
+  path: string;
+  finds: FolderFind[];
+  left: number;
+  more: boolean;
+}
+
+/** What one of the team's additions did on a story. */
+export interface AddedResult {
+  id: string;
+  name: string;
+  kind: 'gate' | 'checklist';
+  state: 'try' | 'on';
+  at: string;
+  result?: 'passed' | 'failed' | 'warned' | 'would-stop' | 'cant-run';
+  why?: string;
+  output?: string;
+  agent?: 'reviewer' | 'tester';
+  answers?: { question: string; answer?: 'yes' | 'no'; why?: string }[];
 }
 
 export interface HarnessStage {
@@ -891,6 +972,17 @@ export interface HarnessView {
   limits: { id: string; group: string; n: string; name: string; what: string; hit?: StoryLink }[];
   caps: { key: string; name: string; turns: number; spendUsd: number }[];
   agents: Record<string, { can: [string, boolean][] }>;
+  additions: {
+    items: HarnessAddition[];
+    log: HarnessLogLine[];
+    broken?: string;
+    parts: { id: string; name: string }[];
+    guarded: boolean;
+    demo: boolean;
+    /** The file travels through git, so the team gets it. */
+    shared: boolean;
+    limits: { rules: number; ruleChars: number; questions: number };
+  };
   safety: { hidden: string[]; locked: string[]; sites: string[]; refused: string[]; tools: string[]; local: string[]; lockedByYou: string[] };
 }
 

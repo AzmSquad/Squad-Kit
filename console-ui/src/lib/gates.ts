@@ -52,6 +52,7 @@ export function noShotsText(t: { gates?: Gates | null; work?: { screens: number 
 
 /** What a Continue anyway went past, for its line on the ticket. */
 export function overrideWhat(o: GateOverride): string {
+  if (o.added) return `team's check "${o.added}"`;
   if (o.weakened?.length) return 'weakened tests';
   if (o.gate === 'hooks') return "project's own check";
   return o.gate === 'checks' ? 'failed checks' : o.gate === 'proof' ? 'unfinished proof' : 'open review';

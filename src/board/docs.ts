@@ -130,6 +130,7 @@ const HEADER_KEYS = [
   'decided',
   'offScreen',
   'alsoChanged',
+  'added',
   'files',
 ] as const;
 

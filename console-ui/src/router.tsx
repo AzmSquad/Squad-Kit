@@ -94,7 +94,7 @@ const harness = createRoute({
   getParentRoute: () => rootRoute,
   path: '/harness',
   validateSearch: (s: Record<string, unknown>): { tab?: HarnessTab } => ({
-    tab: ['compare', 'limits', 'safety', 'agents'].includes(s.tab as string) ? (s.tab as HarnessTab) : undefined,
+    tab: ['compare', 'limits', 'safety', 'agents', 'additions'].includes(s.tab as string) ? (s.tab as HarnessTab) : undefined,
   }),
   component: HarnessPage,
 });

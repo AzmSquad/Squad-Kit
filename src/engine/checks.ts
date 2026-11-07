@@ -1,8 +1,11 @@
+import fs from 'node:fs';
 import net from 'node:net';
+import path from 'node:path';
 import type { ProjectCommands } from '../board/types.js';
 import { KILL_AFTER_MS, endGroup, whenExited } from './process-group.js';
 import { appPortVariables } from './port-vars.js';
 import { guardBlockedPath, spawnProject, type GuardSpec } from './project-guard.js';
+import { scriptsOf } from './weakened.js';
 
 /** squad-kit runs the project's own checks itself, so the AI never grades its own work. */
 
@@ -29,6 +32,8 @@ export interface CommandWatch {
   silentMs?: number;
   /** squad-kit's own guard for the project's command (engine/project-guard.ts). Left out, it runs unguarded. */
   guard?: GuardSpec;
+  /** Also ends what the command left running after it exited. */
+  endAll?: boolean;
 }
 
 /** A check that prints nothing for this long is waiting for something that never comes. */
@@ -48,7 +53,7 @@ function minutes(ms: number): string {
  * keys stay out). A timeout or Stop ends the whole group, and the result comes back once the command exits, even when
  * something it started keeps its output open.
  */
-export function runCommand(cwd: string, command: string, timeoutMs = CHECK_MS, watch: CommandWatch = {}): Promise<{ ok: boolean; output: string; seconds: number; ended?: boolean }> {
+export function runCommand(cwd: string, command: string, timeoutMs = CHECK_MS, watch: CommandWatch = {}): Promise<{ ok: boolean; output: string; seconds: number; ended?: boolean; code?: number }> {
   const started = Date.now();
   if (watch.signal?.aborted) return Promise.resolve({ ok: false, output: STOPPED, seconds: 0 });
   return new Promise((resolve) => {
@@ -81,17 +86,20 @@ export function runCommand(cwd: string, command: string, timeoutMs = CHECK_MS, w
     const onStop = () => end(STOPPED);
     watch.signal?.addEventListener('abort', onStop, { once: true });
     let done = false;
-    const finish = (ok: boolean, output: string) => {
+    const finish = (ok: boolean, output: string, code?: number | null) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
       clearTimeout(silent);
       watch.signal?.removeEventListener('abort', onStop);
-      resolve({ ok, output, seconds: (Date.now() - started) / 1000, ...(ended ? { ended: true } : {}) });
+      resolve({ ok, output, seconds: (Date.now() - started) / 1000, ...(ended ? { ended: true } : {}), ...(typeof code === 'number' ? { code } : {}) });
     };
     child.on('error', (err) => finish(false, err.message));
     // Something the command started still holds its output after it exited: end it too.
-    whenExited(child, 1000, () => endGroup(child)).then((code) => finish(code === 0 && !ended, `${out.trim()}${ended ? `\n(${ended})` : ''}`.trim()));
+    whenExited(child, 1000, () => endGroup(child)).then((code) => {
+      if (watch.endAll) endGroup(child);
+      finish(code === 0 && !ended, `${out.trim()}${ended ? `\n(${ended})` : ''}`.trim(), code);
+    });
   });
 }
 
@@ -100,7 +108,7 @@ export function runCommand(cwd: string, command: string, timeoutMs = CHECK_MS, w
  * is sent to fix it. Not after a Stop, a command squad-kit had to end (a second wait says nothing new), or a blocked
  * file: those fail the same way again.
  */
-async function withOneMoreRun<R extends { ok: boolean; output: string; ended?: boolean }>(run: () => Promise<R>, watch: CommandWatch, onAgain: () => void): Promise<R & { failedFirst?: string }> {
+export async function withOneMoreRun<R extends { ok: boolean; output: string; ended?: boolean }>(run: () => Promise<R>, watch: CommandWatch, onAgain: () => void): Promise<R & { failedFirst?: string }> {
   const first = await run();
   if (first.ok || first.ended || watch.signal?.aborted) return first;
   if (watch.guard && guardBlockedPath(first.output, watch.guard)) return first;
@@ -116,19 +124,40 @@ export function failedOnceLine(name: string): string {
   return `${what} failed once and passed when run again.`;
 }
 
+export const OWN_CHECK = 'scripts/check';
+
+/** A project's own scripts/check, as one more check, unless a command it has already runs it. Windows can't run it by that name. */
+export function ownCheck(cwd: string, commands: ProjectCommands): string | undefined {
+  if (process.platform === 'win32') return undefined;
+  try {
+    const stat = fs.statSync(path.join(cwd, OWN_CHECK));
+    if (!stat.isFile() || !(stat.mode & 0o111)) return undefined;
+  } catch {
+    return undefined;
+  }
+  const said = [commands.test, commands.lint, commands.build].filter(Boolean).join(' ');
+  let scripts: Record<string, string> = {};
+  try {
+    scripts = (JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'), 'utf8')) as { scripts?: Record<string, string> }).scripts ?? {};
+  } catch {
+    // Not a node project.
+  }
+  return [said, ...scriptsOf(said).map((s) => scripts[s] ?? '')].some((c) => c.includes(OWN_CHECK)) ? undefined : `./${OWN_CHECK}`;
+}
+
 /**
  * The project's checks, one after another. When no tests ran (none set up, or none found) and the project says how it
  * starts, "start" checks that the app starts and answers at its address, then stops it: then it is the one check of
  * what the app does. With tests, the Tester starts the app for the proof anyway. After a Stop, the ones not run yet
  * never start.
  */
-export async function runChecks(cwd: string, commands: ProjectCommands, onStart?: (name: string) => void, watch: CommandWatch = {}, appWaitMs?: number): Promise<CheckResult[]> {
+export async function runChecks(cwd: string, commands: ProjectCommands, onStart?: (name: string, command?: string) => void, watch: CommandWatch = {}, appWaitMs?: number): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
-  for (const name of ['test', 'lint', 'build'] as const) {
-    const command = commands[name]?.trim();
+  const steps = [...(['test', 'lint', 'build'] as const).map((name) => [name, commands[name]?.trim()] as const), ['check', ownCheck(cwd, commands)] as const];
+  for (const [name, command] of steps) {
     if (!command) continue;
     if (watch.signal?.aborted) break;
-    onStart?.(name);
+    onStart?.(name, command);
     const r = await withOneMoreRun(() => runCommand(cwd, command, undefined, { silentMs: CHECK_SILENT_MS, ...watch }), watch, () => onStart?.(name));
     results.push({ name, command, ...r });
   }

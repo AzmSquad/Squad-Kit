@@ -11,6 +11,7 @@ import { Cmd, Glyph, Modal, ago } from '../components/ui';
 import { usePrefs } from '../lib/prefs';
 import { withoutComments } from '../lib/text';
 import { useDraft } from '../lib/drafts';
+import { AdditionsTab } from './HarnessAdd';
 import '../styles/harness.css';
 
 /**
@@ -18,11 +19,11 @@ import '../styles/harness.css';
  * keeps what can be changed: Quality, each agent's tool and models, and the team's own instructions.
  */
 
-export type HarnessTab = 'line' | 'compare' | 'limits' | 'safety' | 'agents';
+export type HarnessTab = 'line' | 'compare' | 'limits' | 'safety' | 'agents' | 'additions';
 
-const TABS: [HarnessTab, string][] = [['line', 'The line'], ['compare', 'Compare tracks'], ['limits', 'Limits'], ['safety', 'Safety'], ['agents', 'Agents']];
-type Chip = 'all' | 'you' | 'stopped' | 'needs';
-const CHIPS: [Chip, string][] = [['all', 'All'], ['you', 'You decide'], ['stopped', 'Stopped something'], ['needs', 'Needs you']];
+const TABS: [HarnessTab, string][] = [['line', 'The line'], ['compare', 'Compare tracks'], ['limits', 'Limits'], ['safety', 'Safety'], ['agents', 'Agents'], ['additions', 'Your additions']];
+type Chip = 'all' | 'you' | 'stopped' | 'needs' | 'team';
+const CHIPS: [Chip, string][] = [['all', 'All'], ['you', 'You decide'], ['stopped', 'Stopped something'], ['needs', 'Needs you'], ['team', 'Added by your team']];
 const NOTHING = 'Nothing matches that. Try another word, or clear the search.';
 
 export function HarnessPage() {
@@ -125,6 +126,7 @@ export function HarnessPage() {
         {view && tab === 'limits' && <LimitsTab view={view} />}
         {view && tab === 'safety' && <SafetyTab view={view} />}
         {view && tab === 'agents' && <AgentsTab view={view} />}
+        {view && tab === 'additions' && <AdditionsTab view={view} />}
       </div>
     </div>
   );
@@ -186,13 +188,13 @@ function Story({ s }: { s: { id: string; title: string } }) {
 
 /* ── The line ─────────────────────────────────────────── */
 
-function Result({ s }: { s: NonNullable<HarnessRow['seen']> }) {
+export function Result({ s }: { s: NonNullable<HarnessRow['seen']> }) {
   const counted = s.passed !== undefined;
   const all = (s.passed ?? 0) + (s.stopped ?? 0);
   return (
     <div className="hn-res">
       {counted && all > 0 && <div className="bar"><i style={{ width: `${((s.passed ?? 0) / all) * 100}%` }} /></div>}
-      {counted && <div><b>{s.passed}</b> passed, <b>{s.stopped}</b> stopped{s.week ? `, ${s.week} this week` : ''}</div>}
+      {counted && all > 0 && <div><b>{s.passed}</b> passed, <b>{s.stopped}</b> stopped{s.week ? `, ${s.week} this week` : ''}</div>}
       {!counted && Boolean(s.stopped) && <div>Stopped <b>{s.stopped}</b>{s.stopped === 1 ? ' story' : ' stories'}{s.week ? `, ${s.week} this week` : ''}</div>}
       {s.last && <div>Last stopped <Story s={s.last} />, {ago(s.last.at)}</div>}
       {s.did && <div>{s.did}</div>}
@@ -210,13 +212,14 @@ function Row({ r, track, view, tag, spot }: { r: HarnessRow; track: Track; view:
     <article id={r.id} className={`hn-row ${off ? 'off' : ''} ${spot ? 'spot' : ''}`}>
       <div className="hn-top">
         <div>
-          <h3>
+          <h3 dir={r.team ? 'auto' : undefined}>
             {r.name}
             {r.you && <em>You decide</em>}
+            {r.team && <small className="hn-team">Added by your team{r.team.state === 'try' ? ', on Try first' : ''}</small>}
             {tag && <small>{tag}</small>}
             <a href={`#${r.id}`} aria-label={`A link to ${r.name}`}>#</a>
           </h3>
-          <p>{r.note?.[track] ? `${r.note[track]} ` : ''}{r.what}</p>
+          <p dir={r.team ? 'auto' : undefined}>{r.note?.[track] ? `${r.note[track]} ` : ''}{r.what}</p>
           {r.fail && <p className="if"><b>If it fails:</b> {r.fail}</p>}
           {r.then && <p className="if">{r.then}</p>}
           {skipped && <p className="if">Skipped on {skipped}.</p>}
@@ -247,6 +250,7 @@ function LineTab({ view, stageId, track, chip, setChip, q, setQ, spot }: { view:
   const fits = (r: HarnessRow, stage = '') => {
     if (word && !`${r.name} ${r.what} ${r.fail ?? ''} ${r.then ?? ''} ${stage} ${r.d?.flat().join(' ')}`.toLowerCase().includes(word)) return false;
     if (chip === 'you') return Boolean(r.you);
+    if (chip === 'team') return Boolean(r.team);
     if (chip === 'stopped') return Boolean(r.seen?.week);
     return chip !== 'needs' || Boolean(r.needs?.length);
   };
@@ -254,7 +258,7 @@ function LineTab({ view, stageId, track, chip, setChip, q, setQ, spot }: { view:
   const rows = view.stages.filter((s) => searching || s === stage).flatMap((s) => s.gates.filter((g) => fits(g, s.name)).map((g) => ({ g, s })));
   const always = view.alwaysOn.filter((r) => fits(r));
   const { days, weekDays, stories } = view.range;
-  const title = word ? `${rows.length + always.length} found` : chip === 'all' ? stage.name : { you: 'You decide', stopped: 'Stopped something this week', needs: 'Needs you now' }[chip];
+  const title = word ? `${rows.length + always.length} found` : chip === 'all' ? stage.name : { you: 'You decide', stopped: 'Stopped something this week', needs: 'Needs you now', team: 'Added by your team' }[chip];
   return (
     <>
       <div className="hn-tools">
@@ -323,7 +327,7 @@ function CompareTab({ view }: { view: HarnessView }) {
               <div className="hn-cs">{s.name}</div>
               {keep.map((g) => (
                 <div className="hn-cr" role="row" key={g.id}>
-                  <span role="rowheader">{g.name}</span>
+                  <span role="rowheader" dir={g.team ? 'auto' : undefined}>{g.name}{g.team && <small className="hn-team">Added by your team</small>}</span>
                   {view.tracks.map((t) => (
                     <span key={t.id} role="cell" className={CELL[g.cells?.[t.id].word ?? '']} data-t={t.name}>
                       {g.cells?.[t.id].word}
@@ -535,6 +539,7 @@ function AgentPanel({ a, view, edit }: { a: AgentInfo; view: HarnessView; edit: 
   const clean = (x: string | undefined) => withoutComments(x ?? '').trim();
   const rules = [{ id: 'all', name: 'Every step', text: clean(a.instructions) }, ...a.stepList.map((s) => ({ id: s.id, name: s.name, text: clean(a.steps?.[s.id]) }))].filter((r) => r.text);
   const caps = view.caps.filter((c) => c.key.split('.')[0] === a.role);
+  const added = view.additions.items.filter((x) => x.kind === 'rule' && x.state === 'on' && (x.agents?.includes('all') || x.agents?.includes(a.role)));
   return (
     <div className="hn-two even">
       <div>
@@ -553,7 +558,8 @@ function AgentPanel({ a, view, edit }: { a: AgentInfo; view: HarnessView; edit: 
         </ul>
         <h3 className="hn-sub">Your rules for the {a.name}</h3>
         {rules.map((r) => <p className="hn-rule" key={r.id}><b>{r.name}.</b> {r.text}</p>)}
-        {!rules.length && <p className="note">Nothing added yet.</p>}
+        {added.map((r) => <p className="hn-rule" dir="auto" key={r.id}><b>{r.name}.</b> {r.text} <small className="hn-team">Added by your team</small></p>)}
+        {!rules.length && !added.length && <p className="note">Nothing added yet.</p>}
         <button className="btn sm hn-edit" onClick={edit}>Edit the {a.name}</button>
       </div>
       <div>

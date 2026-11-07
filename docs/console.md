@@ -313,7 +313,7 @@ answers shows in **Waiting for you** and in the sidebar's count. The whole flow 
 
 Everything the engine does, with the real values from the engine and what really happened on this project's stories. At
 the top: how many gates are working, how many stopped something this week, and how many need you. Press one to filter the
-list; with one story waiting, **needs you** opens it. Five tabs:
+list; with one story waiting, **needs you** opens it. Six tabs:
 
 - **The line**: the stages from Setup to Release for each track, with a red number where a stage stopped something this
   week, and each gate: what it checks, what happens if it fails, which tracks skip it, and how often it passed and stopped.
@@ -327,9 +327,41 @@ list; with one story waiting, **needs you** opens it. Five tabs:
   agents can ask squad-kit to do. **Websites the squad may reach** is here: on top of the package registries, for the
   sandbox, shared by the team. Terminal: `squad config set hosts`.
 - **Agents**: see below. `/squad` opens this tab, so old links still work.
+- **Your additions**: what your team added. See below.
 
 Every number counts stories, from the project's own stories on this computer, in the last 30 days; this week is the last 7.
 A gate with no record shows no number.
+
+### Your additions
+
+Add to your harness, and it applies from the next step of every story. Additions can only make the squad stricter, and
+squad-kit's own gates have no off switch. They are saved in `.squad/harness.yaml`, shared through git like the settings; no
+agent can change that file, and the engine reads it from the project's main folder, never from a story's copy. If it can't
+be read (a merge clash, say), the page says so and stories stop and ask at each check instead of going on without your gates.
+Your team gets your additions with your next release, and squad-kit puts each person's copy together, so one person's release
+never takes away what another added. A project that keeps its board out of git keeps them on that computer, and the page says so.
+
+- **A rule**: words one agent or all agents follow, sent after squad-kit's own and only adding care. On or Off.
+- **A checklist**: questions the Reviewer or the Tester answers one by one, with the answers on the story. On Try first a no
+  stops nothing. On, a Reviewer's no is a review finding, and a Tester's no goes the same way as a "done when" not shown.
+- **A gate**: a command squad-kit runs itself, with the runner of the project's checks, in the guard, in the story's copy. No
+  agent is asked if it passed, and what it changes in the copy goes back. **Try it now** runs it once on clean code first: a
+  command that can't run can't be saved, and one that fails today stays on Try first or warn only.
+  - **With the checks**: a failure takes the road of a failed project check.
+  - **Before merge**: it runs when the accepted change is saved. A failure takes the road of a refused commit hook.
+  - **Before release**: it runs on a copy of what is about to go out, before anything changes. A failure holds the release
+    back; try again, or go on with a reason that stays on the stories and the release notes.
+  - **A gate that can't run** (the tool is missing, it ran out of time, the guard refused it, its part is gone) never counts
+    against the story. It tries once more by itself, then a card: Try again, Let an engineer look, or Go on without this
+    check with a reason. On Builds by itself the story waits for a person.
+  - **A story that changes what a must-pass gate runs** stops the way weakened tests stop.
+- **From a folder**: pick a folder, tick what comes in and choose the agent. Nothing in the folder runs while squad-kit looks,
+  and it reads text files only, with limits, never keys. What repeats squad-kit's own process stays out. A gate from a
+  folder still needs its own try. The same name again shows as already added.
+
+Try first, On and Off are on each row; Remove asks once and stays on the record, and **Who did what** lists every change.
+
+squad-kit also runs a project's `scripts/check`, when it has one and no other command runs it, as one more check.
 
 ### Agents
 

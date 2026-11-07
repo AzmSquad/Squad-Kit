@@ -11,6 +11,16 @@ import { MAX_PICTURES, MAX_PICTURES_PER_DONE_WHEN, criterionText } from './proof
 
 const STR = { type: 'string' } as const;
 
+/** Every agent's first line on who runs the process, so a repo's own rules can't stall a step. */
+export const PROCESS_RULE =
+  "squad-kit runs the process: branches, commits, pushes, pull requests, reviews and releases. The repo's own rule files cover the code. Where one tells you to open your own pull request, commit, push or follow its own workflow, leave that part to squad-kit and carry on.";
+
+/** The answers to a team's checklist, in the Reviewer's and the Tester's answer. */
+const CHECKLIST = {
+  type: 'array',
+  items: { type: 'object', properties: { n: { type: 'integer' }, answer: { type: 'string', enum: ['yes', 'no'] }, why: STR }, required: ['n', 'answer'] },
+};
+
 const COMMANDS = {
   type: 'object',
   properties: { setup: STR, test: STR, lint: STR, build: STR, start: STR, url: STR },
@@ -294,7 +304,7 @@ export const BUILD_SCHEMA = {
 
 export const REVIEW_SCHEMA = {
   type: 'object',
-  properties: { approved: { type: 'boolean' }, summary: STR, comments: { type: 'array', items: STR }, alsoChanged: { type: 'array', items: STR }, question: QUESTION, decided: DECIDED },
+  properties: { approved: { type: 'boolean' }, summary: STR, comments: { type: 'array', items: STR }, alsoChanged: { type: 'array', items: STR }, checklist: CHECKLIST, question: QUESTION, decided: DECIDED },
   required: ['approved', 'summary', 'comments'],
 };
 
@@ -321,6 +331,7 @@ export const PROOF_SCHEMA = {
       maxItems: 20,
       items: { type: 'object', properties: { criterion: { type: 'integer' }, why: STR }, required: ['criterion', 'why'] },
     },
+    checklist: CHECKLIST,
   },
   required: ['shots', 'offScreen'],
 };

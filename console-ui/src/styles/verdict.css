@@ -35,3 +35,13 @@
 @media (max-width: 760px) {
   .stage .proofmore-row { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); }
 }
+
+.teamres { margin-top: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; font-size: 13.5px; }
+.teamres .lbl { margin: 0 0 6px; }
+.teamres > div + div { margin-top: 8px; }
+.teamtop { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; overflow-wrap: anywhere; }
+.teamtop b { font-weight: 600; }
+.teamres small { color: var(--muted); }
+.teamres ol { margin: 4px 0 0; padding-inline-start: 20px; overflow-wrap: anywhere; }
+.teamres li b { font-weight: 600; color: var(--accent); }
+.teamres li b.no { color: var(--bug); }

@@ -190,6 +190,37 @@ export function scriptsOf(command: string | undefined): string[] {
 }
 
 /**
+ * A story that changes what a gate runs: a file its command names, or the package.json script it runs. A file the base
+ * does not have is new work, not a changed gate. `who`: the gate, in words.
+ */
+export function gateChanged(dir: string, base: string, command: string, who: string): Weakening[] {
+  const changed = new Set(git(dir, ['diff', '--name-only', '--relative', base], { allowFail: true }).split('\n').filter(Boolean));
+  if (!changed.size) return [];
+  const out: Weakening[] = [];
+  for (const word of new Set(command.split(/\s+/).map((w) => w.replace(/^['"]|['"]$/g, '').replace(/^\.\//, '')))) {
+    if (!changed.has(word) || !git(dir, ['rev-parse', '--verify', '-q', `${base}:./${word}`], { allowFail: true })) continue;
+    const now = fs.existsSync(path.join(dir, word)) ? fs.readFileSync(path.join(dir, word), 'utf8') : '';
+    out.push({ kind: 'config', file: word, text: `${word} changed, and ${who} runs it.`, key: `gate:${word}:${short(now)}` });
+  }
+  if (changed.has('package.json')) {
+    const scriptIn = (text: string, s: string): string | undefined => {
+      try {
+        return ((JSON.parse(text) as { scripts?: Record<string, string> }).scripts ?? {})[s];
+      } catch {
+        return undefined;
+      }
+    };
+    const was = git(dir, ['show', `${base}:./package.json`], { allowFail: true });
+    const nowText = fs.existsSync(path.join(dir, 'package.json')) ? fs.readFileSync(path.join(dir, 'package.json'), 'utf8') : '';
+    for (const s of scriptsOf(command)) {
+      const now = scriptIn(nowText, s);
+      if (scriptIn(was, s) !== now) out.push({ kind: 'config', file: 'package.json', text: `The "${s}" script in package.json changed, and ${who} runs it.`, key: `gate:${s}:${short(now ?? '')}` });
+    }
+  }
+  return out;
+}
+
+/**
  * What weakens the tests in a set of changed files. Pure: the files' text before and after comes in. `scripts` are the
  * package.json scripts the project's test command runs, whatever their names.
  */

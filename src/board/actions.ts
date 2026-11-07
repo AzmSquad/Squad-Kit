@@ -57,6 +57,8 @@ import { askAgent, squadWorks, waitsAtReview, whereItStands } from './at-review.
 import { clearJournal, readJournal } from '../engine/release-resume.js';
 import { clearStaleStop } from './stale-stop.js';
 import { copyViews } from '../engine/copies.js';
+import { HARNESS_FILE_GATE } from './additions.js';
+import { noteGates, releaseGatesDue, runGatesAt, runReleaseGates } from '../engine/gate-run.js';
 import { repoLabel } from './parts.js';
 
 /** Every person-facing action lives here, so the board and the terminal do exactly the same thing. */
@@ -591,8 +593,8 @@ function hookRun(bp: BoardPaths, t: Ticket): HookRun {
 const HOOK_STILL_NO = " The Builder tried, and it still says no. If the check itself is what needs changing, that is for you or an engineer: change it in the ticket's copy, or save without it and say why.";
 
 /** The stop for a hook that said no. Only the person can go past it, with a reason on the record. */
-function hookStopped(bp: BoardPaths, id: string, err: HookRefused, byItself?: string): HookStopped {
-  const words = err.timedOut
+function hookStopped(bp: BoardPaths, id: string, err: HookRefused, byItself?: string, gate?: { id: string; name: string }): HookStopped {
+  const words = gate ? `Your team's check "${gate.name}" runs on every save, and it said no. The change is not saved yet. It is safe in the ticket's copy.` : err.timedOut
     ? `This project has its own check that runs on every save. It did not finish in ${Math.round(err.limitMs / 60_000)} minutes, so the change is not saved yet. It is safe in the ticket's copy.`
     : "This project has its own check that runs on every save, and it said no. The change is not saved yet. It is safe in the ticket's copy.";
   const plain = `${words}${requireTicket(bp, id).hookFixTried ? HOOK_STILL_NO : ''}`;
@@ -602,7 +604,7 @@ function hookStopped(bp: BoardPaths, id: string, err: HookRefused, byItself?: st
     t.live = false;
     t.squad = null;
     t.status = "Stopped: the project's own check said no";
-    t.stuck = { kind: 'hook', question: plain, ...(err.said ? { detail: `A commit hook said no:\n${err.said}` } : {}), options: wayOptions({ kind: 'hook', copy: Boolean(t.worktree && fs.existsSync(t.worktree)) }) };
+    t.stuck = { kind: 'hook', ...(gate ? { added: [gate] } : {}), question: plain, ...(err.said ? { detail: `${gate ? gate.name : 'A commit hook'} said no:\n${err.said}` } : {}), options: wayOptions({ kind: 'hook', copy: Boolean(t.worktree && fs.existsSync(t.worktree)) }) };
     if (byItself) addActivity(t, 'squad', `Not accepted by itself: the project's own check said no`);
     else addActivity(t, 'you', 'Checked the proof. Looks right');
     addActivity(t, 'release', "The project's own check said no, so the change is not saved yet");
@@ -630,6 +632,30 @@ function copyForTheHooks(bp: BoardPaths, ticket: Ticket): Ticket {
   });
 }
 
+/** The team's gates before a save, in the copy about to be saved. Failing takes the road of a refused hook, the same card. */
+async function gatesBeforeSave(bp: BoardPaths, ticket: Ticket, copy: Ticket, label: string | undefined, byItself: string | undefined, signal: AbortSignal): Promise<void> {
+  const meta = readMeta(bp);
+  const place = { dir: copy.worktree!, repo: repoFor(meta, copy).path, ...(label ? { label } : {}) };
+  const done = await runGatesAt(bp, 'merge', [place], requireTicket(bp, ticket.id).addedSkipped ?? [], (dir) => ({ signal, ...hookRun(bp, { ...copy, worktree: dir }) }));
+  if (signal.aborted) throw new CommitStopped();
+  if (!done.length) return;
+  updateTicket(bp, ticket.id, (x) => noteGates(x, done, (text) => addActivity(x, 'release', text)));
+  const failed = done.find((d) => d.stops && d.result === 'failed');
+  if (failed) throw hookStopped(bp, ticket.id, new HookRefused(failed.output, false, 0), byItself, { id: failed.id, name: failed.name });
+  const cant = done.filter((d) => d.stops && d.result === 'cant-run');
+  if (!cant.length) return;
+  const words = gateCantRunCard(cant, { auto: ticket.track === 'auto', save: true });
+  updateTicket(bp, ticket.id, (t) => {
+    t.waiting = { kind: 'stuck', summary: 'A check of your team could not run and needs one decision' };
+    t.live = false;
+    t.squad = null;
+    t.status = 'Stopped: a check could not run';
+    t.stuck = words;
+    for (const c of cant) addActivity(t, 'release', `"${c.name}" could not run: ${c.why} Not a failed try`);
+  });
+  throw new HookStopped(`${words.question} See the ways out on the ticket.`);
+}
+
 /** Saves the accepted change with the hooks running beside everything else, so a slow hook never holds up the board. */
 async function saveBeside(bp: BoardPaths, ticket: Ticket, byItself?: string, signal?: AbortSignal): Promise<void> {
   const key = saveKey(bp, ticket.id);
@@ -643,6 +669,7 @@ async function saveBeside(bp: BoardPaths, ticket: Ticket, byItself?: string, sig
     for (const view of views) {
       const copy = views.length === 1 ? copyForTheHooks(bp, view) : view;
       repairCopy(bp, copy);
+      await gatesBeforeSave(bp, ticket, copy, views.length > 1 ? copy.repo : undefined, byItself, signal ? AbortSignal.any([signal, closing.signal]) : closing.signal);
       leaveProjectFiles(bp, copy, repoFor(readMeta(bp), copy).base);
       stageTicketDocs(bp, { ...copy, stage: 'release', release: release.version, waiting: null, hookOwed: undefined });
       const saved = await commitTicket(copy, { ...hookRun(bp, copy), signal: signal ? AbortSignal.any([signal, closing.signal]) : closing.signal });
@@ -652,7 +679,7 @@ async function saveBeside(bp: BoardPaths, ticket: Ticket, byItself?: string, sig
   } catch (err) {
     // A merge was finished before the hooks looked at it: no later save would show it to them.
     if ((err instanceof CommitStopped || err instanceof HookRefused) && err.owed) updateTicket(bp, ticket.id, (t) => (t.hookOwed = true));
-    if (err instanceof CommitStopped) throw err;
+    if (err instanceof CommitStopped || err instanceof HookStopped) throw err;
     if (err instanceof HookRefused) throw hookStopped(bp, ticket.id, err, byItself);
     throw actionFailed(bp, ticket.id, `squad-kit could not save the change. It is safe in the ticket's copy, and an engineer can see why in squad-kit's log. ${byItself ? 'Press Try again.' : 'Press Looks right to try again.'}`, err);
   } finally {
@@ -673,7 +700,21 @@ export async function approveBeside(bp: BoardPaths, id: string): Promise<Ticket>
 /** `decideStuck`, with "Try the save again" running the project's hooks beside everything else. */
 export async function decideStuckBeside(bp: BoardPaths, id: string, choice: number, input: { note?: string; reason?: string } = {}): Promise<Ticket> {
   const ticket = requireTicket(bp, id);
-  if (ticket.waiting?.kind === 'stuck' && ticket.stuck?.options[choice]?.do === 'save-again') await saveBeside(bp, ticket);
+  const stuck = ticket.waiting?.kind === 'stuck' ? ticket.stuck : undefined;
+  const way = stuck?.options[choice]?.do;
+  if (way === 'save-again') await saveBeside(bp, ticket);
+  // Past a gate of the team's: the project's own hooks still get their say, on the save that follows.
+  if (way === 'skip-hooks' && stuck?.added?.length) {
+    const why = input.reason?.trim();
+    if (!why) throw new BoardActionError('Write why you go on without this check. It shows on the story, the pull request and the release notes.');
+    const by = readMeta(bp).user.name;
+    updateTicket(bp, id, (t) => {
+      t.overrides = [...(t.overrides ?? []), ...stuck.added!.map((g) => ({ gate: 'hooks' as const, added: g.name, reason: why, by, at: now() }))];
+      t.addedSkipped = [...new Set([...(t.addedSkipped ?? []), ...stuck.added!.map((g) => g.id)])];
+      tellLater(t, readMeta(bp).engine, { kind: 'note', text: `Saved without your team's check: ${why}`, noteKind: 'note' });
+    });
+    await saveBeside(bp, requireTicket(bp, id));
+  }
   return decideStuck(bp, id, choice, input);
 }
 
@@ -695,13 +736,14 @@ export async function saveBeforeAccept(bp: BoardPaths, id: string, signal?: Abor
 /** The way out of a hook card that saves: back to the proof, with the hooks on, or off with a reason on the record. */
 function saveFromHookCard(bp: BoardPaths, id: string, choice: number, way: 'save-again' | 'skip-hooks', reason?: string): Ticket {
   const meta = readMeta(bp);
+  const noHooks = way === 'skip-hooks' && !requireTicket(bp, id).stuck?.added?.length;
   const why = reason?.trim();
   if (way === 'skip-hooks' && !why) throw new BoardActionError('Write why you save it without the check. It shows on the ticket, the pull request and the release notes.');
   const ticket = updateTicket(bp, id, (t) => {
     const option = t.stuck!.options[choice]!;
     t.stuck!.options.forEach((o, i) => (o.chosen = i === choice));
     addActivity(t, 'you', `Decided: ${option.name}${why ? `. Why: ${why}` : ''}`);
-    if (way === 'skip-hooks') {
+    if (way === 'skip-hooks' && !t.stuck!.added?.length) {
       t.overrides = [...(t.overrides ?? []), { gate: 'hooks', reason: why!, by: meta.user.name, at: now() }];
       delete t.hookOwed;
       tellLater(t, meta.engine, { kind: 'note', text: `Saved without the project's own check: ${why}`, noteKind: 'note' });
@@ -709,7 +751,7 @@ function saveFromHookCard(bp: BoardPaths, id: string, choice: number, way: 'save
     t.waiting = { kind: 'proof', summary: 'The proof is ready for you to check' };
     t.status = 'Proof ready to check';
   });
-  return acceptProof(bp, ticket, undefined, { noHooks: way === 'skip-hooks' });
+  return acceptProof(bp, ticket, undefined, { noHooks });
 }
 
 /** The accepted branch clashes with the base: not a dead end, a stuck card with ways out. */
@@ -1583,8 +1625,33 @@ export function startOver(bp: BoardPaths, id: string, direction: string): Ticket
   });
 }
 
+/** The card for gates that could not run. `save`: they stopped the save of an accepted change, not the checks. */
+export function gateCantRunCard(cant: { id: string; name: string; why?: string; output?: string }[], opts: { auto: boolean; save?: boolean }): StuckChoice {
+  const one = cant.length === 1 ? cant[0]! : null;
+  const said = one ? (one.id === HARNESS_FILE_GATE ? one.why : `Your team's check "${one.name}" could not run. ${one.why}`) : `${cant.length} of your team's checks could not run.`;
+  const detail = cant.filter((c) => c.output).map((c) => `${c.name}:\n${c.output}`).join('\n\n').slice(-6000);
+  return {
+    ...(opts.save ? {} : { gate: 'checks' as const }),
+    kind: 'gate-cant-run',
+    added: cant.map((c) => ({ id: c.id, name: c.name })),
+    checks: cant.map((c) => c.id),
+    question: `${said} This does not count against the story.`,
+    ...(one ? {} : { points: cant.map((c) => `${c.name}: ${c.why}`) }),
+    ...(detail ? { detail } : {}),
+    options: wayOptions({ kind: 'gate-cant-run', auto: opts.auto, ...(opts.save ? { save: true } : {}) }),
+  };
+}
+
 /** The choices on a stuck card. Every stop has a way out: try again, do it yourself, go around it, or back to the plan. */
-export function wayOptions(stop: { gate?: StuckChoice['gate']; kind?: StuckChoice['kind']; publish?: boolean; copy?: boolean; base?: string; test?: string }): StuckOption[] {
+export function wayOptions(stop: { gate?: StuckChoice['gate']; kind?: StuckChoice['kind']; publish?: boolean; copy?: boolean; base?: string; test?: string; auto?: boolean; save?: boolean }): StuckOption[] {
+  // A gate of the team's could not run. Nothing here counts against the story. On Builds by itself it waits for a person.
+  if (stop.kind === 'gate-cant-run') {
+    return [
+      { do: stop.save ? 'save-again' : 'retry', name: 'Try again', note: 'squad-kit runs it once more. Use this after an engineer fixed it, or when it was a one-off.' },
+      { do: 'engineer', name: 'Let an engineer look', note: 'The story waits here, and what it printed is in the details.' },
+      ...(stop.auto ? [] : [{ do: (stop.save ? 'skip-hooks' : 'continue') as WayOut, name: 'Go on without this check', note: 'This once, on this story. Write why: it shows on the story, the pull request and the release notes.' }]),
+    ];
+  }
   // No tests: asked once per project. The Builder adds tests, go on without them, or check again once an engineer added some.
   if (stop.kind === 'no-tests') {
     return [
@@ -1690,6 +1757,13 @@ export function decideStuck(bp: BoardPaths, id: string, choice: number, input: {
     const option = t.stuck.options[choice];
     if (!option) throw new BoardActionError(`Pick a choice between 1 and ${t.stuck.options.length}.`);
     const way = wayOf(t, option, choice);
+    // Nothing moves: the card stays, for the engineer and for whoever decides after.
+    if (way === 'engineer') {
+      addActivity(t, 'you', 'Asked an engineer to look');
+      t.status = 'Waiting for an engineer';
+      t.waiting = { kind: 'stuck', summary: 'Waiting for an engineer to look at it' };
+      return;
+    }
     const gate = t.stuck.gate;
     const reason = input.reason?.trim();
     const note = input.note?.trim();
@@ -1715,11 +1789,14 @@ export function decideStuck(bp: BoardPaths, id: string, choice: number, input: {
     }
     if (way === 'continue') {
       const weakened = kind === 'weakened' ? (t.stuck.points ?? []) : [];
-      t.overrides = [...(t.overrides ?? []), { gate: gate as 'checks' | 'review' | 'proof', ...(weakened.length ? { weakened } : {}), reason: reason!, by: meta.user.name, at: now() }];
+      const named = kind === 'gate-cant-run' ? { added: (t.stuck.added ?? []).map((g) => g.name).join(', ') } : {};
+      t.overrides = [...(t.overrides ?? []), { gate: gate as 'checks' | 'review' | 'proof', ...(weakened.length ? { weakened } : {}), ...named, reason: reason!, by: meta.user.name, at: now() }];
       t.gates = { ...(t.gates ?? { checks: 'pending', review: 'pending', proof: 'pending' }), [gate as string]: 'skipped' };
       if (kind === 'weakened') {
         // Remembered: only tests weakened again, in a new way, stop the ticket again.
         t.weakenedContinued = [...new Set([...(t.weakenedContinued ?? []), ...(t.stuck.checks ?? [])])];
+      } else if (kind === 'gate-cant-run') {
+        t.addedSkipped = [...new Set([...(t.addedSkipped ?? []), ...(t.stuck.checks ?? [])])];
       } else if (gate === 'checks') {
         // Remembered: a later round where only these checks fail again goes on, instead of stopping on them once more.
         // Cards from before this was kept name the failed checks only in the gate's line: "lint, test failed".
@@ -1727,7 +1804,7 @@ export function decideStuck(bp: BoardPaths, id: string, choice: number, input: {
         t.checksContinued = [...new Set([...(t.checksContinued ?? []), ...failed])];
         t.tries = 0;
       }
-      tellLater(t, meta.engine, { kind: 'note', text: `Continued anyway past ${kind === 'weakened' ? 'the weakened tests' : `the failed ${gate}`}: ${reason}`, noteKind: 'note' });
+      tellLater(t, meta.engine, { kind: 'note', text: `Continued anyway past ${kind === 'weakened' ? 'the weakened tests' : kind === 'gate-cant-run' ? 'a check that could not run' : `the failed ${gate}`}: ${reason}`, noteKind: 'note' });
     }
     // No tests: the person's answer is the project's, so later tickets never ask again.
     if (way === 'add-test') {
@@ -1831,7 +1908,7 @@ export function decideStuck(bp: BoardPaths, id: string, choice: number, input: {
         scheduleSquad(t, 'review', 0.2, 1);
         return;
       case 'continue':
-        if (kind === 'weakened') {
+        if (kind === 'weakened' || kind === 'gate-cant-run') {
           // Past the weakened tests, the checks themselves still run.
           t.stage = 'test';
           t.status = 'Running the project checks';
@@ -1942,7 +2019,7 @@ export function composeNotes(bp: BoardPaths, release: Release): string {
   const tickets = listTickets(bp).filter((t) => release.tickets.includes(t.id));
   const lines = tickets.map((t) => `- ${[t.releaseNote ?? `**${t.title}.**`, alsoChangedLine(t.alsoChanged)].filter(Boolean).join(' ')}`);
   const skipped = tickets.flatMap((t) =>
-    (t.overrides ?? []).map((o) => `- ${t.id} ${t.title}: went out ${o.weakened?.length ? 'with weakened tests' : o.gate === 'checks' ? 'with failing checks' : o.gate === 'proof' ? 'with an unfinished proof' : o.gate === 'hooks' ? "without the project's own check" : 'with open review notes'}. ${o.by}: ${o.reason}`),
+    (t.overrides ?? []).filter((o) => !o.release).map((o) => `- ${t.id} ${t.title}: went out ${o.added ? `without your team's check "${o.added}"` : o.weakened?.length ? 'with weakened tests' : o.gate === 'checks' ? 'with failing checks' : o.gate === 'proof' ? 'with an unfinished proof' : o.gate === 'hooks' ? "without the project's own check" : 'with open review notes'}. ${o.by}: ${o.reason}`),
   );
   return [`### What's new in ${release.version.replace(/^v/, '')}`, '', ...lines, ...(skipped.length ? ['', '### Continued anyway', '', ...skipped] : [])].join('\n');
 }
@@ -1956,7 +2033,34 @@ export function saveReleaseNotes(bp: BoardPaths, version: string, notes: string)
   return release;
 }
 
-export async function releaseVersion(bp: BoardPaths, version?: string): Promise<Release> {
+/**
+ * The team's release gates, on squad-kit's own copy of what is about to go out, before anything changes. What holds the
+ * release back stays on it for the page, with its ways out: Try again, or go on with a reason.
+ */
+async function gatesBeforeRelease(bp: BoardPaths, release: Release, tickets: Ticket[], reason?: string): Promise<void> {
+  const done = await runReleaseGates(bp, tickets);
+  for (const t of tickets) updateTicket(bp, t.id, (x) => noteGates(x, done, (text) => addActivity(x, 'release', text)));
+  const stops = done.filter((d) => d.stops && d.result !== 'passed');
+  const saved = readRelease(bp, release.version)!;
+  delete saved.gateStop;
+  if (stops.length && !reason) {
+    saved.gateStop = stops.map((d) => ({ id: d.id, name: d.name, result: d.result as 'failed' | 'cant-run', ...(d.why ? { why: d.why } : {}), ...(d.output ? { output: d.output } : {}) }));
+    writeRelease(bp, saved);
+    throw new BoardActionError(`${release.version} did not go out: ${stops.map((d) => `"${d.name}"`).join(' and ')} ${stops.some((d) => d.result === 'failed') ? 'did not pass' : 'could not run'}. Nothing changed.`);
+  }
+  if (stops.length) {
+    const by = readMeta(bp).user.name;
+    const at = now();
+    const lines = stops.map((d) => `- Went out without your team's check "${d.name}". ${by}: ${reason}`);
+    release.notes = `${release.notes.trim()}\n\n### Continued anyway\n\n${lines.join('\n')}`;
+    saved.notes = release.notes;
+    for (const t of tickets) updateTicket(bp, t.id, (x) => (x.overrides = [...(x.overrides ?? []), ...stops.map((d) => ({ gate: 'checks' as const, added: d.name, release: release.version, reason: reason!, by, at }))]));
+  }
+  delete release.gateStop;
+  writeRelease(bp, saved);
+}
+
+export async function releaseVersion(bp: BoardPaths, version?: string, goOn?: string): Promise<Release> {
   const release = version ? readRelease(bp, version) : draftRelease(bp);
   if (!release || release.status !== 'draft') throw new BoardActionError('There is no release ready to go out.');
   if (release.tickets.length === 0) throw new BoardActionError(`${release.version} has no tickets yet.`);
@@ -1974,16 +2078,18 @@ export async function releaseVersion(bp: BoardPaths, version?: string): Promise<
       if (cut?.version === release.version && cut.status === 'released') return cut;
     }
     // What it sends is read once the lock is held: a ticket accepted just before still goes with it.
-    return await sendRelease(bp, readRelease(bp, release.version) ?? release);
+    return await sendRelease(bp, readRelease(bp, release.version) ?? release, goOn?.trim());
   } finally {
     free();
   }
 }
 
-async function sendRelease(bp: BoardPaths, release: Release): Promise<Release> {
+async function sendRelease(bp: BoardPaths, release: Release, goOn?: string): Promise<Release> {
   const meta = readMeta(bp);
   if (!release.notes.trim()) release.notes = composeNotes(bp, release);
   const tickets = listTickets(bp).filter((t) => release.tickets.includes(t.id));
+  // No gate due, no wait: nothing changes for a project with none.
+  if (meta.engine === 'live' && (release.gateStop || releaseGatesDue(bp))) await gatesBeforeRelease(bp, release, tickets, goOn);
   // Set before it goes out, so the release commit carries the release as the board will keep it.
   release.date = now();
   release.whatsappDraft = [

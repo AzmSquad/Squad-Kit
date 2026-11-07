@@ -167,7 +167,7 @@ export interface OffScreen {
 }
 
 /** The ways out of a stop. Every stop has at least Try again and one more; a step paused on a cap has Give it more and Stop. */
-export type WayOut = 'retry' | 'yourself' | 'continue' | 'plan' | 'skip-pr' | 'more' | 'stop' | 'add-test' | 'no-tests' | 'save-again' | 'skip-hooks';
+export type WayOut = 'retry' | 'yourself' | 'continue' | 'plan' | 'skip-pr' | 'more' | 'stop' | 'add-test' | 'no-tests' | 'save-again' | 'skip-hooks' | 'engineer';
 
 export interface StuckOption extends DecisionOption {
   /** What the choice does. Older boards have no `do`: their first choice tries again, the second goes to the plan. */
@@ -191,9 +191,12 @@ export interface StuckChoice {
    * squad-kit's check, a project command that needed a file outside its copy and squad-kit's guard blocked it,
    * screenshots that show a "done when" does not work after the Builder's last round ('broken'), or a "done when" the
    * Tester could not show on a screen after its last retake ('not-shown'). 'hook': the project's own commit hook said
-   * no when squad-kit saved the accepted change.
+   * no when squad-kit saved the accepted change. 'gate-cant-run': a gate the team added could not run at all, which
+   * says nothing about the code.
    */
-  kind?: 'weakened' | 'no-tests' | 'bad-proof' | 'guard' | 'broken' | 'not-shown' | 'hook';
+  kind?: 'weakened' | 'no-tests' | 'bad-proof' | 'guard' | 'broken' | 'not-shown' | 'hook' | 'gate-cant-run';
+  /** The team's gates this stop is about (board/additions.ts). */
+  added?: { id: string; name: string }[];
   /** For failed checks: which ones failed (for weakened tests: what was weakened), so continuing past them is remembered for them. */
   checks?: string[];
   /** The plain reasons, one per line on the card: "test/booking.test.ts was deleted (4 tests)". */
@@ -208,9 +211,33 @@ export interface GateOverride {
   gate: 'checks' | 'review' | 'proof' | 'hooks';
   /** Continued past tests made weaker, not past failing checks: what was weakened. */
   weakened?: string[];
+  /** Went past a gate the team added: its name. */
+  added?: string;
+  /** Went past it at this release, not on this story alone: the release notes say so once. */
+  release?: string;
   reason: string;
   by: string;
   at: string;
+}
+
+/** What one of the team's additions did on a story, the latest of each. */
+export interface AddedResult {
+  id: string;
+  name: string;
+  kind: 'gate' | 'checklist';
+  state: 'try' | 'on';
+  at: string;
+  /** A gate: 'would-stop' on Try first, 'warned' on warn only. */
+  result?: 'passed' | 'failed' | 'warned' | 'would-stop' | 'cant-run';
+  /** Why it could not run, in plain words. */
+  why?: string;
+  /** What it printed, for engineers. */
+  output?: string;
+  /** When it stopped this story, kept whatever came after. */
+  stopped?: string;
+  /** A checklist: who answered, and each answer. No answer: not answered. */
+  agent?: 'reviewer' | 'tester';
+  answers?: { question: string; answer?: 'yes' | 'no'; why?: string }[];
 }
 
 export interface Activity {
@@ -526,6 +553,8 @@ export interface Ticket {
   releaseNote?: string;
   /** What the change touches that the plan did not include, in the Reviewer's plain words (board/also-changed.ts). */
   alsoChanged?: string[];
+  /** What the team's own additions did on this story. */
+  added?: AddedResult[];
   foundIn?: string;
   severity?: 'stops-work' | 'annoying' | 'small';
   changeRequest?: string;
@@ -594,6 +623,8 @@ export interface Ticket {
   checksContinued?: string[];
   /** The weakened tests the person chose to continue past (see engine/weakened.ts). Only new ones stop the ticket again. */
   weakenedContinued?: string[];
+  /** The team's gates a person went past on this story, with a reason on the record: they do not run again on it. */
+  addedSkipped?: string[];
   /** The test command the Architect suggested for a project with none. The person approves it before squad-kit uses it. */
   testSuggestion?: string;
   /** The design changes a test command the project has: squad-kit tries it at the checks, which keep the current one until then. */
@@ -803,6 +834,8 @@ export interface Release {
    * does not have it), and they go out with the next release.
    */
   out?: string[];
+  /** The team's release gates that held it back on the last try, for the page to show its ways out. */
+  gateStop?: { id: string; name: string; result: 'failed' | 'cant-run'; why?: string; output?: string }[];
 }
 
 export interface UnpushedRelease {

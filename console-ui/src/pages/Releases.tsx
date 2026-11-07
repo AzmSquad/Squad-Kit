@@ -283,6 +283,8 @@ function ReleaseDetail({ r, onReleased, live }: { r: ReleaseWithItems; onRelease
         )}
       </div>
 
+      {Boolean(r.gateStop?.length) && <ReleaseGateStop r={r} onReleased={onReleased} />}
+
       {confirming && (
         <Modal
           title={`Release ${r.version}?`}
@@ -444,5 +446,37 @@ function MarkSentDialog({ version, onClose, onDone }: { version: string; onClose
         <Cmd text={`squad release ${version} --mark-sent --reason ${shellQuote(reason.trim() || 'how it got there')}${warning ? ' --anyway' : ''}`} />
       </div>
     </Modal>
+  );
+}
+
+/** A team's release gate held this one back. Nothing moved: try again, let an engineer read it, or go on with a reason. */
+function ReleaseGateStop({ r, onReleased }: { r: ReleaseWithItems; onReleased(r: Release): void }) {
+  const act = useAct<Release>();
+  const [why, setWhy] = useState('');
+  const send = (goOn?: string) => act.mutate({ path: `/api/v1/releases/${r.version}/release`, ...(goOn ? { body: { goOn } } : {}) }, { onSuccess: onReleased });
+  const printed = r.gateStop!.filter((g) => g.output);
+  return (
+    <div className="box" role="alert" style={{ marginTop: 12 }}>
+      <b>{r.version} did not go out. Nothing changed.</b>
+      {r.gateStop!.map((g) => (
+        <p key={g.id} dir="auto">
+          Your team's check <b>{g.name}</b> {g.result === 'failed' ? 'did not pass.' : `could not run. ${g.why ?? ''}`}
+        </p>
+      ))}
+      {printed.length > 0 && (
+        <details>
+          <summary>Let an engineer look</summary>
+          <pre className="mono" dir="ltr" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontSize: 12 }}>{printed.map((g) => `${g.name}:\n${g.output}`).join('\n\n')}</pre>
+        </details>
+      )}
+      <div className="field" style={{ marginTop: 10 }}>
+        <label htmlFor="gate-why">To go on without this check, write why. It stays on the stories and the release notes.</label>
+        <textarea id="gate-why" className="textarea" dir="auto" value={why} onChange={(e) => setWhy(e.target.value)} />
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        <button className="btn pri sm" disabled={act.isPending} onClick={() => send()}>Try again</button>
+        <button className="btn sm" disabled={act.isPending || !why.trim()} onClick={() => send(why.trim())}>Go on without this check</button>
+      </div>
+    </div>
   );
 }

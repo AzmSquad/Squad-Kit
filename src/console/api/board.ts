@@ -65,7 +65,7 @@ import { addLocalFile, addLockedFile, lockDockerFiles, projectFilesView, removeP
 import { boardExists, boardPaths, listDecisions, listReleases, listTickets, readMeta, readRelease, readTicket, writeMeta } from '../../board/store.js';
 import { seedDemoBoard } from '../../board/demo.js';
 import type { AgentName, PlanComment, PlanEdit } from '../../board/types.js';
-import { repoFor } from '../../engine/repos.js';
+import { repoFor, reposOf } from '../../engine/repos.js';
 import type { ProjectCommands, Release } from '../../board/types.js';
 import { aiTool, guessTracker, speechModule, trackerFor, trackerModule, TRACKERS } from '../../modules/registry.js';
 import type { Tracker } from '../../modules/tracker/types.js';
@@ -83,6 +83,9 @@ import { loadConfig } from '../../core/config.js';
 import { installedEditors, openInEditor, ticketChanges } from '../../engine/changes.js';
 import { corePrompts } from '../../engine/core-prompts.js';
 import { harnessView } from '../../engine/harness.js';
+import { addAddition, readHarness, removeAddition, ruleNote, setAdditionState, type AdditionState, type NewAddition } from '../../board/additions.js';
+import { additionOf, lookInFolder } from '../../board/additions-folder.js';
+import { addTriedGate, tryGate } from '../../engine/gate-run.js';
 import { boardUsage } from '../../board/usage.js';
 import { liveNow } from '../../board/now.js';
 import { readUsual } from '../../board/usual.js';
@@ -599,7 +602,10 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     return act(c, () => saveReleaseNotes(bp, c.req.param('v'), b.notes ?? ''));
   });
 
-  app.post('/api/v1/releases/:v/release', (c) => act(c, () => releaseVersion(bp, c.req.param('v'))));
+  app.post('/api/v1/releases/:v/release', async (c) => {
+    const { goOn } = await body<{ goOn?: string }>(c);
+    return act(c, () => releaseVersion(bp, c.req.param('v'), goOn));
+  });
 
   // The push of a release failed: it stays open until its commits and tags reach the remote.
   app.post('/api/v1/releases/:v/push', (c) => act(c, () => pushReleaseAgain(bp, c.req.param('v'))));
@@ -818,6 +824,58 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
   });
 
   // Every gate, limit and safety rule, with the engine's real values and what really happened, for the Harness page.
+  // What a team adds to its harness. squad-kit's own gates are not in that file, so every attempt on one is refused here.
+  const addOne = (input: NewAddition & { name: string }, from?: string) => {
+    const meta = readMeta(bp);
+    const by = meta.user.name;
+    if (input.kind !== 'gate') {
+      const added = addAddition(bp, by, input, from);
+      return { added, ...(added.kind === 'rule' && ruleNote(added.text) ? { note: ruleNote(added.text) } : {}) };
+    }
+    if (severalParts(meta) && !input.part) throw new Error('Pick which part it runs in.');
+    const { added, failsToday } = addTriedGate(bp, by, input, from);
+    return { added, ...(failsToday ? { note: "It fails on today's code, so it stays on Try first until that is fixed." } : {}) };
+  };
+  app.post('/api/v1/harness/additions', async (c) => {
+    const input = await body<NewAddition & { name: string }>(c);
+    return act(c, () => addOne(input));
+  });
+  app.post('/api/v1/harness/additions/:id/state', async (c) => {
+    const { state } = await body<{ state: AdditionState }>(c);
+    return act(c, () => setAdditionState(bp, readMeta(bp).user.name, c.req.param('id'), state));
+  });
+  app.post('/api/v1/harness/additions/:id/remove', (c) => act(c, () => removeAddition(bp, readMeta(bp).user.name, c.req.param('id'))));
+  app.post('/api/v1/harness/try', async (c) => {
+    const input = await body<{ command?: string; part?: string; id?: string }>(c);
+    return act(c, () => tryGate(bp, readMeta(bp).user.name, input));
+  });
+  const lookIn = (folder: string | undefined) => {
+    if (!folder?.trim()) throw new Error('Choose a folder first.');
+    return lookInFolder(folder, readHarness(bp).additions, reposOf(readMeta(bp))[0]?.commands ?? {});
+  };
+  app.post('/api/v1/harness/folder', async (c) => {
+    const { path: folder } = await body<{ path?: string }>(c);
+    return act(c, () => lookIn(folder));
+  });
+  app.post('/api/v1/harness/folder/add', async (c) => {
+    const { path: folder, picks } = await body<{ path?: string; picks?: ({ key: string } & Parameters<typeof additionOf>[1])[] }>(c);
+    return act(c, () => {
+      const look = lookIn(folder);
+      const added: string[] = [];
+      const left: { name: string; why: string }[] = [];
+      for (const pick of picks ?? []) {
+        const f = look.finds.find((x) => x.key === pick.key);
+        // Only what the folder holds now, and what can be ticked. An import can only add.
+        if (!f || f.out || f.already) continue;
+        try {
+          added.push(addOne(additionOf(f, pick), look.name).added.name);
+        } catch (err) {
+          left.push({ name: f.name, why: (err as Error).message });
+        }
+      }
+      return { added, left };
+    });
+  });
   app.get('/api/v1/harness', (c) => c.json(boardExists(bp) ? harnessView(readMeta(bp), bp) : harnessView()));
 
   // What the squad used on this board, on this computer: the total, each role at each level, and the project's own line.
