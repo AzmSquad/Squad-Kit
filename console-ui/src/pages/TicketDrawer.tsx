@@ -1005,7 +1005,9 @@ function WorkingPanel({ t }: { t: Ticket }) {
   const asks = useAskAgent(t);
   const calm =
     t.stage === 'release'
-      ? { title: `Ready for ${t.release}`, text: 'It goes out with the next release. Nothing needed from you until then.' }
+      ? /^Waits to merge\b/.test(t.status)
+        ? { title: 'Waits to merge', text: 'Your own copy of the code has changes in the same files. Save or undo them there, and it goes in by itself. squad-kit tries again every few minutes.' }
+        : { title: `Ready for ${t.release}`, text: 'It goes out with the next release. Nothing needed from you until then.' }
       : t.stage === 'done'
         ? { title: t.status, text: 'This ticket is live. Found a problem? Report a bug and it comes back around.' }
         : t.waiting?.kind === 'change'
@@ -1210,18 +1212,20 @@ const NOTE_KINDS = [
 ] as const;
 
 /** Notes the person adds at any time. Every agent on the ticket reads them; a running one gets them at its next step. */
-function Notes({ t }: { t: Ticket }) {
+export function Notes({ t }: { t: Ticket }) {
   const act = useAct();
   const [kind, setKind] = useState<TicketNote['kind']>('note');
   const [text, setText] = useDraft(t.id, 'note', '');
   const notes = t.notes ?? [];
   const open = t.stage !== 'done';
   const pick = NOTE_KINDS.find((k) => k.kind === kind)!;
-  const add = () =>
+  const add = () => {
+    if (!text.trim() || act.isPending) return;
     act.mutate(
       { path: `/api/v1/tickets/${t.id}/notes`, body: { text, kind }, done: t.live ? 'Added. The squad reads it at its next step.' : 'Added. Every agent on this ticket reads it.' },
       { onSuccess: () => setText('') },
     );
+  };
   if (!open && !notes.length) return null;
   return (
     <>

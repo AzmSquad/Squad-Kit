@@ -1,3 +1,4 @@
+import { agentPrivatePlaces } from './project-guard.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -240,6 +241,7 @@ async function runAnalyst(bp: BoardPaths, opts: AgentRun): Promise<AgentResult> 
   const r = await tool.run({
     ...opts,
     secretFiles: secretFiles(bp),
+    privatePlaces: agentPrivatePlaces(),
     ...(extra ? { instructions: extra } : {}),
     level: lv.level,
     ...(effort ? { effort } : {}),

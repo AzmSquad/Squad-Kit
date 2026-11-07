@@ -268,10 +268,22 @@ export function serializeConfig(config: SquadConfig): string {
   return yaml.dump(config, { lineWidth: 100, noRefs: true, sortKeys: false });
 }
 
+/** Through a temp file: a full disk or a crash leaves the settings as they were, never empty or half written. */
+export function writeConfigFile(configFile: string, body: string | Buffer): void {
+  const tmp = `${configFile}.${process.pid}.tmp`;
+  try {
+    fs.writeFileSync(tmp, body);
+    fs.renameSync(tmp, configFile);
+  } catch (err) {
+    fs.rmSync(tmp, { force: true });
+    throw err;
+  }
+}
+
 export function saveConfig(configFile: string, config: SquadConfig): void {
   const body = serializeConfig(config);
   parseConfig(body, configFile);
-  fs.writeFileSync(configFile, body, 'utf8');
+  writeConfigFile(configFile, body);
 }
 
 function mergeConfig(base: SquadConfig, override: Partial<SquadConfig>, configFile: string): SquadConfig {

@@ -233,7 +233,9 @@ export async function runAcp(launch: AcpLaunch, opts: AcpRunOptions): Promise<Ag
 
   // Tool calls arrive first as a stub, then their details (name, input, diff) in updates.
   const tools = new Map<string, { name?: string; input?: Record<string, unknown>; reported?: boolean; structured?: unknown }>();
+  // The agent's last message. It arrives in pieces, and a tool call between pieces means the next piece starts a new one.
   let lastText = '';
+  let newMessage = true;
   let structured: unknown;
   let sessionId = opts.resume ?? opts.sessionId ?? '';
   // What the session has cost so far, in US dollars, as the agent last said, and what it had cost before this run.
@@ -271,9 +273,11 @@ export async function runAcp(launch: AcpLaunch, opts: AcpRunOptions): Promise<Ag
     if (opts.logDir && sessionId) fs.appendFileSync(path.join(opts.logDir, `${sessionId}.jsonl`), `${JSON.stringify({ at: new Date().toISOString(), update })}\n`);
     if (update.sessionUpdate === 'usage_update' && update.cost?.currency === 'USD' && count(update.cost.amount)) cost = update.cost.amount;
     if (update.sessionUpdate === 'agent_message_chunk' && update.content?.type === 'text') {
-      lastText = update.content.text;
+      lastText = newMessage ? update.content.text : lastText + update.content.text;
+      newMessage = false;
       opts.onText?.(update.content.text);
     }
+    if (update.sessionUpdate === 'tool_call') newMessage = true;
     if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
       const t = tools.get(update.toolCallId) ?? {};
       const name = launch.toolName(update) ?? (update.sessionUpdate === 'tool_call' ? undefined : t.name);

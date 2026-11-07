@@ -45,6 +45,36 @@ describe('reading Claude’s usage-limit message', () => {
     expect(at).toBe(want > NOW - 60_000 ? want : local(d.getFullYear(), d.getMonth(), d.getDate() + 1, 23, 50));
   });
 
+  it("says signed out only when Claude Code says so, not when a tool's error names a file or another sign-in", () => {
+    const SIGNED_OUT = 'Claude Code is signed out on this computer. Open the Terminal app, type claude and press Enter, then sign in when it asks. Then press Try again.';
+    for (const raw of [
+      'Claude Code is not logged in. Please run /login',
+      'Not logged in · Please run /login',
+      'Invalid API key · Please run /login',
+      'Failed to authenticate. API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"Invalid bearer token"}}',
+      'API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired."}}',
+      'OAuth token has expired. Please obtain a new token or refresh your existing token.',
+      'Authentication required',
+    ]) {
+      expect(plainError(raw), raw).toBe(SIGNED_OUT);
+    }
+    for (const raw of [
+      'Error: Cannot find module ./pages/login.tsx',
+      "src/auth/login.tsx(12,3): error TS2345: Argument of type 'string' is not assignable",
+      'Test failed: authenticator.test.ts should authenticate the user',
+      'oauth-callback.ts: Type error',
+      'POST /login returned 500',
+      "fatal: Authentication failed for 'https://code.example.test/app.git'",
+      'npm ERR! need auth: This command requires you to be logged in to the registry',
+      'Failed to authenticate with the registry',
+      'API error: 401 from the payments service',
+    ]) {
+      expect(plainError(raw), raw).not.toBe(SIGNED_OUT);
+    }
+    // In what the adapter printed around a real run, too.
+    expect(plainError('The run stopped.\nReading src/auth/login.tsx\nexit 1')).not.toBe(SIGNED_OUT);
+  });
+
   it('knows a limit without a reset time, over ACP and directly, and leaves other failures alone', () => {
     expect(claudeLimit("Internal error: You've hit your session limit · resets 3:40pm (Europe/London)", NOW)).toEqual({ resetsAt: '2026-11-03T15:40:00.000Z' });
     expect(claudeLimit('Claude AI usage limit reached', NOW)).toEqual({});

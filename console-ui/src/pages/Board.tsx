@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { Check, Download, Plus, Search } from 'lucide-react';
 import { api } from '../api/client';
-import type { Actor, DraftJob, Stage, Ticket, TrackerStatus } from '../api/types';
+import type { Actor, BrokenTicket, DraftJob, Stage, Ticket, TrackerStatus } from '../api/types';
 import { useBoard } from '../lib/data';
 import { BugDialog, NewTicketDialog, PullDialog } from '../components/dialogs';
 import { Cmd, Glyph, STAGE_NAME } from '../components/ui';
@@ -63,7 +63,7 @@ export function BoardPage() {
   }, [data, query, view, showArchived]);
 
   if (board.isLoading) return <div className="center">Loading the board…</div>;
-  if (!data) return <NoBoard />;
+  if (!data) return <NoBoard settings={board.data?.settings} />;
 
   // What needs the person shows in the banner at the top of every page. Here: setup, the first ticket, or all calm.
   const waiting = data.tickets.filter(needsYou);
@@ -119,6 +119,8 @@ export function BoardPage() {
           )}
         </section>
       )}
+
+      {(data.broken?.length ?? 0) > 0 && <BrokenTickets list={data.broken!} />}
 
       <div className="board">
         {LANES.map((lane) => {
@@ -230,7 +232,34 @@ function PullButton({ onPull }: { onPull(): void }) {
   );
 }
 
-function NoBoard() {
+/** Tickets whose file cannot be read: never silently gone. What happened, and what an engineer needs one click away. */
+export function BrokenTickets({ list }: { list: BrokenTicket[] }) {
+  return (
+    <section className="stuckbox" role="alert" aria-label="Tickets that could not be read" style={{ marginBottom: 14 }}>
+      {list.map((b) => (
+        <div key={b.id}>
+          <p>{b.problem}</p>
+          <details>
+            <summary className="note">For an engineer</summary>
+            <pre className="mono note" style={{ whiteSpace: 'pre-wrap' }}>{`${b.file}\n${b.detail}`}</pre>
+          </details>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+export function NoBoard({ settings }: { settings?: string | undefined }) {
+  if (settings) {
+    return (
+      <div className="center">
+        <div role="alert">
+          <h2>This board cannot open</h2>
+          <p>{settings}</p>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="center">
       <div>

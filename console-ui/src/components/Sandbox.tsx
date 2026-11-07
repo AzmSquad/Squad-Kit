@@ -95,7 +95,7 @@ export function AllowedHosts({ hosts }: { hosts: string[] }) {
     act.mutate({ path: '/api/v1/settings', method: 'PUT', body: { allowedHosts: next }, done }, { onSuccess: () => setText('') });
   const add = () => {
     const h = text.trim();
-    if (h) save([...hosts, h], `The squad may reach ${h} from its next step`);
+    if (h && !act.isPending) save([...hosts, h], `The squad may reach ${h} from its next step`);
   };
   const off = q.data?.tools.length ? q.data.tools.every((s) => !s.available) : false;
   return (
@@ -153,7 +153,7 @@ export function GuardAllows() {
     act.mutate({ path: '/api/v1/settings', method: 'PUT', body: { guard: { allowRead: guard.allowRead, allowWrite: guard.allowWrite, ...body } }, done }, { onSuccess: clear });
   const row = (kind: 'read' | 'write', list: string[], text: string, setText: (s: string) => void) => {
     const field = kind === 'read' ? 'allowRead' : 'allowWrite';
-    const add = () => text.trim() && save({ [field]: [...list, text.trim()] }, `The project's commands may ${kind} ${text.trim()}`, () => setText(''));
+    const add = () => text.trim() && !act.isPending && save({ [field]: [...list, text.trim()] }, `The project's commands may ${kind} ${text.trim()}`, () => setText(''));
     const drop = (p: string) => save({ [field]: list.filter((x) => x !== p) }, `No longer allowed to ${kind} ${p}`, () => undefined);
     return (
       <div className="maprow">

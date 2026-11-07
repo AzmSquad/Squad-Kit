@@ -221,7 +221,7 @@ function Talk({ t }: { t: OverviewTalk }) {
   const [text, setText] = useDraft('overview', 'talk', '');
   const said = t.messages.some((m) => m.who === 'you');
   const send = (msg = text) => {
-    if (!msg.trim() || t.thinking) return;
+    if (!msg.trim() || t.thinking || act.isPending) return;
     act.mutate({ path: '/api/v1/overview/talk', body: { text: msg } }, { onSuccess: () => setText('') });
   };
   return (

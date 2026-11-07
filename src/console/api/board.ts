@@ -62,7 +62,7 @@ import { copyViews } from '../../engine/copies.js';
 import { isApiProof } from '../../engine/proof-verdict.js';
 import { addPart, changePart, partsOf, removePart, repoPaths, severalParts, type PartChange } from '../../board/parts.js';
 import { addLocalFile, addLockedFile, lockDockerFiles, projectFilesView, removeProjectFile, useMyFile } from '../../board/project-files.js';
-import { boardExists, boardPaths, listDecisions, listReleases, listTickets, readMeta, readRelease, readTicket, writeMeta } from '../../board/store.js';
+import { boardExists, boardPaths, brokenTickets, listDecisions, listReleases, listTickets, readMeta, readRelease, readTicket, settingsProblem, ticketProblem, writeMeta } from '../../board/store.js';
 import { seedDemoBoard } from '../../board/demo.js';
 import type { AgentName, PlanComment, PlanEdit } from '../../board/types.js';
 import { repoFor, reposOf } from '../../engine/repos.js';
@@ -248,9 +248,13 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
   );
 
   app.get('/api/v1/board', (c) => {
-    if (!boardExists(bp)) return c.json({ ready: false });
+    if (!boardExists(bp)) {
+      const settings = settingsProblem(bp);
+      return c.json({ ready: false, ...(settings ? { settings } : {}) });
+    }
     const meta = readMeta(bp);
     const all = listTickets(bp);
+    const broken = brokenTickets(bp, all);
     const recent = listReleases(bp).filter((r) => r.status === 'released' && r.date && Date.now() - Date.parse(r.date) < 30 * DAY);
     const ctl = opts.control;
     const usual = readUsual(bp);
@@ -263,15 +267,18 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
       tickets: all.filter((t) => t.stage !== 'done' && !t.archived).map((t) => ({ ...t, now: liveNow(t, usual) })),
       // Archived tickets leave the board; "Show archived" shows them again.
       archived: all.filter((t) => t.stage !== 'done' && t.archived),
+      ...(broken.length ? { broken } : {}),
       stats: {
         released30: recent.reduce((n, r) => n + r.tickets.length, 0),
         bugs30: recent.reduce((n, r) => n + (r.bugs?.length ?? 0), 0),
-        open: all.filter((t) => t.stage !== 'done' && !t.archived).length,
+        open: all.filter((t) => t.stage !== 'done' && !t.mergedAt && !t.archived).length,
       },
     });
   });
 
   app.get('/api/v1/tickets/:id', (c) => {
+    const problem = ticketProblem(bp, c.req.param('id'));
+    if (problem) return c.json({ error: problem }, 409);
     const t = readTicket(bp, c.req.param('id'));
     return t ? c.json({ ...withProblem(t), now: liveNow(t, readUsual(bp)) }) : c.json({ error: 'not found' }, 404);
   });

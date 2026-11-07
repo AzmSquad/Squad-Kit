@@ -8,7 +8,7 @@ import { AI_TOOLS, BROWSERS } from '../modules/registry.js';
 import { squadHome } from '../core/home.js';
 import { childEnv } from './agent-env.js';
 import { OWN_GROUP, track } from './process-group.js';
-import { PACKAGE_CACHES, PRIVATE, gitPlaces, packageCacheEnv, projectCacheDir, ticketCacheDir } from './sandbox.js';
+import { PACKAGE_CACHES, PRIVATE, gitPlaces, noPushEnv, packageCacheEnv, projectCacheDir, ticketCacheDir } from './sandbox.js';
 
 /**
  * squad-kit's own guard for the project's own commands: the checks (test, lint, build), the app's start, the setup
@@ -35,6 +35,8 @@ export interface GuardSpec {
   write: string[];
   /** Folders the command may also read: its attachments, its own cache. */
   read: string[];
+  /** A story's command: it has no business pushing. The release pipeline's may. */
+  noPush?: boolean;
   /** Files and folders no command may read: keys, sign-ins, squad-kit's own folder, browser profiles, .env files. */
   noRead: string[];
   /** What a command may read but never change: squad-kit's own browser build, the copy's `.git` and git's folder. */
@@ -135,7 +137,7 @@ function squadOwnFiles(): string[] {
 export function ticketGuard(bp: BoardPaths, o: { cwd: string; id: string; read?: string[]; home?: string; platform?: NodeJS.Platform; allow?: ProjectGuard }): GuardSpec {
   const home = o.home ?? os.homedir();
   const cache = ticketCacheDir(bp, o.id);
-  return buildGuard({ cwd: o.cwd, root: bp.root, cache, extraWrite: [bp.proofDir, cache], extraRead: [cache, ...(o.read ?? [])], home, platform: o.platform ?? process.platform, ...(o.allow ? { allow: o.allow } : {}) });
+  return { ...buildGuard({ cwd: o.cwd, root: bp.root, cache, extraWrite: [bp.proofDir, cache], extraRead: [cache, ...(o.read ?? [])], home, platform: o.platform ?? process.platform, ...(o.allow ? { allow: o.allow } : {}) }), noPush: true };
 }
 
 /**
@@ -177,22 +179,36 @@ export function allowPath(p: string, home: string = os.homedir()): string {
   return path.resolve(p.trim().replace(/^~(?=$|\/)/, home));
 }
 
-/** Builds the full spec: where the command may read and write, and what stays hidden. */
-export function buildGuard(o: { cwd: string; root: string; cache?: string; extraWrite?: string[]; extraRead?: string[]; home: string; platform: NodeJS.Platform; allow?: ProjectGuard }): GuardSpec {
-  const home = o.home;
-  const temp = withReal([os.tmpdir(), ...(o.platform === 'win32' ? [] : ['/tmp', '/private/tmp', '/private/var/folders'])]);
-  const noRead = [
+/** Keys and sign-ins in the person's home folder: no project command and no agent reads them. */
+export function privatePlaces(home: string, platform: NodeJS.Platform): string[] {
+  return [
     ...PRIVATE.map((p) => path.join(home, p)),
     path.join(home, '.config', 'gcloud'),
     path.join(home, '.docker'),
     ...RUNTIME_KEYS.map((p) => path.join(home, p)),
-    ...(o.platform === 'darwin' ? [path.join(FINCH_ON_MAC, '_config')] : []),
+    ...(platform === 'darwin' ? [path.join(FINCH_ON_MAC, '_config')] : []),
     path.join(home, 'Library', 'Keychains'),
-    ...browserProfiles(home, o.platform),
+    ...browserProfiles(home, platform),
     ...tokenFiles(home),
     ...aiToolPrivate(home),
-    ...withReal([squadHome()]),
   ];
+}
+
+/**
+ * What no agent may read or change, wherever it works. The sandbox covers a step's shell commands only, and read-only
+ * agents have none, so their file tools need this too. squad-kit's own folder holds what agents must read, so only its
+ * secrets are named: the sign-ins and link tokens of the app and of every project.
+ */
+export function agentPrivatePlaces(home: string = os.homedir(), platform: NodeJS.Platform = process.platform): string[] {
+  const own = squadHome();
+  return [...privatePlaces(home, platform), ...['secrets.yaml', 'app.json', 'console.json'].map((f) => path.join(own, f)), ...['secrets.yaml', 'console.json'].map((f) => path.join(own, 'projects', '*', f))];
+}
+
+/** Builds the full spec: where the command may read and write, and what stays hidden. */
+export function buildGuard(o: { cwd: string; root: string; cache?: string; extraWrite?: string[]; extraRead?: string[]; home: string; platform: NodeJS.Platform; allow?: ProjectGuard }): GuardSpec {
+  const home = o.home;
+  const temp = withReal([os.tmpdir(), ...(o.platform === 'win32' ? [] : ['/tmp', '/private/tmp', '/private/var/folders'])]);
+  const noRead = [...privatePlaces(home, o.platform), ...withReal([squadHome()])];
   // Seatbelt matches the canonical path (on a Mac /var is a link to /private/var), so the copy and everything the
   // command may reach are kept as their real paths, and withReal also keeps the link form where both can appear.
   const real = (p: string) => {
@@ -481,7 +497,7 @@ export interface SpawnProjectOptions {
 export function spawnProject(command: string, o: SpawnProjectOptions): ChildProcess {
   // NuGet, Maven, Gradle and Ruby write into the copy's own cache, never the person's shared ones, like the agent sandbox.
   const caches = o.guard?.cache ? { ...packageCacheEnv(o.guard.cache), ...npmCacheEnv(o.guard.cache), ...ownCacheEnv(o.guard.cache), ...browserCacheEnv(o.guard.cache) } : {};
-  const env = { ...projectEnv(), ...caches, ...(o.env ?? {}) };
+  const env = { ...projectEnv(), ...caches, ...(o.guard?.noPush ? noPushEnv() : {}), ...(o.env ?? {}) };
   const stdio = o.stdio ?? ['ignore', 'pipe', 'pipe'];
   const base: SpawnOptions = { cwd: o.cwd, detached: OWN_GROUP, stdio, env };
   if (o.guard && process.platform === 'darwin') {

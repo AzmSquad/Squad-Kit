@@ -28,7 +28,7 @@ import { usePrefs } from '../lib/prefs';
 import { PHONE, useMedia } from '../lib/chatDock';
 import { shellQuote } from '../lib/text';
 import { Cmd } from '../components/ui';
-import { ReadingCard, FailedCard, QuestionsView } from '../components/BreakdownRead';
+import { CarryOn, ReadingCard, FailedCard, QuestionsView } from '../components/BreakdownRead';
 import { DecidedPanel, ItemPanel, Tree, canEdit } from '../components/BreakdownTree';
 import { BreakdownMap } from '../components/BreakdownMap';
 import {
@@ -660,6 +660,7 @@ function JobLine({ v }: { v: BreakdownView }) {
     <div className="rq-jobline" role="status">
       <span className="live" aria-hidden="true" />
       {j!.status === 'stopping' ? 'Stopping the Analyst…' : `${j!.now ?? 'The Analyst is working'}${j!.ask ? `: "${j!.ask}"` : ''}`}
+      <CarryOn v={v} />
       {v.mine && j!.status !== 'stopping' && (
         <button className="btn sm" onClick={() => act.mutate({ path: `${base(v.id)}/stop`, done: 'Stopping the Analyst.' })} title={`squad requirements stop ${v.id}`}>
           Stop

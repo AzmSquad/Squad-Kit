@@ -40,7 +40,7 @@ const { LiveSquad } = await import('../src/engine/live.js');
 const { addWorktree } = await import('../src/engine/git.js');
 const actions = await import('../src/board/actions.js');
 const { deletePlan, deleteTicket } = await import('../src/engine/delete.js');
-const { packageCacheEnv, ticketCacheDir } = await import('../src/engine/sandbox.js');
+const { noPushEnv, packageCacheEnv, ticketCacheDir } = await import('../src/engine/sandbox.js');
 
 let tmp: string;
 let project: string;
@@ -122,7 +122,7 @@ describe("the Builder's package downloads", () => {
     await squad().runBuilder('AP-1', 'Build it', false, 'build');
     const cache = cacheOf('AP-1');
     const run = h.calls[0]!;
-    expect(run.env).toEqual(packageCacheEnv(cache));
+    expect(run.env).toEqual({ ...noPushEnv(), ...packageCacheEnv(cache) });
     expect(run.env).toMatchObject({
       NUGET_PACKAGES: path.join(cache, 'nuget', 'packages'),
       MAVEN_OPTS: `-Xmx2g -Dmaven.repo.local=${path.join(cache, 'maven', 'repository')}`,
@@ -142,10 +142,10 @@ describe("the Builder's package downloads", () => {
   it('are left alone in steps without the sandbox: steps that only read, and a computer without one', async () => {
     building('AP-1', 'one.txt');
     await squad().review('AP-1').catch(() => undefined);
-    expect(h.calls[0]!.env).toBeUndefined();
+    expect(h.calls[0]!.env).toEqual(noPushEnv());
     h.support = { available: false, why: 'socat is not installed' };
     await squad().runBuilder('AP-1', 'Build it', false, 'build');
-    expect(h.calls.at(-1)!.env).toBeUndefined();
+    expect(h.calls.at(-1)!.env).toEqual(noPushEnv());
     expect(fs.existsSync(cacheOf('AP-1'))).toBe(false);
   });
 });

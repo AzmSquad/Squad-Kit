@@ -5,6 +5,7 @@ import yaml from 'js-yaml';
 import { DEFAULT_CONFIG, loadConfig, saveConfig } from '../core/config.js';
 import { squadHome } from '../core/home.js';
 import { git } from '../engine/git.js';
+import { BOARD_STAGES } from './types.js';
 import type { Actor, BoardMeta, Decision, Question, Release, Step, Ticket } from './types.js';
 import { pauseClock, trackStage, waitsNow } from './clock.js';
 import { clearStaleStop, oldStop } from './stale-stop.js';
@@ -174,6 +175,18 @@ function configBoard(bp: BoardPaths): Record<string, unknown> | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** The project's settings file is there and cannot be read (merge marks, a broken edit): the board must say so, not "no board yet". */
+export function settingsProblem(bp: BoardPaths): string | null {
+  if (!fs.existsSync(bp.configFile)) return null;
+  try {
+    const raw = yaml.load(fs.readFileSync(bp.configFile, 'utf8'));
+    if (raw && typeof raw === 'object') return null;
+  } catch {
+    // Said below.
+  }
+  return "This project's settings file could not be read, so its board cannot open. Nothing is lost. An engineer can look at it.";
 }
 
 function knowledgeFiles(bp: BoardPaths) {
@@ -420,14 +433,44 @@ function joinTicket(bp: BoardPaths, id: string, docs: Record<string, string>, st
   return t;
 }
 
+/** A ticket folder holds a ticket file, and that file cannot be read. Its words are the ones the person sees. */
+export class UnreadableTicket extends Error {
+  constructor(
+    readonly id: string,
+    /** The exact reason, for engineers. */
+    readonly detail: string,
+  ) {
+    super(`${id} could not be read: its file is damaged, so it is not on the board. Nothing is lost. An engineer can look at it.`);
+    this.name = 'UnreadableTicket';
+  }
+}
+
+const STAGES = new Set<string>([...BOARD_STAGES, 'done']);
+
+/** What squad-kit needs from a ticket file for the ticket to show at all, or why it does not have it. */
+function shapeProblem(t: Partial<Ticket>, id: string): string | null {
+  for (const key of ['id', 'title', 'createdAt', 'createdBy'] as const) if (typeof t[key] !== 'string' || !t[key]) return `It has no ${key}.`;
+  if (t.id!.toUpperCase() !== id.toUpperCase()) return `Its id says ${t.id}, in the folder of ${id.toUpperCase()}.`;
+  if (!STAGES.has(String(t.stage))) return `"${String(t.stage)}" is not a stage.`;
+  if (typeof t.source?.type !== 'string') return 'It does not say where it came from.';
+  return null;
+}
+
 function readTicketFiles(bp: BoardPaths, id: string): Ticket | null {
   const folder = ticketDir(bp, id);
   const files = [...DOC_FILES.map((f) => path.join(folder, f)), stateFile(bp, id)];
   if (!fs.existsSync(files[0]!)) return null;
-  return cached(`ticket:${folder}`, files, () => {
-    const docs = Object.fromEntries(DOC_FILES.map((f) => [f, readText(path.join(folder, f))]).filter(([, v]) => v !== undefined)) as Record<string, string>;
-    return joinTicket(bp, id.toUpperCase(), docs, readYaml<TicketState>(stateFile(bp, id)) ?? {});
-  });
+  try {
+    return cached(`ticket:${folder}`, files, () => {
+      const docs = Object.fromEntries(DOC_FILES.map((f) => [f, readText(path.join(folder, f))]).filter(([, v]) => v !== undefined)) as Record<string, string>;
+      const t = joinTicket(bp, id.toUpperCase(), docs, readYaml<TicketState>(stateFile(bp, id)) ?? {});
+      const wrong = shapeProblem(t, id);
+      if (wrong) throw new Error(wrong);
+      return t;
+    });
+  } catch (err) {
+    throw new UnreadableTicket(id.toUpperCase(), (err as Error).message);
+  }
 }
 
 function idNumber(id: string): number {
@@ -439,20 +482,60 @@ export function listTickets(bp: BoardPaths): Ticket[] {
   return fs
     .readdirSync(bp.ticketsDir, { withFileTypes: true })
     .filter((d) => d.isDirectory())
-    .map((d) => {
-      // A folder that does not read as a ticket is the project's own, and is left alone.
-      try {
-        return readTicketFiles(bp, d.name);
-      } catch {
-        return null;
-      }
-    })
-    .filter((t): t is Ticket => Boolean(t?.title && t.stage))
+    .map((d) => readableTicket(bp, d.name))
+    .filter((t): t is Ticket => Boolean(t))
     .sort((a, b) => idNumber(a.id) - idNumber(b.id) || a.id.localeCompare(b.id));
 }
 
 export function readTicket(bp: BoardPaths, id: string): Ticket | null {
   return readTicketFiles(bp, id);
+}
+
+/** The ticket, or null when it is not there or its file cannot be read: for a list that goes on with the others. */
+export function readableTicket(bp: BoardPaths, id: string): Ticket | null {
+  try {
+    return readTicketFiles(bp, id);
+  } catch {
+    return null;
+  }
+}
+
+/** The plain words when this ticket's file cannot be read, else null. */
+export function ticketProblem(bp: BoardPaths, id: string): string | null {
+  try {
+    readTicketFiles(bp, id);
+    return null;
+  } catch (err) {
+    return (err as Error).message;
+  }
+}
+
+/** A ticket the board cannot show: the person's words, and for engineers the file and why. */
+export interface BrokenTicket {
+  id: string;
+  problem: string;
+  file: string;
+  detail: string;
+}
+
+/**
+ * The ticket folders that hold a ticket file which cannot be read, so they are never silently gone from the board. A
+ * folder with no ticket file is not a ticket, and stays out of this. `listed`: the tickets read already, not read twice.
+ */
+export function brokenTickets(bp: BoardPaths, listed: Ticket[] = listTickets(bp)): BrokenTicket[] {
+  if (!fs.existsSync(bp.ticketsDir)) return [];
+  const read = new Set(listed.map((t) => t.id));
+  const out: BrokenTicket[] = [];
+  for (const d of fs.readdirSync(bp.ticketsDir, { withFileTypes: true })) {
+    if (!d.isDirectory() || read.has(d.name.toUpperCase())) continue;
+    try {
+      readTicketFiles(bp, d.name);
+    } catch (err) {
+      const e = err as UnreadableTicket;
+      out.push({ id: e.id, problem: e.message, file: path.relative(bp.root, path.join(ticketDir(bp, e.id), 'ticket.md')), detail: e.detail });
+    }
+  }
+  return out.sort((a, b) => idNumber(a.id) - idNumber(b.id) || a.id.localeCompare(b.id));
 }
 
 export function requireTicket(bp: BoardPaths, id: string): Ticket {

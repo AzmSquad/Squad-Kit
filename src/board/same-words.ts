@@ -25,15 +25,17 @@ function stem(w: string): string {
   return s;
 }
 
-/** The words that carry a line's meaning, each once. Times stay whole ("08:00"). */
+/** The words that carry a line's meaning, in any language, each once. Times stay whole ("08:00"). */
 export function meaningWords(text: string): Set<string> {
   const s = text
     .toLowerCase()
+    .normalize('NFKD')
+    .replace(/\p{M}+/gu, '')
     .replace(/[’‘]/g, "'")
     .replace(/\bcannot\b/g, 'can not')
     .replace(/n't\b/g, ' not')
     .replace(/'s\b/g, '');
-  return new Set((s.match(/\d{1,2}:\d{2}|[a-z0-9]+/g) ?? []).filter((w) => !SMALL.has(w)).map((w) => (NEGATIVE.has(w) ? w : stem(w))));
+  return new Set((s.match(/\d{1,2}:\d{2}|[\p{L}\p{N}]+/gu) ?? []).filter((w) => !SMALL.has(w)).map((w) => (NEGATIVE.has(w) ? w : stem(w))));
 }
 
 /** How much two lines share: of the shorter one's words (overlap), and of all their words (jaccard), each 0 to 1. */

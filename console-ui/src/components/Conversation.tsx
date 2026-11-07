@@ -161,7 +161,7 @@ const AGENT_OF: Record<string, 'analyst' | 'builder' | 'reviewer' | 'tester'> = 
 const AGENT_NAME = { analyst: 'Analyst', architect: 'Architect', builder: 'Builder', reviewer: 'Reviewer', tester: 'Tester' } as const;
 
 /** Message the agent: it reads it at its next step (a safe moment), and the work goes on. */
-function MessageAgent({ t, to }: { t: Ticket; to: keyof typeof AGENT_NAME }) {
+export function MessageAgent({ t, to }: { t: Ticket; to: keyof typeof AGENT_NAME }) {
   const act = useAct();
   const [text, setText] = useDraft(t.id, `message-${to}`, '');
   if (t.stage === 'done') return null;
@@ -172,7 +172,7 @@ function MessageAgent({ t, to }: { t: Ticket; to: keyof typeof AGENT_NAME }) {
     );
   return (
     <div className="msgagent">
-      <input className="input" value={text} onChange={(e) => setText(e.target.value)} placeholder={`Message the ${AGENT_NAME[to]}…`} onKeyDown={(e) => e.key === 'Enter' && text.trim() && send()} />
+      <input className="input" value={text} onChange={(e) => setText(e.target.value)} placeholder={`Message the ${AGENT_NAME[to]}…`} onKeyDown={(e) => e.key === 'Enter' && text.trim() && !act.isPending && send()} />
       <button className="btn sm pri" disabled={!text.trim() || act.isPending} onClick={send}>
         <Send size={13} /> Send
       </button>

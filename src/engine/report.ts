@@ -6,10 +6,11 @@ import yaml from 'js-yaml';
 import { squadHome } from '../core/home.js';
 import { readInstalledPackage } from '../core/package-info.js';
 import { recentLines, writeLog } from '../core/app-log.js';
-import { isSecretFile, knownSecrets, scrubSecrets } from '../core/scrub.js';
+import { isSecretFile, knownSecrets, localFileSecrets, scrubSecrets } from '../core/scrub.js';
+import { readProjects } from '../core/projects.js';
 import { zip, type ZipEntry } from '../core/zip.js';
 import { gitEnv } from './git.js';
-import { boardExists, listTickets, readMeta, readTicket, type BoardPaths } from '../board/store.js';
+import { boardExists, boardPaths, listTickets, readMeta, readTicket, type BoardPaths } from '../board/store.js';
 import { withProblem } from '../board/problem.js';
 import type { Ticket } from '../board/types.js';
 import { AI_TOOLS } from '../modules/registry.js';
@@ -200,12 +201,42 @@ function versionText(v: Versions): string {
   return rows.map(([k, val]) => `${k.padEnd(width)}${val}`).join('\n') + '\n';
 }
 
+/** A .env file with real values in it. The example ones hold none, and their words are in every project's docs. */
+const ENV_FILE = /^\.env(?!\.(?:example|sample|template|dist)$)(\.[\w.-]+)?$/i;
+
+/**
+ * Every project's own local files on this computer: its .env files, and the files it keeps here. The log in a report
+ * holds lines from all the projects, so all of them count.
+ */
+function projectLocalFiles(bp: BoardPaths | undefined): string[] {
+  const places = [...(bp ? [bp] : []), ...readProjects().map((p) => boardPaths(path.join(p.root, '.squad')))];
+  return places.flatMap((place) => {
+    let meta: ReturnType<typeof readMeta> | null = null;
+    try {
+      meta = boardExists(place) ? readMeta(place) : null;
+    } catch {
+      // Its settings cannot be read: its top folder's .env files still count.
+    }
+    const repos = [...new Set(['.', ...(meta?.repos ?? []).map((r) => r.path)])];
+    const envs = repos.flatMap((repo) => {
+      const dir = path.join(place.root, repo);
+      try {
+        return fs.readdirSync(dir).filter((f) => ENV_FILE.test(f)).map((f) => path.join(dir, f));
+      } catch {
+        return [];
+      }
+    });
+    return [...envs, ...(meta?.localFiles ?? []).map((f) => path.join(place.root, f.repo, f.path))];
+  });
+}
+
 /** Every file the report holds, scrubbed, README.txt first. */
 export function reportEntries(input: ReportInput): ZipEntry[] {
   const now = input.now ?? Date.now();
   const at = new Date(now);
   const v = input.versions ?? versions();
-  const known = knownSecrets(input.bp ? [input.bp.secretsFile, path.join(input.bp.squadDir, 'secrets.yaml'), input.bp.consoleFile] : []);
+  // Longest first, so one value inside another never leaves the rest of it behind.
+  const known = [...new Set([...knownSecrets(input.bp ? [input.bp.secretsFile, path.join(input.bp.squadDir, 'secrets.yaml'), input.bp.consoleFile] : []), ...localFileSecrets(projectLocalFiles(input.bp))])].sort((a, b) => b.length - a.length);
   const files: { name: string; text: string; what: string }[] = [];
   const add = (name: string, text: string, what: string) => files.push({ name, text, what });
   const bp = input.bp;

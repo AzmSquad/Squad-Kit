@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import yaml from 'js-yaml';
 import { squadHome } from '../core/home.js';
-import { DEFAULT_CONFIG, loadConfig, saveConfig } from '../core/config.js';
+import { DEFAULT_CONFIG, loadConfig, saveConfig, writeConfigFile } from '../core/config.js';
 import { isMediaNote } from '../engine/media.js';
 import {
   LAYOUT,
@@ -189,7 +189,7 @@ export function moveBoard(bp: BoardPaths, now = new Date()): MoveReport {
     // Put everything back the way it was.
     for (const dir of [...created(bp), ...(next ? created(next) : [])]) if (!before.has(dir)) fs.rmSync(dir, { recursive: true, force: true });
     if (configBefore === null) fs.rmSync(bp.configFile, { force: true });
-    else fs.writeFileSync(bp.configFile, configBefore, 'utf8');
+    else writeConfigFile(bp.configFile, configBefore);
     if (err instanceof MoveError) throw err;
     throw new MoveError(`Moving the board failed, so nothing changed: ${(err as Error).message}`);
   }

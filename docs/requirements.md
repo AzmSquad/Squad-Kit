@@ -149,7 +149,17 @@ The queue also holds, and says why, when:
 - your month budget is used up. Raise it, or press **Build continuously** to go on this month;
 - your AI plan's usage limit is reached. It carries on when the limit resets;
 - squad-kit is waiting for a story that needs you;
-- two stories stopped on an unexpected error, so nothing new starts until you look.
+- two stories stopped on a failed check, an app that would not open or an unexpected error, so the next ones do not pay
+  to reach the same stop. Settle one of them and it goes on. A question about a gap or a clash never holds it.
+
+**Carry on** on one story's budget card covers that story only. The queue goes past the budget only when you press
+**Build continuously** again.
+
+A story whose ticket you deleted does not start again by itself. The queue says so, and **Start this story now** builds it
+again.
+
+The Analyst's own work on a breakdown stops at your month budget too, before its next step, never in the middle of one.
+**Carry on** lets it go on this month (`squad requirements retry BR-1`), or raise the budget in Settings.
 
 When every story is merged, Build continuously turns itself off. Merged stories wait in the next release, and you
 send it out from **Releases** as always.

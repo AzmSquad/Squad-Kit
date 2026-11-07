@@ -22,6 +22,7 @@ function crumbsOf(p: string): { name: string; path: string }[] {
 /** The folder browser of Add project and New project: places, the folders here, and New folder here. */
 export function FolderBrowser({ at, go, listing, onError }: { at: string; go(path: string): void; listing: UseQueryResult<FolderListing>; onError(message: string): void }) {
   const [newName, setNewName] = useState<string | null>(null);
+  const [making, setMaking] = useState(false);
   const l = listing.data;
   // After a folder that cannot be read, Up still leads somewhere: the folder above the one asked for.
   const parentOf = (p: string) => p.replace(/[/\\][^/\\]+[/\\]?$/, '') || '/';
@@ -32,12 +33,15 @@ export function FolderBrowser({ at, go, listing, onError }: { at: string; go(pat
   };
 
   const makeFolder = async () => {
-    if (!l || !newName?.trim()) return;
+    if (!l || !newName?.trim() || making) return;
+    setMaking(true);
     try {
       const made = await send<FolderListing>('/api/v1/app/folders', 'POST', { parent: l.path, name: newName.trim() });
       open(made.path);
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setMaking(false);
     }
   };
 
@@ -94,7 +98,7 @@ export function FolderBrowser({ at, go, listing, onError }: { at: string; go(pat
                 onChange={(e) => setNewName(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && void makeFolder()}
               />
-              <button className="btn sm pri" disabled={!newName.trim()} onClick={() => void makeFolder()}>
+              <button className="btn sm pri" disabled={!newName.trim() || making} onClick={() => void makeFolder()}>
                 Make it
               </button>
               <button className="btn sm" onClick={() => setNewName(null)}>

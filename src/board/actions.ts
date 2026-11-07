@@ -33,6 +33,7 @@ import { holdRelease, releaseGoingOut } from './lock.js';
 import { repoFor, reposOf } from '../engine/repos.js';
 import { buildPaths } from '../core/paths.js';
 import { writeLog } from '../core/app-log.js';
+import { freeName } from '../core/file-names.js';
 import { loadConfig } from '../core/config.js';
 import { loadSecrets } from '../core/secrets.js';
 import { clientFor, overlayTrackerEnv } from '../tracker/index.js';
@@ -295,8 +296,11 @@ export async function startFromTracker(bp: BoardPaths, tracker: Tracker, ref: st
   if (w.attachments.length) {
     const dir = ticketFilesDir(bp, ticket.id);
     fs.mkdirSync(dir, { recursive: true });
+    const taken = new Set<string>();
     for (const a of w.attachments.filter((x) => x.size <= 10 * 1024 * 1024)) {
-      const file = await tracker.download(a.url, path.join(dir, a.name.replace(/[^\w.\- ]+/g, '_'))).catch(() => null);
+      // Letters and digits of any language stay, and two with one name are both kept.
+      const name = a.name.replace(/[^\p{L}\p{M}\p{N}_.\- ]+/gu, '_').replace(/^\.+/, '').slice(-80) || 'file';
+      const file = await tracker.download(a.url, path.join(dir, freeName(name, taken))).catch(() => null);
       if (file) files.push(file);
     }
   }
@@ -467,6 +471,11 @@ function testNameFor(ticket: Ticket): string {
   return `${ticket.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40)}.spec.ts`;
 }
 
+/** A merge that could not move the person's own checkout of the base: it goes in once that copy is free. */
+export const CHECKOUT_WAITS = 'Waits to merge: your own copy of the code has changes in the same files';
+
+const CHECKOUT_LATER = 'It goes in once your own copy of the code is free of changes in the same files. squad-kit tries again every few minutes';
+
 /**
  * Looks right: commit, merge or pull request, and the draft release. `byItself` is the squad's own accept on the
  * Builds by itself track (board/auto.ts): the same steps, with the squad as the actor and this line on the record.
@@ -521,6 +530,8 @@ export function acceptProof(bp: BoardPaths, ticket: Ticket, byItself?: string, o
   writeRelease(bp, release);
   // New code on the base: the architecture page reads it again.
   if (merged?.moved) mapAfterMerge(bp);
+  // The exact words are for engineers. The squad tries again by itself (engine/sync.ts recheckMerge).
+  else if (merged?.note) writeLog({ level: 'warn', project: readMeta(bp).project, ticket: ticket.id, text: merged.note });
   return updateTicket(bp, ticket.id, (t) => {
     t.waiting = null;
     // Accepted: a stop it went past is over.
@@ -535,7 +546,7 @@ export function acceptProof(bp: BoardPaths, ticket: Ticket, byItself?: string, o
       : into
         ? `Merged into ${into.base} · goes out in ${release.version}`
         : merged
-          ? `Ready for ${release.version} · ${merged.base} not moved yet`
+          ? CHECKOUT_WAITS
           : `Ready for ${release.version}`;
     if (into) {
       t.mergedAt = now();
@@ -546,7 +557,7 @@ export function acceptProof(bp: BoardPaths, ticket: Ticket, byItself?: string, o
     if (byItself) addActivity(t, 'squad', byItself);
     else addActivity(t, 'you', 'Checked the proof. Looks right');
     if (commit) addActivity(t, 'release', 'Saved the change');
-    if (merged) addActivity(t, 'release', merged.moved ? `Merged into ${merged.base}` : `Could not move ${merged.base} yet. ${merged.note ?? ''}`.trim());
+    if (merged) addActivity(t, 'release', merged.moved ? `Merged into ${merged.base}` : CHECKOUT_LATER);
     addActivity(t, 'release', `Added to release ${release.version}`);
   });
 }

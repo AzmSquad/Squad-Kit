@@ -69,6 +69,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An agent's whole answer reaches you.** An answer to "ask about this question" could show only its last few words.
+- **No agent reads your keys or sign-ins, and a push is refused.** The rule used to cover a step's shell commands only, so an agent that only reads could open a file in `~/.ssh` with its file tools. Now it goes on every run. A push goes nowhere from any agent or story command, while squad-kit's own push works as before.
+- Build continuously holds once two stories stopped on a failed check or an app that would not open, so the next ones do
+  not pay to reach the same stop. A question about a gap or a clash still never holds it.
+- Carry on at the budget on one story covers that story only. The queue goes past the budget only when you press Build
+  continuously again.
+- A story whose ticket you deleted no longer starts again by itself, and pays again. The queue says so, and Start builds it.
+- A breakdown's Analyst steps stop at the month's budget too, between two steps, with Carry on.
+- A ticket file that cannot be read (merge marks, a broken edit) shows on the board and in the terminal, with its name, and is
+  never written over. It no longer leaves the board with no word. Settings that cannot be read say so instead of "No board
+  yet", and settings are written whole or not at all, so a full disk cannot empty them.
+- Arabic "Decided for you" entries are all kept. They all counted as the same entry.
+- Arabic wiki pages and attachments pulled from Azure DevOps keep their names, and no longer overwrite each other.
+- A merge that waits for your own copy of the code is tried again on Full and Express too, in plain words.
+- A project taken out of the app stays out after a Restart or an Update.
+- `squad demo` opens the sample board alone. Real projects' squads do not start, and it stays off Home.
+- One update the tracker refuses for good (a deleted item, a rule of its own) no longer blocks that ticket's later updates.
+- An agent's error that names a file like `login.tsx` no longer reads "signed out".
+- Report a problem also takes out `DB_PASSWORD=...`, `sk_live_...` and the values in the project's own `.env` and local files.
+- Enter no longer sends twice while the answer is on its way: Pull, Add a part, notes, messages to an agent, hand over.
 - On a narrow window, a long error message no longer breaks its words letter by letter.
 - After you say what you want to build, Home and the setup page no longer ask you the same question.
 

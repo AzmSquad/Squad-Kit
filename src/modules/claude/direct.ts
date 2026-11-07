@@ -31,6 +31,8 @@ export interface RunOptions {
   disallowedTools?: string[];
   /** Files no agent may read or change, such as squad-kit's own secrets.yaml. */
   secretFiles?: string[];
+  /** Files and folders no agent may read or change, wherever they are. */
+  privatePlaces?: string[];
   permissionMode?: 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions';
   /** JSON Schema for the final answer; Claude Code validates it and returns `structured`. */
   schema?: object;
@@ -194,7 +196,8 @@ export function deniedTools(opts: RunOptions): string[] {
   }
   const allowed = opts.allowedTools ?? [];
   const readOnly = allowed.length > 0 && !allowed.some((t) => WRITE_TOOLS.includes(t));
-  return [...(opts.disallowedTools ?? []), ...(readOnly ? WRITE_TOOLS : []), ...[...files].flatMap((f) => [`Read(/${f})`, `Edit(/${f})`])];
+  const places = (opts.privatePlaces ?? []).flatMap((p) => [`Read(/${p})`, `Read(/${p}/**)`, `Edit(/${p})`, `Edit(/${p}/**)`]);
+  return [...(opts.disallowedTools ?? []), ...(readOnly ? WRITE_TOOLS : []), ...[...files].flatMap((f) => [`Read(/${f})`, `Edit(/${f})`]), ...places];
 }
 
 /** The tools that change files. */
@@ -360,6 +363,21 @@ export function ownWords(said: string): boolean {
   return OWN_WORDS.some((re) => re.test(said.trim()));
 }
 
+/**
+ * How Claude Code itself says it is signed out. Only these: an error can quote any tool's output, which may name a file
+ * like login.tsx, or the project's own sign-in failing.
+ */
+const SIGNED_OUT = [
+  /\bnot logged in\b/i,
+  /\b(?:please )?run \/login\b/i,
+  /\binvalid api key\b/i,
+  /\bfailed to authenticate\. api error\b/i,
+  /\bAPI Error: 401\b/,
+  /"type":\s*"authentication_error"/,
+  /\boauth token (?:has )?(?:expired|been revoked|is expired|is invalid)\b/i,
+  /^authentication required\b/im,
+];
+
 export function plainError(raw: string, now = Date.now()): string {
   const s = raw.toLowerCase();
   if (s.includes('exit 143') || s.includes('sigterm')) {
@@ -371,7 +389,7 @@ export function plainError(raw: string, now = Date.now()): string {
       ? `Claude's usage limit is reached. It resets ${resetWords(limit.resetsAt, now)}; press Try again after that.`
       : "Claude's usage limit is reached. Press Try again once the limit resets.";
   }
-  if (s.includes('not logged in') || s.includes('login') || s.includes('authenticat') || s.includes('oauth')) {
+  if (SIGNED_OUT.some((re) => re.test(raw))) {
     return 'Claude Code is signed out on this computer. Open the Terminal app, type claude and press Enter, then sign in when it asks. Then press Try again.';
   }
   if (s.includes('credit balance') && s.includes('low')) {

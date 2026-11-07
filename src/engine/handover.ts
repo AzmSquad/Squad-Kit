@@ -2,7 +2,7 @@ import { execFile, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import yaml from 'js-yaml';
-import { addActivity, boardExists, listDecisions, listTickets, now, readMeta, readTicket, ticketDir, updateTicket, type BoardPaths } from '../board/store.js';
+import { addActivity, boardExists, listDecisions, listTickets, now, readMeta, readTicket, ticketDir, ticketProblem, updateTicket, type BoardPaths } from '../board/store.js';
 import { readTicketDocs, ticketDocs } from '../board/docs.js';
 import { isMine, ownerOf, sameName } from '../board/owner.js';
 import { scheduleSquad } from '../board/schedule.js';
@@ -11,6 +11,7 @@ import { repoHostFor } from '../modules/registry.js';
 import { addWorktree, changedFiles, commitAll, commitArgsFor, conventionalWords, git, gitArgs, gitEnv as ownGitEnv, isAncestor, isRepo, networkGitEnv, remotes, removeWorktree } from './git.js';
 import { guardSupport, ticketGuard } from './project-guard.js';
 import { writeLog } from '../core/app-log.js';
+import { writeConfigFile } from '../core/config.js';
 import { mergeHarness } from '../board/additions.js';
 import { docsInGit, docsRepo, squadInRepo, stageProjectFiles, stageTicketDocs } from './project-git.js';
 import { reposOf } from './repos.js';
@@ -219,6 +220,8 @@ export function pickUpPushed(bp: BoardPaths): PickedUp[] {
     seen.add(on.id);
     const theirs = readTicketDocs(on.docs);
     if (!theirs.title || !theirs.stage) continue;
+    // Its file here cannot be read: nothing writes over it, and an engineer looks at it first.
+    if (ticketProblem(bp, on.id)) continue;
     const local = readTicket(bp, on.id);
     // Deleted on this computer: its branch left on the remote does not bring it back, unless it is handed over again.
     const deleted = local ? undefined : meta.deleted?.filter((d) => d.id === on.id).at(-1);
@@ -472,7 +475,8 @@ export function projectFromPushed(squadDir: string): string | null {
         // What this folder has already stays, except the starting settings a new folder gets.
         if (fs.existsSync(to) && sub !== 'config.yaml') continue;
         fs.mkdirSync(path.dirname(to), { recursive: true });
-        fs.writeFileSync(to, blob(root, ref, `${squad}/${rel}`));
+        if (sub === 'config.yaml') writeConfigFile(to, blob(root, ref, `${squad}/${rel}`));
+        else fs.writeFileSync(to, blob(root, ref, `${squad}/${rel}`));
       }
     }
     // The team's additions come with the settings, so a new computer never runs without its gates.

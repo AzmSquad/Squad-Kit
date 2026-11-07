@@ -23,6 +23,10 @@ const { runBreakdownJob, foundSoFar, readUpTo } = await import('../src/engine/br
 const { LimitReached } = await import('../src/engine/usage-limit.js');
 const { breakdownDir } = await import('../src/board/requirements-paths.js');
 const { LiveSquad } = await import('../src/engine/live.js');
+const { analystOverBudget } = await import('../src/board/requirements-build.js');
+const { monthKey, monthsFile } = await import('../src/board/usage.js');
+const { readMeta } = await import('../src/board/store.js');
+const { setPaymentChoice } = await import('../src/core/settings.js');
 const { StepError } = await import('../src/board/problem.js');
 const { TECHNICAL_STOP } = await import('../src/engine/plain-stop.js');
 const { recentLines } = await import('../src/core/app-log.js');
@@ -516,5 +520,143 @@ describe('the computer sleeps during a step', () => {
     expect(job.error).toBeUndefined();
     expect(job.now).toBe('The computer slept, so this step starts again');
     expect(readBreakdown(bp, id)!.status).not.toBe('failed');
+  });
+});
+
+describe("this month's budget", () => {
+  const WORDS = "This month's budget is used up: $52.00 of $50.00. The Analyst waits. Raise the budget in Settings, or press Carry on to go on this month";
+  const spent = () => {
+    writeMeta(bp, { ...readMeta(bp), budget: { monthUsd: 50 } });
+    fs.mkdirSync(path.dirname(monthsFile(bp)), { recursive: true });
+    fs.writeFileSync(monthsFile(bp), JSON.stringify({ [monthKey()]: { runs: 9, costUsd: 52 } }));
+  };
+  /** The live squad's own wiring, with a fake in place of the agent. */
+  function live() {
+    const runs: unknown[] = [];
+    const squad = new LiveSquad(bp) as unknown as { tick(): void; running: Map<string, unknown>; runAgent: unknown };
+    squad.runAgent = async (o: unknown) => {
+      runs.push(o);
+      throw new Error('No answer in this test');
+    };
+    return { squad, runs };
+  }
+  const settle = async (squad: { running: Map<string, unknown> }) => {
+    for (let i = 0; i < 200 && squad.running.size; i += 1) await new Promise((r) => setTimeout(r, 5));
+  };
+
+  afterEach(() => setPaymentChoice('auto'));
+
+  it('holds the step before it runs, with a plain reason, and nothing is spent or failed', async () => {
+    const id = add();
+    spent();
+    expect(analystOverBudget(bp, id)).toBe(WORDS);
+    const a = analyst([{ structured: READ }]);
+    await runBreakdownJob(bp, id, { ...a, budgetHold: async () => analystOverBudget(bp, id) });
+    expect(asks).toHaveLength(0);
+    expect(readBreakdownState(bp, id).job).toMatchObject({ step: 'read', status: 'pending', now: WORDS, heldFor: 'budget' });
+    expect(readBreakdown(bp, id)!.status).toBe('reading');
+    expect(readBreakdown(bp, id)!.error).toBeUndefined();
+  });
+
+  it('holds between two epics, never in the middle of one, and carries on from there', async () => {
+    const id = add();
+    let held: string | null = null;
+    const a = analyst([{ structured: READ }]);
+    await runBreakdownJob(bp, id, a);
+    actions.skipBreakdownQuestions(bp, id);
+    const next = analyst([{ structured: OUTLINE }, { structured: EPIC_1 }, { structured: EPIC_2 }]);
+    const run = next.run;
+    await runBreakdownJob(bp, id, {
+      run: async (x) => {
+        const r = await run(x);
+        // The budget runs out with the first epic's stories.
+        if (asks.length === 3) held = WORDS;
+        return r;
+      },
+      budgetHold: async () => held,
+    });
+    expect(asks).toHaveLength(3);
+    expect(allStories(readBreakdown(bp, id)!).map((x) => x.story.key)).toEqual(['S-1', 'S-2', 'S-3']);
+    expect(readBreakdownState(bp, id).job).toMatchObject({ step: 'draft', status: 'pending', now: WORDS, heldFor: 'budget' });
+    held = null;
+    await runBreakdownJob(bp, id, { run, budgetHold: async () => held });
+    expect(readBreakdown(bp, id)!.status).toBe('ready');
+    expect(readBreakdownState(bp, id).job).toMatchObject({ step: 'draft', status: 'done' });
+    expect(readBreakdownState(bp, id).job?.heldFor).toBeUndefined();
+  });
+
+  it('on an API key the live squad holds it, once, and Carry on lets it go on this month', async () => {
+    setPaymentChoice('api-key');
+    const id = add();
+    spent();
+    const { squad, runs } = live();
+    squad.tick();
+    await settle(squad);
+    expect(runs).toHaveLength(0);
+    expect(readBreakdownState(bp, id).job).toMatchObject({ status: 'pending', now: WORDS, heldFor: 'budget' });
+    // It stays held: the next turns start nothing.
+    squad.tick();
+    expect(squad.running.size).toBe(0);
+    await settle(squad);
+    expect(runs).toHaveLength(0);
+    // The person's Carry on is the same button as Try again, in the terminal too.
+    actions.retryBreakdown(bp, id);
+    const s = readBreakdownState(bp, id);
+    expect(s.budgetOk).toBe(monthKey());
+    expect(s.job?.heldFor).toBeUndefined();
+    expect(s.activity[0]!.text).toBe("Let the Analyst go on past this month's budget");
+    expect(analystOverBudget(bp, id)).toBeNull();
+    squad.tick();
+    await settle(squad);
+    expect(runs).toHaveLength(1);
+  });
+
+  it('Stop while it waits parks it as usual, and Try again goes back to waiting at the budget', async () => {
+    setPaymentChoice('api-key');
+    const id = add();
+    spent();
+    const { squad, runs } = live();
+    squad.tick();
+    await settle(squad);
+    actions.stopBreakdown(bp, id);
+    expect(readBreakdownState(bp, id).job).toMatchObject({ status: 'failed' });
+    actions.retryBreakdown(bp, id);
+    expect(readBreakdownState(bp, id).job).toMatchObject({ status: 'pending' });
+    expect(readBreakdownState(bp, id).budgetOk).toBeUndefined();
+    squad.tick();
+    await settle(squad);
+    expect(runs).toHaveLength(0);
+    expect(readBreakdownState(bp, id).job).toMatchObject({ status: 'pending', now: WORDS, heldFor: 'budget' });
+  });
+
+  it('a raised budget lets it go on by itself, and a subscription is never held', async () => {
+    setPaymentChoice('api-key');
+    const id = add();
+    spent();
+    const { squad, runs } = live();
+    squad.tick();
+    await settle(squad);
+    expect(runs).toHaveLength(0);
+    writeMeta(bp, { ...readMeta(bp), budget: { monthUsd: 500 } });
+    squad.tick();
+    await settle(squad);
+    expect(runs).toHaveLength(1);
+
+    const other = add('# Another BRD\n\nMore.\n');
+    setPaymentChoice('subscription');
+    writeMeta(bp, { ...readMeta(bp), budget: { monthUsd: 50 } });
+    const free = live();
+    free.squad.tick();
+    await settle(free.squad);
+    expect(free.runs.length).toBeGreaterThan(0);
+    expect(readBreakdownState(bp, other).job?.heldFor).toBeUndefined();
+  });
+
+  it("does not lift the queue: the Analyst's Carry on is for the Analyst", async () => {
+    const id = add();
+    spent();
+    updateBreakdownState(bp, id, (st) => (st.budgetOk = monthKey()));
+    expect(analystOverBudget(bp, id)).toBeNull();
+    expect(readBreakdownState(bp, id).build?.budgetOk).toBeUndefined();
   });
 });

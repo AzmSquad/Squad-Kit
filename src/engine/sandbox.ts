@@ -77,6 +77,24 @@ export const PACKAGE_CACHES = [
 /** Keys and sign-ins in the person's home folder. The guard for the project's own commands keeps them out too. */
 export const PRIVATE = ['.ssh', '.aws', '.gnupg', '.config/gh', '.azure', '.kube', '.docker/config.json', '.netrc', '.git-credentials'];
 
+/** Addresses a push can go to. A remote with its own push address set in git keeps it, as git leaves that one alone. */
+const PUSH_ADDRESSES = ['/', '.', 'file://', 'https://', 'http://', 'ssh://', 'git://', 'git@'];
+
+/**
+ * The environment that sends every push from an agent or a story's own command nowhere, and leaves fetching alone. Only
+ * they get it: squad-kit's own pushes do not. It stands behind the deny rules and the hidden keys, and a command that
+ * clears it still has no keys to push with.
+ */
+export function noPushEnv(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const from = Number(env.GIT_CONFIG_COUNT) || 0;
+  const out: Record<string, string> = { GIT_CONFIG_COUNT: String(from + PUSH_ADDRESSES.length) };
+  PUSH_ADDRESSES.forEach((address, i) => {
+    out[`GIT_CONFIG_KEY_${from + i}`] = 'url.squad-kit-no-push://.pushInsteadOf';
+    out[`GIT_CONFIG_VALUE_${from + i}`] = address;
+  });
+  return out;
+}
+
 /**
  * The ticket's own package cache on this computer, for the package managers whose shared caches stay read only
  * (NuGet, Maven, Gradle, RubyGems and Bundler). It sits with the project's other files on this computer, outside the

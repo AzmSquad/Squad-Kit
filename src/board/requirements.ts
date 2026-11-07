@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import yaml from 'js-yaml';
-import { listReleases, listTickets, now, readMeta, readTicket, type BoardPaths } from './store.js';
+import { listReleases, listTickets, now, readMeta, readableTicket, ticketProblem, type BoardPaths } from './store.js';
 import { BoardActionError } from './actions.js';
 import type { Activity, Actor, BoardMeta, Payment, Release, Ticket } from './types.js';
 import type {
@@ -436,7 +436,7 @@ function ticketsOf(bp: BoardPaths, b: Breakdown): Map<string, Ticket> {
   const out = new Map<string, Ticket>();
   for (const { story } of allStories(b)) {
     if (!story.ticket) continue;
-    const t = readTicket(bp, story.ticket);
+    const t = readableTicket(bp, story.ticket);
     if (t && !t.deleting) out.set(story.key, t);
   }
   return out;
@@ -449,14 +449,15 @@ function releasedIn(releases: Release[], id: string): Release | undefined {
 /** True when the story's change is in the base branch: its ticket is merged or released. */
 export function storyMerged(bp: BoardPaths, s: BreakdownStory): boolean {
   if (!s.ticket) return false;
-  const t = readTicket(bp, s.ticket);
+  const t = readableTicket(bp, s.ticket);
   return Boolean(t && isMerged(t));
 }
 
 /**
  * Where each story is, from its ticket. With no ticket yet: once the breakdown is approved, waiting for the stories
  * it needs (Build continuously on or not); else not started, or next while Build continuously is on. A story whose
- * accepted change waits for a pull request's approver, or for the person's own checkout, needs someone.
+ * ticket a person deleted starts again only when they press Start. A story whose accepted change waits for a pull
+ * request's approver, or for the person's own checkout, needs someone, and so does a ticket whose file cannot be read.
  */
 export function storyProgress(bp: BoardPaths, b: Breakdown, state: BreakdownState): StoryProgress[] {
   const tickets = ticketsOf(bp, b);
@@ -468,8 +469,10 @@ export function storyProgress(bp: BoardPaths, b: Breakdown, state: BreakdownStat
   return allStories(b).map(({ story }): StoryProgress => {
     const t = tickets.get(story.key);
     if (!t) {
+      if (story.ticket && ticketProblem(bp, story.ticket)) return { key: story.key, state: 'needs-you', line: 'Its file could not be read. An engineer can look at it', ticket: story.ticket, stop: 'other' };
       const waitsOn = story.dependsOn.filter((k) => !merged(k));
       if (waitsOn.length && (b.status === 'approved' || state.build?.on)) return { key: story.key, state: 'waits', line: `Waits for ${andWords(waitsOn)} to merge`, waitsOn };
+      if (story.ticket) return { key: story.key, state: 'not-started', line: 'Its ticket was deleted. Press Start to build it again' };
       if (!state.build?.on) return { key: story.key, state: 'not-started', line: 'Not started' };
       const redo = redoHolding(b, state.job, story.key);
       if (redo) return { key: story.key, state: 'waits', line: `Waits for the Analyst to redo ${redo}` };
@@ -539,7 +542,7 @@ export function estimateBreakdown(bp: BoardPaths, b: Breakdown, payment: Payment
 export function decidedView(bp: BoardPaths, b: Breakdown): Decided[] {
   const onTickets = new Map<string, Decided[]>();
   for (const { story } of allStories(b)) {
-    const t = story.ticket ? readTicket(bp, story.ticket) : null;
+    const t = story.ticket ? readableTicket(bp, story.ticket) : null;
     if (t?.decided?.length) onTickets.set(t.id, t.decided.map((d) => ({ ...d, item: d.item ?? story.key, ticket: t.id })));
   }
   const shown = new Set<Decided>();
@@ -633,7 +636,7 @@ export function breakdownWaits(bp: BoardPaths, meta: Pick<BoardMeta, 'user'> = r
     .map(({ b, open }) => ({ id: b.id, title: b.title, questions: open, since: readBreakdownState(bp, b.id).activity[0]?.at ?? b.createdAt }));
 }
 
-/** A job waiting to run says why it waits (the usage limit), until it starts. */
+/** A job waiting to run says why it waits (the usage limit, this month's budget), until it starts. */
 export function holdBreakdownJob(bp: BoardPaths, id: string, text: string): void {
   updateJob(bp, id, (j) => {
     if (j.status === 'pending' && j.now !== text) j.now = text;

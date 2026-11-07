@@ -87,6 +87,7 @@ export function claudeRunOptions(r: AgentRun): RunOptions {
     ...(r.resume ? { resume: r.resume } : {}),
     ...access,
     ...(r.secretFiles ? { secretFiles: r.secretFiles } : {}),
+    ...(r.privatePlaces ? { privatePlaces: r.privatePlaces } : {}),
     ...(r.schema ? { schema: r.schema } : {}),
     ...(r.instructions ? { appendSystemPrompt: r.instructions } : {}),
     ...(r.model || r.level ? { model: r.model || LEVEL_MODEL[r.level!] } : {}),

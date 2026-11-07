@@ -2,7 +2,7 @@ import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { LAYOUT, boardExists, boardPaths, listDecisions, listTickets, newProjectId, readMeta, writeMeta, type BoardPaths } from '../board/store.js';
+import { LAYOUT, boardExists, boardPaths, listDecisions, listTickets, newProjectId, readMeta, settingsProblem, writeMeta, type BoardPaths } from '../board/store.js';
 import { DEFAULT_CONFIG, loadConfig, saveConfig } from '../core/config.js';
 import { SQUAD_DIR, buildPaths, type SquadPaths, isOwnFolder } from '../core/paths.js';
 import { openBoard } from '../board/move.js';
@@ -256,7 +256,9 @@ export function prepareProject(root: string): ReadyProject {
     did.push('Project files: .squad/ with the settings and a README');
   }
   const paths = buildPaths(root);
-  // loadConfig also validates the YAML: settings problems show before anything starts.
+  const broken = settingsProblem(boardPaths(paths.squadDir));
+  if (broken) throw new Error(broken);
+  // loadConfig also validates the settings: problems show before anything starts.
   const config = loadConfig(paths.configFile);
   const opened = openBoard(paths.squadDir);
   if (opened.moved) {

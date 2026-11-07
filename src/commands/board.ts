@@ -70,6 +70,7 @@ import { corePrompts } from '../engine/core-prompts.js';
 import { draftTicket } from '../engine/draft.js';
 import {
   boardExists,
+  brokenTickets,
   boardPaths,
   draftRelease,
   listReleases,
@@ -77,6 +78,7 @@ import {
   readMeta,
   readTicket,
   requireTicket,
+  settingsProblem,
   writeMeta,
   type BoardPaths,
 } from '../board/store.js';
@@ -122,7 +124,7 @@ export function board(): BoardPaths {
   const { bp, moved } = openBoard(buildPaths(requireSquadRoot()).squadDir);
   if (moved) ui.success(`Moved this board to the new layout first (${moved.tickets} tickets, all checked). A copy of the old files: ${moved.backup}`);
   if (!boardExists(bp)) {
-    throw new Error('This project has no board yet. Run `squad demo` to try squad-kit v1 with a sample board.');
+    throw new Error(settingsProblem(bp) ?? 'This project has no board yet. Run `squad demo` to try squad-kit v1 with a sample board.');
   }
   return bp;
 }
@@ -174,6 +176,15 @@ function trackLine(t: Ticket): string {
   }).join(kleur.gray(' ─ '));
 }
 
+/** The tickets whose file cannot be read: never silently gone from what the person sees. */
+function brokenLines(bp: BoardPaths): void {
+  for (const b of brokenTickets(bp)) {
+    out();
+    out(`  ${amber(b.problem)}`);
+    out(kleur.gray(`  For an engineer: ${b.file}: ${b.detail}`));
+  }
+}
+
 export async function runInbox(): Promise<void> {
   // Outside a project folder: one Waiting for you list across every project in squad-kit.
   if (!findSquadRoot()) return inboxEverywhere();
@@ -181,6 +192,7 @@ export async function runInbox(): Promise<void> {
   const items = inbox(bp);
   // A breakdown whose Analyst has questions waits for you too.
   const brds = breakdownWaits(bp);
+  brokenLines(bp);
   out();
   out(`  ${kleur.bold('Waiting for you')} ${amber(`(${items.length + brds.length})`)}`);
   out();
@@ -260,6 +272,7 @@ export async function runBoard(opts: { archived?: boolean } = {}): Promise<void>
     out();
     out(kleur.gray(`  ${hidden} archived ${hidden === 1 ? 'ticket is' : 'tickets are'} not shown. Show them: squad board --archived`));
   }
+  brokenLines(bp);
   out();
 }
 
@@ -1196,5 +1209,5 @@ export async function runDemo(opts: DemoOptions): Promise<void> {
   }
   // The app opens the sample board from its own folder.
   process.chdir(root);
-  await runConsole({ port: opts.port, open: opts.open, token: opts.token });
+  await runConsole({ port: opts.port, open: opts.open, token: opts.token, demo: true });
 }

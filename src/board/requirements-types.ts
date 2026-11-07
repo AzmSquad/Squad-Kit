@@ -194,6 +194,8 @@ export interface BreakdownJob {
   ask?: string;
   question?: string;
   error?: string;
+  /** Held before its next run at this month's budget: Carry on, or a raised budget, lets it go on. */
+  heldFor?: 'budget';
 }
 
 /** What only this computer keeps about a breakdown. */
@@ -201,6 +203,8 @@ export interface BreakdownState {
   job?: BreakdownJob;
   /** The Analyst's conversation, so a redo or a reply carries on in it. */
   sessions?: { read?: string };
+  /** The month the person let this breakdown's Analyst go on past the budget, like 2026-11. */
+  budgetOk?: string;
   activity: Activity[];
   /**
    * Build continuously: on, who switched it, and why it is held now (the month budget, the usage limit, or nothing

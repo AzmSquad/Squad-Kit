@@ -38,6 +38,7 @@ import { DocumentError, kindOf, prepareText, type PreparedText } from './require
 import { isMerged } from './depends.js';
 import { withFirstStory } from './first-story.js';
 import { linkTickets } from './requirements-sync.js';
+import { monthKey } from './usage.js';
 
 /**
  * What a person does with a breakdown, one function each, so the board and the terminal do exactly the same: add a
@@ -230,11 +231,25 @@ export function breakdownStopped(bp: BoardPaths, id: string, waiting = false): B
   return b;
 }
 
-/** Try again: the step that failed or was stopped runs again; what was done before it is kept. */
+/**
+ * Try again: the step that failed or was stopped runs again; what was done before it is kept. A step held at this month's
+ * budget has the same button, Carry on: the Analyst goes on with this breakdown for the rest of the month.
+ */
 export function retryBreakdown(bp: BoardPaths, id: string): Breakdown {
   const b = mine(bp, id);
   const s = readBreakdownState(bp, b.id);
   const job = s.job;
+  if (job?.status === 'pending' && job.heldFor === 'budget') {
+    updateBreakdownState(bp, b.id, (st) => {
+      st.budgetOk = monthKey();
+      if (st.job) {
+        delete st.job.heldFor;
+        st.job.now = 'Waiting for the Analyst';
+      }
+      addBreakdownActivity(st, 'you', "Let the Analyst go on past this month's budget");
+    });
+    return b;
+  }
   if (jobBusy(job)) throw new BoardActionError(busyWords(b, job)!);
   if (b.status !== 'failed' && job?.status !== 'failed') throw new BoardActionError(`${b.id} did not stop. Nothing to try again.`);
   const step: BreakdownJob['step'] = job && job.status === 'failed' ? job.step : b.epics.length ? 'draft' : 'read';

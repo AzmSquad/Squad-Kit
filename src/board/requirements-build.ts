@@ -1,4 +1,4 @@
-import { now, readMeta, readTicket, updateTicket, type BoardPaths } from './store.js';
+import { now, readMeta, readableTicket, ticketProblem, updateTicket, type BoardPaths } from './store.js';
 import { BoardActionError } from './actions.js';
 import type { BoardMeta, Payment, Ticket } from './types.js';
 import type { Breakdown, BreakdownState, BreakdownStory } from './requirements-types.js';
@@ -29,8 +29,9 @@ import { limitText, type LimitPause } from '../engine/usage-limit.js';
  * ticket of every project: this breakdown's stories that are working (started, not merged, not waiting for the
  * person) stay under it, and the squad's own limit must have room. A story that waits for the person frees its place,
  * so the others carry on; the stories that need it wait. The month's budget and the AI account's usage limit hold the
- * queue with a reason, never as a failure. The switch lives in this computer's part of the breakdown, so a restart
- * carries on; Pause stops new starts only. Both squads run the same queue.
+ * queue with a reason, never as a failure. A story whose ticket a person deleted never starts by itself: pressing Start
+ * on it does. The switch lives in this computer's part of the breakdown, so a restart carries on; Pause stops new starts
+ * only. Both squads run the same queue.
  */
 
 function who(bp: BoardPaths): string {
@@ -43,14 +44,20 @@ function and(xs: string[]): string {
 
 const usd = (n: number) => `$${n.toFixed(2)}`;
 
-/** The live tickets of the stories, by story key. A ticket deleted since is no ticket: the story can start again. */
+/** The live tickets of the stories, by story key. A ticket deleted since, or one whose file cannot be read, is not among them. */
 function ticketsOf(bp: BoardPaths, stories: StoryPlace[]): Map<string, Ticket> {
   const out = new Map<string, Ticket>();
   for (const { story } of stories) {
-    const t = story.ticket ? readTicket(bp, story.ticket) : null;
+    const t = story.ticket ? readableTicket(bp, story.ticket) : null;
     if (t && !t.deleting) out.set(story.key, t);
   }
   return out;
+}
+
+function deletedWords(keys: string[]): string {
+  return keys.length === 1
+    ? `The ticket of ${keys[0]} was deleted, so it does not start by itself. Press Start on it to build it again.`
+    : `The tickets of ${and(keys)} were deleted, so they do not start by themselves. Press Start on one to build it again.`;
 }
 
 /**
@@ -142,9 +149,9 @@ export async function fillBuildQueue(bp: BoardPaths, room: QueueRoom): Promise<Q
 }
 
 /** Why nothing more can start now, when what is left waits on other stories (or on a "done when" still missing). */
-function waitsWords(stories: StoryPlace[], tickets: Map<string, Ticket>): string {
+function waitsWords(stories: StoryPlace[], tickets: Map<string, Ticket>, deleted: string[]): string {
   const merged = (k: string) => Boolean(tickets.get(k) && isMerged(tickets.get(k)!));
-  const left = stories.filter(({ story }) => !tickets.has(story.key));
+  const left = stories.filter(({ story }) => !tickets.has(story.key) && !deleted.includes(story.key));
   /** What the started stories among `keys` wait on: the person, a pull request's approver, the person's checkout. */
   const youWords = (keys: string[]) => {
     const you = keys.filter((k) => tickets.get(k)?.waiting);
@@ -159,6 +166,7 @@ function waitsWords(stories: StoryPlace[], tickets: Map<string, Ticket>): string
   };
   if (!left.length) {
     const you = youWords(stories.map(({ story }) => story.key).filter((k) => !merged(k)));
+    if (deleted.length) return you.trim();
     return you ? `Every story has started.${you}` : 'Every story has started. The build is done when the last ones merge.';
   }
   // The started stories the rest wait on, through the stories that wait themselves.
@@ -169,7 +177,7 @@ function waitsWords(stories: StoryPlace[], tickets: Map<string, Ticket>): string
     if (seen.has(k)) return;
     seen.add(k);
     for (const n of byKey.get(k)?.dependsOn ?? []) {
-      if (!byKey.has(n) || merged(n)) continue;
+      if (!byKey.has(n) || merged(n) || deleted.includes(n)) continue;
       if (tickets.has(n)) roots.add(n);
       else visit(n);
     }
@@ -179,34 +187,54 @@ function waitsWords(stories: StoryPlace[], tickets: Map<string, Ticket>): string
   if (order.length) return `The next stories wait for ${and(order)} to merge.${youWords(order)}`;
   const bare = left.filter(({ story }) => !story.criteria.length).map(({ story }) => story.key);
   if (bare.length) return `${and(bare)} ${bare.length === 1 ? 'has' : 'have'} no "done when" yet. Add one and ${bare.length === 1 ? 'it starts' : 'they start'}.`;
-  return 'Nothing more can start now.';
+  return deleted.length ? '' : 'Nothing more can start now.';
 }
 
 /**
- * This month's budget is used up: the queue holds, unless the person let the build go on past it this month (here, or
- * on one of its stories' budget cards, as for any ticket). `goOn`: it goes on past the budget, so the stories it
- * starts do not stop at their own budget card either.
+ * This month's budget is used up: the queue holds, unless the person pressed Build continuously again this month. Carry
+ * on on a story's own budget card covers that story only. `goOn`: it goes on past the budget, so the stories it starts
+ * do not stop at their own budget card either.
  */
-async function budgetHold(bp: BoardPaths, meta: BoardMeta, state: BreakdownState, tickets: Map<string, Ticket>, room: QueueRoom): Promise<{ held?: string; goOn: boolean }> {
+async function budgetHold(bp: BoardPaths, meta: BoardMeta, state: BreakdownState, room: QueueRoom): Promise<{ held?: string; goOn: boolean }> {
   if (!meta.budget?.monthUsd) return { goOn: false };
   const b = budgetState(bp, null, meta.budget);
   if (!b.over.includes('month')) return { goOn: false };
-  const month = monthKey();
-  if (state.build?.budgetOk === month || [...tickets.values()].some((t) => t.budgetOk?.month === month)) return { goOn: true };
+  if (state.build?.budgetOk === monthKey()) return { goOn: true };
   if ((await room.payment()) !== 'api-key') return { goOn: false };
   return { held: `This month's budget is used up: ${usd(b.monthSpent)} of ${usd(b.monthUsd ?? 0)}. No new story starts. Raise the budget in Settings, or press Build continuously again to go on this month.`, goOn: false };
 }
 
 /**
- * Two or more stories stopped on a problem that is not one of the three stops (an error, a cap): something is wrong
- * beyond one story, so no new one starts until the person settles one. A gap, a clash or a failed check never holds it.
+ * This breakdown's Analyst must not run past this month's budget: the words that say so, or null. Only Build continuously
+ * again (for this breakdown) or the Analyst's own Carry on lets it go on. How the person pays is the caller's to ask.
+ */
+export function analystOverBudget(bp: BoardPaths, id: string): string | null {
+  const budget = readMeta(bp).budget;
+  if (!budget?.monthUsd) return null;
+  const b = budgetState(bp, null, budget);
+  if (!b.over.includes('month')) return null;
+  const s = readBreakdownState(bp, id);
+  const month = monthKey();
+  if (s.budgetOk === month || s.build?.budgetOk === month) return null;
+  return `This month's budget is used up: ${usd(b.monthSpent)} of ${usd(b.monthUsd ?? 0)}. The Analyst waits. Raise the budget in Settings, or press Carry on to go on this month`;
+}
+
+/**
+ * Two or more stories stopped for something other than a question: a failed check, an app that will not open, an error,
+ * a cap. Each new story would pay to reach the same stop, so no new one starts until the person settles one. A gap or a
+ * clash is a question about one story, and never holds it.
  */
 function troubleWords(stories: StoryPlace[], tickets: Map<string, Ticket>): string | null {
-  const stopped = stories.map(({ story }) => story.key).filter((k) => {
+  const stops = stories.map(({ story }) => story.key).flatMap((k) => {
     const t = tickets.get(k);
-    return t && !isMerged(t) && t.waiting && stopOf(t) === 'other';
+    const stop = t && !isMerged(t) && t.waiting ? stopOf(t) : undefined;
+    return stop === 'other' || stop === 'check' ? [{ k, stop }] : [];
   });
-  return stopped.length >= 2 ? `${and(stopped)} stopped on a problem. No new story starts until you settle one of them.` : null;
+  if (stops.length < 2) return null;
+  const names = and(stops.map((s) => s.k));
+  return stops.every((s) => s.stop === 'check')
+    ? `${names} stopped on a failed check or an app that would not open. No new story starts until you settle one of them, so the next ones do not pay to reach the same stop.`
+    : `${names} stopped on a problem. No new story starts until you settle one of them.`;
 }
 
 async function queueTurn(bp: BoardPaths, b: Breakdown, meta: BoardMeta, room: QueueRoom): Promise<QueueTurn> {
@@ -223,18 +251,23 @@ async function queueTurn(bp: BoardPaths, b: Breakdown, meta: BoardMeta, room: Qu
     return { id: b.id, started: [], done: true };
   }
   const keys = new Set(stories.map(({ story }) => story.key));
-  const able = stories.filter(({ story }) => !tickets.has(story.key) && story.criteria.length > 0 && story.dependsOn.every((n) => !keys.has(n) || merged(n)));
+  // Had a ticket and has none now: a person deleted it, so it waits for their Start. A file that cannot be read says nothing about the story.
+  const missing = stories.filter(({ story }) => story.ticket && !tickets.has(story.key));
+  const unreadable = missing.filter(({ story }) => ticketProblem(bp, story.ticket!)).map(({ story }) => story.ticket!);
+  const deleted = missing.filter(({ story }) => !unreadable.includes(story.ticket!)).map(({ story }) => story.key);
+  const able = stories.filter(({ story }) => !story.ticket && story.criteria.length > 0 && story.dependsOn.every((n) => !keys.has(n) || merged(n)));
   // A story inside a part the Analyst is redoing waits for the redo: it starts from the new version.
   const redo = able.map(({ story }) => redoHolding(b, state.job, story.key)).find(Boolean);
   const ready = able.filter(({ story }) => !redoHolding(b, state.job, story.key));
   let held: { text: string; for: 'budget' | 'limit' | 'waits' } | null = null;
   const started: string[] = [];
   let goOn = false;
-  if (!ready.length && redo) held = { text: `The Analyst is redoing ${redo}. Its stories start once the redo is done.`, for: 'waits' };
-  else if (!ready.length) held = { text: waitsWords(stories, tickets), for: 'waits' };
+  if (unreadable.length) held = { text: `The file of ${and(unreadable)} could not be read, so no new story starts. An engineer can look at it.`, for: 'waits' };
+  else if (!ready.length && redo) held = { text: `The Analyst is redoing ${redo}. Its stories start once the redo is done.`, for: 'waits' };
+  else if (!ready.length) held = { text: [waitsWords(stories, tickets, deleted), deleted.length ? deletedWords(deleted) : ''].filter(Boolean).join(' '), for: 'waits' };
   else if (room.pause) held = { text: limitText(room.pause), for: 'limit' };
   else {
-    const budget = await budgetHold(bp, meta, state, tickets, room);
+    const budget = await budgetHold(bp, meta, state, room);
     const trouble = troubleWords(stories, tickets);
     goOn = budget.goOn;
     if (budget.held) held = { text: budget.held, for: 'budget' };
@@ -254,6 +287,8 @@ async function queueTurn(bp: BoardPaths, b: Breakdown, meta: BoardMeta, room: Qu
         break;
       }
     }
+    // The others carry on, and the line still says why this one does not.
+    if (!held && deleted.length) held = { text: deletedWords(deleted), for: 'waits' };
   }
   const before = state.build;
   if (before && (before.held !== held?.text || before.heldFor !== held?.for)) {

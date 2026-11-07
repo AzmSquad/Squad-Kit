@@ -110,7 +110,7 @@ export function HandOverDialog({ t, onClose }: { t: Ticket; onClose(): void }) {
       )}
       <div className="field">
         <label htmlFor="handover-to">Hand it over to</label>
-        <input id="handover-to" className="input" autoFocus value={to} placeholder="Their name, as their board shows it" onChange={(e) => setTo(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && !blocked && submit()} />
+        <input id="handover-to" className="input" autoFocus value={to} placeholder="Their name, as their board shows it" onChange={(e) => setTo(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && !blocked && !act.isPending && submit()} />
         {people.length > 0 && (
           <div className="pills" style={{ marginTop: 8 }}>
             {people.map((p) => (

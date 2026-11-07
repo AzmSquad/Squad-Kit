@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Check, MessageCircle, RotateCcw, Send, Square, Trash2 } from 'lucide-react';
+import { Check, MessageCircle, Play, RotateCcw, Send, Square, Trash2 } from 'lucide-react';
 import { useNavigate } from '@tanstack/react-router';
 import type { BrdRef, BreakdownQuestion, BreakdownView } from '../api/requirements-types';
 import { SKIP_CHOICE, afterTitle, clockWords, jobBusy, readSteps, refShort, type ReadStep } from '../lib/requirements';
@@ -35,6 +35,17 @@ function StepDot({ s }: { s: ReadStep }) {
 }
 
 const STATE_WORDS: Record<ReadStep['state'], string> = { done: 'Done', now: 'Now', todo: 'Still to come', failed: 'Stopped here' };
+
+/** The Analyst waits at this month's budget: the person lets it go on, or raises the budget in Settings. */
+export function CarryOn({ v }: { v: BreakdownView }) {
+  const act = useReqAct();
+  if (!v.mine || v.state.job?.heldFor !== 'budget') return null;
+  return (
+    <button className="btn pri" disabled={act.isPending} title={`squad requirements retry ${v.id}`} onClick={() => act.mutate({ path: `${base(v.id)}/retry`, done: "The Analyst goes on past this month's budget, for the rest of the month." })}>
+      <Play size={13} /> Carry on
+    </button>
+  );
+}
 
 /** "The Analyst is reading your BRD": its steps, how far it got, and Stop. */
 export function ReadingCard({ v }: { v: BreakdownView }) {
@@ -73,6 +84,7 @@ export function ReadingCard({ v }: { v: BreakdownView }) {
       </ol>
       <div className="rq-reading-foot">
         <p>You can leave this page. Waiting for you tells you when the Analyst needs you.</p>
+        <CarryOn v={v} />
         {v.mine && busy && (
           <button className="btn" disabled={stopping || act.isPending} title={`squad requirements stop ${v.id}`} onClick={() => act.mutate({ path: `${base(v.id)}/stop`, done: 'Stopping the Analyst. Try again carries on from here.' })}>
             <Square size={13} /> {stopping ? 'Stopping…' : 'Stop'}
@@ -164,6 +176,12 @@ export function QuestionsView({ v, onOpenRef }: { v: BreakdownView; onOpenRef(re
               Try again
             </button>
           )}
+        </div>
+      )}
+      {v.state.job?.heldFor === 'budget' && v.state.job.step === 'reply' && (
+        <div className="rq-jobline" role="status">
+          {v.state.job.now}
+          <CarryOn v={v} />
         </div>
       )}
       {qs.map((q, i) => (

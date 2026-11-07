@@ -35,6 +35,8 @@ export interface ConsoleOptions {
   restart?: boolean;
   /** Set up a folder without squad-kit without asking first. */
   yes?: boolean;
+  /** The sample board on its own: the real projects' squads stay as they are, and it stays off the app's list. */
+  demo?: boolean;
 }
 
 /** Plain `squad`: the one app with every project (ADR-001). */
@@ -43,7 +45,11 @@ export type AppOptions = Omit<ConsoleOptions, 'yes'>;
 const DEFAULT_PORT = 4571;
 /** A board run by a keeper (see restartBoard) exits with this code to ask the keeper for a fresh one. */
 const RESTART_EXIT = 75;
+/** The same, asking for the app with no project of its own: the one it was started for was taken out of it. */
+const RESTART_APP_EXIT = 76;
 const KEEPER_ENV = 'SQUAD_CONSOLE_KEEPER';
+/** What plain `squad` runs when the board restarts it. */
+const APP_COMMAND = ['--no-open'];
 
 /**
  * The project for this terminal: the nearest folder with squad-kit (or the one --project names), or this folder, to
@@ -98,11 +104,12 @@ export async function runConsole(opts: ConsoleOptions): Promise<void> {
     if (!(await stopConsole(own.pid))) throw new Error(`The running board (process ${own.pid}) did not stop. Close it with Ctrl-C in its terminal.`);
   }
 
-  if (app && !opts.restart) {
+  // The sample board runs on its own beside the app, so opening it starts and adds nothing there.
+  if (app && !opts.restart && (!opts.demo || own)) {
     await addToRunningApp(app, root, opts);
     return;
   }
-  if (app) await stopApp(app);
+  if (app && !opts.demo) await stopApp(app);
 
   // Set up what is missing, and move a board from before ADR-001 once, now that nothing runs it.
   const ready = prepareProject(root);
@@ -110,7 +117,8 @@ export async function runConsole(opts: ConsoleOptions): Promise<void> {
   // A new project, or one still getting set up: the setup page opens, and this terminal prints each step as it goes.
   const sv = setupView(ready.bp);
   const follow = sv && !sv.ready && !sv.approved ? ready.bp : undefined;
-  await serveApp({ first: ready.paths, follow, opts, underKeeper, title: 'squad console', restartWith: ['console', '--no-open', '--project', root] });
+  const restartWith = opts.demo ? ['demo', '--keep', '--no-open'] : ['console', '--no-open', '--project', root];
+  await serveApp({ first: ready.paths, follow, opts, underKeeper, title: opts.demo ? 'squad demo' : 'squad console', restartWith, ...(opts.demo ? { demo: true } : {}) });
 }
 
 /** Plain `squad`, from any folder: the one app, with Home, every project and one Waiting for you list. */
@@ -129,7 +137,7 @@ export async function runApp(opts: AppOptions): Promise<void> {
     return;
   }
   if (app) await stopApp(app);
-  await serveApp({ opts, underKeeper, title: 'squad-kit', restartWith: ['--no-open'] });
+  await serveApp({ opts, underKeeper, title: 'squad-kit', restartWith: APP_COMMAND });
 }
 
 async function stopApp(app: ConsoleInfo & { pid: number }): Promise<void> {
@@ -177,11 +185,12 @@ async function followHere(bp: ReturnType<typeof boardPaths>): Promise<void> {
 }
 
 /** Starts the app, prints its link, and runs until Ctrl-C (or a restart from the board). */
-async function serveApp(a: { first?: SquadPaths; follow?: ReturnType<typeof boardPaths>; opts: AppOptions; underKeeper: boolean; title: string; restartWith: string[] }): Promise<void> {
+async function serveApp(a: { first?: SquadPaths; follow?: ReturnType<typeof boardPaths>; opts: AppOptions; underKeeper: boolean; title: string; restartWith: string[]; demo?: boolean }): Promise<void> {
   const { opts } = a;
   // The same port and link as last time, so an open browser tab keeps working after a restart. The first time, a
-  // project's own board from before the one app gives its port and link.
-  const prior = readAppInfo() ?? (a.first ? readConsoleInfo(boardPaths(a.first.squadDir)) : null);
+  // project's own board from before the one app gives its port and link. The sample board keeps its own.
+  const own = a.first ? readConsoleInfo(boardPaths(a.first.squadDir)) : null;
+  const prior = a.demo ? own : (readAppInfo() ?? own);
   const portOpt = opts.port;
   const requestedPort =
     portOpt !== undefined && !Number.isNaN(portOpt) && portOpt >= 0 ? portOpt : (prior?.port ?? DEFAULT_PORT);
@@ -190,11 +199,11 @@ async function serveApp(a: { first?: SquadPaths; follow?: ReturnType<typeof boar
 
   // Errors also print here, in the terminal that runs the app, as they reach the app log.
   printErrors(true);
-  const server: ConsoleServer = await startConsoleServer({ paths: a.first, app: true, requestedPort, token, build, keepOnHangup: startedToOutlive() });
+  const server: ConsoleServer = await startConsoleServer({ paths: a.first, app: !a.demo, requestedPort, token, build, keepOnHangup: startedToOutlive() });
   // From here on, one error nobody caught no longer ends every project's squad.
   installCrashNet();
   const info = { pid: process.pid, port: server.port, token, startedAt: new Date().toISOString(), version: readInstalledPackage().version, build };
-  writeAppInfo(info);
+  if (!a.demo) writeAppInfo(info);
   // The Update button: look for a new squad-kit now and once a day (Settings › About turns it off).
   server.updates.watch();
 
@@ -242,10 +251,12 @@ async function serveApp(a: { first?: SquadPaths; follow?: ReturnType<typeof boar
   // Block until SIGINT/SIGTERM. The server attaches its own listeners that resolve `done`.
   await server.done;
   stopFollow();
-  writeAppInfo({ ...info, pid: null });
+  if (!a.demo) writeAppInfo({ ...info, pid: null });
   if (server.restartRequested()) {
     ui.info('Restarting the board…');
-    await restartBoard(a.underKeeper, a.restartWith);
+    // The project this app was started for was taken out of it: it must not come back with a restart or an update.
+    const removed = Boolean(a.first && !a.demo && !server.projects.first);
+    await restartBoard(a.underKeeper, removed ? APP_COMMAND : a.restartWith, removed);
     return;
   }
   // Quitting leaves nothing behind either: the runs end, and what they left in squad-kit's copies is stopped.
@@ -271,8 +282,9 @@ export async function endRuns(waitMs = RESTART_WAIT_MS): Promise<boolean> {
  * Restart from the board: a fresh process loads the newest squad-kit, in this same terminal, on the same link
  * (app.json keeps the port and token). It never leaves the old board alive as the parent of the new one.
  */
-async function restartBoard(underKeeper: boolean, command: string[]): Promise<void> {
-  const args = [...process.execArgv, process.argv[1]!, ...command];
+async function restartBoard(underKeeper: boolean, command: string[], asApp = false): Promise<void> {
+  const argsFor = (c: string[]) => [...process.execArgv, process.argv[1]!, ...c];
+  let args = argsFor(command);
   await endRuns();
   await new Promise<void>((done) => process.stdout.write('', () => done()));
   // Node 22.15+ swaps this process for the new board: same pid, same terminal, nothing left behind.
@@ -281,7 +293,7 @@ async function restartBoard(underKeeper: boolean, command: string[]): Promise<vo
   }
   // Older Node can't. A process that exits hands the terminal back to the shell, and Ctrl-C with it, so the first
   // board stays on as a small keeper that runs one board at a time; each board it runs exits to be restarted.
-  if (underKeeper) process.exit(RESTART_EXIT);
+  if (underKeeper) process.exit(asApp ? RESTART_APP_EXIT : RESTART_EXIT);
   // Ctrl-C reaches the board as well (same terminal): wait for it to stop rather than leave it behind.
   process.on('SIGINT', () => undefined);
   for (;;) {
@@ -290,7 +302,8 @@ async function restartBoard(underKeeper: boolean, command: string[]): Promise<vo
     process.on('SIGTERM', forward);
     const code = await new Promise<number>((done) => child.on('exit', (c) => done(c ?? 0)));
     process.off('SIGTERM', forward);
-    if (code !== RESTART_EXIT) {
+    if (code === RESTART_APP_EXIT) args = argsFor(APP_COMMAND);
+    else if (code !== RESTART_EXIT) {
       process.exitCode = code;
       return;
     }

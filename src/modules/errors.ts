@@ -23,3 +23,11 @@ export function kindOfStatus(status: number): ModuleErrorKind {
   if (status === 409) return 'clash';
   return 'other';
 }
+
+/**
+ * The other side said no and will say it again: the item is gone, or one of its own rules refuses this. Waiting changes
+ * nothing. A sign-in, a busy service or a lost connection can pass, so they are never this.
+ */
+export function refusedForGood(err: unknown): boolean {
+  return err instanceof ModuleError && (err.kind === 'not-found' || err.status === 400 || err.status === 405 || err.status === 410 || err.status === 422);
+}

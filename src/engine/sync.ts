@@ -12,6 +12,10 @@ import { overviewAfterMerge } from '../board/overview.js';
 import { firstCodeMerged } from '../board/first-story.js';
 import { mergeWait } from '../board/auto.js';
 import { clearStaleStop } from '../board/stale-stop.js';
+import { copyViews } from './copies.js';
+import { writeLog } from '../core/app-log.js';
+import { freeName } from '../core/file-names.js';
+import { refusedForGood } from '../modules/errors.js';
 
 /**
  * Keeps the tracker and the code host in step with the board: item states and comments on the tracker, and the
@@ -30,6 +34,11 @@ function note(bp: BoardPaths, id: string, text: string): void {
   } catch {
     // The ticket was removed meanwhile.
   }
+}
+
+/** Words with a technical part: they stay out of the ticket's activity, in the log an engineer reads. */
+function saidToEngineers(bp: BoardPaths, id: string, text: string): void {
+  writeLog({ level: 'warn', project: readMeta(bp).project, ticket: id, text });
 }
 
 /**
@@ -93,6 +102,12 @@ export async function tellTracker(bp: BoardPaths, ticketId: string, event: Track
     }
     return true;
   } catch (err) {
+    // Sending it again would get the same no, and every later update of this ticket would wait behind it for good.
+    if (refusedForGood(err)) {
+      saidToEngineers(bp, ticketId, `${tracker.label} refused an update on ${ref}: ${(err as Error).message}`);
+      note(bp, ticketId, `${tracker.label} refused this update on ${ref}, so squad-kit went on without it. The item may be deleted, or a rule there may not allow it. Later updates still go`);
+      return true;
+    }
     if (!again) note(bp, ticketId, `Could not update ${ref} on ${tracker.label}: ${(err as Error).message}. The update is kept and sent again later`);
     return false;
   }
@@ -119,6 +134,11 @@ async function fileBug(bp: BoardPaths, t: Ticket, tracker: Tracker, again = fals
     });
     return true;
   } catch (err) {
+    if (refusedForGood(err)) {
+      saidToEngineers(bp, t.id, `${tracker.label} refused a bug: ${(err as Error).message}`);
+      note(bp, t.id, `${tracker.label} refused this bug, so squad-kit went on without it. It stays on this board`);
+      return true;
+    }
     if (!again) note(bp, t.id, `Could not file the bug on ${tracker.label}: ${(err as Error).message}. It is kept and filed again later`);
     return false;
   }
@@ -182,9 +202,12 @@ export async function syncWiki(bp: BoardPaths, tracker: Tracker | null = tracker
     const pages = await tracker.wikiPages();
     fs.rmSync(dir, { recursive: true, force: true });
     fs.mkdirSync(dir, { recursive: true });
+    const taken = new Set<string>();
     for (const p of pages) {
-      const name = p.path.replace(/^\//, '').replace(/[^\w\- ]+/g, '-').trim() || 'Home';
-      fs.writeFileSync(path.join(dir, `${name}.md`), `<!-- ${tracker.label} wiki page ${p.path} -->\n${p.content.trim()}\n`, 'utf8');
+      // Letters and digits of any language stay. The end of the path says most, so that is what a long one keeps.
+      const name = p.path.replace(/^\//, '').replace(/[^\p{L}\p{M}\p{N}_\- ]+/gu, '-').trim().slice(-80);
+      const file = freeName(`${/[\p{L}\p{N}]/u.test(name) ? name : 'Home'}.md`, taken);
+      fs.writeFileSync(path.join(dir, file), `<!-- ${tracker.label} wiki page ${p.path} -->\n${p.content.trim()}\n`, 'utf8');
     }
     fs.writeFileSync(stamp, new Date().toISOString(), 'utf8');
     return pages.length;
@@ -286,7 +309,7 @@ export async function publishTicket(bp: BoardPaths, ticketId: string): Promise<{
     netGit(target.dir, ['fetch', target.remote, target.base], { env });
     const head = git(target.dir, ['rev-parse', 'FETCH_HEAD']);
     const local = moveBase(target.dir, target.base, head, squadInside(bp, target.dir));
-    if (local.note) note(bp, ticketId, local.note);
+    if (local.note) saidToEngineers(bp, ticketId, local.note);
     movedLocal = local.moved;
   } catch (err) {
     why = (err as Error).message;
@@ -331,11 +354,11 @@ export async function publishTicket(bp: BoardPaths, ticketId: string): Promise<{
 }
 
 /**
- * Builds by itself: an accepted story whose change is not in the base yet (board/auto.ts mergeWait), looked at again.
- * Its pull request is asked about through the code host module: once the host has merged it (someone approved and
- * completed it there), the ticket is merged here too and the person's checkout follows. With no pull request, the
- * merge into the base is tried again, now that the person's own copy may be free. 'clash': newer work in the base
- * clashes with it now; the caller gives the clash card. Nothing changes while it still waits.
+ * An accepted ticket whose change is not in the base yet (board/auto.ts mergeWait), looked at again. Its pull request is
+ * asked about through the code host module: once the host has merged it (someone approved and completed it there), the
+ * ticket is merged here too and the person's checkout follows. With no pull request, the merge into the base is tried
+ * again, now that the person's own copy may be free. 'clash': newer work in the base clashes with it now; the caller
+ * gives the clash card. Nothing changes while it still waits.
  */
 export async function recheckMerge(bp: BoardPaths, id: string): Promise<'merged' | 'clash' | 'waiting'> {
   const t = readTicket(bp, id);
@@ -360,7 +383,7 @@ export async function recheckMerge(bp: BoardPaths, id: string): Promise<'merged'
       const env = host.gitEnv();
       netGit(target.dir, ['fetch', target.remote, target.base], { env });
       const local = moveBase(target.dir, target.base, git(target.dir, ['rev-parse', 'FETCH_HEAD']), squadInside(bp, target.dir));
-      if (local.note) note(bp, id, local.note);
+      if (local.note) saidToEngineers(bp, id, local.note);
       moved = local.moved;
     } catch {
       // The person's checkout catches up with the next fetch; the change is in the base on the host already.
@@ -368,8 +391,8 @@ export async function recheckMerge(bp: BoardPaths, id: string): Promise<'merged'
     line = `Pull request ${t.pr.id} was approved and merged on ${host.label}`;
   } else {
     try {
-      const r = mergeLocally(bp, t);
-      if (!r?.moved) return 'waiting';
+      // A story across parts goes in everywhere. One already in is skipped, so a later look finishes the rest.
+      for (const view of copyViews(readMeta(bp), t)) if (!mergeLocally(bp, view)?.moved) return 'waiting';
       moved = true;
     } catch (err) {
       return err instanceof MergeClash ? 'clash' : 'waiting';

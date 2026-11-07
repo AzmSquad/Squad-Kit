@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { addActivity, listTickets, now, readMeta, readTicket, requireTicket, updateTicket, type BoardPaths } from './store.js';
 import type { AgentQuestion, Ticket } from './types.js';
 import type { Decided, DecidedBy } from './requirements-types.js';
-import { BoardActionError, acceptProof, changeAfterRelease, openChange, proposeChange, saveBeforeAccept, shipped } from './actions.js';
+import { BoardActionError, CHECKOUT_WAITS, acceptProof, changeAfterRelease, openChange, proposeChange, saveBeforeAccept, shipped } from './actions.js';
 import { isMerged, refuseBeforeDependency } from './depends.js';
 import { scheduleSquad } from './schedule.js';
 import { git, isAncestor, remotes } from '../engine/git.js';
@@ -45,18 +45,15 @@ export function mergesByItself(t: Pick<Ticket, 'track'>): boolean {
 /** A pull request that needs a person to approve it: a normal wait, not a failure. */
 export const PR_WAITS = 'Waits for someone to approve the pull request';
 
-/** A merge that could not move the person's own checkout of the base: it goes in once that copy is free. */
-export const CHECKOUT_WAITS = 'Waits to merge: your own copy of the code has changes in the same files';
-
 /**
- * Accepted on this track, but its change is not in the base yet and nothing runs for it: its pull request waits for a
- * person to approve it ('pr'), or the merge could not move the person's own checkout of the base ('checkout'). The
- * live squad looks again on a timer (engine/sync.ts recheckMerge). Meanwhile it holds no building place, and its
- * story shows as needing someone.
+ * Accepted, but its change is not in the base yet and nothing runs for it: the merge could not move the person's own
+ * checkout of the base ('checkout', on every track), or on this track its pull request waits for a person to approve
+ * it ('pr'). The live squad looks again on a timer (engine/sync.ts recheckMerge). Meanwhile it holds no building place,
+ * and its story shows as needing someone.
  */
 export function mergeWait(t: Ticket | undefined | null): 'pr' | 'checkout' | null {
-  if (!t || t.track !== 'auto' || t.stage !== 'release' || isMerged(t) || t.squad || t.waiting || t.live || t.deleting || t.archived) return null;
-  if (t.pr) return 'pr';
+  if (!t || t.stage !== 'release' || isMerged(t) || t.squad || t.waiting || t.live || t.deleting || t.archived) return null;
+  if (t.pr) return t.track === 'auto' ? 'pr' : null;
   return t.branch ? 'checkout' : null;
 }
 
@@ -65,9 +62,9 @@ export function mergeWaitWords(wait: 'pr' | 'checkout'): string {
   return wait === 'pr' ? PR_WAITS : CHECKOUT_WAITS;
 }
 
-/** The same entry, word for word (case and marks aside), or in other words. */
+/** The same entry, word for word in any language (case and marks aside), or in other words. */
 function sameDecided(a: string, b: string): boolean {
-  const plain = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const plain = (s: string) => s.toLowerCase().normalize('NFKD').replace(/\p{M}+/gu, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
   return plain(a) === plain(b) || saysTheSame(a, b);
 }
 
@@ -283,13 +280,6 @@ export function acceptByItself(bp: BoardPaths, id: string): Ticket {
   if (t.selfAccept?.waitsFor) updateTicket(bp, id, (x) => delete x.selfAccept?.waitsFor);
   const done = acceptProof(bp, requireTicket(bp, id), acceptedLine(t));
   if (done.waiting?.kind === 'stuck' && done.stuck?.gate === 'merge') return bringInAgain(bp, id);
-  // Merged, but the person's own checkout of the base could not move: the squad tries again on its timer.
-  if (readMeta(bp).engine === 'live' && mergeWait(done) === 'checkout') {
-    return updateTicket(bp, id, (x) => {
-      x.status = CHECKOUT_WAITS;
-      addActivity(x, 'squad', 'It goes in once your own copy of the code is free of changes in the same files. squad-kit tries again every few minutes');
-    });
-  }
   return done;
 }
 

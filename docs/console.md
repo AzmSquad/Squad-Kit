@@ -394,6 +394,11 @@ registries and the websites you allow under Safety. A blocked command shows in t
 why. Where the sandbox can't run (Windows, some Linux setups), steps run as before, and this page and `squad doctor`
 say so.
 
+Every agent, including the ones that only read, is also refused your keys and sign-ins through its file tools. A push from
+an agent or from a story's own command goes nowhere, while squad-kit's own push works. Two limits: a remote with its own push
+address set in git keeps it, and a command that clears the setting could push if it found a working key, which is why the
+keys stay hidden.
+
 **Guard for the project's own commands**: the Builder writes the code the tests run, so squad-kit runs the project's
 own tests, lint, build, setup, app and release pipeline in a guard of its own, on Mac and Linux. They work normally,
 browser tests too, and can reach the network for packages and tests. They can't read your keys, sign-ins, browser

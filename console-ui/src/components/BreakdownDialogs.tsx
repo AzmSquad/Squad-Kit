@@ -484,7 +484,9 @@ export function AddPartDialog({ v, level, under, onClose, onAdded }: { v: Breakd
   const [title, setTitle, clearTitle] = useDraft(v.id, `add-${level}-title`, '');
   const [about, setAbout, clearAbout] = useDraft(v.id, `add-${level}-about`, '');
   const word = level === 'epic' ? 'an epic' : `a ${level}`;
-  const add = () =>
+  const blocked = !title.trim() || (level !== 'epic' && !where) || act.isPending;
+  const add = () => {
+    if (blocked) return;
     act.mutate(
       {
         path: `${base(v.id)}/items`,
@@ -499,6 +501,7 @@ export function AddPartDialog({ v, level, under, onClose, onAdded }: { v: Breakd
         },
       },
     );
+  };
   return (
     <Modal
       title={`Add ${word}`}
@@ -511,7 +514,7 @@ export function AddPartDialog({ v, level, under, onClose, onAdded }: { v: Breakd
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn pri" disabled={!title.trim() || (level !== 'epic' && !where) || act.isPending} onClick={add}>
+          <button className="btn pri" disabled={blocked} onClick={add}>
             Add {word}
           </button>
         </>
@@ -531,7 +534,7 @@ export function AddPartDialog({ v, level, under, onClose, onAdded }: { v: Breakd
       )}
       <div className="field">
         <label htmlFor="rq-title">Title</label>
-        <input id="rq-title" className="input" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && title.trim() && add()} />
+        <input id="rq-title" className="input" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} />
       </div>
       <div className="field">
         <label htmlFor="rq-about">{level === 'epic' ? 'What it is for' : level === 'feature' ? 'What it covers' : 'Story'}</label>

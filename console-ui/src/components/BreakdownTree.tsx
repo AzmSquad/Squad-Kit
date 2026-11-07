@@ -253,7 +253,7 @@ function StoryRow({
             </span>
           </>
         )}
-        {mode === 'build' && <span className="rq-tk">{p?.ticket ?? s.ticket ?? '–'}</span>}
+        {mode === 'build' && <span className="rq-tk">{p?.ticket ?? '–'}</span>}
       </Main>
       {/* The tracker item opens in the tracker; without its address it is only its number. */}
       {mode === 'build' &&
@@ -364,7 +364,8 @@ function StoryPanel({ v, f, onClose, onSelect, onAsk, onOpenRef, onOpenTicket }:
   const act = useReqAct();
   const { toast } = usePrefs();
   const p = v.progress.find((x) => x.key === s.key);
-  const started = Boolean(s.ticket);
+  // Its ticket on the board: one a person deleted has no ticket, so it can be changed and started again.
+  const started = Boolean(s.ticket && p?.ticket);
   const busy = beingRedone(v, s.key);
   const editable = canEdit(v) && !started && !busy;
   const server = useMemo(() => draftOf(s), [s]);
@@ -529,7 +530,7 @@ function StoryPanel({ v, f, onClose, onSelect, onAsk, onOpenRef, onOpenTicket }:
               <Play size={13} /> Start this story now
             </button>
             <span className="note">
-              {waits.length ? `It starts after ${waits.join(', ')} ${waits.length === 1 ? 'merges' : 'merge'}.` : dirty ? 'Save your changes first.' : 'It becomes a ticket that builds by itself.'}
+              {waits.length ? `It starts after ${waits.join(', ')} ${waits.length === 1 ? 'merges' : 'merge'}.` : dirty ? 'Save your changes first.' : s.ticket ? 'Its ticket was deleted. This makes a new one that builds by itself.' : 'It becomes a ticket that builds by itself.'}
             </span>
           </div>
         )}
@@ -616,9 +617,9 @@ function GroupPanel({ v, f, onClose, onSelect, onAsk, onOpenRef, onOpenTicket, o
   const [removing, setRemoving] = useState(false);
   const busy = beingRedone(v, item.key);
   const stories = storiesUnder(item);
-  const started = stories.filter((s) => s.ticket);
-  const editable = canEdit(v) && !busy;
   const progress = new Map(v.progress.map((p) => [p.key, p]));
+  const started = stories.filter((s) => s.ticket && progress.get(s.key)?.ticket);
+  const editable = canEdit(v) && !busy;
   const m = mergedOf(stories, progress);
   const decided = v.decided.filter((x) => x.item === item.key);
   const save = () =>

@@ -16,6 +16,7 @@ import { endPause, startPause } from '../src/engine/usage-limit.js';
 import { mountSupportApi } from '../src/console/api/support.js';
 import { runReport } from '../src/commands/support.js';
 import { chooseProject } from '../src/core/paths.js';
+import { forgetProject, rememberProject } from '../src/core/projects.js';
 
 /**
  * Report a problem (phase 10): one .zip any standard unzip opens, with the ticket's state, its conversations, the log
@@ -162,6 +163,95 @@ describe('scrubbing secrets', () => {
     expect(scrubSecrets('a my-known-secret-value b', ['my-known-secret-value'])).toBe('a [secret removed] b');
     for (const name of ['secrets.yaml', 'projects/x/console.json', '.env', '.env.local', 'id_rsa', 'server.pem', 'app.json']) expect(isSecretFile(name), name).toBe(true);
     expect(isSecretFile('ticket/RO-7.yaml')).toBe(false);
+  });
+});
+
+describe('a corpus of secrets', () => {
+  // Made up, and put together here so nothing that scans this repo takes them for real ones.
+  const LIVE = ['sk', 'live', 'abcdefghijklmnopqrstuvwx'].join('_');
+  const RESTRICTED = ['rk', 'test', 'abcdefghijklmnopqrstuvwx'].join('_');
+  const HOOK = ['whsec', 'abcdefghijklmnopqrstuvwx'].join('_');
+  const NPM = ['npm', 'abcdefghijklmnopqrstuvwxyz0123456789'].join('_');
+  const MAIL = ['SG', 'abcdefghijklmnopqrstuv', 'abcdefghijklmnopqrstuvwxyz0123456789'].join('.');
+
+  it.each([
+    ['a database password in an env line', 'DB_PASSWORD=hunter2', 'hunter2'],
+    ['a short one', 'DB_PASS=abc', 'abc'],
+    ['a name with no underscore', 'PGPASSWORD=hunter2', 'hunter2'],
+    ['exported', 'export MYSQL_ROOT_PASSWORD=hunter2', 'hunter2'],
+    ['in quotes, with a space', 'DB_PASSWORD="my long pass"', 'my long pass'],
+    ['with a comma in it', 'DB_PASSWORD=pa,ss;word', 'ss;word'],
+    ['a secret', 'JWT_SECRET=abc', 'abc'],
+    ['a secret key base', 'SECRET_KEY_BASE=abcdef012345', 'abcdef012345'],
+    ['an env key', 'STRIPE_KEY=abcdef', 'abcdef'],
+    ['a token', 'GITHUB_TOKEN=abc', 'abc'],
+    ['lower case in settings', 'db_password: hunter2', 'hunter2'],
+    ['camel case', 'dbPassword: "hunter2"', 'hunter2'],
+    ['with dots', '"db.password": "hunter2"', 'hunter2'],
+    ['json', '{"clientSecret":"abcdef123456","other":1}', 'abcdef123456'],
+    ['a connection string', 'Server=db;User Id=sa;Password=hunter2;', 'hunter2'],
+    ['a command option', 'tool --password hunter2 --verbose', 'hunter2'],
+    ['a live payment key', LIVE, LIVE],
+    ['a restricted test key', RESTRICTED, RESTRICTED],
+    ['a webhook secret', HOOK, HOOK],
+    ['an npm token', NPM, NPM],
+    ['a mail service key', MAIL, MAIL],
+    ['a temporary cloud key', ['ASIA', 'ABCDEFGHIJKLMNOP'].join(''), 'ABCDEFGHIJKLMNOP'],
+  ])('takes out %s', (_what, line, secret) => {
+    const out = scrubSecrets(`before\n${line}\nafter`, []);
+    expect(out).not.toContain(secret);
+    expect(out).toContain('before');
+    expect(out).toContain('after');
+  });
+
+  it('an empty setting does not take the line after it', () => {
+    expect(scrubSecrets('DB_PASSWORD=\nPORT=3000', [])).toContain('PORT=3000');
+    expect(scrubSecrets('password:\nnext line stays', [])).toContain('next line stays');
+  });
+
+  it('leaves the words engineers need', () => {
+    const line = [
+      'MAX_TOKENS=4096',
+      'NODE_ENV=development',
+      'tokens: 1500',
+      '"input_tokens": 1234',
+      'PORT=3000',
+      'PASS  src/login.test.ts',
+      'commit 0123456789abcdef0123456789abcdef01234567',
+      'password field shows an error',
+    ].join('\n');
+    expect(scrubSecrets(line, [])).toBe(line);
+  });
+
+  it("takes the project's own .env and local file values out by value, even where no shape would catch them", () => {
+    const repo = path.join(path.dirname(bp.squadDir), 'api');
+    fs.mkdirSync(repo, { recursive: true });
+    const root = path.dirname(bp.squadDir);
+    fs.writeFileSync(path.join(root, '.env'), ['# local', 'DB_PASSWORD=plainword', 'CUSTOM_THING=a1b2c3d4e5', 'export QUOTED="quoted value 9"', 'NODE_ENV=development', 'PORT=3000', 'DEBUG=true', 'APP_URL=http://localhost:3000'].join('\n'));
+    fs.writeFileSync(path.join(root, '.env.local'), 'LOCAL_ONLY=z9y8x7w6v5\n');
+    fs.writeFileSync(path.join(root, '.env.example'), 'EXAMPLE_ONE=changeme123\n');
+    fs.writeFileSync(path.join(repo, 'appsettings.Development.json'), JSON.stringify({ ConnectionStrings: { Default: 'Server=db1;Database=cases' }, Mail: { Sender: 'mail-sender-77' } }));
+    fs.writeFileSync(path.join(repo, 'local.yaml'), 'nested:\n  apiPassword: yamlpass\n');
+    const meta = readMeta(bp);
+    writeMeta(bp, { ...meta, repos: [{ path: 'api', base: 'main', remote: '', commands: {} } as never], localFiles: [{ repo: 'api', path: 'appsettings.Development.json' }, { repo: 'api', path: 'local.yaml' }] });
+    updateTicket(bp, id, (t) => (t.status = 'plainword a1b2c3d4e5 quoted value 9 z9y8x7w6v5 Server=db1;Database=cases mail-sender-77 yamlpass changeme123 development 3000 true http://localhost:3000'));
+    const files = unzipped(zip(reportEntries({ bp, ticket: id, versions: VERSIONS })));
+    const all = Object.values(files).join('\n');
+    for (const value of ['plainword', 'a1b2c3d4e5', 'quoted value 9', 'z9y8x7w6v5', 'Server=db1;Database=cases', 'mail-sender-77', 'yamlpass']) expect(all, value).not.toContain(value);
+    // Not every word in those files: a report still reads, and an example file holds nothing real.
+    const line = files[`ticket/${id}.yaml`]!.replace(/\s+/g, ' ');
+    expect(line).toContain('changeme123 development 3000 true http://localhost:3000');
+  });
+
+  it("takes out the values of every project on this computer's list, since the log holds them all", () => {
+    const other = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-other-'));
+    fs.writeFileSync(path.join(other, '.env'), 'OTHER_PASSWORD=otherproject77\n');
+    rememberProject('other-1', other);
+    writeLog({ level: 'error', text: 'the check said otherproject77' });
+    const all = Object.values(unzipped(zip(reportEntries({ versions: VERSIONS })))).join('\n');
+    forgetProject('other-1');
+    fs.rmSync(other, { recursive: true, force: true });
+    expect(all).not.toContain('otherproject77');
   });
 });
 

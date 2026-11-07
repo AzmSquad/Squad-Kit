@@ -65,4 +65,18 @@ describe('Decided for you', () => {
     ];
     for (const [a, b] of different) expect(saysTheSame(a, b), b).toBe(false);
   });
+
+  it('keeps each Arabic entry: lines in another script are words too, never empty and all the same', () => {
+    const REFUND = 'يتم رد الرسوم كاملة عند إلغاء الجلسة قبل موعدها بيوم';
+    const HOURS = 'تعمل المحكمة من الأحد إلى الخميس من الثامنة صباحا';
+    const SLOT = 'تبقى الجلسة محجوزة لمدة عشر دقائق بعد اختيارها';
+    expect(saysTheSame(REFUND, HOURS)).toBe(false);
+    const t = ticket([]);
+    expect(addDecided(t, 'architect', [REFUND, HOURS, SLOT]).map((d) => d.text)).toEqual([REFUND, HOURS, SLOT]);
+    // The same line again is still one entry, with other marks or a full stop.
+    expect(addDecided(t, 'reviewer', [REFUND, `${HOURS}.`, 'تَبْقَى الجلسة محجوزة لمدة عشر دقائق بعد اختيارها'])).toEqual([]);
+    expect(t.decided!.map((d) => d.id)).toEqual(['d1', 'd2', 'd3']);
+    // Short lines must match word for word, in any language.
+    expect(saysTheSame('نعم موافق', 'لا موافق')).toBe(false);
+  });
 });

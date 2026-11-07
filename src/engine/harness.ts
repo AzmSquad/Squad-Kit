@@ -106,7 +106,7 @@ function lineStages(): HarnessStage[] {
     stage('breakdown', 'Breakdown', 'Your requirements become a tree of stories. Skip it if you start from one story.', on({ ...skip('Optional'), off: true }, { ...skip('Optional'), off: true }, you('You approve')), [
       g('brd-questions', 'Only real gaps and clashes', `At most ${MAX_QUESTIONS} questions on a document, where it leaves a gap or disagrees with itself.`, 'A technical one goes back to the agent.'),
       y('brd-approve', 'You approve the breakdown', 'Nothing is built or sent to your tracker before that. Every story needs its "done when".', 'Approve is refused and says what to fix.'),
-      g('brd-queue', 'Stories start in order', 'The next starts when what it needs is merged and a place is free.', 'Your budget or AI limit holds the queue, with a reason.'),
+      g('brd-queue', 'Stories start in order', 'The next starts when what it needs is merged and a place is free.', 'Your budget, your AI limit or two stopped stories hold the queue, with a reason.'),
       g('first-story', 'A project with no code starts with one story', 'squad-kit adds Set up the product: it picks the tools and makes a first version. Nothing else starts until it merges, so every story builds on the same start.', 'Another ticket waits, and says which one it waits for.'),
     ]),
     stage('story', 'Story', 'The Analyst reads your story and asks only what it leaves open.', on(you('You answer'), skip('No questions'), skip('Approved before')), [
@@ -122,9 +122,9 @@ function lineStages(): HarnessStage[] {
       y('change', 'A big change comes back to you', 'The Builder pauses, and the updated design waits for your yes.'),
     ]),
     stage('build', 'Build', 'The Builder writes the code in small steps, in a locked room.', on(squad('Builder')), [
-      g('sandbox', 'The guard', "Each story has its own copy. The Builder and Tester can't read your keys, sign-ins or .env files, and reach only package sites and websites you allow.", 'Blocked, with a line on the story.'),
+      g('sandbox', 'The guard', "Each story has its own copy. No agent can read your keys or sign-ins. The Builder and Tester can't read .env files either, and reach only package sites and websites you allow.", 'Blocked, with a line on the story.'),
       g('guard', 'A second guard for your project', 'Your tests, app, setup and release run locked in too, with keys hidden and Docker closed.', 'A card: an engineer allows the file, or the plan changes.'),
-      g('lane', 'Files no agent can change', "squad-kit's folder, AI instruction files, commit hooks, files an engineer locked. No commit, push or branch change.", 'A file goes back, with a line. A moved branch stops the step.'),
+      g('lane', 'Files no agent can change', "squad-kit's folder, AI instruction files, commit hooks, files an engineer locked. No commit or branch change, and a push is refused.", 'A file goes back, with a line. A moved branch stops the step.'),
       g('local-files', 'Test values, not your own', 'A file marked local gets values kept for stories. No agent can read it.'),
     ]),
     stage('checks', 'Checks', "squad-kit runs your project's own checks. No agent is asked if they passed.", on(squad('squad-kit')), [
@@ -176,7 +176,7 @@ function alwaysOnRows(): HarnessRow[] {
     a('usage-limit', 'Your AI limit is respected', 'At the limit every project waits together, then carries on from the same step.', 'Never a failed try, and you can end the wait yourself.'),
     a('step-up', 'A stronger model after a failed try', 'The Builder moves up, unless someone chose an exact model.', `On Thrifty, after ${QUALITY_PRESETS.thrifty.stepUp.after} failed tries.`),
     a('cap', "A run can't go on forever", 'Each run has a most it can use. See Limits.', 'It pauses with its work kept. Give it more doubles it.'),
-    a('budget', 'Your budget', `If you pay per use, a story and a month can have one. At ${WARN_AT * 100}% the board says so.`, 'At 100% the story stops between two steps, never mid-step.'),
+    a('budget', 'Your budget', `If you pay per use, a story and a month can have one. At ${WARN_AT * 100}% the board says so.`, 'At 100% the story or the Analyst stops between two steps, never mid-step.'),
     a('ways-out', 'Every stop has a way out', 'Try again, do it yourself, go around it, or stop. Only you can go past a failed check.', 'Your reason stays on the story, the pull request and the release notes.'),
     a('plain-words', 'Plain words only', 'Raw errors never reach you.', 'The exact error goes to the engineer details and the log.'),
     a('interrupted', 'An interruption is not a failure', 'A restart, a Stop or a sleeping computer never counts as a failed try.', 'The step carries on where it was.'),
@@ -439,7 +439,7 @@ export function harnessView(meta?: BoardMeta, bp?: BoardPaths) {
     },
     safety: {
       hidden: [...PRIVATE.map((p) => HARNESS_PRIVATE_NAME[p] ?? p), "Your AI tools' sign-ins", 'Browser sign-ins', 'Keys in package settings', '.env files', "squad-kit's own folder and keys"],
-      locked: ["squad-kit's own folder", 'AI instruction files', 'Commit hooks and their settings', 'Code history: commit, push, branches'],
+      locked: ["squad-kit's own folder", 'AI instruction files', 'Commit hooks and their settings', 'Code history: commit and branches. A push is refused, and agents have no keys to push with'],
       sites: [...new Set(PACKAGE_HOSTS.map(packageSiteName))],
       refused: Object.values(HARNESS_REFUSED),
       tools: Object.values(HARNESS_TOOL_NAME),

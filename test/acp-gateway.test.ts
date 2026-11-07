@@ -52,9 +52,31 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
 });
 `;
 
+/** An adapter that sends its messages in small pieces, as the real one does, with a tool call between two messages. */
+const PIECES_ADAPTER = `
+import readline from 'node:readline';
+const send = (m) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...m }) + '\\n');
+const piece = (text) => send({ method: 'session/update', params: { sessionId: 's3', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } } } });
+readline.createInterface({ input: process.stdin }).on('line', (line) => {
+  const msg = JSON.parse(line);
+  if (msg.method === 'initialize') return send({ id: msg.id, result: { protocolVersion: 1 } });
+  if (msg.method === 'session/new') return send({ id: msg.id, result: { sessionId: 's3' } });
+  if (msg.method === 'session/prompt') {
+    piece('Let me ');
+    piece('look.');
+    send({ method: 'session/update', params: { sessionId: 's3', update: { sessionUpdate: 'tool_call', toolCallId: 't1', title: 'Read', rawInput: {}, _meta: { fake: { toolName: 'Read' } } } } });
+    piece('The word ');
+    piece('is ');
+    piece('mango.');
+    return send({ id: msg.id, result: { stopReason: 'end_turn' } });
+  }
+});
+`;
+
 let dir: string;
 let script: string;
 let modeScript: string;
+let piecesScript: string;
 
 beforeAll(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-acp-'));
@@ -62,6 +84,8 @@ beforeAll(() => {
   fs.writeFileSync(script, ADAPTER);
   modeScript = path.join(dir, 'mode-adapter.mjs');
   fs.writeFileSync(modeScript, MODE_ADAPTER);
+  piecesScript = path.join(dir, 'pieces-adapter.mjs');
+  fs.writeFileSync(piecesScript, PIECES_ADAPTER);
 });
 
 const launch = (args: string[]): AcpLaunch => ({
@@ -90,6 +114,13 @@ describe('the agent gateway', () => {
     expect(own.text).toBe('mode:bypassPermissions');
     const set = await runAcp({ ...launch([modeScript]), mode: 'default' }, { cwd: dir, prompt: 'go', timeoutMs: 20_000 });
     expect(set).toMatchObject({ ok: true, text: 'mode:default' });
+  });
+
+  it('keeps the whole last message, not its last piece', async () => {
+    const pieces: string[] = [];
+    const r = await runAcp(launch([piecesScript]), { cwd: dir, prompt: 'go', timeoutMs: 20_000, onText: (t) => pieces.push(t) });
+    expect(r).toMatchObject({ ok: true, text: 'The word is mango.' });
+    expect(pieces).toEqual(['Let me ', 'look.', 'The word ', 'is ', 'mango.']);
   });
 
   it('tells the caller when the adapter cannot start, so it can fall back', async () => {

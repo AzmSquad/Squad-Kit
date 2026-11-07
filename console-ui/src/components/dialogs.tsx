@@ -639,7 +639,9 @@ function FilePicker({ files, onAdd, onRemove }: { files: PickedFile[]; onAdd(lis
 export function PullDialog({ onClose, onCreated }: { onClose(): void; onCreated(t: Ticket): void }) {
   const act = useAct<Ticket>();
   const [ref, setRef] = useState('AB#');
-  const submit = () =>
+  const blocked = ref.replace(/\D/g, '').length === 0 || act.isPending;
+  const submit = () => {
+    if (blocked) return;
     act.mutate(
       { path: '/api/v1/pull', body: { ref } },
       {
@@ -649,6 +651,7 @@ export function PullDialog({ onClose, onCreated }: { onClose(): void; onCreated(
         },
       },
     );
+  };
   return (
     <Modal
       title="Pull from Azure DevOps"
@@ -656,7 +659,7 @@ export function PullDialog({ onClose, onCreated }: { onClose(): void; onCreated(
       icon={<span className="glyph"><Download size={15} /></span>}
       footer={
         <>
-          <button className="btn pri" disabled={ref.replace(/\D/g, '').length === 0 || act.isPending} onClick={submit}>
+          <button className="btn pri" disabled={blocked} onClick={submit}>
             <Download size={15} /> Pull ticket
           </button>
           <button className="btn" onClick={onClose}>Cancel</button>

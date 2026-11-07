@@ -2,7 +2,9 @@
 export function ticketTrouble(err: unknown, id: string): string {
   const said = err instanceof Error ? err.message : String(err);
   if (/^404\b/.test(said)) return `There is no ticket ${id} on this board. It may have been deleted.`;
-  return said;
+  // Its file cannot be read: the board's own plain words, not the answer they came in.
+  const words = /^409\b[^{]*\{"error":"(.*)"\}$/.exec(said)?.[1];
+  return words ?? said;
 }
 
 /** An install that needs permission: on a Mac or Linux the same command, asking for it. */

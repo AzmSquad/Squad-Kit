@@ -198,6 +198,7 @@ function sendProgress(s: NonNullable<BreakdownView['state']['sync']>): string {
 /** What to run next, for the breakdown as it is. */
 function nextLine(v: BreakdownView): string | null {
   const j = v.state.job;
+  if (j?.heldFor === 'budget') return `Carry on: ${cmd(`squad requirements retry ${v.id}`)}   or stop it: ${cmd(`squad requirements stop ${v.id}`)}`;
   if (j && (j.status === 'pending' || j.status === 'running')) return `Stop it: ${cmd(`squad requirements stop ${v.id}`)}`;
   if (v.status === 'questions') return `Answer them: ${cmd(`squad requirements answer ${v.id}`)}   or let the Analyst decide: ${cmd(`squad requirements answer ${v.id} --skip`)}`;
   if (v.status === 'failed') return `Try again: ${cmd(`squad requirements retry ${v.id}`)}`;

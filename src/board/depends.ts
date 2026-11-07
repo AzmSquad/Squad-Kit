@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { addActivity, listTickets, now, readMeta, readTicket, updateTicket, type BoardPaths } from './store.js';
+import { addActivity, listTickets, now, readMeta, readTicket, ticketProblem, updateTicket, type BoardPaths } from './store.js';
 import type { DependencyChoice, Ticket } from './types.js';
 import { BoardActionError } from './actions.js';
 import { scheduleSquad } from './schedule.js';
@@ -30,6 +30,8 @@ export function unmergedDeps(bp: BoardPaths, t: Ticket): Ticket[] {
 /** True when every one of these tickets is merged, or no longer on the board. */
 export function depsReady(bp: BoardPaths, ids: string[]): boolean {
   return ids.every((id) => {
+    // Its file cannot be read: nobody can say it merged, so it still holds this one up.
+    if (ticketProblem(bp, id)) return false;
     const d = readTicket(bp, id);
     return !d || d.deleting || isMerged(d);
   });

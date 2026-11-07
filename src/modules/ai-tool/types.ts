@@ -95,6 +95,8 @@ export interface AgentRun {
   permissions: PermissionSet[];
   /** Files no agent may read or change, such as squad-kit's own secrets.yaml. */
   secretFiles?: string[];
+  /** Files and folders in the person's home no agent may read or change: keys and sign-ins. */
+  privatePlaces?: string[];
   /**
    * Files and folders no agent may change, by name at any depth (a folder ends with a slash): the instructions and
    * settings later sessions load, and squad-kit's own folder.

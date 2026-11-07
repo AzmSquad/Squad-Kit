@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Hono } from 'hono';
 import { SQUAD_DIR, findSquadRoot, type SquadPaths } from '../core/paths.js';
-import { boardExists, boardPaths, listTickets, readMeta, type BoardPaths } from '../board/store.js';
+import { boardExists, boardPaths, listTickets, readMeta, settingsProblem, type BoardPaths } from '../board/store.js';
 import { startDemoSquad } from '../board/engine.js';
 import { claimSquad } from '../board/lock.js';
 import { runningConsole, writeConsoleInfo, type ConsoleInfo } from '../board/console-info.js';
@@ -203,7 +203,8 @@ export class OpenProjects {
       const base = { id: p.id, name: projectName(p.root), root: p.root, url: `/p/${encodeURIComponent(p.id)}/board`, tickets: 0, waiting: 0, working: 0 };
       try {
         if (!boardExists(p.bp)) {
-          rows.push({ ...base, open: true });
+          const why = settingsProblem(p.bp);
+          rows.push({ ...base, open: true, ...(why ? { why } : {}) });
           continue;
         }
         const meta = readMeta(p.bp);

@@ -3,11 +3,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
-import { boardPaths, readTicket, updateTicket, writeMeta, type BoardPaths } from '../src/board/store.js';
+import { boardPaths, readTicket, ticketFilesDir, updateTicket, writeMeta, type BoardPaths } from '../src/board/store.js';
 import * as actions from '../src/board/actions.js';
 import { addWorktree } from '../src/engine/git.js';
 import { trackerFor } from '../src/modules/registry.js';
-import { flushTracker, publishTicket } from '../src/engine/sync.js';
+import { flushTracker, publishTicket, syncWiki } from '../src/engine/sync.js';
+import { AzureError } from '../src/modules/azure/client.js';
 import { LiveSquad } from '../src/engine/live.js';
 import { listReleases } from '../src/board/store.js';
 
@@ -212,6 +213,142 @@ describe('Azure Boards and Repos', () => {
     expect(calls.at(-1)!.url).toContain('_apis/wit/workitems/$Bug');
     expect(ops).toContainEqual({ op: 'add', path: '/fields/Microsoft.VSTS.Common.Severity', value: '1 - Critical' });
     expect(after.trackerQueue).toBeUndefined();
+  });
+});
+
+describe('a tracker that says no for good', () => {
+  /** A tracker whose every call goes through `answer`. */
+  function tracker(answer: (what: string) => void) {
+    const az = trackerFor(bp)!;
+    const said: string[] = [];
+    const fake = Object.create(az) as typeof az & { said: string[] };
+    fake.moveTo = async (id: string, stage: string) => {
+      answer(`move ${id} ${stage}`);
+      said.push(`move ${id} ${stage}`);
+      return null;
+    };
+    fake.comment = async (id: string, text: string) => {
+      answer(`comment ${id}`);
+      said.push(text);
+    };
+    fake.said = said;
+    return fake;
+  }
+  const queued = () => {
+    const t = actions.createTicket(bp, { title: 'Owner signs up' });
+    return updateTicket(bp, t.id, (x) => {
+      x.source = { type: 'azure', ref: 'AB#35', id: '35' };
+      x.trackerQueue = [{ kind: 'started' }, { kind: 'note', noteKind: 'note', text: 'A later note' }];
+    }).id;
+  };
+
+  it.each([
+    ['a deleted item', new AzureError('Azure DevOps said HTTP 404. TF401232', 404)],
+    ['a rule of the tracker', new AzureError('Azure DevOps said HTTP 400. TF401320: Rule Error', 400)],
+  ])('%s: that update goes, one plain line says so, and the later updates still go', async (_what, refusal) => {
+    const id = queued();
+    const az = tracker((what) => {
+      if (what.startsWith('move')) throw refusal;
+    });
+    await flushTracker(bp, id, az);
+    const t = readTicket(bp, id)!;
+    expect(t.trackerQueue).toBeUndefined();
+    expect(t.trackerRetry).toBeUndefined();
+    expect(az.said.join('\n')).toContain('A later note');
+    const said = t.activity.map((a) => a.text).join('\n');
+    expect(said).toContain('Azure DevOps refused this update on AB#35, so squad-kit went on without it.');
+    expect(said).not.toMatch(/HTTP|TF40/);
+  });
+
+  it.each([
+    ['a sign-in', new AzureError('Azure DevOps refused the token (HTTP 401).', 401)],
+    ['a busy service', new AzureError('Azure DevOps said HTTP 503.', 503)],
+    ['too many calls', new AzureError('Azure DevOps said HTTP 429.', 429)],
+    ['a lost connection', new AzureError('Could not reach Azure DevOps: socket hang up', undefined, 'offline')],
+  ])('%s can pass, so the update is kept and sent again', async (_what, trouble) => {
+    const id = queued();
+    let fails = true;
+    const az = tracker(() => {
+      if (fails) throw trouble;
+    });
+    await flushTracker(bp, id, az);
+    let t = readTicket(bp, id)!;
+    expect(t.trackerQueue).toHaveLength(2);
+    expect(t.trackerRetry?.tries).toBe(1);
+    fails = false;
+    updateTicket(bp, id, (x) => (x.trackerRetry!.nextAt = new Date(Date.now() - 1000).toISOString()));
+    await flushTracker(bp, id, az);
+    t = readTicket(bp, id)!;
+    expect(t.trackerQueue).toBeUndefined();
+    expect(az.said.join('\n')).toContain('A later note');
+  });
+
+  it('a bug it refuses for good stays on the board and blocks nothing', async () => {
+    const bug = actions.reportBug(bp, { what: 'Booking page is blank', severity: 'annoying' });
+    const az = trackerFor(bp)!;
+    const fake = Object.create(az) as typeof az;
+    fake.fileBug = async () => {
+      throw new AzureError('Azure DevOps said HTTP 400. No Bug type', 400);
+    };
+    await flushTracker(bp, bug.id, fake);
+    const t = readTicket(bp, bug.id)!;
+    expect(t.trackerQueue).toBeUndefined();
+    expect(t.activity[0]!.text).toBe('Azure DevOps refused this bug, so squad-kit went on without it. It stays on this board');
+  });
+});
+
+describe('names in Arabic, pulled from the tracker', () => {
+  it('keeps every wiki page, with a safe name of its own', async () => {
+    const pages = [
+      { path: '/', content: 'Home page' },
+      { path: '/الرئيسية', content: 'Main rules' },
+      { path: '/قواعد العمل', content: 'Work rules' },
+      { path: '/قواعد/الرسوم', content: 'Fee rules' },
+      { path: '/قواعد-الرسوم', content: 'Same name once it is safe' },
+      { path: '/Team rules', content: 'Team rules' },
+      { path: '/team-rules?', content: 'Nearly the same' },
+      { path: '/???', content: 'No word at all' },
+    ];
+    const az = trackerFor(bp)!;
+    const fake = Object.create(az) as typeof az;
+    fake.wikiPages = async () => pages;
+    expect(await syncWiki(bp, fake, true)).toBe(pages.length);
+    const files = fs.readdirSync(bp.wikiDir).filter((f) => f.endsWith('.md')).sort();
+    expect(files).toHaveLength(pages.length);
+    expect(files).toEqual(expect.arrayContaining(['الرئيسية.md', 'قواعد العمل.md', 'قواعد-الرسوم.md', 'قواعد-الرسوم-2.md', 'Team rules.md', 'Home.md', 'Home-2.md']));
+    const all = files.map((f) => fs.readFileSync(path.join(bp.wikiDir, f), 'utf8')).join('\n');
+    for (const p of pages) expect(all).toContain(p.content);
+    for (const f of files) expect(f, f).not.toMatch(/[/\\:*?"<>|]/);
+  });
+
+  it('keeps every attachment, with its name in any language, and two of one name both stay', async () => {
+    const az = trackerFor(bp)!;
+    const fake = Object.create(az) as typeof az;
+    const item = await az.get('35');
+    fake.get = async () => ({
+      ...item,
+      attachments: [
+        { name: 'صورة.png', url: 'u1', size: 4 },
+        { name: 'مستند.png', url: 'u2', size: 4 },
+        { name: 'صورة.png', url: 'u3', size: 4 },
+        { name: 'Screen Shot!.png', url: 'u4', size: 4 },
+        { name: '../../secret.txt', url: 'u5', size: 4 },
+        { name: '..', url: 'u6', size: 4 },
+      ],
+    });
+    fake.download = async (url: string, file: string) => {
+      fs.writeFileSync(file, url);
+      return file;
+    };
+    const t = await actions.startFromTracker(bp, fake, '35');
+    const dir = ticketFilesDir(bp, t.id);
+    const names = fs.readdirSync(dir).sort();
+    expect(names).toHaveLength(6);
+    expect(names).toEqual(expect.arrayContaining(['صورة.png', 'صورة-2.png', 'مستند.png', 'Screen Shot_.png']));
+    expect(names.map((n) => fs.readFileSync(path.join(dir, n), 'utf8')).sort()).toEqual(['u1', 'u2', 'u3', 'u4', 'u5', 'u6']);
+    expect(readTicket(bp, t.id)!.attachments).toHaveLength(6);
+    // Nothing lands outside the ticket's own folder.
+    expect(fs.existsSync(path.join(dir, '..', '..', 'secret.txt'))).toBe(false);
   });
 });
 

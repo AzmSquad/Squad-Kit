@@ -732,14 +732,26 @@ export interface ProjectCommands {
   /** Runs after a release, for example a pipeline trigger. */
   deploy?: string;
 }
+/** A ticket the board cannot show: what the person reads, and for engineers its file and why. */
+export interface BrokenTicket {
+  id: string;
+  problem: string;
+  file: string;
+  detail: string;
+}
+
 export interface BoardResponse {
   ready: boolean;
+  /** Not ready because the project's settings file cannot be read, in plain words. */
+  settings?: string;
   meta: BoardMeta;
   /** The running board: when it started and whether a newer squad-kit is installed. */
   console?: { startedAt: string; outdated: boolean } | null;
   tickets: Ticket[];
   /** Archived tickets, off the board until "Show archived". */
   archived?: Ticket[];
+  /** Ticket folders whose ticket file cannot be read, so they are not among the tickets. */
+  broken?: BrokenTicket[];
   stats: { released30: number; bugs30: number; open: number };
 }
 

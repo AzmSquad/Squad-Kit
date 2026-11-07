@@ -6,6 +6,7 @@ import { boardPaths, listTickets, readMeta, readTicket, removeTicket, updateTick
 import type { Breakdown, BreakdownStory } from '../src/board/requirements-types.js';
 import type { Ticket } from '../src/board/types.js';
 import { findItem, readBreakdown, readBreakdownState, storyProgress, writeBreakdown } from '../src/board/requirements.js';
+import { startStory } from '../src/board/requirements-actions.js';
 import { buildingBreakdowns, fillBuildQueue, placesLeft, setBuild, type QueueRoom } from '../src/board/requirements-build.js';
 import { monthKey, monthsFile } from '../src/board/usage.js';
 import { limitText, type LimitPause } from '../src/engine/usage-limit.js';
@@ -108,7 +109,7 @@ function merge(key: string): void {
 
 function started(): string[] {
   const b = readBreakdown(bp, 'BR-1')!;
-  return ['S-1', 'S-2', 'S-3', 'S-4', 'S-5', 'S-6'].filter((k) => findItem(b, k)!.story!.ticket);
+  return ['S-1', 'S-2', 'S-3', 'S-4', 'S-5', 'S-6', 'S-7'].filter((k) => findItem(b, k)?.story?.ticket);
 }
 
 describe('Build continuously, the switch', () => {
@@ -230,8 +231,9 @@ describe('the queue', () => {
     // A subscription has no budget to hold it.
     expect((await fillBuildQueue(bp, room()))[0]!.started).toHaveLength(2);
 
-    // Again on an API key: the person presses Build continuously again, and it goes on this month.
+    // Again on an API key, with a fresh start: the person presses Build continuously again, and it goes on this month.
     for (const t of listTickets(bp)) removeTicket(bp, t.id);
+    breakdown();
     await fillBuildQueue(bp, apiKey);
     expect(readBreakdownState(bp, 'BR-1').build?.heldFor).toBe('budget');
     setBuild(bp, 'BR-1', true);
@@ -278,6 +280,155 @@ describe('the queue', () => {
     }
     const [turn] = await fillBuildQueue(bp, room());
     expect(turn).toMatchObject({ started: [], held: 'S-1 and S-3 stopped on a problem. No new story starts until you settle one of them.' });
+  });
+
+  /** The story's ticket stops on a card with this gate. */
+  const stopAt = (key: string, gate: 'checks' | 'review' | 'proof', question = 'It stopped.') =>
+    updateTicket(bp, ticketOf(key).id, (t) => {
+      t.live = false;
+      t.squad = null;
+      t.waiting = { kind: 'stuck', summary: question };
+      t.stuck = { gate, question, options: [] };
+    });
+
+  it('holds when two stories stopped on a failed check or an app that will not open, so the next ones do not pay for the same stop', async () => {
+    const b = breakdown();
+    b.epics[1]!.stories.push(story('S-7', 'Late check out'));
+    writeBreakdown(bp, b);
+    setBuild(bp, 'BR-1', true);
+    await fillBuildQueue(bp, room());
+    // One stop is one story's: the queue goes on.
+    stopAt('S-1', 'checks', 'The checks still fail after 3 tries.');
+    await fillBuildQueue(bp, room());
+    expect(started()).toEqual(['S-1', 'S-3', 'S-6']);
+    // The second: an app that will not open.
+    stopAt('S-3', 'proof', 'squad-kit could not start the app, so it took no screenshots.');
+    merge('S-6');
+    const [turn] = await fillBuildQueue(bp, room());
+    const words = 'S-1 and S-3 stopped on a failed check or an app that would not open. No new story starts until you settle one of them, so the next ones do not pay to reach the same stop.';
+    expect(turn).toMatchObject({ started: [], held: words });
+    expect(readBreakdownState(bp, 'BR-1').build).toMatchObject({ on: true, held: words, heldFor: 'waits' });
+    expect(started()).toEqual(['S-1', 'S-3', 'S-6']);
+    // Settling one lets the queue go on.
+    updateTicket(bp, ticketOf('S-1').id, (t) => {
+      t.waiting = null;
+      t.stuck = undefined;
+      t.squad = { phase: 'build', nextAt: new Date().toISOString() };
+    });
+    merge('S-1');
+    await fillBuildQueue(bp, room());
+    expect(started()).toEqual(['S-1', 'S-2', 'S-3', 'S-6', 'S-7']);
+    expect(readBreakdownState(bp, 'BR-1').build?.held).toBeUndefined();
+  });
+
+  it('a stop of each kind counts together; a gap or a clash question never holds it', async () => {
+    breakdown();
+    setBuild(bp, 'BR-1', true);
+    await fillBuildQueue(bp, room());
+    const ask = (key: string, kind: 'gap' | 'clash') =>
+      updateTicket(bp, ticketOf(key).id, (t) => {
+        t.live = false;
+        t.squad = null;
+        t.waiting = { kind: 'ask', summary: 'A question' };
+        t.agentQuestion = { from: 'architect', text: 'Which one?', options: ['A', 'B'], kind, at: new Date().toISOString() };
+      });
+    ask('S-1', 'gap');
+    ask('S-3', 'clash');
+    const [turn] = await fillBuildQueue(bp, room());
+    expect(turn!.started).toHaveLength(1);
+    expect(started()).toEqual(['S-1', 'S-3', 'S-6']);
+    expect(readBreakdownState(bp, 'BR-1').build?.held).toBeUndefined();
+    // A failed check beside a technical stop: two stops, in the plain words for a problem.
+    meta();
+    breakdown();
+    await fillBuildQueue(bp, room());
+    stopAt('S-1', 'checks');
+    updateTicket(bp, ticketOf('S-3').id, (t) => {
+      t.squad = null;
+      t.waiting = { kind: 'stuck', summary: 'Claude Code did not start' };
+      t.stuck = { question: 'Claude Code did not start.', options: [] };
+    });
+    const [held] = await fillBuildQueue(bp, room());
+    expect(held).toMatchObject({ started: [], held: 'S-1 and S-3 stopped on a problem. No new story starts until you settle one of them.' });
+  });
+
+  it("Carry on at the budget on one story covers that story only: the queue stays held until Build continuously is pressed again", async () => {
+    meta('Momen', { budget: { monthUsd: 50 } });
+    breakdown();
+    setBuild(bp, 'BR-1', true);
+    const apiKey = room({ payment: async () => 'api-key' });
+    await fillBuildQueue(bp, apiKey);
+    expect(started()).toEqual(['S-1', 'S-3']);
+    // The month's budget runs out, and the person presses Carry on on S-1's card.
+    fs.mkdirSync(path.dirname(monthsFile(bp)), { recursive: true });
+    fs.writeFileSync(monthsFile(bp), JSON.stringify({ [monthKey()]: { runs: 9, costUsd: 52 } }));
+    updateTicket(bp, ticketOf('S-1').id, (t) => (t.budgetOk = { month: monthKey() }));
+    merge('S-3');
+    const [turn] = await fillBuildQueue(bp, apiKey);
+    expect(turn!.started).toEqual([]);
+    expect(started()).toEqual(['S-1', 'S-3']);
+    expect(readBreakdownState(bp, 'BR-1').build).toMatchObject({ on: true, heldFor: 'budget', held: expect.stringContaining('press Build continuously again') });
+    // The way the held line says.
+    setBuild(bp, 'BR-1', true);
+    await fillBuildQueue(bp, apiKey);
+    expect(started()).toEqual(['S-1', 'S-3', 'S-4']);
+    expect(ticketOf('S-4').budgetOk).toEqual({ month: monthKey() });
+  });
+
+  it('never starts a story again by itself after a person deleted its ticket, says so, and Start still works', async () => {
+    breakdown();
+    setBuild(bp, 'BR-1', true);
+    await fillBuildQueue(bp, room());
+    const gone = ticketOf('S-1').id;
+    removeTicket(bp, gone);
+    const words = 'The ticket of S-1 was deleted, so it does not start by itself. Press Start on it to build it again.';
+    const [turn] = await fillBuildQueue(bp, room());
+    // S-6 takes the free place; S-1 and what needs it do not start, and no money goes on them.
+    expect(turn).toMatchObject({ started: [expect.not.stringContaining(gone)], held: words });
+    expect(readBreakdownState(bp, 'BR-1').build).toMatchObject({ on: true, held: words, heldFor: 'waits' });
+    expect(readTicket(bp, gone)).toBeNull();
+    expect(started()).toEqual(['S-1', 'S-3', 'S-6']);
+    const b = readBreakdown(bp, 'BR-1')!;
+    const progress = new Map(storyProgress(bp, b, readBreakdownState(bp, 'BR-1')).map((p) => [p.key, p]));
+    expect(progress.get('S-1')).toEqual({ key: 'S-1', state: 'not-started', line: 'Its ticket was deleted. Press Start to build it again' });
+    expect(progress.get('S-2')).toMatchObject({ state: 'waits', waitsOn: ['S-1'] });
+    // Nothing else is left to start: the line still says so, and the build is not done.
+    merge('S-3');
+    merge('S-6');
+    const [again] = await fillBuildQueue(bp, room());
+    expect(again!.done).toBeUndefined();
+    expect(again!.held).toContain(words);
+    expect(findItem(readBreakdown(bp, 'BR-1')!, 'S-1')!.story!.ticket).toBe(gone);
+    // The person's Start makes a new ticket, and the queue carries on from it.
+    const fresh = startStory(bp, 'BR-1', 'S-1');
+    expect(fresh.id).not.toBe(gone);
+    expect(ticketOf('S-1').id).toBe(fresh.id);
+    const [after] = await fillBuildQueue(bp, room());
+    expect(after!.held ?? '').not.toContain('deleted');
+  });
+
+  it('a ticket being deleted right now does not start again either', async () => {
+    breakdown();
+    setBuild(bp, 'BR-1', true);
+    await fillBuildQueue(bp, room());
+    const id = ticketOf('S-1').id;
+    updateTicket(bp, id, (t) => (t.deleting = { at: new Date().toISOString(), by: 'Momen' }));
+    await fillBuildQueue(bp, room());
+    expect(findItem(readBreakdown(bp, 'BR-1')!, 'S-1')!.story!.ticket).toBe(id);
+    expect(listTickets(bp).filter((t) => t.breakdown?.item === 'S-1')).toHaveLength(1);
+  });
+
+  it('a ticket whose file cannot be read holds the queue in plain words: it is neither deleted nor started again', async () => {
+    breakdown();
+    setBuild(bp, 'BR-1', true);
+    await fillBuildQueue(bp, room());
+    const id = ticketOf('S-1').id;
+    fs.writeFileSync(path.join(bp.ticketsDir, id, 'ticket.md'), '---\nid: [broken\n---\n');
+    const [turn] = await fillBuildQueue(bp, room());
+    expect(turn).toMatchObject({ started: [], held: `The file of ${id} could not be read, so no new story starts. An engineer can look at it.` });
+    expect(findItem(readBreakdown(bp, 'BR-1')!, 'S-1')!.story!.ticket).toBe(id);
+    const progress = new Map(storyProgress(bp, readBreakdown(bp, 'BR-1')!, readBreakdownState(bp, 'BR-1')).map((p) => [p.key, p]));
+    expect(progress.get('S-1')).toMatchObject({ state: 'needs-you', line: 'Its file could not be read. An engineer can look at it', ticket: id });
   });
 
   it('turns itself off once every story is merged, and says to send the release', async () => {

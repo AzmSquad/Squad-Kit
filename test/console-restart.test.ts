@@ -8,6 +8,8 @@ import yaml from 'js-yaml';
 import { boardPaths } from '../src/board/store.js';
 import { seedDemoBoard } from '../src/board/demo.js';
 import { readConsoleInfo, type ConsoleInfo } from '../src/board/console-info.js';
+import { demoFolder } from '../src/commands/board.js';
+import { rememberProject } from '../src/core/projects.js';
 
 /**
  * Restart from the board, end to end: a real `squad console` in its own process group, the way a terminal runs it.
@@ -40,6 +42,17 @@ function alive(pid: number): boolean {
     return true;
   } catch {
     return false;
+  }
+}
+
+/** While it runs, this test's own squad-kit home stands in for the one the test setup made. */
+function withHome<T>(home: string, fn: () => T): T {
+  const was = process.env.SQUAD_KIT_HOME;
+  process.env.SQUAD_KIT_HOME = home;
+  try {
+    return fn();
+  } finally {
+    process.env.SQUAD_KIT_HOME = was;
   }
 }
 
@@ -137,4 +150,125 @@ describe.skipIf(process.platform === 'win32')('squad console restart from the bo
     expect(output).toContain('console stopped');
     expect(output).not.toContain('server close');
   }, 90_000);
+
+  /** A project with a sample board: its squad plays a script, so nothing starts a real agent, whatever goes wrong here. */
+  function aProject(root: string, name: string) {
+    const squadDir = path.join(root, '.squad');
+    fs.mkdirSync(squadDir, { recursive: true });
+    fs.writeFileSync(path.join(squadDir, 'config.yaml'), yaml.dump({ version: 1, project: { name, primaryLanguage: 'typescript' }, tracker: { type: 'none' }, naming: { includeTrackerId: false, globalSequence: true }, agents: [] }), 'utf8');
+    const bp = boardPaths(squadDir);
+    seedDemoBoard(bp, { project: name });
+    return boardPaths(squadDir);
+  }
+
+  /** Runs in its own process group, on its own squad-kit home, like a person's own terminal. */
+  function start(cwd: string, home: string, args: string[]) {
+    let output = '';
+    top = spawn(process.execPath, ['--import', tsx, cli, ...args], { cwd, env: { ...process.env, SQUAD_KIT_HOME: home }, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    top.stdout!.on('data', (d) => (output += d));
+    top.stderr!.on('data', (d) => (output += d));
+    const exited = new Promise<number | null>((done) => top!.on('exit', (code) => done(code)));
+    return { log: () => output, exited };
+  }
+
+  it('a project taken out of the app stays out after a restart, and after the next one', async () => {
+    tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'squad-removed-')));
+    const home = path.join(tmp, 'home');
+    const root = path.join(tmp, 'app');
+    const other = path.join(tmp, 'other');
+    for (const dir of [home, root, other]) fs.mkdirSync(dir);
+    const bp = withHome(home, () => aProject(root, 'removed-test'));
+    const stays = withHome(home, () => aProject(other, 'stays'));
+    const app = start(root, home, ['console', '--no-open', '--port', '0']);
+    const appInfo = () => JSON.parse(fs.readFileSync(path.join(home, 'app.json'), 'utf8')) as ConsoleInfo;
+    const list = () => (JSON.parse(fs.readFileSync(path.join(home, 'projects.json'), 'utf8')) as { projects: { root: string }[] }).projects.map((p) => p.root);
+    const up = (what: string, after?: string) =>
+      until(
+        what,
+        async () => {
+          const info = appInfo();
+          if (!info.pid || info.startedAt === after || !alive(info.pid)) return undefined;
+          return (await fetch(`http://127.0.0.1:${info.port}/healthz`)).ok ? info : undefined;
+        },
+        app.log,
+      );
+    const call = (info: ConsoleInfo, method: string, where: string, body?: unknown) =>
+      fetch(`http://127.0.0.1:${info.port}${where}`, { method, headers: { authorization: `Bearer ${info.token}`, 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    const restart = async (info: ConsoleInfo) => {
+      expect((await call(info, 'POST', `/p/${encodeURIComponent(stays.projectId)}/api/v1/restart`)).ok).toBe(true);
+      return up('the restarted app', info.startedAt);
+    };
+
+    const first = await up('the first app');
+    expect((await call(first, 'POST', '/api/v1/app/projects', { folder: other })).ok).toBe(true);
+    expect(list()).toEqual([root, other]);
+    // A restart with it still there keeps it, also from a board a keeper runs.
+    const second = await restart(first);
+    expect(list()).toEqual([root, other]);
+    expect((await call(second, 'DELETE', `/api/v1/app/projects/${encodeURIComponent(bp.projectId)}`)).ok).toBe(true);
+    expect(list()).toEqual([other]);
+
+    const third = await restart(second);
+    expect(list()).toEqual([other]);
+    const open = async (info: ConsoleInfo) => ((await (await call(info, 'GET', '/api/v1/app/projects')).json()) as { projects: { root: string }[] }).projects.map((p) => p.root);
+    expect(await open(third)).toEqual([other]);
+    // Its board is not open again either: its squad does not run.
+    expect(withHome(home, () => readConsoleInfo(bp))?.pid).toBeNull();
+
+    const fourth = await restart(third);
+    expect(fourth.port).toBe(first.port);
+    expect(fourth.token).toBe(first.token);
+    expect(list()).toEqual([other]);
+    expect(await open(fourth)).toEqual([other]);
+    expect(withHome(home, () => readConsoleInfo(bp))?.pid).toBeNull();
+
+    process.kill(-top!.pid!, 'SIGINT');
+    expect(await app.exited).toBe(0);
+  }, 120_000);
+
+  it('squad demo opens the sample board alone: no real project starts, the list stays, and a restart keeps it so', async () => {
+    tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'squad-demo-alone-')));
+    const home = path.join(tmp, 'home');
+    const real = path.join(tmp, 'real');
+    fs.mkdirSync(home);
+    fs.mkdirSync(real);
+    const bp = withHome(home, () => {
+      const made = aProject(real, 'a-real-project');
+      rememberProject(made.projectId, real);
+      return made;
+    });
+    const before = fs.readFileSync(path.join(home, 'projects.json'), 'utf8');
+    const demo = start(tmp, home, ['demo', '--no-open', '--port', '0']);
+    const sample = withHome(home, () => boardPaths(path.join(demoFolder(), '.squad')));
+    const up = (what: string, after?: string) =>
+      until(
+        what,
+        async () => {
+          const info = withHome(home, () => readConsoleInfo(boardPaths(path.join(demoFolder(), '.squad'))));
+          if (!info?.pid || info.startedAt === after || !alive(info.pid)) return undefined;
+          return (await fetch(`http://127.0.0.1:${info.port}/healthz`)).ok ? info : undefined;
+        },
+        demo.log,
+      );
+    const rows = async (info: ConsoleInfo) => (await (await fetch(`http://127.0.0.1:${info.port}/api/v1/app/projects`, { headers: { authorization: `Bearer ${info.token}` } })).json() as { projects: { root: string }[] }).projects.map((p) => p.root);
+    const check = async (info: ConsoleInfo) => {
+      expect(await rows(info)).toEqual([sample.root]);
+      // The real project: its squad never started, and nothing says this app runs it.
+      expect(withHome(home, () => readConsoleInfo(bp))).toBeNull();
+      expect(fs.readFileSync(path.join(home, 'projects.json'), 'utf8')).toBe(before);
+      // The sample board is not the app: plain `squad` and `squad console` never take it for one.
+      expect(fs.existsSync(path.join(home, 'app.json'))).toBe(false);
+    };
+    const first = await up('the sample board');
+    await check(first);
+    const res = await fetch(`http://127.0.0.1:${first.port}/api/v1/restart`, { method: 'POST', headers: { authorization: `Bearer ${first.token}` } });
+    expect(res.ok).toBe(true);
+    const second = await up('the restarted sample board', first.startedAt);
+    expect(second.port).toBe(first.port);
+    expect(second.token).toBe(first.token);
+    await check(second);
+
+    process.kill(-top!.pid!, 'SIGINT');
+    expect(await demo.exited).toBe(0);
+  }, 120_000);
 });

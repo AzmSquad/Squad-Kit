@@ -66,13 +66,13 @@ import { isMediaNote, prepareMedia } from './media.js';
 import { allowedFile, ticketFolders } from './conversations.js';
 import { DEFAULT_QUALITY, builderLevel, describeLevel, effortOn, personLevels, resolveLevel, stepCaps } from './levels.js';
 import { CapReached, capCard } from './caps.js';
-import { blockedLine, packageCacheEnv, sandboxAsk, sandboxOf, ticketCacheDir } from './sandbox.js';
+import { blockedLine, noPushEnv, packageCacheEnv, sandboxAsk, sandboxOf, ticketCacheDir } from './sandbox.js';
 import { hiddenFiles, placeStoryFiles } from './local-files.js';
 import { appCopyOf, copiesOf, reposOfParts, storyCopyDir, workFolder } from './copies.js';
 import { ProductError, productCopiesDir, productPlan, startProduct, stopProduct, waitWords } from './product-run.js';
 import { productHold } from './product-lock.js';
 import { offLimits } from '../board/project-files.js';
-import { GUARD_BLOCKED, GUARD_BLOCKED_DOCKER, blockedDocker, dockerBlockedWords, guardBlockedDetail, guardBlockedPath, guardSupport, ticketGuard, type GuardSpec } from './project-guard.js';
+import { agentPrivatePlaces, GUARD_BLOCKED, GUARD_BLOCKED_DOCKER, blockedDocker, dockerBlockedWords, guardBlockedDetail, guardBlockedPath, guardSupport, ticketGuard, type GuardSpec } from './project-guard.js';
 import { ticketDir } from '../board/store.js';
 import { commitTicketDocs, leaveProjectFiles } from './project-git.js';
 import { carryOn, fetchBase, fetchPushed, workSoFar } from './handover.js';
@@ -116,7 +116,7 @@ import { breakdownDir } from '../board/requirements-paths.js';
 import { proofPages, rowPictures, squadWorks, waitsAtReview, whereItStands } from '../board/at-review.js';
 import { reviewLook } from './review-look.js';
 import { runBreakdownJob } from './breakdown-job.js';
-import { fillBuildQueue, placesLeft } from '../board/requirements-build.js';
+import { analystOverBudget, fillBuildQueue, placesLeft } from '../board/requirements-build.js';
 import { startSends } from '../board/requirements-send.js';
 import { clearStaleStop } from '../board/stale-stop.js';
 import { RUN_MS } from './acp-runner.js';
@@ -470,6 +470,8 @@ export class LiveSquad {
         if (!this.running.has(key)) breakdownStopped(this.bp, j.id);
       } else if (this.running.has(key)) continue;
       else if (pause) holdBreakdownJob(this.bp, j.id, limitText(pause));
+      // Held at this month's budget: it starts again once the budget is raised, or the person pressed Carry on.
+      else if (j.job.heldFor === 'budget' && analystOverBudget(this.bp, j.id)) continue;
       else this.launch(key, () => this.breakdownJob(j.id));
     }
     // Sending a breakdown to the tracker (`__send:<id>`): no AI runs, so neither limit holds it (board/requirements-send.ts).
@@ -1241,10 +1243,11 @@ export class LiveSquad {
       ...o,
       ...watch,
       secretFiles: secretFiles(this.bp, opts.cwd),
+      privatePlaces: agentPrivatePlaces(),
       protectedFiles: this.protectedFiles(opts.cwd),
       ...(Object.keys(runCaps).length ? { caps: runCaps } : {}),
       ...(sandbox ? { sandbox, onBlocked } : {}),
-      ...(sandbox && cache ? { env: packageCacheEnv(cache) } : {}),
+      env: { ...noPushEnv(), ...(sandbox && cache ? packageCacheEnv(cache) : {}) },
       ...(instructions ? { instructions } : {}),
       level: lv.level,
       ...(effort ? { effort } : {}),
@@ -1873,6 +1876,10 @@ export class LiveSquad {
     const signal = this.stops.get(key)?.signal;
     return runBreakdownJob(this.bp, id, {
       ...(signal ? { signal } : {}),
+      budgetHold: async () => {
+        const held = analystOverBudget(this.bp, id);
+        return held && (await howPaid(this.bp)).payment === 'api-key' ? held : null;
+      },
       run: (o) =>
         this.runAgent({
           role: 'analyst',

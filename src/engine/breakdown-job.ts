@@ -65,6 +65,8 @@ export interface AnalystAnswer {
 
 export interface BreakdownJobDeps {
   run(ask: AnalystAsk): Promise<AnalystAnswer>;
+  /** Asked before every run: the words when this month's budget holds it, so nothing is cut in half. */
+  budgetHold?(): Promise<string | null>;
   /** Aborted on Stop, and when the board closes. */
   signal?: AbortSignal;
 }
@@ -79,6 +81,9 @@ const BRD_ANSWER_MS = 5 * MINUTE;
 const NO_ANSWER = 'Could not answer this time. Ask again in a moment.';
 
 class Stopped extends Error {}
+
+/** This month's budget holds the next run. Its message is the plain reason. */
+class HeldAtBudget extends Error {}
 
 /** What the Analyst used, on its model level, for the breakdown's own line. */
 function usageKey(bp: BoardPaths, step: string): UsageKey {
@@ -223,6 +228,8 @@ function setNow(ctx: Ctx, text: string, more: Partial<BreakdownJob> = {}): void 
 /** One run of the Analyst; what it used goes on the breakdown's own line, and its conversation is kept for the next. */
 async function ask(ctx: Ctx, a: AnalystAsk): Promise<AnalystAnswer> {
   goOn(ctx);
+  const held = await ctx.deps.budgetHold?.();
+  if (held) throw new HeldAtBudget(held);
   const r = await ctx.deps.run(a);
   const key = usageKey(ctx.bp, a.step);
   updateBreakdownState(ctx.bp, ctx.id, (s) => {
@@ -624,14 +631,15 @@ const STEPS: Record<BreakdownJob['step'], (ctx: Ctx, b: Breakdown, job: Breakdow
   redo: redoStep,
 };
 
-/** A run that did not get through: the usage limit holds the job, Stop parks it, anything else is said in plain words. */
+/** A run that did not get through: the usage limit and the budget hold the job, Stop parks it, anything else is said in plain words. */
 function failed(ctx: Ctx, job: BreakdownJob, err: unknown): void {
   const { bp, id } = ctx;
-  if (err instanceof LimitReached) {
+  if (err instanceof LimitReached || err instanceof HeldAtBudget) {
     updateBreakdownState(bp, id, (s) => {
       if (!s.job || s.job.status === 'stopping') return;
       s.job.status = 'pending';
-      s.job.now = limitText(err.pause);
+      s.job.now = err instanceof LimitReached ? limitText(err.pause) : err.message;
+      if (err instanceof HeldAtBudget) s.job.heldFor = 'budget';
     });
     return;
   }
@@ -688,13 +696,14 @@ export async function runBreakdownJob(bp: BoardPaths, id: string, deps: Breakdow
       j.status = 'running';
       j.startedAt ??= now();
       delete j.error;
+      delete j.heldFor;
     });
     try {
       if (!(await STEPS[job.step](ctx, b, job))) return;
     } catch (err) {
       // The computer slept and the run did not get through: that says nothing about the document, so the step starts
       // again by itself, as a ticket's does.
-      if (sleptSince(mark) && !(err instanceof LimitReached) && !(err instanceof Stopped)) {
+      if (sleptSince(mark) && !(err instanceof LimitReached) && !(err instanceof HeldAtBudget) && !(err instanceof Stopped)) {
         updateBreakdownState(bp, id, (s) => {
           if (!s.job || s.job.status === 'stopping') return;
           s.job.status = 'pending';
