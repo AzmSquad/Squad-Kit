@@ -17,10 +17,10 @@ vi.mock('../src/modules/claude/direct.js', async (orig) => ({
   },
 }));
 
-const { boardPaths, listDecisions, listTickets, readMeta, readTicket, updateTicket, writeDecision, writeMeta, writeTicket } = await import('../src/board/store.js');
+const { boardPaths, listDecisions, listTickets, readMeta, readTicket, ticketFilesDir, updateTicket, writeDecision, writeMeta, writeTicket } = await import('../src/board/store.js');
 const actions = await import('../src/board/actions.js');
 const { LiveSquad } = await import('../src/engine/live.js');
-const { addWorktree } = await import('../src/engine/git.js');
+const { addWorktree } = await import('./support/copy.js');
 const { commitTicketDocs, hideSquadFromGit } = await import('../src/engine/project-git.js');
 const { carryOn, pickUpPushed } = await import('../src/engine/handover.js');
 const { ensureLiveBoard, setupProject } = await import('../src/engine/setup.js');
@@ -83,7 +83,7 @@ afterEach(() => {
 });
 
 /** A ticket the Builder started on, with some work in its copy that is not committed yet. */
-function building(): Ticket {
+async function building(): Promise<Ticket> {
   const wt = addWorktree(project, id, 'main');
   const t: Ticket = {
     id,
@@ -113,7 +113,7 @@ function building(): Ticket {
   };
   writeTicket(bp, t);
   writeDecision(bp, { id: 'AP-1.1', title: 'Hours in one file', why: 'Simple', options: ['One file'], chosen: 'One file', from: id, approvedBy: 'Momen', date: new Date().toISOString(), checkedBy: null, tickets: [id] });
-  commitTicketDocs(bp, t, 'spec and design approved');
+  await commitTicketDocs(bp, t, 'spec and design approved');
   fs.writeFileSync(path.join(wt.dir, 'hours.ts'), 'export const hours = { mon: "9-5" };\n');
   return readTicket(bp, id)!;
 }
@@ -150,7 +150,7 @@ describe('an owner on each ticket', () => {
 
 describe('hand over', () => {
   it('saves the work so far and the documents on the branch, pushes it, and names the new owner', async () => {
-    building();
+    await building();
     const t = await actions.handOver(bp, id, { to: 'Sara', note: 'The hours file is done' });
     expect(t.owner).toBe('Sara');
     expect(t.handedOver).toMatchObject({ from: 'Momen', to: 'Sara' });
@@ -172,7 +172,7 @@ describe('hand over', () => {
   });
 
   it('waits for running work, and only the owner hands over', async () => {
-    building();
+    await building();
     updateTicket(bp, id, (x) => {
       x.live = true;
       x.squad = { phase: 'build', nextAt: new Date().toISOString() };
@@ -204,7 +204,7 @@ describe('hand over', () => {
   });
 
   it("stops this computer's squad on it: someone else's ticket never runs here", async () => {
-    building();
+    await building();
     updateTicket(bp, id, (x) => {
       x.owner = 'Sara';
       x.waiting = null;
@@ -221,8 +221,20 @@ describe('hand over', () => {
 // Each one clones, hands over, releases and runs squad steps with real git: two computers and a remote, a few hundred
 // git calls. About 10 s on a quiet Mac, so it gets the release tests' limit (release-tidy) for a busy one.
 describe('a new computer', { timeout: 60_000 }, () => {
+  it('a big file on a pushed ticket comes along, and does not end every pick up', async () => {
+    await building();
+    const big = path.join(ticketFilesDir(bp, id), 'walkthrough.bin');
+    fs.mkdirSync(path.dirname(big), { recursive: true });
+    fs.writeFileSync(big, Buffer.alloc(70 * 1024 * 1024, 'x'));
+    updateTicket(bp, id, (t) => (t.attachments = [big]));
+    await actions.handOver(bp, id, { to: 'Sara' });
+    const { bpB } = cloneOnB();
+    expect(readTicket(bpB, id)).toMatchObject({ owner: 'Sara' });
+    expect(fs.statSync(path.join(ticketFilesDir(bpB, id), 'walkthrough.bin')).size).toBe(70 * 1024 * 1024);
+  }, 60_000);
+
   it('shows the same board from a clone, and the handed-over ticket carries on from its pushed branch', async () => {
-    building();
+    await building();
     await actions.handOver(bp, id, { to: 'Sara' });
     const { root, bpB, did } = cloneOnB();
     // The same board: the project's id and settings, the decisions, the knowledge, so no new read of the project.
@@ -263,7 +275,7 @@ describe('a new computer', { timeout: 60_000 }, () => {
   });
 
   it('keeps the carried project files out of the merge: they reach the base with the release', async () => {
-    building();
+    await building();
     await actions.handOver(bp, id, { to: 'Sara' });
     const { root, bpB } = cloneOnB();
     const squad = new LiveSquad(bpB) as unknown as { step(id: string, phase: string): Promise<void> };
@@ -285,7 +297,7 @@ describe('a new computer', { timeout: 60_000 }, () => {
   it('after a release the base has the project files: the branch carries only the ticket, the clone the rest', async () => {
     // What a release commit puts on the base: the settings and what the project knows.
     sh('git add -f .squad/config.yaml .squad/knowledge .squad/decisions && git commit -q -m "release v0.1.0" && git push -q origin main', project);
-    building();
+    await building();
     await actions.handOver(bp, id, { to: 'Sara' });
     expect(sh('git ls-tree -r --name-only squad/ap-1 -- .squad', bare).split('\n').filter((f) => !f.includes('/tickets/AP-1/'))).toEqual([
       '.squad/config.yaml',
@@ -301,7 +313,7 @@ describe('a new computer', { timeout: 60_000 }, () => {
   });
 
   it('follows the base once the work is merged and pushed, and never lets the old branch roll it back', async () => {
-    building();
+    await building();
     await actions.handOver(bp, id, { to: 'Sara' });
     const { root, bpB } = cloneOnB();
     const squad = new LiveSquad(bpB) as unknown as { step(id: string, phase: string): Promise<void> };
@@ -331,7 +343,7 @@ describe('a new computer', { timeout: 60_000 }, () => {
   });
 
   it("shows someone else's ticket with its owner, and leaves it to them", async () => {
-    building();
+    await building();
     await actions.handOver(bp, id, { to: 'Ali' });
     const { bpB } = cloneOnB('Sara');
     const t = readTicket(bpB, id)!;
@@ -341,7 +353,7 @@ describe('a new computer', { timeout: 60_000 }, () => {
   });
 
   it('a ticket handed back carries on from the newest work on the first computer too', async () => {
-    building();
+    await building();
     await actions.handOver(bp, id, { to: 'Sara' });
     const { bpB } = cloneOnB();
     const squad = new LiveSquad(bpB) as unknown as { step(id: string, phase: string): Promise<void> };
@@ -384,7 +396,7 @@ describe('where a ticket carries on from its documents alone', () => {
 
 describe("the project's own check on a hand over", () => {
   it('the work still travels when it says no, and the check is still owed on the other computer', async () => {
-    const mine = building();
+    const mine = await building();
     const hooks = path.join(project, '.git', 'hooks');
     fs.mkdirSync(hooks, { recursive: true });
     fs.writeFileSync(path.join(hooks, 'pre-commit'), '#!/bin/sh\necho "not finished"; exit 1\n', { mode: 0o755 });
@@ -400,7 +412,7 @@ describe("the project's own check on a hand over", () => {
 
 describe('the same ticket name on two computers', () => {
   it("a teammate's different ticket never writes over this one, and this computer's next number goes around it", async () => {
-    const mine = building();
+    const mine = await building();
     const handed = await actions.handOver(bp, mine.id, { to: 'Sara Ali' });
     expect(handed.owner).toBe('Sara Ali');
     const { root, bpB } = cloneOnB('Other Person');
@@ -419,7 +431,7 @@ describe('the same ticket name on two computers', () => {
   });
 
   it('a tracker item both people pulled is one ticket: its hand over still comes in', async () => {
-    const mine = building();
+    const mine = await building();
     updateTicket(bp, mine.id, (x) => (x.source = { type: 'azure', ref: 'AB-80', id: '80', url: 'https://x/80' }));
     await actions.handOver(bp, mine.id, { to: 'Sara Ali' });
     const { root, bpB } = cloneOnB('Sara Ali');

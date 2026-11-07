@@ -7,7 +7,8 @@ import { boardPaths, readMeta, readRelease, readTicket, writeMeta, writeTicket }
 import type { Ticket } from '../src/board/types.js';
 import * as actions from '../src/board/actions.js';
 import { copyViews, repoOrder, repoReliesOn, storyCopyDir } from '../src/engine/copies.js';
-import { addWorktree, mergeWouldClash } from '../src/engine/git.js';
+import { mergeWouldClash } from '../src/engine/git.js';
+import { addWorktree } from './support/copy.js';
 
 /**
  * One story, accepted and released across the parts of a product, with real git and real bare remotes: every merge is tried

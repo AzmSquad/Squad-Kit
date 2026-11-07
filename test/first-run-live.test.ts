@@ -203,7 +203,8 @@ describe('the first run on the live engine', () => {
     expect(done.approved?.by).toBe(readMeta(bp).user.name);
     expect(listDecisions(bp).every((d) => !d.proposed && d.approvedBy === readMeta(bp).user.name)).toBe(true);
     expect(setupView(bp)!.approved).toBe(true);
-    expect(fs.existsSync(setupCopyDir(bp, reposOf(readMeta(bp))[0]!))).toBe(false);
+    // It goes beside everything else, so the page does not wait for it.
+    await vi.waitFor(() => expect(fs.existsSync(setupCopyDir(bp, reposOf(readMeta(bp))[0]!))).toBe(false), { timeout: 10_000 });
 
     // A ticket idea becomes the first ticket with one click, and the same click again gives the same ticket.
     const t = ticketFromIdea(bp, 1);

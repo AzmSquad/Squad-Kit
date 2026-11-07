@@ -141,7 +141,8 @@ describe('the limit of tickets at once', () => {
     const fresh = liveProject('fresh');
     writeMeta(fresh, { ...readMeta(fresh), scan: { status: 'pending' } });
     stops.push(new LiveSquad(fresh).start(25));
-    await until('the first read', () => runs.length === 2);
+    // Its looks at the project's files come first, beside everything else: on a busy computer they take a moment.
+    await until('the first read', () => runs.length === 2, 30_000);
     expect(ticketsRunning()).toBe(1);
     expect(runs[1]!.cwd).toBe(fresh.root);
   }, 60_000);

@@ -2,11 +2,11 @@ import path from 'node:path';
 import { addActivity, listReleases, listTickets, now, readMeta, readRelease, readTicket, updateTicket, writeRelease, type BoardPaths } from './store.js';
 import type { Release, Ticket } from './types.js';
 import { BoardActionError, closeReleased, joinNextRelease } from './actions.js';
-import { holdRelease, releaseGoingOut } from './lock.js';
+import { holdRelease, releaseGoingOut, takingOutTurn } from './lock.js';
 import { isMerged } from './depends.js';
 import { repoFor } from '../engine/repos.js';
 import { leaveOutProblem } from '../engine/leave-out.js';
-import { cleanBranches } from '../engine/branches.js';
+import { cleanBranchesHere } from '../engine/branches.js';
 import { clearJournal, journalAlive, readJournal, settleRepos } from '../engine/release-resume.js';
 import { copyDirsIn, removeWorktree } from '../engine/git.js';
 import { dropTicketCache } from '../engine/sandbox.js';
@@ -29,20 +29,26 @@ function draftFor(bp: BoardPaths, version: string): Release {
 }
 
 /** `squad release --without RO-3`: the ticket leaves the next release. Nothing in git changes until the release is made. */
-export function takeOutOfRelease(bp: BoardPaths, version: string, id: string): Release {
-  const r = draftFor(bp, version);
+export function takeOutOfRelease(bp: BoardPaths, version: string, id: string): Promise<Release> {
+  return takingOutTurn(bp, () => takeOut(bp, version, id));
+}
+
+async function takeOut(bp: BoardPaths, version: string, id: string): Promise<Release> {
+  const asked = draftFor(bp, version);
   const t = readTicket(bp, id);
-  if (!t || !r.tickets.includes(t.id)) throw new BoardActionError(`${id.toUpperCase()} is not in ${r.version}.`);
-  if (r.tickets.length === 1) throw new BoardActionError(`${t.id} is the only ticket in ${r.version}. Leave it in, or simply release later.`);
+  if (!t || !asked.tickets.includes(t.id)) throw new BoardActionError(`${id.toUpperCase()} is not in ${asked.version}.`);
+  if (asked.tickets.length === 1) throw new BoardActionError(`${t.id} is the only ticket in ${asked.version}. Leave it in, or simply release later.`);
   // A ticket in the release that builds on this one would go out without what it needs.
-  const needs = listTickets(bp).filter((x) => r.tickets.includes(x.id) && x.id !== t.id && x.dependsOn?.includes(t.id));
+  const needs = listTickets(bp).filter((x) => asked.tickets.includes(x.id) && x.id !== t.id && x.dependsOn?.includes(t.id));
   if (needs.length) throw new BoardActionError(`${needs.map((x) => x.id).join(' and ')} in this release ${needs.length === 1 ? 'depends' : 'depend'} on ${t.id}. Take ${needs.length === 1 ? 'it' : 'them'} out first, or keep ${t.id} in.`);
   const meta = readMeta(bp);
   if (meta.engine === 'live' && t.mergedAt) {
     const repo = repoFor(meta, t);
-    const problem = leaveOutProblem(path.join(bp.root, repo.path), repo.base, [t, ...(r.out ?? []).map((x) => readTicket(bp, x)).filter((x): x is Ticket => Boolean(x?.mergedAt) && repoFor(meta, x!).path === repo.path)]);
-    if (problem) throw new BoardActionError(`${problem} Keep it in ${r.version}.`);
+    const problem = await leaveOutProblem(path.join(bp.root, repo.path), repo.base, [t, ...(asked.out ?? []).map((x) => readTicket(bp, x)).filter((x): x is Ticket => Boolean(x?.mergedAt) && repoFor(meta, x!).path === repo.path)]);
+    if (problem) throw new BoardActionError(`${problem} Keep it in ${asked.version}.`);
   }
+  // Read now: the check takes a while on a big project, and a ticket accepted or notes written meanwhile stay.
+  const r = draftFor(bp, version);
   const next: Release = { ...r, tickets: r.tickets.filter((x) => x !== t.id), out: [...new Set([...(r.out ?? []), t.id])] };
   writeRelease(bp, next);
   updateTicket(bp, t.id, (x) => {
@@ -89,7 +95,7 @@ export function afterRelease(bp: BoardPaths, release: Release): void {
   if (readMeta(bp).engine !== 'live') return;
   const lines: { ok: boolean; text: string }[] = [];
   try {
-    const done = cleanBranches(bp, { only: release.tickets });
+    const done = cleanBranchesHere(bp, { only: release.tickets });
     if (done.deleted.length) lines.push({ ok: true, text: 'Deleted what was left over from released tickets on this computer' });
     for (const f of done.failed) lines.push({ ok: false, text: `Could not delete ${f}` });
     if (done.remoteLeft.length) {
@@ -116,7 +122,7 @@ export async function settleRelease(bp: BoardPaths, why: string): Promise<Releas
     return release;
   }
   const meta = readMeta(bp);
-  const repos = settleRepos(bp, j);
+  const repos = await settleRepos(bp, j);
   // A pull request the code host merged for the release is in the base now, whatever else happened.
   for (const id of j.prMerged ?? []) {
     if (!readTicket(bp, id)) continue;
@@ -148,7 +154,7 @@ export async function settleRelease(bp: BoardPaths, why: string): Promise<Releas
   writeRelease(bp, done);
   for (const id of going) {
     const t = readTicket(bp, id);
-    for (const v of t?.worktree ? copyViews(meta, t) : []) removeWorktree(path.join(bp.root, repoFor(meta, v).path), v.worktree!);
+    for (const v of t?.worktree ? copyViews(meta, t) : []) await removeWorktree(path.join(bp.root, repoFor(meta, v).path), v.worktree!);
     if (t?.storyDir && !copyDirsIn(t.storyDir).length) fs.rmSync(t.storyDir, { recursive: true, force: true });
     dropTicketCache(bp, id);
   }

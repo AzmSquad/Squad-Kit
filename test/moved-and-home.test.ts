@@ -9,7 +9,8 @@ import { runInit } from '../src/commands/init.js';
 import { prepareProject } from '../src/engine/setup.js';
 import { LiveSquad } from '../src/engine/live.js';
 import * as actions from '../src/board/actions.js';
-import { addWorktree, ensureRepo, repairCopyLink } from '../src/engine/git.js';
+import { ensureRepo, repairCopyLink } from '../src/engine/git.js';
+import { addWorktree } from './support/copy.js';
 
 let tmp: string;
 

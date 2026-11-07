@@ -19,7 +19,7 @@ vi.mock('../src/modules/claude/direct.js', async (orig) => ({
 
 const { boardPaths, readMeta, readTicket, writeDecision, writeMeta, writeTicket } = await import('../src/board/store.js');
 const actions = await import('../src/board/actions.js');
-const { addWorktree } = await import('../src/engine/git.js');
+const { addWorktree } = await import('./support/copy.js');
 const { commitTicketDocs, hideSquadFromGit } = await import('../src/engine/project-git.js');
 const { fetchPushed, pickUpPushed } = await import('../src/engine/handover.js');
 const { deletePlan, deleteTicket } = await import('../src/engine/delete.js');
@@ -100,7 +100,7 @@ async function handedToSara(): Promise<void> {
   };
   writeTicket(bp, t);
   writeDecision(bp, { id: 'AP-1.1', title: 'Hours in one file', why: 'Simple', options: ['One file'], chosen: 'One file', from: id, approvedBy: 'Momen', date: new Date().toISOString(), checkedBy: null, tickets: [id] });
-  commitTicketDocs(bp, t, 'spec approved');
+  await commitTicketDocs(bp, t, 'spec approved');
   fs.writeFileSync(path.join(wt.dir, 'hours.ts'), 'export const hours = { mon: "9-5" };\n');
   await actions.handOver(bp, id, { to: 'Sara' });
 }

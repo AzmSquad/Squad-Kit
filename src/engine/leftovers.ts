@@ -263,6 +263,8 @@ function signal(pid: number, sig: NodeJS.Signals): void {
  * meanwhile is never hit. Says what it stopped. The TERM goes out before this returns its promise.
  */
 export async function stopLeftovers(dirs: string[], opts: LookOptions & { graceMs?: number; only?: number[] } = {}): Promise<Leftover[]> {
+  // A new project has no copies yet, and looking at every process takes a moment on the board's time.
+  if (!dirs.some((d) => fs.existsSync(d))) return [];
   const found = leftoversIn(dirs, opts).filter((p) => !opts.only || opts.only.includes(p.pid));
   if (!found.length) return [];
   for (const p of found) signal(p.pid, 'SIGTERM');

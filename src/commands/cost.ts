@@ -59,8 +59,9 @@ export function costLines(c: TicketCost): string[] {
 }
 
 /** The "What happened" lines of `squad show`: one per step, with its time and what it did. */
-export function happenedLines(bp: BoardPaths, t: Ticket): string[] {
-  const h = whatHappened(bp, t, { files: () => changedFiles(bp, t.id) });
+export async function happenedLines(bp: BoardPaths, t: Ticket): Promise<string[]> {
+  const files = await changedFiles(bp, t.id).catch(() => null);
+  const h = whatHappened(bp, t, { files: () => files });
   if (!h.steps.length) return [];
   const lines = [`  ${kleur.bold('What happened')}${h.seconds ? kleur.gray(`  ${h.steps.length} steps · ${durationWords(h.seconds)} in all`) : ''}`];
   for (const s of h.steps) {

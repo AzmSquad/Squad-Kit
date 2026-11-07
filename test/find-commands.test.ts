@@ -248,13 +248,13 @@ describe('the setup command in a new copy', () => {
     sh('git init -q -b main && git add -A && git -c user.name=t -c user.email=t@t commit -qm start');
     write(wt, { 'package-lock.json': '{ "lockfileVersion": 3 }\n', 'node_modules/a/index.js': 'x\n', 'dev.db.new': 'x\n' });
     fs.rmSync(path.join(wt, 'gone.txt'));
-    expect(putBackTracked(wt).sort()).toEqual(['gone.txt', 'package-lock.json']);
+    expect((await putBackTracked(wt)).sort()).toEqual(['gone.txt', 'package-lock.json']);
     expect(fs.readFileSync(path.join(wt, 'package-lock.json'), 'utf8')).toBe('{ "lockfileVersion": 2 }\n');
     expect(fs.existsSync(path.join(wt, 'gone.txt'))).toBe(true);
     expect(fs.existsSync(path.join(wt, 'node_modules/a/index.js'))).toBe(true);
     expect(fs.existsSync(path.join(wt, 'dev.db.new'))).toBe(true);
     expect(sh('git status --short')).toBe('?? dev.db.new');
-    expect(putBackTracked(wt)).toEqual([]);
+    expect(await putBackTracked(wt)).toEqual([]);
   });
 
   it('on a real copy: the lock file an install rewrote is not "work already there", so the before screens still come', async () => {
@@ -272,7 +272,7 @@ describe('the setup command in a new copy', () => {
     const t = await s.workspace(t0.id);
     expect(fs.readFileSync(path.join(t.worktree, 'package-lock.json'), 'utf8')).toBe('{ "lockfileVersion": 2 }\n');
     const { workSoFar } = await import('../src/engine/handover.js');
-    expect(workSoFar(t.worktree, t.baseCommit)).toEqual([]);
+    expect(await workSoFar(t.worktree, t.baseCommit)).toEqual([]);
     sh(`git worktree remove --force "${t.worktree}"`);
   });
 });

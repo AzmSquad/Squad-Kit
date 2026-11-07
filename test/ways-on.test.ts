@@ -26,7 +26,7 @@ const { boardPaths, readMeta, readRelease, readTicket, updateTicket, writeMeta, 
 const actions = await import('../src/board/actions.js');
 const { LiveSquad } = await import('../src/engine/live.js');
 const { ensureLiveBoard, setupProject } = await import('../src/engine/setup.js');
-const { addWorktree } = await import('../src/engine/git.js');
+const { addWorktree } = await import('./support/copy.js');
 const { takeBack } = await import('../src/engine/handover.js');
 const { takenOver } = await import('../src/engine/process-group.js');
 const { currentStep } = await import('../src/board/setup-state.js');

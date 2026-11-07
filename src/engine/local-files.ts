@@ -48,8 +48,8 @@ export function placeStoryFiles(bp: BoardPaths, repo: string, dir: string): { pl
  * squad-kit's own copy for its own runs, with no agent in it: the project's .env files, as an app needs them to start, and
  * for what an engineer named as local, the values kept for stories instead of the person's own.
  */
-export function fillOwnCopy(bp: BoardPaths, repo: string, dir: string): void {
-  copyEnvFiles(path.join(bp.root, repo), dir);
+export async function fillOwnCopy(bp: BoardPaths, repo: string, dir: string): Promise<void> {
+  await copyEnvFiles(path.join(bp.root, repo), dir);
   for (const f of localFileNames(bp, repo)) fs.rmSync(path.join(dir, f), { force: true });
   placeStoryFiles(bp, repo, dir);
 }
@@ -63,7 +63,7 @@ export function localFileNames(bp: BoardPaths, repo: string): string[] {
  * What no agent may read, by exact path: every local file and untracked .env file in the person's folder, and the local
  * files in the copy the step works in. Nothing else in the copy changes: a Builder still reads a .env.example.
  */
-export function hiddenFiles(bp: BoardPaths, cwd?: string): string[] {
+export async function hiddenFiles(bp: BoardPaths, cwd?: string): Promise<string[]> {
   let local;
   let repos: string[];
   try {
@@ -74,7 +74,7 @@ export function hiddenFiles(bp: BoardPaths, cwd?: string): string[] {
     return [];
   }
   const out = new Set<string>();
-  for (const repo of repos) for (const f of localEnvFiles(path.join(bp.root, repo))) out.add(path.join(bp.root, repo, f));
+  for (const repo of repos) for (const f of await localEnvFiles(path.join(bp.root, repo))) out.add(path.join(bp.root, repo, f));
   for (const f of local) {
     out.add(path.join(bp.root, f.repo, f.path));
     if (cwd) out.add(path.join(cwd, f.path));

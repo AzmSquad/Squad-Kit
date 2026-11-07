@@ -4,10 +4,11 @@ import path from 'node:path';
 import { addActivity, now, readMeta, updateTicket, type BoardPaths } from '../board/store.js';
 import type { BoardMeta, Ticket } from '../board/types.js';
 import { depsReady, openOnBoard, unmergedDeps } from '../board/depends.js';
-import { changedFiles, commitArgsFor, git, isAncestor, pushedBranch, removeWorktree, stageAll, worktreeRoot } from './git.js';
+import { changedFiles, clearHalfCopy, commitArgsFor, copyIsWhole, copyTurn, git, gitLater, isAncestor, makeCopy, pushedBranch, removeWorktree, stageAllLater, worktreeRoot, type CopyHow } from './git.js';
 import type { OpenTicket } from './prompts.js';
 import { repoFor } from './repos.js';
 import { writeLog } from '../core/app-log.js';
+import { trackTask } from './process-group.js';
 
 /**
  * Tickets that depend on unmerged work, on the engine's side: what the Analyst and the Architect see of the other open
@@ -19,17 +20,19 @@ import { writeLog } from '../core/app-log.js';
 const MAX_FILES = 20;
 
 /** The other open tickets, with the files each one's branch (or its copy of the code) changed. */
-export function openTicketsFor(bp: BoardPaths, t: Ticket): OpenTicket[] {
+export async function openTicketsFor(bp: BoardPaths, t: Ticket): Promise<OpenTicket[]> {
   const meta = readMeta(bp);
-  return openOnBoard(bp, t.id).map((o) => ({ id: o.id, title: o.title, stage: o.stage, files: branchFiles(bp, meta, o) }));
+  const open: OpenTicket[] = [];
+  for (const o of openOnBoard(bp, t.id)) open.push({ id: o.id, title: o.title, stage: o.stage, files: await branchFiles(bp, meta, o) });
+  return open;
 }
 
-function branchFiles(bp: BoardPaths, meta: BoardMeta, o: Ticket): string[] {
+async function branchFiles(bp: BoardPaths, meta: BoardMeta, o: Ticket): Promise<string[]> {
   try {
     const repo = repoFor(meta, o);
     const root = path.join(bp.root, repo.path);
     let files: string[] = [];
-    if (o.worktree && fs.existsSync(o.worktree) && o.baseCommit) files = changedFiles(o.worktree, o.baseCommit);
+    if (o.worktree && fs.existsSync(o.worktree) && o.baseCommit) files = await changedFiles(o.worktree, o.baseCommit);
     else {
       const ref = branchRef(root, o);
       const fork = ref ? git(root, ['merge-base', repo.base, ref], { allowFail: true }) : '';
@@ -69,35 +72,37 @@ export function dependencyToStartFrom(bp: BoardPaths, t: Ticket): Ticket | null 
  * moves: not its copy, its index or its branch. squad-kit's own `.squad/` files stay as the base has them, so its
  * documents never travel on this branch.
  */
-export function addWorktreeOn(bp: BoardPaths, t: Ticket, dep: Ticket, at?: string): { dir: string; branch: string; baseCommit: string; from: string } {
+export async function addWorktreeOn(bp: BoardPaths, t: Ticket, dep: Ticket, at?: string, how: CopyHow = {}): Promise<{ dir: string; branch: string; baseCommit: string; from: string }> {
   const meta = readMeta(bp);
   const repo = repoFor(meta, t);
   if (repoFor(meta, dep).path !== repo.path) throw new Error(`${dep.id} changes another repo (${repoFor(meta, dep).path}), so ${t.id} cannot start from its branch. Build anyway, or wait for it.`);
   const root = path.join(bp.root, repo.path);
-  const start = workOf(bp, root, dep, repo.base);
+  const start = await workOf(bp, root, dep, repo.base);
   if (!start) throw new Error(`${dep.id} has no code yet to build on. Wait for it, or build anyway.`);
   const dir = at ?? path.join(worktreeRoot(root), t.id.toLowerCase());
   const branch = `squad/${t.id.toLowerCase()}`;
   const from = `${dep.id}'s work so far`;
-  if (fs.existsSync(path.join(dir, '.git'))) return { dir, branch, baseCommit: start, from };
-  fs.mkdirSync(path.dirname(dir), { recursive: true });
-  git(root, ['worktree', 'prune'], { allowFail: true });
-  if (!git(root, ['rev-parse', '--verify', '-q', `refs/heads/${branch}`], { allowFail: true })) {
-    git(root, ['worktree', 'add', '-b', branch, dir, start]);
-  } else {
-    // Its branch is there already (its documents travelled on it): the other ticket's work comes in on top.
-    git(root, ['worktree', 'add', dir, branch]);
-    if (!isAncestor(dir, start, 'HEAD')) {
-      try {
-        git(dir, [...commitArgsFor(dir), 'merge', '--no-ff', '-m', `Start from ${from}`, start]);
-      } catch (err) {
-        git(dir, ['merge', '--abort'], { allowFail: true });
-        removeWorktree(root, dir);
-        writeLog({ level: 'warn', ticket: t.id, text: `Starting from ${from}: ${(err as Error).message}` });
-        throw new Error(`${t.id}'s work clashes with ${from}, so it cannot start from it.`);
-      }
+  const whole = await copyTurn(dir, async () => {
+    await clearHalfCopy(root, dir, how.signal);
+    if (copyIsWhole(dir)) return true;
+    if (!git(root, ['rev-parse', '--verify', '-q', `refs/heads/${branch}`], { allowFail: true })) {
+      await makeCopy(root, dir, ['-b', branch], start, how, { branch, start });
+      return false;
     }
-  }
+    // Its branch is there already (its documents travelled on it): the other ticket's work comes in on top.
+    await makeCopy(root, dir, [], branch, how);
+    if (isAncestor(dir, start, 'HEAD')) return false;
+    try {
+      await gitLater(dir, [...commitArgsFor(dir), 'merge', '--no-ff', '-m', `Start from ${from}`, start]);
+    } catch (err) {
+      await gitLater(dir, ['merge', '--abort'], { allowFail: true });
+      void trackTask(removeWorktree(root, dir));
+      writeLog({ level: 'warn', ticket: t.id, text: `Starting from ${from}: ${(err as Error).message}` });
+      throw new Error(`${t.id}'s work clashes with ${from}, so it cannot start from it.`);
+    }
+    return false;
+  });
+  if (whole) return { dir, branch, baseCommit: start, from };
   updateTicket(bp, t.id, (x) => {
     if (x.dependency) x.dependency.from = start;
   });
@@ -105,7 +110,7 @@ export function addWorktreeOn(bp: BoardPaths, t: Ticket, dep: Ticket, at?: strin
 }
 
 /** The commit a copy starts from: the other ticket's code now, on the point where it left the base. */
-function workOf(bp: BoardPaths, root: string, dep: Ticket, base: string): string | null {
+async function workOf(bp: BoardPaths, root: string, dep: Ticket, base: string): Promise<string | null> {
   const copy = dep.worktree && fs.existsSync(dep.worktree) ? dep.worktree : null;
   const tip = copy ? 'HEAD' : branchRef(root, dep);
   if (!tip) return null;
@@ -117,7 +122,7 @@ function workOf(bp: BoardPaths, root: string, dep: Ticket, base: string): string
   const env = { GIT_INDEX_FILE: index };
   try {
     git(cwd, ['read-tree', tip], { env });
-    if (copy) stageAll(cwd, env);
+    if (copy) await stageAllLater(cwd, env);
     const squad = squadIn(bp, root);
     if (squad) git(cwd, ['reset', '-q', fork, '--', squad], { env, allowFail: true });
     const tree = git(cwd, ['write-tree'], { env });

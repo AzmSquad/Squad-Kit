@@ -5,7 +5,7 @@ import path from 'node:path';
 import { execSync } from 'node:child_process';
 import { boardPaths, readMeta, readTicket, updateTicket, writeMeta, writeTicket, type BoardPaths } from '../src/board/store.js';
 import * as actions from '../src/board/actions.js';
-import { addWorktree } from '../src/engine/git.js';
+import { addWorktree } from './support/copy.js';
 import { commitTicketDocs, hideSquadFromGit } from '../src/engine/project-git.js';
 import type { Ticket } from '../src/board/types.js';
 
@@ -77,11 +77,11 @@ describe('the project documents in git', () => {
     expect(fs.readFileSync(path.join(project, '.git', 'info', 'exclude'), 'utf8')).toContain('/.squad/');
   });
 
-  it('commits the ticket on its own branch at each big moment, and its history shows them', () => {
+  it('commits the ticket on its own branch at each big moment, and its history shows them', async () => {
     const t = ticketInProgress();
-    expect(commitTicketDocs(bp, t, 'spec and design approved')).toBeTruthy();
+    expect(await commitTicketDocs(bp, t, 'spec and design approved')).toBeTruthy();
     // Nothing new: nothing to commit.
-    expect(commitTicketDocs(bp, t, 'spec and design approved')).toBeNull();
+    expect(await commitTicketDocs(bp, t, 'spec and design approved')).toBeNull();
 
     fs.writeFileSync(path.join(t.worktree!, 'hours.ts'), 'export const hours = 1;\n');
     updateTicket(bp, t.id, (x) => {
@@ -118,10 +118,10 @@ describe('the project documents in git', () => {
     expect(sh('git status --porcelain --untracked-files=all', project)).toBe('');
   });
 
-  it('commits nothing when "Put project documents in git" is off', () => {
+  it('commits nothing when "Put project documents in git" is off', async () => {
     writeMeta(bp, { ...readMeta(bp), documentsInGit: false });
     const t = ticketInProgress();
-    expect(commitTicketDocs(bp, t, 'spec and design approved')).toBeNull();
+    expect(await commitTicketDocs(bp, t, 'spec and design approved')).toBeNull();
     expect(sh('git log --format=%s squad/ap-1', project)).toBe('start');
   });
 });

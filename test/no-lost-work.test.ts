@@ -8,7 +8,8 @@ import { boardPaths, draftRelease, readRelease, readTicket, writeMeta, writeRele
 import type { Ticket } from '../src/board/types.js';
 import * as actions from '../src/board/actions.js';
 import { releaseGoingOut } from '../src/board/lock.js';
-import { MergeClash, addWorktree, mergeIntoBase } from '../src/engine/git.js';
+import { MergeClash, addWorktree as makeCopyOf, mergeIntoBase } from '../src/engine/git.js';
+import { addWorktree } from './support/copy.js';
 import { LiveSquad } from '../src/engine/live.js';
 import { checkGitVersion } from '../src/commands/doctor-engine.js';
 import { mountBoardApi } from '../src/console/api/board.js';
@@ -227,25 +228,25 @@ describe('a push that fails keeps the release open', () => {
 });
 
 describe('"the newest code" is the team\'s, not an old copy here', () => {
-  it('a new copy starts from the remote main when the team moved it on; a project with no remote from its own', () => {
+  it('a new copy starts from the remote main when the team moved it on; a project with no remote from its own', async () => {
     const team = teammatePushes('team.txt', 'team\n');
     sh('git fetch -q origin', project);
-    const fresh = addWorktree(project, 'AP-1', 'main', 'origin');
+    const fresh = await makeCopyOf(project, 'AP-1', 'main', 'origin');
     expect(fresh.baseCommit).toBe(team);
     expect(fs.existsSync(path.join(fresh.dir, 'team.txt'))).toBe(true);
-    const local = addWorktree(project, 'AP-2', 'main');
+    const local = await makeCopyOf(project, 'AP-2', 'main');
     expect(fs.existsSync(path.join(local.dir, 'team.txt'))).toBe(false);
     // The person's own main is left alone.
     expect(fs.existsSync(path.join(project, 'team.txt'))).toBe(false);
   }, 20_000);
 
-  it('when both moved on, the copy gets the work accepted here and the team\'s', () => {
+  it('when both moved on, the copy gets the work accepted here and the team\'s', async () => {
     teammatePushes('team.txt', 'team\n');
     sh('git fetch -q origin', project);
     fs.writeFileSync(path.join(project, 'here.txt'), 'accepted here\n');
     commit(project, 'accepted here, not pushed yet');
     const before = sh('git rev-parse main', project);
-    const wt = addWorktree(project, 'AP-1', 'main', 'origin');
+    const wt = await makeCopyOf(project, 'AP-1', 'main', 'origin');
     expect(fs.existsSync(path.join(wt.dir, 'team.txt'))).toBe(true);
     expect(fs.existsSync(path.join(wt.dir, 'here.txt'))).toBe(true);
     expect(sh('git rev-parse main', project)).toBe(before);

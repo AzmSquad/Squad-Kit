@@ -177,7 +177,7 @@ describe('through real routes', () => {
 describe('words in stops', () => {
   it('a tracker that refuses says so with no status or scopes, and the exact answer is in the log', async () => {
     const fake = (async () => new Response(JSON.stringify({ message: 'TF400813: needs vso.work_write scope' }), { status: 401 })) as unknown as typeof fetch;
-    const azure = new Azure({ organization: 'org', project: 'proj', pat: 'pat', fetch: fake } as never);
+    const azure = new Azure({ organization: 'org', project: 'proj', pat: 'pat' }, fake);
     const said = await azure.whoAmI().catch((e: Error) => e.message);
     expect(said).toBe('Azure DevOps did not accept the sign-in. Check it in Settings. An engineer can see why in the log.');
     expect(said).not.toMatch(/HTTP|scope|token|TF\d+/i);

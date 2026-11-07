@@ -26,7 +26,8 @@ const { boardPaths, readMeta, readRelease, readTicket, updateTicket, writeMeta, 
 const actions = await import('../src/board/actions.js');
 const auto = await import('../src/board/auto.js');
 const { LiveSquad } = await import('../src/engine/live.js');
-const { addWorktree, bringHookRunner, commitHooks } = await import('../src/engine/git.js');
+const { bringHookRunner, commitHooks } = await import('../src/engine/git.js');
+const { addWorktree } = await import('./support/copy.js');
 const { ensureLiveBoard, setupProject } = await import('../src/engine/setup.js');
 const { GUARD_BLOCKED_DOCKER, guardSupport, commitGuard, buildGuard, profileText, bubblewrapArgs } = await import('../src/engine/project-guard.js');
 const { HOOK_FILES, hookFiles, isHookFile } = await import('../src/engine/hook-files.js');
@@ -348,20 +349,20 @@ describe('no agent changes the check', () => {
     expect(line).toContain('.husky/pre-commit');
   });
 
-  it('the folder git really runs hooks from counts, wherever the project keeps it', () => {
+  it('the folder git really runs hooks from counts, wherever the project keeps it', async () => {
     sh('git config core.hooksPath tools/git-hooks', project);
     fs.mkdirSync(path.join(project, 'tools', 'git-hooks'), { recursive: true });
     fs.writeFileSync(path.join(project, 'tools', 'git-hooks', 'pre-commit'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
     sh('git add -A && git -c user.name=t -c user.email=t@t commit --no-verify -qm hooks', project);
     const dir = ticket('AP-1');
     expect(hookFiles(dir)).toContain('/tools/git-hooks/pre-commit');
-    const lane = watchLane(dir, hookFiles(dir));
+    const lane = await watchLane(dir, hookFiles(dir));
     fs.writeFileSync(path.join(dir, 'tools', 'git-hooks', 'pre-commit'), '#!/bin/sh\nexit 0\n');
-    expect(checkLane(lane).restored).toEqual(['tools/git-hooks/pre-commit']);
+    expect((await checkLane(lane)).restored).toEqual(['tools/git-hooks/pre-commit']);
     expect(fs.readFileSync(path.join(dir, 'tools', 'git-hooks', 'pre-commit'), 'utf8')).toContain('exit 1');
   });
 
-  it('knows a hook file from any other, and a person\'s own fix in the copy stands', () => {
+  it('knows a hook file from any other, and a person\'s own fix in the copy stands', async () => {
     expect(isHookFile('.husky/pre-commit')).toBe(true);
     expect(isHookFile('packages/web/.husky/pre-commit')).toBe(true);
     expect(isHookFile('commitlint.config.cjs')).toBe(true);
@@ -372,8 +373,8 @@ describe('no agent changes the check', () => {
     const dir = ticket('AP-1');
     // Fix it yourself, before the next step: that step starts from the person's fix.
     fs.writeFileSync(path.join(dir, '.husky', 'pre-commit'), '#!/bin/sh\necho fixed\n');
-    const lane = watchLane(dir, hookFiles(dir));
-    expect(checkLane(lane).restored).toEqual([]);
+    const lane = await watchLane(dir, hookFiles(dir));
+    expect((await checkLane(lane)).restored).toEqual([]);
     expect(fs.readFileSync(path.join(dir, '.husky', 'pre-commit'), 'utf8')).toContain('fixed');
   });
 

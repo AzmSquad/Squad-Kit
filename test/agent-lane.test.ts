@@ -26,7 +26,7 @@ vi.mock('../src/modules/claude/direct.js', async (orig) => ({
 
 const { boardPaths, readTicket, writeMeta, writeTicket } = await import('../src/board/store.js');
 const { LiveSquad } = await import('../src/engine/live.js');
-const { addWorktree } = await import('../src/engine/git.js');
+const { addWorktree } = await import('./support/copy.js');
 const { deniedTools } = await import('../src/modules/claude/direct.js');
 const { answerProblem } = await import('../src/engine/answers.js');
 const P = await import('../src/engine/prompts.js');

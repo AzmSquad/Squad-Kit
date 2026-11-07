@@ -241,7 +241,7 @@ async function runAnalyst(bp: BoardPaths, opts: AgentRun): Promise<AgentResult> 
   const effort = effortOn(tool, lv.effort);
   const r = await tool.run({
     ...opts,
-    secretFiles: secretFiles(bp),
+    secretFiles: await secretFiles(bp),
     privatePlaces: agentPrivatePlaces(),
     ...(extra ? { instructions: extra } : {}),
     level: lv.level,

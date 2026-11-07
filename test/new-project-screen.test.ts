@@ -199,9 +199,9 @@ describe('the Architect picks the technology with the first story', () => {
 });
 
 describe('the words around the first read', () => {
-  it('never "Read 1 of 98 files" or "Read all 1 files"', () => {
+  it('never "Read 1 of 98 files" or "Read all 1 files"', async () => {
     const bp = emptyProject();
-    readStarted(bp, { label: 'Claude Code', ready: true });
+    await readStarted(bp, { label: 'Claude Code', ready: true });
     readingNow(bp, 'Reading the code', 1, 'Reading README.md');
     let read = setupView(bp)!.steps.find((s) => s.id === 'read')!;
     expect(read.note).toBe('Reading the code · 1 file');
@@ -217,14 +217,14 @@ describe('the words around the first read', () => {
     expect(setupView(bp)!.steps.find((s) => s.id === 'read')!.note).toBe('Read the project: 1 file');
   });
 
-  it('98 files, one opened by name: it says what it read, not what it counted', () => {
+  it('98 files, one opened by name: it says what it read, not what it counted', async () => {
     const dir = path.join(tmp, 'many');
     fs.mkdirSync(dir);
     for (let i = 0; i < 98; i += 1) fs.writeFileSync(path.join(dir, `f${i}.ts`), '');
     execSync('git init -q -b main && git add -A && git -c user.name=t -c user.email=t@t commit -qm start', { cwd: dir });
     setupProject(dir);
     const bp = ensureLiveBoard(boardPaths(path.join(dir, '.squad')), 'many').bp;
-    readStarted(bp, { label: 'Claude Code', ready: true });
+    await readStarted(bp, { label: 'Claude Code', ready: true });
     readingNow(bp, 'Reading the code', 1);
     saveScan(bp, { empty: false, summary: 'An app', map: [], decisions: [], commands: {} }, []);
     expect(setupView(bp)!.steps.find((s) => s.id === 'read')!.note).toBe('Read the project: 98 files');

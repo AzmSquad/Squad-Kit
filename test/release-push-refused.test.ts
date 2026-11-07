@@ -11,7 +11,7 @@ import type { Ticket } from '../src/board/types.js';
 import '../src/engine/live.js';
 import * as actions from '../src/board/actions.js';
 import { mountBoardApi } from '../src/console/api/board.js';
-import { addWorktree } from '../src/engine/git.js';
+import { addWorktree } from './support/copy.js';
 import { pushWords } from '../src/engine/release.js';
 import { mergeSettings } from '../src/engine/project-git.js';
 import { holdRelease } from '../src/board/lock.js';
@@ -254,6 +254,79 @@ describe('the shared settings, with two people', () => {
     expect(readMeta(bp).nextNumber).toBe(50);
     expect(readMeta(bp).quality).toBe('thrifty');
     expect(seen.theirsStayed).toEqual(['the Quality setting']);
+  });
+});
+
+describe('the team rules and notes, with two people', () => {
+  const rule = (root: string) => path.join(root, '.squad', 'rules', 'builder.md');
+  const atRemote = () => sh('git show main:.squad/rules/builder.md', remote);
+  const words = (r: { log?: { text: string }[] }) => r.log!.map((l) => l.text).join('\n');
+  const leftOut = (v: string) => path.join(bp.localDir, 'left-out', v, 'rules', 'builder.md');
+
+  async function shared() {
+    fs.mkdirSync(path.dirname(rule(project)), { recursive: true });
+    fs.writeFileSync(rule(project), 'Keep it short.\n');
+    proofReady('AP-1', 'one.txt', 'one\n');
+    actions.approve(bp, 'AP-1');
+    await actions.releaseVersion(bp);
+    sh('git pull -q origin main', mate);
+  }
+  const teammateWrites = (name: string, text: string) => {
+    fs.writeFileSync(path.join(mate, '.squad', 'rules', name), text);
+    sh('git add -A && git -c user.name=t -c user.email=t@t commit -qm "their rule" && git push -q origin main', mate);
+  };
+  const release = async () => {
+    proofReady('AP-2', 'two.txt', 'two\n');
+    actions.approve(bp, 'AP-2');
+    return actions.releaseVersion(bp);
+  };
+
+  it("a teammate's change stays when this computer did not change the file, and reaches this computer", async () => {
+    await shared();
+    teammateWrites('builder.md', 'Keep it short.\nAsk Sara first.\n');
+    const r = await release();
+    expect(atRemote()).toContain('Ask Sara first.');
+    expect(fs.readFileSync(rule(project), 'utf8')).toContain('Ask Sara first.');
+    expect(words(r)).not.toContain('A teammate changed');
+  });
+
+  it("this computer's older copy does not take it away at the next release either", async () => {
+    await shared();
+    teammateWrites('builder.md', 'Keep it short.\nAsk Sara first.\n');
+    await release();
+    proofReady('AP-3', 'three.txt', 'three\n');
+    actions.approve(bp, 'AP-3');
+    await actions.releaseVersion(bp);
+    expect(atRemote()).toContain('Ask Sara first.');
+  });
+
+  it('what only this computer changed goes out, with nothing said', async () => {
+    await shared();
+    teammateWrites('reviewer.md', 'Theirs, in a file of its own.\n');
+    fs.writeFileSync(rule(project), 'Keep it short.\nMine.\n');
+    const r = await release();
+    expect(atRemote()).toContain('Mine.');
+    expect(sh('git show main:.squad/rules/reviewer.md', remote)).toContain('Theirs');
+    expect(words(r)).not.toContain('A teammate changed');
+  });
+
+  it("both changed one file: the team's stays, here too, the release says so, and this computer's words are kept", async () => {
+    await shared();
+    teammateWrites('builder.md', 'Theirs.\n');
+    fs.writeFileSync(rule(project), 'Mine.\n');
+    const r = await release();
+    expect(atRemote()).toBe('Theirs.');
+    expect(fs.readFileSync(rule(project), 'utf8')).toBe('Theirs.\n');
+    expect(words(r)).toContain('A teammate changed builder.md too, so theirs stays, here as well. Yours is saved: an engineer can see where in the log.');
+    expect(fs.readFileSync(leftOut(r.version), 'utf8')).toBe('Mine.\n');
+  });
+
+  it('a project with nobody else in it: each release sends what changed here', async () => {
+    await shared();
+    fs.writeFileSync(rule(project), 'Changed here.\n');
+    const r = await release();
+    expect(atRemote()).toBe('Changed here.');
+    expect(fs.existsSync(leftOut(r.version))).toBe(false);
   });
 });
 

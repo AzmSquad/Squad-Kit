@@ -23,8 +23,8 @@ async function body<T>(c: Context): Promise<T> {
 }
 
 /** The ticket's changed files, as "What happened" lists them. */
-export function changedFiles(bp: BoardPaths, id: string): FileList | null {
-  const files = ticketChanges(bp, id).files;
+export async function changedFiles(bp: BoardPaths, id: string): Promise<FileList | null> {
+  const { files } = await ticketChanges(bp, id);
   if (!files.length) return null;
   return {
     added: files.filter((f) => f.status === 'added').map((f) => f.path),
@@ -35,10 +35,11 @@ export function changedFiles(bp: BoardPaths, id: string): FileList | null {
 
 export function mountCostApi(app: Hono, bp: BoardPaths): void {
   // One card per step: its time, what it did and what it handed in.
-  app.get('/api/v1/tickets/:id/happened', (c) => {
+  app.get('/api/v1/tickets/:id/happened', async (c) => {
     const t = readTicket(bp, c.req.param('id'));
     if (!t) return c.json({ error: 'not found' }, 404);
-    return c.json(whatHappened(bp, t, { files: () => changedFiles(bp, t.id) }));
+    const files = await changedFiles(bp, t.id).catch(() => null);
+    return c.json(whatHappened(bp, t, { files: () => files }));
   });
 
   // The ticket's cost, the way the person pays.

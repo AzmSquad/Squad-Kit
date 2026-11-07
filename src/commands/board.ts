@@ -376,7 +376,7 @@ export async function runShow(ticketId: string): Promise<void> {
     if (problem.detail) out(kleur.gray(`  The exact error: ${problem.detail.split('\n')[0]!.slice(0, 300)}`));
     out(kleur.gray(`  Need help? ${cmd(`squad report ${t.id}`)} saves one file to send.`));
   }
-  const happened = happenedLines(bp, t);
+  const happened = await happenedLines(bp, t);
   if (happened.length) {
     out();
     for (const l of happened) out(l);
@@ -713,7 +713,7 @@ export async function runAgent(role: string, opts: { step?: string; set?: string
     return;
   }
   if (opts.prompt) {
-    const core = corePrompts(bp, r, opts.ticket);
+    const core = await corePrompts(bp, r, opts.ticket);
     out(kleur.gray(`  Core prompts, read only, filled in from ${core.ticket.id} "${core.ticket.title}"`));
     for (const p of core.prompts.filter((x) => !opts.step || x.step === opts.step)) {
       out();
@@ -774,7 +774,7 @@ export async function runReply(ticketId: string, words: string[]): Promise<void>
 }
 
 export async function runChanges(ticketId: string, opts: { full?: boolean }): Promise<void> {
-  const c = ticketChanges(board(), ticketId);
+  const c = await ticketChanges(board(), ticketId);
   if (!c.files.length) {
     ui.info(c.from === 'none' ? 'Nothing built yet, so there are no changes to show.' : 'No changes against main.');
     return;
@@ -980,7 +980,7 @@ export async function runRelease(version: string | undefined, opts: { yes?: bool
     return;
   }
   for (const x of opts.without ?? []) {
-    draft = takeOutOfRelease(bp, draft.version, x);
+    draft = await takeOutOfRelease(bp, draft.version, x);
     ui.success(`Took ${x.toUpperCase()} out of ${draft.version}. It goes out with the next release. Put it back: ${cmd(`squad release --put-back ${x.toUpperCase()}`)}`);
   }
   const tickets = listTickets(bp).filter((t) => draft!.tickets.includes(t.id));

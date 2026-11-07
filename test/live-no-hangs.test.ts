@@ -52,7 +52,8 @@ const { createTicket, stopTicket } = await import('../src/board/actions.js');
 const { LiveSquad, queuedText } = await import('../src/engine/live.js');
 const { ensureLiveBoard, setupProject } = await import('../src/engine/setup.js');
 const { setParallelLimit } = await import('../src/core/settings.js');
-const { addWorktree, worktreeRoot } = await import('../src/engine/git.js');
+const { worktreeRoot } = await import('../src/engine/git.js');
+const { addWorktree } = await import('./support/copy.js');
 const { runCommand } = await import('../src/engine/checks.js');
 const { endRuns } = await import('../src/commands/console.js');
 

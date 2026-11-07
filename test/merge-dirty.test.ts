@@ -8,7 +8,8 @@ import { LiveSquad } from '../src/engine/live.js';
 import * as actions from '../src/board/actions.js';
 import { mergeWait } from '../src/board/auto.js';
 import { recheckMerge } from '../src/engine/sync.js';
-import { addWorktree, changedTracked, isLockFile, putBackTracked } from '../src/engine/git.js';
+import { changedTracked, isLockFile, putBackTracked } from '../src/engine/git.js';
+import { addWorktree } from './support/copy.js';
 
 let tmp: string;
 let project: string;
@@ -236,7 +237,7 @@ describe('your own checkout after the merge', () => {
     });
   });
 
-  it('knows a lock file by its name, in any folder, and paths are from the folder it is given', () => {
+  it('knows a lock file by its name, in any folder, and paths are from the folder it is given', async () => {
     for (const f of ['package-lock.json', 'web/pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb', 'Gemfile.lock', 'poetry.lock', 'Pipfile.lock', 'uv.lock', 'Cargo.lock', 'composer.lock', 'go.sum', 'packages.lock.json', 'npm-shrinkwrap.json']) {
       expect(isLockFile(f), f).toBe(true);
     }
@@ -249,8 +250,8 @@ describe('your own checkout after the merge', () => {
     fs.writeFileSync(path.join(project, 'web', 'yarn.lock'), 'two\n');
     fs.writeFileSync(path.join(project, 'outside.lock'), 'two\n');
     const web = path.join(project, 'web');
-    expect(changedTracked(web)).toEqual(['yarn.lock']);
-    expect(putBackTracked(web, { only: isLockFile })).toEqual(['yarn.lock']);
+    expect(await changedTracked(web)).toEqual(['yarn.lock']);
+    expect(await putBackTracked(web, { only: isLockFile })).toEqual(['yarn.lock']);
     expect(fs.readFileSync(path.join(web, 'yarn.lock'), 'utf8')).toBe('one\n');
     // Outside the folder it was given: not its business.
     expect(fs.readFileSync(path.join(project, 'outside.lock'), 'utf8')).toBe('two\n');

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { git } from './git.js';
+import { git, gitLater } from './git.js';
 
 /**
  * Weakened checks: a change that makes the tests easier to pass instead of making the code right. Before the checks
@@ -193,8 +193,8 @@ export function scriptsOf(command: string | undefined): string[] {
  * A story that changes what a gate runs: a file its command names, or the package.json script it runs. A file the base
  * does not have is new work, not a changed gate. `who`: the gate, in words.
  */
-export function gateChanged(dir: string, base: string, command: string, who: string): Weakening[] {
-  const changed = new Set(git(dir, ['diff', '--name-only', '--relative', base], { allowFail: true }).split('\n').filter(Boolean));
+export async function gateChanged(dir: string, base: string, command: string, who: string): Promise<Weakening[]> {
+  const changed = new Set((await gitLater(dir, ['diff', '--name-only', '--relative', base], { allowFail: true })).split('\n').filter(Boolean));
   if (!changed.size) return [];
   const out: Weakening[] = [];
   for (const word of new Set(command.split(/\s+/).map((w) => w.replace(/^['"]|['"]$/g, '').replace(/^\.\//, '')))) {
@@ -270,12 +270,20 @@ export function findWeakening(changes: FileChange[], scripts: string[] = []): We
   return out;
 }
 
-/** package.json: only new test scripts or settings were added, and every one that was there is the same. */
+/** A test script that runs no tests, like npm's own `echo "Error: no test specified" && exit 1`. It only says or exits. */
+function runsNoTests(script: unknown): boolean {
+  return typeof script === 'string' && script.split(/&&|\|\||;/).every((part) => /^\s*(?:echo\b.*|exit(?:\s+\d+)?|true|:|node\s+-e\s+["']process\.exit\(\d*\)["'])\s*$/.test(part));
+}
+
+/**
+ * package.json: only new test scripts or settings were added, and every one that was there is the same. A script that ran
+ * no tests may become one that does: that sets tests up, it does not weaken them.
+ */
 function grewOnly(name: string, was: string, now: string | null): boolean {
   if (name !== 'package.json' || now === null) return false;
   const a = JSON.parse(was) as Record<string, unknown>;
   const b = JSON.parse(now) as Record<string, unknown>;
-  return Object.keys(a).every((k) => JSON.stringify(a[k]) === JSON.stringify(b[k]));
+  return Object.keys(a).every((k) => JSON.stringify(a[k]) === JSON.stringify(b[k]) || (runsNoTests(a[k]) && typeof b[k] === 'string' && !runsNoTests(b[k])));
 }
 
 /** For package.json, the script that changed in words: `: "test" was "vitest run", now "vitest run --passWithNoTests"`. */
@@ -296,8 +304,8 @@ const MAX_BYTES = 1024 * 1024;
  * The ticket's copy against its base commit: changed, deleted, renamed and new files that hold tests or test settings.
  * `skip` holds folders never looked at (squad-kit's own). Empty when git cannot tell (no base, not a repo).
  */
-export function changedTestFiles(dir: string, base: string, skip: string[] = []): FileChange[] {
-  const fields = git(dir, ['diff', '--name-status', '-z', '--find-renames', base], { allowFail: true }).split('\0').filter(Boolean);
+export async function changedTestFiles(dir: string, base: string, skip: string[] = []): Promise<FileChange[]> {
+  const fields = (await gitLater(dir, ['diff', '--name-status', '-z', '--find-renames', base], { allowFail: true })).split('\0').filter(Boolean);
   const listed: { status: string; path: string; from?: string }[] = [];
   for (let i = 0; i < fields.length; ) {
     const status = fields[i++]![0]!;
@@ -306,7 +314,7 @@ export function changedTestFiles(dir: string, base: string, skip: string[] = [])
       listed.push({ status: 'R', from, path: fields[i++]! });
     } else listed.push({ status, path: fields[i++]! });
   }
-  for (const f of git(dir, ['ls-files', '--others', '--exclude-standard', '-z'], { allowFail: true }).split('\0').filter(Boolean)) listed.push({ status: 'A', path: f });
+  for (const f of (await gitLater(dir, ['ls-files', '--others', '--exclude-standard', '-z'], { allowFail: true })).split('\0').filter(Boolean)) listed.push({ status: 'A', path: f });
   // A file moved with the shell, not git: deleted here and new there, under the same name. It counts as moved.
   for (const added of listed.filter((l) => l.status === 'A')) {
     const gone = listed.find((l) => l.status === 'D' && path.basename(l.path) === path.basename(added.path));
@@ -344,6 +352,6 @@ function readText(file: string): string | null {
 }
 
 /** What weakens the tests in the ticket's copy, against its base commit. `testCommand` is the project's own. */
-export function weakenedChecks(dir: string, base: string, opts: { skip?: string[]; testCommand?: string } = {}): Weakening[] {
-  return findWeakening(changedTestFiles(dir, base, opts.skip), scriptsOf(opts.testCommand));
+export async function weakenedChecks(dir: string, base: string, opts: { skip?: string[]; testCommand?: string } = {}): Promise<Weakening[]> {
+  return findWeakening(await changedTestFiles(dir, base, opts.skip), scriptsOf(opts.testCommand));
 }

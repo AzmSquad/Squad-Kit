@@ -30,6 +30,8 @@ const D = await import('../src/engine/draft.js');
 let tmp: string;
 let bp: ReturnType<typeof boardPaths>;
 const wait = () => new Promise((r) => setTimeout(r, 10));
+// The Analyst starts once squad-kit looked for what it may not read, which takes a git beside everything else.
+const analystStarted = () => vi.waitFor(() => expect(calls.length).toBeGreaterThan(0), { timeout: 10_000 });
 const answer = { title: 'Login screen', ask: 'People sign in.', kind: 'feature', track: 'full', priority: 'normal', criteria: [], rules: [], edgeCases: [], gaps: [] };
 const png = { name: 'chat.png', data: Buffer.from('png').toString('base64') };
 
@@ -51,7 +53,7 @@ describe('a draft from an idea', () => {
   it('shows each step and what the Analyst looks at, then waits under New ticket until it is used', async () => {
     const started = D.startDraft(bp, { text: 'make login screen', files: [png] });
     expect(started).toMatchObject({ status: 'working', step: 'read', text: 'make login screen', files: [{ name: 'chat.png', size: 3 }] });
-    await wait();
+    await analystStarted();
     expect(D.draftJob(bp, started.id)).toMatchObject({
       status: 'working',
       step: 'look',
@@ -74,7 +76,7 @@ describe('a draft from an idea', () => {
 
   it('Cancel stops the Analyst and keeps the text', async () => {
     const job = D.startDraft(bp, { text: 'make login screen' });
-    await wait();
+    await analystStarted();
     expect(D.cancelDraft(bp, job.id)).toMatchObject({ status: 'cancelled', text: 'make login screen' });
     expect(calls[0]!.signal?.aborted).toBe(true);
     await wait();
@@ -85,7 +87,7 @@ describe('a draft from an idea', () => {
 
   it('a failed draft says why and keeps the text', async () => {
     const job = D.startDraft(bp, { text: 'make login screen' });
-    await wait();
+    await analystStarted();
     const out = 'Claude Code is signed out on this computer. Open the Terminal app, type claude and press Enter, then sign in when it asks. Then press Try again.';
     release({ ok: false, error: out });
     await wait();
@@ -94,7 +96,7 @@ describe('a draft from an idea', () => {
 
   it("a tool's raw error stays out of the failure line, and the way on is said", async () => {
     const job = D.startDraft(bp, { text: 'make login screen' });
-    await wait();
+    await analystStarted();
     release({ ok: false, error: 'ECONNRESET at ClientRequest.socketErrorListener (node:_http_client:501:9)' });
     await wait();
     expect(D.draftJob(bp, job.id)).toMatchObject({ status: 'failed', error: 'The Analyst did not fill in the ticket. Try again, or write it yourself.', text: 'make login screen' });
@@ -102,7 +104,7 @@ describe('a draft from an idea', () => {
 
   it('a new draft replaces the last one and stops it; empty text is refused at once', async () => {
     const first = D.startDraft(bp, { text: 'one' });
-    await wait();
+    await analystStarted();
     const second = D.startDraft(bp, { text: 'two' });
     expect(calls[0]!.signal?.aborted).toBe(true);
     expect(D.currentDraft(bp)).toMatchObject({ id: second.id, text: 'two' });

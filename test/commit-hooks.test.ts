@@ -6,7 +6,8 @@ import { execSync } from 'node:child_process';
 import { boardPaths, readRelease, readTicket, writeMeta, writeTicket, type BoardPaths } from '../src/board/store.js';
 import '../src/engine/live.js';
 import * as actions from '../src/board/actions.js';
-import { HookRefused, addWorktree, commitAll, commitChecked, commitHooks, conventionalWords } from '../src/engine/git.js';
+import { HookRefused, commitAll, commitChecked, commitHooks, conventionalWords } from '../src/engine/git.js';
+import { addWorktree } from './support/copy.js';
 import { problemOf } from '../src/board/problem.js';
 
 /**

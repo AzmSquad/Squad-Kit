@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { ChevronRight, CornerLeftUp, Folder, FolderCheck, FolderGit2, FolderPlus } from 'lucide-react';
 import { api, send } from '../api/client';
-import type { FolderListing } from '../api/types';
+import type { FirstLook, FolderListing } from '../api/types';
 import { typedDir } from '../lib/lang';
 
 /** The app lists folders itself, because a page cannot read a real folder path. Starts at home. */
@@ -13,6 +13,16 @@ export function useFolders(start = '') {
     queryFn: () => api<FolderListing>(`/api/v1/app/folders${at ? `?path=${encodeURIComponent(at)}` : ''}`),
   });
   return { at, setAt, listing };
+}
+
+/** What adding this folder means. It comes by itself: on a big project it takes a moment, and the list of folders never waits for it. */
+export function useFolderLook(l: FolderListing | undefined) {
+  return useQuery({
+    queryKey: ['app', 'folders', 'look', l?.path],
+    queryFn: () => api<FirstLook>(`/api/v1/app/folders/look?path=${encodeURIComponent(l!.path)}`),
+    enabled: Boolean(l?.canAdd),
+    retry: false,
+  });
 }
 
 function crumbsOf(p: string): { name: string; path: string }[] {

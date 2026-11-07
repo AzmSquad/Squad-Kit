@@ -69,7 +69,7 @@ const actions = await import('../src/board/actions.js');
 const auto = await import('../src/board/auto.js');
 const { withProblem } = await import('../src/board/problem.js');
 const { LiveSquad } = await import('../src/engine/live.js');
-const { addWorktree } = await import('../src/engine/git.js');
+const { addWorktree } = await import('./support/copy.js');
 const { MAX_PROOF_ROUNDS, MAX_RETAKES, brokenStop, checkVerdicts, criterionText, drawnFromPicture, notShownStop, together } = await import('../src/engine/proof-verdict.js');
 const P = await import('../src/engine/prompts.js');
 

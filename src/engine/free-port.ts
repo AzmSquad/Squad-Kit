@@ -4,7 +4,8 @@ import { writeLog } from '../core/app-log.js';
 import { addActivity, readMeta, readTicket, requireTicket, updateTicket, type BoardPaths } from '../board/store.js';
 import type { QuietPort, Ticket } from '../board/types.js';
 import { repoFor } from './repos.js';
-import { endPid, portTaken, squadKitOn, whoListens } from './run-app.js';
+import { endPid } from './process-group.js';
+import { portTaken, squadKitOn, whoListens } from './run-app.js';
 
 /**
  * "Stop it and try again" on the Looks stuck card. A step that needs the app (the Tester's, or squad-kit starting the

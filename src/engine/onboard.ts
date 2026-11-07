@@ -7,11 +7,12 @@ import { cleanParts, partsAfterRead, repoInUse } from '../board/parts.js';
 import { begin, currentStep, finish, learnSetupTime, nextProofStep, readTalk, readWords, stepOf, type SetupState, type SetupStepId, type SetupTestRun } from '../board/setup-state.js';
 import { runCommand, startApp, tail, testCount, CHECK_MS, CHECK_SILENT_MS, type RunningApp } from './checks.js';
 import { APP_WAIT_MS, SETUP_MS } from './run-app.js';
-import { addSnapshot, dropSnapshot, git, worktreeRoot } from './git.js';
+import { GitStopped, NoRoomForCopy, addSnapshot, copyIsWhole, dropSnapshot, firstSaveLater, git, worktreeRoot } from './git.js';
+import { plainWords } from '../core/for-people.js';
 import { reposOf } from './repos.js';
 import { dockerBlockedWords, guardSupport, projectGuardFor, type GuardSpec } from './project-guard.js';
 import { fillOwnCopy, placeStoryFiles } from './local-files.js';
-import { countFiles, gitState } from './first-look.js';
+import { countFiles, gitState, nextToNothing } from './first-look.js';
 import { DOING } from './plain-doing.js';
 import { withBrowserTests } from './find-commands.js';
 
@@ -75,10 +76,36 @@ function withAllTests(dir: string, c: ProjectCommands): ProjectCommands {
 
 /* ── The read ──────────────────────────────────────────── */
 
+/** What the first step says while a big folder with no git gets its first save. */
+export const FIRST_SAVE_WORDS = 'Saving your files for the first time. On a big project this takes a while.';
+
+/** True when a big folder's first save is not over: nothing else can start without it (ensureRepo). */
+export function firstSaveHolds(meta: BoardMeta): boolean {
+  return Boolean(meta.setup?.steps.some((s) => s.id === 'files' && s.state !== 'done'));
+}
+
+export function firstSaveDue(meta: BoardMeta): boolean {
+  return Boolean(meta.setup?.steps.some((s) => s.id === 'files' && (s.state === 'todo' || s.state === 'now')));
+}
+
+/** A big folder's first save, as a step of the setup. A Stop or the board closing leaves it to be run again. */
+export async function runFirstSave(bp: BoardPaths, signal: AbortSignal): Promise<void> {
+  withSetup(bp, (s) => begin(s, 'files', FIRST_SAVE_WORDS));
+  try {
+    await firstSaveLater(bp.root, signal);
+    withSetup(bp, (s) => {
+      finish(s, 'files', 'done');
+      delete stepOf(s, 'files').note;
+    });
+  } catch (err) {
+    if (signal.aborted) return;
+    withSetup(bp, (s) => finish(s, 'files', 'failed', { error: plainWords(err, 'Saving the files for the first time', 'something technical stopped it. Press Try again.') }));
+  }
+}
+
 /** The read starts: the AI tool's step says whether it is ready, and the Architect starts reading. */
-export function readStarted(bp: BoardPaths, tool: { label: string; ready: boolean }): void {
-  const files = countFiles(bp.root);
-  const here = gitState(bp.root);
+export async function readStarted(bp: BoardPaths, tool: { label: string; ready: boolean }): Promise<void> {
+  const [files, here] = await Promise.all([countFiles(bp.root), gitState(bp.root)]);
   withSetup(bp, (s) => {
     const t = stepOf(s, 'tool');
     if (t.state !== 'done') {
@@ -141,7 +168,7 @@ export function readFailed(bp: BoardPaths, error: string): void {
 export function saveScan(bp: BoardPaths, answer: ScanAnswer, nested: RepoInfo[], at = now(), idea = ''): void {
   const fresh = readMeta(bp);
   // A folder squad-kit made itself, with nothing in it but its README, has no code, whatever the answer says.
-  const none = answer.empty || (fresh.setup?.kind === 'empty' && countFiles(bp.root) <= 1);
+  const none = answer.empty || (fresh.setup?.kind === 'empty' && nextToNothing(bp.root));
   const out = none ? noCodeAnswer(answer, idea) : answer;
   fresh.map = out.map ?? [];
   fresh.commands = { ...withAllTests(bp.root, clean(out.commands)), ...clean(fresh.commands ?? {}) };
@@ -213,18 +240,19 @@ export function setupCopyDir(bp: BoardPaths, repo: RepoInfo): string {
 }
 
 /** Makes the copy, or keeps the one there. True when it is new, so it still needs its setup command. */
-function ensureCopy(bp: BoardPaths, repo: RepoInfo): { dir: string; fresh: boolean } {
+async function ensureCopy(bp: BoardPaths, repo: RepoInfo, signal: AbortSignal): Promise<{ dir: string; fresh: boolean }> {
+  await droppingSetup.get(bp.squadDir);
   const dir = setupCopyDir(bp, repo);
-  if (fs.existsSync(path.join(dir, '.git'))) {
+  if (copyIsWhole(dir)) {
     placeStoryFiles(bp, repo.path, dir);
     return { dir, fresh: false };
   }
   const src = path.join(bp.root, repo.path);
   const commit = git(src, ['rev-parse', '--verify', `${repo.base}^{commit}`], { allowFail: true }) || git(src, ['rev-parse', 'HEAD']);
-  addSnapshot(src, path.basename(dir), commit);
+  await addSnapshot(src, path.basename(dir), commit, { signal });
   // The app needs the person's .env files to start; git never carries them. A file an engineer named as local uses the
   // values kept for squad-kit's own runs instead: what a failing test prints here is saved with the setup.
-  fillOwnCopy(bp, repo.path, dir);
+  await fillOwnCopy(bp, repo.path, dir);
   return { dir, fresh: true };
 }
 
@@ -236,18 +264,25 @@ function guardFor(bp: BoardPaths, cwd: string): GuardSpec | undefined {
   return projectGuardFor(bp, { cwd, ...(allow ? { allow } : {}) });
 }
 
-export function dropSetupCopies(bp: BoardPaths): void {
-  let meta: BoardMeta;
-  try {
-    meta = readMeta(bp);
-  } catch {
-    return;
-  }
-  for (const repo of reposOf(meta)) {
-    const dir = setupCopyDir(bp, repo);
-    if (fs.existsSync(dir)) dropSnapshot(path.join(bp.root, repo.path), dir);
-  }
+export function dropSetupCopies(bp: BoardPaths): Promise<void> {
+  const run = (droppingSetup.get(bp.squadDir) ?? Promise.resolve()).then(async () => {
+    let meta: BoardMeta;
+    try {
+      meta = readMeta(bp);
+    } catch {
+      return;
+    }
+    for (const repo of reposOf(meta)) {
+      const dir = setupCopyDir(bp, repo);
+      if (fs.existsSync(dir)) await dropSnapshot(path.join(bp.root, repo.path), dir);
+    }
+  });
+  droppingSetup.set(bp.squadDir, run.catch(() => undefined));
+  return run;
 }
+
+/** Setup copies going away beside everything else: a step that wants one waits for this first, or it could take one that is going. */
+const droppingSetup = new Map<string, Promise<unknown>>();
 
 /** What the step found, in plain words. The commands themselves are in Settings, under How the squad checks and runs this project. */
 export function commandsLine(meta: BoardMeta): string {
@@ -264,15 +299,16 @@ type Step = (bp: BoardPaths, deps: ProofDeps, copies: Map<string, string>) => Pr
 
 /** Finding how to test and run it: squad-kit's own copy of the code, with what it needs installed. */
 const commandsStep: Step = async (bp, deps, copies) => {
-  withSetup(bp, (s) => begin(s, 'commands', "Making squad-kit's own copy of the code"));
+  withSetup(bp, (s) => begin(s, 'commands', "Making squad-kit's own copy of the code. On a big project this takes a while."));
   const meta = readMeta(bp);
   const failures: { error: string; output?: string }[] = [];
   for (const repo of reposOf(meta).filter((r) => repoInUse(meta, r.path))) {
     let copy: { dir: string; fresh: boolean };
     try {
-      copy = ensureCopy(bp, repo);
+      copy = await ensureCopy(bp, repo, deps.signal);
     } catch (err) {
-      failures.push({ error: `squad-kit could not make its copy of the code: ${(err as Error).message}` });
+      if (err instanceof GitStopped) throw err;
+      failures.push({ error: err instanceof NoRoomForCopy ? err.message : `squad-kit could not make its copy of the code: ${(err as Error).message}` });
       continue;
     }
     copies.set(repo.path, copy.dir);
@@ -296,7 +332,7 @@ const commandsStep: Step = async (bp, deps, copies) => {
 async function copyFor(bp: BoardPaths, repo: RepoInfo, copies: Map<string, string>, signal: AbortSignal): Promise<string> {
   const known = copies.get(repo.path);
   if (known) return known;
-  const copy = ensureCopy(bp, repo);
+  const copy = await ensureCopy(bp, repo, signal);
   copies.set(repo.path, copy.dir);
   const setup = repo.commands.setup?.trim();
   if (copy.fresh && setup) await runCommand(copy.dir, setup, SETUP_MS, { silentMs: CHECK_SILENT_MS, signal, ...(guardFor(bp, copy.dir) ? { guard: guardFor(bp, copy.dir)! } : {}) });

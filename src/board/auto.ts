@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { addActivity, listTickets, now, readMeta, readTicket, requireTicket, updateTicket, type BoardPaths } from './store.js';
 import type { AgentQuestion, Ticket } from './types.js';
 import type { Decided, DecidedBy } from './requirements-types.js';
-import { BoardActionError, CHECKOUT_WAITS, acceptProof, changeAfterRelease, openChange, proposeChange, saveBeforeAccept, shipped } from './actions.js';
+import { BoardActionError, acceptInTurn, holdingSave, CHECKOUT_WAITS, acceptProof, changeAfterRelease, openChange, proposeChange, saveBeforeAccept, shipped } from './actions.js';
 import { isMerged, refuseBeforeDependency } from './depends.js';
 import { scheduleSquad } from './schedule.js';
 import { git, isAncestor, remotes } from '../engine/git.js';
@@ -212,11 +212,17 @@ export function acceptNext(t: Ticket, seconds: number, speed: number): void {
  */
 export async function acceptByItselfBeside(bp: BoardPaths, id: string, signal?: AbortSignal): Promise<Ticket> {
   const t = requireTicket(bp, id);
-  const blocked = t.track !== 'auto' || shipped(t) || Boolean(openChange(t)) || (t.proof ?? []).some((p) => p.shows && p.shows !== 'met' && p.shows !== 'off-screen');
-  if (!blocked && !beforeDependency(bp, t) && !(await saveBeforeAccept(bp, id, signal))) return requireTicket(bp, id);
-  const now = requireTicket(bp, id);
-  if (signal?.aborted || now.stopRequested || now.deleting) return now;
-  return acceptByItself(bp, id);
+  const blocked = (x: Ticket) => x.track !== 'auto' || shipped(x) || Boolean(openChange(x)) || (x.proof ?? []).some((p) => p.shows && p.shows !== 'met' && p.shows !== 'off-screen') || beforeDependency(bp, x);
+  if (blocked(t)) return signal?.aborted || t.stopRequested || t.deleting ? t : acceptByItself(bp, id);
+  return holdingSave(bp, t.id, async (closing) => {
+    if (!(await saveBeforeAccept(bp, id, closing, signal))) return requireTicket(bp, id);
+    return acceptInTurn(bp, id, closing, () => {
+      // Read once more here, with nothing between this and the merge: anything that came meanwhile goes first.
+      const now = requireTicket(bp, id);
+      if (signal?.aborted || now.stopRequested || now.deleting || now.takenOver || (now.chat?.open && !now.chat.beside)) return now;
+      return acceptByItself(bp, id);
+    });
+  });
 }
 
 function beforeDependency(bp: BoardPaths, t: Ticket): boolean {

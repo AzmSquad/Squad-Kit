@@ -5,7 +5,7 @@ import path from 'node:path';
 import { execSync } from 'node:child_process';
 import { boardPaths, readTicket, writeMeta, writeTicket, type BoardPaths } from '../src/board/store.js';
 import * as actions from '../src/board/actions.js';
-import { addWorktree } from '../src/engine/git.js';
+import { addWorktree } from './support/copy.js';
 import { keyFor } from '../src/engine/setup.js';
 import { findNestedRepos } from '../src/engine/repos.js';
 

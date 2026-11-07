@@ -40,7 +40,7 @@ const { createTicket, keepWaiting, restartStep } = await import('../src/board/ac
 const { LiveSquad } = await import('../src/engine/live.js');
 const { ensureLiveBoard, setupProject } = await import('../src/engine/setup.js');
 const { setParallelLimit } = await import('../src/core/settings.js');
-const { addWorktree } = await import('../src/engine/git.js');
+const { addWorktree } = await import('./support/copy.js');
 const { liveNow } = await import('../src/board/now.js');
 const { readUsual, usualKey } = await import('../src/board/usual.js');
 

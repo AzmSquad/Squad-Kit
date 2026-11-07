@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { addWorktree, bringHookRunner, commitChecked, stageAll } from '../src/engine/git.js';
+import { bringHookRunner, commitChecked, stageAll } from '../src/engine/git.js';
+import { addWorktree } from './support/copy.js';
 import { buildGuard, guardSupport } from '../src/engine/project-guard.js';
 
 /**

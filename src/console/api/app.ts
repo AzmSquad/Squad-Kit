@@ -33,8 +33,6 @@ export interface FolderListing {
   folders: { name: string; path: string; kind: 'project' | 'repo' | 'folder' }[];
   /** Folders people often start from. */
   places: { name: string; path: string }[];
-  /** What adding this folder means: what squad-kit found in it and what happens next. Only for a folder that can be added. */
-  look?: FirstLook;
   /** Where a new project goes unless the person picks another place. */
   place: string;
   /** Why a new project cannot go in this folder. */
@@ -76,9 +74,15 @@ function listFolder(asked: string): FolderListing {
       .filter((p) => fs.existsSync(p.path)),
   ];
   const canAdd = kind === 'project' || isOwnFolder(dir);
-  const look = canAdd ? firstLook(dir) : undefined;
   const notHere = whyNotHere(dir);
-  return { path: dir, parent, home, kind: look?.kind ?? kind, repos, canAdd, folders, places, ...(look ? { look } : {}), place: defaultPlace(), ...(notHere ? { notHere } : {}) };
+  return { path: dir, parent, home, kind, repos, canAdd, folders, places, place: defaultPlace(), ...(notHere ? { notHere } : {}) };
+}
+
+function lookAt(asked: string): Promise<FirstLook> {
+  const dir = path.resolve(asked);
+  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) throw new Error(`There is no folder at ${dir}.`);
+  if (!has(dir, SQUAD_DIR, 'config.yaml') && !isOwnFolder(dir)) throw new Error("This folder can't be a project.");
+  return firstLook(dir);
 }
 
 export async function body<T>(c: Context): Promise<T> {
@@ -131,6 +135,10 @@ export function mountAppApi(app: Hono, opts: { projects: OpenProjects }): void {
 
   // The folder browser: a page cannot read a real folder path, so the app lists folders itself, from the home folder.
   app.get('/api/v1/app/folders', (c) => act(c, () => listFolder(c.req.query('path') ?? '')));
+
+  // What adding this folder means: what squad-kit found in it and what happens next. A call of its own, as it reads the
+  // whole project: the folder browser opens at once on any size, and says what it found when it knows.
+  app.get('/api/v1/app/folders/look', (c) => act(c, () => lookAt(c.req.query('path') ?? '')));
 
   app.post('/api/v1/app/folders', async (c) => {
     const b = await body<{ parent?: string; name?: string }>(c);

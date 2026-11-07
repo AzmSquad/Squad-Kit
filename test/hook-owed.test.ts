@@ -22,7 +22,8 @@ const { boardPaths, readMeta, readTicket, updateTicket, writeMeta, writeTicket }
 const actions = await import('../src/board/actions.js');
 const auto = await import('../src/board/auto.js');
 const { LiveSquad } = await import('../src/engine/live.js');
-const { addWorktree, commitAll } = await import('../src/engine/git.js');
+const { commitAll } = await import('../src/engine/git.js');
+const { addWorktree } = await import('./support/copy.js');
 const { ticketDocs, readTicketDocs } = await import('../src/board/docs.js');
 const { ensureLiveBoard, setupProject } = await import('../src/engine/setup.js');
 

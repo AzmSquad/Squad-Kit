@@ -14,7 +14,7 @@ import { boardPaths } from '../board/store.js';
 import { isOwnFolder, prepareProject } from '../engine/setup.js';
 import { setupView } from '../board/first-run.js';
 import { followSetup } from './overview.js';
-import { allEnded, killAll } from '../engine/process-group.js';
+import { allEnded, askAllToEnd, killAll } from '../engine/process-group.js';
 import { readInstalledPackage } from '../core/package-info.js';
 import {
   buildStamp,
@@ -276,6 +276,8 @@ async function serveApp(a: { first?: SquadPaths; follow?: ReturnType<typeof boar
 
 /** How long a restart waits for the running agents, checks and apps to end after their Stop. */
 const RESTART_WAIT_MS = 10_000;
+/** How long what is left gets once it is asked to end, before it is killed. A git lets go of its locks at once. */
+const ASKED_MS = 2000;
 
 /**
  * The board stopped every run as it closed. A restart or a quit waits for them to end first (10 seconds at most), and
@@ -284,6 +286,9 @@ const RESTART_WAIT_MS = 10_000;
  */
 export async function endRuns(waitMs = RESTART_WAIT_MS): Promise<boolean> {
   if (await allEnded(waitMs)) return true;
+  // Asked first: a git killed outright would leave its lock behind, in the person's own folder too.
+  askAllToEnd();
+  if (await allEnded(ASKED_MS)) return true;
   killAll();
   return allEnded(1000);
 }

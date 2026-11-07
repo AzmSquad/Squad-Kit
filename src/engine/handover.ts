@@ -1,4 +1,4 @@
-import { execFile, execFileSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import yaml from 'js-yaml';
@@ -8,7 +8,7 @@ import { isMine, ownerOf, sameName } from '../board/owner.js';
 import { scheduleSquad } from '../board/schedule.js';
 import type { Ticket, Waiting } from '../board/types.js';
 import { repoHostFor } from '../modules/registry.js';
-import { addWorktree, changedFiles, commitAll, commitArgsFor, conventionalWords, git, gitArgs, gitEnv as ownGitEnv, isAncestor, isRepo, networkGitEnv, remotes, removeWorktree } from './git.js';
+import { MOST_OUTPUT, addWorktree, changedFiles, commitAll, commitArgsFor, conventionalWords, git, gitArgs, gitEnv as ownGitEnv, gitLater, isAncestor, isRepo, netGitLater, remotes, removeWorktree } from './git.js';
 import { guardSupport, ticketGuard } from './project-guard.js';
 import { writeLog } from '../core/app-log.js';
 import { writeConfigFile } from '../core/config.js';
@@ -33,17 +33,6 @@ function gitEnv(bp: BoardPaths, t: Ticket): Record<string, string> {
   return { GIT_TERMINAL_PROMPT: '0', ...(target ? (repoHostFor(bp, target.url)?.gitEnv() ?? {}) : {}) };
 }
 
-/** git over the network, without holding up the board while it waits. */
-function gitLater(cwd: string, args: string[], env: Record<string, string>, timeoutMs = 120_000): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile('git', gitArgs(args), { cwd, encoding: 'utf8', timeout: timeoutMs, env: ownGitEnv(networkGitEnv(cwd, env)) }, (err, stdout, stderr) => {
-      if (!err) return resolve(stdout.trim());
-      const detail = (stderr || err.message).trim().split('\n').slice(-3).join(' ');
-      reject(new Error(`git ${args[0]} failed: ${detail}`));
-    });
-  });
-}
-
 /**
  * Fetches the ticket's base branch from its remote, so "the latest base" is the team's and not an old copy on this
  * computer. Returns the remote's name, or undefined when the repo has none. Never throws: offline, the last fetch counts.
@@ -51,7 +40,7 @@ function gitLater(cwd: string, args: string[], env: Record<string, string>, time
 export async function fetchBase(bp: BoardPaths, t: Ticket): Promise<string | undefined> {
   const target = repoTarget(bp, t);
   if (!target) return undefined;
-  await gitLater(target.dir, ['fetch', '--quiet', target.remote, target.base], gitEnv(bp, t), 60_000).catch(() => undefined);
+  await netGitLater(target.dir, ['fetch', '--quiet', target.remote, target.base], { env: gitEnv(bp, t), timeoutMs: 60_000 }).catch(() => undefined);
   return target.remote;
 }
 
@@ -83,7 +72,7 @@ export async function pushHandOver(bp: BoardPaths, t: Ticket): Promise<HandOverP
   if (!target) throw new Error('This project has no shared copy of the code to send it to. An engineer can add one.');
   const env = gitEnv(bp, t);
   const had = Boolean(t.worktree && fs.existsSync(t.worktree));
-  const copy = had ? { dir: t.worktree!, branch: t.branch!, baseCommit: t.baseCommit } : addWorktree(target.dir, t.id, target.base);
+  const copy = had ? { dir: t.worktree!, branch: t.branch!, baseCommit: t.baseCommit } : await addWorktree(target.dir, t.id, target.base);
   const ticket: Ticket = { ...t, worktree: copy.dir, branch: copy.branch, baseCommit: t.baseCommit ?? copy.baseCommit };
   try {
     // The hook's words go on the ticket's record in the app log; the work still travels, since nothing reaches the base.
@@ -101,9 +90,9 @@ export async function pushHandOver(bp: BoardPaths, t: Ticket): Promise<HandOverP
     const carried = stageProjectFiles(bp, ticket, baseRef);
     const paths = [...stageTicketDocs(bp, ticket), ...carried];
     if (paths.length && git(copy.dir, ['diff', '--cached', '--name-only', '--', ...paths], { allowFail: true })) {
-      git(copy.dir, [...commitArgsFor(copy.dir), 'commit', '-m', `${t.id}: handed over to ${t.owner}`, '--', ...paths]);
+      await gitLater(copy.dir, [...commitArgsFor(copy.dir), 'commit', '-m', `${t.id}: handed over to ${t.owner}`, '--', ...paths]);
     }
-    await gitLater(copy.dir, ['push', target.remote, `${copy.branch}:refs/heads/${copy.branch}`], env).catch((err: Error) => {
+    await netGitLater(copy.dir, ['push', target.remote, `${copy.branch}:refs/heads/${copy.branch}`], { env }).catch((err: Error) => {
       if (/rejected|non-fast-forward|fetch first/i.test(err.message)) {
         throw new Error(`${copy.branch} on ${target.remote} has work this computer does not have. Nothing was handed over.`);
       }
@@ -119,7 +108,7 @@ export async function pushHandOver(bp: BoardPaths, t: Ticket): Promise<HandOverP
     };
   } finally {
     // A copy made only to push is removed again; the branch stays.
-    if (!had) removeWorktree(target.dir, copy.dir);
+    if (!had) await removeWorktree(target.dir, copy.dir);
   }
 }
 
@@ -149,8 +138,20 @@ function filesOn(repo: string, ref: string, dir: string): string[] {
     .map((f) => f.slice(dir.length + 1));
 }
 
+/** One of the ticket's own documents, which a person wrote: small enough to read at once. */
 function blob(repo: string, ref: string, file: string): Buffer {
-  return execFileSync('git', gitArgs(['cat-file', 'blob', `${ref}:${file}`]), { cwd: repo, maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'], env: ownGitEnv() });
+  return execFileSync('git', gitArgs(['cat-file', 'blob', `${ref}:${file}`]), { cwd: repo, maxBuffer: MOST_OUTPUT, stdio: ['ignore', 'pipe', 'ignore'], env: ownGitEnv() });
+}
+
+/** A file on a branch, written straight to disk: an attachment can be any size, and one too long must not end every pick up. */
+function blobTo(repo: string, ref: string, file: string, to: string): void {
+  fs.mkdirSync(path.dirname(to), { recursive: true });
+  const fd = fs.openSync(to, 'w');
+  try {
+    execFileSync('git', gitArgs(['cat-file', 'blob', `${ref}:${file}`]), { cwd: repo, stdio: ['ignore', fd, 'ignore'], env: ownGitEnv() });
+  } finally {
+    fs.closeSync(fd);
+  }
 }
 
 /** The ticket on a ticket branch: the folder named like the branch (squad/ab-80 carries AB-80). */
@@ -177,16 +178,11 @@ function differs(bp: BoardPaths, id: string, docs: Record<string, string>): bool
 function bringIn(bp: BoardPaths, repo: string, ref: string, squad: string, id: string, files: string[]): void {
   const dir = ticketDir(bp, id);
   fs.rmSync(dir, { recursive: true, force: true });
-  for (const f of files) {
-    const to = path.join(dir, f);
-    fs.mkdirSync(path.dirname(to), { recursive: true });
-    fs.writeFileSync(to, blob(repo, ref, `${squad}/tickets/${id}/${f}`));
-  }
+  for (const f of files) blobTo(repo, ref, `${squad}/tickets/${id}/${f}`, path.join(dir, f));
   const known = new Set(listDecisions(bp).map((d) => d.id));
   for (const f of filesOn(repo, ref, `${squad}/decisions`)) {
     if (!f.endsWith('.md') || known.has(f.slice(0, -3))) continue;
-    fs.mkdirSync(bp.decisionsDir, { recursive: true });
-    fs.writeFileSync(path.join(bp.decisionsDir, f), blob(repo, ref, `${squad}/decisions/${f}`));
+    blobTo(repo, ref, `${squad}/decisions/${f}`, path.join(bp.decisionsDir, f));
   }
 }
 
@@ -275,7 +271,7 @@ export async function fetchPushed(bp: BoardPaths): Promise<PickedUp[]> {
   if (remote) {
     const url = git(repo, ['config', '--get', `remote.${remote}.url`], { allowFail: true });
     const env = { GIT_TERMINAL_PROMPT: '0', ...(url ? (repoHostFor(bp, url)?.gitEnv() ?? {}) : {}) };
-    fetched = await gitLater(repo, ['fetch', '--quiet', '--prune', remote], env, 60_000).then(
+    fetched = await netGitLater(repo, ['fetch', '--quiet', '--prune', remote], { env, timeoutMs: 60_000 }).then(
       () => true,
       () => false,
     );
@@ -450,8 +446,8 @@ export function carryOn(t: Ticket, copy: boolean): { phase?: string; waiting?: W
 }
 
 /** The code a ticket's copy has against where it left the base: work done before this Builder session, if any. */
-export function workSoFar(dir: string, baseCommit: string): string[] {
-  return changedFiles(dir, baseCommit).filter((f) => !f.startsWith('.squad/'));
+export async function workSoFar(dir: string, baseCommit: string): Promise<string[]> {
+  return (await changedFiles(dir, baseCommit)).filter((f) => !f.startsWith('.squad/'));
 }
 
 /* ── A new computer ──────────────────────────────────────── */

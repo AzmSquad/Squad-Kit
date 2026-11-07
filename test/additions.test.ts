@@ -32,7 +32,8 @@ const { lookInFolder, MAX_FOLDER_FILES } = await import('../src/board/additions-
 const { CANT_RUN, addTriedGate, gatesChanged, noteGates, runGate, runGatesAt, tryGate } = await import('../src/engine/gate-run.js');
 const { ownCheck, runChecks, runCommand } = await import('../src/engine/checks.js');
 const { ticketGuard } = await import('../src/engine/project-guard.js');
-const { addWorktree, worktreeRoot } = await import('../src/engine/git.js');
+const { worktreeRoot } = await import('../src/engine/git.js');
+const { addWorktree } = await import('./support/copy.js');
 const { watchLane, checkLane } = await import('../src/engine/lane.js');
 const { harnessView } = await import('../src/engine/harness.js');
 const { mountBoardApi } = await import('../src/console/api/board.js');
@@ -406,17 +407,17 @@ describe('rules', () => {
     expect(ask.hosts).toContain('github.com');
   });
 
-  it('a commit made anyway is seen by the lane, whatever a rule says', () => {
+  it('a commit made anyway is seen by the lane, whatever a rule says', async () => {
     const copy = story();
-    const lane = watchLane(copy, []);
+    const lane = await watchLane(copy, []);
     fs.writeFileSync(path.join(copy, 'limit.txt'), 'limit = 9\n');
     sh('git add -A && git commit -qm sneaked', copy);
-    expect(checkLane(lane).moved).toMatch(/moved from/);
+    expect((await checkLane(lane)).moved).toMatch(/moved from/);
   });
 });
 
 describe('agents cannot change the file', () => {
-  it('the file is under the folder every agent is denied, and a change in a story goes back', () => {
+  it('the file is under the folder every agent is denied, and a change in a story goes back', async () => {
     const copy = story();
     const names = squad().protectedFiles(copy);
     expect(names).toContain('.squad/');
@@ -424,9 +425,9 @@ describe('agents cannot change the file', () => {
     expect(options.disallowedTools).toEqual(expect.arrayContaining(['Edit(**/.squad/**)', 'Write(**/.squad/**)']));
     fs.mkdirSync(path.join(copy, '.squad'), { recursive: true });
     fs.writeFileSync(path.join(copy, '.squad', 'harness.yaml'), 'additions:\n  - keep me\n');
-    const lane = watchLane(copy, names);
+    const lane = await watchLane(copy, names);
     fs.writeFileSync(path.join(copy, '.squad', 'harness.yaml'), 'additions: []\n');
-    expect(checkLane(lane).restored).toEqual(expect.arrayContaining(['.squad/harness.yaml']));
+    expect((await checkLane(lane)).restored).toEqual(expect.arrayContaining(['.squad/harness.yaml']));
     expect(fs.readFileSync(path.join(copy, '.squad', 'harness.yaml'), 'utf8')).toContain('keep me');
   });
 
@@ -788,19 +789,19 @@ describe('a story that changes what a gate runs', () => {
     expect(readTicket(bp, 'AP-1')!.gates?.checks).not.toBe('fail');
   });
 
-  it('the script of npm run x', () => {
+  it('the script of npm run x', async () => {
     fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ scripts: { scan: 'node a.js', other: 'x' } }));
     sh('git add -A && git commit -qm pkg');
     const copy = story();
     const base = sh('git rev-parse HEAD');
     gate('Scan', 'npm run scan', { state: 'on' });
     fs.writeFileSync(path.join(copy, 'package.json'), JSON.stringify({ scripts: { scan: 'node a.js', other: 'y' } }));
-    expect(gatesChanged(bp, copy, '.', base)).toEqual([]);
+    expect(await gatesChanged(bp, copy, '.', base)).toEqual([]);
     fs.writeFileSync(path.join(copy, 'package.json'), JSON.stringify({ scripts: { scan: 'true', other: 'y' } }));
-    expect(gatesChanged(bp, copy, '.', base)[0]!.text).toMatch(/"scan" script in package\.json changed/);
+    expect((await gatesChanged(bp, copy, '.', base))[0]!.text).toMatch(/"scan" script in package\.json changed/);
   });
 
-  it('a gate on Try first or warn only stops nothing, so changing it stops nothing', () => {
+  it('a gate on Try first or warn only stops nothing, so changing it stops nothing', async () => {
     script('tools/scan.sh', 'exit 0');
     sh('git add -A && git commit -qm scan');
     const copy = story();
@@ -808,7 +809,7 @@ describe('a story that changes what a gate runs', () => {
     gate('Scan', './tools/scan.sh');
     gate('Soft', './tools/scan.sh', { on_fail: 'warn', state: 'on' });
     script('tools/scan.sh', 'exit 0 # easier', copy);
-    expect(gatesChanged(bp, copy, '.', base)).toEqual([]);
+    expect(await gatesChanged(bp, copy, '.', base)).toEqual([]);
   });
 });
 
@@ -836,12 +837,12 @@ describe('scripts/check', () => {
     expect(ownCheck(project, {})).toBeUndefined();
   });
 
-  it('a new scripts/check in the story itself is new work, not a weakened check', () => {
+  it('a new scripts/check in the story itself is new work, not a weakened check', async () => {
     const copy = story();
     const base = sh('git rev-parse HEAD');
     script('scripts/check', 'exit 0', copy);
     sh('git add -A && git commit -qm new', copy);
-    expect(gatesChanged(bp, copy, '.', base)).toEqual([]);
+    expect(await gatesChanged(bp, copy, '.', base)).toEqual([]);
   });
 });
 
@@ -979,7 +980,7 @@ describe('before merge: the road of a refused commit hook', () => {
   it('on Builds by itself the card has no way past', async () => {
     proofReady({ track: 'auto' });
     gate('Audit', 'no-such-tool-here', { when: 'merge', state: 'on' });
-    expect(await actions.saveBeforeAccept(bp, 'AP-1')).toBe(false);
+    expect(await actions.holdingSave(bp, 'AP-1', (closing) => actions.saveBeforeAccept(bp, 'AP-1', closing))).toBe(false);
     expect(readTicket(bp, 'AP-1')!.stuck?.options.map((o) => o.do)).toEqual(['save-again', 'engineer']);
   });
 });

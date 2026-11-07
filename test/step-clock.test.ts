@@ -35,7 +35,7 @@ const { boardPaths, readTicket, updateTicket, writeMeta } = await import('../src
 const actions = await import('../src/board/actions.js');
 const { pauseClock, slowStep, startStep, stepSeconds, endStep } = await import('../src/board/clock.js');
 const { LiveSquad, queuedText } = await import('../src/engine/live.js');
-const { addWorktree } = await import('../src/engine/git.js');
+const { addWorktree } = await import('./support/copy.js');
 const { readUsual } = await import('../src/board/usual.js');
 
 type Squad = { proof(id: string): Promise<void>; hold(t: unknown, text: string): void };

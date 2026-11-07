@@ -5,7 +5,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CommitStopped, HookRefused, addWorktree, commitAll, commitChecked, settleCopy, stageAll } from '../src/engine/git.js';
+import { CommitStopped, HookRefused, commitAll, commitChecked, settleCopy, stageAll } from '../src/engine/git.js';
+import { addWorktree } from './support/copy.js';
 import { buildGuard, guardSupport } from '../src/engine/project-guard.js';
 import { squadHome } from '../src/core/home.js';
 

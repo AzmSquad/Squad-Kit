@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { git, stageAll } from './git.js';
+import { git, gitLater, stageAllLater } from './git.js';
 import { HOOK_PACKAGE_KEYS } from './hook-files.js';
 
 /**
@@ -40,12 +40,12 @@ export interface LaneCheck {
 }
 
 /** The copy before a step. `wholeCopy` watches every file git sees, not just the protected ones. */
-export function watchLane(dir: string, names: string[], wholeCopy = false): Lane {
+export async function watchLane(dir: string, names: string[], wholeCopy = false): Promise<Lane> {
   const settings = hookSettings(dir);
   const link = gitLinkOf(dir);
-  const lane: Lane = { dir, ...placeOf(dir), names, kept: readKept(dir, names), ...(settings ? { hookSettings: settings } : {}), ...(link ? { gitLink: link } : {}) };
+  const lane: Lane = { dir, ...placeOf(dir), names, kept: await readKept(dir, names), ...(settings ? { hookSettings: settings } : {}), ...(link ? { gitLink: link } : {}) };
   if (wholeCopy) {
-    const tree = treeOf(dir);
+    const tree = await treeOf(dir);
     if (tree) lane.tree = tree;
   }
   return lane;
@@ -55,7 +55,7 @@ export function watchLane(dir: string, names: string[], wholeCopy = false): Lane
  * After the step: puts back what it may not change, and says whether the branch moved. Files in `skip` (the proof
  * folder) may change. On a moved branch the code is left as it is, for the person to see; protected files still go back.
  */
-export function checkLane(lane: Lane, skip: string[] = []): LaneCheck {
+export async function checkLane(lane: Lane, skip: string[] = []): Promise<LaneCheck> {
   const out: LaneCheck = { restored: [], putBack: [] };
   const { dir } = lane;
   if (!fs.existsSync(dir)) return out;
@@ -65,8 +65,8 @@ export function checkLane(lane: Lane, skip: string[] = []): LaneCheck {
   if (relinked) out.moved = "the copy's link to its git folder was changed";
   else if (branch !== lane.branch) out.moved = branch ? `the copy is on ${branch}, not ${lane.branch}` : `the copy left ${lane.branch}`;
   else if (head !== lane.head) out.moved = `${branch || 'HEAD'} moved from ${head8(lane.head)} to ${head8(head)}`;
-  if (lane.tree && !out.moved) out.putBack = putTreeBack(dir, lane.tree, skip);
-  out.restored = [...putKeptBack(dir, lane.kept, readKept(dir, lane.names)), ...putSettingsBack(dir, lane.hookSettings)];
+  if (lane.tree && !out.moved) out.putBack = await putTreeBack(dir, lane.tree, skip);
+  out.restored = [...putKeptBack(dir, lane.kept, await readKept(dir, lane.names)), ...putSettingsBack(dir, lane.hookSettings)];
   return out;
 }
 
@@ -148,17 +148,17 @@ const HOOK_RUNNER = /(?:^|\/)\.husky\/_\//;
  * The protected files in the copy. At its top, ignored files count too (a local settings file usually is ignored);
  * deeper down only the files git sees, so installed packages never count. A name that starts with "/" is only at the top.
  */
-function protectedPaths(dir: string, names: string[]): string[] {
+async function protectedPaths(dir: string, names: string[]): Promise<string[]> {
   const top = names.map((n) => n.replace(/^\//, '').replace(/\/$/, ''));
   const deep = names.filter((n) => !n.startsWith('/')).map((n) => (n.endsWith('/') ? `:(glob)**/${n}**` : `:(glob)**/${n}`));
-  const ls = (args: string[]) => listed(git(dir, ['ls-files', '-z', '--cached', '--others', ...args], { allowFail: true }));
-  return [...new Set([...ls(['--', ...top]), ...(deep.length ? ls(['--exclude-standard', '--', ...deep]) : [])])].filter((f) => !HOOK_RUNNER.test(f));
+  const ls = async (args: string[]) => listed(await gitLater(dir, ['ls-files', '-z', '--cached', '--others', ...args], { allowFail: true }));
+  return [...new Set([...(await ls(['--', ...top])), ...(deep.length ? await ls(['--exclude-standard', '--', ...deep]) : [])])].filter((f) => !HOOK_RUNNER.test(f));
 }
 
-function readKept(dir: string, names: string[]): Map<string, Kept> {
+async function readKept(dir: string, names: string[]): Promise<Map<string, Kept>> {
   const kept = new Map<string, Kept>();
   if (!names.length) return kept;
-  for (const rel of protectedPaths(dir, names)) {
+  for (const rel of await protectedPaths(dir, names)) {
     const file = path.join(dir, rel);
     try {
       const st = fs.lstatSync(file);
@@ -223,7 +223,7 @@ function removeFile(dir: string, rel: string): void {
 }
 
 /** Every file git sees in the copy (tracked, and new ones not ignored) as a tree, without touching its index. */
-function treeOf(dir: string): string | undefined {
+async function treeOf(dir: string): Promise<string | undefined> {
   const tmp = path.join(os.tmpdir(), `squad-index-${randomUUID()}`);
   try {
     // A copy of the real index, so only the files that changed are read again. It keeps the index's own time: git
@@ -235,8 +235,8 @@ function treeOf(dir: string): string | undefined {
       fs.utimesSync(tmp, st.atime, st.mtime);
     }
     const env = { GIT_INDEX_FILE: tmp };
-    stageAll(dir, env);
-    return git(dir, ['write-tree'], { env }) || undefined;
+    await stageAllLater(dir, env);
+    return (await gitLater(dir, ['write-tree'], { env })) || undefined;
   } catch {
     return undefined;
   } finally {
@@ -244,8 +244,8 @@ function treeOf(dir: string): string | undefined {
   }
 }
 
-function putTreeBack(dir: string, before: string, skip: string[]): string[] {
-  const after = treeOf(dir);
+async function putTreeBack(dir: string, before: string, skip: string[]): Promise<string[]> {
+  const after = await treeOf(dir);
   if (!after || after === before) return [];
   const rows = listed(git(dir, ['diff', '--name-status', '--no-renames', '-z', before, after]));
   const added: string[] = [];
@@ -257,7 +257,7 @@ function putTreeBack(dir: string, before: string, skip: string[]): string[] {
   }
   for (const rel of added) removeFile(dir, rel);
   for (let i = 0; i < back.length; i += 100) {
-    git(dir, ['restore', `--source=${before}`, '--worktree', '--', ...back.slice(i, i + 100)], { env: { GIT_LITERAL_PATHSPECS: '1' } });
+    await gitLater(dir, ['restore', `--source=${before}`, '--worktree', '--', ...back.slice(i, i + 100)], { env: { GIT_LITERAL_PATHSPECS: '1' } });
   }
   return [...back, ...added].sort();
 }

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, FolderPlus, Moon, Plus, Sparkles, Sun } from 'lucide-react';
 import { api, send } from '../api/client';
-import type { AppProject, AppProjects, AppSettings, AppWaiting, FolderListing } from '../api/types';
+import type { AppProject, AppProjects, AppSettings, AppWaiting, FirstLook, FolderListing } from '../api/types';
 import { usePrefs } from '../lib/prefs';
 import { shellArg, shellQuote } from '../lib/text';
 import { Cmd, CouldNotLoad, Modal, STAGE_NAME, Written, actionLabel, ago, commandFor, outdatedLine } from '../components/ui';
@@ -10,7 +10,7 @@ import { AboutButton, AppUpdate } from '../components/Update';
 import { LimitBanner } from '../components/UsageLimit';
 import { SaveTroubleBanner } from '../components/SaveTrouble';
 import { HomeWaiting } from '../components/Waiting';
-import { FolderBrowser, useFolders } from '../components/FolderBrowser';
+import { FolderBrowser, useFolderLook, useFolders } from '../components/FolderBrowser';
 import { NewProject } from '../components/NewProject';
 import { BreakdownWaitCard, useAllBreakdownWaits } from '../components/BreakdownWaits';
 import { changeWaits, openChange, testChangeLine, testChangeWaits } from '../lib/waiting';
@@ -264,8 +264,8 @@ const ALSO: { kind: FolderListing['kind']; name: string; text: string }[] = [
 ];
 
 /** What squad-kit found in the folder, and what happens once the person adds it. */
-function Found({ l }: { l: FolderListing }) {
-  const look = l.look;
+function Found({ look, looking }: { look: FirstLook | undefined; looking: boolean }) {
+  if (looking) return <p className="note" aria-live="polite">Looking at what is in this folder…</p>;
   if (!look) return null;
   if (look.ask) {
     return (
@@ -308,12 +308,13 @@ function AddProject({ onClose }: { onClose(): void }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const l = listing.data;
+  const look = useFolderLook(l);
   const go = (p: string) => {
     setError(null);
     setAt(p);
   };
 
-  const ask = l?.look?.ask;
+  const ask = look.data?.ask;
   const add = async (choice?: 'above' | 'here') => {
     if (!l) return;
     setBusy(true);
@@ -348,7 +349,7 @@ function AddProject({ onClose }: { onClose(): void }) {
               )}
             </>
           ) : (
-            <button className="btn pri" disabled={!l?.canAdd || busy || listing.isFetching} onClick={() => void add()}>
+            <button className="btn pri" disabled={!l?.canAdd || busy || listing.isFetching || look.isFetching} onClick={() => void add()}>
               {busy ? 'Adding…' : l?.kind === 'project' ? 'Open it' : 'Add and get to know it'}
             </button>
           )}
@@ -368,7 +369,7 @@ function AddProject({ onClose }: { onClose(): void }) {
           {!l.canAdd && <span>This folder can't be a project. Open a folder inside it, or make a new one here.</span>}
         </p>
       )}
-      {l?.canAdd && <Found l={l} />}
+      {l?.canAdd && <Found look={look.data} looking={look.isFetching} />}
       {error && <p className="fb-error">{error}</p>}
     </Modal>
   );

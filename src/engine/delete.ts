@@ -1,7 +1,6 @@
-import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { BoardActionError } from '../board/actions.js';
+import { BoardActionError, refuseWhileSaving } from '../board/actions.js';
 import { releaseGoingOut, squadRunsElsewhere } from '../board/lock.js';
 import { isMine, ownerOf } from '../board/owner.js';
 import {
@@ -23,7 +22,7 @@ import {
 } from '../board/store.js';
 import type { BoardMeta, Decision, Deleting, Ticket } from '../board/types.js';
 import { repoHostFor, trackerModule } from '../modules/registry.js';
-import { copyDirsIn, currentBranch, dropSnapshot, git, gitArgs, gitEnv, isRepo, networkGitEnv, removeWorktree, worktreeRoot } from './git.js';
+import { copyDirsIn, currentBranch, dropSnapshot, git, gitLater, isRepo, netGitLater, removeWorktree, worktreeRoot } from './git.js';
 import { agentRuns } from './live.js';
 import { repoFor, reposOf } from './repos.js';
 import { repoTarget } from './sync.js';
@@ -279,16 +278,6 @@ async function waitForStop(bp: BoardPaths, id: string, mark: Deleting, ms: numbe
   }
 }
 
-/** git over the network, without holding up the board while it waits. */
-function gitLater(cwd: string, args: string[], env: Record<string, string>): Promise<void> {
-  return new Promise((resolve, reject) => {
-    execFile('git', gitArgs(args), { cwd, encoding: 'utf8', timeout: 120_000, env: gitEnv(networkGitEnv(cwd, env)) }, (err, _out, stderr) => {
-      if (!err) return resolve();
-      reject(new Error((stderr || err.message).trim().split('\n').slice(-2).join(' ')));
-    });
-  });
-}
-
 /** Only when asked: its open pull request closes, then the branch goes from the remote. */
 async function removeRemote(bp: BoardPaths, t: Ticket): Promise<string[]> {
   const target = repoTarget(bp, t);
@@ -305,7 +294,7 @@ async function removeRemote(bp: BoardPaths, t: Ticket): Promise<string[]> {
     }
   }
   try {
-    await gitLater(target.dir, ['push', target.remote, '--delete', branch], { GIT_TERMINAL_PROMPT: '0', ...(host?.gitEnv() ?? {}) });
+    await netGitLater(target.dir, ['push', target.remote, '--delete', branch], { env: host?.gitEnv() ?? {} });
     notes.push(`Deleted ${branch} on ${target.remote}`);
   } catch (err) {
     // Gone there already: a teammate deleted it, or an earlier try did.
@@ -319,28 +308,28 @@ async function removeRemote(bp: BoardPaths, t: Ticket): Promise<string[]> {
  * Its copy of the code (and a "before" copy left behind), then its local branch. For someone else's ticket, only the
  * parts that hold no unpushed work (`localCopy`); the rest stays.
  */
-function removeCopy(bp: BoardPaths, meta: BoardMeta, t: Ticket, opts: { safe?: boolean } = {}): string[] {
+async function removeCopy(bp: BoardPaths, meta: BoardMeta, t: Ticket, opts: { safe?: boolean } = {}): Promise<string[]> {
   const projectCopies = worktreeRoot(bp.root);
-  const one = (dir: string, base: string, copy: string): string[] => {
+  const one = async (dir: string, base: string, copy: string): Promise<string[]> => {
     if (!isRepo(dir)) return [];
     const root = worktreeRoot(dir);
     const keep = opts.safe ? localCopy(dir, t, base, copy) : null;
     if (!keep || keep.copy) {
-      removeWorktree(dir, copy);
+      await removeWorktree(dir, copy);
       // By hand only inside squad-kit's own folder of copies, never anywhere else.
-      if (inside(root, copy) || inside(projectCopies, copy)) fs.rmSync(copy, { recursive: true, force: true });
+      if (inside(root, copy) || inside(projectCopies, copy)) await fs.promises.rm(copy, { recursive: true, force: true });
     }
     const before = path.join(root, `${t.id.toLowerCase()}-before`);
-    if (fs.existsSync(before)) dropSnapshot(dir, before);
-    git(dir, ['worktree', 'prune'], { allowFail: true });
-    if ((!keep || keep.branch) && hasBranch(dir, branchOf(t))) git(dir, ['branch', '-D', branchOf(t)]);
+    if (fs.existsSync(before)) await dropSnapshot(dir, before);
+    await gitLater(dir, ['worktree', 'prune'], { allowFail: true });
+    if ((!keep || keep.branch) && hasBranch(dir, branchOf(t))) await gitLater(dir, ['branch', '-D', branchOf(t)]);
     return keep?.kept ?? [];
   };
   const dir = repoDir(bp, meta, t);
-  const kept = one(dir, repoFor(meta, t).base, copyOf(dir, t));
-  for (const c of t.copies ?? []) kept.push(...one(path.join(bp.root, c.repo), reposOf(meta).find((r) => r.path === c.repo)?.base ?? repoFor(meta, t).base, c.dir));
+  const kept = await one(dir, repoFor(meta, t).base, copyOf(dir, t));
+  for (const c of t.copies ?? []) kept.push(...(await one(path.join(bp.root, c.repo), reposOf(meta).find((r) => r.path === c.repo)?.base ?? repoFor(meta, t).base, c.dir)));
   // The story's folder goes with its last copy.
-  if (t.storyDir && inside(projectCopies, t.storyDir) && fs.existsSync(t.storyDir) && !copyDirsIn(t.storyDir).length) fs.rmSync(t.storyDir, { recursive: true, force: true });
+  if (t.storyDir && inside(projectCopies, t.storyDir) && fs.existsSync(t.storyDir) && !copyDirsIn(t.storyDir).length) await fs.promises.rm(t.storyDir, { recursive: true, force: true });
   return kept;
 }
 
@@ -355,15 +344,15 @@ async function leaveNote(bp: BoardPaths, t: Ticket, by: string, at: string): Pro
   if (!target || !repo || repo !== target.dir) return [];
   const branch = branchOf(t);
   const host = repoHostFor(bp, target.url);
-  const env = { GIT_TERMINAL_PROMPT: '0', ...(host?.gitEnv() ?? {}) };
+  const env = host?.gitEnv() ?? {};
   const ref = `refs/remotes/${target.remote}/${branch}`;
   try {
-    await gitLater(target.dir, ['fetch', '--quiet', target.remote, `+refs/heads/${branch}:${ref}`], env);
+    await netGitLater(target.dir, ['fetch', '--quiet', target.remote, `+refs/heads/${branch}:${ref}`], { env });
     const tip = git(target.dir, ['rev-parse', '--verify', '-q', ref], { allowFail: true });
     if (!tip) return [];
     const note = deleteNoteCommit(target.dir, tip, squadInRepo(bp, repo), t, by, at);
     if (!note) return [];
-    await gitLater(target.dir, ['push', target.remote, `${note}:refs/heads/${branch}`], env);
+    await netGitLater(target.dir, ['push', target.remote, `${note}:refs/heads/${branch}`], { env });
     git(target.dir, ['update-ref', ref, note], { allowFail: true });
     return [`Left a note on ${branch} on ${target.remote}, so teammates' boards show ${t.id} as deleted`];
   } catch (err) {
@@ -430,7 +419,20 @@ function keepRecord(bp: BoardPaths, t: Ticket, mark: Deleting, fromBoard = false
  * copy and branch, its decisions and links, chats and screenshots, and last its files. Safe to run again: each part
  * that is gone already is skipped.
  */
-export async function deleteTicket(bp: BoardPaths, id: string, opts: { remote?: boolean; waitMs?: number } = {}): Promise<DeleteResult> {
+export function deleteTicket(bp: BoardPaths, id: string, opts: { remote?: boolean; waitMs?: number } = {}): Promise<DeleteResult> {
+  const key = `${bp.squadDir}\0${id.toUpperCase()}`;
+  // Pressed twice: one delete, and both presses get how it went.
+  const now = deletesNow.get(key);
+  if (now) return now;
+  const run = deleteOnce(bp, id, opts).finally(() => deletesNow.delete(key));
+  deletesNow.set(key, run);
+  return run;
+}
+
+const deletesNow = new Map<string, Promise<DeleteResult>>();
+
+async function deleteOnce(bp: BoardPaths, id: string, opts: { remote?: boolean; waitMs?: number }): Promise<DeleteResult> {
+  refuseWhileSaving(bp, id);
   const first = readTicket(bp, id);
   if (!first) {
     // Cut off after its files went: only this computer's record of it is left.
@@ -469,7 +471,7 @@ export async function deleteTicket(bp: BoardPaths, id: string, opts: { remote?: 
     }
     // The copy of the app the person was trying stops before its copy of the code goes.
     await stopTry(bp, t.id);
-    notes.push(...removeCopy(bp, meta, t, { safe: local }).map((k) => `Kept ${k.charAt(0).toLowerCase()}${k.slice(1)}`));
+    notes.push(...(await removeCopy(bp, meta, t, { safe: local })).map((k) => `Kept ${k.charAt(0).toLowerCase()}${k.slice(1)}`));
     // Its own package cache: on this computer only, and of no use once the ticket is gone.
     dropTicketCache(bp, t.id);
     unlinkDecisions(bp, t);

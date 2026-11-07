@@ -10,6 +10,7 @@ import { describeToolEvent } from '../modules/registry.js';
 export const DOING = {
   tests: 'Running the tests',
   check: 'Checking the code',
+  copy: 'Making a copy of the code. On a big project this takes a while.',
   setup: "Setting up this story's copy",
   start: 'Starting the app',
   build: 'Building the app',

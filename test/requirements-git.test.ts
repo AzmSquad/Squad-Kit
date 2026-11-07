@@ -5,7 +5,7 @@ import path from 'node:path';
 import { execSync } from 'node:child_process';
 import { boardPaths, readMeta, readTicket, updateTicket, writeMeta, writeTicket, type BoardPaths } from '../src/board/store.js';
 import * as actions from '../src/board/actions.js';
-import { addWorktree } from '../src/engine/git.js';
+import { addWorktree } from './support/copy.js';
 import { commitTicketDocs, hideSquadFromGit } from '../src/engine/project-git.js';
 import { findItem, updateBreakdown, writeBreakdown } from '../src/board/requirements.js';
 import type { Breakdown } from '../src/board/requirements-types.js';
@@ -123,9 +123,9 @@ const inMain = (file: string) => sh(`git show main:.squad/requirements/BR-1/${fi
 const SLOW = 90_000;
 
 describe('the breakdown in git', () => {
-  it("goes into a story's commits, and is in main once the first story merges", () => {
+  it("goes into a story's commits, and is in main once the first story merges", async () => {
     const t = story(1);
-    expect(commitTicketDocs(bp, t, 'plan approved')).toBeTruthy();
+    expect(await commitTicketDocs(bp, t, 'plan approved')).toBeTruthy();
     expect(sh('git show --name-only --format= squad/ap-1', project).split('\n')).toEqual(expect.arrayContaining(['.squad/requirements/BR-1/breakdown.yaml', '.squad/requirements/BR-1/source/pasted.md']));
     expect(sh('git ls-tree -r --name-only main', project)).not.toContain('requirements');
     expect(accept(t).mergedAt).toBeTruthy();
@@ -133,11 +133,11 @@ describe('the breakdown in git', () => {
     expect(inMain('source/pasted.md')).toContain('Guests book rooms.');
   }, SLOW);
 
-  it('never clashes when two stories built side by side both carry it', () => {
+  it('never clashes when two stories built side by side both carry it', async () => {
     const a = story(1);
     const b = story(2);
-    commitTicketDocs(bp, a, 'plan approved');
-    commitTicketDocs(bp, b, 'plan approved');
+    await commitTicketDocs(bp, a, 'plan approved');
+    await commitTicketDocs(bp, b, 'plan approved');
     expect(accept(a).mergedAt).toBeTruthy();
     const first = inMain('breakdown.yaml');
     // The breakdown changed since; B's copy started before main had one, so B keeps main's.
@@ -153,7 +153,7 @@ describe('the breakdown in git', () => {
     expect(inMain('breakdown.yaml')).toContain('ticket: AP-3');
   }, SLOW);
 
-  it("keeps the remote's newer copy when the team merged a story elsewhere, so the pull request never clashes on it", () => {
+  it("keeps the remote's newer copy when the team merged a story elsewhere, so the pull request never clashes on it", async () => {
     // The team's main, on the remote, already has the breakdown (a story merged from another computer); this
     // computer's main does not have it yet.
     const remote = path.join(tmp, 'remote.git');
@@ -168,16 +168,16 @@ describe('the breakdown in git', () => {
     expect(sh('git ls-tree -r --name-only main', project)).not.toContain('requirements');
 
     const t = story(1);
-    expect(commitTicketDocs(bp, t, 'plan approved')).toBeTruthy();
+    expect(await commitTicketDocs(bp, t, 'plan approved')).toBeTruthy();
     // The branch carries the remote's copy, not this computer's newer one: the two agree, so they merge cleanly.
     expect(sh('git show squad/ap-1:.squad/requirements/BR-1/breakdown.yaml', project)).toBe('id: BR-1\ntitle: As the team merged it');
     expect(() => sh('git merge-tree --write-tree origin/main squad/ap-1', project)).not.toThrow();
   }, SLOW);
 
-  it('adds nothing when the project keeps its documents out of git', () => {
+  it('adds nothing when the project keeps its documents out of git', async () => {
     writeMeta(bp, { ...readMeta(bp), documentsInGit: false });
     const t = story(1);
-    expect(commitTicketDocs(bp, t, 'plan approved')).toBeNull();
+    expect(await commitTicketDocs(bp, t, 'plan approved')).toBeNull();
     expect(accept(t).mergedAt).toBeTruthy();
     expect(sh('git ls-tree -r --name-only main', project)).not.toContain('.squad');
   }, SLOW);

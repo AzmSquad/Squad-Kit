@@ -97,6 +97,16 @@ describe('weakened checks: each one fails the gate, in plain words', () => {
     }
   });
 
+  it('a script that ran no tests becoming one that does sets tests up, and the other way round is still weaker', () => {
+    const pkg = (test: string) => JSON.stringify({ name: 'app', scripts: { test } });
+    for (const none of ['echo "Error: no test specified" && exit 1', 'exit 0', 'true', 'node -e "process.exit(0)"', 'echo no tests']) {
+      expect(findWeakening([change('package.json', pkg(none), pkg('vitest run'))]), none).toEqual([]);
+      expect(findWeakening([change('package.json', pkg('vitest run'), pkg(none))]), none).toHaveLength(1);
+    }
+    expect(findWeakening([change('package.json', pkg('echo start && vitest run'), pkg('echo start'))])).toHaveLength(1);
+    expect(findWeakening([change('package.json', pkg('exit 0'), pkg('echo still nothing'))])).toHaveLength(1);
+  });
+
   it('a changed or removed test script in package.json, with the change in words', () => {
     const pkg = (test: string | undefined, more: Record<string, string> = {}) => JSON.stringify({ name: 'app', scripts: { dev: 'vite', ...(test ? { test } : {}), ...more } }, null, 2);
     expect(findWeakening([change('package.json', pkg('vitest run'), pkg('vitest run --passWithNoTests'))])[0]!.text).toBe(
@@ -213,7 +223,7 @@ afterEach(() => {
 });
 
 describe("the ticket's copy against its base, with git", () => {
-  it('finds a deleted test and a new file with .only, not the code change, and a file moved with the shell is no alarm', () => {
+  it('finds a deleted test and a new file with .only, not the code change, and a file moved with the shell is no alarm', async () => {
     const { dir, base } = repo();
     write(dir, 'src/booking.ts', 'export const book = (n: number) => n <= 3;\n');
     fs.rmSync(path.join(dir, 'test/booking.test.ts'));
@@ -221,19 +231,19 @@ describe("the ticket's copy against its base, with git", () => {
     // Moved with mv: deleted from test/, new (untracked) in src/, same name.
     fs.mkdirSync(path.join(dir, 'src/__tests__'));
     fs.renameSync(path.join(dir, 'test/limit.test.ts'), path.join(dir, 'src/__tests__/limit.test.ts'));
-    const found = weakenedChecks(dir, base);
+    const found = await weakenedChecks(dir, base);
     expect(found.map((w) => w.text)).toEqual(['test/booking.test.ts was deleted (3 tests).', 'In test/focus.test.ts: only some tests run because of it.only.']);
     // Nothing weakened: nothing found. No base or no repo: nothing found either.
     git(dir, 'checkout', '-q', '--', '.');
     git(dir, 'clean', '-qfd');
-    expect(weakenedChecks(dir, base)).toEqual([]);
-    expect(weakenedChecks(tmp, base)).toEqual([]);
+    expect(await weakenedChecks(dir, base)).toEqual([]);
+    expect(await weakenedChecks(tmp, base)).toEqual([]);
   });
 
-  it('leaves out squad-kit\'s own folder', () => {
+  it('leaves out squad-kit\'s own folder', async () => {
     const { dir, base } = repo();
     write(dir, '.squad/tickets/RO-1/test.test.ts', "it.only('x', () => {});\n");
-    expect(weakenedChecks(dir, base, { skip: ['.squad/'] })).toEqual([]);
+    expect(await weakenedChecks(dir, base, { skip: ['.squad/'] })).toEqual([]);
   });
 });
 

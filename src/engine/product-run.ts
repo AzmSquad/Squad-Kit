@@ -93,18 +93,18 @@ const guardOf = (bp: BoardPaths, t: Ticket, dir: string): GuardSpec | undefined 
 /** A repo's copy of the newest main, with its own values and what it needs installed. */
 async function readyMainCopy(bp: BoardPaths, t: Ticket, place: ProductPlace, signal?: AbortSignal): Promise<void> {
   const { dir, repo } = place;
-  const { commit, fresh } = updateCopy(bp.root, repo, dir);
-  fillOwnCopy(bp, repo.path, dir);
+  const { commit, fresh } = await updateCopy(bp.root, repo, dir, signal ? { signal } : {});
+  await fillOwnCopy(bp, repo.path, dir);
   const setup = repo.commands.setup?.trim();
   if (!setup) return;
-  const print = dependencyPrint(dir, commit);
+  const print = await dependencyPrint(dir, commit);
   const mark = `${dir}.setup`;
   if (!fresh && fs.existsSync(mark) && fs.readFileSync(mark, 'utf8') === print) return;
   const guard = guardOf(bp, t, dir);
   const r = await runCommand(dir, setup, SETUP_MS, { silentMs: CHECK_SILENT_MS, ...(signal ? { signal } : {}), ...(guard ? { guard } : {}) });
   if (!r.ok) throw new ProductError(dockerBlockedWords(r.output, guard) ?? `squad-kit could not set up ${place.part.name}.`, `${setup}\n${tail(r.output, 30)}`);
   // A setup can write the same files, like cp .env.example .env.dev: the values kept for stories go back over them.
-  fillOwnCopy(bp, repo.path, dir);
+  await fillOwnCopy(bp, repo.path, dir);
   fs.writeFileSync(mark, print);
 }
 

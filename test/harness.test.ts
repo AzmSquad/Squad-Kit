@@ -99,6 +99,9 @@ const EXCUSED: Record<string, string> = {
   'conversations.ts:MAX_TEXT': 'What the conversation log keeps.',
   'report.ts:MAX_CONVERSATION': 'What a report file keeps of one conversation.',
   'changes.ts:MAX_PATCH': 'How much of one change the Changes tab shows.',
+  'changes.ts:MAX_DIFF_READ': 'How much of a change the Changes tab reads to show that much. Past it the tab lists the files.',
+  'git.ts:LOCK_WAITS_MS': 'How long a git beside everything else waits for one holding a lock. It ends in the same words as a git that failed.',
+  'git.ts:LOCK_WAITS_NOW_MS': 'The same for a git that cannot wait long. Nobody sees this.',
   'depends.ts:MAX_FILES': 'How many files per open story go to the agents.',
   'first-look.ts:MAX_FILES': 'Where counting a project stops.',
   'review-look.ts:MAX_FILES': "How many files go into a chat's opening. The agent reads the rest itself.",
@@ -152,7 +155,7 @@ const INLINE_TIMES: Record<string, string> = {
   'media.ts: 5 * 60_000': 'Pulling the sound out of a video note, beside the work.',
   'media.ts: 3 * 60_000': 'Pulling pictures out of a video note, beside the work.',
   'release.ts: 30_000': 'A quick look at the code host before a push.',
-  'handover.ts: 120_000': 'The same as NETWORK_GIT_MS.',
+  'handover.ts: 60_000': 'A look on the remote for new work, beside the work. Offline, the last look counts.',
   'sync.ts: 30 * 60_000': 'The longest wait before trying the tracker again.',
   'sync.ts: 10 * 60_000': 'How often the wiki is copied.',
 };

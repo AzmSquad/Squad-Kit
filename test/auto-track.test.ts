@@ -30,7 +30,7 @@ const { boardPaths, draftRelease, listDecisions, readMeta, readTicket, updateTic
 const actions = await import('../src/board/actions.js');
 const auto = await import('../src/board/auto.js');
 const { LiveSquad } = await import('../src/engine/live.js');
-const { addWorktree } = await import('../src/engine/git.js');
+const { addWorktree } = await import('./support/copy.js');
 const P = await import('../src/engine/prompts.js');
 const { breakdownFile, breakdownTextDir } = await import('../src/board/requirements-paths.js');
 const { wakeIfReady } = await import('../src/board/depends.js');

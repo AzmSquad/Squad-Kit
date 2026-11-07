@@ -8,7 +8,7 @@ import type { ProductPart, ProjectCommands, Ticket } from '../board/types.js';
 import { scrubSecrets } from '../core/scrub.js';
 import { CHECK_MS, CHECK_SILENT_MS, OWN_CHECK, runCommand, withOneMoreRun, type CommandWatch } from './checks.js';
 import { copyViews } from './copies.js';
-import { addSnapshot, dropSnapshot, git, worktreeRoot } from './git.js';
+import { addSnapshot, dropSnapshot, git, gitLater, worktreeRoot } from './git.js';
 import { hookFiles } from './hook-files.js';
 import { checkLane, watchLane } from './lane.js';
 import { fillOwnCopy } from './local-files.js';
@@ -49,9 +49,9 @@ export async function runGate(dir: string, command: string, watch: CommandWatch 
   if (!fs.existsSync(dir)) return { result: 'cant-run', why: CANT_RUN.part, output: '', seconds: 0 };
   const once = async () => {
     const top = git(dir, ['rev-parse', '--show-toplevel'], { allowFail: true }) || dir;
-    const lane = watchLane(top, hookFiles(top), true);
+    const lane = await watchLane(top, hookFiles(top), true);
     const r = await runCommand(dir, command, timeoutMs, { silentMs: CHECK_SILENT_MS, ...watch, endAll: true });
-    checkLane(lane);
+    await checkLane(lane);
     return r;
   };
   let r = await withOneMoreRun(once, watch, () => undefined);
@@ -147,7 +147,7 @@ const COPY_PREFIX = 'gate-copy-';
 const OLD_COPY_MS = 2 * 60 * 60_000;
 
 /** A copy left by an app that ended in the middle of a try goes when the next one starts. */
-function dropOldCopies(src: string): void {
+async function dropOldCopies(src: string): Promise<void> {
   const root = worktreeRoot(src);
   let names: string[] = [];
   try {
@@ -158,7 +158,7 @@ function dropOldCopies(src: string): void {
   for (const n of names) {
     const dir = path.join(root, n);
     try {
-      if (Date.now() - fs.statSync(dir).mtimeMs > OLD_COPY_MS) dropSnapshot(src, dir);
+      if (Date.now() - fs.statSync(dir).mtimeMs > OLD_COPY_MS) await dropSnapshot(src, dir);
     } catch {
       // It went while we looked, or the next try cleans it up.
     }
@@ -170,15 +170,15 @@ export async function cleanCopy(bp: BoardPaths, repo: { path: string; base: stri
   const src = path.join(bp.root, repo.path);
   const commit = git(src, ['rev-parse', '--verify', '-q', `${repo.base}^{commit}`], { allowFail: true }) || git(src, ['rev-parse', '--verify', '-q', 'HEAD'], { allowFail: true });
   if (!commit) throw new Error('This project has no saved code yet, so there is nothing to run it on.');
-  dropOldCopies(src);
+  await dropOldCopies(src);
   const name = `${COPY_PREFIX}${randomBytes(3).toString('hex')}`;
-  const dir = addSnapshot(src, name, commit);
-  fillOwnCopy(bp, repo.path, dir);
+  const dir = await addSnapshot(src, name, commit, watch.signal ? { signal: watch.signal } : {});
+  await fillOwnCopy(bp, repo.path, dir);
   if (repo.commands.setup?.trim()) await runCommand(dir, repo.commands.setup, SETUP_MS, { ...watch, ...guardOf(bp, dir) });
   return dir;
 }
 
-export const dropCleanCopy = (bp: BoardPaths, repo: { path: string }, dir: string): void => dropSnapshot(path.join(bp.root, repo.path), dir);
+export const dropCleanCopy = (bp: BoardPaths, repo: { path: string }, dir: string): Promise<void> => dropSnapshot(path.join(bp.root, repo.path), dir);
 
 export function guardOf(bp: BoardPaths, dir: string): { guard?: CommandWatch['guard'] } {
   if (!guardSupport().on) return {};
@@ -217,7 +217,7 @@ export async function tryGate(bp: BoardPaths, by: string, input: { command?: str
     if (had && run.result !== 'cant-run') setGateTried(bp, by, had.id, { at: new Date().toISOString(), by, result: run.result, seconds: Math.round(run.seconds) });
     return { result: run.result, seconds: Math.round(run.seconds), output: run.output, ...(run.why ? { why: run.why } : {}) };
   } finally {
-    dropCleanCopy(bp, repo, dir);
+    await dropCleanCopy(bp, repo, dir);
   }
 }
 
@@ -248,26 +248,26 @@ export async function runReleaseGates(bp: BoardPaths, tickets: Ticket[]): Promis
       const dir = await cleanCopy(bp, repo);
       copies.push({ repo, dir });
       for (const t of list.filter((x) => x.branch && !x.mergedAt)) {
-        git(dir, ['-c', 'user.name=squad-kit', '-c', 'user.email=squad-kit@localhost', 'merge', '--no-edit', t.branch!], { allowFail: true });
+        await gitLater(dir, ['-c', 'user.name=squad-kit', '-c', 'user.email=squad-kit@localhost', 'merge', '--no-edit', t.branch!], { allowFail: true });
         // Two stories that clash: the release says so itself, and a gate must not judge half-merged files.
-        git(dir, ['merge', '--abort'], { allowFail: true });
+        await gitLater(dir, ['merge', '--abort'], { allowFail: true });
       }
     }
     return await runGatesAt(bp, 'release', copies.map((c) => ({ dir: c.dir, repo: c.repo.path })), [], (dir) => guardOf(bp, dir));
   } finally {
-    for (const c of copies) dropCleanCopy(bp, c.repo, c.dir);
+    for (const c of copies) await dropCleanCopy(bp, c.repo, c.dir);
   }
 }
 
 /** A story that changes what a must-pass gate runs, or the project's scripts/check, stops as weakened tests do. */
-export function gatesChanged(bp: BoardPaths, dir: string, repo: string, base: string): Weakening[] {
+export async function gatesChanged(bp: BoardPaths, dir: string, repo: string, base: string): Promise<Weakening[]> {
   const { additions } = readHarness(bp);
   const parts = partsOf(readMeta(bp));
-  const out = gateChanged(dir, base, `./${OWN_CHECK}`, "the project's own check");
+  const out = await gateChanged(dir, base, `./${OWN_CHECK}`, "the project's own check");
   for (const g of additions.filter((a): a is GateAddition => a.kind === 'gate' && a.state === 'on' && a.on_fail === 'stop')) {
     const part = g.part ? parts.find((p) => p.id === g.part) : undefined;
     if (g.part && (part?.repo ?? '.') !== repo) continue;
-    out.push(...gateChanged(partFolder(dir, part), base, g.command, `your team's gate "${g.name}"`));
+    out.push(...(await gateChanged(partFolder(dir, part), base, g.command, `your team's gate "${g.name}"`)));
   }
   return out;
 }

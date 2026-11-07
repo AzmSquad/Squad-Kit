@@ -5,7 +5,7 @@ import type { LocalSetup, Ticket, TrackerEvent } from '../board/types.js';
 import { StepError } from '../board/problem.js';
 import { repoHostFor, trackerFor } from '../modules/registry.js';
 import type { Tracker } from '../modules/tracker/types.js';
-import { MergeClash, currentBranch, git, mergeIntoBase, moveBase, netGit, remotes } from './git.js';
+import { MergeClash, currentBranch, git, mergeIntoBase, remotes, netGitLater, baseTurn, fetchedTip, moveBase } from './git.js';
 import { projectRoot } from './live.js';
 import { filesMoved, repoFor } from './repos.js';
 import { overviewAfterMerge } from '../board/overview.js';
@@ -256,14 +256,14 @@ export async function publishTicket(bp: BoardPaths, ticketId: string): Promise<{
   const env = host.gitEnv();
 
   // A brand-new repo has no base branch yet, and a PR needs one to point at.
-  const remoteBase = netGit(target.dir, ['ls-remote', '--heads', target.remote, target.base], { allowFail: true, env });
+  const remoteBase = await netGitLater(target.dir, ['ls-remote', '--heads', target.remote, target.base], { allowFail: true, env });
   if (!remoteBase) {
-    netGit(target.dir, ['push', target.remote, `${target.base}:refs/heads/${target.base}`], { env });
+    await netGitLater(target.dir, ['push', target.remote, `${target.base}:refs/heads/${target.base}`], { env });
     note(bp, ticketId, `Sent the first code to ${host.label}, which was empty`);
   }
   // Never forced: when someone else's work is on that branch (the ticket was taken back from them), it stays there.
   try {
-    netGit(t.worktree ?? target.dir, ['push', target.remote, `${t.branch}:refs/heads/${t.branch}`], { env });
+    await netGitLater(t.worktree ?? target.dir, ['push', target.remote, `${t.branch}:refs/heads/${t.branch}`], { env });
   } catch (err) {
     if (/rejected|fast-forward|fetch first|before pushing again/i.test((err as Error).message)) throw new StepError(`${target.remote} has newer work on this ticket from someone else, and squad-kit does not write over it. Bring in their work, then press Try again.`, (err as Error).message);
     throw err;
@@ -306,9 +306,8 @@ export async function publishTicket(bp: BoardPaths, ticketId: string): Promise<{
   try {
     await host.merge(opened.id, `Merge ${t.title} (${t.id})`);
     merged = true;
-    netGit(target.dir, ['fetch', target.remote, target.base], { env });
-    const head = git(target.dir, ['rev-parse', 'FETCH_HEAD']);
-    const local = moveBase(target.dir, target.base, head, squadInside(bp, target.dir));
+    const head = await fetchedTip(target.dir, target.remote, target.base, { env });
+    const local = await baseTurn(target.dir, () => moveBase(target.dir, target.base, head, squadInside(bp, target.dir)));
     if (local.note) saidToEngineers(bp, ticketId, local.note);
     movedLocal = local.moved;
   } catch (err) {
@@ -381,8 +380,8 @@ export async function recheckMerge(bp: BoardPaths, id: string): Promise<'merged'
     }
     try {
       const env = host.gitEnv();
-      netGit(target.dir, ['fetch', target.remote, target.base], { env });
-      const local = moveBase(target.dir, target.base, git(target.dir, ['rev-parse', 'FETCH_HEAD']), squadInside(bp, target.dir));
+      const head = await fetchedTip(target.dir, target.remote, target.base, { env });
+      const local = await baseTurn(target.dir, () => moveBase(target.dir, target.base, head, squadInside(bp, target.dir)));
       if (local.note) saidToEngineers(bp, id, local.note);
       moved = local.moved;
     } catch {
@@ -390,13 +389,17 @@ export async function recheckMerge(bp: BoardPaths, id: string): Promise<'merged'
     }
     line = `Pull request ${t.pr.id} was approved and merged on ${host.label}`;
   } else {
-    try {
+    const dirs = copyViews(readMeta(bp), t).map((view) => path.join(projectRoot(bp), repoFor(readMeta(bp), view).path));
+    const went = await baseTurn(dirs, () => {
+      // Looked at again in its turn: an accept that went first may have merged it by now.
+      if (!mergeWait(readTicket(bp, id))) return false;
       // A story across parts goes in everywhere. One already in is skipped, so a later look finishes the rest.
-      for (const view of copyViews(readMeta(bp), t)) if (!mergeLocally(bp, view)?.moved) return 'waiting';
-      moved = true;
-    } catch (err) {
-      return err instanceof MergeClash ? 'clash' : 'waiting';
-    }
+      for (const view of copyViews(readMeta(bp), t)) if (!mergeLocally(bp, view)?.moved) return false;
+      return true;
+    }).catch((err: unknown) => (err instanceof MergeClash ? 'clash' : false));
+    if (went === 'clash') return 'clash';
+    if (!went) return 'waiting';
+    moved = true;
     line = `Merged into ${base}: your own copy of ${base} was free again`;
   }
   updateTicket(bp, id, (x) => {

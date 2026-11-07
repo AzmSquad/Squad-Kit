@@ -5,7 +5,7 @@ import path from 'node:path';
 import { execSync } from 'node:child_process';
 import { boardPaths, readTicket, ticketFilesDir, updateTicket, writeMeta, type BoardPaths } from '../src/board/store.js';
 import * as actions from '../src/board/actions.js';
-import { addWorktree } from '../src/engine/git.js';
+import { addWorktree } from './support/copy.js';
 import { trackerFor } from '../src/modules/registry.js';
 import { flushTracker, publishTicket, syncWiki } from '../src/engine/sync.js';
 import { AzureError } from '../src/modules/azure/client.js';

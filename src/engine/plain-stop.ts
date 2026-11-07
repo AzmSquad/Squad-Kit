@@ -1,5 +1,6 @@
 import { StepError } from '../board/problem.js';
 import type { AiTool } from '../modules/ai-tool/types.js';
+import { NoRoomForCopy } from './git.js';
 
 /**
  * Only squad-kit's own plain words reach a person's stop as they are: a StepError's, the sentences below that a run
@@ -37,7 +38,7 @@ export function ownRunWords(said: string, tool?: Pick<AiTool, 'ownWords'>): bool
 
 /** squad-kit's own plain words for an error, or null when its words are not squad-kit's to show. */
 export function ownWords(err: unknown): string | null {
-  if (err instanceof StepError) return err.message;
+  if (err instanceof StepError || err instanceof NoRoomForCopy) return err.message;
   if (err instanceof Error && err.message === STOPPED) return STOPPED;
   return null;
 }

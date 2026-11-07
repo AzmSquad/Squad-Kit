@@ -34,7 +34,7 @@ vi.mock('../src/planner/runtimes/auth-probe.js', async (orig) => ({
 const { buildPaths } = await import('../src/core/paths.js');
 const { boardPaths, readMeta, writeMeta, writeTicket } = await import('../src/board/store.js');
 const { startConsoleServer } = await import('../src/console/server.js');
-const { addWorktree } = await import('../src/engine/git.js');
+const { addWorktree } = await import('./support/copy.js');
 
 const TOKEN = 'f'.repeat(64);
 const auth = { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' };

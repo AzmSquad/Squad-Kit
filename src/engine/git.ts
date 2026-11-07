@@ -1,13 +1,14 @@
-import { execFile, execFileSync, spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { constants as bufferLimits } from 'node:buffer';
+import { execFileSync, spawn } from 'node:child_process';
+import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { squadHome } from '../core/home.js';
 import { NOT_A_PROJECT_FOLDER, isOwnFolder } from '../core/paths.js';
-import { OWN_GROUP, endGroup, signalGroup, track, whenExited } from './process-group.js';
+import { OWN_GROUP, endGroup, endPid, signalGroup, takenOver, track, trackTask, whenExited } from './process-group.js';
 import { hookFiles, isHookFile } from './hook-files.js';
-import { clearHookGit, commitsIn, endHookGroup, hookGitEnv, hookGitLeft, hookWords, makeHookGit, noteHookGroup, putFilesBack } from './hook-git.js';
+import { clearHookGit, commitsIn, endHookGroup, hookGitEnv, hookGitLeft, hookWords, makeHookGit, noteHookGroup, putFilesBack, putFilesBackLater } from './hook-git.js';
 import { commitGuard, guardBlockedDetail, guardBlockedPath, projectEnv, spawnProject, type GuardSpec } from './project-guard.js';
 import { RawError } from '../core/for-people.js';
 
@@ -86,19 +87,47 @@ function commandOf(args: string[]): string {
   return args[at < 0 ? 0 : at + 2] ?? 'command';
 }
 
+/** All one string can hold: the most of git's answer squad-kit keeps in memory. A longer one is read as it comes (gitRecords). */
+export const MOST_OUTPUT = bufferLimits.MAX_STRING_LENGTH;
+
+/** git says this when another git holds one of its lock files for a moment: not a failure, a wait. */
+const LOCKED = /Unable to create '[^']*\.lock'|could not lock config file/;
+/** How long a git beside everything else waits for a lock, try by try: longer than any git here holds one, on any size. */
+const LOCK_WAITS_MS = [100, 250, 500, 1000, 2000, 4000, 8000, 15_000];
+/** The same for a git that holds up the board: only what a config or ref lock takes. */
+const LOCK_WAITS_NOW_MS = [50, 100, 200];
+
+function waitNow(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function gaveUp(full: string[], timeoutMs: number): RawError {
+  const s = Math.max(1, Math.round(timeoutMs / 1000));
+  return new RawError(`git ${commandOf(full)} gave up after ${s} second${s === 1 ? '' : 's'}. Check the network, and that git can reach the remote without asking for a password.`);
+}
+
+function saidTooMuch(full: string[]): RawError {
+  return new RawError(`git ${commandOf(full)} said more than squad-kit can read at once.`);
+}
+
 function runGit(cwd: string, full: string[], opts: { allowFail?: boolean; env?: Record<string, string>; timeoutMs?: number }): string {
-  try {
-    const env = gitEnv(opts.env);
-    return execFileSync('git', full, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024, env, ...(opts.timeoutMs ? { timeout: opts.timeoutMs } : {}) }).trim();
-  } catch (err) {
-    if (opts.allowFail) return '';
-    const e = err as { stderr?: Buffer | string; message: string; code?: string };
-    if (e.code === 'ETIMEDOUT') {
-      const s = Math.max(1, Math.round((opts.timeoutMs ?? 0) / 1000));
-      throw new RawError(`git ${commandOf(full)} gave up after ${s} second${s === 1 ? '' : 's'}. Check the network, and that git can reach the remote without asking for a password.`);
+  for (let tries = 0; ; tries += 1) {
+    try {
+      const env = gitEnv(opts.env);
+      return execFileSync('git', full, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: MOST_OUTPUT, env, ...(opts.timeoutMs ? { timeout: opts.timeoutMs } : {}) }).trim();
+    } catch (err) {
+      const e = err as { stderr?: Buffer | string; message: string; code?: string };
+      const said = (e.stderr ? e.stderr.toString() : e.message).trim();
+      if (LOCKED.test(said) && tries < LOCK_WAITS_NOW_MS.length) {
+        waitNow(LOCK_WAITS_NOW_MS[tries]!);
+        continue;
+      }
+      // Never "nothing": a caller that may fail still believes what comes back.
+      if (e.code === 'ENOBUFS') throw saidTooMuch(full);
+      if (opts.allowFail) return '';
+      if (e.code === 'ETIMEDOUT') throw gaveUp(full, opts.timeoutMs ?? 0);
+      throw new RawError(`git ${commandOf(full)} failed: ${said.split('\n').slice(-3).join(' ')}`);
     }
-    const detail = (e.stderr ? e.stderr.toString() : e.message).trim().split('\n').slice(-3).join(' ');
-    throw new RawError(`git ${commandOf(full)} failed: ${detail}`);
   }
 }
 
@@ -106,26 +135,192 @@ export function git(cwd: string, args: string[], opts: { allowFail?: boolean; en
   return runGit(cwd, gitArgs(args), opts);
 }
 
+/* ── git beside everything else ──────────────────────── */
+
+/** How a git runs beside everything else. */
+export interface GitLater {
+  allowFail?: boolean;
+  env?: Record<string, string>;
+  timeoutMs?: number;
+  /** Ends it, and what it started: the ticket's Stop, or the board closing. */
+  signal?: AbortSignal;
+  /** Its process, which leads a group of its own. */
+  onSpawn?(pid: number): void;
+  /** Ends it once it has said this many bytes (the caller does not need more), with a GitSaidTooMuch. */
+  mostBytes?: number;
+  /** What it says goes straight to this open file. */
+  outputTo?: number;
+}
+
+/** A Stop or the board closing ended this git. */
+export class GitStopped extends Error {
+  constructor() {
+    super('Stopped.');
+    this.name = 'GitStopped';
+  }
+}
+
+/** git's answer was longer than the caller keeps. */
+export class GitSaidTooMuch extends RawError {}
+
+class GitFailed extends RawError {
+  /** Another git held a lock, so it may be tried again. */
+  readonly locked: boolean;
+  constructor(full: string[], said: string) {
+    super(`git ${commandOf(full)} failed: ${said.trim().split('\n').slice(-3).join(' ')}`);
+    this.locked = LOCKED.test(said);
+  }
+}
+
+/**
+ * The one way a git runs without holding up the board: the same arguments and environment as every other git, in a
+ * process group of its own, so ending it ends what it started. `git worktree add` does its real work in a child.
+ */
+function gitBeside(cwd: string, full: string[], env: NodeJS.ProcessEnv, how: GitLater, onOutput: (chunk: Buffer, stop: (why: Error) => void) => void): Promise<void> {
+  return new Promise((done, fail) => {
+    if (how.signal?.aborted) return fail(new GitStopped());
+    const child = track(spawn('git', full, { cwd, env, stdio: ['ignore', how.outputTo ?? 'pipe', 'pipe'], detached: OWN_GROUP }));
+    let said = '';
+    let why: Error | null = null;
+    const stop = (reason: Error) => {
+      why ??= reason;
+      endGroup(child, 2000);
+    };
+    const onStop = () => stop(new GitStopped());
+    const timer = how.timeoutMs ? setTimeout(() => stop(gaveUp(full, how.timeoutMs!)), how.timeoutMs) : undefined;
+    how.signal?.addEventListener('abort', onStop, { once: true });
+    const end = () => {
+      clearTimeout(timer);
+      how.signal?.removeEventListener('abort', onStop);
+    };
+    child.stdout?.on('data', (chunk: Buffer) => onOutput(chunk, stop));
+    child.stderr!.on('data', (d: Buffer) => (said = `${said}${d.toString('utf8')}`.slice(-8000)));
+    child.once('error', (err) => {
+      end();
+      fail(new RawError(`git ${commandOf(full)} failed: ${err.message}`));
+    });
+    if (child.pid) how.onSpawn?.(child.pid);
+    void whenExited(child).then((code) => {
+      end();
+      if (why) fail(why);
+      else if (code === 0) done();
+      else fail(new GitFailed(full, said));
+    });
+  });
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** `git` for the steps that really take long on a big project. Its own lock waits for the git that holds it. */
+export async function gitLater(cwd: string, args: string[], how: GitLater = {}): Promise<string> {
+  const full = gitArgs(args);
+  const most = how.mostBytes ?? MOST_OUTPUT;
+  for (let tries = 0; ; tries += 1) {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    try {
+      await gitBeside(cwd, full, gitEnv(how.env), how, (chunk, stop) => {
+        size += chunk.length;
+        if (size > most) stop(new GitSaidTooMuch(`git ${commandOf(full)} said more than squad-kit can read at once.`));
+        else chunks.push(chunk);
+      });
+      return Buffer.concat(chunks).toString('utf8').trim();
+    } catch (err) {
+      if (err instanceof GitFailed && err.locked && tries < LOCK_WAITS_MS.length) {
+        await sleep(LOCK_WAITS_MS[tries]!);
+        continue;
+      }
+      // Never "nothing" for a Stop or an answer cut off: a caller that may fail still believes what comes back.
+      if (how.allowFail && !(err instanceof GitStopped) && !(err instanceof GitSaidTooMuch)) return '';
+      throw err;
+    }
+  }
+}
+
+/** Hands on each record of git's output as it comes, so no answer is too long. A record may end in a separator only. */
+function recordsFrom(separator: '\0' | '\n', onRecord: (record: string) => void): (chunk: Buffer) => void {
+  const byte = separator.charCodeAt(0);
+  let rest: Buffer = Buffer.alloc(0);
+  return (chunk) => {
+    const all = rest.length ? Buffer.concat([rest, chunk]) : chunk;
+    let from = 0;
+    for (let at = all.indexOf(byte, from); at >= 0; at = all.indexOf(byte, from)) {
+      if (at > from) onRecord(all.toString('utf8', from, at));
+      from = at + 1;
+    }
+    rest = all.subarray(from);
+  };
+}
+
+/** git's answer one record at a time, beside everything else: nothing of it is kept here, so its size breaks nothing. */
+export function gitRecords(cwd: string, args: string[], separator: '\0' | '\n', onRecord: (record: string) => void, how: GitLater = {}): Promise<void> {
+  const feed = recordsFrom(separator, onRecord);
+  return gitBeside(cwd, gitArgs(args), gitEnv(how.env), how, (chunk) => feed(chunk));
+}
+
+/** The same for what cannot wait: the answer goes through a file. */
+function gitRecordsNow(cwd: string, args: string[], separator: '\0' | '\n', onRecord: (record: string) => void, env?: Record<string, string>): void {
+  const file = path.join(os.tmpdir(), `squad-git-${randomUUID()}`);
+  const fd = fs.openSync(file, 'w+');
+  try {
+    execFileSync('git', gitArgs(args), { cwd, stdio: ['ignore', fd, 'pipe'], env: gitEnv(env) });
+    const feed = recordsFrom(separator, onRecord);
+    const chunk = Buffer.alloc(1024 * 1024);
+    for (let at = 0, n = fs.readSync(fd, chunk, 0, chunk.length, at); n > 0; at += n, n = fs.readSync(fd, chunk, 0, chunk.length, at)) feed(Buffer.from(chunk.subarray(0, n)));
+  } catch (err) {
+    const e = err as { stderr?: Buffer | string; message: string };
+    throw new RawError(`git ${commandOf(gitArgs(args))} failed: ${(e.stderr ? e.stderr.toString() : e.message).trim().split('\n').slice(-3).join(' ')}`);
+  } finally {
+    fs.closeSync(fd);
+    fs.rmSync(file, { force: true });
+  }
+}
+
 /** The project's own core.hooksPath, which every other git here has masked. Only ever read, never used to run anything. */
 export function projectHooksPath(dir: string): string {
   return runGit(dir, [...PROGRAMS_OFF, 'config', '--get', 'core.hooksPath'], { allowFail: true });
 }
 
-/** The nested repos in a folder: submodules, and any folder with a `.git` of its own that is not ignored. */
+const NESTED_LINKS = ['ls-files', '-z', '--stage'];
+const NESTED_FRESH = ['ls-files', '-z', '--others', '--exclude-standard'];
+/** A submodule in the list of everything in the repo, by its path. */
+const nestedLink = (line: string) => (line.startsWith('160000 ') ? line.slice(line.indexOf('\t') + 1) : null);
+
+/**
+ * The nested repos in a folder: submodules, and any folder with a `.git` of its own that is not ignored. It keeps
+ * nothing of the lists it reads, so it finds them on any size, and when git cannot say, that is an error: a safety
+ * check must never quietly find nothing.
+ */
 function nestedRepos(dir: string, env?: Record<string, string>): string[] {
-  const o = env ? { allowFail: true, env } : { allowFail: true };
-  const links = git(dir, ['ls-files', '-z', '--stage'], o).split('\0').filter((l) => l.startsWith('160000 ')).map((l) => l.slice(l.indexOf('\t') + 1));
-  const fresh = git(dir, ['ls-files', '-z', '--others', '--exclude-standard'], o).split('\0').filter((f) => f.endsWith('/')).map((f) => f.slice(0, -1));
-  return [...links, ...fresh];
+  const found: string[] = [];
+  gitRecordsNow(dir, NESTED_LINKS, '\0', (l) => void (nestedLink(l) !== null && found.push(nestedLink(l)!)), env);
+  gitRecordsNow(dir, NESTED_FRESH, '\0', (f) => void (f.endsWith('/') && found.push(f.slice(0, -1))), env);
+  return found;
 }
+
+async function nestedReposLater(dir: string, env?: Record<string, string>): Promise<string[]> {
+  const found: string[] = [];
+  const how = env ? { env } : {};
+  await gitRecords(dir, NESTED_LINKS, '\0', (l) => void (nestedLink(l) !== null && found.push(nestedLink(l)!)), how);
+  await gitRecords(dir, NESTED_FRESH, '\0', (f) => void (f.endsWith('/') && found.push(f.slice(0, -1))), how);
+  return found;
+}
+
+const notThese = (paths: string[]) => paths.map((p) => `:(top,exclude,literal)${p}`);
 
 /**
  * Stages all the work in a folder, and nothing of a nested repo. git would otherwise look inside it with that repo's own
  * settings, and anything in the copy can write those: this is the one way the engine stages everything.
  */
 export function stageAll(dir: string, env?: Record<string, string>): void {
-  const out = [...nestedRepos(dir, env), ...placedIn(dir)].map((p) => `:(top,exclude,literal)${p}`);
+  const out = notThese([...nestedRepos(dir, env), ...placedIn(dir)]);
   git(dir, ['add', '-A', ...(out.length ? ['--', ':/', ...out] : [])], env ? { env } : {});
+}
+
+/** stageAll, beside everything else: on a big project it reads every file. */
+export async function stageAllLater(dir: string, env?: Record<string, string>, signal?: AbortSignal): Promise<void> {
+  const out = notThese([...(await nestedReposLater(dir, env)), ...placedIn(dir)]);
+  await gitLater(dir, ['add', '-A', ...(out.length ? ['--', ':/', ...out] : [])], { ...(env ? { env } : {}), ...(signal ? { signal } : {}) });
 }
 
 /** The list of local files squad-kit placed in a copy, in the copy's own git folder, where no agent writes. */
@@ -159,8 +354,8 @@ export function somethingToSave(dir: string): boolean {
 }
 
 /** The tracked files in a folder that differ from the last commit, by their paths from that folder. */
-export function changedTracked(dir: string): string[] {
-  return git(dir, ['diff', '--name-only', '--relative', '-z', 'HEAD'], { allowFail: true }).split('\0').filter(Boolean);
+export async function changedTracked(dir: string): Promise<string[]> {
+  return (await gitLater(dir, ['diff', '--name-only', '--relative', '-z', 'HEAD'], { allowFail: true })).split('\0').filter(Boolean);
 }
 
 /** True for a file a package tool writes itself: package-lock.json, pnpm-lock.yaml, yarn.lock, go.sum and the like. */
@@ -174,10 +369,10 @@ export function isLockFile(file: string): boolean {
  * (installed packages, a local database). In the person's own folder, `keep` names what already differed before the
  * setup ran and `only` limits it further, so their own changes stay. The files it put back.
  */
-export function putBackTracked(dir: string, opts: { keep?: string[]; only?: (file: string) => boolean } = {}): string[] {
+export async function putBackTracked(dir: string, opts: { keep?: string[]; only?: (file: string) => boolean } = {}): Promise<string[]> {
   const keep = new Set(opts.keep);
-  const changed = changedTracked(dir).filter((f) => !keep.has(f) && (opts.only?.(f) ?? true));
-  if (changed.length) git(dir, ['checkout', 'HEAD', '--', ...changed], { allowFail: true });
+  const changed = (await changedTracked(dir)).filter((f) => !keep.has(f) && (opts.only?.(f) ?? true));
+  if (changed.length) await gitLater(dir, ['checkout', 'HEAD', '--', ...changed], { allowFail: true });
   return changed;
 }
 
@@ -200,19 +395,21 @@ export function networkGitEnv(cwd: string, env: Record<string, string> = {}): Re
   return { ...env, GIT_TERMINAL_PROMPT: '0', ...(ssh ? { GIT_SSH_COMMAND: [ssh, ...add].join(' ') } : {}) };
 }
 
-/** git over the network (fetch, push, ls-remote, pull): it never asks for a password and gives up after two minutes. */
-export function netGit(cwd: string, args: string[], opts: { allowFail?: boolean; env?: Record<string, string>; timeoutMs?: number } = {}): string {
-  return git(cwd, args, { ...opts, env: networkGitEnv(cwd, opts.env), timeoutMs: opts.timeoutMs ?? NETWORK_GIT_MS });
+/** git over the network (fetch, push, ls-remote, pull), beside everything else: it never asks for a password and gives up after two minutes. */
+export function netGitLater(cwd: string, args: string[], opts: GitLater = {}): Promise<string> {
+  return gitLater(cwd, args, { ...opts, env: networkGitEnv(cwd, opts.env), timeoutMs: opts.timeoutMs ?? NETWORK_GIT_MS });
 }
 
-/** netGit beside everything else, so a slow remote never holds up the board. */
-export function netGitLater(cwd: string, args: string[], opts: { env?: Record<string, string>; timeoutMs?: number } = {}): Promise<string> {
-  return new Promise((done, fail) => {
-    execFile('git', gitArgs(args), { cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, env: gitEnv(networkGitEnv(cwd, opts.env)), timeout: opts.timeoutMs ?? NETWORK_GIT_MS }, (err, stdout, stderr) => {
-      if (err) fail(new RawError(`git ${args[0]} failed: ${(stderr || err.message).trim().split('\n').slice(-3).join(' ')}`));
-      else done(stdout.trim());
-    });
-  });
+/**
+ * A branch's tip on the remote, as it is now. Not through FETCH_HEAD: every other fetch in this folder writes that too,
+ * and any of them may run beside this one.
+ */
+export async function fetchedTip(dir: string, remote: string, branch: string, opts: GitLater = {}): Promise<string> {
+  const ref = `refs/squad/fetched/${randomUUID()}`;
+  await netGitLater(dir, ['fetch', remote, `+refs/heads/${branch}:${ref}`], opts);
+  const tip = git(dir, ['rev-parse', ref]);
+  git(dir, ['update-ref', '-d', ref], { allowFail: true });
+  return tip;
 }
 
 export function isRepo(dir: string): boolean {
@@ -231,7 +428,7 @@ const FIRST_COMMIT_SKIPS = ['/.squad/', 'node_modules/', 'dist/', 'build/', '.ne
  * A folder squad-kit works in needs git with one commit to branch from. A plain folder becomes a repo whose first
  * commit holds the files already there, so the squad's copies start from the real code.
  */
-export function ensureRepo(dir: string, projectName: string): void {
+export function ensureRepo(dir: string, projectName: string): 'later' | 'done' {
   // Everything on the computer sits under these: a first commit here would take it all.
   if (!isOwnFolder(dir) && !hasCommits(dir)) throw new Error(NOT_A_PROJECT_FOLDER);
   if (!isRepo(dir)) git(dir, ['init', '-b', 'main']);
@@ -239,9 +436,50 @@ export function ensureRepo(dir: string, projectName: string): void {
     const readme = path.join(dir, 'README.md');
     if (!fs.readdirSync(dir).some((f) => f !== '.git' && f !== '.squad') && !fs.existsSync(readme)) fs.writeFileSync(readme, `# ${projectName}\n`, 'utf8');
     excludeLocal(dir, FIRST_COMMIT_SKIPS);
+    if (bigToSave(dir)) return 'later';
     stageAll(dir);
-    git(dir, authorArgs(dir).concat(['commit', '--allow-empty', '-m', 'start the project']));
+    git(dir, authorArgs(dir).concat(['commit', '--allow-empty', '-m', FIRST_COMMIT]));
   }
+  return 'done';
+}
+
+const FIRST_COMMIT = 'start the project';
+
+/** Over this a first save takes a moment on the board's time, so it is a step of its own, beside everything else. */
+const BIG_FIRST_SAVE = { files: 2000, bytes: 50 * 1024 * 1024 };
+const NOT_SAVED_FIRST = new Set([...FIRST_COMMIT_SKIPS.filter((p) => p.endsWith('/')).map((p) => p.replace(/\//g, '')), '.git']);
+
+/** True when a folder's first save would take a while. It stops looking as soon as it knows, on any size. */
+function bigToSave(dir: string): boolean {
+  let files = 0;
+  let bytes = 0;
+  const big = (at: string): boolean => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(at, { withFileTypes: true });
+    } catch {
+      return false;
+    }
+    for (const e of entries) {
+      const file = path.join(at, e.name);
+      if (e.isDirectory()) {
+        if (!NOT_SAVED_FIRST.has(e.name) && big(file)) return true;
+      } else if (e.isFile()) {
+        files += 1;
+        bytes += fs.lstatSync(file, { throwIfNoEntry: false })?.size ?? 0;
+        if (files > BIG_FIRST_SAVE.files || bytes > BIG_FIRST_SAVE.bytes) return true;
+      }
+    }
+    return false;
+  };
+  return big(dir);
+}
+
+/** The first save of a big folder, beside everything else. Run again after a restart or a Stop, it goes on from what is there. */
+export async function firstSaveLater(dir: string, signal: AbortSignal): Promise<void> {
+  if (hasCommits(dir)) return;
+  await stageAllLater(dir, undefined, signal);
+  await gitLater(dir, authorArgs(dir).concat(['commit', '--allow-empty', '-m', FIRST_COMMIT]), { signal });
 }
 
 /** Ignore squad-kit's own runtime files without editing the project's .gitignore. */
@@ -295,24 +533,260 @@ export function latestBase(dir: string, base: string, remote?: string): { ref: s
   }
 }
 
+/* ── making and removing a copy of the code ──────────── */
+
+/**
+ * A copy takes as long as the project's size, so it is made beside everything else, and it reaches its real place only
+ * whole: git makes it in the folder below, and it moves into place in one step at the end. So a crash, a restart or a
+ * Stop can leave half a copy only here, where nothing ever works. The same when one is removed: it moves here first.
+ * The note beside it says who is at it. A copy with no note in its real place is whole, the ones from before too.
+ */
+const MAKING = '.making';
+
+/** How a copy is made. */
+export interface CopyHow {
+  /** Ends it: the ticket's Stop, or the board closing. */
+  signal?: AbortSignal;
+  /** A copy really is being made now, not just found ready: the card says so. */
+  making?(): void;
+}
+
+interface MakingNote {
+  /** The real place of the copy. */
+  dir: string;
+  /** The squad-kit that is at it, and since when. */
+  owner: number;
+  since: string;
+  /** The git making it, which leads a process group. */
+  pid?: number;
+  /** The branch made for this copy and where it started: with no work on it yet, it goes with half a copy. */
+  branch?: string;
+  start?: string;
+}
+
+function makingPlace(root: string, dir: string): { at: string; noteFile: string } {
+  const key = createHash('sha1').update(path.resolve(dir)).digest('hex').slice(0, 12);
+  const area = path.join(worktreeRoot(root), MAKING);
+  return { at: path.join(area, key, path.basename(dir)), noteFile: path.join(area, `${key}.json`) };
+}
+
+function readNote(file: string): MakingNote | null {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8')) as MakingNote;
+  } catch {
+    return null;
+  }
+}
+
+function inTurn<T>(turns: Map<string, Promise<unknown>>, key: string, job: () => T | Promise<T>): Promise<T> {
+  const run = (turns.get(key) ?? Promise.resolve()).catch(() => undefined).then(job);
+  turns.set(key, run);
+  void run.catch(() => undefined).finally(() => {
+    if (turns.get(key) === run) turns.delete(key);
+  });
+  return run;
+}
+
+/** Only one thing happens to a copy at a time in this process: a second Start, a Stop's clean-up, a delete. */
+const copyTurns = new Map<string, Promise<unknown>>();
+
+export function copyTurn<T>(dir: string, job: () => Promise<T>): Promise<T> {
+  return inTurn(copyTurns, path.resolve(dir), job);
+}
+
+/**
+ * Only one step moves a repo's base at a time: an accept, a release, a look at a merge that waits. A second one waits
+ * its turn, so it never finds the base moved from under it. The move itself, with `.squad` set aside and put back, is
+ * one synchronous piece (moveBase, keepingFiles): nothing can read or write `.squad` in its middle, and a restart cannot
+ * end it half way. A step with several repos takes their turns in one order, so two steps never wait for each other.
+ */
+const baseTurns = new Map<string, Promise<unknown>>();
+
+export function baseTurn<T>(dirs: string | string[], job: () => T | Promise<T>): Promise<T> {
+  const [first, ...rest] = [...new Set([dirs].flat().map((d) => path.resolve(d)))].sort();
+  return first ? inTurn(baseTurns, first, () => baseTurn(rest, job)) : Promise.resolve().then(job);
+}
+
+/** Another squad-kit on this computer (a terminal beside the board) is at this copy right now. */
+function otherAtIt(note: MakingNote | null): boolean {
+  if (!note || note.owner === process.pid || takenOver(note.owner, note.since)) return false;
+  try {
+    process.kill(note.owner, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Half a copy goes, with what still works on it, when a crash left that running. Nothing here is ever in use. */
+export async function clearHalfCopy(root: string, dir: string, signal?: AbortSignal): Promise<void> {
+  const { at, noteFile } = makingPlace(root, dir);
+  let note = readNote(noteFile);
+  while (otherAtIt(note)) {
+    if (signal?.aborted) throw new GitStopped();
+    await sleep(500);
+    note = readNote(noteFile);
+  }
+  if (!note && !fs.existsSync(at)) return;
+  if (note?.pid && !takenOver(note.pid, note.since)) await endPid(note.pid);
+  await gitLater(root, ['worktree', 'remove', '-f', '-f', at], { allowFail: true });
+  await fs.promises.rm(path.dirname(at), { recursive: true, force: true });
+  await gitLater(root, ['worktree', 'prune'], { allowFail: true });
+  if (note?.branch && note.start && git(root, ['rev-parse', '--verify', '-q', `refs/heads/${note.branch}`], { allowFail: true }) === note.start) {
+    await gitLater(root, ['branch', '-D', note.branch], { allowFail: true });
+  }
+  fs.rmSync(noteFile, { force: true });
+}
+
+/** What a crash or a restart left half made or half removed in this repo's copies goes, beside everything else. */
+export async function clearHalfCopies(root: string): Promise<void> {
+  const area = path.join(worktreeRoot(root), MAKING);
+  let names: string[] = [];
+  try {
+    names = fs.readdirSync(area).filter((n) => n.endsWith('.json'));
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    const note = readNote(path.join(area, name));
+    if (note?.dir && !otherAtIt(note)) await copyTurn(note.dir, () => clearHalfCopy(root, note.dir));
+  }
+}
+
+/**
+ * True for a copy that can be used. git writes a copy's index last, so a copy from before this way of making them that
+ * has none never got whole. One whose repo moved cannot be told yet, and is mended elsewhere.
+ */
+export function copyIsWhole(dir: string): boolean {
+  let gitDir: string | null;
+  try {
+    gitDir = copyLink(dir);
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EISDIR';
+  }
+  return !gitDir || !fs.existsSync(gitDir) || fs.existsSync(path.join(gitDir, 'index'));
+}
+
+/** The copy's own git folder, as its `.git` file says. It takes no git to read, on any size. */
+function copyLink(dir: string): string | null {
+  const own = /^gitdir: (.+)$/m.exec(fs.readFileSync(path.join(dir, '.git'), 'utf8'))?.[1];
+  return own ? path.resolve(dir, own) : null;
+}
+
+/** The copy of this repo in this folder as git knows it: its own git folder. Null for anything else, which is not git's to remove. */
+function copyGitDir(root: string, dir: string): string | null {
+  if (!fs.lstatSync(path.join(dir, '.git'), { throwIfNoEntry: false })?.isFile()) return null;
+  const own = git(dir, ['rev-parse', '--absolute-git-dir'], { allowFail: true });
+  const common = git(root, ['rev-parse', '--git-common-dir'], { allowFail: true });
+  return own && common && path.dirname(path.dirname(own)) === realOf(path.resolve(root, common)) ? own : null;
+}
+
+/** git's own record of where a copy is: what a move in one step leaves for it to be told. */
+function tellGitWhere(gitDir: string, dir: string): void {
+  fs.writeFileSync(path.join(gitDir, 'gitdir'), `${path.join(realOf(path.dirname(dir)), path.basename(dir))}${path.sep}.git\n`);
+}
+
+/** A copy of this repo leaves its real place in one step, and goes with what is on its disk. False when it is not one. */
+async function dropCopy(root: string, dir: string): Promise<boolean> {
+  const gitDir = copyGitDir(root, dir);
+  if (!gitDir) return false;
+  const { at, noteFile } = makingPlace(root, dir);
+  fs.mkdirSync(path.dirname(at), { recursive: true });
+  fs.writeFileSync(noteFile, JSON.stringify({ dir: path.resolve(dir), owner: process.pid, since: new Date().toISOString() } satisfies MakingNote));
+  fs.renameSync(dir, at);
+  tellGitWhere(gitDir, at);
+  await clearHalfCopy(root, dir);
+  return true;
+}
+
+const human = (bytes: number) => (bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${Math.max(1, Math.ceil(bytes / 1024 ** 2))} MB`);
+
+/** There is not room for a copy on this computer's disk. Its words are for the person: nothing else can settle it. */
+export class NoRoomForCopy extends Error {
+  constructor(words: string) {
+    super(words);
+    this.name = 'NoRoomForCopy';
+  }
+}
+
+/** A disk block: what a file takes at the least. */
+const DISK_BLOCK = 4096;
+
+/** The folder itself or the nearest one above it that is there: what the disk is asked about. */
+function nearestFolder(dir: string): string {
+  let at = path.resolve(dir);
+  while (!fs.existsSync(at) && path.dirname(at) !== at) at = path.dirname(at);
+  return at;
+}
+
+/** Each copy takes the project's whole size. Stops with plain words on too little room; a size it cannot work out stops nothing. */
+async function roomForCopy(root: string, commit: string, dir: string, signal?: AbortSignal): Promise<void> {
+  let needed = 0;
+  let free = 0;
+  try {
+    const disk = await fs.promises.statfs(nearestFolder(dir));
+    free = disk.bavail * disk.bsize;
+    await gitRecords(root, ['ls-tree', '-r', '-l', '-z', commit], '\0', (entry) => {
+      needed += Math.ceil(Number(/^\d+ blob \S+ +(\d+)\t/.exec(entry)?.[1] ?? 0) / DISK_BLOCK) * DISK_BLOCK;
+    }, signal ? { signal } : {});
+  } catch (err) {
+    if (err instanceof GitStopped) throw err;
+    return;
+  }
+  if (needed > free) throw new NoRoomForCopy(`A copy of this project's code needs about ${human(needed)} of free disk space, and this computer has ${human(free)} free. Free up some space, then press Try again.`);
+}
+
+/**
+ * Makes a copy in its real place, as `git worktree add <flags> <the place> <from>` would. Call it in the copy's turn,
+ * with nothing whole there. A failure, or a Stop, leaves nothing in the real place: the rest goes by itself, in the next
+ * turn, so a Stop lands now and not when the files are gone.
+ */
+export async function makeCopy(root: string, dir: string, flags: string[], from: string, how: CopyHow = {}, madeBranch?: { branch: string; start: string }): Promise<void> {
+  how.making?.();
+  await roomForCopy(root, from, dir, how.signal);
+  if (fs.existsSync(dir) && !(await dropCopy(root, dir))) await fs.promises.rm(dir, { recursive: true, force: true });
+  const { at, noteFile } = makingPlace(root, dir);
+  fs.mkdirSync(path.dirname(at), { recursive: true });
+  fs.mkdirSync(path.dirname(dir), { recursive: true });
+  const note: MakingNote = { dir: path.resolve(dir), owner: process.pid, since: new Date().toISOString(), ...madeBranch };
+  fs.writeFileSync(noteFile, JSON.stringify(note));
+  try {
+    await gitLater(root, ['worktree', 'prune'], { allowFail: true });
+    // Every core a file can be written on, and a link by its full path, as the copy moves into place after.
+    await gitLater(root, ['-c', 'checkout.workers=0', '-c', 'worktree.useRelativePaths=false', 'worktree', 'add', ...flags, at, from], { ...(how.signal ? { signal: how.signal } : {}), onSpawn: (pid) => fs.writeFileSync(noteFile, JSON.stringify({ ...note, pid })) });
+    tellGitWhere(copyLink(at)!, dir);
+    fs.renameSync(at, dir);
+    fs.rmSync(path.dirname(at), { recursive: true, force: true });
+    fs.rmSync(noteFile, { force: true });
+  } catch (err) {
+    void trackTask(copyTurn(dir, () => clearHalfCopy(root, dir)));
+    if (/No space left on device|Disk quota exceeded/i.test((err as Error).message)) throw new NoRoomForCopy('The disk filled up while squad-kit made its copy of the code. Free up some space, then press Try again.');
+    throw err;
+  }
+}
+
 /**
  * The ticket's copy of the code. A branch pushed from another computer is where its work so far is, so the copy
- * starts from it, not from the base; `pushed` says so. With `remote`, a new copy starts from the newest base.
+ * starts from it, not from the base; `pushed` says so. With `remote`, a new copy starts from the newest base. Half a
+ * copy from a crash or a Stop goes first, and a new one is made.
  */
-export function addWorktree(projectRoot: string, ticketId: string, base: string, remote?: string, at?: string): { dir: string; branch: string; baseCommit: string; pushed?: string } {
+export function addWorktree(projectRoot: string, ticketId: string, base: string, remote?: string, at?: string, how: CopyHow = {}): Promise<{ dir: string; branch: string; baseCommit: string; pushed?: string }> {
   const dir = at ?? path.join(worktreeRoot(projectRoot), ticketId.toLowerCase());
   const branch = `squad/${ticketId.toLowerCase()}`;
-  let baseCommit = git(projectRoot, ['rev-parse', base]);
-  if (fs.existsSync(path.join(dir, '.git'))) return { dir, branch, baseCommit };
-  fs.mkdirSync(path.dirname(dir), { recursive: true });
-  git(projectRoot, ['worktree', 'prune'], { allowFail: true });
-  const exists = git(projectRoot, ['rev-parse', '--verify', `refs/heads/${branch}`], { allowFail: true });
-  const pushed = exists ? null : pushedBranch(projectRoot, branch);
-  if (!exists && !pushed && remote) baseCommit = latestBase(projectRoot, base, remote).sha;
-  git(projectRoot, exists ? ['worktree', 'add', dir, branch] : ['worktree', 'add', '-b', branch, dir, pushed ?? baseCommit]);
-  if (!pushed) return { dir, branch, baseCommit };
-  // Where the ticket left the base, so its changes are measured from there and not against newer work in the base.
-  return { dir, branch, baseCommit: git(projectRoot, ['merge-base', base, pushed], { allowFail: true }) || baseCommit, pushed: pushed.replace(/^refs\/remotes\//, '') };
+  return copyTurn(dir, async () => {
+    let baseCommit = git(projectRoot, ['rev-parse', base]);
+    await clearHalfCopy(projectRoot, dir, how.signal);
+    if (copyIsWhole(dir)) return { dir, branch, baseCommit };
+    const exists = git(projectRoot, ['rev-parse', '--verify', `refs/heads/${branch}`], { allowFail: true });
+    const pushed = exists ? null : pushedBranch(projectRoot, branch);
+    if (!exists && !pushed && remote) baseCommit = latestBase(projectRoot, base, remote).sha;
+    if (exists) await makeCopy(projectRoot, dir, [], branch, how);
+    // No tracking: nothing here reads it, and writing it is what two copies at once could trip over, after the branch is made.
+    else await makeCopy(projectRoot, dir, ['--no-track', '-b', branch], pushed ?? baseCommit, how, { branch, start: git(projectRoot, ['rev-parse', pushed ?? baseCommit]) });
+    if (!pushed) return { dir, branch, baseCommit };
+    // Where the ticket left the base, so its changes are measured from there and not against newer work in the base.
+    return { dir, branch, baseCommit: git(projectRoot, ['merge-base', base, pushed], { allowFail: true }) || baseCommit, pushed: pushed.replace(/^refs\/remotes\//, '') };
+  });
 }
 
 /** The git copies a folder holds: itself, or on a story's folder, the copies inside it. */
@@ -337,31 +811,51 @@ export function repairCopyLink(repoRoot: string, dir: string): boolean {
   return git(dir, ['rev-parse', '--git-dir'], { allowFail: true }) !== '';
 }
 
-export function removeWorktree(projectRoot: string, dir: string): void {
-  git(projectRoot, ['worktree', 'remove', '--force', dir], { allowFail: true });
+/** Removes a copy git knows as one of this repo's, beside everything else. Anything else in that folder is not git's to remove. */
+export function removeWorktree(projectRoot: string, dir: string): Promise<void> {
+  return copyTurn(dir, async () => {
+    await clearHalfCopy(projectRoot, dir);
+    if (fs.existsSync(dir) && !(await dropCopy(projectRoot, dir))) await gitLater(projectRoot, ['worktree', 'remove', '--force', dir], { allowFail: true });
+  });
 }
 
 /** A throwaway copy of the code as it was at one commit, on no branch, beside the ticket copies. */
-export function addSnapshot(projectRoot: string, name: string, commit: string): string {
+export async function addSnapshot(projectRoot: string, name: string, commit: string, how: CopyHow = {}): Promise<string> {
   const dir = path.join(worktreeRoot(projectRoot), name);
-  dropSnapshot(projectRoot, dir);
-  fs.mkdirSync(path.dirname(dir), { recursive: true });
-  git(projectRoot, ['worktree', 'add', '--detach', dir, commit]);
+  await dropSnapshot(projectRoot, dir);
+  await copyTurn(dir, () => makeCopy(projectRoot, dir, ['--detach'], commit, how));
   return dir;
 }
 
 /** Removes a throwaway copy, with whatever its setup added (node_modules and the like). */
-export function dropSnapshot(projectRoot: string, dir: string): void {
-  removeWorktree(projectRoot, dir);
-  fs.rmSync(dir, { recursive: true, force: true });
-  git(projectRoot, ['worktree', 'prune'], { allowFail: true });
+export async function dropSnapshot(projectRoot: string, dir: string): Promise<void> {
+  await removeWorktree(projectRoot, dir);
+  await fs.promises.rm(dir, { recursive: true, force: true });
+  await gitLater(projectRoot, ['worktree', 'prune'], { allowFail: true });
 }
 
 /** Files changed in a worktree compared with where the ticket started, including new files. */
-export function changedFiles(dir: string, baseCommit: string): string[] {
-  const tracked = git(dir, ['diff', '--name-only', baseCommit], { allowFail: true }).split('\n');
-  const untracked = git(dir, ['ls-files', '--others', '--exclude-standard'], { allowFail: true }).split('\n');
+export async function changedFiles(dir: string, baseCommit: string): Promise<string[]> {
+  const tracked = (await gitLater(dir, ['diff', '--name-only', baseCommit], { allowFail: true })).split('\n');
+  const untracked = (await gitLater(dir, ['ls-files', '--others', '--exclude-standard'], { allowFail: true })).split('\n');
   return [...new Set([...tracked, ...untracked].filter(Boolean))];
+}
+
+/**
+ * What a copy changed against where it started, written to a file straight as git says it: a huge change is read in
+ * full by whoever opens the file, and is never told as no change at all.
+ */
+export async function writeChangesOf(dir: string, base: string | undefined, file: string, named: string): Promise<void> {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const fd = fs.openSync(file, 'w');
+  try {
+    if (base) await gitBeside(dir, gitArgs(['diff', '--no-color', '--find-renames', base]), gitEnv(), { outputTo: fd }, () => undefined).catch(() => undefined);
+  } finally {
+    fs.closeSync(fd);
+  }
+  const added = (await gitLater(dir, ['ls-files', '--others', '--exclude-standard'], { allowFail: true })).split('\n').filter(Boolean);
+  const nothing = fs.statSync(file).size === 0;
+  fs.appendFileSync(file, `${nothing ? 'Nothing changed in the files git already has.\n' : ''}\nNew files in ${named}/:\n${added.map((f) => `- ${f}`).join('\n') || '- none'}\n`);
 }
 
 /** The longest a project's own commit hooks may run on a finished change. */
@@ -453,19 +947,19 @@ export function quoted(s: string): string {
 }
 
 /** The hook files as they are staged now, by path. */
-function stagedHookFiles(dir: string): Map<string, string> {
+async function stagedHookFiles(dir: string): Promise<Map<string, string>> {
   const names = hookFiles(dir);
   const staged = new Map<string, string>();
-  for (const line of git(dir, ['ls-files', '-s', '-z'], { allowFail: true }).split('\0')) {
+  await gitRecords(dir, ['ls-files', '-s', '-z'], '\0', (line) => {
     const entry = /^(\d+) ([0-9a-f]+) \d+\t(.*)$/s.exec(line);
     if (entry && isHookFile(entry[3]!, names)) staged.set(entry[3]!, `${entry[1]},${entry[2]}`);
-  }
+  });
   return staged;
 }
 
 /** A hook may change what is staged, as a formatter does, but not the check itself: it would run on every teammate's next commit. */
-function keepHookFiles(dir: string, before: Map<string, string>): void {
-  const now = stagedHookFiles(dir);
+async function keepHookFiles(dir: string, before: Map<string, string>): Promise<void> {
+  const now = await stagedHookFiles(dir);
   for (const rel of new Set([...before.keys(), ...now.keys()])) {
     const was = before.get(rel);
     if (was === now.get(rel)) continue;
@@ -653,9 +1147,9 @@ function hookOutcome(dir: string, t: CommitTry, limitMs: number, how: HookRun): 
 }
 
 /** Only files come back from the hooks, so they are staged here, as the next commit needs, with the check itself put back. */
-function filesFromHooks(dir: string, stagedBefore: Map<string, string>): void {
-  stageAll(dir);
-  keepHookFiles(dir, stagedBefore);
+async function filesFromHooks(dir: string, stagedBefore: Map<string, string>): Promise<void> {
+  await stageAllLater(dir);
+  await keepHookFiles(dir, stagedBefore);
 }
 
 /**
@@ -665,18 +1159,18 @@ function filesFromHooks(dir: string, stagedBefore: Map<string, string>): void {
  * the words for the real commit, or null when they left nothing to save.
  */
 async function hooksLook(dir: string, start: string, message: string, words: string, limitMs: number, how: HookRun, whole: boolean): Promise<string | null> {
-  const stagedBefore = stagedHookFiles(dir);
+  const stagedBefore = await stagedHookFiles(dir);
   let last: CommitTry | undefined;
   try {
     last = await hooksCommit(dir, start, message, limitMs, how);
     if (!last.ok) {
       hookOutcome(dir, last, limitMs, how);
-      filesFromHooks(dir, stagedBefore);
+      await filesFromHooks(dir, stagedBefore);
       last = await hooksCommit(dir, start, commitHooks(dir).includes('commit-msg') ? words : message, limitMs, how);
     }
     if (!last.ok) {
       hookOutcome(dir, last, limitMs, how);
-      filesFromHooks(dir, stagedBefore);
+      await filesFromHooks(dir, stagedBefore);
       // The hook fixed everything itself (a formatter), so nothing is left to save. On a whole change it would mean throwing the work away.
       if (!whole && !somethingToSave(dir)) return null;
       throw new HookRefused(hookSaid(last.said, how), false, limitMs);
@@ -684,8 +1178,8 @@ async function hooksLook(dir: string, start: string, message: string, words: str
     return last.words ?? message;
   } finally {
     // In this order: a crash between them leaves the folder, so the next start puts the files right.
-    if (last?.stopped || last?.timedOut) putFilesBack(dir);
-    else filesFromHooks(dir, stagedBefore);
+    if (last?.stopped || last?.timedOut) await putFilesBackLater(dir);
+    else await filesFromHooks(dir, stagedBefore);
     clearHookGit(dir);
   }
 }
@@ -741,13 +1235,13 @@ export async function commitChecked(dir: string, message: string, words: string,
   if (!how.noRunner) bringHookRunner(dir);
   const where = hookFolder(dir);
   if (!commitHooks(dir).length && !(where && hasHook(dir, where, 'post-commit'))) {
-    if (somethingToSave(dir)) commitWithoutHooks(dir, message);
+    if (somethingToSave(dir)) await commitLater(dir, message);
     return;
   }
   const merging = isMerging(dir);
   const whole = Boolean(how.from) || merging;
   const savedFirst = whole && somethingToSave(dir);
-  if (savedFirst) commitWithoutHooks(dir, `Work so far: ${message}`);
+  if (savedFirst) await commitLater(dir, `Work so far: ${message}`);
   const tip = git(dir, ['rev-parse', 'HEAD']);
   let start = tip;
   if (how.from) {
@@ -763,7 +1257,7 @@ export async function commitChecked(dir: string, message: string, words: string,
     throw err;
   });
   if (saying === null || (!whole && !somethingToSave(dir))) return;
-  git(dir, [...authorArgs(dir), 'commit', ...(whole ? ['--allow-empty'] : []), '-m', saying]);
+  await gitLater(dir, [...authorArgs(dir), 'commit', ...(whole ? ['--allow-empty'] : []), '-m', saying]);
 }
 
 /**
@@ -773,7 +1267,7 @@ export async function commitChecked(dir: string, message: string, words: string,
  * accepted. A hook only looks at what is staged, so nothing else would ever show it to them.
  */
 export async function commitAll(dir: string, message: string, words = message, how: HookRun = {}): Promise<{ commit: string | null; hookSaid?: string }> {
-  stageAll(dir);
+  await stageAllLater(dir);
   if (!somethingToSave(dir)) return { commit: null };
   let said: string | undefined;
   try {
@@ -781,7 +1275,7 @@ export async function commitAll(dir: string, message: string, words = message, h
   } catch (err) {
     if (!(err instanceof HookRefused)) throw err;
     said = err.said;
-    if (somethingToSave(dir)) commitWithoutHooks(dir, message);
+    if (somethingToSave(dir)) await commitLater(dir, message);
   }
   return { commit: git(dir, ['rev-parse', '--short', 'HEAD']), ...(said !== undefined ? { hookSaid: said } : {}) };
 }
@@ -789,6 +1283,11 @@ export async function commitAll(dir: string, message: string, words = message, h
 /** A commit with the project's hooks off, like every other git the engine runs. The caller keeps the record of why. */
 export function commitWithoutHooks(dir: string, message: string): void {
   git(dir, commitArgs(dir, message));
+}
+
+/** commitWithoutHooks, beside everything else: on a big project a commit looks at every file. */
+export async function commitLater(dir: string, message: string): Promise<void> {
+  await gitLater(dir, commitArgs(dir, message));
 }
 
 /** Use the person's git identity; fall back to a squad-kit one so a commit never fails on a fresh machine. */
@@ -877,11 +1376,12 @@ export function mergeWouldClash(dir: string, base: string, branch: string): bool
 function mergedTree(dir: string, base: string, branch: string, baseSha: string, branchSha: string): string {
   let tree: string;
   try {
-    tree = execFileSync('git', gitArgs(['merge-tree', '--write-tree', baseSha, branchSha]), { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024, env: gitEnv() }).split('\n')[0]!.trim();
+    tree = execFileSync('git', gitArgs(['merge-tree', '--write-tree', baseSha, branchSha]), { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: MOST_OUTPUT, env: gitEnv() }).split('\n')[0]!.trim();
   } catch (err) {
-    const e = err as { status?: number | null; stderr?: Buffer | string; message: string };
-    // Exit code 1 is git's "the merge has conflicts"; anything else means the merge could not be tried.
-    if (e.status === 1) throw new MergeClash(`${branch} clashes with changes already in ${base}.`);
+    const e = err as { status?: number | null; stderr?: Buffer | string; message: string; code?: string };
+    // Exit code 1 is git's "the merge has conflicts"; anything else means the merge could not be tried. A clean merge
+    // says one line, so only clashes can say too much.
+    if (e.status === 1 || e.code === 'ENOBUFS') throw new MergeClash(`${branch} clashes with changes already in ${base}.`);
     const version = gitVersion();
     const detail = (e.stderr ? e.stderr.toString() : e.message).trim().split('\n').slice(-2).join(' ');
     const old = version && !gitIsNewEnough(version);

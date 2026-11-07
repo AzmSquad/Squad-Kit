@@ -14,7 +14,7 @@ const write = (root: string, f: string, text: string) => {
 };
 
 describe("your app gets your .env files", () => {
-  it('copies the .env files git does not carry, at the same places, readable by you only', () => {
+  it('copies the .env files git does not carry, at the same places, readable by you only', async () => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-appenv-'));
     const src = path.join(tmp, 'project');
     const dir = path.join(tmp, 'copy');
@@ -31,7 +31,7 @@ describe("your app gets your .env files", () => {
     write(src, '.env.sample', 'S=\n');
     fs.mkdirSync(dir);
 
-    expect(copyEnvFiles(src, dir)).toEqual(['.env', '.env.test', 'apps/web/.env.local']);
+    expect(await copyEnvFiles(src, dir)).toEqual(['.env', '.env.test', 'apps/web/.env.local']);
     expect(fs.readFileSync(path.join(dir, '.env'), 'utf8')).toBe('KEY=secret\n');
     expect(fs.readFileSync(path.join(dir, 'apps/web/.env.local'), 'utf8')).toBe('WEB=1\n');
     expect(fs.existsSync(path.join(dir, 'node_modules/pkg/.env'))).toBe(false);

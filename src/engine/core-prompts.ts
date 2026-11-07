@@ -55,17 +55,18 @@ export function previewTicket(bp: BoardPaths, id?: string): Ticket {
   return real ?? example();
 }
 
-export function corePrompts(bp: BoardPaths, role: AgentRole, ticketId?: string): { ticket: { id: string; title: string }; prompts: CorePrompt[] } {
+export async function corePrompts(bp: BoardPaths, role: AgentRole, ticketId?: string): Promise<{ ticket: { id: string; title: string }; prompts: CorePrompt[] }> {
   const meta = readMeta(bp);
   const decisions = listDecisions(bp);
   const t = previewTicket(bp, ticketId);
   const root = bp.root;
   const ctx: P.PromptContext = { rules: rulesFiles(root), repo: repoFor(meta, t) };
+  const others = await openTicketsFor(bp, t);
   const text: Record<string, () => string> = {
     questions: () => P.intakePrompt(meta, decisions, t, ctx),
-    spec: () => P.specPrompt(t, undefined, false, openTicketsFor(bp, t)),
+    spec: () => P.specPrompt(t, undefined, false, others),
     scan: () => P.scanPrompt(meta, [], ctx),
-    design: () => P.designPrompt(t, undefined, meta, false, openTicketsFor(bp, t)),
+    design: () => P.designPrompt(t, undefined, meta, false, others),
     blueprint: () => P.blueprintPrompt(meta, decisions, detectStack(root, meta).map((x) => x.name)),
     build: () => P.buildPrompt(meta, decisions, t, ctx),
     fix: () =>

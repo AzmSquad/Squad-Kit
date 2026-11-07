@@ -4,7 +4,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import { readMeta, requireTicket, type BoardPaths } from '../board/store.js';
 import { BoardActionError } from '../board/actions.js';
 import type { Ticket } from '../board/types.js';
-import { git } from './git.js';
+import { GitSaidTooMuch, git, gitLater } from './git.js';
 import { repoFor } from './repos.js';
 import { projectRoot } from './live.js';
 
@@ -34,28 +34,51 @@ export interface TicketChanges {
 }
 
 const MAX_PATCH = 600 * 1024;
+/** More of a diff than this is never shown, so it is not read: the list of files says what changed. */
+const MAX_DIFF_READ = 64 * 1024 * 1024;
 
-export function ticketChanges(bp: BoardPaths, id: string): TicketChanges {
+/** A diff too long to read: which files changed, with no patches. */
+async function diffOrNames(dir: string, range: string): Promise<{ files: FileChange[]; cut: boolean }> {
+  try {
+    return { files: splitDiff(await gitLater(dir, ['diff', '--no-color', '--find-renames', range], { allowFail: true, mostBytes: MAX_DIFF_READ })), cut: false };
+  } catch (err) {
+    if (!(err instanceof GitSaidTooMuch)) throw err;
+  }
+  const fields = (await gitLater(dir, ['diff', '--name-status', '-z', '--find-renames', range], { allowFail: true })).split('\0').filter(Boolean);
+  const files: FileChange[] = [];
+  for (let i = 0; i < fields.length; ) {
+    const status = fields[i++]![0]!;
+    const from = status === 'R' || status === 'C' ? fields[i++]! : '';
+    const to = fields[i++]!;
+    files.push({ path: from ? `${from} → ${to}` : to, status: status === 'A' ? 'added' : status === 'D' ? 'deleted' : from ? 'renamed' : 'changed', added: 0, removed: 0, patch: '' });
+  }
+  return { files, cut: true };
+}
+
+export async function ticketChanges(bp: BoardPaths, id: string): Promise<TicketChanges> {
   const t = requireTicket(bp, id);
   if (!t.baseCommit) return { from: 'none', files: [] };
   if (t.worktree && fs.existsSync(t.worktree)) {
-    const inCopy = (dir: string, base: string): FileChange[] => {
-      const raw = git(dir, ['diff', '--no-color', '--find-renames', base], { allowFail: true });
-      const files = splitDiff(raw);
-      for (const f of git(dir, ['ls-files', '--others', '--exclude-standard'], { allowFail: true }).split('\n').filter(Boolean)) {
+    let cut = false;
+    const inCopy = async (dir: string, base: string): Promise<FileChange[]> => {
+      const diff = await diffOrNames(dir, base);
+      cut ||= diff.cut;
+      const { files } = diff;
+      for (const f of (await gitLater(dir, ['ls-files', '--others', '--exclude-standard'], { allowFail: true })).split('\n').filter(Boolean)) {
         files.push(newFile(dir, f));
       }
       // In a story's folder, each file says which part it is in.
       const where = t.storyDir ? path.relative(t.storyDir, dir) : '';
       return where ? files.map((x) => ({ ...x, path: `${where}/${x.path}` })) : files;
     };
-    const others = (t.copies ?? []).filter((c) => fs.existsSync(c.dir) && c.baseCommit).flatMap((c) => inCopy(c.dir, c.baseCommit!));
-    return cap({ from: 'copy', base: t.baseCommit, branch: t.branch, files: [...inCopy(t.worktree, t.baseCommit), ...others] });
+    const files = await inCopy(t.worktree, t.baseCommit);
+    for (const c of (t.copies ?? []).filter((x) => fs.existsSync(x.dir) && x.baseCommit)) files.push(...(await inCopy(c.dir, c.baseCommit!)));
+    return cap({ from: 'copy', base: t.baseCommit, branch: t.branch, files, ...(cut ? { cut } : {}) });
   }
   const dir = repoDir(bp, t);
   if (t.branch && git(dir, ['rev-parse', '--verify', '--quiet', t.branch], { allowFail: true })) {
-    const raw = git(dir, ['diff', '--no-color', '--find-renames', `${t.baseCommit}...${t.branch}`], { allowFail: true });
-    return cap({ from: 'branch', base: t.baseCommit, branch: t.branch, files: splitDiff(raw) });
+    const { files, cut } = await diffOrNames(dir, `${t.baseCommit}...${t.branch}`);
+    return cap({ from: 'branch', base: t.baseCommit, branch: t.branch, files, ...(cut ? { cut } : {}) });
   }
   return { from: 'none', base: t.baseCommit, files: [] };
 }
@@ -111,7 +134,7 @@ function newFile(dir: string, file: string): FileChange {
 
 function cap(c: TicketChanges): TicketChanges {
   let size = 0;
-  let cut = false;
+  let cut = Boolean(c.cut);
   for (const f of c.files) {
     size += f.patch.length;
     if (size > MAX_PATCH) {

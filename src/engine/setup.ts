@@ -168,7 +168,7 @@ export function ensureLiveBoard(bp: BoardPaths, projectName: string): BoardSetup
   // squad-kit 0.x kept stories and plans in .squad/; they stay where they are.
   const older = ['stories', 'plans'].some((d) => fs.existsSync(path.join(bp.squadDir, d)));
   const kind: FolderKind = older ? 'older' : nested.length ? 'repos' : hadRepo ? (hadFiles ? 'repo' : 'empty') : hadFiles ? 'files' : 'empty';
-  if (nested.length === 0) ensureRepo(root, projectName);
+  const saveLater = nested.length === 0 && ensureRepo(root, projectName) === 'later';
   // A freshly cloned empty repo has nothing to branch from yet, so it gets its first commit too.
   for (const r of nested) ensureRepo(path.join(root, r.path), projectName);
   did.push(
@@ -176,8 +176,10 @@ export function ensureLiveBoard(bp: BoardPaths, projectName: string): BoardSetup
       ? `Git: found ${nested.length} code ${nested.length === 1 ? 'repo' : 'repos'} inside`
       : hadRepo
         ? `Git: found the repo, on ${currentBranch(root)}`
-        : hadFiles
-          ? 'Git: made a repo, with the files already here in its first commit'
+        : saveLater
+          ? 'Git: made a repo. The files already here go in its first commit next, which takes a while on a big folder'
+          : hadFiles
+            ? 'Git: made a repo, with the files already here in its first commit'
           : 'Git: made a new repo for the project',
   );
 
@@ -214,7 +216,7 @@ export function ensureLiveBoard(bp: BoardPaths, projectName: string): BoardSetup
     scan: { status: 'pending' },
     parallel: 2,
     // The first run, step by step: the person follows it on the setup page, the board and in the terminal.
-    setup: newSetup(kind, started),
+    setup: { ...newSetup(kind, started), ...(saveLater ? { steps: newSetup(kind, started).steps.map((s) => (s.id === 'files' ? { id: s.id, state: 'todo' as const } : s)) } : {}) },
   };
   writeMeta(next, meta);
   ensureAgents(next);

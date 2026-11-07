@@ -75,7 +75,10 @@ describe('the setup and the Overview over REST', () => {
     fs.mkdirSync(dir);
     fs.writeFileSync(path.join(dir, 'index.html'), '<h1>hi</h1>\n');
     const l = (await call('GET', `/api/v1/app/folders?path=${encodeURIComponent(dir)}`)).data;
-    expect(l).toMatchObject({ kind: 'files', canAdd: true, look: { kind: 'files', title: 'Code without git', found: 'A web site with 1 file, not in git yet.' } });
-    expect((await call('GET', `/api/v1/app/folders?path=${encodeURIComponent(os.homedir())}`)).data.look).toBeUndefined();
+    expect(l).toMatchObject({ kind: 'files', canAdd: true });
+    // What it found has a call of its own: the listing opens at once on any size, and this one reads the whole project.
+    expect(l.look).toBeUndefined();
+    expect((await call('GET', `/api/v1/app/folders/look?path=${encodeURIComponent(dir)}`)).data).toMatchObject({ kind: 'files', title: 'Code without git', found: 'A web site with 1 file, not in git yet.' });
+    expect((await call('GET', `/api/v1/app/folders/look?path=${encodeURIComponent(os.homedir())}`)).status).toBeGreaterThanOrEqual(400);
   });
 });

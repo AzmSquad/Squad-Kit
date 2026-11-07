@@ -28,7 +28,8 @@ const { boardPaths, readMeta, readTicket, updateTicket, writeMeta, writeTicket }
 const actions = await import('../src/board/actions.js');
 const auto = await import('../src/board/auto.js');
 const { LiveSquad } = await import('../src/engine/live.js');
-const { CommitStopped, HookRefused, addWorktree, changedFiles, commitAll, commitChecked, commitWithoutHooks, conventionalWords, git, netGit, settleCopy, stageAll } = await import('../src/engine/git.js');
+const { CommitStopped, HookRefused, changedFiles, commitAll, commitChecked, commitWithoutHooks, conventionalWords, git, netGitLater, settleCopy, stageAll } = await import('../src/engine/git.js');
+const { addWorktree } = await import('./support/copy.js');
 const { ensureLiveBoard, setupProject } = await import('../src/engine/setup.js');
 const { guardSupport, guardBlockedPath, spawnProject, ticketGuard } = await import('../src/engine/project-guard.js');
 const { runCommand } = await import('../src/engine/checks.js');
@@ -143,7 +144,7 @@ describe('finding 1: nothing a hook planted runs outside its guard', () => {
     // What it planted in the copy is not the check, so it does not stay; and were one there, the push would still not run it.
     expect(exists(path.join(dir, '.githooks', 'pre-push'))).toBe(false);
     script(path.join(dir, '.githooks', 'pre-push'), `cat "${secret}" > "${leak}"`);
-    netGit(dir, ['push', 'origin', 'squad/ap-1:refs/heads/squad/ap-1']);
+    await netGitLater(dir, ['push', 'origin', 'squad/ap-1:refs/heads/squad/ap-1']);
     expect(exists(leak)).toBe(false);
     expect(sh('git rev-parse squad/ap-1', remote)).toBe(sh('git rev-parse squad/ap-1', project));
   });
@@ -175,12 +176,12 @@ describe('finding 1: nothing a hook planted runs outside its guard', () => {
     };
     walk(path.join(ROOT, 'src'));
     // The one runner itself, which gets its arguments from gitArgs.
-    expect(offenders.filter((l) => !l.startsWith(path.join('src', 'engine', 'git.ts')) || !l.includes('execFileSync(\'git\', full'))).toEqual([]);
+    expect(offenders.filter((l) => !l.startsWith(path.join('src', 'engine', 'git.ts')) || !l.includes("('git', full"))).toEqual([]);
   });
 
   it('every way git could stage everything goes through the one that leaves nested repos out', () => {
     for (const file of ['engine/release.ts', 'engine/live.ts', 'engine/lane.ts', 'engine/depends.ts', 'engine/handover.ts', 'engine/git.ts']) {
-      const text = fs.readFileSync(path.join(ROOT, 'src', file), 'utf8').replace(/git\(dir, \['add', '-A', \.\.\.\(out\.length[^\n]*/, '');
+      const text = fs.readFileSync(path.join(ROOT, 'src', file), 'utf8').replace(/git(Later)?\(dir, \['add', '-A', \.\.\.\(out\.length[^\n]*/g, '');
       expect(text, file).not.toMatch(/\['add', '-A'/);
     }
   });
@@ -198,7 +199,7 @@ describe('finding 2: a command in the guard cannot repoint git, and git starts n
     const r = await runCommand(dir, swap, 30_000, { guard: guardOf(dir) });
     expect(r.ok).toBe(false);
     expect(fs.readFileSync(path.join(dir, '.git'), 'utf8')).toBe(was);
-    changedFiles(dir, sh('git rev-parse main', project));
+    await changedFiles(dir, sh('git rev-parse main', project));
     expect(exists(leak)).toBe(false);
     // And the engineer's line can say what happened.
     expect(guardBlockedPath(r.output, guardOf(dir))).toBeTruthy();
@@ -228,7 +229,7 @@ describe('finding 2: a command in the guard cannot repoint git, and git starts n
     expect(said).toContain('COMMONDIR-REFUSED');
     expect(said).toContain('GITDIR-REFUSED');
     expect(said).toContain('WORKTREE-CONFIG-REFUSED');
-    changedFiles(dir, sh('git rev-parse main', project));
+    await changedFiles(dir, sh('git rev-parse main', project));
     expect(exists(leak)).toBe(false);
   });
 
@@ -242,12 +243,12 @@ describe('finding 2: a command in the guard cannot repoint git, and git starts n
     expect(said).toContain('HOOK-REFUSED');
   });
 
-  it('the file monitor a repo names never starts, on any engine git', () => {
+  it('the file monitor a repo names never starts, on any engine git', async () => {
     const dir = ticket('AP-1');
     const ran = path.join(tmp, 'ran');
     script(path.join(tmp, 'evil.sh'), `echo ran >> "${ran}"\nexit 0`);
     sh(`git config core.fsmonitor "${tmp}/evil.sh"`, project);
-    changedFiles(dir, sh('git rev-parse main', project));
+    await changedFiles(dir, sh('git rev-parse main', project));
     stageAll(dir);
     git(dir, ['status', '--porcelain']);
     sh('git config --unset core.fsmonitor', project);
@@ -280,7 +281,7 @@ describe('finding 2: a command in the guard cannot repoint git, and git starts n
     stageAll(dir);
     expect(sh('git ls-files --stage', dir)).not.toContain('160000');
     git(dir, ['status', '--porcelain']);
-    changedFiles(dir, sh('git rev-parse main', project));
+    await changedFiles(dir, sh('git rev-parse main', project));
     const saved = await commitAll(dir, 'Work', 'chore: work');
     expect(saved.commit).toBeTruthy();
     expect(sh('git show --stat --format= HEAD', dir)).not.toContain('sub');
@@ -288,7 +289,7 @@ describe('finding 2: a command in the guard cannot repoint git, and git starts n
     sh('git add sub', dir);
     fs.writeFileSync(path.join(sub, 'f.txt'), 'three\n');
     git(dir, ['status', '--porcelain']);
-    changedFiles(dir, sh('git rev-parse main', project));
+    await changedFiles(dir, sh('git rev-parse main', project));
     stageAll(dir);
     expect(exists(ran)).toBe(false);
   });
@@ -380,15 +381,15 @@ describe('finding 4: only the real hooks in a repo\'s hook folder are the check'
     return addWorktree(project, 'AP-1', 'main').dir;
   }
 
-  it.each(['hooks', 'scripts', 'tools/git-hooks'])('core.hooksPath=%s keeps the Builder\'s work, and still guards the hook', (folder) => {
+  it.each(['hooks', 'scripts', 'tools/git-hooks'])('core.hooksPath=%s keeps the Builder\'s work, and still guards the hook', async (folder) => {
     const dir = withHooksIn(folder);
-    const lane = watchLane(dir, hookFiles(dir));
+    const lane = await watchLane(dir, hookFiles(dir));
     fs.writeFileSync(path.join(dir, 'src', 'hooks', 'useAuth.ts'), 'NEW WORK\n');
     fs.writeFileSync(path.join(dir, 'src', 'hooks', 'useBooking.ts'), 'NEW FILE\n');
     fs.writeFileSync(path.join(dir, folder, 'deploy.sh'), 'NEW WORK\n');
     fs.writeFileSync(path.join(dir, folder, 'pre-commit'), '#!/bin/sh\nexit 1\n');
     fs.writeFileSync(path.join(dir, folder, 'pre-push'), '#!/bin/sh\nexit 1\n');
-    const c = checkLane(lane);
+    const c = await checkLane(lane);
     expect(c.restored).toEqual([`${folder}/pre-commit`, `${folder}/pre-push`]);
     expect(fs.readFileSync(path.join(dir, 'src', 'hooks', 'useAuth.ts'), 'utf8')).toBe('NEW WORK\n');
     expect(exists(path.join(dir, 'src', 'hooks', 'useBooking.ts'))).toBe(true);
@@ -401,13 +402,13 @@ describe('finding 4: only the real hooks in a repo\'s hook folder are the check'
     const ran = path.join(tmp, 'ran');
     const hookFile = path.join(dir, 'hooks', 'pre-commit');
     fs.writeFileSync(hookFile, `#!/bin/sh\necho ran >> "${ran}"\nexit 0\n`, { mode: 0o755 });
-    let lane = watchLane(dir, hookFiles(dir));
+    let lane = await watchLane(dir, hookFiles(dir));
     fs.writeFileSync(hookFile, '#!/bin/sh\nexit 0\n');
-    expect(checkLane(lane).restored).toEqual(['hooks/pre-commit']);
+    expect((await checkLane(lane)).restored).toEqual(['hooks/pre-commit']);
     expect(fs.statSync(hookFile).mode & 0o111).not.toBe(0);
-    lane = watchLane(dir, hookFiles(dir));
+    lane = await watchLane(dir, hookFiles(dir));
     fs.chmodSync(hookFile, 0o644);
-    expect(checkLane(lane).restored).toEqual(['hooks/pre-commit']);
+    expect((await checkLane(lane)).restored).toEqual(['hooks/pre-commit']);
     expect(fs.statSync(hookFile).mode & 0o111).not.toBe(0);
     fs.writeFileSync(path.join(dir, 'x.txt'), 'x\n');
     stageAll(dir);
@@ -423,28 +424,28 @@ describe('finding 4: only the real hooks in a repo\'s hook folder are the check'
     expect((disallowedTools ?? []).join(' ')).not.toContain('//hooks');
   });
 
-  it('core.hooksPath=. is no folder of hooks: every change stays, and ignored files are not listed', () => {
+  it('core.hooksPath=. is no folder of hooks: every change stays, and ignored files are not listed', async () => {
     const dir = addWorktree(project, 'AP-1', 'main').dir;
     sh('git config core.hooksPath .', project);
     fs.mkdirSync(path.join(dir, 'node_modules'));
     fs.writeFileSync(path.join(dir, 'node_modules', 'x.js'), 'x');
-    const lane = watchLane(dir, hookFiles(dir));
+    const lane = await watchLane(dir, hookFiles(dir));
     expect([...lane.kept.keys()]).toEqual([]);
     fs.writeFileSync(path.join(dir, 'limit.txt'), 'NEW WORK\n');
     fs.writeFileSync(path.join(dir, 'node_modules', 'x.js'), 'y');
-    expect(checkLane(lane).restored).toEqual([]);
+    expect((await checkLane(lane)).restored).toEqual([]);
     expect(fs.readFileSync(path.join(dir, 'limit.txt'), 'utf8')).toBe('NEW WORK\n');
     expect(fs.readFileSync(path.join(dir, 'node_modules', 'x.js'), 'utf8')).toBe('y');
   });
 
-  it('a story that changes package.json scripts or dependencies keeps them: only the hook keys go back', () => {
+  it('a story that changes package.json scripts or dependencies keeps them: only the hook keys go back', async () => {
     fs.writeFileSync(path.join(project, 'package.json'), `${JSON.stringify({ name: 'a', scripts: { test: 'x' }, 'lint-staged': { '*.js': 'eslint' }, dependencies: { a: '1' } }, null, 4)}\n`);
     commit(project, 'pkg');
     const dir = addWorktree(project, 'AP-1', 'main').dir;
-    const lane = watchLane(dir, hookFiles(dir));
+    const lane = await watchLane(dir, hookFiles(dir));
     const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
     fs.writeFileSync(path.join(dir, 'package.json'), `${JSON.stringify({ ...pkg, scripts: { test: 'vitest' }, 'lint-staged': {}, dependencies: { a: '1', zod: '3' } }, null, 4)}\n`);
-    expect(checkLane(lane).restored).toEqual(['package.json (lint-staged)']);
+    expect((await checkLane(lane)).restored).toEqual(['package.json (lint-staged)']);
     const after = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
     expect(after.scripts.test).toBe('vitest');
     expect(after.dependencies.zod).toBe('3');
@@ -786,21 +787,21 @@ describe('finding 12: closing the board while a Looks right hook runs', () => {
 });
 
 describe('words and false alarms', () => {
-  it('an install that makes a hook manager\'s generated folder is no one changing the check', () => {
+  it('an install that makes a hook manager\'s generated folder is no one changing the check', async () => {
     script(path.join(project, '.husky', 'pre-commit'), 'exit 0');
     commit(project, 'hooks');
     sh('git config core.hooksPath .husky', project);
     const dir = addWorktree(project, 'AP-1', 'main').dir;
-    const lane = watchLane(dir, hookFiles(dir));
+    const lane = await watchLane(dir, hookFiles(dir));
     fs.mkdirSync(path.join(dir, '.husky', '_'));
     fs.writeFileSync(path.join(dir, '.husky', '_', '.gitignore'), '*');
     script(path.join(dir, '.husky', '_', 'husky.sh'), 'exit 0');
-    expect(checkLane(lane).restored).toEqual([]);
+    expect((await checkLane(lane)).restored).toEqual([]);
     expect(exists(path.join(dir, '.husky', '_', 'husky.sh'))).toBe(true);
     // The check itself still goes back.
-    const again = watchLane(dir, hookFiles(dir));
+    const again = await watchLane(dir, hookFiles(dir));
     fs.writeFileSync(path.join(dir, '.husky', 'pre-commit'), '#!/bin/sh\nexit 1\n');
-    expect(checkLane(again).restored).toEqual(['.husky/pre-commit']);
+    expect((await checkLane(again)).restored).toEqual(['.husky/pre-commit']);
   });
 
   it('the card and the ticket use plain words: no commit, no path', async () => {

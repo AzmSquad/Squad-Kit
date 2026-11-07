@@ -27,10 +27,11 @@ import type { BoardMeta, Decision, ImpactCheck, Release, TechDraft, Ticket, Unpu
 import { detectStack } from './stack.js';
 import { scheduleSquad } from './schedule.js';
 import { plainWords } from '../core/for-people.js';
-import { PullRequestClash, commitTicket, commitWithoutCheck, hooksStillOwed, liveRelease, onTheRemote, pushAgain, versionOnRemote } from '../engine/release.js';
-import { CommitStopped, HookRefused, MergeClash, addWorktree, mergeWouldClash, cutOffWords, git, pushedBranch, repairCopyLink, settleCopy, type HookRun } from '../engine/git.js';
+import { DOING } from '../engine/plain-doing.js';
+import { PullRequestClash, basesNow, commitTicket, commitWithoutCheck, commitWithoutCheckLater, hooksStillOwed, liveRelease, onTheRemote, pushAgain, versionOnRemote } from '../engine/release.js';
+import { baseTurn, CommitStopped, GitStopped, HookRefused, MergeClash, addWorktree, mergeWouldClash, cutOffWords, git, pushedBranch, repairCopyLink, settleCopy, type HookRun } from '../engine/git.js';
 import { guardSupport, ticketGuard } from '../engine/project-guard.js';
-import { holdRelease, releaseGoingOut } from './lock.js';
+import { holdRelease, releaseGoingOut, takingOutDone } from './lock.js';
 import { repoFor, reposOf } from '../engine/repos.js';
 import { buildPaths } from '../core/paths.js';
 import { writeLog } from '../core/app-log.js';
@@ -504,12 +505,17 @@ export function acceptProof(bp: BoardPaths, ticket: Ticket, byItself?: string, o
       for (const view of views) {
         repairCopy(bp, view);
         // The accepted ticket's documents go in the same commit as its code, when the project keeps them in git.
-        leaveProjectFiles(bp, view, repoFor(readMeta(bp), view).base);
-        stageTicketDocs(bp, { ...view, stage: 'release', release: release.version, waiting: null, hookOwed: undefined });
         // The hooks run in one place, beside everything else (saveBeside). Past here they had their say, or the person went past them.
         const saved = takeSaved(bp, ticket.id, views.length > 1 ? view.repo : undefined);
-        if (saved === undefined && !opts.noHooks && hooksStillOwed(view)) throw new BoardActionError(`The project's own check has not looked at ${ticket.id} yet, so it cannot be accepted. Press Looks right.`);
-        commit = commitWithoutCheck(view) ?? saved ?? commit;
+        // That save carried the ticket's documents and all there was: nothing is left to look at here.
+        if (saved !== undefined) {
+          commit = saved ?? commit;
+          continue;
+        }
+        leaveProjectFiles(bp, view, repoFor(readMeta(bp), view).base);
+        stageTicketDocs(bp, { ...view, stage: 'release', release: release.version, waiting: null, hookOwed: undefined });
+        if (!opts.noHooks && hooksStillOwed(view)) throw new BoardActionError(`The project's own check has not looked at ${ticket.id} yet, so it cannot be accepted. Press Looks right.`);
+        commit = commitWithoutCheck(view) ?? commit;
       }
     } catch (err) {
       if (err instanceof BoardActionError) throw err;
@@ -592,10 +598,48 @@ function repairCopy(bp: BoardPaths, t: Ticket): void {
 /** The project's commit hook said no: the ticket has a stop card with ways out, and this says so. */
 export class HookStopped extends BoardActionError {}
 
-/** Tickets whose change is being saved, each with what ends its hook, and the commit each got: null when it had nothing to save. */
+/**
+ * Tickets from their Looks right until the merge is over, each with what ends its hook, and the commit each got: null when
+ * it had nothing to save. Other buttons wait for that: what they asked for would not stop the merge.
+ */
 const savingNow = new Map<string, AbortController>();
 const savedCommits = new Map<string, string | null>();
-const saveKey = (bp: BoardPaths, id: string) => `${bp.squadDir}\0${id}`;
+const saveKey = (bp: BoardPaths, id: string) => `${bp.squadDir}\0${id.toUpperCase()}`;
+
+/** A ticket on its way in takes no other button. The person can look at it again once it is in. */
+export function refuseWhileSaving(bp: BoardPaths, id: string): void {
+  if (savingNow.has(saveKey(bp, id))) throw new BoardActionError(`${id.toUpperCase()} is being saved, so this has to wait. Try again in a moment.`);
+}
+
+/** Holds a ticket from its save until the merge is over. A second press is refused. */
+export async function holdingSave<T>(bp: BoardPaths, id: string, job: (closing: AbortController) => Promise<T>): Promise<T> {
+  refuseWhileSaving(bp, id);
+  const key = saveKey(bp, id);
+  const closing = new AbortController();
+  savingNow.set(key, closing);
+  try {
+    return await job(closing);
+  } finally {
+    savingNow.delete(key);
+    // Saved for an accept that did not come: the next one saves for itself.
+    for (const k of savedCommits.keys()) if (k === key || k.startsWith(`${key}\0`)) savedCommits.delete(k);
+  }
+}
+
+/**
+ * The accept itself, in the turn of each repo it moves, in one synchronous piece: `accept` reads the ticket once more, and
+ * nothing can run between that look and the merge.
+ */
+export function acceptInTurn<T>(bp: BoardPaths, id: string, closing: AbortController, accept: () => T): Promise<T> {
+  const meta = readMeta(bp);
+  const dirs = copyViews(meta, requireTicket(bp, id)).map((view) => path.join(bp.root, repoFor(meta, view).path));
+  return baseTurn(dirs, () => {
+    if (closing.signal.aborted) throw new CommitStopped();
+    return accept();
+  });
+}
+
+const movedOn = (id: string) => new BoardActionError(`${id} changed while it was saved, so it did not go in. Its work is safe in its copy.`);
 
 /** The hooks' say on this ticket, for the accept right after them. Undefined when they had none. */
 function takeSaved(bp: BoardPaths, id: string, repo?: string): string | null | undefined {
@@ -644,7 +688,7 @@ function hookStopped(bp: BoardPaths, id: string, err: HookRefused, byItself?: st
  * Work the hooks still owe a look (hookOwed) with no copy of the code left: they would have nothing to look at, and the
  * branch would merge unseen. The copy is made again from the branch; with no branch either, it is a stop card.
  */
-function copyForTheHooks(bp: BoardPaths, ticket: Ticket): Ticket {
+async function copyForTheHooks(bp: BoardPaths, ticket: Ticket, signal: AbortSignal): Promise<Ticket> {
   if (!ticket.hookOwed || (ticket.worktree && fs.existsSync(ticket.worktree))) return ticket;
   const repo = repoFor(readMeta(bp), ticket);
   const root = path.join(bp.root, repo.path);
@@ -652,7 +696,7 @@ function copyForTheHooks(bp: BoardPaths, ticket: Ticket): Ticket {
   if (!git(root, ['rev-parse', '--verify', '-q', `refs/heads/${branch}`], { allowFail: true }) && !pushedBranch(root, branch)) {
     throw new HookRefused("The ticket's copy of the code and its branch are gone, so the project's own check has nothing to look at.", false, 0);
   }
-  const wt = addWorktree(root, ticket.id, repo.base);
+  const wt = await addWorktree(root, ticket.id, repo.base, undefined, undefined, { signal, making: () => updateTicket(bp, ticket.id, (t) => (t.status = DOING.copy)) });
   return updateTicket(bp, ticket.id, (t) => {
     t.worktree = wt.dir;
     t.branch = wt.branch;
@@ -685,44 +729,63 @@ async function gatesBeforeSave(bp: BoardPaths, ticket: Ticket, copy: Ticket, lab
 }
 
 /** Saves the accepted change with the hooks running beside everything else, so a slow hook never holds up the board. */
-async function saveBeside(bp: BoardPaths, ticket: Ticket, byItself?: string, signal?: AbortSignal): Promise<void> {
+async function saveBeside(bp: BoardPaths, ticket: Ticket, closing: AbortController, byItself?: string, signal?: AbortSignal): Promise<void> {
   const key = saveKey(bp, ticket.id);
-  if (savingNow.has(key)) throw new BoardActionError(`${ticket.id} is being saved: the project's own check is still running.`);
-  const closing = new AbortController();
-  savingNow.set(key, closing);
+  const stop = signal ? AbortSignal.any([signal, closing.signal]) : closing.signal;
   try {
     const release = ensureDraftRelease(bp, ticket.kind === 'bug' ? 'patch' : 'minor');
     const views = copyViews(readMeta(bp), ticket);
     // Every copy is saved, with the project's own check on each, before anything goes in.
     for (const view of views) {
-      const copy = views.length === 1 ? copyForTheHooks(bp, view) : view;
+      const copy = views.length === 1 ? await copyForTheHooks(bp, view, stop) : view;
       repairCopy(bp, copy);
-      await gatesBeforeSave(bp, ticket, copy, views.length > 1 ? copy.repo : undefined, byItself, signal ? AbortSignal.any([signal, closing.signal]) : closing.signal);
+      await gatesBeforeSave(bp, ticket, copy, views.length > 1 ? copy.repo : undefined, byItself, stop);
       leaveProjectFiles(bp, copy, repoFor(readMeta(bp), copy).base);
       stageTicketDocs(bp, { ...copy, stage: 'release', release: release.version, waiting: null, hookOwed: undefined });
-      const saved = await commitTicket(copy, { ...hookRun(bp, copy), signal: signal ? AbortSignal.any([signal, closing.signal]) : closing.signal });
-      savedCommits.set(views.length === 1 ? key : `${key}\0${view.repo}`, saved);
+      const saved = await commitTicket(copy, { ...hookRun(bp, copy), signal: stop });
+      // What the hooks left, saved now too, so the accept that comes next has no save of its own to do on the board's time.
+      savedCommits.set(views.length === 1 ? key : `${key}\0${view.repo}`, (await commitWithoutCheckLater(copy)) ?? saved);
     }
     if (ticket.hookOwed) updateTicket(bp, ticket.id, (t) => delete t.hookOwed);
   } catch (err) {
     // A merge was finished before the hooks looked at it: no later save would show it to them.
     if ((err instanceof CommitStopped || err instanceof HookRefused) && err.owed) updateTicket(bp, ticket.id, (t) => (t.hookOwed = true));
     if (err instanceof CommitStopped || err instanceof HookStopped) throw err;
+    if (err instanceof GitStopped) throw new CommitStopped();
     if (err instanceof HookRefused) throw hookStopped(bp, ticket.id, err, byItself);
     throw actionFailed(bp, ticket.id, `squad-kit could not save the change. It is safe in the ticket's copy, and an engineer can see why in squad-kit's log. ${byItself ? 'Press Try again.' : 'Press Looks right to try again.'}`, err);
-  } finally {
-    savingNow.delete(key);
+  }
+}
+
+/** What acceptProof saves when the person went past the project's own check, beside everything else. */
+async function saveNoHooksBeside(bp: BoardPaths, ticket: Ticket): Promise<void> {
+  const release = ensureDraftRelease(bp, ticket.kind === 'bug' ? 'patch' : 'minor');
+  const views = copyViews(readMeta(bp), ticket);
+  try {
+    for (const view of views) {
+      repairCopy(bp, view);
+      leaveProjectFiles(bp, view, repoFor(readMeta(bp), view).base);
+      stageTicketDocs(bp, { ...view, stage: 'release', release: release.version, waiting: null, hookOwed: undefined });
+      savedCommits.set(views.length === 1 ? saveKey(bp, ticket.id) : `${saveKey(bp, ticket.id)}\0${view.repo}`, await commitWithoutCheckLater(view));
+    }
+  } catch (err) {
+    throw actionFailed(bp, ticket.id, 'squad-kit could not save the change, so the proof stays as it is. Press Looks right to try again.', err);
   }
 }
 
 /** Looks right from the board or the squad: `approve`, with the project's hooks running beside everything else. */
 export async function approveBeside(bp: BoardPaths, id: string): Promise<Ticket> {
   const ticket = requireTicket(bp, id);
-  if (ticket.waiting?.kind === 'proof' && readMeta(bp).engine === 'live' && !openChange(ticket)) {
-    refuseBeforeDependency(bp, ticket);
-    await saveBeside(bp, ticket);
-  }
-  return approve(bp, id);
+  if (ticket.waiting?.kind !== 'proof' || readMeta(bp).engine !== 'live' || openChange(ticket)) return approve(bp, id);
+  refuseBeforeDependency(bp, ticket);
+  return holdingSave(bp, ticket.id, async (closing) => {
+    await saveBeside(bp, ticket, closing);
+    return acceptInTurn(bp, ticket.id, closing, () => {
+      const now = requireTicket(bp, id);
+      if (now.waiting?.kind !== 'proof' || now.deleting || now.takenOver || now.stopRequested) throw movedOn(now.id);
+      return approve(bp, id);
+    });
+  });
 }
 
 /** `decideStuck`, with "Try the save again" running the project's hooks beside everything else. */
@@ -730,30 +793,40 @@ export async function decideStuckBeside(bp: BoardPaths, id: string, choice: numb
   const ticket = requireTicket(bp, id);
   const stuck = ticket.waiting?.kind === 'stuck' ? ticket.stuck : undefined;
   const way = stuck?.options[choice]?.do;
-  if (way === 'save-again') await saveBeside(bp, ticket);
-  // Past a gate of the team's: the project's own hooks still get their say, on the save that follows.
-  if (way === 'skip-hooks' && stuck?.added?.length) {
-    const why = input.reason?.trim();
-    if (!why) throw new BoardActionError('Write why you go on without this check. It shows on the story, the pull request and the release notes.');
-    const by = readMeta(bp).user.name;
-    updateTicket(bp, id, (t) => {
-      t.overrides = [...(t.overrides ?? []), ...stuck.added!.map((g) => ({ gate: 'hooks' as const, added: g.name, reason: why, by, at: now() }))];
-      t.addedSkipped = [...new Set([...(t.addedSkipped ?? []), ...stuck.added!.map((g) => g.id)])];
-      tellLater(t, readMeta(bp).engine, { kind: 'note', text: `Saved without your team's check: ${why}`, noteKind: 'note' });
+  const why = input.reason?.trim();
+  const added = way === 'skip-hooks' && Boolean(stuck?.added?.length);
+  if (added && !why) throw new BoardActionError('Write why you go on without this check. It shows on the story, the pull request and the release notes.');
+  if (way !== 'save-again' && !(way === 'skip-hooks' && why)) return decideStuck(bp, id, choice, input);
+  return holdingSave(bp, ticket.id, async (closing) => {
+    if (way === 'save-again') await saveBeside(bp, ticket, closing);
+    // Past a gate of the team's: the project's own hooks still get their say, on the save that follows.
+    else if (added) {
+      const by = readMeta(bp).user.name;
+      updateTicket(bp, id, (t) => {
+        t.overrides = [...(t.overrides ?? []), ...stuck!.added!.map((g) => ({ gate: 'hooks' as const, added: g.name, reason: why!, by, at: now() }))];
+        t.addedSkipped = [...new Set([...(t.addedSkipped ?? []), ...stuck!.added!.map((g) => g.id)])];
+        tellLater(t, readMeta(bp).engine, { kind: 'note', text: `Saved without your team's check: ${why}`, noteKind: 'note' });
+      });
+      await saveBeside(bp, requireTicket(bp, id), closing);
+    }
+    // Past the project's own check, with a reason on the record: the same save with no hooks, then the card's way out.
+    else await saveNoHooksBeside(bp, ticket);
+    return acceptInTurn(bp, ticket.id, closing, () => {
+      const t = requireTicket(bp, id);
+      if (t.waiting?.kind !== 'stuck' || t.deleting || t.takenOver) throw movedOn(t.id);
+      return decideNow(bp, id, choice, input);
     });
-    await saveBeside(bp, requireTicket(bp, id));
-  }
-  return decideStuck(bp, id, choice, input);
+  });
 }
 
 /**
  * The Builds by itself step: its commit, with the hooks beside everything else, before the accept. A refusal leaves its
  * card. The step's Stop ends a hook that is running (CommitStopped goes on up, to the step's own Stop handling).
  */
-export async function saveBeforeAccept(bp: BoardPaths, id: string, signal?: AbortSignal): Promise<boolean> {
+export async function saveBeforeAccept(bp: BoardPaths, id: string, closing: AbortController, signal?: AbortSignal): Promise<boolean> {
   const ticket = requireTicket(bp, id);
   try {
-    await saveBeside(bp, ticket, 'the squad', signal);
+    await saveBeside(bp, ticket, closing, 'the squad', signal);
     return true;
   } catch (err) {
     if (err instanceof HookStopped) return false;
@@ -871,6 +944,7 @@ const AGENT_LABEL: Record<AgentName, string> = { analyst: 'Analyst', architect: 
  * copy. Nothing runs until you give it back, so you and the squad never edit at the same time.
  */
 export function takeOver(bp: BoardPaths, id: string): Ticket {
+  refuseWhileSaving(bp, id);
   const meta = readMeta(bp);
   return updateTicket(bp, id, (t) => {
     if (t.takenOver) throw new BoardActionError(`${t.id} is already yours. Give it back when you are done.`);
@@ -938,6 +1012,7 @@ export interface HandOverInput {
  * on it. Live progress, agent chats and screenshots stay on this computer.
  */
 export async function handOver(bp: BoardPaths, id: string, input: HandOverInput): Promise<Ticket> {
+  refuseWhileSaving(bp, id);
   const meta = readMeta(bp);
   const to = (input.to ?? '').trim().replace(/\s+/g, ' ');
   const t = requireTicket(bp, id);
@@ -954,7 +1029,8 @@ export async function handOver(bp: BoardPaths, id: string, input: HandOverInput)
   const at = now();
   const handedOver = { from: meta.user.name, to, at };
   const note = input.note?.trim();
-  const notes = note ? [...(t.notes ?? []), { at, by: meta.user.name, kind: 'note' as const, text: note }] : t.notes;
+  const said = note ? { at, by: meta.user.name, kind: 'note' as const, text: note } : null;
+  const notes = said ? [...(t.notes ?? []), said] : t.notes;
   let pushed: HandOverPush | null = null;
   if (meta.engine === 'live') {
     try {
@@ -966,7 +1042,8 @@ export async function handOver(bp: BoardPaths, id: string, input: HandOverInput)
   return updateTicket(bp, id, (x) => {
     x.owner = to;
     x.handedOver = handedOver;
-    if (notes) x.notes = notes;
+    // Read now: the push takes a while, and a note written meanwhile stays.
+    if (said) x.notes = [...(x.notes ?? []), said];
     if (pushed) {
       x.branch = pushed.branch;
       x.baseCommit = x.baseCommit ?? pushed.baseCommit;
@@ -990,6 +1067,7 @@ export async function handOver(bp: BoardPaths, id: string, input: HandOverInput)
 
 /** "Change something" on a spec or plan, or "Something's wrong" on the proof. */
 export function requestChange(bp: BoardPaths, id: string, text: string): Ticket {
+  refuseWhileSaving(bp, id);
   const note = text.trim();
   if (!note) throw new BoardActionError('Say in one line what should change.');
   const meta = readMeta(bp);
@@ -1047,6 +1125,7 @@ function openChat(t: Ticket, agent: AgentName, before: AgentChat['before']): voi
  * stays exactly where it is (askQuestion).
  */
 export function startChat(bp: BoardPaths, id: string, agent: AgentName, opts: { ask?: boolean } = {}): Ticket {
+  if (!opts.ask) refuseWhileSaving(bp, id);
   const meta = readMeta(bp);
   if (!AGENT_TITLE[agent]) throw new BoardActionError('Pick an agent: analyst, architect, builder, reviewer or tester.');
   return updateTicket(bp, id, (t) => {
@@ -1776,6 +1855,11 @@ function wayOf(t: Ticket, option: StuckOption, choice: number): WayOut {
 }
 
 export function decideStuck(bp: BoardPaths, id: string, choice: number, input: { note?: string; reason?: string } = {}): Ticket {
+  refuseWhileSaving(bp, id);
+  return decideNow(bp, id, choice, input);
+}
+
+function decideNow(bp: BoardPaths, id: string, choice: number, input: { note?: string; reason?: string }): Ticket {
   const meta = readMeta(bp);
   const before = requireTicket(bp, id);
   const save = before.waiting?.kind === 'stuck' ? before.stuck?.options[choice]?.do : undefined;
@@ -2095,12 +2179,20 @@ async function gatesBeforeRelease(bp: BoardPaths, release: Release, tickets: Tic
  * A teammate released this number from their computer, since each one numbers its drafts alone. A number on the remote
  * is never used twice or moved, so this release takes the next free one, and every ticket in it follows.
  */
-function goAroundTakenVersion(bp: BoardPaths, release: Release): { release: Release; was?: string } {
+async function goAroundTakenVersion(bp: BoardPaths, release: Release): Promise<{ release: Release; was?: string }> {
   const tickets = listTickets(bp).filter((t) => release.tickets.includes(t.id));
-  if (readMeta(bp).engine !== 'live' || !versionOnRemote(bp, release, tickets)) return { release };
+  if (readMeta(bp).engine !== 'live' || !(await versionOnRemote(bp, release, tickets))) return { release };
   const part = /\.0$/.test(release.version) ? 'minor' : 'patch';
   let version = bump(release.version, part);
-  while (fs.existsSync(path.join(bp.releasesDir, `${version}.md`)) || versionOnRemote(bp, { ...release, version }, tickets)) version = bump(version, part);
+  while (fs.existsSync(path.join(bp.releasesDir, `${version}.md`)) || (await versionOnRemote(bp, { ...release, version }, tickets))) version = bump(version, part);
+  // A ticket accepted while the remote was asked may have made this number's draft: that draft moves up one, whole.
+  const accepted = readRelease(bp, version);
+  if (accepted) {
+    let after = bump(version, part);
+    while (fs.existsSync(path.join(bp.releasesDir, `${after}.md`))) after = bump(after, part);
+    writeRelease(bp, { ...accepted, version: after, from: version });
+    for (const id of accepted.tickets) moveToRelease(bp, id, version, after);
+  }
   const next: Release = { ...release, version, from: release.version };
   writeRelease(bp, next);
   removeRelease(bp, release.version);
@@ -2109,32 +2201,45 @@ function goAroundTakenVersion(bp: BoardPaths, release: Release): { release: Rele
 }
 
 export async function releaseVersion(bp: BoardPaths, version?: string, goOn?: string): Promise<Release> {
+  // A ticket being taken out of a release goes first: what its check says decides what goes out.
+  const out = takingOutDone(bp);
+  if (out) await out;
   const asked = version ? readRelease(bp, version) : draftRelease(bp);
   if (!asked || asked.status !== 'draft') throw new BoardActionError('There is no release ready to go out.');
   if (asked.tickets.length === 0) throw new BoardActionError(`${asked.version} has no tickets yet.`);
   // One going out now, or cut off half-way, may have put this tag there itself: it keeps its number.
-  const { release, was } = releaseGoingOut(bp) || readJournal(bp) ? { release: asked, was: undefined } : goAroundTakenVersion(bp, asked);
-  // One release at a time, and "Looks right" meanwhile knows this one takes no more tickets.
+  const keepsNumber = Boolean(releaseGoingOut(bp) || readJournal(bp));
+  // One release at a time, and "Looks right" meanwhile knows this one takes no more tickets. Held before the remote is
+  // asked about its number, which takes a while.
   let free: () => void;
   try {
-    free = holdRelease(bp, release.version);
+    free = holdRelease(bp, asked.version);
   } catch (err) {
     throw new BoardActionError((err as Error).message);
   }
   try {
+    // What it sends is read once the lock is held: a ticket accepted just before still goes with it, and one accepted
+    // from here on waits for the next release, its code too: the copy for the release takes a while on a big project.
+    const sending = readRelease(bp, asked.version) ?? asked;
+    const from = basesNow(bp);
+    const { release, was } = keepsNumber ? { release: sending, was: undefined } : await goAroundTakenVersion(bp, sending);
+    if (release.version !== asked.version) {
+      free();
+      free = holdRelease(bp, release.version);
+    }
     // A release cut off by a restart is finished or undone first (board/release-tidy.ts).
     if (readJournal(bp)) {
       const cut = await settleRelease(bp, `${readJournal(bp)!.version} was cut off while it went out (the app closed or the computer restarted).`);
       if (cut?.version === release.version && cut.status === 'released') return cut;
+      return await sendRelease(bp, readRelease(bp, release.version) ?? release, basesNow(bp), goOn?.trim(), was);
     }
-    // What it sends is read once the lock is held: a ticket accepted just before still goes with it.
-    return await sendRelease(bp, readRelease(bp, release.version) ?? release, goOn?.trim(), was);
+    return await sendRelease(bp, release, from, goOn?.trim(), was);
   } finally {
     free();
   }
 }
 
-async function sendRelease(bp: BoardPaths, release: Release, goOn?: string, numberWas?: string): Promise<Release> {
+async function sendRelease(bp: BoardPaths, release: Release, from: Map<string, string>, goOn?: string, numberWas?: string): Promise<Release> {
   const meta = readMeta(bp);
   if (!release.notes.trim()) release.notes = composeNotes(bp, release);
   const tickets = listTickets(bp).filter((t) => release.tickets.includes(t.id));
@@ -2153,7 +2258,7 @@ async function sendRelease(bp: BoardPaths, release: Release, goOn?: string, numb
   let unpushed: UnpushedRelease[] = [];
   if (meta.engine === 'live') {
     try {
-      const done = await liveRelease(bp, release, tickets);
+      const done = await liveRelease(bp, release, tickets, from);
       release.log = [...(numberWas ? [{ ok: true, text: `A teammate already released ${numberWas}, so this one went out as ${release.version}.` }] : []), ...done.log];
       unpushed = done.unpushed;
       // A pull request merged only now, as the release went out: the first code came in this way.

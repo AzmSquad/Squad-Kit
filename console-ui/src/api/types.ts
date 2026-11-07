@@ -1,4 +1,5 @@
 import type { FirstLook, FolderKind } from './onboard-types';
+export type { FirstLook };
 import type { Decided } from './requirements-types';
 
 // Mirrors src/board/types.ts on the server. Keep the two in step.
@@ -1121,7 +1122,7 @@ export interface ProjectApp {
   start?: string;
   setup?: string;
   state: 'not-running' | 'starting' | 'running' | 'stopped' | 'failed';
-  step?: 'update' | 'setup' | 'start';
+  step?: 'update' | 'copy' | 'setup' | 'start';
   address?: string;
   startedAt?: string;
   since?: string;
@@ -1201,8 +1202,6 @@ export interface FolderListing {
   canAdd: boolean;
   folders: { name: string; path: string; kind: 'project' | 'repo' | 'folder' }[];
   places: { name: string; path: string }[];
-  /** What squad-kit found in the folder and what adding it does. */
-  look?: FirstLook;
   /** Where a new project goes unless the person picks another place. */
   place: string;
   /** Why a new project cannot go in this folder. */

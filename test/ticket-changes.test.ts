@@ -46,18 +46,18 @@ function ticketWithCopy() {
 }
 
 describe('the Changes tab', () => {
-  it('shows nothing before the build starts', () => {
+  it('shows nothing before the build starts', async () => {
     const t = actions.createTicket(bp, { title: 'New' });
-    expect(ticketChanges(bp, t.id)).toEqual({ from: 'none', files: [] });
+    expect(await ticketChanges(bp, t.id)).toEqual({ from: 'none', files: [] });
   });
 
-  it("reads changed, deleted and new files from the ticket's copy", () => {
+  it("reads changed, deleted and new files from the ticket's copy", async () => {
     const { id, copy } = ticketWithCopy();
     fs.writeFileSync(path.join(copy, 'a.txt'), 'one\nTWO\n');
     fs.rmSync(path.join(copy, 'gone.txt'));
     fs.mkdirSync(path.join(copy, 'src'));
     fs.writeFileSync(path.join(copy, 'src', 'new.ts'), 'export const x = 1;\n');
-    const c = ticketChanges(bp, id);
+    const c = await ticketChanges(bp, id);
     expect(c.from).toBe('copy');
     const byPath = Object.fromEntries(c.files.map((f) => [f.path, f]));
     expect(byPath['a.txt']).toMatchObject({ status: 'changed', added: 1, removed: 1 });
@@ -67,12 +67,12 @@ describe('the Changes tab', () => {
     expect(byPath['src/new.ts']!.patch).toContain('+export const x = 1;');
   });
 
-  it('reads the branch once the copy is gone', () => {
+  it('reads the branch once the copy is gone', async () => {
     const { id, copy } = ticketWithCopy();
     fs.writeFileSync(path.join(copy, 'a.txt'), 'one\nthree\n');
     g(copy, 'commit', '-qam', 'change');
     g(repo, 'worktree', 'remove', '--force', copy);
-    const c = ticketChanges(bp, id);
+    const c = await ticketChanges(bp, id);
     expect(c.from).toBe('branch');
     expect(c.files.map((f) => f.path)).toEqual(['a.txt']);
   });

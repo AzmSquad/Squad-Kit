@@ -8,7 +8,7 @@ import * as actions from '../src/board/actions.js';
 import { setupView } from '../src/board/first-run.js';
 import type { Ticket } from '../src/board/types.js';
 import { firstLook } from '../src/engine/first-look.js';
-import { addWorktree } from '../src/engine/git.js';
+import { addWorktree } from './support/copy.js';
 import { pushHandOver } from '../src/engine/handover.js';
 import { commitTicketDocs, docsRepo, leaveProjectFiles, stageProjectFiles, stageTicketDocs } from '../src/engine/project-git.js';
 import { findNestedRepos, workspaceRepos } from '../src/engine/repos.js';
@@ -100,11 +100,11 @@ function storyIn(root: string, repo: string): { bp: BoardPaths; t: Ticket } {
 const squadFilesIn = (repo: string, ref: string) => sh(`git log --format=%s ${ref} -- .squad`, repo);
 
 describe("squad-kit's own files and the code repos of a workspace with a root repo", () => {
-  it('a big moment commits nothing in the code repo, and leaves its copy clean', () => {
+  it('a big moment commits nothing in the code repo, and leaves its copy clean', async () => {
     const root = workspace();
     const { bp, t } = storyIn(root, 'api');
     expect(docsRepo(bp)).toBeNull();
-    expect(commitTicketDocs(bp, t, 'spec and design approved')).toBeNull();
+    expect(await commitTicketDocs(bp, t, 'spec and design approved')).toBeNull();
     expect(stageTicketDocs(bp, t)).toEqual([]);
     expect(stageProjectFiles(bp, t, 'development')).toEqual([]);
     expect(leaveProjectFiles(bp, t, 'development')).toEqual([]);
@@ -153,13 +153,13 @@ describe("squad-kit's own files and the code repos of a workspace with a root re
 });
 
 describe('Add project and the setup say the same about a folder that is a repo with repos inside', () => {
-  it('a root repo with tools and notes, and code repos inside: a workspace, from the first moment', () => {
+  it('a root repo with tools and notes, and code repos inside: a workspace, from the first moment', async () => {
     const root = workspace();
     expect(workspaceRepos(root).map((r) => [r.path, r.base])).toEqual([
       ['api', 'development'],
       ['web', 'development'],
     ]);
-    expect(firstLook(root)).toMatchObject({ kind: 'repos', title: 'Several code folders', repos: ['api', 'web'] });
+    expect(await firstLook(root)).toMatchObject({ kind: 'repos', title: 'Several code folders', repos: ['api', 'web'] });
     const { bp, did } = prepareProject(root);
     expect(setupView(bp)?.kind).toBe('repos');
     expect(did.join('\n')).toContain('Git: found 2 code repos inside');
@@ -167,30 +167,30 @@ describe('Add project and the setup say the same about a folder that is a repo w
     expect(docsRepo(bp)).toBeNull();
   });
 
-  it('small helper scripts beside the repos do not make the root a project of its own', () => {
+  it('small helper scripts beside the repos do not make the root a project of its own', async () => {
     const root = workspace();
     put(path.join(root, 'scripts', 'pull.py'));
     put(path.join(root, 'tools', 'seed.mjs'));
     put(path.join(root, 'docs', 'site', 'index.html'));
     sh('git add -A && git -c user.name=t -c user.email=t@t commit -q -m tools', root);
-    expect(firstLook(root)).toMatchObject({ kind: 'repos', repos: ['api', 'web'] });
+    expect(await firstLook(root)).toMatchObject({ kind: 'repos', repos: ['api', 'web'] });
   });
 
-  it('a root repo with no first commit stays as it is: its repos are not swept into a commit', () => {
+  it('a root repo with no first commit stays as it is: its repos are not swept into a commit', async () => {
     const root = path.join(tmp, 'fresh');
     put(path.join(root, 'api', 'Program.cs'));
     commit(path.join(root, 'api'), 'development');
     sh('git init -q -b main', root);
-    expect(firstLook(root)).toMatchObject({ kind: 'repos', repos: ['api'] });
+    expect(await firstLook(root)).toMatchObject({ kind: 'repos', repos: ['api'] });
     const { bp } = prepareProject(root);
     expect(setupView(bp)?.kind).toBe('repos');
     expect(sh('git rev-parse --verify -q HEAD || echo none', root)).toBe('none');
   });
 
-  it('a one-repo project with a repo inside that it ignores stays one project', () => {
+  it('a one-repo project with a repo inside that it ignores stays one project', async () => {
     const root = oneRepoWithSubRepo('lib/\n');
     expect(workspaceRepos(root)).toEqual([]);
-    expect(firstLook(root)).toMatchObject({ kind: 'repo', repos: [], language: 'TypeScript', branch: 'main' });
+    expect(await firstLook(root)).toMatchObject({ kind: 'repo', repos: [], language: 'TypeScript', branch: 'main' });
     const { bp, did } = prepareProject(root);
     expect(setupView(bp)?.kind).toBe('repo');
     expect(did.join('\n')).toContain('Git: found the repo, on main');
@@ -199,21 +199,21 @@ describe('Add project and the setup say the same about a folder that is a repo w
     expect(docsRepo(bp)).toBe(root);
   });
 
-  it('a one-repo project with a repo inside that git has not been told about stays one project too', () => {
+  it('a one-repo project with a repo inside that git has not been told about stays one project too', async () => {
     const root = oneRepoWithSubRepo('');
     expect(workspaceRepos(root)).toEqual([]);
-    expect(firstLook(root)).toMatchObject({ kind: 'repo', repos: [] });
+    expect(await firstLook(root)).toMatchObject({ kind: 'repo', repos: [] });
     expect(setupView(prepareProject(root).bp)?.kind).toBe('repo');
   });
 
-  it('code at the root that is not saved in git yet still counts as its own', () => {
+  it('code at the root that is not saved in git yet still counts as its own', async () => {
     const root = workspace();
     put(path.join(root, 'main.go'));
     expect(workspaceRepos(root)).toEqual([]);
-    expect(firstLook(root)).toMatchObject({ kind: 'repo', repos: [] });
+    expect(await firstLook(root)).toMatchObject({ kind: 'repo', repos: [] });
   });
 
-  it("a submodule or a repo the root tracks belongs to the root: it is no part of a workspace", () => {
+  it("a submodule or a repo the root tracks belongs to the root: it is no part of a workspace", async () => {
     const lib = path.join(tmp, 'lib-source');
     put(path.join(lib, 'index.js'));
     commit(lib);
@@ -225,7 +225,7 @@ describe('Add project and the setup say the same about a folder that is a repo w
     // Git's own check for the .git file a submodule has: findNestedRepos sees it, the workspace rule does not.
     expect(findNestedRepos(root).map((r) => r.path)).toEqual(['theme']);
     expect(workspaceRepos(root)).toEqual([]);
-    expect(firstLook(root)).toMatchObject({ kind: 'repo', repos: [] });
+    expect(await firstLook(root)).toMatchObject({ kind: 'repo', repos: [] });
     expect(setupView(prepareProject(root).bp)?.kind).toBe('repo');
   });
 
@@ -237,22 +237,22 @@ describe('Add project and the setup say the same about a folder that is a repo w
     expect(workspaceRepos(root)).toEqual([]);
   });
 
-  it('a plain folder holding repos is a workspace as before, with loose files beside them', () => {
+  it('a plain folder holding repos is a workspace as before, with loose files beside them', async () => {
     const root = path.join(tmp, 'plain');
     put(path.join(root, 'api', 'index.js'));
     commit(path.join(root, 'api'));
     put(path.join(root, 'run-all.sh'));
     put(path.join(root, 'loose.py'));
     expect(workspaceRepos(root).map((r) => r.path)).toEqual(['api']);
-    expect(firstLook(root)).toMatchObject({ kind: 'repos', repos: ['api'] });
+    expect(await firstLook(root)).toMatchObject({ kind: 'repos', repos: ['api'] });
   });
 
-  it('a plain repo with nothing inside sees nothing new', () => {
+  it('a plain repo with nothing inside sees nothing new', async () => {
     const root = path.join(tmp, 'plain-repo');
     put(path.join(root, 'index.ts'));
     commit(root);
     expect(workspaceRepos(root)).toEqual([]);
-    expect(firstLook(root)).toMatchObject({ kind: 'repo', repos: [] });
+    expect(await firstLook(root)).toMatchObject({ kind: 'repo', repos: [] });
     expect(docsRepo(prepareProject(root).bp)).toBe(root);
   });
 });

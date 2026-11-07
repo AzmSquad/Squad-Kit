@@ -88,9 +88,9 @@ describe('the setup state', () => {
     expect(setupUsual(bp, 'tests').learned).toBe(false);
   });
 
-  it('says each step in plain words on the board and in the terminal, with its time and the usual time', () => {
+  it('says each step in plain words on the board and in the terminal, with its time and the usual time', async () => {
     const bp = fresh();
-    readStarted(bp, { label: 'Claude Code', ready: true });
+    await readStarted(bp, { label: 'Claude Code', ready: true });
     readingNow(bp, 'Reading roomflow/store.py', 9);
     const v = setupView(bp)!;
     expect(v.steps.map((s) => s.label)).toEqual([
@@ -114,7 +114,7 @@ describe('the setup state', () => {
 
     // An AI tool that is not installed says so, with Try again.
     const other = fresh2();
-    readStarted(other, { label: 'Claude Code', ready: false });
+    await readStarted(other, { label: 'Claude Code', ready: false });
     const tool = setupView(other)!.steps[1]!;
     expect(tool).toMatchObject({ label: 'Claude Code is not ready', state: 'failed', ways: [{ do: 'again', step: 'read', label: 'Try again', command: 'squad setup --again read' }] });
     expect(tool.error).toContain('Install it and sign in once');
@@ -151,9 +151,9 @@ describe("the person's moves on the setup", () => {
     expect(readMeta(bp).scan?.status).toBe('pending');
   });
 
-  it('Stop while a step runs asks the engine to end it', () => {
+  it('Stop while a step runs asks the engine to end it', async () => {
     const bp = fresh();
-    readStarted(bp, { label: 'Claude Code', ready: true });
+    await readStarted(bp, { label: 'Claude Code', ready: true });
     expect(stopSetup(bp).stopping).toBe(true);
     expect(() => setupAgain(bp, 'read')).toThrow('A step is still running');
   });

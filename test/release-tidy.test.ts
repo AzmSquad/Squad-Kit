@@ -10,7 +10,7 @@ import type { Ticket } from '../src/board/types.js';
 import * as actions from '../src/board/actions.js';
 import { putBackInRelease, resumeCutRelease, takeOutOfRelease } from '../src/board/release-tidy.js';
 import { seedDemoBoard } from '../src/board/demo.js';
-import { addWorktree } from '../src/engine/git.js';
+import { addWorktree } from './support/copy.js';
 import { cleanBranches, oldBranches } from '../src/engine/branches.js';
 import { readJournal } from '../src/engine/release-resume.js';
 import { releaseGoingOut } from '../src/board/lock.js';
@@ -113,7 +113,7 @@ describe('take a ticket out of the next release', () => {
     accepted('AP-2', 'two.txt', 'two\n');
     expect(draftRelease(bp)?.tickets).toEqual(['AP-1', 'AP-2']);
 
-    const r = takeOutOfRelease(bp, 'v1.5.0', 'AP-2');
+    const r = await takeOutOfRelease(bp, 'v1.5.0', 'AP-2');
     expect(r).toMatchObject({ tickets: ['AP-1'], out: ['AP-2'] });
     expect(readTicket(bp, 'AP-2')!.status).toBe('Taken out of v1.5.0 · goes out in the release after it');
     // Nothing in git changed yet.
@@ -141,14 +141,14 @@ describe('take a ticket out of the next release', () => {
     expect(sh('git show v1.6.0:two.txt', project)).toBe('two');
   }, 60_000);
 
-  it('put back before the release; refused when it is not there, the only one, needed, or cannot be left out', () => {
+  it('put back before the release; refused when it is not there, the only one, needed, or cannot be left out', async () => {
     accepted('AP-1', 'one.txt', 'one\n');
-    expect(() => takeOutOfRelease(bp, 'v1.5.0', 'AP-1')).toThrow('AP-1 is the only ticket in v1.5.0');
+    await expect(takeOutOfRelease(bp, 'v1.5.0', 'AP-1')).rejects.toThrow('AP-1 is the only ticket in v1.5.0');
     accepted('AP-2', 'two.txt', 'two\n', { dependsOn: ['AP-1'] });
-    expect(() => takeOutOfRelease(bp, 'v1.5.0', 'AP-1')).toThrow('AP-2 in this release depends on AP-1. Take it out first, or keep AP-1 in.');
-    expect(() => takeOutOfRelease(bp, 'v1.5.0', 'AP-7')).toThrow('AP-7 is not in v1.5.0.');
+    await expect(takeOutOfRelease(bp, 'v1.5.0', 'AP-1')).rejects.toThrow('AP-2 in this release depends on AP-1. Take it out first, or keep AP-1 in.');
+    await expect(takeOutOfRelease(bp, 'v1.5.0', 'AP-7')).rejects.toThrow('AP-7 is not in v1.5.0.');
 
-    takeOutOfRelease(bp, 'v1.5.0', 'AP-2');
+    await takeOutOfRelease(bp, 'v1.5.0', 'AP-2');
     const back = putBackInRelease(bp, 'v1.5.0', 'ap-2');
     expect(back.tickets).toEqual(['AP-1', 'AP-2']);
     expect(back.out).toBeUndefined();
@@ -158,7 +158,7 @@ describe('take a ticket out of the next release', () => {
     // Later work changed the same lines: AP-1 can no longer be left out on its own.
     accepted('AP-3', 'limit.txt', 'limit = 3\n');
     accepted('AP-4', 'limit.txt', 'limit = 4\n', { title: 'Raise the limit again' });
-    expect(() => takeOutOfRelease(bp, 'v1.5.0', 'AP-3')).toThrow('AP-3 cannot be left out: work merged into main after it changed the same lines. Keep it in v1.5.0.');
+    await expect(takeOutOfRelease(bp, 'v1.5.0', 'AP-3')).rejects.toThrow('AP-3 cannot be left out: work merged into main after it changed the same lines. Keep it in v1.5.0.');
     expect(draftRelease(bp)?.tickets).toContain('AP-3');
   }, 60_000);
 
@@ -225,7 +225,7 @@ describe('old ticket branches after a release', () => {
       { branch: 'squad/ap-1', why: 'it has work that is not in main' },
       { branch: 'origin/squad/ap-1', why: 'it has work that is not in origin/main' },
     ]);
-    const done = cleanBranches(bp, { remote: true });
+    const done = await cleanBranches(bp, { remote: true });
     expect(done.deleted).toEqual([]);
     expect(sh('git rev-parse --verify -q refs/heads/squad/ap-1', project)).toBeTruthy();
     expect(sh('git ls-remote --heads origin squad/ap-1', project)).toContain('squad/ap-1');
@@ -334,7 +334,7 @@ describe('terminal commands', () => {
       accepted('AP-1', 'one.txt', 'one\n');
       accepted('AP-2', 'two.txt', 'two\n');
       accepted('AP-3', 'three.txt', 'three\n');
-      takeOutOfRelease(bp, 'v1.5.0', 'AP-3');
+      await takeOutOfRelease(bp, 'v1.5.0', 'AP-3');
       expect(readRelease(bp, 'v1.5.0')).toMatchObject({ tickets: ['AP-1', 'AP-2'], out: ['AP-3'] });
       await runRelease(undefined, { putBack: ['ap-3'] });
       expect(readRelease(bp, 'v1.5.0')!.out).toBeUndefined();

@@ -2,7 +2,7 @@ import path from 'node:path';
 import { listTickets, readMeta, type BoardPaths } from '../board/store.js';
 import type { Ticket } from '../board/types.js';
 import { repoHostFor } from '../modules/registry.js';
-import { git, isAncestor, isRepo, netGit, remotes } from './git.js';
+import { git, isAncestor, isRepo, netGitLater, remotes } from './git.js';
 import { reposOf } from './repos.js';
 
 /**
@@ -86,16 +86,34 @@ export interface BranchClean {
  * Deletes the old branches of released tickets on this computer, and on the remotes with `remote`. The remotes are
  * fetched first, and a branch someone moved since is left as it is.
  */
-export function cleanBranches(bp: BoardPaths, opts: { remote?: boolean; only?: string[] } = {}): BranchClean {
-  const meta = readMeta(bp);
-  if (opts.remote) {
-    for (const repo of reposOf(meta)) {
-      const root = path.join(bp.root, repo.path);
-      const remote = isRepo(root) ? repo.remote || remotes(root)[0] : undefined;
-      if (remote) netGit(root, ['fetch', '--prune', remote], { env: hostEnv(bp, root, remote), allowFail: true });
-    }
+export async function cleanBranches(bp: BoardPaths, opts: { remote?: boolean; only?: string[] } = {}): Promise<BranchClean> {
+  if (!opts.remote) return cleanBranchesHere(bp, opts);
+  for (const repo of reposOf(readMeta(bp))) {
+    const root = path.join(bp.root, repo.path);
+    const remote = isRepo(root) ? repo.remote || remotes(root)[0] : undefined;
+    if (remote) await netGitLater(root, ['fetch', '--prune', remote], { env: hostEnv(bp, root, remote), allowFail: true });
   }
   const plan = oldBranches(bp, opts.only);
+  const { deleted, failed } = deleteHere(bp, plan);
+  for (const b of plan.remote) {
+    const root = path.join(bp.root, b.repo);
+    try {
+      await netGitLater(root, ['push', `--force-with-lease=refs/heads/${b.branch}:${b.sha}`, b.remote!, '--delete', b.branch], { env: hostEnv(bp, root, b.remote!) });
+      deleted.push(`${b.remote}/${b.branch}`);
+    } catch (err) {
+      failed.push(`${b.remote}/${b.branch}: ${(err as Error).message}`);
+    }
+  }
+  return { deleted, failed, remoteLeft: [], kept: plan.kept };
+}
+
+/** cleanBranches on this computer only: nothing goes over the network. */
+export function cleanBranchesHere(bp: BoardPaths, opts: { only?: string[] } = {}): BranchClean {
+  const plan = oldBranches(bp, opts.only);
+  return { ...deleteHere(bp, plan), remoteLeft: plan.remote, kept: plan.kept };
+}
+
+function deleteHere(bp: BoardPaths, plan: BranchPlan): { deleted: string[]; failed: string[] } {
   const deleted: string[] = [];
   const failed: string[] = [];
   for (const b of plan.here) {
@@ -108,18 +126,7 @@ export function cleanBranches(bp: BoardPaths, opts: { remote?: boolean; only?: s
       failed.push(`${b.branch}: ${(err as Error).message}`);
     }
   }
-  if (opts.remote) {
-    for (const b of plan.remote) {
-      const root = path.join(bp.root, b.repo);
-      try {
-        netGit(root, ['push', `--force-with-lease=refs/heads/${b.branch}:${b.sha}`, b.remote!, '--delete', b.branch], { env: hostEnv(bp, root, b.remote!) });
-        deleted.push(`${b.remote}/${b.branch}`);
-      } catch (err) {
-        failed.push(`${b.remote}/${b.branch}: ${(err as Error).message}`);
-      }
-    }
-  }
-  return { deleted, failed, remoteLeft: opts.remote ? [] : plan.remote, kept: plan.kept };
+  return { deleted, failed };
 }
 
 function hostEnv(bp: BoardPaths, root: string, remote: string): Record<string, string> {

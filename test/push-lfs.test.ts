@@ -3,7 +3,7 @@ import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { netGit } from '../src/engine/git.js';
+import { netGitLater } from '../src/engine/git.js';
 
 /**
  * squad-kit's pushes run no hook of the project's, so git-lfs's own `pre-push` does not run either. Its large files must
@@ -17,7 +17,7 @@ let bin: string;
 let said: string;
 const sh = (cmd: string, cwd: string) => execSync(cmd, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 const env = () => ({ PATH: `${bin}${path.delimiter}${process.env.PATH}` });
-const push = () => netGit(repo, ['push', 'origin', 'main'], { env: env() });
+const push = () => netGitLater(repo, ['push', 'origin', 'main'], { env: env() });
 const onRemote = () => sh('git rev-parse main', remote);
 
 function fakeLfs(exit = 0): void {
@@ -50,35 +50,35 @@ beforeEach(() => {
 afterEach(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
 describe('a push and Git LFS', () => {
-  it('a project that uses Git LFS gets its files uploaded, for exactly what is being pushed', () => {
+  it('a project that uses Git LFS gets its files uploaded, for exactly what is being pushed', async () => {
     useLfs();
-    push();
+    await push();
     const words = fs.readFileSync(said, 'utf8');
     expect(words).toContain(`args: pre-push origin ${remote}`);
     expect(words).toContain(`refs/heads/main ${sh('git rev-parse HEAD', repo)}`);
     expect(onRemote()).toBe(sh('git rev-parse HEAD', repo));
   });
 
-  it('when the upload fails nothing is pushed, so no pointer reaches the remote without its file', () => {
+  it('when the upload fails nothing is pushed, so no pointer reaches the remote without its file', async () => {
     useLfs();
     fakeLfs(1);
-    expect(push).toThrow();
+    await expect(push()).rejects.toThrow();
     expect(() => onRemote()).toThrow();
   });
 
-  it('a project without it never starts git-lfs', () => {
-    push();
+  it('a project without it never starts git-lfs', async () => {
+    await push();
     expect(fs.existsSync(said)).toBe(false);
     expect(onRemote()).toBe(sh('git rev-parse HEAD', repo));
   });
 
-  it("the project's own pre-push still does not run", () => {
+  it("the project's own pre-push still does not run", async () => {
     useLfs();
     const planted = path.join(tmp, 'planted.txt');
     const hook = path.join(repo, '.git', 'hooks', 'pre-push');
     fs.writeFileSync(hook, `#!/bin/sh\necho ran > "${planted}"\nexit 1\n`);
     fs.chmodSync(hook, 0o755);
-    push();
+    await push();
     expect(fs.existsSync(planted)).toBe(false);
     expect(onRemote()).toBe(sh('git rev-parse HEAD', repo));
   });

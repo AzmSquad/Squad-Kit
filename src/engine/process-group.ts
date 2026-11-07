@@ -82,6 +82,38 @@ export function endTree(pid: number, way: GroupWay = {}): void {
   }
 }
 
+/** True while any process of the group runs. */
+export function groupAlive(pid: number): boolean {
+  try {
+    process.kill(OWN_GROUP ? -pid : pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function signalPid(pid: number, signal: NodeJS.Signals): void {
+  // Windows has no groups: the whole tree under the shell goes at once.
+  if (process.platform === 'win32') return endTree(pid);
+  try {
+    process.kill(OWN_GROUP ? -pid : pid, signal);
+  } catch {
+    // Already gone.
+  }
+}
+
+const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Stops a process group squad-kit started, from any process: TERM, then KILL when it is still there. */
+export async function endPid(pid: number): Promise<void> {
+  signalPid(pid, 'SIGTERM');
+  const until = Date.now() + KILL_AFTER_MS;
+  while (groupAlive(pid) && Date.now() < until) await pause(100);
+  if (groupAlive(pid)) signalPid(pid, 'SIGKILL');
+  const gone = Date.now() + 2000;
+  while (groupAlive(pid) && Date.now() < gone) await pause(100);
+}
+
 /** Ends the child's group: TERM now, then KILL for anything still there after `killAfterMs`. On Windows, taskkill once. */
 export function endGroup(child: ChildProcess, killAfterMs = KILL_AFTER_MS, way: GroupWay = {}): void {
   signalGroup(child, 'SIGTERM', way);
@@ -132,6 +164,11 @@ export async function allEnded(ms: number): Promise<boolean> {
   const end = Date.now() + ms;
   while ((running.size || tasks.size) && Date.now() < end) await new Promise((r) => setTimeout(r, 100));
   return running.size === 0 && tasks.size === 0;
+}
+
+/** Asks whatever squad-kit started that still runs to end: a git lets go of its locks and files when it is asked. */
+export function askAllToEnd(): void {
+  for (const c of running) signalGroup(c, 'SIGTERM');
 }
 
 /** Kills whatever squad-kit started that still runs, at once. */

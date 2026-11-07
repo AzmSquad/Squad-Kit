@@ -78,6 +78,23 @@ export function holdRelease(bp: BoardPaths, version: string): () => void {
   };
 }
 
+/** Tickets being taken out of a release, one at a time per board: each checks the code first, which takes a while. */
+const takingOut = new Map<string, Promise<unknown>>();
+
+export function takingOutTurn<T>(bp: BoardPaths, job: () => Promise<T>): Promise<T> {
+  const run = (takingOut.get(bp.squadDir) ?? Promise.resolve()).catch(() => undefined).then(job);
+  takingOut.set(bp.squadDir, run);
+  void run.catch(() => undefined).finally(() => {
+    if (takingOut.get(bp.squadDir) === run) takingOut.delete(bp.squadDir);
+  });
+  return run;
+}
+
+/** Once no ticket is being taken out of a release. With none, it returns at once and the caller goes on without a wait. */
+export function takingOutDone(bp: BoardPaths): Promise<unknown> | undefined {
+  return takingOut.get(bp.squadDir)?.catch(() => undefined);
+}
+
 export function squadRunsElsewhere(bp: BoardPaths): boolean {
   try {
     const pid = Number(fs.readFileSync(lockFile(bp), 'utf8').trim());

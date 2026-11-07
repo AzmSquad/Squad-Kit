@@ -68,9 +68,9 @@ export async function runBranches(opts: { clean?: boolean; remote?: boolean }): 
   if (readMeta(bp).engine !== 'live') throw new Error('The sample board has no git branches.');
   if (opts.clean) {
     const spin = ui.spinner('Deleting old ticket branches…');
-    let r: ReturnType<typeof cleanBranches>;
+    let r: Awaited<ReturnType<typeof cleanBranches>>;
     try {
-      r = cleanBranches(bp, { remote: opts.remote });
+      r = await cleanBranches(bp, { remote: opts.remote });
     } finally {
       spin.stop();
     }

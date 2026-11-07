@@ -26,6 +26,7 @@ import {
 import { aiTool } from '../modules/registry.js';
 import { readAgent } from '../engine/agents.js';
 import { dropSetupCopies } from '../engine/onboard.js';
+import { trackTask } from '../engine/process-group.js';
 import { DEFAULT_QUALITY, parseQuality } from '../engine/levels.js';
 
 export { readTalk, writeTalk };
@@ -40,7 +41,7 @@ export { readTalk, writeTalk };
 /* ── The setup, in words ───────────────────────────────── */
 
 const LABEL: Record<SetupStepId, (tool: string, state: SetupStepState) => string> = {
-  files: () => 'Project memory created',
+  files: (_t, s) => (s === 'done' ? 'Project memory created' : 'Saving your files'),
   tool: (t, s) => (s === 'done' ? `${t} is ready` : s === 'failed' ? `${t} is not ready` : `Checking ${t}`),
   read: (_t, s) => (s === 'done' ? 'The Architect read your code' : s === 'now' ? 'The Architect is reading your code' : 'The Architect reads your code'),
   commands: () => 'Finding how to test and run it',
@@ -233,7 +234,8 @@ export function stopSetup(bp: BoardPaths): SetupView {
  * gets one, so Read it again on the Overview shows every step too.
  */
 export function setupAgain(bp: BoardPaths, step: SetupStepId = 'read'): SetupView {
-  if (!SETUP_STEPS.includes(step) || step === 'files') throw new BoardActionError(`"${step}" is not a step to run again. Use tool, read, commands, tests or app.`);
+  const saveAgain = step === 'files' && readMeta(bp).setup?.steps.some((x) => x.id === 'files' && x.state !== 'done');
+  if (!SETUP_STEPS.includes(step) || (step === 'files' && !saveAgain)) throw new BoardActionError(`"${step}" is not a step to run again. Use tool, read, commands, tests or app.`);
   const meta = readMeta(bp);
   const from: SetupStepId = step === 'tool' ? 'read' : step;
   if (!meta.setup) {
@@ -242,11 +244,11 @@ export function setupAgain(bp: BoardPaths, step: SetupStepId = 'read'): SetupVie
   }
   if (meta.setup.steps.some((x) => x.state === 'now')) throw new BoardActionError('A step is still running. Wait for it, or press Stop first.');
   resetFrom(meta.setup, from);
-  if (from === 'read') {
+  if (from === 'read' || from === 'files') {
     // The AI tool is looked at again too: it may be installed now.
     stepOf(meta.setup, 'tool').state = 'todo';
     meta.scan = { status: 'pending' };
-    if (meta.engine === 'live') dropSetupCopies(bp);
+    if (meta.engine === 'live') trackTask(dropSetupCopies(bp));
   }
   writeMeta(bp, meta);
   return setupView(bp)!;
@@ -394,7 +396,7 @@ export function approveOverview(bp: BoardPaths): OverviewView {
   }
   const talk = readTalk(bp);
   if (talk?.open) writeTalk(bp, { ...talk, open: false, thinking: false });
-  if (meta.engine === 'live') dropSetupCopies(bp);
+  if (meta.engine === 'live') trackTask(dropSetupCopies(bp));
   return overviewView(bp);
 }
 

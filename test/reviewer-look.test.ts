@@ -35,7 +35,7 @@ vi.mock('../src/modules/registry.js', async (orig) => ({
 const { boardPaths, readTicket, updateTicket, writeMeta } = await import('../src/board/store.js');
 const actions = await import('../src/board/actions.js');
 const { LiveSquad } = await import('../src/engine/live.js');
-const { addWorktree } = await import('../src/engine/git.js');
+const { addWorktree } = await import('./support/copy.js');
 const { openWindows } = await import('../src/engine/window-server.js');
 const P = await import('../src/engine/prompts.js');
 

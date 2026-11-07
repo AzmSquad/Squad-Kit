@@ -928,10 +928,10 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
   });
 
   // The core prompts, read only, filled in from a real ticket: what each step of the agent reads.
-  app.get('/api/v1/agents/:role/prompts', (c) => {
+  app.get('/api/v1/agents/:role/prompts', async (c) => {
     const role = c.req.param('role') as AgentRole;
     if (!AGENTS.some((a) => a.role === role)) return c.json({ error: 'not found' }, 404);
-    return c.json(corePrompts(bp, role, c.req.query('ticket') || undefined));
+    return c.json(await corePrompts(bp, role, c.req.query('ticket') || undefined));
   });
 
   app.post('/api/v1/restart', (c) => {

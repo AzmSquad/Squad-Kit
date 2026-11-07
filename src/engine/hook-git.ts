@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { squadHome } from '../core/home.js';
-import { commitArgsFor, git, hookFolder, quoted, realOf, stageAll } from './git.js';
+import { commitArgsFor, git, gitLater, hookFolder, quoted, realOf, stageAll, stageAllLater } from './git.js';
 import { takenOver } from './process-group.js';
 import { HOOK_GIT_LINK } from './project-guard.js';
 
@@ -66,13 +66,26 @@ export function endHookGroup(dir: string): void {
  * a lock on the real one is no bar. Null when the files are as they were staged, so nothing would be lost.
  */
 function keepOnDisk(dir: string): string | null {
+  const { env, staged } = indexForDisk(dir);
+  stageAll(dir, env);
+  return keptOnDisk(dir, staged, git(dir, ['write-tree'], { env }));
+}
+
+async function keepOnDiskLater(dir: string): Promise<string | null> {
+  const { env, staged } = indexForDisk(dir);
+  await stageAllLater(dir, env);
+  return keptOnDisk(dir, staged, git(dir, ['write-tree'], { env }));
+}
+
+function indexForDisk(dir: string): { env: Record<string, string>; staged: string } {
   const index = path.join(homeFor(dir), 'on-disk');
   fs.copyFileSync(path.join(git(dir, ['rev-parse', '--absolute-git-dir']), 'index'), index);
   const env = { GIT_INDEX_FILE: index };
   git(dir, ['-c', 'core.splitIndex=false', 'update-index', '--no-split-index'], { allowFail: true, env });
-  const staged = git(dir, ['write-tree'], { env });
-  stageAll(dir, env);
-  const onDisk = git(dir, ['write-tree'], { env });
+  return { env, staged: git(dir, ['write-tree'], { env }) };
+}
+
+function keptOnDisk(dir: string, staged: string, onDisk: string): string | null {
   if (onDisk === staged) return null;
   const commit = git(dir, [...commitArgsFor(dir), 'commit-tree', onDisk, '-p', git(dir, ['rev-parse', 'HEAD']), '-m', 'What was on disk when the project\'s own check was cut off']);
   const ref = `refs/squad/on-disk/${path.basename(realOf(dir))}`;
@@ -89,6 +102,14 @@ export function putFilesBack(dir: string): string | null {
   const kept = keepOnDisk(dir);
   git(dir, ['checkout-index', '-f', '-a']);
   git(dir, ['clean', '-fdq']);
+  return kept;
+}
+
+/** putFilesBack, beside everything else: on a big project it writes every file. */
+export async function putFilesBackLater(dir: string): Promise<string | null> {
+  const kept = await keepOnDiskLater(dir);
+  await gitLater(dir, ['checkout-index', '-f', '-a']);
+  await gitLater(dir, ['clean', '-fdq']);
   return kept;
 }
 

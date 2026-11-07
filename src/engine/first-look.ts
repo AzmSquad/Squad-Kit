@@ -3,7 +3,7 @@ import path from 'node:path';
 import yaml from 'js-yaml';
 import { SQUAD_DIR, findSquadRoot, isOwnFolder } from '../core/paths.js';
 import type { FolderKind } from '../board/setup-state.js';
-import { git, isRepo } from './git.js';
+import { git, gitLater, gitRecords, isRepo } from './git.js';
 import { LANG, workspaceRepos } from './repos.js';
 
 /**
@@ -59,32 +59,38 @@ const WEB_DEPS = /"(react|vue|@angular\/core|next|nuxt|svelte|express|hono|fasti
 const WEB_PY = /^(flask|django|fastapi|starlette|bottle|tornado)\b/im;
 const TEST_FILE = /(^|\/)(tests?|__tests__|specs?|e2e)\/|[._-](test|spec)\.[a-z]+$|(^|\/)test_[^/]+\.py$|_test\.(go|py)$|Tests?\.(cs|java|kt)$/i;
 
-/** The folder's own files, as git knows them, or as found on disk when it is not in git or is a workspace. At most 5000. */
-function filesOf(dir: string): string[] {
+/**
+ * The folder's own files, as git knows them, or as found on disk when it is not in git or is a workspace: how many there
+ * are, and the first 5000 of them to read what kind of project it is. All of it beside everything else, and none of the
+ * rest kept, so its size breaks nothing.
+ */
+async function filesOf(dir: string): Promise<{ count: number; files: string[] }> {
+  const files: string[] = [];
+  let count = 0;
+  const add = (f: string) => {
+    count += 1;
+    if (files.length < MAX_FILES) files.push(f);
+  };
   if (isRepo(dir) && !workspaceRepos(dir).length) {
-    const out = git(dir, ['ls-files', '--cached', '--others', '--exclude-standard'], { allowFail: true });
-    const list = out.split('\n').filter((f) => f && !f.startsWith(`${SQUAD_DIR}/`));
-    if (list.length) return list.slice(0, MAX_FILES);
+    await gitRecords(dir, ['ls-files', '--cached', '--others', '--exclude-standard'], '\n', (f) => void (f.startsWith(`${SQUAD_DIR}/`) || add(f))).catch(() => undefined);
+    if (count) return { count, files };
   }
-  const found: string[] = [];
-  const walk = (rel: string) => {
-    if (found.length >= MAX_FILES) return;
+  const walk = async (rel: string): Promise<void> => {
     let entries: fs.Dirent[];
     try {
-      entries = fs.readdirSync(path.join(dir, rel), { withFileTypes: true });
+      entries = await fs.promises.readdir(path.join(dir, rel), { withFileTypes: true });
     } catch {
       return;
     }
     for (const e of entries) {
-      if (found.length >= MAX_FILES) return;
       if (e.name.startsWith('.') || NOISE.has(e.name)) continue;
       const p = rel ? `${rel}/${e.name}` : e.name;
-      if (e.isDirectory()) walk(p);
-      else if (e.isFile()) found.push(p);
+      if (e.isDirectory()) await walk(p);
+      else if (e.isFile()) add(p);
     }
   };
-  walk('');
-  return found;
+  await walk('');
+  return { count, files };
 }
 
 function read(file: string): string {
@@ -177,7 +183,7 @@ export function addAsk(dir: string): AddAsk | null {
   };
 }
 
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
 
 function listWords(names: string[]): string {
   if (names.length <= 1) return names.join('');
@@ -198,35 +204,60 @@ const SAFE = "Your code is not changed. squad-kit only adds a .squad folder for 
 const TAKES = 'Takes about 3 to 5 minutes. You can keep working meanwhile.';
 
 /** The branch the person's folder is on, and how many changes there are not saved in git. Nothing outside git, or for a workspace. */
-export function gitState(dir: string): { branch?: string; unsaved: number } {
+export async function gitState(dir: string): Promise<{ branch?: string; unsaved: number }> {
   if (!isRepo(dir) || workspaceRepos(dir).length) return { unsaved: 0 };
   const branch = git(dir, ['rev-parse', '--abbrev-ref', 'HEAD'], { allowFail: true });
-  const unsaved = git(dir, ['status', '--porcelain'], { allowFail: true }).split('\n').filter((l) => l.trim() && !l.slice(3).startsWith(`${SQUAD_DIR}/`)).length;
+  // A look only: no lock on the person's index that their own git, or a merge, could run into.
+  const unsaved = (await gitLater(dir, ['status', '--porcelain'], { allowFail: true, env: { GIT_OPTIONAL_LOCKS: '0' } })).split('\n').filter((l) => l.trim() && !l.slice(3).startsWith(`${SQUAD_DIR}/`)).length;
   return { ...(branch && branch !== 'HEAD' ? { branch } : {}), unsaved };
 }
 
-/** How many files the project has, as git knows them (at most 5000). */
-export function countFiles(dir: string): number {
-  return filesOf(dir).length;
+/** How many files the project has, as git knows them. */
+export async function countFiles(dir: string): Promise<number> {
+  return (await filesOf(dir)).count;
+}
+
+/** True when a folder holds at most one file of its own: a folder squad-kit made itself, with no code in it yet. */
+export function nextToNothing(dir: string): boolean {
+  if (isRepo(dir) && !workspaceRepos(dir).length) {
+    const list = git(dir, ['ls-files', '--cached', '--others', '--exclude-standard'], { allowFail: true }).split('\n').filter((f) => f && !f.startsWith(`${SQUAD_DIR}/`));
+    if (list.length) return list.length <= 1;
+  }
+  let found = 0;
+  const walk = (at: string) => {
+    let entries: fs.Dirent[] = [];
+    try {
+      entries = fs.readdirSync(at, { withFileTypes: true });
+    } catch {
+      // A folder squad-kit may not read counts for nothing.
+    }
+    for (const e of entries) {
+      if (found > 1) return;
+      if (e.name.startsWith('.') || NOISE.has(e.name)) continue;
+      if (e.isDirectory()) walk(path.join(at, e.name));
+      else if (e.isFile()) found += 1;
+    }
+  };
+  walk(dir);
+  return found <= 1;
 }
 
 /** What adding this folder means, in plain words. */
-export function firstLook(dir: string): FirstLook {
+export async function firstLook(dir: string): Promise<FirstLook> {
   const abs = path.resolve(dir);
   const board = boardOf(abs);
   const squad = path.join(abs, SQUAD_DIR);
-  const files = filesOf(abs);
+  const [{ count, files }, { branch, unsaved }] = await Promise.all([filesOf(abs), gitState(abs)]);
   const code = kindOfCode(abs, files);
   const tests = files.some((f) => TEST_FILE.test(f));
   const repo = isRepo(abs);
-  const { branch, unsaved } = gitState(abs);
   const nested = workspaceRepos(abs).map((r) => r.path);
-  const base = { files: files.length, ...code, tests, ...(branch ? { branch } : {}), unsaved, repos: nested };
+  const base = { files: count, ...code, tests, ...(branch ? { branch } : {}), unsaved, repos: nested };
   const ask = addAsk(abs);
   if (ask) {
     return {
       ...base,
-      kind: repo ? 'repo' : files.length ? 'files' : 'empty',
+      kind: repo ? 'repo' : count ? 'files' : 'empty',
       title: ask.kind === 'inside-repo' ? 'Part of a bigger project' : 'Inside another squad-kit project',
       found: ask.words,
       next: 'Nothing changes until you pick.',
@@ -257,8 +288,8 @@ export function firstLook(dir: string): FirstLook {
       kind: 'older',
       title: 'An older squad-kit project',
       found: legacy
-        ? `A board from an older squad-kit is here, in ${describeCode(files.length, code.language, code.web, tests).replace(/^An? /, 'a ')}.`
-        : `squad-kit 0.x files are here${stories ? `, with ${plural(stories, 'story', 'stories')}` : ''}, in ${describeCode(files.length, code.language, code.web, tests).replace(/^An? /, 'a ')}.`,
+        ? `A board from an older squad-kit is here, in ${describeCode(count, code.language, code.web, tests).replace(/^An? /, 'a ')}.`
+        : `squad-kit 0.x files are here${stories ? `, with ${plural(stories, 'story', 'stories')}` : ''}, in ${describeCode(count, code.language, code.web, tests).replace(/^An? /, 'a ')}.`,
       next: legacy
         ? 'Your specs, plans and decisions are moved to the new layout. Nothing is lost: a full copy is kept first. Then squad-kit reads the code and shows you what it understood.'
         : 'Your specs, plans and decisions stay where they are. squad-kit adds its own files beside them, keeps any notes of yours it would write over under a new name, and moves sign-ins out of the project to this computer. Then it reads the code and shows you what it understood.',
@@ -277,7 +308,7 @@ export function firstLook(dir: string): FirstLook {
       takes: TAKES,
     };
   }
-  if (!files.length) {
+  if (!count) {
     return {
       ...base,
       kind: 'empty',
@@ -295,7 +326,7 @@ export function firstLook(dir: string): FirstLook {
       ...base,
       kind: 'files',
       title: 'Code without git',
-      found: `${describeCode(files.length, code.language, code.web, tests)}, not in git yet.`,
+      found: `${describeCode(count, code.language, code.web, tests)}, not in git yet.`,
       next: 'squad-kit puts the files in git first, in one first commit, then reads them, finds how to test and run it, and shows you what it understood.',
       safe: 'Your files stay as they are. Secrets like .env files and built folders stay out of git.',
       takes: TAKES,
@@ -305,7 +336,7 @@ export function firstLook(dir: string): FirstLook {
     ...base,
     kind: 'repo',
     title: 'Existing code, new to squad-kit',
-    found: `${describeCode(files.length, code.language, code.web, tests)}.${unsavedNote}`,
+    found: `${describeCode(count, code.language, code.web, tests)}.${unsavedNote}`,
     next: 'squad-kit will read it, find how to test and run it, then show you what it understood.',
     safe: SAFE,
     takes: TAKES,

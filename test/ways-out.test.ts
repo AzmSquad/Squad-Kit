@@ -22,7 +22,7 @@ const { boardPaths, readMeta, readTicket, updateTicket, writeMeta, writeTicket }
 const { seedDemoBoard } = await import('../src/board/demo.js');
 const actions = await import('../src/board/actions.js');
 const { LiveSquad } = await import('../src/engine/live.js');
-const { addWorktree } = await import('../src/engine/git.js');
+const { addWorktree } = await import('./support/copy.js');
 const { prDescription } = await import('../src/engine/sync.js');
 
 let tmp: string;

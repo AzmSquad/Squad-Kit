@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { BoardPaths } from '../board/store.js';
 import type { UnpushedRelease } from '../board/types.js';
 import { repoHostFor } from '../modules/registry.js';
-import { git, isAncestor, netGit, removeWorktree } from './git.js';
+import { dropSnapshot, git, isAncestor, netGitLater } from './git.js';
 import { moveLocalBase, type ReleaseLog } from './release.js';
 
 /**
@@ -107,8 +107,9 @@ export interface SettledRepo {
 }
 
 /** Finishes or rolls back each repo of a cut-off release, by what really happened in git. */
-export function settleRepos(bp: BoardPaths, j: ReleaseJournal): SettledRepo[] {
-  return j.repos.map((r) => {
+export async function settleRepos(bp: BoardPaths, j: ReleaseJournal): Promise<SettledRepo[]> {
+  const settled: SettledRepo[] = [];
+  for (const r of j.repos) {
     const root = path.join(bp.root, r.repo);
     const log: ReleaseLog = [];
     let reached = false;
@@ -116,20 +117,20 @@ export function settleRepos(bp: BoardPaths, j: ReleaseJournal): SettledRepo[] {
     const url = r.remote ? git(root, ['config', '--get', `remote.${r.remote}.url`], { allowFail: true }) : '';
     const env = url ? (repoHostFor(bp, url)?.gitEnv() ?? {}) : {};
     if (r.head && r.remote) {
-      netGit(root, ['fetch', r.remote, r.base], { env, allowFail: true });
+      await netGitLater(root, ['fetch', r.remote, r.base], { env, allowFail: true });
       const there = git(root, ['rev-parse', '--verify', '-q', `refs/remotes/${r.remote}/${r.base}`], { allowFail: true });
       reached = Boolean(r.pushed) || Boolean(there && isAncestor(root, r.head, there));
     } else if (r.head) reached = true;
     if (reached) {
       if (r.tag && r.remote) {
         try {
-          netGit(root, ['push', r.remote, `refs/tags/${r.tag}`], { env });
+          await netGitLater(root, ['push', r.remote, `refs/tags/${r.tag}`], { env });
         } catch (err) {
           unpushed = { repo: r.repo, remote: r.remote, base: r.base, commit: r.head!, tag: r.tag, error: (err as Error).message, plain: "The release reached your team's shared copy of the code, but its version mark did not. Press Send again." };
         }
       }
       const keep = path.relative(root, bp.squadDir);
-      moveLocalBase(root, r.base, r.head!, j.version, keep && !keep.startsWith('..') ? keep : undefined, log);
+      await moveLocalBase(root, r.base, r.head!, j.version, keep && !keep.startsWith('..') ? keep : undefined, log);
       log.unshift({ ok: true, text: r.remote ? `It had reached your team's shared copy of the code already, so squad-kit finished it${unpushed ? ', except its version mark: press Send again' : ''}` : 'Its release commit was made already, so squad-kit finished it' });
     } else {
       // Nothing reached the remote: the tag made here goes, so the release can go out again as if it never started.
@@ -138,12 +139,11 @@ export function settleRepos(bp: BoardPaths, j: ReleaseJournal): SettledRepo[] {
       log.push({ ok: true, text: `Nothing had reached ${r.remote ?? 'the remote'} yet, so squad-kit undid it: ${r.base} and the tags are as they were` });
     }
     if (r.dir) {
-      removeWorktree(root, r.dir);
-      fs.rmSync(r.dir, { recursive: true, force: true });
+      await dropSnapshot(root, r.dir);
     }
-    git(root, ['worktree', 'prune'], { allowFail: true });
     // Rolled back, or finished with the local base moved: the release branch goes. One the log says to merge stays.
     if (r.branch && (!reached || isAncestor(root, r.head!, r.base))) git(root, ['branch', '-D', r.branch], { allowFail: true });
-    return { repo: r.repo, reached, ...(unpushed ? { unpushed } : {}), log };
-  });
+    settled.push({ repo: r.repo, reached, ...(unpushed ? { unpushed } : {}), log });
+  }
+  return settled;
 }

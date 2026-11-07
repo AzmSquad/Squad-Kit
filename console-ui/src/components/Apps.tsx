@@ -52,6 +52,7 @@ function statusLine(a: ProjectApp): string {
 }
 
 function stepLine(a: ProjectApp): string {
+  if (a.step === 'copy') return 'Making a copy of the code. On a big project this takes a while.';
   if (a.step === 'setup') return 'Setting it up first';
   if (a.step === 'start') return 'Starting it';
   return `Getting the newest ${a.base}`;

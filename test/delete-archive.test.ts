@@ -34,7 +34,8 @@ vi.mock('../src/modules/claude/direct.js', async (orig) => ({
 const store = await import('../src/board/store.js');
 const { boardPaths, listDecisions, listTickets, readMeta, readTicket, ticketDir, ticketMediaDir, ticketStateFile, updateTicket, writeDecision, writeMeta, writeRelease, writeTicket } = store;
 const { archiveTicket, deletePlan, deleteTicket, unarchiveTicket } = await import('../src/engine/delete.js');
-const { addSnapshot, addWorktree, commitAll, worktreeRoot } = await import('../src/engine/git.js');
+const { addSnapshot, commitAll, worktreeRoot } = await import('../src/engine/git.js');
+const { addWorktree } = await import('./support/copy.js');
 const { commitTicketDocs, hideSquadFromGit } = await import('../src/engine/project-git.js');
 const { pickUpPushed } = await import('../src/engine/handover.js');
 const { LiveSquad, agentRuns } = await import('../src/engine/live.js');
@@ -110,10 +111,10 @@ function ticket(id: string, over: Partial<Ticket> = {}): Ticket {
 }
 
 /** A ticket the Builder worked on: its copy of the code, a commit on its branch, and work not committed yet. */
-function built(id: string, over: Partial<Ticket> = {}): Ticket {
+async function built(id: string, over: Partial<Ticket> = {}): Promise<Ticket> {
   const wt = addWorktree(project, id, 'main');
   fs.writeFileSync(path.join(wt.dir, 'hours.ts'), 'export const hours = 1;\n');
-  commitAll(wt.dir, `${id}: hours`);
+  await commitAll(wt.dir, `${id}: hours`);
   fs.writeFileSync(path.join(wt.dir, 'draft.ts'), '// not committed\n');
   return ticket(id, { worktree: wt.dir, branch: wt.branch, baseCommit: wt.baseCommit, ...over });
 }
@@ -126,7 +127,7 @@ const branches = () => sh('git branch --list "squad/*"', project);
 describe('Delete', () => {
   it('removes every part of a ticket that is not merged, and its cost stays in Usage', async () => {
     const mainBefore = sh('git rev-parse main', project);
-    const t = built('AP-1', {
+    const t = await built('AP-1', {
       source: { type: 'azure', ref: 'AB#7', id: '7' },
       sessions: { intake: 'session-intake-1', build: 'session-build-1' },
       proof: [{ criterion: 'Hours show', before: 'ap-1-before-1.png', after: 'ap-1-after-1.png', beforeLabel: 'Before', afterLabel: 'After', more: [{ after: 'named-extra.png' }, { after: 'shared-extra.png' }] }],
@@ -146,7 +147,7 @@ describe('Delete', () => {
     for (const f of ['ap-1-before-1.png', 'ap-1-after-1.png', 'ap-1-after-2.png', 'shared.png', 'shared-extra.png', 'named-extra.png', 'ap-10-after-1.png']) fs.writeFileSync(path.join(bp.proofDir, f), 'png');
     fs.mkdirSync(ticketMediaDir(bp, 'AP-1'), { recursive: true });
     fs.writeFileSync(path.join(ticketMediaDir(bp, 'AP-1'), 'note.ogg'), 'voice');
-    const before = addSnapshot(project, 'ap-1-before', t.baseCommit!);
+    const before = await addSnapshot(project, 'ap-1-before', t.baseCommit!);
     const total = boardUsage(bp).total;
 
     const plan = deletePlan(bp, 'AP-1');
@@ -222,7 +223,7 @@ describe('Delete', () => {
   });
 
   it.skipIf(process.getuid?.() === 0)('a delete cut off half-way says so, keeps the cost once, and finishes when it runs again', async () => {
-    const t = built('AP-1', { usage: usage(2) });
+    const t = await built('AP-1', { usage: usage(2) });
     decision('STACK.1', 'Project scan', { tickets: ['AP-1'] });
     const total = boardUsage(bp).total;
     // The project's decisions folder cannot be written: the delete stops on the way.
@@ -260,8 +261,8 @@ describe('Delete', () => {
   // Pushes twice and fetches: on a busy machine it takes longer than the default limit.
   it('keeps a pushed branch unless asked, and that branch does not bring the ticket back', { timeout: 60_000 }, async () => {
     for (const id of ['AP-1', 'AP-3']) {
-      const t = built(id, { handedOver: { from: 'Ali', to: 'Momen', at: '2026-11-01T10:00:00.000Z' }, story: 'As an owner, I want hours.' });
-      commitTicketDocs(bp, t, 'handed over');
+      const t = await built(id, { handedOver: { from: 'Ali', to: 'Momen', at: '2026-11-01T10:00:00.000Z' }, story: 'As an owner, I want hours.' });
+      await commitTicketDocs(bp, t, 'handed over');
       sh(`git push -q origin ${t.branch}`, t.worktree!);
     }
     const plan = deletePlan(bp, 'AP-1');
@@ -287,7 +288,7 @@ describe('Delete', () => {
   });
 
   it('a decision another ticket follows stays, and the dialog says so', async () => {
-    built('AP-1', { decision: { title: 'Hours', options: [], why: '', adr: 'AP-1.1' } });
+    await built('AP-1', { decision: { title: 'Hours', options: [], why: '', adr: 'AP-1.1' } });
     decision('AP-1.1', 'AP-1', { tickets: ['AP-1', 'AP-2'] });
     ticket('AP-2', { stage: 'specs', follows: ['AP-1.1'] });
     const plan = deletePlan(bp, 'AP-1');
@@ -301,7 +302,7 @@ describe('Delete', () => {
 
   it('stops the running agent first and waits for it, with no stuck card', async () => {
     block = true;
-    const t = built('AP-1', { stage: 'tickets', live: true, status: 'Analyst is reading the ticket', squad: { phase: 'analyst-read', nextAt: at() } });
+    const t = await built('AP-1', { stage: 'tickets', live: true, status: 'Analyst is reading the ticket', squad: { phase: 'analyst-read', nextAt: at() } });
     const stop = new LiveSquad(bp).start(30);
     try {
       for (let i = 0; i < 200 && !runs.length; i += 1) await sleep(25);
@@ -322,8 +323,8 @@ describe('Delete', () => {
   });
 
   it('waits for a squad in another window to say it stopped, and says so when it does not', async () => {
-    built('AP-1');
-    built('AP-2');
+    await built('AP-1');
+    await built('AP-2');
     // Another process holds the board: its squad must stop the ticket's runs before anything goes.
     fs.mkdirSync(bp.localDir, { recursive: true });
     fs.writeFileSync(bp.pidFile, String(process.ppid));
@@ -341,7 +342,7 @@ describe('Delete', () => {
   });
 
   it('works through the board API', async () => {
-    built('AP-1');
+    await built('AP-1');
     const app = new Hono();
     mountApi(app, { paths: buildPaths(project) });
     const plan = (await (await app.request('/api/v1/tickets/AP-1/delete')).json()) as { removes: string[]; command: string };

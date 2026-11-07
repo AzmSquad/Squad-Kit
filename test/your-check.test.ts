@@ -171,7 +171,7 @@ describe('Ask a question while the ticket waits for your check', () => {
     });
 
     // Nothing runs: no address at all, though the settings have one, and Try it yourself is what the person presses.
-    const off = reviewLook(bp, readTicket(bp, 'SK-139')!);
+    const off = await reviewLook(bp, readTicket(bp, 'SK-139')!);
     expect(off).toMatchObject({ canTry: true, accepted: false });
     expect(off).not.toHaveProperty('tryUrl');
     const notRunning = P.whereToLook(readTicket(bp, 'SK-139')!, off);
@@ -191,7 +191,7 @@ describe('Ask a question while the ticket waits for your check', () => {
     r.start('SK-139');
     const s = await r.settled('SK-139');
     expect(s.state).toBe('running');
-    const on = reviewLook(bp, readTicket(bp, 'SK-139')!);
+    const on = await reviewLook(bp, readTicket(bp, 'SK-139')!);
     expect(on.tryUrl).toBe(s.url);
     const running = P.whereToLook(readTicket(bp, 'SK-139')!, on);
     expect(running).toContain(`This ticket's own copy of the app is running now, at ${s.url}. That is the one address that works`);
@@ -203,7 +203,7 @@ describe('Ask a question while the ticket waits for your check', () => {
     expect(calls.at(-1)!.prompt).toContain(`is running now, at ${s.url}`);
 
     await r.stop('SK-139');
-    expect(reviewLook(bp, readTicket(bp, 'SK-139')!)).not.toHaveProperty('tryUrl');
+    expect(await reviewLook(bp, readTicket(bp, 'SK-139')!)).not.toHaveProperty('tryUrl');
   }, 60_000);
 
   it('an accepted ticket points to Your apps, never to an address', async () => {

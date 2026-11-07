@@ -540,8 +540,8 @@ describe('the Reviewer and the screens', () => {
     const t = await squad().workspace('AP-1');
     fs.writeFileSync(path.join(t.copies![0]!.dir, 'page.js'), 'new\n');
     fs.writeFileSync(path.join(t.worktree!, 'route.js'), 'new\n');
-    expect(ticketChanges(bp, 'AP-1').files.map((f) => f.path).sort()).toEqual(['api-server/route.js', 'web-ui/page.js']);
-    expect(changedFiles(get()).sort()).toEqual(['api-server/route.js', 'web-ui/page.js']);
+    expect((await ticketChanges(bp, 'AP-1')).files.map((f) => f.path).sort()).toEqual(['api-server/route.js', 'web-ui/page.js']);
+    expect((await changedFiles(get())).sort()).toEqual(['api-server/route.js', 'web-ui/page.js']);
     expect(editorFolder(bp, 'AP-1')).toBe(t.storyDir);
   });
 

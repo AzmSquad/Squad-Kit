@@ -36,7 +36,7 @@ vi.mock('../src/modules/claude/sandbox.js', async (orig) => ({
 
 const { boardPaths, readMeta, readTicket, writeMeta, writeTicket } = await import('../src/board/store.js');
 const { LiveSquad } = await import('../src/engine/live.js');
-const { addWorktree } = await import('../src/engine/git.js');
+const { addWorktree } = await import('./support/copy.js');
 const actions = await import('../src/board/actions.js');
 const { problemOf } = await import('../src/board/problem.js');
 const { squadHome } = await import('../src/core/home.js');

@@ -53,7 +53,7 @@ import { ALL_TOOLS, AgentWindow, toolsFor, tooManyMistakesWords, tooManyWords, t
 import { closeWindow, openWindow, windowAccess } from './window-server.js';
 import { TECHNICAL_TRIES, askText, judgeQuestion, judgeReply, questionBackPrompt, refusedAskLine, refusedReplyLine, stoppedQuestion } from './question-filter.js';
 import { TECHNICAL_STOP, ownRunWords, ownWords } from './plain-stop.js';
-import { addSnapshot, addWorktree, changedTracked, copyDirsIn, commitAll, conventionalWords, cutOffWords, dropSnapshot, git, isAncestor, isLockFile, latestBase, putBackTracked, repairCopyLink, settleCopy } from './git.js';
+import { addSnapshot, addWorktree, baseTurn, changedTracked, clearHalfCopies, copyDirsIn, commitAll, conventionalWords, cutOffWords, dropSnapshot, git, gitLater, isAncestor, isLockFile, latestBase, putBackTracked, repairCopyLink, settleCopy, writeChangesOf, type CopyHow } from './git.js';
 import * as P from './prompts.js';
 import { answerLists, checklistAsk, checklistsFor, rulesFor, type ListNo } from '../board/additions.js';
 import { gatesChanged, noteGates, runGatesAt, type GateDone } from './gate-run.js';
@@ -94,7 +94,7 @@ import { forgetSaveTrouble, isSaveTrouble, noteSaveTrouble, stillHeld, endTurnTr
 import { fileTroubleWords, isDiskTrouble } from '../core/file-trouble.js';
 import { explainError, StepError } from '../board/problem.js';
 import { readAgainDone, readIdea, readSaid, saveBlueprintParts, saveFirstWords, talkReply } from './onboard-live.js';
-import { readFailed, readStarted, readingNow, resumeSetup, runSetupProof, saveScan, settleSetupStop, type ScanAnswer } from './onboard.js';
+import { firstSaveDue, firstSaveHolds, runFirstSave, readFailed, readStarted, readingNow, resumeSetup, runSetupProof, saveScan, settleSetupStop, type ScanAnswer } from './onboard.js';
 import { nextProofStep } from '../board/setup-state.js';
 import { writeLog, type LogLevel } from '../core/app-log.js';
 import { designDepends, holdBuild, wakeIfReady } from '../board/depends.js';
@@ -105,8 +105,8 @@ import { CutOff, carriesOn, carryOnLine, carryOnPrompt, markInterrupted, sleepMa
 import { STOP_IT, cardAnswer, goAroundAnswer, inTheWay, ownWorkAnswer, portCard, settledAnswer, type AroundIt } from './port-ask.js';
 import { appPortVariables } from './port-vars.js';
 import { judgeTestChange } from './test-change.js';
-import { trackTask } from './process-group.js';
-import { SETUP_MS, endPid, nextFreePort, portTaken, squadKitOn } from './run-app.js';
+import { endPid, trackTask } from './process-group.js';
+import { SETUP_MS, nextFreePort, portTaken, squadKitOn } from './run-app.js';
 import { APPROVING, NO_QUESTIONS, acceptByItselfBeside, acceptNext, addDecided, afterPullRequest, askWords, cleanSources, mergeWait, mergesByItself, resumeAccept, waitForLanding } from '../board/auto.js';
 import * as A from './auto-prompts.js';
 import type { DecidedBy } from '../board/requirements-types.js';
@@ -157,8 +157,8 @@ function planKey(t: Ticket): string {
 }
 
 /** squad-kit's own keys (tracker token, speech key): no agent may read them, whichever folder it works in. */
-export function secretFiles(bp: BoardPaths, cwd?: string): string[] {
-  return [bp.secretsFile, path.join(bp.squadDir, 'secrets.yaml'), ...hiddenFiles(bp, cwd)];
+export async function secretFiles(bp: BoardPaths, cwd?: string): Promise<string[]> {
+  return [bp.secretsFile, path.join(bp.squadDir, 'secrets.yaml'), ...(await hiddenFiles(bp, cwd))];
 }
 
 /**
@@ -357,6 +357,8 @@ export class LiveSquad {
       }
       // What the last board's runs left running in squad-kit's copies stops before any step carries on.
       this.swept = this.clearCopies(projectCopies(this.bp), { busy: this.busyCopies() }).catch(() => undefined);
+      // Half a copy a crash left goes, beside everything else: nothing works in one, so nothing waits for this.
+      for (const repo of reposOf(readMeta(this.bp))) void clearHalfCopies(path.join(projectRoot(this.bp), repo.path)).catch(() => undefined);
     } catch {
       // Unreadable board; the tick will report it.
     }
@@ -431,11 +433,17 @@ export class LiveSquad {
     if (meta.setup?.stopping) {
       this.stops.get('__scan')?.abort();
       this.stops.get('__setup')?.abort();
+      this.stops.get('__firstSave')?.abort();
       // Nothing runs, so nothing would answer the Stop (the usage limit holds the read).
-      if (!this.running.has('__scan') && !this.running.has('__setup')) {
+      if (!this.running.has('__scan') && !this.running.has('__setup') && !this.running.has('__firstSave')) {
         settleSetupStop(this.bp);
         return;
       }
+    }
+    // A big folder with no git yet gets its first save first, beside everything else: nothing can start without it.
+    if (firstSaveHolds(meta)) {
+      if (firstSaveDue(meta) && !meta.setup?.stopping && !this.running.has('__firstSave')) this.launch('__firstSave', () => runFirstSave(this.bp, this.stops.get('__firstSave')!.signal));
+      return;
     }
     // "Something is wrong": the Architect answers the person beside everything else.
     this.talk();
@@ -891,8 +899,16 @@ export class LiveSquad {
 
   /** The person pressed Stop: park the ticket with a way to pick it up again. */
   private stopped(id: string, phase?: string): void {
-    // Taken over, or talking it through: the person has the ticket now, so no stuck card, just quiet.
     const held = readTicket(this.bp, id);
+    // It went in before the Stop could land: nothing is left to stop, and a card would run a step again on merged work.
+    if (held?.mergedAt) {
+      this.update(id, (t) => {
+        t.stopRequested = undefined;
+        t.retryOnStop = undefined;
+      });
+      return;
+    }
+    // Taken over, or talking it through: the person has the ticket now, so no stuck card, just quiet.
     if (held?.takenOver || (held?.chat?.open && !held.chat.beside)) {
       this.update(id, (t) => {
         t.stopRequested = undefined;
@@ -952,6 +968,22 @@ export class LiveSquad {
   private guardedWatch(id: string, cwd: string) {
     const guard = this.guardFor(cwd, id);
     return { ...this.commandWatch(id), ...(guard ? { guard } : {}) };
+  }
+
+  /**
+   * How a step makes a first copy of the code, which takes as long as the project's size: the card says so, the ticket's
+   * Stop ends it, and the watchdog hears that it works, as nothing else shows progress meanwhile.
+   */
+  private async makingCopy<T>(id: string, make: (how: CopyHow) => Promise<T>): Promise<T> {
+    const said = readTicket(this.bp, id)?.status;
+    const signal = this.stops.get(id)?.signal;
+    const beat = setInterval(() => this.dog.beat(id), 30_000);
+    try {
+      return await make({ ...(signal ? { signal } : {}), making: () => this.update(id, (x) => (x.status = DOING.copy)) });
+    } finally {
+      clearInterval(beat);
+      if (said !== undefined && readTicket(this.bp, id)?.status === DOING.copy) this.update(id, (x) => (x.status = said));
+    }
   }
 
   /** Between the parts of a step: once the person pressed Stop, nothing new starts. */
@@ -1234,7 +1266,8 @@ export class LiveSquad {
     // A sandboxed step of a ticket gets the ticket's own package cache for the tools whose shared caches stay read only.
     const cache = boxed && key ? ticketCacheDir(this.bp, key) : undefined;
     if (cache) fs.mkdirSync(cache, { recursive: true });
-    const sandbox = boxed ? this.sandboxFor(opts.cwd, opts.addDirs ?? [], cache) : undefined;
+    const sandbox = boxed ? await this.sandboxFor(opts.cwd, opts.addDirs ?? [], cache) : undefined;
+    const secrets = await secretFiles(this.bp, opts.cwd);
     // What the sandbox refused shows on the ticket in plain words, each thing once a run.
     const refused = new Set<string>();
     const onBlocked = (b: BlockedAction) => {
@@ -1246,7 +1279,7 @@ export class LiveSquad {
     const run = ({ win: _own, reply: _reply, check: _check, checkHelp: _help, capMore: _more, ...o }: AgentRun & { win?: unknown; reply?: unknown; check?: unknown; checkHelp?: unknown; capMore?: unknown }) => tool.run({
       ...o,
       ...watch,
-      secretFiles: secretFiles(this.bp, opts.cwd),
+      secretFiles: secrets,
       privatePlaces: agentPrivatePlaces(),
       protectedFiles: this.protectedFiles(opts.cwd),
       ...(Object.keys(runCaps).length ? { caps: runCaps } : {}),
@@ -1421,9 +1454,9 @@ export class LiveSquad {
    * After a Builder, Tester or Reviewer step, in the ticket's copy: what the step may not change goes back, with a
    * line saying so, and a branch or commit that moved stops the ticket. `skip` holds folders the step may write in.
    */
-  private keepLane(id: string, role: 'builder' | 'tester' | 'reviewer', lane: Lane, skip: string[] = []): void {
+  private async keepLane(id: string, role: 'builder' | 'tester' | 'reviewer', lane: Lane, skip: string[] = []): Promise<void> {
     const who = role === 'builder' ? 'Builder' : role === 'tester' ? 'Tester' : 'Reviewer';
-    const c = checkLane(lane, skip);
+    const c = await checkLane(lane, skip);
     const some = (files: string[]) => `${files.slice(0, 6).join(', ')}${files.length > 6 ? ` and ${files.length - 6} more` : ''}`;
     // The Reviewer only reads: what changed there is the app's work, while the Reviewer looked at it.
     if (c.putBack.length) this.update(id, (x) => addActivity(x, role, `${role === 'reviewer' ? 'The app changed files while the Reviewer looked at it' : `The ${who} changed files`}; squad-kit put them back: ${some(c.putBack)}`));
@@ -1448,16 +1481,16 @@ export class LiveSquad {
   }
 
   /** The lane check on each of a story's copies. */
-  private watchCopies(t: Ticket, wholeCopy = false): Lane[] {
-    return copiesOf(this.meta(), t).map((c) => watchLane(c.dir, this.protectedFiles(c.dir), wholeCopy));
+  private watchCopies(t: Ticket, wholeCopy = false): Promise<Lane[]> {
+    return Promise.all(copiesOf(this.meta(), t).map((c) => watchLane(c.dir, this.protectedFiles(c.dir), wholeCopy)));
   }
 
   /** Every copy is put right, even when one stops the story: the first stop is the one said. */
-  private keepLanes(id: string, role: 'builder' | 'tester' | 'reviewer', lanes: Lane[], skip: string[] = []): void {
+  private async keepLanes(id: string, role: 'builder' | 'tester' | 'reviewer', lanes: Lane[], skip: string[] = []): Promise<void> {
     let stop: unknown;
     for (const lane of lanes) {
       try {
-        this.keepLane(id, role, lane, skip);
+        await this.keepLane(id, role, lane, skip);
       } catch (err) {
         stop ??= err;
       }
@@ -1578,13 +1611,13 @@ export class LiveSquad {
    * What a Builder or Tester step's commands may reach in the sandbox: its copy, the proof folder, the ticket's own
    * package cache and the registries.
    */
-  private sandboxFor(cwd: string, read: string[], cache?: string) {
+  private async sandboxFor(cwd: string, read: string[], cache?: string) {
     return sandboxAsk({
       cwd,
       root: projectRoot(this.bp),
       read,
       proof: this.bp.proofDir,
-      secrets: secretFiles(this.bp, cwd),
+      secrets: await secretFiles(this.bp, cwd),
       hosts: this.meta().allowedHosts ?? [],
       ...(cache ? { cache } : {}),
     });
@@ -1631,7 +1664,7 @@ export class LiveSquad {
     meta.tools = AI_TOOLS.map((t) => ({ name: t.label, ready: t.ready() }));
     writeMeta(this.bp, meta);
     const architect = aiTool(readAgent(this.bp, 'architect').tool);
-    readStarted(this.bp, { label: architect?.label ?? 'The AI tool', ready: Boolean(architect?.ready()) });
+    await readStarted(this.bp, { label: architect?.label ?? 'The AI tool', ready: Boolean(architect?.ready()) });
     const nested = workspaceRepos(root);
     await syncWiki(this.bp, undefined, true);
     // What the Architect is reading right now, for the setup page and the board's setup card.
@@ -1718,10 +1751,11 @@ export class LiveSquad {
     if (!ls) return;
     this.update(id, (x) => (x.localSetup = { dir: ls.dir, command: ls.command, status: 'running', at: now() }));
     // The person's own changes stay: what differed before the setup ran is theirs.
-    const theirs = changedTracked(ls.dir);
+    // In its turn, as is what comes after: git may write the index while it looks, and a move of this folder's base would run into that.
+    const theirs = await baseTurn(ls.dir, () => changedTracked(ls.dir));
     const r = await runCommand(ls.dir, ls.command, SETUP_MS, this.guardFor(ls.dir, id) ? { guard: this.guardFor(ls.dir, id)! } : {});
     const seconds = Math.round(r.seconds);
-    this.putBackLockFiles(id, ls.dir, theirs);
+    await this.putBackLockFiles(id, ls.dir, theirs);
     this.update(id, (x) => {
       x.localSetup = { dir: ls.dir, command: ls.command, status: r.ok ? 'done' : 'failed', at: now(), seconds, ...(r.ok ? {} : { output: tail(r.output, 12) }) };
       addActivity(x, 'release', r.ok ? 'Your copy is ready' : 'Your copy could not be set up');
@@ -1735,10 +1769,10 @@ export class LiveSquad {
    * make. Only lock files here: this folder is the person's, so a file they saved while the setup ran looks just the
    * same as one the setup wrote, and a database the setup moved on must stay. The rest is said to engineers.
    */
-  private putBackLockFiles(id: string, dir: string, theirs: string[]): void {
-    const back = putBackTracked(dir, { keep: theirs, only: isLockFile });
+  private async putBackLockFiles(id: string, dir: string, theirs: string[]): Promise<void> {
+    const back = await baseTurn(dir, () => putBackTracked(dir, { keep: theirs, only: isLockFile }));
     if (back.length) this.log('info', `The setup command changed ${back.join(', ')} in your folder; squad-kit put ${back.length === 1 ? 'it' : 'them'} back`, id);
-    const left = changedTracked(dir).filter((f) => !theirs.includes(f));
+    const left = (await baseTurn(dir, () => changedTracked(dir))).filter((f) => !theirs.includes(f));
     if (left.length) this.log('info', `${left.join(', ')} changed in your folder while the setup command ran; squad-kit left ${left.length === 1 ? 'it' : 'them'} as they are`, id);
   }
 
@@ -2178,7 +2212,7 @@ export class LiveSquad {
     // Ask a question on a ticket the squad is not working on: it stays where it is, and the agent says so plainly.
     const stands = beside && !done && !review && !squadWorks(t) ? whereItStands(t) : undefined;
     // Where to look, in every state: once the ticket has a copy of the code or pages in its proof.
-    const look = beside && (review || (t.worktree && fs.existsSync(t.worktree)) || proofPages(t).length) ? reviewLook(this.bp, t) : undefined;
+    const look = beside && (review || (t.worktree && fs.existsSync(t.worktree)) || proofPages(t).length) ? await reviewLook(this.bp, t) : undefined;
     const next = beside ? P.besideNext(done, review, stands) : P.chatNext(c.with, Boolean(t.story), Boolean(t.specApproved));
     const talk = P.chatPrompt(c.with, message, next, attached, beside);
     const step = { analyst: 'questions', architect: 'design', builder: 'build', reviewer: 'review', tester: 'proof' }[c.with];
@@ -2467,7 +2501,7 @@ export class LiveSquad {
     });
     const resume = fromChat || Boolean(t0.activity.some((a) => a.who === 'analyst'));
     // The other open tickets, so the spec does not do what one of them already does (E5).
-    const others = openTicketsFor(this.bp, t0);
+    const others = await openTicketsFor(this.bp, t0);
     const r = await this.runAgent({
       role: 'analyst',
       step: 'spec',
@@ -2515,7 +2549,7 @@ export class LiveSquad {
     const design = Boolean(t0.specApproved);
     const asked = answered ? t0.agentQuestion : undefined;
     // The other open tickets and the files their branches changed: the design names the ones it needs (E5).
-    const others = openTicketsFor(this.bp, t0);
+    const others = await openTicketsFor(this.bp, t0);
     const ask = `${asked ? `${P.answerPrompt(asked, 'architect')}\n\n` : ''}${design ? P.designPrompt(t0, change, this.meta(), fromChat, others) : P.planPrompt(t0, change, this.meta(), others)}`;
     // Builds by itself: the Architect plans with the breakdown in view, and may read the document's text and pictures.
     const brd = t0.track === 'auto' ? A.breakdownFor(this.bp, t0) : null;
@@ -2636,9 +2670,8 @@ export class LiveSquad {
     // it depends on, when the person chose to build on that ticket's branch.
     const dep = dependencyToStartFrom(this.bp, t);
     const at = meta.repos?.length ? storyCopyDir(root, id, repo.path) : undefined;
-    const wt: { dir: string; branch: string; baseCommit: string; pushed?: string; from?: string } = dep
-      ? addWorktreeOn(this.bp, t, dep, at)
-      : addWorktree(path.join(root, repo.path), id, repo.base, await fetchBase(this.bp, t), at);
+    const fetched = dep ? undefined : await fetchBase(this.bp, t);
+    const wt: { dir: string; branch: string; baseCommit: string; pushed?: string; from?: string } = await this.makingCopy(id, (how) => (dep ? addWorktreeOn(this.bp, t, dep, at, how) : addWorktree(path.join(root, repo.path), id, repo.base, fetched, at, how)));
     const named = repo.path === '.' ? 'the project' : (repoLabel(meta, repo.path) ?? repo.path);
     t = this.update(id, (x) => {
       x.worktree = wt.dir;
@@ -2656,7 +2689,7 @@ export class LiveSquad {
       );
     });
     // The ticket's documents so far go on its branch first (ADR-001), when the project keeps them in git.
-    const saved = commitTicketDocs(this.bp, t, wt.pushed ? 'picked up from the pushed branch' : t.specApproved ? 'spec and design approved' : 'plan approved');
+    const saved = await commitTicketDocs(this.bp, t, wt.pushed ? 'picked up from the pushed branch' : t.specApproved ? 'spec and design approved' : 'plan approved');
     if (saved) t = this.update(id, (x) => addActivity(x, 'squad', 'Saved the spec and design'));
     await this.setUpCopy(id, wt.dir, repo);
     return this.addWantedCopies(id);
@@ -2675,7 +2708,8 @@ export class LiveSquad {
     if (!t.storyDir || repoFor(this.meta(), t).path === repoPath || t.copies?.some((c) => c.repo === repoPath)) return;
     const repo = reposOf(this.meta()).find((r) => r.path === repoPath);
     if (!repo) return;
-    const wt = addWorktree(path.join(projectRoot(this.bp), repo.path), id, repo.base, await fetchBase(this.bp, { ...t, repo: repo.path }), path.join(t.storyDir, repo.path));
+    const fetched = await fetchBase(this.bp, { ...t, repo: repo.path });
+    const wt = await this.makingCopy(id, (how) => addWorktree(path.join(projectRoot(this.bp), repo.path), id, repo.base, fetched, path.join(t.storyDir!, repo.path), how));
     this.update(id, (x) => {
       x.copies = [...(x.copies ?? []), { repo: repo.path, dir: wt.dir, baseCommit: wt.baseCommit }];
       addActivity(x, 'builder', `Made a clean copy of ${repoLabel(this.meta(), repo.path) ?? repo.path}`);
@@ -2711,7 +2745,7 @@ export class LiveSquad {
       });
     }
     // What the setup rewrote (a lock file, often) is not the story's work: it goes back before anyone reads the copy.
-    const back = putBackTracked(dir);
+    const back = await putBackTracked(dir);
     if (back.length) this.log('info', `The setup command changed ${back.join(', ')}; squad-kit put ${back.length === 1 ? 'it' : 'them'} back`, id);
   }
 
@@ -2732,7 +2766,7 @@ export class LiveSquad {
       const now = readTicket(this.bp, id)!;
       const made = now.copies?.find((c) => c.repo === part.repo);
       if (!made) return `squad-kit could not add a copy of ${part.name}. Call i_am_stuck if the story cannot go on without it.`;
-      lanes?.push(watchLane(made.dir, this.protectedFiles(made.dir)));
+      lanes?.push(await watchLane(made.dir, this.protectedFiles(made.dir)));
       this.update(id, (x) => addActivity(x, 'squad', `The Builder needed ${part.name} too, so squad-kit added its copy`));
     }
     this.update(id, (x) => {
@@ -2745,15 +2779,9 @@ export class LiveSquad {
    * What each part changed, written to a file in the story's folder. A step that only reads cannot run git there: its AI
    * tool refuses git in a folder that is not the one it works in, so squad-kit does that part.
    */
-  private writeChanges(t: Ticket): void {
+  private async writeChanges(t: Ticket): Promise<void> {
     if (!t.storyDir) return;
-    for (const c of copiesOf(this.meta(), t)) {
-      const diff = c.baseCommit ? git(c.dir, ['diff', '--no-color', '--find-renames', c.baseCommit], { allowFail: true }) : '';
-      const added = git(c.dir, ['ls-files', '--others', '--exclude-standard'], { allowFail: true }).split('\n').filter(Boolean);
-      const file = path.join(t.storyDir, P.changesFile(c.repo.path));
-      fs.mkdirSync(path.dirname(file), { recursive: true });
-      fs.writeFileSync(file, `${diff || 'Nothing changed in the files git already has.'}\n\nNew files in ${c.repo.path}/:\n${added.map((f) => `- ${f}`).join('\n') || '- none'}\n`);
-    }
+    for (const c of copiesOf(this.meta(), t)) await writeChangesOf(c.dir, c.baseCommit, path.join(t.storyDir, P.changesFile(c.repo.path)), c.repo.path);
   }
 
   /** A repo's local files go in the story's copy. One with no values yet is said once: the app may not start without it. */
@@ -2786,7 +2814,7 @@ export class LiveSquad {
     const meta = this.meta();
     const rc = (this.appOf(t0)?.repo ?? repoFor(meta, t0)).commands;
     // Work already in the copy (it came with a pushed branch): no "before" screens of it, and a fresh Builder reads it.
-    const sofar = t0.baseCommit ? workSoFar(t0.worktree!, t0.baseCommit) : [];
+    const sofar = t0.baseCommit ? await workSoFar(t0.worktree!, t0.baseCommit) : [];
     // On a product, "before" pictures would need the whole product running beside the build, on the same addresses.
     if (!sofar.length && !t0.proof?.length && t0.baseCommit && rc.start && rc.url && (t0.work?.screens ?? 0) > 0 && !meta.scan?.empty && !runsAsProduct(meta)) {
       // Beside the build, never before it: the Builder starts now.
@@ -2844,7 +2872,7 @@ export class LiveSquad {
     const cwd = workFolder(t)!;
     const started = Date.now();
     let current = -1;
-    const lanes = this.watchCopies(t);
+    const lanes = await this.watchCopies(t);
     this.lanesOf.set(id, lanes);
     const r = await this.runAgent({
         role: 'builder',
@@ -2891,7 +2919,7 @@ export class LiveSquad {
     })
       .finally(() => {
         this.lanesOf.delete(id);
-        this.keepLanes(id, 'builder', lanes);
+        return this.keepLanes(id, 'builder', lanes);
       })
       .catch((err: unknown) => this.builderFailed(id, err));
     if (change) {
@@ -3139,12 +3167,13 @@ export class LiveSquad {
    * it; if the base still is not in the copy, the step fails with git's reason instead of saying it worked.
    */
   private async bringInBase(t: Ticket, base: string, remote?: string, dir = t.worktree!): Promise<{ baseSha: string; clashes: string[]; from: string }> {
-    const unmerged = () => git(dir, ['diff', '--name-only', '--diff-filter=U'], { allowFail: true }).split('\n').filter(Boolean);
+    const unmerged = async () => (await gitLater(dir, ['diff', '--name-only', '--diff-filter=U'], { allowFail: true })).split('\n').filter(Boolean);
     const merging = () => git(dir, ['rev-parse', '-q', '--verify', 'MERGE_HEAD'], { allowFail: true }) !== '';
     // The newest base: the remote's when the team moved it on (fetched just before), with work accepted here kept.
     const latest = latestBase(dir, base, remote);
     // Clashes from last time that are not fixed yet: the Builder fixes those first.
-    if (merging() && unmerged().length) return { baseSha: git(dir, ['rev-parse', 'MERGE_HEAD']), clashes: unmerged(), from: latest.ref };
+    const left = merging() ? await unmerged() : [];
+    if (left.length) return { baseSha: git(dir, ['rev-parse', 'MERGE_HEAD']), clashes: left, from: latest.ref };
     const baseSha = latest.sha;
     leaveProjectFiles(this.bp, t, base);
     const guard = this.guardFor(dir, t.id);
@@ -3159,11 +3188,11 @@ export class LiveSquad {
     }
     let why = 'git did not merge it';
     try {
-      git(dir, ['merge', '--no-commit', '--no-ff', '-m', `Merge ${latest.ref} into ${t.branch ?? 'this ticket'}`, baseSha]);
+      await gitLater(dir, ['merge', '--no-commit', '--no-ff', '-m', `Merge ${latest.ref} into ${t.branch ?? 'this ticket'}`, baseSha]);
     } catch (err) {
       why = (err as Error).message;
     }
-    const clashes = unmerged();
+    const clashes = await unmerged();
     if (!merging() && !isAncestor(dir, baseSha, 'HEAD')) throw new StepError('squad-kit could not bring the newest code into this ticket. Press Try again.', why);
     return { baseSha, clashes, from: latest.ref };
   }
@@ -3332,7 +3361,10 @@ export class LiveSquad {
     const copies = copiesOf(meta, t);
     const several = copies.length > 1;
     // Tests made weaker first: passing them would prove little, and only you can go past it.
-    const weak = copies.flatMap((c) => (c.baseCommit ? weakenedChecks(c.dir, c.baseCommit, { skip: [`${path.basename(this.bp.squadDir)}/`], testCommand: c.repo.commands.test }).concat(gatesChanged(this.bp, c.dir, c.repo.path, c.baseCommit)) : []));
+    const weak: Weakening[] = [];
+    for (const c of copies) {
+      if (c.baseCommit) weak.push(...(await weakenedChecks(c.dir, c.baseCommit, { skip: [`${path.basename(this.bp.squadDir)}/`], testCommand: c.repo.commands.test })), ...(await gatesChanged(this.bp, c.dir, c.repo.path, c.baseCommit)));
+    }
     const fresh = weak.filter((w) => !(t.weakenedContinued ?? []).includes(w.key));
     if (fresh.length) return this.weakenedStop(id, fresh, repoFor(meta, t).base);
     // No old server of squad-kit's own copies may hold a port the checks need.
@@ -3347,7 +3379,8 @@ export class LiveSquad {
     });
     const mark = sleepMark();
     // A part the story did not change has nothing new to check, unless nothing changed at all.
-    const changed = several ? copies.filter((c) => c.baseCommit && workSoFar(c.dir, c.baseCommit).length) : copies;
+    const changed: typeof copies = [];
+    for (const c of copies) if (!several || (c.baseCommit && (await workSoFar(c.dir, c.baseCommit)).length)) changed.push(c);
     const results: (CheckResult & { part?: string })[] = [];
     for (const c of changed.length ? changed : copies.slice(0, 1)) {
       let commands = c.repo.commands;
@@ -3361,10 +3394,10 @@ export class LiveSquad {
       };
       const guard = this.guardFor(c.dir, id);
       // The checks run the Builder's code, which may write in its copy: never in the project's own check.
-      const hookLane = watchLane(c.dir, hookFiles(c.dir));
+      const hookLane = await watchLane(c.dir, hookFiles(c.dir));
       if (!t.testChange?.repo || t.testChange.repo === c.repo.path) commands = await this.tryTestChange(id, c.dir, commands, guard, mark);
       const ran = await runChecks(c.dir, commands, onStart, { ...this.commandWatch(id), ...(guard ? { guard } : {}) });
-      const hooksBack = checkLane(hookLane).restored;
+      const hooksBack = (await checkLane(hookLane)).restored;
       if (hooksBack.length) this.update(id, (x) => addActivity(x, 'squad', `The project's checks changed the check that runs on every save (${hooksBack.slice(0, 6).join(', ')}); squad-kit put it back. Changing that check stays with you or an engineer`));
       // A check that needed a file outside its copy, which the guard blocked: one plain sentence, not a failed try.
       if (guard && !this.stops.get(id)?.signal.aborted) {
@@ -3652,10 +3685,12 @@ export class LiveSquad {
     });
     const round = t0.reviewRound!;
     const goOn = answered && Boolean(t0.sessions?.review);
-    this.writeChanges(t0);
+    await this.writeChanges(t0);
     // The Reviewer may look at the app's pages, and the app runs in the ticket's copy: what it changes there goes back.
     const rc = this.appOf(t0)?.repo.commands ?? {};
-    const lanes = rc.start?.trim() && rc.url?.trim() ? this.watchCopies(t0, true) : [];
+    const lanes = rc.start?.trim() && rc.url?.trim() ? await this.watchCopies(t0, true) : [];
+    const worked: string[] = [];
+    for (const c of goOn ? [] : copiesOf(meta, t0)) if (c.baseCommit) worked.push(...(await workSoFar(c.dir, c.baseCommit)).map((f) => (t0.storyDir ? `${c.repo.path}/${f}` : f)));
     const lists = goOn ? [] : checklistsFor(this.bp, 'reviewer');
     const r = await this.runAgent({
         role: 'reviewer',
@@ -3667,7 +3702,7 @@ export class LiveSquad {
         ? carry
           ? P.chatCarryOnPrompt('reviewer')
           : P.answerPrompt(t0.agentQuestion ?? { text: '' }, 'reviewer')
-        : `${P.reviewPrompt(meta, listDecisions(this.bp), t0, round, this.ctx(t0), copiesOf(meta, t0).flatMap((c) => (c.baseCommit ? workSoFar(c.dir, c.baseCommit).map((f) => (t0.storyDir ? `${c.repo.path}/${f}` : f)) : [])))}${checklistAsk(lists)}`,
+        : `${P.reviewPrompt(meta, listDecisions(this.bp), t0, round, this.ctx(t0), worked)}${checklistAsk(lists)}`,
       addDirs: this.extraDirs(t0),
       permissions: ['read', 'git-read'],
       schema: P.REVIEW_SCHEMA,
@@ -4182,7 +4217,7 @@ export class LiveSquad {
     const root = path.join(projectRoot(this.bp), repo.path);
     let dir: string | null = null;
     try {
-      dir = addSnapshot(root, `${id.toLowerCase()}-before`, t.baseCommit!);
+      dir = await addSnapshot(root, `${id.toLowerCase()}-before`, t.baseCommit!, { signal: own.signal });
       const setup = repo.commands.setup?.trim();
       if (setup) {
         const r = await runCommand(dir, setup, BEFORE_SHOTS_MS, { signal: own.signal, ...(this.guardFor(dir, id) ? { guard: this.guardFor(dir, id)! } : {}) });
@@ -4207,7 +4242,7 @@ export class LiveSquad {
         // Nothing the before screenshots started outlives their copy.
         await runsEnded([dir], 6000);
         await this.clearCopies([dir], {}, id).catch(() => undefined);
-        dropSnapshot(root, dir);
+        await dropSnapshot(root, dir);
       }
     }
   }
@@ -4285,7 +4320,7 @@ export class LiveSquad {
 
   private async shoot(id: string, t: Ticket, when: 'before' | 'after', meta: BoardMeta, win: AgentWindow, appUrl: string, beside?: { cwd: string; job: string }, again: string[] = []): Promise<ShotRound> {
     // The Tester only reads the code: squad-kit takes the pictures. The lane still puts back anything changed.
-    const lanes = beside ? [watchLane(beside.cwd, this.protectedFiles(beside.cwd), true)] : this.watchCopies(t, true);
+    const lanes = beside ? [await watchLane(beside.cwd, this.protectedFiles(beside.cwd), true)] : await this.watchCopies(t, true);
     // A picture saved before this moment was not taken in this step.
     const since = Date.now();
     const lists = when === 'after' && !beside ? checklistsFor(this.bp, 'tester') : [];

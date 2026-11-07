@@ -37,7 +37,7 @@ const { boardPaths, readTicket, updateTicket, writeMeta } = await import('../src
 const actions = await import('../src/board/actions.js');
 const { mergeWait } = await import('../src/board/auto.js');
 const { recheckMerge } = await import('../src/engine/sync.js');
-const { addWorktree } = await import('../src/engine/git.js');
+const { addWorktree } = await import('./support/copy.js');
 const { LiveSquad } = await import('../src/engine/live.js');
 
 let tmp: string;

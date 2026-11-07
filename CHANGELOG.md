@@ -71,6 +71,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Arabic reads right to left across the board, a ticket, a breakdown, its map and the other pages, not only in chat. Each piece of
   text a person or an agent wrote follows its own language, and the app's own frame stays as it is.
+- One person's release no longer takes away a teammate's change to the team rules or notes. If only one of you changed a file,
+  that change goes out. If you both did, the team's stays, the release says so, and yours is kept for an engineer.
+- **A project of any size.** The long git steps run beside everything else, so no page waits for them: a first copy of the
+  code, removing a copy, every git over the network, and the steps that read every file. Worst page wait through a whole
+  story on a project of 300,000 files: 38 seconds before, about 2 seconds now, while your own copy of the code moves. Half
+  a copy can never be worked in: a copy reaches its place only whole. Stop works during a first copy. Too little room on
+  the disk says how much is needed and how much is free. Add project says the true number of files, and a big folder with
+  no git yet gets its first save as a setup step you can see.
+- While Looks right saves and merges, the other buttons on that ticket wait, so work you rejected can no longer go in by
+  itself. Moves of your own copy of the code go one at a time and in one piece, so your settings and tickets stay real
+  while it moves, and a restart cannot cut it off half way.
 - **An agent's whole answer reaches you.** An answer to "ask about this question" could show only its last few words.
 - **No agent reads your keys or sign-ins, and a push is refused.** The rule used to cover a step's shell commands only, so an agent that only reads could open a file in `~/.ssh` with its file tools. Now it goes on every run. A push goes nowhere from any agent or story command, while squad-kit's own push works as before.
 - Build continuously holds once two stories stopped on a failed check or an app that would not open, so the next ones do

@@ -7,7 +7,8 @@ import { boardPaths, readMeta, writeMeta, type BoardPaths } from '../src/board/s
 import { seedDemoBoard } from '../src/board/demo.js';
 import { addLocalFile, addLockedFile, lockDockerFiles, offLimits, projectFilesView, removeProjectFile, storyFile, useMyFile } from '../src/board/project-files.js';
 import { hiddenFiles, placeStoryFiles } from '../src/engine/local-files.js';
-import { addWorktree, stageAll } from '../src/engine/git.js';
+import { stageAll } from '../src/engine/git.js';
+import { addWorktree } from './support/copy.js';
 import { copyEnvFiles } from '../src/engine/run-app.js';
 import { buildPrompt, offLimitsText } from '../src/engine/prompts.js';
 import { SETUP_STEPS } from '../src/board/setup-state.js';
@@ -223,25 +224,25 @@ describe("a story's copy", () => {
 });
 
 describe('what no agent may read', () => {
-  it('names the local files in the folder and the copy, and the project .env files, by exact path', () => {
+  it('names the local files in the folder and the copy, and the project .env files, by exact path', async () => {
     write('.env', 'A=1\n');
     write('sub/.env.local', 'B=1\n');
     sh('git rm -q --cached .gitignore && printf ".env*\\n!.env.example\\npublic/config.js\\n.squad/\\n" > .gitignore && git add .gitignore && git -c user.name=t -c user.email=t@t commit -qm ignore');
     addLocalFile(bp, '.', 'public/config.js');
-    const hidden = hiddenFiles(bp, '/copy/AP-1');
+    const hidden = await hiddenFiles(bp, '/copy/AP-1');
     expect(hidden).toEqual(expect.arrayContaining([path.join(root, '.env'), path.join(root, 'sub/.env.local'), path.join(root, '.env.dev'), path.join(root, 'public/config.js'), '/copy/AP-1/public/config.js']));
     // A Builder still reads what is meant to be read.
     expect(hidden).not.toContain(path.join(root, '.env.example'));
     expect(hidden.some((f) => f.endsWith('/story-files/**'))).toBe(true);
   });
 
-  it('adds nothing on a project with no such files', () => {
+  it('adds nothing on a project with no such files', async () => {
     fs.rmSync(path.join(root, '.env.dev'));
-    expect(hiddenFiles(bp, '/copy/AP-1')).toEqual([]);
+    expect(await hiddenFiles(bp, '/copy/AP-1')).toEqual([]);
   });
 
-  it('asks for nothing when the project has no board yet', () => {
-    expect(hiddenFiles(boardPaths(path.join(root, 'none', '.squad')))).toEqual([]);
+  it('asks for nothing when the project has no board yet', async () => {
+    expect(await hiddenFiles(boardPaths(path.join(root, 'none', '.squad')))).toEqual([]);
   });
 });
 
@@ -264,8 +265,8 @@ describe("squad-kit's own copy for the first run", () => {
     return { dir, kept: JSON.stringify(readMeta(bp).setup) };
   };
 
-  afterEach(() => {
-    dropSetupCopies(bp);
+  afterEach(async () => {
+    await dropSetupCopies(bp);
   });
 
   it("uses the story's values for a named local file, never the person's", async () => {
@@ -282,10 +283,10 @@ describe("squad-kit's own copy for the first run", () => {
 });
 
 describe("squad-kit's own copies", () => {
-  it("that run the person's version take their files, with the .env files", () => {
+  it("that run the person's version take their files, with the .env files", async () => {
     const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'squad-own-copy-')));
     try {
-      expect(copyEnvFiles(root, dir, ['public/config.js', 'not/there.js'])).toEqual(['.env.dev', 'public/config.js'].filter((f) => fs.existsSync(path.join(root, f))));
+      expect(await copyEnvFiles(root, dir, ['public/config.js', 'not/there.js'])).toEqual(['.env.dev', 'public/config.js'].filter((f) => fs.existsSync(path.join(root, f))));
       expect(fs.readFileSync(path.join(dir, 'public/config.js'), 'utf8')).toContain(REAL);
       expect(fs.existsSync(path.join(dir, 'not/there.js'))).toBe(false);
     } finally {

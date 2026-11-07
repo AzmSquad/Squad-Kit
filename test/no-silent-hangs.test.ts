@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { runChecks, runCommand, startApp } from '../src/engine/checks.js';
 import { AcpStartError, runAcp, type AcpLaunch } from '../src/engine/acp-runner.js';
-import { netGit, networkGitEnv } from '../src/engine/git.js';
+import { netGitLater, networkGitEnv } from '../src/engine/git.js';
 import { Azure } from '../src/modules/azure/client.js';
 
 /**
@@ -208,7 +208,6 @@ describe('git over the network', () => {
   });
 
   it('a remote that asks for a password fails at once with git’s reason', async () => {
-    // The remote runs in its own process: git over the network blocks this one while it waits.
     const remote = spawn(process.execPath, ['-e', `require('http').createServer((q, r) => { r.writeHead(401, { 'WWW-Authenticate': 'Basic realm="git"' }); r.end(); }).listen(0, '127.0.0.1', function () { console.log(this.address().port); });`]);
     try {
       const port = await new Promise<number>((resolve) => remote.stdout.once('data', (d: Buffer) => resolve(Number(d.toString().trim()))));
@@ -216,14 +215,14 @@ describe('git over the network', () => {
       fs.mkdirSync(repo);
       execFileSync('git', ['init', '-q'], { cwd: repo });
       const started = Date.now();
-      expect(() => netGit(repo, ['ls-remote', `http://127.0.0.1:${port}/x.git`])).toThrow(/git ls-remote failed: .*(terminal prompts disabled|could not read Username)/i);
+      await expect(netGitLater(repo, ['ls-remote', `http://127.0.0.1:${port}/x.git`])).rejects.toThrow(/git ls-remote failed: .*(terminal prompts disabled|could not read Username)/i);
       expect(Date.now() - started).toBeLessThan(10_000);
     } finally {
       remote.kill();
     }
   }, 20_000);
 
-  it('a remote that never answers gives up within its limit, with a plain message', () => {
+  it('a remote that never answers gives up within its limit, with a plain message', async () => {
     const repo = path.join(dir, 'slow-repo');
     fs.mkdirSync(repo);
     execFileSync('git', ['init', '-q'], { cwd: repo });
@@ -231,7 +230,7 @@ describe('git over the network', () => {
     const args = path.join(dir, 'ssh-args.txt');
     fs.writeFileSync(fakeSsh, `#!/bin/sh\necho "$@" > ${args}\nexec sleep 30\n`, { mode: 0o755 });
     const started = Date.now();
-    expect(() => netGit(repo, ['ls-remote', 'ssh://example.invalid/x.git'], { env: { GIT_SSH_COMMAND: fakeSsh }, timeoutMs: 1500 })).toThrow(
+    await expect(netGitLater(repo, ['ls-remote', 'ssh://example.invalid/x.git'], { env: { GIT_SSH_COMMAND: fakeSsh }, timeoutMs: 1500 })).rejects.toThrow(
       /git ls-remote gave up after 2 seconds\. Check the network, and that git can reach the remote without asking for a password\./,
     );
     expect(Date.now() - started).toBeLessThan(8000);

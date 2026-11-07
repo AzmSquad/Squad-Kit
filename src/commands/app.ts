@@ -80,6 +80,7 @@ function stateLine(s: AppView): string {
 
 /** What the app does now, while it starts. */
 function stepLine(s: AppView): string {
+  if (s.step === 'copy') return 'Making a copy of the code. On a big project this takes a while.';
   if (s.step === 'setup') return `Setting it up first: ${s.setup}`;
   if (s.step === 'start') return `Starting: ${s.start}`;
   return `Getting the newest ${s.base}`;

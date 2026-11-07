@@ -37,7 +37,7 @@ vi.mock('../src/modules/claude/sandbox.js', async (orig) => ({
 
 const { boardPaths, readRelease, readTicket, writeMeta, writeTicket } = await import('../src/board/store.js');
 const { LiveSquad } = await import('../src/engine/live.js');
-const { addWorktree } = await import('../src/engine/git.js');
+const { addWorktree } = await import('./support/copy.js');
 const actions = await import('../src/board/actions.js');
 const { deletePlan, deleteTicket } = await import('../src/engine/delete.js');
 const { noPushEnv, packageCacheEnv, ticketCacheDir } = await import('../src/engine/sandbox.js');

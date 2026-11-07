@@ -9,8 +9,8 @@ import type { RepoInfo } from '../board/types.js';
 import { runCommand, tail } from './checks.js';
 import { DOCKER_STOP_MS, DOCKER_WAIT_MS, composeRun, dockerGuard } from './compose-run.js';
 import { dockerBlockedWords, guardSupport, projectGuardFor, spawnProject, type GuardSpec } from './project-guard.js';
-import { git, latestBase } from './git.js';
-import { KILL_AFTER_MS, OWN_GROUP, endGroup, endTree, takenOver } from './process-group.js';
+import { GitStopped, NoRoomForCopy, clearHalfCopy, copyIsWhole, copyTurn, gitLater, gitRecords, latestBase, makeCopy, type CopyHow } from './git.js';
+import { KILL_AFTER_MS, endGroup, endPid, groupAlive, takenOver } from './process-group.js';
 import { portSettings } from './port-vars.js';
 import { reposOf } from './repos.js';
 import { partsOf, runsAsProduct } from '../board/parts.js';
@@ -36,8 +36,8 @@ export interface BusyPort {
 
 export interface AppStatus extends ProjectApp {
   state: AppState;
-  /** While starting: bringing the copy up to date, the setup command, or the start command. */
-  step?: 'update' | 'setup' | 'start';
+  /** While starting: bringing the copy up to date, making it for the first time, the setup command, or the start command. */
+  step?: 'update' | 'copy' | 'setup' | 'start';
   /** Where it runs: the app's address, or the next free port when the person chose it. */
   address?: string;
   /** When the person last pressed Start: the copy holds main as it was then. */
@@ -127,22 +127,23 @@ export function appCopyDir(bp: BoardPaths, app: ProjectApp): string {
  * Brings squad-kit's copy up to date with the newest main: the work accepted here, and the team's as last fetched.
  * Files the app wrote that git does not track (packages, a local database) stay. A new copy says so: it needs the setup.
  */
-export function updateCopy(root: string, repo: RepoInfo, dir: string): { commit: string; fresh: boolean } {
+export async function updateCopy(root: string, repo: RepoInfo, dir: string, how: CopyHow = {}): Promise<{ commit: string; fresh: boolean }> {
   const src = path.join(root, repo.path);
   const commit = latestBase(src, repo.base, repo.remote || undefined).sha;
-  if (fs.existsSync(path.join(dir, '.git'))) {
-    try {
-      git(dir, ['checkout', '--force', '--detach', commit]);
-      return { commit, fresh: false };
-    } catch {
-      // No longer a working copy: make it again.
+  return copyTurn(dir, async () => {
+    await clearHalfCopy(src, dir, how.signal);
+    if (copyIsWhole(dir)) {
+      try {
+        await gitLater(dir, ['checkout', '--force', '--detach', commit], how.signal ? { signal: how.signal } : {});
+        return { commit, fresh: false };
+      } catch (err) {
+        if (err instanceof GitStopped) throw err;
+        // No longer a working copy: make it again.
+      }
     }
-  }
-  fs.rmSync(dir, { recursive: true, force: true });
-  fs.mkdirSync(path.dirname(dir), { recursive: true });
-  git(src, ['worktree', 'prune'], { allowFail: true });
-  git(src, ['worktree', 'add', '--force', '--detach', dir, commit]);
-  return { commit, fresh: true };
+    await makeCopy(src, dir, ['--force', '--detach'], commit, how);
+    return { commit, fresh: true };
+  });
 }
 
 /** `.env`, `.env.local`, `.env.development` and the like; not the examples a project keeps in git for people to copy. */
@@ -155,21 +156,22 @@ const ENV_EXAMPLE = /\.(example|sample|template|dist)$/;
  * ones it copied.
  */
 /** The project's untracked .env files in a repo, by their paths in it. */
-export function localEnvFiles(src: string): string[] {
+export async function localEnvFiles(src: string): Promise<string[]> {
+  const found = new Set<string>();
   const list = (args: string[]) =>
-    git(src, ['ls-files', '-z', '--others', '--exclude-standard', ...args], { allowFail: true })
-      .split('\0')
-      .filter((f) => f && !f.endsWith('/'));
+    gitRecords(src, ['ls-files', '-z', '--others', '--exclude-standard', ...args], '\0', (f) => {
+      const name = path.basename(f);
+      if (!f.endsWith('/') && ENV_FILE.test(name) && !ENV_EXAMPLE.test(name)) found.add(f);
+    }).catch(() => undefined);
   // Untracked files, and ignored ones with ignored folders (node_modules) folded into one line.
-  return [...new Set([...list([]), ...list(['--ignored', '--directory'])])].filter((f) => {
-    const name = path.basename(f);
-    return ENV_FILE.test(name) && !ENV_EXAMPLE.test(name);
-  });
+  await list([]);
+  await list(['--ignored', '--directory']);
+  return [...found];
 }
 
 /** Copies the .env files, and the local files an engineer named, into squad-kit's own copy that runs the person's own version. */
-export function copyEnvFiles(src: string, dir: string, named: string[] = []): string[] {
-  const files = [...new Set([...localEnvFiles(src), ...named.filter((f) => fs.existsSync(path.join(src, f)))])];
+export async function copyEnvFiles(src: string, dir: string, named: string[] = []): Promise<string[]> {
+  const files = [...new Set([...(await localEnvFiles(src)), ...named.filter((f) => fs.existsSync(path.join(src, f)))])];
   for (const f of files) {
     const to = path.join(dir, f);
     fs.mkdirSync(path.dirname(to), { recursive: true });
@@ -189,13 +191,12 @@ const DEP_FILES = new Set([
 const DEP_NAMES = [/^requirements.*\.txt$/, /\.(cs|fs|vb)proj$/];
 
 /** One short fingerprint of the dependency files at a commit. */
-export function dependencyPrint(dir: string, commit: string): string {
-  const lines = git(dir, ['ls-tree', '-r', commit], { allowFail: true })
-    .split('\n')
-    .filter((l) => {
-      const name = path.basename(l.split('\t')[1] ?? '');
-      return DEP_FILES.has(name) || DEP_NAMES.some((p) => p.test(name));
-    });
+export async function dependencyPrint(dir: string, commit: string): Promise<string> {
+  const lines: string[] = [];
+  await gitRecords(dir, ['ls-tree', '-r', commit], '\n', (l) => {
+    const name = path.basename(l.split('\t')[1] ?? '');
+    if (DEP_FILES.has(name) || DEP_NAMES.some((p) => p.test(name))) lines.push(l);
+  }).catch(() => undefined);
   return createHash('sha1').update(lines.join('\n')).digest('hex').slice(0, 12);
 }
 
@@ -283,36 +284,6 @@ function psField(pid: number, field: 'pgid' | 'ppid'): number | null {
   } catch {
     return null;
   }
-}
-
-/** True while any process of the group runs. */
-function groupAlive(pid: number): boolean {
-  try {
-    process.kill(OWN_GROUP ? -pid : pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function signalPid(pid: number, signal: NodeJS.Signals): void {
-  // Windows has no groups: the whole tree under the shell goes at once.
-  if (process.platform === 'win32') return endTree(pid);
-  try {
-    process.kill(OWN_GROUP ? -pid : pid, signal);
-  } catch {
-    // Already gone.
-  }
-}
-
-/** Stops a process group squad-kit started, from any process: TERM, then KILL when it is still there. */
-export async function endPid(pid: number): Promise<void> {
-  signalPid(pid, 'SIGTERM');
-  const until = Date.now() + KILL_AFTER_MS;
-  while (groupAlive(pid) && Date.now() < until) await sleep(100);
-  if (groupAlive(pid)) signalPid(pid, 'SIGKILL');
-  const gone = Date.now() + 2000;
-  while (groupAlive(pid) && Date.now() < gone) await sleep(100);
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -573,24 +544,28 @@ export class AppRunner {
       if (signal.aborted) return;
       if (!(await this.needReady(need, app, opts))) return this.fail(run, `${need.name} did not start, so ${app.name} cannot work yet. See what ${need.name} says.`);
     }
+    if (signal.aborted) return;
     await this.elsewhereStopped(app, opts);
+    if (signal.aborted) return;
 
     // The newest main, every time: the work accepted since the last Start comes with it.
     let copy: { commit: string; fresh: boolean };
     try {
-      copy = updateCopy(this.bp.root, repo, dir);
+      copy = await updateCopy(this.bp.root, repo, dir, { signal, making: () => (run.step = 'copy') });
     } catch (err) {
+      if (err instanceof NoRoomForCopy) return this.fail(run, err.message);
       return this.fail(run, `squad-kit could not get the newest ${repo.base} ready.`, { detail: (err as Error).message });
     }
     run.commit = copy.commit;
     if (signal.aborted) return;
     const named = (readMeta(this.bp).localFiles ?? []).filter((f) => f.repo === repo.path).map((f) => f.path);
     try {
-      const env = copyEnvFiles(path.join(this.bp.root, repo.path), dir, named);
+      const env = await copyEnvFiles(path.join(this.bp.root, repo.path), dir, named);
       if (env.length) this.keep(app.repo, `Copied from your project folder: ${env.join(', ')}\n`);
     } catch (err) {
       return this.fail(run, "squad-kit could not copy this project's settings into its own copy.", { detail: `Could not copy your .env files: ${(err as Error).message}` });
     }
+    if (signal.aborted) return;
 
     // Something else on the app's port: squad-kit goes around it when the app takes a port setting. Only when it cannot
     // does the person read about it, in plain words. The program is left alone unless they press Stop it and start.
@@ -612,9 +587,12 @@ export class AppRunner {
       }
     }
 
+    if (signal.aborted) return;
+
     // A new copy, or new packages since the last setup: the project's setup first.
     const setup = repo.commands.setup?.trim();
-    const deps = dependencyPrint(dir, copy.commit);
+    const deps = await dependencyPrint(dir, copy.commit);
+    if (signal.aborted) return;
     if (setup && (copy.fresh || this.records()[app.repo]?.setupFor !== deps)) {
       run.step = 'setup';
       this.keep(app.repo, `$ ${setup}\n`);
@@ -626,10 +604,11 @@ export class AppRunner {
       this.record(app.repo, (rec) => (rec.setupFor = deps));
       // A setup can write the same files, like cp .env.example .env.dev: the person's own go back over them.
       try {
-        copyEnvFiles(path.join(this.bp.root, repo.path), dir, named);
+        await copyEnvFiles(path.join(this.bp.root, repo.path), dir, named);
       } catch (err) {
         return this.fail(run, "squad-kit could not copy this project's settings into its own copy.", { detail: `Could not copy your .env files: ${(err as Error).message}` });
       }
+      if (signal.aborted) return;
     }
 
     // A part that runs in Docker gets the one opening compose-run.ts allows, as it does for a story.

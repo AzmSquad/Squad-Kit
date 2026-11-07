@@ -3,11 +3,12 @@ import path from 'node:path';
 import yaml from 'js-yaml';
 import { harnessFile, mergeHarness } from '../board/additions.js';
 import { isPlain } from '../board/shape.js';
+import { writeLog } from '../core/app-log.js';
 import { writeConfigFile } from '../core/config.js';
 import { boardExists, listDecisions, listReleases, listTickets, readMeta, splitTicket, ticketDir, type BoardPaths } from '../board/store.js';
 import { decisionDoc, releaseDoc } from '../board/docs.js';
 import type { Release, Ticket } from '../board/types.js';
-import { commitArgsFor, currentBranch, git, isRepo, latestBase, remotes } from './git.js';
+import { commitArgsFor, currentBranch, git, isRepo, latestBase, remotes, gitLater } from './git.js';
 import { repoFor } from './repos.js';
 import { BREAKDOWN_ID, breakdownDir } from '../board/requirements-paths.js';
 
@@ -204,11 +205,11 @@ export function leaveProjectFiles(bp: BoardPaths, t: Ticket, base: string): stri
 }
 
 /** Commits a ticket's documents on its branch, at a big moment such as "spec and design approved". */
-export function commitTicketDocs(bp: BoardPaths, t: Ticket, moment: string): string | null {
+export async function commitTicketDocs(bp: BoardPaths, t: Ticket, moment: string): Promise<string | null> {
   const paths = stageTicketDocs(bp, t);
   if (!paths.length || !git(t.worktree!, ['diff', '--cached', '--name-only', '--', ...paths], { allowFail: true })) return null;
   // squad-kit's own bookkeeping: the project's commit hooks (tests, linters) are for code, and could wait forever.
-  git(t.worktree!, [...commitArgsFor(t.worktree!), 'commit', '-m', `${t.id}: ${moment}`, '--', ...paths]);
+  await gitLater(t.worktree!, [...commitArgsFor(t.worktree!), 'commit', '-m', `${t.id}: ${moment}`, '--', ...paths]);
   return git(t.worktree!, ['rev-parse', '--short', 'HEAD']);
 }
 
@@ -240,10 +241,7 @@ export function stageReleaseDocs(bp: BoardPaths, dir: string, release: Release, 
   for (const d of listDecisions(bp)) {
     if (ids.has(d.from) || d.id.startsWith('STACK.') || fs.existsSync(into(path.posix.join('decisions', `${d.id}.md`)))) write(into(path.posix.join('decisions', `${d.id}.md`)), decisionDoc(d));
   }
-  for (const sub of ['rules', 'knowledge']) {
-    const from = path.join(bp.squadDir, sub);
-    if (fs.existsSync(from)) fs.cpSync(from, into(sub), { recursive: true });
-  }
+  const teamFiles = mergeTeamFiles(bp, repo, dir, squad, base ?? currentBranch(repo), release.version);
   // Put together with the base's newest copy: one person's release never takes away what a teammate set or added.
   const settingsAt = into('config.yaml');
   const onRemote = remotes(dir).map((r) => git(dir, ['show', `refs/remotes/${r}/${base ?? currentBranch(repo)}:${squad}/config.yaml`], { allowFail: true })).find(Boolean);
@@ -253,7 +251,47 @@ export function stageReleaseDocs(bp: BoardPaths, dir: string, release: Release, 
   const team = mergeHarness(bp, fs.existsSync(atBase) ? fs.readFileSync(atBase, 'utf8') : '');
   if (team) write(atBase, team);
   git(dir, ['add', '-f', '--', squad]);
-  return (settings?.theirsStayed ?? []).map((name) => `A teammate changed ${name} too, so theirs stays, here as well. You can look at it in Settings.`);
+  return [...(settings?.theirsStayed ?? []).map((name) => `A teammate changed ${name} too, so theirs stays, here as well. You can look at it in Settings.`), ...teamFiles];
+}
+
+/**
+ * This computer's rules and knowledge files put together with the base's newest copies, file by file, like the settings:
+ * what only one side changed since this computer last took the base wins. When both did, the team's stays here too, and
+ * this computer's words are kept aside for an engineer. Returns what the release says about it.
+ */
+function mergeTeamFiles(bp: BoardPaths, repo: string, dir: string, squad: string, base: string, version: string): string[] {
+  const said: string[] = [];
+  const newest = remotes(dir).map((r) => `refs/remotes/${r}/${base}`).find((ref) => git(dir, ['rev-parse', '--verify', '-q', ref], { allowFail: true }));
+  for (const sub of ['rules', 'knowledge']) {
+    const from = path.join(bp.squadDir, sub);
+    if (!fs.existsSync(from)) continue;
+    for (const rel of fs.readdirSync(from, { recursive: true, encoding: 'utf8' })) {
+      const here = path.join(from, rel);
+      if (!fs.statSync(here).isFile()) continue;
+      const inRepo = `${squad}/${sub}/${rel.split(path.sep).join('/')}`;
+      // The copy holds this computer's base. A teammate's newer work is only on the remote until the push brings it in.
+      if (newest) git(dir, ['restore', '--source', newest, '--worktree', '--', inRepo], { allowFail: true });
+      const there = path.join(dir, inRepo);
+      const mine = fs.readFileSync(here);
+      const theirs = fs.existsSync(there) ? fs.readFileSync(there) : null;
+      if (theirs?.equals(mine)) continue;
+      const was = git(repo, ['show', `HEAD:${inRepo}`], { allowFail: true }).trim();
+      const unchanged = (b: Buffer) => Boolean(was) && b.toString('utf8').trim() === was;
+      if (!theirs || unchanged(theirs)) {
+        fs.mkdirSync(path.dirname(there), { recursive: true });
+        fs.writeFileSync(there, mine);
+        continue;
+      }
+      fs.writeFileSync(here, theirs);
+      if (unchanged(mine)) continue;
+      const aside = path.join(bp.localDir, 'left-out', version, sub, rel);
+      fs.mkdirSync(path.dirname(aside), { recursive: true });
+      fs.writeFileSync(aside, mine);
+      writeLog({ level: 'warn', text: `${sub}/${rel} changed here and in the team's copy. The team's stays; this computer's is in ${aside}` });
+      said.push(`A teammate changed ${path.basename(rel)} too, so theirs stays, here as well. Yours is saved: an engineer can see where in the log.`);
+    }
+  }
+  return said;
 }
 
 /** The settings in people's words, for the release's log. */

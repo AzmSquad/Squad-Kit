@@ -164,9 +164,9 @@ describe('one app, many projects', () => {
     execSync('git init -q -b main && git add -A && git -c user.name=t -c user.email=t@t commit -q -m first', { cwd: shop });
 
     // The folder browser says so before anyone presses a button.
-    const look = await json<{ look: { title: string; ask?: { kind: string; root: string; name: string } } }>(get(`/api/v1/app/folders?path=${encodeURIComponent(path.join(shop, 'web'))}`));
-    expect(look.look.title).toBe('Part of a bigger project');
-    expect(look.look.ask).toMatchObject({ kind: 'inside-repo', root: shop, name: 'shop' });
+    const look = await json<{ title: string; ask?: { kind: string; root: string; name: string } }>(get(`/api/v1/app/folders/look?path=${encodeURIComponent(path.join(shop, 'web'))}`));
+    expect(look.title).toBe('Part of a bigger project');
+    expect(look.ask).toMatchObject({ kind: 'inside-repo', root: shop, name: 'shop' });
 
     const asked = await call('POST', '/api/v1/app/projects', { folder: path.join(shop, 'web') });
     expect(asked.status).toBe(400);

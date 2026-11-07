@@ -73,13 +73,13 @@ describe('team instructions per step', () => {
     expect(calls.at(-1)!.appendSystemPrompt).toContain('For the Review step:\nCheck every query for the tenant filter.');
   });
 
-  it('shows every core prompt read only, filled in from a real ticket', () => {
+  it('shows every core prompt read only, filled in from a real ticket', async () => {
     for (const role of ['analyst', 'architect', 'builder', 'reviewer', 'tester'] as const) {
-      const core = corePrompts(bp, role);
+      const core = await corePrompts(bp, role);
       expect(core.prompts.map((p) => p.step)).toEqual(STEPS[role].map((s) => s.id));
       for (const p of core.prompts) expect(p.prompt.length).toBeGreaterThan(40);
     }
-    const build = corePrompts(bp, 'builder', 'SK-150').prompts.find((p) => p.step === 'build')!;
+    const build = (await corePrompts(bp, 'builder', 'SK-150')).prompts.find((p) => p.step === 'build')!;
     expect(build.prompt).toContain('Case notes autosave');
     expect(build.prompt).toContain('>> step');
   });
