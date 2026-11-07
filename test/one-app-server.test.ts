@@ -222,7 +222,7 @@ describe('one app, many projects', () => {
   });
 
   it('keeps one limit of tickets at once for every project, in the person’s settings', async () => {
-    expect(await json(get('/api/v1/app/settings'))).toEqual({ parallel: 2, max: 5, running: 0 });
+    expect(await json(get('/api/v1/app/settings'))).toEqual({ parallel: 2, max: 5, running: 0, welcomed: false });
     expect(await json(call('PUT', '/api/v1/app/settings', { parallel: 4 }))).toMatchObject({ parallel: 4 });
     const file = yaml.load(fs.readFileSync(path.join(process.env.SQUAD_KIT_HOME!, 'settings.yaml'), 'utf8')) as { parallel: number };
     expect(file.parallel).toBe(4);

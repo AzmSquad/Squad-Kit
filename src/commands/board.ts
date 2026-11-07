@@ -1,6 +1,5 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { squadHome } from '../core/home.js';
 import kleur from 'kleur';
 import { confirm, input, select, Separator } from '@inquirer/prompts';
 import * as ui from '../ui/index.js';
@@ -60,7 +59,7 @@ import {
 } from '../board/actions.js';
 import { tick } from '../board/engine.js';
 import { squadRunsElsewhere } from '../board/lock.js';
-import { seedDemoBoard } from '../board/demo.js';
+import { demoFolder, seedDemoBoard } from '../board/demo.js';
 import { repoFor } from '../engine/repos.js';
 import { projectApps } from '../board/apps.js';
 import { trackerFor } from '../modules/registry.js';
@@ -1196,13 +1195,7 @@ export interface DemoOptions {
 }
 
 /** Sets up a sample board (and a minimal .squad/ if needed), then opens the console. */
-/**
- * The sample board lives in its own folder on this computer, never in the project this terminal is in: seeding it
- * replaces a board's tickets, decisions and files.
- */
-export function demoFolder(): string {
-  return path.join(squadHome(), 'demo');
-}
+export { demoFolder };
 
 export async function runDemo(opts: DemoOptions): Promise<void> {
   const root = demoFolder();

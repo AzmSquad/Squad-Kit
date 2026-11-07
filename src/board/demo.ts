@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { squadHome } from '../core/home.js';
 import { gitEnv } from '../engine/git.js';
 import { scriptFor } from './scripts.js';
 import { scheduleSquad } from './schedule.js';
@@ -737,6 +738,14 @@ export interface SeedOptions {
 const SAMPLE_SIZE: Record<string, number> = { 'SK-138': 0.8, 'SK-141': 0.45, 'SK-147': 1.3 };
 
 /** Writes a full demo board: tickets in every stage, past releases, decisions and proof images. */
+/**
+ * The sample board lives in its own folder on this computer, never in a project: seeding it replaces a board's tickets,
+ * decisions and files.
+ */
+export function demoFolder(): string {
+  return path.join(squadHome(), 'demo');
+}
+
 export function seedDemoBoard(bp: BoardPaths, opts: SeedOptions = {}): void {
   clearBoard(bp);
   clearDemoRequirements(bp);

@@ -6,6 +6,7 @@ import { useBoard } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { UpdateBanner } from './Restart';
 import { AppUpdate } from './Update';
+import { FirstWin } from './FirstStory';
 import { ProjectWaiting } from './Waiting';
 import { needsYou } from '../lib/waiting';
 import { ChatDock, useChats, useDocked } from './ChatDock';
@@ -168,6 +169,7 @@ export function Shell() {
         </div>
       </main>
       <ChatDock />
+      <FirstWin />
     </div>
   );
 }

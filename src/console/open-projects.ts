@@ -1,8 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { Hono } from 'hono';
-import { SQUAD_DIR, findSquadRoot, type SquadPaths } from '../core/paths.js';
+import { DEFAULT_CONFIG, saveConfig } from '../core/config.js';
+import { SQUAD_DIR, buildPaths, findSquadRoot, type SquadPaths } from '../core/paths.js';
 import { boardExists, boardPaths, listTickets, readMeta, settingsProblem, type BoardPaths } from '../board/store.js';
+import { demoFolder, seedDemoBoard } from '../board/demo.js';
 import { startDemoSquad } from '../board/engine.js';
 import { claimSquad } from '../board/lock.js';
 import { runningConsole, writeConsoleInfo, type ConsoleInfo } from '../board/console-info.js';
@@ -120,6 +122,19 @@ export class OpenProjects {
     const known = this.all().find((p) => p.root === root);
     if (known) return { project: known, did: [], added: false };
     return { ...this.prepareAndOpen(root), added: true };
+  }
+
+  /** Just show me: the sample project, from its own folder. One seeded before stays as it is. */
+  openSample(): OpenProject {
+    const root = demoFolder();
+    const paths = buildPaths(root);
+    if (!fs.existsSync(paths.configFile)) {
+      fs.mkdirSync(paths.squadDir, { recursive: true });
+      saveConfig(paths.configFile, { ...DEFAULT_CONFIG, project: { ...DEFAULT_CONFIG.project, name: 'Case portal' } });
+    }
+    const bp = boardPaths(paths.squadDir);
+    if (!boardExists(bp)) seedDemoBoard(bp);
+    return this.add(root).project;
   }
 
   /** New project: made on disk with what the person gave, and only then its squad starts. */

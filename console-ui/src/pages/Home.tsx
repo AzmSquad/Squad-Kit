@@ -12,6 +12,7 @@ import { SaveTroubleBanner } from '../components/SaveTrouble';
 import { HomeWaiting } from '../components/Waiting';
 import { FolderBrowser, useFolderLook, useFolders } from '../components/FolderBrowser';
 import { NewProject } from '../components/NewProject';
+import { JustShowMe, Welcome, type WelcomeStep } from '../components/Welcome';
 import { BreakdownWaitCard, useAllBreakdownWaits } from '../components/BreakdownWaits';
 import { changeWaits, openChange, testChangeLine, testChangeWaits } from '../lib/waiting';
 
@@ -47,6 +48,20 @@ export function HomePage() {
   // Breakdowns whose Analyst has questions, in every project: the same cards a project's Waiting for you shows.
   const breakdowns = useAllBreakdownWaits();
   const count = items.length + breakdowns.length;
+  // The very first start: the squad, this computer, and what the person has. Going back to it is the empty Home below.
+  const [firstStep, setFirstStep] = useState<WelcomeStep | null>(null);
+  const firstStart = Boolean(projects.data) && list.length === 0 && !projects.data?.welcomed;
+  const welcomeStep = firstStep ?? (firstStart ? 'welcome' : null);
+
+  if (welcomeStep) {
+    return (
+      <>
+        <Welcome step={welcomeStep} onStep={setFirstStep} onNew={() => setCreating(true)} onAdd={() => setAdding(true)} />
+        {adding && <AddProject onClose={() => setAdding(false)} />}
+        {creating && <NewProject onClose={() => setCreating(false)} />}
+      </>
+    );
+  }
 
   return (
     <div className="home">
@@ -91,6 +106,7 @@ export function HomePage() {
                   <b>Add a project you already have</b>
                   <span>Pick its folder: one repo, or a folder with several repos.</span>
                 </button>
+                <JustShowMe />
               </div>
             ) : (
               <div className="pcards">

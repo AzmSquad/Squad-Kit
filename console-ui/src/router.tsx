@@ -54,9 +54,10 @@ const board = createRoute({
   getParentRoute: () => rootRoute,
   path: '/board',
   // `t` is taken by the session token in the URL, so the open ticket uses `ticket`.
-  validateSearch: (s: Record<string, unknown>): { ticket?: string; view?: 'mine' | 'bugs' } => ({
+  validateSearch: (s: Record<string, unknown>): { ticket?: string; view?: 'mine' | 'bugs'; write?: 1 } => ({
     ticket: typeof s.ticket === 'string' && s.ticket ? s.ticket : undefined,
     view: s.view === 'mine' || s.view === 'bugs' ? s.view : undefined,
+    write: s.write === 1 || s.write === '1' ? 1 : undefined,
   }),
   component: BoardPage,
 });

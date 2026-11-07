@@ -1185,6 +1185,16 @@ export interface AppSettings {
   parallel: number;
   max: number;
   running: number;
+  /** The person went past the first start's Welcome, on this computer. */
+  welcomed?: boolean;
+}
+
+/** The first start's "Is your computer ready?" (src/engine/computer-ready.ts). */
+export type ReadyStep = 'install-git' | 'update-git' | 'install-tool' | 'sign-in';
+
+export interface ComputerReady {
+  git: { ok: boolean; step?: ReadyStep };
+  tool: { ok: boolean; label?: string; step?: ReadyStep };
 }
 
 export interface AppProjects extends AppSettings {

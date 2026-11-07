@@ -3,7 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import type { Context, Hono } from 'hono';
 import { SQUAD_DIR } from '../../core/paths.js';
-import { MAX_PARALLEL, parallelLimit, setParallelLimit } from '../../core/settings.js';
+import { MAX_PARALLEL, parallelLimit, setParallelLimit, setWelcomed, welcomed } from '../../core/settings.js';
+import { computerReady } from '../../engine/computer-ready.js';
 import { ticketsRunning } from '../../engine/live.js';
 import { isOwnFolder } from '../../engine/setup.js';
 import { firstLook, type FirstLook } from '../../engine/first-look.js';
@@ -97,7 +98,7 @@ export { act };
 
 export function mountAppApi(app: Hono, opts: { projects: OpenProjects }): void {
   const projects = opts.projects;
-  const settings = () => ({ parallel: parallelLimit(), max: MAX_PARALLEL, running: ticketsRunning() });
+  const settings = () => ({ parallel: parallelLimit(), max: MAX_PARALLEL, running: ticketsRunning(), welcomed: welcomed() });
 
   app.get('/api/v1/app/projects', (c) => c.json({ projects: projects.summaries(), ...settings() }));
 
@@ -111,6 +112,15 @@ export function mountAppApi(app: Hono, opts: { projects: OpenProjects }): void {
       return { ...row, did, added };
     });
   });
+
+  // The first start: is this computer ready, and Just show me, the sample project with no AI and no cost.
+  app.get('/api/v1/app/ready', (c) => act(c, () => computerReady()));
+  app.post('/api/v1/app/sample', (c) =>
+    act(c, () => {
+      const { id } = projects.openSample();
+      return projects.summaries().find((p) => p.id === id);
+    }),
+  );
 
   // New project: the folder, git and the board in one step, from a BRD or an idea.
   app.post('/api/v1/app/projects/new', async (c) => {
@@ -156,9 +166,10 @@ export function mountAppApi(app: Hono, opts: { projects: OpenProjects }): void {
   app.get('/api/v1/app/settings', (c) => c.json(settings()));
 
   app.put('/api/v1/app/settings', async (c) => {
-    const b = await body<{ parallel?: number }>(c);
+    const b = await body<{ parallel?: number; welcomed?: boolean }>(c);
     return act(c, () => {
       if (b.parallel !== undefined) setParallelLimit(Number(b.parallel));
+      if (b.welcomed === true) setWelcomed();
       return settings();
     });
   });

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A first start for new people.** The first time squad-kit opens: meet the squad, a check that this computer is ready with one
+  clear step for what is missing, and What do you have (a BRD or an idea, a project you already have, or Just show me, the sample
+  project with no AI and no cost). In English or Arabic. Then a small checklist on the board follows your first story, and when
+  it merges a page shows what really happened: how long it took, what was checked, and what it cost.
 - **Work in another AI tool.** Copy a prompt from any story, or start a new one, and paste it in a conversation in any AI tool.
   It runs the story by the project's own structure, from where the story is now, and the board shows it at its real step
   whenever you open it. Bring it back at any step. squad-kit trusts only what it ran itself: the story keeps a label on its

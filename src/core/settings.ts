@@ -26,6 +26,15 @@ function writeSettings(patch: Record<string, unknown>): void {
   fs.writeFileSync(settingsFile(), yaml.dump({ ...readSettings(), ...patch }), 'utf8');
 }
 
+/** The person went past the first start's Welcome, on this computer. */
+export function welcomed(): boolean {
+  return readSettings().welcomed === true;
+}
+
+export function setWelcomed(): void {
+  writeSettings({ welcomed: true });
+}
+
 /** How many tickets the squads may work on at once when nobody chose. */
 export const DEFAULT_PARALLEL = 2;
 export const MAX_PARALLEL = 5;

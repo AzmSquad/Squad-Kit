@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { Check, Download, Plus, Search } from 'lucide-react';
@@ -14,6 +14,7 @@ import { changeWaits, openChange } from '../components/ChangeCard';
 import { CardLine, isRunning } from '../components/LiveNow';
 import { DependsTag } from '../components/Depends';
 import { OutsideTag } from '../components/Outside';
+import { FirstStoryGuide } from '../components/FirstStory';
 import { needsYou, testChangeWaits } from '../lib/waiting';
 import { NOT_CHECKED_WHY } from '../lib/gates';
 import { typedDir } from '../lib/lang';
@@ -49,6 +50,12 @@ export function BoardPage() {
     refetchInterval: (q) => (q.state.data?.draft?.status === 'working' ? 2000 : 30_000),
   });
   const draftTag = { working: 'drafting…', done: 'draft ready', failed: 'draft stopped', cancelled: '' }[kept.data?.draft?.status ?? 'cancelled'];
+  // Write your next story, from the first win: the window opens here, and the address forgets it.
+  useEffect(() => {
+    if (!search.write) return;
+    setDialog('new');
+    void navigate({ search: (s) => ({ ...s, write: undefined }), replace: true });
+  }, [search.write, navigate]);
   const view: View = search.view ?? 'all';
   const open = (id: string) => void navigate({ search: (s) => ({ ...s, ticket: id }) });
   const close = () => void navigate({ search: (s) => ({ ...s, ticket: undefined }) });
@@ -125,6 +132,8 @@ export function BoardPage() {
 
       {(data.broken?.length ?? 0) > 0 && <BrokenTickets list={data.broken!} />}
       {(data.brokenRecords?.length ?? 0) > 0 && <BrokenTickets list={data.brokenRecords!} label="Files that could not be read" />}
+
+      <FirstStoryGuide tickets={data.tickets} archived={data.archived ?? []} live={data.meta.engine === 'live'} project={data.meta.project} onOpen={open} />
 
       <div className="board">
         {LANES.map((lane) => {
