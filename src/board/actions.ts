@@ -1,3 +1,4 @@
+import { questionWords } from './schedule.js';
 import {
   addActivity,
   draftRelease,
@@ -356,7 +357,7 @@ export function answerQuestions(bp: BoardPaths, id: string, answers: Record<stri
     t.waiting = null;
     t.live = true;
     t.status = 'Architect is choosing the design';
-    addActivity(t, 'you', `Answered ${t.questions.length} questions`);
+    addActivity(t, 'you', `Answered ${questionWords(t.questions.length)}`);
     scheduleSquad(t, 'plan-write', 2, meta.speed);
     tellLater(t, meta.engine, { kind: 'answered' });
   });
@@ -2263,9 +2264,12 @@ export async function releaseVersion(bp: BoardPaths, version?: string, goOn?: st
 async function sendRelease(bp: BoardPaths, release: Release, from: Map<string, string>, goOn?: string, numberWas?: string): Promise<Release> {
   const meta = readMeta(bp);
   if (!release.notes.trim()) release.notes = composeNotes(bp, release);
-  const tickets = listTickets(bp).filter((t) => release.tickets.includes(t.id));
-  // No gate due, no wait: nothing changes for a project with none.
-  if (meta.engine === 'live' && (release.gateStop || releaseGatesDue(bp))) await gatesBeforeRelease(bp, release, tickets, goOn);
+  let tickets = listTickets(bp).filter((t) => release.tickets.includes(t.id));
+  // No gate due, no wait: nothing changes for a project with none. What the gates wrote on the stories goes out with them.
+  if (meta.engine === 'live' && (release.gateStop || releaseGatesDue(bp))) {
+    await gatesBeforeRelease(bp, release, tickets, goOn);
+    tickets = listTickets(bp).filter((t) => release.tickets.includes(t.id));
+  }
   // Set before it goes out, so the release commit carries the release as the board will keep it.
   release.date = now();
   release.whatsappDraft = [

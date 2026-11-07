@@ -376,3 +376,55 @@ describe('the filter in talks and in runs with no ticket', () => {
     expect(calls).toHaveLength(3);
   });
 });
+
+describe('a story in Arabic: its agents ask in Arabic', () => {
+  it.each([
+    'هل يستطيع الموظف تعديل وقت الدخول بعد حفظه؟',
+    'من يوافق على طلب الزيارة: المدير أم موظف الاستقبال؟',
+    'ما قواعد كلمة المرور للمستخدمين الجدد؟',
+    'هل يظهر سجل الزوار لكل فروع الشركة؟',
+    'ما مفتاح الغرفة الذي يأخذه الزائر؟',
+    'هل تريد إضافة عمود جديد إلى التقرير؟',
+    'كم منفذ بيع لدى الشركة؟',
+  ])('lets a business question through: %s', (text) => {
+    expect(judgeQuestion({ text })).toEqual({ pass: true });
+  });
+
+  it.each([
+    'ما كلمة المرور لقاعدة البيانات؟',
+    'أعطني كلمة السر من فضلك.',
+    'من فضلك أرسل لي مفتاح API.',
+    'هل لديك بيانات الدخول؟',
+    'أحتاج إلى التوكن حتى أكمل.',
+    'أين رمز الدخول؟',
+  ])('refuses a secret: %s', (text) => {
+    expect(judgeQuestion({ text })).toMatchObject({ pass: false, kind: 'not-allowed', what: 'secret' });
+  });
+
+  it("refuses a change to squad-kit's own things", () => {
+    expect(judgeQuestion({ text: 'هل يمكنك تعديل إعدادات squad-kit؟' })).toMatchObject({ pass: false, kind: 'not-allowed', what: 'settings' });
+  });
+
+  it.each([
+    'هل أعدّل ملف الإعدادات أم أنشئ ملفًا جديدًا؟',
+    'أي متغيرات البيئة أستخدم؟',
+    'المنفذ 3000 مشغول، هل أوقف البرنامج؟',
+    'افتح نافذة الأوامر وأخبرني بالنتيجة.',
+    'نفّذ هذا الأمر ثم أخبرني.',
+    'هل أثبّت المتصفح؟',
+    'هل أفتح طلب سحب الآن؟',
+    'ظهر تعارض الدمج، ماذا أفعل؟',
+  ])('sends a technical question back: %s', (text) => {
+    expect(judgeQuestion({ text })).toMatchObject({ pass: false, kind: 'technical' });
+  });
+
+  it('a mark on a letter or a hidden character does not hide a word', () => {
+    expect(judgeQuestion({ text: 'ما كَلِمة المرور؟' })).toMatchObject({ pass: false, what: 'secret' });
+    expect(judgeQuestion({ text: 'ما كلمة\u200b المرور؟' })).toMatchObject({ pass: false, what: 'secret' });
+  });
+
+  it('a reply that only explains is fine, and one that asks for a secret is not', () => {
+    expect(judgeReply('يدخل الموظف كلمة المرور في صفحة الدخول.').pass).toBe(true);
+    expect(judgeReply('أعطني كلمة المرور.').pass).toBe(false);
+  });
+});

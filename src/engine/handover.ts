@@ -1,3 +1,4 @@
+import { questionWords } from '../board/schedule.js';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -433,7 +434,7 @@ export function carryOn(t: Ticket, copy: boolean): { phase?: string; waiting?: W
       return t.gates?.review === 'pass' ? { phase: 'proof', status: 'The Tester takes the screenshots again' } : { phase: 'review', status: 'Reviewer is reading the changes' };
     default:
       if (!t.questions && t.stage === 'tickets') return { phase: 'analyst-read', status: 'Analyst is reading the ticket' };
-      if (open.length) return { waiting: { kind: 'questions', summary: `${t.questions!.length} questions from the Analyst and Architect` }, status: `${open.length} questions for you` };
+      if (open.length) return { waiting: { kind: 'questions', summary: `${questionWords(t.questions!.length)} from the Analyst and Architect` }, status: `${open.length} questions for you` };
       if (!t.story && !t.steps) return { phase: 'plan-write', status: spec ? 'Analyst is writing the spec' : 'Architect is choosing the design' };
       if (spec) return { waiting: { kind: 'spec', summary: 'The spec is ready: is this what you want?' }, status: 'Spec ready for you' };
       if (!t.steps) return { phase: 'plan-write', status: 'Architect is choosing the design' };

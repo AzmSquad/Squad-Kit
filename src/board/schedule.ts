@@ -9,3 +9,8 @@ export function scheduleSquad(ticket: Ticket, phase: string, seconds: number, sp
     ...(index !== undefined ? { index } : {}),
   };
 }
+
+/** "1 question", "3 questions". */
+export function questionWords(n: number): string {
+  return `${n} question${n === 1 ? '' : 's'}`;
+}

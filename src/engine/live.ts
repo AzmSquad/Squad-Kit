@@ -1,3 +1,4 @@
+import { questionWords } from '../board/schedule.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
@@ -2134,10 +2135,10 @@ export class LiveSquad {
       });
       t.stage = 'specs';
       t.live = false;
-      t.status = `${t.questions.length} questions for you`;
-      t.waiting = { kind: 'questions', summary: `${t.questions.length} questions from the Analyst and Architect` };
+      t.status = `${questionWords(t.questions.length)} for you`;
+      t.waiting = { kind: 'questions', summary: `${questionWords(t.questions.length)} from the Analyst and Architect` };
       t.squad = null;
-      addActivity(t, 'analyst', `Asked ${t.questions.length} questions`);
+      addActivity(t, 'analyst', `Asked ${questionWords(t.questions.length)}`);
     });
   }
 

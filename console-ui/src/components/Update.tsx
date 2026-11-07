@@ -70,7 +70,7 @@ function when(iso: string): string {
   const d = new Date(iso);
   const day = (x: Date) => x.toDateString();
   const yesterday = new Date(Date.now() - 86_400_000);
-  const date = day(d) === day(new Date()) ? 'Today' : day(d) === day(yesterday) ? 'Yesterday' : d.toLocaleDateString([], { day: 'numeric', month: 'short' });
+  const date = day(d) === day(new Date()) ? 'Today' : day(d) === day(yesterday) ? 'Yesterday' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
   return `${date} at ${clock(iso)}`;
 }
 

@@ -378,6 +378,23 @@ export const DRAFT_SCHEMA = {
 
 const PLAIN = 'Write for a project manager who may not be a developer: plain words, short sentences, no jargon.';
 
+/** True when most of the letters a person wrote in the ticket are Arabic. */
+export function writtenInArabic(t: Pick<Ticket, 'title' | 'ask'>): boolean {
+  const letters = `${t.title} ${t.ask ?? ''}`.replace(/[^\p{L}]/gu, '');
+  const arabic = letters.replace(/[^\u0600-\u06ff\u0750-\u077f\ufb50-\ufdff\ufe70-\ufeff]/g, '');
+  return letters.length > 0 && arabic.length * 2 > letters.length;
+}
+
+/**
+ * A person reads what the agents write, so it comes in the language they wrote the ticket in. Empty for a ticket in
+ * English, which is what the agents write anyway.
+ */
+export function theirLanguage(t: Pick<Ticket, 'title' | 'ask'>): string {
+  return writtenInArabic(t)
+    ? '\nThe person wrote this ticket in Arabic, so write in Arabic everything a person reads: questions and their options, summaries, the story, every "done when", the release note, the decision with its options and why, the steps, your notes, your findings and your answers to checklists. Keep code, file names, page addresses, commands and commit messages in English.'
+    : '';
+}
+
 /** The rule every "done when" example follows, for the Analyst and the Spec writer. */
 export const EXAMPLES_FIT =
   'Each example in a "done when" must follow every other rule of the story: a date on an open day, a time inside opening hours, an amount under the limit, and so on.';
@@ -471,7 +488,7 @@ export function ticketContext(t: Ticket): string {
     : '';
   const keep = brief ? '\nKeep every acceptance criterion, follow every business rule and handle every edge case the person wrote there.' : '';
   const text = asData('The ticket as it was written', `Title: ${t.title}\nWhat was asked:\n${t.ask}${brief}`);
-  return `Ticket ${t.id}: ${t.kind === 'bug' ? 'a bug report.' : 'a feature request.'}\n${text}${keep}${files}${notesText(t.notes ?? [])}`;
+  return `Ticket ${t.id}: ${t.kind === 'bug' ? 'a bug report.' : 'a feature request.'}\n${text}${keep}${files}${notesText(t.notes ?? [])}${theirLanguage(t)}`;
 }
 
 /** Another open ticket on the board, for the Analyst and the Architect: what it is, where it is, and what its branch changed. */
@@ -744,7 +761,7 @@ ${DEPENDS_RULE}
 - releaseNote: one line for release notes, like "**Dark mode.** Switch the dashboard to dark."
 - commands: only if the project has no way yet to set up, test, build or start it, or this ticket changes that.
   For a new project, choose simple, common tools and give every command, including start and url.${repo}${testLine(t, meta)}${openTicketsText(others, 'architect')}
-${PLAIN}`;
+${PLAIN}${theirLanguage(t)}`;
 }
 
 const NO_CODE_WORDS = `\n  This project has no code yet, so this ticket picks its technology. Choose it yourself, simple and common, and never ask the person: make it the decision (the language, the framework and where the data is kept), so engineers can see it. The person may have no developer tools, so pick what installs with no compiler: no package that builds native code, and where the language has a built-in way to keep data, like node:sqlite in Node 22, use that.`;
@@ -790,7 +807,7 @@ export function specPrompt(t: Ticket, change?: string, fromChat = false, others?
 - criteria: 2 to 5 "done when" checks in Given / When / Then form. Each must be testable, in the person's words.
   ${EXAMPLES_FIT}
 - releaseNote: one line for release notes, like "**Dark mode.** Switch the dashboard to dark."${openTicketsText(others, 'analyst')}
-${PLAIN}`;
+${PLAIN}${theirLanguage(t)}`;
 }
 
 export function designPrompt(t: Ticket, change?: string, meta?: BoardMeta, fromChat = false, others?: OpenTicket[]): string {
@@ -819,7 +836,7 @@ ${DEPENDS_RULE}
   For a new project, choose simple, common tools and give every command, including start and url.${repo}${testLine(t, meta)}
 ${MOCKUP_RULE}
 ${askRule(t)}${openTicketsText(others, 'architect')}
-${PLAIN}`;
+${PLAIN}${theirLanguage(t)}`;
 }
 
 const DECISION_LINKS = `  area: one of ${DECISION_AREAS.join(', ')}. replaces: only if it changes a saved decision, that decision's id
@@ -1142,7 +1159,7 @@ by the answer, and a note for a project manager like "Asked for the sale price o
 Never quote raw data in the note. A "done when" the API can show is never offScreen.
 ` : ''}Never wait for the clock. Do not sleep or pause to let a booking end, a day pass or a timer run out: when a part needs
 time to pass, it is one of those parts that cannot be shown.
-Never ask the person anything technical. Do not change project files: squad-kit puts back anything changed.${notesText((t.notes ?? []).filter((n) => n.kind !== 'criterion'))}${rulesText(ctx)}
+Never ask the person anything technical. Do not change project files: squad-kit puts back anything changed.${theirLanguage(t)}${notesText((t.notes ?? []).filter((n) => n.kind !== 'criterion'))}${rulesText(ctx)}
 ${LOOK}`;
 }
 
@@ -1253,7 +1270,7 @@ In checks, one for each "done when" above, whatever the number of its pictures:
   the app has none yet." With no picture, only the second part.
 - noChange: true when the "done when" itself says the screen stays as it was (looks the same as before, unchanged, as
   today, still shows ...), else false. For those, a picture the same as the one from before is the proof, not a fault:
-  judge what it shows.`;
+  judge what it shows.${theirLanguage(t)}`;
 }
 
 /** The screenshots show a "done when" does not work: the Builder fixes it, told what the pictures show. */
@@ -1556,7 +1573,7 @@ ${stepList(t.steps ?? []) || '(no steps yet)'}
   its words exactly), "changed" when the Builder must redo it, "new" for a step to add. Leave out a step that is no
   longer needed. Change as little as you can: the Builder redoes only the changed and new steps.
 - summary: one or two plain sentences on what changes in the design, and why.
-${PLAIN}
+${PLAIN}${theirLanguage(t)}
 ${LOOK}`;
 }
 

@@ -89,7 +89,7 @@ const ENDS: { step: TimedStep; who: AgentName | 'squad'; by: Activity['who'][]; 
 
 /** What the person did after a step, shown beside it. */
 const AFTER: Partial<Record<TimedStep, { re: RegExp; who: Activity['who'][]; note: string }[]>> = {
-  questions: [{ re: /^Answered \d+ questions/, who: ['you'], note: 'you answered' }],
+  questions: [{ re: /^Answered \d+ questions?/, who: ['you'], note: 'you answered' }],
   spec: [{ re: /^Approved the spec/, who: ['you'], note: 'you approved' }],
   design: [
     { re: /^Approved the (design|plan)/, who: ['you'], note: 'you approved' },

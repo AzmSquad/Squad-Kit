@@ -91,6 +91,13 @@ export function firstWinOf(tickets: Ticket[], archived: Ticket[], now = Date.now
   return at && now - at < DAY_MS ? t : null;
 }
 
+/** Arabic counts differently: one and two have their own words, three to ten take the plural. */
+export function arabicCount(n: number, one: string, two: string, some: string): string {
+  if (n === 1) return one;
+  if (n === 2) return two;
+  return `${n} ${n <= 10 ? some : one}`;
+}
+
 export interface WinStats {
   minutes: number;
   /** How many "done when" passed squad-kit's own proof. None when it did not make one. */

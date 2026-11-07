@@ -1044,6 +1044,16 @@ describe('before release', () => {
     expect(r.gateStop).toBeUndefined();
   });
 
+  it('what a gate wrote on the story goes out in the release, so its file is clean after', async () => {
+    const version = await ready();
+    gate('Sign off', 'exit 0', { when: 'release', state: 'on' });
+    const r = await actions.releaseVersion(bp, version);
+    expect(r.status).toBe('released');
+    expect(readTicket(bp, 'AP-1')!.added?.at(-1)?.name).toBe('Sign off');
+    expect(sh('git show main:.squad/tickets/AP-1/ticket.md')).toContain('Sign off');
+    expect(sh('git status --porcelain -- .squad/tickets/AP-1')).toBe('');
+  });
+
   it('Try first and warn only say so on the story, and the release goes out', async () => {
     const version = await ready();
     gate('Soft', 'exit 1', { when: 'release' });

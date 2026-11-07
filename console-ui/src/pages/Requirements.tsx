@@ -509,7 +509,7 @@ function whoWords(name: string, me: string | undefined): string {
 
 function dayWords(iso: string): string {
   const d = new Date(iso);
-  return d.toDateString() === new Date().toDateString() ? 'today' : `on ${d.toLocaleDateString([], { day: 'numeric', month: 'short' })}`;
+  return d.toDateString() === new Date().toDateString() ? 'today' : `on ${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`;
 }
 
 /** Where it comes from, its size, the estimate, and links to what was decided and left out. */

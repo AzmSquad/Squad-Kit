@@ -239,12 +239,12 @@ export function DraftNote({ onClear }: { onClear(): void }) {
 }
 
 export function clock(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+  return new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
 export function dateShort(iso?: string): string {
   if (!iso) return '';
-  return new Date(iso).toLocaleDateString([], { day: 'numeric', month: 'short' });
+  return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 }
 
 export function ago(iso: string): string {

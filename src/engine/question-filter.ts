@@ -77,7 +77,7 @@ export function readable(text: string): string {
 /** The sentences of a text: a check reads each one on its own, so words from two sentences never make one ask. */
 function sentences(text: string): string[] {
   return text
-    .split(/(?<=[.!?])\s+|\n+/)
+    .split(/(?<=[.!?؟])\s+|\n+/)
     .map((s) => s.trim())
     .filter(Boolean);
 }
@@ -183,6 +183,23 @@ function asksForSecret(s: string): boolean {
   return false;
 }
 
+/*
+ * The same checks in Arabic, for a story written in Arabic: its agents ask in Arabic. There is no word boundary around
+ * Arabic letters here, so a word is found with what joins to it ("وكلمة المرور"). The marks on letters are gone by now
+ * (readable), so these are written without them. Each needs its own words, so a business question passes.
+ */
+
+/** A secret value. A room's key or a password's rules are not: the words right after the ask are the secret itself. */
+const AR_SECRET = '(?:ال)?(?:كلم(?:ة|ات) (?:ال)?(?:مرور|سر)|رقم (?:ال)?سري|رمز (?:ال)?(?:دخول|سري|وصول)|مفتاح (?:ال)?(?:API|واجهة|وصول|دخول|سري)|توكن|بيانات (?:ال)?(?:دخول|اعتماد)|API[- ]?key|token|password)';
+const AR_GIVE = '(?:^|من فضلك\\s+|رجاء\\s+|يرجى\\s+|هل يمكنك\\s+|هل تستطيع\\s+|أرجو\\s+)(?:أعطني|أعطنا|أرسل|زودني|زودنا|شارك|الصق|أدخل|اكتب|قدم|انسخ|أخبرني|إعطائي|إرسال|تزويدي|تزويدنا|مشاركة)(?:\\s+(?:لي|لنا|إلي|إلينا|معي|معنا|ب))?\\s*';
+const AR_HAVE = '(?:هل لديك|هل عندك|هل تعرف|هل تملك|أحتاج(?:\\s+إلى)?|نحتاج(?:\\s+إلى)?|أريد|نريد)\\s+';
+const AR_WHAT = '(?:ما هي|ما هو|ما|أين هي|أين هو|أين)\\s+';
+const AR_ASKS_SECRET = new RegExp(`(?:${AR_GIVE}|${AR_HAVE}|${AR_WHAT})${AR_SECRET}`);
+
+/** Asks to change something. Read together with squad-kit's own things, so "other" (the same letters as "change") does no harm. */
+const AR_CHANGE = /(?:غير|عدل|حدث|أضف|احذف|أزل|بدل|فعل|عطل|اسمح|ارفع|افتح|اكتب في|تغيير|تعديل|تحديث|إضافة|حذف|تفعيل|تعطيل)/;
+const AR_SQUAD_THINGS = /(?:إعدادات|ملفات|مجلد|قواعد|فحوصات|حدود|صلاحيات|حارس)\s+squad-?kit/i;
+
 /**
  * What a text asks the person to do that nobody may ask of them, or null. In a question every sentence counts; in a
  * reply in a talk (`reply`) only what it asks the person to do, never what it only explains.
@@ -190,7 +207,8 @@ function asksForSecret(s: string): boolean {
 function notAllowedIn(text: string, reply: boolean): { what: NotAllowed; why: string } | null {
   for (const s of sentences(text)) {
     const asked = ASKED.test(s);
-    if (asksForSecret(s)) return { what: 'secret', why: 'asks the person for a secret' };
+    if (asksForSecret(s) || AR_ASKS_SECRET.test(s)) return { what: 'secret', why: 'asks the person for a secret' };
+    if (AR_CHANGE.test(s) && AR_SQUAD_THINGS.test(s)) return { what: 'settings', why: "asks the person to change squad-kit's settings or protected files" };
     const changes = CHANGE.test(s) && (!reply || asked);
     if (changes && SQUAD_THINGS.some((re) => re.test(s))) return { what: 'settings', why: "asks the person to change squad-kit's settings or protected files" };
     if (changes && asked && SETTINGS_PLACE.test(s)) return { what: 'settings', why: "asks the person to change squad-kit's settings" };
@@ -228,6 +246,14 @@ const TECHNICAL: RegExp[] = [
   // The agent's own tools and git ("stash items in a wishlist" is the business's own).
   /\bmcp\b|\bi_am_stuck\b/i,
   /\bgit\b|\bpull request\b|\bgit stash\b|\bstash(ed|ing)? ((the|my|your|these|those|its|all|local|uncommitted) )?(changes|work|edits)\b|\bmerge conflict\b|\bcommit (the|these|my|this) changes\b/i,
+  // The same in Arabic ("القاعدة" alone or "المنفذ" alone can be the business's own: each here is about the computer).
+  /مل(?:ف|فات) (?:ال)?(?:إعدادات|تكوين)|متغير(?:ات)? (?:ال)?بيئة/,
+  /(?:رقم )?(?:ال)?منفذ \d{2,5}|رقم (?:ال)?منفذ|خادم (?:ال)?(?:تطوير|ويب)|(?:ال)?عملية الجارية/,
+  /صلاحيات (?:ال)?مل(?:ف|فات)|صلاحية (?:ال)?ملف|تم رفض الإذن/,
+  /(?:نافذة|سطر|موجه) (?:ال)?أوامر|(?:في |إلى |من )(?:ال)?طرفية/,
+  /(?:شغل|نفذ|اكتب|الصق|تشغيل|تنفيذ)\s+(?:هذا\s+|هذه\s+)?(?:ال)?(?:أمر|أوامر|سكربت|برنامج النصي)/,
+  /(?:ثبت|تثبيت|حدث|تحديث)\s+(?:ال)?(?:متصفح|حزم(?:ة)?|مكتب(?:ة|ات)|إضافة|أداة|حزمة)/,
+  /طلب(?:ات)? (?:ال)?سحب|تعارض (?:ال)?دمج|مستودع (?:ال)?كود|(?:ال)?فرع (?:الرئيسي )?في (?:ال)?مستودع/,
 ];
 
 /** The text an agent shows the person with a question, in one piece: the question, its choices, why, where from, what it changes. */

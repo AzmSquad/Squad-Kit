@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { Ticket } from '../console-ui/src/api/types.js';
-import { firstWinOf, guideHint, guideStep, readLang, storyToGuide, winStats } from '../console-ui/src/lib/first-story.js';
+import { arabicCount, firstWinOf, guideHint, guideStep, readLang, storyToGuide, winStats } from '../console-ui/src/lib/first-story.js';
 
 const seen = vi.hoisted(() => ({ git: '2.45.0' as string | null, tools: [] as { name: string; label: string; ready: () => boolean }[], login: true }));
 
@@ -180,6 +180,15 @@ describe('the first win', () => {
 });
 
 describe('the language of the first start', () => {
+  it('counts the way Arabic counts', () => {
+    const minutes = (n: number) => arabicCount(n, 'دقيقة', 'دقيقتان', 'دقائق');
+    expect(minutes(1)).toBe('دقيقة');
+    expect(minutes(2)).toBe('دقيقتان');
+    expect(minutes(4)).toBe('4 دقائق');
+    expect(minutes(10)).toBe('10 دقائق');
+    expect(minutes(11)).toBe('11 دقيقة');
+  });
+
   it('with no storage and no browser, English', () => {
     expect(readLang()).toBe('en');
   });

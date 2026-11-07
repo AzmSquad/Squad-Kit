@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The squad writes in your language.** A story asked in Arabic gets its questions, spec, design, notes and proof in Arabic. Code,
+  file names and commands stay in English. The check that keeps technical questions and requests for passwords away from you
+  reads Arabic too.
 - **A first start for new people.** The first time squad-kit opens: meet the squad, a check that this computer is ready with one
   clear step for what is missing, and What do you have (a BRD or an idea, a project you already have, or Just show me, the sample
   project with no AI and no cost). In English or Arabic. Then a small checklist on the board follows your first story, and when

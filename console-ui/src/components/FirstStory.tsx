@@ -3,7 +3,7 @@ import { useNavigate } from '@tanstack/react-router';
 import { Check, CircleCheck, X } from 'lucide-react';
 import type { Ticket } from '../api/types';
 import { useAct, useApps, useBoard } from '../lib/data';
-import { firstWinOf, guideHint, guideStep, keep, kept, readLang, storyToGuide, winStats, type GuideHint, type Lang } from '../lib/first-story';
+import { arabicCount, firstWinOf, guideHint, guideStep, keep, kept, readLang, storyToGuide, winStats, type GuideHint, type Lang } from '../lib/first-story';
 import { Written } from './ui';
 
 /**
@@ -104,14 +104,14 @@ const WIN: Record<Lang, { head: string; sub: (title: string) => [string, string]
     head: 'قصتك الأولى اكتملت.',
     sub: () => ['«', '» تعمل الآن في تطبيقك. هذا ما فعله فريقك.'],
     took: 'من فكرتك إلى برنامج يعمل',
-    doneWhen: 'شرط إنجاز تم التحقق منه',
-    tests: 'اختبارًا آليًا ناجحًا',
+    doneWhen: 'شروط الإنجاز التي تم التحقق منها',
+    tests: 'اختبارات آلية ناجحة',
     cost: 'من استخدام الذكاء الاصطناعي',
     next: 'اكتب قصتك التالية',
     app: 'افتح تطبيقك',
     close: 'إغلاق',
     of: 'من',
-    time: (m) => (m < 60 ? `${m} دقيقة` : m < 2880 ? `${Math.round(m / 60)} ساعة` : `${Math.round(m / 1440)} يوم`),
+    time: (m) => (m < 60 ? arabicCount(m, 'دقيقة', 'دقيقتان', 'دقائق') : m < 2880 ? arabicCount(Math.round(m / 60), 'ساعة', 'ساعتان', 'ساعات') : arabicCount(Math.round(m / 1440), 'يوم', 'يومان', 'أيام')),
   },
 };
 
