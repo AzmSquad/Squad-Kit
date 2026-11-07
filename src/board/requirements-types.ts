@@ -95,6 +95,8 @@ export interface BreakdownStory {
   /** Story keys it needs merged first. */
   dependsOn: string[];
   ref?: BrdRef;
+  /** squad-kit's own first story on a project with no code (board/first-story.ts). */
+  setsUp?: boolean;
   /** The ticket it became when it started (RO-24). */
   ticket?: string;
   tracker?: TrackerLink;

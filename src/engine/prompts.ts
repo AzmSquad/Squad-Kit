@@ -108,6 +108,9 @@ export const BLUEPRINT_SCHEMA = {
   required: ['map', 'stack', 'patterns'],
 };
 
+/** The first read after a project that had no code got some: it also says what runs. */
+export const FIRST_BLUEPRINT_SCHEMA = { ...BLUEPRINT_SCHEMA, properties: { ...BLUEPRINT_SCHEMA.properties, runs: RUNS, summary: STR, users: STR } };
+
 export const TECH_DECISION_SCHEMA = {
   type: 'object',
   properties: {
@@ -584,13 +587,7 @@ Produce:
   When the product has several parts that run by themselves, each of those gets its own box, named as in runs.
 - links: how the parts connect: from and to are part ids, label is a word or two, like "uses", "calls", "stores in"
   or "checks".
-- runs: what runs when the whole product is up. Each part that starts by itself (a web app, an API, a worker, a PDF
-  service), and each service they share (a database, Redis, a queue). Look in compose files, launch settings, config
-  examples and how the code connects, so no service is missed. A library, a folder of tests or an old app another part
-  replaced is not one. For each: id, a short word like "api"; name, a plain name like "Web app" or "Database"; ${nested.length ? 'repo, the folder of its repo, exactly as in the list above' : 'repo, "."'};
-  folder, only when several parts share that repo; needs, the ids of what it cannot run without, and nothing from
-  another product that only sits in the same folder; url, where it answers when it runs, like http://localhost:5180,
-  when the project's files show it; shared, true for a service, which has no repo.
+${runsWords(nested.length ? 'repo, the folder of its repo, exactly as in the list above' : 'repo, "."')}
 If the folder has no real code yet, leave map, decisions, commands, users, can, worth, parts, links and runs empty. The .squad
 folder is squad-kit's own and says nothing about the project. Choose no technology now: you pick it yourself when the
 first story is planned. Give ideas only for what the person said they want to build.
@@ -600,7 +597,18 @@ ${LOOK}`;
 }
 
 /** The Architect reads the code as it is now: the project map, why each technology is there, and its patterns. */
-export function blueprintPrompt(meta: BoardMeta, decisions: Decision[], tech: string[]): string {
+/** How the Architect says what runs when the whole product is up. */
+function runsWords(repo: string): string {
+  return `- runs: what runs when the whole product is up. Each part that starts by itself (a web app, an API, a worker, a PDF
+  service), and each service they share (a database, Redis, a queue). Look in compose files, launch settings, config
+  examples and how the code connects, so no service is missed. A library, a folder of tests or an old app another part
+  replaced is not one. For each: id, a short word like "api"; name, a plain name like "Web app" or "Database"; ${repo};
+  folder, only when several parts share that repo; needs, the ids of what it cannot run without, and nothing from
+  another product that only sits in the same folder; url, where it answers when it runs, like http://localhost:5180,
+  when the project's files show it; shared, true for a service, which has no repo.`;
+}
+
+export function blueprintPrompt(meta: BoardMeta, decisions: Decision[], tech: string[], findRuns = false): string {
   const saved = decisions.filter((d) => !d.replacedBy).map((d) => `- ${d.id}: ${d.title}. Chosen: ${d.chosen}`).join('\n') || '- none yet';
   return `You are the Architect of a software squad. Read the project's code as it is now on its main branch.
 Look at the files and folders. Do not change anything.${meta.repos?.length ? `\nThe code repos: ${meta.repos.map((r) => r.path).join(', ')}.` : ''}
@@ -622,7 +630,7 @@ Produce:
   and why. where: up to 4 real file or folder paths that show it. decision: the saved decision it comes from, if any.
 - parts and links: 3 to 8 parts of the code for a picture of how it fits together, in the order a request flows (who
   uses it first as kind people, tests last as kind tests), each with id (a short word), name (plain), what (a few
-  words) and files (up to 3 real paths); and links between them by id, each labelled with a word or two like "calls".
+  words) and files (up to 3 real paths); and links between them by id, each labelled with a word or two like "calls".${findRuns ? `\n${runsWords('repo, "."')}\n- summary: what the product is, in one sentence, in the words of the people who use it.\n- users: who uses it and how they get in, in one or two sentences, like "Office staff who book rooms. There are no accounts."` : ''}
 Only what you can see in the code. ${PLAIN}
 ${LOOK}`;
 }
@@ -727,7 +735,7 @@ export function planPrompt(t: Ticket, change?: string, meta?: BoardMeta, others?
 - criteria: 2 to 5 "done when" checks in Given / When / Then form. Each must be testable. ${EXAMPLES_FIT}
 - decision: only if this ticket makes a technical choice later tickets must follow. Give 2 options you considered,
   mark the chosen one, and say why in plain words tied to the person's answers. If the client forces a technology,
-  check it against the business needs and write the result in clientCheck ("no conflict" or the conflict).${firstTechnology(meta)}
+  check it against the business needs and write the result in clientCheck ("no conflict" or the conflict).${firstTechnology(meta, t)}
 ${DECISION_LINKS}
 ${DEPENDS_RULE}
 - steps: 3 to 7 small steps in order, one sentence each. The last step writes the tests.
@@ -739,11 +747,15 @@ ${DEPENDS_RULE}
 ${PLAIN}`;
 }
 
+const NO_CODE_WORDS = `\n  This project has no code yet, so this ticket picks its technology. Choose it yourself, simple and common, and never ask the person: make it the decision (the language, the framework and where the data is kept), so engineers can see it. The person may have no developer tools, so pick what installs with no compiler: no package that builds native code, and where the language has a built-in way to keep data, like node:sqlite in Node 22, use that.`;
+
+/** squad-kit's own first story: a first version every other story builds on (board/first-story.ts). */
+const SET_UP_WORDS = `\n  This story sets up the product, and every other story waits for it. The whole document says what the product must do, so pick tools that fit all of it, and build none of its features now: only a first version that starts, with its tests. All the code stays in this one repo. One part is best, as most products are one program. Only when the document clearly needs parts that run by themselves, like a web app and an API, does each get its own folder. Then a package.json in the top folder holds the scripts dev, test and build, whatever the parts are written in, and each works from there for all of them, and installing in the top folder installs them all, because squad-kit looks for them there. Write in the README.md the full address a person opens, like http://localhost:5173.`;
+
 /** A project with no code: the Architect picks the technology itself now, and it is saved as a decision engineers can see. */
-function firstTechnology(meta?: BoardMeta): string {
-  return meta?.scan?.empty
-    ? `\n  This project has no code yet, so this ticket picks its technology. Choose it yourself, simple and common, and never ask the person: make it the decision (the language, the framework and where the data is kept), so engineers can see it. The person may have no developer tools, so pick what installs with no compiler: no package that builds native code, and where the language has a built-in way to keep data, like node:sqlite in Node 22, use that.`
-    : '';
+function firstTechnology(meta?: BoardMeta, t?: Ticket): string {
+  if (t?.setsUp) return `${NO_CODE_WORDS}${SET_UP_WORDS}`;
+  return meta?.scan?.empty ? NO_CODE_WORDS : '';
 }
 
 /**
@@ -797,7 +809,7 @@ ${doneWhen(t)}
 
 - decision: only if this ticket makes a technical choice later tickets must follow. Give 2 options you considered,
   mark the chosen one, and say why in plain words tied to the spec. If the client forces a technology,
-  check it against the business needs and write the result in clientCheck ("no conflict" or the conflict).${firstTechnology(meta)}
+  check it against the business needs and write the result in clientCheck ("no conflict" or the conflict).${firstTechnology(meta, t)}
 ${DECISION_LINKS}
 ${DEPENDS_RULE}
 - steps: 3 to 7 small steps in order, one sentence each. The last step writes the tests.

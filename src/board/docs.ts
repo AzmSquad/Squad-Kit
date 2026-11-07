@@ -120,6 +120,7 @@ const HEADER_KEYS = [
   'severity',
   'pr',
   'mergedAt',
+  'setsUp',
   'brief',
   'mockup',
   'changeOf',

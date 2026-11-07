@@ -19,6 +19,7 @@ import {
 } from '../board/requirements.js';
 import { SKIP_CHOICE, breakdownStopped, findLoop, nextDecidedId, usualReadSeconds } from '../board/requirements-actions.js';
 import { DocumentError, prepareText, textParts } from '../board/requirements-text.js';
+import { withFirstStory, withoutFirstStory } from '../board/first-story.js';
 import { addRun, type UsageKey } from '../board/usage.js';
 import { StepError, explainError } from '../board/problem.js';
 import { writeLog } from '../core/app-log.js';
@@ -420,6 +421,7 @@ async function draftStep(ctx: Ctx, b0: Breakdown): Promise<boolean> {
     });
   }
   const b = updateBreakdown(ctx.bp, ctx.id, (x) => {
+    withFirstStory(ctx.bp, x);
     x.status = 'ready';
     delete x.error;
   });
@@ -551,7 +553,7 @@ async function redoStep(ctx: Ctx, b: Breakdown, job: BreakdownJob): Promise<bool
   const level = target?.level;
   const schema = whole ? B.WHOLE_REDO_SCHEMA : level === 'epic' ? B.EPIC_REDO_SCHEMA : level === 'feature' ? B.FEATURE_REDO_SCHEMA : B.STORY_REDO_SCHEMA;
   setNow(ctx, `Redoing ${whole ? 'the breakdown' : target!.item.key}`);
-  const r = await ask(ctx, { step: 'spec', prompt: B.redoPrompt(ctx.project, b, target?.item ?? null, job.ask ?? '', documentFiles(ctx.bp, b), Boolean(session)), schema, ...(session ? { resume: session } : {}), timeoutMs: BRD_WRITE_MS });
+  const r = await ask(ctx, { step: 'spec', prompt: B.redoPrompt(ctx.project, whole ? withoutFirstStory(b) : b, target?.item ?? null, job.ask ?? '', documentFiles(ctx.bp, b), Boolean(session)), schema, ...(session ? { resume: session } : {}), timeoutMs: BRD_WRITE_MS });
   const out = r.structured as { story?: B.StoryOut; feature?: B.FeatureOut; epic?: B.EpicOut; epics?: B.EpicOut[]; leftOut?: B.OutlineAnswer['leftOut']; summary?: string; decided?: B.DecidedOut[] };
   let cut = 0;
   let kept: BreakdownStory[] = [];
@@ -599,6 +601,7 @@ async function redoStep(ctx: Ctx, b: Breakdown, job: BreakdownJob): Promise<bool
     });
     cut = cutLoops(x);
     addDecided(x, out.decided, m.map, () => 'analyst');
+    withFirstStory(ctx.bp, x);
   });
   updateBreakdownState(ctx.bp, ctx.id, (s) => {
     s.job = { step: 'redo', status: 'done', item: job.item, ...(job.ask ? { ask: job.ask } : {}) };

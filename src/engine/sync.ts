@@ -9,6 +9,7 @@ import { MergeClash, currentBranch, git, mergeIntoBase, moveBase, netGit, remote
 import { projectRoot } from './live.js';
 import { filesMoved, repoFor } from './repos.js';
 import { overviewAfterMerge } from '../board/overview.js';
+import { firstCodeMerged } from '../board/first-story.js';
 import { mergeWait } from '../board/auto.js';
 import { clearStaleStop } from '../board/stale-stop.js';
 
@@ -395,6 +396,7 @@ export async function recheckMerge(bp: BoardPaths, id: string): Promise<'merged'
 export function mapAfterMerge(bp: BoardPaths): void {
   // The overview, the project's home, is brought up to date after every merged ticket.
   overviewAfterMerge(bp);
+  firstCodeMerged(bp);
   const meta = readMeta(bp);
   if (meta.blueprint?.status === 'done' && !filesMoved(projectRoot(bp), meta, meta.blueprint, bp.squadDir)) return;
   codeChanged(bp);

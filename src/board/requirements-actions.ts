@@ -36,6 +36,7 @@ import {
 } from './requirements.js';
 import { DocumentError, kindOf, prepareText, type PreparedText } from './requirements-text.js';
 import { isMerged } from './depends.js';
+import { withFirstStory } from './first-story.js';
 import { linkTickets } from './requirements-sync.js';
 
 /**
@@ -501,6 +502,7 @@ export function moveItem(bp: BoardPaths, id: string, key: string, to: { under?: 
 export function removeItem(bp: BoardPaths, id: string, key: string): Breakdown {
   const b0 = editable(bp, id, key);
   const f0 = requireItem(b0, key);
+  if (storiesIn(f0).some((s) => s.setsUp)) throw new BoardActionError(FIRST_STORY_STAYS);
   const started = storiesIn(f0).filter((s) => s.ticket && readTicket(bp, s.ticket));
   if (started.length) {
     const first = started[0]!;
@@ -517,6 +519,8 @@ export function removeItem(bp: BoardPaths, id: string, key: string): Breakdown {
   return b;
 }
 
+const FIRST_STORY_STAYS = 'The project has no code yet, and the other stories build on this one, so it stays. You can change its words.';
+
 /** "Ask the Analyst to redo this": one part rewritten with the person's words. Its key, and the keys of what stays, stay. */
 export function redoItem(bp: BoardPaths, id: string, key: string, ask: string): Breakdown {
   const words = ask.trim();
@@ -527,6 +531,7 @@ export function redoItem(bp: BoardPaths, id: string, key: string, ask: string): 
   if (busy) throw new BoardActionError(busy);
   const k = whole ? b.id : requireItem(b, key).item.key;
   const f = whole ? null : requireItem(b, key);
+  if (f && storiesIn(f).some((s) => s.setsUp)) throw new BoardActionError('squad-kit wrote this story itself, so the Analyst does not redo it. You can change its words.');
   if (f?.story) notStarted(bp, f.story);
   setJob(bp, b.id, { step: 'redo', status: 'pending', item: k, ask: words, now: `Redoing ${whole ? 'the breakdown' : k}` }, { who: 'you', text: `Asked the Analyst to redo ${whole ? 'the breakdown' : k}: ${words}` });
   return b;
@@ -555,6 +560,8 @@ export function approveBreakdown(bp: BoardPaths, id: string): Breakdown {
   if (problems.length) throw new BoardActionError(`${problems[0]}${problems.length > 1 ? ` (and ${problems.length - 1} more)` : ''} Fix it, then approve.`);
   const by = who(bp);
   const b = updateBreakdown(bp, b0.id, (x) => {
+    // A story the person added needs the first one too.
+    withFirstStory(bp, x);
     x.status = 'approved';
     x.approved = { by, at: now() };
   });
@@ -683,7 +690,7 @@ export function startStory(bp: BoardPaths, id: string, key: string, opts: { by?:
   const ticket = createTicket(bp, {
     title: story.title,
     ask,
-    fromBreakdown: { id: b.id, item: story.key, story: story.story || story.title, criteria: story.criteria, approvedBy: b.approved.by, ...(decided.length ? { decided } : {}) },
+    fromBreakdown: { id: b.id, item: story.key, story: story.story || story.title, criteria: story.criteria, approvedBy: b.approved.by, ...(decided.length ? { decided } : {}), ...(story.setsUp ? { setsUp: true } : {}) },
   });
   const deps = ticketsOfNeeds();
   if (deps.length) updateTicket(bp, ticket.id, (t) => (t.dependsOn = deps));

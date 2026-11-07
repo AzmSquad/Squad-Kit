@@ -696,6 +696,8 @@ export interface Ticket {
   seenOn?: string;
   /** The breakdown story this ticket builds (BR-1, S-14). */
   breakdown?: { id: string; item: string };
+  /** The story that sets up a project with no code: it picks the tools and makes a first version that starts. */
+  setsUp?: boolean;
   /** Small choices the squad made on its own instead of asking (Builds by itself), so the person can change them. */
   decided?: Decided[];
   /**
@@ -986,7 +988,7 @@ export interface BoardMeta {
   /** The person chose to go on without tests in this project: the checks show "Not checked", and squad-kit asks once. */
   noTests?: { by: string; at: string; ticket: string };
   git?: { base: string; remote: string };
-  scan?: { status: 'pending' | 'running' | 'done' | 'failed'; at?: string; error?: string; summary?: string; empty?: boolean; now?: string };
+  scan?: { status: 'pending' | 'running' | 'done' | 'failed'; at?: string; error?: string; summary?: string; empty?: boolean; now?: string; fromNothing?: boolean };
   /** The project's first run, step by step, on this computer (src/board/setup-state.ts). */
   setup?: SetupState;
   /** What the Architect last read from the code: why each technology is there, and the design patterns it follows. */

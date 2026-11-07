@@ -542,7 +542,7 @@ function Ideas({ v, onCreated, onWrite }: { v: OverviewView; onCreated(t: Ticket
   const act = useAct<Ticket>();
   return (
     <section className="ob-c">
-      <h3>{v.empty ? 'Your first stories' : 'Good first tickets'}</h3>
+      <h3>{v.empty ? 'Your first stories' : v.since.length && !v.ideas.length ? 'What next' : 'Good first tickets'}</h3>
       <ul className="ob-ideas">
         {v.ideas.map((idea, i) => (
           <li key={i}>
@@ -570,7 +570,7 @@ function Ideas({ v, onCreated, onWrite }: { v: OverviewView; onCreated(t: Ticket
       <p className="note">
         {v.ideas.length ? (v.empty ? 'Ideas from what you said. Or ' : 'Ideas from what the Architect saw. Or ') : ''}
         <button className="ob-link" onClick={onWrite}>
-          {v.ideas.length ? 'write your own.' : 'Write your first ticket.'}
+          {v.ideas.length ? 'write your own.' : v.since.length ? 'Write a new ticket.' : 'Write your first ticket.'}
         </button>
       </p>
       {v.ideas.some((x) => !x.ticket) && <Cmd text={`squad overview --idea ${v.ideas.findIndex((x) => !x.ticket) + 1}`} />}

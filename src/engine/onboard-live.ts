@@ -106,6 +106,12 @@ export function readAgainDone(bp: BoardPaths): void {
   if (t) writeTalk(bp, { ...t, reread: false });
 }
 
+/** The first read after a project that had no code got some: the overview says what the product is now. */
+export function saveFirstWords(bp: BoardPaths, users: unknown): void {
+  if (!hasOverview(bp) || typeof users !== 'string' || !users.trim()) return;
+  writeOverview(bp, { ...readOverview(bp), users: users.trim() });
+}
+
 /** A read of the code for the architecture page also brings the overview's picture of the parts up to date. */
 export function saveBlueprintParts(bp: BoardPaths, answer: unknown): void {
   if (!hasOverview(bp) || !answer || typeof answer !== 'object') return;

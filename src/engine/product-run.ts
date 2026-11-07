@@ -67,14 +67,16 @@ export function productPlan(bp: BoardPaths, meta: BoardMeta, t: Ticket): Product
   const places: ProductPlace[] = [];
   for (const part of parts) {
     const repo = reposOf(meta).find((r) => r.path === part.repo);
-    // Two parts in one repo start together, from the repo's one command.
+    // Two parts in one repo start together, from the repo's one command, under the part a person opens.
     if (!repo || places.some((p) => p.repo.path === repo.path)) continue;
+    const inRepo = parts.filter((p) => p.repo === repo.path);
+    const front = inRepo.find((p) => !inRepo.some((x) => x.needs.includes(p.id))) ?? part;
     const start = repo.commands.start?.trim();
-    const url = (repo.commands.url ?? part.url)?.trim();
-    if (!start) return { places: [], why: `squad-kit does not know how to start ${part.name} yet. An engineer can set it in Settings.` };
-    if (!url) return { places: [], why: `squad-kit does not know the address of ${part.name} yet. An engineer can set it in Settings.` };
+    const url = (repo.commands.url ?? front.url)?.trim();
+    if (!start) return { places: [], why: `squad-kit does not know how to start ${front.name} yet. An engineer can set it in Settings.` };
+    if (!url) return { places: [], why: `squad-kit does not know the address of ${front.name} yet. An engineer can set it in Settings.` };
     const copy = copies.find((c) => c.repo.path === repo.path);
-    places.push({ part, repo, dir: copy?.dir ?? mainCopyDir(bp, repo.path), start, url, fromStory: Boolean(copy) });
+    places.push({ part: front, repo, dir: copy?.dir ?? mainCopyDir(bp, repo.path), start, url, fromStory: Boolean(copy) });
   }
   const needed = new Set(places.flatMap((p) => p.part.needs));
   const tops = places.filter((p) => !needed.has(p.part.id));

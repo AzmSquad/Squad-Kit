@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Agents tab, and `/squad` opens it. The allowed websites moved from Settings to Safety.
 - **New project**, on Home and with `squad projects --new`: give a name and a BRD or an idea, and squad-kit makes the folder,
   git and the board. A BRD goes straight to the Analyst. An idea goes into the first read, so you are not asked again.
+- **Set up the product**, on a project with no code: squad-kit adds this first story to the breakdown. It picks the tools and
+  makes a first version that starts, in one repo, with a folder for each part when the BRD needs several. Nothing else starts
+  until it merges, so two stories never pick different tools. The first merge, not the first release, ends "no code yet", and
+  the next read of the code finds the product's parts.
 - GitHub's checks run on a Mac as well as Linux.
 - **One story across the parts of a product.** On a project with several repos, the Architect names the parts a story changes.
   The story gets one folder with a copy of each, side by side, and one Builder session works in it. Each changed part runs

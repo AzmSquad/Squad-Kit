@@ -58,7 +58,7 @@ import * as P from './prompts.js';
 import { answerLists, checklistAsk, checklistsFor, rulesFor, type ListNo } from '../board/additions.js';
 import { gatesChanged, noteGates, runGatesAt, type GateDone } from './gate-run.js';
 import { baseCommits, repoFor, reposOf, rulesFiles, workspaceRepos } from './repos.js';
-import { partsOf, repoLabel, runsAsProduct } from '../board/parts.js';
+import { cleanParts, partsAfterRead, partsOf, repoLabel, runsAsProduct } from '../board/parts.js';
 import { flushTracker, publishTicket, recheckMerge, syncWiki, trackerDue } from './sync.js';
 import { AGENTS, agentInstructions, readAgent, type AgentRole } from './agents.js';
 import { Watchdog, processTable, type Quiet } from './watchdog.js';
@@ -87,12 +87,13 @@ import { hookFiles, isHookFile } from './hook-files.js';
 import { endStep, nextPart, pauseClock, resumeClock, slowStep, startStep, stepDoing, timedStep } from '../board/clock.js';
 import { readUsual } from '../board/usual.js';
 import { QUEUED, queuedLine } from '../board/now.js';
+import { firstOpenTicket, waitsForFirst, waitsForFirstWords } from '../board/first-story.js';
 import { watchPort } from './free-port.js';
 import { LimitReached, activePause, chatWaitNote, isLimitText, limitText, startPause, type LimitPause } from './usage-limit.js';
 import { forgetSaveTrouble, isSaveTrouble, noteSaveTrouble, stillHeld, endTurnTrouble, noteTurnTrouble } from './save-trouble.js';
 import { fileTroubleWords, isDiskTrouble } from '../core/file-trouble.js';
 import { explainError, StepError } from '../board/problem.js';
-import { readAgainDone, readIdea, readSaid, saveBlueprintParts, talkReply } from './onboard-live.js';
+import { readAgainDone, readIdea, readSaid, saveBlueprintParts, saveFirstWords, talkReply } from './onboard-live.js';
 import { readFailed, readStarted, readingNow, resumeSetup, runSetupProof, saveScan, settleSetupStop, type ScanAnswer } from './onboard.js';
 import { nextProofStep } from '../board/setup-state.js';
 import { writeLog, type LogLevel } from '../core/app-log.js';
@@ -532,7 +533,10 @@ export class LiveSquad {
         continue;
       }
       if (t.squad && Date.parse(t.squad.nextAt) <= Date.now()) {
-        if (pause) this.hold(t, limitText(pause));
+        // A project with no code: the first story picks the tools, so the others take their next step once it merges.
+        const first = meta.scan?.empty ? firstOpenTicket(this.bp, t) : undefined;
+        if (first) this.hold(t, waitsForFirstWords(first.id));
+        else if (pause) this.hold(t, limitText(pause));
         else if (this.mayStart(limit)) {
           // The base comes in first when it was asked for, or the ticket this one was built on is merged now.
           const phase = catchUp(this.bp, t, this.phaseFor(t));
@@ -1133,7 +1137,12 @@ export class LiveSquad {
   /** What the Tester may ask: the running parts of the product, or the one app, each only on its own address. */
   private apiParts(t: Ticket): Record<string, { name: string; url: string }> {
     const meta = this.meta();
-    if (runsAsProduct(meta)) return Object.fromEntries(productPlan(this.bp, meta, t).places.map((p) => [p.part.id, { name: p.part.name, url: p.url }]));
+    if (runsAsProduct(meta)) {
+      const { places } = productPlan(this.bp, meta, t);
+      // Parts that start together from their repo's one command each answer on their own address.
+      const beside = partsOf(meta).filter((p) => p.url && !p.shared && !p.off && !p.noRun && places.some((x) => x.repo.path === p.repo && x.part.id !== p.id));
+      return Object.fromEntries([...places.map((p) => [p.part.id, { name: p.part.name, url: p.url }]), ...beside.map((p) => [p.id, { name: p.name, url: p.url! }])]);
+    }
     const c = (this.appOf(t)?.repo ?? repoFor(meta, t)).commands;
     return c.start?.trim() && c.url?.trim() ? { app: { name: 'the app', url: c.url.trim() } } : {};
   }
@@ -1736,17 +1745,19 @@ export class LiveSquad {
     writeMeta(this.bp, meta);
     // The code this read sees, so the next merge can tell whether files came, went or moved since.
     const commits = baseCommits(root, meta);
+    // The first read of a project that had no code: nobody has said yet what runs in it.
+    const findRuns = Boolean(meta.scan?.fromNothing);
     try {
       const r = await this.runAgent({
         role: 'architect',
         step: 'blueprint',
         cwd: root,
-        prompt: P.blueprintPrompt(meta, decisions, detectStack(root, meta).map((x) => x.name)),
+        prompt: P.blueprintPrompt(meta, decisions, detectStack(root, meta).map((x) => x.name), findRuns),
         permissions: ['read'],
-        schema: P.BLUEPRINT_SCHEMA,
+        schema: findRuns ? P.FIRST_BLUEPRINT_SCHEMA : P.BLUEPRINT_SCHEMA,
         timeoutMs: WORDS_STEP_MS,
       });
-      const out = r.structured as { map: BoardMeta['map']; stack: StackNote[]; patterns: PatternNote[] };
+      const out = r.structured as { map: BoardMeta['map']; stack: StackNote[]; patterns: PatternNote[]; runs?: unknown; summary?: string; users?: string };
       // Only links to decisions that exist, so a made-up id never shows on the page.
       const known = new Set(decisions.map((d) => d.id));
       const link = (id?: string) => (id && known.has(id) ? { decision: id } : {});
@@ -1760,7 +1771,14 @@ export class LiveSquad {
         stack: out.stack.map((x) => ({ name: x.name, why: x.why, ...(role(x.role) ? { role: role(x.role) } : {}), ...link(x.decision) })),
         patterns: out.patterns.map((x) => ({ name: x.name, what: x.what, where: x.where ?? [], ...link(x.decision) })),
       };
+      if (findRuns && fresh.scan) {
+        const parts = partsAfterRead(cleanParts(out.runs, fresh, this.bp.root), fresh.parts);
+        if (parts.length) fresh.parts = parts;
+        if (out.summary?.trim()) fresh.scan.summary = out.summary.trim();
+        delete fresh.scan.fromNothing;
+      }
       writeMeta(this.bp, fresh);
+      if (findRuns) saveFirstWords(this.bp, out.users);
       // The overview's picture of the parts follows the code.
       saveBlueprintParts(this.bp, r.structured);
     } catch (err) {
@@ -4463,7 +4481,7 @@ function openStep(t: Ticket): number {
 
 /** A card line that says the ticket waits: for a free place, or for the usage limit. */
 function held(status: string | undefined): boolean {
-  return Boolean(status && (status.startsWith(QUEUED) || isLimitText(status)));
+  return Boolean(status && (status.startsWith(QUEUED) || isLimitText(status) || waitsForFirst(status)));
 }
 
 function isInside(dir: string, file: unknown): boolean {

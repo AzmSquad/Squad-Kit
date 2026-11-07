@@ -50,6 +50,7 @@ import { readTicket, ticketFilesDir, ticketMediaDir } from './store.js';
 import { isMediaNote } from '../engine/media.js';
 import { leaveProjectFiles, stageTicketDocs } from '../engine/project-git.js';
 import { pushHandOver, type HandOverPush } from '../engine/handover.js';
+import { firstCodeMerged } from './first-story.js';
 import { isMine, ownerOf, sameName } from './owner.js';
 import { holdForDependency, refuseBeforeDependency } from './depends.js';
 import { afterRelease, settleRelease } from './release-tidy.js';
@@ -96,7 +97,7 @@ export interface NewTicketInput {
   edgeCases?: string[];
   files?: UploadedFile[];
   /** Builds by itself: the breakdown story it builds, with its story and done-when, approved with the breakdown. */
-  fromBreakdown?: { id: string; item: string; story: string; criteria: Criterion[]; approvedBy: string; decided?: Decided[] };
+  fromBreakdown?: { id: string; item: string; story: string; criteria: Criterion[]; approvedBy: string; decided?: Decided[]; setsUp?: boolean };
 }
 
 /** A file the person added to a ticket, sent as base64 so the board and the terminal send it the same way. */
@@ -173,6 +174,7 @@ export function createTicket(bp: BoardPaths, input: NewTicketInput): Ticket {
           criteria: input.fromBreakdown.criteria,
           specApproved: { by: input.fromBreakdown.approvedBy, at: now() },
           ...(input.fromBreakdown.decided?.length ? { decided: input.fromBreakdown.decided } : {}),
+          ...(input.fromBreakdown.setsUp ? { setsUp: true } : {}),
         }
       : {}),
   };
@@ -2106,7 +2108,8 @@ async function sendRelease(bp: BoardPaths, release: Release, goOn?: string): Pro
       const done = await liveRelease(bp, release, tickets);
       release.log = done.log;
       unpushed = done.unpushed;
-      if (meta.scan?.empty) writeMeta(bp, { ...readMeta(bp), scan: { ...meta.scan, empty: false } });
+      // A pull request merged only now, as the release went out: the first code came in this way.
+      firstCodeMerged(bp);
     } catch (err) {
       // Stopped half-way: what reached the remote is finished, the rest undone, so nothing stays half-done.
       const settled = await settleRelease(bp, `The release stopped: ${(err as Error).message}`).catch(() => null);

@@ -107,6 +107,7 @@ function lineStages(): HarnessStage[] {
       g('brd-questions', 'Only real gaps and clashes', `At most ${MAX_QUESTIONS} questions on a document, where it leaves a gap or disagrees with itself.`, 'A technical one goes back to the agent.'),
       y('brd-approve', 'You approve the breakdown', 'Nothing is built or sent to your tracker before that. Every story needs its "done when".', 'Approve is refused and says what to fix.'),
       g('brd-queue', 'Stories start in order', 'The next starts when what it needs is merged and a place is free.', 'Your budget or AI limit holds the queue, with a reason.'),
+      g('first-story', 'A project with no code starts with one story', 'squad-kit adds Set up the product: it picks the tools and makes a first version. Nothing else starts until it merges, so every story builds on the same start.', 'Another ticket waits, and says which one it waits for.'),
     ]),
     stage('story', 'Story', 'The Analyst reads your story and asks only what it leaves open.', on(you('You answer'), skip('No questions'), skip('Approved before')), [
       g('questions', 'Only business questions reach you', 'The Analyst asks about gaps and clashes. Asks about settings, secrets or code history are refused before you see them.', undefined, { skip: ON_ITS_OWN }),
@@ -302,6 +303,7 @@ function rowDetails(meta: BoardMeta | undefined, root: string | undefined): Reco
     'brd-questions': code('engine/breakdown-job.ts', ['Limit', `${MAX_QUESTIONS} questions`]),
     'brd-approve': code('board/requirements-actions.ts', ['See it in', 'The Requirements page']),
     'brd-queue': code('board/requirements-build.ts', ['Places', `${parallelLimit(meta?.parallel)} at once`]),
+    'first-story': code('board/first-story.ts'),
     questions: code('engine/question-filter.ts', ['Refused', Object.values(HARNESS_REFUSED).join(', ')], ['Tries', `${TECHNICAL_TRIES} back to its agent`]),
     spec: code('board/actions.ts', ['See it in', tab('Spec')]),
     ask: code('engine/live.ts'),

@@ -38,6 +38,7 @@ export function Shell() {
   const path = useRouterState({ select: (s) => s.location.pathname });
   const meta = board.data?.ready ? board.data.meta : undefined;
   const tickets = board.data?.ready ? board.data.tickets : [];
+  const openCount = tickets.filter((t) => !t.mergedAt && t.stage !== 'done' && !t.archived).length;
   // A breakdown whose Analyst has questions counts as one thing that waits for you.
   const breakdownWaits = useBreakdownWaits().length;
   const waiting = tickets.filter(needsYou).length + breakdownWaits;
@@ -91,7 +92,7 @@ export function Shell() {
           <span className="pm">{(meta?.project ?? 'P').charAt(0)}</span>
           <div>
             <b>{meta?.project ?? 'Your project'}</b>
-            <span>{tickets.length} open tickets</span>
+            <span>{openCount === 1 ? '1 open ticket' : `${openCount} open tickets`}</span>
           </div>
           <ChevronsUpDown size={14} className="sw" />
         </a>

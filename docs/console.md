@@ -41,7 +41,9 @@ The first page. It has:
   banner at the top shows the first ones, and the browser tab shows the count: "(3) squad-kit".
 - **New project**: for when you have only a BRD or an idea. Give it a name and the BRD or the idea, and squad-kit makes
   the folder (in Documents, unless you pick another place), git and the board. A BRD goes straight to the Analyst, who asks
-  only about real gaps. An idea goes to the Architect, who writes first stories from it.
+  only about real gaps. An idea goes to the Architect, who writes first stories from it. With no code yet, the first story
+  picks the tools and makes a first version that starts, and the others wait until it merges, so they all build on the same
+  start. For a BRD, squad-kit adds that story itself as **Set up the product**, and you approve it with the rest.
 - **Add project**: a folder browser inside the page. It says what kind of folder you picked (empty, code,
   several repos, already a squad-kit project) and what will happen. **New folder here** makes a folder for a
   new project.

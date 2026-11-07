@@ -256,6 +256,7 @@ export const TICKET_HOME = {
   severity: 'project',
   pr: 'project',
   mergedAt: 'project',
+  setsUp: 'project',
   brief: 'project',
   story: 'project',
   criteria: 'project',

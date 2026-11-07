@@ -40,7 +40,8 @@ where it was. If squad-kit is open already, `squad` just prints its link and ope
 ## 3. Start or add a project
 
 **You have only a BRD or an idea?** On Home, press **New project**. Give it a name and your BRD or your idea. squad-kit makes
-the folder for you, and the squad starts from what you gave.
+the folder for you, and the squad starts from what you gave. A first story, **Set up the product**, picks the tools, and the
+others wait for it.
 
 **You already have a project?** Press **Add project**. A folder browser opens inside the page. Go to your project's folder and
 press **Add this folder**.
