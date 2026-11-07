@@ -9,6 +9,7 @@ import { OWN_GROUP, endGroup, signalGroup, track, whenExited } from './process-g
 import { hookFiles, isHookFile } from './hook-files.js';
 import { clearHookGit, commitsIn, endHookGroup, hookGitEnv, hookGitLeft, hookWords, makeHookGit, noteHookGroup, putFilesBack } from './hook-git.js';
 import { commitGuard, guardBlockedDetail, guardBlockedPath, projectEnv, spawnProject, type GuardSpec } from './project-guard.js';
+import { RawError } from '../core/for-people.js';
 
 /** Small git helpers. The squad never touches the person's own checkout: each ticket gets a worktree. */
 
@@ -94,10 +95,10 @@ function runGit(cwd: string, full: string[], opts: { allowFail?: boolean; env?: 
     const e = err as { stderr?: Buffer | string; message: string; code?: string };
     if (e.code === 'ETIMEDOUT') {
       const s = Math.max(1, Math.round((opts.timeoutMs ?? 0) / 1000));
-      throw new Error(`git ${commandOf(full)} gave up after ${s} second${s === 1 ? '' : 's'}. Check the network, and that git can reach the remote without asking for a password.`);
+      throw new RawError(`git ${commandOf(full)} gave up after ${s} second${s === 1 ? '' : 's'}. Check the network, and that git can reach the remote without asking for a password.`);
     }
     const detail = (e.stderr ? e.stderr.toString() : e.message).trim().split('\n').slice(-3).join(' ');
-    throw new Error(`git ${commandOf(full)} failed: ${detail}`);
+    throw new RawError(`git ${commandOf(full)} failed: ${detail}`);
   }
 }
 
@@ -208,7 +209,7 @@ export function netGit(cwd: string, args: string[], opts: { allowFail?: boolean;
 export function netGitLater(cwd: string, args: string[], opts: { env?: Record<string, string>; timeoutMs?: number } = {}): Promise<string> {
   return new Promise((done, fail) => {
     execFile('git', gitArgs(args), { cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, env: gitEnv(networkGitEnv(cwd, opts.env)), timeout: opts.timeoutMs ?? NETWORK_GIT_MS }, (err, stdout, stderr) => {
-      if (err) fail(new Error(`git ${args[0]} failed: ${(stderr || err.message).trim().split('\n').slice(-3).join(' ')}`));
+      if (err) fail(new RawError(`git ${args[0]} failed: ${(stderr || err.message).trim().split('\n').slice(-3).join(' ')}`));
       else done(stdout.trim());
     });
   });
@@ -648,7 +649,7 @@ function hookOutcome(dir: string, t: CommitTry, limitMs: number, how: HookRun): 
   if (t.stopped) throw new CommitStopped();
   if (t.timedOut) throw new HookRefused(hookSaid(t.said, how), true, limitMs);
   const trouble = gitTrouble(dir);
-  if (trouble) throw new Error(`git commit failed: ${trouble}`);
+  if (trouble) throw new RawError(`git commit failed: ${trouble}`);
 }
 
 /** Only files come back from the hooks, so they are staged here, as the next commit needs, with the check itself put back. */

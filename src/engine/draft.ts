@@ -18,6 +18,7 @@ import { prepareMedia } from './media.js';
 import { recordUsage } from '../board/usage.js';
 import { startPause } from './usage-limit.js';
 import { log } from '../core/app-log.js';
+import { ownRunWords } from './plain-stop.js';
 
 /** A ticket the Analyst filled in from a pasted idea or chat message. Nothing is saved until the person creates it. */
 export interface TicketDraft extends TicketBrief {
@@ -257,7 +258,8 @@ async function runAnalyst(bp: BoardPaths, opts: AgentRun): Promise<AgentResult> 
     if (r.limit) startPause(r.limit, { project });
     log.warn(`The Analyst could not fill in a new ticket: ${r.detail ?? r.error ?? 'no answer'}`, { project });
   }
-  if (!r.ok || !r.structured) throw new BoardActionError(r.error ?? 'The Analyst did not fill in the ticket. Try again.');
+  // Only squad-kit's own sentences reach the person; a tool's raw words went to the log above.
+  if (!r.ok || !r.structured) throw new BoardActionError(r.error && ownRunWords(r.error, tool) ? r.error : 'The Analyst did not fill in the ticket. Try again, or write it yourself.');
   return r;
 }
 

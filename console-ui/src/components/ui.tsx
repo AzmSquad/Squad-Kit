@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { ArrowUp, Bug, Check, Code, Copy, Eye, Search, SquareCheck, Triangle, User, X, PenLine, Users } from 'lucide-react';
 import type { Actor, Stage, Ticket } from '../api/types';
 import { usePrefs } from '../lib/prefs';
+import { loadTrouble } from '../lib/load-trouble';
 
 export const ROLE_NAME: Record<Actor, string> = {
   analyst: 'Analyst',
@@ -151,6 +152,23 @@ export function Modal({
         ) : (
           footer && <footer>{footer}</footer>
         )}
+      </div>
+    </div>
+  );
+}
+
+/** A page's first load did not get through: it says so, with the way on, and never shows an empty page as if it were true. */
+export function CouldNotLoad({ what, error, onRetry }: { what: string; error: unknown; onRetry(): void }) {
+  const t = loadTrouble(error, what);
+  return (
+    <div className="center">
+      <div role="alert">
+        <h2>This did not load</h2>
+        <p>{t.text}</p>
+        <p style={{ marginTop: 12, display: 'flex', gap: 8, justifyContent: 'center' }}>
+          <button className="btn pri" onClick={onRetry}>Try again</button>
+          {t.home && <a className="btn" href="/">Go to Home</a>}
+        </p>
       </div>
     </div>
   );

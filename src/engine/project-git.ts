@@ -1,10 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import yaml from 'js-yaml';
 import { harnessFile, mergeHarness } from '../board/additions.js';
+import { isPlain } from '../board/shape.js';
+import { writeConfigFile } from '../core/config.js';
 import { boardExists, listDecisions, listReleases, listTickets, readMeta, splitTicket, ticketDir, type BoardPaths } from '../board/store.js';
 import { decisionDoc, releaseDoc } from '../board/docs.js';
 import type { Release, Ticket } from '../board/types.js';
-import { commitArgsFor, git, isRepo, latestBase, remotes } from './git.js';
+import { commitArgsFor, currentBranch, git, isRepo, latestBase, remotes } from './git.js';
 import { repoFor } from './repos.js';
 import { BREAKDOWN_ID, breakdownDir } from '../board/requirements-paths.js';
 
@@ -41,7 +44,9 @@ export function hideSquadFromGit(bp: BoardPaths): void {
   const common = git(repo, ['rev-parse', '--git-common-dir'], { allowFail: true });
   if (!common) return;
   const exclude = path.join(path.resolve(repo, common), 'info', 'exclude');
-  const line = `/${squadInRepo(bp, repo)}/`;
+  // Git reads this list from the repo's top folder, which a project in a subfolder is not.
+  const top = git(repo, ['rev-parse', '--show-toplevel'], { allowFail: true }) || repo;
+  const line = `/${path.relative(fs.realpathSync(top), fs.realpathSync(bp.squadDir)).split(path.sep).join('/')}/`;
   const text = fs.existsSync(exclude) ? fs.readFileSync(exclude, 'utf8') : '';
   if (text.split('\n').some((l) => l.trim() === line)) return;
   fs.mkdirSync(path.dirname(exclude), { recursive: true });
@@ -213,9 +218,9 @@ export function commitTicketDocs(bp: BoardPaths, t: Ticket, moment: string): str
  * settings. What changed in them since the last release comes along too. Tickets still in progress come later,
  * with their own pull requests.
  */
-export function stageReleaseDocs(bp: BoardPaths, dir: string, release: Release, tickets: Ticket[]): void {
+export function stageReleaseDocs(bp: BoardPaths, dir: string, release: Release, tickets: Ticket[], base?: string): string[] {
   const repo = docsRepo(bp);
-  if (!repo || !docsInGit(bp)) return;
+  if (!repo || !docsInGit(bp)) return [];
   hideSquadFromGit(bp);
   const squad = squadInRepo(bp, repo);
   const into = (rel: string) => path.join(dir, squad, rel);
@@ -239,10 +244,92 @@ export function stageReleaseDocs(bp: BoardPaths, dir: string, release: Release, 
     const from = path.join(bp.squadDir, sub);
     if (fs.existsSync(from)) fs.cpSync(from, into(sub), { recursive: true });
   }
-  if (fs.existsSync(bp.configFile)) fs.copyFileSync(bp.configFile, into('config.yaml'));
-  // Put together with the base's copy: one person's release never takes away what a teammate added.
+  // Put together with the base's newest copy: one person's release never takes away what a teammate set or added.
+  const settingsAt = into('config.yaml');
+  const onRemote = remotes(dir).map((r) => git(dir, ['show', `refs/remotes/${r}/${base ?? currentBranch(repo)}:${squad}/config.yaml`], { allowFail: true })).find(Boolean);
+  const settings = fs.existsSync(bp.configFile) ? mergeSettings(bp, onRemote || (fs.existsSync(settingsAt) ? fs.readFileSync(settingsAt, 'utf8') : '')) : null;
+  if (settings) write(settingsAt, settings.text);
   const atBase = into('harness.yaml');
   const team = mergeHarness(bp, fs.existsSync(atBase) ? fs.readFileSync(atBase, 'utf8') : '');
   if (team) write(atBase, team);
   git(dir, ['add', '-f', '--', squad]);
+  return (settings?.theirsStayed ?? []).map((name) => `A teammate changed ${name} too, so theirs stays, here as well. You can look at it in Settings.`);
+}
+
+/** The settings in people's words, for the release's log. */
+const SETTING_WORDS: Record<string, string> = {
+  commands: 'how the project is tested and run',
+  git: 'where the code goes',
+  repos: 'the code folders',
+  parts: "the product's parts",
+  guard: "what the project's commands may reach",
+  allowedHosts: 'the allowed addresses',
+  quality: 'the Quality setting',
+  delivery: 'how changes reach the code',
+  atOnce: 'how many stories run at once',
+  documentsInGit: 'where the project documents go',
+  tracker: 'the tracker',
+};
+
+/** What this computer last shared with the team, to tell who changed what since. */
+const sharedSettingsFile = (bp: BoardPaths) => path.join(bp.localDir, 'config-shared.yaml');
+
+function readSettings(text: string): Record<string, unknown> | null {
+  try {
+    const raw = yaml.load(text);
+    return isPlain(raw) ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A copy of the settings from the base, put together with this computer's, like harness.yaml (board/additions.ts). Each
+ * setting: what only one side changed since this computer last shared them wins, and when both did, the team's stays
+ * and the release says so. The next ticket number is the higher one. A copy that can't be read is never mixed in. This
+ * computer's own copy takes the result too, and keeps its own project id, which links it to this computer's files.
+ * `fetched`: the base's copy seen at a fetch, with no release to tell the person anything.
+ */
+export function mergeSettings(bp: BoardPaths, theirs: string, opts: { fetched?: boolean } = {}): { text: string; theirsStayed: string[] } {
+  const mineText = fs.readFileSync(bp.configFile, 'utf8');
+  const mine = readSettings(mineText);
+  const team = readSettings(theirs);
+  if (!mine || !team) {
+    if (mine) write(sharedSettingsFile(bp), mineText);
+    return { text: mine ? mineText : theirs, theirsStayed: [] };
+  }
+  // An older version kept no note of what it last shared: what the checkout holds says the same.
+  const was = readSettings(fs.existsSync(sharedSettingsFile(bp)) ? fs.readFileSync(sharedSettingsFile(bp), 'utf8') : git(bp.root, ['show', `HEAD:${squadInRepo(bp, bp.root)}/config.yaml`], { allowFail: true }));
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const theirsStayed: string[] = [];
+  const pick = (m: Record<string, unknown>, t: Record<string, unknown>, a: Record<string, unknown> | null) => {
+    const out: Record<string, unknown> = {};
+    for (const key of new Set([...Object.keys(m), ...Object.keys(t)])) {
+      if (same(m[key], t[key]) || (a && same(a[key], t[key]))) out[key] = m[key];
+      else if (a && same(a[key], m[key])) out[key] = t[key];
+      else {
+        // Both changed it. At a fetch nothing is said yet, so this computer keeps its own until the release says so.
+        out[key] = opts.fetched ? m[key] : t[key];
+        theirsStayed.push(SETTING_WORDS[key] ?? `the setting "${key}"`);
+      }
+      if (out[key] === undefined) delete out[key];
+    }
+    return out;
+  };
+  const { board: myBoard, ...myRest } = mine;
+  const { board: teamBoard, ...teamRest } = team;
+  const { board: wasBoard, ...wasRest } = was ?? {};
+  const rest = pick(myRest, teamRest, was ? wasRest : null);
+  const boardMine = isPlain(myBoard) ? myBoard : {};
+  const boardTeam = isPlain(teamBoard) ? teamBoard : {};
+  const next = Math.max(Number(boardMine.nextNumber) || 0, Number(boardTeam.nextNumber) || 0);
+  // The next number is the higher one, and each computer keeps its own id: neither is a setting to disagree on.
+  const counted = ({ id: _id, ...b }: Record<string, unknown>) => (next ? { ...b, nextNumber: next } : b);
+  const board = pick(counted(boardMine), counted(boardTeam), isPlain(wasBoard) ? counted(wasBoard) : was ? {} : null);
+  const dump = (id: unknown) => yaml.dump({ ...rest, board: { ...(id ? { id } : {}), ...board } }, { lineWidth: 100, noRefs: true, sortKeys: false });
+  const text = dump(boardTeam.id);
+  const local = dump(boardMine.id);
+  if (local !== mineText) writeConfigFile(bp.configFile, local);
+  if (!opts.fetched) write(sharedSettingsFile(bp), local);
+  return { text, theirsStayed };
 }

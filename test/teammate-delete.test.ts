@@ -126,7 +126,7 @@ describe('a ticket its owner deleted on their computer', { timeout: 60_000 }, ()
 
     // Sara deletes it, keeping the branch on the remote: her delete leaves a note there instead of the ticket's files.
     const plan = deletePlan(bpB, id);
-    expect(plan.stays).toContain("The branch squad/ap-1 on origin, with a note that you deleted AP-1, so teammates' boards show it as deleted.");
+    expect(plan.stays).toContain("Its saved work in your team's shared copy of the code, with a note that you deleted AP-1, so teammates' boards show it as deleted.");
     const r = await deleteTicket(bpB, id);
     expect(r.notes).toEqual(["Left a note on squad/ap-1 on origin, so teammates' boards show AP-1 as deleted"]);
     expect(sh('git log -1 --format=%s squad/ap-1', bare)).toBe('AP-1: deleted by Sara');
@@ -150,7 +150,7 @@ describe('a ticket its owner deleted on their computer', { timeout: 60_000 }, ()
     expect(local.refused).toBeUndefined();
     expect(local.removes).toEqual([
       'AP-1 from your board: its files, notes and questions on this computer',
-      'Its copy of the code and the branch squad/ap-1 on this computer',
+      'Its copy of the code on this computer',
       'Its decision AP-1.1, "Hours in one file", on this computer',
     ]);
     expect(local.stays[0]).toBe("Everything on the remote: squad-kit pushes and deletes nothing there. Sara's delete is theirs.");

@@ -17,6 +17,8 @@ export interface SpeechModule {
   /** The service for a project folder, or null when no key is saved. A given key or fetch is used instead (tests). */
   open(root: string, opts?: { key?: string; fetch?: typeof fetch }): Speech | null;
   hasKey(root: string): boolean;
+  /** Whether the service takes this key, at no cost: asked before it is saved. no-answer: it could not be asked. */
+  checkKey(key: string, doFetch?: typeof fetch): Promise<'ok' | 'wrong' | 'no-answer'>;
   saveKey(root: string, key: string): void;
   removeKey(root: string): void;
 }

@@ -28,6 +28,9 @@ import { readLastRun } from '../core/last-run.js';
 import { formatTokenK } from '../ui/planner-cache-summary.js';
 import { GIT_UPDATE, MIN_GIT, gitIsNewEnough, gitVersion } from '../engine/git.js';
 import { sandboxStatus } from '../engine/sandbox.js';
+import { boardExists, boardPaths, readMeta } from '../board/store.js';
+import { readAgent } from '../engine/agents.js';
+import { aiTool } from '../modules/registry.js';
 import { guardSupport } from '../engine/project-guard.js';
 
 export interface CheckResult {
@@ -99,8 +102,21 @@ function gitignoreHasTrashPattern(repoRoot: string): boolean {
  */
 const DOCTOR_AUTH_PROBE_TIMEOUT_MS = 25_000;
 
+/** A project on squad-kit 1: its files live elsewhere, and it keeps `.squad` out of git by itself. */
+function isBoardProject(paths: SquadPaths): boolean {
+  return boardExists(boardPaths(paths.squadDir));
+}
+
+/** On a 1.x project: the AI tool the Builder runs on must be here, or no story can run. */
+export function checkAiTool(paths: SquadPaths, find: typeof aiTool = aiTool): CheckResult {
+  const name = 'AI tool for the squad';
+  const tool = find(readAgent(boardPaths(paths.squadDir), 'builder').tool);
+  if (tool?.ready()) return { id: 'ai-tool', name, status: 'ok', detail: tool.label };
+  return { id: 'ai-tool', name, status: 'fail', detail: `${tool?.label ?? 'The AI tool'} does not start on this computer, so the squad cannot work`, fixHint: 'Install it and sign in, then run squad doctor again' };
+}
+
 async function checkDirStructure(paths: SquadPaths, _ctx: DoctorContext, fix: boolean): Promise<CheckResult> {
-  const need = [paths.squadDir, paths.storiesDir, paths.plansDir].filter((p) => !fs.existsSync(p));
+  const need = (isBoardProject(paths) ? [paths.squadDir] : [paths.squadDir, paths.storiesDir, paths.plansDir]).filter((p) => !fs.existsSync(p));
   if (need.length === 0) {
     return { id: 'dirs', name: '.squad/ directory structure', status: 'ok' };
   }
@@ -172,7 +188,7 @@ async function checkConfigReadable(_paths: SquadPaths, ctx: DoctorContext): Prom
 }
 
 async function checkGitignore(paths: SquadPaths, _ctx: DoctorContext, fix: boolean): Promise<CheckResult> {
-  if (gitignoreHasManagedBlock(paths.root)) {
+  if (isBoardProject(paths) || gitignoreHasManagedBlock(paths.root)) {
     return { id: 'gitignore', name: '.gitignore managed block', status: 'ok' };
   }
   if (fix) {
@@ -189,7 +205,7 @@ async function checkGitignore(paths: SquadPaths, _ctx: DoctorContext, fix: boole
 }
 
 async function checkGitignoreTrashPattern(paths: SquadPaths, _ctx: DoctorContext, fix: boolean): Promise<CheckResult> {
-  if (gitignoreHasTrashPattern(paths.root)) {
+  if (isBoardProject(paths) || gitignoreHasTrashPattern(paths.root)) {
     return { id: 'gitignore-trash', name: '.gitignore includes .squad/.trash/', status: 'ok' };
   }
   if (fix) {
@@ -951,6 +967,8 @@ export async function runAllChecks(paths: SquadPaths, ctx: DoctorContext, fix: b
   await add('.squad/secrets.yaml parseable', () => checkSecretsParseable(paths, ctx));
   await add('legacy .squad/prompts/ directory', () => checkLegacyPrompts(paths, ctx));
   await add('git version', async () => checkGitVersion());
+  // A sample board runs no AI.
+  if (isBoardProject(paths) && readMeta(boardPaths(paths.squadDir)).engine === 'live') await add('AI tool for the squad', async () => checkAiTool(paths));
   await add('sandbox for the Builder and Tester', async () => checkAgentSandbox());
   await add("guard for the project's own commands", async () => checkProjectGuard());
   await add('planner configuration', () => checkPlannerConfig(paths, ctx));

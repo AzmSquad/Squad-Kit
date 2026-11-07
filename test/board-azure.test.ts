@@ -189,7 +189,7 @@ describe('Azure Boards and Repos', () => {
     const release = await actions.releaseVersion(bp);
     expect(release.version).toBe('v0.1.0');
     expect(release.log?.filter((l) => !l.ok)).toEqual([]);
-    expect(release.log?.[0]?.text).toBe('Already in main: AB-35 Owner signs up for a Mawid account');
+    expect(release.log?.[0]?.text).toBe('Already in the code: AB-35 Owner signs up for a Mawid account');
     expect(calls.filter((c) => c.method === 'PATCH' && (c.body as { status?: string }).status === 'completed').length).toBe(1);
     const log = sh('git log --format=%s main', remote).split('\n');
     expect(log.slice(0, 2)).toEqual(['release v0.1.0', 'Merged PR 7']);

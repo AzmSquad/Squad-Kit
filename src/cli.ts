@@ -516,6 +516,7 @@ program
   .option('--push-again', 'Send a release whose push failed: its commits and tag go to the remote now')
   .option('--mark-sent', 'Close a release whose push failed because it reached the remote another way, such as merged by hand. Needs --reason')
   .option('--reason <how>', 'With --mark-sent: how it reached the remote. It stays in the release log')
+  .option('--go-on <why>', "Go out past a team's release check that failed or could not run. The reason stays on the record")
   .option('--anyway', 'With --mark-sent: mark it even when squad-kit cannot find it on the remote, or cannot reach the remote')
   .option('--without <ticket>', 'Take a ticket out of the release before it is made; it goes out with the next one (repeat for more)', more, [])
   .option('--put-back <ticket>', 'Put a ticket you took out back into the release (repeat for more)', more, [])

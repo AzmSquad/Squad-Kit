@@ -120,7 +120,7 @@ function parseDoc(raw: string): { doc: Doc; broken?: string } {
   if (/^(<{7}|>{7}|={7})/m.test(raw)) return { doc: {}, broken: `${CANT_READ} .squad/harness.yaml still has a merge clash in it. ${FIX_IT}` };
   try {
     const doc = (yaml.load(raw) ?? {}) as Doc;
-    const fine = typeof doc === 'object' && !Array.isArray(doc) && [doc.additions, doc.log].every((l) => l === undefined || l === null || Array.isArray(l));
+    const fine = typeof doc === 'object' && !Array.isArray(doc) && [doc.additions, doc.log].every((l) => l === undefined || l === null || Array.isArray(l)) && (doc.log ?? []).every((l) => typeof l === 'object' && l !== null);
     if (!fine) throw new Error('not lists');
     return { doc };
   } catch {

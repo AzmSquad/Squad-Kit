@@ -46,11 +46,14 @@ export function useAct<T = unknown>() {
   const qc = useQueryClient();
   const { toast } = usePrefs();
   const m = useMutation({
-    mutationFn: ({ path, body, method = 'POST' }: { path: string; body?: unknown; method?: 'POST' | 'PUT'; done?: string }) =>
+    mutationFn: ({ path, body, method = 'POST' }: { path: string; body?: unknown; method?: 'POST' | 'PUT'; done?: string | ((data: T) => string | null); after?: (data: T) => void }) =>
       send<T>(path, method, body),
-    onSuccess: (_data, vars) => {
+    // These run even when the window that sent it has closed.
+    onSuccess: (data, vars) => {
       void qc.invalidateQueries();
-      if (vars.done) toast(vars.done);
+      vars.after?.(data);
+      const done = typeof vars.done === 'function' ? vars.done(data) : vars.done;
+      if (done) toast(done);
     },
     // The error says what happened. When sending it again may help, Try again sends the same action once more.
     onError: (err, vars) => toast(err instanceof Error ? err.message : String(err), 'err', worthRetrying(err) ? () => m.mutate(vars) : undefined),

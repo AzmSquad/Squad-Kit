@@ -740,6 +740,11 @@ export interface BrokenTicket {
   detail: string;
 }
 
+/** A record whose file cannot be read: the person's words, and for engineers the file and why. */
+export interface BrokenRecord extends BrokenTicket {
+  kind: 'decision' | 'release' | 'breakdown';
+}
+
 export interface BoardResponse {
   ready: boolean;
   /** Not ready because the project's settings file cannot be read, in plain words. */
@@ -752,6 +757,8 @@ export interface BoardResponse {
   archived?: Ticket[];
   /** Ticket folders whose ticket file cannot be read, so they are not among the tickets. */
   broken?: BrokenTicket[];
+  /** Decisions, releases and breakdowns whose file cannot be read. Their own pages show them too. */
+  brokenRecords?: BrokenRecord[];
   stats: { released30: number; bugs30: number; open: number };
 }
 
@@ -1094,6 +1101,8 @@ export interface PatternNote {
 
 export interface ArchitectureResponse {
   decisions: Decision[];
+  /** Decisions whose file cannot be read, so they are not among the decisions. */
+  broken?: BrokenRecord[];
   tickets: TimelineTicket[];
   map: BoardMeta['map'];
   lessons: Lesson[];

@@ -70,10 +70,13 @@ import { corePrompts } from '../engine/core-prompts.js';
 import { draftTicket } from '../engine/draft.js';
 import {
   boardExists,
+  brokenDecisions,
+  brokenReleases,
   brokenTickets,
   boardPaths,
   draftRelease,
   listReleases,
+  readRelease,
   listTickets,
   readMeta,
   readTicket,
@@ -100,7 +103,7 @@ import { takeBack } from '../engine/handover.js';
 import { costLines, happenedLines } from './cost.js';
 import { ticketCost } from '../board/cost.js';
 import { howPaid } from '../board/payment.js';
-import { breakdownWaits } from '../board/requirements.js';
+import { breakdownWaits, brokenBreakdowns } from '../board/requirements.js';
 
 const out = (s = '') => process.stdout.write(`${s}\n`);
 const cmd = (s: string) => kleur.green(s);
@@ -176,9 +179,9 @@ function trackLine(t: Ticket): string {
   }).join(kleur.gray(' ─ '));
 }
 
-/** The tickets whose file cannot be read: never silently gone from what the person sees. */
+/** The tickets, decisions, releases and breakdowns whose file cannot be read: never silently gone from what the person sees. */
 function brokenLines(bp: BoardPaths): void {
-  for (const b of brokenTickets(bp)) {
+  for (const b of [...brokenTickets(bp), ...brokenDecisions(bp), ...brokenReleases(bp), ...brokenBreakdowns(bp)]) {
     out();
     out(`  ${amber(b.problem)}`);
     out(kleur.gray(`  For an engineer: ${b.file}: ${b.detail}`));
@@ -942,7 +945,7 @@ function withV(version: string | undefined): string | undefined {
   return version && (version.startsWith('v') ? version : `v${version}`);
 }
 
-export async function runRelease(version: string | undefined, opts: { yes?: boolean; pushAgain?: boolean; markSent?: boolean; reason?: string; anyway?: boolean; without?: string[]; putBack?: string[] }): Promise<void> {
+export async function runRelease(version: string | undefined, opts: { yes?: boolean; pushAgain?: boolean; markSent?: boolean; reason?: string; goOn?: string; anyway?: boolean; without?: string[]; putBack?: string[] }): Promise<void> {
   const bp = board();
   const named = withV(version);
   // Words that do nothing here say so, or a person would think they counted.
@@ -950,6 +953,7 @@ export async function runRelease(version: string | undefined, opts: { yes?: bool
     if (opts.reason !== undefined) ui.warning('--reason only counts with --mark-sent, so it is left out here.');
     if (opts.anyway) ui.warning('--anyway only counts with --mark-sent, so it is left out here.');
   }
+  if (opts.goOn !== undefined && !opts.goOn.trim()) throw new Error(`Say why it goes on: ${cmd('squad release --go-on "<why>"')}`);
   if (opts.pushAgain) return runPushAgain(bp, named);
   if (opts.markSent) {
     const target = listReleases(bp).find((r) => r.unpushed?.length && (!named || r.version === named));
@@ -993,7 +997,7 @@ export async function runRelease(version: string | undefined, opts: { yes?: bool
     const targets = new Map(tickets.map((t) => [repoFor(meta, t).path, repoFor(meta, t)]));
     out(`  ${kleur.bold('This release changes these branches:')}`);
     for (const r of targets.values()) {
-      out(`    ${r.path === '.' ? 'project' : r.path}: ${r.base} ${r.remote ? amber(`→ pushed to ${r.remote}`) : kleur.gray('(no remote, stays on this Mac)')}`);
+      out(`    ${r.path === '.' ? 'project' : r.path}: ${r.base} ${r.remote ? amber(`→ pushed to ${r.remote}`) : kleur.gray('(no remote, stays on this computer)')}`);
     }
     out();
   }
@@ -1002,8 +1006,14 @@ export async function runRelease(version: string | undefined, opts: { yes?: bool
     return;
   }
   const spin = ui.spinner(`Releasing ${draft.version}…`);
-  const r = await releaseVersion(bp, draft.version).finally(() => spin.stop());
-  if (r.unpushed?.length) ui.warning(`Released ${r.version} on this computer, but the push failed. Send it with: squad release ${r.version} --push-again`);
+  // A failed release gate stops it, with what happened; the same command with --go-on goes past it, with the reason on the record.
+  const r = await releaseVersion(bp, draft.version, opts.goOn)
+    .catch((err: Error) => {
+      if (readRelease(bp, draft!.version)?.gateStop?.length) throw new Error(`${err.message} To go on anyway, say why: ${cmd(`squad release ${draft!.version} --go-on "<why>"`)}`);
+      throw err;
+    })
+    .finally(() => spin.stop());
+  if (r.unpushed?.length) ui.warning(`Released ${r.version} on this computer, but it did not reach your team's shared copy of the code. Send it with: squad release ${r.version} --push-again`);
   else ui.success(`Released ${r.version}.`);
   if (r.log) {
     for (const l of r.log) (l.ok ? ui.success : ui.warning)(l.text);
@@ -1032,7 +1042,7 @@ async function runPushAgain(bp: BoardPaths, version: string | undefined): Promis
     for (const u of r.unpushed) ui.warning(`${u.repo === '.' ? '' : `${u.repo}: `}${u.plain ?? `Push to ${u.remote} failed again: ${u.error}`}`);
     throw new Error(`${r.version} is still not pushed. Fix the problem above, then run: squad release ${r.version} --push-again`);
   }
-  ui.success(`Pushed ${r.version}. Its tickets are closed.`);
+  ui.success(`Sent ${r.version}. Its tickets are closed.`);
 }
 
 export async function runBug(words: string[], opts: { in?: string; severity?: string; how?: string; expected?: string }): Promise<void> {

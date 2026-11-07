@@ -1,9 +1,14 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import type { BoardPaths } from '../board/store.js';
 import { speechFor, speechModule } from '../modules/registry.js';
+import { ModuleError } from '../modules/errors.js';
+import { writeLog } from '../core/app-log.js';
+
+const run = promisify(execFile);
 
 /**
  * Voice and video notes. Agents read text and pictures but cannot listen, so squad-kit writes each note out itself
@@ -17,6 +22,21 @@ export const MAX_NOTE_BYTES = 100 * 1024 * 1024;
 
 export function isMediaNote(file: string): boolean {
   return AUDIO_FILE.test(file) || VIDEO_FILE.test(file);
+}
+
+/** A video's sound and pictures can only be taken out on a Mac for now: Settings says so per computer. */
+export function videoNotesWork(platform: NodeJS.Platform = process.platform): boolean {
+  return platform === 'darwin';
+}
+
+/** Why one note could not be written out, in words a person can read. */
+class NoteTrouble extends Error {}
+
+/** The line for a note that failed: plain words only, and the exact error for engineers in the app log. */
+function noteTroubleWords(err: unknown): string {
+  if (err instanceof NoteTrouble) return err.message;
+  if (err instanceof ModuleError && err.kind !== 'other') return err.message;
+  return 'something went wrong with it, so nobody can hear it for now';
 }
 
 export function transcriptOf(file: string): string {
@@ -36,9 +56,9 @@ export interface MediaOptions {
   key?: string;
   fetch?: typeof fetch;
   /** Takes the sound out of a video. Defaults to macOS avconvert. */
-  extractAudio?: (video: string, out: string) => void;
+  extractAudio?: (video: string, out: string) => void | Promise<void>;
   /** Saves pictures of a video's screen and returns their paths. Defaults to AVFoundation through swift. */
-  extractFrames?: (video: string, outPrefix: string) => string[];
+  extractFrames?: (video: string, outPrefix: string) => string[] | Promise<string[]>;
 }
 
 /** Writes out every voice and video note in `files` that has no transcript yet. Never throws: a note that fails is reported and skipped. */
@@ -56,13 +76,13 @@ export async function prepareMedia(bp: BoardPaths, files: string[], opts: MediaO
     const name = path.basename(note);
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-media-'));
     try {
-      if (fs.statSync(note).size > MAX_NOTE_BYTES) throw new Error('it is larger than 100 MB');
+      if (fs.statSync(note).size > MAX_NOTE_BYTES) throw new NoteTrouble('it is larger than 100 MB');
       let audio = note;
       if (VIDEO_FILE.test(note)) {
         audio = path.join(tmp, 'sound.m4a');
-        (opts.extractAudio ?? avconvert)(note, audio);
+        await (opts.extractAudio ?? avconvert)(note, audio);
         try {
-          const frames = (opts.extractFrames ?? swiftFrames)(note, `${note}.screen`);
+          const frames = await (opts.extractFrames ?? swiftFrames)(note, `${note}.screen`);
           result.added.push(...frames);
         } catch {
           // Pictures of the screen are a bonus; the words matter more.
@@ -73,7 +93,8 @@ export async function prepareMedia(bp: BoardPaths, files: string[], opts: MediaO
       result.added.push(transcriptOf(note));
       result.notes.push(`Wrote out ${name}`);
     } catch (err) {
-      result.notes.push(`Could not write out ${name}: ${(err as Error).message}`);
+      writeLog({ level: 'warn', text: `Could not write out ${name}: ${(err as Error).message}` });
+      result.notes.push(`Could not write out ${name}: ${noteTroubleWords(err)}`);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
@@ -81,9 +102,10 @@ export async function prepareMedia(bp: BoardPaths, files: string[], opts: MediaO
   return result;
 }
 
-function avconvert(video: string, out: string): void {
-  if (process.platform !== 'darwin') throw new Error('taking the sound out of a video needs a Mac for now');
-  execFileSync('avconvert', ['-s', video, '-p', 'PresetAppleM4A', '-o', out, '--replace'], { stdio: 'ignore', timeout: 5 * 60_000 });
+/** Takes minutes on a long video, so it runs beside the app, and every page keeps answering. */
+async function avconvert(video: string, out: string): Promise<void> {
+  if (!videoNotesWork()) throw new NoteTrouble('taking the sound out of a video needs a Mac for now');
+  await run('avconvert', ['-s', video, '-p', 'PresetAppleM4A', '-o', out, '--replace'], { timeout: 5 * 60_000 });
 }
 
 /** Up to 12 pictures of the screen, spread over the video, each with its time in the corner. */
@@ -107,13 +129,13 @@ for i in 0..<count {
 }
 `;
 
-function swiftFrames(video: string, outPrefix: string): string[] {
-  if (process.platform !== 'darwin') return [];
+async function swiftFrames(video: string, outPrefix: string): Promise<string[]> {
+  if (!videoNotesWork()) return [];
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-frames-'));
   try {
     const script = path.join(dir, 'frames.swift');
     fs.writeFileSync(script, FRAMES_SWIFT);
-    const out = execFileSync('swift', [script, video, outPrefix], { encoding: 'utf8', timeout: 3 * 60_000, stdio: ['ignore', 'pipe', 'ignore'] });
+    const { stdout: out } = await run('swift', [script, video, outPrefix], { encoding: 'utf8', timeout: 3 * 60_000 });
     return out.split('\n').map((l) => l.trim()).filter((l) => l && fs.existsSync(l));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

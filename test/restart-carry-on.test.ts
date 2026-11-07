@@ -207,7 +207,7 @@ describe.skipIf(process.platform === 'win32')('a board restart in the middle of 
     expect(t.fails ?? 0).toBe(0);
     expect(texts(t).filter((x) => x.startsWith('Runs on ')).every((x) => !x.includes('failed'))).toBe(true);
     expect(texts(t).filter((x) => x === 'Started redoing the work to follow ADR-009')).toHaveLength(1);
-    expect(texts(t).filter((x) => x.startsWith('Brought the latest main'))).toHaveLength(1);
+    expect(texts(t).filter((x) => x.startsWith('Brought the newest code'))).toHaveLength(1);
     expect(texts(t)).toContain('Carried on with step 2 of 3 after a restart');
     expect(t.interrupted).toBeUndefined();
     expect(t.replanFor).toBeUndefined();

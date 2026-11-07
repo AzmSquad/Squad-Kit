@@ -103,7 +103,7 @@ export function worthRetrying(err: unknown): boolean {
 }
 
 /** The app did not answer at all (it stopped, or the computer went to sleep): say so in plain words. */
-export const NO_ANSWER = 'squad-kit did not answer, so nothing changed. Check that it still runs in its terminal, then try again.';
+export const NO_ANSWER = 'squad-kit did not answer, so this may not have gone through. Check that it still runs in its terminal, then try again.';
 
 async function reach(input: string, init: RequestInit): Promise<Response> {
   let res: Response;

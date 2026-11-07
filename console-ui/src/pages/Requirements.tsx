@@ -45,6 +45,7 @@ import {
   type MenuChoice,
 } from '../components/BreakdownDialogs';
 import { TicketDrawer } from './TicketDrawer';
+import { BrokenTickets } from './Board';
 import '../styles/requirements.css';
 
 /**
@@ -71,6 +72,7 @@ export function RequirementsPage() {
   const me = board.data?.ready ? board.data.meta.user?.name : undefined;
   const [adding, setAdding] = useState(false);
   const rows = list.data?.breakdowns ?? [];
+  const broken = board.data?.brokenRecords?.filter((b) => b.kind === 'breakdown') ?? [];
   return (
     <>
       <div className="top">
@@ -83,6 +85,7 @@ export function RequirementsPage() {
       </div>
       <div className="scroll">
         <div className="page rq-list">
+          {broken.length > 0 && <BrokenTickets list={broken} label="Breakdowns that could not be read" />}
           {list.isLoading ? (
             <p className="note">Reading your breakdowns…</p>
           ) : list.isError ? (
@@ -471,6 +474,8 @@ function Actions({ v, onSend, onAsk, phone }: { v: BreakdownView; onSend(): void
   const on = Boolean(v.state.build?.on);
   // Held at this month's budget: Build continuously again lets it go on for the rest of the month.
   const atBudget = v.state.build?.heldFor === 'budget';
+  // The Analyst rewrote stories after the approval: Build continuously again says the person read them.
+  const toRead = v.state.build?.heldFor === 'review';
   return (
     <>
       {sendBtn}
@@ -479,12 +484,12 @@ function Actions({ v, onSend, onAsk, phone }: { v: BreakdownView; onSend(): void
           <Pause size={14} /> Pause
         </button>
       )}
-      {!all && (!on || atBudget) && (
+      {!all && (!on || atBudget || toRead) && (
         <button
           className="btn pri"
           disabled={act.isPending}
           title={atBudget ? `Go on past this month's budget: squad requirements build ${v.id}` : `squad requirements build ${v.id}`}
-          onClick={() => act.mutate({ path: `${base(v.id)}/build`, body: { on: true }, done: atBudget ? "It goes on past this month's budget, for the rest of the month." : 'Building continuously. Stories start in order of what they need.' })}
+          onClick={() => act.mutate({ path: `${base(v.id)}/build`, body: { on: true }, done: atBudget ? "It goes on past this month's budget, for the rest of the month." : toRead ? 'It goes on, with the rewritten stories.' : 'Building continuously. Stories start in order of what they need.' })}
         >
           <Play size={14} /> Build continuously
         </button>
@@ -648,8 +653,8 @@ function JobLine({ v }: { v: BreakdownView }) {
         <div className="rq-jobline fail" role="status">
           The redo of {j.item === v.id ? 'the breakdown' : j.item} stopped{j.error ? `: ${j.error}` : '.'}
           {v.mine && (
-            <button className="btn sm" onClick={() => act.mutate({ path: `${base(v.id)}/retry`, done: 'The Analyst tries the redo again.' })}>
-              Try again
+            <button className="btn sm" onClick={() => act.mutate({ path: `${base(v.id)}/${j.capped ? 'more' : 'retry'}`, done: 'The Analyst tries the redo again.' })}>
+              {j.capped ? 'Give it more' : 'Try again'}
             </button>
           )}
         </div>

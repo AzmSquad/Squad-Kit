@@ -5,7 +5,7 @@ import { api, send } from '../api/client';
 import type { AppProject, AppProjects, AppSettings, AppWaiting, FolderListing } from '../api/types';
 import { usePrefs } from '../lib/prefs';
 import { shellArg, shellQuote } from '../lib/text';
-import { Cmd, Modal, STAGE_NAME, actionLabel, ago, commandFor, outdatedLine } from '../components/ui';
+import { Cmd, CouldNotLoad, Modal, STAGE_NAME, actionLabel, ago, commandFor, outdatedLine } from '../components/ui';
 import { AboutButton, AppUpdate } from '../components/Update';
 import { LimitBanner } from '../components/UsageLimit';
 import { SaveTroubleBanner } from '../components/SaveTrouble';
@@ -77,7 +77,9 @@ export function HomePage() {
                 <Plus size={15} /> New project
               </button>
             </div>
-            {projects.isLoading ? null : list.length === 0 ? (
+            {projects.isLoading ? null : projects.isError && !projects.data ? (
+              <CouldNotLoad what="your projects" error={projects.error} onRetry={() => void projects.refetch()} />
+            ) : list.length === 0 ? (
               <div className="home-starts">
                 <button className="home-empty" onClick={() => setCreating(true)}>
                   <Sparkles size={22} />
@@ -108,7 +110,9 @@ export function HomePage() {
               <span className="grow" />
               <Cmd text="squad inbox" />
             </div>
-            {count === 0 ? (
+            {waiting.isError && !waiting.data ? (
+              <CouldNotLoad what="what waits for you" error={waiting.error} onRetry={() => void waiting.refetch()} />
+            ) : count === 0 ? (
               <div className="calm">
                 <span className="ring"><Check size={18} strokeWidth={2.5} /></span>
                 <div>
@@ -256,13 +260,24 @@ function ProjectCard({ p, onRemove }: { p: AppProject; onRemove(): void }) {
 const ALSO: { kind: FolderListing['kind']; name: string; text: string }[] = [
   { kind: 'empty', name: 'An empty folder', text: 'Start from an idea: squad-kit asks what you want to build.' },
   { kind: 'older', name: 'An older squad-kit', text: 'Your specs, plans and decisions stay where they are. squad-kit adds its own files beside them.' },
-  { kind: 'repos', name: 'Several repos', text: 'squad-kit reads each one and shows you how they fit together.' },
+  { kind: 'repos', name: 'Several code folders', text: 'squad-kit reads each one and shows you how they fit together.' },
 ];
 
 /** What squad-kit found in the folder, and what happens once the person adds it. */
 function Found({ l }: { l: FolderListing }) {
   const look = l.look;
   if (!look) return null;
+  if (look.ask) {
+    return (
+      <div className="ob-found" aria-live="polite">
+        <div className="ob-found-c" role="alert">
+          <b>{look.title}</b>
+          <div>{look.found}</div>
+          <div className="note">{look.next}</div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="ob-found" aria-live="polite">
       <div className="ob-found-c">
@@ -298,12 +313,13 @@ function AddProject({ onClose }: { onClose(): void }) {
     setAt(p);
   };
 
-  const add = async () => {
+  const ask = l?.look?.ask;
+  const add = async (choice?: 'above' | 'here') => {
     if (!l) return;
     setBusy(true);
     setError(null);
     try {
-      const res = await send<AppProject & { did: string[] }>('/api/v1/app/projects', 'POST', { folder: l.path });
+      const res = await send<AppProject & { did: string[] }>('/api/v1/app/projects', 'POST', { folder: l.path, ...(choice ? { choice } : {}) });
       // A new project lands on its setup page, where squad-kit gets to know it step by step.
       const setup = res.setup && !res.setup.ready && !res.setup.approved && res.setup.line;
       window.location.assign(setup ? res.url.replace(/\/board$/, '/setup') : res.url);
@@ -320,18 +336,31 @@ function AddProject({ onClose }: { onClose(): void }) {
       onClose={onClose}
       footer={
         <>
-          <button className="btn pri" disabled={!l?.canAdd || busy || listing.isFetching} onClick={() => void add()}>
-            {busy ? 'Adding…' : l?.kind === 'project' ? 'Open it' : 'Add and get to know it'}
-          </button>
+          {ask ? (
+            <>
+              <button className="btn pri" disabled={busy || listing.isFetching} onClick={() => void add('above')}>
+                {busy ? 'Adding…' : ask.kind === 'inside-repo' ? `Add ${ask.name} instead` : `Open ${ask.name}`}
+              </button>
+              {ask.kind === 'inside-project' && (
+                <button className="btn" disabled={busy || listing.isFetching} onClick={() => void add('here')}>
+                  Add this folder on its own
+                </button>
+              )}
+            </>
+          ) : (
+            <button className="btn pri" disabled={!l?.canAdd || busy || listing.isFetching} onClick={() => void add()}>
+              {busy ? 'Adding…' : l?.kind === 'project' ? 'Open it' : 'Add and get to know it'}
+            </button>
+          )}
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
           <span className="grow" />
-          {l && <Cmd text={`cd ${shellQuote(l.path)} && squad console`} />}
+          {l && <Cmd text={`cd ${shellQuote(ask?.root ?? l.path)} && squad console`} />}
         </>
       }
     >
-      <p className="note">Pick the project's folder: one repo, a folder with several repos, or a new, empty folder for a new project.</p>
+      <p className="note">Pick the project's folder: one with its code, one that holds several code folders, or a new, empty folder for a new project.</p>
       <FolderBrowser at={at} go={go} listing={listing} onError={setError} />
       {l && (
         <p className="fb-kind">

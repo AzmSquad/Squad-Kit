@@ -1,4 +1,5 @@
 import type { Quality, StuckChoice } from '../board/types.js';
+import type { AgentUsage } from '../modules/ai-tool/types.js';
 import type { StepCaps } from './levels.js';
 
 /**
@@ -18,6 +19,8 @@ export class CapReached extends Error {
     readonly quality: Quality,
     /** The role for people: "Builder". */
     readonly who: string,
+    /** The run it ended: its conversation, to carry on in, and what it used. */
+    readonly run?: { sessionId?: string; usage?: AgentUsage },
   ) {
     super(capWords(who, by, caps, quality));
     this.name = 'CapReached';

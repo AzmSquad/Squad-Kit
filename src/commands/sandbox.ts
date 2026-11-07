@@ -3,7 +3,7 @@ import * as ui from '../ui/index.js';
 import { readMeta, writeMeta } from '../board/store.js';
 import type { ProjectGuard } from '../board/types.js';
 import { PACKAGE_HOSTS, guardNote, parseHosts, sandboxStatus } from '../engine/sandbox.js';
-import { allowPath, guardSupport } from '../engine/project-guard.js';
+import { guardSupport, sharedPath } from '../engine/project-guard.js';
 import { board } from './board.js';
 
 /**
@@ -56,7 +56,7 @@ export async function runGuardAllow(kind: 'read' | 'write', paths: string[], opt
     ui.info(`Allow one: ${cmd(`squad config set allow-${kind} ~/shared`)}   Allow none: ${cmd(`squad config set allow-${kind} --clear`)}`);
     return;
   }
-  const next = opts.clear ? [] : [...new Set([...now, ...paths.map((p) => allowPath(p))])];
+  const next = opts.clear ? [] : [...new Set([...now, ...paths.map((p) => sharedPath(p))])];
   const updated: ProjectGuard = { ...guard, [field]: next };
   // Drop empty lists so the setting disappears when nothing is allowed.
   if (!updated.allowRead?.length) delete updated.allowRead;

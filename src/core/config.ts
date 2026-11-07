@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import yaml from 'js-yaml';
 import type { PlannerConfig, PlannerModelOverride, ProviderName } from '../planner/types.js';
 import { PLANNER_AUTH_MODES, type PlannerAuthMode } from './planner-auth.js';
+import { RawError } from './for-people.js';
 
 export type TrackerType = 'none' | 'github' | 'jira' | 'azure';
 
@@ -198,7 +199,7 @@ export function parseConfig(raw: string, configFile: string): SquadConfig {
   try {
     parsed = yaml.load(raw) as Partial<SquadConfig> | undefined;
   } catch (err) {
-    throw new Error(
+    throw new RawError(
       `Invalid YAML in ${configFile}: ${(err as Error).message}. ` +
         `Run \`squad doctor\` to review, or fix the file, or \`squad init --force\` to replace it.`,
     );

@@ -12,6 +12,7 @@ import { LiveSquad } from '../engine/live.js';
 import { stopApps } from '../engine/run-app.js';
 import { stopTries } from '../engine/try-app.js';
 import { prepareProject } from '../engine/setup.js';
+import { addAsk } from '../engine/first-look.js';
 import { dropNewProject, makeNewProject, type NewProjectInput } from '../engine/new-project.js';
 import { setupLine, setupView } from '../board/first-run.js';
 import { forgetProject, projectName, readProjects, rememberProject } from '../core/projects.js';
@@ -106,13 +107,16 @@ export class OpenProjects {
   }
 
   /**
-   * Add project: any folder, set up the way `squad console` does it. A folder inside a project adds that project. A
-   * project that is open already is simply returned.
+   * Add project: any folder, set up the way `squad console` does it. A folder of a project adds that project. A
+   * project that is open already is simply returned. A folder inside something bigger is never guessed at: the person
+   * says which (`choice`), and a subfolder of a repo can only add the repo's top folder.
    */
-  add(folder: string): { project: OpenProject; did: string[]; added: boolean } {
+  add(folder: string, choice?: 'above' | 'here'): { project: OpenProject; did: string[]; added: boolean } {
     const asked = path.resolve(folder);
     if (!fs.existsSync(asked) || !fs.statSync(asked).isDirectory()) throw new Error(`There is no folder at ${asked}.`);
-    const root = findSquadRoot(asked) ?? asked;
+    const ask = addAsk(asked);
+    if (ask && (!choice || (choice === 'here' && ask.kind === 'inside-repo'))) throw new Error(ask.words);
+    const root = ask ? (choice === 'above' ? ask.root : asked) : (findSquadRoot(asked) ?? asked);
     const known = this.all().find((p) => p.root === root);
     if (known) return { project: known, did: [], added: false };
     return { ...this.prepareAndOpen(root), added: true };

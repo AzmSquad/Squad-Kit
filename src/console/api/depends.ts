@@ -5,6 +5,7 @@ import type { DependencyChoice } from '../../board/types.js';
 import { bringInLatest, chooseBuild, setDependsOn } from '../../board/depends.js';
 import { nextDraft, outItems, putBackInRelease, takeOutOfRelease } from '../../board/release-tidy.js';
 import { cleanBranches, oldBranches } from '../../engine/branches.js';
+import { act } from './act.js';
 
 /**
  * Tickets that depend on unmerged work, and the release fixes: one call each, the same as their terminal commands
@@ -16,15 +17,6 @@ async function body<T>(c: Context): Promise<T> {
     return (await c.req.json()) as T;
   } catch {
     return {} as T;
-  }
-}
-
-/** A person-facing mistake comes back as a 400 with the message. */
-async function act(c: Context, fn: () => unknown) {
-  try {
-    return c.json(((await fn()) as object) ?? { ok: true });
-  } catch (err) {
-    return c.json({ error: (err as Error).message }, 400);
   }
 }
 

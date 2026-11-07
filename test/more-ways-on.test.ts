@@ -24,7 +24,7 @@ afterEach(() => {
 describe('a ticket that does not load', () => {
   it('says "no ticket" only when there is none', () => {
     expect(ticketTrouble(new Error('404 Not Found: {}'), 'SK-1')).toMatch(/no ticket SK-1/);
-    const down = 'squad-kit did not answer, so nothing changed. Check that it still runs in its terminal, then try again.';
+    const down = 'squad-kit did not answer, so this may not have gone through. Check that it still runs in its terminal, then try again.';
     expect(ticketTrouble(new Error(down), 'SK-1')).toBe(down);
     expect(ticketTrouble(new Error('500 Internal Server Error: x'), 'SK-1')).not.toMatch(/no ticket/);
   });

@@ -11,6 +11,7 @@ import {
   readBreakdownState,
   redoHolding,
   requireBreakdown,
+  unreadStories,
   updateBreakdownState,
   type StoryPlace,
 } from './requirements.js';
@@ -22,6 +23,7 @@ import { budgetState } from './budget.js';
 import { monthKey } from './usage.js';
 import { parallelLimit } from '../core/settings.js';
 import { limitText, type LimitPause } from '../engine/usage-limit.js';
+import { plainWords } from '../core/for-people.js';
 
 /**
  * Build continuously: the squad starts the next stories of an approved breakdown by itself, in the tree's order, as
@@ -93,11 +95,14 @@ export function setBuild(bp: BoardPaths, id: string, on: boolean): Breakdown {
   const tickets = ticketsOf(bp, stories);
   if (stories.every(({ story }) => tickets.get(story.key) && isMerged(tickets.get(story.key)!))) throw new BoardActionError(`Every story of ${b.id} is merged. Nothing is left to build.`);
   const atBudget = was?.heldFor === 'budget';
-  if (was?.on && !atBudget) return b;
+  const unread = unreadStories(b, readBreakdownState(bp, b.id));
+  if (was?.on && !atBudget && !unread.length) return b;
   const month = monthKey();
   updateBreakdownState(bp, b.id, (s) => {
     s.build = { on: true, by, at: was?.on ? was.at : now(), ...(atBudget ? { budgetOk: month } : was?.budgetOk === month ? { budgetOk: month } : {}) };
-    if (atBudget) addBreakdownActivity(s, 'you', "Let it go on past this month's budget");
+    delete s.rewritten;
+    if (unread.length && was?.on) addBreakdownActivity(s, 'you', `Let the rewritten ${unread.length === 1 ? 'story' : 'stories'} build: ${and(unread)}`);
+    else if (atBudget) addBreakdownActivity(s, 'you', "Let it go on past this month's budget");
     else addBreakdownActivity(s, 'you', `Turned on Build continuously, ${parallelLimit(readMeta(bp).parallel)} at a time`);
   });
   return b;
@@ -259,10 +264,13 @@ async function queueTurn(bp: BoardPaths, b: Breakdown, meta: BoardMeta, room: Qu
   // A story inside a part the Analyst is redoing waits for the redo: it starts from the new version.
   const redo = able.map(({ story }) => redoHolding(b, state.job, story.key)).find(Boolean);
   const ready = able.filter(({ story }) => !redoHolding(b, state.job, story.key));
-  let held: { text: string; for: 'budget' | 'limit' | 'waits' } | null = null;
+  const unread = unreadStories(b, state);
+  let held: { text: string; for: 'budget' | 'limit' | 'waits' | 'review' } | null = null;
   const started: string[] = [];
   let goOn = false;
   if (unreadable.length) held = { text: `The file of ${and(unreadable)} could not be read, so no new story starts. An engineer can look at it.`, for: 'waits' };
+  // Nobody has read what the Analyst wrote after the approval, and building it costs real money.
+  else if (unread.length) held = { text: `The Analyst rewrote ${and(unread)} after you approved. No new story starts until you read ${unread.length === 1 ? 'it' : 'them'} and press Build continuously again.`, for: 'review' };
   else if (!ready.length && redo) held = { text: `The Analyst is redoing ${redo}. Its stories start once the redo is done.`, for: 'waits' };
   else if (!ready.length) held = { text: [waitsWords(stories, tickets, deleted), deleted.length ? deletedWords(deleted) : ''].filter(Boolean).join(' '), for: 'waits' };
   else if (room.pause) held = { text: limitText(room.pause), for: 'limit' };
@@ -283,7 +291,7 @@ async function queueTurn(bp: BoardPaths, b: Breakdown, meta: BoardMeta, room: Qu
         if (goOn) updateTicket(bp, t.id, (x) => (x.budgetOk = { ...x.budgetOk, month: monthKey() }));
         started.push(t.id);
       } catch (err) {
-        held = { text: `${story.key} could not start: ${(err as Error).message}`, for: 'waits' };
+        held = { text: `${story.key} could not start: ${plainWords(err, `Starting ${story.key} of ${b.id}`, 'something technical stopped it. An engineer can see why in the log.')}`, for: 'waits' };
         break;
       }
     }

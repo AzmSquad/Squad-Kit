@@ -79,7 +79,7 @@ export function FolderBrowser({ at, go, listing, onError }: { at: string; go(pat
               {f.kind === 'project' ? <FolderCheck size={16} /> : f.kind === 'repo' ? <FolderGit2 size={16} /> : <Folder size={16} />}
               <span className="nm">{f.name}</span>
               {f.kind === 'project' && <span className="pill ok sm">squad-kit project</span>}
-              {f.kind === 'repo' && <span className="pill sm">code repo</span>}
+              {f.kind === 'repo' && <span className="pill sm">code</span>}
             </button>
           ))}
         </div>

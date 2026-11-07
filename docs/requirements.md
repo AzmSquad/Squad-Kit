@@ -30,6 +30,11 @@ You can leave the page; the work goes on. **Stop** stops it, and **Try again** c
 
 Terminal: `squad requirements show BR-1`, `squad requirements stop BR-1`, `squad requirements retry BR-1`.
 
+A step that reaches its limit says so and offers **Give it more**: it carries on where it stopped, with twice the room
+(`squad requirements more BR-1`). A long document (about 100 PDF pages or more) waits for you before anything is paid: it says
+how long the read usually takes, and **Read it** starts it (`squad requirements retry BR-1`). A password-protected PDF is refused
+when you add it: add a copy with no password.
+
 ## 3. Only the unclear parts come to you
 
 The Analyst asks only about two things:
@@ -154,6 +159,10 @@ The queue also holds, and says why, when:
 
 **Carry on** on one story's budget card covers that story only. The queue goes past the budget only when you press
 **Build continuously** again.
+
+A story the Analyst rewrites after you approved does not start by itself: the queue holds, naming it, until you read it and
+press **Build continuously** again. Changing a decision that is about no one part rewrites the whole breakdown, so it says so
+first, with the rough cost.
 
 A story whose ticket you deleted does not start again by itself. The queue says so, and **Start this story now** builds it
 again.

@@ -154,7 +154,7 @@ describe('Delete', () => {
     expect(plan.summary).toBe('Ticket AP-1 · Stopped, needs you · never merged');
     expect(plan.removes).toEqual([
       'The ticket, its spec, notes and questions',
-      'Its copy of the code and the branch squad/ap-1',
+      'Its copy of the code',
       'Its agent conversations and screenshots',
       'An update for the tracker that was not sent yet',
       'Its decision AP-1.1, "Decision AP-1.1". It never reached main.',
@@ -267,8 +267,8 @@ describe('Delete', () => {
     const plan = deletePlan(bp, 'AP-1');
     expect(plan.pushed).toEqual({ remote: 'origin', branch: 'squad/ap-1', why: 'squad-kit pushed it when the ticket was handed over.' });
     expect(plan.remote).toBe(false);
-    expect(plan.stays).toContain("The branch squad/ap-1 on origin, with a note that you deleted AP-1, so teammates' boards show it as deleted.");
-    expect(deletePlan(bp, 'AP-1', { remote: true }).removes).toContain('The branch squad/ap-1 on origin');
+    expect(plan.stays).toContain("Its saved work in your team's shared copy of the code, with a note that you deleted AP-1, so teammates' boards show it as deleted.");
+    expect(deletePlan(bp, 'AP-1', { remote: true }).removes).toContain("Its saved work in your team's shared copy of the code");
 
     const kept = await deleteTicket(bp, 'AP-1');
     expect(sh('git ls-remote --heads origin squad/ap-1', project)).toContain('squad/ap-1');
@@ -345,7 +345,7 @@ describe('Delete', () => {
     const app = new Hono();
     mountApi(app, { paths: buildPaths(project) });
     const plan = (await (await app.request('/api/v1/tickets/AP-1/delete')).json()) as { removes: string[]; command: string };
-    expect(plan.removes).toContain('Its copy of the code and the branch squad/ap-1');
+    expect(plan.removes).toContain('Its copy of the code');
     expect(plan.command).toBe('squad delete AP-1');
     const res = await app.request('/api/v1/tickets/AP-1/delete', { method: 'POST', body: JSON.stringify({}), headers: { 'content-type': 'application/json' } });
     expect(res.status).toBe(200);

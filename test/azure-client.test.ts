@@ -144,7 +144,7 @@ describe('Azure client', () => {
 
   it('explains a refused token in plain words', async () => {
     const { azure } = fakeAzure([{ method: 'GET', match: /connectionData/, reply: { message: 'TF400813: not authorized' }, status: 401 }]);
-    await expect(azure.whoAmI()).rejects.toThrow(/refused the token .*TF400813/);
+    await expect(azure.whoAmI()).rejects.toThrow('Azure DevOps did not accept the sign-in. Check it in Settings. An engineer can see why in the log.');
   });
 });
 

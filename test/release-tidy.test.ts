@@ -121,7 +121,7 @@ describe('take a ticket out of the next release', () => {
 
     const release = await actions.releaseVersion(bp);
     expect(release.tickets).toEqual(['AP-1']);
-    expect(release.log?.some((l) => l.text === 'Left AP-2 Add two.txt out: its code stays in main and goes out with the next release')).toBe(true);
+    expect(release.log?.some((l) => l.text === 'Left AP-2 Add two.txt out: its work stays in the code and goes out with the next release')).toBe(true);
     // The tag is the release without AP-2; main (here and on the remote) keeps it.
     expect(sh('git show v1.5.0:one.txt', project)).toBe('one');
     expect(tries('git show v1.5.0:two.txt', project)).toBeNull();
@@ -193,8 +193,8 @@ describe('old ticket branches after a release', () => {
 
     const release = await actions.releaseVersion(bp);
     expect(tries('git rev-parse --verify -q refs/heads/squad/ap-1', project)).toBeNull();
-    expect(release.log?.some((l) => l.text === 'Deleted the old ticket branches on this computer: squad/ap-1')).toBe(true);
-    expect(release.log?.some((l) => l.text === 'Their branches on origin stay (1). To delete them there too: squad branches --clean --remote')).toBe(true);
+    expect(release.log?.some((l) => l.text === 'Deleted what was left over from released tickets on this computer')).toBe(true);
+    expect(release.log?.some((l) => l.text === 'What is left of them in the shared copy of the code stays (1). To delete it too: squad branches --clean --remote')).toBe(true);
     expect(sh('git ls-remote --heads origin squad/ap-1', project)).toContain('refs/heads/squad/ap-1');
     expect(sh('git branch --list "squad/*"', project)).toContain('squad/ap-5');
 
@@ -307,7 +307,7 @@ describe('a release cut off by a restart', () => {
     const settled = await resumeCutRelease(bp);
     expect(settled).toMatchObject({ version: 'v1.5.0', status: 'released', tickets: ['AP-1'] });
     expect(settled!.log?.[0]?.text).toBe('v1.5.0 was cut off while it went out (the app closed or the computer restarted).');
-    expect(settled!.log?.some((l) => l.text === 'It had reached origin already, so squad-kit finished it')).toBe(true);
+    expect(settled!.log?.some((l) => l.text === "It had reached your team's shared copy of the code already, so squad-kit finished it")).toBe(true);
     expect(sh('git tag', remote)).toBe('v1.5.0');
     expect(sh('git rev-parse v1.5.0^{commit}', remote)).toBe(head);
     expect(sh('git rev-parse main', project)).toBe(head);

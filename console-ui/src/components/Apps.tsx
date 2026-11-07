@@ -23,7 +23,7 @@ export function Apps() {
       {apps.map((a) => (
         <AppItem key={a.repo} a={a} together={apps.filter((x) => x.start && x.fresh && x.fresh.id === a.fresh?.id)} named={apps.length > 1} live={q.data?.live ?? false} reading={q.data?.reading ?? false} readError={q.data?.readError} />
       ))}
-      {idle && <p className="apps-note">Starts the latest main, with every ticket you approved. No terminal needed.</p>}
+      {idle && <p className="apps-note">Starts the newest code, with every ticket you approved. No terminal needed.</p>}
     </div>
   );
 }
@@ -89,7 +89,7 @@ function AppItem({ a, together, named, live, reading, readError }: { a: ProjectA
               <Check size={13} strokeWidth={3} />
             </span>
             <b title={a.fresh.title}>
-              {a.fresh.id} is in {a.fresh.base}
+              {a.fresh.id} is in the newest version
             </b>
           </div>
           <p>Try the new version yourself.</p>

@@ -218,6 +218,11 @@ export interface DocumentFiles {
   extra: string[];
 }
 
+/** Give it more on a read: the same conversation goes on, so what was read is not read again. */
+export function carryOnPrompt(): string {
+  return 'You stopped at the limit for this step, before you gave your answer. Carry on from where you stopped. Do not read again what you read already. Then give your full answer in the same shape.';
+}
+
 export function documentText(b: Pick<Breakdown, 'title' | 'source'>, d: DocumentFiles): string {
   const name = asData("The document's name, as the person gave it", `${b.title} (${b.source.name})`);
   const read =

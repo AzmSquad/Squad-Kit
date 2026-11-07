@@ -52,7 +52,7 @@ const texts = (id: string) => ticket(id).activity.map((a) => a.text);
 const fixes = () => calls.filter((c) => c.prompt.includes('these files have clash markers'));
 
 const SAVED = 'The change is saved, but it cannot go into main yet: newer work changed the same lines.';
-const tryLine = (n: number) => `It clashes with newer changes in main, so squad-kit brings in the latest main and runs the checks, the review and the proof again (try ${n} of 3)`;
+const tryLine = (n: number) => `It clashes with newer changes, so squad-kit brings in the newest code and runs the checks, the review and the proof again (try ${n} of 3)`;
 const STORY = { id: 'BR-1', item: 'S-14', story: 'As a clerk, I want a limit.', criteria: [{ given: 'a room', when: 'I book it', then: 'the limit holds' }], approvedBy: 'Momen' };
 
 /** A story built in its own copy, past the checks, the review and the proof. Builds by itself unless `full`. */
@@ -170,10 +170,10 @@ describe('a merge that clashes while main keeps moving', () => {
     expect(t.squad ?? null).toBeNull();
     expect(t.retryPhase).toBe('update-base');
     expect(t.selfAccept?.baseTries).toBe(3);
-    expect(texts(id)[0]).toBe('It still clashes with main after the latest main came in 3 times, so it waits for you');
+    expect(texts(id)[0]).toBe('It still clashes after the newest code came in 3 times, so it waits for you');
     expect(sh('git rev-parse main', project)).toBe(before);
     expect(fixes()).toHaveLength(3);
-    expect(t.stuck!.options[0]).toMatchObject({ do: 'retry', name: 'Let the Builder bring in the latest main' });
+    expect(t.stuck!.options[0]).toMatchObject({ do: 'retry', name: 'Let the Builder bring in the newest code' });
   });
 
   it('when main has not moved since it came in, a second clash stops at once', async () => {
@@ -190,7 +190,7 @@ describe('a merge that clashes while main keeps moving', () => {
     expect(t.waiting?.kind).toBe('stuck');
     expect(t.stuck?.question).toBe(SAVED);
     expect(t.selfAccept?.baseTries).toBe(1);
-    expect(texts(id)[0]).toBe('It still clashes with main, and main has not moved since it last came in, so it waits for you');
+    expect(texts(id)[0]).toBe('It still clashes, and the code has not moved since it last came in, so it waits for you');
     expect(fixes()).toHaveLength(0);
   });
 
@@ -311,11 +311,11 @@ describe('a story that is landing goes first', () => {
     await squad().step(id, 'update-base');
     let t = ticket(id);
     expect(fixes()).toHaveLength(0);
-    expect(t.status).toBe(`Waits for ${other} to merge, then brings in the latest main`);
+    expect(t.status).toBe(`Waits for ${other} to merge, then brings in the newest code`);
     expect(t.squad?.phase).toBe('update-base');
     expect(Date.parse(t.squad!.nextAt)).toBeLessThan(Date.now() + 20_000);
     expect(t.live).toBe(true);
-    expect(texts(id)[0]).toBe(`${other} is about to merge into main, so this story waits for it, then brings in the latest main`);
+    expect(texts(id)[0]).toBe(`${other} is about to merge into main, so this story waits for it, then brings in the newest code`);
     // Nothing came in yet.
     expect(sh('git status --short', t.worktree!)).not.toContain('UU');
 
@@ -408,7 +408,7 @@ describe('with a pull request on the code host', () => {
     await squad().step(id, 'publish');
   }
 
-  it('brings in the latest main while the team moves it, then stops when it has not moved', async () => {
+  it('brings in the newest code while the team moves it, then stops when it has not moved', async () => {
     const id = built(false, 'origin');
     teamMoves();
     await acceptedAndRefused(id);
@@ -434,6 +434,6 @@ describe('with a pull request on the code host', () => {
     expect(t.stuck?.gate).toBe('merge');
     expect(t.stuck?.question).toBe('Pull request 7 cannot go into main yet: newer work changed the same lines.');
     expect(t.selfAccept?.baseTries).toBe(2);
-    expect(texts(id)[0]).toBe('It still clashes with main, and main has not moved since it last came in, so it waits for you');
+    expect(texts(id)[0]).toBe('It still clashes, and the code has not moved since it last came in, so it waits for you');
   });
 });

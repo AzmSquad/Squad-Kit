@@ -31,6 +31,7 @@ import { deleteNoteCommit, localCopy } from './teammate-delete.js';
 import { docsRepo, squadInRepo } from './project-git.js';
 import { dropTicketCache, ticketCacheDir } from './sandbox.js';
 import { stopTry } from './try-app.js';
+import { plainWords } from '../core/for-people.js';
 
 /**
  * Delete and Archive. Delete is for a ticket that never reached the base: the squad stops first, then its copy of the
@@ -169,7 +170,7 @@ export function deletePlan(bp: BoardPaths, id: string, opts: { remote?: boolean 
   const inGit = isRepo(dir);
   const copy = inGit && fs.existsSync(copyOf(dir, t));
   const branch = inGit && hasBranch(dir, branchOf(t));
-  if (copy || branch) removes.push(t.copies?.length ? `Its copies of the code and the branch ${branchOf(t)} in each` : copy && branch ? `Its copy of the code and the branch ${branchOf(t)}` : copy ? 'Its copy of the code' : `The branch ${branchOf(t)}`);
+  if (copy || branch) removes.push(t.copies?.length ? 'Its copies of the code' : copy ? 'Its copy of the code' : 'Its saved work on this computer');
   if (fs.existsSync(ticketCacheDir(bp, t.id))) removes.push('The packages its Builder and Tester downloaded for it');
   const chats = Boolean(Object.values(t.sessions ?? {}).some(Boolean) || t.chat);
   const shots = Boolean(t.proof?.length);
@@ -184,14 +185,14 @@ export function deletePlan(bp: BoardPaths, id: string, opts: { remote?: boolean 
     if (old) stays.push(`Decision ${old.id}, "${old.title}". It is a rule again, as it was before ${d.id} replaced it.`);
   }
   for (const r of listReleases(bp).filter((x) => x.bugs?.includes(t.id))) removes.push(`Its place among the bugs found in ${r.version}`);
-  if (pushed && remote) removes.push(`The branch ${pushed.branch} on ${pushed.remote}${t.pr ? `, and pull request ${t.pr.id} is closed` : ''}`);
+  if (pushed && remote) removes.push(`Its saved work in your team's shared copy of the code${t.pr ? `, and pull request ${t.pr.id} is closed` : ''}`);
 
   const tracker = trackerModule(t.source.type);
   if (tracker) stays.push(`The ${t.kind === 'bug' ? 'bug' : 'story'}${t.source.ref ? ` ${t.source.ref}` : ''} in ${tracker.label}. Only the link to it is removed.`);
   stays.push('The cost it used, still counted in Usage');
   for (const k of kept) stays.push(`Its decision ${k.d.id}, "${k.d.title}", because ${and(k.by)} ${k.by.length === 1 ? 'follows' : 'follow'} it`);
   if (pushed && !remote) {
-    stays.push(`The branch ${pushed.branch} on ${pushed.remote}, with a note that you deleted ${t.id}, so teammates' boards show it as deleted.`);
+    stays.push(`Its saved work in your team's shared copy of the code, with a note that you deleted ${t.id}, so teammates' boards show it as deleted.`);
     if (t.pr) stays.push(`Pull request ${t.pr.id}, still open. Close it on the code host if you no longer need it.`);
   }
 
@@ -222,7 +223,7 @@ function removePlan(bp: BoardPaths, meta: BoardMeta, t: Ticket, dir: string, bas
   const by = t.ownerDeleted!.by;
   const local = localCopy(dir, t, base, copyOf(dir, t));
   const removes = [`${t.id} from your board: its files, notes and questions on this computer`];
-  if (local.copy || local.branch) removes.push(local.copy && local.branch ? `Its copy of the code and the branch ${local.branch} on this computer` : local.copy ? 'Its copy of the code on this computer' : `The branch ${local.branch} on this computer`);
+  if (local.copy || local.branch) removes.push(local.copy ? 'Its copy of the code on this computer' : 'Its saved work on this computer');
   const chats = Boolean(Object.values(t.sessions ?? {}).some(Boolean) || t.chat);
   const shots = Boolean(t.proof?.length);
   if (chats || shots) removes.push(chats && shots ? 'Its agent conversations and screenshots on this computer' : chats ? 'Its agent conversations on this computer' : 'Its screenshots on this computer');
@@ -300,7 +301,7 @@ async function removeRemote(bp: BoardPaths, t: Ticket): Promise<string[]> {
       await host.close(t.pr.id);
       notes.push(`Closed pull request ${t.pr.id}`);
     } catch (err) {
-      throw new Error(`Could not close pull request ${t.pr.id}: ${(err as Error).message}`);
+      throw new Error(`Could not close pull request ${t.pr.id}: ${plainWords(err, `Closing pull request ${t.pr.id}`, 'something technical stopped it. Try again.')}`);
     }
   }
   try {
@@ -308,7 +309,7 @@ async function removeRemote(bp: BoardPaths, t: Ticket): Promise<string[]> {
     notes.push(`Deleted ${branch} on ${target.remote}`);
   } catch (err) {
     // Gone there already: a teammate deleted it, or an earlier try did.
-    if (!/remote ref does not exist/i.test((err as Error).message)) throw new Error(`Could not delete ${branch} on ${target.remote}: ${(err as Error).message}`);
+    if (!/remote ref does not exist/i.test((err as Error).message)) throw new Error(`Could not delete its work on ${target.remote}: ${plainWords(err, `Deleting ${branch} on ${target.remote}`, 'something technical stopped it. Try again.')}`);
     git(target.dir, ['update-ref', '-d', `refs/remotes/${target.remote}/${branch}`], { allowFail: true });
   }
   return notes;

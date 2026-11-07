@@ -110,7 +110,7 @@ import { SETUP_MS, endPid, nextFreePort, portTaken, squadKitOn } from './run-app
 import { APPROVING, NO_QUESTIONS, acceptByItselfBeside, acceptNext, addDecided, afterPullRequest, askWords, cleanSources, mergeWait, mergesByItself, resumeAccept, waitForLanding } from '../board/auto.js';
 import * as A from './auto-prompts.js';
 import type { DecidedBy } from '../board/requirements-types.js';
-import { breakdownJobs, holdBreakdownJob } from '../board/requirements.js';
+import { addBreakdownActivity, breakdownJobs, holdBreakdownJob, updateJob } from '../board/requirements.js';
 import { breakdownStopped } from '../board/requirements-actions.js';
 import { breakdownDir } from '../board/requirements-paths.js';
 import { proofPages, rowPictures, squadWorks, waitsAtReview, whereItStands } from '../board/at-review.js';
@@ -212,6 +212,8 @@ export class LiveSquad {
   /** The Builder's lane checks while it runs: a copy it adds on the way joins them. */
   private lanesOf = new Map<string, Lane[]>();
   private syncing = new Set<string>();
+  /** The breakdowns held at the budget whose way of paying is being looked at now. */
+  private paymentLooks = new Set<string>();
   private localRuns = new Set<string>();
   /** Builds by itself: merges that wait (a pull request's approver, the person's checkout), and when each was looked at. */
   private mergeLooks = new Map<string, number>();
@@ -469,9 +471,11 @@ export class LiveSquad {
         this.stops.get(key)?.abort();
         if (!this.running.has(key)) breakdownStopped(this.bp, j.id);
       } else if (this.running.has(key)) continue;
+      // A long document waits for the person's word before the Analyst is paid to read it.
+      else if (j.job.heldFor === 'long') continue;
       else if (pause) holdBreakdownJob(this.bp, j.id, limitText(pause));
       // Held at this month's budget: it starts again once the budget is raised, or the person pressed Carry on.
-      else if (j.job.heldFor === 'budget' && analystOverBudget(this.bp, j.id)) continue;
+      else if (j.job.heldFor === 'budget' && analystOverBudget(this.bp, j.id)) this.letGoOnSubscription(j.id);
       else this.launch(key, () => this.breakdownJob(j.id));
     }
     // Sending a breakdown to the tracker (`__send:<id>`): no AI runs, so neither limit holds it (board/requirements-send.ts).
@@ -1045,7 +1049,7 @@ export class LiveSquad {
    * not reach the person goes back to the agent first (engine/question-filter.ts). `reply` marks a reply in a talk
    * with the person (a chat answer is one too): one that asks for what is not allowed is replaced with a plain line.
    */
-  private async runAgent(opts: AgentRun & { ticket?: string; job?: string; role: AgentRole; step?: string; levelStep?: string; box?: object; check?: (answer: unknown) => string | null; checkHelp?: () => string; win?: AgentWindow; reply?: boolean }): Promise<AgentResult> {
+  private async runAgent(opts: AgentRun & { ticket?: string; job?: string; role: AgentRole; step?: string; levelStep?: string; box?: object; check?: (answer: unknown) => string | null; checkHelp?: () => string; win?: AgentWindow; reply?: boolean; capMore?: number }): Promise<AgentResult> {
     const job = opts.job ?? opts.ticket;
     const jobSignal = job ? this.stops.get(job)?.signal : undefined;
     // The run's own Stop: the job's Stop, or squad-kit stopping an agent that kept asking for what it may not do.
@@ -1188,7 +1192,7 @@ export class LiveSquad {
     };
   }
 
-  private async runWith(opts: AgentRun & { ticket?: string; job?: string; role: AgentRole; step?: string; levelStep?: string; box?: object; check?: (answer: unknown) => string | null; checkHelp?: () => string; win?: AgentWindow; reply?: boolean }, signal: AbortSignal): Promise<AgentResult> {
+  private async runWith(opts: AgentRun & { capMore?: number; ticket?: string; job?: string; role: AgentRole; step?: string; levelStep?: string; box?: object; check?: (answer: unknown) => string | null; checkHelp?: () => string; win?: AgentWindow; reply?: boolean }, signal: AbortSignal): Promise<AgentResult> {
     const job = opts.job ?? opts.ticket;
     // Each role runs as its own agent: the team's file for it sets the tool, the model and extra instructions.
     const agent = readAgent(this.bp, opts.role);
@@ -1221,7 +1225,7 @@ export class LiveSquad {
     };
     const watch = job ? { onActivity: () => this.dog.beat(job), onSpawn: (pid: number) => this.dog.track(job, pid) } : {};
     // The step's caps from the Quality setting, doubled for each Give it more on this same step.
-    const raise = ticket?.capRaise?.role === opts.role && ticket.capRaise.step === levelStep ? ticket.capRaise.times : 0;
+    const raise = opts.capMore ?? (ticket?.capRaise?.role === opts.role && ticket.capRaise.step === levelStep ? ticket.capRaise.times : 0);
     const quality = this.meta().quality ?? DEFAULT_QUALITY;
     const caps = stepCaps({ role: opts.role, step: levelStep, quality }, raise);
     // Only the caps the tool keeps: a tool without a spend cap is held by its turns alone.
@@ -1239,7 +1243,7 @@ export class LiveSquad {
       this.update(key, (x) => addActivity(x, opts.role, blockedLine(b)));
     };
     // Every role runs through the Agent Client Protocol unless the board says to run tools directly.
-    const run = ({ win: _own, reply: _reply, check: _check, checkHelp: _help, ...o }: AgentRun & { win?: unknown; reply?: unknown; check?: unknown; checkHelp?: unknown }) => tool.run({
+    const run = ({ win: _own, reply: _reply, check: _check, checkHelp: _help, capMore: _more, ...o }: AgentRun & { win?: unknown; reply?: unknown; check?: unknown; checkHelp?: unknown; capMore?: unknown }) => tool.run({
       ...o,
       ...watch,
       secretFiles: secretFiles(this.bp, opts.cwd),
@@ -1276,7 +1280,7 @@ export class LiveSquad {
         if (x.notesSeen?.[asked] !== undefined) x.notesSeen[r.sessionId!] = x.notesSeen[asked];
       });
     }
-    const capped = (res: AgentResult) => new CapReached(opts.role, levelStep, res.capped!.by, caps, quality, AGENTS.find((a) => a.role === opts.role)?.name ?? opts.role);
+    const capped = (res: AgentResult) => new CapReached(opts.role, levelStep, res.capped!.by, caps, quality, AGENTS.find((a) => a.role === opts.role)?.name ?? opts.role, { sessionId: res.sessionId, ...(res.usage ? { usage: res.usage } : {}) });
     const who = AGENTS.find((a) => a.role === opts.role)?.name ?? opts.role;
     // squad-kit stopped an agent that kept asking for things it may not do: a plain stop, the details for engineers.
     // Or kept calling squad-kit's tools in the wrong shape: a plain stop of its own, not "may not do".
@@ -1870,6 +1874,24 @@ export class LiveSquad {
     }
   }
 
+  /** An Analyst held at the month's budget, and the person moved to a subscription: there is no budget to pass, so it goes on. */
+  private letGoOnSubscription(id: string): void {
+    if (this.paymentLooks.has(id)) return;
+    this.paymentLooks.add(id);
+    void howPaid(this.bp)
+      .then(({ payment }) => {
+        if (payment === 'api-key') return;
+        updateJob(this.bp, id, (j, s) => {
+          if (j.heldFor !== 'budget') return;
+          delete j.heldFor;
+          j.now = 'Waiting for the Analyst';
+          addBreakdownActivity(s, 'squad', 'The Analyst goes on: a subscription has no month\'s budget to pass');
+        });
+      })
+      .catch(() => undefined)
+      .finally(() => this.paymentLooks.delete(id));
+  }
+
   /** One step of the Analyst's work on a breakdown: read only, in the project, with the breakdown's folder beside it. */
   private breakdownJob(id: string): Promise<void> {
     const key = `__breakdown:${id}`;
@@ -1895,6 +1917,7 @@ export class LiveSquad {
           ...(o.resume ? { resume: o.resume } : {}),
           ...(o.onTool ? { onTool: o.onTool } : {}),
           ...(o.onText ? { onText: o.onText } : {}),
+          ...(o.more ? { capMore: o.more } : {}),
         }),
     });
   }
@@ -2600,6 +2623,13 @@ export class LiveSquad {
       this.mendCopy(t);
       this.placeLocalFiles(id, t.worktree, repo.path);
       for (const c of t.copies ?? []) this.placeLocalFiles(id, c.dir, c.repo);
+      // A setup that stopped the story (only Docker does): Try again runs it, now an engineer may have allowed Docker.
+      for (const owed of t.setupOwed ?? []) {
+        const dir = owed === repo.path ? t.worktree : t.copies?.find((c) => c.repo === owed)?.dir;
+        const of = owed === repo.path ? repo : reposOf(meta).find((r) => r.path === owed);
+        this.update(id, (x) => (x.setupOwed = x.setupOwed?.filter((p) => p !== owed)));
+        if (dir && of) await this.setUpCopy(id, dir, of);
+      }
       return this.addWantedCopies(id);
     }
     // A new copy starts from the newest base, the remote's when the team moved it on; or from the work of the ticket
@@ -2669,7 +2699,10 @@ export class LiveSquad {
     if (!r.ok && !meta.scan?.empty) {
       // Only an engineer can allow Docker. Anything else is technical, so it never stops the story for the person.
       const docker = dockerBlockedWords(r.output, this.guardFor(dir, id));
-      if (docker) throw new StepError(docker, `${setup}:\n${tail(r.output, 30)}`);
+      if (docker) {
+        this.update(id, (x) => (x.setupOwed = [...new Set([...(x.setupOwed ?? []), repo.path])]));
+        throw new StepError(docker, `${setup}:\n${tail(r.output, 30)}`);
+      }
       this.update(id, (x) => {
         const before = x.setupTrouble;
         const said = repo.path === '.' ? setup : `in ${repo.path}: ${setup}`;
@@ -3131,7 +3164,7 @@ export class LiveSquad {
       why = (err as Error).message;
     }
     const clashes = unmerged();
-    if (!merging() && !isAncestor(dir, baseSha, 'HEAD')) throw new StepError(`squad-kit could not bring the latest ${latest.ref} into this ticket. Press Try again.`, why);
+    if (!merging() && !isAncestor(dir, baseSha, 'HEAD')) throw new StepError('squad-kit could not bring the newest code into this ticket. Press Try again.', why);
     return { baseSha, clashes, from: latest.ref };
   }
 
@@ -3177,13 +3210,13 @@ export class LiveSquad {
       x.gates = { checks: 'pending', review: 'pending', proof: 'pending' };
       x.sessions = { ...x.sessions, build: x.sessions?.build ?? randomUUID() };
       x.status = cut ? `Step ${openStep(x)} of ${x.steps?.length ?? 1}` : `Redoing the work to follow ${adr}`;
-      if (moved) addActivity(x, 'squad', `Brought the latest ${from} into this ticket${clashes.length ? `. Clashes in ${clashes.join(', ')}` : ''}`);
+      if (moved) addActivity(x, 'squad', `Brought the newest code into this ticket${clashes.length ? `. Clashes in ${clashes.join(', ')}` : ''}`);
       addActivity(x, 'builder', cut ? carryOnLine(x, cut.by) : `Started redoing the work to follow ${adr}`);
     });
     const meta = this.meta();
     this.update(id, (x) => (x.builtPlan = planKey(t1)));
-    const intro = `The plan changed to follow ${adr}, a decision approved after you started. The latest ${base} is now in this copy${clashes.length ? `, with clashes in ${clashes.join(', ')} to fix first` : ''}. Stay on this branch: it already has the latest ${base}, so a plan that says to start from ${base} is met, and squad-kit does all the git. Redo the work to the new plan below: keep what still fits, change what does not.`;
-    const newer = moved && cut ? ` squad-kit brought the latest ${base} into this copy meanwhile${clashes.length ? `, with clashes in ${clashes.join(', ')} to fix first` : ''}.` : '';
+    const intro = `The plan changed to follow ${adr}, a decision approved after you started. The latest ${base} is now in this copy${clashes.length ? `, with clashes in ${clashes.join(', ')} to fix first` : ''}. Stay on this branch: it already has the newest code, so a plan that says to start from ${base} is met, and squad-kit does all the git. Redo the work to the new plan below: keep what still fits, change what does not.`;
+    const newer = moved && cut ? ` squad-kit brought the newest code into this copy meanwhile${clashes.length ? `, with clashes in ${clashes.join(', ')} to fix first` : ''}.` : '';
     await this.runBuilder(id, cut ? `${carryOnPrompt(t1, cut.by)}${newer}` : `${intro}\n\n${P.buildPrompt(meta, listDecisions(this.bp), t1, this.ctx(t1))}`, Boolean(t.sessions?.build), 'build');
     this.update(id, (x) => {
       for (const s of x.steps ?? []) {
@@ -3222,7 +3255,7 @@ export class LiveSquad {
       x.proof = undefined;
       x.gates = { checks: 'pending', review: 'pending', proof: 'pending' };
       x.status = clashes.length ? `Builder is fixing ${clashes.length} clashing ${clashes.length === 1 ? 'file' : 'files'}` : 'Running the project checks';
-      addActivity(x, 'squad', `Brought the latest ${from} into this ticket${clashes.length ? `. Clashes in ${clashes.join(', ')}` : ''}`);
+      addActivity(x, 'squad', `Brought the newest code into this ticket${clashes.length ? `. Clashes in ${clashes.join(', ')}` : ''}`);
     });
     if (clashes.length) {
       await this.runBuilder(id, P.clashPrompt(base, clashes), Boolean(t.sessions?.build));

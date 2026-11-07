@@ -13,7 +13,7 @@ import { guardSupport, ticketGuard } from './project-guard.js';
 import { writeLog } from '../core/app-log.js';
 import { writeConfigFile } from '../core/config.js';
 import { mergeHarness } from '../board/additions.js';
-import { docsInGit, docsRepo, squadInRepo, stageProjectFiles, stageTicketDocs } from './project-git.js';
+import { docsInGit, docsRepo, mergeSettings, squadInRepo, stageProjectFiles, stageTicketDocs } from './project-git.js';
 import { reposOf } from './repos.js';
 import { repoTarget } from './sync.js';
 import { spotOwnerDeletes } from './teammate-delete.js';
@@ -80,7 +80,7 @@ export async function pushHandOver(bp: BoardPaths, t: Ticket): Promise<HandOverP
   }
   if (!docsInGit(bp)) throw new Error('"Put project documents in git" is off for this project, so the documents cannot travel with the branch. Turn it on in Settings first.');
   const target = repoTarget(bp, t);
-  if (!target) throw new Error('This repo has no remote to push to. Add one first, for example: git remote add origin <url>');
+  if (!target) throw new Error('This project has no shared copy of the code to send it to. An engineer can add one.');
   const env = gitEnv(bp, t);
   const had = Boolean(t.worktree && fs.existsSync(t.worktree));
   const copy = had ? { dir: t.worktree!, branch: t.branch!, baseCommit: t.baseCommit } : addWorktree(target.dir, t.id, target.base);
@@ -105,7 +105,7 @@ export async function pushHandOver(bp: BoardPaths, t: Ticket): Promise<HandOverP
     }
     await gitLater(copy.dir, ['push', target.remote, `${copy.branch}:refs/heads/${copy.branch}`], env).catch((err: Error) => {
       if (/rejected|non-fast-forward|fetch first/i.test(err.message)) {
-        throw new Error(`${copy.branch} on ${target.remote} has work this computer does not have. Nothing was handed over. ${err.message}`);
+        throw new Error(`${copy.branch} on ${target.remote} has work this computer does not have. Nothing was handed over.`);
       }
       throw err;
     });
@@ -302,6 +302,12 @@ function teamAdditions(bp: BoardPaths, repo: string, remote: string): void {
     mergeHarness(bp, blob(repo, `${remote}/${base}`, `${squadInRepo(bp, repo)}/harness.yaml`).toString('utf8'));
   } catch {
     // The base has no such file yet, or someone is saving it: the next look tries again.
+  }
+  try {
+    const base = reposOf(readMeta(bp))[0]!.base;
+    mergeSettings(bp, blob(repo, `${remote}/${base}`, `${squadInRepo(bp, repo)}/config.yaml`).toString('utf8'), { fetched: true });
+  } catch {
+    // The same.
   }
 }
 

@@ -2,6 +2,8 @@ import { spawn } from 'node:child_process';
 import process from 'node:process';
 import { confirm } from '@inquirer/prompts';
 import * as ui from '../ui/index.js';
+import { boardExists, boardPaths } from '../board/store.js';
+import { buildPaths, findSquadRoot } from '../core/paths.js';
 import { changelogBlobUrl, readInstalledPackage } from '../core/package-info.js';
 import { fetchLatest, isNewer } from '../core/registry.js';
 import { fetchReleasesBetween, isMajorBump, upgradePlan } from '../core/update.js';
@@ -102,7 +104,9 @@ export async function runUpgrade(opts: UpgradeOptions): Promise<void> {
 
   ui.blank();
   ui.success(`Upgraded to ${latest}.`);
-  ui.info('Run `squad migrate` to update your .squad/ structure if needed.');
+  // Only a project from before 1.0 has anything to move.
+  const root = findSquadRoot();
+  if (root && !boardExists(boardPaths(buildPaths(root).squadDir))) ui.info('Run `squad migrate` to update your .squad/ structure if needed.');
 }
 
 export function spawnInherit(cmd: string, args: string[]): Promise<number> {

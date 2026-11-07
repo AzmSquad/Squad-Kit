@@ -6,7 +6,7 @@ import { api } from '../api/client';
 import type { Actor, BrokenTicket, DraftJob, Stage, Ticket, TrackerStatus } from '../api/types';
 import { useBoard } from '../lib/data';
 import { BugDialog, NewTicketDialog, PullDialog } from '../components/dialogs';
-import { Cmd, Glyph, STAGE_NAME } from '../components/ui';
+import { Cmd, CouldNotLoad, Glyph, STAGE_NAME } from '../components/ui';
 import { TicketDrawer } from './TicketDrawer';
 import { BoardCost } from '../components/Usage';
 import { isMine, ownerOf, useMe } from '../components/HandOver';
@@ -63,6 +63,7 @@ export function BoardPage() {
   }, [data, query, view, showArchived]);
 
   if (board.isLoading) return <div className="center">Loading the board…</div>;
+  if (board.isError && !board.data) return <CouldNotLoad what="the board" error={board.error} onRetry={() => void board.refetch()} />;
   if (!data) return <NoBoard settings={board.data?.settings} />;
 
   // What needs the person shows in the banner at the top of every page. Here: setup, the first ticket, or all calm.
@@ -121,6 +122,7 @@ export function BoardPage() {
       )}
 
       {(data.broken?.length ?? 0) > 0 && <BrokenTickets list={data.broken!} />}
+      {(data.brokenRecords?.length ?? 0) > 0 && <BrokenTickets list={data.brokenRecords!} label="Files that could not be read" />}
 
       <div className="board">
         {LANES.map((lane) => {
@@ -232,10 +234,10 @@ function PullButton({ onPull }: { onPull(): void }) {
   );
 }
 
-/** Tickets whose file cannot be read: never silently gone. What happened, and what an engineer needs one click away. */
-export function BrokenTickets({ list }: { list: BrokenTicket[] }) {
+/** Tickets and records whose file cannot be read: never silently gone. What happened, and what an engineer needs one click away. */
+export function BrokenTickets({ list, label = 'Tickets that could not be read' }: { list: BrokenTicket[]; label?: string }) {
   return (
-    <section className="stuckbox" role="alert" aria-label="Tickets that could not be read" style={{ marginBottom: 14 }}>
+    <section className="stuckbox" role="alert" aria-label={label} style={{ marginBottom: 14 }}>
       {list.map((b) => (
         <div key={b.id}>
           <p>{b.problem}</p>
@@ -264,9 +266,9 @@ export function NoBoard({ settings }: { settings?: string | undefined }) {
     <div className="center">
       <div>
         <h2>No board yet</h2>
-        <p>Run this in the terminal to open a sample board where the squad works on its own:</p>
+        <p>This project has not been set up yet. Go to Home to set it up, or to try a sample board.</p>
         <p style={{ marginTop: 12 }}>
-          <Cmd text="squad demo" />
+          <a className="btn" href="/">Go to Home</a> <Cmd text="squad demo" />
         </p>
       </div>
     </div>

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import yaml from 'js-yaml';
-import { listReleases, listTickets, now, readMeta, readableTicket, ticketProblem, type BoardPaths } from './store.js';
+import { listReleases, listTickets, now, readMeta, readableTicket, recordProblemWords, ticketProblem, type BoardPaths, type BrokenRecord } from './store.js';
 import { BoardActionError } from './actions.js';
 import type { Activity, Actor, BoardMeta, Payment, Release, Ticket } from './types.js';
 import type {
@@ -28,6 +28,7 @@ import { howPaid } from './payment.js';
 import { parallelLimit } from '../core/settings.js';
 import { sendTargetOf } from './requirements-tracker.js';
 import { mergeWait, mergeWaitWords } from './auto.js';
+import { hasMergeMarks, isPlain, wrongField, type FieldShape } from './shape.js';
 
 /**
  * The breakdowns' files (ADR-001). The project's part of each one is `.squad/requirements/BR-1/breakdown.yaml`, next
@@ -102,16 +103,93 @@ function sourcePath(f: unknown): string | null {
   return f.split('/').some((x) => !x || x === '.' || x === '..') ? null : f;
 }
 
+const STATUSES = new Set<string>(['reading', 'questions', 'drafting', 'ready', 'approved', 'failed']);
+const KINDS = new Set<string>(['pdf', 'docx', 'markdown', 'text', 'pasted']);
+
+const BREAKDOWN_FIELDS: Record<string, FieldShape> = { title: 'text', createdAt: 'text', createdBy: 'text', owner: 'text', summary: 'text', error: 'text', questions: 'objects', epics: 'objects', decided: 'objects', leftOut: 'objects', next: 'object', approved: 'object' };
+const QUESTION_FIELDS: Record<string, FieldShape> = { id: 'text', text: 'text', options: 'texts', inputOption: 'text', thread: 'objects' };
+const DECIDED_FIELDS: Record<string, FieldShape> = { id: 'text', text: 'text', item: 'text', ticket: 'text', changed: 'object' };
+const EPIC_FIELDS: Record<string, FieldShape> = { key: 'text', title: 'text', goal: 'text', summary: 'text', features: 'objects', stories: 'objects', ref: 'object', tracker: 'object' };
+const STORY_FIELDS: Record<string, FieldShape> = { key: 'text', title: 'text', story: 'text', criteria: 'objects', size: 'text', dependsOn: 'texts', ref: 'object', ticket: 'text', tracker: 'object', setsUp: 'yes-no' };
+
+function first(list: unknown[], check: (x: Record<string, unknown>) => string | null): string | null {
+  for (const x of list) {
+    const wrong = check(x as Record<string, unknown>);
+    if (wrong) return wrong;
+  }
+  return null;
+}
+
+/** A part of the tree: the key and title the pages always read, then its fields. */
+function partProblem(x: Record<string, unknown>, fields: Record<string, FieldShape>): string | null {
+  if (typeof x.key !== 'string' || !x.key) return 'A part of the tree has no key.';
+  if (typeof x.title !== 'string') return `${x.key} has no title.`;
+  const wrong = wrongField(x, fields);
+  return wrong && `${x.key}: ${wrong}`;
+}
+
+function storyProblem(x: Record<string, unknown>): string | null {
+  return partProblem(x, STORY_FIELDS) ?? first((x.criteria as unknown[] | undefined) ?? [], (c) => (['given', 'when', 'then'].every((k) => c[k] === undefined || typeof c[k] === 'string') ? null : `${x.key}: a "done when" is not in the right form.`));
+}
+
+/** What the pages need from a breakdown file, or why it does not have it. What it may leave out is filled in after. */
+function breakdownShapeProblem(b: Record<string, unknown>): string | null {
+  if (!b.id) return 'It has no id.';
+  if (!isPlain(b.source)) return 'It does not say which document it came from.';
+  if (!sourcePath(b.source.file)) return "The document it names is not in its own source folder.";
+  if (typeof b.source.name !== 'string' || !KINDS.has(String(b.source.kind))) return "It does not say what the document is.";
+  if (typeof b.title !== 'string' || !b.title) return 'It has no title.';
+  if (!STATUSES.has(String(b.status))) return `"${String(b.status)}" is not a state of a breakdown.`;
+  const wrong = wrongField(b, BREAKDOWN_FIELDS);
+  if (wrong) return wrong;
+  if (b.source.extra !== undefined && !Array.isArray(b.source.extra)) return '"extra" is not in the right form.';
+  return (
+    first((b.questions as unknown[] | undefined) ?? [], (q) => wrongField(q, QUESTION_FIELDS) ?? (typeof q.text === 'string' ? null : 'A question has no words.')) ??
+    first((b.decided as unknown[] | undefined) ?? [], (d) => wrongField(d, DECIDED_FIELDS)) ??
+    first((b.leftOut as unknown[] | undefined) ?? [], (l) => (typeof l.text === 'string' ? null : 'A left out item has no words.')) ??
+    first((b.epics as unknown[] | undefined) ?? [], (e) =>
+      partProblem(e, EPIC_FIELDS) ??
+      first((e.stories as unknown[] | undefined) ?? [], storyProblem) ??
+      first((e.features as unknown[] | undefined) ?? [], (f) => partProblem(f, EPIC_FIELDS) ?? first((f.stories as unknown[] | undefined) ?? [], storyProblem)),
+    )
+  );
+}
+
+const looked = new Map<string, { stamp: string; problem: string | null }>();
+
+/** Why the breakdown's own file cannot be read, for engineers, or null. One look per change of the file: the live loop asks every second. */
+function breakdownFileProblem(bp: BoardPaths, key: string): string | null {
+  const file = breakdownFile(bp, key);
+  if (!fs.existsSync(file)) return null;
+  const st = fs.statSync(file);
+  const stamp = `${st.mtimeMs}:${st.size}`;
+  const hit = looked.get(file);
+  if (hit?.stamp === stamp) return hit.problem;
+  let problem: string | null;
+  try {
+    if (hasMergeMarks(fs.readFileSync(file, 'utf8'))) problem = 'It still has the marks of a merge in it.';
+    else {
+      const b = readYaml<unknown>(file);
+      problem = isPlain(b) ? breakdownShapeProblem(b) : 'It is not a breakdown.';
+    }
+  } catch (err) {
+    problem = (err as Error).message;
+  }
+  looked.set(file, { stamp, problem });
+  return problem;
+}
+
 /**
- * A breakdown by its id. breakdown.yaml is shared in git, so what it says about itself is checked: its id is always
- * its folder's name, and the files it names must sit in its own source/ folder (else it does not read).
+ * A breakdown by its id, or null when it is not there or its file cannot be read (breakdownProblem says so).
+ * breakdown.yaml is shared in git, so what it says about itself is checked: its id is always its folder's name, and the
+ * files it names must sit in its own source/ folder (else it does not read).
  */
 export function readBreakdown(bp: BoardPaths, id: string): Breakdown | null {
   const key = breakdownId(id);
-  if (!ID.test(key)) return null;
+  if (!ID.test(key) || breakdownFileProblem(bp, key)) return null;
   try {
     const b = readYaml<Breakdown>(breakdownFile(bp, key));
-    if (!b?.id || !b.source || !sourcePath(b.source.file)) return null;
+    if (!b) return null;
     b.id = key;
     if (b.source.extra) b.source.extra = b.source.extra.filter((f) => sourcePath(f));
     return fill(b);
@@ -120,10 +198,30 @@ export function readBreakdown(bp: BoardPaths, id: string): Breakdown | null {
   }
 }
 
+/** The plain words when this breakdown's file cannot be read, else null. */
+export function breakdownProblem(bp: BoardPaths, id: string): string | null {
+  const key = breakdownId(id);
+  return ID.test(key) && breakdownFileProblem(bp, key) ? recordProblemWords('breakdown', key) : null;
+}
+
 export function requireBreakdown(bp: BoardPaths, id: string): Breakdown {
   const b = readBreakdown(bp, id);
-  if (!b) throw new BoardActionError(`No breakdown ${breakdownId(id)} in this project.`);
+  if (!b) throw new BoardActionError(breakdownProblem(bp, id) ?? `No breakdown ${breakdownId(id)} in this project.`);
   return b;
+}
+
+/** Breakdowns whose file cannot be read, so they are never silently gone from the Requirements page. */
+export function brokenBreakdowns(bp: BoardPaths): BrokenRecord[] {
+  const dir = requirementsDir(bp);
+  if (!fs.existsSync(dir)) return [];
+  return fs
+    .readdirSync(dir)
+    .filter((d) => ID.test(d))
+    .flatMap((d) => {
+      const detail = breakdownFileProblem(bp, d);
+      return detail ? [{ kind: 'breakdown' as const, id: d, problem: recordProblemWords('breakdown', d), file: path.relative(bp.root, breakdownFile(bp, d)), detail }] : [];
+    })
+    .sort((a, b) => idNumber(a.id) - idNumber(b.id));
 }
 
 /** Every breakdown in the project, oldest first. */
@@ -177,17 +275,28 @@ export function removeBreakdown(bp: BoardPaths, id: string): void {
 
 /* ── This computer's part ───────────────────────────────── */
 
+const STATE_FIELDS: Record<string, FieldShape> = { job: 'object', sessions: 'object', build: 'object', sync: 'object', usage: 'objects', budgetOk: 'text' };
+
+/**
+ * This computer's part. What cannot be read is dropped, never thrown: the breakdown itself is safe in the project, and
+ * one left waiting on a job that is gone has Try again (`lost`).
+ */
 export function readBreakdownState(bp: BoardPaths, id: string): BreakdownState {
+  if (!ID.test(breakdownId(id))) return { activity: [] };
   try {
-    const s = readYaml<BreakdownState>(breakdownStateFile(bp, breakdownId(id)));
-    return { ...s, activity: s?.activity ?? [] };
+    const raw = readYaml<unknown>(breakdownStateFile(bp, breakdownId(id)));
+    if (raw === undefined) return { activity: [] };
+    if (!isPlain(raw) || wrongField(raw, STATE_FIELDS)) throw new Error('not its shape');
+    const s = raw as unknown as BreakdownState;
+    return { ...s, activity: Array.isArray(s.activity) ? s.activity : [] };
   } catch {
-    return { activity: [] };
+    return { activity: [], lost: true };
   }
 }
 
 export function writeBreakdownState(bp: BoardPaths, id: string, state: BreakdownState): void {
-  writeFile(breakdownStateFile(bp, breakdownId(id)), dumpYaml(state));
+  const { lost: _lost, ...kept } = state;
+  writeFile(breakdownStateFile(bp, breakdownId(id)), dumpYaml(kept));
 }
 
 export function updateBreakdownState(bp: BoardPaths, id: string, change: (s: BreakdownState) => void): BreakdownState {
@@ -344,6 +453,31 @@ export function redoHolding(b: Breakdown, job: BreakdownJob | undefined, key: st
   return target && storiesIn(target).some((s) => s.key === itemKey(key)) ? target.item.key : null;
 }
 
+/** The stories no ticket has yet that a redo made or changed: on an approved breakdown nobody has read them yet. */
+export function rewrittenStories(before: Pick<Breakdown, 'epics'>, after: Pick<Breakdown, 'epics'>): string[] {
+  const words = (s: BreakdownStory) => JSON.stringify([s.title, s.story, s.criteria, s.size, s.dependsOn]);
+  const was = new Map(allStories(before).map(({ story }) => [story.key, words(story)]));
+  return allStories(after).filter(({ story }) => !story.ticket && was.get(story.key) !== words(story)).map(({ story }) => story.key);
+}
+
+/** The stories rewritten since the person last said to build, that can still start. */
+export function unreadStories(b: Pick<Breakdown, 'epics'>, state: Pick<BreakdownState, 'rewritten'>): string[] {
+  return allStories(b).filter(({ story }) => !story.ticket && state.rewritten?.includes(story.key)).map(({ story }) => story.key);
+}
+
+/** One writing run of the Analyst on this breakdown, from what its runs used so far; at least a dollar. */
+function wholeRedoCost(state: Pick<BreakdownState, 'usage'>): number {
+  const lines = (state.usage ?? []).filter((l) => l.step === 'spec' && typeof l.costUsd === 'number');
+  const runs = lines.reduce((n, l) => n + l.runs, 0);
+  const each = runs ? lines.reduce((n, l) => n + (l.costUsd ?? 0), 0) / runs : 0;
+  return Math.round(Math.max(1, each) * 10) / 10;
+}
+
+/** Said before a change that redoes the whole breakdown: what it does, and the rough cost. */
+export function wholeRedoWords(state: Pick<BreakdownState, 'usage'>): string {
+  return `This decision is not about one part, so the Analyst rewrites the whole breakdown. Stories that started stay as they are. That uses about $${wholeRedoCost(state).toFixed(2)} of AI at API prices.`;
+}
+
 /** "Payments › Invoices and refunds › S-14", for a ticket's link back and the terminal. */
 export function placeWords(p: StoryPlace): string {
   return [p.epic.title, p.feature?.title, p.story.key].filter(Boolean).join(' › ');
@@ -474,6 +608,7 @@ export function storyProgress(bp: BoardPaths, b: Breakdown, state: BreakdownStat
       if (waitsOn.length && (b.status === 'approved' || state.build?.on)) return { key: story.key, state: 'waits', line: `Waits for ${andWords(waitsOn)} to merge`, waitsOn };
       if (story.ticket) return { key: story.key, state: 'not-started', line: 'Its ticket was deleted. Press Start to build it again' };
       if (!state.build?.on) return { key: story.key, state: 'not-started', line: 'Not started' };
+      if (state.rewritten?.includes(story.key)) return { key: story.key, state: 'waits', line: 'Rewritten after you approved. Read it, then press Build continuously' };
       const redo = redoHolding(b, state.job, story.key);
       if (redo) return { key: story.key, state: 'waits', line: `Waits for the Analyst to redo ${redo}` };
       return { key: story.key, state: 'next', line: 'Next in line' };
@@ -572,11 +707,22 @@ function countsOf(b: Breakdown, progress: StoryProgress[]): BreakdownView['count
   };
 }
 
+/**
+ * The Analyst is said to be working on it, and this computer holds no job for it (its file was damaged or lost): it would
+ * wait for good. It shows as stopped instead, with Try again.
+ */
+function strandedWords(b: Breakdown, state: BreakdownState, meta: Pick<BoardMeta, 'user'>): string | null {
+  if ((b.status !== 'reading' && b.status !== 'drafting') || state.job || !isBreakdownMine(b, meta)) return null;
+  return "squad-kit lost track of the Analyst's work on this computer, so it stopped. Your document is safe. Press Try again.";
+}
+
 /** A breakdown as the board shows it, with how the person pays (for the estimate's dollars). */
 export function breakdownView(bp: BoardPaths, id: string, payment: Payment): BreakdownView {
-  const b = requireBreakdown(bp, id);
-  const state = readBreakdownState(bp, b.id);
+  const read = requireBreakdown(bp, id);
+  const state = readBreakdownState(bp, read.id);
   const meta = readMeta(bp);
+  const stranded = strandedWords(read, state, meta);
+  const b: Breakdown = stranded ? { ...read, status: 'failed', error: stranded } : read;
   const progress = storyProgress(bp, b, state);
   const tracker = sendTarget(bp);
   return {
@@ -590,6 +736,7 @@ export function breakdownView(bp: BoardPaths, id: string, payment: Payment): Bre
     mine: isBreakdownMine(b, meta),
     // What stops Approve breakdown, while there is something to approve.
     problems: b.status === 'ready' ? approveProblems(b) : [],
+    ...(b.status === 'ready' || b.status === 'approved' ? { wholeRedo: wholeRedoWords(state) } : {}),
   };
 }
 
@@ -601,13 +748,14 @@ export async function viewBreakdown(bp: BoardPaths, id: string): Promise<Breakdo
 
 /** The Requirements list. */
 export function breakdownRows(bp: BoardPaths): BreakdownRow[] {
+  const meta = readMeta(bp);
   return listBreakdowns(bp).map((b) => {
     const state = readBreakdownState(bp, b.id);
     const counts = countsOf(b, storyProgress(bp, b, state));
     return {
       id: b.id,
       title: b.title,
-      status: b.status,
+      status: strandedWords(b, state, meta) ? 'failed' : b.status,
       source: { name: b.source.name, kind: b.source.kind },
       counts,
       building: Boolean(state.build?.on) || counts.building > 0,

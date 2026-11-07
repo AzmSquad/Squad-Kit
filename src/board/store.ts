@@ -9,6 +9,7 @@ import { BOARD_STAGES } from './types.js';
 import type { Actor, BoardMeta, Decision, Question, Release, Step, Ticket } from './types.js';
 import { pauseClock, trackStage, waitsNow } from './clock.js';
 import { clearStaleStop, oldStop } from './stale-stop.js';
+import { hasMergeMarks, isPlain, wrongField, type FieldShape } from './shape.js';
 import {
   decisionDoc,
   lessonsDoc,
@@ -169,9 +170,31 @@ const PROJECT_META = ['id', 'layout', 'documentsInGit', 'quality', 'allowedHosts
 /** What the project knows, kept in `.squad/knowledge/` as Markdown. */
 const KNOWLEDGE_META = ['map', 'lessons'] as const;
 
+/** The board's settings as pages and the squad read them. A tool may write any of these in the wrong type. */
+const BOARD_FIELDS: Record<string, FieldShape> = {
+  id: 'text',
+  project: 'text',
+  key: 'text',
+  nextNumber: 'number',
+  engine: 'text',
+  quality: 'text',
+  delivery: 'text',
+  atOnce: 'number',
+  documentsInGit: 'yes-no',
+  git: 'object',
+  commands: 'object',
+  guard: 'object',
+  repos: 'objects',
+  parts: 'objects',
+  localFiles: 'objects',
+  lockedFiles: 'objects',
+  allowedHosts: 'texts',
+};
+
 function configBoard(bp: BoardPaths): Record<string, unknown> | undefined {
   try {
-    return (yaml.load(fs.readFileSync(bp.configFile, 'utf8')) as { board?: Record<string, unknown> } | undefined)?.board;
+    const board = (yaml.load(fs.readFileSync(bp.configFile, 'utf8')) as { board?: unknown } | undefined)?.board;
+    return isPlain(board) && !wrongField(board, BOARD_FIELDS) ? board : undefined;
   } catch {
     return undefined;
   }
@@ -181,8 +204,8 @@ function configBoard(bp: BoardPaths): Record<string, unknown> | undefined {
 export function settingsProblem(bp: BoardPaths): string | null {
   if (!fs.existsSync(bp.configFile)) return null;
   try {
-    const raw = yaml.load(fs.readFileSync(bp.configFile, 'utf8'));
-    if (raw && typeof raw === 'object') return null;
+    const raw = yaml.load(fs.readFileSync(bp.configFile, 'utf8')) as { board?: unknown } | null;
+    if (raw && typeof raw === 'object' && (raw.board === undefined || configBoard(bp))) return null;
   } catch {
     // Said below.
   }
@@ -309,10 +332,12 @@ export const TICKET_HOME = {
   proofRound: 'local',
   retryPhase: 'local',
   capRaise: 'local',
+  createKey: 'local',
   stopRequested: 'local',
   reviewNotes: 'local',
   localSetup: 'local',
   setupTrouble: 'local',
+  setupOwed: 'local',
   parts: 'project',
   storyDir: 'local',
   copies: 'local',
@@ -439,6 +464,8 @@ export class UnreadableTicket extends Error {
     readonly id: string,
     /** The exact reason, for engineers. */
     readonly detail: string,
+    /** The file in the ticket's folder that holds the trouble. */
+    readonly file = 'ticket.md',
   ) {
     super(`${id} could not be read: its file is damaged, so it is not on the board. Nothing is lost. An engineer can look at it.`);
     this.name = 'UnreadableTicket';
@@ -447,13 +474,75 @@ export class UnreadableTicket extends Error {
 
 const STAGES = new Set<string>([...BOARD_STAGES, 'done']);
 
+/** The project's part of a ticket, as pages read it: a tool may write any of these in the wrong type. */
+const TICKET_FIELDS: Record<string, FieldShape> = {
+  kind: 'text',
+  priority: 'text',
+  track: 'text',
+  owner: 'text',
+  builder: 'text',
+  reviewer: 'text',
+  repo: 'text',
+  branch: 'text',
+  release: 'text',
+  foundIn: 'text',
+  severity: 'text',
+  mergedAt: 'text',
+  changeOf: 'text',
+  mockup: 'text',
+  parts: 'texts',
+  follows: 'texts',
+  dependsOn: 'texts',
+  alsoChanged: 'texts',
+  decided: 'objects',
+  added: 'objects',
+  overrides: 'objects',
+  outdated: 'objects',
+  work: 'object',
+  gates: 'object',
+  brief: 'object',
+  pr: 'object',
+  specApproved: 'object',
+  dependency: 'object',
+  breakdown: 'object',
+  handedOver: 'object',
+  archived: 'object',
+  setsUp: 'yes-no',
+  hookOwed: 'yes-no',
+};
+
 /** What squad-kit needs from a ticket file for the ticket to show at all, or why it does not have it. */
 function shapeProblem(t: Partial<Ticket>, id: string): string | null {
   for (const key of ['id', 'title', 'createdAt', 'createdBy'] as const) if (typeof t[key] !== 'string' || !t[key]) return `It has no ${key}.`;
   if (t.id!.toUpperCase() !== id.toUpperCase()) return `Its id says ${t.id}, in the folder of ${id.toUpperCase()}.`;
   if (!STAGES.has(String(t.stage))) return `"${String(t.stage)}" is not a stage.`;
   if (typeof t.source?.type !== 'string') return 'It does not say where it came from.';
+  return wrongField(t as Record<string, unknown>, TICKET_FIELDS);
+}
+
+/** A file of the ticket squad-kit cannot make sense of. The next save would write over it and lose what it holds. */
+function docProblem(docs: Record<string, string>, t: Partial<Ticket>): { file: string; detail: string } | null {
+  for (const [file, text] of Object.entries(docs)) if (hasMergeMarks(text)) return { file, detail: 'It still has the marks of a merge in it.' };
+  const says: Record<string, () => boolean> = {
+    'spec.md': () => t.story !== undefined || t.criteria !== undefined || t.releaseNote !== undefined || t.changes !== undefined,
+    'questions.md': () => Boolean(t.questions?.length),
+    'design.md': () => Boolean(t.decision || t.steps),
+    'notes.md': () => Boolean(t.notes?.length),
+    'proof.md': () => Boolean(t.proof?.length),
+  };
+  // Only its title is fine: an empty proof is written that way.
+  for (const [file, read] of Object.entries(says)) if (docs[file]?.replace(/^# .*$/m, '').trim() && !read()) return { file, detail: 'It holds none of the parts squad-kit reads from that file.' };
   return null;
+}
+
+/** Why one of a ticket's files could not be read, with the file it was. */
+class TicketFileProblem extends Error {
+  constructor(
+    readonly file: string,
+    detail: string,
+  ) {
+    super(detail);
+  }
 }
 
 function readTicketFiles(bp: BoardPaths, id: string): Ticket | null {
@@ -462,14 +551,17 @@ function readTicketFiles(bp: BoardPaths, id: string): Ticket | null {
   if (!fs.existsSync(files[0]!)) return null;
   try {
     return cached(`ticket:${folder}`, files, () => {
-      const docs = Object.fromEntries(DOC_FILES.map((f) => [f, readText(path.join(folder, f))]).filter(([, v]) => v !== undefined)) as Record<string, string>;
+      // A tool on another system may end its lines differently: the words are the same.
+      const docs = Object.fromEntries(DOC_FILES.map((f) => [f, readText(path.join(folder, f))?.replace(/\r\n/g, '\n')]).filter(([, v]) => v !== undefined)) as Record<string, string>;
       const t = joinTicket(bp, id.toUpperCase(), docs, readYaml<TicketState>(stateFile(bp, id)) ?? {});
       const wrong = shapeProblem(t, id);
       if (wrong) throw new Error(wrong);
+      const doc = docProblem(docs, t);
+      if (doc) throw new TicketFileProblem(doc.file, doc.detail);
       return t;
     });
   } catch (err) {
-    throw new UnreadableTicket(id.toUpperCase(), (err as Error).message);
+    throw new UnreadableTicket(id.toUpperCase(), (err as Error).message, err instanceof TicketFileProblem ? err.file : undefined);
   }
 }
 
@@ -532,7 +624,7 @@ export function brokenTickets(bp: BoardPaths, listed: Ticket[] = listTickets(bp)
       readTicketFiles(bp, d.name);
     } catch (err) {
       const e = err as UnreadableTicket;
-      out.push({ id: e.id, problem: e.message, file: path.relative(bp.root, path.join(ticketDir(bp, e.id), 'ticket.md')), detail: e.detail });
+      out.push({ id: e.id, problem: e.message, file: path.relative(bp.root, path.join(ticketDir(bp, e.id), e.file)), detail: e.detail });
     }
   }
   return out.sort((a, b) => idNumber(a.id) - idNumber(b.id) || a.id.localeCompare(b.id));
@@ -604,32 +696,112 @@ export function addActivity(ticket: Ticket, who: Actor, text: string): void {
 
 /* ── Decisions ──────────────────────────────────────────── */
 
-/**
- * The board's own records in a folder. A project may keep its own notes there too (an older squad-kit wrote release
- * notes into releases/): a file that does not read as one of the board's records is left alone, not shown.
- */
-function listDocs<T>(dir: string, parse: (text: string) => T, ours: (x: T) => boolean): T[] {
-  if (!fs.existsSync(dir)) return [];
-  return fs
-    .readdirSync(dir)
-    .filter((f) => f.endsWith('.md'))
-    .map((f) => {
-      const file = path.join(dir, f);
-      return cached(`doc:${file}`, [file], () => {
-        try {
-          const x = parse(fs.readFileSync(file, 'utf8'));
-          return ours(x) ? x : null;
-        } catch {
-          return null;
-        }
-      });
-    })
-    .filter((x): x is T => x !== null);
+/** A decision, a release or a breakdown whose file cannot be read: the person's words, and for engineers the file and why. */
+export interface BrokenRecord {
+  kind: 'decision' | 'release' | 'breakdown';
+  id: string;
+  problem: string;
+  file: string;
+  detail: string;
 }
+
+const RECORD_WORD: Record<BrokenRecord['kind'], string> = { decision: 'Decision', release: 'Release', breakdown: 'Breakdown' };
+
+/** What the person reads about a record that cannot be read. */
+export function recordProblemWords(kind: BrokenRecord['kind'], id: string): string {
+  return `${RECORD_WORD[kind]} ${id} could not be read: its file is damaged, so it is not shown here. Nothing is lost. An engineer can look at it.`;
+}
+
+interface DocKind<T> {
+  kind: 'decision' | 'release';
+  parse(text: string): T;
+  /** What is wrong with it, for engineers; `name` is its file's name. */
+  problem(x: T, name: string): string | null;
+  /** The name squad-kit gives such a file. */
+  named: RegExp;
+  /** Words only a file of this kind holds, whatever it is called. */
+  claims: RegExp;
+}
+
+interface DocRead<T> {
+  value: T | null;
+  /** Why this record cannot be read. Null with no value: not one of the board's records. */
+  detail: string | null;
+}
+
+/**
+ * One file in the board's folders. A project may keep its own notes there too (an older squad-kit wrote release notes
+ * into releases/): a file that is neither named nor written as a record is left alone, not shown. One that is, and
+ * cannot be read, is a plain problem the person sees.
+ */
+function readDoc<T>(file: string, kind: DocKind<T>): DocRead<T> {
+  return cached(`doc:${file}`, [file], (): DocRead<T> => {
+    const text = fs.readFileSync(file, 'utf8');
+    const name = path.basename(file, '.md');
+    let detail: string | null;
+    let x: T | null = null;
+    try {
+      detail = hasMergeMarks(text) ? 'It still has the marks of a merge in it.' : null;
+      x = kind.parse(text);
+      detail ??= kind.problem(x, name);
+    } catch (err) {
+      detail = (err as Error).message;
+    }
+    if (!detail) return { value: x, detail: null };
+    return { value: null, detail: kind.named.test(name) || kind.claims.test(text) ? detail : null };
+  });
+}
+
+function docFiles(dir: string): string[] {
+  return fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith('.md')).map((f) => path.join(dir, f)) : [];
+}
+
+function listDocs<T>(dir: string, kind: DocKind<T>): T[] {
+  return docFiles(dir).map((f) => readDoc(f, kind).value).filter((x): x is T => x !== null);
+}
+
+function brokenDocs<T>(bp: BoardPaths, dir: string, kind: DocKind<T>): BrokenRecord[] {
+  return docFiles(dir).flatMap((f) => {
+    const { detail } = readDoc(f, kind);
+    const id = path.basename(f, '.md');
+    return detail ? [{ kind: kind.kind, id, problem: recordProblemWords(kind.kind, id), file: path.relative(bp.root, f), detail }] : [];
+  });
+}
+
+/** A date a tool wrote without quotes reads back as a date, not as words. */
+function dayText(d: unknown): unknown {
+  return d instanceof Date ? d.toISOString().slice(0, 10) : d;
+}
+
+const DECISION_FIELDS: Record<string, FieldShape> = { from: 'text', approvedBy: 'text', date: 'text', area: 'text', replaces: 'text', replacedBy: 'text', tickets: 'texts', buildsOn: 'texts', proposed: 'yes-no' };
+
+const DECISION_DOC: DocKind<Decision> = {
+  kind: 'decision',
+  parse(text) {
+    const d = parseDecisionDoc(text);
+    d.date = dayText(d.date) as string;
+    if (typeof d.id === 'string' && typeof d.title === 'string') Object.assign(d, { tickets: d.tickets ?? [], from: d.from ?? '', approvedBy: d.approvedBy ?? '', date: d.date ?? '', checkedBy: d.checkedBy ?? null });
+    return d;
+  },
+  problem(d, name) {
+    if (typeof d.id !== 'string' || !/^[\w.-]+$/.test(d.id)) return 'It has no id.';
+    if (typeof d.title !== 'string' || !d.title) return 'It has no title.';
+    if (DECISION_DOC.named.test(name) && d.id !== name) return `Its id says ${d.id}, in the file of ${name}.`;
+    if (d.checkedBy !== null && (typeof d.checkedBy !== 'object' || Array.isArray(d.checkedBy))) return '"checkedBy" is not in the right form.';
+    return wrongField(d as unknown as Record<string, unknown>, DECISION_FIELDS);
+  },
+  named: /^([A-Za-z][\w-]*\.\d+|ADR-\d+)$/,
+  claims: /^(id: |## Chosen$)/m,
+};
 
 /** Newest first: by date, then by name. */
 export function listDecisions(bp: BoardPaths): Decision[] {
-  return listDocs(bp.decisionsDir, parseDecisionDoc, (d) => Boolean(d.id && d.title)).sort((a, b) => String(b.date).localeCompare(String(a.date)) || idNumber(b.id) - idNumber(a.id) || b.id.localeCompare(a.id));
+  return listDocs(bp.decisionsDir, DECISION_DOC).sort((a, b) => String(b.date).localeCompare(String(a.date)) || idNumber(b.id) - idNumber(a.id) || b.id.localeCompare(a.id));
+}
+
+/** Decisions whose file cannot be read, so they are never silently gone. */
+export function brokenDecisions(bp: BoardPaths): BrokenRecord[] {
+  return brokenDocs(bp, bp.decisionsDir, DECISION_DOC);
 }
 
 export function writeDecision(bp: BoardPaths, decision: Decision): void {
@@ -642,7 +814,8 @@ export function writeDecision(bp: BoardPaths, decision: Decision): void {
  */
 export function nextDecisionId(bp: BoardPaths, ticketId?: string): string {
   const prefix = ticketId ? ticketId.toUpperCase() : 'STACK';
-  const taken = new Set(listDecisions(bp).map((d) => d.id));
+  // A file that cannot be read holds its name too, and is never written over.
+  const taken = new Set([...listDecisions(bp).map((d) => d.id), ...brokenDecisions(bp).map((d) => d.id)]);
   let n = 1;
   while (taken.has(`${prefix}.${n}`)) n += 1;
   return `${prefix}.${n}`;
@@ -659,23 +832,59 @@ function releaseStateFile(bp: BoardPaths, version: string): string {
   return path.join(bp.stateDir, 'releases', `${version}.yaml`);
 }
 
+/** A damaged file here only loses what the release did on this computer, never the release. */
 function withReleaseState(bp: BoardPaths, r: Release): Release {
-  const state = readYaml<Pick<Release, 'log' | 'unpushed'>>(releaseStateFile(bp, r.version));
-  return { ...r, ...(state?.log ? { log: state.log } : {}), ...(state?.unpushed?.length ? { unpushed: state.unpushed } : {}) };
+  let state: Pick<Release, 'log' | 'unpushed'> | undefined;
+  try {
+    state = readYaml<Pick<Release, 'log' | 'unpushed'>>(releaseStateFile(bp, r.version));
+  } catch {
+    state = undefined;
+  }
+  return { ...r, ...(Array.isArray(state?.log) ? { log: state.log } : {}), ...(Array.isArray(state?.unpushed) && state.unpushed.length ? { unpushed: state.unpushed } : {}) };
 }
 
+const RELEASE_FIELDS: Record<string, FieldShape> = { from: 'text', date: 'text', whatsappDraft: 'text', tickets: 'texts', bugs: 'texts', out: 'texts', addons: 'object', titles: 'object', gateStop: 'objects' };
+
+const RELEASE_DOC: DocKind<Release> = {
+  kind: 'release',
+  parse(text) {
+    const r = parseReleaseDoc(text);
+    r.date = dayText(r.date) as string | undefined;
+    if (r.date === undefined) delete r.date;
+    if (typeof r.version === 'string') Object.assign(r, { tickets: r.tickets ?? [], from: r.from ?? '', addons: r.addons ?? { changelog: true, tag: true, pipeline: true, whatsapp: true } });
+    return r;
+  },
+  problem(r, name) {
+    if (typeof r.version !== 'string' || !/^v\d+\.\d+\.\d+[\w.-]*$/.test(r.version)) return 'It has no version.';
+    if (r.status !== 'draft' && r.status !== 'released') return `"${String(r.status)}" is not a release's state.`;
+    if (RELEASE_DOC.named.test(name) && r.version !== name) return `Its version says ${r.version}, in the file of ${name}.`;
+    return wrongField(r as unknown as Record<string, unknown>, RELEASE_FIELDS);
+  },
+  named: /^v\d+\.\d+\.\d+[\w.-]*$/,
+  claims: /^(version: |## Notes$)/m,
+};
+
 export function listReleases(bp: BoardPaths): Release[] {
-  return listDocs(bp.releasesDir, parseReleaseDoc, (r) => Boolean(r.version && r.status)).map((r) => withReleaseState(bp, r)).sort((a, b) => {
+  return listDocs(bp.releasesDir, RELEASE_DOC).map((r) => withReleaseState(bp, r)).sort((a, b) => {
     const [x, y] = [versionKey(a.version), versionKey(b.version)];
     for (let i = 0; i < 3; i += 1) if (x[i] !== y[i]) return (y[i] ?? 0) - (x[i] ?? 0);
     return 0;
   });
 }
 
+/** Releases whose file cannot be read, so they are never silently gone. */
+export function brokenReleases(bp: BoardPaths): BrokenRecord[] {
+  return brokenDocs(bp, bp.releasesDir, RELEASE_DOC);
+}
+
+/** A release's file that cannot be read says so, in the same plain words as the page. */
 export function readRelease(bp: BoardPaths, version: string): Release | null {
   const v = version.startsWith('v') ? version : `v${version}`;
   const file = path.join(bp.releasesDir, `${v}.md`);
-  return fs.existsSync(file) ? withReleaseState(bp, parseReleaseDoc(fs.readFileSync(file, 'utf8'))) : null;
+  if (!fs.existsSync(file)) return null;
+  const { value, detail } = readDoc(file, RELEASE_DOC);
+  if (detail) throw new Error(recordProblemWords('release', v));
+  return value ? withReleaseState(bp, value) : null;
 }
 
 export function writeRelease(bp: BoardPaths, release: Release): void {

@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { execSync, spawn } from 'node:child_process';
 import yaml from 'js-yaml';
 import type { BoardPaths } from '../src/board/store.js';
 
@@ -131,6 +131,53 @@ describe('one app, many projects', () => {
     fs.mkdirSync(path.join(dir, 'src'));
     const again = await json<{ id: string; added: boolean; did: string[] }>(call('POST', '/api/v1/app/projects', { folder: path.join(dir, 'src') }));
     expect(again).toMatchObject({ id: res.id, added: false, did: [] });
+  });
+
+  it('a folder inside something bigger is never guessed at: Add asks, naming the folder, and does what the person picks', async () => {
+    // A workspace with an old project, and a fresh clone under it that has its own .git and a .squad with no settings.
+    const workspace = path.join(tmp, 'workspace');
+    fs.mkdirSync(path.join(workspace, '.squad'), { recursive: true });
+    const oldSettings = 'version: 1\nproject:\n  name: Old\n  projectRoots:\n    - .\ntracker:\n  type: none\nnaming:\n  includeTrackerId: false\n  globalSequence: true\nagents: []\n';
+    fs.writeFileSync(path.join(workspace, '.squad', 'config.yaml'), oldSettings);
+    const clone = path.join(workspace, 'clone');
+    fs.mkdirSync(path.join(clone, '.squad'), { recursive: true });
+    execSync('git init -q -b main', { cwd: clone });
+
+    const res = await call('POST', '/api/v1/app/projects', { folder: clone });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe(`This folder sits inside another squad-kit project, in ${workspace}. Open that project, or add this folder on its own?`);
+    // Nothing happened to the project above it.
+    expect(fs.readFileSync(path.join(workspace, '.squad', 'config.yaml'), 'utf8')).toBe(oldSettings);
+    expect(squads.started).not.toContain(workspace);
+
+    // On its own: this folder is the project, and the one above stays as it was.
+    const own = await json<{ root: string; added: boolean }>(call('POST', '/api/v1/app/projects', { folder: clone, choice: 'here' }));
+    expect(own).toMatchObject({ root: clone, added: true });
+    expect(fs.readFileSync(path.join(workspace, '.squad', 'config.yaml'), 'utf8')).toBe(oldSettings);
+    expect(fs.existsSync(path.join(clone, '.squad', 'config.yaml'))).toBe(true);
+  });
+
+  it('a subfolder of a repo offers the top folder, and only that', async () => {
+    const shop = path.join(tmp, 'shop');
+    fs.mkdirSync(path.join(shop, 'web'), { recursive: true });
+    fs.writeFileSync(path.join(shop, 'web', 'index.html'), 'x');
+    execSync('git init -q -b main && git add -A && git -c user.name=t -c user.email=t@t commit -q -m first', { cwd: shop });
+
+    // The folder browser says so before anyone presses a button.
+    const look = await json<{ look: { title: string; ask?: { kind: string; root: string; name: string } } }>(get(`/api/v1/app/folders?path=${encodeURIComponent(path.join(shop, 'web'))}`));
+    expect(look.look.title).toBe('Part of a bigger project');
+    expect(look.look.ask).toMatchObject({ kind: 'inside-repo', root: shop, name: 'shop' });
+
+    const asked = await call('POST', '/api/v1/app/projects', { folder: path.join(shop, 'web') });
+    expect(asked.status).toBe(400);
+    expect(((await asked.json()) as { error: string }).error).toContain(`part of a bigger project, shop, in ${shop}`);
+    const here = await call('POST', '/api/v1/app/projects', { folder: path.join(shop, 'web'), choice: 'here' });
+    expect(here.status).toBe(400);
+    expect(fs.existsSync(path.join(shop, 'web', '.squad'))).toBe(false);
+
+    const top = await json<{ root: string; added: boolean }>(call('POST', '/api/v1/app/projects', { folder: path.join(shop, 'web'), choice: 'above' }));
+    expect(top).toMatchObject({ root: shop, added: true });
+    expect(fs.existsSync(path.join(shop, '.squad', 'config.yaml'))).toBe(true);
   });
 
   it('refuses a folder that is not there, or a project whose board runs in another squad-kit', async () => {

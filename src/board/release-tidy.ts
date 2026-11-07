@@ -12,6 +12,7 @@ import { copyDirsIn, removeWorktree } from '../engine/git.js';
 import { dropTicketCache } from '../engine/sandbox.js';
 import fs from 'node:fs';
 import { copyViews } from '../engine/copies.js';
+import { plainWords } from '../core/for-people.js';
 
 /**
  * Three release fixes. Take a ticket out of the next release before it is made (its code stays in the base; the
@@ -89,14 +90,13 @@ export function afterRelease(bp: BoardPaths, release: Release): void {
   const lines: { ok: boolean; text: string }[] = [];
   try {
     const done = cleanBranches(bp, { only: release.tickets });
-    if (done.deleted.length) lines.push({ ok: true, text: `Deleted the old ticket branches on this computer: ${done.deleted.join(', ')}` });
+    if (done.deleted.length) lines.push({ ok: true, text: 'Deleted what was left over from released tickets on this computer' });
     for (const f of done.failed) lines.push({ ok: false, text: `Could not delete ${f}` });
     if (done.remoteLeft.length) {
-      const remote = done.remoteLeft[0]!.remote;
-      lines.push({ ok: true, text: `Their branches on ${remote} stay (${done.remoteLeft.length}). To delete them there too: squad branches --clean --remote` });
+      lines.push({ ok: true, text: `What is left of them in the shared copy of the code stays (${done.remoteLeft.length}). To delete it too: squad branches --clean --remote` });
     }
   } catch (err) {
-    lines.push({ ok: false, text: `Could not tidy the old ticket branches: ${(err as Error).message}` });
+    lines.push({ ok: false, text: `Could not tidy what was left over: ${plainWords(err, 'Tidying after a release', 'something technical stopped it. An engineer can see why in the log.')}` });
   }
   if (!lines.length) return;
   release.log = [...(release.log ?? []), ...lines];
@@ -141,7 +141,7 @@ export async function settleRelease(bp: BoardPaths, why: string): Promise<Releas
   const rest = release.tickets.filter((id) => !going.includes(id));
   const unpushed = repos.flatMap((r) => (r.unpushed ? [r.unpushed] : []));
   if (release.addons.pipeline && (meta.commands?.deploy || meta.repos?.some((x) => x.commands.deploy))) {
-    log.push({ ok: false, text: 'The pipeline did not run, because the release was cut off. Run it yourself when you are ready.' });
+    log.push({ ok: false, text: 'Your after-release step did not run, because the release was cut off. Run it yourself when you are ready.' });
   }
   const done: Release = { ...release, status: 'released', date: release.date ?? j.at, tickets: going, log, ...(unpushed.length ? { unpushed } : {}) };
   if (!unpushed.length) delete done.unpushed;

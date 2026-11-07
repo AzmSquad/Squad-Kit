@@ -62,7 +62,9 @@ import { copyViews } from '../../engine/copies.js';
 import { isApiProof } from '../../engine/proof-verdict.js';
 import { addPart, changePart, partsOf, removePart, repoPaths, severalParts, type PartChange } from '../../board/parts.js';
 import { addLocalFile, addLockedFile, lockDockerFiles, projectFilesView, removeProjectFile, useMyFile } from '../../board/project-files.js';
-import { boardExists, boardPaths, brokenTickets, listDecisions, listReleases, listTickets, readMeta, readRelease, readTicket, settingsProblem, ticketProblem, writeMeta } from '../../board/store.js';
+import { videoNotesWork } from '../../engine/media.js';
+import { boardExists, boardPaths, brokenDecisions, brokenReleases, brokenTickets, listDecisions, listReleases, listTickets, readMeta, readRelease, readTicket, settingsProblem, ticketProblem, writeMeta } from '../../board/store.js';
+import { brokenBreakdowns } from '../../board/requirements.js';
 import { seedDemoBoard } from '../../board/demo.js';
 import type { AgentName, PlanComment, PlanEdit } from '../../board/types.js';
 import { repoFor, reposOf } from '../../engine/repos.js';
@@ -70,7 +72,7 @@ import type { ProjectCommands, Release } from '../../board/types.js';
 import { aiTool, guessTracker, speechModule, trackerFor, trackerModule, TRACKERS } from '../../modules/registry.js';
 import type { Tracker } from '../../modules/tracker/types.js';
 import { findNestedRepos } from '../../engine/repos.js';
-import { git } from '../../engine/git.js';
+import { git, isRepo, remotes } from '../../engine/git.js';
 import { allowedFile, chatSummaries, dispositionOf, mimeOf, readConversation, ticketConversations, ticketFolders } from '../../engine/conversations.js';
 import { buildStamp } from '../../board/console-info.js';
 import { timingSafeEqualHex } from '../auth.js';
@@ -92,13 +94,14 @@ import { readUsual } from '../../board/usual.js';
 import { answerAsk } from '../../board/ask.js';
 import { withProblem } from '../../board/problem.js';
 import { PACKAGE_HOSTS, guardNote, parseHosts, sandboxStatus } from '../../engine/sandbox.js';
-import { allowPath, guardSupport } from '../../engine/project-guard.js';
+import { guardSupport, sharedPath } from '../../engine/project-guard.js';
 import { mountCostApi } from './cost.js';
 import { freePortAndRetry } from '../../engine/free-port.js';
 import { changeDecided } from '../../board/auto.js';
 import { lookAgain } from '../../engine/try-app.js';
 import { takeBack } from '../../engine/handover.js';
-import { fileTroubleWords, isDiskTrouble } from '../../core/file-trouble.js';
+import { plainWords } from '../../core/for-people.js';
+import { act } from './act.js';
 
 const DAY = 86_400_000;
 
@@ -124,22 +127,23 @@ function withNotes(bp: ReturnType<typeof boardPaths>, r: Release): Release {
   return r.status === 'draft' && !r.notes.trim() ? { ...r, notes: composeNotes(bp, r) } : r;
 }
 
+/**
+ * A branch or remote that does not exist would only show much later, as a story or a release that fails. An engineer
+ * sets these, so the words are an engineer's. A folder that is not in git yet, or has no commits, has nothing to check.
+ */
+function checkWhereCodeGoes(dir: string, base: string, remote: string): void {
+  if (!isRepo(dir)) return;
+  const remotesHere = remotes(dir);
+  if (remote && !remotesHere.includes(remote)) throw new Error(`There is no remote called "${remote}" here. ${remotesHere.length ? `It has: ${remotesHere.join(', ')}.` : 'It has none yet.'} Nothing was saved.`);
+  const branches = git(dir, ['for-each-ref', '--format=%(refname:short)', 'refs/heads', ...(remote ? [`refs/remotes/${remote}`] : [])], { allowFail: true }).split('\n').map((b) => b.replace(`${remote}/`, '')).filter((b) => b && b !== 'HEAD' && b !== remote);
+  if (branches.length && !branches.includes(base)) throw new Error(`There is no branch called "${base}" here. It has: ${[...new Set(branches)].slice(0, 8).join(', ')}. Nothing was saved.`);
+}
+
 async function body<T>(c: Context): Promise<T> {
   try {
     return (await c.req.json()) as T;
   } catch {
     return {} as T;
-  }
-}
-
-/** Runs a board action and turns a person-facing mistake into a 400 with the message. */
-async function act(c: Context, fn: () => unknown) {
-  try {
-    return c.json(((await fn()) as object) ?? { ok: true });
-  } catch (err) {
-    if (isDiskTrouble(err)) return c.json({ error: fileTroubleWords(err) }, 400);
-    if (err instanceof BoardActionError || err instanceof Error) return c.json({ error: err.message }, 400);
-    throw err;
   }
 }
 
@@ -160,7 +164,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
       try {
         connection = { at: Date.now(), key, user: await tracker.whoAmI() };
       } catch (err) {
-        connection = { at: Date.now(), key, error: (err as Error).message };
+        connection = { at: Date.now(), key, error: plainWords(err, 'Checking the tracker sign-in') };
       }
     }
     return { tracker: connection.error ? null : tracker, user: connection.user, error: connection.error };
@@ -197,11 +201,11 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
 
   // Speech to text for voice and video notes. The key stays in .squad/secrets.yaml and is never sent back.
   const root = path.dirname(opts.paths.squadDir);
-  app.get('/api/v1/speech', (c) => c.json({ hasKey: speechModule().hasKey(root), label: speechModule().label }));
+  app.get('/api/v1/speech', (c) => c.json({ hasKey: speechModule().hasKey(root), label: speechModule().label, video: videoNotesWork() }));
 
   app.put('/api/v1/speech', async (c) => {
     const b = await body<{ key?: string; munsit?: string; remove?: boolean }>(c);
-    return act(c, () => {
+    return act(c, async () => {
       const speech = speechModule();
       if (b.remove) {
         speech.removeKey(root);
@@ -209,8 +213,10 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
       }
       const key = (b.key ?? b.munsit)?.trim();
       if (!key) throw new Error(`Paste your ${speech.label} key first.`);
+      const said = await speech.checkKey(key);
+      if (said === 'wrong') throw new BoardActionError(`${speech.label} did not accept this key, so it was not saved. Copy it again from your ${speech.label} account.`);
       speech.saveKey(root, key);
-      return { ok: true, hasKey: true };
+      return { ok: true, hasKey: true, ...(said === 'no-answer' ? { unchecked: true } : {}) };
     });
   });
 
@@ -235,7 +241,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
         }),
       });
     } catch (err) {
-      return c.json({ connected: true, error: (err as Error).message, sprints: [], items: [] });
+      return c.json({ connected: true, error: plainWords(err, 'Reading the backlog'), sprints: [], items: [] });
     }
   });
 
@@ -255,6 +261,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     const meta = readMeta(bp);
     const all = listTickets(bp);
     const broken = brokenTickets(bp, all);
+    const records = [...brokenDecisions(bp), ...brokenReleases(bp), ...brokenBreakdowns(bp)];
     const recent = listReleases(bp).filter((r) => r.status === 'released' && r.date && Date.now() - Date.parse(r.date) < 30 * DAY);
     const ctl = opts.control;
     const usual = readUsual(bp);
@@ -268,6 +275,8 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
       // Archived tickets leave the board; "Show archived" shows them again.
       archived: all.filter((t) => t.stage !== 'done' && t.archived),
       ...(broken.length ? { broken } : {}),
+      // Decisions, releases and breakdowns whose file cannot be read: their own pages show them too.
+      ...(records.length ? { brokenRecords: records } : {}),
       stats: {
         released30: recent.reduce((n, r) => n + r.tickets.length, 0),
         bugs30: recent.reduce((n, r) => n + (r.bugs?.length ?? 0), 0),
@@ -378,6 +387,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
         edgeCases: b.edgeCases,
         files: b.files,
         talkFirst: Boolean(b.talkFirst),
+        ...(typeof b.key === 'string' && b.key ? { key: b.key.slice(0, 80) } : {}),
       }),
     );
   });
@@ -395,7 +405,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     try {
       return c.json(draftJob(bp, c.req.param('id')));
     } catch (err) {
-      return c.json({ error: (err as Error).message }, 404);
+      return c.json({ error: plainWords(err, 'Reading a draft') }, 404);
     }
   });
   app.get('/api/v1/tickets/draft/:id/files', (c) => act(c, () => draftFiles(bp, c.req.param('id'))));
@@ -504,8 +514,9 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
       return c.json(proposeChange(bp, c.req.param('id'), b.text ?? '', b.from));
     } catch (err) {
       if (err instanceof ReleasedError) return c.json({ error: err.message, released: true, choices: ['ticket', 'bug'] }, 409);
-      if (err instanceof Error) return c.json({ error: err.message }, 400);
-      throw err;
+      return act(c, () => {
+        throw err;
+      });
     }
   });
 
@@ -643,7 +654,8 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
   app.get('/api/v1/decisions', (c) => {
     if (!boardExists(bp)) return c.json({ decisions: [], map: [], lessons: [] });
     const meta = readMeta(bp);
-    return c.json({ decisions: listDecisions(bp), map: meta.map, lessons: meta.lessons });
+    const broken = brokenDecisions(bp);
+    return c.json({ decisions: listDecisions(bp), map: meta.map, lessons: meta.lessons, ...(broken.length ? { broken } : {}) });
   });
 
   app.post('/api/v1/architecture/read', (c) => act(c, () => readCodeAgain(bp)));
@@ -697,7 +709,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
         meta.allowedHosts = hosts;
       }
       if (b.guard !== undefined) {
-        const clean = (list: unknown): string[] => [...new Set((Array.isArray(list) ? list : []).map((p) => String(p).trim()).filter(Boolean).map((p) => allowPath(p)))];
+        const clean = (list: unknown): string[] => [...new Set((Array.isArray(list) ? list : []).map((p) => String(p).trim()).filter(Boolean).map((p) => sharedPath(p)))];
         const read = clean(b.guard.allowRead);
         const write = clean(b.guard.allowWrite);
         meta.guard = read.length || write.length ? { ...(read.length ? { allowRead: read } : {}), ...(write.length ? { allowWrite: write } : {}) } : undefined;
@@ -712,7 +724,11 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
           Object.entries(b.commands).map(([k, v]) => [k, String(v ?? '').trim()]).filter(([, v]) => v),
         ) as ProjectCommands;
       }
-      if (b.git) meta.git = { base: b.git.base?.trim() || meta.git?.base || 'main', remote: b.git.remote?.trim() ?? meta.git?.remote ?? '' };
+      if (b.git) {
+        const next = { base: b.git.base?.trim() || meta.git?.base || 'main', remote: b.git.remote?.trim() ?? meta.git?.remote ?? '' };
+        checkWhereCodeGoes(root, next.base, next.remote);
+        meta.git = next;
+      }
       if (typeof b.parallel === 'number' && b.parallel >= 1 && b.parallel <= 5) meta.parallel = Math.round(b.parallel);
       if (b.delivery === null) delete meta.delivery;
       else if (b.delivery === 'pr' || b.delivery === 'push') meta.delivery = b.delivery;
@@ -727,7 +743,9 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
           const commands = Object.fromEntries(
             Object.entries(u.commands ?? r.commands).map(([k, v]) => [k, String(v ?? '').trim()]).filter(([, v]) => v),
           ) as ProjectCommands;
-          return { ...r, base: u.base?.trim() || r.base, remote: u.remote?.trim() ?? r.remote, commands };
+          const next = { base: u.base?.trim() || r.base, remote: u.remote?.trim() ?? r.remote };
+          checkWhereCodeGoes(path.join(root, r.path), next.base, next.remote);
+          return { ...r, ...next, commands };
         });
       }
       writeMeta(bp, meta);
@@ -877,7 +895,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
         try {
           added.push(addOne(additionOf(f, pick), look.name).added.name);
         } catch (err) {
-          left.push({ name: f.name, why: (err as Error).message });
+          left.push({ name: f.name, why: plainWords(err, 'Adding from a folder') });
         }
       }
       return { added, left };

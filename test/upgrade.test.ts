@@ -1,8 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import type { ChildProcess } from 'node:child_process';
 import { confirm } from '@inquirer/prompts';
 import { runUpgrade } from '../src/commands/upgrade.js';
+import { boardPaths, writeMeta } from '../src/board/store.js';
 import { readInstalledPackage } from '../src/core/package-info.js';
 import type { InstalledPackage } from '../src/core/package-info.js';
 import { isNewer } from '../src/core/registry.js';
@@ -229,3 +233,41 @@ describe('isNewer', () => {
     expect(isNewer('0.2.0', '0.2.0')).toBe(false);
   });
 });
+
+describe('after the upgrade', () => {
+  async function upgradedIn(dir: string): Promise<string> {
+    const was = process.cwd();
+    process.chdir(dir);
+    const lines: string[] = [];
+    const keep = (s: unknown) => {
+      lines.push(String(s));
+      return true;
+    };
+    vi.spyOn(process.stdout, 'write').mockImplementation(keep);
+    vi.spyOn(process.stderr, 'write').mockImplementation(keep);
+    vi.spyOn(console, 'log').mockImplementation(keep);
+    try {
+      await runUpgrade({ yes: true });
+    } finally {
+      process.chdir(was);
+      vi.restoreAllMocks();
+    }
+    return lines.join('');
+  }
+
+  it('a project on squad-kit 1 is not sent to squad migrate, and an older one still is', async () => {
+    const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'squad-upgrade-')));
+    try {
+      writeMeta(boardPaths(path.join(tmp, '.squad')), { project: 'App', key: 'AP', nextNumber: 1, engine: 'live', user: { name: 'Momen', role: 'Project manager' }, roles: { analyst: 'C', architect: 'C', builder: 'C', tester: 'C', reviewer: 'C' }, tools: [], speed: 1, map: [], lessons: [] } as never);
+      vi.mocked(readInstalledPackage).mockReturnValue(baseInstalled());
+      expect(await upgradedIn(tmp)).not.toContain('squad migrate');
+      fs.writeFileSync(path.join(tmp, '.squad', 'config.yaml'), 'version: 1\nproject:\n  name: Old\n  projectRoots:\n    - .\ntracker:\n  type: none\nnaming:\n  includeTrackerId: false\n  globalSequence: true\nagents: []\n');
+      vi.mocked(readInstalledPackage).mockReturnValue(baseInstalled());
+      mockRegistry('0.2.1');
+      expect(await upgradedIn(tmp)).toContain('squad migrate');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+

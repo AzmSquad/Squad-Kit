@@ -72,7 +72,7 @@ export function HandOverDialog({ t, onClose }: { t: Ticket; onClose(): void }) {
   const submit = () =>
     to.trim() &&
     act.mutate(
-      { path: `/api/v1/tickets/${t.id}/hand-over`, body: { to, note }, done: `Handed ${t.id} over to ${to.trim()}. Their squad carries on from the branch.` },
+      { path: `/api/v1/tickets/${t.id}/hand-over`, body: { to, note }, done: `Handed ${t.id} over to ${to.trim()}. Their squad carries on from the saved work.` },
       {
         onSuccess: () => {
           clearTo();
@@ -130,9 +130,9 @@ export function HandOverDialog({ t, onClose }: { t: Ticket; onClose(): void }) {
         {live ? (
           <>
             <li>
-              squad-kit saves the work so far and the ticket&apos;s documents on its branch, <span className="mono">{branch}</span>, and pushes it.
+              squad-kit saves the work so far and the ticket&apos;s documents, and sends them to your team&apos;s shared copy of the code.
             </li>
-            <li>{who === 'them' ? 'They become' : `${who} becomes`} the owner. Their squad makes its copy of the code from that branch, and the Builder starts a fresh chat from the spec, the design and the code.</li>
+            <li>{who === 'them' ? 'They become' : `${who} becomes`} the owner. Their squad makes its copy of the code from that, and the Builder starts a fresh chat from the spec, the design and the code.</li>
           </>
         ) : (
           <li>{who === 'them' ? 'They become' : `${who} becomes`} the owner. This is a sample board, so nothing is pushed.</li>
@@ -156,7 +156,7 @@ export function HandedOverBanner({ t }: { t: Ticket }) {
       <div>
         <b>{h.from} handed this ticket to you {ago(h.at)}</b>
         <span>
-          The spec, the design, the notes and the code came with its branch. Live progress, agent chats and screenshots stayed on {h.from}&apos;s computer, so the
+          The spec, the design, the notes and the code came with it. Live progress, agent chats and screenshots stayed on {h.from}&apos;s computer, so the
           Builder starts a fresh chat from the spec, the design and the code, and the Tester takes the screenshots again.
         </span>
       </div>

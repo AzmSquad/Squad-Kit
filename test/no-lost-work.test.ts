@@ -16,7 +16,7 @@ import { buildPaths } from '../src/core/paths.js';
 
 /**
  * No lost work: a ticket accepted while a release goes out stays in main and goes out next time; a push that fails
- * keeps the release open; "the latest main" is the team's; and only a real clash is called one.
+ * keeps the release open; "the newest code" is the team's; and only a real clash is called one.
  */
 
 let tmp: string;
@@ -182,7 +182,7 @@ describe('a push that fails keeps the release open', () => {
     // The next tickets still build on the release.
     expect(sh('git rev-parse main', project)).toBe(head);
     let t = readTicket(bp, 'AP-1')!;
-    expect(t).toMatchObject({ stage: 'release', status: 'In v1.5.0 · not pushed to origin yet' });
+    expect(t).toMatchObject({ stage: 'release', status: 'In v1.5.0 · not sent yet' });
     expect(t.trackerQueue ?? []).not.toContainEqual({ kind: 'released', version: 'v1.5.0' });
 
     // Still unreachable: it stays open, with git's new reason.
@@ -226,7 +226,7 @@ describe('a push that fails keeps the release open', () => {
   }, 30_000);
 });
 
-describe('"the latest main" is the team\'s, not an old copy here', () => {
+describe('"the newest code" is the team\'s, not an old copy here', () => {
   it('a new copy starts from the remote main when the team moved it on; a project with no remote from its own', () => {
     const team = teammatePushes('team.txt', 'team\n');
     sh('git fetch -q origin', project);
@@ -251,7 +251,7 @@ describe('"the latest main" is the team\'s, not an old copy here', () => {
     expect(sh('git rev-parse main', project)).toBe(before);
   }, 20_000);
 
-  it('"Bring in the latest main" fetches the remote main and merges it into the ticket', async () => {
+  it('"Bring in the newest code" fetches the remote main and merges it into the ticket', async () => {
     proofReady('AP-1', 'one.txt', 'one\n');
     const team = teammatePushes('team.txt', 'team\n');
     const squad = new LiveSquad(bp) as unknown as { updateBase(id: string): Promise<void> };
@@ -259,7 +259,7 @@ describe('"the latest main" is the team\'s, not an old copy here', () => {
     const t = readTicket(bp, 'AP-1')!;
     expect(fs.readFileSync(path.join(t.worktree!, 'team.txt'), 'utf8')).toBe('team\n');
     expect(t.baseCommit).toBe(team);
-    expect(t.activity.map((a) => a.text)).toContain('Brought the latest origin/main into this ticket');
+    expect(t.activity.map((a) => a.text)).toContain('Brought the newest code into this ticket');
     expect(t.squad?.phase).toBe('test');
   }, 20_000);
 });

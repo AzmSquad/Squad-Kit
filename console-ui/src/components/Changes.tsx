@@ -66,7 +66,7 @@ export function ChangesTab({ t }: { t: Ticket }) {
           )}
           <p className="note">
             {c?.from === 'branch'
-              ? `Read from branch ${c.branch}. The copy was removed after the release.`
+              ? 'Read from its saved work. The copy was removed after the release.'
               : 'The squad builds in its own copy of the code, so your folder stays yours. These changes reach your folder after Looks right.'}
           </p>
         </div>

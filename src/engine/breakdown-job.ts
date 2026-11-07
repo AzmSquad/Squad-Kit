@@ -12,6 +12,7 @@ import {
   nextKey,
   readBreakdown,
   readBreakdownState,
+  rewrittenStories,
   storiesIn,
   updateBreakdown,
   updateBreakdownState,
@@ -28,6 +29,7 @@ import { aiTool } from '../modules/registry.js';
 import { readAgent } from './agents.js';
 import { personLevels, resolveLevel } from './levels.js';
 import { LimitReached, limitText } from './usage-limit.js';
+import { CapReached } from './caps.js';
 import { TECHNICAL_STOP, ownWords } from './plain-stop.js';
 import * as B from './breakdown-prompts.js';
 import { sleepMark, sleptSince } from './interrupt.js';
@@ -52,6 +54,8 @@ export interface AnalystAsk {
   sessionId?: string;
   resume?: string;
   timeoutMs: number;
+  /** How many times the person pressed Give it more on this step: each time doubles its caps. */
+  more?: number;
   onTool?(e: ToolEvent): void;
   onText?(text: string): void;
 }
@@ -76,6 +80,18 @@ const MINUTE = 60_000;
 export const BRD_READ_MS = 30 * MINUTE;
 export const BRD_WRITE_MS = 15 * MINUTE;
 const BRD_ANSWER_MS = 5 * MINUTE;
+
+/** The most a read of a very long document may take. */
+export const LONGEST_READ_MS = 4 * 60 * MINUTE;
+
+/** A long document gets twice its usual read: never less than BRD_READ_MS, never more than four hours. */
+export function readLimitMs(source: Pick<Breakdown['source'], 'kind' | 'pages'>): number {
+  const usual = usualReadSeconds(source.kind === 'pdf' ? { pages: source.pages ?? 0, parts: 0 } : { parts: source.pages ?? 1 });
+  return Math.min(LONGEST_READ_MS, Math.max(BRD_READ_MS, usual * 2000));
+}
+
+/** Said after a read that stopped: its conversation may not carry on (retryBreakdown), so what it read is not kept. */
+const READ_AGAIN = ' Try again reads the document from the first page, and uses your AI again.';
 
 /** "Ask about this" got no answer, in the words a ticket's question gets (engine/live.ts). */
 const NO_ANSWER = 'Could not answer this time. Ask again in a moment.';
@@ -179,6 +195,8 @@ function byFor(b: Breakdown) {
 function documentFiles(bp: BoardPaths, b: Breakdown): B.DocumentFiles {
   const dir = breakdownDir(bp, b.id);
   const media = breakdownMediaDir(bp, b.id);
+  // The Analyst must never be paid to read nothing, or to guess from a name.
+  if (b.source.kind === 'pdf' ? !fs.existsSync(path.join(dir, b.source.file)) : !textParts(dir).length) throw new DocumentError(`The document of ${b.id} is no longer in its folder. Add the BRD again.`);
   return {
     kind: b.source.kind,
     ...(b.source.kind === 'pdf' ? { pdf: path.join(dir, b.source.file), ...(b.source.pages ? { pages: b.source.pages } : {}) } : {}),
@@ -230,14 +248,25 @@ async function ask(ctx: Ctx, a: AnalystAsk): Promise<AnalystAnswer> {
   goOn(ctx);
   const held = await ctx.deps.budgetHold?.();
   if (held) throw new HeldAtBudget(held);
-  const r = await ctx.deps.run(a);
+  const more = readBreakdownState(ctx.bp, ctx.id).capRaise ?? 0;
   const key = usageKey(ctx.bp, a.step);
-  updateBreakdownState(ctx.bp, ctx.id, (s) => {
-    s.usage = addRun(s.usage, key, r.usage);
-    // ACP may give a conversation a new id: the next step carries on in the one this run ended in.
-    const session = r.sessionId ?? a.sessionId;
-    if (session && (a.sessionId || a.resume || !s.sessions?.read)) s.sessions = { ...s.sessions, read: session };
-  });
+  const kept = (run: { sessionId?: string; usage?: AgentUsage }) =>
+    updateBreakdownState(ctx.bp, ctx.id, (s) => {
+      s.usage = addRun(s.usage, key, run.usage);
+      // ACP may give a conversation a new id: the next step carries on in the one this run ended in.
+      const session = run.sessionId ?? a.sessionId;
+      if (session && (a.sessionId || a.resume || !s.sessions?.read)) s.sessions = { ...s.sessions, read: session };
+    });
+  let r: AnalystAnswer;
+  try {
+    r = await ctx.deps.run({ ...a, ...(more ? { more } : {}) });
+  } catch (err) {
+    // Stopped at a cap: what it used counts, and Give it more carries on in its conversation.
+    if (err instanceof CapReached && err.run) kept(err.run);
+    throw err;
+  }
+  kept(r);
+  if (more) updateBreakdownState(ctx.bp, ctx.id, (s) => delete s.capRaise);
   goOn(ctx);
   return r;
 }
@@ -262,7 +291,7 @@ async function textStep(ctx: Ctx, b: Breakdown): Promise<boolean> {
 }
 
 /** read: what it asks for, the epics and features in it, the questions that matter and the small things decided. */
-async function readStep(ctx: Ctx, b: Breakdown): Promise<boolean> {
+async function readStep(ctx: Ctx, b: Breakdown, job: BreakdownJob): Promise<boolean> {
   const docs = documentFiles(ctx.bp, b);
   const unit = b.source.kind === 'pdf' ? 'page' : 'part';
   const of = b.source.kind === 'pdf' ? (b.source.pages ?? 0) : docs.parts.length;
@@ -270,12 +299,14 @@ async function readStep(ctx: Ctx, b: Breakdown): Promise<boolean> {
   let said = '';
   let found = { epics: 0, features: 0 };
   setNow(ctx, 'Reading the document', { at: { done: 0, of, unit } });
+  // Give it more: the read carries on in its conversation, and what it read is not paid for again.
+  const session = job.more ? readBreakdownState(ctx.bp, ctx.id).sessions?.read : undefined;
   const r = await ask(ctx, {
     step: 'questions',
-    prompt: B.readPrompt(ctx.project, b, docs),
+    prompt: session ? B.carryOnPrompt() : B.readPrompt(ctx.project, b, docs),
     schema: B.READ_SCHEMA,
-    sessionId: randomUUID(),
-    timeoutMs: BRD_READ_MS,
+    ...(session ? { resume: session } : { sessionId: randomUUID() }),
+    timeoutMs: readLimitMs(b.source),
     onTool: (e) => {
       const n = Math.min(of || Infinity, readUpTo(e, b.source.kind));
       if (n > done) {
@@ -564,6 +595,7 @@ async function redoStep(ctx: Ctx, b: Breakdown, job: BreakdownJob): Promise<bool
   const out = r.structured as { story?: B.StoryOut; feature?: B.FeatureOut; epic?: B.EpicOut; epics?: B.EpicOut[]; leftOut?: B.OutlineAnswer['leftOut']; summary?: string; decided?: B.DecidedOut[] };
   let cut = 0;
   let kept: BreakdownStory[] = [];
+  let rewritten: string[] = [];
   updateBreakdown(ctx.bp, ctx.id, (x) => {
     const before = structuredClone(x);
     const t = whole ? null : findItem(x, job.item!);
@@ -609,9 +641,12 @@ async function redoStep(ctx: Ctx, b: Breakdown, job: BreakdownJob): Promise<bool
     cut = cutLoops(x);
     addDecided(x, out.decided, m.map, () => 'analyst');
     withFirstStory(ctx.bp, x);
+    // After the approval, what it wrote waits for the person: nobody has read it, and building it costs real money.
+    if (x.status === 'approved') rewritten = rewrittenStories(before, x);
   });
   updateBreakdownState(ctx.bp, ctx.id, (s) => {
     s.job = { step: 'redo', status: 'done', item: job.item, ...(job.ask ? { ask: job.ask } : {}) };
+    if (rewritten.length) s.rewritten = [...new Set([...(s.rewritten ?? []), ...rewritten])];
     addBreakdownActivity(s, 'analyst', `Redid ${whole ? 'the breakdown' : job.item}${cut ? `, and took away ${cut} ${cut === 1 ? 'need' : 'needs'} that went round in a loop` : ''}`);
     if (kept.length) {
       const one = kept.length === 1;
@@ -652,10 +687,12 @@ function failed(ctx: Ctx, job: BreakdownJob, err: unknown): void {
   if (ctx.deps.signal?.aborted || err instanceof Stopped) return;
   // Only squad-kit's own plain words reach the person (engine/plain-stop.ts), as in a ticket's stop: anything else is
   // one plain sentence, and its exact words go to the app log for engineers.
-  const own = ownWords(err) ?? (err instanceof DocumentError ? err.message : null);
+  const capped = err instanceof CapReached;
+  const own = ownWords(err) ?? (err instanceof DocumentError || capped ? (err as Error).message : null);
   const { what, detail } = explainError(err);
   writeLog({ level: own ? 'warn' : 'error', ...(ctx.project ? { project: ctx.project } : {}), text: `${id}: the Analyst's ${job.step} step stopped: ${[what, detail].filter(Boolean).join('\n')}` });
-  const plain = own ?? TECHNICAL_STOP;
+  // A read that did not get through starts over on Try again, and the person pays for it again: they are told so.
+  const plain = `${own ?? TECHNICAL_STOP}${job.step === 'read' && !capped && !(err instanceof DocumentError) ? READ_AGAIN : ''}`;
   if (job.step === 'reply') {
     updateBreakdown(bp, id, (x) => {
       const q = x.questions.find((y) => y.id === job.question);
@@ -676,6 +713,7 @@ function failed(ctx: Ctx, job: BreakdownJob, err: unknown): void {
       if (job.step === 'reply' && !own) delete s.job.error;
       else s.job.error = plain;
       delete s.job.now;
+      if (capped) s.job.capped = true;
     }
     addBreakdownActivity(s, 'analyst', job.step === 'reply' ? (own ? `Could not answer your question: ${own}` : 'Could not answer your question this time') : `${job.step === 'redo' ? `Could not redo ${job.item}` : 'Stopped'}: ${plain}`);
   });
@@ -703,7 +741,7 @@ export async function runBreakdownJob(bp: BoardPaths, id: string, deps: Breakdow
     } catch (err) {
       // The computer slept and the run did not get through: that says nothing about the document, so the step starts
       // again by itself, as a ticket's does.
-      if (sleptSince(mark) && !(err instanceof LimitReached) && !(err instanceof HeldAtBudget) && !(err instanceof Stopped)) {
+      if (sleptSince(mark) && !(err instanceof LimitReached) && !(err instanceof HeldAtBudget) && !(err instanceof Stopped) && !(err instanceof CapReached)) {
         updateBreakdownState(bp, id, (s) => {
           if (!s.job || s.job.status === 'stopping') return;
           s.job.status = 'pending';

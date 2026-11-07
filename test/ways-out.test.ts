@@ -201,7 +201,7 @@ describe('a branch that clashes with main is not a dead end', () => {
     t = readTicket(bp, 'AP-1')!;
     expect(t.squad?.phase).toBe('test');
     expect(t.baseCommit).toBe(sh('git rev-parse main', project));
-    expect(t.activity.map((a) => a.text)).toContain('Brought the latest main into this ticket. Clashes in limit.txt');
+    expect(t.activity.map((a) => a.text)).toContain('Brought the newest code into this ticket. Clashes in limit.txt');
 
     // After the checks, review and proof, Looks right merges cleanly.
     updateTicket(bp, 'AP-1', (x) => {

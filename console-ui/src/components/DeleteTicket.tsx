@@ -190,7 +190,7 @@ export function DeleteDialog({ t, onClose, onDeleted }: { t: Ticket; onClose(): 
             <label className="talkfirst">
               <input type="checkbox" checked={remote} onChange={(e) => setRemote(e.target.checked)} />
               <span>
-                <b>Also delete the branch {p.pushed.branch} on {p.pushed.remote}.</b> {p.pushed.why}
+                <b>Also delete its work in your team&apos;s shared copy of the code.</b> {p.pushed.why}
               </span>
             </label>
           )}
@@ -200,7 +200,7 @@ export function DeleteDialog({ t, onClose, onDeleted }: { t: Ticket; onClose(): 
             </p>
           ) : (
             <p className="rm-note">
-              A ticket that is already merged cannot be deleted, because its code is in {p.base}. Use <b>Archive</b> to hide it from the board. Its history stays.
+              A ticket that is already merged cannot be deleted, because its work is in the code already. Use <b>Archive</b> to hide it from the board. Its history stays.
             </p>
           )}
         </>
@@ -255,7 +255,7 @@ export function DeleteArchiveBanner({ t, onDeleted }: { t: Ticket; onDeleted(): 
           <b>Deleted by {d.by}.</b>{' '}
           {d.how === 'note'
             ? `${d.by} deleted ${t.id} on their computer ${ago(d.at)}.`
-            : `Its branch ${d.branch} is gone from the remote and it never reached the main code, so ${d.by} deleted it.`}{' '}
+            : `Its work is gone from your team's shared copy of the code, and it never reached the code itself, so ${d.by} deleted it.`}{' '}
           Only {d.by} could delete it. Removing it here cleans your computer only.
         </span>
         <button className="btn sm" onClick={() => setAgain(true)}>

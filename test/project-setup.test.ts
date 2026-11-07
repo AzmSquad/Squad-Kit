@@ -78,7 +78,7 @@ describe('starting squad-kit in a project', () => {
       tracker: { type: 'azure', workspace: 'contoso', project: 'Legacy' },
     });
     put(path.join(squad, 'stories', 'login', '1', 'intake.md'), '# Login\n');
-    put(path.join(squad, 'releases', '2026-10-19-925572.md'), '# 2026-10-19 — Story 925572\n\nWhat changed.\n');
+    put(path.join(squad, 'releases', '2026-10-19-1234.md'), '# 2026-10-19 — Story 1234\n\nWhat changed.\n');
     put(path.join(squad, 'decisions', 'notes.md'), '# Our notes\n');
     put(path.join(squad, 'tickets', 'old', 'ticket.md'), '# Not a board ticket\n');
     put(path.join(squad, 'knowledge', 'project.md'), '# Our own project notes\n');
@@ -103,7 +103,7 @@ describe('starting squad-kit in a project', () => {
     expect(listTickets(bp)).toEqual([]);
     writeRelease(bp, { version: 'v0.1.0', status: 'draft', from: 'v0.0.0', tickets: [], notes: '', addons: { changelog: true, tag: true, pipeline: true, whatsapp: true } });
     expect(listReleases(bp).map((r) => r.version)).toEqual(['v0.1.0']);
-    expect(fs.readFileSync(path.join(squad, 'releases', '2026-10-19-925572.md'), 'utf8')).toContain('Story 925572');
+    expect(fs.readFileSync(path.join(squad, 'releases', '2026-10-19-1234.md'), 'utf8')).toContain('Story 1234');
   });
 
   it('opens an existing board without setting anything up again', () => {

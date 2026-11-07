@@ -3,6 +3,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runDoctor } from '../src/commands/doctor.js';
+import { checkAiTool } from '../src/commands/doctor-engine.js';
+import { runMigrate } from '../src/commands/migrate.js';
+import { boardPaths, writeMeta } from '../src/board/store.js';
+import { buildPaths } from '../src/core/paths.js';
 import { saveConfig, DEFAULT_CONFIG, type SquadConfig } from '../src/core/config.js';
 import { SQUAD_DIR } from '../src/core/paths.js';
 import { ensureGitignore } from '../src/core/gitignore.js';
@@ -68,6 +72,66 @@ afterEach(() => {
   process.chdir(previousCwd);
   fs.rmSync(tmp, { recursive: true, force: true });
   vi.restoreAllMocks();
+});
+
+describe('runDoctor on a project on squad-kit 1', () => {
+  const seed = () => {
+    writeMeta(boardPaths(path.join(tmp, SQUAD_DIR)), {
+      project: 'App',
+      key: 'AP',
+      nextNumber: 1,
+      engine: 'live',
+      user: { name: 'Momen', role: 'Project manager' },
+      roles: { analyst: 'Claude', architect: 'Claude', builder: 'Claude', tester: 'Claude', reviewer: 'Claude' },
+      tools: [],
+      speed: 1,
+      map: [],
+      lessons: [],
+      commands: {},
+      git: { base: 'main', remote: '' },
+      scan: { status: 'done', empty: false },
+    });
+  };
+  const report = async (fix = false) => {
+    const out = captureStdout();
+    await runDoctor({ json: true, fix });
+    out.restore();
+    return JSON.parse(out.text()) as { checks: { id: string; status: string; detail?: string; name: string }[] };
+  };
+
+  it('has no word about the old folders or .gitignore, and --fix makes none and changes nothing', async () => {
+    seed();
+    const before = fs.readdirSync(path.join(tmp, SQUAD_DIR)).sort();
+    const { checks } = await report();
+    for (const id of ['dirs', 'gitignore', 'gitignore-trash']) expect(checks.find((c) => c.id === id)!.status, id).toBe('ok');
+    expect(JSON.stringify(checks)).not.toMatch(/stories|plans/);
+    await report(true);
+    expect(fs.readdirSync(path.join(tmp, SQUAD_DIR)).sort()).toEqual(before);
+    expect(fs.existsSync(path.join(tmp, '.gitignore'))).toBe(false);
+  });
+
+  it('a project from before 1.0 is still repaired as before', async () => {
+    installWorkspace();
+    fs.rmSync(path.join(tmp, SQUAD_DIR, 'stories'), { recursive: true });
+    expect((await report()).checks.find((c) => c.id === 'dirs')!.status).toBe('warn');
+    await report(true);
+    expect(fs.existsSync(path.join(tmp, SQUAD_DIR, 'stories'))).toBe(true);
+    expect(fs.existsSync(path.join(tmp, '.gitignore'))).toBe(true);
+  });
+
+  it('an AI tool that does not start is a failure, in plain words, and one that does is fine', () => {
+    seed();
+    const paths = buildPaths(tmp);
+    const missing = checkAiTool(paths, () => ({ label: 'Claude Code', ready: () => false }) as never);
+    expect(missing).toMatchObject({ id: 'ai-tool', status: 'fail', detail: 'Claude Code does not start on this computer, so the squad cannot work', fixHint: 'Install it and sign in, then run squad doctor again' });
+    expect(checkAiTool(paths, () => ({ label: 'Claude Code', ready: () => true }) as never)).toMatchObject({ status: 'ok', detail: 'Claude Code' });
+  });
+
+  it('squad migrate has nothing to do there, and leaves .gitignore alone', async () => {
+    seed();
+    await runMigrate({ yes: true } as never);
+    expect(fs.existsSync(path.join(tmp, '.gitignore'))).toBe(false);
+  });
 });
 
 describe('runDoctor', () => {

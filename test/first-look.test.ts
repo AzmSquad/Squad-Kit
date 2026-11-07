@@ -4,7 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
 import { DEFAULT_CONFIG, saveConfig } from '../src/core/config.js';
-import { firstLook } from '../src/engine/first-look.js';
+import { addAsk, firstLook } from '../src/engine/first-look.js';
+import { runConsole } from '../src/commands/console.js';
 import { prepareProject } from '../src/engine/setup.js';
 import { setupView } from '../src/board/first-run.js';
 
@@ -26,6 +27,109 @@ afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
+describe('a folder inside something bigger', () => {
+  const settings = (dir: string, more: object = {}) => {
+    fs.mkdirSync(path.join(dir, '.squad'), { recursive: true });
+    saveConfig(path.join(dir, '.squad', 'config.yaml'), { ...DEFAULT_CONFIG, ...more });
+  };
+
+  it('a subfolder of a repo is not called existing code: it names the top folder', () => {
+    const dir = path.join(tmp, 'shop');
+    put(path.join(dir, 'app.py'));
+    put(path.join(dir, 'web', 'index.html'));
+    commit(dir);
+    const look = firstLook(path.join(dir, 'web'));
+    expect(look.title).toBe('Part of a bigger project');
+    expect(look.ask).toMatchObject({ kind: 'inside-repo', root: dir, name: 'shop' });
+    expect(look.found).toBe(`This folder is part of a bigger project, shop, in ${dir}. Its tests and app run from the top folder, so squad-kit works from there too. Add the top folder instead.`);
+    expect(look.found).not.toMatch(/\bgit\b|repo\b/);
+    expect(addAsk(dir)).toBeNull();
+  });
+
+  it('a project in a subfolder of its repo: its own folders open it with no question', () => {
+    const repo = path.join(tmp, 'mono');
+    const web = path.join(repo, 'apps', 'web');
+    put(path.join(web, 'src', 'a.ts'));
+    commit(repo);
+    settings(web);
+    expect(addAsk(path.join(web, 'src'))).toBeNull();
+  });
+
+  it('a fresh clone under a project it is no part of: says which folder it found, and asks', () => {
+    const workspace = path.join(tmp, 'workspace');
+    settings(workspace);
+    const clone = path.join(workspace, 'clone');
+    put(path.join(clone, 'a.ts'));
+    put(path.join(clone, '.squad', 'README.md'));
+    commit(clone);
+    const look = firstLook(clone);
+    expect(look.ask).toMatchObject({ kind: 'inside-project', root: workspace, name: 'workspace' });
+    expect(look.found).toBe(`This folder sits inside another squad-kit project, in ${workspace}. Open that project, or add this folder on its own?`);
+  });
+
+  it('a project whose .squad sits above several repos keeps working: its repos and their folders belong to it', () => {
+    const workspace = path.join(tmp, 'workspace');
+    for (const r of ['api', 'web']) {
+      put(path.join(workspace, r, 'a.ts'));
+      commit(path.join(workspace, r));
+    }
+    settings(workspace, { board: { repos: [{ path: 'api' }, { path: 'web' }] } });
+    expect(addAsk(path.join(workspace, 'api'))).toBeNull();
+    put(path.join(workspace, 'web', 'src', 'x.ts'));
+    expect(addAsk(path.join(workspace, 'web', 'src'))).toBeNull();
+    // A new clone beside them, that the project does not list, is not taken for one of them.
+    put(path.join(workspace, 'other', 'a.ts'));
+    commit(path.join(workspace, 'other'));
+    expect(addAsk(path.join(workspace, 'other'))?.kind).toBe('inside-project');
+    expect(addAsk(workspace)).toBeNull();
+  });
+
+  it('in the terminal: squad console says the same, and never sets anything up with nobody to ask', async () => {
+    const workspace = path.join(tmp, 'workspace');
+    settings(workspace);
+    const before = fs.readFileSync(path.join(workspace, '.squad', 'config.yaml'), 'utf8');
+    const clone = path.join(workspace, 'clone');
+    put(path.join(clone, 'a.ts'));
+    commit(clone);
+    const was = process.cwd();
+    process.chdir(clone);
+    try {
+      await expect(runConsole({ open: false } as never)).rejects.toThrow(`This folder sits inside another squad-kit project, in ${workspace}.`);
+    } finally {
+      process.chdir(was);
+    }
+    expect(fs.readFileSync(path.join(workspace, '.squad', 'config.yaml'), 'utf8')).toBe(before);
+    expect(fs.existsSync(path.join(clone, '.squad'))).toBe(false);
+  });
+
+  it("a project's own subfolder is that project, with no question", () => {
+    const dir = path.join(tmp, 'shop');
+    put(path.join(dir, 'src', 'a.ts'));
+    commit(dir);
+    settings(dir);
+    expect(addAsk(path.join(dir, 'src'))).toBeNull();
+  });
+
+  it('a folder with its own project is its own, whatever is above it; so is a folder in no repo under no project', () => {
+    const outer = path.join(tmp, 'outer');
+    settings(outer);
+    const inner = path.join(outer, 'inner');
+    settings(inner);
+    expect(addAsk(inner)).toBeNull();
+    put(path.join(tmp, 'plain', 'a.txt'));
+    expect(addAsk(path.join(tmp, 'plain'))).toBeNull();
+  });
+
+  it('a project set up in a subfolder before this stays out of the person\'s changes', () => {
+    const dir = path.join(tmp, 'shop');
+    put(path.join(dir, 'app.py'));
+    put(path.join(dir, 'web', 'index.html'));
+    commit(dir);
+    prepareProject(path.join(dir, 'web'));
+    expect(execSync('git status --porcelain', { cwd: dir, encoding: 'utf8' })).not.toContain('.squad');
+  });
+});
+
 describe("what Add project says it found", () => {
   it('existing code with git: the language, the files, the tests and the branch, and that the code is not changed', () => {
     const dir = path.join(tmp, 'roomflow');
@@ -36,7 +140,7 @@ describe("what Add project says it found", () => {
     commit(dir);
     const look = firstLook(dir);
     expect(look).toMatchObject({ kind: 'repo', title: 'Existing code, new to squad-kit', language: 'Python', web: true, tests: true, branch: 'main', unsaved: 0, files: 4 });
-    expect(look.found).toBe('A Python web app with 4 files and tests, on git branch main.');
+    expect(look.found).toBe('A Python web app with 4 files and tests.');
     expect(look.next).toBe('squad-kit will read it, find how to test and run it, then show you what it understood.');
     expect(look.safe).toBe("Your code is not changed. squad-kit only adds a .squad folder for the project's memory.");
     expect(look.takes).toBe('Takes about 3 to 5 minutes. You can keep working meanwhile.');
@@ -76,8 +180,8 @@ describe("what Add project says it found", () => {
       commit(path.join(dir, r));
     }
     const look = firstLook(dir);
-    expect(look).toMatchObject({ kind: 'repos', title: 'Several code repos', repos: ['api', 'mobile', 'web'] });
-    expect(look.found).toBe('A folder with 3 code repos inside: api, mobile and web.');
+    expect(look).toMatchObject({ kind: 'repos', title: 'Several code folders', repos: ['api', 'mobile', 'web'] });
+    expect(look.found).toBe('A folder with 3 code folders inside: api, mobile and web.');
     expect(look.next).toContain('how they fit together');
   });
 
@@ -90,7 +194,7 @@ describe("what Add project says it found", () => {
     commit(dir);
     const look = firstLook(dir);
     expect(look).toMatchObject({ kind: 'older', title: 'An older squad-kit project' });
-    expect(look.found).toBe('squad-kit 0.x files are here, with 1 story, in a TypeScript project with 1 file, on git branch main.');
+    expect(look.found).toBe('squad-kit 0.x files are here, with 1 story, in a TypeScript project with 1 file.');
     // Nothing moves and no copy is made: every old file stays, notes it would write over get a new name, sign-ins move out.
     expect(look.next).toContain('Your specs, plans and decisions stay where they are.');
     expect(look.next).toContain('moves sign-ins out of the project');

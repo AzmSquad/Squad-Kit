@@ -39,7 +39,7 @@ export function SandboxRows() {
         <div className="toolrow" key={s.tool}>
           <span className="logo">{s.available ? <ShieldCheck size={18} /> : <ShieldOff size={18} />}</span>
           <span style={{ minWidth: 0 }}>
-            <b>Sandbox for the Builder and Tester</b>
+            <b>The guard for the Builder and Tester</b>
             <br />
             {s.available ? (
               <span className="note">
@@ -104,7 +104,7 @@ export function AllowedHosts({ hosts }: { hosts: string[] }) {
       <span style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
         <span className="note">
           Allow a website here when the project needs one, for example your company&apos;s package server. The whole team shares this list.
-          {off ? ' This computer has no sandbox, so here they can reach any website.' : ''}
+          {off ? ' This computer has no guard for them, so here they can reach any website.' : ''}
         </span>
         {hosts.length > 0 && (
           <span className="pills">

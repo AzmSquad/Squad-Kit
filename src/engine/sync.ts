@@ -259,7 +259,7 @@ export async function publishTicket(bp: BoardPaths, ticketId: string): Promise<{
   const remoteBase = netGit(target.dir, ['ls-remote', '--heads', target.remote, target.base], { allowFail: true, env });
   if (!remoteBase) {
     netGit(target.dir, ['push', target.remote, `${target.base}:refs/heads/${target.base}`], { env });
-    note(bp, ticketId, `Pushed ${target.base} to ${host.label} (the repo was empty)`);
+    note(bp, ticketId, `Sent the first code to ${host.label}, which was empty`);
   }
   // Never forced: when someone else's work is on that branch (the ticket was taken back from them), it stays there.
   try {

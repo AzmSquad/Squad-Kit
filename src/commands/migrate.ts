@@ -3,6 +3,7 @@ import path from 'node:path';
 import { confirm } from '@inquirer/prompts';
 import * as ui from '../ui/index.js';
 import { findSquadRoot, buildPaths, type SquadPaths } from '../core/paths.js';
+import { boardExists, boardPaths } from '../board/store.js';
 import { loadConfig, saveConfig, serializeConfig } from '../core/config.js';
 import { ensureGitignore } from '../core/gitignore.js';
 
@@ -128,6 +129,11 @@ export async function runMigrate(opts: MigrateOptions): Promise<void> {
     process.exit(1);
   }
   const paths = buildPaths(root);
+  // Every step here is for a project from before 1.0.
+  if (boardExists(boardPaths(paths.squadDir))) {
+    ui.info('This project is on squad-kit 1, so there is nothing to move. Nothing was changed.');
+    return;
+  }
 
   const pending: Migration[] = [];
   for (const m of MIGRATIONS) {

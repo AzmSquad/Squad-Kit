@@ -6,7 +6,7 @@ import { boardPaths } from '../../board/store.js';
 import type { AnswerInput, UploadedFile } from '../../board/actions.js';
 import type { Criterion } from '../../board/types.js';
 import type { BreakdownLevel } from '../../board/requirements-types.js';
-import { breakdownRows, readBreakdown, viewBreakdown } from '../../board/requirements.js';
+import { breakdownProblem, breakdownRows, brokenBreakdowns, readBreakdown, viewBreakdown } from '../../board/requirements.js';
 import {
   addBreakdown,
   addItem,
@@ -20,6 +20,7 @@ import {
   redoItem,
   removeItem,
   renameBreakdown,
+  moreBreakdown,
   retryBreakdown,
   skipBreakdownQuestions,
   startStory,
@@ -28,6 +29,7 @@ import {
 import { breakdownDir } from '../../board/requirements-paths.js';
 import { dispositionOf, mimeOf } from '../../engine/conversations.js';
 import { mountBuildSendApi } from './requirements-build.js';
+import { act } from './act.js';
 
 /**
  * The Requirements page: one call per button, the same as `squad requirements …`. Every change answers with the
@@ -40,15 +42,6 @@ async function body<T>(c: Context): Promise<T> {
     return (await c.req.json()) as T;
   } catch {
     return {} as T;
-  }
-}
-
-/** A person-facing mistake comes back as a 400 with the message. */
-async function act(c: Context, fn: () => unknown) {
-  try {
-    return c.json(((await fn()) as object) ?? { ok: true });
-  } catch (err) {
-    return c.json({ error: (err as Error).message }, 400);
   }
 }
 
@@ -84,7 +77,12 @@ export function mountRequirementsApi(app: Hono, opts: { paths: SquadPaths }): vo
   mountBuildSendApi(app, bp);
 
   // `squad requirements list`.
-  app.get('/api/v1/requirements', (c) => act(c, () => ({ breakdowns: breakdownRows(bp) })));
+  app.get('/api/v1/requirements', (c) =>
+    act(c, () => {
+      const broken = brokenBreakdowns(bp);
+      return { breakdowns: breakdownRows(bp), ...(broken.length ? { broken } : {}) };
+    }),
+  );
 
   // Add a BRD: `squad requirements add <file> [--name] [--with <file>…]`, or `--paste`. Files come as base64, like a
   // ticket's: { file, with } or { files } (the first is the BRD), or { text } for pasted text.
@@ -98,6 +96,8 @@ export function mountRequirementsApi(app: Hono, opts: { paths: SquadPaths }): vo
 
   // `squad requirements show BR-1`.
   app.get('/api/v1/requirements/:id', async (c) => {
+    const problem = breakdownProblem(bp, c.req.param('id'));
+    if (problem) return c.json({ error: problem }, 409);
     if (!readBreakdown(bp, c.req.param('id'))) return c.json({ error: 'not found' }, 404);
     return act(c, () => view(c.req.param('id')));
   });
@@ -129,6 +129,8 @@ export function mountRequirementsApi(app: Hono, opts: { paths: SquadPaths }): vo
   // Stop the Analyst, and Try again: `squad requirements stop BR-1`, `squad requirements retry BR-1`.
   app.post('/api/v1/requirements/:id/stop', (c) => act(c, () => view(stopBreakdown(bp, c.req.param('id')).id)));
   app.post('/api/v1/requirements/:id/retry', (c) => act(c, () => view(retryBreakdown(bp, c.req.param('id')).id)));
+  // Give it more: `squad requirements more BR-1`. A step stopped at a cap carries on with twice the room.
+  app.post('/api/v1/requirements/:id/more', (c) => act(c, () => view(moreBreakdown(bp, c.req.param('id')).id)));
 
   // Answers: { answers: { q1: { choice, value? } } }. `squad requirements answer BR-1`.
   app.post('/api/v1/requirements/:id/answers', async (c) => {
@@ -192,9 +194,9 @@ export function mountRequirementsApi(app: Hono, opts: { paths: SquadPaths }): vo
     }),
   );
 
-  // Change a Decided for you entry: { text }. `squad requirements decided BR-1 d3 "<text>"`.
+  // Change a Decided for you entry: { text }, and { whole: true } once the person agreed to redo all of it. `squad requirements decided BR-1 d3 "<text>"`.
   app.post('/api/v1/requirements/:id/decided/:d', async (c) => {
-    const b = await body<{ text?: string }>(c);
-    return act(c, () => view(changeDecided(bp, c.req.param('id'), c.req.param('d'), b.text ?? '').id));
+    const b = await body<{ text?: string; whole?: boolean }>(c);
+    return act(c, () => view(changeDecided(bp, c.req.param('id'), c.req.param('d'), b.text ?? '', { whole: b.whole === true }).id));
   });
 }

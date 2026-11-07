@@ -8,7 +8,7 @@ import { usePrefs } from '../lib/prefs';
 import { shellArg, shellQuote } from '../lib/text';
 import { Cmd, Modal, DraftNote } from './ui';
 import { ErrorCard } from './ErrorCard';
-import { clearDrafts, useDraft } from '../lib/drafts';
+import { clearDrafts, keptOnce, useDraft } from '../lib/drafts';
 
 export interface PickedFile {
   name: string;
@@ -44,6 +44,10 @@ function previewOf(f: { name: string; data: string }): { preview?: string } {
  */
 const NEW_TICKET = 'new-ticket';
 
+function oneTimeKey(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
 export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCreated(t: Ticket): void }) {
   const act = useAct<Ticket>();
   const { toast } = usePrefs();
@@ -73,6 +77,9 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
   const [where, setWhere] = useDraft(NEW_TICKET, 'where', '');
   const [severity, setSeverity] = useDraft<NonNullable<Ticket['severity']>>(NEW_TICKET, 'severity', 'annoying');
   const isBug = kind === 'bug';
+  // Create is safe to send again: a lost reply, Try again or this window opened again gets the ticket it made.
+  const [createKey, setCreateKey] = useState(() => keptOnce(NEW_TICKET, 'create-key', oneTimeKey));
+  const closedWhileMaking = useRef(false);
   const [files, setFiles] = useState<PickedFile[]>([]);
 
   const addFiles = async (list: FileList | File[]) => {
@@ -196,6 +203,7 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
     setTrack('full');
     setSeverity('annoying');
     clearDrafts(PROJECT, NEW_TICKET);
+    setCreateKey(keptOnce(NEW_TICKET, 'create-key', oneTimeKey));
   };
   const typed = Boolean(pasted || title || ask || what || expected || where || criteria.length || rules.length || edgeCases.length || steps.length);
 
@@ -209,22 +217,36 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
     .filter(Boolean)
     .join('\n\n');
   const body = isBug
-    ? { title, ask: bugAsk, kind, severity, priority: severity === 'stops-work' ? 'high' : severity === 'small' ? 'low' : 'normal', track, files: upload, talkFirst: talkFirst && track === 'full' }
-    : { title, ask, kind, track, priority, criteria, rules, edgeCases, files: upload, talkFirst: talkFirst && track === 'full' };
+    ? { title, ask: bugAsk, kind, severity, priority: severity === 'stops-work' ? 'high' : severity === 'small' ? 'low' : 'normal', track, files: upload, talkFirst: talkFirst && track === 'full', key: createKey }
+    : { title, ask, kind, track, priority, criteria, rules, edgeCases, files: upload, talkFirst: talkFirst && track === 'full', key: createKey };
 
   const submit = () =>
     act.mutate(
-      { path: '/api/v1/tickets', body },
+      {
+        path: '/api/v1/tickets',
+        body,
+        // The effects saving the fields ran already, and nothing changes them again before the dialog goes.
+        after: () => {
+          letGo();
+          clearDrafts(PROJECT, NEW_TICKET);
+        },
+        done: (t) => (closedWhileMaking.current ? `${t.id} is on the board.` : null),
+      },
       {
         onSuccess: (t) => {
-          letGo();
-          // The effects saving the fields ran already, and nothing changes them again before the dialog goes.
-          clearDrafts(PROJECT, NEW_TICKET);
           onCreated(t);
           onClose();
         },
       },
     );
+  // Create cannot be called back once it is on its way, so closing says what really happens to it.
+  const close = () => {
+    if (act.isPending) {
+      closedWhileMaking.current = true;
+      toast('Your ticket is still being made. Closing this does not stop it: it comes onto the board in a moment.');
+    }
+    onClose();
+  };
 
   // The Analyst stopped (an error, or the person pressed Cancel): the ways on show inside the dialog, not in a toast.
   const stuck = Boolean(startError) || job?.status === 'failed' || job?.status === 'cancelled';
@@ -249,8 +271,8 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
     <Modal
       title="New ticket"
       wide
-      onClose={onClose}
-      losing={files.length ? (files.length === 1 ? 'the attached file' : `the ${files.length} attached files`) : null}
+      onClose={close}
+      losing={files.length && !act.isPending ? (files.length === 1 ? 'the attached file' : `the ${files.length} attached files`) : null}
       icon={<span className="glyph"><Plus size={15} /></span>}
       footer={
         <>
@@ -266,7 +288,7 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
             </button>
           )}
           {/* While the Analyst works, Cancel stops it; closing the window (the cross) leaves it working. */}
-          <button className="btn" onClick={drafting ? () => void cancel() : onClose}>Cancel</button>
+          <button className="btn" onClick={drafting ? () => void cancel() : close}>{act.isPending ? 'Close' : 'Cancel'}</button>
           {typed && !drafting && <DraftNote onClear={clearAll} />}
           <span className="grow" />
           <Cmd text={cmd} />
@@ -582,7 +604,7 @@ const MEDIA_NOTE = /\.(ogg|opus|oga|m4a|mp3|wav|aac|amr|flac|weba|mp4|mov|m4v|we
 function FilePicker({ files, onAdd, onRemove }: { files: PickedFile[]; onAdd(list: FileList | File[]): void; onRemove(i: number): void }) {
   const [over, setOver] = useState(false);
   const hasNotes = files.some((f) => MEDIA_NOTE.test(f.name));
-  const speech = useQuery({ queryKey: ['speech'], queryFn: () => api<{ hasKey: boolean }>('/api/v1/speech'), enabled: hasNotes });
+  const speech = useQuery({ queryKey: ['speech'], queryFn: () => api<{ hasKey: boolean; video?: boolean }>('/api/v1/speech'), enabled: hasNotes });
   return (
     <div className="field">
       <label>Files</label>
@@ -628,7 +650,9 @@ function FilePicker({ files, onAdd, onRemove }: { files: PickedFile[]; onAdd(lis
       {hasNotes && speech.data && (
         <p className="note" style={{ marginTop: 6 }}>
           {speech.data.hasKey
-            ? 'squad-kit writes out voice and video notes with Munsit, and takes pictures of the screen in videos, so every agent knows what was said.'
+            ? speech.data.video === false
+              ? 'squad-kit writes out voice notes with Munsit, so every agent knows what was said. Video notes need a Mac: on this computer they stay attached, unheard.'
+              : 'squad-kit writes out voice and video notes with Munsit, and takes pictures of the screen in videos, so every agent knows what was said.'
             : 'Add a Munsit key in Settings so the squad can listen to voice and video notes. Without it they stay attached, unheard.'}
         </p>
       )}
@@ -756,12 +780,12 @@ export function ReleasedDialog({ release, demo, onClose }: { release: Release; d
     void navigator.clipboard?.writeText(release.whatsappDraft ?? '').then(() => toast('Message copied. Send it from WhatsApp.'));
   const steps = [
     release.addons.changelog && 'Changelog updated',
-    release.addons.tag && `Tagged ${release.version} in git`,
-    release.addons.pipeline && 'Azure pipeline started',
+    release.addons.tag && `Marked the code as ${release.version}`,
+    release.addons.pipeline && 'After-release step started',
   ].filter(Boolean) as string[];
   return (
     <Modal
-      title={release.unpushed?.length ? `${release.version} is made, but not pushed yet` : `${release.version} is released`}
+      title={release.unpushed?.length ? `${release.version} is made, but not sent yet` : `${release.version} is released`}
       onClose={onClose}
       icon={<span className="glyph"><Rocket size={15} /></span>}
       footer={
@@ -778,7 +802,7 @@ export function ReleasedDialog({ release, demo, onClose }: { release: Release; d
       <div className="donelist">
         {release.unpushed?.length ? (
           <div style={{ color: 'var(--you-ink)' }}>
-            <span style={{ width: 16, textAlign: 'center', fontWeight: 800 }}>!</span> The push failed, so its tickets stay open. Press Push again on the release once the remote is reachable.
+            <span style={{ width: 16, textAlign: 'center', fontWeight: 800 }}>!</span> It did not reach your team's shared copy of the code, so its tickets stay open. Press Send again on the release once it can.
           </div>
         ) : (
           <div><Check size={16} /> {release.tickets.length} tickets released</div>

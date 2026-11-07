@@ -5,9 +5,10 @@ import { ArrowRight, Check, GitBranch, PenLine, Rocket, Undo2 } from 'lucide-rea
 import { ApiError, api, send } from '../api/client';
 import type { BranchPlan, Release, ReleaseWithItems } from '../api/types';
 import { useAct, useBoard, useReleases } from '../lib/data';
+import { BrokenTickets } from './Board';
 import { partNames } from '../lib/overview';
 import { BugDialog, ReleasedDialog } from '../components/dialogs';
-import { Cmd, Modal, NotesView, dateShort } from '../components/ui';
+import { Cmd, CouldNotLoad, Modal, NotesView, dateShort } from '../components/ui';
 import { usePrefs } from '../lib/prefs';
 import { shellQuote } from '../lib/text';
 import { GatePill } from '../components/Gates';
@@ -20,6 +21,7 @@ export function ReleasesPage() {
   const list = releases.data ?? [];
   const current = list.find((r) => r.version === selected) ?? list.find((r) => r.status === 'draft') ?? list[0];
   const demo = board.data?.ready ? board.data.meta.engine === 'demo' : false;
+  const broken = board.data?.brokenRecords?.filter((b) => b.kind === 'release') ?? [];
 
   return (
     <>
@@ -28,6 +30,7 @@ export function ReleasesPage() {
         <span className="grow" />
         <Cmd text="squad release" />
       </div>
+      {broken.length > 0 && <BrokenTickets list={broken} label="Releases that could not be read" />}
       <div className="split rel">
         <div className="listcol">
           {list.map((r) => (
@@ -42,11 +45,11 @@ export function ReleasesPage() {
                   </span>
                 ) : null}
               </b>
-              {r.status === 'draft' ? 'Next release' : r.unpushed?.length ? 'Not pushed yet' : dateShort(r.date)} · {r.items.length} {r.items.length === 1 ? 'ticket' : 'tickets'}
+              {r.status === 'draft' ? 'Next release' : r.unpushed?.length ? 'Not sent yet' : dateShort(r.date)} · {r.items.length} {r.items.length === 1 ? 'ticket' : 'tickets'}
             </button>
           ))}
         </div>
-        {current ? <ReleaseDetail r={current} onReleased={setDone} live={!demo} /> : <div className="center">No releases yet.</div>}
+        {current ? <ReleaseDetail r={current} onReleased={setDone} live={!demo} /> : releases.isError && !releases.data ? <CouldNotLoad what="the releases" error={releases.error} onRetry={() => void releases.refetch()} /> : <div className="center">No releases yet.</div>}
       </div>
       {done && <ReleasedDialog release={done} demo={demo} onClose={() => setDone(null)} />}
     </>
@@ -81,7 +84,7 @@ function ReleaseDetail({ r, onReleased, live }: { r: ReleaseWithItems; onRelease
 
       {unpushed.length > 0 && (
         <div className="box" style={{ marginTop: 10, color: 'var(--you-ink)' }}>
-          <b>Not pushed yet.</b> The release is made on this computer, but it did not reach your team's shared copy of the code, so its tickets stay open.
+          <b>Not sent yet.</b> The release is made on this computer, but it did not reach your team's shared copy of the code, so its tickets stay open.
           {unpushed.map((u) => (
             <div key={u.repo} style={{ marginTop: 6 }}>
               {u.plain ?? 'An engineer can see why below.'}
@@ -104,9 +107,9 @@ function ReleaseDetail({ r, onReleased, live }: { r: ReleaseWithItems; onRelease
                 )
               }
             >
-              <Rocket size={15} /> Push again
+              <Rocket size={15} /> Send again
             </button>
-            <button className="btn quiet" disabled={act.isPending} title="An engineer brought it in by hand, so Push again cannot see it. You say how; its tickets close." onClick={() => setMarking(true)}>
+            <button className="btn quiet" disabled={act.isPending} title="An engineer brought it in by hand, so Send again cannot see it. You say how; its tickets close." onClick={() => setMarking(true)}>
               It reached it another way
             </button>
             <span className="grow" />
@@ -181,7 +184,7 @@ function ReleaseDetail({ r, onReleased, live }: { r: ReleaseWithItems; onRelease
               )}
             </div>
           ))}
-          {draft && <p className="note">Its code stays in main. This release leaves it out, and it goes out with the next one.</p>}
+          {draft && <p className="note">Its code stays in the project. This release leaves it out, and it goes out with the next one.</p>}
           {draft && (
             <div style={{ marginTop: 6 }}>
               <Cmd text={`squad release --put-back ${r.out![0]}`} />
@@ -224,8 +227,8 @@ function ReleaseDetail({ r, onReleased, live }: { r: ReleaseWithItems; onRelease
               ))
             : [
                 ['changelog', 'Update the changelog'],
-                ['tag', `Tag ${r.version} in git`],
-                ['pipeline', 'Run the pipeline'],
+                ['tag', `Mark the code as ${r.version}`],
+                ['pipeline', 'Run your after-release step'],
                 ['whatsapp', 'Draft a WhatsApp note for my manager'],
               ].map(([k, label]) => (
                 <div className="checkrow" key={k}>
@@ -327,10 +330,11 @@ function ReleaseDetail({ r, onReleased, live }: { r: ReleaseWithItems; onRelease
                   <BranchTargets r={r} />
                 </details>
               ) : (
-                <>
-                  <b>This release changes these branches:</b>
+                <details>
+                  <summary><b>{r.targets.some((g) => g.remote) ? "This release goes to your team's shared copy of the code" : 'This release stays on this computer: the project has no shared copy'}</b></summary>
+                  <div className="note" style={{ marginTop: 6 }}>For engineers:</div>
                   <BranchTargets r={r} />
-                </>
+                </details>
               )}
             </div>
           )}
@@ -353,7 +357,7 @@ function BranchTargets({ r }: { r: ReleaseWithItems }) {
     <>
       {r.targets.map((g) => (
         <div key={g.repo} className="mono" style={{ fontSize: 12.5, marginTop: 6 }}>
-          {g.repo === '.' ? 'project' : g.repo}: {g.branch} {g.remote ? `→ pushed to ${g.remote}` : '(no remote, stays on this Mac)'}
+          {g.repo === '.' ? 'project' : g.repo}: {g.branch} {g.remote ? `→ pushed to ${g.remote}` : '(no remote, stays on this computer)'}
         </div>
       ))}
       <p className="note" style={{ marginTop: 6 }}>Change the branch or remote in Settings first if this is not right.</p>
@@ -369,19 +373,19 @@ function OldBranches() {
   return (
     <div className="box" style={{ marginTop: 18 }}>
       <b>
-        <GitBranch size={14} /> Old ticket branches
+        <GitBranch size={14} /> Left over from released tickets
       </b>
       <p className="note" style={{ margin: '4px 0 8px' }}>
-        {[p.here.length ? `${p.here.length} on this computer` : '', p.remote.length ? `${p.remote.length} in your team's shared copy of the code` : ''].filter(Boolean).join(' and ')}, from released tickets. Their work is in main, so nothing is lost.
+        {[p.here.length ? `${p.here.length} on this computer` : '', p.remote.length ? `${p.remote.length} in your team's shared copy of the code` : ''].filter(Boolean).join(' and ')}. Their work is in the code already, so nothing is lost.
       </p>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         {p.here.length > 0 && (
-          <button className="btn sm" disabled={act.isPending} onClick={() => act.mutate({ path: '/api/v1/branches/clean', body: { remote: false }, done: 'Deleted the old branches on this computer' })}>
+          <button className="btn sm" disabled={act.isPending} onClick={() => act.mutate({ path: '/api/v1/branches/clean', body: { remote: false }, done: 'Deleted what was left over on this computer' })}>
             Delete them here
           </button>
         )}
         {p.remote.length > 0 && (
-          <button className="btn sm" disabled={act.isPending} onClick={() => act.mutate({ path: '/api/v1/branches/clean', body: { remote: true }, done: "Deleted the old branches here and in the shared copy of the code" })}>
+          <button className="btn sm" disabled={act.isPending} onClick={() => act.mutate({ path: '/api/v1/branches/clean', body: { remote: true }, done: "Deleted what was left over here and in the shared copy of the code" })}>
             Delete them {p.here.length ? 'here and ' : ''}in the shared copy
           </button>
         )}

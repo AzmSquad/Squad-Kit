@@ -26,7 +26,8 @@ import path from 'node:path';
 import type { BoardMeta, Decision, ImpactCheck, Release, TechDraft, Ticket, UnpushedRelease } from './types.js';
 import { detectStack } from './stack.js';
 import { scheduleSquad } from './schedule.js';
-import { PullRequestClash, commitTicket, commitWithoutCheck, hooksStillOwed, liveRelease, onTheRemote, pushAgain } from '../engine/release.js';
+import { plainWords } from '../core/for-people.js';
+import { PullRequestClash, commitTicket, commitWithoutCheck, hooksStillOwed, liveRelease, onTheRemote, pushAgain, versionOnRemote } from '../engine/release.js';
 import { CommitStopped, HookRefused, MergeClash, addWorktree, mergeWouldClash, cutOffWords, git, pushedBranch, repairCopyLink, settleCopy, type HookRun } from '../engine/git.js';
 import { guardSupport, ticketGuard } from '../engine/project-guard.js';
 import { holdRelease, releaseGoingOut } from './lock.js';
@@ -65,7 +66,16 @@ import { repoLabel } from './parts.js';
 
 /** Every person-facing action lives here, so the board and the terminal do exactly the same thing. */
 
-export class BoardActionError extends Error {}
+export class BoardActionError extends Error {
+  constructor(
+    message: string,
+    /** The action takes a second yes: the message says what it does. */
+    readonly asks?: 'whole-redo',
+  ) {
+    super(message);
+    this.name = 'BoardActionError';
+  }
+}
 
 /** A button failed on something technical: the person reads the plain words, and the exact error goes to the log. */
 function actionFailed(bp: BoardPaths, id: string, plain: string, err: unknown): BoardActionError {
@@ -97,6 +107,8 @@ export interface NewTicketInput {
   rules?: string[];
   edgeCases?: string[];
   files?: UploadedFile[];
+  /** A one-time key from the page: the same Create sent again (a lost reply, Try again) gets the ticket it made. */
+  key?: string;
   /** Builds by itself: the breakdown story it builds, with its story and done-when, approved with the breakdown. */
   fromBreakdown?: { id: string; item: string; story: string; criteria: Criterion[]; approvedBy: string; decided?: Decided[]; setsUp?: boolean };
 }
@@ -142,6 +154,8 @@ export function saveUploads(dir: string, files: UploadedFile[]): string[] {
 export function createTicket(bp: BoardPaths, input: NewTicketInput): Ticket {
   const title = input.title.trim();
   if (!title) throw new BoardActionError('A ticket needs a title.');
+  const made = input.key ? listTickets(bp).find((t) => t.createKey === input.key && t.title === title) : undefined;
+  if (made) return made;
   const meta = readMeta(bp);
   const id = input.id ?? nextTicketId(bp);
   if (input.id && readTicket(bp, input.id)) throw new BoardActionError(`${input.id} is already on the board.`);
@@ -162,6 +176,7 @@ export function createTicket(bp: BoardPaths, input: NewTicketInput): Ticket {
     createdAt: now(),
     createdBy: meta.user.name,
     owner: meta.user.name,
+    ...(input.key ? { createKey: input.key } : {}),
     builder: meta.roles.builder,
     reviewer: meta.roles.reviewer,
     activity: [],
@@ -229,7 +244,7 @@ async function pullFromTracker(bp: BoardPaths, id: string): Promise<Ticket> {
   try {
     issue = await client.fetchIssue(id);
   } catch (err) {
-    throw new BoardActionError(`Could not fetch ${id}: ${(err as Error).message}`);
+    throw new BoardActionError(`Could not fetch ${id}: ${plainWords(err, 'Pulling from the tracker', 'something technical stopped it. Try again.')}`);
   }
   const ask = [issue.description, issue.acceptanceCriteria && `Acceptance criteria:\n${issue.acceptanceCriteria}`].filter(Boolean).join('\n\n');
   const ticket = createTicket(bp, {
@@ -271,7 +286,7 @@ export async function startFromTracker(bp: BoardPaths, tracker: Tracker, ref: st
   try {
     w = await tracker.get(id);
   } catch (err) {
-    throw new BoardActionError(`Could not fetch ${tracker.refOf(id)}: ${(err as Error).message}`);
+    throw new BoardActionError(`Could not fetch ${tracker.refOf(id)}: ${plainWords(err, 'Pulling from the tracker', 'something technical stopped it. Try again.')}`);
   }
   const ask = [
     w.description,
@@ -1701,7 +1716,7 @@ export function wayOptions(stop: { gate?: StuckChoice['gate']; kind?: StuckChoic
         : stop.gate === 'proof'
           ? { do: 'retry', name: 'Take the screenshots again', note: 'Only the proof runs again. Nothing is rebuilt. You can add a note for the Tester.' }
           : stop.gate === 'merge'
-          ? { do: 'retry', name: `Let the Builder bring in the latest ${stop.base ?? 'base'}`, note: 'It brings the newer work into this ticket and fixes the clash. Then the checks run again.' }
+          ? { do: 'retry', name: `Let the Builder bring in the newest code`, note: 'It brings the newer work into this ticket and fixes the clash. Then the checks run again.' }
           : { do: 'retry', name: 'Try again', note: 'Run the same step again. You can add a note for the squad.' };
   const out: StuckOption[] = [retry];
   if (stop.copy && stop.gate !== 'proof') {
@@ -1979,8 +1994,11 @@ export function ensureDraftRelease(bp: BoardPaths, part: 'minor' | 'patch'): Rel
   // The first release on a live board continues the project's own version, not 0.0.0.
   const done = last?.version ?? (live ? projectVersion(bp.root, meta) : 'v0.0.0');
   const from = going ? newer(going, done) : done;
+  // A file that cannot be read holds its version, and is never written over.
+  let version = bump(from, part);
+  while (fs.existsSync(path.join(bp.releasesDir, `${version}.md`))) version = bump(version, part);
   const release: Release = {
-    version: bump(from, part),
+    version,
     status: 'draft',
     from,
     tickets: [],
@@ -2073,10 +2091,29 @@ async function gatesBeforeRelease(bp: BoardPaths, release: Release, tickets: Tic
   writeRelease(bp, saved);
 }
 
+/**
+ * A teammate released this number from their computer, since each one numbers its drafts alone. A number on the remote
+ * is never used twice or moved, so this release takes the next free one, and every ticket in it follows.
+ */
+function goAroundTakenVersion(bp: BoardPaths, release: Release): { release: Release; was?: string } {
+  const tickets = listTickets(bp).filter((t) => release.tickets.includes(t.id));
+  if (readMeta(bp).engine !== 'live' || !versionOnRemote(bp, release, tickets)) return { release };
+  const part = /\.0$/.test(release.version) ? 'minor' : 'patch';
+  let version = bump(release.version, part);
+  while (fs.existsSync(path.join(bp.releasesDir, `${version}.md`)) || versionOnRemote(bp, { ...release, version }, tickets)) version = bump(version, part);
+  const next: Release = { ...release, version, from: release.version };
+  writeRelease(bp, next);
+  removeRelease(bp, release.version);
+  for (const t of tickets) moveToRelease(bp, t.id, t.release, version);
+  return { release: next, was: release.version };
+}
+
 export async function releaseVersion(bp: BoardPaths, version?: string, goOn?: string): Promise<Release> {
-  const release = version ? readRelease(bp, version) : draftRelease(bp);
-  if (!release || release.status !== 'draft') throw new BoardActionError('There is no release ready to go out.');
-  if (release.tickets.length === 0) throw new BoardActionError(`${release.version} has no tickets yet.`);
+  const asked = version ? readRelease(bp, version) : draftRelease(bp);
+  if (!asked || asked.status !== 'draft') throw new BoardActionError('There is no release ready to go out.');
+  if (asked.tickets.length === 0) throw new BoardActionError(`${asked.version} has no tickets yet.`);
+  // One going out now, or cut off half-way, may have put this tag there itself: it keeps its number.
+  const { release, was } = releaseGoingOut(bp) || readJournal(bp) ? { release: asked, was: undefined } : goAroundTakenVersion(bp, asked);
   // One release at a time, and "Looks right" meanwhile knows this one takes no more tickets.
   let free: () => void;
   try {
@@ -2091,13 +2128,13 @@ export async function releaseVersion(bp: BoardPaths, version?: string, goOn?: st
       if (cut?.version === release.version && cut.status === 'released') return cut;
     }
     // What it sends is read once the lock is held: a ticket accepted just before still goes with it.
-    return await sendRelease(bp, readRelease(bp, release.version) ?? release, goOn?.trim());
+    return await sendRelease(bp, readRelease(bp, release.version) ?? release, goOn?.trim(), was);
   } finally {
     free();
   }
 }
 
-async function sendRelease(bp: BoardPaths, release: Release, goOn?: string): Promise<Release> {
+async function sendRelease(bp: BoardPaths, release: Release, goOn?: string, numberWas?: string): Promise<Release> {
   const meta = readMeta(bp);
   if (!release.notes.trim()) release.notes = composeNotes(bp, release);
   const tickets = listTickets(bp).filter((t) => release.tickets.includes(t.id));
@@ -2117,7 +2154,7 @@ async function sendRelease(bp: BoardPaths, release: Release, goOn?: string): Pro
   if (meta.engine === 'live') {
     try {
       const done = await liveRelease(bp, release, tickets);
-      release.log = done.log;
+      release.log = [...(numberWas ? [{ ok: true, text: `A teammate already released ${numberWas}, so this one went out as ${release.version}.` }] : []), ...done.log];
       unpushed = done.unpushed;
       // A pull request merged only now, as the release went out: the first code came in this way.
       firstCodeMerged(bp);
@@ -2136,7 +2173,7 @@ async function sendRelease(bp: BoardPaths, release: Release, goOn?: string): Pro
           `The release did not go out: ${withPr ? 'the pull request of ' : ''}${err.tickets.join(', ')} ${one || withPr ? 'clashes' : 'clash'} with newer changes in ${err.base}. ${one ? 'It' : 'They'} left ${release.version} and ${one ? 'waits' : 'wait'} for you with ways out.${left ? ' Press Release again to send the rest.' : ''}`,
         );
       }
-      throw new BoardActionError(`The release did not go out: ${(err as Error).message}`);
+      throw new BoardActionError(`The release did not go out: ${plainWords(err, 'A release stopped', 'something technical stopped it, and nothing was lost. Press Release to try again. If it happens again, an engineer can see why in the log.')}`);
     }
   }
   // Read again before saving: a ticket that joined the file while the release went out is not in it, so it waits for
@@ -2166,10 +2203,10 @@ export function closeReleased(bp: BoardPaths, release: Release): void {
     updateTicket(bp, id, (x) => {
       x.live = false;
       if (waits) {
-        const status = `In ${release.version} · not pushed to ${waits.remote} yet`;
+        const status = `In ${release.version} · not sent yet`;
         if (x.status === status) return;
         x.status = status;
-        addActivity(x, 'release', `Released in ${release.version} on this computer only: the push to ${waits.remote} failed. Push again sends it`);
+        addActivity(x, 'release', `Released in ${release.version} on this computer only: it did not reach your team's shared copy of the code. Send again sends it`);
         return;
       }
       x.stage = 'done';

@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { listDecisions, listReleases, listTickets, readMeta, type BoardPaths } from './store.js';
+import { brokenDecisions, listDecisions, listReleases, listTickets, readMeta, type BoardPaths, type BrokenRecord } from './store.js';
 import { reposOf } from '../engine/repos.js';
 import { decidedIn, detectStack, type Tech } from './stack.js';
 import type { BoardMeta, Blueprint, Decision, ImpactCheck, PatternNote, TechDraft, Ticket } from './types.js';
@@ -38,6 +38,8 @@ export interface Architecture {
   impact: ImpactCheck[];
   /** When the Architect last read the code, and whether a read is on its way. */
   reading?: Omit<Blueprint, 'stack' | 'patterns'>;
+  /** Decisions whose file cannot be read, so they are not among the decisions. */
+  broken?: BrokenRecord[];
 }
 
 /** Decisions with their links, and every ticket in order, for the architecture page. */
@@ -77,7 +79,8 @@ export function architecture(bp: BoardPaths): Architecture {
     return parent ? { ...t, via: { name: parent.name, decisions: parent.decisions } } : t;
   });
   const { stack: _s, patterns = [], ...reading } = meta.blueprint ?? { stack: [], patterns: [] };
-  return { decisions, tickets, map: meta.map, lessons: meta.lessons, stack, patterns, impact: meta.impactChecks ?? [], ...(meta.blueprint ? { reading: reading as Architecture['reading'] } : {}) };
+  const broken = brokenDecisions(bp);
+  return { decisions, tickets, map: meta.map, lessons: meta.lessons, stack, patterns, impact: meta.impactChecks ?? [], ...(meta.blueprint ? { reading: reading as Architecture['reading'] } : {}), ...(broken.length ? { broken } : {}) };
 }
 
 function stateOf(t: Ticket, shipped: Set<string>): TimelineState {

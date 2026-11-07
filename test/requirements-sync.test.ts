@@ -436,3 +436,16 @@ describe('tickets of sent stories', () => {
     expect(readTicket(bp, id)!.trackerQueue).toBeUndefined();
   });
 });
+
+describe('a send that stops on something technical', () => {
+  it("says what it was doing and how far it got, with no tool's raw words", async () => {
+    const raw = Object.create(demoTracker({ baseUrl: 'https://boards.example/items/' })) as DemoTracker;
+    raw.createItem = async () => {
+      throw new TypeError("Cannot read properties of undefined (reading 'fields')");
+    };
+    const result = await sendBreakdown(breakdown(), raw, { save: () => {} });
+    expect(result.error).toMatch(/^Could not make .* something technical stopped it\. Nothing was sent yet\.$/);
+    expect(result.error).not.toContain('Cannot read');
+  });
+});
+

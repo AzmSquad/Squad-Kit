@@ -104,6 +104,16 @@ export function pruneDrafts(s: Store | null = store(), now = Date.now()): void {
  * useState that survives. `scope` is the ticket's id or the dialog's name, `field` the box. A value equal to `initial`
  * is no draft. The third item clears it, for when it was sent.
  */
+/** Made once for this draft and kept with it, until the draft goes: a window opened again uses the same one. */
+export function keptOnce(scope: string, field: string, make: () => string): string {
+  const key = draftKey(PROJECT, scope, field);
+  const had = readDraft<string>(key);
+  if (had) return had;
+  const made = make();
+  writeDraft(key, made);
+  return made;
+}
+
 export function useDraft<T>(scope: string, field: string, initial: T): [T, Dispatch<SetStateAction<T>>, () => void] {
   const key = draftKey(PROJECT, scope, field);
   const first = useRef(JSON.stringify(initial));

@@ -16,6 +16,7 @@ import { dropTicketCache } from './sandbox.js';
 import { guardSupport, projectGuardFor } from './project-guard.js';
 import { copyViews, repoOrder, repoReliesOn } from './copies.js';
 import { repoLabel } from '../board/parts.js';
+import { writeLog } from '../core/app-log.js';
 
 /**
  * A real release: merge every ready ticket (its pull request on the code host, or its branch locally), write the
@@ -154,7 +155,7 @@ export async function liveRelease(bp: BoardPaths, release: Release, tickets: Tic
     // A part whose push failed: what relies on it does not go out before it does.
     const waitsFor = unpushed.find((u) => repoReliesOn(meta, repo.path, u.repo))?.repo;
     // The project's shared files go out with the release when `.squad/` sits in this repo (ADR-001).
-    const docs = docsInGit(bp) && path.resolve(docsRepo(bp)!) === path.resolve(repoRoot) ? (dir: string) => stageReleaseDocs(bp, dir, release, list) : undefined;
+    const docs = docsInGit(bp) && path.resolve(docsRepo(bp)!) === path.resolve(repoRoot) ? (dir: string) => stageReleaseDocs(bp, dir, release, list, repo.base || currentBranch(repoRoot)) : undefined;
     const keep = path.relative(repoRoot, bp.squadDir);
     const note = (patch: Partial<RepoJournal> & { base: string }) => noteRepo(bp, repo.path, patch);
     const done = await releaseRepo(repoRoot, repo, release, list, meta.commands?.deploy, host, env, docs, keep && !keep.startsWith('..') ? keep : undefined, {
@@ -182,7 +183,7 @@ async function releaseRepo(
   deployFallback: string | undefined,
   host: RepoHost | null,
   env: Record<string, string>,
-  docs?: (dir: string) => void,
+  docs?: (dir: string) => string[],
   keep?: string,
   extra: { holdPush?: { plain: string }; leave?: Ticket[]; note?: (patch: Partial<RepoJournal> & { base: string }) => void; merged?: (id: string) => void; guardFor?: (dir: string) => ReturnType<typeof projectGuardFor> | undefined } = {},
 ): Promise<{ log: ReleaseLog; unpushed?: UnpushedRelease }> {
@@ -195,7 +196,7 @@ async function releaseRepo(
   let unpushed: UnpushedRelease | undefined;
 
   // Accepted work is normally merged already. A pull request still waiting on the host is merged now.
-  for (const t of tickets.filter((x) => x.mergedAt)) log.push({ ok: true, text: `Already in ${base}: ${t.id} ${t.title}` });
+  for (const t of tickets.filter((x) => x.mergedAt)) log.push({ ok: true, text: `Already in the code: ${t.id} ${t.title}` });
   const viaPr = tickets.filter((t) => host && t.pr?.host === host.host && !t.mergedAt);
   const note = extra.note ?? (() => undefined);
   for (const t of viaPr) {
@@ -228,7 +229,8 @@ async function releaseRepo(
         git(dir, ['merge', '--abort'], { allowFail: true });
         // A real clash: the ticket leaves the release with the clash card and its ways out, and the rest can go.
         if (clashes) throw new PullRequestClash([t.id], base);
-        throw new Error(`${t.id} could not be merged into ${base}, so the release stopped. ${(err as Error).message}`);
+        writeLog({ level: 'error', ticket: t.id, text: `Merging into ${base} for ${release.version}: ${(err as Error).message}` });
+        throw new Error(`${t.id} could not be merged into ${base}, so the release stopped. An engineer can see why in the log.`);
       }
     }
     const reverts = extra.leave?.length ? leaveOut(dir, root, base, extra.leave, version, log) : [];
@@ -243,10 +245,12 @@ async function releaseRepo(
       if (json.version) {
         json.version = version.replace(/^v/, '');
         fs.writeFileSync(pkg, `${JSON.stringify(json, null, 2)}\n`, 'utf8');
-        log.push({ ok: true, text: `Version set to ${json.version} in package.json` });
+        log.push({ ok: true, text: `Set the version to ${json.version}` });
       }
     }
-    docs?.(dir);
+    // What the base holds now, so the shared settings are put together with the newest copy.
+    if (docs && remote) netGit(dir, ['fetch', '--quiet', remote, base], { env, allowFail: true });
+    for (const text of docs?.(dir) ?? []) log.push({ ok: true, text });
     stageAll(dir);
     if (somethingToSave(dir)) await commitRelease(dir, version, log, extra.guardFor?.(dir) ? { guard: extra.guardFor(dir)! } : {});
     // Written before the tag is made, so a restart right after it finds the tag and knows it is this release's.
@@ -255,7 +259,7 @@ async function releaseRepo(
     if (release.addons.tag) {
       // A tag needs a name like a commit does: the same fallback when this computer has none set.
       git(dir, [...commitArgsFor(dir), 'tag', '-f', '-a', version, '-m', `Release ${version}`]);
-      log.push({ ok: true, text: `Tagged ${version}` });
+      log.push({ ok: true, text: `Marked the code as ${version}` });
     }
     // The tag has the release without the work taken out of it; the base gets that work back right after.
     if (reverts.length) bringBack(dir, reverts, version, base);
@@ -271,14 +275,15 @@ async function releaseRepo(
       try {
         sent = await pushRelease(dir, remote, base, version, release.notes, host, env, log);
         note({ base, head: sent, pushed: true });
-        if (release.addons.tag) netGit(dir, ['push', '-f', remote, `refs/tags/${version}`], { env });
-        log.push({ ok: true, text: `Pushed ${base}${release.addons.tag ? ` and ${version}` : ''} to ${remote}` });
+        // Never forced: a version number on the remote is never moved.
+        if (release.addons.tag) netGit(dir, ['push', remote, `refs/tags/${version}`], { env });
+        log.push({ ok: true, text: "Sent to your team's shared copy of the code" });
       } catch (err) {
         const error = (err as Error).message;
         const plain = pushWords(error);
         // The release commit and tag are kept here: Push again sends them once the remote takes them.
         unpushed = { repo: repo.path, remote, base, commit: head, ...(release.addons.tag ? { tag: version } : {}), error: pushDetail(error, { remote, base, version }), plain };
-        log.push({ ok: false, text: `${plain} Press Push again, or run: squad release ${version} --push-again` });
+        log.push({ ok: false, text: `${plain} Press Send again, or run: squad release ${version} --push-again` });
       }
     } else {
       log.push({ ok: true, text: 'Saved on this computer only: this project has no online copy to send it to.' });
@@ -294,13 +299,15 @@ async function releaseRepo(
           // What reached the remote, with a teammate's newer work when it went out together with that.
           if (sent !== head) git(dir, ['checkout', '--quiet', '--detach', sent]);
           const r = await runCommand(dir, deploy, PIPELINE_MS, extra.guardFor?.(dir) ? { guard: extra.guardFor!(dir)! } : {});
-          log.push({ ok: r.ok, text: r.ok ? `Ran the pipeline: ${deploy}` : `Pipeline failed: ${tail(r.output, 3)}` });
+          if (!r.ok) writeLog({ level: 'error', text: `The after-release step of ${version} failed (${deploy}): ${tail(r.output, 3)}` });
+          log.push({ ok: r.ok, text: r.ok ? 'Ran your after-release step' : 'Your after-release step failed. An engineer can see why in the log.' });
         } catch (err) {
           // The release is out by now: this stops only the pipeline.
-          log.push({ ok: false, text: `Pipeline did not run: ${(err as Error).message}` });
+          writeLog({ level: 'error', text: `The after-release step of ${version} did not run: ${(err as Error).message}` });
+          log.push({ ok: false, text: 'Your after-release step did not run. An engineer can see why in the log.' });
         }
       } else {
-        log.push({ ok: false, text: 'No pipeline command is set up in Settings, so no pipeline ran' });
+        log.push({ ok: false, text: 'No after-release step is set up in Settings, so none ran' });
       }
     }
   } finally {
@@ -328,29 +335,28 @@ export function moveLocalBase(root: string, base: string, head: string, version:
       const r = mergeIntoBase(root, base, head, `Merge release ${version} into ${base}`, keep);
       log.push(
         r.moved
-          ? { ok: true, text: `${base} has work accepted while the release went out, so the release was merged into it` }
-          : { ok: false, text: r.note ?? `Your ${base} checkout was not updated. Run: git merge ${branch}` },
+          ? { ok: true, text: 'The code here has work accepted while the release went out, so the release was merged into it' }
+          : { ok: false, text: r.note ?? `Your own copy of the code was not updated. An engineer can bring it in with: git merge ${branch}` },
       );
     } catch (err) {
-      const why = err instanceof MergeClash ? `it has work accepted while the release went out, and the two clash` : (err as Error).message;
-      log.push({ ok: false, text: `${base} on this computer was not moved: ${why}. Run: git merge ${branch}` });
+      if (!(err instanceof MergeClash)) writeLog({ level: 'error', text: `Moving ${base} for ${version}: ${(err as Error).message}` });
+      const why = err instanceof MergeClash ? 'it has work accepted while the release went out, and the two clash' : 'something technical stopped it';
+      log.push({ ok: false, text: `The code on this computer was not updated: ${why}. An engineer can bring it in with: git merge ${branch}` });
     }
     return;
   }
   if (currentBranch(root) === base) {
     // squad-kit's own .squad/ files do not count: they are kept as they are while the checkout moves.
     const dirty = git(root, ['status', '--porcelain', '--untracked-files=no', '--', '.', ...(keep ? [`:(exclude)${keep}`] : [])], { allowFail: true });
-    if (dirty) log.push({ ok: false, text: `Your ${base} checkout has changes, so it was not updated. Run: git merge ${branch}` });
+    if (dirty) log.push({ ok: false, text: `Your own copy of the code has changes, so it was not updated. An engineer can bring it in with: git merge ${branch}` });
     else {
       try {
         keepingFiles(root, keep, before, head, () => git(root, ['merge', '--ff-only', head]));
-        log.push({ ok: true, text: `Your ${base} checkout now has the release` });
+        log.push({ ok: true, text: 'Your own copy of the code now has the release' });
       } catch (err) {
         // Usually untracked files in the checkout that the release also adds.
-        log.push({
-          ok: false,
-          text: `Your ${base} checkout was not updated (${(err as Error).message.replace(/^git merge failed: /, '')}). Run: git merge --ff-only ${head.slice(0, 8)}`,
-        });
+        writeLog({ level: 'warn', text: `Moving ${base} for ${version}: ${(err as Error).message}` });
+        log.push({ ok: false, text: `Your own copy of the code was not updated. An engineer can bring it in with: git merge --ff-only ${head.slice(0, 8)}` });
       }
     }
     return;
@@ -360,7 +366,8 @@ export function moveLocalBase(root: string, base: string, head: string, version:
     git(root, ['update-ref', `refs/heads/${base}`, head, before]);
   } catch (err) {
     if (!again) return moveLocalBase(root, base, head, version, keep, log, true);
-    log.push({ ok: false, text: `${base} on this computer was not moved (${(err as Error).message}). Run: git merge ${branch}` });
+    writeLog({ level: 'error', text: `Moving ${base} for ${version}: ${(err as Error).message}` });
+    log.push({ ok: false, text: `The code on this computer was not updated. An engineer can bring it in with: git merge ${branch}` });
   }
 }
 
@@ -394,8 +401,8 @@ export async function pushAgain(bp: BoardPaths, release: Release): Promise<Relea
         // Merged with a teammate's newer work: the local base gets that merge too.
         if (sent !== u.commit) moveLocalBase(repoRoot, u.base, sent, release.version, keepOf(bp, repoRoot), lines);
       }
-      if (u.tag) netGit(repoRoot, ['push', '-f', u.remote, `refs/tags/${u.tag}`], { env });
-      lines.push({ ok: true, text: `Pushed ${u.base}${u.tag ? ` and ${u.tag}` : ''} to ${u.remote}` });
+      if (u.tag) netGit(repoRoot, ['push', u.remote, `refs/tags/${u.tag}`], { env });
+      lines.push({ ok: true, text: "Sent to your team's shared copy of the code" });
     } catch (err) {
       const error = (err as Error).message;
       const plain = pushWords(error);
@@ -435,13 +442,31 @@ const SHARED_COPY = "your team's shared copy of the code";
  */
 export function pushWords(message: string): string {
   if (/same lines as this release/.test(message)) return message.split('\n')[0]!;
-  if (isProtected(message)) return `The shared copy of the code only takes changes after a review, and squad-kit cannot ask for one there. The release is safe on this computer. An engineer can see what to do below. Press Push again once it is in.`;
-  if (/could not resolve|could not read from remote|does not appear to be|repository exists|unable to access|connection|timed out|gave up after|network|host key/i.test(message)) return `squad-kit could not reach ${SHARED_COPY}, so the release is only on this computer. Check the connection, then press Push again.`;
-  if (/authentication failed|permission denied|could not read username|\b40[13]\b/i.test(message)) return `The shared copy of the code did not accept this computer's sign-in, so the release is only on this computer. Check the sign-in, then press Push again.`;
-  return `The shared copy of the code did not take the release, so it is only on this computer. An engineer can see why below. Press Push again once that is settled.`;
+  if (/refs\/tags\/.*(already exists|rejected)|\[rejected\].*tag|tag already exists/i.test(message)) return `A teammate released this version number while this release went out, so the shared copy did not take it. The release is safe on this computer. An engineer can see what to do below.`;
+  if (isProtected(message)) return `The shared copy of the code only takes changes after a review, and squad-kit cannot ask for one there. The release is safe on this computer. An engineer can see what to do below. Press Send again once it is in.`;
+  if (/could not resolve|could not read from remote|does not appear to be|repository exists|unable to access|connection|timed out|gave up after|network|host key/i.test(message)) return `squad-kit could not reach ${SHARED_COPY}, so the release is only on this computer. Check the connection, then press Send again.`;
+  if (/authentication failed|permission denied|could not read username|\b40[13]\b/i.test(message)) return `The shared copy of the code did not accept this computer's sign-in, so the release is only on this computer. Check the sign-in, then press Send again.`;
+  return `The shared copy of the code did not take the release, so it is only on this computer. An engineer can see why below. Press Send again once that is settled.`;
 }
 
 /** The engineer's line beside those words: where it was going, git's own words, and what to do where the plain sentence leaves it out. */
+/** True when this version's tag is on one of the remotes the release goes to, as the remote says now. No answer counts as no. */
+export function versionOnRemote(bp: BoardPaths, release: Pick<Release, 'version' | 'addons'>, tickets: Ticket[]): boolean {
+  if (!release.addons.tag) return false;
+  const meta = readMeta(bp);
+  const root = projectRoot(bp);
+  const repos = new Map(tickets.flatMap((t) => copyViews(meta, t)).map((t) => { const r = repoFor(meta, t); return [r.path, r] as const; }));
+  for (const repo of repos.values()) {
+    const repoRoot = path.join(root, repo.path);
+    const remote = repo.remote || remotes(repoRoot)[0];
+    if (!remote) continue;
+    const url = git(repoRoot, ['config', '--get', `remote.${remote}.url`], { allowFail: true });
+    const env = url ? (repoHostFor(bp, url)?.gitEnv() ?? {}) : {};
+    if (netGit(repoRoot, ['ls-remote', '--tags', remote, `refs/tags/${release.version}`], { env, allowFail: true }).trim()) return true;
+  }
+  return false;
+}
+
 export function pushDetail(message: string, at: { remote: string; base: string; version: string }): string {
   if (/same lines as this release/.test(message)) return message.split('\n').slice(1).join('\n');
   if (isProtected(message)) return `${at.base} on ${at.remote}: ${message}\nThe release is on the branch release/${at.version}: open a pull request from it into ${at.base}.`;
@@ -477,7 +502,7 @@ function mergeWithNewer(dir: string, remote: string, base: string, commit: strin
     tree = git(dir, ['merge-tree', '--write-tree', newer, commit]).split('\n')[0]!.trim();
   } catch {
     // The first line is for the person; the rest is the engineer's line (pushDetail).
-    throw new PushClash(`A teammate's newer work in ${base} changes the same lines as this release, so it cannot go out by itself. An engineer can see what to do below. Then press Push again.\nMerge them: git fetch ${remote} ${base} && git merge release/${version} && git push ${remote} ${base}`);
+    throw new PushClash(`A teammate's newer work in ${base} changes the same lines as this release, so it cannot go out by itself. An engineer can see what to do below. Then press Send again.\nMerge them: git fetch ${remote} ${base} && git merge release/${version} && git push ${remote} ${base}`);
   }
   return git(dir, [...commitArgsFor(dir), 'commit-tree', tree, '-p', newer, '-p', commit, '-m', `Merge ${remote}/${base} into release ${version}`]);
 }
@@ -498,7 +523,7 @@ async function pushRelease(dir: string, remote: string, base: string, version: s
       const why = (err as Error).message;
       if (tries < 2 && isBehind(why)) {
         sending = mergeWithNewer(dir, remote, base, sending, version, env);
-        if (!tries) log.push({ ok: true, text: `${base} on ${remote} had newer work from a teammate, so the release was merged with it` });
+        if (!tries) log.push({ ok: true, text: 'The shared copy had newer work from a teammate, so the release was merged with it' });
         continue;
       }
       if (!host || !host.refusedPush(why)) {
@@ -512,7 +537,7 @@ async function pushRelease(dir: string, remote: string, base: string, version: s
   netGit(dir, ['push', '-f', remote, `${sending}:refs/heads/${branch}`], { env });
   const pr = (await host.findPullRequest(branch)) ?? (await host.openPullRequest({ source: branch, target: base, title: `Release ${version}`, description: notes, items: [] }));
   await host.merge(pr.id, `Release ${version}`);
-  log.push({ ok: true, text: `${base} only takes pull requests, so the release went through pull request ${pr.id}` });
+  log.push({ ok: true, text: `The shared copy only takes pull requests, so the release went through pull request ${pr.id}` });
   return sending;
 }
 

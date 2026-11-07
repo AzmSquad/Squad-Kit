@@ -37,7 +37,7 @@ afterEach(() => {
 });
 
 /** The shape: a root repo with tools and notes that ignores two code repos, each on its own branch. */
-function workspace(name = 'taqadi'): string {
+function workspace(name = 'portal'): string {
   const root = path.join(tmp, name);
   put(path.join(root, 'api', 'Program.cs'));
   put(path.join(root, 'web', 'src', 'app.ts'));
@@ -159,7 +159,7 @@ describe('Add project and the setup say the same about a folder that is a repo w
       ['api', 'development'],
       ['web', 'development'],
     ]);
-    expect(firstLook(root)).toMatchObject({ kind: 'repos', title: 'Several code repos', repos: ['api', 'web'] });
+    expect(firstLook(root)).toMatchObject({ kind: 'repos', title: 'Several code folders', repos: ['api', 'web'] });
     const { bp, did } = prepareProject(root);
     expect(setupView(bp)?.kind).toBe('repos');
     expect(did.join('\n')).toContain('Git: found 2 code repos inside');

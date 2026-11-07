@@ -377,7 +377,7 @@ describe('a story that builds by itself', () => {
     expect(t.selfAccept?.waitsFor).toBeUndefined();
   });
 
-  it('brings in the latest main on a merge clash, and again while main keeps moving (test/merge-clash-retry.test.ts has the rest)', async () => {
+  it('brings in the newest code on a merge clash, and again while main keeps moving (test/merge-clash-retry.test.ts has the rest)', async () => {
     const t0 = story();
     built(t0.id);
     // Someone changed the same line on main meanwhile.
@@ -391,7 +391,7 @@ describe('a story that builds by itself', () => {
     expect(t.squad?.phase).toBe('update-base');
     expect(t.selfAccept?.baseTried).toBeTruthy();
     expect(t.selfAccept?.baseTries).toBe(1);
-    expect(texts(t0.id)[0]).toBe('It clashes with newer changes in main, so squad-kit brings in the latest main and runs the checks, the review and the proof again (try 1 of 3)');
+    expect(texts(t0.id)[0]).toBe('It clashes with newer changes, so squad-kit brings in the newest code and runs the checks, the review and the proof again (try 1 of 3)');
     expect(sh('git log --format=%s -1 main', project)).toBe('other change');
 
     // The Builder settles the clash in the copy, then the checks, the review and the proof run again.
@@ -412,7 +412,7 @@ describe('a story that builds by itself', () => {
     expect(t.waiting).toBeNull();
     expect(t.squad?.phase).toBe('update-base');
     expect(t.selfAccept?.baseTries).toBe(2);
-    expect(texts(t0.id)[0]).toBe('It clashes with newer changes in main, so squad-kit brings in the latest main and runs the checks, the review and the proof again (try 2 of 3)');
+    expect(texts(t0.id)[0]).toBe('It clashes with newer changes, so squad-kit brings in the newest code and runs the checks, the review and the proof again (try 2 of 3)');
     expect(sh('git log --format=%s -1 main', project)).toBe('third change');
   });
 

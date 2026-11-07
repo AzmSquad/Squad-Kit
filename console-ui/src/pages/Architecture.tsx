@@ -3,6 +3,7 @@ import { Check, Lightbulb, Loader2, Map as MapIcon, Pause, Play, RefreshCw, Shap
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { DECISION_AREAS, type ArchitectureResponse, type Decision, type ImpactCheck, type DecisionArea, type StackItem, type TechRole, type TimelineState, type TimelineTicket } from '../api/types';
 import { useAct, useArchitecture } from '../lib/data';
+import { BrokenTickets } from './Board';
 import { LOGOS } from '../lib/logos';
 import { ago, dateShort } from '../components/ui';
 
@@ -100,6 +101,7 @@ export function ArchitecturePage() {
       <div className="split">
         <div className="scroll">
           <div className="arch">
+            {(data.data?.broken?.length ?? 0) > 0 && <BrokenTickets list={data.data!.broken!} label="Decisions that could not be read" />}
             {visual && (
               <>
                 <div className="arch-stats">

@@ -337,7 +337,7 @@ describe('a ticket whose dependency is not merged waits before building', () => 
     let t = readTicket(bp, 'RO-2')!;
     expect(t.dependency?.caughtUp).toBeTruthy();
     expect(t.squad?.phase).toBe('update-base');
-    expect(t.activity[0]!.text).toBe('RO-1 is merged, so squad-kit brings the latest main into this ticket before the checks');
+    expect(t.activity[0]!.text).toBe('RO-1 is merged, so squad-kit brings the newest code into this ticket before the checks');
     // Only once.
     expect(catchUp(bp, t, 'test')).toBe('test');
 
@@ -379,7 +379,7 @@ describe('a ticket whose dependency is not merged waits before building', () => 
     t = readTicket(bp, 'RO-2')!;
     expect(t.squad?.phase).toBe('build');
     expect(t.dependency?.started).toBeTruthy();
-    expect(t.activity[0]!.text).toBe('RO-1 is merged, so the build starts now, on the latest main');
+    expect(t.activity[0]!.text).toBe('RO-1 is merged, so the build starts now, on the newest code');
     expect(deps.wakeIfReady(bp, t)).toBe(false);
   });
 
@@ -396,7 +396,7 @@ describe('a ticket whose dependency is not merged waits before building', () => 
     deps.chooseBuild(bp, 'RO-3', 'wait');
     fs.rmSync(ticketDir(bp, 'RO-1'), { recursive: true, force: true });
     expect(deps.wakeIfReady(bp, readTicket(bp, 'RO-3')!)).toBe(true);
-    expect(readTicket(bp, 'RO-3')!.activity[0]!.text).toBe('RO-1 left the board, so the build starts now, on the latest main');
+    expect(readTicket(bp, 'RO-3')!.activity[0]!.text).toBe('RO-1 left the board, so the build starts now, on the newest code');
   });
 
   it("can't build on a branch that has no code, or on two branches at once", () => {
@@ -456,7 +456,7 @@ describe('Bring in latest main', () => {
     expect(catchUp(bp, t, 'test')).toBe('update-base');
     t = readTicket(bp, 'RO-2')!;
     expect(t.baseWanted).toBeUndefined();
-    expect(t.status).toBe('Bringing in the latest main');
+    expect(t.status).toBe('Bringing in the newest code');
   });
 
   it('when nothing runs (the proof waits for you): it comes in now, and the checks, review and proof run again', async () => {

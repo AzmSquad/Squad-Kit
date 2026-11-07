@@ -5,7 +5,16 @@ import type { ChatMessage, Quality } from './types';
 export type FolderKind = 'project' | 'repo' | 'repos' | 'empty' | 'files' | 'older';
 
 /** What Add project found in a folder, and what adding it does. */
+/** The folder asked for sits inside something bigger, so Add asks instead of guessing. */
+export interface AddAsk {
+  kind: 'inside-repo' | 'inside-project';
+  root: string;
+  name: string;
+  words: string;
+}
+
 export interface FirstLook {
+  ask?: AddAsk;
   kind: FolderKind;
   title: string;
   found: string;

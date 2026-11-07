@@ -62,7 +62,7 @@ squad-kit works with any of these folders. The browser says which kind you picke
 | **An empty folder** | A new project. squad-kit makes a git repo with a short README in its first commit, then asks "What do you want to build?". The Architect picks the technology itself when your first ticket is planned. |
 | **Code with git** | Your repo, branches and history stay as they are. |
 | **Code without git** | squad-kit makes a repo, with your files in its first commit. Generated folders (`node_modules`, `dist`, `build` and the like) and `.env` files stay out. |
-| **A folder with several code repos** | squad-kit works across them. Each ticket works in one repo, which the Architect picks in the design. |
+| **A folder with several code folders** | squad-kit works across them. Each ticket works in one repo, which the Architect picks in the design. |
 | **A squad-kit 0.x project** | Your stories, plans and tracker settings stay. Your sign-ins move to this computer. See [Moving to 1.0](migrating-to-1.0.md). |
 
 A project needs its own folder: squad-kit will not set up your home folder or the top folder of the disk.
@@ -196,7 +196,7 @@ Decisions the Architect found in the existing code are named `STACK.1`, `STACK.2
 
 The Analyst and the Architect see the project's other open tickets and the files they change. If this ticket needs
 another one that is not merged yet, the design says so ("depends on AB-45"), and before building the ticket waits
-with a card: **Build on AB-45's branch**, **Build anyway** (from main), or **Wait** (it starts by itself when AB-45
+with a card: **Build on AB-45's work**, **Build anyway** (from main), or **Wait** (it starts by itself when AB-45
 merges). Terminal: `squad build <ticket> --on-branch | --anyway | --wait`.
 
 ### Watch the squad build
@@ -229,7 +229,7 @@ While it works, you can:
 - Press **Stop**. The agent stops at once, and the work so far is kept. **Try again** carries on from the same
   step.
 - Developers can press **Take over** to work in the Builder's own session, then **Give back**.
-- Press **Bring in latest main** to give the Builder the newest work from main.
+- Press **Bring in the newest work** to give the Builder what the team merged since.
 
 Only a limited number of tickets run at once (see **Tickets at once** in Settings). A ticket over the limit says
 **Next in line: starts when a slot is free** and starts on its own.
@@ -285,8 +285,8 @@ Need to leave a ticket out? Press **Take out** on it before you release: its cod
 release. After a release, squad-kit deletes the released tickets' branches on your computer (on the remote only
 when you ask). A release cut off by a restart finishes or rolls back cleanly the next time.
 
-If the push fails (no network, or the remote refuses it), the release is made on your computer only and says
-**not pushed yet**. Fix the problem, then press **Push again** on the release. Terminal:
+If it cannot reach your team's shared copy of the code (no network, or the copy refuses it), the release is made on
+your computer only and says **not sent yet**. Fix the problem, then press **Send again** on the release. Terminal:
 `squad release <version> --push-again`.
 
 Found a problem later? Press **Report a bug** on the board. The bug becomes a ticket linked to the release, goes

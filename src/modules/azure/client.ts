@@ -6,6 +6,7 @@ import { loadSecrets } from '../../core/secrets.js';
 import { overlayTrackerEnv } from '../../tracker/env-overlay.js';
 import { ModuleError, kindOfStatus, type ModuleErrorKind } from '../errors.js';
 import { withoutTags } from '../../utils/text.js';
+import { writeLog } from '../../core/app-log.js';
 
 /**
  * Azure Boards and Azure Repos for the live squad: the backlog, work item states and comments, bugs, and pull
@@ -120,15 +121,18 @@ export class Azure {
       });
     } catch (err) {
       if (late(err)) throw tooLong();
-      throw new AzureError(`Could not reach Azure DevOps: ${(err as Error).message}`, undefined, 'offline');
+      writeLog({ level: 'warn', text: `Could not reach Azure DevOps: ${(err as Error).message}` });
+      throw new AzureError('Could not reach Azure DevOps. Check the connection, then try again.', undefined, 'offline');
     }
     if (!res.ok) {
       const text = await res.text().catch(() => '');
       const detail = text.match(/"message"\s*:\s*"([^"]+)"/)?.[1] ?? '';
+      // The exact answer is for engineers: which scope is missing, which rule said no.
+      writeLog({ level: 'warn', text: `Azure DevOps said HTTP ${res.status}. ${detail}`.trim() });
       if (res.status === 401 || res.status === 403 || res.status === 302 || res.status === 203) {
-        throw new AzureError(`Azure DevOps refused the token (HTTP ${res.status}). Check the token in Settings and its scopes. ${detail}`.trim(), res.status);
+        throw new AzureError('Azure DevOps did not accept the sign-in. Check it in Settings. An engineer can see why in the log.', res.status);
       }
-      throw new AzureError(`Azure DevOps said HTTP ${res.status}. ${detail}`.trim(), res.status);
+      throw new AzureError('Azure DevOps said no to this. An engineer can see why in the log.', res.status);
     }
     const text = await res.text().catch((err: unknown) => {
       throw late(err) ? tooLong() : err;

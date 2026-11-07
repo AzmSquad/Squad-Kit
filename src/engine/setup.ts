@@ -16,7 +16,7 @@ import { hideSquadFromGit } from './project-git.js';
 import { pickUpPushed, projectFromPushed, type PickedUp } from './handover.js';
 import { newSetup, type FolderKind } from '../board/setup-state.js';
 
-/** A short ticket key from the project name: "moj-taqadi" becomes "MT", "Leave requests" becomes "LR". */
+/** A short ticket key from the project name: "mega-tracker" becomes "MT", "Leave requests" becomes "LR". */
 export function keyFor(name: string): string {
   const words = name.split(/[^A-Za-z0-9]+/).filter(Boolean);
   const key = (words.length > 1 ? words.map((w) => w[0]) : [words[0]?.slice(0, 2) ?? 'SK']).join('').toUpperCase().slice(0, 3);

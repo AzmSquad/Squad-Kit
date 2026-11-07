@@ -179,6 +179,12 @@ export function allowPath(p: string, home: string = os.homedir()): string {
   return path.resolve(p.trim().replace(/^~(?=$|\/)/, home));
 }
 
+/** The same, as the team's settings file keeps it: a place in this person's home stays "~/…", so it works on any computer. */
+export function sharedPath(p: string, home: string = os.homedir()): string {
+  const full = allowPath(p, home);
+  return full === home || full.startsWith(`${home}${path.sep}`) ? `~${full.slice(home.length).split(path.sep).join('/')}` : full;
+}
+
 /** Keys and sign-ins in the person's home folder: no project command and no agent reads them. */
 export function privatePlaces(home: string, platform: NodeJS.Platform): string[] {
   return [

@@ -65,7 +65,7 @@ time. If another program holds one of those addresses, it says so. A part that r
 Settings: squad-kit then runs its own `docker compose up`, under a project name of its own, and stops it without removing data.
 
 Looks right on a story across parts saves every part and tries every merge first. If one clashes, nothing moves. A release sends the
-parts in order, what others rely on first. If one fails to go out, what relies on it waits, and **Push again** finishes it. There is no
+parts in order, what others rely on first. If one fails to go out, what relies on it waits, and **Send again** finishes it. There is no
 undo. A story across parts does not open pull requests yet: it goes out by push.
 
 A "done when" no page shows, like what an API answers, is proved by asking: squad-kit makes the call and saves it, and the proof
@@ -305,11 +305,16 @@ answers shows in **Waiting for you** and in the sidebar's count. The whole flow 
 - **Releases**: the next release, ready to read and release, and every past release with its notes and the
   bugs found after it. A release whose push was refused says why in plain words. **It reached it another way** closes
   one that was merged by hand: it needs a reason, looks on the remote and asks again if it cannot find it. Terminal:
-  `squad release --mark-sent --reason "…" [--anyway]`.
+  `squad release --mark-sent --reason "…" [--anyway]`. A team's release check that failed or could not run holds the release;
+  go on past it, with the reason on the record: `squad release --go-on "…"`.
 - **Architecture**: every decision. **Map** shows how decisions build on each other, **Timeline** shows them per
   ticket (press **Play the history**), **Stack** shows each technology in the code and why it is there, plus
   **All decisions**, **Project map** and **Lessons**.
 - **Bugs**: each bug, linked to the release it was found in.
+
+After a merge or a release, `.squad` files can show as changed in `git status`. That is squad-kit saving its own state, and
+it stays out of your way: merges and releases keep this computer's newer copy. Leave them out of your own commits. If a hand
+`git pull` is refused over one, `git checkout -- <file>` lets the pull through.
 
 ## Harness
 

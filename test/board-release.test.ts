@@ -96,7 +96,7 @@ describe('live release', () => {
 
 describe('workspace helpers', () => {
   it('makes short ticket keys from project names', () => {
-    expect(keyFor('moj-taqadi')).toBe('MT');
+    expect(keyFor('mega-tracker')).toBe('MT');
     expect(keyFor('Leave requests')).toBe('LR');
     expect(keyFor('shop')).toBe('SH');
   });

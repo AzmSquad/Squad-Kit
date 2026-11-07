@@ -32,8 +32,8 @@ export async function transcribe(audio: string, key: string, doFetch: typeof fet
   let res: Response;
   try {
     res = await doFetch(MUNSIT_URL, { method: 'POST', headers: { authorization: `Bearer ${key}` }, body: form, signal: AbortSignal.timeout(5 * 60_000) });
-  } catch (err) {
-    throw new ModuleError(`Could not reach Munsit: ${(err as Error).message}`, 'offline');
+  } catch {
+    throw new ModuleError('Could not reach Munsit. Check the connection', 'offline', undefined);
   }
   if (res.status === 401 || res.status === 403) throw new ModuleError('Munsit did not accept the key. Check it in Settings', 'sign-in', res.status);
   if (!res.ok) throw new ModuleError(`Munsit answered ${res.status}`, res.status === 429 ? 'too-many' : 'other', res.status);
@@ -53,6 +53,19 @@ export async function transcribe(audio: string, key: string, doFetch: typeof fet
   return text;
 }
 
+/** A call with no real sound in it: Munsit looks at the key first, and a file it cannot hear uses nothing. */
+async function checkKey(key: string, doFetch: typeof fetch = fetch): Promise<'ok' | 'wrong' | 'no-answer'> {
+  const form = new FormData();
+  form.append('file', new Blob([Buffer.from('not sound')]), 'check.txt');
+  form.append('model', MUNSIT_MODEL);
+  try {
+    const res = await doFetch(MUNSIT_URL, { method: 'POST', headers: { authorization: `Bearer ${key}` }, body: form, signal: AbortSignal.timeout(15_000) });
+    return res.status === 401 || res.status === 403 ? 'wrong' : 'ok';
+  } catch {
+    return 'no-answer';
+  }
+}
+
 export const munsitSpeech: SpeechModule = {
   name: 'munsit',
   label: 'Munsit',
@@ -63,6 +76,7 @@ export const munsitSpeech: SpeechModule = {
     return { name: 'munsit', label: 'Munsit', transcribe: (audio) => transcribe(audio, key, doFetch) };
   },
   hasKey: (root) => Boolean(munsitKey(root)),
+  checkKey,
   saveKey(root, key) {
     const file = buildPaths(root).secretsFile;
     saveSecrets(file, mergeSecrets(loadSecrets(file), { speech: { munsit: key } }));

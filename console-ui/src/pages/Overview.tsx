@@ -422,7 +422,7 @@ function Proof({ v }: { v: OverviewView }) {
           )}
           {p.branch && (
             <li className="ok">
-              <Check size={14} /> On git branch {p.branch}, {p.unsaved ? `${p.unsaved} changes not saved in git yet` : 'nothing unsaved'}
+              <Check size={14} /> {p.unsaved ? `${p.unsaved} changes here are not saved yet: squad-kit works from what is saved` : 'All the code here is saved'}
             </li>
           )}
         </ul>

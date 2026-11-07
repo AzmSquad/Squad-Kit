@@ -5,7 +5,7 @@ import path from 'node:path';
 import { boardPaths, type BoardPaths } from '../src/board/store.js';
 import { seedDemoBoard } from '../src/board/demo.js';
 import { loadSecrets, mergeSecrets, saveSecrets } from '../src/core/secrets.js';
-import { prepareMedia, transcriptOf } from '../src/engine/media.js';
+import { prepareMedia, transcriptOf, videoNotesWork } from '../src/engine/media.js';
 import { MUNSIT_URL, munsitKey } from '../src/modules/munsit/speech.js';
 
 let tmp: string;
@@ -100,3 +100,65 @@ describe('voice and video notes', () => {
     expect(r.notes[0]).toMatch(/did not accept the key/);
   });
 });
+
+describe('a video note', () => {
+  /** A real program on the PATH that takes its time, as avconvert does on a long video. */
+  function slowTools(ms: number, fails = false) {
+    const bin = path.join(tmp, 'bin');
+    fs.mkdirSync(bin);
+    const sleep = `perl -e 'select(undef,undef,undef,${ms / 1000})'`;
+    fs.writeFileSync(path.join(bin, 'avconvert'), `#!/bin/sh\n${sleep}\n${fails ? 'echo boom >&2; exit 3' : 'while [ "$1" != "-o" ]; do shift; done; echo sound > "$2"'}\n`, { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, 'swift'), `#!/bin/sh\n${sleep}\n`, { mode: 0o755 });
+    process.env.PATH = `${bin}${path.delimiter}${process.env.PATH}`;
+  }
+  const realPath = process.env.PATH;
+  const realPlatform = process.platform;
+  afterEach(() => {
+    process.env.PATH = realPath;
+    Object.defineProperty(process, 'platform', { value: realPlatform });
+  });
+
+  it('does not hold up the board while it is converted: the app goes on answering', async () => {
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    slowTools(250);
+    const { fake } = munsit({ data: { transcription: 'kalam' } });
+    let ticks = 0;
+    const timer = setInterval(() => (ticks += 1), 10);
+    const done = await prepareMedia(bp, [file('note.mp4')], { key: 'k', fetch: fake });
+    clearInterval(timer);
+    expect(done.notes).toEqual(['Wrote out note.mp4']);
+    // Two programs of 250 ms each: a blocking call would leave next to no ticks.
+    expect(ticks).toBeGreaterThan(15);
+  });
+
+  it('a conversion that fails reads in plain words, with no command in them', async () => {
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    slowTools(1, true);
+    const { fake } = munsit({ data: { transcription: 'kalam' } });
+    const done = await prepareMedia(bp, [file('note.mp4')], { key: 'k', fetch: fake });
+    expect(done.notes).toEqual(['Could not write out note.mp4: something went wrong with it, so nobody can hear it for now']);
+    expect(done.notes.join()).not.toMatch(/avconvert|Command failed/);
+  });
+
+  it('on a computer that cannot do video it says so, and a voice note still works', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux' });
+    const { fake } = munsit({ data: { transcription: 'kalam' } });
+    const done = await prepareMedia(bp, [file('note.mp4'), file('voice.ogg')], { key: 'k', fetch: fake });
+    expect(done.notes).toEqual(['Could not write out note.mp4: taking the sound out of a video needs a Mac for now', 'Wrote out voice.ogg']);
+    expect(videoNotesWork('linux')).toBe(false);
+    expect(videoNotesWork('win32')).toBe(false);
+    expect(videoNotesWork('darwin')).toBe(true);
+  });
+
+  it('a lost connection and a wrong key read in plain words', async () => {
+    const lost = (async () => {
+      throw new TypeError('getaddrinfo ENOTFOUND api.munsit.com');
+    }) as unknown as typeof fetch;
+    const off = await prepareMedia(bp, [file('a.ogg')], { key: 'k', fetch: lost });
+    expect(off.notes).toEqual(['Could not write out a.ogg: Could not reach Munsit. Check the connection']);
+    const { fake } = munsit({}, 401);
+    const wrong = await prepareMedia(bp, [file('b.ogg')], { key: 'k', fetch: fake });
+    expect(wrong.notes).toEqual(['Could not write out b.ogg: Munsit did not accept the key. Check it in Settings']);
+  });
+});
+

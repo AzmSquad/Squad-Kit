@@ -15,12 +15,13 @@ vi.mock('../src/modules/claude/direct.js', async (orig) => ({
 }));
 
 const { boardPaths, writeMeta } = await import('../src/board/store.js');
-const { allStories, findItem, readBreakdown, readBreakdownState, updateBreakdown, updateBreakdownState } = await import('../src/board/requirements.js');
+const { allStories, breakdownView, findItem, readBreakdown, readBreakdownState, updateBreakdown, updateBreakdownState } = await import('../src/board/requirements.js');
 const actions = await import('../src/board/requirements-actions.js');
 const board = await import('../src/board/actions.js');
-const { fillBuildQueue } = await import('../src/board/requirements-build.js');
-const { runBreakdownJob, foundSoFar, readUpTo } = await import('../src/engine/breakdown-job.js');
-const { LimitReached } = await import('../src/engine/usage-limit.js');
+const { fillBuildQueue, setBuild } = await import('../src/board/requirements-build.js');
+const { runBreakdownJob, foundSoFar, readUpTo, readLimitMs, BRD_READ_MS } = await import('../src/engine/breakdown-job.js');
+const { CapReached } = await import('../src/engine/caps.js');
+const { LimitReached, endPause, startPause } = await import('../src/engine/usage-limit.js');
 const { breakdownDir } = await import('../src/board/requirements-paths.js');
 const { LiveSquad } = await import('../src/engine/live.js');
 const { analystOverBudget } = await import('../src/board/requirements-build.js');
@@ -523,6 +524,281 @@ describe('the computer sleeps during a step', () => {
   });
 });
 
+describe('a step that reaches its limit', () => {
+  const NO_QUESTIONS = { ...READ, questions: [] };
+  const STOP = 'The Analyst used the 80 turns one step may take on Best, so squad-kit paused it. Its work so far is kept.';
+  const capped = (sessionId = 'read-1') =>
+    new CapReached('analyst', 'questions', 'turns', { turns: 80, spendUsd: 15 }, 'best', 'Analyst', { sessionId, usage: { costUsd: 15 } });
+
+  it('says so in plain words with Give it more, and Try again is refused: it would pay to stop at the same place', async () => {
+    const id = add();
+    await runBreakdownJob(bp, id, analyst([() => { throw capped(); }]));
+    expect(readBreakdown(bp, id)).toMatchObject({ status: 'failed', error: STOP });
+    expect(readBreakdownState(bp, id).job).toMatchObject({ step: 'read', status: 'failed', capped: true, error: STOP });
+    // What the stopped run used counts on the breakdown's own line.
+    expect(readBreakdownState(bp, id).usage?.[0]?.costUsd).toBe(15);
+    expect(() => actions.retryBreakdown(bp, id)).toThrow('use Give it more');
+    expect(readBreakdownState(bp, id).job?.status).toBe('failed');
+  });
+
+  it('Give it more carries on in the same conversation with twice the room, and it clears once a run gets through', async () => {
+    const id = add();
+    await runBreakdownJob(bp, id, analyst([() => { throw capped(); }]));
+    actions.moreBreakdown(bp, id);
+    expect(readBreakdown(bp, id)!.status).toBe('reading');
+    expect(readBreakdownState(bp, id)).toMatchObject({ capRaise: 1, job: { step: 'read', status: 'pending', more: true }, sessions: { read: 'read-1' } });
+    asks = [];
+    await runBreakdownJob(bp, id, analyst([{ structured: NO_QUESTIONS }, { structured: OUTLINE }, { structured: EPIC_1 }, { structured: EPIC_2 }]));
+    expect(asks[0]).toMatchObject({ more: 1, resume: 'read-1' });
+    expect(asks[0]!.prompt).toContain('Carry on from where you stopped');
+    expect(asks[0]!.prompt).not.toContain('You are the Analyst');
+    // Only the run it was pressed for has the extra room.
+    expect(asks[1]!.more).toBeUndefined();
+    expect(readBreakdownState(bp, id).capRaise).toBeUndefined();
+    expect(readBreakdown(bp, id)!.status).toBe('ready');
+  });
+
+  it('pressing it twice doubles again, when the first was not enough', async () => {
+    const id = add();
+    await runBreakdownJob(bp, id, analyst([() => { throw capped(); }]));
+    actions.moreBreakdown(bp, id);
+    asks = [];
+    await runBreakdownJob(bp, id, analyst([() => { throw capped(); }]));
+    actions.moreBreakdown(bp, id);
+    await runBreakdownJob(bp, id, analyst([() => { throw capped(); }]));
+    expect(asks.map((a) => a.more)).toEqual([1, 2]);
+  });
+
+  it('there is nothing to give more to on a step that stopped for another reason', async () => {
+    const id = add();
+    await runBreakdownJob(bp, id, analyst([() => { throw new StepError('It took longer than 30 minutes, so squad-kit stopped it.', ''); }]));
+    expect(() => actions.moreBreakdown(bp, id)).toThrow('did not stop at its limit');
+  });
+
+  it("the live squad's own runs get the raised caps", async () => {
+    const id = add();
+    await runBreakdownJob(bp, id, analyst([() => { throw capped(); }]));
+    actions.moreBreakdown(bp, id);
+    claudeAnswers.push(READ);
+    const squad = new LiveSquad(bp) as unknown as { breakdownJob(id: string): Promise<void> };
+    await squad.breakdownJob(id);
+    expect(claudeCalls[0]).toMatchObject({ maxTurns: 160, maxBudgetUsd: 30, resume: 'read-1' });
+  });
+
+  it('a redo at its limit has Give it more too, and the breakdown stays as it was', async () => {
+    const id = add();
+    await runBreakdownJob(bp, id, analyst([{ structured: NO_QUESTIONS }, { structured: OUTLINE }, { structured: EPIC_1 }, { structured: EPIC_2 }]));
+    actions.redoItem(bp, id, id, 'Fewer stories');
+    await runBreakdownJob(bp, id, analyst([() => { throw capped(); }]));
+    expect(readBreakdown(bp, id)!.status).toBe('ready');
+    expect(readBreakdownState(bp, id).job).toMatchObject({ step: 'redo', status: 'failed', capped: true });
+    actions.moreBreakdown(bp, id);
+    expect(readBreakdownState(bp, id).job).toMatchObject({ step: 'redo', status: 'pending', more: true });
+  });
+});
+
+describe('a redo after the approval, with Build continuously on', () => {
+  const NO_QUESTIONS = { ...READ, questions: [] };
+  const room = { free: () => 5, pause: null, payment: async () => 'subscription' as const };
+  const approved = async () => {
+    const id = add();
+    await runBreakdownJob(bp, id, analyst([{ structured: NO_QUESTIONS }, { structured: OUTLINE }, { structured: EPIC_1 }, { structured: EPIC_2 }]));
+    actions.approveBreakdown(bp, id);
+    setBuild(bp, id, true);
+    return id;
+  };
+  const firstStory = (id: string) => allStories(readBreakdown(bp, id)!)[0]!.story;
+
+  it('a rewritten story does not start by itself: the queue holds, naming it, until the person presses Build continuously again', async () => {
+    const id = await approved();
+    const key = firstStory(id).key;
+    actions.redoItem(bp, id, key, 'Say it better');
+    await runBreakdownJob(bp, id, analyst([{ structured: { story: { title: 'Rewritten', story: 'As a person I want more', criteria: [{ given: 'a', when: 'b', then: 'c' }], size: 'M', needs: [] } } }]));
+    expect(readBreakdownState(bp, id).rewritten).toEqual([key]);
+    const WORDS = `The Analyst rewrote ${key} after you approved. No new story starts until you read it and press Build continuously again.`;
+    expect(await fillBuildQueue(bp, room)).toEqual([{ id, started: [], held: WORDS }]);
+    expect(readBreakdownState(bp, id).build).toMatchObject({ on: true, held: WORDS, heldFor: 'review' });
+    // The page says the same on the story.
+    expect(breakdownView(bp, id, 'subscription').progress.find((p) => p.key === key)!.line).toBe('Rewritten after you approved. Read it, then press Build continuously');
+
+    setBuild(bp, id, true);
+    expect(readBreakdownState(bp, id).rewritten).toBeUndefined();
+    const turn = (await fillBuildQueue(bp, room))[0]!;
+    expect(turn.held).toBeUndefined();
+    expect(turn.started.length).toBeGreaterThan(0);
+  });
+
+  it('a story the person starts themselves goes, and the others go on holding only for what is unread', async () => {
+    const id = await approved();
+    const key = firstStory(id).key;
+    updateBreakdownState(bp, id, (s) => (s.rewritten = [key]));
+    actions.startStory(bp, id, key);
+    expect((await fillBuildQueue(bp, room))[0]!.held ?? '').not.toContain('rewrote');
+  });
+
+  it('a redo before the approval holds nothing: the person reads it when they approve', async () => {
+    const id = add();
+    await runBreakdownJob(bp, id, analyst([{ structured: NO_QUESTIONS }, { structured: OUTLINE }, { structured: EPIC_1 }, { structured: EPIC_2 }]));
+    const key = firstStory(id).key;
+    actions.redoItem(bp, id, key, 'Say it better');
+    await runBreakdownJob(bp, id, analyst([{ structured: { story: { title: 'Rewritten', story: 'More', criteria: [{ given: 'a', when: 'b', then: 'c' }], size: 'M', needs: [] } } }]));
+    expect(readBreakdownState(bp, id).rewritten).toBeUndefined();
+  });
+
+  it('a redo that leaves a story as it was marks nothing', async () => {
+    const id = await approved();
+    const s = firstStory(id);
+    actions.redoItem(bp, id, s.key, 'Keep it');
+    await runBreakdownJob(bp, id, analyst([{ structured: { story: { title: s.title, story: s.story, criteria: s.criteria, size: s.size, needs: s.dependsOn } } }]));
+    expect(readBreakdownState(bp, id).rewritten).toBeUndefined();
+  });
+
+  it('a change to a decision about no one part says what it does first, with the rough cost, and only a second yes redoes it', async () => {
+    const id = await approved();
+    const d = readBreakdown(bp, id)!.decided.find((x) => !x.item)!;
+    updateBreakdownState(bp, id, (s) => (s.usage = [{ role: 'analyst', step: 'spec', level: 'strongest', model: '', runs: 2, costUsd: 2.5 }]));
+    const WORDS = 'This decision is not about one part, so the Analyst rewrites the whole breakdown. Stories that started stay as they are. That uses about $1.30 of AI at API prices.';
+    expect(() => actions.changeDecided(bp, id, d.id, 'Warn first')).toThrow(WORDS);
+    expect(readBreakdown(bp, id)!.decided.find((x) => x.id === d.id)!.changed).toBeUndefined();
+    expect(readBreakdownState(bp, id).job?.step).not.toBe('redo');
+    expect(breakdownView(bp, id, 'subscription').wholeRedo).toBe(WORDS);
+    actions.changeDecided(bp, id, d.id, 'Warn first', { whole: true });
+    expect(readBreakdownState(bp, id).job).toMatchObject({ step: 'redo', status: 'pending', item: id });
+    expect(readBreakdown(bp, id)!.decided.find((x) => x.id === d.id)!.changed?.text).toBe('Warn first');
+  });
+
+  it('with no runs to go by, the rough cost is a dollar', async () => {
+    const id = await approved();
+    updateBreakdownState(bp, id, (s) => delete s.usage);
+    expect(breakdownView(bp, id, 'subscription').wholeRedo).toContain('about $1.00 of AI');
+  });
+});
+
+describe('a story the queue cannot start', () => {
+  it('the held line has no raw error in it', async () => {
+    const id = add();
+    await runBreakdownJob(bp, id, analyst([{ structured: { ...READ, questions: [] } }, { structured: OUTLINE }, { structured: EPIC_1 }, { structured: EPIC_2 }]));
+    actions.approveBreakdown(bp, id);
+    setBuild(bp, id, true);
+    const real = fs.renameSync;
+    const spy = vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+      if (String(to).includes(`${path.sep}tickets${path.sep}`) || String(to).endsWith('config.yaml')) throw Object.assign(new Error('EBUSY: resource busy or locked, rename'), { code: 'EBUSY' });
+      real(from, to);
+    });
+    const turn = (await fillBuildQueue(bp, { free: () => 5, pause: null, payment: async () => 'subscription' as const }))[0]!;
+    spy.mockRestore();
+    expect(turn.started).toEqual([]);
+    expect(turn.held).toMatch(/^S-\d+ could not start: something technical stopped it\. An engineer can see why in the log\.$/);
+  });
+});
+
+describe('a long document', () => {
+  /** A PDF of this many pages, with each page object where the page count looks. */
+  const pdf = (pages: number, extra = '') => ({ name: 'long.pdf', data: Buffer.from(`%PDF-1.7\n${'<< /Type /Page >>\n'.repeat(pages)}${extra}\n%%EOF\n`).toString('base64') });
+
+  it('waits for the word of the person before the Analyst is paid, and says how long and how much', async () => {
+    const id = actions.addBreakdown(bp, { file: pdf(300) }).id;
+    const job = readBreakdownState(bp, id).job!;
+    expect(job.heldFor).toBe('long');
+    expect(job.now).toBe('This BRD is long: 300 pages. The Analyst usually takes about 1 hour 16 minutes to read it, and can use up to $15 of AI at API prices. Press Read it to start, or Stop to leave it for now.');
+    const runs: unknown[] = [];
+    const squad = new LiveSquad(bp) as unknown as { tick(): void; running: Map<string, unknown>; runAgent: unknown };
+    squad.runAgent = async (o: unknown) => {
+      runs.push(o);
+      throw new Error('No answer in this test');
+    };
+    squad.tick();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(runs).toEqual([]);
+    expect(readBreakdown(bp, id)!.status).toBe('reading');
+    // Read it.
+    actions.retryBreakdown(bp, id);
+    expect(readBreakdownState(bp, id).job?.heldFor).toBeUndefined();
+    expect(readBreakdownState(bp, id).activity[0]!.text).toBe('Said to go on and read the long document');
+    squad.tick();
+    for (let i = 0; i < 200 && squad.running.size; i += 1) await new Promise((r) => setTimeout(r, 5));
+    expect(runs).toHaveLength(1);
+  });
+
+  it('the usage limit does not write over its words', async () => {
+    const id = actions.addBreakdown(bp, { file: pdf(300) }).id;
+    const said = readBreakdownState(bp, id).job!.now;
+    const squad = new LiveSquad(bp) as unknown as { tick(): void };
+    startPause({ name: 'Claude', resetsAt: new Date(Date.now() + 3_600_000).toISOString() } as never, { project: 'x' });
+    try {
+      squad.tick();
+    } finally {
+      endPause();
+    }
+    expect(readBreakdownState(bp, id).job?.now).toBe(said);
+  });
+
+  it('a short one starts at once, with no word', () => {
+    const id = actions.addBreakdown(bp, { file: pdf(40) }).id;
+    expect(readBreakdownState(bp, id).job).toMatchObject({ now: 'Waiting for the Analyst' });
+    expect(readBreakdownState(bp, id).job?.heldFor).toBeUndefined();
+  });
+
+  it('the time limit grows with the file: at 116 pages and past it the read is not cut short', () => {
+    expect(readLimitMs({ kind: 'pdf', pages: 31 })).toBe(BRD_READ_MS);
+    expect(readLimitMs({ kind: 'pdf', pages: 116 })).toBeGreaterThanOrEqual(BRD_READ_MS);
+    expect(readLimitMs({ kind: 'pdf', pages: 300 })).toBe(2 * (60 + 15 * 300) * 1000);
+    expect(readLimitMs({ kind: 'pdf', pages: 5000 })).toBe(4 * 3_600_000);
+    expect(readLimitMs({ kind: 'docx', pages: 60 })).toBeGreaterThan(BRD_READ_MS);
+  });
+
+  it('the read itself runs with that limit', async () => {
+    const id = actions.addBreakdown(bp, { file: pdf(300) }).id;
+    actions.retryBreakdown(bp, id);
+    await runBreakdownJob(bp, id, analyst([{ structured: READ }]));
+    expect(asks[0]!.timeoutMs).toBe(readLimitMs({ kind: 'pdf', pages: 300 }));
+  });
+
+  it('a read cut off says Try again starts from the first page, and uses the AI again', async () => {
+    const id = add();
+    await runBreakdownJob(bp, id, analyst([() => { throw new StepError('It took longer than 30 minutes, so squad-kit stopped it.', ''); }]));
+    expect(readBreakdown(bp, id)!.error).toBe('It took longer than 30 minutes, so squad-kit stopped it. Try again reads the document from the first page, and uses your AI again.');
+  });
+
+  it('a read the person stopped while it ran says the same, and one still waiting costs nothing to carry on', async () => {
+    const id = add();
+    const stop = new AbortController();
+    await runBreakdownJob(bp, id, { signal: stop.signal, run: analyst([() => { actions.stopBreakdown(bp, id); stop.abort(); throw new StepError('You stopped the squad.', ''); }]).run });
+    expect(readBreakdown(bp, id)!.error).toBe('You stopped the Analyst. Nothing is lost, but Try again reads the document from the first page.');
+  });
+});
+
+describe('a PDF that cannot be read', () => {
+  const pdf = (body: string) => ({ name: 'locked.pdf', data: Buffer.from(`%PDF-1.7\n<< /Type /Page >>\n${body}\n%%EOF\n`).toString('base64') });
+
+  it.each([
+    ['a password, in the file\'s last lines', 'trailer << /Root 1 0 R /Encrypt 9 0 R >>'],
+    ['a password, in a stream of its table', '<< /Type /XRef /Encrypt 12 0 R /Size 3 >>'],
+    ['a lock written in place', 'trailer << /Encrypt << /Filter /Standard /V 2 >> >>'],
+  ])('%s: refused at Add in plain words, with nothing left behind', (_what, body) => {
+    expect(() => actions.addBreakdown(bp, { file: pdf(body) })).toThrow('This PDF has a password or is locked, so the Analyst cannot read it. Save a copy with no password and add that.');
+    expect(fs.existsSync(path.join(bp.squadDir, 'requirements', 'BR-1'))).toBe(false);
+  });
+
+  it('a plain PDF whose text says the word is fine', () => {
+    const id = actions.addBreakdown(bp, { file: pdf('(How to /Encrypt a file) Tj') }).id;
+    expect(readBreakdown(bp, id)!.source.pages).toBe(1);
+  });
+});
+
+describe('saving a BRD fails', () => {
+  it('a full disk reads as what happened, with no raw error', () => {
+    const real = fs.writeFileSync;
+    const spy = vi.spyOn(fs, 'writeFileSync').mockImplementation((file, data, opts) => {
+      if (String(file).endsWith('pasted.md')) throw Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC' });
+      real(file, data, opts);
+    });
+    expect(() => actions.addBreakdown(bp, { text: '# BRD' })).toThrow('The disk is full, so squad-kit cannot save its work. Free up some space. Nothing is lost, and squad-kit carries on by itself.');
+    spy.mockRestore();
+    expect(fs.existsSync(path.join(bp.squadDir, 'requirements', 'BR-1'))).toBe(false);
+  });
+});
+
 describe("this month's budget", () => {
   const WORDS = "This month's budget is used up: $52.00 of $50.00. The Analyst waits. Raise the budget in Settings, or press Carry on to go on this month";
   const spent = () => {
@@ -650,6 +926,29 @@ describe("this month's budget", () => {
     await settle(free.squad);
     expect(free.runs.length).toBeGreaterThan(0);
     expect(readBreakdownState(bp, other).job?.heldFor).toBeUndefined();
+  });
+
+  it('held at the budget, then the person moves to a subscription: it goes on by itself', async () => {
+    setPaymentChoice('api-key');
+    const id = add();
+    spent();
+    const { squad, runs } = live();
+    squad.tick();
+    await settle(squad);
+    expect(readBreakdownState(bp, id).job).toMatchObject({ status: 'pending', heldFor: 'budget' });
+    expect(runs).toHaveLength(0);
+    // Still on an API key: nothing moves.
+    squad.tick();
+    await new Promise((r) => setTimeout(r, 10));
+    await settle(squad);
+    expect(runs).toHaveLength(0);
+    setPaymentChoice('subscription');
+    squad.tick();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(readBreakdownState(bp, id).job?.heldFor).toBeUndefined();
+    squad.tick();
+    await settle(squad);
+    expect(runs.length).toBeGreaterThan(0);
   });
 
   it("does not lift the queue: the Analyst's Carry on is for the Analyst", async () => {

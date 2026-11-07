@@ -10,6 +10,7 @@ import { firstLook, type FirstLook } from '../../engine/first-look.js';
 import { defaultPlace, whyNotHere, type NewProjectInput } from '../../engine/new-project.js';
 import { fileTroubleWords, isDiskTrouble } from '../../core/file-trouble.js';
 import type { OpenProjects } from '../open-projects.js';
+import { act } from './act.js';
 
 /**
  * The app's own API (ADR-001), beside each project's: the projects, Add project with a folder browser, one Waiting
@@ -88,13 +89,7 @@ export async function body<T>(c: Context): Promise<T> {
   }
 }
 
-export async function act(c: Context, fn: () => unknown) {
-  try {
-    return c.json(((await fn()) as object) ?? { ok: true });
-  } catch (err) {
-    return c.json({ error: isDiskTrouble(err) ? fileTroubleWords(err) : (err as Error).message }, 400);
-  }
-}
+export { act };
 
 export function mountAppApi(app: Hono, opts: { projects: OpenProjects }): void {
   const projects = opts.projects;
@@ -104,10 +99,10 @@ export function mountAppApi(app: Hono, opts: { projects: OpenProjects }): void {
 
   // Add project: the folder the person picked, set up the way `squad console` sets it up.
   app.post('/api/v1/app/projects', async (c) => {
-    const b = await body<{ folder?: string }>(c);
+    const b = await body<{ folder?: string; choice?: string }>(c);
     return act(c, () => {
       if (!b.folder?.trim()) throw new Error('Pick a folder first.');
-      const { project, did, added } = projects.add(b.folder.trim());
+      const { project, did, added } = projects.add(b.folder.trim(), b.choice === 'above' || b.choice === 'here' ? b.choice : undefined);
       const row = projects.summaries().find((p) => p.id === project.id);
       return { ...row, did, added };
     });

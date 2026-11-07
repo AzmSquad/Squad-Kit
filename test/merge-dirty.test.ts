@@ -276,7 +276,7 @@ describe('your own checkout after the merge', () => {
 });
 
 
-describe('bringing the latest main into a ticket that has unsaved work', () => {
+describe('bringing the newest code into a ticket that has unsaved work', () => {
   type Bring = { bringInBase(t: ReturnType<typeof readTicket> & object, base: string): Promise<{ baseSha: string; clashes: string[] }> };
   const bring = () => (new LiveSquad(bp) as unknown as Bring).bringInBase(readTicket(bp, 'AP-1')!, 'main');
 

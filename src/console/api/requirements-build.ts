@@ -4,6 +4,7 @@ import { BoardActionError } from '../../board/actions.js';
 import { breakdownWaits, viewBreakdown } from '../../board/requirements.js';
 import { setBuild } from '../../board/requirements-build.js';
 import { requestSend, sendPreview } from '../../board/requirements-send.js';
+import { act } from './act.js';
 
 /**
  * Build continuously and Send to the tracker, one call per button like the rest of the Requirements page, and the
@@ -14,15 +15,6 @@ async function body<T>(c: Context): Promise<T> {
     return (await c.req.json()) as T;
   } catch {
     return {} as T;
-  }
-}
-
-/** A person-facing mistake comes back as a 400 with the message. */
-async function act(c: Context, fn: () => unknown) {
-  try {
-    return c.json(((await fn()) as object) ?? { ok: true });
-  } catch (err) {
-    return c.json({ error: (err as Error).message }, 400);
   }
 }
 

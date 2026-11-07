@@ -586,6 +586,8 @@ export interface Ticket {
   brief?: TicketBrief;
   /** In a multi-repo workspace: the code repo this ticket changes. */
   repo?: string;
+  /** The one-time key of the page's Create that made it: the same Create sent again gets this ticket back. */
+  createKey?: string;
   /** Set when the person presses Stop; the live squad stops the running step. */
   stopRequested?: boolean;
   /** The squad's review notes still to fix, passed to the Builder. */
@@ -599,6 +601,8 @@ export interface Ticket {
   localSetup?: LocalSetup;
   /** The project's setup command failed in this ticket's copy: the Builder sorts it out first. */
   setupTrouble?: { command: string; output: string };
+  /** The repos whose setup stopped the story (a Docker refusal): it runs again on Try again. */
+  setupOwed?: string[];
   /** The product's parts this story changes, by their ids, in the order to build them. */
   parts?: string[];
   /** The folder holding the story's copies side by side, on a workspace of several repos (src/engine/copies.ts). */

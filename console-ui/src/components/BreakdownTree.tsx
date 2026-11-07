@@ -734,14 +734,18 @@ export function DecidedEntry({ v, d, compact, onSelect, onOpenTicket }: { v: Bre
   const { toast } = usePrefs();
   const [text, setText] = useDraft(d.ticket ?? v.id, `decided-${d.id}`, '');
   const [editing, setEditing] = useState(Boolean(text));
+  // About no one part: the Analyst rewrites the whole breakdown, so the person hears what that takes first.
+  const redoesAll = !d.ticket && v.wholeRedo && !(d.item && findPart(v, d.item)) ? v.wholeRedo : null;
+  const [sure, setSure] = useState(false);
   const path = d.ticket ? `/api/v1/tickets/${encodeURIComponent(d.ticket)}/decided/${d.id}` : `${base(v.id)}/decided/${d.id}`;
   const command = d.ticket ? `squad decided ${d.ticket} ${d.id} ${shellQuote(text.trim() || '<text>')}` : `squad requirements decided ${v.id} ${d.id} ${shellQuote(text.trim() || '<text>')}`;
   const change = () =>
     act.mutate(
-      { path, body: { text: text.trim() }, ...(d.ticket ? {} : { done: `Changed. The Analyst redoes ${d.item ?? 'the breakdown'} with it.` }) },
+      { path, body: { text: text.trim(), ...(redoesAll ? { whole: true } : {}) }, ...(d.ticket ? {} : { done: `Changed. The Analyst redoes ${redoesAll ? 'the breakdown' : (d.item ?? 'the breakdown')} with it.` }) },
       {
         onSuccess: (r) => {
           setEditing(false);
+          setSure(false);
           setText('');
           // On a ticket the reply is the ticket: its entry says what the change became.
           if (d.ticket) toast(changedWords(d.ticket, (r as Ticket | undefined)?.decided?.find((x) => x.id === d.id)?.changed?.ticket));
@@ -793,12 +797,13 @@ export function DecidedEntry({ v, d, compact, onSelect, onOpenTicket }: { v: Bre
       {editing ? (
         <div className="rq-dedit">
           <textarea className="textarea" autoFocus value={text} onChange={(e) => setText(e.target.value)} aria-label="What you want instead" placeholder="What should it be instead?" />
+          {sure && <p className="note" role="alert">{redoesAll}</p>}
           <div className="rq-dedit-b">
-            <button className="btn sm pri" disabled={!text.trim() || act.isPending} onClick={change}>
-              Save change
+            <button className="btn sm pri" disabled={!text.trim() || act.isPending} onClick={() => (redoesAll && !sure ? setSure(true) : change())}>
+              {sure ? 'Yes, rewrite all of it' : 'Save change'}
             </button>
-            <button className="btn sm" onClick={() => setEditing(false)}>
-              Cancel
+            <button className="btn sm" onClick={() => (sure ? setSure(false) : setEditing(false))}>
+              {sure ? 'Keep it as it is' : 'Cancel'}
             </button>
             <Cmd text={command} />
           </div>

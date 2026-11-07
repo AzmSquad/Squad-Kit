@@ -123,14 +123,14 @@ export function settleRepos(bp: BoardPaths, j: ReleaseJournal): SettledRepo[] {
     if (reached) {
       if (r.tag && r.remote) {
         try {
-          netGit(root, ['push', '-f', r.remote, `refs/tags/${r.tag}`], { env });
+          netGit(root, ['push', r.remote, `refs/tags/${r.tag}`], { env });
         } catch (err) {
-          unpushed = { repo: r.repo, remote: r.remote, base: r.base, commit: r.head!, tag: r.tag, error: (err as Error).message, plain: `The release reached ${r.remote}, but its tag did not. Press Push again.` };
+          unpushed = { repo: r.repo, remote: r.remote, base: r.base, commit: r.head!, tag: r.tag, error: (err as Error).message, plain: "The release reached your team's shared copy of the code, but its version mark did not. Press Send again." };
         }
       }
       const keep = path.relative(root, bp.squadDir);
       moveLocalBase(root, r.base, r.head!, j.version, keep && !keep.startsWith('..') ? keep : undefined, log);
-      log.unshift({ ok: true, text: r.remote ? `It had reached ${r.remote} already, so squad-kit finished it${unpushed ? ', except the tag: press Push again' : ''}` : 'Its release commit was made already, so squad-kit finished it' });
+      log.unshift({ ok: true, text: r.remote ? `It had reached your team's shared copy of the code already, so squad-kit finished it${unpushed ? ', except its version mark: press Send again' : ''}` : 'Its release commit was made already, so squad-kit finished it' });
     } else {
       // Nothing reached the remote: the tag made here goes, so the release can go out again as if it never started.
       const tagged = r.tag ? git(root, ['rev-parse', '--verify', '-q', `refs/tags/${r.tag}^{commit}`], { allowFail: true }) : '';

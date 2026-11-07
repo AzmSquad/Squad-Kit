@@ -196,13 +196,26 @@ export interface BreakdownJob {
   ask?: string;
   question?: string;
   error?: string;
-  /** Held before its next run at this month's budget: Carry on, or a raised budget, lets it go on. */
-  heldFor?: 'budget';
+  /**
+   * Held before its next run. budget: at this month's budget; Carry on, or a raised budget, lets it go on. long: a long
+   * document waits for the person's word before the Analyst is paid to read it.
+   */
+  heldFor?: 'budget' | 'long';
+  /** It stopped at one of its caps. Trying again the same way would stop at the same place: Give it more doubles them. */
+  capped?: boolean;
+  /** Give it more was pressed: the step carries on in its conversation instead of starting over. */
+  more?: boolean;
 }
 
 /** What only this computer keeps about a breakdown. */
 export interface BreakdownState {
   job?: BreakdownJob;
+  /** Stories a redo rewrote after the approval. Build continuously does not start them until the person presses it again. */
+  rewritten?: string[];
+  /** How many times the person pressed Give it more on the step now: each time doubles its caps, until a run gets through. */
+  capRaise?: number;
+  /** This computer's file could not be read, so the job and its history start again from nothing. */
+  lost?: boolean;
   /** The Analyst's conversation, so a redo or a reply carries on in it. */
   sessions?: { read?: string };
   /** The month the person let this breakdown's Analyst go on past the budget, like 2026-11. */
@@ -213,7 +226,7 @@ export interface BreakdownState {
    * can start until other stories merge). `heldFor` says which, for the button to show: at the budget, Build
    * continuously again goes on this month (`budgetOk`, the month it was let go on, like 2026-11).
    */
-  build?: { on: boolean; by: string; at: string; held?: string; heldFor?: 'budget' | 'limit' | 'waits'; budgetOk?: string };
+  build?: { on: boolean; by: string; at: string; held?: string; heldFor?: 'budget' | 'limit' | 'waits' | 'review'; budgetOk?: string };
   /**
    * Send to the tracker: the items one by one, then the dependency links. `done` of `of` counts both, each link one
    * "S-5 needs S-4" (the Send dialog's unit); `items` and `links` say each apart, for "14 of 30 items, then 20 links".
@@ -270,6 +283,8 @@ export interface StoryProgress {
 
 /** A breakdown as the board shows it: the project's part, this computer's part and what is worked out from both. */
 export interface BreakdownView extends Breakdown {
+  /** Said before a change that redoes the whole breakdown: what it does, and the rough cost. */
+  wholeRedo?: string;
   state: BreakdownState;
   estimate: BreakdownEstimate;
   progress: StoryProgress[];

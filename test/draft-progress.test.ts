@@ -86,9 +86,18 @@ describe('a draft from an idea', () => {
   it('a failed draft says why and keeps the text', async () => {
     const job = D.startDraft(bp, { text: 'make login screen' });
     await wait();
-    release({ ok: false, error: 'Claude Code is not signed in on this computer.' });
+    const out = 'Claude Code is signed out on this computer. Open the Terminal app, type claude and press Enter, then sign in when it asks. Then press Try again.';
+    release({ ok: false, error: out });
     await wait();
-    expect(D.draftJob(bp, job.id)).toMatchObject({ status: 'failed', error: 'Claude Code is not signed in on this computer.', text: 'make login screen' });
+    expect(D.draftJob(bp, job.id)).toMatchObject({ status: 'failed', error: out, text: 'make login screen' });
+  });
+
+  it("a tool's raw error stays out of the failure line, and the way on is said", async () => {
+    const job = D.startDraft(bp, { text: 'make login screen' });
+    await wait();
+    release({ ok: false, error: 'ECONNRESET at ClientRequest.socketErrorListener (node:_http_client:501:9)' });
+    await wait();
+    expect(D.draftJob(bp, job.id)).toMatchObject({ status: 'failed', error: 'The Analyst did not fill in the ticket. Try again, or write it yourself.', text: 'make login screen' });
   });
 
   it('a new draft replaces the last one and stops it; empty text is refused at once', async () => {

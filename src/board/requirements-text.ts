@@ -31,6 +31,7 @@ const UNREADABLE_WORD = 'squad-kit cannot open this Word file. Save it again as 
 const EMPTY_WORD = 'This Word file has no text squad-kit can read. Save it again as .docx or paste the text.';
 const BIG_WORD = 'This Word file has more text than squad-kit reads in one go. Split it into smaller documents, or paste the text.';
 const BAD_PDF = 'This PDF cannot be read. Save it again as a PDF, or paste the text.';
+const LOCKED_PDF = 'This PDF has a password or is locked, so the Analyst cannot read it. Save a copy with no password and add that.';
 const EMPTY_TEXT = 'This file has no text. Add a file with text in it, or paste the text.';
 
 /** The kind of document a file name says, or null for one squad-kit does not read. */
@@ -545,6 +546,11 @@ export function pdfPages(buf: Buffer): number {
   return most;
 }
 
+/** A PDF with a password, or with its text locked by its owner: its file names how it is locked. Nothing can read it, so it is refused before anything is paid. */
+export function pdfLocked(buf: Buffer): boolean {
+  return /\/Encrypt\s*(\d+\s+\d+\s+R|<<)/.test(buf.toString('latin1'));
+}
+
 /* ── Plain text and Markdown ────────────────────────────── */
 
 /** A text file as Markdown: the byte order mark and Windows line ends gone. A file with NUL bytes is not text. */
@@ -649,6 +655,7 @@ export function prepareText(dir: string, source: Pick<BreakdownSource, 'file' | 
   const mediaDir = path.join(dir, 'media');
   if (source.kind === 'pdf') {
     const pages = pdfPages(buf);
+    if (pdfLocked(buf)) throw new DocumentError(LOCKED_PDF);
     if (!pages) throw new DocumentError(BAD_PDF);
     return { parts: 0, pages };
   }

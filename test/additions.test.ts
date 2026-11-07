@@ -5,6 +5,8 @@ import path from 'node:path';
 import { execFile, execSync } from 'node:child_process';
 import { Hono } from 'hono';
 import yaml from 'js-yaml';
+import { chooseProject } from '../src/core/paths.js';
+import { runRelease } from '../src/commands/board.js';
 import type { RunOptions, RunResult } from '../src/modules/claude/direct.js';
 
 /**
@@ -1009,6 +1011,25 @@ describe('before release', () => {
     expect(r.gateStop).toBeUndefined();
     expect(r.notes).toMatch(/Went out without your team's check "Sign off"\. Momen: The sign off is by hand this time/);
     expect(readTicket(bp, 'AP-1')!.overrides?.[0]).toMatchObject({ added: 'Sign off', release: version });
+  });
+
+  it('the terminal says how to go on, and goes on with the reason on the record, as the page does', async () => {
+    const version = await ready();
+    gate('Sign off', 'exit 1', { when: 'release', state: 'on' });
+    chooseProject(project);
+    const out = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      await expect(runRelease(version, { yes: true })).rejects.toThrow('To go on anyway, say why: ');
+      await expect(runRelease(version, { yes: true, goOn: '   ' })).rejects.toThrow('Say why it goes on');
+      expect(readRelease(bp, version)!.status).toBe('draft');
+      await runRelease(version, { yes: true, goOn: 'The sign off is by hand this time' });
+    } finally {
+      out.mockRestore();
+      chooseProject(null);
+    }
+    const r = readRelease(bp, version)!;
+    expect(r.status).toBe('released');
+    expect(r.notes).toMatch(/Went out without your team's check "Sign off"\. Momen: The sign off is by hand this time/);
   });
 
   it('Try again after a fix goes out, and an empty harness makes no copy at all', async () => {

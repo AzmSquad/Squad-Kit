@@ -6,10 +6,10 @@ import { confirm, input, select, Separator } from '@inquirer/prompts';
 import * as ui from '../ui/index.js';
 import { isSquadExit } from '../core/cli-exit.js';
 import { readMeta, type BoardPaths } from '../board/store.js';
-import type { AnswerInput, UploadedFile } from '../board/actions.js';
+import { BoardActionError, type AnswerInput, type UploadedFile } from '../board/actions.js';
 import type { Criterion } from '../board/types.js';
 import type { BreakdownEstimate, BreakdownStatus, BreakdownStory, BreakdownView, StoryProgress } from '../board/requirements-types.js';
-import { breakdownRows, readBreakdown, refWords, viewBreakdown } from '../board/requirements.js';
+import { breakdownRows, brokenBreakdowns, readBreakdown, refWords, viewBreakdown } from '../board/requirements.js';
 import {
   SKIP_CHOICE,
   addBreakdown,
@@ -25,6 +25,7 @@ import {
   redoItem,
   removeItem,
   renameBreakdown,
+  moreBreakdown,
   retryBreakdown,
   skipBreakdownQuestions,
   startStory,
@@ -106,6 +107,11 @@ function rows(): void {
   const bp = board();
   const list = breakdownRows(bp);
   out();
+  for (const b of brokenBreakdowns(bp)) {
+    out(`  ${kleur.yellow(b.problem)}`);
+    out(kleur.gray(`  For an engineer: ${b.file}: ${b.detail}`));
+    out();
+  }
   if (!list.length) {
     out(`  No breakdowns yet. Add a BRD: ${cmd('squad requirements add "<file>"')}`);
     out();
@@ -199,10 +205,13 @@ function sendProgress(s: NonNullable<BreakdownView['state']['sync']>): string {
 function nextLine(v: BreakdownView): string | null {
   const j = v.state.job;
   if (j?.heldFor === 'budget') return `Carry on: ${cmd(`squad requirements retry ${v.id}`)}   or stop it: ${cmd(`squad requirements stop ${v.id}`)}`;
+  if (j?.heldFor === 'long') return `Read it: ${cmd(`squad requirements retry ${v.id}`)}   or stop it: ${cmd(`squad requirements stop ${v.id}`)}`;
+  if (j?.capped) return `Give it more: ${cmd(`squad requirements more ${v.id}`)}`;
   if (j && (j.status === 'pending' || j.status === 'running')) return `Stop it: ${cmd(`squad requirements stop ${v.id}`)}`;
   if (v.status === 'questions') return `Answer them: ${cmd(`squad requirements answer ${v.id}`)}   or let the Analyst decide: ${cmd(`squad requirements answer ${v.id} --skip`)}`;
   if (v.status === 'failed') return `Try again: ${cmd(`squad requirements retry ${v.id}`)}`;
   if (v.status === 'ready') return `Edit any part (${cmd(`squad requirements edit ${v.id} S-1 --title "…"`)}), then ${cmd(`squad requirements approve ${v.id}`)}`;
+  if (v.status === 'approved' && v.state.build?.heldFor === 'review') return `Read the rewritten stories, then go on: ${cmd(`squad requirements build ${v.id}`)}`;
   if (v.status === 'approved' && v.state.build?.on) return `Pause: ${cmd(`squad requirements build ${v.id} --pause`)}`;
   if (v.status === 'approved') return `Build it story by story: ${cmd(`squad requirements build ${v.id}`)}   or start one: ${cmd(`squad requirements start ${v.id} <story>`)}`;
   return null;
@@ -450,6 +459,14 @@ export function requirementsCommand(): Command {
       ui.success(`The Analyst carries on with ${b.id}. Follow it: squad requirements show ${b.id}`);
       warnIfNoSquad(bp);
     }));
+  r.command('more <id>')
+    .description('Give it more: a step stopped at its limit carries on with twice the room')
+    .action(run((id: string) => {
+      const bp = board();
+      const b = moreBreakdown(bp, id);
+      ui.success(`The Analyst carries on with ${b.id}, with more room. Follow it: squad requirements show ${b.id}`);
+      warnIfNoSquad(bp);
+    }));
   r.command('answer <id>')
     .description('Answer the Analyst\'s questions in the terminal')
     .option('--skip', 'Skip: let the Analyst decide each open question and write it down')
@@ -568,10 +585,25 @@ export function requirementsCommand(): Command {
     }));
   r.command('decided <id> <entry> [text...]')
     .description('Change a Decided for you entry, like d3; the Analyst redoes the part it is about')
-    .action(run(async (id: string, did: string, words: string[]) => {
+    .option('--whole', 'Yes: redo the whole breakdown when the entry is about no one part')
+    .action(run(async (id: string, did: string, words: string[], o: { whole?: boolean }) => {
       const text = words.join(' ') || (await input({ message: 'What do you want instead?' }));
-      const b = changeDecided(board(), id, did, text);
-      ui.success(`Changed ${did.toLowerCase()} in ${b.id}.`);
+      let whole = Boolean(o.whole);
+      for (;;) {
+        try {
+          const b = changeDecided(board(), id, did, text, { whole });
+          ui.success(`Changed ${did.toLowerCase()} in ${b.id}.`);
+          return;
+        } catch (err) {
+          if (!(err instanceof BoardActionError) || err.asks !== 'whole-redo') throw err;
+          ui.info(err.message);
+          if (!(await confirm({ message: 'Redo the whole breakdown?', default: false }))) {
+            ui.info('Nothing changed.');
+            return;
+          }
+          whole = true;
+        }
+      }
     }));
   r.command('delete <id>')
     .description('Delete a breakdown and its document (not while its stories build)')

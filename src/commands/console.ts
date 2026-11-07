@@ -6,6 +6,7 @@ import open from 'open';
 import * as ui from '../ui/index.js';
 import { isInteractive } from '../ui/tty.js';
 import { buildPaths, findSquadRoot, type SquadPaths } from '../core/paths.js';
+import { addAsk } from '../engine/first-look.js';
 import { startConsoleServer, startedToOutlive, type ConsoleServer } from '../console/server.js';
 import { printErrors } from '../core/app-log.js';
 import { installCrashNet } from '../core/crash-net.js';
@@ -56,6 +57,15 @@ const APP_COMMAND = ['--no-open'];
  * be set up. A home folder or the disk's top folder is never set up: a project needs its own folder.
  */
 async function projectHere(opts: ConsoleOptions): Promise<string | null> {
+  // Inside something bigger: never set that up, or set up this folder, without a word.
+  const ask = addAsk(process.cwd());
+  if (ask) {
+    if (!isInteractive() || opts.yes) throw new Error(ask.words);
+    ui.info(ask.words);
+    if (await confirm({ message: `Use ${ask.root}?`, default: true })) return ask.root;
+    if (ask.kind === 'inside-repo') return null;
+    return process.cwd();
+  }
   const found = findSquadRoot();
   if (found) return found;
   const here = process.cwd();

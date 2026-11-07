@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Check, MessageCircle, Play, RotateCcw, Send, Square, Trash2 } from 'lucide-react';
+import { Check, MessageCircle, Play, Plus, RotateCcw, Send, Square, Trash2 } from 'lucide-react';
 import { useNavigate } from '@tanstack/react-router';
 import type { BrdRef, BreakdownQuestion, BreakdownView } from '../api/requirements-types';
 import { SKIP_CHOICE, afterTitle, clockWords, jobBusy, readSteps, refShort, type ReadStep } from '../lib/requirements';
@@ -36,10 +36,17 @@ function StepDot({ s }: { s: ReadStep }) {
 
 const STATE_WORDS: Record<ReadStep['state'], string> = { done: 'Done', now: 'Now', todo: 'Still to come', failed: 'Stopped here' };
 
-/** The Analyst waits at this month's budget: the person lets it go on, or raises the budget in Settings. */
+/** The Analyst waits at this month's budget, or for the person's word on a long document: the person lets it go on. */
 export function CarryOn({ v }: { v: BreakdownView }) {
   const act = useReqAct();
-  if (!v.mine || v.state.job?.heldFor !== 'budget') return null;
+  if (!v.mine || !v.state.job?.heldFor) return null;
+  if (v.state.job.heldFor === 'long') {
+    return (
+      <button className="btn pri" disabled={act.isPending} title={`squad requirements retry ${v.id}`} onClick={() => act.mutate({ path: `${base(v.id)}/retry`, done: 'The Analyst starts reading.' })}>
+        <Play size={13} /> Read it
+      </button>
+    );
+  }
   return (
     <button className="btn pri" disabled={act.isPending} title={`squad requirements retry ${v.id}`} onClick={() => act.mutate({ path: `${base(v.id)}/retry`, done: "The Analyst goes on past this month's budget, for the rest of the month." })}>
       <Play size={13} /> Carry on
@@ -102,18 +109,21 @@ export function FailedCard({ v }: { v: BreakdownView }) {
   const [sure, setSure] = useState(false);
   // The person's own Stop ("You stopped the Analyst…"), not a step that stopped on something technical.
   const stopped = /^You stopped\b/.test(v.error ?? v.state.job?.error ?? '');
-  const title = stopped ? 'You stopped the Analyst' : 'The Analyst stopped';
+  const capped = Boolean(v.state.job?.capped);
+  const title = stopped ? 'You stopped the Analyst' : capped ? 'The Analyst reached its limit' : 'The Analyst stopped';
   return (
     <ErrorCard
       calm={stopped}
       title={title}
       what={afterTitle(v.error ?? v.state.job?.error ?? 'The read did not get through.', title)}
       safe={['Your document is saved.', ...(v.epics.length ? ['What the Analyst wrote so far is kept.'] : [])]}
-      hint={<Cmd text={`squad requirements retry ${v.id}`} />}
+      hint={<Cmd text={`squad requirements ${capped ? 'more' : 'retry'} ${v.id}`} />}
       ways={
         v.mine
           ? [
-              { label: 'Try again', primary: true, icon: <RotateCcw size={14} />, onClick: () => act.mutate({ path: `${base(v.id)}/retry`, done: 'The Analyst carries on.' }), disabled: act.isPending, title: `squad requirements retry ${v.id}` },
+              capped
+                ? { label: 'Give it more', primary: true, icon: <Plus size={14} />, onClick: () => act.mutate({ path: `${base(v.id)}/more`, done: 'The Analyst carries on with more room.' }), disabled: act.isPending, title: `squad requirements more ${v.id}. It carries on where it stopped, with twice the turns and spend for this step.` }
+                : { label: 'Try again', primary: true, icon: <RotateCcw size={14} />, onClick: () => act.mutate({ path: `${base(v.id)}/retry`, done: 'The Analyst carries on.' }), disabled: act.isPending, title: `squad requirements retry ${v.id}` },
               ...(sure
                 ? [
                     {
@@ -172,8 +182,8 @@ export function QuestionsView({ v, onOpenRef }: { v: BreakdownView; onOpenRef(re
         <div className="rq-err" role="alert">
           The Analyst could not answer your question{v.state.job.error ? `: ${v.state.job.error}` : '.'}{' '}
           {v.mine && (
-            <button className="rq-link" onClick={() => act.mutate({ path: `${base(v.id)}/retry`, done: 'The Analyst tries to answer again.' })}>
-              Try again
+            <button className="rq-link" onClick={() => act.mutate({ path: `${base(v.id)}/${v.state.job?.capped ? 'more' : 'retry'}`, done: 'The Analyst tries to answer again.' })}>
+              {v.state.job.capped ? 'Give it more' : 'Try again'}
             </button>
           )}
         </div>

@@ -13,6 +13,8 @@ import * as actions from '../src/board/actions.js';
 import { mountBoardApi } from '../src/console/api/board.js';
 import { addWorktree } from '../src/engine/git.js';
 import { pushWords } from '../src/engine/release.js';
+import { mergeSettings } from '../src/engine/project-git.js';
+import { holdRelease } from '../src/board/lock.js';
 
 /**
  * A teammate pushed main before a release reached it, or main takes no direct pushes. Real git, with two clones of one
@@ -59,6 +61,10 @@ function proofReady(id: string, file: string, text: string) {
   writeTicket(bp, t);
 }
 
+function updateTicketRelease(id: string, version: string) {
+  writeTicket(bp, { ...readTicket(bp, id)!, release: version });
+}
+
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-push-'));
   project = path.join(tmp, 'app');
@@ -92,6 +98,217 @@ beforeEach(() => {
 
 afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+describe('a version number already on the remote', () => {
+  it('a teammate released the same number: this one takes the next, and their tag does not move', async () => {
+    proofReady('AP-1', 'one.txt', 'one\n');
+    actions.approve(bp, 'AP-1');
+    expect(readRelease(bp, 'v1.5.0')!.tickets).toEqual(['AP-1']);
+    sh('git -c user.name=t -c user.email=t@t tag -a v1.5.0 -m theirs && git push -q origin v1.5.0', mate);
+    const theirs = sh('git rev-parse refs/tags/v1.5.0', remote);
+
+    const r = await actions.releaseVersion(bp, 'v1.5.0');
+    expect(r.version).toBe('v1.6.0');
+    expect(r.from).toBe('v1.5.0');
+    expect(r.log![0]!.text).toBe('A teammate already released v1.5.0, so this one went out as v1.6.0.');
+    expect(sh('git rev-parse refs/tags/v1.5.0', remote)).toBe(theirs);
+    expect(sh('git rev-parse refs/tags/v1.6.0', remote)).toBeTruthy();
+    expect(readRelease(bp, 'v1.5.0')).toBeNull();
+    expect(readTicket(bp, 'AP-1')!.release).toBe('v1.6.0');
+    expect(sh('git show v1.6.0:package.json', remote)).toContain('"version": "1.6.0"');
+  });
+
+  it('every number up to the next free one is gone around, and a patch stays a patch', async () => {
+    proofReady('AP-1', 'one.txt', 'one\n');
+    actions.approve(bp, 'AP-1');
+    const draft = readRelease(bp, 'v1.5.0')!;
+    writeRelease(bp, { ...draft, version: 'v1.5.1', from: 'v1.5.0' });
+    fs.rmSync(path.join(bp.releasesDir, 'v1.5.0.md'));
+    updateTicketRelease('AP-1', 'v1.5.1');
+    for (const v of ['v1.5.1', 'v1.5.2']) sh(`git -c user.name=t -c user.email=t@t tag -a ${v} -m theirs && git push -q origin ${v}`, mate);
+    expect((await actions.releaseVersion(bp, 'v1.5.1')).version).toBe('v1.5.3');
+  });
+
+  it('a release going out, or one cut off half-way, keeps its number though its tag is there', async () => {
+    proofReady('AP-1', 'one.txt', 'one\n');
+    actions.approve(bp, 'AP-1');
+    sh('git -c user.name=t -c user.email=t@t tag -a v1.5.0 -m mine && git push -q origin v1.5.0', mate);
+    const free = holdRelease(bp, 'v1.5.0');
+    await expect(actions.releaseVersion(bp, 'v1.5.0')).rejects.toThrow('v1.5.0 is going out right now');
+    free();
+    expect(readRelease(bp, 'v1.5.0')).not.toBeNull();
+    expect(readTicket(bp, 'AP-1')!.release).toBe('v1.5.0');
+  });
+
+  it('with no answer from the remote the number stands, and a tag is never forced over a teammate\'s', async () => {
+    proofReady('AP-1', 'one.txt', 'one\n');
+    actions.approve(bp, 'AP-1');
+    const r = await actions.releaseVersion(bp, 'v1.5.0');
+    expect(r.version).toBe('v1.5.0');
+    const mine = sh('git rev-parse refs/tags/v1.5.0', remote);
+    // The tag this computer holds is moved by hand, as a mistake would: Push again does not move the remote's.
+    fs.writeFileSync(path.join(project, 'x.txt'), 'x\n');
+    commit(project, 'after');
+    sh('git -c user.name=t -c user.email=t@t tag -f -a v1.5.0 -m moved', project);
+    writeRelease(bp, { ...readRelease(bp, 'v1.5.0')!, unpushed: [{ repo: '.', remote: 'origin', base: 'main', commit: sh('git rev-parse HEAD', project), tag: 'v1.5.0', error: 'x', plain: 'y' }] });
+    const again = await actions.pushReleaseAgain(bp, 'v1.5.0');
+    expect(sh('git rev-parse refs/tags/v1.5.0', remote)).toBe(mine);
+    expect(again.unpushed?.[0]?.plain).toBe('A teammate released this version number while this release went out, so the shared copy did not take it. The release is safe on this computer. An engineer can see what to do below.');
+  });
+});
+
+describe('the shared settings, with two people', () => {
+  /** The first release shares the settings; the teammate has them from there on. */
+  async function shared() {
+    proofReady('AP-1', 'one.txt', 'one\n');
+    actions.approve(bp, 'AP-1');
+    await actions.releaseVersion(bp);
+    sh('git pull -q origin main', mate);
+  }
+  const teammateSets = (change: (text: string) => string) => {
+    const file = path.join(mate, '.squad', 'config.yaml');
+    fs.writeFileSync(file, change(fs.readFileSync(file, 'utf8')));
+    sh('git add -A && git -c user.name=t -c user.email=t@t commit -qm "their setting" && git push -q origin main', mate);
+  };
+  const atRemote = (v: string) => sh(`git show ${v}:.squad/config.yaml`, remote);
+
+  it("one person's change does not take away a teammate's: each goes through", async () => {
+    await shared();
+    teammateSets((t) => t.replace(/commands: \{\}/, 'commands:\n    test: npm test'));
+    writeMeta(bp, { ...readMeta(bp), quality: 'thrifty' });
+    proofReady('AP-2', 'two.txt', 'two\n');
+    actions.approve(bp, 'AP-2');
+    const r = await actions.releaseVersion(bp);
+    const text = atRemote(r.version);
+    expect(text).toContain('test: npm test');
+    expect(text).toContain('quality: thrifty');
+    expect(r.log!.map((l) => l.text).join('\n')).not.toContain('A teammate changed');
+    // This computer has the teammate's setting too.
+    expect(readMeta(bp).commands?.test).toBe('npm test');
+    expect(readMeta(bp).quality).toBe('thrifty');
+  });
+
+  it('a project released by an older version keeps what this computer changed since then', async () => {
+    await shared();
+    // An older version kept no note of what it last shared: what the checkout holds says the same.
+    fs.rmSync(path.join(bp.localDir, 'config-shared.yaml'));
+    writeMeta(bp, { ...readMeta(bp), quality: 'thrifty' });
+    proofReady('AP-2', 'two.txt', 'two\n');
+    actions.approve(bp, 'AP-2');
+    const r = await actions.releaseVersion(bp);
+    expect(atRemote(r.version)).toContain('quality: thrifty');
+    expect(readMeta(bp).quality).toBe('thrifty');
+    expect(r.log!.map((l) => l.text).join('\n')).not.toContain('A teammate changed');
+  });
+
+  it("both changed the same one: the team's stays, here too, and the release says so in plain words", async () => {
+    await shared();
+    teammateSets((t) => t.replace(/commands: \{\}/, 'commands:\n    test: their test'));
+    writeMeta(bp, { ...readMeta(bp), commands: { test: 'my test' } });
+    proofReady('AP-2', 'two.txt', 'two\n');
+    actions.approve(bp, 'AP-2');
+    const r = await actions.releaseVersion(bp);
+    expect(atRemote(r.version)).toContain('test: their test');
+    expect(atRemote(r.version)).not.toContain('my test');
+    expect(r.log!.map((l) => l.text)).toContain('A teammate changed how the project is tested and run too, so theirs stays, here as well. You can look at it in Settings.');
+    expect(readMeta(bp).commands?.test).toBe('their test');
+  });
+
+  it('the next ticket number is the higher of the two, and each computer keeps its own project id', async () => {
+    await shared();
+    teammateSets((t) => t.replace(/nextNumber: \d+/, 'nextNumber: 90').replace(/^  id: .*$/m, '  id: their-id'));
+    proofReady('AP-2', 'two.txt', 'two\n');
+    actions.approve(bp, 'AP-2');
+    const before = readMeta(bp).id;
+    const r = await actions.releaseVersion(bp);
+    expect(readMeta(bp).nextNumber).toBe(90);
+    expect(readMeta(bp).id).toBe(before);
+    expect(atRemote(r.version)).toContain('id: their-id');
+  });
+
+  it('the first time, with nothing shared before: only a setting that differs is said, never the id', async () => {
+    teammatePushes('x.txt', 'x');
+    fs.mkdirSync(path.join(mate, '.squad'), { recursive: true });
+    fs.writeFileSync(path.join(mate, '.squad', 'config.yaml'), fs.readFileSync(bp.configFile, 'utf8').replace(/^  id: .*$/m, '  id: their-id').replace(/commands: \{\}/, 'commands:\n    test: their test'));
+    sh('git add -A && git -c user.name=t -c user.email=t@t commit -qm "their settings" && git push -q origin main', mate);
+    sh('git fetch -q origin', project);
+    const seen = mergeSettings(bp, sh('git show origin/main:.squad/config.yaml', project));
+    expect(seen.theirsStayed).toEqual(['how the project is tested and run']);
+  });
+
+  it("a teammate's copy that cannot be read is never mixed in", async () => {
+    await shared();
+    const mine = fs.readFileSync(bp.configFile, 'utf8');
+    expect(mergeSettings(bp, 'board: [not closed', { fetched: true }).text).toBe(mine);
+    expect(fs.readFileSync(bp.configFile, 'utf8')).toBe(mine);
+  });
+
+  it("at a fetch a teammate's new setting comes in, and a clash waits for the release to say so", async () => {
+    await shared();
+    writeMeta(bp, { ...readMeta(bp), quality: 'thrifty' });
+    teammateSets((t) => t.replace(/commands: \{\}/, 'commands:\n    test: npm test').replace(/nextNumber: \d+/, 'nextNumber: 50').replace(/^(\s+)engine: live$/m, '$1engine: live\n$1quality: best'));
+    sh('git fetch -q origin', project);
+    const seen = mergeSettings(bp, sh('git show origin/main:.squad/config.yaml', project), { fetched: true });
+    expect(readMeta(bp).commands?.test).toBe('npm test');
+    expect(readMeta(bp).nextNumber).toBe(50);
+    expect(readMeta(bp).quality).toBe('thrifty');
+    expect(seen.theirsStayed).toEqual(['the Quality setting']);
+  });
+});
+
+describe('after a release, the person\'s folder', () => {
+  it('leaves squad-kit files plain to git, and the next merge and release still go through', async () => {
+    proofReady('AP-1', 'one.txt', 'one\n');
+    actions.approve(bp, 'AP-1');
+    const first = await actions.releaseVersion(bp);
+    // What squad-kit saves all the time: the next number in the settings, a ticket that went out, a decision.
+    expect(sh('git ls-files -- .squad/config.yaml', project)).toBe('.squad/config.yaml');
+    const tracked = fs.readFileSync(bp.configFile, 'utf8');
+    writeMeta(bp, { ...readMeta(bp), nextNumber: 77 });
+    expect(fs.readFileSync(bp.configFile, 'utf8')).not.toBe(tracked);
+    const t = readTicket(bp, 'AP-1')!;
+    writeTicket(bp, { ...t, status: 'Changed by squad-kit' });
+    fs.appendFileSync(path.join(bp.ticketsDir, 'AP-1', 'ticket.md'), 'More words.\n');
+    // An engineer's usual ways out must work on them: hidden files leave a refused pull with nothing to stash or restore.
+    expect(sh('git ls-files -v -- .squad', project).split('\n').filter((l) => !l.startsWith('H '))).toEqual([]);
+    expect(sh('git status --porcelain', project)).toContain('.squad/config.yaml');
+    sh('git diff --quiet -- .squad/config.yaml || git stash push -q -- .squad/config.yaml && git stash pop -q', project);
+    expect(readMeta(bp).nextNumber).toBe(77);
+    // A change of the person's own still shows.
+    fs.writeFileSync(path.join(project, 'limit.txt'), 'limit = 3\n');
+    expect(sh('git status --porcelain', project)).toContain('M limit.txt');
+    sh('git checkout -- limit.txt', project);
+
+    // The next ticket goes all the way, with this computer's newer copy kept.
+    proofReady('AP-2', 'two.txt', 'two\n');
+    actions.approve(bp, 'AP-2');
+    const second = await actions.releaseVersion(bp);
+    expect(second.version).not.toBe(first.version);
+    expect(second.unpushed).toBeUndefined();
+    expect(readMeta(bp).nextNumber).toBe(77);
+    expect(sh(`git show main:.squad/releases/${second.version}.md`, project)).toContain(second.version);
+  });
+});
+
+describe('the after-release step', () => {
+  it('reads in plain words, with no command or its output, whichever way it goes', async () => {
+    writeMeta(bp, { ...readMeta(bp), commands: { deploy: 'echo boom-from-the-tool; exit 3' } });
+    proofReady('AP-1', 'one.txt', 'one\n');
+    actions.approve(bp, 'AP-1');
+    const failed = await actions.releaseVersion(bp);
+    const words = failed.log!.map((l) => l.text).join('\n');
+    expect(words).toContain('Your after-release step failed. An engineer can see why in the log.');
+    expect(words).not.toMatch(/boom-from-the-tool|pipeline/i);
+    expect(words).toContain("Sent to your team's shared copy of the code");
+    expect(words).toContain(`Marked the code as ${failed.version}`);
+    expect(words).not.toMatch(/\bpushed\b|\borigin\b/i);
+
+    writeMeta(bp, { ...readMeta(bp), commands: { deploy: 'exit 0' } });
+    proofReady('AP-2', 'two.txt', 'two\n');
+    actions.approve(bp, 'AP-2');
+    expect((await actions.releaseVersion(bp)).log!.map((l) => l.text)).toContain('Ran your after-release step');
+  });
 });
 
 describe('a teammate pushed main while the release was being made', () => {

@@ -7,6 +7,7 @@ import { depsReady, openOnBoard, unmergedDeps } from '../board/depends.js';
 import { changedFiles, commitArgsFor, git, isAncestor, pushedBranch, removeWorktree, stageAll, worktreeRoot } from './git.js';
 import type { OpenTicket } from './prompts.js';
 import { repoFor } from './repos.js';
+import { writeLog } from '../core/app-log.js';
 
 /**
  * Tickets that depend on unmerged work, on the engine's side: what the Analyst and the Architect see of the other open
@@ -92,7 +93,8 @@ export function addWorktreeOn(bp: BoardPaths, t: Ticket, dep: Ticket, at?: strin
       } catch (err) {
         git(dir, ['merge', '--abort'], { allowFail: true });
         removeWorktree(root, dir);
-        throw new Error(`${t.id}'s branch clashes with ${from}, so it cannot start from it: ${(err as Error).message}`);
+        writeLog({ level: 'warn', ticket: t.id, text: `Starting from ${from}: ${(err as Error).message}` });
+        throw new Error(`${t.id}'s work clashes with ${from}, so it cannot start from it.`);
       }
     }
   }
@@ -142,10 +144,10 @@ export function catchUp(bp: BoardPaths, t: Ticket, planned: string): string {
   updateTicket(bp, t.id, (x) => {
     if (due && x.dependency) {
       x.dependency.caughtUp = now();
-      addActivity(x, 'squad', `${c!.on.join(' and ')} ${c!.on.length === 1 ? 'is' : 'are'} merged, so squad-kit brings the latest ${base} into this ticket before the checks`);
+      addActivity(x, 'squad', `${c!.on.join(' and ')} ${c!.on.length === 1 ? 'is' : 'are'} merged, so squad-kit brings the newest code into this ticket before the checks`);
     }
     delete x.baseWanted;
-    x.status = `Bringing in the latest ${base}`;
+    x.status = `Bringing in the newest code`;
     // A stop or a failure on the way runs this again, not the checks without it.
     if (x.squad) x.squad.phase = 'update-base';
   });

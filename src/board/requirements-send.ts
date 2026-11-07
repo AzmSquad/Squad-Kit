@@ -17,6 +17,7 @@ import {
 import { applySendChange, linkCount, linkTickets, planSend, sendBreakdown, type SendResult } from './requirements-sync.js';
 import { sendTargetOf, sendTracker } from './requirements-tracker.js';
 import { DemoTracker } from './demo-tracker.js';
+import { plainWords } from '../core/for-people.js';
 
 /**
  * Send to the tracker, as a job: the button (or `squad requirements send`) only asks for it, and the squad runs it
@@ -52,7 +53,7 @@ export async function sendPreview(bp: BoardPaths, id: string): Promise<SendPrevi
   try {
     levels = await tracker.levels();
   } catch (err) {
-    throw new BoardActionError(`squad-kit could not read the item types ${tracker.label} uses: ${(err as Error).message}`);
+    throw new BoardActionError(`squad-kit could not read the item types ${tracker.label} uses: ${plainWords(err, 'Reading item types', 'something technical stopped it. Try again.')}`);
   }
   const project = levels.project ?? sendTargetOf(bp)?.project;
   return {

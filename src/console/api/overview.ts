@@ -18,6 +18,7 @@ import {
   ticketFromIdea,
 } from '../../board/first-run.js';
 import type { SetupStepId } from '../../board/setup-state.js';
+import { act } from './act.js';
 
 /**
  * The first run and the Overview: the setup's live steps, the overview the Architect wrote, and the person's moves on
@@ -29,15 +30,6 @@ async function body<T>(c: Context): Promise<T> {
     return (await c.req.json()) as T;
   } catch {
     return {} as T;
-  }
-}
-
-async function act(c: Context, fn: () => unknown) {
-  try {
-    return c.json(((await fn()) as object) ?? { ok: true });
-  } catch (err) {
-    if (err instanceof Error) return c.json({ error: err.message }, 400);
-    throw err;
   }
 }
 

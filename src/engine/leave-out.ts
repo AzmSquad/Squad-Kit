@@ -1,5 +1,6 @@
 import type { Ticket } from '../board/types.js';
 import { addSnapshot, commitArgsFor, dropSnapshot, git, pushedBranch } from './git.js';
+import { writeLog } from '../core/app-log.js';
 
 /**
  * Taking a ticket out of a release. Accepted work merges into the base at once, so the code of a ticket taken out is
@@ -59,7 +60,7 @@ export function leaveOut(dir: string, root: string, base: string, tickets: Ticke
     if (!git(dir, ['status', '--porcelain'], { allowFail: true })) continue;
     git(dir, [...commitArgsFor(dir), 'commit', '-m', `Leave ${t.id} out of ${version}: it goes out with the next release`]);
     done.push(git(dir, ['rev-parse', 'HEAD']));
-    log.push({ ok: true, text: `Left ${t.id} ${t.title} out: its code stays in ${base} and goes out with the next release` });
+    log.push({ ok: true, text: `Left ${t.id} ${t.title} out: its work stays in the code and goes out with the next release` });
   }
   return done;
 }
@@ -71,7 +72,8 @@ export function bringBack(dir: string, reverts: string[], version: string, base:
       git(dir, ['revert', '--no-commit', r]);
     } catch (err) {
       git(dir, ['revert', '--abort'], { allowFail: true });
-      throw new Error(`The work left out of ${version} could not come back into ${base}: ${(err as Error).message}`);
+      writeLog({ level: 'error', text: `Bringing back the work left out of ${version}: ${(err as Error).message}` });
+      throw new Error(`The work left out of ${version} could not come back into ${base}. An engineer can see why in the log.`);
     }
     if (git(dir, ['status', '--porcelain'], { allowFail: true })) git(dir, [...commitArgsFor(dir), 'commit', '-m', `Bring back the work left out of ${version}`]);
   }

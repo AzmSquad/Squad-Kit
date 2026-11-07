@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { listTickets, now, readMeta, readTicket, updateTicket, type BoardPaths } from './store.js';
 import { BoardActionError, MAX_UPLOADS, MAX_UPLOAD_BYTES, createTicket, saveUploads, type AnswerInput, type UploadedFile } from './actions.js';
-import type { Criterion, Ticket } from './types.js';
+import type { Criterion, Quality, Ticket } from './types.js';
 import type { Breakdown, BreakdownEpic, BreakdownFeature, BreakdownJob, BreakdownLevel, BreakdownSource, BreakdownState, BreakdownStory, Decided, StorySize } from './requirements-types.js';
 import { breakdownDir } from './requirements-paths.js';
 import {
@@ -28,6 +28,7 @@ import {
   storyMerged,
   updateBreakdown,
   updateBreakdownState,
+  wholeRedoWords,
   writeBreakdown,
   writeBreakdownState,
   findLoop,
@@ -35,10 +36,13 @@ import {
   type FoundItem,
 } from './requirements.js';
 import { DocumentError, kindOf, prepareText, type PreparedText } from './requirements-text.js';
+import { fileTroubleWords, isFileTrouble } from '../core/file-trouble.js';
+import { writeLog } from '../core/app-log.js';
 import { isMerged } from './depends.js';
 import { withFirstStory } from './first-story.js';
 import { linkTickets } from './requirements-sync.js';
 import { monthKey } from './usage.js';
+import { stepCaps } from '../engine/levels.js';
 
 /**
  * What a person does with a breakdown, one function each, so the board and the terminal do exactly the same: add a
@@ -53,6 +57,8 @@ export { approveProblems, findLoop } from './requirements.js';
 export const SKIP_CHOICE = 'Skip: let the Analyst decide';
 
 const STOPPED_WORDS = 'You stopped the Analyst. Nothing is lost: Try again carries on from where it was.';
+/** A read that was running keeps no conversation: Try again starts it again. */
+const READ_STOPPED_WORDS = 'You stopped the Analyst. Nothing is lost, but Try again reads the document from the first page.';
 
 function who(bp: BoardPaths): string {
   return readMeta(bp).user.name;
@@ -97,6 +103,24 @@ export interface AddBreakdownInput {
 export function usualReadSeconds(p: Pick<PreparedText, 'pages' | 'words' | 'parts'>): number {
   if (p.pages) return 60 + 15 * p.pages;
   return 60 + Math.round((p.words ?? p.parts * 3500) / 30);
+}
+
+/** A read this long (about 100 PDF pages) waits for the person's word before anything is paid. */
+const LONG_READ_SECONDS = 25 * 60;
+
+function minutesWords(seconds: number): string {
+  const min = Math.round(seconds / 60);
+  if (min < 60) return `${min} minutes`;
+  const rest = min % 60;
+  return `${Math.floor(min / 60)} ${min < 120 ? 'hour' : 'hours'}${rest ? ` ${rest} minutes` : ''}`;
+}
+
+/** Words for a long document, before it is read: how long, and the most one run may use. Null when it is not long. */
+export function longReadWords(kind: BreakdownSource['kind'], p: Pick<PreparedText, 'pages' | 'words' | 'parts'>, quality: Quality | undefined): string | null {
+  const usual = usualReadSeconds(p);
+  if (usual < LONG_READ_SECONDS) return null;
+  const size = kind === 'pdf' ? `${p.pages} pages` : `${p.parts} parts`;
+  return `This BRD is long: ${size}. The Analyst usually takes about ${minutesWords(usual)} to read it, and can use up to $${stepCaps({ role: 'analyst', step: 'questions', quality }).spendUsd} of AI at API prices. Press Read it to start, or Stop to leave it for now.`;
 }
 
 function firstHeading(text: string): string | undefined {
@@ -154,7 +178,9 @@ export function addBreakdown(bp: BoardPaths, input: AddBreakdownInput): Breakdow
   } catch (err) {
     fs.rmSync(dir, { recursive: true, force: true });
     if (err instanceof DocumentError || err instanceof BoardActionError) throw err;
-    throw new BoardActionError(`squad-kit could not save the BRD: ${(err as Error).message}`);
+    if (isFileTrouble(err)) throw new BoardActionError(fileTroubleWords(err));
+    writeLog({ level: 'error', project: meta.project, text: `Adding a BRD: ${(err as Error).message}` });
+    throw new BoardActionError('squad-kit could not save the BRD, and nothing was added. Try again. If it happens again, an engineer can look at the log.');
   }
   const title = input.name?.trim().slice(0, 120) || (input.file ? path.basename(source.name, path.extname(source.name)) : firstHeading(text!)) || 'Pasted BRD';
   const b: Breakdown = {
@@ -175,10 +201,12 @@ export function addBreakdown(bp: BoardPaths, input: AddBreakdownInput): Breakdow
   const s: BreakdownState = { activity: [] };
   addBreakdownActivity(s, 'you', `Added ${source.name}${source.extra?.length ? ` with ${source.extra.length} more ${source.extra.length === 1 ? 'file' : 'files'}` : ''}`);
   addBreakdownActivity(s, 'squad', textLine(kind, prepared));
+  const long = longReadWords(kind, prepared, meta.quality);
   s.job = {
     step: 'read',
     status: 'pending',
-    now: 'Waiting for the Analyst',
+    now: long ?? 'Waiting for the Analyst',
+    ...(long ? { heldFor: 'long' as const } : {}),
     ...(prepared.pages || prepared.parts ? { at: { done: 0, of: prepared.pages ?? prepared.parts, unit: kind === 'pdf' ? 'page' : 'part' } } : {}),
     usualSeconds: usualReadSeconds(prepared),
   };
@@ -209,6 +237,7 @@ export function breakdownStopped(bp: BoardPaths, id: string, waiting = false): B
   const s = readBreakdownState(bp, id);
   const job = s.job;
   if (!job || (job.status !== 'stopping' && !(waiting && job.status === 'pending'))) return requireBreakdown(bp, id);
+  const words = job.step === 'read' && job.status === 'stopping' ? READ_STOPPED_WORDS : STOPPED_WORDS;
   const b = updateBreakdown(bp, id, (x) => {
     if (job.step === 'reply') {
       const q = x.questions.find((y) => y.id === job.question);
@@ -218,13 +247,13 @@ export function breakdownStopped(bp: BoardPaths, id: string, waiting = false): B
       }
     } else if (job.step !== 'redo') {
       x.status = 'failed';
-      x.error = STOPPED_WORDS;
+      x.error = words;
     }
   });
   updateBreakdownState(bp, id, (st) => {
     if (!st.job) return;
     st.job.status = 'failed';
-    st.job.error = job.step === 'redo' ? 'You stopped the redo. The part is as it was.' : job.step === 'reply' ? 'You stopped the answer.' : STOPPED_WORDS;
+    st.job.error = job.step === 'redo' ? 'You stopped the redo. The part is as it was.' : job.step === 'reply' ? 'You stopped the answer.' : words;
     delete st.job.now;
     if (waiting) addBreakdownActivity(st, 'you', 'Stopped the Analyst');
   });
@@ -239,6 +268,16 @@ export function retryBreakdown(bp: BoardPaths, id: string): Breakdown {
   const b = mine(bp, id);
   const s = readBreakdownState(bp, b.id);
   const job = s.job;
+  if (job?.status === 'pending' && job.heldFor === 'long') {
+    updateBreakdownState(bp, b.id, (st) => {
+      if (st.job) {
+        delete st.job.heldFor;
+        st.job.now = 'Waiting for the Analyst';
+      }
+      addBreakdownActivity(st, 'you', 'Said to go on and read the long document');
+    });
+    return b;
+  }
   if (job?.status === 'pending' && job.heldFor === 'budget') {
     updateBreakdownState(bp, b.id, (st) => {
       st.budgetOk = monthKey();
@@ -251,7 +290,28 @@ export function retryBreakdown(bp: BoardPaths, id: string): Breakdown {
     return b;
   }
   if (jobBusy(job)) throw new BoardActionError(busyWords(b, job)!);
-  if (b.status !== 'failed' && job?.status !== 'failed') throw new BoardActionError(`${b.id} did not stop. Nothing to try again.`);
+  // Said to be reading or writing with no job on this computer: its file was damaged or lost, so it starts that step again.
+  const stranded = (b.status === 'reading' || b.status === 'drafting') && !job;
+  if (b.status !== 'failed' && job?.status !== 'failed' && !stranded) throw new BoardActionError(`${b.id} did not stop. Nothing to try again.`);
+  // The same caps would stop at the same place, and be paid for again.
+  if (job?.capped) throw new BoardActionError(`The Analyst stopped at its limit on ${b.id}. Trying again the same way would stop at the same place and use your AI again: use Give it more.`);
+  return runAgain(bp, b, job, 'Asked the Analyst to try again');
+}
+
+/**
+ * Give it more: a step that stopped at one of its caps carries on where it stopped, with twice the turns and spend. A
+ * ticket's step has the same button.
+ */
+export function moreBreakdown(bp: BoardPaths, id: string): Breakdown {
+  const b = mine(bp, id);
+  const job = readBreakdownState(bp, b.id).job;
+  if (!job?.capped || job.status !== 'failed') throw new BoardActionError(`The Analyst did not stop at its limit on ${b.id}. Nothing to give more to.`);
+  updateBreakdownState(bp, b.id, (st) => (st.capRaise = (st.capRaise ?? 0) + 1));
+  return runAgain(bp, b, job, 'Gave the Analyst more room for this step', true);
+}
+
+/** The step that failed or was stopped goes on the queue again. */
+function runAgain(bp: BoardPaths, b: Breakdown, job: BreakdownJob | undefined, line: string, more = false): Breakdown {
   const step: BreakdownJob['step'] = job && job.status === 'failed' ? job.step : b.epics.length ? 'draft' : 'read';
   const stopped = job?.error === STOPPED_WORDS;
   const next = updateBreakdown(bp, b.id, (x) => {
@@ -274,10 +334,12 @@ export function retryBreakdown(bp: BoardPaths, id: string): Breakdown {
       ...(job?.item ? { item: job.item } : {}),
       ...(job?.ask ? { ask: job.ask } : {}),
       ...(job?.question ? { question: job.question } : {}),
+      ...(more ? { more } : {}),
     };
-    // A run that failed may have left a conversation that cannot carry on: the next one starts fresh.
-    if (!stopped && st.sessions) delete st.sessions.read;
-    addBreakdownActivity(st, 'you', 'Asked the Analyst to try again');
+    // A run that failed may have left a conversation that cannot carry on: the next one starts fresh. A cap ends a run
+    // cleanly, so it carries on.
+    if (!stopped && !more && st.sessions) delete st.sessions.read;
+    addBreakdownActivity(st, 'you', line);
   });
   return next;
 }
@@ -588,9 +650,10 @@ export function approveBreakdown(bp: BoardPaths, id: string): Breakdown {
 
 /**
  * Changes a Decided for you entry of the breakdown. Before its story starts, the change is recorded and the Analyst
- * redoes the part it is about. Once its story has a ticket, it changes on the ticket.
+ * redoes the part it is about. Once its story has a ticket, it changes on the ticket. An entry about no one part redoes
+ * the whole breakdown, so it takes a second yes (`whole`).
  */
-export function changeDecided(bp: BoardPaths, id: string, did: string, text: string): Breakdown {
+export function changeDecided(bp: BoardPaths, id: string, did: string, text: string, opts: { whole?: boolean } = {}): Breakdown {
   const words = text.trim();
   if (!words) throw new BoardActionError('Say what you want instead.');
   const b0 = mine(bp, id);
@@ -608,6 +671,7 @@ export function changeDecided(bp: BoardPaths, id: string, did: string, text: str
   if (redo) {
     const busy = busyWords(b0, readBreakdownState(bp, b0.id).job);
     if (busy) throw new BoardActionError(busy);
+    if (!about && !opts.whole) throw new BoardActionError(wholeRedoWords(readBreakdownState(bp, b0.id)), 'whole-redo');
   }
   const by = who(bp);
   const b = updateBreakdown(bp, b0.id, (x) => {

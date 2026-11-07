@@ -3,6 +3,7 @@ import type { SquadPaths } from '../../core/paths.js';
 import { appNews, findApp, withAppCommands } from '../../board/apps.js';
 import { boardExists, boardPaths, listTickets, readMeta, writeMeta } from '../../board/store.js';
 import { AppError, appRunner, type AppStatus, type StartOptions } from '../../engine/run-app.js';
+import { act } from './act.js';
 
 /**
  * Your apps, in the sidebar: Start, Open, Restart and Stop for each app of the project, each one call. Terminal:
@@ -14,16 +15,6 @@ async function body<T>(c: Context): Promise<T> {
     return (await c.req.json()) as T;
   } catch {
     return {} as T;
-  }
-}
-
-/** A person-facing mistake ("already running") is a 400 with the message. */
-async function act(c: Context, fn: () => unknown) {
-  try {
-    return c.json(((await fn()) as object) ?? { ok: true });
-  } catch (err) {
-    if (err instanceof AppError || err instanceof Error) return c.json({ error: err.message }, 400);
-    throw err;
   }
 }
 

@@ -7,6 +7,7 @@ import { parseUsd, setBudget } from '../../board/budget.js';
 import { setPaymentChoice } from '../../core/settings.js';
 import { ticketChanges } from '../../engine/changes.js';
 import type { BoardMeta } from '../../board/types.js';
+import { plainWords } from '../../core/for-people.js';
 
 /**
  * The Conversation tab's "What happened" and the Cost tab, as REST: each view is one call, and each setting one call
@@ -73,7 +74,7 @@ export function mountCostApi(app: Hono, bp: BoardPaths): void {
       const budget: NonNullable<BoardMeta['budget']> = setBudget(bp, change);
       return c.json({ ...costOverview(bp, await howPaid(bp)), budget });
     } catch (err) {
-      return c.json({ error: (err as Error).message }, 400);
+      return c.json({ error: plainWords(err, 'Saving the budget') }, 400);
     }
   });
 }

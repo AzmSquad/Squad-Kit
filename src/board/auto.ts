@@ -327,11 +327,11 @@ export function bringInAgain(bp: BoardPaths, id: string): Ticket {
     const base = repoFor(meta, t).base;
     const tries = baseTries(t);
     if (tries >= MAX_BASE_TRIES) {
-      addActivity(t, 'squad', `It still clashes with ${base} after the latest ${base} came in ${MAX_BASE_TRIES} times, so it waits for you`);
+      addActivity(t, 'squad', `It still clashes after the newest code came in ${MAX_BASE_TRIES} times, so it waits for you`);
       return;
     }
     if (!moved) {
-      addActivity(t, 'squad', `It still clashes with ${base}, and ${base} has not moved since it last came in, so it waits for you`);
+      addActivity(t, 'squad', `It still clashes, and the code has not moved since it last came in, so it waits for you`);
       return;
     }
     t.selfAccept = { ...t.selfAccept, baseTried: now(), baseTries: tries + 1 };
@@ -340,8 +340,8 @@ export function bringInAgain(bp: BoardPaths, id: string): Ticket {
     t.retryPhase = undefined;
     t.stage = 'implement';
     t.live = true;
-    t.status = `Bringing in the latest ${base}`;
-    addActivity(t, 'squad', `It clashes with newer changes in ${base}, so squad-kit brings in the latest ${base} and runs the checks, the review and the proof again (try ${tries + 1} of ${MAX_BASE_TRIES})`);
+    t.status = `Bringing in the newest code`;
+    addActivity(t, 'squad', `It clashes with newer changes, so squad-kit brings in the newest code and runs the checks, the review and the proof again (try ${tries + 1} of ${MAX_BASE_TRIES})`);
     scheduleSquad(t, 'update-base', 0.2, 1);
   });
 }
@@ -374,9 +374,9 @@ export function waitForLanding(bp: BoardPaths, id: string): boolean {
   updateTicket(bp, id, (x) => {
     if (!since) {
       x.selfAccept = { ...x.selfAccept, landingSince: now() };
-      addActivity(x, 'squad', `${going} is about to merge into ${base}, so this story waits for it, then brings in the latest ${base}`);
+      addActivity(x, 'squad', `${going} is about to merge into ${base}, so this story waits for it, then brings in the newest code`);
     }
-    x.status = `Waits for ${going} to merge, then brings in the latest ${base}`;
+    x.status = `Waits for ${going} to merge, then brings in the newest code`;
     if (x.squad) x.squad.nextAt = new Date(Date.now() + LANDING_LOOK_MS).toISOString();
   });
   return true;

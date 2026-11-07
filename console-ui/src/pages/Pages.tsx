@@ -15,7 +15,7 @@ import { PaymentSettings } from '../components/Usage';
 import { GuardAllows } from '../components/Sandbox';
 import { PartsSettings } from '../components/Parts';
 import { ProjectFiles } from '../components/ProjectFiles';
-import { Cmd, Modal, STAGE_NAME, actionLabel, ago, commandFor, outdatedLine } from '../components/ui';
+import { Cmd, CouldNotLoad, Modal, STAGE_NAME, actionLabel, ago, commandFor, outdatedLine } from '../components/ui';
 import { changeWaits, openChange } from '../components/ChangeCard';
 import { NoticeSetting } from '../components/Waiting';
 import { needsYou, testChangeLine, testChangeWaits } from '../lib/waiting';
@@ -37,7 +37,9 @@ export function InboxPage() {
       </div>
       <div className="scroll">
         <div className="page">
-          {tickets.length + breakdowns.length === 0 ? (
+          {board.isError && !board.data ? (
+            <CouldNotLoad what="what waits for you" error={board.error} onRetry={() => void board.refetch()} />
+          ) : tickets.length + breakdowns.length === 0 ? (
             <div className="calm">
               <span className="ring"><Check size={18} strokeWidth={2.5} /></span>
               <div>
@@ -141,7 +143,7 @@ const COMMAND_FIELDS: { key: keyof ProjectCommands; label: string; hint: string 
   { key: 'build', label: 'Build', hint: 'Builds the project, e.g. npm run build' },
   { key: 'start', label: 'Start', hint: 'Runs the app for screenshots, e.g. npm start' },
   { key: 'url', label: 'App address', hint: 'Where the app opens, e.g. http://localhost:3000' },
-  { key: 'deploy', label: 'Pipeline', hint: 'Runs after a release, e.g. az pipelines run …' },
+  { key: 'deploy', label: 'After a release', hint: 'Runs after a release, e.g. az pipelines run …' },
 ];
 
 function ProjectSettings() {
@@ -159,7 +161,7 @@ function ProjectSettings() {
       <h2 style={{ marginTop: 6 }}>How the squad checks and runs this project</h2>
       <p className="note" style={{ margin: '2px 0 10px' }}>
         The Architect filled these in when it read the project. squad-kit runs Test, Lint and Build itself before anything ships.
-        {multi && ' This workspace has several code repos; each ticket works in one of them.'}
+        {multi && ' This project has several code folders; each ticket works in one of them.'}
       </p>
       {repos.map((r) => (
         <RepoSettings key={r.path} repo={r} multi={multi} />
@@ -295,19 +297,26 @@ function AzureSettings() {
 }
 
 /** Voice and video notes need speech to text. The key stays in .squad/secrets.yaml on this computer. */
-function SpeechSettings() {
-  const act = useAct();
-  const status = useQuery({ queryKey: ['speech'], queryFn: () => api<{ hasKey: boolean }>('/api/v1/speech') });
+export function SpeechSettings() {
+  const act = useAct<{ unchecked?: boolean }>();
+  const status = useQuery({ queryKey: ['speech'], queryFn: () => api<{ hasKey: boolean; video?: boolean }>('/api/v1/speech') });
   const [key, setKey] = useState('');
   const hasKey = status.data?.hasKey;
+  // This computer: a video's sound and pictures can only be taken out on a Mac for now.
+  const video = status.data?.video !== false;
   const save = (body: { munsit?: string; remove?: boolean }, done: string) =>
-    act.mutate({ path: '/api/v1/speech', method: 'PUT', body, done }, { onSuccess: () => { setKey(''); void status.refetch(); } });
+    act.mutate(
+      { path: '/api/v1/speech', method: 'PUT', body, done: (r) => (r.unchecked ? 'Saved. squad-kit could not reach Munsit to check the key, so it finds out with the first note.' : done) },
+      { onSuccess: () => { setKey(''); void status.refetch(); } },
+    );
   return (
     <div style={{ marginBottom: 26 }}>
       <h2 style={{ marginTop: 6 }}>Speech to text</h2>
       <p className="note" style={{ margin: '2px 0 10px' }}>
-        Agents cannot listen. With a Munsit key, squad-kit writes out every voice and video note you attach, in Arabic or English, and takes pictures of
-        the screen in videos. Without a key, notes stay attached but nobody hears them. Your key stays on this computer.
+        {video
+          ? 'Agents cannot listen. With a Munsit key, squad-kit writes out every voice and video note you attach, in Arabic or English, and takes pictures of the screen in videos.'
+          : 'Agents cannot listen. With a Munsit key, squad-kit writes out every voice note you attach, in Arabic or English. Video notes need a Mac: on this computer they stay attached, and nobody hears them.'}{' '}
+        Without a key, notes stay attached but nobody hears them. Your key stays on this computer.
       </p>
       <div className="maprow" style={{ alignItems: 'center' }}>
         <b>Status</b>
@@ -355,7 +364,7 @@ function RestartRow() {
   );
 }
 
-function RunnerSetting() {
+export function RunnerSetting() {
   const board = useBoard();
   const act = useAct();
   const meta = board.data?.ready ? board.data.meta : undefined;
@@ -366,13 +375,13 @@ function RunnerSetting() {
     <div className="maprow" style={{ alignItems: 'center' }}>
       <b>Talk to Claude</b>
       <span style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-        <button className={`btn sm ${runner === 'acp' ? 'pri' : ''}`} onClick={() => pick('acp', 'The squad talks to Claude through ACP')}>
-          Agent Client Protocol
+        <button className={`btn sm ${runner === 'acp' ? 'pri' : ''}`} onClick={() => pick('acp', 'The squad talks to Claude the usual way')}>
+          The usual way
         </button>
         <button className={`btn sm ${runner === 'direct' ? 'pri' : ''}`} onClick={() => pick('direct', 'The squad runs Claude Code directly')}>
           Directly
         </button>
-        <span className="note" style={{ marginLeft: 6 }}>ACP is the open standard for agents. If it cannot start, a step runs Claude Code directly.</span>
+        <span className="note" style={{ marginLeft: 6 }}>Leave this on The usual way. If that cannot start, a step runs Claude Code directly by itself.</span>
       </span>
     </div>
   );

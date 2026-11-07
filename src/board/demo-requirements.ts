@@ -9,6 +9,7 @@ import {
   addBreakdownActivity,
   allStories,
   breakdownJobs,
+  rewrittenStories,
   findItem,
   nextKey,
   readBreakdown,
@@ -475,7 +476,7 @@ export function playDemoBreakdowns(bp: BoardPaths, meta: BoardMeta): void {
       breakdownStopped(bp, id);
       continue;
     }
-    if (!beat(bp, id, meta.speed)) continue;
+    if (job.heldFor === 'long' || !beat(bp, id, meta.speed)) continue;
     try {
       playStep(bp, id);
     } catch (err) {
@@ -604,7 +605,9 @@ function playDraft(bp: BoardPaths, b: Breakdown): void {
 
 /** A scripted redo: the part takes the person's words, the way the live Analyst would rewrite it. */
 function playRedo(bp: BoardPaths, b: Breakdown, item: string, ask: string): void {
+  let rewritten: string[] = [];
   updateBreakdown(bp, b.id, (x) => {
+    const before = structuredClone(x);
     if (item === x.id) {
       x.summary = `${x.summary ?? ''} ${ask}`.trim();
       return;
@@ -614,9 +617,11 @@ function playRedo(bp: BoardPaths, b: Breakdown, item: string, ask: string): void
     if (f.level === 'story' && !f.story!.ticket) f.story!.criteria.push({ given: 'the story as you asked', when: 'it is built', then: ask.replace(/\.$/, '') });
     else if (f.level === 'feature') f.feature!.summary = ask;
     else if (f.level === 'epic') (f.item as BreakdownEpic).goal = ask;
+    if (x.status === 'approved') rewritten = rewrittenStories(before, x);
   });
   updateBreakdownState(bp, b.id, (s) => {
     s.job = { step: 'redo', status: 'done', item, ask };
+    if (rewritten.length) s.rewritten = [...new Set([...(s.rewritten ?? []), ...rewritten])];
     addBreakdownActivity(s, 'analyst', `Redid ${item === b.id ? 'the breakdown' : item}`);
   });
 }

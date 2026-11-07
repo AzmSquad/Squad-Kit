@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import yaml from 'js-yaml';
-import { SQUAD_DIR } from '../core/paths.js';
+import { SQUAD_DIR, findSquadRoot, isOwnFolder } from '../core/paths.js';
 import type { FolderKind } from '../board/setup-state.js';
 import { git, isRepo } from './git.js';
 import { LANG, workspaceRepos } from './repos.js';
@@ -16,7 +16,7 @@ export interface FirstLook {
   kind: FolderKind;
   /** "Existing code, new to squad-kit". */
   title: string;
-  /** "A Python web app with 15 files and tests, on git branch main." */
+  /** "A Python web app with 15 files and tests." */
   found: string;
   /** What squad-kit does once the person adds it. */
   next: string;
@@ -32,6 +32,22 @@ export interface FirstLook {
   /** Changes in the folder that are not saved in git. */
   unsaved: number;
   repos: string[];
+  /** Add must not guess: this folder sits inside something bigger. */
+  ask?: AddAsk;
+}
+
+/**
+ * The folder asked for sits inside something bigger. inside-repo: a subfolder of a repo, whose tests and app run at the
+ * repo's top folder, so only that top folder can be the project. inside-project: under another squad-kit project it is no
+ * part of (a fresh clone beside its repos, say), which adding must never take over without a word.
+ */
+export interface AddAsk {
+  kind: 'inside-repo' | 'inside-project';
+  /** The folder it found above this one. */
+  root: string;
+  name: string;
+  /** What the person reads. */
+  words: string;
 }
 
 /** Folders nobody counts as the project's own files. */
@@ -107,6 +123,60 @@ function boardOf(dir: string): Record<string, unknown> | null | undefined {
   }
 }
 
+/** The real path, so a folder reached through a link compares with what git says. */
+function real(dir: string): string {
+  try {
+    return fs.realpathSync(dir);
+  } catch {
+    return path.resolve(dir);
+  }
+}
+
+/** The top folder of the repo this folder is in, or null when it is in none. */
+function repoTop(dir: string): string | null {
+  const top = git(dir, ['rev-parse', '--show-toplevel'], { allowFail: true });
+  return top ? real(top) : null;
+}
+
+/** True when the folder is the project's own: inside its one repo, or one of the repos it lists above its repos. */
+function partOfProject(dir: string, project: string): boolean {
+  const abs = real(dir);
+  const top = repoTop(abs);
+  // No repo of its own between the folder and the project: the project may also sit in a subfolder of its repo.
+  if (top && !path.relative(top, real(project)).startsWith('..')) return true;
+  const repos = boardOf(project)?.repos;
+  if (!Array.isArray(repos)) return false;
+  return repos.some((r: { path?: unknown }) => {
+    if (typeof r?.path !== 'string') return false;
+    const rel = path.relative(real(path.join(project, r.path)), abs);
+    return !rel.startsWith('..') && !path.isAbsolute(rel);
+  });
+}
+
+/** What Add must ask before it does anything with this folder, or null when the folder can simply be added. */
+export function addAsk(dir: string): AddAsk | null {
+  const abs = path.resolve(dir);
+  if (fs.existsSync(path.join(abs, SQUAD_DIR, 'config.yaml'))) return null;
+  const above = findSquadRoot(path.dirname(abs));
+  if (above) {
+    if (partOfProject(abs, above)) return null;
+    return {
+      kind: 'inside-project',
+      root: above,
+      name: path.basename(above),
+      words: `This folder sits inside another squad-kit project, in ${above}. Open that project, or add this folder on its own?`,
+    };
+  }
+  const top = repoTop(abs);
+  if (!top || top === real(abs) || !isOwnFolder(top)) return null;
+  return {
+    kind: 'inside-repo',
+    root: top,
+    name: path.basename(top),
+    words: `This folder is part of a bigger project, ${path.basename(top)}, in ${top}. Its tests and app run from the top folder, so squad-kit works from there too. Add the top folder instead.`,
+  };
+}
+
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 function listWords(names: string[]): string {
@@ -152,7 +222,19 @@ export function firstLook(dir: string): FirstLook {
   const { branch, unsaved } = gitState(abs);
   const nested = workspaceRepos(abs).map((r) => r.path);
   const base = { files: files.length, ...code, tests, ...(branch ? { branch } : {}), unsaved, repos: nested };
-  const onBranch = base.branch ? `, on git branch ${base.branch}` : '';
+  const ask = addAsk(abs);
+  if (ask) {
+    return {
+      ...base,
+      kind: repo ? 'repo' : files.length ? 'files' : 'empty',
+      title: ask.kind === 'inside-repo' ? 'Part of a bigger project' : 'Inside another squad-kit project',
+      found: ask.words,
+      next: 'Nothing changes until you pick.',
+      safe: '',
+      takes: '',
+      ask,
+    };
+  }
   const unsavedNote = unsaved ? ` ${plural(unsaved, 'change is', 'changes are')} not saved in git yet: squad-kit works from what is saved.` : '';
 
   if (board) {
@@ -175,8 +257,8 @@ export function firstLook(dir: string): FirstLook {
       kind: 'older',
       title: 'An older squad-kit project',
       found: legacy
-        ? `A board from an older squad-kit is here, in ${describeCode(files.length, code.language, code.web, tests).replace(/^An? /, 'a ')}${onBranch}.`
-        : `squad-kit 0.x files are here${stories ? `, with ${plural(stories, 'story', 'stories')}` : ''}, in ${describeCode(files.length, code.language, code.web, tests).replace(/^An? /, 'a ')}${onBranch}.`,
+        ? `A board from an older squad-kit is here, in ${describeCode(files.length, code.language, code.web, tests).replace(/^An? /, 'a ')}.`
+        : `squad-kit 0.x files are here${stories ? `, with ${plural(stories, 'story', 'stories')}` : ''}, in ${describeCode(files.length, code.language, code.web, tests).replace(/^An? /, 'a ')}.`,
       next: legacy
         ? 'Your specs, plans and decisions are moved to the new layout. Nothing is lost: a full copy is kept first. Then squad-kit reads the code and shows you what it understood.'
         : 'Your specs, plans and decisions stay where they are. squad-kit adds its own files beside them, keeps any notes of yours it would write over under a new name, and moves sign-ins out of the project to this computer. Then it reads the code and shows you what it understood.',
@@ -188,10 +270,10 @@ export function firstLook(dir: string): FirstLook {
     return {
       ...base,
       kind: 'repos',
-      title: 'Several code repos',
-      found: `A folder with ${plural(nested.length, 'code repo')} inside: ${listWords(nested)}.`,
+      title: 'Several code folders',
+      found: `A folder with ${plural(nested.length, 'code folder')} inside: ${listWords(nested)}.`,
       next: 'squad-kit reads each one, finds how to test and run each, then shows you how they fit together.',
-      safe: "Your repos are not changed. squad-kit only adds a .squad folder beside them for the project's memory.",
+      safe: "Your code is not changed. squad-kit only adds a .squad folder beside it for the project's memory.",
       takes: TAKES,
     };
   }
@@ -223,7 +305,7 @@ export function firstLook(dir: string): FirstLook {
     ...base,
     kind: 'repo',
     title: 'Existing code, new to squad-kit',
-    found: `${describeCode(files.length, code.language, code.web, tests)}${onBranch}.${unsavedNote}`,
+    found: `${describeCode(files.length, code.language, code.web, tests)}.${unsavedNote}`,
     next: 'squad-kit will read it, find how to test and run it, then show you what it understood.',
     safe: SAFE,
     takes: TAKES,

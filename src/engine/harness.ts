@@ -8,7 +8,7 @@ import { MAX_FOLDER_FILES, MAX_FOLDER_FILE_BYTES } from '../board/additions-fold
 import { MAX_PARTS, partsOf, severalParts } from '../board/parts.js';
 import { parallelLimit } from '../core/settings.js';
 import type { AgentRole } from './agents.js';
-import { BRD_READ_MS, BRD_WRITE_MS } from './breakdown-job.js';
+import { BRD_READ_MS, BRD_WRITE_MS, LONGEST_READ_MS } from './breakdown-job.js';
 import { MAX_QUESTIONS } from './breakdown-prompts.js';
 import { CHECK_MS, CHECK_SILENT_MS } from './checks.js';
 import { SEEN_DAYS, WEEK_DAYS, harnessSeen, type Need, type Seen, type StoryLink } from './harness-seen.js';
@@ -160,7 +160,7 @@ function lineStages(): HarnessStage[] {
       g('checkout', 'Your own copy is safe', 'With changes in the same files, the merge waits. It never overwrites them.'),
     ]),
     stage('release', 'Release', 'You choose what goes out and when. Every track stops here.', on(you('You decide')), [
-      y('release', 'Release stays yours', 'Deploying never happens by itself.', "If it can't be sent, it isn't marked as sent. Push again finishes it."),
+      y('release', 'Release stays yours', 'Deploying never happens by itself.', "If it can't be sent, it isn't marked as sent. Send again finishes it."),
       y('leave-out', 'Leave a story out', 'It stays in your code and goes out with the next release.'),
       g('release-clash', 'Nothing moves on a clash', 'Every merge is tried first. What the others rely on goes first.', 'A clash: one card, nothing moved. A failed part: the ones after it wait.'),
       g('release-lock', 'One release at a time', 'One cut off by a restart is finished or rolled back on the next start.'),
@@ -222,7 +222,8 @@ function limitRows(meta?: BoardMeta): HarnessLimit[] {
     time({ BUILD_STEP_MS }, 'Builder', 'One run of building or fixing.'),
     time({ REVIEW_STEP_MS }, 'Reviewer', 'One round, or one look at the pictures.'),
     time({ PROOF_STEP_MS }, 'Tester'),
-    time({ BRD_READ_MS }, 'Reading a document'),
+    time({ BRD_READ_MS }, 'Reading a document', 'A long document gets twice its usual read.'),
+    time({ LONGEST_READ_MS }, 'Reading a very long document', 'The most, however long it is.'),
     time({ BRD_WRITE_MS }, 'Writing a breakdown'),
     time({ CHECK_MS }, 'One check'),
     time({ CHECK_SILENT_MS }, 'A silent check', 'It prints nothing for this long.'),
@@ -232,7 +233,7 @@ function limitRows(meta?: BoardMeta): HarnessLimit[] {
     time({ BEFORE_SHOTS_MS }, 'Before pictures', 'Beside the build, holding nothing up.'),
     time({ HOOK_MS }, 'Your check on a save'),
     time({ NETWORK_GIT_MS }, 'Reaching your code host', 'One push, pull or fetch.'),
-    time({ PIPELINE_MS }, 'Your release pipeline', 'Inside the guard, after a release.'),
+    time({ PIPELINE_MS }, 'Your after-release step', 'Inside the guard, after a release.'),
     time({ MAX_LANDING_WAIT_MS }, 'Waiting for a story to merge', 'On Builds by itself.'),
     time({ WAIT_LIMIT_MS }, 'Waiting for the product'),
     time({ TRY_YIELDS_AFTER_MS }, 'Trying a story yourself', 'Once another story needs it.'),

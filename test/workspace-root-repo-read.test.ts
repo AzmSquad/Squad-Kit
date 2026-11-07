@@ -57,7 +57,7 @@ afterEach(async () => {
 
 describe('the first read of a folder that is a repo with repos inside', () => {
   it('a workspace keeps its code repos, each on its own branch', async () => {
-    const root = path.join(tmp, 'taqadi');
+    const root = path.join(tmp, 'portal');
     put(path.join(root, 'api', 'Program.cs'));
     put(path.join(root, 'web', 'src', 'app.ts'));
     commit(path.join(root, 'api'), 'development');

@@ -148,8 +148,8 @@ export function chooseBuild(bp: BoardPaths, id: string, way: DependencyChoice['w
       // Merged meanwhile: nothing to choose, it builds on the base, which has it now.
       t.waiting = null;
       t.dependency = t.dependency ? { ...t.dependency, started: now() } : undefined;
-      startBuild(t, `Building on the latest ${base}`, meta.speed);
-      addActivity(t, 'squad', `What it needs is merged now, so it builds on the latest ${base}`);
+      startBuild(t, `Building on the newest code`, meta.speed);
+      addActivity(t, 'squad', `What it needs is merged now, so it builds on the newest code`);
       return;
     }
     if (way === 'branch') {
@@ -192,7 +192,7 @@ export function wakeIfReady(bp: BoardPaths, t: Ticket): boolean {
   updateTicket(bp, t.id, (x) => {
     x.dependency = { ...c, started: now() };
     startBuild(x, `${names(c.on)} merged · building now`, meta.speed);
-    addActivity(x, 'squad', gone.length ? `${names(gone)} left the board, so the build starts now, on the latest ${base}` : `${names(c.on)} ${c.on.length === 1 ? 'is' : 'are'} merged, so the build starts now, on the latest ${base}`);
+    addActivity(x, 'squad', gone.length ? `${names(gone)} left the board, so the build starts now, on the newest code` : `${names(c.on)} ${c.on.length === 1 ? 'is' : 'are'} merged, so the build starts now, on the newest code`);
   });
   return true;
 }
@@ -218,7 +218,7 @@ export function setDependsOn(bp: BoardPaths, id: string, on: string[]): Ticket {
     if (waitsForDependency(t) || before) {
       if (!holdForDependency(bp, t) && !before) {
         t.waiting = null;
-        startBuild(t, `Building on the latest ${repoFor(meta, t).base}`, meta.speed);
+        startBuild(t, `Building on the newest code`, meta.speed);
       }
     }
   });
@@ -234,7 +234,7 @@ export function refuseBeforeDependency(bp: BoardPaths, t: Ticket): void {
   if (!waiting.length) return;
   const base = repoFor(readMeta(bp), t).base;
   throw new BoardActionError(
-    `${t.id} is built on ${names(waiting)}'s branch, so it carries ${waiting.length === 1 ? 'its' : 'their'} work too. Accept ${names(waiting)} first: then ${t.id} brings in the latest ${base} and goes in after it.`,
+    `${t.id} is built on ${names(waiting)}'s branch, so it carries ${waiting.length === 1 ? 'its' : 'their'} work too. Accept ${names(waiting)} first: then ${t.id} brings in the newest code and goes in after it.`,
   );
 }
 
@@ -248,17 +248,17 @@ export function bringInLatest(bp: BoardPaths, id: string): Ticket {
     const base = repoFor(meta, t).base;
     if (isMerged(t) || t.stage === 'release') throw new BoardActionError(`${t.id} is accepted already: it goes into ${base} as it is.`);
     const copy = meta.engine !== 'live' || Boolean(t.worktree && fs.existsSync(t.worktree));
-    if (!['implement', 'test', 'review'].includes(t.stage) || !copy) throw new BoardActionError(`${t.id} is not being built yet. Its copy starts from the latest ${base} when the build starts.`);
+    if (!['implement', 'test', 'review'].includes(t.stage) || !copy) throw new BoardActionError(`${t.id} is not being built yet. Its copy starts from the newest code when the build starts.`);
     if (t.takenOver) throw new BoardActionError(`You have ${t.id}. Give it back first.`);
     if (t.chat?.open && !t.chat.beside) throw new BoardActionError(`${t.id} has a chat open. Finish it first.`);
     if (t.waiting && t.waiting.kind !== 'proof' && t.waiting.kind !== 'stuck') throw new BoardActionError(`${t.id} waits for you: ${t.waiting.summary}. Do that first.`);
     if (meta.engine !== 'live') {
-      addActivity(t, 'you', `Brought in the latest ${base}. The sample board has no code, so nothing changed`);
+      addActivity(t, 'you', `Brought in the newest code. The sample board has no code, so nothing changed`);
       return;
     }
     if (!t.waiting && (t.live || t.squad)) {
       t.baseWanted = { by: meta.user.name, at: now() };
-      addActivity(t, 'you', `Asked to bring in the latest ${base}: it comes in when the running step ends, before the checks`);
+      addActivity(t, 'you', `Asked to bring in the newest code: it comes in when the running step ends, before the checks`);
       return;
     }
     t.waiting = null;
@@ -266,8 +266,8 @@ export function bringInLatest(bp: BoardPaths, id: string): Ticket {
     t.retryPhase = undefined;
     t.stage = 'implement';
     t.live = true;
-    t.status = `Bringing in the latest ${base}`;
-    addActivity(t, 'you', `Asked to bring in the latest ${base}`);
+    t.status = `Bringing in the newest code`;
+    addActivity(t, 'you', `Asked to bring in the newest code`);
     scheduleSquad(t, 'update-base', 0.2, 1);
   });
 }

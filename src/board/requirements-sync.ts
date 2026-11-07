@@ -4,6 +4,7 @@ import type { Tracker } from '../modules/tracker/types.js';
 import type { BrdRef, Breakdown, BreakdownEpic, BreakdownFeature, BreakdownLevel, BreakdownStory, TrackerLink } from './requirements-types.js';
 import { addActivity, now, readMeta, readTicket, updateTicket, type BoardPaths } from './store.js';
 import type { Criterion, Ticket, TrackerEvent } from './types.js';
+import { plainWords } from '../core/for-people.js';
 
 /**
  * Sending a breakdown to the project's tracker, one way: epics, features and stories, each under its parent, with a
@@ -330,7 +331,7 @@ export async function sendBreakdown(b: Breakdown, tracker: Tracker, opts: SendOp
       stepDone(l.on.length);
     }
   } catch (err) {
-    const why = ((err as Error)?.message ?? String(err)).trim().replace(/\.$/, '');
+    const why = plainWords(err, `Sending ${b.id} to ${tracker.label}`, 'something technical stopped it').trim().replace(/\.$/, '');
     const kept = result.done ? `${result.done} of ${result.of} are sent. Send again carries on from there.` : 'Nothing was sent yet.';
     return { ...result, error: `Could not ${doing}: ${why}. ${kept}` };
   }
