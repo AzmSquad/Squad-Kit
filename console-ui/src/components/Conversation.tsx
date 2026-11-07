@@ -146,6 +146,8 @@ function FullLog({ t, chosenKey: key, setKey }: { t: Ticket; chosenKey: string |
                 To work in it yourself, press <b>Take over</b> first, so you and the squad never edit at the same time.{' '}
                 <TakeOverButton t={t} />
               </>
+            ) : t.takenOver?.free ? (
+              'It is in a conversation outside squad-kit. Bring it back on the Now tab.'
             ) : t.takenOver ? (
               'The ticket is yours: type into it freely, then press Give back on the Now tab.'
             ) : (

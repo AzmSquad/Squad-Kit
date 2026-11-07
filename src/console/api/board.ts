@@ -63,7 +63,7 @@ import { isApiProof } from '../../engine/proof-verdict.js';
 import { addPart, changePart, partsOf, removePart, repoPaths, severalParts, type PartChange } from '../../board/parts.js';
 import { addLocalFile, addLockedFile, lockDockerFiles, projectFilesView, removeProjectFile, useMyFile } from '../../board/project-files.js';
 import { videoNotesWork } from '../../engine/media.js';
-import { boardExists, boardPaths, brokenDecisions, brokenReleases, brokenTickets, listDecisions, listReleases, listTickets, readMeta, readRelease, readTicket, settingsProblem, ticketProblem, writeMeta } from '../../board/store.js';
+import { boardExists, boardPaths, brokenDecisions, brokenReleases, brokenTickets, listDecisions, listReleases, listTickets, readMeta, readRelease, readTicket, settingsProblem, ticketProblem, writeMeta, requireTicket } from '../../board/store.js';
 import { brokenBreakdowns } from '../../board/requirements.js';
 import { seedDemoBoard } from '../../board/demo.js';
 import type { AgentName, PlanComment, PlanEdit } from '../../board/types.js';
@@ -102,6 +102,8 @@ import { lookAgain } from '../../engine/try-app.js';
 import { takeBack } from '../../engine/handover.js';
 import { plainWords } from '../../core/for-people.js';
 import { act } from './act.js';
+import { bringBack, checkOutside, workOutside } from '../../board/outside.js';
+import { outsidePrompt } from '../../engine/outside-guide.js';
 
 const DAY = 86_400_000;
 
@@ -561,6 +563,18 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     return act(c, () => giveBack(bp, c.req.param('id'), b.note));
   });
 
+  // A conversation in any AI tool, outside squad-kit: move it there, the words to paste, bring it back, and Check.
+  app.get('/api/v1/outside-prompt', (c) => act(c, () => ({ prompt: outsidePrompt(bp) })));
+  app.get('/api/v1/tickets/:id/outside-prompt', (c) => act(c, () => ({ prompt: outsidePrompt(bp, requireTicket(bp, c.req.param('id'))) })));
+  app.post('/api/v1/tickets/:id/outside', (c) =>
+    act(c, async () => {
+      const t = await workOutside(bp, c.req.param('id'));
+      return { ...t, prompt: outsidePrompt(bp, t) };
+    }),
+  );
+  app.post('/api/v1/tickets/:id/bring-back', (c) => act(c, () => bringBack(bp, c.req.param('id'))));
+  app.post('/api/v1/tickets/:id/check-outside', (c) => act(c, () => checkOutside(bp, c.req.param('id'))));
+
   // Hand over: push the ticket's branch with its code and documents, and name the new owner.
   app.post('/api/v1/tickets/:id/hand-over', async (c) => {
     const b = await body<{ to?: string; note?: string }>(c);
@@ -609,7 +623,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
         targets: targets(r),
         items: r.tickets.map((id) => {
           const t = tickets.find((x) => x.id === id);
-          return { id, title: titleOf(id, r), gates: t?.gates ?? null, kind: t?.kind ?? 'feature' };
+          return { id, title: titleOf(id, r), gates: t?.gates ?? null, kind: t?.kind ?? 'feature', ...(t?.outside ? { outside: t.outside } : {}) };
         }),
       })),
     );

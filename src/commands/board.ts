@@ -163,6 +163,7 @@ function nextCommand(t: Ticket): string {
     case 'stuck':
       return `squad decide ${t.id}`;
     case 'yours':
+      if (t.takenOver?.free) return `squad outside back ${t.id}`;
       return `cd ${shellQuote(t.takenOver?.cwd ?? '')} && claude --resume ${t.takenOver?.session}   then   squad give-back ${t.id}`;
     default:
       return `squad watch ${t.id}`;
@@ -340,7 +341,8 @@ export async function runShow(ticketId: string): Promise<void> {
   if (t.gates) {
     const g = (ok: string, label: string) => (ok === 'pass' ? kleur.green(`✓ ${label}`) : ok === 'unchecked' ? kleur.yellow(`! Not checked: ${label}`) : kleur.gray(`○ ${label}`));
     out();
-    out(`  ${kleur.bold('Gates')}  ${g(t.gates.checks, t.gates.checksText ?? 'All checks pass')}   ${g(t.gates.review, 'Review approved')}   ${g(t.gates.proof, 'Proof made')}`);
+    if (t.outside && !t.outside.checked && [t.gates.checks, t.gates.review, t.gates.proof].every((s) => s === 'pending')) out(`  ${kleur.bold('Gates')}  ${kleur.gray('○ Not checked by squad-kit')}`);
+    else out(`  ${kleur.bold('Gates')}  ${g(t.gates.checks, t.gates.checksText ?? 'All checks pass')}   ${g(t.gates.review, 'Review approved')}   ${g(t.gates.proof, 'Proof made')}`);
   }
   if ((t.waiting?.kind === 'proof' || t.stuck?.gate === 'proof') && t.proof?.length) {
     out();

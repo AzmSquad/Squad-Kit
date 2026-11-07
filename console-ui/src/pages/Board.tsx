@@ -13,6 +13,7 @@ import { isMine, ownerOf, useMe } from '../components/HandOver';
 import { changeWaits, openChange } from '../components/ChangeCard';
 import { CardLine, isRunning } from '../components/LiveNow';
 import { DependsTag } from '../components/Depends';
+import { OutsideTag } from '../components/Outside';
 import { needsYou, testChangeWaits } from '../lib/waiting';
 import { NOT_CHECKED_WHY } from '../lib/gates';
 import { typedDir } from '../lib/lang';
@@ -192,6 +193,7 @@ function Card({ t, selected, onOpen }: { t: Ticket; selected: boolean; onOpen():
             Not checked
           </span>
         )}
+        <OutsideTag t={t} />
         <DependsTag t={t} />
       </div>
       <Written as="h4" text={t.title} />

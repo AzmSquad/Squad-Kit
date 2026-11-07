@@ -399,7 +399,9 @@ export interface Ticket {
   notes?: TicketNote[];
   overrides?: GateOverride[];
   specApproved?: { by: string; at: string };
-  takenOver?: { by: string; at: string; session: string; cwd: string };
+  takenOver?: { by: string; at: string; session: string; cwd: string; free?: { from?: string; designApproved?: boolean } };
+  /** Worked on in a conversation outside squad-kit: on its record for good. */
+  outside?: { from?: string; by: string; at: string; checked?: { at: string; by: string; noTests?: boolean } };
   track?: Track;
   agentQuestion?: {
     from: 'architect' | 'builder' | 'reviewer';
@@ -768,6 +770,7 @@ export interface ReleaseItem {
   title: string;
   gates: Gates | null;
   kind: 'feature' | 'bug';
+  outside?: Ticket['outside'];
 }
 
 export type ReleaseWithItems = Release & { items: ReleaseItem[]; targets: { repo: string; branch: string; remote: string }[] };

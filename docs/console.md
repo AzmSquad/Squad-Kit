@@ -177,6 +177,24 @@ its conversations (without pictures), the project's settings and ticket list, an
 It never holds sign-ins, the board's token, `.env` files or anything that looks like a key. Send it to whoever helps
 you with squad-kit. Terminal: `squad report [ticket] [--note "what happened"]`.
 
+### Work in another AI tool
+
+A story can run in a conversation in any AI tool instead, and come back. In a story's menu, **Work in another AI tool** copies a prompt that says where the story is now and what comes next. The New ticket window has **Start in another AI tool** for a new story.
+
+The prompt points to `.squad/how-to-work-here.md`, a guide squad-kit writes from its own code: the steps, the commands, and the exact shape of `spec.md`, `questions.md` and `design.md`. The conversation works in the story's own copy of the code, made with `squad outside copy`, and `squad outside show` tells it which file is wrong and why. The guide stays out of git.
+
+While a conversation has the story, the squad keeps off it. The board reads the story's files, so it shows the real step. **Bring it back** when you are done, at any step:
+
+- With code: the proof card. Nothing counts as passed. You can press Looks right, or Check first.
+- With a design: you approve it and the squad builds. With a spec: you approve it and the squad writes the design. An approval given in the conversation is kept, with `squad outside approved`.
+- With nothing changed: as it was, with no label.
+
+squad-kit trusts only what it ran itself. A story that changed outside keeps a label on its record, also after it merges: **Worked outside squad-kit**, or **Continued outside from the design**. **Check** beside the label runs squad-kit's own checks, review and proof, which use AI like on any story. What they find goes the way it does on any story. When they pass, **Checked** goes beside the label. Squad-kit makes the proof itself, so a conversation does not write `proof.md`.
+
+What you spend in the conversation is yours, and squad-kit does not count it. squad-kit's guard and limits do not apply there.
+
+In the terminal: `squad outside prompt`, `start`, `new`, `show`, `copy`, `approved`, `back` and `check`.
+
 ## The Tester and the proof
 
 After the checks and the review, the Tester shows that the work does what the spec says. squad-kit starts the

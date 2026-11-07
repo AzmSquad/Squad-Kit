@@ -24,7 +24,13 @@ export function notCheckedWhy(g: Gates | undefined | null): string | null {
 }
 
 /** The line above the proof: "every gate is green" only when it is true. */
+/** Built outside squad-kit and brought back: the proof card is there, and no gate has run. */
+export function noGateRan(g: Gates | undefined | null): boolean {
+  return g?.checks === 'pending' && g.review === 'pending' && g.proof === 'pending';
+}
+
 export function proofLead(g: Gates | undefined | null): string {
+  if (noGateRan(g)) return 'Built outside squad-kit, so squad-kit has not checked it. Try it yourself, or press Check at the top.';
   const compare = 'Compare the screens before and after each "done when".';
   if (g?.checks === 'unchecked') return `Not checked: no tests ran, so look closely. ${compare}`;
   if (g && [g.checks, g.review, g.proof].some((s) => s === 'skipped')) return `You went past a gate, so look closely. ${compare}`;
@@ -45,6 +51,7 @@ export function proofWords(t: { gates?: Gates | null; proof?: { shows?: 'met' | 
 
 /** Why a proof has no screenshots. With no tests either, nothing checked the work, and it says so. */
 export function noShotsText(t: { gates?: Gates | null; work?: { screens: number } }): string {
+  if (noGateRan(t.gates)) return 'None yet. squad-kit makes them when you press Check.';
   if (t.gates?.proof === 'skipped' || (t.work?.screens ?? 0) > 0) return 'No screenshots were taken for this ticket. See the activity for why.';
   if (t.gates?.checks === 'unchecked') return 'No screens change in this ticket and no tests ran, so read the changes in the Changes tab.';
   return 'No screens change in this ticket, so the passing checks are the proof.';

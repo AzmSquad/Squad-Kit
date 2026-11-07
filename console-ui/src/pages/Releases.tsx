@@ -12,6 +12,7 @@ import { Cmd, CouldNotLoad, Modal, NotesView, Written, dateShort } from '../comp
 import { usePrefs } from '../lib/prefs';
 import { shellQuote } from '../lib/text';
 import { GatePill } from '../components/Gates';
+import { noGateRan } from '../lib/gates';
 import { langProps, typedDir } from '../lib/lang';
 
 export function ReleasesPage() {
@@ -137,7 +138,15 @@ function ReleaseDetail({ r, onReleased, live }: { r: ReleaseWithItems; onRelease
           <span className="mono">{it.id}</span>
           <Written as="b" text={it.title} />
           <span style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-            {it.gates?.checks === 'unchecked' ? (
+            {it.outside && (
+              <span className={`prio outside${it.outside.checked ? ' checked' : ''}`}>
+                {it.outside.from ? `Continued outside from ${it.outside.from}` : 'Worked outside squad-kit'}
+                {it.outside.checked ? ', checked' : ''}
+              </span>
+            )}
+            {noGateRan(it.gates) ? (
+              <GatePill state="pending" text="Not checked by squad-kit" />
+            ) : it.gates?.checks === 'unchecked' ? (
               <GatePill state="unchecked" text="Not checked · review, proof" />
             ) : (
               it.gates && (

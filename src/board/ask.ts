@@ -1,3 +1,4 @@
+import { changesScreens } from './outside-step.js';
 import type { AgentName, Ticket, TimedStep, WaitingKind } from './types.js';
 import { WHO, slowAfter } from './clock.js';
 import { inAbout, type LiveNow } from './now.js';
@@ -174,7 +175,7 @@ const SENTENCE_AR: Record<TimedStep, string> = {
 };
 
 function screens(t: Ticket): boolean {
-  return (t.work?.screens ?? 0) > 0;
+  return changesScreens(t);
 }
 
 /** Builds by itself: the work is accepted and merged with no one pressing Looks right. */

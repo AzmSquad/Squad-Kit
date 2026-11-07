@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { BoardPaths } from './store.js';
 
 /** The console writes its pid here while its squad runs, so terminal commands don't run a second one. */
-function lockFile(bp: BoardPaths): string {
+export function lockFile(bp: BoardPaths): string {
   return bp.pidFile;
 }
 
@@ -93,6 +93,18 @@ export function takingOutTurn<T>(bp: BoardPaths, job: () => Promise<T>): Promise
 /** Once no ticket is being taken out of a release. With none, it returns at once and the caller goes on without a wait. */
 export function takingOutDone(bp: BoardPaths): Promise<unknown> | undefined {
   return takingOut.get(bp.squadDir)?.catch(() => undefined);
+}
+
+/** True while a squad of this board is alive, in this process or another: only then can a step be running. */
+export function squadAlive(bp: BoardPaths): boolean {
+  try {
+    const pid = Number(fs.readFileSync(lockFile(bp), 'utf8').trim());
+    if (!pid) return false;
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function squadRunsElsewhere(bp: BoardPaths): boolean {

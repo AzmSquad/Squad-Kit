@@ -18,6 +18,7 @@ import { runAsk, runTicketStatus, runWait } from './commands/now.js';
 import { runLogs, runReport, runTryNow } from './commands/support.js';
 import { runAppFind, runAppRestart, runAppSet, runAppStart, runAppStatus, runAppStop } from './commands/app.js';
 import { runTry } from './commands/try.js';
+import { runOutsideApproved, runOutsideBack, runOutsideCheck, runOutsideCopy, runOutsideNew, runOutsidePrompt, runOutsideShow, runOutsideStart } from './commands/outside.js';
 import { runMcpBridge } from './commands/mcp-bridge.js';
 import { runOverview, runSetup } from './commands/overview.js';
 import {
@@ -433,6 +434,20 @@ program
   .command('give-back <ticket> [note...]')
   .description('Give a ticket back to the squad; the checks, review and proof run again')
   .action(wrapArgs(runGiveBack));
+const outsideCmd = program.command('outside').description('Work on a story in a conversation in any AI tool, outside squad-kit, and bring it back');
+outsideCmd.command('prompt [ticket]').description('Print the words to paste in the conversation. With no ticket: for a new story').action(wrapArgs(runOutsidePrompt));
+outsideCmd
+  .command('new <title...>')
+  .description('Make a new story for this conversation. The squad keeps off it')
+  .option('--ask <text>', 'What the person asked, in their words')
+  .option('--bug', 'It is a bug')
+  .action(wrapArgs(runOutsideNew));
+outsideCmd.command('start <ticket>').description('Stop the squad on a story and move it to a conversation').action(wrapArgs(runOutsideStart));
+outsideCmd.command('show <ticket>').description('Where the story is, what comes next, and which of its files is wrong').action(wrapArgs(runOutsideShow));
+outsideCmd.command('copy <ticket> [repo]').description("Make the story's own copy of the code, and print the folder").action(wrapArgs(runOutsideCopy));
+outsideCmd.command('approved <ticket> <what>').description('Record that the person approved the spec or the design in the conversation').action(wrapArgs(runOutsideApproved));
+outsideCmd.command('back <ticket>').description('Bring the story back to the board, at its real step').action(wrapArgs(runOutsideBack));
+outsideCmd.command('check <ticket>').description("Run squad-kit's own checks, review and proof on work done outside").action(wrapArgs(runOutsideCheck));
 program
   .command('hand-over <ticket> [name...]')
   .description("Hand a ticket to a teammate: push its branch with the code and documents, and name the new owner")

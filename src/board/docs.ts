@@ -100,6 +100,7 @@ const HEADER_KEYS = [
   'stage',
   'owner',
   'handedOver',
+  'outside',
   'archived',
   'track',
   'createdAt',
@@ -165,6 +166,49 @@ export function readTicketDocs(docs: TicketDocs): TicketDocInput {
   if (docs['notes.md']) t.notes = parseNotes(docs['notes.md']);
   if (docs['proof.md']) t.proof = parseProof(docs['proof.md']);
   return t;
+}
+
+/** Where a ticket's file is not in the shape squad-kit reads, in plain words, for whoever wrote it by hand. */
+export function shapeTroubles(docs: TicketDocs): { file: string; problem: string }[] {
+  const out: { file: string; problem: string }[] = [];
+  const headsIn = (text: string, level: string) => text.split('\n').filter((l) => l.startsWith(`${level} `));
+  const questions = docs['questions.md'];
+  if (questions !== undefined) {
+    const before = questions.split(/^### /m)[0]!.split('\n').filter((l) => l.trim() && !l.startsWith('# '));
+    if (before.length) out.push({ file: 'questions.md', problem: `This is not under a question, so it is not read: "${before[0]!.slice(0, 80)}".` });
+    for (const h of headsIn(questions, '###')) if (!/^### [\w.-]+, from the (analyst|architect)$/.test(h)) out.push({ file: 'questions.md', problem: `"${h}" is not read. Each question's heading is like: ### q1, from the analyst` });
+    for (const q of sections(questions, /^### ([\w.-]+), from the (analyst|architect)$/)) {
+      if (/^Answer: /m.test(q.text) && !/^- \[x\] /m.test(q.text) && !/^Chosen: /m.test(q.text)) out.push({ file: 'questions.md', problem: `Question ${q.match[1]} has an answer with no choice, so the answer is lost. Mark the option chosen with - [x].` });
+    }
+  }
+  const spec = docs['spec.md'];
+  if (spec !== undefined) {
+    for (const part of ['Story', 'Done when']) if (!new RegExp(`^## ${part}$`, 'm').test(spec)) out.push({ file: 'spec.md', problem: `It has no ## ${part}.` });
+    for (const h of headsIn(spec, '##')) if (!/^## (Story|Done when|Release note|Changes)$/.test(h)) out.push({ file: 'spec.md', problem: `"${h}" is not read. Its headings are ## Story, ## Done when and ## Release note.` });
+    const done = sections(spec, /^## (Story|Done when|Release note|Changes)$/).find((x) => x.match[1] === 'Done when')?.text;
+    if (done !== undefined) {
+      const rows = done.split('\n').filter((l) => l.trim() && !l.startsWith('   '));
+      if (!rows.length) out.push({ file: 'spec.md', problem: '## Done when has nothing under it.' });
+      for (const r of rows) if (!/^\d+\. /.test(r) || !GIVEN.test(r.replace(/^\d+\. /, ''))) out.push({ file: 'spec.md', problem: `This line under ## Done when is not read: "${r.slice(0, 80)}". Each is: 1. **Given** ..., **when** ..., **then** ...` });
+    }
+  }
+  const design = docs['design.md'];
+  if (design !== undefined) {
+    for (const h of headsIn(design, '##')) if (!/^## (Decision: .+|Steps)$/.test(h)) out.push({ file: 'design.md', problem: `"${h}" is not read. Its headings are ## Decision: <title> and ## Steps.` });
+    const steps = sections(design, /^## (Decision: .+|Steps)$/).find((x) => x.match[1] === 'Steps')?.text;
+    if (steps === undefined) out.push({ file: 'design.md', problem: 'It has no ## Steps.' });
+    else {
+      if (!/^\d+\. /m.test(steps)) out.push({ file: 'design.md', problem: '## Steps has no numbered steps.' });
+      for (const r of steps.split('\n').filter((l) => l.trim() && !l.startsWith('   '))) if (!/^\d+\. /.test(r)) out.push({ file: 'design.md', problem: `This line under ## Steps is not read: "${r.slice(0, 80)}". Each step is one numbered line.` });
+    }
+    if (/^## Decision: /m.test(design)) {
+      const options = sections(design, /^(### Options|### Why|## Steps)$/).find((s) => s.head === '### Options')?.text;
+      if (options === undefined) out.push({ file: 'design.md', problem: 'The decision has no ### Options.' });
+      else if (!/^- \[x\] /m.test(options)) out.push({ file: 'design.md', problem: 'None of the ### Options is chosen. Mark one with - [x].' });
+      if (!/^### Why$/m.test(design)) out.push({ file: 'design.md', problem: 'The decision has no ### Why.' });
+    }
+  }
+  return out;
 }
 
 function specDoc(t: TicketDocInput): string {

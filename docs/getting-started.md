@@ -229,6 +229,7 @@ While it works, you can:
 - Press **Stop**. The agent stops at once, and the work so far is kept. **Try again** carries on from the same
   step.
 - Developers can press **Take over** to work in the Builder's own session, then **Give back**.
+- Anyone can move a story to a conversation in any AI tool, at any step, and bring it back: **Work in another AI tool** in the story's menu.
 - Press **Bring in the newest work** to give the Builder what the team merged since.
 
 Only a limited number of tickets run at once (see **Tickets at once** in Settings). A ticket over the limit says

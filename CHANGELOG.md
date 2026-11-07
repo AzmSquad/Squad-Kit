@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Work in another AI tool.** Copy a prompt from any story, or start a new one, and paste it in a conversation in any AI tool.
+  It runs the story by the project's own structure, from where the story is now, and the board shows it at its real step
+  whenever you open it. Bring it back at any step. squad-kit trusts only what it ran itself: the story keeps a label on its
+  record ("Worked outside squad-kit", "Continued outside from the design"), and a small **Check** button runs squad-kit's own
+  checks, review and proof, and shows **Checked** when they pass. What you spend there is yours, and squad-kit's guard and limits
+  do not apply there. If nothing changed outside, the story is just as it was, with no label.
 - **Your additions** on the Harness page: add a rule, a checklist or a gate, type it or bring it in from a folder, and try it
   first. Saved in `.squad/harness.yaml`, shared through git. Additions only make the squad stricter; squad-kit's own gates have
   no off switch. Gates run by squad-kit itself in the guard, with the checks, before merge or before release.

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { ArrowRightLeft, ArrowUp, Check, Code, Copy, Download, ExternalLink, GitPullRequest, LifeBuoy, Loader2, Maximize2, MessageCircle, Minimize2, PencilLine, Send, Square, TriangleAlert, X } from 'lucide-react';
+import { ArrowRightLeft, ArrowUp, Check, Code, Copy, Download, ExternalLink, GitPullRequest, LifeBuoy, Loader2, Maximize2, MessageCircle, MessagesSquare, Minimize2, PencilLine, Send, Square, TriangleAlert, X } from 'lucide-react';
 import { assetUrl, ticketFileUrl } from '../api/client';
 import type { PlanComment, Question, Ticket, TicketNote } from '../api/types';
 import { useAct, useBoard, useTicket } from '../lib/data';
@@ -11,6 +11,7 @@ import { Cmd, Glyph, Modal, ROLE_NAME, Runs, Tracker, Written, WrittenLines, ago
 import { ConversationTab } from '../components/Conversation';
 import { ChangesTab, OpenInEditor } from '../components/Changes';
 import { TakeOverButton, canTakeOver } from '../components/TakeOver';
+import { OutsideDialog, OutsideLabel, OutsidePanel, canWorkOutside } from '../components/Outside';
 import { Attachments as AgentFiles, Mockup } from '../components/Attachments';
 import { Part, WhatChanged, type Review } from '../components/PlanReview';
 import { AGENT_TITLE, TalkButton } from '../components/Chat';
@@ -23,7 +24,7 @@ import { PortAskPanel } from '../components/PortAsk';
 import { ExactError, StuckCard } from '../components/ErrorCard';
 import { TestCommandCard } from '../components/TestCommand';
 import { GatePill, NotCheckedNote } from '../components/Gates';
-import { checksWords, noShotsText, overrideWhat, proofLead, proofWords } from '../lib/gates';
+import { checksWords, noGateRan, noShotsText, overrideWhat, proofLead, proofWords } from '../lib/gates';
 import { testChangeWaits } from '../lib/waiting';
 import { AlsoChanged, MorePictures, OffScreenList, VerdictIcon, VerdictTag } from '../components/Verdict';
 import { isApiProof, proofViewer, verdictClass, verdictNote } from '../lib/verdict';
@@ -47,7 +48,7 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
   const me = useMe();
   const { ticketFull, toggleTicketFull } = usePrefs();
   // Hand over and Propose a change live in the ⋯ menu, so the header stays one row at any width.
-  const [menuDialog, setMenuDialog] = useState<'hand-over' | 'propose' | null>(null);
+  const [menuDialog, setMenuDialog] = useState<'hand-over' | 'outside' | 'propose' | null>(null);
   const [tab, setTab] = useState<Tab>('now');
   useEffect(() => setTab('now'), [id]);
   useEffect(() => {
@@ -59,6 +60,7 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
   const t = ticket.data;
   const board = useBoard();
   const known = board.data?.ready ? board.data.meta.parts : undefined;
+  const liveBoard = board.data?.ready ? board.data.meta.engine === 'live' : false;
   const parts = t?.parts?.length ? t.parts.map((id) => known?.find((p) => p.id === id)?.name ?? id) : partNames(known, t?.repo);
   return (
     <>
@@ -97,6 +99,7 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
                 )}
                 {t.kind === 'bug' && <span className="prio">Bug{t.foundIn ? ` found in ${t.foundIn}` : ''}</span>}
                 {t.priority === 'high' && t.kind !== 'bug' && <span className="prio">High priority</span>}
+                <OutsideLabel t={t} />
                 <span className="grow" />
                 {/* The actions stay together: when the row is too narrow, they move under the id as one group. */}
                 <span className="dacts">
@@ -114,9 +117,10 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
                     t={t}
                     onDeleted={onClose}
                     items={[
-                      ...((isMine(t, me) || !me) && canPropose(t)
+                      ...((isMine(t, me) || !me) && canPropose(t) && !t.takenOver?.free
                         ? [{ key: 'propose', label: <><PencilLine size={15} /> {shipped(t) ? 'Ask for a change…' : 'Propose a change…'}</>, onPick: () => setMenuDialog('propose') }]
                         : []),
+                      ...(canWorkOutside(t, me, liveBoard) ? [{ key: 'outside', label: <><MessagesSquare size={15} /> Work in another AI tool…</>, onPick: () => setMenuDialog('outside') }] : []),
                       ...(canHandOver(t, me) ? [{ key: 'hand-over', label: <><ArrowRightLeft size={15} /> Hand over…</>, onPick: () => setMenuDialog('hand-over') }] : []),
                     ]}
                   />
@@ -135,6 +139,7 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
                 </span>
               </div>
               {menuDialog === 'hand-over' && <HandOverDialog t={t} onClose={() => setMenuDialog(null)} />}
+              {menuDialog === 'outside' && <OutsideDialog t={t} onClose={() => setMenuDialog(null)} />}
               {menuDialog === 'propose' && <ProposeChange t={t} onClose={() => setMenuDialog(null)} />}
               <Written as="h2" text={t.title} />
               <BreakdownPlace t={t} />
@@ -252,7 +257,7 @@ function NowPanel({ t }: { t: Ticket }) {
     case 'ask':
       return <AskPanel t={t} />;
     case 'yours':
-      return <YoursPanel t={t} />;
+      return t.takenOver?.free ? <OutsidePanel t={t} extra={<RecentActivity t={t} />} /> : <YoursPanel t={t} />;
     case 'chat':
       return t.chat ? <ChatOpen t={t} /> : <WorkingPanel t={t} />;
     default:
@@ -531,7 +536,7 @@ function PlanBody({ t, review }: { t: Ticket; review?: Review }) {
         </>
       )}
       {t.work && <TestCommandCard t={t} />}
-      {review && t.work && t.steps && (
+      {review && t.steps && (
         <>
           <div className="lbl">Build steps</div>
           <ol className="ac">
@@ -693,6 +698,15 @@ function AskDeveloper({ t, onClose }: { t: Ticket; onClose(): void }) {
 
 function GatePills({ t }: { t: Ticket }) {
   const g = t.gates;
+  if (t.outside && t.waiting?.kind === 'proof' && noGateRan(g)) {
+    return (
+      <div className="pills">
+        <GatePill state="pending" text="Checks not run" />
+        <GatePill state="pending" text="No review" />
+        <GatePill state="pending" text="No proof" />
+      </div>
+    );
+  }
   return (
     <>
       <div className="pills">

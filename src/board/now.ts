@@ -1,3 +1,4 @@
+import { changesScreens } from './outside-step.js';
 import type { AgentName, QuietPort, Stage, StepClock, Ticket, TimedStep, WaitingKind } from './types.js';
 import { WHO, stepSeconds } from './clock.js';
 import { durationWords, middle, minutesWords, rangeWords, usualOf, usualWords, type Usual, type UsualBook } from './usual.js';
@@ -185,7 +186,7 @@ const SENTENCE: Record<TimedStep, (t: Ticket) => string> = {
 };
 
 function screens(t: Ticket): boolean {
-  return (t.work?.screens ?? 0) > 0;
+  return changesScreens(t);
 }
 
 /** Builds by itself: what it needs from the person at the end of the steps. Nothing: it merges by itself. */

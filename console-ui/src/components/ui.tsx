@@ -290,7 +290,7 @@ export function commandFor(t: Ticket): string {
     case 'ask':
       return `squad reply ${t.id}`;
     case 'yours':
-      return `squad give-back ${t.id}`;
+      return t.takenOver?.free ? `squad outside back ${t.id}` : `squad give-back ${t.id}`;
     case 'chat':
       return `squad chat ${t.id}`;
     case 'depends':
@@ -326,7 +326,7 @@ export function actionLabel(t: Ticket): string {
     case 'ask':
       return 'Answer';
     case 'yours':
-      return 'Give back';
+      return t.takenOver?.free ? 'Bring it back' : 'Give back';
     case 'chat':
       return 'Open chat';
     case 'change':

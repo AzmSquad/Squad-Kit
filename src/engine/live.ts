@@ -119,6 +119,7 @@ import { runBreakdownJob } from './breakdown-job.js';
 import { analystOverBudget, fillBuildQueue, placesLeft } from '../board/requirements-build.js';
 import { startSends } from '../board/requirements-send.js';
 import { clearStaleStop } from '../board/stale-stop.js';
+import { OUTSIDE_WAITS, changesScreens, markCheckedOutside } from '../board/outside-step.js';
 import { RUN_MS } from './acp-runner.js';
 import { CHECK_FAILED, MAX_PICTURES_PER_DONE_WHEN, MAX_PROOF_ROUNDS, MAX_RETAKES, addPictures, isApiProof, afterLastRetake, brokenRows, brokenStop, cannotShowLine, checkVerdicts, criterionText, doneWhenCount, fixLine, fromReason, makeMain, notShownStop, offScreenNumbers, reasonRefusedLine, retakeLine, together, verdictOf, type CheckVerdict, type Judged, type OpenRow } from './proof-verdict.js';
 
@@ -753,7 +754,7 @@ export class LiveSquad {
    */
   private busyCopies(except?: string, runs = true): string[] {
     const tickets = listTickets(this.bp);
-    const out: string[] = tickets.filter((t) => t.takenOver).flatMap((t) => [t.takenOver!.cwd, ...ticketCopies(this.bp, t)]);
+    const out: string[] = tickets.filter((t) => t.takenOver).flatMap((t) => [t.takenOver!.cwd, ...ticketCopies(this.bp, t)]).filter(Boolean);
     for (const k of runs ? this.running : []) {
       if (k === '__setup') out.push(...projectCopies(this.bp).map((r) => path.join(r, 'setup-copy')));
       if (k.startsWith('__before:')) {
@@ -1029,7 +1030,7 @@ export class LiveSquad {
       change(t);
       // A step that ends after you took the ticket over must not move it on: it stays yours until you give it back.
       if (t.takenOver) {
-        t.waiting = { kind: 'yours', summary: 'You took it over. Give it back when you are done' };
+        t.waiting = t.takenOver.free ? { kind: 'yours', summary: OUTSIDE_WAITS } : { kind: 'yours', summary: 'You took it over. Give it back when you are done' };
         t.squad = null;
         t.live = false;
       }
@@ -2695,6 +2696,16 @@ export class LiveSquad {
     return this.addWantedCopies(id);
   }
 
+  /**
+   * The story's copy for a conversation outside squad-kit, made as it is for the Builder: same base, same values, same
+   * setup. A repo named on a workspace of several gets its own copy beside the first.
+   */
+  async copyForOutside(id: string, repoPath?: string): Promise<Ticket> {
+    await this.workspace(id);
+    if (repoPath) await this.addCopy(id, repoPath);
+    return readTicket(this.bp, id)!;
+  }
+
   /** Makes the copies of the parts the Architect named that the story does not have yet. */
   private async addWantedCopies(id: string): Promise<Ticket> {
     const t = readTicket(this.bp, id)!;
@@ -2816,7 +2827,7 @@ export class LiveSquad {
     // Work already in the copy (it came with a pushed branch): no "before" screens of it, and a fresh Builder reads it.
     const sofar = t0.baseCommit ? await workSoFar(t0.worktree!, t0.baseCommit) : [];
     // On a product, "before" pictures would need the whole product running beside the build, on the same addresses.
-    if (!sofar.length && !t0.proof?.length && t0.baseCommit && rc.start && rc.url && (t0.work?.screens ?? 0) > 0 && !meta.scan?.empty && !runsAsProduct(meta)) {
+    if (!sofar.length && !t0.proof?.length && t0.baseCommit && rc.start && rc.url && changesScreens(t0) && !meta.scan?.empty && !runsAsProduct(meta)) {
       // Beside the build, never before it: the Builder starts now.
       this.shootBefore(id);
     }
@@ -2868,7 +2879,13 @@ export class LiveSquad {
    */
   private async runBuilder(id: string, prompt: string, resume: boolean, step: 'build' | 'fix' = 'fix', settled = 0, told = new Set<string>()): Promise<void> {
     const change = this.handChange(id);
-    const t = readTicket(this.bp, id)!;
+    let t = readTicket(this.bp, id)!;
+    // Built outside squad-kit: the Builder has no conversation on it yet, so it gets one, and the story first.
+    if (!t.sessions?.build) {
+      t = this.update(id, (x) => (x.sessions = { ...x.sessions, build: randomUUID() }));
+      resume = false;
+      prompt = `${P.buildPrompt(this.meta(), listDecisions(this.bp), { ...t, story: t.story ?? t.ask }, this.ctx(t))}\n\nThis work was built outside squad-kit, and it is in this folder as it is now. Do not build it again. Look at what is there, then do only this:\n\n${prompt}`;
+    }
     const cwd = workFolder(t)!;
     const started = Date.now();
     let current = -1;
@@ -3792,7 +3809,7 @@ export class LiveSquad {
     const t = readTicket(this.bp, id)!;
     const rc = (this.appOf(t)?.repo ?? repoFor(meta, t)).commands;
     // A product that cannot run yet says why, instead of having nothing to show.
-    const canShow = (Boolean(rc.start && rc.url) || Boolean(runsAsProduct(meta) && productPlan(this.bp, meta, t).why)) && (t.work?.screens ?? 0) + (t.work?.asks ?? 0) > 0;
+    const canShow = (Boolean(rc.start && rc.url) || Boolean(runsAsProduct(meta) && productPlan(this.bp, meta, t).why)) && (changesScreens(t) || (t.work?.asks ?? 0) > 0);
     // Why no picture was taken, in the person's words, and the exact error for engineers.
     let why = '';
     let detail = '';
@@ -3889,6 +3906,7 @@ export class LiveSquad {
       x.gates = { ...(x.gates ?? { checks: 'pass', review: 'pass' }), proof: 'pass' } as Ticket['gates'];
       x.proofRound = undefined;
       clearStaleStop(x);
+      markCheckedOutside(x);
       if (!shots.length) {
         const proof = x.gates?.checks === 'unchecked' ? 'and no tests ran, so read the changes yourself' : 'so the checks are the proof';
         addActivity(x, 'tester', canShow ? `No screenshots were taken, ${proof}` : `No screens to show, ${proof}`);

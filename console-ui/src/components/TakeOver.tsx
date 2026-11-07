@@ -4,7 +4,7 @@ import { useAct } from '../lib/data';
 
 /** Take over once the Builder has started, until the change is accepted. */
 export function canTakeOver(t: Ticket): boolean {
-  return !t.takenOver && ['implement', 'test', 'review'].includes(t.stage);
+  return !t.takenOver && !(t.outside && !t.sessions?.build) && ['implement', 'test', 'review'].includes(t.stage);
 }
 
 export function TakeOverButton({ t }: { t: Ticket }) {

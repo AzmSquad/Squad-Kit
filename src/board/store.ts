@@ -9,6 +9,7 @@ import { BOARD_STAGES } from './types.js';
 import type { Actor, BoardMeta, Decision, Question, Release, Step, Ticket } from './types.js';
 import { pauseClock, trackStage, waitsNow } from './clock.js';
 import { clearStaleStop, oldStop } from './stale-stop.js';
+import { dropOldChecked, showOutsideStep } from './outside-step.js';
 import { hasMergeMarks, isPlain, wrongField, type FieldShape } from './shape.js';
 import {
   decisionDoc,
@@ -358,6 +359,7 @@ export const TICKET_HOME = {
   builtPlan: 'local',
   notesSeen: 'local',
   takenOver: 'local',
+  outside: 'project',
   stuck: 'local',
   changeRequest: 'local',
   agentQuestion: 'local',
@@ -455,6 +457,9 @@ function joinTicket(bp: BoardPaths, id: string, docs: Record<string, string>, st
   if ((t.stuck?.kind as string | undefined) === 'not-met') t.stuck!.kind = 'broken';
   // A ticket past review never shows a stop from before it; the next save drops it for good.
   if (oldStop(t)) clearStaleStop(t);
+  // Worked on outside: its files say which step it is at.
+  if (t.takenOver?.free) showOutsideStep(t);
+  dropOldChecked(t);
   return t;
 }
 
@@ -506,6 +511,7 @@ const TICKET_FIELDS: Record<string, FieldShape> = {
   dependency: 'object',
   breakdown: 'object',
   handedOver: 'object',
+  outside: 'object',
   archived: 'object',
   setsUp: 'yes-no',
   hookOwed: 'yes-no',

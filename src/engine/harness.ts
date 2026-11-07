@@ -151,6 +151,7 @@ function lineStages(): HarnessStage[] {
     stage('yours', 'Your check', 'You look at the proof, try the app, and ask anything.', on(you('You decide'), you('You decide'), skip('On its own')), [
       y('looks-right', 'You look and decide', "Where to look, Try it yourself, Ask a question, Something's wrong. Nothing merges before Looks right.", "Something's wrong sends it back with your words.", { skip: ['auto'], note: { auto: 'It merges when the checks, review and proof pass. If not, it comes to you.' } }),
       y('take-over', 'Take it over', "Work in the story's copy yourself. The squad keeps off until you give it back."),
+      y('outside', 'Work in another AI tool', "Copy a prompt, and a conversation in any AI tool carries on from this step. The squad keeps off until it comes back. It keeps a label on its record, and Check runs squad-kit's own checks, review and proof on it. What is spent there is yours, and the guard and the limits do not apply there."),
       g('accept-order', 'First things first', 'A story built on another is accepted after it, and an open change is settled first.', 'Accept says what comes first.'),
     ]),
     stage('merge', 'Merge', 'The story joins the rest of your code.', on(squad('squad-kit')), [
@@ -334,6 +335,7 @@ function rowDetails(meta: BoardMeta | undefined, root: string | undefined): Reco
     window: code('engine/window.ts', ['Limit', `${REFUSALS_TO_STOP} refusals, ${MISTAKES_TO_STOP} calls in the wrong shape`]),
     'looks-right': code('board/actions.ts', ['See it in', 'The proof page']),
     'take-over': code('board/actions.ts'),
+    outside: code('board/outside.ts', ['File', '.squad/how-to-work-here.md']),
     'accept-order': code('board/depends.ts'),
     hook: code('engine/git.ts', ['Limit', min(HOOK_MS)]),
     merge: code('board/auto.ts', ['Limit', `${MAX_BASE_TRIES} tries on Builds by itself`]),

@@ -48,6 +48,7 @@ This folder is the project's memory, kept by squad-kit. People can read it, and 
 - \`releases/\`: what each release carried.
 - \`rules/\`: how each role works on this project.
 - \`knowledge/\`: what the squad learned about the project.
+- \`how-to-work-here.md\`: how to run a story in a conversation in any AI tool, kept up to date by squad-kit.
 
 Live progress, agent chats, screenshots and sign-ins stay on each person's computer, in \`~/.squad-kit/\`.
 

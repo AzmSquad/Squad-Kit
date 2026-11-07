@@ -91,6 +91,7 @@ export function whereItStands(t: AskTicket): string {
   const id = t.id;
   if (t.stage === 'done') return `${id} is released${t.release ? ` in ${t.release}` : ''}`;
   if (t.stage === 'release') return `${id} is accepted${t.release ? ` and goes out in ${t.release}` : ''}`;
+  if (t.takenOver?.free) return `${id} is in a conversation outside squad-kit, and the squad waits until it comes back`;
   if (t.takenOver) return `You have ${id}, and the squad waits until you give it back`;
   const deps = (t.dependsOn?.length ? t.dependsOn : t.dependency?.on ?? []).join(', ');
   switch (t.waiting?.kind) {

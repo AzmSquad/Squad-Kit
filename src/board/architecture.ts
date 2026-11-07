@@ -87,7 +87,7 @@ function stateOf(t: Ticket, shipped: Set<string>): TimelineState {
   if (shipped.has(t.id) || t.stage === 'done') return 'shipped';
   if (t.mergedAt) return 'merged';
   if (t.decision?.adr || ['implement', 'test', 'review', 'release'].includes(t.stage)) return 'building';
-  if (t.work) return 'designed';
+  if (t.work || t.steps?.length) return 'designed';
   return 'coming';
 }
 

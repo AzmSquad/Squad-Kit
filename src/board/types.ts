@@ -650,8 +650,10 @@ export interface Ticket {
   /** Review like a document: comments sent back, the person's own edits, and the version before the rewrite. */
   chat?: AgentChat;
   planReview?: { before?: PlanSnapshot; sent?: PlanComment[]; edits?: PlanEdit[] };
-  /** You took the ticket over in Claude Code. The squad does nothing on it until you give it back. */
-  takenOver?: { by: string; at: string; session: string; cwd: string };
+  /** You took the ticket over in Claude Code, or `free`, moved it to a conversation in any AI tool. The squad does nothing on it until it comes back. */
+  takenOver?: { by: string; at: string; session: string; cwd: string; free?: LeftForOutside };
+  /** The story was worked on in a conversation outside squad-kit. On its record for good (board/outside.ts). */
+  outside?: Outside;
   /**
    * Full runs every step. Express (a typo, an urgent small bug) skips the questions and the plan approval, never the
    * build, checks, review or your Looks right. Missing means Full.
@@ -712,6 +714,33 @@ export interface Ticket {
   selfAccept?: { baseTried?: string; baseTries?: number; landingSince?: string; waitsFor?: string };
   /** Its owner deleted it on their computer, and the remote shows it: Remove from my board cleans this computer only. */
   ownerDeleted?: OwnerDeleted;
+}
+
+/** What a story looked like when it left for a conversation outside squad-kit: it goes back to this when nothing changed. */
+export interface LeftForOutside {
+  stage: Stage;
+  status: string;
+  waiting: Waiting | null;
+  /** The step that ran or came next. */
+  phase?: string;
+  /** Its documents and its copies as they were, as short hashes. */
+  docs: string;
+  work: string;
+  /** The step it left at, for its label. Missing: nothing was done on it before it left. */
+  from?: string;
+  /** The person approved the design in the conversation. */
+  designApproved?: boolean;
+  /** The person approved something in the conversation, so it did not come back as it left, whatever the files say. */
+  approved?: boolean;
+}
+
+export interface Outside {
+  /** The step it left the squad at: "the plan". Missing: worked outside from the start. */
+  from?: string;
+  by: string;
+  at: string;
+  /** squad-kit's own checks, review and proof passed on it after it came back. */
+  checked?: { at: string; by: string; noTests?: boolean };
 }
 
 /**

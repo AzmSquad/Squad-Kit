@@ -26,6 +26,7 @@ import path from 'node:path';
 import type { BoardMeta, Decision, ImpactCheck, Release, TechDraft, Ticket, UnpushedRelease } from './types.js';
 import { detectStack } from './stack.js';
 import { scheduleSquad } from './schedule.js';
+import { NO_DOCS, leaveForOutside, outsideWords } from './outside-step.js';
 import { plainWords } from '../core/for-people.js';
 import { DOING } from '../engine/plain-doing.js';
 import { PullRequestClash, basesNow, commitTicket, commitWithoutCheck, commitWithoutCheckLater, hooksStillOwed, liveRelease, onTheRemote, pushAgain, versionOnRemote } from '../engine/release.js';
@@ -103,6 +104,8 @@ export interface NewTicketInput {
   track?: Track;
   /** Talk it through with the Analyst first, before any questions or spec. */
   talkFirst?: boolean;
+  /** Made by a conversation outside squad-kit: the squad keeps off it until it comes back. */
+  outside?: boolean;
   source?: Ticket['source'];
   criteria?: string[];
   rules?: string[];
@@ -200,7 +203,13 @@ export function createTicket(bp: BoardPaths, input: NewTicketInput): Ticket {
   if (ticket.track === 'express') addActivity(ticket, 'you', 'Chose the Express track: no questions, the plan is approved on its own');
   if (input.fromBreakdown) addActivity(ticket, 'squad', `Started from ${input.fromBreakdown.id} › ${input.fromBreakdown.item}: the story and done-when were approved with the breakdown`);
   if (attachments.length) addActivity(ticket, 'you', `Added ${attachments.length === 1 ? '1 file' : `${attachments.length} files`}`);
-  if (input.talkFirst && ticket.track === 'full') {
+  if (input.outside) {
+    // Made by a conversation outside squad-kit: the squad never starts on it. If it comes back as it is, it reads it then.
+    scheduleSquad(ticket, 'analyst-read', 0, 1);
+    ticket.live = false;
+    leaveForOutside(ticket, meta.user.name, ticket.createdAt, { docs: NO_DOCS, work: 'none' });
+    addActivity(ticket, 'you', 'Started it in a conversation outside squad-kit');
+  } else if (input.talkFirst && ticket.track === 'full') {
     openChat(ticket, 'analyst', { waiting: null, phase: 'analyst-read' });
     addActivity(ticket, 'you', 'Chose to talk it through with the Analyst first');
   } else scheduleSquad(ticket, 'analyst-read', 4, meta.speed);
@@ -428,30 +437,11 @@ function approveSpec(bp: BoardPaths, ticket: Ticket, speed: number): Ticket {
 /** `self`: the track that approves the plan on its own (Express, Builds by itself); otherwise the person approves it. */
 function approvePlan(bp: BoardPaths, ticket: Ticket, speed: number, self?: 'express' | 'auto'): Ticket {
   const meta = readMeta(bp);
-  let adr: string | undefined;
-  if (ticket.decision && !ticket.decision.adr) {
-    adr = nextDecisionId(bp, ticket.id);
-    const chosen = ticket.decision.options.find((o) => o.chosen) ?? ticket.decision.options[0];
-    writeDecision(bp, {
-      id: adr,
-      title: ticket.decision.title,
-      why: ticket.decision.why,
-      options: ticket.decision.options.map((o) => o.name),
-      chosen: chosen?.name ?? '',
-      from: ticket.id,
-      approvedBy: self ? `${meta.user.name} (${self === 'auto' ? 'Builds by itself' : 'Express track'})` : meta.user.name,
-      date: now(),
-      checkedBy: { kind: 'test', name: testNameFor(ticket), passing: false },
-      tickets: [ticket.id],
-      ...(ticket.decision.area ? { area: ticket.decision.area } : {}),
-      ...(ticket.follows?.length ? { buildsOn: ticket.follows } : {}),
-      ...(ticket.decision.replaces ? { replaces: ticket.decision.replaces } : {}),
-    });
-  }
-  linkDecisions(bp, ticket, adr);
-  if (adr) queueImpactCheck(bp, adr);
+  const adr = saveDesignDecision(bp, ticket, self ? `${meta.user.name} (${self === 'auto' ? 'Builds by itself' : 'Express track'})` : meta.user.name);
   return updateTicket(bp, ticket.id, (t) => {
     t.planReview = undefined;
+    // Written and brought back from a conversation outside: the design is the first thing the person approved here.
+    if (t.outside && !t.specApproved) t.specApproved = { by: meta.user.name, at: now() };
     if (t.decision && adr) t.decision.adr = adr;
     t.waiting = null;
     t.stage = 'implement';
@@ -467,6 +457,33 @@ function approvePlan(bp: BoardPaths, ticket: Ticket, speed: number, self?: 'expr
     holdForDependency(bp, t);
     tellLater(t, meta.engine, { kind: 'planned' });
   });
+}
+
+/** An approved design's decision goes in the project's decisions, once. Returns its id when it is new. */
+export function saveDesignDecision(bp: BoardPaths, ticket: Ticket, approvedBy: string): string | undefined {
+  let adr: string | undefined;
+  if (ticket.decision && !ticket.decision.adr) {
+    adr = nextDecisionId(bp, ticket.id);
+    const chosen = ticket.decision.options.find((o) => o.chosen) ?? ticket.decision.options[0];
+    writeDecision(bp, {
+      id: adr,
+      title: ticket.decision.title,
+      why: ticket.decision.why,
+      options: ticket.decision.options.map((o) => o.name),
+      chosen: chosen?.name ?? '',
+      from: ticket.id,
+      approvedBy,
+      date: now(),
+      checkedBy: { kind: 'test', name: testNameFor(ticket), passing: false },
+      tickets: [ticket.id],
+      ...(ticket.decision.area ? { area: ticket.decision.area } : {}),
+      ...(ticket.follows?.length ? { buildsOn: ticket.follows } : {}),
+      ...(ticket.decision.replaces ? { replaces: ticket.decision.replaces } : {}),
+    });
+  }
+  linkDecisions(bp, ticket, adr);
+  if (adr) queueImpactCheck(bp, adr);
+  return adr;
 }
 
 /** Each decision the design followed lists the ticket; the one a new decision replaces stops being a rule. */
@@ -576,6 +593,7 @@ export function acceptProof(bp: BoardPaths, ticket: Ticket, byItself?: string, o
     }
     t.squad = openPr ? { phase: 'publish', nextAt: now() } : null;
     if (byItself) addActivity(t, 'squad', byItself);
+    else if (t.outside && !t.outside.checked) addActivity(t, 'you', `Looks right, with no check by squad-kit. ${outsideWords(t.outside)}`);
     else addActivity(t, 'you', 'Checked the proof. Looks right');
     if (commit) addActivity(t, 'release', 'Saved the change');
     if (merged) addActivity(t, 'release', merged.moved ? `Merged into ${merged.base}` : CHECKOUT_LATER);
@@ -953,6 +971,7 @@ export function takeOver(bp: BoardPaths, id: string): Ticket {
     const building = ['implement', 'test', 'review'].includes(t.stage);
     const session = t.sessions?.build ?? (demo && building ? 'demo-session' : undefined);
     const cwd = t.storyDir ?? t.worktree ?? (demo ? bp.root : undefined);
+    if (!session && t.outside) throw new BoardActionError(`${t.id} was built outside squad-kit, so it has no Builder session to open. Use Work in another AI tool instead.`);
     if (!session || !cwd || (!demo && !fs.existsSync(cwd))) {
       throw new BoardActionError(`${t.id} has no code yet. You can take over once the Builder has started.`);
     }
@@ -972,6 +991,7 @@ export function giveBack(bp: BoardPaths, id: string, note?: string): Ticket {
   const meta = readMeta(bp);
   return updateTicket(bp, id, (t) => {
     if (!t.takenOver) throw new BoardActionError(`${t.id} is not taken over.`);
+    if (t.takenOver.free) throw new BoardActionError(`${t.id} is in a conversation outside squad-kit. Bring it back instead: squad outside back ${t.id}`);
     const text = note?.trim();
     if (text) {
       t.notes = [...(t.notes ?? []), { at: now(), by: meta.user.name, kind: 'note', text }];
@@ -1372,6 +1392,7 @@ export function proposeChange(bp: BoardPaths, id: string, text: string, from?: A
   const meta = readMeta(bp);
   return updateTicket(bp, id, (t) => {
     if (shipped(t)) throw new ReleasedError(releasedLine(t));
+    if (t.takenOver?.free) throw new BoardActionError(`${t.id} is in a conversation outside squad-kit. Say it there, or bring it back first.`);
     const open = openChange(t);
     if (open) throw new BoardActionError(`${t.id} already has change ${open.id} open. Approve or decline it first: one change at a time.`);
     if (t.takenOver) throw new BoardActionError(`${t.id} is taken over. Give it back first.`);

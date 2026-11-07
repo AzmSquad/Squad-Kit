@@ -7,6 +7,7 @@ import { useAct } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { shellArg, shellQuote } from '../lib/text';
 import { Cmd, Modal, DraftNote, Written, WrittenLines } from './ui';
+import { OutsideNewButton } from './Outside';
 import { ErrorCard } from './ErrorCard';
 import { clearDrafts, keptOnce, useDraft } from '../lib/drafts';
 import { langProps, typedDir } from '../lib/lang';
@@ -291,6 +292,7 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
           {/* While the Analyst works, Cancel stops it; closing the window (the cross) leaves it working. */}
           <button className="btn" onClick={drafting ? () => void cancel() : close}>{act.isPending ? 'Close' : 'Cancel'}</button>
           {typed && !drafting && <DraftNote onClear={clearAll} />}
+          {!typed && !drafting && <OutsideNewButton />}
           <span className="grow" />
           <Cmd text={cmd} />
         </>
