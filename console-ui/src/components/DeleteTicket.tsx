@@ -6,7 +6,7 @@ import { api } from '../api/client';
 import type { DeletePlan, Ticket } from '../api/types';
 import { useAct, useBoard } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
-import { Cmd, Modal, ago } from './ui';
+import { Cmd, Modal, Written, ago } from './ui';
 
 /**
  * Delete and Archive, from the ticket's overflow menu. Delete is for a ticket that is not merged: the dialog lists
@@ -106,7 +106,7 @@ function Lines({ items, mark }: { items: string[]; mark: 'x' | 'ok' | 'hide' }) 
       {items.map((l) => (
         <li key={l}>
           {mark === 'x' ? <X size={16} className="x" aria-hidden /> : mark === 'hide' ? <EyeOff size={16} className="hide" aria-hidden /> : <Check size={16} className="ok" aria-hidden />}
-          <span>{l}</span>
+          <Written text={l} />
         </li>
       ))}
     </ul>
@@ -165,7 +165,7 @@ export function DeleteDialog({ t, onClose, onDeleted }: { t: Ticket; onClose(): 
         </>
       }
     >
-      <p>{p?.summary ?? t.title}</p>
+      <Written as="p" text={p?.summary ?? t.title} />
       {plan.isError && <div className="stuckbox">{(plan.error as Error).message}</div>}
       {p?.refused && <div className="stuckbox">{p.refused}</div>}
       {p && !p.refused && (
@@ -178,7 +178,7 @@ export function DeleteDialog({ t, onClose, onDeleted }: { t: Ticket; onClose(): 
           {p.warnings.length > 0 && (
             <div className="stuckbox rm-gap">
               {p.warnings.map((w) => (
-                <div key={w}>{w}</div>
+                <Written as="div" key={w} text={w} />
               ))}
             </div>
           )}
@@ -231,9 +231,7 @@ function ArchiveDialog({ t, onClose }: { t: Ticket; onClose(): void }) {
         </>
       }
     >
-      <p>
-        {t.title} · {t.status}
-      </p>
+      <Written as="p" text={`${t.title} · ${t.status}`} />
       <div className="lbl">This hides</div>
       <Lines items={['The ticket from the board. Show archived, at the bottom of the board, shows it again.']} mark="hide" />
       <div className="lbl">This stays</div>

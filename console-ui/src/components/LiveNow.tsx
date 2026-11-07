@@ -5,7 +5,7 @@ import { useAct } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { send } from '../api/client';
 import { detect } from '../lib/lang';
-import { Cmd, Glyph, Modal, ROLE_NAME, clock } from './ui';
+import { Cmd, Glyph, Modal, ROLE_NAME, Runs, Written, clock } from './ui';
 import { ProposeChange } from './ChangeCard';
 import { TalkButton } from './Chat';
 import '../styles/now.css';
@@ -45,17 +45,14 @@ export function StepBar({ bar, big }: { bar?: LiveNow['bar']; big?: boolean }) {
 /** The card's line on the board: who, which step, what it does, how long, and the usual time. */
 export function CardLine({ t }: { t: Ticket }) {
   const n = t.now!;
-  if (n.state === 'queued') return <div className="nl1 quiet">{n.line}</div>;
+  if (n.state === 'queued') return <Written as="div" className="nl1 quiet" text={n.line} />;
   const [who, ...rest] = n.line.split(' · ');
   const slow = t.quiet;
   return (
     <>
       <div className="nl1">
         <span className="live" />
-        <span>
-          <b>{who}</b>
-          {rest.length ? ` · ${rest.join(' · ')}` : ''}
-        </span>
+        <Written lead={<b>{who}</b>} text={rest.length ? `· ${rest.join(' · ')}` : ''} />
       </div>
       {slow ? (
         <div className={`nl2 slow ${slow.kind}`}>
@@ -85,19 +82,10 @@ export function NowCard({ t }: { t: Ticket }) {
           {n.state === 'working' && n.lastAt ? ` · last update ${sinceWords(n.lastAt)}` : ''}
         </span>
       </div>
-      <p className="nowsay">{n.sentence}</p>
-      {n.detail && (
-        <div className="nowmeta">
-          {n.part ? <b>{first}</b> : first}
-          {more.length ? ` · ${more.join(' · ')}` : ''}
-        </div>
-      )}
+      <Written as="p" className="nowsay" text={n.sentence} />
+      {n.detail && (n.part ? <Written as="div" className="nowmeta" lead={<b>{first}</b>} text={more.length ? `· ${more.join(' · ')}` : ''} /> : <Written as="div" className="nowmeta" text={n.detail} />)}
       <StepBar bar={n.bar} big />
-      {n.next && (
-        <div className="nownext">
-          <b>What comes next:</b> {n.next}
-        </div>
-      )}
+      {n.next && <Written as="div" className="nownext" lead={<b>What comes next:</b>} text={n.next} />}
     </section>
   );
 }
@@ -117,7 +105,7 @@ export function WorkSoFar({ t }: { t: Ticket }) {
           <div className="fe" key={a.at + i}>
             <span className="tm">{clock(a.at)}</span>
             <Glyph role={a.who} small />
-            <span>{a.text}</span>
+            <Written text={a.text} />
           </div>
         ))}
       </div>
@@ -150,12 +138,12 @@ export function SlowPanel({ t }: { t: Ticket }) {
         <span className="where">{s.where}</span>
       </div>
       <div className="slowbody">
-        <p className="slowsay">{s.text}</p>
+        <Written as="p" className="slowsay" text={s.text} />
         <div className="facts">
           {s.facts.map((f) => (
             <div className="fact" key={f.label}>
               <span>{f.label}</span>
-              <span>{f.value}</span>
+              <Written text={f.value} />
             </div>
           ))}
         </div>
@@ -292,19 +280,16 @@ export function AskBox({ t }: { t: Ticket }) {
 function AskTurn({ t, said }: { t: Ticket; said: Said }) {
   const a = said.a;
   const ar = a?.lang === 'ar';
-  const qdir = detect(said.q).dir;
   return (
     <div className="askturn">
-      <div className="askme" dir={qdir}>
-        {said.q}
-      </div>
+      <Written as="div" className="askme" text={said.q} />
       <div className={`askit ${ar ? 'ar' : ''}`} dir={ar ? 'rtl' : 'ltr'} lang={ar ? 'ar' : 'en'}>
         <div className="who">
           <b>squad-kit</b>
           {a?.instant && <span className="tag">{ar ? 'إجابة فورية' : 'answered at once'}</span>}
           <span className="note">{clock(said.at)}</span>
         </div>
-        {said.error ? <p className="err">{said.error}</p> : a?.lines.map((l, i) => <p key={i}>{l}</p>)}
+        {said.error ? <p className="err">{said.error}</p> : a?.lines.map((l, i) => <p key={i}><Runs text={l} dir={ar ? 'rtl' : 'ltr'} /></p>)}
         {a && a.offers.length > 0 && (
           <div className="askoffers">
             {a.offers.map((o) => (

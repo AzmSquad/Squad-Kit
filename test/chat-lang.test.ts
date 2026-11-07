@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detect, firstWords, langLabel, langTree, majority, runs, textClass, wordCount, type HNode } from '../console-ui/src/lib/lang.js';
+import { detect, firstWords, isolated, langLabel, langProps, langTree, majority, runs, tableDir, textClass, typedDir, wordCount, type HNode } from '../console-ui/src/lib/lang.js';
 
 describe('language per paragraph', () => {
   it('tells Arabic, English and mixed apart by counting letters', () => {
@@ -49,6 +49,12 @@ describe('the other language kept in order', () => {
       { text: ' 0551234567.' },
     ]);
     expect(runs('نحذفها بعد 30 days تلقائيًا', 'rtl')).toEqual([{ text: 'نحذفها بعد ' }, { text: '30 days', dir: 'ltr' }, { text: ' تلقائيًا' }]);
+  });
+
+  it('leaves the full stop or colon after an English word to the sentence', () => {
+    expect(runs('كما في SK-9.', 'rtl')).toEqual([{ text: 'كما في ' }, { text: 'SK-9', dir: 'ltr' }, { text: '.' }]);
+    expect(runs('اضغط Save: ثم v0.2.0.', 'rtl')).toEqual([{ text: 'اضغط ' }, { text: 'Save', dir: 'ltr' }, { text: ': ثم ' }, { text: 'v0.2.0', dir: 'ltr' }, { text: '.' }]);
+    expect(runs('تعلم C# أولا', 'rtl')).toEqual([{ text: 'تعلم ' }, { text: 'C#', dir: 'ltr' }, { text: ' أولا' }]);
   });
 
   it('a list or table follows most of its items', () => {
@@ -106,6 +112,31 @@ describe('on a Markdown tree', () => {
     const para = tree.children![0]!;
     expect(para.children!.filter((x) => x.tagName === 'span' && (x.properties!.className as string[])[0] === 'fx')).toHaveLength(3);
     expect(para.children!.at(-1)!.properties!.className).toEqual(['caret']);
+  });
+});
+
+describe('outside the chat', () => {
+  it('gives an element the direction and language of its words', () => {
+    expect(langProps('راجع SK-12 قبل البدء؟')).toEqual({ dir: 'rtl', lang: 'ar' });
+    expect(langProps('Export the list')).toEqual({ dir: 'ltr', lang: 'en' });
+    expect(langProps('SK-12')).toEqual({ dir: 'ltr', lang: 'en' });
+  });
+
+  it('a box follows what is typed; empty, it follows its hint', () => {
+    expect(typedDir('')).toBe('auto');
+    expect(typedDir('  ')).toBe('auto');
+    expect(typedDir('SK-12 طلب حجز موعد جديد')).toBe('rtl');
+    expect(typedDir('A new request')).toBe('ltr');
+  });
+
+  it('a table sits on the side most of its cells read from, leaving out cells with no letters', () => {
+    expect(tableDir([['القناة', 'الرقم', 'الوقت'], ['SMS', '0551234567', '10:40']])).toBe('rtl');
+    expect(tableDir([['Channel', 'Number'], ['SMS', '0551234567']])).toBe('ltr');
+    expect(tableDir([])).toBe('ltr');
+  });
+
+  it('keeps a name in order inside plain text', () => {
+    expect(isolated('الدفع')).toBe('\u2068الدفع\u2069');
   });
 });
 

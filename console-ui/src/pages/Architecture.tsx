@@ -5,7 +5,8 @@ import { DECISION_AREAS, type ArchitectureResponse, type Decision, type ImpactCh
 import { useAct, useArchitecture } from '../lib/data';
 import { BrokenTickets } from './Board';
 import { LOGOS } from '../lib/logos';
-import { ago, dateShort } from '../components/ui';
+import { Runs, Written, ago, dateShort } from '../components/ui';
+import { isolated, langProps } from '../lib/lang';
 
 /* ── Architecture: every saved decision, how they build on each other, and the tickets they shaped ──
    Map: decisions as cards, left to right from the starting points to what was built on them.
@@ -170,8 +171,8 @@ export function ArchitecturePage() {
                 <ReadingBar reading={data.data.reading} />
                 {data.data.map.map((m) => (
                   <div className="maprow" key={m.area}>
-                    <b>{m.area}</b>
-                    <span>{m.detail}</span>
+                    <Written as="b" text={m.area} />
+                    <Written text={m.detail} />
                   </div>
                 ))}
               </div>
@@ -183,9 +184,10 @@ export function ArchitecturePage() {
                 {lessons.map((l) => (
                   <div className="lesson" key={l.id}>
                     <span className="glyph sm"><Lightbulb size={12} /></span>
-                    <span>
-                      {l.text} <span className="note">From {l.from}</span>
-                    </span>
+                    <Written text={l.text}>
+                      {' '}
+                      <span className="note" dir="ltr">From {l.from}</span>
+                    </Written>
                     <span className="mono">{dateShort(l.date)}</span>
                   </div>
                 ))}
@@ -256,8 +258,8 @@ function StackView({ data, picked, onPick }: { data: ArchitectureResponse; picke
             <div key={p.name} className="pattern">
               <span className="glyph sm"><Shapes size={13} /></span>
               <div>
-                <b>{p.name}</b>
-                <p>{p.what}</p>
+                <Written as="b" text={p.name} />
+                <Written as="p" text={p.what} />
                 <div className="where">
                   {p.where.map((w) => (
                     <code key={w}>{w}</code>
@@ -297,7 +299,7 @@ function TechCard({ t, picked, onPick }: { t: StackItem; picked: string | null; 
         </span>
         <span className="tech-role">{ROLES.find((r) => r.role === t.role)?.label}</span>
       </div>
-      <p className={t.why ? '' : 'note'}>{t.why ?? 'Not explained yet. The Architect fills this in when it reads the code.'}</p>
+      <Written as="p" className={t.why ? '' : 'note'} text={t.why ?? 'Not explained yet. The Architect fills this in when it reads the code.'} />
       <div className="tech-foot">
         {t.decisions.length ? (
           t.decisions.map((d) => (
@@ -336,13 +338,11 @@ function TechDecision({ t }: { t: StackItem }) {
     return (
       <div className="techdraft">
         <span className="lbl">Decision for you to approve</span>
-        <b>{x.title}</b>
-        <p>
-          <span className="note">Chosen:</span> {x.chosen}
-        </p>
-        <p>{x.why}</p>
+        <Written as="b" text={x.title} />
+        <Written as="p" lead={<span className="note">Chosen:</span>} text={x.chosen} />
+        <Written as="p" text={x.why} />
         {x.options.filter((o) => o !== x.chosen).length > 0 && (
-          <p className="note">Also looked at: {x.options.filter((o) => o !== x.chosen).join('; ')}</p>
+          <Written as="p" className="note" lead="Also looked at:" text={x.options.filter((o) => o !== x.chosen).join('; ')} />
         )}
         <div className="row">
           <button className="btn sm pri" disabled={act.isPending} onClick={() => send('approve', 'Saved as a decision. Every new ticket follows it now.')}>
@@ -553,7 +553,7 @@ function DecisionMap({
                 <span className="darea">{d.area ?? 'Other'}</span>
                 {d.checkedBy?.passing && <Check size={13} strokeWidth={3} className="dtest" aria-label="Checked by a test" />}
               </span>
-              <b className="dtitle">{d.title}</b>
+              <Written as="b" className="dtitle" text={d.title} />
               <span className="dchips">
                 {d.replacedBy ? (
                   <span className="dchip ahead">Replaced by {d.replacedBy}</span>
@@ -659,7 +659,7 @@ function Timeline({
             <g key={r.d.id} className={cls} onClick={() => onPick({ kind: 'adr', id: r.d.id })}>
               <rect className="hit" x={0} y={yy - ROW / 2} width={width} height={ROW} />
               <text className="name" x={14} y={yy + 4}>
-                <tspan className="rid">{r.d.id}</tspan> {short(r.d.title, 28)}
+                <tspan className="rid">{r.d.id}</tspan> {isolated(short(r.d.title, 28))}
               </text>
               <line className={`rail ${r.d.replacedBy && endCol < shown ? 'gone' : ''}`} x1={x(start)} x2={x(end) + (r.d.replacedBy ? 0 : COL / 2)} y1={yy} y2={yy} />
               {g.cols.map((c, i) =>
@@ -711,8 +711,8 @@ function Inherit({ decisions, tickets, onPick }: { decisions: Decision[]; ticket
             <div key={a} className={`inherit area-${a.toLowerCase()}`}>
               <b><i /> {a}</b>
               {list.map((d) => (
-                <button key={d.id} onClick={() => onPick({ kind: 'adr', id: d.id })}>
-                  <span className="mono">{d.id}</span> {d.title}
+                <button key={d.id} {...langProps(d.title)} onClick={() => onPick({ kind: 'adr', id: d.id })}>
+                  <Written lead={<span className="mono">{d.id}</span>} text={d.title} />
                 </button>
               ))}
             </div>
@@ -724,8 +724,8 @@ function Inherit({ decisions, tickets, onPick }: { decisions: Decision[]; ticket
         <p className="note">Tickets not built yet, and the past decisions that will shape them.</p>
         {tickets.filter((t) => t.state === 'designed' || t.state === 'coming').map((t) => (
           <div key={t.id} className="coming">
-            <button onClick={() => onPick({ kind: 'ticket', id: t.id })}>
-              <span className="mono">{t.id}</span> {t.title}
+            <button {...langProps(t.title)} onClick={() => onPick({ kind: 'ticket', id: t.id })}>
+              <Written lead={<span className="mono">{t.id}</span>} text={t.title} />
             </button>
             <span className="pills">
               {t.follows.length ? (
@@ -759,8 +759,8 @@ function DecisionTable({ decisions, picked, onPick }: { decisions: Decision[]; p
         {[...decisions].reverse().map((d) => (
           <tr key={d.id} className={`click ${picked === d.id ? 'on' : ''}`} onClick={() => onPick({ kind: 'adr', id: d.id })}>
             <td className="mono">{d.id}</td>
-            <td style={{ fontWeight: picked === d.id ? 600 : 500, color: d.replacedBy ? 'var(--dim)' : undefined }}>
-              {d.replacedBy ? <s>{d.title}</s> : d.title} {d.replacedBy && <span className="pill wait">Replaced by {d.replacedBy}</span>}
+            <td style={{ fontWeight: picked === d.id ? 600 : 500, color: d.replacedBy ? 'var(--dim)' : undefined }} {...langProps(d.title)}>
+              {d.replacedBy ? <s><Runs text={d.title} dir={langProps(d.title).dir} /></s> : <Runs text={d.title} dir={langProps(d.title).dir} />} {d.replacedBy && <span className="pill wait">Replaced by {d.replacedBy}</span>}
             </td>
             <td><span className={`areatag area-${(d.area ?? 'Other').toLowerCase()}`}><i /> {d.area ?? 'Other'}</span></td>
             <td style={{ color: 'var(--muted)', fontSize: 13 }}>{d.from}</td>
@@ -801,9 +801,9 @@ function Detail({ pick, decisions, tickets, impact, onPick }: { pick: Pick; deci
     return (
       <aside className="sidepanel arch-side">
         <span className="note mono">{t.id} · {STATE_NAME[t.state]}{t.release ? ` · ${t.release}` : ''}</span>
-        <h3>{t.title}</h3>
+        <Written as="h3" text={t.title} />
         <div className="lbl">Decision it made</div>
-        {t.made ? <p style={{ fontSize: 13.5 }}>{adr(t.made)} {decisions.find((d) => d.id === t.made)?.title}</p> : <p className="note">None. It worked inside the rules it had.</p>}
+        {t.made ? <Written as="p" style={{ fontSize: 13.5 }} lead={adr(t.made)} text={decisions.find((d) => d.id === t.made)?.title ?? ''} /> : <p className="note">None. It worked inside the rules it had.</p>}
         <div className="lbl">Past decisions its design followed</div>
         {t.follows.length ? <div className="pills">{t.follows.map(adr)}</div> : <p className="note">{t.state === 'coming' ? 'Not designed yet. When it is, it reads every rule in force.' : 'None recorded.'}</p>}
         <p style={{ marginTop: 18 }}>
@@ -834,9 +834,9 @@ function Detail({ pick, decisions, tickets, impact, onPick }: { pick: Pick; deci
   return (
     <aside className="sidepanel arch-side">
       <span className="note mono">
-        {d.id} · {d.area ?? 'Other'} · {d.proposed ? 'found in the code, not approved yet' : `approved by ${d.approvedBy}`} · {dateShort(d.date)}
+        {d.id} · {d.area ?? 'Other'} · {d.proposed ? 'found in the code, not approved yet' : <>approved by <Written text={d.approvedBy} /></>} · {dateShort(d.date)}
       </span>
-      <h3>{d.title}</h3>
+      <Written as="h3" text={d.title} />
       {d.proposed && (
         <div className="box" style={{ borderColor: 'var(--you-line)', background: 'var(--you-soft)', marginTop: 8 }}>
           <b>Proposed, not a rule yet.</b> It becomes one when you approve the <Link to="/overview">Overview</Link>.
@@ -848,13 +848,13 @@ function Detail({ pick, decisions, tickets, impact, onPick }: { pick: Pick; deci
         </div>
       )}
       <div className="lbl">Chosen</div>
-      <p style={{ fontSize: 13.5, fontWeight: 600 }}>{d.chosen}</p>
+      <Written as="p" style={{ fontSize: 13.5, fontWeight: 600 }} text={d.chosen} />
       <div className="lbl">Why</div>
-      <p style={{ fontSize: 13.5 }}>{d.why}</p>
+      <Written as="p" style={{ fontSize: 13.5 }} text={d.why} />
       {d.options.length > 1 && (
         <>
           <div className="lbl">Also looked at</div>
-          {d.options.filter((o) => o !== d.chosen).map((o) => <p key={o} className="note" style={{ fontSize: 13 }}>{o}</p>)}
+          {d.options.filter((o) => o !== d.chosen).map((o) => <Written as="p" key={o} className="note" style={{ fontSize: 13 }} text={o} />)}
         </>
       )}
       <div className="lbl">Where it came from</div>

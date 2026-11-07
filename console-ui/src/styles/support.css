@@ -28,5 +28,5 @@
 .setup-safe { font-size: 13px; color: var(--muted); }
 /* A phone: the words get their own line, and the buttons go under them. */
 @media (max-width: 760px) { .toast.err { flex-wrap: wrap; justify-content: flex-end; padding-right: 8px; } .toast.err .grow { flex-basis: calc(100% - 40px); } }
-.errcard-points { margin: 8px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
-.errcard-points li { overflow-wrap: anywhere; }
+.errcard-points { margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
+.errcard-points li { overflow-wrap: anywhere; margin-inline-start: 20px; }

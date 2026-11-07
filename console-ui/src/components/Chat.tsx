@@ -39,7 +39,7 @@ import { merge, type Item as AcpItem } from '../lib/conversation';
 import { readFile, type PickedFile } from './dialogs';
 import { ProposeChange, canPropose, shipped } from './ChangeCard';
 import { TakeOverButton, canTakeOver } from './TakeOver';
-import { STAGE_NAME, clock, dateShort } from './ui';
+import { STAGE_NAME, Written, clock, dateShort } from './ui';
 import { squadWorks, waitsAtReview, whereItStands } from '../lib/review';
 import { useDraft } from '../lib/drafts';
 
@@ -244,7 +244,7 @@ function ChatHeader({ t, size, onFull, onPanel }: { t: Ticket; size: ChatSize; o
     return (
       <div className="chead-m">
         <div className="chead-m-row">
-          <span className="ctitle">{t.title}</span>
+          <Written className="ctitle" text={t.title} />
           {c.open && primary && (
             <button className="btn pri sm" disabled={busy} onClick={() => run(primary.path, primary.done)}>
               {primary.label}
@@ -283,7 +283,7 @@ function ChatHeader({ t, size, onFull, onPanel }: { t: Ticket; size: ChatSize; o
               <span className={`cstage ${stage.tone}`}>{stage.text}</span>
               {c.open && <span className="cnote">{kind.note}</span>}
             </div>
-            <div className="ctitle">{t.title}</div>
+            <Written as="div" className="ctitle" text={t.title} />
           </div>
           <span className="grow" />
           <div className="cbtns">{buttons}</div>
@@ -312,7 +312,7 @@ function ChatHeader({ t, size, onFull, onPanel }: { t: Ticket; size: ChatSize; o
           </button>
         )}
       </div>
-      <div className="ctitle">{t.title}</div>
+      <Written as="div" className="ctitle" text={t.title} />
       {banner}
       <div className="cbtns">{buttons}</div>
       {dialogs}
@@ -808,7 +808,7 @@ function SquadNote({ t, m, last, onAsk }: { t: Ticket; m: ChatMessage; last: boo
   }
   return (
     <div className="cnote-w cmsg">
-      <div className="cnote-pill">{m.text}</div>
+      <Written as="div" className="cnote-pill" text={m.text} />
       {ways && (
         <div className="cbtns">
           <button className="btn sm" disabled={act.isPending} onClick={retry}>

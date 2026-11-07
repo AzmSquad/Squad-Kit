@@ -5,7 +5,7 @@ import { api } from '../api/client';
 import type { AppOutput, ProjectApp } from '../api/types';
 import { useAct, useApps } from '../lib/data';
 import { shellArg, shellQuote } from '../lib/text';
-import { Cmd, Modal } from './ui';
+import { Cmd, Modal, Written } from './ui';
 
 /**
  * Your apps, in the sidebar: each app of the project with Start, Open, Restart and Stop. squad-kit runs it from its
@@ -132,7 +132,7 @@ function AppItem({ a, together, named, live, reading, readError }: { a: ProjectA
       {a.state === 'running' && (
         <div className="app-more">
           <span className="addr">{bare(a.address)}</span>
-          {a.includes.length > 0 && <span>Includes {both(a.includes)}</span>}
+          {a.includes.length > 0 && <Written lead="Includes" text={both(a.includes)} />}
           {a.elsewhere && <span>Started outside the board, from a terminal or an earlier squad-kit.</span>}
           <div className="app-acts">
             <button className="btn sm" disabled={act.isPending} onClick={() => call('restart', `Restarting ${a.name}`)}>

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from '@tanstack/react-router';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { type Options } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Check, Download, Ellipsis, ExternalLink, ImagePlus, Loader2, MessageCircle, RotateCcw, Trash2, Upload, X } from 'lucide-react';
 import type { BrdRef, BreakdownLevel, BreakdownView } from '../api/requirements-types';
@@ -9,8 +9,9 @@ import { allStories, findPart, leftOutAsk, needExample, pluralType, refWords, se
 import { actionError, rememberSendPlan, reqFileUrl, sendPlanOf, useReqAct, useSendPreview } from '../lib/requirementsData';
 import { shellQuote } from '../lib/text';
 import { readFile, type PickedFile } from './dialogs';
-import { Cmd, Modal } from './ui';
+import { Cmd, Modal, Written } from './ui';
 import { useDraft } from '../lib/drafts';
+import { isolated, rehypeLang, typedDir } from '../lib/lang';
 
 /**
  * The Requirements page's dialogs: Add a BRD, Send to the tracker, Ask the Analyst, Add a part, the parts left out,
@@ -198,7 +199,7 @@ export function AddBrdDialog({ onClose }: { onClose(): void }) {
         {paste ? (
           <div className="field">
             <label htmlFor="rq-paste">The BRD's text</label>
-            <textarea id="rq-paste" className="textarea rq-pastebox" autoFocus value={text} onChange={(e) => setText(e.target.value)} placeholder="Paste the whole document here. Headings help the Analyst find its parts." />
+            <textarea id="rq-paste" className="textarea rq-pastebox" autoFocus dir={typedDir(text)} value={text} onChange={(e) => setText(e.target.value)} placeholder="Paste the whole document here. Headings help the Analyst find its parts." />
             <div className="rq-hint">
               Have the file?{' '}
               <button className="rq-link" onClick={() => setPaste(false)}>
@@ -222,6 +223,7 @@ export function AddBrdDialog({ onClose }: { onClose(): void }) {
           <input
             id="rq-name"
             className="input"
+            dir={typedDir(name)}
             value={name}
             placeholder={paste ? 'Named after its first heading' : 'Named after the file'}
             onChange={(e) => {
@@ -379,7 +381,7 @@ export function SendDialog({ v, onClose }: { v: BreakdownView; onClose(): void }
               <div className="rq-li">
                 <b>{p.first ? p.counts.links : p.links}</b>
                 {p.first ? 'Links between stories that need each other' : 'New links between stories that need each other'}
-                {example && <span>"{example}"</span>}
+                {example && <Written text={`"${example}"`} />}
               </div>
             )}
           </div>
@@ -452,15 +454,17 @@ export function AskAnalystDialog({ v, item, text: start, onClose }: { v: Breakdo
         </>
       }
     >
-      <p>
-        {whole
-          ? 'Say what to change in the breakdown, or what to add. The Analyst rewrites it and keeps the keys of what stays.'
-          : `Say what to change in ${item} ${part?.item.title ?? ''}. The Analyst rewrites it and keeps its key.`}
-        {started && ' Stories that started stay as they are.'}
-      </p>
+      <Written
+        as="p"
+        text={`${
+          whole
+            ? 'Say what to change in the breakdown, or what to add. The Analyst rewrites it and keeps the keys of what stays.'
+            : `Say what to change in ${item} ${part?.item.title ?? ''}. The Analyst rewrites it and keeps its key.`
+        }${started ? ' Stories that started stay as they are.' : ''}`}
+      />
       <div className="field">
         <label htmlFor="rq-ask">What should change</label>
-        <textarea id="rq-ask" className="textarea" autoFocus value={text} onChange={(e) => setText(e.target.value)} placeholder={whole ? 'Add a story for staff to export bookings, under Admin and reports.' : 'Split it in two: one for holding the slot, one for freeing it.'} />
+        <textarea id="rq-ask" className="textarea" autoFocus dir={typedDir(text)} value={text} onChange={(e) => setText(e.target.value)} placeholder={whole ? 'Add a story for staff to export bookings, under Admin and reports.' : 'Split it in two: one for holding the slot, one for freeing it.'} />
       </div>
     </Modal>
   );
@@ -526,7 +530,7 @@ export function AddPartDialog({ v, level, under, onClose, onAdded }: { v: Breakd
           <select id="rq-under" className="select" value={where} onChange={(e) => setWhere(e.target.value)}>
             {places.map((p) => (
               <option key={p.key} value={p.key}>
-                {p.label}
+                {isolated(p.label)}
               </option>
             ))}
           </select>
@@ -534,11 +538,11 @@ export function AddPartDialog({ v, level, under, onClose, onAdded }: { v: Breakd
       )}
       <div className="field">
         <label htmlFor="rq-title">Title</label>
-        <input id="rq-title" className="input" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} />
+        <input id="rq-title" className="input" autoFocus dir={typedDir(title)} value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} />
       </div>
       <div className="field">
         <label htmlFor="rq-about">{level === 'epic' ? 'What it is for' : level === 'feature' ? 'What it covers' : 'Story'}</label>
-        <textarea id="rq-about" className="textarea" value={about} onChange={(e) => setAbout(e.target.value)} placeholder={level === 'story' ? 'As a …, I want …, so that …' : 'One or two sentences'} />
+        <textarea id="rq-about" className="textarea" dir={typedDir(about)} value={about} onChange={(e) => setAbout(e.target.value)} placeholder={level === 'story' ? 'As a …, I want …, so that …' : 'One or two sentences'} />
       </div>
       {level === 'story' && <p className="note">Add its "done when" checks on its panel before you approve.</p>}
     </Modal>
@@ -555,12 +559,12 @@ export function LeftOutDialog({ v, onClose, onOpenRef, onAsk }: { v: BreakdownVi
       <div className="rq-leftout">
         {v.leftOut.map((l, i) => (
           <div key={i} className="rq-lo">
-            <b>{l.text}</b>
-            <span>{l.why}</span>
+            <Written as="b" text={l.text} />
+            <Written text={l.why} />
             <div className="rq-lo-acts">
               {l.ref && (
                 <button className="rq-link" onClick={() => onOpenRef(l.ref!)}>
-                  {refWords(l.ref)}
+                  <Written text={refWords(l.ref)} />
                 </button>
               )}
               {onAsk && (
@@ -631,7 +635,7 @@ export function DeleteBreakdownDialog({ id, title, sentTo, onClose, onDeleted }:
         </>
       }
     >
-      <p>{title}</p>
+      <Written as="p" text={title} />
       {error && (
         <div className="stuckbox rm-gap" role="alert">
           {error}
@@ -760,7 +764,7 @@ export function BrdViewer({ v, at, onClose }: { v: BreakdownView; at?: BrdRef; o
       onClose={onClose}
       footer={
         <>
-          {at && <span className="note">{refWords(at)}</span>}
+          {at && <Written className="note" text={refWords(at)} />}
           <span className="grow" />
           <a className="btn" href={reqFileUrl(v.id, v.source.file)} target="_blank" rel="noreferrer" download={v.source.name}>
             <Download size={14} /> The original
@@ -781,6 +785,7 @@ export function BrdViewer({ v, at, onClose }: { v: BreakdownView; at?: BrdRef; o
             <ReactMarkdown
               key={i}
               remarkPlugins={[remarkGfm]}
+              rehypePlugins={[rehypeLang] as unknown as Options['rehypePlugins']}
               components={{
                 img: ({ src, alt }) => <img src={src ? media(src) : ''} alt={alt ?? ''} loading="lazy" />,
                 a: ({ href, children }) => (

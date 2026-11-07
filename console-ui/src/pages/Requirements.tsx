@@ -27,7 +27,8 @@ import { useBoard } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { PHONE, useMedia } from '../lib/chatDock';
 import { shellQuote } from '../lib/text';
-import { Cmd } from '../components/ui';
+import { Cmd, Written } from '../components/ui';
+import { langProps, typedDir } from '../lib/lang';
 import { CarryOn, ReadingCard, FailedCard, QuestionsView } from '../components/BreakdownRead';
 import { DecidedPanel, ItemPanel, Tree, canEdit } from '../components/BreakdownTree';
 import { BreakdownMap } from '../components/BreakdownMap';
@@ -151,9 +152,9 @@ function RowLink({ r, chip, started }: { r: BreakdownRow; chip: { text: string; 
     <Link to="/requirements/$id" params={{ id: r.id }} className="rq-rowlink">
       <span className="rq-rid mono">{r.id}</span>
       <span className="rq-rname">
-        <b>{r.title}</b>
-        <span>
-          <FileText size={12} aria-hidden="true" /> {r.source.name}
+        <Written as="b" text={r.title} />
+        <span {...langProps(r.source.name)}>
+          <FileText size={12} aria-hidden="true" /> <Written text={r.source.name} />
         </span>
       </span>
       <span className="rq-rcount">{c.epics || c.stories ? countWords(c) : 'Not broken down yet'}</span>
@@ -300,7 +301,7 @@ function Breakdown({ v, search, select, openTicket, setSearch, phone }: { v: Bre
           <div className="rq-titlecol">
             <div className="rq-crumbs">
               <Link to="/requirements">Requirements</Link> › {v.id}
-              {v.status === 'questions' && <> › {v.title}</>}
+              {v.status === 'questions' && <> › <Written text={v.title} /></>}
             </div>
             <div className="rq-name">
               <Rename v={v} />
@@ -328,7 +329,7 @@ function Breakdown({ v, search, select, openTicket, setSearch, phone }: { v: Bre
             <b>Before you approve:</b>
             <ul>
               {v.problems!.slice(0, 4).map((p) => (
-                <li key={p}>{p}</li>
+                <Written as="li" key={p} text={p} />
               ))}
               {v.problems!.length > 4 && <li>and {v.problems!.length - 4} more</li>}
             </ul>
@@ -404,7 +405,7 @@ function Rename({ v }: { v: BreakdownView }) {
   if (!editing)
     return (
       <>
-        <h1>{v.title}</h1>
+        <Written as="h1" text={v.title} />
         {v.mine && (
           <button
             className="iconbtn rq-rename"
@@ -429,7 +430,7 @@ function Rename({ v }: { v: BreakdownView }) {
         if (name.trim()) save();
       }}
     >
-      <input className="input" autoFocus aria-label="Name of the breakdown" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Escape' && setEditing(false)} />
+      <input className="input" autoFocus aria-label="Name of the breakdown" dir={typedDir(name)} value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Escape' && setEditing(false)} />
       <button className="btn sm pri" type="submit" disabled={!name.trim() || act.isPending} title={`squad requirements rename ${v.id} ${shellQuote(name.trim() || v.title)}`}>
         Save
       </button>
@@ -525,10 +526,10 @@ function InfoLine({ v, onDecided, onLeftOut, onDoc }: { v: BreakdownView; onDeci
       <span>
         From{' '}
         <button className="rq-link" onClick={onDoc} title="Open the document">
-          {s.name}
+          <Written text={s.name} />
         </button>
         {s.kind === 'pdf' && s.pages ? `, ${plural(s.pages, 'page')}` : ''}
-        {s.pictures ? `, ${plural(s.pictures, 'picture')}` : ''}, added by {whoWords(s.addedBy, me)} {dayWords(s.addedAt)}
+        {s.pictures ? `, ${plural(s.pictures, 'picture')}` : ''}, added by <Written text={whoWords(s.addedBy, me)} /> {dayWords(s.addedAt)}
       </span>
       <span>
         <b>{c.epics}</b> {c.epics === 1 ? 'epic' : 'epics'}, <b>{c.features}</b> {c.features === 1 ? 'feature' : 'features'}, <b>{c.stories}</b> {c.stories === 1 ? 'story' : 'stories'}
@@ -605,7 +606,7 @@ function BuildRow({ v }: { v: BreakdownView }) {
         <div className="rq-built" role="status">
           <Check size={14} strokeWidth={2.6} aria-hidden="true" />
           <span>
-            {built.text}
+            <Written text={built.text} />
             {built.release && (
               <>
                 {' '}
@@ -617,7 +618,7 @@ function BuildRow({ v }: { v: BreakdownView }) {
       )}
       {held && (on || v.state.build?.heldFor === 'budget') && (
         <div className="rq-held" role="status">
-          <Pause size={13} aria-hidden="true" /> Waiting: {held}
+          <Pause size={13} aria-hidden="true" /> Waiting: <Written text={held} />
         </div>
       )}
       {sync && (sync.status === 'running' || sync.status === 'pending') && (
@@ -651,7 +652,7 @@ function JobLine({ v }: { v: BreakdownView }) {
     if (j?.status === 'failed' && j.step === 'redo' && (v.status === 'ready' || v.status === 'approved'))
       return (
         <div className="rq-jobline fail" role="status">
-          The redo of {j.item === v.id ? 'the breakdown' : j.item} stopped{j.error ? `: ${j.error}` : '.'}
+          The redo of {j.item === v.id ? 'the breakdown' : j.item} stopped{j.error ? <>: <Written text={j.error} /></> : '.'}
           {v.mine && (
             <button className="btn sm" onClick={() => act.mutate({ path: `${base(v.id)}/${j.capped ? 'more' : 'retry'}`, done: 'The Analyst tries the redo again.' })}>
               {j.capped ? 'Give it more' : 'Try again'}
@@ -664,7 +665,7 @@ function JobLine({ v }: { v: BreakdownView }) {
   return (
     <div className="rq-jobline" role="status">
       <span className="live" aria-hidden="true" />
-      {j!.status === 'stopping' ? 'Stopping the Analyst…' : `${j!.now ?? 'The Analyst is working'}${j!.ask ? `: "${j!.ask}"` : ''}`}
+      <Written text={j!.status === 'stopping' ? 'Stopping the Analyst…' : `${j!.now ?? 'The Analyst is working'}${j!.ask ? `: "${j!.ask}"` : ''}`} />
       <CarryOn v={v} />
       {v.mine && j!.status !== 'stopping' && (
         <button className="btn sm" onClick={() => act.mutate({ path: `${base(v.id)}/stop`, done: 'Stopping the Analyst.' })} title={`squad requirements stop ${v.id}`}>
@@ -689,10 +690,7 @@ function NeedsYouCards({ v, onDecide }: { v: BreakdownView; onDecide(ticket: str
         return (
           <div key={p.key} className="rq-youcard">
             <div className="rq-pop-w">{[p.key, p.ticket, stopTag(p.stop)].filter(Boolean).join(' · ')}</div>
-            <div className="rq-youcard-t">
-              {s?.title}
-              {why ? `: ${why.charAt(0).toLowerCase()}${why.slice(1)}` : ''}
-            </div>
+            <Written as="div" className="rq-youcard-t" text={`${s?.title ?? ''}${why ? `: ${why.charAt(0).toLowerCase()}${why.slice(1)}` : ''}`} />
             {p.ticket && (
               <button className="btn you" onClick={() => onDecide(p.ticket!)}>
                 Decide

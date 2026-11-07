@@ -4,6 +4,7 @@
 .card .nl1 { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; color: var(--muted); line-height: 1.35; }
 .card .nl1 .live { margin-top: 4px; }
 .card .nl1 span { overflow-wrap: anywhere; min-width: 0; }
+.card .nl1 > [dir] { flex: 1; }
 .card .nl1 b { color: var(--text); font-weight: 650; }
 .card .nl1.quiet { color: var(--dim); }
 .card .nl2 { font-size: 11.5px; color: var(--dim); margin: 3px 0 0 13px; font-variant-numeric: tabular-nums; }

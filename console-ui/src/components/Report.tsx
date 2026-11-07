@@ -5,6 +5,7 @@ import type { ReportPlan } from '../api/types';
 import { usePrefs } from '../lib/prefs';
 import { report, useReportAsk, type ReportAsk } from '../lib/report';
 import { Cmd, Modal } from './ui';
+import { typedDir } from '../lib/lang';
 
 /**
  * Report a problem (phase 10): squad-kit saves one file the person sends to whoever helps them. The dialog lists what
@@ -146,7 +147,7 @@ function ReportDialog({ ask, onClose }: { ask: ReportAsk; onClose(): void }) {
       )}
       <div className="field" style={{ marginTop: 14 }}>
         <label htmlFor="report-what">What happened? (optional)</label>
-        <textarea id="report-what" className="waynote" rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="For example: it stopped after I approved the design" />
+        <textarea id="report-what" className="waynote" rows={3} dir={typedDir(note)} value={note} onChange={(e) => setNote(e.target.value)} placeholder="For example: it stopped after I approved the design" />
       </div>
       {error && (
         <p className="report-err" role="alert">

@@ -12,6 +12,8 @@ import { pageOf, pagesOf, waitsAtReview } from '../lib/review';
 import { YourCheck } from '../components/YourCheck';
 import { AskButton } from '../components/AskQuestion';
 import { ApiProof } from '../components/ApiProof';
+import { Written } from '../components/ui';
+import { langProps } from '../lib/lang';
 
 export function ProofPage() {
   const { id } = useParams({ from: '/tickets/$id/proof' });
@@ -34,7 +36,7 @@ export function ProofPage() {
         <span className="crumbs">
           <Link to="/inbox">Waiting for you</Link> /
           <Link to="/board" search={{ ticket: t.id }}>
-            {t.id} {t.title}
+            <Written lead={t.id} text={t.title} />
           </Link>{' '}
           / <b>Proof</b>
         </span>
@@ -54,12 +56,12 @@ export function ProofPage() {
         <div className="critlist">
           <div className="lbl" style={{ marginTop: 0 }}>Done when · {shots.length}</div>
           {shots.map((s, i) => (
-            <button key={s.criterion} className={`crit ${i === pick ? 'on' : ''}`} onClick={() => setPick(i)}>
+            <button key={s.criterion} className={`crit ${i === pick ? 'on' : ''}`} {...langProps(s.criterion)} onClick={() => setPick(i)}>
               <VerdictIcon shows={s.shows} />
               <span>
-                {s.criterion}
+                <Written text={s.criterion} />
                 <VerdictTag shows={s.shows} />
-                {pagesOf(s).length > 0 && <small className="critpage-s">{pagesOf(s).join(' · ')}</small>}
+                {pagesOf(s).length > 0 && <small className="critpage-s" dir="ltr">{pagesOf(s).join(' · ')}</small>}
               </span>
             </button>
           ))}
@@ -72,11 +74,11 @@ export function ProofPage() {
         <div className="stage">
           {shot ? (
             <>
-              <h3>{shot.criterion}</h3>
+              <Written as="h3" text={shot.criterion} />
               {shot.shows && (
                 <p className={`verdictline ${verdictClass(shot.shows)}`}>
                   <VerdictTag shows={shot.shows} />
-                  {shot.shows !== 'met' && verdictNote(shot) && <span>{verdictNote(shot)}</span>}
+                  {shot.shows !== 'met' && verdictNote(shot) && <Written text={verdictNote(shot)!} />}
                 </p>
               )}
               {pageOf(shot) && (
@@ -87,7 +89,7 @@ export function ProofPage() {
               {isApiProof(shot.after) ? <ApiProof file={shot.after} {...(shot.note ? { note: shot.note } : {})} /> : <div className="ba">
                 <div>
                   <div className="cap">
-                    <span>{shot.beforeLabel}</span>
+                    <Written text={shot.beforeLabel} />
                   </div>
                   <button className="zoom" onClick={() => setZoom(at)} aria-label={`Open ${shot.beforeLabel} full size`}>
                     <img src={assetUrl(`/api/v1/proof/${shot.before}`)} alt={`${shot.criterion}, ${shot.beforeLabel}`} />
@@ -95,14 +97,14 @@ export function ProofPage() {
                 </div>
                 <div>
                   <div className="cap">
-                    <span>{shot.afterLabel}</span>
+                    <Written text={shot.afterLabel} />
                   </div>
                   <button className="zoom" onClick={() => setZoom(at + 1)} aria-label={`Open ${shot.afterLabel} full size`}>
                     <img src={assetUrl(`/api/v1/proof/${shot.after}`)} alt={`${shot.criterion}, ${shot.afterLabel}`} />
                   </button>
                 </div>
               </div>}
-              {shot.note && !isApiProof(shot.after) && <p className="note">{shot.note}</p>}
+              {shot.note && !isApiProof(shot.after) && <Written as="p" className="note" text={shot.note} />}
               <MorePictures shot={shot} first={at + 2} onOpen={setZoom} />
             </>
           ) : (
@@ -115,7 +117,7 @@ export function ProofPage() {
         <ProofDecision t={t} sticky />
       ) : (
         <div className="stickybar">
-          <span className="note">{t.status}</span>
+          <Written className="note" text={t.status} />
         </div>
       )}
     </>

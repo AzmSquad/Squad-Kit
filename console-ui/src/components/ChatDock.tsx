@@ -5,6 +5,7 @@ import { Maximize2, Minus, Plus } from 'lucide-react';
 import { api } from '../api/client';
 import type { AgentName, ChatSummary } from '../api/types';
 import { useAct, useBoard } from '../lib/data';
+import { isolated } from '../lib/lang';
 import { PHONE, chatDock, useChatDock, useMedia } from '../lib/chatDock';
 import { AGENT_TITLE, Avatar, ChatView } from './Chat';
 import { DocPane, type OpenDoc } from './ChatFiles';
@@ -171,7 +172,7 @@ export function NewTalk() {
               <option value="">Pick a ticket</option>
               {tickets.map((t) => (
                 <option key={t.id} value={t.id}>
-                  {t.id} · {t.title}
+                  {t.id} · {isolated(t.title)}
                 </option>
               ))}
             </select>

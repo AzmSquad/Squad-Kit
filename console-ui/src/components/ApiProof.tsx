@@ -1,5 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { assetUrl } from '../api/client';
+import { langProps, tableDir } from '../lib/lang';
+import { Written } from './ui';
 
 /**
  * A "done when" no page shows, proved by asking the product's API: what was asked and what it answered, in place of a
@@ -29,7 +31,7 @@ export function ApiProof({ file, note }: { file: string; note?: string }) {
   if (!r) return note ? <p className="note">{note}</p> : null;
   return (
     <div className="apiproof">
-      {note && <p>{note}</p>}
+      {note && <Written as="p" text={note} />}
       <div className="maprow">
         <b>Asked</b>
         <span className="mono">{r.part}: {r.method} {r.path}</span>
@@ -43,12 +45,12 @@ export function ApiProof({ file, note }: { file: string; note?: string }) {
       </div>
       {r.sheets?.map((s, i) => (
         <div className="apiproof-sheet" key={i}>
-          <b dir="auto">{s.name}</b>
+          <Written as="b" text={s.name} />
           <div className="apiproof-table">
-            <table dir="auto">
+            <table dir={tableDir(s.rows)}>
               <tbody>
                 {s.rows.slice(0, SHEET_ROWS).map((row, y) => (
-                  <tr key={y}>{row.map((cell, x) => (y === 0 ? <th key={x}>{cell}</th> : <td key={x}>{cell}</td>))}</tr>
+                  <tr key={y}>{row.map((cell, x) => (y === 0 ? <th key={x} {...langProps(cell)}>{cell}</th> : <td key={x} {...langProps(cell)}>{cell}</td>))}</tr>
                 ))}
               </tbody>
             </table>

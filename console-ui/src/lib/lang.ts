@@ -60,8 +60,10 @@ export interface Run {
 
 /** A number written with the words around it: 30, 10:40, 15%, ٣٠. */
 const NUM = '[0-9\\u0660-\\u0669][0-9\\u0660-\\u0669.,:%/+\\-]*';
+/** The rest of an English word. The full stop or colon after it is the sentence's, so it stays on the sentence's side. */
+const LATIN_REST = '(?:[A-Za-z0-9._\\-/+#@:]*[A-Za-z0-9#+])?';
 /** English words, with a number in front or between them: "30 days", "release v0.2.0", "Step 3 of 6". */
-const LATIN_RUN = `(?:${NUM}[ \u00A0]+)*[A-Za-z][A-Za-z0-9._\\-/+#@:]*(?:[ \u00A0]+[A-Za-z0-9][A-Za-z0-9._\\-/+#@:]*)*`;
+const LATIN_RUN = `(?:${NUM}[ \u00A0]+)*[A-Za-z]${LATIN_REST}(?:[ \u00A0]+[A-Za-z0-9]${LATIN_REST})*`;
 /** Arabic words, with numbers between them: "نحتفظ بالرسائل 30 يوم فقط" stays one phrase. */
 const AR_RUN = `[${AR}]+(?:[ \u00A0]+(?:${NUM}[ \u00A0]+)*[${AR}]+)*`;
 const RUNS = new RegExp(`(${LATIN_RUN})|(${AR_RUN})`, 'g');
@@ -94,6 +96,27 @@ export function runs(text: string, dir: Dir): Run[] {
 export function majority(dirs: Dir[]): Dir {
   const rtl = dirs.filter((d) => d === 'rtl').length;
   return dirs.length && rtl * 2 >= dirs.length ? 'rtl' : 'ltr';
+}
+
+/** The `dir` and `lang` of an element that holds these words. */
+export function langProps(text: string): { dir: Dir; lang: 'ar' | 'en' } {
+  const { dir } = detect(text);
+  return { dir, lang: dir === 'rtl' ? 'ar' : 'en' };
+}
+
+/** The `dir` of a box a person types in: what is typed, by the same count as the chat. Empty, it follows its hint. */
+export function typedDir(text: string): Dir | 'auto' {
+  return text.trim() ? detect(text).dir : 'auto';
+}
+
+/** The side a table's first column sits on: the side most of its cells read from, as a Markdown table in the chat. */
+export function tableDir(rows: string[][]): Dir {
+  return majority(rows.flat().map(detect).filter((d) => d.lang !== 'none').map((d) => d.dir));
+}
+
+/** Typed words inside plain text with no element around them, like a select's option: they keep their place among the rest. */
+export function isolated(text: string): string {
+  return `\u2068${text}\u2069`;
 }
 
 /** The source cut after `words` words, keeping the spaces and line breaks between them. */

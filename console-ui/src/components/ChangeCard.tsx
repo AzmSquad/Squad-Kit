@@ -4,8 +4,9 @@ import type { AgentName, ChangePart, SpecChange, Ticket } from '../api/types';
 import { useAct } from '../lib/data';
 import { changeWaits, openChange } from '../lib/waiting';
 import { shellQuote } from '../lib/text';
-import { Cmd, Modal } from './ui';
+import { Cmd, Modal, Written } from './ui';
 import { useDraft } from '../lib/drafts';
+import { langProps, typedDir } from '../lib/lang';
 
 /**
  * A change goes through the spec. The person proposes it (from the ticket or a chat message); the Analyst writes the
@@ -43,8 +44,8 @@ function Parts({ parts }: { parts: ChangePart[] }) {
       {parts.map((p, i) => (
         <div className="chrow" key={i}>
           <div className="chlabel">{partName(p)}</div>
-          <div className={p.before ? 'chold' : 'chold empty'}>{p.before || <i>new</i>}</div>
-          <div className="chnew">{p.after || <i>removed</i>}</div>
+          {p.before ? <Written as="div" className="chold" text={p.before} /> : <div className="chold empty"><i>new</i></div>}
+          {p.after ? <Written as="div" className="chnew" text={p.after} /> : <div className="chnew"><i>removed</i></div>}
         </div>
       ))}
     </div>
@@ -79,7 +80,7 @@ function DesignUpdate({ c }: { c: SpecChange }) {
             <div>
               <span className="pill you">{STEP_MARK[s.change]}</span>
             </div>
-            <div className="chnew">{s.title}</div>
+            <Written as="div" className="chnew" text={s.title} />
           </div>
         ),
       )}
@@ -87,7 +88,7 @@ function DesignUpdate({ c }: { c: SpecChange }) {
         <div className="chrow" key={g}>
           <div className="chlabel">Dropped</div>
           <div />
-          <div className="chold">{g}</div>
+          <Written as="div" className="chold" text={g} />
         </div>
       ))}
     </div>
@@ -153,10 +154,10 @@ export function ChangeCard({ t }: { t: Ticket }) {
           {c.size && <span className={`pill ${c.size === 'big' ? 'you' : 'wait'}`}>{c.size === 'big' ? 'Big change' : 'Small change'}</span>}
         </div>
         <div className="changebody">
-          {c.summary ? <p>{c.summary}</p> : <p>“{c.ask}”</p>}
+          <Written as="p" text={c.summary ?? `“${c.ask}”`} />
           {c.status === 'writing' && <p className="note">The work goes on meanwhile. Nothing changes until you approve it.</p>}
-          {c.status === 'failed' && <p className="note">{c.error}</p>}
-          {c.why && (c.status === 'proposed' || c.status === 'approved') && <p className="note">{c.why}</p>}
+          {c.status === 'failed' && <Written as="p" className="note" text={c.error ?? ''} />}
+          {c.why && (c.status === 'proposed' || c.status === 'approved') && <Written as="p" className="note" text={c.why} />}
           {c.status === 'proposed' && c.parts && <Parts parts={c.parts} />}
           {c.status === 'proposed' && <p className="note">{effect(t, c)}</p>}
           {c.status === 'approved' && (
@@ -165,7 +166,7 @@ export function ChangeCard({ t }: { t: Ticket }) {
           {c.status === 'designing' && <p className="note">The Builder paused after its step. The design update comes to you next.</p>}
           {c.status === 'design-ready' && c.design && (
             <>
-              {c.design.summary && <p>{c.design.summary}</p>}
+              {c.design.summary && <Written as="p" text={c.design.summary} />}
               <DesignUpdate c={c} />
               {c.parts && (
                 <>
@@ -184,7 +185,7 @@ export function ChangeCard({ t }: { t: Ticket }) {
         </div>
         {withdrawing ? (
           <div className="row">
-            <input className="input" autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why take it back? (optional, it stays in the spec's record)" />
+            <input className="input" autoFocus dir={typedDir(reason)} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why take it back? (optional, it stays in the spec's record)" />
             <button className="btn sm" disabled={act.isPending} onClick={() => decide('withdraw', 'Withdrawn. The spec is back to how it was.', { reason })}>
               Withdraw
             </button>
@@ -202,7 +203,7 @@ export function ChangeCard({ t }: { t: Ticket }) {
           </div>
         ) : declining ? (
           <div className="row">
-            <input className="input" autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why not? (optional, it stays in the spec's record)" />
+            <input className="input" autoFocus dir={typedDir(reason)} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why not? (optional, it stays in the spec's record)" />
             <button className="btn sm" disabled={act.isPending} onClick={() => decide('decline', 'Declined. Nothing changes.', { reason })}>
               Decline
             </button>
@@ -309,7 +310,7 @@ export function ProposeChange({ t, initial = '', from, onClose }: { t: Ticket; i
             ? `Change ${open.id} is still open. One change at a time: approve or decline it first.`
             : 'Say what should change. The Analyst writes it into the spec, old and new, and says if it is small or big. Nothing changes until you approve it, and the work goes on meanwhile.'}
       </p>
-      <textarea className="input" rows={4} style={{ width: '100%' }} autoFocus value={text} onChange={(e) => setText(e.target.value)} placeholder="For example: allow 5 bookings a day, not 3" />
+      <textarea className="input" rows={4} style={{ width: '100%' }} autoFocus dir={typedDir(text)} value={text} onChange={(e) => setText(e.target.value)} placeholder="For example: allow 5 bookings a day, not 3" />
     </Modal>
   );
 }
@@ -363,14 +364,10 @@ export function ChangeHistory({ t }: { t: Ticket }) {
       <div className="lbl">Changes to the spec · {all.length}</div>
       <ul className="ticketnotes">
         {all.map((c) => (
-          <li key={c.id}>
+          <li key={c.id} {...langProps(c.summary ?? c.ask)}>
             <span className={`pill ${c.status === 'done' ? 'ok' : c.status === 'declined' ? 'wait' : 'you'}`}>{c.decided?.withdrawn ? 'Withdrawn' : STATUS_WORD[c.status]}</span>
-            <span className="grow">
-              {c.id}: {c.summary ?? c.ask}
-              {c.size ? ` (${c.size})` : ''}
-              {c.decided?.reason ? `. Why not: ${c.decided.reason}` : ''}
-            </span>
-            <span className="note">{c.by}</span>
+            <Written className="grow" text={`${c.id}: ${c.summary ?? c.ask}${c.size ? ` (${c.size})` : ''}${c.decided?.reason ? `. Why not: ${c.decided.reason}` : ''}`} />
+            <Written className="note" text={c.by} />
           </li>
         ))}
       </ul>

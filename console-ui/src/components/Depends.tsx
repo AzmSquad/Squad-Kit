@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Check, GitBranch, GitMerge, Hourglass } from 'lucide-react';
 import type { DependencyChoice, Ticket } from '../api/types';
 import { useAct, useBoard } from '../lib/data';
-import { Cmd, STAGE_NAME } from './ui';
+import { Cmd, STAGE_NAME, Written } from './ui';
 
 /**
  * Tickets that depend on unmerged work. The design can say "depends on RO-1"; while RO-1 is not merged, the ticket
@@ -66,7 +66,7 @@ export function DependsCard({ t }: { t: Ticket }) {
         <div className="youbox">
           <span className="ring">{waiting ? <Hourglass size={15} /> : <GitBranch size={15} />}</span>
           <div>
-            <b>{waiting ? `Waits for ${names} to merge` : (t.waiting?.summary ?? `${t.id} needs ${names}, which is not merged yet`)}</b>
+            <Written as="b" text={waiting ? `Waits for ${names} to merge` : (t.waiting?.summary ?? `${t.id} needs ${names}, which is not merged yet`)} />
             <span>
               {waiting
                 ? `It starts by itself once ${names} ${deps.length > 1 ? 'are' : 'is'} merged. You can still build it another way.`
@@ -78,7 +78,7 @@ export function DependsCard({ t }: { t: Ticket }) {
         {deps.map((d) => (
           <div className="trow" key={d.id}>
             <span className="mono">{d.id}</span>
-            <b>{d.title}</b>
+            <Written as="b" text={d.title} />
             <span className="pill wait">{STAGE_NAME[d.stage]} · not merged yet</span>
           </div>
         ))}
@@ -135,8 +135,10 @@ export function DependsLine({ t }: { t: Ticket }) {
           return (
             <span key={id} className={`pill ${ok ? 'ok' : 'wait'}`} title={d?.title}>
               {ok && <GitMerge size={13} />}
-              {id}
-              {d ? ` ${d.title}` : ''} · {!d ? 'left the board' : ok ? 'merged' : 'not merged yet'}
+              <span>
+                {id}
+                {d && <> <Written text={d.title} /></>} · {!d ? 'left the board' : ok ? 'merged' : 'not merged yet'}
+              </span>
             </span>
           );
         })}

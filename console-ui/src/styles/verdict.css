@@ -4,17 +4,17 @@
 .verdict.broken { background: var(--bug-soft); color: var(--bug); }
 .verdict.notshown { background: var(--you-soft); color: var(--you-ink); }
 .verdict.notonscreen { background: var(--surface-2); color: var(--muted); }
-.critrow h5 .verdict { margin-left: auto; }
+.critrow h5 .verdict { margin-inline-start: auto; }
 .critrow.broken { border-color: color-mix(in srgb, var(--bug) 45%, transparent); }
 .critrow.notshown { border-color: var(--you-line); }
 .critrow.notonscreen { border-style: dashed; border-color: var(--line-strong); }
 .critrow h5 svg.vx, .crit svg.vx { color: var(--bug); }
 .critrow h5 svg.vq, .crit svg.vq { color: var(--you); }
 .critrow h5 svg.vo, .crit svg.vo { color: var(--muted); }
-.critrow .verdictnote { margin: -2px 0 9px 23px; font-size: 12.5px; color: var(--muted); }
+.critrow .verdictnote { margin-block: -2px 9px; margin-inline: 23px 0; font-size: 12.5px; color: var(--muted); }
 .critrow.broken .verdictnote { color: var(--bug); }
 .critrow.notshown .verdictnote { color: var(--you-ink); }
-.crit .verdict { margin-left: 6px; vertical-align: 1px; }
+.crit .verdict { margin-inline-start: 6px; vertical-align: 1px; }
 .stage .verdictline { display: flex; gap: 8px; align-items: baseline; margin: -4px 0 0; font-size: 13px; }
 .stage .verdictline.broken { color: var(--bug); }
 .stage .verdictline.notshown { color: var(--you-ink); }

@@ -6,7 +6,7 @@ import { useAct } from '../lib/data';
 import { pagesOf, proofPages } from '../lib/review';
 import { AGENT_TITLE } from './Chat';
 import { useAskAgent } from './AskQuestion';
-import { Cmd } from './ui';
+import { Cmd, Written } from './ui';
 import { LookYourself } from './Verdict';
 import '../styles/check.css';
 
@@ -54,7 +54,7 @@ export function WhereToLook({ t, s }: { t: Ticket; s?: TryStatus }) {
             return (
               <li key={p}>
                 <code>{p}</code>
-                <span className="what">{shows.join(' · ')}</span>
+                <Written className="what" text={shows.join(' · ')} />
                 {open && (
                   <a className="btn sm" href={open} target="_blank" rel="noreferrer" title={`Open ${open}`}>
                     <ExternalLink size={13} /> Open

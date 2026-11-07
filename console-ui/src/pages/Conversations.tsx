@@ -5,11 +5,11 @@ import type { ChatSummary, Ticket } from '../api/types';
 import { useBoard, useTicket } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { PHONE, chatDock, useChatDock, useMedia } from '../lib/chatDock';
-import { detect, textClass } from '../lib/lang';
+import { detect, textClass, typedDir } from '../lib/lang';
 import { AGENT_TITLE, Avatar, ChatView, stageLine } from '../components/Chat';
 import { ChatFiles, DocPane, type OpenDoc } from '../components/ChatFiles';
 import { NewTalk, unreadOf, useChats } from '../components/ChatDock';
-import { ROLE_NAME, clock, dateShort } from '../components/ui';
+import { ROLE_NAME, Runs, clock, dateShort } from '../components/ui';
 
 /**
  * Every talk with an agent, full screen: the list on the left, the chat in the middle and the ticket's spec beside
@@ -71,7 +71,7 @@ function PageHead({ q, setQ }: { q: string; setQ(v: string): void }) {
       <span className="grow" />
       <label className="search cpage-search">
         <Search size={15} />
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search all conversations" aria-label="Search all conversations" dir="auto" />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search all conversations" aria-label="Search all conversations" dir={typedDir(q)} />
       </label>
       <button className="iconbtn" onClick={toggleTheme} aria-label={theme === 'light' ? 'Switch to dark' : 'Switch to light'}>
         {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
@@ -131,7 +131,7 @@ function ChatList({ list, id, pick, searching }: { list: ChatSummary[]; id?: str
                           <span className="shim">Writing</span>
                         </span>
                       ) : (
-                        p.text || s.title
+                        <Runs text={p.text || s.title} dir={p.dir} />
                       )}
                     </span>
                     {unread > 0 && !on && <span className="cbadge rb">{unread}</span>}
@@ -191,7 +191,7 @@ function Line({ text }: { text: string }) {
   const d = detect(text);
   return (
     <span dir={d.dir} className={textClass(d)}>
-      {text}
+      <Runs text={text} dir={d.dir} />
     </span>
   );
 }
@@ -202,7 +202,7 @@ function Item({ text, fresh, chk, tone }: { text: string; fresh?: boolean; chk?:
     <div className={`citem ${fresh ? 'new' : ''} ${tone ?? ''}`}>
       {chk && <span className="cchk" />}
       <span className={`grow ${textClass(d)}`} dir={d.dir} lang={d.dir === 'rtl' ? 'ar' : 'en'}>
-        {text}
+        <Runs text={text} dir={d.dir} />
       </span>
       {fresh && <span className="ctag">From chat</span>}
     </div>
@@ -233,7 +233,7 @@ function SpecDraft({ t }: { t: Ticket }) {
       </div>
       <h3>Story</h3>
       <div className={textClass(d)} dir={d.dir}>
-        {story}
+        <Runs text={story} dir={d.dir} />
       </div>
       <h3>Done when</h3>
       {done.length ? done.map((x, i) => <Item key={i} text={x.text} chk fresh={fresh(x.at)} />) : <p className="cdim">Nothing yet.</p>}

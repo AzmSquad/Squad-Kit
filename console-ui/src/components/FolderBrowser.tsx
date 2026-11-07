@@ -3,6 +3,7 @@ import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { ChevronRight, CornerLeftUp, Folder, FolderCheck, FolderGit2, FolderPlus } from 'lucide-react';
 import { api, send } from '../api/client';
 import type { FolderListing } from '../api/types';
+import { typedDir } from '../lib/lang';
 
 /** The app lists folders itself, because a page cannot read a real folder path. Starts at home. */
 export function useFolders(start = '') {
@@ -93,6 +94,7 @@ export function FolderBrowser({ at, go, listing, onError }: { at: string; go(pat
               <input
                 className="input"
                 autoFocus
+                dir={typedDir(newName)}
                 placeholder="Name of the new folder"
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}

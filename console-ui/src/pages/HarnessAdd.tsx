@@ -7,11 +7,12 @@ import { FolderBrowser, useFolders } from '../components/FolderBrowser';
 import { useAct } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { ago } from '../components/ui';
+import { isolated, typedDir } from '../lib/lang';
 import { Result } from './Harness';
 
 /**
  * The Your additions tab: what a team added to its harness, its Try first, On and Off, the record of who did what, and
- * the sheets that add a rule, a checklist, a gate or what a folder holds. Typed words use dir="auto": people type Arabic.
+ * the sheets that add a rule, a checklist, a gate or what a folder holds. Typed words follow what is typed: people type Arabic.
  */
 
 const AGENT_NAME: Record<string, string> = { all: 'All agents', analyst: 'Analyst', architect: 'Architect', builder: 'Builder', reviewer: 'Reviewer', tester: 'Tester' };
@@ -30,12 +31,9 @@ function kindLine(a: HarnessAddition): string {
   return `Gate, ${WHEN_LINE[a.when ?? 'checks']}${a.on_fail === 'warn' ? ', warn only' : ''}`;
 }
 
-/** Typed words inside a sentence: Arabic among English keeps its place, and so do the words around it. */
-const bidi = (s: string): string => `\u2068${s}\u2069`;
-
 function logWords(l: HarnessLogLine): string {
-  const what = `the ${l.kind} "${bidi(l.name)}"`;
-  if (l.did === 'added') return `added ${what}${l.from ? `, from the folder ${bidi(l.from)}` : ''}`;
+  const what = `the ${l.kind} "${isolated(l.name)}"`;
+  if (l.did === 'added') return `added ${what}${l.from ? `, from the folder ${isolated(l.from)}` : ''}`;
   if (l.did === 'removed') return `removed ${what}`;
   if (l.did === 'tried') return `tried ${what} again`;
   return l.did === 'off' ? `turned off ${what}` : l.did === 'on' ? `turned on ${what}` : `set ${what} to Try first`;
@@ -75,7 +73,7 @@ export function AdditionsTab({ view }: { view: HarnessView }) {
         <>
           <h3 className="hn-sub">Who did what</h3>
           <ul className="hn-log">
-            {(wholeLog ? a.log : a.log.slice(0, LOG_FIRST)).map((l, i) => <li key={i}><b>{bidi(l.by)}</b> {logWords(l)} <small>{ago(l.at)}</small></li>)}
+            {(wholeLog ? a.log : a.log.slice(0, LOG_FIRST)).map((l, i) => <li key={i}><b>{isolated(l.by)}</b> {logWords(l)} <small>{ago(l.at)}</small></li>)}
           </ul>
           {!wholeLog && a.log.length > LOG_FIRST && <button className="btn sm hn-gap" onClick={() => setWholeLog(true)}>Show all {a.log.length}</button>}
         </>
@@ -125,7 +123,7 @@ function AdditionRow({ a, view }: { a: HarnessAddition; view: HarnessView }) {
       {a.partGone && <p className="if hn-warn">The part it runs in is no longer in the project, so it can't run.</p>}
       {a.kind === 'gate' && !view.additions.guarded && <p className="if hn-warn">{NO_GUARD}</p>}
       {a.seen && <Result s={a.seen} />}
-      <p className="hn-from">{a.from === 'typed' ? 'Typed here' : `From the folder ${bidi(a.from)}`}. Added by {bidi(a.added_by)}, {ago(a.added_at)}.</p>
+      <p className="hn-from">{a.from === 'typed' ? 'Typed here' : `From the folder ${isolated(a.from)}`}. Added by {isolated(a.added_by)}, {ago(a.added_at)}.</p>
       <div className="hn-acts">
         {a.kind === 'gate' && !view.additions.demo && <button className="btn sm" disabled={trying} onClick={() => void tryNow()}><Play size={13} /> Try it now</button>}
         {asking ? (
@@ -249,11 +247,11 @@ function RuleForm({ view, close, back, title }: FormProps) {
   const max = view.additions.limits.ruleChars;
   return (
     <Sheet title={title} back={back} close={close} footer={<button className="btn pri" disabled={busy || !name.trim() || !text.trim() || text.length > max} onClick={() => save({ kind: 'rule', name, agents: [who], text })}>Add the rule</button>}>
-      <div className="field"><label htmlFor="hn-n">Name</label><input id="hn-n" className="input" dir="auto" value={name} onChange={(e) => setName(e.target.value)} /></div>
+      <div className="field"><label htmlFor="hn-n">Name</label><input id="hn-n" className="input" dir={typedDir(name)} value={name} onChange={(e) => setName(e.target.value)} /></div>
       <Pick label="Who follows it" value={who} set={setWho} options={Object.entries(AGENT_NAME)} />
       <div className="field">
         <label htmlFor="hn-t">The rule</label>
-        <textarea id="hn-t" className="textarea" dir="auto" value={text} onChange={(e) => setText(e.target.value)} />
+        <textarea id="hn-t" className="textarea" dir={typedDir(text)} value={text} onChange={(e) => setText(e.target.value)} />
         <small className={`hn-n ${text.length > max ? 'over' : ''}`}>{text.length} of {max} characters</small>
       </div>
       {ASKS_PROCESS.test(text) && <p className="hn-box you">This rule mentions a commit, a push or a pull request. squad-kit does those itself, so agents are told to leave that part out.</p>}
@@ -271,11 +269,11 @@ function ChecklistForm({ view, close, back, title }: FormProps) {
   const max = view.additions.limits.questions;
   return (
     <Sheet title={title} back={back} close={close} footer={<button className="btn pri" disabled={busy || !name.trim() || !questions.length || questions.length > max} onClick={() => save({ kind: 'checklist', name, agent: who, questions })}>Add the checklist</button>}>
-      <div className="field"><label htmlFor="hn-n">Name</label><input id="hn-n" className="input" dir="auto" value={name} onChange={(e) => setName(e.target.value)} /></div>
+      <div className="field"><label htmlFor="hn-n">Name</label><input id="hn-n" className="input" dir={typedDir(name)} value={name} onChange={(e) => setName(e.target.value)} /></div>
       <Pick label="Who answers" value={who} set={setWho} options={[['reviewer', 'Reviewer'], ['tester', 'Tester']]} />
       <div className="field">
         <label htmlFor="hn-q">Questions, one on each line</label>
-        <textarea id="hn-q" className="textarea" dir="auto" value={text} onChange={(e) => setText(e.target.value)} />
+        <textarea id="hn-q" className="textarea" dir={typedDir(text)} value={text} onChange={(e) => setText(e.target.value)} />
         <small className={`hn-n ${questions.length > max ? 'over' : ''}`}>{questions.length} of {max} questions</small>
       </div>
       <div className="hn-box">
@@ -316,7 +314,7 @@ function GateForm({ view, close, back, title }: FormProps) {
   return (
     <Sheet title={title} back={back} close={close} footer={<><button className="btn pri" disabled={busy || !ready} onClick={() => save({ kind: 'gate', name, command, when, on_fail: fail, ...(part ? { part } : {}) })}>Add the gate</button><span className="note">It starts on Try first.</span></>}>
       <p className="note">A command squad-kit runs itself, inside the guard. No agent can change it or talk its way past it.</p>
-      <div className="field"><label htmlFor="hn-n">Name</label><input id="hn-n" className="input" dir="auto" value={name} onChange={(e) => setName(e.target.value)} /></div>
+      <div className="field"><label htmlFor="hn-n">Name</label><input id="hn-n" className="input" dir={typedDir(name)} value={name} onChange={(e) => setName(e.target.value)} /></div>
       <div className="field">
         <label htmlFor="hn-c">Command</label>
         <input id="hn-c" className="input mono" dir="ltr" value={command} onChange={(e) => { setCommand(e.target.value); setAnswer(null); }} />

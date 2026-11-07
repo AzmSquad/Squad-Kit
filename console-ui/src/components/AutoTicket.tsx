@@ -10,7 +10,7 @@ import { useAct } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { changedWords } from '../lib/requirements';
 import { shellQuote } from '../lib/text';
-import { Cmd, Modal, ago } from './ui';
+import { Cmd, Modal, Place, Written, ago } from './ui';
 import { AGENT_TITLE, TalkButton } from './Chat';
 import { Attachments as AgentFiles } from './Attachments';
 import { shipped } from './ChangeCard';
@@ -19,6 +19,7 @@ import { BrdViewer, useOpenRef } from './BreakdownDialogs';
 import { STOP_WORDS, doingWords, optionsOf, placeOf, requirementsPath, sourceRef, waitsLine, type Source, type StopKind } from '../lib/auto';
 import '../styles/auto.css';
 import { useDraft } from '../lib/drafts';
+import { langProps, typedDir } from '../lib/lang';
 
 /**
  * Builds by itself, on the ticket's side: the link back to its breakdown ("From BR-1 › Payments › … › S-14"), the
@@ -67,7 +68,7 @@ export function BreakdownPlace({ t }: { t: Ticket }) {
       <BreakdownLink id={t.breakdown.id} item={t.breakdown.item}>
         {t.breakdown.id}
       </BreakdownLink>{' '}
-      › {placeOf(v, t.breakdown.item)}
+      › <Place path={placeOf(v, t.breakdown.item)} />
     </div>
   );
 }
@@ -120,13 +121,13 @@ export function StopPanel({ t, extra }: { t: Ticket; extra?: ReactNode }) {
               The {who} found it while {doingWords(t)}, {ago(q.at)}
             </span>
           </div>
-          <p className="stuckq">{q.text}</p>
+          <Written as="p" className="stuckq" text={q.text} />
           <Sources list={q.sources} onOpenRef={v ? doc.open : undefined} />
           {q.files && q.files.length > 0 && <AgentFiles ticket={t.id} files={q.files} />}
           <div className="opts2">
             {options.map((o) => (
-              <button key={o.text} className={`opt2 ${pick === o.text ? 'pick' : ''}`} onClick={() => setPick(o.text)} aria-pressed={pick === o.text}>
-                <b>{o.text}</b>
+              <button key={o.text} className={`opt2 ${pick === o.text ? 'pick' : ''}`} {...langProps(o.text)} onClick={() => setPick(o.text)} aria-pressed={pick === o.text}>
+                <b><Written text={o.text} /></b>
                 {(o.suggested || pick === o.text) && (
                   <span className="optfoot">
                     {o.suggested && <span className="rec">{who} suggests</span>}
@@ -143,8 +144,8 @@ export function StopPanel({ t, extra }: { t: Ticket; extra?: ReactNode }) {
               <b>Something else…</b>
             </button>
           </div>
-          {pick === '' && <textarea className="input" rows={3} style={{ width: '100%' }} autoFocus value={own} placeholder="Your answer" onChange={(e) => setOwn(e.target.value)} />}
-          {(q.why || line) && <p className="stopwhy">{[q.why, line].filter(Boolean).join(' ')}</p>}
+          {pick === '' && <textarea className="input" rows={3} style={{ width: '100%' }} autoFocus dir={typedDir(own)} value={own} placeholder="Your answer" onChange={(e) => setOwn(e.target.value)} />}
+          {(q.why || line) && <Written as="p" className="stopwhy" text={[q.why, line].filter(Boolean).join(' ')} />}
         </section>
         <DecidedForYou t={t} />
         {extra}
@@ -182,14 +183,14 @@ function Sources({ list, onOpenRef }: { list?: Source[]; onOpenRef?(ref: BrdRef)
             {i > 0 && ' · '}
             {src.ticket ? (
               <Link to="/board" search={{ ticket: src.ticket }}>
-                {src.text}
+                <Written text={src.text} />
               </Link>
             ) : ref && onOpenRef ? (
               <button className="linkbtn" onClick={() => onOpenRef(ref)} title="Open this place in the document">
-                {src.text}
+                <Written text={src.text} />
               </button>
             ) : (
-              src.text
+              <Written text={src.text} />
             )}
           </span>
         );
@@ -238,15 +239,13 @@ export function DecidedForYou({ t }: { t: Ticket }) {
             </span>
             {d.changed ? (
               <>
-                <span className="was">{d.text}</span>
-                <span>
-                  <b>Now:</b> {d.changed.text}
-                </span>
+                <Written className="was" text={d.text} />
+                <Written lead={<b>Now:</b>} text={d.changed.text} />
                 <Became d={d} />
               </>
             ) : (
               <>
-                <span>{d.text}</span>
+                <Written text={d.text} />
                 {mine && (
                   <button className="linkbtn" onClick={() => setChanging(d)}>
                     Change
@@ -306,11 +305,11 @@ function ChangeDecided({ t, d, onClose }: { t: Ticket; d: Decided; onClose(): vo
       <p className="note" style={{ marginBottom: 8 }}>
         {d.by === 'answer' ? 'From your answer, the squad decided:' : `The ${byWords(d)} decided:`}
       </p>
-      <div className="decidedq">{d.text}</div>
+      <Written as="div" className="decidedq" text={d.text} />
       <label className="lbl" htmlFor="decided-instead" style={{ marginTop: 0 }}>
         What do you want instead?
       </label>
-      <textarea id="decided-instead" className="input" rows={3} style={{ width: '100%' }} autoFocus value={text} onChange={(e) => setText(e.target.value)} placeholder="For example: the refund goes back as store credit" />
+      <textarea id="decided-instead" className="input" rows={3} style={{ width: '100%' }} autoFocus dir={typedDir(text)} value={text} onChange={(e) => setText(e.target.value)} placeholder="For example: the refund goes back as store credit" />
       <p className="note" style={{ marginTop: 8 }}>
         {done
           ? `${t.id} is merged, so this becomes a new ticket linked to it.`

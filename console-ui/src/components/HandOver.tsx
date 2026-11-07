@@ -5,6 +5,7 @@ import { useAct, useBoard } from '../lib/data';
 import { shellArg, shellQuote } from '../lib/text';
 import { Cmd, Modal, ago } from './ui';
 import { useDraft } from '../lib/drafts';
+import { typedDir } from '../lib/lang';
 
 /**
  * Owners and hand over (ADR-001). Each ticket has one owner; only the owner's squad works on it, on their computer.
@@ -110,7 +111,7 @@ export function HandOverDialog({ t, onClose }: { t: Ticket; onClose(): void }) {
       )}
       <div className="field">
         <label htmlFor="handover-to">Hand it over to</label>
-        <input id="handover-to" className="input" autoFocus value={to} placeholder="Their name, as their board shows it" onChange={(e) => setTo(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && !blocked && !act.isPending && submit()} />
+        <input id="handover-to" className="input" autoFocus dir={typedDir(to)} value={to} placeholder="Their name, as their board shows it" onChange={(e) => setTo(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && !blocked && !act.isPending && submit()} />
         {people.length > 0 && (
           <div className="pills" style={{ marginTop: 8 }}>
             {people.map((p) => (
@@ -123,7 +124,7 @@ export function HandOverDialog({ t, onClose }: { t: Ticket; onClose(): void }) {
       </div>
       <div className="field">
         <label htmlFor="handover-note">A note for {who} (optional)</label>
-        <textarea id="handover-note" className="input" rows={2} value={note} placeholder="Where you got to, and anything to watch out for. Every agent reads it too." onChange={(e) => setNote(e.target.value)} />
+        <textarea id="handover-note" className="input" rows={2} dir={typedDir(note)} value={note} placeholder="Where you got to, and anything to watch out for. Every agent reads it too." onChange={(e) => setNote(e.target.value)} />
       </div>
       <div className="lbl">What happens</div>
       <ul className="brief">
@@ -190,7 +191,7 @@ export function NotYoursPanel({ t }: { t: Ticket }) {
       </div>
       {taking ? (
         <div className="df">
-          <input className="input" style={{ flex: 1 }} autoFocus value={why} onChange={(e) => setWhy(e.target.value)} placeholder={`Why you take it from ${owner}, for example: the name was misspelled`} />
+          <input className="input" style={{ flex: 1 }} autoFocus dir={typedDir(why)} value={why} onChange={(e) => setWhy(e.target.value)} placeholder={`Why you take it from ${owner}, for example: the name was misspelled`} />
           <button
             className="btn pri"
             disabled={!why.trim() || act.isPending}

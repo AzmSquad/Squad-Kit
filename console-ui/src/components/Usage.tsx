@@ -6,7 +6,7 @@ import { api } from '../api/client';
 import type { AgentName, BoardUsage, ModelLevel, Quality, RoleUsage, Ticket, UsageLine, UsageTotal } from '../api/types';
 import type { BudgetState, CostOverview, PaymentInfo, TicketCost } from '../api/tabs';
 import { useAct } from '../lib/data';
-import { Cmd, Glyph, ROLE_NAME } from './ui';
+import { Cmd, Glyph, ROLE_NAME, Written } from './ui';
 import { took } from './WhatHappened';
 import '../styles/tabs.css';
 
@@ -485,7 +485,7 @@ export function BudgetBanner() {
         <Wallet size={16} />
       </span>
       <div className="upd-main">
-        <b className="upd-title">{words(first)}</b>
+        <Written as="b" className="upd-title" text={words(first)} />
         <span className="upd-sub">
           {shown.length > 1 ? `And ${shown.length - 1} more near a budget. ` : ''}At 100% a ticket waits for you between two steps, never in the middle of one.
         </span>

@@ -8,10 +8,11 @@ import { useAct, useBoard, useReleases } from '../lib/data';
 import { BrokenTickets } from './Board';
 import { partNames } from '../lib/overview';
 import { BugDialog, ReleasedDialog } from '../components/dialogs';
-import { Cmd, CouldNotLoad, Modal, NotesView, dateShort } from '../components/ui';
+import { Cmd, CouldNotLoad, Modal, NotesView, Written, dateShort } from '../components/ui';
 import { usePrefs } from '../lib/prefs';
 import { shellQuote } from '../lib/text';
 import { GatePill } from '../components/Gates';
+import { langProps, typedDir } from '../lib/lang';
 
 export function ReleasesPage() {
   const releases = useReleases();
@@ -122,9 +123,9 @@ function ReleaseDetail({ r, onReleased, live }: { r: ReleaseWithItems; onRelease
         <div className="box" style={{ marginTop: 10 }}>
           <b>Last time it did not go out.</b>
           {r.log.map((l) => (
-            <div className="checkrow" key={l.text} style={l.ok ? undefined : { color: 'var(--you-ink)' }}>
+            <div className="checkrow" key={l.text} style={l.ok ? undefined : { color: 'var(--you-ink)' }} {...langProps(l.text)}>
               <span className={`cbx ${l.ok ? 'on' : ''}`}>{l.ok ? <Check size={11} strokeWidth={3} /> : '!'}</span>
-              {l.text}
+              <Written text={l.text} />
             </div>
           ))}
         </div>
@@ -134,7 +135,7 @@ function ReleaseDetail({ r, onReleased, live }: { r: ReleaseWithItems; onRelease
       {r.items.map((it) => (
         <div className="trow" key={it.id}>
           <span className="mono">{it.id}</span>
-          <b>{it.title}</b>
+          <Written as="b" text={it.title} />
           <span style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
             {it.gates?.checks === 'unchecked' ? (
               <GatePill state="unchecked" text="Not checked · review, proof" />
@@ -170,7 +171,7 @@ function ReleaseDetail({ r, onReleased, live }: { r: ReleaseWithItems; onRelease
           {r.out!.map((id) => (
             <div className="trow" key={id}>
               <span className="mono">{id}</span>
-              <b>{titleOf(id)}</b>
+              <Written as="b" text={titleOf(id)} />
               {draft ? (
                 <button
                   className="btn sm"
@@ -220,9 +221,9 @@ function ReleaseDetail({ r, onReleased, live }: { r: ReleaseWithItems; onRelease
           <div className="lbl">{draft || !r.log ? 'Also' : 'What the release did'}</div>
           {!draft && r.log
             ? r.log.map((l) => (
-                <div className="checkrow" key={l.text} style={l.ok ? undefined : { color: 'var(--you-ink)' }}>
+                <div className="checkrow" key={l.text} style={l.ok ? undefined : { color: 'var(--you-ink)' }} {...langProps(l.text)}>
                   <span className={`cbx ${l.ok ? 'on' : ''}`}>{l.ok ? <Check size={11} strokeWidth={3} /> : '!'}</span>
-                  {l.text}
+                  <Written text={l.text} />
                 </div>
               ))
             : [
@@ -251,7 +252,7 @@ function ReleaseDetail({ r, onReleased, live }: { r: ReleaseWithItems; onRelease
           </div>
           {editing ? (
             <>
-              <textarea className="textarea mono" style={{ minHeight: 180, fontSize: 13 }} value={notes} onChange={(e) => setNotes(e.target.value)} />
+              <textarea className="textarea mono" style={{ minHeight: 180, fontSize: 13 }} dir={typedDir(notes)} value={notes} onChange={(e) => setNotes(e.target.value)} />
               <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
                 <button
                   className="btn sm pri"
@@ -319,7 +320,14 @@ function ReleaseDetail({ r, onReleased, live }: { r: ReleaseWithItems; onRelease
           }
         >
           <p>
-            {r.items.length} tickets go live: {r.items.map((i) => i.title).join(', ')}.
+            {r.items.length} tickets go live:{' '}
+            {r.items.map((i, k) => (
+              <span key={i.id}>
+                {k > 0 && ', '}
+                <Written text={i.title} />
+              </span>
+            ))}
+            .
           </p>
           {r.targets.length > 0 && (
             <div className="box" style={{ marginBottom: 6 }}>
@@ -444,7 +452,7 @@ function MarkSentDialog({ version, onClose, onDone }: { version: string; onClose
     >
       <p className="note">{version}'s tickets close, and nothing checks after this. squad-kit looks in your team's shared copy of the code first.</p>
       <div className="lbl">How did it get there?</div>
-      <textarea className="waynote" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="For example: Sara merged it by hand" />
+      <textarea className="waynote" rows={2} dir={typedDir(reason)} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="For example: Sara merged it by hand" />
       {warning && <div className="box" style={{ marginTop: 10 }}>{warning}</div>}
       <div style={{ marginTop: 10 }}>
         <Cmd text={`squad release ${version} --mark-sent --reason ${shellQuote(reason.trim() || 'how it got there')}${warning ? ' --anyway' : ''}`} />
@@ -475,7 +483,7 @@ function ReleaseGateStop({ r, onReleased }: { r: ReleaseWithItems; onReleased(r:
       )}
       <div className="field" style={{ marginTop: 10 }}>
         <label htmlFor="gate-why">To go on without this check, write why. It stays on the stories and the release notes.</label>
-        <textarea id="gate-why" className="textarea" dir="auto" value={why} onChange={(e) => setWhy(e.target.value)} />
+        <textarea id="gate-why" className="textarea" dir={typedDir(why)} value={why} onChange={(e) => setWhy(e.target.value)} />
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
         <button className="btn pri sm" disabled={act.isPending} onClick={() => send()}>Try again</button>

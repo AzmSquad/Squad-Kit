@@ -5,8 +5,9 @@ import { Bug, ExternalLink, Play, Plug } from 'lucide-react';
 import { api } from '../api/client';
 import type { BacklogResponse, WorkItemRow } from '../api/types';
 import { useAct } from '../lib/data';
+import { isolated, langProps } from '../lib/lang';
 import { shellQuote } from '../lib/text';
-import { Cmd, STAGE_NAME } from '../components/ui';
+import { Cmd, STAGE_NAME, Written } from '../components/ui';
 
 /** The sprint's stories and bugs from Azure Boards. Starting one makes it a ticket the squad works on. */
 export function BacklogPage() {
@@ -27,7 +28,7 @@ export function BacklogPage() {
           <select className="input" style={{ width: 'auto', marginLeft: 12 }} value={chosen ?? 'all'} onChange={(e) => setSprint(e.target.value)} aria-label="Sprint">
             {data.sprints.map((s) => (
               <option key={s.path} value={s.path}>
-                {s.name}
+                {isolated(s.name)}
                 {s.current ? ' (now)' : ''}
               </option>
             ))}
@@ -94,10 +95,10 @@ function Row({ w }: { w: WorkItemRow }) {
           {w.id} <ExternalLink size={11} />
         </a>
       </td>
-      <td>
+      <td {...langProps(w.title)}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
           {w.type === 'Bug' && <span className="pill bug" style={{ padding: '2px 8px' }}><Bug size={12} /> Bug</span>}
-          <span style={{ fontWeight: 600 }}>{w.title}</span>
+          <Written style={{ fontWeight: 600 }} text={w.title} />
         </span>
       </td>
       <td>{w.points ?? ''}</td>

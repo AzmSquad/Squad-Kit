@@ -4,9 +4,10 @@ import { useNavigate } from '@tanstack/react-router';
 import type { BrdRef, BreakdownQuestion, BreakdownView } from '../api/requirements-types';
 import { SKIP_CHOICE, afterTitle, clockWords, jobBusy, readSteps, refShort, type ReadStep } from '../lib/requirements';
 import { useReqAct } from '../lib/requirementsData';
-import { Cmd, ROLE_NAME } from './ui';
+import { Cmd, ROLE_NAME, Written } from './ui';
 import { ErrorCard } from './ErrorCard';
 import { useDraft } from '../lib/drafts';
+import { langProps, typedDir } from '../lib/lang';
 
 /**
  * The breakdown before there is one to edit: the Analyst reading the document live, its questions, and the card when
@@ -78,7 +79,7 @@ export function ReadingCard({ v }: { v: BreakdownView }) {
                 {s.title}
                 <span className="sr-only">: {STATE_WORDS[s.state]}</span>
               </b>
-              <span>{s.sub}</span>
+              <Written text={s.sub} />
               {s.bar && s.state === 'now' && (
                 <span className="rq-readbar" role="progressbar" aria-valuemin={0} aria-valuemax={s.bar.of} aria-valuenow={s.bar.done} aria-label="How far the Analyst read">
                   <i style={{ flexGrow: Math.max(0, s.bar.done) }} />
@@ -115,7 +116,7 @@ export function FailedCard({ v }: { v: BreakdownView }) {
     <ErrorCard
       calm={stopped}
       title={title}
-      what={afterTitle(v.error ?? v.state.job?.error ?? 'The read did not get through.', title)}
+      what={<Written as="div" text={afterTitle(v.error ?? v.state.job?.error ?? 'The read did not get through.', title)} />}
       safe={['Your document is saved.', ...(v.epics.length ? ['What the Analyst wrote so far is kept.'] : [])]}
       hint={<Cmd text={`squad requirements ${capped ? 'more' : 'retry'} ${v.id}`} />}
       ways={
@@ -180,7 +181,7 @@ export function QuestionsView({ v, onOpenRef }: { v: BreakdownView; onOpenRef(re
       </p>
       {v.state.job?.status === 'failed' && v.state.job.step === 'reply' && (
         <div className="rq-err" role="alert">
-          The Analyst could not answer your question{v.state.job.error ? `: ${v.state.job.error}` : '.'}{' '}
+          The Analyst could not answer your question{v.state.job.error ? <>: <Written text={v.state.job.error} /></> : '.'}{' '}
           {v.mine && (
             <button className="rq-link" onClick={() => act.mutate({ path: `${base(v.id)}/${v.state.job?.capped ? 'more' : 'retry'}`, done: 'The Analyst tries to answer again.' })}>
               {v.state.job.capped ? 'Give it more' : 'Try again'}
@@ -190,7 +191,7 @@ export function QuestionsView({ v, onOpenRef }: { v: BreakdownView; onOpenRef(re
       )}
       {v.state.job?.heldFor === 'budget' && v.state.job.step === 'reply' && (
         <div className="rq-jobline" role="status">
-          {v.state.job.now}
+          <Written text={v.state.job.now ?? ''} />
           <CarryOn v={v} />
         </div>
       )}
@@ -248,21 +249,21 @@ function QuestionCard({
             <span key={i}>
               {i > 0 && (i === (q.refs?.length ?? 0) - 1 ? ' and ' : ', ')}
               <button className="rq-link" onClick={() => onOpenRef(r)} title="Open this place in the document">
-                {refShort(r)}
+                <Written text={refShort(r)} />
               </button>
             </span>
           ))}
           {q.refs?.length && q.impact ? ' · ' : ''}
-          {q.impact}
+          {q.impact && <Written text={q.impact} />}
         </span>
       </div>
-      <div className="rq-qt">{q.text}</div>
+      <Written as="div" className="rq-qt" text={q.text} />
       {(q.thread?.length || q.thinking) && (
-        <div className="thread">
+        <div className="thread" dir={langProps(q.text).dir}>
           {q.thread?.map((m, i) => (
             <div key={i} className={`msg ${m.who === 'you' ? '' : 'squad'}`}>
               <small>{m.who === 'you' ? 'You' : ROLE_NAME[m.who]}</small>
-              {m.text}
+              <Written as="div" text={m.text} />
             </div>
           ))}
           {q.thinking && (
@@ -278,20 +279,20 @@ function QuestionCard({
         </div>
       )}
       {q.options.map((o) => (
-        <label key={o} className={`rq-opt ${answer?.choice === o ? 'on' : ''}`}>
+        <label key={o} className={`rq-opt ${answer?.choice === o ? 'on' : ''}`} {...langProps(o)}>
           <input type="radio" name={name} checked={answer?.choice === o} onChange={() => onAnswer({ choice: o })} disabled={!v.mine} />
-          {o}
+          <Written text={o} />
         </label>
       ))}
       <label className={`rq-opt ${other ? 'on' : ''}`}>
         <input type="radio" name={name} checked={other} onChange={() => onAnswer({ choice: 'Other', value: answer?.value ?? '' })} disabled={!v.mine} />
         Something else…
       </label>
-      {other && <input className="input rq-own" autoFocus aria-label="Your answer" placeholder="Your answer" value={answer?.value ?? ''} onChange={(e) => onAnswer({ choice: 'Other', value: e.target.value })} />}
+      {other && <input className="input rq-own" autoFocus aria-label="Your answer" placeholder="Your answer" dir={typedDir(answer?.value ?? '')} value={answer?.value ?? ''} onChange={(e) => onAnswer({ choice: 'Other', value: e.target.value })} />}
       {v.mine &&
         (asking ? (
           <div className="askrow">
-            <input className="input" autoFocus value={text} onChange={(e) => setText(e.target.value)} placeholder="Ask the Analyst about this question" aria-label="Your question to the Analyst" onKeyDown={(e) => e.key === 'Enter' && ask()} />
+            <input className="input" autoFocus dir={typedDir(text)} value={text} onChange={(e) => setText(e.target.value)} placeholder="Ask the Analyst about this question" aria-label="Your question to the Analyst" onKeyDown={(e) => e.key === 'Enter' && ask()} />
             <button className="btn" onClick={ask} disabled={!text.trim() || act.isPending}>
               Ask
             </button>

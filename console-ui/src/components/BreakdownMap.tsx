@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEven
 import { X } from 'lucide-react';
 import type { BreakdownView } from '../api/requirements-types';
 import { useBoard } from '../lib/data';
+import { Written } from './ui';
 import { MAP, chipKind, findPart, firstScale, firstSentence, fitScale, mapLayout, popPlace, stopTag, waitingOn, type MapBox } from '../lib/requirements';
 
 /**
@@ -138,15 +139,13 @@ export function BreakdownMap({ v, selected, onSelect, onDecide }: { v: Breakdown
                     onFocus={() => setHover(b.key)}
                     onBlur={() => setHover(null)}
                   >
-                    <span className="rq-chipt">
-                      <em>{b.key}</em> {b.title}
-                    </span>
+                    <Written className="rq-chipt" lead={<em>{b.key}</em>} text={b.title} />
                   </button>
                 );
               const pct = b.done?.of ? Math.round((b.done.done / b.done.of) * 100) : 0;
               return (
                 <button key={b.key} className={`rq-box ${b.level} ${selected === b.key ? 'sel' : ''}`} style={style} onClick={() => click(b)} title={b.title} aria-label={`${b.level === 'epic' ? 'Epic' : 'Feature'} ${b.key} ${b.title}, ${b.done?.done ?? 0} of ${b.done?.of ?? 0} merged`}>
-                  <span className="n">{b.title}</span>
+                  <Written className="n" text={b.title} />
                   <span className="p">
                     <i>
                       <b style={{ width: `${pct}%` }} />
@@ -162,7 +161,7 @@ export function BreakdownMap({ v, selected, onSelect, onDecide }: { v: Breakdown
                   <X size={13} />
                 </button>
                 <div className="rq-pop-w">{[popBox.key, popP.ticket, stopTag(popP.stop)].filter(Boolean).join(' · ')}</div>
-                <div className="rq-pop-t">{headline}</div>
+                <Written as="div" className="rq-pop-t" text={headline} />
                 <div className="rq-pop-s">
                   {popWaits.length ? `${popWaits.join(', ')} ${popWaits.length === 1 ? 'waits' : 'wait'} for it. ` : ''}
                   {v.state.build?.on ? 'Everything else keeps going.' : ''}

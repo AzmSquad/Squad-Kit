@@ -8,8 +8,9 @@ import type { ReportAsk } from '../lib/report';
 import { shellQuote } from '../lib/text';
 import { OpenInEditor } from './Changes';
 import { ReportButton } from './Report';
-import { Cmd } from './ui';
+import { Cmd, Written } from './ui';
 import { useDraft } from '../lib/drafts';
+import { typedDir } from '../lib/lang';
 
 /**
  * Every error the person sees, one way (phase 10): what happened in plain words, what is safe, and the ways out as
@@ -125,15 +126,15 @@ export function StuckCard({ t, extra }: { t: Ticket; extra?: ReactNode }) {
         what={
           t.stuck?.points?.length ? (
             <>
-              {t.stuck.question}
+              <Written as="div" text={t.stuck.question} />
               <ul className="errcard-points">
                 {t.stuck.points.map((p) => (
-                  <li key={p}>{p}</li>
+                  <Written as="li" key={p} text={p} />
                 ))}
               </ul>
             </>
           ) : (
-            (t.stuck?.question ?? '')
+            <Written as="div" text={t.stuck?.question ?? ''} />
           )
         }
         safe={t.stuck?.safe ?? ['Nothing was lost: the work so far is kept.']}
@@ -153,7 +154,7 @@ export function StuckCard({ t, extra }: { t: Ticket; extra?: ReactNode }) {
       {open === 'note' && (
         <>
           <div className="lbl">A note for the squad (optional)</div>
-          <textarea className="waynote" rows={2} value={text} onChange={(e) => setText(e.target.value)} placeholder="For example: the test server needs the VPN, it is on now" />
+          <textarea className="waynote" rows={2} dir={typedDir(text)} value={text} onChange={(e) => setText(e.target.value)} placeholder="For example: the test server needs the VPN, it is on now" />
           <p className="note" style={{ fontSize: 12.5 }}>
             The squad reads it first when you press {retry?.label ?? 'Try again'}.
           </p>
@@ -162,7 +163,7 @@ export function StuckCard({ t, extra }: { t: Ticket; extra?: ReactNode }) {
       {open === 'reason' && pending && (
         <>
           <div className="lbl">{pending.way === 'skip-hooks' ? 'Why save it without the check?' : 'Why continue anyway?'}</div>
-          <textarea className="waynote" rows={2} value={text} onChange={(e) => setText(e.target.value)} placeholder={pending.way === 'skip-hooks' ? 'For example: the check needs a licence this laptop does not have' : 'For example: the failing test is broken on main too, fixed in SK-160'} />
+          <textarea className="waynote" rows={2} dir={typedDir(text)} value={text} onChange={(e) => setText(e.target.value)} placeholder={pending.way === 'skip-hooks' ? 'For example: the check needs a licence this laptop does not have' : 'For example: the failing test is broken on main too, fixed in SK-160'} />
           <p className="note" style={{ fontSize: 12.5 }}>Only you can do this. Your reason shows on the ticket, the pull request and the release notes.</p>
           <div className="errcard-confirm">
             <button className="btn pri" disabled={!text.trim() || act.isPending} onClick={() => decide(pending.index, { reason: text }, 'Decided. The squad carries on.')}>

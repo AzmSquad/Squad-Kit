@@ -4,6 +4,8 @@ import type { Criterion, PlanComment, PlanPart, Ticket } from '../api/types';
 import { useAct } from '../lib/data';
 import { clearDraft, draftKey, useDraft } from '../lib/drafts';
 import { PROJECT } from '../api/client';
+import { typedDir, type Dir } from '../lib/lang';
+import { Written } from './ui';
 
 /** Review a spec or design like a document: comment on any part, or edit it yourself. */
 export interface Review {
@@ -16,7 +18,7 @@ export interface Review {
 
 const same = (a: PlanPart, b: PlanPart) => a.part === b.part && (a.index ?? 0) === (b.index ?? 0);
 
-export function Part({ review, at, children }: { review?: Review; at: PlanPart; children: ReactNode }) {
+export function Part({ review, at, dir, children }: { review?: Review; at: PlanPart; dir?: Dir; children: ReactNode }) {
   const [text, setText] = useDraft(review?.t.id ?? 'none', `comment-${at.part}-${at.index ?? 0}`, '');
   const [mode, setMode] = useState<'comment' | 'edit' | null>(text ? 'comment' : null);
   if (!review) return <>{children}</>;
@@ -27,7 +29,7 @@ export function Part({ review, at, children }: { review?: Review; at: PlanPart; 
     setMode(null);
   };
   return (
-    <div className={`part ${mode ? 'open' : ''}`}>
+    <div className={`part ${mode ? 'open' : ''}`} dir={dir}>
       <div className="partbody">
         <div className="partmain">{mode === 'edit' ? <EditPart review={review} at={at} onDone={() => setMode(null)} /> : children}</div>
         {mode !== 'edit' && (
@@ -45,7 +47,7 @@ export function Part({ review, at, children }: { review?: Review; at: PlanPart; 
       </div>
       {mine.map(({ c, i }) => (
         <div className="pcomment" key={i}>
-          <MessageSquare size={12} /> <span>{c.text}</span>
+          <MessageSquare size={12} /> <Written text={c.text} />
           <button className="iconbtn" aria-label="Remove comment" onClick={() => review.remove(i)}>
             <X size={12} />
           </button>
@@ -56,6 +58,7 @@ export function Part({ review, at, children }: { review?: Review; at: PlanPart; 
           <input
             className="input"
             autoFocus
+            dir={typedDir(text)}
             value={text}
             placeholder="Your comment on this part. Enter to add"
             onChange={(e) => setText(e.target.value)}
@@ -96,11 +99,11 @@ function EditPart({ review, at, onDone }: { review: Review; at: PlanPart; onDone
         (['given', 'when', 'then'] as const).map((k) => (
           <label key={k}>
             <em>{k[0]!.toUpperCase() + k.slice(1)}</em>
-            <input className="input" value={c[k]} onChange={(e) => setC({ ...c, [k]: e.target.value })} />
+            <input className="input" dir={typedDir(c[k])} value={c[k]} onChange={(e) => setC({ ...c, [k]: e.target.value })} />
           </label>
         ))
       ) : (
-        <textarea className="waynote" rows={at.part === 'story' ? 3 : 2} autoFocus value={text} onChange={(e) => setText(e.target.value)} />
+        <textarea className="waynote" rows={at.part === 'story' ? 3 : 2} autoFocus dir={typedDir(text)} value={text} onChange={(e) => setText(e.target.value)} />
       )}
       <div className="editbtns">
         <button className="btn sm pri" disabled={act.isPending} onClick={save}>
@@ -140,15 +143,15 @@ export function WhatChanged({ t }: { t: Ticket }) {
             <div className="sentlist">
               Your comments:{' '}
               {t.planReview!.sent!.map((c, i) => (
-                <span key={i}>“{c.text}”</span>
+                <Written key={i} text={`“${c.text}”`} />
               ))}
             </div>
           )}
           {rows.map((r) => (
             <div className="chrow" key={r.label}>
               <div className="chlabel">{r.label}</div>
-              <div className={r.old ? 'chold' : 'chold empty'}>{r.old || <i>new</i>}</div>
-              <div className="chnew">{r.now || <i>removed</i>}</div>
+              {r.old ? <Written as="div" className="chold" text={r.old} /> : <div className="chold empty"><i>new</i></div>}
+              {r.now ? <Written as="div" className="chnew" text={r.now} /> : <div className="chnew"><i>removed</i></div>}
             </div>
           ))}
         </>

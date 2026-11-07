@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, ExternalLink, X } from 'lucide-react';
+import { Written } from './ui';
 
 export interface Picture {
   src: string;
@@ -25,7 +26,7 @@ export function Lightbox({ pictures, start, onClose }: { pictures: Picture[]; st
   return (
     <div className="lightbox" role="dialog" aria-modal="true" aria-label={pic.caption} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="lb-top">
-        <span className="lb-cap">{pic.caption}</span>
+        <Written className="lb-cap" text={pic.caption} />
         {n > 1 && <span className="lb-count">{i + 1} of {n}</span>}
         <span className="grow" />
         <a className="iconbtn" href={pic.src} target="_blank" rel="noreferrer" aria-label="Open in a new tab" title="Open in a new tab">

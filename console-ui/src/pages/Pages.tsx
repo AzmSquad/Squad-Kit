@@ -15,12 +15,13 @@ import { PaymentSettings } from '../components/Usage';
 import { GuardAllows } from '../components/Sandbox';
 import { PartsSettings } from '../components/Parts';
 import { ProjectFiles } from '../components/ProjectFiles';
-import { Cmd, CouldNotLoad, Modal, STAGE_NAME, actionLabel, ago, commandFor, outdatedLine } from '../components/ui';
+import { Cmd, CouldNotLoad, Modal, Runs, STAGE_NAME, Written, actionLabel, ago, commandFor, outdatedLine } from '../components/ui';
 import { changeWaits, openChange } from '../components/ChangeCard';
 import { NoticeSetting } from '../components/Waiting';
 import { needsYou, testChangeLine, testChangeWaits } from '../lib/waiting';
 import { BreakdownWaitCard, WaitStopTag, useBreakdownWaits } from '../components/BreakdownWaits';
 import { stopKind } from '../lib/auto';
+import { langProps } from '../lib/lang';
 
 /* ── Waiting for you ───────────────────────────────────── */
 
@@ -61,8 +62,8 @@ export function InboxPage() {
                       <span>{STAGE_NAME[t.stage]}</span>
                       <span>{ago(t.activity[0]?.at ?? t.createdAt)}</span>
                     </div>
-                    <h3>{t.title}</h3>
-                    <p>{stopKind(t) && t.agentQuestion ? `“${t.agentQuestion.text}”` : t.waiting?.summary ?? (changeWaits(t) ? `Change ${openChange(t)!.id} to the spec waits for you` : testChangeWaits(t) ? testChangeLine(t) : t.outdated?.length ? outdatedLine(t) : `Looks stuck: ${t.quiet?.detail ?? 'no progress'}`)}</p>
+                    <Written as="h3" text={t.title} />
+                    <Written as="p" text={stopKind(t) && t.agentQuestion ? `“${t.agentQuestion.text}”` : t.waiting?.summary ?? (changeWaits(t) ? `Change ${openChange(t)!.id} to the spec waits for you` : testChangeWaits(t) ? testChangeLine(t) : t.outdated?.length ? outdatedLine(t) : `Looks stuck: ${t.quiet?.detail ?? 'no progress'}`)} />
                   </div>
                   <Cmd text={!t.waiting && changeWaits(t) ? `squad propose ${t.id} --approve` : !t.waiting && testChangeWaits(t) ? `squad test-command ${t.id} --use` : commandFor(t)} />
                   {t.waiting?.kind === 'proof' ? (
@@ -116,12 +117,12 @@ export function BugsPage() {
                 {bugs.map((t) => (
                   <tr key={t.id}>
                     <td className="mono">{t.id}</td>
-                    <td>
-                      <Link to="/board" search={{ ticket: t.id }} style={{ fontWeight: 600 }}>{t.title}</Link>
+                    <td {...langProps(t.title)}>
+                      <Link to="/board" search={{ ticket: t.id }} style={{ fontWeight: 600 }}><Runs text={t.title} dir={langProps(t.title).dir} /></Link>
                     </td>
                     <td>{t.foundIn ?? ''}</td>
                     <td>{STAGE_NAME[t.stage]}</td>
-                    <td style={{ color: t.waiting ? 'var(--you-ink)' : 'var(--muted)' }}>{t.waiting?.summary ?? t.status}</td>
+                    <td style={{ color: t.waiting ? 'var(--you-ink)' : 'var(--muted)' }} {...langProps(t.waiting?.summary ?? t.status)}><Runs text={t.waiting?.summary ?? t.status} dir={langProps(t.waiting?.summary ?? t.status).dir} /></td>
                   </tr>
                 ))}
               </tbody>
@@ -194,7 +195,7 @@ function RepoSettings({ repo, multi }: { repo: RepoInfo; multi: boolean }) {
       {multi && (
         <h3 className="mono" style={{ fontSize: 14, margin: '18px 0 2px' }}>
           {repo.path}
-          {repo.summary && <span className="note" style={{ fontFamily: 'inherit', marginLeft: 8 }}>{repo.summary}</span>}
+          {repo.summary && <Written className="note" style={{ fontFamily: 'inherit', marginLeft: 8 }} text={repo.summary} />}
         </h3>
       )}
       {COMMAND_FIELDS.map((f) => (

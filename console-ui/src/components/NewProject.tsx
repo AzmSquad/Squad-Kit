@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { send } from '../api/client';
 import type { AppProject } from '../api/types';
 import { useDraft } from '../lib/drafts';
+import { typedDir } from '../lib/lang';
 import { shellQuote } from '../lib/text';
 import { BrdDrop, readBrd, stem } from './BreakdownDialogs';
 import type { PickedFile } from './dialogs';
@@ -102,12 +103,12 @@ export function NewProject({ onClose }: { onClose(): void }) {
         {mode === 'idea' ? (
           <div className="field">
             <label htmlFor="np-idea">What do you want to build?</label>
-            <textarea id="np-idea" className="textarea" dir="auto" autoFocus rows={4} value={idea} onChange={(e) => setIdea(e.target.value)} placeholder="In your own words, in Arabic or English. Who will use it, and what will they do?" />
+            <textarea id="np-idea" className="textarea" dir={typedDir(idea)} autoFocus rows={4} value={idea} onChange={(e) => setIdea(e.target.value)} placeholder="In your own words, in Arabic or English. Who will use it, and what will they do?" />
           </div>
         ) : paste ? (
           <div className="field">
             <label htmlFor="np-paste">The BRD's text</label>
-            <textarea id="np-paste" className="textarea rq-pastebox" dir="auto" autoFocus value={text} onChange={(e) => setText(e.target.value)} placeholder="Paste the whole document here. Headings help the Analyst find its parts." />
+            <textarea id="np-paste" className="textarea rq-pastebox" dir={typedDir(text)} autoFocus value={text} onChange={(e) => setText(e.target.value)} placeholder="Paste the whole document here. Headings help the Analyst find its parts." />
             <div className="rq-hint">
               Have the file?{' '}
               <button className="rq-link" onClick={() => setPaste(false)}>
@@ -131,7 +132,7 @@ export function NewProject({ onClose }: { onClose(): void }) {
           <input
             id="np-name"
             className="input"
-            dir="auto"
+            dir={typedDir(name)}
             value={name}
             placeholder="Visitor log"
             onChange={(e) => {

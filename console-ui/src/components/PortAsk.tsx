@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { Ticket } from '../api/types';
 import { useAct } from '../lib/data';
 import { shellQuote } from '../lib/text';
-import { Cmd, Modal } from './ui';
+import { Cmd, Modal, Written } from './ui';
 
 /**
  * A program squad-kit did not start is in the Builder's way. squad-kit stops its own leftovers and goes around the rest
@@ -30,8 +30,8 @@ export function PortAskPanel({ t }: { t: Ticket }) {
           </div>
         </div>
         <div className="lbl">What is in the way</div>
-        <p className="stuckq">{q.text}</p>
-        {q.why && <p className="note">{q.why}</p>}
+        <Written as="p" className="stuckq" text={q.text} />
+        {q.why && <Written as="p" className="note" text={q.why} />}
         <details className="costdetails">
           <summary>Details for engineers</summary>
           <p className="note">

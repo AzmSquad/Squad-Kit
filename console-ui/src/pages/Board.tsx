@@ -6,7 +6,7 @@ import { api } from '../api/client';
 import type { Actor, BrokenTicket, DraftJob, Stage, Ticket, TrackerStatus } from '../api/types';
 import { useBoard } from '../lib/data';
 import { BugDialog, NewTicketDialog, PullDialog } from '../components/dialogs';
-import { Cmd, CouldNotLoad, Glyph, STAGE_NAME } from '../components/ui';
+import { Cmd, CouldNotLoad, Glyph, STAGE_NAME, Written } from '../components/ui';
 import { TicketDrawer } from './TicketDrawer';
 import { BoardCost } from '../components/Usage';
 import { isMine, ownerOf, useMe } from '../components/HandOver';
@@ -15,6 +15,7 @@ import { CardLine, isRunning } from '../components/LiveNow';
 import { DependsTag } from '../components/Depends';
 import { needsYou, testChangeWaits } from '../lib/waiting';
 import { NOT_CHECKED_WHY } from '../lib/gates';
+import { typedDir } from '../lib/lang';
 import { SetupCard, useSetupWaits } from '../components/Setup';
 import { CardAutoTag, CardBreakdownKey } from '../components/AutoTicket';
 
@@ -83,7 +84,7 @@ export function BoardPage() {
         <span className="grow" />
         <label className="search">
           <Search size={15} />
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search tickets" aria-label="Search tickets" />
+          <input dir={typedDir(query)} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search tickets" aria-label="Search tickets" />
         </label>
         <PullButton onPull={() => setDialog('pull')} />
         <button className="btn pri" onClick={() => setDialog('new')}>
@@ -184,7 +185,7 @@ function Card({ t, selected, onOpen }: { t: Ticket; selected: boolean; onOpen():
         {t.track === 'express' && <span className="prio express">Express</span>}
         <CardAutoTag t={t} />
         {you ? <span className="youtag">You</span> : t.kind === 'bug' ? <span className="prio">Bug</span> : t.priority === 'high' ? <span className="prio">High</span> : null}
-        {me && !isMine(t, me) && <span className="prio owner" title="Their squad works on it">{ownerOf(t)}</span>}
+        {me && !isMine(t, me) && <Written className="prio owner" title="Their squad works on it" text={ownerOf(t)} />}
         {t.archived && <span className="prio owner">Archived</span>}
         {t.gates?.checks === 'unchecked' && (
           <span className="prio unchecked" title={NOT_CHECKED_WHY}>
@@ -193,7 +194,7 @@ function Card({ t, selected, onOpen }: { t: Ticket; selected: boolean; onOpen():
         )}
         <DependsTag t={t} />
       </div>
-      <h4>{t.title}</h4>
+      <Written as="h4" text={t.title} />
       <CardBreakdownKey t={t} />
       {/* Running: who, which step, what it does, how long and the usual time, with the step bar. */}
       {isRunning(t) && !you ? (
@@ -202,7 +203,7 @@ function Card({ t, selected, onOpen }: { t: Ticket; selected: boolean; onOpen():
         <>
           <div className="st">
             {t.live && !you ? <span className="live" /> : t.stage === 'release' ? <Check size={13} strokeWidth={2.5} /> : null}
-            <span>{t.quiet ? (t.quiet.kind === 'stuck' ? `Looks stuck: ${t.quiet.command ?? 'no progress'}` : `Taking long: ${t.quiet.command ?? t.status}`) : t.status}</span>
+            <Written text={t.quiet ? (t.quiet.kind === 'stuck' ? `Looks stuck: ${t.quiet.command ?? 'no progress'}` : `Taking long: ${t.quiet.command ?? t.status}`) : t.status} />
           </div>
           {typeof t.progress === 'number' && !you && (
             <div className="bar">

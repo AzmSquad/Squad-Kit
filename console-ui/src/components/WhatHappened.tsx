@@ -5,7 +5,8 @@ import { api, assetUrl } from '../api/client';
 import type { Ticket } from '../api/types';
 import type { HandedIn, Happened, HappenedStep, SessionKey } from '../api/tabs';
 import { Lightbox, type Picture } from './Lightbox';
-import { clock } from './ui';
+import { langProps } from '../lib/lang';
+import { Written, clock } from './ui';
 import '../styles/tabs.css';
 
 /**
@@ -63,7 +64,7 @@ function StepCard({ s, t, onTab, onLog }: { s: HappenedStep; t: Ticket; onTab?: 
         <span className="grow" />
         {s.to && !s.running && <span className="hat">{clock(s.to)}</span>}
       </div>
-      <p className="hsum">{s.summary}</p>
+      <Written as="p" className="hsum" text={s.summary} />
       {s.handedIn && <Got h={s.handedIn} tab={s.tab} onTab={onTab} ticket={t} />}
       {s.session && (s.actions ?? 0) > 0 && (
         <button className="linkbtn hmore" onClick={() => onLog(s.session!)}>
@@ -132,7 +133,7 @@ function GotBody({ h, ticket }: { h: HandedIn; ticket: Ticket }) {
     case 'checks':
       return (
         <span>
-          <span className={`pill ${h.ok ? 'ok' : 'bug'}`}>{h.ok ? 'Pass' : 'Failed'}</span> {h.text}
+          <span className={`pill ${h.ok ? 'ok' : 'bug'}`}>{h.ok ? 'Pass' : 'Failed'}</span> <Written text={h.text} />
         </span>
       );
     case 'verdict':
@@ -142,7 +143,7 @@ function GotBody({ h, ticket }: { h: HandedIn; ticket: Ticket }) {
           {h.notes.length > 0 && (
             <ul className="hlist">
               {h.notes.map((n, i) => (
-                <li key={i}>{n}</li>
+                <Written as="li" key={i} text={n} />
               ))}
             </ul>
           )}
@@ -159,9 +160,9 @@ function Questions({ items }: { items: Extract<HandedIn, { kind: 'questions' }>[
     <>
       <ol className="hlist">
         {shown.map((q, i) => (
-          <li key={i}>
-            {q.text}
-            {q.answer && <span className="hans">You: {q.answer}</span>}
+          <li key={i} {...langProps(q.text)}>
+            <Written text={q.text} />
+            {q.answer && <Written className="hans" lead="You:" text={q.answer} />}
           </li>
         ))}
       </ol>
@@ -174,13 +175,13 @@ function Spec({ story, criteria }: { story?: string; criteria: string[] }) {
   const { shown, more } = useMore(criteria);
   return (
     <>
-      {story && <p className="hstory">{story}</p>}
+      {story && <Written as="p" className="hstory" text={story} />}
       {criteria.length > 0 && (
         <>
           <span className="hsub">Done when</span>
           <ul className="hlist">
             {shown.map((c, i) => (
-              <li key={i}>{c}</li>
+              <Written as="li" key={i} text={c} />
             ))}
           </ul>
           {more}
@@ -196,9 +197,9 @@ function Design({ h }: { h: Extract<HandedIn, { kind: 'design' }> }) {
   return (
     <>
       {h.title && (
-        <p className="hstory">
-          <b>{h.title}</b>
-          {h.chosen ? `: ${h.chosen}` : ''}
+        <p className="hstory" {...langProps(h.title)}>
+          <Written as="b" text={h.title} />
+          {h.chosen ? <Written text={`: ${h.chosen}`} /> : ''}
         </p>
       )}
       {h.steps.length > 0 && (
@@ -206,7 +207,7 @@ function Design({ h }: { h: Extract<HandedIn, { kind: 'design' }> }) {
           <span className="hsub">{h.steps.length} {h.steps.length === 1 ? 'step' : 'steps'} to build</span>
           <ol className="hlist">
             {shown.map((s, i) => (
-              <li key={i}>{s}</li>
+              <Written as="li" key={i} text={s} />
             ))}
           </ol>
           {more}
@@ -227,7 +228,7 @@ function Files({ h }: { h: Extract<HandedIn, { kind: 'files' }> }) {
     return (
       <ol className="hlist">
         {h.steps.map((s, i) => (
-          <li key={i}>{s}</li>
+          <Written as="li" key={i} text={s} />
         ))}
       </ol>
     );
@@ -253,7 +254,7 @@ function Shots({ shots, ticket }: { shots: { criterion: string; file: string }[]
         {pictures.map((p, i) => (
           <button key={p.src} className="zoom" onClick={() => setZoom(i)} aria-label={`Open the screenshot for ${p.caption} full size`}>
             <img src={p.src} alt={`${ticket.id}: ${p.caption}`} loading="lazy" />
-            <small>{p.caption}</small>
+            <Written as="small" text={p.caption} />
           </button>
         ))}
       </div>

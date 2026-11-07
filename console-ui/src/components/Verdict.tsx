@@ -5,6 +5,8 @@ import { pageOf, waitsAtReview } from '../lib/review';
 import { isApiProof, notOnScreen, verdictClass, verdictWord } from '../lib/verdict';
 import '../styles/verdict.css';
 import { ApiProof } from './ApiProof';
+import { detect, langProps } from '../lib/lang';
+import { Written } from './ui';
 
 /**
  * What each proof picture shows: its "done when" is Met, Not working yet, Not shown yet or Not on a screen, with why.
@@ -43,7 +45,7 @@ export function MorePictures({ shot, first, onOpen }: { shot: ProofShot; first: 
               <img src={assetUrl(`/api/v1/proof/${m.after}`)} alt={`${shot.criterion}, ${m.note || `picture ${i + 2}`}`} loading="lazy" />
             </button>}
             <figcaption>
-              {m.note && <span>{m.note}</span>}
+              {m.note && <Written text={m.note} />}
               {pageOf(m) && <code>{pageOf(m)}</code>}
             </figcaption>
           </figure>
@@ -58,9 +60,7 @@ export function AlsoChanged({ t, className }: { t: Pick<Ticket, 'alsoChanged' | 
   return (
     <>
       {Boolean(t.alsoChanged?.length) && (
-        <p className={`note alsochanged${className ? ` ${className}` : ''}`}>
-          <b>Also changed, not in the plan:</b> {t.alsoChanged!.join('; ')}.
-        </p>
+        <Written as="p" className={`note alsochanged${className ? ` ${className}` : ''}`} lead={<b>Also changed, not in the plan:</b>} text={`${t.alsoChanged!.join('; ')}.`} />
       )}
       <TeamResults t={t} />
     </>
@@ -84,17 +84,17 @@ function TeamResults({ t }: { t: Pick<Ticket, 'added'> }) {
       {t.added.map((r) => (
         <div key={r.id}>
           <div className="teamtop">
-            <b dir="auto">{r.name}</b>
+            <Written as="b" text={r.name} />
             {r.result && <span className={`pill ${GATE_WORD[r.result][1]}`}>{GATE_WORD[r.result][0]}</span>}
             {r.state === 'try' && <small>On Try first, it stops nothing</small>}
           </div>
-          {r.why && <p className="note">{r.why}</p>}
+          {r.why && <Written as="p" className="note" text={r.why} />}
           {r.answers && (
-            <ol dir="auto">
+            <ol dir={detect(r.answers.map((a) => a.question).join(' ')).dir}>
               {r.answers.map((a) => (
-                <li key={a.question}>
-                  {a.question} <b className={a.answer === 'no' ? 'no' : ''}>{a.answer === 'yes' ? 'Yes' : a.answer === 'no' ? 'No' : 'Not answered'}</b>
-                  {a.why && <small> {a.why}</small>}
+                <li key={a.question} {...langProps(a.question)}>
+                  <Written text={a.question} /> <b className={a.answer === 'no' ? 'no' : ''}>{a.answer === 'yes' ? 'Yes' : a.answer === 'no' ? 'No' : 'Not answered'}</b>
+                  {a.why && <Written as="small" text={` ${a.why}`} />}
                 </li>
               ))}
             </ol>
@@ -114,8 +114,8 @@ export function OffScreenList({ t }: { t: Pick<Ticket, 'offScreen' | 'waiting' |
       <ul>
         {t.offScreen.map((o) => (
           <li key={o.criterion}>
-            <b>{o.criterion}</b>
-            <span>{o.why}</span>
+            <Written as="b" text={o.criterion} />
+            <Written text={o.why} />
           </li>
         ))}
       </ul>
@@ -136,8 +136,8 @@ export function LookYourself({ t }: { t: Pick<Ticket, 'proof' | 'offScreen'> }) 
       <ul>
         {rows.map((o) => (
           <li key={o.criterion}>
-            <b>{o.criterion}</b>
-            <span>{o.why}</span>
+            <Written as="b" text={o.criterion} />
+            <Written text={o.why} />
           </li>
         ))}
       </ul>

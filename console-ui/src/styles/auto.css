@@ -58,4 +58,4 @@ ul.decided .linkbtn { margin-top: 2px; }
 .decidedq { font-size: 13.5px; line-height: 1.45; padding: 10px 12px; border-radius: 9px; background: var(--surface-2); margin-bottom: 12px; }
 
 /* A breakdown waiting for answers, in Waiting for you. */
-.yitem .yline .stoptag, .wcard .meta .stoptag { margin-right: 6px; }
+.yitem .yline .stoptag, .wcard .meta .stoptag { margin-inline-end: 6px; }

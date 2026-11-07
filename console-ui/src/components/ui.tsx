@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useState, type HTMLAttributes, type ReactNode } from 'react';
 import { ArrowUp, Bug, Check, Code, Copy, Eye, Search, SquareCheck, Triangle, User, X, PenLine, Users } from 'lucide-react';
 import type { Actor, Stage, Ticket } from '../api/types';
 import { usePrefs } from '../lib/prefs';
 import { loadTrouble } from '../lib/load-trouble';
+import { detect, runs, type Dir } from '../lib/lang';
 
 export const ROLE_NAME: Record<Actor, string> = {
   analyst: 'Analyst',
@@ -39,6 +40,57 @@ export function Glyph({ role, small, size }: { role: Actor; small?: boolean; siz
   );
 }
 
+/** The other language inside a line, in its own order: a ticket number or an English word in Arabic keeps its place. */
+export function Runs({ text, dir }: { text: string; dir: Dir }) {
+  return <>{runs(String(text ?? ''), dir).map((r, i) => (r.dir ? <bdi key={i} dir={r.dir}>{r.text}</bdi> : r.text))}</>;
+}
+
+/**
+ * Words a person or an agent wrote, in the frame the app draws around them. They run the way their own language runs,
+ * each piece by itself, as a chat message does (lib/lang). `lead` is the frame's own word or a ticket number in front:
+ * it stays in its own order and does not count towards the direction.
+ */
+export function Written({
+  text,
+  lead,
+  as: Tag = 'span',
+  children,
+  ...attrs
+}: { text: string; lead?: ReactNode; as?: 'span' | 'div' | 'p' | 'b' | 'small' | 'li' | 'h1' | 'h2' | 'h3' | 'h4' } & HTMLAttributes<HTMLElement>) {
+  const { dir } = detect(text);
+  return (
+    <Tag {...attrs} dir={dir} lang={dir === 'rtl' ? 'ar' : 'en'}>
+      {lead && (
+        <>
+          {dir === 'rtl' ? <bdi dir="ltr">{lead}</bdi> : lead}{' '}
+        </>
+      )}
+      <Runs text={text} dir={dir} />
+      {children}
+    </Tag>
+  );
+}
+
+/** Text that keeps its line breaks: each line runs its own way, so an Arabic line and an English line sit side by side. */
+export function WrittenLines({ text, as: Tag = 'div', ...attrs }: { text: string; as?: 'div' | 'p' } & HTMLAttributes<HTMLElement>) {
+  return <Tag {...attrs}>{text.trimEnd().split('\n').map((l, i) => (l.trim() ? <Written key={i} className="wline" text={l} /> : <br key={i} />))}</Tag>;
+}
+
+/** "Payments › Invoices": a path of names people wrote. The frame keeps its order, each name keeps its own. */
+export function Place({ path }: { path: string }) {
+  if (!detect(path).share) return <>{path}</>;
+  return (
+    <>
+      {path.split(' › ').map((p, i) => (
+        <Fragment key={i}>
+          {i > 0 && ' › '}
+          <Written text={p} />
+        </Fragment>
+      ))}
+    </>
+  );
+}
+
 /**
  * The terminal command for an action, one click to copy. Hidden when "Show commands" is off. `keep`: the end of the
  * command (an id and its options) that stays in sight when the command is cut short; the start gives way first.
@@ -54,7 +106,7 @@ export function Cmd({ text, keep }: { text: string; keep?: string }) {
   };
   const cut = keep && text.endsWith(keep) && text.length > keep.length ? text.length - keep.length : 0;
   return (
-    <span className="term" title="The same action in the terminal">
+    <span className="term" dir="ltr" title="The same action in the terminal">
       <b>&gt;_</b>
       {cut ? (
         <>
@@ -136,7 +188,7 @@ export function Modal({
       <div className={`modal ${wide ? 'wide' : ''}`} role="dialog" aria-modal="true" aria-label={title}>
         <header>
           {icon}
-          <h3>{title}</h3>
+          <Written as="h3" text={title} />
           <span className="grow" />
           <button className="iconbtn" onClick={leave} aria-label="Close">
             <X size={16} />
@@ -204,11 +256,11 @@ export function ago(iso: string): string {
 }
 
 /** Bold the **words** the squad marks in notes, without a markdown library. */
-export function Rich({ text }: { text: string }) {
+export function Rich({ text, dir }: { text: string; dir: Dir }) {
   const parts = text.split(/(\*\*[^*]+\*\*)/g);
   return (
     <>
-      {parts.map((p, i) => (p.startsWith('**') ? <strong key={i}>{p.slice(2, -2)}</strong> : <span key={i}>{p}</span>))}
+      {parts.map((p, i) => (p.startsWith('**') ? <strong key={i}><Runs text={p.slice(2, -2)} dir={dir} /></strong> : <span key={i}><Runs text={p} dir={dir} /></span>))}
     </>
   );
 }
@@ -217,10 +269,12 @@ export function NotesView({ notes }: { notes: string }) {
   return (
     <div className="notes">
       {notes.split('\n').map((line, i) => {
-        if (line.startsWith('### ')) return <h4 key={i}>{line.slice(4)}</h4>;
-        if (line.startsWith('- ')) return <p key={i}>• <Rich text={line.slice(2)} /></p>;
+        // Each line runs its own way, with its bullet on the side it starts from.
+        const { dir } = detect(line);
+        if (line.startsWith('### ')) return <Written as="h4" key={i} text={line.slice(4)} />;
+        if (line.startsWith('- ')) return <p key={i} dir={dir} lang={dir === 'rtl' ? 'ar' : 'en'}>• <Rich text={line.slice(2)} dir={dir} /></p>;
         if (!line.trim()) return null;
-        return <p key={i}><Rich text={line} /></p>;
+        return <p key={i} dir={dir} lang={dir === 'rtl' ? 'ar' : 'en'}><Rich text={line} dir={dir} /></p>;
       })}
     </div>
   );

@@ -69,6 +69,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Arabic reads right to left across the board, a ticket, a breakdown, its map and the other pages, not only in chat. Each piece of
+  text a person or an agent wrote follows its own language, and the app's own frame stays as it is.
 - **An agent's whole answer reaches you.** An answer to "ask about this question" could show only its last few words.
 - **No agent reads your keys or sign-ins, and a push is refused.** The rule used to cover a step's shell commands only, so an agent that only reads could open a file in `~/.ssh` with its file tools. Now it goes on every run. A push goes nowhere from any agent or story command, while squad-kit's own push works as before.
 - Build continuously holds once two stories stopped on a failed check or an app that would not open, so the next ones do

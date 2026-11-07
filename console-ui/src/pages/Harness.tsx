@@ -11,6 +11,7 @@ import { Cmd, Glyph, Modal, ago } from '../components/ui';
 import { usePrefs } from '../lib/prefs';
 import { withoutComments } from '../lib/text';
 import { useDraft } from '../lib/drafts';
+import { typedDir } from '../lib/lang';
 import { AdditionsTab } from './HarnessAdd';
 import '../styles/harness.css';
 
@@ -264,7 +265,7 @@ function LineTab({ view, stageId, track, chip, setChip, q, setQ, spot }: { view:
       <div className="hn-tools">
         <label>
           Search every gate and rule
-          <input className="input" value={q} placeholder="Try tests, Docker, picture, refused" onChange={(e) => setQ(e.target.value)} />
+          <input className="input" dir={typedDir(q)} value={q} placeholder="Try tests, Docker, picture, refused" onChange={(e) => setQ(e.target.value)} />
         </label>
         <div className="hn-chips" role="group" aria-label="Show">
           {CHIPS.map(([c, name]) => (
@@ -367,7 +368,7 @@ function LimitsTab({ view }: { view: HarnessView }) {
       <div className="hn-tools">
         <label>
           Search the limits
-          <input className="input" value={q} placeholder="Try picture, Docker, rounds" onChange={(e) => setQ(e.target.value)} />
+          <input className="input" dir={typedDir(q)} value={q} placeholder="Try picture, Docker, rounds" onChange={(e) => setQ(e.target.value)} />
         </label>
         <div className="hn-chips">
           <button className={reached ? 'on' : ''} aria-pressed={reached} onClick={() => setReached(!reached)}>Reached in {view.range.days} days</button>
@@ -701,6 +702,7 @@ function AgentDialog({ agent, onClose }: { agent: AgentInfo; onClose: () => void
           className="input"
           rows={4}
           style={{ width: '100%', resize: 'vertical' }}
+          dir={typedDir(instructions)}
           value={instructions}
           placeholder={`Extra instructions the ${agent.name} reads in every step, in plain words.`}
           onChange={(e) => setInstructions(e.target.value)}
@@ -713,6 +715,7 @@ function AgentDialog({ agent, onClose }: { agent: AgentInfo; onClose: () => void
             className="input"
             rows={2}
             style={{ width: '100%', resize: 'vertical' }}
+            dir={typedDir(steps[s.id] ?? '')}
             value={steps[s.id] ?? ''}
             placeholder={`Only for the ${s.name} step. For example: ${STEP_EXAMPLE[s.id] ?? 'keep it short'}.`}
             onChange={(e) => setSteps({ ...steps, [s.id]: e.target.value })}

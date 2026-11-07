@@ -7,12 +7,13 @@ import type { Ticket } from '../api/types';
 import type { CodePart, OverviewTalk, OverviewView } from '../api/onboard-types';
 import { useAct } from '../lib/data';
 import { partColumns, usesLine } from '../lib/overview';
-import { Cmd, clock, dateShort } from '../components/ui';
+import { Cmd, Written, clock, dateShort } from '../components/ui';
 import { SetupCard } from '../components/Setup';
 import { NewTicketDialog } from '../components/dialogs';
 import { Avatar } from '../components/Chat';
 import { ChatMarkdown } from '../components/ChatMarkdown';
 import { useDraft } from '../lib/drafts';
+import { langProps, typedDir } from '../lib/lang';
 
 /**
  * The Overview, first in the sidebar. The first time it is the handover: what squad-kit found, how the code fits
@@ -52,7 +53,7 @@ export function OverviewPage() {
   return (
     <>
       <div className="top">
-        <h1>{v.project}</h1>
+        <Written as="h1" text={v.project} />
         {v.readAt && !v.empty && <span className="note ob-read">{readWhen(v.readAt)}</span>}
         <span className="grow" />
         {v.handover !== 'reading' && !v.empty && (
@@ -72,7 +73,7 @@ export function OverviewPage() {
             <div className="ob-card ready">
               <span className="grow">
                 <b>Your stories start from your BRD</b>
-                <span>There is no code yet. The Analyst reads {v.brd.title} and asks only about real gaps. You approve the stories, then the squad builds them.</span>
+                <span>There is no code yet. The Analyst reads <Written text={v.brd.title} /> and asks only about real gaps. You approve the stories, then the squad builds them.</span>
               </span>
               <Link to="/requirements/$id" params={{ id: v.brd.id }} className="btn pri">
                 Open the BRD <ArrowRight size={15} />
@@ -156,7 +157,7 @@ function AskIdea({ v, onSent, onWrite }: { v: OverviewView; onSent(): void; onWr
         <textarea
           className="cta t-mx"
           rows={3}
-          dir="auto"
+          dir={typedDir(text)}
           value={text}
           placeholder="For example: a page where staff write down visitors' names and see today's list"
           aria-label="What you want to build"
@@ -245,7 +246,7 @@ function Talk({ t }: { t: OverviewTalk }) {
             </div>
           ) : m.who === 'squad' ? (
             <div key={i} className="cnote-w cmsg">
-              <span className="cnote-pill">{m.text}</span>
+              <Written className="cnote-pill" text={m.text} />
             </div>
           ) : (
             <div key={i} className="cag cmsg ag-architect">
@@ -260,7 +261,7 @@ function Talk({ t }: { t: OverviewTalk }) {
                   <div className="cchoices">
                     {m.options.map((o) => (
                       <button key={o} className="cch" onClick={() => send(o)}>
-                        {o}
+                        <Written text={o} />
                       </button>
                     ))}
                   </div>
@@ -290,7 +291,7 @@ function Talk({ t }: { t: OverviewTalk }) {
         <textarea
           className="cta t-en"
           rows={2}
-          dir="auto"
+          dir={typedDir(text)}
           value={text}
           placeholder="What did squad-kit get wrong? In Arabic or English"
           aria-label="Your message"
@@ -337,9 +338,7 @@ function WhatItIs({ v }: { v: OverviewView }) {
     <section className="ob-c">
       <h3>What it is</h3>
       {v.summary ? (
-        <p className="ob-lead" dir="auto">
-          {v.summary}
-        </p>
+        <Written as="p" className="ob-lead" text={v.summary} />
       ) : (
         <p className="note">squad-kit has not read the project yet.</p>
       )}
@@ -349,7 +348,7 @@ function WhatItIs({ v }: { v: OverviewView }) {
           {v.users && (
             <div>
               <div className="ob-k">Who uses it</div>
-              <p>{v.users}</p>
+              <Written as="p" text={v.users} />
             </div>
           )}
           {can.length > 0 && (
@@ -357,14 +356,13 @@ function WhatItIs({ v }: { v: OverviewView }) {
               <div className="ob-k">What it can do today</div>
               <ul className="ob-list">
                 {can.map((x, i) => (
-                  <li key={i}>
-                    {x.text}
+                  <Written as="li" key={i} text={x.text}>
                     {x.id && (
                       <Link to="/board" search={{ ticket: x.id }} className="pill ok sm ob-new" title="Merged since the first read">
                         new · {x.id}
                       </Link>
                     )}
-                  </li>
+                  </Written>
                 ))}
               </ul>
             </div>
@@ -439,8 +437,8 @@ function Parts({ v }: { v: OverviewView }) {
     const uses = usesLine(p, v.parts, v.links);
     return (
       <button key={p.id} className={`ob-node k-${p.kind ?? 'part'} ${open === p.id ? 'on' : ''}`} onClick={() => setOpen(open === p.id ? null : p.id)} aria-expanded={open === p.id}>
-        <b>{p.name}</b>
-        {p.what && <span>{p.what}</span>}
+        <Written as="b" text={p.name} />
+        {p.what && <Written text={p.what} />}
         {p.files.length > 0 && open === p.id && <code>{p.files.join('\n')}</code>}
         {open === p.id && uses && <small>{uses}</small>}
       </button>
@@ -475,7 +473,7 @@ function Parts({ v }: { v: OverviewView }) {
       )}
       {v.product && (
         <p className="ob-product">
-          {v.product} <Link to="/settings" className="ob-more">An engineer can correct this in Settings</Link>
+          <Written text={v.product} /> <Link to="/settings" className="ob-more">An engineer can correct this in Settings</Link>
         </p>
       )}
     </section>
@@ -489,8 +487,8 @@ function MapCard({ v }: { v: OverviewView }) {
       <h3>The project map</h3>
       {v.map.map((m) => (
         <div key={m.area} className="maprow">
-          <b>{m.area}</b>
-          <span>{m.detail}</span>
+          <Written as="b" text={m.area} />
+          <Written text={m.detail} />
         </div>
       ))}
     </section>
@@ -506,10 +504,9 @@ function Rules({ v }: { v: OverviewView }) {
       <div className="note">{rules.length ? (scan === rules.length ? `${scan}, taken from your code` : `${rules.length}: ${scan} from your code, ${rules.length - scan} from tickets`) : 'None yet. The Architect proposes them with your first ticket.'}</div>
       <ul className="ob-list">
         {rules.slice(0, 10).map((r) => (
-          <li key={r.id} title={r.why}>
-            {r.title}
+          <Written as="li" key={r.id} title={r.why} text={r.title}>
             {r.proposed && v.handover !== 'ready' && <span className="pill you sm ob-new">proposed</span>}
-          </li>
+          </Written>
         ))}
       </ul>
       {rules.length > 0 && (
@@ -528,7 +525,7 @@ function Worth({ v }: { v: OverviewView }) {
       {v.worth.length ? (
         <ul className="ob-list ob-worth">
           {v.worth.map((w, i) => (
-            <li key={i}>{w}</li>
+            <Written as="li" key={i} text={w} />
           ))}
         </ul>
       ) : (
@@ -546,9 +543,9 @@ function Ideas({ v, onCreated, onWrite }: { v: OverviewView; onCreated(t: Ticket
       <ul className="ob-ideas">
         {v.ideas.map((idea, i) => (
           <li key={i}>
-            <span dir="auto">
-              <b>{idea.title}</b>
-              {idea.why && <small>{idea.why}</small>}
+            <span {...langProps(idea.title)}>
+              <Written as="b" text={idea.title} />
+              {idea.why && <Written as="small" text={idea.why} />}
             </span>
             {idea.ticket ? (
               <Link to="/board" search={{ ticket: idea.ticket }} className="btn sm">

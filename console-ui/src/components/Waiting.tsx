@@ -24,10 +24,11 @@ import {
   type Notice,
 } from '../lib/waiting';
 import { ASKING, HOW_TO_ALLOW, afterAsking, askPermission, type Asked } from '../lib/notices';
-import { Cmd, STAGE_NAME, actionLabel, outdatedLine } from './ui';
+import { Cmd, STAGE_NAME, Written, actionLabel, outdatedLine } from './ui';
 import { dropWish, readWishes, readyText, readyToTell } from '../lib/overview';
 import { BreakdownBannerItem, WaitStopTag, useAllBreakdownWaits, useBreakdownWaits, type BreakdownWait } from './BreakdownWaits';
 import { stopKind } from '../lib/auto';
+import { langProps } from '../lib/lang';
 
 /**
  * Waiting for you, loud. A banner at the top of every page while something needs the person, the count in the browser
@@ -159,7 +160,7 @@ function BannerItem({ it, now }: { it: Item; now: number }) {
     <div className="yitem" title={`${meta}\n${line}\n${detail}`}>
       <span className="yid">{it.project ? `${it.project.name} · ${t.id}` : t.id}</span>
       {/* A story that builds by itself says which stop it is at, with its title. */}
-      <span className="yline">{stopKind(t) ? <><WaitStopTag t={t} />{t.title}</> : line}</span>
+      {stopKind(t) ? <span className="yline" {...langProps(t.title)}><WaitStopTag t={t} /><Written text={t.title} /></span> : <Written className="yline" text={line} />}
       {it.project ? (
         <a className="btn sm you" href={itemHref(it.project.id, t)}>
           {label}

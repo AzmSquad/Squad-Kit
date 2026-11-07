@@ -7,7 +7,7 @@ import { useAct, useBoard, useTicket } from '../lib/data';
 import { partNames } from '../lib/overview';
 import { ApiProof } from '../components/ApiProof';
 import { usePrefs } from '../lib/prefs';
-import { Cmd, Glyph, Modal, ROLE_NAME, Tracker, ago, clock, commandFor } from '../components/ui';
+import { Cmd, Glyph, Modal, ROLE_NAME, Runs, Tracker, Written, WrittenLines, ago, clock, commandFor } from '../components/ui';
 import { ConversationTab } from '../components/Conversation';
 import { ChangesTab, OpenInEditor } from '../components/Changes';
 import { TakeOverButton, canTakeOver } from '../components/TakeOver';
@@ -38,6 +38,7 @@ import { pageOf, waitsAtReview } from '../lib/review';
 import { useDraft } from '../lib/drafts';
 import { useReach } from '../lib/use-reach';
 import { ticketTrouble } from '../lib/ticket-trouble';
+import { detect, langProps, typedDir } from '../lib/lang';
 
 type Tab = 'now' | 'story' | 'plan' | 'activity' | 'conversation' | 'proof' | 'changes' | 'cost' | 'developer';
 
@@ -135,21 +136,21 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
               </div>
               {menuDialog === 'hand-over' && <HandOverDialog t={t} onClose={() => setMenuDialog(null)} />}
               {menuDialog === 'propose' && <ProposeChange t={t} onClose={() => setMenuDialog(null)} />}
-              <h2>{t.title}</h2>
+              <Written as="h2" text={t.title} />
               <BreakdownPlace t={t} />
               <div className="sub">
                 <span>
-                  Created by <b>{t.createdBy}</b> {ago(t.createdAt)}
+                  Created by <Written as="b" text={t.createdBy} /> {ago(t.createdAt)}
                   {' · '}
                   <TrackWords t={t} />
                 </span>
                 <span>
-                  Owner <b>{ownerOf(t)}</b>
+                  Owner <Written as="b" text={ownerOf(t)} />
                   {isMine(t, me) ? ' (you)' : ''}
                 </span>
                 {parts.length > 0 && (
                   <span>
-                    {parts.length > 1 ? 'Parts' : 'Part'} <b>{parts.join(', ')}</b>
+                    {parts.length > 1 ? 'Parts' : 'Part'} <Written as="b" text={parts.join(', ')} />
                   </span>
                 )}
                 {t.builder && (
@@ -381,15 +382,15 @@ function QuestionBlock({
   const options = [...q.options, 'Other'];
   return (
     <div className="q">
-      <h4>
-        {n}. {q.text}
+      <h4 {...langProps(q.text)}>
+        {n}. <Runs text={q.text} dir={detect(q.text).dir} />
       </h4>
       {(q.thread?.length || q.thinking) && (
-        <div className="thread">
+        <div className="thread" dir={detect(q.text).dir}>
           {q.thread?.map((m, i) => (
             <div key={i} className={`msg ${m.who === 'you' ? '' : 'squad'}`}>
               <small>{m.who === 'you' ? 'You' : ROLE_NAME[m.who]}</small>
-              {m.text}
+              <Written as="div" text={m.text} />
             </div>
           ))}
           {q.thinking && (
@@ -400,17 +401,18 @@ function QuestionBlock({
           )}
         </div>
       )}
-      <div className="choices">
+      <div className="choices" dir={detect(q.options.join(' ')).dir}>
         {options.map((o) => {
           const on = answer?.choice === o;
           const typed = o === q.inputOption || o === 'Other';
           return (
-            <div key={o} className={`choice ${on ? 'on' : ''}`} role="radio" aria-checked={on} tabIndex={0} onClick={() => !on && onAnswer({ choice: o })} onKeyDown={(e) => e.target === e.currentTarget && e.key === 'Enter' && !on && onAnswer({ choice: o })}>
+            <div key={o} className={`choice ${on ? 'on' : ''}`} {...langProps(o)} role="radio" aria-checked={on} tabIndex={0} onClick={() => !on && onAnswer({ choice: o })} onKeyDown={(e) => e.target === e.currentTarget && e.key === 'Enter' && !on && onAnswer({ choice: o })}>
               <span className="rd" />
-              {o === 'Other' ? 'Other' : o.replace(/:$/, '')}
+              <Written text={o.replace(/:$/, '')} />
               {typed && on && (
                 <input
                   autoFocus
+                  dir={typedDir(answer?.value ?? '')}
                   value={answer?.value ?? ''}
                   placeholder={o === 'Other' ? 'Your answer' : 'Which one?'}
                   onChange={(e) => onAnswer({ choice: o, value: e.target.value })}
@@ -423,7 +425,7 @@ function QuestionBlock({
       </div>
       {asking ? (
         <div className="askrow">
-          <input className="input" autoFocus value={text} onChange={(e) => setText(e.target.value)} placeholder={`Ask the ${ROLE_NAME[q.from]} about this question`} onKeyDown={(e) => e.key === 'Enter' && send()} />
+          <input className="input" autoFocus dir={typedDir(text)} value={text} onChange={(e) => setText(e.target.value)} placeholder={`Ask the ${ROLE_NAME[q.from]} about this question`} onKeyDown={(e) => e.key === 'Enter' && send()} />
           <button className="btn" onClick={send} disabled={!text.trim()}>Ask</button>
         </div>
       ) : (
@@ -441,58 +443,56 @@ function PlanBody({ t, review }: { t: Ticket; review?: Review }) {
   return (
     <>
       <div className="lbl">The story</div>
-      <Part review={review} at={{ part: 'story' }}>
-        <p className="story">{t.story}</p>
+      <Part review={review} at={{ part: 'story' }} dir={detect(t.story ?? '').dir}>
+        <Written as="p" className="story" text={t.story ?? ''} />
       </Part>
       {t.criteria && (
         <>
           <div className="lbl">Done when</div>
           <ol className="ac">
-            {t.criteria.map((c, i) => (
-              <li key={i}>
-                <Part review={review} at={{ part: 'criterion', index: i }}>
-                  <span>
-                    <em>Given</em> {c.given}, <em>when</em> {c.when}, <em>then</em> {c.then}.
-                  </span>
-                </Part>
-              </li>
-            ))}
+            {t.criteria.map((c, i) => {
+              // One sentence: its three parts run the way the whole of it runs.
+              const own = langProps(`${c.given} ${c.when} ${c.then}`);
+              return (
+                <li key={i} {...own}>
+                  <Part review={review} at={{ part: 'criterion', index: i }}>
+                    <span>
+                      <em>Given</em> <Runs text={c.given} dir={own.dir} />, <em>when</em> <Runs text={c.when} dir={own.dir} />, <em>then</em> <Runs text={c.then} dir={own.dir} />.
+                    </span>
+                  </Part>
+                </li>
+              );
+            })}
           </ol>
         </>
       )}
       {t.decision && (
         <>
           <div className="lbl">The Architect's decision {t.decision.adr && <span className="pill ok">Saved as {t.decision.adr}</span>}</div>
-          <Part review={review} at={{ part: 'decision' }}>
+          <Part review={review} at={{ part: 'decision' }} dir={detect(t.decision.title).dir}>
           <div className="decision">
-            <h3>
+            <h3 {...langProps(t.decision.title)}>
               <Glyph role="architect" small />
-              {t.decision.title}
+              <Written text={t.decision.title} />
             </h3>
             <div className="opts2">
               {t.decision.options.map((o) => (
-                <div key={o.name} className={`opt2 ${o.chosen ? 'pick' : ''}`}>
+                <div key={o.name} className={`opt2 ${o.chosen ? 'pick' : ''}`} {...langProps(`${o.name} ${o.note}`)}>
                   <b>
-                    {o.name}
+                    <Written text={o.name} />
                     {o.chosen && (
                       <span>
                         <Check size={13} strokeWidth={2.5} /> Chosen
                       </span>
                     )}
                   </b>
-                  {o.note}
+                  <Written text={o.note} />
                 </div>
               ))}
             </div>
             <div className="why">
-              <span>
-                <b>Why</b> {t.decision.why}
-              </span>
-              {t.decision.clientCheck && (
-                <span>
-                  <b>Client's choice</b> {t.decision.clientCheck}
-                </span>
-              )}
+              <Written lead={<b>Why</b>} text={t.decision.why} />
+              {t.decision.clientCheck && <Written lead={<b>Client's choice</b>} text={t.decision.clientCheck} />}
               {t.decision.replaces && (
                 <span>
                   <b>Replaces</b> {t.decision.replaces}. Once you approve, it is no longer a rule and later tickets follow this one.
@@ -536,9 +536,9 @@ function PlanBody({ t, review }: { t: Ticket; review?: Review }) {
           <div className="lbl">Build steps</div>
           <ol className="ac">
             {t.steps.map((st, i) => (
-              <li key={i}>
+              <li key={i} {...langProps(st.title)}>
                 <Part review={review} at={{ part: 'step', index: i }}>
-                  <span>{st.title}</span>
+                  <Written text={st.title} />
                 </Part>
               </li>
             ))}
@@ -607,6 +607,7 @@ function PlanPanel({ t }: { t: Ticket }) {
             className="input"
             style={{ flex: 1 }}
             autoFocus
+            dir={typedDir(note)}
             value={note}
             onChange={(e) => setNote(e.target.value)}
             placeholder={mode === 'over' ? 'What is the new direction? It is written again from zero.' : 'What should change? One line is enough.'}
@@ -683,7 +684,7 @@ function AskDeveloper({ t, onClose }: { t: Ticket; onClose(): void }) {
       }
     >
       <p>Send this to a developer on your team. They can read the plan in the terminal and tell you what they think.</p>
-      <div className="wa">{text}</div>
+      <Written as="div" className="wa" text={text} />
     </Modal>
   );
 }
@@ -702,7 +703,7 @@ function GatePills({ t }: { t: Ticket }) {
       <NotCheckedNote g={g} />
       {t.overrides?.map((o) => (
         <p className="note override" key={o.at}>
-          <b>Continued anyway</b> past the {overrideWhat(o)}, by {o.by}: {o.reason}
+          <b>Continued anyway</b> past the {overrideWhat(o)}, by <Written text={o.by} />: <Written text={o.reason} />
         </p>
       ))}
     </>
@@ -725,12 +726,12 @@ function ProofShots({ t }: { t: Ticket }) {
       {zoom !== null && <Lightbox pictures={pictures} start={zoom} onClose={() => setZoom(null)} />}
       {t.proof.map((p, k) => (
         <div className={`critrow ${verdictClass(p.shows)}`} key={p.criterion}>
-          <h5>
+          <h5 {...langProps(p.criterion)}>
             <VerdictIcon shows={p.shows} />
-            {p.criterion}
+            <Written text={p.criterion} />
             <VerdictTag shows={p.shows} />
           </h5>
-          {verdictNote(p) && <p className="verdictnote">{verdictNote(p)}</p>}
+          {verdictNote(p) && <Written as="p" className="verdictnote" text={verdictNote(p)!} />}
           {pageOf(p) && (
             <p className="critpage">
               Page <code>{pageOf(p)}</code>
@@ -738,19 +739,19 @@ function ProofShots({ t }: { t: Ticket }) {
           )}
           {isApiProof(p.after) ? <ApiProof file={p.after} {...(p.note ? { note: p.note } : {})} /> : <div className="proofmini">
             <div>
-              <small>{p.beforeLabel}</small>
+              <Written as="small" text={p.beforeLabel} />
               <button className="zoom" onClick={() => setZoom(starts[k]!)} aria-label={`Open ${p.beforeLabel} full size`}>
                 <img src={assetUrl(`/api/v1/proof/${p.before}`)} alt={`${p.criterion}, ${p.beforeLabel}`} />
               </button>
             </div>
             <div>
-              <small>{p.afterLabel}</small>
+              <Written as="small" text={p.afterLabel} />
               <button className="zoom" onClick={() => setZoom(starts[k]! + 1)} aria-label={`Open ${p.afterLabel} full size`}>
                 <img src={assetUrl(`/api/v1/proof/${p.after}`)} alt={`${p.criterion}, ${p.afterLabel}`} />
               </button>
             </div>
           </div>}
-          {p.more?.length && p.why && p.note ? <p className="note proofmore-main">{p.note}</p> : null}
+          {p.more?.length && p.why && p.note ? <Written as="p" className="note proofmore-main" text={p.note} /> : null}
           <MorePictures shot={p} first={starts[k]! + 2} onOpen={setZoom} />
         </div>
       ))}
@@ -769,7 +770,7 @@ export function ProofDecision({ t, sticky }: { t: Ticket; sticky?: boolean }) {
   };
   return wrong ? (
     <div className={sticky ? 'stickybar' : 'df'}>
-      <input className="input" style={{ flex: 1 }} autoFocus value={note} onChange={(e) => setNote(e.target.value)} placeholder="What's wrong? Tell the squad in one line." onKeyDown={(e) => e.key === 'Enter' && note.trim() && sendBack()} />
+      <input className="input" style={{ flex: 1 }} autoFocus dir={typedDir(note)} value={note} onChange={(e) => setNote(e.target.value)} placeholder="What's wrong? Tell the squad in one line." onKeyDown={(e) => e.key === 'Enter' && note.trim() && sendBack()} />
       <button className="btn pri" disabled={!note.trim() || act.isPending} onClick={sendBack}>Send back</button>
       <button className="btn" onClick={() => setWrong(false)}>Cancel</button>
     </div>
@@ -841,14 +842,14 @@ function AskPanel({ t }: { t: Ticket }) {
           </div>
         </div>
         <div className="lbl">{who} asks</div>
-        <p className="stuckq">{q.text}</p>
-        {q.why && <p className="note" style={{ marginTop: -4 }}>Why it matters: {q.why}</p>}
+        <Written as="p" className="stuckq" text={q.text} />
+        {q.why && <Written as="p" className="note" style={{ marginTop: -4 }} lead="Why it matters:" text={q.why} />}
         {q.files && q.files.length > 0 && <AgentFiles ticket={t.id} files={q.files} />}
         <div className="opts2">
           {choices.map((o) => (
-            <button key={o} className={`opt2 ${pick === o ? 'pick' : ''}`} onClick={() => setPick(o)}>
+            <button key={o} className={`opt2 ${pick === o ? 'pick' : ''}`} {...langProps(o)} onClick={() => setPick(o)}>
               <b>
-                {o === DECIDE_YOURSELF ? 'Let it decide' : o}
+                <Written text={o === DECIDE_YOURSELF ? 'Let it decide' : o} />
                 {pick === o && (
                   <span>
                     <Check size={13} strokeWidth={2.5} /> Your pick
@@ -862,7 +863,7 @@ function AskPanel({ t }: { t: Ticket }) {
             <b>Write my own answer</b>
           </button>
         </div>
-        {pick === '' && <textarea className="input" rows={3} style={{ width: '100%', marginTop: 8 }} autoFocus value={own} placeholder="Your answer" onChange={(e) => setOwn(e.target.value)} />}
+        {pick === '' && <textarea className="input" rows={3} style={{ width: '100%', marginTop: 8 }} autoFocus dir={typedDir(own)} value={own} placeholder="Your answer" onChange={(e) => setOwn(e.target.value)} />}
         <RecentActivity t={t} />
       </div>
       <div className="df">
@@ -920,13 +921,11 @@ function OutdatedBanner({ t }: { t: Ticket }) {
               <Link to="/architecture" search={{ adr: o.adr }}>{o.adr}</Link> came after this plan and changes it
             </b>
           </div>
-          <p>{o.why}</p>
-          <p>
-            <span className="note">{merged ? 'What a follow-up would change:' : 'What would change:'}</span> {o.change}
-          </p>
+          <Written as="p" text={o.why} />
+          <Written as="p" lead={<span className="note">{merged ? 'What a follow-up would change:' : 'What would change:'}</span>} text={o.change} />
           {keeping === o.adr ? (
             <div className="row">
-              <input className="input" autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why the plan stays as it is" />
+              <input className="input" autoFocus dir={typedDir(reason)} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why the plan stays as it is" />
               <button className="btn sm" disabled={!reason.trim() || act.isPending} onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/decision-update`, body: { adr: o.adr, do: 'keep', reason }, done: 'Kept the plan. The reason is on the ticket.' }, { onSuccess: () => { setKeeping(null); clearReason(); } })}>
                 Keep it
               </button>
@@ -1024,8 +1023,8 @@ function WorkingPanel({ t }: { t: Ticket }) {
           <div className="calm">
             <span className="ring">{t.stage === 'release' ? <ArrowUp size={18} /> : <Check size={18} strokeWidth={2.5} />}</span>
             <div>
-              <b>{calm.title}</b>
-              <span>{calm.text}</span>
+              <Written as="b" text={calm.title} />
+              <Written text={calm.text} />
             </div>
             {t.stage === 'release' && (
               <>
@@ -1100,7 +1099,7 @@ function YoursPanel({ t }: { t: Ticket }) {
         </p>
         <OpenInEditor t={t} />
         <div className="lbl">2. Give it back</div>
-        <textarea className="waynote" rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="What did you change? (optional, every agent reads it)" />
+        <textarea className="waynote" rows={2} dir={typedDir(note)} value={note} onChange={(e) => setNote(e.target.value)} placeholder="What did you change? (optional, every agent reads it)" />
         <p className="note" style={{ fontSize: 12.5 }}>Then squad-kit runs the checks, the Reviewer reads all the changes, yours too, and the Tester makes the proof again.</p>
         <RecentActivity t={t} />
       </div>
@@ -1131,20 +1130,20 @@ function Steps({ t }: { t: Ticket }) {
   return (
     <ul className="steps">
       {t.steps!.map((s, i) => (
-        <li key={i} className={s.status === 'doing' ? 'now' : s.status === 'todo' ? 'todo' : ''}>
+        <li key={i} className={s.status === 'doing' ? 'now' : s.status === 'todo' ? 'todo' : ''} {...langProps(s.title)}>
           <span className={`sd ${s.status === 'done' ? 'ok' : s.status === 'doing' ? 'now' : ''}`}>
             {s.status === 'done' && <Check size={11} strokeWidth={3} />}
           </span>
           <span>
-            {s.status === 'doing' ? <b style={{ fontWeight: 600 }}>{s.title}</b> : s.title}
+            <Written as={s.status === 'doing' ? 'b' : 'span'} style={s.status === 'doing' ? { fontWeight: 600 } : undefined} text={s.title} />
             {s.live && (
               <span className="livetxt">
                 <span className="live" />
-                {s.live}
+                <Written text={s.live} />
               </span>
             )}
           </span>
-          <span className="time">{s.status === 'done' ? `${s.minutes ?? 1} min` : s.status === 'doing' ? 'now' : ''}</span>
+          <span className="time" dir="ltr">{s.status === 'done' ? `${s.minutes ?? 1} min` : s.status === 'doing' ? 'now' : ''}</span>
         </li>
       ))}
     </ul>
@@ -1167,9 +1166,7 @@ function RecentActivity({ t, all }: { t: Ticket; all?: boolean }) {
           <div className="fe" key={a.at + i}>
             <span className="tm">{clock(a.at)}</span>
             <Glyph role={a.who} small />
-            <span>
-              <b>{ROLE_NAME[a.who]}</b> {a.text.charAt(0).toLowerCase() + a.text.slice(1)}
-            </span>
+            <Written lead={<b>{ROLE_NAME[a.who]}</b>} text={a.text.charAt(0).toLowerCase() + a.text.slice(1)} />
           </div>
         ))}
       </div>
@@ -1188,7 +1185,7 @@ function StoryTab({ t }: { t: Ticket }) {
   return (
     <div className="db">
       <div className="lbl">What was asked</div>
-      <p className="story" style={{ whiteSpace: 'pre-wrap' }}>{t.ask}</p>
+      <WrittenLines as="p" className="story" style={{ whiteSpace: 'pre-wrap' }} text={t.ask} />
       <BriefList head="Your acceptance criteria" items={t.brief?.criteria} />
       <BriefList head="Business rules" items={t.brief?.rules} />
       <BriefList head="Edge cases" items={t.brief?.edgeCases} />
@@ -1233,10 +1230,10 @@ export function Notes({ t }: { t: Ticket }) {
       {notes.length > 0 && (
         <ul className="ticketnotes">
           {notes.map((n, i) => (
-            <li key={i}>
+            <li key={i} {...langProps(n.text)}>
               <span className={`pill ${n.kind === 'criterion' ? 'ok' : n.kind === 'rule' ? 'wait' : ''}`}>{NOTE_KINDS.find((k) => k.kind === n.kind)?.head}</span>
-              <span className="grow">{n.text}</span>
-              <span className="note">{n.by} · {ago(n.at)}</span>
+              <Written className="grow" text={n.text} />
+              <span className="note" dir="ltr"><Written text={n.by} /> · {ago(n.at)}</span>
             </li>
           ))}
         </ul>
@@ -1253,6 +1250,7 @@ export function Notes({ t }: { t: Ticket }) {
           <textarea
             className="input"
             rows={2}
+            dir={typedDir(text)}
             value={text}
             placeholder={pick.hint}
             onChange={(e) => setText(e.target.value)}
@@ -1281,7 +1279,7 @@ function BriefList({ head, items }: { head: string; items?: string[] }) {
       <div className="lbl">{head}</div>
       <ul className="brief">
         {items.map((x, i) => (
-          <li key={i}>{x}</li>
+          <Written as="li" key={i} text={x} />
         ))}
       </ul>
     </>

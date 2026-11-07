@@ -25,9 +25,10 @@ import { useReqAct } from '../lib/requirementsData';
 import { usePrefs } from '../lib/prefs';
 import { shellQuote } from '../lib/text';
 import { needOptions } from './BreakdownDialogs';
-import { Cmd } from './ui';
+import { Cmd, Place, Written } from './ui';
 import { clearDraft, draftKey, readDraft, useDraft, writeDraft } from '../lib/drafts';
 import { PROJECT } from '../api/client';
+import { isolated, langProps, typedDir } from '../lib/lang';
 
 /**
  * The breakdown as a tree: epics, features and stories with their level, needs, place in the BRD and size, and once
@@ -168,10 +169,8 @@ function GroupRow({
       </button>
       <Main onClick={onSelect && (() => onSelect(item.key))} current={selected} label={`${LEVEL_WORD[level]} ${item.key} ${item.title}`}>
         <span className={`rq-lv ${level}`}>{LEVEL_WORD[level]}</span>
-        <span className="rq-t" title={item.title}>
-          {item.title}
-        </span>
-        {mode === 'plan' && about && <span className="rq-meta rq-goal">{about}</span>}
+        <Written className="rq-t" title={item.title} text={item.title} />
+        {mode === 'plan' && about && <Written className="rq-meta rq-goal" text={about} />}
         {mode === 'build' && live.length > 0 && <span className="rq-meta rq-live">{live.join(', ')} building</span>}
         <span className="grow" />
         {mode === 'plan' ? (
@@ -204,7 +203,7 @@ function StateLine({ p }: { p: StoryProgress | undefined }) {
   return (
     <span className={`rq-st ${kind} ${p?.state ?? 'not-started'}`}>
       {kind === 'm' ? <Check size={13} strokeWidth={3} aria-hidden="true" /> : kind === 'b' ? <span className="live" aria-hidden="true" /> : null}
-      <span className="rq-stl">{p?.line ?? 'Not started'}</span>
+      <Written className="rq-stl" text={p?.line ?? 'Not started'} />
     </span>
   );
 }
@@ -234,9 +233,7 @@ function StoryRow({
       <Main onClick={onSelect && (() => onSelect(s.key))} current={selected} label={`Story ${s.key} ${s.title}${p && mode === 'build' ? `: ${p.line}` : ''}`}>
         {mode === 'plan' && <span className="rq-lv story">Story</span>}
         <span className="rq-id">{s.key}</span>
-        <span className="rq-t" title={s.title}>
-          {s.title}
-        </span>
+        <Written className="rq-t" title={s.title} text={s.title} />
         {mode === 'plan' && (
           <>
             {s.dependsOn.slice(0, 2).map((n) => (
@@ -310,7 +307,7 @@ function PanelHead({ f, onClose }: { f: Found; onClose(): void }) {
     <div className="rq-ph">
       <span className={`rq-lv ${f.level}`}>{LEVEL_WORD[f.level]}</span>
       <span className="rq-id">{f.item.key}</span>
-      <span className="rq-place">{placeWords(f)}</span>
+      <span className="rq-place"><Place path={placeWords(f)} /></span>
       <span className="grow" />
       <button className="iconbtn" aria-label="Close" onClick={onClose}>
         <X size={15} />
@@ -407,7 +404,7 @@ function StoryPanel({ v, f, onClose, onSelect, onAsk, onOpenRef, onOpenTicket }:
         {started && (
           <div className={`rq-started ${chipKind(p?.state)}`}>
             <span>
-              <b className="mono">{s.ticket}</b> {p?.line ?? ''}
+              <b className="mono">{s.ticket}</b> <Written text={p?.line ?? ''} />
             </span>
             <button className={`btn sm ${p?.state === 'needs-you' ? 'you' : ''}`} onClick={() => onOpenTicket(s.ticket!)}>
               {p?.state === 'needs-you' ? 'Decide' : 'Open the ticket'}
@@ -418,14 +415,16 @@ function StoryPanel({ v, f, onClose, onSelect, onAsk, onOpenRef, onOpenTicket }:
         {busy && <p className="rq-busy">The Analyst is redoing this part. It shows here when it is done.</p>}
         <div className="field">
           <label htmlFor="rq-st">Title</label>
-          {editable ? <input id="rq-st" className="input rq-titlein" value={d.title} onChange={(e) => setD((x) => ({ ...x, title: e.target.value }))} /> : <div id="rq-st" className="rq-ro rq-titlein">{s.title}</div>}
+          {editable ? <input id="rq-st" className="input rq-titlein" dir={typedDir(d.title)} value={d.title} onChange={(e) => setD((x) => ({ ...x, title: e.target.value }))} /> : <Written as="div" id="rq-st" className="rq-ro rq-titlein" text={s.title} />}
         </div>
         <div className="field">
           <label htmlFor="rq-ss">Story</label>
           {editable ? (
-            <textarea id="rq-ss" className="textarea rq-storyin" value={d.story} placeholder="As a …, I want …, so that …" onChange={(e) => setD((x) => ({ ...x, story: e.target.value }))} />
+            <textarea id="rq-ss" className="textarea rq-storyin" dir={typedDir(d.story)} value={d.story} placeholder="As a …, I want …, so that …" onChange={(e) => setD((x) => ({ ...x, story: e.target.value }))} />
+          ) : s.story ? (
+            <Written as="div" id="rq-ss" className="rq-ro" text={s.story} />
           ) : (
-            <div id="rq-ss" className="rq-ro">{s.story || <span className="note">No story text yet.</span>}</div>
+            <div id="rq-ss" className="rq-ro"><span className="note">No story text yet.</span></div>
           )}
         </div>
         <div className="rq-lab">Done when</div>
@@ -436,9 +435,9 @@ function StoryPanel({ v, f, onClose, onSelect, onAsk, onOpenRef, onOpenTicket }:
                 <label key={part} className="rq-gwtrow">
                   <b>{part.charAt(0).toUpperCase() + part.slice(1)}</b>
                   {editable ? (
-                    <textarea rows={Math.max(1, Math.ceil(c[part].length / 40))} value={c[part]} onChange={(e) => setC(i, part, e.target.value.replace(/\n/g, ' '))} aria-label={`Check ${i + 1}: ${part}`} />
+                    <textarea rows={Math.max(1, Math.ceil(c[part].length / 40))} dir={typedDir(c[part])} value={c[part]} onChange={(e) => setC(i, part, e.target.value.replace(/\n/g, ' '))} aria-label={`Check ${i + 1}: ${part}`} />
                   ) : (
-                    <span>{c[part]}</span>
+                    <Written text={c[part]} />
                   )}
                 </label>
               ))}
@@ -469,7 +468,7 @@ function StoryPanel({ v, f, onClose, onSelect, onAsk, onOpenRef, onOpenTicket }:
                 <span key={n} className="rq-need big">
                   <button className="rq-needname" onClick={() => onSelect(n)} title={`Open ${n} ${titleOf(n)}`}>
                     <b>{n}</b>
-                    <span>{titleOf(n)}</span>
+                    <Written text={titleOf(n)} />
                   </button>
                   {editable && (
                     <button aria-label={`${s.key} does not need ${n}`} onClick={() => setD((x) => ({ ...x, needs: x.needs.filter((y) => y !== n) }))}>
@@ -489,7 +488,7 @@ function StoryPanel({ v, f, onClose, onSelect, onAsk, onOpenRef, onOpenTicket }:
                   <option value="">+ Add</option>
                   {choices.map((c) => (
                     <option key={c.key} value={c.key}>
-                      {c.label}
+                      {isolated(c.label)}
                     </option>
                   ))}
                 </select>
@@ -512,7 +511,7 @@ function StoryPanel({ v, f, onClose, onSelect, onAsk, onOpenRef, onOpenTicket }:
           <div className="rq-fromline">
             From the BRD:{' '}
             <button className="rq-link" onClick={() => onOpenRef(s.ref!)}>
-              {refWords(s.ref)}
+              <Written text={refWords(s.ref)} />
             </button>
           </div>
         )}
@@ -599,7 +598,7 @@ function MoveTo({ v, f }: { v: BreakdownView; f: Found }) {
       >
         {targets.map((t) => (
           <option key={t.key} value={t.key}>
-            {t.label}
+            {isolated(t.label)}
           </option>
         ))}
       </select>
@@ -636,11 +635,11 @@ function GroupPanel({ v, f, onClose, onSelect, onAsk, onOpenRef, onOpenTicket, o
         {busy && <p className="rq-busy">The Analyst is redoing this part. It shows here when it is done.</p>}
         <div className="field">
           <label htmlFor="rq-gt">Title</label>
-          {editable ? <input id="rq-gt" className="input rq-titlein" value={d.title} onChange={(e) => setD((x) => ({ ...x, title: e.target.value }))} /> : <div id="rq-gt" className="rq-ro rq-titlein">{item.title}</div>}
+          {editable ? <input id="rq-gt" className="input rq-titlein" dir={typedDir(d.title)} value={d.title} onChange={(e) => setD((x) => ({ ...x, title: e.target.value }))} /> : <Written as="div" id="rq-gt" className="rq-ro rq-titlein" text={item.title} />}
         </div>
         <div className="field">
           <label htmlFor="rq-ga">{epic ? 'What it is for' : 'What it covers'}</label>
-          {editable ? <textarea id="rq-ga" className="textarea rq-storyin" value={d.about} onChange={(e) => setD((x) => ({ ...x, about: e.target.value }))} /> : <div id="rq-ga" className="rq-ro">{about || <span className="note">Nothing written yet.</span>}</div>}
+          {editable ? <textarea id="rq-ga" className="textarea rq-storyin" dir={typedDir(d.about)} value={d.about} onChange={(e) => setD((x) => ({ ...x, about: e.target.value }))} /> : about ? <Written as="div" id="rq-ga" className="rq-ro" text={about} /> : <div id="rq-ga" className="rq-ro"><span className="note">Nothing written yet.</span></div>}
         </div>
         <div className="rq-stats">
           <span>{sizeWords(item)}</span>
@@ -655,7 +654,7 @@ function GroupPanel({ v, f, onClose, onSelect, onAsk, onOpenRef, onOpenTicket, o
           <div className="rq-fromline">
             From the BRD:{' '}
             <button className="rq-link" onClick={() => onOpenRef(item.ref!)}>
-              {refWords(item.ref)}
+              <Written text={refWords(item.ref)} />
             </button>
           </div>
         )}
@@ -768,10 +767,9 @@ export function DecidedEntry({ v, d, compact, onSelect, onOpenTicket }: { v: Bre
         </div>
       )}
       {d.changed ? (
-        <div className="rq-dt">
-          {d.changed.text}
-          <span className="rq-was">
-            Was: {d.text}
+        <Written as="div" className="rq-dt" text={d.changed.text}>
+          <span className="rq-was" {...langProps(d.text)}>
+            <bdi dir="ltr">Was:</bdi> <Written text={d.text} />
             {became && (
               <>
                 {' · '}
@@ -787,16 +785,15 @@ export function DecidedEntry({ v, d, compact, onSelect, onOpenTicket }: { v: Bre
               </>
             )}
           </span>
-        </div>
+        </Written>
       ) : (
-        <div className="rq-dt">
-          {d.text}
-          {compact && d.by === 'answer' && <span className="rq-was">From your answer</span>}
-        </div>
+        <Written as="div" className="rq-dt" text={d.text}>
+          {compact && d.by === 'answer' && <span className="rq-was" dir="ltr">From your answer</span>}
+        </Written>
       )}
       {editing ? (
         <div className="rq-dedit">
-          <textarea className="textarea" autoFocus value={text} onChange={(e) => setText(e.target.value)} aria-label="What you want instead" placeholder="What should it be instead?" />
+          <textarea className="textarea" autoFocus dir={typedDir(text)} value={text} onChange={(e) => setText(e.target.value)} aria-label="What you want instead" placeholder="What should it be instead?" />
           {sure && <p className="note" role="alert">{redoesAll}</p>}
           <div className="rq-dedit-b">
             <button className="btn sm pri" disabled={!text.trim() || act.isPending} onClick={() => (redoesAll && !sure ? setSure(true) : change())}>

@@ -2,7 +2,7 @@ import { useQueries, useQuery } from '@tanstack/react-query';
 import { PROJECT, api } from '../api/client';
 import type { AppProjects, Ticket } from '../api/types';
 import { shellArg } from '../lib/text';
-import { Cmd, ago } from './ui';
+import { Cmd, Written, ago } from './ui';
 import { BreakdownLink, StopTag } from './AutoTicket';
 import { requirementsPath, stopKind } from '../lib/auto';
 import '../styles/auto.css';
@@ -95,7 +95,7 @@ export function BreakdownWaitCard({ w }: { w: BreakdownWait }) {
           <span>Requirements</span>
           <span>{ago(w.since)}</span>
         </div>
-        <h3>{w.title}</h3>
+        <Written as="h3" text={w.title} />
         <p>{breakdownWaitLine(w)}. It writes the breakdown once you answer.</p>
       </div>
       <Cmd text={answerCommand(w)} />

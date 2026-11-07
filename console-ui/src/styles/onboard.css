@@ -92,8 +92,8 @@
 .ob-lead { font-size: 14.5px !important; }
 .ob-two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; margin-top: 4px; }
 .ob-list { list-style: none; display: grid; gap: 5px; font-size: 13.5px; line-height: 1.45; }
-.ob-list li { position: relative; padding-left: 14px; overflow-wrap: anywhere; }
-.ob-list li::before { content: '•'; position: absolute; left: 0; color: var(--dim); }
+.ob-list li { position: relative; padding-inline-start: 14px; overflow-wrap: anywhere; }
+.ob-list li::before { content: '•'; position: absolute; inset-inline-start: 0; color: var(--dim); }
 .ob-worth li::before { color: var(--you); }
 .ob-new { margin-left: 6px; vertical-align: 1px; padding: 1px 7px !important; font-size: 11px !important; }
 .ob-proof { list-style: none; display: grid; gap: 7px; font-size: 13.5px; }

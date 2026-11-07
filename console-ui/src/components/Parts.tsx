@@ -3,7 +3,8 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { ProductPart } from '../api/types';
 import { useAct, useBoard } from '../lib/data';
-import { Cmd } from './ui';
+import { Cmd, Written } from './ui';
+import { typedDir } from '../lib/lang';
 
 /**
  * Settings: what the product is made of. The Architect found it when it read the project, and an engineer corrects it
@@ -37,7 +38,7 @@ function FormFields({ form, set, others, repos, isNew }: { form: PartForm; set(f
     <>
       <div className="maprow part-f">
         <b>Name</b>
-        <input className="input" aria-label="Name" value={form.name} placeholder="Web app" onChange={(e) => set({ ...form, name: e.target.value })} />
+        <input className="input" aria-label="Name" dir={typedDir(form.name)} value={form.name} placeholder="Web app" onChange={(e) => set({ ...form, name: e.target.value })} />
       </div>
       {isNew && (
         <div className="maprow part-f">
@@ -106,7 +107,7 @@ function PartRow({ part, view }: { part: ProductPart; view: PartsView }) {
     <div className={`part-row ${part.off ? 'off' : ''}`}>
       <div className="part-head">
         <div className="grow">
-          <b>{part.name}</b>
+          <Written as="b" text={part.name} />
           {part.off && <span className="pill sm" style={{ marginLeft: 8 }}>Not used</span>}
           {part.noRun && !part.off && <span className="pill sm" style={{ marginLeft: 8 }}>Nothing starts here</span>}
           <div className="note">

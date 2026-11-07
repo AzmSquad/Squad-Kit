@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { type Options } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Highlight, themes } from 'prism-react-renderer';
 import { Zoomable } from './Lightbox';
@@ -28,12 +28,13 @@ import type { AcpContentBlock, AcpToolContent, AcpToolKind, AcpToolStatus, AcpUp
 import { merge, type Item } from '../lib/conversation';
 import { lineDiff } from '../lib/diff';
 import { usePrefs } from '../lib/prefs';
-import { Cmd, clock } from './ui';
+import { Cmd, Written, WrittenLines, clock } from './ui';
 import { useAct } from '../lib/data';
 import { TakeOverButton, canTakeOver } from './TakeOver';
 import { TalkButton } from './Chat';
 import { WhatHappened, took, useHappened, type HappenedTab } from './WhatHappened';
 import { useDraft } from '../lib/drafts';
+import { langProps, rehypeLang, typedDir } from '../lib/lang';
 
 /**
  * The Conversation tab. "What happened" first: one card per step, for everyone. "Full log" for engineers: the real
@@ -172,7 +173,7 @@ export function MessageAgent({ t, to }: { t: Ticket; to: keyof typeof AGENT_NAME
     );
   return (
     <div className="msgagent">
-      <input className="input" value={text} onChange={(e) => setText(e.target.value)} placeholder={`Message the ${AGENT_NAME[to]}…`} onKeyDown={(e) => e.key === 'Enter' && text.trim() && !act.isPending && send()} />
+      <input className="input" dir={typedDir(text)} value={text} onChange={(e) => setText(e.target.value)} placeholder={`Message the ${AGENT_NAME[to]}…`} onKeyDown={(e) => e.key === 'Enter' && text.trim() && !act.isPending && send()} />
       <button className="btn sm pri" disabled={!text.trim() || act.isPending} onClick={send}>
         <Send size={13} /> Send
       </button>
@@ -206,7 +207,7 @@ function Folded({ from, content, ticket }: { from: 'squad-kit' | 'claude-code' |
       <button className="conv-who linkish" onClick={() => setOpen(!open)}>
         {from === 'thought' && <Brain size={12} />} {label} {!open && <span className="note">· show</span>}
       </button>
-      {open && (from === 'thought' ? <div style={{ whiteSpace: 'pre-wrap' }}>{body}</div> : <Block content={content} ticket={ticket} />)}
+      {open && (from === 'thought' ? <WrittenLines style={{ whiteSpace: 'pre-wrap' }} text={body} /> : <Block content={content} ticket={ticket} />)}
     </div>
   );
 }
@@ -349,9 +350,9 @@ function PlanCard({ entries }: { entries: Extract<AcpUpdate, { sessionUpdate: 'p
     <div className="conv-plan">
       <div className="conv-who"><ListChecks size={13} /> Plan · {done} of {entries.length} done</div>
       {entries.map((e, i) => (
-        <div key={i} className={`conv-plan-row ${e.status}`}>
+        <div key={i} className={`conv-plan-row ${e.status}`} {...langProps(e.content)}>
           <span className="box">{e.status === 'completed' ? <Check size={11} /> : e.status === 'in_progress' ? <Loader2 size={11} className="spin" /> : null}</span>
-          {e.content}
+          <Written text={e.content} />
         </div>
       ))}
     </div>
@@ -402,12 +403,15 @@ function FileCard({ uri, name, mime, size, ticket }: { uri: string; name: string
   );
 }
 
+const LANG = [rehypeLang] as unknown as Options['rehypePlugins'];
+
 export function Markdown({ text }: { text: string }) {
   const { theme } = usePrefs();
   return (
     <div className="md">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        rehypePlugins={LANG}
         components={{
           a: ({ href, children }) => (
             <a href={href} target="_blank" rel="noreferrer">
@@ -417,9 +421,9 @@ export function Markdown({ text }: { text: string }) {
           code: ({ className, children }) => {
             const lang = /language-(\w+)/.exec(className ?? '')?.[1];
             const code = String(children).replace(/\n$/, '');
-            if (!lang && !code.includes('\n')) return <code className="mono">{children}</code>;
+            if (!lang && !code.includes('\n')) return <code className="mono" dir="ltr">{children}</code>;
             return (
-              <div className="md-code">
+              <div className="md-code" dir="ltr">
                 {lang && <span className="md-lang">{lang === 'mermaid' ? 'Diagram (Mermaid)' : lang}</span>}
                 <Highlight code={code} language={lang ?? 'text'} theme={theme === 'dark' ? themes.vsDark : themes.github}>
                   {({ tokens, getLineProps, getTokenProps }) => (

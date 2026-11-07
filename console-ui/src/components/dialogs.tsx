@@ -6,9 +6,10 @@ import { api, send, PROJECT } from '../api/client';
 import { useAct } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { shellArg, shellQuote } from '../lib/text';
-import { Cmd, Modal, DraftNote } from './ui';
+import { Cmd, Modal, DraftNote, Written, WrittenLines } from './ui';
 import { ErrorCard } from './ErrorCard';
 import { clearDrafts, keptOnce, useDraft } from '../lib/drafts';
+import { langProps, typedDir } from '../lib/lang';
 
 export interface PickedFile {
   name: string;
@@ -317,6 +318,7 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
               style={{ minHeight: drafting ? 70 : 150 }}
               autoFocus
               readOnly={drafting}
+              dir={typedDir(pasted)}
               value={pasted}
               onChange={(e) => setPasted(e.target.value)}
               onPaste={(e) => {
@@ -354,7 +356,7 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
               {gaps.length > 0 && (
                 <>
                   <div style={{ marginTop: 6 }}>Still unclear, so the Analyst will ask you after you create it:</div>
-                  <ul>{gaps.map((g, i) => <li key={i}>{g}</li>)}</ul>
+                  <ul>{gaps.map((g, i) => <Written as="li" key={i} text={g} />)}</ul>
                 </>
               )}
             </div>
@@ -378,6 +380,7 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
               id="nt-title"
               className="input"
               autoFocus
+              dir={typedDir(title)}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder={isBug ? 'For example: A price written as 1,500 is refused' : 'For example: Show hearing time in local time'}
@@ -387,16 +390,16 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
             <>
               <div className="field">
                 <label htmlFor="nt-what">What happens</label>
-                <textarea id="nt-what" className="textarea" value={what} onChange={(e) => setWhat(e.target.value)} placeholder="For example: the form says the price is not valid." />
+                <textarea id="nt-what" className="textarea" dir={typedDir(what)} value={what} onChange={(e) => setWhat(e.target.value)} placeholder="For example: the form says the price is not valid." />
               </div>
               <ListField label="Steps to see it" hint="One step per line, for example: Open Services and add a service." items={steps} onChange={setSteps} add="Add a step" />
               <div className="field">
                 <label htmlFor="nt-expected">What should happen</label>
-                <textarea id="nt-expected" className="textarea" value={expected} onChange={(e) => setExpected(e.target.value)} placeholder="For example: the price is saved as 1,500 SAR." />
+                <textarea id="nt-expected" className="textarea" dir={typedDir(expected)} value={expected} onChange={(e) => setExpected(e.target.value)} placeholder="For example: the price is saved as 1,500 SAR." />
               </div>
               <div className="field">
                 <label htmlFor="nt-where">Where</label>
-                <input id="nt-where" className="input" value={where} onChange={(e) => setWhere(e.target.value)} placeholder="The page or link, for example: Setup, Services" />
+                <input id="nt-where" className="input" dir={typedDir(where)} value={where} onChange={(e) => setWhere(e.target.value)} placeholder="The page or link, for example: Setup, Services" />
               </div>
               <FilePicker files={files} onAdd={addFiles} onRemove={(i) => setFiles((now) => now.filter((_, k) => k !== i))} />
               <div className="field">
@@ -415,7 +418,7 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
             <>
               <div className="field">
                 <label htmlFor="nt-ask">What do you want?</label>
-                <textarea id="nt-ask" className="textarea" value={ask} onChange={(e) => setAsk(e.target.value)} placeholder="Who needs it, and why. One or two sentences is enough." />
+                <textarea id="nt-ask" className="textarea" dir={typedDir(ask)} value={ask} onChange={(e) => setAsk(e.target.value)} placeholder="Who needs it, and why. One or two sentences is enough." />
               </div>
               <ListField label="Acceptance criteria" hint="Each one is something you can check, for example: The clerk sees the time in their own city." items={criteria} onChange={setCriteria} add="Add a criterion" />
               <ListField label="Business rules" hint="Limits and who may do what, for example: Only a team lead can reassign a case." items={rules} onChange={setRules} add="Add a rule" />
@@ -578,6 +581,7 @@ function ListField({ label, hint, items, onChange, add }: { label: string; hint:
           <span className="mono note">{i + 1}</span>
           <input
             className="input"
+            dir={typedDir(x)}
             value={x}
             autoFocus={x === '' && i === items.length - 1}
             onChange={(e) => set(i, e.target.value)}
@@ -749,15 +753,15 @@ export function BugDialog({ onClose, foundIn }: { onClose(): void; foundIn?: str
       <p>It becomes a ticket linked to {foundIn ?? 'the latest release'}, and goes around the same loop. The Tester adds a check so it can't come back.</p>
       <div className="field">
         <label htmlFor="bug-what">What happened?</label>
-        <input id="bug-what" className="input" autoFocus value={what} onChange={(e) => setWhat(e.target.value)} placeholder="For example: Table text is hard to read in dark mode" />
+        <input id="bug-what" className="input" autoFocus dir={typedDir(what)} value={what} onChange={(e) => setWhat(e.target.value)} placeholder="For example: Table text is hard to read in dark mode" />
       </div>
       <div className="field">
         <label htmlFor="bug-how">How can we see it?</label>
-        <input id="bug-how" className="input" value={how} onChange={(e) => setHow(e.target.value)} placeholder="The steps, in a line" />
+        <input id="bug-how" className="input" dir={typedDir(how)} value={how} onChange={(e) => setHow(e.target.value)} placeholder="The steps, in a line" />
       </div>
       <div className="field">
         <label htmlFor="bug-exp">What did you expect?</label>
-        <input id="bug-exp" className="input" value={expected} onChange={(e) => setExpected(e.target.value)} />
+        <input id="bug-exp" className="input" dir={typedDir(expected)} value={expected} onChange={(e) => setExpected(e.target.value)} />
       </div>
       <div className="field">
         <label>How bad is it?</label>
@@ -809,8 +813,8 @@ export function ReleasedDialog({ release, demo, onClose }: { release: Release; d
         )}
         {release.log
           ? release.log.map((l) => (
-              <div key={l.text} style={l.ok ? undefined : { color: 'var(--you-ink)' }}>
-                {l.ok ? <Check size={16} /> : <span style={{ width: 16, textAlign: 'center', fontWeight: 800 }}>!</span>} {l.text}
+              <div key={l.text} style={l.ok ? undefined : { color: 'var(--you-ink)' }} {...langProps(l.text)}>
+                {l.ok ? <Check size={16} /> : <span style={{ width: 16, textAlign: 'center', fontWeight: 800 }}>!</span>} <Written text={l.text} />
               </div>
             ))
           : steps.map((s) => (
@@ -821,7 +825,7 @@ export function ReleasedDialog({ release, demo, onClose }: { release: Release; d
       {release.addons.whatsapp && release.whatsappDraft && (
         <>
           <div className="lbl" style={{ marginTop: 4 }}>A WhatsApp note for your manager. Copy it and send it yourself.</div>
-          <div className="wa">{release.whatsappDraft}</div>
+          <WrittenLines className="wa" text={release.whatsappDraft} />
         </>
       )}
     </Modal>

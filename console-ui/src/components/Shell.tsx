@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, Outlet, useRouterState } from '@tanstack/react-router';
 import { ArrowUp, Bug, ChevronsUpDown, Compass, Inbox, LayoutGrid, ListTodo, ListTree, Menu, MessagesSquare, Moon, Network, Settings, ShieldCheck, Sun, Terminal } from 'lucide-react';
+import { Written } from './ui';
 import { useBoard } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { UpdateBanner } from './Restart';
@@ -73,7 +74,7 @@ export function Shell() {
         <button className="iconbtn" onClick={() => setMenu(true)} aria-label="Open the menu" aria-expanded={menu}>
           <Menu size={17} />
         </button>
-        <b>{meta?.project ?? 'Your project'}</b>
+        <Written as="b" text={meta?.project ?? 'Your project'} />
         {waiting > 0 && (
           <Link to="/inbox" className="badge you" aria-label={`${waiting} waiting for you`}>
             {waiting}
@@ -91,7 +92,7 @@ export function Shell() {
         <a className="proj" href="/" title="All your projects">
           <span className="pm">{(meta?.project ?? 'P').charAt(0)}</span>
           <div>
-            <b>{meta?.project ?? 'Your project'}</b>
+            <Written as="b" text={meta?.project ?? 'Your project'} />
             <span>{openCount === 1 ? '1 open ticket' : `${openCount} open tickets`}</span>
           </div>
           <ChevronsUpDown size={14} className="sw" />

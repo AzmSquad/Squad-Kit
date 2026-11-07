@@ -5,7 +5,7 @@ import { api, send } from '../api/client';
 import type { AppProject, AppProjects, AppSettings, AppWaiting, FolderListing } from '../api/types';
 import { usePrefs } from '../lib/prefs';
 import { shellArg, shellQuote } from '../lib/text';
-import { Cmd, CouldNotLoad, Modal, STAGE_NAME, actionLabel, ago, commandFor, outdatedLine } from '../components/ui';
+import { Cmd, CouldNotLoad, Modal, STAGE_NAME, Written, actionLabel, ago, commandFor, outdatedLine } from '../components/ui';
 import { AboutButton, AppUpdate } from '../components/Update';
 import { LimitBanner } from '../components/UsageLimit';
 import { SaveTroubleBanner } from '../components/SaveTrouble';
@@ -134,8 +134,8 @@ export function HomePage() {
                         <span>{STAGE_NAME[t.stage]}</span>
                         <span>{ago(t.activity[0]?.at ?? t.createdAt)}</span>
                       </div>
-                      <h3>{t.title}</h3>
-                      <p>{t.waiting?.summary ?? (changeWaits(t) ? `Change ${openChange(t)!.id} to the spec waits for you` : testChangeWaits(t) ? testChangeLine(t) : t.outdated?.length ? outdatedLine(t) : `Looks stuck: ${t.quiet?.detail ?? ''}`)}</p>
+                      <Written as="h3" text={t.title} />
+                      <Written as="p" text={t.waiting?.summary ?? (changeWaits(t) ? `Change ${openChange(t)!.id} to the spec waits for you` : testChangeWaits(t) ? testChangeLine(t) : t.outdated?.length ? outdatedLine(t) : `Looks stuck: ${t.quiet?.detail ?? ''}`)} />
                     </div>
                     <Cmd text={forProject(commandFor(t), project.name)} />
                     <a
@@ -232,7 +232,7 @@ function ProjectCard({ p, onRemove }: { p: AppProject; onRemove(): void }) {
       <span className="pm">{p.name.charAt(0).toUpperCase()}</span>
       <div className="grow">
         <b>
-          {p.name}
+          <Written text={p.name} />
           {p.engine === 'demo' && <small className="demo">Demo</small>}
         </b>
         <span className="mono path" title={p.root}>{p.root}</span>

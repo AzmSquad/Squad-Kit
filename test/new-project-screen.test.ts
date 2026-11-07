@@ -164,7 +164,7 @@ describe('the page', () => {
   it('asks the one question, with a box that takes Arabic, and has no Something is wrong there', () => {
     expect(page).toContain('<h2>What do you want to build?</h2>');
     const ask = page.slice(page.indexOf('function AskIdea'), page.indexOf('/** The handover:'));
-    expect(ask).toContain('dir="auto"');
+    expect(ask).toContain('dir={typedDir(text)}');
     expect(ask).toContain('/api/v1/overview/idea');
     expect(ask).not.toContain('Something is wrong');
     expect(page).toContain('Change what I said');
