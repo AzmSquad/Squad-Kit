@@ -8,7 +8,7 @@ import { writeConfigFile } from '../core/config.js';
 import { boardExists, listDecisions, listReleases, listTickets, readMeta, splitTicket, ticketDir, type BoardPaths } from '../board/store.js';
 import { decisionDoc, releaseDoc } from '../board/docs.js';
 import type { Release, Ticket } from '../board/types.js';
-import { commitArgsFor, currentBranch, git, isRepo, latestBase, remotes, gitLater } from './git.js';
+import { commitArgsFor, currentBranch, git, isRepo, latestBase, remotes, gitLater, keepsCommitRules, conventionalWords } from './git.js';
 import { repoFor } from './repos.js';
 import { BREAKDOWN_ID, breakdownDir } from '../board/requirements-paths.js';
 
@@ -209,7 +209,7 @@ export async function commitTicketDocs(bp: BoardPaths, t: Ticket, moment: string
   const paths = stageTicketDocs(bp, t);
   if (!paths.length || !git(t.worktree!, ['diff', '--cached', '--name-only', '--', ...paths], { allowFail: true })) return null;
   // squad-kit's own bookkeeping: the project's commit hooks (tests, linters) are for code, and could wait forever.
-  await gitLater(t.worktree!, [...commitArgsFor(t.worktree!), 'commit', '-m', `${t.id}: ${moment}`, '--', ...paths]);
+  await gitLater(t.worktree!, [...commitArgsFor(t.worktree!), 'commit', '-m', keepsCommitRules(t.worktree!) ? conventionalWords('chore', moment, t.id) : `${t.id}: ${moment}`, '--', ...paths]);
   return git(t.worktree!, ['rev-parse', '--short', 'HEAD']);
 }
 

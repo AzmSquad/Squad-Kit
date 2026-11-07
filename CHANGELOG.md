@@ -82,6 +82,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A project with commit rules (commitlint): squad-kit's own commits now follow them too, also where no hook checks them.
 - Arabic reads right to left across the board, a ticket, a breakdown, its map and the other pages, not only in chat. Each piece of
   text a person or an agent wrote follows its own language, and the app's own frame stays as it is.
 - One person's release no longer takes away a teammate's change to the team rules or notes. If only one of you changed a file,

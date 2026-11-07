@@ -928,6 +928,22 @@ export function conventionalWords(type: 'feat' | 'fix' | 'chore', text: string, 
   return `${type}: ${subject.charAt(0).toLowerCase()}${subject.slice(1, room).trimEnd()}${tail}`;
 }
 
+const COMMIT_RULES = ['commitlint.config.js', 'commitlint.config.cjs', 'commitlint.config.mjs', 'commitlint.config.ts', '.commitlintrc', '.commitlintrc.json', '.commitlintrc.js', '.commitlintrc.cjs', '.commitlintrc.yaml', '.commitlintrc.yml'];
+
+/**
+ * The project keeps its commit messages in the form commitlint checks. squad-kit's own commits run past the hooks or in a
+ * copy with none, so nothing would turn them back here, and a check further on (a pull request, a pipeline) would.
+ */
+export function keepsCommitRules(dir: string): boolean {
+  if (COMMIT_RULES.some((f) => fs.existsSync(path.join(dir, f)))) return true;
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')) as { commitlint?: unknown; devDependencies?: Record<string, unknown>; dependencies?: Record<string, unknown> };
+    return Boolean(pkg.commitlint || pkg.devDependencies?.['@commitlint/cli'] || pkg.dependencies?.['@commitlint/cli']);
+  } catch {
+    return false;
+  }
+}
+
 interface CommitTry {
   ok: boolean;
   said: string;
@@ -1241,7 +1257,7 @@ export async function commitChecked(dir: string, message: string, words: string,
   const merging = isMerging(dir);
   const whole = Boolean(how.from) || merging;
   const savedFirst = whole && somethingToSave(dir);
-  if (savedFirst) await commitLater(dir, `Work so far: ${message}`);
+  if (savedFirst) await commitLater(dir, keepsCommitRules(dir) ? conventionalWords('chore', `work so far: ${message}`) : `Work so far: ${message}`);
   const tip = git(dir, ['rev-parse', 'HEAD']);
   let start = tip;
   if (how.from) {

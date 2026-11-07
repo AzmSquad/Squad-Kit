@@ -3,7 +3,7 @@ import path from 'node:path';
 import { readMeta, readTicket, type BoardPaths } from '../board/store.js';
 import type { Release, Ticket, UnpushedRelease } from '../board/types.js';
 import { runCommand, tail } from './checks.js';
-import { HOOK_MS, HookRefused, MergeClash, SHORT_HOOK_MS, bringHookRunner, commitArgsFor, commitLater, copyDirsIn, copyTurn, fetchedTip, mergeWouldClash, commitChecked, commitHooks, commitWithoutHooks, conventionalWords, currentBranch, baseTurn, git, gitLater, isAncestor, keepingFiles, makeCopy, mergeIntoBase, netGitLater, remotes, removeWorktree, somethingToSave, stageAll, stageAllLater, worktreeRoot, type HookRun } from './git.js';
+import { HOOK_MS, HookRefused, MergeClash, SHORT_HOOK_MS, bringHookRunner, commitArgsFor, commitLater, copyDirsIn, copyTurn, fetchedTip, mergeWouldClash, commitChecked, commitHooks, commitWithoutHooks, conventionalWords, currentBranch, baseTurn, git, gitLater, isAncestor, keepingFiles, makeCopy, mergeIntoBase, netGitLater, remotes, removeWorktree, somethingToSave, stageAll, stageAllLater, worktreeRoot, type HookRun, keepsCommitRules } from './git.js';
 import { projectRoot } from './live.js';
 import { repoFor, reposOf } from './repos.js';
 import type { RepoInfo } from '../board/types.js';
@@ -98,9 +98,9 @@ export function hooksStillOwed(ticket: Ticket): boolean {
  * not take this kind of commit) it is saved anyway, since the release cannot stop here, and the release's log says so.
  */
 async function commitRelease(dir: string, version: string, log: ReleaseLog, how: HookRun = {}): Promise<void> {
-  const message = `release ${version}`;
+  const message = keepsCommitRules(dir) ? conventionalWords('chore', `release ${version}`) : `release ${version}`;
   try {
-    await commitChecked(dir, message, conventionalWords('chore', message), SHORT_HOOK_MS, { ...how, noRunner: true });
+    await commitChecked(dir, message, conventionalWords('chore', `release ${version}`), SHORT_HOOK_MS, { ...how, noRunner: true });
   } catch (err) {
     if (!(err instanceof HookRefused)) throw err;
     await commitLater(dir, message);

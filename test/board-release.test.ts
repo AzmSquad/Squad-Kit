@@ -94,6 +94,38 @@ describe('live release', () => {
   });
 });
 
+describe('live release, on a project with commit rules', () => {
+  it("names its own commit the way the project's rules ask", async () => {
+    fs.writeFileSync(path.join(project, 'commitlint.config.js'), 'export default {};\n');
+    commit(project, 'chore: rules');
+    sh('git push -q origin main', project);
+    const wt = addWorktree(project, 'AP-1', 'main');
+    fs.writeFileSync(path.join(wt.dir, 'hello.txt'), 'hello\n');
+    writeTicket(bp, {
+      id: 'AP-1',
+      title: 'Say hello',
+      ask: 'Add a hello file',
+      kind: 'feature',
+      source: { type: 'manual' },
+      priority: 'normal',
+      stage: 'review',
+      status: '',
+      waiting: { kind: 'proof', summary: 'Ready' },
+      createdAt: new Date().toISOString(),
+      createdBy: 'Test',
+      activity: [],
+      worktree: wt.dir,
+      branch: wt.branch,
+      baseCommit: wt.baseCommit,
+      releaseNote: '**Hello.** A hello file.',
+      gates: { checks: 'pass', review: 'pass', proof: 'pass' },
+    });
+    actions.approve(bp, 'AP-1');
+    await actions.releaseVersion(bp);
+    expect(sh('git log --format=%s main', remote).split('\n')[0]).toBe('chore: release v1.5.0');
+  });
+});
+
 describe('workspace helpers', () => {
   it('makes short ticket keys from project names', () => {
     expect(keyFor('mega-tracker')).toBe('MT');

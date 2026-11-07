@@ -7,6 +7,7 @@ import { boardPaths, readMeta, readTicket, updateTicket, writeMeta, writeTicket,
 import * as actions from '../src/board/actions.js';
 import { addWorktree } from './support/copy.js';
 import { commitTicketDocs, hideSquadFromGit } from '../src/engine/project-git.js';
+import { keepsCommitRules } from '../src/engine/git.js';
 import type { Ticket } from '../src/board/types.js';
 
 /** ADR-001 for a project whose `.squad/` sits inside its one repo. */
@@ -75,6 +76,31 @@ describe('the project documents in git', () => {
     expect(sh('git status --porcelain', project)).toBe('');
     expect(fs.existsSync(path.join(project, '.gitignore'))).toBe(false);
     expect(fs.readFileSync(path.join(project, '.git', 'info', 'exclude'), 'utf8')).toContain('/.squad/');
+  });
+
+  it("keeps a project's commit rules: nothing checks squad-kit's own save here, and a check further on would", async () => {
+    const t = ticketInProgress();
+    fs.writeFileSync(path.join(t.worktree!, 'commitlint.config.js'), 'export default {};\n');
+    expect(keepsCommitRules(t.worktree!)).toBe(true);
+    expect(await commitTicketDocs(bp, t, 'spec and design approved')).toBeTruthy();
+    expect(sh('git log -1 --format=%s', t.worktree!)).toBe('chore: spec and design approved (AP-1)');
+  });
+
+  it.each([
+    ['a config file', '.commitlintrc.json', '{}', true],
+    ['a package.json that lists it', 'package.json', '{"devDependencies":{"@commitlint/cli":"19"}}', true],
+    ['a package.json that says it', 'package.json', '{"commitlint":{"extends":[]}}', true],
+    ['a package.json with neither', 'package.json', '{"devDependencies":{"husky":"9"}}', false],
+    ['a package.json that cannot be read', 'package.json', 'not json', false],
+  ])('commit rules from %s', (_name, file, text, yes) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-rules-'));
+    try {
+      expect(keepsCommitRules(dir)).toBe(false);
+      fs.writeFileSync(path.join(dir, file), text);
+      expect(keepsCommitRules(dir)).toBe(yes);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('commits the ticket on its own branch at each big moment, and its history shows them', async () => {
