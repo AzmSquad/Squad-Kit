@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-11-08
+
 ### Added
 
 - **The squad writes in your language.** A story asked in Arabic gets its questions, spec, design, notes and proof in Arabic. Code,
@@ -1300,7 +1302,9 @@ First public release.
 - Plan-generation meta-prompt (`generate-plan.md`), intake template (`intake.md`), and plan skeleton reference (`story-skeleton.md`).
 - Documentation: `docs/philosophy.md`, `docs/getting-started.md`, `docs/customization.md`, `docs/vs-spec-kit.md`.
 
-[Unreleased]: https://github.com/AzmSquad/squad-kit/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/AzmSquad/squad-kit/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.3.0
+[1.2.2]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.2.2
 [1.2.1]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.2.1
 [1.2.0]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.2.0
 [1.1.1]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.1.1
