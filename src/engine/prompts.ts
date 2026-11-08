@@ -844,7 +844,15 @@ const DECISION_LINKS = `  area: one of ${DECISION_AREAS.join(', ')}. replaces: o
 - follows: the ids of the saved decisions this ticket's design relies on (like ["ADR-003", "ADR-005"]). Only real
   ones from the list, only those that shape this ticket. Empty if none.`;
 
-const DEPENDS_RULE = `- dependsOn: the ids of other open tickets (from the list of open tickets, if there is one) whose code this ticket
+/**
+ * How the Builder says which step it is on. The board follows its to-do list (ACP's plan update) when it holds one item
+ * per step, and its ">> step N" lines besides, so each comes as the step starts.
+ */
+const STEP_LINE = `Keep your to-do list as these steps: one item per step, in the same order, nothing more. Mark a step in progress
+  as you start it and completed when it is done. Also, as you start each step, write a line that says exactly ">> step N"
+  (N is the step number) in your message, before that step's work: one step at a time, never through a command such as echo.`;
+
+const DEPENDS_RULE =`- dependsOn: the ids of other open tickets (from the list of open tickets, if there is one) whose code this ticket
   needs and that are not merged yet, like ["RO-1"]. squad-kit then waits for them, or builds on their branch. Empty if
   none.`;
 
@@ -871,7 +879,7 @@ Steps:
 ${steps}
 
 Rules:
-- Before you start each step, print a line that says exactly ">> step N" (N is the step number).
+- ${STEP_LINE}
 - Follow the saved decisions and the project's existing style.
 - Write tests that check every "done when", and run the tests before you finish. A browser cannot start in your shell:
   run tests that open a browser with squad-kit's run_checks tool, never yourself.
@@ -1605,7 +1613,7 @@ The Architect updated the design for it${c.design?.summary ? `: ${c.design.summa
 ${steps.map((s, i) => `${i + 1}. ${s.title}${s.status === 'done' ? ' (done, keep it)' : ' (do it now)'}`).join('\n')}
 
 Redo only ${redo.length === 1 ? 'step' : 'steps'} ${redo.join(', ')}. The other steps are done: leave their code as it is unless the change needs it.
-Before you start each step, print a line that says exactly ">> step N" (N is the step number). Then run the tests.`;
+${STEP_LINE} Then run the tests.`;
 }
 
 /** What the person's buttons do after the talk, told to the agent so it can say so. */

@@ -82,5 +82,18 @@ describe('team instructions per step', () => {
     const build = (await corePrompts(bp, 'builder', 'SK-150')).prompts.find((p) => p.step === 'build')!;
     expect(build.prompt).toContain('Case notes autosave');
     expect(build.prompt).toContain('>> step');
+    // The board follows its to-do list, one item per plan step, and its step lines said in its words.
+    expect(build.prompt).toContain('Keep your to-do list as these steps');
+    expect(build.prompt).toContain('never through a command such as echo');
+  });
+
+  it('lets the Builder keep its to-do list by either of its names, so the board can follow its steps', async () => {
+    const { claudeRunOptions } = await import('../src/modules/claude/index.js');
+    const build = claudeRunOptions({ cwd: '/x', prompt: 'x', permissions: ['read', 'edit'] } as never);
+    expect(build.allowedTools).toEqual(expect.arrayContaining(['TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet']));
+    const plans: unknown[] = [];
+    const withPlan = claudeRunOptions({ cwd: '/x', prompt: 'x', permissions: ['read', 'edit'], onPlan: (p: unknown) => plans.push(p) } as never);
+    withPlan.onPlan?.([{ content: 'a', status: 'pending' }]);
+    expect(plans).toHaveLength(1);
   });
 });

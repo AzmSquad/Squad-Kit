@@ -127,6 +127,53 @@ describe('the Builder on the clock', () => {
     // Step 1 took from the start to ">> step 2", then one minute each.
     expect(readUsual(bp)[usualKey('builder', 'build', 'full')]).toEqual([122, 61, 61]);
   });
+
+  /** A Builder of three plan steps; `act` plays what it says, and each look notes the plan step in progress then (from 1). */
+  async function builderSays(name: string, act: (opts: RunOptions, look: () => void) => void): Promise<number[]> {
+    const { bp, id, wt } = liveTicket(name, (x) => {
+      x.steps = [{ title: 'Read the booking page', status: 'todo' }, { title: 'Show how many fit', status: 'todo' }, { title: 'Tests', status: 'todo' }] as typeof x.steps;
+      x.work = { steps: 3, tests: 1, screens: 0 };
+    });
+    const seen: number[] = [];
+    answer = (opts) => {
+      if (opts.cwd !== wt.dir) return null;
+      act(opts, () => seen.push((readTicket(bp, id)!.steps ?? []).findIndex((s) => s.status === 'doing') + 1));
+      return { ok: true, structured: { summary: 'Done' } };
+    };
+    await (new LiveSquad(bp) as unknown as { build(id: string): Promise<void> }).build(id);
+    return seen;
+  }
+
+  it("follows the Builder's own to-do list, as ACP's plan update gives it, step by step", async () => {
+    const seen = await builderSays('plan', (opts, look) => {
+      const plan = (...status: ('pending' | 'in_progress' | 'completed')[]) => opts.onPlan?.(status.map((s, i) => ({ content: `Step ${i + 1}`, status: s })));
+      plan('pending', 'pending', 'pending');
+      look();
+      plan('completed', 'in_progress', 'pending');
+      look();
+      plan('completed', 'completed', 'in_progress');
+      look();
+      // A list that is not the plan's steps says nothing about them.
+      opts.onPlan?.([{ content: 'Something else', status: 'in_progress' }]);
+      look();
+    });
+    expect(seen).toEqual([1, 2, 3, 3]);
+  });
+
+  it('reads ">> step N" cut in two, or said through a command, never goes back, and skips a step the plan does not have', async () => {
+    const seen = await builderSays('pieces', (opts, look) => {
+      opts.onText?.('Reading the page first.\n>> st');
+      opts.onText?.('ep 2\nNow the count.');
+      look();
+      opts.onTool?.({ name: 'Bash', input: { command: 'echo ">> step 3"' } });
+      look();
+      opts.onText?.('Back to >> step 1 for a moment.');
+      look();
+      opts.onText?.('>> step 9');
+      look();
+    });
+    expect(seen).toEqual([2, 3, 3, 3]);
+  });
 });
 
 describe('a slow step in the live squad', () => {

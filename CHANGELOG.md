@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Builder's step on the card now moves with it.** The card often stayed on "step 1" while the Builder was on step 5,
+  then jumped, and "Taking longer than usual" came for a step it had finished long before. squad-kit now follows the
+  Builder's own to-do list, one item per plan step, step by step, and still reads its "step N" lines, also when one comes
+  in two pieces or through a command. Until the Builder says which step it is on, "Taking longer than usual" looks at the
+  whole build, not at the first step.
+
 ## [1.3.1] — 2026-11-08
 
 ### Changed

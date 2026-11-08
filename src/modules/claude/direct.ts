@@ -6,7 +6,7 @@ import path from 'node:path';
 import { resolveClaudeBinary } from '../../core/claude-binary.js';
 import { COULD_NOT_SAVE, asError } from '../../core/file-trouble.js';
 import { childEnv } from '../../engine/agent-env.js';
-import { usageFrom } from '../../engine/acp-runner.js';
+import { planOf, usageFrom } from '../../engine/acp-runner.js';
 import { track, whenExited } from '../../engine/process-group.js';
 import { resetWords } from '../../engine/usage-limit.js';
 import { claudeLimit } from './limit.js';
@@ -18,7 +18,7 @@ import { claudeBlocked, type ClaudeSandbox } from './sandbox.js';
  */
 
 export type { ToolEvent } from '../ai-tool/types.js';
-import type { AgentUsage, BlockedAction, RunWindow, ToolEvent } from '../ai-tool/types.js';
+import type { AgentUsage, BlockedAction, PlanEntry, RunWindow, ToolEvent } from '../ai-tool/types.js';
 
 export interface RunOptions {
   cwd: string;
@@ -58,6 +58,8 @@ export interface RunOptions {
   /** The sandbox refused a command something. */
   onBlocked?(action: BlockedAction): void;
   onText?(text: string): void;
+  /** Claude Code's to-do list changed: all of it, in order. */
+  onPlan?(entries: PlanEntry[]): void;
   /** Any sign of life from Claude Code (a message, a tool call, a tool result), for the watchdog. */
   onActivity?(): void;
   /** The Claude Code process id, so the watchdog can look at the commands it runs. */
@@ -262,6 +264,11 @@ export function runClaude(opts: RunOptions): Promise<RunResult> {
       if (event.type === 'assistant') {
         for (const part of event.message?.content ?? []) {
           if (part.type === 'tool_use' && part.name !== 'StructuredOutput') opts.onTool?.({ name: part.name, input: part.input ?? {} });
+          // The to-do list, as ACP's plan update gives it: run directly, the list comes as the TodoWrite tool's input.
+          if (part.type === 'tool_use' && part.name === 'TodoWrite' && opts.onPlan) {
+            const todos = (part.input as { todos?: { content?: unknown; status?: unknown }[] } | undefined)?.todos;
+            if (Array.isArray(todos)) opts.onPlan(planOf(todos));
+          }
           if (part.type === 'text' && part.text) {
             lastText = part.text;
             opts.onText?.(part.text);

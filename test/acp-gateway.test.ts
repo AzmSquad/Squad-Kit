@@ -73,10 +73,28 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
 });
 `;
 
+/** An adapter whose agent keeps a to-do list: ACP's plan update, the whole list each time, with fields squad-kit does not keep. */
+const PLAN_ADAPTER = `
+import readline from 'node:readline';
+const send = (m) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...m }) + '\\n');
+const plan = (entries) => send({ method: 'session/update', params: { sessionId: 's4', update: { sessionUpdate: 'plan', entries } } });
+readline.createInterface({ input: process.stdin }).on('line', (line) => {
+  const msg = JSON.parse(line);
+  if (msg.method === 'initialize') return send({ id: msg.id, result: { protocolVersion: 1 } });
+  if (msg.method === 'session/new') return send({ id: msg.id, result: { sessionId: 's4' } });
+  if (msg.method === 'session/prompt') {
+    plan([{ content: 'Add the words', status: 'in_progress', priority: 'medium' }, { content: 'Add the page', status: 'pending', priority: 'medium' }]);
+    plan([{ content: 'Add the words', status: 'completed', priority: 'medium' }, { content: 'Add the page', status: 'in_progress', priority: 'high' }, { status: 'odd' }]);
+    return send({ id: msg.id, result: { stopReason: 'end_turn' } });
+  }
+});
+`;
+
 let dir: string;
 let script: string;
 let modeScript: string;
 let piecesScript: string;
+let planScript: string;
 
 beforeAll(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-acp-'));
@@ -86,6 +104,8 @@ beforeAll(() => {
   fs.writeFileSync(modeScript, MODE_ADAPTER);
   piecesScript = path.join(dir, 'pieces-adapter.mjs');
   fs.writeFileSync(piecesScript, PIECES_ADAPTER);
+  planScript = path.join(dir, 'plan-adapter.mjs');
+  fs.writeFileSync(planScript, PLAN_ADAPTER);
 });
 
 const launch = (args: string[]): AcpLaunch => ({
@@ -121,6 +141,16 @@ describe('the agent gateway', () => {
     const r = await runAcp(launch([piecesScript]), { cwd: dir, prompt: 'go', timeoutMs: 20_000, onText: (t) => pieces.push(t) });
     expect(r).toMatchObject({ ok: true, text: 'The word is mango.' });
     expect(pieces).toEqual(['Let me ', 'look.', 'The word ', 'is ', 'mango.']);
+  });
+
+  it("hands on the agent's to-do list each time it changes, as ACP's plan update gives it: words and where each stands", async () => {
+    const plans: unknown[] = [];
+    const r = await runAcp(launch([planScript]), { cwd: dir, prompt: 'go', timeoutMs: 20_000, onPlan: (p) => plans.push(p) });
+    expect(r.ok).toBe(true);
+    expect(plans).toEqual([
+      [{ content: 'Add the words', status: 'in_progress' }, { content: 'Add the page', status: 'pending' }],
+      [{ content: 'Add the words', status: 'completed' }, { content: 'Add the page', status: 'in_progress' }, { content: '', status: 'pending' }],
+    ]);
   });
 
   it('tells the caller when the adapter cannot start, so it can fall back', async () => {

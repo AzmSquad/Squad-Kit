@@ -41,7 +41,7 @@ import { TECH_ROLES, type BoardMeta, type ChangeStep, type DecisionArea, type Im
 import { detectStack } from '../board/stack.js';
 import { AI_TOOLS, aiTool, describeToolEvent } from '../modules/registry.js';
 import { CHECK_DOING, DOING, plainToolLine } from './plain-doing.js';
-import type { AgentResult, AgentRun, AiTool, BlockedAction, ToolEvent } from '../modules/ai-tool/types.js';
+import type { AgentResult, AgentRun, AiTool, BlockedAction, PlanEntry, ToolEvent } from '../modules/ai-tool/types.js';
 import { CHECK_SILENT_MS, checksToRun, failedOnceLine, runChecks as runChecksNow, runCommand, startApp, startsToo, tail, testCount, type CheckResult, type CommandWatch, type RunningApp } from './checks.js';
 import { TurnTimeout, appIn, inTurn, startPastOther, stopAppsIn, untilEnded, type TurnKind } from './copy-turn.js';
 import { forgetKnownFailure, knownFailures } from './known-failures.js';
@@ -3087,6 +3087,50 @@ export class LiveSquad {
     const cwd = workFolder(t)!;
     const started = Date.now();
     let current = -1;
+    /** The Builder is on plan step `n` (from 0): the ones before are done. Only ever forward within a run. */
+    const reached = (n: number) => {
+      if (n <= current || n >= (readTicket(this.bp, id)?.steps?.length ?? 0)) return;
+      current = n;
+      this.update(id, (x) => {
+        const steps = x.steps ?? [];
+        steps.forEach((s, i) => {
+          if (i < n && s.status !== 'done') {
+            s.status = 'done';
+            s.live = undefined;
+            s.minutes = Math.max(1, Math.round((Date.now() - started) / 60000 / Math.max(1, n)));
+            addActivity(x, 'builder', `Finished step ${i + 1}: ${s.title}`);
+          }
+        });
+        const s = steps[n];
+        if (s && s.status !== 'doing') {
+          s.status = 'doing';
+          addActivity(x, 'builder', `Started step ${n + 1}: ${s.title}`);
+        }
+        x.progress = Math.round((n / Math.max(1, steps.length)) * 100);
+        x.status = `Step ${n + 1} of ${steps.length}`;
+        nextPart(this.bp, x, n + 1);
+      });
+    };
+    // Its ">> step N", in its words or in a command it runs (echo ">> step 5"). Its words come in pieces, so the end of
+    // what came before is kept: a line cut in two is still read once its second half comes. Only forward and only a
+    // step of the plan, so a number read before all of it came (1, then 10) does no harm.
+    let heard = '';
+    const stepSaid = (said: string) => {
+      const m = [...said.matchAll(/>>\s*step\s+(\d+)/gi)].pop();
+      if (m) reached(Number(m[1]) - 1);
+    };
+    // Its own to-do list (ACP's plan update), when it keeps one entry per plan step: where it really is, step by step.
+    const planSaid = (entries: PlanEntry[]) => {
+      const steps = readTicket(this.bp, id)?.steps ?? [];
+      if (!steps.length || entries.length !== steps.length) return;
+      const doing = entries.findIndex((e) => e.status === 'in_progress');
+      const open = entries.findIndex((e) => e.status !== 'completed');
+      reached(doing >= 0 ? doing : open >= 0 ? open : steps.length - 1);
+    };
+    const watch = this.watcher(id, 'builder', cwd, (line, x) => {
+      const doing = x.steps?.find((s) => s.status === 'doing');
+      if (doing) doing.live = line;
+    });
     const lanes = await this.watchCopies(t);
     this.lanesOf.set(id, lanes);
     const r = await this.runAgent({
@@ -3101,36 +3145,16 @@ export class LiveSquad {
       timeoutMs: BUILD_STEP_MS,
       addDirs: this.extraDirs(t),
       box: {},
-      onText: (text) => {
-        const m = [...text.matchAll(/>>\s*step\s+(\d+)/gi)].pop();
-        if (!m) return;
-        const n = Number(m[1]) - 1;
-        if (n === current) return;
-        current = n;
-        this.update(id, (x) => {
-          const steps = x.steps ?? [];
-          steps.forEach((s, i) => {
-            if (i < n && s.status !== 'done') {
-              s.status = 'done';
-              s.live = undefined;
-              s.minutes = Math.max(1, Math.round((Date.now() - started) / 60000 / Math.max(1, n)));
-              addActivity(x, 'builder', `Finished step ${i + 1}: ${s.title}`);
-            }
-          });
-          const s = steps[n];
-          if (s && s.status !== 'doing') {
-            s.status = 'doing';
-            addActivity(x, 'builder', `Started step ${n + 1}: ${s.title}`);
-          }
-          x.progress = Math.round((n / Math.max(1, steps.length)) * 100);
-          x.status = `Step ${n + 1} of ${steps.length}`;
-          nextPart(this.bp, x, n + 1);
-        });
+      onText: (piece) => {
+        heard = `${heard}${piece}`.slice(-200);
+        stepSaid(heard);
+        heard = heard.slice(-20);
       },
-      onTool: this.watcher(id, 'builder', cwd, (line, x) => {
-        const doing = x.steps?.find((s) => s.status === 'doing');
-        if (doing) doing.live = line;
-      }),
+      onPlan: planSaid,
+      onTool: (e) => {
+        if (typeof e.input.command === 'string') stepSaid(e.input.command);
+        watch(e);
+      },
     })
       .finally(() => {
         this.lanesOf.delete(id);

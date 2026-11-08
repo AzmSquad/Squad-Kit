@@ -130,6 +130,10 @@ describe('slow and stuck steps', () => {
     expect(slowStep(building({ clock: { who: 'builder', step: 'build', part: 3, since: ago(7 * 60) } }), {}, AT)).toBeNull();
     const slow = slowStep(building({ clock: { who: 'builder', step: 'build', part: 3, since: ago(14 * 60) } }), {}, AT);
     expect(slow).toMatchObject({ kind: 'long', detail: 'The Builder has been on this step for 14 minutes. It usually takes 2 to 4 minutes.' });
+    // Until the Builder says which step it is on, the whole build is judged: its steps would all pile up on the first.
+    const unsaid = (secs: number) => building({ steps: six(-1), clock: { who: 'builder', step: 'build', part: 1, since: ago(secs), began: ago(secs) } });
+    expect(slowStep(unsaid(14 * 60), {}, AT)).toBeNull();
+    expect(slowStep(unsaid(50 * 60), {}, AT)).toMatchObject({ kind: 'long', detail: 'The Builder has been building for 50 minutes. 6 steps usually take 12 to 24 minutes.' });
     // A step that usually takes seconds is still not slow after one minute.
     const quick = { [usualKey('squad', 'checks', 'full')]: [5, 6, 7] };
     const checks = ticket({ stage: 'test', live: true, squad: { phase: 'test', nextAt: ago(-60) }, clock: { who: 'squad', step: 'checks', since: ago(60) } });

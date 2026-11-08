@@ -17,7 +17,12 @@ import { claudeBilling, claudeResume } from './billing.js';
 const READ_SHELL = ['cat', 'ls', 'grep', 'rg', 'head', 'tail', 'wc', 'cd', 'pwd', 'git log', 'git show', 'git diff', 'git status'].map((c) => `Bash(${c}:*)`);
 export const READ_ONLY = ['Read', 'Glob', 'Grep', 'LS', ...READ_SHELL];
 const GIT_READ = ['git diff', 'git status', 'git log', 'git show'].map((c) => `Bash(${c}:*)`);
-const BUILD_TOOLS = ['Read', 'Edit', 'MultiEdit', 'Write', 'Glob', 'Grep', 'LS', 'Bash', 'TodoWrite'];
+/**
+ * The to-do list, by both of its names: TodoWrite, and the Task tools newer Claude Code runs headless with. squad-kit
+ * follows the Builder's steps by it (ACP's plan update). It only keeps a list; it touches no file and runs nothing.
+ */
+const TODO_TOOLS = ['TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet'];
+const BUILD_TOOLS = ['Read', 'Edit', 'MultiEdit', 'Write', 'Glob', 'Grep', 'LS', 'Bash', ...TODO_TOOLS];
 /** A step that runs the app and a browser (the Tester): any command, but no file-editing tools. */
 const RUN_TOOLS = ['Read', 'Glob', 'Grep', 'LS', 'Bash', 'TodoWrite'];
 /** Git that changes history is squad-kit's job, never an agent's; so are pull requests and the repo on the code host. */
@@ -103,6 +108,7 @@ export function claudeRunOptions(r: AgentRun): RunOptions {
     ...(r.onTool ? { onTool: r.onTool } : {}),
     ...(r.onBlocked ? { onBlocked: r.onBlocked } : {}),
     ...(r.onText ? { onText: r.onText } : {}),
+    ...(r.onPlan ? { onPlan: r.onPlan } : {}),
     ...(r.onActivity ? { onActivity: r.onActivity } : {}),
     ...(r.onSpawn ? { onSpawn: r.onSpawn } : {}),
   };

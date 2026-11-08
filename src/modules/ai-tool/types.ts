@@ -29,6 +29,12 @@ export interface ToolEvent {
   input: Record<string, unknown>;
 }
 
+/** One entry of the agent's own to-do list, as ACP's plan update sends the whole list each time it changes. */
+export interface PlanEntry {
+  content: string;
+  status: 'pending' | 'in_progress' | 'completed';
+}
+
 /**
  * What a step's shell commands may reach, kept by the operating system where the AI tool has a sandbox. The engine
  * says which folders and hosts; each module turns that into its tool's own sandbox settings. The folder the run works
@@ -131,6 +137,8 @@ export interface AgentRun {
   /** A sandboxed command was refused something. */
   onBlocked?(action: BlockedAction): void;
   onText?(text: string): void;
+  /** The agent's to-do list changed: all of it, in order, with where each entry stands. */
+  onPlan?(entries: PlanEntry[]): void;
   /** Any sign of life, for the watchdog. */
   onActivity?(): void;
   /** The process id, so the watchdog can look at the commands it runs. */

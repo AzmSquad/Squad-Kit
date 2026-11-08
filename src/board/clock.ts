@@ -155,6 +155,16 @@ export function slowStep(t: Ticket, book: UsualBook, at = Date.now()): NonNullab
   const c = t.clock;
   if (!c || t.waiting || c.paused) return null;
   const u = usualOf(book, c.who, c.step, t.track);
+  const n = t.steps?.length ?? 0;
+  // The build is timed per plan step, by what the Builder says of its steps. Until it has said a word about any, they
+  // would all pile up on the first, so the build is slow when the whole of it is: against what that many steps take.
+  const heard = t.steps?.some((s) => s.status === 'doing' || s.status === 'done');
+  if (c.who === 'builder' && c.step === 'build' && n > 1 && !heard) {
+    const all = { low: u.low * n, high: u.high * n };
+    const secs = Math.max(0, (at - Date.parse(c.began ?? c.since)) / 1000);
+    if (secs < slowAfter(all)) return null;
+    return { since: c.began ?? c.since, kind: 'long', detail: `The Builder has been building for ${minutesWords(secs)}. ${n} steps usually take ${usualSentence(all)}.` };
+  }
   const secs = stepSeconds(c, at);
   if (secs < slowAfter(u)) return null;
   const detail =

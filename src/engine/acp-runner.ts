@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { COULD_NOT_SAVE, asError } from '../core/file-trouble.js';
-import type { AgentResult, AgentUsage, BlockedAction, RunWindow, ToolEvent } from '../modules/ai-tool/types.js';
+import type { AgentResult, AgentUsage, BlockedAction, PlanEntry, RunWindow, ToolEvent } from '../modules/ai-tool/types.js';
 import { OWN_GROUP, endGroup, track } from './process-group.js';
 
 /**
@@ -50,6 +50,14 @@ export interface AcpTokens {
 
 const count = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0;
 
+/** An agent's to-do list as ACP's plan update sends it (and Claude Code's TodoWrite takes it): words and where each stands. */
+export function planOf(entries: unknown[]): PlanEntry[] {
+  return entries.map((e) => {
+    const x = (e ?? {}) as { content?: unknown; status?: unknown };
+    return { content: typeof x.content === 'string' ? x.content : '', status: x.status === 'in_progress' || x.status === 'completed' ? x.status : 'pending' };
+  });
+}
+
 /**
  * One run's usage from what the agent reported: the run's tokens, and the session's cost now and before the run (US
  * dollars). Whatever was not reported is left out. A session cost lower than before means the tool started counting
@@ -82,6 +90,7 @@ export interface AcpRunOptions {
   onTool?(event: ToolEvent): void;
   onBlocked?(action: BlockedAction): void;
   onText?(text: string): void;
+  onPlan?(entries: PlanEntry[]): void;
   onActivity?(): void;
   onSpawn?(pid: number): void;
   /** How long the adapter may take to start, and then to open the session. Tests use less. */
@@ -277,6 +286,7 @@ export async function runAcp(launch: AcpLaunch, opts: AcpRunOptions): Promise<Ag
       newMessage = false;
       opts.onText?.(update.content.text);
     }
+    if (update.sessionUpdate === 'plan' && Array.isArray(update.entries)) opts.onPlan?.(planOf(update.entries));
     if (update.sessionUpdate === 'tool_call') newMessage = true;
     if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
       const t = tools.get(update.toolCallId) ?? {};
