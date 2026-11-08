@@ -207,11 +207,15 @@ Now the squad works on its own:
    works. Its commands run in a sandbox where the computer allows it: they can only write in that copy, can't read
    your keys or sign-ins, and can only reach package registries and the websites you allow.
 2. squad-kit runs the project's **tests, lint and build** itself, in its own guard on Mac and Linux: they work
-   normally, but can't read the usual places for keys and sign-ins. `SECURITY.md` says what the guard stops and what it
-   does not. A check that fails runs once more first, as a test can fail once for
-   no reason in the code. If it still fails, the Builder fixes it, up to 3 tries, and is told which checks already
-   failed before this ticket started. If the change deleted tests, has fewer tests, changed the test setup or skips
-   tests, the ticket stops and says so. A project with no tests shows **Not checked** in orange, never a green pass.
+   normally, but can't read the usual places for keys and sign-ins. `SECURITY.md` says what the guard stops and what
+   it does not. A check that fails runs once more first, as a test can fail once for no reason in the code. For the
+   tests, the failed ones run on their own first: one that still fails fails the check at once, and if they pass, all
+   the tests run once more and decide. A failed test in a part the ticket did not change also runs on its own on
+   main's code: if it fails there too, it is an old bug, not this ticket's, so the ticket goes on, the checks say so,
+   and squad-kit makes a new ticket to fix that test. It waits until you press Start (`squad start <ticket>`). A
+   check that still fails goes to the Builder, up to 3 tries, and it is told which checks already failed before this
+   ticket started. If the change deleted tests, has fewer tests, changed the test setup or skips tests, the ticket
+   stops and says so. A project with no tests shows **Not checked** in orange, never a green pass.
 3. The **Reviewer** reads the whole change in a fresh session, with the check results, so the work gets a real
    second opinion.
 4. The **Tester** shows each "done when" in one or more screenshots, one for each part or case. squad-kit starts the

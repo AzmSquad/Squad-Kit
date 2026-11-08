@@ -31,6 +31,11 @@ export interface GuardSpec {
   cwd: string;
   /** The person's own project folder, outside the copy: its .env files stay out of reach. */
   root: string;
+  /**
+   * The setup squad-kit runs in the person's own checkout after a merge: it may read that checkout's .env files, as it
+   * does when they run it themselves. Everything else stays hidden. A command in a copy never gets this.
+   */
+  ownEnv?: boolean;
   /** Folders the command may also write in: the proof folder, the package caches, the project/ticket cache. */
   write: string[];
   /** Folders the command may also read: its attachments, its own cache. */
@@ -300,9 +305,10 @@ export function profileText(spec: GuardSpec): string {
   const writable = [spec.cwd, ...spec.write, ...allowWrite];
   for (const a of ancestorsOf([...reAllow, ...writable])) lines.push(`(allow file-read-metadata (literal ${sb(a)}))`);
   for (const r of reAllow) lines.push(`(allow file-read* (subpath ${sb(r)}))`);
-  // A command in the person's own checkout: its .env files stay out of reach there too, unless an engineer allowed them.
+  // A command in the person's own checkout: its .env files stay out of reach there too, unless an engineer allowed them,
+  // or it is the setup after a merge, which reads that checkout's own .env files.
   const realRoot = realPlace(spec.root);
-  if (spec.cwd === realRoot || spec.cwd.startsWith(`${realRoot}/`)) {
+  if (!spec.ownEnv && (spec.cwd === realRoot || spec.cwd.startsWith(`${realRoot}/`))) {
     lines.push(envRule);
     for (const a of allowRead) lines.push(`(allow file-read* (subpath ${sb(a)}))`);
   }
@@ -369,7 +375,9 @@ export function bubblewrapArgs(spec: GuardSpec, command: string): string[] {
   for (const w of at(spec.write)) args.push('--bind-try', w, w);
   // A runtime's socket and the project's .env files, after the folders that may hold them: temp holds a socket of Podman's.
   // Read only is no bar to a connection. A port stays open here: only a network of its own could close it, and commands need the network.
-  hide([...spec.noConnect, ...envFilesIn(spec.root)]);
+  // The setup after a merge reads its own checkout's .env files; the others stay hidden.
+  const own = realPlace(spec.cwd);
+  hide([...spec.noConnect, ...envFilesIn(spec.root).filter((f) => !spec.ownEnv || !realPlace(f).startsWith(`${own}/`))]);
   for (const r of at(spec.allow?.allowRead ?? [])) args.push('--ro-bind-try', r, r);
   for (const w of at(spec.allow?.allowWrite ?? [])) args.push('--bind-try', w, w);
   // Read only whatever came before, even a temp folder they sit in: squad-kit's own browser build, the copy's `.git`, git's folder.

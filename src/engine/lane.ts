@@ -222,8 +222,11 @@ function removeFile(dir: string, rel: string): void {
   }
 }
 
-/** Every file git sees in the copy (tracked, and new ones not ignored) as a tree, without touching its index. */
-async function treeOf(dir: string): Promise<string | undefined> {
+/**
+ * Every file git sees in the copy (tracked, and new ones not ignored) as a tree, without touching its index. The same
+ * tree twice is the same code, which tells whether an app kept running still shows the copy as it is.
+ */
+export async function treeOf(dir: string): Promise<string | undefined> {
   const tmp = path.join(os.tmpdir(), `squad-index-${randomUUID()}`);
   try {
     // A copy of the real index, so only the files that changed are read again. It keeps the index's own time: git

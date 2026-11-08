@@ -54,6 +54,7 @@ import {
   runRelease,
   runShow,
   runStop,
+  runStartTicket,
   runWatch,
 } from './commands/board.js';
 import { runGuardAllow, runHosts } from './commands/sandbox.js';
@@ -475,6 +476,10 @@ program
   .description('Stop the squad on a ticket; the work so far is kept')
   .option('--again', 'Stop the running step and start it again at once')
   .action(wrapArgs(runStop));
+program
+  .command('start <ticket>')
+  .description('Start a story squad-kit made, which waits on the board until you start it')
+  .action(wrapArgs(runStartTicket));
 program
   .command('wait <ticket>')
   .description('A slow step is fine: stay quiet about it for a while. Its time limit stays')

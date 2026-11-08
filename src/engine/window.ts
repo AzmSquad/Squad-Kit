@@ -3,6 +3,8 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import type { BrowserStep } from '../modules/browser/types.js';
 import { CHECK_SILENT_MS, runCommand, startApp, tail, testCount, type RunningApp } from './checks.js';
+import { TurnTimeout, appIn, minutes, startPastOther, stopAppsIn, takeTurn, untilEnded, waitWords, type Turn, type TurnKind } from './copy-turn.js';
+import { fileAlone } from './failed-tests.js';
 import { MAX_PICTURES } from './proof-verdict.js';
 import type { GuardSpec } from './project-guard.js';
 import {
@@ -118,6 +120,11 @@ export interface WindowChecks {
   guard?: GuardSpec;
   /** A check starts: the card's line says so. */
   onStart?(name: CheckName): void;
+  /**
+   * A run starts, before its first command: `all` when it runs every saved check (no "which", no "only"). What comes
+   * back, when anything does, is told what ran once every check of the run ran to its end; never for a run cut off.
+   */
+  onRun?(all: boolean): Promise<((ran: CheckRun[]) => Promise<void>) | undefined>;
   /** A story with several parts: each part's own checks, by the part's id. run_checks must then say which. */
   parts?(): Record<string, WindowChecks>;
 }
@@ -151,10 +158,21 @@ export interface WindowSetup {
   beat?(): void;
   /** Before squad-kit starts the app: nothing squad-kit left running may hold its address. */
   beforeStart?(): Promise<void>;
+  /**
+   * Before squad-kit starts the app in its copy `dir`: what a finished check or step left running there stops, never
+   * what squad-kit runs now (a check still running, an app it keeps). With `only`, just that process, when it is such a
+   * leftover. True when something was stopped.
+   */
+  clearCopy?(dir: string, only?: number): Promise<boolean>;
   /** A busy port or a program in the agent's way: what squad-kit settled, in words for the agent. Null when not that. */
   inTheWay?(text: string): Promise<string | null>;
-  /** Tests use less. callMs is the time one call may take in all, waiting its turn included. */
-  limits?: { callMs?: number; stepMs?: number; appWaitMs?: number };
+  /**
+   * At the end of the run, the app squad-kit started may go on to the next step that uses it, instead of stopping: true
+   * when it was taken. It then runs on, and is no longer the window's.
+   */
+  keep?(app: RunningApp): boolean;
+  /** Tests use less. callMs is the time one call may take in all, waiting its turn included. turnMs: the app's wait for its copy's turn. */
+  limits?: { callMs?: number; stepMs?: number; appWaitMs?: number; turnMs?: number };
 }
 
 export interface Refusal {
@@ -212,6 +230,7 @@ export const EXAMPLES = {
     '{ "shots": [{ "page": "/book", "steps": [{ "action": "fill", "target": { "label": "Date" }, "value": "2026-12-03" }, { "action": "click", "target": { "role": "button", "name": "Book" } }, { "action": "wait", "target": { "text": "Booked" } }], "size": "phone" }] }',
   stuck: '{ "what": "The app does not start", "why": "start_app said the address is already in use" }',
   checks: '{ "which": "test" }',
+  only: '{ "only": "tests/e2e/booking.spec.ts:42" }',
 } as const;
 
 const TARGET = {
@@ -292,10 +311,13 @@ const DEFS: Record<WindowTool, Omit<ToolDef, 'name'>> = {
     inputSchema: NONE,
   },
   run_checks: {
-    description: `squad-kit runs the project's own saved checks in this story's copy of the code, inside its own guard, where a browser can start: browser tests work here, not in your shell. "which" picks one (test, lint or build); left out, all of them run, one after another. It gives back pass or fail for each, with the last lines it printed. It runs only the saved commands and takes no command of yours. A long run goes on in the background, and calling this again gives its result. Example: ${EXAMPLES.checks}`,
+    description: `squad-kit runs the project's own saved checks in this story's copy of the code, inside its own guard, where a browser can start: browser tests work here, not in your shell. "which" picks one (test, lint or build); left out, all of them run, one after another. "only" runs one test file on its own with the project's own test tool, much faster than all the tests: use it while you fix a test, then squad-kit runs all the checks again at the end. It gives back pass or fail for each, with the last lines it printed, and runs each once: a failure is not run again. It runs only the saved commands and takes no command of yours. A long run goes on in the background, and calling this again gives its result. Example: ${EXAMPLES.checks}, or ${EXAMPLES.only}`,
     inputSchema: {
       type: 'object',
-      properties: { which: { type: 'string', enum: CHECK_NAMES, description: 'Which check to run. Left out, all of them.' } },
+      properties: {
+        which: { type: 'string', enum: CHECK_NAMES, description: 'Which check to run. Left out, all of them.' },
+        only: { type: 'string', description: 'One test file in this copy to run on its own, as the test output names it, with its line for a browser test (tests/e2e/booking.spec.ts:42). Only the tests run then.' },
+      },
       additionalProperties: false,
     },
   },
@@ -349,13 +371,22 @@ const RUN_CHECKS_BY_PART: Omit<ToolDef, 'name'> = {
 };
 
 /** One check squad-kit ran for an agent. */
-interface CheckRun {
+export interface CheckRun {
   name: CheckName;
   command: string;
   ok: boolean;
   output: string;
   seconds: number;
+  /** squad-kit ended it: it printed nothing for too long, ran past its time, or the run was stopped. */
+  ended?: boolean;
+  /** The one test file it ran, when the agent asked for one. */
+  only?: string;
+  /** Why it ran something else than asked, for the agent. */
+  note?: string;
 }
+
+/** The longest test file name run_checks takes. */
+const MAX_ONLY = 300;
 
 const text = (t: string): ToolContent => ({ type: 'text', text: t });
 const ok = (t: string): ToolResult => ({ content: [text(t)] });
@@ -483,6 +514,10 @@ const STOPPED = 'You stopped the squad.';
 const STOPPED_CALL = 'You were stopped. squad-kit takes no more calls in this run.';
 /** What a call answers while the app starts in the background: the start goes on past the call. */
 export const STILL_STARTING = 'The app is still starting. Call app_status in a moment.';
+/** What run_checks says when squad-kit stopped the app first: the tests may start their own, one per folder. */
+export const STOPPED_FOR_CHECKS = 'squad-kit stopped the app it started for you, so the tests could start their own. Call start_app again when you need it.';
+/** And app_status, until the app starts again. */
+const STOPPED_FOR_CHECKS_STATUS = 'The app is not running: squad-kit stopped it before the checks ran, so the tests could start their own. Call start_app when you need it.';
 /** What a call answers while squad-kit's browser is still being set up (the first time, it is downloaded). */
 export const BROWSER_STARTING = "squad-kit is still setting up its screenshot browser. Call this again in a moment; do not start a browser yourself.";
 
@@ -538,6 +573,12 @@ export class AgentWindow {
   private starting: Promise<RunningApp> | null = null;
   /** Why the last start did not work, for app_status. */
   private startFailed: string | null = null;
+  /** What the start waits for in the app's copy (copy-turn.ts): a check running there, for the calls to say. */
+  private waitsFor: TurnKind | null = null;
+  /** Takes the app off its copy's list (copy-turn.ts appIn), once it is no longer this window's. */
+  private leaveCopy: (() => void) | null = null;
+  /** squad-kit stopped the app so the checks in its copy could run: app_status says so until it starts again. */
+  private stoppedForChecks = false;
   private session: BrowserSession;
   private closed = false;
   /**
@@ -547,7 +588,7 @@ export class AgentWindow {
   private readonly ctl = new AbortController();
   private readonly signal: AbortSignal;
   /** The checks running for this run: they go on in the background, so a long test run never holds a call. */
-  private checksJob: { which?: CheckName; done: Promise<CheckRun[]> } | null = null;
+  private checksJob: { asked?: string; done: Promise<CheckRun[]> } | null = null;
   /** Calls run one at a time. */
   private queue: Promise<unknown> = Promise.resolve();
   private reserved = 0;
@@ -555,7 +596,8 @@ export class AgentWindow {
   private onTooMany: (() => void)[] = [];
 
   constructor(private s: WindowSetup) {
-    this.app = s.running ?? null;
+    this.app = null;
+    this.hold(s.running ?? null);
     this.signal = s.signal ? AbortSignal.any([s.signal, this.ctl.signal]) : this.ctl.signal;
     this.session = new BrowserSession(this.sessionOptions());
   }
@@ -696,7 +738,7 @@ export class AgentWindow {
         case 'app_status':
           return await this.status(args);
         case 'run_checks':
-          return await this.runChecks(args, clock);
+          return await this.checksInTurn(args, clock);
         case 'add_part':
           return await this.addPart(args);
         case 'ask_api':
@@ -895,10 +937,15 @@ export class AgentWindow {
     if (!a) return { fail: error('This step has no app squad-kit can start: the project has no start command or address in its settings.') };
     if (!appOrigin(a.url)) return { fail: error("The app's address in the project's settings is not on this computer, so squad-kit does not open it.") };
     if (this.app && !this.app.ended?.()) return { app: this.app };
-    this.app = null;
+    this.hold(null);
     const r = await settleBy(this.startInBackground(a), at, this.signal);
     if (this.over) return { fail: error(STOPPED_CALL) };
-    if (r === 'late') return { fail: error(this.s.tools.includes('app_status') ? STILL_STARTING : 'The app is still starting. Call this again in a moment.'), late: true };
+    if (r === 'late') {
+      const again = this.s.tools.includes('app_status') ? 'Call app_status in a moment.' : 'Call this again in a moment.';
+      // Waiting for the copy's turn is said as it is: the tests run first, then the app starts.
+      if (this.waitsFor) return { fail: error(`${waitWords(this.waitsFor, 'app')} ${again}`), late: true };
+      return { fail: error(this.s.tools.includes('app_status') ? STILL_STARTING : 'The app is still starting. Call this again in a moment.'), late: true };
+    }
     if ('err' in r) {
       const why = (r.err as { detail?: string })?.detail ?? (r.err as Error)?.message ?? String(r.err);
       return { fail: error(`squad-kit could not start the app: ${why.slice(0, 1500)}\nCall i_am_stuck if you think squad-kit can fix it; otherwise say in your answer what is missing.`) };
@@ -906,22 +953,30 @@ export class AgentWindow {
     return { app: r.ok };
   }
 
-  /** Starts the app once, in the background. An app that comes up after the run ended is stopped at once. */
+  /**
+   * Starts the app once, in the background, in its copy's turn (copy-turn.ts): a check running in that copy ends
+   * first, as its own server would be in the way. An app that comes up after the run ended is stopped at once.
+   */
   private startInBackground(a: WindowApp): Promise<RunningApp> {
     if (this.starting) return this.starting;
     this.startFailed = null;
+    this.stoppedForChecks = false;
     const who = this.s.who;
     let job: Promise<RunningApp> | null = null;
     job = (async () => {
+      let turn: Turn | null = null;
       try {
+        turn = await this.appTurn(a.cwd);
         await this.s.beforeStart?.().catch(() => undefined);
+        // What a finished check left running in the app's own copy (its test server) stops first. A product keeps today's way.
+        if (!a.run) await this.s.clearCopy?.(a.cwd).catch(() => false);
         if (this.over) throw new Error(STOPPED);
-        const app = a.run ? await a.run() : await startApp(a.cwd, a.start, a.url, this.s.limits?.appWaitMs, this.signal, a.guard);
+        const app = a.run ? await a.run() : await this.startPastOther(a);
         if (this.over) {
           app.stop();
           throw new Error(STOPPED);
         }
-        this.app = app;
+        this.hold(app);
         // The address is for the agent and engineers; the story gets one plain line.
         this.s.say(`squad-kit started the app for the ${who}`);
         this.s.log?.(`squad-kit started the app at ${app.url} for the ${who} on ${this.s.ticket}`);
@@ -935,12 +990,70 @@ export class AgentWindow {
         }
         throw err;
       } finally {
+        this.waitsFor = null;
+        turn?.release();
         if (this.starting === job) this.starting = null;
       }
     })();
     this.starting = job;
     job.catch(() => undefined);
     return job;
+  }
+
+  /**
+   * The app this window runs now. It is on its copy's list (copy-turn.ts appIn), so a run of the checks there stops it
+   * first: run_checks and app_status then say so, and the story gets one plain line. A product keeps today's way.
+   */
+  private hold(app: RunningApp | null): void {
+    this.leaveCopy?.();
+    this.leaveCopy = null;
+    this.app = app;
+    const a = this.s.app;
+    if (!app || !a || a.run) return;
+    this.leaveCopy = appIn(a.cwd, async () => {
+      if (this.app !== app || app.ended?.()) return false;
+      this.hold(null);
+      app.stop();
+      this.stoppedForChecks = true;
+      this.s.say(`squad-kit stopped the app for the ${this.s.who}, so the tests could run`);
+      this.s.log?.(`squad-kit stopped the app at ${app.url} for the ${this.s.who} on ${this.s.ticket}, before the checks in its copy`);
+      await untilEnded(app);
+      return true;
+    });
+  }
+
+  /**
+   * The app's copy's turn: at once when nothing runs there, else after the checks running there, said once on the story.
+   * After the cap, the start does not happen, and the agent is told why in plain words.
+   */
+  private async appTurn(dir: string): Promise<Turn> {
+    try {
+      return await takeTurn(dir, 'app', {
+        signal: this.signal,
+        ...(this.s.limits?.turnMs !== undefined ? { waitMs: this.s.limits.turnMs } : {}),
+        onWait: (holder) => {
+          this.waitsFor = holder;
+          if (holder === 'checks') this.s.say(`The app waits for the tests running in this story's copy, then starts for the ${this.s.who}`);
+        },
+      });
+    } catch (err) {
+      if (!(err instanceof TurnTimeout)) throw err;
+      this.s.log?.(`The app for the ${this.s.who} on ${this.s.ticket} did not start: it ${err.message}`);
+      throw new Error(`${err.holder === 'checks' ? 'the tests in this copy were' : 'another start of the app in this copy was'} still running after ${minutes(err.ms)}, so squad-kit did not start the app. ${err.holder === 'checks' && this.s.tools.includes('run_checks') ? 'Call run_checks for their result, then start_app again' : 'Try again in a moment'}`);
+    }
+  }
+
+  /**
+   * The app, started; once more when its framework said another dev server already runs in this copy and squad-kit
+   * could stop that very process (a leftover of this copy, never what squad-kit runs now).
+   */
+  private startPastOther(a: WindowApp): Promise<RunningApp> {
+    const start = () => startApp(a.cwd, a.start, a.url, this.s.limits?.appWaitMs, this.signal, a.guard);
+    return startPastOther(
+      start,
+      async (pid) => !this.over && Boolean(this.s.clearCopy && (await this.s.clearCopy(a.cwd, pid))),
+      (text) => this.s.log?.(`${text}, for the ${this.s.who} on ${this.s.ticket}`),
+    );
   }
 
   private async startApp(args: Record<string, unknown>, clock: CallClock): Promise<ToolResult> {
@@ -957,13 +1070,13 @@ export class AgentWindow {
     if (extra.length) return this.refuse('stop_app', `stop_app takes no fields, and it got "${extra[0]!.slice(0, 40)}"`, `The ${this.s.who} asked to stop a program squad-kit did not start. squad-kit refused.`);
     if (this.starting) return ok('The app is still starting. Call app_status in a moment, then stop_app once it runs.');
     if (!this.app || this.app.ended?.()) {
-      this.app = null;
+      this.hold(null);
       return ok('squad-kit has not started the app in this step, so there is nothing to stop. squad-kit stops only what it started.');
     }
     const at = this.app.url;
     this.s.app?.after?.();
     this.app.stop();
-    this.app = null;
+    this.hold(null);
     this.s.say(`squad-kit stopped the app for the ${this.s.who}`);
     this.s.log?.(`squad-kit stopped the app at ${at} for the ${this.s.who} on ${this.s.ticket}`);
     return ok(`Stopped the app squad-kit started at ${at}.`);
@@ -973,8 +1086,10 @@ export class AgentWindow {
     const extra = extraFields(args, []);
     if (extra.length) return this.mistake('app_status', `app_status takes no fields, and it got "${short(extra[0]!, 40)}"`, 'Call it with {}.');
     if (!this.s.app) return ok('This step has no app squad-kit can start.');
+    if (this.starting && this.waitsFor) return ok(`${waitWords(this.waitsFor, 'app')} Call app_status again in a moment.`);
     if (this.starting) return ok('The app is still starting. Call app_status again in a moment.');
     if (!this.app || this.app.ended?.()) {
+      if (this.stoppedForChecks) return ok(STOPPED_FOR_CHECKS_STATUS);
       const failed = this.startFailed ? `\nThe last start did not work: ${this.startFailed.slice(0, 1500)}` : '';
       return ok(`The app is not running. start_app starts it, and take_screenshots starts it when needed.${failed}${this.app?.lines?.() ? `\nThe last lines it printed:\n${this.app.lines(15)}` : ''}`);
     }
@@ -983,15 +1098,68 @@ export class AgentWindow {
   }
 
   /**
+   * run_checks in its copy's turn (copy-turn.ts): an app starting in the same copy goes first, and the run holds the
+   * turn until it ends, in the background too, so an app start waits for it. A run going on already holds the turn: the
+   * call only asks it for its result. Before a new run, the app squad-kit runs in that copy stops (stopAppsIn): the one
+   * started for this agent, then the answer says so, or one kept for the proof. Nothing else.
+   */
+  private async checksInTurn(args: Record<string, unknown>, clock: CallClock): Promise<ToolResult> {
+    const dir = this.checksJob ? null : this.checksDir(args);
+    if (!dir) return this.runChecks(args, clock);
+    let turn: Turn;
+    try {
+      turn = await takeTurn(dir, 'checks', { signal: this.signal, waitMs: Math.max(0, by(clock, WAIT_SHARE) - Date.now()) });
+    } catch (err) {
+      if (this.over) return error(STOPPED_CALL);
+      if (err instanceof TurnTimeout) return ok(`${waitWords(err.holder, 'checks')} Call run_checks again in a moment.`);
+      throw err;
+    }
+    try {
+      const mine = this.app && !this.app.ended?.() ? this.app : null;
+      if (this.hasChecks(dir)) await stopAppsIn(dir);
+      const told = Boolean(mine && this.app !== mine && this.stoppedForChecks);
+      const r = await this.runChecks(args, clock);
+      const job = this.checksJob;
+      if (job) job.done.then(turn.release, turn.release);
+      else turn.release();
+      return told ? { ...r, content: [text(STOPPED_FOR_CHECKS), ...r.content] } : r;
+    } catch (err) {
+      turn.release();
+      throw err;
+    }
+  }
+
+  /** True when the copy has a saved check to run at all: with none, run_checks runs nothing, and the app is left alone. */
+  private hasChecks(dir: string): boolean {
+    const whole = this.s.checks;
+    const parts = whole?.parts?.();
+    const c = (parts ? Object.values(parts).find((p) => p.cwd === dir) : undefined) ?? whole;
+    const commands = c?.commands() ?? {};
+    return CHECK_NAMES.some((n) => commands[n]?.trim());
+  }
+
+  /** The copy run_checks runs in for these fields: the story's, or the part's it names. Null when this step has no checks. */
+  private checksDir(args: Record<string, unknown>): string | null {
+    const whole = this.s.checks;
+    if (!whole) return null;
+    const parts = whole.parts?.();
+    const part = typeof args.part === 'string' ? args.part.trim() : '';
+    return (parts ? (parts[part] ?? Object.values(parts)[0] ?? whole) : whole).cwd;
+  }
+
+  /**
    * The project's own saved checks, in the story's copy, inside squad-kit's guard. There is no command field: what runs
    * comes from the project's settings. A long run goes on in the background, past this call: the next call gets its result.
    */
   private async runChecks(args: Record<string, unknown>, clock: CallClock): Promise<ToolResult> {
     const byPart = Boolean(this.s.checks?.parts);
-    const extra = extraFields(args, byPart ? ['which', 'part'] : ['which']);
-    if (extra.length) return this.mistake('run_checks', `run_checks takes only ${byPart ? '"which" and "part"' : '"which"'}, and got "${short(extra[0]!, 40)}"`, `Use: ${EXAMPLES.checks}, or {} for all of them.`);
+    const extra = extraFields(args, byPart ? ['which', 'only', 'part'] : ['which', 'only']);
+    if (extra.length) return this.mistake('run_checks', `run_checks takes only ${byPart ? '"which", "only" and "part"' : '"which" and "only"'}, and got "${short(extra[0]!, 40)}"`, `Use: ${EXAMPLES.checks}, ${EXAMPLES.only}, or {} for all of them.`);
     const which = args.which as CheckName | undefined;
     if (which !== undefined && !CHECK_NAMES.includes(which)) return this.mistake('run_checks', 'which is "test", "lint" or "build"', `Use: ${EXAMPLES.checks}, or {} for all of them.`);
+    if (args.only !== undefined && (typeof args.only !== 'string' || !args.only.trim() || args.only.length > MAX_ONLY || /[\n\r\0]/.test(args.only))) return this.mistake('run_checks', 'only is one test file of this copy, as text', `Use: ${EXAMPLES.only}.`);
+    const only = typeof args.only === 'string' ? args.only.trim() : undefined;
+    if (only && which && which !== 'test') return this.mistake('run_checks', 'only names a test file, so which is "test" or left out', `Use: ${EXAMPLES.only}.`);
     const whole = this.s.checks;
     if (!whole) return ok('This step has no checks squad-kit can run.');
     const parts = whole.parts?.();
@@ -1000,40 +1168,56 @@ export class AgentWindow {
     if (parts && Object.keys(parts).length > 1 && !part) return this.mistake('run_checks', 'part is missing, and this story has several', `Say which: ${Object.keys(parts).join(', ')}.`);
     if (parts && part && !parts[part]) return this.mistake('run_checks', `this story has no copy of the part "${short(part, 40)}"`, `Its parts: ${Object.keys(parts).join(', ')}. Call add_part for another.`);
     const c = parts ? (parts[part] ?? Object.values(parts)[0] ?? whole) : whole;
-    const job = this.checksJob ?? this.startChecks(c, which);
-    if (!job) return ok(`The project has no saved ${which ? `${which} command` : 'test, lint or build command'} yet. Add the script to the project's own files (package.json and the like): squad-kit finds it there, then call this again.`);
+    // The file is one of this copy's: squad-kit looks, and never runs a test tool on a name it cannot find here.
+    const file = only ? path.normalize(only.replace(/:\d+$/, '')) : '';
+    if (only && !this.checksJob && (path.isAbsolute(file) || file.startsWith('..') || !fs.existsSync(path.join(c.cwd, file)))) return this.mistake('run_checks', `this story's copy has no file "${short(only, 80)}"`, `Name a test file inside this copy, as the test output names it. Use: ${EXAMPLES.only}.`);
+    const job = this.checksJob ?? this.startChecks(c, only ? 'test' : which, only);
+    if (!job) return ok(`The project has no saved ${which || only ? `${which ?? 'test'} command` : 'test, lint or build command'} yet. Add the script to the project's own files (package.json and the like): squad-kit finds it there, then call this again.`);
     const r = await settleBy(job.done, by(clock, START_SHARE), this.signal);
     if (this.over) return error(STOPPED_CALL);
     if (r === 'late') return ok('The checks are still running. Call run_checks again in a moment for the result; it does not start them twice.');
     this.checksJob = null;
     if ('err' in r) return error(`squad-kit could not run the checks: ${(r.err as Error)?.message ?? String(r.err)}. Call i_am_stuck if it keeps happening.`);
-    const earlier = job.which !== which ? `This is the result of the run you started before it (${job.which ?? 'all the checks'}). Call again for the one you asked for now.\n` : '';
+    const asked = only ? `only ${only}` : which;
+    const earlier = job.asked !== asked ? `This is the result of the run you started before it (${job.asked ?? 'all the checks'}). Call again for the one you asked for now.\n` : '';
     return ok(`${earlier}${r.ok.map(checkAnswer).join('\n\n')}`);
   }
 
-  /** Starts the saved checks in the background, or null when the project has none of them. */
-  private startChecks(c: WindowChecks, which: CheckName | undefined): { which?: CheckName; done: Promise<CheckRun[]> } | null {
+  /**
+   * Starts the saved checks in the background, or null when the project has none of them. `only`: one test file on its
+   * own, with the project's own test tool; when squad-kit cannot run one file with it, all the tests run, and the answer
+   * says why. Each check runs once: an agent often expects a new test to fail first, so a failure is not run again.
+   */
+  private startChecks(c: WindowChecks, which: CheckName | undefined, only?: string): { asked?: string; done: Promise<CheckRun[]> } | null {
     const commands = c.commands();
     const names = (which ? [which] : CHECK_NAMES).filter((n) => commands[n]?.trim());
     if (!names.length) return null;
     const done = (async () => {
       // No server squad-kit left in another copy may hold a port the tests need.
       await this.s.beforeStart?.().catch(() => undefined);
+      // What the run is, for the checks step: squad-kit may note the copy's code now (WindowChecks.onRun).
+      const ranAll = await c.onRun?.(!which && !only).catch(() => undefined);
       const out: CheckRun[] = [];
       for (const name of names) {
         if (this.over) break;
-        const command = commands[name]!.trim();
+        const saved = commands[name]!.trim();
+        const alone = only ? fileAlone(c.cwd, saved, only) : null;
+        const command = alone?.command ?? saved;
+        const note = only && !alone ? `squad-kit cannot run one test file on its own with this project's tests, so it ran all of them.` : undefined;
         c.onStart?.(name);
-        this.s.log?.(`squad-kit runs ${name} for the ${this.s.who} on ${this.s.ticket}: ${command}`);
+        this.s.log?.(`squad-kit runs ${alone ? `${only} on its own` : name} for the ${this.s.who} on ${this.s.ticket}: ${command}`);
         const r = await runCommand(c.cwd, command, undefined, { silentMs: CHECK_SILENT_MS, signal: this.signal, onOutput: () => this.s.beat?.(), ...(c.guard ? { guard: c.guard } : {}) });
         if (this.over) break;
-        out.push({ name, command, ...r });
-        this.s.say(`squad-kit ran ${CHECK_WORDS[name]} for the ${this.s.who}: ${r.ok ? 'passed' : 'did not pass'}`);
+        out.push({ name, command, ...r, ...(alone ? { only } : {}), ...(note ? { note } : {}) });
+        this.s.say(`squad-kit ran ${alone ? 'one test file' : CHECK_WORDS[name]} for the ${this.s.who}: ${r.ok ? 'passed' : 'did not pass'}`);
       }
+      if (ranAll && !this.over && out.length === names.length) await ranAll(out).catch(() => undefined);
       return out;
     })();
     done.catch(() => undefined);
-    const job = { ...(which ? { which } : {}), done };
+    // What the agent asked for, so a later call for something else is told which run this was.
+    const asked = only ? `only ${only}` : which;
+    const job = { ...(asked ? { asked } : {}), done };
     this.checksJob = job;
     return job;
   }
@@ -1184,7 +1368,7 @@ export class AgentWindow {
         // An app that does not answer is started again; one that is starting already is waited for.
         if (!this.starting) {
           this.app?.stop();
-          this.app = null;
+          this.hold(null);
         }
         const r = await this.ensureApp(by(clock, START_SHARE));
         if ('app' in r) {
@@ -1234,8 +1418,11 @@ export class AgentWindow {
     this.closed = true;
     this.ctl.abort();
     await this.session.close();
-    this.app?.stop();
-    this.app = null;
+    const app = this.app;
+    this.hold(null);
+    // Handed on to the next step that uses it (keep): it runs on, and is no longer this window's to stop.
+    if (app && !app.ended?.() && this.s.keep?.(app)) return;
+    app?.stop();
     this.s.app?.after?.();
   }
 
@@ -1263,7 +1450,7 @@ export function toolsFor(o: { app: boolean; look?: boolean; checks?: boolean; pa
 /** One check's result, as the agent reads it. */
 function checkAnswer(r: CheckRun): string {
   const none = r.name === 'test' && r.ok && testCount(r.output) === 0;
-  return `${r.name}: ${r.ok ? (none ? 'passed, but it found no tests' : 'passed') : 'failed'} in ${Math.round(r.seconds)} seconds (${r.command}).\nThe last lines it printed:\n${tail(r.output, 30)}`;
+  return `${r.note ? `${r.note}\n` : ''}${r.name}${r.only ? ` (only ${r.only})` : ''}: ${r.ok ? (none ? 'passed, but it found no tests' : 'passed') : 'failed'} in ${Math.round(r.seconds)} seconds (${r.command}).\nThe last lines it printed:\n${tail(r.output, 30)}`;
 }
 
 /** Text the person never sees: a value cut for a log line. */

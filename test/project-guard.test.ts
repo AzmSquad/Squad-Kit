@@ -145,6 +145,18 @@ describe('the bubblewrap arguments (Linux)', () => {
     expect(args.slice(-3)).toEqual(['/bin/sh', '-c', 'npm test']);
   });
 
+  it("the setup after a merge reads its own checkout's .env files, and the project's others stay hidden", () => {
+    const checkout = path.join(root, 'web');
+    fs.mkdirSync(checkout);
+    fs.writeFileSync(path.join(checkout, '.env'), 'DATABASE_URL=file:./dev.db');
+    fs.writeFileSync(path.join(root, '.env'), 'API_KEY=PARENT SECRET');
+    const spec = buildGuard({ cwd: checkout, root, cache, extraWrite: [cache], extraRead: [cache], home, platform: 'linux' });
+    const hidden = (s: typeof spec) => bubblewrapArgs(s, 'true').flatMap((a, i, all) => (a === '--ro-bind-try' && all[i + 1] === '/dev/null' ? [all[i + 2]] : []));
+    expect(hidden(spec)).toEqual(expect.arrayContaining([path.join(checkout, '.env'), path.join(root, '.env')]));
+    expect(hidden({ ...spec, ownEnv: true })).toContain(path.join(root, '.env'));
+    expect(hidden({ ...spec, ownEnv: true })).not.toContain(path.join(checkout, '.env'));
+  });
+
   it('does not stop at a folder that is not on this computer', () => {
     const gone = path.join(base, 'not-there-yet');
     const spec = buildGuard({ cwd, root, cache, extraWrite: [gone], extraRead: [], home, platform: 'linux', allow: { allowWrite: [path.join(base, 'nor-this')] } });
@@ -252,6 +264,32 @@ describe('the single gate', () => {
     expect(out).toContain('PORT=3000');
     expect(fs.readFileSync(path.join(cwd, 'wrote.txt'), 'utf8')).toBe('ok\n');
     fs.rmSync(squad, { force: true });
+  });
+
+  it("the setup after a merge on a Mac reads its own checkout's .env, and still no key or other .env of the project", async () => {
+    if (process.platform !== 'darwin' || !fs.existsSync('/usr/bin/sandbox-exec')) return;
+    // The person's own checkout, inside the project folder, as the setup after a merge runs it.
+    const checkout = path.join(root, 'web');
+    fs.mkdirSync(checkout);
+    fs.writeFileSync(path.join(checkout, '.env'), 'DATABASE_URL=OWN SETTING');
+    fs.writeFileSync(path.join(root, '.env'), 'API_KEY=PARENT SECRET');
+    fs.writeFileSync(path.join(home, '.ssh', 'id_ed25519'), 'PRIVATE KEY');
+    const script = [path.join(checkout, '.env'), path.join(root, '.env'), path.join(home, '.ssh', 'id_ed25519')].map((f) => `cat ${f}`).join('; ');
+    const run = (ownEnv: boolean) =>
+      new Promise<string>((resolve) => {
+        const spec = buildGuard({ cwd: checkout, root, cache, extraWrite: [cache], extraRead: [cache], home, platform: 'darwin' });
+        const child = spawnProject(script, { cwd: checkout, guard: { ...spec, ...(ownEnv ? { ownEnv } : {}) } });
+        let s = '';
+        child.stdout!.on('data', (c) => (s += c));
+        child.stderr!.on('data', (c) => (s += c));
+        child.on('close', () => resolve(s));
+      });
+    const setup = await run(true);
+    expect(setup).toContain('DATABASE_URL=OWN SETTING');
+    for (const secret of ['PARENT SECRET', 'PRIVATE KEY']) expect(setup).not.toContain(secret);
+    // Any other command in that checkout still reads none of them.
+    const other = await run(false);
+    for (const secret of ['OWN SETTING', 'PARENT SECRET', 'PRIVATE KEY']) expect(other).not.toContain(secret);
   });
 
   it('only project-guard.ts spawns a project command through a shell', () => {

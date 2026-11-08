@@ -68,6 +68,7 @@ const EXCUSED: Record<string, string> = {
   'shots.ts:MAX_NAME': 'The length of one field in a call.',
   'shots.ts:MAX_PAGE': 'The length of one field in a call.',
   'shots.ts:MAX_VALUE': 'The length of one field in a call.',
+  'window.ts:MAX_ONLY': 'The length of one field in a call.',
   'window-server.ts:KEEP_IDLE_MS': 'A connection detail inside one run.',
   'window-server.ts:MAX_BODY': 'The size of one call. Real calls are far smaller.',
   'window.ts:MAX_API_ANSWER': 'What is kept of one API answer. A file it answers with is saved whole.',
@@ -143,7 +144,7 @@ const STOPS_PER_FILE: Record<string, number> = {
   'actions.ts': 3,
   'breakdown-job.ts': 5,
   'budget.ts': 1,
-  'live.ts': 29,
+  'live.ts': 31,
   'sync.ts': 1,
 };
 

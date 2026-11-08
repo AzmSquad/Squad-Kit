@@ -48,6 +48,7 @@ import {
   endStuckCommand,
   keepWaiting,
   restartStep,
+  startTicket,
   stopTicket,
   proposeChange,
   approveChange,
@@ -442,6 +443,8 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
   // Looks right, and Something's wrong below, stop the copy of the app being tried at once (engine/try-app.ts).
   app.post('/api/v1/tickets/:id/approve', (c) => act(c, async () => tried(await approveBeside(bp, c.req.param('id')))));
   app.post('/api/v1/tickets/:id/stop', (c) => act(c, () => stopTicket(bp, c.req.param('id'))));
+  // A story squad-kit made waits on the board until the person starts it.
+  app.post('/api/v1/tickets/:id/start', (c) => act(c, () => startTicket(bp, c.req.param('id'))));
   app.post('/api/v1/tickets/:id/unstick', (c) => act(c, () => endStuckCommand(bp, c.req.param('id'))));
   // Free the port and try again: only a program squad-kit started on the app's port (src/engine/free-port.ts).
   app.post('/api/v1/tickets/:id/free-port', (c) => act(c, () => freePortAndRetry(bp, c.req.param('id'))));

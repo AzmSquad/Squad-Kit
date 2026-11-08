@@ -1,9 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { BrowserModule } from '../src/modules/browser/types.js';
 import { fakeBrowser } from './fakes/browser.js';
+import { installPlaywright, quickNpx, runsIn } from './support/fake-playwright.js';
 import { callTool, rpc, textOf } from './support/window.js';
 
 /**
@@ -68,8 +69,10 @@ describe('the tool', () => {
     const { access } = await builder({ test: 'echo ok' });
     const list = await rpc(access, 'tools/list');
     const tool = list.body.result.tools.find((t: { name: string }) => t.name === 'run_checks');
-    expect(tool.inputSchema.properties).toEqual({ which: expect.objectContaining({ enum: ['test', 'lint', 'build'] }) });
+    expect(tool.inputSchema.properties).toEqual({ which: expect.objectContaining({ enum: ['test', 'lint', 'build'] }), only: expect.objectContaining({ type: 'string' }) });
     expect(tool.description).toContain('takes no command');
+    expect(tool.description).toContain('"only" runs one test file on its own');
+    expect(tool.description).toContain('a failure is not run again');
   });
 
   it('runs the saved test command in the copy and gives back pass, with the last lines', async () => {
@@ -168,9 +171,61 @@ describe('it takes no command', () => {
   it('another field, or a wrong "which", is a mistake in the shape, not a refusal', async () => {
     const { access, w } = await builder({ test: 'echo ok' });
     expect(textOf(await callTool(access, 'run_checks', { which: 'e2e' }))).toContain('which is "test", "lint" or "build"');
-    expect(textOf(await callTool(access, 'run_checks', { only: 'test' }))).toContain('run_checks takes only "which"');
+    expect(textOf(await callTool(access, 'run_checks', { what: 'test' }))).toContain('run_checks takes only "which" and "only"');
     expect(w.refusals).toEqual([]);
     expect(w.mistakes).toHaveLength(2);
+  });
+});
+
+describe('one test file on its own, for a faster fix', () => {
+  const log = () => path.join(tmp, 'runs.log');
+  let putBack = () => {};
+  beforeAll(() => (putBack = quickNpx(fs.mkdtempSync(path.join(os.tmpdir(), 'squad-npx-')))));
+  afterAll(() => putBack());
+  const file = (f: string) => {
+    fs.mkdirSync(path.dirname(path.join(tmp, f)), { recursive: true });
+    fs.writeFileSync(path.join(tmp, f), '');
+  };
+
+  it('"only" runs just that file with the project\'s own test tool, at its line', async () => {
+    installPlaywright(tmp, log());
+    file('tests/e2e/shelves.spec.ts');
+    const { access } = await builder({ test: 'npx playwright test', lint: 'echo tidy' });
+    const said = textOf(await callTool(access, 'run_checks', { only: 'tests/e2e/shelves.spec.ts:387' }));
+    expect(runsIn(log())).toEqual([`${path.basename(tmp)} test tests/e2e/shelves\\.spec\\.ts:387`]);
+    expect(said).toMatch(/^test \(only tests\/e2e\/shelves\.spec\.ts:387\): passed in \d+ seconds/);
+    expect(said).toContain('1 passed');
+    // Only the tests: not the code check.
+    expect(said).not.toContain('lint');
+    expect(lines).toEqual(['squad-kit ran one test file for the Builder: passed']);
+  });
+
+  it('a tool squad-kit cannot run one file with: it says so plainly, and runs all the tests', async () => {
+    file('src/sum.test.ts');
+    const { access } = await builder({ test: 'echo "Tests  12 passed"' });
+    const said = textOf(await callTool(access, 'run_checks', { only: 'src/sum.test.ts' }));
+    expect(said).toContain("squad-kit cannot run one test file on its own with this project's tests, so it ran all of them.");
+    expect(said).toContain('test: passed');
+    expect(lines).toEqual(['squad-kit ran the tests for the Builder: passed']);
+  });
+
+  it('a file that is not in the copy, outside it, or "only" with another check: a mistake in the shape, and nothing runs', async () => {
+    const marker = path.join(tmp, 'ran');
+    const { access, w } = await builder({ test: `touch "${marker}"` });
+    expect(textOf(await callTool(access, 'run_checks', { only: 'tests/missing.spec.ts' }))).toContain("this story's copy has no file");
+    expect(textOf(await callTool(access, 'run_checks', { only: '../../etc/hosts' }))).toContain("this story's copy has no file");
+    expect(textOf(await callTool(access, 'run_checks', { only: 'a.test.ts', which: 'lint' }))).toContain('only names a test file, so which is "test" or left out');
+    expect(textOf(await callTool(access, 'run_checks', { only: 42 }))).toContain('only is one test file of this copy');
+    expect(fs.existsSync(marker)).toBe(false);
+    expect(w.refusals).toEqual([]);
+    expect(w.mistakes).toHaveLength(4);
+  });
+
+  it('a check the Builder runs is not run again when it fails: a new test often fails first', async () => {
+    const count = path.join(tmp, 'count');
+    const { access } = await builder({ test: `echo run >> "${count}"; echo "  1 failed"; exit 1` });
+    expect(textOf(await callTool(access, 'run_checks', { which: 'test' }))).toContain('test: failed');
+    expect(fs.readFileSync(count, 'utf8').trim().split('\n')).toHaveLength(1);
   });
 });
 

@@ -65,7 +65,8 @@ export function SandboxRows() {
             {q.data.guard.on ? (
               <span className="note">
                 The project&apos;s own tests, setup and app run in {q.data.guard.why}: they work normally and can reach the internet for packages and
-                tests, but they cannot read your keys, sign-ins, squad-kit&apos;s own folder or the project&apos;s .env files. An engineer can allow a
+                tests, but they cannot read your keys, sign-ins, squad-kit&apos;s own folder or the project&apos;s .env files. Only the setup after a
+                merge reads the .env files of your own folder, as when you run it yourself. An engineer can allow a
                 file they truly need in Settings.
               </span>
             ) : (

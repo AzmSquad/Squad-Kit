@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { ArrowRightLeft, ArrowUp, Check, Code, Copy, Download, ExternalLink, GitPullRequest, LifeBuoy, Loader2, Maximize2, MessageCircle, MessagesSquare, Minimize2, PencilLine, Send, Square, TriangleAlert, X } from 'lucide-react';
+import { ArrowRightLeft, ArrowUp, Check, Code, Copy, Download, ExternalLink, GitPullRequest, LifeBuoy, Loader2, Maximize2, MessageCircle, MessagesSquare, Minimize2, PencilLine, Play, Send, Square, TriangleAlert, X } from 'lucide-react';
 import { assetUrl, ticketFileUrl } from '../api/client';
 import type { PlanComment, Question, Ticket, TicketNote } from '../api/types';
 import { useAct, useBoard, useTicket } from '../lib/data';
@@ -23,7 +23,7 @@ import { AskBox, NowCard, SlowPanel, WorkSoFar, isRunning } from '../components/
 import { PortAskPanel } from '../components/PortAsk';
 import { ExactError, StuckCard } from '../components/ErrorCard';
 import { TestCommandCard } from '../components/TestCommand';
-import { GatePill, NotCheckedNote } from '../components/Gates';
+import { GatePill, NotCheckedNote, OldFailuresNote } from '../components/Gates';
 import { checksWords, noGateRan, noShotsText, overrideWhat, proofLead, proofWords } from '../lib/gates';
 import { testChangeWaits } from '../lib/waiting';
 import { AlsoChanged, MorePictures, OffScreenList, VerdictIcon, VerdictTag } from '../components/Verdict';
@@ -715,6 +715,7 @@ function GatePills({ t }: { t: Ticket }) {
         <GatePill state={g?.proof} text={proofWords(t)} />
       </div>
       <NotCheckedNote g={g} />
+      <OldFailuresNote g={g} />
       {t.overrides?.map((o) => (
         <p className="note override" key={o.at}>
           <b>Continued anyway</b> past the {overrideWhat(o)}, by <Written text={o.by} />: <Written text={o.reason} />
@@ -1015,6 +1016,7 @@ function WorkingPanel({ t }: { t: Ticket }) {
   const reach = useReach();
   const me = useMe();
   const stop = useAct();
+  const start = useAct();
   const asks = useAskAgent(t);
   const calm =
     t.stage === 'release'
@@ -1025,7 +1027,9 @@ function WorkingPanel({ t }: { t: Ticket }) {
         ? { title: t.status, text: 'This ticket is live. Found a problem? Report a bug and it comes back around.' }
         : t.waiting?.kind === 'change'
           ? { title: 'The Builder paused for your change', text: 'The Architect updated the design. Approve it above, or decline the change and the Builder carries on.' }
-          : { title: 'Nothing needed from you', text: `${nowLine(t)} You'll get a card when the squad needs you.` };
+          : t.waitsToStart
+            ? { title: 'Waits for you to start it', text: 'squad-kit made this story. Nothing runs and nothing is spent until you press Start. Then the Analyst reads it, as with any new story.' }
+            : { title: 'Nothing needed from you', text: `${nowLine(t)} You'll get a card when the squad needs you.` };
   // While the squad works: what it does now, how long, the usual time and what comes next, from the live record.
   const running = isRunning(t);
   return (
@@ -1073,6 +1077,11 @@ function WorkingPanel({ t }: { t: Ticket }) {
             <Square size={12} /> {t.stopRequested ? 'Stopping…' : 'Stop'}
           </button>
         )}
+        {t.waitsToStart && (
+          <button className="btn pri sm" disabled={start.isPending} onClick={() => start.mutate({ path: `/api/v1/tickets/${t.id}/start`, done: `${t.id} started` })}>
+            <Play size={12} /> Start
+          </button>
+        )}
         {canTakeOver(t) && <TakeOverButton t={t} />}
         <BringInButton t={t} />
         {/* Asking never stops the work: the chat runs beside it. Ask a question and Open the chat are at the top; the
@@ -1081,7 +1090,7 @@ function WorkingPanel({ t }: { t: Ticket }) {
         {(isMine(t, me) || !me) && <ProposeChangeButton t={t} />}
         <span className="note">{t.live ? (reach === 'down' ? 'Not updating: squad-kit has stopped.' : 'Updates live as the squad works.') : ''}</span>
         <span className="grow" />
-        <Cmd text={t.live && t.stage !== 'release' ? `squad stop ${t.id}` : commandFor(t)} />
+        <Cmd text={t.waitsToStart ? `squad start ${t.id}` : t.live && t.stage !== 'release' ? `squad stop ${t.id}` : commandFor(t)} />
       </div>
     </>
   );

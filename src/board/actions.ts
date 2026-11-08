@@ -116,6 +116,14 @@ export interface NewTicketInput {
   key?: string;
   /** Builds by itself: the breakdown story it builds, with its story and done-when, approved with the breakdown. */
   fromBreakdown?: { id: string; item: string; story: string; criteria: Criterion[]; approvedBy: string; decided?: Decided[]; setsUp?: boolean };
+  /** Made by squad-kit itself, not the person: the first line of its activity, saying why. */
+  bySquad?: string;
+  /** The old tests it fixes, which fail on main (engine/old-tests.ts). */
+  oldTests?: string[];
+  /** It waits on the board until the person starts it (startTicket): no step runs and nothing is spent before. */
+  waitsToStart?: boolean;
+  /** On a workspace of several repos: the repo it changes. */
+  repo?: string;
 }
 
 /** A file the person added to a ticket, sent as base64 so the board and the terminal send it the same way. */
@@ -188,6 +196,8 @@ export function createTicket(bp: BoardPaths, input: NewTicketInput): Ticket {
     ...(brief.criteria.length || brief.rules.length || brief.edgeCases.length ? { brief } : {}),
     ...(attachments.length ? { attachments } : {}),
     ...(input.kind === 'bug' && input.severity ? { severity: input.severity } : {}),
+    ...(input.oldTests?.length ? { oldTests: input.oldTests } : {}),
+    ...(input.repo ? { repo: input.repo } : {}),
     ...(input.fromBreakdown
       ? {
           breakdown: { id: input.fromBreakdown.id, item: input.fromBreakdown.item },
@@ -200,7 +210,8 @@ export function createTicket(bp: BoardPaths, input: NewTicketInput): Ticket {
       : {}),
   };
   const from = input.source && input.source.type !== 'manual' ? (trackerModule(input.source.type)?.label ?? input.source.type) : '';
-  addActivity(ticket, 'you', from ? `Pulled ${input.source!.ref} from ${from}` : 'Created the ticket');
+  if (input.bySquad) addActivity(ticket, 'squad', input.bySquad);
+  else addActivity(ticket, 'you', from ? `Pulled ${input.source!.ref} from ${from}` : 'Created the ticket');
   if (ticket.track === 'express') addActivity(ticket, 'you', 'Chose the Express track: no questions, the plan is approved on its own');
   if (input.fromBreakdown) addActivity(ticket, 'squad', `Started from ${input.fromBreakdown.id} › ${input.fromBreakdown.item}: the story and done-when were approved with the breakdown`);
   if (attachments.length) addActivity(ticket, 'you', `Added ${attachments.length === 1 ? '1 file' : `${attachments.length} files`}`);
@@ -213,9 +224,30 @@ export function createTicket(bp: BoardPaths, input: NewTicketInput): Ticket {
   } else if (input.talkFirst && ticket.track === 'full') {
     openChat(ticket, 'analyst', { waiting: null, phase: 'analyst-read' });
     addActivity(ticket, 'you', 'Chose to talk it through with the Analyst first');
+  } else if (input.waitsToStart) {
+    // Nothing runs until the person starts it: no step is set, so the squad never picks it up by itself.
+    ticket.live = false;
+    ticket.waitsToStart = true;
+    ticket.status = WAITS_TO_START;
   } else scheduleSquad(ticket, 'analyst-read', 4, meta.speed);
   writeTicket(bp, ticket);
   return ticket;
+}
+
+/** A waiting story's line on its card. */
+export const WAITS_TO_START = 'Waits for you to start it';
+
+/** "Start" on a story that waits on the board: the Analyst reads it, as on any new story. */
+export function startTicket(bp: BoardPaths, id: string): Ticket {
+  const meta = readMeta(bp);
+  return updateTicket(bp, id, (t) => {
+    if (!t.waitsToStart) throw new BoardActionError(`${t.id} does not wait to be started.`);
+    delete t.waitsToStart;
+    t.live = true;
+    t.status = 'Analyst is reading the ticket';
+    addActivity(t, 'you', 'Started it');
+    scheduleSquad(t, 'analyst-read', 1, meta.speed);
+  });
 }
 
 /** Work items a demo board knows how to "pull". Anything else gets a plain title. */

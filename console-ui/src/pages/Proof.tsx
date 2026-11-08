@@ -4,7 +4,7 @@ import { assetUrl } from '../api/client';
 import { useTicket } from '../lib/data';
 import { ProofDecision } from './TicketDrawer';
 import { Lightbox } from '../components/Lightbox';
-import { GatePill as Gate, NotCheckedNote } from '../components/Gates';
+import { GatePill as Gate, NotCheckedNote, OldFailuresNote } from '../components/Gates';
 import { checksWords, noShotsText, proofWords } from '../lib/gates';
 import { AlsoChanged, MorePictures, OffScreenList, VerdictIcon, VerdictTag } from '../components/Verdict';
 import { isApiProof, proofViewer, verdictClass, verdictNote } from '../lib/verdict';
@@ -51,6 +51,7 @@ export function ProofPage() {
         <span style={{ marginLeft: 6 }}>Nothing ships without these three.</span>
       </div>
       <NotCheckedNote g={g} className="gatebar-why" />
+      <OldFailuresNote g={g} className="gatebar-why" />
       <AlsoChanged t={t} className="gatebar-why" />
       <div className="split proofsplit">
         <div className="critlist">

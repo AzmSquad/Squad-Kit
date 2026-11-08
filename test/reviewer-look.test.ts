@@ -11,8 +11,9 @@ import { callTool, rpc, textOf } from './support/window.js';
 
 /**
  * The Reviewer can look at the story's pages (RO-15: "I could not open the page at 390 wide"): read only, through
- * squad-kit's own browser. squad-kit starts the app for it and stops it after. It takes no pictures and cannot start or
- * stop the app itself, and the window's checks hold. What the app changes in the story's copy goes back.
+ * squad-kit's own browser. squad-kit starts the app for it; when the review approves, the app runs on for the proof
+ * (test/kept-app.test.ts). It takes no pictures and cannot start or stop the app itself, and the window's checks hold.
+ * What the app changes in the story's copy goes back.
  */
 
 let reviewer: (opts: RunOptions) => Promise<unknown> = async () => ({ approved: true, summary: 'Fine', comments: [] });
@@ -39,7 +40,14 @@ const { addWorktree } = await import('./support/copy.js');
 const { openWindows } = await import('../src/engine/window-server.js');
 const P = await import('../src/engine/prompts.js');
 
-type Squad = { review(id: string): Promise<void> };
+type Squad = { review(id: string): Promise<void>; kept: Map<string, unknown>; dropKept(id: string): Promise<void> };
+/** Every squad a test made, so the app it keeps for a proof that never comes here stops after the test. */
+const squads: Squad[] = [];
+const squad = () => {
+  const s = new LiveSquad(bp) as unknown as Squad;
+  squads.push(s);
+  return s;
+};
 
 let tmp: string;
 let project: string;
@@ -74,7 +82,10 @@ beforeEach(async () => {
   });
   h.browser = fakeBrowser({ '/rooms': { has: ['button:Book'], snapshot: '- heading "Rooms"\n- button "Book"' } }).module;
 });
-afterEach(() => fs.rmSync(tmp, { recursive: true, force: true }));
+afterEach(async () => {
+  for (const s of squads.splice(0)) for (const id of [...s.kept.keys()]) await s.dropKept(id);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
 
 function story(): string {
   const t0 = actions.createTicket(bp, { title: 'Rooms on a phone' });
@@ -108,15 +119,17 @@ describe('the Reviewer looks at pages', () => {
       said.stop = textOf(await callTool(w, 'stop_app'));
       return { approved: true, summary: 'It fits a phone.', comments: [] };
     };
-    await (new LiveSquad(bp) as unknown as Squad).review(id);
+    const s = squad();
+    await s.review(id);
     const t = readTicket(bp, id)!;
     expect(said.look).toContain('The page is at /rooms.');
     expect(said.look).toContain('button "Book"');
     for (const k of ['shots', 'start', 'stop']) expect(said[k], k).toContain('there is no tool');
     expect(t.gates?.review).toBe('pass');
-    // Nothing was saved, and the app squad-kit started stopped with the run.
+    // Nothing was saved, and the window closed with the run. The review approved: its app runs on for the proof.
     expect(fs.existsSync(bp.proofDir) ? fs.readdirSync(bp.proofDir) : []).toEqual([]);
     expect(openWindows()).toBe(0);
+    expect(s.kept.has(id)).toBe(true);
     expect(t.activity.map((a) => a.text).some((l) => l.includes('squad-kit started the app') && l.includes('for the Reviewer'))).toBe(true);
     // Claude Code may press only these two.
     const run = seen[0]!;
@@ -128,7 +141,7 @@ describe('the Reviewer looks at pages', () => {
 
   it('is told it can, in its prompt and its rule', async () => {
     const id = story();
-    await (new LiveSquad(bp) as unknown as Squad).review(id);
+    await squad().review(id);
     expect(seen[0]!.prompt).toContain('call look_at_page, at the size you need (phone or desktop)');
     expect(seen[0]!.appendSystemPrompt).toContain("look_at_page (its own browser on this story's app, which it starts for you when needed) and i_am_stuck");
     expect(seen[0]!.appendSystemPrompt).toContain('For pages of the app, use look_at_page');
@@ -142,7 +155,7 @@ describe('the Reviewer looks at pages', () => {
       answer = textOf(await callTool(opts.window!, 'look_at_page', { page: 'https://evil.example.com/' }));
       return { approved: true, summary: 'Fine', comments: [] };
     };
-    await (new LiveSquad(bp) as unknown as Squad).review(id);
+    await squad().review(id);
     expect(answer).toContain('squad-kit refused this');
     expect(readTicket(bp, id)!.activity.map((a) => a.text)).toContain('The Reviewer asked to open another website. squad-kit refused.');
   });
@@ -150,7 +163,7 @@ describe('the Reviewer looks at pages', () => {
   it('with no app in the project it gets only i_am_stuck, and is not told about pages', async () => {
     writeMeta(bp, { ...(await import('../src/board/store.js')).readMeta(bp), commands: {} });
     const id = story();
-    await (new LiveSquad(bp) as unknown as Squad).review(id);
+    await squad().review(id);
     expect(seen[0]!.window!.tools).toEqual(['i_am_stuck']);
     expect(seen[0]!.prompt).not.toContain('look_at_page');
   });
@@ -187,7 +200,7 @@ describe('the Reviewer looks at pages', () => {
       appTouches = 'done';
       return { approved: true, summary: 'Fine', comments: [] };
     };
-    await (new LiveSquad(bp) as unknown as Squad).review(id);
+    await squad().review(id);
     expect(appTouches).toBe('done');
     const t = readTicket(bp, id)!;
     expect(fs.readFileSync(path.join(t.worktree!, 'data.txt'), 'utf8')).toBe('as it was\n');

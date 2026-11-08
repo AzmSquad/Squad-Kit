@@ -174,6 +174,8 @@ export interface Gates {
   checksText?: string;
   /** What the checks ran, for engineers. */
   ran?: { name: string; command: string; ok: boolean; tests?: number; failedOnce?: boolean }[];
+  /** Old tests that also fail on main, without this story's change: the story went on past them. */
+  oldFailures?: { title: string; file: string; story?: string }[];
   review: GateState;
   reviewBy?: string;
   proof: GateState;
@@ -347,6 +349,8 @@ export interface Ticket {
   status: string;
   /** True while a squad member is actively working on it. */
   live?: boolean;
+  /** Made by squad-kit, it waits on the board until you start it: nothing runs or costs before. */
+  waitsToStart?: boolean;
   /** 0 to 100, for the current stage. */
   progress?: number;
   waiting: Waiting | null;

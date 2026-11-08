@@ -472,6 +472,8 @@ export function prDescription(t: Ticket, item: string | null, shots: { label: st
   if (g) {
     lines.push('### Checks');
     lines.push(`- Tests, lint and build: ${g.checks === 'pass' ? 'pass' : g.checks === 'skipped' ? 'failed, continued anyway' : g.checks === 'unchecked' ? 'not checked, no tests ran' : g.checks}${g.checksText ? ` (${g.checksText})` : ''}`);
+    // Old tests that fail on main too, without this change: named, with the story that fixes them.
+    for (const o of g.oldFailures ?? []) lines.push(`  - Fails on main too, without this change: ${o.title} (${o.file})${o.story ? `; ${o.story} fixes it` : ''}`);
     lines.push(`- Code review: ${g.review === 'pass' ? 'approved' : g.review === 'skipped' ? 'notes still open, continued anyway' : g.review}${t.reviewRound ? ` after ${t.reviewRound} round${t.reviewRound > 1 ? 's' : ''}` : ''}`);
     lines.push(`- Proof: ${g.proof === 'pass' ? `checked by ${t.createdBy}` : g.proof === 'skipped' ? 'no screenshots, continued anyway' : g.proof}`);
     lines.push('');

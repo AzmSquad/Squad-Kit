@@ -10,14 +10,16 @@ import { parallelLimit } from '../core/settings.js';
 import type { AgentRole } from './agents.js';
 import { BRD_READ_MS, BRD_WRITE_MS, LONGEST_READ_MS } from './breakdown-job.js';
 import { MAX_QUESTIONS } from './breakdown-prompts.js';
-import { CHECK_MS, CHECK_SILENT_MS } from './checks.js';
+import { CHECK_MS, CHECK_SILENT_MS, MAX_ALONE } from './checks.js';
+import { TURN_WAIT_MS } from './copy-turn.js';
+import { MAX_OLD, MAX_RUNS_ON_MAIN, ON_MAIN_MS } from './old-tests.js';
 import { SEEN_DAYS, WEEK_DAYS, harnessSeen, type Need, type Seen, type StoryLink } from './harness-seen.js';
 import { DOCKER_WAIT_MS } from './compose-run.js';
 import { guardSupport } from './project-guard.js';
 import { reposOf, rulesFiles } from './repos.js';
 import { HOOK_MS, NETWORK_GIT_MS } from './git.js';
 import { DEFAULT_QUALITY, QUALITIES, QUALITY_NOTE, QUALITY_PRESETS } from './levels.js';
-import { BEFORE_SHOTS_MS, BLIP_WAITS_MIN, BUILD_STEP_MS, MAX_CHECK_TRIES, MAX_REVIEW_ROUNDS, PROOF_STEP_MS, REVIEW_STEP_MS, WORDS_STEP_MS } from './live.js';
+import { BEFORE_SHOTS_MS, BLIP_WAITS_MIN, BUILD_STEP_MS, KEPT_APP_MS, MAX_CHECK_TRIES, MAX_REVIEW_ROUNDS, PROOF_STEP_MS, REVIEW_STEP_MS, WORDS_STEP_MS } from './live.js';
 import { MAX_NOTE_BYTES } from './media.js';
 import { WAIT_LIMIT_MS } from './product-lock.js';
 import { MIN_SIZE } from './proof-check.js';
@@ -128,7 +130,8 @@ function lineStages(): HarnessStage[] {
       g('local-files', 'Test values, not your own', 'A file marked local gets values kept for stories. No agent can read it.'),
     ]),
     stage('checks', 'Checks', "squad-kit runs your project's own checks. No agent is asked if they passed.", on(squad('squad-kit')), [
-      g('checks', "Your project's own checks", "Test, lint and build, plus scripts/check when your project has one. The Builder's word doesn't count. A failed check runs once more, so a flaky test doesn't stop the story.", `The Builder fixes it, up to ${MAX_CHECK_TRIES} tries. Then a card.`),
+      g('checks', "Your project's own checks", "Test, lint and build, plus scripts/check when your project has one. The Builder's word doesn't count. A failed check runs once more, so a flaky test doesn't stop the story. For the tests, the failed ones run on their own first: one that still fails fails the check at once, and if they pass, all the tests run once more and decide.", `The Builder fixes it, up to ${MAX_CHECK_TRIES} tries. Then a card.`),
+      g('old-tests', 'An old bug is not the story\'s', "A failed test in a file the story didn't change runs on its own on main's code. If it fails there too, it is an old bug: the story goes on, the checks say so, and squad-kit makes one new story to fix that test, which waits on the board until you start it. A story only goes past a test that main already fails.", 'If it passes on main, the Builder fixes it, as for any failed check.'),
       g('weakened', 'Weakened tests', "Tests deleted, switched off or reduced, test settings changed, or a change to what a must-pass gate of your team runs.", 'It stops. Only you can go past it, with a reason on the record.'),
       g('no-tests', 'No tests, no green', 'No tests never means a green pass. Lint, build and the app starting must still pass.', 'Asked once per project: add tests, or go on without.'),
       g('test-change', 'Test commands stay strong', 'A new test command stays only if it passes and runs at least as many tests.', "If squad-kit can't tell, you choose."),
@@ -205,6 +208,9 @@ function limitRows(meta?: BoardMeta): HarnessLimit[] {
   const bytes = row('sizes', (b) => `${b / 1024 / 1024} MB`);
   return [
     tries({ MAX_CHECK_TRIES }, 'Tries at the checks', 'Then a card.'),
+    tries({ MAX_RUNS_ON_MAIN }, "Runs of a failed test on main's code", 'It stops at the first that fails there too.'),
+    size({ MAX_ALONE }, 'Failed tests run on their own first', 'With more, all the tests run again at once.'),
+    size({ MAX_OLD }, "Failed tests run on main's code", 'With more, the Builder fixes them, as before.'),
     tries({ MAX_REVIEW_ROUNDS }, 'Review rounds', 'Then you decide.'),
     tries({ MAX_RETAKES }, 'Retakes', 'For a "done when" the pictures don\'t show clearly.'),
     tries({ MAX_PROOF_ROUNDS: MAX_PROOF_ROUNDS - 1 }, 'Returns after a broken picture', 'To the Builder. Then you decide.'),
@@ -230,9 +236,12 @@ function limitRows(meta?: BoardMeta): HarnessLimit[] {
     time({ CHECK_MS }, 'One check'),
     time({ CHECK_SILENT_MS }, 'A silent check', 'It prints nothing for this long.'),
     time({ APP_WAIT_MS }, 'Waiting for your app'),
+    time({ TURN_WAIT_MS }, 'Tests and your app in one copy', 'One waits for the other, then it stops and says so.'),
+    time({ KEPT_APP_MS }, 'Your app kept for the proof', 'After the review, while nothing uses it. Then it stops.'),
     time({ SETUP_MS }, 'Setting up your app'),
     time({ DOCKER_WAIT_MS }, 'Starting in Docker'),
     time({ BEFORE_SHOTS_MS }, 'Before pictures', 'Beside the build, holding nothing up.'),
+    time({ ON_MAIN_MS }, "Failed tests on main's code", 'All their runs together. Then the Builder fixes them, as before.'),
     time({ HOOK_MS }, 'Your check on a save'),
     time({ NETWORK_GIT_MS }, 'Reaching your code host', 'One push, pull or fetch.'),
     time({ PIPELINE_MS }, 'Your after-release step', 'Inside the guard, after a release.'),
@@ -320,6 +329,7 @@ function rowDetails(meta: BoardMeta | undefined, root: string | undefined): Reco
     lane: code('engine/lane.ts', ['Locked here', names(meta?.lockedFiles)]),
     'local-files': code('engine/local-files.ts', ['Local here', names(meta?.localFiles)]),
     checks: code('engine/checks.ts', ['Runs', run('test', 'lint', 'build')], ['Limit', `${MAX_CHECK_TRIES} tries, ${min(CHECK_MS)} each, ${min(CHECK_SILENT_MS)} with no output`], ['Decided by', 'The exit code, never an agent'], ['See it in', tab('Developer')]),
+    'old-tests': code('engine/old-tests.ts', ['Runs', run('test')], ['Limit', `${MAX_OLD} failed tests, each up to ${MAX_RUNS_ON_MAIN} times, ${min(ON_MAIN_MS)} in all`], ['Reads', 'Playwright, Vitest, Jest, pytest and go test'], ['See it in', 'The proof page and the Releases page']),
     weakened: code('engine/weakened.ts', ['Looks at', 'Deleted tests, skip marks, fewer tests, test settings'], ['See it in', tab('Changes')]),
     'no-tests': code('engine/not-checked.ts', ['Here', meta?.noTests ? 'You chose to go on without tests' : 'Not asked yet']),
     'test-change': code('engine/test-change.ts', ['Runs', run('test')], ['Compares', 'Pass or fail, and how many tests ran']),

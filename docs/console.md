@@ -250,7 +250,7 @@ back the result. Each run has its own key, which stops working when the run ends
 | `take_screenshots` | Opens its own browser on this story's app, does the steps and takes the pictures. At most 10 in one call and 40 in one step. | Tester, Builder |
 | `look_at_page` | Opens a page, does the steps, and gives back the address and what is on the page. It saves no pictures. | Tester, Builder, Reviewer |
 | `start_app`, `stop_app`, `app_status` | Starts this story's copy with the project's own start command, on a free port when the usual one is taken. Stops only what squad-kit started. Says whether it runs, with its last lines. | Tester, Builder |
-| `run_checks` | Runs the project's saved test, lint or build command, inside the guard, where a browser can start. | Tester, Builder |
+| `run_checks` | Runs the project's saved test, lint or build command, inside the guard, where a browser can start. With `only`, it runs one test file on its own with the project's own test tool, for a quick fix. A failure is not run again. | Tester, Builder |
 | `i_am_stuck` | Tries squad-kit's own fixes (see below). | Every agent on a ticket |
 
 The Builder has the app and browser tools once the project has a start command and an address. Until then it has
@@ -426,7 +426,7 @@ keys stay hidden.
 own tests, lint, build, setup, app and release pipeline in a guard of its own, on Mac and Linux. They work normally,
 browser tests too, and can reach the network for packages and tests. They can't read your keys, sign-ins, browser
 profiles or squad-kit's own folder in the places the guard knows, or the `.env` files in your project folder (on Linux, the
-ones it finds 3 folders down), and they start without the AI, cloud and code-host keys. When a project truly needs a file
+ones it finds 3 folders down; the setup after a merge reads your own checkout's), and they start without the AI, cloud and code-host keys. When a project truly needs a file
 outside its copy, the check stops with one plain sentence ("A check needed a file outside its copy, and squad-kit blocked
 it. An engineer can allow it in Settings."), and the file's path is in the details. On Linux the guard needs bubblewrap, and
 this page and `squad doctor` say how to turn it on.

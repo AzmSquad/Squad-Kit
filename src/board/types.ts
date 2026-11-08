@@ -117,11 +117,23 @@ export interface Step {
  */
 export type GateState = 'pending' | 'pass' | 'fail' | 'skipped' | 'unchecked';
 
+/** An old test that fails on main too: its name, its file, and the story that fixes it. */
+export interface OldFailure {
+  title: string;
+  file: string;
+  story?: string;
+}
+
 export interface Gates {
   checks: GateState;
   checksText?: string;
   /** Each check squad-kit ran last, for the Reviewer: "test (npm test): passed, 18 tests". */
   ran?: { name: string; command: string; ok: boolean; tests?: number; failedOnce?: boolean }[];
+  /**
+   * Old tests that failed here and fail on main's code too, without this story's change (engine/old-tests.ts): not
+   * this story's, so it went on past them, with the story that fixes them.
+   */
+  oldFailures?: OldFailure[];
   review: GateState;
   reviewBy?: string;
   proof: GateState;
@@ -625,6 +637,15 @@ export interface Ticket {
   trackerRetry?: { tries: number; nextAt: string };
   /** The checks the person chose to continue past. While only these fail, the work goes on as they decided. */
   checksContinued?: string[];
+  /**
+   * A story squad-kit made to fix old tests that fail on main (engine/old-tests.ts): those tests, by file and name.
+   * While it is open, no other story is made for them.
+   */
+  oldTests?: string[];
+  /** Made by squad-kit, it waits on the board until the person starts it: nothing runs and nothing is spent before. */
+  waitsToStart?: boolean;
+  /** Failed tests squad-kit already ran on main's code for this story, per repo and main's commit: old, or fine there. */
+  onMain?: { repo: string; base: string; old: string[]; fine: string[] }[];
   /** The weakened tests the person chose to continue past (see engine/weakened.ts). Only new ones stop the ticket again. */
   weakenedContinued?: string[];
   /** The team's gates a person went past on this story, with a reason on the record: they do not run again on it. */

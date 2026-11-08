@@ -1,9 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import type { RunOptions, RunResult } from '../src/modules/claude/direct.js';
+import { DRAG, installPlaywright, quickNpx, runsIn } from './support/fake-playwright.js';
 
 /**
  * A check that failed once for no reason in the code, or that already failed before the story started, does not send
@@ -177,6 +178,98 @@ require('http').createServer((q, r) => r.end('ok')).listen(${port}, '127.0.0.1')
     const [r] = await runChecks(wt, { test: `echo run >> blocked.txt; echo "Error: EPERM: operation not permitted, open '${secret}'"; exit 1` }, undefined, { guard });
     expect(r!.ok).toBe(false);
     expect(fs.readFileSync(path.join(wt, 'blocked.txt'), 'utf8').trim().split('\n')).toHaveLength(1);
+  });
+});
+
+describe('the second try runs only the tests that failed', () => {
+  const log = () => path.join(tmp, 'runs.log');
+  let putBack = () => {};
+  beforeAll(() => (putBack = quickNpx(fs.mkdtempSync(path.join(os.tmpdir(), 'squad-npx-')))));
+  afterAll(() => putBack());
+  const shelves = (text: string) => {
+    fs.mkdirSync(path.join(wt, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(wt, 'src', 'shelves.txt'), text);
+  };
+
+  const all = 'copy test';
+  const alone = 'copy test tests/e2e/shelves\\.spec\\.ts:387';
+
+  it('the failed test passes on its own: that decides nothing, all 70 run once more, and that pass counts', async () => {
+    installPlaywright(wt, log());
+    shelves('broken');
+    fs.writeFileSync(path.join(wt, 'passes-alone'), '');
+    fs.writeFileSync(path.join(wt, 'fails-once'), '');
+    const started: string[] = [];
+    const [r] = await runChecks(wt, { test: 'npx playwright test' }, (name) => started.push(name));
+    expect(runsIn(log())).toEqual([all, alone, all]);
+    expect(started).toEqual(['test', 'test']);
+    expect(r).toMatchObject({ name: 'test', ok: true });
+    expect(r!.failedFirst).toContain('1 failed');
+    expect(testCount(r!.output)).toBe(70);
+    // Through the story: the same plain line as any test that failed once, and no Builder.
+    commands({ test: 'npx playwright test' });
+    fs.rmSync(log());
+    fs.rmSync(path.join(wt, 'ran-all-once'));
+    const t0 = built();
+    await squad().checks(t0.id);
+    expect(get(t0.id).gates).toMatchObject({ checks: 'pass', checksText: '70 tests pass, test OK' });
+    expect(get(t0.id).activity.map((a) => a.text)).toContain('A test failed once and passed when run again.');
+    expect(builds()).toHaveLength(0);
+    expect(runsIn(log())).toEqual([all, alone, all]);
+  });
+
+  it('it passes on its own but fails beside the others: the whole run decides, so the check fails and the Builder fixes it', async () => {
+    installPlaywright(wt, log());
+    shelves('broken');
+    fs.writeFileSync(path.join(wt, 'passes-alone'), '');
+    const [r] = await runChecks(wt, { test: 'npx playwright test' });
+    expect(runsIn(log())).toEqual([all, alone, all]);
+    expect(r!.ok).toBe(false);
+    expect(r!.failedFirst).toBeUndefined();
+    expect(r!.output).toContain('Running 70 tests using 1 worker');
+    // Through the story: a failed try, as ever, and no story goes past a test that fails with the others.
+    commands({ test: 'npx playwright test' });
+    const t0 = built();
+    await squad().checks(t0.id);
+    const t = get(t0.id);
+    expect(t.tries).toBe(1);
+    expect(t.gates?.checks).toBe('fail');
+    expect(t.activity.map((a) => a.text)).not.toContain('A test failed once and passed when run again.');
+    expect(builds()).toHaveLength(1);
+  });
+
+  it('still failing on its own: the check fails at once, with what the whole first run printed, and the suite does not run again', async () => {
+    installPlaywright(wt, log());
+    shelves('broken');
+    const [r] = await runChecks(wt, { test: 'npx playwright test' });
+    expect(runsIn(log())).toEqual(['copy test', 'copy test tests/e2e/shelves\\.spec\\.ts:387']);
+    expect(r!.ok).toBe(false);
+    expect(r!.output).toContain('Running 70 tests using 1 worker');
+    expect(r!.output).toContain('69 passed (2.8m)');
+    expect(r!.output).not.toContain('Running 1 test');
+  });
+
+  it('a chain whose first part failed reruns the whole command: the second part never ran', async () => {
+    installPlaywright(wt, log());
+    shelves('fine');
+    // Vitest fails first, so Playwright never runs.
+    fs.writeFileSync(path.join(wt, 'node_modules', '.bin', 'vitest'), `#!/bin/sh\necho "vitest $*" >> '${log()}'\nprintf ' FAIL  src/sum.test.ts > sums > adds\\n Test Files  1 failed (1)\\n      Tests  1 failed | 3 passed (4)\\n'\nexit 1\n`, { mode: 0o755 });
+    const [r] = await runChecks(wt, { test: 'npx vitest run && npx playwright test' });
+    expect(r!.ok).toBe(false);
+    expect(runsIn(log())).toEqual(['vitest run', 'vitest run']);
+  });
+
+  it('a failure it cannot name, or a tool not in the copy: the whole command again, as before', async () => {
+    commands({ test: FAILS });
+    await squad().checks(built().id);
+    expect(runs()).toBe(2);
+    // The output names the test, but no Playwright is installed here.
+    shelves('broken');
+    const out = path.join(tmp, 'out.txt');
+    fs.writeFileSync(out, `Running 70 tests using 1 worker\n  1 failed\n    ${DRAG} \n  69 passed (2.8m)\n`);
+    const [r] = await runChecks(wt, { test: `echo run >> runs2.txt; cat '${out}'; exit 1` });
+    expect(r!.ok).toBe(false);
+    expect(fs.readFileSync(path.join(wt, 'runs2.txt'), 'utf8').trim().split('\n')).toHaveLength(2);
   });
 });
 

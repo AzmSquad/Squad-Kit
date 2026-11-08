@@ -41,6 +41,7 @@ import {
   startOver,
   DECIDE_YOURSELF,
   skipQuestions,
+  startTicket,
   stopTicket,
   restartStep,
   endStuckCommand,
@@ -1151,6 +1152,13 @@ export async function runStop(ticketId: string, opts: { again?: boolean } = {}):
   }
   const t = stopTicket(bp, ticketId);
   ui.success(`Stopping the squad on ${t.id}. The work so far is kept.`);
+}
+
+/** A story squad-kit made waits on the board until you start it: the Analyst reads it then, as on any new story. */
+export async function runStartTicket(ticketId: string): Promise<void> {
+  const t = startTicket(board(), ticketId);
+  ui.success(`${t.id} started. The Analyst is reading it.`);
+  ui.info(`Follow it live: squad watch ${t.id}`);
 }
 
 /** The sprint's open stories and bugs on the tracker, with the ticket each one became. */

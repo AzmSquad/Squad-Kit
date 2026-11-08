@@ -37,27 +37,30 @@ import {
 } from '../board/actions.js';
 import { scheduleSquad } from '../board/schedule.js';
 import { releaseGoingOut } from '../board/lock.js';
-import { TECH_ROLES, type BoardMeta, type ChangeStep, type DecisionArea, type ImpactCheck, type OffScreen, type PatternNote, type PortAsk, type ProjectCommands, type ProofPicture, type ProofShot, type RepoInfo, type Question, type Role, type SpecChange, type StackNote, type TechDraft, type Ticket } from '../board/types.js';
+import { TECH_ROLES, type BoardMeta, type ChangeStep, type DecisionArea, type ImpactCheck, type OffScreen, type OldFailure, type PatternNote, type PortAsk, type ProjectCommands, type ProofPicture, type ProofShot, type RepoInfo, type Question, type Role, type SpecChange, type StackNote, type TechDraft, type Ticket } from '../board/types.js';
 import { detectStack } from '../board/stack.js';
 import { AI_TOOLS, aiTool, describeToolEvent } from '../modules/registry.js';
 import { CHECK_DOING, DOING, plainToolLine } from './plain-doing.js';
 import type { AgentResult, AgentRun, AiTool, BlockedAction, ToolEvent } from '../modules/ai-tool/types.js';
-import { CHECK_SILENT_MS, failedOnceLine, runChecks, runCommand, startApp, tail, testCount, type CheckResult, type RunningApp } from './checks.js';
+import { CHECK_SILENT_MS, checksToRun, failedOnceLine, runChecks as runChecksNow, runCommand, startApp, startsToo, tail, testCount, type CheckResult, type CommandWatch, type RunningApp } from './checks.js';
+import { TurnTimeout, appIn, inTurn, startPastOther, stopAppsIn, untilEnded, type TurnKind } from './copy-turn.js';
 import { forgetKnownFailure, knownFailures } from './known-failures.js';
+import { testKey, testTitle, type FailedTest } from './failed-tests.js';
+import { ON_MAIN_MS, oldGateText, oldLine, runOnMain, storiesForOld, testsToTry, type MainResult } from './old-tests.js';
 import { alsoChangedLine, cleanAlsoChanged } from '../board/also-changed.js';
 import { weakenedChecks, type Weakening } from './weakened.js';
 import { checkWords, holdTestCommand, noTestsDetail, noTestsQuestion, noTestsRan, notCheckedText, ranOf } from './not-checked.js';
 import { findCommands } from './find-commands.js';
 import { samePicture, shotProblem, shotSizeOf } from './proof-check.js';
 import { ShotsUnavailable, isPlain, plainParts, prepareShots, shotsErrorDetail, takeOne, type ShotSize } from './shots.js';
-import { ALL_TOOLS, AgentWindow, toolsFor, tooManyMistakesWords, tooManyWords, type WindowChecks, type WindowSetup } from './window.js';
+import { ALL_TOOLS, AgentWindow, toolsFor, tooManyMistakesWords, tooManyWords, type CheckRun, type WindowChecks, type WindowSetup } from './window.js';
 import { closeWindow, openWindow, windowAccess } from './window-server.js';
 import { TECHNICAL_TRIES, askText, judgeQuestion, judgeReply, questionBackPrompt, refusedAskLine, refusedReplyLine, stoppedQuestion } from './question-filter.js';
 import { TECHNICAL_STOP, ownRunWords, ownWords } from './plain-stop.js';
 import { addSnapshot, addWorktree, baseTurn, changedTracked, clearHalfCopies, copyDirsIn, commitAll, conventionalWords, cutOffWords, dropSnapshot, git, gitLater, isAncestor, isLockFile, latestBase, putBackTracked, repairCopyLink, settleCopy, writeChangesOf, type CopyHow } from './git.js';
 import * as P from './prompts.js';
 import { answerLists, checklistAsk, checklistsFor, rulesFor, type ListNo } from '../board/additions.js';
-import { gatesChanged, noteGates, runGatesAt, type GateDone } from './gate-run.js';
+import { gatesChanged, noteGates, runGatesAt as runGatesNow, type GateDone } from './gate-run.js';
 import { baseCommits, repoFor, reposOf, rulesFiles, workspaceRepos } from './repos.js';
 import { cleanParts, partsAfterRead, partsOf, repoLabel, runsAsProduct } from '../board/parts.js';
 import { flushTracker, publishTicket, recheckMerge, syncWiki, trackerDue } from './sync.js';
@@ -69,7 +72,7 @@ import { DEFAULT_QUALITY, builderLevel, describeLevel, effortOn, personLevels, r
 import { CapReached, capCard } from './caps.js';
 import { blockedLine, noPushEnv, packageCacheEnv, sandboxAsk, sandboxOf, ticketCacheDir } from './sandbox.js';
 import { hiddenFiles, placeStoryFiles } from './local-files.js';
-import { appCopyOf, copiesOf, reposOfParts, storyCopyDir, workFolder } from './copies.js';
+import { appCopyOf, copiesOf, reposOfParts, storyCopyDir, workFolder, type CopyOf } from './copies.js';
 import { ProductError, productCopiesDir, productPlan, startProduct, stopProduct, waitWords } from './product-run.js';
 import { productHold } from './product-lock.js';
 import { offLimits } from '../board/project-files.js';
@@ -83,7 +86,7 @@ import { budgetStop } from '../board/budget.js';
 import { howPaid } from '../board/payment.js';
 import { parallelLimit } from '../core/settings.js';
 import { answerProblem, dependsProblem, scanProblem } from './answers.js';
-import { checkLane, watchLane, type Lane } from './lane.js';
+import { checkLane, treeOf, watchLane, type Lane } from './lane.js';
 import { hookFiles, isHookFile } from './hook-files.js';
 import { endStep, nextPart, pauseClock, resumeClock, slowStep, startStep, stepDoing, timedStep } from '../board/clock.js';
 import { readUsual } from '../board/usual.js';
@@ -147,6 +150,49 @@ const STOPPED = 'You stopped the squad.';
 
 /** The steps in which the Builder works. A small change goes into the next one of these as it starts. */
 const BUILDER_PHASES = new Set(['build', 'unstick', 'fix', 'answered-builder', 'chat-carry-builder', 'review-fix', 'restore-tests', 'update-base', 'change-build']);
+/** How long an app squad-kit keeps for the proof may wait for it, while no step of its story runs. */
+export const KEPT_APP_MS = 10 * 60_000;
+/** The checks waited their whole time for the app starting in the same copy. */
+const CHECKS_WAITED = "The checks waited too long for the app starting in this story's copy, so they did not run. Press Try again to run them.";
+/** The app waited its whole time for the tests running in the same copy. */
+const APP_WAITED = "squad-kit could not start the app: the tests in this story's copy were still running after a long wait. Press Try again to try once more.";
+/** The checks step uses the Builder's last run of the checks (builderPassed). */
+const CHECKS_PASSED_FOR_BUILDER = 'The checks already passed on this same code when squad-kit ran them for the Builder, so they do not run again';
+
+/**
+ * The checks step's own runs of the project's checks (checks.ts) and of the team's gates (gate-run.ts), each in the
+ * turn of the copies it runs in (copy-turn.ts): an app starting in the same copy goes first, and one that starts
+ * meanwhile waits for them. Different copies never wait for each other. An app squad-kit runs in those copies (one kept
+ * for the proof) stops first, as the tests may start their own: only the log says so.
+ */
+function runChecks(...a: Parameters<typeof runChecksNow>): ReturnType<typeof runChecksNow> {
+  const signal = a[3]?.signal;
+  const work = async () => {
+    await stopAppsIn(a[0]);
+    return runChecksNow(...a);
+  };
+  return inTurn(a[0], 'checks', work, signal ? { signal } : {}).catch(turnStop);
+}
+
+function runGatesAt(...a: Parameters<typeof runGatesNow>): ReturnType<typeof runGatesNow> {
+  const dirs = a[2].map((p) => p.dir);
+  const work = async () => {
+    await stopAppsIn(dirs);
+    return runGatesNow(...a);
+  };
+  return inTurn(dirs, 'checks', work).catch(turnStop);
+}
+
+/** The checks' turn did not come: one plain stop with Try again, the details for engineers. */
+function turnStop(err: unknown): never {
+  if (err instanceof TurnTimeout) throw new StepError(CHECKS_WAITED, `The checks ${err.message}.`);
+  throw err;
+}
+
+/** True when something answers at the address: any answer, even an error page, is the app running. */
+async function answersAt(url: string): Promise<boolean> {
+  return fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(3000) }).then(() => true, () => false);
+}
 
 
 export function projectRoot(bp: BoardPaths): string {
@@ -238,6 +284,19 @@ export class LiveSquad {
   private swept: Promise<unknown> | null = null;
   /** When each ticket's step started, on both clocks, to tell a run the computer's sleep cut off. */
   private marks = new Map<string, SleepMark>();
+  /**
+   * The app squad-kit started for a ticket's review, kept running into its proof, and between the proof's rounds of
+   * pictures: a big app takes 30 to 60 seconds to start. `tree` is the copy's code it started from (none yet while the
+   * review decides), `at` when it was last handed back.
+   */
+  private kept = new Map<string, { app: RunningApp; cwd: string; tree?: string; at: number; leave: () => void }>();
+  /**
+   * The Builder's last run_checks of every saved check in a ticket's copy, by the copy's folder, when all of them passed
+   * in its current round: the copy's code as the run started (`tree`), and what each check printed. The checks step may
+   * use it instead of running the same commands again (builderPassed). Kept in memory only: after a restart the checks
+   * step simply runs them.
+   */
+  private builderRuns = new Map<string, Map<string, { tree: string; ran: CheckResult[]; at: number }>>();
 
   constructor(private bp: BoardPaths) {}
 
@@ -255,6 +314,7 @@ export class LiveSquad {
       // Cut off, not failed: each step carries on from where it was when the board opens again (engine/interrupt.ts).
       for (const id of this.ticketIds()) this.cutOff(id, 'restart');
       for (const c of this.stops.values()) c.abort();
+      for (const id of [...this.kept.keys()]) void this.dropKept(id);
       endSaves(this.bp);
       // What their runs leave behind in squad-kit's copies stops too, once they have ended. A restart waits for it.
       if (this.isLive()) trackTask(this.clearAfterClose());
@@ -422,6 +482,7 @@ export class LiveSquad {
     }
     if (meta.engine !== 'live') return;
     this.watch();
+    this.sweepKept();
     this.pickUp();
     const limit = parallelLimit(meta.parallel);
     // The AI account's usage limit: nothing new starts in any project until it resets (E5).
@@ -803,7 +864,8 @@ export class LiveSquad {
     const t = readTicket(this.bp, id);
     if (!t?.worktree || t.takenOver || !fs.existsSync(t.worktree)) return;
     stopProduct(this.bp, id);
-    await runsEnded([workFolder(t)!], 6000);
+    // An app kept for the proof is one of squad-kit's runs in the copy: waiting for it would only take the whole time.
+    await runsEnded([workFolder(t)!], this.kept.has(id) ? 0 : 6000);
     await this.clearCopies([workFolder(t)!], {}, id);
   }
 
@@ -816,6 +878,103 @@ export class LiveSquad {
     if (!t?.worktree) return;
     await this.clearCopies([workFolder(t)!], {}, id);
     await this.clearCopies(projectCopies(this.bp), { busy: [workFolder(t)!, ...this.busyCopies(id)], listening: true }, id);
+  }
+
+  /* ── one app for the review and the proof ────────────── */
+
+  /**
+   * A window hands on the app squad-kit started in `cwd`, for the next step of this ticket that uses it (kept): the
+   * review's for the proof, a round of pictures' for the next round. `tree` is the code it started from, when known.
+   */
+  private keepApp(id: string, cwd: string, app: RunningApp, tree?: string): boolean {
+    if (this.closing) return false;
+    const old = this.kept.get(id);
+    old?.leave();
+    if (old && old.app !== app) old.app.stop();
+    // On its copy's list (copy-turn.ts): a run of the checks there stops it first, with a line in the log only.
+    const leave = appIn(cwd, async () => {
+      if (this.kept.get(id)?.app !== app) return false;
+      this.log('info', `squad-kit stops the app it kept at ${app.url}, so the checks in its copy can start their own`, id);
+      await this.dropKept(id);
+      return true;
+    });
+    this.kept.set(id, { app, cwd, ...(tree ? { tree } : {}), at: Date.now(), leave });
+    this.log('info', `squad-kit keeps the app at ${app.url} running for the next step that uses it`, id);
+    return true;
+  }
+
+  /**
+   * The app kept for this ticket, handed to the caller from now on: only while it runs from `cwd`, still answers at its
+   * address, and the copy's code is the code it started from. Otherwise it stops, and null: the caller starts a new one.
+   */
+  private async keptFor(id: string, cwd: string): Promise<{ app: RunningApp; tree: string } | null> {
+    const k = this.kept.get(id);
+    if (!k) return null;
+    const real = (dir: string) => {
+      try {
+        return fs.realpathSync.native(dir);
+      } catch {
+        return path.resolve(dir);
+      }
+    };
+    let why = '';
+    if (!k.tree) why = 'it was not kept for this step';
+    else if (real(k.cwd) !== real(cwd)) why = 'it runs from another copy';
+    else if (k.app.ended?.()) why = 'it stopped';
+    else if (!(await answersAt(k.app.url))) why = 'it does not answer any more';
+    else if ((await treeOf(cwd)) !== k.tree) why = "the copy's code changed since it started";
+    // Stopped meanwhile (the story's Stop): nothing is left to hand over.
+    if (this.kept.get(id) !== k) return null;
+    if (why) {
+      this.log('info', `squad-kit starts the app again: the one it kept ${why}`, id);
+      await this.dropKept(id);
+      return null;
+    }
+    this.kept.delete(id);
+    k.leave();
+    return { app: k.app, tree: k.tree! };
+  }
+
+  /** The app kept for this ticket stops, and squad-kit waits until it has gone, so a new start never meets it. */
+  private async dropKept(id: string): Promise<void> {
+    const k = this.kept.get(id);
+    if (!k) return;
+    this.kept.delete(id);
+    k.leave();
+    k.app.stop();
+    this.log('info', `squad-kit stopped the app it kept at ${k.app.url}`, id);
+    await untilEnded(k.app);
+  }
+
+  /**
+   * The review is over: its app waits for the proof when the review approved and the proof is next, with the code it
+   * runs. Any other way out (back to the Builder, a question, a stop) stops it, as before.
+   */
+  private async afterReview(id: string): Promise<void> {
+    const k = this.kept.get(id);
+    if (!k) return;
+    const t = readTicket(this.bp, id);
+    const next = Boolean(t && t.gates?.review === 'pass' && t.squad?.phase === 'proof' && !t.stopRequested && !this.stops.get(id)?.signal.aborted);
+    const tree = next && !k.app.ended?.() ? await treeOf(k.cwd) : undefined;
+    if (this.kept.get(id) !== k) return;
+    if (!tree) return this.dropKept(id);
+    k.tree = tree;
+    k.at = Date.now();
+  }
+
+  /** At each turn: a kept app no step is going to use stops. Its story stopped, went or moved on, or it waited too long. */
+  private sweepKept(): void {
+    for (const [id, k] of this.kept) {
+      let t: Ticket | null = null;
+      try {
+        t = readTicket(this.bp, id);
+      } catch {
+        // Unreadable: no step is going to use its app.
+      }
+      const runs = this.running.has(id);
+      const ahead = Boolean(t && !t.deleting && !t.stopRequested && (runs || t.squad?.phase === 'proof'));
+      if (!ahead || k.app.ended?.() || (!runs && Date.now() - k.at > KEPT_APP_MS)) void this.dropKept(id);
+    }
   }
 
   /**
@@ -1118,6 +1277,8 @@ export class LiveSquad {
     const builds = inCopy && opts.permissions.includes('edit');
     const app = here && builds;
     const look = here && opts.role === 'reviewer' && opts.step === 'review';
+    // The Builder's own step, not a run beside it: its full runs of the checks are noted for the checks step.
+    const noted = opts.role === 'builder' && !(opts as { job?: string }).job;
     const who = AGENTS.find((a) => a.role === opts.role)?.name ?? opts.role;
     return new AgentWindow({
       ...this.windowBase(id, opts.role, opts.cwd, (opts as { job?: string }).job ?? id),
@@ -1125,15 +1286,21 @@ export class LiveSquad {
       who,
       tools: toolsFor({ app, look, checks: builds, parts: builds && Boolean(t?.storyDir) }),
       ...(app || look ? { app: { cwd: appCopy!.dir, start: rc.start!.trim(), url: rc.url!.trim(), ...(runsAsProduct(this.meta()) || !this.guardFor(appCopy!.dir, id) ? {} : { guard: this.guardFor(appCopy!.dir, id)! }), ...this.productApp(id) } } : {}),
-      ...(builds ? { checks: t?.storyDir ? this.windowChecksByPart(id, t) : this.windowChecks(id, opts.cwd) } : {}),
+      ...(builds ? { checks: t?.storyDir ? this.windowChecksByPart(id, t, noted) : this.windowChecks(id, opts.cwd, undefined, noted) } : {}),
       ...(builds && t?.storyDir ? { addPart: (part: string) => this.addPart(id, part, this.lanesOf.get(id)) } : {}),
+      // The app started for the review's look runs on into the proof when the review approves (afterReview). A product
+      // starts and stops as before.
+      ...(look && !runsAsProduct(this.meta()) ? { keep: (a: RunningApp) => this.keepApp(id, appCopy!.dir, a) } : {}),
       prefix: `${id.toLowerCase()}-${opts.role}`,
       signal,
     });
   }
 
-  /** The project's own saved checks for an agent's run_checks, in the ticket's copy, inside squad-kit's guard. */
-  private windowChecks(id: string, cwd: string, repo?: string): WindowChecks {
+  /**
+   * The project's own saved checks for an agent's run_checks, in the ticket's copy, inside squad-kit's guard. `noted`:
+   * the Builder's step, whose runs squad-kit notes for the checks step (noteRun).
+   */
+  private windowChecks(id: string, cwd: string, repo?: string, noted = false): WindowChecks {
     const guard = this.guardFor(cwd, id);
     return {
       cwd,
@@ -1145,6 +1312,27 @@ export class LiveSquad {
           x.status = CHECK_DOING[name]!;
           stepDoing(x, x.status);
         }),
+      ...(noted ? { onRun: (all: boolean) => this.noteRun(id, cwd, all) } : {}),
+    };
+  }
+
+  /**
+   * The Builder's run_checks starts in the copy `cwd`: it is now the latest there, so a run noted before no longer
+   * counts. A run of every saved check notes the copy's code as it starts. Once it ran to its end, every check passed and
+   * the code is still the same, the checks step may use its results instead of running the same commands again. Only in
+   * the round it started in (runBuilder): one taken by the checks step, or a new round, notes nothing more.
+   */
+  private async noteRun(id: string, cwd: string, all: boolean): Promise<((ran: CheckRun[]) => Promise<void>) | undefined> {
+    const notes = this.builderRuns.get(id);
+    notes?.delete(cwd);
+    const tree = notes && all ? await treeOf(cwd) : undefined;
+    if (!notes || !tree) return undefined;
+    const at = Date.now();
+    return async (ran) => {
+      if (!ran.length || ran.some((r) => !r.ok || r.ended)) return;
+      // An edit while it ran: the run may have seen some of the new code, or none of it.
+      if ((await treeOf(cwd)) !== tree || this.builderRuns.get(id) !== notes) return;
+      notes.set(cwd, { tree, ran: ran.map((r) => ({ name: r.name, command: r.command, ok: r.ok, output: r.output, seconds: r.seconds })), at });
     };
   }
 
@@ -1188,7 +1376,7 @@ export class LiveSquad {
   }
 
   /** A story's folder: run_checks takes the part, and runs in that part's copy. Read at each call, as a copy may be new. */
-  private windowChecksByPart(id: string, t: Ticket): WindowChecks {
+  private windowChecksByPart(id: string, t: Ticket, noted = false): WindowChecks {
     const parts = () => {
       const meta = this.meta();
       const now = readTicket(this.bp, id) ?? t;
@@ -1196,15 +1384,15 @@ export class LiveSquad {
       const out: Record<string, WindowChecks> = {};
       for (const c of copies) {
         const named = partsOf(meta).filter((p) => p.repo === c.repo.path && !p.shared);
-        for (const key of named.length ? named.map((p) => p.id) : [c.repo.path]) out[key] = this.windowChecks(id, c.dir, c.repo.path);
+        for (const key of named.length ? named.map((p) => p.id) : [c.repo.path]) out[key] = this.windowChecks(id, c.dir, c.repo.path, noted);
       }
       return out;
     };
-    return { ...this.windowChecks(id, t.worktree!, repoFor(this.meta(), t).path), parts };
+    return { ...this.windowChecks(id, t.worktree!, repoFor(this.meta(), t).path, noted), parts };
   }
 
   /** What every window of a ticket shares: its lines on the ticket, the app log, and squad-kit's own fixes. */
-  private windowBase(id: string, role: AgentRole, cwd: string, job = id): Pick<WindowSetup, 'ticket' | 'proofDir' | 'say' | 'log' | 'beat' | 'beforeStart' | 'inTheWay'> {
+  private windowBase(id: string, role: AgentRole, cwd: string, job = id): Pick<WindowSetup, 'ticket' | 'proofDir' | 'say' | 'log' | 'beat' | 'beforeStart' | 'clearCopy' | 'inTheWay'> {
     return {
       ticket: id,
       proofDir: this.bp.proofDir,
@@ -1222,6 +1410,9 @@ export class LiveSquad {
       beforeStart: async () => {
         await this.clearCopies(projectCopies(this.bp), { busy: [cwd, ...this.busyCopies(id)], listening: true }, id);
       },
+      // What a finished check left in the app's own copy: only in squad-kit's own copies, and never what squad-kit runs
+      // now (a check, a kept app, the agent itself).
+      clearCopy: async (dir, only) => Boolean(folderOf(dir, projectCopies(this.bp))) && (await this.clearCopies([dir], only ? { only: [only] } : {}, id)).length > 0,
       inTheWay: async (text) => (await this.inTheWay(id, { text }))?.answer ?? null,
     };
   }
@@ -1755,7 +1946,9 @@ export class LiveSquad {
     // The person's own changes stay: what differed before the setup ran is theirs.
     // In its turn, as is what comes after: git may write the index while it looks, and a move of this folder's base would run into that.
     const theirs = await baseTurn(ls.dir, () => changedTracked(ls.dir));
-    const r = await runCommand(ls.dir, ls.command, SETUP_MS, this.guardFor(ls.dir, id) ? { guard: this.guardFor(ls.dir, id)! } : {});
+    // The person's own checkout: the setup reads its .env files, as when they run it themselves (Prisma needs DATABASE_URL).
+    const guard = this.guardFor(ls.dir, id);
+    const r = await runCommand(ls.dir, ls.command, SETUP_MS, guard ? { guard: { ...guard, ownEnv: true } } : {});
     const seconds = Math.round(r.seconds);
     await this.putBackLockFiles(id, ls.dir, theirs);
     this.update(id, (x) => {
@@ -2879,6 +3072,10 @@ export class LiveSquad {
    * reaches the Builder here, at a safe moment: the start of a step, before that step's own work.
    */
   private async runBuilder(id: string, prompt: string, resume: boolean, step: 'build' | 'fix' = 'fix', settled = 0, told = new Set<string>()): Promise<void> {
+    // The Builder changes the code: an app kept for the review and the proof would show the old code, and hold the copy.
+    await this.dropKept(id);
+    // A new round of the Builder: a run of the checks it noted before no longer counts (noteRun).
+    this.builderRuns.set(id, new Map());
     const change = this.handChange(id);
     let t = readTicket(this.bp, id)!;
     // Built outside squad-kit: the Builder has no conversation on it yet, so it gets one, and the story first.
@@ -3371,6 +3568,41 @@ export class LiveSquad {
     return { ...repo.commands, ...add };
   }
 
+  /**
+   * The Builder's last run_checks in each copy this checks step runs in, used instead of running the same commands
+   * again: it ran every check the step runs now, with the same commands, in that copy, all of them passed, and the copy's
+   * code is the same as when it started (noteRun). A story with several parts needs one in each part it checks, or the
+   * checks run in all of them; a new test command still to be tried runs them too. Taken by this step either way: a
+   * later checks step with no new round of the Builder runs them itself. Null when the checks run as usual.
+   */
+  private async builderPassed(id: string, t: Ticket, copies: CopyOf[]): Promise<Map<CopyOf, CheckResult[]> | null> {
+    const notes = this.builderRuns.get(id);
+    this.builderRuns.delete(id);
+    if (!notes?.size) return null;
+    const out = new Map<CopyOf, CheckResult[]>();
+    let why = t.testChange && !t.testChange.ask ? 'a new test command is still to be tried' : '';
+    for (const c of why ? [] : copies) {
+      const note = notes.get(c.dir);
+      const want = checksToRun(c.dir, c.repo.commands);
+      if (!note) why = `it has no passing run of every check in ${c.label}`;
+      else if (want.length !== note.ran.length || want.some((w, i) => w.name !== note.ran[i]!.name || w.command !== note.ran[i]!.command)) why = `the checks now are not the ones it ran (${want.map((w) => `${w.name}: ${w.command}`).join('; ')})`;
+      else if (startsToo(c.repo.commands, note.ran)) why = 'no tests ran, so the checks also start the app';
+      else if ((await treeOf(c.dir)) !== note.tree) why = `the code in ${c.label} changed since that run started`;
+      if (why || !note) break;
+      out.set(c, note.ran);
+    }
+    if (why) {
+      this.log('info', `squad-kit runs the checks itself, not using the Builder's last run_checks: ${why}`, id);
+      return null;
+    }
+    if (!out.size) return null;
+    for (const [c, ran] of out) {
+      const note = notes.get(c.dir)!;
+      this.log('info', `squad-kit uses the Builder's run_checks from ${new Date(note.at).toISOString()} in ${c.label} instead of running the same commands again: they all passed in the same copy, on the same code (tree ${note.tree.slice(0, 12)}): ${ran.map((r) => `${r.name}: ${r.command}`).join('; ')}`, id);
+    }
+    return out;
+  }
+
   private async checks(id: string): Promise<void> {
     const t = readTicket(this.bp, id)!;
     // A project the Builder just set up says now how it is tested and run.
@@ -3388,18 +3620,22 @@ export class LiveSquad {
     // No old server of squad-kit's own copies may hold a port the checks need.
     await this.clearBeforeApp(id);
     this.goOn(id);
+    // A part the story did not change has nothing new to check, unless nothing changed at all.
+    const changed: typeof copies = [];
+    for (const c of copies) if (!several || (c.baseCommit && (await workSoFar(c.dir, c.baseCommit)).length)) changed.push(c);
+    // The Builder's last run of every check passed on this very code: its results stand, and the commands do not run again.
+    const passed = await this.builderPassed(id, t, changed.length ? changed : copies.slice(0, 1));
     this.update(id, (x) => {
       x.stage = 'test';
       x.live = true;
       x.gates = { checks: 'pending', review: x.gates?.review ?? 'pending', proof: 'pending' };
-      addActivity(x, 'tester', 'squad-kit is running the project checks');
+      addActivity(x, 'tester', passed ? CHECKS_PASSED_FOR_BUILDER : 'squad-kit is running the project checks');
       startStep(x, { who: 'squad', step: 'checks', limit: 15 });
     });
     const mark = sleepMark();
-    // A part the story did not change has nothing new to check, unless nothing changed at all.
-    const changed: typeof copies = [];
-    for (const c of copies) if (!several || (c.baseCommit && (await workSoFar(c.dir, c.baseCommit)).length)) changed.push(c);
     const results: (CheckResult & { part?: string })[] = [];
+    // The copy each project check ran in, for a failed test to run on main's code.
+    const ranIn = new Map<CheckResult, CopyOf>();
     for (const c of changed.length ? changed : copies.slice(0, 1)) {
       let commands = c.repo.commands;
       const onStart = (name: string, command?: string) => {
@@ -3414,7 +3650,7 @@ export class LiveSquad {
       // The checks run the Builder's code, which may write in its copy: never in the project's own check.
       const hookLane = await watchLane(c.dir, hookFiles(c.dir));
       if (!t.testChange?.repo || t.testChange.repo === c.repo.path) commands = await this.tryTestChange(id, c.dir, commands, guard, mark);
-      const ran = await runChecks(c.dir, commands, onStart, { ...this.commandWatch(id), ...(guard ? { guard } : {}) });
+      const ran = passed?.get(c) ?? (await runChecks(c.dir, commands, onStart, { ...this.commandWatch(id), ...(guard ? { guard } : {}) }));
       const hooksBack = (await checkLane(hookLane)).restored;
       if (hooksBack.length) this.update(id, (x) => addActivity(x, 'squad', `The project's checks changed the check that runs on every save (${hooksBack.slice(0, 6).join(', ')}); squad-kit put it back. Changing that check stays with you or an engineer`));
       // A check that needed a file outside its copy, which the guard blocked: one plain sentence, not a failed try.
@@ -3422,7 +3658,10 @@ export class LiveSquad {
         const hit = ran.find((r) => !r.ok && guardBlockedPath(r.output, guard));
         if (hit) return this.guardStop(id, 'test', guardBlockedPath(hit.output, guard)!, hit.command, hit.output, guard);
       }
-      results.push(...ran.map((r) => (several ? { ...r, part: c.label } : r)));
+      for (const r of ran.map((x) => (several ? { ...x, part: c.label } : x))) {
+        results.push(r);
+        ranIn.set(r, c);
+      }
       this.goOn(id);
     }
     // The team's own gates, by squad-kit's own hand. A must-pass one goes the way of a project check; the others only say.
@@ -3453,6 +3692,16 @@ export class LiveSquad {
     const shown = (r: CheckResult & { part?: string }) => (r.part ? `${r.part}: ${r.name}` : r.name);
     // Stopped while a check ran: its result says nothing about the code, so it is no failed try.
     this.goOn(id);
+    // A failed test this story may not have caused runs on its own on main's code first, before any try is counted
+    // (engine/old-tests.ts). Not tests you already chose to continue past: that choice stands.
+    const onMain = new Map<CheckResult & { part?: string }, MainResult>();
+    for (const r of results) {
+      // A run squad-kit had to end says nothing sure about its tests.
+      if (r.ok || r.ended || r.name !== 'test' || (t.checksContinued ?? []).includes(shown(r)) || !ranIn.has(r)) continue;
+      const found = await this.testsOnMain(id, ranIn.get(r)!, r);
+      this.goOn(id);
+      if (found) onMain.set(r, found);
+    }
     // Nor when the computer slept under them: they run again, and no try is counted.
     if (sleptSince(mark)) {
       this.update(id, (x) => {
@@ -3470,9 +3719,25 @@ export class LiveSquad {
     }
     const test = results.find((r) => r.name === 'test');
     if (test?.ok && test.failedFirst === undefined) forgetKnownFailure(this.bp, t, test.command);
-    const failed = results.filter((r) => !r.ok);
+    // A test check whose every failed test fails on main too is not this story's: it does not count as failed.
+    const oldOnly = new Set([...onMain].filter(([, m]) => m.old.length && !m.fine.length).map(([r]) => r));
+    const failed = results.filter((r) => !r.ok && !oldOnly.has(r));
     // A gate that could not run says nothing about the code: no failed try, no stronger model, no Builder. Only a card.
     const cant = gates.filter((g) => g.stops && g.result === 'cant-run');
+    // The old tests found: one story fixes them, and the story says so in one line.
+    const old: OldFailure[] = [];
+    for (const [r, m] of onMain) {
+      if (!m.old.length) continue;
+      const fixes = storiesForOld(this.bp, readTicket(this.bp, id)!, m.old, m.printed, { command: r.command, ...(meta.repos?.length ? { repo: ranIn.get(r)!.repo.path } : {}), ...(r.part ? { part: r.part } : {}) });
+      this.log('info', `${shown(r)} failed on main's code too, without ${id}'s change (${r.command}): ${fixes.map((f) => `${f.file} › ${f.title}${f.story ? ` (${f.story})` : ''}`).join('; ')}`, id);
+      // The stories made for them wait on the board until the person starts them: the line says which still do.
+      const waiting = fixes.flatMap((f) => (f.story && readTicket(this.bp, f.story)?.waitsToStart ? [f.story] : []));
+      const line = oldLine(fixes, !failed.length && !cant.length, waiting);
+      this.update(id, (x) => {
+        if (!x.activity.some((a) => a.text === line)) addActivity(x, 'tester', line);
+      });
+      if (oldOnly.has(r)) old.push(...fixes);
+    }
     if (cant.length && !failed.length) return this.gateCantRun(id, cant);
     const ran = ranOf(results);
     // Weakened tests you continued past are still there: the gate is never a plain pass.
@@ -3482,14 +3747,16 @@ export class LiveSquad {
       const tests = test ? testCount(test.output) : null;
       const parts = [...new Set(results.map((r) => r.part).filter(Boolean))];
       const names = parts.length ? parts.map((p) => `${p} ✓`).join(', ') : results.map((r) => checkWords(r.name)).join(', ');
-      const text = parts.length ? names : tests ? `${tests} ${tests === 1 ? 'test passes' : 'tests pass'}, ${names} OK` : `${names} pass`;
+      const passed = parts.length ? names : tests ? `${tests} ${tests === 1 ? 'test passes' : 'tests pass'}, ${names} OK` : `${names} pass`;
+      // Old tests that fail on main too: the story goes on, and the gate says so in plain words.
+      const text = old.length ? `${passed}; ${oldGateText(old.length)}` : passed;
       this.update(id, (x) => {
-        x.gates = { ...x.gates!, checks: around ? 'skipped' : 'pass', checksText: around ? `${text}; tests weakened, you continued` : text, ran };
+        x.gates = { ...x.gates!, checks: around ? 'skipped' : 'pass', checksText: around ? `${text}; tests weakened, you continued` : text, ran, ...(old.length ? { oldFailures: old } : {}) };
         // A pass starts the count again: a later round that fails has its own tries, and nothing is continued past.
         x.tries = 0;
         clearStaleStop(x);
         x.checksContinued = undefined;
-        addActivity(x, 'tester', `All checks pass: ${names}`);
+        addActivity(x, 'tester', old.length ? `All checks pass, apart from ${old.length === 1 ? 'the old test that fails' : 'the old tests that fail'} on main too: ${names}` : `All checks pass: ${names}`);
         x.stage = 'review';
         x.status = 'Reviewer is reading the changes';
         scheduleSquad(x, 'review', 0.2, 1, (x.reviewRound ?? 0) + 1);
@@ -3545,7 +3812,10 @@ export class LiveSquad {
       x.stage = 'implement';
       x.status = 'Builder is fixing the failed checks';
     });
-    await this.runBuilder(id, P.fixChecksPrompt(failed.map((f) => ({ name: shown(f), command: f.command, output: tail(f.output, 60) })), knownFailures(this.bp, t, failed)), true);
+    // What the failed tests did on main's code: those that pass there are this story's to fix, the old ones are not.
+    const ranOnMain = [...onMain.values()];
+    const said = { passes: ranOnMain.flatMap((m) => m.fine.map(testTitle)), fails: ranOnMain.flatMap((m) => m.old.map(testTitle)) };
+    await this.runBuilder(id, P.fixChecksPrompt(failed.map((f) => ({ name: shown(f), command: f.command, output: tail(f.output, 60) })), knownFailures(this.bp, t, failed), said), true);
     this.update(id, (x) => {
       addActivity(x, 'builder', 'Fixed the failed checks');
       x.stage = 'test';
@@ -3690,7 +3960,19 @@ export class LiveSquad {
     });
   }
 
+  /**
+   * The review. The app squad-kit started for the Reviewer's look at the pages runs on when it approves, for the
+   * proof (afterReview); any other way out stops it.
+   */
   private async review(id: string, answered = false, carry = false): Promise<void> {
+    try {
+      await this.reviewOnce(id, answered, carry);
+    } finally {
+      await this.afterReview(id).catch(() => this.dropKept(id));
+    }
+  }
+
+  private async reviewOnce(id: string, answered: boolean, carry: boolean): Promise<void> {
     this.goOn(id);
     const meta = this.meta();
     const t0 = this.update(id, (x) => {
@@ -3802,9 +4084,19 @@ export class LiveSquad {
    * pictures of each "done when" show together. It passes only when every "done when" that shows on a screen is judged
    * met; one the Tester and the check agree cannot be shown does not fail it, unless every one ends that way. Not shown:
    * the Tester adds what is missing, told what to show (judge), then a plain stop (cannotShow). Broken: back to the
-   * Builder once, then a plain stop (notWorking).
+   * Builder once, then a plain stop (notWorking). One app serves every round: the one the review kept, or the first
+   * round's (screens), and it stops when the proof ends.
    */
   private async proof(id: string): Promise<void> {
+    try {
+      await this.proofOnce(id);
+    } finally {
+      // The proof is over, however it ended: the app kept for it stops (a Builder's fix stops it before it starts).
+      await this.dropKept(id).catch(() => undefined);
+    }
+  }
+
+  private async proofOnce(id: string): Promise<void> {
     this.listNoes.delete(id);
     const meta = this.meta();
     const t = readTicket(this.bp, id)!;
@@ -4267,6 +4559,91 @@ export class LiveSquad {
   }
 
   /**
+   * A failed test check, before a try is counted: its failed tests run on their own on main's code (engine/old-tests.ts),
+   * in the Tester's "before" copy. Which fail there too, and which pass there every time. What squad-kit found on the
+   * same main stays known for the story, so a later round of checks does not run them there again. Null when it cannot
+   * tell (a test it cannot name or run alone, one the story changed, a copy it could not set up): the usual way then.
+   */
+  private async testsOnMain(id: string, c: CopyOf, r: CheckResult): Promise<MainResult | null> {
+    if (!c.baseCommit) return null;
+    const tests = testsToTry(r.output, c.dir, r.command, await workSoFar(c.dir, c.baseCommit));
+    if (!tests) return null;
+    // A story made to fix an old test never goes past that test: it is the one thing it must fix.
+    const t = readTicket(this.bp, id);
+    if (tests.some((x) => t?.oldTests?.includes(testKey(x)))) return null;
+    const seen = t?.onMain?.find((m) => m.repo === c.repo.path && m.base === c.baseCommit);
+    const found: MainResult = { old: tests.filter((x) => seen?.old.includes(testKey(x))), fine: tests.filter((x) => seen?.fine.includes(testKey(x))), printed: {} };
+    const left = tests.filter((x) => !found.old.includes(x) && !found.fine.includes(x));
+    if (!left.length) return found;
+    const fresh = await this.inMainCopy(id, c, (dir, watch) => runOnMain(dir, r.command, left, (one, ms) => runCommand(dir, one, ms, { silentMs: CHECK_SILENT_MS, ...watch }), Date.now() + ON_MAIN_MS));
+    if (!fresh) return null;
+    found.old.push(...fresh.old);
+    found.fine.push(...fresh.fine);
+    Object.assign(found.printed, fresh.printed);
+    this.log('info', `Ran the failed tests on main's code (${c.baseCommit.slice(0, 8)}): ${[...fresh.old.map((x) => `failed there too: ${testKey(x)}`), ...fresh.fine.map((x) => `passed there: ${testKey(x)}`)].join('; ')}`, id);
+    this.update(id, (x) => {
+      const rest = (x.onMain ?? []).filter((m) => m.repo !== c.repo.path);
+      const keys = (list: FailedTest[]) => [...new Set(list.map(testKey))];
+      x.onMain = [...rest, { repo: c.repo.path, base: c.baseCommit!, old: keys(found.old), fine: keys(found.fine) }];
+    });
+    return found;
+  }
+
+  /**
+   * Main's code, in the Tester's "before" copy, made the way the before screenshots make it: at the story's base, with
+   * the story's local files and the project's setup, so a test there differs from the story's copy only by the story's
+   * change. The before screenshots end first, as they use that copy. `use` runs in it, with the ticket's Stop and a time
+   * limit for its runs; the copy goes after. Null when it could not be made or set up.
+   */
+  private async inMainCopy<T>(id: string, c: CopyOf, use: (dir: string, watch: CommandWatch) => Promise<T | null>): Promise<T | null> {
+    await this.beforeShotsOf.get(id);
+    this.goOn(id);
+    const root = path.join(projectRoot(this.bp), c.repo.path);
+    const stop = this.stops.get(id)?.signal;
+    const within = (ms: number) => (stop ? AbortSignal.any([stop, AbortSignal.timeout(ms)]) : AbortSignal.timeout(ms));
+    const said = readTicket(this.bp, id)?.status;
+    const doing = (text: string) =>
+      this.update(id, (x) => {
+        x.status = text;
+        stepDoing(x, text);
+      });
+    let dir: string | null = null;
+    try {
+      const ready = within(BEFORE_SHOTS_MS);
+      dir = await this.makingCopy(id, (how) => addSnapshot(root, `${id.toLowerCase()}-before`, c.baseCommit!, { ...how, signal: ready }));
+      placeStoryFiles(this.bp, c.repo.path, dir);
+      const setup = c.repo.commands.setup?.trim();
+      if (setup) {
+        doing("Setting up a copy of main's code for the failed test");
+        const s = await runCommand(dir, setup, BEFORE_SHOTS_MS, { ...this.guardedWatch(id, dir), signal: ready });
+        if (!s.ok) {
+          this.log('warn', `Could not set up a copy of main's code for the failed tests (${setup}): ${tail(s.output, 10)}`, id);
+          return null;
+        }
+        // A setup can write the same files: the values kept for stories go back over them, as in the story's copy.
+        placeStoryFiles(this.bp, c.repo.path, dir);
+      }
+      this.goOn(id);
+      // No server left by another of squad-kit's copies may hold a port the test needs.
+      await this.clearBeforeApp(id);
+      doing("Running the failed test on main's code");
+      return await use(dir, { ...this.guardedWatch(id, dir), signal: within(ON_MAIN_MS) });
+    } catch (err) {
+      if (stop?.aborted) throw err;
+      this.log('warn', `Could not run the failed tests on main's code: ${(err as Error).message}`, id);
+      return null;
+    } finally {
+      if (dir) {
+        // Nothing the runs started outlives their copy.
+        await runsEnded([dir], 6000);
+        await this.clearCopies([dir], {}, id).catch(() => undefined);
+        await dropSnapshot(root, dir).catch(() => undefined);
+      }
+      if (said !== undefined) this.update(id, (x) => (x.status = said));
+    }
+  }
+
+  /**
    * The Tester takes screenshots for each "done when", before or after the change, with squad-kit's own tools (the
    * window): squad-kit starts the app first and the Tester takes, looks at and retakes the pictures through it.
    * Before-shots run `beside` the build, in their own copy of the code, with their own Stop and conversation, and leave
@@ -4300,21 +4677,25 @@ export class LiveSquad {
     const signal = beside?.signal ?? this.stops.get(id)?.signal;
     const start = rc.start?.trim() ?? '';
     const url = rc.url?.trim() ?? '';
-    // No old server of squad-kit's own copies may hold the app's port.
-    if (!beside) await this.clearBeforeApp(id);
-    if (!beside) this.update(id, (x) => (x.status = 'Starting the app'));
+    // The story's own copy: the app the review kept, or the last round's, while it answers and the code is the same
+    // (keptFor). It does not start again. A product, and the copy of the code as it was, start as before.
+    const shares = !beside && !product;
+    const kept = shares ? await this.keptFor(id, cwd) : null;
+    let tree = kept?.tree;
     let app: RunningApp;
-    try {
-      app = product ? await this.startProductFor(id) : await startApp(cwd, start, url, undefined, signal, this.guardFor(cwd, id));
-    } catch (err) {
-      if (signal?.aborted) throw err;
-      if (err instanceof ProductError) throw new StepError(err.message, err.detail ?? err.message);
-      throw new StepError(dockerBlockedWords((err as Error).message, this.guardFor(cwd, id)) ?? NO_APP, (err as Error).message);
+    if (kept) {
+      app = kept.app;
+      this.log('info', `squad-kit uses the app that already runs at ${app.url} for the Tester`, id);
+      this.update(id, (x) => addActivity(x, 'tester', 'The app squad-kit started earlier still runs, so the Tester uses it'));
+    } else {
+      // The code the app starts from, so the next round can tell whether it may use it too.
+      if (shares) tree = await treeOf(cwd);
+      app = await this.startForPictures(id, cwd, start, url, signal, product, Boolean(beside));
+      // The address goes to the log; the story gets one plain line.
+      this.log('info', `squad-kit started the app at ${app.url}${app.url !== url ? ` (${url} was used by another program)` : ''}`, id);
+      this.update(id, (x) => addActivity(x, 'tester', 'squad-kit started the app'));
     }
     const at = app.url;
-    // The address goes to the log; the story gets one plain line.
-    this.log('info', `squad-kit started the app at ${at}${at !== url ? ` (${url} was used by another program)` : ''}`, id);
-    this.update(id, (x) => addActivity(x, 'tester', 'squad-kit started the app'));
     const win = new AgentWindow({
       ...this.windowBase(id, 'tester', cwd, beside?.job ?? id),
       step: 'proof',
@@ -4325,6 +4706,8 @@ export class LiveSquad {
       app: { cwd, start, url, ...(this.guardFor(cwd, id) ? { guard: this.guardFor(cwd, id)! } : {}), ...(product ? this.productApp(id) : {}) },
       ...(beside ? {} : { checks: this.windowChecks(id, cwd) }),
       running: app,
+      // The next round of pictures, or a retake, uses it too: the proof's end stops it (proof).
+      ...(shares ? { keep: (a: RunningApp) => this.keepApp(id, cwd, a, tree) } : {}),
       prefix: `${id.toLowerCase()}-${when}`,
       ...(signal ? { signal } : {}),
     });
@@ -4332,8 +4715,42 @@ export class LiveSquad {
     try {
       return await this.shoot(id, t, when, meta, win, at, beside, again);
     } finally {
-      // The app squad-kit started stops with the window, and the window's key stops working.
+      // The app squad-kit started stops with the window, or goes on to the next round, and the window's key stops working.
       await closeWindow(win);
+    }
+  }
+
+  /**
+   * Starts the app for the Tester in its copy's turn (copy-turn.ts): the tests running there finish first, and the card
+   * says so. Then what squad-kit's copies left running stops, and when the app's framework names another dev server of
+   * this copy that squad-kit may stop, it stops and the app starts once more. An app that does not start is a plain stop.
+   */
+  private async startForPictures(id: string, cwd: string, start: string, url: string, signal: AbortSignal | undefined, product: boolean, beside: boolean): Promise<RunningApp> {
+    const onWait = (holder: TurnKind) => {
+      if (!beside) this.update(id, (x) => (x.status = holder === 'checks' ? "Waiting for the tests in this story's copy, then starting the app" : "Waiting for the app starting in this story's copy"));
+    };
+    try {
+      return await inTurn(
+        cwd,
+        'app',
+        async () => {
+          // No old server of squad-kit's own copies may hold the app's port.
+          if (!beside) await this.clearBeforeApp(id);
+          if (!beside) this.update(id, (x) => (x.status = 'Starting the app'));
+          if (product) return this.startProductFor(id);
+          return startPastOther(
+            () => startApp(cwd, start, url, undefined, signal, this.guardFor(cwd, id)),
+            async (pid) => Boolean(folderOf(cwd, projectCopies(this.bp))) && (await this.clearCopies([cwd], { only: [pid] }, id)).length > 0,
+            (text) => this.log('info', text, id),
+          );
+        },
+        { ...(signal ? { signal } : {}), onWait },
+      );
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      if (err instanceof TurnTimeout) throw new StepError(APP_WAITED, `The app ${err.message}.`);
+      if (err instanceof ProductError) throw new StepError(err.message, err.detail ?? err.message);
+      throw new StepError(dockerBlockedWords((err as Error).message, this.guardFor(cwd, id)) ?? NO_APP, (err as Error).message);
     }
   }
 

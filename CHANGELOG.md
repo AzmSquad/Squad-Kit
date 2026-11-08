@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The app starts once for the review and the proof.** The app squad-kit starts for the Reviewer keeps running into the proof,
+  so the Tester's screenshots and a retake of a screenshot use it instead of starting it again (30 to 60 seconds each on a big
+  app). It starts again only when it stopped answering or the story's code changed. It stops when the review sends the story
+  back to the Builder, when the story is stopped, and when the proof ends, as before. A product with several parts starts as
+  before. The Harness page shows how long a kept app waits.
+- **An old bug no longer slows a story down.** When a test fails in a part of the app the story did not touch, squad-kit runs
+  that test on its own on main's code, without the story's change. If it fails there too, it is not the story's: the story
+  goes on to review, the checks say so in plain words ("1 old test also fails on main"), the proof and the release show it,
+  and squad-kit makes one new story to fix that test. That story waits on the board until you press Start, so it costs
+  nothing until then. If the test passes on main, the story's change broke it, and the Builder fixes it as before. A story only ever goes past a test that main already fails, so main never gets worse.
+- **A failed test runs again on its own first.** When a test fails, squad-kit first runs only the failed tests, each on its own.
+  If one still fails, the checks fail at once, without minutes of running every test again. If they pass on their own, all
+  the tests run once more and that decides, as a test can fail only next to the others. When squad-kit cannot tell which
+  tests failed, all the tests run again, as before.
+- **The Builder fixes a failed test faster.** While fixing, the Builder runs only the failing test file, and a failure is not run
+  a second time. squad-kit still runs all the checks itself at the end.
+- **The checks no longer run twice on the same code.** When squad-kit ran all the checks for the Builder at the end of its work,
+  every one passed, and nothing changed after, the checks step uses that result instead of running them again: minutes saved on
+  a big suite of browser tests. The story says so in one line, and your team's gates still run. After any change to the code, a
+  check that failed, a run of only some of the checks, other commands, or a new round of fixes, the checks run as before.
+
+### Fixed
+
+- **"Your copy could not be set up" after every merge**, on a project whose setup needs your `.env` file, as Prisma does.
+  The setup squad-kit runs in your own folder after a merge now reads that folder's `.env` files, as it does when you run
+  it yourself. It still reads no other `.env` file, and no key or sign-in.
+- **The tests and the app no longer get in each other's way.** When the Builder ran the tests and asked for the app at the same
+  moment, some apps refused to start, and the story lost minutes. Now, in each story's copy, the tests and the app take turns:
+  the one that waits says so ("The tests are running in this copy. The app starts when they finish."), and the wait has a
+  limit, shown on the Harness page. Stories never wait for each other. What a finished test run left running in the copy stops
+  before the app starts, and when the app says another copy of it already runs in that folder, squad-kit stops that one if it
+  is its own leftover there, and tries once more. The other way round too: before the tests run in a story's copy, the app
+  squad-kit started there stops, so the tests can start their own. The agent is told, and starts it again when it needs it.
+  Nothing squad-kit did not start is stopped, and a product with several parts runs as before.
+
 ## [1.3.0] — 2026-11-08
 
 ### Added

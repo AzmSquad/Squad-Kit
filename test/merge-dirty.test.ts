@@ -166,6 +166,16 @@ describe('your own checkout after the merge', () => {
     expect(after.localSetup?.command).toBe('echo installed > setup.log');
   });
 
+  it("reads your checkout's .env there, as a database setup needs it", async () => {
+    fs.writeFileSync(path.join(project, '.env'), 'DATABASE_URL=file:./dev.db\n');
+    setup('cat .env > setup.log');
+    proofReady();
+    actions.approve(bp, 'AP-1');
+    await run('AP-1');
+    expect(readTicket(bp, 'AP-1')!.localSetup?.status).toBe('done');
+    expect(fs.readFileSync(path.join(project, 'setup.log'), 'utf8')).toBe('DATABASE_URL=file:./dev.db\n');
+  });
+
   it('says so when the setup fails, and can try again', async () => {
     setup('echo no network >&2; exit 3');
     proofReady();

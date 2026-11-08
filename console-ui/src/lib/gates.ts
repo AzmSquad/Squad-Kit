@@ -34,7 +34,25 @@ export function proofLead(g: Gates | undefined | null): string {
   const compare = 'Compare the screens before and after each "done when".';
   if (g?.checks === 'unchecked') return `Not checked: no tests ran, so look closely. ${compare}`;
   if (g && [g.checks, g.review, g.proof].some((s) => s === 'skipped')) return `You went past a gate, so look closely. ${compare}`;
+  if (g?.oldFailures?.length) return `Every gate is green for this story's change. ${oldShort(g.oldFailures.length)}, without it. ${compare}`;
   return `Every gate is green. ${compare}`;
+}
+
+/** "1 old test also fails on main": the short words for a pill. */
+export function oldShort(n: number): string {
+  return n === 1 ? '1 old test also fails on main' : `${n} old tests also fail on main`;
+}
+
+/**
+ * The old tests the story went past, in plain words: they fail on main too, without this story's change, and a story of
+ * their own fixes them. Null when there are none.
+ */
+export function oldFailuresWhy(g: Gates | undefined | null): string | null {
+  const old = g?.oldFailures ?? [];
+  if (!old.length) return null;
+  const one = old.length === 1;
+  const stories = [...new Set(old.map((o) => o.story).filter(Boolean))];
+  return `${one ? 'This test fails' : 'These tests fail'} on main too, without this story's change, so ${one ? 'it is' : 'they are'} not this story's: ${old.map((o) => o.title).join('; ')}.${stories.length ? ` ${stories.join(' and ')} ${stories.length === 1 ? 'fixes' : 'fix'} ${one ? 'it' : 'them'}.` : ''}`;
 }
 
 /** The proof gate in words: made, not working or not shown yet, or gone past, with screenshots or without. */

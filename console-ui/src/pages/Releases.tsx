@@ -12,7 +12,7 @@ import { Cmd, CouldNotLoad, Modal, NotesView, Written, dateShort } from '../comp
 import { usePrefs } from '../lib/prefs';
 import { shellQuote } from '../lib/text';
 import { GatePill } from '../components/Gates';
-import { noGateRan } from '../lib/gates';
+import { noGateRan, oldFailuresWhy, oldShort } from '../lib/gates';
 import { langProps, typedDir } from '../lib/lang';
 
 export function ReleasesPage() {
@@ -154,6 +154,12 @@ function ReleaseDetail({ r, onReleased, live }: { r: ReleaseWithItems; onRelease
                   <Check size={13} strokeWidth={2.5} /> Checks, review, proof
                 </span>
               )
+            )}
+            {/* Old tests that fail on main too: the story went past them, and it says so here as well. */}
+            {(it.gates?.oldFailures?.length ?? 0) > 0 && (
+              <span className="pill unchecked" title={oldFailuresWhy(it.gates) ?? undefined}>
+                {oldShort(it.gates!.oldFailures!.length)}
+              </span>
             )}
             {draft && r.items.length > 1 && (
               <button

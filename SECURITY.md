@@ -64,7 +64,9 @@ Credit will be given in the release notes unless you prefer to remain anonymous.
     GitHub and cloud sign-ins, the keys into a runtime's virtual machine, an `.npmrc` with a token), browser profiles and
     squad-kit's own folder. A place it does not know about is not hidden.
   - Reading the `.env` files in your project folder. On a Mac, all of them. On Linux, the ones it finds 3 folders down when
-    a command starts, outside folders such as `node_modules`.
+    a command starts, outside folders such as `node_modules`. One exception: the setup squad-kit runs in your own
+    checkout after a merge reads that checkout's `.env` files, as it does when you run it yourself (a database setup
+    needs them). It still reads no other `.env` file, key or sign-in.
   - Writing outside its copy, the proof folder, the temp folder and the package caches. `~/.cache` and
     `~/Library/Caches` stay read only: your own tools run programs from there. The copy cannot be moved, and git's own
     folder cannot be changed or moved, so nothing written there can make squad-kit's own git start a program.

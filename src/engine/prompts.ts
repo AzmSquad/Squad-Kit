@@ -948,7 +948,7 @@ export function answerPrompt(q: { text: string; answer?: string }, role: 'archit
 /** Every fix of the Builder's: what is broken in the product, nothing for a picture's sake. */
 const FIX_ONLY_BROKEN = 'Fix only what is broken in the product. Never change the product just to make a picture clearer.';
 
-export function fixChecksPrompt(failures: { name: string; command: string; output: string }[], known: { name: string; command: string; output?: string }[] = []): string {
+export function fixChecksPrompt(failures: { name: string; command: string; output: string }[], known: { name: string; command: string; output?: string }[] = [], onMain: { passes?: string[]; fails?: string[] } = {}): string {
   const text = failures.map((f) => `"${f.name}" (${f.command}) failed. ${asData('Its output', f.output)}`).join('\n\n');
   const before = known.length
     ? `\n\nThese checks already failed before this story started: ${known.map((k) => `${k.name} (${k.command})`).join(', ')}. Fix what this story broke. Do not change other screens or rules to make an old failure pass, unless the plan asks.${known
@@ -956,11 +956,18 @@ export function fixChecksPrompt(failures: { name: string; command: string; outpu
         .map((k) => `\n${asData(`What "${k.name}" printed then`, k.output!)}`)
         .join('')}`
     : '';
+  // What squad-kit found when it ran the failed tests on their own on main's code (engine/old-tests.ts).
+  const passes = onMain.passes?.length
+    ? `\n\nsquad-kit ran the failed tests on their own on main's code, without this story's change. These pass there every time, so this story's change probably broke them: fix the code, not the tests. ${asData('Their names', onMain.passes.join('\n'))}`
+    : '';
+  const fails = onMain.fails?.length
+    ? `\n\nThese failed tests fail on main's code too, without this story's change. They are not this story's, and a story of their own fixes them, so leave them as they are. ${asData('Their names', onMain.fails.join('\n'))}`
+    : '';
   return `squad-kit ran the project checks and some failed.
 
-${text}${before}
+${text}${before}${passes}${fails}
 
-Print ">> fix" first. Fix the cause in the code. Do not delete or weaken tests to make them pass. ${FIX_ONLY_BROKEN} Run the checks again before you finish.`;
+Print ">> fix" first. Fix the cause in the code. Do not delete or weaken tests to make them pass. ${FIX_ONLY_BROKEN} While you fix a failing test, run only that test: run_checks with "only" and its file. squad-kit runs all the checks again when you finish.`;
 }
 
 /** "Send it back to the Builder" after the tests were made weaker: it puts them back, then the checks run again. */
@@ -996,9 +1003,12 @@ function checksRan(t: Ticket, meta: BoardMeta, ctx?: PromptContext): string {
     ? `\nEach check squad-kit ran:\n${t.gates.ran.map((r) => `- ${r.name === 'start' ? 'the app starts' : r.name} (${r.command}): ${r.ok ? 'passed' : 'failed'}${r.tests !== undefined ? `, ${r.tests} tests` : ''}${r.failedOnce ? '; it failed once first, and passed when run again' : ''}`).join('\n')}`
     : '';
   const weakened = (t.overrides ?? []).filter((o) => o.gate === 'checks' && o.weakened?.length);
-  const past = weakened.length
-    ? `\nThe tests were made weaker in this change, and the person chose to go on anyway (${weakened.map((o) => o.reason).join('; ')}): ${weakened.flatMap((o) => o.weakened!).join(' ')} Look closely at whether the tests still check every "done when".`
+  const old = t.gates?.oldFailures?.length
+    ? `\nSome tests failed here that fail on main's code too, without this change, so they are not this story's: a story of their own fixes them. Do not ask for them here. ${asData('Their names', t.gates.oldFailures.map((o) => o.title).join('\n'))}`
     : '';
+  const past = `${weakened.length
+    ? `\nThe tests were made weaker in this change, and the person chose to go on anyway (${weakened.map((o) => o.reason).join('; ')}): ${weakened.flatMap((o) => o.weakened!).join(' ')} Look closely at whether the tests still check every "done when".`
+    : ''}${old}`;
   if (t.gates?.checks === 'unchecked') {
     return `squad-kit ran the project checks on this copy, but no tests ran${result ? ` (${result})` : ''}, so nothing checked that the work does what it should. Do not run them yourself. Read the code with extra care against every "done when", and say in a comment if tests are missing.${each}${past}`;
   }

@@ -6,6 +6,7 @@ import path from 'node:path';
 import type { RunOptions, RunResult } from '../src/modules/claude/direct.js';
 import type { Ticket } from '../src/board/types.js';
 import { callTool, textOf } from './support/window.js';
+import { DRAG_TITLE, playwrightScript, quickNpx, runsIn } from './support/fake-playwright.js';
 
 /**
  * One story across the parts of a product: on a workspace, a story has a folder of its own with a copy of each repo it
@@ -386,6 +387,37 @@ describe('the checks', () => {
     await s.checks('AP-1');
     expect(get().gates?.checks).toBe('pass');
     expect(get().gates?.checksText).toBe('API ✓');
+  });
+
+  it('an old test that fails on main too, in one part: the story goes on, and the new story names the part', async () => {
+    const log = path.join(root, 'runs.log');
+    const web = path.join(root, 'web-ui');
+    for (const [f, text] of Object.entries({ 'src/shelves.txt': 'broken\n', 'tests/e2e/shelves.spec.ts': '// the drag test\n', 'tools/playwright': playwrightScript(log) })) {
+      fs.mkdirSync(path.dirname(path.join(web, f)), { recursive: true });
+      fs.writeFileSync(path.join(web, f), text, { mode: 0o755 });
+    }
+    sh('git add -A && git -c user.name=t -c user.email=t@t commit -qm shelves', web);
+    const setup = 'mkdir -p node_modules/.bin && cp tools/playwright node_modules/.bin/playwright';
+    const meta = readMeta(bp);
+    writeMeta(bp, { ...meta, repos: meta.repos!.map((r) => (r.path === 'web-ui' ? { ...r, commands: { test: 'npx playwright test', setup } } : r)) });
+    const putBack = quickNpx(path.join(root, 'npx'));
+    try {
+      story();
+      const s = squad();
+      const t = await s.workspace('AP-1');
+      change(inPart(t, 'api-server'));
+      change(inPart(t, 'web-ui'));
+      await s.checks('AP-1');
+      expect(runsIn(log).filter((r) => r.startsWith('ap-1-before '))).toHaveLength(1);
+      expect(get().gates).toMatchObject({ checks: 'pass', checksText: 'API ✓, Web app ✓; 1 old test also fails on main', oldFailures: [{ title: DRAG_TITLE, story: 'AP-2' }] });
+      expect(get().stage).toBe('review');
+      const bug = get('AP-2');
+      expect(bug).toMatchObject({ kind: 'bug', repo: 'web-ui' });
+      expect(bug.ask).toContain('Part: Web app');
+      expect(fs.existsSync(path.join(worktreeRoot(web), 'ap-1-before'))).toBe(false);
+    } finally {
+      putBack();
+    }
   });
 
   it('a failure says which part, and the Builder is told', async () => {

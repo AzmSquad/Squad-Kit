@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import type { ProjectCommands } from '../board/types.js';
+import { failedTests, testAlone } from './failed-tests.js';
 import { KILL_AFTER_MS, endGroup, whenExited } from './process-group.js';
 import { appPortVariables } from './port-vars.js';
 import { guardBlockedPath, spawnProject, type GuardSpec } from './project-guard.js';
@@ -17,6 +18,8 @@ export interface CheckResult {
   seconds: number;
   /** It failed, then passed when run once more: what it printed the first time, for engineers. */
   failedFirst?: string;
+  /** squad-kit ended it: it printed nothing for too long, ran past its time, or you pressed Stop. */
+  ended?: boolean;
 }
 
 export interface CommandWatch {
@@ -106,15 +109,46 @@ export function runCommand(cwd: string, command: string, timeoutMs = CHECK_MS, w
 /**
  * A check can fail once for no reason in the code, such as a flaky test, so a failed one runs once more before anyone
  * is sent to fix it. Not after a Stop, a command squad-kit had to end (a second wait says nothing new), or a blocked
- * file: those fail the same way again.
+ * file: those fail the same way again. `alone` may give a quicker look first, at just what failed: still failing there,
+ * the check fails at once, with what the whole first run printed. Passing there decides nothing by itself, as a test can
+ * fail only beside the others (data they share, the order they run in): the whole command runs once more, and decides.
  */
-export async function withOneMoreRun<R extends { ok: boolean; output: string; ended?: boolean }>(run: () => Promise<R>, watch: CommandWatch, onAgain: () => void): Promise<R & { failedFirst?: string }> {
+export async function withOneMoreRun<R extends { ok: boolean; output: string; ended?: boolean }>(run: () => Promise<R>, watch: CommandWatch, onAgain: () => void, alone?: (first: R) => (() => Promise<{ ok: boolean }>) | null): Promise<R & { failedFirst?: string }> {
   const first = await run();
   if (first.ok || first.ended || watch.signal?.aborted) return first;
   if (watch.guard && guardBlockedPath(first.output, watch.guard)) return first;
   onAgain();
+  const quick = alone?.(first);
+  if (quick && !(await quick()).ok) return first;
+  if (watch.signal?.aborted) return first;
   const again = await run();
   return again.ok ? { ...again, failedFirst: tail(first.output, 30) } : again;
+}
+
+/** At most this many failed tests run again on their own first; with more, the whole test command runs again at once. */
+export const MAX_ALONE = 10;
+
+/**
+ * The quick look before a failed test command runs again: only the tests that failed, each on its own with the
+ * project's own test tool (engine/failed-tests.ts). A browser suite of minutes becomes a run of seconds. A test that
+ * still fails on its own fails the check at once, with no second run of the whole suite. Only when squad-kit can name
+ * every failed test, run each one alone, and the failure skipped nothing (in "npm test && npm run test:e2e" a failure in
+ * the first part means the second never ran). A pass must say a test passed: a filter that found nothing proves nothing.
+ */
+export function failedAlone(cwd: string, command: string, watch: CommandWatch): (first: { output: string }) => (() => Promise<{ ok: boolean }>) | null {
+  return (first) => {
+    const failed = failedTests(first.output);
+    if (!failed.length || failed.length > MAX_ALONE) return null;
+    const each = failed.map((t) => testAlone(cwd, command, t));
+    if (each.some((c) => !c)) return null;
+    return async () => {
+      for (const one of each as string[]) {
+        const r = await runCommand(cwd, one, undefined, { silentMs: CHECK_SILENT_MS, ...watch });
+        if (!r.ok || !testCount(r.output)) return { ok: false };
+      }
+      return { ok: true };
+    };
+  };
 }
 
 /** The plain line for a check that failed once and passed when run again. */
@@ -145,6 +179,17 @@ export function ownCheck(cwd: string, commands: ProjectCommands): string | undef
   return [said, ...scriptsOf(said).map((s) => scripts[s] ?? '')].some((c) => c.includes(OWN_CHECK)) ? undefined : `./${OWN_CHECK}`;
 }
 
+/** The checks runChecks runs before any app start, in order: the saved test, lint and build, then the project's scripts/check. */
+export function checksToRun(cwd: string, commands: ProjectCommands): { name: string; command: string }[] {
+  const steps = [...(['test', 'lint', 'build'] as const).map((name) => ({ name, command: commands[name]?.trim() })), { name: 'check', command: ownCheck(cwd, commands) }];
+  return steps.filter((s): s is { name: string; command: string } => Boolean(s.command));
+}
+
+/** After these results, runChecks also checks that the app starts: the project says how it starts, and no tests ran. */
+export function startsToo(commands: ProjectCommands, results: { name: string; output: string }[]): boolean {
+  return Boolean(commands.start?.trim() && commands.url?.trim()) && !results.some((r) => r.name === 'test' && testCount(r.output) !== 0);
+}
+
 /**
  * The project's checks, one after another. When no tests ran (none set up, or none found) and the project says how it
  * starts, "start" checks that the app starts and answers at its address, then stops it: then it is the one check of
@@ -153,18 +198,16 @@ export function ownCheck(cwd: string, commands: ProjectCommands): string | undef
  */
 export async function runChecks(cwd: string, commands: ProjectCommands, onStart?: (name: string, command?: string) => void, watch: CommandWatch = {}, appWaitMs?: number): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
-  const steps = [...(['test', 'lint', 'build'] as const).map((name) => [name, commands[name]?.trim()] as const), ['check', ownCheck(cwd, commands)] as const];
-  for (const [name, command] of steps) {
-    if (!command) continue;
+  for (const { name, command } of checksToRun(cwd, commands)) {
     if (watch.signal?.aborted) break;
     onStart?.(name, command);
-    const r = await withOneMoreRun(() => runCommand(cwd, command, undefined, { silentMs: CHECK_SILENT_MS, ...watch }), watch, () => onStart?.(name));
+    // A failed test command runs its failed tests on their own first, when it can: still failing, nothing more runs.
+    const r = await withOneMoreRun(() => runCommand(cwd, command, undefined, { silentMs: CHECK_SILENT_MS, ...watch }), watch, () => onStart?.(name), name === 'test' ? failedAlone(cwd, command, watch) : undefined);
     results.push({ name, command, ...r });
   }
   const start = commands.start?.trim();
   const url = commands.url?.trim();
-  const tested = results.some((r) => r.name === 'test' && testCount(r.output) !== 0);
-  if (start && url && !tested && !watch.signal?.aborted) {
+  if (start && url && startsToo(commands, results) && !watch.signal?.aborted) {
     onStart?.('start');
     const once = async () => {
       const began = Date.now();
