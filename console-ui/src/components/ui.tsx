@@ -138,6 +138,8 @@ export function Tracker({ ticket }: { ticket: Ticket }) {
   const at = stage === 'done' ? TRACK.length : TRACK.findIndex((s) => s.stage === stage);
   const mode = ticket.waiting ? 'you' : 'work';
   const notes = new Map((ticket.now?.stages ?? []).map((x) => [x.stage, x.note]));
+  // A finished stage that waited long says so on a small second line: its time above is the squad's own work.
+  const waits = new Map((ticket.now?.stages ?? []).filter((x) => x.wait).map((x) => [x.stage, x.wait!]));
   return (
     <div className="track" aria-label="Where this ticket is">
       {TRACK.map((s, i) => {
@@ -151,6 +153,7 @@ export function Tracker({ ticket }: { ticket: Ticket }) {
               <span className="tag">{mode === 'you' ? 'Your turn' : ticket.stage === 'release' ? 'Ready' : ticket.dependency?.way === 'wait' && !ticket.dependency.started && !ticket.squad ? 'Waiting' : 'Working'}</span>
             )}
             {notes.size > 0 && <span className="tnote">{i === at && note === 'your turn' ? '' : (note ?? '')}</span>}
+            {waits.has(s.stage) && <span className="tnote twait">{waits.get(s.stage)}</span>}
           </div>
         );
       })}

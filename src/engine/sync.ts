@@ -1,10 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { addActivity, codeChanged, listTickets, readMeta, readTicket, requireTicket, updateTicket, type BoardPaths } from '../board/store.js';
-import type { LocalSetup, Ticket, TrackerEvent } from '../board/types.js';
+import { NO_NEW_TESTS_LABEL, type LocalSetup, type Ticket, type TrackerEvent } from '../board/types.js';
 import { StepError } from '../board/problem.js';
 import { repoHostFor, trackerFor } from '../modules/registry.js';
 import type { Tracker } from '../modules/tracker/types.js';
+import type { RepoHost } from '../modules/code-host/types.js';
 import { MergeClash, currentBranch, git, mergeIntoBase, remotes, netGitLater, baseTurn, fetchedTip, moveBase } from './git.js';
 import { projectRoot } from './live.js';
 import { filesMoved, repoFor } from './repos.js';
@@ -280,20 +281,25 @@ export async function publishTicket(bp: BoardPaths, ticketId: string): Promise<{
   // Each "done when"'s main picture first, then its others while there is room.
   const rows = t.proof ?? [];
   const pictures = [...rows.map((p) => ({ label: p.criterion, after: p.after })), ...rows.flatMap((p) => (p.more ?? []).map((m) => ({ label: p.criterion, after: m.after })))].slice(0, 6);
+  // One picture often proves two "done when"s: it goes up once, and its link shows in each of them. The host refuses
+  // the same name twice (Azure does), which would leave the second row with no picture.
+  const sent = new Map<string, string | null>();
   for (const shot of host.abilities.attachImages ? pictures : []) {
     const file = path.join(bp.proofDir, shot.after);
     if (!shot.after || !fs.existsSync(file)) continue;
-    try {
-      shots.push({ label: shot.label, url: await host.attachImage(pr.id, file) });
-    } catch {
-      // A missing screenshot should not block the PR.
-    }
+    if (!sent.has(file)) sent.set(file, await host.attachImage(pr.id, file).catch(() => null));
+    const url = sent.get(file);
+    // A missing screenshot should not block the PR.
+    if (url) shots.push({ label: shot.label, url });
   }
   if (shots.length) await host.updateDescription(pr.id, prDescription(t, item, shots));
 
   const opened = pr;
   updateTicket(bp, ticketId, (x) => {
     x.pr = { id: opened.id, url: opened.url, repo: host.repo, host: host.host };
+    // The clash it had is settled, or a new pull request took the place of a closed one.
+    delete x.clashedPr;
+    delete x.prClosed;
     x.status = `Merging pull request ${opened.id}`;
     addActivity(x, 'release', `Opened pull request ${opened.id} on ${host.label}`);
   });
@@ -357,9 +363,10 @@ export async function publishTicket(bp: BoardPaths, ticketId: string): Promise<{
  * asked about through the code host module: once the host has merged it (someone approved and completed it there), the
  * ticket is merged here too and the person's checkout follows. With no pull request, the merge into the base is tried
  * again, now that the person's own copy may be free. 'clash': newer work in the base clashes with it now; the caller
- * gives the clash card. Nothing changes while it still waits.
+ * gives the clash card. 'closed': the host closed the pull request without merging it. Nothing changes while it still
+ * waits.
  */
-export async function recheckMerge(bp: BoardPaths, id: string): Promise<'merged' | 'clash' | 'waiting'> {
+export async function recheckMerge(bp: BoardPaths, id: string): Promise<'merged' | 'clash' | 'waiting' | 'closed'> {
   const t = readTicket(bp, id);
   const wait = mergeWait(t);
   if (!t || !wait) return 'waiting';
@@ -371,22 +378,14 @@ export async function recheckMerge(bp: BoardPaths, id: string): Promise<'merged'
     const host = target && repoHostFor(bp, target.url);
     if (!target || !host || !t.pr) return 'waiting';
     const state = await host.mergeState(t.pr.id).catch(() => null);
-    if (state === 'clash') return 'clash';
+    if (state === 'clash' || state === 'closed') return state;
     if (state !== 'merged') {
       // The host says it can merge, so a network blip cut off the merge itself: it is asked again. One that waits for an
       // approver is left to wait.
       const merged = state === 'mergeable' && (await host.merge(t.pr.id, `Merge ${t.title} (${t.id})`).then(() => true, () => false));
       if (!merged) return 'waiting';
     }
-    try {
-      const env = host.gitEnv();
-      const head = await fetchedTip(target.dir, target.remote, target.base, { env });
-      const local = await baseTurn(target.dir, () => moveBase(target.dir, target.base, head, squadInside(bp, target.dir)));
-      if (local.note) saidToEngineers(bp, id, local.note);
-      moved = local.moved;
-    } catch {
-      // The person's checkout catches up with the next fetch; the change is in the base on the host already.
-    }
+    moved = await followBase(bp, id, target, host);
     line = `Pull request ${t.pr.id} was approved and merged on ${host.label}`;
   } else {
     const dirs = copyViews(readMeta(bp), t).map((view) => path.join(projectRoot(bp), repoFor(readMeta(bp), view).path));
@@ -413,6 +412,39 @@ export async function recheckMerge(bp: BoardPaths, id: string): Promise<'merged'
   });
   mapAfterMerge(bp);
   return 'merged';
+}
+
+/**
+ * The code host merged a pull request, so its base moved there: the person's own checkout of the base follows when it
+ * can. True when it moved.
+ */
+export async function followBase(bp: BoardPaths, id: string, target: { dir: string; base: string; remote: string }, host: RepoHost): Promise<boolean> {
+  try {
+    const head = await fetchedTip(target.dir, target.remote, target.base, { env: host.gitEnv() });
+    const local = await baseTurn(target.dir, () => moveBase(target.dir, target.base, head, squadInside(bp, target.dir)));
+    if (local.note) saidToEngineers(bp, id, local.note);
+    return local.moved;
+  } catch {
+    // The person's checkout catches up with the next fetch; the change is in the base on the host already.
+    return false;
+  }
+}
+
+/**
+ * A story merged on the code host after its pull request clashed: its tracker item, which the clash kept where it was,
+ * moves to resolved now, with where the change went. A tracker problem is said on the ticket and stops nothing.
+ */
+export async function trackerMerged(bp: BoardPaths, ticketId: string, pr: { id: number; url: string }, base: string, tracker: Tracker | null = trackerFor(bp)): Promise<void> {
+  const t = readTicket(bp, ticketId);
+  const item = t && tracker ? itemId(t, tracker) : null;
+  if (!tracker || !item || readMeta(bp).engine !== 'live') return;
+  try {
+    const state = await tracker.moveTo(item, 'resolved');
+    await tracker.comment(item, `Merged into **${base}** by pull request [${pr.id}](${pr.url}), with the proof. It goes out in the next release.`);
+    if (state) note(bp, ticketId, `Moved ${tracker.refOf(item)} to ${state} on ${tracker.label}`);
+  } catch (err) {
+    note(bp, ticketId, `Could not update ${tracker.refOf(item)} on ${tracker.label}: ${(err as Error).message}`);
+  }
 }
 
 /**
@@ -476,6 +508,8 @@ export function prDescription(t: Ticket, item: string | null, shots: { label: st
     for (const o of g.oldFailures ?? []) lines.push(`  - Fails on main too, without this change: ${o.title} (${o.file})${o.story ? `; ${o.story} fixes it` : ''}`);
     lines.push(`- Code review: ${g.review === 'pass' ? 'approved' : g.review === 'skipped' ? 'notes still open, continued anyway' : g.review}${t.reviewRound ? ` after ${t.reviewRound} round${t.reviewRound > 1 ? 's' : ''}` : ''}`);
     lines.push(`- Proof: ${g.proof === 'pass' ? `checked by ${t.createdBy}` : g.proof === 'skipped' ? 'no screenshots, continued anyway' : g.proof}`);
+    // The person chose it on the new story form: the project's own checks ran, and the story added no tests.
+    if (t.noNewTests) lines.push(`- ${NO_NEW_TESTS_LABEL}: the project's own checks ran, and this story added no tests`);
     lines.push('');
   }
   if (t.overrides?.length) {

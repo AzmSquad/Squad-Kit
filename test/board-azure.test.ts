@@ -8,6 +8,7 @@ import * as actions from '../src/board/actions.js';
 import { addWorktree } from './support/copy.js';
 import { trackerFor } from '../src/modules/registry.js';
 import { flushTracker, publishTicket, syncWiki } from '../src/engine/sync.js';
+import { checkMerge, lookOutside } from '../src/engine/merged-outside.js';
 import { AzureError } from '../src/modules/azure/client.js';
 import { LiveSquad } from '../src/engine/live.js';
 import { listReleases } from '../src/board/store.js';
@@ -28,6 +29,8 @@ const sh = (cmd: string, cwd: string) => execSync(cmd, { cwd, encoding: 'utf8', 
 function fakeAzure() {
   const states = new Map<number, string>([[35, 'New']]);
   let prStatus = 'active';
+  let prOpened = false;
+  const attached: string[] = [];
   const reply = (data: unknown) => new Response(JSON.stringify(data), { status: 200 });
   return async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? 'GET';
@@ -60,9 +63,19 @@ function fakeAzure() {
       return reply({ id: 35 });
     }
     if (method === 'POST' && /workItems\/35\/comments/.test(url)) return reply({ id: 1 });
-    if (method === 'GET' && /pullrequests\?searchCriteria/.test(url)) return reply({ value: [] });
-    if (method === 'POST' && /repositories\/Mawid\/pullrequests$|repositories\/Mawid\/pullrequests\?/.test(url)) return reply({ pullRequestId: 7, status: 'active' });
-    if (method === 'POST' && /pullRequests\/7\/attachments/.test(url)) return reply({ url: 'https://dev.azure.com/att/after-1.png' });
+    // Only the search in any state finds a pull request that is merged or closed.
+    if (method === 'GET' && /pullrequests\?searchCriteria/.test(url)) return reply({ value: /searchCriteria\.status=all/.test(url) && prOpened ? [{ pullRequestId: 7, status: prStatus }] : [] });
+    if (method === 'POST' && /repositories\/Mawid\/pullrequests$|repositories\/Mawid\/pullrequests\?/.test(url)) {
+      prOpened = true;
+      return reply({ pullRequestId: 7, status: 'active' });
+    }
+    const att = /pullRequests\/7\/attachments\/([^?]+)/.exec(url);
+    if (method === 'POST' && att) {
+      // Azure keeps one attachment per name on a pull request, and refuses the same name a second time.
+      if (attached.includes(att[1]!)) return new Response(JSON.stringify({ message: `The attachment with file name '${att[1]}' already exists.` }), { status: 400 });
+      attached.push(att[1]!);
+      return reply({ url: `https://dev.azure.com/att/${att[1]}` });
+    }
     if (method === 'PATCH' && /pullrequests\/7/.test(url)) {
       if ((body as { status?: string }).status === 'completed' && prConflicts) return reply({ pullRequestId: 7, status: 'active', mergeStatus: 'conflicts' });
       if ((body as { status?: string }).status === 'completed') {
@@ -176,7 +189,7 @@ describe('Azure Boards and Repos', () => {
     const created = calls.find((c) => c.method === 'POST' && /pullrequests$|pullrequests\?/.test(c.url))!.body as Record<string, unknown>;
     expect(created).toMatchObject({ sourceRefName: 'refs/heads/squad/ab-35', targetRefName: 'refs/heads/main', workItemRefs: [{ id: '35' }] });
     const described = calls.filter((c) => c.method === 'PATCH' && /pullrequests\/7/.test(c.url) && (c.body as { description?: string }).description).at(-1)!.body as { description: string };
-    expect(described.description).toContain('![An account is made](https://dev.azure.com/att/after-1.png)');
+    expect(described.description).toContain('![An account is made](https://dev.azure.com/att/AP-1-after-1.png)');
     expect(described.description).not.toMatch(/claude|\bai\b/i);
     expect(statesSet()).toEqual(['Active', 'Resolved']);
     // Merge on accept: the PR is merged right away, and the local main has it too, so the next ticket builds on it.
@@ -414,6 +427,48 @@ describe('a pull request that clashes with newer changes in main', () => {
     expect(statesSet()).toEqual(['Active']);
   }, 30_000);
 
+  /** The person settles the clash in Azure and completes the pull request there, outside squad-kit. */
+  const mergedInAzure = async () => {
+    prConflicts = false;
+    await fetch('https://dev.azure.com/momenysr/Mawid/_apis/git/repositories/Mawid/pullrequests/7', { method: 'PATCH', body: JSON.stringify({ status: 'completed' }) });
+  };
+
+  it('notices when the person settles the clash in Azure and merges it there, with Check again', async () => {
+    const id = await accepted();
+    prConflicts = true;
+    await (new LiveSquad(bp) as unknown as { step(id: string, phase: string): Promise<void> }).step(id, 'publish');
+    expect(readTicket(bp, id)!.status).toBe('Clashes with main');
+    expect(readTicket(bp, id)!.clashedPr).toMatchObject({ id: 7, host: 'azure' });
+    await mergedInAzure();
+    const r = await checkMerge(bp, id);
+    expect(r.line).toBe('Pull request 7 was merged on Azure Repos. squad-kit saw it and marked AB-35 as merged.');
+    const t = readTicket(bp, id)!;
+    expect(t).toMatchObject({ stage: 'release', release: 'v0.1.0', waiting: null, status: 'Merged into main · goes out in v0.1.0' });
+    expect(t.mergedAt).toBeTruthy();
+    expect(t.pr).toMatchObject({ id: 7 });
+    expect(t.activity.map((a) => a.text)).toContain('Pull request 7 was merged on Azure Repos. squad-kit saw it and marked the story as merged');
+    // The person's own main follows, the work item moves on, and the release takes it as code already in.
+    expect(sh('git rev-parse main', project)).toBe(sh('git rev-parse main', remote));
+    expect(statesSet()).toEqual(['Active', 'Resolved']);
+    expect(listReleases(bp).find((x) => x.version === 'v0.1.0')?.tickets).toEqual([id]);
+    const before = completions();
+    const release = await actions.releaseVersion(bp);
+    expect(release.log?.[0]?.text).toBe('Already in the code: AB-35 Owner signs up for a Mawid account');
+    expect(completions()).toBe(before);
+  }, 30_000);
+
+  it('finds the pull request of a clash card from before it was kept, by itself', async () => {
+    const id = await accepted();
+    prConflicts = true;
+    await (new LiveSquad(bp) as unknown as { step(id: string, phase: string): Promise<void> }).step(id, 'publish');
+    // A board from 1.3.2 kept no pull request on the clash card.
+    updateTicket(bp, id, (x) => delete x.clashedPr);
+    await mergedInAzure();
+    expect((await lookOutside(bp)).merged).toEqual([id]);
+    expect(calls.some((c) => /searchCriteria\.status=all/.test(c.url))).toBe(true);
+    expect(readTicket(bp, id)!.mergedAt).toBeTruthy();
+  }, 30_000);
+
   it('stops the release before anything changes, and gives the ticket a way out', async () => {
     const id = await accepted();
     // Like MA-5: accepted, its pull request open in Azure, then main moved on and it clashes.
@@ -429,5 +484,38 @@ describe('a pull request that clashes with newer changes in main', () => {
     expect(sh('git tag', project)).toBe('');
     expect(readTicket(bp, id)!.stuck?.gate).toBe('merge');
     expect(listReleases(bp).find((r) => r.version === 'v0.1.0')).toMatchObject({ status: 'draft', tickets: [] });
+  }, 30_000);
+});
+
+describe('the proof pictures in the pull request', () => {
+  it('uploads each picture once, and shows it in every "done when" it proves', async () => {
+    const t = await actions.startFromTracker(bp, trackerFor(bp)!, '35');
+    await flushTracker(bp, t.id);
+    const wt = addWorktree(project, t.id, 'main');
+    fs.writeFileSync(path.join(wt.dir, 'signup.ts'), 'export const signup = true;\n');
+    fs.mkdirSync(bp.proofDir, { recursive: true });
+    for (const f of ['ab-35-after-1.png', 'ab-35-after-2.png']) fs.writeFileSync(path.join(bp.proofDir, f), 'png');
+    const row = (criterion: string, after: string) => ({ criterion, before: '', after, beforeLabel: '', afterLabel: '' });
+    updateTicket(bp, t.id, (x) => {
+      x.worktree = wt.dir;
+      x.branch = wt.branch;
+      x.baseCommit = wt.baseCommit;
+      x.stage = 'review';
+      x.gates = { checks: 'pass', review: 'pass', proof: 'pass' };
+      // One picture proves the first two, and is one of the third's pictures too.
+      x.proof = [row('An account is made', 'ab-35-after-1.png'), row('The owner sees a welcome', 'ab-35-after-1.png'), { ...row('The owner can sign in', 'ab-35-after-2.png'), more: [{ after: 'ab-35-after-1.png' }] }];
+      x.waiting = { kind: 'proof', summary: 'The proof is ready for you to check' };
+      x.squad = null;
+      x.trackerQueue = undefined;
+    });
+    actions.approve(bp, t.id);
+    await publishTicket(bp, t.id);
+    const uploads = calls.filter((c) => c.method === 'POST' && /attachments/.test(c.url)).map((c) => /attachments\/([^?]+)/.exec(c.url)![1]);
+    expect(uploads).toEqual(['ab-35-after-1.png', 'ab-35-after-2.png']);
+    const described = calls.filter((c) => c.method === 'PATCH' && /pullrequests\/7/.test(c.url) && (c.body as { description?: string }).description).at(-1)!.body as { description: string };
+    expect(described.description).toContain('![An account is made](https://dev.azure.com/att/ab-35-after-1.png)');
+    expect(described.description).toContain('![The owner sees a welcome](https://dev.azure.com/att/ab-35-after-1.png)');
+    expect(described.description).toContain('![The owner can sign in](https://dev.azure.com/att/ab-35-after-2.png)');
+    expect(described.description.match(/att\/ab-35-after-1\.png/g)).toHaveLength(3);
   }, 30_000);
 });

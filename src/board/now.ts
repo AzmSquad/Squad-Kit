@@ -1,6 +1,6 @@
 import { changesScreens } from './outside-step.js';
-import type { AgentName, QuietPort, Stage, StepClock, Ticket, TimedStep, WaitingKind } from './types.js';
-import { WHO, stepSeconds } from './clock.js';
+import type { AgentName, QuietPort, Stage, StepClock, StepRun, Ticket, TimedStep, WaitingKind } from './types.js';
+import { HISTORY, WHO, runSeconds, stepSeconds } from './clock.js';
 import { durationWords, middle, minutesWords, rangeWords, usualOf, usualWords, type Usual, type UsualBook } from './usual.js';
 
 /**
@@ -90,8 +90,11 @@ export interface LiveNow {
   lastAt?: string;
   /** About how long until the ticket needs the person, in seconds, and for what. */
   readyIn?: { seconds: number; what: string };
-  /** What the tracker says under each stage: how long a finished one took, "now · 2 min", "about 2 min". */
-  stages: { stage: Stage; note: string }[];
+  /**
+   * What the tracker says under each stage: how long the squad worked in a finished one, "now · 2 min", "about 2 min".
+   * `wait`, a small second line under a finished stage that waited long: "waited 25 min for you".
+   */
+  stages: { stage: Stage; note: string; wait?: string }[];
   /** When a note sent now is read. */
   noteWhen: string;
   /** The "Taking longer than usual" or "Looks stuck" card. */
@@ -264,30 +267,91 @@ function barOf(t: Ticket, step: TimedStep, part?: { n: number; of: number }): Li
   return group.map((_, i) => (i < at ? 'done' : i === at ? 'now' : 'todo'));
 }
 
+/** The stage a step ran in, for a step kept before its stage was kept with it. */
+const STEP_STAGE: Record<TimedStep, Stage> = { questions: 'tickets', spec: 'specs', design: 'specs', build: 'implement', fix: 'implement', checks: 'test', review: 'review', proof: 'review' };
+
+/** A wait this long in a stage gets its own small line under it. */
+export const LONG_WAIT_S = 10 * 60;
+
+const trackStageOf = (s: Stage): Stage => (s === 'bugs' ? 'tickets' : s);
+
+/** The steps that ended well in a stage, oldest first. */
+function runsIn(t: Ticket, stage: Stage): StepRun[] {
+  return (t.history ?? []).filter((r) => trackStageOf(r.stage ?? STEP_STAGE[r.step]) === stage);
+}
+
+/**
+ * Seconds the squad itself worked in a stage: its steps that ended well, and the one running now when the stage is the
+ * ticket's. A wait for the person, for another story or for a free place is in no step, nor is a chat. Undefined when
+ * no step is known there, so the tracker can say what it said before steps were kept.
+ */
+function workIn(t: Ticket, stage: Stage, at: number): number | undefined {
+  const runs = runsIn(t, stage);
+  const done = runs.reduce((n, r) => {
+    const secs = (Date.parse(r.to) - Date.parse(r.from)) / 1000;
+    return n + (Number.isFinite(secs) ? Math.max(0, secs) : 0);
+  }, 0);
+  const running = t.clock && trackStageOf(t.stage) === stage ? runSeconds(t.clock, at) : undefined;
+  if (running !== undefined) return done + running;
+  if (runs.length) return done;
+  // No step of it is kept: a ticket from before steps were kept, or one whose oldest steps fell off its history.
+  return t.history?.length && t.history.length < HISTORY ? 0 : undefined;
+}
+
+/** The checks of a test stage came from the Builder's own run, in a few words: "checked with the Builder's run". */
+function builderRunWords(t: Ticket): string {
+  const b = runsIn(t, 'test').filter((r) => r.step === 'checks').pop()?.builderRun;
+  if (!b?.checks.length) return '';
+  if (b.all) return " · checked with the Builder's run";
+  const names = b.checks.map((c) => (c === 'test' ? 'tests' : c === 'lint' ? 'code check' : c));
+  return ` · ${names.join(' and ')} from the Builder's run`;
+}
+
+/** The small line under a finished stage that waited long: mostly for the person, or for anything else. */
+function waitWords(t: Ticket, stage: Stage, work: number): string | undefined {
+  const spent = t.stageTimes?.spent[stage];
+  if (spent === undefined) return undefined;
+  const wait = Math.max(0, spent - work);
+  const yours = Math.min(wait, t.stageTimes?.yours?.[stage] ?? 0);
+  if (yours >= LONG_WAIT_S) return `waited ${durationWords(yours)} for you`;
+  return wait >= LONG_WAIT_S ? `waited ${durationWords(wait)}` : undefined;
+}
+
 function stageNotes(t: Ticket, state: NowState, book: UsualBook, at: number): LiveNow['stages'] {
-  const stage = t.stage === 'bugs' ? 'tickets' : t.stage;
+  const stage = trackStageOf(t.stage);
   const cur = stage === 'done' ? TRACK.length : TRACK.indexOf(stage);
   const st = t.stageTimes;
   const usual = (who: AgentName | 'squad', step: TimedStep) => middle(usualOf(book, who, step, t.track));
   const about = (s: number) => (s > 0 ? `about ${Math.max(1, Math.round(s / 60))} min` : '');
   return TRACK.map((s, i) => {
     let note = '';
+    let wait: string | undefined;
     if (i < cur) {
-      const spent = st?.spent[s];
+      const work = workIn(t, s, at);
       const yours = t.track !== 'express' && t.track !== 'auto' && t.specApproved;
-      note = spent !== undefined ? `${durationWords(spent)}${s === 'specs' && yours ? ', you approved' : ''}` : '';
+      const said = (secs: number) => `${durationWords(secs)}${s === 'specs' && yours ? ', you approved' : ''}`;
+      if (work === undefined) {
+        // No step of it is kept: the clock time it spent there, waits and all, as before.
+        const spent = st?.spent[s];
+        note = spent !== undefined ? said(spent) : '';
+      } else if (runsIn(t, s).length) {
+        note = `${said(work)}${s === 'test' ? builderRunWords(t) : ''}`;
+        wait = waitWords(t, s, work);
+      }
     } else if (i === cur) {
-      const inStage = st?.stage === t.stage ? (at - Date.parse(st.since)) / 1000 : undefined;
+      // The squad's own work in it so far; with no step known there yet, the time since it came in, as before.
+      const work = t.clock || runsIn(t, s).length ? workIn(t, s, at) : undefined;
+      const inStage = work ?? (st?.stage === t.stage ? (at - Date.parse(st.since)) / 1000 : undefined);
       if (state === 'you') note = 'your turn';
       else if (state === 'ready') note = t.release ? `in ${t.release}` : 'accepted';
       else if (state === 'queued') note = 'next in line';
-      else if (state === 'working' || state === 'stopping') note = inStage !== undefined ? `now · ${durationWords(inStage)}` : 'now';
+      else if (state === 'working' || state === 'stopping') note = inStage !== undefined ? `now · ${durationWords(inStage)}${s === 'test' ? builderRunWords(t) : ''}` : 'now';
     } else if (s === 'review') note = t.track === 'auto' ? 'accepted by itself' : 'you check proof';
     else if (s === 'release') note = t.track === 'auto' ? 'merges by itself' : 'on Looks right';
     else if (s === 'specs') note = about(t.track === 'express' || t.track === 'auto' ? usual('architect', 'design') : usual('analyst', 'spec') + usual('architect', 'design'));
     else if (s === 'implement') note = about((t.work?.steps ?? t.steps?.length ?? 0) * usual('builder', 'build'));
     else if (s === 'test') note = about(usual('squad', 'checks'));
-    return { stage: s, note };
+    return { stage: s, note, ...(wait ? { wait } : {}) };
   });
 }
 

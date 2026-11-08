@@ -36,6 +36,8 @@ export interface FakeAzure {
   comments: Map<number, string[]>;
   setClash(on: boolean): void;
   items: Map<number, Item>;
+  /** Every attachment uploaded, as "7/after-1.png". */
+  attached: string[];
   /** Every POST and PATCH to a work item, with its JSON patch body. */
   writes: { method: string; path: string; body: { op: string; path: string; value?: unknown }[] }[];
   /** Turns writes down, as for a token that may only read. */
@@ -61,6 +63,8 @@ export function fakeAzureDevOps(token = 'secret', opts: FakeAzureOptions = {}): 
   ]);
   const comments = new Map<number, string[]>();
   const prs = new Map<number, { source: string; status: string; description: string }>();
+  /** Attachments by pull request and file name, as "7/after-1.png". */
+  const attached: string[] = [];
   let clash = false;
   let nextId = 100;
   let nextPr = 7;
@@ -214,15 +218,23 @@ export function fakeAzureDevOps(token = 'secret', opts: FakeAzureOptions = {}): 
       return json({ path: page, content: 'Prices include VAT.' });
     }
     const att = /pullRequests\/(\d+)\/attachments\/(.+)$/i.exec(path);
-    if (att && method === 'POST') return json({ url: `https://dev.azure.com/att/${att[2]}` });
+    if (att && method === 'POST') {
+      // Azure keeps one attachment per name on a pull request and refuses a second.
+      const key = `${att[1]}/${att[2]}`;
+      if (attached.includes(key)) return json({ message: `The attachment with file name '${decodeURIComponent(att[2]!)}' already exists.` }, 400);
+      attached.push(key);
+      return json({ url: `https://dev.azure.com/att/${att[2]}` });
+    }
     if (/\/pullrequests$/i.test(path) && method === 'POST') {
       const id = nextPr++;
       prs.set(id, { source: String((body as { sourceRefName: string }).sourceRefName).replace('refs/heads/', ''), status: 'active', description: String((body as { description: string }).description) });
       return json({ pullRequestId: id, status: 'active' });
     }
     if (/\/pullrequests$/i.test(path) && method === 'GET') {
-      const source = new URL(url).searchParams.get('searchCriteria.sourceRefName')?.replace('refs/heads/', '');
-      return json({ value: [...prs].filter(([, p]) => p.source === source && p.status === 'active').map(([id, p]) => ({ pullRequestId: id, status: p.status })) });
+      const query = new URL(url).searchParams;
+      const source = query.get('searchCriteria.sourceRefName')?.replace('refs/heads/', '');
+      const status = query.get('searchCriteria.status') ?? 'active';
+      return json({ value: [...prs].filter(([, p]) => p.source === source && (status === 'all' || p.status === status)).map(([id, p]) => ({ pullRequestId: id, status: p.status })) });
     }
     const pr = /\/pullrequests\/(\d+)$/i.exec(path);
     if (pr) {
@@ -239,5 +251,5 @@ export function fakeAzureDevOps(token = 'secret', opts: FakeAzureOptions = {}): 
     }
     return json({ message: `unexpected ${method} ${url}` }, 404);
   };
-  return { fetch: handler as typeof fetch, comments, setClash: (on) => (clash = on), items, writes, denyWrites: (on) => (denied = on) };
+  return { fetch: handler as typeof fetch, comments, setClash: (on) => (clash = on), items, attached, writes, denyWrites: (on) => (denied = on) };
 }

@@ -395,6 +395,16 @@ export class Azure {
     return data.value[0] ? this.pr(repo, data.value[0]) : null;
   }
 
+  /** The newest PR from a branch in any state (active, completed or abandoned), so one merged in Azure is found again. */
+  async lastPullRequest(repo: string, source: string): Promise<PullRequest | null> {
+    const data = await this.call<{ value: RawPr[] }>(
+      'GET',
+      `_apis/git/repositories/${encodeURIComponent(repo)}/pullrequests?searchCriteria.sourceRefName=${encodeURIComponent(`refs/heads/${source}`)}&searchCriteria.status=all`,
+    );
+    const newest = [...data.value].sort((a, b) => b.pullRequestId - a.pullRequestId)[0];
+    return newest ? this.pr(repo, newest) : null;
+  }
+
   /** Uploads a screenshot to the PR and returns a link to use in markdown. */
   async attachToPullRequest(repo: string, prId: number, file: string): Promise<string> {
     const name = path.basename(file);

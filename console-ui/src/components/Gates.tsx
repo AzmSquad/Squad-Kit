@@ -1,5 +1,5 @@
 import { Check, CircleAlert } from 'lucide-react';
-import type { GateState, Gates } from '../api/types';
+import type { GateState, Gates, Ticket } from '../api/types';
 import { NOT_CHECKED_WHY, notCheckedWhy, oldFailuresWhy, oldShort } from '../lib/gates';
 import { Written } from './ui';
 
@@ -40,5 +40,28 @@ export function NotCheckedNote({ g, className = '' }: { g: Gates | undefined | n
         <b>Not checked.</b> {why}
       </span>
     </p>
+  );
+}
+
+const NO_NEW_TESTS = 'Built without new tests';
+const NO_NEW_TESTS_WHY = "Write new tests was off when this story was made, so the Builder wrote no new tests. squad-kit still ran your project's own checks, the review and the proof.";
+
+/** The label of a story built without new tests: in the story, on its proof and in the release. */
+export function NoNewTestsLabel({ t }: { t: Pick<Ticket, 'noNewTests'> }) {
+  if (!t.noNewTests) return null;
+  return (
+    <span className="prio notests" title={NO_NEW_TESTS_WHY}>
+      {NO_NEW_TESTS}
+    </span>
+  );
+}
+
+/** The short form, on a card. */
+export function NoNewTestsTag({ t }: { t: Pick<Ticket, 'noNewTests'> }) {
+  if (!t.noNewTests) return null;
+  return (
+    <span className="prio notests" title={`${NO_NEW_TESTS}. ${NO_NEW_TESTS_WHY}`}>
+      No new tests
+    </span>
   );
 }

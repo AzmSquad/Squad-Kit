@@ -86,7 +86,7 @@ import {
   type BoardPaths,
 } from '../board/store.js';
 import { DEFAULT_QUALITY, QUALITIES, QUALITY_NOTE, parseQuality } from '../engine/levels.js';
-import type { AgentName, PlanPart, Stage, Ticket, UsageLine, UsageTotal } from '../board/types.js';
+import { NO_NEW_TESTS_LABEL, type AgentName, type PlanPart, type Stage, type Ticket, type UsageLine, type UsageTotal } from '../board/types.js';
 import { boardUsage, byRole, costWords, stepWords, tokenWords, totalOf } from '../board/usage.js';
 import { runConsole } from './console.js';
 import { openBoard } from '../board/move.js';
@@ -284,7 +284,7 @@ export async function runShow(ticketId: string): Promise<void> {
   const bp = board();
   const t = requireTicket(bp, ticketId);
   out();
-  out(`  ${id(t.id)}  ${kleur.bold(t.title)}${t.priority === 'high' ? kleur.red('  High priority') : ''}`);
+  out(`  ${id(t.id)}  ${kleur.bold(t.title)}${t.priority === 'high' ? kleur.red('  High priority') : ''}${t.noNewTests ? kleur.gray(`  ${NO_NEW_TESTS_LABEL}`) : ''}`);
   out(`  ${trackLine(t)}`);
   const usual = readUsual(bp);
   for (const l of nowLines(t, liveNow(t, usual))) out(l);
@@ -737,6 +737,27 @@ export async function runAgent(role: string, opts: { step?: string; set?: string
 }
 
 /** Shows the project's Quality setting, or sets it: best, balanced or thrifty. The whole team shares it. */
+/**
+ * `squad config set new-tests`: whether a new story may be built without new tests. "always": every story writes them,
+ * and the "Write new tests" switch is not offered; "switch" (the default): the person chooses on each new story. Shared
+ * with the team in the project's settings.
+ */
+export async function runNewTests(setting: string | undefined): Promise<void> {
+  const bp = board();
+  const meta = readMeta(bp);
+  if (setting === undefined) {
+    out();
+    out(`  ${kleur.bold('New tests')}  ${meta.alwaysNewTests ? 'always: every story writes new tests' : 'your choice on each new story, on by default'}`);
+    out();
+    ui.info(`Change it: ${cmd('squad config set new-tests always')} or ${cmd('squad config set new-tests switch')}`);
+    return;
+  }
+  if (setting !== 'always' && setting !== 'switch') throw new Error(`"${setting}" is not a choice here. Use always (every story writes new tests) or switch (each new story chooses).`);
+  const { alwaysNewTests: _was, ...rest } = meta;
+  writeMeta(bp, setting === 'always' ? { ...rest, alwaysNewTests: true } : rest);
+  ui.success(setting === 'always' ? 'Every new story writes new tests now. The "Write new tests" switch is gone from the new story form.' : 'Each new story can now be built without new tests: the "Write new tests" switch is on the new story form, on by default.');
+}
+
 export async function runQuality(setting: string | undefined): Promise<void> {
   const bp = board();
   const meta = readMeta(bp);
@@ -1063,6 +1084,8 @@ interface NewOptions {
   express?: boolean;
   talk?: boolean;
   full?: boolean;
+  /** --no-new-tests: the Builder writes no new tests. */
+  newTests?: boolean;
   criteria?: string[];
   rule?: string[];
   edge?: string[];
@@ -1084,6 +1107,7 @@ export async function runNew(words: string[], opts: NewOptions): Promise<void> {
     ...(opts.bug && ['stops-work', 'annoying', 'small'].includes(opts.severity ?? '') ? { severity: opts.severity as Ticket['severity'] } : {}),
     track: opts.express ? 'express' : 'full',
     talkFirst: Boolean(opts.talk),
+    ...(opts.newTests === false ? { noNewTests: true } : {}),
     criteria: opts.criteria,
     rules: opts.rule,
     edgeCases: opts.edge,
@@ -1112,6 +1136,7 @@ export async function runNew(words: string[], opts: NewOptions): Promise<void> {
       kind: opts.bug ? 'bug' : d.kind,
       track: opts.express ? 'express' : opts.full ? 'full' : d.track,
       talkFirst: Boolean(opts.talk),
+      ...(opts.newTests === false ? { noNewTests: true } : {}),
       criteria: [...d.criteria, ...(fields.criteria ?? [])],
       rules: [...d.rules, ...(fields.rules ?? [])],
       edgeCases: [...d.edgeCases, ...(fields.edgeCases ?? [])],
@@ -1120,6 +1145,7 @@ export async function runNew(words: string[], opts: NewOptions): Promise<void> {
   const title = fields.title || (await input({ message: 'Ticket title:' }));
   const t = createTicket(bp, { ...fields, title, files });
   ui.success(t.track === 'express' ? `${t.id} created on the Express track. The squad goes straight to the plan.` : `${t.id} created. The Analyst is reading it.`);
+  if (t.noNewTests) ui.info("It is built without new tests: the project's own checks, the review and the proof still run.");
 }
 
 export async function runUnstick(ticketId: string, opts: { keepWaiting?: boolean; freePort?: boolean }): Promise<void> {

@@ -101,7 +101,12 @@ On the board:
   slot is free". A slow step says "Taking longer than usual".
 - **All tickets**, **Mine** and **Bugs** filter the cards. **Search tickets** finds one.
 - **New ticket** writes a ticket in plain words. **Pull from Azure DevOps** brings in a work item (or
-  **Connect a tracker**, when there is none).
+  **Connect a tracker**, when there is none). Under the track (Full or Express), **Write new tests** is on by default.
+  Turn it off for a demo, a small text or colour change, or a project with no tests yet: the plan and the Builder add no
+  new tests and the Reviewer does not ask for them, while squad-kit still runs your project's own checks (tests, lint,
+  build), the review and the proof, so a break of what already works still shows. The story then says **Built without new
+  tests** on its card ("No new tests"), on its proof, in the pull request and in the release notes. An engineer can keep
+  new tests on for every story in Settings, and the switch is then gone. Terminal: `squad new --no-new-tests`.
 - **The footer**: tickets released and bugs found in the last 30 days, open tickets, what the squad used, and
   **Report a bug**.
 - **Show archived**, under the board: archived tickets, each with **Unarchive**.
@@ -129,7 +134,10 @@ over** and **Propose a change** are in the **⋯** menu, and Propose a change is
 ticket's name and title, links to its tracker item and
 pull request, who made it, its **owner** (when they cannot work on it, **Take it** moves it to you, with a reason;
 terminal: `squad take-back <ticket> --reason "…"`), its track (Full, Express or Builds by itself) and its repo. A row of
-steps shows how far it is. A ticket built from a breakdown says where it comes from ("From BR-1 › Payments ›
+steps shows how far it is. Under each finished step is how long the squad itself worked there, from its agents' own
+steps: a wait for your answers or approval, for another story, for a free place, and a chat are not counted. A long wait
+gets a small second line, like "waited 25 min for you". When the checks used the Builder's own passing run, Test says so,
+like "3 s · checked with the Builder's run", or "tests from the Builder's run" when the other checks ran. A ticket built from a breakdown says where it comes from ("From BR-1 › Payments ›
 Invoices and refunds › S-14") and lists what the squad **decided for you**, each with **Change**. When it stops
 for a gap or a clash, the card says which (**Missing in the BRD**, **Two parts clash**), marks the option the
 Architect suggests, and says which stories wait for your answer.
@@ -159,6 +167,17 @@ for another story or for a free place. **Looks stuck** (no progress for a while)
 merged or pushed"), and the ways out: **Try again**, **Fix it yourself**, **Continue anyway** (with a reason), **Send
 it back to the plan**, and **Report a problem**. A tool's raw error never shows there: the exact words are in the
 Developer tab and the app log.
+
+**A pull request merged outside squad-kit.** When you accept a story, squad-kit opens its pull request and merges it
+at once. When it cannot (the pull request waits for an approver, or it clashes with newer work in main), someone can
+settle it and merge it on the code host, such as Azure Repos, instead. squad-kit notices by itself: a few seconds
+after the board opens a project, and every 5 minutes while it runs, it asks the code host about each pull request it
+opened that is still open. When one was merged there, the story shows as merged, it goes into the next release, your
+own copy of main catches up, the tracker item moves on, and the stories that wait for it start. To ask now, press
+**Check again**: on the clash card ("Clashes with main"), on a story whose pull request is open or waits, and on the
+card of a story that waits for another one ("Waits for AB-46 to merge"). It says in one line what it found: merged,
+still open (nothing changes), or closed without merging (one line on the story, and nothing else changes). Terminal:
+`squad check-merge <ticket>`. A project without a code host merges on this computer, so there is nothing to ask.
 
 The **…** menu at the top has **Delete** for a ticket that is not merged, and **Archive** for a merged or released
 one. The dialog lists what is removed and what stays:
@@ -574,6 +593,9 @@ Terminal: `squad config set quality best`, `squad agent builder`, `squad agent b
 - **How the squad checks and runs this project**: for each code repo, the setup, test, lint, build and start
   commands, the app address, a pipeline to run after a release, the release branch and where it pushes. The
   Architect fills these in; change them here. **Read the project again** asks the Architect to read the code again.
+  **New tests**: each story chooses (the **Write new tests** switch on the new story form, on by default), or always,
+  for a project that must always have tests. Shared by the team in the project's settings, and shown on the Harness
+  page as the **New tests** gate. Terminal: `squad config set new-tests always`, `squad config set new-tests switch`.
 - **About squad-kit**: your version, when the app last looked for a new one, **Check for updates**, and the
   daily check (turn it off on a network without internet). When a new version is out, Home and every project
   page show it with what is new. **Update now** waits until no agent is in the middle of a step, installs it,

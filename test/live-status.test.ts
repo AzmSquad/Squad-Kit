@@ -1,6 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { afterAll, describe, it, expect } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { liveNow, queuedLine, shortDoing } from '../src/board/now.js';
-import { slowStep } from '../src/board/clock.js';
+import { endStep, pauseClock, slowStep, startStep, trackStage, waitsNow } from '../src/board/clock.js';
+import { boardPaths } from '../src/board/store.js';
 import { usualKey } from '../src/board/usual.js';
 import type { Step, Ticket } from '../src/board/types.js';
 
@@ -169,5 +173,121 @@ describe('slow and stuck steps', () => {
     // The command and its process are for engineers: in the details, not the facts.
     expect(JSON.stringify(s.facts)).not.toMatch(/npm test|4242/);
     expect(s.detail).toBe('Waiting on: npm test (process 4242)');
+  });
+});
+
+describe('the tracker counts the squad\'s own work', () => {
+  const T0 = Date.parse('2026-11-08T09:00:00Z');
+  const min = (m: number) => T0 + m * 60_000;
+  const iso = (at: number) => new Date(at).toISOString();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-stage-work-'));
+  const bp = boardPaths(path.join(dir, '.squad'));
+  afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
+  /** What saving a ticket does (store.ts updateTicket): the stage times move, and the clock stands still while it waits. */
+  const move = (t: Ticket, at: number, change: (x: Ticket) => void) => {
+    const before = t.stage;
+    change(t);
+    trackStage(t, before, at);
+    if (waitsNow(t)) pauseClock(t, at);
+  };
+  const working = { live: true, squad: { phase: 'build', nextAt: iso(min(500)) } } as const;
+
+  it('leaves out the waits for you, for another story and a chat, and says a long wait on a small line', () => {
+    const t = ticket({ stage: 'tickets', createdAt: iso(min(0)), ...working });
+    // The Analyst reads it for a minute, and its questions wait 20 minutes for you.
+    move(t, min(0), (x) => startStep(x, { who: 'analyst', step: 'questions' }, min(0)));
+    move(t, min(1), (x) => {
+      endStep(bp, x, min(1));
+      x.stage = 'specs';
+      x.waiting = { kind: 'questions', summary: 'Two questions' };
+    });
+    // The spec takes 2 minutes, then waits for you: a 10 minute talk with the Analyst in between, then your approval.
+    move(t, min(21), (x) => {
+      x.waiting = null;
+      startStep(x, { who: 'analyst', step: 'spec' }, min(21));
+    });
+    move(t, min(23), (x) => {
+      endStep(bp, x, min(23));
+      x.waiting = { kind: 'spec', summary: 'The spec is ready' };
+    });
+    move(t, min(25), (x) => (x.waiting = { kind: 'chat', summary: 'Talking it through' }));
+    move(t, min(35), (x) => (x.waiting = { kind: 'spec', summary: 'The spec is ready' }));
+    move(t, min(40), (x) => {
+      x.waiting = null;
+      x.specApproved = { by: 'Sara', at: iso(min(40)) };
+      startStep(x, { who: 'architect', step: 'design' }, min(40));
+    });
+    move(t, min(41), (x) => {
+      endStep(bp, x, min(41));
+      x.waiting = { kind: 'plan', summary: 'The design is ready' };
+    });
+    // The Builder works 3 minutes, waits 20 for another story to merge, then works 4 more.
+    move(t, min(45), (x) => {
+      x.waiting = null;
+      x.stage = 'implement';
+      startStep(x, { who: 'builder', step: 'build' }, min(45));
+    });
+    move(t, min(48), (x) => {
+      x.live = false;
+      x.squad = null;
+    });
+    move(t, min(68), (x) => {
+      Object.assign(x, working);
+      startStep(x, { who: 'builder', step: 'build' }, min(68));
+    });
+    // The checks use the Builder's own run: 3 seconds.
+    move(t, min(72), (x) => {
+      endStep(bp, x, min(72));
+      x.stage = 'test';
+      startStep(x, { who: 'squad', step: 'checks' }, min(72));
+    });
+    move(t, min(72) + 3000, (x) => {
+      endStep(bp, x, min(72) + 3000, { builderRun: { checks: ['test', 'lint'], all: true } });
+      x.stage = 'review';
+      startStep(x, { who: 'reviewer', step: 'review' }, min(72) + 3000);
+    });
+    expect(t.history?.map((h) => [h.step, h.stage])).toEqual([
+      ['questions', 'tickets'],
+      ['spec', 'specs'],
+      ['design', 'specs'],
+      ['build', 'implement'],
+      ['checks', 'test'],
+    ]);
+    const n = liveNow(t, {}, min(74));
+    const notes = Object.fromEntries(n.stages.map((s) => [s.stage, s.note]));
+    expect(notes).toEqual({ tickets: '1 min', specs: '3 min, you approved', implement: '7 min', test: "3 s · checked with the Builder's run", review: 'now · 1 min', release: 'on Looks right' });
+    // Specs waited 41 minutes, all of it for you (the talk too); Implement waited 20 for another story.
+    expect(n.stages.filter((s) => s.wait).map((s) => [s.stage, s.wait])).toEqual([
+      ['specs', 'waited 41 min for you'],
+      ['implement', 'waited 20 min'],
+    ]);
+  });
+
+  it('says which checks came from the Builder\'s run when only some did, and the clock time for a ticket with no steps kept', () => {
+    const t = ticket({
+      stage: 'review',
+      ...working,
+      history: [{ who: 'squad', step: 'checks', from: ago(100), to: ago(60), stage: 'test', builderRun: { checks: ['test'] } }],
+      stageTimes: { stage: 'review', since: ago(50), spent: { test: 50 } },
+    });
+    expect(liveNow(t, {}, AT).stages.find((s) => s.stage === 'test')).toEqual({ stage: 'test', note: "40 s · tests from the Builder's run" });
+    // A stage no step ran in says nothing, not the time it waited.
+    const none = ticket({ stage: 'implement', ...working, history: [{ who: 'architect', step: 'design', from: ago(200), to: ago(140), stage: 'specs' }], stageTimes: { stage: 'implement', since: ago(10), spent: { tickets: 900, specs: 70 } } });
+    expect(liveNow(none, {}, AT).stages.slice(0, 2)).toEqual([
+      { stage: 'tickets', note: '' },
+      { stage: 'specs', note: '1 min' },
+    ]);
+  });
+
+  it("keeps the person's turn with the stage it was in, also when the stage moves on during it", () => {
+    const t = ticket({ stage: 'specs', createdAt: iso(min(0)) });
+    move(t, min(0), (x) => (x.waiting = { kind: 'spec', summary: 'The spec is ready' }));
+    move(t, min(12), (x) => {
+      x.stage = 'implement';
+      x.waiting = { kind: 'depends', summary: 'Choose how to build it' };
+    });
+    move(t, min(15), (x) => (x.waiting = null));
+    expect(t.stageTimes?.yours).toEqual({ specs: 720, implement: 180 });
+    expect(t.stageTimes?.yoursSince).toBeUndefined();
   });
 });

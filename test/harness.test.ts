@@ -123,10 +123,12 @@ const EXCUSED: Record<string, string> = {
   'requirements-text.ts:MAX_DEPTH': 'Keeps a broken document from filling the computer. You get a plain refusal.',
   // Not limits at all.
   'clock.ts:SLOW_FLOOR_S': 'Only when a card may say a step is slow. Nothing stops at it.',
+  'now.ts:LONG_WAIT_S': 'Only when the tracker says a stage waited long, on a small line. Nothing stops at it.',
   'cost.ts:QUALITY_AFTER': 'When the averages on the Agents tab start to show.',
   'usual.ts:LEARN_AFTER': 'When the usual times come from your project.',
   'setup-state.ts:LEARN_AFTER': 'When the usual times come from your project.',
   'requirements-tracker.ts:DEMO_WRITE_MS': "Only the demo board's pretend tracker.",
+  'merged-outside.ts:FIRST_LOOK_MS': 'How soon after the board opens it first looks for merges on the code host. Nothing waits for it.',
 };
 
 /** Rules with no name a scan could find, and why they have no row. Each must still be in the code it names. */

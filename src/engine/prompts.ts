@@ -755,8 +755,7 @@ export function planPrompt(t: Ticket, change?: string, meta?: BoardMeta, others?
   check it against the business needs and write the result in clientCheck ("no conflict" or the conflict).${firstTechnology(meta, t)}
 ${DECISION_LINKS}
 ${DEPENDS_RULE}
-- steps: 3 to 7 small steps in order, one sentence each. The last step writes the tests.
-- tests: how many tests you expect to add. screens: how many "done when" can be shown in a screenshot (0 without a UI).
+${stepsAndTests(t)}
   asks: how many "done when" no page shows, but asking the running API would (0 when none).
 - releaseNote: one line for release notes, like "**Dark mode.** Switch the dashboard to dark."
 - commands: only if the project has no way yet to set up, test, build or start it, or this ticket changes that.
@@ -775,12 +774,23 @@ function firstTechnology(meta?: BoardMeta, t?: Ticket): string {
   return meta?.scan?.empty ? NO_CODE_WORDS : '';
 }
 
+/** The person chose to build the story without new tests ("Write new tests" off on the new story form). */
+const NO_NEW_TESTS = 'The person chose to build this story without new tests';
+
+/** The plan's steps, and the tests it adds: none when the person chose to build it without new tests. */
+function stepsAndTests(t: Ticket): string {
+  const steps = t.noNewTests ? `${NO_NEW_TESTS}, so no step writes tests.` : 'The last step writes the tests.';
+  const tests = t.noNewTests ? '0, as this story adds no tests.' : 'how many tests you expect to add.';
+  return `- steps: 3 to 7 small steps in order, one sentence each. ${steps}
+- tests: ${tests} screens: how many "done when" can be shown in a screenshot (0 without a UI).`;
+}
+
 /**
  * A project with no test command: the Architect suggests one with the design. squad-kit does not use it on its own;
- * the person approves it when the checks find no tests.
+ * the person approves it when the checks find no tests. Not on a story built without new tests: it would have none to run.
  */
 function testLine(t: Ticket, meta?: BoardMeta): string {
-  if (!meta) return '';
+  if (!meta || t.noNewTests) return '';
   const repos = reposOf(meta);
   const repo = repos.find((r) => r.path === t.repo);
   if (repo ? repo.commands.test?.trim() : repos.some((r) => r.commands.test?.trim())) return '';
@@ -829,8 +839,7 @@ ${doneWhen(t)}
   check it against the business needs and write the result in clientCheck ("no conflict" or the conflict).${firstTechnology(meta, t)}
 ${DECISION_LINKS}
 ${DEPENDS_RULE}
-- steps: 3 to 7 small steps in order, one sentence each. The last step writes the tests.
-- tests: how many tests you expect to add. screens: how many "done when" can be shown in a screenshot (0 without a UI).
+${stepsAndTests(t)}
   asks: how many "done when" no page shows, but asking the running API would (0 when none).
 - commands: only if the project has no way yet to set up, test, build or start it, or this ticket changes that.
   For a new project, choose simple, common tools and give every command, including start and url.${repo}${testLine(t, meta)}
@@ -881,7 +890,8 @@ ${steps}
 Rules:
 - ${STEP_LINE}
 - Follow the saved decisions and the project's existing style.
-- Write tests that check every "done when", and run the tests before you finish. A browser cannot start in your shell:
+- ${t.noNewTests ? `${NO_NEW_TESTS}: write no new tests. Run the tests the project already has before you finish, so
+  nothing that worked before breaks.` : 'Write tests that check every "done when", and run the tests before you finish.'} A browser cannot start in your shell:
   run tests that open a browser with squad-kit's run_checks tool, never yourself.
 - Never commit, push, switch branches, or change files outside this folder.
 - Wait for every command to finish (installs too). Never leave anything running in the background; this step ends when you answer.
@@ -1018,10 +1028,10 @@ function checksRan(t: Ticket, meta: BoardMeta, ctx?: PromptContext): string {
     ? `\nThe tests were made weaker in this change, and the person chose to go on anyway (${weakened.map((o) => o.reason).join('; ')}): ${weakened.flatMap((o) => o.weakened!).join(' ')} Look closely at whether the tests still check every "done when".`
     : ''}${old}`;
   if (t.gates?.checks === 'unchecked') {
-    return `squad-kit ran the project checks on this copy, but no tests ran${result ? ` (${result})` : ''}, so nothing checked that the work does what it should. Do not run them yourself. Read the code with extra care against every "done when", and say in a comment if tests are missing.${each}${past}`;
+    return `squad-kit ran the project checks on this copy, but no tests ran${result ? ` (${result})` : ''}, so nothing checked that the work does what it should. Do not run them yourself. Read the code with extra care against every "done when"${t.noNewTests ? '' : ', and say in a comment if tests are missing'}.${each}${past}`;
   }
   if (!ran.length) {
-    return 'This project has no test, lint or build commands set up yet, so squad-kit had no checks to run. Do not try to run them yourself. If the change needs tests and has none, say so in a comment.';
+    return `This project has no test, lint or build commands set up yet, so squad-kit had no checks to run. Do not try to run them yourself.${t.noNewTests ? '' : ' If the change needs tests and has none, say so in a comment.'}`;
   }
   const how = `(${ran.join('; ')})`;
   if (t.gates?.checks === 'skipped') return `squad-kit ran the project checks on this copy ${how}, and they did not pass: ${result ?? 'some failed'}. The person chose to go on anyway. Do not run them yourself.${each}${past}`;
@@ -1059,7 +1069,8 @@ ${criteria}
 
 ${look}${changed}${asked}
 ${checksRan(t, meta, ctx)}
-Check: does it do every "done when"? Does it follow the saved decisions? Real bugs, security holes, missing tests?
+Check: does it do every "done when"? Does it follow the saved decisions? Real bugs, security holes${t.noNewTests ? `?
+${NO_NEW_TESTS}, so do not ask for new tests.` : ', missing tests?'}
 Were tests deleted, switched off or made weaker? That is a real problem unless the plan asks for it.
 ${notOnScreenRule(t)}
 ${again ? 'Approve when your notes are handled and nothing else is wrong.' : 'Approve unless there is a real problem.'} Small style notes do not block. Each comment is one concrete sentence.
@@ -1081,7 +1092,8 @@ function notOnScreenRule(t: Ticket): string {
   const known = [...(t.proof ?? []).filter((p) => p.shows === 'off-screen').map((p) => ({ criterion: p.criterion, why: p.why ?? '' })), ...(t.offScreen ?? [])];
   const named = [...new Map(known.map((o) => [o.criterion, o])).values()];
   const list = named.length ? `\nThe last screenshots could not show these:\n${named.map((o) => `- ${o.criterion}${o.why ? `: ${o.why}` : ''}`).join('\n')}` : '';
-  return `A "done when" can end as "Not on a screen", when the app has no way to show it (an old record it cannot make, what happens after a restart, an email). The screenshots do not prove those, so check them here: find the code that does it and a test that covers it. A "Not on a screen" with no code, or with no test where one could be written, is a real problem.${list}`;
+  const proof = t.noNewTests ? 'find the code that does it. A "Not on a screen" with no code is a real problem.' : 'find the code that does it and a test that covers it. A "Not on a screen" with no code, or with no test where one could be written, is a real problem.';
+  return `A "done when" can end as "Not on a screen", when the app has no way to show it (an old record it cannot make, what happens after a restart, an email). The screenshots do not prove those, so check them here: ${proof}${list}`;
 }
 
 /** The project can start its app, so the Reviewer can look at its pages through squad-kit. */
@@ -1291,12 +1303,15 @@ In checks, one for each "done when" above, whatever the number of its pictures:
   judge what it shows.${theirLanguage(t)}`;
 }
 
-/** The screenshots show a "done when" does not work: the Builder fixes it, told what the pictures show. */
-export function proofFixPrompt(notes: string[]): string {
+/**
+ * The screenshots show a "done when" does not work: the Builder fixes it, told what the pictures show. `newTests` off:
+ * the story is built without new tests, so it adds none for it.
+ */
+export function proofFixPrompt(notes: string[], newTests = true): string {
   return `squad-kit looked at the screenshots of your work, and they show these "done when" do not work yet:
 ${notes.map((n) => `- ${n}`).join('\n')}
 
-Print ">> fix" first. Fix the code so each one works as written, add or update a test for it where you can, and run
+Print ">> fix" first. Fix the code so each one works as written, ${newTests ? 'add or update a test for it where you can, ' : ''}and run
 the tests again. ${FIX_ONLY_BROKEN} The checks, the review and the screenshots run again after you.`;
 }
 

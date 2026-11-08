@@ -271,12 +271,18 @@ export function startsToo(commands: ProjectCommands, results: { name: string; ou
  * The project's checks, one after another. When no tests ran (none set up, or none found) and the project says how it
  * starts, "start" checks that the app starts and answers at its address, then stops it: then it is the one check of
  * what the app does. With tests, the Tester starts the app for the proof anyway. After a Stop, the ones not run yet
- * never start.
+ * never start. `known`: results squad-kit already has for some of them, with the same command, on this same code (the
+ * Builder's own run): those stand in their place and do not run again.
  */
-export async function runChecks(cwd: string, commands: ProjectCommands, onStart?: (name: string, command?: string) => void, watch: CommandWatch = {}, appWaitMs?: number): Promise<CheckResult[]> {
+export async function runChecks(cwd: string, commands: ProjectCommands, onStart?: (name: string, command?: string) => void, watch: CommandWatch = {}, appWaitMs?: number, known: CheckResult[] = []): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
   for (const { name, command } of checksToRun(cwd, commands)) {
     if (watch.signal?.aborted) break;
+    const had = known.find((k) => k.name === name && k.command === command);
+    if (had) {
+      results.push(had);
+      continue;
+    }
     onStart?.(name, command);
     // A failed test command runs its failed tests on their own first, when it can: still failing, nothing more runs.
     const r = await withOneMoreRun(() => runCommand(cwd, command, undefined, { silentMs: CHECK_SILENT_MS, ...watch }), watch, () => onStart?.(name), name === 'test' ? failedAlone(cwd, command, watch) : undefined);

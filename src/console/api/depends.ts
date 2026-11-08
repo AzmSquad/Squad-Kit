@@ -5,11 +5,12 @@ import type { DependencyChoice } from '../../board/types.js';
 import { bringInLatest, chooseBuild, setDependsOn } from '../../board/depends.js';
 import { nextDraft, outItems, putBackInRelease, takeOutOfRelease } from '../../board/release-tidy.js';
 import { cleanBranches, oldBranches } from '../../engine/branches.js';
+import { checkMerge } from '../../engine/merged-outside.js';
 import { act } from './act.js';
 
 /**
  * Tickets that depend on unmerged work, and the release fixes: one call each, the same as their terminal commands
- * (`squad depends`, `squad build`, `squad bring-in`, `squad release --without`, `squad branches --clean`).
+ * (`squad depends`, `squad build`, `squad bring-in`, `squad check-merge`, `squad release --without`, `squad branches --clean`).
  */
 
 async function body<T>(c: Context): Promise<T> {
@@ -37,6 +38,9 @@ export function mountDependsApi(app: Hono, opts: { paths: SquadPaths }): void {
 
   // "Bring in latest main": `squad bring-in RO-2`.
   app.post('/api/v1/tickets/:id/bring-in', (c) => act(c, () => bringInLatest(bp, c.req.param('id'))));
+
+  // "Check again": asks the code host now whether a pull request was merged there, outside squad-kit: `squad check-merge RO-2`.
+  app.post('/api/v1/tickets/:id/check-merge', (c) => act(c, () => checkMerge(bp, c.req.param('id'))));
 
   // Take a ticket out of the next release before it is made, or put it back: `squad release --without RO-3`.
   app.post('/api/v1/releases/:v/take-out', async (c) => {

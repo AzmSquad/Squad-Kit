@@ -140,6 +140,9 @@ Pick a **track**:
 - **Express**: for a typo or a small urgent fix. No questions, and the plan is approved on its own. The build,
   checks, review and your **Looks right** still run.
 
+On any track, **Write new tests** is on. Turn it off when the story needs no new tests (a demo, a text or colour change):
+squad-kit still runs your project's own checks, the review and the proof, and the story says "Built without new tests".
+
 To report a bug, pick **Bug**. The form asks what happens, how to see it, what should happen, and how bad it is.
 
 **Or pull it from your tracker.** Press **Pull from Azure DevOps** on the board, or **Start** on a story in

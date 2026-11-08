@@ -208,7 +208,8 @@ describe('the step history', () => {
     nextPart(bp, t, 2, t0 + 60_000);
     expect(t.clock!.since).toBe(new Date(t0 + 60_000).toISOString());
     endStep(bp, t, t0 + 90_000);
-    expect(t.history).toEqual([{ who: 'builder', step: 'build', from: at(0), to: new Date(t0 + 90_000).toISOString() }]);
+    // With the stage it ran in, for the tracker's work times.
+    expect(t.history).toEqual([{ who: 'builder', step: 'build', from: at(0), to: new Date(t0 + 90_000).toISOString(), stage: t.stage }]);
     expect(t.clock).toBeUndefined();
   });
 });

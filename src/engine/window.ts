@@ -122,10 +122,10 @@ export interface WindowChecks {
   /** A check starts: the card's line says so. */
   onStart?(name: CheckName): void;
   /**
-   * A run starts, before its first command: `all` when it runs every saved check (no "which", no "only"). What comes
-   * back, when anything does, is told what ran once every check of the run ran to its end; never for a run cut off.
+   * A run starts, before its first command: the checks it runs, and `only` when it was asked for one test file. What
+   * comes back, when anything does, is told what ran once every check of the run ran to its end; never for a run cut off.
    */
-  onRun?(all: boolean): Promise<((ran: CheckRun[]) => Promise<void>) | undefined>;
+  onRun?(run: { names: CheckName[]; only?: string }): Promise<((ran: CheckRun[]) => Promise<void>) | undefined>;
   /** A story with several parts: each part's own checks, by the part's id. run_checks must then say which. */
   parts?(): Record<string, WindowChecks>;
 }
@@ -1209,7 +1209,7 @@ export class AgentWindow {
       // No server squad-kit left in another copy may hold a port the tests need.
       await this.s.beforeStart?.().catch(() => undefined);
       // What the run is, for the checks step: squad-kit may note the copy's code now (WindowChecks.onRun).
-      const ranAll = await c.onRun?.(!which && !only).catch(() => undefined);
+      const noted = await c.onRun?.({ names, ...(only ? { only } : {}) }).catch(() => undefined);
       const out: CheckRun[] = [];
       for (const name of names) {
         if (this.over) break;
@@ -1224,7 +1224,7 @@ export class AgentWindow {
         out.push({ name, command, ...r, ...(alone ? { only } : {}), ...(note ? { note } : {}) });
         this.s.say(`squad-kit ran ${alone ? 'one test file' : CHECK_WORDS[name]} for the ${this.s.who}: ${r.ok ? 'passed' : 'did not pass'}`);
       }
-      if (ranAll && !this.over && out.length === names.length) await ranAll(out).catch(() => undefined);
+      if (noted && !this.over && out.length === names.length) await noted(out).catch(() => undefined);
       return out;
     })();
     done.catch(() => undefined);

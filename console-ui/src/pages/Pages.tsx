@@ -164,6 +164,7 @@ function ProjectSettings() {
         The Architect filled these in when it read the project. squad-kit runs Test, Lint and Build itself before anything ships.
         {multi && ' This project has several code folders; each ticket works in one of them.'}
       </p>
+      <NewTestsSetting always={Boolean(meta.alwaysNewTests)} />
       {repos.map((r) => (
         <RepoSettings key={r.path} repo={r} multi={multi} />
       ))}
@@ -433,6 +434,38 @@ function DocsInGitSetting({ on }: { on: boolean }) {
           On: each ticket's spec, design and decisions are committed with its code, so they reach the team through the pull request. Hand over
           needs it on.
         </span>
+      </span>
+    </div>
+  );
+}
+
+/** Whether a new story may be built without new tests, or every story writes them. Shared with the team through git. */
+function NewTestsSetting({ always }: { always: boolean }) {
+  const act = useAct();
+  return (
+    <div className="maprow" style={{ alignItems: 'center' }}>
+      <b>New tests</b>
+      <span style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <button
+          className="btn sm"
+          onClick={() =>
+            act.mutate({
+              path: '/api/v1/settings',
+              method: 'PUT',
+              body: { alwaysNewTests: !always },
+              done: always ? 'Each new story can be built without new tests again' : 'Every new story writes new tests now',
+            })
+          }
+        >
+          {always ? 'Always: let each story choose' : 'Each story chooses: make it always'}
+        </button>
+        <span className="note">
+          {always
+            ? 'Every story writes new tests, so the new story form has no "Write new tests" switch.'
+            : 'The new story form has a "Write new tests" switch, on by default. Turned off, the Builder writes no new tests; the checks, the review and the proof still run.'}{' '}
+          Saved in the project's settings, for the whole team.
+        </span>
+        <Cmd text={`squad config set new-tests ${always ? 'switch' : 'always'}`} />
       </span>
     </div>
   );

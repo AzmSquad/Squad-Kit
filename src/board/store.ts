@@ -167,7 +167,7 @@ function cached<T>(key: string, files: string[], read: () => T): T {
 /* ── Board settings ─────────────────────────────────────── */
 
 /** The board's settings that belong to the project, kept in `.squad/config.yaml` under `board:`. */
-const PROJECT_META = ['id', 'layout', 'documentsInGit', 'quality', 'allowedHosts', 'network', 'guard', 'project', 'key', 'nextNumber', 'engine', 'commands', 'noTests', 'git', 'repos', 'parts', 'atOnce', 'delivery', 'localFiles', 'lockedFiles'] as const;
+const PROJECT_META = ['id', 'layout', 'documentsInGit', 'quality', 'allowedHosts', 'network', 'guard', 'project', 'key', 'nextNumber', 'engine', 'commands', 'noTests', 'alwaysNewTests', 'git', 'repos', 'parts', 'atOnce', 'delivery', 'localFiles', 'lockedFiles'] as const;
 /** What the project knows, kept in `.squad/knowledge/` as Markdown. */
 const KNOWLEDGE_META = ['map', 'lessons'] as const;
 
@@ -182,6 +182,7 @@ const BOARD_FIELDS: Record<string, FieldShape> = {
   delivery: 'text',
   atOnce: 'number',
   documentsInGit: 'yes-no',
+  alwaysNewTests: 'yes-no',
   git: 'object',
   commands: 'object',
   guard: 'object',
@@ -273,6 +274,7 @@ export const TICKET_HOME = {
   priority: 'project',
   stage: 'project',
   track: 'project',
+  noNewTests: 'project',
   createdAt: 'project',
   createdBy: 'project',
   owner: 'project',
@@ -365,6 +367,9 @@ export const TICKET_HOME = {
   takenOver: 'local',
   outside: 'project',
   stuck: 'local',
+  // With the clash card it belongs to, and what this computer last heard from the code host.
+  clashedPr: 'local',
+  prClosed: 'local',
   changeRequest: 'local',
   agentQuestion: 'local',
   chat: 'local',
@@ -520,6 +525,7 @@ const TICKET_FIELDS: Record<string, FieldShape> = {
   archived: 'object',
   setsUp: 'yes-no',
   hookOwed: 'yes-no',
+  noNewTests: 'yes-no',
 };
 
 /** What squad-kit needs from a ticket file for the ticket to show at all, or why it does not have it. */

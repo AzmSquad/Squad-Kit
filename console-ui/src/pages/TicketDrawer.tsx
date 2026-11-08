@@ -23,7 +23,7 @@ import { AskBox, NowCard, SlowPanel, WorkSoFar, isRunning } from '../components/
 import { PortAskPanel } from '../components/PortAsk';
 import { ExactError, StuckCard } from '../components/ErrorCard';
 import { TestCommandCard } from '../components/TestCommand';
-import { GatePill, NotCheckedNote, OldFailuresNote } from '../components/Gates';
+import { GatePill, NoNewTestsLabel, NotCheckedNote, OldFailuresNote } from '../components/Gates';
 import { checksWords, noGateRan, noShotsText, overrideWhat, proofLead, proofWords } from '../lib/gates';
 import { testChangeWaits } from '../lib/waiting';
 import { AlsoChanged, MorePictures, OffScreenList, VerdictIcon, VerdictTag } from '../components/Verdict';
@@ -31,7 +31,7 @@ import { isApiProof, proofViewer, verdictClass, verdictNote } from '../lib/verdi
 import { report } from '../lib/report';
 import { shellQuote } from '../lib/text';
 import { DeleteArchiveBanner, TicketMenu } from '../components/DeleteTicket';
-import { BringInButton, DependsCard, DependsLine, waitsForDependency } from '../components/Depends';
+import { BringInButton, CheckMerge, DependsCard, DependsLine, waitsForDependency } from '../components/Depends';
 import { BreakdownPlace, DecidedForYou, StopPanel, TrackWords } from '../components/AutoTicket';
 import { YourCheck } from '../components/YourCheck';
 import { AskButton, useAskAgent } from '../components/AskQuestion';
@@ -100,6 +100,7 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
                 {t.kind === 'bug' && <span className="prio">Bug{t.foundIn ? ` found in ${t.foundIn}` : ''}</span>}
                 {t.priority === 'high' && t.kind !== 'bug' && <span className="prio">High priority</span>}
                 <OutsideLabel t={t} />
+                <NoNewTestsLabel t={t} />
                 <span className="grow" />
                 {/* The actions stay together: when the row is too narrow, they move under the id as one group. */}
                 <span className="dacts">
@@ -249,6 +250,10 @@ function NowPanel({ t }: { t: Ticket }) {
                 </>
               )}
               {waitsAtReview(t) && <YourCheck t={t} />}
+              {/* Its pull request stays open on the code host: settled and merged there, the story is merged here too. */}
+              {t.stuck?.gate === 'merge' && t.clashedPr && (
+                <CheckMerge t={t} text={`Settled the clash and merged pull request ${t.clashedPr.id} on the code host yourself? squad-kit looks by itself every few minutes, or now:`} />
+              )}
               <RecentActivity t={t} />
             </>
           }
@@ -1053,6 +1058,13 @@ function WorkingPanel({ t }: { t: Ticket }) {
           </div>
         )}
         {t.localSetup && <LocalSetupLine t={t} />}
+        {/* Accepted, its change not in the base yet: its pull request waits on the code host, or the person's copy. */}
+        {t.stage === 'release' && !t.mergedAt && !running && !t.live && !t.squad && (t.pr || /^Waits to merge\b/.test(t.status)) && (
+          <CheckMerge
+            t={t}
+            text={t.pr ? `Pull request ${t.pr.id} is not merged yet. squad-kit asks the code host by itself every few minutes, or now:` : 'squad-kit tries again by itself every few minutes, or now:'}
+          />
+        )}
         {t.steps && t.steps.length > 0 && (
           <>
             <div className="lbl">Steps</div>

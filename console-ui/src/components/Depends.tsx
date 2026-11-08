@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Check, GitBranch, GitMerge, Hourglass } from 'lucide-react';
+import { Check, GitBranch, GitMerge, Hourglass, RefreshCw } from 'lucide-react';
 import type { DependencyChoice, Ticket } from '../api/types';
 import { useAct, useBoard } from '../lib/data';
 import { Cmd, STAGE_NAME, Written } from './ui';
@@ -82,6 +82,9 @@ export function DependsCard({ t }: { t: Ticket }) {
             <span className="pill wait">{STAGE_NAME[d.stage]} · not merged yet</span>
           </div>
         ))}
+        {live && deps.some(atMerge) && (
+          <CheckMerge t={t} text={`Merged ${names} on the code host already? squad-kit looks by itself every few minutes, or now:`} />
+        )}
         <div className="lbl">How to build {t.id}</div>
         <div className="opts2" style={{ gridTemplateColumns: '1fr' }}>
           {ways.map((w) => (
@@ -111,6 +114,36 @@ export function DependsCard({ t }: { t: Ticket }) {
         <Cmd text={`squad build ${t.id} ${COMMAND[chosen?.way ?? 'branch']}`} />
       </div>
     </>
+  );
+}
+
+/** Accepted, with its change not in the base yet: its pull request is open, waits, or clashes. */
+function atMerge(d: Ticket): boolean {
+  return !merged(d) && (d.stage === 'release' || Boolean(d.clashedPr) || (d.waiting?.kind === 'stuck' && d.stuck?.gate === 'merge'));
+}
+
+/**
+ * Check again: asks the code host now whether a pull request was merged there, outside squad-kit. squad-kit also looks
+ * by itself every few minutes. On a story that waits for another, it asks about that one's pull request. One call,
+ * `squad check-merge`; the toast says what it found.
+ */
+export function CheckMerge({ t, text }: { t: Ticket; text: string }) {
+  const act = useAct<{ line: string }>();
+  return (
+    <div className="pills" style={{ alignItems: 'center', marginTop: 10 }}>
+      <span className="note" style={{ fontSize: 13 }}>
+        {text}
+      </span>
+      <button
+        className="btn sm"
+        disabled={act.isPending}
+        title={`squad check-merge ${t.id}`}
+        onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/check-merge`, done: (r) => r.line })}
+      >
+        <RefreshCw size={13} className={act.isPending ? 'spin' : undefined} /> {act.isPending ? 'Asking the code host…' : 'Check again'}
+      </button>
+      <Cmd text={`squad check-merge ${t.id}`} />
+    </div>
   );
 }
 

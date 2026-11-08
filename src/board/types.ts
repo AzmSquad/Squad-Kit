@@ -389,6 +389,9 @@ export interface SpecChange {
  */
 export type Track = 'full' | 'express' | 'auto';
 
+/** The label of a story built without new tests (Ticket.noNewTests), on its card, its proof and the release notes. */
+export const NO_NEW_TESTS_LABEL = 'Built without new tests';
+
 export interface AgentQuestion {
   from: 'architect' | 'builder' | 'reviewer';
   text: string;
@@ -607,6 +610,13 @@ export interface Ticket {
   /** The pull request opened after the proof was accepted. */
   /** The pull request on the code host module named in host. */
   pr?: { id: number; url: string; repo: string; host: string };
+  /**
+   * The pull request that clashed with the base, kept while the clash card waits: it stays open on the code host, and a
+   * person may settle the clash there and merge it (engine/merged-outside.ts).
+   */
+  clashedPr?: { id: number; url: string; repo: string; host: string };
+  /** The pull request (its number) the code host closed without merging: said once on the ticket, not asked about by itself again. */
+  prClosed?: number;
   /** When the change went into the base branch. Accepted work merges right away, so later tickets build on it. */
   mergedAt?: string;
   /** Installing packages and running migrations in the person's own checkout, after the merge moved it. */
@@ -680,6 +690,12 @@ export interface Ticket {
    * build, checks, review or your Looks right. Missing means Full.
    */
   track?: Track;
+  /**
+   * "Write new tests" was off on the new story form, on any track: the Builder writes no new tests and the Reviewer asks
+   * for none. squad-kit still runs the project's own checks, the review and the proof, and the story says "Built without
+   * new tests" on its card, its proof and the release notes.
+   */
+  noNewTests?: boolean;
   /** A question from an agent in the middle of its work. The ticket waits; the answer goes back into the same session. */
   agentQuestion?: AgentQuestion;
   /** How many notes each agent session has been given, so a running agent gets new ones at its next step. */
@@ -843,6 +859,10 @@ export interface StepRun {
   step: TimedStep;
   from: string;
   to: string;
+  /** The stage the ticket was in. Steps kept before it was kept go by their kind (board/now.ts). */
+  stage?: Stage;
+  /** The checks step used the Builder's own passing run of these checks instead of running them again; `all`: of every one. */
+  builderRun?: { checks: string[]; all?: boolean };
 }
 
 /** The stage the ticket is in since when, and the seconds it spent in each stage before. */
@@ -850,6 +870,9 @@ export interface StageTimes {
   stage: Stage;
   since: string;
   spent: Partial<Record<Stage, number>>;
+  /** Of those seconds, the ones it waited for the person in each stage, and since when it waits for them now. */
+  yours?: Partial<Record<Stage, number>>;
+  yoursSince?: string;
 }
 
 export interface HandOver {
@@ -1041,6 +1064,8 @@ export interface BoardMeta {
   commands?: ProjectCommands;
   /** The person chose to go on without tests in this project: the checks show "Not checked", and squad-kit asks once. */
   noTests?: { by: string; at: string; ticket: string };
+  /** An engineer chose that every story writes new tests: the "Write new tests" switch is not offered on a new story. */
+  alwaysNewTests?: boolean;
   git?: { base: string; remote: string };
   scan?: { status: 'pending' | 'running' | 'done' | 'failed'; at?: string; error?: string; summary?: string; empty?: boolean; now?: string; fromNothing?: boolean };
   /** The project's first run, step by step, on this computer (src/board/setup-state.ts). */

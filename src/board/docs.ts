@@ -103,6 +103,7 @@ const HEADER_KEYS = [
   'outside',
   'archived',
   'track',
+  'noNewTests',
   'createdAt',
   'createdBy',
   'builder',

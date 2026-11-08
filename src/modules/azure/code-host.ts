@@ -22,6 +22,10 @@ export class AzureRepo implements RepoHost {
     return this.az.findPullRequest(this.repo, source);
   }
 
+  lastPullRequest(source: string): Promise<PullRequest | null> {
+    return this.az.lastPullRequest(this.repo, source);
+  }
+
   // Azure Repos shows pull request descriptions as Markdown, so they go as written.
   openPullRequest(input: { source: string; target: string; title: string; description: string; items: string[] }): Promise<PullRequest> {
     return this.az.createPullRequest({ repo: this.repo, source: input.source, target: input.target, title: input.title, description: input.description, workItemIds: input.items.map(Number).filter((n) => n > 0) });
@@ -38,6 +42,7 @@ export class AzureRepo implements RepoHost {
   async mergeState(prId: number): Promise<MergeState> {
     const pr = await this.az.getPullRequest(this.repo, prId);
     if (pr.status === 'completed') return 'merged';
+    if (pr.status === 'abandoned') return 'closed';
     if (pr.mergeStatus === 'conflicts') return 'clash';
     return pr.mergeStatus === 'succeeded' ? 'mergeable' : 'waiting';
   }

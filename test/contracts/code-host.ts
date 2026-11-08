@@ -53,6 +53,21 @@ export function codeHostContract(name: string, make: () => CodeHostFixture): voi
       expect((await host.merge(pr.id, 'Merge x')).commit).toBeTruthy();
     });
 
+    it('says when a pull request was closed without merging, and finds a merged one again by its branch', async () => {
+      const { host } = make();
+      const closed = await host.openPullRequest({ source: 'squad/pay-44', target: 'main', title: 'x', description: 'x', items: [] });
+      await host.close(closed.id);
+      expect(await host.mergeState(closed.id)).toBe('closed');
+      const merged = await host.openPullRequest({ source: 'squad/pay-45', target: 'main', title: 'x', description: 'x', items: [] });
+      await host.merge(merged.id, 'Merge x');
+      // No longer open, so only the search in any state finds it.
+      expect(await host.findPullRequest('squad/pay-45')).toBeNull();
+      if (host.lastPullRequest) {
+        expect((await host.lastPullRequest('squad/pay-45'))?.id).toBe(merged.id);
+        expect(await host.lastPullRequest('squad/other')).toBeNull();
+      }
+    });
+
     it('knows when a branch only takes pull requests, and lets git sign in', () => {
       const { host, refusedMessage } = make();
       expect(host.refusedPush(refusedMessage)).toBe(true);

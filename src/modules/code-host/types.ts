@@ -8,8 +8,11 @@ export interface PullRequest {
   url: string;
 }
 
-/** Where a pull request stands: ready to merge, merged, clashing with newer changes in the base, or waiting. */
-export type MergeState = 'mergeable' | 'merged' | 'clash' | 'waiting';
+/**
+ * Where a pull request stands: ready to merge, merged, clashing with newer changes in the base, waiting, or closed
+ * without merging.
+ */
+export type MergeState = 'mergeable' | 'merged' | 'clash' | 'waiting' | 'closed';
 
 /** One repo on a code host. */
 export interface RepoHost {
@@ -24,6 +27,11 @@ export interface RepoHost {
   gitEnv(): Record<string, string>;
   /** The open pull request from a branch, so a retry does not open a second one. */
   findPullRequest(source: string): Promise<PullRequest | null>;
+  /**
+   * The newest pull request from a branch, open, merged or closed, so one a person merged on the host is found again.
+   * A module without it leaves it out.
+   */
+  lastPullRequest?(source: string): Promise<PullRequest | null>;
   /** Opens a pull request; items are tracker item ids to link when the host can. Descriptions are Markdown. */
   openPullRequest(input: { source: string; target: string; title: string; description: string; items: string[] }): Promise<PullRequest>;
   /** Uploads an image and returns a link to use in the description. Only when abilities.attachImages. */

@@ -21,6 +21,7 @@ import { HOOK_MS, NETWORK_GIT_MS } from './git.js';
 import { DEFAULT_QUALITY, QUALITIES, QUALITY_NOTE, QUALITY_PRESETS } from './levels.js';
 import { BEFORE_SHOTS_MS, BLIP_WAITS_MIN, BUILD_STEP_MS, KEPT_APP_MS, MAX_CHECK_TRIES, MAX_REVIEW_ROUNDS, PROOF_STEP_MS, REVIEW_STEP_MS, WORDS_STEP_MS } from './live.js';
 import { MAX_NOTE_BYTES } from './media.js';
+import { OUTSIDE_LOOK_MS } from './merged-outside.js';
 import { WAIT_LIMIT_MS } from './product-lock.js';
 import { MIN_SIZE } from './proof-check.js';
 import { MAX_PICTURES, MAX_PICTURES_PER_DONE_WHEN, MAX_PROOF_ROUNDS, MAX_RETAKES } from './proof-verdict.js';
@@ -129,6 +130,7 @@ function lineStages(): HarnessStage[] {
       g('guard', 'A second guard for your project', 'Your tests, app, setup and release run locked in too, with keys hidden and Docker closed.', 'A card: an engineer allows the file, or the plan changes.'),
       g('lane', 'Files no agent can change', "squad-kit's folder, AI instruction files, commit hooks, files an engineer locked. No commit or branch change, and a push is refused.", 'A file goes back, with a line. A moved branch stops the step.'),
       g('local-files', 'Test values, not your own', 'A file marked local gets values kept for stories. No agent can read it.'),
+      y('new-tests', 'New tests', 'The Builder writes tests for every "done when". On a new story you can turn off Write new tests: your project\'s own checks, the review and the proof still run, and the story says "Built without new tests". An engineer can keep it on for every story.', undefined, { note: { auto: 'Always on: a story from the breakdown writes its tests.' } }),
     ]),
     stage('checks', 'Checks', "squad-kit runs your project's own checks. No agent is asked if they passed.", on(squad('squad-kit')), [
       g('checks', "Your project's own checks", "Test, lint and build, plus scripts/check when your project has one. The Builder's word doesn't count. A failed check runs once more, so a flaky test doesn't stop the story. For the tests, the failed ones run on their own first: one that still fails fails the check at once, and if they pass, all the tests run once more and decide.", `The Builder fixes it, up to ${MAX_CHECK_TRIES} tries. Then a card.`),
@@ -161,7 +163,7 @@ function lineStages(): HarnessStage[] {
     stage('merge', 'Merge', 'The story joins the rest of your code.', on(squad('squad-kit')), [
       g('hook', 'Your check on every save', 'Your commit hooks run on every save, inside the guard.', 'The Builder fixes it, or you save without it and say why.'),
       g('merge', 'A clean merge', 'The latest code comes in first. A clash is never forced.', 'A card.', { note: { auto: `Up to ${MAX_BASE_TRIES} tries first.` } }),
-      g('pull-request', 'Pull requests', 'squad-kit opens and merges them. Waiting for an approver is a normal wait.', 'Try again, or let the release merge the work.'),
+      g('pull-request', 'Pull requests', `squad-kit opens and merges them. Waiting for an approver is a normal wait. One merged on the code host is noticed within ${OUTSIDE_LOOK_MS / 60_000} minutes, or at once with Check again.`, 'Try again, or let the release merge the work.'),
       g('checkout', 'Your own copy is safe', 'With changes in the same files, the merge waits. It never overwrites them.'),
     ]),
     stage('release', 'Release', 'You choose what goes out and when. Every track stops here.', on(you('You decide')), [
@@ -247,6 +249,7 @@ function limitRows(meta?: BoardMeta): HarnessLimit[] {
     time({ NETWORK_GIT_MS }, 'Reaching your code host', 'One push, pull or fetch.'),
     time({ PIPELINE_MS }, 'Your after-release step', 'Inside the guard, after a release.'),
     time({ MAX_LANDING_WAIT_MS }, 'Waiting for a story to merge', 'On Builds by itself.'),
+    time({ OUTSIDE_LOOK_MS }, 'Looking for merges on your code host', 'Pull requests merged there, outside squad-kit. Check again looks now.'),
     time({ WAIT_LIMIT_MS }, 'Waiting for the product'),
     time({ TRY_YIELDS_AFTER_MS }, 'Trying a story yourself', 'Once another story needs it.'),
     time({ QUIET_MS }, 'Quiet before a look', 'Then the watchdog looks.'),
@@ -331,6 +334,7 @@ function rowDetails(meta: BoardMeta | undefined, root: string | undefined): Reco
     guard: code('engine/project-guard.ts', ['On this computer', state(guard.on, guard.why)], ['Network', networkPolicy(level).commands === 'this-computer' ? 'Only this computer (Off)' : 'Open'], ['Also allowed', [...(meta?.guard?.allowRead ?? []), ...(meta?.guard?.allowWrite ?? [])].join(', ') || 'None yet']),
     lane: code('engine/lane.ts', ['Locked here', names(meta?.lockedFiles)]),
     'local-files': code('engine/local-files.ts', ['Local here', names(meta?.localFiles)]),
+    'new-tests': code('engine/prompts.ts', ['Here', meta?.alwaysNewTests ? 'Always on: every story writes new tests' : 'Your choice on each new story, on by default'], ['Set in', 'Settings']),
     checks: code('engine/checks.ts', ['Runs', run('test', 'lint', 'build')], ['Limit', `${MAX_CHECK_TRIES} tries, ${min(CHECK_MS)} each, ${min(CHECK_SILENT_MS)} with no output`], ['Decided by', 'The exit code, never an agent'], ['See it in', tab('Developer')]),
     'old-tests': code('engine/old-tests.ts', ['Runs', run('test')], ['Limit', `${MAX_OLD} failed tests, each up to ${MAX_RUNS_ON_MAIN} times, ${min(ON_MAIN_MS)} in all`], ['Reads', 'Playwright, Vitest, Jest, pytest and go test'], ['See it in', 'The proof page and the Releases page']),
     weakened: code('engine/weakened.ts', ['Looks at', 'Deleted tests, skip marks, fewer tests, test settings'], ['See it in', tab('Changes')]),

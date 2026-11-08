@@ -390,6 +390,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
         edgeCases: b.edgeCases,
         files: b.files,
         talkFirst: Boolean(b.talkFirst),
+        ...(b.noNewTests === true ? { noNewTests: true } : {}),
         ...(typeof b.key === 'string' && b.key ? { key: b.key.slice(0, 80) } : {}),
       }),
     );
@@ -626,7 +627,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
         targets: targets(r),
         items: r.tickets.map((id) => {
           const t = tickets.find((x) => x.id === id);
-          return { id, title: titleOf(id, r), gates: t?.gates ?? null, kind: t?.kind ?? 'feature', ...(t?.outside ? { outside: t.outside } : {}) };
+          return { id, title: titleOf(id, r), gates: t?.gates ?? null, kind: t?.kind ?? 'feature', ...(t?.outside ? { outside: t.outside } : {}), ...(t?.noNewTests ? { noNewTests: true } : {}) };
         }),
       })),
     );
@@ -713,6 +714,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
       delivery?: 'pr' | 'push' | null;
       runner?: 'acp' | 'direct';
       documentsInGit?: boolean;
+      alwaysNewTests?: boolean;
       quality?: string;
       allowedHosts?: string[];
       network?: string;
@@ -760,6 +762,9 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
       else if (typeof b.atOnce === 'number' && b.atOnce >= 1 && b.atOnce <= 5) meta.atOnce = Math.round(b.atOnce);
       if (b.runner === 'acp' || b.runner === 'direct') meta.runner = b.runner;
       if (typeof b.documentsInGit === 'boolean') meta.documentsInGit = b.documentsInGit;
+      // Left out when off, so a project that never chose has nothing new in its settings file.
+      if (b.alwaysNewTests === true) meta.alwaysNewTests = true;
+      else if (b.alwaysNewTests === false) delete meta.alwaysNewTests;
       if (b.repos && meta.repos) {
         meta.repos = meta.repos.map((r) => {
           const u = b.repos!.find((x) => x.path === r.path);

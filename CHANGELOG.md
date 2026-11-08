@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **squad-kit notices a pull request merged outside it.** A story whose pull request clashed with main waited at
+  "Clashes with main" for good, even after someone settled the clash and merged it on Azure Repos, and the stories that
+  waited for it kept waiting. Now squad-kit asks the code host about each pull request it opened that is still open: a
+  few seconds after the board opens a project, and every 5 minutes while it runs, with one question per open pull
+  request and none when there are none. When one was merged there, squad-kit records it as its own merge: the story
+  is merged and in the next release, your own copy of main catches up, the tracker item moves on, the story says
+  "Pull request 14 was merged on Azure Repos. squad-kit saw it and marked the story as merged", and the stories that
+  wait for it start. A pull request closed without merging gets one plain line on the story and nothing else. Nothing
+  else adds a line. **Check again** asks now: on the clash card, on a story whose pull request is open or waits, and on
+  the card of a story that waits for another one. Terminal: `squad check-merge <ticket>`.
+- **"Write new tests", a switch on every new story.** On by default, on any track. Turn it off for a demo, a small
+  text or colour change, or a project with no tests yet: the plan and the Builder add no new tests, and the Reviewer does
+  not ask for them. squad-kit still runs your project's own checks (tests, lint, build), the review and the proof, so a
+  break of what already works still shows. The story says "Built without new tests" on its card, its proof, its pull
+  request and the release notes. An engineer can keep new tests on for every story of a project in Settings, shared with
+  the team; the switch is then gone. Terminal: `squad new --no-new-tests`, `squad config set new-tests always` (or
+  `switch`).
+
+### Changed
+
+- **Stage times count only the squad's own work.** The times under a story's title counted every wait: "Specs 45 min"
+  when the agents worked 3 minutes and the rest was waiting for your answers and approval. Each stage now shows the time
+  of its agents' own steps; a wait for you, for another story or a free place, and a chat are not counted. A long wait
+  gets a small second line, like "waited 25 min for you". When the checks used the Builder's own passing run, Test says
+  so: "3 s · checked with the Builder's run".
+- **The checks use the Builder's passing test run on its own.** When squad-kit ran only the tests for the Builder, and
+  they passed on exactly the same code, the checks step no longer runs those minutes of tests again. Each check counts on
+  its own: the ones the Builder's run did not cover (lint, build) run as usual, in seconds. A run of one test file, an
+  edit after the run, or a run from an earlier round of the Builder still never counts.
+
+### Fixed
+
+- **Every "done when" keeps its picture in the pull request.** One picture often proves two "done when"s. squad-kit
+  uploaded it once for each, Azure Repos refused the second upload of the same file, and that row had no picture in the
+  pull request. Each picture now goes up once, and its link shows in every row it proves.
+- **The Builder's step on the card follows a numbered to-do list.** When the Builder's to-do list has an item of its own
+  besides the plan's steps ("Check everything"), the card stayed on its step. squad-kit now reads the step numbers on the
+  list ("1. …", "Step 2: …", "2) …"), and follows the list item by item, as before, when it has none.
+
 ## [1.3.3] — 2026-11-08
 
 ### Added

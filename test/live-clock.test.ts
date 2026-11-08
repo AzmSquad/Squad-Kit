@@ -37,7 +37,7 @@ vi.mock('../src/modules/claude/direct.js', async (orig) => ({
 
 const { boardPaths, readMeta, readTicket, updateTicket, writeMeta } = await import('../src/board/store.js');
 const { createTicket, keepWaiting, restartStep } = await import('../src/board/actions.js');
-const { LiveSquad } = await import('../src/engine/live.js');
+const { LiveSquad, planStepOf } = await import('../src/engine/live.js');
 const { ensureLiveBoard, setupProject } = await import('../src/engine/setup.js');
 const { setParallelLimit } = await import('../src/core/settings.js');
 const { addWorktree } = await import('./support/copy.js');
@@ -124,6 +124,8 @@ describe('the Builder on the clock', () => {
     const done = readTicket(bp, id)!;
     expect(done.clock).toBeUndefined();
     expect(done.stage).toBe('test');
+    // The history keeps the stage each step ran in, for the tracker's work times.
+    expect(done.history?.map((h) => [h.step, h.stage])).toEqual([['build', 'implement']]);
     // Step 1 took from the start to ">> step 2", then one minute each.
     expect(readUsual(bp)[usualKey('builder', 'build', 'full')]).toEqual([122, 61, 61]);
   });
@@ -158,6 +160,39 @@ describe('the Builder on the clock', () => {
       look();
     });
     expect(seen).toEqual([1, 2, 3, 3]);
+  });
+
+  it('reads the step numbers on its to-do list, so an item of its own does not throw it off; with none, one item per step', async () => {
+    const seen = await builderSays('numbered', (opts, look) => {
+      type Status = 'pending' | 'in_progress' | 'completed';
+      const plan = (...items: [string, Status][]) => opts.onPlan?.(items.map(([content, status]) => ({ content, status })));
+      // Four items for three steps: the numbers say where it is, and "Check everything" is its own.
+      plan(['1. Start from the booking page', 'completed'], ['2. Show how many fit', 'in_progress'], ['3. Tests', 'pending'], ['Check everything', 'pending']);
+      look();
+      plan(['Step 1: Start from the booking page', 'completed'], ['Step 2: Show how many fit', 'completed'], ['Step 3: Tests', 'pending'], ['Check everything', 'pending']);
+      look();
+      // Only forward: a number it has gone past, and one the plan does not have, change nothing.
+      plan(['1) Start from the booking page', 'in_progress'], ['9) Ship it', 'in_progress']);
+      look();
+    });
+    expect(seen).toEqual([2, 3, 3]);
+
+    const plain = await builderSays('unnumbered', (opts, look) => {
+      const plan = (...status: ('pending' | 'in_progress' | 'completed')[]) => opts.onPlan?.(status.map((st, i) => ({ content: ['Read the page', 'Count', 'Tests', 'Check everything'][i]!, status: st })));
+      // No numbers, and an item more than the plan's steps: today's rule, so it says nothing.
+      plan('completed', 'in_progress', 'pending', 'pending');
+      look();
+      // No numbers, one item per step: by their order.
+      plan('completed', 'in_progress', 'pending');
+      look();
+    });
+    expect(plain).toEqual([0, 2]);
+
+    // The ways a step number is written, and words that only start with a number.
+    const at = (content: string, count = 5) => planStepOf([{ content, status: 'in_progress' }], count);
+    expect(['1. Start', 'Step 2: Count', 'step 3 - Warn', '4) Same in the API', '(5) Tests'].map((c) => at(c))).toEqual([0, 1, 2, 3, 4]);
+    expect(['1.5x faster pictures', '10 tests to add', 'Steps 1 to 3', 'Check everything'].map((c) => at(c, 12))).toEqual([null, null, null, null]);
+    expect(planStepOf([{ content: '1. Start', status: 'completed' }, { content: '2. Count', status: 'completed' }, { content: 'Check everything', status: 'in_progress' }], 3)).toBe(2);
   });
 
   it('reads ">> step N" cut in two, or said through a command, never goes back, and skips a step the plan does not have', async () => {

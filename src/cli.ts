@@ -49,6 +49,7 @@ import {
   runNew,
   runPull,
   runQuality,
+  runNewTests,
   runBacklog,
   runUnstick,
   runRelease,
@@ -68,7 +69,7 @@ import {
 } from './commands/config/index.js';
 import { runRmFeature, runRmPlan, runRmStory } from './commands/rm/index.js';
 import { runArchive, runDelete } from './commands/delete.js';
-import { runBranches, runBringIn, runBuild, runDepends } from './commands/depends.js';
+import { runBranches, runBringIn, runBuild, runCheckMerge, runDepends } from './commands/depends.js';
 import { runDecided } from './commands/decided.js';
 import { runConfigBudget, runConfigPayment, runCost } from './commands/cost.js';
 import { runAuthLogin, runAuthStatus, runAuthLogout } from './commands/auth/index.js';
@@ -559,6 +560,10 @@ program
   .description("Bring the latest main into a ticket's copy of the code; the checks, review and proof run again")
   .action(wrapArgs(runBringIn));
 program
+  .command('check-merge <ticket>')
+  .description("Check again: ask the code host now whether a ticket's pull request, or the one it waits for, was merged there")
+  .action(wrapArgs(runCheckMerge));
+program
   .command('branches')
   .description('Show the old branches of released tickets')
   .option('--clean', 'Delete them on this computer (never one with work that is not in main)')
@@ -582,6 +587,7 @@ program
   .option('--express', 'Express track: no questions and the plan is approved on its own; build, checks, review and Looks right still run')
   .option('--full', 'Full track (the default): every step, with your approvals')
   .option('--talk', 'Talk it through with the Analyst first, instead of questions: squad chat <ticket>')
+  .option('--no-new-tests', "Build it without new tests, on any track: the project's own checks, the review and the proof still run")
   .option('--criteria <text>', 'An acceptance criterion (repeat for more)', more, [])
   .option('--rule <text>', 'A business rule (repeat for more)', more, [])
   .option('--edge <text>', 'An edge case to handle (repeat for more)', more, [])
@@ -694,6 +700,10 @@ set
   .option('--type <name>', 'Skip the tracker-type prompt (none|jira|azure|github)')
   .option('-y, --yes', 'Fail fast instead of prompting for missing values', false)
   .action(wrap(runConfigSetTracker));
+set
+  .command('new-tests [setting]')
+  .description('Show or set whether a new story may be built without new tests: switch (default, each story chooses) or always')
+  .action(wrapArgs(runNewTests));
 set
   .command('quality [setting]')
   .description('Show or set how strong the squad\'s models are: best (default), balanced or thrifty')

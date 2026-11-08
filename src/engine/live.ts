@@ -53,7 +53,7 @@ import { checkWords, holdTestCommand, noTestsDetail, noTestsQuestion, noTestsRan
 import { findCommands } from './find-commands.js';
 import { samePicture, shotProblem, shotSizeOf } from './proof-check.js';
 import { ShotsUnavailable, isPlain, plainParts, prepareShots, shotsErrorDetail, takeOne, type ShotSize } from './shots.js';
-import { ALL_TOOLS, AgentWindow, toolsFor, tooManyMistakesWords, tooManyWords, type CheckRun, type WindowChecks, type WindowSetup } from './window.js';
+import { ALL_TOOLS, AgentWindow, toolsFor, tooManyMistakesWords, tooManyWords, type CheckName, type CheckRun, type WindowChecks, type WindowSetup } from './window.js';
 import { closeWindow, openWindow, windowAccess } from './window-server.js';
 import { TECHNICAL_TRIES, askText, judgeQuestion, judgeReply, questionBackPrompt, refusedAskLine, refusedReplyLine, stoppedQuestion } from './question-filter.js';
 import { TECHNICAL_STOP, ownRunWords, ownWords } from './plain-stop.js';
@@ -64,6 +64,7 @@ import { gatesChanged, noteGates, runGatesAt as runGatesNow, type GateDone } fro
 import { baseCommits, repoFor, reposOf, rulesFiles, workspaceRepos } from './repos.js';
 import { cleanParts, partsAfterRead, partsOf, repoLabel, runsAsProduct } from '../board/parts.js';
 import { flushTracker, publishTicket, recheckMerge, syncWiki, trackerDue } from './sync.js';
+import { lookOutsideBeside, lookOutsideSoon } from './merged-outside.js';
 import { AGENTS, agentInstructions, readAgent, type AgentRole } from './agents.js';
 import { Watchdog, processTable, type Quiet } from './watchdog.js';
 import { isMediaNote, prepareMedia } from './media.js';
@@ -159,6 +160,38 @@ const CHECKS_WAITED = "The checks waited too long for the app starting in this s
 const APP_WAITED = "squad-kit could not start the app: the tests in this story's copy were still running after a long wait. Press Try again to try once more.";
 /** The checks step uses the Builder's last run of the checks (builderPassed). */
 const CHECKS_PASSED_FOR_BUILDER = 'The checks already passed on this same code when squad-kit ran them for the Builder, so they do not run again';
+
+/** A leading step number on an item of the Builder's to-do list: "1. Start from…", "Step 2: …", "2) …", "3 - …". */
+const STEP_NUMBER = /^\s*(?:step\s*(\d+)\b|\(?(\d+)\s*(?:[.):]|\s[-–])(?=\s|$))/i;
+
+/**
+ * Where the Builder's own to-do list (ACP's plan update) says it is, as a plan step from 0, or null when the list says
+ * nothing about the plan's `count` steps. Items with a leading step number are read by that number, so an extra item
+ * ("Check everything") does not throw it off; with no numbers, the list holds one item per plan step, in order.
+ */
+export function planStepOf(entries: PlanEntry[], count: number): number | null {
+  if (!count) return null;
+  const numbered = entries
+    .flatMap((e) => {
+      const m = STEP_NUMBER.exec(e.content);
+      const n = m ? Number(m[1] ?? m[2]) : NaN;
+      return n >= 1 && n <= count ? [{ n: n - 1, status: e.status }] : [];
+    })
+    .sort((a, b) => a.n - b.n);
+  const list = numbered.length ? numbered : entries.length === count ? entries.map((e, i) => ({ n: i, status: e.status })) : [];
+  if (!list.length) return null;
+  const doing = list.find((e) => e.status === 'in_progress');
+  const open = list.find((e) => e.status !== 'completed');
+  return doing ? doing.n : open ? open.n : Math.min(count - 1, list[list.length - 1]!.n + 1);
+}
+
+/** Some of the checks come from the Builder's own run (builderPassed): those do not run again, and the others do. */
+function someFromBuilder(names: string[]): string {
+  const words = names.map((n) => (n === 'test' ? 'the tests' : n === 'lint' ? 'the code check' : n === 'build' ? 'the build' : `the ${n} check`));
+  const what = words.length > 1 ? `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}` : words[0]!;
+  const many = words.length > 1 || names[0] === 'test';
+  return `${what.charAt(0).toUpperCase()}${what.slice(1)} already passed on this same code when squad-kit ran ${many ? 'them' : 'it'} for the Builder, so ${many ? 'they do' : 'it does'} not run again. squad-kit is running the other checks`;
+}
 
 /**
  * The checks step's own runs of the project's checks (checks.ts) and of the team's gates (gate-run.ts), each in the
@@ -292,17 +325,19 @@ export class LiveSquad {
    */
   private kept = new Map<string, { app: RunningApp; cwd: string; tree?: string; at: number; leave: () => void }>();
   /**
-   * The Builder's last run_checks of every saved check in a ticket's copy, by the copy's folder, when all of them passed
-   * in its current round: the copy's code as the run started (`tree`), and what each check printed. The checks step may
-   * use it instead of running the same commands again (builderPassed). Kept in memory only: after a restart the checks
-   * step simply runs them.
+   * The Builder's last passing run_checks of each saved check in a ticket's copy, in its current round, by the copy's
+   * folder and the check's name: the copy's code as the run started (`tree`), and what the check printed. The checks
+   * step may use each instead of running that check again (builderPassed). Kept in memory only: after a restart the
+   * checks step simply runs them.
    */
-  private builderRuns = new Map<string, Map<string, { tree: string; ran: CheckResult[]; at: number }>>();
+  private builderRuns = new Map<string, Map<string, Map<string, { tree: string; run: CheckResult; at: number }>>>();
 
   constructor(private bp: BoardPaths) {}
 
   start(intervalMs = 1000): () => void {
     this.resumeAfterRestart();
+    // A pull request merged on the code host while the board was closed is noticed a few seconds after it opens.
+    lookOutsideSoon(this.bp);
     squads.add(this);
     this.timer = setInterval(() => this.safeTick(), intervalMs);
     return () => {
@@ -485,6 +520,8 @@ export class LiveSquad {
     this.watch();
     this.sweepKept();
     this.pickUp();
+    // Pull requests squad-kit opened, merged by a person on the code host: a quiet look now and then, beside the work.
+    lookOutsideBeside(this.bp);
     const limit = parallelLimit(meta.parallel);
     // The AI account's usage limit: nothing new starts in any project until it resets (E5).
     const pause = activePause();
@@ -1325,27 +1362,31 @@ export class LiveSquad {
           x.status = CHECK_DOING[name]!;
           stepDoing(x, x.status);
         }),
-      ...(noted ? { onRun: (all: boolean) => this.noteRun(id, cwd, all) } : {}),
+      ...(noted ? { onRun: (run: { names: CheckName[]; only?: string }) => this.noteRun(id, cwd, run) } : {}),
     };
   }
 
   /**
-   * The Builder's run_checks starts in the copy `cwd`: it is now the latest there, so a run noted before no longer
-   * counts. A run of every saved check notes the copy's code as it starts. Once it ran to its end, every check passed and
-   * the code is still the same, the checks step may use its results instead of running the same commands again. Only in
-   * the round it started in (runBuilder): one taken by the checks step, or a new round, notes nothing more.
+   * The Builder's run_checks starts in the copy `cwd`: it is now the latest run there of each check it runs, so a run of
+   * those noted before no longer counts. It notes the copy's code as it starts. Once it ran to its end and the code is
+   * still the same, each check of it that passed with its whole saved command (not one test file) may stand for that
+   * check at the checks step, instead of running it again. Only in the round it started in (runBuilder): one taken by
+   * the checks step, or a new round, notes nothing more.
    */
-  private async noteRun(id: string, cwd: string, all: boolean): Promise<((ran: CheckRun[]) => Promise<void>) | undefined> {
+  private async noteRun(id: string, cwd: string, run: { names: CheckName[]; only?: string }): Promise<((ran: CheckRun[]) => Promise<void>) | undefined> {
     const notes = this.builderRuns.get(id);
-    notes?.delete(cwd);
-    const tree = notes && all ? await treeOf(cwd) : undefined;
+    for (const name of run.names) notes?.get(cwd)?.delete(name);
+    const tree = notes ? await treeOf(cwd) : undefined;
     if (!notes || !tree) return undefined;
     const at = Date.now();
     return async (ran) => {
-      if (!ran.length || ran.some((r) => !r.ok || r.ended)) return;
+      const passed = ran.filter((r) => r.ok && !r.ended && !r.only);
+      if (!passed.length) return;
       // An edit while it ran: the run may have seen some of the new code, or none of it.
       if ((await treeOf(cwd)) !== tree || this.builderRuns.get(id) !== notes) return;
-      notes.set(cwd, { tree, ran: ran.map((r) => ({ name: r.name, command: r.command, ok: r.ok, output: r.output, seconds: r.seconds })), at });
+      const here = notes.get(cwd) ?? new Map<string, { tree: string; run: CheckResult; at: number }>();
+      for (const r of passed) here.set(r.name, { tree, run: { name: r.name, command: r.command, ok: r.ok, output: r.output, seconds: r.seconds }, at });
+      notes.set(cwd, here);
     };
   }
 
@@ -3139,13 +3180,11 @@ export class LiveSquad {
       const m = [...said.matchAll(/>>\s*step\s+(\d+)/gi)].pop();
       if (m) reached(Number(m[1]) - 1);
     };
-    // Its own to-do list (ACP's plan update), when it keeps one entry per plan step: where it really is, step by step.
+    // Its own to-do list (ACP's plan update), by the step numbers of its items or one item per plan step: where it really
+    // is, step by step (planStepOf).
     const planSaid = (entries: PlanEntry[]) => {
-      const steps = readTicket(this.bp, id)?.steps ?? [];
-      if (!steps.length || entries.length !== steps.length) return;
-      const doing = entries.findIndex((e) => e.status === 'in_progress');
-      const open = entries.findIndex((e) => e.status !== 'completed');
-      reached(doing >= 0 ? doing : open >= 0 ? open : steps.length - 1);
+      const n = planStepOf(entries, readTicket(this.bp, id)?.steps?.length ?? 0);
+      if (n !== null) reached(n);
     };
     const watch = this.watcher(id, 'builder', cwd, (line, x) => {
       const doing = x.steps?.find((s) => s.status === 'doing');
@@ -3613,38 +3652,39 @@ export class LiveSquad {
   }
 
   /**
-   * The Builder's last run_checks in each copy this checks step runs in, used instead of running the same commands
-   * again: it ran every check the step runs now, with the same commands, in that copy, all of them passed, and the copy's
-   * code is the same as when it started (noteRun). A story with several parts needs one in each part it checks, or the
-   * checks run in all of them; a new test command still to be tried runs them too. Taken by this step either way: a
-   * later checks step with no new round of the Builder runs them itself. Null when the checks run as usual.
+   * What the checks step takes from the Builder's own run_checks in each copy it runs in, check by check, instead of
+   * running that check again: the Builder's latest run of it in that copy passed, with the command saved for it now and
+   * its whole saved command, and the copy's code is the same as when that run started (noteRun). The checks it has no
+   * such run of run as usual, in each part on its own. A new test command still to be tried runs them all. Taken by this
+   * step either way: a later checks step with no new round of the Builder runs them itself. Null when nothing is taken.
    */
   private async builderPassed(id: string, t: Ticket, copies: CopyOf[]): Promise<Map<CopyOf, CheckResult[]> | null> {
     const notes = this.builderRuns.get(id);
     this.builderRuns.delete(id);
     if (!notes?.size) return null;
-    const out = new Map<CopyOf, CheckResult[]>();
-    let why = t.testChange && !t.testChange.ask ? 'a new test command is still to be tried' : '';
-    for (const c of why ? [] : copies) {
-      const note = notes.get(c.dir);
-      const want = checksToRun(c.dir, c.repo.commands);
-      if (!note) why = `it has no passing run of every check in ${c.label}`;
-      else if (want.length !== note.ran.length || want.some((w, i) => w.name !== note.ran[i]!.name || w.command !== note.ran[i]!.command)) why = `the checks now are not the ones it ran (${want.map((w) => `${w.name}: ${w.command}`).join('; ')})`;
-      else if (startsToo(c.repo.commands, note.ran)) why = 'no tests ran, so the checks also start the app';
-      else if ((await treeOf(c.dir)) !== note.tree) why = `the code in ${c.label} changed since that run started`;
-      if (why || !note) break;
-      out.set(c, note.ran);
-    }
-    if (why) {
-      this.log('info', `squad-kit runs the checks itself, not using the Builder's last run_checks: ${why}`, id);
+    if (t.testChange && !t.testChange.ask) {
+      this.log('info', "squad-kit runs the checks itself, not using the Builder's last run_checks: a new test command is still to be tried", id);
       return null;
     }
-    if (!out.size) return null;
-    for (const [c, ran] of out) {
-      const note = notes.get(c.dir)!;
-      this.log('info', `squad-kit uses the Builder's run_checks from ${new Date(note.at).toISOString()} in ${c.label} instead of running the same commands again: they all passed in the same copy, on the same code (tree ${note.tree.slice(0, 12)}): ${ran.map((r) => `${r.name}: ${r.command}`).join('; ')}`, id);
+    const out = new Map<CopyOf, CheckResult[]>();
+    for (const c of copies) {
+      const here = notes.get(c.dir);
+      if (!here?.size) continue;
+      const tree = await treeOf(c.dir);
+      const taken: CheckResult[] = [];
+      for (const w of checksToRun(c.dir, c.repo.commands)) {
+        const note = here.get(w.name);
+        if (!note) continue;
+        const why = note.run.command !== w.command ? `the checks now are not the ones it ran (${w.name}: ${w.command})` : note.tree !== tree ? `the code in ${c.label} changed since that run started` : '';
+        if (why) this.log('info', `squad-kit runs ${w.name} itself, not using the Builder's last run_checks: ${why}`, id);
+        else {
+          taken.push(note.run);
+          this.log('info', `squad-kit uses the Builder's run_checks from ${new Date(note.at).toISOString()} in ${c.label} for ${w.name} instead of running it again: it passed in the same copy, on the same code (tree ${note.tree.slice(0, 12)}): ${note.run.command}`, id);
+        }
+      }
+      if (taken.length) out.set(c, taken);
     }
-    return out;
+    return out.size ? out : null;
   }
 
   private async checks(id: string): Promise<void> {
@@ -3667,13 +3707,17 @@ export class LiveSquad {
     // A part the story did not change has nothing new to check, unless nothing changed at all.
     const changed: typeof copies = [];
     for (const c of copies) if (!several || (c.baseCommit && (await workSoFar(c.dir, c.baseCommit)).length)) changed.push(c);
-    // The Builder's last run of every check passed on this very code: its results stand, and the commands do not run again.
+    // The Builder's own passing runs of the checks on this very code stand, check by check: those commands do not run again.
     const passed = await this.builderPassed(id, t, changed.length ? changed : copies.slice(0, 1));
+    /** All of a copy's checks are known from the Builder's run, and none needs the app started: nothing runs there. */
+    const whole = (dir: string, commands: ProjectCommands, had: CheckResult[]) => had.length > 0 && checksToRun(dir, commands).every((w) => had.some((k) => k.name === w.name && k.command === w.command)) && !startsToo(commands, had);
+    const reused = ['test', 'lint', 'build'].filter((n) => [...(passed?.values() ?? [])].some((ran) => ran.some((r) => r.name === n)));
+    const allReused = Boolean(passed) && (changed.length ? changed : copies.slice(0, 1)).every((c) => whole(c.dir, c.repo.commands, passed?.get(c) ?? []));
     this.update(id, (x) => {
       x.stage = 'test';
       x.live = true;
       x.gates = { checks: 'pending', review: x.gates?.review ?? 'pending', proof: 'pending' };
-      addActivity(x, 'tester', passed ? CHECKS_PASSED_FOR_BUILDER : 'squad-kit is running the project checks');
+      addActivity(x, 'tester', allReused ? CHECKS_PASSED_FOR_BUILDER : reused.length ? someFromBuilder(reused) : 'squad-kit is running the project checks');
       startStep(x, { who: 'squad', step: 'checks', limit: 15 });
     });
     const mark = sleepMark();
@@ -3694,7 +3738,8 @@ export class LiveSquad {
       // The checks run the Builder's code, which may write in its copy: never in the project's own check.
       const hookLane = await watchLane(c.dir, hookFiles(c.dir));
       if (!t.testChange?.repo || t.testChange.repo === c.repo.path) commands = await this.tryTestChange(id, c.dir, commands, guard, mark);
-      const ran = passed?.get(c) ?? (await runChecks(c.dir, commands, onStart, { ...this.commandWatch(id), ...(guard ? { guard } : {}) }));
+      const had = passed?.get(c) ?? [];
+      const ran = whole(c.dir, commands, had) ? had : await runChecks(c.dir, commands, onStart, { ...this.commandWatch(id), ...(guard ? { guard } : {}) }, undefined, had);
       const hooksBack = (await checkLane(hookLane)).restored;
       if (hooksBack.length) this.update(id, (x) => addActivity(x, 'squad', `The project's checks changed the check that runs on every save (${hooksBack.slice(0, 6).join(', ')}); squad-kit put it back. Changing that check stays with you or an engineer`));
       // A check that needed a file outside its copy, which the guard blocked: one plain sentence, not a failed try.
@@ -3755,7 +3800,7 @@ export class LiveSquad {
       });
       return;
     }
-    this.update(id, (x) => endStep(this.bp, x));
+    this.update(id, (x) => endStep(this.bp, x, Date.now(), reused.length ? { builderRun: { checks: reused, ...(allReused ? { all: true } : {}) } } : {}));
     // Failed once, then passed: no failed try and no Builder. One plain line here; the Developer tab and the log say more.
     for (const r of results.filter((x) => x.failedFirst !== undefined)) {
       this.log('warn', `${shown(r)} failed once and passed when run again (${r.command}):\n${r.failedFirst}`, id);
@@ -4487,7 +4532,7 @@ export class LiveSquad {
       x.live = true;
       x.status = 'Builder is fixing what the screenshots show';
     });
-    await this.runBuilder(id, P.proofFixPrompt(rows.map(fixLine)), true);
+    await this.runBuilder(id, P.proofFixPrompt(rows.map(fixLine), !readTicket(this.bp, id)?.noNewTests), true);
     this.afterProofFix(id);
   }
 
@@ -4525,7 +4570,7 @@ export class LiveSquad {
       x.live = true;
       x.status = 'Builder is fixing what the screenshots show';
     });
-    await this.runBuilder(id, P.proofFixPrompt(rows.map(fixLine)), Boolean(t.sessions?.build));
+    await this.runBuilder(id, P.proofFixPrompt(rows.map(fixLine), !t.noNewTests), Boolean(t.sessions?.build));
     this.afterProofFix(id);
   }
 

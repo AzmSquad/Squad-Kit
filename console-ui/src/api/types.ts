@@ -336,6 +336,10 @@ export interface Ticket {
   kind: 'feature' | 'bug';
   source: { type: string; ref?: string; id?: string; url?: string; itemType?: string };
   pr?: { id: number; url: string; repo: string; host: string };
+  /** The pull request that clashed with the base, kept while the clash card waits: a person may merge it on the code host. */
+  clashedPr?: { id: number; url: string; repo: string; host: string };
+  /** The pull request the code host closed without merging. */
+  prClosed?: number;
   /** Installing packages and running migrations in the person's own checkout, after the merge moved it. */
   /** Decisions approved after this ticket was planned that change it, waiting for the person. */
   outdated?: { adr: string; why: string; change: string; at: string }[];
@@ -412,6 +416,8 @@ export interface Ticket {
   /** Worked on in a conversation outside squad-kit: on its record for good. */
   outside?: { from?: string; by: string; at: string; checked?: { at: string; by: string; noTests?: boolean } };
   track?: Track;
+  /** "Write new tests" was off on the new story form: the story says "Built without new tests". */
+  noNewTests?: boolean;
   agentQuestion?: {
     from: 'architect' | 'builder' | 'reviewer';
     text: string;
@@ -543,7 +549,8 @@ export interface LiveNow {
   usual?: { low: number; high: number; learned: boolean; runs: number };
   lastAt?: string;
   readyIn?: { seconds: number; what: string };
-  stages: { stage: Stage; note: string }[];
+  /** `wait`: a small second line under a finished stage that waited long, "waited 25 min for you". */
+  stages: { stage: Stage; note: string; wait?: string }[];
   noteWhen: string;
   slow?: SlowCard;
 }
@@ -664,6 +671,8 @@ export interface BoardMeta {
   id?: string;
   /** Off: squad-kit never commits the project's documents (ADR-001). */
   documentsInGit?: boolean;
+  /** An engineer chose that every story writes new tests: no "Write new tests" switch on a new story. */
+  alwaysNewTests?: boolean;
   /** The Quality setting; left out means best. */
   quality?: Quality;
   project: string;
@@ -782,6 +791,7 @@ export interface ReleaseItem {
   gates: Gates | null;
   kind: 'feature' | 'bug';
   outside?: Ticket['outside'];
+  noNewTests?: boolean;
 }
 
 export type ReleaseWithItems = Release & { items: ReleaseItem[]; targets: { repo: string; branch: string; remote: string }[] };

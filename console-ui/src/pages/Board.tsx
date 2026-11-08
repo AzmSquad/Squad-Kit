@@ -14,6 +14,7 @@ import { changeWaits, openChange } from '../components/ChangeCard';
 import { CardLine, isRunning } from '../components/LiveNow';
 import { DependsTag } from '../components/Depends';
 import { OutsideTag } from '../components/Outside';
+import { NoNewTestsTag } from '../components/Gates';
 import { FirstStoryGuide } from '../components/FirstStory';
 import { needsYou, testChangeWaits } from '../lib/waiting';
 import { NOT_CHECKED_WHY } from '../lib/gates';
@@ -203,6 +204,7 @@ function Card({ t, selected, onOpen }: { t: Ticket; selected: boolean; onOpen():
           </span>
         )}
         <OutsideTag t={t} />
+        <NoNewTestsTag t={t} />
         <DependsTag t={t} />
       </div>
       <Written as="h4" text={t.title} />

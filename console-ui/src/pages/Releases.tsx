@@ -11,7 +11,7 @@ import { BugDialog, ReleasedDialog } from '../components/dialogs';
 import { Cmd, CouldNotLoad, Modal, NotesView, Written, dateShort } from '../components/ui';
 import { usePrefs } from '../lib/prefs';
 import { shellQuote } from '../lib/text';
-import { GatePill } from '../components/Gates';
+import { GatePill, NoNewTestsLabel } from '../components/Gates';
 import { noGateRan, oldFailuresWhy, oldShort } from '../lib/gates';
 import { langProps, typedDir } from '../lib/lang';
 
@@ -144,6 +144,7 @@ function ReleaseDetail({ r, onReleased, live }: { r: ReleaseWithItems; onRelease
                 {it.outside.checked ? ', checked' : ''}
               </span>
             )}
+            <NoNewTestsLabel t={it} />
             {noGateRan(it.gates) ? (
               <GatePill state="pending" text="Not checked by squad-kit" />
             ) : it.gates?.checks === 'unchecked' ? (

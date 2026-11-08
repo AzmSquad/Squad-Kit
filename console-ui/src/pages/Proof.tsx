@@ -4,7 +4,7 @@ import { assetUrl } from '../api/client';
 import { useTicket } from '../lib/data';
 import { ProofDecision } from './TicketDrawer';
 import { Lightbox } from '../components/Lightbox';
-import { GatePill as Gate, NotCheckedNote, OldFailuresNote } from '../components/Gates';
+import { GatePill as Gate, NoNewTestsLabel, NotCheckedNote, OldFailuresNote } from '../components/Gates';
 import { checksWords, noShotsText, proofWords } from '../lib/gates';
 import { AlsoChanged, MorePictures, OffScreenList, VerdictIcon, VerdictTag } from '../components/Verdict';
 import { isApiProof, proofViewer, verdictClass, verdictNote } from '../lib/verdict';
@@ -48,6 +48,7 @@ export function ProofPage() {
         <Gate state={g?.checks} text={checksWords(g)} />
         <Gate state={g?.review} text={g?.review === 'skipped' ? 'Review notes open, you continued' : `Review approved${g?.reviewBy ? ` by ${g.reviewBy}` : ''}`} />
         <Gate state={g?.proof} text={proofWords(t)} />
+        <NoNewTestsLabel t={t} />
         <span style={{ marginLeft: 6 }}>Nothing ships without these three.</span>
       </div>
       <NotCheckedNote g={g} className="gatebar-why" />

@@ -24,7 +24,7 @@ import {
 } from './store.js';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { BoardMeta, Decision, ImpactCheck, Release, TechDraft, Ticket, UnpushedRelease } from './types.js';
+import { NO_NEW_TESTS_LABEL, type BoardMeta, type Decision, type ImpactCheck, type Release, type TechDraft, type Ticket, type UnpushedRelease } from './types.js';
 import { detectStack } from './stack.js';
 import { scheduleSquad } from './schedule.js';
 import { NO_DOCS, leaveForOutside, outsideWords } from './outside-step.js';
@@ -105,6 +105,8 @@ export interface NewTicketInput {
   track?: Track;
   /** Talk it through with the Analyst first, before any questions or spec. */
   talkFirst?: boolean;
+  /** "Write new tests" off: the Builder writes no new tests, on any track. Refused where an engineer keeps it on. */
+  noNewTests?: boolean;
   /** Made by a conversation outside squad-kit: the squad keeps off it until it comes back. */
   outside?: boolean;
   source?: Ticket['source'];
@@ -173,6 +175,7 @@ export function createTicket(bp: BoardPaths, input: NewTicketInput): Ticket {
   const id = input.id ?? nextTicketId(bp);
   if (input.id && readTicket(bp, input.id)) throw new BoardActionError(`${input.id} is already on the board.`);
   const brief = { criteria: cleanList(input.criteria), rules: cleanList(input.rules), edgeCases: cleanList(input.edgeCases) };
+  if (input.noNewTests && meta.alwaysNewTests) throw new BoardActionError(NEW_TESTS_ALWAYS);
   const attachments = input.files?.length ? saveTicketUploads(bp, id, input.files) : [];
   const ticket: Ticket = {
     id,
@@ -180,6 +183,7 @@ export function createTicket(bp: BoardPaths, input: NewTicketInput): Ticket {
     ask: input.ask?.trim() || title,
     kind: input.kind ?? 'feature',
     track: input.fromBreakdown ? 'auto' : input.track === 'express' ? 'express' : 'full',
+    ...(input.noNewTests ? { noNewTests: true } : {}),
     source: input.source ?? { type: 'manual' },
     priority: input.priority ?? 'normal',
     stage: 'tickets',
@@ -213,6 +217,7 @@ export function createTicket(bp: BoardPaths, input: NewTicketInput): Ticket {
   if (input.bySquad) addActivity(ticket, 'squad', input.bySquad);
   else addActivity(ticket, 'you', from ? `Pulled ${input.source!.ref} from ${from}` : 'Created the ticket');
   if (ticket.track === 'express') addActivity(ticket, 'you', 'Chose the Express track: no questions, the plan is approved on its own');
+  if (ticket.noNewTests) addActivity(ticket, 'you', "Chose to build it without new tests: the project's own checks, the review and the proof still run");
   if (input.fromBreakdown) addActivity(ticket, 'squad', `Started from ${input.fromBreakdown.id} › ${input.fromBreakdown.item}: the story and done-when were approved with the breakdown`);
   if (attachments.length) addActivity(ticket, 'you', `Added ${attachments.length === 1 ? '1 file' : `${attachments.length} files`}`);
   if (input.outside) {
@@ -236,6 +241,9 @@ export function createTicket(bp: BoardPaths, input: NewTicketInput): Ticket {
 
 /** A waiting story's line on its card. */
 export const WAITS_TO_START = 'Waits for you to start it';
+
+/** A story without new tests, asked for on a project where an engineer keeps them on every story. */
+export const NEW_TESTS_ALWAYS = 'Every story in this project writes new tests: an engineer chose that in Settings, so this one cannot be built without them.';
 
 /** "Start" on a story that waits on the board: the Analyst reads it, as on any new story. */
 export function startTicket(bp: BoardPaths, id: string): Ticket {
@@ -944,7 +952,9 @@ export function pullRequestClashed(bp: BoardPaths, id: string): Ticket {
     const what = t.pr ? `Pull request ${t.pr.id}` : 'The change';
     clashCard(t, base, `${what} cannot go into ${base} yet: newer work changed the same lines.`);
     t.stage = 'review';
-    // Found again by its branch when the ticket is accepted the next time.
+    // Found again by its branch when the ticket is accepted the next time. Kept meanwhile: a person may settle the
+    // clash on the code host and merge it there (engine/merged-outside.ts).
+    if (t.pr) t.clashedPr = t.pr;
     t.pr = undefined;
     t.release = undefined;
     addActivity(t, 'release', `${what} clashes with newer changes in ${base}, so it left ${draft?.version ?? 'the release'}`);
@@ -2186,7 +2196,7 @@ function projectVersion(root: string, meta: ReturnType<typeof readMeta>): string
 /** Release notes written from the tickets inside, in plain words. */
 export function composeNotes(bp: BoardPaths, release: Release): string {
   const tickets = listTickets(bp).filter((t) => release.tickets.includes(t.id));
-  const lines = tickets.map((t) => `- ${[t.releaseNote ?? `**${t.title}.**`, alsoChangedLine(t.alsoChanged)].filter(Boolean).join(' ')}`);
+  const lines = tickets.map((t) => `- ${[t.releaseNote ?? `**${t.title}.**`, alsoChangedLine(t.alsoChanged), t.noNewTests ? `_${NO_NEW_TESTS_LABEL}._` : ''].filter(Boolean).join(' ')}`);
   const skipped = tickets.flatMap((t) =>
     (t.overrides ?? []).filter((o) => !o.release).map((o) => `- ${t.id} ${t.title}: went out ${o.added ? `without your team's check "${o.added}"` : o.weakened?.length ? 'with weakened tests' : o.gate === 'checks' ? 'with failing checks' : o.gate === 'proof' ? 'with an unfinished proof' : o.gate === 'hooks' ? "without the project's own check" : 'with open review notes'}. ${o.by}: ${o.reason}`),
   );

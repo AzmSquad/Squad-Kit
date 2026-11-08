@@ -1,5 +1,5 @@
 import type { BoardPaths } from './store.js';
-import type { AgentName, Stage, StepClock, Ticket, TimedStep } from './types.js';
+import type { AgentName, Stage, StepClock, StepRun, Ticket, TimedStep } from './types.js';
 import { minutesWords, recordUsual, usualKey, usualOf, type Usual, type UsualBook } from './usual.js';
 
 /**
@@ -79,7 +79,7 @@ export function stepSeconds(c: StepClock, at = Date.now()): number {
 }
 
 /** The steps a ticket keeps in its history, newest last. */
-const HISTORY = 80;
+export const HISTORY = 80;
 
 /**
  * The board restarted while the step ran: it carries on with its time so far, and says once that it resumed. The time
@@ -89,13 +89,23 @@ export function resumeClock(t: Ticket, at = Date.now()): void {
   if (t.clock) t.clock.resumed = iso(at);
 }
 
-/** The step ended well: its time joins the usual times and the ticket's history, and the clock stops. */
-export function endStep(bp: BoardPaths, t: Ticket, at = Date.now()): void {
+/**
+ * The step ended well: its time joins the usual times and the ticket's history, with the stage it ran in, and the
+ * clock stops. `more`: what else the history keeps of it.
+ */
+export function endStep(bp: BoardPaths, t: Ticket, at = Date.now(), more: Pick<StepRun, 'builderRun'> = {}): void {
   const c = t.clock;
   if (!c) return;
   if (!c.resumed) recordUsual(bp, usualKey(c.who, c.step, t.track), stepSeconds(c, at));
-  t.history = [...(t.history ?? []), { who: c.who, step: c.step, from: c.began ?? c.since, to: iso(c.paused ? Math.min(at, Date.parse(c.paused)) : at) }].slice(-HISTORY);
+  t.history = [...(t.history ?? []), { who: c.who, step: c.step, from: c.began ?? c.since, to: iso(c.paused ? Math.min(at, Date.parse(c.paused)) : at), stage: t.stage, ...more }].slice(-HISTORY);
   delete t.clock;
+}
+
+/** Seconds the whole step on the clock has run, all of the Builder's plan steps together, without what it waited. */
+export function runSeconds(c: StepClock, at = Date.now()): number {
+  const end = c.paused ? Math.min(at, Date.parse(c.paused)) : at;
+  const secs = (end - Date.parse(c.began ?? c.since)) / 1000;
+  return Number.isFinite(secs) ? Math.max(0, secs) : 0;
 }
 
 /** The Builder moved on to plan step `part` (from 1): the one before counts as done, and its clock starts again. */
@@ -117,17 +127,28 @@ export function stepDoing(t: Ticket, line: string, at = Date.now()): void {
 }
 
 /**
- * Keeps how long the ticket spends in each stage, for the tracker under its title. A ticket from before this was kept
- * starts counting now, so a stage it was in for hours never shows the wrong time.
+ * Keeps how long the ticket spends in each stage, for the tracker under its title, and how much of it was the
+ * person's turn. A ticket from before this was kept starts counting now, so a stage it was in for hours never shows the
+ * wrong time.
  */
 export function trackStage(t: Ticket, before: Stage, at = Date.now()): void {
   const st = t.stageTimes ?? { stage: before, since: before === 'tickets' || before === 'bugs' ? t.createdAt : iso(at), spent: {} };
+  const secsSince = (from: string) => {
+    const secs = Math.max(0, Math.round((at - Date.parse(from)) / 1000));
+    return Number.isFinite(secs) ? secs : 0;
+  };
+  const yours = Boolean(t.waiting || t.takenOver);
+  // The person's turn ended, or the stage moved on during it: that time goes to the stage it was in.
+  if (st.yoursSince && (!yours || st.stage !== t.stage)) {
+    st.yours = { ...st.yours, [st.stage]: (st.yours?.[st.stage] ?? 0) + secsSince(st.yoursSince) };
+    delete st.yoursSince;
+  }
   if (st.stage !== t.stage) {
-    const secs = Math.max(0, Math.round((at - Date.parse(st.since)) / 1000));
-    st.spent = { ...st.spent, [st.stage]: (st.spent[st.stage] ?? 0) + (Number.isFinite(secs) ? secs : 0) };
+    st.spent = { ...st.spent, [st.stage]: (st.spent[st.stage] ?? 0) + secsSince(st.since) };
     st.stage = t.stage;
     st.since = iso(at);
   }
+  if (yours && !st.yoursSince) st.yoursSince = iso(at);
   t.stageTimes = st;
 }
 

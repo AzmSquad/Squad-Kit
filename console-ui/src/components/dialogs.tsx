@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Bug, Check, Copy, Download, Loader2, Paperclip, PenLine, Plus, Rocket, RotateCcw, Sparkles, X } from 'lucide-react';
 import type { DraftJob, Release, Ticket, TicketDraft as Draft, Track } from '../api/types';
 import { api, send, PROJECT } from '../api/client';
-import { useAct } from '../lib/data';
+import { useAct, useBoard } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { shellArg, shellQuote } from '../lib/text';
 import { Cmd, Modal, DraftNote, Written, WrittenLines } from './ui';
@@ -68,6 +68,11 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
   const [priority, setPriority] = useDraft<Ticket['priority']>(NEW_TICKET, 'priority', 'normal');
   const [track, setTrack] = useDraft<Track>(NEW_TICKET, 'track', 'full');
   const [talkFirst, setTalkFirst] = useState(false);
+  // "Write new tests", on by default, on any track. An engineer can keep it on for every story of the project.
+  const [newTests, setNewTests] = useDraft(NEW_TICKET, 'new-tests', true);
+  const board = useBoard();
+  const testsAlways = Boolean(board.data?.ready && board.data.meta.alwaysNewTests);
+  const noNewTests = !newTests && !testsAlways;
   const [suggested, setSuggested] = useState<Track | null>(null);
   const [criteria, setCriteria] = useDraft<string[]>(NEW_TICKET, 'criteria', []);
   const [rules, setRules] = useDraft<string[]>(NEW_TICKET, 'rules', []);
@@ -203,6 +208,7 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
     setKind('feature');
     setPriority('normal');
     setTrack('full');
+    setNewTests(true);
     setSeverity('annoying');
     clearDrafts(PROJECT, NEW_TICKET);
     setCreateKey(keptOnce(NEW_TICKET, 'create-key', oneTimeKey));
@@ -219,8 +225,8 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
     .filter(Boolean)
     .join('\n\n');
   const body = isBug
-    ? { title, ask: bugAsk, kind, severity, priority: severity === 'stops-work' ? 'high' : severity === 'small' ? 'low' : 'normal', track, files: upload, talkFirst: talkFirst && track === 'full', key: createKey }
-    : { title, ask, kind, track, priority, criteria, rules, edgeCases, files: upload, talkFirst: talkFirst && track === 'full', key: createKey };
+    ? { title, ask: bugAsk, kind, severity, priority: severity === 'stops-work' ? 'high' : severity === 'small' ? 'low' : 'normal', track, files: upload, talkFirst: talkFirst && track === 'full', noNewTests, key: createKey }
+    : { title, ask, kind, track, priority, criteria, rules, edgeCases, files: upload, talkFirst: talkFirst && track === 'full', noNewTests, key: createKey };
 
   const submit = () =>
     act.mutate(
@@ -261,6 +267,7 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
           isBug && what.trim() ? `--ask ${shellQuote(what.trim())}` : '',
           track === 'express' ? '--express' : '',
           talkFirst && track === 'full' ? '--talk' : '',
+          noNewTests ? '--no-new-tests' : '',
           ...(isBug ? [] : criteria.filter((x) => x.trim()).map((x) => `--criteria ${shellQuote(x)}`)),
           ...(isBug ? [] : rules.filter((x) => x.trim()).map((x) => `--rule ${shellQuote(x)}`)),
           ...(isBug ? [] : edgeCases.filter((x) => x.trim()).map((x) => `--edge ${shellQuote(x)}`)),
@@ -462,6 +469,16 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
               <input type="checkbox" checked={talkFirst} onChange={(e) => setTalkFirst(e.target.checked)} />
               <span>
                 <b>Talk it through first.</b> The Analyst opens a chat instead of sending questions. The spec is written from your talk when you say so.
+              </span>
+            </label>
+          )}
+          {!testsAlways && (
+            <label className="talkfirst">
+              <input type="checkbox" checked={newTests} onChange={(e) => setNewTests(e.target.checked)} />
+              <span>
+                <b>Write new tests.</b> The Builder writes tests for every "done when". Turn it off for a demo, a small text or colour change, or a
+                project with no tests yet: squad-kit still runs your project's own checks, the review and the proof, and the story says "Built
+                without new tests".
               </span>
             </label>
           )}

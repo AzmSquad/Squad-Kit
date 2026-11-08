@@ -3,6 +3,7 @@ import * as ui from '../ui/index.js';
 import { readMeta, readTicket, requireTicket } from '../board/store.js';
 import { bringInLatest, chooseBuild, isMerged, setDependsOn, unmergedDeps, waitsForDependency } from '../board/depends.js';
 import { cleanBranches, oldBranches } from '../engine/branches.js';
+import { checkMerge } from '../engine/merged-outside.js';
 import { board } from './board.js';
 
 const out = (s = '') => process.stdout.write(`${s}\n`);
@@ -60,6 +61,24 @@ export async function runBringIn(ticketId: string): Promise<void> {
   const bp = board();
   const t = bringInLatest(bp, ticketId);
   ui.success(t.baseWanted ? `${t.id}: the latest main comes in when the running step ends, before the checks.` : t.activity[0]?.text ?? 'Done.');
+}
+
+/**
+ * `squad check-merge <ticket>`: Check again. Asks the code host now whether the ticket's pull request, or the one of a
+ * ticket it waits for, was merged there, outside squad-kit. A merge found is recorded, and what waited for it goes on.
+ */
+export async function runCheckMerge(ticketId: string): Promise<void> {
+  const bp = board();
+  const spin = ui.spinner('Asking the code host…');
+  let r: Awaited<ReturnType<typeof checkMerge>>;
+  try {
+    r = await checkMerge(bp, ticketId);
+  } finally {
+    spin.stop();
+  }
+  if (r.found === 'merged') ui.success(r.line);
+  else ui.info(r.line);
+  if (r.merged.length && readMeta(bp).engine === 'live') ui.info('What waits for it goes on while the board is open: squad console');
 }
 
 /** `squad branches`: the old branches of released tickets; `--clean` deletes them here, `--remote` on the remote too. */
