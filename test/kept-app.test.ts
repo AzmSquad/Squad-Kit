@@ -67,10 +67,23 @@ const squads: Squad[] = [];
 const started: number[] = [];
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** A process this test started itself, outside squad-kit's guard. */
 function alive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The project's app, by the number it wrote to starts.txt: it still runs while its beat file is fresh. On Linux the guard
+ * gives the app its own process numbers, so the number it writes is not one this test can look up.
+ */
+function appAlive(copy: string, pid: number): boolean {
+  try {
+    return Date.now() - fs.statSync(path.join(copy, `beat-${pid}`)).mtimeMs < 1000;
   } catch {
     return false;
   }
@@ -102,11 +115,11 @@ function squad(): Squad {
 }
 
 /**
- * The project's app: it writes its process number to starts.txt in its copy each time it starts (the file is ignored,
- * so it is no change of the code), and it stops answering once .quiet holds its number.
+ * The project's app: it writes its process number to starts.txt in its copy each time it starts, touches its beat file
+ * while it runs (both are ignored, so they are no change of the code), and it stops answering once .quiet holds its number.
  */
 function appStart(p: number): string {
-  return `node -e "const fs = require('fs'); fs.appendFileSync('starts.txt', process.pid + '\\n'); const quiet = () => fs.existsSync('.quiet') && fs.readFileSync('.quiet', 'utf8').trim() === String(process.pid); const s = require('http').createServer((q, r) => { if (quiet()) { s.close(); q.socket.destroy(); return; } r.end('ok'); }).listen(Number(process.env.PORT || ${p}), '127.0.0.1'); setInterval(() => {}, 1000)"`;
+  return `node -e "const fs = require('fs'); fs.appendFileSync('starts.txt', process.pid + '\\n'); const quiet = () => fs.existsSync('.quiet') && fs.readFileSync('.quiet', 'utf8').trim() === String(process.pid); const s = require('http').createServer((q, r) => { if (quiet()) { s.close(); q.socket.destroy(); return; } r.end('ok'); }).listen(Number(process.env.PORT || ${p}), '127.0.0.1'); const beat = () => fs.writeFileSync('beat-' + process.pid, ''); beat(); setInterval(beat, 100)"`;
 }
 
 const starts = (copy: string) => (fs.existsSync(path.join(copy, 'starts.txt')) ? fs.readFileSync(path.join(copy, 'starts.txt'), 'utf8').trim().split('\n').filter(Boolean).map(Number) : []);
@@ -118,7 +131,7 @@ beforeEach(async () => {
   project = path.join(tmp, 'app');
   fs.mkdirSync(project);
   fs.writeFileSync(path.join(project, 'data.txt'), 'as it was\n');
-  fs.writeFileSync(path.join(project, '.gitignore'), 'starts.txt\n.quiet\n');
+  fs.writeFileSync(path.join(project, '.gitignore'), 'starts.txt\n.quiet\nbeat-*\n');
   execSync('git init -q -b main && git add -A && git -c user.name=t -c user.email=t@t commit -qm start', { cwd: project });
   bp = boardPaths(path.join(project, '.squad'));
   port = await freePort();
@@ -184,7 +197,7 @@ describe.skipIf(process.platform === 'win32')('one app for the review and the pr
     const [pid] = starts(copy);
     expect(starts(copy)).toHaveLength(1);
     // It runs on, waiting for the proof.
-    expect(alive(pid!)).toBe(true);
+    expect(appAlive(copy, pid!)).toBe(true);
     expect(await answers(`http://127.0.0.1:${port}`)).toBe(true);
     await s.proof(id);
     const t = readTicket(bp, id)!;
@@ -193,7 +206,7 @@ describe.skipIf(process.platform === 'win32')('one app for the review and the pr
     expect(lines(id)).toContain('The app squad-kit started earlier still runs, so the Tester uses it');
     expect(lines(id)).not.toContain('squad-kit started the app');
     // The proof is over: the app stops, as before.
-    await until('the app to stop', () => !alive(pid!));
+    await until('the app to stop', () => !appAlive(copy, pid!));
     expect(s.kept.size).toBe(0);
   });
 
@@ -221,12 +234,12 @@ describe.skipIf(process.platform === 'win32')('one app for the review and the pr
     const [first] = starts(copy);
     fs.writeFileSync(path.join(copy, '.quiet'), String(first));
     await until('the app to go quiet', async () => !(await answers(`http://127.0.0.1:${port}`)));
-    expect(alive(first!)).toBe(true);
+    expect(appAlive(copy, first!)).toBe(true);
     await s.proof(id);
     expect(readTicket(bp, id)!.waiting?.kind).toBe('proof');
     expect(starts(copy)).toHaveLength(2);
     expect(lines(id)).toContain('squad-kit started the app');
-    await until('the old app to stop', () => !alive(first!));
+    await until('the old app to stop', () => !appAlive(copy, first!));
   });
 
   it("a new app when the copy's code changed since it started; the old one stops", async () => {
@@ -238,7 +251,7 @@ describe.skipIf(process.platform === 'win32')('one app for the review and the pr
     await s.proof(id);
     expect(starts(copy)).toHaveLength(2);
     expect(lines(id)).not.toContain('The app squad-kit started earlier still runs, so the Tester uses it');
-    await until('the old app to stop', () => !alive(first!));
+    await until('the old app to stop', () => !appAlive(copy, first!));
   });
 
   it('a review that sends the story back stops it before the Builder starts', async () => {
@@ -249,7 +262,9 @@ describe.skipIf(process.platform === 'win32')('one app for the review and the pr
     };
     let seen: boolean | null = null;
     builder = async () => {
-      seen = alive(starts(copy)[0]!);
+      // Longer than an app's beat: a beat file still fresh now would be one written after the Builder started.
+      await sleep(1200);
+      seen = appAlive(copy, starts(copy)[0]!);
       return { summary: 'Fixed' };
     };
     const s = squad();
@@ -267,7 +282,7 @@ describe.skipIf(process.platform === 'win32')('one app for the review and the pr
     expect(s.kept.size).toBe(1);
     updateTicket(bp, id, (x) => (x.stopRequested = true));
     s.sweepKept();
-    await until('the app to stop', () => !alive(pid!));
+    await until('the app to stop', () => !appAlive(copy, pid!));
     expect(s.kept.size).toBe(0);
   });
 
@@ -283,7 +298,7 @@ describe.skipIf(process.platform === 'win32')('one app for the review and the pr
     expect(lines(b.id)).toContain("Stopped a program left running in this ticket's copy");
     await until('the leftover to stop', () => !alive(leftover));
     // squad-kit's own app, kept for the other story's proof, is never a leftover.
-    expect(alive(kept!)).toBe(true);
+    expect(appAlive(a.copy, kept!)).toBe(true);
     expect(await answers(`http://127.0.0.1:${port}`)).toBe(true);
   });
 
@@ -337,11 +352,11 @@ describe.skipIf(process.platform === 'win32')("the checks step and an app start 
     const before = lines(a.id).length;
     await s.checks(a.id);
     expect(readTicket(bp, a.id)!.gates?.checks).toBe('pass');
-    await until('the kept app to stop', () => !alive(mine!));
+    await until('the kept app to stop', () => !appAlive(a.copy, mine!));
     expect(s.kept.has(a.id)).toBe(false);
     // Only the log says so: the story's lines are about its checks.
     expect(lines(a.id).slice(before).filter((l) => /stopped|Stopped/.test(l))).toEqual([]);
-    expect(alive(theirs!)).toBe(true);
+    expect(appAlive(b.copy, theirs!)).toBe(true);
     expect(s.kept.has(b.id)).toBe(true);
   });
 
