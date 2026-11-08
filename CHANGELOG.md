@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.3] — 2026-11-08
+
 ### Added
 
 - **A network level for each project: Standard, Strict or Off.** It says how much of the internet the squad's commands
@@ -1393,7 +1395,8 @@ First public release.
 - Plan-generation meta-prompt (`generate-plan.md`), intake template (`intake.md`), and plan skeleton reference (`story-skeleton.md`).
 - Documentation: `docs/philosophy.md`, `docs/getting-started.md`, `docs/customization.md`, `docs/vs-spec-kit.md`.
 
-[Unreleased]: https://github.com/AzmSquad/squad-kit/compare/v1.3.2...HEAD
+[Unreleased]: https://github.com/AzmSquad/squad-kit/compare/v1.3.3...HEAD
+[1.3.3]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.3.3
 [1.3.2]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.3.2
 [1.3.1]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.3.1
 [1.3.0]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.3.0
