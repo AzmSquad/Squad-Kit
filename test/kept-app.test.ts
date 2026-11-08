@@ -78,12 +78,13 @@ function alive(pid: number): boolean {
 }
 
 /**
- * The project's app, by the number it wrote to starts.txt: it still runs while its beat file is fresh. On Linux the guard
- * gives the app its own process numbers, so the number it writes is not one this test can look up.
+ * The project's app, by the name it wrote to starts.txt: it still runs while its beat file is fresh. On Linux the guard
+ * gives each app its own process numbers, so a number it writes is not one this test can look up, and two apps can
+ * have the same one.
  */
-function appAlive(copy: string, pid: number): boolean {
+function appAlive(copy: string, app: string): boolean {
   try {
-    return Date.now() - fs.statSync(path.join(copy, `beat-${pid}`)).mtimeMs < 1000;
+    return Date.now() - fs.statSync(path.join(copy, `beat-${app}`)).mtimeMs < 1000;
   } catch {
     return false;
   }
@@ -115,14 +116,14 @@ function squad(): Squad {
 }
 
 /**
- * The project's app: it writes its process number to starts.txt in its copy each time it starts, touches its beat file
- * while it runs (both are ignored, so they are no change of the code), and it stops answering once .quiet holds its number.
+ * The project's app: each time it starts it writes a name of its own to starts.txt in its copy, touches its beat file
+ * while it runs (both are ignored, so they are no change of the code), and it stops answering once .quiet holds its name.
  */
 function appStart(p: number): string {
-  return `node -e "const fs = require('fs'); fs.appendFileSync('starts.txt', process.pid + '\\n'); const quiet = () => fs.existsSync('.quiet') && fs.readFileSync('.quiet', 'utf8').trim() === String(process.pid); const s = require('http').createServer((q, r) => { if (quiet()) { s.close(); q.socket.destroy(); return; } r.end('ok'); }).listen(Number(process.env.PORT || ${p}), '127.0.0.1'); const beat = () => fs.writeFileSync('beat-' + process.pid, ''); beat(); setInterval(beat, 100)"`;
+  return `node -e "const fs = require('fs'); const me = process.pid + '-' + Date.now() + '-' + Math.random().toString(36).slice(2); fs.appendFileSync('starts.txt', me + '\\n'); const quiet = () => fs.existsSync('.quiet') && fs.readFileSync('.quiet', 'utf8').trim() === me; const s = require('http').createServer((q, r) => { if (quiet()) { s.close(); q.socket.destroy(); return; } r.end('ok'); }).listen(Number(process.env.PORT || ${p}), '127.0.0.1'); const beat = () => fs.writeFileSync('beat-' + me, ''); beat(); setInterval(beat, 100)"`;
 }
 
-const starts = (copy: string) => (fs.existsSync(path.join(copy, 'starts.txt')) ? fs.readFileSync(path.join(copy, 'starts.txt'), 'utf8').trim().split('\n').filter(Boolean).map(Number) : []);
+const starts = (copy: string) => (fs.existsSync(path.join(copy, 'starts.txt')) ? fs.readFileSync(path.join(copy, 'starts.txt'), 'utf8').trim().split('\n').filter(Boolean) : []);
 const lines = (id: string) => readTicket(bp, id)!.activity.map((a) => a.text);
 
 beforeEach(async () => {
