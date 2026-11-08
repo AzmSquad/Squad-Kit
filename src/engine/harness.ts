@@ -1,4 +1,4 @@
-import type { BoardMeta, Track } from '../board/types.js';
+import type { BoardMeta, NetworkLevel, Track } from '../board/types.js';
 import type { BoardPaths } from '../board/store.js';
 import { BUILDS_BY_ITSELF, MAX_BASE_TRIES, MAX_DECIDED, MAX_LANDING_WAIT_MS } from '../board/auto.js';
 import { MAX_UPLOADS, MAX_UPLOAD_BYTES } from '../board/actions.js';
@@ -29,7 +29,8 @@ import { PIPELINE_MS } from './release.js';
 import { NEVER } from './report.js';
 import { docsInGit } from './project-git.js';
 import { APP_WAIT_MS, SETUP_MS } from './run-app.js';
-import { PACKAGE_HOSTS, PRIVATE, sandboxStatus } from './sandbox.js';
+import { DEFAULT_NETWORK, NETWORK_LEVELS, NETWORK_NAME, NETWORK_WORDS, PRIVATE, networkPolicy, parseNetwork, sandboxStatus } from './sandbox.js';
+import { KNOWN_BAD_GROUPS, RECOMMENDED_GROUPS } from './network-lists.js';
 import { TRY_YIELDS_AFTER_MS } from './try-app.js';
 import { RETRY_MS } from './usage-limit.js';
 import { LONG_MS, QUIET_MS } from './watchdog.js';
@@ -124,7 +125,7 @@ function lineStages(): HarnessStage[] {
       y('change', 'A big change comes back to you', 'The Builder pauses, and the updated design waits for your yes.'),
     ]),
     stage('build', 'Build', 'The Builder writes the code in small steps, in a locked room.', on(squad('Builder')), [
-      g('sandbox', 'The guard', "Each story has its own copy. No agent can read your keys or sign-ins. The Builder and Tester can't read .env files either, and reach only package sites and websites you allow.", 'Blocked, with a line on the story.'),
+      g('sandbox', 'The guard', "Each story has its own copy. No agent can read your keys or sign-ins. The Builder and Tester can't read .env files either, and reach only the websites the project's network level allows.", 'Blocked, with a line on the story. A website it may not reach stops nothing: the work goes on without it.'),
       g('guard', 'A second guard for your project', 'Your tests, app, setup and release run locked in too, with keys hidden and Docker closed.', 'A card: an engineer allows the file, or the plan changes.'),
       g('lane', 'Files no agent can change', "squad-kit's folder, AI instruction files, commit hooks, files an engineer locked. No commit or branch change, and a push is refused.", 'A file goes back, with a line. A moved branch stops the step.'),
       g('local-files', 'Test values, not your own', 'A file marked local gets values kept for stories. No agent can read it.'),
@@ -274,10 +275,11 @@ const HARNESS_REFUSED: Record<NotAllowed, string> = { settings: "Change a squad-
 
 const HARNESS_TOOL_NAME: Record<WindowTool, string> = { take_screenshots: 'Take pictures', look_at_page: 'Look at a page', start_app: 'Start the app', stop_app: 'Stop the app', app_status: 'See if the app runs', run_checks: "Run the project's checks", add_part: 'Add a part of the product', ask_api: 'Ask your API', i_am_stuck: 'Say it is stuck' };
 
-/** A package site by what people call it; a new one shows as itself. */
-function packageSiteName(host: string): string {
-  const named: [RegExp, string][] = [[/npm|yarn/, 'npm'], [/pypi|pythonhosted/, 'PyPI'], [/maven|gradle/, 'Maven and Gradle'], [/nuget/, 'NuGet'], [/rubygems/, 'RubyGems'], [/crates/, 'crates.io'], [/golang/, 'Go modules'], [/github/, 'GitHub downloads'], [/playwright/, 'Browsers for browser tests']];
-  return named.find(([re]) => re.test(host))?.[1] ?? host;
+/** Where the Builder's and Tester's commands can go on a level, in words: the recommended sites by the name people know. */
+function levelSites(level: NetworkLevel): string[] {
+  if (level === 'off') return ['Only this computer'];
+  if (level === 'standard') return ['Any website but the closed ones'];
+  return RECOMMENDED_GROUPS.map((g) => g.name);
 }
 
 /** What each role may do: the permissions and tools its steps get in engine/live.ts. test/harness.test.ts compares them. */
@@ -288,7 +290,7 @@ function agentPowers(): Record<AgentRole, { can: [string, boolean][] }> {
   return {
     analyst: { can: reads },
     architect: { can: reads },
-    builder: { can: [yes('Read your project'), yes('Change code'), yes('Run commands'), yes('Package sites and websites you allow'), yes("squad-kit's tools: pictures, checks, the app")] },
+    builder: { can: [yes('Read your project'), yes('Change code'), yes('Run commands'), yes('The websites your network level allows'), yes("squad-kit's tools: pictures, checks, the app")] },
     reviewer: { can: [...reads, yes("Look at a page of this story's app")] },
     tester: { can: [...reads, yes("squad-kit's tools: pictures, the app, your API")] },
   };
@@ -302,6 +304,7 @@ function rowDetails(meta: BoardMeta | undefined, root: string | undefined): Reco
     repos.map((r) => [repos.length > 1 ? `${r.path}: ` : '', keys.map((k) => r.commands[k]).filter(Boolean).join(', ')]).filter(([, c]) => c).map(([p, c]) => `${p}${c}`).join('; ') || 'Not set yet';
   const guard = guardSupport();
   const tools = sandboxStatus();
+  const level = parseNetwork(meta?.network) ?? DEFAULT_NETWORK;
   const state = (on: boolean, why: string) => `${on ? 'On' : 'Off'}: ${why}`;
   const names = (list?: { path: string }[]) => list?.map((f) => f.path).join(', ') || 'None yet';
   const tab = (name: string) => `The story's ${name} tab`;
@@ -324,8 +327,8 @@ function rowDetails(meta: BoardMeta | undefined, root: string | undefined): Reco
     decisions: code('board/actions.ts', ['See it in', 'The Architecture page']),
     depends: code('board/depends.ts'),
     change: code('board/actions.ts'),
-    sandbox: code('engine/sandbox.ts', ['On this computer', tools.map((t) => state(t.available, t.why)).join(', ') || 'Off'], ['Also allowed', meta?.allowedHosts?.join(', ') || 'None yet']),
-    guard: code('engine/project-guard.ts', ['On this computer', state(guard.on, guard.why)], ['Also allowed', [...(meta?.guard?.allowRead ?? []), ...(meta?.guard?.allowWrite ?? [])].join(', ') || 'None yet']),
+    sandbox: code('engine/sandbox.ts', ['On this computer', tools.map((t) => state(t.available, t.why)).join(', ') || 'Off'], ['Network level', NETWORK_NAME[level]], ['Also allowed', meta?.allowedHosts?.join(', ') || 'None yet'], ['Lists', 'src/engine/network-lists.ts']),
+    guard: code('engine/project-guard.ts', ['On this computer', state(guard.on, guard.why)], ['Network', networkPolicy(level).commands === 'this-computer' ? 'Only this computer (Off)' : 'Open'], ['Also allowed', [...(meta?.guard?.allowRead ?? []), ...(meta?.guard?.allowWrite ?? [])].join(', ') || 'None yet']),
     lane: code('engine/lane.ts', ['Locked here', names(meta?.lockedFiles)]),
     'local-files': code('engine/local-files.ts', ['Local here', names(meta?.localFiles)]),
     checks: code('engine/checks.ts', ['Runs', run('test', 'lint', 'build')], ['Limit', `${MAX_CHECK_TRIES} tries, ${min(CHECK_MS)} each, ${min(CHECK_SILENT_MS)} with no output`], ['Decided by', 'The exit code, never an agent'], ['See it in', tab('Developer')]),
@@ -426,6 +429,7 @@ export function harnessView(meta?: BoardMeta, bp?: BoardPaths) {
   const always = alwaysOnRows().map(fill);
   const rows = [...stages.flatMap((s) => s.gates), ...always];
   const offHere = (sandboxStatus().some((t) => t.available) ? 0 : 1) + (guardSupport().on ? 0 : 1);
+  const level = parseNetwork(meta?.network) ?? DEFAULT_NETWORK;
   return {
     quality,
     qualityNote: QUALITY_NOTE,
@@ -455,7 +459,9 @@ export function harnessView(meta?: BoardMeta, bp?: BoardPaths) {
     safety: {
       hidden: [...PRIVATE.map((p) => HARNESS_PRIVATE_NAME[p] ?? p), "Your AI tools' sign-ins", 'Browser sign-ins', 'Keys in package settings', '.env files', "squad-kit's own folder and keys"],
       locked: ["squad-kit's own folder", 'AI instruction files', 'Commit hooks and their settings', 'Code history: commit and branches. A push is refused, and agents have no keys to push with'],
-      sites: [...new Set(PACKAGE_HOSTS.map(packageSiteName))],
+      sites: levelSites(level),
+      // The project's network level, the three to pick from, and what stays closed on all of them.
+      network: { level, levels: NETWORK_LEVELS.map((id) => ({ id, name: NETWORK_NAME[id], words: NETWORK_WORDS[id] })), closed: KNOWN_BAD_GROUPS.map((g) => g.name), commands: networkPolicy(level).commands },
       refused: Object.values(HARNESS_REFUSED),
       tools: Object.values(HARNESS_TOOL_NAME),
       local: (meta?.localFiles ?? []).map((f) => f.path),

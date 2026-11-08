@@ -49,8 +49,10 @@ export interface SandboxAsk {
   read: string[];
   /** Files in a place it may write that it may never change: the copy's `.git`, which says where git's settings are. */
   noWrite: string[];
-  /** The only hosts its commands may reach; "*.example.com" covers every subdomain. */
+  /** The only hosts its commands may reach; "*.example.com" covers every subdomain, and "*" any host. Empty: none. */
   hosts: string[];
+  /** Hosts its commands never reach, whatever `hosts` says: the known-bad list. */
+  noHosts: string[];
 }
 
 /** Whether a tool can keep a step's commands in its sandbox on this computer, in words for people. */

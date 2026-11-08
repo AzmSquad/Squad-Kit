@@ -1,11 +1,14 @@
 import fs from 'node:fs';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import type { ProjectCommands } from '../board/types.js';
+import { writeLog } from '../core/app-log.js';
+import { healEnv, healedBefore, rememberHealed } from './cache-home.js';
 import { failedTests, testAlone } from './failed-tests.js';
 import { KILL_AFTER_MS, endGroup, whenExited } from './process-group.js';
 import { appPortVariables } from './port-vars.js';
-import { guardBlockedPath, spawnProject, type GuardSpec } from './project-guard.js';
+import { guardBlockedPath, homeCachesRefused, spawnProject, type GuardSpec } from './project-guard.js';
 import { scriptsOf } from './weakened.js';
 
 /** squad-kit runs the project's own checks itself, so the AI never grades its own work. */
@@ -37,6 +40,8 @@ export interface CommandWatch {
   guard?: GuardSpec;
   /** Also ends what the command left running after it exited. */
   endAll?: boolean;
+  /** squad-kit runs the command once more with a home of the project's own: the details, for engineers (runCommand). Left out, they go in the log. */
+  onHealed?(detail: string): void;
 }
 
 /** A check that prints nothing for this long is waiting for something that never comes. */
@@ -51,12 +56,84 @@ function minutes(ms: number): string {
   return `${m} minute${m === 1 ? '' : 's'}`;
 }
 
+export interface CommandResult {
+  ok: boolean;
+  output: string;
+  seconds: number;
+  ended?: boolean;
+  code?: number;
+  /** squad-kit ran it once more with a home of the project's own: why, for engineers. */
+  healed?: string;
+}
+
 /**
  * Runs one command of the project in its own process group, with the environment every agent gets (squad-kit's own
  * keys stay out). A timeout or Stop ends the whole group, and the result comes back once the command exits, even when
  * something it started keeps its output open.
+ *
+ * In the guard, a tool that could not write its cache in the person's home (one squad-kit does not point at the cache
+ * home by its own setting) makes the command run once more, by itself, with a home of the project's own where that place
+ * is writable (engine/cache-home.ts). Only once: a command that still fails, or fails for another reason, is not run again
+ * here. The same command starts with that home from then on.
  */
-export function runCommand(cwd: string, command: string, timeoutMs = CHECK_MS, watch: CommandWatch = {}): Promise<{ ok: boolean; output: string; seconds: number; ended?: boolean; code?: number }> {
+export async function runCommand(cwd: string, command: string, timeoutMs = CHECK_MS, watch: CommandWatch = {}): Promise<CommandResult> {
+  const homes = ownHomes(command, watch.guard);
+  const set = (env: Record<string, string> | null): CommandWatch => (env ? { ...watch, env: { ...watch.env, ...env } } : watch);
+  const first = await runOnce(cwd, command, timeoutMs, set(homes.env(homes.before)));
+  if (first.ok || first.ended || watch.signal?.aborted) return first;
+  const refused = homes.refused(first.output);
+  const env = homes.env([...homes.before, ...refused]);
+  if (!refused.length || !env) return first;
+  const detail = homes.said(refused, env);
+  if (watch.onHealed) watch.onHealed(detail);
+  else writeLog({ level: 'info', text: detail });
+  const again: CommandResult = { ...(await runOnce(cwd, command, timeoutMs, set(env))), healed: detail };
+  homes.learn(again.output, refused);
+  return { ...again, seconds: first.seconds + again.seconds };
+}
+
+/**
+ * What squad-kit knows of a command's tools that write in the person's home, in the guard (engine/cache-home.ts): the
+ * places it needed a home of the project's own for before, the environment for such a home, and what it could not write
+ * this time. Nothing without the guard's cache home: such a command runs as it is.
+ */
+function ownHomes(command: string, guard?: GuardSpec) {
+  const cache = guard?.cache;
+  const hidden = { hidden: guard?.noRead ?? [] };
+  const before = cache ? healedBefore(cache, command, hidden) : [];
+  return {
+    before,
+    /** The environment for a home where these places are the project's own, or null for none (or none could be made). */
+    env(places: string[]): Record<string, string> | null {
+      if (!cache || !places.length) return null;
+      try {
+        return healEnv(cache, places, hidden);
+      } catch {
+        // No home of its own could be made: the command runs as it would have.
+        return null;
+      }
+    },
+    /** The places it could not write this time, other than the ones it had already. None when it failed for another reason. */
+    refused(output: string): string[] {
+      return cache && guard ? homeCachesRefused(output, guard).filter((p) => !before.includes(p)) : [];
+    },
+    /** For engineers: which places, the home it got, and the command. */
+    said(refused: string[], env: Record<string, string>): string {
+      return `A tool could not write in ${refused.map((p) => inHome(p)).join(', ')}, so squad-kit ran this once more with HOME=${env.HOME}, where ${refused.length === 1 ? 'that place is' : 'those places are'} the project's own: ${command}`;
+    },
+    /** Learned when the run once more is past those places, whatever else it says: the next run of it, by any story, starts there. */
+    learn(output: string, refused: string[]): void {
+      if (cache && guard && !homeCachesRefused(output, guard).some((p) => refused.includes(p))) rememberHealed(cache, command, [...before, ...refused]);
+    },
+  };
+}
+
+/** A path in the person's home, as people write it. */
+function inHome(p: string, home = os.homedir()): string {
+  return p.startsWith(`${home}/`) ? `~${p.slice(home.length)}` : p;
+}
+
+function runOnce(cwd: string, command: string, timeoutMs: number, watch: CommandWatch): Promise<CommandResult> {
   const started = Date.now();
   if (watch.signal?.aborted) return Promise.resolve({ ok: false, output: STOPPED, seconds: 0 });
   return new Promise((resolve) => {
@@ -213,7 +290,7 @@ export async function runChecks(cwd: string, commands: ProjectCommands, onStart?
       const began = Date.now();
       const seconds = () => (Date.now() - began) / 1000;
       try {
-        const app = await startApp(cwd, start, url, appWaitMs, watch.signal, watch.guard);
+        const app = await startApp(cwd, start, url, appWaitMs, watch.signal, watch.guard, watch.onHealed ? { onHealed: watch.onHealed } : {});
         app.stop();
         return { ok: true, output: `The app answered at ${app.url}.`, seconds: seconds() };
       } catch (err) {
@@ -301,8 +378,11 @@ function portOf(url: string): number | null {
  * address (often the person's own "npm run dev"), or holds its port and says nothing, the copy starts on a free port
  * instead: PORT, and the app's own port variables found in its code (like ROOMFLOW_PORT), so the Tester never looks at
  * the wrong app. The address the app really runs at comes back in `url`. Stop ends the wait and the app.
+ *
+ * An app that stopped while starting because a tool could not write its cache in the person's home starts once more,
+ * by itself, with a home of the project's own, as runCommand does: `onHealed` gets the details.
  */
-export async function startApp(cwd: string, command: string, url: string, waitMs = 3 * 60_000, signal?: AbortSignal, guard?: GuardSpec, more: { fixed?: boolean; env?: Record<string, string> } = {}): Promise<RunningApp> {
+export async function startApp(cwd: string, command: string, url: string, waitMs = 3 * 60_000, signal?: AbortSignal, guard?: GuardSpec, more: { fixed?: boolean; env?: Record<string, string>; onHealed?(detail: string): void } = {}): Promise<RunningApp> {
   if (signal?.aborted) throw new Error(STOPPED);
   // The app squad-kit stopped a moment ago (the last round of screenshots) is no other program: on a busy computer it may
   // still be on its way out, and its port is about to be free. Going around it would break an app that cannot move.
@@ -316,25 +396,32 @@ export async function startApp(cwd: string, command: string, url: string, waitMs
   const own = port ? appPortVariables(cwd, portOf(url)) : [];
   const moved = port ? Object.fromEntries(['PORT', ...own].map((name) => [name, String(port)])) : {};
   const env = { CI: '1', FORCE_COLOR: '0', BROWSER: 'none', ...moved, ...more.env };
-  const child = spawnProject(command, { cwd, env, ...(guard ? { guard } : {}) });
-  let out = '';
-  let exited: number | null = null;
-  const keep = (chunk: Buffer) => {
-    out = (out + chunk.toString('utf8')).slice(-6_000);
+  const homes = ownHomes(command, guard);
+  /** One start of the command: what it printed, and how it ended. */
+  const launch = (extra: Record<string, string> | null) => {
+    const run = { child: spawnProject(command, { cwd, env: { ...env, ...extra }, ...(guard ? { guard } : {}) }), out: '', exited: null as number | null };
+    const keep = (chunk: Buffer) => {
+      run.out = (run.out + chunk.toString('utf8')).slice(-6_000);
+    };
+    run.child.stdout!.on('data', keep);
+    run.child.stderr!.on('data', keep);
+    run.child.on('error', (err) => {
+      run.out += `\n${err.message}`;
+      run.exited = -1;
+    });
+    run.child.on('exit', (code) => (run.exited = code ?? 0));
+    return run;
   };
-  child.stdout!.on('data', keep);
-  child.stderr!.on('data', keep);
-  child.on('error', (err) => {
-    out += `\n${err.message}`;
-    exited = -1;
-  });
-  child.on('exit', (code) => (exited = code ?? 0));
+  let app = launch(homes.env(homes.before));
+  // The places it was started once more for, when it was.
+  let healed: string[] | null = null;
   // The whole process group: the shell, npm, and the server it started.
   const stop = () => {
-    endGroup(child);
+    endGroup(app.child);
     const at = portOf(target);
     if (!at || stopping.has(at)) return;
-    const gone = goneFrom(at, () => exited !== null).finally(() => stopping.delete(at));
+    const ended = app;
+    const gone = goneFrom(at, () => ended.exited !== null).finally(() => stopping.delete(at));
     stopping.set(at, gone);
   };
   // A Stop while it starts ends it at once, not at the next look.
@@ -348,14 +435,28 @@ export async function startApp(cwd: string, command: string, url: string, waitMs
         stop();
         throw new Error(STOPPED);
       }
-      if (exited !== null) throw new Error(`The app stopped while starting (${command}):${busy} ${tail(out, 8)}`);
+      if (app.exited !== null) {
+        // Once only: a tool that could not write its cache in the person's home starts once more with a home of the project's own.
+        const refused: string[] = healed ? [] : homes.refused(app.out);
+        const home = refused.length ? homes.env([...homes.before, ...refused]) : null;
+        if (!home) throw new Error(`The app stopped while starting (${command}):${busy} ${tail(app.out, 8)}`);
+        const detail = homes.said(refused, home);
+        if (more.onHealed) more.onHealed(detail);
+        else writeLog({ level: 'info', text: detail });
+        endGroup(app.child);
+        healed = refused;
+        app = launch(home);
+        continue;
+      }
       if (await answers(target)) {
         // It came up just as the Stop came: it does not outlive it.
         if (signal?.aborted) {
           stop();
           throw new Error(STOPPED);
         }
-        return { url: target, stop, lines: (n = 20) => tail(out.trim(), n), ended: () => exited !== null };
+        if (healed) homes.learn(app.out, healed);
+        const up = app;
+        return { url: target, stop, lines: (n = 20) => tail(up.out.trim(), n), ended: () => up.exited !== null };
       }
       await new Promise((r) => setTimeout(r, Math.min(2000, 250 * 2 ** tries)));
     }
@@ -365,8 +466,8 @@ export async function startApp(cwd: string, command: string, url: string, waitMs
   stop();
   throw new Error(
     port
-      ? `The app did not start on a free port.${busy} Stop the other program, then press Try again. (${command}): ${tail(out, 8)}`
-      : `The app did not answer at ${url} within ${Math.round(waitMs / 60_000)} minutes (${command}): ${tail(out, 8)}`,
+      ? `The app did not start on a free port.${busy} Stop the other program, then press Try again. (${command}): ${tail(app.out, 8)}`
+      : `The app did not answer at ${url} within ${Math.round(waitMs / 60_000)} minutes (${command}): ${tail(app.out, 8)}`,
   );
 }
 

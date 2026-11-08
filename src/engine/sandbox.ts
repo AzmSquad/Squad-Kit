@@ -5,60 +5,129 @@ import { copyDirsIn } from './git.js';
 import type { AiTool, BlockedAction, SandboxAsk, SandboxSupport } from '../modules/ai-tool/types.js';
 import { AI_TOOLS } from '../modules/registry.js';
 import { squadHome } from '../core/home.js';
-import type { BoardPaths } from '../board/store.js';
+import { boardPaths, readMeta, type BoardPaths } from '../board/store.js';
+import type { NetworkLevel } from '../board/types.js';
+import { KNOWN_BAD, RECOMMENDED, knownBadGroup } from './network-lists.js';
 
 /**
  * The Builder's and the Tester's shell commands run in their AI tool's sandbox, where it has one: they write only in
- * the ticket's copy, the proof folder and temp folders, reach only package registries (and the hosts the project
- * allows), and never read keys, sign-ins, squad-kit's own files or the project's .env files. squad-kit asks for
- * folders and hosts; the AI tool module turns them into its own settings. Without a sandbox the step runs as before,
- * kept in its lane by squad-kit's own checks.
+ * the ticket's copy, the proof folder and temp folders, reach the sites the project's network level allows (one
+ * policy, networkPolicy, read by this sandbox and by the guard for the project's own commands), and never read keys,
+ * sign-ins, squad-kit's own files or the project's .env files. squad-kit asks for folders and hosts; the AI tool module
+ * turns them into its own settings. Without a sandbox the step runs as before, kept in its lane by squad-kit's own checks.
  */
 
-/** Package registries and download hosts every project may reach: installing and updating packages needs them. */
-export const PACKAGE_HOSTS = [
-  // npm, pnpm and Yarn
-  'registry.npmjs.org',
-  'registry.yarnpkg.com',
-  'repo.yarnpkg.com',
-  // PyPI
-  'pypi.org',
-  'files.pythonhosted.org',
-  // Maven and Gradle
-  'repo.maven.apache.org',
-  'repo1.maven.org',
-  'plugins.gradle.org',
-  'services.gradle.org',
-  'downloads.gradle.org',
-  // NuGet
-  'api.nuget.org',
-  'globalcdn.nuget.org',
-  // RubyGems
-  'rubygems.org',
-  'index.rubygems.org',
-  // crates.io
-  'crates.io',
-  'index.crates.io',
-  'static.crates.io',
-  // The Go module proxy
-  'proxy.golang.org',
-  'sum.golang.org',
-  // GitHub release downloads, and packages installed from GitHub
-  'github.com',
-  'codeload.github.com',
-  'objects.githubusercontent.com',
-  'release-assets.githubusercontent.com',
-  // Browsers for the project's own browser tests
-  'cdn.playwright.dev',
-  'playwright.download.prss.microsoft.com',
-  'playwright.azureedge.net',
-];
+/**
+ * Package registries and download hosts every project may reach on Standard and Strict: installing and updating
+ * packages needs them. The recommended list of engine/network-lists.ts, updated with each release.
+ */
+export const PACKAGE_HOSTS = RECOMMENDED;
+
+/* ── the network level: one policy for both guards ───────── */
+
+/** The level a project starts on, and keeps until an engineer picks another. */
+export const DEFAULT_NETWORK: NetworkLevel = 'standard';
+
+export const NETWORK_LEVELS: NetworkLevel[] = ['standard', 'strict', 'off'];
+
+/** Each level by name, for people. */
+export const NETWORK_NAME: Record<NetworkLevel, string> = { standard: 'Standard', strict: 'Strict', off: 'Off' };
+
+/** Each level in one plain sentence, the same on the Harness page and in the terminal. */
+export const NETWORK_WORDS: Record<NetworkLevel, string> = {
+  standard: 'Any website but known-bad ones such as tunnels, paste sites and request catchers, with your keys hidden so a harmful package has nothing to take.',
+  strict: "Only the official package and download sites of common tools and the websites you allow, while your project's own tests and app still reach any site for now.",
+  off: 'No internet, only this computer, so the setup, the tests and the app must work with what is already here.',
+};
+
+/** A level as typed ("Strict", "off"), or null when it is none of them. */
+export function parseNetwork(s: string | undefined): NetworkLevel | null {
+  const v = s?.trim().toLowerCase();
+  return NETWORK_LEVELS.find((l) => l === v) ?? null;
+}
+
+/**
+ * The project's level, from its shared settings in the person's own folder: never from a story's copy, where an agent
+ * writes. A project without settings, or with settings that cannot be read, is on the default.
+ */
+export function projectNetwork(root: string): NetworkLevel {
+  try {
+    return parseNetwork(readMeta(boardPaths(path.join(root, '.squad'))).network) ?? DEFAULT_NETWORK;
+  } catch {
+    return DEFAULT_NETWORK;
+  }
+}
+
+/** What one level lets each guard reach. squad-kit makes it here, once; both guards read it. */
+export interface NetworkPolicy {
+  level: NetworkLevel;
+  /** The hosts the agents' own commands may reach. "*" is any host. Empty: none, only this computer's own ports. */
+  hosts: string[];
+  /** Hosts they never reach, whatever else allows them: the known-bad list. */
+  noHosts: string[];
+  /** What the project's own commands (setup, tests, the app) reach: the internet, or only this computer's own ports. */
+  commands: 'internet' | 'this-computer';
+}
+
+/**
+ * The policy for a level and the sites the project allows. Standard lets the agents' commands reach any host ("*"),
+ * with the recommended list beside it, so the usual sites stay open even on a tool that stops taking "*". Strict, the
+ * recommended list and the project's sites; Off, none. The known-bad list is closed on all three, and a site of the
+ * project's never opens it. The project's own commands: closed to all but this computer on Off, on a Mac (Seatbelt
+ * can say "only this computer"). Bubblewrap could only by giving each command a network of its own, where the app
+ * squad-kit started in another command is out of reach, so Linux keeps them open; Strict for them needs a proxy that
+ * sees host names, later.
+ */
+export function networkPolicy(level: NetworkLevel = DEFAULT_NETWORK, sites: string[] = [], platform: NodeJS.Platform = process.platform): NetworkPolicy {
+  const own = sites.filter((h) => !knownBadGroup(h));
+  const hosts = level === 'off' ? [] : [...new Set([...(level === 'standard' ? ['*'] : []), ...PACKAGE_HOSTS, ...own])];
+  return { level, hosts, noHosts: KNOWN_BAD, commands: level === 'off' && platform === 'darwin' ? 'this-computer' : 'internet' };
+}
+
+/** One site the agents' guard refused, for engineers on Harness → Safety. */
+export interface BlockedSite {
+  host: string;
+  /** The story it happened on. */
+  story: string;
+  level: NetworkLevel;
+  at: string;
+}
+
+/** The most the log keeps: enough to see what a project needs, small enough to read. */
+const MAX_BLOCKED_SITES = 50;
+
+/** This computer's log of refused sites, for the project. */
+function blockedSitesFile(bp: Pick<BoardPaths, 'localDir'>): string {
+  return path.join(bp.localDir, 'blocked-sites.json');
+}
+
+/** The refused sites, newest first. */
+export function blockedSites(bp: Pick<BoardPaths, 'localDir'>): BlockedSite[] {
+  try {
+    const list = JSON.parse(fs.readFileSync(blockedSitesFile(bp), 'utf8')) as unknown;
+    return Array.isArray(list) ? (list as BlockedSite[]).filter((b) => b && typeof b.host === 'string').reverse() : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Notes one refused site. The same site on the same story keeps one line, with its latest time. Never fails a step. */
+export function noteBlockedSite(bp: Pick<BoardPaths, 'localDir'>, site: Omit<BlockedSite, 'at'> & { at?: string }): void {
+  try {
+    const list = blockedSites(bp).reverse().filter((b) => b.host !== site.host || b.story !== site.story);
+    list.push({ host: site.host, story: site.story, level: site.level, at: site.at ?? new Date().toISOString() });
+    fs.mkdirSync(bp.localDir, { recursive: true });
+    fs.writeFileSync(blockedSitesFile(bp), `${JSON.stringify(list.slice(-MAX_BLOCKED_SITES), null, 1)}\n`);
+  } catch {
+    // A log it cannot write: the story goes on all the same.
+  }
+}
 
 /**
  * The person's own package caches a command may write in, so installing a package works. Only the ones whose packages
  * are checked against the project's lock file before use: a command cannot leave something there that the person's
- * own builds later run unchecked. The shared caches of NuGet, Maven, Gradle and RubyGems/Bundler stay read only:
- * those tools get the ticket's own cache instead (ticketCacheDir), and npx and browsers get none.
+ * own builds later run unchecked. Every other tool's cache stays read only: those tools get the project's cache home
+ * instead (engine/cache-home.ts).
  */
 export const PACKAGE_CACHES = [
   '.npm/_cacache',
@@ -96,31 +165,29 @@ export function noPushEnv(env: NodeJS.ProcessEnv = process.env): Record<string, 
 }
 
 /**
- * The ticket's own package cache on this computer, for the package managers whose shared caches stay read only
- * (NuGet, Maven, Gradle, RubyGems and Bundler). It sits with the project's other files on this computer, outside the
- * ticket's copy, so git never sees it, and nothing downloaded into it reaches the person's own caches. It goes with
- * the copy: after the release, and on Delete. The cost: a ticket's first build downloads its packages again.
+ * The ticket's own package cache, up to 1.3.2. Its stories now share the project's cache home (engine/cache-home.ts), so
+ * this is only where an older story's downloads may still be: they go with its copy, after the release and on Delete.
  */
 export function ticketCacheDir(bp: Pick<BoardPaths, 'localDir'>, id: string): string {
   return path.join(bp.localDir, 'caches', id.toLowerCase());
 }
 
 /**
- * The project's own package cache on this computer, for the commands squad-kit runs with no ticket: the first setup,
- * Your apps, your checkout's setup after a merge and the release pipeline. The same package managers as a ticket's.
+ * The project's own cache home on this computer, for the commands that run accepted code, with no ticket: the first setup,
+ * Your apps, your checkout's setup after a merge and the release pipeline. No story writes in it (engine/cache-home.ts).
  */
 export function projectCacheDir(bp: Pick<BoardPaths, 'localDir'>): string {
   return path.join(bp.localDir, 'caches', 'project');
 }
 
-/** Removes a ticket's own package cache, with its copy of the code. */
+/** Removes a ticket's own package cache from before 1.3.3, with its copy of the code. */
 export function dropTicketCache(bp: Pick<BoardPaths, 'localDir'>, id: string): void {
   fs.rmSync(ticketCacheDir(bp, id), { recursive: true, force: true });
 }
 
 /**
- * The environment that points those package managers at the ticket's cache, for a sandboxed step's commands. What
- * the person set already is kept where it adds up: their Maven options, and the gems already on this computer.
+ * The environment that points NuGet, Maven, Gradle, RubyGems and Bundler at a cache home (engine/cache-home.ts adds the
+ * other tools). What the person set already is kept where it adds up: their Maven options, and the gems already here.
  */
 export function packageCacheEnv(dir: string, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
   const at = (...p: string[]) => path.join(dir, ...p);
@@ -188,7 +255,9 @@ export interface SandboxFor {
   secrets: string[];
   /** Hosts the project allows on top of the package registries. */
   hosts?: string[];
-  /** The ticket's own package cache (ticketCacheDir). */
+  /** The project's network level. Left out, read from the project's own settings. */
+  network?: NetworkLevel;
+  /** The cache home the project's stories share (engine/cache-home.ts). */
   cache?: string;
   home?: string;
 }
@@ -200,13 +269,15 @@ export function sandboxAsk(o: SandboxFor): SandboxAsk {
   const caches = PACKAGE_CACHES.map((c) => path.join(home, c)).filter((c) => fs.existsSync(c));
   const env = ['.env', '.env.*', '**/.env', '**/.env.*'].map((p) => `${o.root}/${p}`);
   const own = o.cache ? withReal([o.cache]) : [];
+  const net = networkPolicy(o.network ?? projectNetwork(o.root), o.hosts ?? []);
   return {
     write: [...new Set([...withReal([o.proof]), ...own, ...temp, ...caches])],
     noRead: [...new Set([...PRIVATE.map((p) => path.join(home, p)), ...withReal([squadHome()]), ...o.secrets, ...env])],
     // The step's own folders, inside squad-kit's: its copy, its proof folder, its package cache, its attachments.
     read: [...new Set(withReal([o.cwd, o.proof, ...(o.cache ? [o.cache] : []), ...o.read]))],
     noWrite: [...new Set(withReal([...gitPlaces(o.cwd), ...copyDirsIn(o.cwd).flatMap(gitPlaces)]))],
-    hosts: [...new Set([...PACKAGE_HOSTS, ...(o.hosts ?? [])])],
+    hosts: net.hosts,
+    noHosts: net.noHosts,
   };
 }
 
@@ -244,9 +315,12 @@ function shown(file: string, home: string): string {
   return file === home ? '~' : file.startsWith(`${home}${path.sep}`) ? `~${file.slice(home.length)}` : file;
 }
 
-/** One line in plain words for something the sandbox refused, with what to do when the person can allow it. */
+/**
+ * One line in plain words for something the sandbox refused. A site asks nothing of the person and stops nothing: the
+ * agent reads the refusal in its command's output and goes on another way, and engineers see it on Harness → Safety.
+ */
 export function blockedLine(b: BlockedAction, home = os.homedir()): string {
-  if (b.kind === 'host') return `Reaching ${b.target} was blocked: not a package registry. Allow it on the Harness page, under Safety.`;
+  if (b.kind === 'host') return `A download from ${b.target} was not allowed for this project; the work goes on without it.`;
   const file = shown(b.target, home);
   if (b.kind === 'write') return `Writing ${file} was blocked: the squad writes only in the ticket's copy, the proof folder and temp folders.`;
   const base = path.basename(b.target);
@@ -270,16 +344,26 @@ export function blockedIn(output: string): BlockedAction[] {
 
 /**
  * Hosts a person typed for the project, cleaned: "https://Nexus.Example.com/repo" is nexus.example.com. A lone "*"
- * would open every host, so it is refused like anything that is not a host name.
+ * would open every host, so it is refused like anything that is not a host name. A known-bad site is set apart: no
+ * project opens one.
  */
-export function parseHosts(list: string[]): { hosts: string[]; bad: string[] } {
+export function parseHosts(list: string[]): { hosts: string[]; bad: string[]; closed: string[] } {
   const hosts: string[] = [];
   const bad: string[] = [];
+  const closed: string[] = [];
   for (const raw of list.flatMap((x) => String(x).split(/[\s,]+/))) {
     const s = raw.trim().toLowerCase().replace(/^[a-z][a-z0-9+.-]*:\/\//, '').replace(/[/?#].*$/, '').replace(/:\d+$/, '');
     if (!raw.trim()) continue;
-    if (/^(\*\.)?([a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(s) && s !== '*') hosts.push(s);
-    else bad.push(raw.trim());
+    if (!/^(\*\.)?([a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(s) || s === '*') bad.push(raw.trim());
+    else if (knownBadGroup(s)) closed.push(s);
+    else hosts.push(s);
   }
-  return { hosts: [...new Set(hosts)], bad };
+  return { hosts: [...new Set(hosts)], bad, closed };
+}
+
+/** Why a typed list of hosts cannot be saved, in plain words, or null when it can. */
+export function hostsProblem(p: { bad: string[]; closed: string[] }): string | null {
+  if (p.bad.length) return `"${p.bad[0]}" is not a host name. Write it like nexus.example.com, or *.example.com for all of its subdomains.`;
+  if (p.closed.length) return `${p.closed[0]} stays closed for every project: it is one of the ${knownBadGroup(p.closed[0]!)!.toLowerCase()}, which a build never needs.`;
+  return null;
 }

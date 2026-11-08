@@ -8,7 +8,9 @@ import { AI_TOOLS, BROWSERS } from '../modules/registry.js';
 import { squadHome } from '../core/home.js';
 import { childEnv } from './agent-env.js';
 import { OWN_GROUP, track } from './process-group.js';
-import { PACKAGE_CACHES, PRIVATE, gitPlaces, noPushEnv, packageCacheEnv, projectCacheDir, ticketCacheDir } from './sandbox.js';
+import { PACKAGE_CACHES, PRIVATE, gitPlaces, networkPolicy, noPushEnv, packageCacheEnv, projectCacheDir, projectNetwork, ticketCacheDir } from './sandbox.js';
+import type { NetworkLevel } from '../board/types.js';
+import { cacheHomeEnv, homeCachePlace, ownFolder, storiesCacheDir } from './cache-home.js';
 
 /**
  * squad-kit's own guard for the project's own commands: the checks (test, lint, build), the app's start, the setup
@@ -16,7 +18,8 @@ import { PACKAGE_CACHES, PRIVATE, gitPlaces, noPushEnv, packageCacheEnv, project
  * the person's keys or squad-kit's board token and sends them out. The guard runs each command under the operating
  * system's own sandbox (Seatbelt on a Mac, bubblewrap on Linux), where it works normally and may reach the network
  * for packages and tests, but cannot read the private files below. Network is allowed on purpose: the protection is
- * that secrets cannot be read, so there is nothing secret to send. Windows has no guard yet (the note says so).
+ * that secrets cannot be read, so there is nothing secret to send. On the project's Off network level a Mac closes it
+ * to all but this computer (networkPolicy in sandbox.ts). Windows has no guard yet (the note says so).
  *
  * Everything that spawns a project command goes through spawnProject here, so nothing runs unguarded by mistake
  * (test/project-guard.test.ts fails on a new shell spawn of a project command outside this module).
@@ -50,9 +53,11 @@ export interface GuardSpec {
   noConnect: string[];
   /** The one socket squad-kit opened for its own `docker compose up` (compose-run.ts). No other command gets this. */
   openSocket?: string;
+  /** The project's network level is Off: the command reaches nothing but this computer's own ports (networkPolicy). */
+  offline?: boolean;
   /** The throwaway git folder a commit's hooks run on (git.ts): theirs to read and write, whatever else is closed. */
   hookGit?: string;
-  /** The copy's own package cache for NuGet, Maven, Gradle and Ruby, so those tools never write the person's shared ones. */
+  /** The project's cache home (engine/cache-home.ts): every tool keeps its downloads there, never in the person's own caches. */
   cache?: string;
   /** What an engineer allowed this project in Settings, on top of the above. */
   allow?: ProjectGuard;
@@ -112,10 +117,11 @@ const RUNTIME_PORTS = [2375, 2376];
 /**
  * The person's npm and PyPI settings when they hold a token: those files mix a cache path (harmless) with an auth
  * token (secret), so squad-kit hides them only when a token is actually in them, and leaves a token-less ~/.npmrc
- * readable so a private registry URL still works. ~/.pypirc is only ever for credentials, so it is always hidden.
+ * readable so a private registry URL still works. ~/.pypirc is only ever for credentials, so it is always hidden, as are
+ * Composer's auth.json (its tokens for GitHub and private packages, in either of its homes) and RubyGems' credentials.
  */
 function tokenFiles(home: string): string[] {
-  const out: string[] = [path.join(home, '.pypirc')];
+  const out: string[] = [path.join(home, '.pypirc'), path.join(home, '.composer', 'auth.json'), path.join(home, '.config', 'composer', 'auth.json'), path.join(home, '.gem', 'credentials')];
   const npmrc = path.join(home, '.npmrc');
   try {
     if (/(_authToken|_auth|_password)\s*=/.test(fs.readFileSync(npmrc, 'utf8'))) out.push(npmrc);
@@ -136,22 +142,25 @@ function squadOwnFiles(): string[] {
 }
 
 /**
- * The guard for a project command run under a ticket: its copy, the proof folder, the ticket's own cache, and the
- * caches real builds need. squad-kit's whole folder is out of reach except those few places the command truly needs.
+ * The guard for a project command run under a ticket: its copy, the proof folder, the cache home all the project's stories
+ * share, and the caches real builds need. squad-kit's whole folder is out of reach except those few places the command
+ * truly needs.
  */
 export function ticketGuard(bp: BoardPaths, o: { cwd: string; id: string; read?: string[]; home?: string; platform?: NodeJS.Platform; allow?: ProjectGuard }): GuardSpec {
   const home = o.home ?? os.homedir();
-  const cache = ticketCacheDir(bp, o.id);
+  const cache = storiesCacheDir(bp);
+  ownFolder(cache);
   return { ...buildGuard({ cwd: o.cwd, root: bp.root, cache, extraWrite: [bp.proofDir, cache], extraRead: [cache, ...(o.read ?? [])], home, platform: o.platform ?? process.platform, ...(o.allow ? { allow: o.allow } : {}) }), noPush: true };
 }
 
 /**
- * The guard for a project command run with no ticket: the first setup, Your apps, the release pipeline and the
- * checkout setup after a merge. It uses the project's own cache instead of a ticket's.
+ * The guard for a project command that runs accepted code, with no ticket: the first setup, Your apps, the release
+ * pipeline and the checkout setup after a merge. It uses the project's own cache home, where no story writes.
  */
 export function projectGuardFor(bp: BoardPaths, o: { cwd: string; read?: string[]; home?: string; platform?: NodeJS.Platform; allow?: ProjectGuard } ): GuardSpec {
   const home = o.home ?? os.homedir();
   const cache = projectCacheDir(bp);
+  ownFolder(cache);
   return buildGuard({ cwd: o.cwd, root: bp.root, cache, extraWrite: [bp.proofDir, cache], extraRead: [cache, ...(o.read ?? [])], home, platform: o.platform ?? process.platform, ...(o.allow ? { allow: o.allow } : {}) });
 }
 
@@ -215,8 +224,11 @@ export function agentPrivatePlaces(home: string = os.homedir(), platform: NodeJS
   return [...privatePlaces(home, platform), ...['secrets.yaml', 'app.json', 'console.json'].map((f) => path.join(own, f)), ...['secrets.yaml', 'console.json'].map((f) => path.join(own, 'projects', '*', f))];
 }
 
-/** Builds the full spec: where the command may read and write, and what stays hidden. */
-export function buildGuard(o: { cwd: string; root: string; cache?: string; extraWrite?: string[]; extraRead?: string[]; home: string; platform: NodeJS.Platform; allow?: ProjectGuard }): GuardSpec {
+/**
+ * Builds the full spec: where the command may read and write, and what stays hidden. The network comes from the
+ * project's level, read from its own settings unless given: the same policy the agents' commands get.
+ */
+export function buildGuard(o: { cwd: string; root: string; cache?: string; extraWrite?: string[]; extraRead?: string[]; home: string; platform: NodeJS.Platform; allow?: ProjectGuard; network?: NetworkLevel }): GuardSpec {
   const home = o.home;
   const temp = withReal([os.tmpdir(), ...(o.platform === 'win32' ? [] : ['/tmp', '/private/tmp', '/private/var/folders'])]);
   const noRead = [...privatePlaces(home, o.platform), ...withReal([squadHome()])];
@@ -239,6 +251,7 @@ export function buildGuard(o: { cwd: string; root: string; cache?: string; extra
     noConnect: [...new Set(withReal(runtimeSockets(home, o.platform)))],
     ...(o.cache ? { cache: real(o.cache) } : {}),
     ...(o.allow ? { allow: { ...(o.allow.allowRead ? { allowRead: withReal(o.allow.allowRead.map((p) => allowPath(p, home))) } : {}), ...(o.allow.allowWrite ? { allowWrite: withReal(o.allow.allowWrite.map((p) => allowPath(p, home))) } : {}) } } : {}),
+    ...(networkPolicy(o.network ?? projectNetwork(o.root), [], o.platform).commands === 'this-computer' ? { offline: true } : {}),
   };
 }
 
@@ -334,6 +347,10 @@ export function profileText(spec: GuardSpec): string {
   for (const d of spec.noRead) lines.push(`(deny network-outbound (subpath ${sb(d)}))`);
   for (const a of [spec.cwd, ...spec.read, ...spec.write, ...(spec.hookGit ? [spec.hookGit] : [])]) lines.push(`(allow network-outbound (subpath ${sb(a)}))`);
   for (const s of spec.noConnect) lines.push(`(deny network-outbound (subpath ${sb(s)}))`);
+  // Off: no address but this computer's own (127.0.0.1 and ::1), so a test still reaches the app squad-kit started in
+  // another command. Sockets stay as above: DNS answers, and what it finds is out of reach. After the socket rules: a
+  // socket deny after "localhost" closed this computer's own addresses too (seen on a real Mac). Docker's port after it.
+  if (spec.offline) lines.push('(deny network-outbound (remote ip "*:*"))', '(allow network-outbound (remote ip "localhost:*"))');
   for (const port of RUNTIME_PORTS) lines.push(`(deny network-outbound (remote tcp "localhost:${port}"))`);
   for (const a of [...allowRead, ...allowWrite]) lines.push(`(allow network-outbound (subpath ${sb(a)}))`);
   if (spec.openSocket) lines.push(`(allow network-outbound (literal ${sb(spec.openSocket)}))`);
@@ -509,8 +526,8 @@ export interface SpawnProjectOptions {
  * The command still runs through a shell and in its own process group, so Stop ends the whole group as it did.
  */
 export function spawnProject(command: string, o: SpawnProjectOptions): ChildProcess {
-  // NuGet, Maven, Gradle and Ruby write into the copy's own cache, never the person's shared ones, like the agent sandbox.
-  const caches = o.guard?.cache ? { ...packageCacheEnv(o.guard.cache), ...npmCacheEnv(o.guard.cache), ...ownCacheEnv(o.guard.cache), ...browserCacheEnv(o.guard.cache) } : {};
+  // Every tool keeps its downloads in the project's cache home, never the person's own caches, as in the agent's shell.
+  const caches = o.guard?.cache ? cacheHomeEnv(o.guard.cache, { wall: 'project', cwd: o.cwd }) : {};
   const env = { ...projectEnv(), ...caches, ...(o.guard?.noPush ? noPushEnv() : {}), ...(o.env ?? {}) };
   const stdio = o.stdio ?? ['ignore', 'pipe', 'pipe'];
   const base: SpawnOptions = { cwd: o.cwd, detached: OWN_GROUP, stdio, env };
@@ -522,64 +539,6 @@ export function spawnProject(command: string, o: SpawnProjectOptions): ChildProc
     return track(spawn('bwrap', bubblewrapArgs(o.guard, command), base));
   }
   return track(spawn(command, { ...base, shell: true }));
-}
-
-/**
- * The caches a command's tools would keep in `~/.cache` or `~/Library/Caches`, which stay read only: in the copy's own. A
- * Mac's tools look in their own places, so they are named one by one. The first build of a ticket downloads again.
- * pnpm's store has to be named too: it cannot link from its usual store here, so it would make a .pnpm-store in the copy,
- * thousands of files a commit could take. pnpm reads the first name from version 11, and the second before it.
- */
-function ownCacheEnv(cache: string): Record<string, string> {
-  const at = (p: string) => path.join(cache, p);
-  return { XDG_CACHE_HOME: at('xdg'), GOCACHE: at('go-build'), PIP_CACHE_DIR: at('pip'), POETRY_CACHE_DIR: at('poetry'), DENO_DIR: at('deno'), npm_config_devdir: at('node-gyp'), PUPPETEER_CACHE_DIR: at('puppeteer'), electron_config_cache: at('electron'), pnpm_config_store_dir: at('pnpm-store'), npm_config_store_dir: at('pnpm-store') };
-}
-
-/**
- * Playwright locks and writes in its browsers' folder even with nothing to download, and that folder stays read only: the
- * person's own Playwright runs what is there. So a command's Playwright gets a folder of the copy's own, with the browsers
- * this computer has linked in, and what it downloads stays with the copy.
- */
-function browserCacheEnv(cache: string): Record<string, string> {
-  const set = process.env.PLAYWRIGHT_BROWSERS_PATH;
-  if (set === '0' || process.platform === 'win32') return {};
-  const home = os.homedir();
-  const theirs = set ? path.resolve(set) : path.join(process.platform === 'darwin' ? path.join(home, 'Library', 'Caches') : (process.env.XDG_CACHE_HOME ?? path.join(home, '.cache')), 'ms-playwright');
-  const dir = path.join(cache, 'ms-playwright');
-  try {
-    fs.mkdirSync(dir, { recursive: true });
-    for (const name of fs.existsSync(theirs) ? fs.readdirSync(theirs) : []) {
-      if (!/^[a-z_]+-\d+$/.test(name)) continue;
-      try {
-        fs.symlinkSync(path.join(theirs, name), path.join(dir, name));
-      } catch {
-        // Linked by an earlier command, or by one starting beside this.
-      }
-    }
-    return { PLAYWRIGHT_BROWSERS_PATH: dir };
-  } catch {
-    // A folder it cannot make: Playwright as it is, with its folder read only.
-    return {};
-  }
-}
-
-/**
- * npm keeps what npx downloads beside its own cache, and that stays read only: a command could leave something there
- * that the person's own builds run later, unchecked. So a command's npm gets a cache folder of the copy's own, where
- * npx works, with the shared store of packages linked in: those are checked against the lock file, and stay shared.
- */
-function npmCacheEnv(cache: string): Record<string, string> {
-  const dir = path.join(cache, 'npm');
-  try {
-    fs.mkdirSync(dir, { recursive: true });
-    const shared = path.join(os.homedir(), '.npm', '_cacache');
-    const link = path.join(dir, '_cacache');
-    if (fs.existsSync(shared) && !fs.lstatSync(link, { throwIfNoEntry: false })) fs.symlinkSync(shared, link);
-    return { npm_config_cache: dir };
-  } catch {
-    // A cache folder it cannot make: npm as it is, with npx read only.
-    return {};
-  }
 }
 
 /** The file in the throwaway git folder that the copy's `.git` shows, inside bubblewrap. */
@@ -628,6 +587,8 @@ const BLOCKED_LINES = [
   /['"]([^'"\n]+)['"]: (?:Operation not permitted|Read-only file system)/i,
   /([^\s'":]+): (?:Operation not permitted|Read-only file system)/i,
   /(?:Operation not permitted|Read-only file system)[^\n]*?(\/[^\s'":]+)/i,
+  // Dart's: "Cannot open file, path = '<path>' (OS Error: Operation not permitted, errno = 1)".
+  /['"](\/[^'"\n]+)['"][^\n]*?(?:Operation not permitted|Read-only file system)/i,
 ];
 
 /** npm says it on lines of its own: the failed step, then the path it was refused. */
@@ -676,6 +637,22 @@ export function guardBlockedPath(output: string, guard: GuardSpec): string | nul
     }
   }
   return null;
+}
+
+/**
+ * The places in the person's home a tool's cache is in that a command could not write, from what it printed: each
+ * `~/.cache/<tool>`, `~/Library/Caches/<tool>` or `~/.<tool>` once (engine/cache-home.ts says which count). Empty when
+ * nothing it printed is that, so a command that failed for another reason is not run again.
+ */
+export function homeCachesRefused(output: string, guard: GuardSpec, home: string = os.homedir()): string[] {
+  if (!output) return [];
+  const said = [NPM_REFUSED.exec(output)?.[1]?.trim(), ...output.split('\n').flatMap((line) => BLOCKED_LINES.map((re) => re.exec(line)?.[1]?.trim()))];
+  const places = said.flatMap((p) => {
+    const target = p && path.resolve(guard.cwd, p);
+    const place = target && isBlocked(target, guard) ? homeCachePlace(target, home, guard.noRead) : null;
+    return place ? [place] : [];
+  });
+  return [...new Set(places)];
 }
 
 /**

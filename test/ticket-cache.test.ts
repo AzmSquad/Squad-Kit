@@ -7,9 +7,10 @@ import type { RunOptions, RunResult } from '../src/modules/claude/direct.js';
 import type { SandboxSupport } from '../src/modules/ai-tool/types.js';
 
 /**
- * A ticket's own package cache: the Builder and the Tester download NuGet, Maven, Gradle and Ruby packages into it,
- * never into the person's own caches. It is outside the ticket's copy, only sandboxed steps get it, and it goes when
- * the copy goes: after the release, and on Delete.
+ * The cache home the project's stories share (1.3.3): the Builder and the Tester download NuGet, Maven, Gradle, Ruby,
+ * pip, Dart and the other tools' packages into it, never into the person's own caches. It is outside every copy, only
+ * sandboxed steps get it, and it stays for the next story. A ticket's own cache from before 1.3.3 still goes when its copy
+ * goes: after the release, and on Delete.
  */
 
 const h = vi.hoisted(() => ({
@@ -40,7 +41,8 @@ const { LiveSquad } = await import('../src/engine/live.js');
 const { addWorktree } = await import('./support/copy.js');
 const actions = await import('../src/board/actions.js');
 const { deletePlan, deleteTicket } = await import('../src/engine/delete.js');
-const { noPushEnv, packageCacheEnv, ticketCacheDir } = await import('../src/engine/sandbox.js');
+const { noPushEnv, ticketCacheDir } = await import('../src/engine/sandbox.js');
+const { cacheHomeEnv, storiesCacheDir } = await import('../src/engine/cache-home.js');
 
 let tmp: string;
 let project: string;
@@ -51,11 +53,17 @@ const sh = (cmd: string, cwd: string) => execSync(cmd, { cwd, encoding: 'utf8', 
 const commit = (cwd: string, msg: string) => sh(`git add -A && git -c user.name=t -c user.email=t@t commit -qm "${msg}"`, cwd);
 const squad = () => new LiveSquad(bp) as unknown as Squad;
 const cacheOf = (id: string) => ticketCacheDir(bp, id);
+const shared = () => storiesCacheDir(bp);
+/** A ticket's own cache as 1.3.2 left it. */
+const leftOver = (id: string) => fs.mkdirSync(path.join(cacheOf(id), 'nuget', 'packages'), { recursive: true });
 
 beforeEach(() => {
   h.calls.length = 0;
   h.support = { available: true, why: "Claude Code's sandbox (macOS Seatbelt)" };
   tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'squad-cache-')));
+  // A home of the test's own: the cache home starts with copies and links of what the person's has.
+  fs.mkdirSync(path.join(tmp, 'home'));
+  vi.stubEnv('HOME', path.join(tmp, 'home'));
   project = path.join(tmp, 'app');
   const remote = path.join(tmp, 'remote.git');
   fs.mkdirSync(project);
@@ -116,14 +124,17 @@ function building(id: string, file: string): string {
 }
 
 describe("the Builder's package downloads", () => {
-  it("go into the ticket's own cache: outside its copy, writable in the sandbox, with the person's Maven options kept", async () => {
+  it("go into the cache home the stories share: outside every copy, writable in the sandbox, with the person's Maven options kept", async () => {
     vi.stubEnv('MAVEN_OPTS', '-Xmx2g');
     const wt = building('AP-1', 'one.txt');
     await squad().runBuilder('AP-1', 'Build it', false, 'build');
-    const cache = cacheOf('AP-1');
+    const cache = shared();
     const run = h.calls[0]!;
-    expect(run.env).toEqual({ ...noPushEnv(), ...packageCacheEnv(cache) });
+    expect(run.env).toEqual({ ...noPushEnv(), ...cacheHomeEnv(cache, { wall: 'agent' }) });
     expect(run.env).toMatchObject({
+      XDG_CACHE_HOME: path.join(cache, 'xdg'),
+      PIP_CACHE_DIR: path.join(cache, 'pip'),
+      PUB_CACHE: path.join(cache, 'pub'),
       NUGET_PACKAGES: path.join(cache, 'nuget', 'packages'),
       MAVEN_OPTS: `-Xmx2g -Dmaven.repo.local=${path.join(cache, 'maven', 'repository')}`,
       GRADLE_USER_HOME: path.join(cache, 'gradle'),
@@ -137,6 +148,11 @@ describe("the Builder's package downloads", () => {
     expect(path.relative(wt, cache).startsWith('..')).toBe(true);
     expect(fs.existsSync(path.join(cache, 'nuget', 'packages', 'newtonsoft.json.nupkg'))).toBe(true);
     expect(sh('git status --porcelain', wt)).toBe('?? one.txt');
+    expect(fs.existsSync(cacheOf('AP-1'))).toBe(false);
+    // The next story finds what the first one downloaded.
+    building('AP-2', 'two.txt');
+    await squad().runBuilder('AP-2', 'Build it', false, 'build');
+    expect(h.calls.at(-1)!.env!.NUGET_PACKAGES).toBe(path.join(cache, 'nuget', 'packages'));
   });
 
   it('are left alone in steps without the sandbox: steps that only read, and a computer without one', async () => {
@@ -146,14 +162,16 @@ describe("the Builder's package downloads", () => {
     h.support = { available: false, why: 'socat is not installed' };
     await squad().runBuilder('AP-1', 'Build it', false, 'build');
     expect(h.calls.at(-1)!.env).toEqual(noPushEnv());
-    expect(fs.existsSync(cacheOf('AP-1'))).toBe(false);
+    expect(fs.existsSync(path.join(shared(), 'nuget'))).toBe(false);
   });
 });
 
-describe("a ticket's own package cache goes with its copy", () => {
+describe("a ticket's own cache from before 1.3.3 goes with its copy, and the shared one stays", () => {
   it('after the release, and only the released tickets\' caches', async () => {
     building('AP-1', 'one.txt');
     building('AP-2', 'two.txt');
+    leftOver('AP-1');
+    leftOver('AP-2');
     await squad().runBuilder('AP-1', 'Build it', false, 'build');
     await squad().runBuilder('AP-2', 'Build it', false, 'build');
     expect(fs.existsSync(cacheOf('AP-1'))).toBe(true);
@@ -163,16 +181,22 @@ describe("a ticket's own package cache goes with its copy", () => {
     expect(readRelease(bp, release.version)).toMatchObject({ status: 'released', tickets: ['AP-1'] });
     expect(fs.existsSync(readTicket(bp, 'AP-1')!.worktree!)).toBe(false);
     expect(fs.existsSync(cacheOf('AP-1'))).toBe(false);
-    // AP-2 is still being built: its copy and its cache stay.
+    // AP-2 is still being built: its copy and its cache stay, and the next stories still find what the first downloaded.
     expect(fs.existsSync(cacheOf('AP-2'))).toBe(true);
+    expect(fs.existsSync(path.join(shared(), 'nuget', 'packages', 'newtonsoft.json.nupkg'))).toBe(true);
   }, 30_000);
 
   it('on Delete, which says so first', async () => {
     building('AP-1', 'one.txt');
+    building('AP-2', 'two.txt');
+    leftOver('AP-1');
     await squad().runBuilder('AP-1', 'Build it', false, 'build');
     expect(deletePlan(bp, 'AP-1').removes).toContain('The packages its Builder and Tester downloaded for it');
+    // A story of 1.3.3 has no cache of its own to remove.
+    expect(deletePlan(bp, 'AP-2').removes).not.toContain('The packages its Builder and Tester downloaded for it');
     await deleteTicket(bp, 'AP-1', { waitMs: 5000 });
     expect(readTicket(bp, 'AP-1')).toBeNull();
     expect(fs.existsSync(cacheOf('AP-1'))).toBe(false);
+    expect(fs.existsSync(path.join(shared(), 'nuget', 'packages', 'newtonsoft.json.nupkg'))).toBe(true);
   }, 30_000);
 });

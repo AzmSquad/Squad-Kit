@@ -113,6 +113,7 @@ const ask: SandboxAsk = {
   read: ['/home/me/.squad-kit/worktrees/app-1/ap-1'],
   noWrite: ['/home/me/.squad-kit/worktrees/app-1/ap-1/.git'],
   hosts: ['registry.npmjs.org', 'nexus.example.com'],
+  noHosts: ['webhook.site', '*.ngrok.io'],
 };
 
 const optionsOf = (launch: ReturnType<typeof claudeLaunch>) => (launch.meta as { claudeCode: { options: Record<string, unknown> } }).claudeCode.options;
@@ -124,7 +125,7 @@ describe("Claude Code's sandbox settings", () => {
       failIfUnavailable: false,
       autoAllowBashIfSandboxed: false,
       allowUnsandboxedCommands: false,
-      network: { allowedDomains: ['registry.npmjs.org', 'nexus.example.com'], strictAllowlist: true, allowLocalBinding: true },
+      network: { allowedDomains: ['registry.npmjs.org', 'nexus.example.com'], deniedDomains: ['webhook.site', '*.ngrok.io'], strictAllowlist: true, allowLocalBinding: true },
       filesystem: {
         allowWrite: ['/w/proof', '/tmp'],
         denyWrite: ['/home/me/.squad-kit/worktrees/app-1/ap-1/.git'],
@@ -133,7 +134,7 @@ describe("Claude Code's sandbox settings", () => {
       },
     });
     // Listening on local ports is a macOS setting; a Linux sandbox has its own network.
-    expect(claudeSandbox(ask, 'linux', '/home/me').network).toEqual({ allowedDomains: ask.hosts, strictAllowlist: true });
+    expect(claudeSandbox(ask, 'linux', '/home/me').network).toEqual({ allowedDomains: ask.hosts, deniedDomains: ask.noHosts, strictAllowlist: true });
     // No command runs outside it: the browser and the app go through squad-kit's own tools.
     expect(claudeSandbox(ask, 'darwin', '/home/me')).not.toHaveProperty('excludedCommands');
   });
@@ -231,8 +232,10 @@ describe("a step's sandbox", () => {
     );
     // Inside squad-kit's folder, only what the step needs.
     expect(a.read).toEqual(expect.arrayContaining([cwd, proof, '/files']));
-    expect(a.hosts).toEqual([...PACKAGE_HOSTS, 'nexus.example.com']);
+    // A project with no level of its own is on Standard: any host, the recommended ones named too, the known-bad closed.
+    expect(a.hosts).toEqual(['*', ...PACKAGE_HOSTS, 'nexus.example.com']);
     expect(a.hosts).toEqual(expect.arrayContaining(['registry.npmjs.org', 'pypi.org', 'repo1.maven.org', 'api.nuget.org', 'rubygems.org', 'crates.io', 'proxy.golang.org', 'objects.githubusercontent.com']));
+    expect(a.noHosts).toEqual(expect.arrayContaining(['webhook.site', '*.ngrok.io', 'pastebin.com']));
     // Nothing runs outside it, not even a browser: squad-kit's own tools take the pictures.
     expect(a).not.toHaveProperty('outside');
   });
@@ -241,6 +244,7 @@ describe("a step's sandbox", () => {
     expect(parseHosts(['https://Nexus.Example.com/repo/', '*.corp.example.com', 'api.example.com:8443, pypi.example.org', 'nexus'])).toEqual({
       hosts: ['nexus.example.com', '*.corp.example.com', 'api.example.com', 'pypi.example.org', 'nexus'],
       bad: [],
+      closed: [],
     });
     // A lone "*" would open every host.
     expect(parseHosts(['*', 'exa_mple.com', '-bad.com']).bad).toEqual(['*', 'exa_mple.com', '-bad.com']);
@@ -300,8 +304,8 @@ describe('what the sandbox refused', () => {
     expect(claudeBlocked('<sandbox_violations>\ndeny network-outbound [2001:db8::1]:443 (not_allowlisted)\n</sandbox_violations>')).toEqual([{ kind: 'host', target: '2001:db8::1' }]);
   });
 
-  it('is said in plain words, with the way to allow a host', () => {
-    expect(blockedLine({ kind: 'host', target: 'example.com' })).toBe('Reaching example.com was blocked: not a package registry. Allow it on the Harness page, under Safety.');
+  it('is said in plain words; a site asks nothing of the person', () => {
+    expect(blockedLine({ kind: 'host', target: 'example.com' })).toBe('A download from example.com was not allowed for this project; the work goes on without it.');
     expect(blockedLine({ kind: 'read', target: '/Users/me/.ssh/id_rsa' }, '/Users/me')).toBe('Reading ~/.ssh/id_rsa was blocked: keys and sign-ins stay private.');
     expect(blockedLine({ kind: 'read', target: '/Users/me/app/.env.local' }, '/Users/me')).toBe("Reading ~/app/.env.local was blocked: the project's .env files stay private.");
     expect(blockedLine({ kind: 'read', target: path.join(squadHome(), 'projects', 'x', 'secrets.yaml') }, '/nowhere')).toMatch(/was blocked: squad-kit's own files stay private\.$/);
@@ -337,7 +341,7 @@ describe('what the sandbox refused', () => {
     const fromLog = readConversation(id, 400, projects, chats)!;
     const blockedOf = (c: NonNullable<ReturnType<typeof readConversation>>) =>
       c.updates.map((e) => (e.update as { _meta?: { squadKit?: { blocked?: string[] } } })._meta?.squadKit?.blocked).filter(Boolean);
-    const words = ['Reaching example.com was blocked: not a package registry. Allow it on the Harness page, under Safety.', expect.stringContaining('Reading /Users/me/.ssh/id_rsa was blocked'), expect.stringContaining('Writing /Users/me/Documents/notes.txt was blocked')];
+    const words = ['A download from example.com was not allowed for this project; the work goes on without it.', expect.stringContaining('Reading /Users/me/.ssh/id_rsa was blocked'), expect.stringContaining('Writing /Users/me/Documents/notes.txt was blocked')];
     expect(blockedOf(fromLog)).toEqual([words]);
 
     // A direct run: the output is long, so what is shown is cut short, but the refusal at its end still counts.

@@ -1057,6 +1057,8 @@ export interface BoardMeta {
   runner?: 'acp' | 'direct';
   /** Hosts the Builder's and Tester's commands may reach besides the package registries, such as a private package server. */
   allowedHosts?: string[];
+  /** How much of the internet the agents' commands and the project's own commands reach. Left out, Standard. */
+  network?: NetworkLevel;
   /** What an engineer lets the project's own commands (tests, setup, the app) reach outside their copy. */
   guard?: ProjectGuard;
   /** What the squad used on the project's own work, with no ticket: reading the project, filling in new tickets. */
@@ -1096,6 +1098,12 @@ export interface ProjectFile {
   /** Its path inside that repo. */
   path: string;
 }
+
+/**
+ * The project's network level (engine/sandbox.ts turns it into one policy for both guards). Standard: every site but
+ * the known-bad ones. Strict: the recommended sites and the project's own. Off: nothing outside this computer.
+ */
+export type NetworkLevel = 'standard' | 'strict' | 'off';
 
 /**
  * Files and folders outside the copy the project's own commands may still use, as typed: "~/.npmrc", "/opt/shared".

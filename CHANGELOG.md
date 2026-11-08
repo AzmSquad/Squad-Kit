@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A network level for each project: Standard, Strict or Off.** It says how much of the internet the squad's commands
+  reach, in one sentence on Harness → Safety. An engineer picks it there (under For engineers) or with
+  `squad config set network`, and the whole team shares it through git, like the allowed websites.
+  - **Standard**, the default: any website but known-bad ones. Your keys stay hidden, so a harmful package has nothing
+    to take. Setups that download their own tools (Prisma, Gradle, Flutter, .NET, browsers for tests) now just work.
+  - **Strict**: only the official package and download sites of common tools, a much longer list than before, plus the
+    websites you allow. Your project's own tests and app still reach any site on Strict for now.
+  - **Off**: no internet, only this computer. On a Mac this covers your project's own setup, tests and app too, which
+    still reach the app on this computer. On Linux it covers the agents' commands only.
+  - On every level, tunnels, paste and file-drop sites and request catchers stay closed. A build never needs them.
+
+### Changed
+
+- **A refused website no longer asks you anything.** The story used to say "Allow it on the Harness page, under Safety."
+  Now it says the download was not allowed for this project and that the work goes on without it, and nothing stops.
+  The Builder and Tester are told up front that a refused site is closed on purpose, so they work around it instead
+  of trying again. Engineers find each refused site, with its story, level and time, under For engineers on
+  Harness → Safety and in `squad config set network`.
+- **No tool's downloads are blocked any more, and only a project's first story downloads.** Each project now has one
+  download folder of its own on this computer, which all its stories share. The project's setup, checks, app and gates and
+  the agents' own commands all use it, with each tool pointed there by its own setting: Prisma, Python, Dart and Flutter,
+  Gradle and Maven, .NET, PHP, Ruby, test browsers and more. What this computer downloaded already is used first, so even
+  the first story often downloads little: Prisma's engines, Playwright's and Puppeteer's browsers, the Gradle a project asks
+  for, and the Gradle, NuGet and Maven packages you already have. Your own download folders stay as they are, and nothing
+  of the squad's is written in them. Before, a story's copy of a Prisma project could not be set up, and the Builder spent
+  minutes finding a way around it; .NET, Java and Ruby stories each downloaded everything again.
+- **A tool squad-kit does not know sorts itself out.** When one still cannot save its downloads in your home folder,
+  squad-kit gives it the project's own folder and runs the command once more, by itself, only once. The story says so in
+  one line, the log says which place and which command, and that command starts that way from then on.
+- **What you run yourself never takes what a story downloaded.** Your own copy's setup after a merge, Your apps and the
+  release pipeline use a second download folder that no story writes in.
+
+### Fixed
+
+- **Flutter projects run in the guard.** Flutter stopped at once: it could not lock a file in its own folder, which stays
+  read only, nor write its usage reports in your home folder. squad-kit now tells it, by its own settings, not to take that
+  lock and to leave the reports out of the squad's commands. .NET leaves them out too.
+- **Composer's and RubyGems' keys stay hidden.** Composer's `auth.json` (its tokens for GitHub and private packages) and
+  RubyGems' `credentials` file were readable by the squad's commands; like `.pypirc`, they now never are.
+
 ## [1.3.2] — 2026-11-08
 
 ### Fixed

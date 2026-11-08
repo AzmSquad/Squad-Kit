@@ -45,6 +45,10 @@ const { mountApi } = await import('../src/console/api/index.js');
 const { AgentWindow, ALL_TOOLS } = await import('../src/engine/window.js');
 const { addLocalFile, addLockedFile, storyFile } = await import('../src/board/project-files.js');
 const { deniedTools } = await import('../src/modules/claude/direct.js');
+const { blockedSites, projectNetwork } = await import('../src/engine/sandbox.js');
+const { networkRule } = await import('../src/engine/prompts.js');
+const { KNOWN_BAD, RECOMMENDED } = await import('../src/engine/network-lists.js');
+const { ticketGuard, projectGuardFor } = await import('../src/engine/project-guard.js');
 
 let tmp: string;
 let project: string;
@@ -261,12 +265,145 @@ describe('the sandbox', () => {
       opts.onBlocked?.({ kind: 'read', target: path.join(os.homedir(), '.ssh', 'id_rsa') });
     };
     await squad().runBuilder('AP-1', 'Build it', false, 'build');
-    const lines = activity().filter((a) => a.includes('was blocked'));
-    expect(lines).toEqual(['Reading ~/.ssh/id_rsa was blocked: keys and sign-ins stay private.', 'Reaching example.com was blocked: not a package registry. Allow it on the Harness page, under Safety.']);
+    const lines = activity().filter((a) => /was blocked|was not allowed/.test(a));
+    expect(lines).toEqual(['Reading ~/.ssh/id_rsa was blocked: keys and sign-ins stay private.', 'A download from example.com was not allowed for this project; the work goes on without it.']);
+  });
+});
+
+describe('the network level', () => {
+  it("is kept with the project's shared settings, beside the allowed websites, and Standard when not set", () => {
+    expect(projectNetwork(project)).toBe('standard');
+    setMeta({ network: 'strict', allowedHosts: ['nexus.example.com'] });
+    expect(readMeta(bp).network).toBe('strict');
+    // In .squad/config.yaml, which git carries to the team, not in this computer's own file.
+    expect(fs.readFileSync(bp.configFile, 'utf8')).toMatch(/board:[\s\S]*allowedHosts:[\s\S]*network: strict/);
+    expect(fs.existsSync(bp.localMetaFile) ? fs.readFileSync(bp.localMetaFile, 'utf8') : '').not.toContain('network');
+    expect(projectNetwork(project)).toBe('strict');
+    // A level written by hand that is none of the three, or a folder with no settings: Standard.
+    fs.writeFileSync(bp.configFile, fs.readFileSync(bp.configFile, 'utf8').replace('network: strict', 'network: loose'));
+    expect(projectNetwork(project)).toBe('standard');
+    expect(projectNetwork(path.join(tmp, 'nowhere'))).toBe('standard');
+  });
+
+  it("gives the Builder's commands any site but the known-bad ones on Standard", async () => {
+    setMeta({ allowedHosts: ['nexus.example.com'] });
+    await squad().runBuilder('AP-1', 'Build it', false, 'build');
+    const net = h.calls[0]!.sandbox!.network;
+    expect(net.allowedDomains[0]).toBe('*');
+    expect(net.allowedDomains).toEqual(expect.arrayContaining([...RECOMMENDED, 'nexus.example.com']));
+    expect(net.deniedDomains).toEqual(KNOWN_BAD);
+    expect(net.strictAllowlist).toBe(true);
+    // The Builder is told up front what its commands reach, and the way around a refused site.
+    expect(h.calls[0]!.appendSystemPrompt).toContain(networkRule('standard'));
+  });
+
+  it('tells a step with no sandbox here nothing about sites it could not be refused', async () => {
+    h.support = { available: false, why: 'socat is not installed', fix: 'Install it, for example: sudo apt install socat' };
+    setMeta({ network: 'off' });
+    await squad().runBuilder('AP-1', 'Build it', false, 'build');
+    expect(h.calls[0]!.sandbox).toBeUndefined();
+    expect(h.calls[0]!.appendSystemPrompt).not.toContain('Your shell commands reach');
+  });
+
+  it('gives them the recommended sites and the project\'s own on Strict, the known-bad ones still closed', async () => {
+    setMeta({ network: 'strict', allowedHosts: ['nexus.example.com'] });
+    await squad().runBuilder('AP-1', 'Build it', false, 'build');
+    const net = h.calls[0]!.sandbox!.network;
+    expect(net.allowedDomains).toEqual([...RECOMMENDED, 'nexus.example.com']);
+    expect(net.allowedDomains).not.toContain('*');
+    expect(net.deniedDomains).toEqual(KNOWN_BAD);
+    expect(net.strictAllowlist).toBe(true);
+  });
+
+  it("gives them nothing outside this computer on Off, and closes the project's own commands too on a Mac", async () => {
+    setMeta({ network: 'off', allowedHosts: ['nexus.example.com'] });
+    await squad().runBuilder('AP-1', 'Build it', false, 'build');
+    const net = h.calls[0]!.sandbox!.network;
+    expect(net.allowedDomains).toEqual([]);
+    expect(net.strictAllowlist).toBe(true);
+    if (process.platform === 'darwin') expect(net.allowLocalBinding).toBe(true);
+    expect(h.calls[0]!.appendSystemPrompt).toContain(networkRule('off'));
+    // The same policy for the guard around the project's own commands: Seatbelt says "only this computer"; Linux stays open.
+    expect(ticketGuard(bp, { cwd: wt, id: 'AP-1', platform: 'darwin' }).offline).toBe(true);
+    expect(projectGuardFor(bp, { cwd: project, platform: 'darwin' }).offline).toBe(true);
+    expect(ticketGuard(bp, { cwd: wt, id: 'AP-1', platform: 'linux' })).not.toHaveProperty('offline');
+    for (const level of ['standard', 'strict']) {
+      setMeta({ network: level });
+      expect(ticketGuard(bp, { cwd: wt, id: 'AP-1', platform: 'darwin' })).not.toHaveProperty('offline');
+    }
+  });
+
+  it('a refused site asks the person nothing, stops nothing, and goes in the log for engineers', async () => {
+    setMeta({ network: 'strict' });
+    h.run = (opts) => {
+      opts.onBlocked?.({ kind: 'host', target: 'binaries.example.dev' });
+      opts.onBlocked?.({ kind: 'host', target: 'binaries.example.dev' });
+    };
+    const s = squad();
+    await step(s, () => s.runBuilder('AP-1', 'Build it', false, 'build'));
+    const t = readTicket(bp, 'AP-1')!;
+    const line = t.activity.map((a) => a.text).filter((a) => a.includes('binaries.example.dev'));
+    expect(line).toEqual(['A download from binaries.example.dev was not allowed for this project; the work goes on without it.']);
+    // No question, no setting to change, no word a project manager would have to look up.
+    expect(line[0]).not.toMatch(/\?|allow it|Harness|Safety|Settings|sandbox|proxy|allowlist|egress|registr/i);
+    // The story was not stopped and waits for nobody.
+    expect(t.stuck).toBeUndefined();
+    expect(t.waiting).toBeNull();
+    expect(blockedSites(bp)).toEqual([{ host: 'binaries.example.dev', story: 'AP-1', level: 'strict', at: expect.any(String) }]);
+  });
+});
+
+describe('the terminal', () => {
+  it('squad config set network shows the levels and the sites refused lately, and sets one for the team', async () => {
+    const { chooseProject } = await import('../src/core/paths.js');
+    const { runNetwork } = await import('../src/commands/sandbox.js');
+    const { noteBlockedSite } = await import('../src/engine/sandbox.js');
+    const said: string[] = [];
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation((s) => (said.push(String(s)), true));
+    chooseProject(project);
+    try {
+      noteBlockedSite(bp, { host: 'cdn.example.dev', story: 'AP-1', level: 'standard' });
+      await runNetwork(undefined);
+      const shown = said.join('');
+      expect(shown).toMatch(/● standard/);
+      expect(shown).toMatch(/○ strict/);
+      expect(shown).toContain('cdn.example.dev');
+      await runNetwork('off');
+      expect(readMeta(bp).network).toBe('off');
+      await expect(runNetwork('loose')).rejects.toThrow('"loose" is not a network level. Use standard, strict or off.');
+    } finally {
+      chooseProject(null);
+      write.mockRestore();
+    }
   });
 });
 
 describe('the board', () => {
+  it('sets the network level for the team, refuses a level that is none of the three, and shows the sites refused lately', async () => {
+    const app = new Hono();
+    mountApi(app, { paths: buildPaths(project) });
+    const put = (b: object) => app.request('/api/v1/settings', { method: 'PUT', body: JSON.stringify(b), headers: { 'content-type': 'application/json' } });
+    expect((await put({ network: 'Strict' })).status).toBe(200);
+    expect(readMeta(bp).network).toBe('strict');
+    const bad = await put({ network: 'loose' });
+    expect(bad.status).toBe(400);
+    expect(((await bad.json()) as { error: string }).error).toBe('"loose" is not a network level. Use standard, strict or off.');
+    // A known-bad site stays closed, whoever asks.
+    const closed = await put({ allowedHosts: ['nexus.example.com', 'https://abc.ngrok.io/x'] });
+    expect(closed.status).toBe(400);
+    expect(((await closed.json()) as { error: string }).error).toBe('abc.ngrok.io stays closed for every project: it is one of the tunnels that open this computer to the internet, which a build never needs.');
+    const { noteBlockedSite } = await import('../src/engine/sandbox.js');
+    noteBlockedSite(bp, { host: 'cdn.example.dev', story: 'AP-1', level: 'strict' });
+    const info = (await (await app.request('/api/v1/sandbox')).json()) as { network: { level: string; blocked: { host: string; story: string }[] } };
+    expect(info.network.level).toBe('strict');
+    expect(info.network.blocked).toEqual([expect.objectContaining({ host: 'cdn.example.dev', story: 'AP-1', level: 'strict' })]);
+    const view = (await (await app.request('/api/v1/harness')).json()) as { safety: { sites: string[]; network: { level: string; levels: { id: string }[]; closed: string[] } } };
+    expect(view.safety.network.level).toBe('strict');
+    expect(view.safety.network.levels.map((l) => l.id)).toEqual(['standard', 'strict', 'off']);
+    expect(view.safety.sites).toEqual(expect.arrayContaining(['npm', 'PyPI', 'Prisma', 'Dart and Flutter']));
+    expect(view.safety.network.closed).toContain('Paste and file-drop sites');
+  });
+
   it('says whether this computer has the sandbox, and keeps the hosts the project allows', async () => {
     const app = new Hono();
     mountApi(app, { paths: buildPaths(project) });

@@ -37,7 +37,7 @@ import {
 } from '../board/actions.js';
 import { scheduleSquad } from '../board/schedule.js';
 import { releaseGoingOut } from '../board/lock.js';
-import { TECH_ROLES, type BoardMeta, type ChangeStep, type DecisionArea, type ImpactCheck, type OffScreen, type OldFailure, type PatternNote, type PortAsk, type ProjectCommands, type ProofPicture, type ProofShot, type RepoInfo, type Question, type Role, type SpecChange, type StackNote, type TechDraft, type Ticket } from '../board/types.js';
+import { TECH_ROLES, type BoardMeta, type ChangeStep, type DecisionArea, type ImpactCheck, type NetworkLevel, type OffScreen, type OldFailure, type PatternNote, type PortAsk, type ProjectCommands, type ProofPicture, type ProofShot, type RepoInfo, type Question, type Role, type SpecChange, type StackNote, type TechDraft, type Ticket } from '../board/types.js';
 import { detectStack } from '../board/stack.js';
 import { AI_TOOLS, aiTool, describeToolEvent } from '../modules/registry.js';
 import { CHECK_DOING, DOING, plainToolLine } from './plain-doing.js';
@@ -70,13 +70,14 @@ import { isMediaNote, prepareMedia } from './media.js';
 import { allowedFile, ticketFolders } from './conversations.js';
 import { DEFAULT_QUALITY, builderLevel, describeLevel, effortOn, personLevels, resolveLevel, stepCaps } from './levels.js';
 import { CapReached, capCard } from './caps.js';
-import { blockedLine, noPushEnv, packageCacheEnv, sandboxAsk, sandboxOf, ticketCacheDir } from './sandbox.js';
+import { blockedLine, noPushEnv, noteBlockedSite, packageCacheEnv, projectNetwork, sandboxAsk, sandboxOf, ticketCacheDir } from './sandbox.js';
 import { hiddenFiles, placeStoryFiles } from './local-files.js';
 import { appCopyOf, copiesOf, reposOfParts, storyCopyDir, workFolder, type CopyOf } from './copies.js';
 import { ProductError, productCopiesDir, productPlan, startProduct, stopProduct, waitWords } from './product-run.js';
 import { productHold } from './product-lock.js';
 import { offLimits } from '../board/project-files.js';
-import { agentPrivatePlaces, GUARD_BLOCKED, GUARD_BLOCKED_DOCKER, blockedDocker, dockerBlockedWords, guardBlockedDetail, guardBlockedPath, guardSupport, ticketGuard, type GuardSpec } from './project-guard.js';
+import { agentPrivatePlaces, GUARD_BLOCKED, GUARD_BLOCKED_DOCKER, blockedDocker, dockerBlockedWords, guardBlockedDetail, guardBlockedPath, guardSupport, projectGuardFor, ticketGuard, type GuardSpec } from './project-guard.js';
+import { HEALED_LINE, cacheHomeEnv, ownFolder, storiesCacheDir } from './cache-home.js';
 import { ticketDir } from '../board/store.js';
 import { commitTicketDocs, leaveProjectFiles } from './project-git.js';
 import { carryOn, fetchBase, fetchPushed, workSoFar } from './handover.js';
@@ -1108,10 +1109,22 @@ export class LiveSquad {
 
   /* ── helpers ─────────────────────────────────────────── */
 
-  /** Commands squad-kit runs itself (setup, checks) report to the watchdog too, and end on the ticket's Stop. */
+  /**
+   * Commands squad-kit runs itself (setup, checks) report to the watchdog too, and end on the ticket's Stop. One that
+   * runs once more with a home of the project's own says so on the story in one plain line, with the details in the log.
+   */
   private commandWatch(id: string) {
     const signal = this.stops.get(id)?.signal;
-    return { onSpawn: (pid: number) => this.dog.track(id, pid), onOutput: () => this.dog.beat(id), ...(signal ? { signal } : {}) };
+    return { onSpawn: (pid: number) => this.dog.track(id, pid), onOutput: () => this.dog.beat(id), onHealed: (detail: string) => this.healed(id, detail), ...(signal ? { signal } : {}) };
+  }
+
+  private healed(id: string, detail: string): void {
+    this.log('info', detail, id);
+    try {
+      this.update(id, (x) => addActivity(x, 'squad', HEALED_LINE));
+    } catch {
+      // The ticket was removed while it ran.
+    }
   }
 
   /**
@@ -1428,7 +1441,10 @@ export class LiveSquad {
     }
     const extra = agentInstructions(agent, opts.step);
     const win = opts.win;
-    const instructions = [opts.instructions, P.PROCESS_RULE, extra, rulesFor(this.bp, opts.role), win ? P.windowRule(win.tools) : ''].filter(Boolean).join('\n\n');
+    const boxed = Boolean(opts.box && sandboxOf(tool).available);
+    // A sandboxed step is told up front what its commands reach, and that a refused site is closed on purpose.
+    const network = boxed ? projectNetwork(this.bp.root) : undefined;
+    const instructions = [opts.instructions, P.PROCESS_RULE, extra, rulesFor(this.bp, opts.role), win ? P.windowRule(win.tools) : '', network ? P.networkRule(network) : ''].filter(Boolean).join('\n\n');
     const access = win ? await windowAccess(win) : undefined;
     const key = opts.ticket;
     // The model level for this step: squad-kit's default, the project's choice, then this person's own.
@@ -1455,17 +1471,18 @@ export class LiveSquad {
     const caps = stepCaps({ role: opts.role, step: levelStep, quality }, raise);
     // Only the caps the tool keeps: a tool without a spend cap is held by its turns alone.
     const runCaps = { ...(tool.caps?.turns ? { turns: caps.turns } : {}), ...(tool.caps?.spend ? { spendUsd: caps.spendUsd } : {}) };
-    const boxed = Boolean(opts.box && sandboxOf(tool).available);
-    // A sandboxed step of a ticket gets the ticket's own package cache for the tools whose shared caches stay read only.
-    const cache = boxed && key ? ticketCacheDir(this.bp, key) : undefined;
-    if (cache) fs.mkdirSync(cache, { recursive: true });
-    const sandbox = boxed ? await this.sandboxFor(opts.cwd, opts.addDirs ?? [], cache) : undefined;
+    // A sandboxed step of a ticket gets the cache home the project's stories share, as the project's own commands do.
+    const cache = boxed && key ? storiesCacheDir(this.bp) : undefined;
+    if (cache) ownFolder(cache);
+    const sandbox = boxed ? await this.sandboxFor(opts.cwd, opts.addDirs ?? [], cache, network) : undefined;
     const secrets = await secretFiles(this.bp, opts.cwd);
-    // What the sandbox refused shows on the ticket in plain words, each thing once a run.
+    // What the sandbox refused shows on the ticket in plain words, each thing once a run. A site asks nothing and stops
+    // nothing: the agent goes on without it, and engineers find it in the log on Harness → Safety.
     const refused = new Set<string>();
     const onBlocked = (b: BlockedAction) => {
       if (!key || refused.has(`${b.kind}:${b.target}`) || refused.size >= 10) return;
       refused.add(`${b.kind}:${b.target}`);
+      if (b.kind === 'host') noteBlockedSite(this.bp, { host: b.target, story: key, level: network ?? projectNetwork(this.bp.root) });
       this.update(key, (x) => addActivity(x, opts.role, blockedLine(b)));
     };
     // Every role runs through the Agent Client Protocol unless the board says to run tools directly.
@@ -1477,7 +1494,7 @@ export class LiveSquad {
       protectedFiles: this.protectedFiles(opts.cwd),
       ...(Object.keys(runCaps).length ? { caps: runCaps } : {}),
       ...(sandbox ? { sandbox, onBlocked } : {}),
-      env: { ...noPushEnv(), ...(sandbox && cache ? packageCacheEnv(cache) : {}) },
+      env: { ...noPushEnv(), ...(sandbox && cache ? cacheHomeEnv(cache, { wall: 'agent', cwd: opts.cwd }) : {}) },
       ...(instructions ? { instructions } : {}),
       level: lv.level,
       ...(effort ? { effort } : {}),
@@ -1801,10 +1818,10 @@ export class LiveSquad {
   }
 
   /**
-   * What a Builder or Tester step's commands may reach in the sandbox: its copy, the proof folder, the ticket's own
-   * package cache and the registries.
+   * What a Builder or Tester step's commands may reach in the sandbox: its copy, the proof folder, the cache home the
+   * project's stories share and the sites the project's network level allows.
    */
-  private async sandboxFor(cwd: string, read: string[], cache?: string) {
+  private async sandboxFor(cwd: string, read: string[], cache?: string, network?: NetworkLevel) {
     return sandboxAsk({
       cwd,
       root: projectRoot(this.bp),
@@ -1812,6 +1829,7 @@ export class LiveSquad {
       proof: this.bp.proofDir,
       secrets: await secretFiles(this.bp, cwd),
       hosts: this.meta().allowedHosts ?? [],
+      ...(network ? { network } : {}),
       ...(cache ? { cache } : {}),
     });
   }
@@ -1947,8 +1965,10 @@ export class LiveSquad {
     // In its turn, as is what comes after: git may write the index while it looks, and a move of this folder's base would run into that.
     const theirs = await baseTurn(ls.dir, () => changedTracked(ls.dir));
     // The person's own checkout: the setup reads its .env files, as when they run it themselves (Prisma needs DATABASE_URL).
-    const guard = this.guardFor(ls.dir, id);
-    const r = await runCommand(ls.dir, ls.command, SETUP_MS, guard ? { guard: { ...guard, ownEnv: true } } : {});
+    // It takes its downloads from the project's own cache home, where no story writes: you run this checkout with no guard.
+    const allow = this.meta().guard;
+    const guard = guardSupport().on ? { ...projectGuardFor(this.bp, { cwd: ls.dir, ...(allow ? { allow } : {}) }), noPush: true, ownEnv: true } : undefined;
+    const r = await runCommand(ls.dir, ls.command, SETUP_MS, { ...(guard ? { guard } : {}), onHealed: (detail) => this.log('info', detail, id) });
     const seconds = Math.round(r.seconds);
     await this.putBackLockFiles(id, ls.dir, theirs);
     this.update(id, (x) => {
@@ -4555,7 +4575,7 @@ export class LiveSquad {
       dir = await addSnapshot(root, `${id.toLowerCase()}-before`, t.baseCommit!, { signal: own.signal });
       const setup = repo.commands.setup?.trim();
       if (setup) {
-        const r = await runCommand(dir, setup, BEFORE_SHOTS_MS, { signal: own.signal, ...(this.guardFor(dir, id) ? { guard: this.guardFor(dir, id)! } : {}) });
+        const r = await runCommand(dir, setup, BEFORE_SHOTS_MS, { signal: own.signal, onHealed: (detail) => this.healed(id, detail), ...(this.guardFor(dir, id) ? { guard: this.guardFor(dir, id)! } : {}) });
         if (own.signal.aborted) throw new Error(STOPPED);
         if (!r.ok) throw new Error(`setting up a copy of the code as it was failed (${setup}): ${tail(r.output, 3)}`);
       }
@@ -4763,7 +4783,7 @@ export class LiveSquad {
           if (!beside) this.update(id, (x) => (x.status = 'Starting the app'));
           if (product) return this.startProductFor(id);
           return startPastOther(
-            () => startApp(cwd, start, url, undefined, signal, this.guardFor(cwd, id)),
+            () => startApp(cwd, start, url, undefined, signal, this.guardFor(cwd, id), { onHealed: (detail) => this.healed(id, detail) }),
             async (pid) => Boolean(folderOf(cwd, projectCopies(this.bp))) && (await this.clearCopies([cwd], { only: [pid] }, id)).length > 0,
             (text) => this.log('info', text, id),
           );

@@ -1,7 +1,7 @@
 import { DECISION_AREAS, TECH_ROLES } from '../board/types.js';
 import { partsOf } from '../board/parts.js';
 import { PART_KINDS } from '../board/overview.js';
-import type { AgentName, BoardMeta, ChatMessage, Decision, ProjectCommands, Question, RepoInfo, SpecChange, Step, Ticket, TicketNote } from '../board/types.js';
+import type { AgentName, BoardMeta, ChatMessage, Decision, NetworkLevel, ProjectCommands, Question, RepoInfo, SpecChange, Step, Ticket, TicketNote } from '../board/types.js';
 import { reposOf } from './repos.js';
 import { autoAskRule } from './auto-prompts.js';
 import { pagesOf, squadWorks, waitsAtReview, whereItStands } from '../board/at-review.js';
@@ -1314,6 +1314,22 @@ export function windowRule(tools: string[]): string {
 When something technical is in your way (the app does not start, a port is busy, the browser does not work, a
 command or a file is refused), call i_am_stuck: squad-kit tries its fixes and tells you what it did. Never take it to
 the person, and never ask them to edit settings or files, run commands, or hand over a password or a key.${app ? '\nFor pictures and pages of the app, use take_screenshots and look_at_page, never a browser of your own.' : look ? '\nFor pages of the app, use look_at_page, never a browser or an app of your own.' : ''}${checks ? "\nA browser cannot start in your shell, so run tests that open a browser with run_checks, never yourself." : ''}`;
+}
+
+/** Where a step's shell commands go on each network level, in the agent's words. */
+const NETWORK_REACH: Record<NetworkLevel, string> = {
+  standard: 'any website except a few closed ones (tunnels, paste and file-drop sites, request catchers)',
+  strict: "only the official package and download sites of common tools and this project's own sites",
+  off: 'no website at all, only this computer',
+};
+
+/**
+ * What every sandboxed step is told about the project's network level, and the way around a site its command could
+ * not reach: the site is closed on purpose, so the agent goes on without it and never takes it to the person.
+ */
+export function networkRule(level: NetworkLevel): string {
+  const from = level === 'off' ? 'what is already installed and in this copy' : 'an official package registry or what is already in this copy';
+  return `Your shell commands reach ${NETWORK_REACH[level]}. A site a command could not reach because it is not allowed is closed for this project on purpose: do not try it again another way, and never ask the person to open it. Use ${from}, or go on without it and say in your answer what is missing.`;
 }
 
 /**

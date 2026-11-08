@@ -6,7 +6,7 @@ import { api, send } from '../api/client';
 import type { AgentInfo, CorePrompts, Effort, HarnessRow, HarnessStage, HarnessView, LevelChoice, LevelRow, ModelLevel, Quality, Track } from '../api/types';
 import { useAct, useAppSettings, useBoard } from '../lib/data';
 import { QualityMetrics, SquadUsage } from '../components/Usage';
-import { AllowedHosts, SandboxRows, useSandbox } from '../components/Sandbox';
+import { AllowedHosts, NetworkSetting, SandboxRows, useSandbox } from '../components/Sandbox';
 import { Cmd, Glyph, Modal, ago } from '../components/ui';
 import { usePrefs } from '../lib/prefs';
 import { withoutComments } from '../lib/text';
@@ -467,8 +467,10 @@ function SafetyTab({ view }: { view: HarnessView }) {
       </Block>
       <Block title="No agent can change" what="A change goes back by itself, with a line saying so." items={s.locked} mine={s.lockedByYou} />
       <Block title="Where agents can go" what="The Builder only. The others have no internet, and the Tester's pictures stay on this story's app." items={s.sites} mine={meta?.engine === 'live' ? [] : (meta?.allowedHosts ?? [])}>
+        <NetworkSetting net={s.network} live={meta?.engine === 'live'} />
         {meta?.engine === 'live' && <AllowedHosts hosts={meta.allowedHosts ?? []} />}
       </Block>
+      <Block title="Closed on every level" what="Sites with no use in building software, but common for taking data out. A site refused stops nothing: the work goes on without it." items={s.network.closed} />
       <Block title="Questions that never reach you" what="They are refused and logged, and the agent gets on with it." items={s.refused} />
       <Block title="What agents can ask squad-kit to do" what="There is no free command. squad-kit checks every field and does the job itself." items={s.tools} />
     </>

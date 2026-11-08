@@ -94,7 +94,7 @@ import { liveNow } from '../../board/now.js';
 import { readUsual } from '../../board/usual.js';
 import { answerAsk } from '../../board/ask.js';
 import { withProblem } from '../../board/problem.js';
-import { PACKAGE_HOSTS, guardNote, parseHosts, sandboxStatus } from '../../engine/sandbox.js';
+import { DEFAULT_NETWORK, PACKAGE_HOSTS, blockedSites, guardNote, hostsProblem, networkPolicy, parseHosts, parseNetwork, sandboxStatus } from '../../engine/sandbox.js';
 import { guardSupport, sharedPath } from '../../engine/project-guard.js';
 import { mountCostApi } from './cost.js';
 import { freePortAndRetry } from '../../engine/free-port.js';
@@ -715,15 +715,22 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
       documentsInGit?: boolean;
       quality?: string;
       allowedHosts?: string[];
+      network?: string;
       guard?: { allowRead?: string[]; allowWrite?: string[] };
       repos?: { path: string; base?: string; remote?: string; commands?: ProjectCommands }[];
     }>(c);
     return act(c, () => {
       const meta = readMeta(bp);
       if (b.allowedHosts !== undefined) {
-        const { hosts, bad } = parseHosts(Array.isArray(b.allowedHosts) ? b.allowedHosts : []);
-        if (bad.length) throw new Error(`"${bad[0]}" is not a host name. Write it like nexus.example.com, or *.example.com for all of its subdomains.`);
-        meta.allowedHosts = hosts;
+        const parsed = parseHosts(Array.isArray(b.allowedHosts) ? b.allowedHosts : []);
+        const problem = hostsProblem(parsed);
+        if (problem) throw new Error(problem);
+        meta.allowedHosts = parsed.hosts;
+      }
+      if (b.network !== undefined) {
+        const level = parseNetwork(b.network);
+        if (!level) throw new Error(`"${b.network}" is not a network level. Use standard, strict or off.`);
+        meta.network = level;
       }
       if (b.guard !== undefined) {
         const clean = (list: unknown): string[] => [...new Set((Array.isArray(list) ? list : []).map((p) => String(p).trim()).filter(Boolean).map((p) => sharedPath(p)))];
@@ -820,7 +827,10 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     const g = guardSupport();
     const allow = boardExists(bp) ? readMeta(bp).guard : undefined;
     const guard = { on: g.on, why: g.why, ...(g.fix ? { fix: g.fix } : {}), allowRead: allow?.allowRead ?? [], allowWrite: allow?.allowWrite ?? [] };
-    return c.json({ tools, registries: PACKAGE_HOSTS, allowedHosts: boardExists(bp) ? (readMeta(bp).allowedHosts ?? []) : [], guard, ...(note ? { note } : {}) });
+    // The project's network level, what it does to the project's own commands on this computer, and the sites refused lately.
+    const level = (boardExists(bp) ? parseNetwork(readMeta(bp).network) : null) ?? DEFAULT_NETWORK;
+    const network = { level, commands: networkPolicy(level).commands, blocked: boardExists(bp) ? blockedSites(bp).slice(0, 20) : [] };
+    return c.json({ tools, registries: PACKAGE_HOSTS, allowedHosts: boardExists(bp) ? (readMeta(bp).allowedHosts ?? []) : [], guard, network, ...(note ? { note } : {}) });
   });
 
   app.get('/api/v1/agents', (c) => {

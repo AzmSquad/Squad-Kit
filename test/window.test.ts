@@ -346,6 +346,26 @@ describe('i_am_stuck', () => {
     expect(refused(await callTool(access, 'i_am_stuck', { what: 'x', why: 'y', command: 'sudo rm -rf /' }))).toBe(true);
   });
 
+  it('on a website closed for the project: the way around for the agent, nothing restarted, nothing asked', async () => {
+    const { w, access } = await tester();
+    const before = fake.launches;
+    const said = [
+      { what: 'npm install fails on the Prisma engines', why: '<sandbox_violations>\ndeny network-outbound binaries.example.dev:443 (not_allowlisted)\n</sandbox_violations>' },
+      { what: 'The sandbox blocked a download', why: 'curl: (56) CONNECT tunnel failed, response 403' },
+      { what: 'The site webhook.site is blocked', why: 'deny network-outbound webhook.site:443 (host is on the deny list)' },
+    ];
+    for (const s of said) {
+      const a = textOf(await callTool(access, 'i_am_stuck', s));
+      expect(a).toContain('That site is closed for this project on purpose');
+      expect(a).toContain('never ask the person to open it');
+      expect(a).not.toMatch(/browser again|started the app again/);
+    }
+    // No browser started again, no app started, and the story has no new line: its blocked line said it already.
+    expect(fake.launches).toBe(before);
+    expect(w.stuck).toHaveLength(3);
+    expect(lines).toEqual([]);
+  });
+
   it('is the only tool of a step with no app, and it never asks the person', async () => {
     const w = new AgentWindow({ ticket: 'RO-7', step: 'design', who: 'Architect', tools: ['i_am_stuck'], proofDir: proof, prefix: 'ro-7-architect', say: (t) => lines.push(t) });
     openWindow(w);

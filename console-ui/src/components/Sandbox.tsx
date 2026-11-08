@@ -1,15 +1,17 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { Link } from '@tanstack/react-router';
 import { ShieldAlert, ShieldCheck, ShieldOff, X } from 'lucide-react';
 import { api } from '../api/client';
-import type { SandboxInfo } from '../api/types';
+import type { HarnessView, SandboxInfo } from '../api/types';
 import { useAct } from '../lib/data';
-import { Cmd } from './ui';
+import { Cmd, ago } from './ui';
 
 /**
  * The sandbox the Builder's and Tester's commands run in. On the Harness page: whether this computer has it, the
- * websites the project lets them reach besides the package registries, and "Windows: less protected" where the agents'
- * own commands have no guard. In Settings: what an engineer lets the project's own commands use.
+ * project's network level, the websites the project lets them reach besides the package registries, the sites refused
+ * lately, and "Windows: less protected" where the agents' own commands have no guard. In Settings: what an engineer lets
+ * the project's own commands use.
  */
 
 export function useSandbox() {
@@ -43,8 +45,8 @@ export function SandboxRows() {
             <br />
             {s.available ? (
               <span className="note">
-                Their commands run in {s.why}: they write only in the ticket&apos;s copy, the proof folder and temp folders, reach only package
-                registries and the websites you allow under Safety, and never read your keys, sign-ins or .env files.
+                Their commands run in {s.why}: they write only in the ticket&apos;s copy, the proof folder and temp folders, reach only the
+                websites the network level under Safety allows, and never read your keys, sign-ins or .env files.
               </span>
             ) : (
               <span className="note">
@@ -87,6 +89,86 @@ export function SandboxRows() {
   );
 }
 
+/**
+ * The project's network level on Harness → Safety: the project's own in one sentence, for everyone. Under "For
+ * engineers": the three levels to pick from, for the whole team, and the sites refused lately on this computer.
+ */
+export function NetworkSetting({ net, live }: { net: HarnessView['safety']['network']; live: boolean }) {
+  const act = useAct();
+  const level = net.levels.find((l) => l.id === net.level) ?? net.levels[0]!;
+  return (
+    <div className="maprow">
+      <b style={{ paddingTop: 4 }}>Network level</b>
+      <span style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
+        <span className="note">
+          <b>{level.name}:</b> {level.words}
+        </span>
+        {net.level === 'off' && net.commands === 'internet' && (
+          <span className="note">On this computer, Off closes the internet for the agents only: your project&apos;s own setup, tests and app still reach it.</span>
+        )}
+        {live && (
+          <details>
+            <summary className="note">For engineers</summary>
+            <span style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
+              <span style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                {net.levels.map((l) => (
+                  <button
+                    key={l.id}
+                    className={`btn sm ${l.id === net.level ? 'pri' : ''}`}
+                    aria-pressed={l.id === net.level}
+                    disabled={act.isPending}
+                    onClick={() => l.id !== net.level && act.mutate({ path: '/api/v1/settings', method: 'PUT', body: { network: l.id }, done: `The network level is ${l.name} now, from the next step` })}
+                  >
+                    {l.name}
+                  </button>
+                ))}
+                <span className="grow" />
+                <Cmd text={`squad config set network ${net.level}`} />
+              </span>
+              {net.levels.map((l) => (
+                <span key={l.id} className="note" style={{ fontSize: 12.5, ...(l.id === net.level ? { color: 'var(--text)' } : {}) }}>
+                  <b>{l.name}:</b> {l.words}
+                </span>
+              ))}
+              <BlockedSites />
+            </span>
+          </details>
+        )}
+      </span>
+    </div>
+  );
+}
+
+/** The sites the squad's commands were refused lately, on this computer. Nothing here stopped a story. */
+function BlockedSites() {
+  const q = useSandbox();
+  const list = q.data?.network?.blocked ?? [];
+  const name: Record<string, string> = { standard: 'Standard', strict: 'Strict', off: 'Off' };
+  if (!list.length) return <span className="note">No site was refused on this computer yet.</span>;
+  return (
+    <>
+      <span className="note">
+        <b>Refused lately.</b> The work went on without each one. Allow a site below when the project truly needs it, or pick another level.
+      </span>
+      <table className="table">
+        <thead>
+          <tr><th>Site</th><th>Story</th><th>Level</th><th>When</th></tr>
+        </thead>
+        <tbody>
+          {list.map((b) => (
+            <tr key={`${b.host}-${b.story}`}>
+              <td className="mono">{b.host}</td>
+              <td><Link to="/board" search={{ ticket: b.story }}>{b.story}</Link></td>
+              <td>{name[b.level] ?? b.level}</td>
+              <td>{ago(b.at)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </>
+  );
+}
+
 /** The websites the squad's commands may reach besides the package registries, for the whole team. */
 export function AllowedHosts({ hosts }: { hosts: string[] }) {
   const act = useAct();
@@ -105,6 +187,7 @@ export function AllowedHosts({ hosts }: { hosts: string[] }) {
       <span style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
         <span className="note">
           Allow a website here when the project needs one, for example your company&apos;s package server. The whole team shares this list.
+          {q.data?.network?.level === 'standard' ? ' On Standard the squad reaches it already: the list counts on Strict.' : ''}
           {off ? ' This computer has no guard for them, so here they can reach any website.' : ''}
         </span>
         {hosts.length > 0 && (

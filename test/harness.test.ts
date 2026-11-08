@@ -45,6 +45,7 @@ const LIMIT_NAME = /^MAX_|_(MS|TRIES|ROUNDS|TO_STOP|MIN|S|AFTER|LIMIT)$/;
 /** Limits a person doesn't need to see, by file and name, each with why. */
 const EXCUSED: Record<string, string> = {
   'gate-run.ts:OLD_COPY_MS': 'When a copy left by an app that ended gets cleaned up. Nobody waits on this, and it stops nothing.',
+  'sandbox.ts:MAX_BLOCKED_SITES': 'How many refused sites the log on Harness → Safety keeps. A refused site stops nothing.',
   'additions.ts:LOCK_LEFT_MS': 'A lock a closed program left behind. A save takes a moment, and nobody waits on this.',
   'additions.ts:LOCK_WAIT_MS': 'How long one save waits for another. It ends in a plain "try again".',
   // How often squad-kit looks at something. Nothing waits on them, and nothing stops at them.

@@ -29,7 +29,7 @@ export const STOP_LINES: Record<string, RegExp> = {
   broken: /^(The screenshots show .* not working yet|Still not working after)/,
   window: /^The \w+ asked .*squad-kit refused\.$/,
   questions: /did not bother you with it\.$|^The \w+ asked a technical question/,
-  sandbox: /^(Reaching|Reading|Writing) .* was blocked: /,
+  sandbox: /^(Reaching|Reading|Writing) .* was blocked: |^A download from \S+ was not allowed for this project/,
   lane: /^The (Builder|Tester|Reviewer|project's checks) changed .*squad-kit put |^Stopped the \w+: /,
   hook: /^The project's own check said no/,
   merge: /^(Could not merge into |It clashes with newer changes)|clashes with newer changes in \S+, so it left/,

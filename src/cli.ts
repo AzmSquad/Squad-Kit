@@ -57,7 +57,7 @@ import {
   runStartTicket,
   runWatch,
 } from './commands/board.js';
-import { runGuardAllow, runHosts } from './commands/sandbox.js';
+import { runGuardAllow, runHosts, runNetwork } from './commands/sandbox.js';
 import {
   runConfigShow,
   runConfigSetPlanner,
@@ -700,9 +700,13 @@ set
   .action(wrapArgs(runQuality));
 set
   .command('hosts [hosts...]')
-  .description('Show or set the hosts the Builder and Tester may reach besides the package registries')
-  .option('--clear', 'Allow only the package registries again', false)
+  .description('Show or set the hosts the Builder and Tester may reach on Strict besides the official package sites')
+  .option('--clear', 'Allow no host of the project\'s own again', false)
   .action(wrapArgs(runHosts));
+set
+  .command('network [level]')
+  .description("Show or set how much of the internet the squad's commands and the project's own reach: standard (default), strict or off")
+  .action(wrapArgs(runNetwork));
 set
   .command('allow-read [paths...]')
   .description("Show or set files outside its copy that the project's own commands (tests, setup, the app) may read")

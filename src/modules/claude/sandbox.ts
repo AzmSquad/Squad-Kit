@@ -17,7 +17,7 @@ export interface ClaudeSandbox {
   failIfUnavailable: boolean;
   autoAllowBashIfSandboxed: boolean;
   allowUnsandboxedCommands: boolean;
-  network: { allowedDomains: string[]; strictAllowlist: boolean; allowLocalBinding?: boolean };
+  network: { allowedDomains: string[]; deniedDomains?: string[]; strictAllowlist: boolean; allowLocalBinding?: boolean };
   filesystem: { allowWrite: string[]; denyWrite: string[]; denyRead: string[]; allowRead: string[] };
 }
 
@@ -50,8 +50,14 @@ export function claudeSandbox(ask: SandboxAsk, platform: NodeJS.Platform = proce
     // No way out for the agent: a command asking to run outside the sandbox (dangerouslyDisableSandbox) stays in it.
     allowUnsandboxedCommands: false,
     network: {
+      // "*" is any host. Tried on a real Mac (2026-11-08) with Claude Code 2.1.312, the one the Agent SDK ships, and
+      // 2.1.296: with ["*"] here a command reached example.org, the sandbox still held (a write outside was refused),
+      // and a denied host was refused all the same. Its settings check calls "*" too broad, yet the sandbox takes it;
+      // should a later version drop it, the recommended hosts listed beside it stay open.
       allowedDomains: ask.hosts,
-      // Any other host is refused at once instead of asked about.
+      // Refused before allowedDomains is looked at, "*" or not: "host is on the deny list".
+      ...(ask.noHosts.length ? { deniedDomains: ask.noHosts } : {}),
+      // Any other host is refused at once instead of asked about, and a repo's own settings cannot add one.
       strictAllowlist: true,
       // No Unix socket is opened here, so its commands cannot reach Docker's: a container could read any folder.
       // macOS: tests may listen on this computer's own ports and reach them, as the app's own tests do.

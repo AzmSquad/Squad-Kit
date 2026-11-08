@@ -54,6 +54,13 @@ Credit will be given in the release notes unless you prefer to remain anonymous.
   an agent changed outside its lane. Text from trackers and pasted messages reaches agents as data, never as orders.
 - **Agents get fixed tools, no free commands.** For screenshots, the app and the checks, an agent presses one of
   squad-kit's tools. squad-kit checks every field, does the job itself, and refuses and logs what breaks a check.
+- **Each project has a network level, one policy for both guards.** **Standard** (the default): the agents' commands
+  reach any website but known-bad ones (tunnels, paste and file-drop sites, request catchers). **Strict**: only the
+  official package and download sites of common tools and the websites the project allows. **Off**: nothing outside this
+  computer. The known-bad sites are closed on every level and cannot be allowed. On Standard a harmful package can reach
+  the internet, but the keys and sign-ins it would take stay hidden. The project's own commands (tests, setup, the app)
+  stay open on Standard and Strict; on Off a Mac closes them to all but this computer, and Linux leaves them open. A
+  refused site never stops a story: the story gets a plain line and engineers a log on Harness → Safety.
 - **The project's own commands run in a guard** on Mac and Linux: the tests, setup, the app, the release pipeline and the
   commit hooks. **The guard stops accidents and most bad behaviour, but it is not a wall against code built on purpose to
   break out.** On a Mac its rules start from allowing everything and block a list. Use squad-kit on projects and tickets you
@@ -67,9 +74,14 @@ Credit will be given in the release notes unless you prefer to remain anonymous.
     a command starts, outside folders such as `node_modules`. One exception: the setup squad-kit runs in your own
     checkout after a merge reads that checkout's `.env` files, as it does when you run it yourself (a database setup
     needs them). It still reads no other `.env` file, key or sign-in.
-  - Writing outside its copy, the proof folder, the temp folder and the package caches. `~/.cache` and
-    `~/Library/Caches` stay read only: your own tools run programs from there. The copy cannot be moved, and git's own
-    folder cannot be changed or moved, so nothing written there can make squad-kit's own git start a program.
+  - Writing outside its copy, the proof folder, the temp folder, the package caches and the project's own download
+    folder. `~/.cache`, `~/Library/Caches` and each tool's own folder in your home (`~/.gradle`, `~/.m2`, `~/.nuget`,
+    `~/.pub-cache` and the like) stay read only: your own tools run programs from there. Each tool is pointed at the
+    project's own folder instead, by its own setting. A tool that still writes in your home is run once more with a home
+    of the project's own, where your files are seen only through links that stay read only, and your keys and sign-ins
+    are left out. Programs you installed stay read only too: Flutter's SDK, a version manager's folder, and the Gradle your
+    project's wrapper uses when squad-kit links yours in. The copy cannot be moved, and git's own folder cannot be changed
+    or moved, so nothing written there can make squad-kit's own git start a program.
   - Reaching a container runtime. A container can mount any folder, so a command that reaches Docker could read everything
     above. Connections to the sockets of Docker Desktop, colima, lima, Rancher Desktop, OrbStack, Finch and Podman are
     refused where the guard knows them. A runtime that listens somewhere else is not covered. **1.2.0 and 1.2.1 did not
@@ -79,7 +91,8 @@ Credit will be given in the release notes unless you prefer to remain anonymous.
     visible at all.
 
   What it does not stop:
-  - **The network.** A command can reach the network, so what it can read it can send.
+  - **The network.** A command can reach the network, so what it can read it can send. Only the Off network level
+    closes it, on a Mac, to all but this computer.
   - **Other local services.** On a Mac a command can still talk to other services on this computer, and to programs that
     listen on a local port. On Linux it can reach your session's bus and gpg agent under `/run/user`, and Docker's own port
     if you turned that on (on a Mac, ports 2375 and 2376 are refused).
@@ -88,6 +101,10 @@ Credit will be given in the release notes unless you prefer to remain anonymous.
   - **An ssh agent.** A command cannot read a key loaded in it, but it can ask the agent to use it.
   - **What a command leaves running, on a Mac.** A process that leaves its group lives on after the command, with the same
     guard around it, and can change the copy's files.
+  - **One story's downloads, in the next story.** A project's stories share one download folder, so only the first story
+    downloads. So a story's code could change what a later story's commands use, in the same guard. It never reaches what
+    you run yourself: your own checkout's setup after a merge, Your apps and the release pipeline use a download folder of
+    their own that no story writes in, and your own caches stay read only.
 - **The project's commit hooks run once, on a throwaway git folder.** squad-kit makes that folder outside the project for
   each run. It reads git's store of objects and writes only its own. Its settings are squad-kit's, with your branch by its
   real name and the repo's own filters, which run only in the guard. On Mac and Linux the real git folder stays read only to

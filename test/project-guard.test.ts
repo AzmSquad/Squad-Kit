@@ -21,6 +21,7 @@ const {
   guardSupportOn,
   guardBlockedPath,
   spawnProject,
+  privatePlaces,
   GUARD_BLOCKED,
 } = await import('../src/engine/project-guard.js');
 
@@ -49,11 +50,16 @@ afterEach(() => {
   fs.rmSync(base, { recursive: true, force: true });
 });
 
-function guard(allow?: { allowRead?: string[]; allowWrite?: string[] }) {
-  return buildGuard({ cwd, root, cache, extraWrite: [path.join(home, 'proof'), cache], extraRead: [cache], home, platform: 'darwin', ...(allow ? { allow } : {}) });
+function guard(allow?: { allowRead?: string[]; allowWrite?: string[] }, network?: 'standard' | 'strict' | 'off') {
+  return buildGuard({ cwd, root, cache, extraWrite: [path.join(home, 'proof'), cache], extraRead: [cache], home, platform: 'darwin', ...(allow ? { allow } : {}), ...(network ? { network } : {}) });
 }
 
 describe('the Seatbelt profile', () => {
+  it("hides the package tools' files that only hold keys: PyPI's, Composer's in either home, RubyGems'", () => {
+    const places = privatePlaces(home, 'darwin');
+    for (const file of ['.pypirc', '.composer/auth.json', '.config/composer/auth.json', '.gem/credentials']) expect(places).toContain(path.join(home, file));
+  });
+
   it('starts from allow default, denies the private places, and allows the copy and the caches', () => {
     const text = profileText(guard());
     expect(text).toContain('(allow default)');
@@ -98,6 +104,45 @@ describe('the Seatbelt profile', () => {
     expect(text).not.toContain('~/shared-xyz');
     expect(text).toContain(`(allow file-read* (subpath "${allowPath('~/shared-xyz', home)}"))`);
     expect(bubblewrapArgs(guard({ allowWrite: ['~/shared-xyz'] }), 'true').join(' ')).not.toContain('~/shared-xyz');
+  });
+});
+
+describe("the network level for the project's own commands", () => {
+  it('Off on a Mac: no address but this computer, and Docker\'s port still closed after it', () => {
+    const text = profileText(guard(undefined, 'off'));
+    const deny = text.indexOf('(deny network-outbound (remote ip "*:*"))');
+    const local = text.indexOf('(allow network-outbound (remote ip "localhost:*"))');
+    expect(deny).toBeGreaterThan(-1);
+    expect(local).toBeGreaterThan(deny);
+    expect(text.indexOf('(deny network-outbound (remote tcp "localhost:2375"))')).toBeGreaterThan(local);
+  });
+
+  it('Standard and Strict: as before, the internet open', () => {
+    for (const level of ['standard', 'strict'] as const) {
+      expect(guard(undefined, level)).not.toHaveProperty('offline');
+      expect(profileText(guard(undefined, level))).not.toContain('remote ip "*:*"');
+    }
+    // A project folder with no settings of its own is on Standard.
+    expect(guard()).not.toHaveProperty('offline');
+  });
+
+  it('a connection Off refused is never taken for a file the guard blocked, so it never stops a story with a card', () => {
+    const spec = guard(undefined, 'off');
+    const said = [
+      "Error: connect EPERM 104.16.1.35:443\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1611:16) {\n  errno: -1,\n  code: 'EPERM',\n  syscall: 'connect',\n  address: '104.16.1.35',\n  port: 443\n}",
+      'npm error code EPERM\nnpm error syscall connect\nnpm error errno EPERM\nnpm error request to https://registry.npmjs.org/left-pad failed, reason: connect EPERM 104.16.1.35:443',
+      'curl: (7) Immediate connect fail for 93.184.215.14: Operation not permitted',
+      "urllib.error.URLError: <urlopen error [Errno 1] Operation not permitted>",
+      "> Could not GET 'https://repo.maven.apache.org/maven2/org/x/1.0/x-1.0.pom': Operation not permitted",
+      'java.net.SocketException: Operation not permitted (connect failed)',
+    ];
+    for (const out of said) expect(guardBlockedPath(out, spec), out).toBeNull();
+  });
+
+  it('Off on Linux: as before, so a test still reaches the app squad-kit started in another command', () => {
+    const spec = buildGuard({ cwd, root, cache, extraWrite: [cache], extraRead: [cache], home, platform: 'linux', network: 'off' });
+    expect(spec).not.toHaveProperty('offline');
+    expect(bubblewrapArgs(spec, 'npm test')).not.toContain('--unshare-net');
   });
 });
 
@@ -290,6 +335,47 @@ describe('the single gate', () => {
     // Any other command in that checkout still reads none of them.
     const other = await run(false);
     for (const secret of ['OWN SETTING', 'PARENT SECRET', 'PRIVATE KEY']) expect(other).not.toContain(secret);
+  });
+
+  it('on Off, a command on a Mac reaches nothing outside this computer, and still reaches an app on this computer', async () => {
+    if (process.platform !== 'darwin' || !fs.existsSync('/usr/bin/sandbox-exec')) return;
+    const net = await import('node:net');
+    // The app squad-kit started in another command, outside this one's guard, on both of this computer's addresses.
+    const app = net.createServer((s) => s.end('APP ANSWERED\n'));
+    await new Promise<void>((resolve) => app.listen(0, '::', resolve));
+    const port = (app.address() as { port: number }).port;
+    // 192.0.2.1 is a documentation address: nothing answers there, so only the guard can say no at once.
+    fs.writeFileSync(
+      path.join(cwd, 'reach.cjs'),
+      `const net = require('node:net');
+const reach = (host, port) => new Promise((done) => {
+  const s = net.connect({ host, port });
+  const t = setTimeout(() => { s.destroy(); done(host + ' NO ANSWER'); }, 1500);
+  s.on('data', (d) => { clearTimeout(t); s.destroy(); done(host + ' ' + String(d).trim()); });
+  s.on('error', (e) => { clearTimeout(t); done(host + ' ' + e.code); });
+});
+(async () => { for (const [h, p] of [['192.0.2.1', 443], ['127.0.0.1', ${port}], ['::1', ${port}], ['localhost', ${port}]]) console.log(await reach(h, p)); })();
+`,
+    );
+    const run = (spec: ReturnType<typeof guard>) =>
+      new Promise<string>((resolve) => {
+        const child = spawnProject(`"${process.execPath}" reach.cjs`, { cwd, guard: spec });
+        let s = '';
+        child.stdout!.on('data', (c) => (s += c));
+        child.stderr!.on('data', (c) => (s += c));
+        child.on('close', () => resolve(s));
+      });
+    try {
+      const off = await run(guard(undefined, 'off'));
+      expect(off).toContain('192.0.2.1 EPERM');
+      for (const h of ['127.0.0.1', '::1', 'localhost']) expect(off).toContain(`${h} APP ANSWERED`);
+      // The same command on Standard: the guard does not refuse the address (nothing answers there, or no route).
+      const open = await run(guard(undefined, 'standard'));
+      expect(open).not.toContain('192.0.2.1 EPERM');
+      expect(open).toContain('127.0.0.1 APP ANSWERED');
+    } finally {
+      app.close();
+    }
   });
 
   it('only project-guard.ts spawns a project command through a shell', () => {

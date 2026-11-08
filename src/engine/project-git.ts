@@ -302,6 +302,7 @@ const SETTING_WORDS: Record<string, string> = {
   parts: "the product's parts",
   guard: "what the project's commands may reach",
   allowedHosts: 'the allowed addresses',
+  network: 'the network level',
   quality: 'the Quality setting',
   delivery: 'how changes reach the code',
   atOnce: 'how many stories run at once',

@@ -231,7 +231,12 @@ export interface SandboxInfo {
   note?: { title: string; text: string };
   /** squad-kit's own guard for the project's tests, setup and app on this computer, and what an engineer allowed. */
   guard?: { on: boolean; why: string; fix?: string; allowRead: string[]; allowWrite: string[] };
+  /** The project's network level, what it does to the project's own commands here, and the sites refused lately, newest first. */
+  network?: { level: NetworkLevel; commands: 'internet' | 'this-computer'; blocked: { host: string; story: string; level: NetworkLevel; at: string }[] };
 }
+
+/** How much of the internet the squad's commands and the project's own reach. */
+export type NetworkLevel = 'standard' | 'strict' | 'off';
 
 export interface StuckChoice {
   /** What happened, in plain words. */
@@ -682,6 +687,8 @@ export interface BoardMeta {
   runner?: 'acp' | 'direct';
   /** Hosts the Builder's and Tester's commands may reach besides the package registries. */
   allowedHosts?: string[];
+  /** The project's network level. Left out, Standard. */
+  network?: NetworkLevel;
   /** What an engineer lets the project's own commands (tests, setup, the app) reach outside their copy. */
   guard?: { allowRead?: string[]; allowWrite?: string[] };
   /** What the squad used on the project's own work, with no ticket. */
@@ -1010,7 +1017,17 @@ export interface HarnessView {
     shared: boolean;
     limits: { rules: number; ruleChars: number; questions: number };
   };
-  safety: { hidden: string[]; locked: string[]; sites: string[]; refused: string[]; tools: string[]; local: string[]; lockedByYou: string[] };
+  safety: {
+    hidden: string[];
+    locked: string[];
+    sites: string[];
+    refused: string[];
+    tools: string[];
+    local: string[];
+    lockedByYou: string[];
+    /** The project's network level, the three to pick from, and what stays closed on all of them. */
+    network: { level: NetworkLevel; levels: { id: NetworkLevel; name: string; words: string }[]; closed: string[]; commands: 'internet' | 'this-computer' };
+  };
 }
 
 export interface CorePrompts {

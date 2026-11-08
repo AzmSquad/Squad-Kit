@@ -349,8 +349,10 @@ list; with one story waiting, **needs you** opens it. Six tabs:
 - **Limits**: tries, rounds, pictures, refusals, time limits, and the most one run can use on your Quality setting, with
   when a limit was last reached.
 - **Safety**: what is hidden, what no agent can change, where agents can go, which questions never reach you and what
-  agents can ask squad-kit to do. **Websites the squad may reach** is here: on top of the package registries, for the
-  sandbox, shared by the team. Terminal: `squad config set hosts`.
+  agents can ask squad-kit to do. The project's **network level** is here, in one plain sentence (see below), with
+  **Websites the squad may reach**: on top of the package registries, shared by the team, used on Strict. Under **For
+  engineers**: the three levels to pick from and the sites refused lately (site, story, level, when). Terminal:
+  `squad config set network` and `squad config set hosts`.
 - **Agents**: see below. `/squad` opens this tab, so old links still work.
 - **Your additions**: what your team added. See below.
 
@@ -409,13 +411,37 @@ and asks: **Give it more** or **Stop**. It never counts as a failed try.
 
 **Sandbox**: on Mac and most Linux computers, the Builder's and Tester's commands run in Claude Code's sandbox. They
 can write only in the ticket's copy, its proof folder, temp folders and the package caches. npm, pnpm, Yarn, Rust
-and Go use their own caches, which check every package against the lock file. .NET, Java and Ruby packages go into a
-download folder for that ticket only, never your own caches; it is removed when the ticket is released or deleted
-(the first build of a ticket downloads its packages again). They can't read your keys and sign-ins (`~/.ssh`,
-`~/.aws`, the GitHub and cloud sign-ins, squad-kit's files) or the project's `.env` files. They can reach the package
-registries and the websites you allow under Safety. A blocked command shows in the Conversation tab with what and
-why. Where the sandbox can't run (Windows, some Linux setups), steps run as before, and this page and `squad doctor`
-say so.
+and Go use their own caches, which check every package against the lock file. Every other tool keeps its downloads in
+the project's own download folder, which all its stories share (see **Caches** below), never in your own caches, so only
+the first story downloads. They can't read your keys and sign-ins (`~/.ssh`,
+`~/.aws`, the GitHub and cloud sign-ins, squad-kit's files) or the project's `.env` files. Which websites they reach is
+the project's network level (below). A blocked command shows in the Conversation tab with what and why. Where the
+sandbox can't run (Windows, some Linux setups), steps run as before, and this page and `squad doctor` say so.
+
+**Network level**: one setting per project, kept in `.squad/config.yaml` with the allowed websites, so the whole team
+shares it through git. An engineer picks it on Harness → Safety (under For engineers) or with
+`squad config set network standard` (or `strict`, `off`). It applies from the next step and the next command.
+
+- **Standard** (the default): any website but known-bad ones. Your keys stay hidden, so a harmful package has nothing
+  to take.
+- **Strict**: the official package and download sites of common tools (npm, PyPI, Maven and Gradle, Google's Maven,
+  NuGet and .NET, Dart and Flutter, Packagist, Go, crates.io, RubyGems, CocoaPods, Prisma, the browsers for browser
+  tests, GitHub downloads and more), plus the websites you allow. Your project's own tests, setup and app still reach any
+  site on Strict for now: closing them needs a part that sees site names, planned for a later version.
+- **Off**: no internet, only this computer. On a Mac this covers the project's own commands too: they still reach the
+  app squad-kit started on this computer, and nothing outside it. On Linux, Off closes the agents' commands only. Pick
+  Off only when everything the project needs is already on this computer.
+
+On every level the same sites stay closed: tunnels that open this computer to the internet, paste and file-drop sites,
+and request catchers. A build never needs them, and they are a common way to take data out. They cannot be allowed.
+squad-kit keeps both lists (`src/engine/network-lists.ts`) and updates them with each release.
+
+**A refused site never stops a story and never asks you anything.** The story gets one plain line, such as "A download
+from cdn.example.com was not allowed for this project; the work goes on without it." squad-kit tells the Builder and
+Tester up front what their commands reach and that a refused site is closed on purpose, so they get what they need from
+an official package site or the copy, or go on without it and say what is missing. Nobody restarts anything for it.
+Engineers see each refused site under For engineers on Harness → Safety, and in `squad config set network`, and can
+allow a site the project truly needs (on Strict).
 
 Every agent, including the ones that only read, is also refused your keys and sign-ins through its file tools. A push from
 an agent or from a story's own command goes nowhere, while squad-kit's own push works. Two limits: a remote with its own push
@@ -437,13 +463,33 @@ programs, so use squad-kit's sign-ins, not keys exported in a shell. On Linux it
 under `/run/user`. It can use a key loaded in an ssh agent, though not read it. Use squad-kit on projects and tickets you
 trust, and read what the Builder changes. `SECURITY.md` has the full list.
 
-**Caches**: package caches stay open. All of `~/.cache` and `~/Library/Caches` stay read only, as your own tools run programs
-from there, and a command's other tools keep their caches with the copy, so a ticket's first build may download again.
-Playwright gets a folder with the copy, with the browsers this computer has already linked in, so its tests run and `playwright
-install` downloads only what is missing. Puppeteer and Electron download to the copy's cache. On a Mac, Chrome's own sandbox
-cannot start inside the guard, so a project that opens Chrome through Puppeteer needs `args: ['--no-sandbox']` there; Playwright
-needs nothing. Another tool that installs itself there (Cypress) gets the blocked-file sentence until an engineer allows that
-folder.
+**Caches**: no tool's downloads are blocked. Each project has its own download folder on this computer, which all its stories
+share, so only the first story downloads. The project's own commands and the agents' commands both use it. Each tool is
+pointed there by its own setting: pip, Poetry and uv, Dart and Flutter, Gradle and Maven, NuGet, Composer, RubyGems and
+Bundler, Go's build cache, Deno, Bun, Cypress, Puppeteer, Electron, node-gyp, and every tool that follows `XDG_CACHE_HOME`
+(Prisma's engines among them). npm, pnpm, Yarn, Rust and Go's modules keep their package caches, which check every package
+against the lock file. What this computer has already is used first: Prisma's engines start as a copy of yours, the browsers
+Playwright and Puppeteer downloaded are linked in (`playwright install` downloads only what is missing), the Gradle your
+project's wrapper asks for is linked in when this computer has it (yours, read only), your Gradle and Maven settings files are
+linked in, and Gradle, NuGet and Maven read the packages you already have without writing in them, so they download only what
+is new. All of `~/.cache`, `~/Library/Caches` and each tool's own folder in
+your home stay read only, as your own tools run programs from there.
+
+When a tool squad-kit does not know still cannot write in your home, squad-kit runs the command once more by itself (or starts
+the app once more), with a home of the project's own: your home seen through links that stay read only, keys and sign-ins left out, and the place the
+tool needed made the project's own. The story says so in one line ("A tool could not save its downloads in your home folder,
+so squad-kit gave it the project's own folder and ran it again."), the log has which place and which command, and the same
+command starts that way from then on, so the next story does not wait for it. It runs once more only once, and only for
+that reason: a command that fails for another reason, or still cannot write, stops as before.
+
+Your own checkout's setup after a merge, Your apps and the release pipeline use a second download folder that no story writes
+in: what a story left in the shared one never reaches what you run yourself. Programs you installed stay read only, so a
+story's code can never change them. Flutter runs from its own folder: squad-kit tells it not to lock that folder (the lock is
+only for Flutter's own downloads into it), so a part of Flutter that is missing there, such as a platform you never built
+for, gets the blocked-file sentence; run `flutter precache` for it once yourself. Flutter and .NET are told to leave out the
+usage reports they keep in your home folder, for the squad's commands only. On a Mac, Chrome's own sandbox cannot start
+inside the guard, so a project that opens Chrome through Puppeteer needs `args: ['--no-sandbox']` there; Playwright needs
+nothing.
 
 **Docker in the guard**: a container can mount any folder on this computer, so the project's own commands can't reach
 Docker, or colima, lima, Rancher Desktop, OrbStack, Finch or Podman. A check that tries stops with one plain sentence ("A
@@ -464,7 +510,7 @@ a report file it leaves in the copy goes in. The folder has none of the repo's o
 or fetches says no, and the ticket gets the usual card with **Save without this check**. A Stop, a hook that runs out of time
 or a crash puts the files back as they were staged and removes new ones. What was on disk then is kept in
 `refs/squad/on-disk/<ticket>`, so an edit made in that moment is not lost, and the ticket says so after a crash. npm and npx
-get a cache folder of the copy's own, so `npx` in a hook works with no packages installed. No other hook runs: squad-kit runs
+get a cache folder of the project's own, so `npx` in a hook works with no packages installed. No other hook runs: squad-kit runs
 no `pre-push`, `post-merge` or `post-checkout`, since the project's own checks have run by then. A push from your own
 terminal still runs yours. A project that uses Git LFS still gets its large files uploaded when squad-kit pushes.
 

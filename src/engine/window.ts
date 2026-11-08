@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import type { BrowserStep } from '../modules/browser/types.js';
+import { HEALED_LINE } from './cache-home.js';
 import { CHECK_SILENT_MS, runCommand, startApp, tail, testCount, type RunningApp } from './checks.js';
 import { TurnTimeout, appIn, minutes, startPastOther, stopAppsIn, takeTurn, untilEnded, waitWords, type Turn, type TurnKind } from './copy-turn.js';
 import { fileAlone } from './failed-tests.js';
@@ -508,6 +509,12 @@ function stepCall(raw: unknown, n: number): { step: Record<string, unknown> } | 
 const ABOUT_BROWSER = /\b(browser|chrom(e|ium)|playwright|puppeteer|headless|screenshots?|sandbox|seatbelt|mach|bootstrap_check_in|sigtrap)\b/i;
 const ABOUT_PORT = /\b(ports?|eaddrinuse|address (already )?in use|already in use|listen(ing)?)\b/i;
 const ABOUT_APP = /\b(app|server|start(ed|ing)?|not (answer|respond)ing|connection refused|econnrefused|refused to connect|crash(ed)?|down)\b/i;
+/** A website the project's network level does not let its commands reach: what the sandbox and its proxy say. */
+const ABOUT_SITE = /not_allowlisted|on the deny list|deny network-outbound|connect tunnel failed|network allowlist|not allowed for this project|\b(site|host|domain|website|download)s? (is |was |were )?(not allowed|blocked|closed)\b/i;
+
+/** The way around a closed website, for the agent: nothing is broken, so there is nothing to fix or to ask. */
+const SITE_CLOSED =
+  'That site is closed for this project on purpose, and squad-kit does not open it: nothing here is broken. Do not try to reach it another way, and never ask the person to open it. Get what you need from an official package registry or from what is already in this copy, or go on without it.';
 
 const STOPPED = 'You stopped the squad.';
 /** What a call answers once the run is stopped or over. */
@@ -1048,7 +1055,7 @@ export class AgentWindow {
    * could stop that very process (a leftover of this copy, never what squad-kit runs now).
    */
   private startPastOther(a: WindowApp): Promise<RunningApp> {
-    const start = () => startApp(a.cwd, a.start, a.url, this.s.limits?.appWaitMs, this.signal, a.guard);
+    const start = () => startApp(a.cwd, a.start, a.url, this.s.limits?.appWaitMs, this.signal, a.guard, { onHealed: (detail) => this.healed(detail) });
     return startPastOther(
       start,
       async (pid) => !this.over && Boolean(this.s.clearCopy && (await this.s.clearCopy(a.cwd, pid))),
@@ -1183,6 +1190,12 @@ export class AgentWindow {
     return ok(`${earlier}${r.ok.map(checkAnswer).join('\n\n')}`);
   }
 
+  /** A check squad-kit ran once more with a home of the project's own: one plain line on the story, the details in the log. */
+  private healed(detail: string): void {
+    this.s.log?.(detail);
+    this.s.say(HEALED_LINE);
+  }
+
   /**
    * Starts the saved checks in the background, or null when the project has none of them. `only`: one test file on its
    * own, with the project's own test tool; when squad-kit cannot run one file with it, all the tests run, and the answer
@@ -1206,7 +1219,7 @@ export class AgentWindow {
         const note = only && !alone ? `squad-kit cannot run one test file on its own with this project's tests, so it ran all of them.` : undefined;
         c.onStart?.(name);
         this.s.log?.(`squad-kit runs ${alone ? `${only} on its own` : name} for the ${this.s.who} on ${this.s.ticket}: ${command}`);
-        const r = await runCommand(c.cwd, command, undefined, { silentMs: CHECK_SILENT_MS, signal: this.signal, onOutput: () => this.s.beat?.(), ...(c.guard ? { guard: c.guard } : {}) });
+        const r = await runCommand(c.cwd, command, undefined, { silentMs: CHECK_SILENT_MS, signal: this.signal, onOutput: () => this.s.beat?.(), onHealed: (detail) => this.healed(detail), ...(c.guard ? { guard: c.guard } : {}) });
         if (this.over) break;
         out.push({ name, command, ...r, ...(alone ? { only } : {}), ...(note ? { note } : {}) });
         this.s.say(`squad-kit ran ${alone ? 'one test file' : CHECK_WORDS[name]} for the ${this.s.who}: ${r.ok ? 'passed' : 'did not pass'}`);
@@ -1324,13 +1337,16 @@ export class AgentWindow {
     const browser = this.s.tools.includes('take_screenshots') || this.s.tools.includes('look_at_page');
     // A window that only looks at pages has the app started for it too: squad-kit restarts one that does not answer.
     const app = Boolean(this.s.app) && (this.s.tools.includes('start_app') || this.s.tools.includes('look_at_page'));
-    const any = !ABOUT_BROWSER.test(said) && !ABOUT_PORT.test(said) && !ABOUT_APP.test(said);
+    // A closed website: nothing to restart, and the story already has its line. The agent is told the way around.
+    const site = ABOUT_SITE.test(said);
+    if (site) did.push(SITE_CLOSED);
+    const any = !site && !ABOUT_BROWSER.test(said) && !ABOUT_PORT.test(said) && !ABOUT_APP.test(said);
     // A browser cannot start in the agent's own shell: its tests that open one go through run_checks.
-    if (this.s.tools.includes('run_checks') && ABOUT_BROWSER.test(said)) {
+    if (this.s.tools.includes('run_checks') && ABOUT_BROWSER.test(said) && !site) {
       did.push('A browser cannot start in your shell. To run tests that open a browser, call run_checks: squad-kit runs them where a browser can start.');
       plain.push(`The ${who} was stuck on a browser test. squad-kit told it how to run it.`);
     }
-    if (ABOUT_PORT.test(said) && this.s.inTheWay) {
+    if (ABOUT_PORT.test(said) && !site && this.s.inTheWay) {
       const settled = await this.s.inTheWay(said).catch(() => null);
       if (this.over) return error(STOPPED_CALL);
       if (settled) {
@@ -1338,7 +1354,7 @@ export class AgentWindow {
         plain.push(`The ${who} was stuck because another program was in the way. squad-kit dealt with it.`);
       }
     }
-    if (browser && (ABOUT_BROWSER.test(said) || any)) {
+    if (browser && ((ABOUT_BROWSER.test(said) && !site) || any)) {
       // A fresh browser; the old one closes in the background.
       const old = this.session;
       this.session = new BrowserSession(this.sessionOptions());
@@ -1357,7 +1373,7 @@ export class AgentWindow {
         plain.push(`The ${who} was stuck on the screenshot browser, and squad-kit could not fix it.`);
       }
     }
-    if (app && (ABOUT_APP.test(said) || ABOUT_PORT.test(said) || any)) {
+    if (app && (((ABOUT_APP.test(said) || ABOUT_PORT.test(said)) && !site) || any)) {
       const running = this.app && !this.app.ended?.() ? this.app : null;
       const answers = running ? await fetch(running.url, { signal: AbortSignal.timeout(3000) }).then((r) => r.status < 500).catch(() => false) : false;
       if (this.over) return error(STOPPED_CALL);
