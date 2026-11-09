@@ -15,6 +15,7 @@ import { fillOwnCopy, placeStoryFiles } from './local-files.js';
 import { countFiles, gitState, nextToNothing } from './first-look.js';
 import { DOING } from './plain-doing.js';
 import { withBrowserTests } from './find-commands.js';
+import { learnAfterRead } from './story-db.js';
 
 /**
  * The first run on the live engine: the Architect reads the project, then squad-kit proves it can work here, on its
@@ -160,7 +161,8 @@ export function readFailed(bp: BoardPaths, error: string): void {
 }
 
 /**
- * The Architect handed in its read. The map, the commands and the repos are saved as before; the overview goes to
+ * The Architect handed in its read. The map, the commands and the repos are saved as before, and squad-kit learns the
+ * project's database from its files (engine/story-db.ts); the overview goes to
  * `knowledge/overview.md`; and the technical choices it found become proposed decisions (STACK.1, STACK.2): the person
  * approves them on the overview, and only then are they rules. A choice found before stays as it is; a proposal the
  * new read no longer finds goes. `idea` is what the person wants to build, on a project with no code.
@@ -192,6 +194,8 @@ export function saveScan(bp: BoardPaths, answer: ScanAnswer, nested: RepoInfo[],
     }
   }
   writeMeta(bp, fresh);
+  // The project's database, from its own files: an engineer confirms it before any story gets its own copy.
+  if (!out.empty) learnAfterRead(bp);
 
   const before = readOverview(bp);
   writeOverview(bp, { ...cleanOverview(out), readAt: at, ...(before.approved && !fresh.setup ? { approved: before.approved } : {}) });

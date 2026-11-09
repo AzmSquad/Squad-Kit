@@ -238,6 +238,37 @@ export interface SandboxInfo {
 /** How much of the internet the squad's commands and the project's own reach. */
 export type NetworkLevel = 'standard' | 'strict' | 'off';
 
+/** GET /api/v1/database: the project's database and each story's own copy of it, for engineers. No password is in it. */
+export interface DatabaseInfo {
+  database: {
+    kind: 'sqlite' | 'postgres' | 'mysql' | 'mongo';
+    kindName: string;
+    repo: string;
+    name?: string;
+    where?: string;
+    setting: { env?: string; file?: string; key?: string };
+    /** With any password shown as ***. */
+    address?: string;
+    /** The address is kept on this computer only. */
+    secret: boolean;
+    from?: string[];
+    confirmed?: { by: string; at: string };
+    hidePersonal?: boolean;
+    sampleRows?: number;
+  } | null;
+  template: { sourceName: string; madeAt: string; bytes: number; hidePersonal: boolean; tables: { name: string; kept: 'whole' | 'sampled'; rows: number }[]; hidden: string[]; notes: string[] } | null;
+  making?: { since: string; by: string };
+  failed?: { at: string; text: string };
+  /** Why the app would not use a story's own copy: stories then use the database as before. */
+  blocked?: string;
+  stories: { story: string; name: string; at: string; title?: string }[];
+  notes: { at: string; story?: string; text: string }[];
+  /** Tools this computer lacks for the database's kind. */
+  missing: string[];
+  /** One plain sentence for everyone. */
+  words: string;
+}
+
 export interface StuckChoice {
   /** What happened, in plain words. */
   question: string;

@@ -7,6 +7,7 @@ import type { AgentInfo, CorePrompts, Effort, HarnessRow, HarnessStage, HarnessV
 import { useAct, useAppSettings, useBoard } from '../lib/data';
 import { QualityMetrics, SquadUsage } from '../components/Usage';
 import { AllowedHosts, NetworkSetting, SandboxRows, useSandbox } from '../components/Sandbox';
+import { DatabaseBlock } from '../components/Database';
 import { Cmd, Glyph, Modal, ago } from '../components/ui';
 import { usePrefs } from '../lib/prefs';
 import { withoutComments } from '../lib/text';
@@ -466,6 +467,11 @@ function SafetyTab({ view }: { view: HarnessView }) {
         )}
       </Block>
       <Block title="No agent can change" what="A change goes back by itself, with a line saying so." items={s.locked} mine={s.lockedByYou} />
+      {meta?.engine === 'live' && (
+        <Block title="Your own database" what="A story never works on it. squad-kit only reads it, to make the copy stories start from." items={[]}>
+          <DatabaseBlock />
+        </Block>
+      )}
       <Block title="Where agents can go" what="The Builder only. The others have no internet, and the Tester's pictures stay on this story's app." items={s.sites} mine={meta?.engine === 'live' ? [] : (meta?.allowedHosts ?? [])}>
         <NetworkSetting net={s.network} live={meta?.engine === 'live'} />
         {meta?.engine === 'live' && <AllowedHosts hosts={meta.allowedHosts ?? []} />}

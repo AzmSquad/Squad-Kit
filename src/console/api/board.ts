@@ -103,6 +103,7 @@ import { lookAgain } from '../../engine/try-app.js';
 import { takeBack } from '../../engine/handover.js';
 import { plainWords } from '../../core/for-people.js';
 import { act } from './act.js';
+import { confirmDatabase, databaseView, learnDatabase, makeTemplateBeside, setDatabaseOptions, type DatabaseChange } from '../../engine/story-db.js';
 import { bringBack, checkOutside, workOutside } from '../../board/outside.js';
 import { outsidePrompt } from '../../engine/outside-guide.js';
 
@@ -824,6 +825,40 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
   fileRoute('use-mine', (repo, file) => useMyFile(bp, repo, file));
   fileRoute('remove', (repo, file) => removeProjectFile(bp, repo, file));
   app.post('/api/v1/project-files/lock-docker', (c) => act(c, () => ({ locked: lockDockerFiles(bp) })));
+
+  // The project's database and each story's own copy of it, for engineers. An address's password never passes through here.
+  const noDatabase = { database: null, template: null, stories: [], notes: [], missing: [], words: 'squad-kit has not found a database in this project.' };
+  app.get('/api/v1/database', (c) => (boardExists(bp) ? c.json(databaseView(bp)) : c.json(noDatabase)));
+  app.post('/api/v1/database/find', (c) =>
+    act(c, () => {
+      learnDatabase(bp, { again: true });
+      return databaseView(bp);
+    }),
+  );
+  app.post('/api/v1/database/confirm', async (c) => {
+    const b = await body<Record<string, unknown>>(c);
+    const change: DatabaseChange = Object.fromEntries(['kind', 'name', 'repo', 'env', 'file', 'key', 'address'].filter((k) => typeof b[k] === 'string').map((k) => [k, b[k] as string]));
+    return act(c, () => {
+      confirmDatabase(bp, readMeta(bp).user.name, change);
+      return databaseView(bp);
+    });
+  });
+  app.post('/api/v1/database/template', (c) =>
+    act(c, () => {
+      makeTemplateBeside(bp, readMeta(bp).user.name);
+      return databaseView(bp);
+    }),
+  );
+  app.put('/api/v1/database', async (c) => {
+    const b = await body<{ hidePersonal?: unknown; sampleRows?: unknown }>(c);
+    return act(c, () => {
+      setDatabaseOptions(bp, {
+        ...(typeof b.hidePersonal === 'boolean' ? { hidePersonal: b.hidePersonal } : {}),
+        ...(typeof b.sampleRows === 'number' || b.sampleRows === null ? { sampleRows: b.sampleRows as number | null } : {}),
+      });
+      return databaseView(bp);
+    });
+  });
 
   // Whether the Builder's and Tester's commands run in a sandbox on this computer, and the hosts they may reach.
   app.get('/api/v1/sandbox', (c) => {

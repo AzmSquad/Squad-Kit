@@ -3,6 +3,7 @@ import path from 'node:path';
 import { repoPaths } from '../board/parts.js';
 import { storyFile, storyFilesDir } from '../board/project-files.js';
 import { readMeta, type BoardPaths } from '../board/store.js';
+import { copyDbFiles, rewireCopy } from './db-env.js';
 import { markPlaced } from './git.js';
 import { copyEnvFiles, localEnvFiles } from './run-app.js';
 
@@ -41,6 +42,8 @@ export function placeStoryFiles(bp: BoardPaths, repo: string, dir: string): { pl
     out.placed.push(f.path);
   }
   markPlaced(dir, out.placed);
+  // A local file can be the one that points the app at its database: the story's own address goes back in it.
+  rewireCopy(dir);
   return out;
 }
 
@@ -82,5 +85,7 @@ export async function hiddenFiles(bp: BoardPaths, cwd?: string): Promise<string[
     if (cwd && f.repo !== '.') out.add(path.join(cwd, f.repo, f.path));
   }
   if (local.length) out.add(`${storyFilesDir(bp)}/**`);
+  // The copy's settings file squad-kit wrote the story's database address into.
+  for (const f of copyDbFiles(cwd)) out.add(f);
   return [...out];
 }

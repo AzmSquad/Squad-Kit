@@ -73,6 +73,8 @@ import { DEFAULT_QUALITY, builderLevel, describeLevel, effortOn, personLevels, r
 import { CapReached, capCard } from './caps.js';
 import { blockedLine, noPushEnv, noteBlockedSite, packageCacheEnv, projectNetwork, sandboxAsk, sandboxOf, ticketCacheDir } from './sandbox.js';
 import { hiddenFiles, placeStoryFiles } from './local-files.js';
+import { copyDbEnv } from './db-env.js';
+import { OWN_DB_WORDS, rewireStoryDb, rewireStoryDbs, setUpStoryDb, tidyStoryDbs, tidyStoryDbsBeside } from './story-db.js';
 import { appCopyOf, copiesOf, reposOfParts, storyCopyDir, workFolder, type CopyOf } from './copies.js';
 import { ProductError, productCopiesDir, productPlan, startProduct, stopProduct, waitWords } from './product-run.js';
 import { productHold } from './product-lock.js';
@@ -455,6 +457,10 @@ export class LiveSquad {
       }
       // What the last board's runs left running in squad-kit's copies stops before any step carries on.
       this.swept = this.clearCopies(projectCopies(this.bp), { busy: this.busyCopies() }).catch(() => undefined);
+      // Stories with a database of their own point at it again before any step runs; the databases of stories that are
+      // merged, released or deleted go, beside everything else.
+      rewireStoryDbs(this.bp);
+      void tidyStoryDbs(this.bp).catch(() => undefined);
       // Half a copy a crash left goes, beside everything else: nothing works in one, so nothing waits for this.
       for (const repo of reposOf(readMeta(this.bp))) void clearHalfCopies(path.join(projectRoot(this.bp), repo.path)).catch(() => undefined);
     } catch {
@@ -522,6 +528,8 @@ export class LiveSquad {
     this.pickUp();
     // Pull requests squad-kit opened, merged by a person on the code host: a quiet look now and then, beside the work.
     lookOutsideBeside(this.bp);
+    // The databases of stories that no longer need one go, now and then.
+    tidyStoryDbsBeside(this.bp);
     const limit = parallelLimit(meta.parallel);
     // The AI account's usage limit: nothing new starts in any project until it resets (E5).
     const pause = activePause();
@@ -1535,7 +1543,8 @@ export class LiveSquad {
       protectedFiles: this.protectedFiles(opts.cwd),
       ...(Object.keys(runCaps).length ? { caps: runCaps } : {}),
       ...(sandbox ? { sandbox, onBlocked } : {}),
-      env: { ...noPushEnv(), ...(sandbox && cache ? cacheHomeEnv(cache, { wall: 'agent', cwd: opts.cwd }) : {}) },
+      // A story with a database of its own: the agent's own commands reach that one too, never the person's.
+      env: { ...noPushEnv(), ...(sandbox && cache ? cacheHomeEnv(cache, { wall: 'agent', cwd: opts.cwd }) : {}), ...(key ? copyDbEnv(opts.cwd) : {}) },
       ...(instructions ? { instructions } : {}),
       level: lv.level,
       ...(effort ? { effort } : {}),
@@ -2911,6 +2920,8 @@ export class LiveSquad {
     const repo = repoFor(meta, t);
     if (t.worktree && fs.existsSync(t.worktree)) {
       this.mendCopy(t);
+      rewireStoryDb(this.bp, id, t.worktree, repo.path);
+      for (const c of t.copies ?? []) rewireStoryDb(this.bp, id, c.dir, c.repo);
       this.placeLocalFiles(id, t.worktree, repo.path);
       for (const c of t.copies ?? []) this.placeLocalFiles(id, c.dir, c.repo);
       // A setup that stopped the story (only Docker does): Try again runs it, now an engineer may have allowed Docker.
@@ -2983,9 +2994,13 @@ export class LiveSquad {
     await this.setUpCopy(id, wt.dir, repo);
   }
 
-  /** A copy's local files and its setup command. A setup that fails on this computer goes to the Builder, not the person. */
+  /**
+   * A copy's own database, its local files and its setup command. The database comes first, so the setup never runs
+   * against the person's own. A setup that fails on this computer goes to the Builder, not the person.
+   */
   private async setUpCopy(id: string, dir: string, repo: RepoInfo): Promise<void> {
     const meta = this.meta();
+    await this.storyDatabase(id, dir, repo.path);
     this.placeLocalFiles(id, dir, repo.path);
     const setup = repo.commands.setup?.trim();
     if (!setup) return;
@@ -3048,6 +3063,20 @@ export class LiveSquad {
   private async writeChanges(t: Ticket): Promise<void> {
     if (!t.storyDir) return;
     for (const c of copiesOf(this.meta(), t)) await writeChangesOf(c.dir, c.baseCommit, path.join(t.storyDir, P.changesFile(c.repo.path)), c.repo.path);
+  }
+
+  /**
+   * The story's own database, made from the template on the same server, with the copy pointed at it. A PM reads one
+   * plain line; anything wrong goes to engineers only, and the story goes on as before.
+   */
+  private async storyDatabase(id: string, dir: string, repo: string): Promise<void> {
+    const r = await setUpStoryDb(this.bp, id, dir, repo).catch((err: unknown) => {
+      this.log('warn', `The story's own database was not set up: ${(err as Error).message}`, id);
+      return null;
+    });
+    if (r?.state !== 'own') return;
+    if (r.made) this.log('info', `Made ${r.name}, the story's own database`, id);
+    if (!readTicket(this.bp, id)?.activity.some((a) => a.text === OWN_DB_WORDS)) this.update(id, (x) => addActivity(x, 'squad', OWN_DB_WORDS));
   }
 
   /** A repo's local files go in the story's copy. One with no values yet is said once: the app may not start without it. */

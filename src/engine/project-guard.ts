@@ -7,6 +7,7 @@ import type { ProjectGuard } from '../board/types.js';
 import { AI_TOOLS, BROWSERS } from '../modules/registry.js';
 import { squadHome } from '../core/home.js';
 import { childEnv } from './agent-env.js';
+import { copyDbEnv } from './db-env.js';
 import { OWN_GROUP, track } from './process-group.js';
 import { PACKAGE_CACHES, PRIVATE, gitPlaces, networkPolicy, noPushEnv, packageCacheEnv, projectCacheDir, projectNetwork, ticketCacheDir } from './sandbox.js';
 import type { NetworkLevel } from '../board/types.js';
@@ -528,7 +529,8 @@ export interface SpawnProjectOptions {
 export function spawnProject(command: string, o: SpawnProjectOptions): ChildProcess {
   // Every tool keeps its downloads in the project's cache home, never the person's own caches, as in the agent's shell.
   const caches = o.guard?.cache ? cacheHomeEnv(o.guard.cache, { wall: 'project', cwd: o.cwd }) : {};
-  const env = { ...projectEnv(), ...caches, ...(o.guard?.noPush ? noPushEnv() : {}), ...(o.env ?? {}) };
+  // In a story's copy with a database of its own, the setting points at it, whatever the person's environment says.
+  const env = { ...projectEnv(), ...caches, ...(o.guard?.noPush ? noPushEnv() : {}), ...(o.env ?? {}), ...copyDbEnv(o.cwd) };
   const stdio = o.stdio ?? ['ignore', 'pipe', 'pipe'];
   const base: SpawnOptions = { cwd: o.cwd, detached: OWN_GROUP, stdio, env };
   if (o.guard && process.platform === 'darwin') {

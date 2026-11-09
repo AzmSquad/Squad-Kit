@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Each story gets its own copy of the database.** A story no longer works on your own database. squad-kit learns the
+  project's database when it first reads the project, from the project's own files: Prisma's `schema.prisma`, a
+  database address in `.env.example`, a compose file's database service, the connection strings in
+  `appsettings.Development.json`, Spring's `application.properties`, and the packages the code uses. It finds the kind
+  (a SQLite file, Postgres, MySQL or Mongo), where it runs, its name, and the setting that points the app at it, like
+  `DATABASE_URL`, `MONGO_URL` or `ConnectionStrings:Default`. The kind, name and setting are shared with the team in the
+  project's settings; an address with a password stays on this computer only. An engineer confirms it once and makes a
+  small template of it. From then on, when a story's copy is set up, squad-kit makes the story's own database from the
+  template, on the same server, before the copy's setup runs, and points the copy at it: in the copy's own `.env` (when
+  git leaves that file out) and for every command run in the copy, so a value in your own environment never wins. The
+  story's database goes when the story is merged, released or deleted, and a leftover goes with the other leftovers.
+  squad-kit refuses to point a story at the database your own copy uses, and never creates, changes or drops it. With
+  no template yet, or a database it cannot reach, the story goes on as before and engineers get one plain note; nobody
+  is asked anything. A SQLite file stays in each copy, as before, and a story's own file never goes in its commit. A PM reads at most "The story has its own copy of the
+  database." SQL Server comes in a later version.
+- **Only when the app would really use it.** Some apps choose their database themselves: the code opens it by name
+  (`GetDatabase("shop")`, `dbName: 'shop'`), the address in the setting names no database, or a compose file builds the
+  setting from other settings. A copy under another name would be ignored there, and the story would write to your own
+  database all the same. squad-kit sees this from the code, makes no template and gives no story a copy, and tells
+  engineers why, with the file and line. Stories use the database as before.
+- **For engineers, on Harness → Safety and in Settings:** the database squad-kit found (confirm it, correct it or find it
+  again), the template (its size, when it was made, **Make it again**), **Hide personal data** (off by default: names,
+  ID numbers, phones, emails and addresses become fake in the template), the sample size for big tables, and the story
+  databases there are now. Terminal: `squad db`, `squad db find`, `squad db confirm` (with `--kind`, `--env`, `--file`,
+  `--key`, `--address` to correct it), `squad db template`, `squad config set db-hide on|off`,
+  `squad config set db-sample <rows>`.
+- **A small copy of your database for each story, for SQLite, Postgres, MySQL and MongoDB.** squad-kit can make a
+  template of a project's database with the database's own tools, only reading yours: the schema and indexes, small tables
+  whole, the newest rows of big ones, and the rows those point at. Each story then gets its own database from it on the
+  same server, named after the story, and it is removed when the story is done. squad-kit never makes, changes or drops
+  your own database, or one it did not make. Hiding personal data is a switch, off by default: names, ID numbers, phones,
+  emails, addresses and birth dates become consistent fake values while the template is made. Passwords are never shown.
+
 ## [1.3.4] — 2026-11-09
 
 ### Added

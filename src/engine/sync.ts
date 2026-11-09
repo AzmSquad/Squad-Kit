@@ -17,6 +17,7 @@ import { copyViews } from './copies.js';
 import { writeLog } from '../core/app-log.js';
 import { freeName } from '../core/file-names.js';
 import { refusedForGood } from '../modules/errors.js';
+import { tidyStoryDbsBeside } from './story-db.js';
 
 /**
  * Keeps the tracker and the code host in step with the board: item states and comments on the tracker, and the
@@ -452,6 +453,8 @@ export async function trackerMerged(bp: BoardPaths, ticketId: string, pr: { id: 
  * added, moved or removed since its last read: edits inside files leave all three as they were.
  */
 export function mapAfterMerge(bp: BoardPaths): void {
+  // A merged story's own database goes, beside everything else.
+  tidyStoryDbsBeside(bp, Date.now(), true);
   // The overview, the project's home, is brought up to date after every merged ticket.
   overviewAfterMerge(bp);
   firstCodeMerged(bp);

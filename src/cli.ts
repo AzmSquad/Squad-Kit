@@ -14,6 +14,7 @@ import { runApp, runConsole } from './commands/console.js';
 import { runProjects } from './commands/projects.js';
 import { runParts } from './commands/parts.js';
 import { runFiles } from './commands/files.js';
+import { runDb, runDbHide, runDbSample } from './commands/db.js';
 import { runAsk, runTicketStatus, runWait } from './commands/now.js';
 import { runLogs, runReport, runTryNow } from './commands/support.js';
 import { runAppFind, runAppRestart, runAppSet, runAppStart, runAppStatus, runAppStop } from './commands/app.js';
@@ -287,6 +288,18 @@ program
   .option('--remove <path>', 'Take a file off the list')
   .option('--repo <folder>', 'The repo the file is in, when the project has several')
   .action(wrap(runFiles));
+
+program
+  .command('db [action]')
+  .description("For engineers: the project's database and each story's own copy of it. show (default), find, confirm or template. The same as Harness → Safety")
+  .option('--kind <kind>', 'With confirm: postgres, mysql, mongo or sqlite')
+  .option('--name <name>', "With confirm: the database's name")
+  .option('--env <name>', 'With confirm: the setting the app reads it from, like DATABASE_URL ("" for none)')
+  .option('--file <path>', 'With confirm: the settings file inside the repo, like .env or appsettings.Development.json ("" for none)')
+  .option('--key <key>', 'With confirm: the key in that file, like ConnectionStrings:Default')
+  .option('--address <address>', 'With confirm: the address your own copy uses. One with a password stays on this computer only')
+  .option('--repo <folder>', 'With confirm: the repo whose app reads it, when the project has several')
+  .action(wrapArgs(runDb));
 
 // The first run and the Overview: the setup page and the Overview page, button for button.
 program
@@ -717,6 +730,14 @@ set
   .command('network [level]')
   .description("Show or set how much of the internet the squad's commands and the project's own reach: standard (default), strict or off")
   .action(wrapArgs(runNetwork));
+set
+  .command('db-hide [setting]')
+  .description("Show or set whether personal data is hidden in the database template stories are made from: on or off (default)")
+  .action(wrapArgs(runDbHide));
+set
+  .command('db-sample [rows]')
+  .description("Show or set how many of a big table's newest rows the database template keeps, or default")
+  .action(wrapArgs(runDbSample));
 set
   .command('allow-read [paths...]')
   .description("Show or set files outside its copy that the project's own commands (tests, setup, the app) may read")

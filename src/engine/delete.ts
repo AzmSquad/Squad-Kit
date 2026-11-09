@@ -30,6 +30,7 @@ import { deleteNoteCommit, localCopy } from './teammate-delete.js';
 import { docsRepo, squadInRepo } from './project-git.js';
 import { dropTicketCache, ticketCacheDir } from './sandbox.js';
 import { stopTry } from './try-app.js';
+import { dropStoryDb } from './story-db.js';
 import { plainWords } from '../core/for-people.js';
 
 /**
@@ -472,6 +473,8 @@ async function deleteOnce(bp: BoardPaths, id: string, opts: { remote?: boolean; 
     // The copy of the app the person was trying stops before its copy of the code goes.
     await stopTry(bp, t.id);
     notes.push(...(await removeCopy(bp, meta, t, { safe: local })).map((k) => `Kept ${k.charAt(0).toLowerCase()}${k.slice(1)}`));
+    // Its own database goes with its copy. One the server cannot drop now goes with the next tidy-up.
+    await dropStoryDb(bp, t.id).catch(() => false);
     // Its own package cache: on this computer only, and of no use once the ticket is gone.
     dropTicketCache(bp, t.id);
     unlinkDecisions(bp, t);

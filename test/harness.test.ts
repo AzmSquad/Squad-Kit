@@ -48,6 +48,7 @@ const EXCUSED: Record<string, string> = {
   'sandbox.ts:MAX_BLOCKED_SITES': 'How many refused sites the log on Harness → Safety keeps. A refused site stops nothing.',
   'additions.ts:LOCK_LEFT_MS': 'A lock a closed program left behind. A save takes a moment, and nobody waits on this.',
   'additions.ts:LOCK_WAIT_MS': 'How long one save waits for another. It ends in a plain "try again".',
+  'find-database.ts:GREP_MS': 'How long one look in the code for the database name may take. It stops no story: the copy is then made as usual.',
   // How often squad-kit looks at something. Nothing waits on them, and nothing stops at them.
   'try-app.ts:WATCH_MS': 'How often it looks at a copy someone is trying.',
   'product-lock.ts:LOOK_EVERY_MS': 'How often a waiting story looks again. WAIT_LIMIT_MS is the limit.',
@@ -129,6 +130,7 @@ const EXCUSED: Record<string, string> = {
   'setup-state.ts:LEARN_AFTER': 'When the usual times come from your project.',
   'requirements-tracker.ts:DEMO_WRITE_MS': "Only the demo board's pretend tracker.",
   'merged-outside.ts:FIRST_LOOK_MS': 'How soon after the board opens it first looks for merges on the code host. Nothing waits for it.',
+  'story-db.ts:TIDY_MS': "How often the databases of merged, released or deleted stories are dropped, beside everything else. Nothing waits for it.",
 };
 
 /** Rules with no name a scan could find, and why they have no row. Each must still be in the code it names. */

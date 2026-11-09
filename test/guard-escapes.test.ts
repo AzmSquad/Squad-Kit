@@ -21,6 +21,8 @@ let project: string;
 let copy: string;
 let tempWas: string | undefined;
 const started: number[] = [];
+/** A socket that says hello. */
+const SOCKET_SERVER = "require('net').createServer((c)=>{c.on('error',()=>{});c.end('hi')}).listen(process.argv[1])";
 
 const sh = (cmd: string, cwd = base) => execSync(cmd, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 const guardFor = (o: { cwd?: string; root?: string; cache?: string; allow?: { allowRead?: string[]; allowWrite?: string[] } } = {}) => buildGuard({ cwd: o.cwd ?? copy, root: o.root ?? project, home, platform: process.platform, ...(o.cache ? { cache: o.cache, extraWrite: [o.cache], extraRead: [o.cache] } : {}), ...(o.allow ? { allow: o.allow } : {}) });
@@ -46,8 +48,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // Only what this file started: a command in its folder, or its socket server, which is given just the socket's name.
   for (const pid of started.splice(0)) {
-    if (spawnSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }).stdout.includes(base)) process.kill(pid, 'SIGKILL');
+    const command = spawnSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }).stdout;
+    if (command.includes(base) || command.includes(SOCKET_SERVER)) process.kill(pid, 'SIGKILL');
   }
   if (tempWas === undefined) delete process.env.TMPDIR;
   else process.env.TMPDIR = tempWas;
@@ -281,7 +285,7 @@ describe.runIf(onMac)('sockets in places the guard hides, and sockets it may not
   const connect = (file: string, guard: GuardSpec, cwd = copy) => run(`${JSON.stringify(process.execPath)} -e "const c=require('net').connect(process.argv[1]);c.on('connect',()=>{console.log('CONNECTED');c.destroy()});c.on('error',e=>console.log(e.code))" ${JSON.stringify(file)}`, guard, cwd);
   function serve(file: string): void {
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    const child = spawn(process.execPath, ['-e', "require('net').createServer((c)=>{c.on('error',()=>{});c.end('hi')}).listen(process.argv[1])", path.basename(file)], { cwd: path.dirname(file), stdio: 'ignore', detached: true });
+    const child = spawn(process.execPath, ['-e', SOCKET_SERVER, path.basename(file)], { cwd: path.dirname(file), stdio: 'ignore', detached: true });
     child.unref();
     started.push(child.pid!);
   }

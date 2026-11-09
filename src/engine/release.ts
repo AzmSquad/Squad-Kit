@@ -17,6 +17,7 @@ import { guardSupport, projectGuardFor } from './project-guard.js';
 import { copyViews, repoOrder, repoReliesOn } from './copies.js';
 import { repoLabel } from '../board/parts.js';
 import { writeLog } from '../core/app-log.js';
+import { dropStoryDb } from './story-db.js';
 
 /**
  * A real release: merge every ready ticket (its pull request on the code host, or its branch locally), write the
@@ -190,8 +191,9 @@ export async function liveRelease(bp: BoardPaths, release: Release, tickets: Tic
     // Their copies of the code went with the release, so their own package caches go too.
     for (const t of list) dropTicketCache(bp, t.id);
   }
-  // A story's folder goes with its last copy.
+  // A story's folder goes with its last copy, and its own database with it.
   for (const t of tickets) if (t.storyDir && !copyDirsIn(t.storyDir).length) fs.rmSync(t.storyDir, { recursive: true, force: true });
+  for (const t of tickets) await dropStoryDb(bp, t.id).catch(() => false);
   return { log, unpushed };
 }
 

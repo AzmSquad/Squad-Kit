@@ -41,6 +41,14 @@ export interface SquadSecrets {
   speech?: {
     munsit?: string;
   };
+  /**
+   * The project's database (engine/story-db.ts): the address the person's own copy uses when it has a password, and
+   * each story's own database's address, by story id. Never in the project's shared settings.
+   */
+  database?: {
+    address?: string;
+    stories?: Record<string, string>;
+  };
 }
 
 const EMPTY: SquadSecrets = {};
@@ -113,6 +121,8 @@ export function mergeSecrets(base: SquadSecrets, patch: SquadSecrets): SquadSecr
       },
     },
     ...(base.speech || patch.speech ? { speech: { ...(base.speech ?? {}), ...filterEmpty(patch.speech ?? {}) } } : {}),
+    // Kept as it is: only engine/story-db.ts writes it.
+    ...(base.database ? { database: base.database } : {}),
   };
 }
 

@@ -167,7 +167,7 @@ function cached<T>(key: string, files: string[], read: () => T): T {
 /* ── Board settings ─────────────────────────────────────── */
 
 /** The board's settings that belong to the project, kept in `.squad/config.yaml` under `board:`. */
-const PROJECT_META = ['id', 'layout', 'documentsInGit', 'quality', 'allowedHosts', 'network', 'guard', 'project', 'key', 'nextNumber', 'engine', 'commands', 'noTests', 'alwaysNewTests', 'git', 'repos', 'parts', 'atOnce', 'delivery', 'localFiles', 'lockedFiles'] as const;
+const PROJECT_META = ['id', 'layout', 'documentsInGit', 'quality', 'allowedHosts', 'network', 'guard', 'project', 'key', 'nextNumber', 'engine', 'commands', 'noTests', 'alwaysNewTests', 'git', 'repos', 'parts', 'atOnce', 'delivery', 'localFiles', 'lockedFiles', 'database'] as const;
 /** What the project knows, kept in `.squad/knowledge/` as Markdown. */
 const KNOWLEDGE_META = ['map', 'lessons'] as const;
 
@@ -190,6 +190,7 @@ const BOARD_FIELDS: Record<string, FieldShape> = {
   parts: 'objects',
   localFiles: 'objects',
   lockedFiles: 'objects',
+  database: 'object',
   allowedHosts: 'texts',
   network: 'text',
 };

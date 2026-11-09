@@ -371,7 +371,9 @@ list; with one story waiting, **needs you** opens it. Six tabs:
   agents can ask squad-kit to do. The project's **network level** is here, in one plain sentence (see below), with
   **Websites the squad may reach**: on top of the package registries, shared by the team, used on Strict. Under **For
   engineers**: the three levels to pick from and the sites refused lately (site, story, level, when). Terminal:
-  `squad config set network` and `squad config set hosts`.
+  `squad config set network` and `squad config set hosts`. **Your own database** says in one sentence whether each story
+  gets its own copy of the database; the details are under **For engineers** (see Settings, **Each story's own
+  database**).
 - **Agents**: see below. `/squad` opens this tab, so old links still work.
 - **Your additions**: what your team added. See below.
 
@@ -581,6 +583,38 @@ Terminal: `squad config set quality best`, `squad agent builder`, `squad agent b
   from the file in your folder, then change any real values to test values. **Locked files** are in git, like
   `docker-compose.yml`: agents can read them, and squad-kit puts back any change. Only the names are shared with the team.
   Terminal: `squad files`, `squad files --local .env.dev`, `squad files --use-mine .env.dev`, `squad files --lock-docker`.
+- **Each story's own database**, for engineers. squad-kit learns the project's database when it first reads the project,
+  from the project's own files, never by asking a PM: Prisma's `schema.prisma`, an address in `.env.example` (and the one
+  your own `.env` holds), a compose file's database service, `appsettings.Development.json`'s connection strings,
+  Spring's `application.properties` or `application.yml`, and the packages the code uses. It shows the kind (SQLite,
+  Postgres, MySQL or Mongo; SQL Server comes later), its name, where it runs, the setting that points the app at it
+  (`DATABASE_URL` in `.env`, or `ConnectionStrings:Default` in a settings file, with the environment name that stands in
+  for it, `ConnectionStrings__Default`), the address with any password shown as `***`, and the files it learned this
+  from. **Confirm it**, **Correct it** (kind, name, setting name, settings file and key, address) or **Find it again**.
+  The kind, name and setting are shared with the team in `.squad/config.yaml`; an address with a password stays in this
+  computer's secrets, never in git.
+  - **The template**: made only when you press **Make the template** (later **Make it again**, after the schema changed),
+    with the database's own tools, which only read your database: small tables whole, the newest rows of big ones,
+    linked rows and indexes kept. It lives in squad-kit's own folder on this computer, with its size and age shown here.
+    **Hide personal data**, off by default, makes names, ID numbers, phones, emails and addresses fake in the next
+    template. **Sample size**: how many of a big table's newest rows it keeps (1000 by default).
+  - **A story's own database**: when a story's copy is set up, before its setup command runs, squad-kit makes
+    `<name>_<story>` from the template on the same server and points the copy at it, in the copy's own `.env` when git
+    leaves that file out (no agent can read it) and in the environment of every command run in the copy, so a value in
+    your own environment never wins. A later step uses the same one; a story that started without one keeps the
+    database as before. It goes when the story is merged, released or deleted, and with the leftovers after a restart.
+    squad-kit refuses to point a story at the database your own copy uses, and never creates, changes or drops it. A
+    SQLite file stays in each copy, from the template's file when there is one.
+  - **When the app chooses its database itself**, a copy under another name would not be used, and the story would write
+    to your own database all the same. So squad-kit makes no template and gives no story a copy, and says why, here and
+    in `squad db`: the code names the database (`GetDatabase("shop")`, `dbName: 'shop'`, or the name in quotes on a
+    database line), the address in the setting names no database, or a compose file builds the setting from other
+    settings. Stories use the database as before. Take the name from the setting, and each story gets its own copy.
+  - **Story databases now**, and **Notes**: with no template yet, or a database squad-kit cannot reach, the story goes on
+    as before and the note says why, once per story, also in the app log. A PM reads at most "The story has its own copy
+    of the database."
+  - Terminal: `squad db`, `squad db find`, `squad db confirm --env DATABASE_URL --address …`, `squad db template`,
+    `squad config set db-hide on|off`, `squad config set db-sample 5000` (or `default`).
 - **Report a problem**: a report for the whole app, without a ticket. The app log is in `~/.squad-kit/logs/`,
   one file a day with every step, stop and error (never a key or a prompt), kept 14 days. Errors also print in the
   terminal that runs the app. Terminal: `squad logs`, `squad logs --tail`.
@@ -601,3 +635,44 @@ Terminal: `squad config set quality best`, `squad agent builder`, `squad agent b
   page show it with what is new. **Update now** waits until no agent is in the middle of a step, installs it,
   and restarts the app on the same link. The banner shows what is new in every release since your version.
   **Check for updates** also reads the notes again. Terminal: `squad upgrade`.
+
+## A database per story: the adapters (for engineers)
+
+Each story can get its own database, made from a small template of the project's real database, so a story never
+touches the person's own. The adapters are in `src/engine/db/` (one per kind, behind `types.ts`); the rest of squad-kit
+reaches them through `index.ts`. They use each database's own command line tools, and say which are missing.
+
+| Kind | Template, on this computer (never in git) | A story's database |
+| --- | --- | --- |
+| SQLite | A new file made by `sqlite3`: the source attached read-only, its tables, the kept rows, then its indexes, triggers and views. | A copy of the file in the story's folder: `<file>_<story>.db`. |
+| Postgres | `pg_dump --schema-only` in two parts (before and after the rows) and the rows from `COPY (SELECT …) TO STDOUT`, in one read-only snapshot. Also kept as a database on the same server, `<name>_sk_template`, closed to connections. | `CREATE DATABASE <name>_<story> TEMPLATE <name>_sk_template`, or loaded from the files when that database is gone. |
+| MySQL | `mysqldump --no-data`, the triggers and routines on their own, and the rows a table at a time with `mysqldump --where`. | `CREATE DATABASE` and a load of the files (definers taken out, so it belongs to whoever makes it). |
+| MongoDB | A mongodump folder: a small read-only `mongosh` script picks the documents and reads each collection's indexes and options, then `mongodump` reads the documents. | `mongorestore` of the folder under the story's name. |
+
+- **Which rows**: a table with at most `smallRows` rows (default 1000) is kept whole. A bigger one keeps its newest
+  `sampleRows` (default 1000), by a time column with a "created" kind of name, else another time column, else its id.
+  Then, a pass at a time, the rows that kept rows point at through foreign keys, until nothing is missing. MongoDB does not
+  record links: squad-kit follows DBRefs, and ObjectIds in fields named like a collection (`patientId` → `patients`), and
+  says so in the template's notes. A chain of links too long to follow (30 passes, or 20 × `sampleRows` added rows in one
+  table) is said plainly too: on Postgres, a link to a row that was not kept is emptied, or the row left out when the link
+  may not be empty, so the foreign keys still load. MySQL loads with its key checks off.
+- **Reading only**: Postgres reads in read-only sessions (`default_transaction_read_only`), MySQL in `READ ONLY`
+  sessions, SQLite through a `mode=ro` attach with `query_only`, MongoDB with a script that only reads. A template is made
+  in a new folder beside the old one and takes its place when ready.
+- **Hiding personal data** (`hidePersonal`, off by default): columns and fields found by name (people's names in tables of
+  people, usernames, emails, phones, ID and national numbers, addresses, birth dates) get fake values on the way, so the
+  real ones are never written. The same value always becomes the same fake one within a template (a keyed hash with a new
+  random key each time, never kept); phones and ID numbers keep their shape and stay unique (a keyed shuffle); dates stay
+  dates. A fake only goes where it fits the column's type and length. `template.json` lists each hidden column.
+- **Never the person's database**: every create and drop refuses the person's own database (the same name on any host,
+  or the same file) and the server's own (`postgres`, `mysql`, `admin`…). A story's database is dropped only when its name
+  is the story form and squad-kit's mark is on it: one file per database in `~/.squad-kit/databases/made/`, and on
+  Postgres also a comment on the database. Asked again for a story it made, squad-kit keeps the database as it is.
+- **Passwords** go to the tools in their environment (Postgres), a private option file (MySQL) or config file (MongoDB
+  tools), removed right after, never on a command line. What a tool says is cleaned of them before anyone sees it.
+- **Not copied**: MySQL scheduled events (they would run on their own), MongoDB time-series collections, Postgres
+  materialized view rows (refresh them in the story). Postgres extensions need the same rights the source's owner had.
+- **Tests**: `test/db-adapters.test.ts` runs everywhere; `test/db-{sqlite,postgres,mysql,mongo}.test.ts` start a
+  throwaway server each (a `mysqld` and a `mongod` on temp folders and ports, Postgres 16 in a container removed by its
+  exact name, when the image is already here) and skip where the tools are missing. `SQUAD_DB_TEST_DIR` moves their
+  folders.

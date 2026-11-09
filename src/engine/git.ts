@@ -337,11 +337,46 @@ export function markPlaced(dir: string, files: string[]): void {
   else fs.rmSync(list, { force: true });
 }
 
+/** squad-kit's own database files in a copy, like a story's SQLite file, beside the placed list: none goes in a commit. */
+function madeList(dir: string): string | null {
+  const list = placedList(dir);
+  return list ? `${list.slice(0, -'squad-placed'.length)}squad-db-made` : null;
+}
+
+/** A path from the repo's top, as a line of git's ignore list that names that one file. */
+const ignoreLine = (rel: string): string => `/${rel.replace(/[\\[\]*?!#]/g, (c) => `\\${c}`)}`;
+
+/**
+ * Says which files squad-kit made in this copy for the story's own database (a SQLite file, with the files SQLite keeps
+ * beside it). git's local ignore list leaves them out of `git status`, so no step and no agent takes them for the
+ * story's work; the list in the copy's git folder leaves them out of every commit, even when a story changes what git
+ * ignores. Paths are full, or from the copy's folder.
+ */
+export function markDbMade(dir: string, files: string[]): void {
+  const list = madeList(dir);
+  if (!list) return;
+  const top = fs.realpathSync(git(dir, ['rev-parse', '--show-toplevel'], { allowFail: true }) || dir);
+  const real = (f: string) => path.join(fs.realpathSync(path.dirname(path.resolve(dir, f))), path.basename(f));
+  const rel = files.map((f) => path.relative(top, real(f)).split(path.sep).join('/')).filter((f) => f && !f.startsWith('..'));
+  if (rel.length) fs.writeFileSync(list, rel.join('\n'));
+  else fs.rmSync(list, { force: true });
+  excludeLocal(dir, rel.map(ignoreLine));
+}
+
+/** Takes a dropped story database's files off git's local ignore list. `rel`: their paths from the repo's top. */
+export function forgetDbMade(dir: string, rel: string[]): void {
+  const file = excludeFile(dir);
+  if (!file || !fs.existsSync(file)) return;
+  const gone = new Set(rel.map((r) => ignoreLine(r.split(path.sep).join('/'))));
+  const lines = fs.readFileSync(file, 'utf8').split('\n');
+  const kept = lines.filter((l) => !gone.has(l));
+  if (kept.length !== lines.length) fs.writeFileSync(file, kept.join('\n'));
+}
+
 /** The placed files git would save now. One it ignores stays out by itself, and git refuses to be told to leave it out. */
 function placedIn(dir: string): string[] {
-  const list = placedList(dir);
-  if (!list || !fs.existsSync(list)) return [];
-  return fs.readFileSync(list, 'utf8').split('\n').filter((f) => f && !git(dir, ['check-ignore', '--', f], { allowFail: true }));
+  const files = [placedList(dir), madeList(dir)].flatMap((list) => (list && fs.existsSync(list) ? fs.readFileSync(list, 'utf8').split('\n') : []));
+  return files.filter((f) => f && !git(dir, ['check-ignore', '--', f], { allowFail: true }));
 }
 
 function isMerging(dir: string): boolean {
@@ -482,11 +517,16 @@ export async function firstSaveLater(dir: string, signal: AbortSignal): Promise<
   await gitLater(dir, authorArgs(dir).concat(['commit', '--allow-empty', '-m', FIRST_COMMIT]), { signal });
 }
 
+/** git's local ignore list, shared by the repo and all its copies. */
+function excludeFile(dir: string): string | null {
+  const gitDir = git(dir, ['rev-parse', '--git-common-dir'], { allowFail: true });
+  return gitDir ? path.resolve(dir, gitDir, 'info', 'exclude') : null;
+}
+
 /** Ignore squad-kit's own runtime files without editing the project's .gitignore. */
 function excludeLocal(dir: string, patterns: string[]): void {
-  const gitDir = git(dir, ['rev-parse', '--git-common-dir'], { allowFail: true });
-  if (!gitDir) return;
-  const file = path.resolve(dir, gitDir, 'info', 'exclude');
+  const file = excludeFile(dir);
+  if (!file) return;
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const current = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
   const missing = patterns.filter((p) => !current.split('\n').includes(p));

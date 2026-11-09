@@ -15,6 +15,7 @@ import { PaymentSettings } from '../components/Usage';
 import { GuardAllows } from '../components/Sandbox';
 import { PartsSettings } from '../components/Parts';
 import { ProjectFiles } from '../components/ProjectFiles';
+import { DatabaseSettings } from '../components/Database';
 import { Cmd, CouldNotLoad, Modal, Runs, STAGE_NAME, Written, actionLabel, ago, commandFor, outdatedLine } from '../components/ui';
 import { changeWaits, openChange } from '../components/ChangeCard';
 import { NoticeSetting } from '../components/Waiting';
@@ -159,6 +160,7 @@ function ProjectSettings() {
     <>
       <PartsSettings />
       <ProjectFiles />
+      {meta.engine === 'live' && <DatabaseSettings />}
       <h2 style={{ marginTop: 6 }}>How the squad checks and runs this project</h2>
       <p className="note" style={{ margin: '2px 0 10px' }}>
         The Architect filled these in when it read the project. squad-kit runs Test, Lint and Build itself before anything ships.

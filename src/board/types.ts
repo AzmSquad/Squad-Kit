@@ -1107,6 +1107,44 @@ export interface BoardMeta {
   localFiles?: ProjectFile[];
   /** Files in git, like docker-compose.yml, that agents can read and never change. */
   lockedFiles?: ProjectFile[];
+  /** The project's database, as squad-kit learned it: each story gets its own copy of it (engine/story-db.ts). */
+  database?: ProjectDatabase;
+}
+
+/**
+ * The project's database, shared with the team in `.squad/config.yaml`. An address with a password is never here: it
+ * stays in this computer's secrets.
+ */
+export interface ProjectDatabase {
+  kind: 'sqlite' | 'postgres' | 'mysql' | 'mongo';
+  /** The repo whose app reads it, as in RepoInfo.path. */
+  repo: string;
+  /** Its name on the server, or the file for SQLite. */
+  name?: string;
+  /** Where it runs, in plain words: "localhost:5432", "the db service in docker-compose.yml". */
+  where?: string;
+  /** The setting that points the app at it. */
+  setting: DatabaseSetting;
+  /** The address the person's own copy uses, when it has no password in it. */
+  address?: string;
+  /** The project's files it was learned from. */
+  from?: string[];
+  /** An engineer confirmed it. Until then stories use the database as before. */
+  confirmed?: { by: string; at: string };
+  /** Names, ID numbers, phones, emails and addresses become fake in the template. Off by default. */
+  hidePersonal?: boolean;
+  /** How many of a big table's newest rows the template keeps. Left out, the adapters' own number. */
+  sampleRows?: number;
+}
+
+/** Where the app reads its database's address from. */
+export interface DatabaseSetting {
+  /** The environment name the app reads, like DATABASE_URL; for a key in a settings file, the name that stands in for it. */
+  env?: string;
+  /** The file inside the repo it is kept in, like .env or appsettings.Development.json. */
+  file?: string;
+  /** The key in that settings file, like ConnectionStrings:Default or spring.datasource.url. */
+  key?: string;
 }
 
 /** A story's copy of one more repo. */
