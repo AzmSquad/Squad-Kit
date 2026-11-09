@@ -2,7 +2,7 @@ import { addActivity, listReleases, listTickets, readMeta, readTicket, requireTi
 import type { Ticket } from '../board/types.js';
 import { BoardActionError, ensureDraftRelease, pullRequestClashed } from '../board/actions.js';
 import { chooseBuild, isMerged, unmergedDeps, wakeIfReady } from '../board/depends.js';
-import { afterPullRequest, mergeWait, mergesByItself } from '../board/auto.js';
+import { afterPullRequest, mergeWait } from '../board/auto.js';
 import { clearStaleStop } from '../board/stale-stop.js';
 import { isMine } from '../board/owner.js';
 import { repoHostFor } from '../modules/registry.js';
@@ -126,10 +126,9 @@ function saidClosed(bp: BoardPaths, id: string, pr: PrRef, host: RepoHost, base:
   });
 }
 
-/** The clash card now, the way the live squad gives it: on a track that merges by itself the newest code comes in. */
+/** The clash card now, the way the live squad gives it: the newest code comes in by itself first. */
 async function clashCardNow(bp: BoardPaths, id: string): Promise<void> {
-  const t = pullRequestClashed(bp, id);
-  if (mergesByItself(t)) await fetchBase(bp, t);
+  await fetchBase(bp, pullRequestClashed(bp, id));
   afterPullRequest(bp, id, true);
 }
 

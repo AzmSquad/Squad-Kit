@@ -1,14 +1,11 @@
-import fs from 'node:fs';
-import { addActivity, listTickets, now, readMeta, readTicket, requireTicket, updateTicket, type BoardPaths } from './store.js';
+import { addActivity, now, readMeta, readTicket, requireTicket, updateTicket, type BoardPaths } from './store.js';
 import type { AgentQuestion, Ticket } from './types.js';
 import type { Decided, DecidedBy } from './requirements-types.js';
 import { BoardActionError, acceptInTurn, holdingSave, CHECKOUT_WAITS, acceptProof, changeAfterRelease, openChange, proposeChange, saveBeforeAccept, shipped } from './actions.js';
 import { isMerged, refuseBeforeDependency } from './depends.js';
 import { scheduleSquad } from './schedule.js';
-import { git, isAncestor, remotes } from '../engine/git.js';
-import { repoFor } from '../engine/repos.js';
 import { saysTheSame } from './same-words.js';
-import { copyViews } from '../engine/copies.js';
+import { bringInAgain } from './bring-in.js';
 
 /**
  * Builds by itself (the 'auto' track): a story from an approved breakdown. Its story and done-when were approved with
@@ -30,12 +27,8 @@ export const APPROVING = 'Builds by itself: approving the plan';
 /** The card's line while the squad accepts it. */
 export const ACCEPTING = 'Accepting it by itself';
 
-/** Times the latest base comes in by itself after a merge clash, in all, before the person gets the clash card. */
-export const MAX_BASE_TRIES = 3;
-
-/** How often a story looks again at another one that is landing, and how long it waits for it at most. */
-const LANDING_LOOK_MS = 15_000;
-export const MAX_LANDING_WAIT_MS = 3 * 60_000;
+/** A clash at the merge brings in the newest code by itself, on every track (board/bring-in.ts). */
+export { MAX_BASE_TRIES, MAX_LANDING_WAIT_MS, bringInAgain, landingFirst, waitForLanding } from './bring-in.js';
 
 /** The tracks where the squad accepts and merges by itself, with no Looks right to wait for. */
 export function mergesByItself(t: Pick<Ticket, 'track'>): boolean {
@@ -284,122 +277,21 @@ export function acceptByItself(bp: BoardPaths, id: string): Ticket {
     });
   }
   if (t.selfAccept?.waitsFor) updateTicket(bp, id, (x) => delete x.selfAccept?.waitsFor);
-  const done = acceptProof(bp, requireTicket(bp, id), acceptedLine(t));
-  if (done.waiting?.kind === 'stuck' && done.stuck?.gate === 'merge') return bringInAgain(bp, id);
-  return done;
-}
-
-/** How many times the latest base came in by itself. A ticket from before the count has only when it first did. */
-function baseTries(t: Ticket): number {
-  return t.selfAccept?.baseTries ?? (t.selfAccept?.baseTried ? 1 : 0);
+  // A merge clash brings in the latest base by itself (board/bring-in.ts).
+  return acceptProof(bp, requireTicket(bp, id), acceptedLine(t));
 }
 
 /**
- * True when the base has work newer than what last came into this ticket: its tip here (work accepted on this computer)
- * or on the remote (the team's, as last fetched) is not in the ticket's branch. When git cannot say, it counts as moved,
- * and the count of tries still ends it.
- */
-function baseMoved(bp: BoardPaths, story: Ticket): boolean {
-  return copyViews(readMeta(bp), story).some((t) => oneBaseMoved(bp, t));
-}
-
-function oneBaseMoved(bp: BoardPaths, t: Ticket): boolean {
-  if (!t.worktree || !t.branch || !fs.existsSync(t.worktree)) return true;
-  try {
-    const repo = repoFor(readMeta(bp), t);
-    const remote = repo.remote || remotes(t.worktree)[0];
-    return [repo.base, ...(remote ? [`refs/remotes/${remote}/${repo.base}`] : [])].some((ref) => {
-      const tip = git(t.worktree!, ['rev-parse', '--verify', '-q', ref], { allowFail: true });
-      return Boolean(tip) && tip !== t.baseCommit && !isAncestor(t.worktree!, tip, t.branch!);
-    });
-  } catch {
-    return true;
-  }
-}
-
-/**
- * The accepted change clashes with newer work in the base. The squad brings the latest base into the ticket's copy
- * itself (the Builder settles the clashing files) and runs the checks, the review and the proof again, up to
- * MAX_BASE_TRIES times in all, counted on the ticket so a restart does not start over. After the first time only when
- * the base moved since it last came in: bringing in the same base again would change nothing. Otherwise the usual clash
- * card stays, with its ways out. Only for a ticket on a track that merges by itself, at the clash card.
- */
-export function bringInAgain(bp: BoardPaths, id: string): Ticket {
-  const meta = readMeta(bp);
-  const t0 = requireTicket(bp, id);
-  const moved = baseTries(t0) === 0 || baseMoved(bp, t0);
-  return updateTicket(bp, id, (t) => {
-    if (!mergesByItself(t) || t.waiting?.kind !== 'stuck' || t.stuck?.gate !== 'merge') return;
-    const base = repoFor(meta, t).base;
-    const tries = baseTries(t);
-    if (tries >= MAX_BASE_TRIES) {
-      addActivity(t, 'squad', `It still clashes after the newest code came in ${MAX_BASE_TRIES} times, so it waits for you`);
-      return;
-    }
-    if (!moved) {
-      addActivity(t, 'squad', `It still clashes, and the code has not moved since it last came in, so it waits for you`);
-      return;
-    }
-    t.selfAccept = { ...t.selfAccept, baseTried: now(), baseTries: tries + 1 };
-    t.waiting = null;
-    t.stuck = undefined;
-    t.retryPhase = undefined;
-    t.stage = 'implement';
-    t.live = true;
-    t.status = `Bringing in the newest code`;
-    addActivity(t, 'squad', `It clashes with newer changes, so squad-kit brings in the newest code and runs the checks, the review and the proof again (try ${tries + 1} of ${MAX_BASE_TRIES})`);
-    scheduleSquad(t, 'update-base', 0.2, 1);
-  });
-}
-
-/**
- * Another story on the same repo that is at its merge step: about to accept itself, or its pull request merging. Its
- * name, or null. Those steps never wait for a story that is about to bring in the base, so two can never wait for each other.
- */
-export function landingFirst(bp: BoardPaths, t: Ticket): string | null {
-  const meta = readMeta(bp);
-  const repo = repoFor(meta, t).path;
-  const other = listTickets(bp).find((o) => o.id !== t.id && (o.squad?.phase === 'accept' || o.squad?.phase === 'publish') && !o.waiting && !o.stopRequested && !o.deleting && !o.archived && repoFor(meta, o).path === repo);
-  return other?.id ?? null;
-}
-
-/**
- * About to bring in the base on a track that merges by itself, while another story is landing: it waits for that one,
- * or its base comes in without that work, and the next merge clashes again after another round of checks. True while it
- * waits: it looks again every few seconds, MAX_LANDING_WAIT_MS at most. A restart keeps when it began.
- */
-export function waitForLanding(bp: BoardPaths, id: string): boolean {
-  const t = requireTicket(bp, id);
-  const since = t.selfAccept?.landingSince;
-  const going = mergesByItself(t) ? landingFirst(bp, t) : null;
-  if (!going || (since && Date.now() - Date.parse(since) >= MAX_LANDING_WAIT_MS)) {
-    if (since) updateTicket(bp, id, (x) => delete x.selfAccept?.landingSince);
-    return false;
-  }
-  const base = repoFor(readMeta(bp), t).base;
-  updateTicket(bp, id, (x) => {
-    if (!since) {
-      x.selfAccept = { ...x.selfAccept, landingSince: now() };
-      addActivity(x, 'squad', `${going} is about to merge into ${base}, so this story waits for it, then brings in the newest code`);
-    }
-    x.status = `Waits for ${going} to merge, then brings in the newest code`;
-    if (x.squad) x.squad.nextAt = new Date(Date.now() + LANDING_LOOK_MS).toISOString();
-  });
-  return true;
-}
-
-/**
- * After the live squad tried to merge the pull request of a ticket on this track: a clash brings in the base again,
- * and a pull request that waits for a person to approve it is a normal wait, said plainly.
+ * After the live squad tried to merge the pull request of a ticket: a clash brings in the base again, on every track,
+ * and on this track a pull request that waits for a person to approve it is a normal wait, said plainly.
  */
 export function afterPullRequest(bp: BoardPaths, id: string, clash: boolean): void {
-  const t = readTicket(bp, id);
-  if (t?.track !== 'auto') return;
   if (clash) {
     bringInAgain(bp, id);
     return;
   }
-  if (t.mergedAt || !t.pr) return;
+  const t = readTicket(bp, id);
+  if (t?.track !== 'auto' || t.mergedAt || !t.pr) return;
   updateTicket(bp, id, (x) => {
     x.status = PR_WAITS;
     addActivity(x, 'release', `Pull request ${x.pr?.id ?? ''} waits for someone to approve it. That is a normal wait, not a failure`);

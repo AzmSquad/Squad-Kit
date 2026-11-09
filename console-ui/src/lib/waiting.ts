@@ -18,8 +18,12 @@ export function changeWaits(t: Ticket): boolean {
   return s === 'proposed' || s === 'failed' || s === 'design-ready';
 }
 
-/** Everything that needs the person: questions, plans, proof, decisions, changes, and steps that look stuck. Same rule as `inbox()` on the server. */
+/**
+ * Everything that needs the person: questions, plans, proof, decisions, changes, and steps that look stuck. Same rule as
+ * `inbox()` on the server: a proof being saved after Looks right needs nobody any more.
+ */
 export function needsYou(t: Ticket): boolean {
+  if (t.now?.merging) return false;
   return Boolean(t.waiting || t.quiet?.kind === 'stuck' || t.outdated?.length || changeWaits(t) || testChangeWaits(t));
 }
 

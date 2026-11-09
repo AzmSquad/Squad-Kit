@@ -7,6 +7,7 @@ import {
   BoardActionError,
   answerQuestions,
   approveBeside,
+  isSaving,
   askAbout,
   composeNotes,
   createTicket,
@@ -67,7 +68,7 @@ import { videoNotesWork } from '../../engine/media.js';
 import { boardExists, boardPaths, brokenDecisions, brokenReleases, brokenTickets, listDecisions, listReleases, listTickets, readMeta, readRelease, readTicket, settingsProblem, ticketProblem, writeMeta, requireTicket } from '../../board/store.js';
 import { brokenBreakdowns } from '../../board/requirements.js';
 import { seedDemoBoard } from '../../board/demo.js';
-import type { AgentName, PlanComment, PlanEdit } from '../../board/types.js';
+import type { AgentName, PlanComment, PlanEdit, Ticket } from '../../board/types.js';
 import { repoFor, reposOf } from '../../engine/repos.js';
 import type { ProjectCommands, Release } from '../../board/types.js';
 import { aiTool, guessTracker, speechModule, trackerFor, trackerModule, TRACKERS } from '../../modules/registry.js';
@@ -91,7 +92,7 @@ import { additionOf, lookInFolder } from '../../board/additions-folder.js';
 import { addTriedGate, tryGate } from '../../engine/gate-run.js';
 import { boardUsage } from '../../board/usage.js';
 import { liveNow } from '../../board/now.js';
-import { readUsual } from '../../board/usual.js';
+import { readUsual, type UsualBook } from '../../board/usual.js';
 import { answerAsk } from '../../board/ask.js';
 import { withProblem } from '../../board/problem.js';
 import { DEFAULT_NETWORK, PACKAGE_HOSTS, blockedSites, guardNote, hostsProblem, networkPolicy, parseHosts, parseNetwork, sandboxStatus } from '../../engine/sandbox.js';
@@ -157,6 +158,8 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     lookAgain(bp);
     return t;
   };
+  // What is happening on a ticket now. One being saved after Looks right says so: only this board's memory knows.
+  const nowOf = (t: Ticket, usual: UsualBook) => liveNow(t, usual, Date.now(), isSaving(bp, t.id));
   // Who the tracker sign-in belongs to, checked at most once a minute.
   let connection: { at: number; key: string; user?: string; error?: string } | null = null;
 
@@ -275,7 +278,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
       // A newer squad-kit build on disk than the one this board runs: offer a restart.
       console: ctl ? { startedAt: ctl.startedAt, outdated: ctl.build > 0 && buildStamp() > ctl.build } : null,
       // Each ticket with what is happening on it now, in words: the card's line, its time and its usual time.
-      tickets: all.filter((t) => t.stage !== 'done' && !t.archived).map((t) => ({ ...t, now: liveNow(t, usual) })),
+      tickets: all.filter((t) => t.stage !== 'done' && !t.archived).map((t) => ({ ...t, now: nowOf(t, usual) })),
       // Archived tickets leave the board; "Show archived" shows them again.
       archived: all.filter((t) => t.stage !== 'done' && t.archived),
       ...(broken.length ? { broken } : {}),
@@ -293,14 +296,14 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     const problem = ticketProblem(bp, c.req.param('id'));
     if (problem) return c.json({ error: problem }, 409);
     const t = readTicket(bp, c.req.param('id'));
-    return t ? c.json({ ...withProblem(t), now: liveNow(t, readUsual(bp)) }) : c.json({ error: 'not found' }, 404);
+    return t ? c.json({ ...withProblem(t), now: nowOf(t, readUsual(bp)) }) : c.json({ error: 'not found' }, 404);
   });
 
   // What is happening on a ticket now, from its live record. Asking about it is answered from the same record, at
   // once and with no AI cost; anything it cannot answer offers a talk with an agent instead.
   app.get('/api/v1/tickets/:id/status', (c) => {
     const t = readTicket(bp, c.req.param('id'));
-    return t ? c.json(liveNow(t, readUsual(bp))) : c.json({ error: 'not found' }, 404);
+    return t ? c.json(nowOf(t, readUsual(bp))) : c.json({ error: 'not found' }, 404);
   });
 
   app.post('/api/v1/tickets/:id/status/ask', async (c) => {
@@ -311,7 +314,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
       const text = (b.text ?? '').trim();
       if (!text) throw new Error('Write your question first.');
       const usual = readUsual(bp);
-      return answerAsk(t, liveNow(t, usual), usual, text);
+      return answerAsk(t, nowOf(t, usual), usual, text);
     });
   });
 

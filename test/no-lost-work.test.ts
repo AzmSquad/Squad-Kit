@@ -266,15 +266,17 @@ describe('"the newest code" is the team\'s, not an old copy here', () => {
 });
 
 describe('only a real clash is a clash', () => {
-  it('changing the same lines as newer work in main gives the clash card', () => {
+  it('changing the same lines as newer work in main brings in the newest code, and moves nothing', () => {
     const wt = proofReady('AP-1', 'limit.txt', 'limit = 3\n').worktree!;
     commit(wt, 'limit 3');
     fs.writeFileSync(path.join(project, 'limit.txt'), 'limit = 5\n');
     commit(project, 'main limit');
+    const main = sh('git rev-parse main', project);
     expect(() => mergeIntoBase(project, 'main', 'squad/ap-1', 'm')).toThrow(MergeClash);
     const t = actions.approve(bp, 'AP-1');
-    expect(t.stuck?.gate).toBe('merge');
-    expect(t.waiting?.kind).toBe('stuck');
+    expect(t.waiting).toBeNull();
+    expect(t.squad?.phase).toBe('update-base');
+    expect(sh('git rev-parse main', project)).toBe(main);
   }, 20_000);
 
   describe('with a git older than 2.38', () => {

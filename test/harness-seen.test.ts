@@ -237,7 +237,9 @@ describe('compare tracks', () => {
   it('a stage a track does not use says so, and a gate that always runs reads the same on all three', () => {
     expect(cell('brd-approve')).toEqual({ full: { word: 'Not used' }, express: { word: 'Not used' }, auto: { word: 'You' } });
     expect(cell('checks')).toEqual({ full: { word: 'Runs' }, express: { word: 'Runs' }, auto: { word: 'Runs' } });
-    expect(cell('merge').auto.note).toContain('3 tries');
+    // A clash brings in the newest code by itself on every track, so the merge reads the same on all three.
+    expect(cell('merge')).toEqual(cell('checks'));
+    expect(JSON.stringify(v().stages.flatMap((s) => s.gates).find((g) => g.id === 'merge'))).toContain('up to 3 times');
   });
 
   it('every skip and note on a gate shows in a cell', () => {

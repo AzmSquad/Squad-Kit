@@ -463,15 +463,15 @@ describe.skipIf(!POSIX)('Looks right and a release', () => {
     expect(fs.readFileSync(path.join(project, 'one.txt'), 'utf8')).toBe('one\n');
   }, 30_000);
 
-  it('Looks right on a merge that clashes still gives the clash card, and moves nothing', async () => {
+  it('Looks right on a merge that clashes brings in the newest code first, and moves nothing', async () => {
     const t = readTicket(bp, 'AP-1')!;
     put(path.join(t.worktree!, 'package.json'), '{ "name": "ours" }\n');
     put(path.join(project, 'package.json'), '{ "name": "theirs" }\n');
     sh('git add -A && git commit -qm theirs', project);
     const main = sh('git rev-parse main', project);
     const after = await approveBeside(bp, 'AP-1');
-    expect(after.waiting?.kind).toBe('stuck');
-    expect(after.stuck?.gate).toBe('merge');
+    expect(after.waiting).toBeNull();
+    expect(after.squad?.phase).toBe('update-base');
     expect(sh('git rev-parse main', project)).toBe(main);
   }, 30_000);
 

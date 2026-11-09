@@ -99,7 +99,12 @@ export interface LiveNow {
   noteWhen: string;
   /** The "Taking longer than usual" or "Looks stuck" card. */
   slow?: SlowCard;
+  /** On its way in now: its save after Looks right, then its merge or its pull request. The board shows it working. */
+  merging?: true;
 }
+
+/** The card's line while a ticket is saved after Looks right, the project's own checks with it, before its merge. */
+export const SAVING = 'Saving the change, then it merges';
 
 /** Said on the card and the Now tab while a step carries on after a restart, until its first new action. */
 export const RESUMED = 'resumed after a restart';
@@ -411,12 +416,27 @@ function slowCard(t: Ticket, c: Omit<StepClock, 'since'> & { since?: string }, p
   return { kind: 'long', title: 'Taking longer than usual', where, text: q.detail, facts, ...(limit ? { limit } : {}), canEnd: Boolean(q.pid), ...(port.freePort ? { freePort: port.freePort } : {}), ...(detail ? { detail } : {}) };
 }
 
-/** What is happening on the ticket now. `at` is the time to read it at, for tests. */
-export function liveNow(t: Ticket, book: UsualBook, at = Date.now()): LiveNow {
+/**
+ * What is happening on the ticket now. `saving`: it is being saved after Looks right right now, which only the board's
+ * own memory knows (board/actions.ts isSaving). `at` is the time to read it at, for tests.
+ */
+export function liveNow(t: Ticket, book: UsualBook, at = Date.now(), saving = false): LiveNow {
   const state = stateOf(t);
   const stages = stageNotes(t, state, book, at);
   const base = { state, stages };
   if (state === 'done') return { ...base, line: t.status || 'Released', sentence: `It is released${t.release ? ` in ${t.release}` : ''}.`, noteWhen: noteWhenWords(t, { state }) };
+  // On its way in: a minute of the project's own checks, a pull request or a merge never looks like nothing happens.
+  if (saving || (state === 'ready' && (t.squad || t.live))) {
+    const cur = trackStageOf(t.stage);
+    return {
+      ...base,
+      stages: saving ? stages.map((s) => (s.stage === cur ? { ...s, note: 'saving now' } : s)) : stages,
+      merging: true,
+      line: saving ? SAVING : t.status,
+      sentence: saving ? 'You said Looks right. squad-kit is saving the change and merging it now. Nothing is needed from you.' : 'It is accepted, and squad-kit is merging it now. Nothing is needed from you.',
+      noteWhen: noteWhenWords(t, { state: 'ready' }),
+    };
+  }
   if (state === 'ready') return { ...base, line: t.status, sentence: `It is accepted and goes out with ${t.release ?? 'the next release'}. Nothing is needed from you until then.`, noteWhen: noteWhenWords(t, { state }) };
   if (state === 'you') {
     const summary = t.waiting?.summary ?? 'You took it over. Give it back when you are done';

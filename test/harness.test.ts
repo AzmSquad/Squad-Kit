@@ -52,7 +52,7 @@ const EXCUSED: Record<string, string> = {
   // How often squad-kit looks at something. Nothing waits on them, and nothing stops at them.
   'try-app.ts:WATCH_MS': 'How often it looks at a copy someone is trying.',
   'product-lock.ts:LOOK_EVERY_MS': 'How often a waiting story looks again. WAIT_LIMIT_MS is the limit.',
-  'auto.ts:LANDING_LOOK_MS': 'How often a waiting story looks again. MAX_LANDING_WAIT_MS is the limit.',
+  'bring-in.ts:LANDING_LOOK_MS': 'How often a waiting story looks again. MAX_LANDING_WAIT_MS is the limit.',
   'save-trouble.ts:SAVE_CHECK_MS': 'How often a held project tries its test write.',
   'free-port.ts:LOOK_MS': 'How often it looks at who holds the app port.',
   'live.ts:PICK_UP_MS': 'How often it looks for stories teammates pushed.',

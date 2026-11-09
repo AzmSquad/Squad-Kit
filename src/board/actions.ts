@@ -66,6 +66,7 @@ import { copyViews } from '../engine/copies.js';
 import { HARNESS_FILE_GATE } from './additions.js';
 import { noteGates, releaseGatesDue, runGatesAt, runReleaseGates } from '../engine/gate-run.js';
 import { repoLabel } from './parts.js';
+import { bringInAgain } from './bring-in.js';
 
 /** Every person-facing action lives here, so the board and the terminal do exactly the same thing. */
 
@@ -600,8 +601,12 @@ export function acceptProof(bp: BoardPaths, ticket: Ticket, byItself?: string, o
         merged = !merged || !one ? (merged ?? one) : { ...one, moved: merged.moved && one.moved, ...(merged.note ? { note: merged.note } : {}) };
       }
     } catch (err) {
-      // Only a real clash is a clash card. Anything else (an older git) leaves the proof waiting, with git's reason.
-      if (err instanceof MergeClash) return clashed(bp, ticket.id, commit, err.message, byItself);
+      // Only a real clash is a clash card, and the newest code comes in by itself first (board/bring-in.ts). Anything
+      // else (an older git) leaves the proof waiting, with git's reason.
+      if (err instanceof MergeClash) {
+        clashed(bp, ticket.id, commit, err.message, byItself);
+        return bringInAgain(bp, ticket.id);
+      }
       throw actionFailed(bp, ticket.id, 'The change is saved, but it could not be merged, so the proof stays as it is. An engineer can see why in squad-kit\'s log.', err);
     }
   }
@@ -667,7 +672,12 @@ const saveKey = (bp: BoardPaths, id: string) => `${bp.squadDir}\0${id.toUpperCas
 
 /** A ticket on its way in takes no other button. The person can look at it again once it is in. */
 export function refuseWhileSaving(bp: BoardPaths, id: string): void {
-  if (savingNow.has(saveKey(bp, id))) throw new BoardActionError(`${id.toUpperCase()} is being saved, so this has to wait. Try again in a moment.`);
+  if (isSaving(bp, id)) throw new BoardActionError(`${id.toUpperCase()} is being saved, so this has to wait. Try again in a moment.`);
+}
+
+/** True while the ticket is on its way in, from its save until the merge is over: the board shows it as working. */
+export function isSaving(bp: BoardPaths, id: string): boolean {
+  return savingNow.has(saveKey(bp, id));
 }
 
 /** Holds a ticket from its save until the merge is over. A second press is refused. */
@@ -2597,9 +2607,12 @@ export function restartStep(bp: BoardPaths, id: string): Ticket {
   });
 }
 
-/** Everything that needs the person: open questions, plans, proof, decisions, changes, and steps that look stuck. */
+/**
+ * Everything that needs the person: open questions, plans, proof, decisions, changes, and steps that look stuck. A proof
+ * being saved after Looks right needs nobody any more.
+ */
 export function inbox(bp: BoardPaths): Ticket[] {
-  return listTickets(bp).filter((t) => t.waiting || t.quiet?.kind === 'stuck' || t.outdated?.length || changeNeedsYou(t) || t.testChange?.ask);
+  return listTickets(bp).filter((t) => !isSaving(bp, t.id) && (t.waiting || t.quiet?.kind === 'stuck' || t.outdated?.length || changeNeedsYou(t) || t.testChange?.ask));
 }
 
 /** Ask the Architect to read the code again for the architecture page: the stack, the patterns and the project map. */

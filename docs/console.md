@@ -168,6 +168,13 @@ merged or pushed"), and the ways out: **Try again**, **Fix it yourself**, **Cont
 it back to the plan**, and **Report a problem**. A tool's raw error never shows there: the exact words are in the
 Developer tab and the app log.
 
+**After Looks right.** While the change is saved (with the project's own checks) and merged, the card, the story and
+the proof page show a spinner and say so: "Saving the change, then it merges", then the pull request's own line, like
+"Merging pull request 15". When newer work in main changed the same lines meanwhile, squad-kit brings in the newest
+code by itself: the Builder settles the clash, the checks, the review and the proof run again, and the proof comes
+back to you. It does that up to 3 times while main keeps moving. Then, or when main has not moved since it last came
+in, the story shows the clash card with its ways out.
+
 **A pull request merged outside squad-kit.** When you accept a story, squad-kit opens its pull request and merges it
 at once. When it cannot (the pull request waits for an approver, or it clashes with newer work in main), someone can
 settle it and merge it on the code host, such as Azure Repos, instead. squad-kit notices by itself: a few seconds

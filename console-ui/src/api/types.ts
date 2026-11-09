@@ -584,6 +584,8 @@ export interface LiveNow {
   stages: { stage: Stage; note: string; wait?: string }[];
   noteWhen: string;
   slow?: SlowCard;
+  /** On its way in now: its save after Looks right, then its merge or its pull request. */
+  merging?: true;
 }
 
 export type AskOffer =

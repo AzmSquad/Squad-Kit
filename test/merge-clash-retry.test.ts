@@ -246,15 +246,49 @@ describe('a merge that clashes while main keeps moving', () => {
     expect(texts(id)[0]).toBe(tryLine(2));
   });
 
-  it('a track where the person accepts keeps the card at the first clash', () => {
+  it('a track where the person accepts brings in the newest code too, and the proof comes back to the person', async () => {
     const id = built(true);
     mainMoves();
-    const t = actions.acceptProof(bp, ticket(id));
+    updateTicket(bp, id, (x) => (x.waiting = { kind: 'proof', summary: 'The proof is ready for you to check' }));
+    let t = actions.approve(bp, id);
+    expect(t.waiting).toBeNull();
+    expect(t.stuck).toBeUndefined();
+    expect(t.squad?.phase).toBe('update-base');
+    expect(t.status).toBe('Bringing in the newest code');
+    expect(t.selfAccept?.baseTries).toBe(1);
+    expect(texts(id).slice(0, 2)).toEqual([`${tryLine(1)}. Then the proof comes back to you`, `Could not merge into main: ${t.branch} clashes with changes already in main.`]);
+    expect(texts(id)).toContain('Checked the proof. Looks right');
+    await settled(id, 'a');
+    expect(fixes()).toHaveLength(1);
+
+    // The person's Looks right on the new proof: it goes in.
+    updateTicket(bp, id, (x) => (x.waiting = { kind: 'proof', summary: 'The proof is ready for you to check' }));
+    t = actions.approve(bp, id);
+    expect(t.mergedAt).toBeTruthy();
+    expect(sh('git show main:limit.txt', project)).toBe('limit = a');
+  });
+
+  it('on the track where the person accepts, the card comes after 3 times in all, or when main has not moved', async () => {
+    const id = built(true);
+    updateTicket(bp, id, (x) => (x.selfAccept = { baseTries: 3 }));
+    mainMoves();
+    let t = actions.acceptProof(bp, ticket(id));
     expect(t.waiting?.kind).toBe('stuck');
     expect(t.stuck?.question).toBe(SAVED);
-    expect(t.selfAccept).toBeUndefined();
-    auto.bringInAgain(bp, id);
-    expect(ticket(id).waiting?.kind).toBe('stuck');
+    expect(texts(id)[0]).toBe('It still clashes after the newest code came in 3 times, so it waits for you');
+    expect(t.stuck?.options.map((o) => o.do)).toEqual(['retry', 'yourself', 'plan']);
+    expect(t.release).toBeUndefined();
+
+    // As if main came in once and its merge did not stay: this main is the one it took in last, and it still clashes.
+    const again = built(true);
+    mainMoves();
+    updateTicket(bp, again, (x) => {
+      x.selfAccept = { baseTries: 1 };
+      x.baseCommit = sh('git rev-parse main', project);
+    });
+    t = actions.acceptProof(bp, ticket(again));
+    expect(t.waiting?.kind).toBe('stuck');
+    expect(texts(again)[0]).toBe('It still clashes, and the code has not moved since it last came in, so it waits for you');
     expect(fixes()).toHaveLength(0);
   });
 });
@@ -262,6 +296,8 @@ describe('a merge that clashes while main keeps moving', () => {
 describe('the words', () => {
   it('one clean sentence for the person, with git in the activity and the engineer details only', () => {
     const id = built(true);
+    // Past its tries: the card itself.
+    updateTicket(bp, id, (x) => (x.selfAccept = { baseTries: 3 }));
     mainMoves();
     const t = actions.acceptProof(bp, ticket(id));
     const branch = t.branch!;
@@ -355,10 +391,11 @@ describe('a story that is landing goes first', () => {
     expect(ticket(id).selfAccept?.landingSince).toBeUndefined();
   });
 
-  it('a story on a track where the person accepts does not wait', () => {
+  it('a story on a track where the person accepts waits for it too', () => {
     const id = built(true);
-    landing();
-    expect(auto.waitForLanding(bp, id)).toBe(false);
+    const other = landing();
+    expect(auto.waitForLanding(bp, id)).toBe(true);
+    expect(ticket(id).status).toBe(`Waits for ${other} to merge, then brings in the newest code`);
   });
 });
 
@@ -435,5 +472,18 @@ describe('with a pull request on the code host', () => {
     expect(t.stuck?.question).toBe('Pull request 7 cannot go into main yet: newer work changed the same lines.');
     expect(t.selfAccept?.baseTries).toBe(2);
     expect(texts(id)[0]).toBe('It still clashes, and the code has not moved since it last came in, so it waits for you');
+  });
+
+  it("on the track where the person accepts, the team's newer work comes in by itself, then the proof comes back", async () => {
+    const id = built(true, 'origin');
+    teamMoves();
+    updateTicket(bp, id, (x) => (x.waiting = { kind: 'proof', summary: 'The proof is ready for you to check' }));
+    expect(actions.approve(bp, id).squad?.phase).toBe('publish');
+    await squad().step(id, 'publish');
+    const t = ticket(id);
+    expect(t.waiting).toBeNull();
+    expect(t.clashedPr?.id).toBe(7);
+    expect(t.squad?.phase).toBe('update-base');
+    expect(texts(id)[0]).toBe(`${tryLine(1)}. Then the proof comes back to you`);
   });
 });

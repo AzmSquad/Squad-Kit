@@ -438,7 +438,7 @@ describe('a story that builds by itself', () => {
     expect(t.squad?.phase).toBe('update-base');
     expect(t.pr).toBeUndefined();
 
-    // A ticket on the Full track keeps its own words and its card.
+    // A ticket on the Full track keeps its own words for a pull request that waits. A clash brings in the base too.
     const full = actions.createTicket(bp, { title: 'Plain ticket' });
     updateTicket(bp, full.id, (x) => {
       x.stage = 'release';
@@ -450,7 +450,8 @@ describe('a story that builds by itself', () => {
     expect(readTicket(bp, full.id)!.status).toBe('PR 8 is waiting in the code host · v0.1.0');
     actions.pullRequestClashed(bp, full.id);
     auto.afterPullRequest(bp, full.id, true);
-    expect(readTicket(bp, full.id)!.waiting?.kind).toBe('stuck');
+    expect(readTicket(bp, full.id)!.waiting).toBeNull();
+    expect(readTicket(bp, full.id)!.squad?.phase).toBe('update-base');
   });
 
   it('never asks how to build around a ticket it needs: it waits, and starts once that one merges', async () => {

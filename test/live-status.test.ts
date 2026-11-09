@@ -2,7 +2,7 @@ import { afterAll, describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { liveNow, queuedLine, shortDoing } from '../src/board/now.js';
+import { SAVING, liveNow, queuedLine, shortDoing } from '../src/board/now.js';
 import { endStep, pauseClock, slowStep, startStep, trackStage, waitsNow } from '../src/board/clock.js';
 import { boardPaths } from '../src/board/store.js';
 import { usualKey } from '../src/board/usual.js';
@@ -126,6 +126,31 @@ describe('the Now tab', () => {
     const waiting = liveNow(ticket({ stage: 'specs', waiting: { kind: 'spec', summary: 'The spec is ready: is this what you want?' } }), {}, AT);
     expect(waiting.state).toBe('you');
     expect(waiting.noteWhen).toBe('No agent is running now, so nobody reads it yet. The squad reads it when it carries on, after you approve the spec.');
+  });
+});
+
+describe('on its way in, after Looks right', () => {
+  const proof = () => ticket({ stage: 'review', status: 'Proof ready to check', waiting: { kind: 'proof', summary: 'The proof is ready for you to check' } });
+
+  it('says it is being saved and merged while the save runs, never Your turn', () => {
+    const n = liveNow(proof(), {}, AT, true);
+    expect(n.merging).toBe(true);
+    expect(n.line).toBe(SAVING);
+    expect(n.sentence).toBe('You said Looks right. squad-kit is saving the change and merging it now. Nothing is needed from you.');
+    expect(n.stages.find((s) => s.stage === 'review')?.note).toBe('saving now');
+    // Before Looks right, or once the save is over: the proof waits for the person, as before.
+    expect(liveNow(proof(), {}, AT).merging).toBeUndefined();
+    expect(liveNow(proof(), {}, AT).state).toBe('you');
+  });
+
+  it('says it is merging while its pull request opens and merges, and accepted once it is in', () => {
+    const merging = liveNow(ticket({ stage: 'release', release: 'v0.3.0', live: true, squad: { phase: 'publish', nextAt: ago(1) }, status: 'Merging pull request 15' }), {}, AT);
+    expect(merging.merging).toBe(true);
+    expect(merging.line).toBe('Merging pull request 15');
+    expect(merging.sentence).toBe('It is accepted, and squad-kit is merging it now. Nothing is needed from you.');
+    const merged = liveNow(ticket({ stage: 'release', release: 'v0.3.0', mergedAt: ago(5), status: 'Merged into main · goes out in v0.3.0' }), {}, AT);
+    expect(merged.merging).toBeUndefined();
+    expect(merged.sentence).toBe('It is accepted and goes out with v0.3.0. Nothing is needed from you until then.');
   });
 });
 

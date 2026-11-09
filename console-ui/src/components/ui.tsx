@@ -136,7 +136,8 @@ export const TRACK: { stage: Stage; name: string }[] = [
 export function Tracker({ ticket }: { ticket: Ticket }) {
   const stage = ticket.stage === 'bugs' ? 'tickets' : ticket.stage;
   const at = stage === 'done' ? TRACK.length : TRACK.findIndex((s) => s.stage === stage);
-  const mode = ticket.waiting ? 'you' : 'work';
+  // Saved and merged after Looks right: the squad's turn again.
+  const mode = ticket.waiting && !ticket.now?.merging ? 'you' : 'work';
   const notes = new Map((ticket.now?.stages ?? []).map((x) => [x.stage, x.note]));
   // A finished stage that waited long says so on a small second line: its time above is the squad's own work.
   const waits = new Map((ticket.now?.stages ?? []).filter((x) => x.wait).map((x) => [x.stage, x.wait!]));
@@ -150,7 +151,7 @@ export function Tracker({ ticket }: { ticket: Ticket }) {
             <span className="nd">{i < at ? <Check size={12} strokeWidth={3} /> : null}</span>
             {s.name}
             {i === at && (
-              <span className="tag">{mode === 'you' ? 'Your turn' : ticket.stage === 'release' ? 'Ready' : ticket.dependency?.way === 'wait' && !ticket.dependency.started && !ticket.squad ? 'Waiting' : 'Working'}</span>
+              <span className="tag">{mode === 'you' ? 'Your turn' : ticket.now?.merging ? 'Working' : ticket.stage === 'release' ? 'Ready' : ticket.dependency?.way === 'wait' && !ticket.dependency.started && !ticket.squad ? 'Waiting' : 'Working'}</span>
             )}
             {notes.size > 0 && <span className="tnote">{i === at && note === 'your turn' ? '' : (note ?? '')}</span>}
             {waits.has(s.stage) && <span className="tnote twait">{waits.get(s.stage)}</span>}

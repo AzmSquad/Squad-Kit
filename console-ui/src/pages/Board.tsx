@@ -187,7 +187,9 @@ export function BoardPage() {
 }
 
 function Card({ t, selected, onOpen }: { t: Ticket; selected: boolean; onOpen(): void }) {
-  const you = Boolean(t.waiting) || t.quiet?.kind === 'stuck' || changeWaits(t) || testChangeWaits(t);
+  // On its way in after Looks right: it shows working, not Your turn, while it saves and merges.
+  const merging = Boolean(t.now?.merging);
+  const you = !merging && (Boolean(t.waiting) || t.quiet?.kind === 'stuck' || changeWaits(t) || testChangeWaits(t));
   const me = useMe();
   return (
     <button className={`card ${you ? 'you' : ''} ${t.kind === 'bug' ? 'bug' : ''} ${selected ? 'sel' : ''}`} onClick={onOpen}>
@@ -215,8 +217,8 @@ function Card({ t, selected, onOpen }: { t: Ticket; selected: boolean; onOpen():
       ) : (
         <>
           <div className="st">
-            {t.live && !you ? <span className="live" /> : t.stage === 'release' ? <Check size={13} strokeWidth={2.5} /> : null}
-            <Written text={t.quiet ? (t.quiet.kind === 'stuck' ? `Looks stuck: ${t.quiet.command ?? 'no progress'}` : `Taking long: ${t.quiet.command ?? t.status}`) : t.status} />
+            {(t.live || merging) && !you ? <span className="live" /> : t.stage === 'release' ? <Check size={13} strokeWidth={2.5} /> : null}
+            <Written text={merging ? t.now!.line : t.quiet ? (t.quiet.kind === 'stuck' ? `Looks stuck: ${t.quiet.command ?? 'no progress'}` : `Taking long: ${t.quiet.command ?? t.status}`) : t.status} />
           </div>
           {typeof t.progress === 'number' && !you && (
             <div className="bar">

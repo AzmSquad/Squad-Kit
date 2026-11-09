@@ -158,7 +158,7 @@ describe('a branch that clashes with main is not a dead end', () => {
     });
   });
 
-  it('Looks right gives a card, and the Builder settles the clash in the copy', async () => {
+  it('Looks right brings in the newest code by itself, and the Builder settles the clash in the copy', async () => {
     const wt = addWorktree(project, 'AP-1', 'main');
     fs.writeFileSync(path.join(wt.dir, 'limit.txt'), 'limit = 3\n');
     // Someone else changed the same line on main meanwhile.
@@ -185,15 +185,11 @@ describe('a branch that clashes with main is not a dead end', () => {
     });
 
     let t = actions.approve(bp, 'AP-1');
-    expect(t.waiting?.kind).toBe('stuck');
-    expect(t.stuck?.gate).toBe('merge');
-    expect(t.stuck?.question).toContain('cannot go into main');
-    expect(t.stuck?.options.map((o) => o.do)).toEqual(['retry', 'yourself', 'plan']);
+    expect(t.waiting).toBeNull();
+    expect(t.status).toBe('Bringing in the newest code');
+    expect(t.squad?.phase).toBe('update-base');
     expect(t.release).toBeUndefined();
     expect(sh('git log --format=%s -1 main', project)).toBe('other change');
-
-    t = actions.decideStuck(bp, 'AP-1', 0);
-    expect(t.squad?.phase).toBe('update-base');
     builderWork = (cwd) => fs.writeFileSync(path.join(cwd, 'limit.txt'), 'limit = 4\n');
     const squad = new LiveSquad(bp) as unknown as { updateBase(id: string): Promise<void> };
     await squad.updateBase('AP-1');

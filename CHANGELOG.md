@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **A clash at the merge no longer stops you.** When newer work in main changed the same lines while you looked at the
+  proof, Looks right gave the red "The change clashes with newer code" card, and you pressed **Let the Builder bring
+  in the newest code** yourself. Now squad-kit does that by itself, on every track, as it already did on Builds by
+  itself: the Builder settles the clash, the checks, the review and the proof run again, and the proof comes back to
+  you. The same when the pull request clashes on the code host. Up to 3 times while main keeps moving; then, or when
+  main has not moved since it last came in, the clash card with its ways out. A story about to bring in main waits up
+  to 3 minutes for another one that is merging right now, so it takes that work in too.
+
+### Fixed
+
+- **Saving and merging shows it is working.** After Looks right, the button says **Saving…** with a spinner, and the
+  card, the story and the proof page say "Saving the change, then it merges", then the pull request's own line
+  ("Merging pull request 15"), with a spinner. Before, they said "Your turn" or "Ready for v0.3.0" while it still ran.
+
 ## [1.3.5] — 2026-11-09
 
 ### Added

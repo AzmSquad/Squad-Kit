@@ -115,7 +115,7 @@ import { appPortVariables } from './port-vars.js';
 import { judgeTestChange } from './test-change.js';
 import { endPid, trackTask } from './process-group.js';
 import { SETUP_MS, nextFreePort, portTaken, squadKitOn } from './run-app.js';
-import { APPROVING, NO_QUESTIONS, acceptByItselfBeside, acceptNext, addDecided, afterPullRequest, askWords, cleanSources, mergeWait, mergesByItself, resumeAccept, waitForLanding } from '../board/auto.js';
+import { APPROVING, NO_QUESTIONS, acceptByItselfBeside, acceptNext, addDecided, afterPullRequest, askWords, cleanSources, mergeWait, resumeAccept, waitForLanding } from '../board/auto.js';
 import * as A from './auto-prompts.js';
 import type { DecidedBy } from '../board/requirements-types.js';
 import { addBreakdownActivity, breakdownJobs, holdBreakdownJob, updateJob } from '../board/requirements.js';
@@ -673,8 +673,8 @@ export class LiveSquad {
 
   /**
    * A merge that waits is looked at again every 2 minutes, beside the work and never counted against the limit: merged
-   * on the code host (or the person's copy free again) merges it here; a clash gives the clash card, and on this
-   * track brings in the base again (board/auto.ts).
+   * on the code host (or the person's copy free again) merges it here; a clash brings in the base again, or gives the
+   * clash card (board/bring-in.ts).
    */
   private lookAtMerge(id: string): void {
     const last = this.mergeLooks.get(id);
@@ -687,12 +687,11 @@ export class LiveSquad {
   }
 
   /**
-   * The change clashes with newer work on the code host or here: the clash card, and on a track that merges by itself
-   * the latest base comes in again. The base is fetched first, so "has it moved" is about the team's base.
+   * The change clashes with newer work on the code host or here: the clash card, and the latest base comes in again by
+   * itself. The base is fetched first, so "has it moved" is about the team's base.
    */
   private async pullRequestClash(id: string): Promise<void> {
-    const t = pullRequestClashed(this.bp, id);
-    if (mergesByItself(t)) await fetchBase(this.bp, t);
+    await fetchBase(this.bp, pullRequestClashed(this.bp, id));
     afterPullRequest(this.bp, id, true);
   }
 
@@ -2306,7 +2305,7 @@ export class LiveSquad {
           return;
         }
         const { clash } = await publishTicket(this.bp, id);
-        // Builds by itself: a clash brings in the base again; a pull request waiting for its approver is a normal wait.
+        // A clash brings in the base again; on Builds by itself a pull request waiting for its approver is a normal wait.
         if (clash) return this.pullRequestClash(id);
         afterPullRequest(this.bp, id, false);
         return;

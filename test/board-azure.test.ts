@@ -411,17 +411,20 @@ describe('a pull request that clashes with newer changes in main', () => {
   }
   const completions = () => calls.filter((c) => c.method === 'PATCH' && (c.body as { status?: string }).status === 'completed').length;
 
-  it('gives the clash card on accept and leaves the release, instead of waiting in Azure', async () => {
+  it('brings in the newest code on accept and leaves the release, instead of waiting in Azure', async () => {
     const id = await accepted();
     prConflicts = true;
     await (new LiveSquad(bp) as unknown as { step(id: string, phase: string): Promise<void> }).step(id, 'publish');
     const t = readTicket(bp, id)!;
-    expect(t.waiting).toEqual({ kind: 'stuck', summary: 'Clashes with main and needs one decision' });
-    expect(t.stuck?.gate).toBe('merge');
-    expect(t.retryPhase).toBe('update-base');
+    expect(t.waiting).toBeNull();
+    expect(t.squad?.phase).toBe('update-base');
     expect(t.pr).toBeUndefined();
+    expect(t.clashedPr).toMatchObject({ id: 7, host: 'azure' });
     expect(t.release).toBeUndefined();
-    expect(t.activity[0]!.text).toBe('Pull request 7 clashes with newer changes in main, so it left v0.1.0');
+    expect(t.activity.slice(0, 2).map((a) => a.text)).toEqual([
+      'It clashes with newer changes, so squad-kit brings in the newest code and runs the checks, the review and the proof again (try 1 of 3). Then the proof comes back to you',
+      'Pull request 7 clashes with newer changes in main, so it left v0.1.0',
+    ]);
     expect(listReleases(bp).find((r) => r.version === 'v0.1.0')?.tickets ?? []).not.toContain(id);
     // The story is not done yet, so it stays Active.
     expect(statesSet()).toEqual(['Active']);
@@ -435,9 +438,13 @@ describe('a pull request that clashes with newer changes in main', () => {
 
   it('notices when the person settles the clash in Azure and merges it there, with Check again', async () => {
     const id = await accepted();
+    updateTicket(bp, id, (x) => (x.selfAccept = { baseTries: 3 }));
     prConflicts = true;
     await (new LiveSquad(bp) as unknown as { step(id: string, phase: string): Promise<void> }).step(id, 'publish');
+    // Past its tries: the clash card, with its ways out.
     expect(readTicket(bp, id)!.status).toBe('Clashes with main');
+    expect(readTicket(bp, id)!.waiting).toEqual({ kind: 'stuck', summary: 'Clashes with main and needs one decision' });
+    expect(readTicket(bp, id)!.retryPhase).toBe('update-base');
     expect(readTicket(bp, id)!.clashedPr).toMatchObject({ id: 7, host: 'azure' });
     await mergedInAzure();
     const r = await checkMerge(bp, id);
@@ -459,6 +466,7 @@ describe('a pull request that clashes with newer changes in main', () => {
 
   it('finds the pull request of a clash card from before it was kept, by itself', async () => {
     const id = await accepted();
+    updateTicket(bp, id, (x) => (x.selfAccept = { baseTries: 3 }));
     prConflicts = true;
     await (new LiveSquad(bp) as unknown as { step(id: string, phase: string): Promise<void> }).step(id, 'publish');
     // A board from 1.3.2 kept no pull request on the clash card.

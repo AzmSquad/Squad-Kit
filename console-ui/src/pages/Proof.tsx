@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Loader2 } from 'lucide-react';
 import { Link, useParams } from '@tanstack/react-router';
 import { assetUrl } from '../api/client';
 import { useTicket } from '../lib/data';
@@ -24,7 +25,8 @@ export function ProofPage() {
   if (!t) return <div className="center">{ticket.isError ? `No ticket ${id}.` : 'Loading…'}</div>;
   const shots = t.proof ?? [];
   const shot = shots[Math.min(pick, shots.length - 1)];
-  const waiting = t.waiting?.kind === 'proof';
+  // Looks right was pressed: it is being saved and merged now, so the buttons give way to what happens.
+  const waiting = t.waiting?.kind === 'proof' && !t.now?.merging;
   const g = t.gates;
   // Every picture of the proof in order, so the viewer can step through all of them.
   const { pictures, starts } = proofViewer(shots, (file) => assetUrl(`/api/v1/proof/${file}`));
@@ -118,8 +120,9 @@ export function ProofPage() {
       {waiting ? (
         <ProofDecision t={t} sticky />
       ) : (
-        <div className="stickybar">
-          <Written className="note" text={t.status} />
+        <div className="stickybar" role={t.now?.merging ? 'status' : undefined}>
+          {t.now?.merging && <Loader2 size={15} className="spin" />}
+          <Written className="note" text={t.now?.merging ? t.now.line : t.status} />
         </div>
       )}
     </>

@@ -232,7 +232,8 @@ function NowPanel({ t }: { t: Ticket }) {
     case 'plan':
       return <PlanPanel t={t} />;
     case 'proof':
-      return <ProofPanel t={t} />;
+      // Looks right was pressed: it is being saved and merged now.
+      return t.now?.merging ? <SavingPanel t={t} /> : <ProofPanel t={t} />;
     case 'stuck':
       // Every stop has a way out: the plain error card (components/ErrorCard). Stopped at a gate, the person can also
       // ask a question and try the ticket's own copy of the app.
@@ -781,7 +782,7 @@ function ProofShots({ t }: { t: Ticket }) {
 }
 
 export function ProofDecision({ t, sticky }: { t: Ticket; sticky?: boolean }) {
-  const act = useAct();
+  const act = useAct<Ticket>();
   const [note, setNote, clearNote] = useDraft(t.id, 'proof-wrong', '');
   const [wrong, setWrong] = useState(Boolean(note));
   const sendBack = () => {
@@ -796,8 +797,18 @@ export function ProofDecision({ t, sticky }: { t: Ticket; sticky?: boolean }) {
     </div>
   ) : (
     <div className={sticky ? 'stickybar' : 'df'}>
-      <button className="btn pri" disabled={act.isPending} onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/approve`, done: `${t.id} is ready to release.` })}>
-        <Check size={15} strokeWidth={2.5} /> Looks right
+      <button
+        className="btn pri"
+        disabled={act.isPending}
+        onClick={() =>
+          act.mutate({
+            path: `/api/v1/tickets/${t.id}/approve`,
+            // Accepted, or newer work clashed and the Builder brings it in first. A card says anything else itself.
+            done: (x) => (x.stage === 'release' ? `${t.id} is ready to release.` : x.live ? 'Newer work changed the same code meanwhile, so the Builder brings it in first. Then the proof comes back to you.' : null),
+          })
+        }
+      >
+        {act.isPending ? <Loader2 size={15} className="spin" /> : <Check size={15} strokeWidth={2.5} />} {act.isPending ? 'Saving…' : 'Looks right'}
       </button>
       <button className="btn" onClick={() => setWrong(true)}>Something's wrong</button>
       <span className="grow" />
@@ -912,6 +923,29 @@ function AskPanel({ t }: { t: Ticket }) {
 }
 
 /* ── Working, ready, released ──────────────────────────── */
+
+/** On its way in after Looks right: its save, the project's own checks with it, then its merge or its pull request. */
+function MergingNow({ t }: { t: Ticket }) {
+  return (
+    <div className="calm" role="status">
+      <span className="ring"><Loader2 size={18} className="spin" /></span>
+      <div>
+        <Written as="b" text={t.now!.line} />
+        <Written text={t.now!.sentence} />
+      </div>
+    </div>
+  );
+}
+
+/** Looks right was pressed and the save runs: the proof's buttons would only be refused now. */
+function SavingPanel({ t }: { t: Ticket }) {
+  return (
+    <div className="db">
+      <MergingNow t={t} />
+      <RecentActivity t={t} />
+    </div>
+  );
+}
 
 /** The step is slow, or shows no progress: the card says what it does and what squad-kit checked, with the ways on. */
 function QuietPanel({ t }: { t: Ticket }) {
@@ -1042,6 +1076,8 @@ function WorkingPanel({ t }: { t: Ticket }) {
       <div className="db">
         {running ? (
           <NowCard t={t} />
+        ) : t.now?.merging ? (
+          <MergingNow t={t} />
         ) : (
           <div className="calm">
             <span className="ring">{t.stage === 'release' ? <ArrowUp size={18} /> : <Check size={18} strokeWidth={2.5} />}</span>

@@ -131,7 +131,7 @@ describe('Looks right', () => {
     expect(get().stage).toBe('release');
   });
 
-  it('a clash in any part moves nothing in any of them, and says which, on one card', () => {
+  it('a clash in any part moves nothing in any of them, says which, and brings in the newest code', () => {
     const t = story();
     const web = dirOf('web');
     fs.writeFileSync(path.join(web, 'page.js'), 'theirs\n');
@@ -142,7 +142,8 @@ describe('Looks right', () => {
     expect(sh('git rev-parse main', dirOf('api'))).toBe(before.api);
     expect(sh('git rev-parse main', web)).toBe(before.web);
     expect(get().mergedAt).toBeUndefined();
-    expect(JSON.stringify(get().stuck)).toContain('Web app');
+    expect(get().squad?.phase).toBe('update-base');
+    expect(get().activity.map((a) => a.text).join('\n')).toContain('Could not merge into main: In Web app:');
   });
 
   it('a merge already in is skipped, so Try again finishes what a race cut off', () => {
