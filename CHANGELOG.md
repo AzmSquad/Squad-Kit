@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.5] — 2026-11-09
+
 ### Added
 
 - **Each story gets its own copy of the database.** A story no longer works on your own database. squad-kit learns the
@@ -1473,7 +1475,8 @@ First public release.
 - Plan-generation meta-prompt (`generate-plan.md`), intake template (`intake.md`), and plan skeleton reference (`story-skeleton.md`).
 - Documentation: `docs/philosophy.md`, `docs/getting-started.md`, `docs/customization.md`, `docs/vs-spec-kit.md`.
 
-[Unreleased]: https://github.com/AzmSquad/squad-kit/compare/v1.3.4...HEAD
+[Unreleased]: https://github.com/AzmSquad/squad-kit/compare/v1.3.5...HEAD
+[1.3.5]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.3.5
 [1.3.4]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.3.4
 [1.3.3]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.3.3
 [1.3.2]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.3.2
