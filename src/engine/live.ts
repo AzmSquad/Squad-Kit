@@ -74,7 +74,7 @@ import { CapReached, capCard } from './caps.js';
 import { blockedLine, noPushEnv, noteBlockedSite, packageCacheEnv, projectNetwork, sandboxAsk, sandboxOf, ticketCacheDir } from './sandbox.js';
 import { hiddenFiles, placeStoryFiles } from './local-files.js';
 import { copyDbEnv } from './db-env.js';
-import { OWN_DB_WORDS, rewireStoryDb, rewireStoryDbs, setUpStoryDb, tidyStoryDbs, tidyStoryDbsBeside } from './story-db.js';
+import { OWN_DB_WORDS, remakeStoryDb, rewireStoryDb, rewireStoryDbs, setAsideCopyDb, setUpStoryDb, tidyStoryDbs, tidyStoryDbsBeside } from './story-db.js';
 import { appCopyOf, copiesOf, reposOfParts, storyCopyDir, workFolder, type CopyOf } from './copies.js';
 import { ProductError, productCopiesDir, productPlan, startProduct, stopProduct, waitWords } from './product-run.js';
 import { productHold } from './product-lock.js';
@@ -114,7 +114,7 @@ import { STOP_IT, cardAnswer, goAroundAnswer, inTheWay, ownWorkAnswer, portCard,
 import { appPortVariables } from './port-vars.js';
 import { judgeTestChange } from './test-change.js';
 import { endPid, trackTask } from './process-group.js';
-import { SETUP_MS, nextFreePort, portTaken, squadKitOn } from './run-app.js';
+import { SETUP_MS, nextFreePort, portTaken, setupPrintNow, squadKitOn } from './run-app.js';
 import { APPROVING, NO_QUESTIONS, acceptByItselfBeside, acceptNext, addDecided, afterPullRequest, askWords, cleanSources, mergeWait, resumeAccept, waitForLanding } from '../board/auto.js';
 import * as A from './auto-prompts.js';
 import type { DecidedBy } from '../board/requirements-types.js';
@@ -162,6 +162,8 @@ const CHECKS_WAITED = "The checks waited too long for the app starting in this s
 const APP_WAITED = "squad-kit could not start the app: the tests in this story's copy were still running after a long wait. Press Try again to try once more.";
 /** The checks step uses the Builder's last run of the checks (builderPassed). */
 const CHECKS_PASSED_FOR_BUILDER = 'The checks already passed on this same code when squad-kit ran them for the Builder, so they do not run again';
+/** A setup that failed over its database: only then is the copy's own database made again (setUpAgain). */
+const DB_TROUBLE = /database|migrat|schema|drift|sqlite|prisma|alembic|sequelize|knex|typeorm|flyway|liquibase|entity ?framework/i;
 
 /** A leading step number on an item of the Builder's to-do list: "1. Start from…", "Step 2: …", "2) …", "3 - …". */
 const STEP_NUMBER = /^\s*(?:step\s*(\d+)\b|\(?(\d+)\s*(?:[.):]|\s[-–])(?=\s|$))/i;
@@ -1470,6 +1472,12 @@ export class LiveSquad {
       // Nothing squad-kit left running in its other copies may hold the app's address.
       beforeStart: async () => {
         await this.clearCopies(projectCopies(this.bp), { busy: [cwd, ...this.busyCopies(id)], listening: true }, id);
+        // For the Reviewer and the Tester, the app's copy is set up again first when new packages or database changes
+        // came in (setUpAgain). The Builder is still changing them.
+        const t = role === 'builder' ? null : readTicket(this.bp, id);
+        const c = t ? copiesOf(this.meta(), t).find((x) => path.resolve(x.dir) === path.resolve(cwd)) : undefined;
+        const failed = c ? await this.setUpAgain(id, c) : null;
+        if (failed) this.log('warn', `Setting up the copy again did not work, so the app may not work (${failed.command}):\n${tail(failed.output, 30)}`, id);
       },
       // What a finished check left in the app's own copy: only in squad-kit's own copies, and never what squad-kit runs
       // now (a check, a kept app, the agent itself).
@@ -3027,6 +3035,42 @@ export class LiveSquad {
     // What the setup rewrote (a lock file, often) is not the story's work: it goes back before anyone reads the copy.
     const back = await putBackTracked(dir);
     if (back.length) this.log('info', `The setup command changed ${back.join(', ')}; squad-kit put ${back.length === 1 ? 'it' : 'them'} back`, id);
+    if (r.ok) {
+      const print = await setupPrintNow(dir);
+      this.update(id, (x) => (x.setupFor = { ...x.setupFor, [repo.path]: print }));
+    }
+  }
+
+  /**
+   * The copy's setup again, when new packages or database changes came into it since it last ran well: the newest code
+   * came in, or the Builder added them. Before the checks, and before the app starts for the Reviewer or the Tester, so
+   * the app never runs on an old database. When it fails, the copy's own database is made again (never the person's)
+   * and the setup runs once more. What still fails comes back as a failed check, for the Builder.
+   */
+  private async setUpAgain(id: string, c: CopyOf): Promise<CheckResult | null> {
+    const setup = c.repo.commands.setup?.trim();
+    if (!setup || !fs.existsSync(c.dir) || readTicket(this.bp, id)?.setupFor?.[c.repo.path] === (await setupPrintNow(c.dir))) return null;
+    this.update(id, (x) => addActivity(x, 'squad', 'New packages or database changes came into this copy, so squad-kit sets it up again'));
+    this.log('info', `Setting up the copy again: ${setup}`, id);
+    // The story's work is not committed yet: only what the setup itself rewrites goes back.
+    const theirs = await changedTracked(c.dir);
+    const run = async () => {
+      const r = await runCommand(c.dir, setup, SETUP_MS, this.guardedWatch(id, c.dir));
+      this.placeLocalFiles(id, c.dir, c.repo.path);
+      return r;
+    };
+    let r = await run();
+    if (!r.ok && DB_TROUBLE.test(r.output) && !this.stops.get(id)?.signal.aborted && ((await remakeStoryDb(this.bp, id, c.dir, c.repo.path)) || setAsideCopyDb(c.dir).length > 0)) {
+      this.log('info', `The setup failed, so squad-kit made the copy's own database again and ran it once more. It said:\n${tail(r.output, 15)}`, id);
+      this.update(id, (x) => addActivity(x, 'squad', "The copy's own database was out of step with the code, so squad-kit made it again"));
+      r = await run();
+    }
+    const back = await putBackTracked(c.dir, { keep: theirs });
+    if (back.length) this.log('info', `The setup command changed ${back.join(', ')}; squad-kit put ${back.length === 1 ? 'it' : 'them'} back`, id);
+    if (!r.ok) return { name: 'setup', command: setup, ok: false, output: r.output, seconds: r.seconds, ...(r.ended ? { ended: true } : {}) };
+    const print = await setupPrintNow(c.dir);
+    this.update(id, (x) => (x.setupFor = { ...x.setupFor, [c.repo.path]: print }));
+    return null;
   }
 
   /**
@@ -3732,6 +3776,14 @@ export class LiveSquad {
     // No old server of squad-kit's own copies may hold a port the checks need.
     await this.clearBeforeApp(id);
     this.goOn(id);
+    // New packages or database changes since a copy's setup last ran: it runs again first. One that still fails is a
+    // failed check, for the Builder.
+    const setups: (CheckResult & { part?: string })[] = [];
+    for (const c of copies) {
+      const failed = await this.setUpAgain(id, c);
+      if (failed) setups.push(several ? { ...failed, part: c.label } : failed);
+      this.goOn(id);
+    }
     // A part the story did not change has nothing new to check, unless nothing changed at all.
     const changed: typeof copies = [];
     for (const c of copies) if (!several || (c.baseCommit && (await workSoFar(c.dir, c.baseCommit)).length)) changed.push(c);
@@ -3749,7 +3801,7 @@ export class LiveSquad {
       startStep(x, { who: 'squad', step: 'checks', limit: 15 });
     });
     const mark = sleepMark();
-    const results: (CheckResult & { part?: string })[] = [];
+    const results: (CheckResult & { part?: string })[] = [...setups];
     // The copy each project check ran in, for a failed test to run on main's code.
     const ranIn = new Map<CheckResult, CopyOf>();
     for (const c of changed.length ? changed : copies.slice(0, 1)) {

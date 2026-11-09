@@ -189,15 +189,41 @@ const DEP_FILES = new Set([
   'build.gradle.kts', 'packages.lock.json', 'Directory.Packages.props', 'mix.exs', 'mix.lock', 'pubspec.yaml', 'pubspec.lock',
 ]);
 const DEP_NAMES = [/^requirements.*\.txt$/, /\.(cs|fs|vb)proj$/];
+/** Changes to the database, which the setup applies (prisma migrate, rails db:migrate, alembic upgrade): they count too. */
+const DB_CHANGES = /(?:^|\/)(?:migrations?|migrate)\/|(?:^|\/)alembic\/versions\/|(?:^|\/)(?:schema\.prisma|schema\.rb|structure\.sql)$/i;
 
-/** One short fingerprint of the dependency files at a commit. */
+/** A file whose change makes the setup command run again: what the app needs installed, or a change to its database. */
+export function changesSetup(file: string): boolean {
+  const name = path.posix.basename(file);
+  return DEP_FILES.has(name) || DEP_NAMES.some((p) => p.test(name)) || DB_CHANGES.test(file);
+}
+
+/** One short fingerprint of the files the setup depends on, at a commit. */
 export async function dependencyPrint(dir: string, commit: string): Promise<string> {
   const lines: string[] = [];
   await gitRecords(dir, ['ls-tree', '-r', commit], '\n', (l) => {
-    const name = path.basename(l.split('\t')[1] ?? '');
-    if (DEP_FILES.has(name) || DEP_NAMES.some((p) => p.test(name))) lines.push(l);
+    if (changesSetup(l.split('\t')[1] ?? '')) lines.push(l);
   }).catch(() => undefined);
   return createHash('sha1').update(lines.join('\n')).digest('hex').slice(0, 12);
+}
+
+/** The same fingerprint for a copy as it is now, saved or not: a story's work is not committed until it is accepted. */
+export async function setupPrintNow(dir: string): Promise<string> {
+  const files = new Set<string>();
+  await gitRecords(dir, ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], '\0', (f) => {
+    if (f && changesSetup(f)) files.add(f);
+  }).catch(() => undefined);
+  const hash = createHash('sha1');
+  for (const f of [...files].sort()) {
+    hash.update(`${f}\0`);
+    try {
+      hash.update(fs.readFileSync(path.join(dir, f)));
+    } catch {
+      hash.update('gone');
+    }
+    hash.update('\0');
+  }
+  return hash.digest('hex').slice(0, 12);
 }
 
 /**

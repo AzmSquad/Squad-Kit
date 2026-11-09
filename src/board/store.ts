@@ -342,6 +342,7 @@ export const TICKET_HOME = {
   reviewNotes: 'local',
   localSetup: 'local',
   setupTrouble: 'local',
+  setupFor: 'local',
   setupOwed: 'local',
   parts: 'project',
   storyDir: 'local',

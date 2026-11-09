@@ -114,7 +114,7 @@ On the board:
 **Your apps**, in the sidebar: each app of the project with its state (Not running, Starting, Running at its
 address, Stopped, Failed with the reason) and **Start**, **Open**, **Restart** and **Stop**. squad-kit runs the
 app from its own copy of `main` on this computer, never your own folder, and brings that copy up to date first
-(running the setup command when the dependencies changed). Your `.env` files come along: squad-kit copies them from
+(running the setup command when the dependencies or the database changes changed). Your `.env` files come along: squad-kit copies them from
 your project folder into its copy each time, readable by you only. **Show output** has the last lines it printed; when
 it failed, **See what failed** has the command and what it printed. After **Looks right**, "RO-6 is in main" offers
 **Run the new version**. When another program holds the app's port, squad-kit moves the app to a free port by itself
@@ -612,6 +612,11 @@ Terminal: `squad config set quality best`, `squad agent builder`, `squad agent b
     database as before. It goes when the story is merged, released or deleted, and with the leftovers after a restart.
     squad-kit refuses to point a story at the database your own copy uses, and never creates, changes or drops it. A
     SQLite file stays in each copy, from the template's file when there is one.
+  - **When new code comes in**: package files or database changes that are new in a story's copy (from main, or from
+    the Builder) make its setup run again, before the checks and before the app starts for the Reviewer or the Tester.
+    When that setup fails over the database, squad-kit makes the copy's own database again (the story's own from the
+    template, or a SQLite file inside the copy, set aside as `<file>.out-of-step` and kept out of commits) and runs the
+    setup once more. Your own database is never touched. A setup that still fails goes to the Builder.
   - **When the app chooses its database itself**, a copy under another name would not be used, and the story would write
     to your own database all the same. So squad-kit makes no template and gives no story a copy, and says why, here and
     in `squad db`: the code names the database (`GetDatabase("shop")`, `dbName: 'shop'`, or the name in quotes on a

@@ -527,6 +527,43 @@ export function rewireStoryDb(bp: BoardPaths, story: string, dir: string, repo: 
   return true;
 }
 
+/**
+ * A story's own database that its copy's setup cannot bring up to date (the newest code renamed a change it already
+ * has): dropped and made again from the template, for the setup to run on once more. Only one squad-kit made for this
+ * story and this copy. True when it was made again.
+ */
+export async function remakeStoryDb(bp: BoardPaths, story: string, dir: string, repo: string): Promise<boolean> {
+  const had = readState(bp).stories.find((s) => s.story === story && s.repo === repo && path.resolve(s.dir) === path.resolve(dir));
+  if (!had || !(await dropStoryDb(bp, story))) return false;
+  return (await setUpStoryDb(bp, story, dir, repo)).state === 'own';
+}
+
+/**
+ * The same for a SQLite file a copy keeps itself, with no template: set aside with the files SQLite keeps beside it, so
+ * the setup makes it again. Only a file inside the copy that git does not keep, never one anywhere else; what is set
+ * aside stays out of commits. The files set aside.
+ */
+export function setAsideCopyDb(dir: string): string[] {
+  const found = findDatabase(dir, ['.']).found;
+  const name = found?.kind === 'sqlite' && found.address ? readAddress(found.address).name : undefined;
+  if (!name) return [];
+  // Prisma reads a file named relative to its schema; most others from the folder the app runs in.
+  const schemas = git(dir, ['ls-files', '--', '*schema.prisma'], { allowFail: true }).split('\n').filter(Boolean);
+  const files = path.isAbsolute(name) ? [name] : [dir, ...schemas.map((s) => path.dirname(path.join(dir, s)))].map((b) => path.resolve(b, name));
+  const inside = `${path.resolve(dir)}${path.sep}`;
+  const moved: string[] = [];
+  for (const file of new Set(files)) {
+    if (!file.startsWith(inside) || !fs.existsSync(file) || git(dir, ['ls-files', '--', path.relative(dir, file)], { allowFail: true })) continue;
+    for (const end of SQLITE_BESIDE) {
+      if (!fs.existsSync(`${file}${end}`)) continue;
+      fs.renameSync(`${file}${end}`, `${file}.out-of-step${end}`);
+      moved.push(`${file}.out-of-step${end}`);
+    }
+  }
+  if (moved.length) markDbMade(dir, moved);
+  return moved;
+}
+
 /** The story databases this computer has now. */
 export function storyDbs(bp: BoardPaths): StoryDbRecord[] {
   return readState(bp).stories;

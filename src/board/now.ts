@@ -303,13 +303,16 @@ function workIn(t: Ticket, stage: Stage, at: number): number | undefined {
   return t.history?.length && t.history.length < HISTORY ? 0 : undefined;
 }
 
-/** The checks of a test stage came from the Builder's own run, in a few words: "checked with the Builder's run". */
+/**
+ * The checks of a test stage squad-kit ran itself while the Builder built, on this same code, so they did not run again,
+ * in a few words: "passed earlier on the same code". Never the Builder's word: squad-kit read the exit codes.
+ */
 function builderRunWords(t: Ticket): string {
   const b = runsIn(t, 'test').filter((r) => r.step === 'checks').pop()?.builderRun;
   if (!b?.checks.length) return '';
-  if (b.all) return " · checked with the Builder's run";
+  if (b.all) return ' · passed earlier on the same code';
   const names = b.checks.map((c) => (c === 'test' ? 'tests' : c === 'lint' ? 'code check' : c));
-  return ` · ${names.join(' and ')} from the Builder's run`;
+  return ` · ${names.join(' and ')} passed earlier on the same code`;
 }
 
 /** The small line under a finished stage that waited long: mostly for the person, or for anything else. */

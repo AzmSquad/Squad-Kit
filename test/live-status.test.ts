@@ -280,7 +280,7 @@ describe('the tracker counts the squad\'s own work', () => {
     ]);
     const n = liveNow(t, {}, min(74));
     const notes = Object.fromEntries(n.stages.map((s) => [s.stage, s.note]));
-    expect(notes).toEqual({ tickets: '1 min', specs: '3 min, you approved', implement: '7 min', test: "3 s · checked with the Builder's run", review: 'now · 1 min', release: 'on Looks right' });
+    expect(notes).toEqual({ tickets: '1 min', specs: '3 min, you approved', implement: '7 min', test: '3 s · passed earlier on the same code', review: 'now · 1 min', release: 'on Looks right' });
     // Specs waited 41 minutes, all of it for you (the talk too); Implement waited 20 for another story.
     expect(n.stages.filter((s) => s.wait).map((s) => [s.stage, s.wait])).toEqual([
       ['specs', 'waited 41 min for you'],
@@ -295,7 +295,7 @@ describe('the tracker counts the squad\'s own work', () => {
       history: [{ who: 'squad', step: 'checks', from: ago(100), to: ago(60), stage: 'test', builderRun: { checks: ['test'] } }],
       stageTimes: { stage: 'review', since: ago(50), spent: { test: 50 } },
     });
-    expect(liveNow(t, {}, AT).stages.find((s) => s.stage === 'test')).toEqual({ stage: 'test', note: "40 s · tests from the Builder's run" });
+    expect(liveNow(t, {}, AT).stages.find((s) => s.stage === 'test')).toEqual({ stage: 'test', note: '40 s · tests passed earlier on the same code' });
     // A stage no step ran in says nothing, not the time it waited.
     const none = ticket({ stage: 'implement', ...working, history: [{ who: 'architect', step: 'design', from: ago(200), to: ago(140), stage: 'specs' }], stageTimes: { stage: 'implement', since: ago(10), spent: { tickets: 900, specs: 70 } } });
     expect(liveNow(none, {}, AT).stages.slice(0, 2)).toEqual([

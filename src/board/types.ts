@@ -623,6 +623,11 @@ export interface Ticket {
   localSetup?: LocalSetup;
   /** The project's setup command failed in this ticket's copy: the Builder sorts it out first. */
   setupTrouble?: { command: string; output: string };
+  /**
+   * For each repo of the story, a fingerprint of the files its setup depends on (packages, database changes) when the
+   * setup last ran well in its copy. Another one means the setup runs again (engine/run-app.ts setupPrintNow).
+   */
+  setupFor?: Record<string, string>;
   /** The repos whose setup stopped the story (a Docker refusal): it runs again on Try again. */
   setupOwed?: string[];
   /** The product's parts this story changes, by their ids, in the order to build them. */

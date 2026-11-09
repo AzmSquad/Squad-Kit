@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A story's app no longer runs on an old database.** When the newest main came into a story's copy, or the Builder
+  added packages or database changes, the copy's setup did not run again: the checks passed on their own test
+  databases, while the app the Reviewer and the Tester used still had the old database, and signing up failed with
+  "missing newer migrations". Now the setup runs again before the checks and before the app starts, whenever package
+  files or database changes (Prisma, Rails, Django, Alembic, EF Core and other migration folders) are new since it last
+  ran. **Your apps** runs the setup again for database changes too, not only new packages.
+- **A database out of step is made again.** When that setup fails over the database (the newest code renamed a change
+  the copy's database already had), squad-kit makes the copy's own database again and runs the setup once more: a
+  story's own database from the template, or a SQLite file inside the copy, set aside and kept out of commits. Never
+  your own database. A setup that still fails goes to the Builder like a failed check.
+
+### Changed
+
+- The Test stage says "passed earlier on the same code" when squad-kit's own run of the checks during the build stands,
+  instead of "checked with the Builder's run", which read as if the Builder had graded its own work.
+
 ## [1.3.6] — 2026-11-09
 
 ### Changed

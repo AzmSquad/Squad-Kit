@@ -134,6 +134,7 @@ function lineStages(): HarnessStage[] {
     ]),
     stage('checks', 'Checks', "squad-kit runs your project's own checks. No agent is asked if they passed.", on(squad('squad-kit')), [
       g('checks', "Your project's own checks", "Test, lint and build, plus scripts/check when your project has one. The Builder's word doesn't count. A failed check runs once more, so a flaky test doesn't stop the story. For the tests, the failed ones run on their own first: one that still fails fails the check at once, and if they pass, all the tests run once more and decide.", `The Builder fixes it, up to ${MAX_CHECK_TRIES} tries. Then a card.`),
+      g('setup-again', 'Set up again when the code changes', "New packages or database changes came into a story's copy, from main or from the Builder: its setup runs again before the checks and before the app starts, so the app never runs on an old database.", "A database of the story's own that is out of step is made again, and the setup runs once more. Then the Builder fixes it."),
       g('old-tests', 'An old bug is not the story\'s', "A failed test in a file the story didn't change runs on its own on main's code. If it fails there too, it is an old bug: the story goes on, the checks say so, and squad-kit makes one new story to fix that test, which waits on the board until you start it. A story only goes past a test that main already fails.", 'If it passes on main, the Builder fixes it, as for any failed check.'),
       g('weakened', 'Weakened tests', "Tests deleted, switched off or reduced, test settings changed, or a change to what a must-pass gate of your team runs.", 'It stops. Only you can go past it, with a reason on the record.'),
       g('no-tests', 'No tests, no green', 'No tests never means a green pass. Lint, build and the app starting must still pass.', 'Asked once per project: add tests, or go on without.'),
@@ -339,6 +340,7 @@ function rowDetails(meta: BoardMeta | undefined, root: string | undefined): Reco
     'old-tests': code('engine/old-tests.ts', ['Runs', run('test')], ['Limit', `${MAX_OLD} failed tests, each up to ${MAX_RUNS_ON_MAIN} times, ${min(ON_MAIN_MS)} in all`], ['Reads', 'Playwright, Vitest, Jest, pytest and go test'], ['See it in', 'The proof page and the Releases page']),
     weakened: code('engine/weakened.ts', ['Looks at', 'Deleted tests, skip marks, fewer tests, test settings'], ['See it in', tab('Changes')]),
     'no-tests': code('engine/not-checked.ts', ['Here', meta?.noTests ? 'You chose to go on without tests' : 'Not asked yet']),
+    'setup-again': code('engine/live.ts', ['Runs', run('setup')], ['Looks at', 'Package files and database changes, saved or not']),
     'test-change': code('engine/test-change.ts', ['Runs', run('test')], ['Compares', 'Pass or fail, and how many tests ran']),
     review: code('engine/live.ts', ['Limit', `${MAX_REVIEW_ROUNDS} rounds, ${min(REVIEW_STEP_MS)} each`], ['See it in', tab('Conversation')]),
     'reviewer-floor': code('engine/levels.ts'),

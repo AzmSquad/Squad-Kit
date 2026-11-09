@@ -257,10 +257,10 @@ describe.skipIf(process.platform === 'win32')("the Builder's last run of the che
     expect(lines(a.id)).toContain(TESTS_REUSED);
     expect(lines(a.id)).not.toContain(REUSED);
     expect(t.history?.filter((h) => h.step === 'checks').pop()?.builderRun).toEqual({ checks: ['test'] });
-    expect(liveNow(t, {}).stages.find((x) => x.stage === 'test')?.note).toMatch(/^\d+ s · tests from the Builder's run$/);
+    expect(liveNow(t, {}).stages.find((x) => x.stage === 'test')?.note).toMatch(/^\d+ s · tests passed earlier on the same code$/);
     expect(logged()).toContain("squad-kit uses the Builder's run_checks from");
 
-    // Every check from the Builder's run: the Test stage says it was checked with it.
+    // Every check from the Builder's run: the Test stage says they passed earlier on the same code.
     const b = story('Rooms on a tablet');
     builder(async (copy, call) => {
       edit(copy);
@@ -269,7 +269,7 @@ describe.skipIf(process.platform === 'win32')("the Builder's last run of the che
     await s.runBuilder(b.id, 'Build it', true, 'build');
     await s.checks(b.id);
     expect(get(b.id).history?.filter((h) => h.step === 'checks').pop()?.builderRun).toEqual({ checks: ['test', 'lint'], all: true });
-    expect(liveNow(get(b.id), {}).stages.find((x) => x.stage === 'test')?.note).toMatch(/^\d+ s · checked with the Builder's run$/);
+    expect(liveNow(get(b.id), {}).stages.find((x) => x.stage === 'test')?.note).toMatch(/^\d+ s · passed earlier on the same code$/);
   });
 
   it('a run of the tests alone does not count after an edit, nor from an earlier round', async () => {
