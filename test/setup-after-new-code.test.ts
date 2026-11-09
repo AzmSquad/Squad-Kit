@@ -30,7 +30,7 @@ const MIGRATE = [
 ].join('; ');
 
 type Copy = { repo: { path: string; base: string; remote: string; commands: { setup?: string } }; dir: string; label: string };
-type Squad = { workspace(id: string): Promise<unknown>; guardFor(): undefined; setUpAgain(id: string, c: Copy): Promise<{ name: string; ok: boolean; output: string } | null> };
+type Squad = { workspace(id: string): Promise<unknown>; guardFor(): undefined; setUpAgain(id: string, c: Copy): Promise<{ ran: boolean; failed?: { name: string; ok: boolean; output: string } }> };
 
 beforeEach(() => {
   tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'squad-setup-new-code-')));
@@ -82,17 +82,17 @@ describe('the setup again, after new code came into a copy', () => {
   it('runs only when packages or database changes came in, saved or not', async () => {
     const { squad, id, copy } = await story();
     expect(runs()).toBe(1);
-    expect(await squad.setUpAgain(id, copy)).toBeNull();
+    expect(await squad.setUpAgain(id, copy)).toEqual({ ran: false });
     fs.writeFileSync(path.join(copy.dir, 'page.tsx'), 'export const page = 1;\n');
-    expect(await squad.setUpAgain(id, copy)).toBeNull();
+    expect(await squad.setUpAgain(id, copy)).toEqual({ ran: false });
     expect(runs()).toBe(1);
 
     // The newest main came in with a change to the database.
     fs.writeFileSync(path.join(copy.dir, 'migrations', '002_services'), 'create table services;\n');
-    expect(await squad.setUpAgain(id, copy)).toBeNull();
+    expect(await squad.setUpAgain(id, copy)).toEqual({ ran: true });
     expect(runs()).toBe(2);
     expect(applied(copy.dir)).toEqual(['001_init', '002_services']);
-    expect(await squad.setUpAgain(id, copy)).toBeNull();
+    expect(await squad.setUpAgain(id, copy)).toEqual({ ran: false });
     expect(runs()).toBe(2);
   });
 
@@ -105,7 +105,7 @@ describe('the setup again, after new code came into a copy', () => {
     fs.renameSync(path.join(copy.dir, 'migrations', '002_hours'), path.join(copy.dir, 'migrations', '003_hours'));
     fs.writeFileSync(path.join(copy.dir, 'migrations', '002_staff'), 'create table staff;\n');
 
-    expect(await squad.setUpAgain(id, copy)).toBeNull();
+    expect(await squad.setUpAgain(id, copy)).toEqual({ ran: true });
     expect(runs()).toBe(4);
     expect(applied(copy.dir)).toEqual(['001_init', '002_staff', '003_hours']);
     expect(fs.readFileSync(path.join(copy.dir, 'app.db.out-of-step'), 'utf8')).toBe('001_init\n002_hours\n');
@@ -119,7 +119,8 @@ describe('the setup again, after new code came into a copy', () => {
     sh('git add page.tsx', copy.dir);
     fs.writeFileSync(path.join(copy.dir, 'package.json'), '{ "name": "app", "dependencies": { "nope": "1" } }\n');
     const broken = { ...copy, repo: { ...copy.repo, commands: { setup: 'echo "npm ERR! nope not found"; exit 1' } } };
-    const failed = await squad.setUpAgain(id, broken);
+    const { ran, failed } = await squad.setUpAgain(id, broken);
+    expect(ran).toBe(true);
     expect(failed).toMatchObject({ name: 'setup', ok: false });
     expect(failed!.output).toContain('nope not found');
     expect(fs.readFileSync(path.join(copy.dir, 'page.tsx'), 'utf8')).toBe('work in progress\n');

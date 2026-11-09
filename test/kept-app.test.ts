@@ -255,6 +255,34 @@ describe.skipIf(process.platform === 'win32')('one app for the review and the pr
     await until('the old app to stop', () => !appAlive(copy, first!));
   });
 
+  it('new database changes before the proof: the copy is set up again before its app starts (MA-6)', async () => {
+    const setups = path.join(tmp, 'setups.txt');
+    const ran = () => (fs.existsSync(setups) ? fs.readFileSync(setups, 'utf8').trim().split('\n').length : 0);
+    writeMeta(bp, { ...readMeta(bp), commands: { ...readMeta(bp).commands, setup: `echo ran >> "${setups}"` } });
+    const { id, copy } = story();
+    const s = squad();
+    await s.review(id);
+    // Never set up by this version yet: the review's app starts after one setup.
+    expect(ran()).toBe(1);
+    const [first] = starts(copy);
+    await s.proof(id);
+    expect(ran()).toBe(1);
+    expect(starts(copy)).toHaveLength(1);
+
+    // The newest main came in with a change to the database: the proof's app does not start on the old one.
+    fs.mkdirSync(path.join(copy, 'migrations'));
+    fs.writeFileSync(path.join(copy, 'migrations', '002_hours.sql'), 'create table hours;\n');
+    updateTicket(bp, id, (x) => {
+      x.waiting = null;
+      x.live = true;
+    });
+    await s.proof(id);
+    expect(ran()).toBe(2);
+    expect(lines(id)).toContain('New packages or database changes came into this copy, so squad-kit sets it up again');
+    expect(starts(copy).length).toBeGreaterThan(1);
+    await until('the old app to stop', () => !appAlive(copy, first!));
+  });
+
   it('a review that sends the story back stops it before the Builder starts', async () => {
     const { id, copy } = story();
     reviewer = async (opts) => {

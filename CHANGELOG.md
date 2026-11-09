@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The screenshots step sets up the copy too.** In 1.3.7 the setup ran again before the checks and when an agent
+  started the app, but the screenshots step starts the app itself, so a retake still ran on the old database. Now that
+  step sets up the copy again first, and an app kept from before does not stand.
+
 ## [1.3.7] — 2026-11-09
 
 ### Fixed

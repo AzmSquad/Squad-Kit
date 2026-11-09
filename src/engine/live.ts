@@ -1476,7 +1476,7 @@ export class LiveSquad {
         // came in (setUpAgain). The Builder is still changing them.
         const t = role === 'builder' ? null : readTicket(this.bp, id);
         const c = t ? copiesOf(this.meta(), t).find((x) => path.resolve(x.dir) === path.resolve(cwd)) : undefined;
-        const failed = c ? await this.setUpAgain(id, c) : null;
+        const failed = c ? (await this.setUpAgain(id, c)).failed : undefined;
         if (failed) this.log('warn', `Setting up the copy again did not work, so the app may not work (${failed.command}):\n${tail(failed.output, 30)}`, id);
       },
       // What a finished check left in the app's own copy: only in squad-kit's own copies, and never what squad-kit runs
@@ -3045,11 +3045,11 @@ export class LiveSquad {
    * The copy's setup again, when new packages or database changes came into it since it last ran well: the newest code
    * came in, or the Builder added them. Before the checks, and before the app starts for the Reviewer or the Tester, so
    * the app never runs on an old database. When it fails, the copy's own database is made again (never the person's)
-   * and the setup runs once more. What still fails comes back as a failed check, for the Builder.
+   * and the setup runs once more. Whether it ran, and what still fails, as a failed check for the Builder.
    */
-  private async setUpAgain(id: string, c: CopyOf): Promise<CheckResult | null> {
+  private async setUpAgain(id: string, c: { repo: RepoInfo; dir: string }): Promise<{ ran: boolean; failed?: CheckResult }> {
     const setup = c.repo.commands.setup?.trim();
-    if (!setup || !fs.existsSync(c.dir) || readTicket(this.bp, id)?.setupFor?.[c.repo.path] === (await setupPrintNow(c.dir))) return null;
+    if (!setup || !fs.existsSync(c.dir) || readTicket(this.bp, id)?.setupFor?.[c.repo.path] === (await setupPrintNow(c.dir))) return { ran: false };
     this.update(id, (x) => addActivity(x, 'squad', 'New packages or database changes came into this copy, so squad-kit sets it up again'));
     this.log('info', `Setting up the copy again: ${setup}`, id);
     // The story's work is not committed yet: only what the setup itself rewrites goes back.
@@ -3067,10 +3067,10 @@ export class LiveSquad {
     }
     const back = await putBackTracked(c.dir, { keep: theirs });
     if (back.length) this.log('info', `The setup command changed ${back.join(', ')}; squad-kit put ${back.length === 1 ? 'it' : 'them'} back`, id);
-    if (!r.ok) return { name: 'setup', command: setup, ok: false, output: r.output, seconds: r.seconds, ...(r.ended ? { ended: true } : {}) };
+    if (!r.ok) return { ran: true, failed: { name: 'setup', command: setup, ok: false, output: r.output, seconds: r.seconds, ...(r.ended ? { ended: true } : {}) } };
     const print = await setupPrintNow(c.dir);
     this.update(id, (x) => (x.setupFor = { ...x.setupFor, [c.repo.path]: print }));
-    return null;
+    return { ran: true };
   }
 
   /**
@@ -3780,7 +3780,7 @@ export class LiveSquad {
     // failed check, for the Builder.
     const setups: (CheckResult & { part?: string })[] = [];
     for (const c of copies) {
-      const failed = await this.setUpAgain(id, c);
+      const { failed } = await this.setUpAgain(id, c);
       if (failed) setups.push(several ? { ...failed, part: c.label } : failed);
       this.goOn(id);
     }
@@ -4849,6 +4849,11 @@ export class LiveSquad {
     // The story's own copy: the app the review kept, or the last round's, while it answers and the code is the same
     // (keptFor). It does not start again. A product, and the copy of the code as it was, start as before.
     const shares = !beside && !product;
+    // New packages or database changes since the copy was set up: it is set up again first (setUpAgain), and an app
+    // kept from before does not stand, as it runs on what was there.
+    const setUp = shares ? await this.setUpAgain(id, appCopy ?? { repo: repoFor(meta, t), dir: cwd }) : { ran: false };
+    if (setUp.failed) this.log('warn', `Setting up the copy again did not work, so the app may not work (${setUp.failed.command}):\n${tail(setUp.failed.output, 30)}`, id);
+    if (setUp.ran) await this.dropKept(id);
     const kept = shares ? await this.keptFor(id, cwd) : null;
     let tree = kept?.tree;
     let app: RunningApp;
