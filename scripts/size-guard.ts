@@ -1,13 +1,13 @@
 #!/usr/bin/env tsx
 /**
- * Fails CI if the published npm tarball unpacked size would exceed 4 MB.
- * This cap is intentionally generous (~1.4 MB CLI and ~1 MB console-ui in 1.2, plus headroom)
+ * Fails CI if the published npm tarball unpacked size would exceed 5 MB.
+ * This cap is intentionally generous (~2.2 MB CLI and ~1.2 MB console-ui in 1.3.9, when the phone apps came, plus headroom)
  * so minor UI iterations do not require constant limit tuning; tighten when the bundle
  * is stable again.
  */
 import { execSync } from 'node:child_process';
 
-const MAX_PUBLISHED_BYTES = 4 * 1024 * 1024;
+const MAX_PUBLISHED_BYTES = 5 * 1024 * 1024;
 
 interface PackedFile {
   path: string;
