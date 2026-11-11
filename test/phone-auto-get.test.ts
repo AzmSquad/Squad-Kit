@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -12,6 +12,13 @@ import type { ToolSource } from '../src/engine/tools/get.js';
  * time left, and goes on once it is there. A get that did not work is not tried again by itself. The Mac and the
  * downloads are made up: nothing is downloaded and nothing real runs.
  */
+
+// On any computer, CI's Linux too, the phone is a Mac's: a fake that says it is here.
+vi.mock('../src/modules/registry.js', async (orig) => {
+  const { fakePhone } = await import('./fakes/phone.js');
+  const phone = fakePhone({ notHere: null });
+  return { ...(await orig<typeof import('../src/modules/registry.js')>()), shotPhone: () => phone.module };
+});
 
 const { boardPaths } = await import('../src/board/store.js');
 const { zip } = await import('../src/core/zip.js');

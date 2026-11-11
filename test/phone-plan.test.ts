@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,6 +9,13 @@ import type { Found, FoundBook } from '../src/engine/tools/detect.js';
  * of the web version, said in one plain line, when they are missing and the app has one; else the story waits for
  * the tools, and never takes its proof without pictures. A web project keeps its browser pictures as before.
  */
+
+// On any computer, CI's Linux too, the phone is a Mac's: a fake that says it is here.
+vi.mock('../src/modules/registry.js', async (orig) => {
+  const { fakePhone } = await import('./fakes/phone.js');
+  const phone = fakePhone({ notHere: null });
+  return { ...(await orig<typeof import('../src/modules/registry.js')>()), shotPhone: () => phone.module };
+});
 
 const { boardPaths } = await import('../src/board/store.js');
 const { seedDemoBoard } = await import('../src/board/demo.js');
