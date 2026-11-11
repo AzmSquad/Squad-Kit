@@ -654,7 +654,7 @@ export interface Ticket {
   /** The last run that was cut off instead of ending (see Interruption), until its step ends. */
   interrupted?: Interruption;
   /** Set by the watchdog when a running step shows no progress: what it waits on, and whether that looks stuck. */
-  quiet?: { since: string; kind: 'stuck' | 'long'; detail: string; command?: string; pid?: number; port?: QuietPort };
+  quiet?: { since: string; kind: 'stuck' | 'long'; detail: string; command?: string; pid?: number; port?: QuietPort; busy?: boolean };
   /** "Keep waiting": the watchdog stays quiet about this ticket until then. */
   quietSnoozedUntil?: string;
   /** Updates still to send to the tracker; the live squad sends them, so terminal commands never wait on Azure. */
@@ -867,6 +867,13 @@ export interface StepClock {
   resumed?: string;
   /** Since when the step does not run: it waits for the person, another story or a free place. That time does not count. */
   paused?: string;
+  /** squad-kit itself runs this for the step now, since doingAt: one of the project's checks, or the copy's setup. */
+  running?: 'test' | 'lint' | 'build' | 'setup';
+  /**
+   * The Builder's own run of a check that did not pass in this plan step: which, how many times, and when a later run
+   * of the whole check passed. The card says why the step takes longer from it.
+   */
+  failed?: { check: 'test' | 'lint' | 'build'; times: number; at: string; fixed?: string };
 }
 
 /** A step that ended well, kept on the ticket for "What happened" and the time each ticket took. */

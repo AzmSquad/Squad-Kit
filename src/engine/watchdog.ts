@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import os from 'node:os';
 import { performance } from 'node:perf_hooks';
 import type { QuietPort } from '../board/types.js';
 
@@ -25,6 +26,16 @@ export interface Quiet {
   pid?: number;
   /** The app's port is held by a program, added after the watchdog's look (src/engine/free-port.ts). */
   port?: QuietPort;
+  /** The computer was busy at the look (computerBusy), so every step runs slower. */
+  busy?: boolean;
+}
+
+/** A computer is busy when its 1-minute load is this many times its cores: every step on it runs slower. */
+const BUSY_LOAD = 1.5;
+
+/** The computer is busy: its 1-minute load average is well above its number of cores. Never on a load it cannot read. */
+export function computerBusy(load = os.loadavg()[0] ?? 0, cores = os.cpus().length): boolean {
+  return cores > 0 && load >= cores * BUSY_LOAD;
 }
 
 /** "1-02:03:04", "02:03:04", "03:04" or "03:04.56" in seconds. */

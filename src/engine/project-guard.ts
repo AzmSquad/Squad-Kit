@@ -12,7 +12,7 @@ import { OWN_GROUP, track } from './process-group.js';
 import { PACKAGE_CACHES, PRIVATE, gitPlaces, networkPolicy, noPushEnv, packageCacheEnv, projectCacheDir, projectNetwork, ticketCacheDir } from './sandbox.js';
 import type { NetworkLevel } from '../board/types.js';
 import { cacheHomeEnv, homeCachePlace, ownFolder, storiesCacheDir } from './cache-home.js';
-import { flutterOnPath, flutterStampRegexes } from './flutter-sdk.js';
+import { flutterOnPath, flutterStampFolders, flutterStampRegexes } from './flutter-sdk.js';
 
 /**
  * squad-kit's own guard for the project's own commands: the checks (test, lint, build), the app's start, the setup
@@ -63,6 +63,11 @@ export interface GuardSpec {
   cache?: string;
   /** Single files a command may write, each a whole-path regex: Flutter's own version stamps (engine/flutter-sdk.ts). */
   writeExactly?: string[];
+  /**
+   * The folders those files are in. Bubblewrap cannot open a file named by the run, so on Linux each folder is a throwaway
+   * one for the command: the real files back in, read only, all but those, which it writes there and which go when it ends.
+   */
+  writeExactlyIn?: string[];
   /** What an engineer allowed this project in Settings, on top of the above. */
   allow?: ProjectGuard;
 }
@@ -256,7 +261,7 @@ export function buildGuard(o: { cwd: string; root: string; cache?: string; extra
     noWrite: [...new Set(withReal([...squadOwnFiles(), ...gitPlaces(real(o.cwd))]))],
     noConnect: [...new Set(withReal(runtimeSockets(home, o.platform)))],
     ...(o.cache ? { cache: real(o.cache) } : {}),
-    ...(flutter ? { writeExactly: flutterStampRegexes(real(flutter)) } : {}),
+    ...(flutter ? { writeExactly: flutterStampRegexes(real(flutter)), writeExactlyIn: flutterStampFolders(real(flutter)) } : {}),
     ...(o.allow ? { allow: { ...(o.allow.allowRead ? { allowRead: withReal(o.allow.allowRead.map((p) => allowPath(p, home))) } : {}), ...(o.allow.allowWrite ? { allowWrite: withReal(o.allow.allowWrite.map((p) => allowPath(p, home))) } : {}) } } : {}),
     ...(networkPolicy(o.network ?? projectNetwork(o.root), [], o.platform).commands === 'this-computer' ? { offline: true } : {}),
   };
@@ -374,9 +379,10 @@ export function profileText(spec: GuardSpec): string {
 /* ── bubblewrap (Linux) ──────────────────────────────────── */
 
 /**
- * The bubblewrap arguments for one command: the whole computer read-only, the copy and the caches made writable, and
- * the private places hidden behind an empty mount. Same lists as the Mac profile. squad-kit checks bubblewrap works
- * before it uses this; when it does not, the command runs unguarded with the "less protected" note.
+ * The bubblewrap arguments for one command: the whole computer read-only, the copy and the caches made writable, the
+ * private places hidden behind an empty mount, and Flutter's stamps written in a throwaway folder. Same lists as the Mac
+ * profile. squad-kit checks bubblewrap works before it uses this; when it does not, the command runs unguarded with the
+ * "less protected" note.
  */
 export function bubblewrapArgs(spec: GuardSpec, command: string): string[] {
   const args = ['--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--tmpfs', '/tmp', '--die-with-parent', '--new-session', '--unshare-pid', '--unshare-uts', '--unshare-ipc'];
@@ -392,6 +398,10 @@ export function bubblewrapArgs(spec: GuardSpec, command: string): string[] {
       else args.push('--tmpfs', d);
     }
   };
+  // Single files, each exactly (Flutter's version stamps). One is named by the run, and bubblewrap opens only whole files
+  // and folders, so their folder is a throwaway one for this command: the real one stays as it was. First, so whatever is
+  // hidden or opened below still wins.
+  for (const dir of at(spec.writeExactlyIn ?? [])) args.push(...throwawayFolder(dir, spec.writeExactly ?? []));
   // A later mount wins: what the copy and the caches need comes after the private places (a cache inside squad-kit's own folder).
   hide(spec.noRead);
   // The copy must be there. The others may not be on this computer: bubblewrap stops at a folder it cannot find.
@@ -415,6 +425,33 @@ export function bubblewrapArgs(spec: GuardSpec, command: string): string[] {
   }
   args.push('/bin/sh', '-c', command);
   return args;
+}
+
+/**
+ * A throwaway folder in place of a real one, for one bubblewrap command: an empty tmpfs, with each real file and folder of
+ * it bound back in, read only, and each link made again, all but the files the regexes name. A command writes those, and
+ * new files, in the tmpfs, which goes when it ends. Nothing when the folder is not there: bubblewrap could not mount on it.
+ */
+function throwawayFolder(dir: string, leaveOut: string[]): string[] {
+  let names: string[];
+  try {
+    if (!fs.statSync(dir).isDirectory()) return [];
+    names = fs.readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const out = ['--tmpfs', dir];
+  for (const name of names) {
+    const at = path.join(dir, name);
+    if (leaveOut.some((r) => new RegExp(r).test(at))) continue;
+    try {
+      if (fs.lstatSync(at).isSymbolicLink()) out.push('--symlink', fs.readlinkSync(at), at);
+      else out.push('--ro-bind-try', at, at);
+    } catch {
+      // Gone since the folder was read.
+    }
+  }
+  return out;
 }
 
 /** Folders that hold no .env of the person's, and would take long to look through. */

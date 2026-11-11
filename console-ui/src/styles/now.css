@@ -8,8 +8,12 @@
 .card .nl1 b { color: var(--text); font-weight: 650; }
 .card .nl1.quiet { color: var(--dim); }
 .card .nl2 { font-size: 11.5px; color: var(--dim); margin: 3px 0 0 13px; font-variant-numeric: tabular-nums; }
-.card .nl2.slow { display: flex; align-items: center; gap: 5px; color: var(--you-ink); font-weight: 600; }
+.card .nl2.slow { display: flex; align-items: flex-start; gap: 5px; color: var(--you-ink); font-weight: 600; }
+.card .nl2.slow svg { flex: none; margin-top: 1px; }
 .card .nl2.slow.stuck { color: var(--bug); }
+/* Taking longer while it still works: calm, in the card's own grey. Amber is for no progress and for your turn. */
+.card .nl2.slow.still { color: var(--muted); font-weight: 550; }
+.card .nl3 { font-size: 11.5px; color: var(--muted); margin: 2px 0 0 13px; line-height: 1.35; }
 
 .segbar { display: flex; gap: 3px; margin-top: 8px; }
 .segbar span { flex: 1; height: 4px; border-radius: 2px; background: var(--line); }
@@ -34,6 +38,9 @@
 .slowhead .where { font-size: 12.5px; }
 .slowcard.stuck { border-color: color-mix(in srgb, var(--bug) 45%, transparent); }
 .slowcard.stuck .slowhead { background: var(--bug-soft); color: var(--bug); }
+.slowcard.still { border: 1px solid var(--line); }
+.slowcard.still .slowhead { background: var(--surface-2); color: var(--text); }
+.slowcard.still .slowhead .where { color: var(--muted); }
 .slowbody { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
 .slowsay { margin: 0; font-size: 15px; font-weight: 600; line-height: 1.4; }
 .facts { display: flex; flex-direction: column; gap: 6px; }

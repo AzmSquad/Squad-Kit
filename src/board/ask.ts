@@ -280,9 +280,14 @@ function problemLines(t: Ticket, now: LiveNow, book: UsualBook, lang: AskLang): 
     }
     if (slowNow(now, book, t)) {
       if (!now.slow && !ar) return [`It is slower than usual, but still working. ${now.role === 'squad' ? 'squad-kit' : who} has been on this step for ${minutesWords(secs ?? 0)}. It usually takes ${rangeEn(now.usual!)}.`, 'You can give it more time, stop and try again, or stop it.'];
-      return ar
-        ? [`العمل أبطأ من المعتاد، لكنه مستمر. ${who} على هذه الخطوة منذ ${arMinutes(secs ?? 0)}، وتستغرق عادة ${arRange(now.usual!)}.`, 'يمكنك من البطاقة أعلاه منحه 10 دقائق إضافية، أو إيقافه والمحاولة من جديد، أو إيقافه.']
-        : [`It is slower than usual, but still working. ${now.slow?.text ?? ''}`.trim(), 'You can give it 10 more minutes, stop and try again, or stop it from the card above.'];
+      if (ar) return [`العمل أبطأ من المعتاد، لكنه مستمر. ${who} على هذه الخطوة منذ ${arMinutes(secs ?? 0)}، وتستغرق عادة ${arRange(now.usual!)}.`, 'يمكنك من البطاقة أعلاه منحه 10 دقائق إضافية، أو إيقافه والمحاولة من جديد، أو إيقافه.'];
+      // The same reason and end point as the card: why it is slow, and what happens at the step's limit.
+      const s = now.slow!;
+      return [
+        `${s.calm ? 'It is taking longer than usual, but it is still working.' : 'It is taking longer than usual, with no update for a few minutes.'} ${s.why?.sentence ?? s.text}`,
+        s.limit ?? '',
+        s.calm ? "You don't need to do anything. If you want, the card above can give it 10 more minutes, or stop it." : 'You can give it 10 more minutes, stop and try again, or stop it from the card above.',
+      ];
     }
     const p = now.part;
     const u = now.usual!;
@@ -344,7 +349,7 @@ function whenLines(t: Ticket, now: LiveNow, book: UsualBook, lang: AskLang): str
       const who = ar ? WHO_AR[now.role ?? 'builder'] : now.role === 'squad' ? 'squad-kit' : `The ${now.who}`;
       return ar
         ? [`العمل أبطأ من المعتاد، لذلك يصعب التقدير. ${who} على هذه الخطوة منذ ${arMinutes(now.seconds ?? 0)}.`]
-        : [`It is taking longer than usual, so it is hard to say. ${now.slow?.text ?? `${who} has been on this step for ${minutesWords(now.seconds ?? 0)}.`}`];
+        : [`It is taking longer than usual, so it is hard to say. ${now.slow?.why?.sentence ?? now.slow?.text ?? `${who} has been on this step for ${minutesWords(now.seconds ?? 0)}.`}`, now.slow?.limit ?? ''].filter(Boolean);
     }
     const what = now.readyIn.what;
     if (t.track === 'auto') return ar ? [`غالبًا ${arIn(now.readyIn.seconds)}. بعدها ${MERGES_AR}`] : [`Probably ${inAbout(now.readyIn.seconds)}. Then it is accepted and merged by itself.`];

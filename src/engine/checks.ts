@@ -437,10 +437,26 @@ export const NO_WINDOW_START = "The app's start command opens a window on this c
  */
 export function withNoWindow(cwd: string, command: string, url: string): { command: string; url: string } {
   if (!opensAWindow(command)) return { command, url };
-  const found = findCommands(cwd);
-  if (!found.start || opensAWindow(found.start)) throw new Error(NO_WINDOW_START);
+  const found = webStartIn(cwd);
+  if (!found) throw new Error(NO_WINDOW_START);
   writeLog({ level: 'info', text: `The start command opens a window (${command}), so squad-kit starts the web version with no window instead: ${found.start}` });
   return { command: found.start, url: found.url ?? url };
+}
+
+/** The web version's start in the project's files, which opens no window, or null when it has none. */
+function webStartIn(cwd: string): { start: string; url?: string } | null {
+  const found = findCommands(cwd);
+  return found.start && !opensAWindow(found.start) ? { start: found.start, ...(found.url ? { url: found.url } : {}) } : null;
+}
+
+/**
+ * What Settings says beside a start command a person typed that opens a window: the start squad-kit runs instead, the
+ * same one withNoWindow picks, or that it has none. Null for a start that opens no window. It only reads the project's files.
+ */
+export function windowStartNote(cwd: string, command: string | undefined): string | null {
+  if (!opensAWindow(command)) return null;
+  const found = webStartIn(cwd);
+  return found ? `This opens a window. squad-kit starts the app without one: ${found.start}` : 'This opens a window, and squad-kit starts apps without one. This project has no web version it could start instead.';
 }
 
 /**

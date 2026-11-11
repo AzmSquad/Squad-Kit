@@ -137,12 +137,23 @@ describe('checking a computer', () => {
     expect(book.tools.xcode).toMatchObject({ state: 'found', version: '27.2', where: '/Applications/Xcode.app' });
     expect(book.tools.simulator).toEqual({ state: 'found', version: '27.0', note: 'iOS 27.0, iOS 18.2' });
     expect(book.tools.cocoapods).toMatchObject({ state: 'found', version: '1.16.2' });
+    // From RubyGems, in the person's own Ruby: no other tool looks after it.
+    expect(book.tools.cocoapods!.managedBy).toBeUndefined();
     expect(book.tools.java).toMatchObject({ state: 'found', version: '19.0.2' });
     expect(book.tools.maestro).toEqual({ state: 'missing' });
     expect(book.tools['android-studio']).toEqual({ state: 'missing' });
     expect(book.tools.docker).toEqual({ state: 'missing' });
     // The version file was enough: Flutter itself never ran.
     expect(ran.some((r) => r.startsWith('flutter'))).toBe(false);
+  });
+
+  it("CocoaPods from Homebrew says so, so its update steps are Homebrew's", async () => {
+    const h = mac({
+      path: { pod: '/opt/homebrew/bin/pod' },
+      links: { '/opt/homebrew/bin/pod': '/opt/homebrew/Cellar/cocoapods/1.15.2/bin/pod' },
+      answers: { 'pod --version': { ok: true, out: '1.15.2\n', err: '' } },
+    });
+    expect((await detectAll(h, home)).tools.cocoapods).toEqual({ state: 'found', version: '1.15.2', where: '/opt/homebrew/bin/pod', managedBy: 'homebrew' });
   });
 
   it('a Flutter that is here but not on the PATH is not usable yet, and says where it is', async () => {

@@ -40,7 +40,7 @@ import { releaseGoingOut } from '../board/lock.js';
 import { TECH_ROLES, type BoardMeta, type ChangeStep, type DecisionArea, type ImpactCheck, type NetworkLevel, type OffScreen, type OldFailure, type PatternNote, type PortAsk, type ProjectCommands, type ProofPicture, type ProofShot, type RepoInfo, type Question, type Role, type SpecChange, type StackNote, type TechDraft, type Ticket } from '../board/types.js';
 import { detectStack } from '../board/stack.js';
 import { AI_TOOLS, aiTool, describeToolEvent } from '../modules/registry.js';
-import { CHECK_DOING, DOING, plainToolLine } from './plain-doing.js';
+import { CHECK_DOING, DOING, OWN_CHECK_DOING, plainToolLine, stepWords } from './plain-doing.js';
 import type { AgentResult, AgentRun, AiTool, BlockedAction, PlanEntry, ToolEvent } from '../modules/ai-tool/types.js';
 import { CHECK_SILENT_MS, blockedByGuard, checksToRun, failedOnceLine, runChecks as runChecksNow, runCommand, startApp, startsToo, tail, testCount, type CheckResult, type CommandWatch, type RunningApp } from './checks.js';
 import { TurnTimeout, appIn, inTurn, startPastOther, stopAppsIn, untilEnded, type TurnKind } from './copy-turn.js';
@@ -66,7 +66,7 @@ import { cleanParts, partsAfterRead, partsOf, repoLabel, runsAsProduct } from '.
 import { flushTracker, publishTicket, recheckMerge, syncWiki, trackerDue } from './sync.js';
 import { lookOutsideBeside, lookOutsideSoon } from './merged-outside.js';
 import { AGENTS, agentInstructions, readAgent, type AgentRole } from './agents.js';
-import { Watchdog, processTable, type Quiet } from './watchdog.js';
+import { Watchdog, computerBusy, processTable, type Quiet } from './watchdog.js';
 import { isMediaNote, prepareMedia } from './media.js';
 import { allowedFile, ticketFolders } from './conversations.js';
 import { DEFAULT_QUALITY, builderLevel, describeLevel, effortOn, personLevels, resolveLevel, stepCaps } from './levels.js';
@@ -92,9 +92,9 @@ import { parallelLimit } from '../core/settings.js';
 import { answerProblem, dependsProblem, scanProblem } from './answers.js';
 import { checkLane, treeOf, watchLane, type Lane } from './lane.js';
 import { hookFiles, isHookFile } from './hook-files.js';
-import { endStep, nextPart, pauseClock, resumeClock, slowStep, startStep, stepDoing, timedStep } from '../board/clock.js';
+import { endStep, nextPart, ownCheckEnded, pauseClock, ranFor, resumeClock, runsFor, slowStep, startStep, stepDoing, timedStep } from '../board/clock.js';
 import { readUsual } from '../board/usual.js';
-import { QUEUED, queuedLine } from '../board/now.js';
+import { QUEUED, queuedLine, slowActivity } from '../board/now.js';
 import { firstOpenTicket, waitsForFirst, waitsForFirstWords } from '../board/first-story.js';
 import { TOOLS_CHECKING, toolsHold, waitsForTools, type ToolBlock } from './tools/index.js';
 import { WEB_VERSION, picturesHold, picturesWay, untilGot, type PicturesWay } from './phone/plan.js';
@@ -1100,12 +1100,15 @@ export class LiveSquad {
     }
     const rows = processTable();
     const usual = readUsual(this.bp);
+    // A busy computer makes every step slower: the card says so, from this look.
+    const busy = computerBusy();
     for (const id of keys) {
       const t = readTicket(this.bp, id);
       if (!t) continue;
       const snoozed = t.quietSnoozedUntil && Date.parse(t.quietSnoozedUntil) > Date.now();
       // Quiet, or past twice its usual time: either way the person sees a card with what it is doing.
-      this.setQuiet(id, snoozed ? null : (this.dog.check(id, Date.now(), rows) ?? slowStep(t, usual)));
+      const q = snoozed ? null : (this.dog.check(id, Date.now(), rows) ?? slowStep(t, usual));
+      this.setQuiet(id, q?.kind === 'long' && busy ? { ...q, busy } : q);
       // A step that needs the app may wait on a busy port: the card says what holds it (src/engine/free-port.ts).
       watchPort(this.bp, id);
     }
@@ -1125,9 +1128,9 @@ export class LiveSquad {
     try {
       const t = readTicket(this.bp, id);
       if (!t || (!q && !t.quiet)) return;
-      if (q && t.quiet && q.kind === t.quiet.kind && q.detail === t.quiet.detail) return;
+      if (q && t.quiet && q.kind === t.quiet.kind && q.detail === t.quiet.detail && Boolean(q.busy) === Boolean(t.quiet.busy)) return;
       this.update(id, (x) => {
-        if (q && x.quiet?.kind !== q.kind) addActivity(x, 'squad', q.kind === 'stuck' ? `Looks stuck: ${q.detail}` : `Taking long: ${q.detail}`);
+        if (q && x.quiet?.kind !== q.kind) addActivity(x, 'squad', q.kind === 'stuck' ? `Looks stuck: ${q.detail}` : slowActivity(x, q));
         // What the last look found on the app's port stays until the next look.
         if (q) x.quiet = { ...q, ...(x.quiet?.port && q.kind === x.quiet.kind ? { port: x.quiet.port } : {}) };
         else delete x.quiet;
@@ -1321,8 +1324,10 @@ export class LiveSquad {
       if (!line || Date.now() - last < 700) return;
       last = Date.now();
       // The status and the card get plain words; the exact command stays in the Conversation tab's full log.
-      const plain = plainToolLine(e, cwd) ?? DOING.other;
+      const said = plainToolLine(e, cwd) ?? DOING.other;
       this.update(id, (t) => {
+        // The words follow what the step is about: writing tests, fixing what its own run of the tests found.
+        const plain = stepWords(said, t);
         t.status = plain;
         t.live = true;
         stepDoing(t, plain);
@@ -1417,8 +1422,15 @@ export class LiveSquad {
       ...(guard ? { guard } : {}),
       onStart: (name) =>
         this.update(id, (x) => {
-          x.status = CHECK_DOING[name]!;
-          stepDoing(x, x.status);
+          x.status = OWN_CHECK_DOING[name];
+          runsFor(x, name, x.status);
+        }),
+      // What it found stays on the step's clock: the card says the Builder is fixing a failed test, not just slow.
+      onEnd: (name, ok, alone) =>
+        this.update(id, (x) => {
+          if (noted) ownCheckEnded(x, name, ok, alone);
+          else ranFor(x, name);
+          if (x.clock?.doing) x.status = x.clock.doing;
         }),
       ...(noted ? { onRun: (run: { names: CheckName[]; only?: string }) => this.noteRun(id, cwd, run) } : {}),
     };
@@ -3099,7 +3111,11 @@ export class LiveSquad {
   private async setUpAgain(id: string, c: { repo: RepoInfo; dir: string }): Promise<{ ran: boolean; failed?: CheckResult }> {
     const setup = c.repo.commands.setup?.trim();
     if (!setup || !fs.existsSync(c.dir) || readTicket(this.bp, id)?.setupFor?.[c.repo.path] === (await setupPrintNow(c.dir))) return { ran: false };
-    this.update(id, (x) => addActivity(x, 'squad', 'New packages or database changes came into this copy, so squad-kit sets it up again'));
+    this.update(id, (x) => {
+      addActivity(x, 'squad', 'New packages or database changes came into this copy, so squad-kit sets it up again');
+      // A step on the clock says it is set up meanwhile, and is working while it runs.
+      runsFor(x, 'setup', DOING.setup);
+    });
     this.log('info', `Setting up the copy again: ${setup}`, id);
     // The story's work is not committed yet: only what the setup itself rewrites goes back.
     const theirs = await changedTracked(c.dir);
@@ -3114,6 +3130,7 @@ export class LiveSquad {
       this.update(id, (x) => addActivity(x, 'squad', "The copy's own database was out of step with the code, so squad-kit made it again"));
       r = await run();
     }
+    this.update(id, (x) => ranFor(x, 'setup'));
     const back = await putBackTracked(c.dir, { keep: theirs });
     if (back.length) this.log('info', `The setup command changed ${back.join(', ')}; squad-kit put ${back.length === 1 ? 'it' : 'them'} back`, id);
     if (!r.ok) return { ran: true, failed: { name: 'setup', command: setup, ok: false, output: r.output, seconds: r.seconds, ...(r.ended ? { ended: true } : {}) } };

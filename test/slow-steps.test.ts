@@ -35,16 +35,22 @@ afterEach(() => {
 });
 
 describe('a slow step on the sample board', () => {
-  it('gets the "Taking longer than usual" card with what it does and what happens at the limit', () => {
+  it('gets the "Taking longer than usual" card with why, what it does and what happens at the limit', () => {
     tick(bp);
     const t = readTicket(bp, 'SK-153')!;
     expect(t.quiet).toMatchObject({ kind: 'long', detail: 'The Builder has been on this step for 14 minutes. It usually takes 2 to 4 minutes.' });
-    expect(t.activity[0]!.text).toBe('Taking long: The Builder has been on this step for 14 minutes. It usually takes 2 to 4 minutes.');
-    const s = liveNow(t, readUsual(bp)).slow!;
+    // Its own run of the tests failed in this step, as on the story the owner watched: the same reason, and calm.
+    expect(t.activity[0]!.text).toBe('Taking longer than usual: the tests failed once, so the Builder is fixing them. Still working.');
+    const n = liveNow(t, readUsual(bp));
+    expect(n.line).toBe('Builder · step 6 of 6 · fixing a failed test');
+    const s = n.slow!;
     expect(s.title).toBe('Taking longer than usual');
-    expect(s.where).toBe('SK-153 · step 4 of 6');
-    expect(s.facts.map((f) => f.label)).toEqual(['Doing now', 'Last progress']);
-    expect(s.limit).toBe('If you do nothing, squad-kit stops this step at 60 minutes. All work is kept.');
+    expect(s.where).toBe('SK-153 · step 6 of 6');
+    expect(s.text).toBe('The tests failed once, so the Builder is fixing them.');
+    expect(s).toMatchObject({ calm: true, line: 'Longer than usual · 14 min · still working', why: { kind: 'own-fail', short: 'fixing a failed test' } });
+    expect(s.note).toBeUndefined();
+    expect(s.facts.map((f) => f.label)).toEqual(['How long', 'Doing now', 'Last progress', 'Time limit', 'Your part']);
+    expect(s.limit).toBe("squad-kit gives the Builder up to 60 min for all its steps together (31 min used so far). If it isn't done by then, squad-kit stops it and asks you what to do.");
     // A step within its usual time gets no card.
     expect(readTicket(bp, 'SK-145')!.quiet).toBeUndefined();
   });
@@ -74,7 +80,9 @@ describe('a slow step on the sample board', () => {
     expect(t.quiet).toBeUndefined();
     expect(t.waiting).toBeNull();
     expect(t.squad).toBeTruthy();
-    expect(t.clock).toMatchObject({ who: 'builder', step: 'build', part: 4 });
+    expect(t.clock).toMatchObject({ who: 'builder', step: 'build', part: 6 });
+    // A fresh clock: what failed before it is not on it.
+    expect(t.clock?.failed).toBeUndefined();
     expect(Date.parse(t.clock!.since)).toBeGreaterThan(Date.parse(before.clock!.since));
     expect(t.activity[0]!.text).toBe('Stopped the step and started it again, with the work so far');
   });
@@ -156,7 +164,7 @@ describe('the board API', () => {
   it('puts the live status on every ticket, and answers a status question in one call', async () => {
     const a = app();
     const board = (await (await a.request('/api/v1/board')).json()) as { tickets: { id: string; now?: { line: string } }[] };
-    expect(board.tickets.find((t) => t.id === 'SK-153')?.now?.line).toBe('Builder · step 4 of 6 · editing upload.component.ts');
+    expect(board.tickets.find((t) => t.id === 'SK-153')?.now?.line).toBe('Builder · step 6 of 6 · fixing a failed test');
     const one = (await (await a.request('/api/v1/tickets/SK-145')).json()) as { now: { state: string; time: string } };
     expect(one.now).toMatchObject({ state: 'working', time: '1 min · usually 2 to 4 min' });
     const status = (await (await a.request('/api/v1/tickets/SK-151/status')).json()) as { line: string };

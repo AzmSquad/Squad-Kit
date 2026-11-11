@@ -42,12 +42,15 @@ export function StepBar({ bar, big }: { bar?: LiveNow['bar']; big?: boolean }) {
   );
 }
 
-/** The card's line on the board: who, which step, what it does, how long, and the usual time. */
+/**
+ * The card's line on the board: who, which step, what it does, how long, and the usual time. Taking longer reads calm
+ * while it still works ("Longer than usual · 19 min · still working"), with why under it; amber only with no progress.
+ */
 export function CardLine({ t }: { t: Ticket }) {
   const n = t.now!;
   if (n.state === 'queued') return <Written as="div" className="nl1 quiet" text={n.line} />;
   const [who, ...rest] = n.line.split(' · ');
-  const slow = t.quiet;
+  const slow = n.slow;
   return (
     <>
       <div className="nl1">
@@ -55,11 +58,13 @@ export function CardLine({ t }: { t: Ticket }) {
         <Written lead={<b>{who}</b>} text={rest.length ? `· ${rest.join(' · ')}` : ''} />
       </div>
       {slow ? (
-        <div className={`nl2 slow ${slow.kind}`}>
-          {slow.kind === 'stuck' ? <TriangleAlert size={12} /> : <Clock size={12} />}
-          {slow.kind === 'stuck' ? 'Looks stuck' : 'Taking longer than usual'}
-          {n.seconds !== undefined && slow.kind === 'long' ? ` · ${n.time?.split(' · ')[0]}` : ''}
-        </div>
+        <>
+          <div className={`nl2 slow ${slow.kind} ${slow.calm ? 'still' : ''}`}>
+            {slow.kind === 'stuck' ? <TriangleAlert size={12} /> : <Clock size={12} />}
+            <span>{slow.kind === 'stuck' ? 'Looks stuck' : (slow.line ?? 'Longer than usual')}</span>
+          </div>
+          {slow.note && <Written as="div" className="nl3" text={slow.note} />}
+        </>
       ) : (
         n.time && <div className="nl2">{n.time}</div>
       )}
@@ -123,6 +128,8 @@ export function SlowPanel({ t }: { t: Ticket }) {
   const busy = act.isPending || t.stopRequested;
   if (!s) return null;
   const stuck = s.kind === 'stuck';
+  // Taking longer while it still works: a calm card. Nothing is needed from the person, so no amber.
+  const calm = !stuck && Boolean(s.calm);
   const more = () => act.mutate({ path: `/api/v1/tickets/${t.id}/keep-waiting`, body: { minutes: 10 }, done: 'OK. squad-kit stays quiet about it for 10 minutes.' });
   const again = () => act.mutate({ path: `/api/v1/tickets/${t.id}/restart`, done: 'Stopping the step. It starts again at once, with the work so far.' });
   const stop = () => act.mutate({ path: `/api/v1/tickets/${t.id}/stop`, done: 'Stopping. The work so far is kept.' });
@@ -130,7 +137,7 @@ export function SlowPanel({ t }: { t: Ticket }) {
   const free = () =>
     act.mutate({ path: `/api/v1/tickets/${t.id}/free-port`, done: 'Stopped it. The step starts again, with the work so far.' }, { onSettled: () => setFreeing(false) });
   return (
-    <section className={`slowcard ${stuck ? 'stuck' : ''}`} aria-label={s.title}>
+    <section className={`slowcard ${stuck ? 'stuck' : calm ? 'still' : ''}`} aria-label={s.title}>
       <div className="slowhead">
         {stuck ? <TriangleAlert size={17} /> : <Clock size={17} />}
         <b>{s.title}</b>
@@ -159,7 +166,7 @@ export function SlowPanel({ t }: { t: Ticket }) {
             </button>
           )}
           {!stuck && (
-            <button className="btn you" disabled={busy} onClick={more}>
+            <button className={`btn ${calm ? '' : 'you'}`} disabled={busy} onClick={more}>
               Give it 10 more minutes
             </button>
           )}
@@ -185,7 +192,8 @@ export function SlowPanel({ t }: { t: Ticket }) {
           </details>
         )}
         <div className="slowfoot">
-          <span>{s.limit ?? 'Nothing is lost whatever you choose.'}</span>
+          {/* Taking longer says its limit among the facts. */}
+          <span>{(stuck && s.limit) || 'Nothing is lost whatever you choose.'}</span>
           <span className="grow" />
           <Cmd text={s.freePort ? `squad unstick ${t.id} --free-port` : stuck && s.canEnd ? `squad unstick ${t.id}` : `squad wait ${t.id} --more 10m`} />
         </div>

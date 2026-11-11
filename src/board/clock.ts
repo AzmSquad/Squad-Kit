@@ -1,6 +1,7 @@
 import type { BoardPaths } from './store.js';
 import type { AgentName, Stage, StepClock, StepRun, Ticket, TimedStep } from './types.js';
 import { minutesWords, recordUsual, usualKey, usualOf, type Usual, type UsualBook } from './usual.js';
+import { FIXING, PASSED } from '../engine/plain-doing.js';
 
 /**
  * The clock of the step running on a ticket. The engines start it when a step starts, move it on with the Builder's
@@ -50,7 +51,8 @@ export function startStep(t: Ticket, c: Omit<StepClock, 'since'>, at = Date.now(
   // What it waited moves its start on, so the time so far is the time it ran.
   const waited = same?.paused ? Math.max(0, at - Date.parse(same.paused)) : 0;
   const since = same ? iso(Date.parse(same.since) + waited) : iso(at);
-  const { paused: _paused, ...goesOn } = same ?? ({} as Partial<StepClock>);
+  // What squad-kit ran for the last run ended with it.
+  const { paused: _paused, running: _running, ...goesOn } = same ?? ({} as Partial<StepClock>);
   t.clock = {
     ...goesOn,
     who: c.who,
@@ -117,6 +119,8 @@ export function nextPart(bp: BoardPaths, t: Ticket, part: number, at = Date.now(
   c.since = iso(at);
   delete c.resumed;
   delete c.paused;
+  // What failed in the plan step before says nothing about why this one takes long.
+  delete c.failed;
 }
 
 /** The step's latest action, in plain words: its last progress. */
@@ -124,6 +128,35 @@ export function stepDoing(t: Ticket, line: string, at = Date.now()): void {
   if (!t.clock || !line) return;
   t.clock.doing = line;
   t.clock.doingAt = iso(at);
+  delete t.clock.running;
+}
+
+/** squad-kit itself starts something for the step (a check, the copy's setup): the step is working while it runs. */
+export function runsFor(t: Ticket, what: NonNullable<StepClock['running']>, line: string, at = Date.now()): void {
+  stepDoing(t, line, at);
+  if (t.clock) t.clock.running = what;
+}
+
+/** What squad-kit ran for the step ended: that is progress too. */
+export function ranFor(t: Ticket, what: NonNullable<StepClock['running']>, at = Date.now()): void {
+  if (t.clock?.running !== what) return;
+  delete t.clock.running;
+  t.clock.doingAt = iso(at);
+}
+
+/**
+ * One of the Builder's own runs of a check ended in its step (run_checks). One that did not pass is kept on the clock
+ * until a run of that whole check passes (one test file alone does not count), and the Builder's work is fixing it.
+ * One that passed says so, unless something it ran before still fails.
+ */
+export function ownCheckEnded(t: Ticket, check: 'test' | 'lint' | 'build', ok: boolean, alone = false, at = Date.now()): void {
+  const c = t.clock;
+  if (!c || c.who !== 'builder') return ranFor(t, check, at);
+  const was = c.failed?.check === check ? c.failed : undefined;
+  if (!ok) c.failed = { check, times: (was?.times ?? 0) + 1, at: iso(at) };
+  else if (was && !was.fixed && !alone) was.fixed = iso(at);
+  const open = c.failed && !c.failed.fixed ? c.failed.check : undefined;
+  stepDoing(t, open ? FIXING[open] : PASSED[check], at);
 }
 
 /**

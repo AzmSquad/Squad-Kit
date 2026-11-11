@@ -13,8 +13,8 @@ import '../styles/tools.css';
  * "What this project needs": every tool for a smooth experience on this computer, Required first. Each line says what
  * it gives, whether it is here, what it is used for, and who installs it: a Get it button when squad-kit can, the
  * official steps and Check again when only you can. A copy of yours that is too old gets an Update button when
- * squad-kit can update it safely, with a warning to OK first, and the steps stay below. A story stopped by a tool links
- * to its line here.
+ * squad-kit can update it safely, with a warning to OK first, and the steps stay below. A Ready copy older than its makers
+ * recommend says so, with the steps to update it, and stops nothing. A story stopped by a tool links to its line here.
  */
 
 const ACTION_WORDS: Record<string, string> = { build: 'Building', checks: 'Checks', pictures: 'Phone pictures', 'start-app': 'Start', 'try-it': 'Try it yourself' };
@@ -212,14 +212,18 @@ function Line({ l, hit, busy, onCheck }: { l: ToolLine; hit: boolean; busy: bool
           </div>
         )}
         {needsYou && l.update && <UpdateIt l={l} busy={busy} />}
-        {needsYou && l.installer === 'you' && (
+        {(needsYou || l.recommended) && l.installer === 'you' && (
           <div className="tl-act">
             {l.update ? (
               <span className="tl-or">Or do it yourself:</span>
             ) : l.cantUpdate ? (
               <span>{l.cantUpdate}</span>
             ) : (
-              l.reason && <span>You install it: squad-kit can't, as {l.reason}.</span>
+              l.reason && (
+                <span>
+                  You {l.recommended ? 'update' : 'install'} it: squad-kit can't, as {l.reason}.
+                </span>
+              )
             )}
             {l.steps.length > 0 && (
               <ol>

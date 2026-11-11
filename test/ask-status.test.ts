@@ -102,9 +102,28 @@ describe('the answers in English', () => {
   it('says when it is slow or stopped, instead of "no problem"', () => {
     const slow = building({ clock: { who: 'builder', step: 'build', part: 3, since: ago(900) } });
     slow.quiet = { since: ago(900), kind: 'long', detail: 'The Builder has been on this step for 15 minutes. It usually takes 2 to 4 minutes.' };
-    expect(ask(slow, 'is there a problem?').lines[0]).toBe('It is slower than usual, but still working. The Builder has been on this step for 15 minutes. It usually takes 2 to 4 minutes.');
+    // Its last progress was when the plan step started, 15 minutes ago: slow, with no update for a while.
+    expect(ask(slow, 'is there a problem?').lines[0]).toBe('It is taking longer than usual, with no update for a few minutes. Nothing failed on the way, so it is most likely a bigger step than usual.');
     const stopped = ticket({ waiting: { kind: 'stuck', summary: 'The squad stopped and needs you' }, stuck: { question: 'The checks still fail after 3 tries.', options: [] } });
     expect(ask(stopped, 'is there a problem?').lines).toEqual(['Yes: the squad stopped and needs your decision.', 'The checks still fail after 3 tries.']);
+  });
+
+  it('says why it is slow, where it ends and that nothing is needed, as the card does', () => {
+    const slow = building({ clock: { who: 'builder', step: 'build', part: 3, since: ago(900), began: ago(1500), doing: 'Fixing a failed test', doingAt: ago(30), limit: 60, failed: { check: 'test', times: 1, at: ago(300) } } });
+    slow.quiet = { since: ago(900), kind: 'long', detail: 'The Builder has been on this step for 15 minutes. It usually takes 2 to 4 minutes.' };
+    const limit = "squad-kit gives the Builder up to 60 min for all its steps together (25 min used so far). If it isn't done by then, squad-kit stops it and asks you what to do.";
+    const a = ask(slow, 'is it stuck?');
+    expect(a.lines).toEqual([
+      'It is taking longer than usual, but it is still working. The tests failed once, so the Builder is fixing them.',
+      limit,
+      "You don't need to do anything. If you want, the card above can give it 10 more minutes, or stop it.",
+    ]);
+    expect(a.offers).toEqual([]);
+    expect(ask(slow, 'when will it be ready?').lines).toEqual(['It is taking longer than usual, so it is hard to say. The tests failed once, so the Builder is fixing them.', limit]);
+    // A busy computer, measured by the engine.
+    const busy = building({ clock: { who: 'builder', step: 'build', part: 3, since: ago(900), doingAt: ago(30), limit: 60 } });
+    busy.quiet = { since: ago(900), kind: 'long', detail: 'The Builder has been on this step for 15 minutes. It usually takes 2 to 4 minutes.', busy: true };
+    expect(ask(busy, 'is there a problem?').lines[0]).toBe('It is taking longer than usual, but it is still working. Your computer is busy, so steps run slower.');
   });
 
   it('answers when, what, next and cost', () => {

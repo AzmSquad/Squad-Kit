@@ -3,6 +3,7 @@ import { countSampleStep } from './demo-cost.js';
 import { needsSpec, wayOptions } from './actions.js';
 import { endStep, nextPart, slowStep, startStep, stepDoing } from './clock.js';
 import { readUsual } from './usual.js';
+import { slowActivity } from './now.js';
 import type { StepClock, Ticket } from './types.js';
 
 /**
@@ -117,7 +118,7 @@ export function watchDemoSlow(bp: BoardPaths, tickets: Ticket[], at = Date.now()
     const q = snoozed ? null : slowStep(t, usual, at);
     if ((q?.detail ?? null) === (t.quiet?.detail ?? null)) continue;
     updateTicket(bp, t.id, (x) => {
-      if (q && x.quiet?.kind !== q.kind) addActivity(x, 'squad', `Taking long: ${q.detail}`);
+      if (q && x.quiet?.kind !== q.kind) addActivity(x, 'squad', slowActivity(x, q, at));
       if (q) x.quiet = q;
       else delete x.quiet;
     });

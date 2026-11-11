@@ -97,6 +97,7 @@ import { answerAsk } from '../../board/ask.js';
 import { withProblem } from '../../board/problem.js';
 import { DEFAULT_NETWORK, PACKAGE_HOSTS, blockedSites, guardNote, hostsProblem, networkPolicy, parseHosts, parseNetwork, sandboxStatus } from '../../engine/sandbox.js';
 import { guardSupport, sharedPath } from '../../engine/project-guard.js';
+import { windowStartNote } from '../../engine/checks.js';
 import { mountCostApi } from './cost.js';
 import { freePortAndRetry } from '../../engine/free-port.js';
 import { changeDecided } from '../../board/auto.js';
@@ -710,6 +711,15 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     if (/-api-\d+-answer\.[a-z]+$/.test(name)) return new Response(fs.readFileSync(abs), { headers: { 'content-type': 'application/octet-stream', 'content-disposition': `attachment; filename="${name}"` } });
     if (!name.endsWith('.png')) return c.text('not found', 404);
     return new Response(fs.readFileSync(abs), { headers: { 'content-type': 'image/png', 'cache-control': 'private, max-age=3600' } });
+  });
+
+  // What Settings says beside a typed start command that opens a window: the start squad-kit runs instead. The rule is the
+  // engine's (windowStartNote in engine/checks.ts). It reads the code folder asked for when it is one of the project's,
+  // else the project's own folder. Nothing is saved.
+  app.get('/api/v1/settings/start', (c) => {
+    const repo = c.req.query('repo') ?? '.';
+    const folder = boardExists(bp) && readMeta(bp).repos?.some((r) => r.path === repo) ? path.join(root, repo) : root;
+    return c.json({ note: windowStartNote(folder, c.req.query('command')) });
   });
 
   app.put('/api/v1/settings', async (c) => {

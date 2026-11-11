@@ -20,6 +20,14 @@ export function compareVersions(a: string, b: string): number {
 
 export const atLeast = (found: string, min: string): boolean => compareVersions(found, min) >= 0;
 
+/**
+ * The version a tool's makers recommend, when the one found still works but is older: 1.16.2 for CocoaPods 1.15.2. Null
+ * when it is that new, or its version is not known. It never stops anything.
+ */
+export function updateRecommended(found: string | undefined, recommended: string | undefined): string | null {
+  return found && recommended && !atLeast(found, recommended) ? recommended : null;
+}
+
 export interface TooOld {
   /** The oldest version that works. */
   needs: string;

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
@@ -201,9 +201,8 @@ function RepoSettings({ repo, multi }: { repo: RepoInfo; multi: boolean }) {
           {repo.summary && <Written className="note" style={{ fontFamily: 'inherit', marginLeft: 8 }} text={repo.summary} />}
         </h3>
       )}
-      {COMMAND_FIELDS.map((f) => (
-        <div className="maprow" key={f.key} style={{ alignItems: 'center' }}>
-          <b>{f.label}</b>
+      {COMMAND_FIELDS.map((f) => {
+        const input = (
           <input
             className="input mono"
             style={{ fontSize: 13 }}
@@ -211,8 +210,21 @@ function RepoSettings({ repo, multi }: { repo: RepoInfo; multi: boolean }) {
             placeholder={f.hint}
             onChange={(e) => setCommands({ ...current, [f.key]: e.target.value })}
           />
-        </div>
-      ))}
+        );
+        return (
+          <div className="maprow" key={f.key} style={{ alignItems: 'center' }}>
+            <b>{f.label}</b>
+            {f.key === 'start' ? (
+              <div>
+                {input}
+                <StartNote repo={repo.path} command={current.start} />
+              </div>
+            ) : (
+              input
+            )}
+          </div>
+        );
+      })}
       <div className="maprow" style={{ alignItems: 'center' }}>
         <b>Release branch</b>
         <input className="input mono" style={{ fontSize: 13 }} value={gitNow.base} onChange={(e) => setGit({ ...gitNow, base: e.target.value })} />
@@ -228,6 +240,31 @@ function RepoSettings({ repo, multi }: { repo: RepoInfo; multi: boolean }) {
       </div>
     </div>
   );
+}
+
+/**
+ * Beside a start command that opens a window, as typed: the start squad-kit runs instead, without one. The engine says
+ * which (GET /api/v1/settings/start); asked a moment after the typing stops.
+ */
+function StartNote({ repo, command }: { repo: string; command?: string }) {
+  const typed = command?.trim() ?? '';
+  const [asked, setAsked] = useState(typed);
+  useEffect(() => {
+    const t = setTimeout(() => setAsked(typed), 300);
+    return () => clearTimeout(t);
+  }, [typed]);
+  const q = useQuery({
+    queryKey: ['start-note', repo, asked],
+    queryFn: () => api<{ note: string | null }>(`/api/v1/settings/start?repo=${encodeURIComponent(repo)}&command=${encodeURIComponent(asked)}`),
+    enabled: Boolean(asked),
+    placeholderData: (before) => before,
+  });
+  const note = typed && asked ? q.data?.note : null;
+  return note ? (
+    <p className="note" style={{ margin: '6px 0 0' }}>
+      {note}
+    </p>
+  ) : null;
 }
 
 /** Where stories come from and where PRs go. The token stays on this computer, never in .squad. */

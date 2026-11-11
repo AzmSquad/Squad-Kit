@@ -300,6 +300,19 @@ describe("reading a project's own files", () => {
     expect(() => withNoWindow(app, 'flutter run -d macos', 'http://localhost:5000')).toThrow(NO_WINDOW_START);
   });
 
+  it('Settings says it beside a typed start that opens a window, with the start squad-kit runs instead, or none', async () => {
+    const { windowStartNote, withNoWindow } = await import('../src/engine/checks.js');
+    const app = path.join(tmp, 'typed');
+    write(app, { 'pubspec.yaml': 'name: wasl\ndependencies:\n  flutter:\n    sdk: flutter\n', 'web/index.html': '' });
+    expect(windowStartNote(app, 'flutter run')).toBe('This opens a window. squad-kit starts the app without one: flutter run -d web-server --web-port ${PORT:-8080}');
+    // The same start squad-kit really runs.
+    expect(windowStartNote(app, 'flutter run -d chrome')).toContain(withNoWindow(app, 'flutter run -d chrome', '').command);
+    // A start that serves on a port, or none typed: nothing to say.
+    for (const c of ['flutter run -d web-server --web-port 8080', 'npm run dev', '', undefined]) expect(windowStartNote(app, c), String(c)).toBeNull();
+    fs.rmSync(path.join(app, 'web'), { recursive: true });
+    expect(windowStartNote(app, 'flutter run -d macos')).toBe('This opens a window, and squad-kit starts apps without one. This project has no web version it could start instead.');
+  });
+
   it('a test command the setup step found gets the separate browser tests: the Mawid clone', () => {
     write(wt, { 'package.json': pkg({ test: 'vitest run', 'test:e2e': 'playwright test', dev: 'next dev' }) });
     expect(withBrowserTests(wt, 'npm test')).toBe('npm test && npm run test:e2e');

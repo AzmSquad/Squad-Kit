@@ -1,9 +1,10 @@
-import { describe, expect, it } from 'vitest';
-import type { FoundBook } from '../src/engine/tools/detect.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { Found, FoundBook } from '../src/engine/tools/detect.js';
 import type { PlaceKinds } from '../src/engine/tools/kinds.js';
 import { CATALOG } from '../src/engine/tools/catalog.js';
-import { atLeast, compareVersions, tooOld } from '../src/engine/tools/fit.js';
+import { atLeast, compareVersions, tooOld, updateRecommended } from '../src/engine/tools/fit.js';
 import { TOOLS_CHECKING, blockOf, linesFor, projectWords, waitsForTools } from '../src/engine/tools/index.js';
+import { printTools } from '../src/commands/tools.js';
 
 /**
  * Whether the versions fit, how much each tool matters for a project, and what each action needs: a missing Required
@@ -57,6 +58,14 @@ describe('versions', () => {
     expect(tooOld('java', '17', { java: '19.0.2' }, new Set())).toBeNull();
     // An unknown version never stops anyone.
     expect(tooOld('java', '17', {}, new Set())).toBeNull();
+  });
+
+  it('an update its makers recommend: only for an older version that is known', () => {
+    expect(updateRecommended('1.15.2', '1.16.2')).toBe('1.16.2');
+    expect(updateRecommended('1.16.2', '1.16.2')).toBeNull();
+    expect(updateRecommended('1.17.0', '1.16.2')).toBeNull();
+    expect(updateRecommended(undefined, '1.16.2')).toBeNull();
+    expect(updateRecommended('1.15.2', undefined)).toBeNull();
   });
 });
 
@@ -129,6 +138,49 @@ describe('the lines of a project', () => {
         expect(e.steps?.mac ?? e.steps?.all, e.id).toBeTruthy();
       } else expect(e.getSeconds, e.id).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('a tool older than its makers recommend', () => {
+  const cocoapodsAt = (cocoapods: Found) => lineOf(linesFor(FLUTTER_APP, { ...THIS_MAC, tools: { ...THIS_MAC.tools, cocoapods } }, 'mac', READY), 'cocoapods');
+  const GEM_STEPS = ['Open a terminal.', 'Run: gem update cocoapods', "If it says you don't have write permissions, run: sudo gem update cocoapods. It asks for your computer's password.", 'Come back here and press Check again.'];
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("CocoaPods 1.15.2 stays Ready and stops nothing, with a plain note and the steps for how it was installed", () => {
+    const gem = cocoapodsAt({ state: 'found', version: '1.15.2', where: '/Users/pm/.rvm/rubies/ruby-3.1.0/bin/pod' });
+    expect(gem).toMatchObject({ state: 'ready', version: '1.15.2', recommended: '1.16.2', blocks: [], note: 'An update to 1.16.2 or newer is recommended.' });
+    // From RubyGems: the password only when the computer asks for it, and squad-kit never asks for it.
+    expect(gem.steps).toEqual(GEM_STEPS);
+    // From Homebrew: Homebrew's own update.
+    expect(cocoapodsAt({ state: 'found', version: '1.15.2', where: '/opt/homebrew/bin/pod', managedBy: 'homebrew' }).steps).toEqual(['Open a terminal.', 'Run: brew upgrade cocoapods', 'Come back here and press Check again.']);
+    // An iPhone story's pictures do not wait for it.
+    const book = { ...THIS_MAC, tools: { ...THIS_MAC.tools, cocoapods: { state: 'found' as const, version: '1.15.2' } } };
+    expect(linesFor(FLUTTER_APP, book, 'mac').filter((l) => l.blocks.length).map((l) => l.id)).not.toContain('cocoapods');
+  });
+
+  it('new enough, or a version it could not read: nothing more to say', () => {
+    for (const f of [{ state: 'found', version: '1.16.2' }, { state: 'found', version: '1.17.0' }, { state: 'found' }] as Found[]) {
+      const l = cocoapodsAt(f);
+      expect(l.state).toBe('ready');
+      expect(l.recommended).toBeUndefined();
+      expect(l.note).toBeUndefined();
+      expect(l.steps[1]).toContain('sudo gem install cocoapods');
+    }
+  });
+
+  it('the terminal says it the same way, with the steps', () => {
+    let printed = '';
+    vi.spyOn(process.stdout, 'write').mockImplementation((s: string | Uint8Array) => ((printed += String(s)), true));
+    const lines = linesFor(FLUTTER_APP, { ...THIS_MAC, tools: { ...THIS_MAC.tools, cocoapods: { state: 'found', version: '1.15.2' } } }, 'mac', READY);
+    printTools({ system: 'mac', checkedAt: THIS_MAC.at, checking: false, summary: projectWords(FLUTTER_APP), places: FLUTTER_APP, lines, getting: null });
+    // eslint-disable-next-line no-control-regex
+    const plain = printed.replace(/\x1b\[[0-9;]*m/g, '');
+    expect(plain).toContain("✓ CocoaPods  Ready, 1.15.2\n");
+    expect(plain).toContain("      An update to 1.16.2 or newer is recommended.\n      You update it: squad-kit can't, as it may need your computer's password.\n");
+    expect(plain).toContain(GEM_STEPS.map((s, i) => `        ${i + 1}. ${s}`).join('\n'));
   });
 });
 

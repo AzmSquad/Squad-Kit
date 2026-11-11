@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Watchdog, descendants, parseClock, waitingOn, type ProcRow } from '../src/engine/watchdog.js';
+import { Watchdog, computerBusy, descendants, parseClock, waitingOn, type ProcRow } from '../src/engine/watchdog.js';
 
 const MIN = 60_000;
 const row = (pid: number, ppid: number, command: string, cpuSec = 0, elapsedSec = 600): ProcRow => ({ pid, ppid, command, cpuSec, elapsedSec });
@@ -104,5 +104,17 @@ describe('watchdog', () => {
     const rows = [row(10, 1, '/Users/me/.local/bin/claude -p ...', 3)];
     expect(dog.check('MA-1', t0 + 4 * MIN, rows)).toBeNull();
     expect(dog.check('MA-1', t0 + 7 * MIN, rows)).toMatchObject({ kind: 'stuck', detail: expect.stringMatching(/The AI tool has not answered/) });
+  });
+});
+
+describe('a busy computer', () => {
+  it('is one whose 1-minute load is well above its cores: one and a half times them', () => {
+    expect(computerBusy(18, 12)).toBe(true);
+    expect(computerBusy(15, 10)).toBe(true);
+    expect(computerBusy(14.9, 10)).toBe(false);
+    expect(computerBusy(9, 10)).toBe(false);
+    // A computer that cannot tell its cores or its load (Windows says 0) is never called busy.
+    expect(computerBusy(30, 0)).toBe(false);
+    expect(computerBusy(0, 8)).toBe(false);
   });
 });

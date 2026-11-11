@@ -141,6 +141,8 @@ export interface WindowChecks {
   guard?: GuardSpec;
   /** A check starts: the card's line says so. */
   onStart?(name: CheckName): void;
+  /** A check ran to its end: whether it passed, and whether it ran one test file alone. Never for a run cut off. */
+  onEnd?(name: CheckName, ok: boolean, alone: boolean): void;
   /**
    * A run starts, before its first command: the checks it runs, and `only` when it was asked for one test file. What
    * comes back, when anything does, is told what ran once every check of the run ran to its end; never for a run cut off.
@@ -1397,6 +1399,7 @@ export class AgentWindow {
         if (this.over) break;
         out.push({ name, command, ...r, ...(alone ? { only } : {}), ...(note ? { note } : {}) });
         this.s.say(`squad-kit ran ${alone ? 'one test file' : CHECK_WORDS[name]} for the ${this.s.who}: ${r.ok ? 'passed' : 'did not pass'}`);
+        c.onEnd?.(name, r.ok, Boolean(alone));
       }
       if (noted && !this.over && out.length === names.length) await noted(out).catch(() => undefined);
       return out;

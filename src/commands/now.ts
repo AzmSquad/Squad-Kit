@@ -46,10 +46,12 @@ export function nowLines(t: Ticket, now: LiveNow): string[] {
   const s = now.slow;
   if (s) {
     lines.push('');
-    lines.push(`  ${amber(s.title)}  ${kleur.gray(s.where)}`);
+    // Still working: calm, as on the board. Amber when it shows no progress.
+    lines.push(`  ${s.calm ? kleur.bold(s.title) : amber(s.title)}  ${kleur.gray(s.where)}`);
     lines.push(`${pad}${s.text}`);
     for (const f of s.facts) lines.push(`${pad}${kleur.gray(`${f.label}:`)} ${f.value}`);
-    if (s.limit) lines.push(`${pad}${kleur.gray(s.limit)}`);
+    // Taking longer has its limit among the facts.
+    if (s.limit && s.kind === 'stuck') lines.push(`${pad}${kleur.gray(s.limit)}`);
     const ways = s.kind === 'stuck' && s.canEnd ? [`squad unstick ${t.id}`] : [`squad wait ${t.id} --more 10m`];
     lines.push(`${pad}${[...ways, `squad stop ${t.id} --again`, `squad stop ${t.id}`].map(cmd).join(kleur.gray('   or   '))}`);
   }

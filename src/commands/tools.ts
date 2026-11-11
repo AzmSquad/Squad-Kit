@@ -64,7 +64,8 @@ export function printTools(v: ToolsView): void {
       out(kleur.gray(`      ${l.gives}. Used for: ${l.usedFor}`));
       if (l.blocks.length) out(kleur.yellow(`      Stops now: ${l.blocks.map((a) => ACTION_WORDS[a]).join(', ')}. Everything else keeps working.`));
       if (l.note) out(`      ${l.note}`);
-      if (l.state === 'ready' || l.state === 'not-here' || l.state === 'updating') continue;
+      // Ready goes on only when an update is recommended: its steps follow.
+      if ((l.state === 'ready' && !l.recommended) || l.state === 'not-here' || l.state === 'updating') continue;
       if (l.trouble) out(kleur.red(`      ${l.trouble}`));
       if (l.installer === 'squad-kit') {
         if (l.state !== 'getting') out(`      squad-kit gets it: ${cmd(l.command)}`);
@@ -75,7 +76,7 @@ export function printTools(v: ToolsView): void {
         out(kleur.gray(`      ${l.update.warning}`));
         out('      Or do it yourself:');
       } else if (l.cantUpdate) out(`      ${l.cantUpdate}`);
-      else if (l.reason) out(`      You install it: squad-kit can't, as ${l.reason}.`);
+      else if (l.reason) out(`      You ${l.recommended ? 'update' : 'install'} it: squad-kit can't, as ${l.reason}.`);
       l.steps.forEach((s, i) => out(`        ${i + 1}. ${s}`));
       out(`      Official page: ${kleur.underline(l.link)}`);
     }

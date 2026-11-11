@@ -6,7 +6,7 @@ import path from 'node:path';
 import { boardPaths } from '../src/board/store.js';
 import { HEALED_LINE, cacheHomeEnv, healHome, healedBefore, homeCachePlace, rememberHealed, storiesCacheDir } from '../src/engine/cache-home.js';
 import { outsideTheGuard, runCommand, startApp } from '../src/engine/checks.js';
-import { buildGuard, guardSupport, homeCachesRefused, projectGuardFor, ticketGuard, type GuardSpec } from '../src/engine/project-guard.js';
+import { bubblewrapArgs, buildGuard, guardSupport, homeCachesRefused, projectGuardFor, ticketGuard, type GuardSpec } from '../src/engine/project-guard.js';
 import { projectCacheDir, sandboxAsk } from '../src/engine/sandbox.js';
 import { claudeLaunch, claudeRunOptions } from '../src/modules/claude/index.js';
 
@@ -19,6 +19,7 @@ import { claudeLaunch, claudeRunOptions } from '../src/modules/claude/index.js';
  */
 
 const onMac = process.platform === 'darwin' && guardSupport().on;
+const onLinux = process.platform === 'linux' && guardSupport().on;
 const ROOT = fs.realpathSync(process.cwd());
 
 let base: string;
@@ -514,6 +515,52 @@ describe("Flutter's own version stamps", () => {
     expect(r.output).toContain('stamps-ok');
     expect(r.output.match(/not permitted/gi)).toHaveLength(refused(root).length);
     expect(fs.readFileSync(path.join(root, 'bin/cache/engine.stamp'), 'utf8')).toBe('v2\n');
+    for (const p of refused(root)) expect(fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : 'none', p).not.toBe('planted\n');
+  });
+
+  it("on Linux they are written in a throwaway bin/cache: Flutter's own files back in, read only, and none of it opened for real", () => {
+    const root = sdk();
+    const folder = path.join(root, 'bin/cache');
+    // What a stopped run left, Flutter's own lock, and a link of its own.
+    fs.writeFileSync(path.join(folder, 'engine.stamp.tmp.4242'), 'v1\n');
+    fs.writeFileSync(path.join(folder, 'lockfile'), '');
+    fs.symlinkSync('dart-sdk', path.join(folder, 'sdk-link'));
+    const g = buildGuard({ cwd: copy, root: project, cache, extraWrite: [cache], extraRead: [cache], home, platform: 'linux', flutter: root });
+    expect(g.writeExactlyIn).toEqual([folder]);
+    const args = bubblewrapArgs(g, 'flutter test');
+    const at = args.findIndex((a, i) => a === '--tmpfs' && args[i + 1] === folder);
+    expect(at).toBeGreaterThan(-1);
+    const inside = (flag: string) => args.flatMap((a, i) => (a === flag && args[i + 2]?.startsWith(`${folder}/`) ? [path.basename(args[i + 2]!)] : [])).sort();
+    // Each of Flutter's own back in, read only, as it is; the link made again.
+    expect(inside('--ro-bind-try')).toEqual(['artifacts', 'dart-sdk', 'flutter_tools.snapshot', 'lockfile']);
+    expect(args.slice(args.indexOf('--symlink'), args.indexOf('--symlink') + 3)).toEqual(['--symlink', 'dart-sdk', path.join(folder, 'sdk-link')]);
+    for (const a of args.filter((x) => x.startsWith(`${folder}/`))) expect(args.indexOf(a)).toBeGreaterThan(at);
+    // The stamps, and the one a stopped run left, are not there: the command writes them in the throwaway folder.
+    expect(args.filter((a) => /engine\.(stamp|realm)/.test(a))).toEqual([]);
+    // Nothing of Flutter is opened for real, and the private places, the copy and what an engineer allows come after.
+    expect(args.some((a, i) => (a === '--bind' || a === '--bind-try') && args[i + 2]?.startsWith(root))).toBe(false);
+    expect(args.lastIndexOf(path.join(folder, 'sdk-link'))).toBeLessThan(args.indexOf('--bind'));
+    // No bin/cache yet, or no Flutter: nothing to mount on.
+    fs.rmSync(folder, { recursive: true });
+    expect(bubblewrapArgs(g, 'flutter test')).not.toContain(folder);
+    expect(buildGuard({ cwd: copy, root: project, home, platform: 'linux', flutter: null }).writeExactlyIn).toBeUndefined();
+  });
+
+  it.runIf(onLinux)("on Linux a command writes them as Flutter does, and Flutter's own folder stays as it was", async () => {
+    const root = sdk();
+    const folder = path.join(root, 'bin/cache');
+    const before = fs.readdirSync(folder).sort();
+    const g = buildGuard({ cwd: copy, root: project, cache, extraWrite: [cache], extraRead: [cache], home, platform: process.platform, flutter: root });
+    const stamp = path.join(folder, 'engine.stamp');
+    const tmp = path.join(folder, 'engine.stamp.tmp.$$');
+    const r = await runCommand(copy, [`echo v2 > "${tmp}" && mv "${tmp}" "${stamp}" && echo "" > "${path.join(folder, 'engine.realm')}" && cat "${stamp}" "${path.join(folder, 'dart-sdk/bin/dart')}" && echo stamps-ok`, ...refused(root).map((p) => `echo planted > "${p}"`), 'exit 0'].join('; '), 30_000, { guard: g });
+    // Written and read back in the throwaway folder, with Flutter's own files beside them.
+    expect(r.output).toContain('v2\ntheirs\nstamps-ok');
+    // Flutter's own files and folders are refused; a new name lands in the throwaway folder.
+    expect(r.output).toMatch(/read-only file system/i);
+    expect(fs.readFileSync(stamp, 'utf8')).toBe('theirs\n');
+    expect(fs.readFileSync(path.join(folder, 'engine.realm'), 'utf8')).toBe('theirs\n');
+    expect(fs.readdirSync(folder).sort()).toEqual(before);
     for (const p of refused(root)) expect(fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : 'none', p).not.toBe('planted\n');
   });
 });

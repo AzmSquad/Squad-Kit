@@ -336,7 +336,7 @@ function rowDetails(meta: BoardMeta | undefined, root: string | undefined): Reco
     depends: code('board/depends.ts'),
     change: code('board/actions.ts'),
     sandbox: code('engine/sandbox.ts', ['On this computer', tools.map((t) => state(t.available, t.why)).join(', ') || 'Off'], ['Network level', NETWORK_NAME[level]], ['Also allowed', meta?.allowedHosts?.join(', ') || 'None yet'], ['Lists', 'src/engine/network-lists.ts']),
-    'flutter-stamps': code('engine/flutter-sdk.ts', ...FLUTTER_STAMPS.map((f): [string, string] => [f.file, f.why]), ['In', flutterOnPath()?.root ?? 'No Flutter on this computer']),
+    'flutter-stamps': code('engine/flutter-sdk.ts', ...FLUTTER_STAMPS.map((f): [string, string] => [f.file, f.why]), ['In', flutterOnPath()?.root ?? 'No Flutter on this computer'], ['On Linux', "Each command writes them in a throwaway bin/cache that goes when it ends, so Flutter's own folder stays as it was"]),
     xcode: code('engine/checks.ts', ['Runs outside the guard', 'xcodebuild build and test, only as squad-kit writes them for a native iPhone app (outsideTheGuard)'], ['Keeps', "Xcode's own sandboxes: for a package's manifest and plugins, and for build scripts when the project turns that on"], ['Builds in', "build/squad-kit-ios in the story's copy, with the guard's caches"]),
     guard: code('engine/project-guard.ts', ['On this computer', state(guard.on, guard.why)], ['Network', networkPolicy(level).commands === 'this-computer' ? 'Only this computer (Off)' : 'Open'], ['Also allowed', [...(meta?.guard?.allowRead ?? []), ...(meta?.guard?.allowWrite ?? [])].join(', ') || 'None yet']),
     lane: code('engine/lane.ts', ['Locked here', names(meta?.lockedFiles)]),

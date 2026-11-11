@@ -6,7 +6,7 @@ import { computerReady, type ComputerReady } from '../computer-ready.js';
 import { gitVersion } from '../git.js';
 import { ACTION_DOING, ACTION_WORDS, CATALOG, KIND_WORDS, PLATFORM_WORDS, toolEntry, type Priority, type System, type ToolAction, type ToolEntry, type ToolId } from './catalog.js';
 import { detectAll, foundFile, readFound, realHost, systemOf, writeFound, type DetectHost, type Found, type FoundBook } from './detect.js';
-import { atLeast, tooOld } from './fit.js';
+import { atLeast, tooOld, updateRecommended } from './fit.js';
 import { clearHalfGets, gettingNow, lastTrouble, startGets, type Getting, type ToolSource } from './get.js';
 import { projectKinds, type PlaceKinds, type Platform } from './kinds.js';
 import { kindsOfCommands } from '../find-commands.js';
@@ -56,6 +56,8 @@ export interface ToolLine {
   update?: { warning: string; seconds: number; command: string };
   /** Too old, and squad-kit can't update your copy: why, in one line. The steps say how to do it yourself. */
   cantUpdate?: string;
+  /** Ready, and older than its makers recommend: the version they recommend. It stops nothing; the steps say how to update. */
+  recommended?: string;
 }
 
 export interface ToolsView {
@@ -171,11 +173,15 @@ function stepsOf(e: ToolEntry, system: System): string[] {
   return [...(e.steps?.[system] ?? e.steps?.all ?? [])];
 }
 
-/** A copy that is too old: the steps to update it, by the tool that looks after it; the install steps when it has none. */
+/**
+ * A copy that is too old, or older than recommended: the steps to update it, by the tool that looks after it; the install
+ * steps when it has none.
+ */
 function updateStepsOf(e: ToolEntry, system: System, f: Found | undefined): string[] {
   const u = e.updateSteps;
   if (!u) return stepsOf(e, system);
-  return [...((f?.update?.managedBy ? u[f.update.managedBy] : undefined) ?? u.all ?? stepsOf(e, system))];
+  const by = f?.update?.managedBy ?? f?.managedBy;
+  return [...((by ? u[by] : undefined) ?? u.all ?? stepsOf(e, system))];
 }
 
 /** Git and the AI tool, as "Is your computer ready?" sees them. */
@@ -225,16 +231,19 @@ export function linesFor(places: PlaceKinds[], book: FoundBook | null, system: S
       const blocks = state === 'ready' ? [] : state === 'too-old' ? m.required.filter((a) => !old?.for || old.for.includes(a)) : m.required;
       const trouble = lastTrouble(e.id);
       const olderCopy = state === 'too-old' || state === 'updating';
+      // Ready, but older than its makers recommend: it stops nothing, and its line says so, with the steps to update it.
+      const later = state === 'ready' ? updateRecommended(f?.version, e.recommended) : null;
       const look = e.update && state === 'too-old' ? f?.update : undefined;
       const seconds = look && !look.cant ? updateGuess(e.id) : 0;
       line = {
         ...base,
-        ...(olderCopy && e.updateSteps ? { steps: updateStepsOf(e, system, f) } : {}),
+        ...((olderCopy || later) && e.updateSteps ? { steps: updateStepsOf(e, system, f) } : {}),
         name: e.name,
         state,
         ...(f?.version ? { version: f.version } : {}),
         ...(old ? { needs: old.needs, ...(old.why ? { why: old.why } : {}) } : {}),
-        ...(f?.note || e.note ? { note: [f?.note, e.note].filter(Boolean).join(' ') } : {}),
+        ...(later ? { recommended: later } : {}),
+        ...(f?.note || e.note || later ? { note: [later ? `An update to ${later} or newer is recommended.` : '', f?.note, e.note].filter(Boolean).join(' ') } : {}),
         ...(state === 'not-here' && e.notHere ? { notHere: e.notHere } : {}),
         blocks,
         ...(mine ? { getting } : {}),

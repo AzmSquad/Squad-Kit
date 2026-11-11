@@ -2,6 +2,7 @@ import { changesScreens } from './outside-step.js';
 import type { AgentName, QuietPort, Stage, StepClock, StepRun, Ticket, TimedStep, WaitingKind } from './types.js';
 import { HISTORY, WHO, runSeconds, stepSeconds } from './clock.js';
 import { durationWords, middle, minutesWords, rangeWords, usualOf, usualWords, type Usual, type UsualBook } from './usual.js';
+import { DOING, FIXING } from '../engine/plain-doing.js';
 
 /**
  * What is happening on a ticket right now, in plain words, worked out from the ticket's own record and the project's
@@ -14,6 +15,15 @@ import { durationWords, middle, minutesWords, rangeWords, usualOf, usualWords, t
  */
 export type NowState = 'working' | 'queued' | 'you' | 'stopping' | 'idle' | 'ready' | 'done';
 
+/** Why a step takes longer than usual, picked from what really happened on it, most specific first (slowWhy). */
+export interface SlowWhy {
+  kind: 'own-fail' | 'own-fixed' | 'checks' | 'review' | 'setup' | 'busy' | 'bigger';
+  /** A few words for the card: "fixing a failed test". */
+  short: string;
+  /** One sentence for the drawer, the activity and the Ask box: "The tests failed once, so the Builder is fixing them." */
+  sentence: string;
+}
+
 export interface SlowCard {
   kind: 'long' | 'stuck';
   title: string;
@@ -21,8 +31,16 @@ export interface SlowCard {
   where: string;
   text: string;
   facts: { label: string; value: string }[];
-  /** What happens at the hard limit. */
+  /** What happens at the hard limit, from the step's real limit. Taking longer has it among its facts too. */
   limit?: string;
+  /** Taking longer: why, in plain words. */
+  why?: SlowWhy;
+  /** Taking longer, with progress in the last few minutes (or squad-kit running something for it): a calm card, not amber. */
+  calm?: boolean;
+  /** Taking longer: the board card's second line, "Longer than usual · 19 min · still working". */
+  line?: string;
+  /** Taking longer: a small line under it with the reason, when the card's first line does not say it already. */
+  note?: string;
   /** The command it waits on can be ended. */
   canEnd: boolean;
   /** A program squad-kit started holds up the app: "Stop it and try again" stops it, after a confirm. */
@@ -385,12 +403,78 @@ export function noteWhenWords(t: Ticket, now: Pick<LiveNow, 'state' | 'role' | '
   }
 }
 
-function slowCard(t: Ticket, c: Omit<StepClock, 'since'> & { since?: string }, part: LiveNow['part'], lastAt: string | undefined, at: number): SlowCard | undefined {
+/** A check of the Builder's own runs, in words: what failed, what it is, what passes. */
+const CHECK_SAID: Record<'test' | 'lint' | 'build', { name: string; it: string; passes: string }> = {
+  test: { name: 'The tests', it: 'them', passes: 'they pass' },
+  lint: { name: 'The code check', it: 'it', passes: 'it passes' },
+  build: { name: 'The build', it: 'it', passes: 'it passes' },
+};
+
+const timesWords = (n: number) => (n === 1 ? 'once' : `${n} times`);
+
+/**
+ * Why the step takes longer than usual, from what really happened on it, most specific first: the Builder's own run of
+ * a check failed in this step (fixing it, or fixed); the checks failed and it fixes them; the Reviewer's second round;
+ * the copy being set up; the computer busy, as the engine measured it (quiet.busy); else most likely a bigger step.
+ */
+export function slowWhy(t: Ticket, c: Pick<StepClock, 'who' | 'doing' | 'running' | 'failed'> | undefined = t.clock, q: Pick<NonNullable<Ticket['quiet']>, 'busy'> | undefined = t.quiet): SlowWhy {
+  const f = c?.failed;
+  if (f) {
+    const w = CHECK_SAID[f.check];
+    return f.fixed
+      ? { kind: 'own-fixed', short: lowerFirst(FIXING[f.check]).replace(/^fixing/, 'fixed'), sentence: `${w.name} failed ${timesWords(f.times)} on the way. The Builder fixed ${w.it}, and ${w.passes} now.` }
+      : { kind: 'own-fail', short: lowerFirst(FIXING[f.check]), sentence: `${w.name} failed ${timesWords(f.times)}, so the Builder is fixing ${w.it}.` };
+  }
+  const tries = t.tries ?? 0;
+  if (c?.who === 'builder' && tries > 0) return { kind: 'checks', short: `fixing the checks (try ${tries + 1} of 3)`, sentence: `The checks failed ${timesWords(tries)}, so the Builder is fixing them (try ${tries + 1} of 3).` };
+  if (c?.who === 'reviewer' && (t.reviewRound ?? 0) > 1) return { kind: 'review', short: `review round ${t.reviewRound} of 2`, sentence: `The Reviewer asked for changes, so this is its second look (round ${t.reviewRound} of 2).` };
+  if (c && (c.running === 'setup' || c.doing === DOING.setup)) return { kind: 'setup', short: lowerFirst(DOING.setup), sentence: "This story's copy is being set up (packages and the like), which can take a few minutes." };
+  if (q?.busy) return { kind: 'busy', short: 'your computer is busy', sentence: 'Your computer is busy, so steps run slower.' };
+  return { kind: 'bigger', short: 'a bigger step than usual', sentence: 'Nothing failed on the way, so it is most likely a bigger step than usual.' };
+}
+
+/** Progress this recent shows the step is still working. */
+export const STILL_WORKING_S = 3 * 60;
+
+/** There was progress in the last few minutes, or squad-kit itself runs something for the step: it is still working. */
+export function stillWorking(c: Pick<StepClock, 'who' | 'running'>, lastAt: string | undefined, at = Date.now()): boolean {
+  if (c.who === 'squad' || c.running) return true;
+  return Boolean(lastAt) && (at - Date.parse(lastAt!)) / 1000 < STILL_WORKING_S;
+}
+
+/**
+ * What happens at the step's hard limit, as live.ts does it. An agent's run that reaches it is stopped, and the ticket
+ * waits for the person with its ways on (LiveSquad.fail). The Builder's limit is for its whole run, all its plan steps
+ * together. squad-kit's checks have it per check: one that runs longer is stopped and does not pass (checks.ts CHECK_MS).
+ */
+export function limitWords(c: Pick<StepClock, 'who' | 'limit' | 'step' | 'began' | 'paused'> & { since?: string }, part?: LiveNow['part'], at = Date.now()): string | undefined {
+  if (!c.limit) return undefined;
+  if (c.who === 'squad') return `squad-kit gives each check up to ${c.limit} min. One that runs longer is stopped and counts as not passed.`;
+  const asks = "If it isn't done by then, squad-kit stops it and asks you what to do.";
+  if (c.who === 'builder' && c.step === 'build' && part) {
+    const used = Math.floor(runSeconds({ ...c, since: c.since ?? new Date(at).toISOString() }, at) / 60);
+    return `squad-kit gives the Builder up to ${c.limit} min for all its steps together${used >= 1 ? ` (${used} min used so far)` : ''}. ${asks}`;
+  }
+  return `squad-kit gives this step up to ${c.limit} min. ${asks}`;
+}
+
+/** The activity's line when a step starts taking longer than usual: why, and that it is still working. */
+export function slowActivity(t: Ticket, q: Pick<NonNullable<Ticket['quiet']>, 'detail' | 'busy'>, at = Date.now()): string {
+  const c = t.clock;
+  if (!c) return `Taking longer than usual: ${q.detail}`;
+  const why = slowWhy(t, c, q);
+  return `Taking longer than usual: ${lowerFirst(why.sentence)} ${stillWorking(c, c.doingAt ?? c.since, at) ? 'Still working.' : q.detail}`;
+}
+
+/** What squad-kit runs for the step, in words: "the tests", "the setup". */
+const RUNNING_SAID: Record<NonNullable<StepClock['running']>, string> = { test: 'the tests', lint: 'the code check', build: 'the build', setup: "the copy's setup" };
+
+function slowCard(t: Ticket, c: Omit<StepClock, 'since'> & { since?: string }, part: LiveNow['part'], lastAt: string | undefined, at: number, seconds?: number): SlowCard | undefined {
   const q = t.quiet;
   if (!q) return undefined;
   const who = WHO[c.who];
   const where = `${t.id} · ${part ? `step ${part.n} of ${part.of}` : who}`;
-  const limit = c.limit ? `If you do nothing, squad-kit stops this step at ${c.limit} minutes. All work is kept.` : undefined;
+  const limit = limitWords(c, part, at);
   const port = portParts(q);
   const detail = slowDetail(q);
   if (q.kind === 'stuck') {
@@ -407,16 +491,37 @@ function slowCard(t: Ticket, c: Omit<StepClock, 'since'> & { since?: string }, p
       ...(detail ? { detail } : {}),
     };
   }
-  const facts: SlowCard['facts'] = [];
+  // Taking longer: why, how long, what it does and when it last moved, where it ends, and that nothing is needed.
+  const why = slowWhy(t, c, q);
+  const calm = stillWorking(c, lastAt, at);
+  const ago = lastAt ? Math.max(0, (at - Date.parse(lastAt)) / 1000) : undefined;
+  const facts: SlowCard['facts'] = [{ label: 'How long', value: q.detail }];
   if (c.doing) facts.push({ label: 'Doing now', value: upperFirst(c.doing) });
-  if (lastAt) {
-    const ago = Math.max(0, (at - Date.parse(lastAt)) / 1000);
-    facts.push({ label: 'Last progress', value: ago < 180 ? `${minutesWords(ago)} ago, so it is still working` : `${minutesWords(ago)} ago` });
+  if (ago !== undefined) {
+    const still = ago < STILL_WORKING_S ? ', so it is still working' : c.running ? `, and squad-kit is still running ${RUNNING_SAID[c.running]} for it` : '';
+    facts.push({ label: 'Last progress', value: `${minutesWords(ago)} ago${still}` });
   }
-  if ((t.tries ?? 0) > 0) facts.push({ label: 'Why it may be slow', value: `The checks failed ${t.tries === 1 ? 'once' : `${t.tries} times`}, so the Builder is fixing them (try ${(t.tries ?? 0) + 1} of 3).` });
-  else if ((t.reviewRound ?? 0) > 1) facts.push({ label: 'Why it may be slow', value: `The Reviewer asked for changes, so this is round ${t.reviewRound} of 2.` });
+  if (limit) facts.push({ label: 'Time limit', value: limit });
+  facts.push({ label: 'Your part', value: "You don't need to do anything. If it gets stuck, it will show in Waiting for you." });
   if (port.fact) facts.push(port.fact);
-  return { kind: 'long', title: 'Taking longer than usual', where, text: q.detail, facts, ...(limit ? { limit } : {}), canEnd: Boolean(q.pid), ...(port.freePort ? { freePort: port.freePort } : {}), ...(detail ? { detail } : {}) };
+  const line = ['Longer than usual', seconds !== undefined ? durationWords(seconds) : '', calm ? 'still working' : ago !== undefined ? `no update for ${durationWords(ago)}` : ''].filter(Boolean).join(' · ');
+  // The reason under it, unless the first line says it already, or it is only the plain guess.
+  const note = why.kind !== 'bigger' && why.short !== (c.doing ? shortDoing(c.doing) : '') ? upperFirst(why.short) : undefined;
+  return {
+    kind: 'long',
+    title: 'Taking longer than usual',
+    where,
+    text: why.sentence,
+    facts,
+    ...(limit ? { limit } : {}),
+    why,
+    calm,
+    line,
+    ...(note ? { note } : {}),
+    canEnd: Boolean(q.pid),
+    ...(port.freePort ? { freePort: port.freePort } : {}),
+    ...(detail ? { detail } : {}),
+  };
 }
 
 /**
@@ -508,7 +613,7 @@ export function liveNow(t: Ticket, book: UsualBook, at = Date.now(), saving = fa
     noteWhen: '',
   };
   now.noteWhen = noteWhenWords(t, now);
-  const slow = slowCard(t, t.clock ?? { ...c, doing: raw || undefined }, part, lastAt, at);
+  const slow = slowCard(t, t.clock ?? { ...c, doing: raw || undefined }, part, lastAt, at, seconds);
   if (slow) now.slow = slow;
   return now;
 }

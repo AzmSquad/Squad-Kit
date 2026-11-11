@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **A slow step says why, and calmly.** When a step takes longer than usual, the card says what is happening ("fixing a
+  failed test") and "still working", in the card's normal color; amber only when nothing has moved for 3 minutes. The
+  story's Now tab gives the reason (a failed test or check the Builder is fixing, a second review round, a setup
+  running, a busy computer), the last progress, the time limit and what squad-kit does then, and that you don't need to
+  do anything. The activity line and the answer to "is it stuck?" say the same.
+- **The card's words follow the real work.** A step writing tests no longer reads "building the app" because the
+  Builder's own build check ran last.
+- **CocoaPods out of date** shows on the Tools page as a recommended update, with steps. It stops nothing.
+- **Settings says when a start command would open a window,** and which start squad-kit uses instead.
+
+### Fixed
+
+- **Flutter inside the guard on Linux.** Flutter writes its version stamps on every run; on Linux each command now writes
+  them in a throwaway copy, so your Flutter folder stays as it was.
+
 ## [1.3.10] — 2026-11-11
 
 The first build of this work was tagged 1.3.9 and never published: its package went over the size limit then.

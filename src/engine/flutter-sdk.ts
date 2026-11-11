@@ -4,7 +4,8 @@ import path from 'node:path';
 /**
  * The person's Flutter, as the project's commands and the agents' shell find it, and the few files in its folder that
  * every run of `flutter` or `dart` writes. Flutter's folder is the person's program and stays read only in both guards,
- * so a story's code can never change what they run later. Only these stamps open, each one exactly.
+ * so a story's code can never change what they run later. Only these stamps open, each one exactly: on a Mac in the real
+ * folder, on Linux in a throwaway one that goes when the command ends.
  */
 
 /**
@@ -46,4 +47,13 @@ export function flutterStampRegexes(root: string): string[] {
 /** The same as paths for an AI tool's sandbox, which takes a glob for the one named by the run. */
 export function flutterStampGlobs(root: string): string[] {
   return FLUTTER_STAMPS.map((s) => path.join(root, s.glob));
+}
+
+/**
+ * The folders the stamps are in (bin/cache), each as a whole path. Bubblewrap opens only whole files and folders, never a
+ * file named by the run, so on Linux the guard gives each command a throwaway one in its place (bubblewrapArgs in
+ * engine/project-guard.ts).
+ */
+export function flutterStampFolders(root: string): string[] {
+  return [...new Set(FLUTTER_STAMPS.map((s) => path.join(root, path.dirname(s.file))))];
 }

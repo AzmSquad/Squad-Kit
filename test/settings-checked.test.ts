@@ -103,6 +103,32 @@ describe('where the code goes', () => {
   });
 });
 
+describe('a start command that opens a window', () => {
+  const note = async (command: string, repo?: string) =>
+    ((await (await api().request(`/api/v1/settings/start?command=${encodeURIComponent(command)}${repo ? `&repo=${encodeURIComponent(repo)}` : ''}`)).json()) as { note: string | null }).note;
+  const flutterApp = (dir: string) => {
+    fs.mkdirSync(path.join(dir, 'web'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'pubspec.yaml'), 'name: wasl\ndependencies:\n  flutter:\n    sdk: flutter\n');
+    fs.writeFileSync(path.join(dir, 'web', 'index.html'), '');
+  };
+
+  it('gets a plain line from the engine as it is typed: the start squad-kit runs instead', async () => {
+    flutterApp(project);
+    expect(await note('flutter run')).toBe('This opens a window. squad-kit starts the app without one: flutter run -d web-server --web-port ${PORT:-8080}');
+    expect(await note('flutter run -d web-server --web-port 8080')).toBeNull();
+    expect(await note('')).toBeNull();
+    // Nothing is saved by asking.
+    expect(readMeta(bp).commands).toEqual({});
+  });
+
+  it("in a project with several code folders, each folder's own files say; a folder that is not one of them is the project", async () => {
+    flutterApp(path.join(project, 'mobile'));
+    writeMeta(bp, { ...readMeta(bp), repos: [{ path: 'mobile', base: 'main', remote: '', commands: {} } as never] });
+    expect(await note('flutter run', 'mobile')).toContain('flutter run -d web-server');
+    expect(await note('flutter run', '../elsewhere')).toBe('This opens a window, and squad-kit starts apps without one. This project has no web version it could start instead.');
+  });
+});
+
 describe('the speech key', () => {
   const answering = (status: number) => {
     const asked: string[] = [];

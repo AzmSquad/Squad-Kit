@@ -48,6 +48,7 @@ const EXCUSED: Record<string, string> = {
   'sandbox.ts:MAX_BLOCKED_SITES': 'How many refused sites the log on Harness → Safety keeps. A refused site stops nothing.',
   'additions.ts:LOCK_LEFT_MS': 'A lock a closed program left behind. A save takes a moment, and nobody waits on this.',
   'additions.ts:LOCK_WAIT_MS': 'How long one save waits for another. It ends in a plain "try again".',
+  'now.ts:STILL_WORKING_S': 'How recent the last progress must be for a slow card to say "still working" in its calm color. It changes words and a color, and stops nothing.',
   'find-database.ts:GREP_MS': 'How long one look in the code for the database name may take. It stops no story: the copy is then made as usual.',
   // How often squad-kit looks at something. Nothing waits on them, and nothing stops at them.
   'try-app.ts:WATCH_MS': 'How often it looks at a copy someone is trying.',

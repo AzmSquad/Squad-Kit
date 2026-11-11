@@ -25,6 +25,49 @@ export const DOING = {
 /** squad-kit's own checks, by name, while they run. */
 export const CHECK_DOING: Record<string, string> = { test: DOING.tests, lint: DOING.check, build: DOING.build, start: DOING.start };
 
+type OwnCheck = 'test' | 'lint' | 'build';
+
+/**
+ * A check squad-kit runs for the Builder in its step (run_checks), while it runs. The build is a check there, not the
+ * app being built: "Building the app" on a step that writes tests read as the whole story being built.
+ */
+export const OWN_CHECK_DOING: Record<OwnCheck, string> = { test: DOING.tests, lint: DOING.check, build: 'Checking that the app builds' };
+
+/** The Builder's work after its own run of a check did not pass. */
+export const FIXING: Record<OwnCheck, string> = { test: 'Fixing a failed test', lint: 'Fixing the code check', build: 'Fixing the build' };
+
+/** The Builder's own run of a check passed. */
+export const PASSED: Record<OwnCheck, string> = { test: 'The tests passed', lint: 'The code check passed', build: 'The build passed' };
+
+/** Writing, in a plan step that writes tests. */
+export const WRITING_TESTS = 'Writing tests';
+
+/** A plan step whose title says it writes tests: "Write tests: …", "Tests for every "done when"", "Add e2e tests". */
+export function writesTests(title: string | undefined): boolean {
+  return Boolean(title && /\b(tests?|testing|e2e)\b/i.test(title));
+}
+
+/** Lines that say nothing of their own: what the step is about decides how they read. */
+const PLAIN_WORK = new Set<string>([DOING.write, DOING.read, DOING.plan, DOING.lookup, DOING.other]);
+
+/**
+ * The Builder's live line, after what its step is really about. After one of its own runs of a check did not pass, its
+ * writing and reading is fixing that; in a fix of the failed checks, fixing them; in a plan step that writes tests,
+ * writing is writing tests, and a build is a check that the app builds. Any other line, and other roles, stay as they are.
+ */
+export function stepWords(plain: string, t: { clock?: { who: string; step: string; part?: number; failed?: { check: OwnCheck; fixed?: string } }; steps?: { title: string }[]; tries?: number }): string {
+  const c = t.clock;
+  if (c?.who !== 'builder') return plain;
+  if (c.failed && !c.failed.fixed && PLAIN_WORK.has(plain)) return FIXING[c.failed.check];
+  // MAX_CHECK_TRIES in live.ts: the checks run 3 times at most before the person decides.
+  if (c.step === 'fix' && (t.tries ?? 0) > 0 && PLAIN_WORK.has(plain)) return `Fixing the checks (try ${(t.tries ?? 0) + 1} of 3)`;
+  if (c.step === 'build' && c.part && writesTests(t.steps?.[c.part - 1]?.title)) {
+    if (plain === DOING.write) return WRITING_TESTS;
+    if (plain === DOING.build) return OWN_CHECK_DOING.build;
+  }
+  return plain;
+}
+
 type Kind = keyof typeof DOING;
 
 /** Which line wins when one command line does several things. */

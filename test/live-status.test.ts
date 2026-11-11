@@ -2,8 +2,8 @@ import { afterAll, describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { SAVING, liveNow, queuedLine, shortDoing } from '../src/board/now.js';
-import { endStep, pauseClock, slowStep, startStep, trackStage, waitsNow } from '../src/board/clock.js';
+import { SAVING, limitWords, liveNow, queuedLine, shortDoing, slowActivity, slowWhy } from '../src/board/now.js';
+import { endStep, nextPart, ownCheckEnded, pauseClock, ranFor, runsFor, slowStep, startStep, stepDoing, trackStage, waitsNow } from '../src/board/clock.js';
 import { boardPaths } from '../src/board/store.js';
 import { usualKey } from '../src/board/usual.js';
 import type { Step, Ticket } from '../src/board/types.js';
@@ -177,12 +177,17 @@ describe('slow and stuck steps', () => {
     const s = liveNow(t, {}, AT).slow!;
     expect(s.title).toBe('Taking longer than usual');
     expect(s.where).toBe('RO-7 · step 4 of 6');
-    expect(s.text).toBe('The Builder has been on this step for 14 minutes. It usually takes 2 to 4 minutes.');
+    // Nothing failed on the way, and the computer is not busy: the plain reason.
+    expect(s.text).toBe('Nothing failed on the way, so it is most likely a bigger step than usual.');
     expect(s.facts).toEqual([
+      { label: 'How long', value: 'The Builder has been on this step for 14 minutes. It usually takes 2 to 4 minutes.' },
       { label: 'Doing now', value: 'Running npm test' },
       { label: 'Last progress', value: '40 seconds ago, so it is still working' },
+      { label: 'Time limit', value: "squad-kit gives the Builder up to 60 min for all its steps together (14 min used so far). If it isn't done by then, squad-kit stops it and asks you what to do." },
+      { label: 'Your part', value: "You don't need to do anything. If it gets stuck, it will show in Waiting for you." },
     ]);
-    expect(s.limit).toBe('If you do nothing, squad-kit stops this step at 60 minutes. All work is kept.');
+    expect(s).toMatchObject({ calm: true, line: 'Longer than usual · 14 min · still working' });
+    expect(s.note).toBeUndefined();
   });
 
   it('shows the Looks stuck card with what squad-kit checked, and whether the stuck command can be ended', () => {
@@ -198,6 +203,134 @@ describe('slow and stuck steps', () => {
     // The command and its process are for engineers: in the details, not the facts.
     expect(JSON.stringify(s.facts)).not.toMatch(/npm test|4242/);
     expect(s.detail).toBe('Waiting on: npm test (process 4242)');
+  });
+});
+
+describe('why a step takes longer than usual', () => {
+  /** The Builder 14 minutes on plan step 4, past twice its usual time, with its last action 40 seconds ago. */
+  const slowBuilder = (clock: Partial<NonNullable<Ticket['clock']>> = {}, over: Partial<Ticket> = {}) => {
+    const t = building({ steps: six(3), clock: { who: 'builder', step: 'build', part: 4, since: ago(14 * 60), began: ago(30 * 60), doing: 'Writing the code', doingAt: ago(40), limit: 60, ...clock }, ...over });
+    t.quiet = slowStep(t, {}, AT)!;
+    return t;
+  };
+  const failed = { check: 'test' as const, times: 1, at: ago(300) };
+
+  it('picks the reason from what really happened on the step, most specific first', () => {
+    // Everything at once: its own failed run of the tests wins.
+    const all = slowBuilder({ failed }, { tries: 1, reviewRound: 2 });
+    all.quiet!.busy = true;
+    expect(slowWhy(all)).toEqual({ kind: 'own-fail', short: 'fixing a failed test', sentence: 'The tests failed once, so the Builder is fixing them.' });
+    expect(slowWhy(slowBuilder({ failed: { ...failed, times: 2 } }))?.sentence).toBe('The tests failed 2 times, so the Builder is fixing them.');
+    expect(slowWhy(slowBuilder({ failed: { check: 'lint', times: 1, at: ago(300) } }))).toMatchObject({ short: 'fixing the code check', sentence: 'The code check failed once, so the Builder is fixing it.' });
+    expect(slowWhy(slowBuilder({ failed: { check: 'build', times: 1, at: ago(300) } }))).toMatchObject({ short: 'fixing the build', sentence: 'The build failed once, so the Builder is fixing it.' });
+    expect(slowWhy(slowBuilder({ failed: { ...failed, fixed: ago(60) } }))).toEqual({ kind: 'own-fixed', short: 'fixed a failed test', sentence: 'The tests failed once on the way. The Builder fixed them, and they pass now.' });
+    // Then the checks squad-kit ran failed, and the Builder fixes them.
+    const fix = slowBuilder({ step: 'fix', part: undefined }, { tries: 1, reviewRound: 2 });
+    fix.quiet!.busy = true;
+    expect(slowWhy(fix)).toEqual({ kind: 'checks', short: 'fixing the checks (try 2 of 3)', sentence: 'The checks failed once, so the Builder is fixing them (try 2 of 3).' });
+    // The Reviewer's second round.
+    const review = ticket({ stage: 'review', live: true, squad: { phase: 'review', nextAt: ago(-60) }, reviewRound: 2, clock: { who: 'reviewer', step: 'review', since: ago(20 * 60), limit: 15 } });
+    expect(slowWhy(review)).toMatchObject({ kind: 'review', short: 'review round 2 of 2', sentence: 'The Reviewer asked for changes, so this is its second look (round 2 of 2).' });
+    // The copy being set up: squad-kit's setup again, or the Builder installing packages.
+    const setup = slowBuilder({ running: 'setup', doing: "Setting up this story's copy" });
+    setup.quiet!.busy = true;
+    expect(slowWhy(setup)).toMatchObject({ kind: 'setup', sentence: "This story's copy is being set up (packages and the like), which can take a few minutes." });
+    // The computer is busy, as the engine measured it.
+    const busy = slowBuilder();
+    busy.quiet!.busy = true;
+    expect(slowWhy(busy)).toEqual({ kind: 'busy', short: 'your computer is busy', sentence: 'Your computer is busy, so steps run slower.' });
+    // Else the plain reason.
+    expect(slowWhy(slowBuilder())).toMatchObject({ kind: 'bigger', short: 'a bigger step than usual', sentence: 'Nothing failed on the way, so it is most likely a bigger step than usual.' });
+  });
+
+  it('reads calm while it still works, with the reason under the line when the line does not say it', () => {
+    const busy = slowBuilder();
+    busy.quiet!.busy = true;
+    const n = liveNow(busy, {}, AT);
+    expect(n.line).toBe('Builder · step 4 of 6 · writing the code');
+    expect(n.slow).toMatchObject({ kind: 'long', calm: true, line: 'Longer than usual · 14 min · still working', note: 'Your computer is busy', text: 'Your computer is busy, so steps run slower.' });
+    // Fixing a failed test: the first line says it already.
+    const fixing = liveNow(slowBuilder({ failed, doing: 'Fixing a failed test' }), {}, AT);
+    expect(fixing.line).toBe('Builder · step 4 of 6 · fixing a failed test');
+    expect(fixing.slow).toMatchObject({ calm: true, line: 'Longer than usual · 14 min · still working' });
+    expect(fixing.slow?.note).toBeUndefined();
+    // Running the tests again while fixing: the reason shows under it.
+    expect(liveNow(slowBuilder({ failed, doing: 'Running the tests' }), {}, AT).slow?.note).toBe('Fixing a failed test');
+  });
+
+  it('turns amber only with no progress for a few minutes, unless squad-kit itself runs something for it', () => {
+    const quiet = liveNow(slowBuilder({ doingAt: ago(4 * 60) }), {}, AT).slow!;
+    expect(quiet).toMatchObject({ calm: false, line: 'Longer than usual · 14 min · no update for 4 min' });
+    expect(quiet.facts.find((f) => f.label === 'Last progress')?.value).toBe('4 minutes ago');
+    // A long run of the tests for the Builder is the step working.
+    const tests = liveNow(slowBuilder({ doing: 'Running the tests', doingAt: ago(4 * 60), running: 'test' }), {}, AT).slow!;
+    expect(tests).toMatchObject({ calm: true, line: 'Longer than usual · 14 min · still working' });
+    expect(tests.facts.find((f) => f.label === 'Last progress')?.value).toBe('4 minutes ago, and squad-kit is still running the tests for it');
+    // Looks stuck stays what it was.
+    const stuck = building({ quiet: { since: ago(200), kind: 'stuck', detail: 'A command has run for 6 minutes and has done nothing for 3 minutes.' } });
+    expect(liveNow(stuck, {}, AT).slow).toMatchObject({ kind: 'stuck', title: 'Looks stuck' });
+    expect(liveNow(stuck, {}, AT).slow?.calm).toBeUndefined();
+  });
+
+  it("says the step's real limit and what really happens there", () => {
+    const at = (c: Parameters<typeof limitWords>[0], part?: { n: number; of: number }) => limitWords(c, part, AT);
+    expect(at({ who: 'reviewer', step: 'review', limit: 15, since: ago(60) })).toBe("squad-kit gives this step up to 15 min. If it isn't done by then, squad-kit stops it and asks you what to do.");
+    expect(at({ who: 'tester', step: 'proof', limit: 30, since: ago(60) })).toBe("squad-kit gives this step up to 30 min. If it isn't done by then, squad-kit stops it and asks you what to do.");
+    // The Builder's limit is for its whole run, all its plan steps together.
+    expect(at({ who: 'builder', step: 'build', limit: 60, since: ago(19 * 60), began: ago(41 * 60) }, { n: 7, of: 7 })).toBe("squad-kit gives the Builder up to 60 min for all its steps together (41 min used so far). If it isn't done by then, squad-kit stops it and asks you what to do.");
+    expect(at({ who: 'builder', step: 'fix', limit: 60, since: ago(30) })).toBe("squad-kit gives this step up to 60 min. If it isn't done by then, squad-kit stops it and asks you what to do.");
+    // squad-kit's checks have it per check: one that runs longer does not pass.
+    expect(at({ who: 'squad', step: 'checks', limit: 15, since: ago(60) })).toBe('squad-kit gives each check up to 15 min. One that runs longer is stopped and counts as not passed.');
+    expect(at({ who: 'analyst', step: 'questions', since: ago(60) })).toBeUndefined();
+    // On the drawer card, with nothing for the person to do.
+    const s = liveNow(slowBuilder({ failed, doing: 'Fixing a failed test' }), {}, AT).slow!;
+    expect(s.facts).toEqual([
+      { label: 'How long', value: 'The Builder has been on this step for 14 minutes. It usually takes 2 to 4 minutes.' },
+      { label: 'Doing now', value: 'Fixing a failed test' },
+      { label: 'Last progress', value: '40 seconds ago, so it is still working' },
+      { label: 'Time limit', value: "squad-kit gives the Builder up to 60 min for all its steps together (30 min used so far). If it isn't done by then, squad-kit stops it and asks you what to do." },
+      { label: 'Your part', value: "You don't need to do anything. If it gets stuck, it will show in Waiting for you." },
+    ]);
+  });
+
+  it('says the same reason in the activity, and that it is still working', () => {
+    const t = slowBuilder({ failed, doing: 'Fixing a failed test' });
+    expect(slowActivity(t, t.quiet!, AT)).toBe('Taking longer than usual: the tests failed once, so the Builder is fixing them. Still working.');
+    const quiet = slowBuilder({ doingAt: ago(6 * 60) });
+    expect(slowActivity(quiet, quiet.quiet!, AT)).toBe('Taking longer than usual: nothing failed on the way, so it is most likely a bigger step than usual. The Builder has been on this step for 14 minutes. It usually takes 2 to 4 minutes.');
+  });
+
+  it("keeps the Builder's own runs of the checks on its clock, per plan step", () => {
+    const t = building({ steps: six(3), clock: { who: 'builder', step: 'build', part: 4, since: ago(60) } });
+    runsFor(t, 'test', 'Running the tests', AT - 30_000);
+    expect(t.clock).toMatchObject({ doing: 'Running the tests', running: 'test' });
+    ownCheckEnded(t, 'test', false, false, AT);
+    expect(t.clock).toMatchObject({ doing: 'Fixing a failed test', failed: { check: 'test', times: 1 } });
+    expect(t.clock?.running).toBeUndefined();
+    // The code check passing says nothing new while the tests still fail.
+    ownCheckEnded(t, 'lint', true, false, AT);
+    expect(t.clock?.doing).toBe('Fixing a failed test');
+    ownCheckEnded(t, 'test', false, false, AT);
+    expect(t.clock?.failed?.times).toBe(2);
+    // One test file passing alone does not fix it; the whole tests passing does.
+    ownCheckEnded(t, 'test', true, true, AT);
+    expect(t.clock?.failed?.fixed).toBeUndefined();
+    ownCheckEnded(t, 'test', true, false, AT);
+    expect(t.clock).toMatchObject({ doing: 'The tests passed', failed: { check: 'test', times: 2, fixed: new Date(AT).toISOString() } });
+    // A new action ends what squad-kit ran; the next plan step starts with nothing failed.
+    runsFor(t, 'build', 'Checking that the app builds');
+    stepDoing(t, 'Writing tests');
+    expect(t.clock?.running).toBeUndefined();
+    // (Carried on after a restart, so this part teaches no usual time and nothing is written.)
+    const next = { ...t, clock: { ...t.clock!, resumed: ago(30) } };
+    nextPart(boardPaths(path.join(os.tmpdir(), 'squad-no-board', '.squad')), next, 5, AT);
+    expect(next.clock).toMatchObject({ part: 5 });
+    expect(next.clock.failed).toBeUndefined();
+    // squad-kit's setup again, ended: progress, and nothing runs for it any more.
+    runsFor(t, 'setup', "Setting up this story's copy", AT - 60_000);
+    ranFor(t, 'setup', AT);
+    expect(t.clock).toMatchObject({ doing: "Setting up this story's copy", doingAt: new Date(AT).toISOString() });
+    expect(t.clock?.running).toBeUndefined();
   });
 });
 

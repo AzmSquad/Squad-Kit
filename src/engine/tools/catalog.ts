@@ -32,6 +32,11 @@ export interface ToolEntry {
   needs: ToolNeed[];
   /** The oldest version that works, for everything it is used for. */
   min?: string;
+  /**
+   * The version its makers recommend, newer than the oldest that works. An older one stays Ready and stops nothing: its
+   * line says an update is recommended, with the update steps.
+   */
+  recommended?: string;
   /** The systems it can run on at all. Missing: every system. */
   systems?: System[];
   /** Why it is not on this computer when the system can't have it: "needs a Mac". */
@@ -152,12 +157,20 @@ export const CATALOG: ToolEntry[] = [
     name: 'CocoaPods',
     gives: "brings in the app's iPhone libraries when it builds for the iPhone",
     needs: [{ kinds: CROSS, platform: 'ios', priority: 'required', for: ON_PHONE }],
+    // Flutter's own: below 1.16.2 its doctor says "CocoaPods 1.15.2 out of date (1.16.2 is recommended)", and iPhone
+    // builds still work (cocoaPodsRecommendedVersion in flutter_tools/lib/src/macos/cocoapods.dart, read in Flutter 3.47.9).
+    recommended: '1.16.2',
     systems: ['mac'],
     notHere: 'needs a Mac',
     installer: 'you',
     why: "it may need your computer's password",
     steps: { mac: ['Open a terminal.', "Run: sudo gem install cocoapods. It asks for your computer's password.", CHECK_AGAIN] },
     link: 'https://guides.cocoapods.org/using/getting-started.html',
+    // A copy from RubyGems may be the person's own Ruby, or the Mac's, which only the computer's password changes.
+    updateSteps: {
+      all: ['Open a terminal.', 'Run: gem update cocoapods', "If it says you don't have write permissions, run: sudo gem update cocoapods. It asks for your computer's password.", CHECK_AGAIN],
+      homebrew: ['Open a terminal.', 'Run: brew upgrade cocoapods', CHECK_AGAIN],
+    },
   },
   {
     id: 'maestro',

@@ -211,7 +211,7 @@ export function scriptFor(t: Ticket): TicketScript {
 /** Status lines for tickets that work in the background of the demo board. */
 export const AMBIENT: Record<string, string[]> = {
   'SK-151': ['Analyst is reading the ticket', 'Analyst is checking the hearing calendar'],
-  'SK-153': ['Writing the code for the upload page', 'Writing the code for the upload limits'],
+  'SK-153': ['Fixing a failed test', 'Running the tests'],
   'SK-146': ['Running checks for the court filter', 'Checking filters on 3 screen sizes'],
   'SK-145': ['Reviewer is reading the login changes', 'Reviewer is checking the session handling'],
 };

@@ -22,6 +22,8 @@ export interface Found {
   note?: string;
   /** squad-kit got it itself, into its own folder. */
   own?: boolean;
+  /** Another tool that looks after this copy, from where it is (CocoaPods from Homebrew): its update steps are that tool's. */
+  managedBy?: ManagedBy;
   /**
    * Whether squad-kit can update this copy itself (Flutter), looked at by update.ts: the tool that looks after it, and
    * why squad-kit can't, when it can't. Nothing in it: squad-kit can, after you OK it.
@@ -286,7 +288,9 @@ async function cocoapods(h: DetectHost): Promise<Found> {
   if (!bin) return missing();
   const r = await h.run(bin, ['--version'], { timeoutMs: 20_000, env: { LANG: 'en_US.UTF-8' } });
   const version = podVersionOf(r.out);
-  return { state: 'found', where: bin, ...(version ? { version } : {}) };
+  // Homebrew's own CocoaPods links into its Cellar; any other copy came from RubyGems.
+  const brew = /\/Cellar\/cocoapods\//.test(h.real(bin));
+  return { state: 'found', where: bin, ...(version ? { version } : {}), ...(brew ? { managedBy: 'homebrew' as const } : {}) };
 }
 
 /** A Java of the person's own, from JAVA_HOME or the PATH. The Mac's own /usr/bin/java is only a stand-in when no Java is installed. */

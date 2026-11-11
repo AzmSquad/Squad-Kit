@@ -229,7 +229,8 @@ describe('a slow step in the live squad', () => {
     look.watch();
     const slow = readTicket(bp, id)!;
     expect(slow.quiet).toMatchObject({ kind: 'long', detail: 'The Reviewer has been on this step for 20 minutes. It usually takes 2 to 4 minutes.' });
-    expect(liveNow(slow, readUsual(bp)).slow?.limit).toBe('If you do nothing, squad-kit stops this step at 15 minutes. All work is kept.');
+    expect(liveNow(slow, readUsual(bp)).slow?.limit).toBe("squad-kit gives this step up to 15 min. If it isn't done by then, squad-kit stops it and asks you what to do.");
+    expect(slow.activity[0]!.text).toMatch(/^Taking longer than usual: (nothing failed on the way, so it is most likely a bigger step than usual|your computer is busy, so steps run slower)\. /);
 
     keepWaiting(bp, id, 10);
     look.lastWatch = 0;

@@ -563,6 +563,14 @@ export interface SlowCard {
   text: string;
   facts: { label: string; value: string }[];
   limit?: string;
+  /** Taking longer: why, in plain words, picked from what really happened on the step. */
+  why?: { kind: 'own-fail' | 'own-fixed' | 'checks' | 'review' | 'setup' | 'busy' | 'bigger'; short: string; sentence: string };
+  /** Taking longer, with progress in the last few minutes: a calm card, not amber. */
+  calm?: boolean;
+  /** Taking longer: the board card's second line, "Longer than usual · 19 min · still working". */
+  line?: string;
+  /** Taking longer: the reason under it, when the card's first line does not say it already. */
+  note?: string;
   canEnd: boolean;
   /** A program squad-kit started holds up the app: it may stop it, after a confirm. */
   freePort?: { port: number; what: string };
@@ -1350,6 +1358,8 @@ export interface ToolLine {
   update?: { warning: string; seconds: number; command: string };
   /** Too old, and squad-kit can't update your copy: why, in one line. */
   cantUpdate?: string;
+  /** Ready, and older than its makers recommend: the version they recommend. It stops nothing; the steps say how to update. */
+  recommended?: string;
 }
 
 export interface ToolsView {

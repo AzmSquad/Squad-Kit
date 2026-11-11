@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { DOING, plainCommand, plainDoing, plainToolLine } from '../src/engine/plain-doing.js';
+import { DOING, plainCommand, plainDoing, plainToolLine, stepWords, writesTests } from '../src/engine/plain-doing.js';
 
 /**
  * The status line and the card say what an agent is doing in plain words, never a raw command, pattern or path. The
@@ -82,5 +82,46 @@ describe('reading and searching', () => {
     expect(plainToolLine({ name: 'Grep', input: { pattern: 'id="(upcoming|up-)[^"]*"' } }, '/p')).toBe('Reading the code');
     expect(plainToolLine({ name: 'Read', input: { file_path: '/p/src/app.ts' } }, '/p')).toBe('Reading the code');
     expect(plainToolLine({ name: 'SomethingElse', input: {} }, '/p')).toBeNull();
+  });
+});
+
+describe('the words follow the plan step', () => {
+  const steps = [{ title: 'Show the rooms' }, { title: 'Write tests: the rooms list on a phone' }];
+  const builder = (part: number, more: object = {}) => ({ clock: { who: 'builder', step: 'build', part, ...more }, steps });
+
+  it('knows a plan step that writes tests from its title', () => {
+    expect(writesTests('Write tests: the rooms list on a phone')).toBe(true);
+    expect(writesTests('Tests for every "done when"')).toBe(true);
+    expect(writesTests('Add e2e coverage for booking')).toBe(true);
+    expect(writesTests('Show the testimonials page')).toBe(false);
+    expect(writesTests(undefined)).toBe(false);
+  });
+
+  it('on a step that writes tests: writing is writing tests, and a build is never "building the app"', () => {
+    expect(stepWords(DOING.write, builder(2))).toBe('Writing tests');
+    expect(stepWords(DOING.build, builder(2))).toBe('Checking that the app builds');
+    expect(stepWords(DOING.tests, builder(2))).toBe('Running the tests');
+    expect(stepWords(DOING.read, builder(2))).toBe('Reading the code');
+    // Another plan step keeps its words.
+    expect(stepWords(DOING.write, builder(1))).toBe('Writing the code');
+    expect(stepWords(DOING.build, builder(1))).toBe('Building the app');
+  });
+
+  it("after the Builder's own run of a check failed: its writing and reading is fixing it, until a run of it passes", () => {
+    const failed = (check: 'test' | 'lint' | 'build', fixed?: string) => builder(2, { failed: { check, times: 1, at: 'x', ...(fixed ? { fixed } : {}) } });
+    expect(stepWords(DOING.write, failed('test'))).toBe('Fixing a failed test');
+    expect(stepWords(DOING.read, failed('test'))).toBe('Fixing a failed test');
+    expect(stepWords(DOING.other, failed('lint'))).toBe('Fixing the code check');
+    expect(stepWords(DOING.write, failed('build'))).toBe('Fixing the build');
+    // Running something says what it runs.
+    expect(stepWords(DOING.tests, failed('test'))).toBe('Running the tests');
+    expect(stepWords(DOING.write, failed('test', 'y'))).toBe('Writing tests');
+  });
+
+  it('a fix of the failed checks says so, with its try; other roles keep their words', () => {
+    expect(stepWords(DOING.write, { clock: { who: 'builder', step: 'fix' }, tries: 1 })).toBe('Fixing the checks (try 2 of 3)');
+    expect(stepWords(DOING.write, { clock: { who: 'builder', step: 'fix' }, tries: 0 })).toBe('Writing the code');
+    expect(stepWords(DOING.write, { clock: { who: 'tester', step: 'proof' }, steps, tries: 1 })).toBe('Writing the code');
+    expect(stepWords(DOING.write, {})).toBe('Writing the code');
   });
 });
