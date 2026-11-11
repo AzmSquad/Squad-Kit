@@ -6,6 +6,9 @@ import path from 'node:path';
 // squad-kit keeps each project's local files in ~/.squad-kit (ADR-001). Tests use a temp folder instead, never the
 // developer's own.
 process.env.SQUAD_KIT_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-home-'));
+// squad-kit never gets its own tools (Maestro, Java) from the internet by itself in a test: a test that wants it gives a
+// made-up source (engine/phone/plan.ts useGetSource).
+process.env.SQUAD_KIT_NO_AUTO_GET = '1';
 // An app a test starts never asks npm for a new squad-kit; the update tests pass their own registry.
 fs.writeFileSync(path.join(process.env.SQUAD_KIT_HOME, 'settings.yaml'), 'checkForUpdates: false\n');
 

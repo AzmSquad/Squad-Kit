@@ -96,6 +96,7 @@ const EXCUSED: Record<string, string> = {
   'payment.ts:KEEP_MS': 'How long a finding about how you pay is remembered.',
   'apps.ts:NEW_FOR_MS': 'How long Your apps offers a new version.',
   'shots.ts:SETUP_MS': 'Getting the picture browser, the first time only. The story says so while it happens.',
+  'flutter-downloads.ts:PRECACHE_MS': "Flutter's own downloads before a Flutter command, once. Past it, the command runs anyway and says what it misses.",
   // What is kept or read, not what the squad may do.
   'conversations.ts:MAX_IMAGE': 'What the conversation log keeps.',
   'conversations.ts:MAX_RESULT': 'What the conversation log keeps.',
@@ -149,7 +150,7 @@ const STOPS_PER_FILE: Record<string, number> = {
   'actions.ts': 3,
   'breakdown-job.ts': 5,
   'budget.ts': 1,
-  'live.ts': 31,
+  'live.ts': 33,
   'sync.ts': 1,
 };
 
@@ -323,6 +324,37 @@ describe('safety', () => {
     const page = harnessView({ localFiles: [{ repo: '.', path: 'a/.env.dev' }], lockedFiles: [{ repo: '.', path: 'docker-compose.yml' }] } as never);
     expect(page.safety.local).toEqual(['a/.env.dev']);
     expect(page.safety.lockedByYou).toEqual(['docker-compose.yml']);
+  });
+});
+
+describe("Xcode's builds outside the guard", () => {
+  it('show as a rule, read only, right after the guard, in plain words', async () => {
+    const { OUTSIDE_THE_GUARD_WORDS } = await import('../src/engine/checks.js');
+    const build = view.stages.find((s) => s.id === 'build')!.gates;
+    const at = build.findIndex((g) => g.id === 'xcode');
+    // Beside the guard, with Flutter's own stamps.
+    expect(build.slice(build.findIndex((g) => g.id === 'guard') + 1, at + 1).map((g) => g.id)).toEqual(['flutter-stamps', 'xcode']);
+    expect(build[at]).toMatchObject({ name: 'iPhone builds', what: OUTSIDE_THE_GUARD_WORDS });
+    expect(build[at]!.you).toBeUndefined();
+    expect(OUTSIDE_THE_GUARD_WORDS).toContain("Xcode can't start inside squad-kit's guard");
+    expect(OUTSIDE_THE_GUARD_WORDS).toContain('the phone pictures and Start');
+    expect(OUTSIDE_THE_GUARD_WORDS).toContain('Everything else the squad runs stays inside the guard.');
+    expect(isPlain(OUTSIDE_THE_GUARD_WORDS)).toBe(true);
+    expect(Object.fromEntries(build[at]!.d!)).toMatchObject({ 'In the code': 'src/engine/checks.ts' });
+  });
+});
+
+describe("Flutter's own version stamps", () => {
+  it('show read only beside the guard, each file with why, in plain words', async () => {
+    const { FLUTTER_STAMPS } = await import('../src/engine/flutter-sdk.js');
+    const row = view.stages.find((s) => s.id === 'build')!.gates.find((g) => g.id === 'flutter-stamps')!;
+    expect(row.name).toBe("Flutter's own version stamps");
+    expect(isPlain(row.what)).toBe(true);
+    expect(row.you).toBeUndefined();
+    const d = Object.fromEntries(row.d!);
+    for (const f of FLUTTER_STAMPS) expect(d[f.file]).toBe(f.why);
+    expect(d['In the code']).toBe('src/engine/flutter-sdk.ts');
+    expect(FLUTTER_STAMPS.map((f) => f.file)).toEqual(['bin/cache/engine.stamp', 'bin/cache/engine.stamp.tmp.<number>', 'bin/cache/engine.realm']);
   });
 });
 

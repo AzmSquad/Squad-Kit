@@ -198,6 +198,8 @@ export function afterLastRetake(v: { shows: Shows; why: string; advice: string }
 export interface HandedIn {
   file: string;
   page?: string;
+  /** The device it was taken on: "iPhone 16 Pro". */
+  device?: string;
   note?: string;
   shows: Judged;
 }
@@ -207,6 +209,8 @@ function setMain(row: ProofShot, p: ProofPicture): void {
   row.after = p.after;
   if (p.page) row.page = p.page;
   else delete row.page;
+  if (p.device) row.device = p.device;
+  else delete row.device;
   if (p.note) row.note = p.note;
   else delete row.note;
 }
@@ -219,7 +223,7 @@ function setMain(row: ProofShot, p: ProofPicture): void {
  */
 export function addPictures(row: ProofShot, pictures: HandedIn[], same: (a: string, b: string) => boolean = (a, b) => a === b): void {
   for (const p of pictures) {
-    const picture: ProofPicture = { after: p.file, ...(p.page ? { page: p.page } : {}), ...(p.note ? { note: p.note } : {}) };
+    const picture: ProofPicture = { after: p.file, ...(p.page ? { page: p.page } : {}), ...(p.device ? { device: p.device } : {}), ...(p.note ? { note: p.note } : {}) };
     if (!row.after || same(row.after, p.file)) {
       setMain(row, picture);
       continue;
@@ -239,7 +243,7 @@ export function addPictures(row: ProofShot, pictures: HandedIn[], same: (a: stri
 /** One of a row's other pictures becomes its main one, and the main one takes its place beside it. */
 export function makeMain(row: ProofShot, at: number): void {
   const next = row.more![at]!;
-  row.more![at] = { after: row.after, ...(row.page ? { page: row.page } : {}), ...(row.note ? { note: row.note } : {}) };
+  row.more![at] = { after: row.after, ...(row.page ? { page: row.page } : {}), ...(row.device ? { device: row.device } : {}), ...(row.note ? { note: row.note } : {}) };
   setMain(row, next);
 }
 

@@ -12,6 +12,7 @@ import { OWN_GROUP, track } from './process-group.js';
 import { PACKAGE_CACHES, PRIVATE, gitPlaces, networkPolicy, noPushEnv, packageCacheEnv, projectCacheDir, projectNetwork, ticketCacheDir } from './sandbox.js';
 import type { NetworkLevel } from '../board/types.js';
 import { cacheHomeEnv, homeCachePlace, ownFolder, storiesCacheDir } from './cache-home.js';
+import { flutterOnPath, flutterStampRegexes } from './flutter-sdk.js';
 
 /**
  * squad-kit's own guard for the project's own commands: the checks (test, lint, build), the app's start, the setup
@@ -60,6 +61,8 @@ export interface GuardSpec {
   hookGit?: string;
   /** The project's cache home (engine/cache-home.ts): every tool keeps its downloads there, never in the person's own caches. */
   cache?: string;
+  /** Single files a command may write, each a whole-path regex: Flutter's own version stamps (engine/flutter-sdk.ts). */
+  writeExactly?: string[];
   /** What an engineer allowed this project in Settings, on top of the above. */
   allow?: ProjectGuard;
 }
@@ -229,8 +232,10 @@ export function agentPrivatePlaces(home: string = os.homedir(), platform: NodeJS
  * Builds the full spec: where the command may read and write, and what stays hidden. The network comes from the
  * project's level, read from its own settings unless given: the same policy the agents' commands get.
  */
-export function buildGuard(o: { cwd: string; root: string; cache?: string; extraWrite?: string[]; extraRead?: string[]; home: string; platform: NodeJS.Platform; allow?: ProjectGuard; network?: NetworkLevel }): GuardSpec {
+export function buildGuard(o: { cwd: string; root: string; cache?: string; extraWrite?: string[]; extraRead?: string[]; home: string; platform: NodeJS.Platform; allow?: ProjectGuard; network?: NetworkLevel; flutter?: string | null }): GuardSpec {
   const home = o.home;
+  // The person's Flutter writes its version stamps on every run: those few files open, each exactly, and nothing else of it.
+  const flutter = o.flutter === undefined ? flutterOnPath()?.root : o.flutter;
   const temp = withReal([os.tmpdir(), ...(o.platform === 'win32' ? [] : ['/tmp', '/private/tmp', '/private/var/folders'])]);
   const noRead = [...privatePlaces(home, o.platform), ...withReal([squadHome()])];
   // Seatbelt matches the canonical path (on a Mac /var is a link to /private/var), so the copy and everything the
@@ -251,6 +256,7 @@ export function buildGuard(o: { cwd: string; root: string; cache?: string; extra
     noWrite: [...new Set(withReal([...squadOwnFiles(), ...gitPlaces(real(o.cwd))]))],
     noConnect: [...new Set(withReal(runtimeSockets(home, o.platform)))],
     ...(o.cache ? { cache: real(o.cache) } : {}),
+    ...(flutter ? { writeExactly: flutterStampRegexes(real(flutter)) } : {}),
     ...(o.allow ? { allow: { ...(o.allow.allowRead ? { allowRead: withReal(o.allow.allowRead.map((p) => allowPath(p, home))) } : {}), ...(o.allow.allowWrite ? { allowWrite: withReal(o.allow.allowWrite.map((p) => allowPath(p, home))) } : {}) } } : {}),
     ...(networkPolicy(o.network ?? projectNetwork(o.root), [], o.platform).commands === 'this-computer' ? { offline: true } : {}),
   };
@@ -336,6 +342,8 @@ export function profileText(spec: GuardSpec): string {
   // A runtime's socket stays where it is: moved, it could be reached from its new place.
   for (const s of spec.noConnect) lines.push(`(deny file-write* (subpath ${sb(s)}))`);
   for (const a of allowWrite) lines.push(`(allow file-write* (subpath ${sb(a)}))`);
+  // Single files, each exactly: Flutter's version stamps in its own folder.
+  for (const r of spec.writeExactly ?? []) lines.push(`(allow file-write* (regex ${sbRegex(r)}))`);
   // The copy, and every folder above git's own, stay where they are: moved away and another put in their place, squad-kit's
   // own git would believe the settings it found there, and start a program of theirs outside the guard.
   for (const a of [spec.cwd, ...ancestorsOf([spec.cwd, ...spec.noWrite])]) lines.push(`(deny file-write-unlink (literal ${sb(a)}))`, `(deny file-write-create (literal ${sb(a)}))`);
@@ -521,16 +529,23 @@ export interface SpawnProjectOptions {
 }
 
 /**
+ * What a guarded command gets on top of the scrubbed base: every tool keeps its downloads in the project's cache home,
+ * never the person's own caches, as in the agent's shell, and a story's command pushes nowhere. A command squad-kit runs
+ * outside the guard by its one rule (outsideTheGuard in engine/checks.ts) gets the same.
+ */
+export function guardEnv(guard: GuardSpec | undefined, cwd: string): Record<string, string> {
+  return { ...(guard?.cache ? cacheHomeEnv(guard.cache, { wall: 'project', cwd }) : {}), ...(guard?.noPush ? noPushEnv() : {}) };
+}
+
+/**
  * The one place that spawns a project command. On a Mac it wraps the command in sandbox-exec, with the profile passed as
  * text: a file could be swapped by something an earlier command left running. On Linux in bubblewrap; elsewhere, or when no
  * guard is given, it runs the command as before.
  * The command still runs through a shell and in its own process group, so Stop ends the whole group as it did.
  */
 export function spawnProject(command: string, o: SpawnProjectOptions): ChildProcess {
-  // Every tool keeps its downloads in the project's cache home, never the person's own caches, as in the agent's shell.
-  const caches = o.guard?.cache ? cacheHomeEnv(o.guard.cache, { wall: 'project', cwd: o.cwd }) : {};
   // In a story's copy with a database of its own, the setting points at it, whatever the person's environment says.
-  const env = { ...projectEnv(), ...caches, ...(o.guard?.noPush ? noPushEnv() : {}), ...(o.env ?? {}), ...copyDbEnv(o.cwd) };
+  const env = { ...projectEnv(), ...guardEnv(o.guard, o.cwd), ...(o.env ?? {}), ...copyDbEnv(o.cwd) };
   const stdio = o.stdio ?? ['ignore', 'pipe', 'pipe'];
   const base: SpawnOptions = { cwd: o.cwd, detached: OWN_GROUP, stdio, env };
   if (o.guard && process.platform === 'darwin') {
@@ -664,6 +679,7 @@ export function homeCachesRefused(output: string, guard: GuardSpec, home: string
 function isBlocked(target: string, guard: GuardSpec): boolean {
   const under = (base: string) => target === base || target.startsWith(`${base.replace(/\/$/, '')}/`);
   if (guard.noWrite.some(under)) return true;
+  if ((guard.writeExactly ?? []).some((r) => new RegExp(r).test(target))) return false;
   // The copy and the few places the command may use are never the guard blocking it.
   if ([guard.cwd, ...guard.read, ...(guard.cache ? [guard.cache] : []), ...(guard.allow?.allowRead ?? []), ...(guard.allow?.allowWrite ?? [])].some(under)) return false;
   // A private place squad-kit hides, or a .env in the person's project folder outside the copy.

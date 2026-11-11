@@ -6,6 +6,7 @@ import { reposOf } from './repos.js';
 import { autoAskRule } from './auto-prompts.js';
 import { pagesOf, squadWorks, waitsAtReview, whereItStands } from '../board/at-review.js';
 import { MAX_PICTURES, MAX_PICTURES_PER_DONE_WHEN, criterionText } from './proof-verdict.js';
+import { EXPO_CREATE, EXPO_WEB_PORT, EXPO_WEB_START, FLUTTER_COMMANDS, FLUTTER_CREATE, FLUTTER_WEB_PORT, flutterWebStart } from './find-commands.js';
 
 /** Role briefs for the live squad, and the JSON shapes each role must answer in. */
 
@@ -561,6 +562,14 @@ function answersText(t: Ticket): string {
     .join('\n');
 }
 
+/**
+ * The start command a read hands in: the app served on a port, with no window, as squad-kit runs it headless. Phone
+ * apps are started by squad-kit itself. squad-kit also checks what it is given (opensAWindow in engine/find-commands.ts).
+ */
+export function startWithNoWindow(): string {
+  return `The start command serves the app on a port with no window (for Flutter: ${flutterWebStart()}), never a browser, a desktop window or a phone: squad-kit starts phone apps itself.`;
+}
+
 export function scanPrompt(meta: BoardMeta, nested: RepoInfo[], ctx?: PromptContext, corrections = '', idea = ''): string {
   const repos = nested.length
     ? `\nThis folder is a workspace with several code repos inside, each with its own git:\n${nested.map((r) => `- ${r.path}`).join('\n')}
@@ -589,6 +598,7 @@ Produce:
   lint checks code style, build builds it, start runs the app for a browser, url is where it opens.
   Leave a command empty if the project does not have it. When the project has a separate script for browser or
   end-to-end tests, test runs it too: "npm test && npm run test:e2e".
+  ${startWithNoWindow()}
 - users: who uses the project and how they get in, in one or two sentences, from what the code shows (sign-in, roles,
   pages), like "Office staff who book rooms. They pick their name from a list; there are no accounts."
 - can: 3 to 8 things it can do today, one short line each, in the words of the people who use it, like "Book a room
@@ -768,10 +778,19 @@ const NO_CODE_WORDS = `\n  This project has no code yet, so this ticket picks it
 /** squad-kit's own first story: a first version every other story builds on (board/first-story.ts). */
 const SET_UP_WORDS = `\n  This story sets up the product, and every other story waits for it. The whole document says what the product must do, so pick tools that fit all of it, and build none of its features now: only a first version that starts, with its tests. All the code stays in this one repo. One part is best, as most products are one program. Only when the document clearly needs parts that run by themselves, like a web app and an API, does each get its own folder. Then a package.json in the top folder holds the scripts dev, test and build, whatever the parts are written in, and each works from there for all of them, and installing in the top folder installs them all, because squad-kit looks for them there. Write in the README.md the full address a person opens, like http://localhost:5173.`;
 
+/**
+ * A phone app from a document: Flutter, one code base for iPhone, Android and the web, unless React Native is asked for.
+ * Made by its own tool, never written by hand, with the commands squad-kit finds in it later (engine/find-commands.ts).
+ * Read when a prompt is made, as those commands live in another module.
+ */
+export function phoneAppWords(): string {
+  return `\n  When the document or the ticket asks for a phone app, one people install on an iPhone or an Android phone, make it a Flutter app: one code base for iPhone, Android and the web. Make it React Native with Expo only when the document or the team asks for React Native. A phone app needs its phone's own tools, so the rule above on a compiler is not for it. Make the project with its tool's own create command in one step of the plan, never by writing its files yourself: for Flutter \`${FLUTTER_CREATE}\` in this folder, where <org> is the client's web address backwards, like com.acme (com.example when the document names none), and <name> the product's name in small letters with underscores, like visitor_log; for Expo \`${EXPO_CREATE}\`, then move everything in that new folder to the top of this folder. A Flutter app's commands: setup "${FLUTTER_COMMANDS.setup}", lint "${FLUTTER_COMMANDS.lint}", test "${FLUTTER_COMMANDS.test}", start "${flutterWebStart()}" and url "http://localhost:${FLUTTER_WEB_PORT}". An Expo app's: setup "npm install", test "npm test" (its Jest tests), start "${EXPO_WEB_START}" and url "http://localhost:${EXPO_WEB_PORT}". The web version is how squad-kit shows the app when this computer has no iPhone simulator. squad-kit's Tools page then shows the person what this computer needs for the app, like Flutter and Xcode, so never pick another technology because a tool seems missing here.`;
+}
+
 /** A project with no code: the Architect picks the technology itself now, and it is saved as a decision engineers can see. */
 function firstTechnology(meta?: BoardMeta, t?: Ticket): string {
-  if (t?.setsUp) return `${NO_CODE_WORDS}${SET_UP_WORDS}`;
-  return meta?.scan?.empty ? NO_CODE_WORDS : '';
+  if (t?.setsUp) return `${NO_CODE_WORDS}${phoneAppWords()}${SET_UP_WORDS}`;
+  return meta?.scan?.empty ? `${NO_CODE_WORDS}${phoneAppWords()}` : '';
 }
 
 /** The person chose to build the story without new tests ("Write new tests" off on the new story form). */
@@ -870,10 +889,20 @@ const MOCKUP_RULE = `- mockup: when screens is 1 or more, one self-contained HTM
   JavaScript for clicks are fine; no links to other sites, no images from the web. The person approves the look with
   the design, before anything is built. Leave it out when nothing on screen changes.`;
 
+/** The ticket's decision, as the Architect wrote it and the person approved it. */
+function decisionText(t: Ticket): string {
+  return t.decision ? `\nDecision for this ticket: ${t.decision.title}. Why: ${t.decision.why}` : '';
+}
+
+/** The plan's steps as written, numbered. */
+function stepsText(t: Ticket): string {
+  return (t.steps ?? []).map((s, i) => `${i + 1}. ${s.title}`).join('\n');
+}
+
 export function buildPrompt(meta: BoardMeta, decisions: Decision[], t: Ticket, ctx?: PromptContext): string {
-  const steps = (t.steps ?? []).map((s, i) => `${i + 1}. ${s.title}`).join('\n');
+  const steps = stepsText(t);
   const criteria = doneWhen(t);
-  const decision = t.decision ? `\nDecision for this ticket: ${t.decision.title}. Why: ${t.decision.why}` : '';
+  const decision = decisionText(t);
   return `You are the Builder of a software squad. Build the approved plan below in this folder.
 
 ${projectContext(meta, decisions, ctx)}
@@ -895,8 +924,19 @@ Rules:
   run tests that open a browser with squad-kit's run_checks tool, never yourself.
 - Never commit, push, switch branches, or change files outside this folder.
 - Wait for every command to finish (installs too). Never leave anything running in the background; this step ends when you answer.
-- If the plan does not cover a small choice, take the simplest one and say so in notes.
+- If the plan does not cover a small choice, take the simplest one and say so in notes.${t.setsUp ? `\n- ${MADE_BY_ITS_TOOL}` : ''}${builtWithXcode(meta) ? `\n- ${XCODE_IS_SQUAD_KITS}` : ''}
 ${askRule(t)}`;
+}
+
+/** The first story makes the app: with its tool's own create command, never by hand. */
+export const MADE_BY_ITS_TOOL = "Make a new app with its tool's own create command, as the plan says (like flutter create or create-expo-app), never by writing its files yourself.";
+
+/** A native iPhone app: Xcode runs only outside squad-kit's guard (outsideTheGuard in engine/checks.ts), so never in the Builder's shell. */
+export const XCODE_IS_SQUAD_KITS = "This is a native iPhone app: never run xcodebuild yourself, as Xcode can't start in your shell. squad-kit runs the iPhone build and tests after your step and shows you the result.";
+
+/** True when the project builds with Xcode: one of its saved commands is xcodebuild. */
+function builtWithXcode(meta: BoardMeta): boolean {
+  return reposOf(meta).some((r) => Object.values(r.commands).some((c) => typeof c === 'string' && /^\s*xcodebuild\s/.test(c)));
 }
 
 /**
@@ -1045,6 +1085,9 @@ function checksRan(t: Ticket, meta: BoardMeta, ctx?: PromptContext): string {
  */
 export function reviewPrompt(meta: BoardMeta, decisions: Decision[], t: Ticket, round: number, ctx?: PromptContext, files: string[] = []): string {
   const criteria = doneWhen(t);
+  // The plan as written, never the talk that made it: the Reviewer checks the change against the same page the Builder had.
+  const steps = stepsText(t);
+  const plan = steps ? `\n\nThe approved plan:\n${steps}` : '';
   const again = round > 1;
   const changed = files.length ? `\nFiles changed since ${t.baseCommit} (${files.length}): ${files.slice(0, 60).join(', ')}${files.length > 60 ? `, and ${files.length - 60} more` : ''}` : '';
   const asked = again && t.reviewAsked?.length ? `\nIn your last round you asked for:\n${t.reviewAsked.map((c) => `- ${c}`).join('\n')}\nThe Builder says these are fixed. Check each one in the code.` : '';
@@ -1065,11 +1108,11 @@ ${ticketContext(t)}
 
 Story: ${t.story}
 Done when:
-${criteria}
+${criteria}${decisionText(t)}${plan}
 
 ${look}${changed}${asked}
 ${checksRan(t, meta, ctx)}
-Check: does it do every "done when"? Does it follow the saved decisions? Real bugs, security holes${t.noNewTests ? `?
+Check: does it do every "done when"? Does it follow ${steps ? 'the plan and ' : ''}the saved decisions? Real bugs, security holes${t.noNewTests ? `?
 ${NO_NEW_TESTS}, so do not ask for new tests.` : ', missing tests?'}
 Were tests deleted, switched off or made weaker? That is a real problem unless the plan asks for it.
 ${notOnScreenRule(t)}
@@ -1107,7 +1150,7 @@ function canLook(meta: BoardMeta, ctx?: PromptContext): boolean {
  * takes a wrong one again, and hands in the files per "done when", one per part or case, with one plain note each. It
  * never runs a browser or the app itself, and only reads the code.
  */
-export function proofPrompt(meta: BoardMeta, t: Ticket, when: 'before' | 'after', ctx?: PromptContext, appUrl?: string, beforeSizes: Record<string, string> = {}, apiParts: string[] = []): string {
+export function proofPrompt(meta: BoardMeta, t: Ticket, when: 'before' | 'after', ctx?: PromptContext, appUrl?: string, beforeSizes: Record<string, string> = {}, apiParts: string[] = [], onPhone?: PhoneForPictures): string {
   const criteria = doneWhen(t);
   // Each "done when"'s before picture, so the after picture it pairs with is taken at the same size.
   const paired = doneWhenItems(t).flatMap((_, i) => {
@@ -1122,7 +1165,10 @@ export function proofPrompt(meta: BoardMeta, t: Ticket, when: 'before' | 'after'
 Done when:
 ${criteria}
 
-The app is running at ${url}; squad-kit started it and stops it. Use squad-kit's tools, never a browser or the app of
+${
+    onPhone
+      ? phoneToolsText(onPhone)
+      : `The app is running at ${url}; squad-kit started it and stops it. Use squad-kit's tools, never a browser or the app of
 your own (your shell only reads):
 - look_at_page: opens a page and gives back its address and what is on it (roles, names, text). Use it to find the
   names of the fields and buttons.
@@ -1132,7 +1178,8 @@ your own (your shell only reads):
   with their file names. Look at each one: when it does not show the "done when" (wrong page, an error, still
   loading, the wrong data), take it again with better steps.
 - start_app, stop_app, app_status: the app, should it stop. run_checks: the project's own saved tests, lint and build,
-  should you need them. i_am_stuck: anything technical in your way.
+  should you need them. i_am_stuck: anything technical in your way.`
+  }
 Read the code first for the pages, the labels, and the test sign-ins or sample data in the project's own seed,
 fixture or example files. Use only those, never a real person's details.
 When an example in a "done when" breaks another rule of the story (a date when the office is closed, a time outside
@@ -1193,6 +1240,29 @@ Never ask the person anything technical. Do not change project files: squad-kit 
 ${LOOK}`;
 }
 
+/** squad-kit's own phone for the pictures: its real devices by size, and the app's own link names. */
+export interface PhoneForPictures {
+  labels: Partial<Record<string, string>>;
+  links: string[];
+}
+
+/** The Tester's tools on squad-kit's phone, in place of the browser's: the same steps, by the words on the screen. */
+function phoneToolsText(p: PhoneForPictures): string {
+  const devices = Object.entries(p.labels).map(([size, name]) => `"${size}" is a real ${name}`).join(', ') || '"phone" is a real iPhone';
+  const page = p.links.length ? `"/" is the app's start screen, and another path opens by the app's own link, like "/book"` : `"/", the app's start screen: this app has no links of its own, so each shot starts there and its steps reach the screen`;
+  return `The app runs on squad-kit's own phone: an iPhone simulator squad-kit runs itself, hidden (${devices}). Use
+squad-kit's tools, never a simulator, a browser or the app of your own (your shell only reads):
+- look_at_page: opens the app on the phone, does the steps, and gives back what the screen shows as text, the words of
+  each part. Use it to find the words on the fields and buttons.
+- take_screenshots: for each shot, the screen to open (${page}), the steps to do there first (fill, click, select,
+  press, wait and so on, each naming its part of the screen by its words: role and name, label or text), the size,
+  and the language the app opens in ("en" by default, "ar" for Arabic). Each shot starts the app fresh. The pictures
+  come back to you with their file names and devices. Look at each one: when it does not show the "done when" (wrong
+  screen, an error, still loading, the wrong data), take it again with better steps.
+- run_checks: the project's own saved tests, lint and build, should you need them. i_am_stuck: anything technical in
+  your way.`;
+}
+
 /** The screenshots failed squad-kit's check: the Tester takes what is missing, told what was wrong. Its good pictures stay. */
 export function proofAgainPrompt(problems: string[]): string {
   return `squad-kit checked your last screenshots and some do not prove anything yet:
@@ -1212,6 +1282,8 @@ export interface PictureFile {
   file: string;
   page?: string;
   size?: string;
+  /** The device it was taken on: "iPhone 16 Pro", "Web version". */
+  device?: string;
   note?: string;
 }
 
@@ -1238,7 +1310,7 @@ export interface PictureToCheck extends Omit<PictureFile, 'file'> {
  */
 export function proofCheckPrompt(t: Ticket, pictures: PictureToCheck[]): string {
   const items = doneWhenItems(t);
-  const where = (p: Omit<PictureFile, 'file'> & { file?: string }) => `${p.file}${p.size || p.page ? ` (${[p.size, p.page ? `page ${p.page}` : ''].filter(Boolean).join(', ')})` : ''}`;
+  const where = (p: Omit<PictureFile, 'file'> & { file?: string }) => `${p.file}${p.size || p.device || p.page ? ` (${[p.size, p.device, p.page ? `page ${p.page}` : ''].filter(Boolean).join(', ')})` : ''}`;
   const list = pictures
     .map((p) =>
       [
@@ -1278,7 +1350,8 @@ them, and what the local data cannot show goes to off-screen with the reason. An
 opened here: judge by its status, type and size, and the person opens it.
 A picture is taken at one of two sizes: "phone" (390 wide) or "desktop" (1280 wide). When a "done when" names another
 width, judge the nearest size, and do not fault the picture for its size, or for being at another size than the
-picture from before the change.
+picture from before the change. A picture named with a real device (like iPhone 16 Pro or iPad Air) was taken on that
+phone or tablet, at its own size.
 ${EXAMPLES_FIT} When the Tester used the nearest example that fits, judge that example.
 
 ${list}

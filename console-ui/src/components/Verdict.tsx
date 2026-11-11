@@ -1,4 +1,5 @@
 import { Check, EyeOff, MonitorOff, X } from 'lucide-react';
+import { Link } from '@tanstack/react-router';
 import { assetUrl } from '../api/client';
 import type { AddedResult, ProofShot, Ticket } from '../api/types';
 import { pageOf, waitsAtReview } from '../lib/review';
@@ -47,11 +48,28 @@ export function MorePictures({ shot, first, onOpen }: { shot: ProofShot; first: 
             <figcaption>
               {m.note && <Written text={m.note} />}
               {pageOf(m) && <code>{pageOf(m)}</code>}
+              {m.device && <small className="shotdevice">{m.device}</small>}
             </figcaption>
           </figure>
         ))}
       </div>
     </div>
+  );
+}
+
+/**
+ * The pictures are of the app's web version, as its phone tools are missing on this computer: the one plain line, and
+ * the way to the Tools page line with what is needed.
+ */
+export function PicturesNote({ t }: { t: Pick<Ticket, 'picturesNote'> }) {
+  if (!t.picturesNote) return null;
+  return (
+    <p className="critpage picturesnote">
+      {t.picturesNote.text}{' '}
+      <Link to="/tools" hash={t.picturesNote.link.split('#')[1]}>
+        See what's needed
+      </Link>
+    </p>
   );
 }
 

@@ -18,6 +18,11 @@ async function body<T>(c: Context): Promise<T> {
   }
 }
 
+/** How to start: on squad-kit's iPhone, the web version, and the language, as the body says. */
+function how(b: StartOptions): Pick<StartOptions, 'phone' | 'web' | 'language'> {
+  return { ...(b.phone === true ? { phone: true } : {}), ...(b.web === true ? { web: true } : {}), ...(typeof b.language === 'string' ? { language: b.language } : {}) };
+}
+
 export function mountAppsApi(app: Hono, opts: { paths: SquadPaths }): void {
   const bp = boardPaths(opts.paths.squadDir);
   const runner = () => appRunner(bp);
@@ -34,9 +39,11 @@ export function mountAppsApi(app: Hono, opts: { paths: SquadPaths }): void {
     return c.json({ apps, live: meta.engine === 'live', reading, ...(meta.scan?.status === 'failed' && meta.scan.error ? { readError: meta.scan.error } : {}) });
   });
 
+  // An iPhone app on a Mac opens on squad-kit's iPhone: { "phone": true }, in a language: { "language": "ar" }.
+  // { "web": true } is "Use the web version now": a phone start on its way stops first.
   app.post('/api/v1/apps/:name/start', async (c) => {
     const b = await body<StartOptions>(c);
-    return act(c, () => withNews(runner().start(name(c), { nextPort: Boolean(b.nextPort), stopOther: Boolean(b.stopOther) })));
+    return act(c, async () => withNews(await runner().startAs(name(c), { nextPort: Boolean(b.nextPort), stopOther: Boolean(b.stopOther), ...how(b) })));
   });
 
   app.post('/api/v1/apps/:name/stop', (c) => act(c, async () => withNews(await runner().stop(name(c)))));
@@ -44,7 +51,7 @@ export function mountAppsApi(app: Hono, opts: { paths: SquadPaths }): void {
   // Also "Run the new version" after a merge: the app starts again on the newest main.
   app.post('/api/v1/apps/:name/restart', async (c) => {
     const b = await body<StartOptions>(c);
-    return act(c, async () => withNews(await runner().restart(name(c), { nextPort: Boolean(b.nextPort), stopOther: Boolean(b.stopOther) })));
+    return act(c, async () => withNews(await runner().restart(name(c), { nextPort: Boolean(b.nextPort), stopOther: Boolean(b.stopOther), ...how(b) })));
   });
 
   app.get('/api/v1/apps/:name/output', (c) =>

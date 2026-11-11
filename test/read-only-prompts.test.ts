@@ -87,3 +87,28 @@ describe('roles that only read are told how to look around', () => {
     expect(P.buildPrompt(meta, [], t)).not.toContain('only simple read commands');
   });
 });
+
+describe('the Reviewer gets the plan as written', () => {
+  it('has the decision and the steps, in every round, and checks the change against them', () => {
+    const t: Ticket = {
+      ...ticket(),
+      decision: { title: 'Cancel from the booking page', options: [{ name: 'A button on the booking', note: '', chosen: true }], why: 'People look there first.' },
+      steps: [
+        { title: 'Cancel button on the booking page', status: 'done' },
+        { title: 'Tests for cancelling', status: 'done' },
+      ],
+    };
+    for (const round of [1, 2]) {
+      const p = P.reviewPrompt(meta, [], t, round);
+      expect(p).toContain('Decision for this ticket: Cancel from the booking page. Why: People look there first.');
+      expect(p).toContain('The approved plan:\n1. Cancel button on the booking page\n2. Tests for cancelling');
+      expect(p).toContain('Does it follow the plan and the saved decisions?');
+    }
+  });
+
+  it('says nothing of a plan when the ticket has none', () => {
+    const p = P.reviewPrompt(meta, [], ticket(), 1);
+    expect(p).not.toContain('The approved plan');
+    expect(p).toContain('Does it follow the saved decisions?');
+  });
+});

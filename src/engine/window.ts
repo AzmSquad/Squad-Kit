@@ -32,6 +32,8 @@ import {
   type ShotSize,
 } from './shots.js';
 import { readWorkbook, sheetsText, type Sheet } from './spreadsheet.js';
+import type { PhoneSize } from '../modules/phone/types.js';
+import type { PhoneAsk, PhoneRun, PhoneShot } from './phone/session.js';
 
 /**
  * The window: squad-kit's own tools for an agent, served over MCP for one run (engine/window-server.ts). The agent
@@ -112,6 +114,24 @@ const CHECK_NAMES: CheckName[] = ['test', 'lint', 'build'];
 /** A check in words for the story's activity. */
 const CHECK_WORDS: Record<CheckName, string> = { test: 'the tests', lint: 'the code check', build: 'the build' };
 
+/**
+ * squad-kit's own phone for the pictures (engine/phone/session.ts), in place of its browser: a mobile project whose
+ * iPhone tools are ready. The pictures are taken on real devices, each labelled with its name.
+ */
+export interface WindowPhone {
+  /** The sizes the pictures may be taken at: phone, and tablet when the app has one. */
+  readonly sizes: PhoneSize[];
+  /** The real device of each size: { phone: "iPhone 16 Pro", tablet: "iPad Air 11-inch (M2)" }. Known once ready. */
+  labels(): Partial<Record<PhoneSize, string>>;
+  /** The app's own link names: none means every picture starts on the app's start screen. */
+  links(): string[];
+  /** Builds the app and gets the phone up, once. Throws PhoneUnavailable. */
+  ready(): Promise<void>;
+  shoot(ask: PhoneAsk, c: PhoneRun): Promise<PhoneShot | FailedShot>;
+  look(ask: PhoneAsk, c: PhoneRun): Promise<{ page: string; snapshot: string; device: string; said?: string } | FailedShot>;
+  close(): Promise<void>;
+}
+
 export interface WindowChecks {
   /** The story's own copy of the code: the checks run here. */
   cwd: string;
@@ -138,6 +158,10 @@ export interface WindowSetup {
   tools: WindowTool[];
   /** The story's app. Left out, the app tools answer that this step has none. */
   app?: WindowApp;
+  /** The pictures are taken on squad-kit's own phone instead of its browser (a phone app with its tools ready). */
+  phone?: WindowPhone;
+  /** The label every browser picture gets: "Web version" when a phone app's web version stands in for the phone. */
+  pictureLabel?: string;
   /** The project's own checks. Left out, run_checks answers that this step has none. */
   checks?: WindowChecks;
   /** The running product's parts the Tester may ask, by id. There is no field for a host: only these addresses. */
@@ -196,7 +220,9 @@ export interface TakenPicture {
   file: string;
   /** Where it was taken, as the path in the app. */
   page: string;
-  size: ShotSize | 'answer';
+  size: ShotSize | PhoneSize | 'answer';
+  /** The device it was taken on, for people: "iPhone 16 Pro", "Web version". */
+  device?: string;
   /** A saved call to the API, not a picture: what was asked. */
   call?: string;
 }
@@ -357,6 +383,59 @@ const DEFS: Record<WindowTool, Omit<ToolDef, 'name'>> = {
   },
 };
 
+/** The words for squad-kit's phone in the tools: "a real iPhone 16 Pro (phone) or iPad Air 11-inch (M2) (tablet)". */
+function phoneWords(labels: Partial<Record<PhoneSize, string>>): string {
+  const sizes = (Object.keys(labels) as PhoneSize[]).map((k) => `${labels[k]} (${k})`);
+  return sizes.length ? `a real ${sizes.join(' or ')}` : 'a real phone';
+}
+
+/** One right call on the phone, for its tools' descriptions. */
+const PHONE_SHOTS =
+  '{ "shots": [{ "page": "/", "steps": [{ "action": "fill", "target": { "label": "Name" }, "value": "Sara" }, { "action": "click", "target": { "role": "button", "name": "Sign up" } }, { "action": "wait", "target": { "text": "Welcome Sara" } }], "size": "phone", "language": "ar" }] }';
+
+/**
+ * take_screenshots and look_at_page on squad-kit's phone: the same steps and words as in the browser, with the real
+ * devices, the app's start screen or its own links for a page, and a language.
+ */
+function phoneDefs(sizes: PhoneSize[], labels: Partial<Record<PhoneSize, string>>, links: string[]): Record<'take_screenshots' | 'look_at_page', Omit<ToolDef, 'name'>> {
+  const size = { type: 'string', enum: sizes, description: sizes.map((k) => `${k} is the ${labels[k] ?? k}`).join(', ') + (sizes.length > 1 ? ' (phone is the default).' : '.') };
+  const page = {
+    type: 'string',
+    maxLength: MAX_PAGE,
+    description: links.length
+      ? `The screen to open: "/" is the app's start screen; another path opens by the app's own link (${links[0]}://…), like "/book".`
+      : `"/", the app's start screen. This app has no links of its own, so every shot starts there: use steps to reach the screen you need.`,
+  };
+  const language = { type: 'string', pattern: '^[a-z]{2}$', description: 'The language the app opens in: "en" (the default) or "ar", or another two-letter code.' };
+  const steps = {
+    ...STEPS,
+    description: `What to do on the screen first, in order, by the words on it. Each step has an "action" and names its part of the screen inside "target", by its words: role and name (like a button's words), label, text or placeholder; or testId, its id. A phone screen has no css. click (taps), fill (value; it replaces the field's text), select (value: the choice to tap after it), press (key: Enter, Backspace, Escape to put the keyboard away, a letter or digit), hover (scrolls down until the part shows), wait (target, or ms up to 5000). Example: [{ "action": "fill", "target": { "label": "Name" }, "value": "Sara" }, { "action": "click", "target": { "role": "button", "name": "Sign up" } }].`,
+  };
+  const where = phoneWords(labels);
+  return {
+    take_screenshots: {
+      description: `squad-kit opens this story's app on ${where}: an iPhone simulator it runs itself, hidden, on this computer. Each shot starts the app fresh in its language, does the steps by tapping through the app by the words on the screen, and takes one picture after its steps. The pictures come back to you, with each file name, the screen and the device, and are saved in the proof folder. Limits: at most ${MAX_SHOTS_PER_CALL} shots in one call, and at most ${MAX_PICTURES} pictures in all in this step, counting each one you take again, so plan one picture per part or case of each "done when". Asking for more is refused, and refused requests can stop the step. Look at each picture and take a wrong one again. Each answer lists every picture you took in this step: name those files in your final answer, no others. Example: ${PHONE_SHOTS}`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          shots: {
+            type: 'array',
+            minItems: 1,
+            maxItems: MAX_SHOTS_PER_CALL,
+            items: { type: 'object', properties: { page, steps, size, language }, required: ['page'], additionalProperties: false },
+          },
+        },
+        required: ['shots'],
+        additionalProperties: false,
+      },
+    },
+    look_at_page: {
+      description: `squad-kit opens this story's app on ${where}, does the steps, and gives back what the screen shows as text: the words of each part, one a line, with what a field holds. Use it to find the words on fields and buttons. It saves no picture. Example: { "page": "/" }, or with steps: { "page": "/", "steps": [{ "action": "click", "target": { "text": "Sign up" } }], "language": "ar" }`,
+      inputSchema: { type: 'object', properties: { page, steps, size, language }, required: ['page'], additionalProperties: false },
+    },
+  };
+}
+
 /** run_checks on a story with several parts: squad-kit takes the folder from its own list of parts, never a path. */
 const RUN_CHECKS_BY_PART: Omit<ToolDef, 'name'> = {
   ...DEFS.run_checks,
@@ -454,7 +533,7 @@ export interface WrongShape {
  * names its part of the page on itself instead of inside "target". What cannot be put right safely is a shape
  * mistake, with the right shape. Every field is still checked after, as if the agent had sent it right.
  */
-export function pageCall(raw: Record<string, unknown>, tool: string): { ask: Record<string, unknown> } | WrongShape {
+export function pageCall(raw: Record<string, unknown>, tool: string, more: string[] = []): { ask: Record<string, unknown> } | WrongShape {
   const ask = { ...raw };
   const example = tool === 'look_at_page' ? EXAMPLES.look : EXAMPLES.shot;
   for (const alias of ['path', 'url']) {
@@ -463,8 +542,8 @@ export function pageCall(raw: Record<string, unknown>, tool: string): { ask: Rec
     ask.page = ask[alias];
     delete ask[alias];
   }
-  const extra = Object.keys(ask).find((k) => !['page', 'steps', 'size'].includes(k));
-  if (extra) return { wrong: `${tool === 'look_at_page' ? 'look_at_page' : 'a shot'} takes page, steps and size, and got "${short(extra, 40)}"`, help: `Use: ${example}.` };
+  const extra = Object.keys(ask).find((k) => !['page', 'steps', 'size', ...more].includes(k));
+  if (extra) return { wrong: `${tool === 'look_at_page' ? 'look_at_page' : 'a shot'} takes page, steps${more.length ? ', size and language' : ' and size'}, and got "${short(extra, 40)}"`, help: `Use: ${example}.` };
   if (ask.steps === undefined || ask.steps === null) return { ask };
   if (!Array.isArray(ask.steps)) return { wrong: 'steps is not a list', help: `Use: "steps": [${EXAMPLES.step}].` };
   const steps: Record<string, unknown>[] = [];
@@ -527,6 +606,8 @@ export const STOPPED_FOR_CHECKS = 'squad-kit stopped the app it started for you,
 const STOPPED_FOR_CHECKS_STATUS = 'The app is not running: squad-kit stopped it before the checks ran, so the tests could start their own. Call start_app when you need it.';
 /** What a call answers while squad-kit's browser is still being set up (the first time, it is downloaded). */
 export const BROWSER_STARTING = "squad-kit is still setting up its screenshot browser. Call this again in a moment; do not start a browser yourself.";
+/** And while squad-kit's phone gets ready: the app is built and the phone starts, the first time. */
+export const PHONE_STARTING = 'squad-kit is still getting its phone ready (it builds the app and starts the phone). Call this again in a moment; do not start a simulator yourself.';
 
 /**
  * How much of a call's time each part may use: the app and the browser are waited for until 70% of it, pictures are
@@ -652,13 +733,14 @@ export class AgentWindow {
   /** The exact pictures this run took (name, page, size), for the agent to pick from in its final answer. */
   pictureList(): string {
     if (!this.pictures.size) return 'You took no pictures in this step yet.';
-    const rows = [...this.pictures.values()].map((p) => (p.call ? `- ${p.file}: the saved answer to ${p.call}` : `- ${p.file}: ${p.page}, ${p.size}`));
+    const rows = [...this.pictures.values()].map((p) => (p.call ? `- ${p.file}: the saved answer to ${p.call}` : `- ${p.file}: ${p.page}, ${p.size}${p.device ? ` (${p.device})` : ''}`));
     return `The pictures you took in this step. In your final answer, name only these files:\n${rows.join('\n')}`;
   }
 
   /** The tools this run may use, as MCP lists them. */
   listTools(): ToolDef[] {
-    return this.s.tools.map((name) => ({ name, ...(name === 'run_checks' && this.s.checks?.parts ? RUN_CHECKS_BY_PART : DEFS[name]) }));
+    const phone = this.s.phone ? phoneDefs(this.s.phone.sizes, this.s.phone.labels(), this.s.phone.links()) : null;
+    return this.s.tools.map((name) => ({ name, ...(name === 'run_checks' && this.s.checks?.parts ? RUN_CHECKS_BY_PART : phone && (name === 'take_screenshots' || name === 'look_at_page') ? phone[name] : DEFS[name]) }));
   }
 
   /**
@@ -768,7 +850,8 @@ export class AgentWindow {
    */
   private checkPage(tool: string, raw: Record<string, unknown>, at = ''): { ask: Record<string, unknown> } | ToolResult {
     const who = this.s.who;
-    const shaped = pageCall(raw, tool);
+    const phone = this.s.phone;
+    const shaped = pageCall(raw, tool, phone ? ['language'] : []);
     if ('wrong' in shaped) return this.mistake(tool, `${at}${shaped.wrong}`, shaped.help);
     const ask = this.onOwnApp(shaped.ask);
     for (const p of [ask.page, ...gotoPaths(ask.steps)]) {
@@ -781,6 +864,14 @@ export class AgentWindow {
     if (page) return this.mistake(tool, `${at}${page}`, `Use: ${example}.`);
     const steps = stepsProblem(ask.steps);
     if (steps) return this.mistake(tool, `${at}${steps}`, `A step looks like ${EXAMPLES.step}.`);
+    if (phone) {
+      const sizes: string[] = phone.sizes;
+      if (ask.size !== undefined && !sizes.includes(ask.size as string)) return this.mistake(tool, `${at}size is ${sizes.map((x) => `"${x}"`).join(' or ')} on this phone app`, `Use: ${PHONE_SHOTS}.`);
+      if (ask.language !== undefined && (typeof ask.language !== 'string' || !/^[a-z]{2}$/.test(ask.language))) return this.mistake(tool, `${at}language is a two-letter code, like "en" or "ar"`, `Use: ${PHONE_SHOTS}.`);
+      const css = (Array.isArray(ask.steps) ? (ask.steps as BrowserStep[]) : []).findIndex((x) => x?.target?.css !== undefined);
+      if (css >= 0) return this.mistake(tool, `${at}step ${css + 1} names its part by css, and a phone screen has none`, 'Name it by the words on it: { "text": "Sign up" }, { "label": "Name" } or { "role": "button", "name": "Save" }.');
+      return { ask };
+    }
     if (ask.size !== undefined && ask.size !== 'desktop' && ask.size !== 'phone') return this.mistake(tool, `${at}size is "desktop" or "phone"`, `Use: ${example}.`);
     return { ask };
   }
@@ -817,13 +908,16 @@ export class AgentWindow {
       );
     }
     const asks: ShotAsk[] = [];
+    const phoneAsks: PhoneAsk[] = [];
     for (const [i, s] of shots.entries()) {
       if (!s || typeof s !== 'object' || Array.isArray(s)) return this.mistake('take_screenshots', `shots[${i}] is not an object`, `Each shot looks like ${EXAMPLES.shot}.`);
       const checked = this.checkPage('take_screenshots', s as Record<string, unknown>, `shots[${i}]: `);
       if ('content' in checked) return checked;
-      const x = checked.ask as { page: string; steps?: BrowserStep[]; size?: ShotSize };
-      asks.push({ page: x.page.trim(), steps: x.steps ?? [], ...(x.size ? { size: x.size } : {}) });
+      const x = checked.ask as { page: string; steps?: BrowserStep[]; size?: string; language?: string };
+      if (this.s.phone) phoneAsks.push({ page: x.page.trim(), steps: x.steps ?? [], ...(x.size ? { size: x.size as PhoneSize } : {}), ...(x.language ? { language: x.language } : {}) });
+      else asks.push({ page: x.page.trim(), steps: x.steps ?? [], ...(x.size ? { size: x.size as ShotSize } : {}) });
     }
+    if (this.s.phone) return this.phoneShots(this.s.phone, phoneAsks, clock);
     const origin = await this.origin(by(clock, WAIT_SHARE));
     if (typeof origin !== 'string') return origin;
     const notReady = await this.browserBy(by(clock, WAIT_SHARE));
@@ -846,9 +940,9 @@ export class AgentWindow {
         if ('png' in r) {
           const file = this.save(r.png);
           const size = ask.size ?? 'desktop';
-          this.pictures.set(file, { file, page: r.page, size });
-          const { width, height } = SIZES[size];
-          content.push(text(`Shot ${i + 1}: saved as ${file}, at ${r.page} (${size}, ${width}x${height}).${statusWords(r.status)}`));
+          this.pictures.set(file, { file, page: r.page, size: size as ShotSize, ...(this.s.pictureLabel ? { device: this.s.pictureLabel } : {}) });
+          const { width, height } = SIZES[size as ShotSize];
+          content.push(text(`Shot ${i + 1}: saved as ${file}, at ${r.page} (${size}, ${width}x${height}${this.s.pictureLabel ? `, ${this.s.pictureLabel}` : ''}).${statusWords(r.status)}`));
           // Only a real PNG of a size the agent's AI can take goes back as a picture.
           if (isPng(r.png) && r.png.length <= MAX_IMAGE_BYTES) {
             if (this.imageBytesSent + r.png.length > MAX_IMAGE_BYTES_SENT) content.push(text('This picture is saved and counts, but squad-kit does not send it back: this step has sent back enough large pictures. Do not take it again; squad-kit\'s own check looks at it.'));
@@ -874,7 +968,7 @@ export class AgentWindow {
     return { content, ...(failed === asks.length ? { isError: true } : {}) };
   }
 
-  private failedText(n: number, ask: ShotAsk, f: FailedShot): string {
+  private failedText(n: number, ask: { page: string }, f: FailedShot): string {
     if (f.left) this.s.say(`The page tried to open another website while the ${this.s.who} took a picture. squad-kit kept it on the app.`);
     const at = f.step ? `step ${f.step} (${f.what})` : f.what;
     const seen = f.snapshot ? `\nWhat the page showed then, cut short:\n${f.snapshot}` : '';
@@ -885,6 +979,10 @@ export class AgentWindow {
     const checked = this.checkPage('look_at_page', args);
     if ('content' in checked) return checked;
     const fields = checked.ask;
+    if (this.s.phone) {
+      const ask: PhoneAsk = { page: String(fields.page).trim(), steps: (fields.steps as BrowserStep[]) ?? [], ...(fields.size ? { size: fields.size as PhoneSize } : {}), ...(fields.language ? { language: String(fields.language) } : {}) };
+      return this.phoneLook(this.s.phone, ask, clock);
+    }
     const origin = await this.origin(by(clock, WAIT_SHARE));
     if (typeof origin !== 'string') return origin;
     const notReady = await this.browserBy(by(clock, WAIT_SHARE));
@@ -898,6 +996,82 @@ export class AgentWindow {
     } catch (err) {
       return this.browserError(err);
     }
+  }
+
+  /**
+   * The pictures on squad-kit's phone: no app to start and no browser, the phone itself. It is got ready first (the app
+   * built, the phone up), waited for until 70% of the call; then each shot opens the app fresh and takes its picture.
+   */
+  private async phoneShots(phone: WindowPhone, asks: PhoneAsk[], clock: CallClock): Promise<ToolResult> {
+    const notReady = await this.phoneBy(phone, by(clock, WAIT_SHARE));
+    if (notReady) return notReady;
+    this.reserved += asks.length;
+    const deadline = by(clock, SHOOT_SHARE);
+    const content: ToolContent[] = [];
+    let failed = 0;
+    try {
+      for (const [i, ask] of asks.entries()) {
+        if (this.over) break;
+        if (Date.now() >= deadline) {
+          failed += 1;
+          content.push(text(`Shot ${i + 1} (${ask.page}): not taken, the call ran out of time (${Math.round(clock.ms / 1000)} seconds in all). Call again for it.`));
+          continue;
+        }
+        this.s.beat?.();
+        const r = await phone.shoot(ask, { deadline, stepMs: this.s.limits?.stepMs ?? STEP_MS, signal: this.signal });
+        if (this.over) break;
+        if ('png' in r) {
+          const file = this.save(r.png);
+          const size = ask.size ?? 'phone';
+          this.pictures.set(file, { file, page: r.page, size, device: r.device });
+          content.push(text(`Shot ${i + 1}: saved as ${file}, at ${r.page} (${size}, ${r.device}${ask.language ? `, language ${ask.language}` : ''}).${r.said ? ` ${r.said}` : ''}`));
+          if (isPng(r.png) && r.png.length <= MAX_IMAGE_BYTES && this.imageBytesSent + r.png.length <= MAX_IMAGE_BYTES_SENT) {
+            this.imageBytesSent += r.png.length;
+            content.push({ type: 'image', data: r.png.toString('base64'), mimeType: 'image/png' });
+          } else content.push(text("This picture is saved and counts, but squad-kit does not send it back. Do not take it again; squad-kit's own check looks at it."));
+        } else {
+          failed += 1;
+          content.push(text(this.failedText(i + 1, ask, r)));
+        }
+      }
+    } catch (err) {
+      return this.phoneError(err);
+    } finally {
+      this.reserved -= asks.length;
+    }
+    if (this.over) return error(STOPPED_CALL);
+    const left = MAX_PICTURES - this.pictures.size;
+    content.push(text(`${left} of the ${MAX_PICTURES} pictures this step may take are left.${failed ? ' Fix the shots that did not work and call again for them.' : ''}`));
+    if (this.pictures.size) content.push(text(this.pictureList()));
+    return { content, ...(failed === asks.length ? { isError: true } : {}) };
+  }
+
+  private async phoneLook(phone: WindowPhone, ask: PhoneAsk, clock: CallClock): Promise<ToolResult> {
+    const notReady = await this.phoneBy(phone, by(clock, WAIT_SHARE));
+    if (notReady) return notReady;
+    try {
+      const r = await phone.look(ask, { deadline: by(clock, SHOOT_SHARE), stepMs: this.s.limits?.stepMs ?? STEP_MS, signal: this.signal });
+      if (this.over) return error(STOPPED_CALL);
+      if ('why' in r) return error(this.failedText(1, ask, r));
+      return ok(`The screen is at ${r.page} on the ${r.device}.${r.said ? ` ${r.said}` : ''}\nWhat it shows (the words of each part, one a line), cut short:\n${r.snapshot || '(nothing readable)'}`);
+    } catch (err) {
+      return this.phoneError(err);
+    }
+  }
+
+  /** squad-kit's phone, waited for until `at`: null once it is ready, else what the agent is told. Getting ready goes on. */
+  private async phoneBy(phone: WindowPhone, at: number): Promise<ToolResult | null> {
+    const r = await settleBy(phone.ready(), at, this.signal);
+    if (this.over) return error(STOPPED_CALL);
+    if (r === 'late') return error(PHONE_STARTING);
+    return 'err' in r ? this.phoneError(r.err) : null;
+  }
+
+  private phoneError(err: unknown): ToolResult {
+    if (this.over) return error(STOPPED_CALL);
+    const detail = (err as { detail?: string })?.detail;
+    this.s.log?.(`squad-kit's phone did not work for ${this.s.ticket}: ${(err as Error)?.message ?? String(err)}${detail ? `\n${detail}` : ''}`);
+    return error(`squad-kit's phone could not take this: ${(err as Error)?.message ?? String(err)}${detail ? ` (${detail.slice(0, 600)})` : ''}. Call i_am_stuck if it keeps happening, and never start a simulator yourself.`);
   }
 
   /**
@@ -1334,7 +1508,7 @@ export class AgentWindow {
     /** What squad-kit did, for the agent; and the same in plain words, for the story. */
     const did: string[] = [];
     const plain: string[] = [];
-    const browser = this.s.tools.includes('take_screenshots') || this.s.tools.includes('look_at_page');
+    const browser = !this.s.phone && (this.s.tools.includes('take_screenshots') || this.s.tools.includes('look_at_page'));
     // A window that only looks at pages has the app started for it too: squad-kit restarts one that does not answer.
     const app = Boolean(this.s.app) && (this.s.tools.includes('start_app') || this.s.tools.includes('look_at_page'));
     // A closed website: nothing to restart, and the story already has its line. The agent is told the way around.
@@ -1371,6 +1545,20 @@ export class AgentWindow {
         this.s.log?.(`squad-kit's browser did not start for ${this.s.ticket}: ${shotsErrorDetail(r.err)}`);
         did.push(`squad-kit's own browser still does not start: ${shotsErrorDetail(r.err).slice(0, 400)}.`);
         plain.push(`The ${who} was stuck on the screenshot browser, and squad-kit could not fix it.`);
+      }
+    }
+    if (this.s.phone && !site) {
+      const r = await settleBy(this.s.phone.ready(), by(clock, WAIT_SHARE), this.signal);
+      if (this.over) return error(STOPPED_CALL);
+      if (r === 'late') {
+        did.push(PHONE_STARTING);
+        plain.push(`The ${who} was stuck on the phone. squad-kit is still getting it ready.`);
+      } else if ('ok' in r) {
+        did.push("squad-kit's phone works. Use take_screenshots and look_at_page for pictures and screens; never start a simulator or a browser yourself.");
+        plain.push(`The ${who} was stuck on the phone. squad-kit checked it, and it works.`);
+      } else {
+        did.push(`squad-kit's phone does not work: ${(r.err as Error)?.message ?? String(r.err)}`);
+        plain.push(`The ${who} was stuck on the phone, and squad-kit could not fix it.`);
       }
     }
     if (app && (((ABOUT_APP.test(said) || ABOUT_PORT.test(said)) && !site) || any)) {
@@ -1434,6 +1622,7 @@ export class AgentWindow {
     this.closed = true;
     this.ctl.abort();
     await this.session.close();
+    await this.s.phone?.close().catch(() => undefined);
     const app = this.app;
     this.hold(null);
     // Handed on to the next step that uses it (keep): it runs on, and is no longer this window's to stop.

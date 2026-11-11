@@ -14,6 +14,7 @@ import { ConversationsPage } from './pages/Conversations';
 import { OverviewPage } from './pages/Overview';
 import { SetupPage } from './pages/Setup';
 import { BreakdownPage, RequirementsPage } from './pages/Requirements';
+import { ToolsPage } from './pages/Tools';
 
 // One app, many projects (ADR-001): a project's pages sit under /p/<project id>/ (the router's base), and the app's
 // Home, with every project and one Waiting for you list, at /.
@@ -108,8 +109,10 @@ const squad = createRoute({
   },
 });
 const settings = createRoute({ getParentRoute: () => rootRoute, path: '/settings', component: SettingsPage });
+// What this project needs on this computer. A stopped story links to its tool's line: /tools#flutter.
+const tools = createRoute({ getParentRoute: () => rootRoute, path: '/tools', component: ToolsPage });
 
-const routeTree = rootRoute.addChildren([index, setup, overview, requirements, breakdown, board, backlog, proof, inbox, conversations, releases, decisions, architecture, bugs, harness, squad, settings]);
+const routeTree = rootRoute.addChildren([index, setup, overview, requirements, breakdown, board, backlog, proof, inbox, conversations, releases, decisions, architecture, bugs, harness, squad, tools, settings]);
 
 export const router = createRouter({ routeTree, defaultPreload: false, basepath: PROJECT_BASE || '/', defaultErrorComponent: CrashPage });
 

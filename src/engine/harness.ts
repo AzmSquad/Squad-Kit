@@ -10,12 +10,13 @@ import { parallelLimit } from '../core/settings.js';
 import type { AgentRole } from './agents.js';
 import { BRD_READ_MS, BRD_WRITE_MS, LONGEST_READ_MS } from './breakdown-job.js';
 import { MAX_QUESTIONS } from './breakdown-prompts.js';
-import { CHECK_MS, CHECK_SILENT_MS, MAX_ALONE } from './checks.js';
+import { CHECK_MS, CHECK_SILENT_MS, MAX_ALONE, OUTSIDE_THE_GUARD_WORDS } from './checks.js';
 import { TURN_WAIT_MS } from './copy-turn.js';
 import { MAX_OLD, MAX_RUNS_ON_MAIN, ON_MAIN_MS } from './old-tests.js';
 import { SEEN_DAYS, WEEK_DAYS, harnessSeen, type Need, type Seen, type StoryLink } from './harness-seen.js';
 import { DOCKER_WAIT_MS } from './compose-run.js';
 import { guardSupport } from './project-guard.js';
+import { FLUTTER_STAMPS, flutterOnPath } from './flutter-sdk.js';
 import { reposOf, rulesFiles } from './repos.js';
 import { HOOK_MS, NETWORK_GIT_MS } from './git.js';
 import { DEFAULT_QUALITY, QUALITIES, QUALITY_NOTE, QUALITY_PRESETS } from './levels.js';
@@ -128,6 +129,8 @@ function lineStages(): HarnessStage[] {
     stage('build', 'Build', 'The Builder writes the code in small steps, in a locked room.', on(squad('Builder')), [
       g('sandbox', 'The guard', "Each story has its own copy. No agent can read your keys or sign-ins. The Builder and Tester can't read .env files either, and reach only the websites the project's network level allows.", 'Blocked, with a line on the story. A website it may not reach stops nothing: the work goes on without it.'),
       g('guard', 'A second guard for your project', 'Your tests, app, setup and release run locked in too, with keys hidden and Docker closed.', 'A card: an engineer allows the file, or the plan changes.'),
+      g('flutter-stamps', "Flutter's own version stamps", "Flutter writes its version in a few small files of its own folder on every run. Those files, and nothing else of Flutter, are open to the squad's commands."),
+      g('xcode', 'iPhone builds', OUTSIDE_THE_GUARD_WORDS),
       g('lane', 'Files no agent can change', "squad-kit's folder, AI instruction files, commit hooks, files an engineer locked. No commit or branch change, and a push is refused.", 'A file goes back, with a line. A moved branch stops the step.'),
       g('local-files', 'Test values, not your own', 'A file marked local gets values kept for stories. No agent can read it.'),
       y('new-tests', 'New tests', 'The Builder writes tests for every "done when". On a new story you can turn off Write new tests: your project\'s own checks, the review and the proof still run, and the story says "Built without new tests". An engineer can keep it on for every story.', undefined, { note: { auto: 'Always on: a story from the breakdown writes its tests.' } }),
@@ -153,6 +156,7 @@ function lineStages(): HarnessStage[] {
       g('broken', 'Not working yet', 'Pictures that show it does not work never pass.', `Back to the Builder ${MAX_PROOF_ROUNDS - 1 === 1 ? 'once' : `${MAX_PROOF_ROUNDS - 1} times`}. Then a card.`),
       g('off-screen', 'Not on a screen', 'Takes two voices: the Tester and the check. If every "done when" ends that way, you decide.'),
       g('api-proof', 'Answers from your API', "Work with no screen can show a saved answer from this story's own API."),
+      g('phone-pictures', 'iPhone apps on a real iPhone', "On a Mac, an iPhone app's pictures come from squad-kit's own hidden iPhone and iPad, each named with its device. With its tools missing, pictures of the web version stand in, and the story says so.", "With no web version either, it waits for the tools and goes on once they are there. An app that does not build or a phone that does not start: a card, and you decide."),
       g('window', 'Fixed tools only', "The Tester uses squad-kit's own tools, on this story's app only.", `Refused. ${REFUSALS_TO_STOP} refusals stop it.`),
     ]),
     stage('yours', 'Your check', 'You look at the proof, try the app, and ask anything.', on(you('You decide'), you('You decide'), skip('On its own')), [
@@ -332,6 +336,8 @@ function rowDetails(meta: BoardMeta | undefined, root: string | undefined): Reco
     depends: code('board/depends.ts'),
     change: code('board/actions.ts'),
     sandbox: code('engine/sandbox.ts', ['On this computer', tools.map((t) => state(t.available, t.why)).join(', ') || 'Off'], ['Network level', NETWORK_NAME[level]], ['Also allowed', meta?.allowedHosts?.join(', ') || 'None yet'], ['Lists', 'src/engine/network-lists.ts']),
+    'flutter-stamps': code('engine/flutter-sdk.ts', ...FLUTTER_STAMPS.map((f): [string, string] => [f.file, f.why]), ['In', flutterOnPath()?.root ?? 'No Flutter on this computer']),
+    xcode: code('engine/checks.ts', ['Runs outside the guard', 'xcodebuild build and test, only as squad-kit writes them for a native iPhone app (outsideTheGuard)'], ['Keeps', "Xcode's own sandboxes: for a package's manifest and plugins, and for build scripts when the project turns that on"], ['Builds in', "build/squad-kit-ios in the story's copy, with the guard's caches"]),
     guard: code('engine/project-guard.ts', ['On this computer', state(guard.on, guard.why)], ['Network', networkPolicy(level).commands === 'this-computer' ? 'Only this computer (Off)' : 'Open'], ['Also allowed', [...(meta?.guard?.allowRead ?? []), ...(meta?.guard?.allowWrite ?? [])].join(', ') || 'None yet']),
     lane: code('engine/lane.ts', ['Locked here', names(meta?.lockedFiles)]),
     'local-files': code('engine/local-files.ts', ['Local here', names(meta?.localFiles)]),
@@ -351,6 +357,7 @@ function rowDetails(meta: BoardMeta | undefined, root: string | undefined): Reco
     broken: code('engine/proof-verdict.ts', ['Limit', `${MAX_PROOF_ROUNDS} rounds`]),
     'off-screen': code('engine/proof-verdict.ts'),
     'api-proof': code('engine/window.ts', ['Limit', `${MAX_API_CALLS} calls in one proof`]),
+    'phone-pictures': code('engine/phone/session.ts', ['Devices', "squad-kit iPhone and squad-kit iPad, its own, one started at a time"], ['Taps with', 'Maestro']),
     window: code('engine/window.ts', ['Limit', `${REFUSALS_TO_STOP} refusals, ${MISTAKES_TO_STOP} calls in the wrong shape`]),
     'looks-right': code('board/actions.ts', ['See it in', 'The proof page']),
     'take-over': code('board/actions.ts'),

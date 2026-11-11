@@ -104,6 +104,7 @@ import { lookAgain } from '../../engine/try-app.js';
 import { takeBack } from '../../engine/handover.js';
 import { plainWords } from '../../core/for-people.js';
 import { act } from './act.js';
+import { toolWaitOf } from '../../engine/tools/index.js';
 import { confirmDatabase, databaseView, learnDatabase, makeTemplateBeside, setDatabaseOptions, type DatabaseChange } from '../../engine/story-db.js';
 import { bringBack, checkOutside, workOutside } from '../../board/outside.js';
 import { outsidePrompt } from '../../engine/outside-guide.js';
@@ -278,7 +279,8 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
       // A newer squad-kit build on disk than the one this board runs: offer a restart.
       console: ctl ? { startedAt: ctl.startedAt, outdated: ctl.build > 0 && buildStamp() > ctl.build } : null,
       // Each ticket with what is happening on it now, in words: the card's line, its time and its usual time.
-      tickets: all.filter((t) => t.stage !== 'done' && !t.archived).map((t) => ({ ...t, now: nowOf(t, usual) })),
+      // A story that waits for a tool on this computer says which, with the link to its line on the Tools page.
+      tickets: all.filter((t) => t.stage !== 'done' && !t.archived).map((t) => ({ ...t, now: nowOf(t, usual), ...toolWaitOf(bp, t) })),
       // Archived tickets leave the board; "Show archived" shows them again.
       archived: all.filter((t) => t.stage !== 'done' && t.archived),
       ...(broken.length ? { broken } : {}),
@@ -296,7 +298,8 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     const problem = ticketProblem(bp, c.req.param('id'));
     if (problem) return c.json({ error: problem }, 409);
     const t = readTicket(bp, c.req.param('id'));
-    return t ? c.json({ ...withProblem(t), now: nowOf(t, readUsual(bp)) }) : c.json({ error: 'not found' }, 404);
+    // Looking at a story that waits for a tool checks this computer again beside, so it goes on soon after the install.
+    return t ? c.json({ ...withProblem(t), now: nowOf(t, readUsual(bp)), ...toolWaitOf(bp, t, true) }) : c.json({ error: 'not found' }, 404);
   });
 
   // What is happening on a ticket now, from its live record. Asking about it is answered from the same record, at

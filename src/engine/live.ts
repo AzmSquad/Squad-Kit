@@ -42,7 +42,7 @@ import { detectStack } from '../board/stack.js';
 import { AI_TOOLS, aiTool, describeToolEvent } from '../modules/registry.js';
 import { CHECK_DOING, DOING, plainToolLine } from './plain-doing.js';
 import type { AgentResult, AgentRun, AiTool, BlockedAction, PlanEntry, ToolEvent } from '../modules/ai-tool/types.js';
-import { CHECK_SILENT_MS, checksToRun, failedOnceLine, runChecks as runChecksNow, runCommand, startApp, startsToo, tail, testCount, type CheckResult, type CommandWatch, type RunningApp } from './checks.js';
+import { CHECK_SILENT_MS, blockedByGuard, checksToRun, failedOnceLine, runChecks as runChecksNow, runCommand, startApp, startsToo, tail, testCount, type CheckResult, type CommandWatch, type RunningApp } from './checks.js';
 import { TurnTimeout, appIn, inTurn, startPastOther, stopAppsIn, untilEnded, type TurnKind } from './copy-turn.js';
 import { forgetKnownFailure, knownFailures } from './known-failures.js';
 import { testKey, testTitle, type FailedTest } from './failed-tests.js';
@@ -79,7 +79,7 @@ import { appCopyOf, copiesOf, reposOfParts, storyCopyDir, workFolder, type CopyO
 import { ProductError, productCopiesDir, productPlan, startProduct, stopProduct, waitWords } from './product-run.js';
 import { productHold } from './product-lock.js';
 import { offLimits } from '../board/project-files.js';
-import { agentPrivatePlaces, GUARD_BLOCKED, GUARD_BLOCKED_DOCKER, blockedDocker, dockerBlockedWords, guardBlockedDetail, guardBlockedPath, guardSupport, projectGuardFor, ticketGuard, type GuardSpec } from './project-guard.js';
+import { agentPrivatePlaces, GUARD_BLOCKED, GUARD_BLOCKED_DOCKER, blockedDocker, dockerBlockedWords, guardBlockedDetail, guardSupport, projectGuardFor, ticketGuard, type GuardSpec } from './project-guard.js';
 import { HEALED_LINE, cacheHomeEnv, ownFolder, storiesCacheDir } from './cache-home.js';
 import { ticketDir } from '../board/store.js';
 import { commitTicketDocs, leaveProjectFiles } from './project-git.js';
@@ -96,6 +96,10 @@ import { endStep, nextPart, pauseClock, resumeClock, slowStep, startStep, stepDo
 import { readUsual } from '../board/usual.js';
 import { QUEUED, queuedLine } from '../board/now.js';
 import { firstOpenTicket, waitsForFirst, waitsForFirstWords } from '../board/first-story.js';
+import { TOOLS_CHECKING, toolsHold, waitsForTools, type ToolBlock } from './tools/index.js';
+import { WEB_VERSION, picturesHold, picturesWay, untilGot, type PicturesWay } from './phone/plan.js';
+import { PhoneSession, PhoneUnavailable } from './phone/session.js';
+import type { WindowPhone } from './window.js';
 import { watchPort } from './free-port.js';
 import { LimitReached, activePause, chatWaitNote, isLimitText, limitText, startPause, type LimitPause } from './usage-limit.js';
 import { forgetSaveTrouble, isSaveTrouble, noteSaveTrouble, stillHeld, endTurnTrouble, noteTurnTrouble } from './save-trouble.js';
@@ -660,8 +664,13 @@ export class LiveSquad {
       if (t.squad && Date.parse(t.squad.nextAt) <= Date.now()) {
         // A project with no code: the first story picks the tools, so the others take their next step once it merges.
         const first = meta.scan?.empty ? firstOpenTicket(this.bp, t) : undefined;
+        // A Required tool missing or too old for this step (a Flutter app on a computer without Flutter): it waits with
+        // the reason, and goes on by itself once the tool is there (engine/tools).
+        const tools = first || pause ? null : (toolsHold(this.bp, t, this.phaseFor(t)) ?? this.picturesWait(t, this.phaseFor(t)));
+        if (!first && !pause && !tools && waitsForTools(t.status) && t.status !== TOOLS_CHECKING) this.toolsHere(t.id);
         if (first) this.hold(t, waitsForFirstWords(first.id));
         else if (pause) this.hold(t, limitText(pause));
+        else if (tools) this.waitForTools(t, tools);
         else if (this.mayStart(limit)) {
           // The base comes in first when it was asked for, or the ticket this one was built on is merged now.
           const phase = catchUp(this.bp, t, this.phaseFor(t));
@@ -733,6 +742,46 @@ export class LiveSquad {
         // Nothing runs for it now, so its step's clock stands still until the step starts again.
         pauseClock(x);
       });
+    } catch {
+      // The ticket was removed meanwhile.
+    }
+  }
+
+  /**
+   * A Required tool is missing or too old for the step: the card says what can't happen and why, the activity says it
+   * once, and nothing fails. The board links it to the Tools page; the step starts once the tool is there.
+   */
+  private waitForTools(t: Ticket, b: ToolBlock): void {
+    const told = t.status === b.status;
+    this.hold(t, b.status);
+    if (told || b.checking) return;
+    this.log('info', `Waits for tools: ${b.text}`, t.id);
+    try {
+      this.update(t.id, (x) => addActivity(x, 'squad', `${b.text} It waits, and goes on by itself once the tool is there`));
+    } catch {
+      // The ticket was removed meanwhile.
+    }
+  }
+
+  /**
+   * A phone app's pictures wait for its phone tools when it has no web version to show meanwhile (engine/phone/plan.ts):
+   * it never takes the proof without pictures, and goes on by itself once the tools are there.
+   */
+  private picturesWait(t: Ticket, phase: string): ToolBlock | null {
+    if (phase !== 'proof') return null;
+    return picturesHold(this.bp, t, this.hasWeb(t));
+  }
+
+  /** The project can start its app for the browser: a start command and an address. */
+  private hasWeb(t: Ticket): boolean {
+    const rc = (this.appOf(t)?.repo ?? repoFor(this.meta(), t)).commands;
+    return Boolean(rc.start?.trim() && rc.url?.trim());
+  }
+
+  /** The tool a story waited for is here now: said once on the story, as it goes on. */
+  private toolsHere(id: string): void {
+    try {
+      this.update(id, (x) => addActivity(x, 'squad', 'The tools it needs are on this computer now, so it goes on'));
     } catch {
       // The ticket was removed meanwhile.
     }
@@ -3824,8 +3873,9 @@ export class LiveSquad {
       if (hooksBack.length) this.update(id, (x) => addActivity(x, 'squad', `The project's checks changed the check that runs on every save (${hooksBack.slice(0, 6).join(', ')}); squad-kit put it back. Changing that check stays with you or an engineer`));
       // A check that needed a file outside its copy, which the guard blocked: one plain sentence, not a failed try.
       if (guard && !this.stops.get(id)?.signal.aborted) {
-        const hit = ran.find((r) => !r.ok && guardBlockedPath(r.output, guard));
-        if (hit) return this.guardStop(id, 'test', guardBlockedPath(hit.output, guard)!, hit.command, hit.output, guard);
+        // A check squad-kit ran outside its guard (an Xcode build) is never the guard's doing.
+        const hit = blockedByGuard(ran, guard);
+        if (hit) return this.guardStop(id, 'test', hit.path, hit.result.command, hit.result.output, guard);
       }
       for (const r of ran.map((x) => (several ? { ...x, part: c.label } : x))) {
         results.push(r);
@@ -4271,7 +4321,9 @@ export class LiveSquad {
     const t = readTicket(this.bp, id)!;
     const rc = (this.appOf(t)?.repo ?? repoFor(meta, t)).commands;
     // A product that cannot run yet says why, instead of having nothing to show.
-    const canShow = (Boolean(rc.start && rc.url) || Boolean(runsAsProduct(meta) && productPlan(this.bp, meta, t).why)) && (changesScreens(t) || (t.work?.asks ?? 0) > 0);
+    // A phone app with no web version shows on squad-kit's phone, or waits for its tools: never a proof with no pictures.
+    const phoneWay = rc.start && rc.url ? null : (await picturesWay(this.bp, t, false)).way;
+    const canShow = (Boolean(rc.start && rc.url) || phoneWay === 'phone' || phoneWay === 'wait' || Boolean(runsAsProduct(meta) && productPlan(this.bp, meta, t).why)) && (changesScreens(t) || (t.work?.asks ?? 0) > 0);
     // Why no picture was taken, in the person's words, and the exact error for engineers.
     let why = '';
     let detail = '';
@@ -4397,7 +4449,7 @@ export class LiveSquad {
     const reasonOf = (x: Ticket, n: number) => x.offScreen?.find((o) => o.criterion === criterionText(x, n))?.why;
     const t = readTicket(this.bp, id)!;
     const numbers = Array.from({ length: doneWhenCount(t) }, (_, i) => i + 1);
-    const toFile = (p: ProofPicture): P.PictureFile => ({ file: p.after, ...(p.page ? { page: p.page } : {}), ...(sizes[p.after] ? { size: sizes[p.after] } : {}), ...(p.note ? { note: p.note } : {}) });
+    const toFile = (p: ProofPicture): P.PictureFile => ({ file: p.after, ...(p.page ? { page: p.page } : {}), ...(sizes[p.after] ? { size: sizes[p.after] } : {}), ...(p.device ? { device: p.device } : {}), ...(p.note ? { note: p.note } : {}) });
     const toCheck = (x: Ticket, which: number[]): P.PictureToCheck[] =>
       which.flatMap((n) => {
         const row = rowOf(x, n);
@@ -4502,7 +4554,7 @@ export class LiveSquad {
   }
 
   /** The size of each "done when"'s before picture, by its words, so the after picture it pairs with can match. */
-  private beforeSizes(t: Ticket): Record<string, ShotSize> {
+  private beforeSizes(t: Ticket): Record<string, ShotSize | 'tablet'> {
     const rows = (t.proof ?? []).filter((p) => p.before && p.beforeLabel !== 'New screen');
     return Object.fromEntries(rows.flatMap((p) => {
       const size = shotSizeOf(path.join(this.bp.proofDir, p.before));
@@ -4823,8 +4875,21 @@ export class LiveSquad {
     // A product that cannot run yet says why, before anything else starts.
     const cannot = !beside && runsAsProduct(meta) ? productPlan(this.bp, meta, readTicket(this.bp, id)!).why : undefined;
     if (cannot) throw new StepError(cannot, cannot);
+    // A phone app: squad-kit's own iPhone, else its web version meanwhile, else it waits for the tools (phone/plan.ts).
+    let way = await this.picturesWayOf(id, beside);
+    // squad-kit gets its own tools for the phone now, the first time: the pictures wait for that short download.
+    if (way.way === 'wait' && way.getting) {
+      const block = way.block;
+      this.update(id, (x) => {
+        addActivity(x, 'tester', block.text);
+        if (!beside) x.status = block.status;
+      });
+      await untilGot(beside?.signal ?? this.stops.get(id)?.signal);
+      way = await this.picturesWayOf(id, beside);
+    }
+    if (way.way === 'wait') throw new StepError(way.block.text, way.block.text);
     // squad-kit's browser is on this computer before any clock starts: the first time, it is downloaded.
-    await this.readyBrowser(id, beside?.signal ?? this.stops.get(id)?.signal, beside?.job ?? id);
+    if (way.way !== 'phone') await this.readyBrowser(id, beside?.signal ?? this.stops.get(id)?.signal, beside?.job ?? id);
     const t = this.update(id, (x) => {
       if (!beside) {
         x.sessions = { ...x.sessions, tester: x.sessions?.tester ?? randomUUID() };
@@ -4833,12 +4898,18 @@ export class LiveSquad {
       }
       // A new round of after-shots: the last round's no longer count (the before-shots stay). A retake adds to the rows.
       if (when === 'after' && !beside && !again.length && x.proof?.length) {
-        x.proof = x.proof.filter((p) => p.beforeLabel !== 'New screen').map((p) => ({ criterion: p.criterion, before: p.before, after: '', beforeLabel: p.beforeLabel, afterLabel: p.afterLabel }));
+        x.proof = x.proof.filter((p) => p.beforeLabel !== 'New screen').map((p) => ({ criterion: p.criterion, before: p.before, ...(p.beforeDevice ? { beforeDevice: p.beforeDevice } : {}), after: '', beforeLabel: p.beforeLabel, afterLabel: p.afterLabel }));
       }
       if (when === 'after' && !beside && !again.length) delete x.offScreen;
       addActivity(x, 'tester', when === 'before' ? 'Taking screenshots before the change' : 'Taking screenshots after the change');
+      // Pictures of the web version stand in for the phone's: said once a round, with the line of the Tools page.
+      if (!beside && way.way === 'web') {
+        if (x.picturesNote?.text !== way.line || !again.length) addActivity(x, 'tester', way.line);
+        x.picturesNote = { text: way.line, link: way.link };
+      } else if (!beside) delete x.picturesNote;
     });
     fs.mkdirSync(this.bp.proofDir, { recursive: true });
+    if (way.way === 'phone') return this.phoneScreens(id, t, when, meta, way, beside, again);
     const product = !beside && runsAsProduct(meta);
     const appCopy = this.appOf(t);
     const rc = (appCopy?.repo ?? repoFor(meta, t)).commands;
@@ -4882,6 +4953,7 @@ export class LiveSquad {
       running: app,
       // The next round of pictures, or a retake, uses it too: the proof's end stops it (proof).
       ...(shares ? { keep: (a: RunningApp) => this.keepApp(id, cwd, a, tree) } : {}),
+      ...(way.way === 'web' ? { pictureLabel: WEB_VERSION } : {}),
       prefix: `${id.toLowerCase()}-${when}`,
       ...(signal ? { signal } : {}),
     });
@@ -4890,6 +4962,58 @@ export class LiveSquad {
       return await this.shoot(id, t, when, meta, win, at, beside, again);
     } finally {
       // The app squad-kit started stops with the window, or goes on to the next round, and the window's key stops working.
+      await closeWindow(win);
+    }
+  }
+
+  /** How this round's pictures are taken: the story's copy, or the copy of the code as it was for the before-shots. */
+  private picturesWayOf(id: string, beside?: { cwd: string }): Promise<PicturesWay> {
+    const t = readTicket(this.bp, id)!;
+    const where = beside ? { parts: t.parts, repo: t.repo, worktree: beside.cwd } : t;
+    return picturesWay(this.bp, where, this.hasWeb(t));
+  }
+
+  /**
+   * The Tester's pictures on squad-kit's own phone: the app is built for the iPhone in the story's copy and the phone
+   * comes up with it, before the Tester's clock starts, each long step on the card with its usual time. No app is
+   * started for the browser; the Tester's tools take the pictures on the phone, each labelled with its device.
+   */
+  private async phoneScreens(id: string, t: Ticket, when: 'before' | 'after', meta: BoardMeta, way: Extract<PicturesWay, { way: 'phone' }>, beside?: { cwd: string; job: string; signal: AbortSignal }, again: string[] = []): Promise<ShotRound> {
+    const cwd = beside?.cwd ?? this.appOf(t)?.dir ?? t.worktree!;
+    const signal = beside?.signal ?? this.stops.get(id)?.signal;
+    const say = (text: string) =>
+      this.update(id, (x) => {
+        addActivity(x, 'tester', text);
+        if (!beside) x.status = text;
+      });
+    const session = new PhoneSession({ cwd: way.dir, kind: way.kind, tools: way.tools, say, log: (text) => this.log('info', text, id), ...(signal ? { signal } : {}) });
+    // Building the app and starting the phone are the step working, not hanging.
+    const beat = setInterval(() => this.dog.beat(beside?.job ?? id), 20_000);
+    try {
+      await session.ready();
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      if (err instanceof PhoneUnavailable) throw new StepError(err.message, err.detail);
+      throw err;
+    } finally {
+      clearInterval(beat);
+    }
+    if (!beside) this.update(id, (x) => (x.status = when === 'before' ? 'Tester is taking before screenshots' : again.length ? 'Tester is taking the screenshots again' : 'Tester is taking after screenshots'));
+    const win = new AgentWindow({
+      ...this.windowBase(id, 'tester', cwd, beside?.job ?? id),
+      step: 'proof',
+      who: 'Tester',
+      // No app to start for a browser: the phone itself. A copy of the code as it was has nothing to check.
+      tools: beside ? ['take_screenshots', 'look_at_page', 'i_am_stuck'] : ['take_screenshots', 'look_at_page', 'run_checks', 'i_am_stuck'],
+      ...(beside ? {} : { checks: this.windowChecks(id, cwd) }),
+      phone: session,
+      prefix: `${id.toLowerCase()}-${when}`,
+      ...(signal ? { signal } : {}),
+    });
+    openWindow(win);
+    try {
+      return await this.shoot(id, t, when, meta, win, '', beside, again, session);
+    } finally {
       await closeWindow(win);
     }
   }
@@ -4928,13 +5052,14 @@ export class LiveSquad {
     }
   }
 
-  private async shoot(id: string, t: Ticket, when: 'before' | 'after', meta: BoardMeta, win: AgentWindow, appUrl: string, beside?: { cwd: string; job: string }, again: string[] = []): Promise<ShotRound> {
+  private async shoot(id: string, t: Ticket, when: 'before' | 'after', meta: BoardMeta, win: AgentWindow, appUrl: string, beside?: { cwd: string; job: string }, again: string[] = [], phone?: WindowPhone): Promise<ShotRound> {
     // The Tester only reads the code: squad-kit takes the pictures. The lane still puts back anything changed.
     const lanes = beside ? [await watchLane(beside.cwd, this.protectedFiles(beside.cwd), true)] : await this.watchCopies(t, true);
     // A picture saved before this moment was not taken in this step.
     const since = Date.now();
     const lists = when === 'after' && !beside ? checklistsFor(this.bp, 'tester') : [];
-    const prompt = `${P.proofPrompt(meta, t, when, this.ctx(t), appUrl, when === 'after' ? this.beforeSizes(t) : undefined, beside ? [] : Object.keys(this.apiParts(t)))}${checklistAsk(lists)}`;
+    const onPhone = phone ? { labels: phone.labels(), links: phone.links() } : undefined;
+    const prompt = `${P.proofPrompt(meta, t, when, this.ctx(t), appUrl, when === 'after' ? this.beforeSizes(t) : undefined, beside || phone ? [] : Object.keys(this.apiParts(t)), onPhone)}${checklistAsk(lists)}`;
     // A new round of after-shots names every "done when": a picture, or why it shows on no screen.
     const count = doneWhenCount(t);
     const complete = (answer: unknown): string | null => {
@@ -4983,7 +5108,7 @@ export class LiveSquad {
     const say = (text: string) => this.update(id, (x) => addActivity(x, 'tester', text));
     if (lists.length) this.update(id, (x) => this.listNoes.set(id, answerLists(this.bp, x, lists, out.checklist)));
     // Only pictures squad-kit took in this step count, each with the page it was taken at and the Tester's verdict.
-    const shots: { criterion: number; file: string; page: string; size: string; shows: Judged; note?: string }[] = [];
+    const shots: { criterion: number; file: string; page: string; size: string; device?: string; shows: Judged; note?: string }[] = [];
     for (const s of out.shots ?? []) {
       const file = path.basename(String(s.file ?? ''));
       const taken = win.pictures.get(file);
@@ -4997,7 +5122,7 @@ export class LiveSquad {
         continue;
       }
       const note = s.note ? this.plainNote(win, s.note) : '';
-      shots.push({ criterion: s.criterion, file, page: taken.page, size: taken.size, shows: verdictOf(s.shows) ?? 'not-shown', ...(note ? { note } : {}) });
+      shots.push({ criterion: s.criterion, file, page: taken.page, size: taken.size, ...(taken.device ? { device: taken.device } : {}), shows: verdictOf(s.shows) ?? 'not-shown', ...(note ? { note } : {}) });
     }
     // Each "done when" that shows on no screen, with why in plain words.
     const off: { criterion: number; why: string }[] = [];
@@ -5039,13 +5164,17 @@ export class LiveSquad {
           proof.push(row);
         }
         // One before pairs with the main after. The Tester's own verdict stands until squad-kit's check of them (judge).
-        if (when === 'before') row.before = own[0]!.file;
+        if (when === 'before') {
+          row.before = own[0]!.file;
+          if (own[0]!.device) row.beforeDevice = own[0]!.device;
+          else delete row.beforeDevice;
+        }
         else {
           addPictures(row, own, (a, b) => this.sameFile(a, b));
           this.pairWithBefore(row);
         }
       }
-      x.proof = proof.map((p) => (p.before ? p : { ...p, before: p.after, beforeLabel: 'New screen', afterLabel: 'After' }));
+      x.proof = proof.map((p) => (p.before ? p : { ...p, before: p.after, ...(p.device ? { beforeDevice: p.device } : {}), beforeLabel: 'New screen', afterLabel: 'After' }));
       if (when === 'after') {
         // A new round says again what shows on no screen; a retake adds to it. squad-kit's check judges them next (judge).
         const kept = again.length ? (x.offScreen ?? []) : [];
@@ -5164,9 +5293,9 @@ function openStep(t: Ticket): number {
   return i >= 0 ? i + 1 : 1;
 }
 
-/** A card line that says the ticket waits: for a free place, or for the usage limit. */
+/** A card line that says the ticket waits: for a free place, for the usage limit, or for a tool on this computer. */
 function held(status: string | undefined): boolean {
-  return Boolean(status && (status.startsWith(QUEUED) || isLimitText(status) || waitsForFirst(status)));
+  return Boolean(status && (status.startsWith(QUEUED) || isLimitText(status) || waitsForFirst(status) || waitsForTools(status)));
 }
 
 function isInside(dir: string, file: unknown): boolean {

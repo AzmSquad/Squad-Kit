@@ -166,10 +166,18 @@ describe('What happened', () => {
     // Only the latest run of a step shows what it handed in: the first review was replaced by the second.
     expect(review1).toMatchObject({ summary: 'Asked for 1 fix.', notes: ['round 1 of 2, a fresh session'] });
     expect(review1!.handedIn).toBeUndefined();
-    expect(review2).toMatchObject({ summary: 'Approved: meets both "done when" points.', handedIn: { kind: 'verdict', approved: true, notes: [] } });
+    expect(review2).toMatchObject({ summary: 'Approved: meets both "done when" points.', notes: ['round 2 of 2, the same Reviewer as the round before'], handedIn: { kind: 'verdict', approved: true, notes: [] } });
     expect(fix).toMatchObject({ summary: 'Fixed the review comments.', handedIn: { kind: 'files', added: [], changed: ['login.js'] } });
     expect(proof).toMatchObject({ notes: [], tab: 'proof', handedIn: { kind: 'shots', shots: [{ criterion: 'I see the login page', file: 'ro3-after.png' }] } });
     expect(h.seconds).toBe(30 + 9 + 42 + 600 + 54 + 48 + 120 + 48 + 90);
+  });
+
+  it('calls a review fresh only when it started a new Reviewer', () => {
+    // A rebuild started the review over: its round 1 is a new Reviewer, whatever came before.
+    const t = journey();
+    t.activity = [line(42.15, 'reviewer', 'Reading the changes (round 1 of 2)'), ...t.activity];
+    const reviews = whatHappened(bp, t, sources).steps.filter((s) => s.name === 'Reviewer · Review');
+    expect(reviews.map((s) => s.notes.at(-1))).toEqual(['round 1 of 2, a fresh session', 'round 2 of 2, a fresh session']);
   });
 
   it('lists the files from git when the ticket has its copy, and the step running now last', () => {

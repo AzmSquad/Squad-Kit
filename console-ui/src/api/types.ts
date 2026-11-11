@@ -186,6 +186,8 @@ export interface ProofPicture {
   after: string;
   /** Where it was taken, like a row's page. */
   page?: string;
+  /** The device it was taken on, for people: "iPhone 16 Pro", "iPad Air 11-inch (M2)", "Web version". */
+  device?: string;
   /** What it shows, one plain sentence from the Tester. */
   note?: string;
 }
@@ -201,6 +203,10 @@ export interface ProofShot {
   note?: string;
   /** Where the main after picture was taken, as the address in the app without the host, like "/test/sign-up". */
   page?: string;
+  /** The device the main after picture was taken on: "iPhone 16 Pro", "Web version". Browser pictures of a web app have none. */
+  device?: string;
+  /** And the before picture's. */
+  beforeDevice?: string;
   /** The other after pictures of this "done when", one per part or case. Rows with one picture have none. */
   more?: ProofPicture[];
   /**
@@ -410,6 +416,8 @@ export interface Ticket {
   proof?: ProofShot[];
   /** The "done when" items the Tester said show on no screen, with why. They do not fail the proof. */
   offScreen?: OffScreen[];
+  /** The pictures are of the app's web version, as its phone tools are missing: why, and the Tools page line. */
+  picturesNote?: { text: string; link: string };
   /** Rounds of screenshots that showed a "done when" does not work, since the last met proof (2 at most, then a stop). */
   proofRound?: number;
   stuck?: StuckChoice;
@@ -495,6 +503,8 @@ export interface Ticket {
   clock?: { who: AgentName | 'squad'; step: TimedStep; since: string; part?: number; doing?: string; doingAt?: string; limit?: number; began?: string; resumed?: string; paused?: string };
   /** What is happening now, in words, worked out by squad-kit from the live record. */
   now?: LiveNow;
+  /** It waits for a tool on this computer: which, why, and the line on the Tools page (src/engine/tools). */
+  toolWait?: ToolBlock;
   /** A merged or released ticket off the board. Its history stays. */
   archived?: { by: string; at: string };
   /** Delete was pressed. Still here when a delete stopped half-way: then `error` says why. */
@@ -1189,7 +1199,7 @@ export interface ProjectApp {
   start?: string;
   setup?: string;
   state: 'not-running' | 'starting' | 'running' | 'stopped' | 'failed';
-  step?: 'update' | 'copy' | 'setup' | 'start';
+  step?: 'update' | 'copy' | 'setup' | 'start' | 'phone';
   address?: string;
   startedAt?: string;
   since?: string;
@@ -1207,6 +1217,41 @@ export interface ProjectApp {
   includes: { id: string; title: string }[];
   /** A ticket merged since it started: "RO-5 is in main · Run the new version". */
   fresh?: { id: string; title: string; base: string; release?: string };
+  /** An iPhone app on a Mac: Start opens it on squad-kit's iPhone. */
+  phone?: PhoneAppView;
+}
+
+/** An app opened on squad-kit's iPhone for you: each step with the time left, then the device it runs on. */
+export interface PhoneOpenView {
+  state: 'starting' | 'running' | 'stopped' | 'failed';
+  step?: 'build' | 'phone' | 'install' | 'open';
+  /** "Building the app for the iPhone, about 4 minutes left". */
+  line?: string;
+  secondsLeft?: number;
+  /** "iPhone 16 Pro", once it runs. */
+  device?: string;
+  language?: string;
+  since?: string;
+  error?: string;
+  detail?: string;
+  /** Why it stopped by itself: "You closed the iPhone window, so squad-kit stopped the app." */
+  ended?: string;
+}
+
+/** An iPhone app in Your apps or Try it yourself. */
+export interface PhoneAppView {
+  /** The tools for it are here: Start opens it on the iPhone. */
+  ready: boolean;
+  why?: string;
+  /** The Tools page line: "/tools#xcode". */
+  link?: string;
+  /** The languages to pick from next to Start, English first. Empty: nothing to pick. */
+  languages: string[];
+  /** It also has a web version: "Use the web version now". */
+  web: boolean;
+  /** Start runs it on the phone now. */
+  on?: boolean;
+  run?: PhoneOpenView;
 }
 
 export interface AppsResponse {
@@ -1259,6 +1304,72 @@ export type ReadyStep = 'install-git' | 'update-git' | 'install-tool' | 'sign-in
 export interface ComputerReady {
   git: { ok: boolean; step?: ReadyStep };
   tool: { ok: boolean; label?: string; step?: ReadyStep };
+}
+
+/** The Tools page, "What this project needs" (src/engine/tools/index.ts). */
+export type ToolAction = 'build' | 'checks' | 'pictures' | 'start-app' | 'try-it';
+export type ToolState = 'ready' | 'missing' | 'too-old' | 'getting' | 'updating' | 'not-here';
+
+export interface ToolGetting {
+  tool: string;
+  name: string;
+  version?: string;
+  startedAt: string;
+  /** squad-kit's own download and unpack, or an update of your own copy. */
+  step: 'download' | 'unpack' | 'update';
+  /** A download: bytes so far and in all. An update: seconds so far and the time it usually takes. */
+  done: number;
+  total?: number;
+  secondsLeft: number;
+  /** An update: the step it is at, in plain words. */
+  words?: string;
+}
+
+export interface ToolLine {
+  id: string;
+  name: string;
+  gives: string;
+  priority: 'required' | 'recommended' | 'optional';
+  state: ToolState;
+  version?: string;
+  needs?: string;
+  why?: string;
+  note?: string;
+  notHere?: string;
+  installer: 'squad-kit' | 'you';
+  reason?: string;
+  steps: string[];
+  link: string;
+  usedFor: string;
+  actions: ToolAction[];
+  blocks: ToolAction[];
+  getting?: ToolGetting;
+  trouble?: string;
+  command: string;
+  /** Too old, and squad-kit can update your copy safely: the warning to OK first, the usual time, and the command. */
+  update?: { warning: string; seconds: number; command: string };
+  /** Too old, and squad-kit can't update your copy: why, in one line. */
+  cantUpdate?: string;
+}
+
+export interface ToolsView {
+  system: 'mac' | 'windows' | 'linux';
+  checkedAt: string | null;
+  checking: boolean;
+  summary: string;
+  places: { place: string; part?: string; kinds: string[]; platforms: string[] }[];
+  lines: ToolLine[];
+  getting: ToolGetting | null;
+}
+
+/** A step a Required tool stops: what can't happen, why, and the link to its line. */
+export interface ToolBlock {
+  action: ToolAction;
+  tools: { id: string; name: string; state: ToolState; version?: string; needs?: string }[];
+  text: string;
+  status: string;
+  link: string;
+  checking?: true;
 }
 
 export interface AppProjects extends AppSettings {
@@ -1361,4 +1472,8 @@ export interface TryStatus {
   other?: string;
   can: boolean;
   why?: string;
+  /** An iPhone app on a Mac: Try it yourself opens the story's copy on squad-kit's iPhone. */
+  phone?: PhoneAppView;
+  /** Why it stopped by itself last time. */
+  ended?: string;
 }

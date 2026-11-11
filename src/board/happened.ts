@@ -146,6 +146,17 @@ function endLine(log: Activity[], h: Pick<StepRun, 'step' | 'from' | 'to'>): Act
   return log.find((a) => ms(a.at) >= lo && ms(a.at) <= hi && end.by.includes(a.who) && end.re.test(a.text));
 }
 
+const READING = /^Reading the changes \(round (\d+) of/;
+
+/** The round a review run started as, from its "Reading the changes (round 2 of 2)" line; none when it went on after an answer. */
+function reviewRound(log: Activity[], run: Run): number | undefined {
+  if (!run.from) return undefined;
+  const lo = ms(run.from) - 60_000;
+  const hi = ms(run.to);
+  const m = log.find((a) => a.who === 'reviewer' && ms(a.at) >= lo && ms(a.at) <= hi && READING.test(a.text))?.text.match(READING);
+  return m ? Number(m[1]) : undefined;
+}
+
 function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
 }
@@ -355,7 +366,11 @@ export function whatHappened(bp: BoardPaths, t: Ticket, src: HappenedSources = {
       if (log.some((l) => a.who.includes(l.who) && a.re.test(l.text) && ms(l.at) >= ms(run.to) - 1000 && ms(l.at) <= until)) notes.push(a.note);
     }
     if (run.step === 'review') {
-      notes.push(reviews > 1 ? `round ${runs.slice(0, i + 1).filter((r) => r.step === 'review').length} of ${reviews}, a fresh session` : 'a second, separate session');
+      const k = runs.slice(0, i + 1).filter((r) => r.step === 'review').length;
+      const round = reviewRound(log, run);
+      // Round 1 starts a new Reviewer; a later round, or a review that goes on after an answer, carries on its conversation.
+      const fresh = round !== undefined ? round === 1 : k === 1;
+      notes.push(reviews > 1 ? `round ${k} of ${reviews}, ${fresh ? 'a fresh session' : 'the same Reviewer as the round before'}` : 'a second, separate session');
     }
     const got = isLatest ? handedIn(t, run, run.step === 'build' ? ticketFiles() : null, c) : undefined;
     const changed = got?.kind === 'files' ? got.added.length + got.changed.length + got.removed.length : 0;

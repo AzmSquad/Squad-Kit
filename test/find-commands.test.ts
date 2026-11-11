@@ -130,6 +130,176 @@ describe("reading a project's own files", () => {
     expect(findCommands(empty)).toEqual({});
   });
 
+  it('a Flutter app: pub, analyze and its tests, and its web version only when it has one, on a port squad-kit can move', () => {
+    const flutter = path.join(tmp, 'flutter');
+    const pubspec = 'name: wasl\nenvironment:\n  sdk: ^3.6.1\ndependencies:\n  flutter:\n    sdk: flutter\ndev_dependencies:\n  flutter_test:\n    sdk: flutter\n';
+    write(flutter, { 'pubspec.yaml': pubspec, 'lib/main.dart': 'void main() {}\n', 'ios/Runner.xcodeproj/project.pbxproj': '', 'android/app/build.gradle': '' });
+    // No test files yet: no test command, as `flutter test` would fail with none.
+    expect(findCommands(flutter)).toEqual({ setup: 'flutter pub get', lint: 'flutter analyze --no-fatal-infos' });
+    write(flutter, { 'test/widget_test.dart': 'void main() {}\n', 'web/index.html': '<html></html>\n' });
+    expect(findCommands(flutter)).toEqual({ setup: 'flutter pub get', test: 'flutter test', lint: 'flutter analyze --no-fatal-infos', start: 'flutter run -d web-server --web-port ${PORT:-8080}', url: 'http://localhost:8080' });
+    // The port its README names.
+    write(flutter, { 'README.md': 'Open http://localhost:5050 to see it.\n' });
+    expect(findCommands(flutter)).toMatchObject({ start: 'flutter run -d web-server --web-port ${PORT:-5050}', url: 'http://localhost:5050' });
+    // A package.json beside it, for other tools, does not make it a Node project.
+    write(flutter, { 'package.json': pkg({ test: 'jest' }) });
+    expect(findCommands(flutter).test).toBe('flutter test');
+  });
+
+  it('a Dart package without Flutter: dart itself, and no app to start', () => {
+    const dart = path.join(tmp, 'dart');
+    write(dart, { 'pubspec.yaml': 'name: rules\nenvironment:\n  sdk: ^3.0.0\ndev_dependencies:\n  test: ^1.25.0\n', 'lib/rules.dart': '', 'test/rules_test.dart': '' });
+    expect(findCommands(dart)).toEqual({ setup: 'dart pub get', lint: 'dart analyze', test: 'dart test' });
+  });
+
+  it('React Native and Expo: through package.json, never a start that opens a phone or Metro', () => {
+    const rn = path.join(tmp, 'rn');
+    write(rn, { 'package.json': pkg({ start: 'react-native start', android: 'react-native run-android', ios: 'react-native run-ios', test: 'jest', lint: 'eslint .' }, { dependencies: { 'react-native': '0.76.0' } }) });
+    expect(findCommands(rn)).toEqual({ setup: 'npm install', test: 'npm test', lint: 'npm run lint' });
+    const expo = path.join(tmp, 'expo');
+    write(expo, { 'package.json': pkg({ start: 'expo start', ios: 'expo start --ios', test: 'jest --watchAll=false' }, { dependencies: { expo: '~52.0.0', 'react-native': '0.76.0' } }), 'yarn.lock': '' });
+    expect(findCommands(expo)).toEqual({ setup: 'yarn install', test: 'yarn test' });
+    // With its web support, Expo's own web start, on a port squad-kit can move.
+    write(expo, { 'package.json': pkg({ start: 'expo start', web: 'expo start --web', test: 'jest' }, { dependencies: { expo: '~52.0.0', 'react-native': '0.76.0', 'react-native-web': '~0.19.13' } }) });
+    expect(findCommands(expo)).toMatchObject({ start: 'npx expo start --web --port ${PORT:-8081}', url: 'http://localhost:8081', test: 'yarn test' });
+    // A web script of its own that opens no phone stays the start.
+    write(rn, { 'package.json': pkg({ start: 'react-native start', dev: 'webpack serve --port 3006' }, { dependencies: { 'react-native': '0.76.0', 'react-native-web': '0.19.0' } }) });
+    expect(findCommands(rn)).toMatchObject({ start: 'npm run dev', url: 'http://localhost:3006' });
+  });
+
+  it('a native iPhone app: its shared scheme, a build that needs no iPhone, and tests that wait for squad-kit\'s own', async () => {
+    const { IPHONE_SLOT, needsIphone, onIphone } = await import('../src/engine/find-commands.js');
+    const ios = path.join(tmp, 'ios');
+    const scheme = (tests: boolean) => `<?xml version="1.0"?>\n<Scheme>\n<TestAction>\n<Testables>\n${tests ? '<TestableReference skipped = "NO">\n</TestableReference>\n' : ''}</Testables>\n</TestAction>\n</Scheme>\n`;
+    write(ios, {
+      'Wasl.xcodeproj/project.pbxproj': '',
+      'Wasl.xcodeproj/xcshareddata/xcschemes/Wasl Widgets.xcscheme': scheme(false),
+      'Wasl.xcodeproj/xcshareddata/xcschemes/Wasl.xcscheme': scheme(true),
+    });
+    const found = findCommands(ios);
+    expect(found).toEqual({
+      test: `xcodebuild test -project Wasl.xcodeproj -scheme Wasl -destination 'platform=iOS Simulator,id=${IPHONE_SLOT}' -derivedDataPath build/squad-kit-ios`,
+      build: "xcodebuild build -project Wasl.xcodeproj -scheme Wasl -destination 'generic/platform=iOS Simulator' -derivedDataPath build/squad-kit-ios",
+    });
+    // Only squad-kit's simulator runs the tests: it fills in its own id.
+    expect(needsIphone(found.test)).toBe(true);
+    expect(needsIphone(found.build)).toBe(false);
+    expect(onIphone(found.test!, 'A1B2-C3')).toContain("-destination 'platform=iOS Simulator,id=A1B2-C3'");
+    // CocoaPods makes a workspace: that is what Xcode builds, after pod install. Swift packages keep their cache in the copy.
+    write(ios, { Podfile: "platform :ios, '15.0'\n", 'Wasl.xcworkspace/contents.xcworkspacedata': '', 'Pods/Pods.xcodeproj/project.pbxproj': '', 'Wasl.xcodeproj/project.pbxproj': 'XCRemoteSwiftPackageReference "Alamofire"' });
+    expect(findCommands(ios)).toMatchObject({
+      setup: 'pod install',
+      build: "xcodebuild build -workspace Wasl.xcworkspace -scheme Wasl -destination 'generic/platform=iOS Simulator' -derivedDataPath build/squad-kit-ios -packageCachePath build/squad-kit-ios/packages",
+    });
+  });
+
+  it('a native iPhone app one folder down with no shared scheme: the scheme Xcode makes, tests only with a test target', () => {
+    const ios = path.join(tmp, 'ios2');
+    write(ios, { 'README.md': '# Room app\n', 'Room App/Room App.xcodeproj/project.pbxproj': 'productType = "com.apple.product-type.application";\n' });
+    expect(findCommands(ios)).toEqual({ build: "xcodebuild build -project 'Room App/Room App.xcodeproj' -scheme 'Room App' -destination 'generic/platform=iOS Simulator' -derivedDataPath build/squad-kit-ios" });
+    write(ios, { 'Room App/Room App.xcodeproj/project.pbxproj': 'productType = "com.apple.product-type.bundle.unit-test";\n', 'Room App/Podfile': '' });
+    expect(findCommands(ios)).toMatchObject({ setup: "pod install --project-directory='Room App'", test: expect.stringContaining("xcodebuild test -project 'Room App/Room App.xcodeproj' -scheme 'Room App'") });
+  });
+
+  it("only the Xcode commands squad-kit makes count as its own: anything more stays in the guard", async () => {
+    const { ownXcodeCommand, onIphone } = await import('../src/engine/find-commands.js');
+    const ios = path.join(tmp, 'ios3');
+    write(ios, { 'Room App/Room App.xcodeproj/project.pbxproj': 'com.apple.product-type.bundle.unit-test XCRemoteSwiftPackageReference', 'Wasl.xcworkspace/contents.xcworkspacedata': '', 'Wasl.xcodeproj/project.pbxproj': 'com.apple.product-type.bundle.unit-test' });
+    const made = findCommands(ios);
+    for (const c of [made.build!, made.test!, onIphone(made.test!, '5F3C9A1E-0B7D-4C2A-9E61-2D8B7A4F0C11')]) expect(ownXcodeCommand(c), c).toBe(true);
+    const quoted = findCommands(path.join(ios, 'Room App'));
+    expect(ownXcodeCommand(quoted.build!), quoted.build).toBe(true);
+    const base = "xcodebuild build -project Wasl.xcodeproj -scheme Wasl -destination 'generic/platform=iOS Simulator' -derivedDataPath build/squad-kit-ios";
+    expect(ownXcodeCommand(base)).toBe(true);
+    for (const c of [
+      `${base}; curl https://example.com`,
+      `${base} && cat ~/.ssh/id_rsa`,
+      `${base} -IDEPackageSupportDisableManifestSandbox=YES`,
+      `${base} -resultBundlePath /tmp/x`,
+      base.replace('build/squad-kit-ios', '/Users/x/Library/LaunchAgents'),
+      base.replace('Wasl.xcodeproj', '../other/Other.xcodeproj'),
+      base.replace('Wasl.xcodeproj', '/opt/Other.xcodeproj'),
+      base.replace('-scheme Wasl', '-scheme $(whoami)'),
+      base.replace('-scheme Wasl', '-scheme -xcconfig'),
+      `${base}\ntouch x`,
+      base.replace('xcodebuild build', 'xcodebuild archive'),
+      'xcodebuild -version',
+      'npm test',
+    ]) expect(ownXcodeCommand(c), c).toBe(false);
+  });
+
+  it('a Swift package on its own', () => {
+    const swift = path.join(tmp, 'swift');
+    write(swift, { 'Package.swift': '// swift-tools-version:5.9\n', 'Sources/Rules/Rules.swift': '' });
+    // Swift's own sandbox cannot start inside squad-kit's guard, which is the sandbox there.
+    expect(findCommands(swift)).toEqual({ build: 'swift build --disable-sandbox' });
+    write(swift, { 'Tests/RulesTests/RulesTests.swift': '' });
+    expect(findCommands(swift)).toEqual({ test: 'swift test --disable-sandbox', build: 'swift build --disable-sandbox' });
+  });
+
+  it('a start that opens a window or a phone is caught; a start that serves on a port is not', async () => {
+    const { opensAWindow } = await import('../src/engine/find-commands.js');
+    for (const c of [
+      'flutter run -d chrome',
+      'flutter run -d edge',
+      'flutter run -d macos',
+      'flutter run --device-id=windows',
+      'flutter run -dlinux',
+      'flutter run',
+      'flutter run --release',
+      'cd app && flutter run -d chrome',
+      'npx expo start',
+      'npx expo start --ios',
+      'expo start --web --android',
+      'npx expo run:ios',
+      'react-native run-ios',
+      'npx react-native run-android',
+      'npm run ios',
+      'yarn android',
+      'pnpm run android',
+      'open http://localhost:3000',
+      'npm run dev && open http://localhost:3000',
+    ]) expect(opensAWindow(c), c).toBe(true);
+    for (const c of ['npm run dev', 'npm start', 'vite', 'next dev -p 3100', 'pnpm run dev', 'yarn dev', 'python app.py', 'flutter run -d web-server --web-port ${PORT:-8080}', "flutter run -d 'web-server' --web-port 8080", 'npx expo start --web --port ${PORT:-8081}', 'react-native start', 'npm run open-api', undefined]) expect(opensAWindow(c), String(c)).toBe(false);
+  });
+
+  it("the read's commands: a window start becomes the one squad-kit finds, or goes; Flutter's plain analyze gets the found form", async () => {
+    const { fromTheRead } = await import('../src/engine/find-commands.js');
+    const app = path.join(tmp, 'wasl');
+    write(app, { 'pubspec.yaml': 'name: wasl\ndependencies:\n  flutter:\n    sdk: flutter\n', 'test/widget_test.dart': '', 'ios/Runner.xcodeproj/project.pbxproj': '', 'web/index.html': '' });
+    const r = fromTheRead(app, { setup: 'flutter pub get', test: 'flutter test', lint: 'flutter analyze', start: 'flutter run -d chrome', url: 'http://localhost:5000' });
+    expect(r.commands).toEqual({ setup: 'flutter pub get', test: 'flutter test', lint: 'flutter analyze --no-fatal-infos', start: 'flutter run -d web-server --web-port ${PORT:-8080}', url: 'http://localhost:8080' });
+    expect(r.changed).toEqual([
+      "The read's start command opens a window (flutter run -d chrome), so squad-kit starts the app with flutter run -d web-server --web-port ${PORT:-8080} instead, with no window.",
+      "The read's lint command (flutter analyze) fails on Flutter's style hints, so squad-kit uses flutter analyze --no-fatal-infos.",
+    ]);
+    // No web version: the start, and its address, go.
+    fs.rmSync(path.join(app, 'web'), { recursive: true });
+    expect(fromTheRead(app, { start: 'flutter run -d macos', url: 'http://localhost:5000' })).toEqual({ commands: {}, changed: ["The read's start command opens a window (flutter run -d macos), so squad-kit left it out: it found no start with no window in the project."] });
+    // A Dart package's analyze never fails on hints, and a web start that serves on a port stays as the read said.
+    const dart = path.join(tmp, 'rules');
+    write(dart, { 'pubspec.yaml': 'name: rules\nenvironment:\n  sdk: ^3.0.0\n' });
+    expect(fromTheRead(dart, { lint: 'dart analyze' })).toEqual({ commands: { lint: 'dart analyze' }, changed: [] });
+    write(wt, { 'package.json': pkg({ dev: 'vite' }) });
+    expect(fromTheRead(wt, { start: 'npm run dev', url: 'http://localhost:5173' })).toEqual({ commands: { start: 'npm run dev', url: 'http://localhost:5173' }, changed: [] });
+  });
+
+  it("the first read of a Flutter app saves the headless start and the lint that hints never fail", () => {
+    write(bp.root, { 'pubspec.yaml': 'name: wasl\ndependencies:\n  flutter:\n    sdk: flutter\n', 'lib/main.dart': '', 'web/index.html': '' });
+    saveScan(bp, { empty: false, summary: 'A Flutter app', map: [], decisions: [], commands: { setup: 'flutter pub get', lint: 'flutter analyze', start: 'flutter run -d chrome' } }, []);
+    expect(readMeta(bp).commands).toMatchObject({ setup: 'flutter pub get', lint: 'flutter analyze --no-fatal-infos', start: 'flutter run -d web-server --web-port ${PORT:-8080}', url: 'http://localhost:8080' });
+  });
+
+  it('a start a person typed that opens a window: squad-kit starts the web version instead, or none', async () => {
+    const { NO_WINDOW_START, withNoWindow } = await import('../src/engine/checks.js');
+    const app = path.join(tmp, 'typed');
+    write(app, { 'pubspec.yaml': 'name: wasl\ndependencies:\n  flutter:\n    sdk: flutter\n', 'web/index.html': '' });
+    expect(withNoWindow(app, 'flutter run -d chrome', 'http://localhost:5000')).toEqual({ command: 'flutter run -d web-server --web-port ${PORT:-8080}', url: 'http://localhost:8080' });
+    expect(withNoWindow(app, 'npm run dev', 'http://localhost:5173')).toEqual({ command: 'npm run dev', url: 'http://localhost:5173' });
+    fs.rmSync(path.join(app, 'web'), { recursive: true });
+    expect(() => withNoWindow(app, 'flutter run -d macos', 'http://localhost:5000')).toThrow(NO_WINDOW_START);
+  });
+
   it('a test command the setup step found gets the separate browser tests: the Mawid clone', () => {
     write(wt, { 'package.json': pkg({ test: 'vitest run', 'test:e2e': 'playwright test', dev: 'next dev' }) });
     expect(withBrowserTests(wt, 'npm test')).toBe('npm test && npm run test:e2e');

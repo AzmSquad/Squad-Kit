@@ -5,7 +5,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { boardPaths } from '../src/board/store.js';
 import { HEALED_LINE, cacheHomeEnv, healHome, healedBefore, homeCachePlace, rememberHealed, storiesCacheDir } from '../src/engine/cache-home.js';
-import { runCommand, startApp } from '../src/engine/checks.js';
+import { outsideTheGuard, runCommand, startApp } from '../src/engine/checks.js';
 import { buildGuard, guardSupport, homeCachesRefused, projectGuardFor, ticketGuard, type GuardSpec } from '../src/engine/project-guard.js';
 import { projectCacheDir, sandboxAsk } from '../src/engine/sandbox.js';
 import { claudeLaunch, claudeRunOptions } from '../src/modules/claude/index.js';
@@ -348,6 +348,189 @@ describe.runIf(onMac)('squad-kit runs it once more, by itself, on a Mac', () => 
     expect(said).toEqual([]);
   });
 });
+
+describe('phone apps: Flutter, Dart, CocoaPods and Xcode', () => {
+  it("CocoaPods keeps its spec repos and pods in the cache home, with no usage report, in both walls", () => {
+    for (const wall of ['project', 'agent'] as const) {
+      const env = cacheHomeEnv(cache, { wall, home, env: {} });
+      expect(env).toMatchObject({ CP_REPOS_DIR: path.join(cache, 'cocoapods', 'repos'), CP_CACHE_DIR: path.join(cache, 'cocoapods', 'cache'), COCOAPODS_DISABLE_STATS: 'true', PUB_CACHE: path.join(cache, 'pub') });
+      // Its settings stay the person's own.
+      expect(env).not.toHaveProperty('CP_HOME_DIR');
+    }
+  });
+
+  it("a Flutter app's copy finds the Dart packages this computer has, linked in by version, and only that", () => {
+    const pub = flutterApp();
+    // Not a Dart project: nothing linked.
+    fs.renameSync(path.join(copy, 'pubspec.yaml'), path.join(copy, 'pubspec.off'));
+    cacheHomeEnv(cache, { wall: 'project', cwd: copy, home, env: {} });
+    expect(fs.existsSync(path.join(cache, 'pub', 'hosted'))).toBe(false);
+    fs.renameSync(path.join(copy, 'pubspec.off'), path.join(copy, 'pubspec.yaml'));
+    cacheHomeEnv(cache, { wall: 'agent', cwd: copy, home, env: {} });
+    expect(fs.readlinkSync(path.join(cache, 'pub', 'hosted', 'pub.dev', 'http-1.2.2'))).toBe(path.join(pub, 'hosted', 'pub.dev', 'http-1.2.2'));
+    expect(fs.readlinkSync(path.join(cache, 'pub', 'hosted-hashes', 'pub.dev', 'http-1.2.2.sha256'))).toBe(path.join(pub, 'hosted-hashes', 'pub.dev', 'http-1.2.2.sha256'));
+    // The folder it lists them in is the project's own, and pub's own lists and programs are not linked.
+    expect(fs.lstatSync(path.join(cache, 'pub', 'hosted', 'pub.dev')).isSymbolicLink()).toBe(false);
+    expect(fs.existsSync(path.join(cache, 'pub', 'hosted', 'pub.dev', '.cache'))).toBe(false);
+    expect(fs.existsSync(path.join(cache, 'pub', 'bin'))).toBe(false);
+    // Where the person keeps them, when they set it.
+    const elsewhere = path.join(base, 'their-pub');
+    fs.mkdirSync(path.join(elsewhere, 'hosted', 'pub.dev', 'intl-0.19.0'), { recursive: true });
+    cacheHomeEnv(cache, { wall: 'project', cwd: copy, home, env: { PUB_CACHE: elsewhere } });
+    expect(fs.readlinkSync(path.join(cache, 'pub', 'hosted', 'pub.dev', 'intl-0.19.0'))).toBe(path.join(elsewhere, 'hosted', 'pub.dev', 'intl-0.19.0'));
+  });
+
+  it.runIf(process.platform === 'darwin')("a company's own CocoaPods spec repo is linked in; the public one and CocoaPods' lock are the project's own", () => {
+    const repos = path.join(home, '.cocoapods', 'repos');
+    for (const d of ['trunk', 'acme-specs/.git']) fs.mkdirSync(path.join(repos, d), { recursive: true });
+    fs.writeFileSync(path.join(repos, 'Spec_Lock'), '');
+    cacheHomeEnv(cache, { wall: 'project', home, env: {} });
+    expect(fs.readdirSync(path.join(cache, 'cocoapods', 'repos'))).toEqual(['acme-specs']);
+    expect(fs.readlinkSync(path.join(cache, 'cocoapods', 'repos', 'acme-specs'))).toBe(path.join(repos, 'acme-specs'));
+  });
+
+  it("opens none of the person's own: their pub cache, CocoaPods' folders, Xcode's DerivedData, Swift's cache or Flutter itself", () => {
+    const flutter = path.join(base, 'flutter');
+    fs.mkdirSync(path.join(flutter, 'bin', 'cache'), { recursive: true });
+    const closed = [
+      path.join(home, '.pub-cache'),
+      path.join(home, '.cocoapods'),
+      path.join(home, 'Library', 'Caches', 'CocoaPods'),
+      path.join(home, 'Library', 'Developer', 'Xcode', 'DerivedData'),
+      path.join(home, 'Library', 'Caches', 'org.swift.swiftpm'),
+      flutter,
+    ];
+    const under = (list: string[], p: string) => list.some((w) => p === w || p.startsWith(`${w}${path.sep}`));
+    const g = guardOf();
+    const ask = sandboxAsk({ cwd: copy, root: project, read: [], proof: path.join(base, 'proof'), secrets: [], cache, home });
+    for (const p of closed) {
+      expect(under(g.write, p)).toBe(false);
+      expect(under(ask.write, p)).toBe(false);
+    }
+    // Flutter itself is read like any program: never hidden.
+    expect(under(g.noRead, flutter)).toBe(false);
+    expect(under(ask.noRead, flutter)).toBe(false);
+    // Xcode's DerivedData is no tool cache, so a command that could not write there never gets it as the project's own.
+    expect(homeCachePlace(path.join(home, 'Library', 'Developer', 'Xcode', 'DerivedData', 'Wasl-abc', 'x'), home, [])).toBeNull();
+  });
+});
+
+describe.runIf(onMac)('phone apps in the guard on a Mac', () => {
+  it("Dart packages, CocoaPods and Xcode write in the cache home and the copy, never in the person's own", async () => {
+    const pub = flutterApp();
+    const flutter = path.join(base, 'flutter');
+    fs.mkdirSync(path.join(flutter, 'bin', 'cache'), { recursive: true });
+    fs.writeFileSync(path.join(flutter, 'bin', 'cache', 'engine.stamp'), 'e1');
+    for (const d of ['.cocoapods/repos/trunk', 'Library/Caches', 'Library/Developer/Xcode/DerivedData']) fs.mkdirSync(path.join(home, d), { recursive: true });
+    const r = await runCommand(copy, [
+      'mkdir -p "$PUB_CACHE/hosted/pub.dev/intl-0.19.0" "$CP_REPOS_DIR/trunk/Specs" "$CP_CACHE_DIR/Pods" build/squad-kit-ios/ModuleCache.noindex && echo own-ok',
+      'cat "$PUB_CACHE/hosted/pub.dev/http-1.2.2/lib/http.dart" && echo read-ok',
+      `cat "${flutter}/bin/cache/engine.stamp" && echo flutter-read-ok`,
+      'echo changed > "$PUB_CACHE/hosted/pub.dev/http-1.2.2/lib/http.dart"',
+      `mkdir "${home}/.cocoapods/repos/trunk/Specs"`,
+      `mkdir "${home}/Library/Caches/CocoaPods"`,
+      `mkdir "${home}/Library/Developer/Xcode/DerivedData/Wasl-abc"`,
+      `touch "${flutter}/bin/cache/engine.stamp"`,
+      'exit 0',
+    ].join('; '), undefined, { guard: guardOf() });
+    expect(r.output).toContain('own-ok');
+    expect(r.output).toContain('read-ok');
+    expect(r.output).toContain('flutter-read-ok');
+    expect(r.output.match(/not permitted/gi)).toHaveLength(5);
+    expect(fs.readFileSync(path.join(pub, 'hosted', 'pub.dev', 'http-1.2.2', 'lib', 'http.dart'), 'utf8')).toBe('library http;\n');
+    for (const d of ['.cocoapods/repos/trunk/Specs', 'Library/Caches/CocoaPods', 'Library/Developer/Xcode/DerivedData/Wasl-abc']) expect(fs.existsSync(path.join(home, d))).toBe(false);
+    expect(fs.existsSync(path.join(copy, 'build', 'squad-kit-ios', 'ModuleCache.noindex'))).toBe(true);
+  });
+});
+
+describe("Xcode's own builds, by the one rule", () => {
+  const xcode = "xcodebuild build -project Wasl.xcodeproj -scheme Wasl -destination 'generic/platform=iOS Simulator' -derivedDataPath build/squad-kit-ios";
+
+  it('are the only commands outside the guard, and only in the copy the guard was made for', () => {
+    const g = { ...guardOf(), noPush: true };
+    expect(outsideTheGuard(copy, xcode, g)).toBe(true);
+    // Anything more, no guard at all, or another folder: as before.
+    expect(outsideTheGuard(copy, `${xcode} -IDEPackageSupportDisableManifestSandbox=YES`, g)).toBe(false);
+    expect(outsideTheGuard(copy, `${xcode}; touch x`, g)).toBe(false);
+    expect(outsideTheGuard(copy, 'npm test', g)).toBe(false);
+    expect(outsideTheGuard(copy, xcode, undefined)).toBe(false);
+    expect(outsideTheGuard(project, xcode, g)).toBe(false);
+  });
+
+  it.runIf(onMac)("run outside it, in the copy, with the guard's caches and no push; anything else stays in", async () => {
+    // A stand-in for Xcode: it writes where the guard keeps commands out, and says what it was given.
+    const bin = path.join(base, 'bin');
+    fs.mkdirSync(bin);
+    const outside = path.join(base, 'outside.txt');
+    fs.writeFileSync(path.join(bin, 'xcodebuild'), `#!/bin/sh\npwd\necho "pub=$PUB_CACHE pods=$CP_REPOS_DIR push=$GIT_CONFIG_VALUE_0"\necho made > "${outside}"\n`, { mode: 0o755 });
+    vi.stubEnv('PATH', `${bin}${path.delimiter}${process.env.PATH ?? ''}`);
+    const g = { ...guardOf(), noPush: true };
+    const r = await runCommand(copy, xcode, 30_000, { guard: g });
+    expect(r.ok).toBe(true);
+    expect(r.outsideGuard).toBe(true);
+    expect(r.output).toContain(copy);
+    expect(r.output).toContain(`pub=${path.join(cache, 'pub')} pods=${path.join(cache, 'cocoapods', 'repos')} push=/`);
+    expect(fs.readFileSync(outside, 'utf8')).toBe('made\n');
+    // The same stand-in with one more word is not squad-kit's own Xcode command: it stays in the guard.
+    fs.rmSync(outside);
+    const kept = await runCommand(copy, `${xcode} -IDEPackageSupportDisableManifestSandbox=YES`, 30_000, { guard: g });
+    expect(kept.outsideGuard).toBeUndefined();
+    expect(kept.output).toMatch(/not permitted/i);
+    expect(fs.existsSync(outside)).toBe(false);
+  });
+});
+
+describe("Flutter's own version stamps", () => {
+  /** A made-up Flutter folder, as 3.35 and later keep it. */
+  const sdk = () => {
+    const root = path.join(base, 'flutter');
+    for (const d of ['bin/cache/dart-sdk/bin', 'bin/cache/artifacts/engine', 'bin/internal']) fs.mkdirSync(path.join(root, d), { recursive: true });
+    for (const f of ['bin/flutter', 'bin/cache/flutter_tools.snapshot', 'bin/cache/engine.stamp', 'bin/cache/engine.realm', 'bin/cache/dart-sdk/bin/dart', 'bin/internal/engine.version']) fs.writeFileSync(path.join(root, f), 'theirs\n');
+    return root;
+  };
+  const refused = (root: string) => ['bin/cache/dart-sdk/bin/dart', 'bin/cache/artifacts/engine/x', 'bin/cache/flutter_tools.snapshot', 'bin/flutter', 'bin/cache/engine.stamp.bak', 'bin/cache/engine.stamp.tmp.12x', 'bin/cache/engine.realm2', 'bin/cache/lockfile', 'bin/internal/engine.version'].map((f) => path.join(root, f));
+  const allowed = (root: string) => ['bin/cache/engine.stamp', 'bin/cache/engine.stamp.tmp.72843', 'bin/cache/engine.realm'].map((f) => path.join(root, f));
+
+  it('are the only files of Flutter open in the guard, each exactly, and the agents\' sandbox gets the same', () => {
+    const root = sdk();
+    const g = buildGuard({ cwd: copy, root: project, cache, home, platform: process.platform, flutter: root });
+    expect(g.writeExactly).toHaveLength(3);
+    for (const p of allowed(root)) expect(g.writeExactly!.some((r) => new RegExp(r).test(p)), p).toBe(true);
+    for (const p of refused(root)) expect(g.writeExactly!.some((r) => new RegExp(r).test(p)), p).toBe(false);
+    expect(g.write.some((w) => w.startsWith(root))).toBe(false);
+    // A refusal there is the guard's; a write to a stamp is not.
+    expect(homeCachesRefused(`touch: ${path.join(root, 'bin/cache/flutter_tools.snapshot')}: Operation not permitted`, g, home)).toEqual([]);
+    const ask = sandboxAsk({ cwd: copy, root: project, read: [], proof: path.join(base, 'proof'), secrets: [], cache, home, flutter: root });
+    expect(ask.write.filter((w) => w.startsWith(root)).sort()).toEqual(['bin/cache/engine.realm', 'bin/cache/engine.stamp', 'bin/cache/engine.stamp.tmp.*'].map((f) => path.join(root, f)));
+    // No Flutter here: nothing of it is named.
+    expect(buildGuard({ cwd: copy, root: project, home, platform: process.platform, flutter: null }).writeExactly).toBeUndefined();
+  });
+
+  it.runIf(onMac)('a command writes them as Flutter does, and nothing else of Flutter', async () => {
+    const root = sdk();
+    const g = buildGuard({ cwd: copy, root: project, cache, extraWrite: [cache], extraRead: [cache], home, platform: process.platform, flutter: root });
+    const tmp = path.join(root, 'bin/cache/engine.stamp.tmp.$$');
+    const r = await runCommand(copy, [`echo v2 > "${tmp}" && mv "${tmp}" "${path.join(root, 'bin/cache/engine.stamp')}" && echo "" > "${path.join(root, 'bin/cache/engine.realm')}" && echo stamps-ok`, ...refused(root).map((p) => `echo planted > "${p}"`), 'exit 0'].join('; '), 30_000, { guard: g });
+    expect(r.output).toContain('stamps-ok');
+    expect(r.output.match(/not permitted/gi)).toHaveLength(refused(root).length);
+    expect(fs.readFileSync(path.join(root, 'bin/cache/engine.stamp'), 'utf8')).toBe('v2\n');
+    for (const p of refused(root)) expect(fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : 'none', p).not.toBe('planted\n');
+  });
+});
+
+/** A Flutter app's copy, and Dart packages this computer downloaded already, with pub's own lists and programs beside. */
+function flutterApp(): string {
+  fs.writeFileSync(path.join(copy, 'pubspec.yaml'), 'name: wasl\ndependencies:\n  flutter:\n    sdk: flutter\n');
+  const pub = path.join(home, '.pub-cache');
+  fs.mkdirSync(path.join(pub, 'hosted', 'pub.dev', 'http-1.2.2', 'lib'), { recursive: true });
+  fs.writeFileSync(path.join(pub, 'hosted', 'pub.dev', 'http-1.2.2', 'lib', 'http.dart'), 'library http;\n');
+  fs.mkdirSync(path.join(pub, 'hosted', 'pub.dev', '.cache'), { recursive: true });
+  fs.mkdirSync(path.join(pub, 'hosted-hashes', 'pub.dev'), { recursive: true });
+  fs.writeFileSync(path.join(pub, 'hosted-hashes', 'pub.dev', 'http-1.2.2.sha256'), 'abc');
+  // Globally activated programs, on the person's PATH: never linked, never written.
+  fs.mkdirSync(path.join(pub, 'bin'), { recursive: true });
+  return pub;
+}
 
 describe("the person's home", () => {
   it('gets nothing from squad-kit making a cache home', () => {

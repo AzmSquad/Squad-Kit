@@ -308,6 +308,8 @@ export const TICKET_HOME = {
   notes: 'project',
   proof: 'project',
   offScreen: 'project',
+  // Which tools this computer has: another computer may take the pictures on the phone.
+  picturesNote: 'local',
   mockup: 'project',
   changes: 'project',
   changeOf: 'project',

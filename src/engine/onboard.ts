@@ -14,7 +14,8 @@ import { dockerBlockedWords, guardSupport, projectGuardFor, type GuardSpec } fro
 import { fillOwnCopy, placeStoryFiles } from './local-files.js';
 import { countFiles, gitState, nextToNothing } from './first-look.js';
 import { DOING } from './plain-doing.js';
-import { withBrowserTests } from './find-commands.js';
+import { fromTheRead, withBrowserTests } from './find-commands.js';
+import { writeLog } from '../core/app-log.js';
 import { learnAfterRead } from './story-db.js';
 
 /**
@@ -69,10 +70,15 @@ function noCodeAnswer(out: ScanAnswer, idea: string): ScanAnswer {
   return { empty: true, summary: out.summary, map: [], decisions: [], commands: {}, users: '', can: [], worth: [], ideas, parts: [], links: [] };
 }
 
-/** The Architect's test command, with the project's separate browser tests when it left them out. */
+/**
+ * The Architect's commands, ready to save: its test command with the project's separate browser tests when it left them
+ * out, and a start that opens a window, or Flutter's plain analyze, made safe (fromTheRead). Each change goes in the log.
+ */
 function withAllTests(dir: string, c: ProjectCommands): ProjectCommands {
-  const test = withBrowserTests(dir, c.test);
-  return test ? { ...c, test } : c;
+  const safe = fromTheRead(dir, c);
+  for (const line of safe.changed) writeLog({ level: 'info', text: line });
+  const test = withBrowserTests(dir, safe.commands.test);
+  return test ? { ...safe.commands, test } : safe.commands;
 }
 
 /* ── The read ──────────────────────────────────────────── */

@@ -195,12 +195,17 @@ export function samePicture(a: Buffer, b: Buffer): boolean {
   return Buffer.from(pa.pixels.buffer, pa.pixels.byteOffset, pa.pixels.byteLength).equals(Buffer.from(pb.pixels.buffer, pb.pixels.byteOffset, pb.pixels.byteLength));
 }
 
-/** The size a saved screenshot was taken at, from its width: 390 for a phone, 1280 for a desktop (engine/shots.ts). Null when it cannot be read. */
-export function shotSizeOf(file: string): 'phone' | 'desktop' | null {
+/**
+ * The size a saved screenshot was taken at: from its width for the browser's pictures, 390 for a phone and 1280 for a
+ * desktop (engine/shots.ts), and from its shape for a real phone's, which are taken at its full size: a tall one is a
+ * phone, a less tall one a tablet. Null when it cannot be read.
+ */
+export function shotSizeOf(file: string): 'phone' | 'tablet' | 'desktop' | null {
   try {
     const p = readPicture(fs.readFileSync(file));
     if (!p) return null;
-    return p.width < 800 ? 'phone' : 'desktop';
+    if (p.width < 800 || p.height > p.width * 1.6) return 'phone';
+    return p.height > p.width ? 'tablet' : 'desktop';
   } catch {
     return null;
   }

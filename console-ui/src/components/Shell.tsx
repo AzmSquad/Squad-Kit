@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, Outlet, useRouterState } from '@tanstack/react-router';
-import { ArrowUp, Bug, ChevronsUpDown, Compass, Inbox, LayoutGrid, ListTodo, ListTree, Menu, MessagesSquare, Moon, Network, Settings, ShieldCheck, Sun, Terminal } from 'lucide-react';
+import { ArrowUp, Bug, ChevronsUpDown, Compass, Inbox, LayoutGrid, ListTodo, ListTree, Menu, MessagesSquare, Moon, Network, Settings, ShieldCheck, Sun, Terminal, Wrench } from 'lucide-react';
 import { Written } from './ui';
 import { useBoard } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
@@ -19,6 +19,7 @@ import { useOverviewWaits } from './Setup';
 import { useBreakdowns } from '../lib/requirementsData';
 import { requirementsWaiting } from '../lib/requirements';
 import { useBreakdownWaits } from './BreakdownWaits';
+import { useTools } from '../pages/Tools';
 
 const NAV = [
   { to: '/overview', label: 'Overview', icon: Compass, badge: 'setup' as const },
@@ -31,6 +32,7 @@ const NAV = [
   { to: '/architecture', label: 'Architecture', icon: Network },
   { to: '/bugs', label: 'Bugs', icon: Bug, badge: 'bugs' as const },
   { to: '/harness', label: 'Harness', icon: ShieldCheck },
+  { to: '/tools', label: 'Tools', icon: Wrench, badge: 'tools' as const },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
 
@@ -49,6 +51,9 @@ export function Shell() {
   const chats = useChats().data?.filter((c) => c.open).length ?? 0;
   const docked = useDocked();
   const setupWaits = useOverviewWaits();
+  // Required tools not on this computer yet (or too old): the Tools item counts them.
+  const toolsData = useTools(60_000).data;
+  const toolsMissing = toolsData?.lines.filter((l) => l.priority === 'required' && l.state !== 'ready' && l.state !== 'not-here').length ?? 0;
   // Requirements: questions from the Analyst and stories that need the person. "New" until then, in 1.2.
   const breakdowns = useBreakdowns(5000);
   const reqs = requirementsWaiting(breakdowns.data?.breakdowns ?? [], meta?.user.name);
@@ -99,7 +104,7 @@ export function Shell() {
           <ChevronsUpDown size={14} className="sw" />
         </a>
         {NAV.map((n) => {
-          const count = n.badge === 'you' ? waiting : n.badge === 'bugs' ? bugs : n.badge === 'chats' ? chats : 0;
+          const count = n.badge === 'you' ? waiting : n.badge === 'bugs' ? bugs : n.badge === 'chats' ? chats : n.badge === 'tools' ? toolsMissing : 0;
           // The overview waits for the person to check it: marked like anything else that waits for them.
           if (n.badge === 'setup')
             return (

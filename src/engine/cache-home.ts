@@ -67,6 +67,10 @@ export function toolCacheEnv(dir: string): Record<string, string> {
     UV_CACHE_DIR: at('uv'),
     // Dart and Flutter packages.
     PUB_CACHE: at('pub'),
+    // CocoaPods, for an iPhone build: its spec repos (with its lock file) and the pods it downloads. Its settings stay
+    // the person's own, in ~/.cocoapods.
+    CP_REPOS_DIR: at(path.join('cocoapods', 'repos')),
+    CP_CACHE_DIR: at(path.join('cocoapods', 'cache')),
     // PHP packages.
     COMPOSER_CACHE_DIR: at('composer'),
     // Maven's own folder, where the Maven wrapper keeps the Maven it downloads (its packages: MAVEN_OPTS).
@@ -94,11 +98,11 @@ function installedEnv(): Record<string, string> {
 
 /**
  * Tools that keep their usage reports in the person's home, which stays read only: Flutter stops at once when it cannot
- * write them, and .NET tries again for every file. Their own setting leaves the reports out of squad-kit's commands; the
- * person's own runs report as they chose.
+ * write them, and .NET tries again for every file. CocoaPods sends its own after each install. Their own setting leaves
+ * the reports out of squad-kit's commands; the person's own runs report as they chose.
  */
 function noReportsEnv(): Record<string, string> {
-  return { FLUTTER_SUPPRESS_ANALYTICS: 'true', DOTNET_CLI_TELEMETRY_OPTOUT: '1' };
+  return { FLUTTER_SUPPRESS_ANALYTICS: 'true', DOTNET_CLI_TELEMETRY_OPTOUT: '1', COCOAPODS_DISABLE_STATS: 'true' };
 }
 
 /**
@@ -172,6 +176,50 @@ function browserCacheEnv(dir: string, home: string, env: NodeJS.ProcessEnv): Rec
   } catch {
     // A folder it cannot make: Playwright as it is, with its folder read only.
     return {};
+  }
+}
+
+/** Where the person keeps their Dart and Flutter packages: where they set it, or pub's own place. */
+function theirPub(home: string, env: NodeJS.ProcessEnv, win = process.platform === 'win32'): string {
+  if (env.PUB_CACHE) return path.resolve(env.PUB_CACHE);
+  return win ? path.join(env.LOCALAPPDATA ?? path.join(home, 'AppData', 'Local'), 'Pub', 'Cache') : path.join(home, '.pub-cache');
+}
+
+/**
+ * The Dart and Flutter packages this computer downloaded already, linked into the project's own pub folder, each one by
+ * its version with the hash pub checks it by: a Flutter app's story finds them there, and downloads only what is
+ * missing, into the project's folder. The person's own stay read only, as their own builds run what is there. Only for
+ * a Dart or Flutter project, as there can be thousands.
+ */
+function pubLinks(dir: string, cwd: string | undefined, home: string, env: NodeJS.ProcessEnv): void {
+  if (!cwd || !fs.existsSync(path.join(cwd, 'pubspec.yaml'))) return;
+  const theirs = theirPub(home, env);
+  const mine = path.join(dir, 'pub');
+  try {
+    if (!inside(dir, mine) || path.resolve(theirs) === path.resolve(mine)) return;
+    for (const host of fs.existsSync(path.join(theirs, 'hosted')) ? fs.readdirSync(path.join(theirs, 'hosted')) : []) {
+      if (host.startsWith('.')) continue;
+      linkVersions(path.join(theirs, 'hosted', host), path.join(mine, 'hosted', host), /^[a-z0-9_]+-\d[\w.+-]*$/);
+      linkVersions(path.join(theirs, 'hosted-hashes', host), path.join(mine, 'hosted-hashes', host), /^[a-z0-9_]+-\d[\w.+-]*\.sha256$/);
+    }
+  } catch {
+    // A folder it cannot make: pub downloads what it needs instead.
+  }
+}
+
+/**
+ * The person's own CocoaPods spec repos, a company's private one among them, linked into the project's own, read only:
+ * CocoaPods finds them there by their address. Not trunk, CocoaPods' public one, which it writes in on each install as
+ * it downloads what it needs: the project's own trunk starts empty. Nor the lock file CocoaPods keeps beside them.
+ */
+function specRepoLinks(dir: string, home: string, env: NodeJS.ProcessEnv): void {
+  const theirs = env.CP_REPOS_DIR ? path.resolve(env.CP_REPOS_DIR) : path.join(env.CP_HOME_DIR ? path.resolve(env.CP_HOME_DIR) : path.join(home, '.cocoapods'), 'repos');
+  const mine = path.join(dir, 'cocoapods', 'repos');
+  try {
+    if (!fs.existsSync(theirs) || !inside(dir, mine) || theirs === path.resolve(mine)) return;
+    linkVersions(theirs, mine, /^(?!trunk$|Spec_Lock$)[^.]/);
+  } catch {
+    // A folder it cannot make: CocoaPods downloads what it needs instead.
   }
 }
 
@@ -317,6 +365,8 @@ export function cacheHomeEnv(dir: string, o: { wall: CacheWall; cwd?: string; en
     ownFolder(dir);
     startHome(dir, home, env);
     if (o.cwd) gradleWrapper(dir, o.cwd, home, env);
+    pubLinks(dir, o.cwd, home, env);
+    if (process.platform === 'darwin') specRepoLinks(dir, home, env);
   } catch {
     // A folder it cannot make, or a copy it could not finish: each tool's setting still points there, and it downloads.
   }

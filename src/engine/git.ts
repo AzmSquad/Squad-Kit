@@ -309,17 +309,32 @@ async function nestedReposLater(dir: string, env?: Record<string, string>): Prom
 const notThese = (paths: string[]) => paths.map((p) => `:(top,exclude,literal)${p}`);
 
 /**
+ * Folders squad-kit's own builds make in a copy, wherever in it they run: Xcode's build folder (XCODE_BUILD_DIR in
+ * engine/find-commands.ts). A project's .gitignore may not name them, so git's local ignore list keeps them out of
+ * `git status`, and staging leaves them out of every commit, even when a story changes what git ignores.
+ */
+export const OWN_BUILD_DIRS = ['build/squad-kit-ios'];
+
+/** Puts squad-kit's own build folders on git's local ignore list, at any depth. */
+export function keepOwnBuildsOut(dir: string): void {
+  excludeLocal(dir, OWN_BUILD_DIRS.map((d) => `**/${d}/`));
+}
+
+/** squad-kit's own build folders, at any depth, ignored or not: staging leaves them out. */
+const notOwnBuilds = () => OWN_BUILD_DIRS.map((d) => `:(top,exclude,glob)**/${d}/**`);
+
+/**
  * Stages all the work in a folder, and nothing of a nested repo. git would otherwise look inside it with that repo's own
  * settings, and anything in the copy can write those: this is the one way the engine stages everything.
  */
 export function stageAll(dir: string, env?: Record<string, string>): void {
-  const out = notThese([...nestedRepos(dir, env), ...placedIn(dir)]);
+  const out = [...notThese([...nestedRepos(dir, env), ...placedIn(dir)]), ...notOwnBuilds()];
   git(dir, ['add', '-A', ...(out.length ? ['--', ':/', ...out] : [])], env ? { env } : {});
 }
 
 /** stageAll, beside everything else: on a big project it reads every file. */
 export async function stageAllLater(dir: string, env?: Record<string, string>, signal?: AbortSignal): Promise<void> {
-  const out = notThese([...(await nestedReposLater(dir, env)), ...placedIn(dir)]);
+  const out = [...notThese([...(await nestedReposLater(dir, env)), ...placedIn(dir)]), ...notOwnBuilds()];
   await gitLater(dir, ['add', '-A', ...(out.length ? ['--', ':/', ...out] : [])], { ...(env ? { env } : {}), ...(signal ? { signal } : {}) });
 }
 
@@ -823,6 +838,8 @@ export function addWorktree(projectRoot: string, ticketId: string, base: string,
     if (exists) await makeCopy(projectRoot, dir, [], branch, how);
     // No tracking: nothing here reads it, and writing it is what two copies at once could trip over, after the branch is made.
     else await makeCopy(projectRoot, dir, ['--no-track', '-b', branch], pushed ?? baseCommit, how, { branch, start: git(projectRoot, ['rev-parse', pushed ?? baseCommit]) });
+    // Xcode's build folder in the copy is squad-kit's own: never the story's work.
+    keepOwnBuildsOut(dir);
     if (!pushed) return { dir, branch, baseCommit };
     // Where the ticket left the base, so its changes are measured from there and not against newer work in the base.
     return { dir, branch, baseCommit: git(projectRoot, ['merge-base', base, pushed], { allowFail: true }) || baseCommit, pushed: pushed.replace(/^refs\/remotes\//, '') };

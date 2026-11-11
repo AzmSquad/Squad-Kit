@@ -20,6 +20,8 @@ import { mountDependsApi } from './depends.js';
 import { mountOverviewApi } from './overview.js';
 import { mountRequirementsApi } from './requirements.js';
 import { mountTryApi } from './try.js';
+import { mountToolsApi } from './tools.js';
+import { mountPhoneApi } from './phone.js';
 
 export interface MountApiOptions {
   paths: SquadPaths;
@@ -47,5 +49,7 @@ export function mountApi(app: Hono, opts: MountApiOptions): void {
   mountOverviewApi(app, opts);
   mountRequirementsApi(app, opts);
   mountTryApi(app, opts);
+  mountToolsApi(app, opts);
+  mountPhoneApi(app);
   app.onError(onUnexpected);
 }

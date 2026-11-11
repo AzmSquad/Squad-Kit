@@ -80,6 +80,7 @@ function stateLine(s: AppView): string {
 
 /** What the app does now, while it starts. */
 function stepLine(s: AppView): string {
+  if (s.step === 'phone') return s.phone?.run?.line ?? "Getting the app onto squad-kit's iPhone";
   if (s.step === 'copy') return 'Making a copy of the code. On a big project this takes a while.';
   if (s.step === 'setup') return `Setting it up first: ${s.setup}`;
   if (s.step === 'start') return `Starting: ${s.start}`;
@@ -101,6 +102,14 @@ function busyLines(s: AppView, ref: string): void {
 /** How the start went. False when it did not start. */
 function report(bp: BoardPaths, s: AppView, lines: string[] = []): boolean {
   const ref = refOf(bp, s.name);
+  if (s.state === 'running' && s.phone?.run?.state === 'running') {
+    ui.success(`${s.name} is open on squad-kit's ${s.phone.run.device ?? 'iPhone'}, from squad-kit's copy of ${s.base}. Close its window, or stop it: ${cmd(`squad app stop${ref}`)}`);
+    return true;
+  }
+  if (s.state === 'stopped' && s.phone?.run?.ended) {
+    ui.info(s.phone.run.ended);
+    return false;
+  }
   if (s.state === 'running') {
     ui.success(`${s.name} runs at ${s.address}, from squad-kit's copy of ${s.base}.`);
     if (s.includes?.length) out(`  Includes ${s.includes.map((t) => `${t.id} ${t.title}`).join(', ')}`);
@@ -151,7 +160,7 @@ async function runHere(bp: BoardPaths, name: string, opts: StartOptions, again: 
   const stopAsked = new Promise<void>((r) => (asked = r));
   process.once('SIGINT', () => asked());
   process.once('SIGTERM', () => asked());
-  const first = again ? await runner.restart(name, opts) : runner.start(name, opts);
+  const first = again ? await runner.restart(name, opts) : await runner.startAs(name, opts);
   ui.step(stepLine(first));
   const s = await Promise.race([runner.settled(name), stopAsked.then(() => null)]);
   if (!s) {
@@ -179,7 +188,7 @@ async function startOrRestart(name: string | undefined, opts: StartOptions, agai
   const bp = board();
   const app = findApp(readMeta(bp), name);
   const api = boardApi(bp);
-  const body = { nextPort: Boolean(opts.nextPort), stopOther: Boolean(opts.stopOther) };
+  const body = { nextPort: Boolean(opts.nextPort), stopOther: Boolean(opts.stopOther), ...(opts.phone ? { phone: true } : {}), ...(opts.web ? { web: true } : {}), ...(opts.language ? { language: opts.language } : {}) };
   if (!api) return runHere(bp, app.name, body, again);
   const first = await api.call<AppView>('POST', `/apps/${encodeURIComponent(app.name)}/${again ? 'restart' : 'start'}`, body);
   await follow(bp, api, app.name, first);

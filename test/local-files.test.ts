@@ -7,7 +7,8 @@ import { boardPaths, readMeta, writeMeta, type BoardPaths } from '../src/board/s
 import { seedDemoBoard } from '../src/board/demo.js';
 import { addLocalFile, addLockedFile, lockDockerFiles, offLimits, projectFilesView, removeProjectFile, storyFile, useMyFile } from '../src/board/project-files.js';
 import { hiddenFiles, placeStoryFiles } from '../src/engine/local-files.js';
-import { stageAll } from '../src/engine/git.js';
+import { OWN_BUILD_DIRS, addWorktree as makeStoryCopy, stageAll, stageAllLater } from '../src/engine/git.js';
+import { XCODE_BUILD_DIR } from '../src/engine/find-commands.js';
 import { addWorktree } from './support/copy.js';
 import { copyEnvFiles } from '../src/engine/run-app.js';
 import { buildPrompt, offLimitsText } from '../src/engine/prompts.js';
@@ -291,6 +292,33 @@ describe("squad-kit's own copies", () => {
       expect(fs.existsSync(path.join(dir, 'not/there.js'))).toBe(false);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("squad-kit's own Xcode build folder in a story's copy", () => {
+  it('never shows as the story\'s work and never goes in a commit, wherever it is, even when a story takes it out of .gitignore', async () => {
+    // The same folder the native iPhone commands build in.
+    expect(OWN_BUILD_DIRS).toContain(XCODE_BUILD_DIR);
+    const wt = (await makeStoryCopy(root, 'AP-2', 'main')).dir;
+    try {
+      // The project's own .gitignore does not name build/.
+      write('build/squad-kit-ios/Build/Products/App.app/App', 'binary', wt);
+      write('ios/build/squad-kit-ios/Logs/Build/x.xcactivitylog', 'log', wt);
+      write('build/notes.txt', 'the project\'s own\n', wt);
+      write('src/app.ts', 'export const a = 3;\n', wt);
+      expect(sh('git status --porcelain -uall', wt)).not.toContain('squad-kit-ios');
+      expect(fs.readFileSync(path.join(root, '.git', 'info', 'exclude'), 'utf8')).toContain('**/build/squad-kit-ios/\n');
+      // A story that takes it out of git's ignore lists still cannot commit it.
+      write('.gitignore', '.env.dev\npublic/config.js\n.squad/\n!build/squad-kit-ios/\n!**/build/squad-kit-ios/\n', wt);
+      expect(sh('git status --porcelain -uall', wt)).toContain('build/squad-kit-ios');
+      for (const stage of [async () => stageAll(wt), () => stageAllLater(wt)]) {
+        await stage();
+        expect(sh('git diff --cached --name-only', wt).split('\n').sort()).toEqual(['.gitignore', 'build/notes.txt', 'src/app.ts']);
+        sh('git reset -q', wt);
+      }
+    } finally {
+      sh(`git worktree remove --force "${wt}"`);
     }
   });
 });

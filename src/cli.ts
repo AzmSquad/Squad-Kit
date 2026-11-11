@@ -15,6 +15,8 @@ import { runProjects } from './commands/projects.js';
 import { runParts } from './commands/parts.js';
 import { runFiles } from './commands/files.js';
 import { runDb, runDbHide, runDbSample } from './commands/db.js';
+import { runTools } from './commands/tools.js';
+import { runPhone } from './commands/phone.js';
 import { runAsk, runTicketStatus, runWait } from './commands/now.js';
 import { runLogs, runReport, runTryNow } from './commands/support.js';
 import { runAppFind, runAppRestart, runAppSet, runAppStart, runAppStatus, runAppStop } from './commands/app.js';
@@ -301,6 +303,19 @@ program
   .option('--repo <folder>', 'With confirm: the repo whose app reads it, when the project has several')
   .action(wrapArgs(runDb));
 
+program
+  .command('tools [action] [tool]')
+  .description(
+    "What this project needs on this computer, the same as the Tools page. check: look again after installing something. get <tool>: squad-kit gets one of its own tools, like maestro or java. update <tool>: squad-kit updates your own Flutter when it safely can, after a warning",
+  )
+  .option('-y, --yes', 'With update: say OK to the warning without being asked')
+  .action(wrapArgs(runTools));
+
+program
+  .command('phone [action]')
+  .description("squad-kit's own iPhone and iPad on this Mac, which it runs hidden for the Tester's pictures: whether each runs, and when it shuts down by itself. stop: shut them down now. Only squad-kit's own devices, never anybody else's")
+  .action(wrapArgs(runPhone));
+
 // The first run and the Overview: the setup page and the Overview page, button for button.
 program
   .command('setup')
@@ -322,13 +337,25 @@ program
 
 // Your apps: each app of the project, run from squad-kit's own copy of main (the board's sidebar does the same).
 const appCmd = program.command('app').description("Run your apps from squad-kit's own copy of main: start, stop, restart, status");
+/** `squad app start`'s flags, as Start takes them. */
+interface StartFlags {
+  nextPort?: boolean;
+  stopOther?: boolean;
+  phone?: boolean;
+  web?: boolean;
+  lang?: string;
+}
+const startFlags = (o: StartFlags) => ({ ...(o.nextPort ? { nextPort: true } : {}), ...(o.stopOther ? { stopOther: true } : {}), ...(o.phone ? { phone: true } : {}), ...(o.web ? { web: true } : {}), ...(o.lang ? { language: o.lang } : {}) });
 appCmd.command('status').description('Show each app: running or not, its address, and a new version to run').action(wrap(runAppStatus));
 appCmd
   .command('start [name]')
-  .description('Start the app on the newest main (outside squad-kit: here, until Ctrl-C)')
+  .description("Start the app on the newest main (outside squad-kit: here, until Ctrl-C). An iPhone app on a Mac opens on squad-kit's iPhone")
   .option('--next-port', 'No longer needed: squad-kit moves the app to a free port by itself')
   .option('--stop-other', 'Its port is in use by a program squad-kit started: stop that first')
-  .action(wrapArgs(runAppStart));
+  .option('--phone', "Open the iPhone app on squad-kit's iPhone")
+  .option('--web', 'Start its web version in the browser instead ("Use the web version now")')
+  .option('--lang <language>', 'Open the iPhone app in this language, like ar (English by default)')
+  .action(wrapArgs((name: string | undefined, o: StartFlags) => runAppStart(name, startFlags(o))));
 appCmd.command('stop [name]').description('Stop the app, and everything it started').action(wrapArgs(runAppStop));
 appCmd
   .command('restart [name]')
@@ -372,6 +399,9 @@ program
   .description("Try it yourself: run the ticket's own copy of the app, with the change in it, before Looks right. Nothing is merged")
   .option('--stop', 'Stop the copy, and everything it started')
   .option('--status', 'Show whether the copy runs, and its address')
+  .option('--phone', "Open the iPhone app on squad-kit's iPhone")
+  .option('--web', 'Start its web version in the browser instead ("Use the web version now")')
+  .option('--lang <language>', 'Open the iPhone app in this language, like ar (English by default)')
   .action(wrapArgs(runTry));
 program
   .command('propose <ticket> [text...]')

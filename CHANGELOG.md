@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Phone apps, iPhone first.** For a Flutter, React Native or native iPhone app on a Mac, the Tester's pictures come
+  from squad-kit's own iPhone and iPad, started hidden, with the app tapped through by its visible words (Maestro), in
+  English and Arabic. Each picture says its device ("iPhone 16 Pro", "Web version"). squad-kit starts one phone at a
+  time, waits when the computer is busy, shuts it down after 10 minutes unused and when the board stops, and never
+  touches anybody else's simulator.
+- **Start and Try it yourself on the iPhone.** Your apps and Try it yourself open a phone app on squad-kit's iPhone:
+  each step with the time left, measured on your computer, **Use the web version now** at any moment, and the language
+  to open it in when the app has more than one.
+- **The web version stands in.** With the iPhone's tools missing, the pictures and Start use the app's web version and
+  say so. With no web version either, the story waits for the tools and goes on by itself: it never merges unseen.
+- **Tools: what this project needs.** A page per project with every tool it needs, each with its logo, its state
+  (Ready, Missing, Too old, Getting it now) and what it is for. squad-kit gets Maestro and Java itself, into its own
+  folder, the first time they are needed or with **Get it**. **Update Flutter** updates your own Flutter when it is
+  safe, after a warning that it changes Flutter for every project. **Check again** finds a tool you just installed, with
+  no restart (Mac and Linux). A missing tool stops only the actions that need it.
+- **Commands for phone projects.** Flutter (`flutter analyze --no-fatal-infos`, `flutter test`, a headless web start),
+  Dart, React Native and Expo, native iPhone (`xcodebuild`) and Swift packages. Flutter's own downloads happen once,
+  outside the guard; packages and CocoaPods go to the project's own cache.
+- **A new phone project from a requirements document** is a Flutter app (React Native with Expo when the document or
+  the team asks), made with the tool's own create command.
+- Terminal: `squad tools`, `squad tools check | get <tool> | update <tool>`, `squad phone status | stop`, and
+  `--phone`, `--web`, `--lang` on `squad app start` and `squad try`.
+
+### Changed
+
+- **The Reviewer gets the plan.** Every review round now has the plan's steps and the decision, as written, so the
+  review checks the change against what was asked. The board no longer calls every review round "a fresh session".
+- **iPhone builds run under Xcode's own protections.** Xcode can't start inside squad-kit's guard, so squad-kit runs its
+  own Xcode builds and tests outside it; agents never run Xcode themselves. Everything else stays inside the guard.
+  Both show on the Harness page, with Flutter's own version stamps, the only files the guard opens in your Flutter.
+- **squad-kit never opens a window to start an app.** A start command that would open a browser, a desktop window or a
+  phone (`flutter run -d chrome`) is swapped for the headless web start, from a first read or from Settings.
+
+### Fixed
+
+- **Update Flutter ends when Flutter ends.** Something Flutter starts may keep running; it no longer holds the update
+  open until its time limit, and an update that did finish is never reported as failed.
+
 ## [1.3.8] — 2026-11-09
 
 ### Fixed

@@ -3,7 +3,7 @@ import * as ui from '../ui/index.js';
 import { buildPaths, requireSquadRoot } from '../core/paths.js';
 import { openBoard } from '../board/move.js';
 import { boardExists, requireTicket, type BoardPaths } from '../board/store.js';
-import { TryRunner, type TryStatus } from '../engine/try-app.js';
+import { TryRunner, type TryHow, type TryStatus } from '../engine/try-app.js';
 import { boardApi, type BoardApi } from './app.js';
 
 /**
@@ -15,6 +15,17 @@ import { boardApi, type BoardApi } from './app.js';
 export interface TryCliOptions {
   stop?: boolean;
   status?: boolean;
+  /** An iPhone app: open it on squad-kit's iPhone. */
+  phone?: boolean;
+  /** Its web version, in the browser: "Use the web version now". */
+  web?: boolean;
+  /** The language to open an iPhone app in: "ar". */
+  lang?: string;
+}
+
+/** How to start, from the terminal's flags. */
+function howOf(opts: TryCliOptions): TryHow {
+  return { ...(opts.phone ? { phone: true } : {}), ...(opts.web ? { web: true } : {}), ...(opts.lang ? { language: opts.lang } : {}) };
 }
 
 const out = (s = '') => process.stdout.write(`${s}\n`);
@@ -29,6 +40,11 @@ function board(): BoardPaths {
 
 /** How it stands, the way the panel says it. True while the copy runs. */
 function report(s: TryStatus): boolean {
+  if (s.state === 'running' && s.phone?.run?.state === 'running') {
+    ui.success(`${s.ticket}'s own copy of the app is open on squad-kit's ${s.phone.run.device ?? 'iPhone'}. Nothing is merged.`);
+    out(`  Close its window, or stop it: ${cmd(`squad try ${s.ticket} --stop`)}`);
+    return true;
+  }
   if (s.state === 'running') {
     ui.success(`${s.ticket}'s own copy of the app runs at ${s.url}. Nothing is merged.`);
     if (s.pages?.length) {
@@ -58,7 +74,11 @@ async function follow(api: BoardApi, first: TryStatus): Promise<boolean> {
   const at = `/tickets/${encodeURIComponent(first.ticket)}/try`;
   let s = first;
   if (s.state === 'starting') ui.step(`Starting ${s.ticket}'s own copy of the app, with the change in it…`);
+  let said = '';
   while (s.state === 'starting') {
+    const line = s.phone?.run?.line;
+    if (line && line !== said) ui.step(line);
+    if (line) said = line;
     await sleep(500);
     s = await api.call<TryStatus>('GET', at);
   }
@@ -66,9 +86,9 @@ async function follow(api: BoardApi, first: TryStatus): Promise<boolean> {
 }
 
 /** squad-kit is not open: the copy runs here, in this terminal, until Ctrl-C or until the ticket moves on. */
-async function runHere(runner: TryRunner, id: string, stopAsked: Promise<unknown>): Promise<boolean> {
+async function runHere(runner: TryRunner, id: string, stopAsked: Promise<unknown>, how: TryHow = {}): Promise<boolean> {
   ui.info('squad-kit is not open, so the copy runs here until you press Ctrl-C. With squad-kit open, it runs from the board.');
-  const first = runner.start(id);
+  const first = await runner.startAs(id, how);
   ui.step(`Starting ${first.ticket}'s own copy of the app, with the change in it…`);
   const s = await Promise.race([runner.settled(id), stopAsked.then(() => null)]);
   if (!s) {
@@ -112,7 +132,7 @@ export async function tryWith(bp: BoardPaths, api: BoardApi | null, ticket: stri
     if (!api) out(kleur.gray('  squad-kit is not open. The copy runs while it is open, or here with squad try.'));
     return true;
   }
-  if (api) return follow(api, await api.call<TryStatus>('POST', at));
+  if (api) return follow(api, await api.call<TryStatus>('POST', at, howOf(opts)));
   let asked!: () => void;
   const stopAsked =
     here?.stopAsked ??
@@ -121,7 +141,7 @@ export async function tryWith(bp: BoardPaths, api: BoardApi | null, ticket: stri
       process.once('SIGINT', () => asked());
       process.once('SIGTERM', () => asked());
     });
-  return runHere(here?.runner ?? new TryRunner(bp), id, stopAsked);
+  return runHere(here?.runner ?? new TryRunner(bp), id, stopAsked, howOf(opts));
 }
 
 /** `squad try <ticket> [--stop] [--status]` */

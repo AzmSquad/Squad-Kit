@@ -8,6 +8,7 @@ import { squadHome } from '../core/home.js';
 import { boardPaths, readMeta, type BoardPaths } from '../board/store.js';
 import type { NetworkLevel } from '../board/types.js';
 import { KNOWN_BAD, RECOMMENDED, knownBadGroup } from './network-lists.js';
+import { flutterOnPath, flutterStampGlobs } from './flutter-sdk.js';
 
 /**
  * The Builder's and the Tester's shell commands run in their AI tool's sandbox, where it has one: they write only in
@@ -259,6 +260,8 @@ export interface SandboxFor {
   network?: NetworkLevel;
   /** The cache home the project's stories share (engine/cache-home.ts). */
   cache?: string;
+  /** The person's Flutter folder, whose version stamps every run writes (engine/flutter-sdk.ts). Left out, the one on the PATH. */
+  flutter?: string | null;
   home?: string;
 }
 
@@ -270,8 +273,10 @@ export function sandboxAsk(o: SandboxFor): SandboxAsk {
   const env = ['.env', '.env.*', '**/.env', '**/.env.*'].map((p) => `${o.root}/${p}`);
   const own = o.cache ? withReal([o.cache]) : [];
   const net = networkPolicy(o.network ?? projectNetwork(o.root), o.hosts ?? []);
+  // Flutter's version stamps in its own folder, each exactly: the AI tool's sandbox takes a glob for the one a run names.
+  const flutter = o.flutter === undefined ? flutterOnPath()?.root : o.flutter;
   return {
-    write: [...new Set([...withReal([o.proof]), ...own, ...temp, ...caches])],
+    write: [...new Set([...withReal([o.proof]), ...own, ...temp, ...caches, ...(flutter ? flutterStampGlobs(flutter) : [])])],
     noRead: [...new Set([...PRIVATE.map((p) => path.join(home, p)), ...withReal([squadHome()]), ...o.secrets, ...env])],
     // The step's own folders, inside squad-kit's: its copy, its proof folder, its package cache, its attachments.
     read: [...new Set(withReal([o.cwd, o.proof, ...(o.cache ? [o.cache] : []), ...o.read]))],

@@ -6,6 +6,7 @@ import type { AppOutput, ProjectApp } from '../api/types';
 import { useAct, useApps } from '../lib/data';
 import { shellArg, shellQuote } from '../lib/text';
 import { Cmd, Modal, Written } from './ui';
+import { LanguagePick, PhoneLine, PhoneNotReady } from './PhoneStart';
 
 /**
  * Your apps, in the sidebar: each app of the project with Start, Open, Restart and Stop. squad-kit runs it from its
@@ -16,7 +17,7 @@ export function Apps() {
   const q = useApps();
   const apps = q.data?.apps ?? [];
   if (!apps.length) return null;
-  const idle = apps.some((a) => a.start && (a.state === 'not-running' || a.state === 'stopped') && !a.up && !a.fresh);
+  const idle = apps.some((a) => (a.start || a.phone?.ready) && (a.state === 'not-running' || a.state === 'stopped') && !a.up && !a.fresh);
   return (
     <div className="apps">
       <div className="apps-h">Your apps</div>
@@ -39,7 +40,7 @@ function both(items: { id: string; title: string }[]): string {
 function statusLine(a: ProjectApp): string {
   switch (a.state) {
     case 'running':
-      return runningFor(a.since);
+      return a.phone?.run?.state === 'running' ? `On ${a.phone.run.device ?? 'the iPhone'}` : runningFor(a.since);
     case 'starting':
       return 'Starting…';
     case 'stopped':
@@ -52,6 +53,7 @@ function statusLine(a: ProjectApp): string {
 }
 
 function stepLine(a: ProjectApp): string {
+  if (a.step === 'phone') return a.phone?.run?.line ?? "Getting the app onto squad-kit's iPhone";
   if (a.step === 'copy') return 'Making a copy of the code. On a big project this takes a while.';
   if (a.step === 'setup') return 'Setting it up first';
   if (a.step === 'start') return 'Starting it';
@@ -71,6 +73,14 @@ function AppItem({ a, together, named, live, reading, readError }: { a: ProjectA
   const ref = named ? ` ${shellArg(a.name)}` : '';
   const call = (verb: string, done: string, body?: object) => act.mutate({ path: `/api/v1/apps/${encodeURIComponent(a.name)}/${verb}`, body, done });
   const start = (body?: object) => call('start', `Starting ${a.name}`, body);
+  // An iPhone app on a Mac opens on squad-kit's iPhone, in the language picked next to Start.
+  const phone = a.phone;
+  const [lang, setLang] = useState(phone?.languages[0] ?? 'en');
+  const canStart = Boolean(a.start || phone?.ready);
+  const langFlag = phone?.ready && phone.languages.length > 1 && lang !== 'en' ? ` --lang ${lang}` : '';
+  const startHere = () => start(phone?.ready ? { phone: true, ...(phone.languages.length > 1 ? { language: lang } : {}) } : phone ? { web: true } : undefined);
+  const useWeb = () => call('start', `Starting the web version of ${a.name}`, { web: true });
+  const onPhone = Boolean(phone?.on || phone?.run?.state === 'running');
   const busy = a.state === 'failed' ? a.busy : undefined;
   // One story can change several parts of a product: one box for it, and its buttons take them all.
   const forAll = async (verb: string, done: string, body?: object) => {
@@ -113,26 +123,44 @@ function AppItem({ a, together, named, live, reading, readError }: { a: ProjectA
           <b>{a.name}</b>
           <small title={a.state === 'running' ? `Running at ${a.address}` : statusLine(a)}>{statusLine(a)}</small>
         </span>
-        {a.state === 'running' ? (
+        {a.state === 'running' && !onPhone ? (
           <a className="btn sm pri" href={a.address} target="_blank" rel="noreferrer" title={`Open ${a.address}`}>
             Open
           </a>
-        ) : a.state === 'starting' ? (
+        ) : a.state === 'running' ? null : a.state === 'starting' ? (
           <button className="btn sm" disabled={act.isPending} onClick={() => call('stop', `Stopped ${a.name}`)}>
             Stop
           </button>
-        ) : a.start ? (
-          <button className="btn sm go" disabled={act.isPending} onClick={() => start()}>
+        ) : canStart ? (
+          <button className="btn sm go" disabled={act.isPending} onClick={startHere}>
             {a.state === 'failed' ? 'Try again' : 'Start'}
           </button>
         ) : null}
       </div>
 
-      {a.state === 'starting' && <p className="app-more">{stepLine(a)}</p>}
+      {a.state === 'starting' && (phone && onPhone ? <PhoneLine phone={phone} starting /> : <p className="app-more">{stepLine(a)}</p>)}
+      {phone && a.state !== 'starting' && <PhoneLine phone={phone} starting={false} />}
+      {phone && a.state !== 'running' && a.state !== 'starting' && <PhoneNotReady phone={phone} />}
+      {/* The sidebar is narrow: the language sits under Start, not beside it. */}
+      {phone?.ready && a.state !== 'running' && a.state !== 'starting' && (
+        <p className="app-more phone-pick">
+          Opens on squad-kit&apos;s iPhone{phone.languages.length > 1 ? ', in' : '.'}
+          <LanguagePick languages={phone.languages} value={lang} onChange={setLang} />
+        </p>
+      )}
+
+      {phone?.web && onPhone && (a.state === 'starting' || a.state === 'running') && (
+        <div className="app-acts">
+          <button className="btn sm" disabled={act.isPending} onClick={useWeb}>
+            Use the web version now
+          </button>
+          <Cmd text={`squad app start${ref} --web`} />
+        </div>
+      )}
 
       {a.state === 'running' && (
         <div className="app-more">
-          <span className="addr">{bare(a.address)}</span>
+          {!onPhone && <span className="addr">{bare(a.address)}</span>}
           {a.includes.length > 0 && <Written lead="Includes" text={both(a.includes)} />}
           {a.elsewhere && <span>Started outside the board, from a terminal or an earlier squad-kit.</span>}
           <div className="app-acts">
@@ -149,7 +177,7 @@ function AppItem({ a, together, named, live, reading, readError }: { a: ProjectA
 
       {a.state === 'failed' && !busy && <p className="app-more why">{a.error}</p>}
 
-      {a.state !== 'running' && a.state !== 'starting' && a.start && !busy && <Cmd text={`squad app start${ref}`} />}
+      {a.state !== 'running' && a.state !== 'starting' && canStart && !busy && <Cmd text={`squad app start${ref}${langFlag}`} />}
 
       {a.state !== 'running' && a.state !== 'starting' && a.start && a.up && !busy && (
         <p className="app-more">
@@ -175,7 +203,7 @@ function AppItem({ a, together, named, live, reading, readError }: { a: ProjectA
         </div>
       )}
 
-      {!a.start && !typing && (
+      {!a.start && !phone && !typing && (
         <div className="app-warn">
           <b>Start command unknown</b>
           <span>squad-kit could not tell how to start this app yet.</span>

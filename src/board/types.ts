@@ -144,6 +144,8 @@ export interface ProofPicture {
   after: string;
   /** Where it was taken, like a row's page. */
   page?: string;
+  /** The device it was taken on, for people: "iPhone 16 Pro", "iPad Air 11-inch (M2)", "Web version". */
+  device?: string;
   /** What it shows, one plain sentence from the Tester. */
   note?: string;
 }
@@ -159,6 +161,10 @@ export interface ProofShot {
   note?: string;
   /** Where the main after picture was taken, as the address in the app without the host, like "/test/sign-up". */
   page?: string;
+  /** The device the main after picture was taken on: "iPhone 16 Pro", "Web version". Browser pictures of a web app have none. */
+  device?: string;
+  /** And the before picture's. */
+  beforeDevice?: string;
   /** The other after pictures of this "done when", one per part or case. Rows with one picture have none. */
   more?: ProofPicture[];
   /**
@@ -560,6 +566,11 @@ export interface Ticket {
    * do not fail the proof, unless every "done when" ends that way.
    */
   offScreen?: OffScreen[];
+  /**
+   * The pictures are of the app's web version, as its phone tools are missing: the one plain line that says so, and the
+   * line of the Tools page with what is needed. Gone once the pictures are taken on the phone again.
+   */
+  picturesNote?: { text: string; link: string };
   /** Rounds of screenshots that showed a "done when" does not work, since the last met proof (2 at most, then a stop). */
   proofRound?: number;
   stuck?: StuckChoice;

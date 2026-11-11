@@ -360,6 +360,113 @@ After a merge or a release, `.squad` files can show as changed in `git status`. 
 it stays out of your way: merges and releases keep this computer's newer copy. Leave them out of your own commits. If a hand
 `git pull` is refused over one, `git checkout -- <file>` lets the pull through.
 
+## Tools
+
+**Tools** in the sidebar opens "What this project needs": every tool this project uses on this computer, from what
+squad-kit reads in its files (a web app, a Flutter or React Native app, an iPhone or Android app, Docker). The first
+lines are git and an AI tool, as on the first start. Lines come in three groups: **Required** (some steps can't run
+without it), **Recommended** (things work, in a simpler way) and **Optional**. Each line says what the tool gives,
+whether it is here (Ready with its version, Missing, Too old, Getting it now, or Not on this computer, like Xcode on
+Windows) and what it is used for. Versions count: with Xcode 27, a Flutter older than 3.44.8 is Too old for iPhone
+builds.
+
+- **squad-kit gets it**: Maestro, and Java when this computer has none. **Get it** downloads the official release
+  into squad-kit's own folder (`~/.squad-kit/tools/`), checks its published checksum, and shows the progress and the
+  time left. No password, no Homebrew. A failed or cut download leaves nothing behind and says why.
+- **You install it**: the line says why squad-kit can't ("needs your Apple ID"), gives short steps and the official
+  page. Press **Check again** after installing. On Mac and Linux, Check again reads your terminal's PATH, so a tool you
+  just installed is found without closing squad-kit, and the agents squad-kit starts after find it too.
+- **Update Flutter**: when your Flutter is Too old, the line gives the steps to update it yourself (`flutter upgrade`,
+  or `brew upgrade --cask flutter` and FVM's own steps for those). When it is safe, squad-kit can also run Flutter's own
+  `flutter upgrade` for you (never with `--force`). Safe means: your Flutter folder is a copy of Flutter's own
+  repository, on one of its channels (stable, beta, main), with no changes of its own, you can change it without a
+  password, and no other tool (Homebrew, FVM, a snap) looks after it. Flutter is shared by every Flutter project on the
+  computer, so **Update Flutter** first asks inside the line: "This updates Flutter for every Flutter project on this Mac,
+  not only this one. Older projects may need small changes to build again. It downloads about 1 GB and takes about 5
+  minutes." **Update Flutter for all projects** starts it; **Not now** leaves it. The line shows each step in plain words
+  and the time left; steps that need Flutter wait meanwhile. After it, squad-kit checks again, so the line turns Ready
+  and a waiting story goes on. When it fails, the line shows Flutter's last useful words and the steps stay. When it is
+  not safe, the line says why in one sentence ("your Flutter folder has changes of its own") and gives the steps.
+
+A missing Required tool stops only the steps that need it. In this version, a story's build and its checks: the story
+waits with a plain message, "squad-kit can't build this story yet: Flutter isn't on this computer", with **See what's
+needed** linking to the line. It never fails over it, and goes on by itself once the tool is there. squad-kit looks
+again when you press Check again, when you open the waiting story, and every few minutes while one waits.
+
+Terminal: `squad tools`, `squad tools check`, `squad tools get maestro`, `squad tools update flutter` (shows the same
+warning and asks yes or no; `--yes` says OK without asking).
+
+REST (under `/p/<project>/api/v1`): `GET /tools`, `POST /tools/check`, `POST /tools/<tool>/get`, and
+`POST /tools/<tool>/update` with the body `{ "ok": true }`. Without the OK, the update call answers with the warning and
+changes nothing.
+
+### iPhone pictures
+
+For an iPhone app (Flutter, React Native or native, on a Mac), the Tester's pictures come from a real iPhone simulator
+that squad-kit runs itself, hidden: no Simulator window opens. squad-kit makes its own **squad-kit iPhone** and
+**squad-kit iPad** once, on the newest iOS this Mac has, and uses them again by the id it keeps in
+`~/.squad-kit/phones/devices.json`. It touches only those two, by their id: nobody else's simulator is started, stopped
+or changed.
+
+- **The app** is built for the simulator in the story's own copy, outside the agents' sandbox: Flutter with
+  `flutter build ios --simulator --debug`, React Native and native apps with `xcodebuild` (after `pod install` when there
+  is a Podfile), into the copy's `build/squad-kit-ios` folder, which git never sees. It builds again only when the
+  copy's code changed.
+- **Taking the pictures**: Maestro taps through the app by the words on the screen (the Tester's steps are the same as
+  in the browser: click, fill, select, press, wait), one Maestro kept running per booted phone. Each picture starts the
+  app fresh, in English or in the language the Tester asks for (`"ar"` opens it in Arabic). A page opens by the app's
+  own link when it has one; else every picture starts on the app's start screen. Each picture is labelled with its
+  device ("iPhone 16 Pro", "iPad Air 11-inch (M2)") on the Proof page. Maestro's usage numbers stay off, and what it
+  writes stays in `~/.squad-kit/phones/`.
+- **Times**: every long step says what it does and about how long it takes: building the app (first guess 5 minutes),
+  starting the phone (1 minute), putting the app on it (15 seconds), and Maestro's first run on a phone (1 minute).
+  After the first time, squad-kit uses the times it measured on this computer (`~/.squad-kit/tools/times.json`).
+- **One at a time, gently**: one of squad-kit's phones runs at a time, shared by every story (and by two squad-kits on
+  one computer). Before starting one, squad-kit looks at the free memory and the load; when the computer is busy it
+  says "The computer is busy. squad-kit waits a moment before starting the iPhone." and waits, without failing the
+  story. A phone shuts down after 10 minutes unused, and when the board stops. When something else keeps it open (an
+  open Simulator window starts it again), squad-kit leaves it.
+- **When the iPhone tools are missing** (Xcode, the simulator, Maestro, Java, or a Flutter too old for this Xcode) and
+  the app has a web version squad-kit can start, the pictures are of the web version, labelled "Web version", and the
+  story says so in one line, for example "iPhone pictures need Xcode. squad-kit took pictures of the web version
+  meanwhile.", with **See what's needed** on the Proof page. With no web version either, the story waits before its
+  pictures with the reason, and goes on by itself once the tools are there: it never merges without them. On Windows
+  and Linux, an iPhone simulator needs a Mac.
+
+- **Maestro and Java** are got by squad-kit itself the first time phone pictures need them, once Xcode is ready, with
+  the same Get as the Tools page: the story waits for that short download with its progress and time left ("Waits for
+  Maestro, which squad-kit is getting now (45%, about 40 seconds left). Goes on by itself once it's there"), and the
+  Tools line shows the same. A get that did not work is not tried again by itself: the line says why, with Get it.
+
+**Start and Try it yourself on the iPhone.** For an iPhone app on a Mac, **Start** in Your apps opens it on squad-kit's
+iPhone: squad-kit's copy of main is brought up to date and set up, the app is built for the simulator, put on the
+iPhone, started, and shown in the Simulator window. That window is the one squad-kit ever opens, and only here. Each
+step shows with the time left from this computer's times ("Building the app for the iPhone, about 4 minutes left"), and
+once it runs, the device ("Open on iPhone 16 Pro"). **Try it yourself** does the same with the story's own copy.
+
+- When the app comes in more than one language (Flutter's `lib/l10n/*.arb` or the folder its `l10n.yaml` names, an
+  iPhone app's `*.lproj` folders), a list next to Start picks it, English by default. Not for React Native.
+- When it also has a web version, **Use the web version now** shows the whole time: it stops the phone start (or the
+  app open on the phone) and starts the web version the way Start does today. When the iPhone tools are missing, the
+  line says why with **See what's needed**, and Start opens the web version meanwhile.
+- **Stop** closes the app and shuts the iPhone down. When you close the Simulator window yourself, squad-kit sees it
+  and marks Start or Try it yourself as stopped ("You closed the iPhone window, so squad-kit stopped the app."). It
+  never opens the window again by itself.
+- **Sharing the one iPhone**: the Tester's pictures and Start or Try never run on two simulators at once. While you
+  have the app open on the iPhone, a story's pictures wait: "squad-kit's iPhone is open in Try it yourself. The
+  pictures wait until you close it." After 15 minutes of a story waiting (the same rule as for the running product),
+  squad-kit closes the app there, says so ("squad-kit closed the app on its iPhone: a story needs the iPhone for its
+  pictures. Press Try it yourself again later."), and the pictures go on.
+
+Terminal: `squad phone` shows squad-kit's phones, whether each runs and when it shuts down by itself; `squad phone stop`
+shuts them down now (one taking pictures for a story is left, and it says so). `squad app start <app>` opens an iPhone
+app on the iPhone; `--phone` asks for it, `--web` starts the web version instead, `--lang ar` opens it in Arabic.
+`squad try <ticket>` takes the same `--phone`, `--web` and `--lang`.
+
+REST (under `/p/<project>/api/v1`): `GET /phone`, and `POST /phone/stop`, which answers with the same and a `message`.
+`POST /apps/<app>/start` and `POST /tickets/<ticket>/try` take `{ "phone": true }`, `{ "web": true }` (Use the web
+version now) and `{ "language": "ar" }`; their status has `phone` with the step, the time left and the device.
+
 ## Harness
 
 Everything the engine does, with the real values from the engine and what really happened on this project's stories. At

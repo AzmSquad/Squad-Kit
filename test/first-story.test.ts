@@ -304,6 +304,62 @@ describe('what the Architect is told', () => {
     expect(words).not.toContain('This story sets up the product');
   });
 
+  it('a phone app is a Flutter app made by flutter create, unless React Native is asked for, and the Tools page shows what it needs', () => {
+    for (const words of [P.planPrompt(t({ setsUp: true }), undefined, readMeta(bp)), P.designPrompt(t({ setsUp: true }), undefined, readMeta(bp)), P.planPrompt(t(), undefined, readMeta(bp))]) {
+      expect(words).toContain('asks for a phone app');
+      expect(words).toContain('make it a Flutter app: one code base for iPhone, Android and the web');
+      expect(words).toContain('React Native with Expo only when the document or the team asks for React Native');
+      expect(words).toContain('`flutter create --org <org> --project-name <name> --platforms ios,android,web .`');
+      expect(words).toContain('`npx create-expo-app@latest <name> --template blank-typescript --no-install`');
+      expect(words).toContain('never by writing its files yourself');
+      expect(words).toContain('setup "flutter pub get", lint "flutter analyze --no-fatal-infos", test "flutter test", start "flutter run -d web-server --web-port ${PORT:-8080}" and url "http://localhost:8080"');
+      expect(words).toContain('start "npx expo start --web --port ${PORT:-8081}" and url "http://localhost:8081"');
+      expect(words).toContain("squad-kit's Tools page then shows the person what this computer needs");
+    }
+    writeMeta(bp, { ...readMeta(bp), scan: { status: 'done', empty: false } });
+    expect(P.planPrompt(t(), undefined, readMeta(bp))).not.toContain('phone app');
+  });
+
+  it('the Builder of the first story makes the app with its own tool, and no other Builder is told so', () => {
+    const meta = readMeta(bp);
+    expect(P.buildPrompt(meta, [], t({ setsUp: true }))).toContain("Make a new app with its tool's own create command");
+    expect(P.buildPrompt(meta, [], t())).not.toContain('create command');
+  });
+
+  it("a native iPhone app's Builder never runs Xcode itself: squad-kit runs the build and tests after its step", () => {
+    const xcode = "xcodebuild build -project Wasl.xcodeproj -scheme Wasl -destination 'generic/platform=iOS Simulator' -derivedDataPath build/squad-kit-ios";
+    writeMeta(bp, { ...readMeta(bp), commands: { build: xcode } });
+    expect(P.buildPrompt(readMeta(bp), [], t())).toContain('- This is a native iPhone app: never run xcodebuild yourself, as Xcode can\'t start in your shell. squad-kit runs the iPhone build and tests after your step and shows you the result.');
+    writeMeta(bp, { ...readMeta(bp), commands: { test: 'flutter test' } });
+    expect(P.buildPrompt(readMeta(bp), [], t())).not.toContain('xcodebuild');
+  });
+
+  it("the commands it gives are the ones squad-kit finds in the app the tool made, and say what the app is before it is there", async () => {
+    const { findCommands, kindsOfCommands } = await import('../src/engine/find-commands.js');
+    // What `flutter create --platforms ios,android,web` leaves, in short.
+    const app = path.join(tmp, 'made');
+    for (const [f, text] of Object.entries({
+      'pubspec.yaml': 'name: visitor_log\ndependencies:\n  flutter:\n    sdk: flutter\ndev_dependencies:\n  flutter_test:\n    sdk: flutter\n',
+      'lib/main.dart': '',
+      'test/widget_test.dart': '',
+      'ios/Runner.xcodeproj/project.pbxproj': '',
+      'android/app/build.gradle': '',
+      'web/index.html': '',
+    })) {
+      fs.mkdirSync(path.dirname(path.join(app, f)), { recursive: true });
+      fs.writeFileSync(path.join(app, f), text);
+    }
+    const given = { setup: 'flutter pub get', lint: 'flutter analyze --no-fatal-infos', test: 'flutter test', start: 'flutter run -d web-server --web-port ${PORT:-8080}', url: 'http://localhost:8080' };
+    expect(findCommands(app)).toEqual(given);
+    expect(kindsOfCommands(given)).toEqual({ kinds: ['flutter'], platforms: ['ios', 'android', 'web'] });
+    expect(kindsOfCommands({ setup: 'npm install', test: 'npm test', start: 'npx expo start --web --port ${PORT:-8081}' })).toEqual({ kinds: ['react-native'], platforms: ['ios', 'android', 'web'] });
+    expect(kindsOfCommands({ setup: 'npm install', test: 'npm test', start: 'npm run dev' })).toEqual({ kinds: [], platforms: [] });
+  });
+
+  it("the first read is told the start serves on a port with no window: phone apps squad-kit starts itself", () => {
+    expect(P.scanPrompt(readMeta(bp), [])).toContain('The start command serves the app on a port with no window (for Flutter: flutter run -d web-server --web-port ${PORT:-8080}), never a browser, a desktop window or a phone: squad-kit starts phone apps itself.');
+  });
+
   it('only the first read after the first merge asks what runs', () => {
     expect(P.blueprintPrompt(readMeta(bp), [], [])).not.toContain('- runs:');
     expect(P.blueprintPrompt(readMeta(bp), [], [], true)).toContain('- runs:');

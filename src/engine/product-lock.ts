@@ -61,6 +61,12 @@ export function leaveProduct(bp: BoardPaths, holder: string): void {
 }
 
 export const WAIT_LIMIT_MS = 45 * 60_000;
+
+/**
+ * How long a copy someone is trying stays once a story waits for what it holds: the running product, or squad-kit's
+ * phone (engine/phone/turn.ts). Then it gives way, so nothing a person left open holds a story forever.
+ */
+export const TRY_YIELDS_AFTER_MS = 15 * 60_000;
 const LOOK_EVERY_MS = 2000;
 
 /** Waits for its turn. `onWait` hears once who it waits for. A Stop, or waiting too long, ends with the reason. */

@@ -40,6 +40,7 @@ import { useDraft } from '../lib/drafts';
 import { useReach } from '../lib/use-reach';
 import { ticketTrouble } from '../lib/ticket-trouble';
 import { detect, langProps, typedDir } from '../lib/lang';
+import { ToolBlockCard } from '../components/ToolBlock';
 
 type Tab = 'now' | 'story' | 'plan' | 'activity' | 'conversation' | 'proof' | 'changes' | 'cost' | 'developer';
 
@@ -759,17 +760,19 @@ function ProofShots({ t }: { t: Ticket }) {
             </p>
           )}
           {isApiProof(p.after) ? <ApiProof file={p.after} {...(p.note ? { note: p.note } : {})} /> : <div className="proofmini">
-            <div>
+            <div className={p.beforeDevice ? 'ondevice' : undefined}>
               <Written as="small" text={p.beforeLabel} />
               <button className="zoom" onClick={() => setZoom(starts[k]!)} aria-label={`Open ${p.beforeLabel} full size`}>
                 <img src={assetUrl(`/api/v1/proof/${p.before}`)} alt={`${p.criterion}, ${p.beforeLabel}`} />
               </button>
+              {p.beforeDevice && <small className="shotdevice">{p.beforeDevice}</small>}
             </div>
-            <div>
+            <div className={p.device ? 'ondevice' : undefined}>
               <Written as="small" text={p.afterLabel} />
               <button className="zoom" onClick={() => setZoom(starts[k]! + 1)} aria-label={`Open ${p.afterLabel} full size`}>
                 <img src={assetUrl(`/api/v1/proof/${p.after}`)} alt={`${p.criterion}, ${p.afterLabel}`} />
               </button>
+              {p.device && <small className="shotdevice">{p.device}</small>}
             </div>
           </div>}
           {p.more?.length && p.why && p.note ? <Written as="p" className="note proofmore-main" text={p.note} /> : null}
@@ -1074,7 +1077,11 @@ function WorkingPanel({ t }: { t: Ticket }) {
   return (
     <>
       <div className="db">
-        {running ? (
+        {t.toolWait ? (
+          // A tool this step needs is not on this computer: what can't happen, why, and the link to its line. Its step
+          // stays planned, so it reads as working, but nothing runs until the tool is there.
+          <ToolBlockCard block={t.toolWait} />
+        ) : running ? (
           <NowCard t={t} />
         ) : t.now?.merging ? (
           <MergingNow t={t} />

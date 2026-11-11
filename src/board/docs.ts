@@ -452,11 +452,14 @@ function proofDoc(title: string, shots: ProofShot[]): string {
         `- After: ${enc(p.after)} (${enc(p.afterLabel)})`,
         // Where the after picture was taken: the page to look at in the app.
         ...(p.page ? [`- Page: ${enc(p.page)}`] : []),
+        // The device each picture was taken on, for a phone app: "iPhone 16 Pro", "Web version".
+        ...(p.device ? [`- Device: ${enc(p.device)}`] : []),
+        ...(p.beforeDevice ? [`- Before device: ${enc(p.beforeDevice)}`] : []),
         // What the picture shows: the "done when" met, or not yet and why.
         ...(p.shows ? [`- Shows: ${SHOWS_WORDS[p.shows]}`] : []),
         ...(p.why ? [`- Why: ${enc(p.why)}`] : []),
         // The other pictures of this "done when", each with its own page and note.
-        ...(p.more ?? []).flatMap((m) => [`- More: ${enc(m.after)}`, ...(m.page ? [`  - Page: ${enc(m.page)}`] : []), ...(m.note ? [`  - Note: ${enc(m.note)}`] : [])]),
+        ...(p.more ?? []).flatMap((m) => [`- More: ${enc(m.after)}`, ...(m.page ? [`  - Page: ${enc(m.page)}`] : []), ...(m.device ? [`  - Device: ${enc(m.device)}`] : []), ...(m.note ? [`  - Note: ${enc(m.note)}`] : [])]),
         ...(p.note !== undefined ? ['', escText(p.note)] : []),
       ].join('\n'),
     ),
@@ -475,14 +478,16 @@ function parseProof(text: string): ProofShot[] {
     for (const line of s.text.split('\n')) {
       const m = line.match(/^- (Before|After): (.*) \((.*)\)$/);
       const also = line.match(/^- More: (.+)$/);
-      const of = more && line.match(/^ {2}- (Page|Note): (.+)$/);
+      const of = more && line.match(/^ {2}- (Page|Note|Device): (.+)$/);
       // A picture's page and note come right under it; anything else ends it.
       if (!also && !of) more = null;
       if (also) (shot.more ??= []).push((more = { after: dec(also[1]!) }));
-      else if (of) more![of[1] === 'Page' ? 'page' : 'note'] = dec(of[2]!);
+      else if (of) more![of[1] === 'Page' ? 'page' : of[1] === 'Device' ? 'device' : 'note'] = dec(of[2]!);
       else if (m && m[1] === 'Before') [shot.before, shot.beforeLabel] = [dec(m[2]!), dec(m[3]!)];
       else if (m && m[1] === 'After') [shot.after, shot.afterLabel] = [dec(m[2]!), dec(m[3]!)];
       else if (/^- Page: \S/.test(line) && !shot.page) shot.page = dec(line.slice('- Page: '.length));
+      else if (/^- Device: \S/.test(line) && !shot.device) shot.device = dec(line.slice('- Device: '.length));
+      else if (/^- Before device: \S/.test(line) && !shot.beforeDevice) shot.beforeDevice = dec(line.slice('- Before device: '.length));
       else if (/^- Shows: /.test(line) && !shot.shows) said = line.slice('- Shows: '.length).trim();
       else if (/^- Why: \S/.test(line) && !shot.why) shot.why = dec(line.slice('- Why: '.length));
       else rest.push(line);

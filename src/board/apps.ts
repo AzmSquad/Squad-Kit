@@ -20,6 +20,9 @@ export interface ProjectApp {
  * yet still lists its repos, so the person can ask the Architect or type the command. A sample board, or a project
  * with no code yet, lists only what it knows.
  */
+/** Saved commands of a phone app: Flutter, Xcode, React Native or Expo. */
+const PHONE_COMMANDS = /(?:^|[\s;&|(])(?:flutter|xcodebuild)\s|\b(?:expo|react-native)\s/m;
+
 export function projectApps(meta: BoardMeta): ProjectApp[] {
   const all = reposOf(meta).filter((r) => repoRuns(meta, r.path)).map((r) => ({
     name: r.path === '.' ? meta.project : (repoLabel(meta, r.path) ?? r.path),
@@ -29,7 +32,9 @@ export function projectApps(meta: BoardMeta): ProjectApp[] {
     ...(r.commands.start?.trim() ? { start: r.commands.start.trim() } : {}),
     ...(r.commands.setup?.trim() ? { setup: r.commands.setup.trim() } : {}),
   }));
-  const known = all.filter((a) => a.url || a.start);
+  // A phone app runs on squad-kit's iPhone with no start command of its own: its saved checks say what it is.
+  const phone = new Set(reposOf(meta).filter((r) => PHONE_COMMANDS.test(Object.values(r.commands).join('\n'))).map((r) => r.path));
+  const known = all.filter((a) => a.url || a.start || phone.has(a.repo));
   // A folder that started empty has no app to find while the Architect reads what the person wants to build.
   const noCode = meta.scan?.empty || (meta.setup?.kind === 'empty' && meta.scan?.status !== 'done');
   if (known.length || meta.engine !== 'live' || noCode) return known;

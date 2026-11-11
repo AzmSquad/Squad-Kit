@@ -392,3 +392,17 @@ const reach = (host, port) => new Promise((done) => {
     expect(offenders).toEqual([]);
   });
 });
+
+describe("a check squad-kit ran outside its guard", () => {
+  it("an Xcode build's own \"not permitted\" is never shown as squad-kit blocking a file; one in the guard still is", async () => {
+    const { blockedByGuard } = await import('../src/engine/checks.js');
+    const g = guard();
+    const ssh = path.join(home, '.ssh', 'id_rsa');
+    const said = `error: open '${ssh}': Operation not permitted`;
+    const xcode = { name: 'test', command: "xcodebuild test -project 'App.xcodeproj' -scheme App", ok: false, output: said, seconds: 3, outsideGuard: true as const };
+    expect(blockedByGuard([xcode], g)).toBeNull();
+    const inGuard = { name: 'test', command: 'npm test', ok: false, output: said, seconds: 3 };
+    expect(blockedByGuard([xcode, inGuard], g)).toEqual({ result: inGuard, path: ssh });
+    expect(blockedByGuard([{ ...inGuard, ok: true }], g)).toBeNull();
+  });
+});

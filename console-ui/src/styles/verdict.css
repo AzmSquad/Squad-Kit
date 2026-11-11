@@ -45,3 +45,9 @@
 .teamres ol { margin: 4px 0 0; padding-inline-start: 20px; overflow-wrap: anywhere; }
 .teamres li b { font-weight: 600; color: var(--accent); }
 .teamres li b.no { color: var(--bug); }
+
+/* A picture taken on a real phone or tablet: its device in small plain text under it, and a tall phone picture kept to the screen's height. */
+.shotdevice { display: block; margin-top: 6px; font-size: 12px; color: var(--muted); }
+.ba .ondevice img { width: auto; max-width: 100%; max-height: 70vh; margin: 0 auto; }
+.proofmini .ondevice img { width: auto; max-width: 100%; max-height: 420px; }
+.picturesnote a { font-weight: 600; }

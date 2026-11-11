@@ -6,9 +6,11 @@ import type { ProjectCommands } from '../board/types.js';
 import { writeLog } from '../core/app-log.js';
 import { healEnv, healedBefore, rememberHealed } from './cache-home.js';
 import { failedTests, testAlone } from './failed-tests.js';
+import { flutterDownloads } from './flutter-downloads.js';
 import { KILL_AFTER_MS, endGroup, whenExited } from './process-group.js';
 import { appPortVariables } from './port-vars.js';
-import { guardBlockedPath, homeCachesRefused, spawnProject, type GuardSpec } from './project-guard.js';
+import { guardBlockedPath, guardEnv, homeCachesRefused, spawnProject, type GuardSpec } from './project-guard.js';
+import { findCommands, opensAWindow, ownXcodeCommand } from './find-commands.js';
 import { scriptsOf } from './weakened.js';
 
 /** squad-kit runs the project's own checks itself, so the AI never grades its own work. */
@@ -23,6 +25,21 @@ export interface CheckResult {
   failedFirst?: string;
   /** squad-kit ended it: it printed nothing for too long, ran past its time, or you pressed Stop. */
   ended?: boolean;
+  /** squad-kit ran it outside its guard (an Xcode build, outsideTheGuard): nothing it printed is the guard's refusal. */
+  outsideGuard?: true;
+}
+
+/**
+ * The first failed check the guard blocked a file for, with that file. Never one squad-kit ran outside its guard: an
+ * Xcode build's own "not permitted" is Xcode's failure, never "squad-kit blocked a file".
+ */
+export function blockedByGuard(ran: CheckResult[], guard: GuardSpec): { result: CheckResult; path: string } | null {
+  for (const r of ran) {
+    if (r.ok || r.outsideGuard) continue;
+    const hit = guardBlockedPath(r.output, guard);
+    if (hit) return { result: r, path: hit };
+  }
+  return null;
 }
 
 export interface CommandWatch {
@@ -62,8 +79,30 @@ export interface CommandResult {
   seconds: number;
   ended?: boolean;
   code?: number;
+  /** squad-kit ran it outside its guard, by its one rule (outsideTheGuard): nothing it printed is the guard's refusal. */
+  outsideGuard?: true;
   /** squad-kit ran it once more with a home of the project's own: why, for engineers. */
   healed?: string;
+}
+
+/** The rule outsideTheGuard keeps, for people: on the Harness page. */
+export const OUTSIDE_THE_GUARD_WORDS = "Xcode can't start inside squad-kit's guard, so squad-kit runs Xcode's builds and tests outside it, for the checks, the phone pictures and Start, under Xcode's own protections. Everything else the squad runs stays inside the guard.";
+
+/**
+ * The one rule for a command squad-kit runs outside its guard: Xcode's builds and tests, in exactly the form squad-kit
+ * makes them for a native iPhone app (ownXcodeCommand in engine/find-commands.ts). Xcode starts sandboxes of its own, for
+ * a package's manifest and plugins, and for build scripts when the project turns that on, and those cannot start inside
+ * squad-kit's guard (seen on a Mac). So squad-kit runs these outside it, in the copy the guard was made for and nowhere
+ * else, with the guard's environment and caches, under Xcode's own sandboxes: squad-kit never turns those off. Every
+ * other command stays in the guard, and so do the agents' own commands.
+ */
+export function outsideTheGuard(cwd: string, command: string, guard: GuardSpec | undefined): boolean {
+  if (!guard || !ownXcodeCommand(command)) return false;
+  try {
+    return fs.realpathSync(cwd) === guard.cwd;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -75,8 +114,17 @@ export interface CommandResult {
  * home by its own setting) makes the command run once more, by itself, with a home of the project's own where that place
  * is writable (engine/cache-home.ts). Only once: a command that still fails, or fails for another reason, is not run again
  * here. The same command starts with that home from then on.
+ *
+ * A guarded Flutter command gets Flutter's own downloads first, by squad-kit outside the guard (engine/flutter-downloads.ts).
+ * Xcode's own builds run outside the guard by the one rule above (outsideTheGuard).
  */
 export async function runCommand(cwd: string, command: string, timeoutMs = CHECK_MS, watch: CommandWatch = {}): Promise<CommandResult> {
+  if (outsideTheGuard(cwd, command, watch.guard)) {
+    // Xcode's own builds: outside the guard by its one rule, with the guard's environment and nothing else of it.
+    const { guard, ...rest } = watch;
+    return { ...(await runCommand(cwd, command, timeoutMs, { ...rest, env: { ...guardEnv(guard, cwd), ...watch.env } })), outsideGuard: true };
+  }
+  if (watch.guard) await flutterDownloads(cwd, command, { ...(watch.signal ? { signal: watch.signal } : {}), ...(watch.onOutput ? { onOutput: watch.onOutput } : {}) });
   const homes = ownHomes(command, watch.guard);
   const set = (env: Record<string, string> | null): CommandWatch => (env ? { ...watch, env: { ...watch.env, ...env } } : watch);
   const first = await runOnce(cwd, command, timeoutMs, set(homes.env(homes.before)));
@@ -190,10 +238,10 @@ function runOnce(cwd: string, command: string, timeoutMs: number, watch: Command
  * the check fails at once, with what the whole first run printed. Passing there decides nothing by itself, as a test can
  * fail only beside the others (data they share, the order they run in): the whole command runs once more, and decides.
  */
-export async function withOneMoreRun<R extends { ok: boolean; output: string; ended?: boolean }>(run: () => Promise<R>, watch: CommandWatch, onAgain: () => void, alone?: (first: R) => (() => Promise<{ ok: boolean }>) | null): Promise<R & { failedFirst?: string }> {
+export async function withOneMoreRun<R extends { ok: boolean; output: string; ended?: boolean; outsideGuard?: true }>(run: () => Promise<R>, watch: CommandWatch, onAgain: () => void, alone?: (first: R) => (() => Promise<{ ok: boolean }>) | null): Promise<R & { failedFirst?: string }> {
   const first = await run();
   if (first.ok || first.ended || watch.signal?.aborted) return first;
-  if (watch.guard && guardBlockedPath(first.output, watch.guard)) return first;
+  if (watch.guard && !first.outsideGuard && guardBlockedPath(first.output, watch.guard)) return first;
   onAgain();
   const quick = alone?.(first);
   if (quick && !(await quick()).ok) return first;
@@ -379,6 +427,22 @@ function portOf(url: string): number | null {
   }
 }
 
+/** Why squad-kit does not start an app whose start opens a window, when the project has no web version either. */
+export const NO_WINDOW_START = "The app's start command opens a window on this computer, and squad-kit starts apps with no window. This project has no web version it could start instead.";
+
+/**
+ * The start squad-kit really runs: the app's own, unless it opens a window or a phone (opensAWindow, as one a person
+ * typed in Settings may). Then the web version squad-kit finds in the project's files, at its own address, said in
+ * the log; with none, it does not start (NO_WINDOW_START). squad-kit never opens a window on the person's screen.
+ */
+export function withNoWindow(cwd: string, command: string, url: string): { command: string; url: string } {
+  if (!opensAWindow(command)) return { command, url };
+  const found = findCommands(cwd);
+  if (!found.start || opensAWindow(found.start)) throw new Error(NO_WINDOW_START);
+  writeLog({ level: 'info', text: `The start command opens a window (${command}), so squad-kit starts the web version with no window instead: ${found.start}` });
+  return { command: found.start, url: found.url ?? url };
+}
+
 /**
  * Starts the ticket's copy of the app and waits until it answers. When something else already answers at the app's
  * address (often the person's own "npm run dev"), or holds its port and says nothing, the copy starts on a free port
@@ -388,11 +452,14 @@ function portOf(url: string): number | null {
  * An app that stopped while starting because a tool could not write its cache in the person's home starts once more,
  * by itself, with a home of the project's own, as runCommand does: `onHealed` gets the details.
  */
-export async function startApp(cwd: string, command: string, url: string, waitMs = 3 * 60_000, signal?: AbortSignal, guard?: GuardSpec, more: { fixed?: boolean; env?: Record<string, string>; onHealed?(detail: string): void } = {}): Promise<RunningApp> {
+export async function startApp(cwd: string, given: string, at: string, waitMs = 3 * 60_000, signal?: AbortSignal, guard?: GuardSpec, more: { fixed?: boolean; env?: Record<string, string>; onHealed?(detail: string): void } = {}): Promise<RunningApp> {
   if (signal?.aborted) throw new Error(STOPPED);
+  const { command, url } = withNoWindow(cwd, given, at);
   // The app squad-kit stopped a moment ago (the last round of screenshots) is no other program: on a busy computer it may
   // still be on its way out, and its port is about to be free. Going around it would break an app that cannot move.
   await stopping.get(portOf(url) ?? 0);
+  if (signal?.aborted) throw new Error(STOPPED);
+  if (guard) await flutterDownloads(cwd, command, signal ? { signal } : {});
   if (signal?.aborted) throw new Error(STOPPED);
   const taken = (await answers(url)) || (await held(portOf(url)));
   // A part of a product keeps its address: what calls it knows it by that.

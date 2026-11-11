@@ -5,11 +5,14 @@ import { addActivity, readMeta, readTicket, updateTicket, type BoardPaths } from
 import type { Ticket } from '../board/types.js';
 import { runsAsProduct } from '../board/parts.js';
 import { startApp, type RunningApp } from './checks.js';
-import { productHold } from './product-lock.js';
+import { TRY_YIELDS_AFTER_MS, productHold } from './product-lock.js';
 import { ProductError, productPlan, startProduct, stopProduct, waitWords } from './product-run.js';
 import { guardSupport, ticketGuard } from './project-guard.js';
 import { KILL_AFTER_MS } from './process-group.js';
 import { repoFor } from './repos.js';
+import { PhoneOpen } from './phone/open.js';
+import { phoneStartPlan, type PhoneStartPlan } from './phone/plan.js';
+import { languageProblem, phoneAppView, type PhoneAppView } from './run-app.js';
 
 /**
  * Try it yourself: while a ticket waits for the person's check, squad-kit runs that ticket's own copy of the app (its
@@ -44,6 +47,17 @@ export interface TryStatus {
   /** False when this ticket cannot be tried now; `why` says what is missing. */
   can: boolean;
   why?: string;
+  /** An iPhone app on a Mac: Try it yourself opens the story's copy on squad-kit's iPhone (engine/phone/open.ts). */
+  phone?: PhoneAppView;
+  /** Why it stopped by itself last time, in plain words: "You closed the iPhone window, so squad-kit stopped the app." */
+  ended?: string;
+}
+
+/** How Try it yourself starts: on squad-kit's iPhone, or the web version, and the language to open an iPhone app in. */
+export interface TryHow {
+  phone?: boolean;
+  web?: boolean;
+  language?: string;
 }
 
 export interface TryOptions {
@@ -76,6 +90,10 @@ interface TryRun {
   settled: Promise<void>;
   /** How many looks in a row the address did not answer. */
   missed: number;
+  /** The story's copy open on squad-kit's iPhone. */
+  phone?: PhoneOpen;
+  /** It opens on squad-kit's iPhone, from its first step. */
+  onPhone?: boolean;
 }
 
 const WATCH_MS = 2000;
@@ -84,10 +102,11 @@ function markOf(t: Ticket): string {
   return `${t.stage}|${t.waiting?.kind ?? ''}|${t.stuck?.gate ?? ''}`;
 }
 
-/** Why a ticket cannot be tried now, in plain words; null when it can. */
-export function tryBlocked(bp: BoardPaths, t: Ticket): string | null {
+/** Why a ticket cannot be tried now, in plain words; null when it can. On squad-kit's iPhone it needs no start command. */
+export function tryBlocked(bp: BoardPaths, t: Ticket, onPhone = false): string | null {
   if (!waitsAtReview(t)) return `${t.id} does not wait for your check now, so there is nothing to try.`;
   if (!t.worktree || !fs.existsSync(t.worktree)) return `${t.id} has no copy of the code on this computer to run.`;
+  if (onPhone) return null;
   const meta = readMeta(bp);
   if (runsAsProduct(meta)) return productPlan(bp, meta, t).why ?? null;
   const rc = repoFor(meta, t).commands;
@@ -114,14 +133,21 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** Who holds the running product for this copy: never the story itself, whose own steps come back to it. */
 const holderOf = (run: Pick<TryRun, 'ticket'>): string => `try:${run.ticket}`;
 
-/** How long a copy someone is trying stays once a story waits for the product. */
-export const TRY_YIELDS_AFTER_MS = 15 * 60_000;
+export { TRY_YIELDS_AFTER_MS };
 
 /** The ticket copies of one project's app: one runs at a time. The board's buttons and the terminal share it. */
 export class TryRunner {
   private run?: TryRun;
   private timer?: NodeJS.Timeout;
   private looking = false;
+  /** Why the copy on the phone stopped by itself, by ticket, until it is tried again. */
+  private ended = new Map<string, string>();
+
+  /** The story's iPhone app, when it is one and not a product. */
+  private phonePlan(t: Ticket): PhoneStartPlan | null {
+    if (!t.worktree || runsAsProduct(readMeta(this.bp))) return null;
+    return phoneStartPlan(this.bp, 'try-it', t);
+  }
 
   constructor(
     private bp: BoardPaths,
@@ -148,10 +174,17 @@ export class TryRunner {
     const t = this.ticket(id);
     const run = this.run;
     const mine = run?.ticket === t.id ? run : undefined;
-    const why = tryBlocked(this.bp, t);
+    const plan = this.phonePlan(t);
+    const webWhy = tryBlocked(this.bp, t);
+    const web = !webWhy;
+    // An iPhone app with no web version says what the phone needs, with the Tools page line.
+    const why = plan?.ready ? tryBlocked(this.bp, t, true) : webWhy && plan?.why && !tryBlocked(this.bp, t, true) ? plan.why : webWhy;
     const url = mine?.state === 'running' ? mine.url : undefined;
+    const ended = !mine ? this.ended.get(t.id) : undefined;
     return {
       ticket: t.id,
+      ...(plan ? { phone: phoneAppView(plan, web, mine?.phone, Boolean(mine?.onPhone)) } : {}),
+      ...(ended ? { ended } : {}),
       state: mine?.state ?? 'off',
       ...(url ? { url, pages: proofPages(t).map((page) => ({ page, url: pageUrl(url, page) })) } : {}),
       ...(mine?.since && url ? { since: mine.since } : {}),
@@ -168,12 +201,21 @@ export class TryRunner {
    * answers. Something else at the app's address (the person's own app, or Your apps) moves it to a free port. Another
    * ticket's copy stops first. `settled()` waits for the end of the start.
    */
-  start(id: string): TryStatus {
+  start(id: string, how: TryHow = {}): TryStatus {
     const t = this.ticket(id);
-    const why = tryBlocked(this.bp, t);
+    // An iPhone app opens on squad-kit's iPhone when its tools are here, unless the person asked for the web version.
+    const plan = how.web ? null : this.phonePlan(t);
+    const onPhone = Boolean(plan && (how.phone || plan.ready));
+    if (how.phone && !plan) throw new TryError(`${t.id}'s app is not an iPhone app, so squad-kit runs it in the browser.`);
+    if (onPhone && !plan!.ready) throw new TryError(plan!.why ?? "squad-kit can't open it on its iPhone yet.");
+    const wrong = onPhone ? languageProblem(how.language, plan!.languages) : null;
+    if (wrong) throw new TryError(wrong);
+    const why = tryBlocked(this.bp, t, onPhone) ?? (!onPhone && plan && !plan.ready && tryBlocked(this.bp, t) ? plan.why! : null);
     if (why) throw new TryError(why);
     const now = this.run;
     if (now?.ticket === t.id && (now.state === 'starting' || now.state === 'running')) return this.status(t.id);
+    this.ended.delete(t.id);
+    if (onPhone) return this.startOnPhone(t, plan!, how.language);
     const meta = readMeta(this.bp);
     const product = runsAsProduct(meta);
     const front = product ? productPlan(this.bp, meta, t).front : undefined;
@@ -192,6 +234,58 @@ export class TryRunner {
     };
     this.run = run;
     void this.launch(run, now, rc.start!.trim(), rc.url!.trim()).finally(settle);
+    this.watch();
+    return this.status(t.id);
+  }
+
+  /**
+   * "Use the web version now", or Try it yourself again: the copy on the phone, starting or open, stops first, then the
+   * web version starts the way Try it yourself does.
+   */
+  async startAs(id: string, how: TryHow = {}): Promise<TryStatus> {
+    const t = this.ticket(id);
+    if (how.web && this.run?.ticket === t.id && this.run.phone) await this.stop(t.id);
+    return this.start(t.id, how);
+  }
+
+  /** The story's own copy, built and opened on squad-kit's iPhone, each step with the time left (phone/open.ts). */
+  private startOnPhone(t: Ticket, plan: PhoneStartPlan, language?: string): TryStatus {
+    const before = this.run;
+    let settle!: () => void;
+    const run: TryRun = { ticket: t.id, state: 'starting', mark: markOf(t), cwd: plan.dir, copy: t.worktree!, product: false, stop: new AbortController(), settled: new Promise<void>((r) => (settle = r)), missed: 0, onPhone: true };
+    this.run = run;
+    void (async () => {
+      if (before) await this.end(before, before.state === 'running' ? `Stopped the copy of the app you were trying: you started ${run.ticket}'s` : undefined);
+      if (run.stop.signal.aborted) return;
+      const open = new PhoneOpen({
+        dir: plan.dir,
+        kind: plan.kind,
+        by: 'Try it yourself',
+        again: 'Try it yourself',
+        ...(language ? { language } : {}),
+        yieldAfterMs: TRY_YIELDS_AFTER_MS,
+        // The person closed the window, or a story needed the phone: it stops, said on the story in plain words.
+        onEnd: (words) => {
+          if (this.run === run) this.run = undefined;
+          this.ended.set(run.ticket, words);
+          this.note(run.ticket, words);
+        },
+      });
+      run.phone = open;
+      await open.settled;
+      if (run.stop.signal.aborted) return;
+      const v = open.view();
+      if (v.state === 'running') {
+        run.state = 'running';
+        run.since = v.since ?? new Date().toISOString();
+        this.note(run.ticket, `Opened this story's own copy of the app on squad-kit's ${v.device ?? 'iPhone'} for you to try. Nothing is merged.`);
+      } else if (v.state === 'failed') {
+        run.state = 'failed';
+        run.error = v.error ?? 'The app did not open on the iPhone.';
+        if (v.detail) run.detail = v.detail;
+        this.note(run.ticket, 'Try it yourself: the app did not open on the iPhone.');
+      }
+    })().finally(settle);
     this.watch();
     return this.status(t.id);
   }
@@ -234,6 +328,8 @@ export class TryRunner {
   private async end(run: TryRun, why?: string): Promise<void> {
     run.stop.abort();
     run.app?.stop();
+    // On the phone: the app closes and squad-kit's iPhone shuts down.
+    await run.phone?.stop();
     await run.settled;
     if (run.product) stopProduct(this.bp, holderOf(run));
     if (this.run === run) this.run = undefined;
@@ -314,6 +410,7 @@ export class TryRunner {
     if (!run) return;
     run.stop.abort();
     run.app?.stop();
+    void run.phone?.stop();
   }
 }
 

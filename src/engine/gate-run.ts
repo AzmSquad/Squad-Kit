@@ -60,7 +60,7 @@ export async function runGate(dir: string, command: string, watch: CommandWatch 
   const out = { output, seconds: r.seconds, ...(r.failedFirst !== undefined ? { failedFirst: cleanOutput(r.failedFirst) } : {}) };
   if (r.ok) return { result: 'passed', ...out };
   if (r.ended) return { result: 'cant-run', why: CANT_RUN.time, ...out };
-  if (watch.guard && guardBlockedPath(r.output, watch.guard)) return { result: 'cant-run', why: CANT_RUN.guard, ...out };
+  if (watch.guard && !r.outsideGuard && guardBlockedPath(r.output, watch.guard)) return { result: 'cant-run', why: CANT_RUN.guard, ...out };
   if (r.code === 126 || r.code === 127 || r.code === undefined || NOT_THERE.test(r.output)) return { result: 'cant-run', why: CANT_RUN.missing, ...out };
   return { result: 'failed', ...out };
 }

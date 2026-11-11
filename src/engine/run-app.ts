@@ -14,7 +14,9 @@ import { KILL_AFTER_MS, endGroup, endPid, groupAlive, takenOver } from './proces
 import { portSettings } from './port-vars.js';
 import { reposOf } from './repos.js';
 import { partsOf, runsAsProduct } from '../board/parts.js';
-import { leaveProduct, takeProduct } from './product-lock.js';
+import { TRY_YIELDS_AFTER_MS, leaveProduct, takeProduct } from './product-lock.js';
+import { PhoneOpen, type PhoneOpenView } from './phone/open.js';
+import { phoneStartPlan, type PhoneStartPlan } from './phone/plan.js';
 
 /**
  * Your apps: squad-kit runs each app of the project from its own copy of main, never the person's checkout, so a
@@ -36,8 +38,11 @@ export interface BusyPort {
 
 export interface AppStatus extends ProjectApp {
   state: AppState;
-  /** While starting: bringing the copy up to date, making it for the first time, the setup command, or the start command. */
-  step?: 'update' | 'copy' | 'setup' | 'start';
+  /**
+   * While starting: bringing the copy up to date, making it for the first time, the setup command, the start command,
+   * or, for an iPhone app, getting it onto squad-kit's iPhone (phone.run says which step, with the time left).
+   */
+  step?: 'update' | 'copy' | 'setup' | 'start' | 'phone';
   /** Where it runs: the app's address, or the next free port when the person chose it. */
   address?: string;
   /** When the person last pressed Start: the copy holds main as it was then. */
@@ -57,6 +62,38 @@ export interface AppStatus extends ProjectApp {
   elsewhere?: boolean;
   /** Something answers at the app's address now. */
   up: boolean;
+  /** An iPhone app on a Mac: Start opens it on squad-kit's iPhone (engine/phone/open.ts). */
+  phone?: PhoneAppView;
+}
+
+/** An iPhone app in Your apps or Try it yourself: how Start opens it on squad-kit's iPhone. */
+export interface PhoneAppView {
+  /** The tools for it are here: Start opens it on the iPhone. */
+  ready: boolean;
+  /** Why not, in one plain sentence, with the Tools page line. */
+  why?: string;
+  link?: string;
+  /** The languages to pick from next to Start, English first. Empty: nothing to pick. */
+  languages: string[];
+  /** It also has a web version: "Use the web version now" starts that instead. */
+  web: boolean;
+  /** Start runs it on the phone now: from its first step (the copy, the setup) until it ends. */
+  on?: boolean;
+  /** While it starts or runs on the phone, or how it ended. */
+  run?: PhoneOpenView;
+}
+
+/** One plain line for an iPhone app's state, from its plan and its run: shared by Your apps and Try it yourself. */
+export function phoneAppView(plan: PhoneStartPlan, web: boolean, open?: PhoneOpen, on = false): PhoneAppView {
+  return { ready: plan.ready, ...(plan.why ? { why: plan.why } : {}), ...(plan.link ? { link: plan.link } : {}), languages: plan.languages, web, ...(on ? { on: true } : {}), ...(open ? { run: open.view() } : {}) };
+}
+
+/** A language as Start takes it: two or three small letters, like "ar". */
+export function languageProblem(language: string | undefined, languages: string[]): string | null {
+  if (language === undefined) return null;
+  if (!/^[a-z]{2,3}$/.test(language)) return `"${language.slice(0, 20)}" is not a language: use two letters, like "ar" or "en".`;
+  if (languages.length && !languages.includes(language)) return `This app comes in ${languages.join(', ')}. Pick one of them.`;
+  return null;
 }
 
 export interface StartOptions {
@@ -66,6 +103,12 @@ export interface StartOptions {
   stopOther?: boolean;
   /** The apps that asked for this one to run first, so two parts that need each other do not wait forever. */
   asked?: string[];
+  /** An iPhone app: open it on squad-kit's iPhone (the default when its tools are here). */
+  phone?: boolean;
+  /** Its web version, in the browser, even when it is an iPhone app ("Use the web version now"). */
+  web?: boolean;
+  /** The language to start an iPhone app in: "ar". English by default. */
+  language?: string;
 }
 
 export interface RunnerOptions {
@@ -106,6 +149,10 @@ interface Run {
   exited: Promise<void>;
   /** A part in Docker: this stops its stack and keeps its data, once its program is gone. */
   afterStop?: () => Promise<unknown>;
+  /** An iPhone app open on squad-kit's iPhone. */
+  phone?: PhoneOpen;
+  /** It starts on squad-kit's iPhone, from its first step. */
+  onPhone?: boolean;
 }
 
 /** A start that went wrong before anything of the app ran; the exact error is for engineers. */
@@ -432,7 +479,9 @@ export class AppRunner {
   private async view(app: ProjectApp): Promise<AppStatus> {
     const run = this.runs.get(app.repo);
     const dir = appCopyDir(this.bp, app);
-    const base = { ...app, dir };
+    const p = this.phoneOf(app);
+    const on = Boolean(run?.onPhone && (run.state === 'starting' || run.state === 'running'));
+    const base = { ...app, dir, ...(p ? { phone: phoneAppView(p.plan, Boolean(app.start), run?.phone, on) } : {}) };
     if (run) {
       const at = run.address ?? app.url;
       return {
@@ -480,7 +529,14 @@ export class AppRunner {
    */
   start(ref?: string, opts: StartOptions = {}): AppStatus {
     const app = this.find(ref);
-    if (!app.start) throw new AppError(`squad-kit does not know how to start ${app.name} yet. Ask the Architect to find it, or type the start command.`);
+    // An iPhone app opens on squad-kit's iPhone when its tools are here, unless the person asked for the web version.
+    const p = opts.web ? null : this.phoneOf(app);
+    const onPhone = Boolean(p && (opts.phone || p.plan.ready));
+    if (opts.phone && !p) throw new AppError(`${app.name} is not an iPhone app, so squad-kit runs it in the browser: press Start.`);
+    if (onPhone && !p!.plan.ready) throw new AppError(p!.plan.why ?? `squad-kit can't open ${app.name} on its iPhone yet.`);
+    const wrong = onPhone ? languageProblem(opts.language, p!.plan.languages) : null;
+    if (wrong) throw new AppError(wrong);
+    if (!onPhone && !app.start) throw new AppError(p?.plan.why ?? `squad-kit does not know how to start ${app.name} yet. Ask the Architect to find it, or type the start command.`);
     const now = this.runs.get(app.repo);
     if (now?.state === 'starting') throw new AppError(`${app.name} is starting already.`);
     if (now?.state === 'running') throw new AppError(`${app.name} is already running at ${now.address ?? app.url}.`);
@@ -497,15 +553,97 @@ export class AppRunner {
       settled: new Promise<void>((r) => (settle = r)),
       exited: new Promise<void>((r) => (exit = r)),
     };
+    if (onPhone) run.onPhone = true;
     this.runs.set(app.repo, run);
     this.output.set(app.repo, '');
-    void this.launch(app, run, opts, exit)
+    void (onPhone ? this.launchPhone(app, run, p!.dir, p!.plan, opts.language) : this.launch(app, run, opts, exit))
       .catch((err) => this.fail(run, CANNOT_START, { detail: (err as Error).message }))
       .finally(() => {
         if (!run.child) exit();
         settle();
       });
-    return { ...app, dir: appCopyDir(this.bp, app), state: 'starting', step: 'update', startedAt: run.startedAt, up: false };
+    return { ...app, dir: appCopyDir(this.bp, app), state: 'starting', step: 'update', startedAt: run.startedAt, up: false, ...(p ? { phone: phoneAppView(p.plan, Boolean(app.start), undefined, onPhone) } : {}) };
+  }
+
+  /**
+   * Start, or "Use the web version now": a phone start on its way, or the app open on the phone, stops first, then the
+   * web version starts the way Start does.
+   */
+  async startAs(ref: string | undefined, opts: StartOptions = {}): Promise<AppStatus> {
+    const app = this.find(ref);
+    const run = this.runs.get(app.repo);
+    if (opts.web && run?.phone && (run.state === 'starting' || run.state === 'running')) await this.stop(app.name);
+    return this.start(app.name, opts);
+  }
+
+  /** The app on squad-kit's iPhone, for an iPhone app: its plan, and its folder in squad-kit's copy. Null for others, and for a product. */
+  private phoneOf(app: ProjectApp): { plan: PhoneStartPlan; dir: string } | null {
+    if (runsAsProduct(readMeta(this.bp))) return null;
+    const plan = phoneStartPlan(this.bp, 'start-app');
+    if (!plan) return null;
+    const rel = path.relative(path.join(this.bp.root, app.repo), plan.dir);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) return null;
+    return { plan, dir: path.join(appCopyDir(this.bp, app), rel) };
+  }
+
+  /**
+   * An iPhone app's start: squad-kit's copy brought up to date and set up as for the browser, then built, put on
+   * squad-kit's iPhone and opened in its window, each step with the time left (phone/open.ts).
+   */
+  private async launchPhone(app: ProjectApp, run: Run, dir: string, plan: PhoneStartPlan, language?: string): Promise<void> {
+    const repo = this.repoOf(app);
+    const copyDir = appCopyDir(this.bp, app);
+    const { signal } = run.stop;
+    let copy: { commit: string; fresh: boolean };
+    try {
+      copy = await updateCopy(this.bp.root, repo, copyDir, { signal, making: () => (run.step = 'copy') });
+    } catch (err) {
+      if (err instanceof NoRoomForCopy) return this.fail(run, err.message);
+      return this.fail(run, `squad-kit could not get the newest ${repo.base} ready.`, { detail: (err as Error).message });
+    }
+    run.commit = copy.commit;
+    if (signal.aborted) return;
+    const named = (readMeta(this.bp).localFiles ?? []).filter((f) => f.repo === repo.path).map((f) => f.path);
+    try {
+      await copyEnvFiles(path.join(this.bp.root, repo.path), copyDir, named);
+    } catch (err) {
+      return this.fail(run, "squad-kit could not copy this project's settings into its own copy.", { detail: `Could not copy your .env files: ${(err as Error).message}` });
+    }
+    const setup = repo.commands.setup?.trim();
+    const deps = await dependencyPrint(copyDir, copy.commit);
+    if (signal.aborted) return;
+    if (setup && (copy.fresh || this.records()[app.repo]?.setupFor !== deps)) {
+      run.step = 'setup';
+      this.keep(app.repo, `$ ${setup}\n`);
+      const r = await runCommand(copyDir, setup, SETUP_MS, { signal, ...(this.guardFor(copyDir) ? { guard: this.guardFor(copyDir)! } : {}) });
+      this.keep(app.repo, `${r.output}\n`);
+      if (signal.aborted) return;
+      if (!r.ok) return this.fail(run, `squad-kit could not set up ${app.name}.`, { detail: `${setup}\n${tail(r.output, 30)}` });
+      this.record(app.repo, (rec) => (rec.setupFor = deps));
+    }
+    run.step = 'phone';
+    const open = new PhoneOpen({
+      dir,
+      kind: plan.kind,
+      by: 'Your apps',
+      again: 'Start',
+      ...(language ? { language } : {}),
+      yieldAfterMs: TRY_YIELDS_AFTER_MS,
+      log: (text) => this.keep(app.repo, `${text}\n`),
+      // The person closed the window, or a story needed the phone: it stopped, said in plain words.
+      onEnd: () => {
+        run.state = 'stopped';
+        this.leaveIfIdle();
+      },
+    });
+    run.phone = open;
+    await open.settled;
+    if (signal.aborted) return;
+    const v = open.view();
+    if (v.state === 'running') {
+      run.state = 'running';
+      if (v.since) run.since = v.since;
+    } else if (v.state === 'failed') this.fail(run, v.error ?? `${app.name} did not open on the iPhone.`, { detail: v.detail ?? '' });
   }
 
   /** Waits until the app's start is over, and says how it went. */
@@ -752,6 +890,16 @@ export class AppRunner {
   async stop(ref?: string): Promise<AppStatus> {
     const app = this.find(ref);
     const run = this.runs.get(app.repo);
+    if (run?.phone && (run.state === 'starting' || run.state === 'running')) {
+      // The app closes and squad-kit's iPhone shuts down.
+      run.stop.abort();
+      await run.phone.stop();
+      await run.settled;
+      run.state = 'stopped';
+      delete run.error;
+      this.leaveIfIdle();
+      return this.view(app);
+    }
     if (run && (run.state === 'starting' || run.state === 'running')) {
       run.stop.abort();
       if (run.child) {
@@ -793,6 +941,7 @@ export class AppRunner {
     for (const [repo, run] of this.runs) {
       if (run.state !== 'starting' && run.state !== 'running') continue;
       run.stop.abort();
+      void run.phone?.stop();
       if (run.child) endGroup(run.child);
       this.record(repo, (r) => delete r.pid);
     }

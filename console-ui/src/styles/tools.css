@@ -1,0 +1,86 @@
+/* The Tools page and the message of a step a tool stops. Colors come from the tokens in app.css, in both themes; each
+   tool brings its own brand color as --brand, for its logo tile and its progress bar. */
+
+.tl-page { max-width: 880px; }
+.tl-sub { margin-top: 6px; font-size: 14px; color: var(--muted); max-width: 680px; }
+.tl-wait { display: inline-flex; align-items: center; gap: 8px; }
+
+/* A tool's logo on its brand color, like an app on a phone. */
+.tl-logo { --brand: var(--dim); --size: 42px; width: var(--size); height: var(--size); flex: none; display: grid; place-items: center; border-radius: calc(var(--size) * 0.26); background: var(--brand); color: #fff; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12), 0 2px 6px -2px color-mix(in srgb, var(--brand) 55%, transparent); }
+.tl-logo.light { color: #0e1813; }
+.tl-logo svg.tl-glyph { width: calc(var(--size) * 0.54); height: calc(var(--size) * 0.54); fill: currentColor; }
+.tl-logo .lucide { width: calc(var(--size) * 0.54); height: calc(var(--size) * 0.54); }
+.tl-logo b { font: 700 calc(var(--size) * 0.3) 'JetBrains Mono', monospace; text-transform: capitalize; }
+
+/* Every tool at a glance. */
+.tl-shelf { display: grid; grid-template-columns: repeat(auto-fill, minmax(94px, 1fr)); gap: 10px; margin-top: 20px; }
+.tl-chip { --chip-bg: var(--surface); display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 14px 6px 11px; border-radius: 14px; background: var(--chip-bg); border: 1px solid var(--line); color: var(--text); text-align: center; text-decoration: none; transition: border-color 0.2s, transform 0.2s; }
+.tl-chip:hover { border-color: var(--line-strong); transform: translateY(-1px); }
+.tl-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tl-chip b { margin-top: 6px; font-size: 12.5px; font-weight: 650; line-height: 1.25; }
+.tl-chip > span:last-child { font-size: 12px; font-weight: 600; color: var(--muted); }
+.tl-chip.ok > span:last-child { color: var(--accent); }
+.tl-chip.needs { --chip-bg: color-mix(in srgb, var(--you) 11%, var(--surface)); border-color: var(--you-line); }
+.tl-chip.needs > span:last-child { color: var(--you-ink); }
+.tl-chip.off .tl-logo { filter: grayscale(1); opacity: 0.55; }
+.tl-chip-art { position: relative; }
+.tl-badge { position: absolute; right: -6px; bottom: -6px; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; background: var(--dim); color: #fff; box-shadow: 0 0 0 2.5px var(--chip-bg); }
+.tl-chip.ok .tl-badge { background: var(--accent); color: var(--accent-ink); }
+.tl-chip.needs .tl-badge { background: var(--you); color: #fff; }
+.tl-chip.get .tl-badge { background: var(--text); color: var(--surface); }
+
+.tl-group { margin-top: 28px; }
+.tl-group h3 { font-size: 13px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.tl-gsub { margin: 2px 0 10px; font-size: 13px; color: var(--muted); }
+
+.tl-line { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; margin-top: 10px; box-shadow: var(--card-shadow); scroll-margin: 24px; transition: border-color 0.3s, box-shadow 0.3s; }
+.tl-line.stops { border-color: var(--you-line); box-shadow: inset 4px 0 0 var(--you); }
+.tl-line.tl-hit { border-color: var(--you-line); box-shadow: inset 4px 0 0 var(--you), 0 0 0 3px var(--you-soft); }
+.tl-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.tl-name { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; }
+.tl-name b { font-size: 15px; font-weight: 650; }
+.tl-name span { font-size: 13px; color: var(--muted); }
+
+.tl-state { display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 999px; font-size: 12.5px; font-weight: 600; line-height: 1.35; background: var(--surface-2); color: var(--muted); }
+.tl-state svg { flex: none; }
+.tl-state.ok { background: var(--accent-soft); color: var(--accent); }
+.tl-state.needs { background: var(--you-soft); color: var(--you-ink); box-shadow: inset 0 0 0 1px var(--you-line); }
+.tl-state.get { background: color-mix(in srgb, var(--brand) 14%, var(--surface)); color: var(--text); }
+
+.tl-body { margin: 10px 0 0 54px; font-size: 13.5px; display: flex; flex-direction: column; gap: 8px; }
+.tl-stops { display: flex; align-items: flex-start; gap: 8px; padding: 9px 12px; border-radius: 10px; background: var(--you-soft); color: var(--you-ink); font-weight: 550; }
+.tl-stops svg { flex: none; margin-top: 2px; }
+.tl-uses { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--muted); }
+.tl-uses > span { margin-right: 2px; }
+.tl-uses i { font-style: normal; font-size: 12px; font-weight: 550; padding: 2px 9px; border-radius: 999px; background: var(--surface-2); color: var(--text); }
+.tl-uses i.stopped { background: var(--you-soft); color: var(--you-ink); box-shadow: inset 0 0 0 1px var(--you-line); }
+.tl-trouble { color: var(--bug); }
+.tl-act { display: flex; flex-direction: column; gap: 8px; margin-top: 2px; padding-top: 10px; border-top: 1px solid var(--line); }
+.tl-act ol { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 3px; }
+.tl-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tl-or { font-weight: 600; color: var(--muted); }
+
+/* Update: the warning to OK first, inside the line. */
+.tl-ask { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border-radius: 10px; background: var(--you-soft); border: 1px solid var(--you-line); }
+.tl-ask p { display: flex; align-items: flex-start; gap: 8px; color: var(--text); line-height: 1.45; }
+.tl-ask p svg { flex: none; margin-top: 2px; color: var(--you-ink); }
+
+.tl-get { display: flex; flex-direction: column; gap: 6px; color: var(--muted); }
+.tl-bar { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+.tl-bar i { display: block; height: 100%; background: var(--brand, var(--accent)); border-radius: 3px; transition: width 0.6s ease; }
+
+.tl-block { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 14px 16px; border-radius: 12px; background: var(--you-soft); border: 1px solid var(--you-line); color: var(--text); }
+.tl-block .ring { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--surface); color: var(--you-ink); }
+.tl-block > div { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: 13.5px; }
+.tl-block b { font-weight: 650; }
+.tl-block .grow { flex: 0; }
+
+@media (max-width: 640px) {
+  .tl-body { margin-left: 0; }
+  .tl-shelf { grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: 8px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tl-chip, .tl-line { transition: none; }
+  .tl-chip:hover { transform: none; }
+}

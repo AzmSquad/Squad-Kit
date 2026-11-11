@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { DECISION_AREAS, type ArchitectureResponse, type Decision, type ImpactCheck, type DecisionArea, type StackItem, type TechRole, type TimelineState, type TimelineTicket } from '../api/types';
 import { useAct, useArchitecture } from '../lib/data';
 import { BrokenTickets } from './Board';
-import { LOGOS } from '../lib/logos';
+import { LOGOS, inkLogo } from '../lib/logos';
 import { Runs, Written, ago, dateShort } from '../components/ui';
 import { isolated, langProps } from '../lib/lang';
 
@@ -286,7 +286,7 @@ function TechCard({ t, picked, onPick }: { t: StackItem; picked: string | null; 
       <div className="tech-head">
         <span className="logo" style={logo ? ({ '--brand': `#${logo.hex}` } as React.CSSProperties) : undefined}>
           {logo ? (
-            <svg viewBox="0 0 24 24" aria-hidden="true" className={dark(logo.hex) ? 'ink' : ''}>
+            <svg viewBox="0 0 24 24" aria-hidden="true" className={inkLogo(logo.hex) ? 'ink' : ''}>
               <path d={logo.path} />
             </svg>
           ) : (
@@ -368,11 +368,6 @@ function TechDecision({ t }: { t: StackItem }) {
 }
 
 /** Near-black brand colours (Next.js, Prisma) take the text colour, so they show in the dark theme too. */
-function dark(hex: string): boolean {
-  const n = parseInt(hex, 16);
-  return ((n >> 16) & 255) * 0.299 + ((n >> 8) & 255) * 0.587 + (n & 255) * 0.114 < 60;
-}
-
 function ReadingBar({ reading }: { reading?: ArchitectureResponse['reading'] }) {
   const act = useAct();
   const busy = reading?.status === 'pending' || reading?.status === 'running' || act.isPending;

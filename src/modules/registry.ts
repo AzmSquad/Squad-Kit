@@ -14,6 +14,10 @@ import { claudeTool } from './claude/index.js';
 import { codexTool } from './codex/index.js';
 import type { BrowserModule } from './browser/types.js';
 import { playwrightBrowser } from './playwright/index.js';
+import type { PhoneModule } from './phone/types.js';
+import { iosSimulator } from './ios-simulator/index.js';
+import type { PhoneDriverModule } from './phone-driver/types.js';
+import { maestroDriver } from './maestro/index.js';
 
 /**
  * The one place that knows which products squad-kit has modules for (ADR-002). The engine asks here for "this
@@ -25,6 +29,8 @@ export const CODE_HOSTS: CodeHostModule[] = [azureCodeHost];
 export const SPEECH: SpeechModule[] = [munsitSpeech];
 export const AI_TOOLS: AiTool[] = [claudeTool, codexTool];
 export const BROWSERS: BrowserModule[] = [playwrightBrowser];
+export const PHONES: PhoneModule[] = [iosSimulator];
+export const PHONE_DRIVERS: PhoneDriverModule[] = [maestroDriver];
 
 function rootOf(bp: BoardPaths): string {
   return bp.root;
@@ -81,6 +87,16 @@ export function speechModule(): SpeechModule {
 /** The browser squad-kit drives itself, for the screenshots and the pages agents ask to see. */
 export function shotBrowser(): BrowserModule {
   return BROWSERS[0]!;
+}
+
+/** The phone squad-kit runs itself for the iPhone pictures. Android comes as a second module. */
+export function shotPhone(): PhoneModule {
+  return PHONES[0]!;
+}
+
+/** The tool that taps through the app on squad-kit's phone. */
+export function phoneDriver(): PhoneDriverModule {
+  return PHONE_DRIVERS[0]!;
 }
 
 /** The AI tool an agent file names. */
