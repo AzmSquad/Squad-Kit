@@ -6,7 +6,7 @@ import { flutterDownloads, flutterOnPath, precacheArgs, runsFlutter, usePrecache
 import { buildGuard, guardSupport } from '../src/engine/project-guard.js';
 
 /**
- * Flutter's own downloads (1.3.9): in the guard, Flutter's folder is the person's program and stays read only, so
+ * Flutter's own downloads (1.3.10): in the guard, Flutter's folder is the person's program and stays read only, so
  * squad-kit runs `flutter precache` itself, outside the guard and outside the story's copy, once, for the platforms the
  * app builds for here. Never the real Flutter: a made-up one on the PATH, and a fake runner that records what it was
  * asked. The fixtures sit under the worktree, not the system temp, which the guard lets commands write in.

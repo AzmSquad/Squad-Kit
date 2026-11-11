@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.3.9] — 2026-11-11
+## [1.3.10] — 2026-11-11
+
+The first build of this work was tagged 1.3.9 and never published: its package went over the size limit then.
 
 ### Added
 
@@ -1563,8 +1565,8 @@ First public release.
 - Plan-generation meta-prompt (`generate-plan.md`), intake template (`intake.md`), and plan skeleton reference (`story-skeleton.md`).
 - Documentation: `docs/philosophy.md`, `docs/getting-started.md`, `docs/customization.md`, `docs/vs-spec-kit.md`.
 
-[Unreleased]: https://github.com/AzmSquad/squad-kit/compare/v1.3.9...HEAD
-[1.3.9]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.3.9
+[Unreleased]: https://github.com/AzmSquad/squad-kit/compare/v1.3.10...HEAD
+[1.3.10]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.3.10
 [1.3.8]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.3.8
 [1.3.7]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.3.7
 [1.3.6]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.3.6
