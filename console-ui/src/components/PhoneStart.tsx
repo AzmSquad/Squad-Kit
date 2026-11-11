@@ -4,8 +4,8 @@ import type { PhoneAppView } from '../api/types';
 import '../styles/check.css';
 
 /**
- * The pieces Your apps and Try it yourself share for an iPhone app: the language to open it in, the line while it gets
- * onto squad-kit's iPhone (each step with the time left), the device it runs on, and why it can't when a tool is missing.
+ * The pieces Your apps and Try it yourself share for a phone app: the language to open it in, the line while it gets
+ * onto squad-kit's phone (each step with the time left), the device it runs on, and why it can't when a tool is missing.
  */
 
 /** "Arabic", "English": the language's own name in English, or its code when the browser does not know it. */
@@ -37,14 +37,14 @@ export function PhoneLine({ phone, starting }: { phone: PhoneAppView; starting: 
   if (starting) {
     return (
       <p className="app-more phone-line" role="status">
-        <Loader2 size={13} className="spin" aria-hidden="true" /> {run?.line ?? "Getting the app onto squad-kit's iPhone"}
+        <Loader2 size={13} className="spin" aria-hidden="true" /> {run?.line ?? `Getting the app onto squad-kit's ${phone.word}`}
       </p>
     );
   }
   if (run?.state === 'running') {
     return (
       <p className="app-more phone-line">
-        <Smartphone size={13} aria-hidden="true" /> Open on {run.device ?? 'the iPhone'}
+        <Smartphone size={13} aria-hidden="true" /> Open on {run.device ?? `the ${phone.word}`}
         {run.language && run.language !== 'en' ? `, in ${languageName(run.language)}` : ''}. Close its window when you are done.
       </p>
     );
@@ -53,13 +53,13 @@ export function PhoneLine({ phone, starting }: { phone: PhoneAppView; starting: 
   return null;
 }
 
-/** The iPhone can't open it here yet: why, and the line of the Tools page with what is needed. */
+/** The phone can't open it here yet: why, and the line of the Tools page with what is needed. */
 export function PhoneNotReady({ phone }: { phone: PhoneAppView }) {
   if (phone.ready || !phone.why) return null;
   return (
     <p className="app-more phone-wait">
       {phone.why} {phone.web ? 'Start opens the web version meanwhile. ' : ''}
-      <Link to="/tools" hash={(phone.link ?? '/tools#xcode').split('#')[1]}>
+      <Link to="/tools" hash={(phone.link ?? '/tools').split('#')[1] ?? ''}>
         See what&apos;s needed
       </Link>
     </p>

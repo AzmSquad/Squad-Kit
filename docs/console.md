@@ -370,9 +370,23 @@ whether it is here (Ready with its version, Missing, Too old, Getting it now, or
 Windows) and what it is used for. Versions count: with Xcode 27, a Flutter older than 3.44.8 is Too old for iPhone
 builds.
 
-- **squad-kit gets it**: Maestro, and Java when this computer has none. **Get it** downloads the official release
-  into squad-kit's own folder (`~/.squad-kit/tools/`), checks its published checksum, and shows the progress and the
-  time left. No password, no Homebrew. A failed or cut download leaves nothing behind and says why.
+- **squad-kit gets it**: Maestro, Java when this computer has none, and the **Android phone tools**. **Get it**
+  downloads the official release into squad-kit's own folder (`~/.squad-kit/tools/`), checks its published checksum,
+  and shows the progress and the time left. No password, no Homebrew. A failed or cut download leaves nothing behind
+  and says why.
+- **Android phone tools**: Google's own emulator and build tools, so no Android Studio is needed: the command-line tools
+  (pinned to one build, by the checksum in Google's own manifest), then Google's sdkmanager installs platform-tools, the
+  emulator, Android 16 (API 36), its build tools, the NDK Flutter's template names, and one system image (Arm on a Mac
+  with Apple's chip, x86_64 on Intel and AMD computers). Google's license comes first: **Read and accept Google's
+  license** shows it in full, as Google's manifest gives it, with **Accept** and **Not now**. squad-kit never accepts it
+  for you; Get it waits for your Accept, and sdkmanager is answered yes only to the licenses you accepted. The line says
+  how big it is and how long it takes ("about 20 GB on this computer, about 12 minutes the first time"), and Get it looks
+  at the free room first: with less than about 20 GB free it says so and gets nothing. A download that gets no new bytes
+  for 2 minutes is stopped and tried once more, then the line says so plainly. Java comes first when this computer has
+  none (Google's tools run on it), and Maestro with it. An Android SDK of yours (`ANDROID_HOME`, or Android Studio's own
+  folder) that has everything is used as it is and never changed; one that lacks something is left as it is, and squad-kit
+  gets its own. On Windows and Linux computers with an Arm chip, Google's emulator doesn't run yet: the line says so.
+  **Android Studio** shows as Optional: squad-kit doesn't need it.
 - **You install it**: the line says why squad-kit can't ("needs your Apple ID"), gives short steps and the official
   page. Press **Check again** after installing. On Mac and Linux, Check again reads your terminal's PATH, so a tool you
   just installed is found without closing squad-kit, and the agents squad-kit starts after find it too.
@@ -393,12 +407,15 @@ waits with a plain message, "squad-kit can't build this story yet: Flutter isn't
 needed** linking to the line. It never fails over it, and goes on by itself once the tool is there. squad-kit looks
 again when you press Check again, when you open the waiting story, and every few minutes while one waits.
 
-Terminal: `squad tools`, `squad tools check`, `squad tools get maestro`, `squad tools update flutter` (shows the same
-warning and asks yes or no; `--yes` says OK without asking).
+Terminal: `squad tools`, `squad tools check`, `squad tools get maestro`, `squad tools accept android` (prints Google's
+license in full and asks yes or no; `--yes` accepts without asking), `squad tools get android`, `squad tools update
+flutter` (shows the same warning and asks yes or no; `--yes` says OK without asking).
 
-REST (under `/p/<project>/api/v1`): `GET /tools`, `POST /tools/check`, `POST /tools/<tool>/get`, and
-`POST /tools/<tool>/update` with the body `{ "ok": true }`. Without the OK, the update call answers with the warning and
-changes nothing.
+REST (under `/p/<project>/api/v1`): `GET /tools`, `POST /tools/check`, `POST /tools/<tool>/get`,
+`GET /tools/<tool>/license` (the license in full, from its maker), `POST /tools/<tool>/accept` with the body
+`{ "licenses": ["android-sdk-license", ...] }` (every license you were shown), and `POST /tools/<tool>/update` with the
+body `{ "ok": true }`. Without the OK, the update call answers with the warning and changes nothing; without the Accept,
+Get it for the Android phone tools answers why and gets nothing.
 
 ### iPhone pictures
 
@@ -458,10 +475,62 @@ once it runs, the device ("Open on iPhone 16 Pro"). **Try it yourself** does the
   squad-kit closes the app there, says so ("squad-kit closed the app on its iPhone: a story needs the iPhone for its
   pictures. Press Try it yourself again later."), and the pictures go on.
 
-Terminal: `squad phone` shows squad-kit's phones, whether each runs and when it shuts down by itself; `squad phone stop`
-shuts them down now (one taking pictures for a story is left, and it says so). `squad app start <app>` opens an iPhone
-app on the iPhone; `--phone` asks for it, `--web` starts the web version instead, `--lang ar` opens it in Arabic.
-`squad try <ticket>` takes the same `--phone`, `--web` and `--lang`.
+### Android pictures
+
+For an Android app (Flutter, React Native with or without Expo, or native with Gradle), the Tester's pictures come
+from Google's own Android emulator, run by squad-kit itself, hidden: **squad-kit Android phone** (a Pixel 9) and
+**squad-kit Android tablet** (a Pixel Tablet), made once with Google's avdmanager in squad-kit's own folder
+(`~/.squad-kit/phones/android/`), each started on a fixed port so its serial is known (`emulator-5560`,
+`emulator-5562`). The first start is cold and saves a snapshot; every start after loads it in about 5 seconds. Every
+emulator and adb call gets squad-kit's folder as its home, so nothing goes to your `~/.android`; your own phones and
+emulators are never listed, started or stopped, and your own adb server is never stopped. When no adb server runs,
+squad-kit starts its own, writes down its exact process, and stops it again when its phones shut down (after 10 minutes
+unused, and when the board stops); one that was running before is yours, and is used as it is.
+
+- **Which phone**: an app for both iPhone and Android uses the iPhone on a Mac when its own tools (Xcode, the simulator,
+  CocoaPods) are ready, else Android; on Windows and Linux, Android. **Settings → Phone for pictures** chooses iPhone,
+  Android or Automatic for the whole team (`squad config set phone iphone|android|auto`, or `PUT /settings` with
+  `{ "phone": "android" }`). Only the chosen phone's tools count: an app for both never waits for the other one's.
+- **The app** is built in the story's own copy, outside the agents' sandbox: Flutter with `flutter build apk --debug`,
+  native apps with `./gradlew assembleDebug`, React Native with `./gradlew assembleRelease` in `android/` (its debug
+  build waits for a dev server the pictures don't have; the release one carries the app's code and signs with the
+  debug key, as React Native's template does). An Expo app with no `android/` (or `ios/`) folder gets one made first by
+  `npx expo prebuild --platform android --no-install`: that folder stays squad-kit's own, hidden from git in that copy,
+  and no commit ever takes it. Gradle keeps one home for all projects (`~/.squad-kit/caches/gradle`), compiles Kotlin
+  inside itself, and its helper is stopped after each build (`gradlew --stop`). What the build changes in the story's
+  own files (Flutter rewrites `pubspec.lock` and `analysis_options.yaml`) goes back, so the story's changes stay the
+  Builder's; the same holds for iPhone builds. It builds again only when the copy's code changed.
+- **Taking the pictures**: the same Maestro and the same steps as on the iPhone, on the emulator's serial. Android's
+  screen is read by its own rules: its status bar and navigation are left out, and so is the keyboard, whose suggestion
+  strip repeats the words just typed; the keyboard is put away only when it shows. Each picture starts the app fresh in
+  its language (Android 13 and newer open one app in its own language, set on every launch; older systems switch the
+  whole phone), and is taken with `adb exec-out screencap -p`, labelled with its device ("Pixel 9").
+- **Checks and the agents' own commands** that build an Android app (`flutter build apk`, `./gradlew …`) get squad-kit's
+  Android tools too: the SDK and squad-kit's shared Gradle home read only, Java 17 or newer, and Kotlin inside Gradle. In
+  the guard, Android's own folders and Gradle's home are the project's cache home, and Gradle reads what squad-kit's own
+  builds downloaded from the shared home (`GRADLE_RO_DEP_CACHE`), so nothing downloads twice and no story can change
+  what squad-kit's own phone builds run. A Flutter app's build check is `flutter build web` when it has a web version, and
+  none otherwise: when the first read hands in `flutter build apk` (or `appbundle`, `ios`), squad-kit swaps it and says
+  so in the log, as squad-kit's own phone build for the pictures already shows the app builds.
+- **A missing tool is not the Builder's**: a check that fails only because a tool is missing ("No Android SDK found",
+  "JAVA_HOME is not set", "xcrun: error", "command not found") counts no try. squad-kit looks at the tools again and runs
+  the checks once more; still missing, the story waits with the Tools page's line, or a card says what to install.
+- **Times**: first guesses from a 16 GB Mac: building the app 9 minutes the first time (Gradle fetches its libraries),
+  then seconds; starting the phone 40 seconds the first time, then about 5; putting the app on it 5 seconds.
+- **Start and Try it yourself** work as on the iPhone. A hidden emulator can't show a window later, so for you it starts
+  again from its snapshot with its window (about 5 seconds), and the app goes on after. **Stop** closes the app and
+  shuts the phone down by its serial; closing the emulator's window yourself stops it too.
+- One phone runs at a time, iPhone or Android, shared through the same queue, and it shuts down after 10 minutes unused
+  and when the board stops. On Ctrl-C or a stop signal the board first closes Maestro, then shuts its phones down (the
+  emulator by its serial, with the console token in squad-kit's own folder; if the console says no, its exact process),
+  then stops the adb server it started, 20 seconds at most, and only then ends.
+- `squad phone start android` (or `iphone`, `POST /phone/start` with `{ "phone": "android" }`) brings squad-kit's phone
+  up now, hidden, with Maestro ready, so a story's first pictures wait for nothing. It shuts down by itself when unused.
+
+Terminal: `squad phone` shows squad-kit's phones, iPhone and Android, whether each runs and when it shuts down by itself;
+`squad phone stop` shuts them all down now (one taking pictures for a story is left, and it says so).
+`squad app start <app>` opens a phone app on its phone; `--phone` asks for it, `--web` starts the web version instead,
+`--lang ar` opens it in Arabic. `squad try <ticket>` takes the same `--phone`, `--web` and `--lang`.
 
 REST (under `/p/<project>/api/v1`): `GET /phone`, and `POST /phone/stop`, which answers with the same and a `message`.
 `POST /apps/<app>/start` and `POST /tickets/<ticket>/try` take `{ "phone": true }`, `{ "web": true }` (Use the web

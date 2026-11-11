@@ -68,8 +68,10 @@ function show(bp: ReturnType<typeof board>): void {
   const v = databaseView(bp);
   out();
   const db = v.database;
+  const redis = v.redis ? `${v.redis.server}  ${kleur.gray(v.redis.words)}${v.redis.stories.length ? `\n${' '.repeat(16)}${v.redis.stories.map((s) => `${s.story}: ${s.number}`).join('  ')}` : ''}` : '';
   if (!db) {
     out(`  ${v.words}`);
+    if (redis) row('Redis', redis);
     out();
     ui.info(`Look again: ${cmd('squad db find')}   Name it yourself: ${cmd('squad db confirm --kind postgres --env DATABASE_URL --address …')}`);
     return;
@@ -79,6 +81,7 @@ function show(bp: ReturnType<typeof board>): void {
   row('Setting', settingWords(db.setting));
   row('Address', db.address ? `${db.address}${db.secret ? kleur.gray('  (on this computer only)') : ''}` : kleur.yellow('not known yet'));
   if (db.from?.length) row('Learned from', db.from.join(', '));
+  if (redis) row('Redis', redis);
   if (v.blocked) row('Own copies', kleur.yellow(v.blocked));
   if (v.making) row('Template', kleur.yellow(`being made, since ${when(v.making.since)}`));
   else if (v.template) {

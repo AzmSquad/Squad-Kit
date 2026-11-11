@@ -167,6 +167,7 @@ function ProjectSettings() {
         {multi && ' This project has several code folders; each ticket works in one of them.'}
       </p>
       <NewTestsSetting always={Boolean(meta.alwaysNewTests)} />
+      <PhoneSetting phone={meta.phone} />
       {repos.map((r) => (
         <RepoSettings key={r.path} repo={r} multi={multi} />
       ))}
@@ -505,6 +506,42 @@ function NewTestsSetting({ always }: { always: boolean }) {
           Saved in the project's settings, for the whole team.
         </span>
         <Cmd text={`squad config set new-tests ${always ? 'switch' : 'always'}`} />
+      </span>
+    </div>
+  );
+}
+
+/** The phone an app for both iPhone and Android uses for its pictures, Start and Try it yourself. */
+function PhoneSetting({ phone }: { phone?: 'iphone' | 'android' }) {
+  const act = useAct();
+  const now = phone ?? 'auto';
+  const choices = [
+    { id: 'auto', label: 'Automatic' },
+    { id: 'iphone', label: 'iPhone' },
+    { id: 'android', label: 'Android' },
+  ] as const;
+  return (
+    <div className="maprow" style={{ alignItems: 'center' }}>
+      <b>Phone for pictures</b>
+      <span style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <span className="seg" role="radiogroup" aria-label="Phone for pictures">
+          {choices.map((c) => (
+            <button
+              key={c.id}
+              role="radio"
+              aria-checked={now === c.id}
+              className={now === c.id ? 'on' : ''}
+              onClick={() => now !== c.id && act.mutate({ path: '/api/v1/settings', method: 'PUT', body: { phone: c.id }, done: `Phone for pictures: ${c.label}` })}
+            >
+              {c.label}
+            </button>
+          ))}
+        </span>
+        <span className="note">
+          For an app that builds for both iPhone and Android. Automatic uses the iPhone on a Mac when its tools are ready, else Android; a computer that is not a Mac
+          always uses Android. Saved in the project's settings, for the whole team.
+        </span>
+        <Cmd text={`squad config set phone ${now === 'auto' ? 'android' : now === 'android' ? 'iphone' : 'auto'}`} />
       </span>
     </div>
   );

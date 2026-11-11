@@ -41,6 +41,19 @@ export interface AppOnPhone {
   schemes: string[];
 }
 
+/** The long steps whose time squad-kit learns on this computer: building the app, starting the phone, putting the app on it, the first tap. */
+export type PhoneStep = 'build' | 'boot' | 'install' | 'first-run';
+
+/** Where a phone's own tools are on this computer, as squad-kit's tools found them (engine/tools). */
+export interface PhoneTools {
+  /** The phone maker's tools folder: an Android SDK. */
+  sdk?: string;
+  /** squad-kit's own folder for the phone's devices and settings: nothing goes to the person's home folder. */
+  home?: string;
+  /** The Java home its tools run on. */
+  java?: string;
+}
+
 /** A phone command that did not work. `message` is for people; `detail` is what the tool printed, for engineers. */
 export class PhoneError extends Error {
   constructor(
@@ -57,6 +70,29 @@ export interface PhoneModule {
   label: string;
   /** The word for its phone and its tablet: "iPhone", "iPad". */
   words: Record<PhoneSize, string>;
+  /** Its system's name, before a version: "iOS", "Android". */
+  system: string;
+  /**
+   * How long each long step takes the first time, in seconds, and the key squad-kit keeps the time measured here under.
+   * Left out: the iPhone's.
+   */
+  times?: Record<PhoneStep, { key: string; guess: number }>;
+  /**
+   * Its window opens only by starting the device again, from the clean state it boots from: the app goes on after the
+   * window opens, never before (Start, Try it yourself).
+   */
+  windowRestarts?: boolean;
+  /** Tells it where its tools are on this computer, before it is used. A phone that needs none leaves it out. */
+  useTools?(tools: PhoneTools): void;
+  /** The id the tapping tool knows a device by, when it is not the device's own: an Android phone's serial. */
+  tapId?(id: string): string;
+  /** What the tapping tool needs in its environment to reach this phone. */
+  tapEnv?(): Record<string, string>;
+  /**
+   * Ends what the phone started beside its devices, once none of them runs (Android: the adb server squad-kit started
+   * itself, never one that ran before). The idle shutdown and the board's stop call it.
+   */
+  release?(): Promise<void>;
   /** Why it cannot run on this computer, in plain words ("An iPhone simulator needs a Mac."), or null when it can. */
   notHere(): string | null;
   /** The system versions this computer can run, newest first. */

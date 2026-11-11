@@ -10,7 +10,7 @@ import type { Platform, ProjectKind } from './kinds.js';
 export type ToolAction = 'build' | 'checks' | 'pictures' | 'start-app' | 'try-it';
 export type Priority = 'required' | 'recommended' | 'optional';
 export type System = 'mac' | 'windows' | 'linux';
-export type ToolId = 'git' | 'ai-tool' | 'flutter' | 'xcode' | 'simulator' | 'cocoapods' | 'maestro' | 'java' | 'android-studio' | 'docker';
+export type ToolId = 'git' | 'ai-tool' | 'flutter' | 'xcode' | 'simulator' | 'cocoapods' | 'android' | 'maestro' | 'java' | 'android-studio' | 'docker';
 /** Another tool that looks after a copy you installed, and updates it itself. */
 export type ManagedBy = 'homebrew' | 'fvm' | 'snap';
 
@@ -51,6 +51,15 @@ export interface ToolEntry {
   getSeconds?: number;
   /** squad-kit gets these with it, when they are missing. */
   with?: ToolId[];
+  /** squad-kit gets these first, when they are missing: it needs them to get this one (Java runs Google's Android tools). */
+  before?: ToolId[];
+  /**
+   * Its maker's license must be accepted first, by you: the board shows it in full, and Get it waits for your Accept.
+   * squad-kit never accepts it for you.
+   */
+  license?: true;
+  /** How much room it takes once it is in, for its Get it: "about 20 GB". */
+  size?: string;
   /** A line to read before the steps: "Android pictures and Start come in the next update". */
   note?: string;
   /**
@@ -183,10 +192,32 @@ export const CATALOG: ToolEntry[] = [
     with: ['java'],
   },
   {
+    id: 'android',
+    name: 'Android phone tools',
+    gives: "Google's own Android emulator and build tools: an Android phone on this computer, for pictures, Start and Try it yourself",
+    needs: [
+      { kinds: CROSS, platform: 'android', priority: 'required', for: ON_PHONE },
+      { kinds: ['android'], priority: 'required', for: ON_PHONE },
+    ],
+    notHere: "needs a Mac, or a computer with an Intel or AMD chip: Google's Android emulator doesn't run on this one yet",
+    installer: 'squad-kit',
+    link: 'https://developer.android.com/studio#command-line-tools-only',
+    // About 3.6 GB from Google at 6 MB/s, then unpacking: 10 to 15 minutes the first time on a 16 GB Mac.
+    getSeconds: 720,
+    license: true,
+    size: 'about 20 GB',
+    before: ['java'],
+    with: ['maestro'],
+  },
+  {
     id: 'java',
     name: 'Java',
-    gives: 'runs Maestro',
-    needs: [{ kinds: MOBILE, priority: 'required', for: ['pictures'] }],
+    gives: "runs Maestro, and Google's Android build tools",
+    needs: [
+      { kinds: MOBILE, priority: 'required', for: ['pictures'] },
+      { kinds: CROSS, platform: 'android', priority: 'required', for: ON_PHONE },
+      { kinds: ['android'], priority: 'required', for: ON_PHONE },
+    ],
     min: '17',
     installer: 'squad-kit',
     link: 'https://adoptium.net',
@@ -195,16 +226,16 @@ export const CATALOG: ToolEntry[] = [
   {
     id: 'android-studio',
     name: 'Android Studio',
-    gives: 'an Android phone on this computer',
+    gives: "Google's app for building Android apps by hand. squad-kit doesn't need it: its Android phone tools are enough",
     needs: [
-      { kinds: CROSS, platform: 'android', priority: 'recommended', for: ON_PHONE },
-      { kinds: ['android'], priority: 'recommended', for: ON_PHONE },
+      { kinds: CROSS, platform: 'android', priority: 'optional', for: ON_PHONE },
+      { kinds: ['android'], priority: 'optional', for: ON_PHONE },
     ],
     installer: 'you',
     why: 'it is a big app with its own setup',
     steps: { all: ['Open the official download page and get Android Studio.', 'Open it once and follow its setup.', CHECK_AGAIN] },
     link: 'https://developer.android.com/studio',
-    note: 'Android pictures and Start come in the next squad-kit update.',
+    note: 'When its Android tools have everything squad-kit needs, squad-kit uses them as they are and never changes them.',
   },
   {
     id: 'docker',
@@ -271,5 +302,39 @@ export const OWN_SOURCES = {
   java: {
     feature: 21,
     api: 'https://api.adoptium.net/v3/assets/latest',
+  },
+  /**
+   * Google's Android tools: the command-line tools pinned to one build, by the checksum Google's own manifest gives
+   * (repository2-3.xml, checked 2026-11-11; the Mac arm64 file's SHA-256 also matches developer.android.com), then the
+   * packages sdkmanager installs from Google's site. API 36 (Android 16) is what Flutter 3.47 builds for; its NDK is the
+   * one Flutter's template names, got here so a first build doesn't fetch it silently.
+   */
+  android: {
+    /** The folder's version: the API level of its system. */
+    version: '36',
+    api: 36,
+    system: '16',
+    base: 'https://dl.google.com/android/repository/',
+    manifests: ['https://dl.google.com/android/repository/repository2-3.xml', 'https://dl.google.com/android/repository/sys-img/google_apis/sys-img2-4.xml'],
+    tools: {
+      'mac-arm64': { file: 'commandlinetools-mac_arm64-15859902_latest.zip', size: 156_083_281, sha1: 'c4e0dbc53f1a4ce04fc2b11d4e2c4675001a95af', sha256: '835b62a26162b229b441d1f6d4680383815a270809eb33522c0d480fa5002c4e' },
+      'mac-x64': { file: 'commandlinetools-mac_x86_64-15859902_latest.zip', size: 156_281_494, sha1: '1a79e61677b99cb0ce622792713cbea7ff2dc5de' },
+      'windows-x64': { file: 'commandlinetools-win-15859902_latest.zip', size: 155_655_386, sha1: 'b9862337a13e2809a5159dc3a08d058091bd59f6' },
+      'linux-x64': { file: 'commandlinetools-linux-15859902_latest.zip', size: 181_833_628, sha1: '040d3996a65543d22ec4bf73e4c37aa37a8d4af4' },
+    },
+    /** What sdkmanager installs, with each download's size on each system, for the progress line. */
+    packages: {
+      'platform-tools': { mac: 16_597_640, linux: 9_571_024, windows: 8_188_595 },
+      emulator: { 'mac-arm64': 420_630_743, 'mac-x64': 487_646_420, linux: 350_070_672, windows: 456_614_209 },
+      'platforms;android-36': { all: 65_878_410 },
+      'build-tools;36.0.0': { mac: 79_121_749, linux: 63_737_259, windows: 58_699_878 },
+      'ndk;28.2.13676358': { mac: 952_495_160, linux: 722_261_334, windows: 748_118_221 },
+    },
+    images: {
+      arm64: { id: 'system-images;android-36;google_apis;arm64-v8a', size: 1_872_691_175 },
+      x64: { id: 'system-images;android-36;google_apis;x86_64', size: 1_895_447_397 },
+    },
+    /** Free room squad-kit asks for before Get it: the tools, a phone with its snapshot, and Gradle's first build. */
+    diskBytes: 20 * 1000 ** 3,
   },
 } as const;

@@ -7,6 +7,7 @@ import { squadHome } from '../../core/home.js';
 import { writeLog } from '../../core/app-log.js';
 import { CATALOG, OWN_SOURCES, toolEntry, type System, type ToolId } from './catalog.js';
 import { systemOf, toolsHome, type OwnTool } from './detect.js';
+import { androidSource } from './android.js';
 
 /**
  * squad-kit's own installs: into ~/.squad-kit/tools/<id>/<version>/, from the official source only, checked against
@@ -21,10 +22,17 @@ export interface ToolSource {
   pack: 'zip' | 'tar.gz';
   /** The size its source gives, when the download itself does not say. */
   size?: number;
-  /** The checksum the official source publishes, as sha256 hex. */
+  /** How its checksum is made: sha256, unless its source publishes only another. */
+  algorithm?: 'sha256' | 'sha1';
+  /** The checksum the official source publishes, as hex (sha256, or the `algorithm` given). */
   sha256(signal: AbortSignal): Promise<string>;
   open(signal: AbortSignal): Promise<{ body: AsyncIterable<Uint8Array>; size?: number }>;
-  /** The program inside the unpacked folder, once unpacked. */
+  /**
+   * What runs once it is unpacked, before it is marked ready, in the unpacked folder: Google's sdkmanager installs the
+   * rest of the Android tools there. Its progress counts on from the download.
+   */
+  finish?(dir: string, o: { signal: AbortSignal; onProgress(p: { done: number; total: number }): void }): Promise<void>;
+  /** The program inside the unpacked folder, once unpacked (and finished). */
   binary(dir: string): string | null;
 }
 
@@ -33,8 +41,8 @@ export interface Getting {
   name: string;
   version?: string;
   startedAt: string;
-  /** squad-kit's own download and unpack, or an update of your own copy (update.ts). */
-  step: 'download' | 'unpack' | 'update';
+  /** squad-kit's own download and unpack, its install after (Android), or an update of your own copy (update.ts). */
+  step: 'download' | 'unpack' | 'install' | 'update';
   /** A download: bytes so far and in all. An update: seconds so far and the time it usually takes. */
   done: number;
   total?: number;
@@ -178,6 +186,7 @@ export async function javaSource(f: Fetch = fetch, system: System = systemOf(), 
 export async function officialSource(id: ToolId, signal?: AbortSignal): Promise<ToolSource> {
   if (id === 'maestro') return maestroSource();
   if (id === 'java') return javaSource(fetch, systemOf(), process.arch, signal);
+  if (id === 'android') return androidSource({ system: systemOf() });
   throw new GetTrouble(`squad-kit does not get ${nameOf(id)} itself. The Tools page says how to install it.`);
 }
 
@@ -266,12 +275,15 @@ export async function getTool(id: ToolId, source: ToolSource, opts: { home?: str
   fs.mkdirSync(toolsHome(home), { recursive: true });
   const tmp = fs.mkdtempSync(path.join(toolsHome(home), `.part-${id}-`));
   try {
+    const algorithm = source.algorithm ?? 'sha256';
     const expected = (await source.sha256(signal)).toLowerCase();
-    if (!/^[0-9a-f]{64}$/.test(expected)) throw new GetTrouble(`squad-kit could not read ${name}'s published checksum, so it did not download it. Nothing was installed.`);
+    if (!new RegExp(`^[0-9a-f]{${algorithm === 'sha1' ? 40 : 64}}$`).test(expected)) throw new GetTrouble(`squad-kit could not read ${name}'s published checksum, so it did not download it. Nothing was installed.`);
     const file = path.join(tmp, path.basename(source.file));
     const { body, size } = await source.open(signal);
     const total = size ?? source.size;
-    const hash = createHash('sha256');
+    // A download with an install after it shows the whole of it: the install counts on from here.
+    const shown = source.finish && source.size ? source.size : total;
+    const hash = createHash(algorithm);
     // Opened here and now, so a download that fails at once never leaves an open still on its way.
     const out = fs.createWriteStream(file, { fd: fs.openSync(file, 'w') });
     const closed = () => (out.closed ? Promise.resolve() : once(out, 'close').then(() => undefined, () => undefined));
@@ -282,7 +294,7 @@ export async function getTool(id: ToolId, source: ToolSource, opts: { home?: str
         hash.update(chunk);
         done += chunk.length;
         if (!out.write(chunk)) await once(out, 'drain');
-        opts.onProgress?.({ done, ...(total ? { total } : {}), step: 'download' });
+        opts.onProgress?.({ done, ...(shown ? { total: shown } : {}), step: 'download' });
       }
       out.end();
       await once(out, 'close');
@@ -295,10 +307,12 @@ export async function getTool(id: ToolId, source: ToolSource, opts: { home?: str
     }
     if (total && done !== total) throw new GetTrouble(`The download of ${name} stopped before the end, so squad-kit threw it away. Nothing was installed. Press Get it again.`);
     if (hash.digest('hex') !== expected) throw new GetTrouble(`The download of ${name} did not match its published checksum, so squad-kit threw it away. Nothing was installed.`);
-    opts.onProgress?.({ done, ...(total ? { total } : {}), step: 'unpack' });
+    opts.onProgress?.({ done, ...(shown ? { total: shown } : {}), step: 'unpack' });
     const unpacked = path.join(tmp, 'unpacked');
     const system = opts.system ?? systemOf();
     if (!(await unpack(file, unpacked, source.pack, system))) throw new GetTrouble(`squad-kit could not unpack ${name}. Nothing was installed. Press Get it again.`);
+    fs.rmSync(file, { force: true });
+    if (source.finish) await source.finish(unpacked, { signal, onProgress: (p) => opts.onProgress?.({ done: p.done, total: p.total, step: 'install' }) });
     const bin = source.binary(unpacked);
     if (!bin) throw new GetTrouble(`${name}'s download did not have the program squad-kit expected, so squad-kit did not use it. Nothing was installed.`);
     if (system !== 'windows') fs.chmodSync(bin, 0o755);
@@ -309,7 +323,7 @@ export async function getTool(id: ToolId, source: ToolSource, opts: { home?: str
     fs.renameSync(unpacked, dir);
     const seconds = (Date.now() - started) / 1000;
     // Marked ready last: a folder without this mark is never used, and is cleared.
-    fs.writeFileSync(path.join(dir, 'ready.json'), `${JSON.stringify({ version: source.version, binary, sha256: expected, at: new Date().toISOString(), seconds: Math.round(seconds) }, null, 2)}\n`);
+    fs.writeFileSync(path.join(dir, 'ready.json'), `${JSON.stringify({ version: source.version, binary, [algorithm]: expected, at: new Date().toISOString(), seconds: Math.round(seconds) }, null, 2)}\n`);
     noteTime(id, seconds, home);
     return { version: source.version, dir, binary: path.join(dir, binary), seconds: Math.round(seconds) };
   } finally {
@@ -342,7 +356,8 @@ export function startGets(ids: ToolId[], opts: { home?: string; source?: (id: To
             const elapsed = (Date.now() - t0) / 1000;
             const rate = elapsed > 2 && p.done ? p.done / elapsed : 0;
             const left = p.step === 'unpack' ? Math.max(3, guess * 0.1) : rate && p.total ? (p.total - p.done) / rate + guess * 0.1 : Math.max(5, guess - elapsed);
-            g = { ...g, step: p.step, done: p.done, ...(p.total ? { total: p.total } : {}), secondsLeft: Math.round(left) };
+            const words = p.step === 'install' ? `Getting the ${nameOf(id).replace(/ tools$/, '')} and its system from Google` : undefined;
+            g = { ...g, step: p.step, done: p.done, ...(p.total ? { total: p.total } : {}), secondsLeft: Math.round(left), ...(words ? { words } : {}) };
             set(g);
           },
         });

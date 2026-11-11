@@ -77,7 +77,7 @@ export function WhereToLook({ t, s }: { t: Ticket; s?: TryStatus }) {
 function TryItYourself({ t, s }: { t: Ticket; s?: TryStatus }) {
   const act = useAct();
   const state = s?.state ?? 'off';
-  // An iPhone app on a Mac opens on squad-kit's iPhone, in the language picked next to Try it yourself.
+  // A phone app opens on squad-kit's iPhone or Android phone, in the language picked next to Try it yourself.
   const phone = s?.phone;
   const [lang, setLang] = useState(phone?.languages[0] ?? 'en');
   const langFlag = phone?.ready && phone.languages.length > 1 && lang !== 'en' ? ` --lang ${lang}` : '';
@@ -94,9 +94,9 @@ function TryItYourself({ t, s }: { t: Ticket; s?: TryStatus }) {
           {state === 'starting' ? <Loader2 size={15} className="spin" /> : <Play size={14} />}
         </span>
         <div className="trybox-t">
-          <b>{state === 'running' ? (onPhone ? `Open on ${phone?.run?.device ?? 'the iPhone'}` : 'Running') : state === 'starting' ? 'Starting…' : 'Try it yourself'}</b>
+          <b>{state === 'running' ? (onPhone ? `Open on ${phone?.run?.device ?? `the ${phone?.word ?? 'phone'}`}` : 'Running') : state === 'starting' ? 'Starting…' : 'Try it yourself'}</b>
           <span>
-            {phone?.ready ? "Opens this story's own copy of the app on squad-kit's iPhone, with the change in it. Nothing is merged." : "Runs this story's own copy of the app, with the change in it. Nothing is merged."}
+            {phone?.ready ? `Opens this story's own copy of the app on squad-kit's ${phone.word}, with the change in it. Nothing is merged.` : "Runs this story's own copy of the app, with the change in it. Nothing is merged."}
             {state === 'running' && s?.url ? (
               <>
                 {' '}

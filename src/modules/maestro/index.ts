@@ -20,7 +20,7 @@ const START_MS = 120_000;
 /** What one call to Maestro may take at most, besides the step's own time. */
 const SLACK_MS = 30_000;
 
-/** A part of the screen as Maestro reads it. */
+/** A part of the screen as Maestro reads it. Android's parts also say their kind (`cls`). */
 interface Element {
   b?: string;
   txt?: string;
@@ -28,6 +28,7 @@ interface Element {
   hint?: string;
   val?: string;
   rid?: string;
+  cls?: string;
   c?: Element[];
 }
 
@@ -44,6 +45,15 @@ export interface Part {
 /** Parts of the system around the app: the keyboard and its bar. Nothing of the app itself. */
 const KEYBOARD = new Set(['UIKeyboardLayoutStar Preview', 'SystemInputAssistantView']);
 
+/* ── Android's screen ─────────────────────────────────── */
+
+/** Android's status bar, notifications and navigation: the system's, above and below every app. */
+const ANDROID_SYSTEM = /^com\.android\.systemui:id\//;
+/** The keyboard (Gboard, or Android's own) and its frame. Its suggestion strip repeats the words just typed. */
+const ANDROID_KEYBOARD = /^com\.(google\.)?android\.inputmethod\.|^android:id\/(inputArea|input_method_)/;
+/** Android's own frames around every window: ids with no words say nothing about the app. */
+const ANDROID_FRAME = /^android:id\//;
+
 /** "[24,142][378,198]": top and bottom. */
 function bounds(b: string | undefined): { top: number; bottom: number } {
   const m = /\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]/.exec(b ?? '');
@@ -52,15 +62,17 @@ function bounds(b: string | undefined): { top: number; bottom: number } {
 
 /**
  * The parts of the app's screen, from Maestro's `inspect_screen`, in order: the status bar at the very top and the
- * keyboard are left out, and `keyboard` says whether one is open.
+ * keyboard are left out, and `keyboard` says whether one is open; `keys` are the keyboard's own parts with words, like
+ * its suggestions. An Android screen is read by its own rules (androidParts).
  */
-export function partsOf(json: string): { parts: Part[]; keyboard: boolean } {
+export function partsOf(json: string): { parts: Part[]; keyboard: boolean; keys: Part[] } {
   let tree: { elements?: Element[] };
   try {
     tree = JSON.parse(json) as { elements?: Element[] };
   } catch {
-    return { parts: [], keyboard: false };
+    return { parts: [], keyboard: false, keys: [] };
   }
+  if (isAndroid(tree.elements ?? [])) return androidParts(tree.elements ?? []);
   const all: (Part & { keyboard?: boolean })[] = [];
   let keyboardTop = Infinity;
   const walk = (e: Element) => {
@@ -83,7 +95,56 @@ export function partsOf(json: string): { parts: Part[]; keyboard: boolean } {
   const parts = all.filter((p) => !(p.bottom <= 50 && p.top < 50 && p.bottom - p.top < 30) && p.top < keyboardTop && !(p.id && KEYBOARD.has(p.id)));
   // The outermost part names the whole app: it says nothing about the screen.
   if (parts.length > 1 && parts[0]!.top === 0 && parts[0]!.bottom >= Math.max(...parts.map((p) => p.bottom))) parts.shift();
-  return { parts, keyboard: keyboardTop !== Infinity };
+  return { parts, keyboard: keyboardTop !== Infinity, keys: [] };
+}
+
+/** Android's parts say their kind; an iPhone's never do. */
+function isAndroid(elements: Element[]): boolean {
+  const seen = (e: Element): boolean => Boolean(e.cls?.startsWith('android.')) || (e.c ?? []).some(seen);
+  return elements.some(seen);
+}
+
+/**
+ * An Android screen: its sizes are pixels, not points, so nothing is told apart by size. The status bar and the
+ * navigation (`com.android.systemui`) go whole, with everything inside them; so does the keyboard, whose suggestion
+ * strip would otherwise match the words just typed: what the keyboard covers is left out, as on the iPhone. A field
+ * that holds text says its label as its words and the text as its value.
+ */
+function androidParts(elements: Element[]): { parts: Part[]; keyboard: boolean; keys: Part[] } {
+  const all: Part[] = [];
+  const keys: Part[] = [];
+  let keyboardTop = Infinity;
+  let keyboard = false;
+  const partOf = (e: Element): Part | null => {
+    const typed = Boolean(e.hint && e.txt && !e.a11y);
+    const words = (typed ? e.hint! : e.a11y || e.txt || e.hint || '').trim();
+    if (!words && (!e.rid || ANDROID_FRAME.test(e.rid))) return null;
+    return {
+      words,
+      ...bounds(e.b),
+      ...(typed ? { value: e.txt! } : e.val && e.val !== words ? { value: e.val } : e.txt && e.a11y && e.txt !== e.a11y ? { value: e.txt } : {}),
+      ...(e.hint && e.hint !== words ? { hint: e.hint } : {}),
+      ...(e.rid ? { id: e.rid } : {}),
+    };
+  };
+  const walk = (e: Element, inKeyboard: boolean) => {
+    if (e.rid && ANDROID_SYSTEM.test(e.rid)) return;
+    const kb = inKeyboard || Boolean(e.rid && ANDROID_KEYBOARD.test(e.rid));
+    const p = partOf(e);
+    if (kb) {
+      keyboard = true;
+      // The keyboard's top is where its first key or suggestion is: its frame covers the whole screen.
+      if (p?.words) {
+        keyboardTop = Math.min(keyboardTop, p.top);
+        keys.push(p);
+      }
+    } else if (p) all.push(p);
+    for (const c of e.c ?? []) walk(c, kb);
+  };
+  for (const e of elements) walk(e, false);
+  const parts = all.filter((p) => p.top < keyboardTop);
+  if (parts.length > 1 && parts[0]!.top === 0 && parts[0]!.bottom >= Math.max(...parts.map((p) => p.bottom))) parts.shift();
+  return { parts, keyboard: keyboard && keyboardTop !== Infinity, keys };
 }
 
 /** The screen as text, one part a line, the way the browser's accessibility tree reads. */
@@ -145,28 +206,50 @@ export function failureOf(text: string): StepFailure {
   return new StepFailure('other', t);
 }
 
-/** One Maestro in MCP mode, as a child squad-kit started, and how to stop it. Tests give a made-up one. */
-export type MaestroSpawn = (binary: string, args: string[], env: NodeJS.ProcessEnv) => { child: ChildProcess; stop(): void };
+/**
+ * One Maestro in MCP mode, as a child squad-kit started, and how to stop it: its stop ends once the child has ended.
+ * Tests give a made-up one.
+ */
+export type MaestroSpawn = (binary: string, args: string[], env: NodeJS.ProcessEnv) => { child: ChildProcess; stop(): void | Promise<void> };
 
 const realSpawn: MaestroSpawn = (binary, args, env) => {
   const child = spawn(binary, args, { env, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
   return { child, stop: () => stopChild(child) };
 };
 
-/** The child's whole group stops: Maestro's start script hands over to Java, which may start its own helpers. */
-function stopChild(child: ChildProcess): void {
+/** How long Maestro's Java gets to end by itself after it is asked to, before its group is killed. */
+const END_MS = 3000;
+
+/**
+ * The child's whole group stops: Maestro's start script hands over to Java, which may start its own helpers. Asked
+ * first, at once (so it also happens as squad-kit exits); a Java still there after END_MS is killed, with its group.
+ */
+export function stopChild(child: ChildProcess): Promise<void> {
   try {
     child.stdin?.end();
   } catch {
     // Already closed.
   }
-  if (!child.pid || child.exitCode !== null) return;
-  try {
-    if (process.platform === 'win32') child.kill();
-    else process.kill(-child.pid, 'SIGTERM');
-  } catch {
-    // Already gone.
-  }
+  if (!child.pid || child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+  const signal = (s: NodeJS.Signals) => {
+    try {
+      if (process.platform === 'win32') child.kill(s);
+      else process.kill(-child.pid!, s);
+    } catch {
+      // Already gone.
+    }
+  };
+  signal('SIGTERM');
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(hard);
+      clearTimeout(last);
+      resolve();
+    };
+    child.once('exit', done);
+    const hard = setTimeout(() => signal('SIGKILL'), END_MS);
+    const last = setTimeout(done, END_MS + 1000);
+  });
 }
 
 /** Maestro over MCP: a request and its answer, line by line on stdio. */
@@ -253,18 +336,23 @@ export async function openMaestro(o: PhoneDriverStart, spawnIt: MaestroSpawn = r
     // Its usage numbers stay off.
     MAESTRO_CLI_NO_ANALYTICS: '1',
     MAESTRO_CLI_NO_UPDATE_NOTIFICATION: '1',
+    // Its box about its own analysis service stays out of what it prints.
+    MAESTRO_CLI_ANALYSIS_NOTIFICATION_DISABLED: 'true',
     // Its home folder is squad-kit's: what it keeps (its helpers on the phone, logs) never goes to ~/.maestro.
     MAESTRO_OPTS: `${process.env.MAESTRO_OPTS ? `${process.env.MAESTRO_OPTS} ` : ''}-Duser.home=${home}`,
     ...(o.javaHome ? { JAVA_HOME: o.javaHome } : {}),
+    // What the phone needs to be reached: an Android phone's SDK and adb keys, in squad-kit's folder.
+    ...o.env,
   };
   const { child, stop } = spawnIt(o.binary, ['mcp', '--no-viewer', '--working-dir', o.dir], env);
   const mcp = new Mcp(child);
-  o.signal?.addEventListener('abort', stop, { once: true });
+  const onAbort = () => void stop();
+  o.signal?.addEventListener('abort', onAbort, { once: true });
   try {
     await mcp.ask('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: CLIENT }, START_MS);
     mcp.send('notifications/initialized');
   } catch (err) {
-    stop();
+    void stop();
     throw new PhoneError('Maestro did not start.', `${(err as Error).message}\n${mcp.said.slice(-2000)}`);
   }
 
@@ -293,7 +381,9 @@ export async function openMaestro(o: PhoneDriverStart, spawnIt: MaestroSpawn = r
     for (;;) {
       const seen = partsOf(await screen(Math.max(5000, until - Date.now())));
       const m = matching(seen.parts, named);
-      if (m.found.length) return { sel: selector(t, named, m), part: m.found[m.found.length > 1 && PRESSED.has(t.role ?? '') ? m.found.length - 1 : 0]! };
+      // Words the keyboard also shows (its suggestions on Android) would be counted by Maestro too: it goes first.
+      const echoed = seen.keyboard && !hid && matching(seen.keys, named).found.length > 0;
+      if (m.found.length && !echoed) return { sel: selector(t, named, m), part: m.found[m.found.length > 1 && PRESSED.has(t.role ?? '') ? m.found.length - 1 : 0]! };
       if (seen.keyboard && !hid) {
         hid = true;
         await run(appId, '- hideKeyboard', Math.max(5000, until - Date.now()));
@@ -362,8 +452,8 @@ export async function openMaestro(o: PhoneDriverStart, spawnIt: MaestroSpawn = r
       return mcp.alive;
     },
     async close() {
-      o.signal?.removeEventListener('abort', stop);
-      stop();
+      o.signal?.removeEventListener('abort', onAbort);
+      await stop();
     },
   };
   return driver;

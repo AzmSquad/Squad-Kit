@@ -6,12 +6,14 @@ import { squadHome } from '../../core/home.js';
 import type { PhoneModule, PhoneSize } from '../../modules/phone/types.js';
 import { ownDevice, phonesHome, savedDevices, type OwnDevice } from './devices.js';
 import { aboutWords, noteStep, stepSeconds } from './times.js';
+import { everyPhone } from './which.js';
 
 /**
- * One phone at a time, gently. squad-kit boots one of its own devices at a time, shared by every story through a queue
- * in this process and a lock file between squad-kit processes. Before booting it looks at the computer's free memory
- * and load, and when the computer is busy it waits and says so, never failing a story over it. A device shuts down
- * after 10 minutes unused, and when the board stops. Something else may keep a device up (an open Simulator window
+ * One phone at a time, gently. squad-kit boots one of its own devices at a time, iPhone or Android, shared by every
+ * story through a queue in this process and a lock file between squad-kit processes. Before booting it looks at the
+ * computer's free memory and load, and when the computer is busy it waits and says so, never failing a story over it.
+ * A device shuts down after 10 minutes unused, and when the board stops, with what it started beside it (Android's
+ * own adb server, only when squad-kit started it). Something else may keep a device up (an open Simulator window
  * boots it again after it shuts down): squad-kit then leaves it, and never fights it.
  */
 
@@ -185,6 +187,8 @@ export interface TurnOptions {
   signal?: AbortSignal;
   /** A person opens an app on the phone (Start, Try it yourself): it does not wait for a person's hold. */
   person?: boolean;
+  /** The phone starts with its window, for a person, when its window opens only at a start (Android). */
+  window?: boolean;
   /** Who waits, for the person's hold: "WA-3". */
   who?: string;
 }
@@ -225,7 +229,7 @@ export function holdPhone(phone: PhoneModule, h: { by: string; yieldAfterMs: num
     if (hold !== mine) return;
     hold = null;
     for (const d of savedDevices()) markUsed(squadHome(), d.id);
-    if (!inTurn) armIdle(phone);
+    if (!inTurn) armIdle();
   };
 }
 
@@ -277,6 +281,14 @@ const downListeners: ((id: string) => void)[] = [];
 export function onDown(fn: (id: string) => void): void {
   downListeners.push(fn);
 }
+
+/**
+ * A device started again from its clean state (Android's window opens that way): what was tied to it goes, as after a
+ * shutdown. The tapping tool starts again, and the app goes on again.
+ */
+export function restarted(id: string): void {
+  for (const fn of downListeners) fn(id);
+}
 /** The queue in this process: one turn at a time. */
 let queue: Promise<unknown> = Promise.resolve();
 let inTurn = 0;
@@ -293,14 +305,19 @@ export function phoneInUse(): boolean {
  * Shuts down one of squad-kit's own devices, by its id, then looks again a moment later: when something booted it
  * again (an open Simulator window), it is left alone from now on. True when it is down.
  */
-export async function shutDownGently(phone: PhoneModule, id: string, log?: (text: string) => void): Promise<boolean> {
+export async function shutDownGently(phone: PhoneModule, id: string, log?: (text: string) => void, look = true): Promise<boolean> {
   if (keptByOther.has(id)) return false;
   await phone.shutdown(id);
+  // squad-kit itself is ending: nothing is left to fight, and nobody waits for the look.
+  if (!look) {
+    for (const fn of downListeners) fn(id);
+    return true;
+  }
   await host.sleep(VIEWER_LOOK_MS);
   const now = (await phone.devices().catch(() => [])).find((d) => d.id === id);
   if (now && (now.state === 'booted' || now.state === 'booting')) {
     keptByOther.add(id);
-    log?.(`squad-kit shut down its phone ${id}, and something else started it again (an open Simulator window): squad-kit leaves it up`);
+    log?.(`squad-kit shut down its phone ${id}, and something else started it again (an open window): squad-kit leaves it up`);
     return false;
   }
   for (const fn of downListeners) fn(id);
@@ -362,21 +379,29 @@ async function turn<T>(phone: PhoneModule, size: PhoneSize, job: (turn: PhoneTur
     await lockTurn(home, word, o);
     const device = await ownDevice(phone, size, { ...(o.runtime ? { runtime: o.runtime } : {}), home });
     const states = new Map((await phone.devices()).map((d) => [d.id, d.state]));
-    // Only one of squad-kit's phones is up at a time: its other one shuts down first. Nobody else's is looked at.
-    for (const other of savedDevices(home)) {
-      if (other.id === device.id || states.get(other.id) !== 'booted') continue;
-      o.log?.(`squad-kit shuts down its ${phone.words[other.size]} ${other.id}, so only one of its phones runs`);
-      await shutDownGently(phone, other.id, o.log).catch((err: unknown) => o.log?.(`Shutting down ${other.id} did not work: ${(err as Error).message}`));
+    // Only one of squad-kit's phones is up at a time, iPhone or Android: its others shut down first. Nobody else's is
+    // looked at.
+    for (const p of phonesWith(phone)) {
+      const others = savedDevices(home, p).filter((d) => d.id !== device.id);
+      if (!others.length) continue;
+      const theirs = p === phone ? states : new Map((await p.devices().catch(() => [])).map((d) => [d.id, d.state]));
+      for (const other of others) {
+        if (theirs.get(other.id) !== 'booted') continue;
+        o.log?.(`squad-kit shuts down its ${p.words[other.size]} ${other.id}, so only one of its phones runs`);
+        await shutDownGently(p, other.id, o.log).catch((err: unknown) => o.log?.(`Shutting down ${other.id} did not work: ${(err as Error).message}`));
+      }
     }
     let fresh = false;
     if (states.get(device.id) !== 'booted') {
       await waitForRoom(word, o);
       if (o.signal?.aborted) throw new Error(STOPPED);
-      o.say?.(`Starting squad-kit's ${word}, ${aboutWords(stepSeconds('boot', home))}`);
+      o.say?.(`Starting squad-kit's ${word}, ${aboutWords(stepSeconds('boot', home, phone))}`);
       const t0 = Date.now();
-      await phone.boot(device.id, o.signal ? { signal: o.signal } : {});
-      noteStep('boot', (Date.now() - t0) / 1000, home);
-      o.log?.(`squad-kit booted its ${word} ${device.id} (${device.model}, iOS ${device.runtime}) in ${Math.round((Date.now() - t0) / 1000)} s`);
+      // A person's phone whose window opens only at a start starts with it at once, not hidden first.
+      if (o.window && phone.windowRestarts) await phone.openWindow(device.id);
+      else await phone.boot(device.id, o.signal ? { signal: o.signal } : {});
+      noteStep('boot', (Date.now() - t0) / 1000, home, phone);
+      o.log?.(`squad-kit booted its ${word} ${device.id} (${device.model}, ${phone.system} ${device.runtime}) in ${Math.round((Date.now() - t0) / 1000)} s`);
       fresh = true;
     }
     markUsed(home, device.id);
@@ -388,35 +413,50 @@ async function turn<T>(phone: PhoneModule, size: PhoneSize, job: (turn: PhoneTur
   } finally {
     unlock(home);
     inTurn -= 1;
-    if (!inTurn) armIdle(phone);
+    if (!inTurn) armIdle();
   }
 }
 
-/** The idle shutdown: when nothing used squad-kit's phone for IDLE_MS, it shuts down. */
-function armIdle(phone: PhoneModule): void {
+/** Every phone squad-kit runs, with this one among them (a test's own phone, too). */
+function phonesWith(phone?: PhoneModule): PhoneModule[] {
+  const all = everyPhone();
+  return phone && !all.includes(phone) ? [phone, ...all] : all;
+}
+
+/** The idle shutdown: when nothing used squad-kit's phone for IDLE_MS, it shuts down, iPhone or Android. */
+function armIdle(): void {
   if (idle) clearTimeout(idle);
-  idle = setTimeout(() => void idleNow(phone).catch(() => undefined), IDLE_MS);
+  idle = setTimeout(() => void idleNow().catch(() => undefined), IDLE_MS);
   idle.unref?.();
 }
 
+/** One phone or several, as a list: every phone squad-kit runs when none is named. */
+const listOf = (phones?: PhoneModule | PhoneModule[]): PhoneModule[] => (Array.isArray(phones) ? phones : phones ? [phones] : everyPhone());
+
 /** Shuts down squad-kit's phones nobody used for IDLE_MS, in a turn of their own. Returns the ids shut down. */
-export function idleNow(phone: PhoneModule, now = Date.now()): Promise<string[]> {
+export function idleNow(phones?: PhoneModule | PhoneModule[], now = Date.now()): Promise<string[]> {
   const run = queue.then(async () => {
     const home = squadHome();
     // A person's app open on the phone is no idle phone.
     if (hold || !tryLock(home)) return [];
     try {
       const used = readUsed(home);
-      const states = new Map((await phone.devices()).map((d) => [d.id, d.state]));
       const down: string[] = [];
-      for (const d of savedDevices(home)) {
-        if (states.get(d.id) !== 'booted') {
-          keptByOther.delete(d.id);
-          continue;
+      for (const phone of listOf(phones)) {
+        const mine = savedDevices(home, phone);
+        if (!mine.length || phone.notHere()) continue;
+        const states = new Map((await phone.devices()).map((d) => [d.id, d.state]));
+        for (const d of mine) {
+          if (states.get(d.id) !== 'booted') {
+            keptByOther.delete(d.id);
+            continue;
+          }
+          const last = Date.parse(used[d.id] ?? '');
+          if (Number.isFinite(last) && now - last < IDLE_MS) continue;
+          if (await shutDownGently(phone, d.id)) down.push(d.id);
         }
-        const last = Date.parse(used[d.id] ?? '');
-        if (Number.isFinite(last) && now - last < IDLE_MS) continue;
-        if (await shutDownGently(phone, d.id)) down.push(d.id);
+        // With none of its devices up, what the phone started beside them ends too (Android's own adb server).
+        await phone.release?.().catch(() => undefined);
       }
       return down;
     } finally {
@@ -428,25 +468,32 @@ export function idleNow(phone: PhoneModule, now = Date.now()): Promise<string[]>
 }
 
 /**
- * Shuts down squad-kit's own phones now: when the board stops, or a person asks (`squad phone stop`). One in use by a
- * story in this process, or held by another squad-kit, is left: `busy` says so. Nobody else's device is touched.
+ * Shuts down squad-kit's own phones now, iPhone and Android: when the board stops, or a person asks (`squad phone
+ * stop`). One in use by a story in this process, or held by another squad-kit, is left: `busy` says so. Nobody else's
+ * device is touched.
  */
-export async function stopPhones(phone: PhoneModule): Promise<{ stopped: string[]; left: string[]; busy: boolean }> {
+export async function stopPhones(phones?: PhoneModule | PhoneModule[], o: { quitting?: boolean } = {}): Promise<{ stopped: string[]; left: string[]; busy: boolean }> {
   const home = squadHome();
   // Nothing to look at on a computer where squad-kit never made a phone.
-  if (phone.notHere() || !savedDevices(home).length) return { stopped: [], left: [], busy: false };
-  if (inTurn || heldByOther(home)) return { stopped: [], left: [], busy: true };
+  const here = listOf(phones).filter((p) => !p.notHere() && savedDevices(home, p).length);
+  if (!here.length) return { stopped: [], left: [], busy: false };
+  // squad-kit ending stops its phones even mid-picture (its runs are stopping too), and a person's app with them.
+  if (heldByOther(home) || (inTurn && !o.quitting)) return { stopped: [], left: [], busy: true };
   if (idle) clearTimeout(idle);
   idle = null;
   if (!tryLock(home)) return { stopped: [], left: [], busy: true };
+  if (o.quitting) hold = null;
   try {
-    const states = new Map((await phone.devices()).map((d) => [d.id, d.state]));
     const stopped: string[] = [];
     const left: string[] = [];
-    for (const d of savedDevices(home)) {
-      if (states.get(d.id) !== 'booted') continue;
-      if (await shutDownGently(phone, d.id)) stopped.push(d.id);
-      else left.push(d.id);
+    for (const phone of here) {
+      const states = new Map((await phone.devices()).map((d) => [d.id, d.state]));
+      for (const d of savedDevices(home, phone)) {
+        if (states.get(d.id) !== 'booted' && states.get(d.id) !== 'booting') continue;
+        if (await shutDownGently(phone, d.id, undefined, !o.quitting).catch(() => false)) stopped.push(d.id);
+        else left.push(d.id);
+      }
+      await phone.release?.().catch(() => undefined);
     }
     return { stopped, left, busy: false };
   } finally {

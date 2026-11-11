@@ -7,9 +7,9 @@ import { Cmd, ago } from './ui';
 
 /**
  * Each story's own copy of the project's database. Everyone reads one plain sentence; under "For engineers": the
- * database squad-kit learned from the project's files (to confirm or correct), the template stories are made from (its
- * size and age, and Make it again), the hiding switch, the sample size, and the story databases there are now. No
- * password passes through here.
+ * database squad-kit learned from the project's files (to confirm or correct), the app's Redis and each story's own
+ * number on it (read only), the template stories are made from (its size and age, and Make it again), the hiding
+ * switch, the sample size, and the story databases there are now. No password passes through here.
  */
 
 const API = '/api/v1/database';
@@ -51,6 +51,24 @@ function Fix({ v, done }: { v: NonNullable<DatabaseInfo['database']>; done: () =
   );
 }
 
+/** The app's Redis, read only: each story's own database number on it, beside the database. */
+function RedisRow({ redis }: { redis: NonNullable<DatabaseInfo['redis']> }) {
+  return (
+    <div className="maprow">
+      <b>Redis</b>
+      <span>
+        <span className="mono" style={{ fontSize: 13 }}>{redis.server}</span>
+        <span className="note" style={{ display: 'block' }}>{redis.words}</span>
+        {redis.stories.length > 0 && (
+          <span className="note" style={{ display: 'block' }}>
+            {redis.stories.map((s) => `${s.story}: ${s.number}`).join(' · ')}
+          </span>
+        )}
+      </span>
+    </div>
+  );
+}
+
 /** What engineers see and change. */
 export function DatabasePanel() {
   const q = useDatabase();
@@ -67,11 +85,14 @@ export function DatabasePanel() {
   );
   if (!db) {
     return (
-      <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <span className="note">{v.words}</span>
-        {find}
-        <Cmd text="squad db" />
-      </span>
+      <div>
+        <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span className="note">{v.words}</span>
+          {find}
+          <Cmd text="squad db" />
+        </span>
+        {v.redis && <RedisRow redis={v.redis} />}
+      </div>
     );
   }
   const sampled = v.template?.tables.filter((t) => t.kept === 'sampled').length ?? 0;
@@ -87,6 +108,7 @@ export function DatabasePanel() {
           {db.from?.length ? <span className="note" style={{ display: 'block' }}>Learned from <span className="mono">{db.from.join(', ')}</span></span> : null}
         </span>
       </div>
+      {v.redis && <RedisRow redis={v.redis} />}
       <div className="maprow">
         <b>Setting</b>
         <span className="mono" style={{ fontSize: 13 }}>{settingText(db.setting)}</span>

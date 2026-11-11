@@ -1,3 +1,4 @@
+import { androidReads } from './android-env.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -279,7 +280,8 @@ export function sandboxAsk(o: SandboxFor): SandboxAsk {
     write: [...new Set([...withReal([o.proof]), ...own, ...temp, ...caches, ...(flutter ? flutterStampGlobs(flutter) : [])])],
     noRead: [...new Set([...PRIVATE.map((p) => path.join(home, p)), ...withReal([squadHome()]), ...o.secrets, ...env])],
     // The step's own folders, inside squad-kit's: its copy, its proof folder, its package cache, its attachments.
-    read: [...new Set(withReal([o.cwd, o.proof, ...(o.cache ? [o.cache] : []), ...o.read]))],
+    // And squad-kit's Android SDK, Java and shared Gradle home, read only, for an Android build in the shell.
+    read: [...new Set(withReal([o.cwd, o.proof, ...(o.cache ? [o.cache] : []), ...o.read, ...androidReads()]))],
     noWrite: [...new Set(withReal([...gitPlaces(o.cwd), ...copyDirsIn(o.cwd).flatMap(gitPlaces)]))],
     hosts: net.hosts,
     noHosts: net.noHosts,

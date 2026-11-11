@@ -10,6 +10,8 @@ import { unwireCopy, wireCopy, type CopyWiring, type SettingForm } from './db-en
 import { findDatabase, hasPassword, kindOf, readAddress, storyCopyIgnored, withoutPassword } from './find-database.js';
 import { forgetDbMade, git, markDbMade } from './git.js';
 import { reposOf } from './repos.js';
+import { composeServices, serverPlace, settingsFileAddress, type ServerPlace } from './service-hosts.js';
+import { dropStoryRedis, redisView, rewireStoryRedis, setUpStoryRedis, storyRedisNumbers, type RedisView } from './story-redis.js';
 
 /**
  * A database of its own for each story (1.3.5). squad-kit learns the project's database once, from its files; an
@@ -145,6 +147,25 @@ function noteForEngineers(bp: BoardPaths, text: string, story?: string): void {
     // No board to name.
   }
   writeLog({ level: 'warn', ...(project ? { project } : {}), ...(story ? { ticket: story } : {}), text: clean });
+}
+
+/* ── on this computer only ───────────────────────────────── */
+
+/**
+ * Where the database's server is, for a story's own copy: squad-kit makes, copies and drops a database only on a server
+ * on this computer (localhost in any form, host.docker.internal, or a compose service of the project that publishes its
+ * port here), and reaches a compose service through that port. A SQLite file is in each copy already.
+ */
+function placeOf(bp: BoardPaths, db: Pick<ProjectDatabase, 'kind' | 'repo'>, address: string): ServerPlace {
+  if (db.kind === 'sqlite') return { here: true, address };
+  return serverPlace(address, composeServices(path.join(bp.root, db.repo)), { kind: db.kind });
+}
+
+/** What a story, Harness or the template button says when the database is on another computer. */
+export function awayWords(place: Extract<ServerPlace, { here: false }>, who: 'story' | 'stories' | 'template' = 'story'): string {
+  const then = who === 'story' ? 'so this story uses no copy of its own' : who === 'stories' ? 'so stories use it as before' : 'so it makes no template of it';
+  if (place.service) return `This project's database runs in Docker as the ${place.host} service, which does not publish its port on this computer. squad-kit makes a story's own database only where it reaches it on this computer, ${then}. An engineer can publish the port in the compose file, or point the project at a local database in Settings.`;
+  return `This project's database is on another computer (${place.host}). squad-kit makes a story's own database only on this computer, ${then}. An engineer can point the project at a local database in Settings.`;
 }
 
 /* ── learning the database ───────────────────────────────── */
@@ -322,13 +343,16 @@ export function templateReady(bp: BoardPaths): { db: ProjectDatabase; source: st
   if (!db.confirmed) throw new Error('An engineer confirms the database first: squad db confirm');
   const source = personsAddress(bp, db);
   if (!source) throw new Error("squad-kit needs the database's address to make the template. Give it with: squad db confirm --address …");
+  // Nothing is made or read on another computer's server: the template is made only on this one.
+  const place = placeOf(bp, db, source);
+  if (!place.here) throw new Error(awayWords(place, 'template'));
   // No template for a copy the app would not use: it would only read the person's data for nothing.
   const ignored = storyCopyIgnored(path.join(bp.root, db.repo), db, source);
   if (ignored) throw new Error(ignored);
   const adapter = dbAdapter(db.kind);
   const missing = adapter.missingTools();
   if (missing.length) throw new Error(`Making a template of a ${KIND_NAME[db.kind]} database needs ${missing.join(' and ')} on this computer.`);
-  return { db, source, adapter };
+  return { db, source: place.address, adapter };
 }
 
 async function makeOnce(bp: BoardPaths, by: string): Promise<TemplateInfo> {
@@ -359,8 +383,8 @@ export function makeTemplateBeside(bp: BoardPaths, by: string): void {
 export type StoryDbResult =
   /** The copy points at the story's own database. `made` when it was made just now. */
   | { state: 'own'; name: string; made: boolean }
-  /** The story uses the database as before; engineers were told why. */
-  | { state: 'as-before'; why: string }
+  /** The story uses the database as before; engineers were told why. `say`: what the story itself says, for everyone. */
+  | { state: 'as-before'; why: string; say?: string }
   /** The project has no database squad-kit knows, or this copy's repo does not read it. */
   | { state: 'none' };
 
@@ -383,10 +407,24 @@ function copyFile(dir: string, setting: DatabaseSetting): CopyWiring['file'] | u
   return { path: setting.file, key, form };
 }
 
-/** Points the copy at an address: in every command's environment, and in its own settings file when git leaves that out. */
-function wire(dir: string, db: ProjectDatabase, address: string): void {
+/**
+ * Points the copy at an address: in every command's environment, and in its own settings file when git leaves that out.
+ * The environment has the address squad-kit reaches from this computer; the file keeps the form the person wrote, with a
+ * compose service's name, for an app that runs in Compose.
+ */
+function wire(dir: string, db: ProjectDatabase, address: string, written = address): void {
   const file = copyFile(dir, db.setting);
-  wireCopy(dir, { env: db.setting.env ? { [db.setting.env]: address } : {}, value: address, ...(file ? { file } : {}) });
+  wireCopy(dir, { env: db.setting.env ? { [db.setting.env]: address } : {}, value: written, ...(file ? { file } : {}) });
+}
+
+/** A story's address as the person wrote theirs: with the compose service's name, when squad-kit reaches it through a port here. */
+function asWritten(adapter: DbAdapter, source: string, here: string, address: string, story: string): string {
+  if (source === here) return address;
+  try {
+    return adapter.storyAddress(source, { id: story });
+  } catch {
+    return address;
+  }
 }
 
 const SQLITE_BESIDE = ['', '-wal', '-shm', '-journal'];
@@ -401,9 +439,9 @@ function keepOutOfCommits(dir: string, db: ProjectDatabase, address: string): vo
   if (file) markDbMade(dir, SQLITE_BESIDE.map((end) => `${path.resolve(dir, file)}${end}`));
 }
 
-function asBefore(bp: BoardPaths, story: string, why: string): StoryDbResult {
+function asBefore(bp: BoardPaths, story: string, why: string, say?: string): StoryDbResult {
   noteForEngineers(bp, why, story);
-  return { state: 'as-before', why: scrub(bp, why) };
+  return { state: 'as-before', why: scrub(bp, why), ...(say ? { say: scrub(bp, say) } : {}) };
 }
 
 /** True when a story's address is, or could be, the person's own database. Refused whatever the adapter says. */
@@ -431,17 +469,49 @@ function sqliteAt(address: string, from: string, to: string): string {
  * Gives a story's copy its own database, when its copy is set up and each time it is used again. Made from the template
  * on the same server, with the story's name in it; one made before for this story is used again. Without a template,
  * or when the database cannot be reached, the story goes on as before and engineers get one note. A SQLite file is
- * per copy already: it stays so, from the template's file when there is one.
+ * per copy already: it stays so, from the template's file when there is one. A database on another computer gets no
+ * copy, and the story says so. The copy also gets its own Redis database number (story-redis.ts).
  */
 export async function setUpStoryDb(bp: BoardPaths, story: string, dir: string, repo: string): Promise<StoryDbResult> {
+  try {
+    setUpStoryRedis(bp, story, dir, repo);
+  } catch (err) {
+    writeLog({ level: 'warn', ticket: story, text: scrub(bp, `The story's own Redis number was not set up: ${(err as Error).message}`) });
+  }
+  const r = await ownDatabase(bp, story, dir, repo);
+  if (r.state === 'own' || (r.state === 'as-before' && r.say)) return r;
+  return fellBack(bp, story, dir, repo) ?? r;
+}
+
+/**
+ * A copy with no database of its own that misses a settings file the person has (an untracked .env.dev or
+ * appsettings.Development.json no one gave stories): its app reads the project's own settings file instead. When that
+ * one's database is on another computer, the story says so plainly, rather than using it in silence.
+ */
+function fellBack(bp: BoardPaths, story: string, dir: string, repo: string): StoryDbResult | null {
+  const db = readMeta(bp).database;
+  if (!db || db.repo !== repo || db.kind === 'sqlite') return null;
+  const missing = [db.setting.file, ...(db.from ?? [])].find((f): f is string => Boolean(f) && fs.existsSync(path.join(bp.root, repo, f!)) && !fs.existsSync(path.join(dir, f!)));
+  const got = missing ? settingsFileAddress(dir, db.setting) : undefined;
+  if (!missing || !got) return null;
+  const place = placeOf(bp, db, got.value);
+  if (place.here) return null;
+  const say = `This story's copy has no ${missing}, so its app falls back to the database in ${got.file}, which is on another computer (${place.host}). An engineer can add ${missing} as a local file in Settings, with values for stories.`;
+  return asBefore(bp, story, say, say);
+}
+
+async function ownDatabase(bp: BoardPaths, story: string, dir: string, repo: string): Promise<StoryDbResult> {
   const db = readMeta(bp).database;
   if (!db || db.repo !== repo) return { state: 'none' };
   // A SQLite file is in each copy already: nothing to tell anyone until an engineer confirms it.
   if (!db.confirmed && db.kind === 'sqlite') return { state: 'none' };
   if (!db.confirmed) return asBefore(bp, story, `squad-kit found the project's database, and no engineer has confirmed it yet, so ${story} uses it as before. Confirm it on Harness, under Safety, or with: squad db confirm`);
   if (!db.setting.env && !(db.setting.file && db.setting.key)) return asBefore(bp, story, `squad-kit does not know which setting points the app at the database, so ${story} uses it as before. Name it with: squad db confirm --env DATABASE_URL`);
-  const source = personsAddress(bp, db);
-  if (!source) return asBefore(bp, story, `squad-kit does not know the database's address, so ${story} uses it as before. Give it with: squad db confirm --address …`);
+  const written = personsAddress(bp, db);
+  if (!written) return asBefore(bp, story, `squad-kit does not know the database's address, so ${story} uses it as before. Give it with: squad db confirm --address …`);
+  // How squad-kit reaches it from this computer: a compose service through the port it publishes here.
+  const place = placeOf(bp, db, written);
+  const source = place.here ? place.address : written;
   let adapter: DbAdapter;
   try {
     adapter = dbAdapter(db.kind);
@@ -458,10 +528,12 @@ export async function setUpStoryDb(bp: BoardPaths, story: string, dir: string, r
       unwireCopy(had.dir);
       changeState(bp, (s) => (s.stories = s.stories.map((x) => (x.story === story ? { ...x, dir } : x))));
     }
-    wire(dir, db, kept);
+    wire(dir, db, kept, asWritten(adapter, written, source, kept, story));
     keepOutOfCommits(dir, db, kept);
     return { state: 'own', name: had.name, made: false };
   }
+  // Nothing is made on another computer's server.
+  if (!place.here) return asBefore(bp, story, awayWords(place).replace('this story', story), awayWords(place));
   // A copy under another name the app would not use: the story would write to the person's database all the same.
   const ignored = storyCopyIgnored(dir, db, source);
   if (ignored) return asBefore(bp, story, `${story} uses the database as before. ${ignored}`);
@@ -485,7 +557,7 @@ export async function setUpStoryDb(bp: BoardPaths, story: string, dir: string, r
   if (personsOwn(adapter, made.address, source, dir, db.kind)) return asBefore(bp, story, `squad-kit refused to point ${story} at your own database, so the story uses it as before.`);
   changeSecrets(bp, (d) => (d.stories = { ...d.stories, [story]: made.address }));
   changeState(bp, (s) => (s.stories = [...s.stories.filter((x) => x.story !== story), { story, repo, dir, kind: db.kind, name: made.name, at: now() }]));
-  wire(dir, db, made.address);
+  wire(dir, db, made.address, asWritten(adapter, written, source, made.address, story));
   keepOutOfCommits(dir, db, made.address);
   return { state: 'own', name: made.name, made: !made.existed };
 }
@@ -498,6 +570,7 @@ export function rewireStoryDbs(bp: BoardPaths): void {
   } catch {
     return;
   }
+  for (const r of storyRedisNumbers(bp)) if (fs.existsSync(r.dir)) rewireStoryRedis(bp, r.story, r.dir, r.repo);
   if (!db) return;
   for (const r of readState(bp).stories) if (fs.existsSync(r.dir)) rewireStoryDb(bp, r.story, r.dir, r.repo);
 }
@@ -509,6 +582,7 @@ export function rewireStoryDbs(bp: BoardPaths): void {
 export function rewireStoryDb(bp: BoardPaths, story: string, dir: string, repo: string): boolean {
   let db: ProjectDatabase | undefined;
   try {
+    rewireStoryRedis(bp, story, dir, repo);
     db = readMeta(bp).database;
   } catch {
     return false;
@@ -516,13 +590,19 @@ export function rewireStoryDb(bp: BoardPaths, story: string, dir: string, repo: 
   const had = readState(bp).stories.find((s) => s.story === story && s.repo === repo);
   const kept = dbSecrets(bp).stories?.[story];
   if (!db || !had || !kept || path.resolve(had.dir) !== path.resolve(dir)) return false;
-  const source = personsAddress(bp, db);
+  const written = personsAddress(bp, db);
+  if (!written) return false;
+  let adapter: DbAdapter;
+  let source: string;
   try {
-    if (!source || personsOwn(dbAdapter(db.kind), kept, source, dir, db.kind)) return false;
+    adapter = dbAdapter(db.kind);
+    const place = placeOf(bp, db, written);
+    source = place.here ? place.address : written;
+    if (personsOwn(adapter, kept, source, dir, db.kind)) return false;
   } catch {
     return false;
   }
-  wire(dir, db, kept);
+  wire(dir, db, kept, asWritten(adapter, written, source, kept, story));
   keepOutOfCommits(dir, db, kept);
   return true;
 }
@@ -534,7 +614,7 @@ export function rewireStoryDb(bp: BoardPaths, story: string, dir: string, repo: 
  */
 export async function remakeStoryDb(bp: BoardPaths, story: string, dir: string, repo: string): Promise<boolean> {
   const had = readState(bp).stories.find((s) => s.story === story && s.repo === repo && path.resolve(s.dir) === path.resolve(dir));
-  if (!had || !(await dropStoryDb(bp, story))) return false;
+  if (!had || !(await dropDatabase(bp, story))) return false;
   return (await setUpStoryDb(bp, story, dir, repo)).state === 'own';
 }
 
@@ -572,8 +652,16 @@ export function storyDbs(bp: BoardPaths): StoryDbRecord[] {
 /**
  * Drops a story's own database, when it is merged, released or deleted. Only one squad-kit made for a story, and never
  * the person's own: the adapter refuses both. One the server cannot drop now stays on the list for the next tidy-up.
+ * Nothing is dropped on another computer. The story's own Redis number is cleared with it (story-redis.ts).
  */
 export async function dropStoryDb(bp: BoardPaths, story: string): Promise<boolean> {
+  // Its own Redis number goes with it: that number's keys only.
+  const redis = await dropStoryRedis(bp, story).catch(() => false);
+  return (await dropDatabase(bp, story)) || redis;
+}
+
+/** The story's own database alone. */
+async function dropDatabase(bp: BoardPaths, story: string): Promise<boolean> {
   const had = readState(bp).stories.find((s) => s.story === story);
   if (!had) return false;
   const address = dbSecrets(bp).stories?.[story];
@@ -594,6 +682,13 @@ export async function dropStoryDb(bp: BoardPaths, story: string): Promise<boolea
   }
   if (!source) {
     noteForEngineers(bp, `squad-kit could not drop ${had.name}, ${story}'s own database: it does not know your database's address any more, to make sure it is not yours. Drop it yourself when you no longer need it.`, story);
+    return false;
+  }
+  // Nothing is dropped on another computer's server.
+  const away = placeOf(bp, had, address);
+  if (!away.here) {
+    forget();
+    noteForEngineers(bp, `squad-kit left ${had.name} alone: it is on another computer (${away.host}), and squad-kit drops a story's database only on this one. Drop it yourself when you no longer need it.`, story);
     return false;
   }
   try {
@@ -627,7 +722,8 @@ function doneWith(bp: BoardPaths, story: string): boolean {
 /** The leftovers: the databases of stories that are merged, released, archived or deleted go. The ids whose went. */
 export async function tidyStoryDbs(bp: BoardPaths): Promise<string[]> {
   const out: string[] = [];
-  for (const r of readState(bp).stories) if (doneWith(bp, r.story) && (await dropStoryDb(bp, r.story))) out.push(r.story);
+  const ids = new Set([...readState(bp).stories.map((r) => r.story), ...storyRedisNumbers(bp).map((r) => r.story)]);
+  for (const id of ids) if (doneWith(bp, id) && (await dropStoryDb(bp, id))) out.push(id);
   return out;
 }
 
@@ -639,7 +735,7 @@ export function tidyStoryDbsBeside(bp: BoardPaths, at = Date.now(), soon = false
   const t = tidies.get(bp.squadDir) ?? { at: 0, busy: false };
   tidies.set(bp.squadDir, t);
   if (t.busy || (!soon && at < t.at)) return;
-  if (!readState(bp).stories.length) {
+  if (!readState(bp).stories.length && !storyRedisNumbers(bp).length) {
     t.at = at + TIDY_MS;
     return;
   }
@@ -666,6 +762,8 @@ export interface DatabaseView {
   failed?: { at: string; text: string };
   /** Why the app would not use a story's own copy, for engineers: stories then use the database as before. */
   blocked?: string;
+  /** The app's Redis, and each story's own number on it: read only. */
+  redis?: RedisView;
   stories: (StoryDbRecord & { title?: string })[];
   notes: DbNote[];
   /** Tools the database's kind needs that this computer does not have. */
@@ -686,23 +784,34 @@ export function databaseView(bp: BoardPaths): DatabaseView {
     missing = [];
   }
   const live = s.stories.map((r) => ({ ...r, ...(readTicket(bp, r.story)?.title ? { title: readTicket(bp, r.story)!.title } : {}) }));
-  const blocked = db ? storyCopyIgnored(path.join(bp.root, db.repo), db, address) : undefined;
+  const place = db && address ? placeOf(bp, db, address) : undefined;
+  const away = place && !place.here ? place : undefined;
+  const blocked = away ? awayWords(away, 'stories') : db ? storyCopyIgnored(path.join(bp.root, db.repo), db, address) : undefined;
   const ready = Boolean(db?.confirmed && info && !blocked);
+  let redis: RedisView | null = null;
+  try {
+    redis = redisView(bp, reposOf(readMeta(bp)).map((r) => r.path));
+  } catch {
+    redis = null;
+  }
   return {
     database: db ? { ...db, ...(address ? { address: withoutPassword(address) } : {}), secret: Boolean(dbSecrets(bp).address), kindName: KIND_NAME[db.kind] } : null,
     template: info ? { ...info, source: withoutPassword(info.source) } : null,
     ...(s.making ? { making: s.making } : {}),
     ...(s.failed ? { failed: s.failed } : {}),
     ...(blocked ? { blocked: scrub(bp, blocked) } : {}),
+    ...(redis ? { redis } : {}),
     stories: live,
     notes: [...s.notes].reverse().slice(0, 10),
     missing,
     words: ready
       ? 'Each story gets its own copy of the database, made from a small template. Your own database is never changed.'
-      : blocked
-        ? 'Stories use the database as before. The app chooses its database itself, so squad-kit cannot give each story a copy.'
-        : db
-          ? 'Stories use the database as before, until an engineer sets up a copy for each story.'
-        : 'squad-kit has not found a database in this project.',
+      : away
+        ? "Stories use the database as before. It is on another computer, and squad-kit makes each story's own copy only on this one."
+        : blocked
+          ? 'Stories use the database as before. The app chooses its database itself, so squad-kit cannot give each story a copy.'
+          : db
+            ? 'Stories use the database as before, until an engineer sets up a copy for each story.'
+            : 'squad-kit has not found a database in this project.',
   };
 }

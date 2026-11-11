@@ -1,18 +1,19 @@
 import type { Hono } from 'hono';
 import type { SquadPaths } from '../../core/paths.js';
 import { boardPaths } from '../../board/store.js';
-import { checkTools, getToolNow, projectTools, updateToolNow } from '../../engine/tools/index.js';
+import { acceptToolNow, checkTools, getToolNow, projectTools, toolLicense, updateToolNow } from '../../engine/tools/index.js';
 import type { ToolSource } from '../../engine/tools/get.js';
 import type { ToolId } from '../../engine/tools/catalog.js';
 import { act } from './act.js';
 
 /**
  * The Tools page, "What this project needs": the lines for this project on this computer, Check again, Get it for the
- * tools squad-kit gets itself, and Update for your own copy of a tool squad-kit can update safely. One call each, the
- * same as `squad tools`, `squad tools check`, `squad tools get <tool>`, `squad tools update <tool>`.
+ * tools squad-kit gets itself, Accept for a tool whose maker's license comes first (Android's), and Update for your own
+ * copy of a tool squad-kit can update safely. One call each, the same as `squad tools`, `squad tools check`, `squad
+ * tools get <tool>`, `squad tools accept <tool>`, `squad tools update <tool>`.
  */
 
-export function mountToolsApi(app: Hono, opts: { paths: SquadPaths; source?: (id: ToolId) => Promise<ToolSource> }): void {
+export function mountToolsApi(app: Hono, opts: { paths: SquadPaths; source?: (id: ToolId) => Promise<ToolSource>; fetch?: typeof fetch; free?: number | null }): void {
   const bp = boardPaths(opts.paths.squadDir);
 
   app.get('/api/v1/tools', (c) => act(c, () => projectTools(bp)));
@@ -28,7 +29,21 @@ export function mountToolsApi(app: Hono, opts: { paths: SquadPaths; source?: (id
   // Get it: the download runs beside everything else; the page follows it on the line until it is Ready.
   app.post('/api/v1/tools/:tool/get', (c) =>
     act(c, () => {
-      getToolNow(c.req.param('tool'), opts.source ? { source: opts.source } : {});
+      getToolNow(c.req.param('tool'), { ...(opts.source ? { source: opts.source } : {}), ...(opts.free !== undefined ? { free: opts.free } : {}) });
+      return projectTools(bp);
+    }),
+  );
+
+  // The license a tool's maker asks you to accept, in full, read from the maker's own site.
+  app.get('/api/v1/tools/:tool/license', (c) => act(c, () => toolLicense(c.req.param('tool'), opts.fetch ? { fetch: opts.fetch } : {})));
+
+  // Accept: you read the license and accept it, { "licenses": ["android-sdk-license", ...] }, the ones you were shown.
+  // squad-kit never accepts it for you; Get it waits for this.
+  app.post('/api/v1/tools/:tool/accept', (c) =>
+    act(c, async () => {
+      const b = (await c.req.json().catch(() => ({}))) as { licenses?: unknown };
+      const ids = Array.isArray(b?.licenses) ? b.licenses.map(String) : [];
+      await acceptToolNow(c.req.param('tool'), ids, opts.fetch ? { fetch: opts.fetch } : {});
       return projectTools(bp);
     }),
   );

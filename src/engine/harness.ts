@@ -131,6 +131,7 @@ function lineStages(): HarnessStage[] {
       g('guard', 'A second guard for your project', 'Your tests, app, setup and release run locked in too, with keys hidden and Docker closed.', 'A card: an engineer allows the file, or the plan changes.'),
       g('flutter-stamps', "Flutter's own version stamps", "Flutter writes its version in a few small files of its own folder on every run. Those files, and nothing else of Flutter, are open to the squad's commands."),
       g('xcode', 'iPhone builds', OUTSIDE_THE_GUARD_WORDS),
+      g('phone-builds', "squad-kit's own phone builds", "For the pictures, Start and Try it yourself, squad-kit builds the app for its phone itself, outside the guard: Xcode for the iPhone, Gradle or Flutter for Android, in one shared Gradle home of its own. What the build changes in the story's files goes back, so the story's changes stay the Builder's. An Expo app gets its phone folder made for the build, and no commit ever takes it.", 'An app that does not build: a card, and you decide.'),
       g('lane', 'Files no agent can change', "squad-kit's folder, AI instruction files, commit hooks, files an engineer locked. No commit or branch change, and a push is refused.", 'A file goes back, with a line. A moved branch stops the step.'),
       g('local-files', 'Test values, not your own', 'A file marked local gets values kept for stories. No agent can read it.'),
       y('new-tests', 'New tests', 'The Builder writes tests for every "done when". On a new story you can turn off Write new tests: your project\'s own checks, the review and the proof still run, and the story says "Built without new tests". An engineer can keep it on for every story.', undefined, { note: { auto: 'Always on: a story from the breakdown writes its tests.' } }),
@@ -142,6 +143,7 @@ function lineStages(): HarnessStage[] {
       g('weakened', 'Weakened tests', "Tests deleted, switched off or reduced, test settings changed, or a change to what a must-pass gate of your team runs.", 'It stops. Only you can go past it, with a reason on the record.'),
       g('no-tests', 'No tests, no green', 'No tests never means a green pass. Lint, build and the app starting must still pass.', 'Asked once per project: add tests, or go on without.'),
       g('test-change', 'Test commands stay strong', 'A new test command stays only if it passes and runs at least as many tests.', "If squad-kit can't tell, you choose."),
+      g('tool-missing', "A missing tool is not the Builder's", "A check that fails only because a tool is missing (the Android SDK, Java, Xcode, a program the command runs) says nothing about the code. squad-kit looks at this computer's tools again and runs the checks once more: no try counts, and the Builder is never asked.", "Still missing: the story waits for it with the Tools page's line and goes on by itself once it is there, or a card says what to install."),
       g('gate-cant-run', "A check that can't run", "One of your team's gates that can't run, or a file of additions that can't be read, says nothing about the code. It never counts against the story, and it is never dropped without a word.", "It retries by itself, then a card: try again, let an engineer look, or go on with a reason. On Builds by itself it waits for a person."),
     ]),
     stage('review', 'Review', "A Reviewer that never saw the build reads the Builder's work.", on(squad('Reviewer')), [
@@ -156,7 +158,7 @@ function lineStages(): HarnessStage[] {
       g('broken', 'Not working yet', 'Pictures that show it does not work never pass.', `Back to the Builder ${MAX_PROOF_ROUNDS - 1 === 1 ? 'once' : `${MAX_PROOF_ROUNDS - 1} times`}. Then a card.`),
       g('off-screen', 'Not on a screen', 'Takes two voices: the Tester and the check. If every "done when" ends that way, you decide.'),
       g('api-proof', 'Answers from your API', "Work with no screen can show a saved answer from this story's own API."),
-      g('phone-pictures', 'iPhone apps on a real iPhone', "On a Mac, an iPhone app's pictures come from squad-kit's own hidden iPhone and iPad, each named with its device. With its tools missing, pictures of the web version stand in, and the story says so.", "With no web version either, it waits for the tools and goes on once they are there. An app that does not build or a phone that does not start: a card, and you decide."),
+      g('phone-pictures', 'Phone apps on a real phone', "A phone app's pictures come from squad-kit's own hidden phone, each named with its device: its iPhone and iPad on a Mac, or its Android phone and tablet (Google's own emulator). An app for both uses the iPhone on a Mac when its tools are ready, else Android; Settings can choose. One phone runs at a time, and it shuts down after 10 minutes unused. With its tools missing, pictures of the web version stand in, and the story says so.", "With no web version either, it waits for the tools and goes on once they are there. An app that does not build or a phone that does not start: a card, and you decide."),
       g('window', 'Fixed tools only', "The Tester uses squad-kit's own tools, on this story's app only.", `Refused. ${REFUSALS_TO_STOP} refusals stop it.`),
     ]),
     stage('yours', 'Your check', 'You look at the proof, try the app, and ask anything.', on(you('You decide'), you('You decide'), skip('On its own')), [
@@ -199,6 +201,8 @@ function alwaysOnRows(): HarnessRow[] {
     a('save-trouble', 'A full disk holds the work', "If squad-kit can't save its files, the project waits and says so on every page.", 'It carries on once saving works.'),
     a('board-lock', 'Your board is locked', "It opens only on your own computer's address, with your link's key.", 'A request from any other website is refused.'),
     a('report', 'Reports leave your secrets out', NEVER),
+    { id: 'tool-license', name: "A tool maker's license is yours to accept", what: "squad-kit gets Google's Android phone tools only after you read Google's license, in full, and press Accept. It never accepts a license for you.", then: 'Get it waits until you do.', you: true },
+    a('phone-tools', "squad-kit's own phone tools", "Get it looks at the free room first (about 20 GB for Android) and says so. A download that gets no new bytes for 2 minutes is stopped and tried once more. An Android SDK of yours is used as it is when it has everything, and never changed.", 'Too little room, or a download that stops twice: a plain line on the Tools page, and nothing half installed. Press Get it again.'),
   ];
 }
 
@@ -322,6 +326,7 @@ function rowDetails(meta: BoardMeta | undefined, root: string | undefined): Reco
     'first-run': code('engine/onboard.ts', ['Runs', run('setup', 'test', 'start')], ['See it in', 'The Overview page']),
     overview: code('board/first-run.ts', ['See it in', 'The Overview page']),
     'gate-cant-run': code('engine/gate-run.ts', ['File', '.squad/harness.yaml']),
+    'tool-missing': code('engine/tool-missing.ts', ['Reads', 'No Android SDK found, JAVA_HOME is not set, xcrun: error, command not found'], ['Runs again', 'Once, with no try counted']),
     'project-rules': code('engine/repos.ts', ['Reads', (root ? rulesFiles(root).map((f) => f.slice(root.length + 1)) : []).join(', ') || 'None found yet']),
     'brd-questions': code('engine/breakdown-job.ts', ['Limit', `${MAX_QUESTIONS} questions`]),
     'brd-approve': code('board/requirements-actions.ts', ['See it in', 'The Requirements page']),
@@ -357,7 +362,10 @@ function rowDetails(meta: BoardMeta | undefined, root: string | undefined): Reco
     broken: code('engine/proof-verdict.ts', ['Limit', `${MAX_PROOF_ROUNDS} rounds`]),
     'off-screen': code('engine/proof-verdict.ts'),
     'api-proof': code('engine/window.ts', ['Limit', `${MAX_API_CALLS} calls in one proof`]),
-    'phone-pictures': code('engine/phone/session.ts', ['Devices', "squad-kit iPhone and squad-kit iPad, its own, one started at a time"], ['Taps with', 'Maestro']),
+    'phone-pictures': code('engine/phone/session.ts', ['Devices', 'squad-kit iPhone and squad-kit iPad, squad-kit Android phone and squad-kit Android tablet, its own, one started at a time'], ['Which phone', meta?.phone === 'iphone' ? 'The iPhone' : meta?.phone === 'android' ? 'Android' : 'Automatic'], ['Set in', 'Settings'], ['Taps with', 'Maestro']),
+    'phone-builds': code('engine/phone/build.ts', ['Builds in', "build/squad-kit-ios and build/squad-kit-android in the story's copy"], ['Android', 'flutter build apk --debug, or ./gradlew assembleDebug (React Native: assembleRelease); then gradlew --stop'], ['Puts back', "What the build changed in the story's files"]),
+    'tool-license': code('engine/tools/android.ts', ['Licenses', 'android-sdk-license, and android-sdk-arm-dbt-license for an Arm system image'], ['See it in', 'The Tools page']),
+    'phone-tools': code('engine/tools/android.ts', ['Room', 'About 20 GB'], ['No new bytes for', '2 min, then once more'], ['See it in', 'The Tools page']),
     window: code('engine/window.ts', ['Limit', `${REFUSALS_TO_STOP} refusals, ${MISTAKES_TO_STOP} calls in the wrong shape`]),
     'looks-right': code('board/actions.ts', ['See it in', 'The proof page']),
     'take-over': code('board/actions.ts'),

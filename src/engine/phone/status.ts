@@ -1,22 +1,29 @@
 import { squadHome } from '../../core/home.js';
-import { shotPhone } from '../../modules/registry.js';
 import type { PhoneSize, PhoneState } from '../../modules/phone/types.js';
 import { savedDevices } from './devices.js';
 import { stepTimes, type PhoneStep } from './times.js';
 import { IDLE_MS, keptUp, lastUsed, phoneInUse, stopPhones } from './turn.js';
-import { closeDrivers } from './session.js';
+import { closeDrivers, readyToTap } from './session.js';
+import { everyPhone, phoneFor } from './which.js';
+import { tapTools } from './plan.js';
+import { withPhone } from './turn.js';
+import type { PhoneSystem } from '../tools/which-phone.js';
+import { PhoneError } from '../../modules/phone/types.js';
 
 /**
- * squad-kit's own phones for people: which ones it made, whether each runs, and when it shuts down by itself; and Stop,
- * which shuts them down now. The same on the board (/api/v1/phone) and in the terminal (`squad phone`).
+ * squad-kit's own phones for people, iPhone and Android: which ones it made, whether each runs, and when it shuts down
+ * by itself; and Stop, which shuts them down now. The same on the board (/api/v1/phone) and in the terminal
+ * (`squad phone`).
  */
 
 export interface PhoneLine {
   size: PhoneSize;
-  /** squad-kit's name for it: "squad-kit iPhone". */
+  /** squad-kit's name for it: "squad-kit iPhone", "squad-kit Android phone". */
   name: string;
-  /** The real device: "iPhone 16 Pro". */
+  /** The real device: "iPhone 16 Pro", "Pixel 9". */
   model: string;
+  /** Its system's name: "iOS", "Android". */
+  system: string;
   runtime: string;
   id: string;
   state: PhoneState | 'gone';
@@ -30,50 +37,88 @@ export interface PhoneLine {
 }
 
 export interface PhoneView {
-  /** Why squad-kit's phone can't run on this computer: "An iPhone simulator needs a Mac." */
+  /** Why none of squad-kit's phones can run on this computer: "An iPhone simulator needs a Mac." */
   notHere?: string;
   devices: PhoneLine[];
-  /** How long each long step takes on this computer, in seconds: the first guess until squad-kit measured it here. */
+  /** How long each long step takes on this computer, in seconds, for the first phone: the first guess until measured. */
   times: Record<PhoneStep, number>;
+  /** The same for each phone that has devices here, by its word: { "iPhone": {...}, "Android phone": {...} }. */
+  timesBy: Record<string, Record<PhoneStep, number>>;
   /** Unused this many minutes, a phone shuts down by itself. */
   idleMinutes: number;
 }
 
 /** squad-kit's phones now. */
 export async function phoneView(): Promise<PhoneView> {
-  const phone = shotPhone();
+  const phones = everyPhone();
   const home = squadHome();
-  const base = { times: stepTimes(home), idleMinutes: Math.round(IDLE_MS / 60_000) };
-  const notHere = phone.notHere();
-  if (notHere) return { notHere, devices: [], ...base };
-  const saved = savedDevices(home);
-  const states = saved.length ? new Map((await phone.devices().catch(() => [])).map((d) => [d.id, d.state])) : new Map<string, PhoneState>();
+  const timesBy: Record<string, Record<PhoneStep, number>> = {};
+  const base = { times: stepTimes(home, phones[0]), idleMinutes: Math.round(IDLE_MS / 60_000) };
+  const here = phones.filter((p) => !p.notHere());
+  if (!here.length) return { notHere: phones[0]!.notHere()!, devices: [], timesBy, ...base };
   const used = lastUsed(home);
   const busy = phoneInUse();
-  return {
-    devices: saved.map((d) => {
+  const devices: PhoneLine[] = [];
+  for (const phone of here) {
+    const saved = savedDevices(home, phone);
+    if (!saved.length) continue;
+    timesBy[phone.words.phone] = stepTimes(home, phone);
+    const states = new Map((await phone.devices().catch(() => [])).map((d) => [d.id, d.state]));
+    for (const d of saved) {
       const state = states.get(d.id) ?? 'gone';
       const last = used[d.id];
       const off = state === 'booted' && last && !busy ? new Date(Date.parse(last) + IDLE_MS).toISOString() : undefined;
-      return { size: d.size, name: d.name, model: d.model, runtime: d.runtime, id: d.id, state, inUse: busy && state === 'booted', keptUp: keptUp(d.id), ...(last ? { lastUsed: last } : {}), ...(off ? { offAt: off } : {}) };
-    }),
-    ...base,
-  };
+      devices.push({ size: d.size, name: d.name, model: d.model, system: phone.system, runtime: d.runtime, id: d.id, state, inUse: busy && state === 'booted', keptUp: keptUp(d.id), ...(last ? { lastUsed: last } : {}), ...(off ? { offAt: off } : {}) });
+    }
+  }
+  return { devices, timesBy, ...base };
+}
+
+const list = (xs: string[]) => (xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
+
+/**
+ * Start: squad-kit's phone comes up now, hidden, with Maestro ready on it, so a story's first pictures wait for nothing.
+ * It shuts down by itself when unused, as always. The iPhone, or Android.
+ */
+export async function startPhoneNow(system: PhoneSystem = 'ios'): Promise<PhoneView & { message: string }> {
+  const phone = phoneFor(system);
+  const word = phone.words.phone;
+  const away = phone.notHere();
+  if (away) return { ...(await phoneView()), message: `${away} There is nothing to start here.` };
+  try {
+    await withPhone(phone, 'phone', async (turn) => {
+      const tools = tapTools();
+      if (tools) await readyToTap(phone, turn.device.id, tools);
+    });
+  } catch (err) {
+    throw new Error(err instanceof PhoneError ? err.message : `squad-kit's ${word} did not start.`);
+  }
+  return { ...(await phoneView()), message: `squad-kit's ${word} is up, hidden, ready for the pictures. It shuts down by itself when it has been unused for ${Math.round(IDLE_MS / 60_000)} minutes.` };
 }
 
 /** Stop: squad-kit's phones shut down now, with what happened in one plain sentence. */
 export async function stopPhoneNow(): Promise<PhoneView & { message: string }> {
-  const phone = shotPhone();
-  const word = phone.words.phone;
-  if (phone.notHere()) return { ...(await phoneView()), message: `${phone.notHere()} There is nothing to stop here.` };
-  const r = await stopPhones(phone);
-  if (!r.busy) closeDrivers();
+  const phones = everyPhone();
+  const here = phones.filter((p) => !p.notHere());
+  if (!here.length) return { ...(await phoneView()), message: `${phones[0]!.notHere()} There is nothing to stop here.` };
+  const r = await stopPhones(here);
+  if (!r.busy) await closeDrivers();
+  const words = (id: string) => {
+    for (const p of here) {
+      const d = savedDevices(squadHome(), p).find((x) => x.id === id);
+      if (d) return p.words[d.size];
+    }
+    return 'phone';
+  };
+  // The phone a story uses now: the one that has devices here, when only one has.
+  const made = here.filter((p) => savedDevices(squadHome(), p).length);
+  const busyWord = made.length === 1 ? made[0]!.words.phone : 'phone';
   const message = r.busy
-    ? `squad-kit's ${word} is taking pictures for a story now. It shuts down by itself when it has been unused for ${Math.round(IDLE_MS / 60_000)} minutes.`
+    ? `squad-kit's ${busyWord} is taking pictures for a story now. It shuts down by itself when it has been unused for ${Math.round(IDLE_MS / 60_000)} minutes.`
     : r.left.length
-      ? `Something else keeps squad-kit's ${word} open, like a Simulator window, so squad-kit left it. Close that window to shut it down.`
+      ? `Something else keeps squad-kit's ${list([...new Set(r.left.map(words))])} open, like an open window, so squad-kit left it. Close that window to shut it down.`
       : r.stopped.length
-        ? `squad-kit shut down its ${[...new Set(r.stopped.map((id) => phone.words[savedDevices().find((d) => d.id === id)?.size ?? 'phone']))].join(' and ')}.`
+        ? `squad-kit shut down its ${list([...new Set(r.stopped.map(words))])}.`
         : `squad-kit's phones are not running.`;
   return { ...(await phoneView()), message };
 }

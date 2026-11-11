@@ -83,7 +83,7 @@ describe('squad-kit phones, on the board and in the terminal', () => {
     out.length = 0;
     expect(await phoneWith(null, 'stop')).toBe(true);
     expect(out.join('')).toContain('shut down');
-    await expect(phoneWith(null, 'erase')).rejects.toThrow('squad phone erase: there is no such action. Use squad phone, or squad phone stop.');
+    await expect(phoneWith(null, 'erase')).rejects.toThrow('squad phone erase: there is no such action. Use squad phone, squad phone start android, or squad phone stop.');
   });
 
   it('on Windows and Linux it says plainly that an iPhone simulator needs a Mac, and touches nothing', async () => {

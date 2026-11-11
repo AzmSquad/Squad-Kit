@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Phone apps on Android.** For a Flutter, React Native or native Android app, the Tester's pictures come from
+  squad-kit's own Android phone and tablet (Google's own emulator, started hidden), tapped through by their visible
+  words, in English and Arabic, each labelled with its device ("Pixel 9"). Start and Try it yourself open the app on
+  the Android phone in its window. One phone at a time, shared with the iPhone; it shuts down after 10 minutes unused
+  and when the board stops.
+- **squad-kit gets the Android tools itself.** The Tools page shows Google's license in full; after you press Accept,
+  **Get it** downloads Google's command-line tools, the emulator, a phone system and the build tools into squad-kit's
+  own folder (about 20 GB on disk, checked first), with the time left. No Android Studio needed; an Android SDK you
+  already have is used as it is.
+- **Which phone:** a project setting picks the iPhone, Android, or automatic (the iPhone on a Mac when it is ready).
+- Terminal: `squad tools accept android`, `squad tools get android`, `squad config set phone`, `squad phone start`.
+
+### Changed
+
+- **A missing tool is not the Builder's.** A check that fails because a tool is missing ("No Android SDK found", no
+  Java…) no longer goes to the Builder as a code fix: squad-kit checks its tools and runs it again, and the story waits
+  for the tool with a plain line.
+- **Phone builds stay out of the checks.** A first read's `flutter build apk` or `ios` check becomes the web build (or
+  none): squad-kit's own phone build for the pictures already proves the app builds.
+- **A story's own database stays on this computer.** squad-kit makes a story's own copy of the database only on a
+  server on this computer, says so plainly when the project's database is on another one, and tells when a missing
+  local settings file would send the app to a remote database. Addresses that name a Docker Compose service work for
+  apps squad-kit starts on this computer.
+- **Each story gets its own Redis number,** so cache keys and locks never mix with your own app's; they are cleared
+  when the story's copy goes.
+- Deleting a story writes a line to squad-kit's log.
+
+### Fixed
+
+- **Stopping the board stops the phones,** Maestro and squad-kit's own adb, within 20 seconds.
+
 ## [1.3.11] — 2026-11-11
 
 ### Changed

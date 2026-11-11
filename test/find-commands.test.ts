@@ -137,7 +137,8 @@ describe("reading a project's own files", () => {
     // No test files yet: no test command, as `flutter test` would fail with none.
     expect(findCommands(flutter)).toEqual({ setup: 'flutter pub get', lint: 'flutter analyze --no-fatal-infos' });
     write(flutter, { 'test/widget_test.dart': 'void main() {}\n', 'web/index.html': '<html></html>\n' });
-    expect(findCommands(flutter)).toEqual({ setup: 'flutter pub get', test: 'flutter test', lint: 'flutter analyze --no-fatal-infos', start: 'flutter run -d web-server --web-port ${PORT:-8080}', url: 'http://localhost:8080' });
+    // With a web version, its build is the build check; a build for a phone never is (squad-kit's own phone build shows it).
+    expect(findCommands(flutter)).toEqual({ setup: 'flutter pub get', test: 'flutter test', lint: 'flutter analyze --no-fatal-infos', build: 'flutter build web', start: 'flutter run -d web-server --web-port ${PORT:-8080}', url: 'http://localhost:8080' });
     // The port its README names.
     write(flutter, { 'README.md': 'Open http://localhost:5050 to see it.\n' });
     expect(findCommands(flutter)).toMatchObject({ start: 'flutter run -d web-server --web-port ${PORT:-5050}', url: 'http://localhost:5050' });

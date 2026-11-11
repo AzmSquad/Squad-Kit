@@ -146,6 +146,15 @@ function nodeCommands(dir: string, scripts: Record<string, string>): ProjectComm
  */
 export const FLUTTER_COMMANDS = { setup: 'flutter pub get', lint: 'flutter analyze --no-fatal-infos', test: 'flutter test' } as const;
 
+/**
+ * A Flutter app's build check: its web version, when it has one. A build for a phone is never a check: squad-kit's own
+ * phone build for the pictures shows the app builds, outside the guard, with its own tools.
+ */
+export const FLUTTER_WEB_BUILD = 'flutter build web';
+
+/** A Flutter build for a phone: an APK, an app bundle, or the iPhone's. */
+const FLUTTER_PHONE_BUILD = /(?:^|[\s;&|(])flutter\s+build\s+(?:apk|appbundle|ios|ipa)\b/;
+
 /** Flutter has no usual port for its web version: this one, when the project's own files say none. */
 export const FLUTTER_WEB_PORT = 8080;
 
@@ -165,6 +174,7 @@ function dartCommands(dir: string): ProjectCommands | null {
     setup: FLUTTER_COMMANDS.setup,
     ...(tests ? { test: FLUTTER_COMMANDS.test } : {}),
     lint: FLUTTER_COMMANDS.lint,
+    ...(platforms.includes('web') ? { build: FLUTTER_WEB_BUILD } : {}),
     ...(port ? { start: flutterWebStart(port), url: at(port)! } : {}),
   };
 }
@@ -418,8 +428,8 @@ export function opensAWindow(command: string | undefined): boolean {
 /**
  * The commands a read of the project handed in, made safe to run: a start that opens a window (opensAWindow) becomes the
  * start squad-kit finds in the project's files, with its address, or goes when it finds none; Flutter's plain
- * `flutter analyze` becomes the found one, where Flutter's style hints never fail the check. Each change says why, for
- * the log.
+ * `flutter analyze` becomes the found one, where Flutter's style hints never fail the check; and a Flutter build for a
+ * phone (`flutter build apk`) becomes the found build, the web one, or goes. Each change says why, for the log.
  */
 export function fromTheRead(dir: string, given: ProjectCommands): { commands: ProjectCommands; changed: string[] } {
   const commands = { ...given };
@@ -438,6 +448,14 @@ export function fromTheRead(dir: string, given: ProjectCommands): { commands: Pr
   if (commands.lint?.trim() === 'flutter analyze' && found.lint && found.lint !== commands.lint) {
     changed.push(`The read's lint command (${commands.lint}) fails on Flutter's style hints, so squad-kit uses ${found.lint}.`);
     commands.lint = found.lint;
+  }
+  // A Flutter build for a phone as a check: squad-kit's own phone build already shows the app builds, so the check is
+  // the web build when the app has one, and none otherwise.
+  if (commands.build && FLUTTER_PHONE_BUILD.test(commands.build) && found.build !== commands.build) {
+    const was = commands.build;
+    if (found.build) commands.build = found.build;
+    else delete commands.build;
+    changed.push(`The read's build check (${was}) builds for a phone, which squad-kit's own phone build already shows, so squad-kit ${commands.build ? `checks ${commands.build} instead` : 'left it out'}.`);
   }
   return { commands, changed };
 }

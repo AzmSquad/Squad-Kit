@@ -13,7 +13,8 @@ import type { BrowserStep } from '../src/modules/browser/types.js';
  * Maestro command, said back in the same plain words as the browser's when it does not work.
  */
 
-const { openMaestro, screenWords, partsOf, exactly, failureOf } = await import('../src/modules/maestro/index.js');
+const { openMaestro, screenWords, partsOf, exactly, failureOf, stopChild } = await import('../src/modules/maestro/index.js');
+const { spawn } = await import('node:child_process');
 const { failureWords } = await import('../src/engine/shots.js');
 
 /** The screen as Maestro read it on the sample app (measured 2026-11-11): a title and a button both say "Sign up". */
@@ -74,7 +75,12 @@ function fakeMaestro(f: Fake) {
         stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: m.id, result })}\n`);
       }
     });
-    return { child, stop: () => (f.stopped = true) };
+    return {
+      child,
+      stop: () => {
+        f.stopped = true;
+      },
+    };
   };
 }
 
@@ -157,7 +163,7 @@ describe('Maestro, one per phone', () => {
   it('reads the screen as text, one part a line: no clock or battery, no keyboard keys, with what a field holds', async () => {
     const d = await open();
     expect(await d.screenText(2000)).toBe(['- "Sign up"', '- "Name" showing "Sara"', '- "Email"', '- "Sign up"', '- (the keyboard is open)'].join('\n'));
-    expect(partsOf('not json')).toEqual({ parts: [], keyboard: false });
+    expect(partsOf('not json')).toEqual({ parts: [], keyboard: false, keys: [] });
     expect(screenWords(JSON.stringify({ elements: [{ b: '[0,118][402,182]', a11y: 'أهلاً Sara' }] }))).toBe('- "أهلاً Sara"');
   });
 
@@ -193,4 +199,70 @@ describe('Maestro, only what is needed', () => {
     expect(hidden).toBe(true);
     expect(f.flows.map(body)).toEqual(['- hideKeyboard', '- tapOn:\n    text: "Save"']);
   });
+});
+
+describe('Maestro on Android', () => {
+  // The screen of the sample app on squad-kit's Android phone, as Maestro read it (the spike, 2026-11-11): pixels,
+  // Android's status bar and navigation, and Gboard open with its suggestions for the name just typed.
+  const fixture = (name: string) => fs.readFileSync(path.join(__dirname, 'fixtures', name), 'utf8');
+  const TYPED = fixture('maestro-android-typed.json');
+
+  it("reads Android's screen by its own rules: no status bar, no keyboard or its suggestions, a field's label with its text", () => {
+    expect(screenWords(TYPED)).toBe(['- "Sign up"', '- "Name" showing "Sara"', '- "Email"', '- "Sign up"', '- (the keyboard is open)'].join('\n'));
+    const seen = partsOf(TYPED);
+    // The keyboard's own words are kept apart: its suggestion strip repeats the name just typed.
+    expect(seen.keys.map((k) => k.words)).toContain('Sara');
+    expect(seen.parts.some((p) => /AM|battery|T-Mobile|notification|Back/.test(p.words))).toBe(false);
+    // Sizes are pixels: the button sits far below where an iPhone's points would put it.
+    expect(seen.parts.at(-1)).toMatchObject({ words: 'Sign up', top: 741, bottom: 867 });
+    expect(screenWords(fixture('maestro-android-welcome-ar.json'))).toContain('أهلاً Sara');
+    expect(partsOf(fixture('maestro-android-welcome-ar.json')).keyboard).toBe(false);
+  });
+
+  it('a step whose words the keyboard also shows puts the keyboard away first; another one taps at once', async () => {
+    const closed = JSON.stringify({ elements: [{ b: '[0,0][1080,2424]', cls: 'android.widget.FrameLayout', c: [{ b: '[63,352][1017,499]', cls: 'android.widget.EditText', hint: 'Name', txt: 'Sara' }, { b: '[63,741][1017,867]', cls: 'android.widget.Button', a11y: 'Sign up' }] }] });
+    f.screen = TYPED;
+    f.answer = (yaml) => {
+      if (yaml.includes('hideKeyboard')) f.screen = closed;
+      return { text: '{"success":true}' };
+    };
+    const d = await open();
+    await d.act('dev.test.app', step({ action: 'click', target: { label: 'Email' } }), 3000);
+    expect(f.flows.map(body)).toEqual(['- tapOn:\n    text: "Email"']);
+    f.flows = [];
+    await d.act('dev.test.app', step({ action: 'click', target: { text: 'Sara' } }), 3000);
+    expect(f.flows.map(body)).toEqual(['- hideKeyboard', '- tapOn:\n    text: "Sara"']);
+  });
+
+  it("fill on Android replaces a field's text, and Escape with no keyboard up does nothing (Back would leave the screen)", async () => {
+    f.screen = JSON.stringify({ elements: [{ b: '[0,0][1080,2424]', cls: 'android.widget.FrameLayout', c: [{ b: '[63,352][1017,499]', cls: 'android.widget.EditText', hint: 'Name', txt: 'Sara' }] }] });
+    const d = await open();
+    await d.act('dev.test.app', step({ action: 'fill', target: { label: 'Name' }, value: 'Huda' }), 3000);
+    await d.act('dev.test.app', step({ action: 'press', key: 'Escape' }), 3000);
+    expect(f.flows.map(body)).toEqual(['- tapOn:\n    text: "Name"\n- eraseText: 6\n- inputText: "Huda"']);
+  });
+
+  it("Maestro's advert box stays off, and the phone's own environment is passed on", async () => {
+    await openMaestro({ device: 'emulator-5560', binary, dir: path.join(tmp, 'phones', 'maestro'), env: { ANDROID_HOME: '/sk/sdk', HOME: '/sk/phones/android' } }, fakeMaestro(f));
+    expect(f.env.MAESTRO_CLI_ANALYSIS_NOTIFICATION_DISABLED).toBe('true');
+    expect(f.env.ANDROID_HOME).toBe('/sk/sdk');
+    expect(f.env.HOME).toBe('/sk/phones/android');
+  });
+});
+
+describe("Maestro's own stop", () => {
+  it('asks its whole group to end, kills one that stays, and ends only once it has ended', async () => {
+    // A Java that ignores the request to end, like one stuck in its own shutdown.
+    const child = spawn('/bin/sh', ['-c', 'trap "" TERM; while :; do sleep 0.2; done'], { detached: true, stdio: 'ignore' });
+    await new Promise((r) => setTimeout(r, 200));
+    const t0 = Date.now();
+    await stopChild(child);
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(2500);
+    expect(child.exitCode !== null || child.signalCode !== null).toBe(true);
+    expect(() => process.kill(child.pid!, 0)).toThrow();
+    // One that has ended already: nothing to wait for.
+    const t1 = Date.now();
+    await stopChild(child);
+    expect(Date.now() - t1).toBeLessThan(100);
+  }, 15_000);
 });

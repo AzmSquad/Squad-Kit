@@ -200,9 +200,10 @@ export async function startConsoleServer(opts: StartConsoleServerOptions): Promi
     process.off('SIGINT', stop);
     process.off('SIGTERM', stop);
     process.off('SIGHUP', onHangup);
-    stopSquad();
+    // squad-kit's own phones shut down before squad-kit ends (QUIT_MS at most): an emulator outlives a process that ended.
+    const phones = stopSquad();
     windowAt(null);
-    closeServer(nodeServer as unknown as HttpServer, onClose);
+    closeServer(nodeServer as unknown as HttpServer, (err) => void phones.then(() => onClose(err)));
   };
 
   const stop = () => {

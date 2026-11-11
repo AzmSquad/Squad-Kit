@@ -581,3 +581,147 @@ describe('plain words', () => {
     for (const w of [S.databaseView(bp).words, S.OWN_DB_WORDS]) expect(w).not.toMatch(/postgres|mongo|DATABASE_URL|server|address|setting|\.env/i);
   });
 });
+
+describe('only on this computer', () => {
+  const AWAY = 'postgresql://clinic:clinic-pass@203.0.113.7:5432/clinic_dev';
+  const SAY = "This project's database is on another computer (203.0.113.7). squad-kit makes a story's own database only on this computer, so this story uses no copy of its own. An engineer can point the project at a local database in Settings.";
+
+  it('makes no template and no story database on another computer, and the story says so in plain words', async () => {
+    write('.env', `DATABASE_URL=${AWAY}\n`);
+    S.learnDatabase(bp);
+    S.confirmDatabase(bp, 'Momen');
+    await expect(S.makeDbTemplate(bp, 'Momen')).rejects.toThrow("This project's database is on another computer (203.0.113.7). squad-kit makes a story's own database only on this computer, so it makes no template of it.");
+    expect(fake.templates).toEqual([]);
+    // Even with a template made earlier, from when the database was here.
+    fs.mkdirSync(S.templateFolder(bp), { recursive: true });
+    fs.writeFileSync(path.join(S.templateFolder(bp), 'template.json'), JSON.stringify({ kind: 'postgres', source: 'x', sourceName: 'clinic_dev', madeAt: new Date().toISOString(), bytes: 1, tables: [] }));
+    const wt = addWorktree(root, 'CL-1', 'main');
+    const r = await S.setUpStoryDb(bp, 'CL-1', wt.dir, '.');
+    expect(r).toEqual({ state: 'as-before', why: SAY.replace('this story', 'CL-1'), say: SAY });
+    expect(fake.made).toEqual([]);
+    expect(copyDbEnv(wt.dir)).toEqual({});
+    const v = S.databaseView(bp);
+    expect(v.words).toBe("Stories use the database as before. It is on another computer, and squad-kit makes each story's own copy only on this one.");
+    expect(v.blocked).toContain('so stories use it as before');
+    expect(JSON.stringify(v)).not.toContain('clinic-pass');
+  });
+
+  it('on the story itself, once, for whoever reads it', async () => {
+    write('.env', `DATABASE_URL=${AWAY}\n`);
+    S.learnDatabase(bp);
+    S.confirmDatabase(bp, 'Momen');
+    story();
+    const squad = new LiveSquad(bp) as unknown as { workspace(id: string): Promise<Ticket> };
+    await squad.workspace('CL-1');
+    await squad.workspace('CL-1');
+    expect(readTicket(bp, 'CL-1')!.activity.filter((a) => a.text === SAY)).toHaveLength(1);
+  });
+
+  it('every host form: an srv link, several Mongo hosts with one away, IPv6, a cloud host', async () => {
+    for (const [address, host] of [
+      ['mongodb+srv://clinic:pw@cluster0.example.net/clinic_dev', 'cluster0.example.net'],
+      ['mongodb://localhost:27017,198.51.100.4:27017/clinic_dev', '198.51.100.4'],
+      ['mongodb://[2001:db8::7]:27017/clinic_dev', '2001:db8::7'],
+      ['postgresql://clinic@clinic.abc.eu-west-1.rds.amazonaws.com:5432/clinic_dev', 'clinic.abc.eu-west-1.rds.amazonaws.com'],
+    ]) {
+      S.confirmDatabase(bp, 'Momen', { kind: address!.startsWith('mongo') ? 'mongo' : 'postgres', env: 'DATABASE_URL', address });
+      await expect(S.makeDbTemplate(bp, 'Momen')).rejects.toThrow(`on another computer (${host})`);
+    }
+    expect(fake.templates).toEqual([]);
+  });
+
+  it('a compose service that publishes its port here: reached through it, and the copy keeps the name for Compose', async () => {
+    write('docker-compose.yml', 'services:\n  db:\n    image: postgres:16\n    container_name: clinic-db\n    ports: ["5434:5432"]\n');
+    sh('git add -A && git -c user.name=t -c user.email=t@t commit -qm compose');
+    write('.env', 'DATABASE_URL=postgresql://clinic:clinic-pass@Clinic-DB:5432/clinic_dev\n');
+    await readyDatabase();
+    expect(S.databaseView(bp).template?.source).toBe('postgresql://clinic:***@localhost:5434/clinic_dev');
+    const wt = addWorktree(root, 'CL-1', 'main');
+    expect(await S.setUpStoryDb(bp, 'CL-1', wt.dir, '.')).toMatchObject({ state: 'own', name: 'clinic_dev_cl_1' });
+    expect(copyDbEnv(wt.dir)).toEqual({ DATABASE_URL: 'postgresql://clinic:clinic-pass@localhost:5434/clinic_dev_cl_1' });
+    expect(fs.readFileSync(path.join(wt.dir, '.env'), 'utf8')).toBe('DATABASE_URL=postgresql://clinic:clinic-pass@Clinic-DB:5432/clinic_dev_cl_1\n');
+  });
+
+  it('a compose service that publishes no port here gets no copy either', async () => {
+    write('docker-compose.yml', 'services:\n  db:\n    image: postgres:16\n    container_name: clinic-db\n    expose: ["5432"]\n');
+    write('.env', 'DATABASE_URL=postgresql://clinic:clinic-pass@clinic-db:5432/clinic_dev\n');
+    S.learnDatabase(bp);
+    S.confirmDatabase(bp, 'Momen');
+    await expect(S.makeDbTemplate(bp, 'Momen')).rejects.toThrow("This project's database runs in Docker as the clinic-db service, which does not publish its port on this computer.");
+  });
+
+  it('a settings file missing in the copy, so the app would fall back to another computer: said plainly', async () => {
+    write('.gitignore', '.env\n.squad/\nnode_modules\nappsettings.Development.json\n');
+    write('appsettings.json', JSON.stringify({ ConnectionStrings: { Clinic: 'Host=203.0.113.7;Port=5432;Database=clinic_dev;Username=clinic;Password=clinic-pass' } }));
+    sh('git add -A && git -c user.name=t -c user.email=t@t commit -qm settings');
+    write('appsettings.Development.json', JSON.stringify({ ConnectionStrings: { Clinic: 'Host=localhost;Port=5433;Database=clinic_dev;Username=clinic' } }));
+    S.learnDatabase(bp);
+    S.confirmDatabase(bp, 'Momen', { file: 'appsettings.Development.json', key: 'ConnectionStrings:Clinic', env: 'ConnectionStrings__Clinic', address: 'Host=localhost;Port=5433;Database=clinic_dev;Username=clinic' });
+    const wt = addWorktree(root, 'CL-1', 'main');
+    const r = await S.setUpStoryDb(bp, 'CL-1', wt.dir, '.');
+    const say = "This story's copy has no appsettings.Development.json, so its app falls back to the database in appsettings.json, which is on another computer (203.0.113.7). An engineer can add appsettings.Development.json as a local file in Settings, with values for stories.";
+    expect(r).toEqual({ state: 'as-before', why: say, say });
+    expect(JSON.stringify(S.databaseView(bp))).not.toContain('clinic-pass');
+  });
+
+  it('the same when the env file the daily stack reads is missing in the copy', async () => {
+    fs.rmSync(path.join(root, 'prisma'), { recursive: true });
+    fs.rmSync(path.join(root, '.env'));
+    write('.gitignore', '.env\n.env.dev\n.squad/\nnode_modules\n');
+    write('appsettings.json', JSON.stringify({ ConnectionStrings: { Clinic: 'Host=203.0.113.7;Port=5432;Database=clinic_dev;Username=clinic;Password=clinic-pass' } }));
+    sh('git add -A && git -c user.name=t -c user.email=t@t commit -qm dotnet');
+    write('.env.dev', 'ConnectionStrings__Clinic=Host=localhost;Port=5433;Database=clinic_dev;Username=clinic\n');
+    S.learnDatabase(bp);
+    expect(readMeta(bp).database).toMatchObject({ kind: 'postgres', setting: { file: 'appsettings.json', key: 'ConnectionStrings:Clinic' }, address: 'Host=localhost;Port=5433;Database=clinic_dev;Username=clinic', from: ['appsettings.json', '.env.dev'] });
+    S.confirmDatabase(bp, 'Momen');
+    const wt = addWorktree(root, 'CL-1', 'main');
+    const r = await S.setUpStoryDb(bp, 'CL-1', wt.dir, '.');
+    expect(r).toMatchObject({ state: 'as-before', say: "This story's copy has no .env.dev, so its app falls back to the database in appsettings.json, which is on another computer (203.0.113.7). An engineer can add .env.dev as a local file in Settings, with values for stories." });
+  });
+});
+
+describe("a story's own Redis, with its database", () => {
+  let tools: string;
+  beforeEach(() => {
+    // A stand-in redis-cli that only writes down what it was given: no real Redis.
+    tools = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-redis-cli-'));
+    fs.writeFileSync(path.join(tools, 'redis-cli'), `#!/bin/sh\necho "$@" >> "${tools}/calls.txt"\necho OK\n`, { mode: 0o755 });
+    vi.stubEnv('SQUAD_DB_TOOL_DIRS', tools);
+    write('docker-compose.yml', 'services:\n  api:\n    build: .\n    environment:\n      REDIS_URL: redis://cache:6379\n  cache:\n    image: redis:7\n    ports: ["6379:6379"]\n');
+    sh('git add -A && git -c user.name=t -c user.email=t@t commit -qm cache');
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    fs.rmSync(tools, { recursive: true, force: true });
+  });
+
+  it('comes with the copy, shows on Harness, and its keys are cleared when the story is deleted', async () => {
+    await readyDatabase();
+    story();
+    const wt = addWorktree(root, 'CL-1', 'main');
+    updateTicket(bp, 'CL-1', (x) => {
+      x.worktree = wt.dir;
+      x.branch = wt.branch;
+      x.baseCommit = wt.baseCommit;
+    });
+    await S.setUpStoryDb(bp, 'CL-1', wt.dir, '.');
+    const n = S.databaseView(bp).redis!.stories[0]!.number;
+    expect(n).toBeGreaterThanOrEqual(1);
+    expect(copyDbEnv(wt.dir)).toEqual({ DATABASE_URL: STORY, REDIS_URL: `redis://localhost:6379/${n}` });
+    expect(S.databaseView(bp).redis).toMatchObject({ server: 'localhost:6379', here: true, own: 0 });
+    await deleteTicket(bp, 'CL-1', { waitMs: 2000 });
+    expect(fs.readFileSync(path.join(tools, 'calls.txt'), 'utf8')).toBe(`-h localhost -p 6379 -n ${n} FLUSHDB\n`);
+    expect(S.databaseView(bp).redis!.stories).toEqual([]);
+  });
+
+  it('a story with a Redis number and no database of its own still has it cleared at merge', async () => {
+    S.learnDatabase(bp);
+    story();
+    const wt = addWorktree(root, 'CL-1', 'main');
+    await S.setUpStoryDb(bp, 'CL-1', wt.dir, '.');
+    expect(Object.keys(copyDbEnv(wt.dir))).toEqual(['REDIS_URL']);
+    updateTicket(bp, 'CL-1', (x) => (x.mergedAt = new Date().toISOString()));
+    expect(await S.tidyStoryDbs(bp)).toEqual(['CL-1']);
+    expect(fs.readFileSync(path.join(tools, 'calls.txt'), 'utf8')).toMatch(/^-h localhost -p 6379 -n ([1-9]|1[0-5]) FLUSHDB\n$/);
+  });
+});

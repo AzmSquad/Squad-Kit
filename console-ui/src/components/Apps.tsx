@@ -40,7 +40,7 @@ function both(items: { id: string; title: string }[]): string {
 function statusLine(a: ProjectApp): string {
   switch (a.state) {
     case 'running':
-      return a.phone?.run?.state === 'running' ? `On ${a.phone.run.device ?? 'the iPhone'}` : runningFor(a.since);
+      return a.phone?.run?.state === 'running' ? `On ${a.phone.run.device ?? `the ${a.phone.word}`}` : runningFor(a.since);
     case 'starting':
       return 'Starting…';
     case 'stopped':
@@ -53,7 +53,7 @@ function statusLine(a: ProjectApp): string {
 }
 
 function stepLine(a: ProjectApp): string {
-  if (a.step === 'phone') return a.phone?.run?.line ?? "Getting the app onto squad-kit's iPhone";
+  if (a.step === 'phone') return a.phone?.run?.line ?? `Getting the app onto squad-kit's ${a.phone?.word ?? 'phone'}`;
   if (a.step === 'copy') return 'Making a copy of the code. On a big project this takes a while.';
   if (a.step === 'setup') return 'Setting it up first';
   if (a.step === 'start') return 'Starting it';
@@ -73,7 +73,7 @@ function AppItem({ a, together, named, live, reading, readError }: { a: ProjectA
   const ref = named ? ` ${shellArg(a.name)}` : '';
   const call = (verb: string, done: string, body?: object) => act.mutate({ path: `/api/v1/apps/${encodeURIComponent(a.name)}/${verb}`, body, done });
   const start = (body?: object) => call('start', `Starting ${a.name}`, body);
-  // An iPhone app on a Mac opens on squad-kit's iPhone, in the language picked next to Start.
+  // A phone app opens on squad-kit's iPhone or Android phone, in the language picked next to Start.
   const phone = a.phone;
   const [lang, setLang] = useState(phone?.languages[0] ?? 'en');
   const canStart = Boolean(a.start || phone?.ready);
@@ -144,7 +144,7 @@ function AppItem({ a, together, named, live, reading, readError }: { a: ProjectA
       {/* The sidebar is narrow: the language sits under Start, not beside it. */}
       {phone?.ready && a.state !== 'running' && a.state !== 'starting' && (
         <p className="app-more phone-pick">
-          Opens on squad-kit&apos;s iPhone{phone.languages.length > 1 ? ', in' : '.'}
+          Opens on squad-kit&apos;s {phone.word}{phone.languages.length > 1 ? ', in' : '.'}
           <LanguagePick languages={phone.languages} value={lang} onChange={setLang} />
         </p>
       )}

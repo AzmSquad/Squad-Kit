@@ -247,6 +247,16 @@ export async function treeOf(dir: string): Promise<string | undefined> {
   }
 }
 
+/**
+ * Puts every file git sees back as it was in `before` (a treeOf of the same copy), from anywhere in the copy: what a
+ * build of squad-kit's own changed or added in the story's files goes back, and its own ignored build folders stay.
+ * Returns the paths put back, from the repo's top.
+ */
+export async function putCopyBack(dir: string, before: string): Promise<string[]> {
+  const top = git(dir, ['rev-parse', '--show-toplevel'], { allowFail: true });
+  return top ? putTreeBack(top, before, []) : [];
+}
+
 async function putTreeBack(dir: string, before: string, skip: string[]): Promise<string[]> {
   const after = await treeOf(dir);
   if (!after || after === before) return [];

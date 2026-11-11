@@ -5,14 +5,15 @@ import { buildPaths, requireSquadRoot } from '../core/paths.js';
 import { openBoard } from '../board/move.js';
 import type { BoardPaths } from '../board/store.js';
 import { ACTION_WORDS } from '../engine/tools/catalog.js';
-import { checkTools, getToolNow, projectTools, updateToolNow, type ToolLine, type ToolsView } from '../engine/tools/index.js';
+import { acceptToolNow, checkTools, getToolNow, projectTools, toolLicense, updateToolNow, type LicenseView, type ToolLine, type ToolsView } from '../engine/tools/index.js';
 import { gettingNow, lastTrouble, type Getting } from '../engine/tools/get.js';
 import { boardApi, type BoardApi } from './app.js';
 
 /**
  * `squad tools`: the Tools page in the terminal. What this project needs on this computer, `check` to look again after
- * installing something, `get <tool>` for the tools squad-kit gets itself, and `update <tool>` for your own copy of a
- * tool squad-kit can update safely, after the same warning and a yes. With the board open each command is the board's
+ * installing something, `get <tool>` for the tools squad-kit gets itself, `accept <tool>` to read a tool maker's license
+ * and accept it (Android's comes before its Get it), and `update <tool>` for your own copy of a tool squad-kit can
+ * update safely, after the same warning and a yes. With the board open each command is the board's
  * own REST call, so both show the same; without it, the work runs here.
  */
 
@@ -68,7 +69,8 @@ export function printTools(v: ToolsView): void {
       if ((l.state === 'ready' && !l.recommended) || l.state === 'not-here' || l.state === 'updating') continue;
       if (l.trouble) out(kleur.red(`      ${l.trouble}`));
       if (l.installer === 'squad-kit') {
-        if (l.state !== 'getting') out(`      squad-kit gets it: ${cmd(l.command)}`);
+        if (l.license && !l.license.accepted && l.state !== 'getting') out(`      First read Google's license and accept it: ${cmd(l.license.command)}`);
+        if (l.state !== 'getting') out(`      squad-kit gets it${l.size ? ` (${l.size} on this computer${l.seconds ? `, ${left(l.seconds).replace(' left', '')} the first time` : ''})` : ''}: ${cmd(l.command)}`);
         continue;
       }
       if (l.update) {
@@ -159,6 +161,31 @@ export async function toolsWith(bp: BoardPaths, api: BoardApi | null, action: st
     }, id);
     return ok;
   }
+  if (what === 'accept') {
+    if (!tool) throw new Error(`Say which tool, for example: squad tools accept android`);
+    const id = tool.trim().toLowerCase();
+    const v = api ? await api.call<LicenseView>('GET', `/tools/${encodeURIComponent(id)}/license`) : await toolLicense(id);
+    // The license in full, as its maker gives it, then the person's own yes: squad-kit never says it for them.
+    for (const l of v.licenses) {
+      out(kleur.bold(`License ${l.id}:`));
+      out(l.text);
+      out();
+    }
+    let ok = Boolean(opts.yes);
+    if (!ok) {
+      if (!opts.ask && !ui.isInteractive()) throw new Error(`squad-kit gets the ${v.name} only after you accept this license. To accept it here: squad tools accept ${id} --yes`);
+      ok = await (opts.ask ?? askHere)(`Do you accept ${v.licenses.length === 1 ? 'this license' : `these ${v.licenses.length} licenses`}?`);
+    }
+    if (!ok) {
+      ui.info(`Not accepted. squad-kit can't get the ${v.name} until you do.`);
+      return true;
+    }
+    const ids = v.licenses.map((l) => l.id);
+    if (api) await api.call<ToolsView>('POST', `/tools/${encodeURIComponent(id)}/accept`, { licenses: ids });
+    else await acceptToolNow(id, ids);
+    ui.success(`You accepted Google's license. Now: ${cmd(`squad tools get ${id}`)}`);
+    return true;
+  }
   if (what === 'update') {
     if (!tool) throw new Error(`Say which tool, for example: squad tools update flutter`);
     const id = tool.trim().toLowerCase();
@@ -188,10 +215,10 @@ export async function toolsWith(bp: BoardPaths, api: BoardApi | null, action: st
       return { ...v, getting: gettingNow(), lines: v.lines.map((x) => ({ ...x, ...(lastTrouble(x.id) ? { trouble: lastTrouble(x.id) } : {}) })) };
     }, id, `squad tools update ${id}`);
   }
-  throw new Error(`squad tools ${what}: there is no such action. Use squad tools, squad tools check, squad tools get <tool>, or squad tools update <tool>.`);
+  throw new Error(`squad tools ${what}: there is no such action. Use squad tools, squad tools check, squad tools get <tool>, squad tools accept <tool>, or squad tools update <tool>.`);
 }
 
-/** `squad tools [check | get <tool> | update <tool> [--yes]]` */
+/** `squad tools [check | get <tool> | accept <tool> [--yes] | update <tool> [--yes]]` */
 export async function runTools(action: string | undefined, tool: string | undefined, opts: { yes?: boolean } = {}): Promise<void> {
   const { bp } = openBoard(buildPaths(requireSquadRoot()).squadDir);
   const ok = await toolsWith(bp, boardApi(bp), action, tool, { yes: Boolean(opts.yes) });

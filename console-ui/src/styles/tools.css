@@ -84,3 +84,8 @@
   .tl-chip, .tl-line { transition: none; }
   .tl-chip:hover { transform: none; }
 }
+
+/* Google's license, in full, before Accept. */
+.tl-license { margin: 14px 0 0; }
+.tl-license h4 { margin: 0 0 6px; font-size: 13px; color: var(--muted); }
+.tl-license pre { white-space: pre-wrap; max-height: 46vh; overflow: auto; margin: 0; padding: 12px 14px; border-radius: 8px; background: rgba(127, 127, 127, 0.08); font-family: inherit; font-size: 12.5px; line-height: 1.55; }

@@ -1,16 +1,18 @@
 import fs from 'node:fs';
-import { shotPhone } from '../../modules/registry.js';
 import { PhoneError, type PhoneModule } from '../../modules/phone/types.js';
 import { treeOf } from '../lane.js';
 import { BuildFailed, buildForPhone, lastBuild, type PhoneKind } from './build.js';
 import { ownDevice, type OwnDevice } from './devices.js';
 import { aboutWords, stepSeconds } from './times.js';
-import { endHold, holdPhone, shutDownGently, withPhone } from './turn.js';
+import { endHold, holdPhone, restarted, shutDownGently, withPhone } from './turn.js';
+import { phoneFor } from './which.js';
+import type { PhoneSystem } from '../tools/which-phone.js';
 
 /**
- * An app opened on squad-kit's own iPhone for a person, from Start in Your apps or Try it yourself: built for the
- * iPhone, put on the phone, started in the language asked for, then shown in the Simulator window. That window is the
- * one squad-kit ever opens, and only here. Each step says what it does and about how long is left, from this
+ * An app opened on squad-kit's own phone for a person, from Start in Your apps or Try it yourself: built for the
+ * phone, put on it, started in the language asked for, and shown in the phone's window: the Simulator window, or the
+ * Android emulator's, which opens first (a hidden emulator can only show one by starting again, from its clean state,
+ * in about 5 seconds), with the app put on after. That window is the one squad-kit ever opens, and only here. Each step says what it does and about how long is left, from this
  * computer's own times. While it is open the person holds the phone, so stories' pictures wait; one left open gives the
  * phone back to a waiting story after a while. When the person closes the window, squad-kit sees it and stops too.
  */
@@ -38,6 +40,8 @@ export interface PhoneOpenSetup {
   /** The app's folder: squad-kit's copy of main, or the story's own copy. */
   dir: string;
   kind: PhoneKind;
+  /** The phone it opens on: the iPhone (the default) or Android. */
+  system?: PhoneSystem;
   /** Where the person opened it, in their words: "Your apps", "Try it yourself". */
   by: string;
   /** The button that opens it again: "Start", "Try it yourself". */
@@ -69,10 +73,13 @@ export class PhoneOpen {
   private timer: NodeJS.Timeout | null = null;
   readonly settled: Promise<void>;
 
+  private phone: PhoneModule;
+
   constructor(
     private s: PhoneOpenSetup,
-    private phone: PhoneModule = shotPhone(),
+    phone?: PhoneModule,
   ) {
+    this.phone = phone ?? phoneFor(s.system ?? 'ios');
     if (s.language) this.v.language = s.language;
     this.settled = this.go();
   }
@@ -90,7 +97,8 @@ export class PhoneOpen {
 
   private stepWords(step: OpenStep): string {
     const word = this.phone.words.phone;
-    return { build: `Building the app for the ${word}`, phone: `Starting squad-kit's ${word}`, install: `Putting the app on the ${word}`, open: `Opening the app in the ${word} window` }[step];
+    const open = this.phone.windowRestarts ? `Opening the ${word} in its window` : `Opening the app in the ${word} window`;
+    return { build: `Building the app for the ${word}`, phone: `Starting squad-kit's ${word}`, install: `Putting the app on the ${word}`, open }[step];
   }
 
   private at(step: OpenStep): void {
@@ -104,18 +112,23 @@ export class PhoneOpen {
     try {
       // Another app the person opened on the phone (Your apps, Try it yourself) closes first: one at a time.
       await endHold('replaced');
-      const built = lastBuild(this.s.dir);
+      const system = this.s.system ?? 'ios';
+      const built = lastBuild(this.s.dir, system);
       const fresh = Boolean(built && fs.existsSync(built.app) && built.tree && built.tree === (await treeOf(this.s.dir)));
       const own = await ownDevice(this.phone, 'phone');
       this.device = own;
+      // Android's window comes first, as the emulator starts again for it; the iPhone's last, over the app.
+      const first = Boolean(this.phone.windowRestarts);
+      const open = { step: 'open' as const, seconds: OPEN_SECONDS };
       this.plan = [
-        ...(fresh ? [] : [{ step: 'build' as const, seconds: stepSeconds('build') }]),
-        ...(own.state === 'booted' ? [] : [{ step: 'phone' as const, seconds: stepSeconds('boot') }]),
-        { step: 'install', seconds: stepSeconds('install') },
-        { step: 'open', seconds: OPEN_SECONDS },
+        ...(fresh ? [] : [{ step: 'build' as const, seconds: stepSeconds('build', undefined, this.phone) }]),
+        ...(own.state === 'booted' ? [] : [{ step: 'phone' as const, seconds: stepSeconds('boot', undefined, this.phone) }]),
+        ...(first && own.state === 'booted' ? [open] : []),
+        { step: 'install', seconds: stepSeconds('install', undefined, this.phone) },
+        ...(first ? [] : [open]),
       ];
-      this.at(fresh ? 'install' : 'build');
-      const { app } = await buildForPhone(this.s.dir, this.s.kind, { signal, ...(this.s.log ? { log: this.s.log } : {}) });
+      this.at(fresh ? (first && own.state === 'booted' ? 'open' : 'install') : 'build');
+      const { app } = await buildForPhone(this.s.dir, this.s.kind, { system, phone: this.phone, signal, ...(this.s.log ? { log: this.s.log } : {}) });
       const info = await this.phone.appInfo(app);
       this.appId = info.appId;
       if (this.plan.some((p) => p.step === 'phone')) this.at('phone');
@@ -124,17 +137,28 @@ export class PhoneOpen {
         'phone',
         async (turn) => {
           this.device = turn.device;
+          if (first) {
+            // The one window squad-kit opens: the person asked to see the app. A phone started for it has it already.
+            if (!turn.fresh) {
+              this.at('open');
+              await this.phone.openWindow(turn.device.id);
+            }
+            // Started again from its clean state: nothing of before is on it, nor its tapping tool.
+            restarted(turn.device.id);
+          }
           this.at('install');
           await this.phone.install(turn.device.id, app, { signal });
           await this.phone.terminate(turn.device.id, info.appId);
           await this.phone.launch(turn.device.id, info.appId, this.s.language ? { language: this.s.language } : {});
-          this.at('open');
-          // The one window squad-kit opens: the person asked to see the app.
-          await this.phone.openWindow(turn.device.id);
+          if (!first) {
+            this.at('open');
+            // The one window squad-kit opens: the person asked to see the app.
+            await this.phone.openWindow(turn.device.id);
+          }
           // Held from here, inside the turn, so no story's pictures slip in before.
           this.release = holdPhone(this.phone, { by: this.s.by, yieldAfterMs: this.s.yieldAfterMs, end: (why) => void this.endBy(why) });
         },
-        { person: true, signal, ...(this.s.log ? { log: this.s.log } : {}) },
+        { person: true, window: true, signal, ...(this.s.log ? { log: this.s.log } : {}) },
       );
       if (signal.aborted) throw new Error(STOPPED);
       this.v = { state: 'running', device: this.device!.model, since: new Date().toISOString(), ...(this.s.language ? { language: this.s.language } : {}) };

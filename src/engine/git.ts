@@ -310,10 +310,10 @@ const notThese = (paths: string[]) => paths.map((p) => `:(top,exclude,literal)${
 
 /**
  * Folders squad-kit's own builds make in a copy, wherever in it they run: Xcode's build folder (XCODE_BUILD_DIR in
- * engine/find-commands.ts). A project's .gitignore may not name them, so git's local ignore list keeps them out of
+ * engine/find-commands.ts), and the record of squad-kit's own Android build (engine/phone/build.ts). A project's .gitignore may not name them, so git's local ignore list keeps them out of
  * `git status`, and staging leaves them out of every commit, even when a story changes what git ignores.
  */
-export const OWN_BUILD_DIRS = ['build/squad-kit-ios'];
+export const OWN_BUILD_DIRS = ['build/squad-kit-ios', 'build/squad-kit-android'];
 
 /** Puts squad-kit's own build folders on git's local ignore list, at any depth. */
 export function keepOwnBuildsOut(dir: string): void {
@@ -388,9 +388,37 @@ export function forgetDbMade(dir: string, rel: string[]): void {
   if (kept.length !== lines.length) fs.writeFileSync(file, kept.join('\n'));
 }
 
+/** The phone folders squad-kit's own build made in this copy (an Expo app's android/ or ios/), beside the placed list. */
+function prebuiltList(dir: string): string | null {
+  const list = placedList(dir);
+  return list ? `${list.slice(0, -'squad-placed'.length)}squad-prebuilt` : null;
+}
+
+/**
+ * Says which phone folders squad-kit's own build made in this copy: an Expo app with no android/ or ios/ folder gets one
+ * made for the build (`expo prebuild`). Each holds a .gitignore of its own that hides it from git in this copy only,
+ * and the list in the copy's git folder leaves it out of every commit, even when a story changes what git ignores.
+ * Paths are full, or from the copy's folder.
+ */
+export function markPrebuilt(dir: string, folders: string[]): void {
+  const list = prebuiltList(dir);
+  if (!list) return;
+  const top = fs.realpathSync(git(dir, ['rev-parse', '--show-toplevel'], { allowFail: true }) || dir);
+  const had = fs.existsSync(list) ? fs.readFileSync(list, 'utf8').split('\n').filter(Boolean) : [];
+  const rel = folders.map((f) => path.relative(top, fs.realpathSync(path.resolve(dir, f))).split(path.sep).join('/')).filter((f) => f && !f.startsWith('..'));
+  for (const f of folders) fs.writeFileSync(path.join(path.resolve(dir, f), '.gitignore'), '*\n');
+  fs.writeFileSync(list, [...new Set([...had, ...rel])].join('\n'));
+}
+
+/** The phone folders squad-kit's own build made in this copy, from the repo's top. */
+export function prebuiltIn(dir: string): string[] {
+  const list = prebuiltList(dir);
+  return list && fs.existsSync(list) ? fs.readFileSync(list, 'utf8').split('\n').filter(Boolean) : [];
+}
+
 /** The placed files git would save now. One it ignores stays out by itself, and git refuses to be told to leave it out. */
 function placedIn(dir: string): string[] {
-  const files = [placedList(dir), madeList(dir)].flatMap((list) => (list && fs.existsSync(list) ? fs.readFileSync(list, 'utf8').split('\n') : []));
+  const files = [placedList(dir), madeList(dir), prebuiltList(dir)].flatMap((list) => (list && fs.existsSync(list) ? fs.readFileSync(list, 'utf8').split('\n') : []));
   return files.filter((f) => f && !git(dir, ['check-ignore', '--', f], { allowFail: true }));
 }
 

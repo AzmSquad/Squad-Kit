@@ -40,6 +40,8 @@ const LIMITS = { depth: 6, entries: 8000, fileBytes: 256 * 1024, code: 600 };
 const COMPOSE = /^(?:docker-)?compose(?:[.-][\w.-]+)?\.ya?ml$/i;
 const ENV_FILE = /^\.env(?:\.[\w.-]+)?$/;
 const EXAMPLE = /(?:^|\.)(?:example|sample|template|dist|defaults|tpl)$/i;
+/** An env file for another place than this computer: `.env.prod`, `.env.beta`. The app here reads the others first. */
+const OTHER_PLACE = /\.env\.(?:[\w-]+\.)*(?:prod|production|beta|staging|stage|uat|qa|preprod|live|release)(?:\.[\w.-]+)?$/i;
 const APPSETTINGS = /^appsettings(?:\.[\w-]+)?\.json$/i;
 const SPRING = /^application(?:-[\w-]+)?\.(?:properties|ya?ml)$/;
 const CODE = /\.(?:m?[jt]sx?|c[jt]s|py|cs)$/i;
@@ -490,11 +492,11 @@ function findIn(root: string, repo: string): (Omit<Candidate, 'kind'> & { kind: 
   const env = files.env.map((f) => ({ file: f, example: EXAMPLE.test(f), pairs: envPairs(read(path.join(dir, f))) }));
   const envValue = (name: string): { file: string; value: string; example: boolean } | undefined => {
     const hits = env.filter((e) => e.pairs.has(name) && e.pairs.get(name) && !PLACEHOLDER.test(e.pairs.get(name)!));
-    const best = hits.find((e) => !e.example) ?? hits[0];
+    const best = hits.find((e) => !e.example && !OTHER_PLACE.test(e.file)) ?? hits.find((e) => !e.example) ?? hits[0];
     return best ? { file: best.file, value: best.pairs.get(name)!, example: best.example } : undefined;
   };
   const envFileOf = (name: string): string => {
-    const own = env.find((e) => !e.example && e.pairs.has(name)) ?? env.find((e) => e.pairs.has(name));
+    const own = env.find((e) => !e.example && !OTHER_PLACE.test(e.file) && e.pairs.has(name)) ?? env.find((e) => !e.example && e.pairs.has(name)) ?? env.find((e) => e.pairs.has(name));
     return own ? realEnvFile(own.file) : '.env';
   };
   const candidates: Candidate[] = [];
@@ -530,6 +532,16 @@ function findIn(root: string, repo: string): (Omit<Candidate, 'kind'> & { kind: 
   // Database settings in env files, read by the code or not.
   const named = new Set<string>();
   for (const e of env) for (const [k, v] of e.pairs) if ((DB_ENV.test(k) && !NOT_THE_APPS.test(k)) || (kindOf(v) && /:\/\//.test(v) && !NOT_THE_APPS.test(k))) named.add(k);
+  // An env file of this computer with the same name as a settings key (ConnectionStrings__Main): .NET reads it over its
+  // own settings file, and so does the app squad-kit starts, so that address is the one the app uses.
+  for (const c of candidates) {
+    const v = c.setting.key && c.setting.env ? envValue(c.setting.env) : undefined;
+    if (!v || v.example || OTHER_PLACE.test(v.file) || !kindOf(v.value)) continue;
+    c.address = v.value;
+    const name = readAddress(v.value).name;
+    if (name) c.name = name;
+    c.from.push(v.file);
+  }
   for (const k of named) {
     if (candidates.some((c) => c.setting.env === k)) continue;
     const v = envValue(k);

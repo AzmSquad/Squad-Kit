@@ -116,11 +116,13 @@ const CHECK_WORDS: Record<CheckName, string> = { test: 'the tests', lint: 'the c
 
 /**
  * squad-kit's own phone for the pictures (engine/phone/session.ts), in place of its browser: a mobile project whose
- * iPhone tools are ready. The pictures are taken on real devices, each labelled with its name.
+ * iPhone or Android tools are ready. The pictures are taken on real devices, each labelled with its name.
  */
 export interface WindowPhone {
   /** The sizes the pictures may be taken at: phone, and tablet when the app has one. */
   readonly sizes: PhoneSize[];
+  /** What the phone is: "iPhone simulator", "Android emulator". Left out: an iPhone simulator. */
+  readonly label?: string;
   /** The real device of each size: { phone: "iPhone 16 Pro", tablet: "iPad Air 11-inch (M2)" }. Known once ready. */
   labels(): Partial<Record<PhoneSize, string>>;
   /** The app's own link names: none means every picture starts on the app's start screen. */
@@ -399,7 +401,7 @@ const PHONE_SHOTS =
  * take_screenshots and look_at_page on squad-kit's phone: the same steps and words as in the browser, with the real
  * devices, the app's start screen or its own links for a page, and a language.
  */
-function phoneDefs(sizes: PhoneSize[], labels: Partial<Record<PhoneSize, string>>, links: string[]): Record<'take_screenshots' | 'look_at_page', Omit<ToolDef, 'name'>> {
+function phoneDefs(sizes: PhoneSize[], labels: Partial<Record<PhoneSize, string>>, links: string[], label = 'iPhone simulator'): Record<'take_screenshots' | 'look_at_page', Omit<ToolDef, 'name'>> {
   const size = { type: 'string', enum: sizes, description: sizes.map((k) => `${k} is the ${labels[k] ?? k}`).join(', ') + (sizes.length > 1 ? ' (phone is the default).' : '.') };
   const page = {
     type: 'string',
@@ -416,7 +418,7 @@ function phoneDefs(sizes: PhoneSize[], labels: Partial<Record<PhoneSize, string>
   const where = phoneWords(labels);
   return {
     take_screenshots: {
-      description: `squad-kit opens this story's app on ${where}: an iPhone simulator it runs itself, hidden, on this computer. Each shot starts the app fresh in its language, does the steps by tapping through the app by the words on the screen, and takes one picture after its steps. The pictures come back to you, with each file name, the screen and the device, and are saved in the proof folder. Limits: at most ${MAX_SHOTS_PER_CALL} shots in one call, and at most ${MAX_PICTURES} pictures in all in this step, counting each one you take again, so plan one picture per part or case of each "done when". Asking for more is refused, and refused requests can stop the step. Look at each picture and take a wrong one again. Each answer lists every picture you took in this step: name those files in your final answer, no others. Example: ${PHONE_SHOTS}`,
+      description: `squad-kit opens this story's app on ${where}: ${/^[aeiou]/i.test(label) ? 'an' : 'a'} ${label} it runs itself, hidden, on this computer. Each shot starts the app fresh in its language, does the steps by tapping through the app by the words on the screen, and takes one picture after its steps. The pictures come back to you, with each file name, the screen and the device, and are saved in the proof folder. Limits: at most ${MAX_SHOTS_PER_CALL} shots in one call, and at most ${MAX_PICTURES} pictures in all in this step, counting each one you take again, so plan one picture per part or case of each "done when". Asking for more is refused, and refused requests can stop the step. Look at each picture and take a wrong one again. Each answer lists every picture you took in this step: name those files in your final answer, no others. Example: ${PHONE_SHOTS}`,
       inputSchema: {
         type: 'object',
         properties: {
@@ -609,7 +611,7 @@ const STOPPED_FOR_CHECKS_STATUS = 'The app is not running: squad-kit stopped it 
 /** What a call answers while squad-kit's browser is still being set up (the first time, it is downloaded). */
 export const BROWSER_STARTING = "squad-kit is still setting up its screenshot browser. Call this again in a moment; do not start a browser yourself.";
 /** And while squad-kit's phone gets ready: the app is built and the phone starts, the first time. */
-export const PHONE_STARTING = 'squad-kit is still getting its phone ready (it builds the app and starts the phone). Call this again in a moment; do not start a simulator yourself.';
+export const PHONE_STARTING = 'squad-kit is still getting its phone ready (it builds the app and starts the phone). Call this again in a moment; do not start a simulator or an emulator yourself.';
 
 /**
  * How much of a call's time each part may use: the app and the browser are waited for until 70% of it, pictures are
@@ -741,7 +743,7 @@ export class AgentWindow {
 
   /** The tools this run may use, as MCP lists them. */
   listTools(): ToolDef[] {
-    const phone = this.s.phone ? phoneDefs(this.s.phone.sizes, this.s.phone.labels(), this.s.phone.links()) : null;
+    const phone = this.s.phone ? phoneDefs(this.s.phone.sizes, this.s.phone.labels(), this.s.phone.links(), this.s.phone.label) : null;
     return this.s.tools.map((name) => ({ name, ...(name === 'run_checks' && this.s.checks?.parts ? RUN_CHECKS_BY_PART : phone && (name === 'take_screenshots' || name === 'look_at_page') ? phone[name] : DEFS[name]) }));
   }
 
@@ -1073,7 +1075,7 @@ export class AgentWindow {
     if (this.over) return error(STOPPED_CALL);
     const detail = (err as { detail?: string })?.detail;
     this.s.log?.(`squad-kit's phone did not work for ${this.s.ticket}: ${(err as Error)?.message ?? String(err)}${detail ? `\n${detail}` : ''}`);
-    return error(`squad-kit's phone could not take this: ${(err as Error)?.message ?? String(err)}${detail ? ` (${detail.slice(0, 600)})` : ''}. Call i_am_stuck if it keeps happening, and never start a simulator yourself.`);
+    return error(`squad-kit's phone could not take this: ${(err as Error)?.message ?? String(err)}${detail ? ` (${detail.slice(0, 600)})` : ''}. Call i_am_stuck if it keeps happening, and never start a simulator or an emulator yourself.`);
   }
 
   /**
@@ -1557,7 +1559,7 @@ export class AgentWindow {
         did.push(PHONE_STARTING);
         plain.push(`The ${who} was stuck on the phone. squad-kit is still getting it ready.`);
       } else if ('ok' in r) {
-        did.push("squad-kit's phone works. Use take_screenshots and look_at_page for pictures and screens; never start a simulator or a browser yourself.");
+        did.push("squad-kit's phone works. Use take_screenshots and look_at_page for pictures and screens; never start a simulator, an emulator or a browser yourself.");
         plain.push(`The ${who} was stuck on the phone. squad-kit checked it, and it works.`);
       } else {
         did.push(`squad-kit's phone does not work: ${(r.err as Error)?.message ?? String(r.err)}`);

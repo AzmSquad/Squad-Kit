@@ -1,3 +1,4 @@
+import { parseChoice } from '../../engine/tools/which-phone.js';
 import fs from 'node:fs';
 import { createHmac, randomBytes } from 'node:crypto';
 import path from 'node:path';
@@ -732,6 +733,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
       runner?: 'acp' | 'direct';
       documentsInGit?: boolean;
       alwaysNewTests?: boolean;
+      phone?: string;
       quality?: string;
       allowedHosts?: string[];
       network?: string;
@@ -782,6 +784,13 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
       // Left out when off, so a project that never chose has nothing new in its settings file.
       if (b.alwaysNewTests === true) meta.alwaysNewTests = true;
       else if (b.alwaysNewTests === false) delete meta.alwaysNewTests;
+      // The phone an app for both phones uses: left out when automatic, like a project that never chose.
+      if (b.phone !== undefined) {
+        const choice = parseChoice(b.phone);
+        if (!choice) throw new Error(`"${b.phone}" is not a phone here. Use iphone, android or auto.`);
+        if (choice === 'auto') delete meta.phone;
+        else meta.phone = choice;
+      }
       if (b.repos && meta.repos) {
         meta.repos = meta.repos.map((r) => {
           const u = b.repos!.find((x) => x.path === r.path);

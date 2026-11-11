@@ -6,10 +6,14 @@ import { computerReady, type ComputerReady } from '../computer-ready.js';
 import { gitVersion } from '../git.js';
 import { ACTION_DOING, ACTION_WORDS, CATALOG, KIND_WORDS, PLATFORM_WORDS, toolEntry, type Priority, type System, type ToolAction, type ToolEntry, type ToolId } from './catalog.js';
 import { detectAll, foundFile, readFound, realHost, systemOf, writeFound, type DetectHost, type Found, type FoundBook } from './detect.js';
-import { atLeast, tooOld, updateRecommended } from './fit.js';
-import { clearHalfGets, gettingNow, lastTrouble, startGets, type Getting, type ToolSource } from './get.js';
+import { atLeast, PAIR_RULES, tooOld, updateRecommended } from './fit.js';
+import { clearHalfGets, firstGuess, gettingNow, GetTrouble, lastTrouble, startGets, type Getting, type ToolSource } from './get.js';
+import { acceptAndroid, androidAccepted, androidLicenses, freeBytes, roomTrouble, type License } from './android.js';
+import { choosePhone, IPHONE_ONLY, type PhoneSystem } from './which-phone.js';
 import { projectKinds, type PlaceKinds, type Platform } from './kinds.js';
 import { kindsOfCommands } from '../find-commands.js';
+import { reposOf } from '../repos.js';
+import { usesAndroid } from '../android-env.js';
 import { addUpdateLooks, flutterUpdateLook, startUpdate, updateGuess, updateWarning } from './update.js';
 
 /**
@@ -20,6 +24,7 @@ import { addUpdateLooks, flutterUpdateLook, startUpdate, updateGuess, updateWarn
 
 export type { ToolAction, ToolId } from './catalog.js';
 export type { Getting } from './get.js';
+export type { PhoneSystem } from './which-phone.js';
 
 export type ToolState = 'ready' | 'missing' | 'too-old' | 'getting' | 'updating' | 'not-here';
 
@@ -58,6 +63,11 @@ export interface ToolLine {
   cantUpdate?: string;
   /** Ready, and older than its makers recommend: the version they recommend. It stops nothing; the steps say how to update. */
   recommended?: string;
+  /** Its maker's license comes first: whether you accepted it, and the command that shows it and asks. */
+  license?: { accepted: boolean; command: string };
+  /** squad-kit gets it: how much room it takes ("about 20 GB") and about how long the first time takes, in seconds. */
+  size?: string;
+  seconds?: number;
 }
 
 export interface ToolsView {
@@ -161,8 +171,14 @@ export function checkSoon(within = LOOKED_AT_MS): void {
 
 const RANK: Record<Priority, number> = { required: 3, recommended: 2, optional: 1 };
 
-function matches(e: ToolEntry, places: PlaceKinds[]) {
-  const needs = e.needs.filter((n) => n.kinds === 'any' || places.some((p) => (n.kinds as string[]).some((k) => p.kinds.includes(k as never)) && (!n.platform || p.platforms.includes(n.platform))));
+/**
+ * What a tool is to these places: its priority, what it is used for, and what it stops. With the phone an app for both
+ * phones uses (`phone`), what only the other phone needs is Optional and stops nothing.
+ */
+function matches(e: ToolEntry, places: PlaceKinds[], phone?: PhoneSystem) {
+  const needs = e.needs
+    .filter((n) => n.kinds === 'any' || places.some((p) => (n.kinds as string[]).some((k) => p.kinds.includes(k as never)) && (!n.platform || p.platforms.includes(n.platform))))
+    .map((n) => (phone && n.platform && n.platform !== 'web' && n.platform !== phone ? { ...n, priority: 'optional' as const } : n));
   if (!needs.length) return null;
   const priority = needs.reduce<Priority>((a, n) => (RANK[n.priority] > RANK[a] ? n.priority : a), 'optional');
   const uniq = (xs: ToolAction[]) => (Object.keys(ACTION_WORDS) as ToolAction[]).filter((a) => xs.includes(a));
@@ -199,13 +215,13 @@ function asToday(e: ToolEntry, ready: ComputerReady): Pick<ToolLine, 'state' | '
 }
 
 /** The lines for the places of a project, from what the last check found. Git and the AI tool need `ready`. */
-export function linesFor(places: PlaceKinds[], book: FoundBook | null, system: System, ready?: ComputerReady): ToolLine[] {
+export function linesFor(places: PlaceKinds[], book: FoundBook | null, system: System, ready?: ComputerReady, phone?: PhoneSystem): ToolLine[] {
   const platforms = new Set<Platform>(places.flatMap((p) => p.platforms));
   const versions = Object.fromEntries(Object.entries(book?.tools ?? {}).flatMap(([id, f]) => (f?.state === 'found' && f.version ? [[id, f.version]] : []))) as Partial<Record<ToolId, string>>;
   const getting = gettingNow();
   const out: ToolLine[] = [];
   for (const e of CATALOG) {
-    const m = matches(e, places);
+    const m = matches(e, places, phone);
     if (!m || (e.asToday && !ready)) continue;
     const base = {
       id: e.id,
@@ -218,6 +234,8 @@ export function linesFor(places: PlaceKinds[], book: FoundBook | null, system: S
       usedFor: m.actions.map((a) => ACTION_WORDS[a]).join(', '),
       actions: m.actions,
       command: e.installer === 'squad-kit' ? `squad tools get ${e.id}` : 'squad tools check',
+      ...(e.installer === 'squad-kit' ? { seconds: firstGuess(e.id), ...(e.size ? { size: e.size } : {}) } : {}),
+      ...(e.license ? { license: { accepted: accepted(e.id), command: `squad tools accept ${e.id}` } } : {}),
     };
     let line: ToolLine;
     if (e.asToday) {
@@ -293,7 +311,7 @@ export async function projectTools(bp: BoardPaths): Promise<ToolsView> {
     checking: Boolean(running),
     summary: projectWords(places),
     places,
-    lines: linesFor(places, book, system, readyNow()),
+    lines: linesFor(places, book, system, readyNow(), phoneSystem(bp, 'pictures') ?? undefined),
     getting: gettingNow(),
   };
 }
@@ -389,8 +407,11 @@ function placesFor(bp: BoardPaths, meta: () => BoardMeta | null, story?: StoryWh
  * and the link; null when nothing stops it. It uses what the last check found and never waits for a check: with
  * nothing found yet, it says so and a check starts beside. Git and the AI tool are checked as today, never here.
  */
-export function blockedBy(bp: BoardPaths, action: ToolAction, story?: StoryWhere): ToolBlock | null {
-  const places = placesFor(bp, () => metaOf(bp), story);
+export function blockedBy(bp: BoardPaths, action: ToolAction, story?: StoryWhere, phone?: PhoneSystem): ToolBlock | null {
+  // On a phone, only the chosen phone's tools count: an app for both phones never waits for the other one's.
+  const system = PHONE_ACTIONS.includes(action) ? (phone ?? phoneSystem(bp, action, story) ?? undefined) : undefined;
+  const all = placesFor(bp, () => metaOf(bp), story);
+  const places = system ? all.map((p) => ({ ...p, platforms: p.platforms.filter((x) => x === system || x === 'web') })) : all;
   const needing = CATALOG.filter((e) => !e.asToday && matches(e, places)?.required.includes(action));
   if (!needing.length) return null;
   const book = foundNow();
@@ -405,13 +426,61 @@ export function blockedBy(bp: BoardPaths, action: ToolAction, story?: StoryWhere
   return blockOf(action, lines);
 }
 
+/* ── which phone ────────────────────────────────────────── */
+
+const PHONE_ACTIONS: ToolAction[] = ['pictures', 'start-app', 'try-it'];
+
+/**
+ * The phone a project's app (or one story's) uses for an action: the one it builds for, or for an app for both, the
+ * project's setting, else the iPhone on a Mac when the tools only the iPhone needs are ready, else Android
+ * (which-phone.ts). Null when it builds for no phone.
+ */
+export function phoneSystem(bp: BoardPaths, action: ToolAction, story?: StoryWhere): PhoneSystem | null {
+  const meta = metaOf(bp);
+  const computer = foundNow()?.system ?? systemOf();
+  for (const p of placesFor(bp, () => meta, story)) {
+    const chosen = choosePhone(p, meta?.phone, computer, () => iphoneReady(bp, action, story));
+    if (chosen) return chosen;
+  }
+  return null;
+}
+
+/** True when nothing only the iPhone needs stops this action: Xcode, its simulator, CocoaPods, or a Flutter too old for this Xcode. */
+function iphoneReady(bp: BoardPaths, action: ToolAction, story?: StoryWhere): boolean {
+  const b = blockedBy(bp, action, story, 'ios');
+  if (!b) return true;
+  if (b.checking) return true;
+  const pairs = new Set(PAIR_RULES.filter((r) => r.platform === 'ios').map((r) => r.tool));
+  return !b.tools.some((t) => IPHONE_ONLY.includes(t.id) || (t.state === 'too-old' && pairs.has(t.id)));
+}
+
 /** The action a squad step needs its tools for. */
 const ACTION_OF: Record<string, ToolAction> = { build: 'build', unstick: 'build', test: 'checks' };
 
 /** What a story about to take a step waits for, if anything: the live squad holds it with this. */
 export function toolsHold(bp: BoardPaths, t: Ticket, phase: string): ToolBlock | null {
   const action = ACTION_OF[phase];
-  return action ? blockedBy(bp, action, t) : null;
+  return action ? (blockedBy(bp, action, t) ?? commandsBlock(bp, t, action)) : null;
+}
+
+/**
+ * A build or a check whose own command builds an Android app (`flutter build apk`, `./gradlew assembleDebug`) needs
+ * squad-kit's Android tools and Java 17 or newer, whatever kind of app the project is: it waits for them with the Tools
+ * page's line while they are missing or too old.
+ */
+export function commandsBlock(bp: BoardPaths, t: Pick<Ticket, 'repo' | 'parts' | 'worktree' | 'copies'>, action: ToolAction): ToolBlock | null {
+  if (action !== 'build' && action !== 'checks') return null;
+  const meta = metaOf(bp);
+  if (!meta) return null;
+  const commands = reposOf(meta)
+    .filter((r) => !t.repo || r.path === t.repo)
+    .flatMap((r) => [r.commands.test, r.commands.lint, r.commands.build]);
+  if (!commands.some((c) => usesAndroid(c))) return null;
+  const book = foundNow();
+  if (!book) return null;
+  const places = placesFor(bp, () => meta, t).map((p) => ({ ...p, platforms: [...new Set([...p.platforms, 'android' as const])] }));
+  const lines = linesFor(places.length ? places : [{ place: '.', kinds: ['android'], platforms: ['android'] }], book, book.system, undefined, 'android').filter((l) => (l.id === 'android' || l.id === 'java') && l.state !== 'ready');
+  return lines.length ? blockOf(action, lines) : null;
 }
 
 /**
@@ -438,14 +507,62 @@ const fits = (e: ToolEntry | undefined, book: FoundBook | null): boolean => {
  * Get it: squad-kit gets a tool of its own, and what it needs with it when this computer has none, beside everything
  * else. Each one is checked again once it is in, so its line turns Ready.
  */
-export function getToolNow(id: string, opts: { source?: (id: ToolId) => Promise<ToolSource> } = {}): Getting {
+export function getToolNow(id: string, opts: { source?: (id: ToolId) => Promise<ToolSource>; free?: number | null } = {}): Getting {
   const e = toolEntry(id);
   if (!e) throw new Error(`squad-kit knows no tool called "${id}". See them all: squad tools`);
   if (e.installer !== 'squad-kit') throw new Error(`squad-kit can't get ${e.name} itself: ${e.why ?? 'you install it'}. The Tools page shows the steps.`);
   const book = foundNow();
+  if (book?.tools[e.id]?.state === 'not-here') throw new Error(`squad-kit can't get ${e.name} here: it ${e.notHere ?? "can't run on this computer"}.`);
   if (fits(e, book)) throw new Error(`${e.name}${book?.tools[e.id]?.version ? ` ${book.tools[e.id]!.version}` : ''} is here already, so there is nothing to get.`);
-  const also = (e.with ?? []).filter((w) => !fits(toolEntry(w), book));
-  return startGets([e.id, ...also], { ...(opts.source ? { source: opts.source } : {}), after: () => void checkTools().catch(() => undefined) });
+  // Its maker's license is the person's to accept: Get it waits for their Accept, and squad-kit never gives it.
+  if (e.license && !accepted(e.id)) throw new Error(`Google's license for the ${e.name} needs your Accept first. Read it on the Tools page and press Accept, or run: squad tools accept ${e.id}`);
+  if (e.size) {
+    const trouble = roomTrouble(opts.free !== undefined ? opts.free : freeBytes(squadHome()));
+    if (trouble) throw new Error(trouble);
+  }
+  const before = (e.before ?? []).filter((w) => !fits(toolEntry(w), book));
+  const also = (e.with ?? []).filter((w) => !fits(toolEntry(w), book) && !before.includes(w));
+  return startGets([...before, e.id, ...also], { ...(opts.source ? { source: opts.source } : {}), after: () => void checkTools().catch(() => undefined) });
+}
+
+/* ── Accept ─────────────────────────────────────────────── */
+
+/** Whether the person accepted a tool's license. */
+function accepted(id: ToolId): boolean {
+  return id === 'android' ? Boolean(androidAccepted()) : true;
+}
+
+export interface LicenseView {
+  tool: ToolId;
+  name: string;
+  /** Each license in full, as its maker gives it. */
+  licenses: License[];
+  accepted: boolean;
+}
+
+/** A tool's license, in full from its maker, for the person to read before Accept. */
+export async function toolLicense(id: string, o: { fetch?: typeof fetch } = {}): Promise<LicenseView> {
+  const e = toolEntry(id);
+  if (!e) throw new Error(`squad-kit knows no tool called "${id}". See them all: squad tools`);
+  if (!e.license) throw new Error(`${e.name} has no license to accept here.`);
+  try {
+    const licenses = await androidLicenses({ system: foundNow()?.system ?? systemOf(), ...(o.fetch ? { fetch: o.fetch } : {}) });
+    return { tool: e.id, name: e.name, licenses, accepted: accepted(e.id) };
+  } catch (err) {
+    throw new Error(err instanceof GetTrouble ? err.message : `squad-kit could not read the license of the ${e.name}.`);
+  }
+}
+
+/**
+ * Accept: the person accepted the license they were shown. `ids` are the licenses they saw: each must be one the maker
+ * gives now, so an Accept of an old or other text never counts.
+ */
+export async function acceptToolNow(id: string, ids: string[], o: { fetch?: typeof fetch } = {}): Promise<LicenseView> {
+  const view = await toolLicense(id, o);
+  const shown = view.licenses.filter((l) => ids.includes(l.id));
+  if (!ids.length || shown.length !== view.licenses.length) throw new Error(`Read every license of the ${view.name} first, then press Accept.`);
+  acceptAndroid(shown);
+  return { ...view, accepted: true };
 }
 
 /* ── Update ─────────────────────────────────────────────── */

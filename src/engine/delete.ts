@@ -28,6 +28,7 @@ import { repoFor, reposOf } from './repos.js';
 import { repoTarget } from './sync.js';
 import { deleteNoteCommit, localCopy } from './teammate-delete.js';
 import { docsRepo, squadInRepo } from './project-git.js';
+import { writeLog } from '../core/app-log.js';
 import { dropTicketCache, ticketCacheDir } from './sandbox.js';
 import { stopTry } from './try-app.js';
 import { dropStoryDb } from './story-db.js';
@@ -481,6 +482,8 @@ async function deleteOnce(bp: BoardPaths, id: string, opts: { remote?: boolean; 
     removeChatsAndShots(bp, t);
     keepRecord(bp, t, mark, local);
     removeTicket(bp, t.id);
+    // The ticket's own record is gone now: the log keeps that it went, and who pressed it.
+    writeLog({ level: 'info', project: meta.project || bp.projectId, ticket: t.id, text: `${local ? 'Removed from this board' : 'Deleted'} by ${mark.by}: "${t.title}"${notes.length ? `. ${notes.join('. ')}` : ''}` });
     return { id: t.id, title: t.title, notes };
   } catch (err) {
     const why = (err as Error).message.replace(/\.\s*$/, '');

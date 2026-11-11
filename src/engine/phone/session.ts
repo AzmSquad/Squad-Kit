@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { phoneDriver, shotPhone } from '../../modules/registry.js';
+import { phoneDriver } from '../../modules/registry.js';
 import { StepFailure, type BrowserStep } from '../../modules/browser/types.js';
 import { PhoneError, type AppOnPhone, type PhoneModule, type PhoneSize } from '../../modules/phone/types.js';
 import type { PhoneDriver } from '../../modules/phone-driver/types.js';
@@ -8,11 +8,14 @@ import { BuildFailed, buildForPhone, type PhoneKind } from './build.js';
 import { ownDevice, phonesHome, type OwnDevice } from './devices.js';
 import { aboutWords, noteStep, stepSeconds } from './times.js';
 import { onDown, withPhone } from './turn.js';
+import { phoneFor } from './which.js';
+import type { PhoneSystem } from '../tools/which-phone.js';
 
 /**
- * The Tester's pictures on squad-kit's own phone, for one agent run: the app is built for the iPhone in the story's
- * copy, put on squad-kit's hidden iPhone or iPad, opened fresh in the language asked for, its page opened by the app's
- * own link when it has one, and the Tester's steps tapped through by name; then the picture. One Maestro runs per
+ * The Tester's pictures on squad-kit's own phone, for one agent run: the app is built for the phone in the story's
+ * copy, put on squad-kit's hidden iPhone or iPad (or Android phone or tablet), opened fresh in the language asked for,
+ * its page opened by the app's own link when it has one, and the Tester's steps tapped through by name; then the
+ * picture. One Maestro runs per
  * booted device for every story, kept between pictures. What did not work comes back with why, short for the agent
  * and plain for the person, in the same words as the browser's (shots.ts).
  */
@@ -27,6 +30,8 @@ export interface PhoneSetup {
   /** The story's copy of the code: the app is built here. */
   cwd: string;
   kind: PhoneKind;
+  /** The phone it runs on: the iPhone (the default) or Android. */
+  system?: PhoneSystem;
   tools: TapTools;
   /** The system version for squad-kit's devices, when one is asked ("18.2"). Left out, the newest. */
   runtime?: string;
@@ -49,7 +54,7 @@ export interface PhoneShot {
   png: Buffer;
   /** Where the picture was taken: the page asked for, or "/" for the app's start screen. */
   page: string;
-  /** The real device, for the picture's label: "iPhone 16 Pro". */
+  /** The real device, for the picture's label: "iPhone 16 Pro", "Pixel 9". */
   device: string;
   /** A line for the agent, when the page could not be opened as asked. */
   said?: string;
@@ -103,33 +108,52 @@ const warmed = new Set<string>();
 /** The app squad-kit last put on each device, by the device and the app's id: another story's build is put back. */
 const installed = new Map<string, string>();
 
-function dropDriver(id: string): void {
+function dropDriver(id: string): Promise<void> {
   const d = drivers.get(id);
   drivers.delete(id);
   started.delete(id);
   warmed.delete(id);
-  void d?.then((x) => x.close()).catch(() => undefined);
+  return d ? d.then((x) => x.close()).catch(() => undefined) : Promise.resolve();
+}
+
+/** A device that went down, or started again clean: its Maestro goes, and nothing is on it any more. */
+function deviceDown(id: string): void {
+  void dropDriver(id);
+  for (const key of [...installed.keys()]) if (key.startsWith(`${id}:`)) installed.delete(key);
 }
 
 // A device that shuts down takes its Maestro with it, and so does squad-kit when it ends.
-onDown(dropDriver);
+onDown(deviceDown);
 process.once('exit', () => {
   for (const d of started.values()) void d.close();
 });
 
-/** Every Maestro squad-kit runs stops: the board stops. */
-export function closeDrivers(): void {
-  for (const id of [...drivers.keys()]) dropDriver(id);
+/** Every Maestro squad-kit runs stops: the board stops. Resolves once each has ended. */
+export function closeDrivers(): Promise<void> {
+  return Promise.all([...drivers.keys()].map((id) => dropDriver(id))).then(() => undefined);
 }
 
-async function driverFor(id: string, tools: TapTools): Promise<PhoneDriver> {
+/**
+ * Maestro ready on a device: started, and its first step done (which puts its helper on the phone). For `squad phone
+ * start`, so the first pictures wait for nothing.
+ */
+export async function readyToTap(phone: PhoneModule, id: string, tools: TapTools): Promise<void> {
+  const driver = await driverFor(id, tools, phone);
+  if (warmed.has(id)) return;
+  await driver.screenText(180_000);
+  warmed.add(id);
+}
+
+async function driverFor(id: string, tools: TapTools, phone: PhoneModule): Promise<PhoneDriver> {
   const have = drivers.get(id);
   if (have) {
     const d = await have.catch(() => null);
     if (d?.alive) return d;
     drivers.delete(id);
   }
-  const opening = phoneDriver().open({ device: id, binary: tools.maestro, ...(tools.javaHome ? { javaHome: tools.javaHome } : {}), dir: path.join(phonesHome(), 'maestro') });
+  // Maestro knows an Android phone by its serial, and reaches it with squad-kit's own adb keys.
+  const env = phone.tapEnv?.();
+  const opening = phoneDriver().open({ device: phone.tapId?.(id) ?? id, binary: tools.maestro, ...(tools.javaHome ? { javaHome: tools.javaHome } : {}), dir: path.join(phonesHome(), 'maestro'), ...(env && Object.keys(env).length ? { env } : {}) });
   drivers.set(id, opening);
   opening.then((d) => started.set(id, d)).catch(() => drivers.delete(id));
   return opening;
@@ -153,13 +177,22 @@ export class PhoneSession {
   private devices: Partial<Record<PhoneSize, OwnDevice>> = {};
   private closed = false;
 
+  private phone: PhoneModule;
+
   constructor(
     private s: PhoneSetup,
-    private phone: PhoneModule = shotPhone(),
-  ) {}
+    phone?: PhoneModule,
+  ) {
+    this.phone = phone ?? phoneFor(s.system ?? 'ios');
+  }
 
   get sizes(): PhoneSize[] {
     return this.s.sizes ?? ['phone', 'tablet'];
+  }
+
+  /** What the phone is, for the Tester's tools: "iPhone simulator", "Android emulator". */
+  get label(): string {
+    return this.phone.label;
   }
 
   /** The real device of each size, for the pictures' labels: { phone: "iPhone 16 Pro" }. Known once ready. */
@@ -177,8 +210,8 @@ export class PhoneSession {
   }
 
   /**
-   * Gets everything ready before the agent's clock starts: the app built for the iPhone (or the last build, when the
-   * code is the same), squad-kit's devices made when it has none, and its iPhone up with the app on it and Maestro
+   * Gets everything ready before the agent's clock starts: the app built for the phone (or the last build, when the
+   * code is the same), squad-kit's devices made when it has none, and its phone up with the app on it and Maestro
    * ready. Once, even when asked twice; a failed try is tried again on the next ask. Throws PhoneUnavailable.
    */
   ready(): Promise<void> {
@@ -194,20 +227,20 @@ export class PhoneSession {
     const o = this.s;
     try {
       let app = o.app;
-      if (!app) app = (await buildForPhone(o.cwd, o.kind, { say: o.say, ...(o.log ? { log: o.log } : {}), ...(o.signal ? { signal: o.signal } : {}) })).app;
+      if (!app) app = (await buildForPhone(o.cwd, o.kind, { system: o.system ?? 'ios', phone: this.phone, say: o.say, ...(o.log ? { log: o.log } : {}), ...(o.signal ? { signal: o.signal } : {}) })).app;
       const info = await this.phone.appInfo(app);
       this.app = { path: app, info };
       for (const size of this.sizes) this.devices[size] = await ownDevice(this.phone, size, o.runtime ? { runtime: o.runtime } : {});
-      // The iPhone comes up now, with the app and Maestro ready, so the first picture does not wait for them.
+      // The phone comes up now, with the app and Maestro ready, so the first picture does not wait for them.
       await withPhone(this.phone, this.sizes[0]!, async (turn) => {
-        if (turn.fresh) dropDriver(turn.device.id);
+        if (turn.fresh) deviceDown(turn.device.id);
         await this.installOn(turn.device.id, turn.fresh);
         await this.warm(turn.device.id);
       }, this.turnOptions());
     } catch (err) {
       if (o.signal?.aborted || this.closed) throw new Error(STOPPED);
       if (err instanceof BuildFailed || err instanceof PhoneError) throw new PhoneUnavailable(err.message, err.detail);
-      throw new PhoneUnavailable('squad-kit could not get its iPhone ready.', (err as Error)?.stack ?? String(err));
+      throw new PhoneUnavailable(`squad-kit could not get its ${this.phone.words.phone} ready.`, (err as Error)?.stack ?? String(err));
     }
   }
 
@@ -221,21 +254,21 @@ export class PhoneSession {
     const key = `${id}:${app.info.appId}`;
     if (!fresh && installed.get(key) === app.path) return;
     const t0 = Date.now();
-    this.s.say(`Putting the app on squad-kit's ${this.phone.words.phone}, ${aboutWords(stepSeconds('install'))}`);
+    this.s.say(`Putting the app on squad-kit's ${this.phone.words.phone}, ${aboutWords(stepSeconds('install', undefined, this.phone))}`);
     await this.phone.install(id, app.path, this.s.signal ? { signal: this.s.signal } : {});
-    noteStep('install', (Date.now() - t0) / 1000);
+    noteStep('install', (Date.now() - t0) / 1000, undefined, this.phone);
     installed.set(key, app.path);
     this.s.log?.(`squad-kit put ${app.path} on its phone ${id} in ${Math.round((Date.now() - t0) / 1000)} s`);
   }
 
   /** Maestro on the device, ready: its first step ever there puts its helper on the phone, said with its usual time. */
   private async warm(id: string): Promise<PhoneDriver> {
-    const driver = await driverFor(id, this.s.tools);
+    const driver = await driverFor(id, this.s.tools, this.phone);
     if (warmed.has(id)) return driver;
-    this.s.say(`Getting squad-kit's ${this.phone.words.phone} ready to tap through the app, ${aboutWords(stepSeconds('first-run'))}`);
+    this.s.say(`Getting squad-kit's ${this.phone.words.phone} ready to tap through the app, ${aboutWords(stepSeconds('first-run', undefined, this.phone))}`);
     const t0 = Date.now();
     await driver.screenText(180_000);
-    noteStep('first-run', (Date.now() - t0) / 1000);
+    noteStep('first-run', (Date.now() - t0) / 1000, undefined, this.phone);
     warmed.add(id);
     return driver;
   }
@@ -265,7 +298,7 @@ export class PhoneSession {
     return withPhone(this.phone, size, async (turn) => {
       const id = turn.device.id;
       const device = turn.device.model;
-      if (turn.fresh) dropDriver(id);
+      if (turn.fresh) deviceDown(id);
       if (c.signal?.aborted || this.closed) throw new Error(STOPPED);
       let page = '/';
       let said: string | undefined;
@@ -330,7 +363,7 @@ export class PhoneSession {
     } catch (err) {
       if (err instanceof StepFailure || driver.alive) throw err;
       this.s.log?.(`Maestro ended on squad-kit's phone ${id}; squad-kit starts it again: ${(err as Error).message}`);
-      dropDriver(id);
+      void dropDriver(id);
       const again = await this.warm(id);
       await within(again.act(appId, step, ms), ms + 40_000, stepWords(step));
       return again;

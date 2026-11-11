@@ -1,3 +1,4 @@
+import { androidCommandEnv, hasAndroid } from './android-env.js';
 import { questionWords } from '../board/schedule.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -96,7 +97,9 @@ import { endStep, nextPart, ownCheckEnded, pauseClock, ranFor, resumeClock, runs
 import { readUsual } from '../board/usual.js';
 import { QUEUED, queuedLine, slowActivity } from '../board/now.js';
 import { firstOpenTicket, waitsForFirst, waitsForFirstWords } from '../board/first-story.js';
-import { TOOLS_CHECKING, toolsHold, waitsForTools, type ToolBlock } from './tools/index.js';
+import { TOOLS_CHECKING, checkTools, toolsHold, waitsForTools, type ToolBlock } from './tools/index.js';
+import { projectKinds } from './tools/kinds.js';
+import { afterToolMissing, toolMissing } from './tool-missing.js';
 import { WEB_VERSION, picturesHold, picturesWay, untilGot, type PicturesWay } from './phone/plan.js';
 import { PhoneSession, PhoneUnavailable } from './phone/session.js';
 import type { WindowPhone } from './window.js';
@@ -1592,6 +1595,7 @@ export class LiveSquad {
     const cache = boxed && key ? storiesCacheDir(this.bp) : undefined;
     if (cache) ownFolder(cache);
     const sandbox = boxed ? await this.sandboxFor(opts.cwd, opts.addDirs ?? [], cache, network) : undefined;
+    const android = hasAndroid(projectKinds(this.bp.root, this.meta(), ticket ?? undefined));
     const secrets = await secretFiles(this.bp, opts.cwd);
     // What the sandbox refused shows on the ticket in plain words, each thing once a run. A site asks nothing and stops
     // nothing: the agent goes on without it, and engineers find it in the log on Harness → Safety.
@@ -1612,7 +1616,8 @@ export class LiveSquad {
       ...(Object.keys(runCaps).length ? { caps: runCaps } : {}),
       ...(sandbox ? { sandbox, onBlocked } : {}),
       // A story with a database of its own: the agent's own commands reach that one too, never the person's.
-      env: { ...noPushEnv(), ...(sandbox && cache ? cacheHomeEnv(cache, { wall: 'agent', cwd: opts.cwd }) : {}), ...(key ? copyDbEnv(opts.cwd) : {}) },
+      // An Android app: the agent's own builds and checks find squad-kit's Android tools too (android-env.ts).
+      env: { ...noPushEnv(), ...(sandbox && cache ? cacheHomeEnv(cache, { wall: 'agent', cwd: opts.cwd }) : {}), ...(android ? androidCommandEnv(sandbox && cache ? { cache } : {}) : {}), ...(key ? copyDbEnv(opts.cwd) : {}) },
       ...(instructions ? { instructions } : {}),
       level: lv.level,
       ...(effort ? { effort } : {}),
@@ -1949,6 +1954,56 @@ export class LiveSquad {
       hosts: this.meta().allowedHosts ?? [],
       ...(network ? { network } : {}),
       ...(cache ? { cache } : {}),
+    });
+  }
+
+  /** How many times squad-kit ran a story's checks again by itself for a missing tool, by story. */
+  private toolReruns = new Map<string, number>();
+
+  /**
+   * Checks that failed only because a tool is missing (tool-missing.ts): squad-kit checks this computer's tools again
+   * and runs the checks once more, with no try counted. Still missing: the story waits with the Tools page's line when
+   * the Tools page knows the tool, and goes on by itself once it is there; else a card says what is missing. The
+   * Builder is never asked: no code change brings a tool.
+   */
+  private async toolMissingNow(id: string, lacking: { check: string; command: string; what: string; line: string }[], ran: ReturnType<typeof ranOf>): Promise<void> {
+    const first = lacking[0]!;
+    const names = checkNames(lacking.map((l) => l.check));
+    const words = `${names.charAt(0).toUpperCase()}${names.slice(1)} could not run: ${first.what} is not there for it`;
+    this.log('warn', lacking.map((l) => `${l.check} could not run, ${l.what} is missing (${l.command}): ${l.line}`).join('\n'), id);
+    // A tool installed meanwhile, or one squad-kit just set up, counts from now.
+    await checkTools().catch(() => undefined);
+    const now = readTicket(this.bp, id);
+    if (!now) return;
+    const block = toolsHold(this.bp, now, 'test');
+    const reruns = this.toolReruns.get(id) ?? 0;
+    const next = afterToolMissing(reruns, block);
+    if (next !== 'stop') {
+      this.toolReruns.set(id, reruns + 1);
+      this.update(id, (x) => {
+        x.gates = { ...x.gates!, checks: 'pending', checksText: `${first.check} could not run: ${first.what} is missing`, ran };
+        addActivity(x, 'tester', next === 'again' ? `${words}, so squad-kit set its tools up again and runs the checks once more. Not a failed try` : block!.text);
+        x.stage = 'test';
+        scheduleSquad(x, 'test', 0.2, 1);
+      });
+      return;
+    }
+    this.toolReruns.delete(id);
+    this.update(id, (x) => {
+      x.live = false;
+      x.squad = null;
+      x.retryPhase = 'test';
+      x.status = 'Stuck: a tool the checks need is missing';
+      x.gates = { ...x.gates!, checks: 'fail', checksText: `${first.check} could not run: ${first.what} is missing`, ran };
+      // One plain sentence: a tool to install, never code to fix. What it printed is for engineers.
+      x.stuck = {
+        gate: 'checks',
+        checks: lacking.map((l) => l.check),
+        question: `squad-kit can't run ${checkNames(lacking.map((l) => l.check))} on this computer: ${first.what} is missing. Install it, then press Try again. The code was not the problem.`,
+        detail: lacking.map((l) => `${l.check} (${l.command}):\n${l.line}`).join('\n\n'),
+        options: wayOptions({ gate: 'checks', copy: Boolean(x.worktree && fs.existsSync(x.worktree)) }),
+      };
+      x.waiting = { kind: 'stuck', summary: 'A tool the checks need is missing' };
     });
   }
 
@@ -3183,6 +3238,8 @@ export class LiveSquad {
       this.log('warn', `The story's own database was not set up: ${(err as Error).message}`, id);
       return null;
     });
+    // No copy because of where the database is (another computer, a fallback there): the story says so, once.
+    if (r?.state === 'as-before' && r.say && !readTicket(this.bp, id)?.activity.some((a) => a.text === r.say)) this.update(id, (x) => addActivity(x, 'squad', r.say!));
     if (r?.state !== 'own') return;
     if (r.made) this.log('info', `Made ${r.name}, the story's own database`, id);
     if (!readTicket(this.bp, id)?.activity.some((a) => a.text === OWN_DB_WORDS)) this.update(id, (x) => addActivity(x, 'squad', OWN_DB_WORDS));
@@ -3980,6 +4037,7 @@ export class LiveSquad {
     const around = weak.length > 0;
     if (failed.length === 0 && noTestsRan(results)) return this.notChecked(id, results, around);
     if (failed.length === 0) {
+      this.toolReruns.delete(id);
       const tests = test ? testCount(test.output) : null;
       const parts = [...new Set(results.map((r) => r.part).filter(Boolean))];
       const names = parts.length ? parts.map((p) => `${p} ✓`).join(', ') : results.map((r) => checkWords(r.name)).join(', ');
@@ -4018,6 +4076,13 @@ export class LiveSquad {
       });
       return;
     }
+    // A check that failed only because a tool is missing says nothing about the code: no try, and no Builder.
+    const lacking = failed.flatMap((f) => {
+      const miss = toolMissing(f.output);
+      return miss ? [{ check: shown(f), command: f.command, ...miss }] : [];
+    });
+    if (lacking.length) return this.toolMissingNow(id, lacking, ran);
+    this.toolReruns.delete(id);
     const tries = (t.tries ?? 0) + 1;
     this.update(id, (x) => {
       x.tries = tries;
@@ -4892,7 +4957,7 @@ export class LiveSquad {
     // A product that cannot run yet says why, before anything else starts.
     const cannot = !beside && runsAsProduct(meta) ? productPlan(this.bp, meta, readTicket(this.bp, id)!).why : undefined;
     if (cannot) throw new StepError(cannot, cannot);
-    // A phone app: squad-kit's own iPhone, else its web version meanwhile, else it waits for the tools (phone/plan.ts).
+    // A phone app: squad-kit's own phone, else its web version meanwhile, else it waits for the tools (phone/plan.ts).
     let way = await this.picturesWayOf(id, beside);
     // squad-kit gets its own tools for the phone now, the first time: the pictures wait for that short download.
     if (way.way === 'wait' && way.getting) {
@@ -4991,9 +5056,10 @@ export class LiveSquad {
   }
 
   /**
-   * The Tester's pictures on squad-kit's own phone: the app is built for the iPhone in the story's copy and the phone
-   * comes up with it, before the Tester's clock starts, each long step on the card with its usual time. No app is
-   * started for the browser; the Tester's tools take the pictures on the phone, each labelled with its device.
+   * The Tester's pictures on squad-kit's own phone: the app is built for the phone (the iPhone, or Android) in the
+   * story's copy and the phone comes up with it, before the Tester's clock starts, each long step on the card with its
+   * usual time. No app is started for the browser; the Tester's tools take the pictures on the phone, each labelled
+   * with its device.
    */
   private async phoneScreens(id: string, t: Ticket, when: 'before' | 'after', meta: BoardMeta, way: Extract<PicturesWay, { way: 'phone' }>, beside?: { cwd: string; job: string; signal: AbortSignal }, again: string[] = []): Promise<ShotRound> {
     const cwd = beside?.cwd ?? this.appOf(t)?.dir ?? t.worktree!;
@@ -5003,7 +5069,7 @@ export class LiveSquad {
         addActivity(x, 'tester', text);
         if (!beside) x.status = text;
       });
-    const session = new PhoneSession({ cwd: way.dir, kind: way.kind, tools: way.tools, say, log: (text) => this.log('info', text, id), ...(signal ? { signal } : {}) });
+    const session = new PhoneSession({ cwd: way.dir, kind: way.kind, system: way.system, tools: way.tools, say, log: (text) => this.log('info', text, id), ...(signal ? { signal } : {}) });
     // Building the app and starting the phone are the step working, not hanging.
     const beat = setInterval(() => this.dog.beat(beside?.job ?? id), 20_000);
     try {

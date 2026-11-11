@@ -1089,6 +1089,11 @@ export interface BoardMeta {
   noTests?: { by: string; at: string; ticket: string };
   /** An engineer chose that every story writes new tests: the "Write new tests" switch is not offered on a new story. */
   alwaysNewTests?: boolean;
+  /**
+   * The phone an app for both phones uses for its pictures, Start and Try it yourself: the iPhone or Android. Left out:
+   * automatic, the iPhone on a Mac when its tools are ready, else Android (engine/tools/which-phone.ts).
+   */
+  phone?: 'iphone' | 'android';
   git?: { base: string; remote: string };
   scan?: { status: 'pending' | 'running' | 'done' | 'failed'; at?: string; error?: string; summary?: string; empty?: boolean; now?: string; fromNothing?: boolean };
   /** The project's first run, step by step, on this computer (src/board/setup-state.ts). */

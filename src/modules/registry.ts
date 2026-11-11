@@ -16,6 +16,7 @@ import type { BrowserModule } from './browser/types.js';
 import { playwrightBrowser } from './playwright/index.js';
 import type { PhoneModule } from './phone/types.js';
 import { iosSimulator } from './ios-simulator/index.js';
+import { androidEmulator } from './android-emulator/index.js';
 import type { PhoneDriverModule } from './phone-driver/types.js';
 import { maestroDriver } from './maestro/index.js';
 
@@ -29,7 +30,7 @@ export const CODE_HOSTS: CodeHostModule[] = [azureCodeHost];
 export const SPEECH: SpeechModule[] = [munsitSpeech];
 export const AI_TOOLS: AiTool[] = [claudeTool, codexTool];
 export const BROWSERS: BrowserModule[] = [playwrightBrowser];
-export const PHONES: PhoneModule[] = [iosSimulator];
+export const PHONES: PhoneModule[] = [iosSimulator, androidEmulator];
 export const PHONE_DRIVERS: PhoneDriverModule[] = [maestroDriver];
 
 function rootOf(bp: BoardPaths): string {
@@ -89,9 +90,9 @@ export function shotBrowser(): BrowserModule {
   return BROWSERS[0]!;
 }
 
-/** The phone squad-kit runs itself for the iPhone pictures. Android comes as a second module. */
-export function shotPhone(): PhoneModule {
-  return PHONES[0]!;
+/** The phone squad-kit runs itself for an app's pictures, Start and Try it yourself: the iPhone's, or Android's. */
+export function shotPhone(system: 'ios' | 'android' = 'ios'): PhoneModule {
+  return system === 'android' ? PHONES[1]! : PHONES[0]!;
 }
 
 /** The tool that taps through the app on squad-kit's phone. */

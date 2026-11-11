@@ -1,3 +1,4 @@
+import { androidCommandEnv, androidReads, usesAndroid } from './android-env.js';
 import { execFileSync, spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -256,7 +257,8 @@ export function buildGuard(o: { cwd: string; root: string; cache?: string; extra
     cwd: real(o.cwd),
     root: o.root,
     write: [...new Set(withReal([...(o.extraWrite ?? []), ...temp, ...writableCaches(home)]))],
-    read: [...new Set(withReal([...(o.extraRead ?? [])]))],
+    // squad-kit's Android SDK, its Java and its shared Gradle home: read only, so an Android build finds them.
+    read: [...new Set(withReal([...(o.extraRead ?? []), ...androidReads()]))],
     noRead: [...new Set(noRead)],
     noWrite: [...new Set(withReal([...squadOwnFiles(), ...gitPlaces(real(o.cwd))]))],
     noConnect: [...new Set(withReal(runtimeSockets(home, o.platform)))],
@@ -582,7 +584,8 @@ export function guardEnv(guard: GuardSpec | undefined, cwd: string): Record<stri
  */
 export function spawnProject(command: string, o: SpawnProjectOptions): ChildProcess {
   // In a story's copy with a database of its own, the setting points at it, whatever the person's environment says.
-  const env = { ...projectEnv(), ...guardEnv(o.guard, o.cwd), ...(o.env ?? {}), ...copyDbEnv(o.cwd) };
+  // A command that builds an Android app gets squad-kit's Android tools, with their folders in the cache home (android-env.ts).
+  const env = { ...projectEnv(), ...guardEnv(o.guard, o.cwd), ...(usesAndroid(command) ? androidCommandEnv(o.guard?.cache ? { cache: o.guard.cache } : {}) : {}), ...(o.env ?? {}), ...copyDbEnv(o.cwd) };
   const stdio = o.stdio ?? ['ignore', 'pipe', 'pipe'];
   const base: SpawnOptions = { cwd: o.cwd, detached: OWN_GROUP, stdio, env };
   if (o.guard && process.platform === 'darwin') {

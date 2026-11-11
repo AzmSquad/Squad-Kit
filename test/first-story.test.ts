@@ -349,7 +349,7 @@ describe('what the Architect is told', () => {
       fs.mkdirSync(path.dirname(path.join(app, f)), { recursive: true });
       fs.writeFileSync(path.join(app, f), text);
     }
-    const given = { setup: 'flutter pub get', lint: 'flutter analyze --no-fatal-infos', test: 'flutter test', start: 'flutter run -d web-server --web-port ${PORT:-8080}', url: 'http://localhost:8080' };
+    const given = { setup: 'flutter pub get', lint: 'flutter analyze --no-fatal-infos', test: 'flutter test', build: 'flutter build web', start: 'flutter run -d web-server --web-port ${PORT:-8080}', url: 'http://localhost:8080' };
     expect(findCommands(app)).toEqual(given);
     expect(kindsOfCommands(given)).toEqual({ kinds: ['flutter'], platforms: ['ios', 'android', 'web'] });
     expect(kindsOfCommands({ setup: 'npm install', test: 'npm test', start: 'npx expo start --web --port ${PORT:-8081}' })).toEqual({ kinds: ['react-native'], platforms: ['ios', 'android', 'web'] });

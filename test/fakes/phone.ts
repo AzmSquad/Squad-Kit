@@ -40,6 +40,61 @@ export const RUNTIMES: PhoneRuntime[] = [
   },
 ];
 
+/** Google's emulator, as squad-kit's Android module gives it: one system image, Pixel 9 and Pixel Tablet. */
+export const ANDROID_RUNTIMES: PhoneRuntime[] = [
+  {
+    id: 'system-images;android-36;google_apis;arm64-v8a',
+    version: '16',
+    models: [
+      { id: 'pixel_9', name: 'Pixel 9', size: 'phone' },
+      { id: 'pixel_tablet', name: 'Pixel Tablet', size: 'tablet' },
+    ],
+  },
+];
+
+/**
+ * The same made-up phone as Android's emulator: its own words, its window opens only by starting again (which loses
+ * what was put on it after the snapshot), and Maestro knows it by a serial.
+ */
+export function fakeAndroid(o: { devices?: PhoneDevice[]; app?: AppOnPhone } = {}): FakePhone {
+  const f = fakePhone({ ...o, runtimes: ANDROID_RUNTIMES, app: o.app ?? { appId: 'dev.test.app', schemes: [] } });
+  const m = f.module;
+  let n = 0;
+  const create = m.create.bind(m);
+  const boot = m.boot.bind(m);
+  f.module = {
+    ...m,
+    name: 'fake-android',
+    label: 'Android emulator',
+    words: { phone: 'Android phone', tablet: 'Android tablet' },
+    system: 'Android',
+    windowRestarts: true,
+    times: { build: { key: 'android-build', guess: 540 }, boot: { key: 'android-boot', guess: 40 }, install: { key: 'android-install', guess: 5 }, 'first-run': { key: 'maestro-first-android', guess: 30 } },
+    async create(name, model, runtime) {
+      await create(name, model, runtime);
+      // Named like squad-kit's own AVDs, by name, not a made-up id.
+      const id = `squad-kit-android-${n++ === 0 && /phone$/.test(name) ? 'phone' : /tablet$/.test(name) ? 'tablet' : 'phone'}`;
+      f.devices[f.devices.length - 1]!.id = id;
+      return id;
+    },
+    async boot(id) {
+      await boot(id);
+      f.windows.delete(id);
+    },
+    async openWindow(id) {
+      f.calls.push(`window ${id}`);
+      f.devices.find((d) => d.id === id)!.state = 'booted';
+      f.windows.add(id);
+    },
+    tapId: (id) => `emulator-${id.endsWith('tablet') ? 5562 : 5560}`,
+    tapEnv: () => ({ ANDROID_HOME: '/sk/sdk', HOME: '/sk/phones/android' }),
+    async release() {
+      f.calls.push('release');
+    },
+  };
+  return f;
+}
+
 export function fakePhone(o: { devices?: PhoneDevice[]; notHere?: string | null; runtimes?: PhoneRuntime[]; app?: AppOnPhone } = {}): FakePhone {
   const devices = [...(o.devices ?? [])];
   const calls: string[] = [];
@@ -55,6 +110,7 @@ export function fakePhone(o: { devices?: PhoneDevice[]; notHere?: string | null;
     name: 'fake-phone',
     label: 'iPhone simulator',
     words: { phone: 'iPhone', tablet: 'iPad' },
+    system: 'iOS',
     notHere: () => o.notHere ?? null,
     runtimes: async () => o.runtimes ?? RUNTIMES,
     devices: async () => devices.map((d) => ({ ...d })),

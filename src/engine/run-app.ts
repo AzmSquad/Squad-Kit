@@ -13,6 +13,7 @@ import { GitStopped, NoRoomForCopy, clearHalfCopy, copyIsWhole, copyTurn, gitLat
 import { KILL_AFTER_MS, endGroup, endPid, groupAlive, takenOver } from './process-group.js';
 import { portSettings } from './port-vars.js';
 import { reposOf } from './repos.js';
+import { appEnvHere } from './service-hosts.js';
 import { partsOf, runsAsProduct } from '../board/parts.js';
 import { TRY_YIELDS_AFTER_MS, leaveProduct, takeProduct } from './product-lock.js';
 import { PhoneOpen, type PhoneOpenView } from './phone/open.js';
@@ -40,7 +41,7 @@ export interface AppStatus extends ProjectApp {
   state: AppState;
   /**
    * While starting: bringing the copy up to date, making it for the first time, the setup command, the start command,
-   * or, for an iPhone app, getting it onto squad-kit's iPhone (phone.run says which step, with the time left).
+   * or, for a phone app, getting it onto squad-kit's phone (phone.run says which step, with the time left).
    */
   step?: 'update' | 'copy' | 'setup' | 'start' | 'phone';
   /** Where it runs: the app's address, or the next free port when the person chose it. */
@@ -62,13 +63,15 @@ export interface AppStatus extends ProjectApp {
   elsewhere?: boolean;
   /** Something answers at the app's address now. */
   up: boolean;
-  /** An iPhone app on a Mac: Start opens it on squad-kit's iPhone (engine/phone/open.ts). */
+  /** A phone app: Start opens it on squad-kit's iPhone or Android phone (engine/phone/open.ts). */
   phone?: PhoneAppView;
 }
 
-/** An iPhone app in Your apps or Try it yourself: how Start opens it on squad-kit's iPhone. */
+/** A phone app in Your apps or Try it yourself: how Start opens it on squad-kit's phone. */
 export interface PhoneAppView {
-  /** The tools for it are here: Start opens it on the iPhone. */
+  /** The phone it opens on, for people: "iPhone", "Android phone". */
+  word: string;
+  /** The tools for it are here: Start opens it on the phone. */
   ready: boolean;
   /** Why not, in one plain sentence, with the Tools page line. */
   why?: string;
@@ -83,9 +86,9 @@ export interface PhoneAppView {
   run?: PhoneOpenView;
 }
 
-/** One plain line for an iPhone app's state, from its plan and its run: shared by Your apps and Try it yourself. */
+/** One plain line for a phone app's state, from its plan and its run: shared by Your apps and Try it yourself. */
 export function phoneAppView(plan: PhoneStartPlan, web: boolean, open?: PhoneOpen, on = false): PhoneAppView {
-  return { ready: plan.ready, ...(plan.why ? { why: plan.why } : {}), ...(plan.link ? { link: plan.link } : {}), languages: plan.languages, web, ...(on ? { on: true } : {}), ...(open ? { run: open.view() } : {}) };
+  return { word: plan.word, ready: plan.ready, ...(plan.why ? { why: plan.why } : {}), ...(plan.link ? { link: plan.link } : {}), languages: plan.languages, web, ...(on ? { on: true } : {}), ...(open ? { run: open.view() } : {}) };
 }
 
 /** A language as Start takes it: two or three small letters, like "ar". */
@@ -532,8 +535,8 @@ export class AppRunner {
     // An iPhone app opens on squad-kit's iPhone when its tools are here, unless the person asked for the web version.
     const p = opts.web ? null : this.phoneOf(app);
     const onPhone = Boolean(p && (opts.phone || p.plan.ready));
-    if (opts.phone && !p) throw new AppError(`${app.name} is not an iPhone app, so squad-kit runs it in the browser: press Start.`);
-    if (onPhone && !p!.plan.ready) throw new AppError(p!.plan.why ?? `squad-kit can't open ${app.name} on its iPhone yet.`);
+    if (opts.phone && !p) throw new AppError(`${app.name} is not a phone app, so squad-kit runs it in the browser: press Start.`);
+    if (onPhone && !p!.plan.ready) throw new AppError(p!.plan.why ?? `squad-kit can't open ${app.name} on its ${p!.plan.word} yet.`);
     const wrong = onPhone ? languageProblem(opts.language, p!.plan.languages) : null;
     if (wrong) throw new AppError(wrong);
     if (!onPhone && !app.start) throw new AppError(p?.plan.why ?? `squad-kit does not know how to start ${app.name} yet. Ask the Architect to find it, or type the start command.`);
@@ -625,6 +628,7 @@ export class AppRunner {
     const open = new PhoneOpen({
       dir,
       kind: plan.kind,
+      system: plan.system,
       by: 'Your apps',
       again: 'Start',
       ...(language ? { language } : {}),
@@ -643,7 +647,7 @@ export class AppRunner {
     if (v.state === 'running') {
       run.state = 'running';
       if (v.since) run.since = v.since;
-    } else if (v.state === 'failed') this.fail(run, v.error ?? `${app.name} did not open on the iPhone.`, { detail: v.detail ?? '' });
+    } else if (v.state === 'failed') this.fail(run, v.error ?? `${app.name} did not open on the ${plan.word}.`, { detail: v.detail ?? '' });
   }
 
   /** Waits until the app's start is over, and says how it went. */
@@ -794,7 +798,8 @@ export class AppRunner {
       BROWSER: 'none',
       ...(url && (url !== app.url || /\$\{?PORT\b|%PORT%/.test(command)) ? { PORT: String(portOf(url)) } : {}),
       ...moved,
-      ...(compose ? compose.env : {}),
+      // On this computer, a setting that names a compose service reaches it through the port it publishes here.
+      ...(compose ? compose.env : appEnvHere(dir, command, (text) => this.keep(app.repo, `${text}\n`))),
     };
     const child = spawnProject(command, { cwd: dir, env, ...(guard ? { guard } : {}) });
     run.child = child;

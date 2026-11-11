@@ -107,6 +107,7 @@ export function iosSimulatorWith(run: SimRun, platform: NodeJS.Platform = proces
     name: 'ios-simulator',
     label: 'iPhone simulator',
     words: { phone: 'iPhone', tablet: 'iPad' },
+    system: 'iOS',
     notHere: () => (platform === 'darwin' ? null : NEEDS_MAC),
     async runtimes() {
       if (platform !== 'darwin') return [];

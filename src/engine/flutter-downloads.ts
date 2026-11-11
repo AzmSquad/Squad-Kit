@@ -1,3 +1,4 @@
+import { usesAndroid } from './android-env.js';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -29,9 +30,13 @@ export function runsFlutter(command: string): boolean {
   return /(?:^|[\s;&|(])flutter(?:\s|$)/.test(command);
 }
 
-/** What `flutter precache` gets: the iPhone's on a Mac, the web's when the app has a web version. Null when neither. */
-export function precacheArgs(platforms: Platform[], platform: NodeJS.Platform = process.platform): string[] | null {
-  const want = [...(platforms.includes('ios') && platform === 'darwin' ? ['--ios'] : []), ...(platforms.includes('web') ? ['--web'] : [])];
+/**
+ * What `flutter precache` gets: the iPhone's on a Mac, the web's when the app has a web version, and Android's only for
+ * a command that builds for Android (`flutter build apk`). Null when none.
+ */
+export function precacheArgs(platforms: Platform[], platform: NodeJS.Platform = process.platform, command?: string): string[] | null {
+  const android = platforms.includes('android') && usesAndroid(command);
+  const want = [...(platforms.includes('ios') && platform === 'darwin' ? ['--ios'] : []), ...(platforms.includes('web') ? ['--web'] : []), ...(android ? ['--android'] : [])];
   return want.length ? ['precache', ...want] : null;
 }
 
@@ -91,7 +96,7 @@ export type FlutterDownloads = 'done' | 'had' | 'not-needed' | 'failed';
 export async function flutterDownloads(dir: string, command: string, o: { env?: NodeJS.ProcessEnv; signal?: AbortSignal; onOutput?(): void; platform?: NodeJS.Platform; home?: string } = {}): Promise<FlutterDownloads> {
   if (!runsFlutter(command)) return 'not-needed';
   const { kinds, platforms } = kindsOf(dir);
-  const args = kinds.includes('flutter') ? precacheArgs(platforms, o.platform) : null;
+  const args = kinds.includes('flutter') ? precacheArgs(platforms, o.platform, command) : null;
   const env = o.env ?? projectEnv();
   const flutter = args ? flutterOnPath(env) : null;
   if (!args || !flutter) return 'not-needed';

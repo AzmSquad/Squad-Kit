@@ -1,18 +1,19 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useRouterState } from '@tanstack/react-router';
-import { Check, CircleAlert, CircleArrowUp, Download, ExternalLink, Loader2, Minus, Pause, RefreshCw, TriangleAlert } from 'lucide-react';
+import { Check, CircleAlert, CircleArrowUp, Download, ExternalLink, FileText, Loader2, Minus, Pause, RefreshCw, TriangleAlert } from 'lucide-react';
 import { api } from '../api/client';
-import type { ToolGetting, ToolLine, ToolsView } from '../api/types';
+import type { LicenseView, ToolGetting, ToolLine, ToolsView } from '../api/types';
 import { useAct } from '../lib/data';
-import { Cmd, CouldNotLoad, ago } from '../components/ui';
+import { Cmd, CouldNotLoad, Modal, ago } from '../components/ui';
 import { ToolLogo, brandOf } from '../components/ToolLogo';
 import '../styles/tools.css';
 
 /**
  * "What this project needs": every tool for a smooth experience on this computer, Required first. Each line says what
- * it gives, whether it is here, what it is used for, and who installs it: a Get it button when squad-kit can, the
- * official steps and Check again when only you can. A copy of yours that is too old gets an Update button when
+ * it gives, whether it is here, what it is used for, and who installs it: a Get it button when squad-kit can (after
+ * you accept its maker's license, read in full, when it has one: Google's for the Android phone tools), the official
+ * steps and Check again when only you can. A copy of yours that is too old gets an Update button when
  * squad-kit can update it safely, with a warning to OK first, and the steps stay below. A Ready copy older than its makers
  * recommend says so, with the steps to update it, and stops nothing. A story stopped by a tool links to its line here.
  */
@@ -116,7 +117,7 @@ function Progress({ g }: { g: ToolGetting }) {
         </span>
       ) : (
         <span>
-          {g.step === 'unpack' ? 'Unpacking' : `Downloading${g.total ? `: ${mb(g.done)} of ${mb(g.total)} MB` : ''}`}, {left(g.secondsLeft)}. You can keep working meanwhile.
+          {g.step === 'unpack' ? 'Unpacking' : `${g.step === 'install' ? (g.words ?? 'Installing') : 'Downloading'}${g.total ? `: ${mb(g.done)} of ${mb(g.total)} MB` : ''}`}, {left(g.secondsLeft)}. You can keep working meanwhile.
         </span>
       )}
     </div>
@@ -165,9 +166,67 @@ function UpdateIt({ l, busy }: { l: ToolLine; busy: boolean }) {
   );
 }
 
+/** "about 12 minutes", for the first time a tool takes to get. */
+const aboutMin = (s: number) => (s >= 90 ? `about ${Math.round(s / 60)} minutes` : `about ${Math.max(10, Math.round(s / 10) * 10)} seconds`);
+
+/** The license a tool's maker asks you to accept, in full, read from the maker's own site, with Accept and Not now. */
+function LicenseRead({ l, onClose }: { l: ToolLine; onClose(): void }) {
+  const q = useQuery({ queryKey: ['tool-license', l.id], queryFn: () => api<LicenseView>(`/api/v1/tools/${encodeURIComponent(l.id)}/license`), staleTime: 60 * 60_000 });
+  const act = useAct<ToolsView>();
+  const v = q.data;
+  return (
+    <Modal
+      title={`Google's license for the ${l.name}`}
+      wide
+      onClose={onClose}
+      footer={
+        <>
+          <button
+            className="btn pri"
+            disabled={!v || act.isPending}
+            onClick={() => act.mutate({ path: `/api/v1/tools/${encodeURIComponent(l.id)}/accept`, body: { licenses: v!.licenses.map((x) => x.id) }, done: "You accepted Google's license. Now press Get it.", after: onClose })}
+          >
+            {act.isPending ? <Loader2 size={15} className="spin" /> : <Check size={15} />} Accept
+          </button>
+          <button className="btn" autoFocus onClick={onClose}>
+            Not now
+          </button>
+          <span className="grow" />
+          <Cmd text={l.license!.command} />
+        </>
+      }
+    >
+      {!v ? (
+        q.isError ? (
+          <CouldNotLoad what="the license" error={q.error} onRetry={() => void q.refetch()} />
+        ) : (
+          <p className="tl-wait">
+            <Loader2 size={15} className="spin" /> Reading the license from Google's site…
+          </p>
+        )
+      ) : (
+        <>
+          <p>
+            Google asks everyone who gets these tools to accept {v.licenses.length === 1 ? 'this license' : `these ${v.licenses.length} licenses`}. squad-kit
+            never accepts {v.licenses.length === 1 ? 'it' : 'them'} for you: read {v.licenses.length === 1 ? 'it' : 'them'}, then press Accept or Not now.
+          </p>
+          {v.licenses.map((x) => (
+            <section key={x.id} className="tl-license">
+              <h4 className="mono">{x.id}</h4>
+              <pre>{x.text}</pre>
+            </section>
+          ))}
+        </>
+      )}
+    </Modal>
+  );
+}
+
 function Line({ l, hit, busy, onCheck }: { l: ToolLine; hit: boolean; busy: boolean; onCheck(): void }) {
   const act = useAct<ToolsView>();
+  const [reading, setReading] = useState(false);
   const needsYou = l.state !== 'ready' && l.state !== 'not-here' && l.state !== 'getting' && l.state !== 'updating';
+  const mustAccept = Boolean(l.license && !l.license.accepted);
   return (
     <section id={l.id} className={`tl-line ${toneOf(l)} ${l.blocks.length ? 'stops' : ''} ${hit ? 'tl-hit' : ''}`} style={{ '--brand': brandOf(l.id, l.name) } as CSSProperties}>
       <div className="tl-head">
@@ -202,13 +261,27 @@ function Line({ l, hit, busy, onCheck }: { l: ToolLine; hit: boolean; busy: bool
         {l.getting && <Progress g={l.getting} />}
         {needsYou && l.installer === 'squad-kit' && (
           <div className="tl-act">
-            <span>squad-kit gets it itself, into its own folder, with no password asked.</span>
-            <span className="tl-row">
-              <button className="btn pri sm" disabled={busy || act.isPending} onClick={() => act.mutate({ path: `/api/v1/tools/${encodeURIComponent(l.id)}/get`, done: `Getting ${l.name}` })}>
-                <Download size={14} /> Get it
-              </button>
-              <Cmd text={l.command} />
+            <span>
+              squad-kit gets it itself, into its own folder, with no password asked.
+              {l.size ? ` It takes ${l.size} on this computer${l.seconds ? `, and ${aboutMin(l.seconds)} the first time` : ''}.` : ''}
+              {mustAccept ? " Google's license comes first: read it and accept it." : ''}
             </span>
+            {mustAccept ? (
+              <span className="tl-row">
+                <button className="btn pri sm" disabled={busy} onClick={() => setReading(true)}>
+                  <FileText size={14} /> Read and accept Google's license
+                </button>
+                <Cmd text={l.license!.command} />
+              </span>
+            ) : (
+              <span className="tl-row">
+                <button className="btn pri sm" disabled={busy || act.isPending} onClick={() => act.mutate({ path: `/api/v1/tools/${encodeURIComponent(l.id)}/get`, done: `Getting ${l.name}` })}>
+                  <Download size={14} /> Get it
+                </button>
+                <Cmd text={l.command} />
+              </span>
+            )}
+            {reading && <LicenseRead l={l} onClose={() => setReading(false)} />}
           </div>
         )}
         {needsYou && l.update && <UpdateIt l={l} busy={busy} />}

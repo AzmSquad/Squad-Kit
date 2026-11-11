@@ -16,6 +16,8 @@ export interface PhoneDriverStart {
   javaHome?: string;
   /** squad-kit's own folder for everything the tool writes: nothing goes to the person's home folder. */
   dir: string;
+  /** What the phone needs in the tool's environment to reach it (phone/types.ts tapEnv). */
+  env?: Record<string, string>;
   signal?: AbortSignal;
 }
 
@@ -26,6 +28,7 @@ export interface PhoneDriver {
   screenText(timeoutMs: number): Promise<string>;
   /** False once the tool has ended by itself: squad-kit starts it again. */
   readonly alive: boolean;
+  /** Ends the tool, its whole group, and resolves once it has ended. */
   close(): Promise<void>;
 }
 

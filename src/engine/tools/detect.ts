@@ -6,6 +6,7 @@ import { squadHome } from '../../core/home.js';
 import { CATALOG, OWN_SOURCES, type ManagedBy, type System, type ToolId } from './catalog.js';
 import { compareVersions } from './fit.js';
 import { mergePath, readLoginPath } from './login-path.js';
+import { androidPick, imageLevel, sdkLacks, sdkPlaces } from './android.js';
 
 /**
  * Finds each tool and its version with short, safe commands: `--version` style, a few seconds each, never interactive,
@@ -46,6 +47,8 @@ export interface Ran {
 /** The computer the checks look at. Tests give a made-up one. */
 export interface DetectHost {
   system: System;
+  /** The computer's chip, as Node names it: "arm64", "x64". Left out: this computer's. */
+  arch?: string;
   home: string;
   env: NodeJS.ProcessEnv;
   run(cmd: string, args: string[], opts?: { timeoutMs?: number; env?: NodeJS.ProcessEnv }): Promise<Ran>;
@@ -68,6 +71,7 @@ export function systemOf(platform: NodeJS.Platform = process.platform): System {
 export function realHost(): DetectHost {
   return {
     system: systemOf(),
+    arch: process.arch,
     home: os.homedir(),
     env: process.env,
     run: (cmd, args, opts = {}) =>
@@ -342,6 +346,31 @@ function androidStudio(h: DetectHost): Found {
   return missing();
 }
 
+/** Android 16 for API 36. */
+const ANDROID_NAMES: Record<number, string> = { 37: '17', 36: '16', 35: '15', 34: '14', 33: '13' };
+const androidWords = (api: number) => `Android ${ANDROID_NAMES[api] ?? api}`;
+
+/**
+ * Google's Android tools: squad-kit's own, once got; else an SDK of the person's (ANDROID_HOME, or Android Studio's own
+ * folder) that has everything the phone needs, used as it is and never changed. One that lacks something is left as it
+ * is: squad-kit gets its own.
+ */
+function android(h: DetectHost, home: string): Found {
+  const arch = h.arch ?? process.arch;
+  if (!androidPick(h.system, arch)) return { state: 'not-here' };
+  const own = ownTool('android', home);
+  if (own) return { state: 'found', version: androidWords(Number(own.version) || 0), where: path.join(own.dir, 'sdk'), own: true };
+  let short: { sdk: string; lacks: string[] } | null = null;
+  for (const sdk of sdkPlaces(h.env, h.home, h.system)) {
+    if (!h.exists(sdk)) continue;
+    const lacks = sdkLacks(h, sdk, h.system, arch);
+    if (!lacks.length) return { state: 'found', version: androidWords(imageLevel(h.list, sdk, arch)), where: sdk, note: `Your own Android SDK in ${sdk}: squad-kit uses it as it is, and never changes it.` };
+    short ??= { sdk, lacks };
+  }
+  const list = (xs: string[]) => (xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
+  return missing(short ? `Your Android SDK in ${short.sdk} lacks ${list(short.lacks)}. squad-kit gets its own instead, and leaves yours as it is.` : undefined);
+}
+
 async function docker(h: DetectHost): Promise<Found> {
   const bin = onPath(h, 'docker');
   if (!bin) return missing();
@@ -378,6 +407,7 @@ export async function detectAll(h: DetectHost = realHost(), home = squadHome()):
     safe('cocoapods', () => cocoapods(h)),
     safe('java', () => java(h, home)),
     safe('maestro', () => maestro(h, home)),
+    safe('android', () => android(h, home)),
     safe('android-studio', () => androidStudio(h)),
     safe('docker', () => docker(h)),
   ]);

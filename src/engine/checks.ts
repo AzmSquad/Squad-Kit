@@ -12,6 +12,7 @@ import { appPortVariables } from './port-vars.js';
 import { guardBlockedPath, guardEnv, homeCachesRefused, spawnProject, type GuardSpec } from './project-guard.js';
 import { findCommands, opensAWindow, ownXcodeCommand } from './find-commands.js';
 import { scriptsOf } from './weakened.js';
+import { appEnvHere } from './service-hosts.js';
 
 /** squad-kit runs the project's own checks itself, so the AI never grades its own work. */
 
@@ -484,7 +485,8 @@ export async function startApp(cwd: string, given: string, at: string, waitMs = 
   const target = port ? url.replace(/(:\/\/[^/:]+)(:\d+)?/, `$1:${port}`) : url;
   const own = port ? appPortVariables(cwd, portOf(url)) : [];
   const moved = port ? Object.fromEntries(['PORT', ...own].map((name) => [name, String(port)])) : {};
-  const env = { CI: '1', FORCE_COLOR: '0', BROWSER: 'none', ...moved, ...more.env };
+  // On this computer, a database or Redis setting that names a compose service reaches it through the port it publishes here.
+  const env = { CI: '1', FORCE_COLOR: '0', BROWSER: 'none', ...appEnvHere(cwd, command), ...moved, ...more.env };
   const homes = ownHomes(command, guard);
   /** One start of the command: what it printed, and how it ended. */
   const launch = (extra: Record<string, string> | null) => {

@@ -19,7 +19,14 @@ export interface CopyWiring {
   value: string;
 }
 
+/** A story's own Redis database number in its copy (engine/story-redis.ts): its settings, in the environment and in files git leaves out. */
+export interface RedisWiring {
+  env: Record<string, string>;
+  files: { path: string; key: string; form: SettingForm; value: string }[];
+}
+
 const wired = new Map<string, CopyWiring>();
+const redisWired = new Map<string, RedisWiring>();
 
 const inside = (dir: string, p: string): boolean => p === dir || p.startsWith(`${dir}${path.sep}`);
 
@@ -29,35 +36,52 @@ export function wireCopy(dir: string, w: CopyWiring): void {
   writeCopyFile(path.resolve(dir), w);
 }
 
+/** Gives a copy its story's own Redis database number, the same way. */
+export function wireCopyRedis(dir: string, w: RedisWiring): void {
+  redisWired.set(path.resolve(dir), w);
+  for (const f of w.files) writeCopyFile(path.resolve(dir), { env: {}, value: f.value, file: f });
+}
+
 /** Writes the setting into the copy's file again: placing a story's local files writes over that file. */
 export function rewireCopy(dir: string): void {
   const w = wired.get(path.resolve(dir));
   if (w) writeCopyFile(path.resolve(dir), w);
+  for (const f of redisWired.get(path.resolve(dir))?.files ?? []) writeCopyFile(path.resolve(dir), { env: {}, value: f.value, file: f });
 }
 
 export function unwireCopy(dir: string): void {
   wired.delete(path.resolve(dir));
 }
 
+export function unwireCopyRedis(dir: string): void {
+  redisWired.delete(path.resolve(dir));
+}
+
 /** The wiring of the copy a folder is in, or of the one copy inside it (a story's folder on a workspace). */
-function wiringFor(cwd: string): [string, CopyWiring] | undefined {
+function wiringFor<W>(map: Map<string, W>, cwd: string): [string, W] | undefined {
   const at = path.resolve(cwd);
-  for (const [dir, w] of wired) if (inside(dir, at)) return [dir, w];
-  const within = [...wired].filter(([dir]) => inside(at, dir));
+  for (const [dir, w] of map) if (inside(dir, at)) return [dir, w];
+  const within = [...map].filter(([dir]) => inside(at, dir));
   return within.length === 1 ? within[0] : undefined;
 }
 
-/** The environment for a command run in this folder: the story's database setting, when the folder is a wired copy. */
+/** The environment for a command run in this folder: the story's database setting and Redis number, when the folder is a wired copy. */
 export function copyDbEnv(cwd: string | undefined): Record<string, string> {
   if (!cwd) return {};
-  return { ...(wiringFor(cwd)?.[1].env ?? {}) };
+  return { ...(wiringFor(redisWired, cwd)?.[1].env ?? {}), ...(wiringFor(wired, cwd)?.[1].env ?? {}) };
 }
 
-/** The copy's settings file squad-kit wrote the address into, for no agent to read. */
+/** True when the folder is a copy pointed at its story's own database. */
+export function ownDbWired(cwd: string): boolean {
+  return Boolean(wiringFor(wired, cwd));
+}
+
+/** The copy's settings files squad-kit wrote an address into, for no agent to read. */
 export function copyDbFiles(cwd: string | undefined): string[] {
   if (!cwd) return [];
-  const hit = wiringFor(cwd);
-  return hit?.[1].file ? [path.join(hit[0], hit[1].file.path)] : [];
+  const hit = wiringFor(wired, cwd);
+  const redis = wiringFor(redisWired, cwd);
+  return [...new Set([...(hit?.[1].file ? [path.join(hit[0], hit[1].file.path)] : []), ...(redis?.[1].files ?? []).map((f) => path.join(redis![0], f.path))])];
 }
 
 /** The file's place in the copy, or null when a link on the way would send it somewhere else. */
@@ -126,4 +150,5 @@ export function writeSetting(file: string, form: SettingForm, key: string, value
 /** For tests: every copy forgotten. */
 export function forgetWiring(): void {
   wired.clear();
+  redisWired.clear();
 }

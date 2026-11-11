@@ -30,7 +30,7 @@ const OWN_COMPOSE_FILES = ['compose.yaml', 'compose.yml', 'docker-compose.yaml',
 const OWN_OVERRIDES = ['compose.override.yaml', 'compose.override.yml', 'docker-compose.override.yaml', 'docker-compose.override.yml'];
 const VALUE_FLAGS = new Set(['-f', '--file', '--env-file', '--profile', '--parallel', '--ansi', '--progress', '--project-directory']);
 
-const isCompose = (command: string): boolean => /^\s*(docker\s+compose|docker-compose)(\s|$)/.test(command);
+export const isCompose = (command: string): boolean => /^\s*(docker\s+compose|docker-compose)(\s|$)/.test(command);
 
 /** Docker's socket on this computer, where it really is. */
 export function dockerSocket(env: NodeJS.ProcessEnv = process.env, home = os.homedir(), system = '/var/run/docker.sock'): string | null {

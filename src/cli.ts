@@ -53,6 +53,7 @@ import {
   runPull,
   runQuality,
   runNewTests,
+  runPhoneChoice,
   runBacklog,
   runUnstick,
   runRelease,
@@ -306,14 +307,14 @@ program
 program
   .command('tools [action] [tool]')
   .description(
-    "What this project needs on this computer, the same as the Tools page. check: look again after installing something. get <tool>: squad-kit gets one of its own tools, like maestro or java. update <tool>: squad-kit updates your own Flutter when it safely can, after a warning",
+    "What this project needs on this computer, the same as the Tools page. check: look again after installing something. get <tool>: squad-kit gets one of its own tools, like maestro, java or android. accept <tool>: read a tool maker's license and accept it (android needs it before get). update <tool>: squad-kit updates your own Flutter when it safely can, after a warning",
   )
-  .option('-y, --yes', 'With update: say OK to the warning without being asked')
+  .option('-y, --yes', 'With accept or update: say yes without being asked')
   .action(wrapArgs(runTools));
 
 program
-  .command('phone [action]')
-  .description("squad-kit's own iPhone and iPad on this Mac, which it runs hidden for the Tester's pictures: whether each runs, and when it shuts down by itself. stop: shut them down now. Only squad-kit's own devices, never anybody else's")
+  .command('phone [action] [phone]')
+  .description("squad-kit's own phones on this computer (iPhone and iPad, Android phone and tablet), which it runs hidden for the Tester's pictures: whether each runs, and when it shuts down by itself. start <android|iphone>: bring one up hidden now, ready for the pictures. stop: shut them down now. Only squad-kit's own devices, never anybody else's")
   .action(wrapArgs(runPhone));
 
 // The first run and the Overview: the setup page and the Overview page, button for button.
@@ -747,6 +748,10 @@ set
   .command('new-tests [setting]')
   .description('Show or set whether a new story may be built without new tests: switch (default, each story chooses) or always')
   .action(wrapArgs(runNewTests));
+set
+  .command('phone [setting]')
+  .description('Show or set the phone an app for both iPhone and Android uses for its pictures, Start and Try it yourself: iphone, android, or auto (default: the iPhone on a Mac when its tools are ready, else Android)')
+  .action(wrapArgs(runPhoneChoice));
 set
   .command('quality [setting]')
   .description('Show or set how strong the squad\'s models are: best (default), balanced or thrifty')

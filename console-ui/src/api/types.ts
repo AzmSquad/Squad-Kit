@@ -267,6 +267,8 @@ export interface DatabaseInfo {
   failed?: { at: string; text: string };
   /** Why the app would not use a story's own copy: stories then use the database as before. */
   blocked?: string;
+  /** The app's Redis, and each story's own database number on it: read only. */
+  redis?: { server: string; here: boolean; own: number; stories: { story: string; number: number }[]; words: string };
   stories: { story: string; name: string; at: string; title?: string }[];
   notes: { at: string; story?: string; text: string }[];
   /** Tools this computer lacks for the database's kind. */
@@ -724,6 +726,8 @@ export interface BoardMeta {
   documentsInGit?: boolean;
   /** An engineer chose that every story writes new tests: no "Write new tests" switch on a new story. */
   alwaysNewTests?: boolean;
+  /** The phone an app for both phones uses: the iPhone or Android. Left out: automatic. */
+  phone?: 'iphone' | 'android';
   /** The Quality setting; left out means best. */
   quality?: Quality;
   project: string;
@@ -1225,11 +1229,11 @@ export interface ProjectApp {
   includes: { id: string; title: string }[];
   /** A ticket merged since it started: "RO-5 is in main · Run the new version". */
   fresh?: { id: string; title: string; base: string; release?: string };
-  /** An iPhone app on a Mac: Start opens it on squad-kit's iPhone. */
+  /** A phone app: Start opens it on squad-kit's iPhone or Android phone. */
   phone?: PhoneAppView;
 }
 
-/** An app opened on squad-kit's iPhone for you: each step with the time left, then the device it runs on. */
+/** An app opened on squad-kit's phone for you: each step with the time left, then the device it runs on. */
 export interface PhoneOpenView {
   state: 'starting' | 'running' | 'stopped' | 'failed';
   step?: 'build' | 'phone' | 'install' | 'open';
@@ -1246,9 +1250,11 @@ export interface PhoneOpenView {
   ended?: string;
 }
 
-/** An iPhone app in Your apps or Try it yourself. */
+/** A phone app in Your apps or Try it yourself. */
 export interface PhoneAppView {
-  /** The tools for it are here: Start opens it on the iPhone. */
+  /** The phone it opens on: "iPhone", "Android phone". */
+  word: string;
+  /** The tools for it are here: Start opens it on the phone. */
   ready: boolean;
   why?: string;
   /** The Tools page line: "/tools#xcode". */
@@ -1323,8 +1329,8 @@ export interface ToolGetting {
   name: string;
   version?: string;
   startedAt: string;
-  /** squad-kit's own download and unpack, or an update of your own copy. */
-  step: 'download' | 'unpack' | 'update';
+  /** squad-kit's own download and unpack, its install after (Android), or an update of your own copy. */
+  step: 'download' | 'unpack' | 'install' | 'update';
   /** A download: bytes so far and in all. An update: seconds so far and the time it usually takes. */
   done: number;
   total?: number;
@@ -1360,6 +1366,19 @@ export interface ToolLine {
   cantUpdate?: string;
   /** Ready, and older than its makers recommend: the version they recommend. It stops nothing; the steps say how to update. */
   recommended?: string;
+  /** Its maker's license comes first: whether you accepted it, and the command that shows it and asks. */
+  license?: { accepted: boolean; command: string };
+  /** squad-kit gets it: how much room it takes ("about 20 GB") and about how long the first time takes, in seconds. */
+  size?: string;
+  seconds?: number;
+}
+
+/** A tool's license in full, from its maker, for you to read before Accept. */
+export interface LicenseView {
+  tool: string;
+  name: string;
+  licenses: { id: string; text: string }[];
+  accepted: boolean;
 }
 
 export interface ToolsView {

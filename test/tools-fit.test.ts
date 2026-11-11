@@ -71,7 +71,8 @@ describe('versions', () => {
 
 describe('the lines of a project', () => {
   it("a Flutter app on this Mac: what it needs, how much, and what stops", () => {
-    const lines = linesFor(FLUTTER_APP, THIS_MAC, 'mac', READY);
+    // It builds for both phones; on this Mac it uses the iPhone, so what only Android needs is Optional.
+    const lines = linesFor(FLUTTER_APP, THIS_MAC, 'mac', READY, 'ios');
     expect(lines.map((l) => [l.id, l.priority, l.state])).toEqual([
       ['git', 'required', 'ready'],
       ['ai-tool', 'required', 'ready'],
@@ -80,15 +81,17 @@ describe('the lines of a project', () => {
       ['simulator', 'required', 'ready'],
       ['cocoapods', 'required', 'ready'],
       ['maestro', 'required', 'missing'],
+      ['android', 'optional', 'missing'],
       ['java', 'required', 'ready'],
-      ['android-studio', 'recommended', 'missing'],
+      ['android-studio', 'optional', 'missing'],
     ]);
+    expect(lineOf(lines, 'android').blocks).toEqual([]);
     const flutter = lineOf(lines, 'flutter');
     expect(flutter).toMatchObject({ version: '3.27.3', needs: '3.44.8', why: 'Xcode 27 needs it for iPhone builds' });
     // Too old for the iPhone only: building and the checks go on.
     expect(flutter.blocks).toEqual(['pictures', 'start-app', 'try-it']);
     expect(lineOf(lines, 'maestro')).toMatchObject({ installer: 'squad-kit', command: 'squad tools get maestro', blocks: ['pictures'] });
-    // Recommended never stops anything.
+    // Optional never stops anything.
     expect(lineOf(lines, 'android-studio').blocks).toEqual([]);
     expect(lineOf(lines, 'ai-tool').name).toBe('Claude Code');
   });
@@ -185,7 +188,7 @@ describe('a tool older than its makers recommend', () => {
 });
 
 describe('what a block says', () => {
-  const lines = (book: FoundBook) => linesFor(FLUTTER_APP, book, 'mac');
+  const lines = (book: FoundBook) => linesFor(FLUTTER_APP, book, 'mac', undefined, 'ios');
 
   it('what can not happen, why, the way out, and the card line', () => {
     const book = { ...THIS_MAC, tools: { ...THIS_MAC.tools, flutter: { state: 'missing' as const } } };

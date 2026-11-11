@@ -3,6 +3,7 @@ import path from 'node:path';
 import kleur from 'kleur';
 import { confirm, input, select, Separator } from '@inquirer/prompts';
 import * as ui from '../ui/index.js';
+import { CHOICE_WORDS, PHONE_CHOICES, parseChoice } from '../engine/tools/which-phone.js';
 import { whereItStands } from '../board/at-review.js';
 import { alsoChangedLine } from '../board/also-changed.js';
 import { buildPaths, findSquadRoot, requireSquadRoot } from '../core/paths.js';
@@ -756,6 +757,29 @@ export async function runNewTests(setting: string | undefined): Promise<void> {
   const { alwaysNewTests: _was, ...rest } = meta;
   writeMeta(bp, setting === 'always' ? { ...rest, alwaysNewTests: true } : rest);
   ui.success(setting === 'always' ? 'Every new story writes new tests now. The "Write new tests" switch is gone from the new story form.' : 'Each new story can now be built without new tests: the "Write new tests" switch is on the new story form, on by default.');
+}
+
+/**
+ * `squad config set phone`: the phone an app for both iPhone and Android uses for its pictures, Start and Try it
+ * yourself: iphone, android, or auto (the default: the iPhone on a Mac when its tools are ready, else Android). Shared
+ * with the team in the project's settings. The board's Settings shows the same, and calls PUT /api/v1/settings.
+ */
+export async function runPhoneChoice(setting: string | undefined): Promise<void> {
+  const bp = board();
+  const meta = readMeta(bp);
+  const now = meta.phone ?? 'auto';
+  if (setting === undefined) {
+    out();
+    for (const c of PHONE_CHOICES) out(`  ${c === now ? kleur.bold(`● ${c}`) : `○ ${c}`}${' '.repeat(10 - c.length)}${kleur.gray(CHOICE_WORDS[c])}`);
+    out();
+    ui.info(`Change it: ${cmd('squad config set phone android')} (or iphone, auto)`);
+    return;
+  }
+  const choice = parseChoice(setting);
+  if (!choice) throw new Error(`"${setting}" is not a phone here. Use iphone, android or auto.`);
+  const { phone: _was, ...rest } = meta;
+  writeMeta(bp, choice === 'auto' ? rest : { ...rest, phone: choice });
+  ui.success(choice === 'auto' ? 'An app for both phones uses the iPhone on a Mac when its tools are ready, else Android.' : `An app for both phones uses ${choice === 'iphone' ? 'the iPhone' : 'Android'} for its pictures, Start and Try it yourself${choice === 'iphone' ? ' (a computer that is not a Mac still uses Android)' : ''}.`);
 }
 
 export async function runQuality(setting: string | undefined): Promise<void> {

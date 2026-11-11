@@ -5,7 +5,7 @@ import path from 'node:path';
 import type { PhoneDriverModule } from '../src/modules/phone-driver/types.js';
 import type { WindowPhone } from '../src/engine/window.js';
 import { StepFailure } from '../src/modules/browser/types.js';
-import { fakePhone, type FakePhone } from './fakes/phone.js';
+import { fakeAndroid, fakePhone, type FakePhone } from './fakes/phone.js';
 import { pngBytes } from './support/png.js';
 
 /**
@@ -32,11 +32,15 @@ let lines: string[];
 let tapped: string[];
 
 /** A made-up Maestro: each step is written down; a part named "Missing" is never on the screen. */
+/** Where each made-up Maestro was started: the device it was given, and the environment. */
+let opened: { device: string; env?: Record<string, string> }[] = [];
+
 function fakeDriver(): PhoneDriverModule {
   return {
     name: 'fake-maestro',
     label: 'Maestro',
-    async open() {
+    async open(o) {
+      opened.push({ device: o.device, ...(o.env ? { env: o.env } : {}) });
       return {
         alive: true,
         async act(appId, step) {
@@ -55,6 +59,7 @@ beforeEach(() => {
   process.env.SQUAD_KIT_HOME = path.join(tmp, 'home');
   lines = [];
   tapped = [];
+  opened = [];
   h.phone = fakePhone();
   h.driver = fakeDriver();
   desk.resetDesk();
@@ -103,6 +108,25 @@ describe("the phone's tools", () => {
     expect(item.page!.description).toContain('This app has no links of its own');
     expect(Object.keys(item)).toEqual(['page', 'steps', 'size', 'language']);
     expect(tools.find((t) => t.name === 'look_at_page')!.description).toContain('gives back what the screen shows as text');
+    await w.close();
+  });
+
+  it("on Android: the tools name Google's emulator and its Pixel, and Maestro taps it by its serial", async () => {
+    h.phone = fakeAndroid();
+    const s = new PhoneSession({ cwd: tmp, kind: 'flutter', system: 'android', tools: { maestro: '/sk/maestro' }, app: path.join(tmp, 'app-debug.apk'), say: (t) => lines.push(t) });
+    await s.ready();
+    const w = windowWith(s);
+    const shots = w.listTools().find((t) => t.name === 'take_screenshots')!;
+    expect(shots.description).toContain('a real Pixel 9 (phone) or Pixel Tablet (tablet): an Android emulator it runs itself, hidden, on this computer');
+    expect(opened).toEqual([{ device: 'emulator-5560', env: { ANDROID_HOME: '/sk/sdk', HOME: '/sk/phones/android' } }]);
+    expect(lines).toEqual([
+      "Starting squad-kit's Android phone, about 40 seconds",
+      "Putting the app on squad-kit's Android phone, about 5 seconds",
+      "Getting squad-kit's Android phone ready to tap through the app, about 30 seconds",
+    ]);
+    const r = await s.shoot({ page: '/', language: 'ar' }, { deadline: Date.now() + 30_000, stepMs: 5000 });
+    expect(r).toMatchObject({ device: 'Pixel 9' });
+    expect(h.phone.calls).toContain('launch squad-kit-android-phone dev.test.app ar');
     await w.close();
   });
 

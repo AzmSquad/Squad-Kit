@@ -90,6 +90,18 @@ describe('a .NET project', () => {
     expect(found).toMatchObject({ kind: 'mongo', name: 'cases', setting: { file: 'appsettings.Development.json', key: 'MongoSettings:ConnectionString', env: 'MongoSettings__ConnectionString' } });
   });
 
+  it("takes this computer's env file over the address in appsettings.json, and never a file for another place", () => {
+    write('Api.csproj', '<Project><ItemGroup><PackageReference Include="MongoDB.Driver" Version="2.0.0" /></ItemGroup></Project>');
+    write('appsettings.json', '{ "ConnectionStrings": { "Shop": "mongodb://admin:pw@203.0.113.7:27018/shop" } }');
+    write('docker-compose.yml', 'services:\n  api:\n    build: .\n    env_file: .env.dev\n  app.db:\n    image: mongo:7\n    ports: ["27017:27017"]\n');
+    write('.env.beta', 'ConnectionStrings__Shop=mongodb://shop:pw@10.0.0.5:27017/shop\n');
+    write('.env.dev', 'ConnectionStrings__Shop=mongodb://shop:pw@app.db:27017/shop?authSource=admin\n');
+    write('.env.prod', 'ConnectionStrings__Shop=mongodb://shop:pw@10.0.0.9:27017/shop\n');
+    const { found } = look();
+    expect(found).toMatchObject({ kind: 'mongo', name: 'shop', address: 'mongodb://shop:pw@app.db:27017/shop?authSource=admin', setting: { file: 'appsettings.json', key: 'ConnectionStrings:Shop', env: 'ConnectionStrings__Shop' } });
+    expect(found!.from).toEqual(expect.arrayContaining(['appsettings.json', '.env.dev']));
+  });
+
   it('says plainly that SQL Server comes later, and learns nothing', () => {
     write('Api.csproj', '<Project><ItemGroup><PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.0" /></ItemGroup></Project>');
     write('appsettings.Development.json', '{ "ConnectionStrings": { "Default": "Server=localhost;Database=Library;Trusted_Connection=True;TrustServerCertificate=True" } }');

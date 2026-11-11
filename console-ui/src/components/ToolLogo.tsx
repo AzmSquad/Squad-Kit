@@ -14,6 +14,7 @@ const BY_ID: Record<string, string> = {
   simulator: 'apple',
   cocoapods: 'cocoapods',
   java: 'openjdk',
+  android: 'android',
   'android-studio': 'androidstudio',
   docker: 'docker',
 };

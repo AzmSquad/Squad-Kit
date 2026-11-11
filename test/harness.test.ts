@@ -49,6 +49,7 @@ const EXCUSED: Record<string, string> = {
   'additions.ts:LOCK_LEFT_MS': 'A lock a closed program left behind. A save takes a moment, and nobody waits on this.',
   'additions.ts:LOCK_WAIT_MS': 'How long one save waits for another. It ends in a plain "try again".',
   'now.ts:STILL_WORKING_S': 'How recent the last progress must be for a slow card to say "still working" in its calm color. It changes words and a color, and stops nothing.',
+  'story-redis.ts:FLUSH_MS': "How long clearing a story's own Redis number may take when its copy goes. Nobody waits on it: the keys stay, and the log says so.",
   'find-database.ts:GREP_MS': 'How long one look in the code for the database name may take. It stops no story: the copy is then made as usual.',
   // How often squad-kit looks at something. Nothing waits on them, and nothing stops at them.
   'try-app.ts:WATCH_MS': 'How often it looks at a copy someone is trying.',
@@ -151,7 +152,7 @@ const STOPS_PER_FILE: Record<string, number> = {
   'actions.ts': 3,
   'breakdown-job.ts': 5,
   'budget.ts': 1,
-  'live.ts': 33,
+  'live.ts': 34,
   'sync.ts': 1,
 };
 
@@ -224,6 +225,21 @@ describe('limits', () => {
       expect(page.map((c) => c.key).sort()).toEqual(Object.keys(caps).sort());
       for (const c of page) expect({ turns: c.turns, spendUsd: c.spendUsd }).toEqual(caps[c.key]);
     }
+  });
+});
+
+describe('phones', () => {
+  it("shows the phones, their own builds, the maker's license that is yours to accept, and the room and watchdog of Get it", () => {
+    const row = (id: string) => rows.find((r) => r.id === id)!;
+    expect(row('phone-pictures').what).toContain('Android phone and tablet');
+    expect(row('phone-pictures').what).toContain('Settings can choose');
+    expect(row('phone-builds').what).toContain("What the build changes in the story's files goes back");
+    expect(row('tool-license')).toMatchObject({ you: true, then: 'Get it waits until you do.' });
+    expect(row('phone-tools').what).toContain('about 20 GB');
+    expect(row('phone-tools').what).toContain('no new bytes for 2 minutes');
+    const view2 = harnessView({ phone: 'android' } as never);
+    const pictures = [...view2.stages.flatMap((st) => st.gates)].find((r) => r.id === 'phone-pictures')!;
+    expect(pictures.d).toContainEqual(['Which phone', 'Android']);
   });
 });
 

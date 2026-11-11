@@ -13,9 +13,7 @@ import type { Ticket } from '../board/types.js';
 import { LiveSquad } from '../engine/live.js';
 import { stopApps } from '../engine/run-app.js';
 import { stopTries } from '../engine/try-app.js';
-import { stopPhones } from '../engine/phone/turn.js';
-import { closeDrivers } from '../engine/phone/session.js';
-import { shotPhone } from '../modules/registry.js';
+import { phonesQuit } from '../engine/phone/quit.js';
 import { prepareProject } from '../engine/setup.js';
 import { addAsk } from '../engine/first-look.js';
 import { dropNewProject, makeNewProject, type NewProjectInput } from '../engine/new-project.js';
@@ -215,11 +213,14 @@ export class OpenProjects {
     return was;
   }
 
-  closeAll(): void {
+  /**
+   * Closes every project. squad-kit's own phones stop with the board, iPhone and Android, after the Maestro that taps
+   * through them and before the adb server squad-kit started: resolves once they are down, QUIT_MS at most. Nobody
+   * else's is touched.
+   */
+  closeAll(): Promise<void> {
     for (const p of this.open.values()) p.close();
-    // squad-kit's own phone stops with the board, and the Maestro that taps through it. Nobody else's is touched.
-    closeDrivers();
-    void stopPhones(shotPhone()).catch(() => undefined);
+    return phonesQuit();
   }
 
   summaries(): ProjectSummary[] {

@@ -1,3 +1,4 @@
+import { gradleHome } from './tools/android.js';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -305,12 +306,17 @@ function startHome(dir: string, home: string, env: NodeJS.ProcessEnv): void {
  * it is installed: theirs stays read only, the same program they run. Their downloaded zip stays behind.
  */
 function gradleWrapper(dir: string, cwd: string, home: string, env: NodeJS.ProcessEnv): void {
+  // At the top of a Gradle project, or in an app's android/ folder (Flutter, React Native).
   let said = '';
-  try {
-    said = fs.readFileSync(path.join(cwd, 'gradle', 'wrapper', 'gradle-wrapper.properties'), 'utf8');
-  } catch {
-    return;
+  for (const at of [cwd, path.join(cwd, 'android')]) {
+    try {
+      said = fs.readFileSync(path.join(at, 'gradle', 'wrapper', 'gradle-wrapper.properties'), 'utf8');
+      break;
+    } catch {
+      // Not here.
+    }
   }
+  if (!said) return;
   const value = (key: string) => new RegExp(`^${key}\\s*=\\s*(.+)$`, 'm').exec(said)?.[1]?.trim().replace(/\\(.)/g, '$1');
   const url = value('distributionUrl');
   // Only where the wrapper keeps them by default; a project that keeps its Gradle elsewhere has it already.
@@ -319,10 +325,12 @@ function gradleWrapper(dir: string, cwd: string, home: string, env: NodeJS.Proce
   // The wrapper's own name for the folder: the address's MD5 in base 36.
   const hash = BigInt(`0x${createHash('md5').update(url).digest('hex')}`).toString(36);
   const rel = path.join('wrapper', 'dists', name, hash);
-  const theirs = path.join(env.GRADLE_USER_HOME ?? path.join(home, '.gradle'), rel);
   const mine = path.join(dir, 'gradle', rel);
   const ok = `${name}.zip.ok`;
-  if (fs.lstatSync(mine, { throwIfNoEntry: false }) || !fs.existsSync(path.join(theirs, ok)) || !inside(dir, mine)) return;
+  // The person's own Gradle home first, then the one squad-kit's own Android builds use (tools/android.ts gradleHome),
+  // which the guard opens for reading only.
+  const theirs = [path.join(env.GRADLE_USER_HOME ?? path.join(home, '.gradle'), rel), path.join(gradleHome(), rel)].find((p) => fs.existsSync(path.join(p, ok)));
+  if (fs.lstatSync(mine, { throwIfNoEntry: false }) || !theirs || !inside(dir, mine)) return;
   // The wrapper takes the one folder it finds there as Gradle.
   const unpacked = fs.readdirSync(theirs, { withFileTypes: true }).filter((e) => e.isDirectory());
   if (unpacked.length !== 1) return;

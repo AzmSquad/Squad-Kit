@@ -206,8 +206,8 @@ export class TryRunner {
     // An iPhone app opens on squad-kit's iPhone when its tools are here, unless the person asked for the web version.
     const plan = how.web ? null : this.phonePlan(t);
     const onPhone = Boolean(plan && (how.phone || plan.ready));
-    if (how.phone && !plan) throw new TryError(`${t.id}'s app is not an iPhone app, so squad-kit runs it in the browser.`);
-    if (onPhone && !plan!.ready) throw new TryError(plan!.why ?? "squad-kit can't open it on its iPhone yet.");
+    if (how.phone && !plan) throw new TryError(`${t.id}'s app is not a phone app, so squad-kit runs it in the browser.`);
+    if (onPhone && !plan!.ready) throw new TryError(plan!.why ?? `squad-kit can't open it on its ${plan!.word} yet.`);
     const wrong = onPhone ? languageProblem(how.language, plan!.languages) : null;
     if (wrong) throw new TryError(wrong);
     const why = tryBlocked(this.bp, t, onPhone) ?? (!onPhone && plan && !plan.ready && tryBlocked(this.bp, t) ? plan.why! : null);
@@ -260,6 +260,7 @@ export class TryRunner {
       const open = new PhoneOpen({
         dir: plan.dir,
         kind: plan.kind,
+        system: plan.system,
         by: 'Try it yourself',
         again: 'Try it yourself',
         ...(language ? { language } : {}),
@@ -278,12 +279,12 @@ export class TryRunner {
       if (v.state === 'running') {
         run.state = 'running';
         run.since = v.since ?? new Date().toISOString();
-        this.note(run.ticket, `Opened this story's own copy of the app on squad-kit's ${v.device ?? 'iPhone'} for you to try. Nothing is merged.`);
+        this.note(run.ticket, `Opened this story's own copy of the app on squad-kit's ${v.device ?? plan.word} for you to try. Nothing is merged.`);
       } else if (v.state === 'failed') {
         run.state = 'failed';
-        run.error = v.error ?? 'The app did not open on the iPhone.';
+        run.error = v.error ?? `The app did not open on the ${plan.word}.`;
         if (v.detail) run.detail = v.detail;
-        this.note(run.ticket, 'Try it yourself: the app did not open on the iPhone.');
+        this.note(run.ticket, `Try it yourself: the app did not open on the ${plan.word}.`);
       }
     })().finally(settle);
     this.watch();

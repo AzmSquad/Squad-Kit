@@ -4,7 +4,7 @@ import type { PhoneKind } from './build.js';
 
 /**
  * The languages a phone app comes in, read from its own files only: a Flutter app's translation files (lib/l10n/*.arb,
- * or the folder its l10n.yaml names), an iPhone app's *.lproj folders. English first, then the others. Empty when it
+ * or the folder its l10n.yaml names), an iPhone app's *.lproj folders, an Android app's res/values-* folders. English first, then the others. Empty when it
  * has one language, or when squad-kit cannot tell (React Native keeps them in code): then there is nothing to pick.
  */
 
@@ -54,9 +54,21 @@ function isDir(p: string): boolean {
   }
 }
 
+/** A native Android app's res/values-<lang> folders, a few levels down, never into build folders. */
+function valuesLanguages(dir: string, depth = 4): string[] {
+  const out: string[] = [];
+  for (const name of list(dir)) {
+    const m = /^values-([a-z]{2,3})(?:-r[A-Z]{2})?$/.exec(name);
+    if (m && path.basename(dir) === 'res') out.push(m[1]!);
+    else if (depth > 0 && !name.startsWith('.') && !/^(build|node_modules|\.gradle)$/.test(name) && isDir(path.join(dir, name))) out.push(...valuesLanguages(path.join(dir, name), depth - 1));
+  }
+  return out;
+}
+
 export function appLanguages(dir: string, kind: PhoneKind): string[] {
   if (kind === 'react-native') return [];
-  const found = kind === 'flutter' ? list(arbDir(dir)).map(arbLanguage).filter((l): l is string => Boolean(l)) : lprojLanguages(dir);
+  // A native Android app's default language is its plain values folder: English, for squad-kit's choice.
+  const found = kind === 'flutter' ? list(arbDir(dir)).map(arbLanguage).filter((l): l is string => Boolean(l)) : kind === 'android' ? ['en', ...valuesLanguages(dir)] : lprojLanguages(dir);
   const all = [...new Set(found)].sort((a, b) => (a === 'en' ? -1 : b === 'en' ? 1 : a.localeCompare(b)));
   return all.length > 1 ? all : [];
 }

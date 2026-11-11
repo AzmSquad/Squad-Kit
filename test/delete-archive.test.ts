@@ -44,6 +44,7 @@ const { holdRelease } = await import('../src/board/lock.js');
 const { seedDemoBoard } = await import('../src/board/demo.js');
 const { buildPaths } = await import('../src/core/paths.js');
 const { mountApi } = await import('../src/console/api/index.js');
+const { logFile } = await import('../src/core/app-log.js');
 type Ticket = import('../src/board/types.js').Ticket;
 type BoardPaths = import('../src/board/store.js').BoardPaths;
 
@@ -196,6 +197,8 @@ describe('Delete', () => {
     expect(after.total).toEqual(total);
     expect(after.deleted).toEqual({ tickets: 1, total: { runs: 2, inputTokens: 1000, outputTokens: 100, costUsd: 1.5 } });
     expect(readMeta(bp).deleted).toEqual([expect.objectContaining({ id: 'AP-1', title: 'Ticket AP-1', by: 'Momen' })]);
+    // The log keeps that it went, and who pressed it.
+    expect(fs.readFileSync(logFile(), 'utf8')).toContain('AP-1  Deleted by Momen: "Ticket AP-1"');
   });
 
   it('refuses with a plain reason, and leaves the ticket as it was', async () => {

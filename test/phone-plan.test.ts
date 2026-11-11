@@ -21,7 +21,7 @@ const { boardPaths } = await import('../src/board/store.js');
 const { seedDemoBoard } = await import('../src/board/demo.js');
 const { useDetectHost } = await import('../src/engine/tools/index.js');
 const { writeFound } = await import('../src/engine/tools/detect.js');
-const { picturesWay, picturesHold, iphoneApp, tapTools, untilGot, useGetSource, WEB_VERSION } = await import('../src/engine/phone/plan.js');
+const { picturesWay, picturesHold, iphoneApp, phoneApp, tapTools, untilGot, useGetSource, WEB_VERSION } = await import('../src/engine/phone/plan.js');
 const { GetTrouble, setTrouble } = await import('../src/engine/tools/get.js');
 
 let tmp: string;
@@ -75,7 +75,7 @@ describe('how the pictures are taken', () => {
     const bp = flutterApp(true);
     found();
     const way = await picturesWay(bp, {}, true);
-    expect(way).toEqual({ way: 'phone', kind: 'flutter', dir: path.join(tmp, 'app'), tools: { maestro: '/Users/pm/.local/bin/maestro' } });
+    expect(way).toEqual({ way: 'phone', kind: 'flutter', dir: path.join(tmp, 'app'), system: 'ios', tools: { maestro: '/Users/pm/.local/bin/maestro' } });
     expect(picturesHold(bp, {}, false)).toBeNull();
   });
 
@@ -124,7 +124,7 @@ describe('how the pictures are taken', () => {
     expect(picturesHold(bp, {}, true)).toBeNull();
   });
 
-  it('a web project, or an Android-only phone app, keeps its browser pictures as before', async () => {
+  it('a web project keeps its browser pictures as before; an Android-only phone app goes to the Android phone', async () => {
     const web = path.join(tmp, 'web');
     fs.mkdirSync(web, { recursive: true });
     fs.writeFileSync(path.join(web, 'package.json'), JSON.stringify({ dependencies: { react: '19' } }));
@@ -134,7 +134,13 @@ describe('how the pictures are taken', () => {
     fs.mkdirSync(path.join(android, 'android'), { recursive: true });
     fs.writeFileSync(path.join(android, 'pubspec.yaml'), 'dependencies:\n  flutter:\n    sdk: flutter\n');
     expect(iphoneApp(boardPaths(path.join(android, '.squad')))).toBeNull();
-    expect(picturesHold(boardPaths(path.join(android, '.squad')), {}, false)).toBeNull();
+    expect(phoneApp(boardPaths(path.join(android, '.squad')))).toEqual({ dir: android, kind: 'flutter', system: 'android' });
+    // Its Android tools are not here: it waits for them, with the line of the Tools page; Xcode is never asked for.
+    const hold = picturesHold(boardPaths(path.join(android, '.squad')), {}, false);
+    expect(hold?.tools.map((t) => t.id)).toEqual(['android']);
+    expect(hold?.link).toBe('/tools#android');
+    found({ xcode: { state: 'missing' }, android: { state: 'found', version: 'Android 16', where: '/sdk' } });
+    expect(await picturesWay(boardPaths(path.join(android, '.squad')), {}, false)).toMatchObject({ way: 'phone', system: 'android', kind: 'flutter' });
   });
 
   it("reads the story's own copy: an iPhone app the story adds is found there", () => {
