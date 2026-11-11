@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.12] — 2026-11-11
+
 ### Added
 
 - **Phone apps on Android.** For a Flutter, React Native or native Android app, the Tester's pictures come from
@@ -1617,7 +1619,8 @@ First public release.
 - Plan-generation meta-prompt (`generate-plan.md`), intake template (`intake.md`), and plan skeleton reference (`story-skeleton.md`).
 - Documentation: `docs/philosophy.md`, `docs/getting-started.md`, `docs/customization.md`, `docs/vs-spec-kit.md`.
 
-[Unreleased]: https://github.com/AzmSquad/squad-kit/compare/v1.3.11...HEAD
+[Unreleased]: https://github.com/AzmSquad/squad-kit/compare/v1.3.12...HEAD
+[1.3.12]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.3.12
 [1.3.11]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.3.11
 [1.3.10]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.3.10
 [1.3.8]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.3.8
