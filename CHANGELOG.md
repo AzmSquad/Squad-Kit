@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.15] — 2026-11-12
+
+### Changed
+
+- **The Squad lead gives buttons, not "tell me".** When an answer sends you to the board, the button comes with it:
+  **Open MA-17's proof** (or its spec, plan or questions), the same place as the board's own buttons. It changes
+  nothing, so it needs no OK. A board action that does not fit the story now (more pictures on a proof that waits for
+  Looks right) becomes the story's Open button instead.
+- **When the lead refuses what only you may do** (Looks right, approving a spec or plan, merging, releasing), it keeps
+  its refusal and gives you the Open button for each story it names, so you are one press from doing it yourself.
+  squad-kit's own refusals, with no AI, do the same.
+- **An answer that offers to do something later** ("tell me and I'll request them") is asked for again once, with its
+  card. The lead acts only through the cards in its answer, still at most 4, and its can and can't rules are the same.
+- **The lead can show a story's own proof pictures** when it talks about them, read only, marked "From MA-17's proof".
+  Only the pictures the board already keeps on a story, never anything else.
+- **squad-kit's own refusals answer in Arabic** when you write in Arabic. The board's button names stay as they are.
+
 ## [1.3.14] — 2026-11-12
 
 ### Fixed
@@ -1670,7 +1687,8 @@ First public release.
 - Plan-generation meta-prompt (`generate-plan.md`), intake template (`intake.md`), and plan skeleton reference (`story-skeleton.md`).
 - Documentation: `docs/philosophy.md`, `docs/getting-started.md`, `docs/customization.md`, `docs/vs-spec-kit.md`.
 
-[Unreleased]: https://github.com/AzmSquad/squad-kit/compare/v1.3.14...HEAD
+[Unreleased]: https://github.com/AzmSquad/squad-kit/compare/v1.3.15...HEAD
+[1.3.15]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.3.15
 [1.3.14]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.3.14
 [1.3.13]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.3.13
 [1.3.12]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.3.12

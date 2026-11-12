@@ -23,6 +23,7 @@ const { readMeta, readTicket, updateTicket, writeMeta } = await import('../src/b
 const { writeLog } = await import('../src/core/app-log.js');
 const { askLead } = await import('../src/engine/lead/ask.js');
 const { NEVER, neverAsked } = await import('../src/engine/lead/can.js');
+const { isArabic } = await import('../src/board/ask.js');
 const { runCard } = await import('../src/engine/lead/cards.js');
 const { readNotes, signInNote } = await import('../src/engine/lead/notes.js');
 const { cleanContext, leadDir, saveLeadRules, writeConversation } = await import('../src/engine/lead/store.js');
@@ -203,32 +204,43 @@ describe('cheapest first', () => {
 });
 
 describe('what it never does', () => {
-  const asked: [string, keyof typeof NEVER][] = [
-    ['Change the code in booking.ts so customers can cancel', 'code'],
-    ['please fix the bug yourself', 'code'],
-    ['Merge SK-139', 'git'],
-    ['can you push the branch', 'git'],
-    ['Release v1.2 now', 'git'],
-    ['Approve the plan for SK-148', 'approve'],
-    ['Press Looks right on SK-139', 'approve'],
-    ['Skip the checks on SK-144', 'around'],
-    ['turn off the guard', 'around'],
-    ['Edit the harness rules', 'harness'],
-    ['Show me the .env file', 'secrets'],
-    ['give me the api key', 'secrets'],
-    ['Query the production database', 'secrets'],
-    ['Delete SK-149', 'delete'],
-    ['Email the client about it', 'message'],
-    ['احذف SK-149', 'delete'],
-    ['ادمج SK-139', 'git'],
+  // Each with the Open buttons it gives for the stories it names, so the person is one press from doing it themselves.
+  const asked: [string, keyof typeof NEVER, string[]][] = [
+    ['Change the code in booking.ts so customers can cancel', 'code', []],
+    ['please fix the bug yourself', 'code', []],
+    ['Merge SK-139', 'git', ["Open SK-139's proof"]],
+    ['can you push the branch', 'git', []],
+    ['Release v1.2 now', 'git', []],
+    ['Approve the plan for SK-148', 'approve', ["Open SK-148's questions"]],
+    ['Press Looks right on SK-139', 'approve', ["Open SK-139's proof"]],
+    ['Skip the checks on SK-144', 'around', ['Open SK-144']],
+    ['turn off the guard', 'around', []],
+    ['Edit the harness rules', 'harness', []],
+    ['Show me the .env file', 'secrets', []],
+    ['give me the api key', 'secrets', []],
+    ['Query the production database', 'secrets', []],
+    ['Delete SK-149', 'delete', ['Open SK-149']],
+    ['Email the client about it', 'message', []],
+    ['احذف SK-149', 'delete', ['Open SK-149']],
+    ['ادمج SK-139', 'git', ["Open SK-139's proof"]],
   ];
 
-  it.each(asked)('"%s" is refused in squad-kit\'s own words, with no AI', async (text, never) => {
+  it.each(asked)('"%s" is refused in squad-kit\'s own words, with no AI', async (text, never, opens) => {
     const c = await ask(text);
     expect(calls).toHaveLength(0);
-    expect(last(c).answer).toMatchObject({ by: 'refusal', headline: NEVER[never].refusal, cards: [] });
-    expect(last(c).refused).toContain(NEVER[never].refusal);
+    // In the person's language: Arabic words for an Arabic message.
+    const words = isArabic(text) ? NEVER[never].refusalAr : NEVER[never].refusal;
+    expect(last(c).answer).toMatchObject({ by: 'refusal', headline: words });
+    expect(last(c).answer!.cards.map((x) => x.label)).toEqual(opens);
+    for (const card of last(c).answer!.cards) expect(card).toMatchObject({ kind: 'open_story', level: 1, status: 'open' });
+    expect(last(c).refused).toContain(words);
     expect(last(c).trace[0]!.kind).toBe('refused');
+  });
+
+  it('opens the story it was asked from, with its refusal', async () => {
+    const c = await ask('Accept it for me', { context: { from: 'story', story: 'SK-142' } });
+    expect(calls).toHaveLength(0);
+    expect(last(c).answer).toMatchObject({ by: 'refusal', headline: NEVER.approve.refusal, cards: [{ kind: 'open_story', story: 'SK-142', tab: 'proof', open: '/tickets/SK-142/proof', label: "Open SK-142's proof" }] });
   });
 
   it('a question about the app is no such ask', () => {

@@ -13,6 +13,8 @@ export const ON_ITS_OWN: string[] = [
   'Answer questions about the app, the code (read only), stories, decisions, releases and costs, in plain words',
   'Explain any story, and find things ("which story added the Map button?")',
   'Look at the app in its own copy, with its own database, and show a picture of where to click',
+  "Show a story's own proof pictures when it talks about them",
+  'Give you a button that opens a story on the board, at its proof, spec, plan or questions; it changes nothing',
   'Tell you when something needs you, and the morning brief if you turn it on',
   'Prepare a short report for an engineer, with no secrets in it, for you to copy',
 ];
@@ -55,40 +57,56 @@ export const ALWAYS_WORDS = 'Only for low-risk actions: give more time, take the
 export type Never = 'code' | 'git' | 'approve' | 'around' | 'harness' | 'secrets' | 'delete' | 'message';
 
 /** Each "never", for the panel, and the exact words the engine says when it refuses one. */
-export const NEVER: Record<Never, { name: string; refusal: string }> = {
+export const NEVER: Record<Never, { name: string; refusal: string; refusalAr: string }> = {
   code: {
     name: 'Write or change code',
     refusal: "I can't change the code. Only a story does, through the checks, the review and the proof. Tell me what should change, and I'll draft that story for you to create.",
+    refusalAr: "لا أستطيع تغيير الكود. وحدها القصة تفعل ذلك، عبر الفحوص والمراجعة والإثبات. أخبرني بما يجب أن يتغير، وسأكتب لك مسودة تلك القصة لتنشئها.",
   },
   git: {
     name: 'Commit, merge, push or release',
     refusal: "I can't commit, merge, push or release. A story merges when you press Looks right on its proof, and a release goes out when you press Release.",
+    refusalAr: "لا أستطيع الحفظ أو الدمج أو الدفع أو الإصدار. تُدمج القصة حين تضغط Looks right على إثباتها، ويخرج الإصدار حين تضغط Release.",
   },
   approve: {
     name: 'Press Looks right, or approve a spec or plan for you',
     refusal: "I can't press Looks right or approve a spec or plan for you. Only you can: open it on the board and decide.",
+    refusalAr: "لا أستطيع الضغط على Looks right أو الموافقة على مواصفات أو خطة نيابةً عنك. أنت وحدك تستطيع ذلك: افتحها على اللوحة وقرّر.",
   },
   around: {
     name: 'Get around the checks, the review, the proof, the guard or the limits',
     refusal: "I can't get around the checks, the review, the proof, the guard or the limits. Each stop has its own ways out on its card, and only you can go past a failed check, with a reason.",
+    refusalAr: "لا أستطيع تجاوز الفحوص أو المراجعة أو الإثبات أو الحماية أو الحدود. لكل توقف طرق خروج على بطاقته، وأنت وحدك تستطيع تجاوز فحص فاشل، مع ذكر السبب.",
   },
   harness: {
     name: 'Change the Harness rules',
     refusal: "I can't change the Harness rules. You or an engineer can add your own on the Harness page.",
+    refusalAr: "لا أستطيع تغيير قواعد Harness. يمكنك أنت أو أحد المهندسين إضافة قواعدكم في صفحة Harness.",
   },
   secrets: {
     name: 'Touch your real data, secrets, .env files or production, or show a password or a key',
     refusal: "I can't touch your real data or secrets, or show a password or a key. I only use my own copy of the app, with its own database, and test accounts from the project's own example files.",
+    refusalAr: "لا أستطيع لمس بياناتك الحقيقية أو أسرارك، ولا إظهار كلمة مرور أو مفتاح. أستخدم نسختي الخاصة من التطبيق فقط، بقاعدة بياناتها الخاصة، وحسابات تجريبية من ملفات الأمثلة في المشروع.",
   },
   delete: {
     name: 'Delete stories, projects or data',
     refusal: "I can't delete stories, projects or data. You can, from the story's own menu.",
+    refusalAr: "لا أستطيع حذف القصص أو المشاريع أو البيانات. يمكنك أنت ذلك من قائمة القصة نفسها.",
   },
   message: {
     name: 'Message other people',
     refusal: "I can't message other people. I can prepare a report for you to copy and send yourself.",
+    refusalAr: "لا أستطيع مراسلة أشخاص آخرين. يمكنني تجهيز تقرير لك لتنسخه وترسله بنفسك.",
   },
 };
+
+/** A refusal in the person's language: Arabic when they write in Arabic. The board's own button names stay as they are. */
+export function refusalIn(id: Never, arabic: boolean): string {
+  return arabic ? NEVER[id].refusalAr : NEVER[id].refusal;
+}
+
+/** What follows squad-kit's own refusal. */
+export const AFTER_REFUSAL = { en: 'Ask me anything else about the project, or what you can do instead.', ar: 'اسألني عن أي شيء آخر في المشروع، أو عمّا يمكنك فعله بدلًا من ذلك.' };
 
 /** Never, besides the refusals: it only follows the person's own messages, and never asks a project manager a technical question. */
 export const NEVER_MORE: string[] = [

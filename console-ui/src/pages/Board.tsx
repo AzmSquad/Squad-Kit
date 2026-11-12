@@ -58,8 +58,8 @@ export function BoardPage() {
     void navigate({ search: (s) => ({ ...s, write: undefined }), replace: true });
   }, [search.write, navigate]);
   const view: View = search.view ?? 'all';
-  const open = (id: string) => void navigate({ search: (s) => ({ ...s, ticket: id }) });
-  const close = () => void navigate({ search: (s) => ({ ...s, ticket: undefined }) });
+  const open = (id: string) => void navigate({ search: (s) => ({ ...s, ticket: id, tab: undefined }) });
+  const close = () => void navigate({ search: (s) => ({ ...s, ticket: undefined, tab: undefined }) });
 
   const data = board.data?.ready ? board.data : null;
   const tickets = useMemo(() => {
@@ -178,7 +178,7 @@ export function BoardPage() {
         <button className="btn sm quiet" onClick={() => setDialog('bug')}>Report a bug</button>
       </div>
 
-      {search.ticket && <TicketDrawer id={search.ticket} onClose={close} />}
+      {search.ticket && <TicketDrawer id={search.ticket} {...(search.tab ? { tab: search.tab } : {})} onClose={close} />}
       {dialog === 'new' && <NewTicketDialog onClose={() => setDialog(null)} onCreated={(t) => open(t.id)} />}
       {dialog === 'pull' && <PullDialog onClose={() => setDialog(null)} onCreated={(t) => open(t.id)} />}
       {dialog === 'bug' && <BugDialog onClose={() => setDialog(null)} />}

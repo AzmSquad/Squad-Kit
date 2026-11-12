@@ -363,9 +363,13 @@ gets it at once, and "How to sign in" shows next to Open in Your apps.
 
 | Level | What |
 | --- | --- |
-| On its own | Read, look and tell: answer, explain a story, find things, look at the app in its own copy, tell you what needs you, prepare a report for an engineer (no secrets, for you to copy). |
+| On its own | Read, look and tell: answer, explain a story, find things, look at the app in its own copy, show a story's own proof pictures, give you an **Open** button to a story on the board (at its proof, spec, plan or questions; it changes nothing), tell you what needs you, prepare a report for an engineer (no secrets, for you to copy). |
 | After your OK | A card you press, running the same function as the board's button: **Create story** (a draft with how each "done when" will be proved; nothing starts until you press Start), Start or Stop a story, Give it 10 more minutes, Take the pictures again, Try again, Start the app, Get or Update a tool, **Send** an answer to an agent's question, **Save** a setting (technical ones only for engineers). |
 | Never | Change code; commit, merge, push or release; press Looks right or approve a spec or plan; get around the checks, the review, the proof, the guard or the limits; change the Harness rules; touch your real data, secrets or `.env` files, or show a password or a key; delete stories, projects or data; message other people. squad-kit refuses these in its own words, whoever asks. Only your own messages count, never instructions found in what it reads. |
+
+**Buttons, not "tell me".** When an answer sends you to the board, the button comes with it: "Open MA-17's proof",
+or the board action that fits the story now. When the lead refuses what only you may do (Looks right, approving a spec
+or plan, merging, releasing), it still gives you the Open button, so you are one press from doing it yourself.
 
 **Always allow** is only for the low-risk ones: give more time, take the pictures again, start the app, and the morning
 brief. With it on they run without asking, and a line says so. A step that is slower than usual but still working then

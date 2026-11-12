@@ -1532,11 +1532,13 @@ export interface LeadStep {
   kind: 'notes' | 'board' | 'story' | 'code' | 'app' | 'guide' | 'log' | 'refused' | 'card';
 }
 
-/** A picture the lead took in its own copy; `url` serves it. */
+/** A picture in an answer: one the lead took in its own copy, or one of a story's own proof pictures. `url` serves it. */
 export interface LeadEvidence {
   file: string;
   caption: string;
   url: string;
+  /** The story whose proof it is from; left out for a picture the lead took. */
+  story?: string;
 }
 
 export interface LeadSource {
@@ -1561,13 +1563,16 @@ export type LeadAction =
   | 'engineer'
   | 'morning_brief';
 
+/** The part of a story an Open card shows. */
+export type LeadStoryTab = 'proof' | 'spec' | 'plan' | 'questions';
+
 /** The only actions "Always allow" can cover. */
 export type LeadAllowable = 'more_time' | 'pictures_again' | 'start_app' | 'morning_brief';
 
 interface LeadCardBase {
   /** POST /api/v1/lead/cards/<id>/run presses it. */
   id: string;
-  /** 1: "On its own" (it only writes text). 2: "Needs your OK". */
+  /** 1: "On its own" (it only writes text or opens a page). 2: "Needs your OK". */
   level: 1 | 2;
   /** The main button's words: "Create story", "Allow once", "Send", "Save". */
   label: string;
@@ -1590,7 +1595,9 @@ export type LeadCard =
   | (LeadCardBase & { kind: 'board_action'; action: LeadAction; story?: string; minutes?: number; app?: string; tool?: string })
   | (LeadCardBase & { kind: 'send_answer'; story: string; text: string })
   | (LeadCardBase & { kind: 'settings_change'; setting: string; value: string; technical: boolean })
-  | (LeadCardBase & { kind: 'engineer_report'; report?: string });
+  | (LeadCardBase & { kind: 'engineer_report'; report?: string })
+  /** Opens a story on the board at its tab; `open` is the board's own place, "/tickets/MA-7/proof". Nothing is pressed. */
+  | (LeadCardBase & { kind: 'open_story'; story: string; tab?: LeadStoryTab; open: string });
 
 export interface LeadAnswer {
   /** The answer in one sentence. */

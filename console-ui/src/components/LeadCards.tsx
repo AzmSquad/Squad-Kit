@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { Check, Copy, Plus, TriangleAlert, X } from 'lucide-react';
+import { ArrowUpRight, Check, Copy, Plus, TriangleAlert, X } from 'lucide-react';
 import type { LeadCard, LeadCardRun, ProofKind } from '../api/types';
 import { useAct } from '../lib/data';
-import { PROOF_NAME, canAlwaysAllow, levelName } from '../lib/lead';
+import { PROOF_NAME, canAlwaysAllow, levelName, placeOf } from '../lib/lead';
+import { leadAsk } from '../lib/leadAsk';
 import { usePrefs } from '../lib/prefs';
 import { typedDir } from '../lib/lang';
 import { Cmd, Written } from './ui';
@@ -11,7 +12,8 @@ import { Cmd, Written } from './ui';
 /**
  * The lead's cards: what it offers to do, each with its level ("On its own", "Needs your OK") and real buttons. A
  * press runs the same function as the board's own button (POST /lead/cards/<id>/run); the card then says what
- * happened. Nothing here runs without a press, except what "Always allow" covers, and the card says so.
+ * happened. Nothing here runs without a press, except what "Always allow" covers, and the card says so. An Open card
+ * is a plain button to a story on the board: it changes nothing, so it asks nothing.
  */
 
 type Edits = { title?: string; ask?: string; doneWhen?: { text: string; proof: ProofKind }[]; text?: string };
@@ -41,6 +43,8 @@ export function LeadCardView({ card }: { card: LeadCard }) {
       return <DraftCard card={card} />;
     case 'engineer_report':
       return <ReportCard card={card} />;
+    case 'open_story':
+      return <OpenButton card={card} />;
     default:
       return <ActionCard card={card} />;
   }
@@ -164,8 +168,30 @@ function DraftCard({ card }: { card: Extract<LeadCard, { kind: 'draft_story' }> 
   );
 }
 
+/** "Open MA-17's proof": the story on the board, at its tab, the same place as the board's own buttons. The ask box closes. */
+export function OpenButton({ card }: { card: Extract<LeadCard, { kind: 'open_story' }> }) {
+  const place = placeOf(card.open);
+  const look = { className: 'btn lt-open', title: card.why ?? 'Opens it on the board. Nothing changes.', onClick: () => leadAsk.close() };
+  const inner = (
+    <>
+      <ArrowUpRight size={14} aria-hidden="true" /> {card.label}
+    </>
+  );
+  if (place?.to === '/tickets/$id/proof')
+    return (
+      <Link to="/tickets/$id/proof" params={{ id: place.id }} {...look}>
+        {inner}
+      </Link>
+    );
+  return (
+    <Link to="/board" search={{ ticket: card.story, ...(place?.to === '/board' && place.tab ? { tab: place.tab } : {}) }} {...look}>
+      {inner}
+    </Link>
+  );
+}
+
 /** A board action, an answer to send, or a setting to save: one press each. */
-function ActionCard({ card }: { card: Exclude<LeadCard, { kind: 'draft_story' | 'engineer_report' }> }) {
+function ActionCard({ card }: { card: Exclude<LeadCard, { kind: 'draft_story' | 'engineer_report' | 'open_story' }> }) {
   const { press, busy } = usePress(card);
   const [text, setText] = useState(card.kind === 'send_answer' ? card.text : '');
   const always = canAlwaysAllow(card);

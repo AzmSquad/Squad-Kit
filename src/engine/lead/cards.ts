@@ -1,3 +1,4 @@
+import { plainArabic } from '../../board/ask.js';
 import { addNote, answerAgent, BoardActionError, createTicket, decideStuckBeside, keepWaiting, restartStep, startTicket, stopTicket } from '../../board/actions.js';
 import { findApp } from '../../board/apps.js';
 import { addActivity, readMeta, readTicket, requireTicket, updateTicket, type BoardPaths } from '../../board/store.js';
@@ -6,12 +7,13 @@ import type { Ticket } from '../../board/types.js';
 import { appRunner } from '../run-app.js';
 import { getToolNow, updateToolNow } from '../tools/index.js';
 import { ACTIONS, ENGINEERS_ONLY, SETTINGS, isAllowable, isEngineer, neverAction, type Never } from './can.js';
+import { MAX_LEAD_CARDS } from './limits.js';
 import { engineerReport } from './report.js';
 import { allowAlways, requireConversation, updateConversation, saveLeadRules } from './store.js';
-import type { DoneWhen, LeadAction, LeadCard, LeadConversation, ProofKind } from './types.js';
+import type { DoneWhen, LeadAction, LeadCard, LeadConversation, ProofKind, StoryTab } from './types.js';
 
 /**
- * The lead's cards. Level 1 (a report for an engineer) only writes text. Level 2 runs an existing board action through
+ * The lead's cards. Level 1 only writes text (a report for an engineer) or opens a story on the board. Level 2 runs an existing board action through
  * the same function as the board's own button, and only when the person presses it, or when "Always allow" is on for
  * one of the four low-risk actions. Anything else an agent hands in as a card is refused in squad-kit's own words.
  */
@@ -30,6 +32,7 @@ export interface CardInput {
   minutes?: unknown;
   app?: unknown;
   tool?: unknown;
+  tab?: unknown;
   text?: unknown;
   setting?: unknown;
   value?: unknown;
@@ -39,6 +42,8 @@ const PROOFS: ProofKind[] = ['screen', 'api', 'data', 'test'];
 
 /** The board actions that act on one story. */
 const ON_A_STORY: LeadAction[] = ['more_time', 'pictures_again', 'try_again', 'restart', 'stop', 'start_story', 'stop_story', 'engineer'];
+
+const TABS: StoryTab[] = ['proof', 'spec', 'plan', 'questions'];
 
 const str = (v: unknown, n = 2000) => (typeof v === 'string' ? v.trim().slice(0, n) : '');
 
@@ -65,6 +70,39 @@ export function actionCard(id: string, action: LeadAction, o: { story?: string; 
     ...(o.tool ? { tool: o.tool } : {}),
     ...(o.why ? { why: o.why } : {}),
     ...(isAllowable(action) ? { allowAlways: true } : {}),
+  };
+}
+
+/** The tab a story's own wait is about: its proof, its spec, its plan or its questions. */
+export function waitTab(t: Ticket): StoryTab | undefined {
+  return TABS.find((x) => x === t.waiting?.kind);
+}
+
+/**
+ * Where the board opens a story at a tab, the same places as its own buttons: a proof that waits for Looks right on
+ * its proof page; what waits for the person, its questions and a stop at the proof in the story's Now tab, with their
+ * buttons; the rest in their own tab (the spec is the Story tab).
+ */
+export function openPlace(t: Ticket, tab?: StoryTab): string {
+  const id = encodeURIComponent(t.id);
+  if (tab === 'proof' && t.waiting?.kind === 'proof') return `/tickets/${id}/proof`;
+  const now = !tab || tab === 'questions' || waitTab(t) === tab || (tab === 'proof' && t.waiting?.kind === 'stuck' && t.stuck?.gate === 'proof');
+  return `/board?ticket=${id}${now ? '' : `&tab=${tab === 'spec' ? 'story' : tab}`}`;
+}
+
+/** "Open MA-17's proof": a story on the board, at its tab. It changes nothing, so it needs no OK. */
+export function openCard(id: string, t: Ticket, tab?: StoryTab, why?: string): LeadCard {
+  return {
+    id,
+    kind: 'open_story',
+    level: 1,
+    story: t.id,
+    ...(tab ? { tab } : {}),
+    open: openPlace(t, tab),
+    label: `Open ${t.id}${tab ? `'s ${tab}` : ''}`,
+    command: `squad show ${t.id}`,
+    status: 'open',
+    ...(why ? { why } : {}),
   };
 }
 
@@ -114,11 +152,66 @@ export function makeCard(bp: BoardPaths, raw: CardInput, id: string, role?: stri
     if (known.technical && !isEngineer(role ?? readMeta(bp).user.role)) return { left: 'a technical setting, which only an engineer changes' };
     return { card: { ...base, kind: 'settings_change', level: 2, label: 'Save', setting, value, technical: known.technical } };
   }
+  if (kind === 'open_story' || kind === 'open') {
+    const story = str(raw.story, 40).toUpperCase();
+    const t = story ? readTicket(bp, story) : null;
+    if (!t) return { left: 'an Open card names no story on this board' };
+    return { card: openCard(id, t, TABS.find((x) => x === str(raw.tab, 20).toLowerCase()) ?? waitTab(t), why) };
+  }
   if (kind === 'engineer_report' || kind === 'report') {
     return { card: { ...base, kind: 'engineer_report', level: 1, label: 'Prepare a report for an engineer' } };
   }
   const never = neverAction(kind) ?? neverAction(str(raw.action, 60));
   return never ? { refused: never } : { left: `"${kind.slice(0, 40)}" is not a card squad-kit has` };
+}
+
+/** The story a card is for, when it is for one. */
+export function cardStory(card: LeadCard): string | undefined {
+  return card.kind === 'board_action' || card.kind === 'send_answer' || card.kind === 'open_story' ? card.story : undefined;
+}
+
+/** A story's id in an answer's words: MA-17, never a decision like MA-17.1. */
+const STORY_ID = /\b[A-Z][A-Z0-9]*-\d+\b(?!\.\d)/g;
+
+/** Words that send the person somewhere on the board: open it, press, accept, review, answer. Arabic as plainArabic writes it. */
+const SENDS = /\b(?:open|press|click|tap|accept|approve|review|check|look at|go to|answer|decide|reply|start|send (?:it )?back)\b|looks right|(?:^|\s)[وف]?(?:افتح|اضغط|انقر|راجع|اقبل|وافق|اعتمد|ادخل|اذهب|شوف|تحقق|افحص|جاوب|اجب)/i;
+
+/** The tab a sentence is about, by its words. */
+const TAB_WORDS: [StoryTab, RegExp][] = [
+  ['proof', /\b(?:proof|pictures?|screenshots?|looks right|accept)\b|اثبات|صور|لقطات/i],
+  ['plan', /\b(?:plan|design)\b|الخطه|التصميم/i],
+  ['spec', /\b(?:spec|specification|done when)\b|مواصفات/i],
+  ['questions', /\bquestions?\b|اسئله/i],
+];
+
+/**
+ * Open cards for the stories an answer sends the person to, so each is one press away: a story it names that waits for
+ * the person, one a sentence tells them to open, press or decide on, or any story it names when something only the
+ * person may do was refused. A story a card is already for is left out, and the answer keeps at most MAX_LEAD_CARDS.
+ */
+export function openCardsFor(bp: BoardPaths, words: string, have: LeadCard[], prefix: string, o: { refused?: boolean; also?: string[] } = {}): LeadCard[] {
+  const covered = new Set(have.map(cardStory));
+  const sentences = words.split(/(?<=[.!?؟])\s+|\n+/).map((x) => plainArabic(x));
+  const named = [...new Set([...(o.also ?? []), ...(words.match(STORY_ID) ?? [])])];
+  const out: LeadCard[] = [];
+  for (const id of named) {
+    if (have.length + out.length >= MAX_LEAD_CARDS) break;
+    if (covered.has(id)) continue;
+    const t = readTicket(bp, id);
+    if (!t) continue;
+    const said = sentences.filter((x) => x.includes(id));
+    if (!t.waiting && !o.refused && !said.some((x) => SENDS.test(x))) continue;
+    out.push(openCard(`${prefix}.${out.length + 1}`, t, waitTab(t) ?? TAB_WORDS.find(([, re]) => said.some((x) => re.test(x)))?.[0]));
+    covered.add(id);
+  }
+  return out;
+}
+
+/** The cards that fit a story where it stands now, for the lead's read of it. */
+export function fitsNow(t: Ticket): string {
+  const actions = ON_A_STORY.filter((a) => !actionMisfit(t, a));
+  const tab = waitTab(t);
+  return `Cards for ${t.id} now: open_story${tab ? ` (tab ${tab})` : ''}${actions.length ? `; board_action ${actions.join(', ')}` : '; no board action fits it now'}.`;
 }
 
 /**
@@ -218,6 +311,8 @@ export async function doCard(bp: BoardPaths, card: LeadCard, o: { conversation?:
       saveSettings(bp, settingInput(bp, card.setting, card.value));
       return { result: `Saved: ${known.name.toLowerCase()} is now ${card.value}.` };
     }
+    case 'open_story':
+      return { result: `It opens on the board: ${card.open}. In the terminal: ${card.command}` };
     case 'engineer_report': {
       if (!o.conversation) throw new BoardActionError('A report needs the conversation it is about.');
       const report = engineerReport(bp, requireConversation(bp, o.conversation));
@@ -290,6 +385,8 @@ export async function runCard(
   const conversationId = rail ? undefined : id.split('.')[0]!;
   const card = rail ? o.find?.(id) : findCard(requireConversation(bp, conversationId!), id);
   if (!card) throw new BoardActionError(rail ? 'That card is gone: the story moved on.' : `There is no card "${id.slice(0, 60)}".`);
+  // An Open card only shows a place on the board: it stays as it is, to open again.
+  if (card.kind === 'open_story') return { card: { ...card, result: (await doCard(bp, card)).result }, ...(conversationId ? { conversation: conversationId } : {}) };
   if (card.status === 'done' && card.kind !== 'engineer_report') throw new BoardActionError('This card was already used.');
   if (card.status === 'dismissed' && !o.dismiss) throw new BoardActionError('This card was put aside.');
   if (o.always) {

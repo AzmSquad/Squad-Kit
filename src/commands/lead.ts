@@ -60,6 +60,7 @@ export function cardLines(card: LeadCard): string[] {
     : card.kind === 'board_action' ? `${ACTIONS[card.action].name}${card.story ? ` on ${card.story}` : ''}`
     : card.kind === 'send_answer' ? `Send to ${card.story}: "${card.text}"`
     : card.kind === 'settings_change' ? `Save ${card.setting} = ${card.value}`
+    : card.kind === 'open_story' ? card.label
     : 'Prepare a report for an engineer';
   const lines = [`  ${kleur.bold(what)}  ${grey(level)}`];
   if (card.why) lines.push(`    ${card.why}`);
@@ -88,7 +89,7 @@ export function turnLines(turn: LeadTurn): string[] {
   const how = a.by === 'note' ? "from squad-kit's notes, no AI" : a.by === 'record' ? "from the story's live record, no AI" : a.by === 'refusal' ? 'squad-kit refused, no AI' : a.by === 'limit' ? 'no AI' : `${turn.seconds ?? 0} s, ${cost(turn.costUsd)}${turn.model ? `, ${turn.model}` : ''}`;
   lines.push(`  ${kleur.bold(a.headline)}  ${grey(how)}`);
   for (const l of a.body.split('\n')) lines.push(`  ${l}`);
-  for (const e of a.evidence) lines.push(`  ${grey('Picture:')} ${e.caption} ${grey(e.file)}`);
+  for (const e of a.evidence) lines.push(`  ${grey('Picture:')} ${e.caption} ${grey(e.story ? `${e.file}, from ${e.story}'s proof` : e.file)}`);
   if (a.sources.length) lines.push(`  ${grey('Sources:')} ${a.sources.map((s) => `${s.ref}${s.label ? ` (${s.label})` : ''}`).join(', ')}`);
   for (const r of turn.refused) if (r !== a.headline) lines.push(`  ${kleur.yellow(r)}`);
   if (a.learned) lines.push(`  ${grey(`Saved in squad-kit's notes: ${a.learned}`)}`);

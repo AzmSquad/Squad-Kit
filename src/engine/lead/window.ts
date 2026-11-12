@@ -2,6 +2,7 @@ import { readMeta, readTicket, type BoardPaths } from '../../board/store.js';
 import { writeLog } from '../../core/app-log.js';
 import { asData } from '../prompts.js';
 import { AgentWindow, type ToolDef, type ToolResult, type WindowApp, type WindowTool } from '../window.js';
+import { fitsNow } from './cards.js';
 import { guidePage, guidePages } from './guide.js';
 import { boardText, decisionsText, notesText, releasesText, requirementsText, rulesText, toolsText, usageText } from './records.js';
 import { recentTrouble, storyLog, storyText } from './story.js';
@@ -39,7 +40,7 @@ const NONE = { type: 'object', properties: {}, additionalProperties: false } as 
 const DEFS: Record<LeadRead, Omit<ToolDef, 'name'>> = {
   read_board: { description: 'The board now: every open story, where it stands, and what happens on it. Example: {}', inputSchema: NONE },
   read_story: {
-    description: 'One story in full: what was asked, its spec and "done when" list, its plan, what happens now and why, its stop card and checks, the Reviewer\'s notes, its proof, the steps the Tester took in the app (how it signed in), its cost and its activity. Example: { "id": "MA-12" }',
+    description: 'One story in full: what was asked, its spec and "done when" list, its plan, what happens now and why, its stop card and checks, the Reviewer\'s notes, its proof with its picture files, the steps the Tester took in the app (how it signed in), its cost, its activity, and the cards that fit it now. Example: { "id": "MA-12" }',
     inputSchema: { type: 'object', properties: { id: { ...STR, description: 'The story, like MA-12.' } }, required: ['id'], additionalProperties: false },
   },
   read_decision: {
@@ -145,7 +146,7 @@ export class LeadWindow extends AgentWindow {
         const t = id ? readTicket(bp, id) : null;
         if (!t) return this.mistake(name, id ? `there is no story ${id.slice(0, 40)} on this board` : 'id is missing', 'read_board lists the stories. Use: { "id": "MA-12" }');
         step(`Read ${t.id} "${t.title}"`, 'story');
-        return data(`Story ${t.id}, from squad-kit's records`, storyText(bp, t));
+        return data(`Story ${t.id}, from squad-kit's records`, `${storyText(bp, t)}\n\n${fitsNow(t)}`);
       }
       case 'read_decision': {
         const id = str(a.id);

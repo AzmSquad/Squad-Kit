@@ -45,14 +45,17 @@ import { AskLeadStrip } from '../components/LeadAsk';
 
 type Tab = 'now' | 'story' | 'plan' | 'activity' | 'conversation' | 'proof' | 'changes' | 'cost' | 'developer';
 
-export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
+/** The tabs a link may open the drawer on: /board?ticket=MA-7&tab=proof. */
+export type DrawerTab = Extract<Tab, 'story' | 'plan' | 'proof'>;
+
+export function TicketDrawer({ id, tab: start, onClose }: { id: string; tab?: DrawerTab; onClose(): void }) {
   const ticket = useTicket(id);
   const me = useMe();
   const { ticketFull, toggleTicketFull } = usePrefs();
   // Hand over and Propose a change live in the ⋯ menu, so the header stays one row at any width.
   const [menuDialog, setMenuDialog] = useState<'hand-over' | 'outside' | 'propose' | null>(null);
-  const [tab, setTab] = useState<Tab>('now');
-  useEffect(() => setTab('now'), [id]);
+  const [tab, setTab] = useState<Tab>(start ?? 'now');
+  useEffect(() => setTab(start ?? 'now'), [id, start]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !document.querySelector('.modal') && onClose();
     window.addEventListener('keydown', onKey);

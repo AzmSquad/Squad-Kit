@@ -192,15 +192,20 @@ export function appPath(address?: string): string {
   }
 }
 
-/** Where a board link opens: a story's drawer, its proof page, or a page. Null when the board has no place for it. */
-export type BoardPlace = { to: '/board'; ticket: string } | { to: '/tickets/$id/proof'; id: string } | { to: '/architecture'; adr: string } | { to: '/releases' };
+/** Where a board link opens: a story's drawer (at a tab), its proof page, or a page. Null when the board has no place for it. */
+export type BoardPlace =
+  | { to: '/board'; ticket: string; tab?: 'story' | 'plan' | 'proof' }
+  | { to: '/tickets/$id/proof'; id: string }
+  | { to: '/architecture'; adr: string }
+  | { to: '/releases' };
 
-/** A "Needs you" item's own place: "/tickets/MA-7/proof", "/board?ticket=MA-9". */
+/** A "Needs you" item's or an Open card's own place: "/tickets/MA-7/proof", "/board?ticket=MA-9&tab=plan". */
 export function placeOf(open: string): BoardPlace | null {
   const proof = /^\/tickets\/([^/?#]+)\/proof/.exec(open)?.[1];
   if (proof) return { to: '/tickets/$id/proof', id: decodeURIComponent(proof) };
   const m = /^\/board\?(?:.*&)?ticket=([^&#]+)/.exec(open)?.[1];
-  if (m) return { to: '/board', ticket: decodeURIComponent(m) };
+  const tab = /^\/board\?(?:.*&)?tab=(story|plan|proof)(?:[&#]|$)/.exec(open)?.[1] as 'story' | 'plan' | 'proof' | undefined;
+  if (m) return { to: '/board', ticket: decodeURIComponent(m), ...(tab ? { tab } : {}) };
   return null;
 }
 

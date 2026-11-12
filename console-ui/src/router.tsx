@@ -2,6 +2,7 @@ import { createRootRoute, createRoute, createRouter, redirect } from '@tanstack/
 import { Shell } from './components/Shell';
 import { CrashPage } from './components/Crash';
 import { BoardPage } from './pages/Board';
+import type { DrawerTab } from './pages/TicketDrawer';
 import { ProofPage } from './pages/Proof';
 import { ReleasesPage } from './pages/Releases';
 import { BacklogPage } from './pages/Backlog';
@@ -55,9 +56,10 @@ const breakdown = createRoute({
 const board = createRoute({
   getParentRoute: () => rootRoute,
   path: '/board',
-  // `t` is taken by the session token in the URL, so the open ticket uses `ticket`.
-  validateSearch: (s: Record<string, unknown>): { ticket?: string; view?: 'mine' | 'bugs'; write?: 1 } => ({
+  // `t` is taken by the session token in the URL, so the open ticket uses `ticket`, and `tab` the tab it opens on.
+  validateSearch: (s: Record<string, unknown>): { ticket?: string; tab?: DrawerTab; view?: 'mine' | 'bugs'; write?: 1 } => ({
     ticket: typeof s.ticket === 'string' && s.ticket ? s.ticket : undefined,
+    tab: s.tab === 'story' || s.tab === 'plan' || s.tab === 'proof' ? s.tab : undefined,
     view: s.view === 'mine' || s.view === 'bugs' ? s.view : undefined,
     write: s.write === 1 || s.write === '1' ? 1 : undefined,
   }),

@@ -1,19 +1,22 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { listDecisions, listReleases, readTicket, type BoardPaths } from '../../board/store.js';
+import { plainArabic } from '../../board/ask.js';
+import { listDecisions, listReleases, listTickets, readTicket, type BoardPaths } from '../../board/store.js';
 import { isSecretFile } from '../../core/scrub.js';
 import { answerProblem } from '../answers.js';
 import { makeCard, type CardInput } from './cards.js';
 import { MAX_LEAD_CARDS, MAX_LEAD_PICTURES, MAX_LEAD_SOURCES } from './limits.js';
 import { NEVER } from './can.js';
 import { scrubbed } from './notes.js';
+import { proofPictures } from './story.js';
 import type { LeadAnswer, LeadCard, LeadEvidence, LeadSource, LeadStep } from './types.js';
 
 /**
  * The lead hands in its answer in a fixed shape, never free text the board must parse: a headline and a short body,
- * the pictures it took, its sources, its cards and what it learned. squad-kit checks it like every other step's
- * answer and asks once more when it does not fit. Then it cleans it: only pictures it really took, sources that
- * exist, and cards it may offer. A card it never offers is refused in its own words.
+ * the pictures it took or a story's own proof pictures, its sources, its cards and what it learned. squad-kit checks it
+ * like every other step's answer and asks once more when it does not fit, or when it offers to do something later
+ * instead of giving its card. Then it cleans it: only pictures it really took or the board already shows on a story,
+ * sources that exist, and cards it may offer. A card it never offers is refused in its own words.
  */
 
 const STR = { type: 'string' } as const;
@@ -21,7 +24,7 @@ const STR = { type: 'string' } as const;
 const CARD = {
   type: 'object',
   properties: {
-    kind: { ...STR, description: 'draft_story, board_action, send_answer, settings_change or engineer_report' },
+    kind: { ...STR, description: 'draft_story, board_action, open_story, send_answer, settings_change or engineer_report' },
     why: STR,
     title: STR,
     ask: STR,
@@ -37,6 +40,7 @@ const CARD = {
     minutes: { type: 'integer' },
     app: STR,
     tool: STR,
+    tab: { type: 'string', enum: ['proof', 'spec', 'plan', 'questions'] },
     text: STR,
     setting: STR,
     value: STR,
@@ -49,7 +53,11 @@ export const LEAD_SCHEMA = {
   properties: {
     headline: STR,
     body: STR,
-    evidence: { type: 'array', maxItems: 8, items: { type: 'object', properties: { file: STR, caption: STR }, required: ['file', 'caption'] } },
+    evidence: {
+      type: 'array',
+      maxItems: 8,
+      items: { type: 'object', properties: { file: STR, caption: STR, story: { ...STR, description: "The story, for one of its own proof pictures; left out for a picture you took" } }, required: ['file', 'caption'] },
+    },
     sources: {
       type: 'array',
       maxItems: 16,
@@ -65,6 +73,7 @@ export const LEAD_SCHEMA = {
 const NEEDS: Record<string, string[]> = {
   draft_story: ['title', 'ask', 'doneWhen'],
   board_action: ['action'],
+  open_story: ['story'],
   send_answer: ['story', 'text'],
   settings_change: ['setting', 'value'],
 };
@@ -81,6 +90,23 @@ export function leadAnswerProblem(value: unknown): string | null {
       return v === undefined || v === null || (typeof v === 'string' && !v.trim()) || (Array.isArray(v) && !v.length);
     });
     if (missing) return `cards[${i}].${missing} is missing`;
+  }
+  return laterOffer(a);
+}
+
+/** "Tell me and I'll ...", in English and in Arabic as plainArabic writes it. */
+const LATER = /\b(?:tell me|let me know|ask me|say the word|just say)\b[^.!?\n]*\bI(?:'ll| will| can)\b|\bI(?:'ll| will| can)\b[^.!?\n]*\bif you (?:tell|ask) me\b|قل لي|قولي|قلي|اخبرني|خبرني|بلغني|عرفني|اطلب مني|اطلبها مني/i;
+
+/**
+ * The answer offers to do something for a story later ("tell me and I'll request them") with no card for that story:
+ * the lead acts only through the cards in this answer. Null when it does not.
+ */
+export function laterOffer(a: { headline: string; body: string; cards: CardInput[] }): string | null {
+  const carded = new Set(a.cards.map((c) => (typeof c.story === 'string' ? c.story.trim().toUpperCase() : '')));
+  for (const sentence of `${a.headline}\n${a.body}`.split(/(?<=[.!?؟])\s+|\n+/)) {
+    if (!LATER.test(plainArabic(sentence))) continue;
+    const story = (sentence.match(/\b[A-Z][A-Z0-9]*-\d+\b(?!\.\d)/g) ?? []).find((id) => !carded.has(id));
+    if (story) return `the body offers to do something for ${story} later ("tell me and I'll"), but you act only through this answer's cards: give its card now (open_story, or the board_action that fits it), or say what the person can press on the board`;
   }
   return null;
 }
@@ -130,18 +156,31 @@ function sourcesOf(bp: BoardPaths, raw: LeadSource[]): LeadSource[] {
 }
 
 /**
+ * The story whose proof the board shows this picture on, the one the lead named first: only a picture squad-kit already
+ * keeps, never another file. Null when no story's proof has it.
+ */
+function proofOf(bp: BoardPaths, file: string, named: string): string | null {
+  if (!file.endsWith('.png') || !fs.existsSync(path.join(bp.proofDir, file))) return null;
+  const first = named ? readTicket(bp, named.toUpperCase()) : null;
+  if (first && proofPictures(first).includes(file)) return first.id;
+  return listTickets(bp).find((t) => proofPictures(t).includes(file))?.id ?? null;
+}
+
+/**
  * The answer as squad-kit keeps it. `taken` is every picture the lead's window took in this answer; any other file is
- * left out. `prefix` names the cards: "<conversation>.<turn>".
+ * left out, unless it is one of a story's own proof pictures. `prefix` names the cards: "<conversation>.<turn>".
  */
 export function cleanAnswer(bp: BoardPaths, raw: unknown, o: { taken: Set<string>; prefix: string; role?: string }): Cleaned {
-  const a = raw as { headline: string; body: string; evidence: { file: string; caption: string }[]; sources: LeadSource[]; cards: CardInput[]; learned?: { text: string; about: string } };
+  const a = raw as { headline: string; body: string; evidence: { file: string; caption: string; story?: string }[]; sources: LeadSource[]; cards: CardInput[]; learned?: { text: string; about: string } };
   const steps: Omit<LeadStep, 'at'>[] = [];
   const refused: string[] = [];
   const evidence: LeadEvidence[] = [];
   for (const e of a.evidence) {
     const file = path.basename(String(e.file ?? ''));
-    if (!o.taken.has(file) || evidence.some((x) => x.file === file)) continue;
-    evidence.push({ file, caption: scrubbed(bp, String(e.caption ?? '').trim()).slice(0, 240), url: `/api/v1/proof/${encodeURIComponent(file)}` });
+    if (evidence.some((x) => x.file === file)) continue;
+    const story = o.taken.has(file) ? null : proofOf(bp, file, String(e.story ?? '').trim());
+    if (!o.taken.has(file) && !story) continue;
+    evidence.push({ file, caption: scrubbed(bp, String(e.caption ?? '').trim()).slice(0, 240), url: `/api/v1/proof/${encodeURIComponent(file)}`, ...(story ? { story } : {}) });
     if (evidence.length >= MAX_LEAD_PICTURES) break;
   }
   const cards: LeadCard[] = [];

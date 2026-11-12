@@ -16,9 +16,9 @@ import { agentPrivatePlaces } from '../project-guard.js';
 import { PROCESS_RULE, answerAgainPrompt } from '../prompts.js';
 import { startPause } from '../usage-limit.js';
 import { closeWindow, openWindow, windowAccess } from '../window-server.js';
-import { cleanAnswer, leadAnswerProblem, learnedAbout, LEAD_SCHEMA } from './answer.js';
-import { NEVER, isAllowable, neverAsked } from './can.js';
-import { actionMisfit, doCard, waysOut } from './cards.js';
+import { cleanAnswer, laterOffer, leadAnswerProblem, learnedAbout, LEAD_SCHEMA } from './answer.js';
+import { AFTER_REFUSAL, NEVER, isAllowable, neverAsked, refusalIn } from './can.js';
+import { actionMisfit, cardStory, doCard, openCard, openCardsFor, waitTab, waysOut } from './cards.js';
 import { contextFacts, contextStory } from './context.js';
 import { LEAD_ANSWER_MS, MAX_LEAD_DAY_USD, MAX_QUESTION_CHARS } from './limits.js';
 import { noteFor, saveNote } from './notes.js';
@@ -72,17 +72,21 @@ function firstSentence(text: string): string {
 }
 
 /**
- * What squad-kit answers itself, with no AI and no cost: what the lead never does, a saved note, a status question
- * about the story it was asked from, the day's limit, a sample board. Null when the lead must answer.
+ * What squad-kit answers itself, with no AI and no cost: what the lead never does (with an Open card for each story it
+ * names, so the person is one press from doing it themselves), a saved note, a status question about the story it was
+ * asked from, the day's limit, a sample board. Null when the lead must answer. `prefix` names its cards.
  */
-function answerAtOnce(bp: BoardPaths, turn: LeadTurn, fresh: boolean): LeadAnswer | null {
+function answerAtOnce(bp: BoardPaths, turn: LeadTurn, fresh: boolean, prefix: string): LeadAnswer | null {
   const text = turn.ask.text;
   const step = (t: string, kind: LeadStep['kind']) => turn.trace.push({ at: now(), text: t, kind });
   const never = neverAsked(text);
   if (never.length) {
-    turn.refused = never.map((id) => NEVER[id].refusal);
+    const ar = isArabic(text);
+    turn.refused = never.map((id) => refusalIn(id, ar));
     step(`squad-kit refused: ${never.map((id) => NEVER[id].name.toLowerCase()).join('; ')}`, 'refused');
-    return { headline: turn.refused[0]!, body: [...turn.refused.slice(1), 'Ask me anything else about the project, or what you can do instead.'].join('\n\n'), evidence: [], sources: [], cards: [], by: 'refusal' };
+    const asked = contextStory(bp, turn.ask.context)?.id;
+    const cards = openCardsFor(bp, text, [], `${prefix}.o`, { refused: true, ...(asked ? { also: [asked] } : {}) });
+    return { headline: turn.refused[0]!, body: [...turn.refused.slice(1), AFTER_REFUSAL[ar ? 'ar' : 'en']].join('\n\n'), evidence: [], sources: [], cards, by: 'refusal' };
   }
   if (!fresh) {
     const note = noteFor(bp, text);
@@ -144,7 +148,7 @@ export function askLead(bp: BoardPaths, input: LeadAsk, o: LeadAskOptions = {}):
   const turn: LeadTurn = { n: c.turns.length + 1, ask: { text, at, context, ...(facts.length ? { facts } : {}) }, trace: [], refused: [] };
   c.turns.push(turn);
   c.updatedAt = at;
-  const quick = answerAtOnce(bp, turn, Boolean(input.fresh));
+  const quick = answerAtOnce(bp, turn, Boolean(input.fresh), `${c.id}.${turn.n}`);
   if (quick) {
     Object.assign(turn, { answer: quick, seconds: 0, costUsd: 0 });
     writeConversation(bp, c);
@@ -347,22 +351,36 @@ async function answerTurn(bp: BoardPaths, id: string, n: number, signal: AbortSi
       if (still && !(typeof words?.headline === 'string' && words.headline.trim() && typeof words.body === 'string')) {
         return finish({ error: 'The lead did not give a complete answer. Ask again.', ...(costKnown ? { costUsd: cost } : {}), model: describeLevel(lv, tool) }, r.sessionId || undefined);
       }
-      if (still) structured = { evidence: [], sources: [], ...(structured as object), cards: [] };
+      // Still offering to do something later: the words and cards stay, and squad-kit adds the Open cards below.
+      if (still && still !== laterOffer(structured as Parameters<typeof laterOffer>[0])) structured = { evidence: [], sources: [], ...(structured as object), cards: [] };
     }
     const cleaned = cleanAnswer(bp, structured, { taken: new Set(win.pictures.keys()), prefix: `${id}.${n}`, role: meta.user.role });
     for (const s of cleaned.steps) step(s);
     const answer = cleaned.answer;
     const t = contextStory(bp, turn.ask.context);
-    // A board action that no longer fits where its story stands is left out.
-    answer.cards = answer.cards.filter((card) => {
-      if (card.kind !== 'board_action' || !card.story) return true;
-      const story = contextStory(bp, { from: 'story', story: card.story });
-      const misfit = story ? actionMisfit(story, card.action) : `${card.story} is gone`;
-      if (misfit) step({ text: `Left out a card: ${misfit}`, kind: 'card' });
-      return !misfit;
+    // A board action that no longer fits where its story stands is left out; the story opens instead, so the person
+    // still sees its own buttons there.
+    const misfits = new Map(
+      answer.cards.map((card) => {
+        if (card.kind !== 'board_action' || !card.story) return [card, null] as const;
+        const story = contextStory(bp, { from: 'story', story: card.story });
+        return [card, story ? actionMisfit(story, card.action) : `${card.story} is gone`] as const;
+      }),
+    );
+    const opened = new Set<string>();
+    answer.cards = answer.cards.flatMap((card) => {
+      const misfit = misfits.get(card);
+      if (!misfit || card.kind !== 'board_action') return [card];
+      step({ text: `Left out a card: ${misfit}`, kind: 'card' });
+      const story = contextStory(bp, { from: 'story', story: card.story! });
+      if (!story || opened.has(story.id) || answer.cards.some((x) => !misfits.get(x) && cardStory(x) === story.id)) return [];
+      opened.add(story.id);
+      return [openCard(card.id, story, card.action === 'pictures_again' ? 'proof' : waitTab(story), card.why)];
     });
     // Diagnosing a story: its real ways out, as cards, when the lead offered none.
     if (t && !answer.cards.some((x) => x.kind === 'board_action')) answer.cards.push(...waysOut(t, `${id}.${n}.w`));
+    // Buttons, not "go and press it": each story the answer sends the person to gets its Open card.
+    answer.cards.push(...openCardsFor(bp, `${answer.headline}\n${answer.body}`, answer.cards, `${id}.${n}.o`, { refused: cleaned.refused.length > 0 }));
     // "Always allow": the low-risk ones run by themselves, only when the person's own words asked about them.
     for (const [i, card] of answer.cards.entries()) {
       if (card.kind !== 'board_action' || !isAllowable(card.action) || !allowsAlways(bp, card.action)) continue;

@@ -1,6 +1,7 @@
 import type { BoardMeta } from '../../board/types.js';
 import { asData } from '../prompts.js';
 import { ACTIONS, ALLOWABLE, NEVER, SETTINGS } from './can.js';
+import { MAX_LEAD_PICTURES } from './limits.js';
 import type { LeadContext } from './types.js';
 
 /**
@@ -52,7 +53,9 @@ Rules:
 
 Your answer, in the shape squad-kit asks for:
 - headline: the answer in one sentence. body: a few short lines, or short numbered steps.
-- evidence: pictures you took in this answer (their file names as take_screenshots gave them), each with a caption.
+- evidence: pictures you took in this answer (their file names as take_screenshots gave them), or a story's own proof
+  pictures when you talk about them (the files read_story lists, with the story), each with a caption. At most
+  ${MAX_LEAD_PICTURES}: squad-kit shows no more.
 - sources: where it comes from: a story (MA-12), a decision (its id), a file with its line (src/store.py:42), a
   release, a note, a guide page, a log.
 - cards: only what the person may want to do next, at most 4. Each needs the person's press:
@@ -60,10 +63,18 @@ Your answer, in the shape squad-kit asks for:
     api, data or test, and warnings such as "This changes decision MA-12.1"). Nothing starts until the person says.
   - board_action: action is one of ${STORY_ACTIONS}, with the story it is for (minutes for more_time; app for
     start_app; tool for get_tool and update_tool). "Always allow" can only cover ${ALLOWABLE.join(', ')}.
+  - open_story: opens a story on the board (story), at its tab when it is about one: proof, spec, plan or questions.
+    It changes nothing, so it needs no OK.
   - send_answer: an answer the person may send to an agent's question on a story (story, text).
   - settings_change: setting is one of ${Object.keys(SETTINGS).join(', ')}, with its value.
   - engineer_report: when an engineer is needed: squad-kit writes a short report with no secrets for the person to copy.
   Never offer what squad-kit refuses, whoever asks: ${Object.values(NEVER).map((n) => n.name.toLowerCase()).join('; ')}.
+- Buttons, not "tell me": when your answer sends the person to the board (open a story, press a button there, look at
+  its proof), give its card in this answer: open_story, or the board_action read_story says fits it now. Never write
+  "tell me and I'll ..." or promise to do something later: you act only through this answer's cards. When nothing you
+  may offer does it, say what the person can press on the board, with the open_story card. When you refuse what only
+  the person may do (Looks right, approving a spec or plan, merging, releasing), keep your refusal and add an
+  open_story card for each story you name, so they are one press from doing it themselves.
 - learned: when you found something lasting that the next person will ask too (how to sign in, where a feature lives),
   one or two plain sentences for squad-kit's notes, with about "sign-in" or "other". Never a secret. Leave it out otherwise.`;
 }

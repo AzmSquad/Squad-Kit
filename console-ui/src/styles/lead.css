@@ -111,6 +111,7 @@
 .lt-shot { width: 230px; max-width: 100%; flex: none; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); padding: 8px; display: flex; flex-direction: column; gap: 6px; }
 .lt-shot img { width: 100%; height: 150px; object-fit: cover; object-position: top; border-radius: 8px; display: block; border: 1px solid var(--line); background: var(--surface); }
 .lt-shot .cap { font-size: 11px; line-height: 1.35; color: var(--dim); }
+.lt-shot .from { font-size: 11px; font-weight: 600; color: var(--muted); }
 .lt-src { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; min-width: 0; max-width: 100%; flex: 1 1 200px; }
 .lt-evidence:not(:has(.lt-shot)) .lt-src { flex-direction: row; flex-wrap: wrap; align-items: center; }
 .lt-evidence:not(:has(.lt-shot)) .lbl2 { flex-basis: 100%; }
@@ -122,6 +123,11 @@
 a.lt-ref:hover { border-color: var(--line-strong); }
 .lt-learned { font-size: 12px; color: var(--muted); margin-top: 8px; padding: 7px 10px; border-radius: 9px; background: var(--accent-soft); overflow-wrap: anywhere; }
 .lt-learned b { color: var(--text); font-weight: 600; }
+/* Open buttons: plain links to a story on the board, nothing to approve. */
+.lt-opens { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.lt-open { max-width: 100%; }
+.lt-open svg { color: var(--muted); flex: none; }
+.lt-opens + .lt-cards { margin-top: 10px; }
 .lt-cards { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
 .lt-cost { display: flex; gap: 10px; align-items: center; margin-top: -6px; font-size: 11.5px; color: var(--dim); }
 .lt-cost .linkbtn { margin: 0; font-size: 11.5px; }

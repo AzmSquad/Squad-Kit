@@ -26,11 +26,16 @@ export interface LeadStep {
   kind: 'notes' | 'board' | 'story' | 'code' | 'app' | 'guide' | 'log' | 'refused' | 'card';
 }
 
-/** A picture the lead took in its own copy, with what it shows. Served at `url` like the proof pictures. */
+/**
+ * A picture in an answer, with what it shows, served at `url` like the proof pictures: one the lead took in its own copy,
+ * or one of a story's own proof pictures, the same the board shows on that story.
+ */
 export interface LeadEvidence {
   file: string;
   caption: string;
   url: string;
+  /** The story whose proof it is from. Left out for a picture the lead took. */
+  story?: string;
 }
 
 /** Where an answer comes from: a story, a decision, a file and line, a release, a saved note, the guide, a log. */
@@ -55,6 +60,9 @@ export type LeadAction =
   | 'engineer'
   | 'morning_brief';
 
+/** The part of a story an Open card shows: its proof, its spec, its plan or its questions. */
+export type StoryTab = 'proof' | 'spec' | 'plan' | 'questions';
+
 /** The low-risk actions "Always allow" may cover. Nothing else ever runs without a press. */
 export type Allowable = Extract<LeadAction, 'more_time' | 'pictures_again' | 'start_app' | 'morning_brief'>;
 
@@ -66,7 +74,7 @@ export interface DoneWhen {
 interface CardBase {
   /** `<conversation>.<n>`, or `now.<story>.<action>` for a card on the "Needs you" rail. */
   id: string;
-  /** 1: on its own (it only reads or writes text). 2: needs the person's OK. */
+  /** 1: on its own (it only writes text or opens a page). 2: needs the person's OK. */
   level: 1 | 2;
   /** The words on its main button: "Create story", "Allow once", "Send". */
   label: string;
@@ -90,7 +98,9 @@ export type LeadCard =
   | (CardBase & { kind: 'board_action'; action: LeadAction; story?: string; minutes?: number; app?: string; tool?: string })
   | (CardBase & { kind: 'send_answer'; story: string; text: string })
   | (CardBase & { kind: 'settings_change'; setting: string; value: string; technical: boolean })
-  | (CardBase & { kind: 'engineer_report'; report?: string });
+  | (CardBase & { kind: 'engineer_report'; report?: string })
+  /** Opens a story on the board, at its tab: `open` is the board's own place, "/tickets/MA-7/proof". It changes nothing. */
+  | (CardBase & { kind: 'open_story'; story: string; tab?: StoryTab; open: string });
 
 /** The lead's answer, as the engine checked and cleaned it. */
 export interface LeadAnswer {

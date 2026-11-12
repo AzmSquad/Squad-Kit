@@ -2,11 +2,11 @@ import { useEffect, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { Check, ChevronDown, Clock, Eye, FileText, Loader2, Square } from 'lucide-react';
 import { assetUrl } from '../api/client';
-import type { LeadAnswer, LeadConversation, LeadSource, LeadStep, LeadTurn } from '../api/types';
+import type { LeadAnswer, LeadCard, LeadConversation, LeadSource, LeadStep, LeadTurn } from '../api/types';
 import { useAct } from '../lib/data';
 import { bodyAfter, contextWords, duration, fileLabel, sourcePlace, traceSummary, turnMeta } from '../lib/lead';
 import { ChatMarkdown } from './ChatMarkdown';
-import { LeadCardView } from './LeadCards';
+import { LeadCardView, OpenButton } from './LeadCards';
 import { Lightbox } from './Lightbox';
 import { Written, clock } from './ui';
 
@@ -136,11 +136,13 @@ function Thinking({ c, turn }: { c: LeadConversation; turn: LeadTurn }) {
   );
 }
 
-/** The answer itself, as a short document. */
+/** The answer itself, as a short document: its Open buttons first, then the cards that need a press. */
 function Answer({ answer }: { answer: LeadAnswer }) {
   const [zoom, setZoom] = useState<number | null>(null);
-  const pictures = answer.evidence.map((e) => ({ src: assetUrl(e.url), caption: e.caption }));
+  const pictures = answer.evidence.map((e) => ({ src: assetUrl(e.url), caption: e.story ? `${e.caption} (${e.story}'s proof)` : e.caption, story: e.story }));
   const body = bodyAfter(answer.headline, answer.body);
+  const opens = answer.cards.filter((c): c is Extract<LeadCard, { kind: 'open_story' }> => c.kind === 'open_story');
+  const cards = answer.cards.filter((c) => c.kind !== 'open_story');
   return (
     <div className="lt-answer">
       <Written as="h3" text={answer.headline} />
@@ -150,7 +152,8 @@ function Answer({ answer }: { answer: LeadAnswer }) {
           {pictures.map((p, i) => (
             <button key={p.src} className="lt-shot zoom" onClick={() => setZoom(i)} aria-label={`Open the picture full size: ${p.caption}`}>
               <img src={p.src} alt={p.caption} loading="lazy" />
-              <Written className="cap" text={p.caption} />
+              {p.story && <span className="from">From {p.story}&apos;s proof</span>}
+              <Written className="cap" text={answer.evidence[i]!.caption} />
             </button>
           ))}
           {answer.sources.length > 0 && (
@@ -168,9 +171,16 @@ function Answer({ answer }: { answer: LeadAnswer }) {
           <b>Saved in squad-kit&apos;s notes</b> for the next person: <Written text={answer.learned} />
         </p>
       )}
-      {answer.cards.length > 0 && (
+      {opens.length > 0 && (
+        <div className="lt-opens">
+          {opens.map((card) => (
+            <OpenButton key={card.id} card={card} />
+          ))}
+        </div>
+      )}
+      {cards.length > 0 && (
         <div className="lt-cards">
-          {answer.cards.map((card) => (
+          {cards.map((card) => (
             <LeadCardView key={card.id} card={card} />
           ))}
         </div>

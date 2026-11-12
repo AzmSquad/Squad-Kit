@@ -2,7 +2,7 @@ import { recentLines } from '../../core/app-log.js';
 import { criterionText } from '../../board/docs.js';
 import { liveNow } from '../../board/now.js';
 import type { BoardPaths } from '../../board/store.js';
-import type { Ticket } from '../../board/types.js';
+import type { ProofShot, Ticket } from '../../board/types.js';
 import { readUsual } from '../../board/usual.js';
 import { costWords, totalOf } from '../../board/usage.js';
 import { readConversation } from '../conversations.js';
@@ -65,6 +65,16 @@ export function testerSteps(bp: BoardPaths, t: Ticket): string[] {
     }
   }
   return out.map((l) => scrubbed(bp, l));
+}
+
+/** A proof row's pictures as the board shows them: the before, the main after and its others. API answers are none. */
+function rowPictures(p: ProofShot): string[] {
+  return [...new Set([p.before, p.after, ...(p.more ?? []).map((m) => m.after)].filter((f): f is string => Boolean(f) && f.endsWith('.png')))];
+}
+
+/** Every picture the board shows on a story's proof, each once. */
+export function proofPictures(t: Ticket): string[] {
+  return [...new Set((t.proof ?? []).flatMap(rowPictures))];
 }
 
 /** squad-kit's own log lines about a story, the newest last, scrubbed. */
@@ -131,7 +141,7 @@ export function storyText(bp: BoardPaths, t: Ticket): string {
   if (t.proof?.length) {
     parts.push(
       `The proof:\n${t.proof
-        .map((p, i) => `${i + 1}. ${p.criterion}: ${p.shows ?? 'not judged yet'}${p.why ? ` (${p.why})` : ''}${p.page ? `, on ${p.page}` : ''}, ${1 + (p.more?.length ?? 0)} picture${p.more?.length ? 's' : ''}${p.device ? ` on ${p.device}` : ''}${p.note ? `. ${p.note}` : ''}`)
+        .map((p, i) => `${i + 1}. ${p.criterion}: ${p.shows ?? 'not judged yet'}${p.why ? ` (${p.why})` : ''}${p.page ? `, on ${p.page}` : ''}, ${1 + (p.more?.length ?? 0)} picture${p.more?.length ? 's' : ''}${p.device ? ` on ${p.device}` : ''}${p.note ? `. ${p.note}` : ''}${rowPictures(p).length ? ` [files: ${rowPictures(p).join(', ')}]` : ''}`)
         .join('\n')}`,
     );
   }

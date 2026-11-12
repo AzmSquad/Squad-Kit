@@ -95,9 +95,9 @@ describe('board actions', () => {
     expect(readTicket(bp, 'SK-146')!.stopRequested).toBe(true);
   });
 
-  it('leaves out an action that does not fit where the story stands, and one with no story', async () => {
+  it('leaves out an action that does not fit where the story stands, opening the story instead, and one with no story', async () => {
     const { cards: list, turn } = await offered({ kind: 'board_action', action: 'start_story', story: 'SK-145' }, { kind: 'board_action', action: 'more_time' });
-    expect(list).toEqual([]);
+    expect(list).toEqual([expect.objectContaining({ kind: 'open_story', story: 'SK-145', label: 'Open SK-145', level: 1 })]);
     expect(turn.trace.map((s) => s.text)).toEqual(expect.arrayContaining(['Left out a card: SK-145 does not wait to be started', 'Left out a card: give it more time names no story on this board']));
   });
 
