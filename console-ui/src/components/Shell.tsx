@@ -9,7 +9,8 @@ import { AppUpdate } from './Update';
 import { FirstWin } from './FirstStory';
 import { ProjectWaiting } from './Waiting';
 import { needsYou } from '../lib/waiting';
-import { ChatDock, useChats, useDocked } from './ChatDock';
+import { ChatPopups } from './popups/ChatPopups';
+import { useChats } from '../lib/chats';
 import { LimitBanner } from './UsageLimit';
 import { SaveTroubleBanner } from './SaveTrouble';
 import { BudgetBanner } from './Usage';
@@ -21,7 +22,6 @@ import { requirementsWaiting } from '../lib/requirements';
 import { useBreakdownWaits } from './BreakdownWaits';
 import { useTools } from '../pages/Tools';
 import { LeadMark } from './LeadMark';
-import { LeadAskHost } from './LeadAsk';
 import { useLead } from '../lib/leadData';
 
 const NAV = [
@@ -53,7 +53,6 @@ export function Shell() {
   const bugs = tickets.filter((t) => t.kind === 'bug').length;
   const initials = (meta?.user.name ?? 'You').slice(0, 2).toUpperCase();
   const chats = useChats().data?.filter((c) => c.open).length ?? 0;
-  const docked = useDocked();
   const setupWaits = useOverviewWaits();
   // Required tools not on this computer yet (or too old): the Tools item counts them.
   const toolsData = useTools(60_000).data;
@@ -67,7 +66,8 @@ export function Shell() {
   const [menu, setMenu] = useState(false);
   useEffect(() => setMenu(false), [path]);
 
-  // The Conversations page is full screen: the list, the chat and the spec need the whole width. So is the setup.
+  // The Conversations page is full screen: the list, the chat and the spec need the whole width. So is the setup,
+  // which has no chats yet.
   if (path.startsWith('/conversations') || path.startsWith('/setup'))
     return (
       <div className="fullpage">
@@ -77,12 +77,12 @@ export function Shell() {
         <div className="canvas-b">
           <Outlet />
         </div>
-        <LeadAskHost />
+        {!path.startsWith('/setup') && <ChatPopups />}
       </div>
     );
 
   return (
-    <div className={`app ${docked ? 'docked' : ''}`}>
+    <div className="app">
       <header className="mtop">
         <button className="iconbtn" onClick={() => setMenu(true)} aria-label="Open the menu" aria-expanded={menu}>
           <Menu size={17} />
@@ -188,9 +188,8 @@ export function Shell() {
           <Outlet />
         </div>
       </main>
-      <ChatDock />
       <FirstWin />
-      <LeadAskHost />
+      <ChatPopups />
     </div>
   );
 }

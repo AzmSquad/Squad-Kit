@@ -1,4 +1,4 @@
-import type { ProofKind } from '../../board/types.js';
+import type { ProofKind, WaitingKind } from '../../board/types.js';
 
 /**
  * The Squad lead: one contact for the whole project. It reads, looks and tells on its own; it drafts the rest as
@@ -100,7 +100,13 @@ export type LeadCard =
   | (CardBase & { kind: 'settings_change'; setting: string; value: string; technical: boolean })
   | (CardBase & { kind: 'engineer_report'; report?: string })
   /** Opens a story on the board, at its tab: `open` is the board's own place, "/tickets/MA-7/proof". It changes nothing. */
-  | (CardBase & { kind: 'open_story'; story: string; tab?: StoryTab; open: string });
+  | (CardBase & { kind: 'open_story'; story: string; tab?: StoryTab; open: string })
+  /**
+   * A story that waits on the person, brought into the chat: the board shows it there from its live data, with the
+   * board's own buttons. The lead brings it; only the person presses it, and the press is checked again against `key`,
+   * the mark of what waited when the card was made (board/wait-key.ts). The card itself changes nothing.
+   */
+  | (CardBase & { kind: 'decide'; story: string; wait: WaitingKind; key: string; open: string });
 
 /** The lead's answer, as the engine checked and cleaned it. */
 export interface LeadAnswer {
@@ -129,6 +135,8 @@ export interface LeadTurn {
   error?: string;
   /** The model it ran on, for the cost line: "Sonnet (balanced, medium effort)". */
   model?: string;
+  /** While it answers: its words so far, as they come from the AI tool. Gone once the answer is in. */
+  draft?: { headline?: string; body?: string };
 }
 
 /** One conversation, one file under squad-kit's own folder for the project. */

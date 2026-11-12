@@ -1,35 +1,36 @@
 import { useSyncExternalStore } from 'react';
 import type { LeadContext } from '../api/types';
+import { popups } from './popups';
 
 /**
- * The ask box (⌘K or Ctrl+K on any board page, "Ask the lead" on a card, "Ask about it" in Your apps): whether it is
- * open, the question it starts with, where it was asked from, and the conversation it shows once sent. One per tab.
+ * "Ask the lead" from a card ("Ask about it" on a stop, an error page, Your apps): the lead's popup opens on a new
+ * conversation with the question filled in and where it is asked from. Nothing is sent until the person presses Send.
  */
 export interface AskState {
-  open: boolean;
   text: string;
   context: LeadContext | null;
-  /** The conversation the box shows, once the question is sent. */
-  conversation: string | null;
-  /** Bumped on every open, so the box starts again with what it was opened with. */
+  /** Bumped on every ask, so the box starts again with what it was opened with. */
   n: number;
 }
 
 const listeners = new Set<() => void>();
-let state: AskState = { open: false, text: '', context: null, conversation: null, n: 0 };
-
-function set(next: Partial<AskState>): void {
-  state = { ...state, ...next };
-  for (const l of listeners) l();
-}
+let state: AskState = { text: '', context: null, n: 0 };
 
 export const leadAsk = {
   get: () => state,
-  /** Opens the box with a question already filled in, or empty, and where it is asked from. */
-  open: (o: { text?: string; context: LeadContext }) => set({ open: true, text: o.text ?? '', context: o.context, conversation: null, n: state.n + 1 }),
-  close: () => set({ open: false }),
-  /** The question went: the box follows its conversation. */
-  sent: (conversation: string) => set({ conversation }),
+  /** Opens the lead's popup on a new conversation, with a question already filled in, or empty, and where it is asked from. */
+  open: (o: { text?: string; context: LeadContext }) => {
+    state = { text: o.text ?? '', context: o.context, n: state.n + 1 };
+    popups.follow(null);
+    popups.open('lead');
+    for (const l of listeners) l();
+  },
+  /** The question went: the next new conversation asks from the page again. */
+  used: () => {
+    if (!state.context && !state.text) return;
+    state = { text: '', context: null, n: state.n };
+    for (const l of listeners) l();
+  },
 };
 
 export function useLeadAsk(): AskState {

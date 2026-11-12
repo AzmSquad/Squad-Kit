@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useRouterState } from '@tanstack/react-router';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { useBoard } from '../lib/data';
-import { PHONE, useMedia } from '../lib/chatDock';
+import { PHONE, useMedia } from '../lib/popups';
 import { needsYou } from '../lib/waiting';
 import { useBreakdownWaits } from './BreakdownWaits';
 import { updateLine, useUpdate } from './Update';
@@ -10,7 +10,7 @@ import { useUsageLimit } from './UsageLimit';
 
 /**
  * The banners over a project's pages: the update, the usage limit, squad-kit was updated, and Waiting for you. With a
- * ticket open in a narrow board area (a phone, or the chat docked beside the board) they would take much of the height
+ * ticket open in a narrow board area (a phone, or a small window) they would take much of the height
  * above it, so they fold into one slim row that names each; a tap opens them all. They stay on the page while folded,
  * so the tab title and the desktop notices go on.
  */

@@ -316,6 +316,8 @@ export interface AgentChat {
   messages: ChatMessage[];
   /** Set while the agent writes its reply. */
   thinking?: boolean;
+  /** Its reply so far, while it writes it, as the AI tool hands it in. Gone once the reply is in the messages. */
+  draft?: string;
   /** The agent thinks it understands enough for the next step. It only says so; you decide. */
   ready?: boolean;
   /** Where the ticket was when the chat started, to go back to it on Done. */

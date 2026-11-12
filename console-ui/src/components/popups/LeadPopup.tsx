@@ -1,0 +1,138 @@
+import { useEffect, useRef, useState } from 'react';
+import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
+import type { LeadView } from '../../api/types';
+import { useApps, useBoard } from '../../lib/data';
+import { detect } from '../../lib/lang';
+import { exampleQuestions, pageContext } from '../../lib/lead';
+import { leadAsk, useLeadAsk } from '../../lib/leadAsk';
+import { useLead, useLeadConversation } from '../../lib/leadData';
+import { popups, usePopups, type Pop } from '../../lib/popups';
+import { BoxLine, ChatBox, useBoxAsk } from '../decide/BoxAsk';
+import { AskInput, ContextChip, useSendLead } from '../LeadAsk';
+import { LeadMark } from '../LeadMark';
+import { LeadTurnView } from '../LeadTurn';
+import { Written } from '../ui';
+import { Frame, useFollow } from './Frame';
+
+/** The lead's popup: what needs you and questions to start from, then the conversation. */
+export function LeadPopup({ pop }: { pop: Pop }) {
+  const s = usePopups();
+  const ask = useLeadAsk();
+  const conv = useLeadConversation(s.lead);
+  const c = s.lead ? conv.data : undefined;
+  const lead = useLead();
+  const board = useBoard();
+  const navigate = useNavigate();
+  const loc = useRouterState({ select: (r) => r.location });
+  const { send, busy } = useSendLead();
+  const [text, setText] = useState(ask.text);
+  const feed = useRef<HTMLDivElement>(null);
+  // "Something's wrong" on a card: the box asks for the note, and only its own Send takes it to the board.
+  const { box, cancel: cancelBox, door } = useBoxAsk();
+  const meta = board.data?.ready ? board.data.meta : undefined;
+  const project = meta?.project ?? 'the project';
+  const stories = board.data?.ready ? board.data.tickets.length + board.data.stats.released30 : 0;
+  // A question asked from a card starts with its words in the box.
+  useEffect(() => setText(ask.text), [ask.n, ask.text]);
+  const context = ask.context ?? pageContext(loc.pathname, loc.search as Record<string, unknown>);
+  const go = (q: string, fresh = false) =>
+    send({ text: q.trim(), context: c ? null : context, conversation: c?.id ?? null, fresh }, (x) => {
+      popups.follow(x.id);
+      leadAsk.used();
+      setText('');
+    });
+  // The box's own Send: the note for the board while a card asks for one, else a question for the lead.
+  const submit = () => {
+    if (box) {
+      box.send(text.trim());
+      setText('');
+    } else go(text);
+  };
+  useFollow(feed);
+  const last = c?.turns.at(-1)?.ask.text ?? text;
+  return (
+    <Frame
+      pop={pop}
+      avatar={
+        <span className="av lead">
+          <LeadMark size={20} />
+        </span>
+      }
+      title="Squad lead"
+      sub={`${project} · knows the code${stories ? `, ${stories} ${stories === 1 ? 'story' : 'stories'}` : ''}`}
+      busy={Boolean(c?.thinking)}
+      dir={last.trim() ? detect(last).dir : undefined}
+      onExpand={() => void navigate({ to: '/lead', search: c ? { c: c.id } : {} })}
+    >
+      <ChatBox.Provider value={door}>
+        <div className="feed" ref={feed}>
+          <div className="feedcol">
+            {c ? (
+              c.turns.map((t, i) => (
+                <LeadTurnView
+                  key={t.n}
+                  c={c}
+                  turn={t}
+                  last={i === c.turns.length - 1}
+                  onAgain={(q, fresh) => {
+                    // Ask again goes to the lead, never to the board: the box stops asking for a note.
+                    cancelBox();
+                    go(q, fresh);
+                  }}
+                />
+              ))
+            ) : s.lead && conv.isLoading ? null : (
+              <LeadStart view={lead.data} onPick={setText} />
+            )}
+          </div>
+        </div>
+      </ChatBox.Provider>
+      <div className="composer">
+        {box && <BoxLine box={box} onCancel={cancelBox} />}
+        <AskInput value={text} onChange={setText} onSend={submit} busy={busy || Boolean(c?.thinking)} placeholder={box ? box.placeholder : c ? 'Ask a follow-up…' : `Ask about ${project}, or ask for something…`} autoFocus />
+        <div className="where">
+          <ContextChip ctx={c?.context ?? context} />
+          <span>Enter to send</span>
+        </div>
+      </div>
+    </Frame>
+  );
+}
+
+/** No conversation yet: what needs you, each opening its story's popup, and a few questions to start from. */
+function LeadStart({ view, onPick }: { view?: LeadView; onPick(q: string): void }) {
+  const apps = (useApps().data?.apps ?? []).map((a) => a.name);
+  const needs = (view?.needsYou ?? []).filter((n) => n.kind !== 'slow');
+  const examples = exampleQuestions({ apps, needsYou: view?.needsYou ?? [], squadNow: view?.squadNow ?? [] });
+  return (
+    <div className="empty">
+      {needs.length > 0 && (
+        <>
+          <h6>Needs you</h6>
+          {needs.slice(0, 4).map((n, i) => (
+            <button key={n.id} className="need" style={{ ['--i' as string]: i }} onClick={() => popups.open(n.story)}>
+              <div>
+                <Written as="b" text={n.words} />
+                <Written as="small" text={n.more ?? n.title} />
+              </div>
+              <span className="go">{n.kind === 'questions' || n.kind === 'ask' ? 'Answer' : 'Open'}</span>
+            </button>
+          ))}
+          {needs.length > 4 && (
+            <Link to="/inbox" className="linkbtn">
+              and {needs.length - 4} more in Waiting for you
+            </Link>
+          )}
+        </>
+      )}
+      <h6>Try asking</h6>
+      <div className="sugs">
+        {examples.map((q) => (
+          <button key={q} className="sug" onClick={() => onPick(q)}>
+            {q}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}

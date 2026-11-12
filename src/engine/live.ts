@@ -2635,6 +2635,14 @@ export class LiveSquad {
         timeoutMs: WORDS_STEP_MS,
         // Beside the work, the Analyst and the Architect may read the code built so far to answer.
         addDirs: [...attachmentDirs(t), ...(beside && t.worktree && cwd !== workFolder(t) && fs.existsSync(t.worktree) ? [workFolder(t)!] : [])],
+        // Its reply so far, for the board to show as it is written.
+        onDraft: (a) => {
+          const reply = typeof a.reply === 'string' ? a.reply.trim() : '';
+          if (!reply || readTicket(this.bp, id)?.chat?.draft === reply) return;
+          this.update(id, (x) => {
+            if (x.chat?.thinking) x.chat.draft = reply;
+          });
+        },
       });
       const out = (r.structured ?? {}) as { reply?: string; ready?: boolean; options?: string[]; files?: string[] };
       const options = (out.options ?? []).map((o) => String(o).trim()).filter(Boolean).slice(0, 4);
@@ -2651,6 +2659,7 @@ export class LiveSquad {
         });
         x.chat.ready = !beside && Boolean(out.ready);
         x.chat.thinking = false;
+        delete x.chat.draft;
       });
     } catch (err) {
       const after = readTicket(this.bp, id);
@@ -2660,6 +2669,7 @@ export class LiveSquad {
         if (!x.chat) return;
         x.chat.messages.push({ who: 'squad', text: this.couldNotAnswer(err, id, 'Could not answer this time. Press Try again.'), at: now(), note: 'failed' });
         x.chat.thinking = false;
+        delete x.chat.draft;
       });
     }
   }
@@ -2683,6 +2693,7 @@ export class LiveSquad {
       if (!c) return;
       if (c.thinking && c.open) c.messages.push({ who: 'squad', text: 'You stopped this answer. Ask again, or carry on.', at: now(), note: 'stopped' });
       c.thinking = false;
+      delete c.draft;
       c.stopping = undefined;
     });
   }

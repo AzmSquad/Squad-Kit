@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type ReactNode, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   ArrowUp,
@@ -10,6 +11,7 @@ import {
   Compass,
   Copy,
   Eye,
+  FileText,
   Loader2,
   Maximize2,
   MessageCircle,
@@ -31,8 +33,14 @@ import { api } from '../api/client';
 import type { AgentName, ChatMessage, ConversationResponse, Ticket } from '../api/types';
 import { useAct, useTicket } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
-import { chatDock } from '../lib/chatDock';
-import { detect, firstWords, langLabel, textClass, wordCount } from '../lib/lang';
+import { popups, useMedia } from '../lib/popups';
+import { REDUCED } from '../lib/reveal';
+import { agentFor, decideKind, pressedLately } from '../lib/decide';
+import { useReveal } from '../lib/reveal';
+import { isAgent, keyOf, useWriting } from '../lib/writing';
+import { BoxLine, BoxOnly, ChatBox, useBoxAsk, type BoxAsk } from './decide/BoxAsk';
+import { DecideCard } from './decide/DecideCard';
+import { detect, firstWords, langLabel, textClass } from '../lib/lang';
 import { ChatMarkdown, Folded, lineCount } from './ChatMarkdown';
 import { AUDIO, ChatFiles, type OpenDoc } from './ChatFiles';
 import { merge, type Item as AcpItem } from '../lib/conversation';
@@ -74,7 +82,8 @@ const PHASE_ROLE: Record<string, AgentName> = {
   'chat-carry-tester': 'tester',
 };
 
-export type ChatSize = 'panel' | 'full' | 'phone';
+/** `pop`: in a chat popup over any page, whose own head line says who it is. */
+export type ChatSize = 'panel' | 'full' | 'phone' | 'pop';
 type Tool = Extract<AcpItem, { kind: 'tool' }>;
 
 /** An agent's mark in its own color; it breathes while the agent works. */
@@ -87,7 +96,7 @@ export function Avatar({ role, small, live }: { role: AgentName; small?: boolean
   );
 }
 
-/** Open a talk with one agent from anywhere. It opens in the chat panel beside the board. */
+/** Open a talk with one agent from anywhere. It opens in its popup, over the page. */
 export function TalkButton({ t, agent, label, primary, small }: { t: Ticket; agent: AgentName; label?: string; primary?: boolean; small?: boolean }) {
   const act = useAct();
   return (
@@ -97,7 +106,7 @@ export function TalkButton({ t, agent, label, primary, small }: { t: Ticket; age
       onClick={() =>
         act.mutate(
           { path: `/api/v1/tickets/${t.id}/chat/start`, body: { with: agent } },
-          { onSuccess: () => chatDock.show(t.id) },
+          { onSuccess: () => popups.open(t.id) },
         )
       }
     >
@@ -198,7 +207,7 @@ function ChatHeader({ t, size, onFull, onPanel }: { t: Ticket; size: ChatSize; o
         <button
           className="btn"
           disabled={act.isPending}
-          onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/chat/start`, body: { with: c.with, ...(c.beside ? { ask: true } : {}) } }, { onSuccess: () => chatDock.show(t.id) })}
+          onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/chat/start`, body: { with: c.with, ...(c.beside ? { ask: true } : {}) } }, { onSuccess: () => popups.open(t.id) })}
         >
           <MessageCircle size={14} /> {c.beside ? `Ask the ${who} again` : `Talk to the ${who} again`}
         </button>
@@ -239,6 +248,34 @@ function ChatHeader({ t, size, onFull, onPanel }: { t: Ticket; size: ChatSize; o
     ) : null;
 
   const dialogs = change ? <ProposeChange t={t} from={c.with} onClose={() => setChange(false)} /> : null;
+
+  // In a popup: one line under its head line, with the talk's own buttons.
+  if (size === 'pop') {
+    return (
+      <div className="cstrip">
+        <FileText size={15} aria-hidden="true" />
+        <b>{c.open ? (kind.kind === 'talk' && c.with === 'analyst' ? `The spec ${t.story ? 'grows' : 'starts'} as you talk` : kind.kind === 'talk' && c.with === 'architect' && t.specApproved ? 'The design grows as you talk' : stands || kind.note) : 'This talk is over'}</b>
+        <span className="grow" />
+        {c.open && primary && (
+          <button className="linkbtn go" disabled={busy} onClick={() => run(primary.path, primary.done)}>
+            {primary.label}
+          </button>
+        )}
+        {c.open && (
+          <button className="linkbtn" disabled={act.isPending} onClick={() => run('done', kind.kind === 'talk' ? 'Done talking.' : `Done asking the ${who}.`)}>
+            {primary && kind.kind === 'talk' && !later ? 'Done, no changes' : 'Done'}
+          </button>
+        )}
+        {!c.open && (c.beside || !t.takenOver) && (
+          <button className="linkbtn go" disabled={act.isPending} onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/chat/start`, body: { with: c.with, ...(c.beside ? { ask: true } : {}) } })}>
+            Talk again
+          </button>
+        )}
+        {/* A dialog opened here covers the popups and their heads too. */}
+        {dialogs && createPortal(dialogs, document.body)}
+      </div>
+    );
+  }
 
   if (size === 'phone') {
     return (
@@ -288,7 +325,7 @@ function ChatHeader({ t, size, onFull, onPanel }: { t: Ticket; size: ChatSize; o
           <span className="grow" />
           <div className="cbtns">{buttons}</div>
           {onPanel && (
-            <button className="iconbtn" onClick={onPanel} aria-label="Back to the side panel" title="Back to the side panel">
+            <button className="iconbtn" onClick={onPanel} aria-label="Back to its popup" title="Back to its popup">
               <Minimize2 size={16} />
             </button>
           )}
@@ -322,19 +359,20 @@ function ChatHeader({ t, size, onFull, onPanel }: { t: Ticket; size: ChatSize; o
 
 /* ── The talk ──────────────────────────────────────────── */
 
-const keyOf = (m: ChatMessage) => `${m.at}|${m.who}`;
-const isAgent = (m: ChatMessage) => m.who !== 'you' && m.who !== 'squad';
 
 /**
- * One chat with one agent, in three sizes: the side panel beside the board, the full-screen Conversations page and a
- * phone. Replies come from the agent's real session; while it works you see what it reads and its working steps, and
- * each new answer is written out word by word. Only your buttons move the ticket on.
+ * One chat with one agent, in four sizes: a popup over any page, the full-screen Conversations page, a phone, and the
+ * old side panel. Replies come from the agent's real session; while it works you see what it reads and its working
+ * steps, and its words appear as they are written: the reply so far while it comes, then the rest, at a reading pace.
+ * Answers that were already here show whole. When the story waits for you, its decision card closes the talk, with
+ * the board's own buttons. Only your buttons move the ticket on.
  */
 export function ChatView({ id, size, onOpenDoc, onFull, onPanel }: { id: string; size: ChatSize; onOpenDoc(d: OpenDoc): void; onFull?(): void; onPanel?(): void }) {
   const ticket = useTicket(id);
   const t = ticket.data;
   const c = t?.chat;
   const thread = useRef<HTMLDivElement>(null);
+  const reduced = useMedia(REDUCED);
   // Kept on this computer until sent: another tab, Minimize, Full screen or a reload lose nothing.
   const [text, setText] = useDraft(id, 'chat', '');
   const input = useRef<HTMLTextAreaElement>(null);
@@ -342,6 +380,8 @@ export function ChatView({ id, size, onOpenDoc, onFull, onPanel }: { id: string;
   const sendRef = useRef<((words: string) => void) | null>(null);
   // Your message shows as sending until the board has it.
   const [pending, setPending] = useState<Pending | null>(null);
+  // "Something's wrong" on the decision card: the box asks for the words, and they go to the board.
+  const { box, cancel: cancelBox, door } = useBoxAsk(() => setTimeout(() => input.current?.focus(), 0));
   const count = t?.chat?.messages.length ?? 0;
   useEffect(() => {
     if (pending && count > pending.count) setPending(null);
@@ -359,31 +399,8 @@ export function ChatView({ id, size, onOpenDoc, onFull, onPanel }: { id: string;
   const stepsFor = (from?: string, to?: string) => steps.filter((s) => (!from || (s.at ?? '') >= from) && (!to || (s.at ?? '') <= to));
 
   // New answers are written out word by word; answers that were already here show whole.
-  const known = useRef<Set<string> | null>(null);
-  const [reveal, setReveal] = useState<{ key: string; shown: number; total: number } | null>(null);
   const messages = useMemo(() => c?.messages ?? [], [c?.messages]);
-  useEffect(() => {
-    if (!c) return;
-    const keys = messages.map(keyOf);
-    if (!known.current) {
-      known.current = new Set(keys);
-      return;
-    }
-    const fresh = messages.filter((m) => !known.current!.has(keyOf(m)));
-    for (const k of keys) known.current.add(k);
-    const last = fresh.filter(isAgent).at(-1);
-    if (last) setReveal({ key: keyOf(last), shown: 0, total: wordCount(last.text) });
-  }, [c, messages]);
-  useEffect(() => {
-    if (!reveal) return;
-    if (reveal.shown >= reveal.total) {
-      setReveal(null);
-      return;
-    }
-    const step = Math.max(1, Math.ceil(reveal.total / 120));
-    const timer = setTimeout(() => setReveal((r) => (r ? { ...r, shown: r.shown + step } : r)), 55);
-    return () => clearTimeout(timer);
-  }, [reveal]);
+  const { writing: reveal, fresh, drafted } = useWriting(messages, Boolean(c), reduced);
 
   // Stay at the newest message while it is written, unless you scrolled up to read.
   const pinned = useRef(true);
@@ -404,16 +421,29 @@ export function ChatView({ id, size, onOpenDoc, onFull, onPanel }: { id: string;
     return () => ro.disconnect();
   }, [t?.id, Boolean(c)]);
   useEffect(() => {
-    if (c) chatDock.seen(id, messages.length);
+    if (c) popups.seen(id, messages.length);
   }, [c, id, messages.length]);
 
   if (!t) return <div className="cempty">{ticket.isError ? `No ticket ${id}.` : 'Loading…'}</div>;
+  // What the story waits on you for closes the talk, or the card of the press you just made.
+  const waits = decideKind(t) !== null || pressedLately(t.id);
+  const decide = waits ? <DecideCard key={t.id} story={t.id} /> : null;
   if (!c) {
     return (
-      <div className="cempty">
-        <p>No talk on {t.id} yet.</p>
-        <TalkButton t={t} agent="analyst" primary />
-      </div>
+      <ChatBox.Provider value={door}>
+        <div className={`chat-v csize-${size}`}>
+          <div className="cthread" ref={thread}>
+            <div className="ccol" ref={col}>
+              {decide}
+              <div className="cempty inline">
+                <p>No talk on {t.id} yet.</p>
+                <TalkButton t={t} agent={agentFor(t)} primary small />
+              </div>
+            </div>
+          </div>
+          {box && <BoxOnly t={t} box={box} onCancel={cancelBox} />}
+        </div>
+      </ChatBox.Provider>
     );
   }
   const who = AGENT_TITLE[c.with];
@@ -434,55 +464,85 @@ export function ChatView({ id, size, onOpenDoc, onFull, onPanel }: { id: string;
     if (with_ !== undefined) setText(with_);
     setTimeout(() => input.current?.focus(), 0);
   };
+  // The reply so far, while the agent writes it.
+  const draft = c.thinking && c.draft && messages.at(-1)?.note !== 'waits' ? c.draft : '';
 
   return (
-    <div className={`chat-v csize-${size}`}>
-      <ChatHeader t={t} size={size} onFull={onFull} onPanel={onPanel} />
-      <div
-        className="cthread"
-        ref={thread}
-        aria-live="polite"
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-        }}
-      >
-        <div className="ccol" ref={col}>
-          {c.open && <div className="cnote-pill">{opening}</div>}
-          {messages.map((m, i) => {
-            if (m.who === 'squad') return <SquadNote key={i} t={t} m={m} last={i === messages.length - 1} onAsk={() => focus()} />;
-            if (m.who === 'you') return <YouMessage key={i} t={t} m={m} onOpenDoc={onOpenDoc} onReply={(q) => focus(q)} />;
-            const prev = messages[i - 1];
-            const writing = reveal?.key === keyOf(m);
-            const next = messages[i + 1];
-            return (
-              <AgentMessage
-                key={i}
-                t={t}
-                m={m}
-                size={size}
-                used={stepsFor(prev?.at, m.at)}
-                writing={writing ? reveal!.shown : null}
-                answer={next?.who === 'you' ? next.text : undefined}
-                canChoose={c.open && !c.thinking && m === lastAgent && i === messages.length - 1}
-                newest={m === lastAgent}
-                onChoose={(o) => sendRef.current?.(o)}
-                onOther={() => focus()}
-                onOpenDoc={onOpenDoc}
-                onReply={(q) => focus(q)}
-              />
-            );
-          })}
-          {pending && <Sending p={pending} />}
-          {/* While the answer waits for the usage limit, the note says until when instead of the dots. */}
-          {c.thinking && messages.at(-1)?.note !== 'waits' && <Thinking role={c.with} steps={stepsFor(lastYou?.at ?? messages.at(-1)?.at)} hasMessage={Boolean(lastYou)} />}
+    <ChatBox.Provider value={door}>
+      <div className={`chat-v csize-${size}`}>
+        <ChatHeader t={t} size={size} onFull={onFull} onPanel={onPanel} />
+        <div
+          className="cthread"
+          ref={thread}
+          aria-live="polite"
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+          }}
+        >
+          <div className="ccol" ref={col}>
+            {c.open && size !== 'pop' && <div className="cnote-pill">{opening}</div>}
+            {messages.map((m, i) => {
+              if (m.who === 'squad') return <SquadNote key={i} t={t} m={m} last={i === messages.length - 1} onAsk={() => focus()} />;
+              if (m.who === 'you') return <YouMessage key={i} t={t} m={m} fresh={fresh(m)} onOpenDoc={onOpenDoc} onReply={(q) => focus(q)} />;
+              const prev = messages[i - 1];
+              const writing = reveal?.key === keyOf(m);
+              const next = messages[i + 1];
+              return (
+                <AgentMessage
+                  key={i}
+                  t={t}
+                  m={m}
+                  size={size}
+                  used={stepsFor(prev?.at, m.at)}
+                  writing={writing ? reveal!.shown : null}
+                  answer={next?.who === 'you' ? next.text : undefined}
+                  canChoose={c.open && !c.thinking && m === lastAgent && i === messages.length - 1}
+                  newest={m === lastAgent}
+                  onChoose={(o) => sendRef.current?.(o)}
+                  onOther={() => focus()}
+                  onOpenDoc={onOpenDoc}
+                  onReply={(q) => focus(q)}
+                />
+              );
+            })}
+            {pending && <Sending p={pending} />}
+            {draft ? (
+              <Drafting t={t} role={c.with} text={draft} size={size} onShown={(n) => (drafted.current = { text: draft, shown: n })} />
+            ) : (
+              // While the answer waits for the usage limit, the note says until when instead of the dots.
+              c.thinking && messages.at(-1)?.note !== 'waits' && <Thinking role={c.with} steps={stepsFor(lastYou?.at ?? messages.at(-1)?.at)} hasMessage={Boolean(lastYou)} />
+            )}
+            {decide}
+          </div>
         </div>
+        {c.open ? (
+          <Composer t={t} size={size} text={text} setText={setText} input={input} onSent={() => (pinned.current = true)} sendRef={sendRef} setPending={setPending} box={box} onBoxCancel={cancelBox} />
+        ) : box ? (
+          <BoxOnly t={t} box={box} onCancel={cancelBox} />
+        ) : (
+          <div className="cclosed">This talk is over. It stays here to read.</div>
+        )}
       </div>
-      {c.open ? (
-        <Composer t={t} size={size} text={text} setText={setText} input={input} onSent={() => (pinned.current = true)} sendRef={sendRef} setPending={setPending} />
-      ) : (
-        <div className="cclosed">This talk is over. It stays here to read.</div>
-      )}
+    </ChatBox.Provider>
+  );
+}
+
+/** The agent's reply as far as it came, written out at a reading pace. */
+function Drafting({ t, role, text, size, onShown }: { t: Ticket; role: AgentName; text: string; size: ChatSize; onShown(n: number): void }) {
+  const r = useReveal(text, true);
+  useEffect(() => onShown(r.shown), [r.shown, onShown]);
+  return (
+    <div className={`cag cmsg ag-${role}`}>
+      <Avatar role={role} live />
+      <div className="cwho">
+        <b>{AGENT_TITLE[role]}</b>
+        <span className="shim">Writing</span>
+      </div>
+      <div className="cagb">
+        <ChatMarkdown text={firstWords(text, r.shown)} ticket={t.id} stream caret />
+      </div>
+      {size === 'phone' && <span className="cmeta">{AGENT_TITLE[role]} · now</span>}
     </div>
   );
 }
@@ -599,12 +659,13 @@ function asParagraphs(text: string): string {
     .join('\n');
 }
 
-function YouMessage({ t, m, onOpenDoc, onReply }: { t: Ticket; m: ChatMessage; onOpenDoc(d: OpenDoc): void; onReply(q: string): void }) {
+/** Your own words. A message you just sent pops in. */
+function YouMessage({ t, m, fresh, onOpenDoc, onReply }: { t: Ticket; m: ChatMessage; fresh?: boolean; onOpenDoc(d: OpenDoc): void; onReply(q: string): void }) {
   const holder = useRef<HTMLDivElement>(null);
   const [picked, setPicked] = useState(false);
   const voice = !m.text.trim() && (m.files ?? []).some((f) => AUDIO.test(f));
   return (
-    <div className={`cyou cmsg ${picked ? 'picked' : ''}`}>
+    <div className={`cyou cmsg ${picked ? 'picked' : ''} ${fresh ? 'pop-in' : ''}`}>
       <div className="cybub" ref={holder} onClick={() => setPicked(!picked)}>
         {m.text.trim() && <ChatMarkdown text={asParagraphs(m.text)} ticket={t.id} />}
         {m.files && m.files.length > 0 && <ChatFiles ticket={t.id} files={m.files} onOpen={onOpenDoc} sent from="From you" />}
@@ -683,17 +744,17 @@ function Choices({ options, answer, can, onChoose, onOther }: { options: string[
   const chosen = answer?.trim();
   return (
     <div className="cchoices" dir={d.dir}>
-      {options.map((o) => {
+      {options.map((o, i) => {
         const od = detect(o);
         const cls = chosen ? (chosen === o.trim() ? 'on' : 'off') : can ? '' : 'off';
         return (
-          <button key={o} className={`cch ${cls} ${textClass(od)}`} lang={od.dir === 'rtl' ? 'ar' : 'en'} dir={od.dir} disabled={!can} onClick={() => onChoose(o)}>
+          <button key={o} className={`cch ${cls} ${textClass(od)} ${can ? 'rise' : ''}`} style={{ ['--i' as string]: i }} lang={od.dir === 'rtl' ? 'ar' : 'en'} dir={od.dir} disabled={!can} onClick={() => onChoose(o)}>
             {o}
           </button>
         );
       })}
       {can && (
-        <button className="cch other" onClick={onOther} dir={d.dir}>
+        <button className="cch other rise" style={{ ['--i' as string]: options.length }} onClick={onOther} dir={d.dir}>
           {d.dir === 'rtl' ? 'إجابة أخرى…' : 'Something else…'}
         </button>
       )}
@@ -826,7 +887,8 @@ const MAX_FILE = 10 * 1024 * 1024;
 
 /**
  * The typing box turns to the language you write in, as you type. Files come by the clip, a paste or a drop; a voice
- * note by the microphone. While the agent answers, Send becomes Stop.
+ * note by the microphone. While the agent answers, Send becomes Stop. After "Something's wrong" on the decision card,
+ * the box asks for what is wrong and sends it to the board, not to the agent.
  */
 function Composer({
   t,
@@ -837,6 +899,8 @@ function Composer({
   onSent,
   sendRef,
   setPending,
+  box,
+  onBoxCancel,
 }: {
   t: Ticket;
   size: ChatSize;
@@ -846,6 +910,8 @@ function Composer({
   onSent(): void;
   sendRef: { current: ((words: string) => void) | null };
   setPending(p: Pending | null): void;
+  box?: BoxAsk | null;
+  onBoxCancel?(): void;
 }) {
   const act = useAct();
   const { toast } = usePrefs();
@@ -868,11 +934,25 @@ function Composer({
     });
     setFiles((now) => [...now, ...read].slice(0, 10));
   };
+  // The send button gives a small push when it sends.
+  const [went, setWent] = useState(false);
+  const pushed = () => {
+    setWent(true);
+    setTimeout(() => setWent(false), 220);
+  };
   const send = (words = text, extra: PickedFile[] = []) => {
+    if (box) {
+      if (!words.trim()) return;
+      pushed();
+      box.send(words.trim());
+      setText('');
+      return;
+    }
     const all = [...files, ...extra];
     if ((!words.trim() && !all.length) || c.thinking || act.isPending) return;
     // The message shows as sending in the talk at once; the typing box is free again. On a failure it comes back.
     setPending({ text: words, files: all, count: c.messages.length });
+    pushed();
     const typed = text;
     setText('');
     setFiles([]);
@@ -890,7 +970,7 @@ function Composer({
   };
   sendRef.current = (o: string) => send(o);
   const stop = () => act.mutate({ path: `/api/v1/tickets/${t.id}/chat/stop` });
-  const placeholder = size === 'phone' ? `Message the ${who}` : `Message the ${who} in Arabic or English`;
+  const placeholder = box ? box.placeholder : size === 'phone' ? `Message the ${who}` : size === 'pop' ? `Answer the ${who}, or ask it something…` : `Message the ${who} in Arabic or English`;
 
   return (
     <div
@@ -900,6 +980,7 @@ function Composer({
       onDrop={(e: DragEvent) => (e.preventDefault(), setDrag(false), void add(e.dataTransfer.files))}
     >
       {drag && <div className="cdrop">Drop files to add them to your message</div>}
+      {box && <BoxLine box={box} onCancel={() => onBoxCancel?.()} />}
       <Recorder
         who={who}
         size={size}
@@ -908,7 +989,7 @@ function Composer({
           rec.on ? (
             rec.box
           ) : (
-            <div className={`cbox ${size === 'phone' ? 'm' : ''}`}>
+            <div className={`cbox ${size === 'phone' ? 'm' : ''} ${box ? 'asking' : ''}`}>
               {files.length > 0 && (
                 <div className="cpicked">
                   {files.map((f, i) => (
@@ -953,7 +1034,7 @@ function Composer({
                     <Square size={14} fill="currentColor" />
                   </button>
                 ) : text.trim() || files.length ? (
-                  <button className="csend m" onClick={() => send()} aria-label="Send" disabled={act.isPending}>
+                  <button className={`csend m ${went ? 'go' : ''}`} onClick={() => send()} aria-label="Send" disabled={act.isPending}>
                     <ArrowUp size={18} />
                   </button>
                 ) : (
@@ -976,7 +1057,7 @@ function Composer({
                       <Square size={11} fill="currentColor" /> {c.stopping ? 'Stopping…' : 'Stop'}
                     </button>
                   ) : (
-                    <button className="csend" onClick={() => send()} disabled={act.isPending || (!text.trim() && !files.length)} aria-label="Send">
+                    <button className={`csend ${went ? 'go' : ''}`} onClick={() => send()} disabled={act.isPending || (!text.trim() && !files.length)} aria-label="Send">
                       <ArrowUp size={17} />
                     </button>
                   )}
@@ -987,7 +1068,17 @@ function Composer({
           )
         }
       />
-      {size !== 'phone' && <div className="chint">Enter sends · Shift+Enter for a new line · It answers in the language you write</div>}
+      {size === 'pop' ? (
+        <div className="where">
+          <span className="chip">
+            <Eye size={12} aria-hidden="true" />
+            {t.id}
+          </span>
+          <span>Enter to send</span>
+        </div>
+      ) : (
+        size !== 'phone' && <div className="chint">Enter sends · Shift+Enter for a new line · It answers in the language you write</div>
+      )}
     </div>
   );
 }

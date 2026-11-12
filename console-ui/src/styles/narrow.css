@@ -1,5 +1,5 @@
-/* The board area can be narrow on a wide screen: the chat docked beside it, or a small window. These rules follow the
-   room the page really has, not the screen's width, so the ticket and the banner stay readable beside the chat. */
+/* The board area can be narrow on a wide screen: a small window, or a ticket beside the board. These rules follow the
+   room the page really has, not the screen's width, so the ticket and the banner stay readable. */
 .canvas { container: canvas / inline-size; }
 .drawer { container: drawer / inline-size; }
 
@@ -43,12 +43,4 @@
   .drawer .youbox { flex-wrap: wrap; row-gap: 12px; }
   .drawer .youbox > div { flex: 1 1 220px; min-width: 0; }
   .drawer .youbox > .grow { display: none; }
-}
-
-/* With a ticket open, the small "conversations" card shrinks to its avatar and Open button and sits above the
-   ticket's bottom bar, so it never covers the ticket's buttons. */
-.app:has(.drawer) .cmini { bottom: 104px; }
-.app:has(.drawer) .cmini > div { display: none; }
-@media (max-width: 760px) {
-  .app:has(.drawer) .cmini { bottom: 150px; }
 }

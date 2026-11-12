@@ -24,7 +24,7 @@ const STR = { type: 'string' } as const;
 const CARD = {
   type: 'object',
   properties: {
-    kind: { ...STR, description: 'draft_story, board_action, open_story, send_answer, settings_change or engineer_report' },
+    kind: { ...STR, description: 'draft_story, board_action, open_story, decide, send_answer, settings_change or engineer_report' },
     why: STR,
     title: STR,
     ask: STR,
@@ -74,6 +74,7 @@ const NEEDS: Record<string, string[]> = {
   draft_story: ['title', 'ask', 'doneWhen'],
   board_action: ['action'],
   open_story: ['story'],
+  decide: ['story'],
   send_answer: ['story', 'text'],
   settings_change: ['setting', 'value'],
 };

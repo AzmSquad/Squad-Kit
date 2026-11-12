@@ -1,8 +1,7 @@
-import { useNavigate } from '@tanstack/react-router';
 import { MessageCircle } from 'lucide-react';
 import type { AgentName, Ticket } from '../api/types';
 import { useAct, useBoard } from '../lib/data';
-import { PHONE, chatDock, useMedia } from '../lib/chatDock';
+import { popups } from '../lib/popups';
 import { askAgent } from '../lib/review';
 import { AGENT_TITLE } from './Chat';
 
@@ -22,10 +21,8 @@ export function useAskAgent(t: Ticket): AgentName {
 export function AskButton({ t }: { t: Ticket }) {
   const act = useAct();
   const who = AGENT_TITLE[useAskAgent(t)];
-  const navigate = useNavigate();
-  // On a phone the chat takes the whole screen; beside the board it opens in the chat panel.
-  const phone = useMedia(PHONE);
-  const show = () => (phone ? void navigate({ to: '/conversations', search: { ticket: t.id } }) : chatDock.show(t.id));
+  // It opens in its popup over the page; on a phone the popup takes the whole screen.
+  const show = () => popups.open(t.id);
   if (t.chat?.open) {
     return (
       <button className="btn sm askbtn" onClick={show} title={`The chat with the ${AGENT_TITLE[t.chat.with]} is open`}>

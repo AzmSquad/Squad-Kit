@@ -139,6 +139,8 @@ export interface AgentRun {
   /** A sandboxed command was refused something. */
   onBlocked?(action: BlockedAction): void;
   onText?(text: string): void;
+  /** The structured answer as far as it came, while the agent writes it: each field once it is whole. */
+  onDraft?(answer: Record<string, unknown>): void;
   /** The agent's to-do list changed: all of it, in order, with where each entry stands. */
   onPlan?(entries: PlanEntry[]): void;
   /** Any sign of life, for the watchdog. */

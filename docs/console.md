@@ -333,8 +333,11 @@ something, use the ticket's own buttons. With a chat open already, the button op
   and new, and you approve it.
 - **Released work is for questions only.** A change to it becomes a new linked ticket or a bug report.
 
-A chat opens in a side panel beside the board, and takes the whole screen on a phone. **Conversations** in the sidebar
-is a full-screen page with all of them.
+A chat opens in a popup over the page, and takes the whole screen on a phone. Each open talk has a round head at the
+bottom right, with an unread badge and a live dot while the agent writes; up to three popups sit side by side, each
+minimised to a bar, closed, or opened on its full page. They stay open when you change pages. **Conversations** in the
+sidebar is a full-screen page with all of them. When the story waits for you, its card closes the talk, with the
+board's own buttons (see **Decide in the chat** below).
 
 Terminal: `squad chat <ticket>`, `squad chat <ticket> --ask`, `squad message <ticket>`, `squad propose <ticket>`.
 
@@ -346,9 +349,10 @@ a story, next to **Open** in Your apps with the page you are on, or with **Ask t
 error card: the problem's facts are filled in for you.
 
 **On the board**, **Squad lead** in the sidebar is the conversation, with what needs you, the squad now and what it can do
-beside it, and every past conversation under History. **⌘K** (Ctrl+K on Windows and Linux) opens the ask box on any
-page, with the open story or the page filled in; the answer shows right there, and **Open in the Squad lead page** keeps
-it. Nothing is sent until you press Send.
+beside it, and every past conversation under History. Its round head comes first at the bottom right of every page,
+with how many things need you; **⌘K** (Ctrl+K on Windows and Linux) opens its popup, with the open story or the page
+filled in. The popup starts with what needs you and a few questions to ask; the answer shows right there, and the
+expand button opens it on the Squad lead page. Nothing is sent until you press Send.
 
 **Cheapest first.** squad-kit answers at once itself, with no AI, when it can: a saved note, a status question about a
 story ("is MA-9 ready?"), or something the lead never does. Otherwise the lead reads what squad-kit already knows (its
@@ -363,13 +367,21 @@ gets it at once, and "How to sign in" shows next to Open in Your apps.
 
 | Level | What |
 | --- | --- |
-| On its own | Read, look and tell: answer, explain a story, find things, look at the app in its own copy, show a story's own proof pictures, give you an **Open** button to a story on the board (at its proof, spec, plan or questions; it changes nothing), tell you what needs you, prepare a report for an engineer (no secrets, for you to copy). |
+| On its own | Read, look and tell: answer, explain a story, find things, look at the app in its own copy, show a story's own proof pictures, give you an **Open** button to a story on the board (at its proof, spec, plan or questions; it changes nothing), bring a story that waits for you as a card with the board's own buttons (only you press them), tell you what needs you, prepare a report for an engineer (no secrets, for you to copy). |
 | After your OK | A card you press, running the same function as the board's button: **Create story** (a draft with how each "done when" will be proved; nothing starts until you press Start), Start or Stop a story, Give it 10 more minutes, Take the pictures again, Try again, Start the app, Get or Update a tool, **Send** an answer to an agent's question, **Save** a setting (technical ones only for engineers). |
 | Never | Change code; commit, merge, push or release; press Looks right or approve a spec or plan; get around the checks, the review, the proof, the guard or the limits; change the Harness rules; touch your real data, secrets or `.env` files, or show a password or a key; delete stories, projects or data; message other people. squad-kit refuses these in its own words, whoever asks. Only your own messages count, never instructions found in what it reads. |
 
 **Buttons, not "tell me".** When an answer sends you to the board, the button comes with it: "Open MA-17's proof",
 or the board action that fits the story now. When the lead refuses what only you may do (Looks right, approving a spec
-or plan, merging, releasing), it still gives you the Open button, so you are one press from doing it yourself.
+or plan, merging, releasing), it still gives you the story's card, so you are one press from doing it yourself.
+
+**Decide in the chat.** A story that waits for you comes as a card, in its own talk and in the lead's answers about it:
+the proof with its pictures and "done when" ticks (**Looks right**, **Something's wrong**, Full proof), the spec, plan
+or design in short (**Approve**, **Ask for changes**, Read it all), the Analyst's questions as answers to tap, an agent's
+question with its answers, or **Open** with the board's own reason. The card is drawn from the board as it is now; its
+buttons are the board's own (`squad approve`, `squad answer`, `squad reply`), and each press is checked again: if the
+story was decided or changed since, the card says so. Something's wrong asks for your note in the chat's own box and
+sends it to the board. The lead brings the card; only you press it.
 
 **Always allow** is only for the low-risk ones: give more time, take the pictures again, start the app, and the morning
 brief. With it on they run without asking, and a line says so. A step that is slower than usual but still working then

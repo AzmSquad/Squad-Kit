@@ -19,10 +19,10 @@ import { startPause } from '../usage-limit.js';
 import { closeWindow, openWindow, windowAccess } from '../window-server.js';
 import { cleanAnswer, laterOffer, leadAnswerProblem, learnedAbout, LEAD_SCHEMA } from './answer.js';
 import { AFTER_REFUSAL, NEVER, isAllowable, neverAsked, refusalIn } from './can.js';
-import { actionMisfit, cardStory, doCard, openCard, openCardsFor, waitTab, waysOut } from './cards.js';
+import { actionMisfit, cardStory, doCard, openCardsFor, storyCard, waysOut } from './cards.js';
 import { contextFacts, contextStory } from './context.js';
 import { LEAD_ANSWER_MS, MAX_LEAD_DAY_USD, MAX_QUESTION_CHARS } from './limits.js';
-import { noteFor, saveNote } from './notes.js';
+import { noteFor, saveNote, scrubbed } from './notes.js';
 import { leadAppPlan, startLeadApp, stopLeadApp } from './own-app.js';
 import { followUpPrompt, leadPrompt, leadRules } from './prompt.js';
 import { notesText } from './records.js';
@@ -72,12 +72,18 @@ function firstSentence(text: string): string {
   return (m?.[1] ?? text.trim().slice(0, 300)).trim();
 }
 
+/** Under a refusal that brings a story's card: the card is the way to do it yourself. */
+const CARD_BELOW = {
+  en: "Its card is below, with the board's own buttons: only you can press them.",
+  ar: 'بطاقتها بالأسفل، بأزرار اللوحة نفسها: أنت وحدك تستطيع الضغط عليها.',
+};
+
 /**
  * What squad-kit answers itself, with no AI and no cost: what the lead never does (with an Open card for each story it
  * names, so the person is one press from doing it themselves), a saved note, a status question about the story it was
  * asked from, the day's limit, a sample board. Null when the lead must answer. `prefix` names its cards.
  */
-function answerAtOnce(bp: BoardPaths, turn: LeadTurn, fresh: boolean, prefix: string): LeadAnswer | null {
+function answerAtOnce(bp: BoardPaths, turn: LeadTurn, fresh: boolean, prefix: string, earlier?: string[]): LeadAnswer | null {
   const text = turn.ask.text;
   const step = (t: string, kind: LeadStep['kind']) => turn.trace.push({ at: now(), text: t, kind });
   const never = neverAsked(text);
@@ -85,9 +91,11 @@ function answerAtOnce(bp: BoardPaths, turn: LeadTurn, fresh: boolean, prefix: st
     const ar = isArabic(text);
     turn.refused = never.map((id) => refusalIn(id, ar));
     step(`squad-kit refused: ${never.map((id) => NEVER[id].name.toLowerCase()).join('; ')}`, 'refused');
-    const asked = contextStory(bp, turn.ask.context)?.id;
-    const cards = openCardsFor(bp, text, [], `${prefix}.o`, { refused: true, ...(asked ? { also: [asked] } : {}) });
-    return { headline: turn.refused[0]!, body: [...turn.refused.slice(1), AFTER_REFUSAL[ar ? 'ar' : 'en']].join('\n\n'), evidence: [], sources: [], cards, by: 'refusal' };
+    // The stories it is about: where it was asked from, then the ones the conversation just talked about ("accept it").
+    const also = [contextStory(bp, turn.ask.context)?.id, ...(earlier ?? [])].filter((x): x is string => Boolean(x));
+    const cards = openCardsFor(bp, text, [], `${prefix}.o`, { refused: true, ...(also.length ? { also: [...new Set(also)] } : {}) });
+    const card = cards.some((x) => x.kind === 'decide') ? [CARD_BELOW[ar ? 'ar' : 'en']] : [];
+    return { headline: turn.refused[0]!, body: [...turn.refused.slice(1), ...card, AFTER_REFUSAL[ar ? 'ar' : 'en']].join('\n\n'), evidence: [], sources: [], cards, by: 'refusal' };
   }
   if (!fresh) {
     const note = noteFor(bp, text);
@@ -132,6 +140,13 @@ function answerAtOnce(bp: BoardPaths, turn: LeadTurn, fresh: boolean, prefix: st
   return null;
 }
 
+/** The stories the turn before was about: the ones its cards were for, or else the ones its headline names. */
+function lastStories(t: LeadTurn | undefined): string[] {
+  if (!t?.answer) return [];
+  const carded = t.answer.cards.map(cardStory).filter((x): x is string => Boolean(x));
+  return [...new Set(carded.length ? carded : (t.answer.headline.match(/\b[A-Z][A-Z0-9]*-\d+\b(?!\.\d)/g) ?? []))];
+}
+
 /**
  * Asks the lead: a new conversation, or a follow-up in `conversation`. It answers at once when squad-kit can answer
  * itself; otherwise the conversation comes back thinking, and `done` resolves once the answer is in its file.
@@ -149,7 +164,7 @@ export function askLead(bp: BoardPaths, input: LeadAsk, o: LeadAskOptions = {}):
   const turn: LeadTurn = { n: c.turns.length + 1, ask: { text, at, context, ...(facts.length ? { facts } : {}) }, trace: [], refused: [] };
   c.turns.push(turn);
   c.updatedAt = at;
-  const quick = answerAtOnce(bp, turn, Boolean(input.fresh), `${c.id}.${turn.n}`);
+  const quick = answerAtOnce(bp, turn, Boolean(input.fresh), `${c.id}.${turn.n}`, lastStories(c.turns.at(-2)));
   if (quick) {
     Object.assign(turn, { answer: quick, seconds: 0, costUsd: 0 });
     writeConversation(bp, c);
@@ -238,9 +253,27 @@ async function answerTurn(bp: BoardPaths, id: string, n: number, signal: AbortSi
       // A step that could not be written is still in the answer's own record.
     }
   };
+  // Its words so far, as the AI tool hands them in: the headline, then the body. Only what is new is written; the board
+  // reveals the words as they come.
+  let drafted = '';
+  const draft = (a: Record<string, unknown>) => {
+    const words = { ...(typeof a.headline === 'string' ? { headline: scrubbed(bp, a.headline).slice(0, 400) } : {}), ...(typeof a.body === 'string' ? { body: scrubbed(bp, a.body).slice(0, 4000) } : {}) };
+    const now = JSON.stringify(words);
+    if (now === drafted || now === '{}') return;
+    drafted = now;
+    try {
+      updateConversation(bp, id, (c) => {
+        const t = c.turns.find((x) => x.n === n);
+        if (t && c.thinking) t.draft = words;
+      });
+    } catch {
+      // The words still come whole with the answer.
+    }
+  };
   const finish = (fields: Partial<LeadTurn>, session?: string) =>
     updateConversation(bp, id, (c) => {
       const t = c.turns.find((x) => x.n === n)!;
+      delete t.draft;
       Object.assign(t, fields, { seconds: Math.round((Date.now() - started) / 1000) });
       c.thinking = false;
       if (session) c.session = session;
@@ -317,6 +350,7 @@ async function answerTurn(bp: BoardPaths, id: string, n: number, signal: AbortSi
           const line = codeStep(e, bp.root);
           if (line) step({ text: line, kind: 'code' });
         },
+        onDraft: (a) => draft(a),
       });
       // A question has no story: it counts on the project's own line, and in the month.
       recordUsage(bp, undefined, used, r.usage);
@@ -376,7 +410,7 @@ async function answerTurn(bp: BoardPaths, id: string, n: number, signal: AbortSi
       const story = contextStory(bp, { from: 'story', story: card.story! });
       if (!story || opened.has(story.id) || answer.cards.some((x) => !misfits.get(x) && cardStory(x) === story.id)) return [];
       opened.add(story.id);
-      return [openCard(card.id, story, card.action === 'pictures_again' ? 'proof' : waitTab(story), card.why)];
+      return [storyCard(card.id, story, card.action === 'pictures_again' ? 'proof' : undefined, card.why)];
     });
     // Diagnosing a story: its real ways out, as cards, when the lead offered none.
     if (t && !answer.cards.some((x) => x.kind === 'board_action')) answer.cards.push(...waysOut(t, `${id}.${n}.w`));

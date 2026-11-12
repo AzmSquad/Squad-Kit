@@ -72,6 +72,8 @@ export function readConversation(bp: BoardPaths, id: string): LeadConversation |
     const last = c.turns.at(-1);
     if (last && !last.answer && !last.error) last.error = CUT_OFF;
   }
+  // Words written so far belong to an answer being written now; one a restart cut off keeps none.
+  if (!c.thinking) for (const t of c.turns) delete t.draft;
   return c;
 }
 

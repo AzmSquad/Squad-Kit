@@ -95,6 +95,7 @@ import { liveNow } from '../../board/now.js';
 import { readUsual, type UsualBook } from '../../board/usual.js';
 import { answerAsk } from '../../board/ask.js';
 import { withProblem } from '../../board/problem.js';
+import { expectWait, withKey } from '../../board/wait-key.js';
 import { DEFAULT_NETWORK, PACKAGE_HOSTS, blockedSites, guardNote, networkPolicy, parseNetwork, sandboxStatus } from '../../engine/sandbox.js';
 import { guardSupport } from '../../engine/project-guard.js';
 import { windowStartNote } from '../../engine/checks.js';
@@ -274,7 +275,8 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
       console: ctl ? { startedAt: ctl.startedAt, outdated: ctl.build > 0 && buildStamp() > ctl.build } : null,
       // Each ticket with what is happening on it now, in words: the card's line, its time and its usual time.
       // A story that waits for a tool on this computer says which, with the link to its line on the Tools page.
-      tickets: all.filter((t) => t.stage !== 'done' && !t.archived).map((t) => ({ ...t, now: nowOf(t, usual), ...toolWaitOf(bp, t) })),
+      // `waitKey` marks what each one waits on the person for now, so a decision card in a chat can tell it changed.
+      tickets: all.filter((t) => t.stage !== 'done' && !t.archived).map((t) => ({ ...t, now: nowOf(t, usual), ...toolWaitOf(bp, t), ...withKey(t) })),
       // Archived tickets leave the board; "Show archived" shows them again.
       archived: all.filter((t) => t.stage !== 'done' && t.archived),
       ...(broken.length ? { broken } : {}),
@@ -296,7 +298,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     if (!t) return c.json({ error: 'not found' }, 404);
     // Merged here, with its work going on by pull request: how to send it (engine/send-as-pr.ts).
     const sendAs = sendAsOf(bp, t);
-    return c.json({ ...withProblem(t), now: nowOf(t, readUsual(bp)), ...toolWaitOf(bp, t, true), ...(sendAs ? { sendAs } : {}) });
+    return c.json({ ...withProblem(t), now: nowOf(t, readUsual(bp)), ...toolWaitOf(bp, t, true), ...withKey(t), ...(sendAs ? { sendAs } : {}) });
   });
 
   // What is happening on a ticket now, from its live record. Asking about it is answered from the same record, at
@@ -425,9 +427,14 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     return act(c, () => pullTicket(bp, b.ref ?? ''));
   });
 
+  // `expect` (here and on approve, change and reply below): pressed on a decision card in a chat, the story must still
+  // wait on what the card showed (board/wait-key.ts). The board's own buttons leave it out.
   app.post('/api/v1/tickets/:id/answers', async (c) => {
-    const b = await body<{ answers?: Record<string, { choice: string; value?: string }> }>(c);
-    return act(c, () => answerQuestions(bp, c.req.param('id'), b.answers ?? {}));
+    const b = await body<{ answers?: Record<string, { choice: string; value?: string }>; expect?: string }>(c);
+    return act(c, () => {
+      expectWait(bp, c.req.param('id'), b.expect);
+      return answerQuestions(bp, c.req.param('id'), b.answers ?? {});
+    });
   });
 
   app.post('/api/v1/tickets/:id/decision-update', async (c) => {
@@ -446,7 +453,13 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
   });
 
   // Looks right, and Something's wrong below, stop the copy of the app being tried at once (engine/try-app.ts).
-  app.post('/api/v1/tickets/:id/approve', (c) => act(c, async () => tried(await approveBeside(bp, c.req.param('id')))));
+  app.post('/api/v1/tickets/:id/approve', async (c) => {
+    const b = await body<{ expect?: string }>(c);
+    return act(c, async () => {
+      expectWait(bp, c.req.param('id'), b.expect);
+      return tried(await approveBeside(bp, c.req.param('id')));
+    });
+  });
   app.post('/api/v1/tickets/:id/stop', (c) => act(c, () => stopTicket(bp, c.req.param('id'))));
   // A story squad-kit made waits on the board until the person starts it.
   app.post('/api/v1/tickets/:id/start', (c) => act(c, () => startTicket(bp, c.req.param('id'))));
@@ -460,8 +473,11 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
   app.post('/api/v1/tickets/:id/restart', (c) => act(c, () => restartStep(bp, c.req.param('id'))));
 
   app.post('/api/v1/tickets/:id/change', async (c) => {
-    const b = await body<{ text?: string }>(c);
-    return act(c, () => tried(requestChange(bp, c.req.param('id'), b.text ?? '')));
+    const b = await body<{ text?: string; expect?: string }>(c);
+    return act(c, () => {
+      expectWait(bp, c.req.param('id'), b.expect);
+      return tried(requestChange(bp, c.req.param('id'), b.text ?? ''));
+    });
   });
 
   // Everything the ticket changed against main, read from its own copy.
@@ -475,8 +491,11 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
   });
 
   app.post('/api/v1/tickets/:id/reply', async (c) => {
-    const b = await body<{ text?: string }>(c);
-    return act(c, () => answerAgent(bp, c.req.param('id'), b.text ?? ''));
+    const b = await body<{ text?: string; expect?: string }>(c);
+    return act(c, () => {
+      expectWait(bp, c.req.param('id'), b.expect);
+      return answerAgent(bp, c.req.param('id'), b.text ?? '');
+    });
   });
 
   app.post('/api/v1/tickets/:id/notes', async (c) => {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronLeft, ChevronRight, ExternalLink, X } from 'lucide-react';
 import { Written } from './ui';
 
@@ -7,7 +8,10 @@ export interface Picture {
   caption: string;
 }
 
-/** Full-size view of one picture, with next and previous for the rest. Esc closes, the arrow keys move. */
+/**
+ * Full-size view of one picture, with next and previous for the rest. Esc closes, the arrow keys move. It opens at
+ * the page's top level, so a picture opened from a chat popup covers the popups and their heads too.
+ */
 export function Lightbox({ pictures, start, onClose }: { pictures: Picture[]; start: number; onClose(): void }) {
   const [i, setI] = useState(start);
   const n = pictures.length;
@@ -23,7 +27,7 @@ export function Lightbox({ pictures, start, onClose }: { pictures: Picture[]; st
   }, [onClose, move]);
   const pic = pictures[i];
   if (!pic) return null;
-  return (
+  return createPortal(
     <div className="lightbox" role="dialog" aria-modal="true" aria-label={pic.caption} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="lb-top">
         <Written className="lb-cap" text={pic.caption} />
@@ -47,7 +51,8 @@ export function Lightbox({ pictures, start, onClose }: { pictures: Picture[]; st
           </button>
         </>
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }
 

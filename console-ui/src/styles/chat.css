@@ -1,4 +1,4 @@
-/* The chat with the squad: docked beside the board, full screen, and on a phone.
+/* The chat with the squad: in a popup over any page, full screen, and on a phone.
    Arabic and English share one page. Each paragraph carries its own direction; Arabic is set one pixel larger with
    a taller line, in IBM Plex Sans Arabic next to Instrument Sans. */
 
@@ -17,7 +17,6 @@
   --acc-line: rgba(13, 138, 66, 0.28);
   --rec: #c62828;
   --c-shadow: 0 1px 2px rgba(14, 24, 19, 0.05), 0 10px 30px -14px rgba(14, 24, 19, 0.2);
-  --c-dock-shadow: -24px 0 60px -30px rgba(14, 24, 19, 0.25);
 }
 
 :root[data-theme='dark'] {
@@ -34,12 +33,9 @@
   --acc-line: rgba(124, 255, 160, 0.3);
   --rec: #ff6b6b;
   --c-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 30px -14px rgba(0, 0, 0, 0.7);
-  --c-dock-shadow: -24px 0 60px -30px rgba(0, 0, 0, 0.8);
 }
 
 .nav .badge.talk { background: var(--accent-soft); color: var(--accent); }
-body.cresizing { cursor: col-resize; user-select: none; }
-body.cresizing iframe { pointer-events: none; }
 
 /* ── Agent marks ───────────────────────────────────────── */
 .cav { --c: var(--c-an); display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 9px; color: var(--c); background: color-mix(in srgb, var(--c) 12%, var(--surface)); border: 1px solid color-mix(in srgb, var(--c) 28%, var(--line)); flex: none; }
@@ -61,34 +57,6 @@ body.cresizing iframe { pointer-events: none; }
 .shim { background: linear-gradient(90deg, var(--dim) 0%, var(--dim) 38%, var(--text) 50%, var(--dim) 62%, var(--dim) 100%); background-size: 220% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: cshim 2s linear infinite; }
 @keyframes cshim { 0% { background-position: 110% 0; } 100% { background-position: -110% 0; } }
 
-/* ── The dock beside the board ─────────────────────────── */
-/* The board keeps working beside the open chat: its top bar wraps and the waiting cards scroll sideways. */
-.app.docked .top { height: auto; min-height: 64px; flex-wrap: wrap; row-gap: 8px; padding-block: 12px; }
-.app.docked .top .search { width: 180px; }
-.app.docked .wcards { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(250px, 1fr); overflow-x: auto; padding-bottom: 2px; }
-.app.docked .wcard { flex-direction: column; align-items: flex-start; gap: 8px; padding: 11px 13px 11px 16px; }
-.app.docked .wcard .grow { width: 100%; }
-.app.docked .wcard p { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.app.docked .waiting { padding: 14px 20px 16px; }
-.app.docked .waiting .wh { flex-wrap: wrap; }
-.cdock { position: relative; flex: none; display: flex; flex-direction: column; min-width: 0; margin: 10px 10px 10px 0; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--c-dock-shadow); overflow: hidden; }
-.cgrip { position: absolute; inset-block: 0; inset-inline-start: 0; width: 8px; cursor: col-resize; z-index: 3; }
-.cgrip:hover::after { content: ''; position: absolute; inset-block: 0; inset-inline-start: 3px; width: 2px; background: var(--accent); opacity: 0.6; }
-.ctabs { display: flex; align-items: center; gap: 4px; padding: 8px 10px 0; border-bottom: 1px solid var(--line); background: var(--surface-2); flex: none; }
-.ctabs .iconbtn { border: 0; background: transparent; margin-bottom: 4px; }
-.ctabs .iconbtn:hover { background: var(--surface); }
-.ctabs .grow { flex: 1; }
-.ctabscroll { display: flex; align-items: flex-end; gap: 4px; overflow-x: auto; min-width: 0; flex: 0 1 auto; scrollbar-width: none; }
-.ctabscroll::-webkit-scrollbar { display: none; }
-.ctab { position: relative; flex: none; display: flex; align-items: center; gap: 7px; height: 36px; padding: 0 10px; border-radius: 10px 10px 0 0; color: var(--muted); max-width: 190px; }
-.ctab:hover { color: var(--text); }
-.ctab.on { background: var(--surface); color: var(--text); box-shadow: 0 -1px 0 var(--line), 1px 0 0 var(--line), -1px 0 0 var(--line); }
-.ctab .tid { font: 500 12px 'JetBrains Mono', monospace; white-space: nowrap; }
-.ctab .tn { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cmini { position: fixed; inset-inline-end: 20px; bottom: 20px; z-index: 40; display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 12px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--pop-shadow); max-width: calc(100vw - 32px); }
-.cmini b { display: block; font-size: 13px; font-weight: 650; }
-.cmini small { display: block; font-size: 12px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cmini > div { min-width: 0; }
 
 /* ── One chat ──────────────────────────────────────────── */
 .chat-v { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--surface); }

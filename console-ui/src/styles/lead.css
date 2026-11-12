@@ -1,4 +1,4 @@
-/* The Squad lead: its page, its ask box (⌘K), its cards, and its buttons on other cards. Colors come from the tokens in
+/* The Squad lead: its page, its ask box, its cards, and its buttons on other cards. Colors come from the tokens in
    app.css, in both themes; the four proof kinds of a "done when" get their own, light and dark. */
 
 :root,
@@ -45,7 +45,7 @@
 .lead-day { text-align: center; font-size: 11.5px; color: var(--dim); font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lead-composer { flex: none; width: 100%; max-width: 760px; margin: 0 auto; padding: 12px 20px 14px; border-top: 1px solid var(--line); }
 
-/* The ask box, on the page and in ⌘K. */
+/* The ask box, on the page and in the lead's popup. */
 .lead-box { border: 1px solid var(--line-strong); border-radius: 14px; padding: 10px 12px 8px; background: var(--surface); transition: border-color 0.12s, box-shadow 0.12s; }
 .lead-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .lead-box textarea { display: block; width: 100%; border: 0; outline: none; background: none; resize: none; font-size: 14px; line-height: 1.5; min-height: 26px; max-height: 168px; field-sizing: content; }
@@ -235,20 +235,6 @@ a.lt-ref:hover { border-color: var(--line-strong); }
   .lt-shot { width: 100%; }
   .lc-after { margin-left: 0; flex-basis: 100%; }
 }
-
-/* ── ⌘K: the ask box on any page ───────────────────────── */
-.modal-veil.lask-veil { place-items: start center; padding-top: max(20px, 9vh); }
-.lask { width: min(720px, 100%); max-height: min(82vh, 900px); display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--pop-shadow); animation: pop 0.18s cubic-bezier(0.2, 0.8, 0.2, 1); min-width: 0; }
-.lask-h { display: flex; align-items: center; gap: 10px; padding: 12px 14px 0 16px; }
-.lask-h img { width: 24px; height: 24px; border-radius: 6px; flex: none; }
-.lask-h b { font-size: 14.5px; font-weight: 650; }
-.lask-h .grow { flex: 1; }
-.lask-h kbd { font: 500 11px 'JetBrains Mono', monospace; color: var(--dim); border: 1px solid var(--line-strong); border-radius: 5px; padding: 1px 5px; }
-.lask-feed { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 18px 16px; display: flex; flex-direction: column; gap: 16px; border-bottom: 1px solid var(--line); margin-top: 10px; }
-.lask-ask { padding: 12px 14px 0; }
-.lask-f { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 14px 12px 16px; }
-.lask-f .lead-hint { margin: 0; flex: 1 1 260px; }
-.lask-f .grow { display: none; }
 
 /* "Ask the lead" above a story that waits for you. */
 .lead-strip { display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; margin: 14px 28px 0; padding: 7px 8px 7px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); font-size: 12.5px; color: var(--muted); }

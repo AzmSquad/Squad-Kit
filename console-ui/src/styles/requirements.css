@@ -405,7 +405,7 @@ a.rq-ref:hover { text-decoration: underline; text-underline-offset: 3px; }
 .rq-legend i.y { background: var(--you-soft); border: 1.5px solid var(--you); }
 .rq-legend i.w { background: var(--surface); border: 1px solid var(--line-strong); }
 
-/* ── Narrower rooms: a docked chat or a small window ───── */
+/* ── Narrower rooms: a small window ────────────────────── */
 @container canvas (max-width: 1100px) {
   .rq-aside { width: 360px; }
   .rq-stcol { width: clamp(170px, 30%, 230px); }

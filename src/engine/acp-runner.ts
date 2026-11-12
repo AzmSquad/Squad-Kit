@@ -90,6 +90,8 @@ export interface AcpRunOptions {
   onTool?(event: ToolEvent): void;
   onBlocked?(action: BlockedAction): void;
   onText?(text: string): void;
+  /** The structured answer as far as it came: the adapter hands its fields in one by one as each is whole. */
+  onDraft?(answer: Record<string, unknown>): void;
   onPlan?(entries: PlanEntry[]): void;
   onActivity?(): void;
   onSpawn?(pid: number): void;
@@ -293,7 +295,11 @@ export async function runAcp(launch: AcpLaunch, opts: AcpRunOptions): Promise<Ag
       const name = launch.toolName(update) ?? (update.sessionUpdate === 'tool_call' ? undefined : t.name);
       if (name) t.name = name;
       if (update.rawInput && Object.keys(update.rawInput).length) t.input = update.rawInput;
-      if (launch.structuredTool && t.name === launch.structuredTool && t.input) structured = t.input;
+      if (launch.structuredTool && t.name === launch.structuredTool && t.input) {
+        structured = t.input;
+        // The answer's fields so far, for a board that shows the words as they are written.
+        if (opts.onDraft && typeof t.input === 'object') opts.onDraft(t.input as Record<string, unknown>);
+      }
       // Report each tool once, when its name and input are known, the way the direct runner does.
       if (!t.reported && t.name && t.input && t.name !== launch.structuredTool) {
         t.reported = true;

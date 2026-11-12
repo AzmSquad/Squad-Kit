@@ -5,9 +5,10 @@ import type { RunOptions, RunResult } from '../src/modules/claude/direct.js';
 import { goodAnswer, leadBoard, pressTool, textOf } from './support/lead.js';
 
 /**
- * Buttons, not "tell me": an answer that sends the person to the board comes with its card, an Open card to the story
- * at its tab, which changes nothing; a refusal of what only the person may do opens the stories it names; and the lead
- * may show a story's own proof pictures, only those the board already keeps. The agent is a fake.
+ * Buttons, not "tell me": an answer that sends the person to the board comes with its card: a story that waits for
+ * the person comes with its decision card (the board's own buttons, only theirs to press), any other with an Open card
+ * to the story at its tab, which changes nothing; a refusal of what only the person may do brings the stories it
+ * names; and the lead may show a story's own proof pictures, only those the board already keeps. The agent is a fake.
  */
 
 const calls: RunOptions[] = [];
@@ -57,8 +58,8 @@ describe('an Open card', () => {
     const [plan, proof] = t.answer!.cards;
     expect(t.answer!.cards).toHaveLength(2);
     expect(plan).toMatchObject({ kind: 'open_story', level: 1, story: 'SK-144', tab: 'plan', label: "Open SK-144's plan", open: '/board?ticket=SK-144&tab=plan', command: 'squad show SK-144', why: 'Its plan shows the steps.', status: 'open' });
-    // No tab given: the one its own wait is about. SK-139 waits for Looks right, on its proof page.
-    expect(proof).toMatchObject({ story: 'SK-139', tab: 'proof', label: "Open SK-139's proof", open: '/tickets/SK-139/proof' });
+    // No tab given on a story that waits for the person: its decision card. SK-139 waits for Looks right, on its proof page.
+    expect(proof).toMatchObject({ kind: 'decide', story: 'SK-139', wait: 'proof', label: 'Looks right', open: '/tickets/SK-139/proof' });
     expect(t.trace.map((s) => s.text)).toContain('Left out a card: an Open card names no story on this board');
     const before = JSON.stringify(readTicket(bp, 'SK-144'));
     for (let i = 0; i < 2; i++) {
@@ -88,7 +89,7 @@ describe('an Open card', () => {
 });
 
 describe('buttons, not "go and press it"', () => {
-  it('gives an Open card for each story the answer sends the person to, at its tab', async () => {
+  it('gives a card for each story the answer sends the person to: its decision card while it waits for them', async () => {
     agent = async () => ({
       structured: goodAnswer({
         headline: 'Accept SK-139 first, then SK-142.',
@@ -96,9 +97,9 @@ describe('buttons, not "go and press it"', () => {
       }),
     });
     const t = await ask('What order should I accept them in?');
-    expect(t.answer!.cards.map((c) => [c.kind, c.label, c.kind === 'open_story' && c.open])).toEqual([
-      ['open_story', "Open SK-139's proof", '/tickets/SK-139/proof'],
-      ['open_story', "Open SK-142's proof", '/tickets/SK-142/proof'],
+    expect(t.answer!.cards.map((c) => [c.kind, c.label, (c.kind === 'open_story' || c.kind === 'decide') && c.open])).toEqual([
+      ['decide', 'Looks right', '/tickets/SK-139/proof'],
+      ['decide', 'Looks right', '/tickets/SK-142/proof'],
     ]);
   });
 
@@ -123,10 +124,10 @@ describe('buttons, not "go and press it"', () => {
       }),
     });
     const t = await ask('What needs me?');
-    expect(t.answer!.cards.map((c) => c.label)).toEqual(["Open SK-139's proof", "Open SK-142's proof", 'Try again', "Open SK-148's questions"]);
+    expect(t.answer!.cards.map((c) => `${c.kind} ${c.label}`)).toEqual(['decide Looks right', 'decide Looks right', 'board_action Try again', 'decide Answer']);
   });
 
-  it('turns an action that does not fit now into an Open card: no pictures again on a proof that waits for Looks right', async () => {
+  it('turns an action that does not fit now into the story\'s own card: no pictures again on a proof that waits for Looks right', async () => {
     agent = async () => ({
       structured: goodAnswer({
         cards: [
@@ -136,12 +137,12 @@ describe('buttons, not "go and press it"', () => {
       }),
     });
     const t = await ask('Can the Tester take SK-139 pictures again?');
-    expect(t.answer!.cards).toEqual([expect.objectContaining({ kind: 'open_story', story: 'SK-139', label: "Open SK-139's proof", why: 'It has no picture of the search box.' })]);
+    expect(t.answer!.cards).toEqual([expect.objectContaining({ kind: 'decide', story: 'SK-139', label: 'Looks right', why: 'It has no picture of the search box.' })]);
     expect(t.trace.map((s) => s.text)).toEqual(expect.arrayContaining(['Left out a card: SK-139 does not wait for new pictures', 'Left out a card: SK-139 has no Try again now']));
     expect(readTicket(bp, 'SK-139')!.waiting?.kind).toBe('proof');
   });
 
-  it('keeps its refusal of what only the person may do, and opens the stories it names', async () => {
+  it('keeps its refusal of what only the person may do, and brings the stories it names', async () => {
     agent = async () => ({
       structured: goodAnswer({
         headline: "I can't press Looks right for you.",
@@ -150,10 +151,10 @@ describe('buttons, not "go and press it"', () => {
     });
     const t = await ask('ممتاز موافق');
     expect(t.answer!.headline).toBe("I can't press Looks right for you.");
-    expect(t.answer!.cards.map((c) => c.label)).toEqual(["Open SK-139's proof", "Open SK-142's proof"]);
-    // squad-kit's own refusal, with no AI, opens them too.
+    expect(t.answer!.cards.map((c) => `${c.kind} ${c.kind === 'decide' ? c.story : ''}`)).toEqual(['decide SK-139', 'decide SK-142']);
+    // squad-kit's own refusal, with no AI, brings them too.
     const own = await ask('Approve SK-142');
-    expect(own.answer).toMatchObject({ by: 'refusal', headline: NEVER.approve.refusal, cards: [{ kind: 'open_story', story: 'SK-142', open: '/tickets/SK-142/proof' }] });
+    expect(own.answer).toMatchObject({ by: 'refusal', headline: NEVER.approve.refusal, cards: [{ kind: 'decide', story: 'SK-142', open: '/tickets/SK-142/proof' }] });
   });
 });
 
@@ -169,15 +170,15 @@ describe('"tell me and I\'ll"', () => {
     expect(calls).toHaveLength(2);
     expect(calls[1]!.prompt).toContain('the body offers to do something for SK-142 later');
     expect(t.trace.map((s) => s.text)).toContainEqual(expect.stringMatching(/^The answer was not complete \(the body offers to do something for SK-142 later/));
-    expect(t.answer!.cards.map((c) => c.label)).toEqual(["Open SK-142's proof"]);
+    expect(t.answer!.cards.map((c) => `${c.kind} ${c.label}`)).toEqual(['decide Looks right']);
   });
 
-  it('keeps the words and its cards when it still offers it, and the Open card comes anyway', async () => {
+  it('keeps the words and its cards when it still offers it, and the story\'s card comes anyway', async () => {
     agent = async () => ({ structured: goodAnswer({ headline: 'SK-142 is almost there.', body: 'لو تريد صورًا لـ SK-142 قبل القبول، قل لي وسأطلبها.', cards: [{ kind: 'engineer_report' }] }) });
     const t = await ask('هل SK-142 جاهزة؟');
     expect(calls).toHaveLength(2);
     expect(t.answer!.body).toContain('قل لي');
-    expect(t.answer!.cards.map((c) => c.kind)).toEqual(['engineer_report', 'open_story']);
+    expect(t.answer!.cards.map((c) => c.kind)).toEqual(['engineer_report', 'decide']);
   });
 
   it('is only an offer about a story with no card for it', () => {

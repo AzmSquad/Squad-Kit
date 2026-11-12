@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Chat heads and popups on every page.** Round heads sit at the bottom right of every project page: the Squad lead
+  first, with how many things need you, then one per open talk with the agent's letters, the story under it, an unread
+  badge and a live dot while it writes. A press opens the talk in a popup over the page, up to three side by side
+  (fewer on a narrow window, one full-screen sheet on a phone). Each popup minimises to a bar, closes, or opens its
+  full page. They stay open after a page change or a reload. ⌘K or Ctrl+K opens the lead; with nothing open, a small
+  "Ask the lead" sits beside the heads. A head gives a small nudge when its talk gets a new message or a new decision.
+- **The lead's popup starts with what needs you** (each one opens its story's popup) and a few questions to ask.
+- **Decide in the chat.** When a story waits for you, its card closes the story's talk and comes with the lead's
+  answers about it: the proof with its pictures and "done when" ticks (Looks right, Something's wrong, Full proof), the
+  spec, plan or design in short (Approve, Ask for changes, Read it all), the Analyst's questions as answer chips, an
+  agent's question with its answers, or Open with the board's own reason. The buttons are the board's own; the card is
+  drawn from the board as it is now, and a press is checked again: decided already, or changed since, the card says so.
+  After your press it turns green with what really happened, and the board, heads and badges update at once.
+- **The lead brings the card; only you press it.** "Approve" stays on the lead's never list, its can and can't rules
+  are the same, and it still gives at most 4 cards. "Accept it for me" is refused with the story's card next to the
+  refusal, in Arabic too ("ممتاز، اقبلها لي"), with no AI.
+
+### Changed
+
+- **Words appear as they are written.** The lead's headline and body show as the AI tool hands them in, then the words
+  come in at a reading pace; its working line shimmers, its steps tick in, and it folds to one line when done. An
+  agent's reply does the same. Your message pops in, cards and answer chips rise in one after another, and Send gives
+  a small push. With reduced motion there is no motion and the words show at once. A talk in Arabic reads right to left.
+- **The board keeps its whole width.** The chat panel docked beside it and the ⌘K box are gone: the popups do both.
+
 ## [1.3.16] — 2026-11-12
 
 ### Added

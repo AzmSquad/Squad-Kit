@@ -4,6 +4,7 @@ import { findApp } from '../../board/apps.js';
 import { addActivity, readMeta, readTicket, requireTicket, updateTicket, type BoardPaths } from '../../board/store.js';
 import { saveSettings, type SettingsInput } from '../../board/settings.js';
 import type { Ticket } from '../../board/types.js';
+import { waitKey } from '../../board/wait-key.js';
 import { appRunner } from '../run-app.js';
 import { getToolNow, updateToolNow } from '../tools/index.js';
 import { ACTIONS, ENGINEERS_ONLY, SETTINGS, isAllowable, isEngineer, neverAction, type Never } from './can.js';
@@ -13,7 +14,8 @@ import { allowAlways, requireConversation, updateConversation, saveLeadRules } f
 import type { DoneWhen, LeadAction, LeadCard, LeadConversation, ProofKind, StoryTab } from './types.js';
 
 /**
- * The lead's cards. Level 1 only writes text (a report for an engineer) or opens a story on the board. Level 2 runs an existing board action through
+ * The lead's cards. Level 1 only writes text (a report for an engineer), opens a story on the board, or brings a story
+ * that waits on the person into the chat with the board's own buttons, for the person to press. Level 2 runs an existing board action through
  * the same function as the board's own button, and only when the person presses it, or when "Always allow" is on for
  * one of the four low-risk actions. Anything else an agent hands in as a card is refused in squad-kit's own words.
  */
@@ -106,6 +108,37 @@ export function openCard(id: string, t: Ticket, tab?: StoryTab, why?: string): L
   };
 }
 
+/** The words on a decision card's main button, by what the story waits for. */
+const DECIDE_LABEL: Partial<Record<NonNullable<Ticket['waiting']>['kind'], string>> = {
+  proof: 'Looks right',
+  spec: 'Approve spec',
+  plan: 'Approve plan',
+  questions: 'Answer',
+  ask: 'Answer',
+};
+
+/**
+ * "Decide here": a story that waits on the person, brought into the chat. The board shows it there from its live data
+ * with its own buttons; only the person presses them, and each press is checked again against the mark of what waited
+ * now. The card itself changes nothing, so it is level 1. Null when the story waits for nothing.
+ */
+export function decideCard(id: string, t: Ticket, why?: string): LeadCard | null {
+  const key = waitKey(t);
+  // The story waits on its own talk: the talk is the place, so its Open card goes there.
+  if (!t.waiting || !key || t.waiting.kind === 'chat') return null;
+  const label = t.waiting.kind === 'plan' && t.specApproved ? 'Approve design' : (DECIDE_LABEL[t.waiting.kind] ?? `Open ${t.id}`);
+  return { id, kind: 'decide', level: 1, story: t.id, wait: t.waiting.kind, key, open: openPlace(t, waitTab(t)), label, command: `squad show ${t.id}`, status: 'open', ...(why ? { why } : {}) };
+}
+
+/**
+ * The card for a story the answer is about: its decision card when it waits on the person and no other tab is named
+ * than the one it waits on, its Open card otherwise.
+ */
+export function storyCard(id: string, t: Ticket, tab?: StoryTab, why?: string): LeadCard {
+  const wait = waitTab(t);
+  return (t.waiting && (!tab || tab === wait) ? decideCard(id, t, why) : null) ?? openCard(id, t, tab ?? wait, why);
+}
+
 /** The card, or the "never" it falls under, or why it was left out (it is no card squad-kit has, or not for this person). */
 export function makeCard(bp: BoardPaths, raw: CardInput, id: string, role?: string): { card: LeadCard } | { refused: Never } | { left: string } {
   const kind = str(raw.kind, 60).toLowerCase().replace(/[\s-]+/g, '_');
@@ -152,11 +185,11 @@ export function makeCard(bp: BoardPaths, raw: CardInput, id: string, role?: stri
     if (known.technical && !isEngineer(role ?? readMeta(bp).user.role)) return { left: 'a technical setting, which only an engineer changes' };
     return { card: { ...base, kind: 'settings_change', level: 2, label: 'Save', setting, value, technical: known.technical } };
   }
-  if (kind === 'open_story' || kind === 'open') {
+  if (kind === 'open_story' || kind === 'open' || kind === 'decide' || kind === 'decision') {
     const story = str(raw.story, 40).toUpperCase();
     const t = story ? readTicket(bp, story) : null;
-    if (!t) return { left: 'an Open card names no story on this board' };
-    return { card: openCard(id, t, TABS.find((x) => x === str(raw.tab, 20).toLowerCase()) ?? waitTab(t), why) };
+    if (!t) return { left: `${kind.startsWith('decid') ? 'a decision' : 'an Open'} card names no story on this board` };
+    return { card: storyCard(id, t, TABS.find((x) => x === str(raw.tab, 20).toLowerCase()), why) };
   }
   if (kind === 'engineer_report' || kind === 'report') {
     return { card: { ...base, kind: 'engineer_report', level: 1, label: 'Prepare a report for an engineer' } };
@@ -167,7 +200,7 @@ export function makeCard(bp: BoardPaths, raw: CardInput, id: string, role?: stri
 
 /** The story a card is for, when it is for one. */
 export function cardStory(card: LeadCard): string | undefined {
-  return card.kind === 'board_action' || card.kind === 'send_answer' || card.kind === 'open_story' ? card.story : undefined;
+  return card.kind === 'board_action' || card.kind === 'send_answer' || card.kind === 'open_story' || card.kind === 'decide' ? card.story : undefined;
 }
 
 /** A story's id in an answer's words: MA-17, never a decision like MA-17.1. */
@@ -185,9 +218,10 @@ const TAB_WORDS: [StoryTab, RegExp][] = [
 ];
 
 /**
- * Open cards for the stories an answer sends the person to, so each is one press away: a story it names that waits for
- * the person, one a sentence tells them to open, press or decide on, or any story it names when something only the
- * person may do was refused. A story a card is already for is left out, and the answer keeps at most MAX_LEAD_CARDS.
+ * Cards for the stories an answer sends the person to, so each is one press away: a story it names that waits for the
+ * person gets its decision card, with the board's own buttons; one a sentence tells them to open, or any story it names
+ * when something only the person may do was refused, gets its Open card. A story a card is already for is left out,
+ * and the answer keeps at most MAX_LEAD_CARDS.
  */
 export function openCardsFor(bp: BoardPaths, words: string, have: LeadCard[], prefix: string, o: { refused?: boolean; also?: string[] } = {}): LeadCard[] {
   const covered = new Set(have.map(cardStory));
@@ -201,7 +235,7 @@ export function openCardsFor(bp: BoardPaths, words: string, have: LeadCard[], pr
     if (!t) continue;
     const said = sentences.filter((x) => x.includes(id));
     if (!t.waiting && !o.refused && !said.some((x) => SENDS.test(x))) continue;
-    out.push(openCard(`${prefix}.${out.length + 1}`, t, waitTab(t) ?? TAB_WORDS.find(([, re]) => said.some((x) => re.test(x)))?.[0]));
+    out.push(storyCard(`${prefix}.${out.length + 1}`, t, t.waiting ? undefined : TAB_WORDS.find(([, re]) => said.some((x) => re.test(x)))?.[0]));
     covered.add(id);
   }
   return out;
@@ -313,6 +347,9 @@ export async function doCard(bp: BoardPaths, card: LeadCard, o: { conversation?:
     }
     case 'open_story':
       return { result: `It opens on the board: ${card.open}. In the terminal: ${card.command}` };
+    // Never pressed from here: its buttons are the board's own, and only the person presses them.
+    case 'decide':
+      return { result: `Only you can decide ${card.story}, with its buttons in the chat or on the board: ${card.open}. In the terminal: ${card.command}` };
     case 'engineer_report': {
       if (!o.conversation) throw new BoardActionError('A report needs the conversation it is about.');
       const report = engineerReport(bp, requireConversation(bp, o.conversation));
@@ -385,8 +422,9 @@ export async function runCard(
   const conversationId = rail ? undefined : id.split('.')[0]!;
   const card = rail ? o.find?.(id) : findCard(requireConversation(bp, conversationId!), id);
   if (!card) throw new BoardActionError(rail ? 'That card is gone: the story moved on.' : `There is no card "${id.slice(0, 60)}".`);
-  // An Open card only shows a place on the board: it stays as it is, to open again.
-  if (card.kind === 'open_story') return { card: { ...card, result: (await doCard(bp, card)).result }, ...(conversationId ? { conversation: conversationId } : {}) };
+  // An Open card only shows a place on the board, and a decision card only the board's own buttons: each stays as it
+  // is, to open again. Nothing runs from it.
+  if (card.kind === 'open_story' || card.kind === 'decide') return { card: { ...card, result: (await doCard(bp, card)).result }, ...(conversationId ? { conversation: conversationId } : {}) };
   if (card.status === 'done' && card.kind !== 'engineer_report') throw new BoardActionError('This card was already used.');
   if (card.status === 'dismissed' && !o.dismiss) throw new BoardActionError('This card was put aside.');
   if (o.always) {

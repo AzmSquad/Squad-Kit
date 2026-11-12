@@ -1,0 +1,237 @@
+/* Chat heads and popups over every page of a project, and the decision cards inside them (design/squad-lead/chats.html).
+   Colours come from the tokens in app.css and chat.css, in both themes. Motion is short and stops for reduced motion. */
+
+/* Popups and heads sit over the page and under every dialog (.modal-veil is 50), the picture viewer and the toasts. */
+
+/* ── The heads ─────────────────────────────────────────── */
+.heads { position: fixed; inset-inline-end: 18px; bottom: 18px; z-index: 46; display: flex; flex-direction: column-reverse; align-items: flex-end; gap: 14px; }
+.head { --c: var(--accent); position: relative; width: 48px; height: 48px; border-radius: 99px; display: grid; place-items: center; font-weight: 700; font-size: 13px; background: var(--surface); box-shadow: 0 22px 56px -18px rgba(14, 24, 19, 0.38), 0 0 0 1px rgba(14, 24, 19, 0.07); transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1.3), box-shadow 0.2s; animation: headin 0.5s cubic-bezier(0.2, 0.9, 0.25, 1.3) both; }
+:root[data-theme='dark'] .head { box-shadow: 0 22px 64px -14px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(124, 255, 160, 0.1); }
+:root[data-theme='dark'] .head.on { box-shadow: 0 22px 64px -14px rgba(0, 0, 0, 0.85), 0 0 0 3px var(--accent); }
+.head:hover { transform: scale(1.07); }
+.head:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.head.on { box-shadow: 0 22px 56px -18px rgba(14, 24, 19, 0.38), 0 0 0 3px var(--accent); }
+.head .face { width: 100%; height: 100%; border-radius: 99px; display: grid; place-items: center; color: var(--c); background: color-mix(in srgb, var(--c) 16%, var(--surface)); }
+.head.lead { width: 58px; height: 58px; background: #0a0a0c; color: var(--mint); }
+:root[data-theme='dark'] .head.lead { box-shadow: 0 22px 64px -14px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(124, 255, 160, 0.22); }
+:root[data-theme='dark'] .head.lead.on, .head.lead.on { box-shadow: 0 22px 56px -18px rgba(14, 24, 19, 0.38), 0 0 0 3px var(--accent); }
+.head.more .face { color: var(--muted); background: var(--surface-2); font-size: 12px; }
+.head .n { position: absolute; top: -3px; inset-inline-end: -3px; min-width: 19px; height: 19px; padding: 0 5px; border-radius: 99px; background: var(--you); color: #fff; font-size: 11px; font-weight: 700; display: grid; place-items: center; box-shadow: 0 0 0 2px var(--bg); }
+.head .live { position: absolute; top: 1px; inset-inline-start: 1px; width: 13px; height: 13px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg); animation: hpulse 1.4s ease-in-out infinite; }
+.head .sid { position: absolute; left: 50%; bottom: -7px; transform: translateX(-50%); font: 600 9.5px 'JetBrains Mono', monospace; padding: 1px 5px; border-radius: 6px; background: var(--surface); color: var(--text); box-shadow: 0 0 0 1px var(--line); white-space: nowrap; }
+.head .tip { position: absolute; inset-inline-end: calc(100% + 10px); top: 50%; transform: translateY(-50%); white-space: nowrap; font-size: 12px; font-weight: 600; padding: 5px 10px; border-radius: 8px; background: #0e1813; color: #e6f0ea; opacity: 0; pointer-events: none; transition: opacity 0.15s; }
+.head .tip small { color: #95ae9f; font-weight: 500; margin-inline-start: 6px; font-size: 12px; }
+.head:hover .tip, .head:focus-visible .tip { opacity: 1; }
+.head.ping { animation: hping 0.7s cubic-bezier(0.2, 0.8, 0.2, 1.4); }
+@keyframes headin { from { opacity: 0; transform: translateY(14px) scale(0.6); } }
+@keyframes hping { 25% { transform: translateY(-8px) scale(1.08); } 50% { transform: none; } 70% { transform: translateY(-3px); } }
+@keyframes hpulse { 50% { box-shadow: 0 0 0 2px var(--bg), 0 0 0 6px var(--accent-soft); } }
+
+/* "Ask the lead ⌘K", beside the heads while no popup is open. */
+.asklabel { position: fixed; inset-inline-end: 86px; bottom: 29px; z-index: 45; height: 36px; padding: 0 12px; border-radius: 99px; background: var(--surface); box-shadow: var(--pop-shadow), 0 0 0 1px var(--line); display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; animation: rise2 0.3s ease both; }
+.asklabel:hover { box-shadow: var(--pop-shadow), 0 0 0 1px var(--line-strong); }
+.asklabel kbd { font: 500 11px 'JetBrains Mono', monospace; color: var(--muted); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; }
+
+/* ── The popups ────────────────────────────────────────── */
+.pops { position: fixed; inset-inline-end: 90px; bottom: 18px; z-index: 44; display: flex; flex-direction: row-reverse; align-items: flex-end; gap: 12px; pointer-events: none; }
+.pop { pointer-events: auto; width: 368px; height: min(600px, calc(100vh - 36px)); border-radius: 18px; background: var(--surface); box-shadow: 0 22px 56px -18px rgba(14, 24, 19, 0.38), 0 0 0 1px rgba(14, 24, 19, 0.07); display: flex; flex-direction: column; overflow: hidden; transform-origin: 100% 100%; animation: popin 0.45s cubic-bezier(0.2, 0.9, 0.25, 1.12) both; transition: height 0.32s cubic-bezier(0.2, 0.8, 0.2, 1); }
+:root[data-theme='dark'] .pop { box-shadow: 0 22px 64px -14px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(124, 255, 160, 0.1); }
+.pop.out { animation: popout 0.2s ease forwards; }
+.pop.mini { height: 54px; }
+@keyframes popin { from { opacity: 0; transform: translateY(24px) scale(0.9); } }
+@keyframes popout { to { opacity: 0; transform: translateY(18px) scale(0.92); } }
+.ph { display: flex; align-items: center; gap: 10px; padding: 10px 8px 10px 12px; border-bottom: 1px solid var(--line); min-height: 54px; flex: none; }
+.pop.mini .ph { border-bottom: 0; cursor: pointer; }
+.ph .av { --c: var(--accent); width: 32px; height: 32px; border-radius: 99px; display: grid; place-items: center; font-weight: 700; font-size: 11.5px; flex: none; color: var(--c); background: color-mix(in srgb, var(--c) 16%, var(--surface)); }
+.av.lead { background: #0a0a0c; color: var(--mint); }
+.ph .pt { min-width: 0; flex: 1; }
+.ph h2 { font-size: 14px; font-weight: 650; line-height: 1.2; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.ph h2 .mono { font: 500 11px 'JetBrains Mono', monospace; color: var(--dim); }
+.ph .sub { font-size: 11.5px; color: var(--muted); display: flex; align-items: center; gap: 5px; min-width: 0; }
+.ph .sub > :last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ph .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; }
+.ph .dot.busy { animation: dpulse 1.2s ease-in-out infinite; }
+@keyframes dpulse { 50% { box-shadow: 0 0 0 5px var(--accent-soft); } }
+.ph .tools { margin-inline-start: auto; display: flex; flex: none; }
+.ph .ib { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: var(--muted); }
+.ph .ib:hover { background: var(--surface-2); color: var(--text); }
+.ph .ib:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* The lead's popup: what needs you first, then the conversation. */
+.pop .feed { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 14px 10px; scrollbar-width: none; }
+.pop .feed::-webkit-scrollbar { width: 0; }
+.feedcol { display: flex; flex-direction: column; gap: 13px; }
+.pop .empty { display: flex; flex-direction: column; gap: 10px; animation: rise2 0.4s ease both; }
+.pop .empty h6 { font-size: 11px; font-weight: 650; color: var(--muted); }
+.pop .need { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 11px; border: 1px solid var(--you-line); background: var(--you-soft); font-size: 12.5px; text-align: start; animation: rise2 0.35s ease both; animation-delay: calc(var(--i, 0) * 70ms); }
+.pop .need:hover { border-color: var(--you); }
+.pop .need > div { min-width: 0; flex: 1; }
+.pop .need b { font-weight: 650; display: block; }
+.pop .need small { display: block; color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pop .need .go { margin-inline-start: auto; font-size: 12px; font-weight: 600; color: var(--you-ink); white-space: nowrap; }
+.pop .sugs { display: flex; flex-wrap: wrap; gap: 6px; }
+.pop .sug { padding: 5px 11px; border-radius: 99px; border: 1px solid var(--line); font-size: 12.5px; text-align: start; }
+.pop .sug:hover { border-color: var(--accent); background: var(--accent-soft); }
+.pop .empty .linkbtn { align-self: flex-start; font-size: 12px; }
+
+/* The lead's turns, small: your question in its bubble, its work in one line, its answer as it is written. */
+.pop .lt { gap: 12px; }
+.pop .lt-answer h3 { font-size: 14px; }
+.pop .lt-answer .cmd { font-size: 13.5px; }
+.pop .lt-work, .pop .lt-think { border-radius: 12px; }
+.pop .lt-wh { padding: 7px 11px; font-size: 12px; }
+.pop .lt-shot { width: 100%; }
+.pop .lt-cards { gap: 7px; margin-top: 10px; }
+.pop .lc-f { flex-wrap: wrap; }
+.pop .lt-cost { margin-top: -4px; font-size: 10.5px; }
+
+/* The box: one row with Send, and where it is asked from under it. */
+.pop .composer { flex: none; padding: 9px 10px 11px; border-top: 1px solid var(--line); }
+.pop .lead-box { display: flex; align-items: flex-end; gap: 8px; padding: 7px 7px 7px 11px; border-radius: 12px; }
+.pop .lead-box textarea { flex: 1; min-width: 0; font-size: 13px; min-height: 22px; padding: 3px 0; }
+.pop .lead-bar { margin-top: 0; flex: none; }
+.pop .lead-bar .grow { display: none; }
+.pop .lead-send { width: 30px; height: 30px; }
+.pop .where, .csize-pop .where { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); margin-top: 6px; min-width: 0; }
+.pop .where .lt-ctx { margin: 0; font-size: 11px; padding: 1px 8px; }
+.csize-pop .where .chip { display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border-radius: 6px; background: var(--surface-2); }
+.boxask { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; padding: 5px 9px; border-radius: 9px; background: var(--you-soft); color: var(--you-ink); font-size: 11.5px; font-weight: 600; animation: rise2 0.25s ease both; }
+.boxask span { flex: 1; min-width: 0; }
+.boxask .linkbtn { margin: 0; font-size: 11.5px; color: var(--you-ink); }
+.cbox.asking, .pop .composer:has(.boxask) .lead-box { border-color: var(--you); box-shadow: 0 0 0 3px var(--you-soft); }
+
+/* A story's talk in its popup. */
+.pop .chat-v { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.csize-pop .cstrip { flex: none; display: flex; align-items: center; gap: 8px; margin: 12px 14px 0; padding: 7px 10px; border-radius: 10px; background: var(--surface-2); font-size: 11.5px; color: var(--muted); min-width: 0; }
+.csize-pop .cstrip b { color: var(--text); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.csize-pop .cstrip .grow { flex: 1; }
+.csize-pop .cstrip .linkbtn { margin: 0; font-size: 11.5px; font-weight: 600; white-space: nowrap; color: var(--muted); }
+.csize-pop .cstrip .linkbtn.go { color: var(--accent); }
+.csize-pop .cthread { padding: 14px 14px 10px; scrollbar-width: none; }
+.csize-pop .cthread::-webkit-scrollbar { width: 0; }
+.csize-pop .ccol { gap: 13px; }
+.csize-pop .cag { grid-template-columns: 26px minmax(0, 1fr); column-gap: 8px; }
+.csize-pop .cag > .cav { width: 26px; height: 26px; border-radius: 99px; }
+.csize-pop .cag > .cav svg { width: 13px; height: 13px; }
+.csize-pop .cwho { height: 26px; font-size: 12px; }
+.csize-pop .cagb .cmd { font-size: 13.5px; }
+.csize-pop .cybub { border-radius: 16px 16px 5px 16px; padding: 8px 12px 0; background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 20%, transparent); }
+.csize-pop .cyou .cmd { font-size: 13.5px; font-weight: 500; }
+.csize-pop .cacts { display: none; }
+.csize-pop .ccomp { padding: 9px 10px 11px; border-top: 1px solid var(--line); }
+.csize-pop .cbox { display: flex; align-items: flex-end; gap: 6px; padding: 7px 7px 7px 11px; border-radius: 12px; }
+.csize-pop .cta { flex: 1; min-width: 0; font-size: 13px; padding: 3px 0; min-height: 22px; }
+.csize-pop .crow { flex: none; margin: 0; gap: 2px; }
+.csize-pop .clchip { display: none; }
+.csize-pop .csend { width: 30px; height: 30px; border-radius: 9px; }
+.csize-pop .cempty.inline { align-items: flex-start; text-align: start; padding: 4px 0; gap: 8px; }
+.csize-pop .cclosed { padding: 10px 14px 12px; }
+[dir='rtl'] .csize-pop .cybub, [dir='rtl'].csize-pop .cybub { border-radius: 16px 16px 16px 5px; }
+
+/* ── Motion, shared with the full pages ────────────────── */
+/* Your bubble pops in. */
+.cyou.pop-in, .lt.watched .lt-you { animation: bub 0.42s cubic-bezier(0.2, 0.9, 0.25, 1.25) both; transform-origin: 100% 100%; }
+[dir='rtl'] .cyou.pop-in, [dir='rtl'] .lt.watched .lt-you { transform-origin: 0 100%; }
+@keyframes bub { from { opacity: 0; transform: translateY(10px) scale(0.94); } }
+/* Cards and choices rise in one after another. */
+.rise { animation: rise2 0.35s cubic-bezier(0.2, 0.8, 0.2, 1.15) both; animation-delay: calc(var(--i, 0) * 120ms); }
+.cch.rise { animation: rise2 0.3s ease both; animation-delay: calc(var(--i, 0) * 70ms); }
+.lt-think .lt-steps li { animation: rise2 0.3s ease both; }
+@keyframes rise2 { from { opacity: 0; transform: translateY(8px); } }
+/* The send button gives a small push. */
+.lead-send, .csend { transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1.4), opacity 0.12s; }
+.lead-send.go, .csend.go { transform: scale(0.86) rotate(-8deg); }
+/* The lead's live line shimmers while it works. */
+.lt-th b.shim { font-weight: 600; }
+
+/* Your question to the lead, as your bubble. */
+.lt-you { align-self: flex-end; max-width: 84%; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; padding: 0; border: 0; }
+.lt-you .lt-meta { order: 2; margin: 0; font-size: 10.5px; }
+.lt-you .lt-meta b { font-weight: 500; color: var(--dim); font-size: 10.5px; }
+.lt-you > p { font-size: 13.5px; font-weight: 500; padding: 8px 12px; border-radius: 16px 16px 5px 16px; background: var(--accent-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent); }
+[dir='rtl'] .lt-you > p { border-radius: 16px 16px 16px 5px; }
+.lt-you .lt-ctx { order: 3; margin-top: 0; }
+
+/* ── A decision only you can make ──────────────────────── */
+.decide { border: 1px solid var(--you-line); border-radius: 14px; background: var(--surface); overflow: hidden; transition: border-color 0.4s; animation: rise2 0.35s cubic-bezier(0.2, 0.8, 0.2, 1.15) both; }
+.decide .dh { display: flex; align-items: center; gap: 8px; padding: 8px 11px; background: var(--you-soft); border-bottom: 1px solid var(--you-line); transition: background 0.4s, border-color 0.4s; min-width: 0; }
+.decide .dh .sid { font: 600 10.5px 'JetBrains Mono', monospace; color: var(--you-ink); flex: none; }
+.decide .dh b { font-size: 12.5px; font-weight: 650; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.decide .dh .who { font-size: 10.5px; font-weight: 650; color: var(--you-ink); white-space: nowrap; flex: none; }
+.decide .db { padding: 9px 11px 2px; }
+.decide .shots { display: flex; gap: 6px; margin: 0 0 8px; }
+.decide .shot { flex: 1; min-width: 0; border-radius: 9px; border: 1px solid var(--line); background: var(--bg); padding: 6px; display: flex; flex-direction: column; gap: 4px; text-align: start; }
+.decide .shot:hover { border-color: var(--line-strong); }
+.decide .shot .shot-l { font-size: 9px; font-weight: 650; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+.decide .shot img { display: block; width: 100%; height: 58px; object-fit: cover; object-position: top; border-radius: 5px; border: 1px solid var(--line); background: var(--surface); }
+.decide ul { list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.decide li { display: flex; gap: 7px; align-items: flex-start; font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
+.decide li svg { width: 13px; height: 13px; color: var(--accent); margin-top: 2px; flex: none; }
+.decide li.warn svg { color: var(--you); }
+.decide li.more { color: var(--dim); padding-inline-start: 20px; }
+.decide li .clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.decide .sum { font-size: 12.5px; color: var(--muted); margin-bottom: 6px; overflow-wrap: anywhere; }
+.decide .sum b { color: var(--text); font-weight: 600; }
+.decide .db .q { font-size: 13px; }
+.decide .df { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 10px 11px 6px; }
+.decide .df .btn { height: 28px; padding: 0 11px; border-radius: 8px; font-size: 12px; font-weight: 600; transition: transform 0.15s, box-shadow 0.2s; }
+.decide .df .btn:active, .decide .btn.press { transform: scale(0.93); box-shadow: 0 0 0 5px var(--accent-soft); }
+.decide .df .link { margin-inline-start: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--accent); white-space: nowrap; }
+.decide .df .link:hover { text-decoration: underline; }
+.decide .df.ask .input { flex: 1 1 160px; min-width: 0; height: 30px; font-size: 12.5px; }
+.decide .yours { font-size: 10.5px; color: var(--dim); padding: 0 11px 10px; }
+.decide .refused { display: flex; gap: 7px; align-items: flex-start; margin: 8px 11px 0; padding: 7px 9px; border-radius: 9px; background: var(--you-soft); color: var(--you-ink); font-size: 12px; font-weight: 550; }
+.decide .refused svg { flex: none; margin-top: 2px; }
+.decide .done { display: flex; align-items: flex-start; gap: 7px; padding: 10px 11px 11px; font-size: 12.5px; font-weight: 600; color: var(--accent); animation: rise2 0.3s ease both; }
+.decide .done svg { width: 15px; height: 15px; stroke-width: 2.4; flex: none; margin-top: 1px; stroke-dasharray: 24; stroke-dashoffset: 24; animation: draw 0.45s 0.1s ease forwards; }
+@keyframes draw { to { stroke-dashoffset: 0; } }
+.decide.decided { border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+.decide.decided .dh { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 22%, transparent); }
+.decide.decided .dh .sid, .decide.decided .dh .who { color: var(--accent); }
+.decide.off { border-color: var(--line); }
+.decide.off .dh { background: var(--surface-2); border-color: var(--line); }
+.decide.off .dh .sid, .decide.off .dh .who { color: var(--muted); }
+.decide .note-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; padding: 9px 11px 10px; font-size: 12px; color: var(--muted); }
+.decide .note-row svg { color: var(--accent); flex: none; }
+.decide .note-row .link { margin-inline-start: auto; font-weight: 600; color: var(--accent); }
+/* Answers to tap. */
+.decide .opts { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 11px 4px; }
+.decide .qs .opts { padding: 7px 0 0; }
+.decide .opt { padding: 5px 11px; border-radius: 99px; border: 1px solid var(--line-strong); font-size: 12.5px; transition: border-color 0.2s, background 0.2s, transform 0.15s; animation: rise2 0.3s ease both; animation-delay: calc(var(--i, 0) * 70ms); }
+.decide .opt:hover, .decide .opt.on { border-color: var(--accent); background: var(--accent-soft); }
+.decide .opt:active { transform: scale(0.95); }
+.decide .qs { padding: 9px 11px 0; display: flex; flex-direction: column; gap: 10px; }
+.decide .qs .df { padding: 4px 0 8px; }
+.decide .qrow { display: flex; flex-direction: column; gap: 2px; }
+.decide .qrow .q { font-size: 13px; }
+.decide .qn { display: inline-block; white-space: nowrap; unicode-bidi: isolate; font-size: 10.5px; font-weight: 650; color: var(--you-ink); background: var(--you-soft); border: 1px solid var(--you-line); padding: 0 7px; border-radius: 99px; margin-inline-start: 6px; }
+.decide .qrow .me { align-self: flex-end; margin-top: 5px; font-size: 13px; font-weight: 500; padding: 6px 11px; border-radius: 16px 16px 5px 16px; background: var(--accent-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent); animation: bub 0.42s cubic-bezier(0.2, 0.9, 0.25, 1.25) both; }
+.decide .qrow .input { margin-top: 6px; height: 30px; font-size: 12.5px; }
+/* In a story's talk or a lead answer, the card is part of the conversation. */
+.ccol > .decide { align-self: stretch; }
+.csize-full .ccol > .decide { max-width: 560px; }
+
+/* An opened file, beside the popups. */
+.chatpops > .cdoc { position: fixed; top: 10px; bottom: 10px; inset-inline-end: 10px; z-index: 47; margin: 0; box-shadow: var(--pop-shadow); }
+
+/* ── A phone-width window: one popup at a time, the whole screen, with the heads in a row under it ─ */
+.chatpops.phone .pops { inset: 0 0 72px 0; display: block; }
+.chatpops.phone .pop { width: 100%; height: 100%; border-radius: 0 0 18px 18px; transform-origin: 50% 100%; }
+.chatpops.phone .pop.mini { position: absolute; bottom: 0; inset-inline: 10px; width: auto; height: 54px; border-radius: 14px; }
+.chatpops.phone .heads { flex-direction: row-reverse; align-items: center; inset-inline-end: 12px; bottom: 12px; gap: 10px; }
+.chatpops.phone .head { width: 44px; height: 44px; }
+.chatpops.phone .head.lead { width: 48px; height: 48px; }
+.chatpops.phone .head .tip { display: none; }
+.chatpops.phone .head .sid { bottom: -6px; }
+.chatpops.phone:not(.has-open) .pops { display: none; }
+/* A phone zooms into a box with smaller words. */
+.chatpops.phone .lead-box textarea, .chatpops.phone .cta { font-size: 16px; }
+/* With a sheet open, the heads sit on their own bar under it, so the page never shows between them. */
+.chatpops.phone.has-open .heads { inset-inline: 0; bottom: 0; height: 72px; padding: 0 12px; background: var(--surface); border-top: 1px solid var(--line); }
+.chatpops.phone.has-open .pops { inset: 0 0 72px 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .head, .head.ping, .head .live, .pop, .pop.out, .asklabel, .rise, .cch.rise, .need, .empty, .decide, .decide .done, .decide .opt, .decide .qrow .me, .boxask, .cyou.pop-in, .lt.watched .lt-you, .lt-think .lt-steps li, .ph .dot.busy { animation: none !important; }
+  .decide .done svg { stroke-dashoffset: 0; }
+  .pop, .lead-send, .csend, .head { transition: none; }
+}

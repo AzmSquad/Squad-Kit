@@ -25,7 +25,7 @@ import {
 import { sendPlanOf, useBreakdown, useBreakdowns, useReqAct } from '../lib/requirementsData';
 import { useBoard } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
-import { PHONE, useMedia } from '../lib/chatDock';
+import { PHONE, useMedia } from '../lib/popups';
 import { shellQuote } from '../lib/text';
 import { Cmd, Written } from '../components/ui';
 import { langProps, typedDir } from '../lib/lang';

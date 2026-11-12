@@ -131,12 +131,13 @@ export function chipWords(ctx: LeadContext): string {
     case 'problem':
       return ctx.story ? `About ${ctx.story}: it ${PROBLEM_WORDS[ctx.problem]}` : 'About an error on the board';
     default:
-      return ctx.page ? `From the board, on ${ctx.page}` : 'From the board';
+      return ctx.page ? `On ${ctx.page === 'Board' ? 'the Board' : ctx.page}` : 'On the board';
   }
 }
 
 /** Where a question was asked from, for the small chip under it: "Asked from RoomFlow web, on /app". */
 export function contextWords(ctx: LeadContext): string {
+  if (ctx.from === 'board') return ctx.page ? `Asked from the board, on ${ctx.page}` : 'Asked from the board';
   const w = chipWords(ctx);
   return `Asked ${w[0]!.toLowerCase()}${w.slice(1)}`;
 }

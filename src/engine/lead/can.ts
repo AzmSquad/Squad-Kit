@@ -15,6 +15,7 @@ export const ON_ITS_OWN: string[] = [
   'Look at the app in its own copy, with its own database, and show a picture of where to click',
   "Show a story's own proof pictures when it talks about them",
   'Give you a button that opens a story on the board, at its proof, spec, plan or questions; it changes nothing',
+  "Bring a story that waits for you into the chat as a card with the board's own buttons; only you can press them",
   'Tell you when something needs you, and the morning brief if you turn it on',
   'Prepare a short report for an engineer, with no secrets in it, for you to copy',
 ];
@@ -145,7 +146,7 @@ const EN: [Never, RegExp][] = [
 const AR: [Never, RegExp][] = [
   ['harness', /^(?:غير|عدل|احذف|الغ|اوقف)\s+(?:قواعد|القواعد|الهارنس|harness)/i],
   ['around', /^(?:تجاهل|تخط|تخطي|تجاوز|الغ|اوقف|عطل)\s+(?:ال)?(?:فحوص|اختبار|مراجع|اثبات|حمايه|حدود|حد|ميزانيه)/],
-  ['approve', /^(?:وافق|اعتمد|اقبل)(?:\s|$)|^اضغط\s+(?:على\s+)?(?:looks right|موافق|اعتماد)/i],
+  ['approve', /^(?:وافق|اعتمد|اقبل)(?:ها|ه|هم|هما)?(?:\s|$)|^اضغط\s+(?:على\s+)?(?:looks right|موافق|اعتماد)/i],
   ['git', /^(?:ادمج|ادفع|ارفع الكود|انشر|اصدر|اطلق)(?:\s|$)/],
   ['delete', /^(?:احذف|امسح|شيل|الغ)\s+(?:ال)?(?:قصه|قصص|تذكره|تذاكر|مشروع|مشاريع|بيانات|قاعده|جدول|سجل|[a-z]{1,8}-\d+)/i],
   ['code', /^(?:عدل|غير|اكتب|اصلح|صلح)\s+(?:ال)?(?:كود|ملف|ملفات|الشفره)/],
@@ -153,13 +154,25 @@ const AR: [Never, RegExp][] = [
   ['message', /^(?:ارسل|راسل|ابعث|بلغ)\s+(?:رساله|ايميل|بريد|واتساب|الفريق|العميل|المدير)/],
 ];
 
+/** Words of agreement before an ask, with what follows them: "ممتاز،", "تمام", "خلاص", "طيب", "حلو", "اوكي". */
+const AR_FILLER = /^(?:(?:ممتاز|تمام|خلاص|طيب|حلو|اوكي|اوكيه|اوك|ok|okay)(?:\s*[،,.!؟]+\s*|\s+))+/i;
+/** A polite opening: "لو سمحت", "ممكن", "ابيك", "اريدك ان". */
+const AR_POLITE = /^(?:لو سمحت|من فضلك|رجاء|ممكن|ابيك|ابغاك|اريدك ان|اريدك)\s*[،,]?\s*/;
+/** "You approve it", after a polite opening. */
+const AR_YOU_APPROVE = /^(?:توافق|تعتمد|تقبل)(?:ها|ه|هم|هما)?(?:\s|$)/;
+
 /** What the person's own message asks the lead to do that it never does, by word lists in English and Arabic. */
 export function neverAsked(text: string): Never[] {
   const found = new Set<Never>();
   for (const part of text.split(/[\n!?؟؛;]+|\.(?=\s|$)/).map((p) => p.trim()).filter(Boolean)) {
     if (isArabic(part)) {
-      const s = plainArabic(part).replace(/^(?:لو سمحت|من فضلك|رجاء|ممكن|ابيك|ابغاك|اريدك ان|اريدك)\s*/, '').trim();
+      // A word of agreement first ("ممتاز، اقبلها لي"), then a polite opening ("ممكن توافق على الخطة"). A comma
+      // elsewhere starts no ask: "المدير اعتمدها امس، فما التالي؟" is a question.
+      const plain = plainArabic(part).trim().replace(AR_FILLER, '').trim();
+      const s = plain.replace(AR_POLITE, '').trim();
       for (const [id, re] of AR) if (re.test(s)) found.add(id);
+      // "You approve it" is an ask only after a polite opening: "ابيك تعتمد الخطة".
+      if (s !== plain && AR_YOU_APPROVE.test(s)) found.add('approve');
       continue;
     }
     const s = part.toLowerCase().replace(/[’`]/g, "'").replace(/\s+/g, ' ').replace(POLITE, '').trim();

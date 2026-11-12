@@ -58,6 +58,8 @@ export interface AgentChat {
   open: boolean;
   messages: ChatMessage[];
   thinking?: boolean;
+  /** Its reply so far, while it writes it. */
+  draft?: string;
   ready?: boolean;
   /** Asking beside the work: the squad goes on, and the chat changes nothing on the ticket. */
   beside?: boolean;
@@ -404,6 +406,8 @@ export interface Ticket {
   /** 0 to 100, for the current stage. */
   progress?: number;
   waiting: Waiting | null;
+  /** What it waits on the person for now, as a short mark (board/wait-key.ts): a decision card in a chat sends it back with a press. */
+  waitKey?: string;
   createdAt: string;
   createdBy: string;
   builder?: string;
@@ -1601,7 +1605,13 @@ export type LeadCard =
   | (LeadCardBase & { kind: 'settings_change'; setting: string; value: string; technical: boolean })
   | (LeadCardBase & { kind: 'engineer_report'; report?: string })
   /** Opens a story on the board at its tab; `open` is the board's own place, "/tickets/MA-7/proof". Nothing is pressed. */
-  | (LeadCardBase & { kind: 'open_story'; story: string; tab?: LeadStoryTab; open: string });
+  | (LeadCardBase & { kind: 'open_story'; story: string; tab?: LeadStoryTab; open: string })
+  /**
+   * A story that waits for you, brought into the chat: the board shows it from its live data, with its own buttons. The
+   * lead brings it; only you press it. `key` is what waited when the card was made: a press sends it back, so the board
+   * acts only on what you saw.
+   */
+  | (LeadCardBase & { kind: 'decide'; story: string; wait: WaitingKind; key: string; open: string });
 
 export interface LeadAnswer {
   /** The answer in one sentence. */
@@ -1631,6 +1641,8 @@ export interface LeadTurn {
   error?: string;
   /** "Sonnet (balanced, medium effort)". */
   model?: string;
+  /** While it answers: its words so far. */
+  draft?: { headline?: string; body?: string };
 }
 
 /** GET /api/v1/lead/conversations/<id>: poll it while `thinking`. */

@@ -4,10 +4,10 @@ import { ArrowUpRight, Check, Copy, Plus, TriangleAlert, X } from 'lucide-react'
 import type { LeadCard, LeadCardRun, ProofKind } from '../api/types';
 import { useAct } from '../lib/data';
 import { PROOF_NAME, canAlwaysAllow, levelName, placeOf } from '../lib/lead';
-import { leadAsk } from '../lib/leadAsk';
 import { usePrefs } from '../lib/prefs';
 import { typedDir } from '../lib/lang';
 import { Cmd, Written } from './ui';
+import { DecideCard } from './decide/DecideCard';
 
 /**
  * The lead's cards: what it offers to do, each with its level ("On its own", "Needs your OK") and real buttons. A
@@ -45,6 +45,9 @@ export function LeadCardView({ card }: { card: LeadCard }) {
       return <ReportCard card={card} />;
     case 'open_story':
       return <OpenButton card={card} />;
+    // A story that waits for the person: drawn from the board now, with the board's own buttons, only theirs to press.
+    case 'decide':
+      return <DecideCard story={card.story} made={card.key} fromLead />;
     default:
       return <ActionCard card={card} />;
   }
@@ -168,10 +171,10 @@ function DraftCard({ card }: { card: Extract<LeadCard, { kind: 'draft_story' }> 
   );
 }
 
-/** "Open MA-17's proof": the story on the board, at its tab, the same place as the board's own buttons. The ask box closes. */
+/** "Open MA-17's proof": the story on the board, at its tab, the same place as the board's own buttons. */
 export function OpenButton({ card }: { card: Extract<LeadCard, { kind: 'open_story' }> }) {
   const place = placeOf(card.open);
-  const look = { className: 'btn lt-open', title: card.why ?? 'Opens it on the board. Nothing changes.', onClick: () => leadAsk.close() };
+  const look = { className: 'btn lt-open', title: card.why ?? 'Opens it on the board. Nothing changes.' };
   const inner = (
     <>
       <ArrowUpRight size={14} aria-hidden="true" /> {card.label}
@@ -191,7 +194,7 @@ export function OpenButton({ card }: { card: Extract<LeadCard, { kind: 'open_sto
 }
 
 /** A board action, an answer to send, or a setting to save: one press each. */
-function ActionCard({ card }: { card: Exclude<LeadCard, { kind: 'draft_story' | 'engineer_report' | 'open_story' }> }) {
+function ActionCard({ card }: { card: Exclude<LeadCard, { kind: 'draft_story' | 'engineer_report' | 'open_story' | 'decide' }> }) {
   const { press, busy } = usePress(card);
   const [text, setText] = useState(card.kind === 'send_answer' ? card.text : '');
   const always = canAlwaysAllow(card);

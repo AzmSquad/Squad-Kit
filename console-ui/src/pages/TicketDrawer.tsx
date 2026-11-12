@@ -279,7 +279,7 @@ function NowPanel({ t }: { t: Ticket }) {
   }
 }
 
-/** The talk itself lives in the chat panel beside the board, so the board stays in view while you talk. Open the chat is at the top. */
+/** The talk itself lives in its popup over the page, so the board stays in view while you talk. Open the chat is at the top. */
 function ChatOpen({ t }: { t: Ticket }) {
   const who = AGENT_TITLE[t.chat!.with];
   return (
@@ -290,7 +290,7 @@ function ChatOpen({ t }: { t: Ticket }) {
         </span>
         <div>
           <b>Talking it through with the {who}</b>
-          <span>The talk is open in the chat panel beside the board. Its work waits until you press a button there.</span>
+          <span>The talk is open in its popup, at the bottom right. Its work waits until you press a button there.</span>
         </div>
         <span className="grow" />
         <Link to="/conversations" search={{ ticket: t.id }} className="btn sm">

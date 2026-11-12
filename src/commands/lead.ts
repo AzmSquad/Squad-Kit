@@ -61,6 +61,7 @@ export function cardLines(card: LeadCard): string[] {
     : card.kind === 'send_answer' ? `Send to ${card.story}: "${card.text}"`
     : card.kind === 'settings_change' ? `Save ${card.setting} = ${card.value}`
     : card.kind === 'open_story' ? card.label
+    : card.kind === 'decide' ? `${card.story} waits for you: only you decide it (${card.label})`
     : 'Prepare a report for an engineer';
   const lines = [`  ${kleur.bold(what)}  ${grey(level)}`];
   if (card.why) lines.push(`    ${card.why}`);

@@ -4,11 +4,12 @@ import { ArrowLeft, ChevronLeft, Moon, Search, Sun } from 'lucide-react';
 import type { ChatSummary, Ticket } from '../api/types';
 import { useBoard, useTicket } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
-import { PHONE, chatDock, useChatDock, useMedia } from '../lib/chatDock';
+import { PHONE, popups, useMedia, usePopups } from '../lib/popups';
 import { detect, textClass, typedDir } from '../lib/lang';
 import { AGENT_TITLE, Avatar, ChatView, stageLine } from '../components/Chat';
 import { ChatFiles, DocPane, type OpenDoc } from '../components/ChatFiles';
-import { NewTalk, unreadOf, useChats } from '../components/ChatDock';
+import { NewTalk } from '../components/popups/NewTalk';
+import { unreadOf, useChats } from '../lib/chats';
 import { ROLE_NAME, Runs, clock, dateShort } from '../components/ui';
 
 /**
@@ -30,7 +31,7 @@ export function ConversationsPage() {
     void navigate({ search: { ticket: x } });
   };
   const toPanel = (x: string) => {
-    chatDock.show(x);
+    popups.open(x);
     void navigate({ to: '/board' });
   };
 
@@ -93,7 +94,7 @@ function preview(s: ChatSummary): { text: string; dir: 'rtl' | 'ltr'; cls: strin
 }
 
 function ChatList({ list, id, pick, searching }: { list: ChatSummary[]; id?: string; pick(x: string): void; searching: boolean }) {
-  const dock = useChatDock();
+  const dock = usePopups();
   const groups: [string, ChatSummary[]][] = [
     ['Waiting for you', list.filter((s) => s.open && s.yourTurn)],
     ['Talking now', list.filter((s) => s.open && !s.yourTurn)],
@@ -269,7 +270,7 @@ function SpecDraft({ t }: { t: Ticket }) {
 
 function PhoneChats({ id, all, pick, doc, setDoc }: { id?: string; all: ChatSummary[]; pick(x: string): void; doc: OpenDoc | null; setDoc(d: OpenDoc | null): void }) {
   const t = useTicket(id).data;
-  const dock = useChatDock();
+  const dock = usePopups();
   const navigate = useNavigate();
   const { theme, toggleTheme } = usePrefs();
   const c = t?.chat;
