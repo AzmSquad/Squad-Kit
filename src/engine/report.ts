@@ -208,7 +208,7 @@ const ENV_FILE = /^\.env(?!\.(?:example|sample|template|dist)$)(\.[\w.-]+)?$/i;
  * Every project's own local files on this computer: its .env files, and the files it keeps here. The log in a report
  * holds lines from all the projects, so all of them count.
  */
-function projectLocalFiles(bp: BoardPaths | undefined): string[] {
+export function projectLocalFiles(bp: BoardPaths | undefined): string[] {
   const places = [...(bp ? [bp] : []), ...readProjects().map((p) => boardPaths(path.join(p.root, '.squad')))];
   return places.flatMap((place) => {
     let meta: ReturnType<typeof readMeta> | null = null;

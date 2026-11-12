@@ -1,4 +1,3 @@
-import { parseChoice } from '../../engine/tools/which-phone.js';
 import fs from 'node:fs';
 import { createHmac, randomBytes } from 'node:crypto';
 import path from 'node:path';
@@ -75,14 +74,14 @@ import type { ProjectCommands, Release } from '../../board/types.js';
 import { aiTool, guessTracker, speechModule, trackerFor, trackerModule, TRACKERS } from '../../modules/registry.js';
 import type { Tracker } from '../../modules/tracker/types.js';
 import { findNestedRepos } from '../../engine/repos.js';
-import { git, isRepo, remotes } from '../../engine/git.js';
+import { git } from '../../engine/git.js';
 import { allowedFile, chatSummaries, dispositionOf, mimeOf, readConversation, ticketConversations, ticketFolders } from '../../engine/conversations.js';
 import { buildStamp } from '../../board/console-info.js';
 import { timingSafeEqualHex } from '../auth.js';
 import type { NewTicketInput, UploadedFile } from '../../board/actions.js';
 import { cancelDraft, currentDraft, dismissDraft, draftFiles, draftJob, startDraft } from '../../engine/draft.js';
 import { AGENTS, STEPS, ensureAgents, levelSteps, readAgent, roleForPhase, writeAgent, type AgentRole, type AgentTool } from '../../engine/agents.js';
-import { builderLevel, effortOn, parseEffort, parseLevel, parseQuality, personLevels, resolveLevel, setPersonLevel, standardLevel, toolEfforts, type LevelOverrides } from '../../engine/levels.js';
+import { builderLevel, effortOn, parseEffort, parseLevel, personLevels, resolveLevel, setPersonLevel, standardLevel, toolEfforts, type LevelOverrides } from '../../engine/levels.js';
 import { MODEL_LEVELS } from '../../modules/ai-tool/types.js';
 import { loadConfig } from '../../core/config.js';
 import { installedEditors, openInEditor, ticketChanges } from '../../engine/changes.js';
@@ -96,10 +95,11 @@ import { liveNow } from '../../board/now.js';
 import { readUsual, type UsualBook } from '../../board/usual.js';
 import { answerAsk } from '../../board/ask.js';
 import { withProblem } from '../../board/problem.js';
-import { DEFAULT_NETWORK, PACKAGE_HOSTS, blockedSites, guardNote, hostsProblem, networkPolicy, parseHosts, parseNetwork, sandboxStatus } from '../../engine/sandbox.js';
-import { guardSupport, sharedPath } from '../../engine/project-guard.js';
+import { DEFAULT_NETWORK, PACKAGE_HOSTS, blockedSites, guardNote, networkPolicy, parseNetwork, sandboxStatus } from '../../engine/sandbox.js';
+import { guardSupport } from '../../engine/project-guard.js';
 import { windowStartNote } from '../../engine/checks.js';
 import { mountCostApi } from './cost.js';
+import { saveSettings, type SettingsInput } from '../../board/settings.js';
 import { freePortAndRetry } from '../../engine/free-port.js';
 import { changeDecided } from '../../board/auto.js';
 import { lookAgain } from '../../engine/try-app.js';
@@ -133,18 +133,6 @@ function mockupFile(bp: ReturnType<typeof boardPaths>, id: string, asked: string
 
 function withNotes(bp: ReturnType<typeof boardPaths>, r: Release): Release {
   return r.status === 'draft' && !r.notes.trim() ? { ...r, notes: composeNotes(bp, r) } : r;
-}
-
-/**
- * A branch or remote that does not exist would only show much later, as a story or a release that fails. An engineer
- * sets these, so the words are an engineer's. A folder that is not in git yet, or has no commits, has nothing to check.
- */
-function checkWhereCodeGoes(dir: string, base: string, remote: string): void {
-  if (!isRepo(dir)) return;
-  const remotesHere = remotes(dir);
-  if (remote && !remotesHere.includes(remote)) throw new Error(`There is no remote called "${remote}" here. ${remotesHere.length ? `It has: ${remotesHere.join(', ')}.` : 'It has none yet.'} Nothing was saved.`);
-  const branches = git(dir, ['for-each-ref', '--format=%(refname:short)', 'refs/heads', ...(remote ? [`refs/remotes/${remote}`] : [])], { allowFail: true }).split('\n').map((b) => b.replace(`${remote}/`, '')).filter((b) => b && b !== 'HEAD' && b !== remote);
-  if (branches.length && !branches.includes(base)) throw new Error(`There is no branch called "${base}" here. It has: ${[...new Set(branches)].slice(0, 8).join(', ')}. Nothing was saved.`);
 }
 
 async function body<T>(c: Context): Promise<T> {
@@ -724,88 +712,8 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
   });
 
   app.put('/api/v1/settings', async (c) => {
-    const b = await body<{
-      commands?: ProjectCommands;
-      git?: { base?: string; remote?: string };
-      parallel?: number;
-      atOnce?: number | null;
-      delivery?: 'pr' | 'push' | null;
-      runner?: 'acp' | 'direct';
-      documentsInGit?: boolean;
-      alwaysNewTests?: boolean;
-      phone?: string;
-      quality?: string;
-      allowedHosts?: string[];
-      network?: string;
-      guard?: { allowRead?: string[]; allowWrite?: string[] };
-      repos?: { path: string; base?: string; remote?: string; commands?: ProjectCommands }[];
-    }>(c);
-    return act(c, () => {
-      const meta = readMeta(bp);
-      if (b.allowedHosts !== undefined) {
-        const parsed = parseHosts(Array.isArray(b.allowedHosts) ? b.allowedHosts : []);
-        const problem = hostsProblem(parsed);
-        if (problem) throw new Error(problem);
-        meta.allowedHosts = parsed.hosts;
-      }
-      if (b.network !== undefined) {
-        const level = parseNetwork(b.network);
-        if (!level) throw new Error(`"${b.network}" is not a network level. Use standard, strict or off.`);
-        meta.network = level;
-      }
-      if (b.guard !== undefined) {
-        const clean = (list: unknown): string[] => [...new Set((Array.isArray(list) ? list : []).map((p) => String(p).trim()).filter(Boolean).map((p) => sharedPath(p)))];
-        const read = clean(b.guard.allowRead);
-        const write = clean(b.guard.allowWrite);
-        meta.guard = read.length || write.length ? { ...(read.length ? { allowRead: read } : {}), ...(write.length ? { allowWrite: write } : {}) } : undefined;
-      }
-      if (b.quality !== undefined) {
-        const q = parseQuality(b.quality);
-        if (!q) throw new Error(`"${b.quality}" is not a Quality setting. Use best, balanced or thrifty.`);
-        meta.quality = q;
-      }
-      if (b.commands) {
-        meta.commands = Object.fromEntries(
-          Object.entries(b.commands).map(([k, v]) => [k, String(v ?? '').trim()]).filter(([, v]) => v),
-        ) as ProjectCommands;
-      }
-      if (b.git) {
-        const next = { base: b.git.base?.trim() || meta.git?.base || 'main', remote: b.git.remote?.trim() ?? meta.git?.remote ?? '' };
-        checkWhereCodeGoes(root, next.base, next.remote);
-        meta.git = next;
-      }
-      if (typeof b.parallel === 'number' && b.parallel >= 1 && b.parallel <= 5) meta.parallel = Math.round(b.parallel);
-      if (b.delivery === null) delete meta.delivery;
-      else if (b.delivery === 'pr' || b.delivery === 'push') meta.delivery = b.delivery;
-      if (b.atOnce === null) delete meta.atOnce;
-      else if (typeof b.atOnce === 'number' && b.atOnce >= 1 && b.atOnce <= 5) meta.atOnce = Math.round(b.atOnce);
-      if (b.runner === 'acp' || b.runner === 'direct') meta.runner = b.runner;
-      if (typeof b.documentsInGit === 'boolean') meta.documentsInGit = b.documentsInGit;
-      // Left out when off, so a project that never chose has nothing new in its settings file.
-      if (b.alwaysNewTests === true) meta.alwaysNewTests = true;
-      else if (b.alwaysNewTests === false) delete meta.alwaysNewTests;
-      // The phone an app for both phones uses: left out when automatic, like a project that never chose.
-      if (b.phone !== undefined) {
-        const choice = parseChoice(b.phone);
-        if (!choice) throw new Error(`"${b.phone}" is not a phone here. Use iphone, android or auto.`);
-        if (choice === 'auto') delete meta.phone;
-        else meta.phone = choice;
-      }
-      if (b.repos && meta.repos) {
-        meta.repos = meta.repos.map((r) => {
-          const u = b.repos!.find((x) => x.path === r.path);
-          if (!u) return r;
-          const commands = Object.fromEntries(
-            Object.entries(u.commands ?? r.commands).map(([k, v]) => [k, String(v ?? '').trim()]).filter(([, v]) => v),
-          ) as ProjectCommands;
-          const next = { base: u.base?.trim() || r.base, remote: u.remote?.trim() ?? r.remote };
-          checkWhereCodeGoes(path.join(root, r.path), next.base, next.remote);
-          return { ...r, ...next, commands };
-        });
-      }
-      writeMeta(bp, meta);
-      return meta;
-    });
+    const b = await body<SettingsInput>(c);
+    return act(c, () => saveSettings(bp, b));
   });
 
   // What the product is made of. An engineer corrects it here; the Architect found it when it read the project.

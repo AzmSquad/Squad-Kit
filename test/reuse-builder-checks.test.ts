@@ -458,8 +458,8 @@ describe.skipIf(process.platform === 'win32')('a story with several parts', () =
 });
 
 describe.skipIf(process.platform === 'win32')('one test file on its own', () => {
-  /** A stand-in for Playwright: all the tests with no file, one test with one. Each run notes itself in runs.txt. */
-  const PLAYWRIGHT = '#!/bin/sh\nif [ "$#" -le 1 ]; then echo test >> runs.txt; echo "  3 passed (1.0s)"; else echo one-file >> runs.txt; echo "  1 passed (0.3s)"; fi\n';
+  /** A stand-in for Playwright: all the tests with no file, one test with one, which fails when its name says so. Each run notes itself in runs.txt. */
+  const PLAYWRIGHT = '#!/bin/sh\nif [ "$#" -le 1 ]; then echo test >> runs.txt; echo "  3 passed (1.0s)"; else echo one-file >> runs.txt; case "$*" in *broken*) echo "  1 failed (0.3s)"; exit 1;; esac; echo "  1 passed (0.3s)"; fi\n';
   let putBack = () => {};
   beforeEach(() => {
     putBack = quickNpx(path.join(tmp, 'npx'));
@@ -473,9 +473,10 @@ describe.skipIf(process.platform === 'win32')('one test file on its own', () => 
     fs.writeFileSync(path.join(copy, 'node_modules', '.bin', 'playwright'), PLAYWRIGHT, { mode: 0o755 });
     fs.mkdirSync(path.join(copy, 'tests', 'e2e'), { recursive: true });
     fs.writeFileSync(path.join(copy, 'tests', 'e2e', 'rooms.spec.ts'), '// the rooms\n');
+    fs.writeFileSync(path.join(copy, 'tests', 'e2e', 'broken.spec.ts'), '// fails\n');
   };
 
-  it('never counts for the tests, and as the latest run of them, an earlier run of all of them no longer counts', async () => {
+  it('never counts for the tests on its own, and an earlier run of all of them on the same code still stands', async () => {
     const a = story();
     install(a.copy);
     const s = squad();
@@ -486,10 +487,42 @@ describe.skipIf(process.platform === 'win32')('one test file on its own', () => 
     });
     await s.runBuilder(a.id, 'Build it', true, 'build');
     await s.checks(a.id);
-    // All the tests run again; the code check, from the first run, does not.
+    // Nothing runs again: the file added nothing to the whole run on this same code.
+    expect(runs(a.copy)).toEqual(['test', 'lint', 'one-file']);
+    expect(lines(a.id)).toContain(REUSED);
+    expect(get(a.id).gates).toMatchObject({ checks: 'pass' });
+    expect(get(a.id).history?.filter((x) => x.step === 'checks').pop()?.builderRun).toEqual({ checks: ['test', 'lint'], all: true });
+  });
+
+  it('a test file that fails after a whole run: that run no longer counts, and all the tests run again', async () => {
+    const a = story();
+    install(a.copy);
+    const s = squad();
+    builder(async (copy, call) => {
+      edit(copy);
+      await call({});
+      expect(await call({ only: 'tests/e2e/broken.spec.ts' })).toContain('1 failed');
+    });
+    await s.runBuilder(a.id, 'Build it', true, 'build');
+    await s.checks(a.id);
     expect(runs(a.copy)).toEqual(['test', 'lint', 'one-file', 'test']);
     expect(lines(a.id)).toContain(LINT_REUSED);
-    expect(get(a.id).gates).toMatchObject({ checks: 'pass' });
     expect(get(a.id).history?.filter((x) => x.step === 'checks').pop()?.builderRun).toEqual({ checks: ['lint'] });
+  });
+
+  it('a test file after an edit: the earlier whole run does not count, as the code changed', async () => {
+    const a = story();
+    install(a.copy);
+    const s = squad();
+    builder(async (copy, call) => {
+      edit(copy);
+      await call({});
+      edit(copy, 'four rooms\n');
+      expect(await call({ only: 'tests/e2e/rooms.spec.ts' })).toContain('1 passed');
+    });
+    await s.runBuilder(a.id, 'Build it', true, 'build');
+    await s.checks(a.id);
+    expect(runs(a.copy)).toEqual(['test', 'lint', 'one-file', 'test', 'lint']);
+    expect(lines(a.id)).not.toContain(REUSED);
   });
 });

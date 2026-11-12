@@ -4,6 +4,7 @@ import { appNews, findApp, withAppCommands } from '../../board/apps.js';
 import { boardExists, boardPaths, listTickets, readMeta, writeMeta } from '../../board/store.js';
 import { AppError, appRunner, type AppStatus, type StartOptions } from '../../engine/run-app.js';
 import { act } from './act.js';
+import { signInNote } from '../../engine/lead/notes.js';
 
 /**
  * Your apps, in the sidebar: Start, Open, Restart and Stop for each app of the project, each one call. Terminal:
@@ -28,8 +29,11 @@ export function mountAppsApi(app: Hono, opts: { paths: SquadPaths }): void {
   const runner = () => appRunner(bp);
   const name = (c: Context) => decodeURIComponent(c.req.param('name') ?? '');
 
-  /** The app's status with what its code holds, and the new version a merge brought. */
-  const withNews = (s: AppStatus) => ({ ...s, ...appNews(readMeta(bp), listTickets(bp), s, runner().notNowOf(s.repo)) });
+  /** The app's status with what its code holds, the new version a merge brought, and how to sign in, once the Squad lead learned it. */
+  const withNews = (s: AppStatus) => {
+    const signIn = signInNote(bp);
+    return { ...s, ...appNews(readMeta(bp), listTickets(bp), s, runner().notNowOf(s.repo)), ...(signIn ? { signIn } : {}) };
+  };
 
   app.get('/api/v1/apps', async (c) => {
     if (!boardExists(bp)) return c.json({ apps: [] });

@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { Check, Lock, ShieldAlert, ShieldCheck, Terminal, X } from 'lucide-react';
 import { api, send } from '../api/client';
-import type { AgentInfo, CorePrompts, Effort, HarnessRow, HarnessStage, HarnessView, LevelChoice, LevelRow, ModelLevel, Quality, Track } from '../api/types';
+import type { AgentInfo, CorePrompts, Effort, HarnessLead, HarnessRow, HarnessStage, HarnessView, LevelChoice, LevelRow, ModelLevel, Quality, Track } from '../api/types';
 import { useAct, useAppSettings, useBoard } from '../lib/data';
 import { QualityMetrics, SquadUsage } from '../components/Usage';
 import { AllowedHosts, NetworkSetting, SandboxRows, useSandbox } from '../components/Sandbox';
@@ -513,6 +513,7 @@ function AgentsTab({ view }: { view: HarnessView }) {
         ))}
       </div>
       {a && <AgentPanel a={a} view={view} edit={() => setEditing(a)} />}
+      <LeadPanel lead={view.lead} />
       <SquadUsage />
       <h2 className="hn-gap">Your AI tools</h2>
       <p className="note" style={{ marginTop: 2 }}>squad-kit uses the logins you already have. Nothing new to buy.</p>
@@ -586,6 +587,43 @@ function AgentPanel({ a, view, edit }: { a: AgentInfo; view: HarnessView; edit: 
             </details>
           ))}
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** The Squad lead, read only: what it reads, its three levels, what runs without asking, and its limits. */
+function LeadPanel({ lead }: { lead: HarnessLead }) {
+  const on = lead.always.can.filter((c) => lead.always.on.includes(c.id)).map((c) => c.name);
+  return (
+    <div className="hn-two even hn-gap">
+      <div>
+        <h2 className="hn-title">The Squad lead</h2>
+        <p className="note">One contact for the whole project. It answers, drafts and passes work on; you press the button.</p>
+        {lead.levels.map((l) => (
+          <Fragment key={l.level}>
+            <h3 className="hn-sub">{l.name}</h3>
+            <p className="note">{l.words}</p>
+            <ul className="hn-can">
+              {l.items.map((i) => (
+                <li key={i} className={l.level === 3 ? 'no' : ''}>{l.level === 3 ? <X size={16} aria-label="Never" /> : <Check size={16} aria-label="Yes" />}{i}</li>
+              ))}
+            </ul>
+          </Fragment>
+        ))}
+      </div>
+      <div>
+        <h3 className="hn-sub">How it runs</h3>
+        <p className="note">{lead.model}</p>
+        {lead.limits.map((l) => <div className="maprow" key={l.name}><b>{l.name}</b><span className="note">{l.n}. {l.what}</span></div>)}
+        <h3 className="hn-sub">Without asking</h3>
+        <p className="note">{lead.always.words}</p>
+        <div className="maprow"><b>Always allow</b><span className="note">{on.length ? on.join(', ') : 'Nothing yet'}</span></div>
+        <Link className="btn sm hn-edit" to="/lead">Change it on the Squad lead page</Link>
+        <h3 className="hn-sub">What it may read</h3>
+        <ul className="hn-can">
+          {lead.reads.map((r) => <li key={r}><Check size={16} aria-label="Yes" />{r}</li>)}
+        </ul>
       </div>
     </div>
   );

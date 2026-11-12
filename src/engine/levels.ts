@@ -48,6 +48,8 @@ const THRIFTY: Record<string, Record<string, LevelChoice>> = {
   reviewer: { review: strong('medium'), chat: strong('medium') },
   // The proof judges each "done when" from its picture, so a picture badly framed costs more than a stronger model.
   tester: { proof: balanced('medium'), chat: fast('low') },
+  // The Squad lead answers questions about the whole project: it reads and looks, so the balanced level is enough.
+  lead: { ask: balanced('medium') },
 };
 
 /** Best: the strongest model builds and reviews, at high effort. */
@@ -73,7 +75,10 @@ export interface StepCaps {
   spendUsd: number;
 }
 
-/** Best's caps, by role and by role and step ("builder.fix"); "chat" is any role talking a ticket through. */
+/**
+ * Best's caps, by role and by role and step ("builder.fix"); "chat" is any role talking a ticket through, and "lead" is
+ * one question to the Squad lead.
+ */
 const BEST_CAPS: Record<string, StepCaps> = {
   analyst: { turns: 80, spendUsd: 15 },
   architect: { turns: 120, spendUsd: 20 },
@@ -82,6 +87,7 @@ const BEST_CAPS: Record<string, StepCaps> = {
   reviewer: { turns: 120, spendUsd: 20 },
   tester: { turns: 80, spendUsd: 10 },
   chat: { turns: 40, spendUsd: 8 },
+  lead: { turns: 60, spendUsd: 3 },
 };
 
 /** The same caps with fewer turns and less spend, for the cheaper settings. */

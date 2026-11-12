@@ -7,6 +7,7 @@ import { isCompose } from './compose-run.js';
 import { kindOfAddress, normalHost, readAddress } from './db/address.js';
 import type { DbKind } from './db/types.js';
 import { ownDbWired } from './db-env.js';
+import { envFilesIn } from './env-file.js';
 import { kindOf } from './find-database.js';
 
 /**
@@ -472,9 +473,10 @@ function envFilesOf(doc: ComposeDoc, s: Record<string, unknown>): string[] {
 }
 
 /**
- * The app's settings, as a folder has them: the env files compose gives its services and the folder's own (`.env`,
- * `.env.dev`), the compose services' own environment, .NET's appsettings and Spring's application.properties. Files for
- * other places (prod, beta, staging) are left out. When two say the same name, the first wins, in that order.
+ * The app's settings, as a folder has them: the part's own env file (env-file.ts), the env files compose gives its
+ * services and the folder's own (`.env`, `.env.dev`), the compose services' own environment, .NET's appsettings and
+ * Spring's application.properties. Files for other places (prod, beta, staging) are left out. When two say the same
+ * name, the first wins, in that order.
  */
 export function settingsIn(dir: string): Setting[] {
   const files = filesOf(dir);
@@ -485,7 +487,7 @@ export function settingsIn(dir: string): Setting[] {
     if (v && !out.some((s) => s.name === name)) out.push({ name, value: v, file, key, form });
   };
   const services = docs.flatMap((d) => Object.values(d.services).map((s) => ({ doc: d, s: (s ?? {}) as Record<string, unknown> })));
-  const envFiles = [...new Set([...services.flatMap(({ doc, s }) => envFilesOf(doc, s)), ...files.env])];
+  const envFiles = [...new Set([...envFilesIn(dir), ...services.flatMap(({ doc, s }) => envFilesOf(doc, s)), ...files.env])];
   for (const f of envFiles) for (const [k, v] of envPairs(read(path.join(dir, f)))) add(k, v, f, k, 'env');
   for (const { doc, s } of services) {
     const env = s.environment;
@@ -528,9 +530,11 @@ function envHere(cwd: string, command: string, log?: (text: string) => void): Re
   const services = composeServices(cwd);
   if (!services.length) return {};
   const own = ownDbWired(cwd);
+  // The part's env file gives its own, swapped, with only the names in the log (part-env.ts).
+  const partFiles = new Set(envFilesIn(cwd, true));
   const out: Record<string, string> = {};
   for (const s of appSettings(cwd)) {
-    if (own && s.kind !== 'redis') continue;
+    if ((own && s.kind !== 'redis') || partFiles.has(s.file)) continue;
     const swapped = swapServiceHost(s.value, services, s.kind === 'redis');
     if (!swapped) continue;
     out[s.name] = swapped;

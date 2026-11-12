@@ -7,6 +7,7 @@ import type { DatabaseSetting, ProjectDatabase } from '../board/types.js';
 import { dbAdapter, readTemplate } from './db/index.js';
 import { DbError, type DbAdapter, type DbKind, type DbTemplate, type TemplateInfo } from './db/types.js';
 import { unwireCopy, wireCopy, type CopyWiring, type SettingForm } from './db-env.js';
+import { repoEnvFiles } from './env-file.js';
 import { findDatabase, hasPassword, kindOf, readAddress, storyCopyIgnored, withoutPassword } from './find-database.js';
 import { forgetDbMade, git, markDbMade } from './git.js';
 import { reposOf } from './repos.js';
@@ -491,7 +492,8 @@ export async function setUpStoryDb(bp: BoardPaths, story: string, dir: string, r
 function fellBack(bp: BoardPaths, story: string, dir: string, repo: string): StoryDbResult | null {
   const db = readMeta(bp).database;
   if (!db || db.repo !== repo || db.kind === 'sqlite') return null;
-  const missing = [db.setting.file, ...(db.from ?? [])].find((f): f is string => Boolean(f) && fs.existsSync(path.join(bp.root, repo, f!)) && !fs.existsSync(path.join(dir, f!)));
+  // The part's env file too (env-file.ts): without it, the app reads its settings file.
+  const missing = [db.setting.file, ...(db.from ?? []), ...repoEnvFiles(readMeta(bp), repo)].find((f): f is string => Boolean(f) && fs.existsSync(path.join(bp.root, repo, f!)) && !fs.existsSync(path.join(dir, f!)));
   const got = missing ? settingsFileAddress(dir, db.setting) : undefined;
   if (!missing || !got) return null;
   const place = placeOf(bp, db, got.value);
@@ -708,8 +710,12 @@ async function dropDatabase(bp: BoardPaths, story: string): Promise<boolean> {
   }
 }
 
-/** True when a story no longer needs its own database: it is merged, released, archived or gone. */
+/**
+ * True when a story no longer needs its own database: it is merged, released, archived or gone. The Squad lead's own
+ * copy is no story: its database stays for its next look at the app (engine/lead/own-app.ts).
+ */
 function doneWith(bp: BoardPaths, story: string): boolean {
+  if (story === 'lead') return false;
   let t;
   try {
     t = readTicket(bp, story);

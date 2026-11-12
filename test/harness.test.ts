@@ -27,7 +27,7 @@ const read = (file: string) => fs.readFileSync(path.join(ROOT, file), 'utf8');
 
 /** Every source file of the engine and the board. A demo board's files only play a recording back. */
 function sources(): { file: string; text: string }[] {
-  return ['src/engine', 'src/board'].flatMap((dir) =>
+  return ['src/engine', 'src/engine/lead', 'src/board'].flatMap((dir) =>
     fs
       .readdirSync(path.join(ROOT, dir))
       .filter((f) => f.endsWith('.ts') && !f.startsWith('demo') && !f.startsWith('harness'))
@@ -134,6 +134,12 @@ const EXCUSED: Record<string, string> = {
   'requirements-tracker.ts:DEMO_WRITE_MS': "Only the demo board's pretend tracker.",
   'merged-outside.ts:FIRST_LOOK_MS': 'How soon after the board opens it first looks for merges on the code host. Nothing waits for it.',
   'story-db.ts:TIDY_MS': "How often the databases of merged, released or deleted stories are dropped, beside everything else. Nothing waits for it.",
+  // What the Squad lead reads in one call, not what it may do.
+  'story.ts:MAX_ACTIVITY': 'How many activity lines of a story the Squad lead reads in one call.',
+  'story.ts:MAX_LOG_LINES': "How many of squad-kit's log lines about a story the Squad lead reads in one call.",
+  'story.ts:LOG_DAYS_MS': 'How far back the Squad lead reads the log for a story.',
+  'guide.ts:MAX_GUIDE_CHARS': "How much of one page of squad-kit's guide the Squad lead reads in one call.",
+  'limits.ts:MAX_LEAD_SOURCES': 'How many sources one answer of the Squad lead keeps. It stops nothing.',
 };
 
 /** Rules with no name a scan could find, and why they have no row. Each must still be in the code it names. */
@@ -372,6 +378,39 @@ describe("Flutter's own version stamps", () => {
     for (const f of FLUTTER_STAMPS) expect(d[f.file]).toBe(f.why);
     expect(d['In the code']).toBe('src/engine/flutter-sdk.ts');
     expect(FLUTTER_STAMPS.map((f) => f.file)).toEqual(['bin/cache/engine.stamp', 'bin/cache/engine.stamp.tmp.<number>', 'bin/cache/engine.realm']);
+  });
+});
+
+describe('the Squad lead', () => {
+  it('shows what it may read, its three levels, Always allow and its limits, from the engine itself', async () => {
+    const { NEVER, NEVER_MORE, ALLOWABLE, ON_ITS_OWN, AFTER_YOUR_OK } = await import('../src/engine/lead/can.js');
+    const { LEAD_ANSWER_MS, MAX_LEAD_DAY_USD } = await import('../src/engine/lead/limits.js');
+    const lead = view.lead;
+    expect(rows.find((r) => r.id === 'lead')).toMatchObject({ name: 'The Squad lead changes nothing on its own' });
+    expect(lead.reads.length).toBeGreaterThanOrEqual(6);
+    expect(lead.reads.join(' ')).toMatch(/own copy of main with its own database/);
+    expect(lead.levels.map((l) => l.name)).toEqual(['On its own', 'After your OK', 'Never']);
+    expect(lead.levels[0]!.items).toEqual(ON_ITS_OWN);
+    expect(lead.levels[1]!.items).toEqual(AFTER_YOUR_OK);
+    expect(lead.levels[2]!.items).toEqual([...Object.values(NEVER).map((n) => n.name), ...NEVER_MORE]);
+    expect(lead.always.can.map((a) => a.id)).toEqual(ALLOWABLE);
+    expect(ALLOWABLE).toEqual(['more_time', 'pictures_again', 'start_app', 'morning_brief']);
+    const n = (id: string) => view.limits.find((l) => l.id === id)?.n;
+    expect(n('LEAD_ANSWER_MS')).toBe(`${LEAD_ANSWER_MS / 60_000} min`);
+    expect(n('MAX_LEAD_DAY_USD')).toBe(`$${MAX_LEAD_DAY_USD}`);
+    expect(view.caps.find((c) => c.key === 'lead')).toMatchObject(QUALITY_PRESETS.best.caps.lead!);
+    expect(lead.limits.map((l) => l.n)).toEqual([`$${QUALITY_PRESETS.best.caps.lead!.spendUsd} or ${QUALITY_PRESETS.best.caps.lead!.turns} turns`, `$${MAX_LEAD_DAY_USD}`, `${LEAD_ANSWER_MS / 60_000} min`]);
+    const words = [...lead.reads, ...lead.levels.flatMap((l) => [l.words, ...l.items]), lead.always.words, ...lead.limits.flatMap((l) => [l.name, l.what])];
+    expect(words.filter((w) => !isPlain(w.replace(/\.env|\bAPI\b/g, '')))).toEqual([]);
+  });
+
+  it('runs read only, as the page says', async () => {
+    const { LEAD_PERMISSIONS } = await import('../src/engine/lead/ask.js');
+    expect([...LEAD_PERMISSIONS]).toEqual(['read', 'git-read']);
+    const ask = read('src/engine/lead/ask.ts');
+    expect(ask).toContain('permissions: [...LEAD_PERMISSIONS]');
+    expect(ask).not.toMatch(/permissions: \[[^\]]*'(edit|run)'/);
+    expect(rows.find((r) => r.id === 'lead')!.d).toContainEqual(['Runs as', 'Read only and git read: it never edits, runs the project or commits']);
   });
 });
 

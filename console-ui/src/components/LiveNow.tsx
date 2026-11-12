@@ -8,6 +8,7 @@ import { detect } from '../lib/lang';
 import { Cmd, Glyph, Modal, ROLE_NAME, Runs, Written, clock } from './ui';
 import { ProposeChange } from './ChangeCard';
 import { TalkButton } from './Chat';
+import { AskLeadAbout } from './LeadAsk';
 import '../styles/now.css';
 import { useDraft } from '../lib/drafts';
 
@@ -181,6 +182,7 @@ export function SlowPanel({ t }: { t: Ticket }) {
           <button className="btn" disabled={busy} onClick={stop}>
             <Square size={12} /> Stop
           </button>
+          <AskLeadAbout t={t} problem={stuck ? 'stuck' : 'slow'} />
         </div>
         {stuck && s.canEnd && <p className="note slownote">Ending the command gives the squad an error back, and it carries on in the same conversation.</p>}
         {s.detail && (

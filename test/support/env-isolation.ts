@@ -1,11 +1,12 @@
-import { beforeEach, afterEach } from 'vitest';
+import { afterAll, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 // squad-kit keeps each project's local files in ~/.squad-kit (ADR-001). Tests use a temp folder instead, never the
 // developer's own.
-process.env.SQUAD_KIT_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-home-'));
+const home = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-home-'));
+process.env.SQUAD_KIT_HOME = home;
 // squad-kit never gets its own tools (Maestro, Java) from the internet by itself in a test: a test that wants it gives a
 // made-up source (engine/phone/plan.ts useGetSource).
 process.env.SQUAD_KIT_NO_AUTO_GET = '1';
@@ -15,10 +16,22 @@ fs.writeFileSync(path.join(process.env.SQUAD_KIT_HOME, 'settings.yaml'), 'checkF
 // The same git settings on every machine: a laptop's own name or branch default never leaks into a test, and a CI
 // runner with none set behaves like a laptop.
 // Beside squad-kit's folder, not in it: a commit runs in the project's guard, which hides that folder from git too.
-const gitConfig = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'squad-gitconfig-')), 'gitconfig');
+const gitDir = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-gitconfig-'));
+const gitConfig = path.join(gitDir, 'gitconfig');
 fs.writeFileSync(gitConfig, '[user]\n\tname = Momen\n\temail = momen@example.com\n[init]\n\tdefaultBranch = main\n');
 process.env.GIT_CONFIG_GLOBAL = gitConfig;
 process.env.GIT_CONFIG_NOSYSTEM = '1';
+
+// Both go when the file's tests end: a full run makes one of each per test file, and a home can grow past a gigabyte.
+afterAll(() => {
+  for (const dir of [home, gitDir]) {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
+    } catch {
+      // A program a test left running may still hold a file: the system clears its temp folder later.
+    }
+  }
+});
 
 // A test never touches the person's clipboard: these stand-ins come first on the PATH, and only say what they were given.
 const standIns = path.join(process.env.SQUAD_KIT_HOME, 'stand-in-bin');

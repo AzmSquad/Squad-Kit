@@ -95,9 +95,9 @@ describe('what it refuses', () => {
   });
 
   it('a project name of its own, or another folder', () => {
-    expect(why('docker compose -p moj up')).toContain('must not name one');
-    expect(why('docker compose --project-name moj up')).toContain('must not name one');
-    expect(why('docker compose --project-name=moj up')).toContain('must not name one');
+    expect(why('docker compose -p shop up')).toContain('must not name one');
+    expect(why('docker compose --project-name shop up')).toContain('must not name one');
+    expect(why('docker compose --project-name=shop up')).toContain('must not name one');
     expect(why('docker compose --project-directory /etc up')).toContain('run from its own folder');
   });
 

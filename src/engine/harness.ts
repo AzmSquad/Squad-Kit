@@ -17,6 +17,7 @@ import { SEEN_DAYS, WEEK_DAYS, harnessSeen, type Need, type Seen, type StoryLink
 import { DOCKER_WAIT_MS } from './compose-run.js';
 import { guardSupport } from './project-guard.js';
 import { FLUTTER_STAMPS, flutterOnPath } from './flutter-sdk.js';
+import { envFilesOf } from './env-file.js';
 import { reposOf, rulesFiles } from './repos.js';
 import { HOOK_MS, NETWORK_GIT_MS } from './git.js';
 import { DEFAULT_QUALITY, QUALITIES, QUALITY_NOTE, QUALITY_PRESETS } from './levels.js';
@@ -37,6 +38,9 @@ import { TRY_YIELDS_AFTER_MS } from './try-app.js';
 import { RETRY_MS } from './usage-limit.js';
 import { LONG_MS, QUIET_MS } from './watchdog.js';
 import { MAX_API_CALLS, MAX_SHOTS_PER_CALL, MAX_STUCK, MISTAKES_TO_STOP, REFUSALS_TO_STOP, type WindowTool } from './window.js';
+import { ACTIONS, ALLOWABLE, ALWAYS_WORDS, leadCan } from './lead/can.js';
+import { LEAD_ANSWER_MS, MAX_LEAD_CARDS, MAX_LEAD_DAY_USD, MAX_LEAD_PICTURES, MAX_QUESTION_CHARS } from './lead/limits.js';
+import { MAX_LEAD_NOTES } from './lead/notes.js';
 
 /**
  * The Harness page's words: every gate, limit and safety rule the engine keeps, in plain words, with the real values
@@ -134,6 +138,7 @@ function lineStages(): HarnessStage[] {
       g('phone-builds', "squad-kit's own phone builds", "For the pictures, Start and Try it yourself, squad-kit builds the app for its phone itself, outside the guard: Xcode for the iPhone, Gradle or Flutter for Android, in one shared Gradle home of its own. What the build changes in the story's files goes back, so the story's changes stay the Builder's. An Expo app gets its phone folder made for the build, and no commit ever takes it.", 'An app that does not build: a card, and you decide.'),
       g('lane', 'Files no agent can change', "squad-kit's folder, AI instruction files, commit hooks, files an engineer locked. No commit or branch change, and a push is refused.", 'A file goes back, with a line. A moved branch stops the step.'),
       g('local-files', 'Test values, not your own', 'A file marked local gets values kept for stories. No agent can read it.'),
+      g('env-file', "A part's env file", "squad-kit gives the app the story's values from it, then its own database, Redis and the app's address on top."),
       y('new-tests', 'New tests', 'The Builder writes tests for every "done when". On a new story you can turn off Write new tests: your project\'s own checks, the review and the proof still run, and the story says "Built without new tests". An engineer can keep it on for every story.', undefined, { note: { auto: 'Always on: a story from the breakdown writes its tests.' } }),
     ]),
     stage('checks', 'Checks', "squad-kit runs your project's own checks. No agent is asked if they passed.", on(squad('squad-kit')), [
@@ -201,6 +206,7 @@ function alwaysOnRows(): HarnessRow[] {
     a('save-trouble', 'A full disk holds the work', "If squad-kit can't save its files, the project waits and says so on every page.", 'It carries on once saving works.'),
     a('board-lock', 'Your board is locked', "It opens only on your own computer's address, with your link's key.", 'A request from any other website is refused.'),
     a('report', 'Reports leave your secrets out', NEVER),
+    a('lead', 'The Squad lead changes nothing on its own', "It reads and looks: the stories, the code, squad-kit's records and guide, and the app in its own copy with its own database, never yours. Everything else is a card you press, and some things it never does, whoever asks.", "A card it may not offer is refused in squad-kit's own words. Only your own messages count, never what it reads."),
     { id: 'tool-license', name: "A tool maker's license is yours to accept", what: "squad-kit gets Google's Android phone tools only after you read Google's license, in full, and press Accept. It never accepts a license for you.", then: 'Get it waits until you do.', you: true },
     a('phone-tools', "squad-kit's own phone tools", "Get it looks at the free room first (about 20 GB for Android) and says so. A download that gets no new bytes for 2 minutes is stopped and tried once more. An Android SDK of yours is used as it is when it has everything, and never changed.", 'Too little room, or a download that stops twice: a plain line on the Tools page, and nothing half installed. Press Get it again.'),
   ];
@@ -275,11 +281,45 @@ function limitRows(meta?: BoardMeta): HarnessLimit[] {
     row('sizes', (b) => `${b / 1000} KB`)({ MAX_FOLDER_FILE_BYTES }, 'Largest file read in that folder', 'A bigger one is left out.'),
     bytes({ MAX_UPLOAD_BYTES }, 'One file'),
     bytes({ MAX_NOTE_BYTES }, 'One voice or video note'),
+    time({ LEAD_ANSWER_MS }, 'The Squad lead, one answer', 'Looking at the app in its own copy included.'),
+    row('asks', (usd) => `$${usd}`)({ MAX_LEAD_DAY_USD }, 'What the Squad lead may use in a day', 'At API prices. Then it answers again the next day; its notes still answer at once.'),
+    asks({ MAX_LEAD_CARDS }, 'Cards in one answer of the Squad lead'),
+    pics({ MAX_LEAD_PICTURES }, 'Pictures in one answer of the Squad lead', 'Taken in its own copy of the app.'),
+    size({ MAX_LEAD_NOTES }, 'Notes the Squad lead keeps', 'The oldest go first.'),
+    size({ MAX_QUESTION_CHARS }, 'Characters in one question to the Squad lead'),
   ];
 }
 
 /** Each step's most, in the order of the page's table. */
-const HARNESS_CAP_NAME: Record<string, string> = { analyst: 'Analyst', architect: 'Architect', builder: 'Builder', 'builder.fix': 'Builder, fixes', reviewer: 'Reviewer', tester: 'Tester', chat: 'Talking a story through' };
+const HARNESS_CAP_NAME: Record<string, string> = { analyst: 'Analyst', architect: 'Architect', builder: 'Builder', 'builder.fix': 'Builder, fixes', reviewer: 'Reviewer', tester: 'Tester', chat: 'Talking a story through', lead: 'The Squad lead, one question' };
+
+/** What the Squad lead may read and look at: its window (engine/lead/window.ts) and its own read tools. */
+export const LEAD_MAY_READ: string[] = [
+  "The board: every story, where it stands and what happens on it",
+  'Each story: its spec, plan, "done when", activity, the Reviewer\'s notes, its proof and how the Tester went through the app',
+  'The decisions, the requirements, the releases, what the squad used, and the Tools page',
+  "squad-kit's log lines for a story, with secrets taken out",
+  "squad-kit's own guide and the Harness rules",
+  'The code, read only, and its history. Never your keys, sign-ins or .env files',
+  'The app, in its own copy of main with its own database: pictures, pages and your API. Never your app or your real data',
+];
+
+/** The Squad lead on the Harness page: what it may read, its three levels, Always allow, and its limits. */
+function leadRows(meta: BoardMeta | undefined, bp: BoardPaths | undefined) {
+  const caps = QUALITY_PRESETS[meta?.quality ?? DEFAULT_QUALITY].caps.lead!;
+  const always = (meta?.lead?.always ?? []).filter((a) => (ALLOWABLE as string[]).includes(a));
+  return {
+    reads: LEAD_MAY_READ,
+    levels: leadCan().levels,
+    always: { words: ALWAYS_WORDS, can: ALLOWABLE.map((id) => ({ id, name: ACTIONS[id].name })), on: bp ? always : [] },
+    limits: [
+      { name: 'One question', n: `$${caps.spendUsd} or ${caps.turns} turns`, what: 'From the Quality setting, like every step.' },
+      { name: 'One day', n: `$${MAX_LEAD_DAY_USD}`, what: 'At API prices. Its notes and the board still answer at once after it.' },
+      { name: 'One answer', n: `${LEAD_ANSWER_MS / 60_000} min`, what: 'Looking at the app in its own copy included.' },
+    ],
+    model: 'The balanced level by default. A person can change it for themselves, under the name "lead".',
+  };
+}
 
 const HARNESS_PRIVATE_NAME: Record<string, string> = { '.ssh': 'SSH keys', '.aws': 'AWS sign-in', '.gnupg': 'GPG keys', '.config/gh': 'GitHub sign-in', '.azure': 'Azure sign-in', '.kube': 'Kubernetes sign-in', '.docker/config.json': 'Docker sign-in', '.netrc': 'Saved website passwords', '.git-credentials': 'Saved git passwords' };
 
@@ -346,6 +386,7 @@ function rowDetails(meta: BoardMeta | undefined, root: string | undefined): Reco
     guard: code('engine/project-guard.ts', ['On this computer', state(guard.on, guard.why)], ['Network', networkPolicy(level).commands === 'this-computer' ? 'Only this computer (Off)' : 'Open'], ['Also allowed', [...(meta?.guard?.allowRead ?? []), ...(meta?.guard?.allowWrite ?? [])].join(', ') || 'None yet']),
     lane: code('engine/lane.ts', ['Locked here', names(meta?.lockedFiles)]),
     'local-files': code('engine/local-files.ts', ['Local here', names(meta?.localFiles)]),
+    'env-file': code('engine/env-file.ts', ['Here', repos.flatMap((r) => envFilesOf(r.commands).map((f) => `${repos.length > 1 ? `${r.path}: ` : ''}${f}`)).join(', ') || 'None yet'], ['Set in', 'Settings, beside the commands'], ['Order', "The file's values first, then squad-kit's own: a Docker service reached through the port it publishes here, the story's own database and Redis number, and the port it picked"], ['In the log', 'The names only, never a value']),
     'new-tests': code('engine/prompts.ts', ['Here', meta?.alwaysNewTests ? 'Always on: every story writes new tests' : 'Your choice on each new story, on by default'], ['Set in', 'Settings']),
     checks: code('engine/checks.ts', ['Runs', run('test', 'lint', 'build')], ['Limit', `${MAX_CHECK_TRIES} tries, ${min(CHECK_MS)} each, ${min(CHECK_SILENT_MS)} with no output`], ['Decided by', 'The exit code, never an agent'], ['See it in', tab('Developer')]),
     'old-tests': code('engine/old-tests.ts', ['Runs', run('test')], ['Limit', `${MAX_OLD} failed tests, each up to ${MAX_RUNS_ON_MAIN} times, ${min(ON_MAIN_MS)} in all`], ['Reads', 'Playwright, Vitest, Jest, pytest and go test'], ['See it in', 'The proof page and the Releases page']),
@@ -394,6 +435,7 @@ function rowDetails(meta: BoardMeta | undefined, root: string | undefined): Reco
     'save-trouble': code('engine/save-trouble.ts'),
     'board-lock': code('console/auth.ts'),
     report: code('engine/report.ts'),
+    lead: code('engine/lead/ask.ts', ['Runs as', 'Read only and git read: it never edits, runs the project or commits'], ['Always allow here', (meta?.lead?.always ?? []).map((a) => ACTIONS[a]?.name ?? a).join(', ') || 'Nothing yet'], ['Its notes', "squad-kit's own folder on this computer, never your repo"], ['Refusals', 'engine/lead/can.ts']),
   };
 }
 
@@ -467,6 +509,7 @@ export function harnessView(meta?: BoardMeta, bp?: BoardPaths) {
     limits: limitRows(meta).map((l) => (seen?.hits[l.id] ? { ...l, hit: seen.hits[l.id]! } : l)),
     caps: Object.keys(HARNESS_CAP_NAME).map((key) => ({ key, name: HARNESS_CAP_NAME[key], ...caps[key]! })),
     agents: agentPowers(),
+    lead: leadRows(meta, bp),
     additions: {
       items: file.additions.map((a) => ({ ...a, stage: additionStage(a), ...(seen?.rows[`add:${a.id}`] ? { seen: seen.rows[`add:${a.id}`]! } : {}), ...(a.kind === 'rule' && ruleNote(a.text) ? { note: ruleNote(a.text)! } : {}), ...(a.kind === 'gate' && a.part && meta && !partsOf(meta).some((p) => p.id === a.part) ? { partGone: true } : {}) })),
       log: file.log.slice(-200).reverse(),

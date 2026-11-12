@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.13] — 2026-11-11
+
+### Added
+
+- **The Squad lead.** One place to ask about the whole project: the app, the code (read only), stories, decisions,
+  releases, costs, or what went wrong. Each answer shows its work first (what it read and searched), then a short
+  answer, pictures from its own copy of the app, and its sources. It drafts a story or a bug from the conversation, with
+  how each "done when" will be proved, and you press **Create story**. It saves what it learns, so the same question is
+  answered at once the next time, and Your apps shows "How to sign in" when it knows.
+- **What it can and can't do:** it reads and looks on its own, in its own copy of the app with its own database, never
+  yours. Everything else is a card you press. It never changes code, merges, releases, presses Looks right, touches
+  your real data or secrets, or deletes anything, whoever asks; it says so in plain words at no cost. **Always allow**
+  is only for low-risk actions: more time, the pictures again, starting the app, the morning brief.
+- **Ask from anywhere:** the Squad lead page in the sidebar (with Needs you, The squad now and What it can do),
+  ⌘K / Ctrl+K on any page, **Ask the lead** on a stopped, slow or waiting story, and **Ask about it** in Your apps.
+- **A part's env file:** a part's setting (for example `.env.dev`) gives its values to every command squad-kit runs for
+  that part on this computer, with the story's own database, Redis and port on top. squad-kit learns it from a Compose
+  file on the first read. Only the names are ever shown.
+- Terminal: `squad ask "<question>"`, `squad lead`, `squad lead run <card>`, `squad lead rules`,
+  `squad config set env-file`. `squad ask MA-9 is it ready?` still answers status questions at once, at no cost.
+
+### Changed
+
+- A first read never saves a `docker compose up` start whose containers have fixed names (it could replace your own
+  running containers); it uses the local start when the program is on this computer.
+- A .NET API's start is found as `dotnet run` on the address squad-kit picks.
+- The Harness page shows the Squad lead: what it reads, its three levels, Always allow and its limits.
+- Decision links like `RO-1.1` open the decision on the Architecture page.
+- squad-kit's guide now ships with the package, so the Squad lead can read it.
+- **Faster checks:** when the Builder runs one test file after all the tests passed, on the same code, the checks step
+  no longer runs all the tests again (about 5 minutes on a Mawid story). A failing file still makes them run.
+
 ## [1.3.12] — 2026-11-11
 
 ### Added
@@ -1619,7 +1651,8 @@ First public release.
 - Plan-generation meta-prompt (`generate-plan.md`), intake template (`intake.md`), and plan skeleton reference (`story-skeleton.md`).
 - Documentation: `docs/philosophy.md`, `docs/getting-started.md`, `docs/customization.md`, `docs/vs-spec-kit.md`.
 
-[Unreleased]: https://github.com/AzmSquad/squad-kit/compare/v1.3.12...HEAD
+[Unreleased]: https://github.com/AzmSquad/squad-kit/compare/v1.3.13...HEAD
+[1.3.13]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.3.13
 [1.3.12]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.3.12
 [1.3.11]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.3.11
 [1.3.10]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.3.10

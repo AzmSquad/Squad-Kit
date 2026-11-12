@@ -244,7 +244,8 @@ export interface ToolResult {
 }
 
 export interface ToolDef {
-  name: WindowTool;
+  /** One of the window's tools, or a tool of a window built on it (the Squad lead's reads, engine/lead/window.ts). */
+  name: string;
   description: string;
   inputSchema: object;
 }
@@ -706,7 +707,8 @@ export class AgentWindow {
     return this.s.step;
   }
 
-  get tools(): WindowTool[] {
+  /** The names the agent may call. A window built on this one adds its own. */
+  get tools(): string[] {
     return this.s.tools;
   }
 
@@ -1450,6 +1452,17 @@ export class AgentWindow {
     if (body && !Object.keys(headers).some((k) => /^content-type$/i.test(k))) headers['content-type'] = typeof args.body === 'string' ? 'text/plain' : 'application/json';
     const up = await this.ensureApp(by(clock, START_SHARE));
     if ('fail' in up) return up.fail;
+    // Where the part answers now that it runs: an app squad-kit moved to a free port answers there, never at the
+    // address another program holds.
+    const live = this.s.api?.()[id];
+    if (live && live.url !== part.url) {
+      try {
+        origin = new URL(live.url).origin;
+        target = new URL(asked, origin);
+      } catch {
+        return this.mistake('ask_api', 'path is not a path on this part', `Use: ${example}.`);
+      }
+    }
     this.apiCalls += 1;
     const n = this.apiCalls;
     let res: Response;

@@ -120,6 +120,7 @@ import { CutOff, carriesOn, carryOnLine, carryOnPrompt, markInterrupted, sleepMa
 import { STOP_IT, cardAnswer, goAroundAnswer, inTheWay, ownWorkAnswer, portCard, settledAnswer, type AroundIt } from './port-ask.js';
 import { appPortVariables } from './port-vars.js';
 import { judgeTestChange } from './test-change.js';
+import { moreTimeByItself } from './lead/by-itself.js';
 import { endPid, trackTask } from './process-group.js';
 import { SETUP_MS, nextFreePort, portTaken, setupPrintNow, squadKitOn } from './run-app.js';
 import { APPROVING, NO_QUESTIONS, acceptByItselfBeside, acceptNext, addDecided, afterPullRequest, askWords, cleanSources, mergeWait, resumeAccept, waitForLanding } from '../board/auto.js';
@@ -1138,6 +1139,8 @@ export class LiveSquad {
         if (q) x.quiet = { ...q, ...(x.quiet?.port && q.kind === x.quiet.kind ? { port: x.quiet.port } : {}) };
         else delete x.quiet;
       });
+      // Slower than usual but still working, with "Always allow" on for more time: squad-kit gives it, and says so.
+      if (q?.kind === 'long' && t.quiet?.kind !== 'long') moreTimeByItself(this.bp, id);
     } catch {
       // The ticket was removed meanwhile.
     }
@@ -1443,16 +1446,19 @@ export class LiveSquad {
    * The Builder's run_checks starts in the copy `cwd`: it is now the latest run there of each check it runs, so a run of
    * those noted before no longer counts. It notes the copy's code as it starts. Once it ran to its end and the code is
    * still the same, each check of it that passed with its whole saved command (not one test file) may stand for that
-   * check at the checks step, instead of running it again. Only in the round it started in (runBuilder): one taken by
-   * the checks step, or a new round, notes nothing more.
+   * check at the checks step, instead of running it again. One test file adds nothing to a whole run of the tests on the
+   * same code, so that run still stands, unless the file fails. Only in the round it started in (runBuilder): one taken
+   * by the checks step, or a new round, notes nothing more.
    */
   private async noteRun(id: string, cwd: string, run: { names: CheckName[]; only?: string }): Promise<((ran: CheckRun[]) => Promise<void>) | undefined> {
     const notes = this.builderRuns.get(id);
-    for (const name of run.names) notes?.get(cwd)?.delete(name);
+    if (!run.only) for (const name of run.names) notes?.get(cwd)?.delete(name);
     const tree = notes ? await treeOf(cwd) : undefined;
     if (!notes || !tree) return undefined;
     const at = Date.now();
     return async (ran) => {
+      // A test file that failed, or did not end, on code a whole run passed on: that run no longer counts.
+      for (const r of ran) if (r.only && (!r.ok || r.ended)) notes.get(cwd)?.delete(r.name);
       const passed = ran.filter((r) => r.ok && !r.ended && !r.only);
       if (!passed.length) return;
       // An edit while it ran: the run may have seen some of the new code, or none of it.

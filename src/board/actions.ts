@@ -24,7 +24,7 @@ import {
 } from './store.js';
 import fs from 'node:fs';
 import path from 'node:path';
-import { NO_NEW_TESTS_LABEL, type BoardMeta, type Decision, type ImpactCheck, type Release, type TechDraft, type Ticket, type UnpushedRelease } from './types.js';
+import { NO_NEW_TESTS_LABEL, type BoardMeta, type Decision, type ImpactCheck, type ProofKind, type Release, type TechDraft, type Ticket, type UnpushedRelease } from './types.js';
 import { detectStack } from './stack.js';
 import { scheduleSquad } from './schedule.js';
 import { NO_DOCS, leaveForOutside, outsideWords } from './outside-step.js';
@@ -112,6 +112,8 @@ export interface NewTicketInput {
   outside?: boolean;
   source?: Ticket['source'];
   criteria?: string[];
+  /** How each "done when" will be proved, in the same order: a Squad lead draft says so. */
+  proofs?: ProofKind[];
   rules?: string[];
   edgeCases?: string[];
   files?: UploadedFile[];
@@ -175,7 +177,9 @@ export function createTicket(bp: BoardPaths, input: NewTicketInput): Ticket {
   const meta = readMeta(bp);
   const id = input.id ?? nextTicketId(bp);
   if (input.id && readTicket(bp, input.id)) throw new BoardActionError(`${input.id} is already on the board.`);
-  const brief = { criteria: cleanList(input.criteria), rules: cleanList(input.rules), edgeCases: cleanList(input.edgeCases) };
+  const kept = (input.criteria ?? []).map((x, i) => ({ text: x.trim(), proof: input.proofs?.[i] })).filter((x) => x.text);
+  const proofs = kept.length && kept.every((x) => x.proof) ? { proofs: kept.map((x) => x.proof!) } : {};
+  const brief = { criteria: cleanList(input.criteria), rules: cleanList(input.rules), edgeCases: cleanList(input.edgeCases), ...proofs };
   if (input.noNewTests && meta.alwaysNewTests) throw new BoardActionError(NEW_TESTS_ALWAYS);
   const attachments = input.files?.length ? saveTicketUploads(bp, id, input.files) : [];
   const ticket: Ticket = {

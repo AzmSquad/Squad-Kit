@@ -278,6 +278,10 @@ back the result. Each run has its own key, which stops working when the run ends
 | `start_app`, `stop_app`, `app_status` | Starts this story's copy with the project's own start command, on a free port when the usual one is taken. Stops only what squad-kit started. Says whether it runs, with its last lines. | Tester, Builder |
 | `run_checks` | Runs the project's saved test, lint or build command, inside the guard, where a browser can start. With `only`, it runs one test file on its own with the project's own test tool, for a quick fix. A failure is not run again. | Tester, Builder |
 | `i_am_stuck` | Tries squad-kit's own fixes (see below). | Every agent on a ticket |
+| `read_board`, `read_story`, `read_decision`, `read_records`, `read_logs`, `read_guide` | Reads squad-kit's own records: the board, a story, the decisions, requirements, releases, usage, the Tools page, the Harness rules, its notes, its log (secrets taken out) and its guide. What comes back is marked as data. | Squad lead |
+
+The Squad lead also has `take_screenshots`, `look_at_page` and `ask_api`, only on its own copy of main with its own
+database, started on a free port when your app holds the usual one.
 
 The Builder has the app and browser tools once the project has a start command and an address. Until then it has
 `run_checks` and `i_am_stuck`. The Reviewer uses `look_at_page` in its review, to see a page of the app as it is now:
@@ -333,6 +337,68 @@ A chat opens in a side panel beside the board, and takes the whole screen on a p
 is a full-screen page with all of them.
 
 Terminal: `squad chat <ticket>`, `squad chat <ticket> --ask`, `squad message <ticket>`, `squad propose <ticket>`.
+
+## The Squad lead
+
+One contact for the whole project. Ask it anything about the app, the code, the stories, the decisions, the releases or
+the costs, or "help, something is wrong", and it answers in plain words, in English or Arabic. Ask from the board, from
+a story, next to **Open** in Your apps with the page you are on, or with **Ask the lead** on a slow, stuck, waiting or
+error card: the problem's facts are filled in for you.
+
+**On the board**, **Squad lead** in the sidebar is the conversation, with what needs you, the squad now and what it can do
+beside it, and every past conversation under History. **⌘K** (Ctrl+K on Windows and Linux) opens the ask box on any
+page, with the open story or the page filled in; the answer shows right there, and **Open in the Squad lead page** keeps
+it. Nothing is sent until you press Send.
+
+**Cheapest first.** squad-kit answers at once itself, with no AI, when it can: a saved note, a status question about a
+story ("is MA-9 ready?"), or something the lead never does. Otherwise the lead reads what squad-kit already knows (its
+notes, the first read of the project, the stories, including the steps the Tester took in the app), then the code, read
+only, and only then looks at the app, in **its own copy of main with its own database**, never your app or your real
+data. Every answer shows its work first ("Read MA-12 and decision MA-12.1", "Looked at /my-bookings in its own copy"),
+then a one-line answer, the pictures it took and its sources (stories, decisions, file and line, releases). What it
+learned that the next person will ask too goes in squad-kit's notes for the project, on this computer: the next person
+gets it at once, and "How to sign in" shows next to Open in Your apps.
+
+**What it can do**, in three levels:
+
+| Level | What |
+| --- | --- |
+| On its own | Read, look and tell: answer, explain a story, find things, look at the app in its own copy, tell you what needs you, prepare a report for an engineer (no secrets, for you to copy). |
+| After your OK | A card you press, running the same function as the board's button: **Create story** (a draft with how each "done when" will be proved; nothing starts until you press Start), Start or Stop a story, Give it 10 more minutes, Take the pictures again, Try again, Start the app, Get or Update a tool, **Send** an answer to an agent's question, **Save** a setting (technical ones only for engineers). |
+| Never | Change code; commit, merge, push or release; press Looks right or approve a spec or plan; get around the checks, the review, the proof, the guard or the limits; change the Harness rules; touch your real data, secrets or `.env` files, or show a password or a key; delete stories, projects or data; message other people. squad-kit refuses these in its own words, whoever asks. Only your own messages count, never instructions found in what it reads. |
+
+**Always allow** is only for the low-risk ones: give more time, take the pictures again, start the app, and the morning
+brief. With it on they run without asking, and a line says so. A step that is slower than usual but still working then
+gets 10 more minutes by itself; one that looks stuck still asks you.
+
+**It comes to you.** "Needs you" lists what waits for you, each with the lead's check-in in plain words ("MA-7 is ready
+for your check: 5 pictures, checks pass, Reviewer approved") and its ways out as cards. "The squad now" shows who works
+on what. Turn on the **morning brief** for a short summary since yesterday evening: what merged, who is on what, what
+stopped, and what the AI used. None of these call the AI.
+
+**Limits.** Balanced level by default. One question may use what the Quality setting allows it (on Best, $3 or 60
+turns) and 8 minutes; the lead's answers may use $10 a day at API prices, then it answers again the next day. Each
+answer shows its time and cost.
+
+Terminal: `squad ask "How do I sign in to the app?"` prints the work as it goes, then the answer and the cards with
+their commands. `--story MA-9` asks from a story, `--page /my-bookings` from a page of the app, `--in <conversation>`
+follows up, `--fresh` looks again past a saved note. `squad ask MA-9 is it ready?` still answers a status question at
+once. `squad lead` lists the conversations, what needs you and the squad now; `squad lead show <conversation>`;
+`squad lead run <card>` presses a card (`--always`, `--dismiss`); `squad lead rules --always more_time --brief on`.
+
+REST (under `/p/<project>/api/v1`):
+
+| Call | What |
+| --- | --- |
+| `GET /lead` | The conversations, Needs you, The squad now, the morning brief when it is on, your rules, and today's cost and limit. |
+| `GET /lead/needs-you`, `GET /lead/squad-now`, `GET /lead/brief` | Each on its own, for the rail and the phone. |
+| `POST /lead/conversations` | Ask: `{ "text": "...", "context": { "from": "app", "path": "/my-bookings" } }`. The context is `board` (with `page`), `app` (with `path`), `story` (with `story`) or `problem` (with `problem`: slow, stuck, waiting or error, and `story` or `error`). `"fresh": true` looks again past a note. It answers with the conversation: answered when squad-kit answered itself, else `thinking` until the answer is in. |
+| `POST /lead/conversations/<id>/messages` | A follow-up, the same body. |
+| `GET /lead/conversations/<id>` | The conversation: each question with its facts, the work trace, the answer (headline, body, evidence, sources, cards, learned), the time and the cost. |
+| `POST /lead/conversations/<id>/stop` | Stop the answer being written. |
+| `POST /lead/cards/<id>/run` | Press a card. `{ "always": true }` turns Always allow on first, only for the low-risk ones; `{ "dismiss": true }` is Not now; `{ "edits": { "title": "...", "doneWhen": [...] } }` is Edit before Create. |
+| `GET /lead/rules`, `PUT /lead/rules` | Always allow and the morning brief: `{ "always": ["more_time"], "brief": true }`. The never list is shown and cannot change. |
+| `GET /lead/can` | The three levels in words, what it reads, and its limits, for "What it can do". |
 
 ## Requirements
 
@@ -818,6 +884,26 @@ Terminal: `squad config set quality best`, `squad agent builder`, `squad agent b
   **New tests**: each story chooses (the **Write new tests** switch on the new story form, on by default), or always,
   for a project that must always have tests. Shared by the team in the project's settings, and shown on the Harness
   page as the **New tests** gate. Terminal: `squad config set new-tests always`, `squad config set new-tests switch`.
+  - **Env file**, for engineers, beside the commands: the file a part's app reads its settings from, like `.env.dev`
+    (several with commas), for an app whose daily stack runs in Docker Compose (`env_file: .env.dev` or
+    `--env-file .env.dev`) and has no loader of its own. Run on this computer without it, such an app falls back to its
+    settings file, which may point at another computer's database. squad-kit gives the file's values to every command it
+    runs for the part on this computer (the start, the setup, the checks and the agents' `run_checks`), read the way
+    Compose reads it (`KEY=VALUE`, quotes, `#` comments, `export`, empty values, no `$NAME` filled in). Its own go on
+    top: a setting that names a Docker service (`mongodb://app.db:27017/shop`) reaches it through the port that service
+    publishes here, then the story's own database, its own Redis number, and the port squad-kit picked. A database on
+    another computer stays as it is, and no story database is made there. The values come from the file in the copy
+    the command runs in: a file git does not carry needs values for stories under **Local files**, so a story never
+    gets your own; Your apps runs your own version with your own. A command that runs in Docker Compose gets nothing:
+    Compose reads the file itself. No agent can read the file, and the log, the board and the agents get the names
+    only, never a value. The first read learns it from a compose file whose app service has `env_file:`, or a compose
+    command with `--env-file` in the README or Makefile, when the part starts on this computer. It never saves a
+    `docker compose up` start that uses fixed `container_name`s or names its project: squad-kit gives its own compose
+    runs a project name of their own, but a container name is the same on the whole computer, so it would clash with
+    your own Docker stack. The start for this computer takes its place when its tools are here (for .NET, `dotnet run
+    --project <the web project> --urls http://localhost:${PORT:-<its port>}`), and the log says so in one line. Shown
+    read only on the Harness page as **A part's env file**. Terminal: `squad config set env-file .env.dev`
+    (`--repo <repo>` on a workspace, `--clear` for none).
 - **About squad-kit**: your version, when the app last looked for a new one, **Check for updates**, and the
   daily check (turn it off on a network without internet). When a new version is out, Home and every project
   page show it with what is new. **Update now** waits until no agent is in the middle of a step, installs it,

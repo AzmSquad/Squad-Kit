@@ -34,7 +34,10 @@ export function ArchitecturePage() {
   const [until, setUntil] = useState<number | null>(null);
   const [playing, setPlaying] = useState(false);
   const [hover, setHover] = useState<string | null>(null);
-  const pick: Pick = search.adr ? (search.adr.startsWith('ADR-') ? { kind: 'adr', id: search.adr } : { kind: 'ticket', id: search.adr }) : null;
+  const decisions = data.data?.decisions ?? [];
+  // A decision is named ADR-n, or after its story (RO-1.1): anything else is a story.
+  const pickOf = (id: string): Pick => (id.startsWith('ADR-') || decisions.some((d) => d.id === id) ? { kind: 'adr', id } : { kind: 'ticket', id });
+  const pick: Pick = search.adr ? pickOf(search.adr) : null;
   const go = (next: { view?: ArchView; pick?: Pick }) =>
     void navigate({
       to: '/architecture',
@@ -46,7 +49,6 @@ export function ArchitecturePage() {
     });
   const setPick = (p: Pick) => go({ pick: pick?.id === p?.id ? null : p });
 
-  const decisions = data.data?.decisions ?? [];
   const tickets = data.data?.tickets ?? [];
   const g = useMemo(() => columns(decisions, tickets), [decisions, tickets]);
   const last = g.cols.length;
@@ -72,7 +74,7 @@ export function ArchitecturePage() {
   const asOf = decisions.filter((d) => g.colOf(d.from) < shown);
   const rules = asOf.filter((d) => !d.replacedBy || g.colOf(ticketOfAdr(decisions, d.replacedBy)) >= shown);
   const follows = g.cols.slice(0, shown).reduce((n, c) => n + (c.t?.follows.length ?? 0), 0);
-  const focus: Pick = hover ? (hover.startsWith('ADR-') ? { kind: 'adr', id: hover } : { kind: 'ticket', id: hover }) : pick;
+  const focus: Pick = hover ? pickOf(hover) : pick;
   const related = relatedTo(focus, decisions, tickets);
   const visual = view === 'map' || view === 'timeline';
   const lessons = data.data.lessons ?? [];

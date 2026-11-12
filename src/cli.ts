@@ -17,7 +17,8 @@ import { runFiles } from './commands/files.js';
 import { runDb, runDbHide, runDbSample } from './commands/db.js';
 import { runTools } from './commands/tools.js';
 import { runPhone } from './commands/phone.js';
-import { runAsk, runTicketStatus, runWait } from './commands/now.js';
+import { runTicketStatus, runWait } from './commands/now.js';
+import { runLead, runLeadAsk, runLeadCard, runLeadRules, runLeadShow } from './commands/lead.js';
 import { runLogs, runReport, runTryNow } from './commands/support.js';
 import { runAppFind, runAppRestart, runAppSet, runAppStart, runAppStatus, runAppStop } from './commands/app.js';
 import { runTry } from './commands/try.js';
@@ -63,6 +64,7 @@ import {
   runWatch,
 } from './commands/board.js';
 import { runGuardAllow, runHosts, runNetwork } from './commands/sandbox.js';
+import { runEnvFile } from './commands/env-file.js';
 import {
   runConfigShow,
   runConfigSetPlanner,
@@ -531,9 +533,33 @@ program
   .option('--more <time>', 'How much longer, like 10m or 1h', '10m')
   .action(wrapArgs(runWait));
 program
-  .command('ask <ticket> [question...]')
-  .description('Ask about a ticket: is there a problem, when will it be ready, what is it doing. Answered at once, no AI cost')
-  .action(wrapArgs(runAsk));
+  .command('ask <question...>')
+  .description(
+    'Ask the Squad lead about the project: the app, the code, stories, decisions, releases, costs, or what went wrong. It prints its work, the answer and the cards with their commands. `squad ask MA-9 is it ready?` still answers status questions about a story at once, with no AI cost',
+  )
+  .option('--story <ticket>', 'Asked from a story: its state, stop card, checks and log come with the question')
+  .option('--page <path>', 'Asked from a page of the app, like /my-bookings')
+  .option('--app <name>', 'With --page: the app the page is in, when the project has several')
+  .option('--in <conversation>', 'A follow-up in this conversation')
+  .option('--fresh', "Look again, even when squad-kit's notes already answer it")
+  .action(wrapArgs(runLeadAsk));
+const leadCmd = program
+  .command('lead')
+  .description('The Squad lead: its conversations, what needs you and the squad now. Ask it with: squad ask "<question>"')
+  .action(wrapArgs(runLead));
+leadCmd.command('show <conversation>').description('One conversation: each question, the work trace, the answer and its cards').action(wrapArgs(runLeadShow));
+leadCmd
+  .command('run <card>')
+  .description('Press a card, the same as its button: Create story, Allow once, Send, Save, Prepare a report')
+  .option('--always', 'Turn "Always allow" on for this kind first (only giving more time, taking the pictures again, starting the app, the morning brief)')
+  .option('--dismiss', 'Not now: put the card aside')
+  .action(wrapArgs(runLeadCard));
+leadCmd
+  .command('rules')
+  .description('What the lead can do, and your rules: "Always allow" and the morning brief. The never list cannot change')
+  .option('--always <actions>', 'The low-risk actions that run without asking, with commas: more_time, pictures_again, start_app, morning_brief, or none')
+  .option('--brief <on|off>', 'Turn the morning brief on or off')
+  .action(wrapArgs(runLeadRules));
 program
   .command('delete <ticket>')
   .description('Delete a ticket that is not merged: its copy of the code, branch, files, chats and screenshots. Its cost stays in Usage')
@@ -783,6 +809,12 @@ set
   .description("Show or set folders outside its copy that the project's own commands may write in")
   .option('--clear', 'Allow none again', false)
   .action(wrapArgs((paths: string[], opts: { clear?: boolean }) => runGuardAllow('write', paths, opts)));
+set
+  .command('env-file [paths...]')
+  .description("Show or set the env file a part's app reads its settings from, like .env.dev: squad-kit gives its values to every command it runs for the part on this computer, with its own database, Redis and port on top")
+  .option('--repo <folder>', 'The repo it is for, when the project has several')
+  .option('--clear', 'No env file again', false)
+  .action(wrapArgs((paths: string[], opts: { repo?: string; clear?: boolean }) => runEnvFile(paths, opts)));
 set
   .command('payment [how]')
   .description('Show or set how you pay for the AI: subscription, api-key, or auto to let squad-kit find out')

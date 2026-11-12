@@ -6,13 +6,14 @@ import { boardExists, requireTicket, type BoardPaths } from '../board/store.js';
 import { keepWaiting } from '../board/actions.js';
 import { liveNow, type LiveNow } from '../board/now.js';
 import { readUsual } from '../board/usual.js';
-import { answerAsk, type AskOffer } from '../board/ask.js';
+import type { AskOffer } from '../board/ask.js';
 import type { Ticket } from '../board/types.js';
 import { shellQuote } from '../utils/text.js';
 
 /**
- * The live status in the terminal: the same words as the board's card and Now tab, the Ask box as `squad ask`, and
- * "Give it 10 more minutes" as `squad wait --more 10m`.
+ * The live status in the terminal: the same words as the board's card and Now tab, and "Give it 10 more minutes" as
+ * `squad wait --more 10m`. The Ask box is `squad ask`, answered by the Squad lead (commands/lead.ts): a status question
+ * about a story is still answered at once from its live record, with no AI cost.
  */
 
 const out = (s = '') => process.stdout.write(`${s}\n`);
@@ -81,24 +82,6 @@ export function offerCommand(t: Pick<Ticket, 'id'>, o: AskOffer, question: strin
     case 'stop':
       return `squad stop ${t.id}`;
   }
-}
-
-/** `squad ask <ticket> <question>`: status questions answered at once from the live record, with no AI cost. */
-export async function runAsk(ticketId: string, words: string[]): Promise<void> {
-  const question = words.join(' ').trim();
-  if (!question) throw new Error('Ask a question, for example: squad ask SK-12 "is there a problem?"');
-  const bp = board();
-  const t = requireTicket(bp, ticketId);
-  const usual = readUsual(bp);
-  const a = answerAsk(t, liveNow(t, usual), usual, question);
-  out();
-  out(`  ${kleur.bold('squad-kit')}${a.instant ? kleur.gray(a.lang === 'ar' ? '  إجابة فورية' : '  answered at once') : ''}`);
-  for (const l of a.lines) out(`  ${l}`);
-  if (a.offers.length) {
-    out();
-    for (const o of a.offers) out(`  ${o.label}${'note' in o ? kleur.gray(`  ${o.note}`) : ''}\n    ${cmd(offerCommand(t, o, question))}`);
-  }
-  out();
 }
 
 /** "1h", "10m", "90s" or a bare number of minutes, in minutes. */

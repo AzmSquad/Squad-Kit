@@ -20,6 +20,9 @@ import { useBreakdowns } from '../lib/requirementsData';
 import { requirementsWaiting } from '../lib/requirements';
 import { useBreakdownWaits } from './BreakdownWaits';
 import { useTools } from '../pages/Tools';
+import { LeadMark } from './LeadMark';
+import { LeadAskHost } from './LeadAsk';
+import { useLead } from '../lib/leadData';
 
 const NAV = [
   { to: '/overview', label: 'Overview', icon: Compass, badge: 'setup' as const },
@@ -27,6 +30,7 @@ const NAV = [
   { to: '/board', label: 'Board', icon: LayoutGrid },
   { to: '/backlog', label: 'Backlog', icon: ListTodo },
   { to: '/inbox', label: 'Waiting for you', icon: Inbox, badge: 'you' as const },
+  { to: '/lead', label: 'Squad lead', icon: LeadMark, badge: 'lead' as const },
   { to: '/conversations', label: 'Conversations', icon: MessagesSquare, badge: 'chats' as const },
   { to: '/releases', label: 'Releases', icon: ArrowUp },
   { to: '/architecture', label: 'Architecture', icon: Network },
@@ -57,6 +61,8 @@ export function Shell() {
   // Requirements: questions from the Analyst and stories that need the person. "New" until then, in 1.2.
   const breakdowns = useBreakdowns(5000);
   const reqs = requirementsWaiting(breakdowns.data?.breakdowns ?? [], meta?.user.name);
+  // The Squad lead's dot: it is answering a question now, maybe one asked from another page.
+  const answering = useLead(5000).data?.conversations.some((c) => c.thinking) ?? false;
   // On a phone the sidebar folds away behind a menu button, and closes again when you go to another page.
   const [menu, setMenu] = useState(false);
   useEffect(() => setMenu(false), [path]);
@@ -71,6 +77,7 @@ export function Shell() {
         <div className="canvas-b">
           <Outlet />
         </div>
+        <LeadAskHost />
       </div>
     );
 
@@ -123,6 +130,14 @@ export function Shell() {
               </Link>
             );
           const on = path.startsWith(n.to) || (n.to === '/inbox' && path.endsWith('/proof'));
+          if (n.badge === 'lead')
+            return (
+              <Link key={n.to} to={n.to} className={`nav navlead ${on ? 'on' : ''}`} onClick={() => setMenu(false)} title="Ask from any page with ⌘K or Ctrl+K">
+                <n.icon size={16} />
+                {n.label}
+                {answering && <span className="leaddot" aria-label="The lead is answering" />}
+              </Link>
+            );
           return (
             <Link key={n.to} to={n.to} className={`nav ${on ? 'on' : ''}`} onClick={() => setMenu(false)}>
               <n.icon size={16} />
@@ -175,6 +190,7 @@ export function Shell() {
       </main>
       <ChatDock />
       <FirstWin />
+      <LeadAskHost />
     </div>
   );
 }

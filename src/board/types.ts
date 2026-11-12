@@ -449,7 +449,12 @@ export interface TicketBrief {
   criteria: string[];
   rules: string[];
   edgeCases: string[];
+  /** How each "done when" will be proved, in the same order, when a Squad lead draft said so. */
+  proofs?: ProofKind[];
 }
+
+/** How a "done when" will be proved: a picture of a screen, an answer from the API, what the data holds, or a test. */
+export type ProofKind = 'screen' | 'api' | 'data' | 'test';
 
 /** A decision approved after this ticket was planned, that the Architect says changes it. */
 export interface Outdated {
@@ -491,7 +496,8 @@ export interface UsageTotal {
  * runs the squad on their own AI account, and it changes with every run.
  */
 export interface UsageLine extends UsageTotal {
-  role: AgentName;
+  /** The role, or the Squad lead, whose questions count on the project's own line. */
+  role: AgentName | 'lead';
   step: string;
   level: 'strongest' | 'balanced' | 'fast';
   /** The model in words, as the AI tool names it for the level ("Opus"), or the model someone pinned. */
@@ -767,6 +773,8 @@ export interface Ticket {
   selfAccept?: { baseTried?: string; baseTries?: number; landingSince?: string; waitsFor?: string };
   /** Its owner deleted it on their computer, and the remote shows it: Remove from my board cleans this computer only. */
   ownerDeleted?: OwnerDeleted;
+  /** Made from a conversation with the Squad lead: its id, so the conversation stays linked to the story. */
+  lead?: string;
 }
 
 /** What a story looked like when it left for a conversation outside squad-kit: it goes back to this when nothing changed. */
@@ -1137,6 +1145,11 @@ export interface BoardMeta {
   lockedFiles?: ProjectFile[];
   /** The project's database, as squad-kit learned it: each story gets its own copy of it (engine/story-db.ts). */
   database?: ProjectDatabase;
+  /**
+   * The Squad lead's rules for this project on this computer: the low-risk actions that run without asking ("Always
+   * allow"), and the morning brief.
+   */
+  lead?: { always?: ('more_time' | 'pictures_again' | 'start_app' | 'morning_brief')[]; brief?: boolean };
 }
 
 /**
@@ -1231,7 +1244,7 @@ export interface ProductPart {
 }
 
 export interface RepoInfo {
-  /** Folder relative to the project, like "moj-t4-ui-vue". */
+  /** Folder relative to the project, like "web-ui". */
   path: string;
   base: string;
   remote: string;
@@ -1248,4 +1261,9 @@ export interface ProjectCommands {
   url?: string;
   /** Runs after a release, for example a pipeline trigger. */
   deploy?: string;
+  /**
+   * The env file the app reads its settings from, like .env.dev (several with commas): squad-kit gives its values to
+   * every command it runs for this part on this computer, with its own on top (engine/env-file.ts).
+   */
+  envFile?: string;
 }

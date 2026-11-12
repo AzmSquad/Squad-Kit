@@ -4,7 +4,8 @@ import { repoPaths } from '../board/parts.js';
 import { storyFile, storyFilesDir } from '../board/project-files.js';
 import { readMeta, type BoardPaths } from '../board/store.js';
 import { copyDbFiles, rewireCopy } from './db-env.js';
-import { markPlaced } from './git.js';
+import { git, markPlaced } from './git.js';
+import { repoEnvFiles } from './env-file.js';
 import { copyEnvFiles, localEnvFiles } from './run-app.js';
 
 /**
@@ -69,10 +70,12 @@ export function localFileNames(bp: BoardPaths, repo: string): string[] {
 export async function hiddenFiles(bp: BoardPaths, cwd?: string): Promise<string[]> {
   let local;
   let repos: string[];
+  let envFiles: { repo: string; path: string }[];
   try {
     const meta = readMeta(bp);
     local = meta.localFiles ?? [];
     repos = repoPaths(meta);
+    envFiles = repos.flatMap((repo) => repoEnvFiles(meta, repo).map((f) => ({ repo, path: f })));
   } catch {
     return [];
   }
@@ -82,6 +85,13 @@ export async function hiddenFiles(bp: BoardPaths, cwd?: string): Promise<string[
     out.add(path.join(bp.root, f.repo, f.path));
     if (cwd) out.add(path.join(cwd, f.path));
     // A story's folder holds each repo's copy under the repo's name.
+    if (cwd && f.repo !== '.') out.add(path.join(cwd, f.repo, f.path));
+  }
+  // A part's env file git does not carry is kept off the same way (env-file.ts): its values are for the app alone.
+  for (const f of envFiles) {
+    if (git(path.join(bp.root, f.repo), ['ls-files', '--', `:(literal)${f.path}`], { allowFail: true })) continue;
+    out.add(path.join(bp.root, f.repo, f.path));
+    if (cwd) out.add(path.join(cwd, f.path));
     if (cwd && f.repo !== '.') out.add(path.join(cwd, f.repo, f.path));
   }
   if (local.length) out.add(`${storyFilesDir(bp)}/**`);

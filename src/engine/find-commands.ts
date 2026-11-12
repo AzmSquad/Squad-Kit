@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { ProjectCommands } from '../board/types.js';
 import { findPortVariables } from './port-vars.js';
 import { kindsOf, type Platform, type ProjectKind } from './tools/kinds.js';
+import { envFileToLearn, learnFromCompose } from './compose-learn.js';
 
 /**
  * How to test and run a project, read from its own files with no AI: its package.json scripts and the equivalents in
@@ -359,12 +360,66 @@ function anyFile(dir: string, test: (name: string) => boolean): boolean {
   return list(dir).some((e) => (e.isFile() ? test(e.name) : e.isDirectory() && !e.name.startsWith('.') && e.name !== 'node_modules' && list(path.join(dir, e.name)).some((x) => x.isFile() && test(x.name))));
 }
 
+/* ── .NET ───────────────────────────────────────────────── */
+
+/** .NET's own port, when a web project's launch settings give none. */
+const DOTNET_PORT = 5000;
+
+/** The http port a web project's launch settings give it: `applicationUrl`, its own profile first. */
+function launchPort(folder: string): number | null {
+  let doc: { profiles?: Record<string, { commandName?: string; applicationUrl?: string } | null> };
+  try {
+    doc = JSON.parse(read(path.join(folder, 'Properties', 'launchSettings.json')).replace(/^\uFEFF/, '')) as typeof doc;
+  } catch {
+    return null;
+  }
+  const profiles = Object.values(doc.profiles ?? {}).filter((p): p is { commandName?: string; applicationUrl?: string } => Boolean(p));
+  for (const p of [...profiles.filter((x) => x.commandName === 'Project'), ...profiles]) {
+    const m = /http:\/\/(?:localhost|127\.0\.0\.1|\*|\+|0\.0\.0\.0):(\d{2,5})/.exec(p.applicationUrl ?? '');
+    if (m) return Number(m[1]);
+  }
+  return null;
+}
+
+/**
+ * A .NET web app's start on this computer: its web project (the Web SDK, never a test project), nearest the top, at the
+ * address its launch settings give, on a port squad-kit can move: PORT when squad-kit sets it. Nothing with no web project.
+ */
+function dotnetStart(dir: string): { start: string; url: string } | Record<string, never> {
+  const projects: string[] = [];
+  const visit = (rel: string, depth: number) => {
+    if (depth > 3 || projects.length >= 50) return;
+    let list: fs.Dirent[];
+    try {
+      list = fs.readdirSync(path.join(dir, rel), { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of list) {
+      const p = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory() && !e.name.startsWith('.') && !['bin', 'obj', 'node_modules', 'packages', 'TestResults'].includes(e.name)) visit(p, depth + 1);
+      else if (e.isFile() && e.name.endsWith('.csproj')) projects.push(p);
+    }
+  };
+  visit('', 0);
+  const web = projects
+    .filter((p) => {
+      const text = read(path.join(dir, p));
+      return /Sdk\s*=\s*"Microsoft\.NET\.Sdk\.Web"/i.test(text) && !/Microsoft\.NET\.Test\.Sdk|<IsTestProject>\s*true/i.test(text) && !/tests?\.csproj$/i.test(p);
+    })
+    .sort((a, b) => a.split('/').length - b.split('/').length || a.localeCompare(b));
+  const project = web[0];
+  if (!project) return {};
+  const port = launchPort(path.join(dir, path.posix.dirname(project))) ?? DOTNET_PORT;
+  return { start: `dotnet run --project ${word(project)} --urls http://localhost:\${PORT:-${port}}`, url: at(port)! };
+}
+
 function otherCommands(dir: string): ProjectCommands | null {
   if (has(dir, 'go.mod')) return { ...(anyFile(dir, (f) => f.endsWith('_test.go')) ? { test: 'go test ./...' } : {}), lint: 'go vet ./...', build: 'go build ./...' };
   if (has(dir, 'Cargo.toml')) return { test: 'cargo test', build: 'cargo build' };
   if (has(dir, 'pom.xml')) return { test: 'mvn test', build: 'mvn package' };
   if (has(dir, 'gradlew')) return { test: './gradlew test', build: './gradlew build' };
-  if (anyFile(dir, (f) => f.endsWith('.csproj') || f.endsWith('.sln'))) return { ...(anyFile(dir, (f) => /tests?\.csproj$/i.test(f)) ? { test: 'dotnet test' } : {}), build: 'dotnet build' };
+  if (anyFile(dir, (f) => f.endsWith('.csproj') || f.endsWith('.sln'))) return { ...(anyFile(dir, (f) => /tests?\.csproj$/i.test(f)) ? { test: 'dotnet test' } : {}), build: 'dotnet build', ...dotnetStart(dir) };
   const apple = xcodeCommands(dir) ?? swiftCommands(dir);
   if (apple) return apple;
   if (has(dir, 'Makefile')) {
@@ -429,7 +484,9 @@ export function opensAWindow(command: string | undefined): boolean {
  * The commands a read of the project handed in, made safe to run: a start that opens a window (opensAWindow) becomes the
  * start squad-kit finds in the project's files, with its address, or goes when it finds none; Flutter's plain
  * `flutter analyze` becomes the found one, where Flutter's style hints never fail the check; and a Flutter build for a
- * phone (`flutter build apk`) becomes the found build, the web one, or goes. Each change says why, for the log.
+ * phone (`flutter build apk`) becomes the found build, the web one, or goes. A compose start with fixed names becomes the
+ * found start for this computer, or goes, and an app that starts here gets its compose env file (engine/compose-learn.ts).
+ * Each change says why, for the log.
  */
 export function fromTheRead(dir: string, given: ProjectCommands): { commands: ProjectCommands; changed: string[] } {
   const commands = { ...given };
@@ -457,11 +514,22 @@ export function fromTheRead(dir: string, given: ProjectCommands): { commands: Pr
     else delete commands.build;
     changed.push(`The read's build check (${was}) builds for a phone, which squad-kit's own phone build already shows, so squad-kit ${commands.build ? `checks ${commands.build} instead` : 'left it out'}.`);
   }
+  // A compose start that takes the daily stack's names is never saved, and an app started here gets its env file.
+  changed.push(...learnFromCompose(dir, commands, found));
   return { commands, changed };
 }
 
-/** What the project's own files say about how to test and run it. Empty when they say nothing. */
+/**
+ * What the project's own files say about how to test and run it. Empty when they say nothing. An app that starts on this
+ * computer also gets the env file its compose files give it (engine/compose-learn.ts).
+ */
 export function findCommands(dir: string): ProjectCommands {
+  const found = commandsIn(dir);
+  const learned = envFileToLearn(dir, found);
+  return learned ? { ...found, envFile: learned.envFile } : found;
+}
+
+function commandsIn(dir: string): ProjectCommands {
   const dart = dartCommands(dir);
   if (dart) return dart;
   const scripts = scriptsOf(dir);

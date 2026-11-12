@@ -9,6 +9,7 @@ import { AI_TOOLS, BROWSERS } from '../modules/registry.js';
 import { squadHome } from '../core/home.js';
 import { childEnv } from './agent-env.js';
 import { copyDbEnv } from './db-env.js';
+import { partEnv } from './part-env.js';
 import { OWN_GROUP, track } from './process-group.js';
 import { PACKAGE_CACHES, PRIVATE, gitPlaces, networkPolicy, noPushEnv, packageCacheEnv, projectCacheDir, projectNetwork, ticketCacheDir } from './sandbox.js';
 import type { NetworkLevel } from '../board/types.js';
@@ -585,7 +586,8 @@ export function guardEnv(guard: GuardSpec | undefined, cwd: string): Record<stri
 export function spawnProject(command: string, o: SpawnProjectOptions): ChildProcess {
   // In a story's copy with a database of its own, the setting points at it, whatever the person's environment says.
   // A command that builds an Android app gets squad-kit's Android tools, with their folders in the cache home (android-env.ts).
-  const env = { ...projectEnv(), ...guardEnv(o.guard, o.cwd), ...(usesAndroid(command) ? androidCommandEnv(o.guard?.cache ? { cache: o.guard.cache } : {}) : {}), ...(o.env ?? {}), ...copyDbEnv(o.cwd) };
+  // The part's env file comes first, and everything squad-kit sets goes on top of it (part-env.ts).
+  const env = { ...projectEnv(), ...partEnv(command, o.cwd), ...guardEnv(o.guard, o.cwd), ...(usesAndroid(command) ? androidCommandEnv(o.guard?.cache ? { cache: o.guard.cache } : {}) : {}), ...(o.env ?? {}), ...copyDbEnv(o.cwd) };
   const stdio = o.stdio ?? ['ignore', 'pipe', 'pipe'];
   const base: SpawnOptions = { cwd: o.cwd, detached: OWN_GROUP, stdio, env };
   if (o.guard && process.platform === 'darwin') {

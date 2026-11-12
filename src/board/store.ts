@@ -341,6 +341,7 @@ export const TICKET_HOME = {
   capRaise: 'local',
   createKey: 'local',
   stopRequested: 'local',
+  lead: 'local',
   reviewNotes: 'local',
   localSetup: 'local',
   setupTrouble: 'local',

@@ -41,6 +41,7 @@ import { useReach } from '../lib/use-reach';
 import { ticketTrouble } from '../lib/ticket-trouble';
 import { detect, langProps, typedDir } from '../lib/lang';
 import { ToolBlockCard } from '../components/ToolBlock';
+import { AskLeadStrip } from '../components/LeadAsk';
 
 type Tab = 'now' | 'story' | 'plan' | 'activity' | 'conversation' | 'proof' | 'changes' | 'cost' | 'developer';
 
@@ -201,6 +202,8 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose(): void }) {
             {tab === 'now' && <HandedOverBanner t={t} />}
             {tab === 'now' && <DeleteArchiveBanner t={t} onDeleted={onClose} />}
             {tab === 'now' && (isMine(t, me) || !me) && <ChangeCard t={t} />}
+            {/* Waiting for you: the Squad lead reads the story and says what it needs. A stop has it on its own card. */}
+            {tab === 'now' && (isMine(t, me) || !me) && t.waiting && t.waiting.kind !== 'stuck' && t.waiting.kind !== 'chat' && !t.now?.merging && <AskLeadStrip t={t} />}
             {/* A panel of its own per ticket: what is typed on one never shows on another. */}
             {tab === 'now' && (isMine(t, me) || !me ? <NowPanel key={t.id} t={t} /> : <NotYoursPanel t={t} />)}
             {tab === 'story' && <StoryTab t={t} />}

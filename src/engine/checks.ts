@@ -484,7 +484,8 @@ export async function startApp(cwd: string, given: string, at: string, waitMs = 
   const port = taken ? await freePort() : null;
   const target = port ? url.replace(/(:\/\/[^/:]+)(:\d+)?/, `$1:${port}`) : url;
   const own = port ? appPortVariables(cwd, portOf(url)) : [];
-  const moved = port ? Object.fromEntries(['PORT', ...own].map((name) => [name, String(port)])) : {};
+  // A start that reads PORT gets the address's own, over a PORT the part's env file holds for its container (part-env.ts).
+  const moved = port ? Object.fromEntries(['PORT', ...own].map((name) => [name, String(port)])) : /\$\{?PORT\b/.test(command) && portOf(url) ? { PORT: String(portOf(url)) } : {};
   // On this computer, a database or Redis setting that names a compose service reaches it through the port it publishes here.
   const env = { CI: '1', FORCE_COLOR: '0', BROWSER: 'none', ...appEnvHere(cwd, command), ...moved, ...more.env };
   const homes = ownHomes(command, guard);

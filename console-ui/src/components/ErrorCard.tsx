@@ -11,6 +11,9 @@ import { ReportButton } from './Report';
 import { Cmd, Written } from './ui';
 import { useDraft } from '../lib/drafts';
 import { typedDir } from '../lib/lang';
+import { problemQuestion } from '../lib/lead';
+import { leadAsk } from '../lib/leadAsk';
+import { LeadMark } from './LeadMark';
 
 /**
  * Every error the person sees, one way (phase 10): what happened in plain words, what is safe, and the ways out as
@@ -115,6 +118,14 @@ export function StuckCard({ t, extra }: { t: Ticket; extra?: ReactNode }) {
       decide(b.index, b.way === 'retry' && note ? { note } : {}, b.way === 'retry' ? 'Trying again. The squad carries on.' : 'Decided. The squad carries on.');
     },
   }));
+  // The Squad lead reads the stop, its checks and its log, and says what happened and the way out it recommends.
+  const why = t.stuck?.title ?? t.stuck?.question;
+  ways.push({
+    label: 'Ask the lead',
+    title: 'It reads what happened and tells you, in plain words. It changes nothing.',
+    icon: <LeadMark size={14} />,
+    onClick: () => leadAsk.open({ text: problemQuestion('error', t.id), context: { from: 'problem', problem: 'error', story: t.id, ...(why ? { error: why.slice(0, 400) } : {}) } }),
+  });
   const cmd = pending
     ? `squad decide ${t.id} ${pending.index + 1}${pending.needs === 'reason' ? ` --reason ${shellQuote(text.trim() || '…')}` : ''}`
     : `squad decide ${t.id}${retry && note ? ` ${retry.index + 1} --note ${shellQuote(note)}` : ''}`;

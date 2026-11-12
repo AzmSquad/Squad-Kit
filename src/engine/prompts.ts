@@ -445,7 +445,8 @@ function reposText(meta: BoardMeta): string {
 /** A story's folder, for an agent working in it: each part in a folder of its own, each its own git repo. */
 function storyFolderText(copies: NonNullable<PromptContext['copies']>): string {
   const lines = copies.map((c) => {
-    const commands = Object.entries(c.commands).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join('; ') || 'no commands set up yet';
+    // The part's env file is no command: squad-kit gives its values to the commands it runs itself.
+    const commands = Object.entries(c.commands).filter(([k, v]) => v && k !== 'envFile').map(([k, v]) => `${k}: ${v}`).join('; ') || 'no commands set up yet';
     return `- ${c.folder}/ is ${c.name}. Commands, from inside that folder: ${commands}.`;
   });
   return `This folder holds this story's copy of each part it changes, side by side. Each one is its own git repo on the same branch name, and the folder around them is not a repo:\n${lines.join('\n')}\nWork through them in that order. git works only with the folder named, as in: git -C ${copies[0]!.folder} status.`;

@@ -152,7 +152,7 @@ describe('Azure helpers', () => {
   it('recognises Azure Repos remotes', () => {
     expect(parseAzureRemote('https://dev.azure.com/momenysr/Mawid/_git/Mawid')).toEqual({ organization: 'momenysr', project: 'Mawid', repo: 'Mawid' });
     expect(parseAzureRemote('https://momenysr@dev.azure.com/momenysr/My%20Project/_git/api')).toEqual({ organization: 'momenysr', project: 'My Project', repo: 'api' });
-    expect(parseAzureRemote('https://dttmoj.visualstudio.com/DefaultCollection/AI/_git/moj-t4-api')).toEqual({ organization: 'dttmoj', project: 'AI', repo: 'moj-t4-api' });
+    expect(parseAzureRemote('https://contoso.visualstudio.com/DefaultCollection/Shop/_git/orders-api')).toEqual({ organization: 'contoso', project: 'Shop', repo: 'orders-api' });
     expect(parseAzureRemote('git@ssh.dev.azure.com:v3/momenysr/Mawid/Mawid')).toEqual({ organization: 'momenysr', project: 'Mawid', repo: 'Mawid' });
     expect(parseAzureRemote('https://github.com/a/b.git')).toBeNull();
   });

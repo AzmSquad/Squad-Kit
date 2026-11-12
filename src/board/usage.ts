@@ -127,7 +127,45 @@ export function readMonths(bp: BoardPaths): Record<string, UsageTotal> {
   }
 }
 
-/** One run joins its month. Counting is a help, never a reason for a step to fail. */
+/** What the squad used each day lately, on this project, on this computer: the Squad lead's morning brief reads it. */
+export function daysFile(bp: BoardPaths): string {
+  return path.join(bp.localDir, 'usage-days.json');
+}
+
+/** The days kept: two weeks. */
+const KEEP_DAYS = 14;
+
+/** "2026-11-11", in this computer's time zone. */
+export function dayKey(at = Date.now()): string {
+  const d = new Date(at);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+export function readDays(bp: BoardPaths): Record<string, UsageTotal> {
+  try {
+    const raw = JSON.parse(fs.readFileSync(daysFile(bp), 'utf8')) as unknown;
+    if (!raw || typeof raw !== 'object') return {};
+    return Object.fromEntries(Object.entries(raw).filter(([k, v]) => /^\d{4}-\d{2}-\d{2}$/.test(k) && v && typeof v === 'object' && typeof (v as UsageTotal).runs === 'number')) as Record<string, UsageTotal>;
+  } catch {
+    return {};
+  }
+}
+
+/** One run joins its day; days older than two weeks go. */
+function addToDay(bp: BoardPaths, usage: AgentUsage | undefined, at: number): void {
+  const days = readDays(bp);
+  const key = dayKey(at);
+  const t = days[key] ?? { runs: 0 };
+  addTo(t, usage, 1);
+  days[key] = t;
+  const oldest = dayKey(at - KEEP_DAYS * 86_400_000);
+  const kept = Object.fromEntries(Object.entries(days).filter(([k]) => k >= oldest));
+  const tmp = `${daysFile(bp)}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, `${JSON.stringify(kept, null, 1)}\n`);
+  fs.renameSync(tmp, daysFile(bp));
+}
+
+/** One run joins its month, and its day. Counting is a help, never a reason for a step to fail. */
 export function addToMonth(bp: BoardPaths, usage: AgentUsage | undefined, at = Date.now()): void {
   try {
     const months = readMonths(bp);
@@ -139,6 +177,7 @@ export function addToMonth(bp: BoardPaths, usage: AgentUsage | undefined, at = D
     const tmp = `${monthsFile(bp)}.${process.pid}.tmp`;
     fs.writeFileSync(tmp, `${JSON.stringify(months, null, 1)}\n`);
     fs.renameSync(tmp, monthsFile(bp));
+    addToDay(bp, usage, at);
   } catch {
     // A full disk or a folder removed: the month's total misses this run.
   }
@@ -170,11 +209,11 @@ export function boardUsage(bp: BoardPaths): BoardUsage {
 
 /* ── In words, for the terminal ─────────────────────────── */
 
-const MORE_STEPS: Record<string, string> = { chat: 'Talking it through', draft: 'Filling in a new ticket' };
+const MORE_STEPS: Record<string, string> = { chat: 'Talking it through', draft: 'Filling in a new ticket', ask: 'Questions to the Squad lead' };
 
 /** A step's name for people: "Fixes", "Reading the project". */
-export function stepWords(role: AgentName, step: string): string {
-  return STEPS[role]?.find((s) => s.id === step)?.name ?? MORE_STEPS[step] ?? step;
+export function stepWords(role: AgentName | 'lead', step: string): string {
+  return (role === 'lead' ? undefined : STEPS[role])?.find((s) => s.id === step)?.name ?? MORE_STEPS[step] ?? step;
 }
 
 /** "$1.23", "under $0.01", with the runs the tool did not report; null when no run reported a cost. */

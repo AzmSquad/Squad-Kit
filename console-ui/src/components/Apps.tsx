@@ -7,6 +7,8 @@ import { useAct, useApps } from '../lib/data';
 import { shellArg, shellQuote } from '../lib/text';
 import { Cmd, Modal, Written } from './ui';
 import { LanguagePick, PhoneLine, PhoneNotReady } from './PhoneStart';
+import { AskLeadButton } from './LeadAsk';
+import { appPath } from '../lib/lead';
 
 /**
  * Your apps, in the sidebar: each app of the project with Start, Open, Restart and Stop. squad-kit runs it from its
@@ -138,6 +140,8 @@ function AppItem({ a, together, named, live, reading, readError }: { a: ProjectA
         ) : null}
       </div>
 
+      <AppLead a={a} />
+
       {a.state === 'starting' && (phone && onPhone ? <PhoneLine phone={phone} starting /> : <p className="app-more">{stepLine(a)}</p>)}
       {phone && a.state !== 'starting' && <PhoneLine phone={phone} starting={false} />}
       {phone && a.state !== 'running' && a.state !== 'starting' && <PhoneNotReady phone={phone} />}
@@ -241,6 +245,25 @@ function AppItem({ a, together, named, live, reading, readError }: { a: ProjectA
           }}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * The Squad lead beside each app: "How to sign in", once it learned it (a press shows all of it), and Ask about it,
+ * from the app's page. The lead answers from its own copy of the app, never this one.
+ */
+function AppLead({ a }: { a: ProjectApp }) {
+  const [all, setAll] = useState(false);
+  return (
+    <div className="app-lead">
+      {a.signIn && (
+        <button className={`app-signin ${all ? 'all' : ''}`} onClick={() => setAll(!all)} aria-expanded={all} title={all ? undefined : a.signIn}>
+          <b>How to sign in</b>
+          <Written className="txt" text={a.signIn} />
+        </button>
+      )}
+      <AskLeadButton className="btn sm app-ask" label="Ask about it" context={{ from: 'app', app: a.name, path: appPath(a.address ?? a.url) }} />
     </div>
   );
 }

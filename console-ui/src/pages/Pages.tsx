@@ -23,6 +23,7 @@ import { needsYou, testChangeLine, testChangeWaits } from '../lib/waiting';
 import { BreakdownWaitCard, WaitStopTag, useBreakdownWaits } from '../components/BreakdownWaits';
 import { stopKind } from '../lib/auto';
 import { langProps } from '../lib/lang';
+import { AskLeadAbout } from '../components/LeadAsk';
 
 /* ── Waiting for you ───────────────────────────────────── */
 
@@ -67,6 +68,7 @@ export function InboxPage() {
                     <Written as="p" text={stopKind(t) && t.agentQuestion ? `“${t.agentQuestion.text}”` : t.waiting?.summary ?? (changeWaits(t) ? `Change ${openChange(t)!.id} to the spec waits for you` : testChangeWaits(t) ? testChangeLine(t) : t.outdated?.length ? outdatedLine(t) : `Looks stuck: ${t.quiet?.detail ?? 'no progress'}`)} />
                   </div>
                   <Cmd text={!t.waiting && changeWaits(t) ? `squad propose ${t.id} --approve` : !t.waiting && testChangeWaits(t) ? `squad test-command ${t.id} --use` : commandFor(t)} />
+                  <AskLeadAbout t={t} problem={t.waiting?.kind === 'stuck' ? 'error' : !t.waiting && t.quiet ? (t.quiet.kind === 'long' ? 'slow' : 'stuck') : 'waiting'} className="btn sm" />
                   {t.waiting?.kind === 'proof' ? (
                     <Link to="/tickets/$id/proof" params={{ id: t.id }} className="btn pri sm">{actionLabel(t)}</Link>
                   ) : (
@@ -145,6 +147,7 @@ const COMMAND_FIELDS: { key: keyof ProjectCommands; label: string; hint: string 
   { key: 'build', label: 'Build', hint: 'Builds the project, e.g. npm run build' },
   { key: 'start', label: 'Start', hint: 'Runs the app for screenshots, e.g. npm start' },
   { key: 'url', label: 'App address', hint: 'Where the app opens, e.g. http://localhost:3000' },
+  { key: 'envFile', label: 'Env file', hint: 'Settings the app reads on this computer, e.g. .env.dev' },
   { key: 'deploy', label: 'After a release', hint: 'Runs after a release, e.g. az pipelines run …' },
 ];
 
@@ -220,6 +223,11 @@ function RepoSettings({ repo, multi }: { repo: RepoInfo; multi: boolean }) {
                 {input}
                 <StartNote repo={repo.path} command={current.start} />
               </div>
+            ) : f.key === 'envFile' ? (
+              <div>
+                {input}
+                <EnvFileNote repo={multi ? repo.path : undefined} file={current.envFile} />
+              </div>
             ) : (
               input
             )}
@@ -240,6 +248,22 @@ function RepoSettings({ repo, multi }: { repo: RepoInfo; multi: boolean }) {
         </button>
       </div>
     </div>
+  );
+}
+
+/**
+ * Beside the env file: what squad-kit does with it, and its terminal command. Only the path is shown; the values never
+ * pass through the board.
+ */
+function EnvFileNote({ repo, file }: { repo?: string; file?: string }) {
+  return (
+    <p className="note" style={{ margin: '6px 0 0', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+      <span>
+        squad-kit gives its values to every command it runs for this part on this computer, then its own database, Redis and port on top. A file git
+        does not carry needs values for stories: add it under Local files.
+      </span>
+      <Cmd text={`squad config set env-file ${file?.trim() || '.env.dev'}${repo ? ` --repo ${repo}` : ''}`} />
+    </p>
   );
 }
 
