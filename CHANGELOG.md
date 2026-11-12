@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.17] — 2026-11-12
+
 ### Added
 
 - **Chat heads and popups on every page.** Round heads sit at the bottom right of every project page: the Squad lead
