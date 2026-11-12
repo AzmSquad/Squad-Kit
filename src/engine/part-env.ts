@@ -11,15 +11,16 @@ import { addressKind, composeServices, swapServiceHost, type ComposeService } fr
  * publishes here, then the story's own database, its own Redis number and the port squad-kit picked (project-guard.ts
  * puts those after this). A database on another computer stays as it is: no story database is made there (story-db.ts).
  * Only a copy squad-kit made gets it, never the person's own folder, and never a command that runs in Compose, which
- * reads the file itself. The log hears the names only, never a value.
+ * reads the file itself. Its `$NAME`s are filled in as Compose fills them: from `env`, the environment the command starts
+ * with (squad-kit's own keys already out), then the file's own values. The log hears the names only, never a value.
  */
 
-export function partEnv(command: string, cwd: string): Record<string, string> {
+export function partEnv(command: string, cwd: string, env: Record<string, string | undefined> = {}): Record<string, string> {
   if (isCompose(command)) return {};
   try {
     const part = envFilesFor(cwd);
     if (!part?.copy) return {};
-    const got = readEnvFiles(part.top, part.files);
+    const got = readEnvFiles(part.top, part.files, { env });
     let services: ComposeService[] | undefined;
     const swapped: string[] = [];
     for (const [name, value] of Object.entries(got.env)) {

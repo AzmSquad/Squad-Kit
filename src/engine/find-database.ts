@@ -3,6 +3,7 @@ import path from 'node:path';
 import yaml from 'js-yaml';
 import type { DatabaseSetting } from '../board/types.js';
 import type { DbKind } from './db/types.js';
+import { parseEnvFile, readEnvFiles } from './env-file.js';
 import { git } from './git.js';
 
 /**
@@ -195,17 +196,12 @@ function read(file: string): string {
 /** A value with a setting of its own inside, like ${DB_PASSWORD}: the address is not all here. */
 const PLACEHOLDER = /\$\{[^}]*\}|\$[A-Z_][A-Z0-9_]*/;
 
-/** KEY=value lines of an env file, quotes taken off. */
+/**
+ * KEY=value lines of an env file, as Compose reads them (env-file.ts): each `${NAME}` the file sets is filled in. A value
+ * that names a setting the file does not set stays as written, so it reads as an address not all here.
+ */
 function envPairs(text: string): Map<string, string> {
-  const out = new Map<string, string>();
-  for (const line of text.split(/\r?\n/)) {
-    const m = /^\s*(?:export\s+)?([A-Za-z_][\w.]*)\s*=\s*(.*?)\s*$/.exec(line);
-    if (!m) continue;
-    let value = m[2]!;
-    if (!/^['"]/.test(value)) value = value.replace(/\s+#.*$/, '');
-    out.set(m[1]!, unquote(value));
-  }
-  return out;
+  return new Map(parseEnvFile(text, { unset: 'keep' }));
 }
 
 /** The environment's value, or the default in `${NAME:-default}`, or undefined when it is only a name. */
@@ -476,27 +472,35 @@ interface Candidate {
   address?: string;
   kind?: FoundKind;
   name?: string;
+  /** A name given beside the address in its settings file, which an env file's address does not change. */
+  beside?: string;
   from: string[];
   score: number;
 }
 
-/** The project's database in one repo, or null when its files say nothing about one. */
-function findIn(root: string, repo: string): (Omit<Candidate, 'kind'> & { kind: FoundKind; where?: string; repo: string }) | null {
+/** The project's database in one repo, or null when its files say nothing about one. `partFiles`: the part's env files. */
+function findIn(root: string, repo: string, partFiles: string[] = []): (Omit<Candidate, 'kind' | 'beside'> & { kind: FoundKind; where?: string; repo: string }) | null {
   const dir = path.join(root, repo);
   const files = filesOf(dir);
   const prisma = prismaSources(dir, files.prisma);
   const compose = composeDbs(dir, files.compose);
   const kinds = packageKinds(dir, files);
   const reads = codeReads(dir, files.code);
-  // Env files: the person's own (.env, .env.local) hold the address their copy uses; examples only stand for them.
-  const env = files.env.map((f) => ({ file: f, example: EXAMPLE.test(f), pairs: envPairs(read(path.join(dir, f))) }));
-  const envValue = (name: string): { file: string; value: string; example: boolean } | undefined => {
+  // Env files: the part's own (env-file.ts) first, as the app gets its values from them, here and in Compose: each name
+  // from the last file that sets it. Then the person's own (.env, .env.local), which hold the address their copy uses;
+  // examples only stand for them.
+  const part = partFiles.length ? readEnvFiles(dir, partFiles, { unset: 'keep' }) : null;
+  const env = [
+    ...[...(part?.read ?? [])].reverse().map((f) => ({ file: f, example: false, part: true, pairs: new Map(Object.entries(part!.env).filter(([k]) => part!.fileOf[k] === f)) })),
+    ...files.env.filter((f) => !part?.read.includes(f)).map((f) => ({ file: f, example: EXAMPLE.test(f), part: false, pairs: envPairs(read(path.join(dir, f))) })),
+  ];
+  const envValue = (name: string): { file: string; value: string; example: boolean; part: boolean } | undefined => {
     const hits = env.filter((e) => e.pairs.has(name) && e.pairs.get(name) && !PLACEHOLDER.test(e.pairs.get(name)!));
-    const best = hits.find((e) => !e.example && !OTHER_PLACE.test(e.file)) ?? hits.find((e) => !e.example) ?? hits[0];
-    return best ? { file: best.file, value: best.pairs.get(name)!, example: best.example } : undefined;
+    const best = hits.find((e) => e.part) ?? hits.find((e) => !e.example && !OTHER_PLACE.test(e.file)) ?? hits.find((e) => !e.example) ?? hits[0];
+    return best ? { file: best.file, value: best.pairs.get(name)!, example: best.example, part: best.part } : undefined;
   };
   const envFileOf = (name: string): string => {
-    const own = env.find((e) => !e.example && !OTHER_PLACE.test(e.file) && e.pairs.has(name)) ?? env.find((e) => !e.example && e.pairs.has(name)) ?? env.find((e) => e.pairs.has(name));
+    const own = env.find((e) => e.part && e.pairs.has(name)) ?? env.find((e) => !e.example && !OTHER_PLACE.test(e.file) && e.pairs.has(name)) ?? env.find((e) => !e.example && e.pairs.has(name)) ?? env.find((e) => e.pairs.has(name));
     return own ? realEnvFile(own.file) : '.env';
   };
   const candidates: Candidate[] = [];
@@ -515,7 +519,7 @@ function findIn(root: string, repo: string): (Omit<Candidate, 'kind'> & { kind: 
       const asked = [...reads.connection].some((n) => k.key === `ConnectionStrings:${n}`);
       const kind = kindOf(k.value) ?? undefined;
       const name = k.name ?? readAddress(k.value).name;
-      candidates.push({ setting: { file: f, key: k.key, env: k.key.split(':').join('__') }, address: k.value, ...(kind ? { kind } : {}), ...(name ? { name } : {}), from: [f], score: 40 + (asked ? 5 : 0) + (/development/i.test(f) ? 2 : 0) });
+      candidates.push({ setting: { file: f, key: k.key, env: k.key.split(':').join('__') }, address: k.value, ...(kind ? { kind } : {}), ...(name ? { name } : {}), ...(k.name ? { beside: k.name } : {}), from: [f], score: 40 + (asked ? 5 : 0) + (/development/i.test(f) ? 2 : 0) });
     }
   }
 
@@ -525,7 +529,7 @@ function findIn(root: string, repo: string): (Omit<Candidate, 'kind'> & { kind: 
       let address = k.value || undefined;
       if (address && k.user && !readAddress(address).password) address = address.replace(/^((?:jdbc:)?[a-z][\w+.-]*:\/\/)/i, `$1${encodeURIComponent(k.user)}${k.pass ? `:${encodeURIComponent(k.pass)}` : ''}@`);
       const kind = address ? (kindOf(address) ?? undefined) : undefined;
-      candidates.push({ setting: { file: f, key: k.key, env: envName }, ...(address ? { address } : {}), ...(kind ? { kind } : {}), ...(k.db ? { name: k.db } : {}), from: [f], score: 40 + (/(?:^|\/)application\.(?:properties|ya?ml)$/.test(f) ? 2 : 0) });
+      candidates.push({ setting: { file: f, key: k.key, env: envName }, ...(address ? { address } : {}), ...(kind ? { kind } : {}), ...(k.db ? { name: k.db, beside: k.db } : {}), from: [f], score: 40 + (/(?:^|\/)application\.(?:properties|ya?ml)$/.test(f) ? 2 : 0) });
     }
   }
 
@@ -533,13 +537,17 @@ function findIn(root: string, repo: string): (Omit<Candidate, 'kind'> & { kind: 
   const named = new Set<string>();
   for (const e of env) for (const [k, v] of e.pairs) if ((DB_ENV.test(k) && !NOT_THE_APPS.test(k)) || (kindOf(v) && /:\/\//.test(v) && !NOT_THE_APPS.test(k))) named.add(k);
   // An env file of this computer with the same name as a settings key (ConnectionStrings__Main): .NET reads it over its
-  // own settings file, and so does the app squad-kit starts, so that address is the one the app uses.
+  // own settings file, and so do Compose and the app squad-kit starts, so the setting is that name in that file, and its
+  // address the one the app uses. The name comes from that address, or from beside the key, never from the address
+  // the env file overrides. The part's own env file counts whatever its name.
   for (const c of candidates) {
     const v = c.setting.key && c.setting.env ? envValue(c.setting.env) : undefined;
-    if (!v || v.example || OTHER_PLACE.test(v.file) || !kindOf(v.value)) continue;
+    if (!v || v.example || (!v.part && OTHER_PLACE.test(v.file)) || !kindOf(v.value)) continue;
+    c.setting = { env: c.setting.env!, file: v.file };
     c.address = v.value;
-    const name = readAddress(v.value).name;
+    const name = readAddress(v.value).name ?? c.beside;
     if (name) c.name = name;
+    else delete c.name;
     c.from.push(v.file);
   }
   for (const k of named) {
@@ -563,13 +571,14 @@ function findIn(root: string, repo: string): (Omit<Candidate, 'kind'> & { kind: 
 
   const db = compose.dbs[0];
   if (!candidates.length && !db) return null;
-  const best = candidates.sort((a, b) => b.score - a.score)[0] ?? { setting: {}, from: [], score: 10 };
+  const { beside: _beside, ...best } = candidates.sort((a, b) => b.score - a.score)[0] ?? ({ setting: {}, from: [], score: 10 } as Candidate);
   // The kind: the address says best, then the ORM's provider, the database the compose file runs, the packages.
   const kind = (best.address ? kindOf(best.address) : null) ?? best.kind ?? prisma.find((p) => p.kind)?.kind ?? db?.kind ?? kinds[0];
   if (!kind) return null;
   const own = db && db.kind === kind ? db : undefined;
-  // An address with the compose file's host name in it (db:5432) is reached here through the published port.
-  const address = best.address && !(own && readAddress(best.address).host === own.service) ? best.address : (own?.address ?? best.address);
+  // An address with a compose service's name in it (db:5432) stays as written: squad-kit reaches it through the port the
+  // service publishes here (service-hosts.ts). With none, the compose file's own database stands for it.
+  const address = best.address ?? own?.address;
   const said = address ? readAddress(address) : { password: false, name: undefined, host: undefined, port: undefined };
   const name = best.name ?? said.name ?? own?.name;
   const where = own ? `the ${own.service} service in ${own.file}${own.port ? `, on port ${own.port}` : ''}` : kind === 'sqlite' ? 'a file in the project' : said.host ? `${said.host}${said.port ? `:${said.port}` : ''}` : undefined;
@@ -579,10 +588,10 @@ function findIn(root: string, repo: string): (Omit<Candidate, 'kind'> & { kind: 
 
 /**
  * The project's database, from the files of each repo: the repo whose files say the most wins. A database squad-kit
- * cannot copy yet (SQL Server) is said, and not learned.
+ * cannot copy yet (SQL Server) is said, and not learned. `envFiles`: each repo's part env files (env-file.ts).
  */
-export function findDatabase(root: string, repos: string[]): DatabaseLook {
-  const found = repos.map((r) => findIn(root, r)).filter((x): x is NonNullable<ReturnType<typeof findIn>> => Boolean(x)).sort((a, b) => b.score - a.score);
+export function findDatabase(root: string, repos: string[], envFiles: Record<string, string[]> = {}): DatabaseLook {
+  const found = repos.map((r) => findIn(root, r, envFiles[r])).filter((x): x is NonNullable<ReturnType<typeof findIn>> => Boolean(x)).sort((a, b) => b.score - a.score);
   const best = found[0];
   if (!best) return { found: null };
   if (best.kind === 'sqlserver') return { found: null, later: 'This project uses SQL Server. A database of its own for each story comes for SQL Server in a later version; until then stories use it as before.' };
@@ -602,6 +611,10 @@ const DB_WORDS = /data ?base|db|mongo|catalog|schema|connect|client/i;
 /** Names too common to look for in the code: `"postgres"` there is mostly the kind, not the database. */
 const COMMON_NAMES = new Set(['postgres', 'postgresql', 'mysql', 'mariadb', 'mongo', 'mongodb', 'test', 'admin', 'app', 'db', 'database', 'default', 'main', 'local', 'dev']);
 const TEST_PATH = /(?:^|\/)(?:tests?|__tests__|spec|specs|e2e)\/|[.-](?:test|spec)\.[a-z]+$|Tests?\.(?:cs|fs|java|kt)$|(?:^|\/)test_[^/]*\.py$|_test\.(?:py|go)$/i;
+/** A .NET test project's folder, named the .NET way: Shop.Tests/, Orders.UnitTests/, Web.Api.Integration.Test/, IntegrationTests/. */
+const DOTNET_TESTS = /(?:^|\/)(?:[^/]*\.)?(?:[A-Z][A-Za-z0-9]*)?Tests?\/|(?:^|\/)[^/]*\.tests?\//;
+/** Test code: the databases it names or opens are its own, never the one the app runs with. */
+const isTestCode = (file: string): boolean => TEST_PATH.test(file) || DOTNET_TESTS.test(file);
 const SERVER_KINDS: DbKind[] = ['postgres', 'mysql', 'mongo'];
 /** The most one look in the code takes; a repo too big for it is looked at no further. */
 const GREP_MS = 20_000;
@@ -652,6 +665,7 @@ function composeSets(dir: string, files: string[], name: string): { file: string
  * names the database itself or opens one by a name of its own, the address names no database at all, or a compose
  * file builds the setting from other settings. Then the story would write to the person's own database whatever
  * squad-kit points it at, so stories use the database as before. Undefined when squad-kit sees nothing of the kind.
+ * Test code is left out: what it names is its own test database, not the app's.
  * Only a server's database: a SQLite file is in each copy already. A quick look: git grep, and the files findDatabase reads.
  */
 export function storyCopyIgnored(dir: string, db: { kind: DbKind; name?: string; setting: DatabaseSetting }, address?: string): string | undefined {
@@ -664,13 +678,14 @@ export function storyCopyIgnored(dir: string, db: { kind: DbKind; name?: string;
     // A connection string may carry the database's name as its own (GetConnectionString("shop")): that reads the setting.
     const reads = (text: string) => text.replace(/\bGetConnectionString\s*\(\s*(["'`])[^"'`]*\1\s*\)|\bConnectionStrings[:_]+\w+/g, '');
     const hits = grepLines(dir, ['-F', ...quoted.flatMap((q) => ['-e', q])])
+      .filter((h) => !isTestCode(h.file))
       .map((h) => ({ ...h, text: reads(h.text) }))
       .filter((h) => quoted.some((q) => h.text.includes(q)) && DB_WORDS.test(quoted.reduce((t, q) => t.split(q).join(''), h.text)));
     const at = (h: { file: string; line: string }) => `${h.file}:${h.line}`;
     if (hits.length) return `The code names the database ${name} itself, in ${hits.length === 1 ? at(hits[0]!) : `${hits.length} places like ${at(hits[0]!)}`}, so it would not use a story's own copy under another name. ${takes}`;
   }
   for (const h of grepLines(dir, ['-E', '-e', OPENS_GREP])) {
-    const other = TEST_PATH.test(h.file) ? undefined : OPENS.exec(h.text)?.[2];
+    const other = isTestCode(h.file) ? undefined : OPENS.exec(h.text)?.[2];
     if (other) return `The code opens the database ${other} by its name, in ${h.file}:${h.line}, so it would not use a story's own copy under another name. ${takes}`;
   }
   const files = filesOf(dir);

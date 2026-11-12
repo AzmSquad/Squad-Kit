@@ -308,6 +308,8 @@ describe("a story's own database", () => {
     const wt = addWorktree(root, 'CL-1', 'main');
     const r = await S.setUpStoryDb(bp, 'CL-1', wt.dir, '.');
     expect(r).toMatchObject({ state: 'as-before', why: expect.stringContaining(`CL-1 uses the database as before. ${why}`) });
+    // The database is on this computer: engineers read that the story uses their own data.
+    expect(r).toMatchObject({ why: expect.stringContaining("That is your own database on this computer: the story's app and tests can change its data.") });
     expect(fake.made).toEqual([]);
     expect(copyDbEnv(wt.dir)).toEqual({});
     const v = S.databaseView(bp);
@@ -672,11 +674,61 @@ describe('only on this computer', () => {
     sh('git add -A && git -c user.name=t -c user.email=t@t commit -qm dotnet');
     write('.env.dev', 'ConnectionStrings__Clinic=Host=localhost;Port=5433;Database=clinic_dev;Username=clinic\n');
     S.learnDatabase(bp);
-    expect(readMeta(bp).database).toMatchObject({ kind: 'postgres', setting: { file: 'appsettings.json', key: 'ConnectionStrings:Clinic' }, address: 'Host=localhost;Port=5433;Database=clinic_dev;Username=clinic', from: ['appsettings.json', '.env.dev'] });
+    expect(readMeta(bp).database).toMatchObject({ kind: 'postgres', setting: { env: 'ConnectionStrings__Clinic', file: '.env.dev' }, address: 'Host=localhost;Port=5433;Database=clinic_dev;Username=clinic', from: ['appsettings.json', '.env.dev'] });
     S.confirmDatabase(bp, 'Momen');
     const wt = addWorktree(root, 'CL-1', 'main');
     const r = await S.setUpStoryDb(bp, 'CL-1', wt.dir, '.');
     expect(r).toMatchObject({ state: 'as-before', say: "This story's copy has no .env.dev, so its app falls back to the database in appsettings.json, which is on another computer (203.0.113.7). An engineer can add .env.dev as a local file in Settings, with values for stories." });
+  });
+});
+
+describe("a part's env file that fills its address from other settings", () => {
+  /** A .NET API whose daily stack runs in Compose: the database address in appsettings.json is another computer's. */
+  function ordersApi(address: string): void {
+    fs.rmSync(path.join(root, 'prisma'), { recursive: true });
+    fs.rmSync(path.join(root, '.env'));
+    write('.gitignore', '.env\n.env.dev\n.squad/\nnode_modules\n');
+    write('docker-compose.yml', 'services:\n  api:\n    build: .\n    env_file: .env.dev\n  orders-db:\n    image: mongo:7\n    ports: ["27019:27017"]\n');
+    write('Orders.Api/appsettings.json', JSON.stringify({ ConnectionStrings: { Orders: 'mongodb://orders:remote-pass@203.0.113.7:27017/orders' } }));
+    write('Orders.Api/Program.cs', 'var cs = builder.Configuration.GetConnectionString("Orders");\nvar db = new MongoClient(cs).GetDatabase(MongoUrl.Create(cs).DatabaseName);\n');
+    // Its tests name the database themselves: that is the tests' own business.
+    write('Orders.Api.Integration.Test/Fixture.cs', 'var db = client.GetDatabase("orders");\n');
+    sh('git add -A && git -c user.name=t -c user.email=t@t commit -qm dotnet');
+    write('.env.dev', `MONGO_USER=orders\nMONGO_PASSWORD=orders-pass\nMONGO_HOST=orders-db\nMONGO_PORT=27017\nConnectionStrings__Orders=${address}\n`);
+    writeMeta(bp, { ...readMeta(bp), commands: { envFile: '.env.dev' } });
+  }
+
+  it('is learned from that file, filled in, and each story gets its own copy through the port Compose publishes', async () => {
+    ordersApi('mongodb://${MONGO_USER}:${MONGO_PASSWORD}@${MONGO_HOST}:${MONGO_PORT}/orders?authMechanism=SCRAM-SHA-256');
+    S.learnDatabase(bp);
+    expect(readMeta(bp).database).toMatchObject({ kind: 'mongo', name: 'orders', setting: { env: 'ConnectionStrings__Orders', file: '.env.dev' }, where: 'the orders-db service in docker-compose.yml, on port 27019' });
+    expect(S.personsAddress(bp)).toBe('mongodb://orders:orders-pass@orders-db:27017/orders?authMechanism=SCRAM-SHA-256');
+    expect(fs.readFileSync(bp.configFile, 'utf8')).not.toContain('orders-pass');
+    S.confirmDatabase(bp, 'Momen');
+    await S.makeDbTemplate(bp, 'Momen');
+    expect(S.databaseView(bp).template?.source).toBe('mongodb://orders:***@localhost:27019/orders?authMechanism=SCRAM-SHA-256');
+    const wt = addWorktree(root, 'CL-1', 'main');
+    expect(await S.setUpStoryDb(bp, 'CL-1', wt.dir, '.')).toMatchObject({ state: 'own', name: 'orders_cl_1' });
+    expect(copyDbEnv(wt.dir)).toEqual({ ConnectionStrings__Orders: 'mongodb://orders:orders-pass@localhost:27019/orders_cl_1?authMechanism=SCRAM-SHA-256' });
+    // The copy's own .env.dev keeps the service's name, for an app that Compose runs there.
+    expect(fs.readFileSync(path.join(wt.dir, '.env.dev'), 'utf8')).toBe('ConnectionStrings__Orders=mongodb://orders:orders-pass@orders-db:27017/orders_cl_1?authMechanism=SCRAM-SHA-256\n');
+  });
+
+  it("with no database's name in it: stories use it as before, engineers are told why, and no password shows", async () => {
+    ordersApi('mongodb://${MONGO_USER}:${MONGO_PASSWORD}@${MONGO_HOST}:${MONGO_PORT}/?authMechanism=SCRAM-SHA-256');
+    S.learnDatabase(bp);
+    expect(readMeta(bp).database).toMatchObject({ kind: 'mongo', setting: { env: 'ConnectionStrings__Orders', file: '.env.dev' } });
+    expect(readMeta(bp).database?.name).toBeUndefined();
+    S.confirmDatabase(bp, 'Momen');
+    await expect(S.makeDbTemplate(bp, 'Momen')).rejects.toThrow('The address in .env.dev names no database');
+    expect(fake.templates).toEqual([]);
+    const wt = addWorktree(root, 'CL-1', 'main');
+    expect((await S.setUpStoryDb(bp, 'CL-1', wt.dir, '.')).state).toBe('as-before');
+    expect(copyDbEnv(wt.dir)).toEqual({});
+    const v = S.databaseView(bp);
+    expect(v.blocked).toContain('The address in .env.dev names no database');
+    expect(v.notes.map((n) => n.text).join('\n')).toContain('CL-1 uses the database as before.');
+    expect(JSON.stringify(v)).not.toContain('orders-pass');
   });
 });
 

@@ -67,6 +67,14 @@ describe('addresses, in the forms apps write them', () => {
     expect(() => readAddress('mongo', 'mongodb://localhost:27017')).toThrow(/names no database/);
   });
 
+  it("a Mongo story's address stays valid with a ? or & already there, and a link with no name gets none", () => {
+    expect(readAddress('mongo', 'mongodb://u:p@h:27017/orders?').withName('orders_s_1')).toBe('mongodb://u:p@h:27017/orders_s_1?authSource=orders');
+    expect(readAddress('mongo', 'mongodb://u:p@h:27017/orders?w=1&').withName('orders_s_1')).toBe('mongodb://u:p@h:27017/orders_s_1?w=1&authSource=orders');
+    expect(dbAdapter('mongo').storyAddress('mongodb://u:p@h:27017/orders?authMechanism=SCRAM-SHA-256', { id: 'S-1' })).toBe('mongodb://u:p@h:27017/orders_s_1?authMechanism=SCRAM-SHA-256&authSource=orders');
+    // No name to give it another of: refused in plain words before any story address is made.
+    expect(() => dbAdapter('mongo').storyAddress('mongodb://u:p@h:27017/?authMechanism=SCRAM-SHA-256', { id: 'S-1' })).toThrow(/names no database/);
+  });
+
   it('reads SQLite files in their forms, and only by a full path', () => {
     expect(readAddress('sqlite', 'file:/srv/app/dev.db').withName('/tmp/x.db')).toBe('file:/tmp/x.db');
     expect(readAddress('sqlite', 'sqlite:////srv/app/dev.db').name).toBe('/srv/app/dev.db');

@@ -105,9 +105,14 @@ function writeCopyFile(dir: string, w: CopyWiring): void {
   }
 }
 
-/** An env file's value, in quotes when it needs them. */
+/**
+ * An env file's value, in quotes when it needs them, to read back as it is: Compose and squad-kit fill in a `$NAME` in
+ * double quotes, so a `$` goes in single quotes, which keep it as written, or else as `\$`.
+ */
 function envValue(v: string): string {
-  return /[\s#"'\\$`]/.test(v) ? `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : v;
+  if (!/[\s#"'\\$`]/.test(v)) return v;
+  if (v.includes('$') && !/['\r\n]/.test(v) && !v.endsWith('\\')) return `'${v}'`;
+  return `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$')}"`;
 }
 
 /** Sets one key in a settings file, keeping the rest as it is. A file that is not there yet is made, for this computer only. */

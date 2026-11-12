@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.14] — 2026-11-12
+
+### Fixed
+
+- **A part's env file fills in `${NAME}` the way Docker Compose does,** so a line like
+  `ConnectionStrings__Db=mongodb://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:27017/shop` gives the app the real address:
+  from names set earlier in the same files, with `${NAME:-default}`, `$$` for a `$`, and single quotes kept as written.
+  A name nothing sets is empty, as in Compose. squad-kit's own keys never fill a value, the log still shows names only,
+  and an address squad-kit writes into an env file with a `$` in it reads back as written.
+- **`squad db find` learns the database from the part's env file** when it sets the same setting as `appsettings.json`
+  (.NET and Compose read it first). The setting is that name in that file, and a Compose service in its address is
+  reached through the port it publishes here. Before, it learned the settings file's address, often another computer's.
+- **Test code no longer stops stories from getting their own database.** A database named in tests, .NET test projects
+  like `Orders.Tests/` or `Shop.IntegrationTests/` included, is the tests' own; app code that names it still counts.
+- **A Mongo story's address always says where its user signs in:** no stray `&` after a `?` at the end, and `admin`
+  for an address with no database name.
+- When a story cannot get its own copy and uses the project's database on this computer, engineers read plainly that
+  it is their own database, which the story's app and tests can change.
+
 ## [1.3.13] — 2026-11-11
 
 ### Added
@@ -1651,7 +1670,8 @@ First public release.
 - Plan-generation meta-prompt (`generate-plan.md`), intake template (`intake.md`), and plan skeleton reference (`story-skeleton.md`).
 - Documentation: `docs/philosophy.md`, `docs/getting-started.md`, `docs/customization.md`, `docs/vs-spec-kit.md`.
 
-[Unreleased]: https://github.com/AzmSquad/squad-kit/compare/v1.3.13...HEAD
+[Unreleased]: https://github.com/AzmSquad/squad-kit/compare/v1.3.14...HEAD
+[1.3.14]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.3.14
 [1.3.13]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.3.13
 [1.3.12]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.3.12
 [1.3.11]: https://github.com/AzmSquad/squad-kit/releases/tag/v1.3.11

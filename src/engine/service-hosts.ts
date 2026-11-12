@@ -7,7 +7,7 @@ import { isCompose } from './compose-run.js';
 import { kindOfAddress, normalHost, readAddress } from './db/address.js';
 import type { DbKind } from './db/types.js';
 import { ownDbWired } from './db-env.js';
-import { envFilesIn } from './env-file.js';
+import { envFilesIn, parseEnvFile } from './env-file.js';
 import { kindOf } from './find-database.js';
 
 /**
@@ -424,7 +424,7 @@ export interface AppSetting extends Setting {
   kind: AddressKind;
 }
 
-/** KEY=value lines of an env file, quotes taken off. */
+/** KEY=value lines, quotes taken off: application.properties, once its `:` reads as `=`. */
 function envPairs(text: string): [string, string][] {
   const out: [string, string][] = [];
   for (const line of text.split(/\r?\n/)) {
@@ -476,7 +476,8 @@ function envFilesOf(doc: ComposeDoc, s: Record<string, unknown>): string[] {
  * The app's settings, as a folder has them: the part's own env file (env-file.ts), the env files compose gives its
  * services and the folder's own (`.env`, `.env.dev`), the compose services' own environment, .NET's appsettings and
  * Spring's application.properties. Files for other places (prod, beta, staging) are left out. When two say the same
- * name, the first wins, in that order.
+ * name, the first wins, in that order. An env file's `$NAME`s are filled in as Compose fills them (env-file.ts), from
+ * the env files read before it and its own lines; a value that names a setting none of them sets stays as written.
  */
 export function settingsIn(dir: string): Setting[] {
   const files = filesOf(dir);
@@ -488,7 +489,13 @@ export function settingsIn(dir: string): Setting[] {
   };
   const services = docs.flatMap((d) => Object.values(d.services).map((s) => ({ doc: d, s: (s ?? {}) as Record<string, unknown> })));
   const envFiles = [...new Set([...envFilesIn(dir), ...services.flatMap(({ doc, s }) => envFilesOf(doc, s)), ...files.env])];
-  for (const f of envFiles) for (const [k, v] of envPairs(read(path.join(dir, f)))) add(k, v, f, k, 'env');
+  const seen: Record<string, string> = {};
+  for (const f of envFiles) {
+    for (const [k, v] of parseEnvFile(read(path.join(dir, f)), { before: seen, unset: 'keep' })) {
+      seen[k] = v;
+      add(k, v, f, k, 'env');
+    }
+  }
   for (const { doc, s } of services) {
     const env = s.environment;
     const pairs: [string, unknown][] = Array.isArray(env) ? env.map((e) => String(e)).filter((e) => e.includes('=')).map((e) => [e.slice(0, e.indexOf('=')), e.slice(e.indexOf('=') + 1)]) : env && typeof env === 'object' ? Object.entries(env as Record<string, unknown>) : [];

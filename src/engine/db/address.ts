@@ -377,8 +377,10 @@ function readMongoLink(text: string, link: Link): Address {
     hosts: link.hosts,
     srv: link.scheme === 'mongodb+srv',
     withName: (n) => {
-      // The name in a link is also where Mongo looks for the user, unless the link says otherwise: keep that the same.
-      const keep = link.user && !params.authsource ? `${link.query ? '&' : '?'}authSource=${encodeURIComponent(link.path)}` : '';
+      // The name in a link is also where Mongo looks for the user, unless the link says otherwise: keep that the same. A
+      // link with no name signs in on admin. A `?` or `&` already at the end takes the setting as it is.
+      const sep = !link.query ? '?' : /[?&]$/.test(link.query) ? '' : '&';
+      const keep = link.user && !params.authsource ? `${sep}authSource=${encodeURIComponent(link.path || 'admin')}` : '';
       const q = link.query + keep;
       return link.before + encodeURIComponent(n) + q + link.after.slice(link.query.length);
     },

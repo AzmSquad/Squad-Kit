@@ -90,7 +90,7 @@ describe('a .NET project', () => {
     expect(found).toMatchObject({ kind: 'mongo', name: 'cases', setting: { file: 'appsettings.Development.json', key: 'MongoSettings:ConnectionString', env: 'MongoSettings__ConnectionString' } });
   });
 
-  it("takes this computer's env file over the address in appsettings.json, and never a file for another place", () => {
+  it("takes this computer's env file over the address in appsettings.json: the setting is that name in that file, never a file for another place", () => {
     write('Api.csproj', '<Project><ItemGroup><PackageReference Include="MongoDB.Driver" Version="2.0.0" /></ItemGroup></Project>');
     write('appsettings.json', '{ "ConnectionStrings": { "Shop": "mongodb://admin:pw@203.0.113.7:27018/shop" } }');
     write('docker-compose.yml', 'services:\n  api:\n    build: .\n    env_file: .env.dev\n  app.db:\n    image: mongo:7\n    ports: ["27017:27017"]\n');
@@ -98,8 +98,46 @@ describe('a .NET project', () => {
     write('.env.dev', 'ConnectionStrings__Shop=mongodb://shop:pw@app.db:27017/shop?authSource=admin\n');
     write('.env.prod', 'ConnectionStrings__Shop=mongodb://shop:pw@10.0.0.9:27017/shop\n');
     const { found } = look();
-    expect(found).toMatchObject({ kind: 'mongo', name: 'shop', address: 'mongodb://shop:pw@app.db:27017/shop?authSource=admin', setting: { file: 'appsettings.json', key: 'ConnectionStrings:Shop', env: 'ConnectionStrings__Shop' } });
+    expect(found).toMatchObject({ kind: 'mongo', name: 'shop', address: 'mongodb://shop:pw@app.db:27017/shop?authSource=admin', where: 'the app.db service in docker-compose.yml, on port 27017' });
+    expect(found!.setting).toEqual({ env: 'ConnectionStrings__Shop', file: '.env.dev' });
     expect(found!.from).toEqual(expect.arrayContaining(['appsettings.json', '.env.dev']));
+  });
+
+  const ordersApi = () => {
+    write('Orders.Api/Orders.Api.csproj', '<Project><ItemGroup><PackageReference Include="MongoDB.Driver" Version="2.0.0" /></ItemGroup></Project>');
+    write('Orders.Api/appsettings.json', '{ "ConnectionStrings": { "OrdersDb": "mongodb://admin:remote-pw@203.0.113.7:27017/orders_remote" } }');
+    write('Orders.Api/Program.cs', 'var cs = builder.Configuration.GetConnectionString("OrdersDb");\n');
+    write('docker-compose.yml', 'services:\n  api:\n    build: .\n    env_file: deploy/dev.env\n  orders-db:\n    image: mongo:7\n    environment:\n      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER}\n    ports: ["27019:27017"]\n');
+  };
+  const ordersEnv = (tail: string) => `MONGO_USER=orders\nMONGO_PASSWORD=orders-pw\nMONGO_HOST=orders-db\nMONGO_PORT=27017\nConnectionStrings__OrdersDb=mongodb://\${MONGO_USER}:\${MONGO_PASSWORD}@\${MONGO_HOST}:\${MONGO_PORT}${tail}?authMechanism=SCRAM-SHA-256\n`;
+
+  it("learns from the part's env file, whatever its name, with its address filled in from the file's other settings", () => {
+    ordersApi();
+    write('deploy/dev.env', ordersEnv('/orders'));
+    // Not the part's env file, and not named like one: the settings file's address, as before.
+    expect(look().found).toMatchObject({ name: 'orders_remote', setting: { file: 'Orders.Api/appsettings.json', key: 'ConnectionStrings:OrdersDb' } });
+    const { found } = findDatabase(root, ['.'], { '.': ['deploy/dev.env'] });
+    expect(found).toMatchObject({ kind: 'mongo', name: 'orders', address: 'mongodb://orders:orders-pw@orders-db:27017/orders?authMechanism=SCRAM-SHA-256', where: 'the orders-db service in docker-compose.yml, on port 27019' });
+    expect(found!.setting).toEqual({ env: 'ConnectionStrings__OrdersDb', file: 'deploy/dev.env' });
+    expect(found!.from).toEqual(expect.arrayContaining(['Orders.Api/appsettings.json', 'deploy/dev.env']));
+  });
+
+  it("an env file's address with no database's name in it: no name from the address it overrides, and no copy for stories", () => {
+    ordersApi();
+    write('.env.dev', ordersEnv('/'));
+    const { found } = findDatabase(root, ['.'], { '.': ['.env.dev'] });
+    expect(found).toMatchObject({ kind: 'mongo', address: 'mongodb://orders:orders-pw@orders-db:27017/?authMechanism=SCRAM-SHA-256', setting: { env: 'ConnectionStrings__OrdersDb', file: '.env.dev' } });
+    expect(found!.name).toBeUndefined();
+    execSync('git init -q -b main && git add -A && git -c user.name=t -c user.email=t@t commit -qm start', { cwd: root, stdio: 'ignore' });
+    expect(storyCopyIgnored(root, found!, found!.address)).toContain('The address in .env.dev names no database');
+  });
+
+  it('an env file value that names a setting nothing sets is no address, as before', () => {
+    write('package.json', JSON.stringify({ dependencies: { pg: '8.0.0' } }));
+    write('.env', 'DATABASE_URL=postgres://${DB_USER}@localhost:5432/orders\n');
+    write('src/db.ts', 'export const pool = new Pool({ connectionString: process.env.DATABASE_URL });\n');
+    expect(look().found).toMatchObject({ setting: { env: 'DATABASE_URL', file: '.env' } });
+    expect(look().found!.address).toBeUndefined();
   });
 
   it('says plainly that SQL Server comes later, and learns nothing', () => {
@@ -191,6 +229,24 @@ describe('whether the app would use a story\'s own copy', () => {
     write('src/conn.js', "mongoose.connect(process.env.MONGO_URL, { dbName: 'other' });\n");
     commit();
     expect(storyCopyIgnored(root, MONGO, ADDRESS)).toContain('The code opens the database other by its name, in src/conn.js:1');
+  });
+
+  it('test code is left out, .NET test projects too; the same lines in the app count', () => {
+    write('Web.Api.Integration.Test/Fixture.cs', 'var db = client.GetDatabase("shop");\nprivate const string DatabaseName = "shop";\n');
+    write('Orders.UnitTests/Repository.cs', 'private const string DatabaseName = "shop";\n');
+    write('MyApp.Tests/Setup.cs', 'var db = client.GetDatabase("scratch");\n');
+    write('Shop.IntegrationTests/Db.cs', 'var db = mongo.GetDatabase("shop_it");\n');
+    write('IntegrationTests/Seed.cs', 'const string DatabaseName = "shop";\n');
+    write('test/db.spec.ts', 'const databaseName = "shop";\n');
+    write('src/Shop.Api/Db.cs', 'var db = client.GetDatabase(MongoUrl.Create(configuration.GetConnectionString("Shop")).DatabaseName);\n');
+    commit();
+    expect(storyCopyIgnored(root, MONGO, ADDRESS)).toBeUndefined();
+    write('src/Contests/Repo.cs', 'private const string DatabaseName = "shop";\n');
+    commit();
+    expect(storyCopyIgnored(root, MONGO, ADDRESS)).toContain('The code names the database shop itself, in src/Contests/Repo.cs:1');
+    write('src/Contests/Repo.cs', 'var db = client.GetDatabase("audit");\n');
+    commit();
+    expect(storyCopyIgnored(root, MONGO, ADDRESS)).toContain('The code opens the database audit by its name, in src/Contests/Repo.cs:1');
   });
 
   it('an address that names no database', () => {

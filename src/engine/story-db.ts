@@ -183,7 +183,9 @@ export function learnDatabase(bp: BoardPaths, opts: { again?: boolean } = {}): {
   const meta = readMeta(bp);
   const before = meta.database;
   if (before?.confirmed && !opts.again) return { database: before, changed: false };
-  const look = findDatabase(bp.root, reposOf(meta).map((r) => r.path));
+  // The part's env file is where the app gets its settings first (env-file.ts): its address wins over a settings file's.
+  const repos = reposOf(meta).map((r) => r.path);
+  const look = findDatabase(bp.root, repos, Object.fromEntries(repos.map((r) => [r, repoEnvFiles(meta, r)])));
   if (!look.found) {
     if (look.later) noteForEngineers(bp, look.later);
     return { ...(before ? { database: before } : {}), changed: false, ...(look.later ? { later: look.later } : {}) };
@@ -392,7 +394,7 @@ export type StoryDbResult =
 /** How the copy's own settings file is written, or null when it is not a form squad-kit writes. */
 function formOf(file: string): SettingForm | null {
   const base = path.posix.basename(file);
-  if (/^\.env(?:\.|$)/.test(base)) return 'env';
+  if (/^\.env(?:\.|$)/.test(base) || base.endsWith('.env')) return 'env';
   if (base.endsWith('.properties')) return 'properties';
   if (base.endsWith('.json')) return 'json';
   return null;
@@ -440,7 +442,20 @@ function keepOutOfCommits(dir: string, db: ProjectDatabase, address: string): vo
   if (file) markDbMade(dir, SQLITE_BESIDE.map((end) => `${path.resolve(dir, file)}${end}`));
 }
 
-function asBefore(bp: BoardPaths, story: string, why: string, say?: string): StoryDbResult {
+/** The person's own database is a server on this computer (not a SQLite file, which each copy has its own of). */
+function ownServerHere(bp: BoardPaths): boolean {
+  try {
+    const db = readMeta(bp).database;
+    const own = db && db.kind !== 'sqlite' ? personsAddress(bp, db) : undefined;
+    return !!(db && own && placeOf(bp, db, own).here);
+  } catch {
+    return false;
+  }
+}
+
+function asBefore(bp: BoardPaths, story: string, why: string, say?: string, away = false): StoryDbResult {
+  // On a server on this computer, "as before" is the person's own data: engineers read that plainly.
+  if (!away && ownServerHere(bp)) why = `${why} That is your own database on this computer: the story's app and tests can change its data.`;
   noteForEngineers(bp, why, story);
   return { state: 'as-before', why: scrub(bp, why), ...(say ? { say: scrub(bp, say) } : {}) };
 }
@@ -499,7 +514,7 @@ function fellBack(bp: BoardPaths, story: string, dir: string, repo: string): Sto
   const place = placeOf(bp, db, got.value);
   if (place.here) return null;
   const say = `This story's copy has no ${missing}, so its app falls back to the database in ${got.file}, which is on another computer (${place.host}). An engineer can add ${missing} as a local file in Settings, with values for stories.`;
-  return asBefore(bp, story, say, say);
+  return asBefore(bp, story, say, say, true);
 }
 
 async function ownDatabase(bp: BoardPaths, story: string, dir: string, repo: string): Promise<StoryDbResult> {

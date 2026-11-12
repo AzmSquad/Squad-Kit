@@ -9,6 +9,7 @@ import { seedDemoBoard } from '../src/board/demo.js';
 import { buildPaths } from '../src/core/paths.js';
 import { mountBoardApi } from '../src/console/api/board.js';
 import { runEnvFile } from '../src/commands/env-file.js';
+import { writeSetting } from '../src/engine/db-env.js';
 import { envFileProblem, envFileSetting, envFilesFor, envFilesIn, envFilesOf, parseEnvFile, readEnvFiles, setEnvFile } from '../src/engine/env-file.js';
 import { harnessView } from '../src/engine/harness.js';
 import { hiddenFiles } from '../src/engine/local-files.js';
@@ -47,7 +48,7 @@ afterEach(() => {
 });
 
 describe('reading an env file the way Docker Compose does', () => {
-  it('reads every form: export, quotes, comments, empty values, several lines, and no $NAME filled in', () => {
+  it('reads every form: export, quotes, comments, empty values, several lines', () => {
     const text = [
       '\uFEFF# the shop API on this computer',
       'export EXPORTED=yes',
@@ -61,7 +62,6 @@ describe('reading an env file the way Docker Compose does', () => {
       'DOUBLE="say \\"hi\\"\\nnext # kept" # a comment',
       'MULTI="first',
       'second"',
-      'DOLLAR=$HOME/shop',
       'ConnectionStrings__Shop=mongodb://shop:pw@app.db:27017/shop?authSource=admin',
       'Logging.Level-Name=Debug',
       'BARE',
@@ -79,10 +79,76 @@ describe('reading an env file the way Docker Compose does', () => {
       SINGLE: 'as $written \\n kept',
       DOUBLE: 'say "hi"\nnext # kept',
       MULTI: 'first\nsecond',
-      DOLLAR: '$HOME/shop',
       ConnectionStrings__Shop: 'mongodb://shop:pw@app.db:27017/shop?authSource=admin',
       'Logging.Level-Name': 'Debug',
     });
+  });
+
+  it('fills in $NAME the way Compose does: the environment first, then the lines before; single quotes as written', () => {
+    const text = [
+      'ORDERS_USER=orders',
+      'ORDERS_PASSWORD=orders-pw',
+      'ORDERS_HOST=orders-db',
+      'ORDERS_PORT=27017',
+      'EMPTY=',
+      'ORDERS_DB=mongodb://${ORDERS_USER}:${ORDERS_PASSWORD}@${ORDERS_HOST}:${ORDERS_PORT}/?authMechanism=SCRAM-SHA-256',
+      'BARE=$ORDERS_USER-x',
+      'QUOTED="${ORDERS_HOST}:$ORDERS_PORT" # a comment',
+      "SINGLE='${ORDERS_HOST}:$ORDERS_PORT'",
+      'ESCAPED="cost \\$5 and $$6"',
+      'DOLLARS=a$$b',
+      'LONE=price $ 5 $1',
+      'UNKNOWN=[${NOPE}][$NOPE]',
+      'SOFT=${NOPE:-fallback}|${EMPTY:-fallback}|${ORDERS_USER:-x}',
+      'HARD=${NOPE-fallback}|${EMPTY-fallback}',
+      'ALT=${ORDERS_USER:+set}|${EMPTY:+set}|${EMPTY+set}|${NOPE+set}',
+      'REQUIRED=${NOPE:?needed}|${NOPE?needed}|${ORDERS_USER:?needed}',
+      'NESTED=${NOPE:-${ORDERS_HOST:-x}:${ORDERS_PORT}}',
+      'BROKEN=${1X}|${OPEN',
+      'FROM_ENV=${SHOP_MODE}',
+      'ORDERS_HOST=later',
+      'AFTER=${ORDERS_HOST}',
+    ].join('\n');
+    // The environment comes first, as the shell's does for Compose: ORDERS_PORT is its 27018, not the line's 27017.
+    expect(Object.fromEntries(parseEnvFile(text, { env: { ORDERS_PORT: '27018', SHOP_MODE: 'dev' } }))).toEqual({
+      ORDERS_USER: 'orders',
+      ORDERS_PASSWORD: 'orders-pw',
+      ORDERS_HOST: 'later',
+      ORDERS_PORT: '27017',
+      EMPTY: '',
+      ORDERS_DB: 'mongodb://orders:orders-pw@orders-db:27018/?authMechanism=SCRAM-SHA-256',
+      BARE: 'orders-x',
+      QUOTED: 'orders-db:27018',
+      SINGLE: '${ORDERS_HOST}:$ORDERS_PORT',
+      ESCAPED: 'cost $5 and $6',
+      DOLLARS: 'a$b',
+      LONE: 'price $ 5 $1',
+      UNKNOWN: '[][]',
+      SOFT: 'fallback|fallback|orders',
+      HARD: 'fallback|',
+      ALT: 'set||set|',
+      REQUIRED: '||orders',
+      NESTED: 'orders-db:27018',
+      BROKEN: '${1X}|${OPEN',
+      FROM_ENV: 'dev',
+      AFTER: 'later',
+    });
+    // No environment is looked up unless given: nothing of squad-kit's own fills a value.
+    expect(Object.fromEntries(parseEnvFile('HOME_DIR=${HOME}/shop\n'))).toEqual({ HOME_DIR: '/shop' });
+  });
+
+  it('keeps a value as written when asked, if it names a setting nothing sets', () => {
+    const text = 'HOST=orders-db\nURL=mongodb://${HOST}/orders\nLOGIN="u:${MISSING}@x"\nAGAIN=${LOGIN}\nSOFT=${MISSING:-ok}\nSTRICT=${MISSING:?}\n';
+    expect(Object.fromEntries(parseEnvFile(text, { unset: 'keep' }))).toEqual({ HOST: 'orders-db', URL: 'mongodb://orders-db/orders', LOGIN: 'u:${MISSING}@x', AGAIN: '${LOGIN}', SOFT: 'ok', STRICT: '${MISSING:?}' });
+    expect(Object.fromEntries(parseEnvFile(text))).toMatchObject({ LOGIN: 'u:@x', AGAIN: 'u:@x', STRICT: '' });
+  });
+
+  it('a value squad-kit writes in an env file reads back as it is, with a $ in it too', () => {
+    const file = path.join(root, '.env.story');
+    for (const value of ['mongodb://orders:pa$word@localhost:27017/orders_s_1?authSource=orders', "it's $5", 'a$b\\', 'two words', 'plain', 'say "hi"\nnext']) {
+      writeSetting(file, 'env', 'ConnectionStrings__Orders', value);
+      expect(Object.fromEntries(parseEnvFile(fs.readFileSync(file, 'utf8'))).ConnectionStrings__Orders).toBe(value);
+    }
   });
 
   it('a quote that never closes is read as written', () => {
@@ -90,6 +156,14 @@ describe('reading an env file the way Docker Compose does', () => {
       ['OPEN', '"half'],
       ['NEXT', '1'],
     ]);
+  });
+
+  it('a later file fills in from the earlier ones, after the environment given, and says where each value is from', () => {
+    write('.env', 'ORDERS_HOST=orders-db\nORDERS_PORT=27017\n');
+    write('config/api.env', 'ORDERS_URL=mongodb://${ORDERS_HOST}:${ORDERS_PORT}/orders\nORDERS_PORT=27019\n');
+    const got = readEnvFiles(root, ['.env', 'config/api.env'], { env: { ORDERS_HOST: 'from-env' } });
+    expect(got.env).toEqual({ ORDERS_HOST: 'orders-db', ORDERS_PORT: '27019', ORDERS_URL: 'mongodb://from-env:27017/orders' });
+    expect(got.fileOf).toEqual({ ORDERS_HOST: '.env', ORDERS_PORT: 'config/api.env', ORDERS_URL: 'config/api.env' });
   });
 
   it('reads several files, a later one over an earlier one, and nothing outside the folder', () => {

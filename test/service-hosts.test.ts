@@ -212,6 +212,13 @@ describe('appEnvHere: the app squad-kit starts on this computer', () => {
     expect(said[0]).toContain('mongodb://shop:***@localhost:27018/shop');
   });
 
+  it("fills an address in from the env file's other settings first, as Compose does, then swaps the service", () => {
+    write('.env.dev', 'MONGO_USER=shop\nMONGO_PASSWORD=s3cret\nMONGO_HOST=app.db\nConnectionStrings__Shop="mongodb://${MONGO_USER}:${MONGO_PASSWORD}@${MONGO_HOST}:27017/shop?authSource=admin"\n');
+    const said: string[] = [];
+    expect(appEnvHere(dir, 'dotnet run', (t) => said.push(t))).toMatchObject({ ConnectionStrings__Shop: 'mongodb://shop:s3cret@localhost:27018/shop?authSource=admin' });
+    expect(said.join('\n')).not.toContain('s3cret');
+  });
+
   it('leaves everything as it is when the app runs in Compose', () => {
     expect(appEnvHere(dir, 'docker compose up --build', () => undefined)).toEqual({});
     expect(appEnvHere(dir, 'docker-compose up', () => undefined)).toEqual({});

@@ -87,14 +87,110 @@ function unescape(c: string): string {
   return c === 'n' ? '\n' : c === 'r' ? '\r' : c;
 }
 
+/** Where a value's `$NAME` is looked up, as Compose looks it up for an env file. */
+export interface EnvLookup {
+  /**
+   * The environment looked up first, as Compose looks up the shell's: the one the command starts with, squad-kit's own
+   * keys already taken out. None unless given, so nothing of squad-kit's own ever fills a value.
+   */
+  env?: Record<string, string | undefined>;
+  /** The values of the env files read before this one: a later file reads them, as Compose's later env_file does. */
+  before?: Record<string, string>;
+  /**
+   * A value that names a setting nothing sets: empty in its place, as Compose does (the default), or kept as written,
+   * for squad-kit to learn an address only when all of it is there.
+   */
+  unset?: 'empty' | 'keep';
+}
+
+const NAME = /^[A-Za-z_][A-Za-z0-9_]*/;
+const BRACED = /^([A-Za-z_][A-Za-z0-9_]*)(?:(:?[-+?])([\s\S]*))?$/;
+
+/**
+ * A value with its `$NAME`s filled in, as Compose fills an env file's: `$NAME`, `${NAME}`, `${NAME:-default}` (unset or
+ * empty), `${NAME-default}` (unset), `${NAME:+other}` (set and not empty), `${NAME+other}` (set), and `${NAME:?why}`,
+ * `${NAME?why}`, which stop Compose and here are only empty. A default is filled in turn, and `$$` is a `$`. A name
+ * nothing sets is empty, and `unset` hears it. A `$` with no name after it stays as it is.
+ */
+function fill(text: string, get: (name: string) => string | undefined, unset: () => void): string {
+  let out = '';
+  let i = 0;
+  while (i < text.length) {
+    const at = text.indexOf('$', i);
+    if (at < 0) return out + text.slice(i);
+    out += text.slice(i, at);
+    i = at + 1;
+    if (text[i] === '$') {
+      out += '$';
+      i += 1;
+      continue;
+    }
+    if (text[i] !== '{') {
+      const name = NAME.exec(text.slice(i))?.[0];
+      if (name) {
+        const v = get(name);
+        if (v === undefined) unset();
+        out += v ?? '';
+        i += name.length;
+      } else out += '$';
+      continue;
+    }
+    // `${...}` ends at its own closing brace, after those of any `${...}` inside it.
+    let depth = 0;
+    let end = -1;
+    for (let j = i + 1; j < text.length && end < 0; j++) {
+      if (text[j] === '{') depth += 1;
+      else if (text[j] === '}' && depth) depth -= 1;
+      else if (text[j] === '}') end = j;
+    }
+    const m = end < 0 ? null : BRACED.exec(text.slice(i + 1, end));
+    if (!m) {
+      // No name in it: Compose stops there; here it stays as written.
+      out += '$';
+      continue;
+    }
+    const [, name, op, word = ''] = m;
+    const v = get(name!);
+    const set = v !== undefined;
+    const said = op?.startsWith(':') ? set && v !== '' : set;
+    if (!op) {
+      if (!set) unset();
+      out += v ?? '';
+    } else if (op.endsWith('-')) out += said ? v! : fill(word, get, unset);
+    else if (op.endsWith('+')) out += said ? fill(word, get, unset) : (v ?? '');
+    else {
+      if (!said) unset();
+      out += said ? v! : '';
+    }
+    i = end + 1;
+  }
+  return out;
+}
+
 /**
  * The settings in an env file, as Docker Compose reads it: `KEY=VALUE` lines, `export ` before a key, `#` comments on
  * their own line or after a space, single quotes as written, double quotes with `\n` and `\"`, quoted values over several
- * lines, and empty values. A line with no `=` gives nothing. No `$NAME` is filled in: the value is as written.
+ * lines, and empty values. A line with no `=` gives nothing. Unquoted and double-quoted values have their `$NAME`s filled
+ * in (`\$` is a `$`): from the environment given, then the values read before, in earlier files and earlier lines.
  */
-export function parseEnvFile(text: string): [string, string][] {
+export function parseEnvFile(text: string, o: EnvLookup = {}): [string, string][] {
   const s = text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
   const out = new Map<string, string>();
+  const env = o.env ?? {};
+  const known = new Map(Object.entries(o.before ?? {}));
+  const get = (name: string) => (Object.hasOwn(env, name) ? env[name] : known.get(name));
+  // `template` is what is filled in; `written` is the value as written, kept when it names a setting nothing sets.
+  const put = (key: string, template: string, written = template) => {
+    let missing = false;
+    const value = fill(template, get, () => (missing = true));
+    if (missing && o.unset === 'keep') {
+      out.set(key, written);
+      known.delete(key);
+    } else {
+      out.set(key, value);
+      known.set(key, value);
+    }
+  };
   let i = 0;
   while (i < s.length) {
     const nl = s.indexOf('\n', i);
@@ -109,18 +205,25 @@ export function parseEnvFile(text: string): [string, string][] {
     const quote = s[at];
     if (quote === '"' || quote === "'") {
       let v = '';
+      let t = '';
       let j = at + 1;
       while (j < s.length && s[j] !== quote) {
         if (quote === '"' && s[j] === '\\' && j + 1 < s.length) {
           v += unescape(s[j + 1]!);
+          t += s[j + 1] === '$' ? '$$' : unescape(s[j + 1]!);
           j += 2;
           continue;
         }
         v += s[j];
+        t += s[j];
         j += 1;
       }
       if (j < s.length) {
-        out.set(key, v);
+        // Single quotes keep the value as written; double quotes have it filled in.
+        if (quote === "'") {
+          out.set(key, v);
+          known.set(key, v);
+        } else put(key, t, v);
         const after = s.indexOf('\n', j);
         i = after < 0 ? s.length : after + 1;
         continue;
@@ -130,7 +233,7 @@ export function parseEnvFile(text: string): [string, string][] {
     // A `#` after a space starts a comment; in `KEY=#1` it is the value.
     const raw = s.slice(at, lineEnd);
     const spaced = m[0].length > m[0].trimEnd().length;
-    out.set(key, (spaced && raw.startsWith('#') ? '' : raw.split(/[ \t]#/)[0]!).trim());
+    put(key, (spaced && raw.startsWith('#') ? '' : raw.split(/[ \t]#/)[0]!).trim());
     i = lineEnd + 1;
   }
   return [...out];
@@ -138,6 +241,8 @@ export function parseEnvFile(text: string): [string, string][] {
 
 export interface EnvFileValues {
   env: Record<string, string>;
+  /** The file each value is from: the last one that sets it. */
+  fileOf: Record<string, string>;
   /** The files read, by their paths in the folder. */
   read: string[];
   /** Not in the folder. */
@@ -146,9 +251,12 @@ export interface EnvFileValues {
   refused: string[];
 }
 
-/** The values of env files in a folder, a later file over an earlier one. Nothing outside the folder is ever read. */
-export function readEnvFiles(top: string, files: string[]): EnvFileValues {
-  const out: EnvFileValues = { env: {}, read: [], missing: [], refused: [] };
+/**
+ * The values of env files in a folder, a later file over an earlier one, and filling its `$NAME`s from the earlier ones.
+ * Nothing outside the folder is ever read.
+ */
+export function readEnvFiles(top: string, files: string[], o: Omit<EnvLookup, 'before'> = {}): EnvFileValues {
+  const out: EnvFileValues = { env: {}, fileOf: {}, read: [], missing: [], refused: [] };
   let real: string;
   try {
     real = fs.realpathSync(top);
@@ -168,7 +276,10 @@ export function readEnvFiles(top: string, files: string[]): EnvFileValues {
       out.refused.push(f);
       continue;
     }
-    for (const [k, v] of parseEnvFile(fs.readFileSync(file, 'utf8'))) out.env[k] = v;
+    for (const [k, v] of parseEnvFile(fs.readFileSync(file, 'utf8'), { ...o, before: out.env })) {
+      out.env[k] = v;
+      out.fileOf[k] = f;
+    }
     out.read.push(f);
   }
   return out;

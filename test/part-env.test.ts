@@ -176,6 +176,25 @@ describe("the commands squad-kit runs in a story's copy", () => {
     expect(fs.readFileSync(logFile(), 'utf8')).toContain(`${path.basename(copy)} has no .env.dev, so its commands run without that env file.`);
   });
 
+  it("fill in $NAME as Compose does: from the environment they start with, then the file's own lines, never squad-kit's own keys", async () => {
+    write(storyFile(bp, local), ['MONGO_USER=shop', 'MONGO_PASSWORD=TEST-SECRET-4471', 'MONGO_HOST=app.db', 'MONGO_PORT=27017', 'ConnectionStrings__Shop=mongodb://${MONGO_USER}:${MONGO_PASSWORD}@${MONGO_HOST}:${MONGO_PORT}/shop?authMechanism=SCRAM-SHA-256', 'Shop__Region=${SHOP_REGION}', 'Shop__Key=${SQUAD_TEST_TOKEN}', "Shop__Note='${MONGO_HOST}'", ''].join('\n'), '/');
+    process.env.SHOP_REGION = 'eu-north';
+    process.env.SQUAD_TEST_TOKEN = 'SQUAD-OWN-9931';
+    try {
+      const copy = storyCopy('SH-6');
+      expect(await seen(copy, ['ConnectionStrings__Shop', 'Shop__Region', 'Shop__Key', 'Shop__Note'])).toEqual({
+        ConnectionStrings__Shop: 'mongodb://shop:TEST-SECRET-4471@localhost:27018/shop?authMechanism=SCRAM-SHA-256',
+        Shop__Region: 'eu-north',
+        Shop__Key: '',
+        Shop__Note: '${MONGO_HOST}',
+      });
+      expect(fs.readFileSync(logFile(), 'utf8')).not.toContain('SQUAD-OWN-9931');
+    } finally {
+      delete process.env.SHOP_REGION;
+      delete process.env.SQUAD_TEST_TOKEN;
+    }
+  });
+
   it('never writes a value in the log: the names only', async () => {
     const copy = storyCopy('SH-4');
     await seen(copy, ['Shop__Mode']);
