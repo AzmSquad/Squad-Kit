@@ -4,9 +4,10 @@ import { buildPaths } from '../core/paths.js';
 import { loadConfig } from '../core/config.js';
 import type { BoardPaths } from '../board/store.js';
 import type { Tracker, TrackerModule } from './tracker/types.js';
-import type { CodeHostModule, RepoHost } from './code-host/types.js';
+import type { CodeHostModule, PullRequestPageModule, RepoHost } from './code-host/types.js';
 import { azureTracker } from './azure/tracker.js';
 import { azureCodeHost } from './azure/code-host.js';
+import { githubPullPage } from './github/pull-page.js';
 import type { Speech, SpeechModule } from './speech/types.js';
 import { munsitSpeech } from './munsit/speech.js';
 import type { AiTool, ToolEvent } from './ai-tool/types.js';
@@ -27,6 +28,7 @@ import { maestroDriver } from './maestro/index.js';
 
 export const TRACKERS: TrackerModule[] = [azureTracker];
 export const CODE_HOSTS: CodeHostModule[] = [azureCodeHost];
+export const PULL_REQUEST_PAGES: PullRequestPageModule[] = [githubPullPage];
 export const SPEECH: SpeechModule[] = [munsitSpeech];
 export const AI_TOOLS: AiTool[] = [claudeTool, codexTool];
 export const BROWSERS: BrowserModule[] = [playwrightBrowser];
@@ -57,6 +59,11 @@ export function repoHostFor(bp: BoardPaths, remoteUrl: string): RepoHost | null 
     if (host) return host;
   }
   return null;
+}
+
+/** The host whose page opens a pull request from this remote, when squad-kit knows one. */
+export function pullRequestPageFor(remoteUrl: string): PullRequestPageModule | null {
+  return PULL_REQUEST_PAGES.find((m) => m.repoName(remoteUrl)) ?? null;
 }
 
 /** The tracker a git remote points to, with the settings read from it, for a project not set up yet. */

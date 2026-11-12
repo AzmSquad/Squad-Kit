@@ -6,6 +6,7 @@ import path from 'node:path';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { freePort } from './support/tiny-app.js';
 
+import { inGuard } from './support/in-guard.js';
 /**
  * "Stop it and try again" on the Looks stuck card. A step that needs the app waits while a program holds the app's
  * port and the app never answers. squad-kit stops that program only when it started it itself (it knows its process
@@ -127,7 +128,7 @@ describe('the app port on the Looks stuck card', () => {
     expect(portOf('not a url')).toBeNull();
   });
 
-  it.skipIf(!hasLsof)('a program squad-kit started: the card offers to stop it, and it stops only that program', async () => {
+  it.skipIf(!hasLsof || inGuard)('a program squad-kit started: the card offers to stop it, and it stops only that program', async () => {
     const child = await oursHolds();
     const t = stuckTester();
     const p = await lookAtPort(bp, t);

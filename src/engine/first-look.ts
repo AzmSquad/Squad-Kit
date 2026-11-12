@@ -5,6 +5,7 @@ import { SQUAD_DIR, findSquadRoot, isOwnFolder } from '../core/paths.js';
 import type { FolderKind } from '../board/setup-state.js';
 import { git, gitLater, gitRecords, isRepo } from './git.js';
 import { LANG, workspaceRepos } from './repos.js';
+import { SELF_NOTE, isSquadKitCode } from './self-project.js';
 
 /**
  * Add project says what it found before the person confirms: existing code with git, code without git, an empty
@@ -329,6 +330,17 @@ export async function firstLook(dir: string): Promise<FirstLook> {
       found: `${describeCode(count, code.language, code.web, tests)}, not in git yet.`,
       next: 'squad-kit puts the files in git first, in one first commit, then reads them, finds how to test and run it, and shows you what it understood.',
       safe: 'Your files stay as they are. Secrets like .env files and built folders stay out of git.',
+      takes: TAKES,
+    };
+  }
+  if (isSquadKitCode(abs)) {
+    return {
+      ...base,
+      kind: 'repo',
+      title: "squad-kit's own code",
+      found: `squad-kit's own code: ${describeCode(count, code.language, code.web, tests).replace(/^An? /, 'a ')}.${unsavedNote}`,
+      next: `squad-kit will read it, set up its own way to check and run it, then show you what it understood. ${SELF_NOTE}`,
+      safe: SAFE,
       takes: TAKES,
     };
   }

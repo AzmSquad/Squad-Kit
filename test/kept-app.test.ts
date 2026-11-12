@@ -10,6 +10,7 @@ import { fakeBrowser } from './fakes/browser.js';
 import { callTool, savedFiles } from './support/window.js';
 import { checkAnswer, isProofCheck, type FakeCheck } from './support/proof-check.js';
 
+import { inGuard } from './support/in-guard.js';
 /**
  * One app for the Reviewer and the Tester (MA-18: squad-kit started the app for the review, stopped it, and started it
  * again for the proof and for a retake, 30 to 60 seconds each on a big app). The app started for the Reviewer's look
@@ -315,7 +316,7 @@ describe.skipIf(process.platform === 'win32')('one app for the review and the pr
     expect(s.kept.size).toBe(0);
   });
 
-  it("before an app starts in a copy, a finished check's leftover there stops; the app kept in another copy runs on", async () => {
+  it.skipIf(inGuard)("before an app starts in a copy, a finished check's leftover there stops; the app kept in another copy runs on", async () => {
     const a = story('Rooms on a phone');
     const b = story('Staff page');
     const s = squad();

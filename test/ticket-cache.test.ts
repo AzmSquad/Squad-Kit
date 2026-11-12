@@ -43,6 +43,7 @@ const actions = await import('../src/board/actions.js');
 const { deletePlan, deleteTicket } = await import('../src/engine/delete.js');
 const { noPushEnv, ticketCacheDir } = await import('../src/engine/sandbox.js');
 const { cacheHomeEnv, storiesCacheDir } = await import('../src/engine/cache-home.js');
+const { ownHomeEnv } = await import('../src/engine/own-home.js');
 
 let tmp: string;
 let project: string;
@@ -130,7 +131,9 @@ describe("the Builder's package downloads", () => {
     await squad().runBuilder('AP-1', 'Build it', false, 'build');
     const cache = shared();
     const run = h.calls[0]!;
-    expect(run.env).toEqual({ ...noPushEnv(), ...cacheHomeEnv(cache, { wall: 'agent' }) });
+    // A squad-kit the agent starts goes to a home of its copy's own (own-home.ts), and in its sandbox it knows it is in a
+    // guard, so squad-kit's own tests that cannot nest a sandbox skip there.
+    expect(run.env).toEqual({ ...noPushEnv(), ...ownHomeEnv(wt, cache), SQUAD_KIT_IN_GUARD: '1', ...cacheHomeEnv(cache, { wall: 'agent' }) });
     expect(run.env).toMatchObject({
       XDG_CACHE_HOME: path.join(cache, 'xdg'),
       PIP_CACHE_DIR: path.join(cache, 'pip'),
@@ -156,12 +159,13 @@ describe("the Builder's package downloads", () => {
   });
 
   it('are left alone in steps without the sandbox: steps that only read, and a computer without one', async () => {
-    building('AP-1', 'one.txt');
+    const wt = building('AP-1', 'one.txt');
     await squad().review('AP-1').catch(() => undefined);
-    expect(h.calls[0]!.env).toEqual(noPushEnv());
+    // No sandbox, no guard: the flag is not there.
+    expect(h.calls[0]!.env).toEqual({ ...noPushEnv(), ...ownHomeEnv(wt) });
     h.support = { available: false, why: 'socat is not installed' };
     await squad().runBuilder('AP-1', 'Build it', false, 'build');
-    expect(h.calls.at(-1)!.env).toEqual(noPushEnv());
+    expect(h.calls.at(-1)!.env).toEqual({ ...noPushEnv(), ...ownHomeEnv(wt) });
     expect(fs.existsSync(path.join(shared(), 'nuget'))).toBe(false);
   });
 });

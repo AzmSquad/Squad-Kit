@@ -4,6 +4,7 @@ import { useAct } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
 import { Cmd } from '../components/ui';
 import { NotifyButton, QualityAsk, Reads, SetupSteps, useSetup } from '../components/Setup';
+import { SelfNote } from '../components/SelfNote';
 
 /**
  * After Add project: a full page where the person watches squad-kit get to know the project, step by step. They can
@@ -52,6 +53,7 @@ export function SetupPage() {
                       : 'About 3 to 5 minutes. You can leave this page: we will tell you when it is ready.'}
                 </p>
               </div>
+              {s.self && <SelfNote title="squad-kit's own code" text={s.self} />}
               <SetupSteps s={s} />
               {s.ready && !s.approved && (
                 <div className="ob-card ready">

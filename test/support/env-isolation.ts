@@ -10,6 +10,9 @@ process.env.SQUAD_KIT_HOME = home;
 // squad-kit never gets its own tools (Maestro, Java) from the internet by itself in a test: a test that wants it gives a
 // made-up source (engine/phone/plan.ts useGetSource).
 process.env.SQUAD_KIT_NO_AUTO_GET = '1';
+// squad-kit's own switches for a squad-kit started inside a project's command (engine/own-home.ts): a run inside the guard
+// gets them, and a test starts clean of them.
+for (const v of ['SQUAD_KIT_UPDATES', 'SQUAD_KIT_BROWSER']) delete process.env[v];
 // An app a test starts never asks npm for a new squad-kit; the update tests pass their own registry.
 fs.writeFileSync(path.join(process.env.SQUAD_KIT_HOME, 'settings.yaml'), 'checkForUpdates: false\n');
 

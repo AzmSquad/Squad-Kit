@@ -18,6 +18,7 @@ import { docsInGit, docsRepo, mergeSettings, squadInRepo, stageProjectFiles, sta
 import { reposOf } from './repos.js';
 import { repoTarget } from './sync.js';
 import { spotOwnerDeletes } from './teammate-delete.js';
+import { SELF_DOCS_OFF, isSquadKitCode } from './self-project.js';
 
 /**
  * Hand over, and a new computer (ADR-001). A ticket's documents and code travel on its pushed branch; live progress,
@@ -68,7 +69,11 @@ export async function pushHandOver(bp: BoardPaths, t: Ticket): Promise<HandOverP
   if (!repo) {
     throw new Error("This project's documents sit outside its code repos, so they cannot travel with a branch yet. Share the .squad folder another way.");
   }
-  if (!docsInGit(bp)) throw new Error('"Put project documents in git" is off for this project, so the documents cannot travel with the branch. Turn it on in Settings first.');
+  if (!docsInGit(bp)) {
+    // squad-kit's own code keeps them off for good (self-project.ts): a hand over there is no setting away.
+    if (isSquadKitCode(bp.root)) throw new Error(`${SELF_DOCS_OFF} A hand over needs them in git, so it cannot travel with the branch here.`);
+    throw new Error('"Put project documents in git" is off for this project, so the documents cannot travel with the branch. Turn it on in Settings first.');
+  }
   const target = repoTarget(bp, t);
   if (!target) throw new Error('This project has no shared copy of the code to send it to. An engineer can add one.');
   const env = gitEnv(bp, t);

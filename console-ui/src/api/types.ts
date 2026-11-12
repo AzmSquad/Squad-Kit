@@ -390,6 +390,8 @@ export interface Ticket {
   /** When the change went into the base branch. */
   mergedAt?: string;
   localSetup?: { status: 'pending' | 'running' | 'done' | 'failed'; dir: string; command: string; at?: string; seconds?: number; output?: string };
+  /** Merged here, with its work going on by pull request: how to send it. Only on the ticket's own record. */
+  sendAs?: { branch: string; remote: string; push: string; dir: string; page?: string; host?: string; into?: string };
   quiet?: { since: string; kind: 'stuck' | 'long'; detail: string; command?: string; pid?: number; port?: { port: number; pid?: number; program?: string; ours: boolean; app?: string } };
   priority: 'high' | 'normal' | 'low';
   stage: Stage;
@@ -840,6 +842,8 @@ export interface BoardResponse {
   /** Decisions, releases and breakdowns whose file cannot be read. Their own pages show them too. */
   brokenRecords?: BrokenRecord[];
   stats: { released30: number; bugs30: number; open: number };
+  /** The project is squad-kit's own code: the plain notes its pages show. */
+  self?: { note: string; releases: string; docs: string };
 }
 
 export interface ReleaseItem {

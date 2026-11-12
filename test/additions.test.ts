@@ -9,6 +9,7 @@ import { chooseProject } from '../src/core/paths.js';
 import { runRelease } from '../src/commands/board.js';
 import type { RunOptions, RunResult } from '../src/modules/claude/direct.js';
 
+import { inGuard } from './support/in-guard.js';
 /**
  * What a team adds to its harness: one file, read fresh at each step from the main folder, rules that can only add care,
  * checklists on the existing routes, and gates squad-kit runs itself. Real git and real commands; no real AI runs.
@@ -391,7 +392,7 @@ describe('rules', () => {
   });
 
   it('the guard really stops a commit in a copy: its git folder is closed, whatever a rule says', async () => {
-    if (process.platform !== 'darwin' || !fs.existsSync('/usr/bin/sandbox-exec')) return;
+    if (process.platform !== 'darwin' || !fs.existsSync('/usr/bin/sandbox-exec') || inGuard) return;
     const copy = story();
     const before = sh('git rev-parse HEAD', copy);
     fs.writeFileSync(path.join(copy, 'limit.txt'), 'limit = 9\n');
@@ -539,7 +540,7 @@ describe('a gate run', () => {
   });
 
   it('a guard refusal cannot run', async () => {
-    if (process.platform !== 'darwin' || !fs.existsSync('/usr/bin/sandbox-exec')) return;
+    if (process.platform !== 'darwin' || !fs.existsSync('/usr/bin/sandbox-exec') || inGuard) return;
     const copy = story();
     const home = path.join(tmp, 'home');
     fs.mkdirSync(path.join(home, '.ssh'), { recursive: true });

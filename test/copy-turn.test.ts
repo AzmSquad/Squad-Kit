@@ -7,6 +7,7 @@ import type { BrowserModule } from '../src/modules/browser/types.js';
 import { fakeBrowser } from './fakes/browser.js';
 import { freePort } from './support/tiny-app.js';
 
+import { inGuard } from './support/in-guard.js';
 /**
  * One turn per copy (MA-18: the Builder's tests started `next dev` in the story's copy, and at the same moment it asked
  * for the app, which Next.js refused: one dev server per folder). In a copy, a check run and an app start never
@@ -384,7 +385,7 @@ describe.skipIf(process.platform === 'win32')('another dev server already runs i
     return fs.existsSync(path.join(copy, 'starts.txt')) ? fs.readFileSync(path.join(copy, 'starts.txt'), 'utf8').length : 0;
   }
 
-  it("stops only that process, when it is a leftover in this copy, then starts the app once more", async () => {
+  it.skipIf(inGuard)("stops only that process, when it is a leftover in this copy, then starts the app once more", async () => {
     const copy = path.join(tmp, 'copy');
     fs.mkdirSync(copy);
     const port = await freePort();

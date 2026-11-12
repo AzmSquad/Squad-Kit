@@ -28,6 +28,7 @@ import { readAgent } from '../engine/agents.js';
 import { dropSetupCopies } from '../engine/onboard.js';
 import { trackTask } from '../engine/process-group.js';
 import { DEFAULT_QUALITY, parseQuality } from '../engine/levels.js';
+import { SELF_NOTE, isSelfProject } from '../engine/self-project.js';
 
 export { readTalk, writeTalk };
 
@@ -105,6 +106,8 @@ export interface SetupView {
   idea: boolean;
   /** New project with a BRD, until its first release: the BRD the Analyst has, where the work starts. */
   brd?: { id: string; title: string };
+  /** The project is squad-kit's own code: the one plain note that says so (engine/self-project.ts). */
+  self?: string;
 }
 
 const again = (step: SetupStepId, label = 'Try again'): SetupWay => ({ do: 'again', step, label, command: `squad setup --again ${step}` });
@@ -186,6 +189,7 @@ export function setupView(bp: BoardPaths): SetupView | null {
     empty: Boolean(meta.scan?.empty),
     idea,
     ...(brd ? { brd: { id: brd.id, title: brd.title } } : {}),
+    ...(isSelfProject(bp, meta) ? { self: SELF_NOTE } : {}),
   };
 }
 
@@ -306,6 +310,8 @@ export interface OverviewView {
   old: boolean;
   /** The terminal command for this page. */
   command: string;
+  /** The project is squad-kit's own code: the one plain note that says so (engine/self-project.ts). */
+  self?: string;
 }
 
 function mergedAt(t: Ticket): string | undefined {
@@ -371,6 +377,7 @@ export function overviewView(bp: BoardPaths): OverviewView {
     ...(talk?.idea ? { idea: talk.idea } : {}),
     old: !fs.existsSync(path.join(bp.knowledgeDir, 'overview.md')) && meta.scan?.status === 'done',
     command: 'squad overview',
+    ...(isSelfProject(bp, meta) ? { self: SELF_NOTE } : {}),
   };
 }
 

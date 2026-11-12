@@ -19,6 +19,7 @@ import { recordUsage } from '../board/usage.js';
 import { startPause } from './usage-limit.js';
 import { log } from '../core/app-log.js';
 import { ownRunWords } from './plain-stop.js';
+import { selfRule } from './self-project.js';
 
 /** A ticket the Analyst filled in from a pasted idea or chat message. Nothing is saved until the person creates it. */
 export interface TicketDraft extends TicketBrief {
@@ -235,7 +236,7 @@ async function runAnalyst(bp: BoardPaths, opts: AgentRun): Promise<AgentResult> 
     const can = AI_TOOLS.filter((t) => t.canRun).map((t) => t.label).join(' or ');
     throw new BoardActionError(`The Analyst is set to ${tool?.label ?? agent.tool}, which squad-kit cannot run yet. Switch it to ${can} on the Harness page, under Agents.`);
   }
-  const extra = [agentInstructions(agent), rulesFor(bp, 'analyst')].filter(Boolean).join('\n\n');
+  const extra = [selfRule(bp), agentInstructions(agent), rulesFor(bp, 'analyst')].filter(Boolean).join('\n\n');
   // Filling in a ticket is a short, simple task: squad-kit's default is the fast level.
   const lv = resolveLevel({ role: 'analyst', step: 'draft', quality: readMeta(bp).quality }, agent.levels, personLevels());
   const effort = effortOn(tool, lv.effort);

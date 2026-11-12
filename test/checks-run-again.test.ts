@@ -6,6 +6,7 @@ import path from 'node:path';
 import type { RunOptions, RunResult } from '../src/modules/claude/direct.js';
 import { DRAG, installPlaywright, quickNpx, runsIn } from './support/fake-playwright.js';
 
+import { inGuard } from './support/in-guard.js';
 /**
  * A check that failed once for no reason in the code, or that already failed before the story started, does not send
  * a small story on a long detour. A failed check runs once more first. When the same command already failed on code
@@ -171,7 +172,7 @@ require('http').createServer((q, r) => r.end('ok')).listen(${port}, '127.0.0.1')
 
   });
 
-  it.skipIf(process.platform !== 'darwin')('nor for a file the guard blocked: it would only fail the same way', async () => {
+  it.skipIf(process.platform !== 'darwin' || inGuard)('nor for a file the guard blocked: it would only fail the same way', async () => {
     const home = path.join(tmp, 'home');
     const guard = buildGuard({ cwd: wt, root: tmp, cache: path.join(tmp, 'cache'), extraWrite: [path.join(tmp, 'cache')], extraRead: [path.join(tmp, 'cache')], home, platform: 'darwin' });
     const secret = path.join(home, '.ssh', 'id_rsa');

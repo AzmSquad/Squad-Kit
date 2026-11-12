@@ -7,6 +7,7 @@ import { hostsProblem, parseHosts, parseNetwork } from '../engine/sandbox.js';
 import { sharedPath } from '../engine/project-guard.js';
 import { parseChoice } from '../engine/tools/which-phone.js';
 import { checkEnvFiles } from '../engine/env-file.js';
+import { SELF_DOCS_OFF, isSquadKitCode } from '../engine/self-project.js';
 
 /**
  * Settings, Save: the project's settings, checked, then saved. The board's Save and a Squad lead card that the person
@@ -82,7 +83,11 @@ export function saveSettings(bp: BoardPaths, b: SettingsInput): BoardMeta {
   if (b.atOnce === null) delete meta.atOnce;
   else if (typeof b.atOnce === 'number' && b.atOnce >= 1 && b.atOnce <= 5) meta.atOnce = Math.round(b.atOnce);
   if (b.runner === 'acp' || b.runner === 'direct') meta.runner = b.runner;
-  if (typeof b.documentsInGit === 'boolean') meta.documentsInGit = b.documentsInGit;
+  if (typeof b.documentsInGit === 'boolean') {
+    // On squad-kit's own code they stay out of git: said, never quietly ignored (engine/self-project.ts).
+    if (b.documentsInGit && isSquadKitCode(bp.root)) throw new Error(SELF_DOCS_OFF);
+    meta.documentsInGit = b.documentsInGit;
+  }
   // Left out when off, so a project that never chose has nothing new in its settings file.
   if (b.alwaysNewTests === true) meta.alwaysNewTests = true;
   else if (b.alwaysNewTests === false) delete meta.alwaysNewTests;

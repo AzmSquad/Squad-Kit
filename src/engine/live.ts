@@ -72,6 +72,8 @@ import { isMediaNote, prepareMedia } from './media.js';
 import { allowedFile, ticketFolders } from './conversations.js';
 import { DEFAULT_QUALITY, builderLevel, describeLevel, effortOn, personLevels, resolveLevel, stepCaps } from './levels.js';
 import { CapReached, capCard } from './caps.js';
+import { ownHomeEnv } from './own-home.js';
+import { designCommands, selfRule } from './self-project.js';
 import { blockedLine, noPushEnv, noteBlockedSite, packageCacheEnv, projectNetwork, sandboxAsk, sandboxOf, ticketCacheDir } from './sandbox.js';
 import { hiddenFiles, placeStoryFiles } from './local-files.js';
 import { copyDbEnv } from './db-env.js';
@@ -80,7 +82,7 @@ import { appCopyOf, copiesOf, reposOfParts, storyCopyDir, workFolder, type CopyO
 import { ProductError, productCopiesDir, productPlan, startProduct, stopProduct, waitWords } from './product-run.js';
 import { productHold } from './product-lock.js';
 import { offLimits } from '../board/project-files.js';
-import { agentPrivatePlaces, GUARD_BLOCKED, GUARD_BLOCKED_DOCKER, blockedDocker, dockerBlockedWords, guardBlockedDetail, guardSupport, projectGuardFor, ticketGuard, type GuardSpec } from './project-guard.js';
+import { agentPrivatePlaces, IN_GUARD, GUARD_BLOCKED, GUARD_BLOCKED_DOCKER, blockedDocker, dockerBlockedWords, guardBlockedDetail, guardSupport, projectGuardFor, ticketGuard, type GuardSpec } from './project-guard.js';
 import { HEALED_LINE, cacheHomeEnv, ownFolder, storiesCacheDir } from './cache-home.js';
 import { ticketDir } from '../board/store.js';
 import { commitTicketDocs, leaveProjectFiles } from './project-git.js';
@@ -1570,7 +1572,7 @@ export class LiveSquad {
     const boxed = Boolean(opts.box && sandboxOf(tool).available);
     // A sandboxed step is told up front what its commands reach, and that a refused site is closed on purpose.
     const network = boxed ? projectNetwork(this.bp.root) : undefined;
-    const instructions = [opts.instructions, P.PROCESS_RULE, extra, rulesFor(this.bp, opts.role), win ? P.windowRule(win.tools) : '', network ? P.networkRule(network) : ''].filter(Boolean).join('\n\n');
+    const instructions = [opts.instructions, P.PROCESS_RULE, selfRule(this.bp), extra, rulesFor(this.bp, opts.role), win ? P.windowRule(win.tools) : '', network ? P.networkRule(network) : ''].filter(Boolean).join('\n\n');
     const access = win ? await windowAccess(win) : undefined;
     const key = opts.ticket;
     // The model level for this step: squad-kit's default, the project's choice, then this person's own.
@@ -1623,7 +1625,9 @@ export class LiveSquad {
       ...(sandbox ? { sandbox, onBlocked } : {}),
       // A story with a database of its own: the agent's own commands reach that one too, never the person's.
       // An Android app: the agent's own builds and checks find squad-kit's Android tools too (android-env.ts).
-      env: { ...noPushEnv(), ...(sandbox && cache ? cacheHomeEnv(cache, { wall: 'agent', cwd: opts.cwd }) : {}), ...(android ? androidCommandEnv(sandbox && cache ? { cache } : {}) : {}), ...(key ? copyDbEnv(opts.cwd) : {}) },
+      // A squad-kit the agent starts lands in a home of its copy's own (own-home.ts), never on this board. In its sandbox
+      // it is inside a guard, as the project's own commands are: what cannot nest there skips (SQUAD_KIT_IN_GUARD).
+      env: { ...noPushEnv(), ...ownHomeEnv(opts.cwd, cache), ...(sandbox ? { [IN_GUARD]: '1' } : {}), ...(sandbox && cache ? cacheHomeEnv(cache, { wall: 'agent', cwd: opts.cwd }) : {}), ...(android ? androidCommandEnv(sandbox && cache ? { cache } : {}) : {}), ...(key ? copyDbEnv(opts.cwd) : {}) },
       ...(instructions ? { instructions } : {}),
       level: lv.level,
       ...(effort ? { effort } : {}),
@@ -2989,7 +2993,7 @@ export class LiveSquad {
     const repo = meta.repos?.length ? (inRepos[0] ?? meta.repos.find((r) => r.path === out.repo?.replace(/\/$/, ''))?.path ?? meta.repos[0]!.path) : undefined;
     // A new test command waits for the checks to want it, a different one for squad-kit to try it (see not-checked.ts);
     // the others apply at once.
-    const held = holdTestCommand((repo && meta.repos ? meta.repos.find((r) => r.path === repo)?.commands : meta.commands) ?? {}, clean(out.commands ?? {}));
+    const held = holdTestCommand((repo && meta.repos ? meta.repos.find((r) => r.path === repo)?.commands : meta.commands) ?? {}, designCommands(this.bp, meta, clean(out.commands ?? {})));
     if (Object.values(held.apply).some(Boolean)) {
       if (repo && meta.repos) {
         meta.repos = meta.repos.map((r) => (r.path === repo ? { ...r, commands: { ...r.commands, ...held.apply } } : r));

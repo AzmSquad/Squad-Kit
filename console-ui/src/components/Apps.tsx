@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Check } from 'lucide-react';
 import { api } from '../api/client';
 import type { AppOutput, ProjectApp } from '../api/types';
-import { useAct, useApps } from '../lib/data';
+import { useAct, useApps, useBoard } from '../lib/data';
 import { shellArg, shellQuote } from '../lib/text';
 import { Cmd, Modal, Written } from './ui';
 import { LanguagePick, PhoneLine, PhoneNotReady } from './PhoneStart';
@@ -69,6 +69,9 @@ function runningFor(iso?: string): string {
 
 function AppItem({ a, together, named, live, reading, readError }: { a: ProjectApp; together: ProjectApp[]; named: boolean; live: boolean; reading: boolean; readError?: string }) {
   const act = useAct();
+  // squad-kit's own code: a story goes on as a pull request, never in a release from here.
+  const board = useBoard();
+  const self = board.data?.ready ? Boolean(board.data.self) : false;
   const [typing, setTyping] = useState(false);
   const [output, setOutput] = useState(false);
   // The terminal names the app only when the project has more than one.
@@ -114,7 +117,7 @@ function AppItem({ a, together, named, live, reading, readError }: { a: ProjectA
               Not now
             </button>
           </div>
-          {a.fresh.release && <small>It also goes out in release {a.fresh.release}.</small>}
+          {self ? <small>It goes on as a pull request: its story says how to send it.</small> : a.fresh.release && <small>It also goes out in release {a.fresh.release}.</small>}
           <Cmd text={`squad app restart${ref}`} />
         </div>
       )}

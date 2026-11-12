@@ -10,6 +10,7 @@ import { addWorktree } from './support/copy.js';
 import { buildGuard, guardSupport } from '../src/engine/project-guard.js';
 import { squadHome } from '../src/core/home.js';
 
+import { inGuard } from './support/in-guard.js';
 /**
  * A commit's hooks run on a throwaway git folder, so the real one is read only to them, all of it. Real git, real hooks,
  * and on a Mac the real guard: every try at harm below has to be refused, and the real folder has to come out the same to
@@ -698,7 +699,7 @@ describe('a Stop in the middle of a stash-and-lint hook', () => {
   });
 });
 
-describe('a crash at each point', () => {
+describe.skipIf(inGuard)('a crash at each point', () => {
   /** A commit in a process of its own, ended by its exact number; the hook's own process is ended by its exact number too. */
   async function crashWhile(hookBody: string, opts: { gpg?: boolean } = {}) {
     const run = path.join(scratch, 'run.mts');
@@ -879,7 +880,7 @@ exit 0`);
   });
 });
 
-describe('what a hook leaves running', () => {
+describe.skipIf(inGuard)('what a hook leaves running', () => {
   const alive = (pid: number) => spawnSync('ps', ['-o', 'pid=', '-p', String(pid)], { encoding: 'utf8' }).stdout.trim() !== '';
 
   it('its process group ends when the commit does', async () => {

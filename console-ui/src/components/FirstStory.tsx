@@ -86,7 +86,7 @@ export function FirstStoryGuide({ tickets, archived, live, project, onOpen }: { 
   );
 }
 
-const WIN: Record<Lang, { head: string; sub: (title: string) => [string, string]; took: string; doneWhen: string; tests: string; cost: string; next: string; app: string; close: string; of: string; time: (m: number) => string }> = {
+const WIN: Record<Lang, { head: string; sub: (title: string) => [string, string]; took: string; doneWhen: string; tests: string; cost: string; next: string; app: string; pr: string; close: string; of: string; time: (m: number) => string }> = {
   en: {
     head: 'Your first story is in.',
     sub: () => ['"', '" now works in your app. Here is what your squad did.'],
@@ -96,6 +96,7 @@ const WIN: Record<Lang, { head: string; sub: (title: string) => [string, string]
     cost: 'of AI use',
     next: 'Write your next story',
     app: 'Open your app',
+    pr: 'Send it as a pull request',
     close: 'Close',
     of: 'of',
     time: (m) => (m < 60 ? `${m} min` : m < 2880 ? `${Math.round(m / 60)} h` : `${Math.round(m / 1440)} days`),
@@ -109,6 +110,7 @@ const WIN: Record<Lang, { head: string; sub: (title: string) => [string, string]
     cost: 'من استخدام الذكاء الاصطناعي',
     next: 'اكتب قصتك التالية',
     app: 'افتح تطبيقك',
+    pr: 'أرسلها كطلب دمج',
     close: 'إغلاق',
     of: 'من',
     time: (m) => (m < 60 ? arabicCount(m, 'دقيقة', 'دقيقتان', 'دقائق') : m < 2880 ? arabicCount(Math.round(m / 60), 'ساعة', 'ساعتان', 'ساعات') : arabicCount(Math.round(m / 1440), 'يوم', 'يومان', 'أيام')),
@@ -126,6 +128,7 @@ export function FirstWin() {
   return (
     <FirstWinPage
       t={t}
+      self={Boolean(data?.self)}
       onClose={() => {
         keep(key);
         setClosed(true);
@@ -134,7 +137,7 @@ export function FirstWin() {
   );
 }
 
-function FirstWinPage({ t, onClose }: { t: Ticket; onClose(): void }) {
+function FirstWinPage({ t, self, onClose }: { t: Ticket; self: boolean; onClose(): void }) {
   const navigate = useNavigate();
   const apps = useApps();
   const act = useAct();
@@ -187,9 +190,22 @@ function FirstWinPage({ t, onClose }: { t: Ticket; onClose(): void }) {
             ))}
           </div>
           <div className="fw-acts">
+            {/* squad-kit's own code: the story goes on as a pull request, which its drawer says how to send. */}
+            {self && (
+              <button
+                ref={nextRef}
+                className="wl-cta"
+                onClick={() => {
+                  onClose();
+                  void navigate({ to: '/board', search: { ticket: t.id } });
+                }}
+              >
+                {w.pr}
+              </button>
+            )}
             <button
-              ref={nextRef}
-              className="wl-cta"
+              ref={self ? undefined : nextRef}
+              className={self ? 'fw-ghost' : 'wl-cta'}
               onClick={() => {
                 onClose();
                 void navigate({ to: '/board', search: { write: 1 } });

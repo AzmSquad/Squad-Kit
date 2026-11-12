@@ -51,3 +51,20 @@ export interface CodeHostModule {
   /** The repo behind a git remote URL, or null when it lives elsewhere or no sign-in is saved for the project. */
   repoFor(root: string, remoteUrl: string): RepoHost | null;
 }
+
+/**
+ * A code host squad-kit opens no pull request on by itself (it has no sign-in for it): it knows only the page where the
+ * person opens one, so a merged story can say where to send it (engine/send-as-pr.ts).
+ */
+export interface PullRequestPageModule {
+  readonly name: string;
+  /** For people, for example "GitHub". */
+  readonly label: string;
+  /** "owner/name" of a remote on this host, or null when the remote is elsewhere. */
+  repoName(remoteUrl: string): string | null;
+  /**
+   * The page that opens a pull request of `branch`, pushed to `from`, into `base` of `into` (the same repo, or the one
+   * it was copied from). Null when either is not on this host.
+   */
+  pageFor(o: { from: string; into: string; base: string; branch: string; title: string }): string | null;
+}

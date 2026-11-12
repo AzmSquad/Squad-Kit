@@ -6,10 +6,11 @@ import path from 'node:path';
 import type { BoardPaths } from '../board/store.js';
 import type { ProjectGuard } from '../board/types.js';
 import { AI_TOOLS, BROWSERS } from '../modules/registry.js';
-import { squadHome } from '../core/home.js';
+import { squadHome, squadHomes } from '../core/home.js';
 import { childEnv } from './agent-env.js';
 import { copyDbEnv } from './db-env.js';
 import { partEnv } from './part-env.js';
+import { ownHomeEnv } from './own-home.js';
 import { OWN_GROUP, track } from './process-group.js';
 import { PACKAGE_CACHES, PRIVATE, gitPlaces, networkPolicy, noPushEnv, packageCacheEnv, projectCacheDir, projectNetwork, ticketCacheDir } from './sandbox.js';
 import type { NetworkLevel } from '../board/types.js';
@@ -31,6 +32,9 @@ import { flutterOnPath, flutterStampFolders, flutterStampRegexes } from './flutt
 
 /** The Seatbelt binary on a Mac. */
 const SEATBELT = '/usr/bin/sandbox-exec';
+
+/** Set for every command that runs in the guard, so what cannot run there (a sandbox inside it) knows and skips. */
+export const IN_GUARD = 'SQUAD_KIT_IN_GUARD';
 
 /** What the guard lets a command read and write, built from the project's places on this computer. */
 export interface GuardSpec {
@@ -231,8 +235,7 @@ export function privatePlaces(home: string, platform: NodeJS.Platform): string[]
  * secrets are named: the sign-ins and link tokens of the app and of every project.
  */
 export function agentPrivatePlaces(home: string = os.homedir(), platform: NodeJS.Platform = process.platform): string[] {
-  const own = squadHome();
-  return [...privatePlaces(home, platform), ...['secrets.yaml', 'app.json', 'console.json'].map((f) => path.join(own, f)), ...['secrets.yaml', 'console.json'].map((f) => path.join(own, 'projects', '*', f))];
+  return [...privatePlaces(home, platform), ...squadHomes(home).flatMap((own) => [...['secrets.yaml', 'app.json', 'console.json'].map((f) => path.join(own, f)), ...['secrets.yaml', 'console.json'].map((f) => path.join(own, 'projects', '*', f))])];
 }
 
 /**
@@ -244,7 +247,7 @@ export function buildGuard(o: { cwd: string; root: string; cache?: string; extra
   // The person's Flutter writes its version stamps on every run: those few files open, each exactly, and nothing else of it.
   const flutter = o.flutter === undefined ? flutterOnPath()?.root : o.flutter;
   const temp = withReal([os.tmpdir(), ...(o.platform === 'win32' ? [] : ['/tmp', '/private/tmp', '/private/var/folders'])]);
-  const noRead = [...privatePlaces(home, o.platform), ...withReal([squadHome()])];
+  const noRead = [...privatePlaces(home, o.platform), ...withReal(squadHomes(home))];
   // Seatbelt matches the canonical path (on a Mac /var is a link to /private/var), so the copy and everything the
   // command may reach are kept as their real paths, and withReal also keeps the link form where both can appear.
   const real = (p: string) => {
@@ -497,10 +500,17 @@ export interface GuardHost {
   release: string;
   has(program: string): boolean;
   bwrapWorks(): boolean;
+  /** This squad-kit itself runs inside another one's guard: a story of squad-kit's own code, or its tests there. */
+  inGuard?: boolean;
 }
 
-/** Whether squad-kit can run the project's own commands in its guard on this computer. */
+/**
+ * Whether squad-kit can run the project's own commands in its guard on this computer. Inside another squad-kit's guard
+ * it cannot: the system refuses a second sandbox inside the first ("sandbox_apply: Operation not permitted" on a Mac),
+ * and the outer guard already holds everything this one runs.
+ */
 export function guardSupportOn(h: GuardHost): GuardSupport {
+  if (h.inGuard) return { on: false, why: "squad-kit runs inside another squad-kit's guard here, which holds everything it runs: a guard cannot hold a second one" };
   if (h.platform === 'darwin') return h.has(SEATBELT) ? { on: true, why: "squad-kit's guard (macOS Seatbelt)" } : { on: false, why: 'macOS sandbox-exec is missing on this Mac' };
   if (h.platform === 'win32') return { on: false, why: "squad-kit's guard does not run on Windows yet" };
   if (h.platform !== 'linux') return { on: false, why: "squad-kit's guard does not run on this system" };
@@ -513,7 +523,7 @@ export function guardSupportOn(h: GuardHost): GuardSupport {
 let support: GuardSupport | null = null;
 
 export function guardSupport(): GuardSupport {
-  return (support ??= guardSupportOn({ platform: process.platform, release: os.release(), has: onPath, bwrapWorks }));
+  return (support ??= guardSupportOn({ platform: process.platform, release: os.release(), has: onPath, bwrapWorks, inGuard: process.env[IN_GUARD] === '1' }));
 }
 
 function onPath(program: string): boolean {
@@ -587,8 +597,11 @@ export function spawnProject(command: string, o: SpawnProjectOptions): ChildProc
   // In a story's copy with a database of its own, the setting points at it, whatever the person's environment says.
   // A command that builds an Android app gets squad-kit's Android tools, with their folders in the cache home (android-env.ts).
   // The part's env file comes first, filled in from that same start, and everything squad-kit sets goes on top (part-env.ts).
+  // A squad-kit the command starts gets a home of its copy's own, never the person's board (own-home.ts), and a command in
+  // the guard can tell it is there (SQUAD_KIT_IN_GUARD), so a test that cannot run inside it skips with a reason.
   const start = projectEnv();
-  const env = { ...start, ...partEnv(command, o.cwd, start), ...guardEnv(o.guard, o.cwd), ...(usesAndroid(command) ? androidCommandEnv(o.guard?.cache ? { cache: o.guard.cache } : {}) : {}), ...(o.env ?? {}), ...copyDbEnv(o.cwd) };
+  const guarded = Boolean(o.guard && (process.platform === 'darwin' || process.platform === 'linux'));
+  const env = { ...start, ...partEnv(command, o.cwd, start), ...guardEnv(o.guard, o.cwd), ...ownHomeEnv(o.guard?.cwd ?? o.cwd, o.guard?.cache), ...(guarded ? { [IN_GUARD]: '1' } : {}), ...(usesAndroid(command) ? androidCommandEnv(o.guard?.cache ? { cache: o.guard.cache } : {}) : {}), ...(o.env ?? {}), ...copyDbEnv(o.cwd) };
   const stdio = o.stdio ?? ['ignore', 'pipe', 'pipe'];
   const base: SpawnOptions = { cwd: o.cwd, detached: OWN_GROUP, stdio, env };
   if (o.guard && process.platform === 'darwin') {

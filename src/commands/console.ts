@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import { confirm } from '@inquirer/prompts';
-import open from 'open';
+import openInBrowser from 'open';
 import * as ui from '../ui/index.js';
 import { isInteractive } from '../ui/tty.js';
 import { buildPaths, findSquadRoot, type SquadPaths } from '../core/paths.js';
@@ -26,6 +26,12 @@ import {
   writeAppInfo,
   type ConsoleInfo,
 } from '../board/console-info.js';
+
+/** Opens the board in a browser, unless squad-kit was started by a project's own command (engine/own-home.ts). */
+async function open(url: string): Promise<void> {
+  if (process.env.SQUAD_KIT_BROWSER === 'off') return;
+  await openInBrowser(url);
+}
 
 export interface ConsoleOptions {
   port?: number;

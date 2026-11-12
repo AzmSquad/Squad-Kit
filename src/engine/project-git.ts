@@ -11,6 +11,7 @@ import type { Release, Ticket } from '../board/types.js';
 import { commitArgsFor, currentBranch, git, isRepo, latestBase, remotes, gitLater, keepsCommitRules, conventionalWords } from './git.js';
 import { repoFor } from './repos.js';
 import { BREAKDOWN_ID, breakdownDir } from '../board/requirements-paths.js';
+import { isSquadKitCode } from './self-project.js';
 
 /**
  * The project's documents in git, for a project whose `.squad/` sits inside its one repo (ADR-001). squad-kit keeps
@@ -30,7 +31,8 @@ export function docsRepo(bp: BoardPaths): string | null {
 }
 
 export function docsInGit(bp: BoardPaths): boolean {
-  return docsRepo(bp) !== null && readMeta(bp).documentsInGit !== false;
+  // Never on squad-kit's own code: its pull requests carry code only (self-project.ts).
+  return docsRepo(bp) !== null && readMeta(bp).documentsInGit !== false && !isSquadKitCode(bp.root);
 }
 
 /** `.squad/` as a path inside the repo, with forward slashes. */

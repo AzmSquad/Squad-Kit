@@ -11,6 +11,7 @@ import { readConsoleInfo, type ConsoleInfo } from '../src/board/console-info.js'
 import { demoFolder } from '../src/commands/board.js';
 import { rememberProject } from '../src/core/projects.js';
 
+import { inGuard } from './support/in-guard.js';
 /**
  * Restart from the board, end to end: a real `squad console` in its own process group, the way a terminal runs it.
  * Each restart must load a fresh board on the same port and link without leaving the old board alive as the parent
@@ -71,7 +72,7 @@ async function until<T>(what: string, check: () => Promise<T | undefined>, log: 
 }
 
 describe.skipIf(process.platform === 'win32')('squad console restart from the board', () => {
-  it('keeps one board on the same port and link, and Ctrl-C still stops it', async () => {
+  it.skipIf(inGuard)('keeps one board on the same port and link, and Ctrl-C still stops it', async () => {
     tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'squad-restart-')));
     const squadDir = path.join(tmp, '.squad');
     fs.mkdirSync(squadDir, { recursive: true });

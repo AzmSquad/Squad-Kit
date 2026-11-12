@@ -17,6 +17,7 @@ import { DOING } from './plain-doing.js';
 import { fromTheRead, withBrowserTests } from './find-commands.js';
 import { writeLog } from '../core/app-log.js';
 import { learnAfterRead } from './story-db.js';
+import { selfCommandsIn, selfParts } from './self-project.js';
 
 /**
  * The first run on the live engine: the Architect reads the project, then squad-kit proves it can work here, on its
@@ -179,15 +180,16 @@ export function saveScan(bp: BoardPaths, answer: ScanAnswer, nested: RepoInfo[],
   const none = answer.empty || (fresh.setup?.kind === 'empty' && nextToNothing(bp.root));
   const out = none ? noCodeAnswer(answer, idea) : answer;
   fresh.map = out.map ?? [];
-  fresh.commands = { ...withAllTests(bp.root, clean(out.commands)), ...clean(fresh.commands ?? {}) };
+  // squad-kit's own code has its own way to check and run (self-project.ts); what the person saved still wins.
+  fresh.commands = { ...withAllTests(bp.root, clean(out.commands)), ...selfCommandsIn(bp.root, fresh.git?.base), ...clean(fresh.commands ?? {}) };
   if (nested.length) {
     fresh.repos = nested.map((r) => {
       const found = out.repos?.find((x) => x.path.replace(/\/$/, '') === r.path);
       const kept = fresh.repos?.find((x) => x.path === r.path);
-      return { ...r, summary: found?.summary ?? kept?.summary, commands: { ...withAllTests(path.join(bp.root, r.path), clean(found?.commands ?? {})), ...clean(kept?.commands ?? {}) } };
+      return { ...r, summary: found?.summary ?? kept?.summary, commands: { ...withAllTests(path.join(bp.root, r.path), clean(found?.commands ?? {})), ...selfCommandsIn(path.join(bp.root, r.path), r.base), ...clean(kept?.commands ?? {}) } };
     });
   }
-  const parts = partsAfterRead(cleanParts(out.runs, fresh, bp.root), fresh.parts);
+  const parts = selfParts(bp.root, fresh, partsAfterRead(cleanParts(out.runs, fresh, bp.root), fresh.parts));
   if (parts.length) fresh.parts = parts;
   else delete fresh.parts;
   fresh.scan = { status: 'done', at, summary: out.summary, empty: out.empty };

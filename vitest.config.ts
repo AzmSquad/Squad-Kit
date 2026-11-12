@@ -14,5 +14,7 @@ export default defineConfig({
     testTimeout: 60_000,
     hookTimeout: 60_000,
     setupFiles: ['test/support/env-isolation.ts'],
+    // Says once why some tests skip inside squad-kit's own guard (test/support/in-guard.ts).
+    globalSetup: ['test/support/guard-note.ts'],
   },
 });

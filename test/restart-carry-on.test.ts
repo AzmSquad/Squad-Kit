@@ -8,6 +8,7 @@ import { stepSeconds } from '../src/board/clock.js';
 import type { RunOptions, RunResult } from '../src/modules/claude/direct.js';
 import { freePort } from './support/tiny-app.js';
 
+import { inGuard } from './support/in-guard.js';
 /**
  * An interruption is not a failure, and nothing is left behind (the Mawid MA-5 incident). A board restart in the middle
  * of the Builder's step is no failed try and no stronger model: the same step carries on with its clock, and the
@@ -145,7 +146,7 @@ afterEach(async () => {
 });
 
 describe.skipIf(process.platform === 'win32')('a board restart in the middle of a Builder step', () => {
-  it('is no failed try: the same step carries on with its clock and its effort, and the server it left is gone', async () => {
+  it.skipIf(inGuard)('is no failed try: the same step carries on with its clock and its effort, and the server it left is gone', async () => {
     const port = await freePort();
     // MA-5: the plan was redone to follow ADR-009 after the Builder had started.
     const { bp, id, wt } = liveTicket('mawid', (x) => {
@@ -225,7 +226,7 @@ describe.skipIf(process.platform === 'win32')('a board restart in the middle of 
 });
 
 describe.skipIf(process.platform === 'win32')('before the checks', () => {
-  it("stops a leftover server of the ticket's copy that holds the port, and says so in one plain line", async () => {
+  it.skipIf(inGuard)("stops a leftover server of the ticket's copy that holds the port, and says so in one plain line", async () => {
     const port = await freePort();
     const { bp, id, wt } = liveTicket('checks', (x) => {
       x.stage = 'test';
@@ -269,7 +270,7 @@ describe.skipIf(process.platform === 'win32')('a Builder question about a busy p
   const question = (port: number, pid: number) => ({ text: `Can you stop the leftover server on port ${port} so the e2e tests can run?`, options: [`I ran \`kill ${pid}\``], why: 'The e2e tests start their own server there.', kind: 'gap' });
   type Squad = { build(id: string): Promise<void>; builderAnswered(id: string): Promise<void> };
 
-  it("is answered by squad-kit when a squad-kit leftover holds the port: the person never sees it", async () => {
+  it.skipIf(inGuard)("is answered by squad-kit when a squad-kit leftover holds the port: the person never sees it", async () => {
     const port = await freePort();
     const { bp, id, wt } = asking('ours');
     const server = await orphan(wt.dir, SERVE(port), port);

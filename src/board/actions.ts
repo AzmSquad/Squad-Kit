@@ -67,6 +67,7 @@ import { HARNESS_FILE_GATE } from './additions.js';
 import { noteGates, releaseGatesDue, runGatesAt, runReleaseGates } from '../engine/gate-run.js';
 import { repoLabel } from './parts.js';
 import { bringInAgain } from './bring-in.js';
+import { SELF_MERGED, SELF_NO_RELEASE, isSelfProject } from '../engine/self-project.js';
 
 /** Every person-facing action lives here, so the board and the terminal do exactly the same thing. */
 
@@ -629,10 +630,12 @@ export function acceptProof(bp: BoardPaths, ticket: Ticket, byItself?: string, o
     t.progress = undefined;
     t.release = release.version;
     const into = merged?.moved ? merged : null;
+    // squad-kit's own code goes out by pull request, never in a release from here (engine/self-project.ts).
+    const own = isSelfProject(bp);
     t.status = openPr
       ? 'Opening the pull request'
       : into
-        ? `Merged into ${into.base} · goes out in ${release.version}`
+        ? `Merged into ${into.base} · ${own ? SELF_MERGED : `goes out in ${release.version}`}`
         : merged
           ? CHECKOUT_WAITS
           : `Ready for ${release.version}`;
@@ -647,7 +650,7 @@ export function acceptProof(bp: BoardPaths, ticket: Ticket, byItself?: string, o
     else addActivity(t, 'you', 'Checked the proof. Looks right');
     if (commit) addActivity(t, 'release', 'Saved the change');
     if (merged) addActivity(t, 'release', merged.moved ? `Merged into ${merged.base}` : CHECKOUT_LATER);
-    addActivity(t, 'release', `Added to release ${release.version}`);
+    if (!own) addActivity(t, 'release', `Added to release ${release.version}`);
   });
 }
 
@@ -2279,6 +2282,8 @@ async function goAroundTakenVersion(bp: BoardPaths, release: Release): Promise<{
 }
 
 export async function releaseVersion(bp: BoardPaths, version?: string, goOn?: string): Promise<Release> {
+  // squad-kit's own code: a release there publishes to npm, and that is for its maintainers (engine/self-project.ts).
+  if (isSelfProject(bp)) throw new BoardActionError(SELF_NO_RELEASE);
   // A ticket being taken out of a release goes first: what its check says decides what goes out.
   const out = takingOutDone(bp);
   if (out) await out;

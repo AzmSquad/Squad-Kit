@@ -5,7 +5,7 @@ import path from 'node:path';
 import { copyDirsIn } from './git.js';
 import type { AiTool, BlockedAction, SandboxAsk, SandboxSupport } from '../modules/ai-tool/types.js';
 import { AI_TOOLS } from '../modules/registry.js';
-import { squadHome } from '../core/home.js';
+import { squadHome, squadHomes } from '../core/home.js';
 import { boardPaths, readMeta, type BoardPaths } from '../board/store.js';
 import type { NetworkLevel } from '../board/types.js';
 import { KNOWN_BAD, RECOMMENDED, knownBadGroup } from './network-lists.js';
@@ -278,7 +278,7 @@ export function sandboxAsk(o: SandboxFor): SandboxAsk {
   const flutter = o.flutter === undefined ? flutterOnPath()?.root : o.flutter;
   return {
     write: [...new Set([...withReal([o.proof]), ...own, ...temp, ...caches, ...(flutter ? flutterStampGlobs(flutter) : [])])],
-    noRead: [...new Set([...PRIVATE.map((p) => path.join(home, p)), ...withReal([squadHome()]), ...o.secrets, ...env])],
+    noRead: [...new Set([...PRIVATE.map((p) => path.join(home, p)), ...withReal(squadHomes(home)), ...o.secrets, ...env])],
     // The step's own folders, inside squad-kit's: its copy, its proof folder, its package cache, its attachments.
     // And squad-kit's Android SDK, Java and shared Gradle home, read only, for an Android build in the shell.
     read: [...new Set(withReal([o.cwd, o.proof, ...(o.cache ? [o.cache] : []), ...o.read, ...androidReads()]))],

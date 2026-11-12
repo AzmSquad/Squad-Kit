@@ -42,6 +42,7 @@ import { ticketTrouble } from '../lib/ticket-trouble';
 import { detect, langProps, typedDir } from '../lib/lang';
 import { ToolBlockCard } from '../components/ToolBlock';
 import { AskLeadStrip } from '../components/LeadAsk';
+import { SendAsPr } from '../components/SendAsPr';
 
 type Tab = 'now' | 'story' | 'plan' | 'activity' | 'conversation' | 'proof' | 'changes' | 'cost' | 'developer';
 
@@ -1070,7 +1071,9 @@ function WorkingPanel({ t }: { t: Ticket }) {
     t.stage === 'release'
       ? /^Waits to merge\b/.test(t.status)
         ? { title: 'Waits to merge', text: 'Your own copy of the code has changes in the same files. Save or undo them there, and it goes in by itself. squad-kit tries again every few minutes.' }
-        : { title: `Ready for ${t.release}`, text: 'It goes out with the next release. Nothing needed from you until then.' }
+        : t.sendAs
+          ? { title: 'Merged on this computer', text: 'It goes on as a pull request: send it below.' }
+          : { title: `Ready for ${t.release}`, text: 'It goes out with the next release. Nothing needed from you until then.' }
       : t.stage === 'done'
         ? { title: t.status, text: 'This ticket is live. Found a problem? Report a bug and it comes back around.' }
         : t.waiting?.kind === 'change'
@@ -1098,7 +1101,7 @@ function WorkingPanel({ t }: { t: Ticket }) {
               <Written as="b" text={calm.title} />
               <Written text={calm.text} />
             </div>
-            {t.stage === 'release' && (
+            {t.stage === 'release' && !t.sendAs && (
               <>
                 <span className="grow" style={{ flex: 1 }} />
                 <Link to="/releases" className="btn sm">Open release</Link>
@@ -1107,6 +1110,7 @@ function WorkingPanel({ t }: { t: Ticket }) {
           </div>
         )}
         {t.localSetup && <LocalSetupLine t={t} />}
+        {t.sendAs && <SendAsPr s={t.sendAs} />}
         {/* Accepted, its change not in the base yet: its pull request waits on the code host, or the person's copy. */}
         {t.stage === 'release' && !t.mergedAt && !running && !t.live && !t.squad && (t.pr || /^Waits to merge\b/.test(t.status)) && (
           <CheckMerge

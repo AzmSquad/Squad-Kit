@@ -9,6 +9,7 @@ import { BrokenTickets } from './Board';
 import { partNames } from '../lib/overview';
 import { BugDialog, ReleasedDialog } from '../components/dialogs';
 import { Cmd, CouldNotLoad, Modal, NotesView, Written, dateShort } from '../components/ui';
+import { SelfNote } from '../components/SelfNote';
 import { usePrefs } from '../lib/prefs';
 import { shellQuote } from '../lib/text';
 import { GatePill, NoNewTestsLabel } from '../components/Gates';
@@ -24,15 +25,22 @@ export function ReleasesPage() {
   const current = list.find((r) => r.version === selected) ?? list.find((r) => r.status === 'draft') ?? list[0];
   const demo = board.data?.ready ? board.data.meta.engine === 'demo' : false;
   const broken = board.data?.brokenRecords?.filter((b) => b.kind === 'release') ?? [];
+  // squad-kit's own code: its maintainers release it, so the page says so and offers no Release button.
+  const self = board.data?.ready ? board.data.self : undefined;
 
   return (
     <>
       <div className="top">
         <h1>Releases</h1>
         <span className="grow" />
-        <Cmd text="squad release" />
+        {!self && <Cmd text="squad release" />}
       </div>
       {broken.length > 0 && <BrokenTickets list={broken} label="Releases that could not be read" />}
+      {self && (
+        <div style={{ padding: '0 28px 12px' }}>
+          <SelfNote title="Releases are for squad-kit's maintainers" text={self.releases} />
+        </div>
+      )}
       <div className="split rel">
         <div className="listcol">
           {list.map((r) => (
@@ -74,6 +82,7 @@ function ReleaseDetail({ r, onReleased, live }: { r: ReleaseWithItems; onRelease
     if (!editing) setNotes(r.notes);
   }, [r.notes, editing]);
   const draft = r.status === 'draft';
+  const self = board.data?.ready ? board.data.self : undefined;
   const unpushed = r.unpushed ?? [];
   const part = r.version.endsWith('.0') ? 'New features, nothing breaks for users.' : 'Fixes only, nothing new to learn.';
 
@@ -81,7 +90,7 @@ function ReleaseDetail({ r, onReleased, live }: { r: ReleaseWithItems; onRelease
     <div className="detail">
       <h2 style={{ fontSize: 24, fontStretch: '88%' }}>{draft ? `Release ${r.version}` : r.version}</h2>
       <p className="note" style={{ marginTop: 2 }}>
-        {draft ? 'The squad prepared this release. Read it, edit the notes if you like, then release.' : `Released ${dateShort(r.date)}`}
+        {draft && self ? 'The stories merged on this computer. The notes help your pull request; the release itself is for the maintainers.' : draft ? 'The squad prepared this release. Read it, edit the notes if you like, then release.' : `Released ${dateShort(r.date)}`}
       </p>
 
       {unpushed.length > 0 && (
@@ -291,7 +300,9 @@ function ReleaseDetail({ r, onReleased, live }: { r: ReleaseWithItems; onRelease
       </div>
 
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 26 }}>
-        {draft ? (
+        {draft && self ? (
+          <span className="note">Merged stories wait on main here. Each one says how to send it as a pull request.</span>
+        ) : draft ? (
           <>
             <button className="btn pri" disabled={r.items.length === 0} onClick={() => setConfirming(true)}>
               <Rocket size={15} /> Release {r.version}

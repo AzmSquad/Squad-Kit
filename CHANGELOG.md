@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.16] — 2026-11-12
+
+### Added
+
+- **squad-kit knows when it works on its own code.** Add a clone of squad-kit's repo as a project and Add project, the
+  setup, the Overview and the Releases page say so in one plain note: "This is squad-kit's own code. Each story runs its
+  own separate squad-kit, with sample data, so this board and your other projects are never touched." Every agent and
+  the Squad lead are told too. It goes by the package (named squad-kit, with the `squad` command), never the folder's name.
+- **squad-kit's own way to check and run itself.** Both packages install from their lock files. The checks are the
+  engine's and the board's type checks, the tests your change reaches plus the board's server test, the build and the
+  npm size limit. The whole suite (about 9 minutes) stays with CI. The app for pictures is a sample board (`squad demo`)
+  built from the story's code, on the story's own port and home folder, with no AI and no sign-in.
+- **Send it as a pull request.** On squad-kit's own code, a merged story shows the one command that pushes its branch
+  (shown even with commands turned off), and a button that opens GitHub's page for the pull request into the repo it
+  came from. squad-kit pushes nothing to GitHub by itself. The story says "Merged into main · send it as a pull request",
+  and the first-story screen offers the same button. Other projects, forks too, go out with their own releases as
+  before.
+- CONTRIBUTING.md has a short "Build squad-kit with squad-kit" section.
+
+### Changed
+
+- **A squad-kit that a project's command or an agent starts gets a home folder of its own copy**, with update checks and
+  the browser off. It never reads or reaches your board, its token, its lock or its port. The guard also hides your usual
+  `~/.squad-kit` when the board runs with its home elsewhere.
+- **Inside the guard, a command knows it** (`SQUAD_KIT_IN_GUARD=1`). squad-kit started there runs no guard of its own (the
+  system refuses a sandbox inside a sandbox), and squad-kit's tests that need one skip there; they still run in CI.
+- On squad-kit's own code, Release is refused with plain words and the Releases page explains why: a release on GitHub
+  publishes squad-kit to npm, so its maintainers make them. Its project documents stay out of git, so a pull request
+  carries code only. The Settings switch says why it stays off, and so does a hand over.
+
 ## [1.3.15] — 2026-11-12
 
 ### Changed

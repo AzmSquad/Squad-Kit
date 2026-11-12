@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { RunOptions, RunResult } from '../src/modules/claude/direct.js';
 
+import { inGuard } from './support/in-guard.js';
 /**
  * How the engine runs git, with real git and real hooks. One place starts git, with hooks and every program a repo can
  * name turned off; exactly one path runs the project's hooks, in their guard. What a hook or a check does there stays
@@ -606,7 +607,7 @@ describe('finding 7: a hook never holds up the app, and ends with all it started
   });
 });
 
-describe('finding 8: a crash while the hooks look at the whole change', () => {
+describe.skipIf(inGuard)('finding 8: a crash while the hooks look at the whole change', () => {
   it('the branch never moved: the next push goes forward, and the next start puts the copy back', async () => {
     const remote = path.join(tmp, 'remote.git');
     sh(`git init -q --bare -b main "${remote}"`, tmp);

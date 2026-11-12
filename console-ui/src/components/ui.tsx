@@ -95,9 +95,10 @@ export function Place({ path }: { path: string }) {
  * The terminal command for an action, one click to copy. Hidden when "Show commands" is off. `keep`: the end of the
  * command (an id and its options) that stays in sight when the command is cut short; the start gives way first.
  */
-export function Cmd({ text, keep }: { text: string; keep?: string }) {
+export function Cmd({ text, keep, always }: { text: string; keep?: string; always?: boolean }) {
   const { showCommands, toast } = usePrefs();
-  if (!showCommands) return null;
+  // `always`: the command is the step itself, not a terminal twin of a button, so it shows with commands turned off too.
+  if (!showCommands && !always) return null;
   const copy = () => {
     void navigator.clipboard?.writeText(text).then(
       () => toast('Command copied'),
@@ -153,7 +154,7 @@ export function Tracker({ ticket }: { ticket: Ticket }) {
             {i === at && (
               <span className="tag">{mode === 'you' ? 'Your turn' : ticket.now?.merging ? 'Working' : ticket.stage === 'release' ? 'Ready' : ticket.dependency?.way === 'wait' && !ticket.dependency.started && !ticket.squad ? 'Waiting' : 'Working'}</span>
             )}
-            {notes.size > 0 && <span className="tnote">{i === at && note === 'your turn' ? '' : (note ?? '')}</span>}
+            {notes.size > 0 && <span className="tnote">{i === at && note === 'your turn' ? '' : s.stage === 'release' && ticket.sendAs ? 'as a pull request' : (note ?? '')}</span>}
             {waits.has(s.stage) && <span className="tnote twait">{waits.get(s.stage)}</span>}
           </div>
         );

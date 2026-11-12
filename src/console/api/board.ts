@@ -110,6 +110,8 @@ import { toolWaitOf } from '../../engine/tools/index.js';
 import { confirmDatabase, databaseView, learnDatabase, makeTemplateBeside, setDatabaseOptions, type DatabaseChange } from '../../engine/story-db.js';
 import { bringBack, checkOutside, workOutside } from '../../board/outside.js';
 import { outsidePrompt } from '../../engine/outside-guide.js';
+import { SELF_DOCS_OFF, SELF_NOTE, SELF_RELEASES, isSelfProject } from '../../engine/self-project.js';
+import { sendAsOf } from '../../engine/send-as-pr.js';
 
 const DAY = 86_400_000;
 
@@ -266,6 +268,8 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     return c.json({
       ready: true,
       meta,
+      // squad-kit's own code: the plain notes its pages show (engine/self-project.ts).
+      ...(isSelfProject(bp, meta) ? { self: { note: SELF_NOTE, releases: SELF_RELEASES, docs: SELF_DOCS_OFF } } : {}),
       // A newer squad-kit build on disk than the one this board runs: offer a restart.
       console: ctl ? { startedAt: ctl.startedAt, outdated: ctl.build > 0 && buildStamp() > ctl.build } : null,
       // Each ticket with what is happening on it now, in words: the card's line, its time and its usual time.
@@ -289,7 +293,10 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     if (problem) return c.json({ error: problem }, 409);
     const t = readTicket(bp, c.req.param('id'));
     // Looking at a story that waits for a tool checks this computer again beside, so it goes on soon after the install.
-    return t ? c.json({ ...withProblem(t), now: nowOf(t, readUsual(bp)), ...toolWaitOf(bp, t, true) }) : c.json({ error: 'not found' }, 404);
+    if (!t) return c.json({ error: 'not found' }, 404);
+    // Merged here, with its work going on by pull request: how to send it (engine/send-as-pr.ts).
+    const sendAs = sendAsOf(bp, t);
+    return c.json({ ...withProblem(t), now: nowOf(t, readUsual(bp)), ...toolWaitOf(bp, t, true), ...(sendAs ? { sendAs } : {}) });
   });
 
   // What is happening on a ticket now, from its live record. Asking about it is answered from the same record, at

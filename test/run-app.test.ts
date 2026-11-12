@@ -10,6 +10,7 @@ import { AppRunner, portTaken, stopApps, appRunner } from '../src/engine/run-app
 import { GUARD_BLOCKED_DOCKER, guardSupport } from '../src/engine/project-guard.js';
 import { freePort } from './support/tiny-app.js';
 
+import { inGuard } from './support/in-guard.js';
 /**
  * Your apps: squad-kit runs the app from its own copy of main, never the person's checkout, waits for the address,
  * and stops the whole process group. Real git repos and real little servers.
@@ -251,7 +252,7 @@ describe('your apps run from squad-kit’s own copy of main', () => {
     }
   }, 40_000);
 
-  it.runIf(hasLsof)('a program squad-kit started on the port can be stopped for it', async () => {
+  it.runIf(hasLsof && !inGuard)('a program squad-kit started on the port can be stopped for it', async () => {
     const other = spawn(process.execPath, ['-e', `require('http').createServer((q, r) => r.end('old')).listen(${port}, '127.0.0.1')`], { detached: true, stdio: 'ignore' });
     try {
       while (!(await answers(`http://127.0.0.1:${port}`))) await sleep(100);

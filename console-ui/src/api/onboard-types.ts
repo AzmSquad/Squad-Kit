@@ -69,6 +69,8 @@ export interface SetupView {
   idea: boolean;
   /** New project with a BRD, until its first release: the BRD the Analyst has. */
   brd?: { id: string; title: string };
+  /** The project is squad-kit's own code: one plain note that says so. */
+  self?: string;
 }
 
 export interface SetupTestRun {
@@ -160,4 +162,6 @@ export interface OverviewView {
   idea?: string;
   old: boolean;
   command: string;
+  /** The project is squad-kit's own code: one plain note that says so. */
+  self?: string;
 }

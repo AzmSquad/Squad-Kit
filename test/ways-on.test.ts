@@ -6,6 +6,7 @@ import path from 'node:path';
 import type { RunOptions, RunResult } from '../src/modules/claude/direct.js';
 import { passing, plainError } from '../src/modules/claude/direct.js';
 
+import { inGuard } from './support/in-guard.js';
 /**
  * Dead ends that are ways on now: a network blip waits and tries again, a clash at release gets the clash card, a ticket
  * nobody can touch can be taken, a failed first read says so, Stop during the usage limit stops, and an old process
@@ -254,7 +255,7 @@ describe('Stop while the usage limit holds the first read', () => {
 });
 
 describe('a process number from before a crash or a reboot', () => {
-  it('is not trusted when the process with that number started later', () => {
+  it.skipIf(inGuard)('is not trusted when the process with that number started later', () => {
     const long = new Date(Date.now() - 24 * 3_600_000).toISOString();
     if (process.platform === 'win32') return;
     // This test process started after that record: the number counts as someone else's now.

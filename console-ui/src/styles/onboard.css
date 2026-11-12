@@ -167,3 +167,9 @@
   .ob-setup .cpage-h .grow { display: none; }
 }
 .ob-c p.ob-product { font-size: 13px; color: var(--muted); margin-top: 4px; }
+/* squad-kit's own code: the mark beside one plain note (components/SelfNote.tsx), and a merged story's way to send it. */
+.selfnote { background: var(--accent-soft); }
+.selfnote img { flex: none; border-radius: 8px; }
+.sendas .grow { min-width: 0; }
+.sendas .grow code { font-size: 12.5px; overflow-wrap: anywhere; }
+.sendas .grow .term { margin-top: 6px; justify-self: start; max-width: 100%; min-width: 0; overflow: hidden; }

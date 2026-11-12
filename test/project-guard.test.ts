@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { inGuard } from './support/in-guard.js';
 /**
  * squad-kit's own guard for the project's own commands (decision 8 of the agent's room plan): the checks, the app and
  * the setup commands run in Seatbelt on a Mac and bubblewrap on Linux, where they work normally and may reach the
@@ -257,7 +258,7 @@ describe('a file the guard blocked', () => {
 
 describe('the single gate', () => {
   it('runs a command in the guard on a Mac: it cannot read a file outside its copy', async () => {
-    if (process.platform !== 'darwin' || !fs.existsSync('/usr/bin/sandbox-exec')) return;
+    if (process.platform !== 'darwin' || !fs.existsSync('/usr/bin/sandbox-exec') || inGuard) return;
     const secret = path.join(home, '.ssh', 'id_rsa');
     fs.writeFileSync(secret, 'PRIVATE KEY');
     const out = await new Promise<string>((resolve) => {
@@ -273,7 +274,7 @@ describe('the single gate', () => {
   });
 
   it("a hostile test on a Mac reads no key, nothing of squad-kit's, no .env of the project, and writes only in its copy", async () => {
-    if (process.platform !== 'darwin' || !fs.existsSync('/usr/bin/sandbox-exec')) return;
+    if (process.platform !== 'darwin' || !fs.existsSync('/usr/bin/sandbox-exec') || inGuard) return;
     fs.writeFileSync(path.join(home, '.ssh', 'id_ed25519'), 'PRIVATE KEY');
     const squad = path.join(process.env.SQUAD_KIT_HOME!, 'secrets-guard-test.yaml');
     fs.writeFileSync(squad, 'token: SQUAD SECRET');
@@ -312,7 +313,7 @@ describe('the single gate', () => {
   });
 
   it("the setup after a merge on a Mac reads its own checkout's .env, and still no key or other .env of the project", async () => {
-    if (process.platform !== 'darwin' || !fs.existsSync('/usr/bin/sandbox-exec')) return;
+    if (process.platform !== 'darwin' || !fs.existsSync('/usr/bin/sandbox-exec') || inGuard) return;
     // The person's own checkout, inside the project folder, as the setup after a merge runs it.
     const checkout = path.join(root, 'web');
     fs.mkdirSync(checkout);
@@ -338,7 +339,7 @@ describe('the single gate', () => {
   });
 
   it('on Off, a command on a Mac reaches nothing outside this computer, and still reaches an app on this computer', async () => {
-    if (process.platform !== 'darwin' || !fs.existsSync('/usr/bin/sandbox-exec')) return;
+    if (process.platform !== 'darwin' || !fs.existsSync('/usr/bin/sandbox-exec') || inGuard) return;
     const net = await import('node:net');
     // The app squad-kit started in another command, outside this one's guard, on both of this computer's addresses.
     const app = net.createServer((s) => s.end('APP ANSWERED\n'));

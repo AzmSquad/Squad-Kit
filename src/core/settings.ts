@@ -57,6 +57,8 @@ export function setParallelLimit(n: number): number {
 
 /** The app looks for a new squad-kit on start and once a day. On unless the person turned it off (offline networks). */
 export function checkForUpdates(): boolean {
+  // A squad-kit a project's own command started looks for none (engine/own-home.ts).
+  if (process.env.SQUAD_KIT_UPDATES === 'off') return false;
   return readSettings().checkForUpdates !== false;
 }
 

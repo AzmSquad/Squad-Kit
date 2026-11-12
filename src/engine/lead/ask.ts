@@ -14,6 +14,7 @@ import { secretFiles } from '../live.js';
 import { ownRunWords } from '../plain-stop.js';
 import { agentPrivatePlaces } from '../project-guard.js';
 import { PROCESS_RULE, answerAgainPrompt } from '../prompts.js';
+import { selfRule } from '../self-project.js';
 import { startPause } from '../usage-limit.js';
 import { closeWindow, openWindow, windowAccess } from '../window-server.js';
 import { cleanAnswer, laterOffer, leadAnswerProblem, learnedAbout, LEAD_SCHEMA } from './answer.js';
@@ -299,7 +300,7 @@ async function answerTurn(bp: BoardPaths, id: string, n: number, signal: AbortSi
         prompt: p,
         permissions: [...LEAD_PERMISSIONS],
         schema: LEAD_SCHEMA,
-        instructions: [PROCESS_RULE, leadRules(win.tools, isArabic(turn.ask.text))].join('\n\n'),
+        instructions: [PROCESS_RULE, selfRule(bp), leadRules(win.tools, isArabic(turn.ask.text))].filter(Boolean).join('\n\n'),
         secretFiles: secrets,
         privatePlaces: agentPrivatePlaces(),
         level: lv.level,

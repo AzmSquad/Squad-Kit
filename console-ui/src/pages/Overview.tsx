@@ -14,6 +14,7 @@ import { Avatar } from '../components/Chat';
 import { ChatMarkdown } from '../components/ChatMarkdown';
 import { useDraft } from '../lib/drafts';
 import { langProps, typedDir } from '../lib/lang';
+import { SelfNote } from '../components/SelfNote';
 
 /**
  * The Overview, first in the sidebar. The first time it is the handover: what squad-kit found, how the code fits
@@ -65,6 +66,7 @@ export function OverviewPage() {
       </div>
       <div className="scroll">
         <div className="page ob-page">
+          {v.self && <SelfNote title="squad-kit's own code" text={v.self} />}
           {v.handover === 'reading' && <SetupCard />}
           {asking && <AskIdea v={v} onSent={() => setChanging(false)} onWrite={() => setWriting(true)} />}
           {v.handover === 'ready' && !asking && !v.talk?.open && <Handover v={v} {...(v.empty ? { onChange: () => setChanging(true) } : {})} />}

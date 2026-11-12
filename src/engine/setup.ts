@@ -15,6 +15,7 @@ import { ensureAgents } from './agents.js';
 import { hideSquadFromGit } from './project-git.js';
 import { pickUpPushed, projectFromPushed, type PickedUp } from './handover.js';
 import { newSetup, type FolderKind } from '../board/setup-state.js';
+import { isSquadKitCode } from './self-project.js';
 
 /** A short ticket key from the project name: "mega-tracker" becomes "MT", "Leave requests" becomes "LR". */
 export function keyFor(name: string): string {
@@ -200,7 +201,8 @@ export function ensureLiveBoard(bp: BoardPaths, projectName: string): BoardSetup
   const meta: BoardMeta = {
     id,
     layout: LAYOUT,
-    documentsInGit: true,
+    // squad-kit's own code: its documents stay on this computer, so a pull request to squad-kit carries only code.
+    documentsInGit: !isSquadKitCode(root),
     project: projectName,
     key: keyFor(projectName),
     nextNumber: 1,

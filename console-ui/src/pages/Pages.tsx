@@ -475,8 +475,22 @@ function ParallelSetting() {
 }
 
 /** Whether squad-kit commits the project's documents with each ticket's code, so they travel with the branch. */
-function DocsInGitSetting({ on }: { on: boolean }) {
+function DocsInGitSetting({ on, locked }: { on: boolean; locked?: string }) {
   const act = useAct();
+  // squad-kit's own code keeps them off: the switch says why instead of changing nothing.
+  if (locked) {
+    return (
+      <div className="maprow" style={{ alignItems: 'center' }}>
+        <b>Project documents in git</b>
+        <span style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button className="btn sm" disabled>
+            Off
+          </button>
+          <span className="note">{locked}</span>
+        </span>
+      </div>
+    );
+  }
   return (
     <div className="maprow" style={{ alignItems: 'center' }}>
       <b>Project documents in git</b>
@@ -588,6 +602,7 @@ export function SettingsPage() {
   const act = useAct();
   const [resetting, setResetting] = useState(false);
   const meta = board.data?.ready ? board.data.meta : undefined;
+  const self = board.data?.ready ? board.data.self : undefined;
   return (
     <>
       <div className="top">
@@ -616,7 +631,7 @@ export function SettingsPage() {
               progress, chats and sign-ins stay on this computer.
             </span>
           </div>
-          {meta?.engine === 'live' && <DocsInGitSetting on={meta.documentsInGit !== false} />}
+          {meta?.engine === 'live' && <DocsInGitSetting on={meta.documentsInGit !== false} {...(self?.docs ? { locked: self.docs } : {})} />}
           <RestartRow />
           {meta?.engine === 'live' && <ParallelSetting />}
           {meta?.engine === 'live' && <RunnerSetting />}

@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { RunOptions, RunResult } from '../src/modules/claude/direct.js';
 
+import { inGuard } from './support/in-guard.js';
 const claudeCalls: RunOptions[] = [];
 const claudeAnswers: unknown[] = [];
 vi.mock('../src/modules/claude/direct.js', async (orig) => ({
@@ -799,7 +800,8 @@ describe('saving a BRD fails', () => {
   });
 });
 
-describe("this month's budget", () => {
+// Whether the person pays by subscription comes from the AI tool's sign-in, which the guard hides.
+describe.skipIf(inGuard)("this month's budget", () => {
   const WORDS = "This month's budget is used up: $52.00 of $50.00. The Analyst waits. Raise the budget in Settings, or press Carry on to go on this month";
   const spent = () => {
     writeMeta(bp, { ...readMeta(bp), budget: { monthUsd: 50 } });
