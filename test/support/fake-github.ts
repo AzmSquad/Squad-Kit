@@ -38,6 +38,22 @@ exit 0
 `;
 
 /** gh as this test wants it: signed in, signed out, or not on this computer at all. Its own settings folder says the same. */
+/**
+ * A PATH of `dir` alone, holding git and the system's own programs but no gh anywhere, not even the test's stand-in. The
+ * system folders are linked in one by one, since a CI runner keeps gh in /usr/bin.
+ */
+export function pathWithoutGh(dir: string): string {
+  const have = new Set(fs.readdirSync(dir));
+  const link = (from: string, name: string) => {
+    if (name === 'gh' || have.has(name)) return;
+    fs.symlinkSync(from, path.join(dir, name));
+    have.add(name);
+  };
+  link(execSync('command -v git', { encoding: 'utf8' }).trim(), 'git');
+  for (const sys of ['/usr/bin', '/bin']) for (const name of fs.readdirSync(sys)) link(path.join(sys, name), name);
+  return dir;
+}
+
 export function fakeGh(state: 'ready' | 'signed-out' | 'missing'): () => void {
   const before = process.env.PATH;
   const config = process.env.GH_CONFIG_DIR;
@@ -46,9 +62,7 @@ export function fakeGh(state: 'ready' | 'signed-out' | 'missing'): () => void {
   fs.mkdirSync(process.env.GH_CONFIG_DIR);
   if (state === 'ready') fs.writeFileSync(path.join(process.env.GH_CONFIG_DIR, 'hosts.yml'), 'github.com:\n    user: me\n');
   if (state === 'missing') {
-    // git and the system's own programs only: no gh anywhere, not even the test's stand-in.
-    fs.symlinkSync(execSync('command -v git', { encoding: 'utf8' }).trim(), path.join(dir, 'git'));
-    process.env.PATH = [dir, '/usr/bin', '/bin'].join(path.delimiter);
+    process.env.PATH = pathWithoutGh(dir);
   } else {
     fs.writeFileSync(path.join(dir, 'gh'), ghScript(state), { mode: 0o755 });
     process.env.PATH = `${dir}${path.delimiter}${before ?? ''}`;

@@ -83,7 +83,9 @@ describe("the sign-in, through GitHub's own tool", () => {
     expect(await checkGh()).toBe('unknown');
     expect(githubCodeHost.repoFor('/tmp/x', 'https://github.com/me/app.git')).not.toBeNull();
     // A gh that cannot even start (not a program) is no answer either.
+    // On its own on the PATH: Linux would skip a gh it cannot run and start the next one, like a CI runner's own.
     fs.writeFileSync(path.join(dir, 'gh'), 'not a program', { mode: 0o644 });
+    process.env.PATH = dir;
     forgetGhState();
     expect(await checkGh()).toBe('unknown');
     // After a real answer, a missing one keeps it.
