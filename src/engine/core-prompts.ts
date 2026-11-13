@@ -64,7 +64,7 @@ export async function corePrompts(bp: BoardPaths, role: AgentRole, ticketId?: st
   const others = await openTicketsFor(bp, t);
   const text: Record<string, () => string> = {
     questions: () => P.intakePrompt(meta, decisions, t, ctx),
-    spec: () => P.specPrompt(t, undefined, false, others),
+    spec: () => P.specPrompt(t, undefined, false, others, meta),
     scan: () => P.scanPrompt(meta, [], ctx),
     design: () => P.designPrompt(t, undefined, meta, false, others),
     blueprint: () => P.blueprintPrompt(meta, decisions, detectStack(root, meta).map((x) => x.name)),

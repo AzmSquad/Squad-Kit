@@ -2,9 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { scrubSecrets } from '../../core/scrub.js';
 import { DbError } from '../db/types.js';
-import { SAFE_NAME, type RowsAsk, type RowsRead, type RowValue } from '../db/read-rows.js';
+import { SAFE_NAME, valueProblem, type RowsAsk, type RowsRead, type RowValue } from '../db/read-rows.js';
 import type { TakenPicture, ToolDef, ToolResult, WindowSetup } from '../window.js';
 import { extraFields } from '../window-calls.js';
+import { writeNew } from '../shots.js';
+import { MAX_SHOWN_ROWS, changesWords, keyColumn, rowChanges, shownRows, type RowsChanges } from './rows-show.js';
 
 /**
  * The Data proof: read_rows, a fixed tool of the Tester's window. squad-kit reads a few rows of one table of the
@@ -13,10 +15,9 @@ import { extraFields } from '../window-calls.js';
  * address: secret-looking columns are hidden, and so is any value shaped like a key or a connection.
  */
 
-export const MAX_ROWS = 20;
+export const MAX_ROWS = MAX_SHOWN_ROWS;
 export const MAX_ROWS_CALLS = 20;
 const MAX_WHERE = 6;
-const MAX_CELL = 200;
 
 /** What the window needs to read: the story's own database, through squad-kit (rows-db.ts). */
 export interface RowsReader {
@@ -31,17 +32,11 @@ export interface RowsRecord {
   table: string;
   where: Record<string, RowValue>;
   columns: string[];
-  /** The column rows are matched by: id, else the first. */
+  /** The column rows are matched by: id, else the first that is not a secret. */
   key: string;
   before: { rows: Record<string, string>[]; at: string } | null;
   after: { rows: Record<string, string>[]; at: string } | null;
   changes?: RowsChanges;
-}
-
-export interface RowsChanges {
-  changed: { key: string; columns: string[] }[];
-  added: string[];
-  removed: string[];
 }
 
 export const READ_ROWS_DEF: Omit<ToolDef, 'name'> = {
@@ -58,57 +53,6 @@ export const READ_ROWS_DEF: Omit<ToolDef, 'name'> = {
   },
 };
 
-/** A column whose values are never shown. */
-const SECRET_COLUMN = /(pass(word|wd|phrase)?|pwd|secret|token|api_?key|hash|salt|otp|pin_?code|cvv|cvc|card_?number|iban|ssn|private_?key|session)/i;
-/** A value shaped like a database address or a link with a sign-in. */
-const CONNECTION = /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|sqlserver|mssql|amqp|jdbc:[a-z]+):\/\/\S+|(?:server|host|data source)=[^;]+;[^\n]*(?:password|pwd)=/i;
-export const HIDDEN = '•••';
-
-/** One value as the proof shows it: text, cut short, with nothing secret in it. */
-export function shownValue(column: string, v: unknown): string {
-  if (v === null || v === undefined) return '–';
-  if (SECRET_COLUMN.test(column)) return HIDDEN;
-  const text = typeof v === 'string' ? v : typeof v === 'object' ? JSON.stringify(v) : String(v);
-  if (CONNECTION.test(text)) return HIDDEN;
-  const clean = scrubSecrets(text, []);
-  return clean.length > MAX_CELL ? `${clean.slice(0, MAX_CELL - 1)}…` : clean;
-}
-
-/** The rows as the proof keeps them. */
-export function shownRows(columns: string[], rows: Record<string, unknown>[]): Record<string, string>[] {
-  return rows.slice(0, MAX_ROWS).map((r) => Object.fromEntries(columns.map((c) => [c, shownValue(c, r[c])])));
-}
-
-/** The column rows are matched by between the two reads. */
-export function keyColumn(columns: string[]): string {
-  return columns.find((c) => /^(id|_id)$/i.test(c)) ?? columns[0] ?? 'id';
-}
-
-/** What changed between the two reads, row by row, by the key column. */
-export function rowChanges(key: string, before: Record<string, string>[], after: Record<string, string>[]): RowsChanges {
-  const had = new Map(before.map((r) => [r[key] ?? '', r]));
-  const now = new Set(after.map((r) => r[key] ?? ''));
-  const changed: RowsChanges['changed'] = [];
-  const added: string[] = [];
-  for (const r of after) {
-    const k = r[key] ?? '';
-    const old = had.get(k);
-    if (!old) added.push(k);
-    else {
-      const cols = Object.keys(r).filter((c) => r[c] !== old[c]);
-      if (cols.length) changed.push({ key: k, columns: cols });
-    }
-  }
-  return { changed, added, removed: before.map((r) => r[key] ?? '').filter((k) => !now.has(k)) };
-}
-
-/** "1 row changed, 1 row added", or "No row changed". */
-export function changesWords(c: RowsChanges | undefined): string {
-  if (!c) return '';
-  const n = (x: number, what: string) => (x ? `${x} ${x === 1 ? 'row' : 'rows'} ${what}` : '');
-  return [n(c.changed.length, 'changed'), n(c.added.length, 'added'), n(c.removed.length, 'removed')].filter(Boolean).join(', ') || 'No row changed';
-}
-
 export const isRowsProof = (file: string): boolean => file.endsWith('.rows.json');
 
 interface RowsWindow {
@@ -118,8 +62,14 @@ interface RowsWindow {
 }
 
 const text = (t: string, isError = false): ToolResult => ({ content: [{ type: 'text', text: t }], ...(isError ? { isError } : {}) });
-/** Calls made and files saved, per window, so the window keeps no new fields of its own. */
-const made = new WeakMap<object, { calls: number; files: Map<string, string> }>();
+/** One read this window keeps: its file, the record as saved, and the rows before as read, never written anywhere. */
+interface Kept {
+  file: string;
+  record: RowsRecord;
+  before: Record<string, unknown>[] | null;
+}
+/** Calls made and reads kept, per window, so the window keeps no new fields of its own. */
+const made = new WeakMap<object, { calls: number; reads: Map<string, Kept> }>();
 const EXAMPLE = '{ "table": "bookings", "where": { "id": 1042 }, "when": "before" }';
 /** A name with a character only a query would have: never a slip, always refused. */
 const QUERY_LIKE = /[\s;'"`()=*/\\-]/;
@@ -140,11 +90,13 @@ export async function readRowsCall(win: RowsWindow, s: Pick<WindowSetup, 'rows' 
     if (QUERY_LIKE.test(col)) return win.refuse(tool, `the column "${col.slice(0, 60)}" is not a name`, `The ${s.who} asked squad-kit to run its own query on the database. squad-kit refused.`);
     if (!SAFE_NAME.test(col)) return win.mistake(tool, `"${col.slice(0, 40)}" is not a column's name`, `Use: ${EXAMPLE}.`);
     if (v !== null && !['string', 'number', 'boolean'].includes(typeof v)) return win.mistake(tool, `the value of "${col}" is not a plain value`, 'Each value is text, a number, true, false or null.');
+    const wrong = valueProblem(v as RowValue);
+    if (wrong) return win.mistake(tool, wrong, 'Name the rows by their id or another plain value.');
     where[col] = v as RowValue;
   }
   if (Object.keys(where).length > MAX_WHERE) return win.mistake(tool, `where names more than ${MAX_WHERE} columns`, 'Name fewer: the id is usually enough.');
   if (!s.rows) return text("This step has no database of the story's own that squad-kit can read.");
-  const mine = made.get(win) ?? { calls: 0, files: new Map<string, string>() };
+  const mine = made.get(win) ?? { calls: 0, reads: new Map<string, Kept>() };
   made.set(win, mine);
   if (mine.calls >= MAX_ROWS_CALLS) return win.mistake(tool, `this step has made its ${MAX_ROWS_CALLS} reads`, 'Hand in what you have.');
   mine.calls += 1;
@@ -158,28 +110,44 @@ export async function readRowsCall(win: RowsWindow, s: Pick<WindowSetup, 'rows' 
   }
   if (!got.columns.length) return win.mistake(tool, `there is no table "${table}" in the story's database`, got.tables.length ? `Its tables: ${got.tables.slice(0, 40).join(', ')}.` : 'It has no tables yet.');
   const stamp = JSON.stringify([table, Object.entries(where).sort(([a], [b]) => a.localeCompare(b))]);
-  let file = mine.files.get(stamp);
-  if (!file) {
-    file = `${s.prefix ?? s.ticket.toLowerCase()}-rows-${mine.files.size + 1}.rows.json`;
-    mine.files.set(stamp, file);
+  // Only a read of this window pairs with this one: a file from an earlier round is never read or written again.
+  const had = mine.reads.get(stamp);
+  const key = had?.record.key ?? keyColumn(got.columns);
+  const at = new Date().toISOString();
+  let kept: Kept;
+  if (args.when === 'before' || !had?.before) {
+    const record: RowsRecord = { table, where, columns: got.columns, key, before: null, after: null };
+    if (args.when === 'before') record.before = { rows: shownRows(got.columns, got.rows, key), at };
+    else record.after = { rows: shownRows(got.columns, got.rows, key), at };
+    kept = { file: had?.file ?? newRowsFile(s.proofDir, s.prefix ?? s.ticket.toLowerCase()), record, before: args.when === 'before' ? got.rows : null };
+  } else {
+    const changes = rowChanges(key, had.before, got.rows);
+    kept = { ...had, record: { ...had.record, columns: got.columns, after: { rows: shownRows(got.columns, got.rows, key, changes), at }, changes } };
   }
-  const full = path.join(s.proofDir, file);
-  const rows = shownRows(got.columns, got.rows);
-  let record: RowsRecord;
-  try {
-    record = JSON.parse(fs.readFileSync(full, 'utf8')) as RowsRecord;
-  } catch {
-    record = { table, where, columns: got.columns, key: keyColumn(got.columns), before: null, after: null };
-  }
-  const read = { rows, at: new Date().toISOString() };
-  if (args.when === 'before') record = { ...record, columns: got.columns, before: read, after: null };
-  else record = { ...record, columns: got.columns, after: read };
-  delete record.changes;
-  if (record.before && record.after) record.changes = rowChanges(record.key, record.before.rows, record.after.rows);
-  fs.writeFileSync(full, JSON.stringify(record, null, 2));
+  mine.reads.set(stamp, kept);
+  saveRecord(path.join(s.proofDir, kept.file), kept.record);
+  const { file, record } = kept;
+  const rows = (args.when === 'before' ? record.before : record.after)!.rows;
   win.pictures.set(file, { file, page: '', size: 'answer', call: `rows of ${table}, ${args.when}` });
   s.say(`squad-kit read ${rows.length} ${rows.length === 1 ? 'row' : 'rows'} of ${table} for the ${s.who}, read only`);
   const next = args.when === 'before' ? 'Now do the action, then call read_rows again with when "after" and the same table and where.' : `Name ${file} in shots for the "done when" it proves.`;
   const changed = record.changes ? ` ${changesWords(record.changes)}.` : '';
   return text(`Read ${rows.length} ${rows.length === 1 ? 'row' : 'rows'} of ${table} (${args.when}), saved as ${file}.${changed} ${next}\n\n${JSON.stringify(rows).slice(0, 8000)}`);
+}
+
+/** The next free name for a read in the proof folder, made new so no earlier round's file is ever taken. */
+function newRowsFile(dir: string, prefix: string): string {
+  fs.mkdirSync(dir, { recursive: true });
+  for (let n = 1; n <= 10_000; n += 1) {
+    const name = `${prefix}-rows-${n}.rows.json`;
+    if (writeNew(path.join(dir, name), Buffer.from('{}'))) return name;
+  }
+  throw new Error('squad-kit found no free name for the rows in the proof folder');
+}
+
+/** Writes this window's own file again: through a new file put in its place, never through a link. */
+function saveRecord(full: string, record: RowsRecord): void {
+  const tmp = `${full}.${process.pid}.${Date.now()}.tmp`;
+  if (!writeNew(tmp, Buffer.from(JSON.stringify(record, null, 2)))) throw new Error('squad-kit could not save the rows');
+  fs.renameSync(tmp, full);
 }

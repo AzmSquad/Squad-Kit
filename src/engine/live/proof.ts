@@ -152,12 +152,13 @@ export const proofPart = {
         if (this.stops.get(id)?.signal.aborted) throw err;
         return this.checkStop(id, err);
       }
-      if (judged.broken.length || other.broken.length) return this.notWorking(id, [...judged.broken, ...other.broken], judged.notShown);
-      if (judged.notShown.length) return this.cannotShow(id, judged.notShown, true, this.listNoes.get(id));
+      if (judged.broken.length || other.broken.length) return this.notWorking(id, [...judged.broken, ...other.broken], [...judged.notShown, ...other.open]);
+      // A Test line squad-kit could not prove is on the same card, so Continue anyway never passes it unseen.
+      if (judged.notShown.length) return this.cannotShow(id, [...judged.notShown, ...other.open], true, this.listNoes.get(id));
       // Every "done when" ended as not on a screen: nothing shows the work, so the person decides.
-      if (judged.offScreen.length === doneWhenCount(now)) return this.cannotShow(id, judged.offScreen, false, this.listNoes.get(id));
+      if (judged.offScreen.length === doneWhenCount(now)) return this.cannotShow(id, [...judged.offScreen, ...other.open], false, this.listNoes.get(id));
     }
-    if (other.broken.length) return this.notWorking(id, other.broken, []);
+    if (other.broken.length) return this.notWorking(id, other.broken, other.open);
     if (other.open.length) return void this.update(id, (x) => kindsStop(x, other.open));
     // A no on a team's list that is on goes the same way as a "done when" not shown.
     if (this.listNoes.get(id)?.length) return this.cannotShow(id, [], true, this.listNoes.get(id));

@@ -10,6 +10,9 @@ import type { CriterionProof, ProofKind } from './proof-kind.js';
  *
  * A lock only ever adds a picture. An agent's answer never unlocks a line, and the person changes any other line's
  * kind before approving the spec (board/prove.ts).
+ *
+ * A project with no app to start (a command-line tool, a library: board/apps.ts hasAppToStart) has nothing to show, call
+ * or act on, so it has no lock, and a Screen, API call or Data line is proved by a test instead. `app` false says so.
  */
 
 /** In the order the menu shows them. */
@@ -22,6 +25,10 @@ export const SEES_WHY = 'About what someone sees, so it needs a picture';
 export const SCREENS_WHY = 'The story changes a screen, so one line keeps a picture';
 /** What the menu says on a locked line. */
 export const LOCK_NOTE = 'Screen needs a picture. squad-kit keeps it when a line is about what someone sees.';
+/** Why a line is a test on a project with no app. */
+export const NO_APP_WHY = 'This project has no app to start, so a test proves it';
+/** The kinds a project with no app can use. */
+export const NO_APP_KINDS: ProofKind[] = ['test', 'none'];
 
 /** Words that are about what someone sees, whatever else the line says. */
 const SEES = /\b(?:see|sees|seeing|seen|saw|visible|invisible|on (?:the|a|my|his|her|their|your) (?:screen|page)|on screen|onscreen|screens?|pages?|buttons?|clicks?|clicked|taps?|tapped|pop-?ups?|dialogs?|modals?|toasts?|banners?|tooltips?|headings?|scroll(?:s|ed|ing)?|highlighted|greyed|grayed|looks?)\b/i;
@@ -47,16 +54,22 @@ function screenScore(c: Criterion): number {
   return [SEES, MAYBE, SEES_AR, MAYBE_AR].filter((r) => r.test(text)).length - (AWAY.test(text) || AWAY_AR.test(text) ? 1 : 0);
 }
 
+/** A kind a project with no app cannot use becomes a test. */
+function withoutApp(p: CriterionProof): CriterionProof {
+  return NO_APP_KINDS.includes(p.kind) ? { kind: p.kind, ...(p.why ? { why: p.why } : {}) } : { kind: 'test', why: NO_APP_WHY };
+}
+
 /** Rule 1 on one line: one about what someone sees is Screen, locked, with the rule's words when it had no reason of its own for a picture. */
-export function lockLine(c: Criterion): Criterion {
+export function lockLine(c: Criterion, app = true): Criterion {
+  if (!app) return c.proof ? { ...c, proof: withoutApp(c.proof) } : c;
   if (!c.proof || !aboutWhatSomeoneSees(c)) return c;
   const why = c.proof.kind === 'screen' && c.proof.why ? c.proof.why : SEES_WHY;
   return { ...c, proof: { kind: 'screen', why, locked: true } };
 }
 
 /** Rule 1 on every line. A line squad-kit locked before stays locked. */
-export function withLocks(criteria: Criterion[]): Criterion[] {
-  return criteria.map((c) => (c.proof?.locked ? { ...c, proof: { ...c.proof, kind: 'screen' } } : lockLine(c)));
+export function withLocks(criteria: Criterion[], app = true): Criterion[] {
+  return criteria.map((c) => (c.proof?.locked && app ? { ...c, proof: { ...c.proof, kind: 'screen' } } : lockLine(c, app)));
 }
 
 /**
@@ -95,28 +108,28 @@ export function cleanProof(raw: unknown): CriterionProof | undefined {
  * The criteria an agent wrote, with its proposed proof cleaned and the locks on. When it proposed none for any line
  * (an older answer), the lines stay as they were: proved as before. A line it left out is Screen, as before.
  */
-export function proposedProofs(criteria: { given: string; when: string; then: string; proof?: unknown }[]): Criterion[] {
+export function proposedProofs(criteria: { given: string; when: string; then: string; proof?: unknown }[], app = true): Criterion[] {
   const proposed = criteria.map((c) => cleanProof(c.proof));
   if (!proposed.some(Boolean)) return criteria.map(({ given, when, then }) => ({ given, when, then }));
-  return withLocks(criteria.map(({ given, when, then }, i) => ({ given, when, then, proof: proposed[i] ?? { kind: 'screen' } })));
+  return withLocks(criteria.map(({ given, when, then }, i) => ({ given, when, then, proof: proposed[i] ?? { kind: 'screen' } })), app);
 }
 
 /** A line's words changed by hand: its kind stays, and the rule looks at it again. */
-export function keepProof(old: Criterion | undefined, next: Criterion): Criterion {
+export function keepProof(old: Criterion | undefined, next: Criterion, app = true): Criterion {
   if (!old?.proof) return next;
   const { locked: _locked, ...rest } = old.proof;
-  return lockLine({ ...next, proof: rest.kind === 'screen' && old.proof.locked && rest.why === SEES_WHY ? { kind: 'screen' } : rest });
+  return lockLine({ ...next, proof: rest.kind === 'screen' && old.proof.locked && rest.why === SEES_WHY ? { kind: 'screen' } : rest }, app);
 }
 
 /**
  * A line as a change writes it (Ask for changes, after the spec's approval): the kind the Analyst gave, else the one
  * the line had; a new line on a spec with kinds is Screen when it gave none. squad-kit's locks stay on.
  */
-export function changedLine(old: Criterion | undefined, said: unknown, words: { given: string; when: string; then: string }, kinds: boolean): Criterion {
+export function changedLine(old: Criterion | undefined, said: unknown, words: { given: string; when: string; then: string }, kinds: boolean, app = true): Criterion {
   const proof = cleanProof(said) ?? (old?.proof ? { kind: old.proof.kind, ...(old.proof.why ? { why: old.proof.why } : {}) } : kinds ? { kind: 'screen' as const } : undefined);
   if (!proof) return words;
-  if (old?.proof?.locked) return { ...words, proof: { kind: 'screen', why: old.proof.why ?? SEES_WHY, locked: true } };
-  return lockLine({ ...words, proof });
+  if (old?.proof?.locked && app) return { ...words, proof: { kind: 'screen', why: old.proof.why ?? SEES_WHY, locked: true } };
+  return lockLine({ ...words, proof }, app);
 }
 
 /** True when a change gives a line another kind. */

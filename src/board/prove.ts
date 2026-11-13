@@ -1,6 +1,7 @@
 import { BoardActionError } from './actions/errors.js';
-import { addActivity, updateTicket, type BoardPaths } from './store.js';
-import { KIND_NAMES, LOCK_NOTE, PROOF_KINDS } from './proof-lock.js';
+import { addActivity, readMeta, updateTicket, type BoardPaths } from './store.js';
+import { hasAppToStart } from './apps.js';
+import { KIND_NAMES, LOCK_NOTE, NO_APP_KINDS, PROOF_KINDS } from './proof-lock.js';
 import type { ProofKind } from './proof-kind.js';
 import type { Ticket } from './types.js';
 
@@ -27,6 +28,7 @@ export function proveLine(bp: BoardPaths, id: string, line: number, kindSaid: st
   const kind = kindNamed(kindSaid);
   if (!kind) throw new BoardActionError(`Choose one of: ${PROOF_KINDS.join(', ')}.`);
   const why = String(whySaid ?? '').replace(/\s+/g, ' ').trim().slice(0, 200);
+  if (!NO_APP_KINDS.includes(kind) && !hasAppToStart(readMeta(bp))) throw new BoardActionError(`This project has no app to start, so nothing can be shown, called or read for its proof. Pick test, or none with a reason.`);
   return updateTicket(bp, id, (t) => {
     if (t.live && !t.specApproved) throw new BoardActionError(`The squad is writing the spec of ${t.id} now. Change it once it is ready.`);
     if (!t.criteria?.length) throw new BoardActionError(`The spec of ${t.id} is not written yet.`);

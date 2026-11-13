@@ -52,7 +52,11 @@ export function shortProof(p: ProofShot, kind: LineProofKind): string {
   switch (kind) {
     case 'test':
       if (!p.test) return 'A test';
-      return p.test.before === 'failed' && p.test.after === 'passed' ? `Failed before the change, passes now${p.test.seconds !== undefined ? ` · ${p.test.seconds} s` : ''}` : p.test.after === 'failed' ? 'The test fails' : 'The test passes on main too';
+      if (p.test.before === 'failed' && p.test.after === 'passed') return `Failed before the change, passes now${p.test.seconds !== undefined ? ` · ${p.test.seconds} s` : ''}`;
+      if (p.test.after === 'failed') return 'The test fails';
+      if (p.test.after === 'unknown') return 'Could not run the test';
+      if (p.test.before === 'unknown') return 'Could not run on the old code';
+      return 'The test passes on main too';
     case 'none':
       return p.checked ? `Reviewer: ${firstSentence(p.checked)}` : 'Not checked yet';
     case 'data':

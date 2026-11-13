@@ -1,6 +1,7 @@
 import { KIND_NAMES, PROOF_KINDS } from '../../board/proof-lock.js';
 import { hasKinds } from '../../board/proof-rows.js';
-import type { Ticket } from '../../board/types.js';
+import type { BoardMeta, Ticket } from '../../board/types.js';
+import { hasAppToStart } from '../../board/apps.js';
 import { criterionText } from '../proof-verdict.js';
 import { MAX_ROWS } from './rows.js';
 import { kindOf, linesOf, testerLines } from './lines.js';
@@ -20,7 +21,7 @@ export const PROOF_SHAPE = {
 } as const;
 
 /** For the Analyst's spec and the Express plan: how each "done when" will be proved. */
-export const KINDS_ASK = `- proof, for each "done when": how the person will see it is done, and why in one plain line.
+const KINDS_ASK = `- proof, for each "done when": how the person will see it is done, and why in one plain line.
   kind is one of:
   screen: pictures before and after, for what someone sees on a page.
   data: rows of the story's own database before and after, for what is saved and shows on no page.
@@ -31,6 +32,17 @@ export const KINDS_ASK = `- proof, for each "done when": how the person will see
   Pick the lightest proof that truly shows the line: a picture only where someone sees a change. A line about what
   someone sees is always screen. why: one short plain line for a project manager, like "Other apps will call this, so
   the answer itself is the proof." It may be empty for screen.`;
+
+/** The same for a project with no app to start (board/apps.ts hasAppToStart): only a test, or nothing to show. */
+const NO_APP_ASK = `- proof, for each "done when": how the person will see it is done, and why in one plain line. This project has no
+  app to start (a command-line tool or a library), so nothing can be shown on a screen, called or read. kind is test (a
+  test that fails before the change and passes after it) or none (only for what truly has nothing to show, with the
+  reason the Reviewer will check). why: one short plain line for a project manager.`;
+
+/** What the spec and the Express plan ask about the proof: with no app to start, only a test or nothing to show. */
+export function kindsAsk(meta?: BoardMeta): string {
+  return meta && !hasAppToStart(meta) ? NO_APP_ASK : KINDS_ASK;
+}
 
 /** On a rewrite of the spec: the kinds as the person left them, to keep unless the change asks otherwise. */
 export function proofsNow(t: Pick<Ticket, 'criteria'>): string {

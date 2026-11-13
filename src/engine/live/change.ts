@@ -12,6 +12,7 @@ import { carriesOn, carryOnLine, carryOnPrompt } from '../interrupt.js';
 import { WORDS_STEP_MS } from './limits.js';
 import { attachmentDirs, projectRoot } from './shared.js';
 import type { LiveSquad } from './squad.js';
+import { hasAppToStart } from '../../board/apps.js';
 
 /** A change to an approved spec: written, designed and built. */
 export const changePart = {
@@ -45,7 +46,7 @@ export const changePart = {
       });
       const out = r.structured as ChangeAnswer;
       set((x, y) => {
-        const parts = changeParts(x, out);
+        const parts = changeParts(x, out, hasAppToStart(this.meta()));
         if (!parts.length) {
           y.status = 'failed';
           y.error = `The Analyst found nothing in the spec to change. It said: ${out.summary}`;

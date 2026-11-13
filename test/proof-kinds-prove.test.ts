@@ -10,7 +10,7 @@ import { Hono } from 'hono';
  * reason. Ask for changes after the approval carries the kinds, and a change cannot unlock a line.
  */
 
-const { boardPaths, readTicket, updateTicket } = await import('../src/board/store.js');
+const { boardPaths, readMeta, readTicket, updateTicket, writeMeta } = await import('../src/board/store.js');
 const { seedDemoBoard } = await import('../src/board/demo.js');
 const actions = await import('../src/board/actions.js');
 const { proveLine, kindNamed, kindsOpen } = await import('../src/board/prove.js');
@@ -25,6 +25,8 @@ beforeEach(() => {
   tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'squad-prove-')));
   bp = boardPaths(path.join(tmp, '.squad'));
   seedDemoBoard(bp, { speed: 50 });
+  // An app squad-kit can start for the proof: every kind is open.
+  writeMeta(bp, { ...readMeta(bp), commands: { start: 'npm run dev', url: 'http://localhost:3000' } });
 });
 afterEach(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
@@ -123,6 +125,16 @@ describe('squad prove: the person picks the kind before approving', () => {
     expect(said).toContain('1. I see Paid and my receipt number  Screen, kept by squad-kit');
     expect(said).toContain('squad prove');
     expect(readTicket(bp, id)!.criteria![2]!.proof).toEqual({ kind: 'none', why: 'Nothing to show.' });
+  });
+});
+
+describe('a project with no app to start (a command-line tool, a library)', () => {
+  it('offers only a test, or nothing to show with a reason', () => {
+    writeMeta(bp, { ...readMeta(bp), commands: { test: 'npm test' } });
+    const id = specWaiting();
+    expect(() => proveLine(bp, id, 2, 'data')).toThrow('This project has no app to start');
+    expect(() => proveLine(bp, id, 2, 'screen')).toThrow('Pick test, or none with a reason');
+    expect(proveLine(bp, id, 2, 'test').criteria![1]!.proof).toEqual({ kind: 'test' });
   });
 });
 

@@ -14,7 +14,7 @@ import type { KindsHost } from '../src/engine/proof-kinds/flow.js';
  * A story with no Screen line starts no browser; an old spec with no kinds is proved exactly as before.
  */
 
-const { boardPaths, readTicket, updateTicket } = await import('../src/board/store.js');
+const { boardPaths, readMeta, readTicket, updateTicket, writeMeta } = await import('../src/board/store.js');
 const { seedDemoBoard } = await import('../src/board/demo.js');
 const actions = await import('../src/board/actions.js');
 const { judgeTest, commandFor, cleanNamed } = await import('../src/engine/proof-kinds/tests.js');
@@ -50,7 +50,11 @@ beforeEach(() => {
 });
 afterEach(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
-const run = (ok: boolean, output = ok ? ' Tests  1 passed (1)' : ' Tests  1 failed (1)'): CommandResult => ({ ok, output, seconds: 0.42 });
+/** Vitest's own words: a run that passed, one where that very test failed its check, and one an import stopped. */
+const PASSED = ' Test Files  1 passed (1)\n      Tests  1 passed (1)';
+const FAILED = (name = 'frees an unpaid slot') => ` FAIL  tests/booking.test.ts > ${name}\nAssertionError: expected true to be false\n Test Files  1 failed (1)\n      Tests  1 failed (1)`;
+const IMPORT_FAILED = " FAIL  tests/booking.test.ts [ tests/booking.test.ts ]\nError: Cannot find module '../src/slots'\n⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯\n Test Files  1 failed (1)\n      Tests  no tests";
+const run = (ok: boolean, output = ok ? PASSED : FAILED()): CommandResult => ({ ok, output, seconds: 0.42 });
 const c = (then: string, kind?: string, why?: string): Criterion => ({ given: 'a customer', when: 'they book', then, ...(kind ? { proof: { kind: kind as 'screen', ...(why ? { why } : {}) } } : {}) });
 
 function story(criteria: Criterion[]): string {
@@ -93,20 +97,43 @@ describe('a Test line: it must fail on main and pass now', () => {
     const t = { criterion: 2, file: 'tests/booking.test.ts', name: 'frees an unpaid slot', steps: ['a'] };
     expect(judgeTest(t, run(true), run(false))).toMatchObject({ shows: 'met', proof: { before: 'failed', after: 'passed', seconds: 0.4 } });
     expect(judgeTest(t, run(true), run(true))).toMatchObject({ shows: 'not-shown', toBuilder: true });
-    expect(judgeTest(t, run(true), run(true)).why).toContain("passes too, so it does not show the change");
+    expect(judgeTest(t, run(true), run(true)).why).toContain('passes too, so it does not show the change');
     expect(judgeTest(t, run(false), run(false))).toMatchObject({ shows: 'broken', toBuilder: true });
     expect(judgeTest(t, run(true), null)).toMatchObject({ shows: 'not-shown', toBuilder: false, proof: { before: 'unknown' } });
-    // A run that ran no test passes nothing.
-    expect(judgeTest(t, run(true, 'No test files found'), run(false)).shows).toBe('broken');
+  });
+
+  it('failed before counts only when that very test ran on main and its check said no', () => {
+    const t = { criterion: 2, file: 'tests/booking.test.ts', name: 'frees an unpaid slot', steps: ['a'] };
+    // An import stopped it: it never ran, so it proves nothing.
+    expect(judgeTest(t, run(true), run(false, IMPORT_FAILED))).toMatchObject({ shows: 'not-shown', toBuilder: false, proof: { before: 'unknown' } });
+    // Another test of the file failed, not this one.
+    expect(judgeTest(t, run(true), run(false, FAILED('keeps a paid slot'))).proof?.before).toBe('unknown');
+    // The time ran out, or the tool is missing.
+    expect(judgeTest(t, run(true), { ok: false, output: FAILED(), seconds: 300, ended: true }).proof?.before).toBe('unknown');
+    expect(judgeTest(t, run(true), run(false, 'sh: vitest: command not found')).proof?.before).toBe('unknown');
+    // The name is matched whole: a longer test name with the same end is not this test.
+    expect(judgeTest(t, run(true), run(false, FAILED('also frees an unpaid slot'))).proof?.before).toBe('unknown');
+    // On the story's code, a run that ran no test passes nothing, and says so.
+    expect(judgeTest(t, run(true, 'No test files found'), run(false))).toMatchObject({ shows: 'not-shown', toBuilder: false, proof: { after: 'unknown' } });
   });
 
   it("runs only that test with the project's own tool, and takes only a test file inside the copy", () => {
     const how = commandFor(dir, 'npm test', { criterion: 2, file: 'tests/booking.test.ts', name: 'Bookings > frees an unpaid slot', steps: [] })!;
     expect(how.command).toContain('vitest run');
     expect(how.command).toContain("'tests/booking.test.ts'");
-    expect(how.command).toContain('-t');
+    // Anchored at both ends: only this test, never one whose name merely contains it.
+    expect(how.command).toContain("-t '^Bookings frees an unpaid slot$'");
     expect(how.whole).toBe(false);
+    expect(commandFor(dir, 'npm test', { criterion: 2, file: 'tests/booking.test.ts', name: 'costs 1.50 (with tax)', steps: [] })!.command).toContain("-t '^costs 1\\.50 \\(with tax\\)$'");
     expect(cleanNamed({ tests: [{ criterion: 2, file: '../secret.ts', name: 'x', steps: [] }, { criterion: 9, file: 'tests/booking.test.ts', name: 'x', steps: [] }] }, dir, [2])).toEqual([]);
+  });
+
+  it('takes a name only when it is not empty and each of its parts is written in the file', () => {
+    const one = (name: string) => cleanNamed({ tests: [{ criterion: 2, file: 'tests/booking.test.ts', name, steps: ['a'] }] }, dir, [2]);
+    expect(one('frees an unpaid slot')).toHaveLength(1);
+    expect(one('')).toEqual([]);
+    expect(one('frees a paid slot')).toEqual([]);
+    expect(one('Bookings > frees an unpaid slot')).toEqual([]);
   });
 
   it('met: the test failed on main with the story\'s test file put there, and passes now', async () => {
@@ -117,7 +144,7 @@ describe('a Test line: it must fail on main and pass now', () => {
     expect(out).toEqual({ broken: [], open: [] });
     expect(h.ran).toHaveLength(1);
     expect(h.onMainRan).toEqual(h.ran);
-    expect(fs.existsSync(path.join(tmp, 'main', 'tests', 'booking.test.ts'))).toBe(true);
+    expect(fs.readFileSync(path.join(tmp, 'main', 'tests', 'booking.test.ts'), 'utf8')).toBe("it('frees an unpaid slot', () => {});\n");
     const rows = readTicket(bp, id)!.proof!;
     expect(rows.map((r) => [r.kind, r.shows])).toEqual([
       ['test', 'met'],
@@ -127,6 +154,17 @@ describe('a Test line: it must fail on main and pass now', () => {
     expect(rows[1]!.checked).toContain('last 4 digits');
     expect(isSavedProof(rows[0]!.after)).toBe(true);
     expect(fs.existsSync(path.join(bp.proofDir, rows[0]!.after))).toBe(true);
+  });
+
+  it("main gets the test file as it was before the story's run, not what the run left", async () => {
+    const id = story([c('a slot not paid in 15 minutes is freed', 'test')]);
+    const h = host(id, { named: { tests: [{ ...named.tests[0]!, criterion: 1 }] } });
+    h.run = async () => {
+      fs.writeFileSync(path.join(dir, 'tests', 'booking.test.ts'), "it('frees an unpaid slot', () => { expect(1).toBe(1); });\n");
+      return run(true);
+    };
+    await provedByKind(h);
+    expect(fs.readFileSync(path.join(tmp, 'main', 'tests', 'booking.test.ts'), 'utf8')).toBe("it('frees an unpaid slot', () => {});\n");
   });
 
   it('a test that passes on main too goes back to the Builder as Not shown yet', async () => {
@@ -146,7 +184,7 @@ describe('a Test line: it must fail on main and pass now', () => {
       return { tests: [{ ...named.tests[0]!, criterion: 1, file: 'tests/old.test.ts' }] };
     };
     const out = await provedByKind(h);
-    expect(asked[0]).toContain('is not a test file this story added or changed');
+    expect(asked[0]).toContain('give a test file this story added or changed');
     expect(asked[0]).toContain('tests/booking.test.ts');
     expect(out.broken[0]!.why).toContain('No test proves it yet');
     expect(h.ran).toEqual([]);
@@ -167,6 +205,7 @@ describe('a Test line: it must fail on main and pass now', () => {
 
 describe('a planned proof is never dropped quietly', () => {
   it('no app could start for the Tester: its Screen, API and Data lines wait for the person', async () => {
+    writeMeta(bp, { ...readMeta(bp), commands: { start: 'npm run dev', url: 'http://localhost:3000' } });
     const id = story([c('I see Paid', 'screen'), c('the booking is saved', 'data'), c('card numbers are never saved', 'none', 'Nothing to show.')]);
     keepNoneChecks(bp, readTicket(bp, id)!, [{ criterion: 3, checked: 'Only the last 4 digits are kept.', holds: true }]);
     const out = await provedByKind(host(id, {}), false);

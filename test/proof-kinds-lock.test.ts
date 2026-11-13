@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { SCREENS_WHY, SEES_WHY, aboutWhatSomeoneSees, changedLine, cleanProof, isScreenFile, keepProof, lockForScreens, proposedProofs, withLocks } from '../src/board/proof-lock.js';
+import { NO_APP_WHY, SCREENS_WHY, SEES_WHY, aboutWhatSomeoneSees, changedLine, cleanProof, isScreenFile, keepProof, lockForScreens, proposedProofs, withLocks } from '../src/board/proof-lock.js';
+import { hasAppToStart } from '../src/board/apps.js';
+import type { BoardMeta } from '../src/board/types.js';
 import { readTicketDocs, ticketDocs } from '../src/board/docs.js';
 import type { Criterion, ProofShot } from '../src/board/types.js';
 
@@ -86,6 +88,33 @@ describe('the lock rules', () => {
     expect(changedLine(undefined, { kind: 'test', why: 'A timer.' }, line('the slot is freed'), true).proof).toEqual({ kind: 'test', why: 'A timer.' });
     expect(changedLine(undefined, undefined, line('the slot is freed'), true).proof).toEqual({ kind: 'screen' });
     expect(changedLine(undefined, undefined, line('the slot is freed'), false).proof).toBeUndefined();
+  });
+});
+
+describe('a project with no app to start', () => {
+  it('knows one: no start command and address, no product of parts, no phone app, and code already there', () => {
+    const meta = (more: Partial<BoardMeta>) => ({ project: 'Tool', commands: { test: 'npm test' }, ...more }) as BoardMeta;
+    expect(hasAppToStart(meta({}))).toBe(false);
+    expect(hasAppToStart(meta({ commands: { start: 'npm run dev', url: 'http://localhost:3000' } }))).toBe(true);
+    expect(hasAppToStart(meta({ commands: { test: 'flutter test' } }))).toBe(true);
+    // A new project makes its app in its first stories.
+    expect(hasAppToStart(meta({ scan: { empty: true } as BoardMeta['scan'] }))).toBe(true);
+  });
+
+  it('has no lock, and a picture, a call or rows becomes a test', () => {
+    const out = proposedProofs(
+      [
+        { ...line('I see the report in the terminal'), proof: { kind: 'screen' } },
+        { ...line('the list shows three rows'), proof: { kind: 'data', why: 'Rows.' } },
+        { ...line('the exit code is 0'), proof: { kind: 'test', why: 'A test runs the tool.' } },
+        { ...line('it stays fast'), proof: { kind: 'none', why: 'Speed only.' } },
+      ],
+      false,
+    );
+    expect(out.map((c) => c.proof)).toEqual([{ kind: 'test', why: NO_APP_WHY }, { kind: 'test', why: NO_APP_WHY }, { kind: 'test', why: 'A test runs the tool.' }, { kind: 'none', why: 'Speed only.' }]);
+    expect(withLocks([{ ...line('I see it'), proof: { kind: 'test' } }], false)[0]!.proof).toEqual({ kind: 'test' });
+    expect(keepProof({ ...line('x'), proof: { kind: 'test' } }, line('I see the total'), false).proof).toEqual({ kind: 'test' });
+    expect(changedLine(undefined, { kind: 'screen' }, line('I see the total'), true, false).proof).toEqual({ kind: 'test', why: NO_APP_WHY });
   });
 });
 

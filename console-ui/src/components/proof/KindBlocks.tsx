@@ -111,8 +111,8 @@ function TestRun({ p }: { p: ProofShot }) {
         ))}
       </ul>
       <div className="redgreen">
-        <span className={red ? 'r' : 'q'}>{red ? 'It failed before the change' : run.before === 'passed' ? 'It passed before the change too' : 'Not run on main’s code'}</span>
-        <span>{run.after === 'passed' ? 'and passes now' : 'and fails now'}</span>
+        <span className={red ? 'r' : 'q'}>{red ? 'It failed before the change' : run.before === 'passed' ? 'It passed before the change too' : 'It could not run on the old code'}</span>
+        <span>{run.after === 'passed' ? 'and passes now' : run.after === 'failed' ? 'and fails now' : 'and could not run now'}</span>
         {run.after === 'passed' && (
           <span className="g">
             <Check aria-hidden="true" />

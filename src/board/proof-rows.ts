@@ -16,7 +16,7 @@ export interface TestProof {
   /** On main's code, with the story's test file: it must fail there. "unknown" when squad-kit could not run it there. */
   before: 'failed' | 'passed' | 'unknown';
   /** On the story's code. */
-  after: 'passed' | 'failed';
+  after: 'passed' | 'failed' | 'unknown';
   /** How long the run on the story's code took. */
   seconds?: number;
 }

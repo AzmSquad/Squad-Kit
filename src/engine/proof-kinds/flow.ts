@@ -3,9 +3,10 @@ import path from 'node:path';
 import { wayOptions } from '../../board/actions.js';
 import { KIND_NAMES, isScreenFile, lockForScreens } from '../../board/proof-lock.js';
 import { hasKinds } from '../../board/proof-rows.js';
-import { addActivity, readTicket, updateTicket, type BoardPaths } from '../../board/store.js';
+import { addActivity, readMeta, readTicket, updateTicket, type BoardPaths } from '../../board/store.js';
 import type { BoardMeta, ProofShot, Ticket } from '../../board/types.js';
 import { copiesOf } from '../copies.js';
+import { hasAppToStart } from '../../board/apps.js';
 import type { CommandResult } from '../checks.js';
 import { criterionText, doneWhenCount, type OpenRow } from '../proof-verdict.js';
 import { kindOf, linesOf, testerLines } from './lines.js';
@@ -80,7 +81,8 @@ function noneChecks(bp: BoardPaths, id: string): NoneCheck[] {
 /** squad-kit's second lock: the story changed screen files, in any of its copies, and no line is Screen. Said once on the story. */
 export async function lockScreenLines(bp: BoardPaths, id: string, meta: BoardMeta): Promise<void> {
   const t = readTicket(bp, id);
-  if (!t || !hasKinds(t)) return;
+  // A project with no app to start has nothing to show: no picture is kept for it.
+  if (!t || !hasKinds(t) || !hasAppToStart(meta)) return;
   const changed = (await Promise.all(copiesOf(meta, t).map((c) => (c.baseCommit ? workSoFar(c.dir, c.baseCommit).catch(() => []) : [])))).flat();
   const locked = lockForScreens(t.criteria!, changed.some(isScreenFile));
   if (!locked) return;
@@ -145,14 +147,14 @@ async function runOne(host: KindsHost, t: Ticket, n: number, test: NamedTest, ou
     out.open.push({ criterion: n, text, why });
     return row(t, n, saveRecord(host.bp, t.id, n, 'test', { criterion: text, test }), { shows: 'not-shown', why });
   }
+  // The test file as it is now goes onto main's code: the very test that runs on the story's, only the change is missing.
+  const snapshot = fs.readFileSync(path.join(host.dir, test.file));
   host.update((x) => (x.status = `Running the test of "done when" ${n} on the story's code`));
   const now = await host.run(how.command, TEST_MS);
   const main = await host.onMain(async (dir, run) => {
-    // The story's own test file goes onto main's code: the test is the same, only the change is missing.
-    const from = path.join(host.dir, test.file);
     const to = path.join(dir, test.file);
     fs.mkdirSync(path.dirname(to), { recursive: true });
-    fs.copyFileSync(from, to);
+    fs.writeFileSync(to, snapshot);
     return run(how.command, TEST_MS);
   });
   const v = judgeTest(test, now, main);
@@ -190,7 +192,8 @@ export async function provedByKind(host: KindsHost, testerRan = true): Promise<K
   const t = readTicket(host.bp, host.id);
   if (!t || !hasKinds(t)) return NOTHING;
   const out: KindsResult = { broken: [], open: [] };
-  if (!testerRan) for (const n of testerLines(t)) out.open.push({ criterion: n, text: criterionText(t, n)!, why: `squad-kit could not start the app here, so the ${KIND_NAMES[kindOf(t, n) ?? 'screen']} proof was not made.` });
+  // A project with no app to start has nothing to show, call or read: those lines are not expected to have a proof.
+  if (!testerRan && hasAppToStart(readMeta(host.bp))) for (const n of testerLines(t)) out.open.push({ criterion: n, text: criterionText(t, n)!, why: `squad-kit could not start the app here, so the ${KIND_NAMES[kindOf(t, n) ?? 'screen']} proof was not made.` });
   const tests = linesOf(t, ['test']);
   const rows = [...(tests.length ? await proveTests(host, t, tests, out) : []), ...proveNone(host, t, linesOf(t, ['none']), out)];
   host.update((x) => putRows(x, rows));

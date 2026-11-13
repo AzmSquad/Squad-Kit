@@ -117,11 +117,11 @@ interface PlanOut {
 }
 
 /** Runs a small mongosh script with the connection in its environment, never on its command line. */
-export async function shell(a: Address, script: string, vars: Record<string, string>, doing: string): Promise<string> {
+export async function shell(a: Address, script: string, vars: Record<string, string>, doing: string, timeoutMs?: number): Promise<string> {
   return withPrivateDir(async (dir) => {
     const file = path.join(dir, 'script.js');
     writePrivate(file, script);
-    return runTool(tools().mongosh, ['--nodb', '--quiet', '--norc', file], { env: { SK_DB_URI: toolUri(a), ...vars }, secrets: secretsOf(a.password, toolUri(a)), doing });
+    return runTool(tools().mongosh, ['--nodb', '--quiet', '--norc', file], { env: { SK_DB_URI: toolUri(a), ...vars }, secrets: secretsOf(a.password, toolUri(a)), doing, ...(timeoutMs ? { timeoutMs } : {}) });
   });
 }
 

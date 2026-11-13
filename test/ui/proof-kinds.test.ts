@@ -173,3 +173,13 @@ describe('the Proof tab and the chat card', () => {
     expect([...page.querySelectorAll('.pkind')].map((x: any) => x.textContent)).toEqual(['Screen', 'Data', 'Not on a screen']);
   });
 });
+
+describe('the short words for a test', () => {
+  it('never says the test passes on main when its run there told nothing', () => {
+    const row = (before: string, after: string) => ({ criterion: 'x', before: 'a', after: 'a', beforeLabel: '', afterLabel: '', kind: 'test', test: { name: 'n', file: 'f', steps: [], before, after } });
+    expect(K.shortProof(row('unknown', 'passed'), 'test')).toBe('Could not run on the old code');
+    expect(K.shortProof(row('passed', 'passed'), 'test')).toBe('The test passes on main too');
+    expect(K.shortProof(row('failed', 'unknown'), 'test')).toBe('Could not run the test');
+    expect(K.shortProof(row('failed', 'passed'), 'test')).toBe('Failed before the change, passes now');
+  });
+});

@@ -17,7 +17,7 @@ export interface TestProof {
   file: string;
   steps: string[];
   before: 'failed' | 'passed' | 'unknown';
-  after: 'passed' | 'failed';
+  after: 'passed' | 'failed' | 'unknown';
   seconds?: number;
 }
 

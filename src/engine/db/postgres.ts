@@ -53,14 +53,15 @@ function env(a: Address, database: string, readOnly = false): Record<string, str
     PGSSLMODE: a.params.sslmode,
     PGAPPNAME: 'squad-kit',
     PGCONNECT_TIMEOUT: '15',
-    PGOPTIONS: readOnly ? '-c default_transaction_read_only=on' : undefined,
+    // Read only, and a backslash in a literal is only ever a backslash, whatever a role or a migration set.
+    PGOPTIONS: readOnly ? '-c default_transaction_read_only=on -c standard_conforming_strings=on' : undefined,
     PGSERVICE: undefined,
   };
 }
 
 /** Runs SQL through psql on one database and gives back one line per row. */
-export async function sql(a: Address, database: string, text: string, doing: string, readOnly = false): Promise<string[]> {
-  const out = await runTool(tools().psql, ['-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1', '-f', '-'], { env: env(a, database, readOnly), input: text, secrets: secretsOf(a.password), doing });
+export async function sql(a: Address, database: string, text: string, doing: string, readOnly = false, timeoutMs?: number): Promise<string[]> {
+  const out = await runTool(tools().psql, ['-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1', '-f', '-'], { env: env(a, database, readOnly), input: text, secrets: secretsOf(a.password), doing, ...(timeoutMs ? { timeoutMs } : {}) });
   return out.split('\n').filter((l) => l.length);
 }
 

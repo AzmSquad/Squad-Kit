@@ -17,6 +17,7 @@ import { WORDS_STEP_MS } from './limits.js';
 import { type AgentAsk, attachmentDirs, projectRoot } from './shared.js';
 import type { LiveSquad } from './squad.js';
 import { proposedProofs } from '../../board/proof-lock.js';
+import { hasAppToStart } from '../../board/apps.js';
 
 /** The spec and the design. */
 export const planPart = {
@@ -39,8 +40,8 @@ export const planPart = {
       cwd: root,
       ...(resume ? { resume: t0.sessions!.intake } : { sessionId: t0.sessions!.intake }),
       prompt: resume
-        ? P.specPrompt(t0, change, fromChat, others)
-        : `${P.intakePrompt(this.meta(), listDecisions(this.bp), t0, this.ctx())}\n\n${P.specPrompt(t0, change, false, others)}`,
+        ? P.specPrompt(t0, change, fromChat, others, this.meta())
+        : `${P.intakePrompt(this.meta(), listDecisions(this.bp), t0, this.ctx())}\n\n${P.specPrompt(t0, change, false, others, this.meta())}`,
       permissions: ['read'],
       schema: P.SPEC_SCHEMA,
       timeoutMs: WORDS_STEP_MS,
@@ -50,7 +51,7 @@ export const planPart = {
     const out = r.structured as { story: string; criteria: { given: string; when: string; then: string }[]; releaseNote: string };
     this.update(id, (t) => {
       t.story = out.story;
-      t.criteria = proposedProofs(out.criteria);
+      t.criteria = proposedProofs(out.criteria, hasAppToStart(this.meta()));
       t.releaseNote = out.releaseNote;
       applyPlanEdits(t);
       delete t.decision;
@@ -146,7 +147,7 @@ export const planPart = {
       } else delete t.testChange;
       if (!design) {
         t.story = out.story;
-        t.criteria = out.criteria && proposedProofs(out.criteria);
+        t.criteria = out.criteria && proposedProofs(out.criteria, hasAppToStart(meta));
         t.releaseNote = out.releaseNote;
       }
       t.agentQuestion = undefined;

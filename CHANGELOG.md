@@ -40,8 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Data proof.** A new tool for the Tester, `read_rows`, reads a few rows of one table of the story's own database
   before and after its action. squad-kit builds the one query itself: it never writes, and it hides secrets. The
   Proof tab marks the cells that changed.
-- **A backend-only story takes no pictures.** With no Screen line, no browser starts; the app starts headless only when
-  an API or Data line needs it.
+- **A backend-only story takes no pictures.** With no Screen line, no browser starts and nothing is built for the phone;
+  the app starts headless only when an API or Data line needs it. A command-line tool or a library, with no app to
+  start, is proved by tests: no lock, and only Test or Not on a screen can be picked.
 - The Proof tab and the proof page show one block per line with its kind, and a chat card shows each line's kind with a
   short form of its proof. Right to left in Arabic, light and dark. Old specs are proved exactly as before.
 - **Every button has its call and its command:** `squad prove <ticket> [line] [kind] [--why "…"]` and

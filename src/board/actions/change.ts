@@ -7,7 +7,7 @@ import { BoardActionError, tellLater } from './errors.js';
 import { createTicket, reportBug } from './new-ticket.js';
 import { AGENT_TITLE } from './chat.js';
 import { planSnapshot } from './plan-edits.js';
-import { changedLine, kindChanged, withKindWords, withLocks } from '../proof-lock.js';
+import { changedLine, kindChanged, withKindWords } from '../proof-lock.js';
 import { hasKinds } from '../proof-rows.js';
 
 /* ── A change goes through the spec ───────────────────── */
@@ -72,7 +72,7 @@ function applyChange(t: Ticket, c: SpecChange): void {
     } else if (p.criterion) criteria[p.index] = { ...p.criterion };
     else gone.add(p.index);
   }
-  t.criteria = withLocks(criteria.filter((_, i) => !gone.has(i)));
+  t.criteria = criteria.filter((_, i) => !gone.has(i));
 }
 
 /** The Analyst's answer when it writes a change into the spec. */
@@ -86,7 +86,7 @@ export interface ChangeAnswer {
 }
 
 /** Turns the Analyst's answer into old and new wording. The old words come from the ticket itself, never from the agent. */
-export function changeParts(t: Ticket, out: ChangeAnswer): ChangePart[] {
+export function changeParts(t: Ticket, out: ChangeAnswer, app = true): ChangePart[] {
   const parts: ChangePart[] = [];
   const story = out.story?.trim();
   if (story && story !== t.story?.trim()) parts.push({ part: 'story', before: t.story ?? '', after: story });
@@ -95,7 +95,7 @@ export function changeParts(t: Ticket, out: ChangeAnswer): ChangePart[] {
   for (const x of out.criteria ?? []) {
     const i = Math.round(x.number) - 1;
     const old = criteria[i];
-    const c = changedLine(x.action === 'change' ? old : undefined, x.proof, { given: x.given?.trim() ?? '', when: x.when?.trim() ?? '', then: x.then?.trim() ?? '' }, hasKinds(t));
+    const c = changedLine(x.action === 'change' ? old : undefined, x.proof, { given: x.given?.trim() ?? '', when: x.when?.trim() ?? '', then: x.then?.trim() ?? '' }, hasKinds(t), app);
     if (x.action === 'remove') {
       if (old && !used.has(i)) parts.push({ part: 'criterion', index: i, before: criterionText(old), after: '' });
       used.add(i);

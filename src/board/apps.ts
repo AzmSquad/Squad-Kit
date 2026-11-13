@@ -1,6 +1,6 @@
 import { copyViews } from '../engine/copies.js';
 import { repoFor, reposOf } from '../engine/repos.js';
-import { repoLabel, repoRuns } from './parts.js';
+import { repoLabel, repoRuns, runsAsProduct } from './parts.js';
 import type { BoardMeta, ProjectCommands, Ticket } from './types.js';
 
 /** One app the project runs: a code repo with a start command and a web address. Either may not be known yet. */
@@ -22,6 +22,16 @@ export interface ProjectApp {
  */
 /** Saved commands of a phone app: Flutter, Xcode, React Native or Expo. */
 const PHONE_COMMANDS = /(?:^|[\s;&|(])(?:flutter|xcodebuild)\s|\b(?:expo|react-native)\s/m;
+
+/**
+ * True when the project has an app squad-kit can start for a proof: a start command and an address, a product of parts,
+ * or a phone app. A project with no code yet counts too, as its first stories make the app. A command-line tool or a
+ * library has none: nothing to show, call or act on, so its proof is a test.
+ */
+export function hasAppToStart(meta: BoardMeta): boolean {
+  if (runsAsProduct(meta) || meta.scan?.empty || (meta.setup?.kind === 'empty' && meta.scan?.status !== 'done')) return true;
+  return reposOf(meta).some((r) => Boolean(r.commands.start?.trim() && r.commands.url?.trim()) || PHONE_COMMANDS.test(Object.values(r.commands).join('\n')));
+}
 
 export function projectApps(meta: BoardMeta): ProjectApp[] {
   const all = reposOf(meta).filter((r) => repoRuns(meta, r.path)).map((r) => ({

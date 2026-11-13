@@ -25,7 +25,7 @@ const { seedDemoBoard } = await import('../src/board/demo.js');
 const actions = await import('../src/board/actions.js');
 const { LiveSquad } = await import('../src/engine/live.js');
 const P = await import('../src/engine/prompts.js');
-const { SEES_WHY } = await import('../src/board/proof-lock.js');
+const { NO_APP_WHY, SEES_WHY } = await import('../src/board/proof-lock.js');
 
 let tmp: string;
 let bp: ReturnType<typeof boardPaths>;
@@ -47,7 +47,7 @@ beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-kinds-spec-'));
   bp = boardPaths(path.join(tmp, '.squad'));
   seedDemoBoard(bp, { speed: 50 });
-  writeMeta(bp, { ...readMeta(bp), engine: 'live', runner: 'direct' });
+  writeMeta(bp, { ...readMeta(bp), engine: 'live', runner: 'direct', commands: { start: 'npm run dev', url: 'http://localhost:3000', test: 'npm test' } });
 });
 afterEach(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
@@ -82,6 +82,20 @@ describe('the proof kinds in the spec', () => {
     await squad.step(t.id, t.squad!.phase);
     expect(calls.at(-1)!.prompt).toContain('How each "done when" is proved now, as the person left it');
     expect(calls.at(-1)!.prompt).toContain('1. Screen (squad-kit keeps this one)');
+  });
+
+  it('a command-line project: no lock, and every line is a test or nothing to show', async () => {
+    writeMeta(bp, { ...readMeta(bp), commands: { test: 'npm test', build: 'npm run build' } });
+    const t0 = answered();
+    const squad = new LiveSquad(bp) as unknown as Steps;
+    answers.push(SPEC);
+    await squad.step(t0.id, 'plan-write');
+    expect(calls.at(-1)!.prompt).toContain('This project has no\n  app to start (a command-line tool or a library)');
+    expect(readTicket(bp, t0.id)!.criteria!.map((c) => c.proof)).toEqual([
+      { kind: 'test', why: NO_APP_WHY },
+      { kind: 'test', why: NO_APP_WHY },
+      { kind: 'none', why: 'Nothing to show. The Reviewer checks the code.' },
+    ]);
   });
 
   it('the Express plan proposes the kinds too', async () => {

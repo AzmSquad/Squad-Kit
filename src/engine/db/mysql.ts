@@ -79,10 +79,10 @@ async function connected<T>(a: Address, work: (opt: string) => Promise<T>): Prom
 /** Every read on the source starts so: read only, and with the escapes squad-kit writes. */
 const READ_ONLY = "SET SESSION TRANSACTION READ ONLY; SET SESSION sql_mode = REPLACE(@@SESSION.sql_mode, 'NO_BACKSLASH_ESCAPES', '');";
 
-export async function sql(a: Address, database: string | null, text: string, doing: string, readOnly = false): Promise<string[]> {
+export async function sql(a: Address, database: string | null, text: string, doing: string, readOnly = false, timeoutMs?: number): Promise<string[]> {
   return connected(a, async (opt) => {
     const args = [`--defaults-extra-file=${opt}`, '--batch', '--raw', '--skip-column-names', ...(database ? [`--database=${database}`] : [])];
-    const out = await runTool(tools().mysql, args, { input: (readOnly ? READ_ONLY : "SET SESSION sql_mode = REPLACE(@@SESSION.sql_mode, 'NO_BACKSLASH_ESCAPES', '');") + '\n' + text + ';\n', secrets: secretsOf(a.password), doing });
+    const out = await runTool(tools().mysql, args, { input: (readOnly ? READ_ONLY : "SET SESSION sql_mode = REPLACE(@@SESSION.sql_mode, 'NO_BACKSLASH_ESCAPES', '');") + '\n' + text + ';\n', secrets: secretsOf(a.password), doing, ...(timeoutMs ? { timeoutMs } : {}) });
     return out.split('\n').filter((l) => l.length);
   });
 }

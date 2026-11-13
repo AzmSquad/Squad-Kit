@@ -285,12 +285,16 @@ plain line on why under it:
   Not on a screen asks for a reason first. After the approval the chips are read only: **Ask for changes** changes a
   kind, and a change can never unlock a line.
 - **A test that also passes on main is no proof.** The line shows **Not shown yet** and goes back to the Builder, to
-  write a test that fails without the change. A test that fails on the story's code is **Not working yet**. A test
-  squad-kit cannot run on main's code waits for you, with Try again and Continue anyway.
+  write a test that fails without the change. A test that fails on the story's code is **Not working yet**. "It failed
+  before the change" counts only when the test tool ran that very test on main's code, matched by its whole name, and
+  its own check said no: a run stopped by an import, the setup, a missing tool or the time limit tells nothing, and
+  waits for you, with Try again and Continue anyway, like a test squad-kit cannot run there at all.
 - **A planned picture is never dropped quietly.** When the Tester cannot make a Screen, API or Data proof, or no app
   can start for it, it is Not shown yet, and after the retakes a problem on the card, never a silent Not on a screen.
 - **A story with no Screen line** starts no browser, never builds for the phone, and takes no pictures. When an API or
   Data line needs the app, it starts headless.
+- **A project with no app to start** (a command-line tool, a library) has nothing to show, call or read: there is no
+  lock, the Analyst proposes Test or Not on a screen, and only those can be picked.
 - The Proof tab and the proof page show one block per line with its kind. A chat card shows each line's kind with a
   short form of its proof. An old spec with no kinds is proved exactly as before.
 
@@ -354,7 +358,7 @@ back the result. Each run has its own key, which stops working when the run ends
 | `start_app`, `stop_app`, `app_status` | Starts this story's copy with the project's own start command, on a free port when the usual one is taken. Stops only what squad-kit started. Says whether it runs, with its last lines. | Tester, Builder |
 | `run_checks` | Runs the project's saved test, lint or build command, inside the guard, where a browser can start. With `only`, it runs one test file on its own with the project's own test tool, for a quick fix. A failure is not run again. | Tester, Builder |
 | `ask_api` | Asks a part of the running product (only its own address), and saves what was asked and answered. | Tester |
-| `read_rows` | Reads at most 20 rows of one table of the story's own database, read only, before and after the Tester's action, and keeps both in one file for a Data proof. squad-kit builds the one query itself from a table and the columns each row equals; it takes no query, never writes, and hides secret columns and anything shaped like an address. A story with no database of its own has nothing to read. | Tester, on a story with a Data line |
+| `read_rows` | Reads at most 20 rows of one table of the story's own database, read only, before and after the Tester's action, and keeps both in a new file of each round for a Data proof. squad-kit builds the one query itself from a table and the columns each row equals; it takes no query, never writes, sends no backslash or control character, stops a read after 20 seconds, and hides secret columns and fields (a password, a token, a key: by whole word parts, so `passport` shows) and anything shaped like an address. A secret that changed says so with no value. A story with no database of its own has nothing to read. | Tester, on a story with a Data line |
 | `i_am_stuck` | Tries squad-kit's own fixes (see below). | Every agent on a ticket |
 | `read_board`, `read_story`, `read_decision`, `read_records`, `read_logs`, `read_guide` | Reads squad-kit's own records: the board, a story, the decisions, requirements, releases, usage, the Tools page, the Harness rules, its notes, its log (secrets taken out) and its guide. What comes back is marked as data. | Squad lead |
 

@@ -16,15 +16,28 @@ import { NoRows, type RowsReader } from './rows.js';
 
 const NONE = "This story has no database of its own, so squad-kit reads none: prove this line with the API or a picture instead, and say so in the note.";
 
+/** The real file, when it is a file inside the copy, through any link: never one outside it. */
+function insideCopy(file: string, dir: string): string | null {
+  try {
+    const real = fs.realpathSync(file);
+    return real.startsWith(`${fs.realpathSync(dir)}${path.sep}`) && fs.statSync(real).isFile() ? real : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The SQLite file inside the copy that the app's setting names, where it is: from the copy, or from Prisma's schema folder. */
 function copyFile(dir: string): string | null {
   const found = findDatabase(dir, ['.']).found;
   const name = found?.kind === 'sqlite' && found.address ? readAddress(found.address).name : undefined;
   if (!name) return null;
   const schemas = git(dir, ['ls-files', '--', '*schema.prisma'], { allowFail: true }).split('\n').filter(Boolean);
-  const inside = `${path.resolve(dir)}${path.sep}`;
   const places = path.isAbsolute(name) ? [name] : [...schemas.map((s) => path.resolve(dir, path.dirname(s), name)), path.resolve(dir, name)];
-  return places.find((f) => f.startsWith(inside) && fs.existsSync(f)) ?? null;
+  for (const f of places) {
+    const real = insideCopy(f, dir);
+    if (real) return real;
+  }
+  return null;
 }
 
 /** The story's own database, or null with no such database. */
@@ -42,7 +55,8 @@ export function storyDatabase(bp: BoardPaths, story: string, dir: string): { kin
     if (!address) return null;
     if (own.kind !== 'sqlite') return { kind: own.kind, address };
     const file = readAddress(address).name;
-    return file && path.resolve(file).startsWith(`${path.resolve(dir)}${path.sep}`) ? { kind: 'sqlite', address: path.resolve(file) } : null;
+    const real = file ? insideCopy(path.resolve(dir, file), dir) : null;
+    return real ? { kind: 'sqlite', address: real } : null;
   }
   if (db.kind !== 'sqlite') return null;
   const file = copyFile(dir);
