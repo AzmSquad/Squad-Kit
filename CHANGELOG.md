@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.20] — 2026-11-13
+
 ### Fixed
 
 - **Arabic no longer turns the whole chat around.** A popup, its buttons, the sources and the cards stay where the
