@@ -7,6 +7,9 @@ import { writeLog } from '../../core/app-log.js';
 import { plainWords } from '../../core/for-people.js';
 import { whenWords } from '../../board/review-doc.js';
 import { gitLater } from '../git.js';
+import { repoFor } from '../repos.js';
+import { plainMarkdown } from '../../core/safe-markdown.js';
+import { notePrefix } from './notes.js';
 import { lineNow } from './git-fixed.js';
 import { reviewView, type NoteView, type ReviewView } from './view.js';
 import { reasonWords, stateWords } from './words.js';
@@ -17,35 +20,42 @@ import { reasonWords, stateWords } from './words.js';
  * Writing it never stops or undoes the merge: a refusal is said on the story, with Write it again.
  */
 
-/** A thread's words: the Reviewer's note, and where it stands. */
-function threadText(n: NoteView): string {
-  const head = `**Reviewer** · round ${n.round}${n.line ? ` · line ${n.line}` : ''}`;
-  const state = n.state === 'fixed' ? stateWords(n).replace(/^Fixed in (\w+)$/, 'Fixed in `$1`') : n.state === 'past' ? `Went past. ${reasonWords(n)}` : 'Open';
-  return `${head}\n\n${n.text}\n\n${state}`;
+/**
+ * A thread's words: the Reviewer's note, and where it stands. The note and the reason are someone's own words, so they
+ * go in as plain text. `elsewhere`: the file of a note that is not in this pull request's repo.
+ */
+function threadText(n: NoteView, elsewhere?: string): string {
+  const head = `**Reviewer** · round ${n.round}${n.line && !elsewhere ? ` · line ${n.line}` : ''}${elsewhere ? ` · ${plainMarkdown(elsewhere)}` : ''}`;
+  const state = n.state === 'fixed' ? stateWords(n).replace(/^Fixed in (\w+)$/, 'Fixed in `$1`') : n.state === 'past' ? `Went past. ${plainMarkdown(reasonWords(n))}` : 'Open';
+  return `${head}\n\n${plainMarkdown(n.text)}\n\n${state}`;
 }
 
-/** Where a note's line is in the branch now: the Builder's later fixes may have moved it. */
-async function lineInBranch(dir: string | undefined, read: string | undefined, n: NoteView): Promise<number | undefined> {
-  if (!n.file || !n.line) return undefined;
-  if (!dir || !read || !fs.existsSync(dir)) return n.line;
-  const diff = await gitLater(dir, ['diff', '-U0', '--no-color', '--no-ext-diff', read, 'HEAD', '--', n.file], { allowFail: true });
-  return lineNow(n.line, n.file, diff);
+/** Where a note's line is in the branch now: the Builder's later fixes may have moved it. `file` is from the repo. */
+async function lineInBranch(dir: string | undefined, read: string | undefined, file: string, line: number): Promise<number> {
+  if (!dir || !read || !fs.existsSync(dir)) return line;
+  const diff = await gitLater(dir, ['diff', '-U0', '--no-color', '--no-ext-diff', read, 'HEAD', '--', file], { allowFail: true });
+  return lineNow(line, file, diff);
 }
 
-export async function reviewForHost(t: Ticket, v: ReviewView = reviewView(t)): Promise<PullRequestReview> {
+/**
+ * The review as threads for the pull request of the story's repo. `prefix`: the repo's folder that notes start with on a
+ * workspace of several repos (notes.ts notePrefix); a note on another repo's file goes in with no place, naming it.
+ */
+export async function reviewForHost(t: Ticket, prefix = '', v: ReviewView = reviewView(t)): Promise<PullRequestReview> {
   const threads: ReviewThread[] = [];
   for (const r of v.rounds) {
     const read = Object.values(t.review?.rounds.find((x) => x.n === r.n)?.read ?? {})[0];
     for (const n of r.notes) {
-      const line = await lineInBranch(t.worktree, read, n);
-      threads.push({ key: `${t.id}#${n.n}`, ...(n.file ? { file: n.file } : {}), ...(line ? { line } : {}), text: threadText(n), state: n.state });
+      const file = n.file?.startsWith(prefix) ? n.file.slice(prefix.length) : undefined;
+      const line = file && n.line ? await lineInBranch(t.worktree, read, file, n.line) : undefined;
+      threads.push({ key: `${t.id}#${n.n}`, ...(file ? { file } : {}), ...(line ? { line } : {}), text: threadText(n, file ? undefined : n.file), state: n.state });
     }
   }
   const ok = v.looksRight;
   const approval = ok
     ? ok.byItself
       ? `squad-kit accepted this by itself, on the Builds by itself track, ${whenWords(ok.at)}. No person approved it.`
-      : `**${ok.by}** pressed Looks right on the squad-kit board, ${whenWords(ok.at)}. squad-kit wrote this for them: it cannot approve in their name.`
+      : `**${plainMarkdown(ok.by)}** pressed Looks right on the squad-kit board, ${whenWords(ok.at)}. squad-kit wrote this for them: it cannot approve in their name.`
     : undefined;
   return { threads, ...(approval ? { approval: { key: `${t.id}#looks-right`, text: approval } } : {}) };
 }
@@ -56,7 +66,7 @@ export async function writeReview(bp: BoardPaths, id: string, host: RepoHost, pr
   let posted: ReviewPosted;
   try {
     const t = requireTicket(bp, id);
-    const { threads } = await host.postReview(pr.id, await reviewForHost(t));
+    const { threads } = await host.postReview(pr.id, await reviewForHost(t, notePrefix(t, repoFor(readMeta(bp), t).path)));
     posted = { at: now(), ok: true, pr: pr.id, threads };
   } catch (err) {
     writeLog({ level: 'warn', project: readMeta(bp).project, ticket: id, text: `Could not write the review into pull request ${pr.id}: ${(err as Error).message}` });

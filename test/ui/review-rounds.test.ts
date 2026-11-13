@@ -104,6 +104,11 @@ describe('the review on the Changes tab', () => {
     expect(page.querySelector('.rv-pr.no .term')!.textContent).toContain('squad review MA-21 --write');
   });
 
+  it('an open note whose place a later change touched says so: the Reviewer calls it next round', async () => {
+    await show({ ...VIEW, rounds: [{ ...VIEW.rounds[0], notes: [{ n: 5, round: 1, file: 'README.md', text: 'Add the new line.', state: 'open', touched: '021e063' }] }] });
+    expect(page.querySelector('.rv-touched')!.textContent).toBe('Changed in 021e063: the Reviewer says in its next round whether it is fixed');
+  });
+
   it('after Looks right there is nothing to go past, and a written review says where it is', async () => {
     await show({ ...VIEW, canPast: false, posted: { at: VIEW.posted.at, ok: true, pr: 7, threads: 3 } });
     expect(page.querySelectorAll('.rv-go')).toHaveLength(0);

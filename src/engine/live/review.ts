@@ -14,7 +14,7 @@ import { MAX_REVIEW_ROUNDS, REVIEW_STEP_MS } from './limits.js';
 import type { AgentAsk } from './shared.js';
 import type { LiveSquad } from './squad.js';
 import { keepNoneChecks } from '../proof-kinds/flow.js';
-import { readAnswer, recordRound } from '../review-record/notes.js';
+import { readAnswer, recordRound, reviewAnswerProblem } from '../review-record/notes.js';
 import { fixRound } from '../review-record/fix-round.js';
 
 /** The Reviewer's step, and the Builder fixing what it found. */
@@ -85,6 +85,7 @@ export const reviewPart = {
       addDirs: this.extraDirs(t0),
       permissions: ['read', 'git-read'],
       schema: P.REVIEW_SCHEMA,
+      check: reviewAnswerProblem,
       timeoutMs: REVIEW_STEP_MS,
       onTool: this.watcher(id, 'reviewer', workFolder(t0)!),
     }).finally(() => this.keepLanes(id, 'reviewer', lanes));

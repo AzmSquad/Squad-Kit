@@ -344,8 +344,9 @@ export async function publishTicket(bp: BoardPaths, ticketId: string): Promise<{
     }
   });
   if (merged) mapAfterMerge(bp);
-  // The review goes in once the merge is settled, so a thread can never hold it up. A clash writes it at the next accept.
-  if (!clash) await writeReview(bp, ticketId, host, opened);
+  // The review goes in once the pull request is merged, so a thread can never hold it up. A pull request that waits
+  // gets it when its merge is seen (recheckMerge, merged-outside.ts).
+  if (merged) await writeReview(bp, ticketId, host, opened);
 
   // A clash is not done yet: the item stays where it is until the ticket is accepted again.
   if (tracker && item && !clash) {
@@ -380,6 +381,7 @@ export async function recheckMerge(bp: BoardPaths, id: string): Promise<'merged'
   const base = repoFor(readMeta(bp), t).base;
   let line: string;
   let moved = false;
+  let review: (() => Promise<unknown>) | undefined;
   if (wait === 'pr') {
     const target = repoTarget(bp, t);
     const host = target && repoHostFor(bp, target.url);
@@ -393,6 +395,8 @@ export async function recheckMerge(bp: BoardPaths, id: string): Promise<'merged'
       if (!merged) return 'waiting';
     }
     moved = await followBase(bp, id, target, host);
+    const pr = t.pr;
+    review = () => writeReview(bp, id, host, pr);
     line = `Pull request ${t.pr.id} was approved and merged on ${host.label}`;
   } else {
     const dirs = copyViews(readMeta(bp), t).map((view) => path.join(projectRoot(bp), repoFor(readMeta(bp), view).path));
@@ -418,6 +422,7 @@ export async function recheckMerge(bp: BoardPaths, id: string): Promise<'merged'
     addActivity(x, 'release', line);
   });
   mapAfterMerge(bp);
+  await review?.();
   return 'merged';
 }
 

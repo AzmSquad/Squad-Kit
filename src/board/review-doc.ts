@@ -1,5 +1,6 @@
 import { splitHeader, withHeader } from './docs.js';
 import type { ReviewNote, ReviewRecord, ReviewRound } from './review-types.js';
+import { plainMarkdown } from '../core/safe-markdown.js';
 
 /**
  * A story's review.md (ADR-001: a new part of a ticket is a new file in its folder). The header holds the record squad-kit
@@ -23,7 +24,7 @@ export function whereWords(n: Pick<ReviewNote, 'file' | 'line'>): string {
 function noteDoc(n: ReviewNote): string {
   const where = whereWords(n);
   const state = n.past ? ` (went past: ${n.past.reason}, ${n.past.by})` : n.fixed ? ` (fixed${n.fixed.commit ? ` in ${n.fixed.commit}` : ''})` : '';
-  return `${n.n}. ${where ? `${where}: ` : ''}${n.text.replace(/\s*\n\s*/g, ' ')}${state}`;
+  return `${n.n}. ${plainMarkdown(`${where ? `${where}: ` : ''}${n.text}${state}`)}`;
 }
 
 function roundDoc(r: ReviewRound): string {
@@ -36,7 +37,7 @@ function roundDoc(r: ReviewRound): string {
 export function reviewDoc(title: string, record: ReviewRecord): string {
   const parts = [`# ${title}: review`, ...record.rounds.map(roundDoc)];
   const ok = record.looksRight;
-  if (ok) parts.push(ok.byItself ? `squad-kit accepted it by itself, ${whenWords(ok.at)}` : `${ok.by} approved: Looks right, ${whenWords(ok.at)}`);
+  if (ok) parts.push(ok.byItself ? `squad-kit accepted it by itself, ${whenWords(ok.at)}` : `${plainMarkdown(ok.by)} approved: Looks right, ${whenWords(ok.at)}`);
   return withHeader(record as unknown as Record<string, unknown>, parts.join('\n\n'));
 }
 

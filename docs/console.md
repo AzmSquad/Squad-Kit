@@ -315,7 +315,7 @@ story. Each note stands one of three ways:
 
 | State | What it means |
 | --- | --- |
-| **Fixed in `a3f9c21`** | squad-kit saved the work as the Reviewer read it, then the Builder's fix, and git shows the fix changed that file within 5 lines of the note (any change, for a note about a whole file). When git cannot tell, the Reviewer's next round says whether it is fixed. |
+| **Fixed in `a3f9c21`** | squad-kit saved the work as the Reviewer read it, then the Builder's fix, and git shows the fix changed the note's own lines (or, with no change on them, the nearest note within 2 lines; a removed file fixes nothing). The Reviewer's next round sees it and can reopen it. A note about a whole file, a note git cannot place, or a note of an approved round that a change you asked for touched, is fixed only when the Reviewer's next round says so, and a note about a whole file only if its file really changed. |
 | **Went past** | You went on without it, with your reason on the record: **Go past…** on the note, or **Continue anyway** on a review that stopped. Only you can. |
 | **Open** | Nothing settled it yet, for example a small note the Reviewer approved with. |
 
@@ -328,8 +328,11 @@ is proved and a link to its proof, the review (rounds, notes fixed and gone past
 the notes you went past with your reason, and "<you> approved: Looks right, <date and time>". Each note is a thread on
 its file and line: Fixed with its commit, Went past with your reason (closed), or Open (active). One more closed thread
 says who pressed Looks right: squad-kit signs in with the project's token, so it never votes or approves in your name.
-squad-kit writes the threads after the merge, so a thread can never hold it up. If the code host says no, the merge
-still goes on, the story says so plainly, and **Write it again** on the Changes tab tries once more.
+squad-kit writes the threads only once the pull request is merged, so a thread can never hold the merge up: right after
+its own merge, or when it sees that someone merged it on the code host. If the code host says no, the story says so
+plainly, and **Write it again** on the Changes tab tries once more, only on a merged pull request: it adds the threads
+that are missing and leaves the others as people left them. Every word the Reviewer, the Analyst or you wrote goes into
+the pull request as plain text, one paragraph each: no link, picture, heading or mention of theirs shows there.
 
 A project with no pull requests gets the same record in short in the merge commit's message, under its title: the
 rounds, one line per note with where it stands, and who pressed Looks right.
@@ -343,7 +346,7 @@ REST (under `/p/<project>/api/v1`):
 | --- | --- |
 | `GET /tickets/<id>/review` | Every round with its notes, each note's state, the counts, the fix commits, who pressed Looks right, and whether it is in the pull request (`posted`). |
 | `POST /tickets/<id>/review/past` | `{ "note": 3, "reason": "…" }`: go past one open note, before Looks right. A reason is a must. Answers with the review. |
-| `POST /tickets/<id>/review/write` | Write the review into the story's pull request again. Answers `{ "ok", "pr", "threads", "why" }`. |
+| `POST /tickets/<id>/review/write` | Write the review into the story's merged pull request again: only the threads that are missing. Refused on a pull request that is not merged or was closed. Answers `{ "ok", "pr", "threads", "why" }`. |
 
 ## The window
 

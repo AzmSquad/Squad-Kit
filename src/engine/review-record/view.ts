@@ -33,13 +33,13 @@ export interface ReviewView {
   posted?: ReviewPosted;
   /** Kept the old way: the latest notes as plain text, with no rounds, files or lines. */
   old: boolean;
-  /** Its pull request can take the review again: the story has one. */
+  /** Its pull request can take the review again: the story has one, and it is merged. */
   canWrite: boolean;
   /** A note can still be gone past: the story is not accepted yet. */
   canPast: boolean;
 }
 
-export type ReviewTicket = Pick<Ticket, 'review' | 'reviewNotes' | 'reviewAsked' | 'reviewRound' | 'createdAt' | 'overrides' | 'reviewPosted' | 'pr' | 'stage'>;
+export type ReviewTicket = Pick<Ticket, 'review' | 'reviewNotes' | 'reviewAsked' | 'reviewRound' | 'createdAt' | 'overrides' | 'reviewPosted' | 'pr' | 'mergedAt' | 'stage'>;
 
 export function reviewView(t: ReviewTicket): ReviewView {
   const record = withOldNotes(t);
@@ -63,7 +63,7 @@ export function reviewView(t: ReviewTicket): ReviewView {
     ...(record?.looksRight ? { looksRight: record.looksRight } : {}),
     ...(t.reviewPosted ? { posted: t.reviewPosted } : {}),
     old: Boolean(rounds.length && !t.review?.rounds.length),
-    canWrite: Boolean(t.pr),
+    canWrite: Boolean(t.pr && t.mergedAt),
     canPast: t.stage !== 'release' && t.stage !== 'done',
   };
 }

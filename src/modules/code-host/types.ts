@@ -61,9 +61,9 @@ export interface RepoHost {
   updateDescription(prId: number, description: string): Promise<void>;
   mergeState(prId: number): Promise<MergeState>;
   /**
-   * Writes the review into the pull request: a thread per note, on its file and line when it has them, with its state,
-   * and the comment that says who pressed Looks right. Written again, it finds its own threads and only brings their
-   * state up to date. A module without it keeps the review in the description only.
+   * Writes the review into a merged pull request: a thread per note, on its file and line when it has them, with its
+   * state, and the comment that says who pressed Looks right. Written again, it adds only the threads that are missing
+   * and leaves the others as people left them. A module without it keeps the review in the description only.
    */
   postReview?(prId: number, review: PullRequestReview): Promise<{ threads: number }>;
   /** Merges with a merge commit and deletes the branch. Resolves once the host has merged it. */

@@ -9,6 +9,7 @@ import { repoHostFor } from '../modules/registry.js';
 import type { RepoHost } from '../modules/code-host/types.js';
 import { followBase, localSetupFor, mapAfterMerge, opensPullRequest, recheckMerge, repoTarget, trackerMerged } from './sync.js';
 import { fetchBase } from './handover.js';
+import { writeReview } from './review-record/write.js';
 
 /**
  * A pull request squad-kit opened can be merged on the code host by a person, outside squad-kit: after they settled its
@@ -110,6 +111,8 @@ async function recordMerged(bp: BoardPaths, id: string, pr: PrRef, host: RepoHos
   mapAfterMerge(bp);
   // Its owner's computer tells the tracker, as it would have for its own merge.
   if (clash && isMine(t0, readMeta(bp))) await trackerMerged(bp, id, pr, target.base);
+  // Merged now, so the review's threads can go in: nothing in them can hold the merge up any more.
+  await writeReview(bp, id, host, pr);
   return true;
 }
 

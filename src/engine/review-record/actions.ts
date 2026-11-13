@@ -33,7 +33,10 @@ export function goPast(bp: BoardPaths, id: string, n: number, reason: string): R
   return reviewView(t);
 }
 
-/** Write it again: the Changes tab's button and `squad review <story> --write`. */
+/**
+ * Write it again: the Changes tab's button and `squad review <story> --write`. Only into a merged pull request, so a
+ * thread can never hold a merge up; it adds the threads that are missing and leaves the others as people left them.
+ */
 export async function writeReviewAgain(bp: BoardPaths, id: string): Promise<ReviewPosted> {
   const t = requireTicket(bp, id);
   if (!t.pr) throw new BoardActionError(`${t.id} has no pull request: its review is in its merge commit and on the board.`);
@@ -41,5 +44,8 @@ export async function writeReviewAgain(bp: BoardPaths, id: string): Promise<Revi
   const host = target && repoHostFor(bp, target.url);
   if (!host) throw new BoardActionError(`${t.id}'s code host has no saved sign-in on this computer. Add it in Settings, then try again.`);
   if (!host.postReview) throw new BoardActionError(`${host.label} keeps the review in the pull request's description only.`);
+  const state = await host.mergeState(t.pr.id);
+  if (state === 'closed') throw new BoardActionError(`Pull request ${t.pr.id} was closed on ${host.label} without merging, so its review is not written there. It stays on the board.`);
+  if (state !== 'merged') throw new BoardActionError(`Pull request ${t.pr.id} is not merged yet. squad-kit writes the review into it once it is merged, so nothing in it can hold the merge up.`);
   return (await writeReview(bp, id, host, t.pr))!;
 }

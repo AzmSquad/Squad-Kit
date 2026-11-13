@@ -1,6 +1,7 @@
 import type { Ticket } from '../../board/types.js';
 import { noteLine } from './notes.js';
-import { openNotes } from './state.js';
+import type { ReviewNote } from '../../board/review-types.js';
+import { fixesToConfirm, openNotes } from './state.js';
 
 /**
  * What the Reviewer is asked about its notes (ADR-007): each with its file and line, and, from the second round, whether
@@ -25,13 +26,19 @@ const NOTES_RULE = `Write each problem in notes: one concrete sentence, the file
 line in that file as it is now. Leave out the line when it is about a whole file, and the file when it is about the whole
 change.`;
 
-/** The rule, and the earlier notes nothing settled yet: squad-kit saw no change near them, so the Reviewer says. */
+/**
+ * The rule, then the earlier notes the Reviewer settles this round: the fixes git found, to confirm or reopen, and the
+ * notes git could not settle, with the commit that changed their file when one did.
+ */
 export function notesAsk(t: Pick<Ticket, 'review' | 'overrides'>): string {
+  const found = fixesToConfirm(t);
   const open = openNotes(t);
-  if (!open.length) return NOTES_RULE;
-  return `${NOTES_RULE}
-squad-kit could not tell from the Builder's changes whether these earlier notes are fixed:
-${open.map((n) => `${n.n}. ${noteLine(n)}`).join('\n')}
-For each one, say in earlier whether the code handles it now: its number, and fixed true or false. One that is not
-fixed stays open, so do not write it again in notes.`;
+  if (!found.length && !open.length) return NOTES_RULE;
+  const line = (n: ReviewNote) => `${n.n}. ${noteLine(n)}${n.touched ? ` (its place changed in ${n.touched})` : ''}`;
+  const parts = [NOTES_RULE];
+  if (found.length) parts.push(`squad-kit saw the Builder change the lines of these earlier notes, so it counts them as fixed:\n${found.map(line).join('\n')}`);
+  if (open.length) parts.push(`squad-kit could not tell whether these earlier notes are fixed:\n${open.map(line).join('\n')}`);
+  parts.push(`For each one, say in earlier whether the code handles it now: its number, and fixed true or false. One that is not
+fixed stays open, so do not write it again in notes.`);
+  return parts.join('\n');
 }

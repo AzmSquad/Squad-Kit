@@ -6,7 +6,8 @@ import { commitHooks, commitLater, conventionalWords, git, gitLater, keepsCommit
 import { copiesOf, type CopyOf } from '../copies.js';
 import { leaveProjectFiles } from '../project-git.js';
 import { writeLog } from '../../core/app-log.js';
-import { fixedByGit, readDiff } from './git-fixed.js';
+import { readDiff, touchedNotes } from './git-fixed.js';
+import { notePrefix } from './notes.js';
 import { stateOf } from './state.js';
 
 /**
@@ -15,11 +16,6 @@ import { stateOf } from './state.js';
  * work as the Reviewer read it, the Builder works, squad-kit saves that, and git says which notes it touched. The
  * project's own commit hooks look at all of it at Looks right (hookOwed), so nothing here waits on them.
  */
-
-/** The folder a note's path starts with in this copy: the repo's folder on a workspace of several repos, else none. */
-function prefixOf(t: Pick<Ticket, 'storyDir'>, c: CopyOf): string {
-  return t.storyDir ? `${c.repo.path.replace(/\/+$/, '')}/` : '';
-}
 
 /** What a save found in each copy, by its folder: the commit it is at, and whether this save made it. */
 interface Saved {
@@ -58,8 +54,10 @@ const short = (sha: string) => sha.slice(0, 7);
 
 /**
  * Runs the Builder's round (`fix`) after the story's last review round, with the work saved before and after it when a
- * note of that round is open. Then each open note whose file changed near its line is fixed in that commit. The others
- * wait for the Reviewer's next round to say (prompt.ts). Nothing here stops the story: a git problem leaves them open.
+ * note of that round is open. git compares the commit the Reviewer read with the copy's last commit, the Builder's own
+ * commits too. A note whose lines that changed is fixed in that commit when its round asked for the change; the
+ * Reviewer's next round can still reopen it (prompt.ts). A note about a whole file, or one of an approved round that a
+ * change you asked for touched, waits for the Reviewer's next round to say. Nothing here stops the story.
  */
 export async function fixRound(bp: BoardPaths, id: string, fix: () => Promise<unknown>): Promise<void> {
   const t0 = requireTicket(bp, id);
@@ -78,33 +76,38 @@ export async function fixRound(bp: BoardPaths, id: string, fix: () => Promise<un
   await fix();
   const t = requireTicket(bp, id);
   const done = await saveCopies(bp, t, { plain: `The Builder's changes after review round ${n} (${t.id})`, rule: conventionalWords('fix', `changes after review round ${n}`, t.id) });
-  const made = [...done.copies.values()].filter((d) => d.made);
-  const fixed = new Map<number, string>();
-  for (const d of made) {
-    const from = read.copies.get(d.copy.dir)?.at;
-    if (!from) continue;
-    const files = readDiff(await gitLater(d.copy.dir, ['diff', '-U0', '--no-color', '--no-ext-diff', '-M', from, d.at], { allowFail: true }));
-    const prefix = prefixOf(t, d.copy);
-    for (const note of open) {
-      if (!note.file?.startsWith(prefix)) continue;
-      if (fixedByGit({ file: note.file.slice(prefix.length), ...(note.line ? { line: note.line } : {}) }, files)) fixed.set(note.n, short(d.at));
-    }
+  const moved = [...done.copies.values()].filter((d) => read.copies.get(d.copy.dir) && read.copies.get(d.copy.dir)!.at !== d.at);
+  const touched = new Map<number, string>();
+  for (const d of moved) {
+    const files = readDiff(await gitLater(d.copy.dir, ['diff', '-U0', '--no-color', '--no-ext-diff', '-M', read.copies.get(d.copy.dir)!.at, d.at], { allowFail: true }));
+    const prefix = notePrefix(t, d.copy.repo.path);
+    const here = open.filter((note) => note.file?.startsWith(prefix)).map((note) => ({ ...note, file: note.file!.slice(prefix.length) }));
+    for (const k of touchedNotes(here, files)) touched.set(k, short(d.at));
   }
   const label = (c: CopyOf) => c.repo.path || '.';
   updateTicket(bp, id, (x) => {
     const r = x.review?.rounds.find((y) => y.n === n);
     if (!r) return;
     r.read = Object.fromEntries([...read.copies.values()].map((d) => [label(d.copy), short(d.at)]));
-    if (made.length) r.fix = Object.fromEntries(made.map((d) => [label(d.copy), short(d.at)]));
-    for (const note of r.notes) if (fixed.has(note.n)) note.fixed = { commit: fixed.get(note.n)!, by: 'git' };
+    if (moved.length) r.fix = Object.fromEntries(moved.map((d) => [label(d.copy), short(d.at)]));
+    let fixed = 0;
+    for (const note of r.notes) {
+      const commit = touched.get(note.n);
+      if (!commit) continue;
+      if (r.approved || !note.line) note.touched = commit;
+      else {
+        note.fixed = { commit, by: 'git' };
+        fixed += 1;
+      }
+    }
     // Saved here without the project's commit hooks: they look at the whole change at Looks right.
     if (read.hooks || done.hooks) x.hookOwed = true;
-    if (made.length) addActivity(x, 'squad', fixLine(r, fixed.size, open.length));
+    if (moved.length) addActivity(x, 'squad', fixLine(r, open.length, fixed, touched.size - fixed));
   });
 }
 
-function fixLine(r: ReviewRound, fixed: number, total: number): string {
-  const commits = Object.values(r.fix ?? {}).join(', ');
-  const said = fixed === total ? `${total === 1 ? 'its note' : `all ${total} notes`} changed in the code` : `${fixed} of ${total} ${total === 1 ? 'note' : 'notes'} changed in the code, the Reviewer checks the rest`;
-  return `Saved the Builder's changes after review round ${r.n} as ${commits}: ${said}`;
+function fixLine(r: ReviewRound, total: number, fixed: number, touched: number): string {
+  const notes = (k: number) => `${k} ${k === 1 ? 'note' : 'notes'}`;
+  const said = [`${fixed} of ${notes(total)} changed where they point`, ...(touched ? [`${notes(touched)} more touched, for the Reviewer to call`] : [])];
+  return `Saved the Builder's changes after review round ${r.n} as ${Object.values(r.fix ?? {}).join(', ')}: ${said.join('; ')}. The Reviewer checks them in its next round`;
 }

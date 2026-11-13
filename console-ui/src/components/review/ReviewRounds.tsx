@@ -110,6 +110,11 @@ function NoteThread({ id, n, canPast }: { id: string; n: ReviewNoteView; canPast
               </small>
             </div>
           )}
+          {n.state === 'open' && n.touched && (
+            <p className="rv-touched">
+              Changed in <code dir="ltr">{n.touched}</code>: the Reviewer says in its next round whether it is fixed
+            </p>
+          )}
           {n.state === 'open' && canPast && <GoPast id={id} n={n.n} />}
         </div>
       </div>

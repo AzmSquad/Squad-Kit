@@ -12,17 +12,10 @@ const KEY = 'squadKit.note';
 
 const STATUS: Record<ReviewThreadState, string> = { open: 'active', fixed: 'fixed', past: 'closed' };
 
-interface RawComment {
-  id: number;
-  content?: string;
-}
-
 interface RawThread {
   id: number;
-  status?: string;
   isDeleted?: boolean;
   properties?: Record<string, { $value?: unknown } | undefined>;
-  comments?: RawComment[];
 }
 
 function keyOf(t: RawThread): string | undefined {
@@ -55,18 +48,8 @@ export async function postReviewThreads(az: Azure, repo: string, prId: number, r
     const key = keyOf(t);
     if (key && !t.isDeleted) found.set(key, t);
   }
-  for (const th of review.threads) {
-    const status = STATUS[th.state];
-    const had = found.get(th.key);
-    if (!had) {
-      await az.call('POST', base, newThread(th.key, th.text, status, contextOf(th)));
-      continue;
-    }
-    // Written before: its words and status follow the record, nothing is added.
-    const first = had.comments?.[0];
-    if (first && first.content !== th.text) await az.call('PATCH', `${base}/${had.id}/comments/${first.id}`, { content: th.text });
-    if (had.status !== status) await az.call('PATCH', `${base}/${had.id}`, { status });
-  }
+  // Written before: a thread is left as it is, whatever a person did with it since (resolved, reopened, replied).
+  for (const th of review.threads) if (!found.has(th.key)) await az.call('POST', base, newThread(th.key, th.text, STATUS[th.state], contextOf(th)));
   const ok = review.approval;
   // Closed from the start: it says who pressed Looks right, and needs nobody to resolve it.
   if (ok && !found.has(ok.key)) await az.call('POST', base, newThread(ok.key, ok.text, 'closed'));

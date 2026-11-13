@@ -40,6 +40,8 @@
 .rv-past small { display: block; color: var(--muted); margin-top: 2px; }
 
 .rv-go { margin-top: 8px; }
+.rv-touched { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+.rv-touched code { font: 500 11px 'JetBrains Mono', ui-monospace, monospace; padding: 0 5px; border-radius: 4px; background: var(--surface-2); color: var(--text); }
 .rv-why { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
 .rv-why input { flex: 1 1 260px; min-width: 0; height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--text); font: inherit; font-size: 12.5px; }
 

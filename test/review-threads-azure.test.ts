@@ -7,7 +7,7 @@ import type { PullRequestReview } from '../src/modules/code-host/types.js';
 /**
  * The review in an Azure Repos pull request (ADR-007), against the in-memory Azure DevOps: never a real server. One
  * thread per note on its file and right-side line, with Azure's status; who pressed Looks right as a closed thread, never
- * a vote; and a second write that adds nothing.
+ * a vote; and a second write that only adds what is missing.
  */
 
 const target = { organization: 'momenysr', project: 'Mawid', pat: 'secret' };
@@ -49,16 +49,19 @@ describe('the review in an Azure Repos pull request', () => {
     expect(ok!.comments[0]!.content).toContain('cannot approve in their name');
   });
 
-  it('written again, it finds its own threads: nothing is added, and their status and words follow the record', async () => {
+  it('written again, it adds only what is missing, and leaves each thread as people left it', async () => {
     const { fake, host } = repo();
     const pr = await host.openPullRequest({ source: 'squad/ma-21', target: 'main', title: 'Pay by card', description: 'x', items: [] });
-    await host.postReview(pr.id, REVIEW);
-    const again: PullRequestReview = { ...REVIEW, threads: REVIEW.threads.map((t) => (t.key === 'MA-21#3' ? { ...t, state: 'past', text: `${t.text}\n\nWent past.` } : t)) };
-    await host.postReview(pr.id, again);
+    await host.postReview(pr.id, { ...REVIEW, threads: REVIEW.threads.slice(0, 2) });
+    // A person reopened the fixed one on Azure and changed nothing else.
+    fake.threads.get(pr.id)![0]!.status = 'active';
+    await host.postReview(pr.id, { ...REVIEW, threads: REVIEW.threads.map((t) => ({ ...t, state: 'past' as const, text: `${t.text} (again)` })) });
     const threads = fake.threads.get(pr.id)!;
     expect(threads).toHaveLength(4);
-    expect(threads[2]!.status).toBe('closed');
-    expect(threads[2]!.comments[0]!.content).toBe('Add a test for a refund.\n\nWent past.');
+    expect(threads.map((t) => t.status)).toEqual(['active', 'closed', 'closed', 'closed']);
+    expect(threads[0]!.comments[0]!.content).not.toContain('(again)');
+    // The approval went in first time; the note that was missing goes in now, with its state of today.
+    expect(threads[3]!.comments[0]!.content).toBe('Add a test for a refund. (again)');
   });
 
   it('a token that may not comment is refused in the shared words, for the story to say plainly', async () => {

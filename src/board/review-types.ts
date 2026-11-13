@@ -5,9 +5,9 @@
  */
 
 /**
- * Where a note stands. open: nothing settled it yet. fixed: the Builder's next round changed its file near its line
- * (squad-kit reads that from git), or, when git could not tell, the Reviewer's next round said so. past: the person went
- * on without it, with a reason on the record.
+ * Where a note stands. open: nothing settled it yet. fixed: the Builder's fix of the round that asked for it changed the
+ * lines it points at (squad-kit reads that from git), or the Reviewer's next round said so after its file changed; the
+ * Reviewer's next round can reopen it. past: the person went on without it, with a reason on the record.
  */
 export type ReviewNoteState = 'open' | 'fixed' | 'past';
 
@@ -19,8 +19,13 @@ export interface ReviewNote {
   /** The line in that file as the Reviewer read it. None when it is about the whole file. */
   line?: number;
   text: string;
-  /** Fixed: the commit of the Builder's round that fixed it (short), and who could tell, git or the Reviewer. */
-  fixed?: { commit?: string; by: 'git' | 'reviewer' };
+  /**
+   * Fixed: the commit of the Builder's round that fixed it (short), and who could tell, git or the Reviewer. checked: the
+   * Reviewer's next round has seen a fix git found, and did not reopen it.
+   */
+  fixed?: { commit?: string; by: 'git' | 'reviewer'; checked?: boolean };
+  /** A later Builder round changed its place (short commit), which only the Reviewer's next round can call fixed. */
+  touched?: string;
   /** The person went on without it: who, why and when. */
   past?: { by: string; reason: string; at: string };
 }

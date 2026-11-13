@@ -1,13 +1,17 @@
 import type { ReviewRecord } from '../../board/review-types.js';
 import { whenWords, whereWords } from '../../board/review-doc.js';
+import { plainMarkdown } from '../../core/safe-markdown.js';
 import type { NoteView } from './view.js';
 
 /** The review's own sentences, the same in the pull request, the merge commit and the terminal. */
 
-/** "Momen approved: Looks right, 13 Nov 2026 10:42", or the squad's own accept, which no person approved. */
+/**
+ * "Momen approved: Looks right, 13 Nov 2026 10:42", or the squad's own accept, which no person approved. `bold`: for
+ * Markdown, the name in bold and as plain text.
+ */
 export function approvalWords(ok: NonNullable<ReviewRecord['looksRight']>, bold = false): string {
   if (ok.byItself) return `squad-kit accepted it by itself, on the Builds by itself track, ${whenWords(ok.at)}`;
-  return `${bold ? `**${ok.by}**` : ok.by} approved: Looks right, ${whenWords(ok.at)}`;
+  return `${bold ? `**${plainMarkdown(ok.by)}**` : ok.by} approved: Looks right, ${whenWords(ok.at)}`;
 }
 
 /** "Fixed in a3f9c21", "Fixed, the Reviewer says", "Went past", "Open". */

@@ -26,3 +26,8 @@ export function stateOf(t: Pick<Ticket, 'overrides'>, round: Pick<ReviewRound, '
 export function openNotes(t: Pick<Ticket, 'review' | 'overrides'>): ReviewNote[] {
   return (t.review?.rounds ?? []).flatMap((r) => r.notes.filter((n) => stateOf(t, r, n) === 'open'));
 }
+
+/** The fixes git found that no Reviewer round has looked at yet: the next round confirms or reopens each. */
+export function fixesToConfirm(t: Pick<Ticket, 'review' | 'overrides'>): ReviewNote[] {
+  return (t.review?.rounds ?? []).flatMap((r) => r.notes.filter((n) => n.fixed?.by === 'git' && !n.fixed.checked && !n.past));
+}

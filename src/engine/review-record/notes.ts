@@ -1,9 +1,10 @@
 import path from 'node:path';
 import { now } from '../../board/store.js';
+import { StepError } from '../../board/problem.js';
 import type { Ticket } from '../../board/types.js';
 import type { ReviewNote, ReviewRecord, ReviewRound } from '../../board/review-types.js';
 import { whereWords } from '../../board/review-doc.js';
-import { openNotes } from './state.js';
+import { fixesToConfirm, openNotes } from './state.js';
 
 /**
  * The Reviewer's notes, round by round (ADR-007). Its answer gives notes with a file and a line; squad-kit numbers them
@@ -16,6 +17,11 @@ export interface ReviewAnswer {
   comments: string[];
   notes?: unknown;
   earlier?: unknown;
+}
+
+/** The folder a note's path starts with for this repo: the repo's folder on a workspace of several repos, else none. */
+export function notePrefix(t: Pick<Ticket, 'storyDir'>, repoPath: string): string {
+  return t.storyDir ? `${repoPath.replace(/\/+$/, '')}/` : '';
 }
 
 /** A note as the Reviewer wrote it, before squad-kit numbers it. */
@@ -31,7 +37,7 @@ export function cleanFile(file: unknown, folder?: string): string | undefined {
     f = rel.split(path.sep).join('/');
   }
   f = f.replace(/^(\.\/)+/, '').replace(/^\/+/, '');
-  return f && !f.startsWith('../') ? f : undefined;
+  return f && !f.split('/').includes('..') ? f : undefined;
 }
 
 function cleanLine(line: unknown): number | undefined {
@@ -59,10 +65,25 @@ export function noteLine(n: SaidNote): string {
 }
 
 /**
+ * What is wrong with an answer that asks for changes but names none: no note, and no earlier note it says is still not
+ * fixed. A question for the person is not this. Asked once more (the review step's `check`); then the step stops.
+ */
+export function reviewAnswerProblem(answer: unknown): string | null {
+  const out = (answer ?? {}) as Partial<ReviewAnswer> & { question?: { text?: unknown } };
+  if (out.approved !== false || (typeof out.question?.text === 'string' && out.question.text.trim())) return null;
+  if (readNotes({ notes: out.notes, comments: out.comments ?? [] }).length) return null;
+  if (Array.isArray(out.earlier) && out.earlier.some((e) => (e as { fixed?: unknown } | null)?.fixed === false)) return null;
+  return 'approved is false, and notes names nothing to change';
+}
+
+/**
  * Reads the notes once, so `comments`, which the review step passes on, says where each one points. The notes it read
- * are given back, for recordRound.
+ * are given back, for recordRound. An answer that asks for changes but names none stops the step, never a Builder round
+ * with nothing to fix.
  */
 export function readAnswer(out: ReviewAnswer, folder?: string): SaidNote[] {
+  const problem = reviewAnswerProblem(out);
+  if (problem) throw new StepError('The Reviewer asked for changes but did not say which. Press Try again.', problem);
   const said = readNotes(out, folder);
   out.comments = said.map(noteLine);
   return said;
@@ -84,9 +105,11 @@ function earlierWord(earlier: unknown): Map<number, boolean> {
 }
 
 /**
- * Saves the round on the story. Before it, the Reviewer's word on the earlier notes git could not settle: one it says
- * is fixed is fixed in the Builder's last fix; one it says is not stays open, and goes back to the Builder with the new
- * notes when the round asks for changes. Checklist answers (a "no" to the team's list) come in as `extra`, with no file.
+ * Saves the round on the story. Before it, the Reviewer's word on earlier notes (prompt.ts). A fix git found stays
+ * fixed unless the Reviewer says it is not; then it is open again. An open note it says is fixed is fixed, in the commit
+ * that touched it or the Builder's last fix; one about a whole file only when its file really changed. A note it says is
+ * not fixed stays open, and goes back to the Builder with the new notes when the round asks for changes. Checklist
+ * answers (a "no" to the team's list) come in after the notes in `comments`, with no file.
  */
 export function recordRound(t: Ticket, out: ReviewAnswer, said: SaidNote[]): ReviewRound {
   const record: ReviewRecord = t.review ?? { rounds: [] };
@@ -94,12 +117,18 @@ export function recordRound(t: Ticket, out: ReviewAnswer, said: SaidNote[]): Rev
   const word = earlierWord(out.earlier);
   const lastFix = Object.values(last?.fix ?? {})[0];
   const stillOpen: ReviewNote[] = [];
+  for (const n of fixesToConfirm({ ...t, review: record })) {
+    if (word.get(n.n) === false) {
+      delete n.fixed;
+      stillOpen.push(n);
+    } else n.fixed!.checked = true;
+  }
   for (const n of openNotes({ ...t, review: record })) {
     const fixed = word.get(n.n);
-    if (fixed === true) n.fixed = { ...(lastFix ? { commit: lastFix } : {}), by: 'reviewer' };
-    else if (fixed === false) stillOpen.push(n);
+    const commit = n.touched ?? lastFix;
+    if (fixed === true && (n.touched || !n.file || n.line)) n.fixed = { ...(commit ? { commit } : {}), by: 'reviewer', checked: true };
+    else if (fixed === false && !stillOpen.includes(n)) stillOpen.push(n);
   }
-  // Answers to the team's checklist come after the notes in `comments`, as plain sentences.
   const extra = out.comments.slice(said.length).map((text) => ({ text }));
   let next = allNotes(record).reduce((m, n) => Math.max(m, n.n), 0);
   const round: ReviewRound = { n: (last?.n ?? 0) + 1, at: now(), approved: out.approved, notes: [...said, ...extra].map((n) => ({ n: ++next, ...n })) };

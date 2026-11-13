@@ -13,7 +13,9 @@ export interface ReviewNoteView {
   line?: number;
   text: string;
   state: NoteState;
-  fixed?: { commit?: string; by: 'git' | 'reviewer' };
+  fixed?: { commit?: string; by: 'git' | 'reviewer'; checked?: boolean };
+  /** A later Builder round changed its place: the Reviewer's next round says whether it is fixed. */
+  touched?: string;
   past?: { by: string; reason: string; at: string };
 }
 
