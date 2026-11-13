@@ -11,6 +11,7 @@ import { fakeBrowser } from './fakes/browser.js';
 import { callTool, savedFiles } from './support/window.js';
 import { checkAnswer, checkedNumbers, isProofCheck, type FakeCheck } from './support/proof-check.js';
 import { pngBytes } from './support/png.js';
+import { codeAt } from './support/code-at.js';
 
 /**
  * A "done when" can have several pictures (RO-8, RO-12 and RO-13 stopped with "not shown" although the Tester took 9
@@ -684,8 +685,8 @@ describe('what happened and the board', () => {
     // Both places use it, in the viewer's own order, and the stop uses the panel's rows.
     const read = (f: string) => fs.readFileSync(new URL(`../console-ui/src/${f}`, import.meta.url), 'utf8');
     expect(read('pages/Proof.tsx')).toContain('<MorePictures shot={shot} first={at + 2} onOpen={setZoom} />');
-    expect(read('pages/TicketDrawer.tsx')).toContain('<MorePictures shot={p} first={starts[k]! + 2} onOpen={setZoom} />');
-    expect(read('pages/TicketDrawer.tsx')).toContain('<ProofShots t={t} />');
+    expect(codeAt('console-ui/src/pages/TicketDrawer.tsx', 'console-ui/src/pages/drawer')).toContain('<MorePictures shot={p} first={starts[k]! + 2} onOpen={setZoom} />');
+    expect(codeAt('console-ui/src/pages/TicketDrawer.tsx', 'console-ui/src/pages/drawer')).toContain('<ProofShots t={t} />');
     expect(read('styles/verdict.css')).toContain('.proofmore-row');
     vi.unstubAllGlobals();
   });

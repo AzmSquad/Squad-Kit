@@ -16,6 +16,7 @@ import { mountBoardApi } from '../src/console/api/board.js';
 import { buildPaths } from '../src/core/paths.js';
 import { boardPaths, writeMeta } from '../src/board/store.js';
 import { seedDemoBoard } from '../src/board/demo.js';
+import { codeAt } from './support/code-at.js';
 
 /**
  * The Harness page must really show everything, and stay that way. Every gate, stop and limit in the engine has a row
@@ -27,11 +28,20 @@ const read = (file: string) => fs.readFileSync(path.join(ROOT, file), 'utf8');
 
 /** Every source file of the engine and the board. A demo board's files only play a recording back. */
 function sources(): { file: string; text: string }[] {
-  return ['src/engine', 'src/engine/lead', 'src/board'].flatMap((dir) =>
+  // A module split into a folder of its own is read file by file, each named with its folder: live/checks.ts.
+  const dirs = [
+    { dir: 'src/engine', folder: '' },
+    { dir: 'src/engine/lead', folder: '' },
+    { dir: 'src/engine/live', folder: 'live/' },
+    { dir: 'src/engine/prompts', folder: 'prompts/' },
+    { dir: 'src/board', folder: '' },
+    { dir: 'src/board/actions', folder: 'actions/' },
+  ];
+  return dirs.flatMap(({ dir, folder }) =>
     fs
       .readdirSync(path.join(ROOT, dir))
       .filter((f) => f.endsWith('.ts') && !f.startsWith('demo') && !f.startsWith('harness'))
-      .map((f) => ({ file: f, text: read(`${dir}/${f}`) })),
+      .map((f) => ({ file: `${folder}${f}`, text: read(`${dir}/${f}`) })),
   );
 }
 
@@ -57,7 +67,7 @@ const EXCUSED: Record<string, string> = {
   'bring-in.ts:LANDING_LOOK_MS': 'How often a waiting story looks again. MAX_LANDING_WAIT_MS is the limit.',
   'save-trouble.ts:SAVE_CHECK_MS': 'How often a held project tries its test write.',
   'free-port.ts:LOOK_MS': 'How often it looks at who holds the app port.',
-  'live.ts:PICK_UP_MS': 'How often it looks for stories teammates pushed.',
+  'live/limits.ts:PICK_UP_MS': 'How often it looks for stories teammates pushed.',
   'watchdog.ts:SLEEP_MS': 'Tells a computer that slept from a step that went quiet.',
   'watchdog.ts:NO_LOOK_MS': 'Tells a computer that slept from a step that went quiet.',
   'watchdog.ts:IDLE_MS': 'Part of the same look as QUIET_MS and LONG_MS, which are on the page.',
@@ -91,7 +101,7 @@ const EXCUSED: Record<string, string> = {
   'acp-runner.ts:RUN_MS': 'A fallback for a run that names no limit of its own. Every step on the page names one.',
   'lock.ts:RELEASE_LOCK_MAX_MS': 'An older lock was left behind by a crash. Nothing ever waits on it.',
   // Small helpers beside the work, where a late answer only asks you to try again.
-  'live.ts:ANSWER_STEP_MS': 'The Analyst explains one of its questions. A late answer says to ask again.',
+  'live/limits.ts:ANSWER_STEP_MS': 'The Analyst explains one of its questions. A late answer says to ask again.',
   'breakdown-job.ts:BRD_ANSWER_MS': 'The Analyst explains one of its questions. A late answer says to ask again.',
   'draft.ts:DRAFT_MS': 'Filling in the new ticket form from pasted text. The form stays yours either way.',
   'draft.ts:KEEP_MS': 'How long a draft nobody came back for is kept.',
@@ -144,28 +154,40 @@ const EXCUSED: Record<string, string> = {
 
 /** Rules with no name a scan could find, and why they have no row. Each must still be in the code it names. */
 const NO_ROW: { file: string; word: string; why: string }[] = [
-  { file: 'src/engine/live.ts', word: 'TURNS_BEFORE_BANNER', why: 'The board says it itself, and only when something is really wrong.' },
-  { file: 'src/engine/live.ts', word: 'holdNewRuns', why: "An update's own card says what it waits for." },
+  { file: 'src/engine/live/limits.ts', word: 'TURNS_BEFORE_BANNER', why: 'The board says it itself, and only when something is really wrong.' },
+  { file: 'src/engine/live/squad.ts', word: 'holdNewRuns', why: "An update's own card says what it waits for." },
   { file: 'src/board/lock.ts', word: 'claimSquad', why: 'Keeps a terminal from starting a second squad. Nobody ever meets it.' },
   { file: 'src/board/owner.ts', word: 'isMine', why: 'A story stays with its owner. It only matters between teammates, and Hand over says so.' },
   { file: 'src/engine/port-ask.ts', word: 'inTheWay', why: 'A busy port is the engine to settle. A person never needs to know.' },
-  { file: 'src/engine/live.ts', word: 'answerAgainPrompt', why: 'An agent is asked once more for a complete answer. If that fails it is a stop like any other.' },
+  { file: 'src/engine/live/agent-run.ts', word: 'answerAgainPrompt', why: 'An agent is asked once more for a complete answer. If that fails it is a stop like any other.' },
   { file: 'src/engine/branches.ts', word: 'cleanBranches', why: 'Tidying after a release. It never deletes work that is not merged.' },
 ];
 
 /** Stops with no name of their own: each is a plain card with ways out, the row "Every stop has a way out". */
 const STOPS_PER_FILE: Record<string, number> = {
-  'actions.ts': 3,
+  'actions/decide.ts': 1,
+  'actions/save.ts': 2,
   'breakdown-job.ts': 5,
   'budget.ts': 1,
-  'live.ts': 34,
+  'live/agent-run.ts': 9,
+  'live/base.ts': 1,
+  'live/build.ts': 1,
+  'live/change.ts': 1,
+  'live/check-stops.ts': 2,
+  'live/checks.ts': 2,
+  'live/picture-check.ts': 3,
+  'live/review.ts': 1,
+  'live/screens.ts': 6,
+  'live/shoot.ts': 3,
+  'live/stops.ts': 4,
+  'live/workspace.ts': 1,
   'sync.ts': 1,
 };
 
 /** Times written where they are used, each with why it needs no row. */
 const INLINE_TIMES: Record<string, string> = {
-  'live.ts: 2 * 60_000': 'How often it looks again at a merge that waits.',
-  'live.ts: 10 * 60_000': 'Tells a step that was waiting a long time from one cut off just now.',
+  'live/waits.ts: 2 * 60_000': 'How often it looks again at a merge that waits.',
+  'live/waits.ts: 10 * 60_000': 'Tells a step that was waiting a long time from one cut off just now.',
   'checks.ts: 3 * 60_000': 'The same as APP_WAIT_MS, as a default.',
   'media.ts: 5 * 60_000': 'Pulling the sound out of a video note, beside the work.',
   'media.ts: 3 * 60_000': 'Pulling pictures out of a video note, beside the work.',
@@ -317,10 +339,10 @@ describe('gates', () => {
   });
 
   it('says the same as the engine about the tracks', () => {
-    const live = read('src/engine/live.ts');
+    const live = codeAt('src/engine/live');
     expect(live).toContain("if (x.track === 'auto') return acceptNext(x, 0.2, 1);");
     expect(live).toContain("if (track === 'express' || track === 'auto') {");
-    expect(read('src/board/actions.ts')).toContain("return t.track !== 'express' && !t.specApproved;");
+    expect(read('src/board/actions/approve.ts')).toContain("return t.track !== 'express' && !t.specApproved;");
   });
 });
 
@@ -331,7 +353,7 @@ describe('safety', () => {
   });
 
   it('says what each agent may do as its steps really run', () => {
-    const live = read('src/engine/live.ts');
+    const live = codeAt('src/engine/live');
     const runs = [...live.matchAll(/runAgent\(\{[\s\S]*?permissions: \[([^\]]*)\]/g)].map((m) => ({ role: /role: '(\w+)'/.exec(m[0])?.[1], perms: m[1]! })).filter((r) => r.role);
     expect(new Set(runs.map((r) => r.role))).toEqual(new Set(AGENTS.map((a) => a.role)));
     for (const a of AGENTS) {

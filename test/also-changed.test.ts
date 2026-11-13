@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { RunOptions, RunResult } from '../src/modules/claude/direct.js';
+import { codeAt } from './support/code-at.js';
 
 /**
  * A change outside the plan is not hidden in the Activity tab. The Reviewer names it, squad-kit keeps it on the ticket
@@ -163,8 +164,13 @@ describe('where the person sees it', () => {
 
   it('every place shows it: the Your turn panel, the stops, the ticket and the proof page', () => {
     const read = (f: string) => fs.readFileSync(new URL(`../console-ui/src/${f}`, import.meta.url), 'utf8');
-    const drawer = read('pages/TicketDrawer.tsx');
-    const panel = (name: string) => drawer.slice(drawer.indexOf(`function ${name}(`), drawer.indexOf('\nfunction ', drawer.indexOf(`function ${name}(`) + 1));
+    const drawer = codeAt('console-ui/src/pages/TicketDrawer.tsx', 'console-ui/src/pages/drawer');
+    // A panel ends where the next function, or the next file's imports, begin.
+    const panel = (name: string) => {
+      const from = drawer.indexOf(`function ${name}(`);
+      const end = drawer.slice(from + 1).search(/\n(?:export )?function |\nimport /);
+      return drawer.slice(from, end < 0 ? undefined : from + 1 + end);
+    };
     for (const name of ['ProofPanel', 'WorkingPanel', 'ProofTab', 'NowPanel', 'AskPanel']) expect(panel(name), name).toContain('<AlsoChanged t={t}');
     expect(read('pages/Proof.tsx')).toContain('<AlsoChanged t={t}');
   });

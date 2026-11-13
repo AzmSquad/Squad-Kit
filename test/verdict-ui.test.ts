@@ -5,6 +5,7 @@ import { proofWords } from '../console-ui/src/lib/gates.js';
 import { readTicketDocs, ticketDocs } from '../src/board/docs.js';
 import { withProblem } from '../src/board/problem.js';
 import type { ProofShot, Ticket } from '../src/board/types.js';
+import { codeAt } from './support/code-at.js';
 
 /**
  * On Full and Express the person sees each row of the proof marked Met, Not working yet or Not shown yet, with its
@@ -59,9 +60,10 @@ describe('Met, Not working yet and Not shown yet on the board', () => {
     for (const c of ['.verdict.broken', '.verdict.notshown', '.critrow.broken', '.critrow.notshown', '.verdictline.notshown']) expect(read('styles/verdict.css')).toContain(c);
     // The proof page and the panel color each row by its verdict, and show its plain note.
     expect(read('pages/Proof.tsx')).toContain('verdictClass(shot.shows)');
-    expect(read('pages/TicketDrawer.tsx')).toContain('verdictClass(p.shows)');
-    for (const f of ['pages/Proof.tsx', 'pages/TicketDrawer.tsx']) expect(read(f)).toContain('verdictNote(');
-    expect(`${read('pages/Proof.tsx')}${read('pages/TicketDrawer.tsx')}${verdict}`).not.toContain('not-met');
+    const drawer = codeAt('console-ui/src/pages/TicketDrawer.tsx', 'console-ui/src/pages/drawer');
+    expect(drawer).toContain('verdictClass(p.shows)');
+    for (const src of [read('pages/Proof.tsx'), drawer]) expect(src).toContain('verdictNote(');
+    expect(`${read('pages/Proof.tsx')}${drawer}${verdict}`).not.toContain('not-met');
   });
 
   it('says on the gate which it is, or that you went past it', () => {
@@ -82,7 +84,7 @@ describe('Met, Not working yet and Not shown yet on the board', () => {
 
   it('the proof panel, the proof page and a stop at the proof all show the marks', () => {
     const read = (f: string) => fs.readFileSync(new URL(`../console-ui/src/${f}`, import.meta.url), 'utf8');
-    const drawer = read('pages/TicketDrawer.tsx');
+    const drawer = codeAt('console-ui/src/pages/TicketDrawer.tsx', 'console-ui/src/pages/drawer');
     const page = read('pages/Proof.tsx');
     for (const src of [drawer, page]) {
       expect(src).toContain('<VerdictTag shows=');

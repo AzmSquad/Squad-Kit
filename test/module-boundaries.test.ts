@@ -5,9 +5,12 @@ import path from 'node:path';
 /**
  * ADR-002: the engine only knows the module interfaces and the registry, and a product folder never uses another
  * one. Adding a tracker, code host, AI tool, speech service, browser, phone or tapping tool then never touches the engine.
+ * ADR-005: the board's pages and squad-kit's own scripts never reach a product either.
  */
 
 const SRC = path.resolve(__dirname, '../src');
+/** Outside src: the board's pages and squad-kit's own scripts. */
+const OTHERS = [path.resolve(__dirname, '../console-ui/src'), path.resolve(__dirname, '../scripts')];
 const MODULES = path.join(SRC, 'modules');
 /** The folders that hold one kind's interface, not a product. */
 const KINDS = new Set(['tracker', 'code-host', 'ai-tool', 'speech', 'browser', 'phone', 'phone-driver']);
@@ -50,6 +53,11 @@ describe('module boundaries', () => {
         return rel.startsWith('..') || KINDS.has(rel.split(path.sep)[0]!) || !rel.includes(path.sep);
       })
       .flatMap((f) => productsImported(f).map((p) => `${path.relative(SRC, f)} imports ${p}`));
+    expect(offenders).toEqual([]);
+  });
+
+  it("the board's pages and squad-kit's scripts never import a product", () => {
+    const offenders = OTHERS.flatMap((dir) => files(dir)).flatMap((f) => productsImported(f).map((p) => `${path.relative(SRC, f)} imports ${p}`));
     expect(offenders).toEqual([]);
   });
 

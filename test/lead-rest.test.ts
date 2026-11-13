@@ -77,7 +77,7 @@ describe('Needs you and The squad now', () => {
     expect(t.activity.at(-1)).toMatchObject({ who: 'squad', text: BY_ITSELF_LINE });
     expect(t.activity.some((a) => a.who === 'you' && a.text.startsWith('Gave it'))).toBe(false);
     // The watchdog's slow card calls it: the live squad's own code.
-    expect(fs.readFileSync(new URL('../src/engine/live.ts', import.meta.url), 'utf8')).toContain("if (q?.kind === 'long' && t.quiet?.kind !== 'long') moreTimeByItself(this.bp, id);");
+    expect(fs.readFileSync(new URL('../src/engine/live/watch.ts', import.meta.url), 'utf8')).toContain("if (q?.kind === 'long' && t.quiet?.kind !== 'long') moreTimeByItself(this.bp, id);");
   });
 
   it('lists who works on what now, with how far along', () => {

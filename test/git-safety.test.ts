@@ -181,7 +181,8 @@ describe('finding 1: nothing a hook planted runs outside its guard', () => {
   });
 
   it('every way git could stage everything goes through the one that leaves nested repos out', () => {
-    for (const file of ['engine/release.ts', 'engine/live.ts', 'engine/lane.ts', 'engine/depends.ts', 'engine/handover.ts', 'engine/git.ts']) {
+    const live = fs.readdirSync(path.join(ROOT, 'src/engine/live')).map((f) => `engine/live/${f}`);
+    for (const file of ['engine/release.ts', ...live, 'engine/lane.ts', 'engine/depends.ts', 'engine/handover.ts', 'engine/git.ts']) {
       const text = fs.readFileSync(path.join(ROOT, 'src', file), 'utf8').replace(/git(Later)?\(dir, \['add', '-A', \.\.\.\(out\.length[^\n]*/g, '');
       expect(text, file).not.toMatch(/\['add', '-A'/);
     }

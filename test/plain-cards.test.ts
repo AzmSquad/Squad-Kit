@@ -8,6 +8,7 @@ import { startApp } from '../src/engine/checks.js';
 import { portSettings } from '../src/engine/port-vars.js';
 import { seedDemoBoard } from '../src/board/demo.js';
 import { boardPaths, readTicket } from '../src/board/store.js';
+import { codeAt } from './support/code-at.js';
 
 /**
  * The person is a project manager: what they read names no command, port, process, file path or tool. Those are one
@@ -117,16 +118,16 @@ describe('what the person reads on the other cards', () => {
   });
 
   it("your own copy's setup: the command only under See what failed, and in the Developer tab", () => {
-    const drawer = read('console-ui/src/pages/TicketDrawer.tsx');
+    const drawer = codeAt('console-ui/src/pages/TicketDrawer.tsx', 'console-ui/src/pages/drawer');
     const line = drawer.slice(drawer.indexOf('function LocalSetupLine'), drawer.indexOf('function WorkingPanel'));
     expect(line.indexOf('{ls.command}')).toBeGreaterThan(line.indexOf('See what failed'));
-    const dev = drawer.slice(drawer.indexOf('function DeveloperTab'));
+    const dev = codeAt('console-ui/src/pages/drawer/DeveloperTab.tsx');
     expect(dev).toContain('{t.localSetup.command}');
     expect(dev).toContain('How the tests run');
   });
 
   it('a step says where it is, not which tool runs it', () => {
-    expect(read('src/engine/live.ts')).not.toMatch(/\.status = .*toolLabel/);
+    expect(codeAt('src/engine/live')).not.toMatch(/\.status = .*toolLabel/);
   });
 
   it('the sample board shows the same words', () => {

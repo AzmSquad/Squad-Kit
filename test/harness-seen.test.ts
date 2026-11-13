@@ -184,7 +184,7 @@ describe('what waits and where', () => {
 });
 
 describe('it stays true', () => {
-  const engine = ['src/engine', 'src/board'].flatMap((d) => fs.readdirSync(path.join(ROOT, d)).filter((f) => f.endsWith('.ts') && !f.startsWith('demo') && !f.startsWith('harness')).map((f) => fs.readFileSync(path.join(ROOT, d, f), 'utf8'))).join('\n');
+  const engine = ['src/engine', 'src/engine/live', 'src/engine/prompts', 'src/board', 'src/board/actions'].flatMap((d) => fs.readdirSync(path.join(ROOT, d)).filter((f) => f.endsWith('.ts') && !f.startsWith('demo') && !f.startsWith('harness')).map((f) => fs.readFileSync(path.join(ROOT, d, f), 'utf8'))).join('\n');
 
   /** The plain words of a pattern, which the engine must still write: a reworded line would count nothing without a word. */
   const words = (re: RegExp) => re.source.replace(/\\([.()])/g, '$1').split(/\.\*|\\d\+|\\w\+|\\S\+|\\1|\(\\d\+\)|\[\^|[|()^$?]/).map((w) => w.replace(/\\/g, '').trim()).filter((w) => w.length > 5);
@@ -211,6 +211,8 @@ describe('it stays true', () => {
       const where = r.d?.find(([k]) => k === 'In the code')?.[1];
       expect(where, r.id).toBeTruthy();
       expect(fs.existsSync(path.join(ROOT, where!)), `${r.id}: ${where}`).toBe(true);
+      // A file that only passes on another file's names, like src/engine/live.ts, is not where the rule is.
+      expect(fs.readFileSync(path.join(ROOT, where!), 'utf8'), `${r.id}: ${where}`).toMatch(/^(?:export )?(?:async )?(?:function|class|const|let) /m);
     }
     expect(rows.find((r) => r.id === 'checks')!.d).toContainEqual(['Runs', 'npm test, npm run lint']);
   });

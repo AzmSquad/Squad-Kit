@@ -12,6 +12,7 @@ import { callTool, savedFiles } from './support/window.js';
 import { checkAnswer, checkedNumbers, isProofCheck, type FakeCheck } from './support/proof-check.js';
 import { notOnScreen, verdictClass, verdictNote, verdictWord } from '../console-ui/src/lib/verdict.js';
 import { proofWords } from '../console-ui/src/lib/gates.js';
+import { codeAt } from './support/code-at.js';
 
 /**
  * A "done when" that truly cannot be shown (RO-12: no past bookings in the app; RO-8: no old booking in the data). The
@@ -577,7 +578,7 @@ describe('on the board', () => {
     expect(renderToStaticMarkup(createElement(OffScreenList, { t: { offScreen: [none] } }))).toContain('It survives a restart');
     expect(renderToStaticMarkup(createElement(OffScreenList, { t: { offScreen: [none], waiting: { kind: 'proof', summary: 'x' } } }))).toBe('');
     // The panel and the page both draw the row by its verdict.
-    expect(read('pages/TicketDrawer.tsx')).toContain('<VerdictTag shows={p.shows} />');
+    expect(codeAt('console-ui/src/pages/TicketDrawer.tsx', 'console-ui/src/pages/drawer')).toContain('<VerdictTag shows={p.shows} />');
     expect(read('pages/Proof.tsx')).toContain('<VerdictTag shows={shot.shows} />');
     vi.unstubAllGlobals();
   });

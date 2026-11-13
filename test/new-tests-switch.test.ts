@@ -5,6 +5,7 @@ import path from 'node:path';
 import { execSync } from 'node:child_process';
 import { Hono } from 'hono';
 import type { Release, Ticket } from '../src/board/types.js';
+import { codeAt } from './support/code-at.js';
 
 /**
  * "Write new tests" on a new story: on by default, on any track. Off, the plan and the Builder add no tests and the
@@ -225,7 +226,7 @@ describe('on the board', () => {
 
   it('every place shows it: the card, the story, the proof page and the release; the form has the switch', () => {
     expect(read('pages/Board.tsx')).toContain('<NoNewTestsTag t={t} />');
-    expect(read('pages/TicketDrawer.tsx')).toContain('<NoNewTestsLabel t={t} />');
+    expect(codeAt('console-ui/src/pages/TicketDrawer.tsx', 'console-ui/src/pages/drawer')).toContain('<NoNewTestsLabel t={t} />');
     expect(read('pages/Proof.tsx')).toContain('<NoNewTestsLabel t={t} />');
     expect(read('pages/Releases.tsx')).toContain('<NoNewTestsLabel t={it} />');
     const form = read('components/dialogs.tsx');
