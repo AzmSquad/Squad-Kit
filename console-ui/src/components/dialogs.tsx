@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Bug, Check, Copy, Download, Loader2, Paperclip, PenLine, Plus, Rocket, RotateCcw, Sparkles, X } from 'lucide-react';
-import type { DraftJob, Release, Ticket, TicketDraft as Draft, Track } from '../api/types';
+import type { DraftJob, Release, Ticket, TicketDraft as Draft, Track, TrackerStatus } from '../api/types';
 import { api, send, PROJECT } from '../api/client';
 import { useAct, useBoard } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
@@ -716,23 +716,18 @@ function FilePicker({ files, onAdd, onRemove }: { files: PickedFile[]; onAdd(lis
 
 export function PullDialog({ onClose, onCreated }: { onClose(): void; onCreated(t: Ticket): void }) {
   const act = useAct<Ticket>();
-  const [ref, setRef] = useState('AB#');
+  // The connected tracker says how its items are written: AB#40, #40.
+  const tracker = useQuery({ queryKey: ['tracker'], queryFn: () => api<TrackerStatus>('/api/v1/tracker') }).data;
+  const example = tracker?.example ?? 'AB#40';
+  const [ref, setRef] = useState(example.replace(/\d+$/, ''));
   const blocked = ref.replace(/\D/g, '').length === 0 || act.isPending;
   const submit = () => {
     if (blocked) return;
-    act.mutate(
-      { path: '/api/v1/pull', body: { ref } },
-      {
-        onSuccess: (t) => {
-          onCreated(t);
-          onClose();
-        },
-      },
-    );
+    act.mutate({ path: '/api/v1/pull', body: { ref } }, { onSuccess: (t) => (onCreated(t), onClose()) });
   };
   return (
     <Modal
-      title="Pull from Azure DevOps"
+      title={`Pull from ${tracker?.label ?? 'the tracker'}`}
       onClose={onClose}
       icon={<span className="glyph"><Download size={15} /></span>}
       footer={
@@ -742,14 +737,14 @@ export function PullDialog({ onClose, onCreated }: { onClose(): void; onCreated(
           </button>
           <button className="btn" onClick={onClose}>Cancel</button>
           <span className="grow" />
-          <Cmd text={`squad pull ${ref.trim() ? shellArg(ref.trim()) : 'AB#4133'}`} />
+          <Cmd text={`squad pull ${shellArg(ref.trim() || example)}`} />
         </>
       }
     >
-      <p>Bring a work item in as a ticket, with its description and attachments.</p>
+      <p>Bring an item in as a ticket, with its description and attachments.</p>
       <div className="field">
-        <label htmlFor="pull-ref">Work item</label>
-        <input id="pull-ref" className="input mono" autoFocus value={ref} onChange={(e) => setRef(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+        <label htmlFor="pull-ref">Item</label>
+        <input id="pull-ref" className="input mono" autoFocus value={ref} placeholder={example} onChange={(e) => setRef(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
       </div>
     </Modal>
   );

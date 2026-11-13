@@ -265,7 +265,7 @@ export function AddBrdDialog({ onClose }: { onClose(): void }) {
             <span>2</span>You edit the breakdown and approve it.
           </div>
           <div className="rq-nstep">
-            <span>3</span>Send it to Azure DevOps, let the squad build it story by story, or both.
+            <span>3</span>Send it to your tracker, let the squad build it story by story, or both.
           </div>
         </div>
       </div>
@@ -275,7 +275,7 @@ export function AddBrdDialog({ onClose }: { onClose(): void }) {
 
 /* ── Send to the tracker ────────────────────────────────── */
 
-/** Send to Azure DevOps: what it creates and links, from GET /send. Then its progress, and Send again if it stops. */
+/** Send to the tracker: what it creates and links, from GET /send. Then its progress, and Send again if it stops. */
 export function SendDialog({ v, onClose }: { v: BreakdownView; onClose(): void }) {
   const act = useReqAct<BreakdownView>();
   const preview = useSendPreview(v.id, true);
@@ -345,7 +345,7 @@ export function SendDialog({ v, onClose }: { v: BreakdownView; onClose(): void }
       }
     >
       <p>
-        Into {project ? <>project <b className="rq-ink">{project}</b></> : `your ${label} project`}, as the work item types it uses. They go into the backlog, not a sprint.
+        Into {project ? <>project <b className="rq-ink">{project}</b></> : `your ${label} project`}, as the item types it uses. They go into the backlog, not a sprint.
       </p>
       {preview.isLoading ? (
         <p className="note">Working out what to send…</p>
@@ -389,7 +389,7 @@ export function SendDialog({ v, onClose }: { v: BreakdownView; onClose(): void }
       ) : null}
       <div className="rq-promise">
         <div>
-          Each story's number, like AB#120, shows in the breakdown. When the squad builds a story, its item moves forward and gets the squad's notes, as tickets from the Backlog do today.
+          Each story's number shows in the breakdown. When the squad builds a story, its item moves forward and gets the squad's notes, as tickets from the Backlog do today.
         </div>
         <div>
           Edit the breakdown later and <b>Send changes</b> updates the same items. squad-kit never deletes anything in {label}.

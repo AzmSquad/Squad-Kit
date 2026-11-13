@@ -869,49 +869,7 @@ export interface DecisionsResponse {
   lessons: Lesson[];
 }
 
-export interface WorkItemRow {
-  id: string;
-  /** How people write it, for example AB#40. */
-  ref: string;
-  type: string;
-  title: string;
-  state: string;
-  points?: number;
-  priority?: number;
-  sprint?: string;
-  assignedTo?: string;
-  tags: string[];
-  url: string;
-  ticket: { id: string; stage: Stage; status: string } | null;
-}
-
-export interface Sprint {
-  name: string;
-  path: string;
-  start?: string;
-  finish?: string;
-  current: boolean;
-}
-
-export interface BacklogResponse {
-  connected: boolean;
-  error?: string | null;
-  user?: string;
-  sprints: Sprint[];
-  sprint?: string;
-  items: WorkItemRow[];
-}
-
-export interface TrackerStatus {
-  type: 'none' | 'azure' | 'jira' | 'github';
-  /** The tracker's name in words: "Azure DevOps". */
-  label?: string;
-  organization: string;
-  project: string;
-  hasToken: boolean;
-  user?: string;
-  error?: string;
-}
+export type { BacklogResponse, Sprint, TrackerStatus, WorkItemRow } from './tracker-types';
 
 export interface AgentInfo {
   role: 'analyst' | 'architect' | 'builder' | 'reviewer' | 'tester';

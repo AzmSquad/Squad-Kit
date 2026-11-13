@@ -5,10 +5,12 @@ import { buildPaths, requireSquadRoot } from '../../core/paths.js';
 import { loadConfig, saveConfig, type SquadConfig, type TrackerType } from '../../core/config.js';
 import { loadSecrets, saveSecrets, mergeSecrets, type SquadSecrets } from '../../core/secrets.js';
 import { clientFor, overlayTrackerEnv } from '../../tracker/index.js';
-import { probeJiraConnectivity, probeAzureConnectivity, probeGitHubConnectivity } from '../../core/probes.js';
+import { probeJiraConnectivity, probeAzureConnectivity } from '../../core/probes.js';
 import { skipExternalProbesInAutomation } from '../../core/ci-env.js';
 import { isInteractive } from '../../ui/tty.js';
-import { promptJiraCredentials, promptAzureCredentials, promptGitHubCredentials } from './shared.js';
+import { promptJiraCredentials, promptAzureCredentials } from './shared.js';
+import { trackerModule } from '../../modules/registry.js';
+import { setTrackerFromModule } from './set-tracker-module.js';
 
 const TYPES: TrackerType[] = ['none', 'github', 'jira', 'azure'];
 
@@ -38,15 +40,11 @@ function azureError(): Error {
   );
 }
 
-function githubError(): Error {
-  return new Error(
-    `GitHub configuration is incomplete. Set tracker.workspace (owner) and tracker.project (repo) in .squad/config.yaml plus GITHUB_TOKEN (or run \`squad config set tracker\` without --yes to enter credentials interactively).`,
-  );
-}
-
 export interface ConfigSetTrackerOptions {
   type?: string;
   yes?: boolean;
+  /** The tracker's own settings, as key=value. */
+  field?: string[];
 }
 
 export async function runConfigSetTracker(opts: ConfigSetTrackerOptions = {}): Promise<void> {
@@ -68,7 +66,7 @@ export async function runConfigSetTracker(opts: ConfigSetTrackerOptions = {}): P
       message: 'Issue tracker',
       choices: [
         { name: 'None', value: 'none' as TrackerType },
-        { name: 'GitHub Issues', value: 'github' as TrackerType },
+        { name: 'GitHub (Issues or a Project)', value: 'github' as TrackerType },
         { name: 'Jira', value: 'jira' as TrackerType },
         { name: 'Azure DevOps', value: 'azure' as TrackerType },
       ],
@@ -76,41 +74,17 @@ export async function runConfigSetTracker(opts: ConfigSetTrackerOptions = {}): P
     })) as TrackerType;
   }
 
+  // A tracker that keeps no token of its own, or one given its settings, is set up from its module's fields.
+  const mod = type === 'none' ? undefined : trackerModule(type);
+  if (mod && (opts.field?.length || !mod.fields.some((f) => f.secret))) {
+    await setTrackerFromModule(root, mod, opts.field, interactive);
+    return;
+  }
+
   let nextTracker!: SquadConfig['tracker'];
 
   if (type === 'none') {
     nextTracker = { type: 'none' };
-  } else if (type === 'github') {
-    if (interactive) {
-      ui.step('GitHub credentials (stored in .squad/secrets.yaml — always git-ignored)');
-      const g = await promptGitHubCredentials({
-        owner: config.tracker.type === 'github' ? config.tracker.workspace : undefined,
-        repo: config.tracker.type === 'github' ? config.tracker.project : undefined,
-        host: baseSecrets.tracker?.github?.host,
-      });
-      const merged = mergeSecrets(baseSecrets, {
-        tracker: { github: { host: g.host, pat: g.pat } },
-      });
-      saveSecrets(paths.secretsFile, merged);
-      nextTracker = { type: 'github', workspace: g.owner, project: g.repo };
-      ui.success('GitHub credentials saved');
-      ui.info('.squad/secrets.yaml updated (chmod 0600 on POSIX)');
-    } else {
-      const o = overlayTrackerEnv(baseSecrets);
-      const owner = (config.tracker.workspace ?? '').trim();
-      const repo = (config.tracker.project ?? '').trim();
-      if (!owner || !repo) {
-        throw githubError();
-      }
-      const candidate: SquadConfig = {
-        ...config,
-        tracker: { type: 'github', workspace: owner, project: repo },
-      };
-      if (clientFor(candidate, o).error) {
-        throw githubError();
-      }
-      nextTracker = { type: 'github', workspace: owner, project: repo };
-    }
   } else if (type === 'jira') {
     if (interactive) {
       ui.step('Jira Cloud credentials (stored in .squad/secrets.yaml — always git-ignored)');
@@ -211,17 +185,6 @@ export async function runConfigSetTracker(opts: ConfigSetTrackerOptions = {}): P
           : `Azure DevOps connectivity check failed: ${r.detail ?? 'unknown'}`,
       );
     }
-  } else if (reloaded.tracker.type === 'github') {
-    const r = await probeGitHubConnectivity(s, reloaded);
-    if (r.ok) {
-      ui.info('GitHub connectivity check: OK');
-    } else {
-      ui.warning(
-        r.status !== undefined
-          ? `GitHub connectivity check: HTTP ${r.status}`
-          : `GitHub connectivity check failed: ${r.detail ?? 'unknown'}`,
-      );
-    }
   }
 
   printTrackerNextSteps(next.tracker.type);
@@ -236,8 +199,7 @@ function printTrackerNextSteps(type: string): void {
     return;
   }
   ui.info('1) Verify with `squad doctor` — tracker checks should be green.');
-  const idHint =
-    type === 'jira' ? 'JIRA-123' : type === 'github' ? 'github-issue-number' : 'azure-work-item-id';
+  const idHint = type === 'jira' ? 'JIRA-123' : 'azure-work-item-id';
   ui.info(`2) Create a story: squad new-story <feature-slug> --id <${idHint}>`);
   ui.info('   squad-kit auto-fetches the title, description, and attachments into the intake.');
   ui.info('3) Review the generated intake.md, then run `squad new-plan --api` to generate the plan.');

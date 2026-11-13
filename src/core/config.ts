@@ -17,6 +17,8 @@ export interface SquadConfig {
     type: TrackerType;
     workspace?: string;
     project?: string;
+    /** The tracker module's own settings, read and written only by it. */
+    options?: Record<string, string>;
   };
   naming: {
     includeTrackerId: boolean;

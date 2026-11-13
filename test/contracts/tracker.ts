@@ -16,6 +16,8 @@ export interface TrackerFixture {
   comments(id: string): string[];
   /** The same tracker with a sign-in the backend refuses. */
   refused: Tracker;
+  /** Its own format is Markdown: comments go in as written. */
+  keepsMarkdown?: boolean;
 }
 
 export function trackerContract(name: string, make: () => TrackerFixture): void {
@@ -68,12 +70,13 @@ export function trackerContract(name: string, make: () => TrackerFixture): void 
     });
 
     it('takes comments written in Markdown', async () => {
-      const { tracker, story, comments } = make();
+      const { tracker, story, comments, keepsMarkdown } = make();
       await tracker.comment(story, '**Plan approved**\n\n1. Given a day\n2. Then it is saved');
       const saved = comments(story);
       expect(saved).toHaveLength(1);
       expect(saved[0]).toContain('Plan approved');
-      expect(saved[0]).not.toContain('**');
+      if (keepsMarkdown) expect(saved[0]).toBe('**Plan approved**\n\n1. Given a day\n2. Then it is saved');
+      else expect(saved[0]).not.toContain('**');
     });
 
     it('files a bug when it can, and tags items when it can', async () => {

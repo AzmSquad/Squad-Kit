@@ -21,6 +21,9 @@ export interface TrackerItemRow {
   isBug: boolean;
 }
 
+/** A backlog. `more`: the tracker had more than it reads at once, and the rest is not in this list. */
+export type ItemList = TrackerItemRow[] & { more?: boolean };
+
 export interface TrackerItem extends TrackerItemRow {
   description: string;
   acceptanceCriteria: string;
@@ -105,11 +108,13 @@ export interface Tracker {
   parseRef(text: string): string | null;
   /** How people write an item id. */
   refOf(id: string): string;
+  /** The ticket's name on the board for an item (ADR-001). Optional: without it, the letters and digits of its ref. */
+  ticketName?(id: string): string;
   /** The signed-in name, as a connection check. */
   whoAmI(): Promise<string>;
   sprints(): Promise<Sprint[]>;
   /** Stories and bugs, in backlog order; a sprint's items when given its path. */
-  list(opts?: { sprint?: string; includeDone?: boolean }): Promise<TrackerItemRow[]>;
+  list(opts?: { sprint?: string; includeDone?: boolean }): Promise<ItemList>;
   get(id: string): Promise<TrackerItem>;
   /** Saves an attachment to a file and returns its path. */
   download(url: string, file: string): Promise<string>;
@@ -140,18 +145,48 @@ export interface SetupField {
   key: string;
   label: string;
   secret?: boolean;
+  /** Picked from a list: these, or the ones the module's choices() gives for the values so far. */
+  options?: SetupChoice[];
+  choice?: boolean;
+  /** A choice that may also be typed: the list only suggests. */
+  typed?: boolean;
+  /** Shown only while another field has one of these values. */
+  when?: { key: string; is: string[] };
+  placeholder?: string;
+  /** Shown under More, for the few who change it. */
+  more?: boolean;
+}
+
+export interface SetupChoice {
+  value: string;
+  label: string;
+}
+
+/** Something to do on this computer before the tracker can connect, such as a tool to install or a sign-in. */
+export interface SetupStep {
+  say: string;
+  command?: string;
+  link?: string;
 }
 
 export interface TrackerModule {
   name: string;
   label: string;
+  /** One or two plain sentences for the Settings page: where stories come from, and where the sign-in is kept. */
+  about?: string;
+  /** A short line beside Save, such as the rights a token needs. */
+  hint?: string;
   fields: SetupField[];
   /** The tracker for a project folder, or null when it is not set up or has no sign-in saved. */
   open(root: string): Tracker | null;
-  /** What is saved now (secrets only say whether they are there). */
-  read(root: string): { values: Record<string, string>; hasSecret: boolean };
-  /** Saves the settings; secrets left empty keep the saved ones. */
-  save(root: string, values: Record<string, string | undefined>): void;
+  /** What is saved now (secrets only say whether they are there), and one plain line about it for Settings. */
+  read(root: string): { values: Record<string, string>; hasSecret: boolean; note?: string };
+  /** Saves the settings; secrets left empty keep the saved ones. It may check them with the tracker first. */
+  save(root: string, values: Record<string, string | undefined>): void | Promise<void>;
   /** Settings read from a git remote that lives on this product, for a project not set up yet. */
   guess(remoteUrl: string): Record<string, string> | null;
+  /** What this computer still needs before it can connect, for these values. Optional: none. */
+  setupSteps?(values: Record<string, string>): Promise<SetupStep[]>;
+  /** The lists its choice fields pick from, for the values chosen so far. */
+  choices?(values: Record<string, string>): Promise<Record<string, SetupChoice[]>>;
 }

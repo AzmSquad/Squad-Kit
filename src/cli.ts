@@ -65,14 +65,7 @@ import {
 } from './commands/board.js';
 import { runGuardAllow, runHosts, runNetwork } from './commands/sandbox.js';
 import { runEnvFile } from './commands/env-file.js';
-import {
-  runConfigShow,
-  runConfigSetPlanner,
-  runConfigSetTracker,
-  runConfigUnsetPlanner,
-  runConfigUnsetTracker,
-  runConfigRemoveCredential,
-} from './commands/config/index.js';
+import { runConfigShow, runConfigSetPlanner, runConfigSetTracker, runConfigUnsetPlanner, runConfigUnsetTracker, runConfigRemoveCredential } from './commands/config/index.js';
 import { runRmFeature, runRmPlan, runRmStory } from './commands/rm/index.js';
 import { runArchive, runDelete } from './commands/delete.js';
 import { runBranches, runBringIn, runBuild, runCheckMerge, runDepends } from './commands/depends.js';
@@ -791,6 +784,7 @@ set
   .command('tracker')
   .description('Set or change the tracker type, workspace, and credentials')
   .option('--type <name>', 'Skip the tracker-type prompt (none|jira|azure|github)')
+  .option('--field <key=value...>', "The tracker's own settings, like --field repo=owner/name from=project board=2 (see Settings)")
   .option('-y, --yes', 'Fail fast instead of prompting for missing values', false)
   .action(wrap(runConfigSetTracker));
 set

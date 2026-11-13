@@ -221,10 +221,13 @@ export class AzureTracker implements Tracker {
 export const azureTracker: TrackerModule = {
   name: 'azure',
   label: 'Azure DevOps',
+  about:
+    'Stories and bugs come from Azure Boards. squad-kit moves them along as the squad works, opens a pull request for each finished ticket, and merges it when you release. Your token stays on this computer.',
+  hint: 'Token scopes: Work Items and Code (read, write and manage).',
   fields: [
-    { key: 'organization', label: 'Organization' },
-    { key: 'project', label: 'Project' },
-    { key: 'token', label: 'Personal access token', secret: true },
+    { key: 'organization', label: 'Organization', placeholder: 'e.g. momenysr' },
+    { key: 'project', label: 'Project', placeholder: 'e.g. Mawid' },
+    { key: 'token', label: 'Token', secret: true, placeholder: 'Personal access token from Azure DevOps' },
   ],
   open(root) {
     const az = azureForProject(root);
@@ -245,7 +248,9 @@ export const azureTracker: TrackerModule = {
     if (!organization || !project) throw new Error('Enter the Azure organization and project.');
     const paths = buildPaths(root);
     const config = loadConfig(paths.configFile);
-    saveConfig(paths.configFile, { ...config, tracker: { ...config.tracker, type: 'azure', workspace: organization, project } });
+    // Another tracker's own settings go with it.
+    const kept = config.tracker.type === 'azure' && config.tracker.options ? { options: config.tracker.options } : {};
+    saveConfig(paths.configFile, { ...config, tracker: { type: 'azure', workspace: organization, project, ...kept } });
     const secrets = loadSecrets(paths.secretsFile);
     saveSecrets(paths.secretsFile, mergeSecrets(secrets, { tracker: { azure: { organization, project, pat: values.token?.trim() || undefined } } }));
   },

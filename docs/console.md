@@ -100,8 +100,8 @@ On the board:
   on this project, and a step bar. A ticket over the limit of tickets at once says "Next in line: starts when a
   slot is free". A slow step says "Taking longer than usual".
 - **All tickets**, **Mine** and **Bugs** filter the cards. **Search tickets** finds one.
-- **New ticket** writes a ticket in plain words. **Pull from Azure DevOps** brings in a work item (or
-  **Connect a tracker**, when there is none). Under the track (Full or Express), **Write new tests** is on by default.
+- **New ticket** writes a ticket in plain words. **Pull from** your tracker (Azure DevOps or GitHub) brings in an item
+  (or **Connect a tracker**, when there is none). Under the track (Full or Express), **Write new tests** is on by default.
   Turn it off for a demo, a small text or colour change, or a project with no tests yet: the plan and the Builder add no
   new tests and the Reviewer does not ask for them, while squad-kit still runs your project's own checks (tests, lint,
   build), the review and the proof, so a break of what already works still shows. The story then says **Built without new
@@ -639,13 +639,14 @@ REST (under `/p/<project>/api/v1`):
 
 Upload a requirements document (a BRD) and the Analyst breaks it into epics, features and stories. You review it
 as a **tree** (the main view, with a side panel to edit each part) or a **map** (boxes and lines, for presenting),
-approve it, send it to Azure DevOps if you like, and press **Build continuously**. A breakdown waiting for your
-answers shows in **Waiting for you** and in the sidebar's count. The whole flow is in
+approve it, send it to your tracker (Azure DevOps or GitHub) if you like, and press **Build continuously**. A breakdown
+waiting for your answers shows in **Waiting for you** and in the sidebar's count. The whole flow is in
 [From a BRD to a built product](requirements.md).
 
 ## Other pages
 
-- **Backlog**: your tracker's sprint, in backlog order. **Start** puts an item on the board.
+- **Backlog**: your tracker's sprint, in backlog order (a GitHub Project's own order, or the newest issues first).
+  **Start** puts an item on the board.
 - **Waiting for you**: this project's cards, all of them.
 - **Releases**: the next release, ready to read and release, and every past release with its notes and the
   bugs found after it. A release whose push was refused says why in plain words. **It reached it another way** closes
@@ -1053,6 +1054,35 @@ Terminal: `squad config set quality best`, `squad agent builder`, `squad agent b
 - **Desktop notices**: on or off, for this browser. **Turn on** says at once that the browser is asking; if the
   browser doesn't answer, it says how to allow notices for the page (and, on a Mac, in System Settings ›
   Notifications). When they are on, it sends one test notice.
+- **Tracker**: where stories come from. Pick **Azure DevOps** or **GitHub**, fill in what it asks, then **Save and
+  check**: squad-kit checks the settings with the tracker before it saves them, and the Status row says who is signed in.
+  - **Azure DevOps**: organization, project and a token, which stays on this computer.
+  - **GitHub**: squad-kit signs in with GitHub's own tool, `gh`, and keeps no token. When gh is missing or not signed in,
+    the steps show above the settings: install GitHub's tool (cli.github.com), `gh auth login`, and for a Project
+    `gh auth refresh -s project` (Issues alone never need that right). Pick the **Repository** (your project's own, from
+    its git remote, at first) and where the stories come from: **Issues**, with any **Labels** (all of them) and
+    **Assigned to** (a login, or `@me`), or **A Project**, picked from the owner's open Projects or typed as its number
+    or address (one under another owner too), with an optional **View** (its filter picks the stories) or **Only with
+    Status**. Under **More**: the Status for each of squad-kit's steps (Not started, In progress, Merged, Released),
+    the one that fits its name best unless you pick another, and **Stories from anyone**. It is off: only issues
+    written by the repo's owner, the organization's members and its collaborators reach the squad, so a stranger's
+    issue on a public repo never steers the agents.
+    Issues show as `#40`, or `owner/repo#40` for another repo's issue on the board, and become tickets named `GH-40`.
+    Labels are tags; the `bug` label or the Bug issue type makes a bug; a Project's iteration field gives the sprints
+    (the Backlog opens on the one running now, else the next, else the newest), and its Priority (first option highest)
+    and Points fields are read. Parents come from sub-issues, and what a story needs from "blocked by". On a board an
+    item only moves forward; merged and released also close the issue. Questions, answers, plans and pull request links
+    are comments on the issue, and a reported bug becomes an issue with the bug label. **Send to GitHub** on a breakdown
+    makes epics, features and stories as issues (the organization's issue types when it has them, else the labels
+    `epic`, `feature`, `story`), with sub-issues and "blocked by" links. GitHub has no wiki for squad-kit to read. The
+    Backlog reads at most 500 items at once and says so when there are more: a sprint, a view or a Status narrows it.
+  - **Set up before 1.3.21?** A project that had GitHub as its tracker before only reads it: pulling works, but no
+    move, comment, bug or breakdown goes to GitHub until you press **Save and check** once (or run the command below).
+    Settings says "Connect again to let squad-kit update GitHub." The updates wait meanwhile and go once you connect.
+  - Terminal: `squad config set tracker` asks for each setting;
+    `squad config set tracker --type github --field repo=owner/name from=project board=2` sets them at once
+    (also `labels=`, `assignee=`, `view=`, `status=`, `anyone=yes`, and `stage-in-progress=` and so on for the Status
+    of each step). `squad doctor` checks the same sign-in: gh found, signed in, and the Projects right for a Project.
 - **How you pay for Claude**: squad-kit finds out (subscription or API key); change it here if it is wrong. With an
   API key: a budget per ticket and per month. Terminal: `squad config set payment`, `squad config set budget`.
 - **Also read** and **Also write**, for engineers, where the guard runs: files or folders outside its copy that the

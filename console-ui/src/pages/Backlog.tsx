@@ -3,13 +3,13 @@ import { Link } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { Bug, ExternalLink, Play, Plug } from 'lucide-react';
 import { api } from '../api/client';
-import type { BacklogResponse, WorkItemRow } from '../api/types';
+import type { BacklogResponse, TrackerStatus, WorkItemRow } from '../api/types';
 import { useAct } from '../lib/data';
 import { isolated, langProps } from '../lib/lang';
 import { shellQuote } from '../lib/text';
 import { Cmd, STAGE_NAME, Written } from '../components/ui';
 
-/** The sprint's stories and bugs from Azure Boards. Starting one makes it a ticket the squad works on. */
+/** The sprint's stories and bugs from the project's tracker. Starting one makes it a ticket the squad works on. */
 export function BacklogPage() {
   const [sprint, setSprint] = useState<string | undefined>(undefined);
   const backlog = useQuery({
@@ -18,6 +18,7 @@ export function BacklogPage() {
     refetchInterval: 15_000,
   });
   const data = backlog.data;
+  const label = useQuery({ queryKey: ['tracker'], queryFn: () => api<TrackerStatus>('/api/v1/tracker') }).data?.label ?? 'the tracker';
   const chosen = sprint ?? data?.sprint;
   const sprintName = data?.sprints.find((s) => s.path === chosen)?.name;
   return (
@@ -41,14 +42,14 @@ export function BacklogPage() {
       <div className="scroll">
         <div className="page">
           {backlog.isLoading ? (
-            <p className="note">Reading the backlog from Azure…</p>
+            <p className="note">Reading the backlog from {label}…</p>
           ) : !data?.connected ? (
             <div className="calm">
               <span className="ring"><Plug size={18} /></span>
               <div>
-                <b>Connect Azure DevOps</b>
+                <b>Connect a tracker</b>
                 <span>
-                  {data?.error ?? 'Add your Azure organization, project and token, and your stories and bugs show up here.'}{' '}
+                  {data?.error ?? 'Connect your tracker in Settings, and your stories and bugs show up here.'}{' '}
                   <Link to="/settings" style={{ fontWeight: 600 }}>Open Settings</Link>
                 </span>
               </div>
@@ -60,7 +61,8 @@ export function BacklogPage() {
           ) : (
             <>
               <p className="note" style={{ marginBottom: 12 }}>
-                {data.items.length} open {data.items.length === 1 ? 'item' : 'items'} in {sprintName ?? 'the backlog'}, in backlog order. Start one and the squad picks it up; Azure follows along.
+                {data.items.length} open {data.items.length === 1 ? 'item' : 'items'} in {sprintName ?? 'the backlog'}, in backlog order. Start one and the squad picks it up; {label} follows along.
+                {data.capped && ' There are more: only the first 500 are shown. Pick a sprint here, or a view or Status in Settings, to see the rest.'}
               </p>
               <table className="table">
                 <thead>
@@ -68,7 +70,7 @@ export function BacklogPage() {
                     <th style={{ width: 80 }}>ID</th>
                     <th>Title</th>
                     <th style={{ width: 70 }}>Points</th>
-                    <th style={{ width: 100 }}>On Azure</th>
+                    <th style={{ width: 100 }}>On {label}</th>
                     <th style={{ width: 260 }}>squad-kit</th>
                   </tr>
                 </thead>
@@ -92,12 +94,12 @@ function Row({ w }: { w: WorkItemRow }) {
     <tr>
       <td className="mono">
         <a href={w.url} target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-          {w.id} <ExternalLink size={11} />
+          {w.ref} <ExternalLink size={11} />
         </a>
       </td>
       <td {...langProps(w.title)}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-          {w.type === 'Bug' && <span className="pill bug" style={{ padding: '2px 8px' }}><Bug size={12} /> Bug</span>}
+          {w.isBug && <span className="pill bug" style={{ padding: '2px 8px' }}><Bug size={12} /> Bug</span>}
           <Written style={{ fontWeight: 600 }} text={w.title} />
         </span>
       </td>
@@ -112,7 +114,7 @@ function Row({ w }: { w: WorkItemRow }) {
           <button
             className="btn sm pri"
             disabled={act.isPending}
-            onClick={() => act.mutate({ path: `/api/v1/backlog/${w.id}/start`, done: `${w.ref} is on the board. The Analyst is reading it.` })}
+            onClick={() => act.mutate({ path: `/api/v1/backlog/${encodeURIComponent(w.id)}/start`, done: `${w.ref} is on the board. The Analyst is reading it.` })}
           >
             <Play size={13} /> Start
           </button>

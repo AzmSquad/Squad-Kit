@@ -294,7 +294,7 @@ export async function startFromTracker(bp: BoardPaths, tracker: Tracker, ref: st
   await syncWiki(bp, tracker);
   const ticket = createTicket(bp, {
     // Named by the tracker (ADR-001), so two people pulling different items never make the same name.
-    id: w.ref.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').toUpperCase(),
+    id: tracker.ticketName?.(w.id) ?? w.ref.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').toUpperCase(),
     title: w.title,
     ask: ask || w.title,
     priority: w.priority === 1 ? 'high' : w.priority === 4 ? 'low' : 'normal',

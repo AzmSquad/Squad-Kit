@@ -13,7 +13,7 @@
     "POST /api/v1/apps/:name/stop": "squad app stop [name]",
     "POST /api/v1/apps/:name/restart": "squad app restart [name]",
     "PUT /api/v1/apps/:name/commands": "squad app set [name] --start <command>",
-    "PUT /api/v1/tracker": "squad config set tracker",
+    "PUT /api/v1/tracker": ["squad config set tracker", "squad config set tracker --type <name> --field <key=value...>"],
     "POST /api/v1/backlog/:id/start": "squad pull <ref>",
     "POST /api/v1/pull": "squad pull <ref>",
     "POST /api/v1/tickets/:id/status/ask": "squad ask <ticket> <question...>",

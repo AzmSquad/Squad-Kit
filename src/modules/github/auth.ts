@@ -2,14 +2,15 @@ import { execFile } from 'node:child_process';
 import { ModuleError, kindOfStatus } from '../errors.js';
 
 /**
- * GitHub's sign-in for squad-kit: GitHub's own tool, gh, signed in by the person. squad-kit asks it for the token on
- * each call and keeps none. The pull request and tracker modules both call GitHub through here.
+ * GitHub's sign-in for squad-kit: GitHub's own tool, gh, signed in by the person. squad-kit asks gh for the token each
+ * time it calls GitHub and keeps none. REST and GraphQL calls go through here; a file download and the sign-in check
+ * take the token from githubToken().
  */
 
 const API = 'https://api.github.com';
 
 /** The token gh holds for github.com, or null when gh is missing or not signed in. */
-function githubToken(): Promise<string | null> {
+export function githubToken(): Promise<string | null> {
   return new Promise((resolve) => {
     execFile('gh', ['auth', 'token', '--hostname', 'github.com'], { timeout: 10_000 }, (err, out) => {
       const token = String(out ?? '').trim();

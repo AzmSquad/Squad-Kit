@@ -3,12 +3,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { HostSignIn } from '../code-host/types.js';
-import { githubApi } from './auth.js';
+import type { SetupStep } from '../tracker/types.js';
+import { githubApi, githubToken } from './auth.js';
 
 /**
  * Whether GitHub's own tool, gh, is on this computer and signed in. gh itself is asked beside everything else, never
  * holding the board up: only its exit code is read, and what it prints (the token) goes nowhere. Its answer is kept a
  * minute. Until it has answered, a quick guess from files stands in: gh on the PATH, and github.com in its hosts file.
+ * The pull request part and the tracker's Settings steps both read it from here.
  */
 
 type GhState = HostSignIn['state'];
@@ -115,4 +117,40 @@ export async function ghSignIn(): Promise<HostSignIn> {
     return { state: 'signed-out', steps: GH_STEPS['signed-out'], link: GH_PAGE };
   }
   return { state, account: login, steps: [], link: GH_PAGE };
+}
+
+/* ── The tracker's Settings steps ─────────────────────────────── */
+
+/** What the tracker's steps read: gh's own answer, and the rights its token has (null when GitHub does not say). */
+export interface SignInProbe {
+  state(): Promise<GhState>;
+  scopes(): Promise<string[] | null>;
+}
+
+export const realProbe: SignInProbe = {
+  state: () => checkGh(),
+  async scopes() {
+    const token = await githubToken();
+    if (!token) return null;
+    try {
+      const res = await fetch('https://api.github.com/user', { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' } });
+      const said = res.headers.get('x-oauth-scopes');
+      return said === null ? null : said.split(',').map((s) => s.trim()).filter(Boolean);
+    } catch {
+      return null;
+    }
+  },
+};
+
+const PROJECTS: SetupStep = { say: 'Let it use Projects', command: 'gh auth refresh -s project' };
+
+/** The steps Settings and squad doctor show: install gh, sign in, and for a Project let gh use Projects. */
+export async function signInSteps(forProject: boolean, probe: SignInProbe = realProbe): Promise<SetupStep[]> {
+  const project = forProject ? [PROJECTS] : [];
+  const state = await probe.state();
+  if (state === 'missing') return [{ say: "Install GitHub's tool, gh", link: GH_PAGE }, { say: 'Sign in with it', command: 'gh auth login' }, ...project];
+  if (state === 'signed-out') return [{ say: "Sign in with GitHub's tool", command: 'gh auth login' }, ...project];
+  if (!forProject) return [];
+  const scopes = await probe.scopes();
+  return scopes && !scopes.includes('project') ? project : [];
 }

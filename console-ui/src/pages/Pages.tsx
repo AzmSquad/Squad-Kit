@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { TrackerStatus } from '../api/types';
 import { Bug, Check, RotateCcw } from 'lucide-react';
 import type { ProjectCommands, RepoInfo } from '../api/types';
 import { useAct, useAppSettings, useBoard } from '../lib/data';
@@ -16,6 +15,7 @@ import { GuardAllows } from '../components/Sandbox';
 import { PartsSettings } from '../components/Parts';
 import { ProjectFiles } from '../components/ProjectFiles';
 import { DatabaseSettings } from '../components/Database';
+import { TrackerSettings } from '../components/TrackerSettings';
 import { Cmd, CouldNotLoad, Modal, Runs, STAGE_NAME, Written, actionLabel, ago, commandFor, outdatedLine } from '../components/ui';
 import { changeWaits, openChange } from '../components/ChangeCard';
 import { NoticeSetting } from '../components/Waiting';
@@ -292,76 +292,6 @@ function StartNote({ repo, command }: { repo: string; command?: string }) {
   ) : null;
 }
 
-/** Where stories come from and where PRs go. The token stays on this computer, never in .squad. */
-function AzureSettings() {
-  const act = useAct();
-  const status = useQuery({ queryKey: ['tracker'], queryFn: () => api<TrackerStatus>('/api/v1/tracker'), refetchInterval: 60_000 });
-  const [form, setForm] = useState<{ organization: string; project: string; token: string } | null>(null);
-  const s = status.data;
-  const current = form ?? { organization: s?.organization ?? '', project: s?.project ?? '', token: '' };
-  const connected = s?.type === 'azure' && s.user;
-  return (
-    <div style={{ marginBottom: 26 }}>
-      <h2 style={{ marginTop: 6 }}>Azure DevOps</h2>
-      <p className="note" style={{ margin: '2px 0 10px' }}>
-        Stories and bugs come from Azure Boards. squad-kit moves them along as the squad works, opens a pull request for each finished ticket, and
-        merges it when you release. Your token stays on this computer.
-      </p>
-      {s && (
-        <div className="maprow" style={{ alignItems: 'center' }}>
-          <b>Status</b>
-          <span>
-            {connected ? (
-              <span className="pill ok">Connected as {s.user}</span>
-            ) : s.type === 'azure' ? (
-              <span className="pill bug">{s.error ?? (s.hasToken ? 'Not connected' : 'Needs a token')}</span>
-            ) : (
-              <span className="pill wait">Not set up</span>
-            )}
-          </span>
-        </div>
-      )}
-      <div className="maprow" style={{ alignItems: 'center' }}>
-        <b>Organization</b>
-        <input className="input mono" style={{ fontSize: 13 }} value={current.organization} placeholder="e.g. momenysr" onChange={(e) => setForm({ ...current, organization: e.target.value })} />
-      </div>
-      <div className="maprow" style={{ alignItems: 'center' }}>
-        <b>Project</b>
-        <input className="input mono" style={{ fontSize: 13 }} value={current.project} placeholder="e.g. Mawid" onChange={(e) => setForm({ ...current, project: e.target.value })} />
-      </div>
-      <div className="maprow" style={{ alignItems: 'center' }}>
-        <b>Token</b>
-        <input
-          className="input mono"
-          style={{ fontSize: 13 }}
-          type="password"
-          autoComplete="off"
-          value={current.token}
-          placeholder={s?.hasToken ? 'Saved. Paste a new one to replace it' : 'Personal access token from Azure DevOps'}
-          onChange={(e) => setForm({ ...current, token: e.target.value })}
-        />
-      </div>
-      <div style={{ marginTop: 12, display: 'flex', gap: 10, alignItems: 'center' }}>
-        <button
-          className="btn pri sm"
-          disabled={!form || act.isPending}
-          onClick={() =>
-            act.mutate(
-              { path: '/api/v1/tracker', method: 'PUT', body: current, done: 'Azure DevOps is connected' },
-              { onSuccess: () => { setForm(null); void status.refetch(); } },
-            )
-          }
-        >
-          {act.isPending ? 'Checking…' : 'Save and check'}
-        </button>
-        <span className="note">Token scopes: Work Items and Code (read, write and manage).</span>
-        <span className="grow" />
-        <Cmd text="squad config set tracker" />
-      </div>
-    </div>
-  );
-}
-
 /** Voice and video notes need speech to text. The key stays in .squad/secrets.yaml on this computer. */
 export function SpeechSettings() {
   const act = useAct<{ unchecked?: boolean }>();
@@ -636,7 +566,7 @@ export function SettingsPage() {
           {meta?.engine === 'live' && <ParallelSetting />}
           {meta?.engine === 'live' && <RunnerSetting />}
           {meta?.engine === 'live' && <GuardAllows />}
-          {meta?.engine === 'live' && <AzureSettings />}
+          {meta?.engine === 'live' && <TrackerSettings />}
           {meta?.engine === 'live' && <SpeechSettings />}
           {meta?.engine === 'live' && <ProjectSettings />}
           {meta?.engine === 'demo' && (

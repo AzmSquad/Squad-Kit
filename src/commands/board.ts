@@ -65,29 +65,14 @@ import { demoFolder, seedDemoBoard } from '../board/demo.js';
 import { repoFor } from '../engine/repos.js';
 import { projectApps } from '../board/apps.js';
 import { trackerFor } from '../modules/registry.js';
+import { sprintToShow } from '../modules/tracker/sprints.js';
 import { openInEditor, ticketChanges } from '../engine/changes.js';
 import { AGENTS, STEPS, readAgent, writeAgent, type AgentRole } from '../engine/agents.js';
 import { corePrompts } from '../engine/core-prompts.js';
 import { draftTicket } from '../engine/draft.js';
 import { createSized } from '../board/split.js';
 import { chooseDraftSize, newToRequirements } from './split.js';
-import {
-  boardExists,
-  brokenDecisions,
-  brokenReleases,
-  brokenTickets,
-  boardPaths,
-  draftRelease,
-  listReleases,
-  readRelease,
-  listTickets,
-  readMeta,
-  readTicket,
-  requireTicket,
-  settingsProblem,
-  writeMeta,
-  type BoardPaths,
-} from '../board/store.js';
+import { boardExists, brokenDecisions, brokenReleases, brokenTickets, boardPaths, draftRelease, listReleases, readRelease, listTickets, readMeta, readTicket, requireTicket, settingsProblem, writeMeta, type BoardPaths } from '../board/store.js';
 import { DEFAULT_QUALITY, QUALITIES, QUALITY_NOTE, parseQuality } from '../engine/levels.js';
 import { NO_NEW_TESTS_LABEL, type AgentName, type PlanPart, type Stage, type Ticket, type UsageLine, type UsageTotal } from '../board/types.js';
 import { boardUsage, byRole, costWords, stepWords, tokenWords, totalOf } from '../board/usage.js';
@@ -1232,12 +1217,12 @@ export async function runBacklog(opts: { sprint?: string; all?: boolean }): Prom
   if (!tracker) throw new Error('No tracker is set up for this project. Run: squad config set tracker');
   const sprints = tracker.abilities.sprints ? await tracker.sprints() : [];
   const wanted = opts.sprint?.toLowerCase();
-  const sprint = opts.all ? undefined : wanted ? sprints.find((s) => s.name.toLowerCase() === wanted || s.path.toLowerCase() === wanted) : sprints.find((s) => s.current) ?? sprints[0];
+  const sprint = opts.all ? undefined : wanted ? sprints.find((s) => s.name.toLowerCase() === wanted || s.path.toLowerCase() === wanted) : (sprintToShow(sprints) ?? undefined);
   if (wanted && !sprint) throw new Error(`No sprint called "${opts.sprint}". Sprints: ${sprints.map((s) => s.name).join(', ')}`);
   const items = await tracker.list(sprint ? { sprint: sprint.path } : {});
   const tickets = listTickets(bp).filter((t) => t.source.type === tracker.name);
   out();
-  out(`  ${kleur.bold('Backlog')} ${kleur.gray(`${sprint ? sprint.name : 'everything open'} · ${items.length} open`)}`);
+  out(`  ${kleur.bold('Backlog')} ${kleur.gray(`${sprint ? sprint.name : 'everything open'} · ${items.length} open${items.more ? ` · only the first ${items.length} shown` : ''}`)}`);
   out();
   const w = Math.min(60, Math.max(10, ...items.map((i) => i.title.length)));
   for (const i of items) {

@@ -25,6 +25,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   my copy makes your fork), up to date with squad-kit (Bring it up to date, only ever forward), the rules the checks
   hold, and Tell the maintainers first for a big idea, as a filled-in page you send yourself.
 - **GitHub's tool on the Tools page**, Recommended for a project kept on GitHub, with the steps to install it and sign in.
+- **GitHub as a tracker.** Stories and bugs can come from a repo's Issues (with the labels and the assignee you pick)
+  or from a GitHub Project, with an optional view or Status. Pull `#40`, or `owner/repo#40` for another repo's issue on
+  the board; it becomes ticket `GH-40`. Labels are tags, the `bug` label or the Bug issue type makes a bug, a Project's
+  iteration field gives the sprints, and its Priority and Points fields are read. Parents come from sub-issues, and
+  what a story needs from "blocked by". Uploads in the issue come with it.
+- **The squad keeps the issue up to date.** On a Project, each step moves the Status that fits it best (you can pick
+  another in Settings), only forward; merged and released close the issue. Questions, answers, the plan and the pull
+  request link are comments on the issue, and a release adds its version as a label. A bug you report becomes an issue
+  with the bug label.
+- **Send a breakdown to GitHub:** epics, features and stories as issues (your organization's issue types when it has
+  them, else the labels `epic`, `feature`, `story`), each under its parent as a sub-issue, with "blocked by" for the
+  order.
+- **Connect it in Settings, no token to paste.** The tracker part of Settings now has a choice: Azure DevOps or GitHub.
+  GitHub signs in with GitHub's own tool, `gh`; when it is missing or not signed in, Settings shows the steps
+  (install it, `gh auth login`, and `gh auth refresh -s project` for a Project). Pick the repository and Issues or a
+  Project from lists. Terminal: `squad config set tracker --type github --field repo=owner/name from=project board=2`.
+- **The Pull dialog and the Backlog page name your tracker,** and how its items are written.
+- **Only your team's issues reach the squad.** Issues written by the repo's owner, the organization's members and
+  collaborators; a stranger's issue on a public repo never steers the agents. **Stories from anyone** under More turns
+  that off.
+- **A project set up with GitHub before only reads it** until you press Save and check once: pulling works, and the
+  moves, comments and bugs wait until then. Settings says so in one line.
+- **The Backlog opens on the sprint running now,** else the next one, else the newest, never an old finished one. It
+  reads at most 500 items and says so when there are more.
+- **`squad doctor` checks GitHub's sign-in** the way Settings does: gh found, signed in, and the Projects right for a
+  Project, with the same steps.
 
 ## [1.3.20] — 2026-11-13
 

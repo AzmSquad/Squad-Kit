@@ -22,8 +22,8 @@ import {
   fetchProviderModelIds,
   probeJiraConnectivity,
   probeAzureConnectivity,
-  probeGitHubConnectivity,
 } from '../core/probes.js';
+import { selfSignedTracker, trackerReachCheck, trackerSignInCheck } from './doctor-tracker.js';
 import { readLastRun } from '../core/last-run.js';
 import { formatTokenK } from '../ui/planner-cache-summary.js';
 import { GIT_UPDATE, MIN_GIT, gitIsNewEnough, gitVersion } from '../engine/git.js';
@@ -864,13 +864,15 @@ function formatClientError(err: ClientResolutionError): string {
   return `${err.message} ${err.detail}`.trim();
 }
 
-async function checkTrackerCredential(_paths: SquadPaths, ctx: DoctorContext): Promise<CheckResult> {
+async function checkTrackerCredential(paths: SquadPaths, ctx: DoctorContext): Promise<CheckResult> {
   if (!ctx.config) {
     return { id: 'tracker-cred', name: 'tracker credential resolves', status: 'skip', detail: 'config unavailable' };
   }
   if (ctx.config.tracker.type === 'none') {
     return { id: 'tracker-cred', name: 'tracker credential resolves', status: 'skip', detail: 'none' };
   }
+  const own = selfSignedTracker(ctx.config);
+  if (own) return trackerSignInCheck(paths.root, own);
   const secrets = ctx.secrets ?? {};
   const overlay = overlayTrackerEnv(secrets);
   const { client, error } = clientFor(ctx.config, overlay);
@@ -897,6 +899,8 @@ async function checkTrackerConnectivity(paths: SquadPaths, ctx: DoctorContext): 
   if (!ctx.config || ctx.config.tracker.type === 'none') {
     return { id: 'tracker-live', name: 'tracker connectivity', status: 'skip', detail: 'none' };
   }
+  const own = selfSignedTracker(ctx.config);
+  if (own) return trackerReachCheck(paths.root, own);
   const secrets = ctx.secrets ?? {};
   const overlay = overlayTrackerEnv(secrets);
   const { client, error } = clientFor(ctx.config, overlay);
@@ -916,16 +920,6 @@ async function checkTrackerConnectivity(paths: SquadPaths, ctx: DoctorContext): 
   if (client.name === 'azure') {
     const r = await probeAzureConnectivity(secrets, ctx.config);
     if (r.ok) return { id: 'tracker-live', name: 'tracker connectivity', status: 'ok', detail: 'Azure DevOps' };
-    return {
-      id: 'tracker-live',
-      name: 'tracker connectivity',
-      status: 'fail',
-      detail: r.status !== undefined ? `HTTP ${r.status}` : r.detail ?? 'request failed',
-    };
-  }
-  if (client.name === 'github') {
-    const r = await probeGitHubConnectivity(secrets, ctx.config);
-    if (r.ok) return { id: 'tracker-live', name: 'tracker connectivity', status: 'ok', detail: 'GitHub REST' };
     return {
       id: 'tracker-live',
       name: 'tracker connectivity',

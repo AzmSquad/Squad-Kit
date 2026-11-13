@@ -70,10 +70,10 @@ import { seedDemoBoard } from '../../board/demo.js';
 import type { AgentName, PlanComment, PlanEdit, Ticket } from '../../board/types.js';
 import { repoFor, reposOf } from '../../engine/repos.js';
 import type { ProjectCommands, Release } from '../../board/types.js';
-import { aiTool, guessTracker, speechModule, trackerFor, trackerModule, TRACKERS } from '../../modules/registry.js';
+import { aiTool, speechModule, trackerFor, trackerModule, TRACKERS } from '../../modules/registry.js';
+import { sprintToShow } from '../../modules/tracker/sprints.js';
+import { trackerForm } from './tracker-form.js';
 import type { Tracker } from '../../modules/tracker/types.js';
-import { findNestedRepos } from '../../engine/repos.js';
-import { git } from '../../engine/git.js';
 import { allowedFile, chatSummaries, dispositionOf, mimeOf, readConversation, ticketConversations, ticketFolders } from '../../engine/conversations.js';
 import { buildStamp } from '../../board/console-info.js';
 import { mountMockupApi } from './mockup.js';
@@ -158,17 +158,11 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
 
   app.get('/api/v1/tracker', async (c) => {
     const config = fs.existsSync(opts.paths.configFile) ? loadConfig(opts.paths.configFile) : null;
-    const root = path.dirname(opts.paths.squadDir);
     const type = config?.tracker.type ?? 'none';
-    const mod = trackerModule(type);
-    const status = mod ? await trackerStatus() : { user: undefined, error: undefined };
-    // Not set up yet: a repo whose remote lives on a tracker's product already says which settings to use.
-    const dirs = [root, ...findNestedRepos(root).map((r) => path.join(root, r.path))];
-    const guessed = guessTracker(dirs.map((d) => git(d, ['config', '--get', 'remote.origin.url'], { allowFail: true })));
-    const saved = mod ? mod.read(root) : { values: {}, hasSecret: false };
-    const fieldsOf = mod ?? guessed?.module ?? TRACKERS[0]!;
-    const values = Object.fromEntries(fieldsOf.fields.filter((f) => !f.secret).map((f) => [f.key, saved.values[f.key] || guessed?.values[f.key] || '']));
-    return c.json({ type, module: fieldsOf.name, label: fieldsOf.label, fields: fieldsOf.fields, ...values, hasToken: saved.hasSecret, user: status.user, error: status.error });
+    const status = trackerModule(type) ? await trackerStatus() : { tracker: null, user: undefined, error: undefined };
+    const form = await trackerForm(path.dirname(opts.paths.squadDir), type, c.req.query('module'));
+    // The values stay at the top as well, where the board read them before.
+    return c.json({ type, ...form, ...form.values, user: status.user, error: status.error, example: status.tracker?.refOf('40') });
   });
 
   // The person's own sign-in for their own project, saved on this computer (never in .squad or git).
@@ -177,7 +171,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     return act(c, async () => {
       const config = loadConfig(opts.paths.configFile);
       const mod = trackerModule(b.module ?? config.tracker.type) ?? TRACKERS[0]!;
-      mod.save(path.dirname(opts.paths.squadDir), b);
+      await mod.save(path.dirname(opts.paths.squadDir), b);
       connection = null;
       const status = await trackerStatus();
       if (status.error) throw new Error(status.error);
@@ -213,7 +207,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     try {
       const sprints = tracker.abilities.sprints ? await tracker.sprints() : [];
       const asked = c.req.query('sprint');
-      const sprint = asked === 'all' ? null : (sprints.find((s) => s.path === asked) ?? sprints.find((s) => s.current) ?? sprints[0] ?? null);
+      const sprint = asked === 'all' ? null : (sprints.find((s) => s.path === asked) ?? sprintToShow(sprints));
       const items = await tracker.list(sprint ? { sprint: sprint.path } : {});
       const onBoard = new Map(listTickets(bp).filter((t) => t.source.type === tracker.name).map((t) => [t.source.id ?? tracker.parseRef(t.source.ref ?? ''), t]));
       return c.json({
@@ -221,6 +215,8 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
         user: status.user,
         sprints,
         sprint: sprint?.path ?? 'all',
+        // The tracker had more than it reads at once: the page says only these are shown.
+        ...(items.more ? { capped: true } : {}),
         items: items.map((w) => {
           const t = onBoard.get(w.id);
           return { ...w, ticket: t ? { id: t.id, stage: t.stage, status: t.status } : null };
