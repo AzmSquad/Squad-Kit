@@ -7,8 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.21] — 2026-11-13
+
 ### Added
 
+- **A Connections page, Sign in first.** Each outside tool has its row, with the button first and the steps folded
+  under it. **Sign in with GitHub** runs GitHub's own tool and shows its short code to type on GitHub; Cancel stops it,
+  and Disconnect asks first. When gh is missing, the steps show instead. Azure DevOps opens its Settings; Jira and Sign
+  in with Microsoft are shown as coming next. Terminal: `squad connect`, `squad connect --status`, `squad disconnect`.
+- **Contribute, for people building squad-kit with squad-kit.** On squad-kit's own code a Contribute page lists each
+  step with its button and its command: signed in, Make my copy, Bring it up to date, the rules, Tell the maintainers.
+  **Do both for me** makes the copy and brings it up to date in one press, and says plainly if one part could not.
+- **The journey bar on every page of a contribution:** Set up, Your idea, Built and checked, Pull request, Owner's
+  review, Merged, with "squad-kit knows. We stay with you until the owner merges it." `squad contribute` prints it.
+- **The pull request on the story's Now tab:** each step from Looks right to the merge, the owner's notes with Fix
+  these, Reply on GitHub and Ask the lead, Fixed in its commit for each note, and Merged by the owner, Waiting with
+  Check again, or Closed.
 - **squad-kit opens the pull request on GitHub.** With GitHub's own tool, gh, signed in on your computer, Looks right
   pushes the story's branch and opens its pull request, in your own repo or your team's fork. squad-kit merges it with a
   merge commit once GitHub allows it, deletes the branch and brings your main up to date, as on Azure Repos. While the
@@ -53,6 +67,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reads at most 500 items and says so when there are more.
 - **`squad doctor` checks GitHub's sign-in** the way Settings does: gh found, signed in, and the Projects right for a
   Project, with the same steps.
+
+### Security
+
+- **Agents never reach your GitHub sign-in.** Every agent and project command runs with GitHub's tool pointed at an
+  empty place and a stand-in that is not a token, so none of them can read the sign-in from your keychain or open,
+  merge or comment on anything. Only squad-kit itself does that, for the steps you see.
+
+### Changed
+
+- **The npm package may be up to 6 MB** (`pnpm size:guard`), up from 5 MB, so error reports keep the real function
+  names. It is about 5.05 MB today.
 
 ## [1.3.20] — 2026-11-13
 
