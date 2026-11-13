@@ -1,5 +1,7 @@
 import type { BoardMeta, ChatMessage, Decision, SpecChange, Step, Ticket } from '../../board/types.js';
 import { LOOK, PLAIN, projectContext, type PromptContext, STEP_LINE, theirLanguage, ticketContext } from './context.js';
+import { hasKinds } from '../../board/proof-rows.js';
+import { CHANGE_KINDS } from '../proof-kinds/prompts.js';
 
 /** The parts a change touches, in words for an agent: what each said and what it says now. */
 export function changeLines(c: SpecChange): string {
@@ -45,7 +47,7 @@ Write the change into the spec, as the Analyst:
 - story: the whole new story when the change touches it, else an empty string.
 - criteria: only the "done when" items that change. For each: number (its number above, or 0 for a new one), action
   ("change", "add" or "remove"), and the new given, when and then for change and add. Every change shows in the
-  spec: at least one item here, or a new story.
+  spec: at least one item here, or a new story.${hasKinds(t) ? `\n${CHANGE_KINDS}` : ''}
 - size: "small" when the approved design still holds and the Builder can fit it into the work as it is (a wording, a
   limit, one more check on a screen it builds anyway). "big" when the design must change: a new screen or page, other
   data, a new technical decision, or steps to add or redo.

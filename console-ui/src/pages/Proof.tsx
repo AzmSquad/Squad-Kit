@@ -15,6 +15,8 @@ import { AskButton } from '../components/AskQuestion';
 import { ApiProof } from '../components/ApiProof';
 import { Written } from '../components/ui';
 import { langProps } from '../lib/lang';
+import { KindBlocks } from '../components/proof/KindBlocks';
+import { hasKinds } from '../lib/proof-kinds';
 
 export function ProofPage() {
   const { id } = useParams({ from: '/tickets/$id/proof' });
@@ -56,6 +58,12 @@ export function ProofPage() {
       <NotCheckedNote g={g} className="gatebar-why" />
       <OldFailuresNote g={g} className="gatebar-why" />
       <AlsoChanged t={t} className="gatebar-why" />
+      {hasKinds(t) ? (
+        <div className="kindpage">
+          <KindBlocks t={t} />
+          {waitsAtReview(t) && <YourCheck t={t} />}
+        </div>
+      ) : (
       <div className="split proofsplit">
         <div className="critlist">
           <div className="lbl" style={{ marginTop: 0 }}>Done when · {shots.length}</div>
@@ -119,6 +127,7 @@ export function ProofPage() {
           )}
         </div>
       </div>
+      )}
       {zoom !== null && <Lightbox pictures={pictures} start={zoom} onClose={() => setZoom(null)} />}
       {waiting ? (
         <ProofDecision t={t} sticky />

@@ -6,6 +6,10 @@ import type { Ticket } from '../../api/types';
 import { proofShots, type DecideKind } from '../../lib/decide';
 import { Lightbox } from '../Lightbox';
 import { Written } from '../ui';
+import type { LineProofKind } from '../../api/proof-kind';
+import { hasKinds } from '../../lib/proof-kinds';
+import { KindChip } from '../proof/KindChip';
+import { ShortProof } from '../proof/ShortProof';
 
 /** What the person decides on: the pictures and the "done when" ticks, the spec's words, the plan's steps, the reason. */
 export function Body({ t, kind }: { t: Ticket; kind: DecideKind }) {
@@ -32,6 +36,7 @@ export function Body({ t, kind }: { t: Ticket; kind: DecideKind }) {
             <li key={p.criterion} className={p.shows && p.shows !== 'met' && p.shows !== 'off-screen' ? 'warn' : ''}>
               {p.shows && p.shows !== 'met' && p.shows !== 'off-screen' ? <CircleAlert aria-hidden="true" /> : <Check aria-hidden="true" />}
               <Written className="clamp" text={p.criterion} />
+              {hasKinds(t) && <ShortProof p={p} />}
             </li>
           ))}
           {gates && (
@@ -51,7 +56,7 @@ export function Body({ t, kind }: { t: Ticket; kind: DecideKind }) {
     return (
       <div className="db">
         {t.story && <Written as="p" className="sum" text={short(t.story, 220)} />}
-        <List items={items} />
+        <List items={items} kinds={hasKinds(t) ? (t.criteria ?? []).filter((c) => c.then).map((c) => c.proof?.kind ?? 'screen') : undefined} />
       </div>
     );
   }
@@ -73,7 +78,7 @@ export function Body({ t, kind }: { t: Ticket; kind: DecideKind }) {
   );
 }
 
-function List({ items }: { items: string[] }) {
+function List({ items, kinds }: { items: string[]; kinds?: LineProofKind[] }) {
   if (!items.length) return null;
   return (
     <ul>
@@ -81,6 +86,7 @@ function List({ items }: { items: string[] }) {
         <li key={i}>
           <Check aria-hidden="true" />
           <Written className="clamp" text={x} />
+          {kinds?.[i] && <KindChip kind={kinds[i]!} small />}
         </li>
       ))}
       {items.length > 3 && <li className="more">and {items.length - 3} more in Read it all</li>}

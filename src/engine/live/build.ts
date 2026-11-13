@@ -19,6 +19,7 @@ import { changesScreens } from '../../board/outside-step.js';
 import { BUILD_STEP_MS } from './limits.js';
 import { type AgentAsk, openStep, PassingTrouble, planKey, planStepOf, WaitingForYou } from './shared.js';
 import type { LiveSquad } from './squad.js';
+import { picturesNeeded } from '../proof-kinds/lines.js';
 
 /** The Builder's step. */
 export const buildPart = {
@@ -33,7 +34,7 @@ export const buildPart = {
     // Work already in the copy (it came with a pushed branch): no "before" screens of it, and a fresh Builder reads it.
     const sofar = t0.baseCommit ? await workSoFar(t0.worktree!, t0.baseCommit) : [];
     // On a product, "before" pictures would need the whole product running beside the build, on the same addresses.
-    if (!sofar.length && !t0.proof?.length && t0.baseCommit && rc.start && rc.url && changesScreens(t0) && !meta.scan?.empty && !runsAsProduct(meta)) {
+    if (!sofar.length && !t0.proof?.length && t0.baseCommit && rc.start && rc.url && picturesNeeded(t0, changesScreens(t0)) && !meta.scan?.empty && !runsAsProduct(meta)) {
       // Beside the build, never before it: the Builder starts now.
       this.shootBefore(id);
     }

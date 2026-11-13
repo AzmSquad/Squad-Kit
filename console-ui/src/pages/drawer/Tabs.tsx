@@ -3,6 +3,7 @@ import { AlsoChanged } from '../../components/Verdict';
 import { PlanBody } from './Plan';
 import { GatePills, ProofShots } from './Proof';
 import { RecentActivity, Steps } from './Working';
+import { proofHead } from '../../lib/proof-kinds';
 
 export function PlanTab({ t }: { t: Ticket }) {
   if (!t.story) return <div className="db"><p className="note">The plan is written after the questions are answered.</p></div>;
@@ -34,7 +35,7 @@ export function ProofTab({ t }: { t: Ticket }) {
       <div className="lbl">Gates, checked by squad-kit</div>
       <GatePills t={t} />
       <AlsoChanged t={t} />
-      <div className="lbl">Before and after</div>
+      <div className="lbl">{proofHead(t, 'Before and after')}</div>
       {t.gates.proof === 'pass' || t.proof?.some((p) => p.shows) ? <ProofShots t={t} /> : <p className="note">The screens are recorded after all checks pass.</p>}
     </div>
   );

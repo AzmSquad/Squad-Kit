@@ -23,6 +23,7 @@ import {
 } from '../proof-verdict.js';
 import { REVIEW_STEP_MS } from './limits.js';
 import type { LiveSquad } from './squad.js';
+import { hasKinds } from '../../board/proof-rows.js';
 
 /** The picture check's verdicts, and what each one sends back. */
 export const pictureCheckPart = {
@@ -30,7 +31,7 @@ export const pictureCheckPart = {
   async checkPictures(this: LiveSquad, id: string, pictures: P.PictureToCheck[]): Promise<Map<number, CheckVerdict>> {
     if (!pictures.length) return new Map();
     const t = this.update(id, (x) => {
-      x.status = 'Reviewer is checking the screenshots';
+      x.status = hasKinds(x) ? 'Reviewer is checking the proof' : 'Reviewer is checking the screenshots';
       x.live = true;
     });
     const asked = pictures.map((p) => p.criterion);

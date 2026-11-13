@@ -487,9 +487,10 @@ function playwrightFolder(dir: string, run: ToolRun): string | null {
 /**
  * The command that runs one test file (or a file at a line, for Playwright) on its own, as the Builder asks with
  * run_checks. When the test command runs two tools (Vitest, then Playwright), the file goes to the one whose tests it
- * is: Playwright's own test folder says. Null when squad-kit cannot tell, or the file is not in the copy.
+ * is: Playwright's own test folder says. With `name`, only that test of the file (a proof's test). Null when squad-kit
+ * cannot tell, or the file is not in the copy.
  */
-export function fileAlone(dir: string, testCommand: string, asked: string): { command: string; tool: TestTool } | null {
+export function fileAlone(dir: string, testCommand: string, asked: string, name?: string): { command: string; tool: TestTool } | null {
   const m = asked.trim().match(/^(.+?)(?::(\d+))?$/);
   if (!m) return null;
   const file = path.normalize(m[1]!).replace(/^\.\//, '');
@@ -503,7 +504,8 @@ export function fileAlone(dir: string, testCommand: string, asked: string): { co
   }
   const run = runs.find((r) => r.tool === tool);
   if (!run) return null;
-  const command = commandFor(dir, run, { file, ...(m[2] && run.tool === 'playwright' ? { line: Number(m[2]) } : {}) });
+  // One named test of the file, for the proof of a "done when": Playwright picks it by its line, the others by its name.
+  const command = commandFor(dir, run, { file, ...(m[2] && run.tool === 'playwright' ? { line: Number(m[2]) } : {}), ...(name && run.tool !== 'playwright' ? { name } : {}) });
   return command ? { command, tool: run.tool } : null;
 }
 

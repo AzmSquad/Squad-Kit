@@ -18,6 +18,8 @@ import { StepError } from '../../board/problem.js';
 import { folderOf, projectCopies } from '../leftovers.js';
 import type { LiveSquad } from './squad.js';
 import type { ShotRound } from './proof.js';
+import { picturesNeeded, testerTools } from '../proof-kinds/lines.js';
+import { rowsReader } from '../proof-kinds/rows-db.js';
 
 /** The app waited its whole time for the tests running in the same copy. */
 const APP_WAITED = "squad-kit could not start the app: the tests in this story's copy were still running after a long wait. Press Try again to try once more.";
@@ -36,7 +38,8 @@ export const screensPart = {
     const cannot = !beside && runsAsProduct(meta) ? productPlan(this.bp, meta, readTicket(this.bp, id)!).why : undefined;
     if (cannot) throw new StepError(cannot, cannot);
     // A phone app: squad-kit's own phone, else its web version meanwhile, else it waits for the tools (phone/plan.ts).
-    let way = await this.picturesWayOf(id, beside);
+    // With no Screen line, no picture is taken: never the phone, and no browser.
+    let way: PicturesWay = picturesNeeded(readTicket(this.bp, id)!, true) ? await this.picturesWayOf(id, beside) : { way: 'browser' };
     // squad-kit gets its own tools for the phone now, the first time: the pictures wait for that short download.
     if (way.way === 'wait' && way.getting) {
       const block = way.block;
@@ -49,7 +52,7 @@ export const screensPart = {
     }
     if (way.way === 'wait') throw new StepError(way.block.text, way.block.text);
     // squad-kit's browser is on this computer before any clock starts: the first time, it is downloaded.
-    if (way.way !== 'phone') await this.readyBrowser(id, beside?.signal ?? this.stops.get(id)?.signal, beside?.job ?? id);
+    if (way.way !== 'phone' && picturesNeeded(readTicket(this.bp, id)!, true)) await this.readyBrowser(id, beside?.signal ?? this.stops.get(id)?.signal, beside?.job ?? id);
     const t = this.update(id, (x) => {
       if (!beside) {
         x.sessions = { ...x.sessions, tester: x.sessions?.tester ?? randomUUID() };
@@ -106,8 +109,8 @@ export const screensPart = {
       step: 'proof',
       who: 'Tester',
       // A copy of the code as it was has nothing to check; the story's own copy does.
-      tools: beside ? ALL_TOOLS.filter((x) => x !== 'run_checks') : [...ALL_TOOLS, 'ask_api'],
-      ...(beside ? {} : { api: () => this.apiParts(t) }),
+      tools: testerTools(t, beside ? ALL_TOOLS.filter((x) => x !== 'run_checks') : [...ALL_TOOLS, 'ask_api'], Boolean(beside)),
+      ...(beside ? {} : { api: () => this.apiParts(t), rows: rowsReader(this.bp, id, cwd) }),
       app: { cwd, start, url, ...(this.guardFor(cwd, id) ? { guard: this.guardFor(cwd, id)! } : {}), ...(product ? this.productApp(id) : {}) },
       ...(beside ? {} : { checks: this.windowChecks(id, cwd) }),
       running: app,

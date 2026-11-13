@@ -21,6 +21,7 @@ import {
   theirLanguage,
 } from './context.js';
 import { askRule, offLimitsText } from './rules.js';
+import { KINDS_ASK, proofsNow } from '../proof-kinds/prompts.js';
 
 /** On a workspace, the Architect says which parts of the product a story changes. It is one story and one approval. */
 function partsRule(meta?: BoardMeta): string {
@@ -40,6 +41,7 @@ export function planPrompt(t: Ticket, change?: string, meta?: BoardMeta, others?
 
 - story: "As a <who>, I want <what>, so <why>."
 - criteria: 2 to 5 "done when" checks in Given / When / Then form. Each must be testable. ${EXAMPLES_FIT}
+${KINDS_ASK}
 - decision: only if this ticket makes a technical choice later tickets must follow. Give 2 options you considered,
   mark the chosen one, and say why in plain words tied to the person's answers. If the client forces a technology,
   check it against the business needs and write the result in clientCheck ("no conflict" or the conflict).${firstTechnology(meta, t)}
@@ -112,6 +114,7 @@ export function specPrompt(t: Ticket, change?: string, fromChat = false, others?
 - story: "As a <who>, I want <what>, so <why>."
 - criteria: 2 to 5 "done when" checks in Given / When / Then form. Each must be testable, in the person's words.
   ${EXAMPLES_FIT}
+${KINDS_ASK}${change || fromChat ? proofsNow(t) : ''}
 - releaseNote: one line for release notes, like "**Dark mode.** Switch the dashboard to dark."${openTicketsText(others, 'analyst')}
 ${PLAIN}${theirLanguage(t)}`;
 }

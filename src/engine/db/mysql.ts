@@ -23,7 +23,7 @@ const TOOLS = ['mysql', 'mysqldump'];
 const q = (name: string) => `\`${name.replace(/`/g, '``')}\``;
 
 /** A string for MySQL's SQL, with its own escapes (the session turns off NO_BACKSLASH_ESCAPES first). */
-function lit(text: string): string {
+export function lit(text: string): string {
   return `'${text.replace(/[\0\n\r\\'"\x1a]/g, (c) => ({ '\0': '\\0', '\n': '\\n', '\r': '\\r', '\\': '\\\\', "'": "\\'", '"': '\\"', '\x1a': '\\Z' })[c]!)}'`;
 }
 
@@ -79,7 +79,7 @@ async function connected<T>(a: Address, work: (opt: string) => Promise<T>): Prom
 /** Every read on the source starts so: read only, and with the escapes squad-kit writes. */
 const READ_ONLY = "SET SESSION TRANSACTION READ ONLY; SET SESSION sql_mode = REPLACE(@@SESSION.sql_mode, 'NO_BACKSLASH_ESCAPES', '');";
 
-async function sql(a: Address, database: string | null, text: string, doing: string, readOnly = false): Promise<string[]> {
+export async function sql(a: Address, database: string | null, text: string, doing: string, readOnly = false): Promise<string[]> {
   return connected(a, async (opt) => {
     const args = [`--defaults-extra-file=${opt}`, '--batch', '--raw', '--skip-column-names', ...(database ? [`--database=${database}`] : [])];
     const out = await runTool(tools().mysql, args, { input: (readOnly ? READ_ONLY : "SET SESSION sql_mode = REPLACE(@@SESSION.sql_mode, 'NO_BACKSLASH_ESCAPES', '');") + '\n' + text + ';\n', secrets: secretsOf(a.password), doing });

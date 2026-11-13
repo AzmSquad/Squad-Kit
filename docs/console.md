@@ -265,6 +265,44 @@ When the proof is ready, or a check stopped the ticket, the row of steps says **
 command and what it printed, for engineers. It is on Try it yourself, Your apps, the setup after a merge, and the
 tests on the Overview.
 
+### The right proof for each "done when"
+
+Not every story needs pictures. In the spec, each "done when" has a chip that says how it will be proved, with one
+plain line on why under it:
+
+| Kind | The proof | Made by |
+| --- | --- | --- |
+| **Screen** | Pictures before and after, as above. | The Tester, through squad-kit's browser |
+| **Data** | The rows of the story's own database before and after the action, read only. Changed cells are marked, new rows too. | The Tester, with `read_rows` |
+| **API call** | The call and its answer. | The Tester, with `ask_api` |
+| **Test** | The one test the story added or changed that proves it, its steps in plain words, and "It failed before the change and passes now". | squad-kit runs that test on main's code (with the story's test file put there) and on the story's code |
+| **Not on a screen** | The reason you approved, and what the Reviewer checked in the code, the data and the logs. | The Reviewer, in its review |
+
+- **The Analyst proposes** the kind for each line. **squad-kit's own rules** then lock a line to Screen when it is about
+  what someone sees, and when the story changes screen files and no other line has a picture. The lock shows on the
+  chip, with the rule under it. No agent can move a locked line away from Screen.
+- **You change a kind** with the chip's menu before you approve the spec. On a locked line the other kinds are off.
+  Not on a screen asks for a reason first. After the approval the chips are read only: **Ask for changes** changes a
+  kind, and a change can never unlock a line.
+- **A test that also passes on main is no proof.** The line shows **Not shown yet** and goes back to the Builder, to
+  write a test that fails without the change. A test that fails on the story's code is **Not working yet**. A test
+  squad-kit cannot run on main's code waits for you, with Try again and Continue anyway.
+- **A planned picture is never dropped quietly.** When the Tester cannot make a Screen, API or Data proof, or no app
+  can start for it, it is Not shown yet, and after the retakes a problem on the card, never a silent Not on a screen.
+- **A story with no Screen line** starts no browser, never builds for the phone, and takes no pictures. When an API or
+  Data line needs the app, it starts headless.
+- The Proof tab and the proof page show one block per line with its kind. A chat card shows each line's kind with a
+  short form of its proof. An old spec with no kinds is proved exactly as before.
+
+Terminal: `squad prove MA-21` lists the lines and their kinds. `squad prove MA-21 2 data` changes line 2;
+`squad prove MA-21 5 none --why "Nothing to show: the Reviewer checks the code"`. Not on a screen needs `--why`.
+
+REST (under `/p/<project>/api/v1`):
+
+| Call | What |
+| --- | --- |
+| `POST /tickets/<id>/prove` | `{ "line": 2, "kind": "screen" \| "data" \| "api" \| "test" \| "none", "why": "…" }`, only before the spec is approved. `why` is needed for `none`. A locked line takes only `screen`. Answers with the story. |
+
 ## The review, in the pull request
 
 The Reviewer writes each note with the file it is about and the line in that file. squad-kit keeps every round on the
@@ -315,6 +353,8 @@ back the result. Each run has its own key, which stops working when the run ends
 | `look_at_page` | Opens a page, does the steps, and gives back the address and what is on the page. It saves no pictures. | Tester, Builder, Reviewer |
 | `start_app`, `stop_app`, `app_status` | Starts this story's copy with the project's own start command, on a free port when the usual one is taken. Stops only what squad-kit started. Says whether it runs, with its last lines. | Tester, Builder |
 | `run_checks` | Runs the project's saved test, lint or build command, inside the guard, where a browser can start. With `only`, it runs one test file on its own with the project's own test tool, for a quick fix. A failure is not run again. | Tester, Builder |
+| `ask_api` | Asks a part of the running product (only its own address), and saves what was asked and answered. | Tester |
+| `read_rows` | Reads at most 20 rows of one table of the story's own database, read only, before and after the Tester's action, and keeps both in one file for a Data proof. squad-kit builds the one query itself from a table and the columns each row equals; it takes no query, never writes, and hides secret columns and anything shaped like an address. A story with no database of its own has nothing to read. | Tester, on a story with a Data line |
 | `i_am_stuck` | Tries squad-kit's own fixes (see below). | Every agent on a ticket |
 | `read_board`, `read_story`, `read_decision`, `read_records`, `read_logs`, `read_guide` | Reads squad-kit's own records: the board, a story, the decisions, requirements, releases, usage, the Tools page, the Harness rules, its notes, its log (secrets taken out) and its guide. What comes back is marked as data. | Squad lead |
 

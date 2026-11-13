@@ -25,6 +25,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The Changes tab starts with the review:** each round, each note on its file and line with where it stands, as the
   pull request shows it. A note in Arabic reads right to left. Stories from before keep their notes as round 1.
 - **Every button has its call and its command:** `squad review <ticket>`, `--past <n> --reason "…"` and `--write`.
+- **The right proof for each "done when".** Not every story needs pictures. In the spec, each line has a chip that says
+  how it will be proved, with one plain line on why: Screen (pictures before and after), Data (the rows of the story's
+  own database before and after, read only), API call (the call and its answer), Test (the test that proves it, in
+  plain words) or Not on a screen (with a reason the Reviewer checks). The Analyst proposes them; change any of them
+  with the chip's menu before you approve the spec.
+- **squad-kit keeps a picture where one is needed.** Its own rules lock a line to Screen when it is about what someone
+  sees, and when the story changes screen files and no other line has a picture. No agent can move a locked line
+  away from Screen, and a planned picture the Tester cannot take is a problem on the card, never a quiet Not on a
+  screen.
+- **A test must fail on main.** squad-kit runs the test that proves a line on main's code and on the story's: "It
+  failed before the change and passes now". A test that also passes on main goes back to the Builder, to write a real
+  one.
+- **Data proof.** A new tool for the Tester, `read_rows`, reads a few rows of one table of the story's own database
+  before and after its action. squad-kit builds the one query itself: it never writes, and it hides secrets. The
+  Proof tab marks the cells that changed.
+- **A backend-only story takes no pictures.** With no Screen line, no browser starts; the app starts headless only when
+  an API or Data line needs it.
+- The Proof tab and the proof page show one block per line with its kind, and a chat card shows each line's kind with a
+  short form of its proof. Right to left in Arabic, light and dark. Old specs are proved exactly as before.
+- **Every button has its call and its command:** `squad prove <ticket> [line] [kind] [--why "…"]` and
+  `POST /tickets/<id>/prove`.
 
 ## [1.3.18] — 2026-11-13
 

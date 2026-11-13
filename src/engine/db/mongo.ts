@@ -117,7 +117,7 @@ interface PlanOut {
 }
 
 /** Runs a small mongosh script with the connection in its environment, never on its command line. */
-async function shell(a: Address, script: string, vars: Record<string, string>, doing: string): Promise<string> {
+export async function shell(a: Address, script: string, vars: Record<string, string>, doing: string): Promise<string> {
   return withPrivateDir(async (dir) => {
     const file = path.join(dir, 'script.js');
     writePrivate(file, script);

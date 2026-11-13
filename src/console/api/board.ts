@@ -61,7 +61,7 @@ import {
 } from '../../board/actions.js';
 import { architecture } from '../../board/architecture.js';
 import { copyViews } from '../../engine/copies.js';
-import { isApiProof } from '../../engine/proof-verdict.js';
+import { isSavedProof } from '../../engine/proof-kinds/saved.js';
 import { addPart, changePart, partsOf, removePart, repoPaths, severalParts, type PartChange } from '../../board/parts.js';
 import { addLocalFile, addLockedFile, lockDockerFiles, projectFilesView, removeProjectFile, useMyFile } from '../../board/project-files.js';
 import { videoNotesWork } from '../../engine/media.js';
@@ -724,7 +724,7 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     const abs = path.join(bp.proofDir, name);
     if (!fs.existsSync(abs)) return c.text('not found', 404);
     // What the API answered, saved by squad-kit: the record to read, and a file it answered with to download, never to show.
-    if (isApiProof(name)) return new Response(fs.readFileSync(abs), { headers: { 'content-type': 'application/json' } });
+    if (isSavedProof(name)) return new Response(fs.readFileSync(abs), { headers: { 'content-type': 'application/json' } });
     if (/-api-\d+-answer\.[a-z]+$/.test(name)) return new Response(fs.readFileSync(abs), { headers: { 'content-type': 'application/octet-stream', 'content-disposition': `attachment; filename="${name}"` } });
     if (!name.endsWith('.png')) return c.text('not found', 404);
     return new Response(fs.readFileSync(abs), { headers: { 'content-type': 'image/png', 'cache-control': 'private, max-age=3600' } });

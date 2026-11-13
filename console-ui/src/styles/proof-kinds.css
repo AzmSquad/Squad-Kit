@@ -1,0 +1,102 @@
+/* How each "done when" is proved (components/proof): one colour and one picture per kind, in the spec, the proof and the chat cards. */
+:root,
+:root[data-theme='light'] {
+  --k-screen: #3d6fe0;
+  --k-api: #7c4ddb;
+  --k-data: #0f8b8d;
+  --k-test: #c2591f;
+}
+:root[data-theme='dark'] {
+  --k-screen: #8fb0ff;
+  --k-api: #b9a0ff;
+  --k-data: #6fe3e0;
+  --k-test: #ffab76;
+}
+.k-screen { --k: var(--k-screen); }
+.k-api { --k: var(--k-api); }
+.k-data { --k: var(--k-data); }
+.k-test { --k: var(--k-test); }
+.k-none { --k: var(--muted); }
+
+.pkind { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px 0 7px; border-radius: 7px; font-size: 12px; font-weight: 650; white-space: nowrap; flex: none;
+  color: var(--k); background: color-mix(in srgb, var(--k) 10%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--k) 28%, transparent); }
+.pkind svg { width: 13px; height: 13px; flex: none; }
+.pkind .kindcaret, .pkind .kindlock { opacity: 0.75; }
+.pkind.sm { height: 20px; font-size: 11px; padding: 0 7px 0 5px; gap: 4px; }
+.pkind.sm svg { width: 12px; height: 12px; }
+
+/* The spec: a chip at the end of each "done when", its reason under the line, a menu to change it. */
+.ac li:has(> .kindpick) { grid-template-columns: 24px 1fr auto; }
+.ac li > .kindpick { grid-column: 3; grid-row: 1 / span 2; justify-self: end; position: relative; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.ac li > .kindwhy { grid-column: 2; grid-row: 2; font-size: 12px; color: var(--muted); margin-top: -4px; }
+.kindbtn { padding: 0; border: 0; background: none; cursor: pointer; border-radius: 7px; }
+.kindbtn:hover .pkind { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--k) 55%, transparent); }
+.kindrule { font-size: 11px; color: var(--dim); max-width: 240px; text-align: end; line-height: 1.35; }
+.kindmenu { position: absolute; top: 30px; inset-inline-end: 0; width: 300px; background: var(--surface); border-radius: 12px; box-shadow: var(--pop-shadow); padding: 6px; z-index: 20; animation: kinddrop 0.28s cubic-bezier(0.2, 0.9, 0.25, 1.15) both; transform-origin: 100% 0; }
+[dir='rtl'] .kindmenu { transform-origin: 0 0; }
+@keyframes kinddrop { from { opacity: 0; transform: translateY(-6px) scale(0.96); } }
+.kindmenu .mh { font-size: 11.5px; color: var(--muted); padding: 6px 8px 4px; }
+.kindmenu .opt { display: grid; grid-template-columns: 24px 1fr 16px; gap: 8px; align-items: center; padding: 5px 8px; border-radius: 8px; width: 100%; border: 0; background: none; color: var(--text); text-align: start; cursor: pointer; font: inherit; }
+.kindmenu .opt:hover:not(:disabled), .kindmenu .opt.on { background: var(--surface-2); }
+.kindmenu .opt .ic { width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; color: var(--k); background: color-mix(in srgb, var(--k) 12%, transparent); }
+.kindmenu .opt .ic svg { width: 14px; height: 14px; }
+.kindmenu .opt b { display: block; font-size: 13px; font-weight: 600; }
+.kindmenu .opt small { display: block; font-size: 11.5px; color: var(--muted); line-height: 1.3; }
+.kindmenu .opt .tick { width: 15px; height: 15px; color: var(--accent); visibility: hidden; }
+.kindmenu .opt.on .tick { visibility: visible; }
+.kindmenu .opt.off { opacity: 0.45; cursor: not-allowed; }
+.kindmenu .mf { border-top: 1px solid var(--line); margin-top: 4px; padding: 7px 8px 3px; font-size: 11.5px; color: var(--muted); display: flex; gap: 6px; align-items: flex-start; }
+.kindmenu .mf svg { width: 13px; height: 13px; flex: none; margin-top: 1px; }
+.kindmenu .mcmd { padding: 4px 6px 2px; }
+.kindmenu .mcmd .term { max-width: 100%; }
+.kindwhyask { display: flex; gap: 6px; padding: 6px 8px 2px; }
+.kindwhyask .input { flex: 1; min-width: 0; height: 30px; font-size: 12.5px; }
+
+/* The proof: one block per "done when", two by two. */
+.kindgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+.kindgrid .pf { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; animation: kindrise 0.4s ease both; animation-delay: calc(var(--i) * 90ms); }
+@keyframes kindrise { from { opacity: 0; transform: translateY(8px); } }
+.kindgrid .pf.broken { border-color: color-mix(in srgb, var(--bug) 45%, transparent); }
+.kindgrid .pf.notshown { border-color: var(--you-line); }
+.kindgrid .pf .ph { display: flex; align-items: flex-start; gap: 8px; }
+.kindgrid .pf .ph > svg { margin-top: 2px; color: var(--accent); flex: none; }
+.kindgrid .pf .ph > svg.vx { color: var(--bug); }
+.kindgrid .pf .ph > svg.vq { color: var(--you); }
+.kindgrid .pf .ph b { font-size: 13.5px; font-weight: 650; flex: 1; line-height: 1.35; min-width: 0; }
+.kindgrid .pf .cap { font-size: 12px; color: var(--muted); margin: 0; }
+.kindgrid .pf .verdictnote { font-size: 12.5px; margin: -2px 0 0; color: var(--muted); }
+.kindgrid .pf.broken .verdictnote { color: var(--bug); }
+.kindgrid .pf.notshown .verdictnote { color: var(--you-ink); }
+.kindgrid .apiproof { margin: 0; }
+.tname { font: 600 11px 'JetBrains Mono', ui-monospace, monospace; color: var(--text); }
+.datarows .rowscroll { overflow-x: auto; }
+table.rows { width: 100%; border-collapse: collapse; font: 500 11.5px 'JetBrains Mono', ui-monospace, monospace; }
+table.rows th { text-align: start; font: 600 10.5px 'Instrument Sans Variable', 'Instrument Sans', sans-serif; color: var(--muted); padding: 3px 6px; border-bottom: 1px solid var(--line); }
+table.rows td { padding: 4px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+table.rows td.w { font: 600 10.5px 'Instrument Sans Variable', 'IBM Plex Sans Arabic', sans-serif; color: var(--muted); }
+table.rows tr.after td.ch { color: var(--k-data); background: color-mix(in srgb, var(--k-data) 11%, transparent); font-weight: 600; }
+table.rows tr.new td { color: var(--k-data); }
+table.rows tr.gone td { color: var(--muted); text-decoration: line-through; }
+.tsteps { list-style: none; display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; }
+.tsteps li { display: flex; gap: 7px; align-items: center; font-size: 12.5px; }
+.tsteps li svg { color: var(--accent); width: 13px; height: 13px; flex: none; }
+.redgreen { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12px; color: var(--muted); }
+.redgreen .r { color: var(--bug); background: var(--bug-soft); padding: 0 6px; border-radius: 5px; font-weight: 650; }
+.redgreen .q { color: var(--you-ink); background: var(--you-soft); padding: 0 6px; border-radius: 5px; font-weight: 650; }
+.redgreen .g { color: var(--accent); background: var(--accent-soft); padding: 0 6px; border-radius: 5px; display: inline-flex; }
+.redgreen .g svg { width: 13px; height: 13px; }
+.checked { font-size: 12px; color: var(--muted); display: flex; gap: 6px; align-items: flex-start; }
+.checked svg { color: var(--accent); width: 14px; height: 14px; flex: none; margin-top: 1px; }
+.shortproof { display: inline-flex; align-items: center; gap: 6px; margin-inline-start: 6px; font-size: 11.5px; color: var(--muted); vertical-align: 1px; }
+@media (max-width: 900px) {
+  .kindgrid { grid-template-columns: 1fr; }
+  .ac li:has(> .kindpick) { grid-template-columns: 24px 1fr; }
+  .ac li > .kindpick { grid-column: 2; grid-row: auto; justify-self: start; align-items: flex-start; }
+  .kindmenu { inset-inline-end: auto; inset-inline-start: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kindgrid .pf, .kindmenu { animation: none; }
+}
+.kindpage { padding: 16px 28px 90px; }
+.kindmenu.up { top: auto; bottom: 30px; transform-origin: 100% 100%; }
+[dir='rtl'] .kindmenu.up { transform-origin: 0 100%; }

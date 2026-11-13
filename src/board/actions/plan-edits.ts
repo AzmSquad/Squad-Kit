@@ -4,6 +4,7 @@ import { scheduleSquad } from '../schedule.js';
 import { criterionText } from '../docs.js';
 import { BoardActionError } from './errors.js';
 import { SPEC_CHANGED } from './change.js';
+import { keepProof } from '../proof-lock.js';
 
 /* ── Review a plan like a document ─────────────────────── */
 
@@ -57,7 +58,7 @@ export function editPlan(bp: BoardPaths, id: string, edit: PlanEdit): Ticket {
       const c = edit.criterion;
       if (!c?.given.trim() || !c.when.trim() || !c.then.trim()) throw new BoardActionError('Fill in Given, When and Then.');
       if (!t.criteria?.[i]) throw new BoardActionError('That "done when" item is gone. Reload the ticket.');
-      t.criteria[i] = { given: c.given.trim(), when: c.when.trim(), then: c.then.trim() };
+      t.criteria[i] = keepProof(t.criteria[i], { given: c.given.trim(), when: c.when.trim(), then: c.then.trim() });
     } else {
       if (!text) throw new BoardActionError('Write the new text first.');
       if (edit.part === 'story') t.story = text;

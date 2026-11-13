@@ -15,7 +15,6 @@ import { StepError } from '../../board/problem.js';
 import {
   MAX_PICTURES_PER_DONE_WHEN,
   addPictures,
-  isApiProof,
   criterionText,
   doneWhenCount,
   verdictOf,
@@ -25,6 +24,8 @@ import { PROOF_STEP_MS } from './limits.js';
 import { technicalWords } from './shared.js';
 import type { LiveSquad } from './squad.js';
 import type { ShotProblem, ShotRound } from './proof.js';
+import { testerProves } from '../proof-kinds/lines.js';
+import { isSavedProof, savedWords } from '../proof-kinds/saved.js';
 
 /** The Tester's run in the browser, and its words for the proof. */
 export const shootPart = {
@@ -41,7 +42,7 @@ export const shootPart = {
     const complete = (answer: unknown): string | null => {
       const a = (answer ?? {}) as { shots?: { criterion?: unknown }[]; offScreen?: { criterion?: unknown }[] };
       const named = new Set([...(a.shots ?? []), ...(a.offScreen ?? [])].map((x) => Number(x?.criterion)));
-      const left = Array.from({ length: count }, (_, i) => i + 1).filter((n) => !named.has(n));
+      const left = Array.from({ length: count }, (_, i) => i + 1).filter((n) => !named.has(n) && testerProves(t, n));
       return left.length ? `every "done when" must be in shots or in offScreen, and ${left.map((n) => `"done when" ${n}`).join(', ')} ${left.length === 1 ? 'is' : 'are'} in neither` : null;
     };
     // Only pictures taken in this step count: a file it names from outside them is asked for once more, with the list.
@@ -123,7 +124,7 @@ export const shootPart = {
       const full = path.join(this.bp.proofDir, s.file);
       const criterion = named(s.criterion);
       if (!criterion || !fs.existsSync(full)) continue;
-      const bad = isApiProof(s.file) ? null : shotProblem(full, since);
+      const bad = isSavedProof(s.file) ? null : shotProblem(full, since);
       if (!bad) continue;
       rejected.add(s.file);
       problems.push({ criterion, text: `The ${when} screenshot for "${criterion}" (${s.file}): ${bad}.` });
@@ -159,9 +160,7 @@ export const shootPart = {
         if (all.length) x.offScreen = all;
         else delete x.offScreen;
         const notOn = off.length ? `. Not on a screen: ${off.map((o) => `"done when" ${o.criterion}`).join(', ')}` : skipped ? `. Skipped: ${skipped}` : '';
-        const answers = shots.filter((s) => isApiProof(s.file)).length;
-        const pictures = shots.length - answers - rejected.size;
-        addActivity(x, 'tester', `Saved ${pictures} ${answers && pictures === 1 ? 'screenshot' : 'screenshots'}${answers ? ` and ${answers} ${answers === 1 ? 'answer' : 'answers'} from the API` : ''}${notOn}`);
+        addActivity(x, 'tester', `${savedWords(shots.map((s) => s.file), rejected.size)}${notOn}`);
       }
     });
     return { problems, planned: shots.map((s) => s.criterion), said: skipped, stuck: win.stuck, sizes: Object.fromEntries(shots.map((s) => [s.file, s.size])) };

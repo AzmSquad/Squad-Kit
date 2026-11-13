@@ -32,6 +32,8 @@ import {
   type ShotSize,
 } from './shots.js';
 import { readWorkbook, sheetsText, type Sheet } from './spreadsheet.js';
+import { READ_ROWS_DEF, readRowsCall, type RowsReader } from './proof-kinds/rows.js';
+import { commandField, extraFields, gotoPaths, hugeValue, outsideApp } from './window-calls.js';
 import type { PhoneSize } from '../modules/phone/types.js';
 import type { PhoneAsk, PhoneRun, PhoneShot } from './phone/session.js';
 
@@ -46,7 +48,7 @@ import type { PhoneAsk, PhoneRun, PhoneShot } from './phone/session.js';
  * window starts outlives its run.
  */
 
-export type WindowTool = 'take_screenshots' | 'look_at_page' | 'start_app' | 'stop_app' | 'app_status' | 'run_checks' | 'add_part' | 'ask_api' | 'i_am_stuck';
+export type WindowTool = 'take_screenshots' | 'look_at_page' | 'start_app' | 'stop_app' | 'app_status' | 'run_checks' | 'add_part' | 'ask_api' | 'read_rows' | 'i_am_stuck';
 
 export const APP_TOOLS: WindowTool[] = ['take_screenshots', 'look_at_page', 'start_app', 'stop_app', 'app_status'];
 export const ALL_TOOLS: WindowTool[] = [...APP_TOOLS, 'run_checks', 'i_am_stuck'];
@@ -170,6 +172,8 @@ export interface WindowSetup {
   checks?: WindowChecks;
   /** The running product's parts the Tester may ask, by id. There is no field for a host: only these addresses. */
   api?(): Record<string, { name: string; url: string }>;
+  /** The story's own database, read only, for read_rows (proof-kinds/rows.ts). */
+  rows?: RowsReader;
   /** Adds a part's copy to the story's folder, and says what it did. Left out, add_part answers that this step cannot. */
   addPart?(part: string): Promise<string>;
   /** An app squad-kit already started for this step. The window owns it from now on and stops it at the end. */
@@ -368,6 +372,7 @@ const DEFS: Record<WindowTool, Omit<ToolDef, 'name'>> = {
       additionalProperties: false,
     },
   },
+  read_rows: READ_ROWS_DEF,
   add_part: {
     description: "Call this when the story needs a part of the product it has no copy of yet, to read it or change it. squad-kit adds that part's copy to this story's folder, on the same branch name, and says where. The person is not asked.",
     inputSchema: {
@@ -477,56 +482,10 @@ const text = (t: string): ToolContent => ({ type: 'text', text: t });
 const ok = (t: string): ToolResult => ({ content: [text(t)] });
 const error = (t: string): ToolResult => ({ content: [text(t)], isError: true });
 
-/** The fields of a call that a tool does not take, or null when it takes the call as it is. */
-function extraFields(args: Record<string, unknown>, allowed: string[]): string[] {
-  return Object.keys(args).filter((k) => !allowed.includes(k));
-}
-
-/** The first value in a call longer than `max` characters, anywhere in it. */
-function hugeValue(v: unknown, max: number, depth = 0): boolean {
-  if (typeof v === 'string') return v.length > max;
-  if (depth > 6 || !v || typeof v !== 'object') return false;
-  return Object.values(v as Record<string, unknown>).some((x) => hugeValue(x, max, depth + 1));
-}
-
-/** Why a page is not merely wrong but outside the app: a scheme, another host, "..". Null when it is only a mistake or fine. */
-function outsideApp(p: unknown): string | null {
-  if (typeof p !== 'string') return null;
-  const s = p.trim();
-  if (/^[a-z][a-z0-9+.-]*:/i.test(s) || s.startsWith('//') || s.includes('\\')) return `page "${s.slice(0, 80)}" is outside the app`;
-  let decoded = s;
-  try {
-    decoded = decodeURIComponent(s);
-  } catch {
-    return `page "${s.slice(0, 80)}" is not a valid path`;
-  }
-  if (decoded.startsWith('//') || decoded.includes('\\') || /^[a-z][a-z0-9+.-]*:/i.test(decoded) || /(^|[/\\])\.\.([/\\?#]|$)/.test(decoded)) return `page "${s.slice(0, 80)}" goes outside the app`;
-  return null;
-}
-
-/** The goto paths of a call's steps, for the same check. */
-function gotoPaths(steps: unknown): unknown[] {
-  return Array.isArray(steps) ? steps.filter((x) => x && typeof x === 'object' && (x as BrowserStep).action === 'goto').map((x) => (x as BrowserStep).path) : [];
-}
-
 /** The fields a target takes. A step may name them on itself by mistake: they are moved into its target. */
 const TARGET_KEYS = ['role', 'name', 'label', 'text', 'placeholder', 'testId', 'css'];
 const STEP_KEYS = ['action', 'target', 'value', 'path', 'key', 'ms'];
 const ACTION_KEYS = ['goto', 'click', 'fill', 'select', 'check', 'uncheck', 'press', 'hover', 'wait'];
-/** A field that asks squad-kit to run something. Never a slip: always refused. */
-const COMMAND_FIELD = /^(commands?|cmd|scripts?|exec|execute|shell|bash|sh|eval|javascript|program)$/i;
-
-/** The first field anywhere in a call that asks squad-kit to run something, or null. */
-function commandField(v: unknown, depth = 0): string | null {
-  if (depth > 6 || !v || typeof v !== 'object') return null;
-  for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
-    if (COMMAND_FIELD.test(k)) return k;
-    const inner = commandField(x, depth + 1);
-    if (inner) return inner;
-  }
-  return null;
-}
-
 /** A call in the wrong shape: what is wrong, and the right shape to use, with an example. */
 export interface WrongShape {
   wrong: string;
@@ -838,6 +797,8 @@ export class AgentWindow {
           return await this.addPart(args);
         case 'ask_api':
           return await this.askApi(args, clock);
+        case 'read_rows':
+          return await readRowsCall(this, this.s, args);
         case 'i_am_stuck':
           return await this.iAmStuck(args, clock);
       }

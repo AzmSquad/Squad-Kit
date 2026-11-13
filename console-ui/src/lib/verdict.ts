@@ -35,11 +35,14 @@ export function notOnScreen(t: Pick<Ticket, 'proof' | 'offScreen'>): OffScreen[]
 /** A proof that is no picture: squad-kit asked the product's API, and saved what it answered. */
 export const isApiProof = (file: string): boolean => file.endsWith('.api.json');
 
+/** Any proof squad-kit saved as a file of its own, not a picture: an API answer, rows, a test run, a Reviewer's check. */
+export const isSavedProof = (file: string): boolean => /\.(api|rows|test|none)\.json$/.test(file);
+
 /** What the picture viewer shows in place of a saved answer, so its places stay in order. */
-const NO_PICTURE = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="200"><text x="24" y="100" font-family="sans-serif" font-size="20">An answer from the API, not a picture</text></svg>')}`;
+const NO_PICTURE = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="200"><text x="24" y="100" font-family="sans-serif" font-size="20">A saved proof, not a picture</text></svg>')}`;
 
 export function proofViewer(rows: ProofShot[], rawSrc: (file: string) => string): { pictures: { src: string; caption: string }[]; starts: number[] } {
-  const src = (file: string) => (isApiProof(file) ? NO_PICTURE : rawSrc(file));
+  const src = (file: string) => (isSavedProof(file) ? NO_PICTURE : rawSrc(file));
   const pictures: { src: string; caption: string }[] = [];
   const starts: number[] = [];
   for (const r of rows) {

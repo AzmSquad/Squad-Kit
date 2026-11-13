@@ -13,6 +13,7 @@ import { shellQuote } from '../../lib/text';
 import { DependsLine } from '../../components/Depends';
 import { useDraft } from '../../lib/drafts';
 import { detect, langProps, typedDir } from '../../lib/lang';
+import { KindPick } from '../../components/proof/KindPick';
 
 /* ── Plan ──────────────────────────────────────────────── */
 
@@ -37,6 +38,7 @@ export function PlanBody({ t, review }: { t: Ticket; review?: Review }) {
                       <em>Given</em> <Runs text={c.given} dir={own.dir} />, <em>when</em> <Runs text={c.when} dir={own.dir} />, <em>then</em> <Runs text={c.then} dir={own.dir} />.
                     </span>
                   </Part>
+                  <KindPick t={t} i={i} />
                 </li>
               );
             })}

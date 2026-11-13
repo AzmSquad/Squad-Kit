@@ -1,6 +1,7 @@
 import yaml from 'js-yaml';
 import { parseReviewDoc, withReviewDoc } from './review-doc.js';
 import { TECH_ROLES, type AgentName, type Blueprint, type BoardMeta, type ChangePart, type ChangeStatus, type ChangeStep, type Criterion, type Decision, type DecisionDraft, type Lesson, type ProofPicture, type ProofShot, type Question, type Release, type SpecChange, type Step, type Ticket, type TicketNote } from './types.js';
+import { parseProof, proofDoc, proofLine, splitProofLine } from './proof-doc.js';
 
 /**
  * The project's documents as Markdown (ADR-001). squad-kit writes each in a fixed shape and reads it back from that
@@ -28,7 +29,7 @@ export function dec(s: string): string {
 /** Free text: a line that looks like part of the shape gets a backslash in front. */
 const MARKER = /^(\\*)(#|- \[|\d+\. |Answer:|Chosen:|To:|- (Area|Saved as|Replaces|Check with the client|Before|After|Decision|Where|More):)/;
 
-function escText(text: string): string {
+export function escText(text: string): string {
   return text
     .split('\n')
     .map((l) => (MARKER.test(l) ? `\\${l}` : l))
@@ -58,7 +59,7 @@ export function splitHeader(text: string): { header: Record<string, any>; body: 
 }
 
 /** The text under each of the given headings (exact heading lines only), in order. */
-function sections(body: string, heads: RegExp): { head: string; match: RegExpMatchArray; text: string }[] {
+export function sections(body: string, heads: RegExp): { head: string; match: RegExpMatchArray; text: string }[] {
   const lines = body.split('\n');
   const out: { head: string; match: RegExpMatchArray; text: string }[] = [];
   let cur: { head: string; match: RegExpMatchArray; lines: string[] } | null = null;
@@ -73,7 +74,7 @@ function sections(body: string, heads: RegExp): { head: string; match: RegExpMat
   return out;
 }
 
-const block = (text: string) => unescText(text.replace(/^\n+/, '').replace(/\s+$/, ''));
+export const block = (text: string) => unescText(text.replace(/^\n+/, '').replace(/\s+$/, ''));
 
 /** List items that start with `start` and go on in lines indented by `indent` spaces. */
 function items(text: string, start: RegExp, indent = 3): string[][] {
@@ -217,7 +218,7 @@ export function shapeTroubles(docs: TicketDocs): { file: string; problem: string
 function specDoc(t: TicketDocInput): string {
   const parts = [`# ${enc(t.title)}: spec`];
   if (t.story !== undefined) parts.push(`## Story\n\n${escText(t.story)}`);
-  if (t.criteria) parts.push(`## Done when\n\n${t.criteria.map((c, i) => `${i + 1}. **Given** ${enc(c.given)}, **when** ${enc(c.when)}, **then** ${enc(c.then)}`).join('\n')}`);
+  if (t.criteria) parts.push(`## Done when\n\n${t.criteria.map((c, i) => `${i + 1}. **Given** ${enc(c.given)}, **when** ${enc(c.when)}, **then** ${enc(c.then)}${proofLine(c.proof)}`).join('\n')}`);
   if (t.releaseNote !== undefined) parts.push(`## Release note\n\n${escText(t.releaseNote)}`);
   if (t.changes?.length) parts.push(`## Changes\n\n${t.changes.map(changeDoc).join('\n\n')}`);
   return `${parts.join('\n\n')}\n`;
@@ -225,9 +226,10 @@ function specDoc(t: TicketDocInput): string {
 
 const GIVEN = /^\*\*Given\*\* ([\s\S]*?), \*\*when\*\* ([\s\S]*?), \*\*then\*\* ([\s\S]*)$/;
 
-function parseCriterion(line: string): Criterion {
+function parseCriterion(text: string): Criterion {
+  const { words: line, proof } = splitProofLine(text);
   const m = line.match(GIVEN);
-  return m ? { given: dec(m[1]!), when: dec(m[2]!), then: dec(m[3]!) } : { given: '', when: '', then: line };
+  return { ...(m ? { given: dec(m[1]!), when: dec(m[2]!), then: dec(m[3]!) } : { given: '', when: '', then: line }), ...(proof ? { proof } : {}) };
 }
 
 function parseSpec(text: string): Pick<Ticket, 'story' | 'criteria' | 'releaseNote' | 'changes'> {
@@ -265,6 +267,7 @@ function changeDoc(c: SpecChange): string {
     if (p.part === 'story') lines.push(`- Story was: ${enc(p.before)}`, `- Story now: ${enc(p.after)}`);
     else if (p.index === undefined) lines.push(`- New done when: ${criterionDoc(p.criterion ?? { given: '', when: '', then: p.after })}`);
     else lines.push(`- Done when ${p.index + 1} was: ${enc(p.before)}`, p.criterion ? `- Done when ${p.index + 1} now: ${criterionDoc(p.criterion)}` : `- Done when ${p.index + 1} goes`);
+    if (p.criterion?.proof) lines.push(`  - ${proofLine(p.criterion.proof).trim()}`);
   }
   if (c.design) {
     lines.push(`- Design: ${enc(c.design.summary)}`, ...c.design.before.map((s) => `- Step was: ${enc(s)}`), ...c.design.steps.map((s, i) => `- Step ${i + 1}, ${s.change}: ${enc(s.title)}`));
@@ -310,6 +313,7 @@ function parseChanges(text: string): SpecChange[] {
         p.criterion = parseCriterion(m[2]!);
         p.after = criterionText(p.criterion);
       } else if ((m = line.match(/^- Done when (\d+) goes$/))) at(Number(m[1]) - 1).after = '';
+      else if ((m = line.match(/^ {2}- (Proof: .*)$/)) && parts.at(-1)?.criterion) parts.at(-1)!.criterion!.proof = splitProofLine(`\n${m[1]}`).proof;
       else if ((m = line.match(/^- Design: ?(.*)$/))) [design.summary, designed] = [dec(m[1]!), true];
       else if ((m = line.match(/^- Step was: ?(.*)$/))) design.before.push(dec(m[1]!));
       else if ((m = line.match(/^- Step \d+, (same|changed|new): (.*)$/))) design.steps.push({ title: dec(m[2]!), change: m[1] as ChangeStep['change'] });
@@ -440,74 +444,6 @@ function parseNotes(text: string): TicketNote[] {
       text: block((to ? lines.slice(1) : lines).join('\n')),
     };
   });
-}
-
-function proofDoc(title: string, shots: ProofShot[]): string {
-  return `${[
-    `# ${enc(title)}: proof`,
-    ...shots.map((p) =>
-      [
-        `### ${enc(p.criterion)}`,
-        '',
-        `- Before: ${enc(p.before)} (${enc(p.beforeLabel)})`,
-        `- After: ${enc(p.after)} (${enc(p.afterLabel)})`,
-        // Where the after picture was taken: the page to look at in the app.
-        ...(p.page ? [`- Page: ${enc(p.page)}`] : []),
-        // The device each picture was taken on, for a phone app: "iPhone 16 Pro", "Web version".
-        ...(p.device ? [`- Device: ${enc(p.device)}`] : []),
-        ...(p.beforeDevice ? [`- Before device: ${enc(p.beforeDevice)}`] : []),
-        // What the picture shows: the "done when" met, or not yet and why.
-        ...(p.shows ? [`- Shows: ${SHOWS_WORDS[p.shows]}`] : []),
-        ...(p.why ? [`- Why: ${enc(p.why)}`] : []),
-        // The other pictures of this "done when", each with its own page and note.
-        ...(p.more ?? []).flatMap((m) => [`- More: ${enc(m.after)}`, ...(m.page ? [`  - Page: ${enc(m.page)}`] : []), ...(m.device ? [`  - Device: ${enc(m.device)}`] : []), ...(m.note ? [`  - Note: ${enc(m.note)}`] : [])]),
-        ...(p.note !== undefined ? ['', escText(p.note)] : []),
-      ].join('\n'),
-    ),
-  ].join('\n\n')}\n`;
-}
-
-/** What a proof row's "Shows:" line says. */
-const SHOWS_WORDS: Record<NonNullable<ProofShot['shows']>, string> = { met: 'met', broken: 'not working', 'not-shown': 'not shown', 'off-screen': 'not on a screen' };
-
-function parseProof(text: string): ProofShot[] {
-  return sections(text, /^### (.*)$/).map((s) => {
-    const shot: ProofShot = { criterion: dec(s.match[1]!), before: '', after: '', beforeLabel: '', afterLabel: '' };
-    const rest: string[] = [];
-    let said = '';
-    let more: ProofPicture | null = null;
-    for (const line of s.text.split('\n')) {
-      const m = line.match(/^- (Before|After): (.*) \((.*)\)$/);
-      const also = line.match(/^- More: (.+)$/);
-      const of = more && line.match(/^ {2}- (Page|Note|Device): (.+)$/);
-      // A picture's page and note come right under it; anything else ends it.
-      if (!also && !of) more = null;
-      if (also) (shot.more ??= []).push((more = { after: dec(also[1]!) }));
-      else if (of) more![of[1] === 'Page' ? 'page' : of[1] === 'Device' ? 'device' : 'note'] = dec(of[2]!);
-      else if (m && m[1] === 'Before') [shot.before, shot.beforeLabel] = [dec(m[2]!), dec(m[3]!)];
-      else if (m && m[1] === 'After') [shot.after, shot.afterLabel] = [dec(m[2]!), dec(m[3]!)];
-      else if (/^- Page: \S/.test(line) && !shot.page) shot.page = dec(line.slice('- Page: '.length));
-      else if (/^- Device: \S/.test(line) && !shot.device) shot.device = dec(line.slice('- Device: '.length));
-      else if (/^- Before device: \S/.test(line) && !shot.beforeDevice) shot.beforeDevice = dec(line.slice('- Before device: '.length));
-      else if (/^- Shows: /.test(line) && !shot.shows) said = line.slice('- Shows: '.length).trim();
-      else if (/^- Why: \S/.test(line) && !shot.why) shot.why = dec(line.slice('- Why: '.length));
-      else rest.push(line);
-    }
-    const shows = showsOf(said, shot.why);
-    if (shows) shot.shows = shows;
-    const note = block(rest.join('\n'));
-    if (note || rest.some((l) => l.trim())) shot.note = note;
-    return shot;
-  });
-}
-
-/**
- * A row's verdict from its line. "not met" is from before the three verdicts, when a picture that did not show it
- * clearly counted as not met too: its reason tells them apart.
- */
-function showsOf(said: string, why: string | undefined): ProofShot['shows'] {
-  if (said === 'not met') return why && /^(The screenshot does not show clearly|No screenshot shows it)/.test(why) ? 'not-shown' : 'broken';
-  return (Object.keys(SHOWS_WORDS) as NonNullable<ProofShot['shows']>[]).find((k) => SHOWS_WORDS[k] === said);
 }
 
 /* ── Decisions and releases ──────────────────────────────── */

@@ -16,6 +16,7 @@ import * as A from '../auto-prompts.js';
 import { WORDS_STEP_MS } from './limits.js';
 import { type AgentAsk, attachmentDirs, projectRoot } from './shared.js';
 import type { LiveSquad } from './squad.js';
+import { proposedProofs } from '../../board/proof-lock.js';
 
 /** The spec and the design. */
 export const planPart = {
@@ -49,7 +50,7 @@ export const planPart = {
     const out = r.structured as { story: string; criteria: { given: string; when: string; then: string }[]; releaseNote: string };
     this.update(id, (t) => {
       t.story = out.story;
-      t.criteria = out.criteria;
+      t.criteria = proposedProofs(out.criteria);
       t.releaseNote = out.releaseNote;
       applyPlanEdits(t);
       delete t.decision;
@@ -145,7 +146,7 @@ export const planPart = {
       } else delete t.testChange;
       if (!design) {
         t.story = out.story;
-        t.criteria = out.criteria;
+        t.criteria = out.criteria && proposedProofs(out.criteria);
         t.releaseNote = out.releaseNote;
       }
       t.agentQuestion = undefined;

@@ -14,6 +14,7 @@ import {
 } from './context.js';
 import { askRule } from './rules.js';
 import { notesAsk } from '../review-record/prompt.js';
+import { noneForReviewer } from '../proof-kinds/prompts.js';
 
 /**
  * What squad-kit's own run of the project checks found. The Reviewer reads the result instead of running the checks:
@@ -81,7 +82,7 @@ ${checksRan(t, meta, ctx)}
 Check: does it do every "done when"? Does it follow ${steps ? 'the plan and ' : ''}the saved decisions? Real bugs, security holes${t.noNewTests ? `?
 ${NO_NEW_TESTS}, so do not ask for new tests.` : ', missing tests?'}
 Were tests deleted, switched off or made weaker? That is a real problem unless the plan asks for it.
-${notOnScreenRule(t)}
+${notOnScreenRule(t)}${noneForReviewer(t)}
 ${again ? 'Approve when your notes are handled and nothing else is wrong.' : 'Approve unless there is a real problem.'} Small style notes do not block.
 ${notesAsk(t)}
 alsoChanged: each thing this change touches that the story, its "done when" and the plan did not ask for, as a short

@@ -327,7 +327,7 @@ const HARNESS_PRIVATE_NAME: Record<string, string> = { '.ssh': 'SSH keys', '.aws
 
 const HARNESS_REFUSED: Record<NotAllowed, string> = { settings: "Change a squad-kit setting or a protected file", secret: 'Hand over a password or a key', history: 'Change the history of the code' };
 
-const HARNESS_TOOL_NAME: Record<WindowTool, string> = { take_screenshots: 'Take pictures', look_at_page: 'Look at a page', start_app: 'Start the app', stop_app: 'Stop the app', app_status: 'See if the app runs', run_checks: "Run the project's checks", add_part: 'Add a part of the product', ask_api: 'Ask your API', i_am_stuck: 'Say it is stuck' };
+const HARNESS_TOOL_NAME: Record<WindowTool, string> = { take_screenshots: 'Take pictures', look_at_page: 'Look at a page', start_app: 'Start the app', stop_app: 'Stop the app', app_status: 'See if the app runs', run_checks: "Run the project's checks", add_part: 'Add a part of the product', ask_api: 'Ask your API', read_rows: "Read the story's own rows", i_am_stuck: 'Say it is stuck' };
 
 /** Where the Builder's and Tester's commands can go on a level, in words: the recommended sites by the name people know. */
 function levelSites(level: NetworkLevel): string[] {

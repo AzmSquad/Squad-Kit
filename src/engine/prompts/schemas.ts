@@ -2,6 +2,7 @@ import { DECISION_AREAS, TECH_ROLES } from '../../board/types.js';
 import { PART_KINDS } from '../../board/overview.js';
 import { MAX_PICTURES } from '../proof-verdict.js';
 import { EARLIER_NOTES, REVIEW_NOTES } from '../review-record/prompt.js';
+import { NONE_CHECKS, PROOF_SHAPE } from '../proof-kinds/prompts.js';
 
 const STR = { type: 'string' } as const;
 
@@ -164,7 +165,7 @@ export const PLAN_SCHEMA = {
       type: 'array',
       minItems: 1,
       maxItems: 6,
-      items: { type: 'object', properties: { given: STR, when: STR, then: STR }, required: ['given', 'when', 'then'] },
+      items: { type: 'object', properties: { given: STR, when: STR, then: STR, proof: PROOF_SHAPE }, required: ['given', 'when', 'then'] },
     },
     decision: {
       type: 'object',
@@ -202,7 +203,7 @@ const CRITERIA = {
   type: 'array',
   minItems: 1,
   maxItems: 6,
-  items: { type: 'object', properties: { given: STR, when: STR, then: STR }, required: ['given', 'when', 'then'] },
+  items: { type: 'object', properties: { given: STR, when: STR, then: STR, proof: PROOF_SHAPE }, required: ['given', 'when', 'then'] },
 };
 
 /** Full track, step one: the what. The person approves it before any design. */
@@ -226,7 +227,7 @@ export const CHANGE_SCHEMA = {
       maxItems: 8,
       items: {
         type: 'object',
-        properties: { number: { type: 'integer' }, action: { type: 'string', enum: ['change', 'add', 'remove'] }, given: STR, when: STR, then: STR },
+        properties: { number: { type: 'integer' }, action: { type: 'string', enum: ['change', 'add', 'remove'] }, given: STR, when: STR, then: STR, proof: PROOF_SHAPE },
         required: ['number', 'action'],
       },
     },
@@ -301,7 +302,7 @@ export const BUILD_SCHEMA = {
 
 export const REVIEW_SCHEMA = {
   type: 'object',
-  properties: { approved: { type: 'boolean' }, summary: STR, notes: REVIEW_NOTES, earlier: EARLIER_NOTES, alsoChanged: { type: 'array', items: STR }, checklist: CHECKLIST, question: QUESTION, decided: DECIDED },
+  properties: { approved: { type: 'boolean' }, summary: STR, notes: REVIEW_NOTES, earlier: EARLIER_NOTES, alsoChanged: { type: 'array', items: STR }, checklist: CHECKLIST, question: QUESTION, decided: DECIDED, noneChecks: NONE_CHECKS },
   required: ['approved', 'summary'],
 };
 

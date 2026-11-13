@@ -15,6 +15,8 @@ import { YourCheck } from '../../components/YourCheck';
 import { pageOf } from '../../lib/review';
 import { useDraft } from '../../lib/drafts';
 import { langProps, typedDir } from '../../lib/lang';
+import { KindBlocks } from '../../components/proof/KindBlocks';
+import { hasKinds, proofHead } from '../../lib/proof-kinds';
 
 /* ── Proof ─────────────────────────────────────────────── */
 
@@ -48,6 +50,7 @@ export function GatePills({ t }: { t: Ticket }) {
 }
 
 export function ProofShots({ t }: { t: Ticket }) {
+  if (hasKinds(t)) return <KindBlocks t={t} />;
   const [zoom, setZoom] = useState<number | null>(null);
   if (!t.proof?.length) {
     return (
@@ -153,7 +156,7 @@ export function ProofPanel({ t }: { t: Ticket }) {
         <div className="lbl">Gates, checked by squad-kit</div>
         <GatePills t={t} />
         <AlsoChanged t={t} />
-        <div className="lbl">Before and after</div>
+        <div className="lbl">{proofHead(t, 'Before and after')}</div>
         <ProofShots t={t} />
         <YourCheck t={t} />
       </div>

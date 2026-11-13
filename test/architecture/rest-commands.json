@@ -48,6 +48,7 @@
     "POST /api/v1/tickets/:id/split": "squad split <ticket> --yes",
     "POST /api/v1/tickets/:id/review/past": "squad review <ticket> --past <note>",
     "POST /api/v1/tickets/:id/review/write": "squad review <ticket> --write",
+    "POST /api/v1/tickets/:id/prove": "squad prove <ticket> [line] [kind] --why <reason>",
     "POST /api/v1/tickets/:id/spec-change": "squad propose <ticket> [text...]",
     "POST /api/v1/tickets/:id/spec-change/approve": "squad propose <ticket> --approve",
     "POST /api/v1/tickets/:id/spec-change/decline": "squad propose <ticket> --decline",

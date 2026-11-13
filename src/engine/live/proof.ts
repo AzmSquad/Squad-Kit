@@ -31,6 +31,13 @@ import {
 } from '../proof-verdict.js';
 import { PassingTrouble, technicalWords } from './shared.js';
 import type { LiveSquad } from './squad.js';
+import { appNeeded, picturesNeeded, testerLines } from '../proof-kinds/lines.js';
+import { kindsStop, lockScreenLines, plannedProof, provedByKind, type KindsHost } from '../proof-kinds/flow.js';
+import { randomUUID } from 'node:crypto';
+import { CHECK_SILENT_MS, runCommand, type CommandWatch } from '../checks.js';
+import { copiesOf, workFolder } from '../copies.js';
+import { PROOF_STEP_MS } from './limits.js';
+import { checkedLine } from '../proof-kinds/saved.js';
 
 /** The proof step: the Tester's screenshots and squad-kit's check of them. */
 export const proofPart = {
@@ -54,12 +61,13 @@ export const proofPart = {
   async proofOnce(this: LiveSquad, id: string): Promise<void> {
     this.listNoes.delete(id);
     const meta = this.meta();
+    await lockScreenLines(this.bp, id, meta);
     const t = readTicket(this.bp, id)!;
     const rc = (this.appOf(t)?.repo ?? repoFor(meta, t)).commands;
     // A product that cannot run yet says why, instead of having nothing to show.
     // A phone app with no web version shows on squad-kit's phone, or waits for its tools: never a proof with no pictures.
-    const phoneWay = rc.start && rc.url ? null : (await picturesWay(this.bp, t, false)).way;
-    const canShow = (Boolean(rc.start && rc.url) || phoneWay === 'phone' || phoneWay === 'wait' || Boolean(runsAsProduct(meta) && productPlan(this.bp, meta, t).why)) && (changesScreens(t) || (t.work?.asks ?? 0) > 0);
+    const phoneWay = (rc.start && rc.url) || !picturesNeeded(t, true) ? null : (await picturesWay(this.bp, t, false)).way;
+    const canShow = (Boolean(rc.start && rc.url) || phoneWay === 'phone' || phoneWay === 'wait' || Boolean(runsAsProduct(meta) && productPlan(this.bp, meta, t).why)) && appNeeded(t, changesScreens(t) || (t.work?.asks ?? 0) > 0);
     // Why no picture was taken, in the person's words, and the exact error for engineers.
     let why = '';
     let detail = '';
@@ -133,6 +141,7 @@ export const proofPart = {
       });
       return;
     }
+    const other = await provedByKind(this.kindsHost(id), canShow);
     // What each picture shows: the Tester's verdict and squad-kit's own look at it, together.
     if (canShow && round && doneWhenCount(now) > 0) {
       let judged: ProofJudged;
@@ -143,11 +152,13 @@ export const proofPart = {
         if (this.stops.get(id)?.signal.aborted) throw err;
         return this.checkStop(id, err);
       }
-      if (judged.broken.length) return this.notWorking(id, judged.broken, judged.notShown);
+      if (judged.broken.length || other.broken.length) return this.notWorking(id, [...judged.broken, ...other.broken], judged.notShown);
       if (judged.notShown.length) return this.cannotShow(id, judged.notShown, true, this.listNoes.get(id));
       // Every "done when" ended as not on a screen: nothing shows the work, so the person decides.
       if (judged.offScreen.length === doneWhenCount(now)) return this.cannotShow(id, judged.offScreen, false, this.listNoes.get(id));
     }
+    if (other.broken.length) return this.notWorking(id, other.broken, []);
+    if (other.open.length) return void this.update(id, (x) => kindsStop(x, other.open));
     // A no on a team's list that is on goes the same way as a "done when" not shown.
     if (this.listNoes.get(id)?.length) return this.cannotShow(id, [], true, this.listNoes.get(id));
     this.update(id, (x) => {
@@ -179,12 +190,31 @@ export const proofPart = {
    * screen takes two voices: the check says it cannot be shown, and the Tester said so too or could not show it in its
    * last retake. Returns the rows broken, still not shown and not on a screen, in the order of the "done when" list.
    */
+  /** What the proof kinds need of the squad (proof-kinds/flow.ts): a short Tester run, the story's copy and main's. */
+  kindsHost(this: LiveSquad, id: string): KindsHost {
+    const t = readTicket(this.bp, id)!;
+    const c = copiesOf(this.meta(), t)[0];
+    const dir = c?.dir ?? t.worktree!;
+    const watched = (where: string, watch: CommandWatch) => (cmd: string, ms: number) => runCommand(where, cmd, ms, { silentMs: CHECK_SILENT_MS, ...watch });
+    return {
+      bp: this.bp,
+      id,
+      dir,
+      testCommand: (c?.repo ?? repoFor(this.meta(), t)).commands.test?.trim() ?? '',
+      update: (change) => this.update(id, change),
+      tester: async (o) => (await this.runAgent({ role: 'tester', step: 'proof', ticket: id, cwd: workFolder(t)!, sessionId: randomUUID(), permissions: ['read'], addDirs: this.extraDirs(t), timeoutMs: PROOF_STEP_MS, onTool: this.watcher(id, 'tester', workFolder(t)!), ...o })).structured,
+      run: watched(dir, this.guardedWatch(id, dir)),
+      onMain: (use) => (c?.baseCommit ? this.inMainCopy(id, c, (main, watch) => use(main, watched(main, watch)), "the proof's test") : Promise.resolve(null)),
+      log: (text) => this.log('info', text, id),
+    };
+  },
+
   async judge(this: LiveSquad, id: string, first: ShotRound): Promise<ProofJudged> {
     const sizes = { ...first.sizes };
     const rowOf = (x: Ticket, n: number) => (x.proof ?? []).find((p) => p.after && p.criterion === criterionText(x, n));
     const reasonOf = (x: Ticket, n: number) => x.offScreen?.find((o) => o.criterion === criterionText(x, n))?.why;
     const t = readTicket(this.bp, id)!;
-    const numbers = Array.from({ length: doneWhenCount(t) }, (_, i) => i + 1);
+    const numbers = testerLines(t);
     const toFile = (p: ProofPicture): P.PictureFile => ({ file: p.after, ...(p.page ? { page: p.page } : {}), ...(sizes[p.after] ? { size: sizes[p.after] } : {}), ...(p.device ? { device: p.device } : {}), ...(p.note ? { note: p.note } : {}) });
     const toCheck = (x: Ticket, which: number[]): P.PictureToCheck[] =>
       which.flatMap((n) => {
@@ -238,7 +268,7 @@ export const proofPart = {
         const row = rowOf(x, n);
         const text = criterionText(x, n)!;
         // No retake is left: pictures of a part and the Tester's reason for the rest never stop the story.
-        const v = row ? afterLastRetake(verdict(x, n)!, reasonOf(x, n)) : verdict(x, n);
+        const v = plannedProof(x, n, row ? afterLastRetake(verdict(x, n)!, reasonOf(x, n)) : verdict(x, n));
         const said = v ? plainParts(v.why, technicalWords).kept : '';
         if (!row) {
           if (v?.shows === 'off-screen') {
@@ -259,9 +289,8 @@ export const proofPart = {
       // Agreed on, and with no picture, it stays on the list; a row with pictures says it itself; the rest are not on a list.
       if (stays.length) x.offScreen = stays;
       else delete x.offScreen;
-      const met = (x.proof ?? []).filter((p) => p.shows === 'met').length;
       const open = [out.broken.length ? `${out.broken.length} not working yet` : '', out.notShown.length ? `${out.notShown.length} not shown yet` : '', out.offScreen.length ? `${out.offScreen.length} not on a screen` : ''].filter(Boolean);
-      addActivity(x, 'reviewer', open.length ? `Checked the screenshots: ${[`${met} met`, ...open].join(', ')}` : `Checked the screenshots: each "done when" on a screen is met`);
+      addActivity(x, 'reviewer', checkedLine(x, open));
       for (const r of out.offScreen) addActivity(x, 'reviewer', `"Done when" ${r.criterion} is not on a screen: ${r.why}`);
     });
     return out;

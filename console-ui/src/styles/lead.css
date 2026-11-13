@@ -6,13 +6,13 @@
   --k-screen: #3d6fe0;
   --k-api: #7c4ddb;
   --k-data: #0f8b8d;
-  --k-test: #0d8a42;
+  --k-test: #c2591f;
 }
 :root[data-theme='dark'] {
   --k-screen: #8fb0ff;
   --k-api: #b9a0ff;
   --k-data: #6fe3e0;
-  --k-test: #7cffa0;
+  --k-test: #ffab76;
 }
 
 .btn.go { background: var(--accent); color: var(--accent-ink); border-color: transparent; }

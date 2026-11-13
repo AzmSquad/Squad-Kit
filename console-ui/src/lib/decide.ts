@@ -1,6 +1,6 @@
 import { PROJECT } from '../api/client';
 import type { AgentName, Ticket } from '../api/types';
-import { isApiProof } from './verdict';
+import { isSavedProof } from './verdict';
 
 /**
  * Decision cards in a chat: a story that waits on the person, shown where they talk, with the board's own buttons. The
@@ -60,7 +60,7 @@ export interface Shot {
 }
 
 export function proofShots(t: Ticket): Shot[] {
-  return (t.proof ?? []).filter((p) => p.after && !isApiProof(p.after)).map((p) => ({ file: p.after, label: p.criterion }));
+  return (t.proof ?? []).filter((p) => p.after && !isSavedProof(p.after)).map((p) => ({ file: p.after, label: p.criterion }));
 }
 
 /** Never blind: the thing to look at is there, so Looks right or Approve may show. */

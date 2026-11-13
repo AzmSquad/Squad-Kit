@@ -13,6 +13,7 @@ import { clearStaleStop } from '../../board/stale-stop.js';
 import { MAX_REVIEW_ROUNDS, REVIEW_STEP_MS } from './limits.js';
 import type { AgentAsk } from './shared.js';
 import type { LiveSquad } from './squad.js';
+import { keepNoneChecks } from '../proof-kinds/flow.js';
 import { readAnswer, recordRound } from '../review-record/notes.js';
 import { fixRound } from '../review-record/fix-round.js';
 
@@ -99,6 +100,7 @@ export const reviewPart = {
         x.alsoChanged = also;
         addActivity(x, 'reviewer', alsoChangedLine(also));
       } else delete x.alsoChanged;
+      keepNoneChecks(this.bp, x, (r.structured as { noneChecks?: unknown }).noneChecks);
       // A no on a list that is on is a review finding, like any other.
       const noes = answerLists(this.bp, x, lists, out.checklist);
       if (noes.length) {

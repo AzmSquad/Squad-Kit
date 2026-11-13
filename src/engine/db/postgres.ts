@@ -59,7 +59,7 @@ function env(a: Address, database: string, readOnly = false): Record<string, str
 }
 
 /** Runs SQL through psql on one database and gives back one line per row. */
-async function sql(a: Address, database: string, text: string, doing: string, readOnly = false): Promise<string[]> {
+export async function sql(a: Address, database: string, text: string, doing: string, readOnly = false): Promise<string[]> {
   const out = await runTool(tools().psql, ['-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1', '-f', '-'], { env: env(a, database, readOnly), input: text, secrets: secretsOf(a.password), doing });
   return out.split('\n').filter((l) => l.length);
 }

@@ -11,6 +11,8 @@ import {
   theirLanguage,
 } from './context.js';
 import { FIX_ONLY_BROKEN } from './build.js';
+import { picturesNeeded } from '../proof-kinds/lines.js';
+import { beforeKinds, kindsForTester, noPicturesPrompt, rowsForCheck } from '../proof-kinds/prompts.js';
 
 /**
  * The Tester's brief for the proof: it takes the pictures with squad-kit's own tools (the window), looks at each one,
@@ -25,6 +27,7 @@ export function proofPrompt(meta: BoardMeta, t: Ticket, when: 'before' | 'after'
     return size ? [`- "done when" ${i + 1}: ${size}`] : [];
   });
   const url = appUrl ?? (ctx?.repo?.commands ?? meta.commands ?? {}).url ?? 'its usual address';
+  if (when === 'after' && !picturesNeeded(t, true)) return noPicturesPrompt(t, criteria, apiParts, `${theirLanguage(t)}${notesText((t.notes ?? []).filter((n) => n.kind !== 'criterion'))}${rulesText(ctx)}\n${LOOK}`);
   return `You are the Tester of a software squad. Take screenshots that show each "done when" below ${
     when === 'before' ? 'as the app is BEFORE the change (a screen may not exist yet: show the closest one)' : 'working AFTER the change'
   }.
@@ -101,7 +104,7 @@ ask_api with part (${apiParts.join(', ')}), path, and method and body when it ne
 a file in your list, with exactly what was asked and answered. Name that file in shots like a picture, with shows judged
 by the answer, and a note for a project manager like "Asked for the sale price of an item of 200 cents. It answered 150."
 Never quote raw data in the note. A "done when" the API can show is never offScreen.
-` : ''}Never wait for the clock. Do not sleep or pause to let a booking end, a day pass or a timer run out: when a part needs
+` : ''}${when === 'after' ? kindsForTester(t, apiParts) : beforeKinds(t)}Never wait for the clock. Do not sleep or pause to let a booking end, a day pass or a timer run out: when a part needs
 time to pass, it is one of those parts that cannot be shown.
 Never ask the person anything technical. Do not change project files: squad-kit puts back anything changed.${theirLanguage(t)}${notesText((t.notes ?? []).filter((n) => n.kind !== 'criterion'))}${rulesText(ctx)}
 ${LOOK}`;
@@ -214,7 +217,7 @@ A file ending in .api.json is no picture: squad-kit asked the product's API and 
 what it answered. Read it, and judge by what was answered, not by what the Tester says about it. An Excel answer has its
 sheets in the record, under "sheets": judge by those rows. Numbers the "done when" names are met only when the rows show
 them, and what the local data cannot show goes to off-screen with the reason. Any other saved file (a PDF) cannot be
-opened here: judge by its status, type and size, and the person opens it.
+opened here: judge by its status, type and size, and the person opens it.${rowsForCheck(pictures.flatMap((p) => [p.file, ...(p.more ?? []).map((m) => m.file)]))}
 A picture is taken at one of two sizes: "phone" (390 wide) or "desktop" (1280 wide). When a "done when" names another
 width, judge the nearest size, and do not fault the picture for its size, or for being at another size than the
 picture from before the change. A picture named with a real device (like iPhone 16 Pro or iPad Air) was taken on that

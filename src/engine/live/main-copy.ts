@@ -52,7 +52,7 @@ export const mainCopyPart = {
    * change. The before screenshots end first, as they use that copy. `use` runs in it, with the ticket's Stop and a time
    * limit for its runs; the copy goes after. Null when it could not be made or set up.
    */
-  async inMainCopy<T>(this: LiveSquad, id: string, c: CopyOf, use: (dir: string, watch: CommandWatch) => Promise<T | null>): Promise<T | null> {
+  async inMainCopy<T>(this: LiveSquad, id: string, c: CopyOf, use: (dir: string, watch: CommandWatch) => Promise<T | null>, what = 'the failed test'): Promise<T | null> {
     await this.beforeShotsOf.get(id);
     this.goOn(id);
     const root = path.join(projectRoot(this.bp), c.repo.path);
@@ -71,7 +71,7 @@ export const mainCopyPart = {
       placeStoryFiles(this.bp, c.repo.path, dir);
       const setup = c.repo.commands.setup?.trim();
       if (setup) {
-        doing("Setting up a copy of main's code for the failed test");
+        doing(`Setting up a copy of main's code for ${what}`);
         const s = await runCommand(dir, setup, BEFORE_SHOTS_MS, { ...this.guardedWatch(id, dir), signal: ready });
         if (!s.ok) {
           this.log('warn', `Could not set up a copy of main's code for the failed tests (${setup}): ${tail(s.output, 10)}`, id);
@@ -83,7 +83,7 @@ export const mainCopyPart = {
       this.goOn(id);
       // No server left by another of squad-kit's copies may hold a port the test needs.
       await this.clearBeforeApp(id);
-      doing("Running the failed test on main's code");
+      doing(`Running ${what} on main's code`);
       return await use(dir, { ...this.guardedWatch(id, dir), signal: within(ON_MAIN_MS) });
     } catch (err) {
       if (stop?.aborted) throw err;

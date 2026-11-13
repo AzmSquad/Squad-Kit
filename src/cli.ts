@@ -78,6 +78,8 @@ import { runArchive, runDelete } from './commands/delete.js';
 import { runBranches, runBringIn, runBuild, runCheckMerge, runDepends } from './commands/depends.js';
 import { runSplit } from './commands/split.js';
 import { runReview } from './commands/review.js';
+import { runProve } from './commands/prove.js';
+import { wrap, wrapArgs } from './commands/wrap.js';
 import { runDecided } from './commands/decided.js';
 import { runConfigBudget, runConfigPayment, runCost } from './commands/cost.js';
 import { runAuthLogin, runAuthStatus, runAuthLogout } from './commands/auth/index.js';
@@ -681,6 +683,11 @@ program
   .option('--chat-requirements', 'Send the whole document pasted into its talk to Requirements, as the hint under it does')
   .action(wrapArgs(runSplit));
 program
+  .command('prove <ticket> [line] [kind]')
+  .description('How each "done when" of a spec is proved: screen, data, api, test or none. With no line, list them')
+  .option('--why <reason>', 'One plain line on why; Not on a screen needs one')
+  .action(wrapArgs(runProve));
+program
   .command('pull <ref>')
   .description('Start a ticket from an Azure DevOps work item, for example 35 or AB#35')
   .action(wrapArgs(runPull));
@@ -891,33 +898,3 @@ program.parseAsync(process.argv).catch((err) => {
   ui.renderError(err);
   process.exit(1);
 });
-
-function wrap<T>(fn: (opts: T) => Promise<void>) {
-  return async (opts: T) => {
-    try {
-      await fn(opts);
-    } catch (err) {
-      if (isSquadExit(err)) {
-        if (err.message.trim()) ui.info(err.message);
-        process.exit(err.exitCode);
-      }
-      ui.renderError(err);
-      process.exit(1);
-    }
-  };
-}
-
-function wrapArgs<A extends unknown[]>(fn: (...args: A) => Promise<void>) {
-  return async (...args: A) => {
-    try {
-      await fn(...args);
-    } catch (err) {
-      if (isSquadExit(err)) {
-        if (err.message.trim()) ui.info(err.message);
-        process.exit(err.exitCode);
-      }
-      ui.renderError(err);
-      process.exit(1);
-    }
-  };
-}

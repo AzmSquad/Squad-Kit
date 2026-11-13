@@ -13,6 +13,7 @@ import { QuestionsPanel } from './Questions';
 import { PlanPanel } from './Plan';
 import { ProofPanel, ProofShots } from './Proof';
 import { AskPanel } from './AskPanel';
+import { proofHead } from '../../lib/proof-kinds';
 import { QuietPanel, RecentActivity, SavingPanel, WorkingPanel, YoursPanel } from './Working';
 
 export function NowPanel({ t }: { t: Ticket }) {
@@ -40,7 +41,7 @@ export function NowPanel({ t }: { t: Ticket }) {
               {/* Stopped at the proof: what each screenshot shows, Met, Not working yet or Not shown yet. */}
               {t.stuck?.gate === 'proof' && t.proof?.some((p) => p.after) && (
                 <>
-                  <div className="lbl">What the screenshots show</div>
+                  <div className="lbl">{proofHead(t, 'What the screenshots show')}</div>
                   <ProofShots t={t} />
                 </>
               )}
