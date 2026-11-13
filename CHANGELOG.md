@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.19] — 2026-11-13
+
 ### Added
 
 - **The review written into the pull request.** The Reviewer now writes each note with its file and line, and squad-kit

@@ -56,6 +56,31 @@ Open the pull request:
 - The story then shows **Send it as a pull request**: run the push command it shows (it pushes the branch to your fork),
   then press **Open the pull request page**. GitHub opens a pull request from your fork into `AzmSquad/squad-kit`.
 
+Before you start a big feature:
+
+- **Talk to us first** for anything large, like a new page, a new integration or a design studio. Open an issue or a
+  discussion. Some of these are already planned, and it is better to plan them together than to build the same thing
+  twice.
+- **Write it as an idea, not one giant story.** squad-kit checks the size and suggests splitting it into stories in the
+  order to build them, or sends a whole requirements document to Requirements.
+- **A new page needs sample data.** The story's sample board starts with sample projects and stories only. Add sample
+  data for your page, or the Tester's pictures show an empty page.
+- **Drag, draw and resize are hard to show in pictures.** Give those "done when" lines a Test proof in the spec.
+
+Rules for squad-kit's own code. Tests in `test/architecture/` check them, so a story that breaks one fails its checks:
+
+- **Small files by feature.** A source file stays under 600 lines. The few older files above that are listed in
+  `test/architecture/file-size-caps.json`, and their numbers may only go down.
+- **The layers.** The board (`console-ui/src`) imports nothing outside its own folder and talks to the engine over REST.
+  The engine never imports the board, the terminal commands or the server. Outside tools (trackers, code hosts, AI
+  tools) are modules behind one interface each, in `src/modules/`, and nothing else names a product.
+- **Every button has its terminal command.** Each board action is one REST call and one `squad` command that do the
+  same thing (`test/architecture/rest-commands.json`).
+- **The npm package stays under 5 MB** (`pnpm size:guard`). Prefer small libraries, and ask before adding a big one.
+
+After your pull request is merged, your fork does not update itself. Before your next feature, press **Sync fork** on
+GitHub, or run `git pull upstream main`, so you start from the newest code.
+
 ## Tests
 
 - Unit tests in `test/*.test.ts`, run with `pnpm test`.
