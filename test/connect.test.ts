@@ -143,7 +143,9 @@ describe('Connections: GitHub sign-in through its own tool', () => {
     const bp = project({ projects: true });
     await startSignIn(bp, 'github');
     expect(calls()).toContain('auth login --hostname github.com --web --git-protocol https --scopes project');
-    expect((await connectionsOf(bp)).rows[0]!.steps.map((s) => s.command)).toEqual(['brew install gh', 'gh auth login --web', 'gh auth refresh -s project'].filter((c) => process.platform === 'darwin' || c !== 'brew install gh'));
+    // The install step has a command on a Mac only; elsewhere it points at the Tools page.
+    const install = process.platform === 'darwin' ? 'brew install gh' : undefined;
+    expect((await connectionsOf(bp)).rows[0]!.steps.map((s) => s.command)).toEqual([install, 'gh auth login --web', 'gh auth refresh -s project']);
   });
 
   it('Cancel stops that gh process, and nothing is signed in', async () => {

@@ -83,8 +83,10 @@ describe("the sign-in, through GitHub's own tool", () => {
     expect(await checkGh()).toBe('unknown');
     expect(githubCodeHost.repoFor('/tmp/x', 'https://github.com/me/app.git')).not.toBeNull();
     // A gh that cannot even start (not a program) is no answer either.
-    // On its own on the PATH: Linux would skip a gh it cannot run and start the next one, like a CI runner's own.
-    fs.writeFileSync(path.join(dir, 'gh'), 'not a program', { mode: 0o644 });
+    // Not runnable at all (the mode of a file already there stays, so it is set here): Linux runs a runnable file that
+    // is no program through sh, and would skip one it cannot run for the next gh on the PATH, like a CI runner's own.
+    fs.writeFileSync(path.join(dir, 'gh'), 'not a program');
+    fs.chmodSync(path.join(dir, 'gh'), 0o644);
     process.env.PATH = dir;
     forgetGhState();
     expect(await checkGh()).toBe('unknown');
