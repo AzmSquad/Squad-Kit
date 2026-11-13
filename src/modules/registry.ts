@@ -65,6 +65,15 @@ export function repoHostFor(bp: BoardPaths, remoteUrl: string, upstream?: string
   return null;
 }
 
+/** The kind of project the Tools page reads from a remote, when its code host needs a tool on this computer. */
+export function remoteKind(remoteUrl: string): string | null {
+  for (const m of CODE_HOSTS) {
+    const kind = m.kindOf?.(remoteUrl);
+    if (kind) return kind;
+  }
+  return null;
+}
+
 /** The host that can make and sync copies (forks) of the repo behind a remote, whatever the sign-in. */
 export function forkHostFor(remoteUrl: string): { label: string; forks: ForkHost } | null {
   const m = CODE_HOSTS.find((x) => x.forks?.repoName(remoteUrl));

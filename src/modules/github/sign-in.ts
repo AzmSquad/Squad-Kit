@@ -1,18 +1,22 @@
-import { execFileSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import type { HostSignIn } from '../code-host/types.js';
 import { githubApi } from './auth.js';
 
 /**
- * Whether GitHub's own tool, gh, is on this computer and signed in. Only gh's exit code is read: what it prints (the
- * token) goes nowhere, not even into squad-kit's memory. Kept a minute, so the many quick asks of a board cost nothing.
+ * Whether GitHub's own tool, gh, is on this computer and signed in. gh itself is asked beside everything else, never
+ * holding the board up: only its exit code is read, and what it prints (the token) goes nowhere. Its answer is kept a
+ * minute. Until it has answered, a quick guess from files stands in: gh on the PATH, and github.com in its hosts file.
  */
 
-export type GhState = HostSignIn['state'];
+type GhState = HostSignIn['state'];
 
-export const GH_PAGE = 'https://cli.github.com';
+const GH_PAGE = 'https://cli.github.com';
 
 /** The steps for the person, by what is missing. */
-export const GH_STEPS: Record<Exclude<GhState, 'ready'>, string[]> = {
+const GH_STEPS: Record<Exclude<GhState, 'ready'>, string[]> = {
   missing: ["Install GitHub's tool, gh, from cli.github.com.", 'Sign in: open a terminal and run gh auth login.', 'Come back and press Try again.'],
   'signed-out': ['Sign in: open a terminal and run gh auth login.', 'Come back and press Try again.'],
 };
@@ -21,20 +25,70 @@ export const GH_STEPS: Record<Exclude<GhState, 'ready'>, string[]> = {
 export const SIGN_IN_HELP = "Sign in again with GitHub's tool: open a terminal and run gh auth login. If gh is not on this computer, install it from cli.github.com first.";
 
 const KEEP_MS = 60_000;
-let kept: { at: number; path: string; state: GhState } | null = null;
+const ASK_MS = 10_000;
+let kept: { at: number; key: string; state: GhState } | null = null;
+let asking: Promise<GhState> | null = null;
 let account: { at: number; login: string } | null = null;
 
-export function ghState(at = Date.now()): GhState {
-  const where = process.env.PATH ?? '';
-  if (kept && kept.path === where && at - kept.at < KEEP_MS) return kept.state;
-  let state: GhState = 'ready';
+/** What the answer depends on: a new PATH or gh folder asks again. */
+const keyNow = () => `${process.env.PATH ?? ''}\0${process.env.GH_CONFIG_DIR ?? ''}`;
+
+function configDir(): string {
+  const env = process.env;
+  if (env.GH_CONFIG_DIR) return env.GH_CONFIG_DIR;
+  if (process.platform === 'win32' && env.AppData) return path.join(env.AppData, 'GitHub CLI');
+  return path.join(env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'gh');
+}
+
+function onPath(): boolean {
+  const names = process.platform === 'win32' ? ['gh.exe', 'gh.cmd'] : ['gh'];
+  return (process.env.PATH ?? '').split(path.delimiter).some((d) => d && names.some((n) => fs.existsSync(path.join(d, n))));
+}
+
+/** A quick guess from files only, for the moment before gh has answered. */
+function guess(): GhState {
+  if (!onPath()) return 'missing';
+  if (process.env.GH_TOKEN || process.env.GITHUB_TOKEN) return 'ready';
   try {
-    execFileSync('gh', ['auth', 'token', '--hostname', 'github.com'], { stdio: 'ignore', timeout: 10_000 });
-  } catch (err) {
-    state = (err as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : 'signed-out';
+    return /^github\.com:/m.test(fs.readFileSync(path.join(configDir(), 'hosts.yml'), 'utf8')) ? 'ready' : 'signed-out';
+  } catch {
+    return 'signed-out';
   }
-  kept = { at, path: where, state };
-  return state;
+}
+
+/** Asks gh now, beside everything else, and keeps its answer. */
+export function checkGh(): Promise<GhState> {
+  if (asking) return asking;
+  const key = keyNow();
+  asking = new Promise<GhState>((resolve) => {
+    let done = false;
+    const end = (state: GhState) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      kept = { at: Date.now(), key, state };
+      resolve(state);
+    };
+    const child = spawn('gh', ['auth', 'token', '--hostname', 'github.com'], { stdio: 'ignore' });
+    const timer = setTimeout(() => {
+      child.kill();
+      end('signed-out');
+    }, ASK_MS);
+    child.on('error', (err: NodeJS.ErrnoException) => end(err.code === 'ENOENT' ? 'missing' : 'signed-out'));
+    child.on('exit', (code) => end(code === 0 ? 'ready' : 'signed-out'));
+  }).finally(() => {
+    asking = null;
+  });
+  return asking;
+}
+
+/** The sign-in now, never waiting: gh's last answer, else the guess while gh is asked. */
+export function ghState(at = Date.now()): GhState {
+  const key = keyNow();
+  const mine = kept?.key === key ? kept : null;
+  if (mine && at - mine.at < KEEP_MS) return mine.state;
+  void checkGh();
+  return mine?.state ?? guess();
 }
 
 /** Asks gh again next time: after GitHub refused the sign-in, or in a test. */
@@ -42,7 +96,6 @@ export function forgetGhState(): void {
   kept = null;
   account = null;
 }
-
 
 /** Who is signed in, as GitHub says. Kept ten minutes. */
 export async function signedInAs(): Promise<string> {
@@ -52,9 +105,9 @@ export async function signedInAs(): Promise<string> {
   return me.login;
 }
 
-/** The sign-in as the board shows it. */
+/** The sign-in as the board shows it, from gh's own answer. */
 export async function ghSignIn(): Promise<HostSignIn> {
-  const state = ghState();
+  const state = await checkGh();
   if (state !== 'ready') return { state, steps: GH_STEPS[state], link: GH_PAGE };
   const login = await signedInAs().catch(() => null);
   if (!login) {

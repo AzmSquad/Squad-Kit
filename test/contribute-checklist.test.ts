@@ -187,13 +187,18 @@ describe('the contribution checklist', () => {
     undo.push(fakeGh('ready'));
     const bp = clone('https://github.com/sara/squad-kit.git');
     gh = fakeGitHub(() => undefined);
-    expect(ideaPage(bp, 'A design studio', 'Draw the screens first.')).toEqual({ link: 'https://github.com/AzmSquad/squad-kit/issues/new?title=A+design+studio&body=Draw+the+screens+first.' });
+    expect(ideaPage(bp, 'A design studio', 'Draw the screens first.')).toEqual({ link: 'https://github.com/AzmSquad/squad-kit/issues/new?title=A+design+studio&body=Draw+the+screens+first.', cut: false });
+    // A long idea: the page has its start, and the whole text comes back to paste in.
+    const long = 'Every screen drawn first. '.repeat(400);
+    const big = ideaPage(bp, 'A design studio', long);
+    expect(big).toMatchObject({ cut: true, rest: long.trim() });
+    expect(big.link.length).toBeLessThanOrEqual(6000);
     expect(() => ideaPage(bp, ' ', 'x')).toThrow('Give your idea a short title.');
     expect(gh.calls).toEqual([]);
     const app = new Hono();
     mountContributionApi(app, { paths: buildPaths(project) });
     const r = (await (await app.request('/api/v1/contribute/idea', { method: 'POST', body: JSON.stringify({ title: 'Jira', text: 'Pull stories from Jira' }), headers: { 'content-type': 'application/json' } })).json()) as { link: string };
-    expect(r.link).toBe('https://github.com/AzmSquad/squad-kit/issues/new?title=Jira&body=Pull+stories+from+Jira');
+    expect(r).toEqual({ link: 'https://github.com/AzmSquad/squad-kit/issues/new?title=Jira&body=Pull+stories+from+Jira', cut: false });
   });
 
   it('any other project has no checklist', async () => {

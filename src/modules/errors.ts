@@ -1,8 +1,9 @@
 /**
  * Every module reports a problem in one of these few ways, so the board's ways out (sign in again, try later, fix
- * the clash) work the same whichever tracker, code host, AI tool or speech service the project uses.
+ * the clash) work the same whichever tracker, code host, AI tool or speech service the project uses. 'waiting': not yet,
+ * and it needs nobody (a pull request's checks still run): squad-kit looks again by itself.
  */
-export type ModuleErrorKind = 'sign-in' | 'not-found' | 'too-many' | 'offline' | 'clash' | 'other';
+export type ModuleErrorKind = 'sign-in' | 'not-found' | 'too-many' | 'offline' | 'clash' | 'waiting' | 'other';
 
 export class ModuleError extends Error {
   constructor(

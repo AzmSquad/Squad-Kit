@@ -1,18 +1,18 @@
 import type { CodeHostModule, Contribution, HostNote, MergeState, PullRequest, PullRequestReview, RepoHost } from '../code-host/types.js';
 import { ModuleError } from '../errors.js';
 import { githubForks } from './forks.js';
-import { mergePull } from './merge.js';
+import { mergePull, pullState } from './merge.js';
 import { answerOwnerNote, ownerNotesOf } from './owner-notes.js';
 import { repoName } from './pull-page.js';
-import { closePull, describePull, findPull, getPull, openPull, stateOf } from './pulls.js';
+import { closePull, describePull, findPull, openPull } from './pulls.js';
 import { postReviewComments } from './review-comments.js';
 import { SIGN_IN_HELP, ghState } from './sign-in.js';
 import { whereOf } from './where.js';
 
 /**
- * GitHub as a squad-kit code host, signed in through GitHub's own tool, gh. Pull requests of the person's own repo are
- * opened and merged like any code host's. A copy of someone else's repo (a fork, or squad-kit's own code with an
- * upstream) sends its pull request to the repo it came from, where its owner merges: squad-kit never merges there.
+ * GitHub as a squad-kit code host, signed in through GitHub's own tool, gh. Pull requests of the team's own repo (a fork
+ * too) are opened and merged like any code host's. Only when the engine names an upstream (squad-kit's own code) does the
+ * pull request go to that repo, where its owner merges: squad-kit never merges there.
  */
 
 /**
@@ -27,11 +27,11 @@ const GIT_ENV: Record<string, string> = {
   GIT_CONFIG_VALUE_1: '!gh auth git-credential',
 };
 
-export class GitHubRepo implements RepoHost {
+class GitHubRepo implements RepoHost {
   readonly host = 'github';
   readonly label = 'GitHub';
-  // GitHub has no way to upload a picture for a pull request from outside its own pages: the description says the
-  // pictures are on the board instead (ADR-008).
+  // GitHub has no way to upload a picture for a pull request from outside its own pages: the pictures stay on the
+  // board (ADR-008).
   readonly abilities = { attachImages: false };
   readonly signInHelp = SIGN_IN_HELP;
 
@@ -45,26 +45,30 @@ export class GitHubRepo implements RepoHost {
     return whereOf(this.repo, this.upstream);
   }
 
-  private get owner(): string {
-    return this.repo.split('/')[0]!;
+  private async prRepo(): Promise<string> {
+    return (await this.where()).repo;
   }
 
   gitEnv(): Record<string, string> {
     return { ...GIT_ENV };
   }
 
+  async pushable(): Promise<boolean> {
+    return (await this.where()).push;
+  }
+
   async findPullRequest(source: string): Promise<PullRequest | null> {
-    return findPull(await this.where(), this.owner, source, 'open');
+    return findPull(await this.where(), source, 'open');
   }
 
   async lastPullRequest(source: string): Promise<PullRequest | null> {
-    return findPull(await this.where(), this.owner, source, 'all');
+    return findPull(await this.where(), source, 'all');
   }
 
-  /** Into the repo it came from, for a copy: its default branch, whatever this repo's base is called. */
+  /** Into the upstream's default branch when there is one, whatever this repo's base is called. */
   async openPullRequest(input: { source: string; target: string; title: string; description: string; items: string[] }): Promise<PullRequest> {
     const w = await this.where();
-    return openPull(w, this.owner, { source: input.source, base: w.into?.base ?? input.target, title: input.title, description: input.description });
+    return openPull(w, { source: input.source, base: w.into?.base ?? input.target, title: input.title, description: input.description });
   }
 
   attachImage(): Promise<string> {
@@ -72,15 +76,15 @@ export class GitHubRepo implements RepoHost {
   }
 
   async updateDescription(prId: number, description: string): Promise<void> {
-    await describePull((await this.where()).repo, prId, description);
+    await describePull(await this.prRepo(), prId, description);
   }
 
   async mergeState(prId: number): Promise<MergeState> {
-    return stateOf(await getPull((await this.where()).repo, prId));
+    return pullState(await this.prRepo(), prId);
   }
 
   async postReview(prId: number, review: PullRequestReview): Promise<{ threads: number }> {
-    return postReviewComments((await this.where()).repo, prId, review);
+    return postReviewComments(await this.prRepo(), prId, review);
   }
 
   async merge(prId: number, message: string): Promise<{ commit: string }> {
@@ -90,7 +94,7 @@ export class GitHubRepo implements RepoHost {
   }
 
   async close(prId: number): Promise<void> {
-    await closePull((await this.where()).repo, prId);
+    await closePull(await this.prRepo(), prId);
   }
 
   refusedPush(message: string): boolean {
@@ -103,11 +107,11 @@ export class GitHubRepo implements RepoHost {
   }
 
   async ownerNotes(prId: number): Promise<HostNote[]> {
-    return ownerNotesOf((await this.where()).repo, prId);
+    return ownerNotesOf(await this.prRepo(), prId);
   }
 
-  async answerNote(prId: number, note: Pick<HostNote, 'id' | 'kind' | 'who' | 'text'>, text: string): Promise<void> {
-    await answerOwnerNote((await this.where()).repo, prId, note, text);
+  async answerNote(prId: number, note: Pick<HostNote, 'id' | 'kind' | 'who' | 'text' | 'thread'>, text: string): Promise<void> {
+    await answerOwnerNote(await this.prRepo(), prId, note, text);
   }
 }
 
@@ -121,4 +125,6 @@ export const githubCodeHost: CodeHostModule = {
     return new GitHubRepo(repo, (upstream && repoName(upstream)) || undefined);
   },
   forks: githubForks,
+  // Code kept on GitHub: the Tools page lists GitHub's tool for it.
+  kindOf: (remoteUrl) => (repoName(remoteUrl) ? 'github' : null),
 };

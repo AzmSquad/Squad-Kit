@@ -4,7 +4,7 @@ import { scheduleSquad } from '../../board/schedule.js';
 import { releaseGoingOut } from '../../board/lock.js';
 import type { Ticket } from '../../board/types.js';
 import * as P from '../prompts.js';
-import { publishTicket } from '../sync.js';
+import { publishTicket } from '../publish.js';
 import { isMediaNote, prepareMedia } from '../media.js';
 import { budgetStop } from '../../board/budget.js';
 import { howPaid } from '../../board/payment.js';

@@ -69,6 +69,24 @@ describe('agents never see squad-kit secrets', () => {
     }
   });
 
+  it("never gets the person's code host sign-in: no GitHub tokens, and gh's settings in an empty folder", () => {
+    const before = { ...process.env };
+    Object.assign(process.env, { GH_TOKEN: 'a', GITHUB_TOKEN: 'b', GH_ENTERPRISE_TOKEN: 'c', GITHUB_ENTERPRISE_TOKEN: 'd', GH_CONFIG_DIR: path.join(os.homedir(), '.config', 'gh') });
+    try {
+      const env = childEnv();
+      expect([env.GH_TOKEN, env.GITHUB_TOKEN, env.GH_ENTERPRISE_TOKEN, env.GITHUB_ENTERPRISE_TOKEN]).toEqual([undefined, undefined, undefined, undefined]);
+      expect(env.GH_CONFIG_DIR).not.toBe(process.env.GH_CONFIG_DIR);
+      expect(fs.readdirSync(env.GH_CONFIG_DIR!)).toEqual([]);
+      // Something written there is never handed to the next agent.
+      fs.writeFileSync(path.join(env.GH_CONFIG_DIR!, 'hosts.yml'), 'github.com:\n');
+      const next = childEnv().GH_CONFIG_DIR!;
+      expect(next).not.toBe(env.GH_CONFIG_DIR);
+      expect(fs.readdirSync(next)).toEqual([]);
+    } finally {
+      process.env = before;
+    }
+  });
+
   it('every squad step carries the board secrets file', async () => {
     const t = actions.createTicket(bp, { title: 'Opening hours' });
     updateTicket(bp, t.id, (x) => (x.squad = null));

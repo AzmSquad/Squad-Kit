@@ -42,9 +42,11 @@ fs.mkdirSync(standIns, { recursive: true });
 for (const tool of ['pbcopy', 'xclip', 'xsel', 'wl-copy', 'termux-clipboard-set']) {
   fs.writeFileSync(path.join(standIns, tool), '#!/bin/sh\ncat > "$SQUAD_KIT_HOME/clipboard.txt"\n', { mode: 0o755 });
 }
-// A test never reaches GitHub with the developer's own sign-in: this gh is not signed in. A test that wants gh puts its
-// own made-up one first on the PATH.
+// A test never reaches GitHub with the developer's own sign-in: this gh is not signed in, and its settings folder is
+// empty. A test that wants gh puts its own made-up one first on the PATH.
 fs.writeFileSync(path.join(standIns, 'gh'), '#!/bin/sh\necho "not signed in (test)" >&2\nexit 1\n', { mode: 0o755 });
+process.env.GH_CONFIG_DIR = path.join(standIns, 'gh-config');
+fs.mkdirSync(process.env.GH_CONFIG_DIR, { recursive: true });
 process.env.PATH = `${standIns}${path.delimiter}${process.env.PATH ?? ''}`;
 
 // A locale for git, as a person's terminal has. Started with none (an app opened from the Dock, an editor's test
@@ -75,6 +77,9 @@ const ISOLATED_VARS = [
   'SQUAD_PLANNER_API_KEY',
   'JIRA_API_TOKEN',
   'AZURE_DEVOPS_PAT',
+  // GitHub's tool reads these before its own sign-in: a developer's own would reach GitHub from a test.
+  'GH_TOKEN',
+  'GITHUB_TOKEN',
   'SQUAD_TRACKER_API_KEY',
   // Also isolate the interactivity-gating vars. Tests that want CI=1 (fail-fast
   // path) set it explicitly inside their own beforeEach, which runs after this

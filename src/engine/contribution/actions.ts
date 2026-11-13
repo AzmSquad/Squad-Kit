@@ -3,7 +3,7 @@ import type { Ticket, WayOut } from '../../board/types.js';
 import type { ContributionState, OwnerNote } from '../../board/contribution-types.js';
 import { BoardActionError } from '../../board/actions/errors.js';
 import { scheduleSquad } from '../../board/schedule.js';
-import { fixWords, OWNER_FIXING, OWNER_LEFT_CLOSED, OWNER_WAITS } from './words.js';
+import { fixWords, MOST_NOTES, OWNER_FIXING, OWNER_LEFT_CLOSED, OWNER_WAITS } from './words.js';
 
 /**
  * The person's buttons on a pull request that went to someone else's repo, each one REST call and one terminal command
@@ -16,16 +16,23 @@ function sent(t: Ticket): NonNullable<Ticket['contribution']> {
   return t.contribution;
 }
 
-/** Fix these: the owner's new notes go to the Builder; then the checks, the review and Looks right, and the fix goes out. */
+/** The owner's notes on the story's pull request now that wait for the person. */
+const waiting = (t: Ticket): OwnerNote[] => (t.contribution?.notes ?? []).filter((n) => n.state === 'new' && n.pr === t.pr?.id);
+
+/**
+ * Fix these: the owner's new notes go to the Builder, at most MOST_NOTES at once (the rest wait for the next round);
+ * then the checks, the review and Looks right, and the fix goes out. Only the notes sent are marked as being fixed.
+ */
 export function fixThese(bp: BoardPaths, id: string): Ticket {
   const t = requireTicket(bp, id);
-  const c = sent(t);
-  const fresh = (c.notes ?? []).filter((n) => n.state === 'new');
+  sent(t);
+  const fresh = waiting(t).slice(0, MOST_NOTES);
   if (!fresh.length) throw new BoardActionError(`${t.id} has no notes from the owner waiting. squad pr ${t.id} shows them all.`);
   if (t.live || t.squad) throw new BoardActionError(`${t.id} is busy with a step now. Fix these once it is done.`);
+  const ids = new Set(fresh.map((n) => n.id));
   return updateTicket(bp, id, (x) => {
     const cx = x.contribution!;
-    cx.notes = (cx.notes ?? []).map((n): OwnerNote => (n.state === 'new' ? { ...n, state: 'fixing' } : n));
+    cx.notes = (cx.notes ?? []).map((n): OwnerNote => (ids.has(n.id) ? { ...n, state: 'fixing' } : n));
     cx.state = 'fixing';
     cx.since = now();
     x.changeRequest = fixWords(fresh, cx.into);
@@ -57,11 +64,12 @@ function backToWaiting(x: Ticket, state: ContributionState, status: string): voi
 /** Answer them yourself: the notes stay with the person, on the code host, and the story waits for the owner again. */
 export function leaveNotes(bp: BoardPaths, id: string): Ticket {
   const t = requireTicket(bp, id);
-  const c = sent(t);
-  const fresh = (c.notes ?? []).filter((n) => n.state === 'new');
+  sent(t);
+  const fresh = waiting(t);
   if (!fresh.length) throw new BoardActionError(`${t.id} has no notes from the owner waiting.`);
+  const ids = new Set(fresh.map((n) => n.id));
   return updateTicket(bp, id, (x) => {
-    x.contribution!.notes = (x.contribution!.notes ?? []).map((n): OwnerNote => (n.state === 'new' ? { ...n, state: 'left' } : n));
+    x.contribution!.notes = (x.contribution!.notes ?? []).map((n): OwnerNote => (ids.has(n.id) ? { ...n, state: 'left', why: 'You answer it yourself.' } : n));
     backToWaiting(x, 'waiting', OWNER_WAITS);
     addActivity(x, 'you', `Answers the owner's ${fresh.length === 1 ? 'note' : `${fresh.length} notes`} on the pull request themselves. squad-kit waits for the owner again`);
   });

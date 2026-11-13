@@ -4,7 +4,7 @@ import type { BoardMeta, Ticket } from '../../board/types.js';
 import { partsOf } from '../../board/parts.js';
 import { copiesOf } from '../copies.js';
 import { reposOf } from '../repos.js';
-import { pullRequestPageFor } from '../../modules/registry.js';
+import { remoteKind } from '../../modules/registry.js';
 
 /**
  * What kind of project each part is, read from its files, so the Tools page knows what this project needs. Only files
@@ -103,7 +103,7 @@ export function kindsOf(dir: string): { kinds: ProjectKind[]; platforms: Platfor
     }
   }
   if (['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml'].some((f) => has(dir, f))) kinds.push('docker');
-  if (remoteUrls(dir).some((u) => pullRequestPageFor(u)?.name === 'github')) kinds.push('github');
+  for (const kind of remoteUrls(dir).map(remoteKind)) if (kind && !kinds.includes(kind as ProjectKind)) kinds.push(kind as ProjectKind);
   return { kinds, platforms: [...platforms] };
 }
 

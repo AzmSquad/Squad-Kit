@@ -364,26 +364,31 @@ gh for the sign-in each time and keeps no token; `git push` signs in through gh 
 with gh not signed in, nothing changes from before: the work merges on your computer. The **Tools** page has a line for
 gh, Recommended for a project kept on GitHub, with the steps.
 
-**Your own repo.** Looks right pushes the story's branch, opens the pull request into main, and merges it with a merge
-commit once GitHub allows it; the branch goes, and your own main follows. While GitHub's checks run, squad-kit waits (up
-to 15 minutes). A failed check, a clash, or a branch rule that asks for a person's review is said plainly on the story,
-and squad-kit never goes around it: once someone merges it on GitHub, squad-kit sees it (Check again). A branch rule
-that wants the newest main brings it in on GitHub first. The review goes in after the merge: each note a comment on its
-file and line, fixed ones resolved, and one comment for who pressed Looks right. GitHub takes no pictures from outside
-its own pages, so the pictures stay on the board.
+**Your own repo, a fork too.** A fork is your team's own repo: its pull requests stay in it. Looks right pushes the
+story's branch, opens the pull request into main, and merges it with a merge commit when GitHub allows it; the branch
+goes, and your own main follows. squad-kit never waits for that in the step: while GitHub's checks run, or a branch rule
+waits for a person's approval, the story says "Waits on the code host: its checks or an approval", and squad-kit looks
+again every few minutes and merges it then (or at once with **Check again**). A failed check, a draft or a clash is said
+plainly on the story, and squad-kit never goes around a rule. A branch rule that wants the newest main brings it in on
+GitHub once. When you can't push to the repo, the story merges on this computer instead, as with no code host, and says
+why. The review goes in after the merge: each note a comment on its file and line, fixed ones resolved, and one comment
+for who pressed Looks right. GitHub takes no pictures from outside its own pages, so the pictures stay on the board.
 
-**Someone else's repo.** When your repo is a copy (a fork) of another, or on squad-kit's own code with an `upstream`
-remote, the pull request goes to that repo, into its default branch, and its owner merges it: squad-kit never does.
-The story says **Waiting for the owner to merge**, out of your next release, and squad-kit watches the pull request
-every few minutes:
+**squad-kit's own code.** Its pull request goes to squad-kit's main repo (the `upstream` remote, else the repo its
+package names), into its default branch, and its owners merge it: squad-kit never does. The review goes into the pull
+request's text, note by note, so they read it while reviewing. The story says **Waiting for the owner to merge**, out of
+your release, and squad-kit watches the pull request every few minutes:
 
 - **The owner left notes:** the story waits for you with each note (where, who, what), and two ways out. **Fix these**:
-  the Builder fixes them, the checks, the review and your Looks right run as usual, then squad-kit sends the fix to the
-  same pull request and answers each note "Fixed in <commit>". **Answer them yourself**: the story goes on waiting for
-  the owner. Only notes from people who can change that repo count; anyone else's, a bot's and your own are left out.
+  the Builder fixes them (20 at most at once; the rest come back on the next card), the checks, the review and your
+  Looks right run as usual, then squad-kit sends the fix to the same pull request and answers "Fixed in <commit>" on
+  each note whose lines the fix really changed. A question, or a note the fix did not touch, is left for you to answer,
+  with why. **Answer them yourself**: the story goes on waiting for the owner. Only notes from people who can change
+  that repo count; anyone else's, a bot's and your own are left out.
 - **Merged by the owner:** the story is done. Your copy and your main catch up by themselves when they only fell
   behind.
 - **Closed without merging:** the story says so, with **Send it again** (a new pull request) and **Leave it closed**.
+  Opened again by the owner, it waits again. A clash with newer work there is said once, with what to do.
 
 On squad-kit's own code without gh, the story still shows "Send it as a pull request" (the push and GitHub's page), and
 says how to let squad-kit do it next time.

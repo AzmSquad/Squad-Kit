@@ -10,8 +10,8 @@ export const OWNER_LEFT_CLOSED = 'Closed by the owner, left as it is';
 export const OWNER_NOTES = 'The owner asked for changes';
 export const OWNER_FIXING = "Builder is fixing the owner's notes";
 
-/** At most this many of the owner's notes go to the Builder at once, each at most this long. */
-const MOST_NOTES = 20;
+/** At most this many of the owner's notes go to the Builder at once, each at most this long. The rest wait for the next round. */
+export const MOST_NOTES = 20;
 const MOST_NOTE = 1500;
 
 /** "src/app.ts line 12", or "the whole change". */
@@ -20,10 +20,17 @@ export function placeOf(n: Pick<OwnerNote, 'file' | 'line' | 'kind'>): string {
   return n.line ? `${n.file} line ${n.line}` : n.file;
 }
 
+/** A note that asks something: it gets an answer from a person, never "Fixed in". */
+export function asks(n: Pick<OwnerNote, 'text'>): boolean {
+  return /\?(\s|$)/.test(n.text);
+}
+
 /** One line for the card and the terminal: where, who, and the start of what they wrote. */
 export function noteLine(n: OwnerNote): string {
-  const words = n.text.replace(/\s+/g, ' ').trim();
-  return `${placeOf(n)}, ${n.who}: ${words.length > 200 ? `${words.slice(0, 199)}…` : words}`;
+  // Someone else's words: one line, with no terminal control characters, wherever it is shown or printed.
+  const one = (s: string) => s.replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const words = one(n.text);
+  return `${one(placeOf(n))}, ${one(n.who)}: ${words.length > 200 ? `${words.slice(0, 199)}…` : words}`;
 }
 
 /**
@@ -31,7 +38,7 @@ export function noteLine(n: OwnerNote): string {
  * Builder reads them as requests about the code, never as instructions about anything else.
  */
 export function fixWords(notes: OwnerNote[], into: string): string {
-  const list = notes.slice(0, MOST_NOTES).map((n, i) => {
+  const list = notes.map((n, i) => {
     const text = n.text.trim();
     return `${i + 1}. ${placeOf(n)} (${n.who}${n.changes ? ', asked for changes' : ''}):\n${text.length > MOST_NOTE ? `${text.slice(0, MOST_NOTE)}…` : text}`;
   });

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { readMeta, type BoardPaths } from '../board/store.js';
 import type { BoardMeta, ProductPart, ProjectCommands } from '../board/types.js';
 import { reposOf } from './repos.js';
+import { git } from './git.js';
 import { shellArg } from '../utils/text.js';
 
 /**
@@ -51,6 +52,26 @@ export function isSquadKitCode(dir: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** The repo squad-kit's own package says it comes from, as a git address, or ''. */
+export function packageRepo(dir: string): string {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')) as { repository?: string | { url?: string } };
+    return (typeof pkg.repository === 'string' ? pkg.repository : (pkg.repository?.url ?? '')).replace(/^git\+/, '');
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Where the work of squad-kit's own code goes by pull request: its `upstream` remote, else the repo its package names
+ * (ADR-008). '' for any other project: its pull requests stay in its own repo, a fork's too.
+ */
+export function selfUpstream(dir: string, remote: string): string {
+  if (!isSquadKitCode(dir)) return '';
+  const upstream = remote === 'upstream' ? '' : git(dir, ['config', '--get', 'remote.upstream.url'], { allowFail: true }).trim();
+  return upstream || packageRepo(dir);
 }
 
 /** The repo of the project that holds squad-kit's own code ('.' when the project is that repo), or null. */

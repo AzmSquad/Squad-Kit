@@ -1,11 +1,10 @@
-import fs from 'node:fs';
 import path from 'node:path';
 import { readMeta, type BoardPaths } from '../board/store.js';
 import type { Ticket } from '../board/types.js';
 import { forkHostFor, pullRequestPageFor } from '../modules/registry.js';
 import { git } from './git.js';
 import { repoFor } from './repos.js';
-import { isSquadKitCode } from './self-project.js';
+import { isSquadKitCode, packageRepo } from './self-project.js';
 import { shellArg } from '../utils/text.js';
 
 /**
@@ -39,17 +38,6 @@ export interface SendAs {
 /** A remote's address, or '' when there is none. */
 function remoteUrl(dir: string, name: string): string {
   return git(dir, ['config', '--get', `remote.${name}.url`], { allowFail: true }).trim();
-}
-
-/** The repo squad-kit's own package says it comes from, as a git address. */
-function packageRepo(dir: string): string {
-  try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')) as { repository?: string | { url?: string } };
-    const url = typeof pkg.repository === 'string' ? pkg.repository : (pkg.repository?.url ?? '');
-    return url.replace(/^git\+/, '');
-  } catch {
-    return '';
-  }
 }
 
 /**

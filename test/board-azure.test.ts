@@ -7,7 +7,8 @@ import { boardPaths, readTicket, ticketFilesDir, updateTicket, writeMeta, type B
 import * as actions from '../src/board/actions.js';
 import { addWorktree } from './support/copy.js';
 import { trackerFor } from '../src/modules/registry.js';
-import { flushTracker, publishTicket, syncWiki } from '../src/engine/sync.js';
+import { flushTracker, syncWiki } from '../src/engine/sync.js';
+import { publishTicket } from '../src/engine/publish.js';
 import { checkMerge, lookOutside } from '../src/engine/merged-outside.js';
 import { AzureError } from '../src/modules/azure/client.js';
 import { LiveSquad } from '../src/engine/live.js';
@@ -387,6 +388,24 @@ describe('a branch with someone else\'s work on it', () => {
     vi.stubGlobal('fetch', async () => new Response('{}', { status: 200 }));
     await expect(publishTicket(bp, t.id)).rejects.toThrow(/has newer work on this ticket from someone else, and squad-kit does not write over it/);
     expect(sh(`git rev-parse ${wt.branch}`, remote)).toBe(tip);
+  });
+});
+
+describe('Azure says no to the sign-in when the pull request goes out', () => {
+  it('stops with plain words and Try again, and the exact answer stays for engineers', async () => {
+    const t = actions.createTicket(bp, { title: 'Owner signs up' });
+    const wt = addWorktree(project, t.id, 'main');
+    fs.writeFileSync(path.join(wt.dir, 'mine.txt'), 'mine\n');
+    sh('git add -A && git -c user.name=t -c user.email=t@t commit -qm mine', wt.dir);
+    updateTicket(bp, t.id, (x) => {
+      x.worktree = wt.dir;
+      x.branch = wt.branch;
+      x.baseCommit = wt.baseCommit;
+    });
+    vi.stubGlobal('fetch', async () => new Response('{"message":"TF400813: not authorized"}', { status: 401 }));
+    const err = (await publishTicket(bp, t.id).then(() => null, (e: unknown) => e)) as Error & { detail?: string };
+    expect(err.message).toBe('squad-kit could not sign in to Azure Repos, so the pull request did not open. Check the sign-in in Settings. Then press Try again.');
+    expect(err.detail).toBe('Azure DevOps did not accept the sign-in. Check it in Settings. An engineer can see why in the log.');
   });
 });
 

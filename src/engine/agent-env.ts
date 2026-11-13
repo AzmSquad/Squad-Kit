@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { SUBSCRIPTION_WITHHELD_ENV_KEYS } from '../planner/runtimes/sdk-env.js';
 
 /**
@@ -10,8 +13,20 @@ export function withIpv4First(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return flags.length ? { ...env, NODE_OPTIONS: `${current} ${flags.join(' ')}`.trim() } : env;
 }
 
-/** squad-kit's own keys are for the engine: agents never talk to the tracker or the speech service themselves. */
-const ENGINE_ONLY_ENV_KEYS = ['AZURE_DEVOPS_PAT', 'SQUAD_TRACKER_API_KEY', 'JIRA_API_TOKEN', 'MUNSIT_API_KEY'];
+/**
+ * squad-kit's own keys are for the engine: agents never talk to the tracker, the code host or the speech service
+ * themselves. The code host's tool keeps its sign-in in its own folder, so agents get an empty one of those too.
+ */
+const ENGINE_ONLY_ENV_KEYS = ['AZURE_DEVOPS_PAT', 'SQUAD_TRACKER_API_KEY', 'JIRA_API_TOKEN', 'MUNSIT_API_KEY', 'GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN'];
+
+let noSignIn: string | null = null;
+
+/** An empty folder for the code host tool's settings: a tool started there finds no sign-in. Made once per run. */
+function emptyToolFolder(): string {
+  if (noSignIn && fs.existsSync(noSignIn) && !fs.readdirSync(noSignIn).length) return noSignIn;
+  noSignIn = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-kit-no-sign-in-'));
+  return noSignIn;
+}
 
 /** The environment every agent process starts with, whichever AI tool it is. */
 export function childEnv(): NodeJS.ProcessEnv {
@@ -20,5 +35,6 @@ export function childEnv(): NodeJS.ProcessEnv {
   for (const key of Object.keys(env)) {
     if (SUBSCRIPTION_WITHHELD_ENV_KEYS.includes(key.toUpperCase()) || ENGINE_ONLY_ENV_KEYS.includes(key.toUpperCase())) delete env[key];
   }
+  env.GH_CONFIG_DIR = emptyToolFolder();
   return env;
 }

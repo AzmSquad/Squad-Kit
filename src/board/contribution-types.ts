@@ -1,15 +1,8 @@
 /**
- * A story whose pull request went to someone else's repo: the one the project's repo was copied from (a fork), or the
- * main repo of squad-kit's own code. Its owner merges it, never squad-kit; squad-kit watches the pull request, brings
- * the owner's notes back to the story, and answers each one it fixed (engine/contribution).
+ * A story of squad-kit's own code whose pull request went to the main repo (ADR-008): its owner merges it, never
+ * squad-kit. squad-kit watches the pull request, brings the owner's notes back to the story, and answers each one its
+ * fix really changed (engine/contribution).
  */
-
-/**
- * Where an owner's note stands. new: it waits for the person (Fix these, or Answer them yourself). fixing: the Builder
- * works on it. fixed: the fix is in the pull request, and the note was answered "Fixed in <commit>". left: the person
- * answers it on the code host themselves.
- */
-export type OwnerNoteState = 'new' | 'fixing' | 'fixed' | 'left';
 
 export interface OwnerNote {
   /** The code host's own id, with its kind: "line:123". */
@@ -24,11 +17,22 @@ export interface OwnerNote {
   at: string;
   /** A review that asked for changes. */
   changes?: boolean;
-  state: OwnerNoteState;
-  /** The short commit that fixed it, once the fix is in the pull request. */
+  /** The pull request it was written on: a new one after Send it again never answers an old note. */
+  pr: number;
+  /** A note on a line that answers another one: its thread's first note, where answers go. */
+  thread?: string;
+  /**
+   * new: it waits for the person (Fix these, or Answer them yourself). fixing: the Builder works on it. fixed: git shows
+   * the fix changed its lines, and squad-kit answered "Fixed in <commit>". left: the person answers it on the code host,
+   * with why.
+   */
+  state: 'new' | 'fixing' | 'fixed' | 'left';
+  /** The short commit that fixed it. */
   fixedIn?: string;
   /** squad-kit answered it on the code host. */
   answered?: boolean;
+  /** Left: why squad-kit did not answer it, in plain words. */
+  why?: string;
 }
 
 /**
@@ -47,7 +51,14 @@ export interface Contribution {
   since: string;
   /** When squad-kit last asked the code host about it. */
   lookedAt?: string;
+  /** The full commit last sent to the pull request: a fix round's changes are read from git against it. */
+  sent?: string;
+  /** The newest notes, at most 100. */
   notes?: OwnerNote[];
+  /** Every note id ever seen on it, so an old one never comes back as new. */
+  seen?: string[];
+  /** The pull request whose clash in the owner's repo was said on the story, once. */
+  clashTold?: number;
 }
 
 export interface TicketContribution {

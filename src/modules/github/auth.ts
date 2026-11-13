@@ -9,7 +9,7 @@ import { ModuleError, kindOfStatus } from '../errors.js';
 const API = 'https://api.github.com';
 
 /** The token gh holds for github.com, or null when gh is missing or not signed in. */
-export function githubToken(): Promise<string | null> {
+function githubToken(): Promise<string | null> {
   return new Promise((resolve) => {
     execFile('gh', ['auth', 'token', '--hostname', 'github.com'], { timeout: 10_000 }, (err, out) => {
       const token = String(out ?? '').trim();

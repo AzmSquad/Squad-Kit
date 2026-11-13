@@ -2,24 +2,21 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { addActivity, codeChanged, listTickets, readMeta, readTicket, requireTicket, updateTicket, type BoardPaths } from '../board/store.js';
 import type { LocalSetup, Ticket, TrackerEvent } from '../board/types.js';
-import { StepError } from '../board/problem.js';
 import { repoHostFor, trackerFor } from '../modules/registry.js';
 import type { Tracker } from '../modules/tracker/types.js';
 import type { RepoHost } from '../modules/code-host/types.js';
-import { MergeClash, currentBranch, git, mergeIntoBase, remotes, netGitLater, baseTurn, fetchedTip, moveBase } from './git.js';
+import { MergeClash, currentBranch, git, mergeIntoBase, remotes, baseTurn, fetchedTip, moveBase } from './git.js';
 import { projectRoot } from './live.js';
 import { filesMoved, repoFor } from './repos.js';
 import { overviewAfterMerge } from '../board/overview.js';
 import { firstCodeMerged } from '../board/first-story.js';
-import { mergeWait } from '../board/auto.js';
+import { PR_HOST_WAITS, mergeWait } from '../board/auto.js';
 import { clearStaleStop } from '../board/stale-stop.js';
 import { copyViews } from './copies.js';
 import { writeLog } from '../core/app-log.js';
 import { freeName } from '../core/file-names.js';
 import { ModuleError, refusedForGood } from '../modules/errors.js';
-import { isSquadKitCode } from './self-project.js';
-import { sentToOwner } from './contribution/send.js';
-import { prDescription } from './review-record/pr-description.js';
+import { selfUpstream } from './self-project.js';
 import { tidyStoryDbsBeside } from './story-db.js';
 import type { ReviewRecord } from '../board/review-types.js';
 import { withReviewBody } from './review-record/commit-body.js';
@@ -31,12 +28,12 @@ import { writeReview } from './review-record/write.js';
  */
 
 /** The ticket's item id on this tracker, when it came from it. */
-function itemId(t: Ticket, tracker: Tracker): string | null {
+export function itemId(t: Ticket, tracker: Tracker): string | null {
   if (t.source.type !== tracker.name) return null;
   return t.source.id ?? tracker.parseRef(t.source.ref ?? '');
 }
 
-function note(bp: BoardPaths, id: string, text: string): void {
+export function noteOn(bp: BoardPaths, id: string, text: string): void {
   try {
     updateTicket(bp, id, (t) => addActivity(t, 'release', text));
   } catch {
@@ -45,7 +42,7 @@ function note(bp: BoardPaths, id: string, text: string): void {
 }
 
 /** Words with a technical part: they stay out of the ticket's activity, in the log an engineer reads. */
-function saidToEngineers(bp: BoardPaths, id: string, text: string): void {
+export function saidToEngineers(bp: BoardPaths, id: string, text: string): void {
   writeLog({ level: 'warn', project: readMeta(bp).project, ticket: id, text });
 }
 
@@ -70,7 +67,7 @@ export async function tellTracker(bp: BoardPaths, ticketId: string, event: Track
       case 'started': {
         const state = await tracker.moveTo(id, 'in-progress');
         await tracker.comment(id, `squad-kit started work on this as ticket **${t.id}**.`);
-        if (state) note(bp, ticketId, `Moved ${ref} to ${state} on ${tracker.label}`);
+        if (state) noteOn(bp, ticketId, `Moved ${ref} to ${state} on ${tracker.label}`);
         break;
       }
       case 'answered': {
@@ -78,7 +75,7 @@ export async function tellTracker(bp: BoardPaths, ticketId: string, event: Track
         if (!answered.length) return true;
         const items = answered.map((q, i) => `${i + 1}. ${q.text}\n   **${q.answer!.choice.replace(/:$/, '')}${q.answer!.value ? `: ${q.answer!.value}` : ''}**`).join('\n');
         await tracker.comment(id, `**Questions answered** by ${readMeta(bp).user.name}\n\n${items}`);
-        note(bp, ticketId, `Posted the answers on ${ref}`);
+        noteOn(bp, ticketId, `Posted the answers on ${ref}`);
         break;
       }
       case 'planned': {
@@ -91,20 +88,20 @@ export async function tellTracker(bp: BoardPaths, ticketId: string, event: Track
           t.decision && chosen ? `**Decision${t.decision.adr ? ` ${t.decision.adr}` : ''}:** ${chosen.name}. ${t.decision.why}` : '',
         ];
         await tracker.comment(id, parts.filter(Boolean).join('\n\n'));
-        note(bp, ticketId, `Posted the plan on ${ref}`);
+        noteOn(bp, ticketId, `Posted the plan on ${ref}`);
         break;
       }
       case 'note': {
         const label = event.noteKind === 'criterion' ? 'Acceptance criterion added' : event.noteKind === 'rule' ? 'Business rule added' : 'Note';
         await tracker.comment(id, `**${label}** by ${readMeta(bp).user.name}\n\n${event.text}`);
-        note(bp, ticketId, `Posted the note on ${ref}`);
+        noteOn(bp, ticketId, `Posted the note on ${ref}`);
         break;
       }
       case 'released': {
         const state = await tracker.moveTo(id, 'closed');
         if (tracker.abilities.tags) await tracker.addTag(id, event.version);
         await tracker.comment(id, `Released in **${event.version}**.`);
-        note(bp, ticketId, `Closed ${ref} on ${tracker.label}${state ? ` (${state})` : ''}`);
+        noteOn(bp, ticketId, `Closed ${ref} on ${tracker.label}${state ? ` (${state})` : ''}`);
         break;
       }
     }
@@ -113,10 +110,10 @@ export async function tellTracker(bp: BoardPaths, ticketId: string, event: Track
     // Sending it again would get the same no, and every later update of this ticket would wait behind it for good.
     if (refusedForGood(err)) {
       saidToEngineers(bp, ticketId, `${tracker.label} refused an update on ${ref}: ${(err as Error).message}`);
-      note(bp, ticketId, `${tracker.label} refused this update on ${ref}, so squad-kit went on without it. The item may be deleted, or a rule there may not allow it. Later updates still go`);
+      noteOn(bp, ticketId, `${tracker.label} refused this update on ${ref}, so squad-kit went on without it. The item may be deleted, or a rule there may not allow it. Later updates still go`);
       return true;
     }
-    if (!again) note(bp, ticketId, `Could not update ${ref} on ${tracker.label}: ${(err as Error).message}. The update is kept and sent again later`);
+    if (!again) noteOn(bp, ticketId, `Could not update ${ref} on ${tracker.label}: ${(err as Error).message}. The update is kept and sent again later`);
     return false;
   }
 }
@@ -144,10 +141,10 @@ async function fileBug(bp: BoardPaths, t: Ticket, tracker: Tracker, again = fals
   } catch (err) {
     if (refusedForGood(err)) {
       saidToEngineers(bp, t.id, `${tracker.label} refused a bug: ${(err as Error).message}`);
-      note(bp, t.id, `${tracker.label} refused this bug, so squad-kit went on without it. It stays on this board`);
+      noteOn(bp, t.id, `${tracker.label} refused this bug, so squad-kit went on without it. It stays on this board`);
       return true;
     }
-    if (!again) note(bp, t.id, `Could not file the bug on ${tracker.label}: ${(err as Error).message}. It is kept and filed again later`);
+    if (!again) noteOn(bp, t.id, `Could not file the bug on ${tracker.label}: ${(err as Error).message}. It is kept and filed again later`);
     return false;
   }
 }
@@ -225,14 +222,14 @@ export async function syncWiki(bp: BoardPaths, tracker: Tracker | null = tracker
 }
 
 /** `.squad/` as a folder inside a repo, when it is in that repo: git moving the checkout must keep squad-kit's newer files. */
-function squadInside(bp: BoardPaths, repoDir: string): string | undefined {
+export function squadInside(bp: BoardPaths, repoDir: string): string | undefined {
   const rel = path.relative(repoDir, bp.squadDir);
   return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel : undefined;
 }
 
 /**
  * Where a ticket's repo lives: its folder, remote name and remote URL. On squad-kit's own code, `upstream`: the repo its
- * work goes to by pull request, when an `upstream` remote names one (ADR-003).
+ * work goes to by pull request (ADR-008). Any other project has none: a fork's pull requests stay in the fork.
  */
 export function repoTarget(bp: BoardPaths, t: Ticket): { dir: string; base: string; remote: string; url: string; upstream?: string } | null {
   const meta = readMeta(bp);
@@ -243,22 +240,13 @@ export function repoTarget(bp: BoardPaths, t: Ticket): { dir: string; base: stri
   // The URL as configured, before any insteadOf rewriting, says which host the repo lives on.
   const url = git(dir, ['config', '--get', `remote.${remote}.url`], { allowFail: true });
   if (!url) return null;
-  const upstream = remote !== 'upstream' && isSquadKitCode(dir) ? git(dir, ['config', '--get', 'remote.upstream.url'], { allowFail: true }) : '';
+  const upstream = selfUpstream(dir, remote);
   return { dir, base: repo.base, remote, url, ...(upstream ? { upstream } : {}) };
 }
 
 /** The code host of a ticket's repo, which knows the repo its work goes to when that is another one. */
 export function targetHost(bp: BoardPaths, target: { url: string; upstream?: string }): RepoHost | null {
   return repoHostFor(bp, target.url, target.upstream);
-}
-
-/** A code host that said no to the sign-in, or a push it refused for one: the stop says how to sign in again. */
-function signInStop(err: unknown, host: RepoHost): StepError | null {
-  const msg = (err as Error)?.message ?? '';
-  // A 403 is a code host's no to this one thing (a rule, a right), not a sign-in.
-  const sign = err instanceof ModuleError ? err.kind === 'sign-in' && err.status !== 403 : /Authentication failed|could not read Username|Invalid username or password/i.test(msg);
-  if (!sign) return null;
-  return new StepError(`squad-kit could not sign in to ${host.label}, so the pull request did not open. ${host.signInHelp ?? 'Check the sign-in in Settings.'} Then press Try again.`, msg);
 }
 
 /** True when accepting the proof should open a pull request: the repo's code host has a module and a saved sign-in. */
@@ -269,138 +257,6 @@ export function opensPullRequest(bp: BoardPaths, t: Ticket): boolean {
   if (meta.delivery === 'push' || t.copies?.length) return false;
   const target = repoTarget(bp, t);
   return Boolean(target && targetHost(bp, target));
-}
-
-/**
- * Push the ticket's branch and open a PR to the base branch, linked to the tracker item, with the proof screenshots.
- * Safe to run again: it reuses the open PR for the branch.
- */
-export async function publishTicket(bp: BoardPaths, ticketId: string): Promise<{ clash: boolean }> {
-  const t = requireTicket(bp, ticketId);
-  const target = repoTarget(bp, t);
-  const host = target && targetHost(bp, target);
-  if (!target || !host || !t.branch) throw new Error('This ticket has no code host with a saved sign-in to open a pull request with.');
-  try {
-    return await publishTo(bp, t, target, host);
-  } catch (err) {
-    throw signInStop(err, host) ?? err;
-  }
-}
-
-async function publishTo(bp: BoardPaths, t: Ticket, target: NonNullable<ReturnType<typeof repoTarget>>, host: RepoHost): Promise<{ clash: boolean }> {
-  const ticketId = t.id;
-  const env = host.gitEnv();
-  // Someone else's repo (the one this one was copied from): its owner merges it, never squad-kit (engine/contribution).
-  // A repo the person cannot push to says so in plain words: they make their own copy first.
-  const into = (await host.contribution?.().catch((err: unknown) => Promise.reject(err instanceof ModuleError && err.status === 403 ? new StepError(err.message) : err))) ?? null;
-
-  // A brand-new repo has no base branch yet, and a PR needs one to point at.
-  const remoteBase = into ? 'there' : await netGitLater(target.dir, ['ls-remote', '--heads', target.remote, target.base], { allowFail: true, env });
-  if (!remoteBase) {
-    await netGitLater(target.dir, ['push', target.remote, `${target.base}:refs/heads/${target.base}`], { env });
-    note(bp, ticketId, `Sent the first code to ${host.label}, which was empty`);
-  }
-  // Never forced: when someone else's work is on that branch (the ticket was taken back from them), it stays there.
-  try {
-    await netGitLater(t.worktree ?? target.dir, ['push', target.remote, `${t.branch!}:refs/heads/${t.branch!}`], { env });
-  } catch (err) {
-    if (/rejected|fast-forward|fetch first|before pushing again/i.test((err as Error).message)) throw new StepError(`${target.remote} has newer work on this ticket from someone else, and squad-kit does not write over it. Bring in their work, then press Try again.`, (err as Error).message);
-    throw err;
-  }
-
-  const tracker = trackerFor(bp);
-  const item = tracker ? itemId(t, tracker) : null;
-  const branch = t.branch!;
-  let pr = await host.findPullRequest(branch);
-  // Found again (a fix sent to the same pull request, or a retry): its description gets the newest record.
-  const found = Boolean(pr);
-  if (!pr) {
-    pr = await host.openPullRequest({ source: branch, target: target.base, title: t.title, description: prDescription(t, item, []), items: item ? [item] : [] });
-  }
-  // Screenshots go into the PR so reviewers see the proof where they review the code.
-  const shots: { label: string; url: string }[] = [];
-  // Each "done when"'s main picture first, then its others while there is room.
-  const rows = t.proof ?? [];
-  const pictures = [...rows.map((p) => ({ label: p.criterion, after: p.after })), ...rows.flatMap((p) => (p.more ?? []).map((m) => ({ label: p.criterion, after: m.after })))].slice(0, 6);
-  // One picture often proves two "done when"s: it goes up once, and its link shows in each of them. The host refuses
-  // the same name twice (Azure does), which would leave the second row with no picture.
-  const sent = new Map<string, string | null>();
-  for (const shot of host.abilities.attachImages ? pictures : []) {
-    const file = path.join(bp.proofDir, shot.after);
-    if (!shot.after || !fs.existsSync(file)) continue;
-    if (!sent.has(file)) sent.set(file, await host.attachImage(pr.id, file).catch(() => null));
-    const url = sent.get(file);
-    // A missing screenshot should not block the PR.
-    if (url) shots.push({ label: shot.label, url });
-  }
-  if (shots.length || found) await host.updateDescription(pr.id, prDescription(t, item, shots));
-
-  const opened = pr;
-  updateTicket(bp, ticketId, (x) => {
-    x.pr = { id: opened.id, url: opened.url, repo: into?.into ?? host.repo, host: host.host };
-    // The clash it had is settled, or a new pull request took the place of a closed one.
-    delete x.clashedPr;
-    delete x.prClosed;
-    x.status = `Merging pull request ${opened.id}`;
-    if (!into) addActivity(x, 'release', `Opened pull request ${opened.id} on ${host.label}`);
-  });
-  if (into) return sentToOwner(bp, ticketId, host, opened, into, { dir: t.worktree ?? target.dir, branch });
-
-  // Merge on accept: the change goes into the base branch now, so the next tickets build on it.
-  let merged = false;
-  let movedLocal = false;
-  let why = '';
-  let clash = false;
-  try {
-    await host.merge(opened.id, `Merge ${t.title} (${t.id})`);
-    merged = true;
-    const head = await fetchedTip(target.dir, target.remote, target.base, { env });
-    const local = await baseTurn(target.dir, () => moveBase(target.dir, target.base, head, squadInside(bp, target.dir)));
-    if (local.note) saidToEngineers(bp, ticketId, local.note);
-    movedLocal = local.moved;
-  } catch (err) {
-    why = (err as Error).message;
-    // Newer changes in the base clash with it: that needs the clash card (the caller gives it), not a wait on the host.
-    clash = (await host.mergeState(opened.id).catch(() => null)) === 'clash';
-  }
-  updateTicket(bp, ticketId, (x) => {
-    x.live = false;
-    x.squad = null;
-    x.progress = undefined;
-    if (merged) {
-      x.mergedAt = new Date().toISOString();
-      // Merged: a stop it went past (a clash it settled, a pull request that did not open) is over.
-      clearStaleStop(x);
-      const ls = movedLocal ? localSetupFor(bp, x) : undefined;
-      if (ls) x.localSetup = ls;
-      x.status = `Merged into ${target.base} · goes out in ${x.release ?? 'the next release'}`;
-      addActivity(x, 'release', `Merged pull request ${opened.id} into ${target.base}`);
-    } else if (!clash) {
-      x.status = `PR ${opened.id} is waiting in ${host.label} · ${x.release ?? 'next release'}`;
-      addActivity(x, 'release', `Pull request ${opened.id} is open but not merged yet: ${why}`);
-    }
-  });
-  if (merged) mapAfterMerge(bp);
-  // The review goes in once the pull request is merged, so a thread can never hold it up. A pull request that waits
-  // gets it when its merge is seen (recheckMerge, merged-outside.ts).
-  if (merged) await writeReview(bp, ticketId, host, opened);
-
-  // A clash is not done yet: the item stays where it is until the ticket is accepted again.
-  if (tracker && item && !clash) {
-    try {
-      const state = await tracker.moveTo(item, 'resolved');
-      await tracker.comment(
-        item,
-        merged
-          ? `Merged into **${target.base}** by pull request [${opened.id}](${opened.url}), with the proof. It goes out in the next release.`
-          : `Pull request [${opened.id}](${opened.url}) is open with the proof, waiting to be merged in ${host.label}.`,
-      );
-      if (state) note(bp, ticketId, `Moved ${tracker.refOf(item)} to ${state} on ${tracker.label}`);
-    } catch (err) {
-      note(bp, ticketId, `Could not update ${tracker.refOf(item)} on ${tracker.label}: ${(err as Error).message}`);
-    }
-  }
-  return { clash };
 }
 
 /**
@@ -426,10 +282,15 @@ export async function recheckMerge(bp: BoardPaths, id: string): Promise<'merged'
     const state = await host.mergeState(t.pr.id).catch(() => null);
     if (state === 'clash' || state === 'closed') return state;
     if (state !== 'merged') {
-      // The host says it can merge, so a network blip cut off the merge itself: it is asked again. One that waits for an
-      // approver is left to wait.
-      const merged = state === 'mergeable' && (await host.merge(t.pr.id, `Merge ${t.title} (${t.id})`).then(() => true, () => false));
-      if (!merged) return 'waiting';
+      // The host says it can merge now (its checks passed, someone approved, or a blip cut the merge off): it merges.
+      // One the host held back (PR_HOST_WAITS) is asked too, so a refusal is said on the story once and the wait ends.
+      if (state !== 'mergeable' && t.status !== PR_HOST_WAITS) return 'waiting';
+      const err = await host.merge(t.pr.id, `Merge ${t.title} (${t.id})`).then(() => null, (e: unknown) => e as Error);
+      if (err instanceof ModuleError && err.kind === 'clash') return 'clash';
+      if (err) {
+        if (!(err instanceof ModuleError && err.kind === 'waiting') && t.status === PR_HOST_WAITS) heldBack(bp, id, t.pr.id, host.label, err.message);
+        return 'waiting';
+      }
     }
     moved = await followBase(bp, id, target, host);
     const pr = t.pr;
@@ -463,6 +324,15 @@ export async function recheckMerge(bp: BoardPaths, id: string): Promise<'merged'
   return 'merged';
 }
 
+/** A pull request the code host held back for good (a failed check, a draft): said once, and the squad stops looking. */
+function heldBack(bp: BoardPaths, id: string, pr: number, label: string, why: string): void {
+  updateTicket(bp, id, (x) => {
+    if (x.status !== PR_HOST_WAITS) return;
+    x.status = `PR ${pr} is waiting in ${label} · ${x.release ?? 'next release'}`;
+    addActivity(x, 'release', `Pull request ${pr} is open but not merged yet: ${why}`);
+  });
+}
+
 /**
  * The code host merged a pull request, so its base moved there: the person's own checkout of the base follows when it
  * can. True when it moved.
@@ -490,9 +360,9 @@ export async function trackerMerged(bp: BoardPaths, ticketId: string, pr: { id: 
   try {
     const state = await tracker.moveTo(item, 'resolved');
     await tracker.comment(item, `Merged into **${base}** by pull request [${pr.id}](${pr.url}), with the proof. It goes out in the next release.`);
-    if (state) note(bp, ticketId, `Moved ${tracker.refOf(item)} to ${state} on ${tracker.label}`);
+    if (state) noteOn(bp, ticketId, `Moved ${tracker.refOf(item)} to ${state} on ${tracker.label}`);
   } catch (err) {
-    note(bp, ticketId, `Could not update ${tracker.refOf(item)} on ${tracker.label}: ${(err as Error).message}`);
+    noteOn(bp, ticketId, `Could not update ${tracker.refOf(item)} on ${tracker.label}: ${(err as Error).message}`);
   }
 }
 

@@ -39,15 +39,21 @@ export function mergesByItself(t: Pick<Ticket, 'track'>): boolean {
 export const PR_WAITS = 'Waits for someone to approve the pull request';
 
 /**
+ * A pull request the code host holds back for now, on any track: its checks still run, or a branch rule waits for an
+ * approval. The squad looks again every few minutes and merges it then (engine/sync.ts recheckMerge).
+ */
+export const PR_HOST_WAITS = 'Waits on the code host: its checks or an approval';
+
+/**
  * Accepted, but its change is not in the base yet and nothing runs for it: the merge could not move the person's own
- * checkout of the base ('checkout', on every track), or on this track its pull request waits for a person to approve
- * it ('pr'). The live squad looks again on a timer (engine/sync.ts recheckMerge). Meanwhile it holds no building place,
+ * checkout of the base ('checkout', on every track), or its pull request waits for a person to approve it on this track,
+ * or for the code host's checks on any track ('pr'). The live squad looks again on a timer (engine/sync.ts recheckMerge). Meanwhile it holds no building place,
  * and its story shows as needing someone.
  */
 export function mergeWait(t: Ticket | undefined | null): 'pr' | 'checkout' | null {
   if (!t || t.stage !== 'release' || isMerged(t) || t.squad || t.waiting || t.live || t.deleting || t.archived) return null;
   // A pull request in someone else's repo is its owner's to merge (engine/contribution).
-  if (t.pr) return t.track === 'auto' && !t.contribution ? 'pr' : null;
+  if (t.pr) return (t.track === 'auto' || t.status === PR_HOST_WAITS) && !t.contribution ? 'pr' : null;
   return t.branch ? 'checkout' : null;
 }
 

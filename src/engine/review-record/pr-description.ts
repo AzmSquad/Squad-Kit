@@ -3,7 +3,7 @@ import { KIND_NAMES } from '../../board/proof-lock.js';
 import { plainMarkdown as plain } from '../../core/safe-markdown.js';
 import { criterionText } from '../proof-verdict.js';
 import { commitWords, countWords, reviewView, type ReviewView } from './view.js';
-import { approvalWords, oneLine, reasonWords } from './words.js';
+import { approvalWords, oneLine, reasonWords, stateWords } from './words.js';
 
 /**
  * The pull request's description: the full record of the story (ADR-007). Every word an agent or a person wrote goes
@@ -71,9 +71,21 @@ function continuedLines(t: Ticket): string[] {
   return ['### Continued anyway', ...t.overrides.map((o) => `- **${what(o)}**, by ${plain(o.by)}: ${plain(o.reason)}`), ''];
 }
 
-export function prDescription(t: Ticket, item: string | null, shots: { label: string; url: string }[]): string {
+/**
+ * Each of the Reviewer's notes, where it is and how it was settled: for a pull request into someone else's repo, whose
+ * owner reads the review here while reviewing (ADR-008). Its own threads are never written into their repo.
+ */
+function noteLines(v: ReviewView): string[] {
+  const notes = v.rounds.flatMap((r) => r.notes);
+  if (!notes.length) return [];
+  const settled = (n: (typeof notes)[number]) => (n.state === 'fixed' ? stateWords(n).replace(/^Fixed in (\w+)$/, 'Fixed in `$1`') : n.state === 'past' ? `Went past. ${plain(reasonWords(n))}` : 'Open');
+  return ['### The review, note by note', ...notes.map((n) => `- ${n.file ? `\`${n.file.replace(/`/g, '')}\`${n.line ? ` line ${n.line}` : ''}: ` : ''}${plain(n.text.replace(/\s+/g, ' ').trim(), 300)} · ${settled(n)}`), ''];
+}
+
+/** `notes`: the review note by note too, for a pull request into someone else's repo. */
+export function prDescription(t: Ticket, item: string | null, shots: { label: string; url: string }[], o: { notes?: boolean } = {}): string {
   const view = reviewView(t);
-  const lines = [...askedLines(t), ...(item ? [`Work item: #${item}`, ''] : []), ...doneWhenLines(t, shots), ...reviewLines(view), ...checksLines(t, view.rounds.length || (t.reviewRound ?? 0)), ...continuedLines(t)];
+  const lines = [...askedLines(t), ...(item ? [`Work item: #${item}`, ''] : []), ...doneWhenLines(t, shots), ...reviewLines(view), ...(o.notes ? noteLines(view) : []), ...checksLines(t, view.rounds.length || (t.reviewRound ?? 0)), ...continuedLines(t)];
   if (view.looksRight) lines.push(approvalWords(view.looksRight, true), '');
   if (shots.length) {
     lines.push('### Screenshots');

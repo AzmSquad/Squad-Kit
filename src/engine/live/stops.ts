@@ -141,6 +141,7 @@ export const stopsPart = {
           ...(detail ? { detail } : {}),
           options: wayOptions({
             publish: retryPhase === 'publish',
+            contribution: Boolean(t.contribution),
             copy: Boolean(t.worktree && fs.existsSync(t.worktree)) && ['implement', 'test', 'review'].includes(t.stage),
           }),
         };

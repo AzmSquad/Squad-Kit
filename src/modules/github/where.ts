@@ -1,11 +1,11 @@
 import type { HostRepoInfo } from '../code-host/types.js';
-import { ModuleError } from '../errors.js';
 import { githubApi } from './auth.js';
 
 /**
- * Where a repo's pull requests go: into the repo itself, or, for a copy (a fork, or squad-kit's own code with an
- * upstream), into the repo it came from, with the branch named "owner:branch". A repo's place never changes, so it is
- * asked once and kept a while.
+ * Where a repo's pull requests go. Into the repo itself, a fork too: a team's fork is its own repo. Only when the
+ * engine names an upstream (squad-kit's own code) do they go there, from "owner:branch", and the upstream wins over
+ * GitHub's own parent, so a copy of a copy still sends its work to the right repo. A repo's place never changes, so it
+ * is asked once and kept a while.
  */
 
 export interface RawRepo {
@@ -22,8 +22,12 @@ export interface RawRepo {
 export interface Where {
   /** The repo that holds the pull requests. */
   repo: string;
+  /** The owner of the branch's repo, as GitHub names it (a renamed account too). */
+  owner: string;
   /** The branch as a pull request names it. */
   head(branch: string): string;
+  /** The signed-in person can push to the branch's repo. */
+  push: boolean;
   /** Set when the pull requests go to someone else's repo. */
   into?: { repo: string; base: string };
 }
@@ -45,17 +49,11 @@ export function rawRepo(repo: string): Promise<RawRepo> {
 
 async function find(origin: string, upstream?: string): Promise<Where> {
   const own = await rawRepo(origin);
-  let into = own.fork && own.parent ? { repo: own.parent.full_name, base: own.parent.default_branch } : undefined;
-  if (!into && upstream && upstream.toLowerCase() !== own.full_name.toLowerCase()) {
-    const up = await rawRepo(upstream);
-    into = { repo: up.full_name, base: up.default_branch };
-  }
-  if (!into) {
-    if (own.permissions?.push === false) throw new ModuleError(`You can't send changes to ${own.full_name} itself. Make your own copy of it (a fork) on GitHub first, then try again.`, 'other', 403);
-    return { repo: own.full_name, head: (b) => b };
-  }
   const owner = own.full_name.split('/')[0]!;
-  return { repo: into.repo, head: (b) => `${owner}:${b}`, into };
+  const push = own.permissions?.push !== false;
+  const up = upstream && upstream.toLowerCase() !== own.full_name.toLowerCase() ? await rawRepo(upstream) : null;
+  if (!up || up.full_name.toLowerCase() === own.full_name.toLowerCase()) return { repo: own.full_name, owner, head: (b) => b, push };
+  return { repo: up.full_name, owner, head: (b) => `${owner}:${b}`, push, into: { repo: up.full_name, base: up.default_branch } };
 }
 
 const KEEP_MS = 10 * 60_000;
@@ -66,9 +64,10 @@ export function whereOf(origin: string, upstream?: string): Promise<Where> {
   const k = kept.get(key);
   if (k && Date.now() - k.at < KEEP_MS) return k.where;
   const where = find(origin, upstream);
-  kept.set(key, { at: Date.now(), where });
+  const entry = { at: Date.now(), where };
+  kept.set(key, entry);
   // A failed ask is asked again next time.
-  where.catch(() => kept.delete(key));
+  where.catch(() => kept.get(key) === entry && kept.delete(key));
   return where;
 }
 

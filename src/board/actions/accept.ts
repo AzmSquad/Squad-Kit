@@ -54,8 +54,10 @@ export function acceptProof(bp: BoardPaths, ticket: Ticket, byItself?: string, o
       throw actionFailed(bp, ticket.id, 'squad-kit could not save the change, so the proof stays as it is. Press Looks right to try again.', err);
     }
   }
-  // A fix of the owner's notes goes to the same pull request in their repo (engine/contribution).
-  const openPr = (!ticket.pr || Boolean(ticket.contribution)) && opensPullRequest(bp, ticket);
+  // A story whose pull request is in the main repo (engine/contribution) never merges here: its fix goes to the same
+  // pull request, and with no sign-in now the publish step stops with the steps. It goes out in the owner's release.
+  const sendsOn = Boolean(ticket.contribution);
+  const openPr = sendsOn || (!ticket.pr && opensPullRequest(bp, ticket));
   // Merge on accept: without a pull request host the branch merges into the base right here, so the next tickets
   // build on it. With a code host module the live squad opens the PR and merges it.
   let merged: ReturnType<typeof mergeLocally> = null;
@@ -84,7 +86,7 @@ export function acceptProof(bp: BoardPaths, ticket: Ticket, byItself?: string, o
       throw actionFailed(bp, ticket.id, 'The change is saved, but it could not be merged, so the proof stays as it is. An engineer can see why in squad-kit\'s log.', err);
     }
   }
-  if (!release.tickets.includes(ticket.id)) release.tickets.push(ticket.id);
+  if (!sendsOn && !release.tickets.includes(ticket.id)) release.tickets.push(ticket.id);
   writeRelease(bp, release);
   // New code on the base: the architecture page reads it again.
   if (merged?.moved) mapAfterMerge(bp);
@@ -97,7 +99,7 @@ export function acceptProof(bp: BoardPaths, ticket: Ticket, byItself?: string, o
     t.stage = 'release';
     t.live = openPr;
     t.progress = undefined;
-    t.release = release.version;
+    t.release = sendsOn ? undefined : release.version;
     const into = merged?.moved ? merged : null;
     // squad-kit's own code goes out by pull request, never in a release from here (engine/self-project.ts).
     const own = isSelfProject(bp);

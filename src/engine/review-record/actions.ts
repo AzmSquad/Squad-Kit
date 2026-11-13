@@ -39,6 +39,8 @@ export function goPast(bp: BoardPaths, id: string, n: number, reason: string): R
 export async function writeReviewAgain(bp: BoardPaths, id: string): Promise<ReviewPosted> {
   const t = requireTicket(bp, id);
   if (!t.pr) throw new BoardActionError(`${t.id} has no pull request: its review is in its merge commit and on the board.`);
+  // In someone else's repo, the review is in the pull request's own text: squad-kit writes no threads there (ADR-008).
+  if (t.contribution) throw new BoardActionError(`${t.id}'s review is in the text of pull request ${t.pr.id} in ${t.contribution.into}: squad-kit writes no threads into that repo.`);
   const target = repoTarget(bp, t);
   const host = target && targetHost(bp, target);
   if (!host) throw new BoardActionError(`${t.id}'s code host has no saved sign-in on this computer. Add it in Settings, then try again.`);

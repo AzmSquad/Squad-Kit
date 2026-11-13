@@ -61,6 +61,8 @@ export interface HostNote {
   at: string;
   /** A review that asked for changes. */
   changes?: boolean;
+  /** A note on a line that answers another one: the id of its thread's first note, where answers go. */
+  thread?: string;
 }
 
 /** One repo on a code host. */
@@ -93,13 +95,18 @@ export interface RepoHost {
    * and leaves the others as people left them. A module without it keeps the review in the description only.
    */
   postReview?(prId: number, review: PullRequestReview): Promise<{ threads: number }>;
-  /** Merges with a merge commit and deletes the branch. Resolves once the host has merged it. */
+  /**
+   * Merges with a merge commit and deletes the branch, when the host allows it now. Resolves once the host has merged
+   * it. One that only has to wait (its checks run) is a ModuleError of kind 'waiting': squad-kit looks again later.
+   */
   merge(prId: number, message: string): Promise<{ commit: string }>;
   close(prId: number): Promise<void>;
   /** The push was refused because the branch only takes pull requests. */
   refusedPush(message: string): boolean;
   /** How to sign in again when the host says no, in plain words, for the stop card. */
   readonly signInHelp?: string;
+  /** False when the signed-in person cannot push to this repo. A module without it is never asked. */
+  pushable?(): Promise<boolean>;
   /**
    * Where the pull request goes when the repo is a copy of someone else's: their repo and its default branch. Null for
    * the person's own repo. A module without it has no copies.
@@ -108,7 +115,7 @@ export interface RepoHost {
   /** What the repo's owners wrote on the pull request, oldest first: never the signed-in person's own words, nor a bot's. */
   ownerNotes?(prId: number): Promise<HostNote[]>;
   /** Answers one of those notes, for example "Fixed in 1a2b3c4": on its thread when it has one, else on the pull request. */
-  answerNote?(prId: number, note: Pick<HostNote, 'id' | 'kind' | 'who' | 'text'>, text: string): Promise<void>;
+  answerNote?(prId: number, note: Pick<HostNote, 'id' | 'kind' | 'who' | 'text' | 'thread'>, text: string): Promise<void>;
 }
 
 /** The sign-in a code host module uses on this computer, for the person: ready or not, and the steps when not. */
@@ -152,8 +159,11 @@ export interface ForkHost {
   compareFork(copy: string, parent: string, branch: string): Promise<{ behind: number; ahead: number }>;
   /** Brings the copy's branch up to date with the repo it came from, on the host. Only a fast-forward. */
   syncFork(copy: string, branch: string): Promise<void>;
-  /** The host's page that opens a new issue on `repo`, filled in. The person sends it; squad-kit posts nothing. */
-  newIssuePage(repo: string, title: string, body: string): string;
+  /**
+   * The host's page that opens a new issue on `repo`, filled in. The person sends it; squad-kit posts nothing. `cut`: the
+   * words were too long for one link, so the page has their start.
+   */
+  newIssuePage(repo: string, title: string, body: string): { link: string; cut: boolean };
 }
 
 export interface CodeHostModule {
@@ -161,11 +171,14 @@ export interface CodeHostModule {
   label: string;
   /**
    * The repo behind a git remote URL, or null when it lives elsewhere or no sign-in is saved for the project. `upstream`:
-   * the repo the work goes to by pull request when it is not this one (squad-kit's own code with an `upstream` remote).
+   * the repo the work goes to by pull request when it is not this one: only squad-kit's own code has one (its `upstream`
+   * remote, or the repo its package names). Any other copy of a repo is the team's own, and its pull requests stay in it.
    */
   repoFor(root: string, remoteUrl: string, upstream?: string): RepoHost | null;
   /** Optional: copies of other people's repos (forks). */
   forks?: ForkHost;
+  /** The kind of project the Tools page reads from a remote kept here, when this host needs a tool on the computer. */
+  kindOf?(remoteUrl: string): string | null;
 }
 
 /**

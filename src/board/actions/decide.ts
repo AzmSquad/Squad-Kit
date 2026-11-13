@@ -26,7 +26,7 @@ export function gateCantRunCard(cant: { id: string; name: string; why?: string; 
 }
 
 /** The choices on a stuck card. Every stop has a way out: try again, do it yourself, go around it, or back to the plan. */
-export function wayOptions(stop: { gate?: StuckChoice['gate']; kind?: StuckChoice['kind']; publish?: boolean; copy?: boolean; base?: string; test?: string; auto?: boolean; save?: boolean }): StuckOption[] {
+export function wayOptions(stop: { gate?: StuckChoice['gate']; kind?: StuckChoice['kind']; publish?: boolean; contribution?: boolean; copy?: boolean; base?: string; test?: string; auto?: boolean; save?: boolean }): StuckOption[] {
   // A gate of the team's could not run. Nothing here counts against the story. On Builds by itself it waits for a person.
   if (stop.kind === 'gate-cant-run') {
     return [
@@ -56,7 +56,8 @@ export function wayOptions(stop: { gate?: StuckChoice['gate']; kind?: StuckChoic
   if (stop.publish) {
     return [
       { do: 'retry', name: 'Try again', note: 'Push the branch and open the pull request again.' },
-      { do: 'skip-pr', name: 'Skip the pull request', note: 'Release merges this branch directly instead.' },
+      // A pull request into the main repo is the only way out for it: it never merges here or goes out in a release.
+      ...(stop.contribution ? [] : [{ do: 'skip-pr' as const, name: 'Skip the pull request', note: 'Release merges this branch directly instead.' }]),
     ];
   }
   const retry: StuckOption =

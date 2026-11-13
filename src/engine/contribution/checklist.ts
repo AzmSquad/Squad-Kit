@@ -6,7 +6,7 @@ import { forkHostFor } from '../../modules/registry.js';
 import type { ForkHost, HostSignIn } from '../../modules/code-host/types.js';
 import { git } from '../git.js';
 import { reposOf } from '../repos.js';
-import { selfRepo } from '../self-project.js';
+import { selfRepo, selfUpstream } from '../self-project.js';
 import { catchUp, type RepoPlace } from './catch-up.js';
 
 /**
@@ -51,31 +51,22 @@ const FORK: ChecklistAction = { id: 'fork', name: 'Make my copy', route: 'POST /
 const SYNC: ChecklistAction = { id: 'sync', name: 'Bring it up to date', route: 'POST /api/v1/contribute/sync', command: 'squad contribute --sync' };
 const IDEA: ChecklistAction = { id: 'idea', name: 'Tell the maintainers first', route: 'POST /api/v1/contribute/idea', command: 'squad contribute --idea <title> --text <words>' };
 
-export interface SelfPlace extends RepoPlace {
-  upstream: string;
+interface SelfPlace extends RepoPlace {
+  /** The upstream remote's address, '' with none. */
+  upstreamRemote: string;
 }
 
 const remoteUrl = (dir: string, name: string) => git(dir, ['config', '--get', `remote.${name}.url`], { allowFail: true }).trim();
 
-/** squad-kit's own code in this project: its folder, remote, base, and the upstream remote's address when it has one. */
-export function selfPlace(bp: BoardPaths): SelfPlace | null {
+/** squad-kit's own code in this project: its folder, remote, base, the main repo it goes to, and its upstream remote. */
+function selfPlace(bp: BoardPaths): SelfPlace | null {
   const meta = readMeta(bp);
   const rel = selfRepo(bp.root, meta);
   if (rel === null) return null;
   const repo = reposOf(meta).find((r) => r.path === rel)!;
   const dir = path.join(bp.root, rel);
   const remote = repo.remote || 'origin';
-  return { dir, remote, base: repo.base, url: remoteUrl(dir, remote), upstream: remote === 'upstream' ? '' : remoteUrl(dir, 'upstream') };
-}
-
-/** The repo the package says it comes from. */
-function packageRepo(dir: string): string {
-  try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')) as { repository?: string | { url?: string } };
-    return (typeof pkg.repository === 'string' ? pkg.repository : (pkg.repository?.url ?? '')).replace(/^git\+/, '');
-  } catch {
-    return '';
-  }
+  return { dir, remote, base: repo.base, url: remoteUrl(dir, remote), upstream: selfUpstream(dir, remote), upstreamRemote: remote === 'upstream' ? '' : remoteUrl(dir, 'upstream') };
 }
 
 function count(file: string, of: (j: Record<string, unknown>) => number): number | null {
@@ -122,9 +113,9 @@ function signInItem(s: HostSignIn, label: string): ChecklistItem {
   return { id: 'sign-in', title: `Signed in to ${label}`, state: 'todo', line: `${why} squad-kit signs in through it, and keeps no password.`, steps: s.steps, link: s.link };
 }
 
-/** The main repo: the one the copy came from, else the upstream remote's, else the package's, else the remote's own. */
+/** The main repo: the upstream remote's, else the package's (it wins over the host's own parent), else the parent, else the remote's own. */
 function mainOf(forks: ForkHost, p: SelfPlace, origin: string, parent?: string): string {
-  return parent ?? forks.repoName(p.upstream) ?? forks.repoName(packageRepo(p.dir)) ?? origin;
+  return forks.repoName(p.upstream ?? '') ?? parent ?? origin;
 }
 
 export async function contributeChecklist(bp: BoardPaths): Promise<Checklist> {
@@ -183,9 +174,9 @@ export async function makeMyCopy(bp: BoardPaths): Promise<{ line: string; checkl
   if (info.canPush) throw new BoardActionError(`You can send changes to ${origin} itself, so you need no copy of it.`);
   const copy = await forks.makeFork(origin);
   const ssh = /^(?:git@|ssh:\/\/)/.test(p.url);
-  if (!p.upstream) git(p.dir, ['remote', 'add', 'upstream', p.url]);
+  if (!p.upstreamRemote) git(p.dir, ['remote', 'add', 'upstream', p.url]);
   git(p.dir, ['remote', 'set-url', p.remote, ssh ? copy.gitUrl.ssh : copy.gitUrl.https]);
-  return { line: `Made your own copy, ${copy.repo}. ${p.remote} is your copy now${p.upstream ? '' : `, and upstream is ${origin}`}.`, checklist: await contributeChecklist(bp) };
+  return { line: `Made your own copy, ${copy.repo}. ${p.remote} is your copy now${p.upstreamRemote ? '' : `, and upstream is ${origin}`}.`, checklist: await contributeChecklist(bp) };
 }
 
 /** Bring it up to date: the copy takes the main repo's newest by the host's own sync, then this computer's base moves forward. */
@@ -195,11 +186,15 @@ export async function bringCopyUpToDate(bp: BoardPaths): Promise<{ line: string;
   return { line: r.line, checklist: await contributeChecklist(bp) };
 }
 
-/** Tell the maintainers first: the host's new issue page on the main repo, filled in. The person sends it. */
-export function ideaPage(bp: BoardPaths, title: string, text: string): { link: string } {
+/**
+ * Tell the maintainers first: the host's new issue page on the main repo, filled in. The person sends it. A long idea
+ * does not fit in one link: the page has its start, and `rest` is the part to paste in.
+ */
+export function ideaPage(bp: BoardPaths, title: string, text: string): { link: string; cut: boolean; rest?: string } {
   const { p, forks, origin } = ready(bp);
   const t = title.trim();
   if (!t) throw new BoardActionError('Give your idea a short title.');
-  const main = forks.repoName(p.upstream) ?? forks.repoName(packageRepo(p.dir)) ?? origin;
-  return { link: forks.newIssuePage(main, t, text.trim()) };
+  const words = text.trim();
+  const page = forks.newIssuePage(forks.repoName(p.upstream ?? '') ?? origin, t, words);
+  return page.cut ? { ...page, rest: words } : page;
 }

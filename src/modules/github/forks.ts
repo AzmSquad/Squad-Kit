@@ -13,11 +13,12 @@ import { infoOf, rawRepo, type RawRepo } from './where.js';
 
 export interface ForkPace {
   stepMs: number;
-  waitMs: number;
+  /** Looks at most, one every stepMs: about 3 minutes in all. Counted, never timed, so a busy computer changes nothing. */
+  looks: number;
   sleep(ms: number): Promise<void>;
 }
 
-const REAL: ForkPace = { stepMs: 3_000, waitMs: 3 * 60_000, sleep: (ms) => new Promise((r) => setTimeout(r, ms)) };
+const REAL: ForkPace = { stepMs: 3_000, looks: 60, sleep: (ms) => new Promise((r) => setTimeout(r, ms)) };
 let pace = REAL;
 
 /** Tests wait no time. Null goes back to the real pace. */
@@ -37,14 +38,13 @@ async function makeFork(repo: string): Promise<HostRepoInfo> {
     throw err;
   }
   // GitHub makes the copy in the background: it is ready once its default branch is there.
-  const until = Date.now() + pace.waitMs;
-  for (;;) {
+  for (let look = 1; ; look++) {
     try {
       const r = await rawRepo(made.full_name);
       await githubApi(`/repos/${r.full_name}/branches/${encodeURIComponent(r.default_branch)}`);
       return infoOf(r);
     } catch (err) {
-      if (!(err instanceof ModuleError && err.kind === 'not-found') || Date.now() >= until) throw err;
+      if (!(err instanceof ModuleError && err.kind === 'not-found') || look >= pace.looks) throw err;
     }
     await pace.sleep(pace.stepMs);
   }
@@ -71,9 +71,20 @@ async function syncFork(copy: string, branch: string): Promise<void> {
   }
 }
 
-function newIssuePage(repo: string, title: string, body: string): string {
-  const q = new URLSearchParams({ title: title.slice(0, 200), body: body.slice(0, 6000) });
-  return `https://github.com/${repo}/issues/new?${q.toString()}`;
+/** GitHub's own pages and browsers take a link of about 8,000 characters: the words, encoded, stay well under. */
+const MOST_LINK = 6000;
+
+function newIssuePage(repo: string, title: string, body: string): { link: string; cut: boolean } {
+  const page = (b: string) => `https://github.com/${repo}/issues/new?${new URLSearchParams({ title: title.slice(0, 200), body: b }).toString()}`;
+  if (page(body).length <= MOST_LINK) return { link: page(body), cut: false };
+  // Cut at a word, shorter until it fits: a long idea's start, with a line that says the rest stays with the person.
+  const tail = '\n\n(The rest did not fit in this link. It is in squad-kit: paste it here before you send.)';
+  let keep = body.length;
+  while (keep > 0 && page(`${body.slice(0, keep)}${tail}`).length > MOST_LINK) {
+    const space = body.lastIndexOf(' ', Math.floor(keep * 0.9));
+    keep = space > 0 ? space : Math.floor(keep * 0.9);
+  }
+  return { link: page(`${body.slice(0, keep).trimEnd()}${tail}`), cut: true };
 }
 
 export const githubForks: ForkHost = {
