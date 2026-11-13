@@ -24,9 +24,14 @@ export function kindNamed(said: string): ProofKind | null {
   return PROOF_KINDS.find((k) => k === s || KIND_NAMES[k].toLowerCase() === plain) ?? (plain === 'api' ? 'api' : null);
 }
 
-export function proveLine(bp: BoardPaths, id: string, line: number, kindSaid: string, whySaid?: string): Ticket {
+/**
+ * `keeps`: the Test line keeps something that already works ("stays as it is"), so its test passes before and after.
+ * Left out, a Test line keeps what it had.
+ */
+export function proveLine(bp: BoardPaths, id: string, line: number, kindSaid: string, whySaid?: string, keeps?: boolean): Ticket {
   const kind = kindNamed(kindSaid);
   if (!kind) throw new BoardActionError(`Choose one of: ${PROOF_KINDS.join(', ')}.`);
+  if (keeps && kind !== 'test') throw new BoardActionError('Only a Test line can stay as it is: its test passes before and after the change.');
   const why = String(whySaid ?? '').replace(/\s+/g, ' ').trim().slice(0, 200);
   if (!NO_APP_KINDS.includes(kind) && !hasAppToStart(readMeta(bp))) throw new BoardActionError(`This project has no app to start, so nothing can be shown, called or read for its proof. Pick test, or none with a reason.`);
   return updateTicket(bp, id, (t) => {
@@ -40,11 +45,13 @@ export function proveLine(bp: BoardPaths, id: string, line: number, kindSaid: st
     if (kind === 'none' && !why && !(before === 'none' && c.proof?.why)) throw new BoardActionError('Say why it cannot be shown. The Reviewer checks that reason.');
     // A reason given for another kind no longer fits.
     const keptWhy = why || (before === kind ? c.proof?.why : undefined);
-    c.proof = { kind, ...(keptWhy ? { why: keptWhy } : {}), ...(c.proof?.locked ? { locked: true } : {}) };
+    const wasKeeps = Boolean(before === 'test' && c.proof?.keeps);
+    const nowKeeps = kind === 'test' && (keeps ?? wasKeeps);
+    c.proof = { kind, ...(keptWhy ? { why: keptWhy } : {}), ...(c.proof?.locked ? { locked: true } : {}), ...(nowKeeps ? { keeps: true } : {}) };
     // A first kind on an old spec: the other lines are proved by a picture, as before, and say so.
     for (const o of t.criteria) o.proof ??= { kind: 'screen' };
     // The person's own wording of this line, kept for a rewrite, keeps this kind too.
     for (const e of t.planReview?.edits ?? []) if (e.part === 'criterion' && (e.index ?? 0) === line - 1 && e.criterion) e.criterion.proof = { ...c.proof };
-    if (before !== kind || why) addActivity(t, 'you', `"Done when" ${line} is proved by ${KIND_NAMES[kind]} now${why ? `: ${why}` : ''}`);
+    if (before !== kind || why || wasKeeps !== nowKeeps) addActivity(t, 'you', `"Done when" ${line} is proved by ${KIND_NAMES[kind]}${nowKeeps ? ', stays as it is,' : ''} now${why ? `: ${why}` : ''}`);
   });
 }

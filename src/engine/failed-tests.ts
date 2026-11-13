@@ -70,7 +70,8 @@ function vitestFailed(lines: string[]): FailedTest[] | null {
   for (const line of lines) {
     const m = line.match(/^\s*FAIL\s+(?:\|([^|]+)\|\s+)?(\S+)\s+(?:>\s+(.+?)|\[ .+ \])\s*$/);
     if (!m) continue;
-    const t: FailedTest = { tool: 'vitest', file: m[2]!, ...(m[3] ? { name: m[3] } : {}), ...(m[1] ? { project: m[1] } : {}) };
+    // Run by its file and line, Vitest prints the line after the file: "tests/a.test.ts:135 > …".
+    const t: FailedTest = { tool: 'vitest', file: m[2]!.replace(/:\d+$/, ''), ...(m[3] ? { name: m[3] } : {}), ...(m[1] ? { project: m[1] } : {}) };
     (m[3] ? tests : suites).set(`${m[1] ?? ''}|${testKey(t)}`, t);
   }
   const count = (re: RegExp) => lines.map((l) => l.match(re)).find(Boolean)?.[1];
@@ -183,6 +184,30 @@ function quoted(word: string): string {
 /** Text a test tool reads as a pattern, matching only itself. */
 function exactly(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Where `it.each` and `test.each` put each case's values into a test's title: "%s", "%d", "$amount". */
+const EACH_VALUE = /%[sdifjoO#]|\$[A-Za-z_][\w.]*/;
+
+/**
+ * The pattern that picks one test by its whole name, groups first, on every Vitest and Jest: Vitest 5 joins the groups
+ * with " > ", Vitest 4 and before and Jest with a space, and Vitest 1 and 2 start the name of a test in a file's first
+ * group with a space. Each part is taken as it is, and the name is matched from its first word to its last. A name as
+ * a tool prints it may use " > " or " › " between the groups. A title written for `each` matches each of its cases.
+ */
+export function wholeNamePattern(name: string): string {
+  const part = (p: string) => p.split(EACH_VALUE).map(exactly).join('.*?');
+  return `^ ?${name.split(/ > | › /).map(part).join('(?: > | )')}$`;
+}
+
+/** Vitest 3 and later pick one test by its file and line ("file.test.ts:42"). */
+function vitestPinsLines(dir: string): boolean {
+  try {
+    const v = (JSON.parse(fs.readFileSync(path.join(dir, 'node_modules', 'vitest', 'package.json'), 'utf8')) as { version?: string }).version ?? '';
+    return Number(v.split('.')[0]) >= 3;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -439,9 +464,9 @@ function commandFor(dir: string, run: ToolRun, t: Pick<FailedTest, 'file' | 'lin
       // Playwright reads the file as a pattern, then the line after it.
       return `${env}npx playwright test${carry}${projects} ${quoted(`${exactly(t.file)}${t.line ? `:${t.line}` : ''}`)}`;
     case 'vitest':
-      return `${env}npx vitest run${carry}${projects} ${quoted(t.file)}${t.name ? ` -t ${quoted(`${exactly(t.name.split(' > ').join(' '))}$`)}` : ''}`;
+      return `${env}npx vitest run${carry}${projects} ${quoted(t.line && vitestPinsLines(dir) ? `${t.file}:${t.line}` : t.file)}${t.name ? ` -t ${quoted(wholeNamePattern(t.name))}` : ''}`;
     case 'jest':
-      return `${env}npx jest${carry} ${quoted(exactly(t.file))}${t.name ? ` -t ${quoted(`^${exactly(t.name.split(' › ').join(' '))}$`)}` : ''}`;
+      return `${env}npx jest${carry} ${quoted(exactly(t.file))}${t.name ? ` -t ${quoted(wholeNamePattern(t.name))}` : ''}`;
     case 'pytest':
       return `${env}${has.python} -m pytest${carry} ${quoted(t.name ? `${t.file}::${t.name}` : t.file)}`;
     case 'go': {
@@ -504,8 +529,10 @@ export function fileAlone(dir: string, testCommand: string, asked: string, name?
   }
   const run = runs.find((r) => r.tool === tool);
   if (!run) return null;
-  // One named test of the file, for the proof of a "done when": Playwright picks it by its line, the others by its name.
-  const command = commandFor(dir, run, { file, ...(m[2] && run.tool === 'playwright' ? { line: Number(m[2]) } : {}), ...(name && run.tool !== 'playwright' ? { name } : {}) });
+  // One named test of the file, for the proof of a "done when": Playwright picks it by its line, the others by its name,
+  // and Vitest by both when it can.
+  const line = m[2] && (run.tool === 'playwright' || (run.tool === 'vitest' && name)) ? { line: Number(m[2]) } : {};
+  const command = commandFor(dir, run, { file, ...line, ...(name && run.tool !== 'playwright' ? { name } : {}) });
   return command ? { command, tool: run.tool } : null;
 }
 

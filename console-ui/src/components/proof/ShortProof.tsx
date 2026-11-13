@@ -7,7 +7,7 @@ export function ShortProof({ p }: { p: ProofShot }) {
   const kind = rowKind(p);
   return (
     <span className="shortproof">
-      <KindChip kind={kind} small />
+      <KindChip kind={kind} small keeps={p.test?.keeps} />
       <bdi>{shortProof(p, kind)}</bdi>
     </span>
   );

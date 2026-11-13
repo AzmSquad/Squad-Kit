@@ -12,16 +12,16 @@ import { block, dec, enc, escText, sections } from './docs.js';
 /** The line under a "done when" in spec.md: "Proof: data. Nothing new on a screen." or "Proof: screen, locked. …". */
 export function proofLine(p: CriterionProof | undefined): string {
   if (!p) return '';
-  return `\n   Proof: ${p.kind}${p.locked ? ', locked' : ''}${p.why ? `. ${p.why.replace(/\s+/g, ' ').trim()}` : ''}`;
+  return `\n   Proof: ${p.kind}${p.locked ? ', locked' : ''}${p.keeps ? ', keeps' : ''}${p.why ? `. ${p.why.replace(/\s+/g, ' ').trim()}` : ''}`;
 }
 
-const LINE = /\nProof: (screen|api|data|test|none)(, locked)?(?:\. (.*))?$/;
+const LINE = /\nProof: (screen|api|data|test|none)(, locked)?(, keeps)?(?:\. (.*))?$/;
 
 /** A "done when" as read from spec.md: its own words, and its proof when the line under it says one. */
 export function splitProofLine(text: string): { words: string; proof?: CriterionProof } {
   const m = text.match(LINE);
   if (!m) return { words: text };
-  const proof: CriterionProof = { kind: m[1] as ProofKind, ...(m[3]?.trim() ? { why: m[3].trim() } : {}), ...(m[2] ? { locked: true } : {}) };
+  const proof: CriterionProof = { kind: m[1] as ProofKind, ...(m[4]?.trim() ? { why: m[4].trim() } : {}), ...(m[2] ? { locked: true } : {}), ...(m[3] ? { keeps: true } : {}) };
   return { words: text.slice(0, m.index), proof };
 }
 

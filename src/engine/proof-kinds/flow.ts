@@ -14,6 +14,7 @@ import { TESTS_SCHEMA, testsPrompt } from './prompts.js';
 import { theirLanguage } from '../prompts.js';
 import { workSoFar } from '../handover.js';
 import { TEST_MS, cleanNamed, commandFor, judgeTest, namedProblem, runRecord, type NamedTest } from './tests.js';
+import { storyTestFiles } from './test-files.js';
 
 /**
  * The proof of the kinds the Tester's window does not make: Test lines, which squad-kit proves by running their test on
@@ -123,7 +124,8 @@ async function proveTests(host: KindsHost, t: Ticket, lines: number[], out: Kind
   });
   // Only a test the story added or changed can show its change.
   const changed = t.baseCommit ? await workSoFar(host.dir, t.baseCommit).catch(() => null) : null;
-  const answer = await host.tester({ prompt: `${testsPrompt(t, lines)}${theirLanguage(t)}`, schema: TESTS_SCHEMA, check: (a) => namedProblem(a, host.dir, lines, changed) });
+  const prompt = testsPrompt(t, lines, storyTestFiles(host.dir, changed ?? []));
+  const answer = await host.tester({ prompt: `${prompt}${theirLanguage(t)}`, schema: TESTS_SCHEMA, check: (a) => namedProblem(a, host.dir, lines, changed) });
   const named = cleanNamed(answer, host.dir, lines, changed);
   const rows: ProofShot[] = [];
   for (const n of lines) {
@@ -157,11 +159,12 @@ async function runOne(host: KindsHost, t: Ticket, n: number, test: NamedTest, ou
     fs.writeFileSync(to, snapshot);
     return run(how.command, TEST_MS);
   });
-  const v = judgeTest(test, now, main);
+  const v = judgeTest(test, now, main, t.criteria?.[n - 1]?.proof?.keeps === true);
   host.log(`Ran the test of "done when" ${n} (${how.command}): on main ${v.proof?.before}, on the story's code ${v.proof?.after}`);
   const file = saveRecord(host.bp, t.id, n, 'test', { criterion: text, test, whole: how.whole, story: runRecord(now, how.command), main: runRecord(main, how.command) });
   if (v.shows !== 'met') (v.toBuilder ? out.broken : out.open).push({ criterion: n, text, why: v.why });
-  host.update((x) => addActivity(x, 'tester', v.shows === 'met' ? `The test of "done when" ${n} failed before the change and passes now` : `"Done when" ${n}: ${v.why}`));
+  const met = v.proof?.keeps ? 'passes before the change and after it' : 'failed before the change and passes now';
+  host.update((x) => addActivity(x, 'tester', v.shows === 'met' ? `The test of "done when" ${n} ${met}` : `"Done when" ${n}: ${v.why}`));
   return row(t, n, file, { shows: v.shows, ...(v.why ? { why: v.why } : {}), ...(v.proof ? { test: v.proof } : {}), ...(test.steps.length ? { note: test.steps.join(' ') } : {}) });
 }
 

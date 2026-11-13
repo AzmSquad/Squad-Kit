@@ -91,6 +91,29 @@ describe('the lock rules', () => {
   });
 });
 
+describe('a Test line that stays as it is', () => {
+  it('the Analyst proposes it with a test; any other kind drops it', () => {
+    expect(cleanProof({ kind: 'test', keeps: true })).toEqual({ kind: 'test', keeps: true });
+    expect(cleanProof({ kind: 'data', keeps: true })).toEqual({ kind: 'data' });
+    expect(cleanProof({ kind: 'test', keeps: 'yes' })).toEqual({ kind: 'test' });
+    expect(proposedProofs([{ ...line('paid bookings stay as they are'), proof: { kind: 'test', keeps: true } }])[0]!.proof).toEqual({ kind: 'test', keeps: true });
+    // With no app to start, a test keeps it.
+    expect(proposedProofs([{ ...line('paid bookings stay as they are'), proof: { kind: 'test', keeps: true } }], false)[0]!.proof).toEqual({ kind: 'test', keeps: true });
+  });
+
+  it('after the approval no agent sets it: a change keeps the line\'s own, and a new line has none', () => {
+    const words = line('paid bookings stay as they are');
+    const kept: Criterion = { ...words, proof: { kind: 'test', keeps: true } };
+    const plain: Criterion = { ...words, proof: { kind: 'test' } };
+    expect(changedLine(plain, { kind: 'test', keeps: true }, words, true).proof).toEqual({ kind: 'test' });
+    expect(changedLine(undefined, { kind: 'test', keeps: true }, words, true).proof).toEqual({ kind: 'test' });
+    expect(changedLine(kept, { kind: 'test', why: 'A rule.' }, words, true).proof).toEqual({ kind: 'test', why: 'A rule.', keeps: true });
+    expect(changedLine(kept, undefined, words, true).proof).toEqual({ kind: 'test', keeps: true });
+    // Another kind ends it.
+    expect(changedLine(kept, { kind: 'data' }, words, true).proof).toEqual({ kind: 'data' });
+  });
+});
+
 describe('a project with no app to start', () => {
   it('knows one: no start command and address, no product of parts, no phone app, and code already there', () => {
     const meta = (more: Partial<BoardMeta>) => ({ project: 'Tool', commands: { test: 'npm test' }, ...more }) as BoardMeta;
@@ -132,6 +155,27 @@ describe('the kinds in the project files', () => {
     expect(docs['spec.md']).toContain('   Proof: screen, locked. About what someone sees, so it needs a picture');
     expect(docs['spec.md']).toContain('   Proof: data. Nothing new on a screen: the bookings table shows it.');
     expect(readTicketDocs(docs).criteria).toEqual(criteria);
+  });
+
+  it('keeps a Test line that stays as it is in spec.md, with or without its reason', () => {
+    const criteria: Criterion[] = [
+      { ...line('paid bookings stay as they are'), proof: { kind: 'test', why: 'Payments already work.', keeps: true } },
+      { ...line('refunds stay as they are'), proof: { kind: 'test', keeps: true } },
+    ];
+    const docs = ticketDocs({ ...base, story: 'As a customer…', criteria });
+    expect(docs['spec.md']).toContain('   Proof: test, keeps. Payments already work.');
+    expect(docs['spec.md']).toContain('   Proof: test, keeps\n');
+    expect(readTicketDocs(docs).criteria).toEqual(criteria);
+  });
+
+  it('the pull request says a line stays as it is, and passes before and after once its test did', async () => {
+    const { prDescription } = await import('../src/engine/review-record/pr-description.js');
+    const words = line('paid bookings stay as they are');
+    const row = (before: 'passed' | 'failed'): ProofShot => ({ criterion: 'Given a customer, when they pay, then paid bookings stay as they are', before: 'x.test.json', after: 'x.test.json', beforeLabel: 'Test', afterLabel: 'Test', kind: 'test', shows: 'met', test: { name: 'keeps a paid slot', file: 'tests/booking.test.ts', steps: [], before, after: 'passed', keeps: true } });
+    const t = { ...base, stage: 'done', story: 'As a customer…', criteria: [{ ...words, proof: { kind: 'test' as const, keeps: true } }], activity: [] } as never as Parameters<typeof prDescription>[0];
+    const label = (await import('../src/engine/proof-verdict.js')).criterionText(t, 1)!;
+    expect(prDescription({ ...t, proof: [{ ...row('passed'), criterion: label }] }, null, [])).toContain('**then** paid bookings stay as they are · Stays as it is: passes before and after\n');
+    expect(prDescription({ ...t, proof: [{ ...row('failed'), criterion: label }] }, null, [])).toMatch(/stay as they are · Stays as it is(?!:)/);
   });
 
   it('an old spec with no kinds reads and writes exactly as before', () => {

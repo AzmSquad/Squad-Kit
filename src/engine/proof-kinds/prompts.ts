@@ -5,6 +5,7 @@ import { hasAppToStart } from '../../board/apps.js';
 import { criterionText } from '../proof-verdict.js';
 import { MAX_ROWS } from './rows.js';
 import { kindOf, linesOf, testerLines } from './lines.js';
+import { testFilesText, type StoryTestFile } from './test-files.js';
 
 /**
  * The words the agents get about the proof kinds. They show read only on the Harness page, so they stay plain. The
@@ -16,7 +17,7 @@ const STR = { type: 'string' } as const;
 /** The proof an agent proposes for one "done when": in the spec, the Express plan and a change. */
 export const PROOF_SHAPE = {
   type: 'object',
-  properties: { kind: { type: 'string', enum: PROOF_KINDS }, why: STR },
+  properties: { kind: { type: 'string', enum: PROOF_KINDS }, why: STR, keeps: { type: 'boolean' } },
   required: ['kind'],
 } as const;
 
@@ -29,6 +30,8 @@ const KINDS_ASK = `- proof, for each "done when": how the person will see it is 
   test: a test that fails before the change and passes after it, for a rule, a timer or a background job.
   none: only for what truly has nothing to show (speed, a clean-up, something never saved), with the reason the
   Reviewer will check.
+  keeps: true only for a test line that keeps something that already works ("Paid bookings stay as they are"): its
+  test passes before the change and after it. Leave it out for a line the story changes or adds.
   Pick the lightest proof that truly shows the line: a picture only where someone sees a change. A line about what
   someone sees is always screen. why: one short plain line for a project manager, like "Other apps will call this, so
   the answer itself is the proof." It may be empty for screen.`;
@@ -37,7 +40,8 @@ const KINDS_ASK = `- proof, for each "done when": how the person will see it is 
 const NO_APP_ASK = `- proof, for each "done when": how the person will see it is done, and why in one plain line. This project has no
   app to start (a command-line tool or a library), so nothing can be shown on a screen, called or read. kind is test (a
   test that fails before the change and passes after it) or none (only for what truly has nothing to show, with the
-  reason the Reviewer will check). why: one short plain line for a project manager.`;
+  reason the Reviewer will check). keeps: true only for a test line that keeps something that already works: its test
+  passes before the change and after it. why: one short plain line for a project manager.`;
 
 /** What the spec and the Express plan ask about the proof: with no app to start, only a test or nothing to show. */
 export function kindsAsk(meta?: BoardMeta): string {
@@ -47,7 +51,7 @@ export function kindsAsk(meta?: BoardMeta): string {
 /** On a rewrite of the spec: the kinds as the person left them, to keep unless the change asks otherwise. */
 export function proofsNow(t: Pick<Ticket, 'criteria'>): string {
   if (!hasKinds(t)) return '';
-  const lines = (t.criteria ?? []).map((c, i) => `${i + 1}. ${KIND_NAMES[c.proof?.kind ?? 'screen']}${c.proof?.locked ? ' (squad-kit keeps this one)' : ''}`);
+  const lines = (t.criteria ?? []).map((c, i) => `${i + 1}. ${KIND_NAMES[c.proof?.kind ?? 'screen']}${c.proof?.keeps ? ', stays as it is (keeps)' : ''}${c.proof?.locked ? ' (squad-kit keeps this one)' : ''}`);
   return `\nHow each "done when" is proved now, as the person left it. Keep each unless the change asks otherwise:\n${lines.join('\n')}`;
 }
 
@@ -123,18 +127,25 @@ export const TESTS_SCHEMA = {
   required: ['tests'],
 };
 
-/** The Tester names the one test that proves each Test line, and says what it does in plain words. */
-export function testsPrompt(t: Ticket, lines: number[]): string {
+/**
+ * The Tester names the one test that proves each Test line, and says what it does in plain words. squad-kit lists the
+ * story's test files with their tests, so the Tester's read-only shell needs no git.
+ */
+export function testsPrompt(t: Ticket, lines: number[], files: StoryTestFile[]): string {
+  const keeps = lines.filter((n) => t.criteria?.[n - 1]?.proof?.keeps);
   return `You are the Tester of a software squad. These "done when" are proved by a test, not by a picture:
-${lines.map((n) => `${n}. ${criterionText(t, n)}`).join('\n')}
+${lines.map((n) => `${n}. ${criterionText(t, n)}${keeps.includes(n) ? ' (stays as it is)' : ''}`).join('\n')}
 
-For each, find the one test in this story's copy that proves it: one the Builder added or changed with this story (run
-"git diff --stat ${t.baseCommit ?? 'main'}" and read those test files). A test from before the story is never the
-proof. squad-kit then runs that one test on main's code and on the story's code. It must fail on main and pass now, or
-it proves nothing.
-In tests, one for each: criterion (its number), file (the test file's path in this copy, like tests/booking.test.ts),
+For each, find the one test in this story's copy that proves it: one the Builder added or changed with this story. A
+test from before the story is never the proof. The test files this story added or changed, with their groups and
+tests, as squad-kit read them:
+${testFilesText(files)}
+Read those files. squad-kit then runs that one test on main's code and on the story's code. It must fail on main and
+pass now, or it proves nothing.${keeps.length ? ` A line marked "stays as it is" keeps something that already works: its test must pass on main and pass now.` : ''}
+In tests, one for each: criterion (its number), file (the test file's path as listed above, like tests/booking.test.ts),
 name (the test's full name as the test tool prints it, its groups first, joined with " > ", like "Bookings > frees an
-unpaid slot after 15 minutes"), line (the line the test starts on, for a browser test), and steps: what the test does,
+unpaid slot after 15 minutes"; a test written for each with its title as written, like "accepts %s minutes"), line
+(the line the test starts on), and steps: what the test does,
 in 2 to 5 short plain sentences for a project manager, like "Makes a booking at 10:00 and does not pay", "Moves the
 clock to 10:16", "The 10:30 slot is free again". No code and no file names in the steps.
 When no test proves one of them, leave it out: squad-kit then asks the Builder to write one.

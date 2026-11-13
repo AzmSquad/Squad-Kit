@@ -57,7 +57,7 @@ export function Body({ t, kind }: { t: Ticket; kind: DecideKind }) {
     return (
       <div className="db">
         {t.story && <Written as="p" className="sum" text={short(t.story, 220)} />}
-        <List items={items} kinds={hasKinds(t) ? (t.criteria ?? []).filter((c) => c.then).map((c) => c.proof?.kind ?? 'screen') : undefined} />
+        <List items={items} kinds={hasKinds(t) ? (t.criteria ?? []).filter((c) => c.then).map((c) => c.proof?.kind ?? 'screen') : undefined} keeps={(t.criteria ?? []).filter((c) => c.then).map((c) => Boolean(c.proof?.keeps))} />
       </div>
     );
   }
@@ -80,7 +80,7 @@ export function Body({ t, kind }: { t: Ticket; kind: DecideKind }) {
   );
 }
 
-function List({ items, kinds }: { items: string[]; kinds?: LineProofKind[] }) {
+function List({ items, kinds, keeps }: { items: string[]; kinds?: LineProofKind[]; keeps?: boolean[] }) {
   if (!items.length) return null;
   return (
     <ul>
@@ -88,7 +88,7 @@ function List({ items, kinds }: { items: string[]; kinds?: LineProofKind[] }) {
         <li key={i}>
           <Check aria-hidden="true" />
           <Written className="clamp" text={x} />
-          {kinds?.[i] && <KindChip kind={kinds[i]!} small />}
+          {kinds?.[i] && <KindChip kind={kinds[i]!} small keeps={keeps?.[i]} />}
         </li>
       ))}
       {items.length > 3 && <li className="more">and {items.length - 3} more in Read it all</li>}

@@ -20,6 +20,11 @@ export const KIND_SMALL: Record<LineProofKind, string> = {
   none: 'Only with a reason the Reviewer checks',
 };
 
+/** A Test line that keeps something that already works: its test passes before and after the change. */
+export const KEEPS_NAME = 'stays as it is';
+export const KEEPS_SMALL = 'For a line that keeps something that already works: its test passes before and after.';
+export const KEEPS_PROOF = 'Stays as it is: passes before and after';
+
 export const LOCK_NOTE = 'Screen needs a picture. squad-kit keeps it when a line is about what someone sees.';
 export const MENU_FOOT = 'You see this proof when the story is ready to check.';
 
@@ -42,9 +47,10 @@ export function rowKind(p: ProofShot): LineProofKind {
   return 'screen';
 }
 
-/** The terminal command of a choice in the menu. */
-export function proveCommand(id: string, line: number, kind: LineProofKind, why?: string): string {
-  return `squad prove ${id} ${line} ${kind}${why ? ` --why ${shellQuote(why)}` : ''}`;
+/** The terminal command of a choice in the menu. `keeps`: "stays as it is" on or off, for a Test line. */
+export function proveCommand(id: string, line: number, kind: LineProofKind, why?: string, keeps?: boolean): string {
+  const k = kind === 'test' && keeps !== undefined ? (keeps ? ' --keeps' : ' --no-keeps') : '';
+  return `squad prove ${id} ${line} ${kind}${why ? ` --why ${shellQuote(why)}` : ''}${k}`;
 }
 
 /** One short line for a chat card: what proves it, without opening it. */
@@ -52,6 +58,8 @@ export function shortProof(p: ProofShot, kind: LineProofKind): string {
   switch (kind) {
     case 'test':
       if (!p.test) return 'A test';
+      if (p.test.keeps && p.test.before === 'passed' && p.test.after === 'passed') return `${KEEPS_PROOF}${p.test.seconds !== undefined ? ` · ${p.test.seconds} s` : ''}`;
+      if (p.test.keeps && p.test.before === 'failed') return 'Fails on main: it did not work before';
       if (p.test.before === 'failed' && p.test.after === 'passed') return `Failed before the change, passes now${p.test.seconds !== undefined ? ` · ${p.test.seconds} s` : ''}`;
       if (p.test.after === 'failed') return 'The test fails';
       if (p.test.after === 'unknown') return 'Could not run the test';

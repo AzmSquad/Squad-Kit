@@ -40,7 +40,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   screen.
 - **A test must fail on main.** squad-kit runs the test that proves a line on main's code and on the story's: "It
   failed before the change and passes now". A test that also passes on main goes back to the Builder, to write a real
-  one.
+  one. squad-kit runs only that one test, by its whole name on every version of Vitest and Jest (each case of a test
+  written for `each`), and on Vitest 3 and later by its file and line too. The Tester names it from the story's own
+  test files, which squad-kit lists for it.
+- **Test · stays as it is.** A line that keeps something that already works ("Paid bookings stay as they are") passes
+  before and after the change: "Stays as it is: passes before and after". The Analyst proposes it, and you turn it on
+  or off in the chip's menu before you approve the spec (`squad prove <ticket> <line> test --keeps`, `--no-keeps`).
 - **Data proof.** A new tool for the Tester, `read_rows`, reads a few rows of one table of the story's own database
   before and after its action. squad-kit builds the one query itself: it never writes, and it hides secrets. The
   Proof tab marks the cells that changed.
@@ -49,7 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   start, is proved by tests: no lock, and only Test or Not on a screen can be picked.
 - The Proof tab and the proof page show one block per line with its kind, and a chat card shows each line's kind with a
   short form of its proof. Right to left in Arabic, light and dark. Old specs are proved exactly as before.
-- **Every button has its call and its command:** `squad prove <ticket> [line] [kind] [--why "…"]` and
+- **Every button has its call and its command:** `squad prove <ticket> [line] [kind] [--why "…"] [--keeps]` and
   `POST /tickets/<id>/prove`.
 - **The design card shows the design.** The Architect's mockup is a small picture inside the card, with Open the
   mockup for the full one. The Squad lead knows a story's mockup and brings its card when you ask to see a design.

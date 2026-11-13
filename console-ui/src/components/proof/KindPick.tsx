@@ -3,7 +3,7 @@ import { Check, Lock } from 'lucide-react';
 import type { LineProofKind } from '../../api/proof-kind';
 import type { Ticket } from '../../api/types';
 import { useAct } from '../../lib/data';
-import { KINDS, KIND_NAME, KIND_SMALL, LOCK_NOTE, MENU_FOOT, kindsOpen, proveCommand } from '../../lib/proof-kinds';
+import { KEEPS_NAME, KEEPS_SMALL, KINDS, KIND_NAME, KIND_SMALL, LOCK_NOTE, MENU_FOOT, kindsOpen, proveCommand } from '../../lib/proof-kinds';
 import { typedDir } from '../../lib/lang';
 import { Cmd, Written } from '../ui';
 import { KIND_ICON, KindChip } from './KindChip';
@@ -24,20 +24,20 @@ export function KindPick({ t, i }: { t: Ticket; i: number }) {
       {p.why && !p.locked && <Written className="kindwhy" text={p.why} />}
       <div className="kindpick">
         {can ? (
-          <button type="button" className="kindbtn" aria-haspopup="menu" aria-expanded={open} aria-label={`How "done when" ${i + 1} is proved: ${KIND_NAME[p.kind]}. Change it`} onClick={() => setOpen((o) => !o)}>
-            <KindChip kind={p.kind} locked={p.locked} caret />
+          <button type="button" className="kindbtn" aria-haspopup="menu" aria-expanded={open} aria-label={`How "done when" ${i + 1} is proved: ${KIND_NAME[p.kind]}${p.keeps ? `, ${KEEPS_NAME}` : ''}. Change it`} onClick={() => setOpen((o) => !o)}>
+            <KindChip kind={p.kind} locked={p.locked} keeps={p.keeps} caret />
           </button>
         ) : (
-          <KindChip kind={p.kind} locked={p.locked} />
+          <KindChip kind={p.kind} locked={p.locked} keeps={p.keeps} />
         )}
         {p.locked && p.why && <Written as="small" className="kindrule" text={p.why} />}
-        {open && <KindMenu t={t} line={i + 1} current={p.kind} locked={Boolean(p.locked)} why={p.why} onClose={() => setOpen(false)} />}
+        {open && <KindMenu t={t} line={i + 1} current={p.kind} locked={Boolean(p.locked)} why={p.why} keeps={Boolean(p.keeps)} onClose={() => setOpen(false)} />}
       </div>
     </>
   );
 }
 
-function KindMenu({ t, line, current, locked, why, onClose }: { t: Ticket; line: number; current: LineProofKind; locked: boolean; why?: string; onClose(): void }) {
+function KindMenu({ t, line, current, locked, why, keeps, onClose }: { t: Ticket; line: number; current: LineProofKind; locked: boolean; why?: string; keeps: boolean; onClose(): void }) {
   const act = useAct();
   const box = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<LineProofKind>(current);
@@ -64,6 +64,10 @@ function KindMenu({ t, line, current, locked, why, onClose }: { t: Ticket; line:
     if (kind === current && kind !== 'none') return onClose();
     act.mutate({ path: `/api/v1/tickets/${t.id}/prove`, body: { line, kind, ...(said ? { why: said } : {}) }, done: `"Done when" ${line} is proved by ${KIND_NAME[kind]} now.` }, { onSuccess: onClose });
   };
+  // On a Test line: it keeps something that already works, so its test passes before and after.
+  const keep = (on: boolean) =>
+    act.mutate({ path: `/api/v1/tickets/${t.id}/prove`, body: { line, kind: 'test', keeps: on }, done: on ? `"Done when" ${line} stays as it is: its test passes before and after.` : `"Done when" ${line} changes what happens: its test fails before the change.` }, { onSuccess: onClose });
+  const keepsHere = current === 'test' && hover === 'test' && !asking;
   return (
     <div className={`kindmenu${up ? ' up' : ''}`} role="menu" ref={box} aria-label={`How should line ${line} be proved?`}>
       <div className="mh">How should line {line} be proved?</div>
@@ -93,6 +97,15 @@ function KindMenu({ t, line, current, locked, why, onClose }: { t: Ticket; line:
           </button>
         );
       })}
+      {current === 'test' && (
+        <label className="kindkeeps">
+          <input type="checkbox" checked={keeps} disabled={act.isPending} onChange={(e) => keep(e.target.checked)} onFocus={() => setHover('test')} />
+          <span>
+            <b>Test · {KEEPS_NAME}</b>
+            <small>{KEEPS_SMALL}</small>
+          </span>
+        </label>
+      )}
       {asking && (
         <div className="kindwhyask">
           <input className="input" autoFocus dir={typedDir(reason)} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why can it not be shown? The Reviewer checks it." onKeyDown={(e) => e.key === 'Enter' && reason.trim() && pick('none', reason.trim())} />
@@ -106,7 +119,7 @@ function KindMenu({ t, line, current, locked, why, onClose }: { t: Ticket; line:
         <span>{locked ? LOCK_NOTE : MENU_FOOT}</span>
       </div>
       <div className="mcmd">
-        <Cmd text={proveCommand(t.id, line, asking ? 'none' : hover, asking ? reason.trim() || '…' : undefined)} />
+        <Cmd text={proveCommand(t.id, line, asking ? 'none' : hover, asking ? reason.trim() || '…' : undefined, keepsHere ? keeps : undefined)} />
       </div>
     </div>
   );

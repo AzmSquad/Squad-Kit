@@ -45,6 +45,10 @@
 .kindmenu .opt .tick { width: 15px; height: 15px; color: var(--accent); visibility: hidden; }
 .kindmenu .opt.on .tick { visibility: visible; }
 .kindmenu .opt.off { opacity: 0.45; cursor: not-allowed; }
+.kindmenu .kindkeeps { display: grid; grid-template-columns: 24px 1fr; gap: 8px; align-items: start; margin: 2px 0 0; padding: 7px 8px; border-top: 1px solid var(--line); cursor: pointer; }
+.kindmenu .kindkeeps input { width: 15px; height: 15px; margin: 2px auto 0; accent-color: var(--accent); }
+.kindmenu .kindkeeps b { display: block; font-size: 13px; font-weight: 600; }
+.kindmenu .kindkeeps small { display: block; font-size: 11.5px; color: var(--muted); line-height: 1.3; }
 .kindmenu .mf { border-top: 1px solid var(--line); margin-top: 4px; padding: 7px 8px 3px; font-size: 11.5px; color: var(--muted); display: flex; gap: 6px; align-items: flex-start; }
 .kindmenu .mf svg { width: 13px; height: 13px; flex: none; margin-top: 1px; }
 .kindmenu .mcmd { padding: 4px 6px 2px; }

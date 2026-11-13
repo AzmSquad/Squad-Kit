@@ -128,6 +128,52 @@ describe('squad prove: the person picks the kind before approving', () => {
   });
 });
 
+describe('a Test line that stays as it is', () => {
+  it('the person turns it on and off before approving, only on a Test line', () => {
+    const id = specWaiting();
+    const on = proveLine(bp, id, 2, 'test', undefined, true);
+    expect(on.criteria![1]!.proof).toEqual({ kind: 'test', keeps: true });
+    expect(on.activity.map((a) => a.text)).toContain('"Done when" 2 is proved by Test, stays as it is, now');
+    expect(fs.readFileSync(path.join(bp.ticketsDir, id, 'spec.md'), 'utf8')).toContain('   Proof: test, keeps');
+    // Left out, a Test line keeps what it had.
+    expect(proveLine(bp, id, 2, 'test', 'Payments already work.').criteria![1]!.proof).toEqual({ kind: 'test', why: 'Payments already work.', keeps: true });
+    expect(proveLine(bp, id, 2, 'test', undefined, false).criteria![1]!.proof).toEqual({ kind: 'test', why: 'Payments already work.' });
+    expect(() => proveLine(bp, id, 3, 'data', undefined, true)).toThrow('Only a Test line can stay as it is');
+    // Another kind ends it.
+    proveLine(bp, id, 2, 'test', undefined, true);
+    expect(proveLine(bp, id, 2, 'data').criteria![1]!.proof).toEqual({ kind: 'data' });
+    // After the approval it is read only, like the kind.
+    updateTicket(bp, id, (x) => (x.specApproved = { by: 'Momen', at: '' }));
+    expect(() => proveLine(bp, id, 2, 'test', undefined, true)).toThrow();
+  });
+
+  it('the REST call and squad prove --keeps and --no-keeps', async () => {
+    const id = specWaiting();
+    const app = new Hono();
+    mountProveApi(app, { paths: buildPaths(tmp) });
+    const post = (body: object) => app.request(`/api/v1/tickets/${id}/prove`, { method: 'POST', body: JSON.stringify(body), headers: { 'content-type': 'application/json' } });
+    const ok = await post({ line: 2, kind: 'test', keeps: true });
+    expect(((await ok.json()) as { criteria: { proof: unknown }[] }).criteria[1]!.proof).toEqual({ kind: 'test', keeps: true });
+    expect((await post({ line: 3, kind: 'api', keeps: true })).status).toBe(400);
+    let said = '';
+    const out = vi.spyOn(process.stdout, 'write').mockImplementation((s) => ((said += String(s)), true));
+    const cwd = process.cwd();
+    process.chdir(tmp);
+    try {
+      const { runProve } = await import('../src/commands/prove.js');
+      await runProve(id, undefined, undefined, {});
+      expect(said).toContain('the booking is saved as paid, with its amount  Test, stays as it is');
+      await runProve(id, '2', 'test', { keeps: false });
+      expect(readTicket(bp, id)!.criteria![1]!.proof).toEqual({ kind: 'test' });
+      await runProve(id, '2', 'test', { keeps: true });
+      expect(readTicket(bp, id)!.criteria![1]!.proof).toEqual({ kind: 'test', keeps: true });
+    } finally {
+      process.chdir(cwd);
+      out.mockRestore();
+    }
+  });
+});
+
 describe('a project with no app to start (a command-line tool, a library)', () => {
   it('offers only a test, or nothing to show with a reason', () => {
     writeMeta(bp, { ...readMeta(bp), commands: { test: 'npm test' } });

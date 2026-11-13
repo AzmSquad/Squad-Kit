@@ -9,6 +9,8 @@ export interface CriterionProof {
   why?: string;
   /** Set by squad-kit: the kind stays Screen. */
   locked?: boolean;
+  /** A Test line that keeps something that already works: its test passes before and after. */
+  keeps?: boolean;
 }
 
 /** A Test row: the test that proves the line, and how it ran on main's code and on the story's. */
@@ -17,6 +19,8 @@ export interface TestProof {
   file: string;
   steps: string[];
   before: 'failed' | 'passed' | 'unknown';
+  /** The line keeps something that already works: passing before is the proof. */
+  keeps?: boolean;
   after: 'passed' | 'failed' | 'unknown';
   seconds?: number;
 }

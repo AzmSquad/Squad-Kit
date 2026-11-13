@@ -10,4 +10,9 @@ export interface CriterionProof {
   why?: string;
   /** Set by squad-kit, never by an agent: the kind stays Screen. */
   locked?: boolean;
+  /**
+   * A Test line that keeps something that already works ("stays as it is"): its test passes on main's code and on the
+   * story's. The Analyst may propose it; after the spec's approval only the person changes it.
+   */
+  keeps?: boolean;
 }

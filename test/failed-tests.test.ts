@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { failedTests, fileAlone, inChanged, testAlone, testKey, testTitle, type FailedTest } from '../src/engine/failed-tests.js';
+import { failedTests, fileAlone, inChanged, testAlone, testKey, testTitle, wholeNamePattern, type FailedTest } from '../src/engine/failed-tests.js';
 
 /**
  * The failed tests a check's output names, and the command that runs one of them on its own with the project's own
@@ -148,6 +148,12 @@ describe('the failed tests an output names', () => {
     expect(failedTests(' FAIL  |unit| src/a.test.ts > adds\n Test Files  1 failed (1)\n      Tests  1 failed (1)\n')).toEqual([{ tool: 'vitest', file: 'src/a.test.ts', name: 'adds', project: 'unit' }]);
   });
 
+  it('Vitest run by a file and line: the file without the line it prints after it', () => {
+    // Vitest 5's own words, run as "tests/unit/services-action.test.ts:135".
+    const pinned = '\x1b[41m\x1b[1m FAIL \x1b[22m\x1b[49m tests/unit/services-action.test.ts\x1b[2m:135\x1b[22m\x1b[2m > \x1b[22madding a service\x1b[2m > \x1b[22mrefuses a service over 8 hours\n\x1b[2m Test Files \x1b[22m \x1b[1m\x1b[31m1 failed\x1b[39m\x1b[22m\x1b[90m (1)\x1b[39m\n\x1b[2m      Tests \x1b[22m \x1b[1m\x1b[31m1 failed\x1b[39m\x1b[22m\x1b[2m | \x1b[22m\x1b[33m29 skipped\x1b[39m\x1b[90m (30)\x1b[39m\n';
+    expect(failedTests(pinned)).toEqual([{ tool: 'vitest', file: 'tests/unit/services-action.test.ts', name: 'adding a service > refuses a service over 8 hours' }]);
+  });
+
   it('Jest: each "●" under its FAIL file, and a file that failed to run', () => {
     expect(failedTests(JEST)).toEqual([
       { tool: 'jest', file: 'src/broken.test.js' },
@@ -249,14 +255,14 @@ describe('the command that runs one failed test on its own', () => {
     expect(testAlone(dir, 'npm run test:e2e', { ...pw, project: 'webkit' })).toContain("--project='webkit' ");
     scripts({ test: 'vitest run --config vitest.unit.ts --coverage' });
     tool('vitest');
-    expect(testAlone(dir, 'npm test', vt)).toBe("npx vitest run --config='vitest.unit.ts' 'src/sum.test.ts' -t 'sums small numbers adds two numbers$'");
+    expect(testAlone(dir, 'npm test', vt)).toBe("npx vitest run --config='vitest.unit.ts' 'src/sum.test.ts' -t '^ ?sums(?: > | )small numbers(?: > | )adds two numbers$'");
     expect(testAlone(dir, 'npm test', { tool: 'vitest', file: 'src/broken.test.ts' })).toBe("npx vitest run --config='vitest.unit.ts' 'src/broken.test.ts'");
   });
 
   it('Jest, pytest and go test', () => {
     scripts({ test: 'jest --runInBand' });
     tool('jest');
-    expect(testAlone(dir, 'npm test', { tool: 'jest', file: 'src/cart.test.js', name: 'cart › adds an item' })).toBe("npx jest --runInBand 'src/cart\\.test\\.js' -t '^cart adds an item$'");
+    expect(testAlone(dir, 'npm test', { tool: 'jest', file: 'src/cart.test.js', name: 'cart › adds an item' })).toBe("npx jest --runInBand 'src/cart\\.test\\.js' -t '^ ?cart(?: > | )adds an item$'");
     write('.venv/bin/python', '');
     write('.venv/bin/pytest', '');
     expect(testAlone(dir, 'pytest -q --ds=shop.settings', { tool: 'pytest', file: 'tests/test_cart.py', name: 'TestTotals::test_add[two-items]' })).toBe(".venv/bin/python -m pytest --ds='shop.settings' 'tests/test_cart.py::TestTotals::test_add[two-items]'");
@@ -303,11 +309,65 @@ describe('the command that runs one failed test on its own', () => {
     fs.mkdirSync(bin);
     fs.writeFileSync(path.join(bin, 'npx'), '#!/bin/sh\nfor a in "$@"; do printf "[%s]\\n" "$a"; done\n', { mode: 0o755 });
     const said = execFileSync('/bin/sh', ['-c', command], { cwd: dir, env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } }).toString();
-    expect(said.trim().split('\n')).toEqual(['[vitest]', '[run]', '[src/a.test.ts]', '[-t]', `[x'; touch pwned; echo '\\$\\(touch pwned2\\) \`touch pwned3\`$]`]);
+    expect(said.trim().split('\n')).toEqual(['[vitest]', '[run]', '[src/a.test.ts]', '[-t]', `[^ ?x'; touch pwned; echo '\\$\\(touch pwned2\\) \`touch pwned3\`$]`]);
     for (const f of ['pwned', 'pwned2', 'pwned3']) expect(fs.existsSync(path.join(dir, f))).toBe(false);
     // A name or file that starts like an option is never passed at all.
     expect(testAlone(dir, 'npm test', { ...vt, name: '--reporter=./evil.js' })).toBeNull();
     expect(testAlone(dir, 'npm test', { ...vt, file: '--config=/tmp/evil.ts' })).toBeNull();
+  });
+});
+
+describe('one test by its whole name, on every Vitest and Jest', () => {
+  // How each tool writes the whole name it matches -t against.
+  const vitest5 = 'Bookings > when unpaid > frees the slot after 15 minutes';
+  const vitest4 = 'Bookings when unpaid frees the slot after 15 minutes';
+  const vitest2 = ' Bookings when unpaid frees the slot after 15 minutes';
+  const jest = 'Bookings when unpaid frees the slot after 15 minutes';
+
+  it('matches the name joined by " > " (Vitest 5) and by a space (Vitest 4 and before, Jest), with nested groups', () => {
+    for (const said of ['Bookings > when unpaid > frees the slot after 15 minutes', 'Bookings › when unpaid › frees the slot after 15 minutes']) {
+      const re = new RegExp(wholeNamePattern(said));
+      for (const name of [vitest5, vitest4, vitest2, jest]) expect(re.test(name), `${said} on "${name}"`).toBe(true);
+    }
+    expect(wholeNamePattern('Bookings > when unpaid > frees the slot')).toBe('^ ?Bookings(?: > | )when unpaid(?: > | )frees the slot$');
+    // A test with no group.
+    expect(new RegExp(wholeNamePattern('adds two numbers')).test('adds two numbers')).toBe(true);
+  });
+
+  it('matches that one test only: not one with more words, another group, or a group left out', () => {
+    const re = new RegExp(wholeNamePattern('Bookings > when unpaid > frees the slot'));
+    for (const other of ['Old Bookings when unpaid frees the slot', 'Bookings when unpaid frees the slot again', 'Bookings > frees the slot', 'Bookings when paid frees the slot', 'Bookings  when unpaid frees the slot', 'x Bookings when unpaid frees the slot']) {
+      expect(re.test(other), other).toBe(false);
+    }
+    // Each part is taken as it is: a dot, brackets and a plus are no pattern.
+    const price = new RegExp(wholeNamePattern('Prices > costs 1.50 (with tax) + fees'));
+    expect(price.test('Prices costs 1.50 (with tax) + fees')).toBe(true);
+    expect(price.test('Prices costs 1x50 with tax  fees')).toBe(false);
+  });
+
+  it('a title written for each matches each of its cases, and nothing else', () => {
+    const re = new RegExp(wholeNamePattern('validateService > accepts a duration of %s minutes'));
+    for (const name of ['validateService > accepts a duration of 10 minutes', 'validateService accepts a duration of 480 minutes', ' validateService accepts a duration of "15" minutes']) expect(re.test(name), name).toBe(true);
+    for (const name of ['validateService > accepts a duration of 10 hours', 'validateService > refuses a duration of 5 minutes', 'other > accepts a duration of 10 minutes']) expect(re.test(name), name).toBe(false);
+    expect(new RegExp(wholeNamePattern('charges $amount for $service.name')).test('charges 15.00 for Haircut')).toBe(true);
+    expect(new RegExp(wholeNamePattern('case %# of %d')).test('case 2 of 30')).toBe(true);
+  });
+
+  it('a Vitest test the proof names by its line: the file and line on Vitest 3 and later, the file only before', () => {
+    scripts({ test: 'vitest run' });
+    tool('vitest');
+    write('src/sum.test.ts', '');
+    const one = (version?: string) => {
+      if (version) write('node_modules/vitest/package.json', JSON.stringify({ name: 'vitest', version }));
+      return fileAlone(dir, 'npm test', 'src/sum.test.ts:12', 'sums > adds two numbers')?.command;
+    };
+    expect(one()).toBe("npx vitest run 'src/sum.test.ts' -t '^ ?sums(?: > | )adds two numbers$'");
+    expect(one('2.1.9')).toBe("npx vitest run 'src/sum.test.ts' -t '^ ?sums(?: > | )adds two numbers$'");
+    expect(one('4.1.12')).toBe("npx vitest run 'src/sum.test.ts:12' -t '^ ?sums(?: > | )adds two numbers$'");
+    // With no name, the whole file as before: a line alone is never the proof's pick.
+    expect(fileAlone(dir, 'npm test', 'src/sum.test.ts:12')?.command).toBe("npx vitest run 'src/sum.test.ts'");
+    // A failed test squad-kit runs again is picked by its name only: the tool printed no line for it.
+    expect(testAlone(dir, 'npm test', { tool: 'vitest', file: 'src/sum.test.ts', name: 'sums > adds two numbers' })).toBe("npx vitest run 'src/sum.test.ts' -t '^ ?sums(?: > | )adds two numbers$'");
   });
 });
 

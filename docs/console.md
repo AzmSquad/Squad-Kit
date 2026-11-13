@@ -288,7 +288,15 @@ plain line on why under it:
   write a test that fails without the change. A test that fails on the story's code is **Not working yet**. "It failed
   before the change" counts only when the test tool ran that very test on main's code, matched by its whole name, and
   its own check said no: a run stopped by an import, the setup, a missing tool or the time limit tells nothing, and
-  waits for you, with Try again and Continue anyway, like a test squad-kit cannot run there at all.
+  waits for you, with Try again and Continue anyway, like a test squad-kit cannot run there at all. squad-kit runs only
+  that one test, by its whole name (each case of a test written for `each`) and, where the test tool can, by its file
+  and line.
+- **A line that keeps something that already works** ("Paid bookings stay as they are") is **Test · stays as it is**.
+  The Analyst proposes it with the kind, and you turn it on or off in the chip's menu before you approve the spec. Its
+  test must pass on main's code and pass now: "Stays as it is: passes before and after". A test that fails on main
+  shows what it keeps did not work before, and waits for you. No agent sets it after the approval.
+- **The Tester names the test** from the list of test files the story added or changed, with their tests, that
+  squad-kit gives it. A test from before the story is never the proof.
 - **A planned picture is never dropped quietly.** When the Tester cannot make a Screen, API or Data proof, or no app
   can start for it, it is Not shown yet, and after the retakes a problem on the card, never a silent Not on a screen.
 - **A story with no Screen line** starts no browser, never builds for the phone, and takes no pictures. When an API or
@@ -300,12 +308,13 @@ plain line on why under it:
 
 Terminal: `squad prove MA-21` lists the lines and their kinds. `squad prove MA-21 2 data` changes line 2;
 `squad prove MA-21 5 none --why "Nothing to show: the Reviewer checks the code"`. Not on a screen needs `--why`.
+`squad prove MA-21 3 test --keeps` makes line 3 stay as it is; `--no-keeps` turns that off.
 
 REST (under `/p/<project>/api/v1`):
 
 | Call | What |
 | --- | --- |
-| `POST /tickets/<id>/prove` | `{ "line": 2, "kind": "screen" \| "data" \| "api" \| "test" \| "none", "why": "…" }`, only before the spec is approved. `why` is needed for `none`. A locked line takes only `screen`. Answers with the story. |
+| `POST /tickets/<id>/prove` | `{ "line": 2, "kind": "screen" \| "data" \| "api" \| "test" \| "none", "why": "…", "keeps": true }`, only before the spec is approved. `why` is needed for `none`. `keeps` (true or false, only with `test`) turns "stays as it is" on or off; left out, a Test line keeps what it had. A locked line takes only `screen`. Answers with the story. |
 
 ## The review, in the pull request
 

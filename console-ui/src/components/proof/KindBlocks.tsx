@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Check } from 'lucide-react';
 import { assetUrl } from '../../api/client';
 import type { ProofShot, Ticket } from '../../api/types';
-import { rowKind, shortProof } from '../../lib/proof-kinds';
+import { KEEPS_PROOF, rowKind, shortProof } from '../../lib/proof-kinds';
 import { pageOf } from '../../lib/review';
 import { proofViewer, verdictClass, verdictNote } from '../../lib/verdict';
 import { langProps } from '../../lib/lang';
@@ -43,7 +43,7 @@ function Block({ p, i, first, onOpen }: { p: ProofShot; i: number; first: number
       <div className="ph">
         <VerdictIcon shows={p.shows} />
         <Written as="b" text={p.criterion} />
-        <KindChip kind={kind} />
+        <KindChip kind={kind} keeps={p.test?.keeps} />
         <VerdictTag shows={p.shows} />
       </div>
       {note && <Written as="p" className="verdictnote" text={note} />}
@@ -95,11 +95,12 @@ function Rows({ p }: { p: ProofShot }) {
   );
 }
 
-/** The test's steps in plain words, and its run before and after the change. */
+/** The test's steps in plain words, and its run before and after the change. A line that stays as it is passes both times. */
 function TestRun({ p }: { p: ProofShot }) {
   const run = p.test;
   if (!run) return p.note ? <Written as="p" className="cap" text={p.note} /> : null;
   const red = run.before === 'failed';
+  const kept = run.keeps && run.before === 'passed' && run.after === 'passed';
   return (
     <>
       <ul className="tsteps">
@@ -111,8 +112,14 @@ function TestRun({ p }: { p: ProofShot }) {
         ))}
       </ul>
       <div className="redgreen">
-        <span className={red ? 'r' : 'q'}>{red ? 'It failed before the change' : run.before === 'passed' ? 'It passed before the change too' : 'It could not run on the old code'}</span>
-        <span>{run.after === 'passed' ? 'and passes now' : run.after === 'failed' ? 'and fails now' : 'and could not run now'}</span>
+        {kept ? (
+          <span>{KEEPS_PROOF}</span>
+        ) : (
+          <>
+            <span className={red ? 'r' : 'q'}>{red ? 'It failed before the change' : run.before === 'passed' ? 'It passed before the change too' : 'It could not run on the old code'}</span>
+            <span>{run.after === 'passed' ? 'and passes now' : run.after === 'failed' ? 'and fails now' : 'and could not run now'}</span>
+          </>
+        )}
         {run.after === 'passed' && (
           <span className="g">
             <Check aria-hidden="true" />

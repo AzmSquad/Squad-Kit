@@ -56,7 +56,7 @@ function screenScore(c: Criterion): number {
 
 /** A kind a project with no app cannot use becomes a test. */
 function withoutApp(p: CriterionProof): CriterionProof {
-  return NO_APP_KINDS.includes(p.kind) ? { kind: p.kind, ...(p.why ? { why: p.why } : {}) } : { kind: 'test', why: NO_APP_WHY };
+  return NO_APP_KINDS.includes(p.kind) ? { kind: p.kind, ...(p.why ? { why: p.why } : {}), ...(p.keeps ? { keeps: true } : {}) } : { kind: 'test', why: NO_APP_WHY };
 }
 
 /** Rule 1 on one line: one about what someone sees is Screen, locked, with the rule's words when it had no reason of its own for a picture. */
@@ -101,7 +101,8 @@ export function cleanProof(raw: unknown): CriterionProof | undefined {
   const why = typeof o.why === 'string' ? o.why.replace(/\s+/g, ' ').trim().slice(0, 200) : '';
   // Not on a screen with no reason is no proof at all: the line keeps a picture, as before.
   if (kind === 'none' && !why) return { kind: 'screen' };
-  return { kind, ...(why ? { why } : {}) };
+  // Only a Test line keeps something that already works.
+  return { kind, ...(why ? { why } : {}), ...(kind === 'test' && o.keeps === true ? { keeps: true } : {}) };
 }
 
 /**
@@ -126,7 +127,12 @@ export function keepProof(old: Criterion | undefined, next: Criterion, app = tru
  * the line had; a new line on a spec with kinds is Screen when it gave none. squad-kit's locks stay on.
  */
 export function changedLine(old: Criterion | undefined, said: unknown, words: { given: string; when: string; then: string }, kinds: boolean, app = true): Criterion {
-  const proof = cleanProof(said) ?? (old?.proof ? { kind: old.proof.kind, ...(old.proof.why ? { why: old.proof.why } : {}) } : kinds ? { kind: 'screen' as const } : undefined);
+  const given = cleanProof(said);
+  // After the approval an agent never sets "stays as it is": a changed line keeps its own, a new line has none.
+  const keeps = old?.proof?.keeps && (given?.kind ?? old.proof.kind) === 'test' ? { keeps: true } : {};
+  const kept = old?.proof ? { kind: old.proof.kind, ...(old.proof.why ? { why: old.proof.why } : {}) } : kinds ? { kind: 'screen' as const } : undefined;
+  const base = given ? { kind: given.kind, ...(given.why ? { why: given.why } : {}) } : kept;
+  const proof = base ? { ...base, ...keeps } : undefined;
   if (!proof) return words;
   if (old?.proof?.locked && app) return { ...words, proof: { kind: 'screen', why: old.proof.why ?? SEES_WHY, locked: true } };
   return lockLine({ ...words, proof }, app);

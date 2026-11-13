@@ -685,7 +685,7 @@ program
 program
   .command('prove <ticket> [line] [kind]')
   .description('How each "done when" of a spec is proved: screen, data, api, test or none. With no line, list them')
-  .option('--why <reason>', 'One plain line on why; Not on a screen needs one')
+  .option('--why <reason>', 'One plain line on why; Not on a screen needs one').option('--keeps', 'A Test line that keeps something that already works: its test passes before and after').option('--no-keeps', 'The Test line changes what happens: its test must fail before the change')
   .action(wrapArgs(runProve));
 program
   .command('pull <ref>')

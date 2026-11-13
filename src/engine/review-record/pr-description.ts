@@ -27,7 +27,10 @@ function doneWhenLines(t: Ticket, shots: { label: string; url: string }[]): stri
     const kind = c.proof?.kind ? `\`${KIND_NAMES[c.proof.kind]}\` ` : '';
     const label = criterionText(t, i + 1);
     const shot = label ? shots.find((s) => s.label === label) : undefined;
-    return `- [x] ${kind}**Given** ${plain(c.given)}, **when** ${plain(c.when)}, **then** ${plain(c.then)}${shot ? ` · [proof](${shot.url})` : ''}`;
+    // A Test line that keeps something that already works, when its test passed on main and on the story's code.
+    const run = label ? t.proof?.find((p) => p.criterion === label)?.test : undefined;
+    const keeps = c.proof?.keeps ? (run?.before === 'passed' && run.after === 'passed' ? ' · Stays as it is: passes before and after' : ' · Stays as it is') : '';
+    return `- [x] ${kind}**Given** ${plain(c.given)}, **when** ${plain(c.when)}, **then** ${plain(c.then)}${keeps}${shot ? ` · [proof](${shot.url})` : ''}`;
   });
   return ['### Done when, with its proof', ...lines, ''];
 }

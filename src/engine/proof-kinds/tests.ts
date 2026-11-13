@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { TestProof } from '../../board/proof-rows.js';
 import { scrubSecrets } from '../../core/scrub.js';
 import { tail, testCount, type CommandResult } from '../checks.js';
-import { failedTests, fileAlone } from '../failed-tests.js';
+import { failedTests, fileAlone, wholeNamePattern } from '../failed-tests.js';
 
 /**
  * The Test proof: the one test that proves a "done when", run by squad-kit on main's code (with the story's test file
@@ -44,7 +44,9 @@ export function cleanNamed(raw: unknown, dir: string, lines: number[], changed?:
   for (const x of Array.isArray(list) ? list : []) {
     const o = (x ?? {}) as Record<string, unknown>;
     const n = Number(o.criterion);
-    const file = typeof o.file === 'string' ? path.normalize(o.file.trim()).replace(/^\.\//, '') : '';
+    const said = typeof o.file === 'string' ? path.normalize(o.file.trim()).replace(/^\.\//, '') : '';
+    // A path from the copy's root when the project is a folder in it ("project/tests/a.test.ts"): that story file.
+    const file = changed && !changed.includes(said) ? ([...changed].sort((a, b) => b.length - a.length).find((f) => said.endsWith(`/${f}`)) ?? said) : said;
     if (!lines.includes(n) || out.some((t) => t.criterion === n) || !file || file.startsWith('..') || path.isAbsolute(file) || !fs.existsSync(path.join(dir, file))) continue;
     if (changed && !changed.includes(file)) continue;
     const name = typeof o.name === 'string' ? o.name.replace(/\s+/g, ' ').trim().slice(0, 300) : '';
@@ -77,36 +79,50 @@ export function namedProblem(raw: unknown, dir: string, lines: number[], changed
   return `for "done when" ${wrong.map((x) => Number(x?.criterion)).join(', ')}, give a test file this story added or changed in this copy${tests}, and the test's full name as written in that file, its groups first`;
 }
 
-/** Words for a regular expression, taken as they are. */
-const literal = (s: string) => s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
-/** One word for the shell, quoted. */
-const quote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+/** A line that starts a test with its title: `it('…'`, `test.only("…"`. */
+const STARTS_TEST = /\b(it|test)(\.\w+)*\s*\(\s*['"`]/;
 
 /**
- * The command that runs that one test with the project's own tool, matched by its whole name, from its first word to
- * its last: Vitest and Jest by `-t '^…$'`, pytest and go by their own ids, Playwright by its line. Its whole file when
- * the tool cannot pick one test.
+ * The line the Tester gave, when the test starts on it with its own title: a wrong line would pick no test at all, so
+ * a line squad-kit cannot be sure of is left out and the test is picked by its name only.
+ */
+function checkedLine(dir: string, t: NamedTest): number | undefined {
+  const title = nameParts(t.name).at(-1);
+  if (!t.line || !title) return undefined;
+  try {
+    const text = fs.readFileSync(path.join(dir, t.file), 'utf8').split('\n')[t.line - 1] ?? '';
+    return STARTS_TEST.test(text) && text.includes(title) ? t.line : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The command that runs that one test with the project's own tool, by its whole name from its first word to its last
+ * (failed-tests.ts wholeNamePattern), and on Vitest 3 and later by its file and line too, when the line is right;
+ * pytest and go by their own ids, Playwright by its line. Its whole file when the tool cannot pick one test.
  */
 export function commandFor(dir: string, testCommand: string, t: NamedTest): { command: string; whole: boolean } | null {
-  const at = t.line ? `${t.file}:${t.line}` : t.file;
+  const line = checkedLine(dir, t);
+  const at = line ? `${t.file}:${line}` : t.file;
   const file = fileAlone(dir, testCommand, at);
   if (!file) return null;
+  if (file.tool === 'playwright') return { command: file.command, whole: !line };
   const parts = nameParts(t.name);
-  if (file.tool === 'vitest' || file.tool === 'jest') return parts.length ? { command: `${file.command} -t ${quote(`^${literal(parts.join(' '))}$`)}`, whole: false } : { command: file.command, whole: true };
-  if (file.tool === 'playwright') return { command: file.command, whole: !t.line };
-  const one = parts.length ? fileAlone(dir, testCommand, at, file.tool === 'pytest' ? parts.join('::') : parts[parts.length - 1]!) : null;
+  if (!parts.length) return { command: file.command, whole: true };
+  const one = fileAlone(dir, testCommand, at, file.tool === 'pytest' ? parts.join('::') : file.tool === 'go' ? parts[0]! : parts.join(' > '));
   return { command: one?.command ?? file.command, whole: !one };
 }
 
 /** A run that ran at least one test and passed. */
 export const passed = (r: CommandResult): boolean => r.ok && !r.ended && (testCount(r.output) ?? 0) > 0;
 
-/** True when the tool named this very test failed: it ran, and its check said no. */
+/** True when the tool named this very test failed: it ran, and its check said no. A test written for `each`: one of its cases. */
 export function namedFailed(r: CommandResult, t: Pick<NamedTest, 'file' | 'name'>): boolean {
   if (r.ended) return false;
-  const want = nameParts(t.name).join(' > ');
+  const want = new RegExp(wholeNamePattern(nameParts(t.name).join(' > ')));
   const file = t.file.replace(/^\.\//, '');
-  return failedTests(r.output).some((f) => Boolean(f.name) && nameParts(f.name!).join(' > ') === want && (f.file.replace(/^\.\//, '') === file || file.endsWith(`/${f.file.replace(/^\.\//, '')}`) || f.file.endsWith(`/${file}`)));
+  return failedTests(r.output).some((f) => Boolean(f.name) && want.test(nameParts(f.name!).join(' > ')) && (f.file.replace(/^\.\//, '') === file || file.endsWith(`/${f.file.replace(/^\.\//, '')}`) || f.file.endsWith(`/${file}`)));
 }
 
 /** How one run went: passed, failed on the test's own check, or nothing it can tell (it did not run that test). */
@@ -129,17 +145,22 @@ export interface TestVerdict {
 /**
  * The verdict of a line from its two runs. Fails now on its own check: not working. Passes on main too: not shown, and
  * the Builder writes a real test. Either run told nothing (it did not run that test, or stopped before it): not shown,
- * and the person decides. Else met: it failed before the change and passes now.
+ * and the person decides. Else met: it failed before the change and passes now. `keeps`: the line keeps something that
+ * already works ("stays as it is"), so met is passing on main and now, and failing on main is the problem the person
+ * decides on: what it keeps did not work before.
  */
-export function judgeTest(t: NamedTest, now: CommandResult, main: CommandResult | null): TestVerdict {
+export function judgeTest(t: NamedTest, now: CommandResult, main: CommandResult | null, keeps = false): TestVerdict {
   const before = runOf(main, t);
   const after = runOf(now, t);
-  const proof: TestProof = { name: t.name, file: t.file, steps: t.steps, before, after, seconds: Math.round(now.seconds * 10) / 10 };
+  const proof: TestProof = { name: t.name, file: t.file, steps: t.steps, before, after, seconds: Math.round(now.seconds * 10) / 10, ...(keeps ? { keeps: true } : {}) };
   const named = `the test "${t.name || t.file}"`;
   if (after === 'failed') return { shows: 'broken', why: `The story's code fails ${named}.`, toBuilder: true, proof };
   if (after === 'unknown') return { shows: 'not-shown', why: `squad-kit could not run ${named} by its name on the story's code.`, toBuilder: false, proof };
+  if (keeps && before === 'passed') return { shows: 'met', why: '', toBuilder: false, proof };
+  if (keeps && before === 'failed') return { shows: 'not-shown', why: `This line keeps something that already works, but on main's code ${named} fails: it did not work before the change.`, toBuilder: false, proof };
+  if (keeps && main) return { shows: 'not-shown', why: `On main's code ${named} did not run to its own check (an import, the setup, a missing tool or the time limit stopped it), so it does not show that it worked before the change.`, toBuilder: false, proof };
   if (before === 'passed') return { shows: 'not-shown', why: `On main's code ${named} passes too, so it does not show the change. Write a test that fails without the change and passes with it.`, toBuilder: true, proof };
-  if (before === 'unknown' && !main) return { shows: 'not-shown', why: `squad-kit could not run ${named} on main's code, so it cannot tell that it failed before the change.`, toBuilder: false, proof };
+  if (before === 'unknown' && !main) return { shows: 'not-shown', why: `squad-kit could not run ${named} on main's code, so it cannot tell how it went before the change.`, toBuilder: false, proof };
   if (before === 'unknown') return { shows: 'not-shown', why: `On main's code ${named} did not run to its own check (an import, the setup, a missing tool or the time limit stopped it), so it does not show that it failed before the change.`, toBuilder: false, proof };
   return { shows: 'met', why: '', toBuilder: false, proof };
 }

@@ -174,6 +174,52 @@ describe('the Proof tab and the chat card', () => {
   });
 });
 
+describe('a Test line that stays as it is', () => {
+  const kept = [criteria[0], { ...criteria[1], proof: { kind: 'test', keeps: true } }, criteria[2]];
+  const keepRow = { criterion: 'Paid bookings stay as they are', before: 'ma-21-test-2.test.json', after: 'ma-21-test-2.test.json', beforeLabel: 'Test', afterLabel: 'Test', kind: 'test', shows: 'met', test: { name: 'keeps a paid slot', file: 'tests/booking.test.ts', steps: ['Pays for a booking', 'The slot stays taken'], before: 'passed', after: 'passed', seconds: 0.3, keeps: true } };
+
+  it('the chip says so, and the menu turns it off with one call and shows its command', async () => {
+    await show(lines(spec({ criteria: kept })));
+    expect([...page.querySelectorAll('.pkind')].map((x: any) => x.textContent)).toContain('Test · stays as it is');
+    await click(buttons().find((b) => b.getAttribute('aria-label')?.includes('"done when" 2')));
+    const box = page.querySelector('.kindkeeps input') as any;
+    expect(box.checked).toBe(true);
+    expect(page.body.textContent).toContain('its test passes before and after');
+    expect(page.querySelector('.kindmenu .mcmd')?.textContent).toContain('squad prove MA-21 2 test --keeps');
+    await click(box);
+    expect(sent).toEqual([{ url: '/p/mawid/api/v1/tickets/MA-21/prove', body: { line: 2, kind: 'test', keeps: false } }]);
+  });
+
+  it('only a Test line offers it', async () => {
+    await show(lines(spec()));
+    await click(buttons().find((b) => b.getAttribute('aria-label')?.includes('"done when" 2')));
+    expect(page.querySelector('.kindkeeps')).toBeNull();
+  });
+
+  it('the Proof tab and the card say it passes before and after', async () => {
+    await show(() => h(KindBlocks, { t: { ...spec({ stage: 'review', waiting: { kind: 'proof', summary: '' } }), proof: [keepRow] } }));
+    expect(page.body.textContent).toContain('Stays as it is: passes before and after');
+    expect(page.body.textContent).not.toContain('It passed before the change too');
+    expect(page.querySelector('.pkind')?.textContent).toBe('Test · stays as it is');
+    await act(async () => root.unmount());
+    root = createRoot(page.getElementById('root'));
+    await show(() => h(Body, { t: { ...spec({ waiting: { kind: 'proof', summary: '' } }), proof: [keepRow] }, kind: 'proof' }));
+    expect(page.body.textContent).toContain('Stays as it is: passes before and after · 0.3 s');
+  });
+
+  it('the spec card shows it on the line', async () => {
+    await show(() => h(Body, { t: spec({ criteria: kept }), kind: 'spec' }));
+    expect([...page.querySelectorAll('.pkind')].map((x: any) => x.textContent)).toEqual(['Screen', 'Test · stays as it is', 'Not on a screen']);
+  });
+
+  it('the short words when it fails on main, and the command', () => {
+    const row = { ...keepRow, test: { ...keepRow.test, before: 'failed' } };
+    expect(K.shortProof(row, 'test')).toBe('Fails on main: it did not work before');
+    expect(K.proveCommand('MA-21', 2, 'test', undefined, false)).toBe('squad prove MA-21 2 test --no-keeps');
+    expect(K.proveCommand('MA-21', 2, 'data', undefined, true)).toBe('squad prove MA-21 2 data');
+  });
+});
+
 describe('the short words for a test', () => {
   it('never says the test passes on main when its run there told nothing', () => {
     const row = (before: string, after: string) => ({ criterion: 'x', before: 'a', after: 'a', beforeLabel: '', afterLabel: '', kind: 'test', test: { name: 'n', file: 'f', steps: [], before, after } });
