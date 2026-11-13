@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { addActivity, now, readMeta, readTicket, updateTicket } from '../../board/store.js';
 import { scheduleSquad } from '../../board/schedule.js';
+import { fixRoundStopped } from '../contribution/actions.js';
 import type { BoardMeta, Ticket } from '../../board/types.js';
 import { DOING } from '../plain-doing.js';
 import type { CopyHow } from '../git.js';
@@ -156,6 +157,8 @@ export const watchPart = {
     this.update(id, (t) => {
       t.stopRequested = undefined;
       if (t.stuck) t.stuck.options[0] = { name: 'Carry on', note: 'Run the stopped step again.' };
+      // A fix of the owner's notes that stopped: the pull request is watched again, and the notes wait for you again.
+      fixRoundStopped(t);
     });
   },
 

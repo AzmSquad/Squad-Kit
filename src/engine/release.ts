@@ -8,6 +8,7 @@ import { projectRoot } from './live.js';
 import { repoFor, reposOf } from './repos.js';
 import type { RepoInfo } from '../board/types.js';
 import { repoHostFor } from '../modules/registry.js';
+import { mergeReleasePr } from './release-pr.js';
 import type { RepoHost } from '../modules/code-host/types.js';
 import { docsInGit, docsRepo, stageReleaseDocs } from './project-git.js';
 import { bringBack, leaveOut, leaveOutProblem } from './leave-out.js';
@@ -155,9 +156,14 @@ export async function liveRelease(bp: BoardPaths, release: Release, tickets: Tic
   // One pull request the host cannot merge would stop the release halfway: look for those first, before anything changes.
   for (const { repo, repoRoot, list, host, leave } of plans) {
     const clashing: string[] = [];
+    const held: string[] = [];
     for (const t of list.filter((x) => host && x.pr?.host === host.host && !x.mergedAt)) {
-      if ((await host!.mergeState(t.pr!.id)) === 'clash') clashing.push(t.id);
+      const state = await host!.mergeState(t.pr!.id);
+      if (state === 'clash') clashing.push(t.id);
+      // Held back by the host (its checks, an approval): it would stop the release after another repo went out.
+      else if (state === 'waiting') held.push(t.id);
     }
+    if (held.length) throw new Error(`The pull request of ${held.join(', ')} still waits on ${host!.label}: its checks or an approval. Release once it is merged, or take it out of this release: squad release ${release.version} --without ${held[0]}.`);
     // So would a merge that clashes in one repo after another repo has gone out.
     const base = repo.base || currentBranch(repoRoot);
     for (const t of list.filter((x) => x.branch && !x.mergedAt && !x.pr)) {
@@ -564,8 +570,7 @@ async function pushRelease(dir: string, remote: string, base: string, version: s
     }
   }
   await netGitLater(dir, ['push', '-f', remote, `${sending}:refs/heads/${branch}`], { env });
-  const pr = (await host.findPullRequest(branch)) ?? (await host.openPullRequest({ source: branch, target: base, title: `Release ${version}`, description: notes, items: [] }));
-  await host.merge(pr.id, `Release ${version}`);
+  const pr = await mergeReleasePr(host, branch, base, version, notes);
   log.push({ ok: true, text: `The shared copy only takes pull requests, so the release went through pull request ${pr.id}` });
   return sending;
 }

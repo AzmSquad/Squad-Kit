@@ -98,7 +98,8 @@ class GitHubRepo implements RepoHost {
   }
 
   refusedPush(message: string): boolean {
-    return /GH006|protected branch|refusing to allow|push declined|rule violations/i.test(message);
+    // GitHub's own branch protection and rules, and a server hook of GitHub Enterprise that turns direct pushes away.
+    return /GH006|protected branch|hook declined|refusing to allow|push declined|rule violations/i.test(message);
   }
 
   async contribution(): Promise<Contribution | null> {
@@ -120,8 +121,10 @@ export const githubCodeHost: CodeHostModule = {
   label: 'GitHub',
   repoFor(_root, remoteUrl, upstream) {
     const repo = repoName(remoteUrl);
-    // No sign-in on this computer: squad-kit opens nothing, and the work goes on as without a code host.
-    if (!repo || ghState() !== 'ready') return null;
+    // No sign-in on this computer: squad-kit opens nothing, and the work goes on as without a code host. gh that did not
+    // answer this time counts as signed in: a refusal then stops the story with the steps, never a merge here.
+    const state = ghState();
+    if (!repo || state === 'missing' || state === 'signed-out') return null;
     return new GitHubRepo(repo, (upstream && repoName(upstream)) || undefined);
   },
   forks: githubForks,

@@ -58,8 +58,10 @@ export function mergeWait(t: Ticket | undefined | null): 'pr' | 'checkout' | nul
 }
 
 /** The words for a merge wait, on the story and the card. */
-export function mergeWaitWords(wait: 'pr' | 'checkout'): string {
-  return wait === 'pr' ? PR_WAITS : CHECKOUT_WAITS;
+export function mergeWaitWords(wait: 'pr' | 'checkout', t?: Pick<Ticket, 'status'>): string {
+  if (wait === 'checkout') return CHECKOUT_WAITS;
+  // Held back by the code host (its checks, or a rule's approval) is no wait for a person to approve.
+  return t?.status === PR_HOST_WAITS ? PR_HOST_WAITS : PR_WAITS;
 }
 
 /** The same entry, word for word in any language (case and marks aside), or in other words. */

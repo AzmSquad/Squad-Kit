@@ -32,3 +32,12 @@ export function kindOfStatus(status: number): ModuleErrorKind {
 export function refusedForGood(err: unknown): boolean {
   return err instanceof ModuleError && (err.kind === 'not-found' || err.status === 400 || err.status === 405 || err.status === 410 || err.status === 422);
 }
+
+/**
+ * Not yet, and it may pass by itself: the other side holds it for now (its checks run), the connection or the service is
+ * down for a moment, too many calls, or a sign-in that may come back. Waiting is right; a no for good is not this.
+ */
+export function mayPassSoon(err: unknown): boolean {
+  if (!(err instanceof ModuleError)) return false;
+  return err.kind === 'waiting' || err.kind === 'offline' || err.kind === 'too-many' || (err.kind === 'sign-in' && err.status !== 403) || (err.status ?? 0) >= 500;
+}

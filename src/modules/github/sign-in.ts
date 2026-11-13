@@ -21,6 +21,7 @@ const GH_PAGE = 'https://cli.github.com';
 const GH_STEPS: Record<Exclude<GhState, 'ready'>, string[]> = {
   missing: ["Install GitHub's tool, gh, from cli.github.com.", 'Sign in: open a terminal and run gh auth login.', 'Come back and press Try again.'],
   'signed-out': ['Sign in: open a terminal and run gh auth login.', 'Come back and press Try again.'],
+  unknown: ["GitHub's tool did not answer just now. Wait a moment, then press Try again.", 'If it happens again, open a terminal and run gh auth status.'],
 };
 
 /** The words for a stop card when GitHub said no to the sign-in. */
@@ -29,7 +30,7 @@ export const SIGN_IN_HELP = "Sign in again with GitHub's tool: open a terminal a
 const KEEP_MS = 60_000;
 const ASK_MS = 10_000;
 let kept: { at: number; key: string; state: GhState } | null = null;
-let asking: Promise<GhState> | null = null;
+let asking: { key: string; answer: Promise<GhState> } | null = null;
 let account: { at: number; login: string } | null = null;
 
 /** What the answer depends on: a new PATH or gh folder asks again. */
@@ -58,30 +59,46 @@ function guess(): GhState {
   }
 }
 
-/** Asks gh now, beside everything else, and keeps its answer. */
+/**
+ * Asks gh now, beside everything else, and keeps its answer. Only gh's own answer counts: one that never came (it timed
+ * out, or could not start) keeps the last answer, or is 'unknown' when there was none, never a sign-out. Neither gh nor
+ * its timer keeps a terminal command from ending.
+ */
 export function checkGh(): Promise<GhState> {
-  if (asking) return asking;
   const key = keyNow();
-  asking = new Promise<GhState>((resolve) => {
+  // Asked already, for this same gh: that answer. A new PATH or gh folder asks its own.
+  if (asking?.key === key) return asking.answer;
+  const answer = new Promise<GhState>((resolve) => {
     let done = false;
-    const end = (state: GhState) => {
+    const end = (state: GhState | null) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
-      kept = { at: Date.now(), key, state };
-      resolve(state);
+      const last = kept?.key === key ? kept.state : 'unknown';
+      kept = { at: Date.now(), key, state: state ?? last };
+      resolve(kept.state);
     };
-    const child = spawn('gh', ['auth', 'token', '--hostname', 'github.com'], { stdio: 'ignore' });
+    let child: ReturnType<typeof spawn> | null = null;
     const timer = setTimeout(() => {
-      child.kill();
-      end('signed-out');
+      child?.kill();
+      end(null);
     }, ASK_MS);
-    child.on('error', (err: NodeJS.ErrnoException) => end(err.code === 'ENOENT' ? 'missing' : 'signed-out'));
-    child.on('exit', (code) => end(code === 0 ? 'ready' : 'signed-out'));
+    timer.unref();
+    try {
+      child = spawn('gh', ['auth', 'token', '--hostname', 'github.com'], { stdio: 'ignore' });
+    } catch (err) {
+      // A gh that cannot start at all (not a program): no answer.
+      end((err as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : null);
+      return;
+    }
+    child.unref();
+    child.on('error', (err: NodeJS.ErrnoException) => end(err.code === 'ENOENT' ? 'missing' : null));
+    child.on('exit', (code) => end(code === 0 ? 'ready' : code === null ? null : 'signed-out'));
   }).finally(() => {
-    asking = null;
+    if (asking?.answer === answer) asking = null;
   });
-  return asking;
+  asking = { key, answer };
+  return answer;
 }
 
 /** The sign-in now, never waiting: gh's last answer, else the guess while gh is asked. */

@@ -30,6 +30,7 @@ import { MIN_SIZE } from './proof-check.js';
 import { MAX_PICTURES, MAX_PICTURES_PER_DONE_WHEN, MAX_PROOF_ROUNDS, MAX_RETAKES } from './proof-verdict.js';
 import { TECHNICAL_TRIES, type NotAllowed } from './question-filter.js';
 import { PIPELINE_MS } from './release.js';
+import { RELEASE_PR_WAIT_MS } from './release-pr.js';
 import { NEVER } from './report.js';
 import { docsInGit } from './project-git.js';
 import { APP_WAIT_MS, SETUP_MS } from './run-app.js';
@@ -180,7 +181,7 @@ function lineStages(): HarnessStage[] {
       g('merge', 'A clean merge', 'The latest code comes in first. A clash is never forced.', `The newest code comes in by itself, up to ${MAX_BASE_TRIES} times. Then a card.`),
       g('pull-request', 'Pull requests', `squad-kit opens and merges them. Waiting for an approver is a normal wait. One merged on the code host is noticed within ${OUTSIDE_LOOK_MS / 60_000} minutes, or at once with Check again.`, 'Try again, or let the release merge the work.'),
       y('owner-notes', "The owner's notes", "A pull request to someone else's repo (the one yours was copied from) waits for its owner: squad-kit never merges there. Notes from people who can change that repo come back to the story; nobody else's reach the Builder.", 'Fix these, or answer them yourself. The fix goes to the same pull request, and each note is answered with its commit.'),
-      g('owner-closed', 'Closed by the owner', 'A pull request its owner closed without merging is said on the story. Nothing here changes.', 'Send it again, or leave it closed.'),
+      g('owner-closed', 'Closed without merging', 'A pull request closed on the code host without merging, by its owner or while it waited, is said on the story. Nothing here changes.', 'Send it again, or leave it closed.'),
       g('checkout', 'Your own copy is safe', 'With changes in the same files, the merge waits. It never overwrites them.'),
     ]),
     stage('release', 'Release', 'You choose what goes out and when. Every track stops here.', on(you('You decide')), [
@@ -268,6 +269,7 @@ function limitRows(meta?: BoardMeta): HarnessLimit[] {
     time({ HOOK_MS }, 'Your check on a save'),
     time({ NETWORK_GIT_MS }, 'Reaching your code host', 'One push, pull or fetch.'),
     time({ PIPELINE_MS }, 'Your after-release step', 'Inside the guard, after a release.'),
+    time({ RELEASE_PR_WAIT_MS }, "A release's own pull request", 'On a branch that only takes pull requests: the release waits this long for its checks, then Send again merges it.'),
     time({ MAX_LANDING_WAIT_MS }, 'Waiting for a story to merge', 'Before the newest code comes in.'),
     time({ OUTSIDE_LOOK_MS }, 'Looking for merges on your code host', 'Pull requests merged there, outside squad-kit. Check again looks now.'),
     time({ WAIT_LIMIT_MS }, 'Waiting for the product'),

@@ -24,18 +24,27 @@ export async function answerFixed(host: RepoHost, prId: number, notes: OwnerNote
       await host.answerNote(prId, n, `Fixed in ${n.fixedIn}.`);
       answered.add(n.id);
     } catch (err) {
-      // Deleted, or refused for good: never asked again. Anything else is answered on the next look.
-      if (err instanceof ModuleError && (err.status === 404 || err.status === 422)) gone.set(n.id, `squad-kit could not answer it on ${host.label}: its comment is gone or closed there.`);
+      // Deleted, its conversation locked, or refused for good: never asked again. Anything else is answered on the next look.
+      if (err instanceof ModuleError && (err.status === 403 || err.status === 404 || err.status === 410 || err.status === 422)) gone.set(n.id, `squad-kit could not answer it on ${host.label}: its conversation is locked, or its comment is gone.`);
     }
   }
   return { answered, gone };
 }
 
-/** The notes of this fix round whose place git shows the fix changed, by id. */
-function changedByFix(dir: string, from: string | undefined, to: string, notes: OwnerNote[]): Set<string> {
+/** The files the round's own commits changed: never the base's newer code a round brought in (it is in the base already). */
+function ownFiles(dir: string, from: string, to: string, base: { branch: string; remote: string }): Set<string> {
+  const refs = [`refs/heads/${base.branch}`, `refs/remotes/${base.remote}/${base.branch}`].filter((r) => git(dir, ['rev-parse', '--verify', '-q', r], { allowFail: true }));
+  const names = git(dir, ['log', '--no-merges', '--format=', '--name-only', `${from}..${to}`, ...(refs.length ? ['--not', ...refs] : [])], { allowFail: true });
+  return new Set(names.split('\n').map((l) => l.trim()).filter(Boolean));
+}
+
+/** The notes of this fix round whose place git shows the round's own commits changed, by id. */
+function changedByFix(dir: string, from: string | undefined, to: string, notes: OwnerNote[], base: { branch: string; remote: string }): Set<string> {
   if (!from) return new Set();
+  const own = ownFiles(dir, from, to, base);
   const diff = git(dir, ['diff', '-U0', '--no-color', '--no-ext-diff', from, to], { allowFail: true });
-  const touched = touchedNotes(notes.map((n, i) => ({ n: i, file: n.file, line: n.line })), readDiff(diff));
+  const files = readDiff(diff).filter((f) => (f.to && own.has(f.to)) || (f.from && own.has(f.from)));
+  const touched = touchedNotes(notes.map((n, i) => ({ n: i, file: n.file, line: n.line })), files);
   return new Set(notes.filter((_, i) => touched.has(i)).map((n) => n.id));
 }
 
@@ -46,14 +55,14 @@ function notFixed(n: OwnerNote, changed: Set<string>, label: string): string | n
   return changed.has(n.id) ? null : `The fix did not change its lines: answer it yourself on ${label}.`;
 }
 
-export async function sentToOwner(bp: BoardPaths, id: string, host: RepoHost, pr: PullRequest, into: Into, copy: { dir: string; branch: string }): Promise<{ clash: false }> {
+export async function sentToOwner(bp: BoardPaths, id: string, host: RepoHost, pr: PullRequest, into: Into, copy: { dir: string; branch: string; base: string; remote: string }): Promise<{ clash: false }> {
   const full = git(copy.dir, ['rev-parse', copy.branch], { allowFail: true });
   const commit = full.slice(0, 7) || copy.branch;
   const before = requireTicket(bp, id).contribution;
   // Sent again after the owner closed it: a new pull request, not a fix to the old one.
   const fix = before?.state === 'fixing';
   const round = (before?.notes ?? []).filter((n) => n.state === 'fixing' && n.pr === pr.id);
-  const changed = changedByFix(copy.dir, before?.sent, full || copy.branch, round);
+  const changed = changedByFix(copy.dir, before?.sent, full || copy.branch, round, { branch: copy.base, remote: copy.remote });
   const settle = new Map(round.map((n) => [n.id, notFixed(n, changed, host.label)]));
   const fixed = round.filter((n) => settle.get(n.id) === null).map((n) => ({ ...n, fixedIn: commit }));
   const { answered, gone } = await answerFixed(host, pr.id, fixed);

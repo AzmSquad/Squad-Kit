@@ -13,19 +13,37 @@ export function withIpv4First(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return flags.length ? { ...env, NODE_OPTIONS: `${current} ${flags.join(' ')}`.trim() } : env;
 }
 
-/**
- * squad-kit's own keys are for the engine: agents never talk to the tracker, the code host or the speech service
- * themselves. The code host's tool keeps its sign-in in its own folder, so agents get an empty one of those too.
- */
+/** squad-kit's own keys are for the engine: agents never talk to the tracker, the code host or the speech service themselves. */
 const ENGINE_ONLY_ENV_KEYS = ['AZURE_DEVOPS_PAT', 'SQUAD_TRACKER_API_KEY', 'JIRA_API_TOKEN', 'MUNSIT_API_KEY', 'GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN'];
+
+/**
+ * Takes the place of the person's GitHub sign-in for agents and the project's own commands. GitHub's tool reads its
+ * token from these first, and with one set it never looks in the person's keychain; this one is no token, so every call
+ * it makes is refused. squad-kit's own calls and pushes use squad-kit's own environment, never this one.
+ */
+export const NO_GITHUB_SIGN_IN = 'squad-kit-agents-have-no-github-sign-in';
+const NO_SIGN_IN_ENV = { GH_TOKEN: NO_GITHUB_SIGN_IN, GH_ENTERPRISE_TOKEN: NO_GITHUB_SIGN_IN };
 
 let noSignIn: string | null = null;
 
-/** An empty folder for the code host tool's settings: a tool started there finds no sign-in. Made once per run. */
+/**
+ * An empty folder for GitHub's tool's settings, so it finds no account there either: one per run, emptied again before
+ * each use, and removed when squad-kit ends.
+ */
 function emptyToolFolder(): string {
-  if (noSignIn && fs.existsSync(noSignIn) && !fs.readdirSync(noSignIn).length) return noSignIn;
-  noSignIn = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-kit-no-sign-in-'));
+  if (!noSignIn) {
+    noSignIn = path.join(os.tmpdir(), `squad-kit-no-sign-in-${process.pid}`);
+    const made = noSignIn;
+    process.once('exit', () => fs.rmSync(made, { recursive: true, force: true }));
+  }
+  fs.rmSync(noSignIn, { recursive: true, force: true });
+  fs.mkdirSync(noSignIn, { recursive: true });
   return noSignIn;
+}
+
+/** No GitHub sign-in: a token that is none, and an empty settings folder. projectEnv sets it again after its own cleaning. */
+export function noGithubSignIn(): Record<string, string> {
+  return { ...NO_SIGN_IN_ENV, GH_CONFIG_DIR: emptyToolFolder() };
 }
 
 /** The environment every agent process starts with, whichever AI tool it is. */
@@ -35,6 +53,5 @@ export function childEnv(): NodeJS.ProcessEnv {
   for (const key of Object.keys(env)) {
     if (SUBSCRIPTION_WITHHELD_ENV_KEYS.includes(key.toUpperCase()) || ENGINE_ONLY_ENV_KEYS.includes(key.toUpperCase())) delete env[key];
   }
-  env.GH_CONFIG_DIR = emptyToolFolder();
-  return env;
+  return { ...env, ...noGithubSignIn() };
 }

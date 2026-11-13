@@ -64,6 +64,38 @@ describe("the sign-in, through GitHub's own tool", () => {
     expect(ghState()).toBe('signed-out');
   });
 
+  it("gh that does not answer is never a sign-out: the last answer stays, else 'unknown', and squad-kit still tries", async () => {
+    const fs = await import('node:fs');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const before = process.env.PATH;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-gh-dies-'));
+    undo.push(() => {
+      process.env.PATH = before;
+      fs.rmSync(dir, { recursive: true, force: true });
+    });
+    // gh is killed before it answers: no exit code, so no answer.
+    fs.writeFileSync(path.join(dir, 'gh'), '#!/bin/sh\nkill -9 $$\n', { mode: 0o755 });
+    undo.push(fakeGh('ready'));
+    process.env.PATH = `${dir}${path.delimiter}${process.env.PATH}`;
+    const { forgetGhState } = await import('../src/modules/github/sign-in.js');
+    forgetGhState();
+    expect(await checkGh()).toBe('unknown');
+    expect(githubCodeHost.repoFor('/tmp/x', 'https://github.com/me/app.git')).not.toBeNull();
+    // A gh that cannot even start (not a program) is no answer either.
+    fs.writeFileSync(path.join(dir, 'gh'), 'not a program', { mode: 0o644 });
+    forgetGhState();
+    expect(await checkGh()).toBe('unknown');
+    // After a real answer, a missing one keeps it.
+    process.env.PATH = before;
+    undo.push(fakeGh('signed-out'));
+    expect(await checkGh()).toBe('signed-out');
+    fs.writeFileSync(path.join(dir, 'gh'), '#!/bin/sh\nkill -9 $$\n', { mode: 0o755 });
+    process.env.PATH = `${dir}${path.delimiter}${process.env.PATH}`;
+    const { ghState } = await import('../src/modules/github/sign-in.js');
+    expect(ghState(Date.now() + 120_000)).toBe('signed-out');
+  });
+
   it("git push signs in through gh's credential helper, and no token is in its environment", async () => {
     const host = await signedIn(() => undefined);
     const env = host.gitEnv();
@@ -213,6 +245,21 @@ describe("squad-kit's own code: the pull request goes to the main repo", () => {
     expect(gh.sent('POST', '/repos/team/app/pulls')[0]!.body).toMatchObject({ head: 'me:squad/ap-1', base: 'main', maintainer_can_modify: true });
     await expect(host.merge(31, 'm')).rejects.toThrow('Pull request 31 is in team/app: its owner merges it, never squad-kit.');
     expect(gh.sent('PUT', '/repos/team/app/pulls/31/merge')).toHaveLength(0);
+  });
+
+  it("a maintainer's own clone of the main repo: the pull request opens there, from its branch, and squad-kit never merges it", async () => {
+    const host = await signedIn(
+      (c) => {
+        if (route(c, 'GET', '/repos/me/app')) return { body: repoJson('me/app', { push: true }) };
+        if (route(c, 'POST', '/repos/me/app/pulls')) return { status: 201, body: pullJson('me/app', 12) };
+        return undefined;
+      },
+      'https://github.com/me/app.git',
+    );
+    expect(await host.contribution!()).toEqual({ into: 'me/app', base: 'main' });
+    await host.openPullRequest({ source: 'squad/sk-1', target: 'main', title: 't', description: 'd', items: [] });
+    expect(gh.sent('POST', '/repos/me/app/pulls')[0]!.body).toMatchObject({ head: 'squad/sk-1', base: 'main' });
+    await expect(host.merge(12, 'm')).rejects.toThrow('Pull request 12 is in me/app: its owner merges it, never squad-kit.');
   });
 
   it('the upstream wins over GitHub\'s own parent, a copy of a copy too', async () => {

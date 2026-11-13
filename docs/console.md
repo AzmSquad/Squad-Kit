@@ -366,16 +366,19 @@ gh, Recommended for a project kept on GitHub, with the steps.
 
 **Your own repo, a fork too.** A fork is your team's own repo: its pull requests stay in it. Looks right pushes the
 story's branch, opens the pull request into main, and merges it with a merge commit when GitHub allows it; the branch
-goes, and your own main follows. squad-kit never waits for that in the step: while GitHub's checks run, or a branch rule
-waits for a person's approval, the story says "Waits on the code host: its checks or an approval", and squad-kit looks
-again every few minutes and merges it then (or at once with **Check again**). A failed check, a draft or a clash is said
-plainly on the story, and squad-kit never goes around a rule. A branch rule that wants the newest main brings it in on
+goes, and your own main follows. squad-kit never waits for that in the step: while GitHub's checks run, a branch rule
+waits for a person's approval, or GitHub could not be reached just then (a laptop waking from sleep), the story says
+"Waits on the code host: its checks or an approval", and squad-kit looks again every few minutes and merges it then (or
+at once with **Check again**, which also merges one that stopped once it can). A failed check, a draft or a clash is said
+plainly on the story, and squad-kit never goes around a rule. Closed on GitHub while it waits, the story says so, with
+**Send it again** and **Leave it closed**. A release never starts while one of its pull requests still waits; on a main
+that only takes pull requests, the release goes through its own pull request and waits up to 10 minutes for its checks. A branch rule that wants the newest main brings it in on
 GitHub once. When you can't push to the repo, the story merges on this computer instead, as with no code host, and says
 why. The review goes in after the merge: each note a comment on its file and line, fixed ones resolved, and one comment
 for who pressed Looks right. GitHub takes no pictures from outside its own pages, so the pictures stay on the board.
 
 **squad-kit's own code.** Its pull request goes to squad-kit's main repo (the `upstream` remote, else the repo its
-package names), into its default branch, and its owners merge it: squad-kit never does. The review goes into the pull
+package names), into its default branch, and its owners merge it: squad-kit never does, a maintainer's own clone too. The review goes into the pull
 request's text, note by note, so they read it while reviewing. The story says **Waiting for the owner to merge**, out of
 your release, and squad-kit watches the pull request every few minutes:
 

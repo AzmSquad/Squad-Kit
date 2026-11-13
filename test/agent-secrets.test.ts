@@ -69,19 +69,25 @@ describe('agents never see squad-kit secrets', () => {
     }
   });
 
-  it("never gets the person's code host sign-in: no GitHub tokens, and gh's settings in an empty folder", () => {
+  it("never gets the person's GitHub sign-in: a token that is none (so gh never reads the keychain), and an empty gh folder", async () => {
+    const { projectEnv } = await import('../src/engine/project-guard.js');
     const before = { ...process.env };
     Object.assign(process.env, { GH_TOKEN: 'a', GITHUB_TOKEN: 'b', GH_ENTERPRISE_TOKEN: 'c', GITHUB_ENTERPRISE_TOKEN: 'd', GH_CONFIG_DIR: path.join(os.homedir(), '.config', 'gh') });
     try {
-      const env = childEnv();
-      expect([env.GH_TOKEN, env.GITHUB_TOKEN, env.GH_ENTERPRISE_TOKEN, env.GITHUB_ENTERPRISE_TOKEN]).toEqual([undefined, undefined, undefined, undefined]);
-      expect(env.GH_CONFIG_DIR).not.toBe(process.env.GH_CONFIG_DIR);
-      expect(fs.readdirSync(env.GH_CONFIG_DIR!)).toEqual([]);
-      // Something written there is never handed to the next agent.
-      fs.writeFileSync(path.join(env.GH_CONFIG_DIR!, 'hosts.yml'), 'github.com:\n');
+      for (const env of [childEnv(), projectEnv()]) {
+        expect([env.GH_TOKEN, env.GH_ENTERPRISE_TOKEN]).toEqual(['squad-kit-agents-have-no-github-sign-in', 'squad-kit-agents-have-no-github-sign-in']);
+        expect([env.GITHUB_TOKEN, env.GITHUB_ENTERPRISE_TOKEN]).toEqual([undefined, undefined]);
+        expect(env.GH_CONFIG_DIR).not.toBe(process.env.GH_CONFIG_DIR);
+        expect(fs.readdirSync(env.GH_CONFIG_DIR!)).toEqual([]);
+      }
+      // One folder for the whole run, emptied before each use: something written there never reaches the next agent.
+      const first = childEnv().GH_CONFIG_DIR!;
+      fs.writeFileSync(path.join(first, 'hosts.yml'), 'github.com:\n');
       const next = childEnv().GH_CONFIG_DIR!;
-      expect(next).not.toBe(env.GH_CONFIG_DIR);
+      expect(next).toBe(first);
       expect(fs.readdirSync(next)).toEqual([]);
+      // squad-kit's own calls and pushes keep the person's sign-in.
+      expect(process.env.GH_TOKEN).toBe('a');
     } finally {
       process.env = before;
     }

@@ -6,7 +6,7 @@ import { writeLog } from '../../core/app-log.js';
 import { HARNESS_FILE_GATE } from '../additions.js';
 import { BoardActionError, tellLater } from './errors.js';
 import { refuseWhileSaving, saveFromHookCard } from './save.js';
-import { ownerWay } from '../../engine/contribution/actions.js';
+import { fixRoundStopped, ownerWay } from '../../engine/contribution/actions.js';
 
 /** The card for gates that could not run. `save`: they stopped the save of an accepted change, not the checks. */
 export function gateCantRunCard(cant: { id: string; name: string; why?: string; output?: string }[], opts: { auto: boolean; save?: boolean }): StuckChoice {
@@ -261,6 +261,7 @@ export function decideNow(bp: BoardPaths, id: string, choice: number, input: { n
         return;
       case 'stop':
         // As if the person pressed Stop: the card says so and offers carrying on later, fixing it, or the plan.
+        fixRoundStopped(t);
         t.live = false;
         t.retryPhase = retryPhase;
         t.capRaise = undefined;
@@ -333,6 +334,8 @@ export function decideNow(bp: BoardPaths, id: string, choice: number, input: { n
         }
         return;
       case 'plan':
+        // A fix of the owner's notes given up for the plan: the notes wait for the person again.
+        fixRoundStopped(t);
         t.changeRequest = `The squad got stuck: ${t.stuck.question}`;
         t.stage = 'specs';
         t.status = 'Spec writer is updating the plan';

@@ -2,7 +2,8 @@ import { addActivity, listReleases, listTickets, readMeta, readTicket, requireTi
 import type { Ticket } from '../board/types.js';
 import { BoardActionError, ensureDraftRelease, pullRequestClashed } from '../board/actions.js';
 import { chooseBuild, isMerged, unmergedDeps, wakeIfReady } from '../board/depends.js';
-import { afterPullRequest, mergeWait } from '../board/auto.js';
+import { PR_HOST_WAITS, afterPullRequest, mergeWait } from '../board/auto.js';
+import { mayPassSoon } from '../modules/errors.js';
 import { clearStaleStop } from '../board/stale-stop.js';
 import { isMine } from '../board/owner.js';
 import type { RepoHost } from '../modules/code-host/types.js';
@@ -79,7 +80,7 @@ async function clashedByBranch(bp: BoardPaths, t: Ticket, host: RepoHost): Promi
  * A clash had taken it out of the release and kept the tracker item where it was: it goes back into the next release,
  * and the item moves to resolved.
  */
-async function recordMerged(bp: BoardPaths, id: string, pr: PrRef, host: RepoHost, target: { dir: string; base: string; remote: string }): Promise<boolean> {
+async function recordMerged(bp: BoardPaths, id: string, pr: PrRef, host: RepoHost, target: { dir: string; base: string; remote: string }, said?: string): Promise<boolean> {
   const moved = await followBase(bp, id, target, host);
   const t0 = requireTicket(bp, id);
   if (isMerged(t0)) return false;
@@ -103,7 +104,7 @@ async function recordMerged(bp: BoardPaths, id: string, pr: PrRef, host: RepoHos
     const ls = moved ? localSetupFor(bp, x) : undefined;
     if (ls) x.localSetup = ls;
     x.status = `Merged into ${target.base} · goes out in ${x.release ?? 'the next release'}`;
-    addActivity(x, 'release', `Pull request ${pr.id} was merged on ${host.label}. squad-kit saw it and marked the story as merged`);
+    addActivity(x, 'release', said ?? `Pull request ${pr.id} was merged on ${host.label}. squad-kit saw it and marked the story as merged`);
   });
   if (!done) return false;
   if (draft) {
@@ -172,7 +173,29 @@ async function checkOwn(bp: BoardPaths, t: Ticket): Promise<Omit<MergeCheck, 'ti
     await clashCardNow(bp, t.id);
     return { found: 'clash', line: `Pull request ${pr.id} clashes with newer work in ${base}, so ${t.id} waits for you with ways out.`, merged: [] };
   }
+  // The host says it can merge now (a check fixed, an approval given), and it is the team's own: squad-kit merges it.
+  if (state === 'mergeable' && t.stage === 'release' && t.pr) return mergeNow(bp, t, pr, host, target);
   return { found: 'open', line: `Pull request ${pr.id} is still open on ${host.label}, not merged yet. Nothing changed.`, merged: [] };
+}
+
+/**
+ * Check again on a pull request the host can merge now: merged now and recorded as squad-kit's own. One that has to wait
+ * after all goes back to the squad's own look (board/auto.ts PR_HOST_WAITS); a no for good is said.
+ */
+async function mergeNow(bp: BoardPaths, t: Ticket, pr: PrRef, host: RepoHost, target: { dir: string; base: string; remote: string }): Promise<Omit<MergeCheck, 'ticket'>> {
+  const err = await host.merge(pr.id, `Merge ${t.title} (${t.id})`).then(() => null, (e: unknown) => e as Error);
+  if (!err) {
+    const merged = await recordMerged(bp, t.id, pr, host, target, `Merged pull request ${pr.id} on ${host.label} with Check again`);
+    return { found: 'merged', line: `Merged pull request ${pr.id} on ${host.label} now that it can merge. ${t.id} is merged.`, merged: merged ? [t.id] : [] };
+  }
+  if (mayPassSoon(err)) {
+    updateTicket(bp, t.id, (x) => {
+      x.status = PR_HOST_WAITS;
+      addActivity(x, 'release', `Pull request ${pr.id} is not merged yet: ${err.message.replace(/\.?$/, '.')} squad-kit looks again every few minutes and merges it then`);
+    });
+    return { found: 'open', line: `Pull request ${pr.id} is not merged yet: ${err.message.replace(/\.?$/, '.')} squad-kit looks again by itself and merges it then.`, merged: [] };
+  }
+  return { found: 'open', line: `Pull request ${pr.id} is not merged: ${err.message.replace(/\.?$/, '.')}`, merged: [] };
 }
 
 /** A merge the squad looks at again by itself (board/auto.ts mergeWait), looked at now. */
@@ -188,8 +211,10 @@ async function checkWait(bp: BoardPaths, t: Ticket, wait: 'pr' | 'checkout'): Pr
   const host = target && targetHost(bp, target);
   if (r === 'closed' && t.pr && host) {
     saidClosed(bp, t.id, t.pr, host, base);
-    return { found: 'closed', line: `${closedLine(t.pr, host, base)}.`, merged: [] };
+    return { found: 'closed', line: `Pull request ${t.pr.id} was closed on ${host.label} without merging, so ${t.id} waits for you: send it again, or leave it closed.`, merged: [] };
   }
+  const now = readTicket(bp, t.id);
+  if (wait === 'pr' && now?.status === PR_HOST_WAITS) return { found: 'open', line: `Pull request ${t.pr?.id ?? ''} still waits${host ? ` on ${host.label}` : ''}: its checks or an approval. squad-kit looks again by itself and merges it then.`, merged: [] };
   if (wait === 'pr') return { found: 'open', line: `Pull request ${t.pr?.id ?? ''} is still open${host ? ` on ${host.label}` : ''}, waiting for someone to approve it. Nothing changed.`, merged: [] };
   return { found: 'open', line: `Your own copy of ${base} still has changes in the same files. Save or undo them there, and ${t.id} goes in by itself.`, merged: [] };
 }

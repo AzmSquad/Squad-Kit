@@ -56,10 +56,13 @@ async function checksOf(repo: string, sha: string): Promise<Checks> {
 
 type Look = { pr: RawPull; state: 'merged' | 'closed' | 'clash' | 'ready' | 'behind' } | { pr: RawPull; state: 'waiting' | 'refused'; why: string };
 
-/** Where it stands now, by squad-kit's rules: GitHub's own answer, and the checks on its newest commit. */
-async function look(repo: string, n: number): Promise<Look> {
+/**
+ * Where it stands now, by squad-kit's rules: GitHub's own answer, and the checks on its newest commit. `settle`: give
+ * GitHub a few seconds to work out whether it can merge, only right before a merge, so one look never waits twice.
+ */
+async function look(repo: string, n: number, settle = false): Promise<Look> {
   let p = await getPull(repo, n);
-  for (let i = 0; p.state === 'open' && !p.merged && p.mergeable === null && i < pace.settleLooks; i++) {
+  for (let i = 0; settle && p.state === 'open' && !p.merged && p.mergeable === null && i < pace.settleLooks; i++) {
     await pace.sleep(pace.stepMs);
     p = await getPull(repo, n);
   }
@@ -92,7 +95,7 @@ const updated = new Set<string>();
 
 export async function mergePull(repo: string, n: number, message: string): Promise<{ commit: string }> {
   for (let tries = 0; ; tries++) {
-    const l = await look(repo, n);
+    const l = await look(repo, n, true);
     const p = l.pr;
     if (l.state === 'merged') return { commit: p.merge_commit_sha ?? '' };
     if (l.state === 'closed') throw new ModuleError(`Pull request ${n} was closed on GitHub without merging.`, 'other', 410);

@@ -618,7 +618,7 @@ export function storyProgress(bp: BoardPaths, b: Breakdown, state: BreakdownStat
     if (r || t.stage === 'done') return { key: story.key, state: 'released', line: r ? `Released in ${r.version}` : 'Released', ticket: t.id };
     if (isMerged(t)) return { key: story.key, state: 'merged', line: t.mergedAt ? `Merged ${clockWords(t.mergedAt)}` : 'Merged', ticket: t.id };
     const wait = mergeWait(t);
-    if (wait) return { key: story.key, state: 'needs-you', line: mergeWaitWords(wait), ticket: t.id, stop: 'other' };
+    if (wait) return { key: story.key, state: 'needs-you', line: mergeWaitWords(wait, t), ticket: t.id, stop: 'other' };
     if (t.waiting) {
       const stop = stopOf(t);
       return { key: story.key, state: 'needs-you', line: `Needs you: ${STOP_WORDS[stop] || t.waiting.summary.replace(/^./, (c) => c.toLowerCase())}`, ticket: t.id, stop };

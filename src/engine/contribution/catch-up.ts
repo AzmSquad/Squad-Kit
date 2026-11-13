@@ -45,7 +45,13 @@ export async function catchUp(bp: BoardPaths, p: RepoPlace): Promise<CaughtUp> {
   if (!host || !copy) throw new BoardActionError('This repo is not on a code host squad-kit can bring up to date.');
   const info = await host.forks.repoInfo(copy);
   const main = (p.upstream && host.forks.repoName(p.upstream)) || info.parent;
-  if (!main || main.toLowerCase() === copy.toLowerCase()) throw new BoardActionError(`${copy} is not a copy of another repo, so there is nothing to bring in.`);
+  // A maintainer's own clone of the main repo: there is no copy to sync, only this computer's base to move forward.
+  if (main && main.toLowerCase() === copy.toLowerCase()) {
+    const moved = await baseForward(bp, p);
+    if (moved) mapAfterMerge(bp);
+    return { took: 0, moved, line: moved ? `${p.base} on this computer moved forward to the newest of ${main}.` : `${p.base} on this computer has the newest of ${main}.` };
+  }
+  if (!main) throw new BoardActionError(`${copy} is not a copy of another repo, so there is nothing to bring in.`);
   // The host's own sync takes from the copy's parent only: a copy of a copy is brought up to date by hand.
   if (info.parent?.toLowerCase() !== main.toLowerCase()) throw new BoardActionError(`Your copy ${copy} was made from ${info.parent ?? 'no other repo'}, not from ${main}, so ${host.label}'s own sync cannot bring ${main}'s newest in. Bring it in yourself: git pull upstream ${p.base}.`);
   const { behind, ahead } = await host.forks.compareFork(copy, main, p.base);

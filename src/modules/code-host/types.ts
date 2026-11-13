@@ -120,7 +120,8 @@ export interface RepoHost {
 
 /** The sign-in a code host module uses on this computer, for the person: ready or not, and the steps when not. */
 export interface HostSignIn {
-  state: 'ready' | 'missing' | 'signed-out';
+  /** unknown: the tool did not answer this time (it timed out). squad-kit then tries as if signed in, and says so if not. */
+  state: 'ready' | 'missing' | 'signed-out' | 'unknown';
   /** Who is signed in, when ready. */
   account?: string;
   /** Plain numbered steps, when not ready. */

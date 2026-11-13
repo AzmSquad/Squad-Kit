@@ -1,9 +1,9 @@
-import { addActivity, now, requireTicket, updateTicket, type BoardPaths } from '../../board/store.js';
+import { addActivity, listReleases, now, requireTicket, updateTicket, writeRelease, type BoardPaths } from '../../board/store.js';
 import type { Ticket, WayOut } from '../../board/types.js';
 import type { ContributionState, OwnerNote } from '../../board/contribution-types.js';
 import { BoardActionError } from '../../board/actions/errors.js';
 import { scheduleSquad } from '../../board/schedule.js';
-import { fixWords, MOST_NOTES, OWNER_FIXING, OWNER_LEFT_CLOSED, OWNER_WAITS } from './words.js';
+import { fixWords, LEFT_CLOSED, MOST_NOTES, OWNER_FIXING, OWNER_LEFT_CLOSED, OWNER_WAITS } from './words.js';
 
 /**
  * The person's buttons on a pull request that went to someone else's repo, each one REST call and one terminal command
@@ -75,14 +75,43 @@ export function leaveNotes(bp: BoardPaths, id: string): Ticket {
   });
 }
 
-/** Leave it closed: the story ends here, not merged. */
+/**
+ * Leave it closed: the story ends here, not merged. A pull request in the team's own repo closed while it waited
+ * (engine/sync.ts closedWhileWaiting) leaves the release too: it is not in the code.
+ */
 export function leaveClosed(bp: BoardPaths, id: string): Ticket {
   const t = requireTicket(bp, id);
-  if (sent(t).state !== 'closed') throw new BoardActionError(`Pull request ${t.pr!.id} of ${t.id} is not closed.`);
+  const closed = t.contribution ? t.contribution.state === 'closed' : Boolean(t.pr && t.prClosed === t.pr.id);
+  if (!closed) throw new BoardActionError(`${t.id}'s pull request is not closed.`);
+  if (!t.contribution) {
+    const draft = listReleases(bp).find((r) => r.status !== 'released' && r.tickets.includes(id));
+    if (draft) writeRelease(bp, { ...draft, tickets: draft.tickets.filter((x) => x !== id) });
+  }
   return updateTicket(bp, id, (x) => {
-    backToWaiting(x, 'closed', OWNER_LEFT_CLOSED);
+    if (x.contribution) backToWaiting(x, 'closed', OWNER_LEFT_CLOSED);
+    else {
+      x.stuck = undefined;
+      x.waiting = null;
+      x.live = false;
+      x.squad = null;
+      x.retryPhase = undefined;
+      x.release = undefined;
+      x.status = LEFT_CLOSED;
+    }
     addActivity(x, 'you', `Left pull request ${x.pr?.id ?? ''} closed. The work stays on the story's branch`);
   });
+}
+
+/**
+ * A fix round of the owner's notes that was stopped or given up: the story waits for the owner again, and the notes it
+ * was fixing wait for the person again. Changes `t` in place (inside an update).
+ */
+export function fixRoundStopped(t: Ticket): void {
+  const c = t.contribution;
+  if (c?.state !== 'fixing') return;
+  c.state = 'waiting';
+  c.since = now();
+  c.notes = (c.notes ?? []).map((n): OwnerNote => (n.state === 'fixing' ? { ...n, state: 'new' } : n));
 }
 
 /** The ways out on the owner's cards, chosen on the stop card (`squad unstick`). Null for any other way out. */

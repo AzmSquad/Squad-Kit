@@ -12,8 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **squad-kit opens the pull request on GitHub.** With GitHub's own tool, gh, signed in on your computer, Looks right
   pushes the story's branch and opens its pull request, in your own repo or your team's fork. squad-kit merges it with a
   merge commit once GitHub allows it, deletes the branch and brings your main up to date, as on Azure Repos. While the
-  checks run or a branch rule waits for an approval, nothing is held up: squad-kit looks again every few minutes and
-  merges it then. A failed check or a clash is said plainly, and squad-kit never goes around a rule. Can't push to the
+  checks run, a branch rule waits for an approval, or GitHub could not be reached for a moment, nothing is held up:
+  squad-kit looks again every few minutes and merges it then. A failed check or a clash is said plainly, and squad-kit never goes around a rule. Can't push to the
   repo? It merges on your computer instead, and says why. Without gh, the work merges on your computer as before.
 - **Sending your work to squad-kit itself.** On squad-kit's own code, the pull request goes to squad-kit's main repo,
   with the review in its text, and its owners merge it: squad-kit never does. The story waits for them and squad-kit

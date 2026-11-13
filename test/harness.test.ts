@@ -69,6 +69,7 @@ const EXCUSED: Record<string, string> = {
   'save-trouble.ts:SAVE_CHECK_MS': 'How often a held project tries its test write.',
   'free-port.ts:LOOK_MS': 'How often it looks at who holds the app port.',
   'contribution/look.ts:LOOK_MS': "How often it looks at a pull request in someone else's repo, beside the work. Check again looks at once.",
+  'release-pr.ts:RELEASE_PR_LOOK_MS': "How often a release looks at its own pull request. RELEASE_PR_WAIT_MS is the limit.",
   'live/limits.ts:PICK_UP_MS': 'How often it looks for stories teammates pushed.',
   'watchdog.ts:SLEEP_MS': 'Tells a computer that slept from a step that went quiet.',
   'watchdog.ts:NO_LOOK_MS': 'Tells a computer that slept from a step that went quiet.',
@@ -184,6 +185,7 @@ const STOPS_PER_FILE: Record<string, number> = {
   'live/stops.ts': 4,
   'live/workspace.ts': 1,
   'publish.ts': 4,
+  'sync.ts': 1,
   'contribution/look.ts': 2,
 };
 

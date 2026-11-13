@@ -7,7 +7,7 @@ import type { BoardPaths } from '../board/store.js';
 import type { ProjectGuard } from '../board/types.js';
 import { AI_TOOLS, BROWSERS } from '../modules/registry.js';
 import { squadHome, squadHomes } from '../core/home.js';
-import { childEnv } from './agent-env.js';
+import { childEnv, noGithubSignIn } from './agent-env.js';
 import { copyDbEnv } from './db-env.js';
 import { partEnv } from './part-env.js';
 import { ownHomeEnv } from './own-home.js';
@@ -557,14 +557,14 @@ export function isSecretEnv(name: string, names = secretEnvNames()): boolean {
 /**
  * The environment the project's own commands run with: every agent's environment (childEnv, which already drops the
  * subscription and engine keys) minus squad-kit's own variables, the AI tools' keys and the common cloud and
- * code-host tokens. Everything an app commonly needs (PATH, HOME, LANG, NODE_OPTIONS, DATABASE_URL and the like) is
+ * code-host tokens, with GitHub's tool given no sign-in again (agent-env.ts noGithubSignIn). Everything an app commonly needs (PATH, HOME, LANG, NODE_OPTIONS, DATABASE_URL and the like) is
  * kept, so only secrets are removed, never the ordinary settings a build or a test reads.
  */
 export function projectEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   const names = secretEnvNames();
   const env = childEnv();
   for (const key of Object.keys(env)) if (isSecretEnv(key, names)) delete env[key];
-  return { ...env, ...extra };
+  return { ...env, ...noGithubSignIn(), ...extra };
 }
 
 /* ── the single gate: every project command spawns here ──── */

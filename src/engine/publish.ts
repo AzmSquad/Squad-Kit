@@ -8,7 +8,7 @@ import { PR_HOST_WAITS } from '../board/auto.js';
 import { clearStaleStop } from '../board/stale-stop.js';
 import { forkHostFor, trackerFor } from '../modules/registry.js';
 import type { RepoHost } from '../modules/code-host/types.js';
-import { ModuleError } from '../modules/errors.js';
+import { ModuleError, mayPassSoon } from '../modules/errors.js';
 import { MergeClash, baseTurn, fetchedTip, moveBase, netGitLater } from './git.js';
 import { itemId, localSetupFor, mapAfterMerge, mergeLocally, noteOn, prItem, repoTarget, resolveItem, saidToEngineers, squadInside, targetHost } from './sync.js';
 import { sentToOwner } from './contribution/send.js';
@@ -150,7 +150,7 @@ async function publishTo(bp: BoardPaths, t: Ticket, target: Target, host: RepoHo
     if (!into) addActivity(x, 'release', `Opened pull request ${opened.id} on ${host.label}`);
   });
   if (into) {
-    const sentTo = await sentToOwner(bp, ticketId, host, opened, into, { dir: t.worktree ?? target.dir, branch });
+    const sentTo = await sentToOwner(bp, ticketId, host, opened, into, { dir: t.worktree ?? target.dir, branch, base: target.base, remote: target.remote });
     // The owner merges it, so the item is resolved but stays open until they do (engine/contribution/look.ts).
     if (!found) await resolveItem(bp, ticketId, tracker, item, false, `Pull request [${opened.id}](${opened.url}) is open in ${into.into} with the proof, waiting for its owner to merge it.`);
     return sentTo;
@@ -162,6 +162,7 @@ async function publishTo(bp: BoardPaths, t: Ticket, target: Target, host: RepoHo
   let why = '';
   let clash = false;
   let waits = false;
+  let held = false;
   try {
     await host.merge(opened.id, `Merge ${t.title} (${t.id})`);
     merged = true;
@@ -171,7 +172,9 @@ async function publishTo(bp: BoardPaths, t: Ticket, target: Target, host: RepoHo
     movedLocal = local.moved;
   } catch (err) {
     why = (err as Error).message;
-    waits = err instanceof ModuleError && err.kind === 'waiting';
+    // Checks still running, a connection that dropped, a busy service: the squad looks again by itself and merges then.
+    waits = mayPassSoon(err);
+    held = err instanceof ModuleError && err.kind === 'waiting';
     // Newer changes in the base clash with it: that needs the clash card (the caller gives it), not a wait on the host.
     clash = !waits && (err instanceof ModuleError && err.kind === 'clash' ? true : (await host.mergeState(opened.id).catch(() => null)) === 'clash');
   }
@@ -190,7 +193,8 @@ async function publishTo(bp: BoardPaths, t: Ticket, target: Target, host: RepoHo
     } else if (waits) {
       // The squad looks again every few minutes and merges it then (sync.ts recheckMerge): nothing holds a place meanwhile.
       x.status = PR_HOST_WAITS;
-      addActivity(x, 'release', `${why} squad-kit looks again every few minutes and merges it then`);
+      const said = held ? why : `Pull request ${opened.id} is open, not merged yet: ${why.replace(/\.?$/, '.')}`;
+      addActivity(x, 'release', `${said} squad-kit looks again every few minutes and merges it then`);
     } else if (!clash) {
       x.status = `PR ${opened.id} is waiting in ${host.label} · ${x.release ?? 'next release'}`;
       addActivity(x, 'release', `Pull request ${opened.id} is open but not merged yet: ${why}`);

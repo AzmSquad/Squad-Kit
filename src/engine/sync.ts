@@ -16,7 +16,8 @@ import { clearStaleStop } from '../board/stale-stop.js';
 import { copyViews } from './copies.js';
 import { writeLog } from '../core/app-log.js';
 import { freeName } from '../core/file-names.js';
-import { ModuleError, refusedForGood } from '../modules/errors.js';
+import { ModuleError, mayPassSoon, refusedForGood } from '../modules/errors.js';
+import { closedOptions } from './contribution/words.js';
 import { selfUpstream } from './self-project.js';
 import { tidyStoryDbsBeside } from './story-db.js';
 import type { ReviewRecord } from '../board/review-types.js';
@@ -282,7 +283,11 @@ export async function recheckMerge(bp: BoardPaths, id: string): Promise<'merged'
     const host = target && targetHost(bp, target);
     if (!target || !host || !t.pr) return 'waiting';
     const state = await host.mergeState(t.pr.id).catch(() => null);
-    if (state === 'clash' || state === 'closed') return state;
+    if (state === 'clash') return state;
+    if (state === 'closed') {
+      closedWhileWaiting(bp, id, t.pr.id, host.label);
+      return state;
+    }
     if (state !== 'merged') {
       // The host says it can merge now (its checks passed, someone approved, or a blip cut the merge off): it merges.
       // One the host held back (PR_HOST_WAITS) is asked too, so a refusal is said on the story once and the wait ends.
@@ -290,14 +295,15 @@ export async function recheckMerge(bp: BoardPaths, id: string): Promise<'merged'
       const err = await host.merge(t.pr.id, `Merge ${t.title} (${t.id})`).then(() => null, (e: unknown) => e as Error);
       if (err instanceof ModuleError && err.kind === 'clash') return 'clash';
       if (err) {
-        if (!(err instanceof ModuleError && err.kind === 'waiting') && t.status === PR_HOST_WAITS) heldBack(bp, id, t.pr.id, host.label, err.message);
+        // Only a no for good ends the wait: a computer that slept, a busy service or checks still running keep it.
+        if (!mayPassSoon(err) && t.status === PR_HOST_WAITS) heldBack(bp, id, t.pr.id, host.label, err.message);
         return 'waiting';
       }
     }
     moved = await followBase(bp, id, target, host);
     const pr = t.pr;
     review = () => writeReview(bp, id, host, pr);
-    line = `Pull request ${t.pr.id} was approved and merged on ${host.label}`;
+    line = t.status === PR_HOST_WAITS ? `Merged pull request ${t.pr.id} on ${host.label} once it was ready` : `Pull request ${t.pr.id} was approved and merged on ${host.label}`;
   } else {
     const dirs = copyViews(readMeta(bp), t).map((view) => path.join(projectRoot(bp), repoFor(readMeta(bp), view).path));
     const went = await baseTurn(dirs, () => {
@@ -326,6 +332,24 @@ export async function recheckMerge(bp: BoardPaths, id: string): Promise<'merged'
   // A pull request that waited left the item open: it is in the base now.
   if (wait === 'pr' && t.pr && isMine(t, readMeta(bp))) await trackerMerged(bp, id, t.pr, base);
   return 'merged';
+}
+
+/**
+ * Its pull request was closed on the code host without merging while it waited: the story says so once, with Send it
+ * again (a new pull request) and Leave it closed, and the squad stops looking.
+ */
+export function closedWhileWaiting(bp: BoardPaths, id: string, pr: number, label: string): void {
+  updateTicket(bp, id, (x) => {
+    if (x.prClosed === pr && x.waiting?.kind === 'stuck') return;
+    x.prClosed = pr;
+    x.live = false;
+    x.squad = null;
+    x.retryPhase = 'publish';
+    x.status = `Pull request ${pr} was closed on ${label} without merging`;
+    x.stuck = { kind: 'owner-closed', question: `Pull request ${pr} was closed on ${label} without merging, so it is not in the code. Nothing here changed: the work stays on the story's branch.`, options: closedOptions() };
+    x.waiting = { kind: 'stuck', summary: 'The pull request was closed without merging' };
+    addActivity(x, 'release', `Pull request ${pr} was closed on ${label} without merging`);
+  });
 }
 
 /** A pull request the code host held back for good (a failed check, a draft): said once, and the squad stops looking. */

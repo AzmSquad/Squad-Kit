@@ -109,7 +109,7 @@ function ideaItem(main: string | undefined): ChecklistItem {
 
 function signInItem(s: HostSignIn, label: string): ChecklistItem {
   if (s.state === 'ready') return { id: 'sign-in', title: `Signed in to ${label}`, state: 'done', line: `Signed in as ${s.account ?? 'you'}.` };
-  const why = s.state === 'missing' ? `${label}'s own tool is not on this computer.` : `${label}'s own tool is here, but not signed in.`;
+  const why = s.state === 'missing' ? `${label}'s own tool is not on this computer.` : s.state === 'unknown' ? `${label}'s own tool did not answer just now.` : `${label}'s own tool is here, but not signed in.`;
   return { id: 'sign-in', title: `Signed in to ${label}`, state: 'todo', line: `${why} squad-kit signs in through it, and keeps no password.`, steps: s.steps, link: s.link };
 }
 
@@ -145,7 +145,7 @@ export async function contributeChecklist(bp: BoardPaths): Promise<Checklist> {
     items.push({ id: 'copy', title: 'Your own copy', state: 'todo', line: `You can't send changes to ${main} itself. squad-kit makes your own copy of it (a fork) on ${fh.label}, then sends your stories from there as pull requests.`, action: FORK });
     items.push({ id: 'up-to-date', title: `Up to date with ${main}`, state: 'blocked', line: 'Make your own copy first.' });
   } else {
-    items.push({ id: 'copy', title: 'Your own copy', state: 'done', line: same ? `You can send changes to ${main} itself: you are one of its maintainers.` : `${origin}, with ${main} as the repo your stories go to.` });
+    items.push({ id: 'copy', title: 'Your own copy', state: 'done', line: same ? `You can send changes to ${main} itself: you are one of its maintainers. Your stories still go as pull requests, and its owners merge them on ${fh.label}.` : `${origin}, with ${main} as the repo your stories go to.` });
     items.push({ id: 'up-to-date', title: `Up to date with ${main}`, state: 'info', line: `Your stories start from ${p.base} as squad-kit last fetched it.` });
   }
   items.push(rulesItem(p.dir), ideaItem(main));

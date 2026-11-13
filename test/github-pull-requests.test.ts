@@ -5,9 +5,11 @@ import path from 'node:path';
 import { execSync } from 'node:child_process';
 import { Hono } from 'hono';
 import { boardPaths, listReleases, readTicket, requireTicket, updateTicket, writeMeta } from '../src/board/store.js';
-import { approve, createTicket, decideStuck } from '../src/board/actions.js';
-import { mergeWait, PR_HOST_WAITS } from '../src/board/auto.js';
-import { opensPullRequest } from '../src/engine/sync.js';
+import { approve, createTicket, decideStuck, releaseVersion } from '../src/board/actions.js';
+import { mergeWait, mergeWaitWords, PR_HOST_WAITS } from '../src/board/auto.js';
+import { opensPullRequest, recheckMerge } from '../src/engine/sync.js';
+import { releasePace } from '../src/engine/release-pr.js';
+import { fixRoundStopped } from '../src/engine/contribution/actions.js';
 import { publishTicket } from '../src/engine/publish.js';
 import { lookAtContribution, lookAtContributions } from '../src/engine/contribution/look.js';
 import { checkMerge } from '../src/engine/merged-outside.js';
@@ -119,6 +121,9 @@ describe("the team's own repo on GitHub", () => {
   /** GitHub for me/app: `pull` answers for pull request 7, and the checks are none unless `checks` says. */
   function own(pull: () => object, extra: (c: Call) => Answer = () => undefined, o: { fork?: string; push?: boolean } = {}) {
     gh = fakeGitHub((c) => {
+      // The test's own answers first: a dropped connection, a busy GitHub, a release's pull request.
+      const first = extra(c);
+      if (first) return first;
       if (route(c, 'GET', '/repos/me/app')) return { body: repoJson('me/app', o) };
       if (route(c, 'GET', '/repos/me/app/pulls')) return { body: [] };
       if (route(c, 'POST', '/repos/me/app/pulls')) return { status: 201, body: pullJson('me/app', 7) };
@@ -127,7 +132,7 @@ describe("the team's own repo on GitHub", () => {
       if (c.method === 'DELETE') return { status: 204 };
       if (c.method === 'GET' && c.path.includes('/comments')) return { body: [] };
       if (c.method === 'POST' && c.path.includes('/comments')) return { status: 201, body: { id: 900 } };
-      return extra(c) ?? noChecks(c);
+      return noChecks(c);
     });
   }
 
@@ -231,6 +236,130 @@ describe("the team's own repo on GitHub", () => {
     expect(gh!.calls.filter((c) => c.method !== 'GET')).toEqual([]);
   });
 
+  it('a laptop waking from sleep: offline, too many calls or GitHub trouble keep the wait, and it merges once all is well', async () => {
+    setUp('me/app');
+    const id = accepted();
+    let now: 'running' | 'offline' | 'busy' | 'green' = 'offline';
+    own(
+      () => pullJson('me/app', 7, now === 'green' ? { merged: exact('PUT', '/repos/me/app/pulls/7/merge').length > 0 } : { mergeableState: 'unstable' }),
+      (c) => {
+        if (now === 'offline' && c.path.startsWith('/repos/me/app/pulls/7')) return 'offline';
+        if (now === 'busy' && c.path.startsWith('/repos/me/app/pulls/7')) return { status: 502, body: { message: 'Bad gateway' } };
+        return c.path.includes('/check-runs') ? { body: { check_runs: [{ name: 'e2e', status: now === 'green' ? 'completed' : 'queued', conclusion: now === 'green' ? 'success' : null }] } } : undefined;
+      },
+    );
+    // Offline right at the merge: a wait, never a stop.
+    expect(await publishTicket(bp, id)).toEqual({ clash: false });
+    let t = requireTicket(bp, id);
+    expect(t.status).toBe(PR_HOST_WAITS);
+    expect(t.activity[0]!.text).toMatch(/^Pull request 7 is open, not merged yet: GitHub could not be reached: fetch failed\. squad-kit looks again every few minutes/);
+    expect(mergeWaitWords('pr', t)).toBe(PR_HOST_WAITS);
+    for (const step of ['running', 'offline', 'busy'] as const) {
+      now = step;
+      expect(await recheckMerge(bp, id)).toBe('waiting');
+      expect(requireTicket(bp, id).status).toBe(PR_HOST_WAITS);
+    }
+    now = 'green';
+    expect(await recheckMerge(bp, id)).toBe('merged');
+    t = requireTicket(bp, id);
+    expect(t.mergedAt).toBeTruthy();
+    expect(t.activity.map((a) => a.text)).toContain('Merged pull request 7 on GitHub once it was ready');
+  });
+
+  it('closed on GitHub while it waits: the story says so, with Send it again or Leave it closed, and leaves the release', async () => {
+    setUp('me/app');
+    const id = accepted();
+    let closed = false;
+    own(
+      () => (closed ? pullJson('me/app', 7, { state: 'closed' }) : pullJson('me/app', 7, { mergeableState: 'blocked' })),
+    );
+    await publishTicket(bp, id);
+    closed = true;
+    expect(await recheckMerge(bp, id)).toBe('closed');
+    let t = requireTicket(bp, id);
+    expect(t).toMatchObject({ status: 'Pull request 7 was closed on GitHub without merging', waiting: { kind: 'stuck' }, stuck: { kind: 'owner-closed' } });
+    expect(t.stuck!.options.map((o) => o.name)).toEqual(['Send it again', 'Leave it closed']);
+    expect(mergeWait(t)).toBeNull();
+    t = decideStuck(bp, id, 1);
+    expect(t).toMatchObject({ status: 'Closed without merging, left as it is', waiting: null });
+    expect(t.release).toBeUndefined();
+    expect(listReleases(bp).flatMap((r) => r.tickets)).not.toContain(id);
+  });
+
+  it('Check again after a stop merges it once it can; on Builds by itself the squad does', async () => {
+    setUp('me/app');
+    const id = accepted();
+    let failed = true;
+    own(
+      () => pullJson('me/app', 7, failed ? { mergeableState: 'unstable' } : { merged: exact('PUT', '/repos/me/app/pulls/7/merge').length > 0 }),
+      (c) => (c.path.includes('/check-runs') ? { body: { check_runs: [{ name: 'lint', status: 'completed', conclusion: failed ? 'failure' : 'success' }] } } : undefined),
+    );
+    await publishTicket(bp, id);
+    expect(requireTicket(bp, id).status).toMatch(/^PR 7 is waiting in GitHub/);
+    expect(mergeWait(requireTicket(bp, id))).toBeNull();
+    failed = false;
+    expect(await checkMerge(bp, id)).toMatchObject({ found: 'merged', merged: [id], line: `Merged pull request 7 on GitHub now that it can merge. ${id} is merged.` });
+
+    // Builds by itself: the squad's own look merges it once the check is fixed.
+    const auto = accepted();
+    updateTicket(bp, auto, (x) => (x.track = 'auto'));
+    failed = true;
+    own(
+      () => pullJson('me/app', 7, failed ? { mergeableState: 'unstable' } : { merged: exact('PUT', '/repos/me/app/pulls/7/merge').length > 0 }),
+      (c) => (c.path.includes('/check-runs') ? { body: { check_runs: [{ name: 'lint', status: 'completed', conclusion: failed ? 'failure' : 'success' }] } } : undefined),
+    );
+    await publishTicket(bp, auto);
+    expect(mergeWait(requireTicket(bp, auto))).toBe('pr');
+    expect(await recheckMerge(bp, auto)).toBe('waiting');
+    failed = false;
+    expect(await recheckMerge(bp, auto)).toBe('merged');
+  });
+
+  it('a release never starts with a pull request still held back, and goes through its own pull request on a branch that takes only those', async () => {
+    setUp('me/app');
+    const held = accepted();
+    let running = true;
+    let releasePr = false;
+    own(
+      () => pullJson('me/app', 7, running ? { mergeableState: 'unstable' } : { merged: exact('PUT', '/repos/me/app/pulls/7/merge').length > 0 }),
+      (c) => {
+        if (c.path.includes('/commits/headsha/check-runs')) return { body: { check_runs: running ? [{ name: 'e2e', status: 'queued', conclusion: null }] : [] } };
+        if (route(c, 'GET', '/repos/me/app/pulls') && c.path.includes('release')) return { body: releasePr ? [pullJson('me/app', 8)] : [] };
+        if (route(c, 'POST', '/repos/me/app/pulls') && String(c.body?.head).startsWith('release/')) {
+          releasePr = true;
+          return { status: 201, body: pullJson('me/app', 8) };
+        }
+        if (route(c, 'GET', '/repos/me/app/pulls/8')) return { body: pullJson('me/app', 8, { sha: 'relsha', merged: exact('PUT', '/repos/me/app/pulls/8/merge').length > 0 }) };
+        // The release's own checks run on its first look, and pass by the next one.
+        if (c.path.startsWith('/repos/me/app/commits/relsha/check-runs')) return { body: { check_runs: [{ name: 'e2e', status: exact('GET', c.path).length < 2 ? 'queued' : 'completed', conclusion: exact('GET', c.path).length < 2 ? null : 'success' }] } };
+        if (route(c, 'PUT', '/repos/me/app/pulls/8/merge')) return { body: { merged: true, sha: 'rel123' } };
+        return undefined;
+      },
+    );
+    await publishTicket(bp, held);
+    expect(requireTicket(bp, held).status).toBe(PR_HOST_WAITS);
+    await expect(releaseVersion(bp)).rejects.toThrow(`The pull request of ${held} still waits on GitHub: its checks or an approval.`);
+    // Nothing of the release was written down or made.
+    expect(sh('git tag', project)).toBe('');
+    running = false;
+    expect(await recheckMerge(bp, held)).toBe('merged');
+    // main only takes pull requests: the release goes through its own, and waits for its checks for a while.
+    fs.writeFileSync(path.join(remote, 'hooks', 'pre-receive'), '#!/bin/sh\nwhile read old new ref; do\n  if [ "$ref" = "refs/heads/main" ]; then echo "error: GH006: Protected branch update failed for refs/heads/main."; exit 1; fi\ndone\n', { mode: 0o755 });
+    const sleep = releasePace.sleep;
+    releasePace.sleep = async () => undefined;
+    try {
+      const r = await releaseVersion(bp);
+      expect(r.unpushed).toBeUndefined();
+      expect(r.log?.map((l) => l.text)).toContain('The shared copy only takes pull requests, so the release went through pull request 8');
+      expect(sh(`git tag -l ${r.version}`, remote)).toBe(r.version);
+      expect(exact('PUT', '/repos/me/app/pulls/8/merge')).toHaveLength(1);
+      // It looked twice: once while the checks ran, once when they passed.
+      expect(exact('GET', '/repos/me/app/commits/relsha/check-runs?per_page=100')).toHaveLength(2);
+    } finally {
+      releasePace.sleep = sleep;
+    }
+  });
+
   it("GitHub says no to the sign-in: the stop says how to sign in again with GitHub's tool", async () => {
     setUp('me/app');
     const id = accepted();
@@ -254,6 +383,8 @@ describe("squad-kit's own code: the main repo's owner merges", () => {
   function mainRoutes(extra: (c: Call) => Answer = () => undefined): void {
     gh = fakeGitHub(
       (c) => {
+        const first = extra(c);
+        if (first) return first;
         const open = 30 + prs;
         if (route(c, 'GET', '/repos/me/app')) return { body: repoJson('me/app', { fork: 'team/app' }) };
         if (route(c, 'GET', '/repos/team/app')) return { body: repoJson('team/app', { push: false }) };
@@ -272,7 +403,7 @@ describe("squad-kit's own code: the main repo's owner merges", () => {
         const reply = /\/pulls\/\d+\/comments\/(\d+)\/replies$/.exec(c.path);
         if (reply && gone.has(Number(reply[1]))) return { status: 404, body: { message: 'Not Found' } };
         if (c.method === 'POST' && c.path.includes('/comments')) return { status: 201, body: { id: 500 } };
-        return extra(c) ?? noChecks(c);
+        return noChecks(c);
       },
       { network: [['me/app', 'team/app']] },
     );
@@ -385,6 +516,90 @@ describe("squad-kit's own code: the main repo's owner merges", () => {
     expect(t.status).toBe('Waiting for the owner to merge');
   });
 
+  it('"Fixed in" reads the round\'s own commits only: the newest base brought in during the round fixes nothing', async () => {
+    const id = await sent();
+    lines = [note(41, 'Keep the fee.', 'book.ts', 1), note(42, 'Tidy n7.', 'other.ts', 8)];
+    await lookAtContribution(bp, id);
+    decideStuck(bp, id, 0);
+    const t = requireTicket(bp, id);
+    // Meanwhile main moved: someone changed other.ts line 8 there, and the round brought it in.
+    sh(`git checkout -q main && sed -i.bak 's/n7 = 7/n7 = 70/' other.ts && rm other.ts.bak && git commit -qam "teammate's change" && git checkout -q -`, project);
+    sh('git merge -q --no-edit main', t.worktree!);
+    const sha = await fixedAndSent(id, () => fs.writeFileSync(path.join(t.worktree!, 'book.ts'), 'export const fee = 500;\nexport const rooms = 3;\n'));
+    expect(requireTicket(bp, id).contribution!.notes!.map((n) => [n.id, n.state, n.fixedIn ?? n.why])).toEqual([
+      ['line:41', 'fixed', sha],
+      ['line:42', 'left', 'The fix did not change its lines: answer it yourself on GitHub.'],
+    ]);
+  });
+
+  it('a conversation the owner locked: the answer is refused, so the note is left with why, never asked again', async () => {
+    const id = await sent();
+    lines = [note(43, 'Lower it.', 'book.ts', 1)];
+    await lookAtContribution(bp, id);
+    decideStuck(bp, id, 0);
+    mainRoutes((c) => (c.path.endsWith('/comments/43/replies') ? { status: 403, body: { message: 'Conversation is locked' } } : undefined));
+    prs = 1;
+    const t = requireTicket(bp, id);
+    await fixedAndSent(id, () => fs.writeFileSync(path.join(t.worktree!, 'book.ts'), 'export const fee = 300;\nexport const rooms = 3;\n'));
+    expect(requireTicket(bp, id).contribution!.notes![0]).toMatchObject({ state: 'left', why: 'squad-kit could not answer it on GitHub: its conversation is locked, or its comment is gone.' });
+    const asked = answers().length;
+    await lookAtContribution(bp, id);
+    expect(answers()).toHaveLength(asked);
+  });
+
+  it('a fix round stopped or given up: the pull request is watched again and its notes wait for you again', async () => {
+    const id = await sent();
+    lines = [note(44, 'Rename it.', 'book.ts', 1)];
+    await lookAtContribution(bp, id);
+    decideStuck(bp, id, 0);
+    expect(requireTicket(bp, id).contribution!.state).toBe('fixing');
+    expect(await lookAtContributions(bp)).toEqual([]);
+    // As the live squad's Stop does, and Stop or back to the plan on a card.
+    updateTicket(bp, id, (x) => {
+      fixRoundStopped(x);
+      x.squad = null;
+      x.live = false;
+    });
+    expect(requireTicket(bp, id).contribution).toMatchObject({ state: 'waiting', notes: [{ id: 'line:44', state: 'new' }] });
+    expect(await lookAtContributions(bp)).toEqual([id]);
+    expect(requireTicket(bp, id).stuck).toMatchObject({ kind: 'owner-notes', points: ['book.ts line 1, lead: Rename it.'] });
+  });
+
+  it("a maintainer's own clone of the main repo: the pull request opens there and waits for its owners, never merged by squad-kit", async () => {
+    setUp('team/app', SELF);
+    const id = accepted();
+    gh = fakeGitHub((c) => {
+      if (route(c, 'GET', '/repos/team/app')) return { body: repoJson('team/app', { push: true }) };
+      if (route(c, 'GET', '/repos/team/app/pulls')) return { body: [] };
+      if (route(c, 'POST', '/repos/team/app/pulls')) return { status: 201, body: pullJson('team/app', 40) };
+      return undefined;
+    });
+    await publishTicket(bp, id);
+    const t = requireTicket(bp, id);
+    expect(gh.sent('POST', '/repos/team/app/pulls')[0]!.body).toMatchObject({ head: t.branch, base: 'main' });
+    expect(t).toMatchObject({ status: 'Waiting for the owner to merge', contribution: { into: 'team/app', state: 'waiting' } });
+    expect(gh.calls.some((c) => c.path.endsWith('/merge'))).toBe(false);
+  });
+
+  it("gh that did not answer just now never means a merge here: Looks right still sends the pull request", async () => {
+    setUp('me/app', SELF);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-gh-dies-'));
+    const before = process.env.PATH;
+    fs.writeFileSync(path.join(dir, 'gh'), '#!/bin/sh\nkill -9 $$\n', { mode: 0o755 });
+    process.env.PATH = `${dir}${path.delimiter}${before}`;
+    undo.push(() => {
+      process.env.PATH = before;
+      fs.rmSync(dir, { recursive: true, force: true });
+    });
+    const { forgetGhState } = await import('../src/modules/github/sign-in.js');
+    forgetGhState();
+    expect(await checkGh()).toBe('unknown');
+    const main = mainHere();
+    const id = accepted();
+    expect(mainHere()).toBe(main);
+    expect(requireTicket(bp, id).squad?.phase).toBe('publish');
+  });
+
   it('a deleted note is never asked again: it is left, with why', async () => {
     const id = await sent();
     lines = [note(81, 'Rename the fee.', 'book.ts', 1)];
@@ -394,7 +609,7 @@ describe("squad-kit's own code: the main repo's owner merges", () => {
     lines = [];
     const t = requireTicket(bp, id);
     await fixedAndSent(id, () => fs.writeFileSync(path.join(t.worktree!, 'book.ts'), 'export const charge = 450;\nexport const rooms = 3;\n'));
-    expect(requireTicket(bp, id).contribution!.notes![0]).toMatchObject({ id: 'line:81', state: 'left', why: 'squad-kit could not answer it on GitHub: its comment is gone or closed there.' });
+    expect(requireTicket(bp, id).contribution!.notes![0]).toMatchObject({ id: 'line:81', state: 'left', why: 'squad-kit could not answer it on GitHub: its conversation is locked, or its comment is gone.' });
     const asked = answers().length;
     await lookAtContribution(bp, id);
     expect(answers()).toHaveLength(asked);

@@ -7,6 +7,7 @@ export const OWNER_WAITS = 'Waiting for the owner to merge';
 export const OWNER_MERGED = 'Merged by the owner';
 export const OWNER_CLOSED = 'Closed by the owner without merging';
 export const OWNER_LEFT_CLOSED = 'Closed by the owner, left as it is';
+export const LEFT_CLOSED = 'Closed without merging, left as it is';
 export const OWNER_NOTES = 'The owner asked for changes';
 export const OWNER_FIXING = "Builder is fixing the owner's notes";
 
