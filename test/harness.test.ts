@@ -68,6 +68,7 @@ const EXCUSED: Record<string, string> = {
   'bring-in.ts:LANDING_LOOK_MS': 'How often a waiting story looks again. MAX_LANDING_WAIT_MS is the limit.',
   'save-trouble.ts:SAVE_CHECK_MS': 'How often a held project tries its test write.',
   'free-port.ts:LOOK_MS': 'How often it looks at who holds the app port.',
+  'contribution/journey.ts:KEEP_MS': "How long the contribution bar keeps the checklist's answer before it asks the code host again. Nobody waits on it, and it stops nothing.",
   'contribution/look.ts:LOOK_MS': "How often it looks at a pull request in someone else's repo, beside the work. Check again looks at once.",
   'release-pr.ts:RELEASE_PR_LOOK_MS': "How often a release looks at its own pull request. RELEASE_PR_WAIT_MS is the limit.",
   'live/limits.ts:PICK_UP_MS': 'How often it looks for stories teammates pushed.',

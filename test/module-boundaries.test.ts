@@ -13,7 +13,7 @@ const SRC = path.resolve(__dirname, '../src');
 const OTHERS = [path.resolve(__dirname, '../console-ui/src'), path.resolve(__dirname, '../scripts')];
 const MODULES = path.join(SRC, 'modules');
 /** The folders that hold one kind's interface, not a product. */
-const KINDS = new Set(['tracker', 'code-host', 'ai-tool', 'speech', 'browser', 'phone', 'phone-driver']);
+const KINDS = new Set(['tracker', 'code-host', 'ai-tool', 'speech', 'browser', 'phone', 'phone-driver', 'connection']);
 const PRODUCTS = fs
   .readdirSync(MODULES, { withFileTypes: true })
   .filter((d) => d.isDirectory() && !KINDS.has(d.name))

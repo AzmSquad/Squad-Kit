@@ -536,7 +536,7 @@ export function SettingsPage() {
   return (
     <>
       <div className="top">
-        <h1>Settings</h1>
+        <h1>Settings</h1><span className="grow" /><Link to="/connections" className="btn sm">Connections</Link>
       </div>
       <div className="scroll">
         <div className="page" style={{ maxWidth: 760 }}>

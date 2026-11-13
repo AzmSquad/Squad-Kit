@@ -28,6 +28,7 @@ import { mountSplitApi } from './split.js';
 import { mountReviewApi } from './review.js';
 import { mountProveApi } from './prove.js';
 import { mountContributionApi } from './contribution.js';
+import { mountConnectionsApi } from './connections.js';
 
 export interface MountApiOptions {
   paths: SquadPaths;
@@ -57,6 +58,7 @@ export function mountApi(app: Hono, opts: MountApiOptions): void {
   mountReviewApi(app, opts);
   mountProveApi(app, opts);
   mountContributionApi(app, opts);
+  mountConnectionsApi(app, opts);
   mountOverviewApi(app, opts);
   mountRequirementsApi(app, opts);
   mountTryApi(app, opts);

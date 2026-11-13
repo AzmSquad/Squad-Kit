@@ -22,6 +22,10 @@ import { iosSimulator } from './ios-simulator/index.js';
 import { androidEmulator } from './android-emulator/index.js';
 import type { PhoneDriverModule } from './phone-driver/types.js';
 import { maestroDriver } from './maestro/index.js';
+import type { ConnectionModule } from './connection/types.js';
+import { githubConnection } from './github/connect.js';
+import { jiraConnection } from './jira/connection.js';
+import { azureConnection } from './azure/connection.js';
 
 /**
  * The one place that knows which products squad-kit has modules for (ADR-002). The engine asks here for "this
@@ -36,6 +40,8 @@ export const AI_TOOLS: AiTool[] = [claudeTool, codexTool];
 export const BROWSERS: BrowserModule[] = [playwrightBrowser];
 export const PHONES: PhoneModule[] = [iosSimulator, androidEmulator];
 export const PHONE_DRIVERS: PhoneDriverModule[] = [maestroDriver];
+/** The rows of the Connections page, in their order there. */
+export const CONNECTIONS: ConnectionModule[] = [githubConnection, jiraConnection, azureConnection];
 
 function rootOf(bp: BoardPaths): string {
   return bp.root;
@@ -43,6 +49,10 @@ function rootOf(bp: BoardPaths): string {
 
 export function trackerModule(name: string | undefined): TrackerModule | undefined {
   return TRACKERS.find((m) => m.name === name);
+}
+
+export function connectionModule(name: string): ConnectionModule | undefined {
+  return CONNECTIONS.find((m) => m.name === name);
 }
 
 /** The tracker set up for the project, when it has a module and a saved sign-in. */

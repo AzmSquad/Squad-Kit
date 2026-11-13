@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, Outlet, useRouterState } from '@tanstack/react-router';
-import { ArrowUp, Bug, ChevronsUpDown, Compass, Inbox, LayoutGrid, ListTodo, ListTree, Menu, MessagesSquare, Moon, Network, Settings, ShieldCheck, Sun, Terminal, Wrench } from 'lucide-react';
+import { ArrowUp, Bug, ChevronsUpDown, Compass, GitPullRequestArrow, Inbox, LayoutGrid, ListTodo, ListTree, Menu, MessagesSquare, Moon, Network, Settings, ShieldCheck, Sun, Terminal, Wrench } from 'lucide-react';
 import { Written } from './ui';
 import { useBoard } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
@@ -22,9 +22,12 @@ import { requirementsWaiting } from '../lib/requirements';
 import { useTools } from '../pages/Tools';
 import { LeadMark } from './LeadMark';
 import { useLead } from '../lib/leadData';
+import { JourneyBar } from './Journey';
 
 const NAV = [
   { to: '/overview', label: 'Overview', icon: Compass, badge: 'setup' as const },
+  // squad-kit's own code only: the contribution assistant, reachable after its setup too.
+  { to: '/contribute', label: 'Contribute', icon: GitPullRequestArrow, badge: 'self' as const },
   { to: '/requirements', label: 'Requirements', icon: ListTree, badge: 'reqs' as const },
   { to: '/board', label: 'Board', icon: LayoutGrid },
   { to: '/backlog', label: 'Backlog', icon: ListTodo },
@@ -43,6 +46,8 @@ export function Shell() {
   const board = useBoard();
   const { theme, toggleTheme, showCommands, toggleCommands } = usePrefs();
   const path = useRouterState({ select: (s) => s.location.pathname });
+  // The story open in the drawer, or on its proof page: the contribution bar follows it.
+  const open = useRouterState({ select: (s) => (s.location.search as { ticket?: string }).ticket ?? /\/tickets\/([^/]+)\/proof/.exec(s.location.pathname)?.[1] });
   const meta = board.data?.ready ? board.data.meta : undefined;
   const tickets = board.data?.ready ? board.data.tickets : [];
   const openCount = tickets.filter((t) => !t.mergedAt && t.stage !== 'done' && !t.archived).length;
@@ -119,6 +124,7 @@ export function Shell() {
                 {setupWaits && <span className="badge you" aria-label="Waits for you">1</span>}
               </Link>
             );
+          if (n.badge === 'self' && !(board.data?.ready && board.data.self)) return null;
           if (n.badge === 'reqs')
             return (
               <Link key={n.to} to={n.to} className={`nav ${path.startsWith(n.to) ? 'on' : ''}`} onClick={() => setMenu(false)}>
@@ -127,7 +133,7 @@ export function Shell() {
                 {reqs > 0 ? <span className="badge you" aria-label={`${reqs} ${reqs === 1 ? 'needs' : 'need'} you`}>{reqs}</span> : <span className="badge new">New</span>}
               </Link>
             );
-          const on = path.startsWith(n.to) || (n.to === '/inbox' && path.endsWith('/proof'));
+          const on = path.startsWith(n.to) || (n.to === '/inbox' && path.endsWith('/proof')) || (n.to === '/tools' && path.startsWith('/connections'));
           if (n.badge === 'lead')
             return (
               <Link key={n.to} to={n.to} className={`nav navlead ${on ? 'on' : ''}`} onClick={() => setMenu(false)} title="Ask from any page with ⌘K or Ctrl+K">
@@ -173,6 +179,7 @@ export function Shell() {
         </div>
       </aside>
       <main className="canvas">
+        <JourneyBar {...(open ? { ticket: decodeURIComponent(open) } : {})} />
         <Banners>
           <SaveTroubleBanner />
           <AppUpdate />

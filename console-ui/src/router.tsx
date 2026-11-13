@@ -17,6 +17,8 @@ import { SetupPage } from './pages/Setup';
 import { BreakdownPage, RequirementsPage } from './pages/Requirements';
 import { ToolsPage } from './pages/Tools';
 import { LeadPage } from './pages/Lead';
+import { ConnectionsPage } from './pages/Connections';
+import { ContributePage } from './pages/Contribute';
 
 // One app, many projects (ADR-001): a project's pages sit under /p/<project id>/ (the router's base), and the app's
 // Home, with every project and one Waiting for you list, at /.
@@ -114,6 +116,10 @@ const squad = createRoute({
 const settings = createRoute({ getParentRoute: () => rootRoute, path: '/settings', component: SettingsPage });
 // What this project needs on this computer. A stopped story links to its tool's line: /tools#flutter.
 const tools = createRoute({ getParentRoute: () => rootRoute, path: '/tools', component: ToolsPage });
+// The outside tools this project works with: sign in, the steps, disconnect.
+const connections = createRoute({ getParentRoute: () => rootRoute, path: '/connections', component: ConnectionsPage });
+// squad-kit's own code: the contribution assistant, from set up to the first pull request.
+const contribute = createRoute({ getParentRoute: () => rootRoute, path: '/contribute', component: ContributePage });
 // The Squad lead: one contact for the whole project. `c` opens a conversation.
 const lead = createRoute({
   getParentRoute: () => rootRoute,
@@ -122,7 +128,7 @@ const lead = createRoute({
   component: LeadPage,
 });
 
-const routeTree = rootRoute.addChildren([index, setup, overview, requirements, breakdown, board, backlog, proof, inbox, conversations, releases, decisions, architecture, bugs, harness, squad, tools, lead, settings]);
+const routeTree = rootRoute.addChildren([index, setup, overview, requirements, breakdown, board, backlog, proof, inbox, conversations, releases, decisions, architecture, bugs, harness, squad, tools, connections, contribute, lead, settings]);
 
 export const router = createRouter({ routeTree, defaultPreload: false, basepath: PROJECT_BASE || '/', defaultErrorComponent: CrashPage });
 

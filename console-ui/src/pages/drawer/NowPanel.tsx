@@ -15,8 +15,11 @@ import { ProofPanel, ProofShots } from './Proof';
 import { AskPanel } from './AskPanel';
 import { proofHead } from '../../lib/proof-kinds';
 import { QuietPanel, RecentActivity, SavingPanel, WorkingPanel, YoursPanel } from './Working';
+import { PullRequestNow, showsPullRequest } from '../../components/pr/PullRequestNow';
 
 export function NowPanel({ t }: { t: Ticket }) {
+  // Sent to the owner's repo: the pull request's steps, and the owner's notes or merge (components/pr).
+  if (showsPullRequest(t)) return <PullRequestNow t={t} />;
   if (!t.waiting && t.quiet) return <QuietPanel t={t} />;
   // It needs a ticket that is not merged yet: the ways to build (components/Depends).
   if (waitsForDependency(t)) return <DependsCard t={t} />;

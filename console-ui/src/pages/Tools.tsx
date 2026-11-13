@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useRouterState } from '@tanstack/react-router';
-import { Check, CircleAlert, CircleArrowUp, Download, ExternalLink, FileText, Loader2, Minus, Pause, RefreshCw, TriangleAlert } from 'lucide-react';
+import { Check, CircleAlert, CircleArrowUp, Download, ExternalLink, FileText, Loader2, Minus, Pause, Plug, RefreshCw, TriangleAlert } from 'lucide-react';
 import { api } from '../api/client';
 import type { LicenseView, ToolGetting, ToolLine, ToolsView } from '../api/types';
 import { useAct } from '../lib/data';
@@ -337,6 +337,9 @@ export function ToolsPage() {
       <div className="top">
         <h1>Tools</h1>
         <span className="grow" />
+        <Link to="/connections" className="btn">
+          <Plug size={14} /> Connections
+        </Link>
         <button className="btn" disabled={busy} onClick={checkAgain}>
           {busy ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />} Check again
         </button>

@@ -1,0 +1,56 @@
+/* Connections: one row per outside tool; the button first, the step-by-step guide folded under it. */
+.gh-top { height: auto; padding-top: 16px; padding-bottom: 14px; }
+.gh-top p { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.gh-page { max-width: 1240px; }
+.gh-conns { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; align-items: start; }
+.gh-conn { background: var(--surface); border-radius: 14px; box-shadow: inset 0 0 0 1px var(--line); padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.gh-conn.focus { box-shadow: inset 0 0 0 2px var(--text); }
+.gh-conn > p { font-size: 13px; color: var(--muted); }
+.gh-hd { display: flex; align-items: center; gap: 10px; }
+.gh-hd b { font-size: 15px; font-weight: 650; display: block; }
+.gh-hd small { font-size: 12px; color: var(--muted); }
+.gh-tile { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; font-weight: 700; font-size: 13px; flex: none; color: #fff; }
+.gh-tile.ink { background: var(--text); color: var(--surface); }
+.gh-tile.blue { background: #2659d4; }
+.gh-tile.sky { background: #1572c9; }
+.gh-state { margin-inline-start: auto; font-size: 11.5px; font-weight: 650; padding: 2px 9px; border-radius: 99px; white-space: nowrap; }
+.gh-state.ok { color: var(--accent); background: var(--accent-soft); }
+.gh-state.no, .gh-state.soon { color: var(--muted); background: var(--surface-2); }
+.gh-who { display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 10px; background: var(--surface-2); font-size: 13px; }
+.gh-who > div { flex: 1; min-width: 0; }
+.gh-who b { display: block; font-weight: 600; overflow-wrap: anywhere; }
+.gh-who small { color: var(--muted); font-size: 12px; }
+.gh-av { width: 28px; height: 28px; border-radius: 99px; display: grid; place-items: center; font-size: 11px; font-weight: 700; flex: none; background: var(--you-soft); color: var(--you-ink); box-shadow: inset 0 0 0 1px var(--you-line); }
+.gh-can { list-style: none; display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; color: var(--muted); }
+.gh-can li { display: flex; gap: 7px; align-items: center; }
+.gh-can svg { color: var(--accent); flex: none; }
+.gh-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.gh-next { font-size: 11.5px; font-weight: 650; color: var(--muted); background: var(--surface-2); padding: 2px 9px; border-radius: 99px; }
+.gh-muted { color: var(--muted); font-size: 13px; }
+.gh-small { font-size: 12px; color: var(--muted); }
+.gh-link { color: var(--accent); font-weight: 600; font-size: 12.5px; }
+.gh-guide { border-top: 1px dashed var(--line-strong); padding-top: 10px; display: flex; flex-direction: column; gap: 9px; }
+.gh-guide summary { list-style: none; cursor: pointer; font-size: 12.5px; font-weight: 600; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+.gh-guide summary::-webkit-details-marker { display: none; }
+.gh-guide:not([open]) summary svg { transform: rotate(-90deg); }
+[dir='rtl'] .gh-guide:not([open]) summary svg { transform: rotate(90deg); }
+.gh-guide[open] > * + * { margin-top: 9px; }
+.gh-steps { list-style: none; display: flex; flex-direction: column; gap: 9px; }
+.gh-steps li { display: grid; grid-template-columns: 22px 1fr; gap: 8px; font-size: 13px; }
+.gh-steps li > div { display: flex; flex-direction: column; gap: 5px; align-items: flex-start; min-width: 0; }
+.gh-n { width: 20px; height: 20px; border-radius: 6px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); font-size: 11px; font-weight: 650; display: grid; place-items: center; }
+.gh-done { color: var(--accent); font-size: 12px; font-weight: 600; display: inline-flex; gap: 5px; align-items: center; }
+.gh-token { display: flex; flex-direction: column; gap: 8px; }
+.gh-token label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); font-weight: 600; }
+.gh-token .input { font-size: 13px; }
+
+/* The tool's own sign-in, as a code to type on its page. */
+.modal.gh-code { width: min(470px, 100%); padding: 22px; gap: 14px; }
+.modal.gh-code h2 { font-size: 18px; font-weight: 650; }
+.gh-bigcode { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 16px; border-radius: 12px; background: var(--surface-2); flex-wrap: wrap; }
+.gh-bigcode span { font: 600 30px 'JetBrains Mono', ui-monospace, monospace; letter-spacing: 0.12em; }
+.gh-wait { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--muted); }
+.gh-spin { width: 14px; height: 14px; border-radius: 99px; border: 2px solid var(--line-strong); border-top-color: var(--accent); animation: gh-sp 1s linear infinite; flex: none; }
+@keyframes gh-sp { to { transform: rotate(360deg); } }
+.gh-foot { font-size: 12px; color: var(--muted); }
+.gh-bad { color: var(--bug); font-size: 13px; }

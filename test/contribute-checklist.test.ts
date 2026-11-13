@@ -204,6 +204,6 @@ describe('the contribution checklist', () => {
   it('any other project has no checklist', async () => {
     undo.push(fakeGh('ready'));
     const bp = clone('https://github.com/sara/shop.git', { name: 'shop' });
-    expect(await contributeChecklist(bp)).toEqual({ self: false, line: "This project is not squad-kit's own code, so it has no contribution checklist.", items: [] });
+    expect(await contributeChecklist(bp)).toEqual({ self: false, line: "This project is not squad-kit's own code, so it has no contribution checklist.", items: [], ready: false, left: 0 });
   });
 });

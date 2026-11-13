@@ -5,6 +5,8 @@ import { pullRequestView, type PullRequestView } from '../engine/contribution/vi
 import { fixThese, leaveClosed, leaveNotes } from '../engine/contribution/actions.js';
 import { bringCopyUpToDate, contributeChecklist, ideaPage, makeMyCopy, type Checklist } from '../engine/contribution/checklist.js';
 import { placeOf } from '../engine/contribution/words.js';
+import { journeyOf, type Journey } from '../engine/contribution/journey.js';
+import { setUpForMe } from '../engine/contribution/set-up.js';
 import { board } from './board.js';
 
 const out = (s = '') => process.stdout.write(`${s}\n`);
@@ -27,7 +29,7 @@ function pullRequestLines(v: PullRequestView): string[] {
   return lines;
 }
 
-/** `squad pr <story>`: its pull request; `--fix` (Fix these), `--leave` (Answer them yourself), `--leave-closed`. */
+/** `squad pr <story>`: its pull request; `--fix` (Fix these), `--leave` (I answered them on the code host), `--leave-closed`. */
 export async function runPr(id: string, opts: { fix?: boolean; leave?: boolean; leaveClosed?: boolean }): Promise<void> {
   const bp = board();
   if (opts.fix) {
@@ -37,7 +39,7 @@ export async function runPr(id: string, opts: { fix?: boolean; leave?: boolean; 
   }
   if (opts.leave) {
     leaveNotes(bp, id);
-    ui.success('You answer the notes on the pull request yourself. squad-kit waits for the owner again.');
+    ui.success('Marked as answered by you on the code host. squad-kit waits for the owner again.');
     return;
   }
   if (opts.leaveClosed) {
@@ -48,8 +50,15 @@ export async function runPr(id: string, opts: { fix?: boolean; leave?: boolean; 
   const t = requireTicket(bp, id);
   out();
   out(`  ${kleur.bold(t.id)} ${t.title}`);
+  const j = await journeyOf(bp, t.id);
+  if (j.self) out(journeyLine(j));
   for (const l of pullRequestLines(pullRequestView(t))) out(l);
   out();
+}
+
+/** Where a contribution stands, as the bar on the board shows it: "✓ Set up › ✓ Your idea › [Built and checked] › …". */
+export function journeyLine(j: Journey): string {
+  return `  ${j.steps.map((s, i) => (i < j.at ? kleur.green(`✓ ${s}`) : i === j.at ? kleur.yellow().bold(`[${s}]`) : grey(s))).join(grey(' › '))}`;
 }
 
 const MARK = { done: kleur.green('✓'), todo: kleur.yellow('•'), blocked: grey('·'), info: grey('i') } as const;
@@ -86,14 +95,17 @@ export async function runContribute(opts: { fork?: boolean; sync?: boolean; idea
   let c: Checklist;
   let line = '';
   try {
-    if (opts.fork) ({ line, checklist: c } = await makeMyCopy(bp));
+    if (opts.fork && opts.sync) ({ line, checklist: c } = await setUpForMe(bp));
+    else if (opts.fork) ({ line, checklist: c } = await makeMyCopy(bp));
     else if (opts.sync) ({ line, checklist: c } = await bringCopyUpToDate(bp));
     else c = await contributeChecklist(bp);
   } finally {
     spin.stop();
   }
   if (line) ui.success(line);
+  const j = await journeyOf(bp);
   out();
+  if (j.self) out(journeyLine(j));
   for (const l of checklistLines(c)) out(l);
   out();
 }

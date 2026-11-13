@@ -1,0 +1,90 @@
+/* A contribution to squad-kit's own code: the bar on every page, the assistant, and a story's pull request. */
+
+/* ── The bar: where it is, from set up to the owner's merge ── */
+.jr { flex: none; display: flex; align-items: center; gap: 18px; padding: 9px 24px; background: var(--accent-soft); border-bottom: 1px solid color-mix(in srgb, var(--accent) 22%, transparent); min-width: 0; }
+.jr-t { display: flex; align-items: center; gap: 10px; flex: none; min-width: 0; }
+.jr-t img { width: 30px; height: 30px; border-radius: 8px; flex: none; }
+.jr-t b { display: block; font-size: 13.5px; font-weight: 650; }
+.jr-t small { display: block; font-size: 12px; color: var(--muted); }
+.jr ol { list-style: none; display: flex; gap: 4px; margin-inline-start: auto; flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
+.jr li { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--dim); padding: 4px 9px; border-radius: 99px; white-space: nowrap; }
+.jr li span { width: 16px; height: 16px; border-radius: 99px; box-shadow: inset 0 0 0 1.5px var(--line-strong); display: grid; place-items: center; flex: none; }
+.jr li.d { color: var(--accent); }
+.jr li.d span { background: var(--accent); box-shadow: none; color: var(--accent-ink); }
+.jr li.n { color: var(--you-ink); background: var(--you-soft); box-shadow: inset 0 0 0 1px var(--you-line); }
+.jr li.n span { box-shadow: inset 0 0 0 2px var(--you); }
+.jr li.x { color: var(--bug); background: var(--bug-soft); }
+.jr li.x span { background: var(--bug); box-shadow: none; color: var(--surface); }
+@media (max-width: 1100px) { .jr-t small { display: none; } }
+@media (max-width: 760px) { .jr { flex-wrap: wrap; padding: 8px 12px; gap: 8px; } .jr ol { margin-inline-start: 0; justify-content: flex-start; } }
+
+/* ── The assistant: what is ready, what squad-kit can do, each with its button ── */
+.as-top { height: auto; padding-top: 16px; padding-bottom: 14px; }
+.as-top p { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.as-page { max-width: 900px; display: flex; flex-direction: column; gap: 14px; }
+.as-checks { list-style: none; background: var(--surface); border-radius: 14px; box-shadow: inset 0 0 0 1px var(--line); overflow: hidden; }
+.as-checks > li { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 14px 16px; border-top: 1px solid var(--line); }
+.as-checks > li:first-child { border-top: 0; }
+.as-checks > li.todo { background: var(--you-soft); }
+.as-checks b { font-size: 14.5px; font-weight: 650; }
+.as-checks p { font-size: 13px; color: var(--muted); margin-top: 2px; max-width: 62ch; }
+.as-act { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; align-self: center; }
+.as-dot { width: 24px; height: 24px; border-radius: 99px; display: grid; place-items: center; margin-top: 1px; flex: none; }
+.as-dot.ok { background: var(--accent); color: var(--accent-ink); }
+.as-dot.todo { box-shadow: inset 0 0 0 2px var(--you); }
+.as-dot.tip { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line-strong); font-size: 12px; font-weight: 700; color: var(--muted); }
+.as-rules { margin-top: 8px; display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; color: var(--muted); padding-inline-start: 18px; }
+.as-rules code { font-size: 11.5px; }
+.as-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+.as-foot > .as-left { margin-inline-end: auto; }
+.as-foot > .term { flex-basis: auto; margin-inline-start: auto; }
+.as-idea { display: flex; flex-direction: column; gap: 10px; }
+.as-idea label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+@media (max-width: 760px) { .as-checks > li { grid-template-columns: 26px minmax(0, 1fr); } .as-act { grid-column: 2; align-items: flex-start; } }
+
+/* ── A story's pull request in the owner's repo ── */
+.prw { container-type: inline-size; }
+.pr-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 380px); gap: 18px; align-items: start; }
+@container (max-width: 720px) { .pr-grid { grid-template-columns: minmax(0, 1fr); } }
+.pr-side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.pr-panel { background: var(--surface); border-radius: 14px; box-shadow: inset 0 0 0 1px var(--line); padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.pr-panel h3 { font-size: 15px; font-weight: 650; display: flex; align-items: center; gap: 8px; }
+.pr-panel h3 .mono { font-size: 12px; color: var(--dim); font-weight: 500; }
+.pr-panel h3 a { margin-inline-start: auto; color: var(--accent); font-weight: 600; font-size: 13px; display: inline-flex; gap: 6px; align-items: center; }
+.pr-track { list-style: none; display: flex; flex-direction: column; }
+.pr-track li { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 10px; padding: 7px 0; position: relative; font-size: 13.5px; }
+.pr-track li::before { content: ''; position: absolute; inset-inline-start: 10px; top: 26px; bottom: -8px; width: 2px; background: var(--line); }
+.pr-track li:last-child::before { display: none; }
+.pr-track small { display: block; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.pr-track .t { font-size: 12px; color: var(--dim); white-space: nowrap; }
+.pr-dot { width: 22px; height: 22px; border-radius: 99px; display: grid; place-items: center; background: var(--accent); color: var(--accent-ink); position: relative; z-index: 1; }
+li.now .pr-dot { background: var(--you); box-shadow: 0 0 0 4px var(--you-soft); }
+li.later .pr-dot { background: var(--surface); box-shadow: inset 0 0 0 2px var(--line-strong); }
+li.closed .pr-dot { background: var(--bug); color: var(--surface); }
+.pr-note { font-size: 12px; color: var(--muted); }
+.pr-card { border-radius: 14px; box-shadow: inset 0 0 0 1px var(--you-line); background: var(--surface); overflow: hidden; }
+.pr-card .ch { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: var(--you-soft); font-size: 13.5px; font-weight: 650; }
+.pr-card .ch .mono { font-size: 11.5px; color: var(--you-ink); }
+.pr-card .ch em { margin-inline-start: auto; font-style: normal; font-size: 12px; color: var(--you-ink); font-weight: 650; white-space: nowrap; }
+.pr-card .cb { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+.pr-card .cf { padding: 10px 14px 12px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.pr-card.done { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent); }
+.pr-card.done .ch { background: var(--accent-soft); }
+.pr-card.done .ch .mono, .pr-card.done .ch em { color: var(--accent); }
+.pr-cmt { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 9px; }
+.pr-cmt .av { width: 28px; height: 28px; border-radius: 99px; display: grid; place-items: center; font-size: 11px; font-weight: 700; background: color-mix(in srgb, #3d6fe0 14%, var(--surface)); color: #3d6fe0; }
+:root[data-theme='dark'] .pr-cmt .av { color: #8fb0ff; background: color-mix(in srgb, #8fb0ff 14%, var(--surface)); }
+.pr-cmt small { display: block; font-size: 11.5px; color: var(--muted); }
+.pr-cmt small b { color: var(--text); font-weight: 600; }
+.pr-cmt .file { font: 500 11px 'JetBrains Mono', ui-monospace, monospace; color: var(--dim); unicode-bidi: isolate; }
+.pr-cmt p { font-size: 13px; margin-top: 2px; overflow-wrap: anywhere; }
+.pr-fixed { display: inline-flex; gap: 5px; align-items: center; font-size: 12px; font-weight: 650; color: var(--accent); margin-top: 4px; }
+.pr-fixed code { font-size: 11px; padding: 0 5px; border-radius: 4px; background: var(--surface-2); color: var(--text); font-weight: 500; }
+.pr-small { font-size: 11.5px; color: var(--muted); }
+.pr-box { display: flex; gap: 12px; align-items: center; padding: 14px; border-radius: 14px; background: var(--accent-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent); }
+.pr-box.wait { background: var(--you-soft); box-shadow: inset 0 0 0 1px var(--you-line); }
+.pr-box .big { width: 36px; height: 36px; border-radius: 99px; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; flex: none; }
+.pr-box.wait .big { background: var(--you); color: #1d1203; }
+.pr-box b { font-size: 15px; display: block; }
+.pr-box small { color: var(--muted); font-size: 12.5px; }
+.pr-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

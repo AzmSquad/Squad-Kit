@@ -34,6 +34,9 @@ export interface ChecklistItem {
   link?: string;
   /** A file in the person's own checkout to read. */
   file?: string;
+  /** Who is signed in, for sign-in; how many changes behind (or ahead), for up-to-date. */
+  account?: string;
+  count?: number;
   action?: ChecklistAction;
 }
 
@@ -45,16 +48,32 @@ export interface Checklist {
   main?: string;
   copy?: string;
   items: ChecklistItem[];
+  /** Nothing left that must come before the first story: the person can write their idea. */
+  ready: boolean;
+  /** How many items still come before it. */
+  left: number;
+}
+
+/**
+ * An item that must come before the first story. A copy whose base has changes of its own (`up-to-date` blocked with a
+ * count) is said, never forced, and stops nothing: the person can still write their idea.
+ */
+export function comesFirst(i: ChecklistItem): boolean {
+  if (i.id === 'up-to-date' && i.state === 'blocked' && (i.count ?? 0) > 0) return false;
+  return i.state === 'todo' || i.state === 'blocked';
+}
+
+/** What is still to do, with the plain words for it, from the items. */
+function listed(c: Omit<Checklist, 'ready' | 'left'>): Checklist {
+  const left = c.items.filter(comesFirst).length;
+  return { ...c, ready: c.self && left === 0, left };
 }
 
 const FORK: ChecklistAction = { id: 'fork', name: 'Make my copy', route: 'POST /api/v1/contribute/fork', command: 'squad contribute --fork' };
 const SYNC: ChecklistAction = { id: 'sync', name: 'Bring it up to date', route: 'POST /api/v1/contribute/sync', command: 'squad contribute --sync' };
 const IDEA: ChecklistAction = { id: 'idea', name: 'Tell the maintainers first', route: 'POST /api/v1/contribute/idea', command: 'squad contribute --idea <title> --text <words>' };
 
-interface SelfPlace extends RepoPlace {
-  /** The upstream remote's address, '' with none. */
-  upstreamRemote: string;
-}
+type SelfPlace = RepoPlace;
 
 const remoteUrl = (dir: string, name: string) => git(dir, ['config', '--get', `remote.${name}.url`], { allowFail: true }).trim();
 
@@ -66,7 +85,7 @@ function selfPlace(bp: BoardPaths): SelfPlace | null {
   const repo = reposOf(meta).find((r) => r.path === rel)!;
   const dir = path.join(bp.root, rel);
   const remote = repo.remote || 'origin';
-  return { dir, remote, base: repo.base, url: remoteUrl(dir, remote), upstream: selfUpstream(dir, remote), upstreamRemote: remote === 'upstream' ? '' : remoteUrl(dir, 'upstream') };
+  return { dir, remote, base: repo.base, url: remoteUrl(dir, remote), upstream: selfUpstream(dir, remote) };
 }
 
 function count(file: string, of: (j: Record<string, unknown>) => number): number | null {
@@ -108,7 +127,7 @@ function ideaItem(main: string | undefined): ChecklistItem {
 }
 
 function signInItem(s: HostSignIn, label: string): ChecklistItem {
-  if (s.state === 'ready') return { id: 'sign-in', title: `Signed in to ${label}`, state: 'done', line: `Signed in as ${s.account ?? 'you'}.` };
+  if (s.state === 'ready') return { id: 'sign-in', title: `Signed in to ${label}`, state: 'done', line: `Signed in as ${s.account ?? 'you'}.`, ...(s.account ? { account: s.account } : {}) };
   const why = s.state === 'missing' ? `${label}'s own tool is not on this computer.` : s.state === 'unknown' ? `${label}'s own tool did not answer just now.` : `${label}'s own tool is here, but not signed in.`;
   return { id: 'sign-in', title: `Signed in to ${label}`, state: 'todo', line: `${why} squad-kit signs in through it, and keeps no password.`, steps: s.steps, link: s.link };
 }
@@ -120,17 +139,17 @@ function mainOf(forks: ForkHost, p: SelfPlace, origin: string, parent?: string):
 
 export async function contributeChecklist(bp: BoardPaths): Promise<Checklist> {
   const p = selfPlace(bp);
-  if (!p) return { self: false, line: "This project is not squad-kit's own code, so it has no contribution checklist.", items: [] };
+  if (!p) return listed({ self: false, line: "This project is not squad-kit's own code, so it has no contribution checklist.", items: [] });
   const fh = forkHostFor(p.url);
   const origin = fh?.forks.repoName(p.url);
-  if (!fh || !origin) return { self: true, line: `This copy of squad-kit's code has no remote on a code host squad-kit can work with, so only the rules apply.`, items: [rulesItem(p.dir)] };
+  if (!fh || !origin) return listed({ self: true, line: `This copy of squad-kit's code has no remote on a code host squad-kit can work with, so only the rules apply.`, items: [rulesItem(p.dir)] });
   const sign = await fh.forks.signIn();
   const items: ChecklistItem[] = [signInItem(sign, fh.label)];
   if (sign.state !== 'ready') {
     const main = mainOf(fh.forks, p, origin);
     const first = `Sign in to ${fh.label} first.`;
     items.push({ id: 'copy', title: 'Your own copy', state: 'blocked', line: first }, { id: 'up-to-date', title: `Up to date with ${main}`, state: 'blocked', line: first }, rulesItem(p.dir), ideaItem(main));
-    return { self: true, line: `Sign in to ${fh.label}, and squad-kit can do the rest of this list for you.`, host: fh.label, main, items };
+    return listed({ self: true, line: `Sign in to ${fh.label}, and squad-kit can do the rest of this list for you.`, host: fh.label, main, items });
   }
   const info = await fh.forks.repoInfo(origin);
   const main = mainOf(fh.forks, p, origin, info.parent);
@@ -138,8 +157,8 @@ export async function contributeChecklist(bp: BoardPaths): Promise<Checklist> {
   if (info.parent) {
     items.push({ id: 'copy', title: 'Your own copy', state: 'done', line: `${origin}, a copy of ${main}. Your stories go to ${main} as pull requests from it.` });
     const { behind, ahead } = await fh.forks.compareFork(origin, main, p.base);
-    if (ahead > 0) items.push({ id: 'up-to-date', title: `Up to date with ${main}`, state: 'blocked', line: `${p.base} of your copy has ${ahead === 1 ? 'a change' : `${ahead} changes`} that ${main} does not have, so squad-kit does not bring it up to date by itself. Nothing is forced.` });
-    else if (behind > 0) items.push({ id: 'up-to-date', title: `Up to date with ${main}`, state: 'todo', line: `Your copy is ${behind === 1 ? 'one change' : `${behind} changes`} behind ${main}. Bring it up to date before your next story, so it starts from the newest code.`, action: SYNC });
+    if (ahead > 0) items.push({ id: 'up-to-date', title: `Up to date with ${main}`, state: 'blocked', count: ahead, line: aheadLine(p.base, ahead, main) });
+    else if (behind > 0) items.push({ id: 'up-to-date', title: `Up to date with ${main}`, state: 'todo', count: behind, line: `Your copy is ${behind === 1 ? 'one change' : `${behind} changes`} behind ${main}. Bring it up to date before your next story, so it starts from the newest code.`, action: SYNC });
     else items.push({ id: 'up-to-date', title: `Up to date with ${main}`, state: 'done', line: `Your copy has everything in ${p.base} of ${main}.`, action: SYNC });
   } else if (same && !info.canPush) {
     items.push({ id: 'copy', title: 'Your own copy', state: 'todo', line: `You can't send changes to ${main} itself. squad-kit makes your own copy of it (a fork) on ${fh.label}, then sends your stories from there as pull requests.`, action: FORK });
@@ -149,8 +168,15 @@ export async function contributeChecklist(bp: BoardPaths): Promise<Checklist> {
     items.push({ id: 'up-to-date', title: `Up to date with ${main}`, state: 'info', line: `Your stories start from ${p.base} as squad-kit last fetched it.` });
   }
   items.push(rulesItem(p.dir), ideaItem(main));
-  const left = items.filter((i) => i.state === 'todo' || i.state === 'blocked').length;
-  return { self: true, line: left ? `${left === 1 ? 'One thing' : `${left} things`} before your first pull request.` : 'Ready: your stories go as pull requests.', host: fh.label, main, copy: info.parent ? origin : undefined, items };
+  const left = items.filter(comesFirst).length;
+  const ahead = items.find((i) => i.id === 'up-to-date' && i.state === 'blocked' && i.count);
+  const line = left ? `${left === 1 ? 'One thing' : `${left} things`} before your first pull request.` : `Ready: your stories go as pull requests.${ahead ? ` ${ahead.line}` : ''}`;
+  return listed({ self: true, line, host: fh.label, main, copy: info.parent ? origin : undefined, items });
+}
+
+/** The copy's base has changes of its own: said plainly, with what to do, and never forced. */
+export function aheadLine(base: string, ahead: number, main: string): string {
+  return `${base} of your copy has ${ahead === 1 ? 'a change' : `${ahead} changes`} that ${main} does not have. squad-kit leaves ${ahead === 1 ? 'it' : 'them'} as ${ahead === 1 ? 'it is' : 'they are'}, and you can still write your idea. To match ${main}, send ${ahead === 1 ? 'it' : 'them'} as a pull request, or ask an engineer.`;
 }
 
 function ready(bp: BoardPaths): { p: SelfPlace; forks: ForkHost; origin: string } {
@@ -174,9 +200,11 @@ export async function makeMyCopy(bp: BoardPaths): Promise<{ line: string; checkl
   if (info.canPush) throw new BoardActionError(`You can send changes to ${origin} itself, so you need no copy of it.`);
   const copy = await forks.makeFork(origin);
   const ssh = /^(?:git@|ssh:\/\/)/.test(p.url);
-  if (!p.upstreamRemote) git(p.dir, ['remote', 'add', 'upstream', p.url]);
+  // Asked again here, not from before the wait for the copy: a second run never adds it twice.
+  const hadUpstream = git(p.dir, ['remote'], { allowFail: true }).split('\n').some((r) => r.trim() === 'upstream');
+  if (!hadUpstream) git(p.dir, ['remote', 'add', 'upstream', p.url]);
   git(p.dir, ['remote', 'set-url', p.remote, ssh ? copy.gitUrl.ssh : copy.gitUrl.https]);
-  return { line: `Made your own copy, ${copy.repo}. ${p.remote} is your copy now${p.upstreamRemote ? '' : `, and upstream is ${origin}`}.`, checklist: await contributeChecklist(bp) };
+  return { line: `Made your own copy, ${copy.repo}. ${p.remote} is your copy now${hadUpstream ? '' : `, and upstream is ${origin}`}.`, checklist: await contributeChecklist(bp) };
 }
 
 /** Bring it up to date: the copy takes the main repo's newest by the host's own sync, then this computer's base moves forward. */

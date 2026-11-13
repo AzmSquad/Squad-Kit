@@ -77,6 +77,9 @@
     "POST /api/v1/contribute/fork": "squad contribute --fork",
     "POST /api/v1/contribute/sync": "squad contribute --sync",
     "POST /api/v1/contribute/idea": "squad contribute --idea <title>",
+    "POST /api/v1/contribute/setup": "squad contribute --fork --sync",
+    "POST /api/v1/connections/:name/sign-in": "squad connect [tool]",
+    "POST /api/v1/connections/:name/disconnect": "squad disconnect <tool>",
     "POST /api/v1/tickets/:id/try": "squad try <ticket>",
     "POST /api/v1/tickets/:id/try/stop": "squad try <ticket> --stop",
     "POST /api/v1/releases/:v/release": "squad release [version]",
@@ -144,6 +147,7 @@
     "POST /api/v1/requirements/:id/send": "squad requirements send <id>"
   },
   "allowed": [
+    { "route": "POST /api/v1/connections/:name/sign-in/cancel", "reason": "Cancel on the board's sign-in code: stops the sign-in this board started. In the terminal, Ctrl-C stops squad connect." },
     { "route": "POST /api/v1/app/folders", "reason": "The folder browser's New folder button. In a terminal people make a folder themselves." },
     { "route": "POST /api/v1/harness/folder", "reason": "Read only: lists what a folder holds that could be added. It is a POST because the folder is in the body." },
     { "route": "POST /api/v1/tickets/draft/:id/dismiss", "reason": "Board only: takes a finished draft off the New ticket dialog. The terminal shows no dialog." }

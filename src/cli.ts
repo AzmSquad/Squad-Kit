@@ -72,6 +72,7 @@ import { runBranches, runBringIn, runBuild, runCheckMerge, runDepends } from './
 import { runSplit } from './commands/split.js';
 import { runReview } from './commands/review.js';
 import { runContribute, runPr } from './commands/contribute.js';
+import { runConnect, runDisconnect } from './commands/connect.js';
 import { runProve } from './commands/prove.js';
 import { wrap, wrapArgs } from './commands/wrap.js';
 import { runDecided } from './commands/decided.js';
@@ -625,13 +626,12 @@ program
   .option('--anyway', 'Build from main without it; this stays on the record')
   .option('--wait', 'Wait: the build starts by itself once the dependency is merged')
   .action(wrapArgs(runBuild));
-program
-  .command('bring-in <ticket>')
-  .description("Bring the latest main into a ticket's copy of the code; the checks, review and proof run again")
-  .action(wrapArgs(runBringIn));
+program.command('bring-in <ticket>').description("Bring the latest main into a ticket's copy of the code; the checks, review and proof run again").action(wrapArgs(runBringIn));
 program.command('check-merge <ticket>').description("Check again: ask the code host now whether a ticket's pull request, or the one it waits for, was merged there").action(wrapArgs(runCheckMerge));
-program.command('pr <ticket>').description("A story's pull request: where it went, where it stands, and the owner's notes").option('--fix', "Fix these: the Builder fixes the owner's notes, and the fix goes to the same pull request").option('--leave', "Answer the owner's notes yourself, on the code host").option('--leave-closed', 'The owner closed it: leave it closed').action(wrapArgs(runPr));
-program.command('contribute').description("squad-kit's own code: the checklist before your first pull request").option('--fork', 'Make your own copy (a fork) of the main repo').option('--sync', 'Bring your copy up to date with the main repo').option('--idea <title>', 'A big idea: print the new issue page that tells the maintainers first, filled in').option('--text <words>', 'With --idea: the idea in a few lines').action(wrap(runContribute));
+program.command('pr <ticket>').description("A story's pull request: where it went, where it stands, and the owner's notes").option('--fix', "Fix these: the Builder fixes the owner's notes, and the fix goes to the same pull request").option('--leave', "I answered them on the code host: the owner's notes are answered, and squad-kit waits for the owner again").option('--leave-closed', 'The owner closed it: leave it closed').action(wrapArgs(runPr));
+program.command('contribute').description("squad-kit's own code: where you are, and the checklist before your first pull request").option('--fork', 'Make your own copy (a fork) of the main repo (with --sync: do both)').option('--sync', 'Bring your copy up to date with the main repo').option('--idea <title>', 'A big idea: print the new issue page that tells the maintainers first, filled in').option('--text <words>', 'With --idea: the idea in a few lines').action(wrap(runContribute));
+program.command('connect [tool]').description("Outside tools: each one's state, or sign in to one with its own sign-in (a code you type on its page)").option('--status', 'Every outside tool and its state on this computer').action(wrapArgs(runConnect));
+program.command('disconnect <tool>').description("Sign an outside tool out on this computer, for every app that uses it").option('-y, --yes', 'Do not ask first').action(wrapArgs(runDisconnect));
 program
   .command('branches')
   .description('Show the old branches of released tickets')
