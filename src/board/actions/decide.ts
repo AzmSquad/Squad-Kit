@@ -6,6 +6,7 @@ import { writeLog } from '../../core/app-log.js';
 import { HARNESS_FILE_GATE } from '../additions.js';
 import { BoardActionError, tellLater } from './errors.js';
 import { refuseWhileSaving, saveFromHookCard } from './save.js';
+import { ownerWay } from '../../engine/contribution/actions.js';
 
 /** The card for gates that could not run. `save`: they stopped the save of an accepted change, not the checks. */
 export function gateCantRunCard(cant: { id: string; name: string; why?: string; output?: string }[], opts: { auto: boolean; save?: boolean }): StuckChoice {
@@ -139,6 +140,9 @@ export function decideNow(bp: BoardPaths, id: string, choice: number, input: { n
   const before = requireTicket(bp, id);
   const save = before.waiting?.kind === 'stuck' ? before.stuck?.options[choice]?.do : undefined;
   if (save === 'save-again' || save === 'skip-hooks') return saveFromHookCard(bp, id, choice, save, input.reason);
+  // The owner's notes, or a pull request the owner closed (engine/contribution).
+  const owner = ownerWay(bp, id, save);
+  if (owner) return owner;
   return updateTicket(bp, id, (t) => {
     if (t.waiting?.kind !== 'stuck' || !t.stuck) throw new BoardActionError(`${t.id} is not stuck.`);
     const option = t.stuck.options[choice];

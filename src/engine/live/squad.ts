@@ -18,6 +18,7 @@ import { TECHNICAL_STOP, ownWords } from '../plain-stop.js';
 import type { ListNo } from '../../board/additions.js';
 import { flushTracker, trackerDue } from '../sync.js';
 import { lookOutsideBeside, lookOutsideSoon } from '../merged-outside.js';
+import { lookAtContributionsBeside } from '../contribution/look.js';
 import { Watchdog } from '../watchdog.js';
 import { CapReached } from '../caps.js';
 import { sandboxAsk } from '../sandbox.js';
@@ -251,6 +252,8 @@ export class LiveSquad {
     this.pickUp();
     // Pull requests squad-kit opened, merged by a person on the code host: a quiet look now and then, beside the work.
     lookOutsideBeside(this.bp);
+    // Pull requests sent to someone else's repo: merged or closed by its owner, or new notes from them.
+    lookAtContributionsBeside(this.bp);
     // The databases of stories that no longer need one go, now and then.
     tidyStoryDbsBeside(this.bp);
     const limit = parallelLimit(meta.parallel);

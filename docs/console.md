@@ -357,6 +357,70 @@ REST (under `/p/<project>/api/v1`):
 | `POST /tickets/<id>/review/past` | `{ "note": 3, "reason": "…" }`: go past one open note, before Looks right. A reason is a must. Answers with the review. |
 | `POST /tickets/<id>/review/write` | Write the review into the story's merged pull request again: only the threads that are missing. Refused on a pull request that is not merged or was closed. Answers `{ "ok", "pr", "threads", "why" }`. |
 
+## Pull requests on GitHub
+
+squad-kit opens pull requests on GitHub through GitHub's own tool, **gh**, signed in as you (`gh auth login`). It asks
+gh for the sign-in each time and keeps no token; `git push` signs in through gh too, for that push only. Without gh, or
+with gh not signed in, nothing changes from before: the work merges on your computer. The **Tools** page has a line for
+gh, Recommended for a project kept on GitHub, with the steps.
+
+**Your own repo.** Looks right pushes the story's branch, opens the pull request into main, and merges it with a merge
+commit once GitHub allows it; the branch goes, and your own main follows. While GitHub's checks run, squad-kit waits (up
+to 15 minutes). A failed check, a clash, or a branch rule that asks for a person's review is said plainly on the story,
+and squad-kit never goes around it: once someone merges it on GitHub, squad-kit sees it (Check again). A branch rule
+that wants the newest main brings it in on GitHub first. The review goes in after the merge: each note a comment on its
+file and line, fixed ones resolved, and one comment for who pressed Looks right. GitHub takes no pictures from outside
+its own pages, so the pictures stay on the board.
+
+**Someone else's repo.** When your repo is a copy (a fork) of another, or on squad-kit's own code with an `upstream`
+remote, the pull request goes to that repo, into its default branch, and its owner merges it: squad-kit never does.
+The story says **Waiting for the owner to merge**, out of your next release, and squad-kit watches the pull request
+every few minutes:
+
+- **The owner left notes:** the story waits for you with each note (where, who, what), and two ways out. **Fix these**:
+  the Builder fixes them, the checks, the review and your Looks right run as usual, then squad-kit sends the fix to the
+  same pull request and answers each note "Fixed in <commit>". **Answer them yourself**: the story goes on waiting for
+  the owner. Only notes from people who can change that repo count; anyone else's, a bot's and your own are left out.
+- **Merged by the owner:** the story is done. Your copy and your main catch up by themselves when they only fell
+  behind.
+- **Closed without merging:** the story says so, with **Send it again** (a new pull request) and **Leave it closed**.
+
+On squad-kit's own code without gh, the story still shows "Send it as a pull request" (the push and GitHub's page), and
+says how to let squad-kit do it next time.
+
+Terminal: `squad pr <ticket>` shows where the pull request went, where it stands and the owner's notes; `--fix`,
+`--leave` and `--leave-closed` are the buttons. Send it again is `squad decide <ticket> 1`; **Check again** is `squad
+check-merge <ticket>`.
+
+### Contributing to squad-kit
+
+On squad-kit's own code, `squad contribute` shows the checklist before your first pull request, and squad-kit can do
+each step for you:
+
+1. **Signed in to GitHub**, or the steps.
+2. **Your own copy.** Cloned squad-kit itself and can't send changes there? **Make my copy** (`squad contribute
+   --fork`) makes your fork on GitHub, then `origin` points at it and `upstream` at squad-kit. Nothing in your history
+   changes.
+3. **Up to date with squad-kit**: how far behind. **Bring it up to date** (`squad contribute --sync`) uses GitHub's own
+   sync, then moves your main forward. When your copy or your main has changes of its own, it says so and forces
+   nothing.
+4. **The rules** the checks hold, from CONTRIBUTING.md.
+5. **A big idea?** **Tell the maintainers first** (`squad contribute --idea "<title>" --text "<idea>"`) gives GitHub's new
+   issue page, filled in. You read it and send it; squad-kit posts nothing in your name.
+
+REST (under `/p/<project>/api/v1`):
+
+| Call | What |
+| --- | --- |
+| `GET /tickets/<id>/pull-request` | `{ ticket, pr, to ("own", "owner" or "none"), into, base, state, line, notes, lookedAt, since, actions }`. `state`: open, merged, waiting, notes, fixing or closed. Each note: `{ id, kind, who, text, file, line, url, at, changes, state ("new", "fixing", "fixed", "left"), fixedIn, answered }`. Each action: `{ id, name, command }`. |
+| `POST /tickets/<id>/pull-request/fix` | Fix these. Answers with the same view. |
+| `POST /tickets/<id>/pull-request/leave` | Answer them yourself. |
+| `POST /tickets/<id>/pull-request/leave-closed` | Leave it closed. |
+| `GET /contribute` | `{ self, line, host, main, copy, items }`; each item `{ id, title, state ("done", "todo", "blocked", "info"), line, steps, points, file, action }`. |
+| `POST /contribute/fork` | Make my copy. `{ line, checklist }`. |
+| `POST /contribute/sync` | Bring it up to date. `{ line, checklist }`. |
+| `POST /contribute/idea` | `{ "title": "…", "text": "…" }` gives `{ link }`, the filled-in new issue page. |
+
 ## The window
 
 Agents don't get free commands for the app, the browser or the checks. squad-kit gives them a few fixed tools, "the
@@ -619,6 +683,9 @@ builds.
   folder) that has everything is used as it is and never changed; one that lacks something is left as it is, and squad-kit
   gets its own. On Windows and Linux computers with an Arm chip, Google's emulator doesn't run yet: the line says so.
   **Android Studio** shows as Optional: squad-kit doesn't need it.
+- **GitHub's tool (gh)**, Recommended when the project's code is kept on GitHub: it opens and merges the pull
+  requests, signed in as you. Signed out shows as missing, with one line that says so. Without it, the work merges on
+  this computer, as before.
 - **You install it**: the line says why squad-kit can't ("needs your Apple ID"), gives short steps and the official
   page. Press **Check again** after installing. On Mac and Linux, Check again reads your terminal's PATH, so a tool you
   just installed is found without closing squad-kit, and the agents squad-kit starts after find it too.

@@ -50,11 +50,16 @@ What squad-kit does for you:
 - Releases are for the maintainers, so the Releases page has no Release button here. The story's notes stay on your
   computer and out of the pull request.
 
+Before your first story, run `squad contribute`: it checks that you are signed in to GitHub, that you have your own
+copy (it can make your fork), that the copy is up to date (it can sync it), and lists the rules below.
+
 Open the pull request:
 
-- Press Looks right. The story merges into `main` on your computer, and its branch is kept.
-- The story then shows **Send it as a pull request**: run the push command it shows (it pushes the branch to your fork),
-  then press **Open the pull request page**. GitHub opens a pull request from your fork into `AzmSquad/squad-kit`.
+- With GitHub's tool signed in (`gh auth login`), press Looks right. squad-kit pushes the branch to your fork and opens
+  the pull request into `AzmSquad/squad-kit`. The story waits for the maintainers; their notes come back to it, and
+  **Fix these** sends the fix to the same pull request (`squad pr <story>`).
+- Without gh, the story merges into `main` on your computer, keeps its branch, and shows **Send it as a pull request**:
+  run the push command it shows (it pushes the branch to your fork), then press **Open the pull request page**.
 
 Before you start a big feature:
 
@@ -78,8 +83,8 @@ Rules for squad-kit's own code. Tests in `test/architecture/` check them, so a s
   same thing (`test/architecture/rest-commands.json`).
 - **The npm package stays under 5 MB** (`pnpm size:guard`). Prefer small libraries, and ask before adding a big one.
 
-After your pull request is merged, your fork does not update itself. Before your next feature, press **Sync fork** on
-GitHub, or run `git pull upstream main`, so you start from the newest code.
+After your pull request is merged, squad-kit brings your fork and your `main` up to date when it can. Otherwise run
+`squad contribute --sync` (or press **Sync fork** on GitHub) before your next feature, so you start from the newest code.
 
 ## Tests
 

@@ -33,6 +33,7 @@ function sources(): { file: string; text: string }[] {
     { dir: 'src/engine', folder: '' },
     { dir: 'src/engine/lead', folder: '' },
     { dir: 'src/engine/live', folder: 'live/' },
+    { dir: 'src/engine/contribution', folder: 'contribution/' },
     { dir: 'src/engine/prompts', folder: 'prompts/' },
     { dir: 'src/board', folder: '' },
     { dir: 'src/board/actions', folder: 'actions/' },
@@ -67,6 +68,7 @@ const EXCUSED: Record<string, string> = {
   'bring-in.ts:LANDING_LOOK_MS': 'How often a waiting story looks again. MAX_LANDING_WAIT_MS is the limit.',
   'save-trouble.ts:SAVE_CHECK_MS': 'How often a held project tries its test write.',
   'free-port.ts:LOOK_MS': 'How often it looks at who holds the app port.',
+  'contribution/look.ts:LOOK_MS': "How often it looks at a pull request in someone else's repo, beside the work. Check again looks at once.",
   'live/limits.ts:PICK_UP_MS': 'How often it looks for stories teammates pushed.',
   'watchdog.ts:SLEEP_MS': 'Tells a computer that slept from a step that went quiet.',
   'watchdog.ts:NO_LOOK_MS': 'Tells a computer that slept from a step that went quiet.',
@@ -181,7 +183,8 @@ const STOPS_PER_FILE: Record<string, number> = {
   'live/shoot.ts': 3,
   'live/stops.ts': 4,
   'live/workspace.ts': 1,
-  'sync.ts': 1,
+  'sync.ts': 3,
+  'contribution/look.ts': 2,
 };
 
 /** Times written where they are used, each with why it needs no row. */

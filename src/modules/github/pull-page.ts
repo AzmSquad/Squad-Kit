@@ -6,7 +6,7 @@ import type { PullRequestPageModule } from '../code-host/types.js';
  */
 
 /** "owner/name" from https://github.com/owner/name(.git), git@github.com:owner/name(.git) or ssh://git@github.com/owner/name. */
-function repoName(remoteUrl: string): string | null {
+export function repoName(remoteUrl: string): string | null {
   const m = /^(?:https?:\/\/(?:[^@/]+@)?github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i.exec(remoteUrl.trim());
   return m ? `${m[1]}/${m[2]}` : null;
 }

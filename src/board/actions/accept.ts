@@ -54,7 +54,8 @@ export function acceptProof(bp: BoardPaths, ticket: Ticket, byItself?: string, o
       throw actionFailed(bp, ticket.id, 'squad-kit could not save the change, so the proof stays as it is. Press Looks right to try again.', err);
     }
   }
-  const openPr = !ticket.pr && opensPullRequest(bp, ticket);
+  // A fix of the owner's notes goes to the same pull request in their repo (engine/contribution).
+  const openPr = (!ticket.pr || Boolean(ticket.contribution)) && opensPullRequest(bp, ticket);
   // Merge on accept: without a pull request host the branch merges into the base right here, so the next tickets
   // build on it. With a code host module the live squad opens the PR and merges it.
   let merged: ReturnType<typeof mergeLocally> = null;

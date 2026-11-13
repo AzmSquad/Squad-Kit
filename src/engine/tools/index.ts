@@ -393,7 +393,7 @@ function placesFor(bp: BoardPaths, meta: () => BoardMeta | null, story?: StoryWh
   const m = meta();
   const places = projectKinds(bp.root, m, story);
   // A new project with no files yet: its first story's saved commands say what kind of app it becomes.
-  if (!places.length && m?.scan?.empty) {
+  if (!places.some((p) => p.kinds.some((k) => k !== 'github')) && m?.scan?.empty) {
     const k = kindsOfCommands(m.commands ?? {});
     if (k.kinds.length) places.push({ place: '.', ...k });
   }

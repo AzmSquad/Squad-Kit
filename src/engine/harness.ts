@@ -24,6 +24,7 @@ import { DEFAULT_QUALITY, QUALITIES, QUALITY_NOTE, QUALITY_PRESETS } from './lev
 import { BEFORE_SHOTS_MS, BLIP_WAITS_MIN, BUILD_STEP_MS, KEPT_APP_MS, MAX_CHECK_TRIES, MAX_REVIEW_ROUNDS, PROOF_STEP_MS, REVIEW_STEP_MS, WORDS_STEP_MS } from './live.js';
 import { MAX_NOTE_BYTES } from './media.js';
 import { OUTSIDE_LOOK_MS } from './merged-outside.js';
+import { LOOK_MS } from './contribution/look.js';
 import { WAIT_LIMIT_MS } from './product-lock.js';
 import { MIN_SIZE } from './proof-check.js';
 import { MAX_PICTURES, MAX_PICTURES_PER_DONE_WHEN, MAX_PROOF_ROUNDS, MAX_RETAKES } from './proof-verdict.js';
@@ -178,6 +179,8 @@ function lineStages(): HarnessStage[] {
       g('hook', 'Your check on every save', 'Your commit hooks run on every save, inside the guard.', 'The Builder fixes it, or you save without it and say why.'),
       g('merge', 'A clean merge', 'The latest code comes in first. A clash is never forced.', `The newest code comes in by itself, up to ${MAX_BASE_TRIES} times. Then a card.`),
       g('pull-request', 'Pull requests', `squad-kit opens and merges them. Waiting for an approver is a normal wait. One merged on the code host is noticed within ${OUTSIDE_LOOK_MS / 60_000} minutes, or at once with Check again.`, 'Try again, or let the release merge the work.'),
+      y('owner-notes', "The owner's notes", "A pull request to someone else's repo (the one yours was copied from) waits for its owner: squad-kit never merges there. Notes from people who can change that repo come back to the story; nobody else's reach the Builder.", 'Fix these, or answer them yourself. The fix goes to the same pull request, and each note is answered with its commit.'),
+      g('owner-closed', 'Closed by the owner', 'A pull request its owner closed without merging is said on the story. Nothing here changes.', 'Send it again, or leave it closed.'),
       g('checkout', 'Your own copy is safe', 'With changes in the same files, the merge waits. It never overwrites them.'),
     ]),
     stage('release', 'Release', 'You choose what goes out and when. Every track stops here.', on(you('You decide')), [
@@ -418,6 +421,8 @@ function rowDetails(meta: BoardMeta | undefined, root: string | undefined): Reco
     hook: code('engine/git.ts', ['Limit', min(HOOK_MS)]),
     merge: code('board/bring-in.ts', ['Limit', `${MAX_BASE_TRIES} tries`]),
     'pull-request': code('engine/sync.ts', ['Limit', `${min(NETWORK_GIT_MS)} to reach your code host`]),
+    'owner-notes': code('engine/contribution/look.ts', ['Looks again', `Every ${min(LOOK_MS)}, and at once with Check again`], ['Terminal', 'squad pr <story>']),
+    'owner-closed': code('engine/contribution/look.ts'),
     checkout: code('board/auto.ts'),
     release: code('engine/release.ts', ['Runs', run('deploy')], ['Limit', min(PIPELINE_MS)]),
     'leave-out': code('engine/leave-out.ts'),

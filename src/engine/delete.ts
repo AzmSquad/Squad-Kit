@@ -25,7 +25,7 @@ import { repoHostFor, trackerModule } from '../modules/registry.js';
 import { copyDirsIn, currentBranch, dropSnapshot, git, gitLater, isRepo, netGitLater, removeWorktree, worktreeRoot } from './git.js';
 import { agentRuns } from './live.js';
 import { repoFor, reposOf } from './repos.js';
-import { repoTarget } from './sync.js';
+import { repoTarget, targetHost } from './sync.js';
 import { deleteNoteCommit, localCopy } from './teammate-delete.js';
 import { docsRepo, squadInRepo } from './project-git.js';
 import { writeLog } from '../core/app-log.js';
@@ -285,7 +285,8 @@ async function removeRemote(bp: BoardPaths, t: Ticket): Promise<string[]> {
   const target = repoTarget(bp, t);
   if (!target) return [];
   const branch = branchOf(t);
-  const host = repoHostFor(bp, target.url);
+  // With where its work goes, so a pull request in the repo it was copied from is the one that closes.
+  const host = targetHost(bp, target);
   const notes: string[] = [];
   if (t.pr && host) {
     try {

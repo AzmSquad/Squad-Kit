@@ -4,9 +4,10 @@ import { buildPaths } from '../core/paths.js';
 import { loadConfig } from '../core/config.js';
 import type { BoardPaths } from '../board/store.js';
 import type { Tracker, TrackerModule } from './tracker/types.js';
-import type { CodeHostModule, PullRequestPageModule, RepoHost } from './code-host/types.js';
+import type { CodeHostModule, ForkHost, PullRequestPageModule, RepoHost } from './code-host/types.js';
 import { azureTracker } from './azure/tracker.js';
 import { azureCodeHost } from './azure/code-host.js';
+import { githubCodeHost } from './github/code-host.js';
 import { githubPullPage } from './github/pull-page.js';
 import type { Speech, SpeechModule } from './speech/types.js';
 import { munsitSpeech } from './munsit/speech.js';
@@ -27,7 +28,7 @@ import { maestroDriver } from './maestro/index.js';
  */
 
 export const TRACKERS: TrackerModule[] = [azureTracker];
-export const CODE_HOSTS: CodeHostModule[] = [azureCodeHost];
+export const CODE_HOSTS: CodeHostModule[] = [azureCodeHost, githubCodeHost];
 export const PULL_REQUEST_PAGES: PullRequestPageModule[] = [githubPullPage];
 export const SPEECH: SpeechModule[] = [munsitSpeech];
 export const AI_TOOLS: AiTool[] = [claudeTool, codexTool];
@@ -51,14 +52,23 @@ export function trackerFor(bp: BoardPaths): Tracker | null {
   return trackerModule(loadConfig(configFile).tracker.type)?.open(root) ?? null;
 }
 
-/** The code host behind a repo's git remote, when it has a module and a saved sign-in. */
-export function repoHostFor(bp: BoardPaths, remoteUrl: string): RepoHost | null {
+/**
+ * The code host behind a repo's git remote, when it has a module and a saved sign-in. `upstream`: the repo its work
+ * goes to by pull request, when that is not the remote's own (squad-kit's own code with an `upstream` remote).
+ */
+export function repoHostFor(bp: BoardPaths, remoteUrl: string, upstream?: string): RepoHost | null {
   const root = rootOf(bp);
   for (const m of CODE_HOSTS) {
-    const host = m.repoFor(root, remoteUrl);
+    const host = m.repoFor(root, remoteUrl, upstream);
     if (host) return host;
   }
   return null;
+}
+
+/** The host that can make and sync copies (forks) of the repo behind a remote, whatever the sign-in. */
+export function forkHostFor(remoteUrl: string): { label: string; forks: ForkHost } | null {
+  const m = CODE_HOSTS.find((x) => x.forks?.repoName(remoteUrl));
+  return m?.forks ? { label: m.label, forks: m.forks } : null;
 }
 
 /** The host whose page opens a pull request from this remote, when squad-kit knows one. */

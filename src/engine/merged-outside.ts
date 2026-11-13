@@ -5,9 +5,9 @@ import { chooseBuild, isMerged, unmergedDeps, wakeIfReady } from '../board/depen
 import { afterPullRequest, mergeWait } from '../board/auto.js';
 import { clearStaleStop } from '../board/stale-stop.js';
 import { isMine } from '../board/owner.js';
-import { repoHostFor } from '../modules/registry.js';
 import type { RepoHost } from '../modules/code-host/types.js';
-import { followBase, localSetupFor, mapAfterMerge, opensPullRequest, recheckMerge, repoTarget, trackerMerged } from './sync.js';
+import { followBase, localSetupFor, mapAfterMerge, opensPullRequest, recheckMerge, repoTarget, targetHost, trackerMerged } from './sync.js';
+import { lookAtContribution } from './contribution/look.js';
 import { fetchBase } from './handover.js';
 import { writeReview } from './review-record/write.js';
 
@@ -47,9 +47,12 @@ function still(t: Ticket): boolean {
   return !t.live && !t.squad && !t.deleting && !t.archived && !isMerged(t);
 }
 
-/** The pull request squad-kit opened for the story, open as far as the board knows. */
+/**
+ * The pull request squad-kit opened for the story, open as far as the board knows. One in someone else's repo is
+ * watched on its own (engine/contribution/look.ts).
+ */
 function openPr(t: Ticket): PrRef | null {
-  if (!still(t)) return null;
+  if (!still(t) || t.contribution) return null;
   if (t.stage === 'release' && t.pr) return t.pr;
   return onClashCard(t) ? (t.clashedPr ?? null) : null;
 }
@@ -140,11 +143,15 @@ async function clashCardNow(bp: BoardPaths, id: string): Promise<void> {
  * gets a line. Null when the story has nothing of its own to ask about.
  */
 async function checkOwn(bp: BoardPaths, t: Ticket): Promise<Omit<MergeCheck, 'ticket'> | null> {
+  if (t.contribution && t.pr) {
+    const look = await lookAtContribution(bp, t.id);
+    return { found: look.found === 'notes' ? 'open' : look.found, line: look.line, merged: look.found === 'merged' ? [t.id] : [] };
+  }
   const wait = mergeWait(t);
   if (wait) return checkWait(bp, t, wait);
   if (!openPr(t) && !mayHaveClashedPr(bp, t)) return null;
   const target = repoTarget(bp, t);
-  const host = target && repoHostFor(bp, target.url);
+  const host = target && targetHost(bp, target);
   if (!target || !host) return { found: 'none', line: `${t.id}'s code host has no saved sign-in on this computer, so squad-kit cannot ask it. Add it in Settings, then check again.`, merged: [] };
   const pr = openPr(t) ?? (await clashedByBranch(bp, t, host));
   if (!pr) return mayHaveClashedPr(bp, t) ? { found: 'none', line: `squad-kit found no pull request of ${t.id} on ${host.label}, so there is nothing to ask about. Pick a way out on the card.`, merged: [] } : null;
@@ -178,7 +185,7 @@ async function checkWait(bp: BoardPaths, t: Ticket, wait: 'pr' | 'checkout'): Pr
     return { found: 'clash', line: `${t.pr ? `Pull request ${t.pr.id}` : t.id} clashes with newer work in ${base}, so ${t.id} waits for you with ways out.`, merged: [] };
   }
   const target = repoTarget(bp, t);
-  const host = target && repoHostFor(bp, target.url);
+  const host = target && targetHost(bp, target);
   if (r === 'closed' && t.pr && host) {
     saidClosed(bp, t.id, t.pr, host, base);
     return { found: 'closed', line: `${closedLine(t.pr, host, base)}.`, merged: [] };
@@ -273,7 +280,7 @@ export async function lookOutside(bp: BoardPaths): Promise<{ asked: number; merg
     const key = `${bp.squadDir}\0${t.id}`;
     if (known ? t.prClosed === known.id : notFound.has(key) || !mayHaveClashedPr(bp, t)) continue;
     const target = repoTarget(bp, t);
-    const host = target && repoHostFor(bp, target.url);
+    const host = target && targetHost(bp, target);
     if (!target || !host) continue;
     try {
       const pr = known ?? (await clashedByBranch(bp, t, host));

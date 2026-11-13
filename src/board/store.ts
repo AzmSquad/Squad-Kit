@@ -12,21 +12,7 @@ import { pauseClock, trackStage, waitsNow } from './clock.js';
 import { clearStaleStop, oldStop } from './stale-stop.js';
 import { dropOldChecked, showOutsideStep } from './outside-step.js';
 import { hasMergeMarks, isPlain, wrongField, type FieldShape } from './shape.js';
-import {
-  decisionDoc,
-  lessonsDoc,
-  parseDecisionDoc,
-  parseLessonsDoc,
-  parseProjectDoc,
-  parseReleaseDoc,
-  parseStackDoc,
-  projectDoc,
-  readTicketDocs,
-  releaseDoc,
-  stackDoc,
-  ticketDocs,
-  type TicketDocInput,
-} from './docs.js';
+import { decisionDoc, lessonsDoc, parseDecisionDoc, parseLessonsDoc, parseProjectDoc, parseReleaseDoc, parseStackDoc, projectDoc, readTicketDocs, releaseDoc, stackDoc, ticketDocs, type TicketDocInput } from './docs.js';
 
 /**
  * The board's files, in two homes (ADR-001). The project's `.squad/` holds its memory: settings, rules, knowledge,
@@ -375,6 +361,7 @@ export const TICKET_HOME = {
   // With the clash card it belongs to, and what this computer last heard from the code host.
   clashedPr: 'local',
   prClosed: 'local',
+  contribution: 'local',
   changeRequest: 'local',
   agentQuestion: 'local',
   chat: 'local',

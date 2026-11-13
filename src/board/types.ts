@@ -3,6 +3,7 @@ import type { SetupState } from './setup-state.js';
 import type { CriterionProof } from './proof-kind.js';
 import type { OffScreen, ProofShot } from './proof-rows.js';
 import type { TicketReview } from './review-types.js';
+import type { TicketContribution } from './contribution-types.js';
 
 /** The 7 stages a ticket moves through. `done` means released and off the board. */
 export type Stage = 'tickets' | 'specs' | 'implement' | 'test' | 'review' | 'release' | 'bugs' | 'done';
@@ -149,7 +150,7 @@ export interface Gates {
 export type { OffScreen, ProofPicture, ProofShot } from './proof-rows.js';
 
 /** The ways out of a stop. Every stop has at least Try again and one more; a step paused on a cap has Give it more and Stop. */
-export type WayOut = 'retry' | 'yourself' | 'continue' | 'plan' | 'skip-pr' | 'more' | 'stop' | 'add-test' | 'no-tests' | 'save-again' | 'skip-hooks' | 'engineer';
+export type WayOut = 'retry' | 'yourself' | 'continue' | 'plan' | 'skip-pr' | 'more' | 'stop' | 'add-test' | 'no-tests' | 'save-again' | 'skip-hooks' | 'engineer' | 'owner-fix' | 'owner-leave' | 'leave-closed';
 
 export interface StuckOption extends DecisionOption {
   /** What the choice does. Older boards have no `do`: their first choice tries again, the second goes to the plan. */
@@ -176,7 +177,7 @@ export interface StuckChoice {
    * no when squad-kit saved the accepted change. 'gate-cant-run': a gate the team added could not run at all, which
    * says nothing about the code.
    */
-  kind?: 'weakened' | 'no-tests' | 'bad-proof' | 'guard' | 'broken' | 'not-shown' | 'hook' | 'gate-cant-run';
+  kind?: 'weakened' | 'no-tests' | 'bad-proof' | 'guard' | 'broken' | 'not-shown' | 'hook' | 'gate-cant-run' | 'owner-notes' | 'owner-closed';
   /** The team's gates this stop is about (board/additions.ts). */
   added?: { id: string; name: string }[];
   /** For failed checks: which ones failed (for weakened tests: what was weakened), so continuing past them is remembered for them. */
@@ -503,7 +504,7 @@ export interface LocalSetup {
   output?: string;
 }
 
-export interface Ticket extends TicketReview {
+export interface Ticket extends TicketReview, TicketContribution {
   id: string;
   title: string;
   ask: string;
@@ -591,8 +592,7 @@ export interface Ticket extends TicketReview {
   createKey?: string;
   /** Set when the person presses Stop; the live squad stops the running step. */
   stopRequested?: boolean;
-  /** The pull request opened after the proof was accepted. */
-  /** The pull request on the code host module named in host. */
+  /** The pull request opened after the proof was accepted, on the code host module named in host. */
   pr?: { id: number; url: string; repo: string; host: string };
   /**
    * The pull request that clashed with the base, kept while the clash card waits: it stays open on the code host, and a

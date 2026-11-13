@@ -61,6 +61,8 @@ function title(t: Ticket): string {
   if (STOPPED.test(s.question)) return 'You stopped the squad';
   if (s.budget) return s.budget === 'ticket' ? 'This ticket reached its budget' : "This month's budget is reached";
   if (s.kind === 'gate-cant-run') return 'A check of your team could not run';
+  if (s.kind === 'owner-notes') return 'The owner asked for changes';
+  if (s.kind === 'owner-closed') return 'The owner closed the pull request';
   if (s.kind === 'hook') return s.added ? "Your team's check said no" : "The project's own check said no";
   if (s.gate === 'checks') return s.kind === 'weakened' ? 'The tests were made weaker' : s.kind === 'no-tests' ? 'No tests to check the work' : s.kind === 'guard' ? 'A file was blocked' : 'The checks still fail';
   if (s.gate === 'review') return 'The review is still open';

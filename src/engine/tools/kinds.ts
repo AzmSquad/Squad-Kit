@@ -4,14 +4,15 @@ import type { BoardMeta, Ticket } from '../../board/types.js';
 import { partsOf } from '../../board/parts.js';
 import { copiesOf } from '../copies.js';
 import { reposOf } from '../repos.js';
+import { pullRequestPageFor } from '../../modules/registry.js';
 
 /**
  * What kind of project each part is, read from its files, so the Tools page knows what this project needs. Only files
  * are read: nothing runs. A part can be more than one kind (a Flutter app with a Docker file), and a phone app says
- * which phones it builds for from its folders.
+ * which phones it builds for from its folders. Its repo's remotes say where its code is kept, for the code host's tool.
  */
 
-export type ProjectKind = 'web' | 'flutter' | 'react-native' | 'ios' | 'android' | 'docker';
+export type ProjectKind = 'web' | 'flutter' | 'react-native' | 'ios' | 'android' | 'docker' | 'github';
 export type Platform = 'ios' | 'android' | 'web';
 
 export interface PlaceKinds {
@@ -102,7 +103,43 @@ export function kindsOf(dir: string): { kinds: ProjectKind[]; platforms: Platfor
     }
   }
   if (['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml'].some((f) => has(dir, f))) kinds.push('docker');
+  if (remoteUrls(dir).some((u) => pullRequestPageFor(u)?.name === 'github')) kinds.push('github');
   return { kinds, platforms: [...platforms] };
+}
+
+/** The repo's git config file, for a folder in it: its own `.git`, or the shared one of a git worktree. */
+function gitConfigOf(dir: string): string | null {
+  for (let d = path.resolve(dir), i = 0; i < 12; i++, d = path.dirname(d)) {
+    const dot = path.join(d, '.git');
+    try {
+      if (fs.statSync(dot).isDirectory()) return path.join(dot, 'config');
+      const gitdir = /^gitdir:\s*(.+)$/m.exec(read(dot) ?? '')?.[1]?.trim();
+      if (!gitdir) return null;
+      const at = path.resolve(d, gitdir);
+      const common = read(path.join(at, 'commondir'))?.trim();
+      return path.join(common ? path.resolve(at, common) : at, 'config');
+    } catch {
+      // No .git here: the folder above.
+    }
+    if (path.dirname(d) === d) break;
+  }
+  return null;
+}
+
+/** The addresses of the repo's remotes, read from its git config. */
+function remoteUrls(dir: string): string[] {
+  const file = gitConfigOf(dir);
+  const text = file ? read(file) : null;
+  if (!text) return [];
+  const out: string[] = [];
+  let inRemote = false;
+  for (const line of text.split('\n')) {
+    const section = /^\s*\[([^\]]+)\]/.exec(line);
+    if (section) inRemote = /^remote\s+"/.test(section[1]!);
+    const url = inRemote ? /^\s*url\s*=\s*(.+?)\s*$/.exec(line)?.[1] : undefined;
+    if (url) out.push(url);
+  }
+  return out;
 }
 
 /**

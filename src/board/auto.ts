@@ -46,7 +46,8 @@ export const PR_WAITS = 'Waits for someone to approve the pull request';
  */
 export function mergeWait(t: Ticket | undefined | null): 'pr' | 'checkout' | null {
   if (!t || t.stage !== 'release' || isMerged(t) || t.squad || t.waiting || t.live || t.deleting || t.archived) return null;
-  if (t.pr) return t.track === 'auto' ? 'pr' : null;
+  // A pull request in someone else's repo is its owner's to merge (engine/contribution).
+  if (t.pr) return t.track === 'auto' && !t.contribution ? 'pr' : null;
   return t.branch ? 'checkout' : null;
 }
 
@@ -291,7 +292,7 @@ export function afterPullRequest(bp: BoardPaths, id: string, clash: boolean): vo
     return;
   }
   const t = readTicket(bp, id);
-  if (t?.track !== 'auto' || t.mergedAt || !t.pr) return;
+  if (t?.track !== 'auto' || t.mergedAt || !t.pr || t.contribution) return;
   updateTicket(bp, id, (x) => {
     x.status = PR_WAITS;
     addActivity(x, 'release', `Pull request ${x.pr?.id ?? ''} waits for someone to approve it. That is a normal wait, not a failure`);

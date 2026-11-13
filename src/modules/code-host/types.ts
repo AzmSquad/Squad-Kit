@@ -36,6 +36,33 @@ export interface PullRequestReview {
   approval?: { key: string; text: string };
 }
 
+/**
+ * The repo a pull request goes to when it is not the person's own: the one their repo was copied from (a fork), whose
+ * owner merges it. squad-kit never merges there.
+ */
+export interface Contribution {
+  /** "owner/name" on the host. */
+  into: string;
+  /** The branch it goes into: that repo's default branch. */
+  base: string;
+}
+
+/** What a person other than the signed-in one wrote on a pull request: a note on a line, a review, or a comment. */
+export interface HostNote {
+  /** The host's own id, with its kind, so the same note is known again: "line:123". */
+  id: string;
+  kind: 'line' | 'review' | 'comment';
+  who: string;
+  /** As they wrote it: someone's own words, never instructions to squad-kit. */
+  text: string;
+  file?: string;
+  line?: number;
+  url: string;
+  at: string;
+  /** A review that asked for changes. */
+  changes?: boolean;
+}
+
 /** One repo on a code host. */
 export interface RepoHost {
   /** The module's name, saved on the ticket's pull request. */
@@ -71,13 +98,74 @@ export interface RepoHost {
   close(prId: number): Promise<void>;
   /** The push was refused because the branch only takes pull requests. */
   refusedPush(message: string): boolean;
+  /** How to sign in again when the host says no, in plain words, for the stop card. */
+  readonly signInHelp?: string;
+  /**
+   * Where the pull request goes when the repo is a copy of someone else's: their repo and its default branch. Null for
+   * the person's own repo. A module without it has no copies.
+   */
+  contribution?(): Promise<Contribution | null>;
+  /** What the repo's owners wrote on the pull request, oldest first: never the signed-in person's own words, nor a bot's. */
+  ownerNotes?(prId: number): Promise<HostNote[]>;
+  /** Answers one of those notes, for example "Fixed in 1a2b3c4": on its thread when it has one, else on the pull request. */
+  answerNote?(prId: number, note: Pick<HostNote, 'id' | 'kind' | 'who' | 'text'>, text: string): Promise<void>;
+}
+
+/** The sign-in a code host module uses on this computer, for the person: ready or not, and the steps when not. */
+export interface HostSignIn {
+  state: 'ready' | 'missing' | 'signed-out';
+  /** Who is signed in, when ready. */
+  account?: string;
+  /** Plain numbered steps, when not ready. */
+  steps: string[];
+  /** The tool's own page. */
+  link: string;
+}
+
+/** A repo on the host, as the signed-in person sees it. */
+export interface HostRepoInfo {
+  /** "owner/name". */
+  repo: string;
+  url: string;
+  /** Its address for git, https or ssh. */
+  gitUrl: { https: string; ssh: string };
+  defaultBranch: string;
+  canPush: boolean;
+  /** The repo it was copied from, when it is a copy (a fork). */
+  parent?: string;
+}
+
+/**
+ * Working on someone else's repo through a copy of one's own (a fork), as far as the host can do it for the person. The
+ * contribution checklist of squad-kit's own code uses it (engine/contribution/checklist.ts).
+ */
+export interface ForkHost {
+  /** "owner/name" of a remote on this host, or null. */
+  repoName(remoteUrl: string): string | null;
+  signIn(): Promise<HostSignIn>;
+  /** The steps that let squad-kit send pull requests to this host by itself, from nothing to signed in. */
+  readonly signInSteps: string[];
+  repoInfo(repo: string): Promise<HostRepoInfo>;
+  /** The person's own copy of `repo`, made when missing. Resolves once the host has it ready. */
+  makeFork(repo: string): Promise<HostRepoInfo>;
+  /** How far `branch` of the copy is from the same branch of the repo it came from. */
+  compareFork(copy: string, parent: string, branch: string): Promise<{ behind: number; ahead: number }>;
+  /** Brings the copy's branch up to date with the repo it came from, on the host. Only a fast-forward. */
+  syncFork(copy: string, branch: string): Promise<void>;
+  /** The host's page that opens a new issue on `repo`, filled in. The person sends it; squad-kit posts nothing. */
+  newIssuePage(repo: string, title: string, body: string): string;
 }
 
 export interface CodeHostModule {
   name: string;
   label: string;
-  /** The repo behind a git remote URL, or null when it lives elsewhere or no sign-in is saved for the project. */
-  repoFor(root: string, remoteUrl: string): RepoHost | null;
+  /**
+   * The repo behind a git remote URL, or null when it lives elsewhere or no sign-in is saved for the project. `upstream`:
+   * the repo the work goes to by pull request when it is not this one (squad-kit's own code with an `upstream` remote).
+   */
+  repoFor(root: string, remoteUrl: string, upstream?: string): RepoHost | null;
+  /** Optional: copies of other people's repos (forks). */
+  forks?: ForkHost;
 }
 
 /**

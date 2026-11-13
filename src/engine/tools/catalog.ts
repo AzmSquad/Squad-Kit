@@ -7,10 +7,10 @@ import type { Platform, ProjectKind } from './kinds.js';
  */
 
 /** What squad-kit does that a tool can be needed for. Phase A stops `build` and `checks` only. */
-export type ToolAction = 'build' | 'checks' | 'pictures' | 'start-app' | 'try-it';
+export type ToolAction = 'build' | 'checks' | 'pictures' | 'start-app' | 'try-it' | 'pull-request';
 export type Priority = 'required' | 'recommended' | 'optional';
 export type System = 'mac' | 'windows' | 'linux';
-export type ToolId = 'git' | 'ai-tool' | 'flutter' | 'xcode' | 'simulator' | 'cocoapods' | 'android' | 'maestro' | 'java' | 'android-studio' | 'docker';
+export type ToolId = 'git' | 'ai-tool' | 'flutter' | 'xcode' | 'simulator' | 'cocoapods' | 'android' | 'maestro' | 'java' | 'android-studio' | 'docker' | 'gh';
 /** Another tool that looks after a copy you installed, and updates it itself. */
 export type ManagedBy = 'homebrew' | 'fvm' | 'snap';
 
@@ -247,6 +247,20 @@ export const CATALOG: ToolEntry[] = [
     steps: { all: ['Open the official page and get Docker Desktop.', 'Open it once and let it start.', CHECK_AGAIN] },
     link: 'https://docs.docker.com/get-started/get-docker/',
   },
+  {
+    id: 'gh',
+    name: "GitHub's tool (gh)",
+    gives: 'opens and merges the pull requests on GitHub, signed in as you. Without it, the work merges on this computer',
+    needs: [{ kinds: ['github'], priority: 'recommended', for: ['pull-request'] }],
+    installer: 'you',
+    why: 'it signs in to GitHub as you, which only you can do',
+    steps: {
+      mac: ['Open a terminal.', "Run: brew install gh. Without Homebrew, get it from GitHub's tool page.", 'Run: gh auth login, and sign in with your browser.', CHECK_AGAIN],
+      windows: ["Open GitHub's tool page and get it for Windows.", 'Open a terminal and run: gh auth login, then sign in with your browser.', OPEN_AGAIN],
+      linux: ["Open GitHub's tool page and follow the steps for your Linux.", 'Run: gh auth login, and sign in with your browser.', CHECK_AGAIN],
+    },
+    link: 'https://cli.github.com',
+  },
 ];
 
 export function toolEntry(id: string): ToolEntry | undefined {
@@ -261,6 +275,7 @@ export const KIND_WORDS: Record<ProjectKind, string> = {
   ios: 'an iPhone app',
   android: 'an Android app',
   docker: 'Docker files',
+  github: 'code kept on GitHub',
 };
 
 export const PLATFORM_WORDS: Record<Platform, string> = { ios: 'iPhone', android: 'Android', web: 'web' };
@@ -272,6 +287,7 @@ export const ACTION_WORDS: Record<ToolAction, string> = {
   pictures: 'Phone pictures',
   'start-app': 'Start',
   'try-it': 'Try it yourself',
+  'pull-request': 'Pull requests',
 };
 
 /** What can't happen, for a block's message: "squad-kit can't build this story yet". */
@@ -281,6 +297,7 @@ export const ACTION_DOING: Record<ToolAction, string> = {
   pictures: 'take the phone pictures',
   'start-app': 'start the app on a phone',
   'try-it': 'open Try it yourself on a phone',
+  'pull-request': 'open the pull request',
 };
 
 /**

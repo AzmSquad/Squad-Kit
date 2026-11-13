@@ -78,6 +78,7 @@ import { runArchive, runDelete } from './commands/delete.js';
 import { runBranches, runBringIn, runBuild, runCheckMerge, runDepends } from './commands/depends.js';
 import { runSplit } from './commands/split.js';
 import { runReview } from './commands/review.js';
+import { runContribute, runPr } from './commands/contribute.js';
 import { runProve } from './commands/prove.js';
 import { wrap, wrapArgs } from './commands/wrap.js';
 import { runDecided } from './commands/decided.js';
@@ -635,10 +636,9 @@ program
   .command('bring-in <ticket>')
   .description("Bring the latest main into a ticket's copy of the code; the checks, review and proof run again")
   .action(wrapArgs(runBringIn));
-program
-  .command('check-merge <ticket>')
-  .description("Check again: ask the code host now whether a ticket's pull request, or the one it waits for, was merged there")
-  .action(wrapArgs(runCheckMerge));
+program.command('check-merge <ticket>').description("Check again: ask the code host now whether a ticket's pull request, or the one it waits for, was merged there").action(wrapArgs(runCheckMerge));
+program.command('pr <ticket>').description("A story's pull request: where it went, where it stands, and the owner's notes").option('--fix', "Fix these: the Builder fixes the owner's notes, and the fix goes to the same pull request").option('--leave', "Answer the owner's notes yourself, on the code host").option('--leave-closed', 'The owner closed it: leave it closed').action(wrapArgs(runPr));
+program.command('contribute').description("squad-kit's own code: the checklist before your first pull request").option('--fork', 'Make your own copy (a fork) of the main repo').option('--sync', 'Bring your copy up to date with the main repo').option('--idea <title>', 'A big idea: print the new issue page that tells the maintainers first, filled in').option('--text <words>', 'With --idea: the idea in a few lines').action(wrap(runContribute));
 program
   .command('branches')
   .description('Show the old branches of released tickets')

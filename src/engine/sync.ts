@@ -16,7 +16,9 @@ import { clearStaleStop } from '../board/stale-stop.js';
 import { copyViews } from './copies.js';
 import { writeLog } from '../core/app-log.js';
 import { freeName } from '../core/file-names.js';
-import { refusedForGood } from '../modules/errors.js';
+import { ModuleError, refusedForGood } from '../modules/errors.js';
+import { isSquadKitCode } from './self-project.js';
+import { sentToOwner } from './contribution/send.js';
 import { prDescription } from './review-record/pr-description.js';
 import { tidyStoryDbsBeside } from './story-db.js';
 import type { ReviewRecord } from '../board/review-types.js';
@@ -228,8 +230,11 @@ function squadInside(bp: BoardPaths, repoDir: string): string | undefined {
   return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel : undefined;
 }
 
-/** Where a ticket's repo lives: its folder, remote name and remote URL. */
-export function repoTarget(bp: BoardPaths, t: Ticket): { dir: string; base: string; remote: string; url: string } | null {
+/**
+ * Where a ticket's repo lives: its folder, remote name and remote URL. On squad-kit's own code, `upstream`: the repo its
+ * work goes to by pull request, when an `upstream` remote names one (ADR-003).
+ */
+export function repoTarget(bp: BoardPaths, t: Ticket): { dir: string; base: string; remote: string; url: string; upstream?: string } | null {
   const meta = readMeta(bp);
   const repo = repoFor(meta, t);
   const dir = path.join(projectRoot(bp), repo.path);
@@ -237,7 +242,23 @@ export function repoTarget(bp: BoardPaths, t: Ticket): { dir: string; base: stri
   if (!remote) return null;
   // The URL as configured, before any insteadOf rewriting, says which host the repo lives on.
   const url = git(dir, ['config', '--get', `remote.${remote}.url`], { allowFail: true });
-  return url ? { dir, base: repo.base, remote, url } : null;
+  if (!url) return null;
+  const upstream = remote !== 'upstream' && isSquadKitCode(dir) ? git(dir, ['config', '--get', 'remote.upstream.url'], { allowFail: true }) : '';
+  return { dir, base: repo.base, remote, url, ...(upstream ? { upstream } : {}) };
+}
+
+/** The code host of a ticket's repo, which knows the repo its work goes to when that is another one. */
+export function targetHost(bp: BoardPaths, target: { url: string; upstream?: string }): RepoHost | null {
+  return repoHostFor(bp, target.url, target.upstream);
+}
+
+/** A code host that said no to the sign-in, or a push it refused for one: the stop says how to sign in again. */
+function signInStop(err: unknown, host: RepoHost): StepError | null {
+  const msg = (err as Error)?.message ?? '';
+  // A 403 is a code host's no to this one thing (a rule, a right), not a sign-in.
+  const sign = err instanceof ModuleError ? err.kind === 'sign-in' && err.status !== 403 : /Authentication failed|could not read Username|Invalid username or password/i.test(msg);
+  if (!sign) return null;
+  return new StepError(`squad-kit could not sign in to ${host.label}, so the pull request did not open. ${host.signInHelp ?? 'Check the sign-in in Settings.'} Then press Try again.`, msg);
 }
 
 /** True when accepting the proof should open a pull request: the repo's code host has a module and a saved sign-in. */
@@ -247,7 +268,7 @@ export function opensPullRequest(bp: BoardPaths, t: Ticket): boolean {
   // A story across parts goes out together at the release. So does a project that pushes to a branch, by its own choice.
   if (meta.delivery === 'push' || t.copies?.length) return false;
   const target = repoTarget(bp, t);
-  return Boolean(target && repoHostFor(bp, target.url));
+  return Boolean(target && targetHost(bp, target));
 }
 
 /**
@@ -257,19 +278,31 @@ export function opensPullRequest(bp: BoardPaths, t: Ticket): boolean {
 export async function publishTicket(bp: BoardPaths, ticketId: string): Promise<{ clash: boolean }> {
   const t = requireTicket(bp, ticketId);
   const target = repoTarget(bp, t);
-  const host = target && repoHostFor(bp, target.url);
+  const host = target && targetHost(bp, target);
   if (!target || !host || !t.branch) throw new Error('This ticket has no code host with a saved sign-in to open a pull request with.');
+  try {
+    return await publishTo(bp, t, target, host);
+  } catch (err) {
+    throw signInStop(err, host) ?? err;
+  }
+}
+
+async function publishTo(bp: BoardPaths, t: Ticket, target: NonNullable<ReturnType<typeof repoTarget>>, host: RepoHost): Promise<{ clash: boolean }> {
+  const ticketId = t.id;
   const env = host.gitEnv();
+  // Someone else's repo (the one this one was copied from): its owner merges it, never squad-kit (engine/contribution).
+  // A repo the person cannot push to says so in plain words: they make their own copy first.
+  const into = (await host.contribution?.().catch((err: unknown) => Promise.reject(err instanceof ModuleError && err.status === 403 ? new StepError(err.message) : err))) ?? null;
 
   // A brand-new repo has no base branch yet, and a PR needs one to point at.
-  const remoteBase = await netGitLater(target.dir, ['ls-remote', '--heads', target.remote, target.base], { allowFail: true, env });
+  const remoteBase = into ? 'there' : await netGitLater(target.dir, ['ls-remote', '--heads', target.remote, target.base], { allowFail: true, env });
   if (!remoteBase) {
     await netGitLater(target.dir, ['push', target.remote, `${target.base}:refs/heads/${target.base}`], { env });
     note(bp, ticketId, `Sent the first code to ${host.label}, which was empty`);
   }
   // Never forced: when someone else's work is on that branch (the ticket was taken back from them), it stays there.
   try {
-    await netGitLater(t.worktree ?? target.dir, ['push', target.remote, `${t.branch}:refs/heads/${t.branch}`], { env });
+    await netGitLater(t.worktree ?? target.dir, ['push', target.remote, `${t.branch!}:refs/heads/${t.branch!}`], { env });
   } catch (err) {
     if (/rejected|fast-forward|fetch first|before pushing again/i.test((err as Error).message)) throw new StepError(`${target.remote} has newer work on this ticket from someone else, and squad-kit does not write over it. Bring in their work, then press Try again.`, (err as Error).message);
     throw err;
@@ -277,9 +310,12 @@ export async function publishTicket(bp: BoardPaths, ticketId: string): Promise<{
 
   const tracker = trackerFor(bp);
   const item = tracker ? itemId(t, tracker) : null;
-  let pr = await host.findPullRequest(t.branch);
+  const branch = t.branch!;
+  let pr = await host.findPullRequest(branch);
+  // Found again (a fix sent to the same pull request, or a retry): its description gets the newest record.
+  const found = Boolean(pr);
   if (!pr) {
-    pr = await host.openPullRequest({ source: t.branch, target: target.base, title: t.title, description: prDescription(t, item, []), items: item ? [item] : [] });
+    pr = await host.openPullRequest({ source: branch, target: target.base, title: t.title, description: prDescription(t, item, []), items: item ? [item] : [] });
   }
   // Screenshots go into the PR so reviewers see the proof where they review the code.
   const shots: { label: string; url: string }[] = [];
@@ -297,17 +333,18 @@ export async function publishTicket(bp: BoardPaths, ticketId: string): Promise<{
     // A missing screenshot should not block the PR.
     if (url) shots.push({ label: shot.label, url });
   }
-  if (shots.length) await host.updateDescription(pr.id, prDescription(t, item, shots));
+  if (shots.length || found) await host.updateDescription(pr.id, prDescription(t, item, shots));
 
   const opened = pr;
   updateTicket(bp, ticketId, (x) => {
-    x.pr = { id: opened.id, url: opened.url, repo: host.repo, host: host.host };
+    x.pr = { id: opened.id, url: opened.url, repo: into?.into ?? host.repo, host: host.host };
     // The clash it had is settled, or a new pull request took the place of a closed one.
     delete x.clashedPr;
     delete x.prClosed;
     x.status = `Merging pull request ${opened.id}`;
-    addActivity(x, 'release', `Opened pull request ${opened.id} on ${host.label}`);
+    if (!into) addActivity(x, 'release', `Opened pull request ${opened.id} on ${host.label}`);
   });
+  if (into) return sentToOwner(bp, ticketId, host, opened, into, { dir: t.worktree ?? target.dir, branch });
 
   // Merge on accept: the change goes into the base branch now, so the next tickets build on it.
   let merged = false;
@@ -384,7 +421,7 @@ export async function recheckMerge(bp: BoardPaths, id: string): Promise<'merged'
   let review: (() => Promise<unknown>) | undefined;
   if (wait === 'pr') {
     const target = repoTarget(bp, t);
-    const host = target && repoHostFor(bp, target.url);
+    const host = target && targetHost(bp, target);
     if (!target || !host || !t.pr) return 'waiting';
     const state = await host.mergeState(t.pr.id).catch(() => null);
     if (state === 'clash' || state === 'closed') return state;

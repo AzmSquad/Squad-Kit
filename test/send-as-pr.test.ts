@@ -16,7 +16,8 @@ import type { Ticket } from '../src/board/types.js';
 /**
  * A story merged on this computer, on squad-kit's own code, goes on by pull request: the story says how to push its
  * branch with the person's own sign-in, and opens the host's page for the request, into the repo it came from. Any other
- * project, a fork too, gets none of it: its work goes out with its own release.
+ * project, a fork too, gets none of it: its work goes out with its own release. With GitHub's tool signed in, squad-kit
+ * sends the pull request itself (github-pull-requests.test.ts), so this box is the way when it is not.
  */
 
 let tmp: string;
@@ -68,6 +69,8 @@ describe('a merged story says how to send it', () => {
       page: 'https://github.com/AzmSquad/squad-kit/compare/main...someone:sk-1-show-version?expand=1&title=Show+the+version',
       host: 'GitHub',
       into: 'AzmSquad/squad-kit',
+      // GitHub's tool is not signed in here (the test's gh is not): the steps that let squad-kit send the next ones.
+      letSquadKit: ["Install GitHub's tool, gh, from cli.github.com.", 'Sign in: open a terminal and run gh auth login.', 'squad-kit then sends your next stories as pull requests by itself.'],
     });
     // The ticket's own record carries it, for the drawer.
     const made = createTicket(bp, { title: 'Show the version' });

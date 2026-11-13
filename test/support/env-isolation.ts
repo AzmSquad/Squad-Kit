@@ -42,6 +42,9 @@ fs.mkdirSync(standIns, { recursive: true });
 for (const tool of ['pbcopy', 'xclip', 'xsel', 'wl-copy', 'termux-clipboard-set']) {
   fs.writeFileSync(path.join(standIns, tool), '#!/bin/sh\ncat > "$SQUAD_KIT_HOME/clipboard.txt"\n', { mode: 0o755 });
 }
+// A test never reaches GitHub with the developer's own sign-in: this gh is not signed in. A test that wants gh puts its
+// own made-up one first on the PATH.
+fs.writeFileSync(path.join(standIns, 'gh'), '#!/bin/sh\necho "not signed in (test)" >&2\nexit 1\n', { mode: 0o755 });
 process.env.PATH = `${standIns}${path.delimiter}${process.env.PATH ?? ''}`;
 
 // A locale for git, as a person's terminal has. Started with none (an app opened from the Dock, an editor's test

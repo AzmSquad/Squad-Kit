@@ -1,8 +1,7 @@
 import { addActivity, now, readMeta, requireTicket, updateTicket, type BoardPaths } from '../../board/store.js';
 import { BoardActionError } from '../../board/actions.js';
 import type { ReviewPosted } from '../../board/review-types.js';
-import { repoHostFor } from '../../modules/registry.js';
-import { repoTarget } from '../sync.js';
+import { repoTarget, targetHost } from '../sync.js';
 import { stateOf } from './state.js';
 import { reviewView, type ReviewView } from './view.js';
 import { writeReview } from './write.js';
@@ -41,7 +40,7 @@ export async function writeReviewAgain(bp: BoardPaths, id: string): Promise<Revi
   const t = requireTicket(bp, id);
   if (!t.pr) throw new BoardActionError(`${t.id} has no pull request: its review is in its merge commit and on the board.`);
   const target = repoTarget(bp, t);
-  const host = target && repoHostFor(bp, target.url);
+  const host = target && targetHost(bp, target);
   if (!host) throw new BoardActionError(`${t.id}'s code host has no saved sign-in on this computer. Add it in Settings, then try again.`);
   if (!host.postReview) throw new BoardActionError(`${host.label} keeps the review in the pull request's description only.`);
   const state = await host.mergeState(t.pr.id);

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { readMeta, type BoardPaths } from '../board/store.js';
 import type { Ticket } from '../board/types.js';
-import { pullRequestPageFor } from '../modules/registry.js';
+import { forkHostFor, pullRequestPageFor } from '../modules/registry.js';
 import { git } from './git.js';
 import { repoFor } from './repos.js';
 import { isSquadKitCode } from './self-project.js';
@@ -14,7 +14,8 @@ import { shellArg } from '../utils/text.js';
  * The story says how to send it: push the branch, then open the request on the host's own page, into the repo it was
  * copied from (the `upstream` remote, or else the repo its package names). Any other project's work goes out with its
  * own release, so it gets none of this. squad-kit pushes nothing itself here: the person runs the push, with their own
- * sign-in.
+ * sign-in. With the host's tool signed in, squad-kit sends the pull request itself instead (engine/contribution), so
+ * this box is the way when it is not: it also says how to let squad-kit do it next time.
  */
 
 export interface SendAs {
@@ -31,6 +32,8 @@ export interface SendAs {
   host?: string;
   /** The repo the pull request goes to, "owner/name", when it is not the person's own copy. */
   into?: string;
+  /** How to let squad-kit send the next ones itself: the host's tool and its sign-in, step by step. */
+  letSquadKit?: string[];
 }
 
 /** A remote's address, or '' when there is none. */
@@ -72,6 +75,7 @@ export function sendAsOf(bp: BoardPaths, t: Ticket): SendAs | null {
   const host = pullRequestPageFor(from);
   const page = host?.pageFor({ from, into, base: repo.base, branch: t.branch, title: `${t.title}` }) ?? undefined;
   const target = host?.repoName(into);
+  const steps = forkHostFor(from)?.forks.signInSteps;
   return {
     branch: t.branch,
     remote,
@@ -80,5 +84,6 @@ export function sendAsOf(bp: BoardPaths, t: Ticket): SendAs | null {
     ...(page ? { page } : {}),
     ...(host ? { host: host.label } : {}),
     ...(target && target.toLowerCase() !== host?.repoName(from)?.toLowerCase() ? { into: target } : {}),
+    ...(steps ? { letSquadKit: steps } : {}),
   };
 }

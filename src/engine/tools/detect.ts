@@ -379,6 +379,21 @@ async function docker(h: DetectHost): Promise<Found> {
   return { state: 'found', where: bin, ...(version ? { version } : {}) };
 }
 
+/** `gh --version`: "gh version 2.63.0 (2024-11-27)". */
+export function ghVersionOf(text: string): string | null {
+  return /gh version (\d+\.\d+(?:\.\d+)?)/.exec(text)?.[1] ?? null;
+}
+
+/** GitHub's tool, and whether it is signed in. Only the sign-in's exit code is used: what it prints is dropped here. */
+async function gh(h: DetectHost): Promise<Found> {
+  const bin = onPath(h, 'gh');
+  if (!bin) return missing();
+  const version = ghVersionOf((await h.run(bin, ['--version'], { timeoutMs: 10_000 })).out);
+  const signedIn = (await h.run(bin, ['auth', 'token', '--hostname', 'github.com'], { timeoutMs: 10_000 })).ok;
+  if (signedIn) return { state: 'found', where: bin, ...(version ? { version } : {}) };
+  return { state: 'missing', where: bin, ...(version ? { version } : {}), note: "GitHub's tool is here, but not signed in. Sign in once: open a terminal and run gh auth login." };
+}
+
 /**
  * Every tool in the catalog that this computer can have, checked side by side. Git and the AI tool are checked by
  * "Is your computer ready?" (engine/computer-ready.ts) whenever the page is read, so they are not kept here.
@@ -410,6 +425,7 @@ export async function detectAll(h: DetectHost = realHost(), home = squadHome()):
     safe('android', () => android(h, home)),
     safe('android-studio', () => androidStudio(h)),
     safe('docker', () => docker(h)),
+    safe('gh', () => gh(h)),
   ]);
   return { at: new Date().toISOString(), system: h.system, tools: Object.fromEntries([x, ...found]) };
 }

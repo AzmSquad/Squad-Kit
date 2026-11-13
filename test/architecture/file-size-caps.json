@@ -15,7 +15,7 @@
   "src/board/requirements-actions.ts": 785,
   "src/board/requirements-text.ts": 695,
   "src/board/requirements.ts": 793,
-  "src/board/store.ts": 959,
+  "src/board/store.ts": 946,
   "src/board/types.ts": 1301,
   "src/cli.ts": 900,
   "src/commands/board.ts": 1290,

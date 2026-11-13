@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **squad-kit opens the pull request on GitHub.** With GitHub's own tool, gh, signed in on your computer, Looks right
+  pushes the story's branch and opens its pull request. On your own repo squad-kit waits for GitHub's checks, merges
+  it with a merge commit, deletes the branch and brings your main up to date, as on Azure Repos. A failed check, a
+  clash, or a branch rule that asks for a person's review is said plainly, and squad-kit never goes around it. The
+  review goes in after the merge: each note a comment on its file and line. Without gh, the work merges on your
+  computer as before.
+- **Sending your work to someone else's repo.** When your repo is a copy (a fork) of another one, or on squad-kit's own
+  code with an `upstream` remote, the pull request goes to that repo, and its owner merges it: squad-kit never does.
+  The story waits for the owner and squad-kit watches the pull request. The owner's notes come back to the story:
+  **Fix these** has the Builder fix them, then the fix goes to the same pull request and each note is answered "Fixed
+  in" its commit. Merged by the owner: the story is done. Closed: the story says so, with Send it again or Leave it
+  closed. `squad pr <story>` shows it all.
+- **The contribution checklist** on squad-kit's own code (`squad contribute`): signed in to GitHub, your own copy (Make
+  my copy makes your fork), up to date with squad-kit (Bring it up to date, only ever forward), the rules the checks
+  hold, and Tell the maintainers first for a big idea, as a filled-in page you send yourself.
+- **GitHub's tool on the Tools page**, Recommended for a project kept on GitHub, with the steps to install it and sign in.
+
 ## [1.3.20] — 2026-11-13
 
 ### Fixed
