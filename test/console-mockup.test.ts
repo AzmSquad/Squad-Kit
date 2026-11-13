@@ -8,6 +8,7 @@ import { buildPaths } from '../src/core/paths.js';
 import { startConsoleServer, type ConsoleServer } from '../src/console/server.js';
 import { boardPaths, updateTicket } from '../src/board/store.js';
 import { seedDemoBoard } from '../src/board/demo.js';
+import { MOCKUP_ESCAPE } from '../src/console/api/mockup.js';
 
 // Never spawn a real Claude login probe from a test (see console-server.test.ts).
 vi.mock('../src/planner/runtimes/auth-probe.js', async (importOriginal) => ({
@@ -51,11 +52,14 @@ describe('agent mockups', () => {
 
     const page = await fetch(base + url);
     expect(page.status).toBe(200);
-    expect(await page.text()).toContain('<button');
+    const html = await page.text();
+    expect(html.startsWith('<button')).toBe(true);
+    // Esc inside the mockup closes the board's viewer: the page says so to its own frame, with no words of its own.
+    expect(html.trimEnd().endsWith(MOCKUP_ESCAPE)).toBe(true);
+    expect(MOCKUP_ESCAPE).toContain("parent.postMessage({squadKit:'mockup-escape'},'*')");
     const csp = page.headers.get('content-security-policy')!;
-    expect(csp).toContain('sandbox allow-scripts');
-    expect(csp).toContain("default-src 'none'");
-    expect(csp).not.toContain('allow-same-origin');
+    // The same sealed policy as before: only its own scripts, no network, no board origin.
+    expect(csp).toBe("sandbox allow-scripts; default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src data:; frame-ancestors 'self'");
   });
 
   it('refuses a wrong key, a file outside the ticket, and a link without the token', async () => {

@@ -1,6 +1,6 @@
 {
   "console-ui/src/api/types.ts": 1527,
-  "console-ui/src/components/BreakdownDialogs.tsx": 826,
+  "console-ui/src/components/BreakdownDialogs.tsx": 824,
   "console-ui/src/components/BreakdownTree.tsx": 854,
   "console-ui/src/components/Usage.tsx": 616,
   "console-ui/src/components/dialogs.tsx": 883,
@@ -22,7 +22,7 @@
   "src/commands/doctor-engine.ts": 997,
   "src/commands/new-plan.ts": 686,
   "src/commands/requirements.ts": 625,
-  "src/console/api/board.ts": 990,
+  "src/console/api/board.ts": 959,
   "src/engine/breakdown-job.ts": 756,
   "src/engine/checks.ts": 608,
   "src/engine/find-database.ts": 710,

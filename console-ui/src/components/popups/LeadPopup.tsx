@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
 import type { LeadView } from '../../api/types';
 import { useApps, useBoard } from '../../lib/data';
-import { detect } from '../../lib/lang';
 import { exampleQuestions, leadCount, pageContext } from '../../lib/lead';
 import { leadAsk, useLeadAsk } from '../../lib/leadAsk';
 import { useLead, useLeadConversation } from '../../lib/leadData';
@@ -53,7 +52,6 @@ export function LeadPopup({ pop }: { pop: Pop }) {
       setText('');
     } else go(text);
   };
-  const last = c?.turns.at(-1)?.ask.text ?? text;
   return (
     <Frame
       pop={pop}
@@ -65,7 +63,6 @@ export function LeadPopup({ pop }: { pop: Pop }) {
       title="Squad lead"
       sub={`${project} · knows the code${stories ? `, ${stories} ${stories === 1 ? 'story' : 'stories'}` : ''}`}
       busy={Boolean(c?.thinking)}
-      dir={last.trim() ? detect(last).dir : undefined}
       onExpand={() => void navigate({ to: '/lead', search: c ? { c: c.id } : {} })}
     >
       <ChatBox.Provider value={door}>

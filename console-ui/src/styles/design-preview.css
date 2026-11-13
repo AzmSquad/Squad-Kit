@@ -6,3 +6,20 @@
 .mockprev-pic:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .mockprev-frame { position: absolute; top: 0; left: 0; width: 960px; height: calc(190px / var(--s, 0.35)); border: 0; transform: scale(var(--s, 0.35)); transform-origin: 0 0; pointer-events: none; background: #fff; }
 .mockprev-open { display: inline-flex; align-items: center; gap: 5px; margin: 0; font-size: 12px; font-weight: 600; color: var(--accent); }
+
+/* The one full mockup viewer (components/MockupViewer.tsx): nearly the whole window, over the popups, their heads and
+   any dialog, in the board's own colours around the mockup's own page. */
+.mockview-veil { position: fixed; inset: 0; z-index: 80; display: flex; padding: 20px; background: var(--overlay); backdrop-filter: blur(3px); animation: fade 0.15s; }
+.mockview { flex: 1; min-width: 0; max-width: 1480px; margin: 0 auto; display: flex; flex-direction: column; overflow: hidden; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--pop-shadow); animation: pop 0.18s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.mockview header { flex: none; display: flex; align-items: center; gap: 12px; min-width: 0; padding: 10px 12px 10px 18px; border-bottom: 1px solid var(--line); }
+.mockview header h3 { min-width: 0; font-size: 15px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mockview-hint { flex: 1; min-width: 0; font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mockview header .iconbtn { flex: none; margin-inline-start: auto; }
+.mockview-frame { flex: 1; display: block; width: 100%; min-height: 0; border: 0; background: #fff; }
+.mockview-err { padding: 18px; }
+.mockview-guard { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+@media (max-width: 640px) {
+  .mockview-veil { padding: 0; }
+  .mockview { border-radius: 0; border: 0; }
+  .mockview-hint { display: none; }
+}

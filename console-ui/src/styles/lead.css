@@ -81,10 +81,10 @@
 
 /* ── One question and its answer ───────────────────────── */
 .lt { display: flex; flex-direction: column; gap: 14px; }
-/* Your question: a bubble at the end, and one small dim line under it with its time and where it was asked. */
+/* Your question: a bubble on your side whatever its language, its words running their own way inside, and one small
+   dim line under it with its time and where it was asked. */
 .lt-you { align-self: flex-end; max-width: 84%; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
 .lt-you > p { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; padding: 8px 12px; border-radius: 16px 16px 5px 16px; background: var(--accent-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent); }
-[dir='rtl'] .lt-you > p { border-radius: 16px 16px 16px 5px; }
 .lt-when { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--dim); max-width: 100%; min-width: 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .lt-when svg { flex: none; }
 .lt-when bdi { overflow: hidden; text-overflow: ellipsis; min-width: 0; }

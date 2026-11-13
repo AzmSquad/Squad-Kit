@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useState, type HTMLAttributes, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { ArrowUp, Bug, Check, Code, Copy, Eye, Search, SquareCheck, Triangle, User, X, PenLine, Users } from 'lucide-react';
 import type { Actor, Stage, Ticket } from '../api/types';
 import { usePrefs } from '../lib/prefs';
@@ -163,6 +164,11 @@ export function Tracker({ ticket }: { ticket: Ticket }) {
   );
 }
 
+/**
+ * The board's dialog. It opens at the page's top level, wherever it is asked from, so a popup, a card or a header that
+ * moves, clips or styles what is inside it (a transform, an overflow, its own text styles) can never hold it: it
+ * covers the page, the chat popups and their heads, and looks the same everywhere.
+ */
 export function Modal({
   title,
   onClose,
@@ -188,7 +194,7 @@ export function Modal({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [leave]);
-  return (
+  return createPortal(
     <div className="modal-veil" onMouseDown={(e) => e.target === e.currentTarget && leave()}>
       <div className={`modal ${wide ? 'wide' : ''}`} role="dialog" aria-modal="true" aria-label={title}>
         <header>
@@ -210,7 +216,8 @@ export function Modal({
           footer && <footer>{footer}</footer>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

@@ -272,7 +272,10 @@ describe('the design card', () => {
     const open = [...page.querySelectorAll('.mockprev button')].find((b: { textContent: string }) => b.textContent.includes('Open the mockup'));
     expect(open).toBeTruthy();
     await React.act(async () => open.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })));
-    expect(page.querySelector('.mockframe.big')).toBeTruthy();
+    // The full one is the board's one viewer, at the page's top level (test/ui/chat-frame.test.ts has the rest).
+    expect(page.querySelector('body > .mockview-veil .mockview-frame').getAttribute('src')).toBe('http://127.0.0.1:4809/mockups/abc/mockup.html');
+    await React.act(async () => page.querySelector('.mockview button[aria-label="Close"]').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })));
+    expect(page.querySelector('.mockview')).toBeNull();
     // A design with no mockup shows no picture.
     await show({ id: 'MA-9', title: 'Another', mockup: undefined });
     expect(page.querySelector('.mockprev')).toBeNull();

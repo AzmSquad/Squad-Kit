@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { Ticket } from '../api/types';
 import { focusBoxIn, useShowsTalk } from '../lib/here';
 import { ChatView } from './Chat';
@@ -25,11 +26,14 @@ export function TalkHere({ t }: { t: Ticket }) {
   return (
     <div className="talkhere" ref={box}>
       <ChatView id={t.id} size="pop" onOpenDoc={setDoc} />
-      {doc && (
-        <div className="talkhere-doc">
-          <DocPane doc={doc} onClose={() => setDoc(null)} />
-        </div>
-      )}
+      {/* A file opened from the talk lies over the page, at its top level: nothing that moves around it can hold it. */}
+      {doc &&
+        createPortal(
+          <div className="talkhere-doc">
+            <DocPane doc={doc} onClose={() => setDoc(null)} />
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

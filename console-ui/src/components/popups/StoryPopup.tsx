@@ -4,7 +4,7 @@ import type { AgentName } from '../../api/types';
 import { INITIALS } from '../../lib/chats';
 import { useTicket } from '../../lib/data';
 import { agentFor } from '../../lib/decide';
-import { detect, isolated } from '../../lib/lang';
+import { isolated } from '../../lib/lang';
 import { popups, type Pop } from '../../lib/popups';
 import { AGENT_TITLE, ChatView } from '../Chat';
 import type { OpenDoc } from '../ChatFiles';
@@ -25,7 +25,6 @@ export function StoryPopup({ pop, onOpenDoc }: { pop: Pop; onOpenDoc(d: OpenDoc)
   useEffect(() => {
     if (!pop.min && t?.waitKey) popups.looked(pop.id, t.waitKey);
   }, [pop.min, pop.id, t?.waitKey]);
-  const said = (t?.chat?.messages ?? []).slice(-6).map((m) => m.text).join(' ');
   return (
     <Frame
       pop={pop}
@@ -37,7 +36,6 @@ export function StoryPopup({ pop, onOpenDoc }: { pop: Pop; onOpenDoc(d: OpenDoc)
       }
       sub={t ? isolated(t.title) : pop.id}
       busy={Boolean(t?.chat?.thinking)}
-      dir={said.trim() ? detect(said).dir : undefined}
       onExpand={() => void navigate(t?.chat ? { to: '/conversations', search: { ticket: pop.id } } : { to: '/board', search: { ticket: pop.id } })}
     >
       <ChatView id={pop.id} size="pop" onOpenDoc={onOpenDoc} />

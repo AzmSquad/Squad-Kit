@@ -19,4 +19,5 @@
 /* A story's talk on its Conversation tab (components/TalkHere.tsx): the popup's talk, in a box of its own height. */
 .talkhere { height: 520px; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--surface); }
 .talkhere > .chat-v { flex: 1; min-height: 0; }
-.talkhere-doc > .cdoc { position: fixed; top: 10px; bottom: 10px; inset-inline-end: 10px; z-index: 80; margin: 0; box-shadow: var(--pop-shadow); }
+/* A file opened from it, at the page's top level: over the popups and their heads, under any dialog, like the popups' own. */
+.talkhere-doc > .cdoc { position: fixed; top: 10px; bottom: 10px; inset-inline-end: 10px; z-index: 47; margin: 0; box-shadow: var(--pop-shadow); }

@@ -92,7 +92,8 @@ export function YouMessage({ t, m, fresh, onOpenDoc, onReply }: { t: Ticket; m: 
   const voice = !m.text.trim() && (m.files ?? []).some((f) => AUDIO.test(f));
   return (
     <div className={`cyou cmsg ${picked ? 'picked' : ''} ${fresh ? 'pop-in' : ''}`}>
-      <div className="cybub" ref={holder} onClick={() => setPicked(!picked)}>
+      {/* Only a click on the bubble itself: one in a picture or mockup it opened over the page reaches here too. */}
+      <div className="cybub" ref={holder} onClick={(e) => e.currentTarget.contains(e.target as Node) && setPicked(!picked)}>
         {m.text.trim() && <ChatMarkdown text={asParagraphs(m.text)} ticket={t.id} />}
         {m.files && m.files.length > 0 && <ChatFiles ticket={t.id} files={m.files} onOpen={onOpenDoc} sent from="From you" />}
       </div>
@@ -153,7 +154,7 @@ export function AgentMessage({
         <b>{name}</b>
         {live ? <span className="shim">Writing</span> : <span className="ctime">{when(m.at)}</span>}
       </div>
-      <div className="cagb" ref={holder} onClick={(e) => size === 'phone' && !(e.target as HTMLElement).closest('button, a') && setPicked(!picked)}>
+      <div className="cagb" ref={holder} onClick={(e) => size === 'phone' && e.currentTarget.contains(e.target as Node) && !(e.target as HTMLElement).closest('button, a') && setPicked(!picked)}>
         {used.length > 0 && <Looked steps={used} />}
         {live || newest ? body : <Folded lines={lineCount(m.text)}>{body}</Folded>}
         {!live && m.files && m.files.length > 0 && <ChatFiles ticket={t.id} files={m.files} onOpen={onOpenDoc} from={`From the ${name} · ${when(m.at)}`} />}

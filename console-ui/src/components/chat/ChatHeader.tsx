@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { createPortal } from 'react-dom';
 import { Bug, Check, FileText, Maximize2, MessageCircle, Minimize2, PencilLine, SquarePlus } from 'lucide-react';
 import type { Ticket } from '../../api/types';
 import { useAct } from '../../lib/data';
@@ -126,8 +125,7 @@ export function ChatHeader({ t, size, onFull, onPanel }: { t: Ticket; size: Chat
             Talk again
           </button>
         )}
-        {/* A dialog opened here covers the popups and their heads too. */}
-        {dialogs && createPortal(dialogs, document.body)}
+        {dialogs}
       </div>
     );
   }

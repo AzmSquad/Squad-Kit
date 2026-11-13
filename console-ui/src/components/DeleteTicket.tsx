@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Archive, ArchiveRestore, Check, Ellipsis, EyeOff, Trash2, X } from 'lucide-react';
 import { api } from '../api/client';
@@ -17,11 +16,6 @@ import { Cmd, Modal, Written, ago } from './ui';
 /** Merged into the base, or released. On the sample board an accepted ticket counts as merged. */
 export function isMerged(t: Ticket, demo: boolean): boolean {
   return Boolean(t.mergedAt) || t.stage === 'done' || (demo && t.stage === 'release');
-}
-
-/** Dialogs open from inside a header or a banner; on the page itself they keep the page's own text styles. */
-function onTop(node: ReactNode) {
-  return createPortal(node, document.body);
 }
 
 function useDemo(): boolean {
@@ -89,8 +83,8 @@ export function TicketMenu({ t, onDeleted, items = [] }: { t: Ticket; onDeleted(
           )}
         </div>
       )}
-      {dialog === 'delete' && onTop(<DeleteDialog t={t} onClose={() => setDialog(null)} onDeleted={onDeleted} />)}
-      {dialog === 'archive' && onTop(<ArchiveDialog t={t} onClose={() => setDialog(null)} />)}
+      {dialog === 'delete' && <DeleteDialog t={t} onClose={() => setDialog(null)} onDeleted={onDeleted} />}
+      {dialog === 'archive' && <ArchiveDialog t={t} onClose={() => setDialog(null)} />}
     </span>
   );
 }
@@ -260,7 +254,7 @@ export function DeleteArchiveBanner({ t, onDeleted }: { t: Ticket; onDeleted(): 
           <Trash2 size={13} /> Remove from my board
         </button>
         <Cmd text={`squad delete ${t.id}`} />
-        {again && onTop(<DeleteDialog t={t} onClose={() => setAgain(false)} onDeleted={onDeleted} />)}
+        {again && <DeleteDialog t={t} onClose={() => setAgain(false)} onDeleted={onDeleted} />}
       </div>
     );
   }
@@ -279,7 +273,7 @@ export function DeleteArchiveBanner({ t, onDeleted }: { t: Ticket; onDeleted(): 
           </button>
         )}
         <Cmd text={`squad delete ${t.id}`} />
-        {again && onTop(<DeleteDialog t={t} onClose={() => setAgain(false)} onDeleted={onDeleted} />)}
+        {again && <DeleteDialog t={t} onClose={() => setAgain(false)} onDeleted={onDeleted} />}
       </div>
     );
   }

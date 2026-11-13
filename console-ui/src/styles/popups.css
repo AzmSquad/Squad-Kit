@@ -1,7 +1,7 @@
 /* Chat heads and popups over every page of a project, and the decision cards inside them (design/squad-lead/chats.html).
    Colours come from the tokens in app.css and chat.css, in both themes. Motion is short and stops for reduced motion. */
 
-/* Popups and heads sit over the page and under every dialog (.modal-veil is 50), the picture viewer and the toasts. */
+/* Popups and heads sit over the page and under every dialog (.modal-veil is 61), the picture viewer and the toasts. */
 
 /* ── The heads ─────────────────────────────────────────── */
 .heads { position: fixed; inset-inline-end: 18px; bottom: 18px; z-index: 46; display: flex; flex-direction: column-reverse; align-items: flex-end; gap: 14px; }
@@ -128,12 +128,10 @@
 .csize-pop .csend { width: 30px; height: 30px; border-radius: 9px; }
 .csize-pop .cempty.inline { align-items: flex-start; text-align: start; padding: 4px 0; gap: 8px; }
 .csize-pop .cclosed { padding: 10px 14px 12px; }
-[dir='rtl'] .csize-pop .cybub, [dir='rtl'].csize-pop .cybub { border-radius: 16px 16px 16px 5px; }
 
 /* ── Motion, shared with the full pages ────────────────── */
-/* Your bubble pops in. */
+/* Your bubble pops in, from your own side: the chat's frame never turns with the language of its words. */
 .cyou.pop-in, .lt.watched .lt-you { animation: bub 0.42s cubic-bezier(0.2, 0.9, 0.25, 1.25) both; transform-origin: 100% 100%; }
-[dir='rtl'] .cyou.pop-in, [dir='rtl'] .lt.watched .lt-you { transform-origin: 0 100%; }
 @keyframes bub { from { opacity: 0; transform: translateY(10px) scale(0.94); } }
 /* Cards and choices rise in one after another. */
 .rise { animation: rise2 0.35s cubic-bezier(0.2, 0.8, 0.2, 1.15) both; animation-delay: calc(var(--i, 0) * 120ms); }

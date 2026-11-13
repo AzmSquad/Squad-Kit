@@ -1,5 +1,4 @@
 import { useState, type MouseEvent, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
 import { Link, useRouter } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { Check, PencilLine, Send } from 'lucide-react';
@@ -150,7 +149,7 @@ export function StopPanel({ t, extra }: { t: Ticket; extra?: ReactNode }) {
         <DecidedForYou t={t} />
         {extra}
       </div>
-      {v && doc.viewer !== undefined && createPortal(<BrdViewer v={v} at={doc.viewer ?? undefined} onClose={doc.close} />, document.body)}
+      {v && doc.viewer !== undefined && <BrdViewer v={v} at={doc.viewer ?? undefined} onClose={doc.close} />}
       <div className="df">
         <button
           className="btn you"

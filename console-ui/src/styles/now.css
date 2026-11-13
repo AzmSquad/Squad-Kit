@@ -59,10 +59,11 @@
 .askfoot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--dim); margin-top: 8px; }
 .askthread { display: flex; flex-direction: column; gap: 12px; margin-bottom: 12px; }
 .askturn { display: flex; flex-direction: column; gap: 8px; }
+/* Your question on your side and squad-kit's answer on its own, in any language: only the words inside turn. */
 .askme { align-self: flex-end; max-width: 80%; background: var(--surface-2); border-radius: 12px 12px 4px 12px; padding: 8px 12px; font-size: 13.5px; }
-.askme[dir='rtl'] { align-self: flex-start; border-radius: 12px 12px 12px 4px; font-family: 'IBM Plex Sans Arabic', 'Instrument Sans Variable', sans-serif; }
+.askme[dir='rtl'] { font-family: 'IBM Plex Sans Arabic', 'Instrument Sans Variable', sans-serif; }
 .askit { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; font-size: 13.5px; line-height: 1.5; max-width: 92%; }
-.askit.ar { align-self: flex-end; font-family: 'IBM Plex Sans Arabic', 'Instrument Sans Variable', sans-serif; font-size: 14.5px; line-height: 1.7; }
+.askit.ar { font-family: 'IBM Plex Sans Arabic', 'Instrument Sans Variable', sans-serif; font-size: 14.5px; line-height: 1.7; }
 .askit p { margin: 4px 0 0; }
 .askit p.err { color: var(--bug); }
 .askit .who { display: flex; align-items: center; gap: 8px; font-size: 12px; }

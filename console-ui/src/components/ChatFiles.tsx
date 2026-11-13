@@ -5,9 +5,8 @@ import { ticketFileUrl } from '../api/client';
 import { usePrefs } from '../lib/prefs';
 import { detect, textClass } from '../lib/lang';
 import { Lightbox } from './Lightbox';
-import { Mockup } from './Attachments';
 import { ChatMarkdown } from './ChatMarkdown';
-import { Modal } from './ui';
+import { MockupViewer } from './MockupViewer';
 
 export const PICTURE = /\.(png|jpe?g|gif|webp|bmp)$/i;
 export const VIDEO = /\.(mp4|webm|mov|m4v)$/i;
@@ -44,7 +43,7 @@ export function badgeOf(f: string): { cls: string; label: string } {
  */
 export function ChatFiles({ ticket, files, from, onOpen, sent }: { ticket: string; files: string[]; from?: string; onOpen?(d: OpenDoc): void; sent?: boolean }) {
   const [zoom, setZoom] = useState<number | null>(null);
-  const [mock, setMock] = useState<string | null>(null);
+  const [mock, setMock] = useState<{ file: string; from: HTMLElement } | null>(null);
   const pictures = files.filter((f) => PICTURE.test(f));
   const videos = files.filter((f) => VIDEO.test(f));
   const voices = files.filter((f) => AUDIO.test(f));
@@ -99,7 +98,7 @@ export function ChatFiles({ ticket, files, from, onOpen, sent }: { ticket: strin
         }
         if (html) {
           return (
-            <button key={f} className="cfile" onClick={() => setMock(f)}>
+            <button key={f} className="cfile" onClick={(e) => setMock({ file: f, from: e.currentTarget })}>
               {inner}
             </button>
           );
@@ -111,11 +110,7 @@ export function ChatFiles({ ticket, files, from, onOpen, sent }: { ticket: strin
         );
       })}
       {zoom !== null && <Lightbox pictures={pictures.map((f) => ({ src: ticketFileUrl(ticket, f), caption: baseName(f) }))} start={zoom} onClose={() => setZoom(null)} />}
-      {mock && (
-        <Modal title={baseName(mock)} wide onClose={() => setMock(null)}>
-          <Mockup ticket={ticket} file={mock} title={baseName(mock)} />
-        </Modal>
-      )}
+      {mock && <MockupViewer ticket={ticket} file={mock.file} title={baseName(mock.file)} opener={mock.from} onClose={() => setMock(null)} />}
     </div>
   );
 }

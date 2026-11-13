@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
 import { useNavigate } from '@tanstack/react-router';
 import ReactMarkdown, { type Options } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -613,7 +612,7 @@ export function DeleteBreakdownDialog({ id, title, sentTo, onClose, onDeleted }:
         onError: (err) => setError(plainError(err)),
       },
     );
-  return createPortal(
+  return (
     <Modal
       title={`Delete ${id}?`}
       icon={
@@ -646,8 +645,7 @@ export function DeleteBreakdownDialog({ id, title, sentTo, onClose, onDeleted }:
       <div className="lbl">This stays</div>
       <Lines ok items={['Tickets that started from its stories, with their code and history', ...(sentTo ? [`Its items in ${sentTo}: squad-kit never deletes there`] : [])]} />
       <p className="rm-note">It cannot be deleted while its stories build. Wait until they merge, or delete those tickets first.</p>
-    </Modal>,
-    document.body,
+    </Modal>
   );
 }
 

@@ -468,8 +468,9 @@ button.opt2:hover { border-color: var(--line-strong); }
 .stickybar { flex: none; border-top: 1px solid var(--line); padding: 12px 24px; display: flex; align-items: center; gap: 10px; background: var(--surface); }
 .stickybar .grow { flex: 1; }
 
-/* Dialogs and toasts. The veil's one column is the screen's width, so a long command in a dialog cannot widen it and push the dialog off screen. */
-.modal-veil { position: fixed; inset: 0; background: var(--overlay); backdrop-filter: blur(3px); display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; z-index: 50; animation: fade 0.15s; padding: 20px; }
+/* Dialogs and toasts. The veil's one column is the screen's width, so a long command in a dialog cannot widen it and push the dialog off screen.
+   Layers: popups 44-47, the phone's side menu 59-60, dialogs 61, toasts 62, the picture and mockup viewers 80. */
+.modal-veil { position: fixed; inset: 0; background: var(--overlay); backdrop-filter: blur(3px); display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; z-index: 61; animation: fade 0.15s; padding: 20px; }
 .modal { width: min(560px, 100%); background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--pop-shadow); animation: pop 0.18s cubic-bezier(0.2, 0.8, 0.2, 1); max-height: calc(100vh - 40px); display: flex; flex-direction: column; }
 @keyframes pop { from { transform: scale(0.97); opacity: 0; } }
 .modal header { display: flex; align-items: center; gap: 10px; padding: 18px 22px 0; }
@@ -507,7 +508,7 @@ button.opt2:hover { border-color: var(--line-strong); }
 .drafterr.calm b { color: var(--text); }
 .drafterr-ways { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
 /* Both edges, not left: 50%: from the middle a message only gets half the screen, and a narrow one breaks its text letter by letter. */
-.toasts { position: fixed; bottom: 18px; left: 16px; right: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 60; align-items: center; pointer-events: none; }
+.toasts { position: fixed; bottom: 18px; left: 16px; right: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 62; align-items: center; pointer-events: none; }
 .toast { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 11px; background: var(--btn-bg); color: var(--btn-ink); font-size: 13.5px; font-weight: 550; box-shadow: var(--pop-shadow); animation: pop 0.2s; max-width: min(560px, 100%); pointer-events: auto; }
 .toast.err { background: var(--bug); color: #fff; padding-right: 6px; }
 .toast .grow { flex: 1; min-width: 0; overflow-wrap: anywhere; }
@@ -767,7 +768,6 @@ ul.ticketnotes .grow, .addnote .grow { flex: 1; }
 .mockbar { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; font-size: 12.5px; color: var(--muted); border-bottom: 1px solid var(--line); }
 .mockbar span { flex: 1; }
 .mockframe { display: block; width: 100%; height: 300px; border: 0; background: #fff; }
-.mockframe.big { height: min(70vh, 720px); border-radius: 8px; border: 1px solid var(--line); }
 
 /* Review a plan like a document */
 .reviewhint { font-size: 12.5px; margin: 0 0 6px; }

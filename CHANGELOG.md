@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Arabic no longer turns the whole chat around.** A popup, its buttons, the sources and the cards stay where the
+  board has them, and your messages stay on your side, whatever language you or the squad write in. Only each
+  message's words run their own way inside their bubble: Arabic right to left, English left to right. The same in
+  **Ask about this ticket**.
+- **A mockup opens big, over the whole page.** Open the mockup on a design card in a popup opened it inside the small
+  popup, cut off. Now every mockup, from a card, a chat or a story's plan, opens in one viewer that fills nearly the
+  whole window: Close or Esc, and the focus goes back to where you were. Approve stays on the card. Every other
+  window does the same: opened from a popup, a card or a message, it covers the whole page and is never cut off.
+
 ## [1.3.19] — 2026-11-13
 
 ### Added

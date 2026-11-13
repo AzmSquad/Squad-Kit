@@ -4,8 +4,11 @@ import { popups, type Pop } from '../../lib/popups';
 import { REDUCED } from '../../lib/reveal';
 import { Written } from '../ui';
 
-/** The frame every popup shares: its head line with who it is, and Open full page, Minimise and Close. */
-export function Frame({ pop, avatar, title, sub, busy, dir, onExpand, children }: { pop: Pop; avatar: ReactNode; title: ReactNode; sub: string; busy?: boolean; dir?: 'rtl' | 'ltr'; onExpand(): void; children: ReactNode }) {
+/**
+ * The frame every popup shares: its head line with who it is, and Open full page, Minimise and Close. It runs the
+ * board's own way whatever the talk's language: only each message's words run their own way, inside their bubble.
+ */
+export function Frame({ pop, avatar, title, sub, busy, onExpand, children }: { pop: Pop; avatar: ReactNode; title: ReactNode; sub: string; busy?: boolean; onExpand(): void; children: ReactNode }) {
   const [out, setOut] = useState(false);
   const close = () => {
     if (window.matchMedia?.(REDUCED).matches) return popups.close(pop.id);
@@ -17,7 +20,7 @@ export function Frame({ pop, avatar, title, sub, busy, dir, onExpand, children }
     fn();
   };
   return (
-    <section className={`pop ${pop.min ? 'mini' : ''} ${out ? 'out' : ''}`} dir={dir} aria-label={typeof title === 'string' ? title : sub}>
+    <section className={`pop ${pop.min ? 'mini' : ''} ${out ? 'out' : ''}`} aria-label={typeof title === 'string' ? title : sub}>
       <header className="ph" onClick={() => pop.min && popups.open(pop.id)}>
         {avatar}
         <div className="pt">
