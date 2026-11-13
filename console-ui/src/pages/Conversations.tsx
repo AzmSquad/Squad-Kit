@@ -10,6 +10,7 @@ import { AGENT_TITLE, Avatar, ChatView, stageLine } from '../components/Chat';
 import { ChatFiles, DocPane, type OpenDoc } from '../components/ChatFiles';
 import { NewTalk } from '../components/popups/NewTalk';
 import { unreadOf, useChats } from '../lib/chats';
+import { focusBoxIn, useShowsTalk } from '../lib/here';
 import { ROLE_NAME, Runs, clock, dateShort } from '../components/ui';
 
 /**
@@ -34,6 +35,8 @@ export function ConversationsPage() {
     popups.open(x);
     void navigate({ to: '/board' });
   };
+  // The talk picked here is on this page: no popup of it meanwhile, and its head brings this box into view.
+  useShowsTalk(id ?? null, () => focusBoxIn(document.querySelector<HTMLElement>('.ccenter, .cphone')));
 
   if (phone) return <PhoneChats id={id} all={all} pick={pick} doc={doc} setDoc={setDoc} />;
 

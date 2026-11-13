@@ -135,6 +135,8 @@ export function storyText(bp: BoardPaths, t: Ticket): string {
   if (t.brief?.rules.length) parts.push(`Business rules:\n${t.brief.rules.map((r) => `- ${r}`).join('\n')}`);
   if (t.decision) parts.push(`The plan's decision: ${t.decision.title}. Why: ${t.decision.why}${t.decision.adr ? ` (saved as decision ${t.decision.adr})` : ''}`);
   if (t.follows?.length) parts.push(`Follows decisions: ${t.follows.join(', ')}`);
+  // The Architect's mockup: the board shows it as a picture on the story's design card and its plan tab.
+  if (t.mockup) parts.push(`The Architect's mockup of the screen: ${t.mockup}, in the story's folder. The board shows it as a picture on the story's design card in the chat (decide, while the design waits for the person) and on its plan tab (open_story, tab plan).`);
   if (t.steps?.length) parts.push(`The plan's steps:\n${t.steps.map((s, i) => `${i + 1}. ${s.title} (${s.status})`).join('\n')}`);
   if (t.reviewNotes?.length || t.reviewAsked?.length) parts.push(`The Reviewer's notes:\n${[...(t.reviewNotes ?? []), ...(t.reviewAsked ?? [])].map((n) => `- ${n}`).join('\n')}`);
   if (t.alsoChanged?.length) parts.push(`Also changed:\n${t.alsoChanged.map((n) => `- ${n}`).join('\n')}`);

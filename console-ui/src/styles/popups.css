@@ -23,14 +23,13 @@
 .head .tip small { color: #95ae9f; font-weight: 500; margin-inline-start: 6px; font-size: 12px; }
 .head:hover .tip, .head:focus-visible .tip { opacity: 1; }
 .head.ping { animation: hping 0.7s cubic-bezier(0.2, 0.8, 0.2, 1.4); }
+/* Its talk is on this page: a ring, and a press brings the page's own box into view. */
+.head.here { outline: 2px dashed var(--accent); outline-offset: 3px; }
 @keyframes headin { from { opacity: 0; transform: translateY(14px) scale(0.6); } }
 @keyframes hping { 25% { transform: translateY(-8px) scale(1.08); } 50% { transform: none; } 70% { transform: translateY(-3px); } }
 @keyframes hpulse { 50% { box-shadow: 0 0 0 2px var(--bg), 0 0 0 6px var(--accent-soft); } }
 
 /* "Ask the lead ⌘K", beside the heads while no popup is open. */
-.asklabel { position: fixed; inset-inline-end: 86px; bottom: 29px; z-index: 45; height: 36px; padding: 0 12px; border-radius: 99px; background: var(--surface); box-shadow: var(--pop-shadow), 0 0 0 1px var(--line); display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; animation: rise2 0.3s ease both; }
-.asklabel:hover { box-shadow: var(--pop-shadow), 0 0 0 1px var(--line-strong); }
-.asklabel kbd { font: 500 11px 'JetBrains Mono', monospace; color: var(--muted); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; }
 
 /* ── The popups ────────────────────────────────────────── */
 .pops { position: fixed; inset-inline-end: 90px; bottom: 18px; z-index: 44; display: flex; flex-direction: row-reverse; align-items: flex-end; gap: 12px; pointer-events: none; }
@@ -73,6 +72,9 @@
 .pop .sug { padding: 5px 11px; border-radius: 99px; border: 1px solid var(--line); font-size: 12.5px; text-align: start; }
 .pop .sug:hover { border-color: var(--accent); background: var(--accent-soft); }
 .pop .empty .linkbtn { align-self: flex-start; font-size: 12px; }
+.pop .news { list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.pop .news a { display: block; font-size: 12px; color: var(--muted); padding: 2px 0; }
+.pop .news a:hover { color: var(--text); }
 
 /* The lead's turns, small: your question in its bubble, its work in one line, its answer as it is written. */
 .pop .lt { gap: 12px; }
@@ -144,13 +146,9 @@
 /* The lead's live line shimmers while it works. */
 .lt-th b.shim { font-weight: 600; }
 
-/* Your question to the lead, as your bubble. */
-.lt-you { align-self: flex-end; max-width: 84%; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; padding: 0; border: 0; }
-.lt-you .lt-meta { order: 2; margin: 0; font-size: 10.5px; }
-.lt-you .lt-meta b { font-weight: 500; color: var(--dim); font-size: 10.5px; }
-.lt-you > p { font-size: 13.5px; font-weight: 500; padding: 8px 12px; border-radius: 16px 16px 5px 16px; background: var(--accent-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent); }
-[dir='rtl'] .lt-you > p { border-radius: 16px 16px 16px 5px; }
-.lt-you .lt-ctx { order: 3; margin-top: 0; }
+/* Your question to the lead, as your bubble (lead.css), a little smaller here. */
+.pop .lt-you > p { font-size: 13.5px; }
+.pop .lt-when { font-size: 10.5px; }
 
 /* ── A decision only you can make ──────────────────────── */
 .decide { border: 1px solid var(--you-line); border-radius: 14px; background: var(--surface); overflow: hidden; transition: border-color 0.4s; animation: rise2 0.35s cubic-bezier(0.2, 0.8, 0.2, 1.15) both; }
@@ -231,7 +229,12 @@
 .chatpops.phone.has-open .pops { inset: 0 0 72px 0; }
 
 @media (prefers-reduced-motion: reduce) {
-  .head, .head.ping, .head .live, .pop, .pop.out, .asklabel, .rise, .cch.rise, .need, .empty, .decide, .decide .done, .decide .opt, .decide .qrow .me, .boxask, .cyou.pop-in, .lt.watched .lt-you, .lt-think .lt-steps li, .ph .dot.busy { animation: none !important; }
+  .head, .head.ping, .head .live, .pop, .pop.out, .rise, .cch.rise, .need, .empty, .decide, .decide .done, .decide .opt, .decide .qrow .me, .boxask, .cyou.pop-in, .lt.watched .lt-you, .lt-think .lt-steps li, .ph .dot.busy { animation: none !important; }
   .decide .done svg { stroke-dashoffset: 0; }
   .pop, .lead-send, .csend, .head { transition: none; }
 }
+
+/* The heads keep a gutter of their own at the end of the page, so they never cover a card or a button. */
+.app:has(> .chatpops:not(.phone) .heads) > .canvas { margin-inline-end: 86px; }
+.fullpage:has(> .chatpops:not(.phone) .heads) > .canvas-b { margin-inline-end: 80px; }
+.app:has(> .chatpops.phone .heads) .canvas-b, .fullpage:has(> .chatpops.phone .heads) > .canvas-b { padding-bottom: 64px; }

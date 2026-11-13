@@ -73,6 +73,14 @@ export function shownPops(s: PopState, max: number): Pop[] {
   return s.open.slice(0, max);
 }
 
+/**
+ * The popups left once the page shows some talks itself: those hide, untouched, and come back as they were when the
+ * page lets go (lib/here.ts). The others keep their order and their room.
+ */
+export function notShownHere(s: PopState, here: { has(id: string): boolean }): PopState {
+  return s.open.some((p) => here.has(p.id)) ? { ...s, open: s.open.filter((p) => !here.has(p.id)) } : s;
+}
+
 /** True while the popup is open and not minimised. */
 export function isOpen(s: PopState, id: string): boolean {
   return s.open.some((p) => p.id === id && !p.min);

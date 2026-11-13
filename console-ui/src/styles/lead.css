@@ -34,12 +34,12 @@
 .lead-title h1 { font-size: 16px; font-weight: 650; line-height: 1.25; }
 .lead-sub { display: flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--muted); white-space: nowrap; min-width: 0; }
 .lead-sub > span:last-child { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.lead-sub .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; margin-right: 2px; }
+.lead-sub .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; margin-inline-end: 2px; }
+.lead-sub .pulse.idle { background: var(--dim); }
 .lead-h .grow { flex: 1; min-width: 4px; }
 .lead-h .btn { flex: none; }
 .lead-hist { position: relative; display: inline-flex; }
 .lead-histmenu { position: absolute; right: 0; top: 36px; z-index: 30; width: min(380px, 84vw); max-height: 60vh; overflow-y: auto; padding: 6px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--pop-shadow); }
-.lead-railbtn, .lead-veil, .lead-railx { display: none; }
 
 .lead-col { max-width: 760px; margin: 0 auto; padding: 16px 20px 20px; display: flex; flex-direction: column; gap: 16px; }
 .lead-day { text-align: center; font-size: 11.5px; color: var(--dim); font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -56,6 +56,13 @@
 .lead-send:disabled { opacity: 0.3; cursor: default; }
 .lead-hint { display: flex; gap: 6px; align-items: center; margin-top: 8px; font-size: 11.5px; color: var(--dim); }
 .lead-hint svg { flex: none; }
+.lead-foot { display: flex; align-items: center; gap: 4px 14px; flex-wrap: wrap; }
+.lead-foot .lead-hint { flex: 1 1 260px; min-width: 0; }
+.lead-can { display: inline-flex; align-items: center; gap: 5px; margin: 8px 0 0; font-size: 11.5px; font-weight: 600; color: var(--accent); }
+.lead-news { list-style: none; display: flex; flex-direction: column; gap: 4px; margin-bottom: 4px; }
+.lead-news a { font-size: 13px; color: var(--muted); }
+.lead-news a:hover { color: var(--text); }
+.lead-brief { margin-top: 18px; }
 
 /* No conversation open. */
 .lead-empty { padding: 36px 0 8px; }
@@ -74,10 +81,13 @@
 
 /* ── One question and its answer ───────────────────────── */
 .lt { display: flex; flex-direction: column; gap: 14px; }
-.lt-you { padding: 2px 0 2px 14px; border-left: 3px solid var(--line-strong); }
-.lt-you p { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
-.lt-meta { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--dim); margin-bottom: 4px; }
-.lt-meta b { color: var(--text); font-weight: 600; font-size: 12.5px; }
+/* Your question: a bubble at the end, and one small dim line under it with its time and where it was asked. */
+.lt-you { align-self: flex-end; max-width: 84%; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.lt-you > p { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; padding: 8px 12px; border-radius: 16px 16px 5px 16px; background: var(--accent-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent); }
+[dir='rtl'] .lt-you > p { border-radius: 16px 16px 16px 5px; }
+.lt-when { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--dim); max-width: 100%; min-width: 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.lt-when svg { flex: none; }
+.lt-when bdi { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .lt-ctx { display: inline-flex; align-items: center; gap: 5px; margin-top: 6px; font-size: 11.5px; color: var(--muted); background: var(--surface-2); padding: 2px 8px; border-radius: 6px; max-width: 100%; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lt-ctx svg { flex: none; }
 .lead-bar .lt-ctx { margin: 0; }
@@ -176,42 +186,13 @@ a.lt-ref:hover { border-color: var(--line-strong); }
 .lc-rows .input { padding: 7px 9px; font-size: 13px; }
 .lc-edit .linkbtn { display: inline-flex; align-items: center; gap: 4px; margin: 0; }
 
-/* ── The rail ──────────────────────────────────────────── */
-.lead-rail { width: 340px; flex: none; display: flex; flex-direction: column; gap: 18px; padding: 18px 18px 22px; border-left: 1px solid var(--line); background: var(--lane); overflow-y: auto; min-height: 0; }
-.lead-rail h5 { font-size: 12px; font-weight: 650; color: var(--muted); display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.lead-rail h5 .n { min-width: 18px; height: 18px; border-radius: 99px; background: var(--you); color: #1d1203; font-size: 11px; display: grid; place-items: center; padding: 0 5px; }
-.lead-rail .stack { display: flex; flex-direction: column; gap: 8px; }
-.lr-calm { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
-.lr-calm svg { color: var(--accent); }
-.prow { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 11px; background: var(--surface); border: 1px solid var(--line); }
-.prow.you { border-color: var(--you-line); box-shadow: inset 3px 0 0 var(--you); padding-left: 14px; }
-.prow .pt { font-size: 13px; line-height: 1.38; min-width: 0; overflow-wrap: anywhere; }
-.prow .pt b { font-weight: 650; display: block; }
-.prow .pt small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
-.prow .pt small.by { color: var(--accent); }
-.prow .acts { display: flex; gap: 6px; flex-wrap: wrap; }
-.sqr { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-radius: 11px; background: var(--surface); border: 1px solid var(--line); font-size: 12.5px; min-width: 0; }
-.sqr:hover { border-color: var(--line-strong); }
-.sqr .who { font-weight: 650; flex: none; }
-.sqr .id { font: 500 11px 'JetBrains Mono', monospace; color: var(--dim); flex: none; }
-.sqr .st { color: var(--muted); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sqr .bar2 { width: 54px; height: 4px; border-radius: 3px; background: var(--line); overflow: hidden; flex: none; }
-.sqr .bar2 i { display: block; height: 100%; background: var(--accent); }
-.sqr.slow .bar2 i { background: var(--you); }
-.can { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); overflow: hidden; }
-.can .cl { padding: 9px 12px; border-top: 1px solid var(--line); font-size: 12.5px; }
-.can .cl:first-child { border-top: 0; }
-.can .cl b { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 650; margin-bottom: 2px; }
-.can .cl span { color: var(--muted); }
-.can .d, .lr-level .d { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-.can .more { width: 100%; display: flex; align-items: center; gap: 4px; padding: 9px 12px; border-top: 1px solid var(--line); font-size: 12.5px; font-weight: 600; color: var(--accent); text-align: left; }
-.can .more:focus-visible { outline-offset: -2px; }
-.lr-today { margin-top: 8px; font-size: 11.5px; color: var(--dim); }
+/* ── What it can do, and the morning brief ──────────────── */
 .lr-brief { padding: 10px 12px; border-radius: 11px; background: var(--surface); border: 1px solid var(--line); font-size: 12.5px; }
 .lr-brief p { font-weight: 600; margin-bottom: 4px; }
 .lr-brief ul { list-style: none; display: flex; flex-direction: column; gap: 2px; color: var(--muted); margin-bottom: 4px; }
 .lr-brief li b { color: var(--text); font-weight: 600; }
 .lr-can { display: flex; flex-direction: column; gap: 14px; padding-bottom: 8px; }
+.lr-level .d { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 .lr-level b { display: flex; align-items: center; gap: 7px; font-size: 13.5px; font-weight: 650; margin-bottom: 4px; }
 .lr-level ul { padding-left: 34px; font-size: 13px; color: var(--muted); display: flex; flex-direction: column; gap: 2px; }
 .lr-always { display: flex; flex-direction: column; gap: 6px; margin: 10px 0 0 15px; }
@@ -219,14 +200,6 @@ a.lt-ref:hover { border-color: var(--line-strong); }
 .lr-limits { line-height: 1.5; }
 .lr-level > .note { margin: 6px 0 0 15px; }
 
-/* Narrower: the rail opens over the conversation from its button. */
-@container lead (max-width: 980px) {
-  .lead-railbtn { display: inline-flex; }
-  .lead-rail { position: absolute; top: 0; right: 0; bottom: 0; z-index: 7; width: min(340px, 92%); box-shadow: var(--drawer-shadow); transform: translateX(100%); visibility: hidden; transition: transform 0.2s ease, visibility 0s linear 0.2s; }
-  .lead-page.rail-open .lead-rail { transform: none; visibility: visible; transition: transform 0.2s ease; padding-top: 54px; }
-  .lead-veil { display: block; position: absolute; inset: 0; z-index: 6; background: var(--overlay); backdrop-filter: blur(2px); }
-  .lead-railx { display: grid; position: absolute; top: 12px; right: 12px; z-index: 8; }
-}
 @container lead (max-width: 640px) {
   .lead-h { padding: 0 12px; gap: 6px; }
   .lead-logo { display: none; }

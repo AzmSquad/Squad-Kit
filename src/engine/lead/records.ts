@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { liveNow } from '../../board/now.js';
 import { readOverview } from '../../board/overview.js';
-import { listBreakdowns } from '../../board/requirements.js';
+import { breakdownWaits, listBreakdowns } from '../../board/requirements.js';
 import { listDecisions, listReleases, listTickets, readMeta, type BoardPaths } from '../../board/store.js';
 import { readUsual } from '../../board/usual.js';
 import { boardUsage, costWords, monthKey, readMonths, totalOf } from '../../board/usage.js';
@@ -10,7 +10,9 @@ import { harnessView } from '../harness.js';
 import { projectTools } from '../tools/index.js';
 import { ALLOWABLE, ACTIONS, AFTER_YOUR_OK, NEVER, NEVER_MORE, ON_ITS_OWN } from './can.js';
 import { readNotes } from './notes.js';
+import { boardNumbers } from './small-talk.js';
 import { leadRules, spentToday } from './store.js';
+import { pressNeeded, releasedNews } from './waiting.js';
 
 /**
  * What the lead may read besides the stories and the code, each as plain text: the board, the decisions, the
@@ -31,7 +33,15 @@ export function boardText(bp: BoardPaths): string {
     return `- ${t.id} "${t.title}" (${t.kind}, ${t.stage}${t.waiting ? `, waits for you: ${t.waiting.summary}` : ''}${t.waitsToStart ? ', waits for you to start it' : ''}): ${now.state === 'working' ? now.line : now.sentence}`;
   });
   const done = all.filter((t) => t.stage === 'done').length;
-  return [`Project ${meta.project}: ${open.length} open stor${open.length === 1 ? 'y' : 'ies'}, ${done} released.`, ...rows].join('\n');
+  // The board's own count of what needs the person, the same number its top bar shows (lead/waiting.ts).
+  const needs = [...pressNeeded(bp).map((t) => t.id), ...breakdownWaits(bp).map((b) => `${b.id} (the Analyst's questions on a requirements document)`)];
+  const news = releasedNews(bp).map((t) => `${t.id} (${(t.outdated ?? []).map((o) => o.adr).join(', ') || 'a decision'} came after its plan)`);
+  return [
+    `Project ${meta.project}: ${open.length} open stor${open.length === 1 ? 'y' : 'ies'}, ${done} released.`,
+    `Things that need the person now: ${needs.length}, the board's own count and the number its top bar shows${needs.length ? `: ${needs.join(', ')}` : ''}. Say this number.`,
+    ...(news.length ? [`News, not counted as needing the person: ${news.join(', ')}.`] : []),
+    ...rows,
+  ].join('\n');
 }
 
 /** The saved decisions, or one of them in full. */
@@ -129,11 +139,18 @@ export function notesText(bp: BoardPaths): string {
   const notes = readNotes(bp);
   const overview = readOverview(bp);
   const parts: string[] = [];
+  // The board's numbers first: they are newer than the first read, which may say the project had no code yet.
+  const b = boardNumbers(bp);
+  parts.push(`The board now, squad-kit's own count and newer than anything below: ${b.open} open stories, ${b.accepted} accepted for the next release, ${b.released} released, ${b.waiting} things need the person, ${b.working} agents working.`);
   if (notes.length) parts.push(`The Squad lead's saved notes, newest last:\n${notes.map((n) => `- (${n.about}, ${n.at.slice(0, 10)}, asked "${cut(n.question, 120)}") ${n.text}${n.sources?.length ? ` [${n.sources.join(', ')}]` : ''}`).join('\n')}`);
   if (overview.users) parts.push(`Who uses the app (from squad-kit's first read): ${overview.users}`);
   if (overview.can.length) parts.push(`What it can do today:\n${overview.can.map((c) => `- ${c}`).join('\n')}`);
   if (overview.worth.length) parts.push(`Worth knowing:\n${overview.worth.map((c) => `- ${c}`).join('\n')}`);
-  if (meta.scan?.summary) parts.push(`The project in short: ${meta.scan.summary}`);
+  if (meta.scan?.summary) {
+    const at = meta.scan.at;
+    const since = at ? listTickets(bp).filter((t) => t.mergedAt && t.mergedAt > at).length : 0;
+    parts.push(`The project in short, from squad-kit's first read${at ? ` on ${at.slice(0, 10)}` : ''}${since ? `; ${since} stories were merged since, so it is older than the code` : ''}: ${meta.scan.summary}`);
+  }
   if (meta.map.length) parts.push(`Its parts:\n${meta.map.map((m) => `- ${m.area}: ${m.detail}`).join('\n')}`);
   if (meta.lessons.length) parts.push(`Lessons:\n${meta.lessons.map((l) => `- ${l.text}`).join('\n')}`);
   let files: string[] = [];
@@ -142,6 +159,6 @@ export function notesText(bp: BoardPaths): string {
   } catch {
     // No knowledge files yet.
   }
-  if (files.length) parts.push(`Knowledge files you may read: ${files.map((f) => path.relative(bp.root, path.join(bp.knowledgeDir, f))).join(', ')}`);
-  return parts.join('\n\n') || 'squad-kit has no notes on this project yet.';
+  if (files.length) parts.push(`Knowledge files you may read, written at the first read (the board's numbers above are newer): ${files.map((f) => path.relative(bp.root, path.join(bp.knowledgeDir, f))).join(', ')}`);
+  return parts.join('\n\n');
 }

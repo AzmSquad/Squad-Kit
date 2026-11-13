@@ -32,17 +32,19 @@ import { Cmd, Written, WrittenLines, clock } from './ui';
 import { useAct } from '../lib/data';
 import { TakeOverButton, canTakeOver } from './TakeOver';
 import { TalkButton } from './Chat';
+import { TalkHere } from './TalkHere';
 import { WhatHappened, took, useHappened, type HappenedTab } from './WhatHappened';
 import { useDraft } from '../lib/drafts';
 import { langProps, rehypeLang, typedDir } from '../lib/lang';
 
 /**
- * The Conversation tab. "What happened" first: one card per step, for everyone. "Full log" for engineers: the real
+ * The Conversation tab. The talk itself first when the story has one. "What happened": one card per step, for everyone. "Full log" for engineers: the real
  * conversation behind each role, drawn from Agent Client Protocol (ACP) updates (messages, thoughts, the plan, tool
  * calls with their status, diffs of every edit, command output, pictures, recordings and files), in plain names.
  */
 export function ConversationTab({ t, onTab }: { t: Ticket; onTab?: (tab: HappenedTab) => void }) {
-  const [view, setView] = useState<'happened' | 'log'>('happened');
+  // A story with an open talk opens on the talk itself: the same one as its popup, which hides meanwhile.
+  const [view, setView] = useState<'talk' | 'happened' | 'log'>(t.chat?.open ? 'talk' : 'happened');
   const [key, setKey] = useState<string | null>(null);
   const happened = useHappened(t);
   const steps = happened.data?.steps ?? [];
@@ -50,6 +52,11 @@ export function ConversationTab({ t, onTab }: { t: Ticket; onTab?: (tab: Happene
     <div className="db">
       <div className="convbar">
         <div className="seg" role="group" aria-label="View">
+          {t.chat && (
+            <button className={view === 'talk' ? 'on' : ''} aria-pressed={view === 'talk'} onClick={() => setView('talk')}>
+              The talk
+            </button>
+          )}
           <button className={view === 'happened' ? 'on' : ''} aria-pressed={view === 'happened'} onClick={() => setView('happened')}>
             What happened
           </button>
@@ -65,7 +72,9 @@ export function ConversationTab({ t, onTab }: { t: Ticket; onTab?: (tab: Happene
           </span>
         )}
       </div>
-      {view === 'happened' ? (
+      {view === 'talk' && t.chat ? (
+        <TalkHere t={t} />
+      ) : view === 'happened' ? (
         <WhatHappened
           t={t}
           onTab={onTab}

@@ -87,6 +87,12 @@ Your answer, in the shape squad-kit asks for:
 - A story that waits for the person shows its card in this chat, right under your answer, with the board's own
   buttons (Looks right, Approve, its answers). Point to that card ("press Approve on the card below"), never to a tab,
   a page or a button on the board.
+- When cards come with your answer, keep the body to a line or two: each card shows its story itself, so never list
+  or repeat what a card shows.
+- A story's mockup (read_story names its file) shows as a picture on its design card and its plan tab. When the person
+  asks to see a design, bring that story's card; never say you cannot show a mockup.
+- For greetings and how many things need the person, use the board's own numbers (read_board says them), never a
+  guess from older notes.
 - learned: when you found something lasting that the next person will ask too (how to sign in, where a feature lives),
   one or two plain sentences for squad-kit's notes, with about "sign-in" or "other". Never a secret. Leave it out otherwise.`;
 }

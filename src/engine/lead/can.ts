@@ -30,8 +30,8 @@ export const AFTER_YOUR_OK: string[] = [
 
 /** What each board action does, its button, and whether "Always allow" may cover it. */
 export const ACTIONS: Record<LeadAction, { name: string; label: string; allowable?: true }> = {
-  more_time: { name: 'Give it more time', label: 'Allow once', allowable: true },
-  pictures_again: { name: 'Take the pictures again', label: 'Take them again', allowable: true },
+  more_time: { name: 'Give it more time', label: 'Give it more time', allowable: true },
+  pictures_again: { name: 'Take the pictures again', label: 'Take the pictures again', allowable: true },
   start_app: { name: 'Start the app', label: 'Start the app', allowable: true },
   morning_brief: { name: 'Turn on the morning brief', label: 'Turn it on', allowable: true },
   try_again: { name: 'Try again', label: 'Try again' },

@@ -3,7 +3,7 @@ import { Link } from '@tanstack/react-router';
 import { ArrowUpRight, Check, Copy, Plus, TriangleAlert, X } from 'lucide-react';
 import type { LeadCard, LeadCardRun, ProofKind } from '../api/types';
 import { useAct } from '../lib/data';
-import { PROOF_NAME, canAlwaysAllow, levelName, placeOf } from '../lib/lead';
+import { PROOF_NAME, alwaysLabel, canAlwaysAllow, levelName, placeOf } from '../lib/lead';
 import { usePrefs } from '../lib/prefs';
 import { typedDir } from '../lib/lang';
 import { Cmd, Written } from './ui';
@@ -11,10 +11,10 @@ import { DecideCard } from './decide/DecideCard';
 import { LeadRequirements, LeadSplit } from './split/LeadSplit';
 
 /**
- * The lead's cards: what it offers to do, each with its level ("On its own", "Needs your OK") and real buttons. A
- * press runs the same function as the board's own button (POST /lead/cards/<id>/run); the card then says what
- * happened. Nothing here runs without a press, except what "Always allow" covers, and the card says so. An Open card
- * is a plain button to a story on the board: it changes nothing, so it asks nothing.
+ * The lead's cards: what it offers to do, each with its level ("On its own", "Needs your OK") and real buttons that
+ * name what they do. A press runs the same function as the board's own button (POST /lead/cards/<id>/run); the card
+ * then says what happened. Nothing here runs without a press, except what "Always allow" covers, and the card says so.
+ * An Open card is a plain button to a story on the board: it changes nothing, so it asks nothing.
  */
 
 type Edits = { title?: string; ask?: string; doneWhen?: { text: string; proof: ProofKind }[]; text?: string };
@@ -205,7 +205,8 @@ function ActionCard({ card }: { card: Exclude<LeadCard, { kind: 'draft_story' | 
   const story = card.kind === 'board_action' || card.kind === 'send_answer' ? card.story : undefined;
   const title =
     card.kind === 'send_answer' ? `An answer for ${card.story}` : card.kind === 'settings_change' ? `Change ${SETTING_NAME[card.setting] ?? card.setting} to ${card.value}` : `${card.label}${card.story ? ` · ${card.story}` : ''}`;
-  const main = card.kind === 'board_action' && always ? 'Allow once' : card.label;
+  // The buttons name what they do: "Take the pictures again", "Always take them again".
+  const main = card.label;
   const open = card.status === 'open' && !card.byItself;
   return (
     <section className="lc" aria-label={title}>
@@ -234,7 +235,7 @@ function ActionCard({ card }: { card: Exclude<LeadCard, { kind: 'draft_story' | 
           </button>
           {always && (
             <button className="btn" disabled={busy} onClick={() => press({ always: true })} title="Runs by itself from now on, without asking. Only for low-risk actions.">
-              Always allow
+              {alwaysLabel(card)}
             </button>
           )}
           <button className="btn ghost" disabled={busy} onClick={() => press({ dismiss: true })}>
@@ -283,36 +284,5 @@ function ReportCard({ card }: { card: Extract<LeadCard, { kind: 'engineer_report
         <Cmd text={card.command} />
       </div>
     </section>
-  );
-}
-
-/**
- * The ways out of a "Needs you" item on the rail: the first with Always allow when that is allowed, the others by their
- * own words. Each press runs the board's own action for the story as it stands now.
- */
-export function RailButtons({ cards }: { cards: LeadCard[] }) {
-  const act = useAct<LeadCardRun>();
-  const live = cards.filter((c) => c.status === 'open' && !c.byItself);
-  const run = (c: LeadCard, always = false) =>
-    act.mutate({ path: `/api/v1/lead/cards/${encodeURIComponent(c.id)}/run`, body: always ? { always: true } : {}, done: (r) => r.card.result ?? null });
-  const [first, ...rest] = live;
-  if (!first) return null;
-  const always = canAlwaysAllow(first);
-  return (
-    <>
-      <button className="btn pri sm" disabled={act.isPending} onClick={() => run(first)} title={first.why}>
-        {always ? 'Allow once' : first.label}
-      </button>
-      {always && (
-        <button className="btn sm" disabled={act.isPending} onClick={() => run(first, true)} title="Runs by itself from now on, without asking. Only for low-risk actions.">
-          Always allow
-        </button>
-      )}
-      {rest.map((c) => (
-        <button key={c.id} className="btn sm" disabled={act.isPending} onClick={() => run(c)} title={c.why}>
-          {c.label}
-        </button>
-      ))}
-    </>
   );
 }

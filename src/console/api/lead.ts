@@ -6,7 +6,7 @@ import { morningBrief } from '../../engine/lead/brief.js';
 import { ACTIONS, ALLOWABLE, NEVER, leadCan } from '../../engine/lead/can.js';
 import { runCard, type CardEdits } from '../../engine/lead/cards.js';
 import { LEAD_ANSWER_MS, MAX_LEAD_DAY_USD } from '../../engine/lead/limits.js';
-import { needsYou, squadNow } from '../../engine/lead/needs-you.js';
+import { needsYou, squadNow, whatsNew } from '../../engine/lead/needs-you.js';
 import { signInNote } from '../../engine/lead/notes.js';
 import { LEAD_READS, LEAD_LOOKS } from '../../engine/lead/window.js';
 import { leadRules, listConversations, requireConversation, saveLeadRules, spentToday, summaryOf } from '../../engine/lead/store.js';
@@ -36,14 +36,15 @@ export function mountLeadApi(app: Hono, opts: { paths: SquadPaths }): void {
     return { questionUsd: caps.spendUsd, questionTurns: caps.turns, dayUsd: MAX_LEAD_DAY_USD, minutes: LEAD_ANSWER_MS / 60_000 };
   };
 
-  // Everything the Squad lead page opens with: the conversations, what needs you, the squad now, the morning brief.
+  // Everything the Squad lead page opens with: the conversations, what needs you, what's new, the squad now, the brief.
   app.get('/api/v1/lead', (c) => {
-    if (!ready()) return c.json({ conversations: [], needsYou: [], squadNow: [], rules: { always: [], brief: false }, today: { costUsd: 0, limitUsd: MAX_LEAD_DAY_USD } });
+    if (!ready()) return c.json({ conversations: [], needsYou: [], whatsNew: [], squadNow: [], rules: { always: [], brief: false }, today: { costUsd: 0, limitUsd: MAX_LEAD_DAY_USD } });
     const rules = leadRules(bp);
     const signIn = signInNote(bp);
     return c.json({
       conversations: listConversations(bp).map(summaryOf),
       needsYou: needsYou(bp),
+      whatsNew: whatsNew(bp),
       squadNow: squadNow(bp),
       ...(rules.brief ? { brief: morningBrief(bp) } : {}),
       rules,

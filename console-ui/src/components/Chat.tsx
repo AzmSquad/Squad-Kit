@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { ConversationResponse } from '../api/types';
@@ -7,6 +7,8 @@ import { popups, useMedia } from '../lib/popups';
 import { REDUCED } from '../lib/reveal';
 import { agentFor, decideKind, pressedLately } from '../lib/decide';
 import { isAgent, keyOf, useWriting } from '../lib/writing';
+import { useStickToBottom } from '../lib/stick-to-bottom';
+import { NewLine, ToBottom } from './ToBottom';
 import { BoxOnly, ChatBox, useBoxAsk } from './decide/BoxAsk';
 import { DecideCard } from './decide/DecideCard';
 import { SplitDone } from './split/SplitCard';
@@ -42,7 +44,6 @@ export function ChatView({ id, size, onOpenDoc, onFull, onPanel }: { id: string;
   const ticket = useTicket(id);
   const t = ticket.data;
   const c = t?.chat;
-  const thread = useRef<HTMLDivElement>(null);
   const reduced = useMedia(REDUCED);
   // Kept on this computer until sent: another tab, Minimize, Full screen or a reload lose nothing.
   const [text, setText] = useDraft(id, 'chat', '');
@@ -73,24 +74,11 @@ export function ChatView({ id, size, onOpenDoc, onFull, onPanel }: { id: string;
   const messages = useMemo(() => c?.messages ?? [], [c?.messages]);
   const { writing: reveal, fresh, drafted } = useWriting(messages, Boolean(c), reduced);
 
-  // Stay at the newest message while it is written, unless you scrolled up to read.
-  const pinned = useRef(true);
-  const col = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const el = thread.current;
-    if (el && pinned.current) el.scrollTop = el.scrollHeight;
-  });
-  // Pictures load after the words, so the talk grows later: keep the newest message in view then too.
-  useEffect(() => {
-    const el = thread.current;
-    const inner = col.current;
-    if (!el || !inner) return;
-    const ro = new ResizeObserver(() => {
-      if (pinned.current) el.scrollTop = el.scrollHeight;
-    });
-    ro.observe(inner);
-    return () => ro.disconnect();
-  }, [t?.id, Boolean(c)]);
+  // It opens at the newest message, or at the first one you have not read under a "New" line, and follows only while
+  // you are at the bottom (lib/stick-to-bottom).
+  const stick = useStickToBottom(id, messages.length);
+  const [seenAtOpen] = useState(() => popups.get().seen[id]);
+  const newAt = seenAtOpen !== undefined && seenAtOpen < messages.length && messages.slice(seenAtOpen).some(isAgent) ? seenAtOpen : -1;
   useEffect(() => {
     if (c) popups.seen(id, messages.length);
   }, [c, id, messages.length]);
@@ -103,8 +91,8 @@ export function ChatView({ id, size, onOpenDoc, onFull, onPanel }: { id: string;
     return (
       <ChatBox.Provider value={door}>
         <div className={`chat-v csize-${size}`}>
-          <div className="cthread" ref={thread}>
-            <div className="ccol" ref={col}>
+          <div className="cthread" ref={stick.boxRef}>
+            <div className="ccol" ref={stick.contentRef}>
               <SplitDone t={t} />
               {decide}
               <div className="cempty inline">
@@ -143,26 +131,20 @@ export function ChatView({ id, size, onOpenDoc, onFull, onPanel }: { id: string;
     <ChatBox.Provider value={door}>
       <div className={`chat-v csize-${size}`}>
         <ChatHeader t={t} size={size} onFull={onFull} onPanel={onPanel} />
-        <div
-          className="cthread"
-          ref={thread}
-          aria-live="polite"
-          onScroll={(e) => {
-            const el = e.currentTarget;
-            pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-          }}
-        >
-          <div className="ccol" ref={col}>
+        <div className="cthread" ref={stick.boxRef} aria-live="polite">
+          <div className="ccol" ref={stick.contentRef}>
             {c.open && size !== 'pop' && <div className="cnote-pill">{opening}</div>}
             {messages.map((m, i) => {
-              if (m.who === 'squad') return <SquadNote key={i} t={t} m={m} last={i === messages.length - 1} onAsk={() => focus()} />;
-              if (m.who === 'you') return <YouMessage key={i} t={t} m={m} fresh={fresh(m)} onOpenDoc={onOpenDoc} onReply={(q) => focus(q)} />;
+              const line = i === newAt ? <NewLine /> : null;
+              if (m.who === 'squad') return <Fragment key={i}>{line}<SquadNote t={t} m={m} last={i === messages.length - 1} onAsk={() => focus()} /></Fragment>;
+              if (m.who === 'you') return <Fragment key={i}>{line}<YouMessage t={t} m={m} fresh={fresh(m)} onOpenDoc={onOpenDoc} onReply={(q) => focus(q)} /></Fragment>;
               const prev = messages[i - 1];
               const writing = reveal?.key === keyOf(m);
               const next = messages[i + 1];
               return (
+                <Fragment key={i}>
+                {line}
                 <AgentMessage
-                  key={i}
                   t={t}
                   m={m}
                   size={size}
@@ -176,6 +158,7 @@ export function ChatView({ id, size, onOpenDoc, onFull, onPanel }: { id: string;
                   onOpenDoc={onOpenDoc}
                   onReply={(q) => focus(q)}
                 />
+                </Fragment>
               );
             })}
             {pending && <Sending p={pending} />}
@@ -188,9 +171,10 @@ export function ChatView({ id, size, onOpenDoc, onFull, onPanel }: { id: string;
             <SplitDone t={t} />
             {decide}
           </div>
+          <ToBottom s={stick} />
         </div>
         {c.open ? (
-          <Composer t={t} size={size} text={text} setText={setText} input={input} onSent={() => (pinned.current = true)} sendRef={sendRef} setPending={setPending} box={box} onBoxCancel={cancelBox} />
+          <Composer t={t} size={size} text={text} setText={setText} input={input} onSent={() => stick.toBottom()} sendRef={sendRef} setPending={setPending} box={box} onBoxCancel={cancelBox} />
         ) : box ? (
           <BoxOnly t={t} box={box} onCancel={cancelBox} />
         ) : (

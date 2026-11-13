@@ -553,7 +553,7 @@ const leadCmd = program
 leadCmd.command('show <conversation>').description('One conversation: each question, the work trace, the answer and its cards').action(wrapArgs(runLeadShow));
 leadCmd
   .command('run <card>')
-  .description('Press a card, the same as its button: Create story, Allow once, Send, Save, Prepare a report')
+  .description('Press a card, the same as its button: Create story, Take the pictures again, Send, Save, Prepare a report')
   .option('--always', 'Turn "Always allow" on for this kind first (only giving more time, taking the pictures again, starting the app, the morning brief)')
   .option('--dismiss', 'Not now: put the card aside')
   .option('--split', 'A story draft that is more than one story: create its stories')

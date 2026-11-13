@@ -85,7 +85,7 @@ describe('board actions', () => {
       { kind: 'board_action', action: 'start_story', story: waiting.id },
       { kind: 'board_action', action: 'stop_story', story: 'SK-146' },
     );
-    expect(list.map((c) => c.label)).toEqual(['Give it 15 more minutes', 'Take them again', 'Start', 'Stop']);
+    expect(list.map((c) => c.label)).toEqual(['Give it 15 more minutes', 'Take the pictures again', 'Start', 'Stop']);
     for (const c of list) await runCard(bp, c.id);
     expect(readTicket(bp, 'SK-145')!.quietSnoozedUntil).toBeDefined();
     expect(readTicket(bp, 'SK-145')!.activity.at(-1)!.text).toBe('Gave it 15 more minutes');

@@ -1,4 +1,4 @@
-import type { LeadCard, LeadContext, LeadSource, LeadStep, LeadTurn, NeedsYouItem, ProofKind, SquadNowItem } from '../api/types';
+import type { LeadAllowable, LeadCard, LeadContext, LeadConversation, LeadSource, LeadStep, LeadTurn, NeedsYouItem, ProofKind, SquadNowItem } from '../api/types';
 
 /**
  * The Squad lead's words on the board, worked out from the API's shapes: the one line of an answer's work, where a
@@ -78,6 +78,17 @@ export function traceSummary(trace: LeadStep[]): string {
   return line && !line.startsWith('squad-kit') ? line[0]!.toUpperCase() + line.slice(1) : line;
 }
 
+/** A conversation's messages, for the "new messages" chip: each question, and each answer once it is in. */
+export function leadCount(c?: Pick<LeadConversation, 'turns'>): number {
+  return c ? c.turns.length + c.turns.filter((t) => t.answer || t.error).length : 0;
+}
+
+/** "The squad now" in one line: "2 agents working", "No one is working right now". */
+export function squadLine(now: Pick<SquadNowItem, 'who' | 'story' | 'doing'>[]): { line: string; more: string } {
+  if (!now.length) return { line: 'No one is working right now', more: '' };
+  return { line: `${now.length} ${now.length === 1 ? 'agent' : 'agents'} working`, more: now.map((s) => `${s.who} on ${s.story}: ${s.doing}`).join('\n') };
+}
+
 /** "16 s", "2 min 5 s". */
 export function duration(seconds: number): string {
   const s = Math.max(0, Math.round(seconds));
@@ -106,6 +117,8 @@ export function turnMeta(turn: Pick<LeadTurn, 'answer' | 'seconds' | 'costUsd'>)
       return "From squad-kit's notes, at once. No cost.";
     case 'record':
       return "From the story's live record, at once. No cost.";
+    case 'board':
+      return "From the board's own numbers, at once. No cost.";
     case 'refusal':
     case 'limit':
       return 'squad-kit answered this itself. No cost.';
@@ -135,11 +148,25 @@ export function chipWords(ctx: LeadContext): string {
   }
 }
 
-/** Where a question was asked from, for the small chip under it: "Asked from RoomFlow web, on /app". */
+/** Where a question was asked from, in full, for the tooltip of the line under it: "Asked from RoomFlow web, on /app". */
 export function contextWords(ctx: LeadContext): string {
-  if (ctx.from === 'board') return ctx.page ? `Asked from the board, on ${ctx.page}` : 'Asked from the board';
+  if (ctx.from === 'board') return ctx.page ? `Asked on the ${ctx.page} page` : 'Asked from the board';
   const w = chipWords(ctx);
   return `Asked ${w[0]!.toLowerCase()}${w.slice(1)}`;
+}
+
+/** The same place in a word or two, for the dim line under the question: "Board", "MA-9", "RoomFlow web /app". */
+export function askedPlace(ctx: LeadContext): string {
+  switch (ctx.from) {
+    case 'app':
+      return `${ctx.app ?? 'Your app'} ${ctx.path}`;
+    case 'story':
+      return ctx.story;
+    case 'problem':
+      return ctx.story ? `${ctx.story}, ${PROBLEM_WORDS[ctx.problem].replace(/^waits for you$/, 'waiting')}` : 'An error';
+    default:
+      return ctx.page ?? 'Board';
+  }
 }
 
 /** The question an "Ask the lead" button fills in, so the person never has to describe the problem. */
@@ -235,26 +262,16 @@ export function canAlwaysAllow(card: LeadCard): boolean {
   return card.kind === 'board_action' && Boolean(card.allowAlways) && ['more_time', 'pictures_again', 'start_app', 'morning_brief'].includes(card.action);
 }
 
-/** The main button of a "Needs you" item: the proof opens as "Open the proof", the rest open the story. */
-export function openLabel(item: Pick<NeedsYouItem, 'kind'>): string {
-  switch (item.kind) {
-    case 'proof':
-      return 'Open the proof';
-    case 'spec':
-      return 'Review the spec';
-    case 'plan':
-      return 'Review the plan';
-    case 'questions':
-    case 'ask':
-      return 'Answer';
-    default:
-      return 'Open it';
-  }
-}
+/** "Always allow" on a card, by what it does: "Always take them again". Its main button says the action itself. */
+const ALWAYS: Record<LeadAllowable, string> = {
+  more_time: 'Always give more time',
+  pictures_again: 'Always take them again',
+  start_app: 'Always start it',
+  morning_brief: 'Always turn it on',
+};
 
-/** The problem an item on the "Needs you" rail is, for its "Ask about it". */
-export function problemOf(item: Pick<NeedsYouItem, 'kind'>): Extract<LeadContext, { from: 'problem' }>['problem'] {
-  return item.kind === 'slow' ? 'slow' : item.kind === 'looks-stuck' ? 'stuck' : item.kind === 'stuck' ? 'error' : 'waiting';
+export function alwaysLabel(card: LeadCard): string {
+  return card.kind === 'board_action' && card.action in ALWAYS ? ALWAYS[card.action as LeadAllowable] : 'Always allow';
 }
 
 /**

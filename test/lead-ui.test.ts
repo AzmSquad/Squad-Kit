@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  alwaysLabel,
   appPath,
+  askedPlace,
   bodyAfter,
   canAlwaysAllow,
   chipWords,
@@ -9,12 +11,12 @@ import {
   duration,
   exampleQuestions,
   fileLabel,
+  leadCount,
   levelName,
-  openLabel,
   pageContext,
   placeOf,
-  problemOf,
   problemQuestion,
+  squadLine,
   sourcePlace,
   traceSummary,
   turnMeta,
@@ -90,6 +92,7 @@ describe('time and cost, small', () => {
     expect(turnMeta({ answer: { ...answer, by: 'note' }, seconds: 0, costUsd: 0 })).toBe("From squad-kit's notes, at once. No cost.");
     expect(turnMeta({ answer: { ...answer, by: 'refusal' }, seconds: 0, costUsd: 0 })).toBe('squad-kit answered this itself. No cost.');
     expect(turnMeta({ answer: { ...answer, by: 'record' } })).toBe("From the story's live record, at once. No cost.");
+    expect(turnMeta({ answer: { ...answer, by: 'board' }, seconds: 0, costUsd: 0 })).toBe("From the board's own numbers, at once. No cost.");
   });
 });
 
@@ -109,7 +112,7 @@ describe('where a question is asked from', () => {
     expect(contextWords({ from: 'app', app: 'RoomFlow web', path: '/app' })).toBe('Asked from RoomFlow web, on /app');
     expect(contextWords({ from: 'problem', problem: 'stuck', story: 'RO-9' })).toBe('Asked about RO-9: it looks stuck');
     expect(contextWords({ from: 'story', story: 'RO-9' })).toBe('Asked about RO-9');
-    expect(contextWords({ from: 'board', page: 'Releases' })).toBe('Asked from the board, on Releases');
+    expect(contextWords({ from: 'board', page: 'Releases' })).toBe('Asked on the Releases page');
     expect(chipWords({ from: 'app', app: 'RoomFlow web', path: '/' })).toBe('From RoomFlow web, on its first page');
     expect(appPath('http://localhost:5000/app')).toBe('/app');
     expect(appPath('http://localhost:5000')).toBe('/');
@@ -121,10 +124,20 @@ describe('where a question is asked from', () => {
     expect(problemQuestion('slow', 'RO-9')).toBe('Why is RO-9 taking longer than usual?');
     expect(problemQuestion('stuck', 'RO-9')).toBe('Why does RO-9 look stuck, and what should I do?');
     expect(problemQuestion('waiting', 'RO-9')).toBe('What does RO-9 need from me, and what do you recommend?');
-    expect(problemOf({ kind: 'slow' })).toBe('slow');
-    expect(problemOf({ kind: 'looks-stuck' })).toBe('stuck');
-    expect(problemOf({ kind: 'stuck' })).toBe('error');
-    expect(problemOf({ kind: 'proof' })).toBe('waiting');
+  });
+
+  it('says it under the question in a word or two, with no "board … Board"', () => {
+    expect(askedPlace({ from: 'board', page: 'Board' })).toBe('Board');
+    expect(contextWords({ from: 'board', page: 'Board' })).toBe('Asked on the Board page');
+    expect(askedPlace({ from: 'board' })).toBe('Board');
+    expect(askedPlace({ from: 'story', story: 'MA-9' })).toBe('MA-9');
+    expect(askedPlace({ from: 'problem', problem: 'stuck', story: 'MA-9' })).toBe('MA-9, looks stuck');
+    expect(askedPlace({ from: 'problem', problem: 'waiting', story: 'MA-9' })).toBe('MA-9, waiting');
+    expect(askedPlace({ from: 'app', app: 'RoomFlow web', path: '/app' })).toBe('RoomFlow web /app');
+    for (const ctx of [{ from: 'board', page: 'Board' }, { from: 'board', page: 'Releases' }] as const) {
+      expect(askedPlace(ctx)).not.toMatch(/board.*board/i);
+      expect(contextWords(ctx)).not.toMatch(/board.*board/i);
+    }
   });
 });
 
@@ -142,8 +155,13 @@ describe('links and buttons', () => {
     expect(placeOf('/tickets/RO-7/proof')).toEqual({ to: '/tickets/$id/proof', id: 'RO-7' });
     expect(placeOf('/board?ticket=RO-9')).toEqual({ to: '/board', ticket: 'RO-9' });
     expect(placeOf('/somewhere')).toBeNull();
-    expect(openLabel({ kind: 'proof' })).toBe('Open the proof');
-    expect(openLabel({ kind: 'stuck' })).toBe('Open it');
+  });
+
+  it('names the action on every button, never a bare "Allow"', () => {
+    expect(alwaysLabel(action({ action: 'pictures_again', label: 'Take the pictures again' }))).toBe('Always take them again');
+    expect(alwaysLabel(action({}))).toBe('Always give more time');
+    expect(alwaysLabel(action({ action: 'start_app', label: 'Start the app' }))).toBe('Always start it');
+    expect(alwaysLabel(action({ action: 'morning_brief', label: 'Turn it on' }))).toBe('Always turn it on');
   });
 
   it('shows each card its level, and Always allow only on the low-risk ones', () => {
@@ -154,6 +172,23 @@ describe('links and buttons', () => {
     // Even a card that says so is not allowed for an action outside the low-risk four.
     expect(canAlwaysAllow(action({ action: 'stop_story', allowAlways: true }))).toBe(false);
     expect(canAlwaysAllow({ ...action({}), kind: 'send_answer', story: 'RO-9', text: 'Yes' } as LeadCard)).toBe(false);
+  });
+});
+
+describe('the lead page', () => {
+  it('says the squad now in one line, with who does what in its tooltip', () => {
+    expect(squadLine([])).toEqual({ line: 'No one is working right now', more: '' });
+    expect(squadLine([{ who: 'Builder', story: 'MA-12', doing: 'fixing a failed test' }, { who: 'Tester', story: 'MA-14', doing: 'taking pictures' }])).toEqual({
+      line: '2 agents working',
+      more: 'Builder on MA-12: fixing a failed test\nTester on MA-14: taking pictures',
+    });
+    expect(squadLine([{ who: 'Builder', story: 'MA-12', doing: 'x' }]).line).toBe('1 agent working');
+  });
+
+  it('counts each question and each answer once it is in, for the new messages chip', () => {
+    const turn = (answered: boolean) => ({ n: 1, ask: { text: 'q', at: '', context: { from: 'board' as const } }, trace: [], refused: [], ...(answered ? { answer: { headline: 'h', body: '', evidence: [], sources: [], cards: [] } } : {}) });
+    expect(leadCount(undefined)).toBe(0);
+    expect(leadCount({ turns: [turn(true), turn(false)] })).toBe(3);
   });
 });
 

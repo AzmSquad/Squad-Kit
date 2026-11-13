@@ -1,0 +1,8 @@
+/* The design card's picture of the mockup (components/decide/DesignPreview.tsx): drawn 960 px wide, then scaled down
+   to the card's width (--s), in a box of a fixed height, so the card never moves while it loads. */
+.mockprev { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin: 2px 0 8px; }
+.mockprev-pic { position: relative; display: block; width: 100%; height: 190px; padding: 0; overflow: hidden; border-radius: 10px; border: 1px solid var(--line); background: #fff; cursor: zoom-in; }
+.mockprev-pic:hover { border-color: var(--line-strong); }
+.mockprev-pic:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mockprev-frame { position: absolute; top: 0; left: 0; width: 960px; height: calc(190px / var(--s, 0.35)); border: 0; transform: scale(var(--s, 0.35)); transform-origin: 0 0; pointer-events: none; background: #fff; }
+.mockprev-open { display: inline-flex; align-items: center; gap: 5px; margin: 0; font-size: 12px; font-weight: 600; color: var(--accent); }

@@ -47,6 +47,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   short form of its proof. Right to left in Arabic, light and dark. Old specs are proved exactly as before.
 - **Every button has its call and its command:** `squad prove <ticket> [line] [kind] [--why "…"]` and
   `POST /tickets/<id>/prove`.
+- **The design card shows the design.** The Architect's mockup is a small picture inside the card, with Open the
+  mockup for the full one. The Squad lead knows a story's mockup and brings its card when you ask to see a design.
+- **"Hello" gets an answer at once,** with no AI run and no cost: the stories open, what needs you and who is working,
+  in your language, Arabic too. The lead also reads the board's own numbers first, so it no longer calls a project
+  with many stories "new" from an old first read.
+
+### Changed
+
+- **Chats scroll like a modern chat, everywhere.** A talk opens at its newest message, or at the first unread one under
+  a "New" line, a popup brought back from its bar too. Your own message goes to the bottom; new words follow only
+  while you are at the bottom; scrolled up, the talk stays put and a chip counts the new messages. Late pictures and
+  cards no longer move what you read.
+- **One talk in one place.** While a page shows a talk (the Squad lead page, the Conversations page, a story's
+  Conversation tab, which now shows the talk itself), its popup hides and its head says "on this page".
+- **"Needs you" counts only what needs your press,** with one number in the top bar, the side menu, the lead's head,
+  its popup and its answers. News such as "MA-3 is released" goes to a small "What's new" list.
+- **The Squad lead page is one centred chat.** The Needs you column is gone (the top bar has it); who is working is one
+  line under the lead's name; What it can do is under the box. Answers that bring cards stay short.
+- **Your question to the lead** has one small line under it: its time and where you asked, in full on hover.
+- **Buttons name the action:** "Take the pictures again" and "Always take them again", never a bare Allow once. A
+  check-in for a story with no pictures says how it was proved ("proved by a test") instead of "0 pictures".
+- **The chat heads keep a gutter of their own,** so they never cover a card. The "Ask the lead ⌘K" pill moved into the
+  lead head's tooltip.
 
 ## [1.3.18] — 2026-11-13
 

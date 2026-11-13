@@ -7,9 +7,9 @@ import { morningBrief } from '../engine/lead/brief.js';
 import { ACTIONS, ALLOWABLE, leadCan } from '../engine/lead/can.js';
 import { cardCommand, runCard } from '../engine/lead/cards.js';
 import { MAX_LEAD_DAY_USD } from '../engine/lead/limits.js';
-import { needsYou, squadNow } from '../engine/lead/needs-you.js';
+import { needsYou, squadNow, whatsNew } from '../engine/lead/needs-you.js';
 import { leadRules, listConversations, readConversation, requireConversation, saveLeadRules, spentToday, summaryOf } from '../engine/lead/store.js';
-import type { LeadCard, LeadContext, LeadConversation, LeadStep, LeadSummary, LeadTurn, MorningBrief, NeedsYouItem, SquadNowItem } from '../engine/lead/types.js';
+import type { LeadCard, LeadContext, LeadConversation, LeadStep, LeadSummary, LeadTurn, MorningBrief, NeedsYouItem, NewsItem, SquadNowItem } from '../engine/lead/types.js';
 import { boardApi, type BoardApi } from './app.js';
 import { splitLines } from './split.js';
 
@@ -182,15 +182,16 @@ function briefLines(b: MorningBrief): string[] {
 export async function runLead(): Promise<void> {
   const bp = board();
   const api = boardApi(bp);
-  type View = { conversations: LeadSummary[]; needsYou: NeedsYouItem[]; squadNow: SquadNowItem[]; brief?: MorningBrief; today: { costUsd: number; limitUsd: number } };
+  type View = { conversations: LeadSummary[]; needsYou: NeedsYouItem[]; whatsNew?: NewsItem[]; squadNow: SquadNowItem[]; brief?: MorningBrief; today: { costUsd: number; limitUsd: number } };
   const v: View = api
     ? await api.call<View>('GET', '/lead')
-    : { conversations: listConversations(bp).map(summaryOf), needsYou: needsYou(bp), squadNow: squadNow(bp), ...(leadRules(bp).brief ? { brief: morningBrief(bp) } : {}), today: { costUsd: spentToday(bp), limitUsd: MAX_LEAD_DAY_USD } };
+    : { conversations: listConversations(bp).map(summaryOf), needsYou: needsYou(bp), whatsNew: whatsNew(bp), squadNow: squadNow(bp), ...(leadRules(bp).brief ? { brief: morningBrief(bp) } : {}), today: { costUsd: spentToday(bp), limitUsd: MAX_LEAD_DAY_USD } };
   out();
   if (v.brief) out([...briefLines(v.brief), ''].join('\n'));
   out(kleur.bold(`  Needs you (${v.needsYou.length})`));
   out(v.needsYou.length ? needsLines(v.needsYou).join('\n') : grey('  Nothing waits for you.'));
   out();
+  if (v.whatsNew?.length) out([kleur.bold("  What's new"), ...v.whatsNew.map((x) => `  ${x.words}`), ''].join('\n'));
   out(kleur.bold('  The squad now'));
   out(v.squadNow.length ? nowLines(v.squadNow).join('\n') : grey('  Nobody is working right now.'));
   out();

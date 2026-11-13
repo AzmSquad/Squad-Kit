@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
 import type { LeadView } from '../../api/types';
 import { useApps, useBoard } from '../../lib/data';
 import { detect } from '../../lib/lang';
-import { exampleQuestions, pageContext } from '../../lib/lead';
+import { exampleQuestions, leadCount, pageContext } from '../../lib/lead';
 import { leadAsk, useLeadAsk } from '../../lib/leadAsk';
 import { useLead, useLeadConversation } from '../../lib/leadData';
 import { popups, usePopups, type Pop } from '../../lib/popups';
@@ -12,7 +12,10 @@ import { AskInput, ContextChip, useSendLead } from '../LeadAsk';
 import { LeadMark } from '../LeadMark';
 import { LeadTurnView } from '../LeadTurn';
 import { Written } from '../ui';
-import { Frame, useFollow } from './Frame';
+import { Frame } from './Frame';
+import { useStickToBottom } from '../../lib/stick-to-bottom';
+import { useWaitingCount } from '../../lib/waiting-count';
+import { ToBottom } from '../ToBottom';
 
 /** The lead's popup: what needs you and questions to start from, then the conversation. */
 export function LeadPopup({ pop }: { pop: Pop }) {
@@ -26,7 +29,8 @@ export function LeadPopup({ pop }: { pop: Pop }) {
   const loc = useRouterState({ select: (r) => r.location });
   const { send, busy } = useSendLead();
   const [text, setText] = useState(ask.text);
-  const feed = useRef<HTMLDivElement>(null);
+  // It opens at the bottom, back from its bar too, and follows the answer only while you are at the bottom.
+  const stick = useStickToBottom(c?.id ?? 'new', leadCount(c));
   // "Something's wrong" on a card: the box asks for the note, and only its own Send takes it to the board.
   const { box, cancel: cancelBox, door } = useBoxAsk();
   const meta = board.data?.ready ? board.data.meta : undefined;
@@ -40,6 +44,7 @@ export function LeadPopup({ pop }: { pop: Pop }) {
       popups.follow(x.id);
       leadAsk.used();
       setText('');
+      stick.toBottom();
     });
   // The box's own Send: the note for the board while a card asks for one, else a question for the lead.
   const submit = () => {
@@ -48,7 +53,6 @@ export function LeadPopup({ pop }: { pop: Pop }) {
       setText('');
     } else go(text);
   };
-  useFollow(feed);
   const last = c?.turns.at(-1)?.ask.text ?? text;
   return (
     <Frame
@@ -65,8 +69,9 @@ export function LeadPopup({ pop }: { pop: Pop }) {
       onExpand={() => void navigate({ to: '/lead', search: c ? { c: c.id } : {} })}
     >
       <ChatBox.Provider value={door}>
-        <div className="feed" ref={feed}>
-          <div className="feedcol">
+        {/* A conversation sticks to its newest message; the start, with what needs you, reads from the top. */}
+        <div className="feed" ref={c ? stick.boxRef : undefined}>
+          <div className="feedcol" ref={c ? stick.contentRef : undefined}>
             {c ? (
               c.turns.map((t, i) => (
                 <LeadTurnView
@@ -85,6 +90,7 @@ export function LeadPopup({ pop }: { pop: Pop }) {
               <LeadStart view={lead.data} onPick={setText} />
             )}
           </div>
+          {c && <ToBottom s={stick} />}
         </div>
       </ChatBox.Provider>
       <div className="composer">
@@ -99,10 +105,13 @@ export function LeadPopup({ pop }: { pop: Pop }) {
   );
 }
 
-/** No conversation yet: what needs you, each opening its story's popup, and a few questions to start from. */
+/** No conversation yet: what needs you, each opening its story's popup, what's new, and a few questions to start from. */
 function LeadStart({ view, onPick }: { view?: LeadView; onPick(q: string): void }) {
   const apps = (useApps().data?.apps ?? []).map((a) => a.name);
   const needs = (view?.needsYou ?? []).filter((n) => n.kind !== 'slow');
+  // The same number as the top bar: the list shows the stories, the rest wait in Waiting for you.
+  const total = Math.max(useWaitingCount(), needs.length);
+  const news = view?.whatsNew ?? [];
   const examples = exampleQuestions({ apps, needsYou: view?.needsYou ?? [], squadNow: view?.squadNow ?? [] });
   return (
     <div className="empty">
@@ -118,11 +127,25 @@ function LeadStart({ view, onPick }: { view?: LeadView; onPick(q: string): void 
               <span className="go">{n.kind === 'questions' || n.kind === 'ask' ? 'Answer' : 'Open'}</span>
             </button>
           ))}
-          {needs.length > 4 && (
+          {total > Math.min(4, needs.length) && (
             <Link to="/inbox" className="linkbtn">
-              and {needs.length - 4} more in Waiting for you
+              and {total - Math.min(4, needs.length)} more in Waiting for you
             </Link>
           )}
+        </>
+      )}
+      {news.length > 0 && (
+        <>
+          <h6>What&apos;s new</h6>
+          <ul className="news">
+            {news.slice(0, 3).map((x) => (
+              <li key={x.id}>
+                <Link to="/board" search={{ ticket: x.story }}>
+                  <Written text={x.words} />
+                </Link>
+              </li>
+            ))}
+          </ul>
         </>
       )}
       <h6>Try asking</h6>

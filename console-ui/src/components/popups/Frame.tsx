@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Maximize2, Minus, X } from 'lucide-react';
 import { popups, type Pop } from '../../lib/popups';
 import { REDUCED } from '../../lib/reveal';
@@ -42,28 +42,4 @@ export function Frame({ pop, avatar, title, sub, busy, dir, onExpand, children }
       {!pop.min && children}
     </section>
   );
-}
-
-/** Keeps the newest words in view while they come in, unless the person scrolled up to read. */
-export function useFollow(ref: { current: HTMLElement | null }) {
-  const pinned = useRef(true);
-  useEffect(() => {
-    const el = ref.current;
-    const inner = el?.firstElementChild;
-    if (!el || !inner) return;
-    const onScroll = () => (pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80);
-    el.addEventListener('scroll', onScroll);
-    const ro = new ResizeObserver(() => {
-      if (pinned.current) el.scrollTop = el.scrollHeight;
-    });
-    ro.observe(inner);
-    return () => {
-      el.removeEventListener('scroll', onScroll);
-      ro.disconnect();
-    };
-  }, [ref]);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (el && pinned.current) el.scrollTop = el.scrollHeight;
-  });
 }

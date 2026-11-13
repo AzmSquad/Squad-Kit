@@ -1,0 +1,22 @@
+/* Scrolling in every chat (lib/stick-to-bottom.ts): the chip that takes you down, and the "New" line. */
+
+/* The chip stays at the bottom of the chat's view, taking no room of its own. */
+.tobottom-w { position: sticky; bottom: 10px; height: 0; display: flex; justify-content: center; z-index: 4; pointer-events: none; }
+.tobottom { pointer-events: auto; transform: translateY(-100%); display: inline-flex; align-items: center; gap: 6px; height: 32px; min-width: 32px; padding: 0 9px; border-radius: 99px; background: var(--surface); color: var(--text); font-size: 12.5px; font-weight: 600; box-shadow: var(--pop-shadow), 0 0 0 1px var(--line-strong); animation: tobin 0.22s ease both; }
+.tobottom.has { padding: 0 12px 0 10px; background: var(--accent); color: var(--accent-ink); box-shadow: var(--pop-shadow); }
+.tobottom:hover { box-shadow: var(--pop-shadow), 0 0 0 1px var(--accent); }
+.tobottom:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@keyframes tobin { from { opacity: 0; transform: translateY(-60%); } }
+
+/* "New": the first message you have not read yet. */
+.newline { display: flex; align-items: center; gap: 10px; color: var(--you-ink); font-size: 11px; font-weight: 650; letter-spacing: 0.02em; }
+.newline::before, .newline::after { content: ''; flex: 1; height: 1px; background: var(--you-line); }
+
+@media (prefers-reduced-motion: reduce) {
+  .tobottom { animation: none; }
+}
+
+/* A story's talk on its Conversation tab (components/TalkHere.tsx): the popup's talk, in a box of its own height. */
+.talkhere { height: 520px; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--surface); }
+.talkhere > .chat-v { flex: 1; min-height: 0; }
+.talkhere-doc > .cdoc { position: fixed; top: 10px; bottom: 10px; inset-inline-end: 10px; z-index: 80; margin: 0; box-shadow: var(--pop-shadow); }

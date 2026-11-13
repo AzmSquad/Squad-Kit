@@ -5,6 +5,7 @@ import { assetUrl } from '../../api/client';
 import type { Ticket } from '../../api/types';
 import { proofShots, type DecideKind } from '../../lib/decide';
 import { Lightbox } from '../Lightbox';
+import { DesignPreview } from './DesignPreview';
 import { Written } from '../ui';
 import type { LineProofKind } from '../../api/proof-kind';
 import { hasKinds } from '../../lib/proof-kinds';
@@ -65,6 +66,7 @@ export function Body({ t, kind }: { t: Ticket; kind: DecideKind }) {
     return (
       <div className="db">
         {t.decision && <Written as="p" className="sum" lead={<b>{t.decision.title}:</b>} text={chosen?.name ?? ''} />}
+        <DesignPreview t={t} />
         <List items={(t.steps ?? []).map((s) => s.title)} />
       </div>
     );

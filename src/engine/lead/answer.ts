@@ -5,6 +5,7 @@ import { listDecisions, listReleases, listTickets, readTicket, type BoardPaths }
 import { isSecretFile } from '../../core/scrub.js';
 import { answerProblem } from '../answers.js';
 import { makeCard, type CardInput } from './cards.js';
+import { sameStoryCard } from './tidy.js';
 import { checkSize } from '../story-size.js';
 import { AREA_SHAPE, MOST_PARTS, PART_SHAPE } from '../split-prompts.js';
 import { MAX_LEAD_CARDS, MAX_LEAD_PICTURES, MAX_LEAD_SOURCES } from './limits.js';
@@ -200,7 +201,9 @@ export function cleanAnswer(bp: BoardPaths, raw: unknown, o: { taken: Set<string
   for (const c of a.cards) {
     if (cards.length >= MAX_LEAD_CARDS) break;
     const made = makeCard(bp, c, `${o.prefix}.${cards.length + 1}`, o.role, o.asked);
-    if ('card' in made) cards.push(made.card);
+    if ('card' in made) {
+      if (!sameStoryCard(cards, made.card)) cards.push(made.card);
+    }
     else if ('refused' in made) {
       const words = NEVER[made.refused].refusal;
       if (!refused.includes(words)) refused.push(words);

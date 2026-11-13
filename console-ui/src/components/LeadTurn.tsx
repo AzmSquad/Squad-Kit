@@ -4,7 +4,7 @@ import { Check, ChevronDown, Clock, Eye, FileText, Loader2, Square } from 'lucid
 import { assetUrl } from '../api/client';
 import type { LeadAnswer, LeadCard, LeadConversation, LeadSource, LeadStep, LeadTurn } from '../api/types';
 import { useAct } from '../lib/data';
-import { bodyAfter, contextWords, duration, fileLabel, sourcePlace, traceSummary, turnMeta } from '../lib/lead';
+import { askedPlace, bodyAfter, contextWords, duration, fileLabel, sourcePlace, traceSummary, turnMeta } from '../lib/lead';
 import { firstWords, wordCount } from '../lib/lang';
 import { askedHere, useReveal } from '../lib/reveal';
 import { ChatMarkdown } from './ChatMarkdown';
@@ -38,17 +38,18 @@ export function LeadTurnView({ c, turn, last, onAgain }: { c: LeadConversation; 
   return (
     <div className={`lt ${watched.current ? 'watched' : ''}`}>
       <div className="lt-you">
-        <div className="lt-meta">
-          <b>You</b>
-          {clock(turn.ask.at)}
-        </div>
         <Written as="p" text={turn.ask.text} />
-        {showCtx && (
-          <span className="lt-ctx">
-            <Eye size={12} aria-hidden="true" />
-            {contextWords(ctx)}
-          </span>
-        )}
+        {/* One dim line under it: the time, and where it was asked from in a word, in full on hover. */}
+        <div className="lt-when" title={showCtx ? contextWords(ctx) : undefined}>
+          <span>{clock(turn.ask.at)}</span>
+          {showCtx && (
+            <>
+              <span aria-hidden="true">·</span>
+              <Eye size={12} aria-hidden="true" />
+              <bdi>{askedPlace(ctx)}</bdi>
+            </>
+          )}
+        </div>
       </div>
       {thinking ? (
         <>
@@ -87,14 +88,6 @@ export function LeadTurnView({ c, turn, last, onAgain }: { c: LeadConversation; 
       )}
     </div>
   );
-}
-
-/** The newest question at the top of the view: its answer reads from the start, and the live line shows under it. */
-export function showNewest(feed: HTMLElement | null): void {
-  const turns = feed?.querySelectorAll<HTMLElement>('.lt');
-  const last = turns?.[turns.length - 1];
-  if (!feed || !last) return;
-  feed.scrollTo({ top: Math.max(0, last.getBoundingClientRect().top - feed.getBoundingClientRect().top + feed.scrollTop - 12) });
 }
 
 /** The work it did, folded to one line by default: "Worked for 16 s: read 3 files, searched the code twice". */

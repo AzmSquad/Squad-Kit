@@ -26,6 +26,8 @@ import { LEAD_ANSWER_MS, MAX_LEAD_DAY_USD, MAX_QUESTION_CHARS } from './limits.j
 import { noteFor, saveNote, scrubbed } from './notes.js';
 import { leadAppPlan, startLeadApp, stopLeadApp } from './own-app.js';
 import { followUpPrompt, leadPrompt, leadRules } from './prompt.js';
+import { smallTalk } from './small-talk.js';
+import { trimCarded } from './tidy.js';
 import { notesText } from './records.js';
 import { allowsAlways, cleanContext, markWorking, newConversationId, requireConversation, spentToday, titleOf, updateConversation, writeConversation } from './store.js';
 import type { LeadAnswer, LeadCard, LeadContext, LeadConversation, LeadStep, LeadTurn } from './types.js';
@@ -81,8 +83,9 @@ const CARD_BELOW = {
 
 /**
  * What squad-kit answers itself, with no AI and no cost: what the lead never does (with an Open card for each story it
- * names, so the person is one press from doing it themselves), a saved note, a status question about the story it was
- * asked from, the day's limit, a sample board. Null when the lead must answer. `prefix` names its cards.
+ * names, so the person is one press from doing it themselves), small talk with the board's numbers, a saved note, a
+ * status question about the story it was asked from, the day's limit, a sample board. Null when the lead must answer.
+ * `prefix` names its cards.
  */
 function answerAtOnce(bp: BoardPaths, turn: LeadTurn, fresh: boolean, prefix: string, earlier?: string[]): LeadAnswer | null {
   const text = turn.ask.text;
@@ -103,6 +106,9 @@ function answerAtOnce(bp: BoardPaths, turn: LeadTurn, fresh: boolean, prefix: st
     const card = cards.some((x) => x.kind === 'decide') ? [CARD_BELOW[ar ? 'ar' : 'en']] : [];
     return { headline: turn.refused[0]!, body: [...turn.refused.slice(1), ...card, AFTER_REFUSAL[ar ? 'ar' : 'en']].join('\n\n'), evidence: [], sources: [], cards, by: 'refusal' };
   }
+  // A greeting or a thank you: the board's own numbers, at once, with no AI run.
+  const small = smallTalk(bp, text);
+  if (small) return small;
   if (!fresh) {
     const note = noteFor(bp, text);
     if (note) {
@@ -443,6 +449,8 @@ async function answerTurn(bp: BoardPaths, id: string, n: number, signal: AbortSi
     if (t && !answer.cards.some((x) => x.kind === 'board_action')) answer.cards.push(...waysOut(t, `${id}.${n}.w`));
     // Buttons, not "go and press it": each story the answer sends the person to gets its Open card.
     answer.cards.push(...openCardsFor(bp, `${answer.headline}\n${answer.body}`, answer.cards, `${id}.${n}.o`, { refused: cleaned.refused.length > 0 }));
+    // Each story is said once, on its card: the words leave out the list lines its decision card shows.
+    answer.body = trimCarded(answer.body, answer.cards);
     // "Always allow": the low-risk ones run by themselves, only when the person's own words asked about them.
     for (const [i, card] of answer.cards.entries()) {
       if (card.kind !== 'board_action' || !isAllowable(card.action) || !allowsAlways(bp, card.action)) continue;

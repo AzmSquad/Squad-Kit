@@ -27,6 +27,15 @@ export function needsYou(t: Ticket): boolean {
   return Boolean(t.waiting || t.quiet?.kind === 'stuck' || t.outdated?.length || changeWaits(t) || testChangeWaits(t));
 }
 
+/**
+ * The one number of things that need a press from the person: the open stories the board lists that wait for them,
+ * and the breakdowns whose Analyst has questions. A released story's news is never part of it: the board lists open
+ * stories only.
+ */
+export function waitingCount(tickets: Ticket[], breakdowns: number): number {
+  return tickets.filter(needsYou).length + breakdowns;
+}
+
 /** squad-kit settles a change to the test command itself; it waits for the person only when squad-kit cannot tell. */
 export function testChangeWaits(t: Ticket): boolean {
   return Boolean(t.testChange?.ask);

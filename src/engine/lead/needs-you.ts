@@ -1,4 +1,3 @@
-import { inbox } from '../../board/actions.js';
 import { liveNow, shortDoing, type LiveNow } from '../../board/now.js';
 import { withProblem } from '../../board/problem.js';
 import { listTickets, type BoardPaths } from '../../board/store.js';
@@ -6,11 +5,13 @@ import type { Ticket } from '../../board/types.js';
 import { middle, readUsual } from '../../board/usual.js';
 import { WHO } from '../../board/clock.js';
 import { actionCard, waysOut } from './cards.js';
+import { proofWords } from './proof-words.js';
 import { allowsAlways } from './store.js';
-import type { NeedsYouItem, SquadNowItem } from './types.js';
+import type { NeedsYouItem, NewsItem, SquadNowItem } from './types.js';
+import { pressNeeded, releasedNews } from './waiting.js';
 
 /**
- * "Needs you" and "The squad now", for the rail beside the conversation and for the phone: one call each, from the
+ * "Needs you", "What's new" and "The squad now", for the lead's popup, its page and the phone: one call each, from the
  * board's own waiting and live data. Each item carries the lead's check-in words, made by squad-kit from the story's
  * data with no AI call: "MA-7 is ready for your check: 5 pictures, checks pass, Reviewer approved".
  */
@@ -44,7 +45,7 @@ export function checkIn(t: Ticket, now: LiveNow): Pick<NeedsYouItem, 'kind' | 'w
       const rows = t.proof?.length ?? 0;
       const pics = picturesIn(t);
       const all = rows > 0 && (t.proof ?? []).every((p) => p.after);
-      return { kind: 'proof', words: `${id} is ready for your check: ${[plural(pics, 'picture'), ...gatesWords(t)].join(', ')}.`, ...(rows ? { more: `${plural(rows, '"done when"', '"done when"')}${all ? ', all with pictures' : ''}` } : {}) };
+      return { kind: 'proof', words: `${id} is ready for your check: ${[proofWords(t, pics), ...gatesWords(t)].join(', ')}.`, ...(rows ? { more: `${plural(rows, '"done when"', '"done when"')}${all ? ', all with pictures' : ''}` } : {}) };
     }
     case 'spec':
       return { kind: 'spec', words: `${id}'s spec is ready for you: ${plural(t.criteria?.length ?? 0, '"done when"', '"done when"')}.` };
@@ -80,13 +81,16 @@ function openOf(t: Ticket): string {
   return t.waiting?.kind === 'proof' ? `/tickets/${encodeURIComponent(t.id)}/proof` : `/board?ticket=${encodeURIComponent(t.id)}`;
 }
 
-/** Everything that needs the person now, with the lead's check-in words and the real ways out as cards. No AI. */
+/**
+ * Everything that needs a press from the person now, with the lead's check-in words and the real ways out as cards.
+ * The open stories only, as the board counts them (lead/waiting.ts); a slower step comes last, uncounted. No AI.
+ */
 export function needsYou(bp: BoardPaths, at = Date.now()): NeedsYouItem[] {
   const usual = readUsual(bp);
-  const waiting = inbox(bp);
+  const waiting = pressNeeded(bp);
   const seen = new Set(waiting.map((t) => t.id));
   // A slow step is no wait, but the person may give it more time: it shows too, unless "Always allow" gives it.
-  const slow = listTickets(bp).filter((t) => !seen.has(t.id) && t.quiet?.kind === 'long' && !t.waiting && !(t.quietSnoozedUntil && Date.parse(t.quietSnoozedUntil) > at));
+  const slow = listTickets(bp).filter((t) => !seen.has(t.id) && t.stage !== 'done' && !t.archived && t.quiet?.kind === 'long' && !t.waiting && !(t.quietSnoozedUntil && Date.parse(t.quietSnoozedUntil) > at));
   return [...waiting, ...slow].map((t) => {
     const now = liveNow(t, usual, at);
     const c = checkIn(t, now);
@@ -94,6 +98,15 @@ export function needsYou(bp: BoardPaths, at = Date.now()): NeedsYouItem[] {
     let cards = c.kind === 'slow' ? [actionCard(`${prefix}.more_time`, 'more_time', { story: t.id, minutes: 10, why: now.slow?.why?.sentence ?? 'It is slower than usual but still working.' })] : waysOut(t, prefix).map((x) => (x.kind === 'board_action' ? { ...x, id: `${prefix}.${x.action}` } : x));
     if (c.kind === 'slow' && allowsAlways(bp, 'more_time')) cards = cards.map((x) => ({ ...x, byItself: 'Always allow is on: squad-kit gives it more time by itself.' }));
     return { id: `${prefix}.${c.kind}`, story: t.id, title: t.title, ...c, cards, open: openOf(t) };
+  });
+}
+
+/** "What's new": a released story with news, such as a decision that came after its plan. Never counted. */
+export function whatsNew(bp: BoardPaths): NewsItem[] {
+  return releasedNews(bp).map((t) => {
+    const after = (t.outdated ?? []).map((o) => o.adr);
+    const words = `${t.id} is released${t.release ? ` in ${t.release}` : ''}.${after.length ? ` ${after.join(', ')} came after its plan.` : ''}`;
+    return { id: `new.${t.id}`, story: t.id, title: t.title, words, open: `/board?ticket=${encodeURIComponent(t.id)}` };
   });
 }
 

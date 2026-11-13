@@ -1,9 +1,9 @@
-import { inbox } from '../../board/actions.js';
 import { liveNow } from '../../board/now.js';
 import { listReleases, listTickets, type BoardPaths } from '../../board/store.js';
 import { readUsual } from '../../board/usual.js';
 import { dayKey, readDays } from '../../board/usage.js';
 import type { MorningBrief } from './types.js';
+import { waitingCount } from './waiting.js';
 
 /**
  * The morning brief, a routine the person turns on: what happened since yesterday evening, from the board's own data,
@@ -30,7 +30,7 @@ export function morningBrief(bp: BoardPaths, at = Date.now()): MorningBrief {
   const released = listReleases(bp).filter((r) => r.status === 'released' && after(r.date)).map((r) => r.version);
   const working = all.filter((t) => t.stage !== 'done' && !t.archived && liveNow(t, usual, at).state === 'working').map((t) => t.id);
   const stopped = all.filter((t) => t.waiting?.kind === 'stuck' && t.activity.some((a) => after(a.at))).map((t) => t.id);
-  const waiting = inbox(bp).length;
+  const waiting = waitingCount(bp);
   const days = readDays(bp);
   const counted = [dayKey(since), dayKey(at)].filter((k, i, a) => a.indexOf(k) === i).map((k) => days[k]).filter(Boolean);
   const cost = counted.some((d) => d!.costUsd !== undefined) ? counted.reduce((s, d) => s + (d!.costUsd ?? 0), 0) : undefined;

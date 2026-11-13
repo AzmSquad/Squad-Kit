@@ -516,10 +516,19 @@ sends it to the board. The lead brings the card; only you press it.
 brief. With it on they run without asking, and a line says so. A step that is slower than usual but still working then
 gets 10 more minutes by itself; one that looks stuck still asks you.
 
-**It comes to you.** "Needs you" lists what waits for you, each with the lead's check-in in plain words ("MA-7 is ready
-for your check: 5 pictures, checks pass, Reviewer approved") and its ways out as cards. "The squad now" shows who works
-on what. Turn on the **morning brief** for a short summary since yesterday evening: what merged, who is on what, what
-stopped, and what the AI used. None of these call the AI.
+**It comes to you.** "Needs you" lists what needs a press from you, each with the lead's check-in in plain words
+("MA-7 is ready for your check: 5 pictures, checks pass, Reviewer approved"; a story proved without pictures says how,
+"proved by a test") and its ways out as cards, each button named by what it does ("Take the pictures again", "Always
+take them again"). Its number is the top bar's, everywhere. News, such as a released story with a decision that came
+after its plan, goes to "What's new" and is never counted. Who works now is one line under the lead's name. "Hello"
+or "Thanks" is answered at once from the board's own numbers, in your language, with no AI. Turn on the **morning
+brief** for a short summary since yesterday evening: what merged, who is on what, what stopped, and what the AI used.
+None of these call the AI.
+
+**One talk in one place.** While a page shows a talk itself (the Squad lead page, the Conversations page with that talk
+picked, a story's Conversation tab), its popup hides and its head shows an "on this page" ring; pressing it brings the
+page's own box into view. Every chat opens at its newest message, or at the first unread one under a "New" line;
+scrolled up, a chip counts the new messages and takes you down.
 
 **Limits.** Balanced level by default. One question may use what the Quality setting allows it (on Best, $3 or 60
 turns) and 8 minutes; the lead's answers may use $10 a day at API prices, then it answers again the next day. Each
@@ -535,8 +544,8 @@ REST (under `/p/<project>/api/v1`):
 
 | Call | What |
 | --- | --- |
-| `GET /lead` | The conversations, Needs you, The squad now, the morning brief when it is on, your rules, and today's cost and limit. |
-| `GET /lead/needs-you`, `GET /lead/squad-now`, `GET /lead/brief` | Each on its own, for the rail and the phone. |
+| `GET /lead` | The conversations, Needs you, What's new, The squad now, the morning brief when it is on, your rules, and today's cost and limit. |
+| `GET /lead/needs-you`, `GET /lead/squad-now`, `GET /lead/brief` | Each on its own, for the phone. |
 | `POST /lead/conversations` | Ask: `{ "text": "...", "context": { "from": "app", "path": "/my-bookings" } }`. The context is `board` (with `page`), `app` (with `path`), `story` (with `story`) or `problem` (with `problem`: slow, stuck, waiting or error, and `story` or `error`). `"fresh": true` looks again past a note. It answers with the conversation: answered when squad-kit answered itself, else `thinking` until the answer is in. |
 | `POST /lead/conversations/<id>/messages` | A follow-up, the same body. |
 | `GET /lead/conversations/<id>` | The conversation: each question with its facts, the work trace, the answer (headline, body, evidence, sources, cards, learned), the time and the cost. |

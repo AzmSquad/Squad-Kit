@@ -8,7 +8,7 @@ import { UpdateBanner } from './Restart';
 import { AppUpdate } from './Update';
 import { FirstWin } from './FirstStory';
 import { ProjectWaiting } from './Waiting';
-import { needsYou } from '../lib/waiting';
+import { useWaitingCount } from '../lib/waiting-count';
 import { ChatPopups } from './popups/ChatPopups';
 import { useChats } from '../lib/chats';
 import { LimitBanner } from './UsageLimit';
@@ -19,7 +19,6 @@ import { Banners } from './Banners';
 import { useOverviewWaits } from './Setup';
 import { useBreakdowns } from '../lib/requirementsData';
 import { requirementsWaiting } from '../lib/requirements';
-import { useBreakdownWaits } from './BreakdownWaits';
 import { useTools } from '../pages/Tools';
 import { LeadMark } from './LeadMark';
 import { useLead } from '../lib/leadData';
@@ -47,9 +46,8 @@ export function Shell() {
   const meta = board.data?.ready ? board.data.meta : undefined;
   const tickets = board.data?.ready ? board.data.tickets : [];
   const openCount = tickets.filter((t) => !t.mergedAt && t.stage !== 'done' && !t.archived).length;
-  // A breakdown whose Analyst has questions counts as one thing that waits for you.
-  const breakdownWaits = useBreakdownWaits().length;
-  const waiting = tickets.filter(needsYou).length + breakdownWaits;
+  // The one number of what needs you, the same in the top bar and on the lead's head (lib/waiting-count).
+  const waiting = useWaitingCount();
   const bugs = tickets.filter((t) => t.kind === 'bug').length;
   const initials = (meta?.user.name ?? 'You').slice(0, 2).toUpperCase();
   const chats = useChats().data?.filter((c) => c.open).length ?? 0;

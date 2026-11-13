@@ -76,7 +76,7 @@ interface CardBase {
   id: string;
   /** 1: on its own (it only writes text or opens a page). 2: needs the person's OK. */
   level: 1 | 2;
-  /** The words on its main button: "Create story", "Allow once", "Send". */
+  /** The words on its main button, naming what it does: "Create story", "Take the pictures again", "Send". */
   label: string;
   /** Why the lead offers it, one plain line. */
   why?: string;
@@ -126,8 +126,11 @@ export interface LeadAnswer {
   cards: LeadCard[];
   /** A short note worth keeping, saved in squad-kit's notes for the next person. */
   learned?: string;
-  /** Answered by squad-kit itself, with no AI: from a saved note, the story's live record, a refusal, the day's limit, or its own count of a pasted document. */
-  by?: 'note' | 'record' | 'refusal' | 'limit' | 'check';
+  /**
+   * Answered by squad-kit itself, with no AI: from a saved note, the story's live record, a refusal, the day's limit,
+   * its own count of a pasted document, or the board's own numbers (a greeting or other small talk).
+   */
+  by?: 'note' | 'record' | 'refusal' | 'limit' | 'check' | 'board';
 }
 
 /** One question and its answer. */
@@ -191,6 +194,17 @@ export interface NeedsYouItem {
   /** Low risk, so "Always allow" can cover it. */
   lowRisk?: boolean;
   cards: LeadCard[];
+  /** Where on the board it opens. */
+  open: string;
+}
+
+/** "What's new": a released story with news, never counted in what needs the person. */
+export interface NewsItem {
+  id: string;
+  story: string;
+  title: string;
+  /** "MA-3 is released in v0.2.0. ADR-011 came after its plan." */
+  words: string;
   /** Where on the board it opens. */
   open: string;
 }

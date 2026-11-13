@@ -20,6 +20,7 @@ import {
   testChangeLine,
   testChangeWaits,
   waitedFor,
+  waitingCount,
   waitingSince,
   type Notice,
 } from '../lib/waiting';
@@ -60,7 +61,7 @@ export function ProjectWaiting() {
   const items = useMemo<Item[]>(() => (data?.tickets ?? []).filter(needsYou).map((t) => ({ key: t.id, since: waitingSince(t), ticket: t })), [data]);
   // A breakdown whose Analyst has questions waits for you too (components/BreakdownWaits).
   const breakdowns = useBreakdownWaits();
-  useTabTitle(data?.meta.project, items.length + breakdowns.length);
+  useTabTitle(data?.meta.project, waitingCount(data?.tickets ?? [], breakdowns.length));
   useDesktopNotices();
   if (path.startsWith('/inbox')) return null;
   return <WaitingBanner items={items} breakdowns={breakdowns} />;
