@@ -64,6 +64,10 @@ export function checkIn(t: Ticket, now: LiveNow): Pick<NeedsYouItem, 'kind' | 'w
     }
     case 'release':
       return { kind: 'release', words: `${id} is ready to go out with the next release.` };
+    case 'split': {
+      const s = t.split?.suggestion;
+      return { kind: 'split', words: s?.size === 'brd' ? `${id} is too big for one story: the Analyst suggests Requirements.` : `The Analyst suggests splitting ${id} into ${s?.parts.length ?? 'a few'} stories.` };
+    }
     default: {
       const said = cut(t.waiting?.summary ?? now.sentence, 200);
       return { kind: 'other', words: said.startsWith(id) ? said : `${id}: ${said}` };

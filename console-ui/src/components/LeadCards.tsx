@@ -8,6 +8,7 @@ import { usePrefs } from '../lib/prefs';
 import { typedDir } from '../lib/lang';
 import { Cmd, Written } from './ui';
 import { DecideCard } from './decide/DecideCard';
+import { LeadRequirements, LeadSplit } from './split/LeadSplit';
 
 /**
  * The lead's cards: what it offers to do, each with its level ("On its own", "Needs your OK") and real buttons. A
@@ -39,8 +40,11 @@ const SETTING_NAME: Record<string, string> = {
 /** One card under an answer. */
 export function LeadCardView({ card }: { card: LeadCard }) {
   switch (card.kind) {
+    // More than one story: its parts, Requirements, or one story anyway (components/split).
     case 'draft_story':
-      return <DraftCard card={card} />;
+      return card.split ? <LeadSplit card={card} /> : <DraftCard card={card} />;
+    case 'requirements':
+      return <LeadRequirements card={card} />;
     case 'engineer_report':
       return <ReportCard card={card} />;
     case 'open_story':
@@ -194,7 +198,7 @@ export function OpenButton({ card }: { card: Extract<LeadCard, { kind: 'open_sto
 }
 
 /** A board action, an answer to send, or a setting to save: one press each. */
-function ActionCard({ card }: { card: Exclude<LeadCard, { kind: 'draft_story' | 'engineer_report' | 'open_story' | 'decide' }> }) {
+function ActionCard({ card }: { card: Exclude<LeadCard, { kind: 'draft_story' | 'engineer_report' | 'open_story' | 'decide' | 'requirements' }> }) {
   const { press, busy } = usePress(card);
   const [text, setText] = useState(card.kind === 'send_answer' ? card.text : '');
   const always = canAlwaysAllow(card);

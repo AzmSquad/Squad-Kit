@@ -199,6 +199,7 @@ export function noticeText(n: Notice): { title: string; body: string } {
     plan: t.specApproved ? 'the design is ready for you' : 'the plan is ready for you',
     change: 'a change waits for you',
     depends: 'it needs a ticket that is not merged yet',
+    split: 'the Analyst suggests a split',
     proof: 'the proof is ready to check',
     stuck: 'the squad stopped and needs you',
     quiet: 'a step looks stuck',

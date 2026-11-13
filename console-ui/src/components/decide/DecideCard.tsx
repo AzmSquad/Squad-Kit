@@ -11,6 +11,7 @@ import { isMine, ownerOf, useMe } from '../HandOver';
 import { AskFoot, LET_IT_DECIDE, QuestionsFoot } from './Answers';
 import { Body, OpenLink } from './Body';
 import { useCardBox } from './BoxAsk';
+import { SplitCard } from '../split/SplitCard';
 
 /**
  * A decision only the person can make, in the chat where they talk: a proof to accept, a spec, a plan or a design to
@@ -39,6 +40,8 @@ export function DecideCard({ story, made, fromLead }: { story: string; made?: st
   const me = useMe();
   if (loading) return null;
   const kind = t ? decideKind(t) : null;
+  // The Analyst's split has a card of its own, drawn from the story the same way, and green from its record once decided.
+  if (t && kind === 'split' && (!me || isMine(t, me))) return <SplitCard t={t} />;
 
   if (pressed) {
     // What it showed when pressed, from the story as the board has it now: the proof, the spec or the plan stay on it.

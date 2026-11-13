@@ -546,7 +546,8 @@ function clockWords(iso: string): string {
   return `on ${d.getDate()} ${d.toLocaleString('en', { month: 'short' })}`;
 }
 
-function andWords(xs: string[]): string {
+/** "RO-22", "RO-22 and RO-23", "RO-22, RO-23 and RO-24". */
+export function andWords(xs: string[]): string {
   return xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`;
 }
 

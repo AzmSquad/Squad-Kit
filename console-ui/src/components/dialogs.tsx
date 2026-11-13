@@ -11,6 +11,8 @@ import { OutsideNewButton } from './Outside';
 import { ErrorCard } from './ErrorCard';
 import { clearDrafts, keptOnce, useDraft } from '../lib/drafts';
 import { langProps, typedDir } from '../lib/lang';
+import { WORDS, draftShows, langOf } from '../lib/split';
+import { DraftSizeButtons, DraftSuggestion } from './split/DraftSize';
 
 export interface PickedFile {
   name: string;
@@ -62,6 +64,8 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
   const [startError, setStartError] = useState<string | null>(null);
   const drafting = job?.status === 'working';
   const [gaps, setGaps] = useState<string[] | null>(null);
+  // How its size was settled, sent with Create: judged one story, or made as one over the Analyst's suggestion.
+  const [sized, setSized] = useState<'checked' | 'kept' | 'brd' | null>(null);
   const [title, setTitle] = useDraft(NEW_TICKET, 'title', '');
   const [ask, setAsk] = useDraft(NEW_TICKET, 'ask', '');
   const [kind, setKind] = useDraft<Ticket['kind']>(NEW_TICKET, 'kind', 'feature');
@@ -158,7 +162,11 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
   useEffect(() => {
     if (job?.status === 'done' && job.draft && used.current !== job.id) {
       used.current = job.id;
-      takeDraft(job.draft);
+      // More than one story: its suggestion waits here, and the form only after "as one".
+      if (draftShows(job.draft) === 'one') {
+        takeDraft(job.draft);
+        setSized('checked');
+      }
     }
   }, [job]);
 
@@ -194,6 +202,7 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
   const discard = () => {
     letGo();
     setGaps(null);
+    setSized(null);
     setSuggested(null);
     for (const clear of [setTitle, setAsk, setWhat, setExpected, setWhere]) clear('');
     for (const clear of [setCriteria, setRules, setEdgeCases, setSteps]) clear([]);
@@ -225,8 +234,8 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
     .filter(Boolean)
     .join('\n\n');
   const body = isBug
-    ? { title, ask: bugAsk, kind, severity, priority: severity === 'stops-work' ? 'high' : severity === 'small' ? 'low' : 'normal', track, files: upload, talkFirst: talkFirst && track === 'full', noNewTests, key: createKey }
-    : { title, ask, kind, track, priority, criteria, rules, edgeCases, files: upload, talkFirst: talkFirst && track === 'full', noNewTests, key: createKey };
+    ? { title, ask: bugAsk, kind, severity, priority: severity === 'stops-work' ? 'high' : severity === 'small' ? 'low' : 'normal', track, files: upload, talkFirst: talkFirst && track === 'full', noNewTests, key: createKey, ...(sized ? { sized } : {}) }
+    : { title, ask, kind, track, priority, criteria, rules, edgeCases, files: upload, talkFirst: talkFirst && track === 'full', noNewTests, key: createKey, ...(sized ? { sized } : {}) };
 
   const submit = () =>
     act.mutate(
@@ -258,6 +267,8 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
 
   // The Analyst stopped (an error, or the person pressed Cancel): the ways on show inside the dialog, not in a toast.
   const stuck = Boolean(startError) || job?.status === 'failed' || job?.status === 'cancelled';
+  // More than one story, for the text as it is now: the suggestion and its own buttons, before anything is created.
+  const bigDraft = mode === 'paste' && job?.status === 'done' && draftShows(job.draft) !== 'one' && job.text === pasted ? job : null;
   const cmd =
     mode === 'paste'
       ? `squad new --from ${shellQuote(pasted.trim().split('\n')[0]?.slice(0, 40) || 'your message')}`
@@ -284,25 +295,41 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
       losing={files.length && !act.isPending ? (files.length === 1 ? 'the attached file' : `the ${files.length} attached files`) : null}
       icon={<span className="glyph"><Plus size={15} /></span>}
       footer={
-        <>
-          {mode === 'paste' ? (
-            stuck ? null : (
-              <button className="btn pri" disabled={(!pasted.trim() && !files.length) || drafting} onClick={() => void fill()}>
-                {drafting ? <Loader2 size={15} className="spin" /> : <Sparkles size={15} />} {drafting ? 'Filling in…' : 'Fill in the ticket'}
+        bigDraft ? (
+          <DraftSizeButtons
+            job={bigDraft}
+            onOne={(as) => {
+              setSized(as);
+              takeDraft(bigDraft.draft!);
+            }}
+            onCancel={close}
+            onMade={(first) => {
+              clearDrafts(PROJECT, NEW_TICKET);
+              if (first) onCreated(first);
+              onClose();
+            }}
+          />
+        ) : (
+          <>
+            {mode === 'paste' ? (
+              stuck ? null : (
+                <button className="btn pri" disabled={(!pasted.trim() && !files.length) || drafting} onClick={() => void fill()}>
+                  {drafting ? <Loader2 size={15} className="spin" /> : <Sparkles size={15} />} {drafting ? 'Filling in…' : 'Fill in the ticket'}
+                </button>
+              )
+            ) : (
+              <button className="btn pri" disabled={!title.trim() || act.isPending} onClick={submit}>
+                <Plus size={15} /> Create ticket
               </button>
-            )
-          ) : (
-            <button className="btn pri" disabled={!title.trim() || act.isPending} onClick={submit}>
-              <Plus size={15} /> Create ticket
-            </button>
-          )}
-          {/* While the Analyst works, Cancel stops it; closing the window (the cross) leaves it working. */}
-          <button className="btn" onClick={drafting ? () => void cancel() : close}>{act.isPending ? 'Close' : 'Cancel'}</button>
-          {typed && !drafting && <DraftNote onClear={clearAll} />}
-          {!typed && !drafting && <OutsideNewButton />}
-          <span className="grow" />
-          <Cmd text={cmd} />
-        </>
+            )}
+            {/* While the Analyst works, Cancel stops it; closing the window (the cross) leaves it working. */}
+            <button className="btn" onClick={drafting ? () => void cancel() : close}>{act.isPending ? 'Close' : 'Cancel'}</button>
+            {typed && !drafting && <DraftNote onClear={clearAll} />}
+            {!typed && !drafting && <OutsideNewButton />}
+            <span className="grow" />
+            <Cmd text={cmd} />
+          </>
+        )
       }
     >
       <div className="seg" style={{ marginBottom: 14, width: 'fit-content' }}>
@@ -318,13 +345,13 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
 
       {mode === 'paste' ? (
         <>
-          {!drafting && <p>Paste an idea, a WhatsApp message or one line of business. Add screenshots if you have them. The Analyst fills in the ticket, and you check every field before it is created.</p>}
+          {!drafting && !bigDraft && <p>Paste an idea, a WhatsApp message or one line of business. Add screenshots if you have them. The Analyst fills in the ticket, and you check every field before it is created.</p>}
           <div className="field">
             <label htmlFor="nt-paste">The idea or message</label>
             <textarea
               id="nt-paste"
               className="textarea"
-              style={{ minHeight: drafting ? 70 : 150 }}
+              style={{ minHeight: drafting || bigDraft ? 70 : 150 }}
               autoFocus
               readOnly={drafting}
               dir={typedDir(pasted)}
@@ -345,9 +372,12 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
               {files.length > 0 && <p className="note" style={{ margin: '-6px 0 12px' }}>With {files.map((f) => f.name).join(', ')}</p>}
               <DraftProgress job={job} />
             </>
+          ) : bigDraft ? (
+            files.length > 0 && <p className="note" style={{ margin: '-6px 0 12px' }}>With {files.map((f) => f.name).join(', ')}</p>
           ) : (
             <FilePicker files={files} onAdd={addFiles} onRemove={(i) => setFiles((now) => now.filter((_, k) => k !== i))} />
           )}
+          {bigDraft && <DraftSuggestion job={bigDraft} />}
           {stuck && (
             <DraftStopped
               error={startError ?? (job?.status === 'failed' ? (job.error ?? 'Something went wrong.') : null)}
@@ -362,6 +392,7 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose(): void; onCre
             <div className="drafted">
               <b><Sparkles size={13} /> The Analyst filled this in from your message.</b> Check it and change anything.{' '}
               <button className="linkbtn" onClick={discard}>Discard this draft</button>
+              {sized === 'brd' && <div style={{ marginTop: 6 }}>{WORDS[langOf(pasted)].brd.also}</div>}
               {gaps.length > 0 && (
                 <>
                   <div style={{ marginTop: 6 }}>Still unclear, so the Analyst will ask you after you create it:</div>

@@ -40,6 +40,8 @@ import { useReveal } from '../lib/reveal';
 import { isAgent, keyOf, useWriting } from '../lib/writing';
 import { BoxLine, BoxOnly, ChatBox, useBoxAsk, type BoxAsk } from './decide/BoxAsk';
 import { DecideCard } from './decide/DecideCard';
+import { SplitDone } from './split/SplitCard';
+import { SizeHint } from './split/SizeHint';
 import { detect, firstWords, langLabel, textClass } from '../lib/lang';
 import { ChatMarkdown, Folded, lineCount } from './ChatMarkdown';
 import { AUDIO, ChatFiles, type OpenDoc } from './ChatFiles';
@@ -434,6 +436,7 @@ export function ChatView({ id, size, onOpenDoc, onFull, onPanel }: { id: string;
         <div className={`chat-v csize-${size}`}>
           <div className="cthread" ref={thread}>
             <div className="ccol" ref={col}>
+              <SplitDone t={t} />
               {decide}
               <div className="cempty inline">
                 <p>No talk on {t.id} yet.</p>
@@ -513,6 +516,7 @@ export function ChatView({ id, size, onOpenDoc, onFull, onPanel }: { id: string;
               // While the answer waits for the usage limit, the note says until when instead of the dots.
               c.thinking && messages.at(-1)?.note !== 'waits' && <Thinking role={c.with} steps={stepsFor(lastYou?.at ?? messages.at(-1)?.at)} hasMessage={Boolean(lastYou)} />
             )}
+            <SplitDone t={t} />
             {decide}
           </div>
         </div>
@@ -675,6 +679,7 @@ function YouMessage({ t, m, fresh, onOpenDoc, onReply }: { t: Ticket; m: ChatMes
         {voice ? ' · written out from your voice' : ''}
       </span>
       <MsgActions t={t} m={m} holder={holder} onReply={onReply} />
+      {m.big && <SizeHint story={t.id} m={m} />}
     </div>
   );
 }

@@ -76,6 +76,7 @@ import {
 import { runRmFeature, runRmPlan, runRmStory } from './commands/rm/index.js';
 import { runArchive, runDelete } from './commands/delete.js';
 import { runBranches, runBringIn, runBuild, runCheckMerge, runDepends } from './commands/depends.js';
+import { runSplit } from './commands/split.js';
 import { runDecided } from './commands/decided.js';
 import { runConfigBudget, runConfigPayment, runCost } from './commands/cost.js';
 import { runAuthLogin, runAuthStatus, runAuthLogout } from './commands/auth/index.js';
@@ -553,6 +554,9 @@ leadCmd
   .description('Press a card, the same as its button: Create story, Allow once, Send, Save, Prepare a report')
   .option('--always', 'Turn "Always allow" on for this kind first (only giving more time, taking the pictures again, starting the app, the morning brief)')
   .option('--dismiss', 'Not now: put the card aside')
+  .option('--split', 'A story draft that is more than one story: create its stories')
+  .option('--one', 'A story draft that is more than one story: create it as one story anyway')
+  .option('--requirements', 'A story draft of a whole document: send it to Requirements')
   .action(wrapArgs(runLeadCard));
 leadCmd
   .command('rules')
@@ -662,8 +666,20 @@ program
   .option('--rule <text>', 'A business rule (repeat for more)', more, [])
   .option('--edge <text>', 'An edge case to handle (repeat for more)', more, [])
   .option('--attach <file>', 'Attach a file: a screenshot, a document (repeat for more)', more, [])
-  .option('--from <text>', 'Paste an idea or a chat message; the Analyst fills in the ticket for you to check')
+  .option('--from <text>', 'Paste an idea or a chat message; the Analyst fills in the ticket for you to check, or suggests a split when it is more than one story')
+  .option('--split', 'With --from: when the Analyst suggests a split, create its stories (the first starts, the others wait in Tickets)')
+  .option('--one', 'With --from: create it as one story, even when the Analyst suggests a split')
+  .option('--requirements', 'With --from: send the text and files to Requirements as a whole document')
   .action(wrapArgs(runNew));
+program
+  .command('split <ticket>')
+  .description("Show the Analyst's suggestion to split a story that is too big, and choose: nothing changes until you do")
+  .option('--yes', 'Split it: the story keeps the first part, the others wait in Tickets with "depends on"')
+  .option('--keep', 'Keep it as one story')
+  .option('--change <how>', 'Tell the Analyst how to split it; it writes the split again')
+  .option('--requirements', 'Send a whole document to Requirements')
+  .option('--chat-requirements', 'Send the whole document pasted into its talk to Requirements, as the hint under it does')
+  .action(wrapArgs(runSplit));
 program
   .command('pull <ref>')
   .description('Start a ticket from an Azure DevOps work item, for example 35 or AB#35')

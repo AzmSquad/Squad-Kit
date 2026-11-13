@@ -36,6 +36,7 @@ import { DEFAULT_NETWORK, NETWORK_LEVELS, NETWORK_NAME, NETWORK_WORDS, PRIVATE, 
 import { KNOWN_BAD_GROUPS, RECOMMENDED_GROUPS } from './network-lists.js';
 import { TRY_YIELDS_AFTER_MS } from './try-app.js';
 import { RETRY_MS } from './usage-limit.js';
+import { BRD_PAGES, BRD_REQUIREMENT_IDS, BRD_WORDS, FEW_STORIES_IDS, FEW_STORIES_WORDS } from './story-size.js';
 import { LONG_MS, QUIET_MS } from './watchdog.js';
 import { MAX_API_CALLS, MAX_SHOTS_PER_CALL, MAX_STUCK, MISTAKES_TO_STOP, REFUSALS_TO_STOP, type WindowTool } from './window.js';
 import { ACTIONS, ALLOWABLE, ALWAYS_WORDS, leadCan } from './lead/can.js';
@@ -119,6 +120,7 @@ function lineStages(): HarnessStage[] {
       g('first-story', 'A project with no code starts with one story', 'squad-kit adds Set up the product: it picks the tools and makes a first version. Nothing else starts until it merges, so every story builds on the same start.', 'Another ticket waits, and says which one it waits for.'),
     ]),
     stage('story', 'Story', 'The Analyst reads your story and asks only what it leaves open.', on(you('You answer'), skip('No questions'), skip('Approved before')), [
+      y('split', 'A story too big for one', `squad-kit counts it first, with no AI, leaving out code, tables and logs: ${FEW_STORIES_WORDS} words or ${FEW_STORIES_IDS} requirement numbers is never one story, and ${BRD_WORDS} words, ${BRD_PAGES} pages or ${BRD_REQUIREMENT_IDS} requirement numbers is a whole requirements document. The Analyst judges the rest and suggests a split, or Requirements. Bugs and stories from a tracker are never split. Nothing is split or sent until you press.`, 'Keep it as one, or say how to split it.', { skip: ON_ITS_OWN }),
       g('questions', 'Only business questions reach you', 'The Analyst asks about gaps and clashes. Asks about settings, secrets or code history are refused before you see them.', undefined, { skip: ON_ITS_OWN }),
       y('spec', 'You approve what gets built', 'The story and its "done when" list wait for you.', 'You ask for a change and it is rewritten.', { skip: ON_ITS_OWN, note: { auto: 'Approved with the breakdown.' } }),
       y('ask', 'An agent can stop and ask you', 'The Architect, Builder or Reviewer can ask one plain question. It passes the same filter.', undefined, { note: { auto: 'Only for a critical gap or a clash. Small choices go under Decided for you.' } }),
@@ -374,6 +376,7 @@ function rowDetails(meta: BoardMeta | undefined, root: string | undefined): Reco
     'first-story': code('board/first-story.ts'),
     questions: code('engine/question-filter.ts', ['Refused', Object.values(HARNESS_REFUSED).join(', ')], ['Tries', `${TECHNICAL_TRIES} back to its agent`]),
     spec: code('board/actions.ts', ['See it in', tab('Spec')]),
+    split: code('board/split.ts', ['Counts', 'src/engine/story-size.ts']),
     ask: code('engine/live.ts'),
     chat: code('board/actions.ts'),
     plan: code('board/actions.ts', ['See it in', tab('Design')]),

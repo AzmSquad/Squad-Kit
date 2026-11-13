@@ -11,6 +11,7 @@ import { needsYou, squadNow } from '../engine/lead/needs-you.js';
 import { leadRules, listConversations, readConversation, requireConversation, saveLeadRules, spentToday, summaryOf } from '../engine/lead/store.js';
 import type { LeadCard, LeadContext, LeadConversation, LeadStep, LeadSummary, LeadTurn, MorningBrief, NeedsYouItem, SquadNowItem } from '../engine/lead/types.js';
 import { boardApi, type BoardApi } from './app.js';
+import { splitLines } from './split.js';
 
 /**
  * The Squad lead in the terminal, the same as on the board: `squad ask "<question>"` prints the work trace as it goes,
@@ -56,7 +57,8 @@ function cost(n: number | undefined): string {
 export function cardLines(card: LeadCard): string[] {
   const level = card.level === 1 ? 'On its own' : 'Needs your OK';
   const what =
-    card.kind === 'draft_story' ? `Story draft (${card.storyKind}): ${card.title}`
+    card.kind === 'draft_story' ? (card.split?.size === 'brd' ? `Too big for one story: ${card.title}` : card.split ? `Split into ${card.split.parts.length} stories: ${card.title}` : `Story draft (${card.storyKind}): ${card.title}`)
+    : card.kind === 'requirements' ? 'Too big for one story: send it to Requirements'
     : card.kind === 'board_action' ? `${ACTIONS[card.action].name}${card.story ? ` on ${card.story}` : ''}`
     : card.kind === 'send_answer' ? `Send to ${card.story}: "${card.text}"`
     : card.kind === 'settings_change' ? `Save ${card.setting} = ${card.value}`
@@ -65,17 +67,20 @@ export function cardLines(card: LeadCard): string[] {
     : 'Prepare a report for an engineer';
   const lines = [`  ${kleur.bold(what)}  ${grey(level)}`];
   if (card.why) lines.push(`    ${card.why}`);
-  if (card.kind === 'draft_story') {
+  if (card.kind === 'draft_story' && card.split) lines.push(...splitLines(card.split).map((l) => `  ${l}`));
+  else if (card.kind === 'draft_story') {
     lines.push(`    ${card.ask}`);
     card.doneWhen.forEach((d, i) => lines.push(`    ${i + 1}. ${d.text} ${grey(`[${d.proof}]`)}`));
     for (const w of card.warnings) lines.push(`    ${kleur.yellow(`! ${w}`)}`);
   }
+  if (card.kind === 'requirements' && card.found.length) lines.push(`    ${grey(`squad-kit's own count: ${card.found.join(', ')}`)}`);
   if (card.byItself) lines.push(`    ${kleur.green(card.byItself)}`);
   else if (card.status === 'done') lines.push(`    ${grey(`Done: ${card.result ?? ''}`)}`);
   else if (card.status === 'dismissed') lines.push(`    ${grey('Put aside')}`);
   else {
     if (card.result) lines.push(`    ${kleur.yellow(card.result)}`);
-    lines.push(`    ${cmd(card.command)}${card.allowAlways ? `${grey('   or always: ')}${cmd(cardCommand(card.id, true))}` : ''}`);
+    if (card.kind === 'draft_story' && card.split) lines.push(`    ${cmd(`${card.command} ${card.split.size === 'brd' ? '--requirements' : '--split'}`)}${grey('   or one story: ')}${cmd(`${card.command} --one`)}`);
+    else lines.push(`    ${cmd(card.command)}${card.allowAlways ? `${grey('   or always: ')}${cmd(cardCommand(card.id, true))}` : ''}`);
     if (card.asksFirst) lines.push(`    ${grey('It asks first: this came from what the lead read, not from your message.')}`);
   }
   return lines;
@@ -87,7 +92,7 @@ export function turnLines(turn: LeadTurn): string[] {
   const a = turn.answer;
   if (turn.error) return [`  ${kleur.yellow(turn.error)}`];
   if (!a) return [];
-  const how = a.by === 'note' ? "from squad-kit's notes, no AI" : a.by === 'record' ? "from the story's live record, no AI" : a.by === 'refusal' ? 'squad-kit refused, no AI' : a.by === 'limit' ? 'no AI' : `${turn.seconds ?? 0} s, ${cost(turn.costUsd)}${turn.model ? `, ${turn.model}` : ''}`;
+  const how = a.by === 'note' ? "from squad-kit's notes, no AI" : a.by === 'record' ? "from the story's live record, no AI" : a.by === 'refusal' ? 'squad-kit refused, no AI' : a.by === 'check' ? "squad-kit's own count, no AI" : a.by === 'limit' ? 'no AI' : `${turn.seconds ?? 0} s, ${cost(turn.costUsd)}${turn.model ? `, ${turn.model}` : ''}`;
   lines.push(`  ${kleur.bold(a.headline)}  ${grey(how)}`);
   for (const l of a.body.split('\n')) lines.push(`  ${l}`);
   for (const e of a.evidence) lines.push(`  ${grey('Picture:')} ${e.caption} ${grey(e.story ? `${e.file}, from ${e.story}'s proof` : e.file)}`);
@@ -213,10 +218,12 @@ export async function runLeadShow(id: string): Promise<void> {
 }
 
 /** `squad lead run <card> [--always] [--dismiss]`: presses a card, the same as its button. */
-export async function runLeadCard(id: string, o: { always?: boolean; dismiss?: boolean } = {}): Promise<void> {
+export async function runLeadCard(id: string, o: { always?: boolean; dismiss?: boolean; split?: boolean; one?: boolean; requirements?: boolean } = {}): Promise<void> {
   const bp = board();
   const api = boardApi(bp);
-  const payload = { ...(o.always ? { always: true } : {}), ...(o.dismiss ? { dismiss: true } : {}) };
+  // A story draft that is more than one story: its parts, Requirements, or one story anyway.
+  const choice = o.split ? ('split' as const) : o.requirements ? ('requirements' as const) : o.one ? ('one' as const) : undefined;
+  const payload = { ...(o.always ? { always: true } : {}), ...(o.dismiss ? { dismiss: true } : {}), ...(choice ? { choice } : {}) };
   const r = api
     ? await api.call<{ card: LeadCard }>('POST', `/lead/cards/${encodeURIComponent(id)}/run`, payload)
     : await runCard(bp, id, { ...payload, find: (x) => needsYou(bp).flatMap((n) => n.cards).find((c) => c.id === x) });

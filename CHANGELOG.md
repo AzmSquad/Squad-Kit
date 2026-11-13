@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.18] — 2026-11-13
+
+### Added
+
+- **A story too big for one is caught before any questions.** squad-kit counts it first, with no AI, leaving out code,
+  tables and logs: the words, the pages of an attached Word or PDF file, requirement numbers, headings and "must"
+  lines, separate asks, and the roles, screens and flows it names. A short story goes on as before. The Analyst judges
+  the rest, with the breakdown's sizes in plain words: About a day, A few days, A week or more. Bugs and stories pulled
+  from a tracker are never split.
+- **The Analyst suggests a split.** Its parts come in the order to build them, each with its size and what it needs.
+  On a story, the card waits in the Analyst's popup and the Now tab: Split into N, Keep as one, or Change the split
+  (your note goes in the chat box). After Split the story keeps the first part, the Analyst asks part 1's questions,
+  and the other parts wait in Tickets with "depends on". Each part has its own "done when" lines. Nothing changes until
+  you press.
+- **New ticket shows the same suggestion before anything is created:** Create N stories, Create as one story, Cancel.
+- **A whole requirements document goes to Requirements.** "Too big for one story", with a rough count by part, then
+  Send to Requirements (your text and files go with it), Make one story anyway (with a short warning), or Cancel.
+- **The Squad lead never drafts one giant story.** Its draft goes through the same count and offers the split or Send
+  to Requirements. A requirements document pasted to the lead gets that card at once, with no AI. A big text pasted
+  into a story's talk gets a hint under it.
+- **Every button has its call and its command:** `squad split <ticket> --yes | --keep | --change "…" | --requirements`,
+  `squad new --from "…" --split | --one | --requirements`, `squad lead run <card> --split | --one | --requirements`.
+- The cards speak the language you wrote in, right to left in Arabic. The Harness page shows the size rules.
+
 ## [1.3.17] — 2026-11-12
 
 ### Added

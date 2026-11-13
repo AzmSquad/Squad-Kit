@@ -1,7 +1,11 @@
 import { plainArabic } from '../../board/ask.js';
 import { addNote, answerAgent, BoardActionError, createTicket, decideStuckBeside, keepWaiting, restartStep, startTicket, stopTicket } from '../../board/actions.js';
 import { findApp } from '../../board/apps.js';
-import { addActivity, readMeta, readTicket, requireTicket, updateTicket, type BoardPaths } from '../../board/store.js';
+import { addActivity, now, readMeta, readTicket, requireTicket, updateTicket, type BoardPaths } from '../../board/store.js';
+import { AS_ONE_ANYWAY, createParts, sendToRequirements } from '../../board/split.js';
+import { andWords } from '../../board/requirements.js';
+import { checkSize } from '../story-size.js';
+import { cleanSplit } from '../split-prompts.js';
 import { saveSettings, type SettingsInput } from '../../board/settings.js';
 import type { Ticket } from '../../board/types.js';
 import { waitKey } from '../../board/wait-key.js';
@@ -38,6 +42,9 @@ export interface CardInput {
   text?: unknown;
   setting?: unknown;
   value?: unknown;
+  size?: unknown;
+  parts?: unknown;
+  areas?: unknown;
 }
 
 const PROOFS: ProofKind[] = ['screen', 'api', 'data', 'test'];
@@ -115,6 +122,7 @@ const DECIDE_LABEL: Partial<Record<NonNullable<Ticket['waiting']>['kind'], strin
   plan: 'Approve plan',
   questions: 'Answer',
   ask: 'Answer',
+  split: 'Decide the split',
 };
 
 /**
@@ -139,8 +147,11 @@ export function storyCard(id: string, t: Ticket, tab?: StoryTab, why?: string): 
   return (t.waiting && (!tab || tab === wait) ? decideCard(id, t, why) : null) ?? openCard(id, t, tab ?? wait, why);
 }
 
-/** The card, or the "never" it falls under, or why it was left out (it is no card squad-kit has, or not for this person). */
-export function makeCard(bp: BoardPaths, raw: CardInput, id: string, role?: string): { card: LeadCard } | { refused: Never } | { left: string } {
+/**
+ * The card, or the "never" it falls under, or why it was left out (it is no card squad-kit has, or not for this person).
+ * `asked`: the person's message, which squad-kit counts itself before a story is drafted from it (ADR-004).
+ */
+export function makeCard(bp: BoardPaths, raw: CardInput, id: string, role?: string, asked = ''): { card: LeadCard } | { refused: Never } | { left: string } {
   const kind = str(raw.kind, 60).toLowerCase().replace(/[\s-]+/g, '_');
   const why = str(raw.why, 300);
   const base = { id, command: cardCommand(id), status: 'open' as const, ...(why ? { why } : {}) };
@@ -153,7 +164,11 @@ export function makeCard(bp: BoardPaths, raw: CardInput, id: string, role?: stri
     if (!title || !doneWhen.length) return { left: 'a story draft with no title or "done when"' };
     const storyKind = raw.storyKind === 'bug' || kind === 'bug' || kind === 'draft_bug' ? 'bug' : 'feature';
     const warnings = (Array.isArray(raw.warnings) ? raw.warnings : []).map((w) => str(w, 300)).filter(Boolean).slice(0, 4);
-    return { card: { ...base, kind: 'draft_story', level: 2, label: 'Create story', title, ask: str(raw.ask, 2000) || title, storyKind, doneWhen, warnings } };
+    // More than one story, by squad-kit's own count of the person's words or by the lead: a split or Requirements instead.
+    const said = Array.isArray(raw.parts) && raw.parts.length >= 2 ? 'few' : raw.size;
+    const split = cleanSplit({ split: { size: said, why: raw.why, parts: raw.parts, areas: raw.areas } }, checkSize({ text: asked }), now(), doneWhen.length);
+    const label = split ? (split.size === 'brd' ? 'Send to Requirements' : `Create ${split.parts.length} stories`) : 'Create story';
+    return { card: { ...base, kind: 'draft_story', level: 2, label, title, ask: str(raw.ask, 2000) || title, storyKind, doneWhen, warnings, ...(split ? { split } : {}) } };
   }
   if (kind === 'board_action' || kind === 'action') {
     const name = str(raw.action, 60).toLowerCase().replace(/[\s-]+/g, '_');
@@ -303,6 +318,15 @@ function choiceOf(t: Ticket, does: 'retry' | 'engineer', action: string): number
   return i;
 }
 
+/** What the person chose on a draft that is more than one story: its parts, Requirements, or one story anyway. */
+export type DraftChoice = 'split' | 'requirements' | 'one';
+
+/** The person's own message a card answers, from the conversation it is in. */
+function askedText(bp: BoardPaths, conversation: string | undefined, card: LeadCard): string {
+  if (!conversation) return '';
+  return requireConversation(bp, conversation).turns.find((t) => t.answer?.cards.some((c) => c.id === card.id))?.ask.text ?? '';
+}
+
 /** Edits the person made to a card before pressing it: a draft's words, or an answer's. */
 export interface CardEdits {
   title?: string;
@@ -312,11 +336,31 @@ export interface CardEdits {
 }
 
 /** Runs one card through the board's own function, and says what it did. */
-export async function doCard(bp: BoardPaths, card: LeadCard, o: { conversation?: string; edits?: CardEdits } = {}): Promise<{ result: string; story?: string; report?: string }> {
+export async function doCard(bp: BoardPaths, card: LeadCard, o: { conversation?: string; edits?: CardEdits; choice?: DraftChoice } = {}): Promise<{ result: string; story?: string; stories?: string[]; report?: string; breakdown?: string }> {
   const e = o.edits ?? {};
   switch (card.kind) {
     case 'draft_story': {
       const doneWhen = (e.doneWhen?.length ? e.doneWhen : card.doneWhen).filter((d) => d.text?.trim());
+      const s = card.split;
+      const choice = o.choice ?? (s ? null : 'one');
+      // Never on the lead's own say: a draft that is more than one story waits for the person's choice.
+      if (!choice) throw new BoardActionError(s!.size === 'brd' ? 'Choose: send it to Requirements, or make one story anyway (--requirements or --one).' : `Choose: create ${s!.parts.length} stories, or one story (--split or --one).`);
+      // Only what the card offers: Create N stories on a split, Send to Requirements on a whole document, one story on both.
+      if (s && choice !== 'one' && choice !== (s.size === 'few' ? 'split' : 'requirements')) {
+        throw new BoardActionError(s.size === 'few' ? `This draft is ${s.parts.length} stories: create them, or one story (--split or --one).` : 'This draft is a whole requirements document: send it to Requirements, or make one story anyway (--requirements or --one).');
+      }
+      const asked = askedText(bp, o.conversation, card);
+      if (choice === 'requirements') {
+        const b = sendToRequirements(bp, { text: asked || `${card.title}\n\n${card.ask}`, name: e.title?.trim() || card.title });
+        return { result: `Sent to Requirements as ${b.id}. The Analyst reads it first.`, breakdown: b.id };
+      }
+      if (choice === 'split') {
+        if (s?.size !== 'few') throw new BoardActionError('This draft has no split. Create it as one story.');
+        // Its "done when" lines are for the whole text: each part has its own.
+        const made = createParts(bp, s, { title: e.title?.trim() || card.title, ask: asked || card.ask, kind: card.storyKind }, { startFirst: false, key: card.id, ...(o.conversation ? { lead: o.conversation } : {}) });
+        const ids = made.map((t) => t.id);
+        return { result: `Created ${andWords(ids)}. Nothing starts until you press Start.`, story: ids[0]!, stories: ids };
+      }
       const t = createTicket(bp, {
         title: e.title?.trim() || card.title,
         ask: e.ask?.trim() || card.ask,
@@ -325,12 +369,13 @@ export async function doCard(bp: BoardPaths, card: LeadCard, o: { conversation?:
         proofs: doneWhen.map((d) => (PROOFS.includes(d.proof) ? d.proof : 'screen')),
         waitsToStart: true,
         key: card.id,
+        split: s ? { decided: { choice: 'keep', by: readMeta(bp).user.name, at: now() } } : { checked: now() },
       });
       updateTicket(bp, t.id, (x) => {
         if (o.conversation) x.lead = o.conversation;
         addActivity(x, 'you', 'Made it from a conversation with the Squad lead. Nothing starts until you press Start');
       });
-      for (const w of card.warnings) addNote(bp, t.id, { text: w, kind: 'note' });
+      for (const w of [...card.warnings, ...(s?.size === 'brd' ? [AS_ONE_ANYWAY] : [])]) addNote(bp, t.id, { text: w, kind: 'note' });
       return { result: `Created ${t.id}. Nothing starts until you press Start.`, story: t.id };
     }
     case 'board_action':
@@ -350,6 +395,12 @@ export async function doCard(bp: BoardPaths, card: LeadCard, o: { conversation?:
     // Never pressed from here: its buttons are the board's own, and only the person presses them.
     case 'decide':
       return { result: `Only you can decide ${card.story}, with its buttons in the chat or on the board: ${card.open}. In the terminal: ${card.command}` };
+    case 'requirements': {
+      const asked = askedText(bp, o.conversation, card);
+      if (!asked) throw new BoardActionError('The text is gone from this conversation. Paste it on the Requirements page.');
+      const b = sendToRequirements(bp, { text: asked });
+      return { result: `Sent to Requirements as ${b.id}. The Analyst reads it first.`, breakdown: b.id };
+    }
     case 'engineer_report': {
       if (!o.conversation) throw new BoardActionError('A report needs the conversation it is about.');
       const report = engineerReport(bp, requireConversation(bp, o.conversation));
@@ -416,7 +467,7 @@ async function doAction(bp: BoardPaths, action: LeadAction, card: { story?: stri
 export async function runCard(
   bp: BoardPaths,
   id: string,
-  o: { always?: boolean; dismiss?: boolean; edits?: CardEdits; find?: (id: string) => LeadCard | undefined } = {},
+  o: { always?: boolean; dismiss?: boolean; edits?: CardEdits; choice?: DraftChoice; find?: (id: string) => LeadCard | undefined } = {},
 ): Promise<{ card: LeadCard; conversation?: string }> {
   const rail = id.startsWith('now.');
   const conversationId = rail ? undefined : id.split('.')[0]!;
@@ -435,8 +486,16 @@ export async function runCard(
   if (o.dismiss) next = { ...card, status: 'dismissed' };
   else {
     try {
-      const done = await doCard(bp, card, { ...(conversationId ? { conversation: conversationId } : {}), ...(o.edits ? { edits: o.edits } : {}) });
-      next = { ...card, status: 'done', result: done.result, ...(done.story && card.kind === 'draft_story' ? { story: done.story } : {}), ...(done.report && card.kind === 'engineer_report' ? { report: done.report } : {}) };
+      const done = await doCard(bp, card, { ...(conversationId ? { conversation: conversationId } : {}), ...(o.edits ? { edits: o.edits } : {}), ...(o.choice ? { choice: o.choice } : {}) });
+      next = {
+        ...card,
+        status: 'done',
+        result: done.result,
+        ...(done.story && card.kind === 'draft_story' ? { story: done.story } : {}),
+        ...(done.stories && card.kind === 'draft_story' ? { stories: done.stories } : {}),
+        ...(done.breakdown && (card.kind === 'requirements' || card.kind === 'draft_story') ? { breakdown: done.breakdown } : {}),
+        ...(done.report && card.kind === 'engineer_report' ? { report: done.report } : {}),
+      };
     } catch (err) {
       if (conversationId) saveCard(bp, conversationId, { ...card, result: (err as Error).message });
       throw err;

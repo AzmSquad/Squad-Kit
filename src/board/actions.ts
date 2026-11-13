@@ -68,6 +68,7 @@ import { noteGates, releaseGatesDue, runGatesAt, runReleaseGates } from '../engi
 import { repoLabel } from './parts.js';
 import { bringInAgain } from './bring-in.js';
 import { SELF_MERGED, SELF_NO_RELEASE, isSelfProject } from '../engine/self-project.js';
+import { bigText } from './split.js';
 
 /** Every person-facing action lives here, so the board and the terminal do exactly the same thing. */
 
@@ -130,6 +131,8 @@ export interface NewTicketInput {
   waitsToStart?: boolean;
   /** On a workspace of several repos: the repo it changes. */
   repo?: string;
+  /** Its size was judged before it was made, and what the person chose (board/split.ts). */
+  split?: Ticket['split'];
 }
 
 /** A file the person added to a ticket, sent as base64 so the board and the terminal send it the same way. */
@@ -208,6 +211,7 @@ export function createTicket(bp: BoardPaths, input: NewTicketInput): Ticket {
     ...(input.kind === 'bug' && input.severity ? { severity: input.severity } : {}),
     ...(input.oldTests?.length ? { oldTests: input.oldTests } : {}),
     ...(input.repo ? { repo: input.repo } : {}),
+    ...(input.split ? { split: input.split } : {}),
     ...(input.fromBreakdown
       ? {
           breakdown: { id: input.fromBreakdown.id, item: input.fromBreakdown.item },
@@ -1258,7 +1262,9 @@ export function sendChat(bp: BoardPaths, id: string, text: string, uploads: Uplo
   const files = saveTicketUploads(bp, t0.id, uploads);
   return updateTicket(bp, id, (t) => {
     const c = t.chat!;
-    c.messages.push({ who: 'you', text: msg, at: now(), ...(files.length ? { files } : {}) });
+    // A text that looks like several stories, or a whole document, gets a hint under it: a talk beside the work changes nothing.
+    const big = c.beside ? bigText(msg) : undefined;
+    c.messages.push({ who: 'you', text: msg, at: now(), ...(files.length ? { files } : {}), ...(big ? { big } : {}) });
     if (files.length) t.attachments = [...(t.attachments ?? []), ...files];
     c.thinking = true;
     c.stopping = undefined;

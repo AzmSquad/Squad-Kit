@@ -13,7 +13,7 @@ export type Role = 'analyst' | 'architect' | 'spec' | 'builder' | 'tester' | 're
 /** Who wrote an activity line or a thread message. */
 export type Actor = Role | 'you' | 'squad';
 
-export type WaitingKind = 'questions' | 'spec' | 'plan' | 'proof' | 'stuck' | 'release' | 'ask' | 'yours' | 'chat' | 'change' | 'depends';
+export type WaitingKind = 'questions' | 'spec' | 'plan' | 'proof' | 'stuck' | 'release' | 'ask' | 'yours' | 'chat' | 'change' | 'depends' | 'split';
 
 export interface Waiting {
   kind: WaitingKind;
@@ -51,6 +51,10 @@ export interface ChatMessage {
   options?: string[];
   /** A note from squad-kit: you stopped the answer, or the agent could not answer. */
   note?: 'stopped' | 'failed' | 'waits';
+  /** You pasted a text that looks like several stories or a whole requirements document: a hint shows under it. */
+  big?: 'few' | 'brd';
+  /** That whole document was sent to Requirements from the hint: the breakdown it became. */
+  breakdown?: string;
 }
 
 export interface AgentChat {
@@ -353,6 +357,8 @@ export interface TicketDraft {
   rules: string[];
   edgeCases: string[];
   gaps: string[];
+  /** More than one story: the Analyst's split, or a whole requirements document. The fields above are for one story anyway. */
+  split?: SplitSuggestion;
 }
 
 /** A draft the Analyst is writing (src/engine/draft.ts). It waits under New ticket until it is used. */
@@ -529,6 +535,40 @@ export interface Ticket {
   baseWanted?: { by: string; at: string };
   /** Someone else's ticket that its owner deleted on their computer, as the remote shows it. */
   ownerDeleted?: { by: string; at: string; how: 'note' | 'gone'; branch: string };
+  /** Its size: the Analyst's suggestion to split it, what you chose, or the story it was split from (src/board/split.ts). */
+  split?: StorySplit;
+}
+
+/** One story of a suggested split, in the order to build them. `needs`: the parts it needs first, by number (1 is the first). */
+export interface SplitPart {
+  title: string;
+  line: string;
+  size: 'S' | 'M' | 'L';
+  needs: number[];
+  criteria?: number[];
+  doneWhen?: string[];
+}
+
+/** The Analyst's suggestion for a story too big for one: split it (`few`), or a whole requirements document (`brd`). */
+export interface SplitSuggestion {
+  size: 'few' | 'brd';
+  why: string;
+  parts: SplitPart[];
+  areas?: { name: string; stories: number }[];
+  /** What squad-kit's own count found, in plain words. */
+  found: string[];
+  at: string;
+}
+
+export interface StorySplit {
+  suggestion?: SplitSuggestion;
+  questions?: Question[];
+  /** Your note for another split, while the Analyst writes it again. */
+  change?: string;
+  decided?: { choice: 'split' | 'keep' | 'requirements'; by: string; at: string; made?: string[]; breakdown?: string };
+  checked?: string;
+  from?: string;
+  was?: { title: string; ask: string };
 }
 
 /** branch: built on the dependency's branch; anyway: from main without it; wait: starts once it is merged. */
@@ -1599,7 +1639,10 @@ interface LeadCardBase {
 }
 
 export type LeadCard =
-  | (LeadCardBase & { kind: 'draft_story'; title: string; ask: string; storyKind: 'feature' | 'bug'; doneWhen: { text: string; proof: ProofKind }[]; warnings: string[]; story?: string })
+  /** `split`: the text is more than one story; you choose its parts, Requirements, or one story anyway. `stories`: what it made. */
+  | (LeadCardBase & { kind: 'draft_story'; title: string; ask: string; storyKind: 'feature' | 'bug'; doneWhen: { text: string; proof: ProofKind }[]; warnings: string[]; story?: string; split?: SplitSuggestion; stories?: string[]; breakdown?: string })
+  /** A whole requirements document pasted to the lead, by squad-kit's own count: Send to Requirements, in its language. */
+  | (LeadCardBase & { kind: 'requirements'; found: string[]; lang: 'en' | 'ar'; breakdown?: string })
   | (LeadCardBase & { kind: 'board_action'; action: LeadAction; story?: string; minutes?: number; app?: string; tool?: string })
   | (LeadCardBase & { kind: 'send_answer'; story: string; text: string })
   | (LeadCardBase & { kind: 'settings_change'; setting: string; value: string; technical: boolean })
@@ -1624,7 +1667,7 @@ export interface LeadAnswer {
   /** What it saved in squad-kit's notes. */
   learned?: string;
   /** Answered by squad-kit itself, with no AI: a saved note, the story's live record, a refusal, the day's limit. */
-  by?: 'note' | 'record' | 'refusal' | 'limit';
+  by?: 'note' | 'record' | 'refusal' | 'limit' | 'check';
 }
 
 export interface LeadTurn {

@@ -149,6 +149,7 @@ export const YOUR_PART: Record<WaitingKind, string> = {
   chat: 'finish the talk',
   change: 'decide on the design update',
   depends: 'choose how to build it',
+  split: "decide on the Analyst's split",
 };
 
 function lowerFirst(s: string): string {

@@ -96,6 +96,7 @@ import { readUsual, type UsualBook } from '../../board/usual.js';
 import { answerAsk } from '../../board/ask.js';
 import { withProblem } from '../../board/problem.js';
 import { expectWait, withKey } from '../../board/wait-key.js';
+import { createSized } from '../../board/split.js';
 import { DEFAULT_NETWORK, PACKAGE_HOSTS, blockedSites, guardNote, networkPolicy, parseNetwork, sandboxStatus } from '../../engine/sandbox.js';
 import { guardSupport } from '../../engine/project-guard.js';
 import { windowStartNote } from '../../engine/checks.js';
@@ -381,25 +382,26 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     return new Response(fs.readFileSync(file), { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'private, no-store' } });
   });
 
+  // `sized`: made from a draft whose size was judged (board/split.ts): `checked` one story, `kept` or `brd` as one anyway.
   app.post('/api/v1/tickets', async (c) => {
-    const b = await body<Partial<NewTicketInput>>(c);
-    return act(c, () =>
-      createTicket(bp, {
-        title: b.title ?? '',
-        ask: b.ask,
-        priority: b.priority,
-        kind: b.kind === 'bug' ? 'bug' : 'feature',
-        severity: b.severity === 'stops-work' || b.severity === 'annoying' || b.severity === 'small' ? b.severity : undefined,
-        track: b.track === 'express' ? 'express' : 'full',
-        criteria: b.criteria,
-        rules: b.rules,
-        edgeCases: b.edgeCases,
-        files: b.files,
-        talkFirst: Boolean(b.talkFirst),
-        ...(b.noNewTests === true ? { noNewTests: true } : {}),
-        ...(typeof b.key === 'string' && b.key ? { key: b.key.slice(0, 80) } : {}),
-      }),
-    );
+    const b = await body<Partial<NewTicketInput> & { sized?: string }>(c);
+    const sized = b.sized === 'checked' || b.sized === 'kept' || b.sized === 'brd' ? b.sized : null;
+    const input: NewTicketInput = {
+      title: b.title ?? '',
+      ask: b.ask,
+      priority: b.priority,
+      kind: b.kind === 'bug' ? 'bug' : 'feature',
+      severity: b.severity === 'stops-work' || b.severity === 'annoying' || b.severity === 'small' ? b.severity : undefined,
+      track: b.track === 'express' ? 'express' : 'full',
+      criteria: b.criteria,
+      rules: b.rules,
+      edgeCases: b.edgeCases,
+      files: b.files,
+      talkFirst: Boolean(b.talkFirst),
+      ...(b.noNewTests === true ? { noNewTests: true } : {}),
+      ...(typeof b.key === 'string' && b.key ? { key: b.key.slice(0, 80) } : {}),
+    };
+    return act(c, () => (sized ? createSized(bp, input, sized) : createTicket(bp, input)));
   });
 
   // Fills in a ticket from a pasted idea or chat message. Nothing is saved: the person checks it, then creates it.

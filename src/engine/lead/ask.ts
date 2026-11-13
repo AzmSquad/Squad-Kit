@@ -19,7 +19,8 @@ import { startPause } from '../usage-limit.js';
 import { closeWindow, openWindow, windowAccess } from '../window-server.js';
 import { cleanAnswer, laterOffer, leadAnswerProblem, learnedAbout, LEAD_SCHEMA } from './answer.js';
 import { AFTER_REFUSAL, NEVER, isAllowable, neverAsked, refusalIn } from './can.js';
-import { actionMisfit, cardStory, doCard, openCardsFor, storyCard, waysOut } from './cards.js';
+import { actionMisfit, cardCommand, cardStory, doCard, openCardsFor, storyCard, waysOut } from './cards.js';
+import { checkSize } from '../story-size.js';
 import { contextFacts, contextStory } from './context.js';
 import { LEAD_ANSWER_MS, MAX_LEAD_DAY_USD, MAX_QUESTION_CHARS } from './limits.js';
 import { noteFor, saveNote, scrubbed } from './notes.js';
@@ -86,6 +87,11 @@ const CARD_BELOW = {
 function answerAtOnce(bp: BoardPaths, turn: LeadTurn, fresh: boolean, prefix: string, earlier?: string[]): LeadAnswer | null {
   const text = turn.ask.text;
   const step = (t: string, kind: LeadStep['kind']) => turn.trace.push({ at: now(), text: t, kind });
+  if (text.length > MAX_QUESTION_CHARS) {
+    const size = checkSize({ text });
+    step(`Counted the text itself: ${size.found.join(', ')}`, 'notes');
+    return wholeDocument(size.found, isArabic(text), `${prefix}.1`);
+  }
   const never = neverAsked(text);
   if (never.length) {
     const ar = isArabic(text);
@@ -140,6 +146,24 @@ function answerAtOnce(bp: BoardPaths, turn: LeadTurn, fresh: boolean, prefix: st
   return null;
 }
 
+/** A whole requirements document pasted to the lead: too big for one story, and one press from Requirements. */
+const WHOLE_DOCUMENT = {
+  en: {
+    headline: 'This is a whole requirements document, too big for one story.',
+    body: 'Requirements breaks it down with you: the Analyst asks its questions first, then you approve the stories part by part, in the right order. Nothing is sent until you press.',
+  },
+  ar: {
+    headline: 'ده مستند متطلبات كامل، أكبر من قصة واحدة.',
+    body: 'صفحة المتطلبات بتقسّمه معاك: المحلل يسأل أسئلته الأول، وبعدين توافق على القصص جزء جزء، بالترتيب الصح. مفيش حاجة هتتبعت لحد ما تضغط.',
+  },
+};
+
+function wholeDocument(found: string[], ar: boolean, id: string): LeadAnswer {
+  const w = WHOLE_DOCUMENT[ar ? 'ar' : 'en'];
+  const card: LeadCard = { id, kind: 'requirements', level: 2, label: 'Send to Requirements', command: cardCommand(id), status: 'open', found, lang: ar ? 'ar' : 'en' };
+  return { headline: w.headline, body: w.body, evidence: [], sources: [], cards: [card], by: 'check' };
+}
+
 /** The stories the turn before was about: the ones its cards were for, or else the ones its headline names. */
 function lastStories(t: LeadTurn | undefined): string[] {
   if (!t?.answer) return [];
@@ -154,7 +178,10 @@ function lastStories(t: LeadTurn | undefined): string[] {
 export function askLead(bp: BoardPaths, input: LeadAsk, o: LeadAskOptions = {}): { conversation: LeadConversation; done: Promise<LeadConversation> } {
   const text = (input.text ?? '').trim();
   if (!text) throw new BoardActionError('Write your question first.');
-  if (text.length > MAX_QUESTION_CHARS) throw new BoardActionError(`Ask in at most ${MAX_QUESTION_CHARS} characters.`);
+  // A pasted requirements document is longer than a question: squad-kit counts it itself and offers Requirements (answerAtOnce).
+  if (text.length > MAX_QUESTION_CHARS && checkSize({ text }).size !== 'brd') {
+    throw new BoardActionError(`Ask in at most ${MAX_QUESTION_CHARS} characters. To make stories from a long text, paste it in New ticket, which suggests a split, or on the Requirements page.`);
+  }
   const before = input.conversation ? requireConversation(bp, input.conversation) : null;
   if (before?.thinking) throw new BoardActionError('The lead is still answering. Wait a moment.');
   const context: LeadContext = input.context !== undefined ? cleanContext(input.context) : (before?.context ?? { from: 'board' });
@@ -373,14 +400,14 @@ async function answerTurn(bp: BoardPaths, id: string, n: number, signal: AbortSi
     let r = await run(prompt, first.session);
     if (!r.ok) return finish({ error: failed(r), ...(costKnown ? { costUsd: cost } : {}), model: describeLevel(lv, tool) }, r.sessionId || undefined);
     let structured = r.structured;
-    const problem = leadAnswerProblem(structured);
+    const problem = leadAnswerProblem(structured, turn.ask.text);
     if (problem) {
       step({ text: `The answer was not complete (${problem}), so squad-kit asked for it again`, kind: 'card' });
       const again = await run(answerAgainPrompt(problem), r.sessionId || undefined);
       if (!again.ok) return finish({ error: failed(again), ...(costKnown ? { costUsd: cost } : {}), model: describeLevel(lv, tool) }, again.sessionId || r.sessionId || undefined);
       r = again;
       structured = again.structured;
-      const still = leadAnswerProblem(structured);
+      const still = leadAnswerProblem(structured, turn.ask.text);
       // The words came, with a broken card: the words stay and the card goes. No words: no answer.
       const words = structured as { headline?: unknown; body?: unknown } | undefined;
       if (still && !(typeof words?.headline === 'string' && words.headline.trim() && typeof words.body === 'string')) {
@@ -389,7 +416,7 @@ async function answerTurn(bp: BoardPaths, id: string, n: number, signal: AbortSi
       // Still offering to do something later: the words and cards stay, and squad-kit adds the Open cards below.
       if (still && still !== laterOffer(structured as Parameters<typeof laterOffer>[0])) structured = { evidence: [], sources: [], ...(structured as object), cards: [] };
     }
-    const cleaned = cleanAnswer(bp, structured, { taken: new Set(win.pictures.keys()), prefix: `${id}.${n}`, role: meta.user.role });
+    const cleaned = cleanAnswer(bp, structured, { taken: new Set(win.pictures.keys()), prefix: `${id}.${n}`, role: meta.user.role, asked: turn.ask.text });
     for (const s of cleaned.steps) step(s);
     const answer = cleaned.answer;
     const t = contextStory(bp, turn.ask.context);

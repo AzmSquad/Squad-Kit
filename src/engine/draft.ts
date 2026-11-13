@@ -5,7 +5,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { readMeta, type BoardPaths } from '../board/store.js';
 import { BoardActionError, saveUploads, type UploadedFile } from '../board/actions.js';
-import type { Ticket, TicketBrief, Track } from '../board/types.js';
+import type { SplitSuggestion, Ticket, TicketBrief, Track } from '../board/types.js';
 import { AI_TOOLS, aiTool, describeToolEvent } from '../modules/registry.js';
 import type { AgentResult, AgentRun, ToolEvent } from '../modules/ai-tool/types.js';
 import { agentInstructions, readAgent } from './agents.js';
@@ -14,12 +14,14 @@ import { effortOn, personLevels, resolveLevel } from './levels.js';
 import { projectRoot, secretFiles } from './live.js';
 import { rulesFiles } from './repos.js';
 import * as P from './prompts.js';
-import { prepareMedia } from './media.js';
+import { isMediaNote, prepareMedia, transcriptOf } from './media.js';
 import { recordUsage } from '../board/usage.js';
 import { startPause } from './usage-limit.js';
 import { log } from '../core/app-log.js';
 import { ownRunWords } from './plain-stop.js';
 import { selfRule } from './self-project.js';
+import { checkSize } from './story-size.js';
+import { cleanSplit, sizeRule, splitProblem, withSplit } from './split-prompts.js';
 
 /** A ticket the Analyst filled in from a pasted idea or chat message. Nothing is saved until the person creates it. */
 export interface TicketDraft extends TicketBrief {
@@ -31,6 +33,11 @@ export interface TicketDraft extends TicketBrief {
   priority: Ticket['priority'];
   /** What the text leaves unclear. The Analyst asks about these again after the ticket is created. */
   gaps: string[];
+  /**
+   * The text is more than one story: the Analyst's suggestion to split it, or to send it to Requirements. The person
+   * chooses in the dialog; the fields above are used only if they make it one story anyway.
+   */
+  split?: SplitSuggestion;
 }
 
 export interface DraftInput {
@@ -85,28 +92,48 @@ export async function draftTicket(bp: BoardPaths, input: DraftInput, opts: Draft
   try {
     const saved = saveUploads(dir, input.files ?? []);
     // Voice and video notes are written out first, so the Analyst reads what the manager said.
-    const files = [...saved, ...(await prepareMedia(bp, saved)).added];
+    const heard = await prepareMedia(bp, saved);
+    const files = [...saved, ...heard.added];
     if (opts.signal?.aborted) throw new DraftCancelled();
     const root = projectRoot(bp);
-    const r = await runAnalyst(bp, {
-      cwd: root,
-      prompt: P.draftPrompt(meta, text, files, { rules: rulesFiles(root) }),
-      permissions: ['read'],
-      schema: P.DRAFT_SCHEMA,
-      addDirs: [dir],
-      timeoutMs: DRAFT_MS,
-      ...(opts.signal ? { signal: opts.signal } : {}),
-      // The first sign of life means the message is read and the Analyst is looking around; words mean it is writing.
-      onActivity: () => {
-        if (progress.step === 'read') report('look');
-      },
-      onTool: (e) => report('look', lookedAt(bp, e, root, dir)),
-      onText: () => report('write'),
-    }).catch((err: unknown) => {
-      throw opts.signal?.aborted ? new DraftCancelled() : err;
-    });
+    // squad-kit's own count of its size comes first, with no AI, with what the notes said; the Analyst judges what it
+    // leaves open. A note nobody could write out is never "clearly one story".
+    const counted = checkSize({ text, files: files.map((f) => ({ name: path.basename(f), data: fs.readFileSync(f) })) });
+    const unheard = saved.some((f) => isMediaNote(f) && !fs.existsSync(transcriptOf(f)));
+    const size = unheard && counted.size === 'one' ? { ...counted, size: 'middle' as const } : counted;
+    const sized = size.size !== 'one';
+    const run = (o: Pick<AgentRun, 'prompt'> & { resume?: string }) =>
+      runAnalyst(bp, {
+        cwd: root,
+        ...o,
+        permissions: ['read'],
+        // "one" stays open to a bug report; for anything else squad-kit's count found bigger, it is asked for again.
+        schema: sized ? withSplit(P.DRAFT_SCHEMA, size.size === 'brd' ? 'brd' : 'middle') : P.DRAFT_SCHEMA,
+        addDirs: [dir],
+        timeoutMs: DRAFT_MS,
+        ...(opts.signal ? { signal: opts.signal } : {}),
+        // The first sign of life means the message is read and the Analyst is looking around; words mean it is writing.
+        onActivity: () => {
+          if (progress.step === 'read') report('look');
+        },
+        onTool: (e) => report('look', lookedAt(bp, e, root, dir)),
+        onText: () => report('write'),
+      }).catch((err: unknown) => {
+        throw opts.signal?.aborted ? new DraftCancelled() : err;
+      });
+    let r = await run({ prompt: `${P.draftPrompt(meta, text, files, { rules: rulesFiles(root) })}${sized ? sizeRule(size, 'draft') : ''}` });
     if (opts.signal?.aborted) throw new DraftCancelled();
-    return r.structured as TicketDraft;
+    // A split it could not use is asked for once more, in the same conversation.
+    const problem = sized ? splitProblem(r.structured, size.size) : null;
+    if (problem && r.sessionId) {
+      r = await run({ prompt: P.answerAgainPrompt(problem), resume: r.sessionId });
+      if (opts.signal?.aborted) throw new DraftCancelled();
+    }
+    // The answer's own split is replaced by the one squad-kit checked.
+    const draft = { ...(r.structured as TicketDraft) };
+    delete draft.split;
+    const split = sized ? cleanSplit(r.structured, size, new Date().toISOString()) : null;
+    return { ...draft, ...(split ? { split } : {}) };
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -140,6 +167,11 @@ export interface DraftJob extends DraftProgress {
   endedAt?: string;
   draft?: TicketDraft;
   error?: string;
+  /**
+   * It was used: the stories its split made, or the breakdown it went to. The same press sent again gets these back,
+   * and it no longer waits under New ticket.
+   */
+  used?: { stories?: string[]; breakdown?: string };
 }
 
 /** The longest filling in a new ticket may take. */
@@ -196,7 +228,14 @@ export function startDraft(bp: BoardPaths, input: DraftInput): DraftJob {
 /** The project's draft, or null when there is none. */
 export function currentDraft(bp: BoardPaths): DraftJob | null {
   const h = held(bp);
-  return h ? copy(h.job) : null;
+  return h && !h.job.used ? copy(h.job) : null;
+}
+
+/** Its split made these stories, or it went to Requirements: kept on the draft, so the same press gets them again. */
+export function draftUsed(bp: BoardPaths, id: string, used: NonNullable<DraftJob['used']>): DraftJob {
+  const h = heldJob(bp, id);
+  h.job.used = used;
+  return copy(h.job);
 }
 
 export function draftJob(bp: BoardPaths, id: string): DraftJob {

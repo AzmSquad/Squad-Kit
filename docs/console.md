@@ -316,6 +316,53 @@ program it did not start without your press.
 The same rule reads an agent's answer in a chat, where technical words are fine, because you asked. An answer that
 asks you to do one of the things nobody may ask is left out, and you read one plain line instead.
 
+## A story too big for one
+
+Before the Analyst asks any questions, squad-kit counts the story's size itself, with no AI: its words, the pages of an
+attached Word or PDF file, requirement numbers (FR-1, REQ-12…), headings and "shall" or "must" lines, separate asks, and
+how many roles, screens and flows it names. Code, tables, logs and stack traces are left out first. A short story is
+one story, and nothing more is asked. 400 words or 3 requirement numbers is never one story. 2,500 words, a document of
+8 pages or 10 requirement numbers is a whole requirements document. The Analyst judges the rest, and can still say one
+story, with the same sizes as a breakdown: **About a day**, **A few days**, **A week or more**. A bug, and a story
+pulled from a tracker, is never split. It only suggests: nothing is split or sent until you press.
+
+- **A few stories in one.** The Analyst suggests the parts in the order to build them, each with its size and what it
+  needs ("Needs 1"). On a story that exists, the card waits in its Now tab and in the Analyst's popup: **Split into N**,
+  **Keep as one**, or **Change the split** (your note goes in the chat's own box, and the Analyst splits it again).
+  After Split, the story keeps the first part with its new title, the Analyst asks part 1's questions, and the other
+  parts wait in Tickets with "depends on" ("Waits for MA-21"), each started when you like. Each part has its own
+  "done when" lines. Keep as one goes on with the questions the Analyst already asked. A whole document has **Send to
+  Requirements** and **Keep as one** instead.
+- **New ticket, From an idea or message:** the same suggestion shows before anything is created: **Create N stories**
+  (the first starts, the others wait in Tickets), **Create as one story** (the form, as usual), or **Cancel**.
+- **A whole requirements document:** "Too big for one story", with a rough count by part ("about 25 stories in 6
+  parts"): **Send to Requirements** starts a breakdown with your text and files, **Make one story anyway** keeps a short
+  warning on the story, or **Cancel**.
+- **The Squad lead** never drafts one giant story: its draft goes through the same count and offers Create N stories,
+  or Send to Requirements. A requirements document pasted to the lead gets that card at once, with no AI.
+- **A talk beside the work** changes nothing on the story: a big text pasted there gets a hint under it, and for a
+  whole document a Send to Requirements button. Once sent, the hint links to the breakdown.
+
+The cards speak the language you wrote in, right to left in Arabic. The Harness page shows the numbers.
+
+Terminal: `squad split MA-21` shows the suggestion; `--yes` splits it, `--keep` keeps it as one, `--change "<how>"` asks
+for another split, `--requirements` sends a whole document to Requirements. Like the card's buttons, a split has no
+`--requirements` and a whole document no `--yes` or `--change`. `squad split MA-21 --chat-requirements` sends the
+document pasted into its talk, as the hint does. `squad new --from "<text>"` prints the suggestion and asks; `--split`
+or `--one` answer up front, and `--requirements` sends the text and files to Requirements with no draft.
+`squad lead run <card> --split | --one | --requirements`.
+
+REST (under `/p/<project>/api/v1`):
+
+| Call | What |
+| --- | --- |
+| `POST /tickets/<id>/split` | `{ "choice": "split" \| "keep" \| "change" \| "requirements", "note": "…" }`, only the choices its card offers. From a decision card, `expect` is the mark of what it showed. Answers with the story. |
+| `POST /tickets/<id>/chat/requirements` | `{ "at": "…" }`: send the whole document pasted into the story's talk to Requirements, once. Answers `{ "breakdown": { "id" } }`. |
+| `POST /tickets/draft/<draft>/split` | Create N stories from the New ticket draft. The same press sent again gets the same stories. Answers `{ "tickets": [...] }`. |
+| `POST /tickets/draft/<draft>/requirements` | Send the draft's text and files to Requirements; again, the same breakdown. Answers `{ "breakdown": { "id" } }`. |
+| `POST /tickets` | As before, with `"sized": "checked" \| "kept" \| "brd"` when the size was judged in the dialog. |
+| `POST /lead/cards/<id>/run` | `{ "choice": "split" \| "one" \| "requirements" }` on a story draft that is more than one story. |
+
 ## Chat
 
 Open a chat with any agent on a ticket: **Ask the Analyst** on the Now tab, **Talk it through** on a spec or
@@ -412,7 +459,7 @@ REST (under `/p/<project>/api/v1`):
 | `POST /lead/conversations/<id>/messages` | A follow-up, the same body. |
 | `GET /lead/conversations/<id>` | The conversation: each question with its facts, the work trace, the answer (headline, body, evidence, sources, cards, learned), the time and the cost. |
 | `POST /lead/conversations/<id>/stop` | Stop the answer being written. |
-| `POST /lead/cards/<id>/run` | Press a card. `{ "always": true }` turns Always allow on first, only for the low-risk ones; `{ "dismiss": true }` is Not now; `{ "edits": { "title": "...", "doneWhen": [...] } }` is Edit before Create. |
+| `POST /lead/cards/<id>/run` | Press a card. `{ "always": true }` turns Always allow on first, only for the low-risk ones; `{ "dismiss": true }` is Not now; `{ "edits": { "title": "...", "doneWhen": [...] } }` is Edit before Create; `{ "choice": "split" }`, `"one"` or `"requirements"` on a draft that is more than one story (see [A story too big for one](#a-story-too-big-for-one)). |
 | `GET /lead/rules`, `PUT /lead/rules` | Always allow and the morning brief: `{ "always": ["more_time"], "brief": true }`. The never list is shown and cannot change. |
 | `GET /lead/can` | The three levels in words, what it reads, and its limits, for "What it can do". |
 

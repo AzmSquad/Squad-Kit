@@ -42,7 +42,7 @@ export function explainError(err: unknown): { what: string; detail?: string } {
 const STOPPED = /^You stopped the squad\b/;
 
 const ROLE_OF: [string, string[]][] = [
-  ['Analyst', ['analyst-read', 'triage', 'spec-rewrite', 'chat-spec']],
+  ['Analyst', ['analyst-read', 'split-change', 'triage', 'spec-rewrite', 'chat-spec']],
   ['Architect', ['plan-rewrite', 'answered-architect', 'chat-design', 'change-design']],
   ['Builder', ['build', 'unstick', 'pick-up', 'fix', 'answered-builder', 'chat-carry-builder', 'change-build', 'review-fix', 'restore-tests', 'update-base', 'proof-fix']],
   ['Reviewer', ['review', 'answered-reviewer', 'chat-carry-reviewer']],

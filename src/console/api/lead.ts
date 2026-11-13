@@ -75,11 +75,13 @@ export function mountLeadApi(app: Hono, opts: { paths: SquadPaths }): void {
   // Press a card: { "always": true } turns "Always allow" on first (only for the low-risk ones), { "dismiss": true } is
   // Not now, and { "edits": { "title": ..., "doneWhen": [...] } } is Edit before Create.
   app.post('/api/v1/lead/cards/:id/run', async (c) => {
-    const b = await body<{ always?: boolean; dismiss?: boolean; edits?: CardEdits }>(c);
+    const b = await body<{ always?: boolean; dismiss?: boolean; edits?: CardEdits; choice?: string }>(c);
+    const choice = b.choice === 'split' || b.choice === 'requirements' || b.choice === 'one' ? b.choice : undefined;
     return act(c, () =>
       runCard(bp, c.req.param('id'), {
         always: b.always === true,
         dismiss: b.dismiss === true,
+        ...(choice ? { choice } : {}),
         ...(b.edits && typeof b.edits === 'object' ? { edits: b.edits } : {}),
         find: (id) => needsYou(bp).flatMap((x) => x.cards).find((x) => x.id === id),
       }),

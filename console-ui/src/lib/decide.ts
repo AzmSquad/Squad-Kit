@@ -10,7 +10,7 @@ import { isApiProof } from './verdict';
  */
 
 /** What the card asks: Looks right on a proof, Approve on a spec, a plan or a design, answers, or only Open. */
-export type DecideKind = 'proof' | 'spec' | 'plan' | 'design' | 'questions' | 'ask' | 'open';
+export type DecideKind = 'proof' | 'spec' | 'plan' | 'design' | 'questions' | 'ask' | 'split' | 'open';
 
 /** The kind of card for what the story waits on now, or null when it waits for nothing a card can show. */
 export function decideKind(t: Ticket): DecideKind | null {
@@ -30,6 +30,9 @@ export function decideKind(t: Ticket): DecideKind | null {
       const q = t.agentQuestion;
       return q && !q.port && !q.kind ? 'ask' : 'open';
     }
+    // Too big for one story: the Analyst's suggestion, with its own card (components/split).
+    case 'split':
+      return t.split?.suggestion ? 'split' : 'open';
     // The talk itself waits for the person: the talk is the place.
     case 'chat':
       return null;
@@ -74,6 +77,8 @@ export function seeable(t: Ticket, kind: DecideKind): boolean {
       return (t.questions ?? []).some((q) => !q.answer);
     case 'ask':
       return Boolean(t.agentQuestion?.text.trim());
+    case 'split':
+      return Boolean(t.split?.suggestion);
     default:
       return true;
   }
@@ -94,6 +99,8 @@ export function whoFor(t: Ticket, kind: DecideKind): string {
       return 'Questions for you';
     case 'ask':
       return `${agentName(t.agentQuestion?.from ?? 'builder')} asks you`;
+    case 'split':
+      return 'Suggestion for you';
     default:
       return 'Waits for you';
   }

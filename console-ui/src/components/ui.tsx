@@ -300,6 +300,8 @@ export function commandFor(t: Ticket): string {
       return `squad chat ${t.id}`;
     case 'depends':
       return `squad build ${t.id} --on-branch`;
+    case 'split':
+      return `squad split ${t.id}`;
     case 'change':
     case 'spec':
     case 'plan':
@@ -338,6 +340,8 @@ export function actionLabel(t: Ticket): string {
       return 'Review design update';
     case 'depends':
       return 'Choose';
+    case 'split':
+      return 'Decide the split';
     default:
       return 'Open';
   }

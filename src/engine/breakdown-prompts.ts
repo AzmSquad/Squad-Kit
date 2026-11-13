@@ -295,7 +295,8 @@ function decidedText(b: Pick<Breakdown, 'decided'>): string {
   return `\n\n${asData('What was decided so far', lines)}\nKeep to these. Do not repeat them as new decided entries.`;
 }
 
-const SIZES = 'size: S (a day of work or less), M (a few days), L (a week or more: split it into smaller stories if you can).';
+/** What S, M and L mean, the same for a breakdown's stories and a split story's parts (engine/split-prompts.ts). */
+export const SIZES = 'size: S (a day of work or less), M (a few days), L (a week or more: split it into smaller stories if you can).';
 
 const STORY_RULES = `Each story becomes its own ticket that the squad plans, builds, tests and reviews on its own, so every story costs
 real time. Make each one something a person can try in the app from start to end: the screen, the rules and the saved

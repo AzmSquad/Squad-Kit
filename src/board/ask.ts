@@ -114,6 +114,7 @@ const YOUR_PART_AR: Record<WaitingKind, string> = {
   chat: 'إنهاء المحادثة',
   change: 'البت في تحديث التصميم',
   depends: 'اختيار طريقة البناء',
+  split: 'البت في تقسيم القصة',
 };
 
 /** The English "what it needs you for" of the live record, in Arabic. */

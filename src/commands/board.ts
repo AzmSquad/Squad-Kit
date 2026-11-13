@@ -69,6 +69,8 @@ import { openInEditor, ticketChanges } from '../engine/changes.js';
 import { AGENTS, STEPS, readAgent, writeAgent, type AgentRole } from '../engine/agents.js';
 import { corePrompts } from '../engine/core-prompts.js';
 import { draftTicket } from '../engine/draft.js';
+import { createSized } from '../board/split.js';
+import { chooseDraftSize, newToRequirements } from './split.js';
 import {
   boardExists,
   brokenDecisions,
@@ -1115,6 +1117,10 @@ interface NewOptions {
   edge?: string[];
   attach?: string[];
   from?: string;
+  /** With --from, when the Analyst found more than one story: make its parts, one story anyway, or send it to Requirements. */
+  split?: boolean;
+  one?: boolean;
+  requirements?: boolean;
 }
 
 export async function runNew(words: string[], opts: NewOptions): Promise<void> {
@@ -1136,9 +1142,17 @@ export async function runNew(words: string[], opts: NewOptions): Promise<void> {
     rules: opts.rule,
     edgeCases: opts.edge,
   };
+  let sized: 'checked' | 'kept' | 'brd' | undefined;
+  // Straight to Requirements: the text and files become a breakdown, with no draft first.
+  if (opts.from !== undefined && opts.requirements) return newToRequirements(bp, opts.from, files);
   if (opts.from !== undefined) {
     ui.info('The Analyst is filling in the ticket…');
     const d = await draftTicket(bp, { text: opts.from, files });
+    if (opts.split && !d.split) throw new Error('The Analyst found one story in this text, so there is nothing to split. Run it again without --split to create it as one story.');
+    // More than one story: the suggestion first, and nothing is made until the person chooses (board/split.ts).
+    const as = d.split ? await chooseDraftSize(bp, d, opts.from, files, opts) : 'checked';
+    if (!as) return;
+    sized = as;
     const list = (head: string, items: string[]) => (items.length ? `\n${kleur.bold(head)}\n${items.map((x) => `  - ${x}`).join('\n')}` : '');
     console.log(
       `\n${kleur.bold(d.title)} ${kleur.dim(`(${d.kind}, ${d.priority}, ${d.track === 'express' ? 'Express' : 'Full'} track suggested)`)}\n${d.ask}` +
@@ -1167,7 +1181,7 @@ export async function runNew(words: string[], opts: NewOptions): Promise<void> {
     };
   }
   const title = fields.title || (await input({ message: 'Ticket title:' }));
-  const t = createTicket(bp, { ...fields, title, files });
+  const t = sized ? createSized(bp, { ...fields, title, files }, sized) : createTicket(bp, { ...fields, title, files });
   ui.success(t.track === 'express' ? `${t.id} created on the Express track. The squad goes straight to the plan.` : `${t.id} created. The Analyst is reading it.`);
   if (t.noNewTests) ui.info("It is built without new tests: the project's own checks, the review and the proof still run.");
 }

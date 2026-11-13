@@ -61,6 +61,12 @@ Your answer, in the shape squad-kit asks for:
 - cards: only what the person may want to do next, at most 4. Each needs the person's press:
   - draft_story: a story or a bug from the conversation (title, ask, storyKind, doneWhen with a proof each: screen,
     api, data or test, and warnings such as "This changes decision MA-12.1"). Nothing starts until the person says.
+    Never one giant draft: when the person's text holds several stories (separate asks, roles, screens or flows), set
+    size "few" with "parts", 2 to 8 in the order to build them, each with title, line, size (S a day of work or less,
+    M a few days, L a week or more), needs (the numbers of the earlier parts it needs) and doneWhen (2 to 4 testable
+    lines of its own, only about that part), and a short "why". For a whole
+    requirements document, set size "brd" with "areas" ({"name", "stories"}): squad-kit offers Send to Requirements.
+    The person chooses; squad-kit counts the text itself too.
   - board_action: action is one of ${STORY_ACTIONS}, with the story it is for (minutes for more_time; app for
     start_app; tool for get_tool and update_tool). "Always allow" can only cover ${ALLOWABLE.join(', ')}.
   - open_story: opens a story on the board (story), at its tab when it is about one: proof, spec, plan or questions.

@@ -1,4 +1,4 @@
-import type { Decided } from './requirements-types.js';
+import type { Decided, StorySize } from './requirements-types.js';
 import type { SetupState } from './setup-state.js';
 
 /** The 7 stages a ticket moves through. `done` means released and off the board. */
@@ -22,9 +22,10 @@ export type Actor = Role | 'you' | 'squad';
 /**
  * 'spec' waits for you to approve the what (story, done when); 'plan' the how (decision, steps). 'change': the
  * Builder paused for a big change, and the Architect's design update waits for you. 'depends': the design needs a
- * ticket that is not merged yet, and you choose how to build.
+ * ticket that is not merged yet, and you choose how to build. 'split': the Analyst found the story too big and
+ * suggests splitting it, or sending it to Requirements; you decide (board/split.ts).
  */
-export type WaitingKind = 'questions' | 'spec' | 'plan' | 'proof' | 'stuck' | 'release' | 'ask' | 'yours' | 'chat' | 'change' | 'depends';
+export type WaitingKind = 'questions' | 'spec' | 'plan' | 'proof' | 'stuck' | 'release' | 'ask' | 'yours' | 'chat' | 'change' | 'depends' | 'split';
 
 export interface Waiting {
   kind: WaitingKind;
@@ -303,6 +304,10 @@ export interface ChatMessage {
   options?: string[];
   /** A note from squad-kit: the person stopped the answer, the agent could not answer, or the answer waits for the usage limit. */
   note?: 'stopped' | 'failed' | 'waits';
+  /** The person pasted a text that looks like several stories or a whole requirements document (engine/story-size.ts). */
+  big?: 'few' | 'brd';
+  /** That whole document was sent to Requirements, from the hint under it: the breakdown it became. */
+  breakdown?: string;
 }
 
 /**
@@ -777,6 +782,73 @@ export interface Ticket {
   ownerDeleted?: OwnerDeleted;
   /** Made from a conversation with the Squad lead: its id, so the conversation stays linked to the story. */
   lead?: string;
+  /** Its size: the Analyst's suggestion to split it, what the person chose, or the story it was split from (board/split.ts). */
+  split?: StorySplit;
+}
+
+/** One story of a suggested split, in the order to build them. */
+export interface SplitPart {
+  title: string;
+  /** What it does, in one plain line. */
+  line: string;
+  /** The breakdown's sizes: S a day of work or less, M a few days, L a week or more. */
+  size: StorySize;
+  /** The parts it needs built first, by their numbers (1 is the first). */
+  needs: number[];
+  /** The person's own "done when" lines that belong to it, by their numbers. */
+  criteria?: number[];
+  /** Its own "done when" lines, written for it when the text had none of the person's own. */
+  doneWhen?: string[];
+}
+
+/** A part of a whole requirements document, with a rough count of its stories. */
+export interface SplitArea {
+  name: string;
+  stories: number;
+}
+
+/**
+ * The Analyst's suggestion for a story too big for one: `few`, split it into these parts; `brd`, a whole requirements
+ * document, for Requirements. squad-kit's own check (no AI) found `found`. Nothing changes until the person presses.
+ */
+export interface SplitSuggestion {
+  size: 'few' | 'brd';
+  /** Why, in one or two plain sentences, in the person's language. */
+  why: string;
+  parts: SplitPart[];
+  areas?: SplitArea[];
+  /** What squad-kit's own check found, in plain words: "about 3,100 words", "42 requirement numbers". */
+  found: string[];
+  at: string;
+}
+
+/** What the person pressed on a split suggestion. */
+export interface SplitDecided {
+  /** split: into its parts. keep: one story anyway. requirements: sent to Requirements. */
+  choice: 'split' | 'keep' | 'requirements';
+  by: string;
+  at: string;
+  /** split: every part's story, in order; the first is this one. */
+  made?: string[];
+  /** requirements: the breakdown it became. */
+  breakdown?: string;
+}
+
+/** A story's size on its record. */
+export interface StorySplit {
+  /** What the Analyst suggests, waiting for the person or decided. */
+  suggestion?: SplitSuggestion;
+  /** The Analyst's questions about the story as it was, asked beside the suggestion and kept for Keep as one. */
+  questions?: Question[];
+  /** The person's note for another split, while the Analyst writes it again. */
+  change?: string;
+  decided?: SplitDecided;
+  /** The size was judged before it was created (the New ticket dialog, the lead's card): its first step asks no more. */
+  checked?: string;
+  /** One part of another story's split: that story's id. */
+  from?: string;
+  /** The first part of a split: the story's title and ask before it was split. */
+  was?: { title: string; ask: string };
 }
 
 /** What a story looked like when it left for a conversation outside squad-kit: it goes back to this when nothing changed. */

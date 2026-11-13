@@ -1,4 +1,4 @@
-import type { ProofKind, WaitingKind } from '../../board/types.js';
+import type { ProofKind, SplitSuggestion, WaitingKind } from '../../board/types.js';
 
 /**
  * The Squad lead: one contact for the whole project. It reads, looks and tells on its own; it drafts the rest as
@@ -94,7 +94,16 @@ interface CardBase {
 }
 
 export type LeadCard =
-  | (CardBase & { kind: 'draft_story'; title: string; ask: string; storyKind: 'feature' | 'bug'; doneWhen: DoneWhen[]; warnings: string[]; story?: string })
+  /**
+   * A story from the conversation. `split`: the person's text is more than one story, by squad-kit's own count or the
+   * lead's: Create N stories, or Send to Requirements for a whole document, or one story anyway. `stories`: what it made.
+   */
+  | (CardBase & { kind: 'draft_story'; title: string; ask: string; storyKind: 'feature' | 'bug'; doneWhen: DoneWhen[]; warnings: string[]; story?: string; split?: SplitSuggestion; stories?: string[]; breakdown?: string })
+  /**
+   * A whole requirements document pasted to the lead: squad-kit's own count says so, with no AI. Send to Requirements.
+   * `lang`: the language it was written in, for the card's words.
+   */
+  | (CardBase & { kind: 'requirements'; found: string[]; lang: 'en' | 'ar'; breakdown?: string })
   | (CardBase & { kind: 'board_action'; action: LeadAction; story?: string; minutes?: number; app?: string; tool?: string })
   | (CardBase & { kind: 'send_answer'; story: string; text: string })
   | (CardBase & { kind: 'settings_change'; setting: string; value: string; technical: boolean })
@@ -117,8 +126,8 @@ export interface LeadAnswer {
   cards: LeadCard[];
   /** A short note worth keeping, saved in squad-kit's notes for the next person. */
   learned?: string;
-  /** Answered by squad-kit itself, with no AI: from a saved note, the story's live record, a refusal, or the day's limit. */
-  by?: 'note' | 'record' | 'refusal' | 'limit';
+  /** Answered by squad-kit itself, with no AI: from a saved note, the story's live record, a refusal, the day's limit, or its own count of a pasted document. */
+  by?: 'note' | 'record' | 'refusal' | 'limit' | 'check';
 }
 
 /** One question and its answer. */
@@ -174,7 +183,7 @@ export interface NeedsYouItem {
   id: string;
   story: string;
   title: string;
-  kind: 'proof' | 'spec' | 'plan' | 'questions' | 'ask' | 'stuck' | 'slow' | 'looks-stuck' | 'release' | 'other';
+  kind: 'proof' | 'spec' | 'plan' | 'questions' | 'ask' | 'stuck' | 'slow' | 'looks-stuck' | 'release' | 'split' | 'other';
   /** The check-in: "MA-7 is ready for your check: 5 pictures, checks pass, Reviewer approved". */
   words: string;
   /** A second short line, when there is one. */

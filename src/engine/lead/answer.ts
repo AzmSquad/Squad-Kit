@@ -5,6 +5,8 @@ import { listDecisions, listReleases, listTickets, readTicket, type BoardPaths }
 import { isSecretFile } from '../../core/scrub.js';
 import { answerProblem } from '../answers.js';
 import { makeCard, type CardInput } from './cards.js';
+import { checkSize } from '../story-size.js';
+import { AREA_SHAPE, MOST_PARTS, PART_SHAPE } from '../split-prompts.js';
 import { MAX_LEAD_CARDS, MAX_LEAD_PICTURES, MAX_LEAD_SOURCES } from './limits.js';
 import { NEVER } from './can.js';
 import { scrubbed } from './notes.js';
@@ -35,6 +37,9 @@ const CARD = {
       items: { type: 'object', properties: { text: STR, proof: { type: 'string', enum: ['screen', 'api', 'data', 'test'] } }, required: ['text', 'proof'] },
     },
     warnings: { type: 'array', maxItems: 4, items: STR },
+    size: { type: 'string', enum: ['one', 'few', 'brd'], description: 'draft_story: one story, a few stories in one (with parts), or a whole requirements document (with areas)' },
+    parts: { type: 'array', maxItems: MOST_PARTS, items: PART_SHAPE },
+    areas: { type: 'array', maxItems: 12, items: AREA_SHAPE },
     action: STR,
     story: STR,
     minutes: { type: 'integer' },
@@ -79,8 +84,11 @@ const NEEDS: Record<string, string[]> = {
   settings_change: ['setting', 'value'],
 };
 
-/** What is wrong with the answer, in a few words, or null when it fits. */
-export function leadAnswerProblem(value: unknown): string | null {
+/**
+ * What is wrong with the answer, in a few words, or null when it fits. `asked`: the person's message. A story drafted
+ * as one from a text squad-kit's own count finds is more than one story is asked for again, with its parts.
+ */
+export function leadAnswerProblem(value: unknown, asked = ''): string | null {
   const shape = answerProblem(LEAD_SCHEMA, value);
   if (shape) return shape;
   const a = value as { headline: string; body: string; cards: CardInput[] };
@@ -91,6 +99,10 @@ export function leadAnswerProblem(value: unknown): string | null {
       return v === undefined || v === null || (typeof v === 'string' && !v.trim()) || (Array.isArray(v) && !v.length);
     });
     if (missing) return `cards[${i}].${missing} is missing`;
+    const parts = (c as { parts?: unknown }).parts;
+    if (c.kind === 'draft_story' && (c as { size?: unknown }).size !== 'brd' && !(Array.isArray(parts) && parts.length >= 2) && asked && checkSize({ text: asked }).size === 'few') {
+      return `cards[${i}] drafts one story from a text that holds several: give its "parts" (2 to ${MOST_PARTS}, in the order to build them), or size "brd" with "areas" for a whole requirements document`;
+    }
   }
   return laterOffer(a);
 }
@@ -171,7 +183,7 @@ function proofOf(bp: BoardPaths, file: string, named: string): string | null {
  * The answer as squad-kit keeps it. `taken` is every picture the lead's window took in this answer; any other file is
  * left out, unless it is one of a story's own proof pictures. `prefix` names the cards: "<conversation>.<turn>".
  */
-export function cleanAnswer(bp: BoardPaths, raw: unknown, o: { taken: Set<string>; prefix: string; role?: string }): Cleaned {
+export function cleanAnswer(bp: BoardPaths, raw: unknown, o: { taken: Set<string>; prefix: string; role?: string; asked?: string }): Cleaned {
   const a = raw as { headline: string; body: string; evidence: { file: string; caption: string; story?: string }[]; sources: LeadSource[]; cards: CardInput[]; learned?: { text: string; about: string } };
   const steps: Omit<LeadStep, 'at'>[] = [];
   const refused: string[] = [];
@@ -187,7 +199,7 @@ export function cleanAnswer(bp: BoardPaths, raw: unknown, o: { taken: Set<string
   const cards: LeadCard[] = [];
   for (const c of a.cards) {
     if (cards.length >= MAX_LEAD_CARDS) break;
-    const made = makeCard(bp, c, `${o.prefix}.${cards.length + 1}`, o.role);
+    const made = makeCard(bp, c, `${o.prefix}.${cards.length + 1}`, o.role, o.asked);
     if ('card' in made) cards.push(made.card);
     else if ('refused' in made) {
       const words = NEVER[made.refused].refusal;

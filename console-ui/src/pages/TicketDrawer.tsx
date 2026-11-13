@@ -43,6 +43,7 @@ import { detect, langProps, typedDir } from '../lib/lang';
 import { ToolBlockCard } from '../components/ToolBlock';
 import { AskLeadStrip } from '../components/LeadAsk';
 import { SendAsPr } from '../components/SendAsPr';
+import { SplitCard } from '../components/split/SplitCard';
 
 type Tab = 'now' | 'story' | 'plan' | 'activity' | 'conversation' | 'proof' | 'changes' | 'cost' | 'developer';
 
@@ -270,6 +271,12 @@ function NowPanel({ t }: { t: Ticket }) {
       );
     case 'ask':
       return <AskPanel t={t} />;
+    case 'split':
+      return (
+        <div className="db">
+          <SplitCard t={t} />
+        </div>
+      );
     case 'yours':
       return t.takenOver?.free ? <OutsidePanel t={t} extra={<RecentActivity t={t} />} /> : <YoursPanel t={t} />;
     case 'chat':

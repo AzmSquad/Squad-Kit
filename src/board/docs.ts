@@ -131,6 +131,7 @@ const HEADER_KEYS = [
   'hookOwed',
   'breakdown',
   'decided',
+  'split',
   'offScreen',
   'alsoChanged',
   'oldTests',

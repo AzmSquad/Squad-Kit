@@ -8,7 +8,7 @@ import type { Ticket } from './types.js';
  * question is a new mark. A decision card in a chat carries the mark it was made with, and a press sends it back: the
  * board's own action then runs only on the thing the person saw.
  */
-export function waitKey(t: Pick<Ticket, 'waiting' | 'proof' | 'proofRound' | 'gates' | 'story' | 'criteria' | 'steps' | 'decision' | 'questions' | 'agentQuestion' | 'specApproved'>): string | undefined {
+export function waitKey(t: Pick<Ticket, 'waiting' | 'proof' | 'proofRound' | 'gates' | 'story' | 'criteria' | 'steps' | 'decision' | 'questions' | 'agentQuestion' | 'specApproved' | 'split'>): string | undefined {
   const w = t.waiting;
   if (!w) return undefined;
   switch (w.kind) {
@@ -22,6 +22,8 @@ export function waitKey(t: Pick<Ticket, 'waiting' | 'proof' | 'proofRound' | 'ga
       return `questions:${hash(t.questions?.map((q) => [q.id, q.text, q.options]))}`;
     case 'ask':
       return `ask:${hash([t.agentQuestion?.at, t.agentQuestion?.text])}`;
+    case 'split':
+      return `split:${hash([t.split?.suggestion?.at, t.split?.suggestion?.size, t.split?.suggestion?.parts])}`;
     default:
       return `${w.kind}:${hash(w.summary)}`;
   }
