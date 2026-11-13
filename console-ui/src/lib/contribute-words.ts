@@ -133,7 +133,7 @@ export function itemWords(i: ChecklistItem, c: Checklist, lang: Lang): ItemWords
     case 'rules':
       return {
         title: ar ? 'قواعد squad-kit' : "squad-kit's rules",
-        line: ar ? 'ملفات صغيرة، طبقات واضحة، كل زر له أمر، وأقل من 5 ميجا. الفريق يلتزم بها والفحوص تحرسها.' : 'Small files, clear layers, every button with its command, under 5 MB. Your squad follows them and the checks hold them.',
+        line: ar ? 'ملفات صغيرة، طبقات واضحة، كل زر له أمر، وأقل من 6 ميجا. الفريق يلتزم بها والفحوص تحرسها.' : 'Small files, clear layers, every button with its command, under 6 MB. Your squad follows them and the checks hold them.',
         button: ar ? 'اقرأ القواعد' : 'Read the rules',
       };
     case 'idea':

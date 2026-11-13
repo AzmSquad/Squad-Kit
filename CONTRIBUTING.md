@@ -81,7 +81,7 @@ Rules for squad-kit's own code. Tests in `test/architecture/` check them, so a s
   tools) are modules behind one interface each, in `src/modules/`, and nothing else names a product.
 - **Every button has its terminal command.** Each board action is one REST call and one `squad` command that do the
   same thing (`test/architecture/rest-commands.json`).
-- **The npm package stays under 5 MB** (`pnpm size:guard`). Prefer small libraries, and ask before adding a big one.
+- **The npm package stays under 6 MB** (`pnpm size:guard`). Prefer small libraries, and ask before adding a big one.
 
 After your pull request is merged, squad-kit brings your fork and your `main` up to date when it can. Otherwise run
 `squad contribute --sync` (or press **Sync fork** on GitHub) before your next feature, so you start from the newest code.

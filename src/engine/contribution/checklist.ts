@@ -109,7 +109,7 @@ function rulesItem(dir: string): ChecklistItem {
       `Small files: a source file stays under 600 lines${caps ? `; the ${caps} older big files may only shrink` : ''} (test/architecture/file-size-caps.json).`,
       'The layers: the board talks to the engine over REST only, and outside tools are modules (test/architecture/layers.test.ts, test/module-boundaries.test.ts).',
       `Every button has its terminal command${routes ? `: ${routes} board actions, each one REST call and one squad command` : ''} (test/architecture/rest-commands.json).`,
-      'The npm package stays under 5 MB (pnpm size:guard).',
+      'The npm package stays under 6 MB (pnpm size:guard).',
     ],
     file: path.join(dir, 'CONTRIBUTING.md'),
     link: "CONTRIBUTING.md, \"Rules for squad-kit's own code\"",

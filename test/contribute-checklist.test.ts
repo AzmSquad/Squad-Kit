@@ -84,7 +84,7 @@ describe('the contribution checklist', () => {
       'Small files: a source file stays under 600 lines; the 2 older big files may only shrink (test/architecture/file-size-caps.json).',
       'The layers: the board talks to the engine over REST only, and outside tools are modules (test/architecture/layers.test.ts, test/module-boundaries.test.ts).',
       'Every button has its terminal command: 3 board actions, each one REST call and one squad command (test/architecture/rest-commands.json).',
-      'The npm package stays under 5 MB (pnpm size:guard).',
+      'The npm package stays under 6 MB (pnpm size:guard).',
     ]);
     expect(c.items[3]!.file).toBe(path.join(project, 'CONTRIBUTING.md'));
   });

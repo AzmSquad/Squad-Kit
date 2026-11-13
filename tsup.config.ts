@@ -13,7 +13,7 @@ export default defineConfig({
   shims: true,
   /**
    * Spaces, and syntax written shorter where it means exactly the same; names stay, so a stack trace still says which
-   * function. The package has a 5 MB limit.
+   * function. The package has a 6 MB limit.
    */
   minifyWhitespace: true,
   minifySyntax: true,
