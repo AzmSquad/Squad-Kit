@@ -10,7 +10,7 @@ import { forkHostFor, trackerFor } from '../modules/registry.js';
 import type { RepoHost } from '../modules/code-host/types.js';
 import { ModuleError } from '../modules/errors.js';
 import { MergeClash, baseTurn, fetchedTip, moveBase, netGitLater } from './git.js';
-import { itemId, localSetupFor, mapAfterMerge, mergeLocally, noteOn, repoTarget, saidToEngineers, squadInside, targetHost } from './sync.js';
+import { itemId, localSetupFor, mapAfterMerge, mergeLocally, noteOn, prItem, repoTarget, resolveItem, saidToEngineers, squadInside, targetHost } from './sync.js';
 import { sentToOwner } from './contribution/send.js';
 import { prDescription } from './review-record/pr-description.js';
 import { writeReview } from './review-record/write.js';
@@ -114,8 +114,10 @@ async function publishTo(bp: BoardPaths, t: Ticket, target: Target, host: RepoHo
 
   const tracker = trackerFor(bp);
   const item = tracker ? itemId(t, tracker) : null;
+  // The item as its tracker names it, with the line that has the code host close it when the pull request merges.
+  const words = prItem(tracker, item, into?.into ?? host.repo);
   // The owner of the main repo reads the review while reviewing: it goes in the description, note by note.
-  const describe = (shots: { label: string; url: string }[]) => prDescription(t, item, shots, { notes: Boolean(into) });
+  const describe = (shots: { label: string; url: string }[]) => prDescription(t, words, shots, { notes: Boolean(into) });
   let pr = await host.findPullRequest(branch);
   // Found again (a fix sent to the same pull request, or a retry): its description gets the newest record.
   const found = Boolean(pr);
@@ -147,7 +149,12 @@ async function publishTo(bp: BoardPaths, t: Ticket, target: Target, host: RepoHo
     x.status = `Merging pull request ${opened.id}`;
     if (!into) addActivity(x, 'release', `Opened pull request ${opened.id} on ${host.label}`);
   });
-  if (into) return sentToOwner(bp, ticketId, host, opened, into, { dir: t.worktree ?? target.dir, branch });
+  if (into) {
+    const sentTo = await sentToOwner(bp, ticketId, host, opened, into, { dir: t.worktree ?? target.dir, branch });
+    // The owner merges it, so the item is resolved but stays open until they do (engine/contribution/look.ts).
+    if (!found) await resolveItem(bp, ticketId, tracker, item, false, `Pull request [${opened.id}](${opened.url}) is open in ${into.into} with the proof, waiting for its owner to merge it.`);
+    return sentTo;
+  }
 
   // Merge on accept, when the host allows it now: the change goes into the base branch, so the next tickets build on it.
   let merged = false;
@@ -194,20 +201,19 @@ async function publishTo(bp: BoardPaths, t: Ticket, target: Target, host: RepoHo
   // gets it when its merge is seen (recheckMerge, merged-outside.ts).
   if (merged) await writeReview(bp, ticketId, host, opened);
 
-  // A clash is not done yet: the item stays where it is until the ticket is accepted again.
-  if (tracker && item && !clash) {
-    try {
-      const state = await tracker.moveTo(item, 'resolved');
-      await tracker.comment(
-        item,
-        merged
-          ? `Merged into **${target.base}** by pull request [${opened.id}](${opened.url}), with the proof. It goes out in the next release.`
-          : `Pull request [${opened.id}](${opened.url}) is open with the proof, waiting to be merged in ${host.label}.`,
-      );
-      if (state) noteOn(bp, ticketId, `Moved ${tracker.refOf(item)} to ${state} on ${tracker.label}`);
-    } catch (err) {
-      noteOn(bp, ticketId, `Could not update ${tracker.refOf(item)} on ${tracker.label}: ${(err as Error).message}`);
-    }
+  // A clash is not done yet: the item stays where it is until the ticket is accepted again. One that waits on the code
+  // host is resolved but stays open until the merge (sync.ts recheckMerge, merged-outside.ts tell the tracker then).
+  if (!clash) {
+    await resolveItem(
+      bp,
+      ticketId,
+      tracker,
+      item,
+      merged,
+      merged
+        ? `Merged into **${target.base}** by pull request [${opened.id}](${opened.url}), with the proof. It goes out in the next release.`
+        : `Pull request [${opened.id}](${opened.url}) is open with the proof, waiting to be merged in ${host.label}.`,
+    );
   }
   return { clash };
 }

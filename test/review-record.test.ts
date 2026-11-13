@@ -416,8 +416,11 @@ describe('the record in the pull request', () => {
     const saved = requireTicket(bp, id);
     // Each line's kind is the spec's (board/proof-kind.ts), saved there by its own step.
     const t = { ...saved, criteria: saved.criteria!.map((c, i) => ({ ...c, proof: { kind: i === 0 ? ('screen' as const) : ('data' as const) } })) };
-    const md = prDescription(t, '21', [{ label: 'I see Paid and my receipt number', url: 'https://code.example.test/att/after-1.png' }]);
+    const md = prDescription(t, { ref: 'AB#21' }, [{ label: 'I see Paid and my receipt number', url: 'https://code.example.test/att/after-1.png' }]);
     expect(md).toContain('### What was asked\n\nCustomers pay by card when they confirm a booking.');
+    // The item as its tracker writes it.
+    expect(md).toContain('Work item: AB#21\n');
+    expect(prDescription(t, { ref: '#40', closes: 'Closes #40' }, [])).toContain('Work item: #40\nCloses #40\n');
     expect(md).toContain('### Done when, with its proof\n- [x] `Screen` **Given** I confirm a booking, **when** I pay by card, **then** I see Paid and my receipt number · [proof](https://code.example.test/att/after-1.png)');
     expect(md).toContain('- [x] `Data` **Given** the payment goes through, **when** the booking is saved, **then** it is saved as paid\n');
     expect(md).toContain('### The review\n- Rounds: **2**\n- Notes: **2: 1 fixed, 1 you went past**\n- Builder changes after review: **1 commit** (a3f9c21)');

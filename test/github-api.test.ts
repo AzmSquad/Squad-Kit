@@ -14,8 +14,8 @@ vi.mock('../src/modules/github/auth.js', () => ({
   githubApi: (p: string, i?: { method?: string; body?: unknown }) => state.fake!.calls.rest(p, i),
   githubGraphql: (q: string, v?: Record<string, unknown>) => state.fake!.calls.graphql(q, v),
 }));
-vi.mock('../src/modules/github/sign-in.js', () => ({
-  realProbe: {},
+vi.mock('../src/modules/github/sign-in.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/modules/github/sign-in.js')>()),
   signInSteps: async (forProject: boolean) => (forProject ? [{ say: 'Let it use Projects', command: 'gh auth refresh -s project' }] : []),
 }));
 

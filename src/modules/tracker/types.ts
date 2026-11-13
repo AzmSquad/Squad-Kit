@@ -119,8 +119,17 @@ export interface Tracker {
   /** Saves an attachment to a file and returns its path. */
   download(url: string, file: string): Promise<string>;
   wikiPages(): Promise<{ path: string; content: string }[]>;
-  /** Moves the item forward to the stage; never backwards. Returns the new state, or null when it stayed. */
-  moveTo(id: string, stage: ItemStage): Promise<string | null>;
+  /**
+   * Moves the item forward to the stage; never backwards. Returns the new state, or null when it stayed. `merged: false`
+   * at resolved: accepted, but its work is not in the base yet (a pull request waits for an approver or for the owner of
+   * another repo), so a tracker that closes items once the work is in leaves it open.
+   */
+  moveTo(id: string, stage: ItemStage, opts?: { merged?: boolean }): Promise<string | null>;
+  /**
+   * The line a pull request into `repo` (as its code host names it) carries so that the code host closes the item when
+   * it merges, such as "Closes #40". Optional: a tracker without one is moved by squad-kit alone.
+   */
+  closesWith?(id: string, repo: string): string | null;
   /** squad-kit writes Markdown; the module turns it into the tracker's own format. */
   comment(id: string, markdown: string): Promise<void>;
   addTag(id: string, tag: string): Promise<void>;

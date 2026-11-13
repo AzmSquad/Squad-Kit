@@ -83,7 +83,6 @@ async function recordMerged(bp: BoardPaths, id: string, pr: PrRef, host: RepoHos
   const moved = await followBase(bp, id, target, host);
   const t0 = requireTicket(bp, id);
   if (isMerged(t0)) return false;
-  const clash = onClashCard(t0);
   const draft = t0.release ? null : ensureDraftRelease(bp, t0.kind === 'bug' ? 'patch' : 'minor');
   let done = false;
   updateTicket(bp, id, (x) => {
@@ -112,8 +111,9 @@ async function recordMerged(bp: BoardPaths, id: string, pr: PrRef, host: RepoHos
     if (!r.tickets.includes(id)) writeRelease(bp, { ...r, tickets: [...r.tickets, id] });
   }
   mapAfterMerge(bp);
-  // Its owner's computer tells the tracker, as it would have for its own merge.
-  if (clash && isMine(t0, readMeta(bp))) await trackerMerged(bp, id, pr, target.base);
+  // Its owner's computer tells the tracker, as it would have for its own merge: a clash kept the item where it was, and
+  // a pull request that waited for its approver left it open.
+  if (isMine(t0, readMeta(bp))) await trackerMerged(bp, id, pr, target.base);
   // Merged now, so the review's threads can go in: nothing in them can hold the merge up any more.
   await writeReview(bp, id, host, pr);
   return true;

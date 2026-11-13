@@ -1071,7 +1071,9 @@ Terminal: `squad config set quality best`, `squad agent builder`, `squad agent b
     Labels are tags; the `bug` label or the Bug issue type makes a bug; a Project's iteration field gives the sprints
     (the Backlog opens on the one running now, else the next, else the newest), and its Priority (first option highest)
     and Points fields are read. Parents come from sub-issues, and what a story needs from "blocked by". On a board an
-    item only moves forward; merged and released also close the issue. Questions, answers, plans and pull request links
+    item only moves forward. The issue closes once the work is really in: the pull request says `Closes #40`, and a
+    pull request that waits for an approver, or for the owner of another repo, leaves it open until it is merged. A
+    merge on your computer leaves it to the release. Questions, answers, plans and pull request links
     are comments on the issue, and a reported bug becomes an issue with the bug label. **Send to GitHub** on a breakdown
     makes epics, features and stories as issues (the organization's issue types when it has them, else the labels
     `epic`, `feature`, `story`), with sub-issues and "blocked by" links. GitHub has no wiki for squad-kit to read. The

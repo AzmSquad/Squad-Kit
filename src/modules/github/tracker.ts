@@ -173,11 +173,11 @@ export class GithubTracker implements Tracker {
   }
 
   /**
-   * On a board: the Status of the stage, only forward, putting the issue on the board when it is not there yet. Merged
-   * and released also close the issue, as a merged pull request that says "Closes #40" would. Issues alone are open
-   * until then.
+   * On a board: the Status of the stage, only forward, putting the issue on the board when it is not there yet. The
+   * issue closes only once its work is really in: merged (not a pull request that still waits), or released. Issues
+   * alone stay open until then.
    */
-  async moveTo(id: string, stage: ItemStage): Promise<string | null> {
+  async moveTo(id: string, stage: ItemStage, opts: { merged?: boolean } = {}): Promise<string | null> {
     this.ctx.writing();
     const issue = await this.ctx.detail(id);
     let moved: string | null = null;
@@ -191,11 +191,20 @@ export class GithubTracker implements Tracker {
         moved = to;
       }
     }
-    if ((stage === 'resolved' || stage === 'closed') && issue.state === 'OPEN') {
+    const done = stage === 'closed' || (stage === 'resolved' && opts.merged !== false);
+    if (done && issue.state === 'OPEN') {
       await this.ctx.calls.rest(this.ctx.path(id), { method: 'PATCH', body: { state: 'closed', state_reason: 'completed' } });
       moved ??= 'Closed';
     }
     return moved;
+  }
+
+  /** "Closes #40" into the issue's own repo, "Closes owner/repo#40" into another: GitHub closes it when that merges. */
+  closesWith(id: string, repo: string): string | null {
+    if (this.settings.readOnly) return null;
+    const k = this.ctx.key(id);
+    const where = `${k.owner}/${k.name}`;
+    return `Closes ${repo.toLowerCase() === where.toLowerCase() ? `#${k.number}` : `${where}#${k.number}`}`;
   }
 
   /** GitHub writes Markdown itself. */

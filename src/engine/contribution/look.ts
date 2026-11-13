@@ -4,7 +4,7 @@ import type { OwnerNote } from '../../board/contribution-types.js';
 import type { HostNote } from '../../modules/code-host/types.js';
 import { isMine } from '../../board/owner.js';
 import { clearStaleStop } from '../../board/stale-stop.js';
-import { repoTarget, targetHost } from '../sync.js';
+import { repoTarget, targetHost, trackerMerged } from '../sync.js';
 import { answerFixed } from './send.js';
 import { closedOptions, noteLine, notesOptions, OWNER_CLOSED, OWNER_MERGED, OWNER_NOTES, OWNER_WAITS } from './words.js';
 import { catchUpAfterMerge } from './catch-up.js';
@@ -77,8 +77,11 @@ function takeNotes(bp: BoardPaths, id: string, found: HostNote[], label: string)
   return added;
 }
 
-/** The owner merged it: the story is done here. The person's copy and checkout catch up when they only fell behind. */
-async function mergedByOwner(bp: BoardPaths, id: string, pr: { id: number }): Promise<void> {
+/**
+ * The owner merged it: the story is done here. The person's copy and checkout catch up when they only fell behind, and
+ * the tracker item, left open while the owner had it, closes.
+ */
+async function mergedByOwner(bp: BoardPaths, id: string, pr: { id: number; url: string }): Promise<void> {
   updateTicket(bp, id, (x) => {
     if (x.mergedAt || !x.contribution) return;
     x.mergedAt = now();
@@ -92,6 +95,8 @@ async function mergedByOwner(bp: BoardPaths, id: string, pr: { id: number }): Pr
   });
   // The review is in the pull request's text already: squad-kit writes no threads into the owner's repo (ADR-008).
   await catchUpAfterMerge(bp, id).catch(() => undefined);
+  const t = requireTicket(bp, id);
+  if (t.contribution && isMine(t, readMeta(bp))) await trackerMerged(bp, id, pr, `${t.contribution.base} of ${t.contribution.into}`);
 }
 
 function closedByOwner(bp: BoardPaths, id: string, pr: { id: number }): void {

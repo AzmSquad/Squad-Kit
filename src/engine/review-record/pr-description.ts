@@ -82,10 +82,16 @@ function noteLines(v: ReviewView): string[] {
   return ['### The review, note by note', ...notes.map((n) => `- ${n.file ? `\`${n.file.replace(/`/g, '')}\`${n.line ? ` line ${n.line}` : ''}: ` : ''}${plain(n.text.replace(/\s+/g, ' ').trim(), 300)} · ${settled(n)}`), ''];
 }
 
+/** The story's tracker item: its name there (#40, AB#123), and the line that has the code host close it on merge. */
+export interface PrItem {
+  ref: string;
+  closes?: string;
+}
+
 /** `notes`: the review note by note too, for a pull request into someone else's repo. */
-export function prDescription(t: Ticket, item: string | null, shots: { label: string; url: string }[], o: { notes?: boolean } = {}): string {
+export function prDescription(t: Ticket, item: PrItem | null, shots: { label: string; url: string }[], o: { notes?: boolean } = {}): string {
   const view = reviewView(t);
-  const lines = [...askedLines(t), ...(item ? [`Work item: #${item}`, ''] : []), ...doneWhenLines(t, shots), ...reviewLines(view), ...(o.notes ? noteLines(view) : []), ...checksLines(t, view.rounds.length || (t.reviewRound ?? 0)), ...continuedLines(t)];
+  const lines = [...askedLines(t), ...(item ? [`Work item: ${item.ref}`, ...(item.closes ? [item.closes] : []), ''] : []), ...doneWhenLines(t, shots), ...reviewLines(view), ...(o.notes ? noteLines(view) : []), ...checksLines(t, view.rounds.length || (t.reviewRound ?? 0)), ...continuedLines(t)];
   if (view.looksRight) lines.push(approvalWords(view.looksRight, true), '');
   if (shots.length) {
     lines.push('### Screenshots');

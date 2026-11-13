@@ -31,9 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   iteration field gives the sprints, and its Priority and Points fields are read. Parents come from sub-issues, and
   what a story needs from "blocked by". Uploads in the issue come with it.
 - **The squad keeps the issue up to date.** On a Project, each step moves the Status that fits it best (you can pick
-  another in Settings), only forward; merged and released close the issue. Questions, answers, the plan and the pull
-  request link are comments on the issue, and a release adds its version as a label. A bug you report becomes an issue
-  with the bug label.
+  another in Settings), only forward. The issue closes once the work is really merged: the pull request says
+  `Closes #40`, and one that waits for an approver or another repo's owner leaves it open until then. The pull
+  request's "Work item:" line names the item as its tracker does (`#40`, `AB#123`). Questions, answers, the plan and
+  the pull request link are comments on the issue, and a release adds its version as a label. A bug you report becomes
+  an issue with the bug label.
 - **Send a breakdown to GitHub:** epics, features and stories as issues (your organization's issue types when it has
   them, else the labels `epic`, `feature`, `story`), each under its parent as a sub-issue, with "blocked by" for the
   order.

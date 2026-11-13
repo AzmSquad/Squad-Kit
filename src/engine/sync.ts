@@ -11,6 +11,7 @@ import { filesMoved, repoFor } from './repos.js';
 import { overviewAfterMerge } from '../board/overview.js';
 import { firstCodeMerged } from '../board/first-story.js';
 import { PR_HOST_WAITS, mergeWait } from '../board/auto.js';
+import { isMine } from '../board/owner.js';
 import { clearStaleStop } from '../board/stale-stop.js';
 import { copyViews } from './copies.js';
 import { writeLog } from '../core/app-log.js';
@@ -21,6 +22,7 @@ import { tidyStoryDbsBeside } from './story-db.js';
 import type { ReviewRecord } from '../board/review-types.js';
 import { withReviewBody } from './review-record/commit-body.js';
 import { writeReview } from './review-record/write.js';
+import type { PrItem } from './review-record/pr-description.js';
 
 /**
  * Keeps the tracker and the code host in step with the board: item states and comments on the tracker, and the
@@ -321,6 +323,8 @@ export async function recheckMerge(bp: BoardPaths, id: string): Promise<'merged'
   });
   mapAfterMerge(bp);
   await review?.();
+  // A pull request that waited left the item open: it is in the base now.
+  if (wait === 'pr' && t.pr && isMine(t, readMeta(bp))) await trackerMerged(bp, id, t.pr, base);
   return 'merged';
 }
 
@@ -349,21 +353,39 @@ export async function followBase(bp: BoardPaths, id: string, target: { dir: stri
   }
 }
 
+/** The story's item in a pull request into `repo`: its name on the tracker, and the line that closes it on merge. */
+export function prItem(tracker: Tracker | null, item: string | null, repo: string): PrItem | null {
+  if (!tracker || !item) return null;
+  const closes = tracker.closesWith?.(item, repo);
+  return { ref: tracker.refOf(item), ...(closes ? { closes } : {}) };
+}
+
 /**
- * A story merged on the code host after its pull request clashed: its tracker item, which the clash kept where it was,
- * moves to resolved now, with where the change went. A tracker problem is said on the ticket and stops nothing.
+ * The item after Looks right: resolved, and closed only when its work is really in the base (`merged`); a pull request
+ * that waits for its checks, an approver or an owner leaves it open. Said on the ticket; a tracker problem stops nothing.
+ */
+export async function resolveItem(bp: BoardPaths, ticketId: string, tracker: Tracker | null, item: string | null, merged: boolean, words: string): Promise<void> {
+  if (!tracker || !item) return;
+  try {
+    const state = await tracker.moveTo(item, 'resolved', { merged });
+    await tracker.comment(item, words);
+    if (state) noteOn(bp, ticketId, `Moved ${tracker.refOf(item)} to ${state} on ${tracker.label}`);
+  } catch (err) {
+    noteOn(bp, ticketId, `Could not update ${tracker.refOf(item)} on ${tracker.label}: ${(err as Error).message}`);
+  }
+}
+
+/**
+ * A story merged on the code host after Looks right: its pull request clashed (the clash kept the item where it was),
+ * waited for its checks or an approver, or waited for the owner of another repo. Its item is resolved and closed now,
+ * with where the change went. Its owner's computer tells the tracker. A tracker problem is said on the ticket and stops
+ * nothing.
  */
 export async function trackerMerged(bp: BoardPaths, ticketId: string, pr: { id: number; url: string }, base: string, tracker: Tracker | null = trackerFor(bp)): Promise<void> {
   const t = readTicket(bp, ticketId);
   const item = t && tracker ? itemId(t, tracker) : null;
   if (!tracker || !item || readMeta(bp).engine !== 'live') return;
-  try {
-    const state = await tracker.moveTo(item, 'resolved');
-    await tracker.comment(item, `Merged into **${base}** by pull request [${pr.id}](${pr.url}), with the proof. It goes out in the next release.`);
-    if (state) noteOn(bp, ticketId, `Moved ${tracker.refOf(item)} to ${state} on ${tracker.label}`);
-  } catch (err) {
-    noteOn(bp, ticketId, `Could not update ${tracker.refOf(item)} on ${tracker.label}: ${(err as Error).message}`);
-  }
+  await resolveItem(bp, ticketId, tracker, item, true, `Merged into **${base}** by pull request [${pr.id}](${pr.url}), with the proof. It goes out in the next release.`);
 }
 
 /**
