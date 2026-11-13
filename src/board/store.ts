@@ -6,6 +6,7 @@ import { DEFAULT_CONFIG, loadConfig, saveConfig } from '../core/config.js';
 import { squadHome } from '../core/home.js';
 import { git } from '../engine/git.js';
 import { BOARD_STAGES } from './types.js';
+import { REVIEW_HOME } from './review-types.js';
 import type { Actor, BoardMeta, Decision, Question, Release, Step, Ticket } from './types.js';
 import { pauseClock, trackStage, waitsNow } from './clock.js';
 import { clearStaleStop, oldStop } from './stale-stop.js';
@@ -335,7 +336,6 @@ export const TICKET_HOME = {
   hookFixTried: 'local',
   tries: 'local',
   fails: 'local',
-  reviewRound: 'local',
   proofRound: 'local',
   retryPhase: 'local',
   capRaise: 'local',
@@ -343,7 +343,7 @@ export const TICKET_HOME = {
   stopRequested: 'local',
   lead: 'local',
   split: 'project',
-  reviewNotes: 'local',
+  ...REVIEW_HOME,
   localSetup: 'local',
   setupTrouble: 'local',
   setupFor: 'local',
@@ -367,7 +367,6 @@ export const TICKET_HOME = {
   testSuggestion: 'local',
   testChange: 'local',
   testDecided: 'local',
-  reviewAsked: 'local',
   builtPlan: 'local',
   notesSeen: 'local',
   takenOver: 'local',
@@ -413,7 +412,7 @@ export function ticketMediaDir(bp: BoardPaths, id: string): string {
   return path.join(bp.mediaDir, id.toUpperCase());
 }
 
-const DOC_FILES = ['ticket.md', 'spec.md', 'questions.md', 'design.md', 'notes.md', 'proof.md'];
+const DOC_FILES = ['ticket.md', 'spec.md', 'questions.md', 'design.md', 'notes.md', 'proof.md', 'review.md'];
 
 function stateFile(bp: BoardPaths, id: string): string {
   return path.join(bp.stateDir, `${id.toUpperCase()}.yaml`);
@@ -552,6 +551,7 @@ function docProblem(docs: Record<string, string>, t: Partial<Ticket>): { file: s
     'design.md': () => Boolean(t.decision || t.steps),
     'notes.md': () => Boolean(t.notes?.length),
     'proof.md': () => Boolean(t.proof?.length),
+    'review.md': () => Boolean(t.review),
   };
   // Only its title is fine: an empty proof is written that way.
   for (const [file, read] of Object.entries(says)) if (docs[file]?.replace(/^# .*$/m, '').trim() && !read()) return { file, detail: 'It holds none of the parts squad-kit reads from that file.' };

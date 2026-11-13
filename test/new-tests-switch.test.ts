@@ -18,7 +18,7 @@ const { boardPaths, listTickets, readMeta, readTicket, updateTicket, writeMeta }
 const actions = await import('../src/board/actions.js');
 const P = await import('../src/engine/prompts.js');
 const { LiveSquad } = await import('../src/engine/live.js');
-const { prDescription } = await import('../src/engine/sync.js');
+const { prDescription } = await import('../src/engine/review-record/pr-description.js');
 const { harnessView } = await import('../src/engine/harness.js');
 const { mountBoardApi } = await import('../src/console/api/board.js');
 const { chooseProject } = await import('../src/core/paths.js');

@@ -5,6 +5,7 @@ import { api } from '../api/client';
 import type { Ticket } from '../api/types';
 import { useAct } from '../lib/data';
 import { Cmd } from './ui';
+import { ReviewRounds } from './review/ReviewRounds';
 
 interface FileChange {
   path: string;
@@ -42,7 +43,7 @@ export function OpenInEditor({ t }: { t: Ticket }) {
   );
 }
 
-/** Everything this ticket changed against main, file by file. Your own folder shows it only after Looks right. */
+/** The review round by round, then everything this ticket changed against main, file by file. Your own folder shows it only after Looks right. */
 export function ChangesTab({ t }: { t: Ticket }) {
   const changes = useQuery({
     queryKey: ['changes', t.id, t.activity.length],
@@ -73,6 +74,7 @@ export function ChangesTab({ t }: { t: Ticket }) {
         <span className="grow" />
         <OpenInEditor t={t} />
       </div>
+      <ReviewRounds t={t} />
       {changes.isLoading && <p className="note">Reading the changes…</p>}
       {changes.error && <p className="note">{(changes.error as Error).message}</p>}
       {c && !c.files.length && <p className="note">{c.from === 'none' ? 'Nothing built yet.' : 'No changes against main yet.'}</p>}

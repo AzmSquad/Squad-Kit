@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The review written into the pull request.** The Reviewer now writes each note with its file and line, and squad-kit
+  keeps every round on the story: when, approved or not, and each note numbered across the rounds. Before the
+  Builder fixes a round, squad-kit saves the work as the Reviewer read it, then saves the fix, and git says which notes
+  it touched: those are **Fixed in** that commit. When git cannot tell, the Reviewer's next round says so.
+- **Only you go past a note, with a reason.** Go past… on an open note, or Continue anyway on a review that stopped.
+  Your reason stays on the record, in the pull request too.
+- **The pull request is the full record.** Its description has what was asked, each "done when" with how it is proved
+  and a link to its proof, the review in short, the notes you went past with your reason, and "<you> approved: Looks
+  right, <date time>". Each note is a thread on its file and line, Fixed, Went past or Open. One more thread says who
+  pressed Looks right: squad-kit never votes as you. On Azure Repos the threads have Azure's own status.
+- **Writing it never holds up the merge.** If the code host says no, the merge goes on, the story says so plainly, and
+  Write it again tries once more.
+- **No pull requests? The merge commit carries it,** in short under its title, and the board keeps the whole record.
+- **The Changes tab starts with the review:** each round, each note on its file and line with where it stands, as the
+  pull request shows it. A note in Arabic reads right to left. Stories from before keep their notes as round 1.
+- **Every button has its call and its command:** `squad review <ticket>`, `--past <n> --reason "…"` and `--write`.
+
 ## [1.3.18] — 2026-11-13
 
 ### Added

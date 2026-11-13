@@ -1,5 +1,7 @@
 import type { Decided, StorySize } from './requirements-types.js';
 import type { SetupState } from './setup-state.js';
+import type { CriterionProof } from './proof-kind.js';
+import type { TicketReview } from './review-types.js';
 
 /** The 7 stages a ticket moves through. `done` means released and off the board. */
 export type Stage = 'tickets' | 'specs' | 'implement' | 'test' | 'review' | 'release' | 'bugs' | 'done';
@@ -56,6 +58,8 @@ export interface Criterion {
   given: string;
   when: string;
   then: string;
+  /** How this line is proved (board/proof-kind.ts). Old specs have none. */
+  proof?: CriterionProof;
 }
 
 /** A part of a spec or design the person can point at. `index` counts from 0 for criteria and steps. */
@@ -540,7 +544,7 @@ export interface LocalSetup {
   output?: string;
 }
 
-export interface Ticket {
+export interface Ticket extends TicketReview {
   id: string;
   title: string;
   ask: string;
@@ -615,7 +619,6 @@ export interface Ticket {
   hookFixTried?: boolean;
   /** The Builder's runs that did not get through: the run itself failed, or the checks or the Reviewer turned it back. */
   fails?: number;
-  reviewRound?: number;
   /** Step to run again when the person picks "Try again" on a stuck card. */
   retryPhase?: string;
   /** A step that reached its caps, and how many times the person pressed Give it more on it: each time doubles them. */
@@ -629,8 +632,6 @@ export interface Ticket {
   createKey?: string;
   /** Set when the person presses Stop; the live squad stops the running step. */
   stopRequested?: boolean;
-  /** The squad's review notes still to fix, passed to the Builder. */
-  reviewNotes?: string[];
   /** The pull request opened after the proof was accepted. */
   /** The pull request on the code host module named in host. */
   pr?: { id: number; url: string; repo: string; host: string };
@@ -695,8 +696,6 @@ export interface Ticket {
   testChange?: TestChange;
   /** How the last change to the test command was settled, for the Developer tab. */
   testDecided?: TestDecided;
-  /** The Reviewer's notes from its last round, shown to it again with the whole change in the next round. */
-  reviewAsked?: string[];
   /** The plan the Builder's conversation was given, as a short hash: a resumed Builder gets the plan again when it changed. */
   builtPlan?: string;
   notes?: TicketNote[];

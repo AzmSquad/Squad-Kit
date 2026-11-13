@@ -7,6 +7,7 @@ import { MergeClash, mergeWouldClash, cutOffWords, repairCopyLink, settleCopy } 
 import { repoFor } from '../../engine/repos.js';
 import { writeLog } from '../../core/app-log.js';
 import { localSetupFor, mapAfterMerge, mergeLocally, opensPullRequest } from '../../engine/sync.js';
+import { looksRightNow, noteLooksRight } from '../../engine/review-record/commit-body.js';
 import { leaveProjectFiles, stageTicketDocs } from '../../engine/project-git.js';
 import { clearStaleStop } from '../stale-stop.js';
 import { copyViews } from '../../engine/copies.js';
@@ -27,6 +28,7 @@ const CHECKOUT_LATER = 'It goes in once your own copy of the code is free of cha
  * Builds by itself track (board/auto.ts): the same steps, with the squad as the actor and this line on the record.
  */
 export function acceptProof(bp: BoardPaths, ticket: Ticket, byItself?: string, opts: { noHooks?: boolean } = {}): Ticket {
+  const looksRight = looksRightNow(bp, byItself);
   let commit: string | null = null;
   const release = ensureDraftRelease(bp, ticket.kind === 'bug' ? 'patch' : 'minor');
   const views = copyViews(readMeta(bp), ticket);
@@ -67,7 +69,7 @@ export function acceptProof(bp: BoardPaths, ticket: Ticket, byItself?: string, o
         }
       }
       for (const view of views) {
-        const one = mergeLocally(bp, view);
+        const one = mergeLocally(bp, view, looksRight);
         // Moved only when every one of them moved. A merge already in is skipped next time, so Try again finishes the rest.
         merged = !merged || !one ? (merged ?? one) : { ...one, moved: merged.moved && one.moved, ...(merged.note ? { note: merged.note } : {}) };
       }
@@ -111,6 +113,7 @@ export function acceptProof(bp: BoardPaths, ticket: Ticket, byItself?: string, o
       if (ls) t.localSetup = ls;
     }
     t.squad = openPr ? { phase: 'publish', nextAt: now() } : null;
+    noteLooksRight(t, looksRight);
     if (byItself) addActivity(t, 'squad', byItself);
     else if (t.outside && !t.outside.checked) addActivity(t, 'you', `Looks right, with no check by squad-kit. ${outsideWords(t.outside)}`);
     else addActivity(t, 'you', 'Checked the proof. Looks right');

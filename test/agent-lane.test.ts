@@ -210,7 +210,7 @@ describe('answers are checked before use', () => {
     expect(answerProblem(P.REVIEW_SCHEMA, undefined)).toBe('there is no answer');
     expect(answerProblem(P.REVIEW_SCHEMA, { summary: 'Fine', comments: [] })).toBe('approved is missing');
     expect(answerProblem(P.REVIEW_SCHEMA, { ...review, approved: 'yes' })).toBe('approved is not true or false');
-    expect(answerProblem(P.REVIEW_SCHEMA, { ...review, comments: 'none' })).toBe('comments is not a list');
+    expect(answerProblem(P.REVIEW_SCHEMA, { ...review, notes: 'none' })).toBe('notes is not a list');
     expect(answerProblem(P.REVIEW_SCHEMA, { ...review, question: null })).toBeNull();
     expect(answerProblem(P.PROOF_SCHEMA, { shots: [{ criterion: 1.5, file: 'a.png', shows: 'met', note: 'Saved.' }], offScreen: [] })).toBe('shots[0].criterion is not a whole number');
     expect(answerProblem(P.PROOF_SCHEMA, { shots: [{ criterion: 1, file: 'a.png', shows: 'met' }], offScreen: [] })).toBe('shots[0].note is missing');

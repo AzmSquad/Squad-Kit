@@ -102,7 +102,7 @@ export class Azure {
     return `${this.orgUrl}/_apis/wit/workItems/${id}`;
   }
 
-  private async call<T>(method: string, url: string, body?: unknown, contentType = 'application/json'): Promise<T> {
+  async call<T>(method: string, url: string, body?: unknown, contentType = 'application/json'): Promise<T> {
     const full = url.startsWith('http') ? url : `${this.projUrl}/${url}`;
     const sep = full.includes('?') ? '&' : '?';
     let res: Response;

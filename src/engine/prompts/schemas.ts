@@ -1,6 +1,7 @@
 import { DECISION_AREAS, TECH_ROLES } from '../../board/types.js';
 import { PART_KINDS } from '../../board/overview.js';
 import { MAX_PICTURES } from '../proof-verdict.js';
+import { EARLIER_NOTES, REVIEW_NOTES } from '../review-record/prompt.js';
 
 const STR = { type: 'string' } as const;
 
@@ -300,8 +301,8 @@ export const BUILD_SCHEMA = {
 
 export const REVIEW_SCHEMA = {
   type: 'object',
-  properties: { approved: { type: 'boolean' }, summary: STR, comments: { type: 'array', items: STR }, alsoChanged: { type: 'array', items: STR }, checklist: CHECKLIST, question: QUESTION, decided: DECIDED },
-  required: ['approved', 'summary', 'comments'],
+  properties: { approved: { type: 'boolean' }, summary: STR, notes: REVIEW_NOTES, earlier: EARLIER_NOTES, alsoChanged: { type: 'array', items: STR }, checklist: CHECKLIST, question: QUESTION, decided: DECIDED },
+  required: ['approved', 'summary'],
 };
 
 /**

@@ -14,6 +14,28 @@ export interface PullRequest {
  */
 export type MergeState = 'mergeable' | 'merged' | 'clash' | 'waiting' | 'closed';
 
+/** Where one note of the review stands on the code host: open, fixed, or gone past by the person with a reason. */
+export type ReviewThreadState = 'open' | 'fixed' | 'past';
+
+/** One note of the review, as a thread on the pull request. */
+export interface ReviewThread {
+  /** The same for the note every time, so writing the review again finds its thread instead of adding one. */
+  key: string;
+  /** The file it is about, from the repo's root, and the line in the pull request's newest version of it. */
+  file?: string;
+  line?: number;
+  /** Markdown. */
+  text: string;
+  state: ReviewThreadState;
+}
+
+/** The review written into a pull request (ADR-007). */
+export interface PullRequestReview {
+  threads: ReviewThread[];
+  /** Who pressed Looks right, as a comment: squad-kit can never approve or vote as a person. */
+  approval?: { key: string; text: string };
+}
+
 /** One repo on a code host. */
 export interface RepoHost {
   /** The module's name, saved on the ticket's pull request. */
@@ -38,6 +60,12 @@ export interface RepoHost {
   attachImage(prId: number, file: string): Promise<string>;
   updateDescription(prId: number, description: string): Promise<void>;
   mergeState(prId: number): Promise<MergeState>;
+  /**
+   * Writes the review into the pull request: a thread per note, on its file and line when it has them, with its state,
+   * and the comment that says who pressed Looks right. Written again, it finds its own threads and only brings their
+   * state up to date. A module without it keeps the review in the description only.
+   */
+  postReview?(prId: number, review: PullRequestReview): Promise<{ threads: number }>;
   /** Merges with a merge commit and deletes the branch. Resolves once the host has merged it. */
   merge(prId: number, message: string): Promise<{ commit: string }>;
   close(prId: number): Promise<void>;

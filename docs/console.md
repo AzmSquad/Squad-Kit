@@ -265,6 +265,44 @@ When the proof is ready, or a check stopped the ticket, the row of steps says **
 command and what it printed, for engineers. It is on Try it yourself, Your apps, the setup after a merge, and the
 tests on the Overview.
 
+## The review, in the pull request
+
+The Reviewer writes each note with the file it is about and the line in that file. squad-kit keeps every round on the
+story (its `review.md`): the round's number and time, approved or changes asked, and each note, numbered across the
+story. Each note stands one of three ways:
+
+| State | What it means |
+| --- | --- |
+| **Fixed in `a3f9c21`** | squad-kit saved the work as the Reviewer read it, then the Builder's fix, and git shows the fix changed that file within 5 lines of the note (any change, for a note about a whole file). When git cannot tell, the Reviewer's next round says whether it is fixed. |
+| **Went past** | You went on without it, with your reason on the record: **Go past…** on the note, or **Continue anyway** on a review that stopped. Only you can. |
+| **Open** | Nothing settled it yet, for example a small note the Reviewer approved with. |
+
+The **Changes** tab starts with the review: each round, each note on its file and line with where it stands, the
+Builder's fix commits, and who pressed Looks right. Stories from before this keep their notes as round 1, with no file
+or line.
+
+At Looks right, the pull request is the full record. Its description has what was asked, each "done when" with how it
+is proved and a link to its proof, the review (rounds, notes fixed and gone past, the Builder's changes after review),
+the notes you went past with your reason, and "<you> approved: Looks right, <date and time>". Each note is a thread on
+its file and line: Fixed with its commit, Went past with your reason (closed), or Open (active). One more closed thread
+says who pressed Looks right: squad-kit signs in with the project's token, so it never votes or approves in your name.
+squad-kit writes the threads after the merge, so a thread can never hold it up. If the code host says no, the merge
+still goes on, the story says so plainly, and **Write it again** on the Changes tab tries once more.
+
+A project with no pull requests gets the same record in short in the merge commit's message, under its title: the
+rounds, one line per note with where it stands, and who pressed Looks right.
+
+Terminal: `squad review MA-21` prints the review the way the Changes tab shows it. `squad review MA-21 --past 3
+--reason "<why>"` goes past note 3; `squad review MA-21 --write` writes it into the pull request again.
+
+REST (under `/p/<project>/api/v1`):
+
+| Call | What |
+| --- | --- |
+| `GET /tickets/<id>/review` | Every round with its notes, each note's state, the counts, the fix commits, who pressed Looks right, and whether it is in the pull request (`posted`). |
+| `POST /tickets/<id>/review/past` | `{ "note": 3, "reason": "…" }`: go past one open note, before Looks right. A reason is a must. Answers with the review. |
+| `POST /tickets/<id>/review/write` | Write the review into the story's pull request again. Answers `{ "ok", "pr", "threads", "why" }`. |
+
 ## The window
 
 Agents don't get free commands for the app, the browser or the checks. squad-kit gives them a few fixed tools, "the

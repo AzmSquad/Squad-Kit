@@ -17,7 +17,7 @@
   "src/board/requirements-text.ts": 695,
   "src/board/requirements.ts": 793,
   "src/board/store.ts": 959,
-  "src/board/types.ts": 1343,
+  "src/board/types.ts": 1342,
   "src/cli.ts": 923,
   "src/commands/board.ts": 1290,
   "src/commands/doctor-engine.ts": 997,

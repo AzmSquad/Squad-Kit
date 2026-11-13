@@ -1,5 +1,6 @@
-import type { CodeHostModule, MergeState, PullRequest, RepoHost } from '../code-host/types.js';
+import type { CodeHostModule, MergeState, PullRequest, PullRequestReview, RepoHost } from '../code-host/types.js';
 import { Azure, azureForProject, gitAuthEnv, parseAzureRemote } from './client.js';
+import { postReviewThreads } from './review-threads.js';
 
 /** Azure Repos as a squad-kit code host. The project's Azure token signs in, for any org it can reach. */
 
@@ -37,6 +38,10 @@ export class AzureRepo implements RepoHost {
 
   updateDescription(prId: number, description: string): Promise<void> {
     return this.az.updatePullRequestDescription(this.repo, prId, description);
+  }
+
+  postReview(prId: number, review: PullRequestReview): Promise<{ threads: number }> {
+    return postReviewThreads(this.az, this.repo, prId, review);
   }
 
   async mergeState(prId: number): Promise<MergeState> {

@@ -27,7 +27,7 @@ const actions = await import('../src/board/actions.js');
 const { withProblem } = await import('../src/board/problem.js');
 const { LiveSquad } = await import('../src/engine/live.js');
 const P = await import('../src/engine/prompts.js');
-const { prDescription } = await import('../src/engine/sync.js');
+const { prDescription } = await import('../src/engine/review-record/pr-description.js');
 
 type FileChange = import('../src/engine/weakened.js').FileChange;
 const change = (file: string, before: string | null, after: string | null, from?: string): FileChange => ({ path: file, before, after, ...(from ? { from } : {}) });

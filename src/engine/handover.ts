@@ -27,7 +27,7 @@ import { SELF_DOCS_OFF, isSquadKitCode } from './self-project.js';
  * design and the code.
  */
 
-const DOC_FILES = ['ticket.md', 'spec.md', 'questions.md', 'design.md', 'notes.md', 'proof.md'];
+const DOC_FILES = ['ticket.md', 'spec.md', 'questions.md', 'design.md', 'notes.md', 'proof.md', 'review.md'];
 
 /** git never asks for a password in the background; a code host module signs pushes in through its environment. */
 function gitEnv(bp: BoardPaths, t: Ticket): Record<string, string> {

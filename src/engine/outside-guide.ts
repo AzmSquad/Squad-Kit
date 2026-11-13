@@ -251,7 +251,7 @@ export interface OutsideLook {
 /** A story's files as squad-kit reads them: what is wrong in which file, for the agent that wrote them. */
 export function lookAtFiles(bp: BoardPaths, id: string): OutsideLook {
   const folder = ticketDir(bp, id);
-  const known = ['ticket.md', 'spec.md', 'questions.md', 'design.md', 'notes.md', 'proof.md'];
+  const known = ['ticket.md', 'spec.md', 'questions.md', 'design.md', 'notes.md', 'proof.md', 'review.md'];
   const docs: TicketDocs = {};
   const problems: { file: string; problem: string }[] = [];
   if (!fs.existsSync(folder)) return { ticket: null, problems: [{ file: id.toUpperCase(), problem: 'There is no story with that id.' }] };

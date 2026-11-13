@@ -77,6 +77,7 @@ import { runRmFeature, runRmPlan, runRmStory } from './commands/rm/index.js';
 import { runArchive, runDelete } from './commands/delete.js';
 import { runBranches, runBringIn, runBuild, runCheckMerge, runDepends } from './commands/depends.js';
 import { runSplit } from './commands/split.js';
+import { runReview } from './commands/review.js';
 import { runDecided } from './commands/decided.js';
 import { runConfigBudget, runConfigPayment, runCost } from './commands/cost.js';
 import { runAuthLogin, runAuthStatus, runAuthLogout } from './commands/auth/index.js';
@@ -157,10 +158,7 @@ program
   .option('--no-fetch', 'Skip tracker auto-fetch even when tracker and credentials are configured')
   .option('--no-attachments', 'Fetch issue metadata but do not download attachments')
   .option('--attachment-mb <n>', 'Override attachment size cap in MB (default 10)', (v) => parseInt(v, 10))
-  .option(
-    '--no-tracker',
-    'Skip tracker fetch AND drop the tracker-id requirement for this story',
-  )
+  .option('--no-tracker', 'Skip tracker fetch AND drop the tracker-id requirement for this story')
   .action(wrapArgs(runNewStory));
 
 program
@@ -421,6 +419,8 @@ program
   .description("Show what a ticket changed against main, read from the ticket's own copy")
   .option('--full', 'Print the whole diff', false)
   .action(wrapArgs(runChanges));
+program.command('review <ticket>').description("Show the Reviewer's notes round by round, each with its file, line and where it stands, and who pressed Looks right")
+  .option('--past <note>', 'Go past one open note, by its number, with --reason "<why>"').option('--reason <why>', 'Why you go past the note').option('--write', 'Write the review into the pull request again').action(wrapArgs(runReview));
 program
   .command('open <ticket>')
   .description("Open the ticket's copy of the code in Cursor or VS Code")

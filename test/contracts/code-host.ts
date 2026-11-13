@@ -68,6 +68,21 @@ export function codeHostContract(name: string, make: () => CodeHostFixture): voi
       }
     });
 
+    it('writes the review into a pull request once: written again, it adds nothing and follows each note', async () => {
+      const { host } = make();
+      if (!host.postReview) return;
+      const pr = await host.openPullRequest({ source: 'squad/pay-46', target: 'main', title: 'x', description: 'x', items: [] });
+      const review = {
+        threads: [
+          { key: 'PAY-46#1', file: 'src/pay.ts', line: 42, text: 'Round once, after tax.', state: 'fixed' as const },
+          { key: 'PAY-46#2', text: 'Move the money formatting into one helper.', state: 'open' as const },
+        ],
+        approval: { key: 'PAY-46#looks-right', text: 'Momen pressed Looks right.' },
+      };
+      expect(await host.postReview(pr.id, review)).toEqual({ threads: 2 });
+      await expect(host.postReview(pr.id, { ...review, threads: [review.threads[0]!, { ...review.threads[1]!, state: 'past' as const }] })).resolves.toEqual({ threads: 2 });
+    });
+
     it('knows when a branch only takes pull requests, and lets git sign in', () => {
       const { host, refusedMessage } = make();
       expect(host.refusedPush(refusedMessage)).toBe(true);

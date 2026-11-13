@@ -24,6 +24,7 @@ import { mountToolsApi } from './tools.js';
 import { mountPhoneApi } from './phone.js';
 import { mountLeadApi } from './lead.js';
 import { mountSplitApi } from './split.js';
+import { mountReviewApi } from './review.js';
 
 export interface MountApiOptions {
   paths: SquadPaths;
@@ -49,6 +50,7 @@ export function mountApi(app: Hono, opts: MountApiOptions): void {
   mountAppsApi(app, opts);
   mountDependsApi(app, opts);
   mountSplitApi(app, opts);
+  mountReviewApi(app, opts);
   mountOverviewApi(app, opts);
   mountRequirementsApi(app, opts);
   mountTryApi(app, opts);

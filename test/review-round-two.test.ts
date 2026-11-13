@@ -137,7 +137,7 @@ describe('the live review loop', () => {
     expect(runs[1]!.resume).toBe(runs[0]!.sessionId);
     expect(runs[1]!.prompt).toContain('This is review round 2');
     expect(runs[1]!.prompt).toContain('- Count per day, not per week.');
-    expect(runs[1]!.prompt).toContain(`Files changed since ${base} (2): booking.ts, booking.test.ts`);
+    expect(runs[1]!.prompt).toContain(`Files changed since ${base} (2): booking.test.ts, booking.ts`);
     expect(runs[1]!.prompt).toContain('Story: As a clerk');
     t = readTicket(bp, t0.id)!;
     expect(t.gates?.review).toBe('pass');

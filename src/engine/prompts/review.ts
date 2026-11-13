@@ -13,6 +13,7 @@ import {
   ticketContext,
 } from './context.js';
 import { askRule } from './rules.js';
+import { notesAsk } from '../review-record/prompt.js';
 
 /**
  * What squad-kit's own run of the project checks found. The Reviewer reads the result instead of running the checks:
@@ -33,10 +34,10 @@ function checksRan(t: Ticket, meta: BoardMeta, ctx?: PromptContext): string {
     ? `\nThe tests were made weaker in this change, and the person chose to go on anyway (${weakened.map((o) => o.reason).join('; ')}): ${weakened.flatMap((o) => o.weakened!).join(' ')} Look closely at whether the tests still check every "done when".`
     : ''}${old}`;
   if (t.gates?.checks === 'unchecked') {
-    return `squad-kit ran the project checks on this copy, but no tests ran${result ? ` (${result})` : ''}, so nothing checked that the work does what it should. Do not run them yourself. Read the code with extra care against every "done when"${t.noNewTests ? '' : ', and say in a comment if tests are missing'}.${each}${past}`;
+    return `squad-kit ran the project checks on this copy, but no tests ran${result ? ` (${result})` : ''}, so nothing checked that the work does what it should. Do not run them yourself. Read the code with extra care against every "done when"${t.noNewTests ? '' : ', and say in a note if tests are missing'}.${each}${past}`;
   }
   if (!ran.length) {
-    return `This project has no test, lint or build commands set up yet, so squad-kit had no checks to run. Do not try to run them yourself.${t.noNewTests ? '' : ' If the change needs tests and has none, say so in a comment.'}`;
+    return `This project has no test, lint or build commands set up yet, so squad-kit had no checks to run. Do not try to run them yourself.${t.noNewTests ? '' : ' If the change needs tests and has none, say so in a note.'}`;
   }
   const how = `(${ran.join('; ')})`;
   if (t.gates?.checks === 'skipped') return `squad-kit ran the project checks on this copy ${how}, and they did not pass: ${result ?? 'some failed'}. The person chose to go on anyway. Do not run them yourself.${each}${past}`;
@@ -81,7 +82,8 @@ Check: does it do every "done when"? Does it follow ${steps ? 'the plan and ' : 
 ${NO_NEW_TESTS}, so do not ask for new tests.` : ', missing tests?'}
 Were tests deleted, switched off or made weaker? That is a real problem unless the plan asks for it.
 ${notOnScreenRule(t)}
-${again ? 'Approve when your notes are handled and nothing else is wrong.' : 'Approve unless there is a real problem.'} Small style notes do not block. Each comment is one concrete sentence.
+${again ? 'Approve when your notes are handled and nothing else is wrong.' : 'Approve unless there is a real problem.'} Small style notes do not block.
+${notesAsk(t)}
 alsoChanged: each thing this change touches that the story, its "done when" and the plan did not ask for, as a short
 plain phrase for a project manager, like "the Services screen". Leave it out when there is none. It does not block
 your approval by itself: squad-kit shows it to the person.${canLook(meta, ctx) ? `

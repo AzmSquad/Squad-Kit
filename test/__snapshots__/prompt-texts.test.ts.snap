@@ -1866,7 +1866,10 @@ squad-kit already ran the project checks on this copy before your review (test: 
 Check: does it do every "done when"? Does it follow the plan and the saved decisions? Real bugs, security holes, missing tests?
 Were tests deleted, switched off or made weaker? That is a real problem unless the plan asks for it.
 A "done when" can end as "Not on a screen", when the app has no way to show it (an old record it cannot make, what happens after a restart, an email). The screenshots do not prove those, so check them here: find the code that does it and a test that covers it. A "Not on a screen" with no code, or with no test where one could be written, is a real problem.
-Approve unless there is a real problem. Small style notes do not block. Each comment is one concrete sentence.
+Approve unless there is a real problem. Small style notes do not block.
+Write each problem in notes: one concrete sentence, the file it is in (its path from this folder) and the
+line in that file as it is now. Leave out the line when it is about a whole file, and the file when it is about the whole
+change.
 alsoChanged: each thing this change touches that the story, its "done when" and the plan did not ask for, as a short
 plain phrase for a project manager, like "the Services screen". Leave it out when there is none. It does not block
 your approval by itself: squad-kit shows it to the person.
@@ -1943,7 +1946,10 @@ squad-kit already ran the project checks on this copy before your review (test: 
 Check: does it do every "done when"? Does it follow the saved decisions? Real bugs, security holes, missing tests?
 Were tests deleted, switched off or made weaker? That is a real problem unless the plan asks for it.
 A "done when" can end as "Not on a screen", when the app has no way to show it (an old record it cannot make, what happens after a restart, an email). The screenshots do not prove those, so check them here: find the code that does it and a test that covers it. A "Not on a screen" with no code, or with no test where one could be written, is a real problem.
-Approve when your notes are handled and nothing else is wrong. Small style notes do not block. Each comment is one concrete sentence.
+Approve when your notes are handled and nothing else is wrong. Small style notes do not block.
+Write each problem in notes: one concrete sentence, the file it is in (its path from this folder) and the
+line in that file as it is now. Leave out the line when it is about a whole file, and the file when it is about the whole
+change.
 alsoChanged: each thing this change touches that the story, its "done when" and the plan did not ask for, as a short
 plain phrase for a project manager, like "the Services screen". Leave it out when there is none. It does not block
 your approval by itself: squad-kit shows it to the person.
@@ -3431,10 +3437,42 @@ exports[`prompt texts > the answer shapes and fixed words 1`] = `
       "summary": {
         "type": "string"
       },
-      "comments": {
+      "notes": {
         "type": "array",
         "items": {
-          "type": "string"
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string"
+            },
+            "line": {
+              "type": "integer"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "text"
+          ]
+        }
+      },
+      "earlier": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "n": {
+              "type": "integer"
+            },
+            "fixed": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "n",
+            "fixed"
+          ]
         }
       },
       "alsoChanged": {
@@ -3538,8 +3576,7 @@ exports[`prompt texts > the answer shapes and fixed words 1`] = `
     },
     "required": [
       "approved",
-      "summary",
-      "comments"
+      "summary"
     ]
   },
   "SCAN_SCHEMA": {

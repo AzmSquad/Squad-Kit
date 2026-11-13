@@ -23,7 +23,7 @@ const { seedDemoBoard } = await import('../src/board/demo.js');
 const actions = await import('../src/board/actions.js');
 const { LiveSquad } = await import('../src/engine/live.js');
 const { addWorktree } = await import('./support/copy.js');
-const { prDescription } = await import('../src/engine/sync.js');
+const { prDescription } = await import('../src/engine/review-record/pr-description.js');
 
 let tmp: string;
 let bp: ReturnType<typeof boardPaths>;

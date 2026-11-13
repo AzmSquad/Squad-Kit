@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { addActivity, codeChanged, listTickets, readMeta, readTicket, requireTicket, updateTicket, type BoardPaths } from '../board/store.js';
-import { NO_NEW_TESTS_LABEL, type LocalSetup, type Ticket, type TrackerEvent } from '../board/types.js';
+import type { LocalSetup, Ticket, TrackerEvent } from '../board/types.js';
 import { StepError } from '../board/problem.js';
 import { repoHostFor, trackerFor } from '../modules/registry.js';
 import type { Tracker } from '../modules/tracker/types.js';
@@ -17,7 +17,11 @@ import { copyViews } from './copies.js';
 import { writeLog } from '../core/app-log.js';
 import { freeName } from '../core/file-names.js';
 import { refusedForGood } from '../modules/errors.js';
+import { prDescription } from './review-record/pr-description.js';
 import { tidyStoryDbsBeside } from './story-db.js';
+import type { ReviewRecord } from '../board/review-types.js';
+import { withReviewBody } from './review-record/commit-body.js';
+import { writeReview } from './review-record/write.js';
 
 /**
  * Keeps the tracker and the code host in step with the board: item states and comments on the tracker, and the
@@ -340,6 +344,8 @@ export async function publishTicket(bp: BoardPaths, ticketId: string): Promise<{
     }
   });
   if (merged) mapAfterMerge(bp);
+  // The review goes in once the merge is settled, so a thread can never hold it up. A clash writes it at the next accept.
+  if (!clash) await writeReview(bp, ticketId, host, opened);
 
   // A clash is not done yet: the item stays where it is until the ticket is accepted again.
   if (tracker && item && !clash) {
@@ -484,46 +490,13 @@ export function localSetupFor(bp: BoardPaths, t: Ticket): LocalSetup | undefined
   return { status: 'pending', dir, command };
 }
 
-export function mergeLocally(bp: BoardPaths, t: Ticket): { commit: string; base: string; moved: boolean; note?: string } | null {
+/** `ok`: who pressed Looks right, when it is not on the story yet. The review goes under the commit's title. */
+export function mergeLocally(bp: BoardPaths, t: Ticket, ok?: NonNullable<ReviewRecord['looksRight']>): { commit: string; base: string; moved: boolean; note?: string } | null {
   if (!t.branch) return null;
   const meta = readMeta(bp);
   const repo = repoFor(meta, t);
   const dir = path.join(projectRoot(bp), repo.path);
   const plain = meta.delivery === 'push';
-  const r = mergeIntoBase(dir, repo.base, t.branch, plain ? `${t.id}: ${t.title}` : `Merge ${t.title} (${t.id})`, squadInside(bp, dir), plain);
+  const r = mergeIntoBase(dir, repo.base, t.branch, withReviewBody(plain ? `${t.id}: ${t.title}` : `Merge ${t.title} (${t.id})`, t, ok), squadInside(bp, dir), plain);
   return { commit: r.commit, base: repo.base, moved: r.moved, ...(r.note ? { note: r.note } : {}) };
-}
-
-export function prDescription(t: Ticket, item: string | null, shots: { label: string; url: string }[]): string {
-  const lines: string[] = [];
-  if (t.story) lines.push(t.story, '');
-  if (item) lines.push(`Work item: #${item}`, '');
-  if (t.criteria?.length) {
-    lines.push('### Done when');
-    for (const c of t.criteria) lines.push(`- [x] **Given** ${c.given}, **when** ${c.when}, **then** ${c.then}`);
-    lines.push('');
-  }
-  const g = t.gates;
-  if (g) {
-    lines.push('### Checks');
-    lines.push(`- Tests, lint and build: ${g.checks === 'pass' ? 'pass' : g.checks === 'skipped' ? 'failed, continued anyway' : g.checks === 'unchecked' ? 'not checked, no tests ran' : g.checks}${g.checksText ? ` (${g.checksText})` : ''}`);
-    // Old tests that fail on main too, without this change: named, with the story that fixes them.
-    for (const o of g.oldFailures ?? []) lines.push(`  - Fails on main too, without this change: ${o.title} (${o.file})${o.story ? `; ${o.story} fixes it` : ''}`);
-    lines.push(`- Code review: ${g.review === 'pass' ? 'approved' : g.review === 'skipped' ? 'notes still open, continued anyway' : g.review}${t.reviewRound ? ` after ${t.reviewRound} round${t.reviewRound > 1 ? 's' : ''}` : ''}`);
-    lines.push(`- Proof: ${g.proof === 'pass' ? `checked by ${t.createdBy}` : g.proof === 'skipped' ? 'no screenshots, continued anyway' : g.proof}`);
-    // The person chose it on the new story form: the project's own checks ran, and the story added no tests.
-    if (t.noNewTests) lines.push(`- ${NO_NEW_TESTS_LABEL}: the project's own checks ran, and this story added no tests`);
-    lines.push('');
-  }
-  if (t.overrides?.length) {
-    lines.push('### Continued anyway');
-    for (const o of t.overrides) lines.push(`- **${o.added ? `Without your team's check "${o.added}"` : o.weakened?.length ? 'Weakened tests' : o.gate === 'hooks' ? "Saved without the project's own check" : o.gate === 'checks' ? 'Failed checks' : o.gate === 'proof' ? 'No screenshots' : 'Open review notes'}**, by ${o.by}: ${o.reason}`);
-    lines.push('');
-  }
-  if (shots.length) {
-    lines.push('### Screenshots');
-    for (const s of shots) lines.push(`**${s.label}**`, '', `![${s.label.replace(/[[\]]/g, '')}](${s.url})`, '');
-  }
-  lines.push(`Ticket ${t.id} on the squad-kit board.`);
-  return lines.join('\n');
 }

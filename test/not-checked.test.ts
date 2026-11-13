@@ -30,7 +30,7 @@ const { withProblem } = await import('../src/board/problem.js');
 const { LiveSquad } = await import('../src/engine/live.js');
 const { runChecks } = await import('../src/engine/checks.js');
 const { holdTestCommand, notCheckedText } = await import('../src/engine/not-checked.js');
-const { prDescription } = await import('../src/engine/sync.js');
+const { prDescription } = await import('../src/engine/review-record/pr-description.js');
 const P = await import('../src/engine/prompts.js');
 const { checksWords, noShotsText, notCheckedWhy, proofLead } = await import('../console-ui/src/lib/gates.js');
 const { needsYou, noticeText, reasonsOf, testChangeLine } = await import('../console-ui/src/lib/waiting.js');
@@ -111,7 +111,7 @@ describe('a project with no tests', () => {
     // The Reviewer knows nothing was tested, and so does the pull request.
     const review = P.reviewPrompt(readMeta(bp), [], t, 1);
     expect(review).toContain('but no tests ran (No tests ran), so nothing checked that the work does what it should');
-    expect(review).toContain('say in a comment if tests are missing');
+    expect(review).toContain('say in a note if tests are missing');
     expect(prDescription(t, null, [])).toContain('- Tests, lint and build: not checked, no tests ran (No tests ran)');
 
     // The next ticket is not asked again: it is simply "Not checked".

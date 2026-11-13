@@ -1,6 +1,6 @@
 import yaml from 'js-yaml';
-import { TECH_ROLES } from './types.js';
-import type { AgentName, Blueprint, BoardMeta, ChangePart, ChangeStatus, ChangeStep, Criterion, Decision, DecisionDraft, Lesson, ProofPicture, ProofShot, Question, Release, SpecChange, Step, Ticket, TicketNote } from './types.js';
+import { parseReviewDoc, withReviewDoc } from './review-doc.js';
+import { TECH_ROLES, type AgentName, type Blueprint, type BoardMeta, type ChangePart, type ChangeStatus, type ChangeStep, type Criterion, type Decision, type DecisionDraft, type Lesson, type ProofPicture, type ProofShot, type Question, type Release, type SpecChange, type Step, type Ticket, type TicketNote } from './types.js';
 
 /**
  * The project's documents as Markdown (ADR-001). squad-kit writes each in a fixed shape and reads it back from that
@@ -156,7 +156,7 @@ export function ticketDocs(t: TicketDocInput): TicketDocs {
   if (t.decision || t.steps) docs['design.md'] = designDoc(t.title, t.decision, t.steps);
   if (t.notes?.length) docs['notes.md'] = notesDoc(t.title, t.notes);
   if (t.proof) docs['proof.md'] = proofDoc(t.title, t.proof);
-  return docs;
+  return withReviewDoc(docs, t);
 }
 
 export function readTicketDocs(docs: TicketDocs): TicketDocInput {
@@ -168,7 +168,7 @@ export function readTicketDocs(docs: TicketDocs): TicketDocInput {
   if (docs['design.md']) Object.assign(t, parseDesign(docs['design.md']));
   if (docs['notes.md']) t.notes = parseNotes(docs['notes.md']);
   if (docs['proof.md']) t.proof = parseProof(docs['proof.md']);
-  return t;
+  return Object.assign(t, parseReviewDoc(docs['review.md']));
 }
 
 /** Where a ticket's file is not in the shape squad-kit reads, in plain words, for whoever wrote it by hand. */

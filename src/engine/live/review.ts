@@ -13,6 +13,8 @@ import { clearStaleStop } from '../../board/stale-stop.js';
 import { MAX_REVIEW_ROUNDS, REVIEW_STEP_MS } from './limits.js';
 import type { AgentAsk } from './shared.js';
 import type { LiveSquad } from './squad.js';
+import { readAnswer, recordRound } from '../review-record/notes.js';
+import { fixRound } from '../review-record/fix-round.js';
 
 /** The Reviewer's step, and the Builder fixing what it found. */
 export const reviewPart = {
@@ -26,7 +28,7 @@ export const reviewPart = {
       x.tries = 0;
       x.reviewRound = 0;
     });
-    await this.runBuilder(id, P.reviewFixPrompt(t.reviewNotes ?? []), Boolean(t.sessions?.build));
+    await fixRound(this.bp, id, () => this.runBuilder(id, P.reviewFixPrompt(t.reviewNotes ?? []), Boolean(t.sessions?.build)));
     this.update(id, (x) => {
       addActivity(x, 'builder', 'Fixed the review notes');
       x.reviewNotes = undefined;
@@ -86,6 +88,7 @@ export const reviewPart = {
       onTool: this.watcher(id, 'reviewer', workFolder(t0)!),
     }).finally(() => this.keepLanes(id, 'reviewer', lanes));
     const out = r.structured as { approved: boolean; summary: string; comments: string[]; alsoChanged?: string[]; question?: AgentAsk; checklist?: { n?: unknown; answer?: unknown; why?: unknown }[] };
+    const said = readAnswer(out, workFolder(t0));
     this.askIfNeeded(id, 'reviewer', out.question);
     this.saveDecided(id, 'reviewer', out);
     if (goOn) this.update(id, (x) => (x.agentQuestion = undefined));
@@ -102,6 +105,7 @@ export const reviewPart = {
         out.approved = false;
         out.comments = [...(out.comments ?? []), ...noes.map((n) => `Your team's checklist "${n.list}" asks: ${n.question} The answer is no${n.why ? `: ${n.why}` : '.'}`)];
       }
+      recordRound(x, out, said);
     });
     if (out.approved) {
       this.update(id, (x) => {
@@ -146,7 +150,7 @@ export const reviewPart = {
       x.stage = 'implement';
       x.status = `Builder is fixing ${out.comments.length} review comments`;
     });
-    await this.runBuilder(id, P.reviewFixPrompt(out.comments), true);
+    await fixRound(this.bp, id, () => this.runBuilder(id, P.reviewFixPrompt(out.comments), true));
     this.update(id, (x) => {
       addActivity(x, 'builder', 'Fixed the review comments');
       x.reviewNotes = undefined;

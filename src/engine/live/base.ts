@@ -12,6 +12,7 @@ import { StepError } from '../../board/problem.js';
 import { carriesOn, carryOnLine, carryOnPrompt } from '../interrupt.js';
 import { openStep, planKey } from './shared.js';
 import type { LiveSquad } from './squad.js';
+import { fixRound } from '../review-record/fix-round.js';
 
 /** Bringing main's new code into a ticket's copy, and the person's own fix. */
 export const basePart = {
@@ -169,7 +170,7 @@ export const basePart = {
       x.reviewRound = 0;
       x.steps = [...(x.steps ?? []), { title: `Fix: ${x.changeRequest?.split('\n')[0] ?? 'what you found'}`, status: 'doing' }];
     });
-    await this.runBuilder(id, P.changeFixPrompt(t.changeRequest ?? ''), Boolean(t.sessions?.build));
+    await fixRound(this.bp, id, () => this.runBuilder(id, P.changeFixPrompt(t.changeRequest ?? ''), Boolean(t.sessions?.build)));
     this.update(id, (x) => {
       const last = x.steps?.[x.steps.length - 1];
       if (last) {

@@ -42,6 +42,16 @@ export interface FakeAzure {
   writes: { method: string; path: string; body: { op: string; path: string; value?: unknown }[] }[];
   /** Turns writes down, as for a token that may only read. */
   denyWrites(on: boolean): void;
+  /** The comment threads on each pull request, as Azure keeps them. */
+  threads: Map<number, FakeThread[]>;
+}
+
+export interface FakeThread {
+  id: number;
+  status: string;
+  threadContext?: { filePath: string; rightFileStart?: { line: number; offset: number }; rightFileEnd?: { line: number; offset: number } };
+  properties?: Record<string, { $type: string; $value: unknown }>;
+  comments: { id: number; content: string }[];
 }
 
 export interface FakeAzureOptions {
@@ -65,6 +75,8 @@ export function fakeAzureDevOps(token = 'secret', opts: FakeAzureOptions = {}): 
   const prs = new Map<number, { source: string; status: string; description: string }>();
   /** Attachments by pull request and file name, as "7/after-1.png". */
   const attached: string[] = [];
+  const threads = new Map<number, FakeThread[]>();
+  let nextThread = 1;
   let clash = false;
   let nextId = 100;
   let nextPr = 7;
@@ -225,6 +237,31 @@ export function fakeAzureDevOps(token = 'secret', opts: FakeAzureOptions = {}): 
       attached.push(key);
       return json({ url: `https://dev.azure.com/att/${att[2]}` });
     }
+    // Comment threads: a pull request's own list, a new thread, its status, and the words of its first comment.
+    const th = /pullRequests\/(\d+)\/threads(?:\/(\d+))?(?:\/comments\/(\d+))?$/i.exec(path);
+    if (th) {
+      const pr = Number(th[1]);
+      if (!prs.has(pr)) return json({ message: 'not found' }, 404);
+      if (denied && method !== 'GET') return json({ message: 'TF401027: You need the Git Contribute to pull requests permission.' }, 403);
+      const list = threads.get(pr) ?? [];
+      threads.set(pr, list);
+      if (method === 'GET' && !th[2]) return json({ value: list, count: list.length });
+      if (method === 'POST' && !th[2]) {
+        const b = body as Omit<FakeThread, 'id' | 'comments'> & { comments: { content: string }[] };
+        const made: FakeThread = { id: nextThread++, status: b.status, ...(b.threadContext ? { threadContext: b.threadContext } : {}), ...(b.properties ? { properties: b.properties } : {}), comments: b.comments.map((c, i) => ({ id: i + 1, content: c.content })) };
+        list.push(made);
+        return json(made);
+      }
+      const one = list.find((x) => x.id === Number(th[2]));
+      if (!one) return json({ message: 'not found' }, 404);
+      if (method === 'PATCH' && th[3]) {
+        const c = one.comments.find((x) => x.id === Number(th[3]));
+        if (c) c.content = String((body as { content: string }).content);
+        return json(c ?? {});
+      }
+      if (method === 'PATCH') one.status = String((body as { status: string }).status);
+      return json(one);
+    }
     if (/\/pullrequests$/i.test(path) && method === 'POST') {
       const id = nextPr++;
       prs.set(id, { source: String((body as { sourceRefName: string }).sourceRefName).replace('refs/heads/', ''), status: 'active', description: String((body as { description: string }).description) });
@@ -251,5 +288,5 @@ export function fakeAzureDevOps(token = 'secret', opts: FakeAzureOptions = {}): 
     }
     return json({ message: `unexpected ${method} ${url}` }, 404);
   };
-  return { fetch: handler as typeof fetch, comments, setClash: (on) => (clash = on), items, attached, writes, denyWrites: (on) => (denied = on) };
+  return { fetch: handler as typeof fetch, comments, setClash: (on) => (clash = on), items, attached, writes, denyWrites: (on) => (denied = on), threads };
 }

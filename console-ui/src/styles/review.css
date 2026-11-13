@@ -1,0 +1,47 @@
+/* The review on the Changes tab (components/review): each round of the Reviewer, each note as a thread on its file, the
+   way the pull request shows it. Logical sides only, so a story in Arabic reads right to left. */
+
+.rv { display: flex; flex-direction: column; gap: 12px; margin-bottom: 18px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+.rv-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.rv-head b { font-size: 14px; }
+.rv-head .rv-sum { font-size: 12.5px; color: var(--muted); }
+.rv-head .grow { flex: 1; }
+
+.rv-pr { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; flex-wrap: wrap; }
+.rv-pr.ok { color: var(--accent); }
+.rv-pr.no { color: var(--you-ink); padding: 6px 10px; border-radius: 9px; background: var(--you-soft); box-shadow: inset 0 0 0 1px var(--you-line); font-weight: 500; }
+
+.rv-round { display: flex; flex-direction: column; gap: 8px; }
+.rv-rhead { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.rv-rhead .r { min-width: 22px; height: 20px; padding: 0 7px; border-radius: 6px; display: grid; place-items: center; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); color: var(--text); font-weight: 650; font-size: 11.5px; }
+.rv-rhead code { font: 500 11px 'JetBrains Mono', ui-monospace, monospace; }
+.rv-none { margin: 0; font-size: 12.5px; color: var(--muted); padding: 9px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+
+.rv-thread { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); overflow: hidden; }
+.rv-file { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--surface-2); font: 500 12px 'JetBrains Mono', ui-monospace, monospace; }
+.rv-file .path { overflow-wrap: anywhere; min-width: 0; }
+.rv-file .res { margin-inline-start: auto; display: inline-flex; align-items: center; gap: 4px; flex: none; font: 650 11.5px 'Instrument Sans', 'IBM Plex Sans Arabic', system-ui, sans-serif; padding: 1px 8px; border-radius: 6px; }
+.rv-file .res.fixed { color: var(--accent); background: var(--accent-soft); }
+.rv-file .res.past { color: var(--you-ink); background: var(--you-soft); box-shadow: inset 0 0 0 1px var(--you-line); }
+.rv-file .res.open { color: var(--muted); background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
+
+.rv-note { display: flex; gap: 9px; padding: 10px 14px; font-size: 13px; }
+.rv-note .av { width: 22px; height: 22px; border-radius: 99px; display: grid; place-items: center; flex: none; font-size: 10px; font-weight: 700; color: #7c4ddb; background: color-mix(in srgb, #7c4ddb 14%, var(--surface)); }
+:root[data-theme='dark'] .rv-note .av { color: #b9a0ff; background: color-mix(in srgb, #b9a0ff 16%, var(--surface)); }
+.rv-note .body { flex: 1; min-width: 0; }
+.rv-note .body small { display: block; color: var(--muted); font-size: 11.5px; margin-bottom: 2px; }
+.rv-note .body small b { color: var(--text); }
+.rv-note .body p { margin: 0; line-height: 1.5; }
+.rv-note .body p[dir='rtl'] { font-size: 14px; line-height: 1.65; }
+
+.rv-fixed { display: flex; width: fit-content; gap: 5px; align-items: center; margin-top: 6px; font-size: 12px; font-weight: 650; color: var(--accent); }
+.rv-fixed code { font: 500 11px 'JetBrains Mono', ui-monospace, monospace; padding: 0 5px; border-radius: 4px; background: var(--surface-2); color: var(--text); }
+.rv-past { margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: var(--you-soft); box-shadow: inset 0 0 0 1px var(--you-line); font-size: 12.5px; }
+.rv-past small { display: block; color: var(--muted); margin-top: 2px; }
+
+.rv-go { margin-top: 8px; }
+.rv-why { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.rv-why input { flex: 1 1 260px; min-width: 0; height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--text); font: inherit; font-size: 12.5px; }
+
+.rv-ok { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.rv-ok .ok { width: 22px; height: 22px; border-radius: 99px; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; flex: none; }
