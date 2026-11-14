@@ -115,6 +115,7 @@ export interface GuideStep {
 
 export interface SignInFlow {
   state: 'waiting' | 'done' | 'failed' | 'cancelled' | 'none';
+  /** The one-time code to type on the tool's page; none when the page only asks the person to approve squad-kit. */
   code?: string;
   url?: string;
   startedAt?: string;
@@ -149,6 +150,10 @@ export interface ConnectionRow {
   line?: Words;
   /** A sign-in of squad-kit's own left here, which Disconnect ends; `as` when its name is known. */
   signedIn?: { as?: string };
+  /** Where on the tool's own site squad-kit's access can be taken away too, said with Disconnect. */
+  revokeAt?: { link: string; words: Words };
+  /** The sign-in reaches several places (Jira sites) and this project has none yet: pick one. */
+  pick?: { site: string; name: string }[];
   for?: { repo: string; into?: string; self: boolean };
   flow?: SignInFlow;
   actions: { id: 'sign-in' | 'disconnect' | 'check'; name: string; command: string }[];

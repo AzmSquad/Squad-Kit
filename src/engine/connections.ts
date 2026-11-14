@@ -37,6 +37,10 @@ export interface ConnectionRow {
   line?: Words;
   /** A sign-in of squad-kit's own left here, which Disconnect ends. */
   signedIn?: { as?: string };
+  /** Where on the tool's own site squad-kit's access can be taken away too. */
+  revokeAt?: { link: string; words: Words };
+  /** The places the sign-in reaches, to pick this project's from. */
+  pick?: { site: string; name: string }[];
   /** What it is for in this project: the repo on this tool, and the repo its pull requests go to when that is not it. */
   for?: { repo: string; into?: string; self: boolean };
   /** A sign-in started from the board or the terminal, while it waits or just ended. */
@@ -75,8 +79,9 @@ function actionsOf(m: ConnectionModule, s: ConnectionStatus): ConnectionAction[]
   if (m.how === 'soon') return [];
   const list: ConnectionAction[] = [];
   // Only a tool that is here and signed out gets the button: missing, or not answering, the guide comes first. When the
-  // token is the way here, Settings is: no sign-in. Disconnect is there while there is a sign-in to end.
-  if (m.signIn && s.state === 'not-connected' && s.by !== 'token') list.push({ id: 'sign-in', name: `Sign in with ${m.codePage?.name ?? m.label}`, command: `squad connect ${m.name}` });
+  // token is the way here, Settings is: no sign-in; nor while a place is left to pick. Disconnect is there while there is
+  // a sign-in to end.
+  if (m.signIn && s.state === 'not-connected' && s.by !== 'token' && !s.pick?.length) list.push({ id: 'sign-in', name: `Sign in with ${m.codePage?.name ?? m.label}`, command: `squad connect ${m.name}` });
   if (m.signOut && toEnd(s)) list.push({ id: 'disconnect', name: 'Disconnect', command: `squad disconnect ${m.name}` });
   list.push({ id: 'check', name: 'Check again', command: 'squad connect --status' });
   return list;
@@ -96,12 +101,14 @@ async function rowOf(bp: BoardPaths, m: ConnectionModule): Promise<ConnectionRow
     ...(m.tracker ? { tracker: m.tracker } : {}),
     ...(m.codePage ? { codePage: m.codePage } : {}),
     ...(m.ownSignIn ? { ownSignIn: true } : {}),
+    ...(m.ownSignIn && m.revokeAt ? { revokeAt: m.revokeAt } : {}),
     state: s.state,
     ...(s.account ? { account: s.account } : {}),
     steps: s.steps,
     ...(s.by ? { by: s.by } : {}),
     ...(s.line ? { line: s.line } : {}),
     ...(s.signedIn ? { signedIn: s.signedIn } : {}),
+    ...(s.pick?.length ? { pick: s.pick } : {}),
     ...(there ? { for: there } : {}),
     ...(flow ? { flow } : {}),
     actions: actionsOf(m, s),
@@ -143,6 +150,17 @@ export function cancelSignIn(name: string): SignInFlow {
   return f;
 }
 
+/**
+ * Picks the place a sign-in reaches for projects that have none of their own yet: one of the row's `pick` list, by its
+ * name there (a Jira site). In a terminal, `squad connect <tool> --site <site>`, or a number from the list.
+ */
+export async function pickSite(bp: BoardPaths, name: string, site: string): Promise<{ line: string }> {
+  const m = moduleFor(name);
+  if (!m.pickSite) throw new BoardActionError(`${m.label} has nothing to pick here.`);
+  if (!site?.trim()) throw new BoardActionError('Say which one to use.');
+  return m.pickSite(bp.root, site.trim());
+}
+
 /** Whose sign-in Disconnect ends, and the page the code is typed on, for the terminal's own words. */
 export function connectionInfo(name: string): { label: string; ownSignIn: boolean; codePage?: CodePage } {
   const m = moduleFor(name);
@@ -164,6 +182,7 @@ export async function disconnect(bp: BoardPaths, name: string): Promise<{ line: 
   await m.signOut(end.as ?? '');
   m.forget?.();
   const as = end.as ? `, as ${end.as}` : '';
-  if (m.ownSignIn) return { line: `squad-kit is signed out of ${m.label} on this computer${as}. Your other sign-ins on this computer stay as they are.` };
+  const revoke = m.revokeAt ? ` ${m.revokeAt.words.en.replace(/\.$/, '')}: ${m.revokeAt.link}` : '';
+  if (m.ownSignIn) return { line: `squad-kit is signed out of ${m.label} on this computer${as}. Your other sign-ins on this computer stay as they are.${revoke}` };
   return { line: `${m.label} is signed out on this computer${as}. Every app that uses its tool here is signed out too.` };
 }

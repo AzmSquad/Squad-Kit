@@ -6,6 +6,7 @@ import { CONNECT } from '../../lib/connect-words';
 import { useAct } from '../../lib/data';
 import type { Lang } from '../../lib/first-story';
 import { Cmd } from '../ui';
+import { SitePick } from './SitePick';
 
 /** A tool's tile: its initials on a color of its own, by its place on the page. */
 const TONES = ['ink', 'blue', 'sky'] as const;
@@ -109,6 +110,14 @@ function Disconnect({ row, lang, onClose }: { row: ConnectionRow; lang: Lang; on
       <div className="modal gh-code" role="alertdialog" aria-modal="true" aria-label={w.head(row.label)} dir={lang === 'ar' ? 'rtl' : 'ltr'} lang={lang}>
         <h2>{w.head(row.label)}</h2>
         <p className="gh-muted">{row.ownSignIn ? w.own(row.label, row.signedIn?.as) : w.body(row.label, row.account ?? '')}</p>
+        {row.revokeAt && (
+          <p className="gh-small">
+            {row.revokeAt.words[lang]}{' '}
+            <a href={row.revokeAt.link} target="_blank" rel="noreferrer" className="gh-link gh-url" dir="ltr">
+              {row.revokeAt.link.replace(/^https:\/\//, '')}
+            </a>
+          </p>
+        )}
         <div className="gh-row">
           <button
             className="btn sm danger"
@@ -191,6 +200,7 @@ export function ConnectionCard({ row, at, lang, onSignIn, onCheck, checking }: {
           ) : (
             row.for && <p>{w.forWhat(row.for)}</p>
           )}
+          {row.pick && <SitePick row={row} lang={lang} />}
           {signIn && (
             <div className="gh-row">
               <button className="btn pri" onClick={onSignIn}>{w.code.head(row.codePage?.name ?? row.label)}</button>

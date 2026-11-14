@@ -2,26 +2,46 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ModuleError, kindOfStatus } from '../errors.js';
 import { writeLog } from '../../core/app-log.js';
+import { GATEWAY } from './atlassian-app.js';
 
 /**
- * Jira Cloud's REST API as squad-kit calls it: one site, one person's email and API token. squad-kit makes these calls
- * itself; agents never reach Jira. The token goes only to the site, never into a log, an error or a URL.
+ * Jira Cloud's REST API as squad-kit calls it: one site, with the person's email and API token, or with squad-kit's own
+ * Atlassian sign-in (ADR-012). squad-kit makes these calls itself; agents never reach Jira. A token goes only to its own
+ * site and the sign-in's bearer only to Atlassian's gateway, never into a log, an error or a URL.
  */
+
+/** Signed in with Atlassian: every call goes to Atlassian's gateway, for this site's cloud id, with a bearer token. */
+export interface AtlassianCloud {
+  id: string;
+  bearer(): Promise<string>;
+  /** Jira refused this token: true when one more try with a new one is worth it. */
+  refused(token: string): boolean;
+}
 
 export interface JiraAccess {
   /** The site's host, like yourcompany.atlassian.net. */
   site: string;
+  /** Who signs in: the email with an API token, the Atlassian account's name with the sign-in. */
   email: string;
-  token: string;
+  /** The person's API token, sent only to `site`. */
+  token?: string;
+  cloud?: AtlassianCloud;
 }
 
 /**
- * The sign-in header, and the only place that builds it: an email and an API token today. A later "Sign in with
- * Atlassian" swaps in its own header here and nothing else changes.
+ * The sign-in header, and the only place that builds it: Basic with an email and an API token, or the Atlassian
+ * sign-in's bearer token. `bearer`: the token sent, for a refusal.
  */
-function authHeader(a: JiraAccess): string {
-  return `Basic ${Buffer.from(`${a.email}:${a.token}`).toString('base64')}`;
+async function authHeader(a: JiraAccess): Promise<{ header: string; bearer?: string }> {
+  if (a.cloud && !a.token) {
+    const bearer = await a.cloud.bearer();
+    return { header: `Bearer ${bearer}`, bearer };
+  }
+  return { header: `Basic ${Buffer.from(`${a.email}:${a.token ?? ''}`).toString('base64')}` };
 }
+
+/** An attachment's file on the site, by Jira's two ways of linking it. */
+const ATTACHMENT = /^\/(?:rest\/api\/[23]\/attachment\/content\/(\d+)|secure\/attachment\/(\d+)\/)/;
 
 /** The longest one call may take, so a stalled network never holds up the board. */
 const CALL_MS = 60_000;
@@ -53,19 +73,26 @@ function jiraWords(text: string): string {
 }
 
 export class JiraClient {
+  /** Where the calls go: the site itself with a token, Atlassian's gateway for the site with the sign-in. */
   readonly base: string;
+  /** The site, for the pages people open. */
+  private readonly own: string;
+  /** With the Atlassian sign-in: the site's path on the gateway, /ex/jira/<cloud id>. */
+  private readonly gate: string | null;
 
   constructor(
     readonly access: JiraAccess,
     private readonly http: typeof fetch = fetch,
     private readonly opts: { timeoutMs?: number; pause?: (ms: number) => Promise<void> } = {},
   ) {
-    this.base = `https://${access.site}`;
+    this.own = `https://${access.site}`;
+    this.gate = access.cloud && !access.token ? `/ex/jira/${access.cloud.id}` : null;
+    this.base = this.gate ? `${GATEWAY}${this.gate}` : this.own;
   }
 
-  /** The page people open for an issue. */
+  /** The page people open for an issue: always on the site. */
   browseUrl(key: string): string {
-    return `${this.base}/browse/${key}`;
+    return `${this.own}/browse/${key}`;
   }
 
   /** Waits a while, as Jira asks; tests give their own pace. */
@@ -73,14 +100,20 @@ export class JiraClient {
     return (this.opts.pause ?? ((t) => new Promise((r) => setTimeout(r, t))))(ms);
   }
 
-  /** A call to the site's own API. Only a path on the site: the sign-in never goes to another host. */
-  async call<T>(method: string, path: string, body?: unknown, again = true): Promise<T> {
+  /** A call to the site's own API. Only a path on it: the sign-in never goes to another host. */
+  call<T>(method: string, path: string, body?: unknown): Promise<T> {
+    return this.send<T>(method, path, body, { wait: true, fresh: true });
+  }
+
+  /** `wait`: Jira's short "slow down" is waited once. `fresh`: a refused sign-in token is swapped for a new one once. */
+  private async send<T>(method: string, path: string, body: unknown, again: { wait: boolean; fresh: boolean }): Promise<T> {
     if (!path.startsWith('/')) throw new Error(`A Jira call takes a path on the site, not "${path}".`);
+    const auth = await authHeader(this.access);
     let res: Response;
     try {
       res = await this.http(`${this.base}${path}`, {
         method,
-        headers: { authorization: authHeader(this.access), accept: 'application/json', ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },
+        headers: { authorization: auth.header, accept: 'application/json', ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },
         body: body === undefined ? undefined : JSON.stringify(body),
         redirect: 'manual',
         signal: AbortSignal.timeout(this.opts.timeoutMs ?? CALL_MS),
@@ -89,11 +122,16 @@ export class JiraClient {
       writeLog({ level: 'warn', text: `Could not reach Jira at ${this.access.site}: ${(err as Error).name}` });
       throw new ModuleError(`Could not reach Jira at ${this.access.site}. Check the connection, then try again.`, 'offline');
     }
+    // A sign-in token kept a while may have ended early on Atlassian's side: that one is dropped and the call made once more.
+    if (res.status === 401 && auth.bearer && again.fresh && this.access.cloud?.refused(auth.bearer)) {
+      await res.body?.cancel().catch(() => undefined);
+      return this.send<T>(method, path, body, { ...again, fresh: false });
+    }
     if (res.status === 429) {
       const wait = Number(res.headers.get('retry-after') ?? '');
-      if (again && Number.isFinite(wait) && wait <= SHORT_WAIT_S) {
+      if (again.wait && Number.isFinite(wait) && wait <= SHORT_WAIT_S) {
         await this.wait(Math.max(0, wait) * 1000);
-        return this.call<T>(method, path, body, false);
+        return this.send<T>(method, path, body, { ...again, wait: false });
       }
       const after = Number.isFinite(wait) && wait > 0 ? ` Try again in ${Math.ceil(wait)} seconds.` : ' Try again in a minute.';
       throw new ModuleError(`Jira asked squad-kit to slow down: too many calls just now.${after}`, 'too-many', 429);
@@ -135,6 +173,15 @@ export class JiraClient {
     const words = jiraWords(text);
     // The exact answer is for engineers: the path and Jira's words, never the header.
     writeLog({ level: 'warn', text: `Jira said HTTP ${status} to ${method} ${url.replace(/\?.*$/, '')}. ${words}`.trim() });
+    if (status === 401 && this.gate) {
+      // Atlassian's gateway says "scope does not match" when squad-kit's app lacks a permission the call needs.
+      if (/scope/i.test(words)) return new ModuleError(`squad-kit's Atlassian sign-in does not cover this call (${words}). Update squad-kit; if it is the newest, tell its makers.`, 'sign-in', 401);
+      return new ModuleError(
+        `Jira did not accept squad-kit's Atlassian sign-in for ${this.access.email}. Sign in with Atlassian again on the Connections page (squad connect jira), or paste an API token in Settings.`,
+        'sign-in',
+        401,
+      );
+    }
     if (status === 401) {
       return new ModuleError(
         `Jira did not accept the API token for ${this.access.email}. It may have expired or been removed: Atlassian tokens last a year at most. Make a new one and paste it in Settings.`,
@@ -179,18 +226,41 @@ export class JiraClient {
   }
 
   /**
+   * Where an attachment is asked for, or null when it is not on this site. With the Atlassian sign-in, an attachment on
+   * the site (or already on the gateway for this site) is asked of the gateway, by its id.
+   */
+  private fileUrl(url: string): URL | null {
+    let at: URL;
+    try {
+      at = new URL(url);
+    } catch {
+      return null;
+    }
+    if (at.protocol !== 'https:') return null;
+    if (!this.gate) return at.host === this.access.site ? at : null;
+    const own = at.host === this.access.site ? at.pathname : this.ownAddress(at) ? at.pathname.slice(this.gate.length) : null;
+    const id = own ? ATTACHMENT.exec(own) : null;
+    return id ? new URL(`${this.base}/rest/api/3/attachment/content/${id[1] ?? id[2]}`) : null;
+  }
+
+  /** Only squad-kit's own address for the sign-in gets it: the site with a token, the site's gateway path with the sign-in. */
+  private ownAddress(at: URL): boolean {
+    return this.gate ? at.origin === GATEWAY && at.pathname.startsWith(`${this.gate}/`) : at.host === this.access.site;
+  }
+
+  /**
    * Saves an attachment. Jira answers with a redirect to its media service: that host gets no sign-in, only the
    * one-time address Jira gave. Only files on the site itself are asked for.
    */
   async download(url: string, file: string): Promise<string> {
-    let at = new URL(url);
-    if (at.protocol !== 'https:' || at.host !== this.access.site) throw new ModuleError(`squad-kit only downloads files kept on ${this.access.site}.`, 'not-found');
+    let at = this.fileUrl(url);
+    if (!at) throw new ModuleError(`squad-kit only downloads files kept on ${this.access.site}.`, 'not-found');
     for (let hop = 0; hop < 4; hop += 1) {
-      const own = at.host === this.access.site;
+      const own = this.ownAddress(at);
       let res: Response;
       try {
         res = await this.http(at.toString(), {
-          headers: own ? { authorization: authHeader(this.access) } : {},
+          headers: own ? { authorization: (await authHeader(this.access)).header } : {},
           redirect: 'manual',
           signal: AbortSignal.timeout((this.opts.timeoutMs ?? CALL_MS) * 5),
         });

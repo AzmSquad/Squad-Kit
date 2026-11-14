@@ -48,6 +48,8 @@ export interface ConnectionStatus {
   by?: 'token';
   /** One plain line for this case: "Signed in as …, which has no access to …". */
   line?: Words;
+  /** The sign-in reaches several places and this project has none yet: the person picks one (`pickSite`). */
+  pick?: { site: string; name: string }[];
 }
 
 /** The page the one-time code is typed on, when it is not the tool's own: Microsoft's, for Azure DevOps. */
@@ -61,18 +63,18 @@ export interface CodePage {
 }
 
 /**
- * A sign-in started from the board or the terminal: the tool's one-time code and the page to type it on, until the
- * person approves it there, cancels, or it fails.
+ * A sign-in started from the board or the terminal: the tool's one-time code and the page to type it on, or only the
+ * page to approve squad-kit on (no code), until the person approves it there, cancels, or it fails.
  */
 export interface SignInFlow {
   state: 'waiting' | 'done' | 'failed' | 'cancelled';
   code?: string;
-  /** The tool's page for the code. A normal link: squad-kit opens no window. */
+  /** The tool's page for the code, or the page to approve on. A normal link: squad-kit opens no window. */
   url?: string;
   /** The tool's own process, which Cancel stops. */
   pid?: number;
   startedAt: string;
-  /** Plain words for a failure. */
+  /** Plain words for a failure, or for what is left to do once it is done. */
   line?: string;
   account?: string;
 }
@@ -98,6 +100,8 @@ export interface ConnectionModule {
   ownSignIn?: boolean;
   /** That sign-in's folder inside squad-kit's own (core/home.ts privateFolder), which agents never reach. */
   privateFolder?: string;
+  /** Where on the tool's own site the person can take squad-kit's access away too: said with Disconnect. */
+  revokeAt?: { link: string; words: Words };
   /** The next way to connect, shown as coming: "Sign in with Atlassian". */
   next?: Words;
   /** "owner/name" of a git remote on this tool, so the page can say what it is for. */
@@ -111,4 +115,6 @@ export interface ConnectionModule {
     cancel(): SignInFlow | null;
   };
   signOut?(account: string): Promise<void>;
+  /** Picks one of the places the sign-in reaches (`ConnectionStatus.pick`) for projects that have none of their own. */
+  pickSite?(root: string, site: string): Promise<{ line: string }>;
 }

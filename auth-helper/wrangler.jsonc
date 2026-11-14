@@ -1,0 +1,16 @@
+{
+  "name": "squad-kit-auth",
+  "compatibility_date": "2026-10-01",
+  // The sign-in helper for "Sign in with Atlassian" (README.md): it adds the app's client secret and stores nothing.
+  "main": "src/worker.js",
+  "routes": [{ "pattern": "auth.squad-kit.com", "custom_domain": true }],
+  "workers_dev": false,
+  // Nothing about a request is kept: no logs, no traces, no log push.
+  "observability": { "enabled": false },
+  "logpush": false,
+  "vars": {
+    // Public: the Client ID of squad-kit's Atlassian app (developer.atlassian.com, the app's Settings). The same id is in
+    // src/modules/jira/atlassian-app.ts. The secret is never here: `npx wrangler secret put ATLASSIAN_CLIENT_SECRET`.
+    "ATLASSIAN_CLIENT_ID": "ATLASSIAN_CLIENT_ID_NOT_SET"
+  }
+}

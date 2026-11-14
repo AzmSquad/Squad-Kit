@@ -6,7 +6,8 @@ import { adfProblem } from './adf-check.js';
  * running sprint 7 with an attachment and acceptance criteria, task PAY-41, bug PAY-42, a finished story PAY-43, story
  * PAY-44 blocked by PAY-41, and sub-task PAY-45 under PAY-40. Board 1 is Scrum (sprints 5, 6 closed, 7 running, 8 next),
  * board 2 Kanban. Searches go only through POST /rest/api/3/search/jql, paged with nextPageToken; the old search is
- * gone (410). An attachment is a 303 to Atlassian's media host, which must get no sign-in.
+ * gone (410). An attachment is a 303 to Atlassian's media host, which must get no sign-in. With `cloud`, the same site
+ * answers through Atlassian's gateway to the Atlassian sign-in's bearer token.
  */
 
 
@@ -76,6 +77,11 @@ export interface FakeJiraOptions {
   busy?: 'once' | 'always';
   /** The site has these projects besides PAY. */
   projects?: { key: string; name: string }[];
+  /**
+   * Signed in with Atlassian: the site also answers at api.atlassian.com/ex/jira/<id>/… to the bearer token Atlassian
+   * gave last, as Atlassian's gateway does. A token Jira does not know is a 401.
+   */
+  cloud?: { id: string; bearer(): string; scopeMissing?: boolean };
 }
 
 export const SITE = 'acme.atlassian.net';
@@ -485,13 +491,19 @@ export function fakeJira(token = 'secret', opts: FakeJiraOptions = {}): FakeJira
     const signedIn = headers.has('authorization');
     requests.push({ method, url: url.href, signedIn });
     if (url.host === MEDIA) return new Response(Buffer.from('PNG!'), { status: 200, headers: { 'content-type': 'image/png' } });
-    if (url.host !== (opts.site ?? SITE)) throw new TypeError('fetch failed');
+    const gate = opts.cloud && url.origin === 'https://api.atlassian.com' && url.pathname.startsWith(`/ex/jira/${opts.cloud.id}/`) ? opts.cloud : null;
+    if (!gate && url.host !== (opts.site ?? SITE)) throw new TypeError('fetch failed');
     if (busy) {
       if (busy === 'once') busy = undefined;
       return json({ errorMessages: ['Rate limit exceeded.'], errors: {} }, 429, { 'retry-after': opts.busy === 'once' ? '1' : '30' });
     }
-    if (headers.get('authorization') !== auth) return new Response('Client must be authenticated to access this resource.', { status: 401, headers: { 'content-type': 'text/plain' } });
     const body = typeof init?.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : undefined;
+    if (gate) {
+      if (headers.get('authorization') !== `Bearer ${gate.bearer()}`) return json({ code: 401, message: 'Unauthorized' }, 401);
+      if (gate.scopeMissing) return json({ code: 401, message: 'Unauthorized; scope does not match' }, 401);
+      return answer(method, new URL(`https://${opts.site ?? SITE}${url.pathname.slice(`/ex/jira/${gate.id}`.length)}${url.search}`), body);
+    }
+    if (headers.get('authorization') !== auth) return new Response('Client must be authenticated to access this resource.', { status: 401, headers: { 'content-type': 'text/plain' } });
     return answer(method, url, body);
   }) as typeof fetch;
 

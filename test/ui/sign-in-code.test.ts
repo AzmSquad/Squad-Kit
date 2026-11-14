@@ -41,19 +41,21 @@ let started: ((r: Record<string, unknown>) => void) | null;
 const wait = (ms = 10) => act(async () => new Promise((r) => dom.window.setTimeout(r, ms)));
 const button = (name: string) => [...page.querySelectorAll('button')].find((b: any) => b.textContent.trim() === name) as any;
 
-async function open(hold = false) {
+const GITHUB = { name: 'github', label: 'GitHub', first: { state: 'waiting', code: 'AB12-CD34', url: 'https://github.com/login/device' } as Record<string, unknown> };
+
+async function open(hold = false, tool: { name: string; label: string; first: Record<string, unknown>; page?: unknown } = GITHUB) {
   vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
     const route = `${init.method ?? 'GET'} ${new URL(String(url), 'http://127.0.0.1:4809').pathname}`;
     calls.push(route);
     if (route.endsWith('/sign-in') && init.method === 'POST') {
-      const body = hold ? await new Promise<Record<string, unknown>>((done) => (started = done)) : { state: 'waiting', code: 'AB12-CD34', url: 'https://github.com/login/device' };
+      const body = hold ? await new Promise<Record<string, unknown>>((done) => (started = done)) : tool.first;
       return new Response(JSON.stringify(body), { status: 200 });
     }
     if (route.endsWith('/cancel')) return new Response(JSON.stringify({ state: 'cancelled' }), { status: 200 });
     return new Response(JSON.stringify(now), { status: 200 });
   });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  await act(async () => root.render(h(QueryClientProvider, { client }, h(PrefsProvider, null, h(SignInCode, { name: 'github', label: 'GitHub', onClose: () => (closed += 1) })))));
+  await act(async () => root.render(h(QueryClientProvider, { client }, h(PrefsProvider, null, h(SignInCode, { name: tool.name, label: tool.label, page: tool.page, onClose: () => (closed += 1) })))));
   await wait();
 }
 
@@ -111,5 +113,23 @@ describe('the sign-in code window', () => {
     await wait();
     expect(calls.filter((c) => c === 'POST /p/squad-kit/api/v1/connections/github/sign-in')).toHaveLength(2);
     expect(page.querySelector('.gh-bigcode span')?.textContent).toBe('AB12-CD34');
+  });
+
+  it("a sign-in with no code (Atlassian's): the page to approve on, Cancel and the command; done closes it", async () => {
+    const link = 'https://auth.atlassian.com/authorize?audience=api.atlassian.com&state=51234.nonce';
+    now = { state: 'waiting', url: link };
+    const atlassian = { name: 'Atlassian', then: { en: 'pick your Jira site and press Accept', ar: '' }, foot: { en: 'squad-kit keeps this sign-in in its own folder.', ar: '' } };
+    await open(false, { name: 'jira', label: 'Jira', first: { state: 'waiting', url: link }, page: atlassian });
+    expect(page.querySelector('h2')?.textContent).toBe("Approve squad-kit on Atlassian's page");
+    expect(page.querySelector('.gh-bigcode')).toBeNull();
+    expect(page.querySelector('.gh-muted')?.textContent).toBe("Open Atlassian's page, then pick your Jira site and press Accept.");
+    const a = page.querySelector('a.btn') as any;
+    expect(a.getAttribute('href')).toBe(link);
+    expect(a.textContent).toContain('Open Atlassian');
+    expect(button('Cancel')).toBeTruthy();
+    expect(page.querySelector('.gh-foot')?.textContent).toBe('squad-kit keeps this sign-in in its own folder.');
+    now = { state: 'done', account: 'Sara Ali', line: "Signed in. Pick this project's Jira site on the Connections page." };
+    await wait(1700);
+    expect(closed).toBe(1);
   });
 });

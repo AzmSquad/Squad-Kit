@@ -1,7 +1,7 @@
 import kleur from 'kleur';
-import { confirm } from '@inquirer/prompts';
+import { confirm, input } from '@inquirer/prompts';
 import * as ui from '../ui/index.js';
-import { cancelSignIn, connectionInfo, connectionsOf, disconnect, signInNow, startSignIn, type ConnectionRow } from '../engine/connections.js';
+import { cancelSignIn, connectionInfo, connectionsOf, disconnect, pickSite, signInNow, startSignIn, type ConnectionRow } from '../engine/connections.js';
 import { board } from './board.js';
 
 const out = (s = '') => process.stdout.write(`${s}\n`);
@@ -22,6 +22,8 @@ export function connectionLines(rows: ConnectionRow[]): string[] {
     lines.push('', `  ${kleur.bold(r.label)}  ${STATE[r.state]}${r.account && r.state === 'connected' ? ` as ${r.account}` : ''}`, grey(`    ${r.what.en}`));
     if (r.for) lines.push(`    For ${r.for.repo}${r.for.into && r.for.into !== r.for.repo ? `: pull requests into ${r.for.into}` : ''}`);
     if (r.line) lines.push(`    ${r.line.en}`);
+    r.pick?.forEach((p, i) => lines.push(`      ${i + 1}. ${p.name} (${p.site})`));
+    if (r.pick?.length) lines.push(`    Pick one: ${kleur.green(`squad connect ${r.name} --site <site>`)}`);
     if (r.state !== 'connected') r.steps.forEach((s, i) => lines.push(`    ${i + 1}. ${s.text.en}${s.command ? `: ${kleur.green(s.command)}` : ''}${s.done ? grey(` (${s.done.en})`) : ''}`));
     for (const a of r.actions.filter((x) => x.id !== 'check')) lines.push(`    ${a.name}: ${kleur.green(a.command)}`);
   }
@@ -31,16 +33,40 @@ export function connectionLines(rows: ConnectionRow[]): string[] {
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * `squad connect`: every outside tool and its state (`--status` is the same). `squad connect <tool>`: signs in through
- * the tool's own sign-in: prints its one-time code and page, then waits until you approve it there. Ctrl-C cancels.
+ * The sign-in reaches several places and this project has none of its own (a Jira site): `--site`, else a number from
+ * the list when a person is at the terminal.
  */
-export async function runConnect(name: string | undefined, opts: { status?: boolean }): Promise<void> {
+async function pickOne(bp: ReturnType<typeof board>, name: string, row: ConnectionRow, site?: string): Promise<void> {
+  const list = row.pick ?? [];
+  if (!site) {
+    const asks = process.stdin.isTTY && process.env.CI !== 'true';
+    const lines = list.map((p, i) => `  ${i + 1}. ${p.name} (${p.site})`);
+    if (!asks) throw new Error(`${row.line?.en ?? 'Pick one.'}\n${lines.join('\n')}\nTo pick one: squad connect ${name} --site <site>`);
+    out();
+    out(`  ${row.line?.en ?? 'Pick one.'}`);
+    lines.forEach((l) => out(l));
+    const n = await input({ message: `Which one? (1-${list.length})`, validate: (v) => (Number(v) >= 1 && Number(v) <= list.length && Number.isInteger(Number(v)) ? true : `Type a number from 1 to ${list.length}.`) });
+    site = list[Number(n) - 1]!.site;
+  }
+  ui.success((await pickSite(bp, name, site)).line);
+}
+
+/**
+ * `squad connect`: every outside tool and its state (`--status` is the same). `squad connect <tool>`: signs in through
+ * the tool's own sign-in: prints its one-time code and page (or only the page to approve on), then waits until you
+ * approve it there. Ctrl-C cancels. `--site`: the place to use when the sign-in reaches several.
+ */
+export async function runConnect(name: string | undefined, opts: { status?: boolean; site?: string }): Promise<void> {
   const bp = board();
   if (!name || opts.status) {
     for (const l of connectionLines((await connectionsOf(bp, { again: true })).rows)) out(l);
     out();
     return;
   }
+  const rowOf = async () => (await connectionsOf(bp)).rows.find((r) => r.name === name);
+  // Signed in already, with only the place left to pick: no new sign-in.
+  const before = opts.site ? await rowOf() : undefined;
+  if (before?.pick?.length) return pickOne(bp, name, before, opts.site);
   // Ctrl-C stops the tool's sign-in from the start, also while it is still getting its code: the tool leads its own
   // group, so it would not stop with this terminal by itself.
   const stop = () => {
@@ -59,11 +85,17 @@ export async function runConnect(name: string | undefined, opts: { status?: bool
     const f = await startSignIn(bp, name);
     if (f.state === 'failed') throw new Error(f.line ?? 'The sign-in did not start.');
     out();
-    // The tool's page says what to press: Authorize on GitHub, Continue on Microsoft's.
+    // The tool's page says what to press: Authorize on GitHub, Continue on Microsoft's, Accept on Atlassian's.
     const page = connectionInfo(name).codePage;
-    out(`  Open ${kleur.underline(f.url ?? '')} and type this code, then ${page ? page.then.en : 'press Authorize'}:`);
-    out();
-    out(`      ${kleur.bold(f.code ?? '')}`);
+    if (f.code) {
+      out(`  Open ${kleur.underline(f.url ?? '')} and type this code, then ${page ? page.then.en : 'press Authorize'}:`);
+      out();
+      out(`      ${kleur.bold(f.code)}`);
+    } else {
+      out(`  Open this link, then ${page ? page.then.en : 'approve squad-kit there'}:`);
+      out();
+      out(`      ${kleur.underline(f.url ?? '')}`);
+    }
     out();
     const spin = ui.spinner('Waiting for you to approve it…');
     now = signInNow(name);
@@ -79,7 +111,8 @@ export async function runConnect(name: string | undefined, opts: { status?: bool
     process.off('SIGINT', stop);
   }
   if (now?.state !== 'done') throw new Error(now?.line ?? 'The sign-in did not finish.');
-  const row = (await connectionsOf(bp)).rows.find((r) => r.name === name);
+  const row = await rowOf();
+  if (row?.pick?.length) return pickOne(bp, name, row, opts.site);
   ui.success(`Connected${row?.account ? ` as ${row.account}` : ''}.`);
 }
 

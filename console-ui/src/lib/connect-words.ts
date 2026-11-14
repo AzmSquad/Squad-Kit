@@ -47,7 +47,10 @@ export const CONNECT = {
       again: 'Try again',
       close: 'Close',
       lost: 'The sign-in stopped before it finished. Try again.',
+      approve: (label: string) => `Approve squad-kit on ${label}'s page`,
+      link: (label: string, then = 'approve squad-kit') => `Open ${label}'s page, then ${then}.`,
     },
+    use: 'Use this one',
     off: {
       head: (label: string) => `Disconnect ${label}?`,
       body: (label: string, account: string) =>
@@ -98,7 +101,10 @@ export const CONNECT = {
       again: 'جرّب مرة ثانية',
       close: 'إغلاق',
       lost: 'التسجيل وقف قبل ما يخلص. جرّب مرة ثانية.',
+      approve: (label: string) => `وافق على squad-kit في صفحة ${label}`,
+      link: (label: string, then = 'وافق على squad-kit') => `افتح صفحة ${label}، وبعدين ${then}.`,
     },
+    use: 'استخدم هذا',
     off: {
       head: (label: string) => `تفصل ${label}؟`,
       body: (label: string, account: string) => `هذا يسجّل خروج أداة ${label} الرسمية على هذا الجهاز، باسم ${account}، لكل تطبيق يستخدمها، مو بس squad-kit. تقدر تسجّل الدخول مرة ثانية في أي وقت.`,

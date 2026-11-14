@@ -4,6 +4,8 @@ import { loadSecrets, mergeSecrets, saveSecrets } from '../../core/secrets.js';
 import { overlayTrackerEnv } from '../../tracker/env-overlay.js';
 import { jiraAccess } from '../../tracker/jira-site.js';
 import type { SetupField } from '../tracker/types.js';
+import { atlassianCloud } from './atlassian-token.js';
+import type { JiraAccess } from './client.js';
 import { projectOf, siteOf } from './refs.js';
 
 /**
@@ -12,10 +14,7 @@ import { projectOf, siteOf } from './refs.js';
  * squad-kit 0.x kept the site, email and token the same way, so a setup from then is read as it is.
  */
 
-export interface JiraSettings {
-  site: string;
-  email: string;
-  token: string;
+export interface JiraSettings extends JiraAccess {
   /** The project key, like PAY. A setup from before this version may have none yet. */
   project?: string;
   /** The board whose sprints the Backlog shows; none: the project has no sprints, or the person chose none. */
@@ -95,18 +94,17 @@ export function readSaved(root: string): SavedJira | null {
   };
 }
 
-/** The settings a tracker opens with: only when the site, the email and the token are all there. */
+/**
+ * The settings a tracker opens with: the site with the person's email and API token for it, else squad-kit's own
+ * Atlassian sign-in when it covers the site (ADR-012). A token saved for the site wins: it is the person's own choice.
+ */
 export function readSettings(root: string): JiraSettings | null {
   const s = readSaved(root);
-  if (!s?.site || !s.email || !s.token) return null;
-  return {
-    site: s.site,
-    email: s.email,
-    token: s.token,
-    ...(s.project ? { project: s.project } : {}),
-    ...(s.board && s.board !== 'none' ? { board: s.board } : {}),
-    readOnly: s.readOnly,
-  };
+  if (!s?.site) return null;
+  const rest = { ...(s.project ? { project: s.project } : {}), ...(s.board && s.board !== 'none' ? { board: s.board } : {}), readOnly: s.readOnly };
+  if (s.email && s.token) return { site: s.site, email: s.email, token: s.token, ...rest };
+  const signedIn = atlassianCloud(s.site);
+  return signedIn ? { site: s.site, email: signedIn.who, cloud: signedIn.cloud, ...rest } : null;
 }
 
 /** The values the Settings form shows. The token never leaves this computer's file. */
@@ -115,11 +113,11 @@ export function formValues(s: SavedJira): Record<string, string> {
 }
 
 /**
- * Saves the checked settings: the team's part in the project's config, the person's sign-in on this computer. The
+ * Saves the checked settings: the team's part in the project's config, the person's email and token on this computer. The
  * file's host is written only with a newly pasted token, or when it is that host already: a save that used a token
  * from the environment never puts a new host next to the file's older token.
  */
-export function writeSettings(root: string, s: { site: string; email: string; token?: string; project?: string; board?: { id: number; name: string } | 'none' }): void {
+export function writeSettings(root: string, s: { site: string; email?: string; token?: string; project?: string; board?: { id: number; name: string } | 'none' }): void {
   const paths = buildPaths(root);
   const config = loadConfig(paths.configFile);
   const options: Record<string, string> = { updates: WRITES };
@@ -129,5 +127,7 @@ export function writeSettings(root: string, s: { site: string; email: string; to
   const secrets = loadSecrets(paths.secretsFile);
   const file = secrets.tracker?.jira;
   if (!s.token && file?.token && siteOf(file.host) !== s.site) return;
+  // Checked with the Atlassian sign-in: nothing of the person's to keep here.
+  if (!s.token && !s.email) return;
   saveSecrets(paths.secretsFile, mergeSecrets(secrets, { tracker: { jira: { host: s.site, email: s.email, token: s.token } } }));
 }

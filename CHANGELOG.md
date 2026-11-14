@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Sign in with Atlassian for Jira.** On the Connections page, Jira now signs in with a button: squad-kit gives you
+  the link to Atlassian's page, you pick your Jira site and press Accept, and that is all. No token to make or paste. A
+  token still works: **Use a token instead** opens the same form in Settings, and a token saved there is used first.
+  When Atlassian gives squad-kit several Jira sites and the project has none yet, you pick one from a short list on the
+  Jira row. Terminal: `squad connect jira` (`--site <site>` to pick), `squad disconnect jira`.
+- **squad-kit keeps its own Atlassian sign-in** on your computer only, in its own folder that the agents cannot read.
+  The short-lived token stays in memory. Atlassian asks every app for a secret during sign-in, so a small helper at
+  `auth.squad-kit.com` adds squad-kit's secret and passes the sign-in straight to your computer; it stores nothing and
+  its code is public in the repository (`auth-helper/`).
+- **Plain words for each case:** Cancel on Atlassian's page, a project whose Jira site you did not pick on Atlassian's
+  page, a sign-in Atlassian ended (unused for 90 days, or removed), and a network that cannot reach Atlassian just now
+  (never taken as a sign-out). Disconnect works offline and tells you where to remove squad-kit on your Atlassian
+  account too (Connected apps).
+- **A privacy page** for the website (draft): what squad-kit keeps on your computer, and how to remove it.
+
+Sign in with Atlassian shows once squad-kit's Atlassian app is registered; until then Jira keeps the token way.
+
 ## [1.3.22] — 2026-11-14
 
 ### Added
