@@ -1,0 +1,102 @@
+---
+import Layout from "~/layouts/Layout.astro";
+
+const issues = "https://github.com/AzmSquad/Squad-Kit/issues";
+const connectedApps = "https://id.atlassian.com/manage-profile/apps";
+const helperCode = "https://github.com/AzmSquad/Squad-Kit/tree/main/auth-helper";
+---
+
+<Layout
+  title="Privacy · squad-kit"
+  description="squad-kit runs on your computer. We keep no account of you and run no servers that hold your data. What squad-kit keeps on your computer, and how to remove it."
+>
+  <section class="container-page py-16 sm:py-20">
+    <article class="prose-docs max-w-3xl">
+      <h1>Privacy</h1>
+      <p>
+        squad-kit is a program that runs on your own computer. This page says what it keeps, where it keeps it, and how
+        to remove it. Last changed: November 2026.
+      </p>
+
+      <h2>squad-kit runs on your computer</h2>
+      <p>
+        squad-kit, its board and the AI agents it starts all run on your computer. <strong>We keep no account of you,
+        and we run no servers that hold your data.</strong> Your projects, stories and code stay on your computer. They
+        go only to the services you connect yourself: your tracker (such as Jira), your code host (such as GitHub) and
+        the AI tool you choose.
+      </p>
+
+      <h2>The sign-in helper</h2>
+      <p>
+        When you press <strong>Sign in with Atlassian</strong>, Atlassian sends you back through a small helper at
+        <code>auth.squad-kit.com</code>. Atlassian asks every app for its own secret during sign-in, and an app you
+        download cannot hold a secret. So the helper adds squad-kit's secret and passes the sign-in straight on to
+        squad-kit on your computer.
+      </p>
+      <p>
+        squad-kit also uses the helper to <strong>renew the sign-in, about once an hour</strong> while you use it: the
+        renewal passes through <code>auth.squad-kit.com</code> too. The helper runs on Cloudflare. It
+        <strong>keeps no codes and no tokens, and writes no logs</strong>. To stop abuse, Cloudflare counts the requests
+        from each internet address for about a minute; nothing else is kept. Its code is public:
+        <a href={helperCode} target="_blank" rel="noopener">auth-helper in squad-kit's repository</a>.
+      </p>
+
+      <h2>What squad-kit keeps on your computer</h2>
+      <ul>
+        <li>
+          <strong>Your Atlassian sign-in:</strong> a sign-in token, the Jira sites you allowed and your account name, in
+          <code>~/.squad-kit/atlassian</code>. Only you can read it. The short-lived token squad-kit uses to call Jira
+          is kept in memory only, never in a file.
+        </li>
+        <li>
+          <strong>A Jira API token you paste instead:</strong> in squad-kit's private files on your computer. For a
+          project set up with squad-kit 1.x, that is <code>~/.squad-kit/projects</code>; for an older project, the
+          project's <code>.squad/secrets.yaml</code>, which squad-kit keeps out of git. squad-kit can also read it from
+          the <code>JIRA_API_TOKEN</code> variable instead.
+        </li>
+        <li>
+          <strong>Your project's settings</strong> (your Jira site and project, never a token): in the project's
+          <code>.squad</code> folder, which your team shares through git.
+        </li>
+      </ul>
+      <p>squad-kit makes every Jira call itself; it never gives your sign-in or your tokens to the AI agents it runs.</p>
+      <p>
+        <strong>How far the agents are kept away depends on your computer.</strong> On a Mac, and on Linux with
+        bubblewrap working, squad-kit's guard walls the agents off from your sign-ins and tokens. On Windows, on WSL 1,
+        and on Linux without bubblewrap, squad-kit cannot wall them off yet: there an agent could read what your own
+        account can read, so use squad-kit only on a computer you trust.
+      </p>
+
+      <h2>What squad-kit does in Jira</h2>
+      <p>
+        It reads your project's stories, boards and sprints, and it updates them as the work moves: statuses, comments,
+        labels, new stories and bugs. It does this as you, with the access you gave it, and only for the work you start
+        in squad-kit. Nothing of it is sent to us.
+      </p>
+
+      <h2>How to remove it</h2>
+      <ul>
+        <li>
+          <strong>Disconnect</strong> on squad-kit's Connections page, or <code>squad disconnect jira</code> in a
+          terminal, deletes squad-kit's Atlassian sign-in from your computer. It works even without a network.
+        </li>
+        <li>
+          To take squad-kit's access away on Atlassian's side too, open your Atlassian account settings,
+          <a href={connectedApps} target="_blank" rel="noopener">Connected apps</a>, and remove squad-kit.
+        </li>
+        <li>To remove everything squad-kit kept, uninstall squad-kit and delete the <code>~/.squad-kit</code> folder.</li>
+      </ul>
+
+      <h2>This website</h2>
+      <p>
+        This website has no analytics. Its fonts come from Google Fonts, so your browser asks Google for them. The film
+        on the home page is YouTube's player, which loads only when you press play.
+      </p>
+
+      <h2>Contact</h2>
+      <p>
+        Questions about privacy: open an issue on <a href={issues} target="_blank" rel="noopener">squad-kit's issues page</a>.
+      </p>
+    </article>
+  </section>
+</Layout>
