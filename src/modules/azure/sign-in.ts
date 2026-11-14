@@ -4,7 +4,8 @@ import { loadConfig } from '../../core/config.js';
 import { loadSecrets } from '../../core/secrets.js';
 import { overlayTrackerEnv } from '../../tracker/env-overlay.js';
 import { writeLog } from '../../core/app-log.js';
-import { Azure, parseAzureRemote, type AzureTarget } from './client.js';
+import { Azure, type AzureTarget } from './client.js';
+import { azureHost, parseAzureRemote } from './hosts.js';
 import { bearerFor, refusedFor, signedInWithMicrosoft } from './token.js';
 
 /**
@@ -29,18 +30,9 @@ export function signInFor(organization: string, pat?: string): Pick<AzureTarget,
   return signedInWithMicrosoft() ? { bearer: () => bearerFor(organization), refused: (token) => refusedFor(organization, token) } : null;
 }
 
-/** Azure DevOps' own git hosts: a sign-in header is only ever made for one of these, never for any other address. */
-const AZURE_HOST = /^(?:dev\.azure\.com|[a-z0-9-]+\.visualstudio\.com)$/i;
-
 /** The Azure DevOps host of an https remote, or null for any other address (another host, a port, no https). */
 function azureHttpsHost(remoteUrl: string): string | null {
-  if (!/^https:\/\//i.test(remoteUrl) || !parseAzureRemote(remoteUrl)) return null;
-  try {
-    const host = new URL(remoteUrl).host;
-    return AZURE_HOST.test(host) ? host : null;
-  } catch {
-    return null;
-  }
+  return parseAzureRemote(remoteUrl) ? azureHost(remoteUrl) : null;
 }
 
 /** The Azure client for a project folder, when its tracker is Azure and it has a sign-in. */

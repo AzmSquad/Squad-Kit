@@ -481,6 +481,45 @@ describe("Jira: only what squad-kit made, and links that land either way", () =>
     expect(await tracker.findMade({ level: 'epic', tag: 'BR-1', mark: 'Made by squad-kit from BR-1, E-1.' })).toMatchObject({ id: made.id });
   });
 
+  it('a status named like a step of the work (Awaiting QA) is a sideways step on the way to Done', async () => {
+    const { tracker, fake } = jira({ qa: 'way', qaName: 'Awaiting QA' });
+    expect(await tracker.moveTo('PAY-40', 'closed')).toBe('Done');
+    expect(fake.issues.get('PAY-40')!.status).toBe('Done');
+    for (const name of ['Awaiting QA', 'Awaiting Approval', 'Stakeholder Review', 'Waiting for Deploy']) {
+      expect(nextStep([{ id: '1', to: { name, category: 'indeterminate' } }], { name: 'In Progress', category: 'indeterminate' }, 3)?.to.name, name).toBe(name);
+    }
+  });
+
+  it("learning a site's link sides judges only the one new link: a person's earlier link stays, and nothing flips", async () => {
+    const site = 'fresh.atlassian.net';
+    const { tracker, fake } = jira({ site }, { site });
+    // A person linked them earlier the other way: PAY-44 blocks PAY-40.
+    fake.links.push({ id: '98001', type: 'Blocks', source: 'PAY-44', target: 'PAY-40' });
+    await tracker.linkDepends('PAY-44', ['PAY-40']);
+    expect(fake.links).toContainEqual({ id: '98001', type: 'Blocks', source: 'PAY-44', target: 'PAY-40' });
+    expect(fake.links).toContainEqual(expect.objectContaining({ type: 'Blocks', source: 'PAY-40', target: 'PAY-44' }));
+    expect(fake.requests.filter((r) => r.method === 'DELETE')).toEqual([]);
+    const sent = fake.requests.length;
+    await tracker.linkDepends('PAY-44', ['PAY-42']);
+    expect(fake.links).toContainEqual(expect.objectContaining({ type: 'Blocks', source: 'PAY-42', target: 'PAY-44' }));
+    expect(fake.requests.slice(sent).filter((r) => r.method !== 'GET').map((r) => r.method)).toEqual(['POST']);
+  });
+
+  it("an epic link or label a teammate made already is used, never recorded as squad-kit's, so it is never taken away", async () => {
+    const { tracker, fake } = jira();
+    const first = await tracker.createItem({ level: 'epic', title: 'Front desk', markdown: 'x' });
+    const billing = await tracker.createItem({ level: 'epic', title: 'Billing', markdown: 'x' });
+    const feature = await tracker.createItem({ level: 'feature', title: 'Paying', markdown: 'x', parent: first.id });
+    // A teammate had linked it to Billing and labelled it so.
+    fake.links.push({ id: '97001', type: 'Relates', source: feature.id, target: billing.id });
+    fake.issues.get(feature.id)!.labels.push('epic-billing');
+    await tracker.updateItem(feature.id, { parent: billing.id });
+    expect((await tracker.get(feature.id)).parents.map((p) => p.id)).toEqual([billing.id]);
+    await tracker.updateItem(feature.id, { parent: first.id });
+    expect(fake.links).toContainEqual({ id: '97001', type: 'Relates', source: feature.id, target: billing.id });
+    expect(fake.issues.get(feature.id)!.labels).toEqual(expect.arrayContaining(['epic-billing', 'epic-front-desk']));
+  });
+
   it('a sideways step never goes into a status that parks the work', () => {
     const inProgress = { name: 'In Progress', category: 'indeterminate' };
     const steps = [

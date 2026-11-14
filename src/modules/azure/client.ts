@@ -3,6 +3,7 @@ import path from 'node:path';
 import { ModuleError, kindOfStatus, type ModuleErrorKind } from '../errors.js';
 import { withoutTags } from '../../utils/text.js';
 import { writeLog } from '../../core/app-log.js';
+import { azureHost } from './hosts.js';
 
 /**
  * Azure Boards and Azure Repos for the live squad: the backlog, work item states and comments, bugs, and pull
@@ -268,8 +269,9 @@ export class Azure {
     return pages;
   }
 
-  /** Saves an attachment to a file and returns its path. */
+  /** Saves an attachment to a file and returns its path. Only a file on Azure DevOps itself gets the sign-in. */
   async download(url: string, file: string): Promise<string> {
+    if (!azureHost(url)) throw new AzureError('squad-kit only downloads files kept on Azure DevOps itself.', undefined, 'not-found');
     // A file may be big: it gets more time than a call, but never forever.
     const res = await this.http(url, { headers: { authorization: await this.auth(), 'X-TFS-FedAuthRedirect': 'Suppress' }, signal: AbortSignal.timeout(this.timeoutMs * 5) });
     if (!res.ok) throw new AzureError(`Could not download ${path.basename(file)} (HTTP ${res.status}).`, res.status);
@@ -594,19 +596,4 @@ export function htmlToText(html: string): string {
 
 export function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-/** Where a git remote lives on Azure Repos, or null for any other host. */
-export function parseAzureRemote(url: string): { organization: string; project: string; repo: string } | null {
-  const clean = url.trim().replace(/\.git$/, '');
-  const patterns = [
-    /^https:\/\/(?:[^@/]+@)?dev\.azure\.com\/([^/]+)\/([^/]+)\/_git\/([^/?#]+)/i,
-    /^https:\/\/(?:[^@/]+@)?([a-z0-9-]+)\.visualstudio\.com\/(?:DefaultCollection\/)?([^/]+)\/_git\/([^/?#]+)/i,
-    /^(?:ssh:\/\/)?git@ssh\.dev\.azure\.com:(?:22\/)?v3\/([^/]+)\/([^/]+)\/([^/]+)$/i,
-  ];
-  for (const p of patterns) {
-    const m = clean.match(p);
-    if (m?.[1] && m[2] && m[3]) return { organization: decodeURIComponent(m[1]), project: decodeURIComponent(m[2]), repo: decodeURIComponent(m[3]) };
-  }
-  return null;
 }

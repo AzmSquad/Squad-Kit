@@ -43,6 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   project and board, checked with Jira first. `squad doctor` checks Jira as the board does.
 - A Jira token in `JIRA_API_TOKEN` (or `SQUAD_TRACKER_API_KEY`) is used only with `JIRA_HOST` set to its site, and
   squad-kit 0.x's Jira fetch (`squad new-story --id`) never sends a token to a site it was not saved for.
+- A work item's files are downloaded with the sign-in only from the tracker's own site: Azure DevOps' own hosts, or
+  the saved Jira site. A file linked from anywhere else is left out.
+- When a tracker will not move an item, the comment and release label still go, and the ticket says so once.
 
 ## [1.3.21] — 2026-11-13
 

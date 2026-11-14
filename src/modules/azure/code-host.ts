@@ -1,5 +1,6 @@
 import type { CodeHostModule, MergeState, PullRequest, PullRequestReview, RepoHost } from '../code-host/types.js';
-import { Azure, parseAzureRemote } from './client.js';
+import { Azure } from './client.js';
+import { parseAzureRemote } from './hosts.js';
 import { postReviewThreads } from './review-threads.js';
 import { azurePlace, gitAuthEnv, signInFor } from './sign-in.js';
 

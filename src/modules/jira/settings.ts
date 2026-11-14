@@ -114,7 +114,11 @@ export function formValues(s: SavedJira): Record<string, string> {
   return { site: s.site ?? '', email: s.email ?? '', project: s.project ?? '', board: s.board === 'none' ? 'none' : s.board ? String(s.board.id) : '' };
 }
 
-/** Saves the checked settings: the team's part in the project's config, the person's sign-in on this computer. */
+/**
+ * Saves the checked settings: the team's part in the project's config, the person's sign-in on this computer. The
+ * file's host is written only with a newly pasted token, or when it is that host already: a save that used a token
+ * from the environment never puts a new host next to the file's older token.
+ */
 export function writeSettings(root: string, s: { site: string; email: string; token?: string; project?: string; board?: { id: number; name: string } | 'none' }): void {
   const paths = buildPaths(root);
   const config = loadConfig(paths.configFile);
@@ -122,5 +126,8 @@ export function writeSettings(root: string, s: { site: string; email: string; to
   if (s.board === 'none') options.board = 'none';
   else if (s.board) Object.assign(options, { board: String(s.board.id), boardName: s.board.name });
   saveConfig(paths.configFile, { ...config, tracker: { type: 'jira', workspace: s.site, ...(s.project ? { project: s.project } : {}), options } });
-  saveSecrets(paths.secretsFile, mergeSecrets(loadSecrets(paths.secretsFile), { tracker: { jira: { host: s.site, email: s.email, token: s.token } } }));
+  const secrets = loadSecrets(paths.secretsFile);
+  const file = secrets.tracker?.jira;
+  if (!s.token && file?.token && siteOf(file.host) !== s.site) return;
+  saveSecrets(paths.secretsFile, mergeSecrets(secrets, { tracker: { jira: { host: s.site, email: s.email, token: s.token } } }));
 }

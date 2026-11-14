@@ -33,7 +33,6 @@
   "src/engine/story-db.ts": 838,
   "src/engine/window.ts": 1643,
   "src/modules/android-emulator/index.ts": 668,
-  "src/modules/azure/client.ts": 612,
   "src/planner/runtimes/agent-sdk-runtime.ts": 735,
   "src/planner/runtimes/vercel-runtime.ts": 672
 }

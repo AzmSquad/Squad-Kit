@@ -153,13 +153,14 @@ export function microsoftSignInNow(): SignInFlow | null {
  * in their own folder, are never touched.
  */
 export async function signOutOfMicrosoft(): Promise<void> {
-  // A sign-in still waiting would write its account in after the clear: it is stopped first, and its end waited for.
-  const waiting = flow?.state === 'waiting' && alive(flow.child) ? flow.child! : null;
-  if (waiting) {
-    const gone = whenExited(waiting);
-    cancelMicrosoftSignIn();
-    await Promise.race([gone, new Promise((r) => setTimeout(r, 8000))]);
-  }
+  // A sign-in on its way would write its account in after the clear: still finding the organization's directory (no az
+  // yet), or az waiting for the person. It is marked cancelled either way, so az login never starts after this; its az
+  // is stopped, and both its start and its end are waited for.
+  const pending = starting;
+  const waiting = flow && alive(flow.child) ? flow.child : null;
+  const gone = waiting ? whenExited(waiting) : null;
+  cancelMicrosoftSignIn();
+  if (pending || gone) await Promise.race([Promise.all([pending?.catch(() => undefined), gone]), new Promise((r) => setTimeout(r, 8000))]);
   await runAz(['account', 'clear'], 30_000);
   clearAzFolder();
   forgetMicrosoftTokens();

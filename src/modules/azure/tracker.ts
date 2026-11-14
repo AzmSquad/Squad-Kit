@@ -13,7 +13,8 @@ import type {
   TrackerLevels,
   TrackerModule,
 } from '../tracker/types.js';
-import { Azure, AzureError, parseAzureRemote, PROCESS_TYPES, processOf, type PatchOp, type StateCategory, type WorkItemRow } from './client.js';
+import { Azure, AzureError, PROCESS_TYPES, processOf, type PatchOp, type StateCategory, type WorkItemRow } from './client.js';
+import { parseAzureRemote } from './hosts.js';
 import { azureForProject } from './sign-in.js';
 import { signedInWithMicrosoft } from './token.js';
 import { markdownToHtml } from './markdown.js';

@@ -75,16 +75,21 @@ export async function placeBeside(ctx: JiraContext, issue: RawIssue, epic: { key
   if (before?.epic === epic.key && relatesLink(issue, epic.key) && (!before.label || before.label === label)) return;
   const removed = await unlinkEpics(ctx, issue, before);
   const path = `/rest/api/3/issue/${encodeURIComponent(issue.key)}`;
-  const labelled = (await ctx.editFields(issue.key)).includes('labels');
+  // Only what squad-kit makes here is recorded: a label or a link a teammate made already is used, never claimed.
+  const made: Placed = { epic: epic.key };
   const hasLabel = (issue.fields.labels ?? []).includes(label) && removed.label !== label;
-  if (labelled && !hasLabel) await ctx.client.call('PUT', path, { update: { labels: [{ add: label }] } });
-  let link = relatesLink(issue, epic.key, removed.link)?.id;
-  if (!link) {
+  if (!hasLabel && (await ctx.editFields(issue.key)).includes('labels')) {
+    await ctx.client.call('PUT', path, { update: { labels: [{ add: label }] } });
+    made.label = label;
+  }
+  if (!relatesLink(issue, epic.key, removed.link)) {
+    const had = new Set((issue.fields.issuelinks ?? []).map((l) => l.id));
     await ctx.link((await relatesType(ctx)).name, issue.key, epic.key);
     const back = await ctx.client.call<RawIssue>('GET', `${path}?fields=issuelinks`);
-    link = relatesLink(back, epic.key)?.id;
+    const fresh = (back?.fields.issuelinks ?? []).filter((l) => l.id && !had.has(l.id) && relatesLike(l.type) && (l.outwardIssue ?? l.inwardIssue)?.key === epic.key);
+    if (fresh.length === 1) made.link = fresh[0]!.id;
   }
-  await ctx.client.call('PUT', propertyPath(issue.key), { epic: epic.key, ...(link ? { link } : {}), ...(labelled ? { label } : {}) });
+  await ctx.client.call('PUT', propertyPath(issue.key), made);
 }
 
 /**

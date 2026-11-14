@@ -135,7 +135,8 @@ export class JiraClient implements TrackerClient {
     targetDir: string,
     opts?: DownloadOptions,
   ): Promise<DownloadedAttachment[]> {
-    return downloadAttachmentsWith(refs, targetDir, this.headers(), opts);
+    // The token goes only to the Jira site itself.
+    return downloadAttachmentsWith(refs, targetDir, this.headers(), opts, (url) => onHost(url, new URL(this.baseUrl).host));
   }
 
   private headers(): Record<string, string> {
@@ -260,4 +261,14 @@ function extractJiraErrorMessages(body: string): string {
   if (messages.length === 0) return '';
   const joined = messages.join(' ');
   return joined.length > 200 ? `${joined.slice(0, 197)}...` : joined;
+}
+
+/** True for an https address on exactly this host. */
+function onHost(url: string, host: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.protocol === 'https:' && u.host === host && !u.username && !u.password;
+  } catch {
+    return false;
+  }
 }

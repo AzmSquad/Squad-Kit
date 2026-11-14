@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { Azure, htmlToText, parseAzureRemote, pickState } from '../src/modules/azure/client.js';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { Azure, htmlToText, pickState } from '../src/modules/azure/client.js';
+import { parseAzureRemote } from '../src/modules/azure/hosts.js';
 import { gitAuthEnv } from '../src/modules/azure/sign-in.js';
 
 type Route = { method: string; match: RegExp; reply: unknown | ((body: unknown) => unknown); status?: number };
@@ -189,5 +193,24 @@ describe('Azure helpers', () => {
     // No tag is left, however tags nest; a written &lt; stays as text.
     expect(htmlToText('<p>a<<b>>b <scr<i>ipt>c</p>')).toBe('a>b ipt>c');
     expect(htmlToText('<p>&amp;lt;b&amp;gt; is &lt;b&gt;</p>')).toBe('&lt;b&gt; is <b>');
+  });
+});
+
+describe('Azure DevOps attachments', () => {
+  it('a file elsewhere than Azure DevOps is never asked for with the sign-in', async () => {
+    const seen: string[] = [];
+    const http = (async (url: string) => {
+      seen.push(url);
+      return new Response('PNG!', { status: 200 });
+    }) as unknown as typeof fetch;
+    const az = new Azure({ organization: 'momenysr', project: 'Mawid', pat: 'secret' }, http);
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'squad-az-files-')), 'a.png');
+    for (const url of ['https://evil.example/f', 'https://dev.azure.com.evil.example/f', 'https://dev.azure.com:8443/f', 'http://dev.azure.com/f']) {
+      await expect(az.download(url, file), url).rejects.toThrow('squad-kit only downloads files kept on Azure DevOps itself.');
+    }
+    expect(seen).toEqual([]);
+    await az.download('https://dev.azure.com/momenysr/_apis/wit/attachments/a1', file);
+    await az.download('https://momenysr.visualstudio.com/_apis/wit/attachments/a2', file);
+    expect(seen).toHaveLength(2);
   });
 });

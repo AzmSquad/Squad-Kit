@@ -52,6 +52,8 @@ export interface FakeJiraOptions {
    * QA goes on to Done; 'dead-end': QA only goes back. Bugs keep the usual workflow.
    */
   qa?: 'way' | 'dead-end';
+  /** The QA status's own name, such as "Awaiting QA". */
+  qaName?: string;
   /** The way to Done asks for a resolution on a screen: 'also' beside a plain way, 'only' as the one way. */
   screen?: 'also' | 'only';
   /** No Labels field on the create and edit screens. */
@@ -135,13 +137,14 @@ export function fakeJira(token = 'secret', opts: FakeJiraOptions = {}): FakeJira
     ...(opts.review ? [{ id: '10001', name: 'In Review', cat: 'indeterminate' }] : []),
     { id: '10002', name: 'Done', cat: 'done' },
     { id: '10003', name: "Won't Do", cat: 'done' },
-    ...(opts.qa ? [{ id: '10004', name: 'QA', cat: 'indeterminate' }] : []),
+    ...(opts.qa ? [{ id: '10004', name: opts.qaName ?? 'QA', cat: 'indeterminate' }] : []),
   ];
   /** Each type's workflow: its statuses in order, and where each one may go. */
   const flowOf = (type: string): { names: string[]; to(from: string): string[] } => {
     if (opts.qa && (type === 'Story' || type === 'Task')) {
-      const ways: Record<string, string[]> = { 'To Do': ['In Progress'], 'In Progress': ['QA', 'To Do'], QA: opts.qa === 'way' ? ['Done', 'In Progress'] : ['In Progress'], Done: ['To Do'] };
-      return { names: ['To Do', 'In Progress', 'QA', 'Done', "Won't Do"], to: (from) => [...(ways[from] ?? []), "Won't Do"].filter((n) => n !== from) };
+      const qa = opts.qaName ?? 'QA';
+      const ways: Record<string, string[]> = { 'To Do': ['In Progress'], 'In Progress': [qa, 'To Do'], [qa]: opts.qa === 'way' ? ['Done', 'In Progress'] : ['In Progress'], Done: ['To Do'] };
+      return { names: ['To Do', 'In Progress', qa, 'Done', "Won't Do"], to: (from) => [...(ways[from] ?? []), "Won't Do"].filter((n) => n !== from) };
     }
     const names = statuses.filter((x) => x.name !== 'QA').map((x) => x.name);
     const line = names.filter((n) => n !== "Won't Do");

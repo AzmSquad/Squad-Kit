@@ -124,3 +124,27 @@ describe('downloadAttachmentsWith', () => {
     expect(out[1]!.bytesWritten).toBe(2);
   });
 });
+
+describe('downloads with a tracker sign-in go only to its own site', () => {
+  it('the 0.x Jira client skips a file on another host, and never sends it the token', async () => {
+    const { JiraClient } = await import('../src/tracker/jira.js');
+    const seen: string[] = [];
+    vi.stubGlobal('fetch', async (url: string) => {
+      seen.push(url);
+      return new Response('PNG!', { status: 200 });
+    });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-jira-files-'));
+    const client = new JiraClient({ host: 'acme.atlassian.net', email: 'e@e.com', token: 't' });
+    const out = await client.downloadAttachments(
+      [
+        { filename: 'a.png', url: 'https://acme.atlassian.net/rest/api/3/attachment/content/1', size: 4 },
+        { filename: 'b.png', url: 'https://evil.example/steal', size: 4 },
+        { filename: 'c.png', url: 'https://acme.atlassian.net@evil.example/x', size: 4 },
+      ],
+      dir,
+    );
+    expect(out.map((o) => o.outcome)).toEqual(['written', 'skipped-error', 'skipped-error']);
+    expect(seen).toEqual(['https://acme.atlassian.net/rest/api/3/attachment/content/1']);
+    vi.unstubAllGlobals();
+  });
+});

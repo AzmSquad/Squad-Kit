@@ -10,6 +10,7 @@ import { DEFAULT_CONFIG, loadConfig, saveConfig, type SquadConfig } from '../src
 import { buildPaths } from '../src/core/paths.js';
 import { loadSecrets } from '../src/core/secrets.js';
 import { mountTrackerChoices } from '../src/console/api/tracker-form.js';
+import { mountSecretsApi } from '../src/console/api/secrets.js';
 
 /** Jira in Settings: the save that checks with Jira first, the lists, a setup from squad-kit 0.x, and the Connections row. */
 
@@ -148,6 +149,38 @@ describe('the saved token goes only to the host it was saved for', () => {
     await expect(m.save(root, { site: 'other.atlassian.net', email: EMAIL, token: '' })).rejects.toThrow('Paste your Jira API token for other.atlassian.net.');
     expect(fake.requests.slice(before)).toEqual([]);
     expect(tracker(root).workspace).toBe(SITE);
+  });
+});
+
+describe("the file's Jira host only ever beside its own token", () => {
+  it("a save that used the token from JIRA_HOST and JIRA_API_TOKEN never writes the new host next to the file's older token", async () => {
+    const fake = fakeJira('env-token', { site: 'new.atlassian.net' });
+    const m = jiraTrackerModule(fake.fetch);
+    const root = project({ type: 'jira', workspace: SITE }, OLD_SECRETS);
+    process.env.JIRA_HOST = 'new.atlassian.net';
+    process.env.JIRA_EMAIL = EMAIL;
+    process.env.JIRA_API_TOKEN = 'env-token';
+    await m.save(root, { site: 'new.atlassian.net', email: EMAIL, token: '', project: 'PAY' });
+    expect(tracker(root).workspace).toBe('new.atlassian.net');
+    expect(secrets(root)).toEqual({ host: SITE, email: EMAIL, token: 'secret' });
+    // Without the environment, the old token stays with its own site, and does not open for the new one.
+    delete process.env.JIRA_HOST;
+    delete process.env.JIRA_API_TOKEN;
+    expect(m.open(root)).toBeNull();
+    expect(m.read(root).note).toBe("The team's Jira site is now new.atlassian.net. Paste your token for it.");
+  });
+
+  it('PUT /api/secrets takes a Jira host only with its token', async () => {
+    const root = project({ type: 'jira', workspace: SITE }, OLD_SECRETS);
+    const app = new Hono();
+    mountSecretsApi(app, { paths: buildPaths(root) });
+    const put = (jira: Record<string, string>) => app.request('/api/secrets', { method: 'PUT', body: JSON.stringify({ tracker: { jira } }), headers: { 'content-type': 'application/json' } });
+    const res = await put({ host: 'evil.example' });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'jira_host_needs_token' });
+    expect(secrets(root)!.host).toBe(SITE);
+    expect((await put({ host: 'other.atlassian.net', token: 'new-token' })).status).toBe(200);
+    expect(secrets(root)).toMatchObject({ host: 'other.atlassian.net', token: 'new-token' });
   });
 });
 

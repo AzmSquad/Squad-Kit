@@ -413,6 +413,36 @@ describe('Connections: Sign in with Microsoft through its own tool, in squad-kit
     expect(fs.existsSync(azFolder())).toBe(false);
   });
 
+  it('Disconnect while a sign-in still finds the organization’s directory: it is cancelled, and az login never starts after', async () => {
+    const bp = project();
+    devops = fakeDevOps({ access: false });
+    signedIn(TENANT, 'sam@fabrikam.com');
+    // The sign-in's question for the directory is held back until Disconnect is signing out.
+    const answer = globalThis.fetch;
+    let open = () => undefined as void;
+    const gate = new Promise<void>((r) => (open = r));
+    let first = true;
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
+      if (init.method === 'HEAD' && first) {
+        first = false;
+        await gate;
+      }
+      return answer(url, init);
+    });
+    const started = startSignIn(bp, 'azure');
+    await new Promise((r) => setTimeout(r, 50));
+    const off = disconnect(bp, 'azure');
+    // Disconnect marks it cancelled while its directory is still unknown; only then does the answer come.
+    await until(() => signInNow('azure')?.state === 'cancelled');
+    open();
+    expect((await off).line).toContain('as sam@fabrikam.com');
+    expect(await started).toMatchObject({ state: 'cancelled' });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(az!.calls().some((c) => c.startsWith('login '))).toBe(false);
+    expect(signInNow('azure')?.state).toBe('cancelled');
+    expect(fs.existsSync(azFolder())).toBe(false);
+  });
+
   it('a personal-account organization with a sign-in left: the token is the way, and Disconnect still ends the sign-in', async () => {
     const bp = project('personal-org');
     devops = fakeDevOps({ orgs: { 'personal-org': ZEROS } });

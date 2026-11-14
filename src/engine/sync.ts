@@ -68,7 +68,7 @@ export async function tellTracker(bp: BoardPaths, ticketId: string, event: Track
   try {
     switch (event.kind) {
       case 'started': {
-        const state = await moveOrSay(bp, ticketId, tracker, id, 'in-progress');
+        const { state } = await moveOrSay(bp, ticketId, tracker, id, 'in-progress', undefined, again);
         await tracker.comment(id, `squad-kit started work on this as ticket **${t.id}**.`);
         if (state) noteOn(bp, ticketId, `Moved ${ref} to ${state} on ${tracker.label}`);
         break;
@@ -101,10 +101,11 @@ export async function tellTracker(bp: BoardPaths, ticketId: string, event: Track
         break;
       }
       case 'released': {
-        const state = await moveOrSay(bp, ticketId, tracker, id, 'closed');
+        const { state, refused } = await moveOrSay(bp, ticketId, tracker, id, 'closed', undefined, again);
         if (tracker.abilities.tags) await tracker.addTag(id, event.version);
         await tracker.comment(id, `Released in **${event.version}**.`);
-        noteOn(bp, ticketId, `Closed ${ref} on ${tracker.label}${state ? ` (${state})` : ''}`);
+        // Closed only when the tracker took the move: a refused one was said already.
+        noteOn(bp, ticketId, refused ? `Posted the release on ${ref}` : `Closed ${ref} on ${tracker.label}${state ? ` (${state})` : ''}`);
         break;
       }
     }
@@ -389,25 +390,28 @@ export function prItem(tracker: Tracker | null, item: string | null, repo: strin
  * that waits for its checks, an approver or an owner leaves it open. Said on the ticket; a tracker problem stops nothing.
  */
 /**
- * A move the tracker refuses for good (its workflow has no way on) is said on the ticket, and the comment and label
- * that come with it still go. A problem that may pass is thrown, so the whole update is sent again later.
+ * A move the tracker refuses for good (its workflow has no way on, or a rule there) is said on the ticket once, and the
+ * comment and label that come with it still go. A deleted item, or a problem that may pass, is thrown: the whole update
+ * is then said as refused, or sent again later. `again`: a retry, whose line was said the first time.
  */
-async function moveOrSay(bp: BoardPaths, ticketId: string, tracker: Tracker, id: string, stage: ItemStage, opts?: { merged?: boolean }): Promise<string | null> {
+async function moveOrSay(bp: BoardPaths, ticketId: string, tracker: Tracker, id: string, stage: ItemStage, opts?: { merged?: boolean }, again = false): Promise<{ state: string | null; refused: boolean }> {
   try {
-    return await tracker.moveTo(id, stage, opts);
+    return { state: await tracker.moveTo(id, stage, opts), refused: false };
   } catch (err) {
-    if (!refusedForGood(err)) throw err;
-    // The exact words are for engineers; the ticket gets one plain line with the way out.
-    saidToEngineers(bp, ticketId, `${tracker.label} refused to move ${tracker.refOf(id)}: ${(err as Error).message}`);
-    noteOn(bp, ticketId, `${tracker.label} would not move ${tracker.refOf(id)}, so squad-kit went on without the move. Move it in ${tracker.label} if it should go on`);
-    return null;
+    if (!refusedForGood(err) || (err instanceof ModuleError && err.kind === 'not-found')) throw err;
+    if (!again) {
+      // The exact words are for engineers; the ticket gets one plain line with the way out.
+      saidToEngineers(bp, ticketId, `${tracker.label} refused to move ${tracker.refOf(id)}: ${(err as Error).message}`);
+      noteOn(bp, ticketId, `${tracker.label} would not move ${tracker.refOf(id)}, so squad-kit went on without the move. Move it in ${tracker.label} if it should go on`);
+    }
+    return { state: null, refused: true };
   }
 }
 
 export async function resolveItem(bp: BoardPaths, ticketId: string, tracker: Tracker | null, item: string | null, merged: boolean, words: string): Promise<void> {
   if (!tracker || !item) return;
   try {
-    const state = await moveOrSay(bp, ticketId, tracker, item, 'resolved', { merged });
+    const { state } = await moveOrSay(bp, ticketId, tracker, item, 'resolved', { merged });
     await tracker.comment(item, words);
     if (state) noteOn(bp, ticketId, `Moved ${tracker.refOf(item)} to ${state} on ${tracker.label}`);
   } catch (err) {

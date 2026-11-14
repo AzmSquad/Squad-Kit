@@ -138,23 +138,29 @@ export class JiraContext {
 
   /**
    * Links two issues through Jira's issue link call: `from` reads the link type's outward words to `to` ("PAY-41 blocks
-   * PAY-44"). Jira's docs leave its two sides unclear, so the first link on a site is read back from `from`: if it
-   * landed the other way round, it is made again the right way, and every later link on that site is sent that way.
+   * PAY-44"). Jira's docs leave its two sides unclear, so on a site whose way is not known yet, the one link this call
+   * made is read back from `from` (by its id, new since the call): if it landed the other way round, it is made again
+   * the right way, and every later link on that site is sent that way. When no single new link can be told apart,
+   * nothing is decided and nothing is taken away.
    */
   async link(type: string, from: string, to: string): Promise<void> {
     const site = this.settings.site;
     const flipped = LINK_SIDES.get(site);
     const send = (out: string, into: string) => this.client.call('POST', '/rest/api/3/issueLink', { type: { name: type }, outwardIssue: { key: out }, inwardIssue: { key: into } });
-    await (flipped ? send(to, from) : send(from, to));
-    if (flipped !== undefined) return;
-    const back = await this.client.call<RawIssue>('GET', `/rest/api/3/issue/${encodeURIComponent(from)}?fields=issuelinks`);
-    const made = (back?.fields.issuelinks ?? []).find((l) => l.type?.name === type && (l.outwardIssue?.key === to || l.inwardIssue?.key === to));
-    if (!made) return;
+    if (flipped !== undefined) {
+      await (flipped ? send(to, from) : send(from, to));
+      return;
+    }
+    const linksOf = async () => (await this.client.call<RawIssue>('GET', `/rest/api/3/issue/${encodeURIComponent(from)}?fields=issuelinks`))?.fields.issuelinks ?? [];
+    const before = new Set((await linksOf()).map((l) => l.id));
+    await send(from, to);
+    const made = (await linksOf()).filter((l) => l.id && !before.has(l.id) && l.type?.name === type && (l.outwardIssue?.key === to || l.inwardIssue?.key === to));
+    if (made.length !== 1) return;
     // Seen from `from`, as Jira shows an issue's links: `to` on the outward side means "from <outward words> to".
-    const right = made.outwardIssue?.key === to;
+    const right = made[0]!.outwardIssue?.key === to;
     LINK_SIDES.set(site, !right);
     if (right) return;
-    if (made.id) await this.client.call('DELETE', `/rest/api/3/issueLink/${encodeURIComponent(made.id)}`);
+    await this.client.call('DELETE', `/rest/api/3/issueLink/${encodeURIComponent(made[0]!.id!)}`);
     await send(to, from);
   }
 

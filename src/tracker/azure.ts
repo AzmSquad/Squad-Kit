@@ -150,7 +150,8 @@ export class AzureDevOpsClient implements TrackerClient {
     targetDir: string,
     opts?: DownloadOptions,
   ): Promise<DownloadedAttachment[]> {
-    return downloadAttachmentsWith(refs, targetDir, this.headers(), opts);
+    // The token goes only to Azure DevOps' own hosts.
+    return downloadAttachmentsWith(refs, targetDir, this.headers(), opts, (url) => /^https:\/\/(dev\.azure\.com|[a-z0-9-]+\.visualstudio\.com)\//i.test(url));
   }
 
   private headers(): Record<string, string> {

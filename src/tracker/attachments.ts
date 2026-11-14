@@ -4,11 +4,16 @@ import type { AttachmentRef, DownloadedAttachment, DownloadOptions } from './typ
 
 const DEFAULT_MAX_MB = 10;
 
+/**
+ * Downloads the attachments with the tracker's sign-in. `signs`: the addresses that may get the sign-in, the tracker's
+ * own host; a file anywhere else is not downloaded.
+ */
 export async function downloadAttachmentsWith(
   refs: AttachmentRef[],
   targetDir: string,
   authHeaders: Record<string, string>,
   opts: DownloadOptions = {},
+  signs: (url: string) => boolean = () => true,
 ): Promise<DownloadedAttachment[]> {
   const maxMb = opts.maxMegabytes ?? DEFAULT_MAX_MB;
   const maxBytes = maxMb * 1024 * 1024;
@@ -16,7 +21,11 @@ export async function downloadAttachmentsWith(
 
   const out: DownloadedAttachment[] = [];
   for (const ref of refs) {
-    out.push(await one(ref, targetDir, authHeaders, maxBytes, maxMb));
+    out.push(
+      signs(ref.url)
+        ? await one(ref, targetDir, authHeaders, maxBytes, maxMb)
+        : { source: ref, outcome: 'skipped-error', bytesWritten: 0, skipReason: "not on the tracker's own site, so not downloaded with its sign-in" },
+    );
   }
   return out;
 }

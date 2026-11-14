@@ -40,7 +40,22 @@ describe('Jira updates when the workflow has no way on', () => {
     expect(await tellTracker(bp, t.id, { kind: 'released', version: 'v1.3.22' }, tracker)).toBe(true);
     expect(fake.issues.get('PAY-40')!.labels).toContain('v1.3.22');
     expect(fake.comments('PAY-40').some((c) => c.includes('Released in'))).toBe(true);
-    expect(JSON.stringify(readTicket(bp, t.id))).toContain('Jira would not move PAY-40, so squad-kit went on without the move. Move it in Jira if it should go on');
+    const notes = () => readTicket(bp, t.id)!.activity.map((a) => a.text);
+    expect(notes().filter((l) => l.includes('would not move'))).toEqual(['Jira would not move PAY-40, so squad-kit went on without the move. Move it in Jira if it should go on']);
+    // Closed is said only when Jira took the move.
+    expect(notes().some((l) => l.startsWith('Closed PAY-40'))).toBe(false);
+    expect(notes()).toContain('Posted the release on PAY-40');
+    // A retry says nothing twice.
+    await tellTracker(bp, t.id, { kind: 'released', version: 'v1.3.22' }, tracker, true);
+    expect(notes().filter((l) => l.includes('would not move'))).toHaveLength(1);
+  });
+
+  it('released where Jira takes the move: Closed, with the status', async () => {
+    const fake = fakeJira('secret');
+    const tracker = new JiraTracker(new JiraClient({ site: SITE, email: EMAIL, token: 'secret' }, fake.fetch), { site: SITE, email: EMAIL, token: 'secret', project: 'PAY', readOnly: false });
+    const { bp, t } = board();
+    await tellTracker(bp, t.id, { kind: 'released', version: 'v1.3.22' }, tracker);
+    expect(readTicket(bp, t.id)!.activity.map((a) => a.text)).toContain('Closed PAY-40 on Jira (Done)');
   });
 
   it('resolved: the merge words still go on the story', async () => {

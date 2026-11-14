@@ -89,6 +89,9 @@ export function mountSecretsApi(app: Hono, opts: { paths: SquadPaths }): void {
   app.put('/api/secrets', async (c) => {
     const parse = PutBody.safeParse(await c.req.json());
     if (!parse.success) return c.json({ error: 'invalid_body', issues: parse.error.issues }, 400);
+    // A Jira host is only ever saved with its own token: never a new host next to an older site's token.
+    const jira = parse.data.tracker?.jira;
+    if (jira?.host?.trim() && !jira.token?.trim()) return c.json({ error: 'jira_host_needs_token', detail: 'Send the Jira token with its host.' }, 400);
     const current = loadSecrets(opts.paths.secretsFile);
     const merged = mergeSecrets(current, parse.data as SquadSecrets);
     // `mergeSecrets` drops empty strings so a partial update cannot clobber a sibling, which

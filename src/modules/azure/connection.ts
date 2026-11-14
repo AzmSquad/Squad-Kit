@@ -1,7 +1,8 @@
 import type { ConnectionModule, ConnectionStatus, GuideStep, Words } from '../connection/types.js';
 import { git } from '../../engine/git.js';
 import { ModuleError } from '../errors.js';
-import { Azure, parseAzureRemote } from './client.js';
+import { Azure } from './client.js';
+import { parseAzureRemote } from './hosts.js';
 import { AZ_FOLDER, azAccounts, azVersion, forgetAzVersion, signInLeft } from './az.js';
 import { cancelMicrosoftSignIn, microsoftSignInNow, signOutOfMicrosoft, startMicrosoftSignIn } from './device-sign-in.js';
 import { azurePlace } from './sign-in.js';
