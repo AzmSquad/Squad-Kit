@@ -20,10 +20,9 @@ import { clientFor, overlayTrackerEnv, type ClientResolutionError } from '../tra
 import type { ProviderName } from '../planner/types.js';
 import {
   fetchProviderModelIds,
-  probeJiraConnectivity,
   probeAzureConnectivity,
 } from '../core/probes.js';
-import { selfSignedTracker, trackerReachCheck, trackerSignInCheck } from './doctor-tracker.js';
+import { moduleTokenTracker, selfSignedTracker, tokenSignInCheck, trackerReachCheck, trackerSignInCheck } from './doctor-tracker.js';
 import { readLastRun } from '../core/last-run.js';
 import { formatTokenK } from '../ui/planner-cache-summary.js';
 import { GIT_UPDATE, MIN_GIT, gitIsNewEnough, gitVersion } from '../engine/git.js';
@@ -868,6 +867,8 @@ async function checkTrackerCredential(paths: SquadPaths, ctx: DoctorContext): Pr
   if (!ctx.config) {
     return { id: 'tracker-cred', name: 'tracker credential resolves', status: 'skip', detail: 'config unavailable' };
   }
+  const tokenModule = moduleTokenTracker(ctx.config);
+  if (tokenModule) return tokenSignInCheck(paths.root, tokenModule);
   if (ctx.config.tracker.type === 'none') {
     return { id: 'tracker-cred', name: 'tracker credential resolves', status: 'skip', detail: 'none' };
   }
@@ -896,6 +897,8 @@ async function checkTrackerCredential(paths: SquadPaths, ctx: DoctorContext): Pr
 }
 
 async function checkTrackerConnectivity(paths: SquadPaths, ctx: DoctorContext): Promise<CheckResult> {
+  const tokenModule = moduleTokenTracker(ctx.config);
+  if (tokenModule) return trackerReachCheck(paths.root, tokenModule);
   if (!ctx.config || ctx.config.tracker.type === 'none') {
     return { id: 'tracker-live', name: 'tracker connectivity', status: 'skip', detail: 'none' };
   }
@@ -906,16 +909,6 @@ async function checkTrackerConnectivity(paths: SquadPaths, ctx: DoctorContext): 
   const { client, error } = clientFor(ctx.config, overlay);
   if (error || !client) {
     return { id: 'tracker-live', name: 'tracker connectivity', status: 'skip', detail: 'no credential' };
-  }
-  if (client.name === 'jira') {
-    const r = await probeJiraConnectivity(secrets, ctx.config);
-    if (r.ok) return { id: 'tracker-live', name: 'tracker connectivity', status: 'ok', detail: 'Jira REST' };
-    return {
-      id: 'tracker-live',
-      name: 'tracker connectivity',
-      status: 'fail',
-      detail: r.status !== undefined ? `HTTP ${r.status}` : r.detail ?? 'request failed',
-    };
   }
   if (client.name === 'azure') {
     const r = await probeAzureConnectivity(secrets, ctx.config);

@@ -19,6 +19,8 @@ interface Step {
 
 const REVIEW = /review|merged|release/i;
 const DROPPED = /won'?t|cancel|reject|declin|duplicate|invalid|abandon|obsolete/i;
+/** Statuses that park work (Blocked, On hold, Waiting, Paused): never a sideways step on the way. */
+const PARKED = /block|hold|wait|pause/i;
 const BEST: Record<number, RegExp> = { 0: /^(to ?do|open|backlog|new)$/i, 1: /^in progress$/i, 2: /review/i, 3: /^(done|closed|resolved|released|complete[d]?|finished)$/i };
 
 /** How far along a status is: 0 to do, 1 in progress, 2 in review (in progress, its work finished), 3 done. */
@@ -48,7 +50,7 @@ export function nextStep(steps: Step[], from: Status, goal: number, visited: Set
   const now = rankOf(from);
   const usable = steps.filter((t) => !(rankOf(t.to) === 3 && DROPPED.test(t.to.name)));
   const forward = usable.filter((t) => rankOf(t.to) > now && rankOf(t.to) <= goal);
-  const sideways = usable.filter((t) => rankOf(t.to) === now && !visited.has(t.to.name) && t.to.name !== from.name);
+  const sideways = usable.filter((t) => rankOf(t.to) === now && !visited.has(t.to.name) && t.to.name !== from.name && !PARKED.test(t.to.name));
   const score = (t: Step) => rankOf(t.to) * 10 + (BEST[rankOf(t.to)]!.test(t.to.name.trim()) ? 2 : 0) + (t.screen ? 0 : 1);
   const best = (list: Step[]) => [...list].sort((a, b) => score(b) - score(a))[0] ?? null;
   return best(forward) ?? best(sideways);

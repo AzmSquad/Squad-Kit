@@ -40,7 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nothing again. It only writes to Jira once you press Save and check in Settings, after picking the project if it had
   none.
 - `squad config set tracker` and `squad init --tracker jira` set Jira up from the same fields as Settings, with its
-  project and board, checked with Jira first.
+  project and board, checked with Jira first. `squad doctor` checks Jira as the board does.
+- A Jira token in `JIRA_API_TOKEN` (or `SQUAD_TRACKER_API_KEY`) is used only with `JIRA_HOST` set to its site, and
+  squad-kit 0.x's Jira fetch (`squad new-story --id`) never sends a token to a site it was not saved for.
 
 ## [1.3.21] — 2026-11-13
 

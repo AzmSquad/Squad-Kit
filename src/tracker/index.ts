@@ -3,6 +3,7 @@ import type { SquadSecrets } from '../core/secrets.js';
 import { AzureDevOpsClient } from './azure.js';
 import { GitHubClient } from './github.js';
 import { JiraClient } from './jira.js';
+import { jiraAccess } from './jira-site.js';
 import type { TrackerClient } from './types.js';
 
 export * from './types.js';
@@ -34,8 +35,18 @@ export interface ClientResolution {
 export function clientFor(config: SquadConfig, secrets: SquadSecrets): ClientResolution {
   switch (config.tracker.type) {
     case 'jira': {
-      const jira = secrets.tracker?.jira ?? {};
-      const host = jira.host ?? config.tracker.workspace;
+      // The token goes only to the host saved with it, never to the team's site from config.yaml when that differs.
+      const jira = jiraAccess(config.tracker.workspace, secrets.tracker?.jira);
+      if (jira.moved) {
+        return {
+          error: {
+            kind: 'missing-credentials',
+            message: `The team's Jira site is now ${jira.moved}.`,
+            detail: 'Paste your token for it in Settings, or run `squad config set tracker --type jira`.',
+          },
+        };
+      }
+      const host = jira.site;
       if (!host || !jira.email || !jira.token) {
         return {
           error: {

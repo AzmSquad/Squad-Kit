@@ -1,25 +1,35 @@
 import { ModuleError } from '../errors.js';
 import type { JiraContext } from './context.js';
-import { labelOf, typeLevel, type RawIssue, type RawLink } from './rows.js';
+import { labelOf, type RawIssue } from './rows.js';
 
 /**
  * Where Jira cannot nest an item under its epic (a feature that is an Epic under an epic that is an Epic too, or a story
- * straight under an epic above Epic), the item sits beside the epic instead: it carries a label made from the epic's
- * name, so Jira's filters group them, and an outgoing "relates to" link to it, so squad-kit finds its epic again.
- * squad-kit reads such a link as the item's parent only on an item with an epic label.
+ * straight under an epic above Epic), the item sits beside the epic instead: a label made from the epic's name, so
+ * Jira's filters group them, and a "relates to" link to it.
+ *
+ * squad-kit keeps what it made in a property of the item (Jira's issue properties, unseen by people): the epic, the
+ * link's id and the label. Only that counts as the item's epic, and only that is ever taken away: a teammate's link to
+ * another Epic, or a team label like epic-q3-roadmap, stays as it is.
  */
 
-const PREFIX = 'epic-';
+const PROPERTY = 'squad-kit-epic';
+
+/** What squad-kit made to put an item beside its epic. */
+interface Placed {
+  epic: string;
+  link?: string;
+  label?: string;
+}
 
 /** The label for an epic's items: "epic-front-desk". */
 function epicLabel(name: string): string {
-  return labelOf(`${PREFIX}${name.trim().toLowerCase()}`).slice(0, 255);
+  return labelOf(`epic-${name.trim().toLowerCase()}`).slice(0, 255);
 }
 
 type LinkType = { name: string; inward: string; outward: string };
 
-/** "relates to", or the closest the site has: a link that reads the same both ways. */
-const relatesLike = (t: Partial<LinkType> | undefined) => Boolean(t && (t.name === 'Relates' || /relate/i.test(t.outward ?? '') || (t.inward && t.inward === t.outward)));
+/** "relates to", or the closest the site has: a type named or worded like it. */
+const relatesLike = (t: Partial<LinkType> | undefined) => Boolean(t && [t.name, t.outward, t.inward].some((w) => /relate/i.test(w ?? '')));
 
 async function relatesType(ctx: JiraContext): Promise<LinkType> {
   const type = (await ctx.linkType((t) => t.name === 'Relates')) ?? (await ctx.linkType(relatesLike));
@@ -27,55 +37,72 @@ async function relatesType(ctx: JiraContext): Promise<LinkType> {
   return type;
 }
 
-interface EpicLink {
-  /** The link's own id, to take it away when the item moves to another epic. */
-  linkId: string;
-  key: string;
-  title: string;
-  type: string;
+const propertyPath = (key: string) => `/rest/api/3/issue/${encodeURIComponent(key)}/properties/${PROPERTY}`;
+
+/** What squad-kit recorded on the item, or null when it put it beside no epic. */
+async function placedOf(ctx: JiraContext, key: string): Promise<Placed | null> {
+  try {
+    const p = await ctx.client.call<{ value?: Placed }>('GET', propertyPath(key));
+    return p?.value?.epic ? p.value : null;
+  } catch (err) {
+    if (err instanceof ModuleError && err.kind === 'not-found') return null;
+    throw err;
+  }
 }
 
-/** The epic an item sits beside: its outgoing "relates to" links to an item no lower than it, when it has an epic label. */
-function epicLinks(issue: RawIssue): EpicLink[] {
-  const f = issue.fields;
-  if (!(f.labels ?? []).some((l) => l.startsWith(PREFIX))) return [];
-  const own = typeLevel(f.issuetype);
-  return (f.issuelinks ?? [])
-    .filter((l): l is RawLink & { outwardIssue: NonNullable<RawLink['outwardIssue']> } => Boolean(l.outwardIssue) && relatesLike(l.type as Partial<LinkType>))
-    .filter((l) => typeLevel(l.outwardIssue.fields?.issuetype) >= own)
-    .map((l) => ({ linkId: l.id ?? '', key: l.outwardIssue.key, title: l.outwardIssue.fields?.summary ?? '', type: l.outwardIssue.fields?.issuetype?.name ?? '' }));
+/** The "relates to" link between the item and another, on either side: Jira may show a link from either end. */
+function relatesLink(issue: RawIssue, other: string, gone?: string) {
+  return (issue.fields.issuelinks ?? []).find((l) => l.id !== gone && relatesLike(l.type) && (l.outwardIssue ?? l.inwardIssue)?.key === other);
 }
 
-/** The item right above: Jira's parent, else the epic it sits beside. */
-export function itemAbove(issue: RawIssue): { key: string; type: string; title: string } | null {
+/** The item right above: Jira's parent, else the epic squad-kit put it beside, while that link is still there. */
+export async function itemAbove(ctx: JiraContext, issue: RawIssue): Promise<{ key: string; type: string; title: string } | null> {
   const p = issue.fields.parent;
   if (p) return { key: p.key, type: p.fields?.issuetype?.name ?? '', title: p.fields?.summary ?? '' };
-  return epicLinks(issue)[0] ?? null;
-}
-
-/** True when the item already has an outgoing "relates to" link to this one. */
-function relatesTo(issue: RawIssue, key: string): boolean {
-  return (issue.fields.issuelinks ?? []).some((l) => l.outwardIssue?.key === key && relatesLike(l.type as Partial<LinkType>));
+  const placed = await placedOf(ctx, issue.key);
+  const link = placed ? relatesLink(issue, placed.epic) : undefined;
+  const other = link?.outwardIssue ?? link?.inwardIssue;
+  return other ? { key: other.key, type: other.fields?.issuetype?.name ?? '', title: other.fields?.summary ?? '' } : null;
 }
 
 /**
- * Puts an item beside its epic: the epic's label (when its edit screen has labels) and "this relates to the epic",
- * each only when it is not there yet. Its links to another epic, and their labels, go first.
+ * Puts an item beside its epic: the epic's label (when its edit screen has labels) and "relates to" the epic, and records
+ * them on the item. Sent again for the same epic, it changes nothing; for another one, what squad-kit made before goes.
  */
 export async function placeBeside(ctx: JiraContext, issue: RawIssue, epic: { key: string; title: string }): Promise<void> {
   const label = epicLabel(epic.title);
-  await unlinkEpics(ctx, issue, { key: epic.key, label });
-  if (!(issue.fields.labels ?? []).includes(label) && (await ctx.editFields(issue.key)).includes('labels')) {
-    await ctx.client.call('PUT', `/rest/api/3/issue/${encodeURIComponent(issue.key)}`, { update: { labels: [{ add: label }] } });
+  const before = await placedOf(ctx, issue.key);
+  if (before?.epic === epic.key && relatesLink(issue, epic.key) && (!before.label || before.label === label)) return;
+  const removed = await unlinkEpics(ctx, issue, before);
+  const path = `/rest/api/3/issue/${encodeURIComponent(issue.key)}`;
+  const labelled = (await ctx.editFields(issue.key)).includes('labels');
+  const hasLabel = (issue.fields.labels ?? []).includes(label) && removed.label !== label;
+  if (labelled && !hasLabel) await ctx.client.call('PUT', path, { update: { labels: [{ add: label }] } });
+  let link = relatesLink(issue, epic.key, removed.link)?.id;
+  if (!link) {
+    await ctx.link((await relatesType(ctx)).name, issue.key, epic.key);
+    const back = await ctx.client.call<RawIssue>('GET', `${path}?fields=issuelinks`);
+    link = relatesLink(back, epic.key)?.id;
   }
-  if (!relatesTo(issue, epic.key)) await ctx.link((await relatesType(ctx)).name, issue.key, epic.key);
+  await ctx.client.call('PUT', propertyPath(issue.key), { epic: epic.key, ...(link ? { link } : {}), ...(labelled ? { label } : {}) });
 }
 
-/** Takes an item from beside the epics it had (all but `keep`): those links and epic labels go; the items stay. */
-export async function unlinkEpics(ctx: JiraContext, issue: RawIssue, keep?: { key: string; label: string }): Promise<void> {
-  for (const link of epicLinks(issue)) {
-    if (link.linkId && link.key !== keep?.key) await ctx.client.call('DELETE', `/rest/api/3/issueLink/${encodeURIComponent(link.linkId)}`);
+/**
+ * Takes an item from beside the epic squad-kit put it beside: the link and label it made go, nothing else. Says what
+ * it took away.
+ */
+export async function unlinkEpics(ctx: JiraContext, issue: RawIssue, known?: Placed | null): Promise<{ link?: string; label?: string }> {
+  const placed = known === undefined ? await placedOf(ctx, issue.key) : known;
+  if (!placed) return {};
+  const removed: { link?: string; label?: string } = {};
+  if (placed.link && (issue.fields.issuelinks ?? []).some((l) => l.id === placed.link)) {
+    await ctx.client.call('DELETE', `/rest/api/3/issueLink/${encodeURIComponent(placed.link)}`);
+    removed.link = placed.link;
   }
-  const labels = (issue.fields.labels ?? []).filter((l) => l.startsWith(PREFIX) && l !== keep?.label);
-  if (labels.length) await ctx.client.call('PUT', `/rest/api/3/issue/${encodeURIComponent(issue.key)}`, { update: { labels: labels.map((l) => ({ remove: l })) } });
+  if (placed.label && (issue.fields.labels ?? []).includes(placed.label)) {
+    await ctx.client.call('PUT', `/rest/api/3/issue/${encodeURIComponent(issue.key)}`, { update: { labels: [{ remove: placed.label }] } });
+    removed.label = placed.label;
+  }
+  await ctx.client.call('DELETE', propertyPath(issue.key));
+  return removed;
 }

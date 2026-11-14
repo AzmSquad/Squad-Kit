@@ -32,6 +32,8 @@ interface Issue {
   comments: Adf[];
   /** Searches that do not find it yet. */
   unseen?: number;
+  /** Jira's issue properties: data an app keeps on an issue, unseen by people. */
+  props?: Record<string, unknown>;
 }
 
 export interface FakeJiraOptions {
@@ -58,6 +60,10 @@ export interface FakeJiraOptions {
   criteriaOnCreateOnly?: boolean;
   /** Jira's search catches up late: a new issue is missing from this many searches after it is made. */
   lag?: number;
+  /** The issue link call takes its two sides the other way round from what squad-kit assumes first. */
+  reversedLinks?: boolean;
+  /** Answer as this site instead of acme.atlassian.net. */
+  site?: string;
   /** No field called Acceptance Criteria on the site. */
   noCriteria?: boolean;
   /** This many more stories in the backlog, for paging. */
@@ -249,7 +255,11 @@ export function fakeJira(token = 'secret', opts: FakeJiraOptions = {}): FakeJira
       } else if ((m = /^issuetype = (\d+)$/.exec(clause))) list = list.filter((i) => typeOf(i.type).id === m![1]);
       else if ((m = /^sprint = (\d+)$/.exec(clause))) list = list.filter((i) => i.sprint === Number(m![1]));
       else if (clause === 'statusCategory != Done') list = list.filter((i) => statuses.find((s) => s.name === i.status)!.cat !== 'done');
-      else if ((m = /^labels = "((?:[^"\\]|\\.)+)"$/.exec(clause))) {
+      else if ((m = /^description ~ "((?:[^"\\]|\\.)+)"$/.exec(clause))) {
+        // Jira's text search: every word in the text, whatever the case.
+        const words = m[1]!.replace(/\\(.)/g, '$1').toLowerCase().split(/\s+/);
+        list = list.filter((i) => words.every((w) => JSON.stringify(i.description ?? '').toLowerCase().includes(w)));
+      } else if ((m = /^labels = "((?:[^"\\]|\\.)+)"$/.exec(clause))) {
         const label = m[1]!.replace(/\\(.)/g, '$1');
         list = list.filter((i) => i.labels.includes(label));
       }
@@ -291,8 +301,10 @@ export function fakeJira(token = 'secret', opts: FakeJiraOptions = {}): FakeJira
     const labels = fields.labels as string[] | undefined;
     const spaced = labels?.find((l) => /\s/.test(l));
     if (spaced) return { labels: `The label '${spaced}' contains spaces which is invalid.` };
-    const parent = (fields.parent as { key?: string } | undefined)?.key;
-    const problem = parent !== undefined || isNew ? parentProblem(i.type, parent) : null;
+    // null takes the parent away.
+    if (fields.parent === null && !isNew) i.parent = undefined;
+    const parent = (fields.parent as { key?: string } | null | undefined)?.key;
+    const problem = (parent !== undefined || isNew) && fields.parent !== null ? parentProblem(i.type, parent) : null;
     if (problem) return { parent: problem };
     if (typeof fields.summary === 'string') i.summary = fields.summary;
     if ('description' in fields) i.description = fields.description as Adf;
@@ -377,7 +389,7 @@ export function fakeJira(token = 'secret', opts: FakeJiraOptions = {}): FakeJira
       const type = (body?.type as { name?: string })?.name ?? '';
       if (!issues.has(from) || !issues.has(to)) return no(404, [`Issue ${issues.has(from) ? to : from} does not exist or you do not have permission to see it.`]);
       if (!linkTypes.some((t) => t.name === type)) return no(404, [`No issue link type with name '${type}' found.`]);
-      links.push({ id: String(linkIds++), type, source: from, target: to });
+      links.push({ id: String(linkIds++), type, ...(opts.reversedLinks ? { source: to, target: from } : { source: from, target: to }) });
       return new Response(null, { status: 201 });
     }
     if ((m = /^\/rest\/api\/3\/issueLink\/(\d+)$/.exec(p)) && method === 'DELETE') {
@@ -417,6 +429,21 @@ export function fakeJira(token = 'secret', opts: FakeJiraOptions = {}): FakeJira
       issues.set(key, made);
       return json({ id: made.id, key, self: `https://${SITE}/rest/api/3/issue/${made.id}` }, 201);
     }
+    if ((m = /^\/rest\/api\/3\/issue\/([A-Z]+-\d+)\/properties\/([\w.-]+)$/.exec(p))) {
+      const i = issues.get(m[1]!);
+      if (!i) return no(404, ['Issue does not exist or you do not have permission to see it.']);
+      const props = (i.props ??= {});
+      if (method === 'PUT') {
+        const made = !(m[2]! in props);
+        props[m[2]!] = body;
+        return json(undefined, made ? 201 : 200);
+      }
+      if (method === 'DELETE') {
+        delete props[m[2]!];
+        return json(undefined, 204);
+      }
+      return m[2]! in props ? json({ key: m[2], value: props[m[2]!] }) : no(404, [`The property with key '${m[2]}' does not exist.`]);
+    }
     if ((m = /^\/rest\/api\/3\/issue\/([A-Z]+-\d+)\/editmeta$/.exec(p))) {
       const i = issues.get(m[1]!);
       if (!i) return no(404, ['Issue does not exist or you do not have permission to see it.']);
@@ -455,7 +482,7 @@ export function fakeJira(token = 'secret', opts: FakeJiraOptions = {}): FakeJira
     const signedIn = headers.has('authorization');
     requests.push({ method, url: url.href, signedIn });
     if (url.host === MEDIA) return new Response(Buffer.from('PNG!'), { status: 200, headers: { 'content-type': 'image/png' } });
-    if (url.host !== SITE) throw new TypeError('fetch failed');
+    if (url.host !== (opts.site ?? SITE)) throw new TypeError('fetch failed');
     if (busy) {
       if (busy === 'once') busy = undefined;
       return json({ errorMessages: ['Rate limit exceeded.'], errors: {} }, 429, { 'retry-after': opts.busy === 'once' ? '1' : '30' });

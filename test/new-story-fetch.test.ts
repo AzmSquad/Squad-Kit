@@ -91,7 +91,7 @@ describe('new-story tracker fetch', () => {
 
     writeJiraWorkspace();
     writeJiraSecrets({
-      tracker: { jira: { email: 'e@e.com', token: 'tok' } },
+      tracker: { jira: { host: 'mycompany.atlassian.net', email: 'e@e.com', token: 'tok' } },
     });
 
     const warn = vi.spyOn(ui, 'warning').mockImplementation(() => true);
@@ -129,7 +129,7 @@ describe('new-story tracker fetch', () => {
 
     writeJiraWorkspace();
     writeJiraSecrets({
-      tracker: { jira: { email: 'e@e.com', token: 'tok' } },
+      tracker: { jira: { host: 'mycompany.atlassian.net', email: 'e@e.com', token: 'tok' } },
     });
 
     await runNewStory('feat', { id: 'PROJ-9', yes: true, fetch: false });
@@ -153,7 +153,7 @@ describe('new-story tracker fetch', () => {
 
     writeJiraWorkspace();
     writeJiraSecrets({
-      tracker: { jira: { email: 'e@e.com', token: 'tok' } },
+      tracker: { jira: { host: 'mycompany.atlassian.net', email: 'e@e.com', token: 'tok' } },
     });
 
     await runNewStory('feat', { id: 'PROJ-42', yes: true, attachments: false });
@@ -191,7 +191,7 @@ describe('new-story tracker fetch', () => {
   it('401: fallback preamble, warning, full intake present', async () => {
     writeJiraWorkspace();
     writeJiraSecrets({
-      tracker: { jira: { email: 'e@e.com', token: 'bad' } },
+      tracker: { jira: { host: 'mycompany.atlassian.net', email: 'e@e.com', token: 'bad' } },
     });
 
     vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 401 })));
@@ -213,7 +213,7 @@ describe('new-story tracker fetch', () => {
   it('404: fallback preamble and warning', async () => {
     writeJiraWorkspace();
     writeJiraSecrets({
-      tracker: { jira: { email: 'e@e.com', token: 'tok' } },
+      tracker: { jira: { host: 'mycompany.atlassian.net', email: 'e@e.com', token: 'tok' } },
     });
 
     vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 404 })));
@@ -245,7 +245,7 @@ describe('new-story tracker fetch', () => {
 
     writeJiraWorkspace();
     writeJiraSecrets({
-      tracker: { jira: { email: 'e@e.com', token: 'tok' } },
+      tracker: { jira: { host: 'mycompany.atlassian.net', email: 'e@e.com', token: 'tok' } },
     });
 
     await runNewStory('feat', { id: 'PROJ-42', yes: true });

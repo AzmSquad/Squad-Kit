@@ -60,7 +60,7 @@ describe('clientFor', () => {
       tracker: { type: 'jira', workspace: 'w.atlassian.net' },
     };
     const secrets: SquadSecrets = {
-      tracker: { jira: { email: 'e@e.com', token: 'tok' } },
+      tracker: { jira: { host: 'w.atlassian.net', email: 'e@e.com', token: 'tok' } },
     };
     const res = clientFor(config, secrets);
     expect(res.error).toBeUndefined();
@@ -126,28 +126,15 @@ describe('clientFor', () => {
     expect(res.client?.name).toBe('github');
   });
 
-  it('prefers secrets.tracker.jira.host over config.tracker.workspace for requests', async () => {
+  it("never sends a Jira token to config.yaml's site when it was saved for another host, nor when no host was saved with it", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify(loadMinimalIssue()), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
-
-    const config: SquadConfig = {
-      ...DEFAULT_CONFIG,
-      tracker: { type: 'jira', workspace: 'config-host.atlassian.net' },
-    };
-    const secrets: SquadSecrets = {
-      tracker: {
-        jira: {
-          host: 'secret-host.atlassian.net',
-          email: 'e@e.com',
-          token: 't',
-        },
-      },
-    };
-    const res = clientFor(config, secrets);
-    expect(res.client).toBeDefined();
-    await res.client!.fetchIssue('PROJ-1');
-    const { url } = firstFetchCall(fetchMock);
-    expect(url.startsWith('https://secret-host.atlassian.net/rest/api/3/issue/')).toBe(true);
+    const config: SquadConfig = { ...DEFAULT_CONFIG, tracker: { type: 'jira', workspace: 'config-host.atlassian.net' } };
+    const moved = clientFor(config, { tracker: { jira: { host: 'secret-host.atlassian.net', email: 'e@e.com', token: 't' } } });
+    expect(moved.client).toBeUndefined();
+    expect(moved.error).toMatchObject({ kind: 'missing-credentials', message: "The team's Jira site is now config-host.atlassian.net." });
+    expect(clientFor(config, { tracker: { jira: { email: 'e@e.com', token: 't' } } }).client).toBeUndefined();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('prefers secrets.tracker.azure.organization over config.tracker.workspace', async () => {

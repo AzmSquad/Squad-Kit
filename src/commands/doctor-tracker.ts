@@ -46,3 +46,19 @@ export async function trackerReachCheck(root: string, mod: TrackerModule): Promi
     return { id: 'tracker-live', name, status: 'fail', detail: (err as Error).message };
   }
 }
+
+/**
+ * A tracker with a token to paste that doctor checks through its module all the same, so it says what the board says:
+ * Jira, whose token goes only to the host it was saved for.
+ */
+export function moduleTokenTracker(config: SquadConfig | undefined): TrackerModule | null {
+  return config?.tracker.type === 'jira' ? (trackerModule('jira') ?? null) : null;
+}
+
+/** Its token on this computer, for the team's site, or the plain line saying what to do. */
+export function tokenSignInCheck(root: string, mod: TrackerModule): CheckResult {
+  const name = 'tracker credential resolves';
+  if (mod.open(root)) return { id: 'tracker-cred', name, status: 'ok', detail: `${mod.label}: a token for the team's site on this computer` };
+  const fix = `squad config set tracker --type ${mod.name}`;
+  return { id: 'tracker-cred', name, status: 'fail', detail: mod.read(root).note ?? `${mod.label} has no token on this computer. Paste it in Settings, or run ${fix}.`, fixHint: fix };
+}

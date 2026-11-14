@@ -3,7 +3,7 @@ import path from 'node:path';
 import { addActivity, codeChanged, listTickets, readMeta, readTicket, requireTicket, updateTicket, type BoardPaths } from '../board/store.js';
 import type { LocalSetup, Ticket, TrackerEvent } from '../board/types.js';
 import { repoHostFor, trackerFor } from '../modules/registry.js';
-import type { Tracker } from '../modules/tracker/types.js';
+import type { ItemStage, Tracker } from '../modules/tracker/types.js';
 import type { RepoHost } from '../modules/code-host/types.js';
 import { MergeClash, currentBranch, git, mergeIntoBase, remotes, baseTurn, fetchedTip, moveBase } from './git.js';
 import { projectRoot } from './live.js';
@@ -68,7 +68,7 @@ export async function tellTracker(bp: BoardPaths, ticketId: string, event: Track
   try {
     switch (event.kind) {
       case 'started': {
-        const state = await tracker.moveTo(id, 'in-progress');
+        const state = await moveOrSay(bp, ticketId, tracker, id, 'in-progress');
         await tracker.comment(id, `squad-kit started work on this as ticket **${t.id}**.`);
         if (state) noteOn(bp, ticketId, `Moved ${ref} to ${state} on ${tracker.label}`);
         break;
@@ -101,7 +101,7 @@ export async function tellTracker(bp: BoardPaths, ticketId: string, event: Track
         break;
       }
       case 'released': {
-        const state = await tracker.moveTo(id, 'closed');
+        const state = await moveOrSay(bp, ticketId, tracker, id, 'closed');
         if (tracker.abilities.tags) await tracker.addTag(id, event.version);
         await tracker.comment(id, `Released in **${event.version}**.`);
         noteOn(bp, ticketId, `Closed ${ref} on ${tracker.label}${state ? ` (${state})` : ''}`);
@@ -388,10 +388,26 @@ export function prItem(tracker: Tracker | null, item: string | null, repo: strin
  * The item after Looks right: resolved, and closed only when its work is really in the base (`merged`); a pull request
  * that waits for its checks, an approver or an owner leaves it open. Said on the ticket; a tracker problem stops nothing.
  */
+/**
+ * A move the tracker refuses for good (its workflow has no way on) is said on the ticket, and the comment and label
+ * that come with it still go. A problem that may pass is thrown, so the whole update is sent again later.
+ */
+async function moveOrSay(bp: BoardPaths, ticketId: string, tracker: Tracker, id: string, stage: ItemStage, opts?: { merged?: boolean }): Promise<string | null> {
+  try {
+    return await tracker.moveTo(id, stage, opts);
+  } catch (err) {
+    if (!refusedForGood(err)) throw err;
+    // The exact words are for engineers; the ticket gets one plain line with the way out.
+    saidToEngineers(bp, ticketId, `${tracker.label} refused to move ${tracker.refOf(id)}: ${(err as Error).message}`);
+    noteOn(bp, ticketId, `${tracker.label} would not move ${tracker.refOf(id)}, so squad-kit went on without the move. Move it in ${tracker.label} if it should go on`);
+    return null;
+  }
+}
+
 export async function resolveItem(bp: BoardPaths, ticketId: string, tracker: Tracker | null, item: string | null, merged: boolean, words: string): Promise<void> {
   if (!tracker || !item) return;
   try {
-    const state = await tracker.moveTo(item, 'resolved', { merged });
+    const state = await moveOrSay(bp, ticketId, tracker, item, 'resolved', { merged });
     await tracker.comment(item, words);
     if (state) noteOn(bp, ticketId, `Moved ${tracker.refOf(item)} to ${state} on ${tracker.label}`);
   } catch (err) {

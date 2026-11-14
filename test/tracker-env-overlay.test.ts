@@ -46,8 +46,8 @@ describe('overlayTrackerEnv', () => {
     expect(out.tracker?.github).toEqual(base.tracker?.github);
   });
 
-  it('overrides jira fields from JIRA_* env vars', () => {
-    process.env.JIRA_HOST = 'env-host';
+  it('overrides jira fields from JIRA_* env vars, the host and the token together', () => {
+    process.env.JIRA_HOST = 'env.atlassian.net';
     process.env.JIRA_EMAIL = 'env@example.com';
     process.env.JIRA_API_TOKEN = 'env-token';
 
@@ -58,7 +58,7 @@ describe('overlayTrackerEnv', () => {
     };
     const out = overlayTrackerEnv(base);
     expect(out.tracker?.jira).toEqual({
-      host: 'env-host',
+      host: 'env.atlassian.net',
       email: 'env@example.com',
       token: 'env-token',
     });
@@ -75,12 +75,14 @@ describe('overlayTrackerEnv', () => {
       },
     };
     const out = overlayTrackerEnv(base);
-    expect(out.tracker?.jira?.token).toBe('shared-from-env');
+    // Jira takes the shared key only with a JIRA_HOST for it: here the file's token stays, with the file's host.
+    expect(out.tracker?.jira).toEqual({ host: 'h', email: 'e', token: 'file-jira' });
     expect(out.tracker?.azure?.pat).toBe('shared-from-env');
     expect(out.tracker?.github?.pat).toBe('shared-from-env');
   });
 
   it('prefers JIRA_API_TOKEN over SQUAD_TRACKER_API_KEY for jira', () => {
+    process.env.JIRA_HOST = 'env.atlassian.net';
     process.env.JIRA_API_TOKEN = 'explicit-jira';
     process.env.SQUAD_TRACKER_API_KEY = 'shared';
 
@@ -89,6 +91,25 @@ describe('overlayTrackerEnv', () => {
     };
     const out = overlayTrackerEnv(base);
     expect(out.tracker?.jira?.token).toBe('explicit-jira');
+  });
+
+  it('a Jira token in the environment without JIRA_HOST is not paired with the file host: the file pair stays', () => {
+    process.env.JIRA_API_TOKEN = 'env-token';
+    const out = overlayTrackerEnv({ tracker: { jira: { host: 'file.atlassian.net', email: 'e', token: 'file-token' } } });
+    expect(out.tracker?.jira).toEqual({ host: 'file.atlassian.net', email: 'e', token: 'file-token' });
+  });
+
+  it('SQUAD_TRACKER_API_KEY counts for Jira only with a JIRA_HOST', () => {
+    process.env.SQUAD_TRACKER_API_KEY = 'shared';
+    expect(overlayTrackerEnv({}).tracker?.jira?.token).toBeUndefined();
+    process.env.JIRA_HOST = 'https://env.atlassian.net/browse/PAY-1';
+    expect(overlayTrackerEnv({}).tracker?.jira).toMatchObject({ host: 'env.atlassian.net', token: 'shared' });
+  });
+
+  it('a JIRA_HOST for another site does not take the file token there: the file token keeps its own host', () => {
+    process.env.JIRA_HOST = 'other.atlassian.net';
+    const out = overlayTrackerEnv({ tracker: { jira: { host: 'file.atlassian.net', email: 'e', token: 'file-token' } } });
+    expect(out.tracker?.jira).toEqual({ host: 'file.atlassian.net', email: 'e', token: 'file-token' });
   });
 
   it('prefers AZURE_DEVOPS_PAT over SQUAD_TRACKER_API_KEY for azure', () => {

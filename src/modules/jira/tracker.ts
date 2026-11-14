@@ -140,10 +140,10 @@ export class JiraTracker implements Tracker {
     const text = criteria ? { description, acceptance: criteria } : splitCriteria(description);
     // The feature and epic above it, nearest first: Jira's parent, or the epic it is linked to; then the one above that.
     const parents: TrackerItem['parents'] = [];
-    for (let p = itemAbove(issue); p && parents.length < 3; ) {
+    for (let p = await itemAbove(this.ctx, issue); p && parents.length < 3; ) {
       parents.push({ id: p.key, type: p.type, title: p.title });
       const next = await this.client.call<RawIssue>('GET', `/rest/api/3/issue/${encodeURIComponent(p.key)}?fields=parent,summary,issuetype,labels,issuelinks`).catch(() => null);
-      p = next ? itemAbove(next) : null;
+      p = next ? await itemAbove(this.ctx, next).catch(() => null) : null;
     }
     return {
       ...rowOf(issue, fields, (k) => this.client.browseUrl(k)),

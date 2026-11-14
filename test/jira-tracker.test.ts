@@ -7,6 +7,7 @@ import { trackerContract, trackerCreateContract } from './contracts/tracker.js';
 import { JiraClient } from '../src/modules/jira/client.js';
 import { JiraTracker } from '../src/modules/jira/tracker.js';
 import { siteOf } from '../src/modules/jira/refs.js';
+import { nextStep } from '../src/modules/jira/states.js';
 import type { JiraSettings } from '../src/modules/jira/settings.js';
 import { ModuleError, mayPassSoon, refusedForGood } from '../src/modules/errors.js';
 import { sprintToShow } from '../src/modules/tracker/sprints.js';
@@ -46,6 +47,8 @@ describe('Jira refs', () => {
     expect(tracker.parseRef('PAY-0')).toBeNull();
     expect([siteOf('acme'), siteOf(`https://${SITE}/browse/PAY-4`), siteOf('jira.mycorp.com')]).toEqual([SITE, SITE, 'jira.mycorp.com']);
     expect([siteOf(`${SITE}:8443`), siteOf('10.0.0.5'), siteOf('https://1.2.3.4/browse/PAY-4'), siteOf('[::1]'), siteOf('acme .net')]).toEqual([null, null, null, null, null]);
+    // A user name or password in the address could hide another host.
+    expect([siteOf(`https://${SITE}@evil.example/browse/PAY-4`), siteOf(`sara:pw@${SITE}`), siteOf(`https://sara@${SITE}/`)]).toEqual([null, null, null]);
     expect(tracker.refOf('PAY-40')).toBe('PAY-40');
     expect(tracker.refOf('40')).toBe('PAY-40');
   });
@@ -416,5 +419,77 @@ describe('Jira client answers that are not Jira data', () => {
     const client = new JiraClient(access, answer(() => new Response('{}')));
     await expect(client.call('GET', 'https://evil.example/steal')).rejects.toThrow('A Jira call takes a path on the site');
     expect(seen).toEqual([]);
+  });
+});
+
+describe("Jira: only what squad-kit made, and links that land either way", () => {
+  it("a teammate's link to another Epic and a team epic- label are never read as the parent, nor taken away", async () => {
+    const { tracker, fake } = jira();
+    const epic = await tracker.createItem({ level: 'epic', title: 'Front desk', markdown: 'x' });
+    const other = await tracker.createItem({ level: 'epic', title: 'Billing', markdown: 'x' });
+    const feature = await tracker.createItem({ level: 'feature', title: 'Paying', markdown: 'x', parent: epic.id });
+    const story = await tracker.createItem({ level: 'story', title: 'Pay by card', markdown: 'x', parent: feature.id });
+    // A teammate links the feature to a roadmap Epic and labels it for a team filter, the way squad-kit would.
+    const roadmap = await tracker.createItem({ level: 'epic', title: 'Q3 roadmap', markdown: 'x' });
+    fake.links.push({ id: '99001', type: 'Relates', source: roadmap.id, target: feature.id });
+    fake.issues.get(feature.id)!.labels.push('epic-q3-roadmap');
+    expect((await tracker.get(story.id)).parents.map((p) => p.id)).toEqual([feature.id, epic.id]);
+    await tracker.updateItem(feature.id, { parent: other.id });
+    expect(fake.issues.get(feature.id)!.labels.sort()).toEqual(['epic-billing', 'epic-q3-roadmap']);
+    expect(fake.links.filter((l) => l.source === feature.id || l.target === feature.id).map((l) => [l.id === '99001' ? 'teammate' : 'squad-kit', l.source === feature.id ? l.target : l.source]).sort()).toEqual([
+      ['squad-kit', other.id],
+      ['teammate', roadmap.id],
+    ]);
+    // An Epic a teammate linked to another and labelled after it: not squad-kit's, so no parent.
+    const lone = await tracker.createItem({ level: 'epic', title: 'Lone', markdown: 'x' });
+    fake.links.push({ id: '99002', type: 'Relates', source: lone.id, target: roadmap.id });
+    fake.issues.get(lone.id)!.labels.push('epic-q3-roadmap');
+    expect((await tracker.get(lone.id)).parents).toEqual([]);
+  });
+
+  it('an item moved from under a feature to beside its epic loses its Jira parent', async () => {
+    const { tracker, fake } = jira({ initiative: true });
+    const initiative = await tracker.createItem({ level: 'epic', title: 'Front desk', markdown: 'x' });
+    const feature = await tracker.createItem({ level: 'feature', title: 'Paying', markdown: 'x', parent: initiative.id });
+    const story = await tracker.createItem({ level: 'story', title: 'Pay by card', markdown: 'x', parent: feature.id });
+    expect(fake.issues.get(story.id)!.parent).toBe(feature.id);
+    await tracker.updateItem(story.id, { parent: initiative.id });
+    expect(fake.issues.get(story.id)).toMatchObject({ parent: undefined, labels: ['epic-front-desk'] });
+    expect((await tracker.get(story.id)).parents.map((p) => p.id)).toEqual([initiative.id]);
+  });
+
+  it("a site whose issue link call takes its sides the other way: the first link is read back and made again the right way, and the next ones go right at once", async () => {
+    const site = 'rev.atlassian.net';
+    const { tracker, fake } = jira({ reversedLinks: true, site }, { site });
+    await tracker.linkDepends('PAY-44', ['PAY-40']);
+    expect(fake.links).toContainEqual(expect.objectContaining({ type: 'Blocks', source: 'PAY-40', target: 'PAY-44' }));
+    expect(fake.links.filter((l) => l.source === 'PAY-44' && l.target === 'PAY-40')).toEqual([]);
+    const sent = fake.requests.length;
+    await tracker.linkDepends('PAY-44', ['PAY-42']);
+    expect(fake.requests.slice(sent).filter((r) => r.method !== 'GET').map((r) => r.method)).toEqual(['POST']);
+    expect((await tracker.get('PAY-44')).dependsOn.map((d) => d.ref).sort()).toEqual(['PAY-40', 'PAY-41', 'PAY-42']);
+    // A feature beside its epic on that site is read back from either side of its link.
+    const epic = await tracker.createItem({ level: 'epic', title: 'Front desk', markdown: 'x' });
+    const feature = await tracker.createItem({ level: 'feature', title: 'Paying', markdown: 'x', parent: epic.id });
+    const story = await tracker.createItem({ level: 'story', title: 'Pay', markdown: 'x', parent: feature.id });
+    expect((await tracker.get(story.id)).parents.map((p) => p.id)).toEqual([feature.id, epic.id]);
+  });
+
+  it("finds a cut-off send's item by its line where the create screen has no Labels", async () => {
+    const { tracker } = jira({ noLabels: true });
+    const made = await tracker.createItem({ level: 'epic', title: 'Front desk', markdown: 'Guests check in.\n\nMade by squad-kit from BR-1, E-1.', tags: ['squad-kit', 'BR-1'] });
+    expect(await tracker.findMade({ level: 'epic', tag: 'BR-1', mark: 'Made by squad-kit from BR-1, E-1.' })).toMatchObject({ id: made.id });
+  });
+
+  it('a sideways step never goes into a status that parks the work', () => {
+    const inProgress = { name: 'In Progress', category: 'indeterminate' };
+    const steps = [
+      { id: '1', to: { name: 'Blocked', category: 'indeterminate' } },
+      { id: '2', to: { name: 'On Hold', category: 'indeterminate' } },
+      { id: '3', to: { name: 'Waiting for customer', category: 'indeterminate' } },
+      { id: '4', to: { name: 'Paused', category: 'indeterminate' } },
+    ];
+    expect(nextStep(steps, inProgress, 3)).toBeNull();
+    expect(nextStep([...steps, { id: '5', to: { name: 'QA', category: 'indeterminate' } }], inProgress, 3)?.to.name).toBe('QA');
   });
 });

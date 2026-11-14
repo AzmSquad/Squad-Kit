@@ -501,7 +501,7 @@ describe('runDoctor', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input: FetchInput) => {
       const u = String(input);
       if (u.includes('/rest/api/3/myself')) {
-        return Promise.resolve(new Response(JSON.stringify({ name: 'me' }), { status: 200 }));
+        return Promise.resolve(new Response(JSON.stringify({ accountId: 'a1', displayName: 'Me' }), { status: 200 }));
       }
       return Promise.resolve(new Response('noop', { status: 500 }));
     });
@@ -526,8 +526,9 @@ describe('runDoctor', () => {
     try {
       await runDoctor({ json: true });
       const j = JSON.parse(cap.text()) as { checks: { id: string; status: string }[] };
-      const row = j.checks.find((c) => c.id === 'tracker-live');
-      expect(row?.status).toBe('ok');
+      const row = j.checks.find((c) => c.id === 'tracker-live') as { status: string; detail?: string } | undefined;
+      // Through the tracker module, as the board checks it: a 0.x setup reads, and says to save once to write.
+      expect(row).toMatchObject({ status: 'warn', detail: expect.stringContaining('Jira as Me') });
     } finally {
       cap.restore();
     }

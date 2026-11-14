@@ -15,19 +15,7 @@ function urlOf(text: string): URL | null {
   }
 }
 
-/**
- * The site's host from what a person typed or pasted: "acme", "acme.atlassian.net" or any Jira link on it. A name only:
- * no port and no IP address, as Jira Cloud has neither.
- */
-export function siteOf(text: string | undefined): string | null {
-  const t = (text ?? '').trim();
-  if (!t || /\s/.test(t)) return null;
-  const url = urlOf(t);
-  if (!url || url.port || /^\d+(\.\d+){3}$/.test(url.hostname)) return null;
-  const host = url.hostname.toLowerCase();
-  if (/^[a-z0-9-]+$/.test(host)) return `${host}.atlassian.net`;
-  return /^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z][a-z0-9-]*$/.test(host) ? host : null;
-}
+export { siteOf } from '../../tracker/jira-site.js';
 
 /** The issue key in a Jira link: /browse/PAY-40, or ?selectedIssue=PAY-40 on a board. */
 function keyInLink(text: string): string | null {

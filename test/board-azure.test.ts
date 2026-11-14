@@ -259,7 +259,7 @@ describe('a tracker that says no for good', () => {
   it.each([
     ['a deleted item', new AzureError('Azure DevOps said HTTP 404. TF401232', 404)],
     ['a rule of the tracker', new AzureError('Azure DevOps said HTTP 400. TF401320: Rule Error', 400)],
-  ])('%s: that update goes, one plain line says so, and the later updates still go', async (_what, refusal) => {
+  ])('%s on a move: the move goes, its comment and the later updates still go, and one plain line says so', async (_what, refusal) => {
     const id = queued();
     const az = tracker((what) => {
       if (what.startsWith('move')) throw refusal;
@@ -268,6 +268,31 @@ describe('a tracker that says no for good', () => {
     const t = readTicket(bp, id)!;
     expect(t.trackerQueue).toBeUndefined();
     expect(t.trackerRetry).toBeUndefined();
+    expect(az.said.join('\n')).toContain('squad-kit started work on this');
+    expect(az.said.join('\n')).toContain('A later note');
+    const said = t.activity.map((a) => a.text).join('\n');
+    expect(said).toContain('Azure DevOps would not move AB#35, so squad-kit went on without the move. Move it in Azure DevOps if it should go on');
+    expect(said).not.toMatch(/HTTP|TF40/);
+  });
+
+  it.each([
+    ['a deleted item', new AzureError('Azure DevOps said HTTP 404. TF401232', 404)],
+    ['a rule of the tracker', new AzureError('Azure DevOps said HTTP 400. TF401320: Rule Error', 400)],
+  ])('%s on a comment: that update goes, one plain line says so, and the later updates still go', async (_what, refusal) => {
+    const id = queued();
+    const az = tracker(() => undefined);
+    let first = true;
+    const comment = az.comment.bind(az);
+    az.comment = async (item: string, text: string) => {
+      if (first) {
+        first = false;
+        throw refusal;
+      }
+      return comment(item, text);
+    };
+    await flushTracker(bp, id, az);
+    const t = readTicket(bp, id)!;
+    expect(t.trackerQueue).toBeUndefined();
     expect(az.said.join('\n')).toContain('A later note');
     const said = t.activity.map((a) => a.text).join('\n');
     expect(said).toContain('Azure DevOps refused this update on AB#35, so squad-kit went on without it.');

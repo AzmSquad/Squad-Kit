@@ -1,7 +1,7 @@
 import { ModuleError } from '../errors.js';
 import type { JiraClient } from './client.js';
 import { projectOf } from './refs.js';
-import { typeLevel } from './rows.js';
+import { typeLevel, type RawIssue } from './rows.js';
 import type { JiraSettings } from './settings.js';
 
 /**
@@ -43,6 +43,9 @@ interface RawField {
   name: string;
   schema?: { type?: string; custom?: string };
 }
+
+/** Per site: whether Jira's issue link call takes its two sides the other way round, once a link showed it. */
+const LINK_SIDES = new Map<string, boolean>();
 
 const READ_ONLY = 'squad-kit only reads Jira for this project until you connect it again: press Save and check in Settings, or run squad config set tracker --type jira';
 const NO_PROJECT = 'Pick the Jira project the stories come from in Settings, then press Save and check.';
@@ -135,10 +138,24 @@ export class JiraContext {
 
   /**
    * Links two issues through Jira's issue link call: `from` reads the link type's outward words to `to` ("PAY-41 blocks
-   * PAY-44", "PAY-50 relates to PAY-10"). Which side Jira shows them on is checked on the first real site (ADR-010).
+   * PAY-44"). Jira's docs leave its two sides unclear, so the first link on a site is read back from `from`: if it
+   * landed the other way round, it is made again the right way, and every later link on that site is sent that way.
    */
   async link(type: string, from: string, to: string): Promise<void> {
-    await this.client.call('POST', '/rest/api/3/issueLink', { type: { name: type }, outwardIssue: { key: from }, inwardIssue: { key: to } });
+    const site = this.settings.site;
+    const flipped = LINK_SIDES.get(site);
+    const send = (out: string, into: string) => this.client.call('POST', '/rest/api/3/issueLink', { type: { name: type }, outwardIssue: { key: out }, inwardIssue: { key: into } });
+    await (flipped ? send(to, from) : send(from, to));
+    if (flipped !== undefined) return;
+    const back = await this.client.call<RawIssue>('GET', `/rest/api/3/issue/${encodeURIComponent(from)}?fields=issuelinks`);
+    const made = (back?.fields.issuelinks ?? []).find((l) => l.type?.name === type && (l.outwardIssue?.key === to || l.inwardIssue?.key === to));
+    if (!made) return;
+    // Seen from `from`, as Jira shows an issue's links: `to` on the outward side means "from <outward words> to".
+    const right = made.outwardIssue?.key === to;
+    LINK_SIDES.set(site, !right);
+    if (right) return;
+    if (made.id) await this.client.call('DELETE', `/rest/api/3/issueLink/${encodeURIComponent(made.id)}`);
+    await send(to, from);
   }
 
   /** The statuses of a type's workflow in a project, in Jira's order. */

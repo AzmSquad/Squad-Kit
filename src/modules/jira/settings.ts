@@ -2,6 +2,7 @@ import { buildPaths } from '../../core/paths.js';
 import { loadConfig, saveConfig } from '../../core/config.js';
 import { loadSecrets, mergeSecrets, saveSecrets } from '../../core/secrets.js';
 import { overlayTrackerEnv } from '../../tracker/env-overlay.js';
+import { jiraAccess } from '../../tracker/jira-site.js';
 import type { SetupField } from '../tracker/types.js';
 import { projectOf, siteOf } from './refs.js';
 
@@ -81,15 +82,13 @@ export function readSaved(root: string): SavedJira | null {
   const own = savedSignIn(root);
   const id = Number(o.board);
   // The team's site rules. A commit that changes it never sends anyone's token to the new host: the token waits.
-  const team = siteOf(tracker.workspace) ?? undefined;
-  const site = team ?? own.site;
-  const token = tokenFor(site, own);
+  const access = jiraAccess(tracker.workspace, { host: own.site, email: own.email, token: own.token });
   const project = projectOf(tracker.project);
   return {
-    ...(own.email ? { email: own.email } : {}),
-    ...(site ? { site } : {}),
-    ...(token ? { token } : {}),
-    ...(own.token && !token && site ? { moved: site } : {}),
+    ...(access.email ? { email: access.email } : {}),
+    ...(access.site ? { site: access.site } : {}),
+    ...(access.token ? { token: access.token } : {}),
+    ...(access.moved ? { moved: access.moved } : {}),
     ...(project ? { project } : {}),
     ...(o.board === 'none' ? { board: 'none' as const } : id > 0 ? { board: { id, name: o.boardName ?? `Board ${id}` } } : {}),
     readOnly: o.updates !== WRITES,

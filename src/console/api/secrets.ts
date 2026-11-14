@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { z } from 'zod';
 import type { Hono } from 'hono';
 import type { SquadPaths } from '../../core/paths.js';
@@ -5,12 +6,12 @@ import { loadSecrets, mergeSecrets, saveSecrets, type SquadSecrets } from '../..
 import { maskToken } from '../../core/mask-token.js';
 import {
   fetchProviderModelIds,
-  probeJiraConnectivity,
   probeAzureConnectivity,
   probeGitHubConnectivity,
 } from '../../core/probes.js';
 import { loadConfig } from '../../core/config.js';
 import type { ProviderName } from '../../planner/types.js';
+import { trackerModule } from '../../modules/registry.js';
 
 const PROVIDERS: readonly ProviderName[] = ['anthropic', 'openai', 'google'] as const;
 
@@ -112,10 +113,17 @@ export function mountSecretsApi(app: Hono, opts: { paths: SquadPaths }): void {
     });
   }
 
+  // Through the tracker module, as the board checks it: the token goes only to the host saved with it.
   app.post('/api/secrets/test/jira', async (c) => {
-    const cfg = loadConfig(opts.paths.configFile);
-    const s = loadSecrets(opts.paths.secretsFile);
-    return c.json(await probeJiraConnectivity(s, cfg));
+    const mod = trackerModule('jira')!;
+    const root = path.dirname(opts.paths.squadDir);
+    const tracker = mod.open(root);
+    if (!tracker) return c.json({ ok: false, detail: mod.read(root).note ?? 'Jira has no token for the team\'s site on this computer.' });
+    try {
+      return c.json({ ok: true, detail: await tracker.whoAmI() });
+    } catch (err) {
+      return c.json({ ok: false, detail: (err as Error).message });
+    }
   });
 
   app.post('/api/secrets/test/azure', async (c) => {

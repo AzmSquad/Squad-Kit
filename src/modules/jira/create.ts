@@ -34,7 +34,7 @@ type Placed = RawIssue & { fields: { project?: { key?: string } } };
 
 /** An issue's type, project, labels and links: where it sits, and what links it to an epic. */
 function issueOf(ctx: JiraContext, key: string): Promise<Placed> {
-  return ctx.client.call<Placed>('GET', `/rest/api/3/issue/${encodeURIComponent(key)}?fields=summary,issuetype,project,labels,issuelinks`);
+  return ctx.client.call<Placed>('GET', `/rest/api/3/issue/${encodeURIComponent(key)}?fields=summary,issuetype,project,labels,issuelinks,parent`);
 }
 
 /** A title Jira takes: one line, at most 255 characters. */
@@ -97,7 +97,11 @@ export async function updateIssue(ctx: JiraContext, key: string, change: Tracker
     if (nests(typeLevel(issue.fields.issuetype), typeLevel(parent.fields.issuetype))) {
       fields.parent = { key: parent.key };
       await unlinkEpics(ctx, issue);
-    } else await placeBeside(ctx, issue, { key: parent.key, title: parent.fields.summary ?? parent.key });
+    } else {
+      // Beside its epic now: the Jira parent it had goes.
+      if (issue.fields.parent) fields.parent = null;
+      await placeBeside(ctx, issue, { key: parent.key, title: parent.fields.summary ?? parent.key });
+    }
   }
   if (Object.keys(fields).length) await ctx.client.call('PUT', `/rest/api/3/issue/${encodeURIComponent(key)}`, { fields });
 }
@@ -105,7 +109,12 @@ export async function updateIssue(ctx: JiraContext, key: string, change: Tracker
 /** An item a cut-off send made: the newest of its level's types with the breakdown's label and this line in its text. */
 export async function findMadeIssue(ctx: JiraContext, input: { level: ItemLevel; tag: string; mark: string }): Promise<TrackerItemRow | null> {
   const type = await typeFor(ctx, input.level);
-  const jql = `project = ${jqlText(ctx.project())} AND labels = ${jqlText(labelOf(input.tag))} AND issuetype = ${Number(type.id)} ORDER BY created DESC`;
+  const project = ctx.project();
+  // By the breakdown's label; where the create screen has no Labels, by the words of its "Made by squad-kit" line.
+  const labelled = (await ctx.createFields(project, type.id)).some((f) => f.fieldId === 'labels');
+  const words = input.mark.split(/[^\p{L}\p{N}]+/u).filter(Boolean).join(' ');
+  const which = labelled ? `labels = ${jqlText(labelOf(input.tag))}` : `description ~ ${jqlText(words)}`;
+  const jql = `project = ${jqlText(project)} AND ${which} AND issuetype = ${Number(type.id)} ORDER BY created DESC`;
   const fields = await ctx.fields();
   const look = async () => (await ctx.client.search<RawIssue>(jql, [...rowFields(fields), 'description'], 50)).issues.find((i) => adfToMarkdown(i.fields.description).includes(input.mark));
   // Jira's search catches up with a new issue a few seconds later: one made just before the cut is looked for twice.

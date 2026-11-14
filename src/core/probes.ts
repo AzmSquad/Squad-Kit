@@ -67,32 +67,6 @@ export async function fetchProviderModelIds(
   }
 }
 
-function jiraMyselfUrl(host: string): string {
-  const normHost = host.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
-  return `https://${normHost}/rest/api/3/myself`;
-}
-
-export async function probeJiraConnectivity(
-  secrets: SquadSecrets,
-  config: SquadConfig,
-): Promise<{ ok: boolean; status?: number; detail?: string }> {
-  const jira = overlayTrackerEnv(secrets).tracker?.jira ?? {};
-  const host = jira.host ?? config.tracker.workspace ?? '';
-  const email = jira.email ?? '';
-  const token = jira.token ?? '';
-  const auth = Buffer.from(`${email}:${token}`).toString('base64');
-  const url = jiraMyselfUrl(host);
-  try {
-    const res = await fetch(url, {
-      headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
-    });
-    if (res.ok) return { ok: true };
-    return { ok: false, status: res.status, detail: (await res.text()).slice(0, 200) };
-  } catch (err) {
-    return { ok: false, detail: (err as Error).message };
-  }
-}
-
 export async function probeAzureConnectivity(
   secrets: SquadSecrets,
   config: SquadConfig,

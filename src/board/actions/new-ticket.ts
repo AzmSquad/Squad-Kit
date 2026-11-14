@@ -23,8 +23,6 @@ import { plainWords } from '../../core/for-people.js';
 import { buildPaths } from '../../core/paths.js';
 import { freeName } from '../../core/file-names.js';
 import { loadConfig } from '../../core/config.js';
-import { loadSecrets } from '../../core/secrets.js';
-import { clientFor, overlayTrackerEnv } from '../../tracker/index.js';
 import { trackerFor, trackerModule } from '../../modules/registry.js';
 import type { Tracker } from '../../modules/tracker/types.js';
 import { syncWiki } from '../../engine/sync.js';
@@ -227,43 +225,17 @@ export async function pullTicket(bp: BoardPaths, ref: string): Promise<Ticket> {
   return pullFromTracker(bp, clean);
 }
 
-/** Fetch a real work item with the tracker set up in .squad/ (the same one `squad new-story --id` uses). */
+/**
+ * Fetch a real work item with the tracker set up in .squad/. A tracker that is set up but cannot open (no sign-in, or
+ * a token saved for another site) says why: there is no older way around it that could send the token elsewhere.
+ */
 async function pullFromTracker(bp: BoardPaths, id: string): Promise<Ticket> {
   const tracker = trackerFor(bp);
   if (tracker) return startFromTracker(bp, tracker, id);
-  const paths = buildPaths(bp.root);
-  const config = loadConfig(paths.configFile);
-  if (config.tracker.type === 'none') {
-    throw new BoardActionError('No tracker is set up for this project. Add one in Settings.');
-  }
-  const { client, error } = clientFor(config, overlayTrackerEnv(loadSecrets(paths.secretsFile)));
-  if (!client) throw new BoardActionError(`${error?.message ?? 'The tracker is not ready.'} ${error?.detail ?? ''}`.trim());
-  let issue;
-  try {
-    issue = await client.fetchIssue(id);
-  } catch (err) {
-    throw new BoardActionError(`Could not fetch ${id}: ${plainWords(err, 'Pulling from the tracker', 'something technical stopped it. Try again.')}`);
-  }
-  const ask = [issue.description, issue.acceptanceCriteria && `Acceptance criteria:\n${issue.acceptanceCriteria}`].filter(Boolean).join('\n\n');
-  const ticket = createTicket(bp, {
-    title: issue.title,
-    ask: ask || issue.title,
-    priority: 'normal',
-    source: { type: config.tracker.type, ref: issue.id },
-  });
-  if (issue.attachments.length) {
-    const dir = ticketFilesDir(bp, ticket.id);
-    fs.mkdirSync(dir, { recursive: true });
-    const saved = await client.downloadAttachments(issue.attachments, dir).catch(() => []);
-    const files = saved.filter((a) => a.outcome === 'written' && a.absolutePath).map((a) => a.absolutePath!);
-    if (files.length) {
-      return updateTicket(bp, ticket.id, (t) => {
-        t.attachments = files;
-        addActivity(t, 'you', `Pulled ${files.length} attachments with it`);
-      });
-    }
-  }
-  return ticket;
+  const type = loadConfig(buildPaths(bp.root).configFile).tracker.type;
+  if (type === 'none') throw new BoardActionError('No tracker is set up for this project. Add one in Settings.');
+  const mod = trackerModule(type);
+  throw new BoardActionError(mod?.read(bp.root).note ?? `${mod?.label ?? 'The tracker'} is not connected on this computer. Connect it in Settings.`);
 }
 
 /**

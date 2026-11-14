@@ -1,4 +1,5 @@
 import type { SquadSecrets } from '../core/secrets.js';
+import { siteOf } from './jira-site.js';
 
 /**
  * Build a SquadSecrets from env vars. Values present in `base` are preserved
@@ -6,9 +7,13 @@ import type { SquadSecrets } from '../core/secrets.js';
  * precedence: env > secrets.yaml).
  */
 export function overlayTrackerEnv(base: SquadSecrets): SquadSecrets {
-  const jiraHost = process.env.JIRA_HOST;
-  const jiraEmail = process.env.JIRA_EMAIL;
-  const jiraToken = process.env.JIRA_API_TOKEN ?? process.env.SQUAD_TRACKER_API_KEY;
+  // A Jira token and its host come from the same place: JIRA_API_TOKEN (or SQUAD_TRACKER_API_KEY) only with a JIRA_HOST
+  // that is a site, else the file's token with the file's host. Never one's token with the other's host.
+  const file = base.tracker?.jira ?? {};
+  const envSite = siteOf(process.env.JIRA_HOST);
+  const envToken = process.env.JIRA_API_TOKEN ?? process.env.SQUAD_TRACKER_API_KEY;
+  const jiraEmail = process.env.JIRA_EMAIL ?? file.email;
+  const jira = envSite && envToken ? { host: envSite, email: jiraEmail, token: envToken } : { host: file.host, email: jiraEmail, token: file.token };
 
   const azOrg = process.env.AZURE_DEVOPS_ORG;
   const azProj = process.env.AZURE_DEVOPS_PROJECT;
@@ -20,11 +25,7 @@ export function overlayTrackerEnv(base: SquadSecrets): SquadSecrets {
   return {
     ...base,
     tracker: {
-      jira: {
-        host: jiraHost ?? base.tracker?.jira?.host,
-        email: jiraEmail ?? base.tracker?.jira?.email,
-        token: jiraToken ?? base.tracker?.jira?.token,
-      },
+      jira,
       azure: {
         organization: azOrg ?? base.tracker?.azure?.organization,
         project: azProj ?? base.tracker?.azure?.project,
