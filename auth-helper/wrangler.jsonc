@@ -8,6 +8,9 @@
   // Nothing about a request is kept: no logs, no traces, no log push.
   "observability": { "enabled": false },
   "logpush": false,
+  // About 30 code exchanges and refreshes a minute from one address, then a plain 429. Cloudflare's Workers rate limiting
+  // binding: counted per Cloudflare location, set here (no dashboard step). Needs wrangler 4.36 or later.
+  "ratelimits": [{ "name": "TOKEN_LIMIT", "namespace_id": "1323", "simple": { "limit": 30, "period": 60 } }],
   "vars": {
     // Public: the Client ID of squad-kit's Atlassian app (developer.atlassian.com, the app's Settings). The same id is in
     // src/modules/jira/atlassian-app.ts. The secret is never here: `npx wrangler secret put ATLASSIAN_CLIENT_SECRET`.

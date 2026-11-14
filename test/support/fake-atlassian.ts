@@ -26,6 +26,8 @@ export interface FakeAtlassian {
   offline: boolean;
   /** Runs when a refresh token Atlassian does not take arrives, before it says no. */
   onRefused?: () => void;
+  /** While set, a refresh waits for it before Atlassian answers: two refreshes at once, a Disconnect on the way. */
+  gate?: Promise<void>;
 }
 
 export const GOOD_CODE = 'good-code';
@@ -60,6 +62,8 @@ export function fakeAtlassian(opts: { jira?: FakeJiraOptions; sites?: 'one' | 't
       return json(pair());
     }
     if (url.href === 'https://auth.squad-kit.com/atlassian/refresh') {
+      await f.gate;
+      if (f.offline) throw new TypeError('fetch failed');
       if (f.revoked || body?.refresh_token !== f.now.refresh) {
         f.onRefused?.();
         return json({ error: 'invalid_grant', error_description: 'Unknown or invalid refresh token.' }, 403);

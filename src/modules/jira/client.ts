@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ModuleError, kindOfStatus } from '../errors.js';
 import { writeLog } from '../../core/app-log.js';
-import { GATEWAY } from './atlassian-app.js';
+import { GATEWAY, scopeFor } from './atlassian-app.js';
 
 /**
  * Jira Cloud's REST API as squad-kit calls it: one site, with the person's email and API token, or with squad-kit's own
@@ -38,6 +38,19 @@ async function authHeader(a: JiraAccess): Promise<{ header: string; bearer?: str
     return { header: `Bearer ${bearer}`, bearer };
   }
   return { header: `Basic ${Buffer.from(`${a.email}:${a.token ?? ''}`).toString('base64')}` };
+}
+
+/** Calls Atlassian said squad-kit's app has no scope for, and when: not sent again for a while. A new sign-in clears it. */
+const missing = new Map<string, number>();
+const MISSING_MS = 10 * 60_000;
+const ISSUES = 'https://github.com/AzmSquad/Squad-Kit/issues';
+/** One kind of call: the site, the method and the path with its ids and issue keys left out. */
+const missingKey = (gate: string, method: string, path: string) =>
+  `${gate} ${method} ${path.replace(/\?.*$/, '').replace(/\/[A-Z][A-Z0-9_]*-\d+(?=\/|$)/g, '/{key}').replace(/\/\d+(?=\/|$)/g, '/{id}')}`;
+
+/** A new sign-in may bring the permission: every call is tried again. */
+export function forgetMissingScopes(): void {
+  missing.clear();
 }
 
 /** An attachment's file on the site, by Jira's two ways of linking it. */
@@ -108,6 +121,8 @@ export class JiraClient {
   /** `wait`: Jira's short "slow down" is waited once. `fresh`: a refused sign-in token is swapped for a new one once. */
   private async send<T>(method: string, path: string, body: unknown, again: { wait: boolean; fresh: boolean }): Promise<T> {
     if (!path.startsWith('/')) throw new Error(`A Jira call takes a path on the site, not "${path}".`);
+    const lacking = this.gate ? missing.get(missingKey(this.gate, method, path)) : undefined;
+    if (lacking && Date.now() - lacking < MISSING_MS) throw this.missingScope(method, path, false);
     const auth = await authHeader(this.access);
     let res: Response;
     try {
@@ -122,10 +137,13 @@ export class JiraClient {
       writeLog({ level: 'warn', text: `Could not reach Jira at ${this.access.site}: ${(err as Error).name}` });
       throw new ModuleError(`Could not reach Jira at ${this.access.site}. Check the connection, then try again.`, 'offline');
     }
-    // A sign-in token kept a while may have ended early on Atlassian's side: that one is dropped and the call made once more.
-    if (res.status === 401 && auth.bearer && again.fresh && this.access.cloud?.refused(auth.bearer)) {
-      await res.body?.cancel().catch(() => undefined);
-      return this.send<T>(method, path, body, { ...again, fresh: false });
+    if (res.status === 401 && auth.bearer) {
+      const text = await res.text().catch(() => '');
+      // squad-kit's app lacks a permission for this call: a new token would not help, so none is asked for.
+      if (/scope/i.test(jiraWords(text))) throw this.missingScope(method, path);
+      // A sign-in token kept a while may have ended early on Atlassian's side: that one is dropped and the call made once more.
+      if (again.fresh && this.access.cloud?.refused(auth.bearer)) return this.send<T>(method, path, body, { ...again, fresh: false });
+      throw this.failure(method, path, 401, text);
     }
     if (res.status === 429) {
       const wait = Number(res.headers.get('retry-after') ?? '');
@@ -169,13 +187,24 @@ export class JiraClient {
     }
   }
 
+  /**
+   * Atlassian's gateway said "scope does not match": squad-kit's app is missing the permission this call needs. Said
+   * with its name, remembered a while so the same call is not sent again, and never answered with a new token.
+   */
+  private missingScope(method: string, path: string, first = true): ModuleError {
+    const scope = scopeFor(method, path);
+    if (first) {
+      missing.set(missingKey(this.gate!, method, path), Date.now());
+      writeLog({ level: 'warn', text: `Atlassian said squad-kit's app has no scope for ${method} ${path.replace(/\?.*$/, '')} (needs ${scope}).` });
+    }
+    return new ModuleError(`squad-kit's Atlassian app is missing a permission Jira needs here (${scope}). Tell the squad-kit maintainers: ${ISSUES}`, 'other', 401);
+  }
+
   private failure(method: string, url: string, status: number, text: string): ModuleError {
     const words = jiraWords(text);
     // The exact answer is for engineers: the path and Jira's words, never the header.
     writeLog({ level: 'warn', text: `Jira said HTTP ${status} to ${method} ${url.replace(/\?.*$/, '')}. ${words}`.trim() });
     if (status === 401 && this.gate) {
-      // Atlassian's gateway says "scope does not match" when squad-kit's app lacks a permission the call needs.
-      if (/scope/i.test(words)) return new ModuleError(`squad-kit's Atlassian sign-in does not cover this call (${words}). Update squad-kit; if it is the newest, tell its makers.`, 'sign-in', 401);
       return new ModuleError(
         `Jira did not accept squad-kit's Atlassian sign-in for ${this.access.email}. Sign in with Atlassian again on the Connections page (squad connect jira), or paste an API token in Settings.`,
         'sign-in',

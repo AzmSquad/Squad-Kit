@@ -39,13 +39,14 @@ function signedIn(sites: 'one' | 'two' = 'one', chosen?: string) {
   const acme = { id: CLOUD, url: `https://${SITE}`, name: 'Acme' };
   const globex = { id: OTHER.id, url: OTHER.url, name: OTHER.name };
   writeAtlassianSignIn({
+    signIn: 'sign-in-a',
     refreshToken: fake.now.refresh,
     sites: sites === 'two' ? [acme, globex] : [acme],
     ...(chosen ? { site: chosen } : sites === 'one' ? { site: CLOUD } : {}),
     account: { id: 'a1', name: 'Sara Ali' },
     ...freshDates(),
   });
-  keepAccess(fake.now.access, 3600);
+  keepAccess(fake.now.access, 3600, 'sign-in-a');
 }
 
 function project(tracker: SquadConfig['tracker'] = { type: 'jira', workspace: SITE, project: 'PAY', options: { updates: 'on' } }, token = false): BoardPaths {
@@ -117,6 +118,24 @@ describe("Jira's row", () => {
     expect(await row(bp)).toMatchObject({ state: 'not-connected' });
   });
 
+  it('Disconnect decides from this computer’s files alone: online, it calls neither the helper nor Jira', async () => {
+    use(fakeAtlassian());
+    signedIn();
+    const bp = project();
+    expect(await row(bp)).toMatchObject({ state: 'connected' });
+    fake.calls.length = 0;
+    fake.jira.requests.length = 0;
+    // Check again first, as the board's Disconnect dialog may follow it: still nothing goes out.
+    jiraConnection.forget?.();
+    expect((await disconnect(bp, 'jira')).line).toContain('squad-kit is signed out of Jira on this computer, as Sara Ali.');
+    expect(fake.calls).toEqual([]);
+    expect(fake.jira.requests).toEqual([]);
+    await expect(disconnect(bp, 'jira')).rejects.toThrow('Jira is not signed in on this computer.');
+    const token = project(undefined, true);
+    await expect(disconnect(token, 'jira')).rejects.toThrow('Jira is connected with the token saved in Settings. Change it there.');
+    expect(fake.calls).toEqual([]);
+  });
+
   it("a token saved for the project's site wins; the sign-in left here can still be ended", async () => {
     use(fakeAtlassian());
     signedIn();
@@ -145,13 +164,19 @@ describe("Jira's row", () => {
     const no = await pick('initech.atlassian.net');
     expect(no.status).toBe(400);
     expect(await no.json()).toEqual({ error: `Atlassian did not give squad-kit access to initech.atlassian.net. Pick one of: ${SITE}, ${OTHER.host}.` });
+    // A body that is no object, or a site that is no text: said plainly, never a crash.
+    for (const body of ['null', '{"site":5}', 'not json']) {
+      const bad = await app.request('/api/v1/connections/jira/site', { method: 'POST', body, headers: { 'content-type': 'application/json' } });
+      expect(bad.status).toBe(400);
+      expect(await bad.json()).toEqual({ error: 'Say which one to use.' });
+    }
     expect(await (await pick('globex')).json()).toEqual({ line: `squad-kit uses ${OTHER.host} for Jira on this computer.` });
     expect(await row(bp)).toMatchObject({ state: 'connected', account: `Sara Ali (${OTHER.host})` });
   });
 
   it("the project's site not among those Atlassian gave: said plainly, with Sign in again and Disconnect", async () => {
     use(fakeAtlassian());
-    writeAtlassianSignIn({ refreshToken: 'rt-1', sites: [{ id: OTHER.id, url: OTHER.url, name: OTHER.name }], site: OTHER.id, account: { id: 'a1', name: 'Sara Ali' }, ...freshDates() });
+    writeAtlassianSignIn({ signIn: 'sign-in-a', refreshToken: 'rt-1', sites: [{ id: OTHER.id, url: OTHER.url, name: OTHER.name }], site: OTHER.id, account: { id: 'a1', name: 'Sara Ali' }, ...freshDates() });
     const r = await row(project());
     expect(r.line?.en).toBe(`Atlassian did not give squad-kit access to ${SITE}, this project's Jira site (it gave ${OTHER.host}). Sign in with Atlassian again and pick ${SITE} on Atlassian's page.`);
     expect(r.line?.ar).toContain(SITE);

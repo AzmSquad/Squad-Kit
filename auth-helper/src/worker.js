@@ -15,6 +15,8 @@ const STATE = /^(\d{4,5})\.([A-Za-z0-9_-]{32,128})$/;
 /** Atlassian's own error words are short codes, like access_denied: only those go back, never free text. */
 const ERROR = /^[a-z_]{1,64}$/;
 const CODE = /^[\x21-\x7e]{1,4096}$/;
+/** The client id in wrangler.jsonc until the owner registers the app: the helper is not set up yet. */
+const NOT_SET = 'ATLASSIAN_CLIENT_ID_NOT_SET';
 
 const PLAIN = {
   'cache-control': 'no-store',
@@ -102,7 +104,12 @@ function isJson(text) {
 async function exchange(request, env, grant) {
   // squad-kit calls this from Node, never from a web page: a browser always says where it comes from.
   if (request.headers.has('origin')) return refuse(403, 'invalid_request', 'Only squad-kit on your computer calls this.');
-  if (!env.ATLASSIAN_CLIENT_ID || !env.ATLASSIAN_CLIENT_SECRET) return refuse(500, 'server_error', 'The sign-in helper is not set up yet.');
+  if (!env.ATLASSIAN_CLIENT_ID || env.ATLASSIAN_CLIENT_ID === NOT_SET || !env.ATLASSIAN_CLIENT_SECRET) return refuse(500, 'server_error', 'The sign-in helper is not set up yet.');
+  // About 30 a minute from one address (Cloudflare's rate limiting binding, per location); a refresh is once an hour.
+  if (env.TOKEN_LIMIT) {
+    const { success } = await env.TOKEN_LIMIT.limit({ key: request.headers.get('cf-connecting-ip') ?? 'unknown' });
+    if (!success) return refuse(429, 'slow_down', 'Too many sign-in requests from this address. Wait a minute, then try again.');
+  }
   if (!/^application\/json\b/i.test(request.headers.get('content-type') ?? '')) return refuse(415, 'invalid_request', 'Send JSON.');
   const text = await capped(request);
   if (text === null) return refuse(413, 'invalid_request', 'The request is too big.');

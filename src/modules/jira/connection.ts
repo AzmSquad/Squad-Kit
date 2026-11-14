@@ -3,7 +3,7 @@ import { ModuleError } from '../errors.js';
 import { atlassianReady } from './atlassian-app.js';
 import { atlassianSignInNow, cancelAtlassianSignIn, signOutOfAtlassian, startAtlassianSignIn } from './atlassian-sign-in.js';
 import { ATLASSIAN_FOLDER, hostOf, readAtlassianSignIn, writeAtlassianSignIn, type AtlassianSite } from './atlassian-store.js';
-import { atlassianCloud, atlassianEnded, atlassianToken, forgetAtlassianTokens, grantedSite } from './atlassian-token.js';
+import { atlassianCloud, atlassianEnded, atlassianToken, forgetAtlassianFailure, grantedSite } from './atlassian-token.js';
 import { JiraClient } from './client.js';
 import { LINES, SIGN_IN_FOOT, TOKEN_STEPS, signInSteps } from './connection-words.js';
 import { jiraTracker } from './module.js';
@@ -164,13 +164,18 @@ export const jiraConnection: ConnectionModule = {
   status,
   forget() {
     kept = null;
-    forgetAtlassianTokens();
+    forgetAtlassianFailure();
   },
   get signIn() {
     return atlassianReady() ? SIGN_IN : undefined;
   },
   get signOut() {
     return atlassianReady() ? signOut : undefined;
+  },
+  localSignIn(root) {
+    const s = readAtlassianSignIn();
+    if (s) return s.account ? { as: s.account.name } : {};
+    return readSaved(root)?.token ? 'token' : null;
   },
   pickSite,
 };

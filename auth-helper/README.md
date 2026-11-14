@@ -25,7 +25,15 @@ prints a code, a token or a request body. Each request is answered and forgotten
 | Anything else | 404. |
 
 JSON only, at most 8 KB, no CORS (squad-kit calls it from Node, so a request from a web page is refused), and
-`Cache-Control: no-store` on every answer.
+`Cache-Control: no-store` on every answer. The code exchange and the refresh take about 30 requests a minute from one
+address (Cloudflare's rate limiting binding `TOKEN_LIMIT` in `wrangler.jsonc`, counted per Cloudflare location), then
+answer a plain 429. squad-kit refreshes about once an hour, so a person never meets it.
+
+If Cloudflare refuses the `ratelimits` binding on the account's plan, take that block out of `wrangler.jsonc` (the
+helper then runs without it) and add a rule in the dashboard instead: the `squad-kit.com` zone, Security, WAF, Rate
+limiting rules, Create rule. When: URI Path is in `/atlassian/token` `/atlassian/refresh`. Same characteristics: IP.
+Requests: 30 per 1 minute (on Free, the period may be fixed at 10 seconds: then 10 per 10 seconds). Action: Block, for
+the shortest duration.
 
 ## Set up (the owner, once)
 

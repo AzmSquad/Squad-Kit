@@ -7,7 +7,7 @@ import { buildPaths } from '../src/core/paths.js';
 import { useAtlassianApp } from '../src/modules/jira/atlassian-app.js';
 import { signOutOfAtlassian } from '../src/modules/jira/atlassian-sign-in.js';
 import { freshDates, readAtlassianSignIn, writeAtlassianSignIn } from '../src/modules/jira/atlassian-store.js';
-import { atlassianCloud, atlassianEnded, atlassianToken, forgetAtlassianTokens, keepAccess } from '../src/modules/jira/atlassian-token.js';
+import { atlassianCloud, atlassianEnded, atlassianToken, forgetAtlassianFailure, forgetAtlassianTokens, keepAccess } from '../src/modules/jira/atlassian-token.js';
 import { jiraTracker } from '../src/modules/jira/module.js';
 import { EMAIL, SITE } from './fakes/jira.js';
 import { CLOUD, fakeAtlassian, type FakeAtlassian } from './support/fake-atlassian.js';
@@ -23,15 +23,15 @@ let tmp = '';
 
 function use(f: FakeAtlassian) {
   fake = f;
-  useAtlassianApp({ clientId: 'squad-kit-test-app', fetch: f.fetch });
+  useAtlassianApp({ clientId: 'squad-kit-test-app', fetch: f.fetch, settleMs: 20 });
   // The Jira client and the Connections row use the plain fetch.
   vi.stubGlobal('fetch', f.fetch);
 }
 
 /** Signed in as Sara Ali on acme, the way a finished sign-in leaves it. */
 function signedIn(expiresIn = 3600) {
-  writeAtlassianSignIn({ refreshToken: fake.now.refresh, sites: [{ id: CLOUD, url: `https://${SITE}`, name: 'Acme' }], site: CLOUD, account: { id: 'a1', name: 'Sara Ali' }, ...freshDates() });
-  keepAccess(fake.now.access, expiresIn);
+  writeAtlassianSignIn({ signIn: 'sign-in-a', refreshToken: fake.now.refresh, sites: [{ id: CLOUD, url: `https://${SITE}`, name: 'Acme' }], site: CLOUD, account: { id: 'a1', name: 'Sara Ali' }, ...freshDates() });
+  keepAccess(fake.now.access, expiresIn, 'sign-in-a');
 }
 
 /** A project on Jira at acme, project PAY, with or without the person's API token. */
@@ -76,7 +76,8 @@ describe('the access token', () => {
     expect(refreshes()).toHaveLength(1);
     expect(readAtlassianSignIn()?.refreshToken).toBe('rt-1');
     await expect(atlassianCloud(SITE)!.cloud.bearer()).rejects.toMatchObject({ kind: 'offline' });
-    forgetAtlassianTokens();
+    // Check again: asked afresh.
+    forgetAtlassianFailure();
     fake.offline = false;
     fake.revoked = true;
     expect(await atlassianToken()).toEqual({ ok: false, why: 'ended' });
@@ -98,6 +99,7 @@ describe('the access token', () => {
     expect(refreshes().map((c) => c.body?.refresh_token)).toEqual(['rt-1', 'rt-9']);
     expect(readAtlassianSignIn()?.refreshToken).toBe('rt-2');
   });
+
   it("the helper's own trouble never signs out; a Disconnect while a refresh is on its way is never undone", async () => {
     use(fakeAtlassian());
     signedIn(1);
@@ -106,7 +108,7 @@ describe('the access token', () => {
     helper(() => new Response(JSON.stringify({ error: 'invalid_client', error_description: 'Client credentials are invalid.' }), { status: 401 }));
     expect(await atlassianToken()).toEqual({ ok: false, why: 'no-answer' });
     expect(readAtlassianSignIn()?.refreshToken).toBe('rt-1');
-    forgetAtlassianTokens();
+    forgetAtlassianFailure();
     helper(() => {
       signOutOfAtlassian();
       return new Response(JSON.stringify({ access_token: 'at-2', refresh_token: 'rt-2', expires_in: 3600 }), { status: 200 });
@@ -169,10 +171,25 @@ describe('Jira with the sign-in', () => {
     }
   });
 
-  it("a call squad-kit's app has no scope for is said as that, not as a bad sign-in", async () => {
+  it("a call squad-kit's app has no scope for names the permission, asks for no new token, and is not sent again", async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
     use(fakeAtlassian({ scopeMissing: true }));
     signedIn();
-    await expect(jiraTracker.open(project())!.whoAmI()).rejects.toThrow("squad-kit's Atlassian sign-in does not cover this call (Unauthorized; scope does not match). Update squad-kit");
+    // A token kept more than a minute: a plain refusal would be answered with a new one.
+    vi.setSystemTime(Date.now() + 2 * 60_000);
+    const t = jiraTracker.open(project())!;
+    const words = "squad-kit's Atlassian app is missing a permission Jira needs here (read:jira-user). Tell the squad-kit maintainers: https://github.com/AzmSquad/Squad-Kit/issues";
+    await expect(t.whoAmI()).rejects.toThrow(words);
+    expect(refreshes()).toHaveLength(0);
+    const sent = fake.jira.requests.length;
+    await expect(t.whoAmI()).rejects.toThrow(words);
+    expect(fake.jira.requests).toHaveLength(sent);
+    await expect(t.sprints()).rejects.toThrow('(read:sprint:jira-software)');
+    // A new sign-in may bring the permission: the call is tried again.
+    keepAccess(fake.now.access, 3600, 'sign-in-a');
+    await expect(t.whoAmI()).rejects.toThrow(words);
+    expect(fake.jira.requests.length).toBeGreaterThan(sent);
+    expect(refreshes()).toHaveLength(0);
   });
 
   it("a token saved for the project's site wins: it goes to the site, and the bearer goes nowhere", async () => {

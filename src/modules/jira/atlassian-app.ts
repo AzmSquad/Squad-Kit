@@ -34,14 +34,23 @@ export const SCOPES = [
   'offline_access',
 ];
 
-/** Atlassian keeps a code for a while; squad-kit's door stays open 15 minutes at most. */
-const PACE = { lifeMs: 15 * 60_000 };
+/**
+ * lifeMs: squad-kit's door stays open 15 minutes at most. settleMs: after Atlassian refuses a refresh token, the wait
+ * before the file is read again (another squad-kit may have just written a newer one). lockWaitMs: how long a refresh
+ * waits for another one on this computer to finish.
+ */
+const PACE = { lifeMs: 15 * 60_000, settleMs: 1000, lockWaitMs: 35_000 };
+type Pace = typeof PACE;
 
-let app: { clientId: string; fetch?: typeof fetch; lifeMs: number } = { clientId: CLIENT_ID, lifeMs: PACE.lifeMs };
+let app: { clientId: string; fetch?: typeof fetch; pace: Pace } = { clientId: CLIENT_ID, pace: PACE };
 
-/** Tests use their own app id, a made-up Atlassian and a shorter wait. Null goes back to the real ones. */
-export function useAtlassianApp(p: { clientId?: string; fetch?: typeof fetch; lifeMs?: number } | null): void {
-  app = { clientId: p?.clientId ?? CLIENT_ID, ...(p?.fetch ? { fetch: p.fetch } : {}), lifeMs: p?.lifeMs ?? PACE.lifeMs };
+/** Tests use their own app id, a made-up Atlassian and shorter waits. Null goes back to the real ones. */
+export function useAtlassianApp(p: ({ clientId?: string; fetch?: typeof fetch } & Partial<Pace>) | null): void {
+  app = {
+    clientId: p?.clientId ?? CLIENT_ID,
+    ...(p?.fetch ? { fetch: p.fetch } : {}),
+    pace: { lifeMs: p?.lifeMs ?? PACE.lifeMs, settleMs: p?.settleMs ?? PACE.settleMs, lockWaitMs: p?.lockWaitMs ?? PACE.lockWaitMs },
+  };
 }
 
 /** The app is registered: Sign in with Atlassian works. Else Jira keeps the pasted token only, so nothing half-works. */
@@ -54,8 +63,8 @@ export function atlassianFetch(): typeof fetch {
   return app.fetch ?? ((url, init) => fetch(url, init));
 }
 
-export function signInLife(): number {
-  return app.lifeMs;
+export function atlassianPace(): Pace {
+  return app.pace;
 }
 
 /** Atlassian's consent page, where the person picks their Jira site and presses Accept. */
@@ -71,6 +80,19 @@ export function authorizeUrl(state: string): string {
   ];
   // Spaces as %20, as Atlassian's own examples write them.
   return `https://auth.atlassian.com/authorize?${q.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&')}`;
+}
+
+/**
+ * The scope a Jira call needs, from the list above, to name it when Atlassian says "scope does not match": Jira
+ * Software's boards and sprints, /myself, else reading or writing work.
+ */
+export function scopeFor(method: string, path: string): string {
+  const p = path.replace(/\?.*$/, '');
+  if (/^\/rest\/agile\/1\.0\/board\/\d+\/sprint/.test(p)) return 'read:sprint:jira-software';
+  if (/^\/rest\/agile\/1\.0\/board\/\d+$/.test(p)) return 'read:board-scope:jira-software, read:issue-details:jira';
+  if (/^\/rest\/agile\//.test(p)) return 'read:board-scope:jira-software, read:project:jira';
+  if (p === '/rest/api/3/myself') return 'read:jira-user';
+  return method === 'GET' || p === '/rest/api/3/search/jql' ? 'read:jira-work' : 'write:jira-work';
 }
 
 /** The helper's two routes: a code for the first pair, a refresh token for a new one. */

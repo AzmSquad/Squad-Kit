@@ -115,6 +115,11 @@ export interface ConnectionModule {
     cancel(): SignInFlow | null;
   };
   signOut?(account: string): Promise<void>;
+  /**
+   * What Disconnect would end, from this computer's files only (no call goes out): squad-kit's own sign-in left here
+   * (with its account when known), 'token' when a pasted token is the way and nothing else is left, or null.
+   */
+  localSignIn?(root: string): { as?: string } | 'token' | null;
   /** Picks one of the places the sign-in reaches (`ConnectionStatus.pick`) for projects that have none of their own. */
   pickSite?(root: string, site: string): Promise<{ line: string }>;
 }

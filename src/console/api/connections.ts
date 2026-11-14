@@ -41,8 +41,8 @@ export function mountConnectionsApi(app: Hono, opts: { paths: SquadPaths }): voi
 
   // `squad connect jira --site <site>`: the place this sign-in uses for projects that have none of their own.
   app.post('/api/v1/connections/:name/site', async (c) => {
-    const b = await body<{ site?: string }>(c);
-    return act(c, () => pickSite(bp, c.req.param('name'), b.site ?? ''));
+    const b = await body<{ site?: unknown } | null>(c);
+    return act(c, () => pickSite(bp, c.req.param('name'), typeof b?.site === 'string' ? b.site : ''));
   });
 
   // `squad disconnect github`: signs the tool out on this computer, for every app that uses it.

@@ -174,10 +174,20 @@ export function connectionInfo(name: string): { label: string; ownSignIn: boolea
 export async function disconnect(bp: BoardPaths, name: string): Promise<{ line: string }> {
   const m = moduleFor(name);
   if (!m.signOut) throw new BoardActionError(`${m.label} has nothing to sign out of here.`);
-  m.forget?.();
-  const s = await m.status(bp.root);
-  const end = toEnd(s);
-  if (!end && s.by === 'token') throw new BoardActionError(`${m.label} is connected with the token saved in Settings. Change it there.`);
+  // From this computer's files when the module can tell (works offline, asks nobody); else from its status.
+  const local = m.localSignIn?.(bp.root);
+  let end: { as?: string } | null;
+  let byToken: boolean;
+  if (local !== undefined) {
+    end = local === 'token' ? null : local;
+    byToken = local === 'token';
+  } else {
+    m.forget?.();
+    const s = await m.status(bp.root);
+    end = toEnd(s);
+    byToken = s.by === 'token';
+  }
+  if (!end && byToken) throw new BoardActionError(`${m.label} is connected with the token saved in Settings. Change it there.`);
   if (!end) throw new BoardActionError(`${m.label} is not signed in on this computer.`);
   await m.signOut(end.as ?? '');
   m.forget?.();

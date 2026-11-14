@@ -128,7 +128,27 @@ describe('the code exchange and the refresh', () => {
     expect((await post('/atlassian/token', { code: 'x', pad: 'y'.repeat(9000) })).status).toBe(413);
     expect((await post('/atlassian/token', { code: 'x' }, { origin: 'https://evil.example' })).status).toBe(403);
     expect((await post('/atlassian/token', { code: 'x' }, {}, { ATLASSIAN_CLIENT_ID: 'client-123' })).status).toBe(500);
+    // The placeholder id in wrangler.jsonc, before the owner registers the app, is not set up either.
+    const placeholder = await post('/atlassian/refresh', { refresh_token: 'x' }, {}, { ATLASSIAN_CLIENT_ID: 'ATLASSIAN_CLIENT_ID_NOT_SET', ATLASSIAN_CLIENT_SECRET: 's' });
+    expect(placeholder.status).toBe(500);
+    expect(await placeholder.json()).toEqual({ error: 'server_error', error_description: 'The sign-in helper is not set up yet.' });
     expect(sent).toEqual([]);
+  });
+
+  it('too many from one address: a plain 429, counted by Cloudflare’s rate limit per address', async () => {
+    const sent = fakeAtlassian(200, { access_token: 'at', refresh_token: 'rt', expires_in: 3600 });
+    const seen: string[] = [];
+    let left = 2;
+    const TOKEN_LIMIT = { limit: async ({ key }: { key: string }) => (seen.push(key), { success: left-- > 0 }) };
+    const env = { ...ENV, TOKEN_LIMIT } as unknown as Record<string, string>;
+    const ask = () => post('/atlassian/refresh', { refresh_token: 'rt-1' }, { 'cf-connecting-ip': '203.0.113.7' }, env);
+    expect((await ask()).status).toBe(200);
+    expect((await ask()).status).toBe(200);
+    const no = await ask();
+    expect(no.status).toBe(429);
+    expect(await no.json()).toEqual({ error: 'slow_down', error_description: 'Too many sign-in requests from this address. Wait a minute, then try again.' });
+    expect(seen).toEqual(['203.0.113.7', '203.0.113.7', '203.0.113.7']);
+    expect(sent).toHaveLength(2);
   });
 });
 

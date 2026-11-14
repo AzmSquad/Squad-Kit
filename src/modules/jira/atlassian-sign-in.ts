@@ -1,10 +1,11 @@
 import { randomBytes } from 'node:crypto';
 import { writeLog } from '../../core/app-log.js';
 import type { SignInFlow } from '../connection/types.js';
-import { GATEWAY, atlassianFetch, authorizeUrl, signInLife } from './atlassian-app.js';
+import { GATEWAY, atlassianFetch, atlassianPace, authorizeUrl } from './atlassian-app.js';
 import { openDoor, type Door, type DoorAnswer } from './atlassian-loopback.js';
-import { clearAtlassianFolder, freshDates, hostOf, readAtlassianSignIn, siteFrom, writeAtlassianSignIn, type AtlassianSite } from './atlassian-store.js';
-import { askHelper, forgetAtlassianEnded, forgetAtlassianTokens, grantedSite, keepAccess } from './atlassian-token.js';
+import { askHelper } from './atlassian-refresh.js';
+import { clearAtlassianFolder, freshDates, hostOf, newSignInId, readAtlassianSignIn, siteFrom, writeAtlassianSignIn, type AtlassianSite } from './atlassian-store.js';
+import { forgetAtlassianEnded, forgetAtlassianTokens, grantedSite, keepAccess } from './atlassian-token.js';
 
 /**
  * "Sign in with Atlassian" (ADR-012). squad-kit opens a one-shot door on 127.0.0.1 and gives the link to Atlassian's
@@ -90,27 +91,31 @@ async function finish(f: Running, a: DoorAnswer, projectSite: string | undefined
   const chosen = own ?? sites.find((s) => s.id === before) ?? (sites.length === 1 ? sites[0] : undefined);
   const account = await accountOn(chosen ?? sites[0]!, token);
   if (f.state !== 'waiting') return;
-  writeAtlassianSignIn({ refreshToken: refresh, sites, ...(chosen ? { site: chosen.id } : {}), ...(account ? { account } : {}), ...freshDates() });
-  keepAccess(token, secs);
+  const signIn = newSignInId();
+  writeAtlassianSignIn({ signIn, refreshToken: refresh, sites, ...(chosen ? { site: chosen.id } : {}), ...(account ? { account } : {}), ...freshDates() });
+  keepAccess(token, secs, signIn);
   done();
   if (projectSite && !own) return void fail(f, notGranted(projectSite, sites));
   Object.assign(f, { state: 'done', ...(account ? { account: account.name } : {}), ...(chosen ? {} : { line: PICK }) });
 }
 
-/** Starts the sign-in: the door, then the link to Atlassian's page. One at a time: a second start shows the first. */
-export async function startAtlassianSignIn(projectSite: string | undefined, done: () => void): Promise<SignInFlow> {
-  if (flow?.state === 'waiting' && flow.door) return shown(flow);
+/** Opens the door and gives the link. Cancelled while the door opened: the door closes at once. */
+async function open(projectSite: string | undefined, done: () => void): Promise<SignInFlow> {
   const f: Running = { state: 'waiting', startedAt: new Date().toISOString() };
   flow = f;
   const nonce = randomBytes(32).toString('base64url');
   let door: Door;
   try {
-    door = await openDoor(nonce, signInLife());
+    door = await openDoor(nonce, atlassianPace().lifeMs);
   } catch (err) {
     writeLog({ level: 'warn', text: `squad-kit could not open its sign-in door on 127.0.0.1: ${(err as Error).message}` });
     return shown(fail(f, 'squad-kit could not wait for Atlassian’s answer on this computer. Try again.'));
   }
   f.door = door;
+  if (f.state !== 'waiting') {
+    door.close();
+    return shown(f);
+  }
   f.url = authorizeUrl(`${door.port}.${nonce}`);
   void door.answer.then(async (a) => {
     if (!a) {
@@ -123,6 +128,19 @@ export async function startAtlassianSignIn(projectSite: string | undefined, done
     });
   });
   return shown(f);
+}
+
+let starting: Promise<SignInFlow> | null = null;
+
+/**
+ * Starts the sign-in: the door, then the link to Atlassian's page. One at a time: a second start, even one that comes
+ * while the door is still opening, shows the first.
+ */
+export function startAtlassianSignIn(projectSite: string | undefined, done: () => void): Promise<SignInFlow> {
+  if (starting) return starting;
+  if (flow?.state === 'waiting' && flow.door) return Promise.resolve(shown(flow));
+  starting = open(projectSite, done).finally(() => (starting = null));
+  return starting;
 }
 
 /** Cancel: closes the door. A code already on its way is not kept. */

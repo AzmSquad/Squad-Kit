@@ -151,6 +151,16 @@ describe('the answer at the door', () => {
     expect(atlassianSignInNow()?.state).toBe('waiting');
   });
 
+  it('two starts at once (a double click) open one door: both get the same link', async () => {
+    use(fakeAtlassian());
+    const [a, b] = await Promise.all([startAtlassianSignIn(undefined, () => undefined), startAtlassianSignIn(undefined, () => undefined)]);
+    expect(b.url).toBe(a.url);
+    expect(atlassianSignInNow()?.url).toBe(a.url);
+    cancelAtlassianSignIn();
+    // That one door is closed now: nothing is left listening.
+    await expect(arrive(a.url!, { code: GOOD_CODE })).rejects.toThrow();
+  });
+
   it('Cancel closes the door; a code that comes after is never kept', async () => {
     use(fakeAtlassian());
     const f = await startAtlassianSignIn(undefined, () => undefined);
