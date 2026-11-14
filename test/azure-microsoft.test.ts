@@ -7,17 +7,18 @@ import { Hono } from 'hono';
 import { boardPaths, writeMeta, type BoardPaths } from '../src/board/store.js';
 import { DEFAULT_CONFIG, saveConfig } from '../src/core/config.js';
 import { buildPaths } from '../src/core/paths.js';
-import { ownAzureFolder, squadHome } from '../src/core/home.js';
+import { squadHome } from '../src/core/home.js';
+import { azFolder } from '../src/modules/azure/az.js';
 import { cancelSignIn, connectionsOf, disconnect, signInNow, startSignIn } from '../src/engine/connections.js';
 import { mountConnectionsApi } from '../src/console/api/connections.js';
 import { azureConnection } from '../src/modules/azure/connection.js';
 import { useAzurePace } from '../src/modules/azure/device-sign-in.js';
-import { orgTenant } from '../src/modules/azure/tenant.js';
+import { forgetTenants, orgTenant } from '../src/modules/azure/tenant.js';
 import { forgetMicrosoftTokens, microsoftToken } from '../src/modules/azure/token.js';
 import { azureTracker } from '../src/modules/azure/tracker.js';
 import { azureCodeHost } from '../src/modules/azure/code-host.js';
 import { ModuleError } from '../src/modules/errors.js';
-import { pathWithoutGh } from './support/fake-github.js';
+import { pathWithoutTools } from './support/fake-github.js';
 import { MS_TOKEN, OTHER_TENANT, TENANT, ZEROS, fakeAz, fakeDevOps, signedIn, type FakeAz } from './support/fake-azure.js';
 
 /**
@@ -118,17 +119,20 @@ describe('the organization’s directory, found without signing in', () => {
     expect(init.redirect).toBe('manual');
   });
 
-  it('all zeros: not on Microsoft Entra; a 404: no such organization; only WWW-Authenticate: its directory', async () => {
+  it('all zeros: personal Microsoft accounts; a 404: no such organization; only WWW-Authenticate: its directory', async () => {
     expect(await orgTenant('personal-org', answer(401, { 'x-vss-resourcetenant': ZEROS }))).toEqual({ kind: 'personal' });
     expect(await orgTenant('nobody-here', answer(404))).toEqual({ kind: 'not-found' });
     expect(await orgTenant('old-style', answer(302, { 'www-authenticate': `Bearer authorization_uri=https://login.microsoftonline.com/${OTHER_TENANT}, Basic realm="x"` }))).toEqual({ kind: 'entra', tenant: OTHER_TENANT });
   });
 
-  it('not reachable is never kept: the next look asks again', async () => {
+  it('not reachable is kept a minute only, so being offline does not wait on every call; Check again asks at once', async () => {
     const offline = vi.fn(async () => {
       throw new TypeError('fetch failed');
     }) as unknown as typeof fetch;
     expect(await orgTenant('far-away', offline)).toEqual({ kind: 'no-answer' });
+    expect(await orgTenant('far-away', offline)).toEqual({ kind: 'no-answer' });
+    expect(offline).toHaveBeenCalledTimes(1);
+    forgetTenants();
     expect(await orgTenant('far-away', answer(401, { 'x-vss-resourcetenant': TENANT }))).toEqual({ kind: 'entra', tenant: TENANT });
   });
 });
@@ -139,7 +143,7 @@ describe('Connections: Sign in with Microsoft through its own tool, in squad-kit
     devops = fakeDevOps();
     const f = await startSignIn(bp, 'azure');
     expect(f).toMatchObject({ state: 'waiting', code: 'GZ3SDVTBE', url: 'https://login.microsoft.com/device' });
-    expect(az!.calls()).toContain(`login --use-device-code --allow-no-subscriptions --tenant ${TENANT} --output none | dir=${ownAzureFolder()} | telemetry=false`);
+    expect(az!.calls()).toContain(`login --use-device-code --allow-no-subscriptions --tenant ${TENANT} --output none | dir=${azFolder()} | telemetry=false`);
     // Asked again while it waits: the same sign-in, not a second az.
     expect((await startSignIn(bp, 'azure')).pid).toBe(f.pid);
     const waiting = await azureRow(bp);
@@ -157,8 +161,8 @@ describe('Connections: Sign in with Microsoft through its own tool, in squad-kit
     expect(row.actions.map((a) => a.id)).toEqual(['disconnect', 'check']);
     expect(row.steps[1]!.done).toEqual({ en: 'Signed in as sara@contoso.com', ar: 'مسجّل باسم sara@contoso.com' });
     // Every az run used squad-kit's own folder, never the person's ~/.azure, and sent no usage report.
-    expect(az!.calls().every((c) => c.endsWith(`| dir=${ownAzureFolder()} | telemetry=false`))).toBe(true);
-    expect(ownAzureFolder()).toBe(path.join(squadHome(), 'azure-cli'));
+    expect(az!.calls().every((c) => c.endsWith(`| dir=${azFolder()} | telemetry=false`))).toBe(true);
+    expect(azFolder()).toBe(path.join(squadHome(), 'azure-cli'));
     // The token went in memory only: on no command line and in no file of squad-kit's.
     expect(az!.calls().some((c) => c.includes(MS_TOKEN))).toBe(false);
     expect(filesHolding(squadHome(), MS_TOKEN)).toEqual([]);
@@ -175,7 +179,7 @@ describe('Connections: Sign in with Microsoft through its own tool, in squad-kit
     expect(running(f.pid!) && running(python)).toBe(true);
     expect(cancelSignIn('azure')).toMatchObject({ state: 'cancelled', pid: f.pid });
     await until(() => !running(f.pid!) && !running(python));
-    expect(fs.existsSync(path.join(ownAzureFolder(), 'azureProfile.json'))).toBe(false);
+    expect(fs.existsSync(path.join(azFolder(), 'azureProfile.json'))).toBe(false);
     expect((await azureRow(bp)).state).toBe('not-connected');
   });
 
@@ -210,7 +214,7 @@ describe('Connections: Sign in with Microsoft through its own tool, in squad-kit
     const bp = project();
     devops = fakeDevOps();
     const bare = fs.mkdtempSync(path.join(tmp, 'bin-'));
-    process.env.PATH = pathWithoutGh(bare, 'az');
+    process.env.PATH = pathWithoutTools(bare);
     const row = await azureRow(bp);
     expect(row.state).toBe('missing');
     expect(row.steps[0]).toMatchObject({ page: '/tools#az', text: { en: "Install Microsoft's Azure tool" } });
@@ -222,19 +226,23 @@ describe('Connections: Sign in with Microsoft through its own tool, in squad-kit
     expect(await startSignIn(bp, 'azure')).toMatchObject({ state: 'failed', line: "Microsoft's Azure tool, az, is not on this computer. Install it from the Tools page first, or use a token instead." });
   });
 
-  it('an organization not on Microsoft Entra says it needs a token, with the token steps, and cannot sign in', async () => {
+  it('an organization of personal Microsoft accounts says it needs a token, with the token steps, and cannot sign in', async () => {
     const bp = project('personal-org');
     devops = fakeDevOps({ orgs: { 'personal-org': ZEROS } });
     const row = await azureRow(bp);
     expect(row).toMatchObject({ state: 'not-connected', by: 'token' });
-    expect(row.line?.en).toBe('personal-org is not on Microsoft Entra, so it needs a token. Make one on Azure DevOps and paste it in Settings.');
-    expect(row.line?.ar).toContain('Microsoft Entra');
+    expect(row.line?.en).toBe('This organization, personal-org, uses personal Microsoft accounts, so it needs a token. Paste one in Settings.');
+    expect(row.line?.ar).toBe('هذي المنظمة، personal-org، تستخدم حسابات Microsoft شخصية، فتحتاج رمز. الصقه في الإعدادات.');
     expect(row.steps.map((s) => s.command)).toEqual([undefined, undefined, 'squad config set tracker']);
     expect(row.actions.map((a) => a.id)).toEqual(['check']);
     const f = await startSignIn(bp, 'azure');
-    expect(f).toMatchObject({ state: 'failed' });
-    expect(f.line).toContain('Use a token instead');
+    expect(f).toMatchObject({ state: 'failed', line: 'This organization, personal-org, uses personal Microsoft accounts, so it needs a token. Paste one in Settings. Sign in with Microsoft cannot reach it.' });
     expect(az!.calls().some((c) => c.startsWith('login'))).toBe(false);
+    // With no az here either: still the token's steps, never "install Microsoft's tool".
+    process.env.PATH = pathWithoutTools(fs.mkdtempSync(path.join(tmp, 'bin-')));
+    const bare = await azureRow(bp);
+    expect(bare).toMatchObject({ state: 'not-connected', by: 'token' });
+    expect(bare.steps.map((s) => s.command)).toEqual([undefined, undefined, 'squad config set tracker']);
   });
 
   it('signed in with an account that cannot reach the organization: plain words, and Sign in again', async () => {
@@ -245,7 +253,9 @@ describe('Connections: Sign in with Microsoft through its own tool, in squad-kit
     let row = await azureRow(bp);
     expect(row).toMatchObject({ state: 'not-connected' });
     expect(row.line?.en).toBe('Signed in as sam@fabrikam.com, which has no access to contoso. Sign in with the Microsoft account that owns contoso.');
-    expect(row.actions.map((a) => a.id)).toEqual(['sign-in', 'check']);
+    // Sign in with another account, or end this one.
+    expect(row.actions.map((a) => a.id)).toEqual(['sign-in', 'disconnect', 'check']);
+    expect(row.account).toBe('sam@fabrikam.com');
     // An account from another directory: Microsoft gives no token for the organization's.
     devops.done();
     devops = fakeDevOps();
@@ -278,10 +288,79 @@ describe('Connections: Sign in with Microsoft through its own tool, in squad-kit
     const bp = project();
     devops = fakeDevOps();
     signedIn();
+    fs.writeFileSync(path.join(azFolder(), 'msal_token_cache.json'), '{"made": "up"}');
     expect((await azureRow(bp)).state).toBe('connected');
     expect((await disconnect(bp, 'azure')).line).toBe('squad-kit is signed out of Azure DevOps on this computer, as Sara Ahmed. Your other sign-ins on this computer stay as they are.');
-    expect(az!.calls()).toContain(`account clear | dir=${ownAzureFolder()} | telemetry=false`);
+    expect(az!.calls()).toContain(`account clear | dir=${azFolder()} | telemetry=false`);
+    // az's saved tokens go too, not only what az itself clears.
+    expect(fs.existsSync(azFolder())).toBe(false);
     expect((await azureRow(bp)).state).toBe('not-connected');
+  });
+
+  it('Disconnect works with az gone: the sign-in left in squad-kit’s folder is shown, and emptied', async () => {
+    const bp = project();
+    devops = fakeDevOps();
+    signedIn();
+    fs.writeFileSync(path.join(azFolder(), 'msal_token_cache.json'), '{"made": "up"}');
+    fs.writeFileSync(path.join(azFolder(), 'msal_http_cache.bin'), 'made up');
+    process.env.PATH = pathWithoutTools(fs.mkdtempSync(path.join(tmp, 'bin-')));
+    const row = await azureRow(bp);
+    expect(row).toMatchObject({ state: 'missing', account: 'sara@contoso.com' });
+    expect(row.actions.map((a) => a.id)).toEqual(['disconnect', 'check']);
+    expect((await disconnect(bp, 'azure')).line).toContain('squad-kit is signed out of Azure DevOps on this computer, as sara@contoso.com.');
+    expect(fs.existsSync(path.join(azFolder(), 'msal_token_cache.json'))).toBe(false);
+    expect(fs.existsSync(path.join(azFolder(), 'azureProfile.json'))).toBe(false);
+    expect((await azureRow(bp)).actions.map((a) => a.id)).toEqual(['check']);
+  });
+
+  it('not reaching Microsoft or Azure DevOps is never a sign-in problem, and is not asked again for a minute', async () => {
+    const bp = project();
+    devops = fakeDevOps();
+    signedIn();
+    az!.touch('offline');
+    let row = await azureRow(bp);
+    expect(row).toMatchObject({ state: 'unknown', line: { en: 'Azure DevOps or Microsoft could not be reached just now. Check the network; squad-kit asks again in a minute.' } });
+    // A failed request is answered from memory a minute: az is not started on every call.
+    const asked = () => az!.calls().filter((c) => c.startsWith('account get-access-token')).length;
+    const before = asked();
+    await expect(azureTracker.open(bp.root)!.whoAmI()).rejects.toMatchObject({ kind: 'offline' });
+    await expect(azureTracker.open(bp.root)!.whoAmI()).rejects.toMatchObject({ kind: 'offline' });
+    expect(asked()).toBe(before);
+    // A saved token with Azure DevOps out of reach: not "the token did not work".
+    vi.stubEnv('AZURE_DEVOPS_PAT', 'pat-secret');
+    devops.done();
+    devops = fakeDevOps({ offline: true });
+    row = await azureRow(bp);
+    expect(row).toMatchObject({ state: 'unknown', by: 'token' });
+    expect(row.line?.en).toContain('could not be reached just now');
+  });
+
+  it('a Microsoft token Azure DevOps refuses is dropped, and the call tried once more with a fresh one', async () => {
+    const bp = project();
+    // Azure DevOps takes only the newer token: the one kept was ended on Microsoft's side.
+    devops = fakeDevOps({ tokens: [`${MS_TOKEN}-new`] });
+    signedIn();
+    const asked = () => az!.calls().filter((c) => c.startsWith('account get-access-token')).length;
+    await microsoftToken(TENANT);
+    expect(asked()).toBe(1);
+    az!.touch('token', `${MS_TOKEN}-new`);
+    expect(await azureTracker.open(bp.root)!.whoAmI()).toBe('Sara Ahmed');
+    expect(asked()).toBe(2);
+    expect(devops.calls.filter((c) => c.auth).map((c) => c.auth)).toEqual([`Bearer ${MS_TOKEN}`, `Bearer ${MS_TOKEN}-new`]);
+    // git gets the fresh one from the same memory.
+    expect((await azureCodeHost.repoFor(bp.root, REMOTE)!.gitEnv()).GIT_CONFIG_VALUE_1).toBe(`AUTHORIZATION: bearer ${MS_TOKEN}-new`);
+  });
+
+  it('a token request on its way when the sign-in changes is never kept', async () => {
+    project();
+    signedIn();
+    az!.touch('slow');
+    const old = microsoftToken(TENANT);
+    await new Promise((r) => setTimeout(r, 200));
+    az!.touch('token', `${MS_TOKEN}-after`);
+    forgetMicrosoftTokens();
+    expect(await old).toMatchObject({ ok: true, token: `${MS_TOKEN}-after` });
+    expect(await microsoftToken(TENANT)).toMatchObject({ ok: true, token: `${MS_TOKEN}-after` });
   });
 
   it('each button is one REST call, and the board never gets the process id or the token', async () => {
@@ -311,7 +390,7 @@ describe('Azure DevOps calls and git with the Microsoft token', () => {
     expect(await tracker.whoAmI()).toBe('Sara Ahmed');
     expect(await tracker.whoAmI()).toBe('Sara Ahmed');
     const asked = () => az!.calls().filter((c) => c.startsWith('account get-access-token'));
-    expect(asked()).toEqual([`account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798 --tenant ${TENANT} --output json | dir=${ownAzureFolder()} | telemetry=false`]);
+    expect(asked()).toEqual([`account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798 --tenant ${TENANT} --output json | dir=${azFolder()} | telemetry=false`]);
     expect(devops.calls.filter((c) => c.auth).every((c) => c.auth === `Bearer ${MS_TOKEN}`)).toBe(true);
     // A token with less than five minutes left is asked for again.
     forgetMicrosoftTokens();
@@ -353,14 +432,15 @@ describe('Azure DevOps calls and git with the Microsoft token', () => {
     const err = await azureTracker.open(bp.root)!.whoAmI().catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ModuleError);
     expect(err).toMatchObject({ kind: 'sign-in', message: 'squad-kit has no Microsoft sign-in for contoso. Sign in with Microsoft again on the Connections page (squad connect azure), or paste a token in Settings.' });
+    expect(azureCodeHost.repoFor(bp.root, REMOTE)!.signInHelp).toBe('Sign in with Microsoft again on the Connections page (squad connect azure), or paste a token in Settings.');
     expect(await azureCodeHost.repoFor(bp.root, REMOTE)!.gitEnv()).toEqual({ GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'credential.https://dev.azure.com.helper', GIT_CONFIG_VALUE_0: '', GIT_TERMINAL_PROMPT: '0' });
   });
 
-  it('an organization not on Microsoft Entra: a call says it needs a token', async () => {
+  it('an organization of personal Microsoft accounts: a call says it needs a token', async () => {
     const bp = project('personal-org');
     devops = fakeDevOps({ orgs: { 'personal-org': ZEROS } });
     signedIn();
-    await expect(azureTracker.open(bp.root)!.whoAmI()).rejects.toMatchObject({ kind: 'sign-in', message: 'personal-org is not on Microsoft Entra, so it needs a token. Paste one in Settings.' });
+    await expect(azureTracker.open(bp.root)!.whoAmI()).rejects.toMatchObject({ kind: 'sign-in', message: 'This organization, personal-org, uses personal Microsoft accounts, so it needs a token. Paste one in Settings.' });
   });
 
   it('the Connections row before any project settings: connected as the Microsoft account', async () => {

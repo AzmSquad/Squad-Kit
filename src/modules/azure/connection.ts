@@ -2,18 +2,19 @@ import type { ConnectionModule, ConnectionStatus, GuideStep, Words } from '../co
 import { git } from '../../engine/git.js';
 import { ModuleError } from '../errors.js';
 import { Azure, parseAzureRemote } from './client.js';
-import { azAccounts, azVersion, forgetAzVersion } from './az.js';
+import { AZ_FOLDER, azAccounts, azVersion, forgetAzVersion, signInLeft } from './az.js';
 import { cancelMicrosoftSignIn, microsoftSignInNow, signOutOfMicrosoft, startMicrosoftSignIn } from './device-sign-in.js';
 import { azurePlace } from './sign-in.js';
 import { forgetTenants, orgTenant } from './tenant.js';
 import { azureTracker } from './tracker.js';
-import { forgetMicrosoftTokens, microsoftToken } from './token.js';
+import { bearerFor, forgetMicrosoftTokens, microsoftToken, personalOrg } from './token.js';
 
 /**
  * Azure DevOps on the Connections page (ADR-011): "Sign in with Microsoft" through Microsoft's own tool, az, kept in
- * squad-kit's own folder, with a pasted token as the other way. A token saved for the project wins. An organization not
- * on Microsoft Entra says plainly that it needs a token. What az or Azure DevOps answers is kept a minute; a tool that
- * did not answer is never taken as signed out.
+ * squad-kit's own folder, with a pasted token as the other way. A token saved for the project wins. An organization of
+ * personal Microsoft accounts says plainly that it needs a token. What az or Azure DevOps answers is kept a minute; not
+ * reaching them (offline, a proxy, an outage) is never taken as a sign-in problem, and Disconnect stays possible while a
+ * sign-in is left in squad-kit's folder, with az or without.
  */
 
 const KEEP_MS = 60_000;
@@ -52,9 +53,13 @@ function signInSteps(found: string | null, who?: string): GuideStep[] {
 const LINES = {
   tokenFailed: { en: 'The token saved in Settings did not work. Paste a new one there.', ar: 'الرمز المحفوظ في الإعدادات ما اشتغل. الصق رمز جديد هناك.' },
   personal: (org: string): Words => ({
-    en: `${org} is not on Microsoft Entra, so it needs a token. Make one on Azure DevOps and paste it in Settings.`,
-    ar: `${org} مو على Microsoft Entra، فيحتاج رمز. سوّه في Azure DevOps والصقه في الإعدادات.`,
+    en: personalOrg(org),
+    ar: `هذي المنظمة، ${org}، تستخدم حسابات Microsoft شخصية، فتحتاج رمز. الصقه في الإعدادات.`,
   }),
+  offline: {
+    en: 'Azure DevOps or Microsoft could not be reached just now. Check the network; squad-kit asks again in a minute.',
+    ar: 'ما قدرنا نوصل لـ Azure DevOps أو Microsoft الحين. تأكد من الشبكة؛ squad-kit يسأل مرة ثانية بعد دقيقة.',
+  },
   notFound: (org: string): Words => ({
     en: `squad-kit could not find the organization ${org} on Azure DevOps. Check its name in Settings.`,
     ar: `squad-kit ما لقى المنظمة ${org} في Azure DevOps. تأكد من اسمها في الإعدادات.`,
@@ -75,36 +80,48 @@ function placeOf(root: string): { organization?: string; project?: string; pat?:
   return where ? { organization: where.organization, project: where.project } : {};
 }
 
+/** Only a sign-in Azure DevOps or Microsoft refused is a sign-in problem; anything else is not reaching them. */
+const refused = (err: unknown) => err instanceof ModuleError && err.kind === 'sign-in';
+
 async function look(root: string): Promise<ConnectionStatus> {
   const { organization: org, project, pat } = placeOf(root);
   // A saved token wins: it is the person's own choice for this project.
   if (pat && org) {
-    const account = await new Azure({ organization: org, project: project ?? '', pat }).whoAmI().catch(() => null);
-    return account ? { state: 'connected', account, by: 'token', steps: TOKEN_STEPS } : { state: 'not-connected', by: 'token', line: LINES.tokenFailed, steps: TOKEN_STEPS };
+    try {
+      const account = await new Azure({ organization: org, project: project ?? '', pat }).whoAmI();
+      return { state: 'connected', account, by: 'token', steps: TOKEN_STEPS };
+    } catch (err) {
+      if (refused(err)) return { state: 'not-connected', by: 'token', line: LINES.tokenFailed, steps: TOKEN_STEPS };
+      return { state: 'unknown', by: 'token', line: LINES.offline, steps: TOKEN_STEPS };
+    }
   }
-  const found = await azVersion();
-  if (!found) return { state: 'missing', steps: signInSteps(null) };
-  const tenant = org ? await orgTenant(org) : null;
-  if (org && tenant?.kind === 'personal') return { state: 'not-connected', by: 'token', line: LINES.personal(org), steps: TOKEN_STEPS };
-  if (org && tenant?.kind === 'not-found') return { state: 'not-connected', line: LINES.notFound(org), steps: signInSteps(found) };
-  const t = await microsoftToken(tenant?.kind === 'entra' ? tenant.tenant : undefined);
+  // Disconnect stays possible while a sign-in is left in squad-kit's folder, whatever else is wrong here.
   const accounts = azAccounts();
   const who = accounts[0]?.user;
+  const mine = signInLeft() ? { account: who ?? 'Microsoft' } : {};
+  const tenant = org ? await orgTenant(org) : null;
+  // An organization of personal accounts needs a token, whatever is on this computer: its steps, never installing az.
+  if (org && tenant?.kind === 'personal') return { state: 'not-connected', by: 'token', line: LINES.personal(org), steps: TOKEN_STEPS };
+  const found = await azVersion();
+  if (!found) return { state: 'missing', ...mine, steps: signInSteps(null) };
+  if (org && tenant?.kind === 'not-found') return { state: 'not-connected', ...mine, line: LINES.notFound(org), steps: signInSteps(found) };
+  const t = await microsoftToken(tenant?.kind === 'entra' ? tenant.tenant : undefined);
   if (!t.ok) {
-    if (t.why === 'missing') return { state: 'missing', steps: signInSteps(null) };
-    if (t.why === 'no-answer') return { state: 'unknown', steps: signInSteps(found, who) };
-    if (t.why === 'signed-out' || !who) return { state: 'not-connected', steps: signInSteps(found) };
-    // Signed in, but no token for this directory: the account is not in it, or the sign-in ended.
+    if (t.why === 'missing') return { state: 'missing', ...mine, steps: signInSteps(null) };
+    if (t.why === 'no-answer') return { state: 'unknown', ...mine, line: LINES.offline, steps: signInSteps(found, who) };
+    if (t.why === 'signed-out' || !who) return { state: 'not-connected', ...mine, steps: signInSteps(found) };
+    // Signed in, but Microsoft gives no token for this directory: the account is not in it, or the sign-in ended.
     const outside = org && tenant?.kind === 'entra' && !accounts.some((a) => a.tenant.toLowerCase() === tenant.tenant);
-    return { state: 'not-connected', line: outside ? LINES.noAccess(who, org) : LINES.ended, steps: signInSteps(found) };
+    return { state: 'not-connected', ...mine, line: outside ? LINES.noAccess(who, org) : LINES.ended, steps: signInSteps(found) };
   }
   if (!org) return { state: 'connected', account: who ?? 'Microsoft', steps: signInSteps(found, who) };
   try {
-    const name = await new Azure({ organization: org, project: project ?? '', bearer: async () => t.token }).whoAmI();
+    // The token just asked for; refused, one fresh one, as for every call.
+    const name = await new Azure({ organization: org, project: project ?? '', bearer: (fresh) => (fresh ? bearerFor(org, true) : Promise.resolve(t.token)) }).whoAmI();
     return { state: 'connected', account: name, steps: signInSteps(found, who) };
   } catch (err) {
-    if (err instanceof ModuleError && err.kind === 'sign-in') return { state: 'not-connected', line: LINES.noAccess(who ?? 'Microsoft', org), steps: signInSteps(found) };
-    return { state: 'unknown', steps: signInSteps(found, who) };
+    if (refused(err)) return { state: 'not-connected', ...mine, line: LINES.noAccess(who ?? 'Microsoft', org), steps: signInSteps(found) };
+    return { state: 'unknown', ...mine, line: LINES.offline, steps: signInSteps(found, who) };
   }
 }
 
@@ -140,6 +157,7 @@ export const azureConnection: ConnectionModule = {
     },
   },
   ownSignIn: true,
+  privateFolder: AZ_FOLDER,
   can: [
     { en: 'Pull stories, move them along and file bugs', ar: 'يسحب القصص ويحرّكها ويسجّل الأخطاء' },
     { en: 'Open a pull request for each finished story', ar: 'يفتح طلب دمج لكل قصة تخلص' },

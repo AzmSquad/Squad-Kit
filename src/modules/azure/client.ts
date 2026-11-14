@@ -14,8 +14,8 @@ export interface AzureTarget {
   project: string;
   /** The person's own token, pasted in Settings. It wins over the Microsoft sign-in (ADR-011). */
   pat?: string;
-  /** squad-kit's own Microsoft sign-in instead: a fresh token for each call, kept in memory only. */
-  bearer?: () => Promise<string>;
+  /** squad-kit's own Microsoft sign-in instead, kept in memory only. `fresh`: the one kept was refused, ask anew. */
+  bearer?: (fresh?: boolean) => Promise<string>;
 }
 
 export interface WorkItemRow {
@@ -102,13 +102,13 @@ export class Azure {
   }
 
   /** The sign-in for one call: the token's, else a Microsoft token that a refused sign-in says plainly. */
-  private async auth(): Promise<string> {
-    return this.basic ?? `Bearer ${await this.target.bearer!()}`;
+  private async auth(fresh = false): Promise<string> {
+    return this.basic ?? `Bearer ${await this.target.bearer!(fresh)}`;
   }
 
-  async call<T>(method: string, url: string, body?: unknown, contentType = 'application/json'): Promise<T> {
+  async call<T>(method: string, url: string, body?: unknown, contentType = 'application/json', fresh = false): Promise<T> {
     const full = url.startsWith('http') ? url : `${this.projUrl}/${url}`;
-    const authorization = await this.auth();
+    const authorization = await this.auth(fresh);
     const sep = full.includes('?') ? '&' : '?';
     let res: Response;
     const tooLong = () => new AzureError(`Azure DevOps did not answer within ${seconds(this.timeoutMs)}. Check the network, then try again.`, undefined, 'offline');
@@ -135,22 +135,22 @@ export class Azure {
       // The exact answer is for engineers: which scope is missing, which rule said no.
       writeLog({ level: 'warn', text: `Azure DevOps said HTTP ${res.status}. ${detail}`.trim() });
       if (res.status === 401 || res.status === 403 || res.status === 302 || res.status === 203) {
+        // A Microsoft token Azure DevOps refuses (it ended early, or the account changed): once more, with a fresh one.
+        if (!this.basic && res.status === 401 && !fresh) return this.call<T>(method, url, body, contentType, true);
         if (!this.basic) throw new AzureError(res.status === 403 ? 'Azure DevOps did not allow this for your Microsoft account. An engineer can see why in the log.' : `Your Microsoft account has no access to ${this.target.organization}. Sign in with the Microsoft account that owns it on the Connections page, or paste a token in Settings.`, res.status);
         throw new AzureError('Azure DevOps did not accept the sign-in. Check it in Settings. An engineer can see why in the log.', res.status);
       }
       throw new AzureError('Azure DevOps said no to this. An engineer can see why in the log.', res.status);
     }
-    const text = await res.text().catch((err: unknown) => {
-      throw late(err) ? tooLong() : err;
-    });
+    const text = await res.text().catch((err: unknown) => Promise.reject(late(err) ? tooLong() : err));
     return (text ? JSON.parse(text) : null) as T;
   }
 
-  /** Who the token belongs to, as a connection check. */
+  /** Who the sign-in belongs to, as a connection check. Anonymous means it did not count: a sign-in problem (401). */
   async whoAmI(): Promise<string> {
     const data = await this.call<{ authenticatedUser?: { providerDisplayName?: string } }>('GET', `${this.orgUrl}/_apis/connectionData?api-version=7.1-preview`);
     const name = data?.authenticatedUser?.providerDisplayName;
-    if (!name || name === 'Anonymous') throw this.basic ? new AzureError('Azure DevOps did not accept the token.') : new AzureError(`Your Microsoft account has no access to ${this.target.organization}.`, 401);
+    if (!name || name === 'Anonymous') throw new AzureError(this.basic ? 'Azure DevOps did not accept the token.' : `Your Microsoft account has no access to ${this.target.organization}.`, 401);
     return name;
   }
 

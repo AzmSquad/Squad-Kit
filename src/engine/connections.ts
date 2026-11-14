@@ -64,10 +64,11 @@ function actionsOf(m: ConnectionModule, s: ConnectionStatus): ConnectionAction[]
   if (m.how === 'soon') return [];
   const list: ConnectionAction[] = [];
   // Only a tool that is here and signed out gets the button: missing, or not answering, the guide comes first. When the
-  // token is the way here, Settings is: no sign-in and no Disconnect.
+  // token is the way here, Settings is: no sign-in and no Disconnect. Disconnect is there while someone is signed in,
+  // connected or not (a sign-in left behind can always be ended, even with the tool gone).
   const token = s.by === 'token';
   if (m.signIn && s.state === 'not-connected' && !token) list.push({ id: 'sign-in', name: `Sign in with ${m.codePage?.name ?? m.label}`, command: `squad connect ${m.name}` });
-  if (m.signOut && s.state === 'connected' && !token) list.push({ id: 'disconnect', name: 'Disconnect', command: `squad disconnect ${m.name}` });
+  if (m.signOut && s.account && !token) list.push({ id: 'disconnect', name: 'Disconnect', command: `squad disconnect ${m.name}` });
   list.push({ id: 'check', name: 'Check again', command: 'squad connect --status' });
   return list;
 }
@@ -148,7 +149,7 @@ export async function disconnect(bp: BoardPaths, name: string): Promise<{ line: 
   m.forget?.();
   const s = await m.status(bp.root);
   if (s.by === 'token') throw new BoardActionError(`${m.label} is connected with the token saved in Settings. Change it there.`);
-  if (s.state !== 'connected' || !s.account) throw new BoardActionError(`${m.label} is not signed in on this computer.`);
+  if (!s.account) throw new BoardActionError(`${m.label} is not signed in on this computer.`);
   await m.signOut(s.account);
   m.forget?.();
   if (m.ownSignIn) return { line: `squad-kit is signed out of ${m.label} on this computer, as ${s.account}. Your other sign-ins on this computer stay as they are.` };

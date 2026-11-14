@@ -7,11 +7,11 @@ export function squadHome(): string {
 }
 
 /**
- * squad-kit's own sign-in with Microsoft's Azure tool, az, apart from the person's own `~/.azure` (ADR-011). Inside
- * squad-kit's folder, so the guard keeps it from agents too.
+ * A module's own private folder inside squad-kit's folder, named by the module: the settings of an outside tool that
+ * squad-kit signs in with on its own, apart from the person's (ADR-011). The guard keeps every one from agents.
  */
-export function ownAzureFolder(home: string = squadHome()): string {
-  return path.join(home, 'azure-cli');
+export function privateFolder(name: string, home: string = squadHome()): string {
+  return path.join(home, name);
 }
 
 /**

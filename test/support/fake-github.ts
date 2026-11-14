@@ -39,13 +39,14 @@ exit 0
 
 /** gh as this test wants it: signed in, signed out, or not on this computer at all. Its own settings folder says the same. */
 /**
- * A PATH of `dir` alone, holding git and the system's own programs but no gh anywhere, not even the test's stand-in. The
- * system folders are linked in one by one, since a CI runner keeps gh in /usr/bin (and az too: `tool` leaves that out).
+ * A PATH of `dir` alone, holding git and the system's own programs but none of `tools` anywhere, not even the test's
+ * stand-ins. The system folders are linked in one by one, since a CI runner keeps gh and az in /usr/bin: a test that
+ * left one of them there would run the runner's real tool.
  */
-export function pathWithoutGh(dir: string, tool = 'gh'): string {
+export function pathWithoutTools(dir: string, tools: string[] = ['gh', 'az']): string {
   const have = new Set(fs.readdirSync(dir));
   const link = (from: string, name: string) => {
-    if (name === tool || have.has(name)) return;
+    if (tools.includes(name) || have.has(name)) return;
     fs.symlinkSync(from, path.join(dir, name));
     have.add(name);
   };
@@ -62,7 +63,7 @@ export function fakeGh(state: 'ready' | 'signed-out' | 'missing'): () => void {
   fs.mkdirSync(process.env.GH_CONFIG_DIR);
   if (state === 'ready') fs.writeFileSync(path.join(process.env.GH_CONFIG_DIR, 'hosts.yml'), 'github.com:\n    user: me\n');
   if (state === 'missing') {
-    process.env.PATH = pathWithoutGh(dir);
+    process.env.PATH = pathWithoutTools(dir);
   } else {
     fs.writeFileSync(path.join(dir, 'gh'), ghScript(state), { mode: 0o755 });
     process.env.PATH = `${dir}${path.delimiter}${before ?? ''}`;

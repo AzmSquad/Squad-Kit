@@ -26,7 +26,7 @@ export function azurePlace(root: string): { organization?: string; project?: str
 /** The sign-in for one organization: the saved token, else the Microsoft sign-in, else none. */
 export function signInFor(organization: string, pat?: string): Pick<AzureTarget, 'pat' | 'bearer'> | null {
   if (pat) return { pat };
-  return signedInWithMicrosoft() ? { bearer: () => bearerFor(organization) } : null;
+  return signedInWithMicrosoft() ? { bearer: (fresh) => bearerFor(organization, fresh) } : null;
 }
 
 /** The Azure client for a project folder, when its tracker is Azure and it has a sign-in. */

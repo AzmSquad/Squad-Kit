@@ -30,13 +30,13 @@ export interface GuideStep {
 
 export interface ConnectionStatus {
   state: ConnectionState;
-  /** Who is signed in, when connected. */
+  /** Who is signed in: when connected, and when a sign-in that Disconnect can end is there but does not work here. */
   account?: string;
   steps: GuideStep[];
   /**
    * For a sign-in that also takes a pasted token: 'token' when the token is the way here, because one is saved (it
-   * wins), or because this place cannot sign in (an Azure DevOps organization not on Microsoft Entra). No sign-in
-   * button and no Disconnect then: the token is changed in Settings.
+   * wins), or because this place cannot sign in (an Azure DevOps organization of personal Microsoft accounts). No
+   * sign-in button and no Disconnect then: the token is changed in Settings.
    */
   by?: 'token';
   /** One plain line for this case: "Signed in as …, which has no access to …". */
@@ -89,6 +89,8 @@ export interface ConnectionModule {
    * squad-kit out.
    */
   ownSignIn?: boolean;
+  /** That sign-in's folder inside squad-kit's own (core/home.ts privateFolder), which agents never reach. */
+  privateFolder?: string;
   /** The next way to connect, shown as coming: "Sign in with Atlassian". */
   next?: Words;
   /** "owner/name" of a git remote on this tool, so the page can say what it is for. */

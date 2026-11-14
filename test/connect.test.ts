@@ -10,7 +10,8 @@ import { buildPaths } from '../src/core/paths.js';
 import { cancelSignIn, connectionsOf, disconnect, signInNow, startSignIn } from '../src/engine/connections.js';
 import { mountConnectionsApi } from '../src/console/api/connections.js';
 import { forgetGhConnect, useConnectPace } from '../src/modules/github/connect.js';
-import { fakeGitHub, pathWithoutGh, type FakeGitHub } from './support/fake-github.js';
+import { fakeGitHub, pathWithoutTools, type FakeGitHub } from './support/fake-github.js';
+import { forgetAzure } from './support/fake-azure.js';
 
 /**
  * The Connections page's GitHub row: Sign in runs GitHub's own tool, `gh auth login`, reads its one-time code and page
@@ -114,6 +115,8 @@ afterEach(() => {
   for (const v of ['GH_FORCE_TTY', 'CLICOLOR_FORCE']) delete process.env[v];
   gh?.done();
   gh = undefined;
+  // What the Azure row learned (az's version, its answer) never carries into the next test.
+  forgetAzure();
   process.env.PATH = before;
   forgetGhConnect();
   if (tmp) fs.rmSync(tmp, { recursive: true, force: true });
@@ -171,7 +174,7 @@ describe('Connections: GitHub sign-in through its own tool', () => {
   it('gh is not on this computer: the row says so with the steps and no Sign in, and a sign-in from the terminal says to install it first', async () => {
     const bp = project();
     fs.rmSync(path.join(bin, 'gh'));
-    process.env.PATH = pathWithoutGh(bin);
+    process.env.PATH = pathWithoutTools(bin);
     forgetGhConnect();
     const row = (await connectionsOf(bp)).rows[0]!;
     expect(row.state).toBe('missing');

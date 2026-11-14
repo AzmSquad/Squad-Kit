@@ -1,24 +1,33 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFile, spawn, type ChildProcess } from 'node:child_process';
-import { ownAzureFolder } from '../../core/home.js';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { privateFolder } from '../../core/home.js';
+import { OWN_GROUP, endGroup, track } from '../../engine/process-group.js';
 
 /**
  * Microsoft's own Azure tool, az, as squad-kit runs it (ADR-011): always with squad-kit's own settings folder
  * (`AZURE_CONFIG_DIR`), never the person's `~/.azure`, so squad-kit never sees or changes their other Azure sign-ins.
  * Plain, with no colors, no questions and no usage reports. On a Mac az is a small script that starts Python without
- * handing over its own process, so a stop always takes the whole group squad-kit started.
+ * handing over its own process, so az leads a process group of its own and a stop ends the whole group (then kills
+ * what is still there), as for every program squad-kit starts (engine/process-group.ts).
  */
+
+/** The name of squad-kit's own az folder inside squad-kit's folder. */
+export const AZ_FOLDER = 'azure-cli';
 
 const WINDOWS = process.platform === 'win32';
 const AZ = WINDOWS ? 'az.cmd' : 'az';
 
+export function azFolder(): string {
+  return privateFolder(AZ_FOLDER);
+}
+
 /** The environment az runs with: squad-kit's own folder, made private on first use. */
 export function azEnv(): NodeJS.ProcessEnv {
-  const dir = ownAzureFolder();
+  const dir = azFolder();
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  // Only this person may read it, whoever made it first (az itself, on the Tools page's check).
-  if (process.platform !== 'win32') fs.chmodSync(dir, 0o700);
+  // Only this person may read it, whoever made it first.
+  if (!WINDOWS) fs.chmodSync(dir, 0o700);
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     AZURE_CONFIG_DIR: dir,
@@ -32,22 +41,15 @@ export function azEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
-/** az started: in a group of its own (Mac and Linux), so a stop reaches the Python it starts too. */
+/** az started, leading its own group, and stopped with squad-kit if it still runs then. */
 export function startAz(args: string[]): ChildProcess {
   // Windows runs az's .cmd through the shell; every word squad-kit passes is a fixed flag, an id or a checked tenant.
-  return spawn(AZ, args, { env: azEnv(), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: !WINDOWS, shell: WINDOWS });
+  return track(spawn(AZ, args, { env: azEnv(), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: OWN_GROUP, shell: WINDOWS }));
 }
 
-/** Stops the az squad-kit started, by its own id: the group it leads, or its tree on Windows. */
+/** Stops the az squad-kit started and everything it started, by its own id; killed when it does not stop. */
 export function stopAz(child: ChildProcess): void {
-  const pid = child.pid;
-  if (!pid || child.exitCode !== null || child.signalCode !== null) return;
-  try {
-    if (WINDOWS) execFile('taskkill', ['/pid', String(pid), '/T', '/F'], () => undefined);
-    else process.kill(-pid, 'SIGTERM');
-  } catch {
-    // Gone already.
-  }
+  if (child.exitCode === null && child.signalCode === null) endGroup(child);
 }
 
 export interface AzRan {
@@ -115,13 +117,28 @@ export interface AzAccount {
 /** Who squad-kit's own az is signed in as, from its profile file: no az run, nothing secret read. */
 export function azAccounts(): AzAccount[] {
   try {
-    const text = fs.readFileSync(path.join(ownAzureFolder(), 'azureProfile.json'), 'utf8').replace(/^﻿/, '');
+    const text = fs.readFileSync(path.join(azFolder(), 'azureProfile.json'), 'utf8').replace(/^﻿/, '');
     const p = JSON.parse(text) as { subscriptions?: { user?: { name?: string; type?: string }; tenantId?: string; isDefault?: boolean }[] };
     const all = (p.subscriptions ?? []).filter((s) => s.user?.name && s.user.type !== 'servicePrincipal');
     return all.map((s) => ({ user: s.user!.name!, tenant: s.tenantId ?? '', default: Boolean(s.isDefault) })).sort((a, b) => Number(b.default) - Number(a.default));
   } catch {
     return [];
   }
+}
+
+/** A sign-in is left in squad-kit's folder: an account in its profile, or az's saved tokens. */
+export function signInLeft(): boolean {
+  if (azAccounts().length) return true;
+  try {
+    return fs.readdirSync(azFolder()).some((f) => /^msal_token_cache/i.test(f));
+  } catch {
+    return false;
+  }
+}
+
+/** Empties squad-kit's own az folder: its accounts and az's saved tokens. Nothing of the person's is in it. */
+export function clearAzFolder(): void {
+  fs.rmSync(azFolder(), { recursive: true, force: true });
 }
 
 /** The last line az printed, for a plain failure. az never prints a token on its error side. */
@@ -134,4 +151,12 @@ export function azLastLine(text: string): string {
       .pop()
       ?.slice(0, 200) ?? ''
   );
+}
+
+/**
+ * Whether az's failure is about the sign-in itself (not signed in, refused, ended, no access), as opposed to reaching
+ * Microsoft (offline, a proxy, an outage), which may pass by itself.
+ */
+export function signInRefused(err: string): boolean {
+  return /az login|AADSTS\d+|interactive authentication|invalid_grant|refresh token|consent|does not exist in tenant|not found in the directory|No subscription found/i.test(err);
 }

@@ -6,7 +6,7 @@ import { execSync } from 'node:child_process';
 import { azVersionOf, detectAll, type DetectHost, type Ran } from '../src/engine/tools/detect.js';
 import { kindsOf } from '../src/engine/tools/kinds.js';
 import { linesFor } from '../src/engine/tools/index.js';
-import { ownAzureFolder } from '../src/core/home.js';
+import { azFolder } from '../src/modules/azure/az.js';
 import { childEnv } from '../src/engine/agent-env.js';
 
 /**
@@ -43,12 +43,18 @@ function mac(answers: Record<string, Ran>, seen: NodeJS.ProcessEnv[], az = true)
 }
 
 describe("Microsoft's Azure tool on the Tools page", () => {
-  it("reads its version with squad-kit's own settings folder, never the person's", async () => {
+  it("reads its version with a settings folder of its own for that call, removed after: never the person's, nor squad-kit's sign-in", async () => {
     expect(azVersionOf('{\n  "azure-cli": "2.88.0",\n  "azure-cli-core": "2.88.0"\n}')).toBe('2.88.0');
     const seen: NodeJS.ProcessEnv[] = [];
     const found = await detectAll(mac({ 'az version --output json': { ok: true, out: '{"azure-cli": "2.88.0"}', err: '' } }, seen), tmp);
     expect(found.tools.az).toEqual({ state: 'found', where: '/opt/homebrew/bin/az', version: '2.88.0' });
-    expect(seen).toEqual([{ AZURE_CONFIG_DIR: ownAzureFolder(tmp), AZURE_CORE_COLLECT_TELEMETRY: 'false' }]);
+    expect(seen).toHaveLength(1);
+    const dir = seen[0]!.AZURE_CONFIG_DIR!;
+    expect(path.basename(dir)).toMatch(/^squad-az-version-/);
+    expect(dir).not.toBe(azFolder());
+    expect(dir).not.toBe(path.join(os.homedir(), '.azure'));
+    expect(fs.existsSync(dir)).toBe(false);
+    expect(seen[0]!.AZURE_CORE_COLLECT_TELEMETRY).toBe('false');
     expect((await detectAll(mac({}, [], false), tmp)).tools.az).toEqual({ state: 'missing' });
   });
 
@@ -77,7 +83,7 @@ describe('agents and the Microsoft sign-in', () => {
     try {
       const env = childEnv();
       expect(env.AZURE_CONFIG_DIR).not.toBe(process.env.AZURE_CONFIG_DIR);
-      expect(env.AZURE_CONFIG_DIR).not.toBe(ownAzureFolder());
+      expect(env.AZURE_CONFIG_DIR).not.toBe(azFolder());
       expect(fs.readdirSync(env.AZURE_CONFIG_DIR!)).toEqual([]);
       expect(env.AZURE_CONFIG_DIR).not.toBe(env.GH_CONFIG_DIR);
       expect([env.AZURE_DEVOPS_EXT_PAT, env.AZURE_DEVOPS_PAT]).toEqual([undefined, undefined]);

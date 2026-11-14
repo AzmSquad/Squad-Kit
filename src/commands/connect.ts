@@ -19,7 +19,7 @@ const STATE: Record<ConnectionRow['state'], string> = {
 export function connectionLines(rows: ConnectionRow[]): string[] {
   const lines: string[] = [];
   for (const r of rows) {
-    lines.push('', `  ${kleur.bold(r.label)}  ${STATE[r.state]}${r.account ? ` as ${r.account}` : ''}`, grey(`    ${r.what.en}`));
+    lines.push('', `  ${kleur.bold(r.label)}  ${STATE[r.state]}${r.account && r.state === 'connected' ? ` as ${r.account}` : ''}`, grey(`    ${r.what.en}`));
     if (r.for) lines.push(`    For ${r.for.repo}${r.for.into && r.for.into !== r.for.repo ? `: pull requests into ${r.for.into}` : ''}`);
     if (r.line) lines.push(`    ${r.line.en}`);
     if (r.state !== 'connected') r.steps.forEach((s, i) => lines.push(`    ${i + 1}. ${s.text.en}${s.command ? `: ${kleur.green(s.command)}` : ''}${s.done ? grey(` (${s.done.en})`) : ''}`));
@@ -41,31 +41,41 @@ export async function runConnect(name: string | undefined, opts: { status?: bool
     out();
     return;
   }
-  const f = await startSignIn(bp, name);
-  if (f.state === 'failed') throw new Error(f.line ?? 'The sign-in did not start.');
-  out();
-  // The tool's page says what to press: Authorize on GitHub, Continue on Microsoft's.
-  const page = connectionInfo(name).codePage;
-  out(`  Open ${kleur.underline(f.url ?? '')} and type this code, then ${page ? page.then.en : 'press Authorize'}:`);
-  out();
-  out(`      ${kleur.bold(f.code ?? '')}`);
-  out();
+  // Ctrl-C stops the tool's sign-in from the start, also while it is still getting its code: the tool leads its own
+  // group, so it would not stop with this terminal by itself.
   const stop = () => {
-    cancelSignIn(name);
+    try {
+      cancelSignIn(name);
+    } catch {
+      // Nothing was started yet.
+    }
     out();
     ui.info('Cancelled. Nothing changed.');
     process.exit(130);
   };
   process.once('SIGINT', stop);
-  const spin = ui.spinner('Waiting for you to approve it…');
-  let now = signInNow(name);
+  let now: ReturnType<typeof signInNow>;
   try {
-    while (now?.state === 'waiting') {
-      await wait(1000);
-      now = signInNow(name);
+    const f = await startSignIn(bp, name);
+    if (f.state === 'failed') throw new Error(f.line ?? 'The sign-in did not start.');
+    out();
+    // The tool's page says what to press: Authorize on GitHub, Continue on Microsoft's.
+    const page = connectionInfo(name).codePage;
+    out(`  Open ${kleur.underline(f.url ?? '')} and type this code, then ${page ? page.then.en : 'press Authorize'}:`);
+    out();
+    out(`      ${kleur.bold(f.code ?? '')}`);
+    out();
+    const spin = ui.spinner('Waiting for you to approve it…');
+    now = signInNow(name);
+    try {
+      while (now?.state === 'waiting') {
+        await wait(1000);
+        now = signInNow(name);
+      }
+    } finally {
+      spin.stop();
     }
   } finally {
-    spin.stop();
     process.off('SIGINT', stop);
   }
   if (now?.state !== 'done') throw new Error(now?.line ?? 'The sign-in did not finish.');

@@ -55,6 +55,11 @@ export function connectionModule(name: string): ConnectionModule | undefined {
   return CONNECTIONS.find((m) => m.name === name);
 }
 
+/** The folders inside squad-kit's own where a connection keeps its own sign-in: hidden from every agent. */
+export function privateFolders(): string[] {
+  return CONNECTIONS.flatMap((m) => (m.privateFolder ? [m.privateFolder] : []));
+}
+
 /** The tracker set up for the project, when it has a module and a saved sign-in. */
 export function trackerFor(bp: BoardPaths): Tracker | null {
   const root = rootOf(bp);

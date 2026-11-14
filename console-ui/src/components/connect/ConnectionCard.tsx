@@ -59,7 +59,7 @@ function Guide({ row, lang, open, onCheck, checking }: { row: ConnectionRow; lan
             </button>
             <Cmd text="squad connect --status" />
           </div>
-          {row.by !== 'token' && <p className="gh-small">{w.stepFoot(row.codePage?.name ?? row.label, row.label)}</p>}
+          {row.by !== 'token' && <p className="gh-small">{row.ownSignIn ? w.ownFoot(row.codePage?.name ?? row.label) : w.stepFoot(row.codePage?.name ?? row.label, row.label)}</p>}
         </>
       )}
     </details>
@@ -190,6 +190,12 @@ export function ConnectionCard({ row, at, lang, onSignIn, onCheck, checking }: {
             <div className="gh-row">
               <button className="btn pri" onClick={onSignIn}>{w.code.head(row.codePage?.name ?? row.label)}</button>
               <Cmd text={signIn.command} />
+            </div>
+          )}
+          {/* A sign-in left behind that does not work here (no access, its tool gone) can still be ended. */}
+          {row.actions.some((a) => a.id === 'disconnect') && (
+            <div className="gh-row">
+              <button className="btn sm" onClick={() => setOff(true)}>{w.disconnect}</button>
             </div>
           )}
           {/* A sign-in that also takes a token: the token is the way here, or the other way. */}

@@ -5,8 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import type { BoardPaths } from '../board/store.js';
 import type { ProjectGuard } from '../board/types.js';
-import { AI_TOOLS, BROWSERS } from '../modules/registry.js';
-import { ownAzureFolder, squadHome, squadHomes } from '../core/home.js';
+import { AI_TOOLS, BROWSERS, privateFolders } from '../modules/registry.js';
+import { privateFolder, squadHome, squadHomes } from '../core/home.js';
 import { childEnv, noToolSignIn } from './agent-env.js';
 import { copyDbEnv } from './db-env.js';
 import { partEnv } from './part-env.js';
@@ -232,10 +232,10 @@ export function privatePlaces(home: string, platform: NodeJS.Platform): string[]
 /**
  * What no agent may read or change, wherever it works. The sandbox covers a step's shell commands only, and read-only
  * agents have none, so their file tools need this too. squad-kit's own folder holds what agents must read, so only its
- * secrets are named: the sign-ins and link tokens of the app and of every project, and its own Microsoft sign-in.
+ * secrets are named: the sign-ins and link tokens of the app and of every project, and the connections' own sign-ins.
  */
 export function agentPrivatePlaces(home: string = os.homedir(), platform: NodeJS.Platform = process.platform): string[] {
-  return [...privatePlaces(home, platform), ...squadHomes(home).flatMap((own) => [...['secrets.yaml', 'app.json', 'console.json'].map((f) => path.join(own, f)), ...['secrets.yaml', 'console.json'].map((f) => path.join(own, 'projects', '*', f)), ownAzureFolder(own)])];
+  return [...privatePlaces(home, platform), ...squadHomes(home).flatMap((own) => [...['secrets.yaml', 'app.json', 'console.json'].map((f) => path.join(own, f)), ...['secrets.yaml', 'console.json'].map((f) => path.join(own, 'projects', '*', f)), ...privateFolders().map((f) => privateFolder(f, own))])];
 }
 
 /**

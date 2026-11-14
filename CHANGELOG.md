@@ -16,8 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **squad-kit keeps its own Microsoft sign-in,** apart from yours: it never reads or changes your other Azure sign-ins
   on this computer, and Disconnect signs out squad-kit only. The token stays in memory and is never written down.
 - **Plain words for each case:** Microsoft's tool not installed (with the steps, and a line on the Tools page), an
-  account that cannot reach the organization ("Sign in with the Microsoft account that owns it"), and an organization
-  that is not on Microsoft Entra, which needs a token.
+  account that cannot reach the organization ("Sign in with the Microsoft account that owns it"), an organization that
+  uses personal Microsoft accounts, which needs a token, and a network that cannot reach Microsoft just now (never taken
+  as a sign-in problem). Disconnect works even with Microsoft's tool gone, and leaves nothing of the sign-in behind.
 
 ## [1.3.21] — 2026-11-13
 

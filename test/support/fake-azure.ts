@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { vi } from 'vitest';
-import { ownAzureFolder } from '../../src/core/home.js';
+import { azFolder } from '../../src/modules/azure/az.js';
 import { azureConnection } from '../../src/modules/azure/connection.js';
 import { forgetMicrosoftFlow } from '../../src/modules/azure/device-sign-in.js';
 
@@ -28,8 +28,10 @@ case "$1 $2" in
   "account get-access-token")
     if [ ! -f "$P" ]; then echo "ERROR: Please run 'az login' to setup account." >&2; exit 1; fi
     if [ -f "$D/refuse" ]; then echo "ERROR: AADSTS50020: User account from identity provider does not exist in tenant." >&2; exit 1; fi
+    if [ -f "$D/offline" ]; then echo "ERROR: HTTPSConnectionPool(host='login.microsoftonline.com', port=443): Max retries exceeded (Failed to establish a new connection)" >&2; exit 1; fi
+    if [ -f "$D/slow" ]; then sleep 1; fi
     E=$(( $(date +%s) + $(cat "$D/life" 2>/dev/null || echo 3600) ))
-    printf '{\\n  "accessToken": "%s",\\n  "expiresOn": "2026-11-14 01:30:00.000000",\\n  "expires_on": %s,\\n  "tokenType": "Bearer"\\n}\\n' "${MS_TOKEN}" "$E"
+    printf '{\\n  "accessToken": "%s",\\n  "expiresOn": "2026-11-14 01:30:00.000000",\\n  "expires_on": %s,\\n  "tokenType": "Bearer"\\n}\\n' "$(cat "$D/token" 2>/dev/null || echo ${MS_TOKEN})" "$E"
     exit 0;;
   "account clear") rm -f "$P"; exit 0;;
   "login --use-device-code")
@@ -50,16 +52,16 @@ export interface FakeAz {
   bin: string;
   /** Every az run: its words, the settings folder it was given, and whether it reports usage. */
   calls(): string[];
-  /** Puts a file the made-up az reads: approve, refuse, silent, decline, life. */
+  /** Puts a file the made-up az reads: approve, refuse, offline, slow, silent, decline, life, token. */
   touch(name: string, text?: string): void;
   done(): void;
 }
 
 /** squad-kit as already signed in with Microsoft: its own az profile, in squad-kit's own folder. */
 export function signedIn(tenant = TENANT, user = 'sara@contoso.com'): void {
-  fs.mkdirSync(ownAzureFolder(), { recursive: true });
+  fs.mkdirSync(azFolder(), { recursive: true });
   const profile = { installationId: 'x', subscriptions: [{ id: tenant, name: 'N/A(tenant level account)', user: { name: user, type: 'user' }, isDefault: true, tenantId: tenant }] };
-  fs.writeFileSync(path.join(ownAzureFolder(), 'azureProfile.json'), `﻿${JSON.stringify(profile)}`);
+  fs.writeFileSync(path.join(azFolder(), 'azureProfile.json'), `﻿${JSON.stringify(profile)}`);
 }
 
 /** Every bit of Microsoft sign-in state squad-kit keeps in memory, forgotten. */
@@ -84,7 +86,7 @@ export function fakeAz(): FakeAz {
     done: () => {
       process.env.PATH = before;
       forgetAzure();
-      fs.rmSync(ownAzureFolder(), { recursive: true, force: true });
+      fs.rmSync(azFolder(), { recursive: true, force: true });
       fs.rmSync(bin, { recursive: true, force: true });
     },
   };
@@ -100,7 +102,7 @@ export interface DevOpsCall {
  * (as the real one does for a HEAD of its address), its connectionData with the person's name for the made-up Microsoft token or any token, and
  * anything else with `answer` or a 404. `access: false`: the Microsoft account is not in the organization.
  */
-export function fakeDevOps(o: { orgs?: Record<string, string>; access?: boolean; answer?: (c: DevOpsCall) => unknown } = {}) {
+export function fakeDevOps(o: { orgs?: Record<string, string>; access?: boolean; tokens?: string[]; offline?: boolean; answer?: (c: DevOpsCall) => unknown } = {}) {
   const orgs = o.orgs ?? { contoso: TENANT };
   const calls: DevOpsCall[] = [];
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -111,11 +113,12 @@ export function fakeDevOps(o: { orgs?: Record<string, string>; access?: boolean;
     if (u.host !== 'dev.azure.com') throw new Error(`Not a call to the fake Azure DevOps: ${url}`);
     const c: DevOpsCall = { url, ...(auth ? { auth } : {}) };
     calls.push(c);
+    if (o.offline) throw new TypeError('fetch failed');
     const tenant = orgs[decodeURIComponent(u.pathname.split('/')[1] ?? '')];
     if (!tenant) return new Response('', { status: 404 });
     // The organization's own address, with no sign-in: 401 and its directory, as the real one answers a HEAD.
     if (!auth) return new Response(null, { status: 401, headers: { 'x-vss-resourcetenant': tenant, 'www-authenticate': `Bearer authorization_uri=https://login.microsoftonline.com/${tenant}` } });
-    const known = auth === `Bearer ${MS_TOKEN}` ? o.access !== false : auth.startsWith('Basic ');
+    const known = auth.startsWith('Bearer ') ? (o.tokens ?? [MS_TOKEN]).includes(auth.slice(7)) && o.access !== false : auth.startsWith('Basic ');
     if (!known) return new Response('', { status: 401 });
     if (u.pathname.endsWith('/_apis/connectionData')) return json({ authenticatedUser: { providerDisplayName: auth.startsWith('Basic ') ? 'Sara (token)' : 'Sara Ahmed' } });
     const a = o.answer?.(c);

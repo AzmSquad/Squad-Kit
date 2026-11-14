@@ -12,12 +12,18 @@ export class AzureRepo implements RepoHost {
   readonly host = 'azure';
   readonly label = 'Azure Repos';
   readonly abilities = { attachImages: true };
+  /** What to do when Azure DevOps refuses the sign-in: the token in Settings, or Microsoft's sign-in on Connections. */
+  readonly signInHelp: string;
 
   constructor(
     private readonly az: Azure,
     readonly repo: string,
     private readonly remoteUrl: string,
-  ) {}
+  ) {
+    this.signInHelp = az.target.pat
+      ? 'Check the sign-in in Settings.'
+      : 'Sign in with Microsoft again on the Connections page (squad connect azure), or paste a token in Settings.';
+  }
 
   gitEnv(): Promise<Record<string, string>> {
     return gitAuthEnv(this.az.target, this.remoteUrl);

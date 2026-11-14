@@ -1,8 +1,8 @@
 import type { ChildProcess } from 'node:child_process';
 import type { SignInFlow } from '../connection/types.js';
-import { azAccounts, azLastLine, runAz, startAz, stopAz } from './az.js';
+import { azAccounts, azLastLine, clearAzFolder, runAz, startAz, stopAz } from './az.js';
 import { orgTenant } from './tenant.js';
-import { forgetMicrosoftTokens } from './token.js';
+import { forgetMicrosoftTokens, personalOrg } from './token.js';
 
 /**
  * "Sign in with Microsoft": runs Microsoft's own tool, `az login --use-device-code`, with squad-kit's own settings
@@ -39,14 +39,9 @@ const shown = (f: Running): SignInFlow => {
 
 const alive = (c?: ChildProcess) => Boolean(c && c.exitCode === null && c.signalCode === null);
 
-/** squad-kit stops: the az it started stops with it. */
-const stopWithUs = () => {
-  if (flow?.child) stopAz(flow.child);
-};
-
 /**
- * Starts the sign-in for this organization (or for any, when none is set yet). An organization that is not on
- * Microsoft Entra cannot sign in this way: it fails at once, in plain words, before az starts.
+ * Starts the sign-in for this organization (or for any, when none is set yet). An organization of personal Microsoft
+ * accounts cannot sign in this way: it fails at once, in plain words, before az starts.
  */
 export function startMicrosoftSignIn(org: string | undefined, done: () => void): Promise<SignInFlow> {
   if (starting) return starting;
@@ -57,7 +52,7 @@ export function startMicrosoftSignIn(org: string | undefined, done: () => void):
     .then((t) => {
       if (f.state !== 'waiting') return shown(f);
       if (t?.kind === 'personal') {
-        Object.assign(f, { state: 'failed', line: `${org} is not on Microsoft Entra, so Sign in with Microsoft cannot reach it. Use a token instead: paste one in Settings.` });
+        Object.assign(f, { state: 'failed', line: `${personalOrg(org!)} Sign in with Microsoft cannot reach it.` });
         return shown(f);
       }
       return run(f, ['login', '--use-device-code', '--allow-no-subscriptions', ...(t?.kind === 'entra' ? ['--tenant', t.tenant] : []), '--output', 'none'], done);
@@ -87,9 +82,9 @@ function run(f: Running, args: string[], done: () => void): Promise<SignInFlow> 
       return;
     }
     child.stdin?.end();
+    // squad-kit stopping stops this az too (engine/process-group.ts track).
     f.child = child;
     f.pid = child.pid;
-    process.once('exit', stopWithUs);
     timer = setTimeout(() => {
       if (f.code) return;
       stopAz(child);
@@ -119,7 +114,6 @@ function run(f: Running, args: string[], done: () => void): Promise<SignInFlow> 
     });
     child.on('close', (code) => {
       clearTimeout(life);
-      process.removeListener('exit', stopWithUs);
       forgetMicrosoftTokens();
       done();
       if (f.state !== 'waiting') return settle();
@@ -151,15 +145,14 @@ export function microsoftSignInNow(): SignInFlow | null {
 }
 
 /**
- * Signs squad-kit out of Microsoft: every account in squad-kit's own az folder. The person's own az sign-ins, in their
- * own folder, are never touched.
+ * Signs squad-kit out of Microsoft: az clears its accounts when it is here, then squad-kit's own az folder is emptied
+ * all the same, saved tokens too, so a missing or stuck az never leaves a sign-in behind. The person's own az sign-ins,
+ * in their own folder, are never touched.
  */
 export async function signOutOfMicrosoft(): Promise<void> {
-  const a = await runAz(['account', 'clear'], 30_000);
+  await runAz(['account', 'clear'], 30_000);
+  clearAzFolder();
   forgetMicrosoftTokens();
-  if (a === 'missing') throw new Error("Microsoft's Azure tool, az, is not on this computer, so there is nothing to sign out of.");
-  if (a === 'no-answer') throw new Error("Microsoft's tool did not answer. Try again in a moment.");
-  if (a.code !== 0) throw new Error(`Microsoft's tool did not sign out: ${azLastLine(a.err) || 'no reason given'}`);
 }
 
 /** A test starts afresh. */

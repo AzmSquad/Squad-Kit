@@ -11,8 +11,12 @@ export type OrgTenant = { kind: 'entra'; tenant: string } | { kind: 'personal' }
 
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ZERO = '00000000-0000-0000-0000-000000000000';
-/** A directory never moves: an answer is kept an hour. Not reaching Azure DevOps is never kept. */
+/**
+ * A directory never moves: an answer is kept an hour. Not reaching Azure DevOps is kept a minute, so being offline does
+ * not wait 15 seconds on every call.
+ */
 const KEEP_MS = 3_600_000;
+const NO_ANSWER_MS = 60_000;
 
 const kept = new Map<string, { at: number; t: OrgTenant }>();
 
@@ -31,7 +35,7 @@ function fromHeaders(h: Headers): OrgTenant | null {
 export async function orgTenant(org: string, http: typeof fetch = fetch): Promise<OrgTenant> {
   const key = org.toLowerCase();
   const was = kept.get(key);
-  if (was && Date.now() - was.at < KEEP_MS) return was.t;
+  if (was && Date.now() - was.at < (was.t.kind === 'no-answer' ? NO_ANSWER_MS : KEEP_MS)) return was.t;
   let t: OrgTenant;
   try {
     const res = await http(`https://dev.azure.com/${encodeURIComponent(org)}`, {
@@ -46,7 +50,7 @@ export async function orgTenant(org: string, http: typeof fetch = fetch): Promis
   } catch {
     t = { kind: 'no-answer' };
   }
-  if (t.kind !== 'no-answer') kept.set(key, { at: Date.now(), t });
+  kept.set(key, { at: Date.now(), t });
   return t;
 }
 

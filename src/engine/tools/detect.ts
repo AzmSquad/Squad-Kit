@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ownAzureFolder, squadHome } from '../../core/home.js';
+import { squadHome } from '../../core/home.js';
 import { CATALOG, OWN_SOURCES, type ManagedBy, type System, type ToolId } from './catalog.js';
 import { compareVersions } from './fit.js';
 import { mergePath, readLoginPath } from './login-path.js';
@@ -400,14 +400,19 @@ export function azVersionOf(text: string): string | null {
 }
 
 /**
- * Microsoft's Azure tool. Asked with squad-kit's own settings folder, never the person's ~/.azure (ADR-011). Whether
- * squad-kit is signed in with it is the Connections page's to say.
+ * Microsoft's Azure tool. Its version is asked with a settings folder of its own for that one call, removed after: never
+ * the person's ~/.azure, nor squad-kit's own sign-in (ADR-011). Whether squad-kit is signed in is the Connections page's.
  */
-async function az(h: DetectHost, home: string): Promise<Found> {
+async function az(h: DetectHost): Promise<Found> {
   const bin = onPath(h, 'az');
   if (!bin) return missing();
-  const version = azVersionOf((await h.run(bin, ['version', '--output', 'json'], { timeoutMs: 20_000, env: { AZURE_CONFIG_DIR: ownAzureFolder(home), AZURE_CORE_COLLECT_TELEMETRY: 'false' } })).out);
-  return { state: 'found', where: bin, ...(version ? { version } : {}) };
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-az-version-'));
+  try {
+    const version = azVersionOf((await h.run(bin, ['version', '--output', 'json'], { timeoutMs: 20_000, env: { AZURE_CONFIG_DIR: dir, AZURE_CORE_COLLECT_TELEMETRY: 'false' } })).out);
+    return { state: 'found', where: bin, ...(version ? { version } : {}) };
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 /**
@@ -442,7 +447,7 @@ export async function detectAll(h: DetectHost = realHost(), home = squadHome()):
     safe('android-studio', () => androidStudio(h)),
     safe('docker', () => docker(h)),
     safe('gh', () => gh(h)),
-    safe('az', () => az(h, home)),
+    safe('az', () => az(h)),
   ]);
   return { at: new Date().toISOString(), system: h.system, tools: Object.fromEntries([x, ...found]) };
 }
