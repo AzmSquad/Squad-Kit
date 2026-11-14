@@ -39,7 +39,7 @@ export const SCOPES = [
  * before the file is read again (another squad-kit may have just written a newer one). lockWaitMs: how long a refresh
  * waits for another one on this computer to finish.
  */
-const PACE = { lifeMs: 15 * 60_000, settleMs: 1000, lockWaitMs: 35_000 };
+const PACE = { lifeMs: 15 * 60_000, settleMs: 1000, lockWaitMs: 75_000 };
 type Pace = typeof PACE;
 
 let app: { clientId: string; fetch?: typeof fetch; pace: Pace } = { clientId: CLIENT_ID, pace: PACE };

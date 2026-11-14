@@ -2,7 +2,8 @@
 //
 // Atlassian's OAuth 2.0 (3LO) asks for the app's client secret on every code exchange and every refresh, and a secret
 // cannot ship inside an npm package. This Worker keeps the secret, adds it, and passes Atlassian's answer straight back
-// to squad-kit on the person's computer. It stores nothing and logs nothing: no code, no token, no body.
+// to squad-kit on the person's computer. It keeps no code and no token, and logs nothing; Cloudflare counts requests per
+// address for about a minute, to stop abuse.
 
 const ATLASSIAN_TOKEN = 'https://auth.atlassian.com/oauth/token';
 /** The one address Atlassian sends the person back to, as registered for squad-kit's app. */
@@ -106,10 +107,14 @@ async function exchange(request, env, grant) {
   if (request.headers.has('origin')) return refuse(403, 'invalid_request', 'Only squad-kit on your computer calls this.');
   if (!env.ATLASSIAN_CLIENT_ID || env.ATLASSIAN_CLIENT_ID === NOT_SET || !env.ATLASSIAN_CLIENT_SECRET) return refuse(500, 'server_error', 'The sign-in helper is not set up yet.');
   // About 30 a minute from one address (Cloudflare's rate limiting binding, per location); a refresh is once an hour.
-  if (env.TOKEN_LIMIT) {
-    const { success } = await env.TOKEN_LIMIT.limit({ key: request.headers.get('cf-connecting-ip') ?? 'unknown' });
-    if (!success) return refuse(429, 'slow_down', 'Too many sign-in requests from this address. Wait a minute, then try again.');
+  // The limit failing on Cloudflare's side never stops a sign-in: it fails open.
+  let allowed = true;
+  try {
+    if (env.TOKEN_LIMIT) allowed = (await env.TOKEN_LIMIT.limit({ key: request.headers.get('cf-connecting-ip') ?? 'unknown' })).success !== false;
+  } catch {
+    allowed = true;
   }
+  if (!allowed) return refuse(429, 'slow_down', 'Too many sign-in requests from this address. Wait a minute, then try again.');
   if (!/^application\/json\b/i.test(request.headers.get('content-type') ?? '')) return refuse(415, 'invalid_request', 'Send JSON.');
   const text = await capped(request);
   if (text === null) return refuse(413, 'invalid_request', 'The request is too big.');

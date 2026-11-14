@@ -1,18 +1,22 @@
 import { ModuleError } from '../errors.js';
 import { atlassianReady } from './atlassian-app.js';
-import { refreshAtlassian, type Refreshed } from './atlassian-refresh.js';
-import { hostOf, readAtlassianSignIn, type AtlassianSite } from './atlassian-store.js';
+import { refreshAtlassian, saveAtlassianPair, unsavedAtlassianPair, type Refreshed } from './atlassian-refresh.js';
+import { hostOf, readAtlassianEnded, readAtlassianSignIn, type AtlassianSite, type EndedWhy } from './atlassian-store.js';
 import { forgetMissingScopes, type AtlassianCloud } from './client.js';
 
 /**
  * The access token of squad-kit's Atlassian sign-in (ADR-012): in memory only, asked anew a few minutes before it ends
- * (about once an hour) through atlassian-refresh.ts. Every caller shares one refresh on its way, and Check again never
- * starts a second one. The token belongs to the sign-in it came with: once the file holds another sign-in (a Disconnect,
+ * (about once an hour) through atlassian-refresh.ts. In those last minutes callers keep the token they have while the
+ * refresh runs behind them; only a token really at its end makes them wait. Every caller shares one refresh on its way,
+ * and Check again never starts a second one. The token belongs to the sign-in it came with: once the file holds another sign-in (a Disconnect,
  * a new sign-in in a terminal), it is dropped. Not reaching the helper or Atlassian is remembered a minute and never
  * signs out; Atlassian's own no does, in plain words.
  */
 
+/** A refresh starts this long before the token ends, behind the callers. */
 const EARLY_MS = 5 * 60_000;
+/** Closer to its end than this, a token is not handed out: the caller waits for the new one. */
+const LAST_MS = 30_000;
 const FAILED_MS = 60_000;
 /** A token Atlassian gave this recently is as new as it gets: a refusal then is about access, not age. */
 const FRESH_MS = 60_000;
@@ -27,26 +31,35 @@ let failed: { at: number; answer: Failed } | null = null;
 let asking: Promise<AtlassianAnswer> | null = null;
 /** Moves on with every sign-in and sign-out here: a refresh begun before is never kept. Check again does not move it. */
 let generation = 0;
-/** Atlassian ended the sign-in: said on the Connections page until the next sign-in or Disconnect. */
-let ended = false;
 
 /** A token Atlassian gave at sign-in, kept in memory for that sign-in until a few minutes before it ends. */
 export function keepAccess(token: string, expiresIn: number | undefined, signIn: string): void {
   generation++;
-  ended = false;
   failed = null;
   forgetMissingScopes();
   const now = Date.now();
   access = { token, until: now + (Number(expiresIn) > 0 ? Number(expiresIn) : 3600) * 1000, at: now, signIn };
 }
 
-/** The access token: from memory while it has more than a few minutes left, else one refresh shared by every caller. */
+/** The access token: from memory while it lasts, else one refresh shared by every caller. */
 export function atlassianToken(): Promise<AtlassianAnswer> {
+  // A new pair that could not be written before: written now, behind the caller.
+  if (unsavedAtlassianPair()) void saveAtlassianPair();
   // A token of another sign-in than the file's (a Disconnect, a new sign-in in a terminal) is never used.
   if (access && readAtlassianSignIn()?.signIn !== access.signIn) access = null;
-  if (access && Date.now() < access.until - EARLY_MS) return Promise.resolve({ ok: true, token: access.token });
+  const left = access ? access.until - Date.now() : 0;
+  if (access && left > EARLY_MS) return Promise.resolve({ ok: true, token: access.token });
+  // In its last minutes: the token still works, and the new one comes behind the caller.
+  if (access && left > LAST_MS) {
+    if (!asking && !(failed && Date.now() - failed.at < FAILED_MS)) void refresh();
+    return Promise.resolve({ ok: true, token: access.token });
+  }
   if (failed && Date.now() - failed.at < FAILED_MS) return Promise.resolve(failed.answer);
-  if (asking) return asking;
+  return asking ?? refresh();
+}
+
+/** The one refresh on its way, shared by every caller until it ends. */
+function refresh(): Promise<AtlassianAnswer> {
   const asked = generation;
   const answer: Promise<AtlassianAnswer> = refreshAtlassian(() => asked === generation)
     .catch((): Refreshed => ({ ok: false, why: 'no-answer' }))
@@ -58,11 +71,10 @@ export function atlassianToken(): Promise<AtlassianAnswer> {
         access = { token: a.token, until: a.until, at: Date.now(), signIn: a.signIn };
         return { ok: true, token: a.token };
       }
-      if (a.why === 'ended') ended = true;
       // Signed out or ended is never remembered: the file says so at once, and a new sign-in shows straight away.
       if (a.why === 'no-answer') failed = { at: Date.now(), answer: { ok: false, why: 'no-answer' } };
-      // Signed out by Atlassian earlier: said as that until the next sign-in or Disconnect.
-      return { ok: false, why: a.why === 'stale' ? 'no-answer' : a.why === 'signed-out' && ended ? 'ended' : a.why };
+      // Ended by Atlassian, here or in another squad-kit on this computer: its marker says so.
+      return { ok: false, why: a.why === 'stale' ? 'no-answer' : a.why === 'signed-out' && readAtlassianEnded() ? 'ended' : a.why };
     });
   asking = answer;
   return answer;
@@ -91,22 +103,24 @@ export function forgetAtlassianFailure(): void {
   failed = null;
 }
 
-/** Disconnect: the person chose it, so nothing is said about an ended sign-in. */
-export function forgetAtlassianEnded(): void {
-  ended = false;
-}
-
-/** Atlassian ended squad-kit's sign-in since this squad-kit started. */
-export function atlassianEnded(): boolean {
-  return ended && !readAtlassianSignIn();
+/** Why Atlassian ended squad-kit's sign-in on this computer (here or in another squad-kit), until a sign-in or Disconnect. */
+export function atlassianEnded(): EndedWhy | null {
+  return readAtlassianEnded()?.why ?? null;
 }
 
 const AGAIN = 'Sign in with Atlassian on the Connections page (squad connect jira), or paste an API token in Settings.';
 
+/** Why the sign-in ended, in plain words: the reason only. */
+export function endedReason(why: EndedWhy | null): string {
+  return why === 'lost'
+    ? "squad-kit lost Atlassian's answer while renewing your sign-in, so Atlassian no longer takes it."
+    : "Atlassian ended squad-kit's sign-in: it was not used for 90 days, or it was removed under Connected apps.";
+}
+
 /** The words for a call that has no token, by why. */
 function noToken(why: Failed['why']): ModuleError {
   if (why === 'no-answer') return new ModuleError("Atlassian's sign-in could not be reached just now. Check the network; squad-kit tries again in a moment.", 'offline');
-  if (why === 'ended') return new ModuleError(`Atlassian ended squad-kit's sign-in: it was not used for 90 days, or it was removed. ${AGAIN}`, 'sign-in');
+  if (why === 'ended') return new ModuleError(`${endedReason(atlassianEnded())} ${AGAIN}`, 'sign-in');
   return new ModuleError(`squad-kit is not signed in with Atlassian. ${AGAIN}`, 'sign-in');
 }
 

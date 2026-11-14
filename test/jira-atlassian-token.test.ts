@@ -43,10 +43,10 @@ function project(token = false): string {
   return tmp;
 }
 
-afterEach(() => {
+afterEach(async () => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
-  signOutOfAtlassian();
+  await signOutOfAtlassian();
   forgetAtlassianTokens();
   useAtlassianApp(null);
   if (tmp) fs.rmSync(tmp, { recursive: true, force: true });
@@ -56,13 +56,29 @@ afterEach(() => {
 const refreshes = () => fake.calls.filter((c) => c.url.endsWith('/atlassian/refresh'));
 
 describe('the access token', () => {
-  it('is asked anew a few minutes before it ends, through the helper; the new refresh token is on disk first', async () => {
+  it('a token at its end is asked anew through the helper, and the new refresh token is on disk first', async () => {
     use(fakeAtlassian());
-    signedIn(200);
+    signedIn(1);
     expect(await atlassianToken()).toEqual({ ok: true, token: 'at-2' });
     expect(refreshes().map((c) => c.body)).toEqual([{ refresh_token: 'rt-1' }]);
     expect(readAtlassianSignIn()).toMatchObject({ refreshToken: 'rt-2', account: { name: 'Sara Ali' }, site: CLOUD });
+    expect(readAtlassianSignIn()?.renewing).toBeUndefined();
     // Then from memory for the hour.
+    expect(await atlassianToken()).toEqual({ ok: true, token: 'at-2' });
+    expect(refreshes()).toHaveLength(1);
+  });
+
+  it('in its last minutes the token is still handed out at once, and the new one comes behind the caller', async () => {
+    use(fakeAtlassian());
+    signedIn(200);
+    let go = () => undefined as void;
+    fake.gate = new Promise<void>((r) => (go = r));
+    expect(await atlassianToken()).toEqual({ ok: true, token: 'at-1' });
+    expect(await atlassianToken()).toEqual({ ok: true, token: 'at-1' });
+    await vi.waitFor(() => expect(refreshes()).toHaveLength(1));
+    fake.gate = undefined;
+    go();
+    await vi.waitFor(() => expect(readAtlassianSignIn()?.refreshToken).toBe('rt-2'));
     expect(await atlassianToken()).toEqual({ ok: true, token: 'at-2' });
     expect(refreshes()).toHaveLength(1);
   });
@@ -82,7 +98,7 @@ describe('the access token', () => {
     fake.revoked = true;
     expect(await atlassianToken()).toEqual({ ok: false, why: 'ended' });
     expect(readAtlassianSignIn()).toBeNull();
-    expect(atlassianEnded()).toBe(true);
+    expect(atlassianEnded()).toBe('refused');
     expect(await atlassianToken()).toEqual({ ok: false, why: 'ended' });
   });
 
@@ -109,12 +125,17 @@ describe('the access token', () => {
     expect(await atlassianToken()).toEqual({ ok: false, why: 'no-answer' });
     expect(readAtlassianSignIn()?.refreshToken).toBe('rt-1');
     forgetAtlassianFailure();
+    // A Disconnect while the helper is asked: it waits for the refresh to end, then nothing is left.
+    let out: Promise<void> | undefined;
     helper(() => {
-      signOutOfAtlassian();
+      helper(() => new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 403 }));
+      out = signOutOfAtlassian();
       return new Response(JSON.stringify({ access_token: 'at-2', refresh_token: 'rt-2', expires_in: 3600 }), { status: 200 });
     });
-    expect(await atlassianToken()).toEqual({ ok: false, why: 'signed-out' });
+    await atlassianToken();
+    await out;
     expect(readAtlassianSignIn()).toBeNull();
+    expect(await atlassianToken()).toEqual({ ok: false, why: 'signed-out' });
   });
 });
 
@@ -178,7 +199,7 @@ describe('Jira with the sign-in', () => {
     // A token kept more than a minute: a plain refusal would be answered with a new one.
     vi.setSystemTime(Date.now() + 2 * 60_000);
     const t = jiraTracker.open(project())!;
-    const words = "squad-kit's Atlassian app is missing a permission Jira needs here (read:jira-user). Tell the squad-kit maintainers: https://github.com/AzmSquad/Squad-Kit/issues";
+    const words = "Jira refused this call: squad-kit's Atlassian app is missing a permission it needs (read:jira-user), or the site's admin removed squad-kit's access. Ask the admin, or tell the squad-kit maintainers: https://github.com/AzmSquad/Squad-Kit/issues";
     await expect(t.whoAmI()).rejects.toThrow(words);
     expect(refreshes()).toHaveLength(0);
     const sent = fake.jira.requests.length;
@@ -190,6 +211,15 @@ describe('Jira with the sign-in', () => {
     await expect(t.whoAmI()).rejects.toThrow(words);
     expect(fake.jira.requests.length).toBeGreaterThan(sent);
     expect(refreshes()).toHaveLength(0);
+  });
+
+  it('only "scope does not match" is a missing permission: another 401 that names a scope is answered with a new token once', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    use(fakeAtlassian({ scopeMissing: 'Unauthorized; the scope of this token has ended' }));
+    signedIn();
+    vi.setSystemTime(Date.now() + 2 * 60_000);
+    await expect(jiraTracker.open(project())!.whoAmI()).rejects.toThrow("Jira did not accept squad-kit's Atlassian sign-in for Sara Ali.");
+    expect(refreshes()).toHaveLength(1);
   });
 
   it("a token saved for the project's site wins: it goes to the site, and the bearer goes nowhere", async () => {

@@ -150,6 +150,14 @@ describe('the code exchange and the refresh', () => {
     expect(seen).toEqual(['203.0.113.7', '203.0.113.7', '203.0.113.7']);
     expect(sent).toHaveLength(2);
   });
+
+  it('the rate limit failing on Cloudflare’s side never stops a sign-in: it fails open', async () => {
+    const sent = fakeAtlassian(200, { access_token: 'at', refresh_token: 'rt', expires_in: 3600 });
+    const TOKEN_LIMIT = { limit: async () => Promise.reject(new Error('rate limiter unavailable')) };
+    const res = await post('/atlassian/refresh', { refresh_token: 'rt-1' }, {}, { ...ENV, TOKEN_LIMIT } as unknown as Record<string, string>);
+    expect(res.status).toBe(200);
+    expect(sent).toHaveLength(1);
+  });
 });
 
 describe('everything else', () => {

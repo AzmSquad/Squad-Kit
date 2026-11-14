@@ -25,8 +25,8 @@ function use(f: FakeAtlassian, lifeMs?: number) {
   useAtlassianApp({ clientId: 'squad-kit-test-app', fetch: f.fetch, ...(lifeMs ? { lifeMs } : {}) });
 }
 
-afterEach(() => {
-  signOutOfAtlassian();
+afterEach(async () => {
+  await signOutOfAtlassian();
   forgetAtlassianFlow();
   forgetAtlassianTokens();
   useAtlassianApp(null);
@@ -207,7 +207,7 @@ describe('which Jira site', () => {
     await arrive(f.url!, { code: GOOD_CODE });
     expect(await ended()).toMatchObject({ state: 'done', account: 'Sara Ali' });
     expect(readAtlassianSignIn()!.site).toBe(OTHER.id);
-    signOutOfAtlassian();
+    await signOutOfAtlassian();
     use(fakeAtlassian({ sites: 'other' }));
     f = await startAtlassianSignIn(SITE, () => undefined);
     await arrive(f.url!, { code: GOOD_CODE });
@@ -242,7 +242,7 @@ describe("squad-kit's folder", () => {
     expect(fs.lstatSync(privateFolder('atlassian')).isSymbolicLink()).toBe(false);
     expect(JSON.parse(fs.readFileSync(path.join(outside, 'sign-in.json'), 'utf8')).refreshToken).toBe('planted');
     // Disconnect empties squad-kit's folder only.
-    signOutOfAtlassian();
+    await signOutOfAtlassian();
     expect(fs.existsSync(privateFolder('atlassian'))).toBe(false);
     expect(fs.existsSync(path.join(outside, 'sign-in.json'))).toBe(true);
   });

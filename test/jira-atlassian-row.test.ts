@@ -78,9 +78,9 @@ const row = async (bp: BoardPaths): Promise<ConnectionRow> => {
 };
 const ids = (r: ConnectionRow) => r.actions.map((a) => a.id);
 
-afterEach(() => {
+afterEach(async () => {
   vi.unstubAllGlobals();
-  signOutOfAtlassian();
+  await signOutOfAtlassian();
   forgetAtlassianFlow();
   forgetAtlassianTokens();
   jiraConnection.forget?.();
@@ -134,6 +134,20 @@ describe("Jira's row", () => {
     const token = project(undefined, true);
     await expect(disconnect(token, 'jira')).rejects.toThrow('Jira is connected with the token saved in Settings. Change it there.');
     expect(fake.calls).toEqual([]);
+  });
+
+  it("Jira refusing a call for a missing permission (or an admin removing squad-kit): the row is not connected, and says why", async () => {
+    use(fakeAtlassian());
+    signedIn();
+    const bp = project();
+    expect(await row(bp)).toMatchObject({ state: 'connected' });
+    fake.scopeMissing = true;
+    const r = await row(bp);
+    expect(r).toMatchObject({ state: 'not-connected', signedIn: { as: 'Sara Ali' } });
+    expect(r.line?.en).toBe(
+      "Jira refused this call: squad-kit's Atlassian app is missing a permission it needs (read:jira-user), or the site's admin removed squad-kit's access. Ask the admin, or tell the squad-kit maintainers: https://github.com/AzmSquad/Squad-Kit/issues",
+    );
+    expect(r.line?.ar).toContain('read:jira-user');
   });
 
   it("a token saved for the project's site wins; the sign-in left here can still be ended", async () => {

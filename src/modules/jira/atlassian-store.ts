@@ -7,11 +7,13 @@ import { privateFolder, readyPrivateFolder } from '../../core/home.js';
  * squad-kit's own Atlassian sign-in on this computer (ADR-012), in its own private folder (`~/.squad-kit/atlassian`),
  * which agents never reach: the refresh token, the Jira sites Atlassian gave, the account's name, and when the refresh
  * token ends if unused. The access token is never here: it lives in memory only (atlassian-token.ts). The file is the
- * person's only (0600), written whole and never followed through a link.
+ * person's only (0600), written whole and never followed through a link. When Atlassian ends the sign-in, a small
+ * marker says why and when, so every squad-kit on this computer can say so; Disconnect takes everything away.
  */
 
 export const ATLASSIAN_FOLDER = 'atlassian';
 const FILE = 'sign-in.json';
+const ENDED = 'ended.json';
 /** Atlassian ends a refresh token that has not been used for 90 days. */
 const INACTIVE_MS = 90 * 24 * 60 * 60_000;
 
@@ -35,7 +37,15 @@ interface AtlassianSignIn {
   refreshedAt: string;
   /** When that refresh token ends if squad-kit does not use it: 90 days on. */
   until: string;
+  /**
+   * When a refresh was sent with this refresh token, until its answer is kept. Still here at the next refresh: that
+   * answer was lost (Atlassian may have already stopped this token).
+   */
+  renewing?: string;
 }
+
+/** Why Atlassian ended the sign-in: it refused the token (unused 90 days, removed), or squad-kit lost a renewal's answer. */
+export type EndedWhy = 'refused' | 'lost';
 
 /** A cloud id goes into an address: letters, digits and dashes only. */
 const CLOUD_ID = /^[A-Za-z0-9-]{1,64}$/;
@@ -89,6 +99,7 @@ export function readAtlassianSignIn(): AtlassianSignIn | null {
       ...(account ? { account } : {}),
       refreshedAt: String(j.refreshedAt ?? ''),
       until: String(j.until ?? ''),
+      ...(typeof j.renewing === 'string' ? { renewing: j.renewing } : {}),
     };
   } catch {
     return null;
@@ -103,78 +114,73 @@ export function freshDates(now = Date.now()): Pick<AtlassianSignIn, 'refreshedAt
   return { refreshedAt: new Date(now).toISOString(), until: new Date(now + INACTIVE_MS).toISOString() };
 }
 
-/**
- * Keeps the sign-in: written whole to a new file of the person's only, then put in place. A link standing where the
- * file goes is replaced, never written through; a link standing as the folder is taken away first.
- */
-export function writeAtlassianSignIn(s: AtlassianSignIn): void {
-  const dir = readyPrivateFolder(ATLASSIAN_FOLDER);
-  const tmp = path.join(dir, `.${FILE}.${randomBytes(6).toString('hex')}`);
-  const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW ?? 0);
-  const fd = fs.openSync(tmp, flags, 0o600);
-  try {
-    if (process.platform !== 'win32') fs.fchmodSync(fd, 0o600);
-    fs.writeFileSync(fd, JSON.stringify(s, null, 2));
-  } finally {
-    fs.closeSync(fd);
-  }
-  fs.renameSync(tmp, fileOf());
+/** A rename Windows refuses for a moment (another program has the file open), or a full disk: tried again. */
+const BUSY = new Set(['EPERM', 'EBUSY', 'EACCES']);
+const TRIES = [20, 60, 150, 400];
+
+/** Waits without giving way: only between the few tries of a rename refused for a moment. */
+function pause(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-const LOCK = 'refresh.lock';
-/** A refresh lock older than this was left by a squad-kit that stopped half-way: it is taken over. */
-const STALE_MS = 30_000;
-const flagsNew = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW ?? 0);
-
-function lockOwner(file: string): string {
+/**
+ * A file in squad-kit's Atlassian folder, written whole to a new file of the person's only, then put in place. A link
+ * standing where the file goes is replaced, never written through; a link standing as the folder is taken away first.
+ * The new file never stays behind, written or not.
+ */
+function writeWhole(name: string, data: unknown): void {
+  const dir = readyPrivateFolder(ATLASSIAN_FOLDER);
+  const tmp = path.join(dir, `.${name}.${randomBytes(6).toString('hex')}`);
+  const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW ?? 0);
   try {
-    const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+    const fd = fs.openSync(tmp, flags, 0o600);
     try {
-      return fs.readFileSync(fd, 'utf8');
+      if (process.platform !== 'win32') fs.fchmodSync(fd, 0o600);
+      fs.writeFileSync(fd, JSON.stringify(data, null, 2));
     } finally {
       fs.closeSync(fd);
     }
-  } catch {
-    return '';
-  }
-}
-
-/**
- * Holds the refresh lock in squad-kit's Atlassian folder, so one squad-kit on this computer (the board, a terminal)
- * refreshes at a time: Atlassian rotates the refresh token, and two refreshes with the same one would leave one of
- * them refused. Waits up to `waitMs`; a lock older than 30 seconds is taken over. Gives the release, or null when the
- * lock could not be had in time.
- */
-export async function holdRefreshLock(waitMs: number): Promise<(() => void) | null> {
-  const file = path.join(readyPrivateFolder(ATLASSIAN_FOLDER), LOCK);
-  const mine = `${process.pid} ${randomBytes(8).toString('hex')}`;
-  const until = Date.now() + waitMs;
-  for (;;) {
-    try {
-      const fd = fs.openSync(file, flagsNew, 0o600);
+    for (let i = 0; ; i += 1) {
       try {
-        fs.writeFileSync(fd, mine);
-      } finally {
-        fs.closeSync(fd);
+        fs.renameSync(tmp, path.join(dir, name));
+        return;
+      } catch (err) {
+        if (!BUSY.has((err as NodeJS.ErrnoException).code ?? '') || i >= TRIES.length) throw err;
+        pause(TRIES[i]!);
       }
-      // Only its own lock is taken away: not one taken over after it went stale, nor a new sign-in's folder.
-      return () => {
-        if (lockOwner(file) === mine) fs.rmSync(file, { force: true });
-      };
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-      const there = fs.lstatSync(file, { throwIfNoEntry: false });
-      if (there && (!there.isFile() || Date.now() - there.mtimeMs > STALE_MS)) {
-        fs.rmSync(file, { force: true });
-        continue;
-      }
-      if (Date.now() >= until) return null;
-      await new Promise((r) => setTimeout(r, 100));
     }
+  } finally {
+    fs.rmSync(tmp, { force: true });
   }
 }
 
-/** Empties squad-kit's Atlassian folder: Disconnect, or a sign-in Atlassian ended. A link there is removed, never followed. */
+/** Keeps the sign-in. Signed in again: the marker of an ended sign-in goes. */
+export function writeAtlassianSignIn(s: AtlassianSignIn): void {
+  writeWhole(FILE, s);
+  fs.rmSync(path.join(privateFolder(ATLASSIAN_FOLDER), ENDED), { force: true });
+}
+
+/** Atlassian ended the sign-in: it goes, and a marker says why and when, for every squad-kit on this computer. */
+export function endAtlassianSignIn(why: EndedWhy): void {
+  fs.rmSync(fileOf(), { force: true });
+  writeWhole(ENDED, { why, at: new Date().toISOString() });
+}
+
+/** Why and when Atlassian ended the sign-in, while nobody has signed in again or disconnected. */
+export function readAtlassianEnded(): { why: EndedWhy; at: string } | null {
+  if (readAtlassianSignIn()) return null;
+  const dir = fs.lstatSync(privateFolder(ATLASSIAN_FOLDER), { throwIfNoEntry: false });
+  const file = path.join(privateFolder(ATLASSIAN_FOLDER), ENDED);
+  if (!dir?.isDirectory() || !fs.lstatSync(file, { throwIfNoEntry: false })?.isFile()) return null;
+  try {
+    const j = JSON.parse(fs.readFileSync(file, 'utf8')) as { why?: unknown; at?: unknown };
+    return j.why === 'refused' || j.why === 'lost' ? { why: j.why, at: String(j.at ?? '') } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Empties squad-kit's Atlassian folder: Disconnect. A link there is removed, never followed. */
 export function clearAtlassianFolder(): void {
   fs.rmSync(privateFolder(ATLASSIAN_FOLDER), { recursive: true, force: true });
 }

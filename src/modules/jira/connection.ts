@@ -1,10 +1,11 @@
 import type { CodePage, ConnectionModule, ConnectionStatus, GuideStep } from '../connection/types.js';
 import { ModuleError } from '../errors.js';
-import { atlassianReady } from './atlassian-app.js';
+import { atlassianPace, atlassianReady } from './atlassian-app.js';
+import { holdRefreshLock } from './atlassian-lock.js';
 import { atlassianSignInNow, cancelAtlassianSignIn, signOutOfAtlassian, startAtlassianSignIn } from './atlassian-sign-in.js';
 import { ATLASSIAN_FOLDER, hostOf, readAtlassianSignIn, writeAtlassianSignIn, type AtlassianSite } from './atlassian-store.js';
 import { atlassianCloud, atlassianEnded, atlassianToken, forgetAtlassianFailure, grantedSite } from './atlassian-token.js';
-import { JiraClient } from './client.js';
+import { JiraClient, MissingScopeError } from './client.js';
 import { LINES, SIGN_IN_FOOT, TOKEN_STEPS, signInSteps } from './connection-words.js';
 import { jiraTracker } from './module.js';
 import { siteOf } from './refs.js';
@@ -70,7 +71,8 @@ async function look(root: string): Promise<ConnectionStatus> {
     }
   }
   if (!s) {
-    const line = atlassianEnded() ? LINES.ended : saved?.moved ? movedWords(saved.moved) : undefined;
+    const ended = atlassianEnded();
+    const line = ended ? LINES.ended(ended) : saved?.moved ? movedWords(saved.moved) : undefined;
     return { state: 'not-connected', ...(line ? { line } : {}), steps: signInSteps() };
   }
   const steps = signInSteps(s.account?.name);
@@ -83,7 +85,7 @@ async function look(root: string): Promise<ConnectionStatus> {
   const t = await atlassianToken();
   if (!t.ok) {
     if (t.why === 'no-answer') return { state: 'unknown', ...left, line: LINES.offline, steps };
-    return { state: 'not-connected', ...(t.why === 'ended' ? { line: LINES.ended } : {}), steps: signInSteps() };
+    return { state: 'not-connected', ...(t.why === 'ended' ? { line: LINES.ended(atlassianEnded()) } : {}), steps: signInSteps() };
   }
   const host = hostOf(site.url);
   const signedIn = atlassianCloud(host);
@@ -93,6 +95,7 @@ async function look(root: string): Promise<ConnectionStatus> {
     const name = await new JiraTracker(new JiraClient(access), { ...access, readOnly: true }).whoAmI();
     return { state: 'connected', account: `${name} (${host})`, ...left, steps };
   } catch (err) {
+    if (err instanceof MissingScopeError) return { state: 'not-connected', ...left, line: LINES.missingScope(err.scope), steps };
     if (refused(err)) return { state: 'not-connected', ...left, line: LINES.refusedSignIn(host), steps };
     return { ...trouble(err), ...left, steps };
   }
@@ -109,14 +112,22 @@ async function status(root: string): Promise<ConnectionStatus> {
 
 /** The site for projects with no Jira site of their own, from those Atlassian gave. */
 async function pickSite(_root: string, asked: string): Promise<{ line: string }> {
-  const s = readAtlassianSignIn();
-  if (!s) throw new ModuleError('squad-kit is not signed in with Atlassian. Sign in first: squad connect jira', 'sign-in');
-  const host = siteOf(asked);
-  const site = host ? grantedSite(s.sites, host) : undefined;
-  if (!host || !site) throw new ModuleError(`Atlassian did not give squad-kit access to ${asked}. Pick one of: ${s.sites.map((x) => hostOf(x.url)).join(', ')}.`, 'not-found');
-  writeAtlassianSignIn({ ...s, site: site.id });
-  kept = null;
-  return { line: `squad-kit uses ${host} for Jira on this computer.` };
+  if (!readAtlassianSignIn()) throw new ModuleError('squad-kit is not signed in with Atlassian. Sign in first: squad connect jira', 'sign-in');
+  // Never in the middle of a refresh: it writes the same file.
+  const release = await holdRefreshLock(atlassianPace().lockWaitMs);
+  if (!release) throw new ModuleError('squad-kit is renewing its Atlassian sign-in just now. Try again in a moment.', 'too-many');
+  try {
+    const s = readAtlassianSignIn();
+    if (!s) throw new ModuleError('squad-kit is not signed in with Atlassian. Sign in first: squad connect jira', 'sign-in');
+    const host = siteOf(asked);
+    const site = host ? grantedSite(s.sites, host) : undefined;
+    if (!host || !site) throw new ModuleError(`Atlassian did not give squad-kit access to ${asked}. Pick one of: ${s.sites.map((x) => hostOf(x.url)).join(', ')}.`, 'not-found');
+    writeAtlassianSignIn({ ...s, site: site.id });
+    kept = null;
+    return { line: `squad-kit uses ${host} for Jira on this computer.` };
+  } finally {
+    release();
+  }
 }
 
 const SIGN_IN: NonNullable<ConnectionModule['signIn']> = {
@@ -126,7 +137,7 @@ const SIGN_IN: NonNullable<ConnectionModule['signIn']> = {
 };
 
 const signOut = async () => {
-  signOutOfAtlassian();
+  await signOutOfAtlassian();
   kept = null;
 };
 

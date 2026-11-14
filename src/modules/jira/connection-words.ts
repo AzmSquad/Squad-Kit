@@ -1,6 +1,9 @@
 import type { GuideStep, Words } from '../connection/types.js';
 import { hostOf, type AtlassianSite } from './atlassian-store.js';
 import { notGranted } from './atlassian-sign-in.js';
+import type { EndedWhy } from './atlassian-store.js';
+import { endedReason } from './atlassian-token.js';
+import { missingScopeWords } from './client.js';
 
 /** Jira's words on the Connections page, in English and Arabic: the token's steps, the sign-in's, and each case's line. */
 
@@ -45,10 +48,21 @@ export const SIGN_IN_FOOT: Words = {
 
 export const LINES = {
   tokenFailed: { en: 'The API token saved in Settings did not work. Paste a new one there.', ar: 'رمز API المحفوظ في الإعدادات ما اشتغل. الصق رمز جديد هناك.' },
-  ended: {
-    en: "Atlassian ended squad-kit's sign-in: it was not used for 90 days, or it was removed under Connected apps. Sign in with Atlassian again.",
-    ar: 'Atlassian أنهى تسجيل دخول squad-kit: ما انستخدم 90 يوم، أو انشال من Connected apps. سجّل الدخول بـ Atlassian مرة ثانية.',
-  },
+  /** Atlassian ended the sign-in: it refused the token, or squad-kit lost a renewal's answer. */
+  ended: (why: EndedWhy | null): Words =>
+    why === 'lost'
+      ? {
+          en: `${endedReason('lost')} Sign in with Atlassian again.`,
+          ar: 'squad-kit فقد رد Atlassian وهو يجدد تسجيل دخولك، فـ Atlassian ما عاد يقبله. سجّل الدخول بـ Atlassian مرة ثانية.',
+        }
+      : {
+          en: `${endedReason('refused')} Sign in with Atlassian again.`,
+          ar: 'Atlassian أنهى تسجيل دخول squad-kit: ما انستخدم 90 يوم، أو انشال من Connected apps. سجّل الدخول بـ Atlassian مرة ثانية.',
+        },
+  missingScope: (scope: string): Words => ({
+    en: missingScopeWords(scope),
+    ar: `Jira رفض هذا الطلب: تطبيق squad-kit في Atlassian ناقصه إذن (${scope})، أو مدير الموقع شال وصول squad-kit. اسأل المدير، أو بلّغ فريق squad-kit.`,
+  }),
   notGranted: (site: string, got: AtlassianSite[]): Words => ({
     en: notGranted(site, got),
     ar: `Atlassian ما أعطى squad-kit وصول لـ ${site}، موقع Jira لهذا المشروع${got.length ? ` (أعطاه ${got.map((s) => hostOf(s.url)).join('، ')})` : ''}. سجّل الدخول بـ Atlassian مرة ثانية واختر ${site} في صفحة Atlassian.`,

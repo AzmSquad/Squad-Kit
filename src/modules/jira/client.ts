@@ -48,6 +48,18 @@ const ISSUES = 'https://github.com/AzmSquad/Squad-Kit/issues';
 const missingKey = (gate: string, method: string, path: string) =>
   `${gate} ${method} ${path.replace(/\?.*$/, '').replace(/\/[A-Z][A-Z0-9_]*-\d+(?=\/|$)/g, '/{key}').replace(/\/\d+(?=\/|$)/g, '/{id}')}`;
 
+/** The words for a call squad-kit's Atlassian app has no permission for. */
+export function missingScopeWords(scope: string): string {
+  return `Jira refused this call: squad-kit's Atlassian app is missing a permission it needs (${scope}), or the site's admin removed squad-kit's access. Ask the admin, or tell the squad-kit maintainers: ${ISSUES}`;
+}
+
+/** A call squad-kit's Atlassian app has no permission for: an access problem, so the Connections row is not connected. */
+export class MissingScopeError extends ModuleError {
+  constructor(readonly scope: string) {
+    super(missingScopeWords(scope), 'sign-in', 401);
+  }
+}
+
 /** A new sign-in may bring the permission: every call is tried again. */
 export function forgetMissingScopes(): void {
   missing.clear();
@@ -140,7 +152,7 @@ export class JiraClient {
     if (res.status === 401 && auth.bearer) {
       const text = await res.text().catch(() => '');
       // squad-kit's app lacks a permission for this call: a new token would not help, so none is asked for.
-      if (/scope/i.test(jiraWords(text))) throw this.missingScope(method, path);
+      if (/scope does not match/i.test(jiraWords(text))) throw this.missingScope(method, path);
       // A sign-in token kept a while may have ended early on Atlassian's side: that one is dropped and the call made once more.
       if (again.fresh && this.access.cloud?.refused(auth.bearer)) return this.send<T>(method, path, body, { ...again, fresh: false });
       throw this.failure(method, path, 401, text);
@@ -188,16 +200,17 @@ export class JiraClient {
   }
 
   /**
-   * Atlassian's gateway said "scope does not match": squad-kit's app is missing the permission this call needs. Said
-   * with its name, remembered a while so the same call is not sent again, and never answered with a new token.
+   * Atlassian's gateway said "scope does not match": squad-kit's app is missing the permission this call needs, or the
+   * site's admin took squad-kit's access away. Said with the permission's name, remembered a while so the same call is
+   * not sent again, and never answered with a new token.
    */
-  private missingScope(method: string, path: string, first = true): ModuleError {
+  private missingScope(method: string, path: string, first = true): MissingScopeError {
     const scope = scopeFor(method, path);
     if (first) {
       missing.set(missingKey(this.gate!, method, path), Date.now());
       writeLog({ level: 'warn', text: `Atlassian said squad-kit's app has no scope for ${method} ${path.replace(/\?.*$/, '')} (needs ${scope}).` });
     }
-    return new ModuleError(`squad-kit's Atlassian app is missing a permission Jira needs here (${scope}). Tell the squad-kit maintainers: ${ISSUES}`, 'other', 401);
+    return new MissingScopeError(scope);
   }
 
   private failure(method: string, url: string, status: number, text: string): ModuleError {

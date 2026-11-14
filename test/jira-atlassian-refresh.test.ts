@@ -1,14 +1,16 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { privateFolder } from '../src/core/home.js';
 import { useAtlassianApp } from '../src/modules/jira/atlassian-app.js';
+import { holdRefreshLock } from '../src/modules/jira/atlassian-lock.js';
 import { signOutOfAtlassian } from '../src/modules/jira/atlassian-sign-in.js';
 import { freshDates, readAtlassianSignIn, writeAtlassianSignIn } from '../src/modules/jira/atlassian-store.js';
 import { atlassianToken, forgetAtlassianFailure, forgetAtlassianTokens, keepAccess } from '../src/modules/jira/atlassian-token.js';
 import { jiraConnection } from '../src/modules/jira/connection.js';
 import { SITE } from './fakes/jira.js';
-import { CLOUD, fakeAtlassian, type FakeAtlassian } from './support/fake-atlassian.js';
+import { CLOUD, OTHER, fakeAtlassian, type FakeAtlassian } from './support/fake-atlassian.js';
 
 /**
  * Refreshing squad-kit's Atlassian sign-in when two want it at once (ADR-012). Atlassian rotates the refresh token, so
@@ -43,9 +45,9 @@ function hold(): () => void {
 const refreshes = () => fake.calls.filter((c) => c.url.endsWith('/atlassian/refresh')).map((c) => c.body?.refresh_token);
 const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms));
 
-afterEach(() => {
+afterEach(async () => {
   fake.gate = undefined;
-  signOutOfAtlassian();
+  await signOutOfAtlassian();
   forgetAtlassianTokens();
   useAtlassianApp(null);
   vi.resetModules();
@@ -98,22 +100,63 @@ describe('one refresh at a time', () => {
     expect(fs.existsSync(path.join(privateFolder('atlassian'), 'refresh.lock'))).toBe(false);
   });
 
-  it('a lock left by a squad-kit that stopped half-way is taken over after 30 seconds', async () => {
+  it('a lock left by a squad-kit that has stopped is taken over at once', async () => {
+    use(fakeAtlassian());
+    signedIn();
+    const gone = spawnSync(process.execPath, ['-e', '']).pid;
+    const lock = path.join(privateFolder('atlassian'), 'refresh.lock');
+    fs.writeFileSync(lock, `${gone} left-behind`);
+    expect(await atlassianToken()).toEqual({ ok: true, token: 'at-2' });
+    expect(fs.existsSync(lock)).toBe(false);
+  });
+
+  it('a lock of a squad-kit that still runs is taken over only when it is minutes old', async () => {
     use(fakeAtlassian());
     signedIn();
     const lock = path.join(privateFolder('atlassian'), 'refresh.lock');
-    fs.writeFileSync(lock, '4242 left-behind');
-    const old = (Date.now() - 60_000) / 1000;
+    fs.writeFileSync(lock, `${process.pid} stuck`);
+    const old = (Date.now() - 6 * 60_000) / 1000;
     fs.utimesSync(lock, old, old);
     expect(await atlassianToken()).toEqual({ ok: true, token: 'at-2' });
+  });
+
+  it('a folder standing where the lock goes is taken away, never a lock that stays forever', async () => {
+    use(fakeAtlassian());
+    signedIn();
+    const lock = path.join(privateFolder('atlassian'), 'refresh.lock');
+    fs.mkdirSync(path.join(lock, 'inside'), { recursive: true });
+    expect(await atlassianToken()).toEqual({ ok: true, token: 'at-2' });
     expect(fs.existsSync(lock)).toBe(false);
+  });
+
+  it('a site picked, or a Disconnect, waits for the refresh holding the lock: neither lands in its middle', async () => {
+    use(fakeAtlassian());
+    writeAtlassianSignIn({ signIn: 'sign-in-a', refreshToken: 'rt-1', sites: [acme, { id: OTHER.id, url: OTHER.url, name: OTHER.name }], account: { id: 'a1', name: 'Sara Ali' }, ...freshDates() });
+    const release = (await holdRefreshLock(1000))!;
+    let picked = false;
+    const pick = jiraConnection.pickSite!('/nowhere', OTHER.host).then(() => (picked = true));
+    await tick(250);
+    expect(picked).toBe(false);
+    release();
+    await pick;
+    expect(readAtlassianSignIn()?.site).toBe(OTHER.id);
+    const again = (await holdRefreshLock(1000))!;
+    let out = false;
+    const disconnected = signOutOfAtlassian().then(() => (out = true));
+    await tick(250);
+    expect(out).toBe(false);
+    expect(readAtlassianSignIn()).not.toBeNull();
+    again();
+    await disconnected;
+    expect(readAtlassianSignIn()).toBeNull();
   });
 
   it("a lock still held by another squad-kit past the wait is no answer, never a sign-out", async () => {
     use(fakeAtlassian());
     useAtlassianApp({ clientId: 'squad-kit-test-app', fetch: fake.fetch, settleMs: 20, lockWaitMs: 200 });
     signedIn();
-    fs.writeFileSync(path.join(privateFolder('atlassian'), 'refresh.lock'), '4242 busy');
+    // Held by a squad-kit that still runs: this test's own process stands for it.
+    fs.writeFileSync(path.join(privateFolder('atlassian'), 'refresh.lock'), `${process.pid} busy`);
     expect(await atlassianToken()).toEqual({ ok: false, why: 'no-answer' });
     expect(refreshes()).toEqual([]);
     expect(readAtlassianSignIn()?.refreshToken).toBe('rt-1');
@@ -135,21 +178,22 @@ describe('one refresh at a time', () => {
 });
 
 describe('a late answer', () => {
-  it('a refresh for A still on its way, a Disconnect, a sign-in as B: A’s answer leaves B’s sign-in as it is', async () => {
+  it('a Disconnect waits for a refresh on its way, then nothing of the sign-in is left', async () => {
     use(fakeAtlassian());
     signedIn('sign-in-a', 'Sara Ali');
     const go = hold();
     const forA = atlassianToken();
-    await tick();
-    signOutOfAtlassian();
-    writeAtlassianSignIn({ signIn: 'sign-in-b', refreshToken: 'rt-B', sites: [acme], site: CLOUD, account: { id: 'b1', name: 'Omar' }, ...freshDates() });
-    keepAccess('at-B', 3600, 'sign-in-b');
-    const b = JSON.stringify(readAtlassianSignIn());
+    await vi.waitFor(() => expect(refreshes()).toEqual(['rt-1']));
+    let out = false;
+    const disconnected = signOutOfAtlassian().then(() => (out = true));
+    await tick(200);
+    expect(out).toBe(false);
     go();
-    // A's caller gets B's token, from memory: A's pair is not kept anywhere.
-    expect(await forA).toEqual({ ok: true, token: 'at-B' });
-    expect(JSON.stringify(readAtlassianSignIn())).toBe(b);
-    expect(await atlassianToken()).toEqual({ ok: true, token: 'at-B' });
+    await disconnected;
+    expect(await forA).toEqual({ ok: true, token: 'at-2' });
+    expect(readAtlassianSignIn()).toBeNull();
+    expect(fs.existsSync(privateFolder('atlassian'))).toBe(false);
+    expect(await atlassianToken()).toEqual({ ok: false, why: 'signed-out' });
   });
 
   it('the board keeps no token of an old sign-in after a terminal signs in as someone else', async () => {

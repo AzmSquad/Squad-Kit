@@ -81,7 +81,7 @@ export interface FakeJiraOptions {
    * Signed in with Atlassian: the site also answers at api.atlassian.com/ex/jira/<id>/… to the bearer token Atlassian
    * gave last, as Atlassian's gateway does. A token Jira does not know is a 401.
    */
-  cloud?: { id: string; bearer(): string; scopeMissing?: boolean };
+  cloud?: { id: string; bearer(): string; scopeMissing?: boolean | string };
 }
 
 export const SITE = 'acme.atlassian.net';
@@ -500,7 +500,7 @@ export function fakeJira(token = 'secret', opts: FakeJiraOptions = {}): FakeJira
     const body = typeof init?.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : undefined;
     if (gate) {
       if (headers.get('authorization') !== `Bearer ${gate.bearer()}`) return json({ code: 401, message: 'Unauthorized' }, 401);
-      if (gate.scopeMissing) return json({ code: 401, message: 'Unauthorized; scope does not match' }, 401);
+      if (gate.scopeMissing) return json({ code: 401, message: typeof gate.scopeMissing === 'string' ? gate.scopeMissing : 'Unauthorized; scope does not match' }, 401);
       return answer(method, new URL(`https://${opts.site ?? SITE}${url.pathname.slice(`/ex/jira/${gate.id}`.length)}${url.search}`), body);
     }
     if (headers.get('authorization') !== auth) return new Response('Client must be authenticated to access this resource.', { status: 401, headers: { 'content-type': 'text/plain' } });

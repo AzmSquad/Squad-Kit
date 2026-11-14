@@ -12,8 +12,9 @@ computer.
 
 ## What it stores
 
-Nothing. It has no database and no storage, it writes no logs (observability and log push are off), and it never
-prints a code, a token or a request body. Each request is answered and forgotten.
+No codes and no tokens. It has no database and no storage, it writes no logs (observability and log push are off),
+and it never prints a code, a token or a request body. Each request is answered and forgotten. The one thing counted is
+how many requests came from each address in the last minute (Cloudflare's rate limit, below), to stop abuse.
 
 ## Routes
 

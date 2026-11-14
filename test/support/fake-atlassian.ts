@@ -28,11 +28,16 @@ export interface FakeAtlassian {
   onRefused?: () => void;
   /** While set, a refresh waits for it before Atlassian answers: two refreshes at once, a Disconnect on the way. */
   gate?: Promise<void>;
+  /**
+   * The gateway answers every Jira call with a 401: true, "scope does not match" (the app lacks a permission, or an
+   * admin removed it); a text, these words instead.
+   */
+  scopeMissing: boolean | string;
 }
 
 export const GOOD_CODE = 'good-code';
 
-export function fakeAtlassian(opts: { jira?: FakeJiraOptions; sites?: 'one' | 'two' | 'other' | 'none'; scopeMissing?: boolean } = {}): FakeAtlassian {
+export function fakeAtlassian(opts: { jira?: FakeJiraOptions; sites?: 'one' | 'two' | 'other' | 'none'; scopeMissing?: boolean | string } = {}): FakeAtlassian {
   let n = 1;
   const site = (id: string, url: string, name: string, scopes = JIRA_SCOPES) => ({ id, url, name, scopes, avatarUrl: 'https://site-admin-avatar-cdn.prod.public.atl-paas.net/avatars/240/rocket.png' });
   const acme = site(CLOUD, `https://${SITE}`, 'Acme');
@@ -47,8 +52,18 @@ export function fakeAtlassian(opts: { jira?: FakeJiraOptions; sites?: 'one' | 't
     sites: which === 'none' ? [wiki] : which === 'other' ? [globex, wiki] : which === 'two' ? [acme, globex, wiki] : [acme, wiki],
     revoked: false,
     offline: false,
+    scopeMissing: opts.scopeMissing ?? false,
   };
-  f.jira = fakeJira('secret', { ...opts.jira, cloud: { id: CLOUD, bearer: () => f.now.access, scopeMissing: opts.scopeMissing } });
+  f.jira = fakeJira('secret', {
+    ...opts.jira,
+    cloud: {
+      id: CLOUD,
+      bearer: () => f.now.access,
+      get scopeMissing() {
+        return f.scopeMissing;
+      },
+    },
+  });
   const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } });
   const pair = () => ({ access_token: f.now.access, refresh_token: f.now.refresh, expires_in: 3600, scope: 'read:jira-work write:jira-work read:jira-user offline_access' });
   f.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -56,14 +71,15 @@ export function fakeAtlassian(opts: { jira?: FakeJiraOptions; sites?: 'one' | 't
     const auth = new Headers(init?.headers).get('authorization');
     const body = typeof init?.body === 'string' ? (JSON.parse(init.body) as Record<string, string>) : undefined;
     f.calls.push({ url: url.href, auth, ...(body ? { body } : {}) });
-    if (f.offline) throw new TypeError('fetch failed');
+    // As Node's fetch says it: no connection could be made.
+    if (f.offline) throw Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }) });
     if (url.href === 'https://auth.squad-kit.com/atlassian/token') {
       if (body?.code !== GOOD_CODE) return json({ error: 'invalid_grant', error_description: 'Invalid authorization code.' }, 403);
       return json(pair());
     }
     if (url.href === 'https://auth.squad-kit.com/atlassian/refresh') {
       await f.gate;
-      if (f.offline) throw new TypeError('fetch failed');
+      if (f.offline) throw Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }) });
       if (f.revoked || body?.refresh_token !== f.now.refresh) {
         f.onRefused?.();
         return json({ error: 'invalid_grant', error_description: 'Unknown or invalid refresh token.' }, 403);

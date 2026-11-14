@@ -2,10 +2,11 @@ import { randomBytes } from 'node:crypto';
 import { writeLog } from '../../core/app-log.js';
 import type { SignInFlow } from '../connection/types.js';
 import { GATEWAY, atlassianFetch, atlassianPace, authorizeUrl } from './atlassian-app.js';
+import { holdRefreshLock } from './atlassian-lock.js';
 import { openDoor, type Door, type DoorAnswer } from './atlassian-loopback.js';
 import { askHelper } from './atlassian-refresh.js';
 import { clearAtlassianFolder, freshDates, hostOf, newSignInId, readAtlassianSignIn, siteFrom, writeAtlassianSignIn, type AtlassianSite } from './atlassian-store.js';
-import { forgetAtlassianEnded, forgetAtlassianTokens, grantedSite, keepAccess } from './atlassian-token.js';
+import { forgetAtlassianTokens, grantedSite, keepAccess } from './atlassian-token.js';
 
 /**
  * "Sign in with Atlassian" (ADR-012). squad-kit opens a one-shot door on 127.0.0.1 and gives the link to Atlassian's
@@ -77,7 +78,7 @@ async function finish(f: Running, a: DoorAnswer, projectSite: string | undefined
   }
   const got = await askHelper('token', { code: a.code });
   if (f.state !== 'waiting') return;
-  if (got === 'no-answer') return void fail(f, NOT_REACHED);
+  if (got === 'no-answer' || got === 'unsent') return void fail(f, NOT_REACHED);
   const { access_token: token, refresh_token: refresh, expires_in: secs, error_description: why } = got.reply;
   if (got.status !== 200 || !token) return void fail(f, `Atlassian did not accept the sign-in${why ? `: ${why.slice(0, 160).replace(/\.$/, '')}` : ''}. Try again.`);
   if (!refresh) return void fail(f, 'Atlassian gave squad-kit no lasting sign-in. Try again.');
@@ -92,8 +93,13 @@ async function finish(f: Running, a: DoorAnswer, projectSite: string | undefined
   const account = await accountOn(chosen ?? sites[0]!, token);
   if (f.state !== 'waiting') return;
   const signIn = newSignInId();
-  writeAtlassianSignIn({ signIn, refreshToken: refresh, sites, ...(chosen ? { site: chosen.id } : {}), ...(account ? { account } : {}), ...freshDates() });
-  keepAccess(token, secs, signIn);
+  // Never in the middle of another squad-kit's refresh of an older sign-in: it writes the same file.
+  await underLock(() => {
+    if (f.state !== 'waiting') return;
+    writeAtlassianSignIn({ signIn, refreshToken: refresh, sites, ...(chosen ? { site: chosen.id } : {}), ...(account ? { account } : {}), ...freshDates() });
+    keepAccess(token, secs, signIn);
+  });
+  if (f.state !== 'waiting') return;
   done();
   if (projectSite && !own) return void fail(f, notGranted(projectSite, sites));
   Object.assign(f, { state: 'done', ...(account ? { account: account.name } : {}), ...(chosen ? {} : { line: PICK }) });
@@ -156,14 +162,27 @@ export function atlassianSignInNow(): SignInFlow | null {
 }
 
 /**
- * Signs squad-kit out of Atlassian on this computer: a sign-in still waiting stops, and squad-kit's Atlassian folder
- * is emptied. No call goes out, so it works offline; Atlassian's Connected apps page takes the app's access away.
+ * Runs a change of the sign-in file with the lock held, so it never lands in the middle of a refresh. Not had in time
+ * (a refresh hanging on a slow network): it runs all the same, as the person asked for it.
  */
-export function signOutOfAtlassian(): void {
+async function underLock(change: () => void): Promise<void> {
+  const release = await holdRefreshLock(atlassianPace().lockWaitMs).catch(() => null);
+  try {
+    change();
+  } finally {
+    release?.();
+  }
+}
+
+/**
+ * Signs squad-kit out of Atlassian on this computer: a sign-in still waiting stops, and squad-kit's Atlassian folder
+ * is emptied, with the lock held, so a refresh on its way finishes first and never writes the sign-in back. No call
+ * goes out, so it works offline; Atlassian's Connected apps page takes the app's access away.
+ */
+export async function signOutOfAtlassian(): Promise<void> {
   cancelAtlassianSignIn();
-  clearAtlassianFolder();
+  await underLock(clearAtlassianFolder);
   forgetAtlassianTokens();
-  forgetAtlassianEnded();
 }
 
 /** A test starts afresh. */
