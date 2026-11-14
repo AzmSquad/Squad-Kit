@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, Outlet, useRouterState } from '@tanstack/react-router';
-import { ArrowUp, Bug, ChevronsUpDown, Compass, GitPullRequestArrow, Inbox, LayoutGrid, ListTodo, ListTree, Menu, MessagesSquare, Moon, Network, Settings, ShieldCheck, Sun, Terminal, Wrench } from 'lucide-react';
+import { ArrowUp, Bug, ChevronsUpDown, Compass, GitPullRequestArrow, Inbox, LayoutGrid, ListTodo, ListTree, Menu, MessagesSquare, Moon, Network, Palette, Settings, ShieldCheck, Sun, Terminal, Wrench } from 'lucide-react';
 import { Written } from './ui';
 import { useBoard } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
@@ -36,6 +36,8 @@ const NAV = [
   { to: '/conversations', label: 'Conversations', icon: MessagesSquare, badge: 'chats' as const },
   { to: '/releases', label: 'Releases', icon: ArrowUp },
   { to: '/architecture', label: 'Architecture', icon: Network },
+  // The Studio is always on: no switch and no counter (AB-127).
+  { to: '/studio', label: 'Studio', icon: Palette },
   { to: '/bugs', label: 'Bugs', icon: Bug, badge: 'bugs' as const },
   { to: '/harness', label: 'Harness', icon: ShieldCheck },
   { to: '/tools', label: 'Tools', icon: Wrench, badge: 'tools' as const },

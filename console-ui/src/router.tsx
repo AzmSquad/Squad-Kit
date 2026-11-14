@@ -19,6 +19,7 @@ import { ToolsPage } from './pages/Tools';
 import { LeadPage } from './pages/Lead';
 import { ConnectionsPage } from './pages/Connections';
 import { ContributePage } from './pages/Contribute';
+import { StudioPage } from './pages/Studio';
 
 // One app, many projects (ADR-001): a project's pages sit under /p/<project id>/ (the router's base), and the app's
 // Home, with every project and one Waiting for you list, at /.
@@ -89,6 +90,8 @@ const architecture = createRoute({
   }),
   component: ArchitecturePage,
 });
+// The Studio: sketches and design systems. Its tab stays in the browser tab, not in the address (lib/studio).
+const studio = createRoute({ getParentRoute: () => rootRoute, path: '/studio', component: StudioPage });
 // Every talk with an agent, full screen. `ticket` picks the talk.
 const conversations = createRoute({
   getParentRoute: () => rootRoute,
@@ -128,7 +131,7 @@ const lead = createRoute({
   component: LeadPage,
 });
 
-const routeTree = rootRoute.addChildren([index, setup, overview, requirements, breakdown, board, backlog, proof, inbox, conversations, releases, decisions, architecture, bugs, harness, squad, tools, connections, contribute, lead, settings]);
+const routeTree = rootRoute.addChildren([index, setup, overview, requirements, breakdown, board, backlog, proof, inbox, conversations, releases, decisions, architecture, studio, bugs, harness, squad, tools, connections, contribute, lead, settings]);
 
 export const router = createRouter({ routeTree, defaultPreload: false, basepath: PROJECT_BASE || '/', defaultErrorComponent: CrashPage });
 

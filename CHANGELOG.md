@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- A Studio page in every project's sidebar, after Architecture, with Sketches and Design systems tabs. It remembers
+  the last tab per project while squad-kit's browser tab stays open, and creates nothing in the project until you make
+  something.
+
 ## [1.3.21] — 2026-11-13
 
 ### Added
