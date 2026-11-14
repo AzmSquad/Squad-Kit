@@ -61,7 +61,7 @@ export function ConnectionsPage() {
           </div>
         )}
       </div>
-      {signing && <SignInCode name={signing.name} label={signing.label} onClose={() => setSigning(null)} />}
+      {signing && <SignInCode name={signing.name} label={signing.label} page={signing.codePage} onClose={() => setSigning(null)} />}
     </>
   );
 }

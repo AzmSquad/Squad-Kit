@@ -12,7 +12,7 @@ import { remoteKind } from '../../modules/registry.js';
  * which phones it builds for from its folders. Its repo's remotes say where its code is kept, for the code host's tool.
  */
 
-export type ProjectKind = 'web' | 'flutter' | 'react-native' | 'ios' | 'android' | 'docker' | 'github';
+export type ProjectKind = 'web' | 'flutter' | 'react-native' | 'ios' | 'android' | 'docker' | 'github' | 'azure';
 export type Platform = 'ios' | 'android' | 'web';
 
 export interface PlaceKinds {

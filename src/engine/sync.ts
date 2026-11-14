@@ -367,7 +367,7 @@ function heldBack(bp: BoardPaths, id: string, pr: number, label: string, why: st
  */
 export async function followBase(bp: BoardPaths, id: string, target: { dir: string; base: string; remote: string }, host: RepoHost): Promise<boolean> {
   try {
-    const head = await fetchedTip(target.dir, target.remote, target.base, { env: host.gitEnv() });
+    const head = await fetchedTip(target.dir, target.remote, target.base, { env: await host.gitEnv() });
     const local = await baseTurn(target.dir, () => moveBase(target.dir, target.base, head, squadInside(bp, target.dir)));
     if (local.note) saidToEngineers(bp, id, local.note);
     return local.moved;

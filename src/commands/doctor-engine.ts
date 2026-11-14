@@ -871,7 +871,7 @@ async function checkTrackerCredential(paths: SquadPaths, ctx: DoctorContext): Pr
   if (ctx.config.tracker.type === 'none') {
     return { id: 'tracker-cred', name: 'tracker credential resolves', status: 'skip', detail: 'none' };
   }
-  const own = selfSignedTracker(ctx.config);
+  const own = selfSignedTracker(ctx.config, paths.root);
   if (own) return trackerSignInCheck(paths.root, own);
   const secrets = ctx.secrets ?? {};
   const overlay = overlayTrackerEnv(secrets);
@@ -899,7 +899,7 @@ async function checkTrackerConnectivity(paths: SquadPaths, ctx: DoctorContext): 
   if (!ctx.config || ctx.config.tracker.type === 'none') {
     return { id: 'tracker-live', name: 'tracker connectivity', status: 'skip', detail: 'none' };
   }
-  const own = selfSignedTracker(ctx.config);
+  const own = selfSignedTracker(ctx.config, paths.root);
   if (own) return trackerReachCheck(paths.root, own);
   const secrets = ctx.secrets ?? {};
   const overlay = overlayTrackerEnv(secrets);

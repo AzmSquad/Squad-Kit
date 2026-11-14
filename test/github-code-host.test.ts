@@ -51,7 +51,9 @@ describe("the sign-in, through GitHub's own tool", () => {
     expect(CODE_HOSTS.map((m) => m.name)).toContain('github');
     expect(forkHostFor('https://github.com/me/app')?.label).toBe('GitHub');
     expect(remoteKind('git@github.com:me/app.git')).toBe('github');
-    expect(remoteKind('https://dev.azure.com/o/p/_git/r')).toBeNull();
+    // An Azure Repos remote is Azure's own kind, for Microsoft's tool on the Tools page (ADR-011).
+    expect(remoteKind('https://dev.azure.com/o/p/_git/r')).toBe('azure');
+    expect(remoteKind('https://gitlab.com/o/r.git')).toBeNull();
   });
 
   it('never holds the board up: before gh answers, a quick guess from its files stands in, then gh decides', async () => {

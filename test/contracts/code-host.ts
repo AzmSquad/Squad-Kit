@@ -83,11 +83,11 @@ export function codeHostContract(name: string, make: () => CodeHostFixture): voi
       await expect(host.postReview(pr.id, { ...review, threads: [review.threads[0]!, { ...review.threads[1]!, state: 'past' as const }] })).resolves.toEqual({ threads: 2 });
     });
 
-    it('knows when a branch only takes pull requests, and lets git sign in', () => {
+    it('knows when a branch only takes pull requests, and lets git sign in', async () => {
       const { host, refusedMessage } = make();
       expect(host.refusedPush(refusedMessage)).toBe(true);
       expect(host.refusedPush('fatal: could not read from remote repository')).toBe(false);
-      expect(typeof host.gitEnv()).toBe('object');
+      expect(typeof (await host.gitEnv())).toBe('object');
     });
   });
 }

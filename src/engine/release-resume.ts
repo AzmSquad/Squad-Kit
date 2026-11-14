@@ -115,7 +115,7 @@ export async function settleRepos(bp: BoardPaths, j: ReleaseJournal): Promise<Se
     let reached = false;
     let unpushed: UnpushedRelease | undefined;
     const url = r.remote ? git(root, ['config', '--get', `remote.${r.remote}.url`], { allowFail: true }) : '';
-    const env = url ? (repoHostFor(bp, url)?.gitEnv() ?? {}) : {};
+    const env = url ? ((await repoHostFor(bp, url)?.gitEnv()) ?? {}) : {};
     if (r.head && r.remote) {
       await netGitLater(root, ['fetch', r.remote, r.base], { env, allowFail: true });
       const there = git(root, ['rev-parse', '--verify', '-q', `refs/remotes/${r.remote}/${r.base}`], { allowFail: true });

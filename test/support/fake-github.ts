@@ -40,12 +40,12 @@ exit 0
 /** gh as this test wants it: signed in, signed out, or not on this computer at all. Its own settings folder says the same. */
 /**
  * A PATH of `dir` alone, holding git and the system's own programs but no gh anywhere, not even the test's stand-in. The
- * system folders are linked in one by one, since a CI runner keeps gh in /usr/bin.
+ * system folders are linked in one by one, since a CI runner keeps gh in /usr/bin (and az too: `tool` leaves that out).
  */
-export function pathWithoutGh(dir: string): string {
+export function pathWithoutGh(dir: string, tool = 'gh'): string {
   const have = new Set(fs.readdirSync(dir));
   const link = (from: string, name: string) => {
-    if (name === 'gh' || have.has(name)) return;
+    if (name === tool || have.has(name)) return;
     fs.symlinkSync(from, path.join(dir, name));
     have.add(name);
   };

@@ -29,7 +29,7 @@ interface CaughtUp {
 
 /** The computer's base, forward to the copy's newest. */
 async function baseForward(bp: BoardPaths, p: RepoPlace): Promise<boolean> {
-  const env = repoHostFor(bp, p.url)?.gitEnv() ?? {};
+  const env = (await repoHostFor(bp, p.url)?.gitEnv()) ?? {};
   const tip = await fetchedTip(p.dir, p.remote, p.base, { env });
   const here = git(p.dir, ['rev-parse', '--verify', '-q', `refs/heads/${p.base}`], { allowFail: true });
   if (here === tip) return false;

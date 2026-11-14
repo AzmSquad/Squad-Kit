@@ -13,7 +13,9 @@ import type {
   TrackerLevels,
   TrackerModule,
 } from '../tracker/types.js';
-import { Azure, AzureError, azureForProject, parseAzureRemote, PROCESS_TYPES, processOf, type PatchOp, type StateCategory, type WorkItemRow } from './client.js';
+import { Azure, AzureError, parseAzureRemote, PROCESS_TYPES, processOf, type PatchOp, type StateCategory, type WorkItemRow } from './client.js';
+import { azureForProject } from './sign-in.js';
+import { signedInWithMicrosoft } from './token.js';
 import { markdownToHtml } from './markdown.js';
 
 /** Azure Boards as a squad-kit tracker. */
@@ -46,7 +48,7 @@ export class AzureTracker implements Tracker {
 
   get identity(): string {
     const t = this.az.target;
-    return `${t.organization}/${t.project}/${t.pat.slice(-6)}`;
+    return `${t.organization}/${t.project}/${t.pat ? t.pat.slice(-6) : 'microsoft'}`;
   }
 
   parseRef(text: string): string | null {
@@ -222,7 +224,7 @@ export const azureTracker: TrackerModule = {
   name: 'azure',
   label: 'Azure DevOps',
   about:
-    'Stories and bugs come from Azure Boards. squad-kit moves them along as the squad works, opens a pull request for each finished ticket, and merges it when you release. Your token stays on this computer.',
+    'Stories and bugs come from Azure Boards. squad-kit moves them along as the squad works, opens a pull request for each finished ticket, and merges it when you release. Sign in with Microsoft on the Connections page, or paste a token here: a saved token is used first, and stays on this computer.',
   hint: 'Token scopes: Work Items and Code (read, write and manage).',
   fields: [
     { key: 'organization', label: 'Organization', placeholder: 'e.g. momenysr' },
@@ -237,10 +239,9 @@ export const azureTracker: TrackerModule = {
     const paths = buildPaths(root);
     const config = loadConfig(paths.configFile);
     const values: Record<string, string> = config.tracker.type === 'azure' ? { organization: config.tracker.workspace ?? '', project: config.tracker.project ?? '' } : {};
-    return {
-      values,
-      hasSecret: Boolean(loadSecrets(paths.secretsFile).tracker?.azure?.pat || process.env.AZURE_DEVOPS_PAT),
-    };
+    const hasSecret = Boolean(loadSecrets(paths.secretsFile).tracker?.azure?.pat || process.env.AZURE_DEVOPS_PAT);
+    // Both here: the token is used (ADR-011), and Settings says so.
+    return { values, hasSecret, ...(hasSecret && signedInWithMicrosoft() ? { note: 'The token saved here is used, not your Microsoft sign-in.' } : {}) };
   },
   save(root, values) {
     const organization = values.organization?.trim().replace(/^https:\/\/dev\.azure\.com\//, '').replace(/\/.*$/, '');

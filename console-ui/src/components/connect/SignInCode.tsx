@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Copy, ExternalLink } from 'lucide-react';
 import { api, send } from '../../api/client';
-import type { SignInFlow } from '../../api/contribution-types';
+import type { CodePage, SignInFlow } from '../../api/contribution-types';
 import { CONNECT } from '../../lib/connect-words';
 import { readLang } from '../../lib/first-story';
 import { usePrefs } from '../../lib/prefs';
@@ -12,11 +12,13 @@ import { Cmd } from '../ui';
  * Sign in with an outside tool, through its own sign-in: squad-kit runs the tool, which gives a one-time code; the
  * person opens the tool's page (a normal link: squad-kit opens no window), types the code and approves. The window
  * follows the sign-in until it is done. Cancel and Esc stop the tool's sign-in, even before its code arrives; a click
- * beside the window does nothing, so it never stops a sign-in the person is approving.
+ * beside the window does nothing, so it never stops a sign-in the person is approving. `page`: the code goes on another
+ * company's page (Microsoft's, for Azure DevOps), with its own words.
  */
-export function SignInCode({ name, label, onClose }: { name: string; label: string; onClose(): void }) {
+export function SignInCode({ name, label: tool, page, onClose }: { name: string; label: string; page?: CodePage; onClose(): void }) {
   const lang = readLang();
   const w = CONNECT[lang];
+  const label = page?.name ?? tool;
   const qc = useQueryClient();
   const { toast } = usePrefs();
   const [flow, setFlow] = useState<SignInFlow | null>(null);
@@ -42,7 +44,7 @@ export function SignInCode({ name, label, onClose }: { name: string; label: stri
         if (f.state === 'waiting') timer = setTimeout(() => void follow(), 1500);
         else if (f.state === 'done') {
           void qc.invalidateQueries();
-          toast(CONNECT[lang].connectedNow(label));
+          toast(CONNECT[lang].connectedNow(tool));
           onClose();
         } else if (f.state === 'cancelled') onClose();
         // `none`: the board lost the sign-in (squad-kit restarted). Said as a failure, with Try again.
@@ -111,7 +113,7 @@ export function SignInCode({ name, label, onClose }: { name: string; label: stri
           </>
         ) : (
           <>
-            <p className="gh-muted">{w.code.sub(label)}</p>
+            <p className="gh-muted">{w.code.sub(label, page?.then[lang])}</p>
             <div className="gh-bigcode" dir="ltr">
               <span aria-label="One-time code">{flow.code}</span>
               <button className="btn sm" onClick={copy}>
@@ -129,7 +131,7 @@ export function SignInCode({ name, label, onClose }: { name: string; label: stri
               <button className="btn sm" onClick={cancel}>{w.code.cancel}</button>
               <Cmd text={`squad connect ${name}`} />
             </div>
-            <p className="gh-foot">{w.code.foot(label)}</p>
+            <p className="gh-foot">{page ? page.foot[lang] : w.code.foot(label)}</p>
           </>
         )}
       </div>

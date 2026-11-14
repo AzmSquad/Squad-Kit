@@ -30,9 +30,9 @@ import { SELF_DOCS_OFF, isSquadKitCode } from './self-project.js';
 const DOC_FILES = ['ticket.md', 'spec.md', 'questions.md', 'design.md', 'notes.md', 'proof.md', 'review.md'];
 
 /** git never asks for a password in the background; a code host module signs pushes in through its environment. */
-function gitEnv(bp: BoardPaths, t: Ticket): Record<string, string> {
+async function gitEnv(bp: BoardPaths, t: Ticket): Promise<Record<string, string>> {
   const target = repoTarget(bp, t);
-  return { GIT_TERMINAL_PROMPT: '0', ...(target ? (repoHostFor(bp, target.url)?.gitEnv() ?? {}) : {}) };
+  return { GIT_TERMINAL_PROMPT: '0', ...(target ? ((await repoHostFor(bp, target.url)?.gitEnv()) ?? {}) : {}) };
 }
 
 /**
@@ -42,7 +42,7 @@ function gitEnv(bp: BoardPaths, t: Ticket): Record<string, string> {
 export async function fetchBase(bp: BoardPaths, t: Ticket): Promise<string | undefined> {
   const target = repoTarget(bp, t);
   if (!target) return undefined;
-  await netGitLater(target.dir, ['fetch', '--quiet', target.remote, target.base], { env: gitEnv(bp, t), timeoutMs: 60_000 }).catch(() => undefined);
+  await netGitLater(target.dir, ['fetch', '--quiet', target.remote, target.base], { env: await gitEnv(bp, t), timeoutMs: 60_000 }).catch(() => undefined);
   return target.remote;
 }
 
@@ -76,7 +76,7 @@ export async function pushHandOver(bp: BoardPaths, t: Ticket): Promise<HandOverP
   }
   const target = repoTarget(bp, t);
   if (!target) throw new Error('This project has no shared copy of the code to send it to. An engineer can add one.');
-  const env = gitEnv(bp, t);
+  const env = await gitEnv(bp, t);
   const had = Boolean(t.worktree && fs.existsSync(t.worktree));
   const copy = had ? { dir: t.worktree!, branch: t.branch!, baseCommit: t.baseCommit } : await addWorktree(target.dir, t.id, target.base);
   const ticket: Ticket = { ...t, worktree: copy.dir, branch: copy.branch, baseCommit: t.baseCommit ?? copy.baseCommit };
@@ -276,7 +276,7 @@ export async function fetchPushed(bp: BoardPaths): Promise<PickedUp[]> {
   let fetched = false;
   if (remote) {
     const url = git(repo, ['config', '--get', `remote.${remote}.url`], { allowFail: true });
-    const env = { GIT_TERMINAL_PROMPT: '0', ...(url ? (repoHostFor(bp, url)?.gitEnv() ?? {}) : {}) };
+    const env = { GIT_TERMINAL_PROMPT: '0', ...(url ? ((await repoHostFor(bp, url)?.gitEnv()) ?? {}) : {}) };
     fetched = await netGitLater(repo, ['fetch', '--quiet', '--prune', remote], { env, timeoutMs: 60_000 }).then(
       () => true,
       () => false,

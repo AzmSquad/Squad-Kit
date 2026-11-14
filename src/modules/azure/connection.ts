@@ -1,43 +1,159 @@
-import type { ConnectionModule, ConnectionStatus } from '../connection/types.js';
+import type { ConnectionModule, ConnectionStatus, GuideStep, Words } from '../connection/types.js';
+import { git } from '../../engine/git.js';
+import { ModuleError } from '../errors.js';
+import { Azure, parseAzureRemote } from './client.js';
+import { azAccounts, azVersion, forgetAzVersion } from './az.js';
+import { cancelMicrosoftSignIn, microsoftSignInNow, signOutOfMicrosoft, startMicrosoftSignIn } from './device-sign-in.js';
+import { azurePlace } from './sign-in.js';
+import { forgetTenants, orgTenant } from './tenant.js';
 import { azureTracker } from './tracker.js';
+import { forgetMicrosoftTokens, microsoftToken } from './token.js';
 
 /**
- * Azure DevOps on the Connections page: today a token the person makes on Azure DevOps and pastes, saved on this computer
- * only (the tracker's own settings). Signing in with Microsoft comes next and is only shown as coming.
+ * Azure DevOps on the Connections page (ADR-011): "Sign in with Microsoft" through Microsoft's own tool, az, kept in
+ * squad-kit's own folder, with a pasted token as the other way. A token saved for the project wins. An organization not
+ * on Microsoft Entra says plainly that it needs a token. What az or Azure DevOps answers is kept a minute; a tool that
+ * did not answer is never taken as signed out.
  */
 
 const KEEP_MS = 60_000;
 let kept: { at: number; root: string; status: ConnectionStatus } | null = null;
 
-const STEPS: ConnectionStatus['steps'] = [
+const TOKEN_STEPS: GuideStep[] = [
   { text: { en: 'On Azure DevOps, open User settings, then Personal access tokens.', ar: 'في Azure DevOps افتح User settings ثم Personal access tokens.' } },
   { text: { en: 'Make a new token with Work Items and Code: read, write and manage.', ar: 'سوّ رمز جديد فيه Work Items وCode: قراءة وكتابة وإدارة.' } },
   { text: { en: 'Paste it with your organization and project, then press Save and check.', ar: 'الصقه مع اسم المنظمة والمشروع، واضغط احفظ وافحص.' }, command: 'squad config set tracker' },
 ];
 
+/** The install command Microsoft gives for this computer: Homebrew on a Mac, winget on Windows; Linux has its page. */
+function installCommand(): string | undefined {
+  if (process.platform === 'darwin') return 'brew install azure-cli';
+  if (process.platform === 'win32') return 'winget install --exact --id Microsoft.AzureCLI';
+  return undefined;
+}
+
+function signInSteps(found: string | null, who?: string): GuideStep[] {
+  const command = installCommand();
+  return [
+    {
+      text: { en: "Install Microsoft's Azure tool", ar: 'ثبّت أداة Azure من Microsoft' },
+      ...(command ? { command } : {}),
+      page: '/tools#az',
+      ...(found ? { done: { en: `Found az ${found}`, ar: `لقينا az ${found}` } } : {}),
+    },
+    {
+      text: { en: 'Sign in with Microsoft from a terminal', ar: 'سجّل الدخول بـ Microsoft من الطرفية' },
+      command: 'squad connect azure',
+      ...(who ? { done: { en: `Signed in as ${who}`, ar: `مسجّل باسم ${who}` } } : {}),
+    },
+  ];
+}
+
+const LINES = {
+  tokenFailed: { en: 'The token saved in Settings did not work. Paste a new one there.', ar: 'الرمز المحفوظ في الإعدادات ما اشتغل. الصق رمز جديد هناك.' },
+  personal: (org: string): Words => ({
+    en: `${org} is not on Microsoft Entra, so it needs a token. Make one on Azure DevOps and paste it in Settings.`,
+    ar: `${org} مو على Microsoft Entra، فيحتاج رمز. سوّه في Azure DevOps والصقه في الإعدادات.`,
+  }),
+  notFound: (org: string): Words => ({
+    en: `squad-kit could not find the organization ${org} on Azure DevOps. Check its name in Settings.`,
+    ar: `squad-kit ما لقى المنظمة ${org} في Azure DevOps. تأكد من اسمها في الإعدادات.`,
+  }),
+  noAccess: (who: string, org: string): Words => ({
+    en: `Signed in as ${who}, which has no access to ${org}. Sign in with the Microsoft account that owns ${org}.`,
+    ar: `مسجّل باسم ${who}، وهذا الحساب ما يوصل لـ ${org}. سجّل الدخول بحساب Microsoft اللي يملك ${org}.`,
+  }),
+  ended: { en: 'The Microsoft sign-in has ended. Sign in with Microsoft again.', ar: 'انتهى تسجيل الدخول بـ Microsoft. سجّل الدخول مرة ثانية.' },
+};
+
+/** The organization and project this project works with, and its saved token; else its own Azure remote's. */
+function placeOf(root: string): { organization?: string; project?: string; pat?: string } {
+  const p = azurePlace(root);
+  if (p?.organization) return p;
+  // Through the engine's one git runner (git-safety); a folder with no repo answers nothing.
+  const where = parseAzureRemote(git(root, ['config', '--get', 'remote.origin.url'], { allowFail: true }).trim());
+  return where ? { organization: where.organization, project: where.project } : {};
+}
+
+async function look(root: string): Promise<ConnectionStatus> {
+  const { organization: org, project, pat } = placeOf(root);
+  // A saved token wins: it is the person's own choice for this project.
+  if (pat && org) {
+    const account = await new Azure({ organization: org, project: project ?? '', pat }).whoAmI().catch(() => null);
+    return account ? { state: 'connected', account, by: 'token', steps: TOKEN_STEPS } : { state: 'not-connected', by: 'token', line: LINES.tokenFailed, steps: TOKEN_STEPS };
+  }
+  const found = await azVersion();
+  if (!found) return { state: 'missing', steps: signInSteps(null) };
+  const tenant = org ? await orgTenant(org) : null;
+  if (org && tenant?.kind === 'personal') return { state: 'not-connected', by: 'token', line: LINES.personal(org), steps: TOKEN_STEPS };
+  if (org && tenant?.kind === 'not-found') return { state: 'not-connected', line: LINES.notFound(org), steps: signInSteps(found) };
+  const t = await microsoftToken(tenant?.kind === 'entra' ? tenant.tenant : undefined);
+  const accounts = azAccounts();
+  const who = accounts[0]?.user;
+  if (!t.ok) {
+    if (t.why === 'missing') return { state: 'missing', steps: signInSteps(null) };
+    if (t.why === 'no-answer') return { state: 'unknown', steps: signInSteps(found, who) };
+    if (t.why === 'signed-out' || !who) return { state: 'not-connected', steps: signInSteps(found) };
+    // Signed in, but no token for this directory: the account is not in it, or the sign-in ended.
+    const outside = org && tenant?.kind === 'entra' && !accounts.some((a) => a.tenant.toLowerCase() === tenant.tenant);
+    return { state: 'not-connected', line: outside ? LINES.noAccess(who, org) : LINES.ended, steps: signInSteps(found) };
+  }
+  if (!org) return { state: 'connected', account: who ?? 'Microsoft', steps: signInSteps(found, who) };
+  try {
+    const name = await new Azure({ organization: org, project: project ?? '', bearer: async () => t.token }).whoAmI();
+    return { state: 'connected', account: name, steps: signInSteps(found, who) };
+  } catch (err) {
+    if (err instanceof ModuleError && err.kind === 'sign-in') return { state: 'not-connected', line: LINES.noAccess(who ?? 'Microsoft', org), steps: signInSteps(found) };
+    return { state: 'unknown', steps: signInSteps(found, who) };
+  }
+}
+
 async function status(root: string): Promise<ConnectionStatus> {
   if (kept && kept.root === root && Date.now() - kept.at < KEEP_MS) return kept.status;
-  const tracker = azureTracker.open(root);
-  let s: ConnectionStatus = { state: 'not-connected', steps: STEPS };
-  if (tracker) {
-    const account = await tracker.whoAmI().catch(() => null);
-    if (account) s = { state: 'connected', account, steps: STEPS };
-  }
+  let s = await look(root).catch((): ConnectionStatus => ({ state: 'unknown', steps: signInSteps(null) }));
+  // No answer just now: the last answer stays, never a sign-out.
+  if (s.state === 'unknown' && kept?.root === root) s = kept.status;
   kept = { at: Date.now(), root, status: s };
   return s;
+}
+
+/** Check again: az, the organization's directory and the token are all asked afresh. */
+function forget(): void {
+  kept = null;
+  forgetAzVersion();
+  forgetTenants();
+  forgetMicrosoftTokens();
 }
 
 export const azureConnection: ConnectionModule = {
   name: 'azure',
   label: 'Azure DevOps',
   what: { en: 'Boards and Repos', ar: 'Boards وRepos' },
-  how: 'token',
+  how: 'sign-in',
   tracker: azureTracker.name,
-  next: { en: 'Sign in with Microsoft', ar: 'سجّل الدخول بـ Microsoft' },
+  codePage: {
+    name: 'Microsoft',
+    then: { en: 'pick your work account and press Continue', ar: 'اختر حساب العمل واضغط Continue' },
+    foot: {
+      en: "This sign-in is squad-kit's own, kept apart from any other Azure sign-in on this computer. squad-kit uses it for Azure DevOps only, and you can take it back at any time.",
+      ar: 'هذا التسجيل خاص بـ squad-kit، منفصل عن أي تسجيل Azure ثاني على هذا الجهاز. squad-kit يستخدمه لـ Azure DevOps بس، وتقدر تسحبه في أي وقت.',
+    },
+  },
+  ownSignIn: true,
   can: [
     { en: 'Pull stories, move them along and file bugs', ar: 'يسحب القصص ويحرّكها ويسجّل الأخطاء' },
     { en: 'Open a pull request for each finished story', ar: 'يفتح طلب دمج لكل قصة تخلص' },
   ],
+  repoName(remoteUrl) {
+    const where = parseAzureRemote(remoteUrl);
+    return where ? `${where.project}/${where.repo}` : null;
+  },
   status,
-  forget: () => (kept = null),
+  forget,
+  signIn: {
+    start: (root) => startMicrosoftSignIn(placeOf(root).organization, () => (kept = null)),
+    now: microsoftSignInNow,
+    cancel: cancelMicrosoftSignIn,
+  },
+  signOut: () => signOutOfMicrosoft(),
 };

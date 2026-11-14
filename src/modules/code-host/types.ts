@@ -74,8 +74,11 @@ export interface RepoHost {
   /** The repo's name on the host. */
   readonly repo: string;
   readonly abilities: { attachImages: boolean };
-  /** Environment variables that let git push sign in, without writing the token to any git file. */
-  gitEnv(): Record<string, string>;
+  /**
+   * Environment variables that let git push sign in, without writing the token to any git file. A host whose sign-in
+   * gives short-lived tokens answers with a promise: it asks for a fresh one first.
+   */
+  gitEnv(): Record<string, string> | Promise<Record<string, string>>;
   /** The open pull request from a branch, so a retry does not open a second one. */
   findPullRequest(source: string): Promise<PullRequest | null>;
   /**

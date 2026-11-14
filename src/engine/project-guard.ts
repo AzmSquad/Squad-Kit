@@ -6,8 +6,8 @@ import path from 'node:path';
 import type { BoardPaths } from '../board/store.js';
 import type { ProjectGuard } from '../board/types.js';
 import { AI_TOOLS, BROWSERS } from '../modules/registry.js';
-import { squadHome, squadHomes } from '../core/home.js';
-import { childEnv, noGithubSignIn } from './agent-env.js';
+import { ownAzureFolder, squadHome, squadHomes } from '../core/home.js';
+import { childEnv, noToolSignIn } from './agent-env.js';
 import { copyDbEnv } from './db-env.js';
 import { partEnv } from './part-env.js';
 import { ownHomeEnv } from './own-home.js';
@@ -232,10 +232,10 @@ export function privatePlaces(home: string, platform: NodeJS.Platform): string[]
 /**
  * What no agent may read or change, wherever it works. The sandbox covers a step's shell commands only, and read-only
  * agents have none, so their file tools need this too. squad-kit's own folder holds what agents must read, so only its
- * secrets are named: the sign-ins and link tokens of the app and of every project.
+ * secrets are named: the sign-ins and link tokens of the app and of every project, and its own Microsoft sign-in.
  */
 export function agentPrivatePlaces(home: string = os.homedir(), platform: NodeJS.Platform = process.platform): string[] {
-  return [...privatePlaces(home, platform), ...squadHomes(home).flatMap((own) => [...['secrets.yaml', 'app.json', 'console.json'].map((f) => path.join(own, f)), ...['secrets.yaml', 'console.json'].map((f) => path.join(own, 'projects', '*', f))])];
+  return [...privatePlaces(home, platform), ...squadHomes(home).flatMap((own) => [...['secrets.yaml', 'app.json', 'console.json'].map((f) => path.join(own, f)), ...['secrets.yaml', 'console.json'].map((f) => path.join(own, 'projects', '*', f)), ownAzureFolder(own)])];
 }
 
 /**
@@ -557,14 +557,14 @@ export function isSecretEnv(name: string, names = secretEnvNames()): boolean {
 /**
  * The environment the project's own commands run with: every agent's environment (childEnv, which already drops the
  * subscription and engine keys) minus squad-kit's own variables, the AI tools' keys and the common cloud and
- * code-host tokens, with GitHub's tool given no sign-in again (agent-env.ts noGithubSignIn). Everything an app commonly needs (PATH, HOME, LANG, NODE_OPTIONS, DATABASE_URL and the like) is
+ * code-host tokens, with GitHub's and Microsoft's tools given no sign-in again (agent-env.ts noToolSignIn). Everything an app commonly needs (PATH, HOME, LANG, NODE_OPTIONS, DATABASE_URL and the like) is
  * kept, so only secrets are removed, never the ordinary settings a build or a test reads.
  */
 export function projectEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   const names = secretEnvNames();
   const env = childEnv();
   for (const key of Object.keys(env)) if (isSecretEnv(key, names)) delete env[key];
-  return { ...env, ...noGithubSignIn(), ...extra };
+  return { ...env, ...noToolSignIn(), ...extra };
 }
 
 /* ── the single gate: every project command spawns here ──── */

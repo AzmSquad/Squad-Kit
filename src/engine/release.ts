@@ -146,13 +146,13 @@ export async function liveRelease(bp: BoardPaths, release: Release, tickets: Tic
   const order = repoOrder(meta);
   const place = (repo: string) => (order.includes(repo) ? order.indexOf(repo) : order.length);
   const inOrder = [...groups.values()].sort((a, b) => place(a.repo.path) - place(b.repo.path));
-  const plans = inOrder.map(({ repo, tickets: list }) => {
+  const plans = await Promise.all(inOrder.map(async ({ repo, tickets: list }) => {
     const repoRoot = path.join(root, repo.path);
     const remote = repo.remote || remotes(repoRoot)[0];
     const url = remote ? git(repoRoot, ['config', '--get', `remote.${remote}.url`], { allowFail: true }) : '';
     const host = url ? repoHostFor(bp, url) : null;
-    return { repo, repoRoot, list, host, env: host?.gitEnv() ?? {}, leave: leaving.filter((t) => repoFor(meta, t).path === repo.path) };
-  });
+    return { repo, repoRoot, list, host, env: (await host?.gitEnv()) ?? {}, leave: leaving.filter((t) => repoFor(meta, t).path === repo.path) };
+  }));
   // One pull request the host cannot merge would stop the release halfway: look for those first, before anything changes.
   for (const { repo, repoRoot, list, host, leave } of plans) {
     const clashing: string[] = [];
@@ -425,7 +425,7 @@ export async function pushAgain(bp: BoardPaths, release: Release): Promise<Relea
     const repoRoot = path.join(root, u.repo);
     const url = git(repoRoot, ['config', '--get', `remote.${u.remote}.url`], { allowFail: true });
     const host = url ? repoHostFor(bp, url) : null;
-    const env = host?.gitEnv() ?? {};
+    const env = (await host?.gitEnv()) ?? {};
     const lines: ReleaseLog = [];
     try {
       // A later release may have taken this commit to the remote already: then only the tag is left to send.
@@ -496,7 +496,7 @@ export async function versionOnRemote(bp: BoardPaths, release: Pick<Release, 've
     const remote = repo.remote || remotes(repoRoot)[0];
     if (!remote) continue;
     const url = git(repoRoot, ['config', '--get', `remote.${remote}.url`], { allowFail: true });
-    const env = url ? (repoHostFor(bp, url)?.gitEnv() ?? {}) : {};
+    const env = url ? ((await repoHostFor(bp, url)?.gitEnv()) ?? {}) : {};
     if ((await netGitLater(repoRoot, ['ls-remote', '--tags', remote, `refs/tags/${release.version}`], { env, allowFail: true })).trim()) return true;
   }
   return false;
@@ -515,7 +515,7 @@ export function pushDetail(message: string, at: { remote: string; base: string; 
 export async function onTheRemote(bp: BoardPaths, u: UnpushedRelease): Promise<{ there: 'yes' | 'no' | 'no-answer'; why?: string }> {
   const repoRoot = path.join(projectRoot(bp), u.repo);
   const url = git(repoRoot, ['config', '--get', `remote.${u.remote}.url`], { allowFail: true });
-  const env = url ? (repoHostFor(bp, url)?.gitEnv() ?? {}) : {};
+  const env = url ? ((await repoHostFor(bp, url)?.gitEnv()) ?? {}) : {};
   let tip: string;
   try {
     tip = await fetchedTip(repoRoot, u.remote, u.base, { env, timeoutMs: 30_000 });

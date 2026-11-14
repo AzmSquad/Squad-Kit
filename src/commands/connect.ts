@@ -1,7 +1,7 @@
 import kleur from 'kleur';
 import { confirm } from '@inquirer/prompts';
 import * as ui from '../ui/index.js';
-import { cancelSignIn, connectionsOf, disconnect, signInNow, startSignIn, type ConnectionRow } from '../engine/connections.js';
+import { cancelSignIn, connectionInfo, connectionsOf, disconnect, signInNow, startSignIn, type ConnectionRow } from '../engine/connections.js';
 import { board } from './board.js';
 
 const out = (s = '') => process.stdout.write(`${s}\n`);
@@ -21,6 +21,7 @@ export function connectionLines(rows: ConnectionRow[]): string[] {
   for (const r of rows) {
     lines.push('', `  ${kleur.bold(r.label)}  ${STATE[r.state]}${r.account ? ` as ${r.account}` : ''}`, grey(`    ${r.what.en}`));
     if (r.for) lines.push(`    For ${r.for.repo}${r.for.into && r.for.into !== r.for.repo ? `: pull requests into ${r.for.into}` : ''}`);
+    if (r.line) lines.push(`    ${r.line.en}`);
     if (r.state !== 'connected') r.steps.forEach((s, i) => lines.push(`    ${i + 1}. ${s.text.en}${s.command ? `: ${kleur.green(s.command)}` : ''}${s.done ? grey(` (${s.done.en})`) : ''}`));
     for (const a of r.actions.filter((x) => x.id !== 'check')) lines.push(`    ${a.name}: ${kleur.green(a.command)}`);
   }
@@ -43,7 +44,9 @@ export async function runConnect(name: string | undefined, opts: { status?: bool
   const f = await startSignIn(bp, name);
   if (f.state === 'failed') throw new Error(f.line ?? 'The sign-in did not start.');
   out();
-  out(`  Open ${kleur.underline(f.url ?? '')} and type this code, then press Authorize:`);
+  // The tool's page says what to press: Authorize on GitHub, Continue on Microsoft's.
+  const page = connectionInfo(name).codePage;
+  out(`  Open ${kleur.underline(f.url ?? '')} and type this code, then ${page ? page.then.en : 'press Authorize'}:`);
   out();
   out(`      ${kleur.bold(f.code ?? '')}`);
   out();
@@ -75,8 +78,11 @@ export async function runDisconnect(name: string, opts: { yes?: boolean }): Prom
   const bp = board();
   if (!opts.yes) {
     const asks = process.stdin.isTTY && process.env.CI !== 'true';
-    if (!asks) throw new Error(`This signs ${name}'s tool out on this computer, for every app that uses it. To do it: squad disconnect ${name} --yes`);
-    const ok = await confirm({ message: `Sign ${name}'s tool out on this computer? Every app here that uses it is signed out too.`, default: false });
+    // squad-kit's own sign-in ends for squad-kit only; a tool's own sign-in ends for every app that uses it.
+    const own = connectionInfo(name).ownSignIn;
+    const what = own ? `This signs squad-kit out of ${name} on this computer. Your other sign-ins stay as they are.` : `This signs ${name}'s tool out on this computer, for every app that uses it.`;
+    if (!asks) throw new Error(`${what} To do it: squad disconnect ${name} --yes`);
+    const ok = await confirm({ message: own ? `Sign squad-kit out of ${name} on this computer?` : `Sign ${name}'s tool out on this computer? Every app here that uses it is signed out too.`, default: false });
     if (!ok) return;
   }
   ui.success((await disconnect(bp, name)).line);

@@ -10,7 +10,7 @@ import type { Platform, ProjectKind } from './kinds.js';
 export type ToolAction = 'build' | 'checks' | 'pictures' | 'start-app' | 'try-it' | 'pull-request';
 export type Priority = 'required' | 'recommended' | 'optional';
 export type System = 'mac' | 'windows' | 'linux';
-export type ToolId = 'git' | 'ai-tool' | 'flutter' | 'xcode' | 'simulator' | 'cocoapods' | 'android' | 'maestro' | 'java' | 'android-studio' | 'docker' | 'gh';
+export type ToolId = 'git' | 'ai-tool' | 'flutter' | 'xcode' | 'simulator' | 'cocoapods' | 'android' | 'maestro' | 'java' | 'android-studio' | 'docker' | 'gh' | 'az';
 /** Another tool that looks after a copy you installed, and updates it itself. */
 export type ManagedBy = 'homebrew' | 'fvm' | 'snap';
 
@@ -261,6 +261,20 @@ export const CATALOG: ToolEntry[] = [
     },
     link: 'https://cli.github.com',
   },
+  {
+    id: 'az',
+    name: "Microsoft's Azure tool (az)",
+    gives: 'signs in to Azure DevOps with your Microsoft account, instead of a token you paste. squad-kit keeps its own sign-in, apart from yours',
+    needs: [{ kinds: ['azure'], priority: 'optional', for: ['pull-request'] }],
+    installer: 'you',
+    why: 'it signs in to Microsoft as you, which only you can do',
+    steps: {
+      mac: ['Open a terminal.', "Run: brew install azure-cli. Without Homebrew, follow Microsoft's install page.", 'Open Connections and press Sign in with Microsoft.', CHECK_AGAIN],
+      windows: ['Open a terminal.', 'Run: winget install --exact --id Microsoft.AzureCLI', OPEN_AGAIN, 'Open Connections and press Sign in with Microsoft.'],
+      linux: ["Open Microsoft's install page and follow the steps for your Linux.", 'Open Connections and press Sign in with Microsoft.', CHECK_AGAIN],
+    },
+    link: 'https://learn.microsoft.com/cli/azure/install-azure-cli',
+  },
 ];
 
 export function toolEntry(id: string): ToolEntry | undefined {
@@ -276,6 +290,7 @@ export const KIND_WORDS: Record<ProjectKind, string> = {
   android: 'an Android app',
   docker: 'Docker files',
   github: 'code kept on GitHub',
+  azure: 'code kept on Azure Repos',
 };
 
 export const PLATFORM_WORDS: Record<Platform, string> = { ios: 'iPhone', android: 'Android', web: 'web' };

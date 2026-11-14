@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Sign in with Microsoft for Azure DevOps.** On the Connections page, Azure DevOps now signs in with a button, the way
+  GitHub does: squad-kit runs Microsoft's own Azure tool and shows its short code to type on Microsoft's page, then you
+  pick your work account. No token to make or paste. A token still works: **Use a token instead** opens the same form in
+  Settings, and a token saved there is used first. Terminal: `squad connect azure`, `squad disconnect azure`.
+- **squad-kit keeps its own Microsoft sign-in,** apart from yours: it never reads or changes your other Azure sign-ins
+  on this computer, and Disconnect signs out squad-kit only. The token stays in memory and is never written down.
+- **Plain words for each case:** Microsoft's tool not installed (with the steps, and a line on the Tools page), an
+  account that cannot reach the organization ("Sign in with the Microsoft account that owns it"), and an organization
+  that is not on Microsoft Entra, which needs a token.
+
 ## [1.3.21] — 2026-11-13
 
 ### Added

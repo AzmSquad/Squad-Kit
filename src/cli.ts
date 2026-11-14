@@ -631,7 +631,7 @@ program.command('check-merge <ticket>').description("Check again: ask the code h
 program.command('pr <ticket>').description("A story's pull request: where it went, where it stands, and the owner's notes").option('--fix', "Fix these: the Builder fixes the owner's notes, and the fix goes to the same pull request").option('--leave', "I answered them on the code host: the owner's notes are answered, and squad-kit waits for the owner again").option('--leave-closed', 'The owner closed it: leave it closed').action(wrapArgs(runPr));
 program.command('contribute').description("squad-kit's own code: where you are, and the checklist before your first pull request").option('--fork', 'Make your own copy (a fork) of the main repo (with --sync: do both)').option('--sync', 'Bring your copy up to date with the main repo').option('--idea <title>', 'A big idea: print the new issue page that tells the maintainers first, filled in').option('--text <words>', 'With --idea: the idea in a few lines').action(wrap(runContribute));
 program.command('connect [tool]').description("Outside tools: each one's state, or sign in to one with its own sign-in (a code you type on its page)").option('--status', 'Every outside tool and its state on this computer').action(wrapArgs(runConnect));
-program.command('disconnect <tool>').description("Sign an outside tool out on this computer, for every app that uses it").option('-y, --yes', 'Do not ask first').action(wrapArgs(runDisconnect));
+program.command('disconnect <tool>').description("Sign an outside tool out on this computer: its own tool's sign-in, or squad-kit's own").option('-y, --yes', 'Do not ask first').action(wrapArgs(runDisconnect));
 program
   .command('branches')
   .description('Show the old branches of released tickets')

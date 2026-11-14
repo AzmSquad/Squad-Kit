@@ -121,6 +121,13 @@ export interface SignInFlow {
   account?: string;
 }
 
+/** The page the code is typed on, when it is not the tool's own. */
+export interface CodePage {
+  name: string;
+  then: Words;
+  foot: Words;
+}
+
 export interface ConnectionRow {
   name: string;
   label: string;
@@ -128,10 +135,17 @@ export interface ConnectionRow {
   how: 'sign-in' | 'token' | 'soon';
   can: Words[];
   next?: Words;
+  /** A sign-in that also takes a token instead: that token goes in Settings. */
   tracker?: string;
+  codePage?: CodePage;
+  /** squad-kit's own sign-in: Disconnect signs only squad-kit out. */
+  ownSignIn?: boolean;
   state: 'connected' | 'not-connected' | 'missing' | 'unknown' | 'soon';
   account?: string;
   steps: GuideStep[];
+  /** 'token': the token in Settings is the way here. */
+  by?: 'token';
+  line?: Words;
   for?: { repo: string; into?: string; self: boolean };
   flow?: SignInFlow;
   actions: { id: 'sign-in' | 'disconnect' | 'check'; name: string; command: string }[];

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { Azure, gitAuthEnv, htmlToText, parseAzureRemote, pickState } from '../src/modules/azure/client.js';
+import { Azure, htmlToText, parseAzureRemote, pickState } from '../src/modules/azure/client.js';
+import { gitAuthEnv } from '../src/modules/azure/sign-in.js';
 
 type Route = { method: string; match: RegExp; reply: unknown | ((body: unknown) => unknown); status?: number };
 
@@ -157,12 +158,12 @@ describe('Azure helpers', () => {
     expect(parseAzureRemote('https://github.com/a/b.git')).toBeNull();
   });
 
-  it('gives git the token through env vars only for Azure https remotes', () => {
-    const env = gitAuthEnv('secret', 'https://dev.azure.com/momenysr/Mawid/_git/Mawid');
+  it('gives git the token through env vars only for Azure https remotes', async () => {
+    const env = await gitAuthEnv({ pat: 'secret' }, 'https://dev.azure.com/momenysr/Mawid/_git/Mawid');
     expect(env.GIT_CONFIG_KEY_0).toBe('http.https://dev.azure.com/.extraheader');
     expect(env.GIT_CONFIG_VALUE_0).toBe('AUTHORIZATION: Basic ' + Buffer.from(':secret').toString('base64'));
-    expect(gitAuthEnv('secret', 'https://github.com/a/b.git')).toEqual({});
-    expect(gitAuthEnv(undefined, 'https://dev.azure.com/momenysr/Mawid/_git/Mawid')).toEqual({});
+    expect(await gitAuthEnv({ pat: 'secret' }, 'https://github.com/a/b.git')).toEqual({});
+    expect(await gitAuthEnv({}, 'https://dev.azure.com/momenysr/Mawid/_git/Mawid')).toEqual({});
   });
 
   it('turns Azure HTML into plain text', () => {

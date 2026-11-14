@@ -59,7 +59,7 @@ function Guide({ row, lang, open, onCheck, checking }: { row: ConnectionRow; lan
             </button>
             <Cmd text="squad connect --status" />
           </div>
-          <p className="gh-small">{w.stepFoot(row.label)}</p>
+          {row.by !== 'token' && <p className="gh-small">{w.stepFoot(row.codePage?.name ?? row.label, row.label)}</p>}
         </>
       )}
     </details>
@@ -67,13 +67,24 @@ function Guide({ row, lang, open, onCheck, checking }: { row: ConnectionRow; lan
 }
 
 /** A token is pasted where the tracker is chosen, in Settings: one place for it, never a second form here. */
-function InSettings({ label, lang }: { label: string; lang: Lang }) {
+function InSettings({ line, lang }: { line?: string; lang: Lang }) {
+  return (
+    <div className="gh-row">
+      {line && <span className="gh-muted">{line}</span>}
+      <Link to="/settings" hash="tracker" className="btn sm">
+        {CONNECT[lang].openSettings}
+      </Link>
+    </div>
+  );
+}
+
+/** The other way for a sign-in that also takes a token: a quiet link to the token form in Settings. */
+function TokenInstead({ lang }: { lang: Lang }) {
   const w = CONNECT[lang];
   return (
     <div className="gh-row">
-      <span className="gh-muted">{w.tokenInSettings(label)}</span>
-      <Link to="/settings" hash="tracker" className="btn sm">
-        {w.openSettings}
+      <Link to="/settings" hash="tracker" className="gh-link" title={w.tokenOther}>
+        {w.useToken}
       </Link>
     </div>
   );
@@ -92,7 +103,7 @@ function Disconnect({ row, lang, onClose }: { row: ConnectionRow; lang: Lang; on
     <div className="modal-veil" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal gh-code" role="alertdialog" aria-modal="true" aria-label={w.head(row.label)} dir={lang === 'ar' ? 'rtl' : 'ltr'} lang={lang}>
         <h2>{w.head(row.label)}</h2>
-        <p className="gh-muted">{w.body(row.label, row.account ?? '')}</p>
+        <p className="gh-muted">{row.ownSignIn ? w.own(row.label, row.account ?? '') : w.body(row.label, row.account ?? '')}</p>
         <div className="gh-row">
           <button
             className="btn sm danger"
@@ -145,7 +156,7 @@ export function ConnectionCard({ row, at, lang, onSignIn, onCheck, checking }: {
               </li>
             ))}
           </ul>
-          {row.how === 'token' && <InSettings label={row.label} lang={lang} />}
+          {(row.how === 'token' || row.by === 'token') && <InSettings line={row.by === 'token' ? w.byToken : w.tokenInSettings(row.label)} lang={lang} />}
         </>
       ) : row.how === 'soon' ? (
         <>
@@ -163,19 +174,27 @@ export function ConnectionCard({ row, at, lang, onSignIn, onCheck, checking }: {
               <span className="gh-next">{w.nextTag}</span>
             </div>
           )}
-          <InSettings label={row.label} lang={lang} />
+          <InSettings line={w.tokenInSettings(row.label)} lang={lang} />
           <Guide row={row} lang={lang} open={false} onCheck={onCheck} checking={checking} />
         </>
       ) : (
         <>
-          {row.state === 'unknown' ? <p>{w.unknownLine(row.label)}</p> : row.for && <p>{w.forWhat(row.for)}</p>}
+          {row.line ? (
+            <p>{row.line[lang]}</p>
+          ) : row.state === 'unknown' ? (
+            <p>{w.unknownLine(row.codePage?.name ?? row.label)}</p>
+          ) : (
+            row.for && <p>{w.forWhat(row.for)}</p>
+          )}
           {signIn && (
             <div className="gh-row">
-              <button className="btn pri" onClick={onSignIn}>{w.code.head(row.label)}</button>
+              <button className="btn pri" onClick={onSignIn}>{w.code.head(row.codePage?.name ?? row.label)}</button>
               <Cmd text={signIn.command} />
             </div>
           )}
-          <Guide row={row} lang={lang} open={row.state === 'missing' || row.state === 'unknown'} onCheck={onCheck} checking={checking} />
+          {/* A sign-in that also takes a token: the token is the way here, or the other way. */}
+          {row.tracker && (row.by === 'token' ? <InSettings lang={lang} /> : <TokenInstead lang={lang} />)}
+          <Guide row={row} lang={lang} open={row.state === 'missing' || row.state === 'unknown' || row.by === 'token'} onCheck={onCheck} checking={checking} />
         </>
       )}
       {off && <Disconnect row={row} lang={lang} onClose={() => setOff(false)} />}

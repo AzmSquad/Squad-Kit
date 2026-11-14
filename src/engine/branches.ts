@@ -91,14 +91,14 @@ export async function cleanBranches(bp: BoardPaths, opts: { remote?: boolean; on
   for (const repo of reposOf(readMeta(bp))) {
     const root = path.join(bp.root, repo.path);
     const remote = isRepo(root) ? repo.remote || remotes(root)[0] : undefined;
-    if (remote) await netGitLater(root, ['fetch', '--prune', remote], { env: hostEnv(bp, root, remote), allowFail: true });
+    if (remote) await netGitLater(root, ['fetch', '--prune', remote], { env: await hostEnv(bp, root, remote), allowFail: true });
   }
   const plan = oldBranches(bp, opts.only);
   const { deleted, failed } = deleteHere(bp, plan);
   for (const b of plan.remote) {
     const root = path.join(bp.root, b.repo);
     try {
-      await netGitLater(root, ['push', `--force-with-lease=refs/heads/${b.branch}:${b.sha}`, b.remote!, '--delete', b.branch], { env: hostEnv(bp, root, b.remote!) });
+      await netGitLater(root, ['push', `--force-with-lease=refs/heads/${b.branch}:${b.sha}`, b.remote!, '--delete', b.branch], { env: await hostEnv(bp, root, b.remote!) });
       deleted.push(`${b.remote}/${b.branch}`);
     } catch (err) {
       failed.push(`${b.remote}/${b.branch}: ${(err as Error).message}`);
@@ -129,7 +129,7 @@ function deleteHere(bp: BoardPaths, plan: BranchPlan): { deleted: string[]; fail
   return { deleted, failed };
 }
 
-function hostEnv(bp: BoardPaths, root: string, remote: string): Record<string, string> {
+async function hostEnv(bp: BoardPaths, root: string, remote: string): Promise<Record<string, string>> {
   const url = git(root, ['config', '--get', `remote.${remote}.url`], { allowFail: true });
-  return url ? (repoHostFor(bp, url)?.gitEnv() ?? {}) : {};
+  return url ? ((await repoHostFor(bp, url)?.gitEnv()) ?? {}) : {};
 }

@@ -49,6 +49,9 @@ describe("the person's keys and sign-ins", () => {
     expect(places()).toContain(path.join(own, 'secrets.yaml'));
     expect(places()).toContain(path.join(own, 'app.json'));
     expect(places()).toContain(path.join(own, 'projects', '*', 'secrets.yaml'));
+    // squad-kit's own Microsoft sign-in (ADR-011), kept apart from the person's ~/.azure, which is hidden too.
+    expect(places()).toContain(path.join(own, 'azure-cli'));
+    expect(places()).toContain(path.join(home, '.azure'));
     // Agents read a story's pictures and a BRD's pages from squad-kit's own folder.
     expect(places()).not.toContain(own);
   });

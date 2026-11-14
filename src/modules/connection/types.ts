@@ -1,8 +1,8 @@
 /**
  * A connection: the person's sign-in to an outside tool on this computer, for the Connections page (ADR-002). squad-kit
- * keeps no password. A tool signs in through its own way (a code the person types on the tool's page), takes a token
- * the person pastes, or is shown as coming in a next version. Each product's words come in English and Arabic, so the
- * board names no product.
+ * keeps no password. A tool signs in through its own way (a code the person types on the tool's page), with a pasted
+ * token as the other way for some, takes a token the person pastes, or is shown as coming in a next version. Each
+ * product's words come in English and Arabic, so the board names no product.
  */
 
 /** Words for people, in both of the board's languages. */
@@ -33,6 +33,24 @@ export interface ConnectionStatus {
   /** Who is signed in, when connected. */
   account?: string;
   steps: GuideStep[];
+  /**
+   * For a sign-in that also takes a pasted token: 'token' when the token is the way here, because one is saved (it
+   * wins), or because this place cannot sign in (an Azure DevOps organization not on Microsoft Entra). No sign-in
+   * button and no Disconnect then: the token is changed in Settings.
+   */
+  by?: 'token';
+  /** One plain line for this case: "Signed in as …, which has no access to …". */
+  line?: Words;
+}
+
+/** The page the one-time code is typed on, when it is not the tool's own: Microsoft's, for Azure DevOps. */
+export interface CodePage {
+  /** "Microsoft": the button says "Sign in with Microsoft". */
+  name: string;
+  /** What to do on that page once the code is typed: "pick your work account, then press Continue". */
+  then: Words;
+  /** What squad-kit gets, under the code. */
+  foot: Words;
 }
 
 /**
@@ -62,9 +80,16 @@ export interface ConnectionModule {
   how: 'sign-in' | 'token' | 'soon';
   /** What squad-kit can do once it is connected. */
   can: Words[];
-  /** The tracker module this connection's token belongs to, for `token`. */
+  /** The tracker module whose Settings take this connection's token: for `token`, and for a sign-in that takes one instead. */
   tracker?: string;
-  /** The next way to connect, shown as coming: "Sign in with Microsoft". */
+  /** The page the code is typed on, when it is not the tool's own. */
+  codePage?: CodePage;
+  /**
+   * The sign-in is squad-kit's own, kept apart from the person's own sign-ins with the same tool: Disconnect signs only
+   * squad-kit out.
+   */
+  ownSignIn?: boolean;
+  /** The next way to connect, shown as coming: "Sign in with Atlassian". */
   next?: Words;
   /** "owner/name" of a git remote on this tool, so the page can say what it is for. */
   repoName?(remoteUrl: string): string | null;

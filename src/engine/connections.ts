@@ -2,7 +2,7 @@ import path from 'node:path';
 import { readMeta, type BoardPaths } from '../board/store.js';
 import { BoardActionError } from '../board/actions/errors.js';
 import { CONNECTIONS, connectionModule } from '../modules/registry.js';
-import type { ConnectionModule, ConnectionState, GuideStep, SignInFlow, Words } from '../modules/connection/types.js';
+import type { CodePage, ConnectionModule, ConnectionState, ConnectionStatus, GuideStep, SignInFlow, Words } from '../modules/connection/types.js';
 import { git } from './git.js';
 import { reposOf } from './repos.js';
 import { selfRepo, selfUpstream } from './self-project.js';
@@ -27,9 +27,14 @@ export interface ConnectionRow {
   can: Words[];
   next?: Words;
   tracker?: string;
+  codePage?: CodePage;
+  ownSignIn?: boolean;
   state: ConnectionState;
   account?: string;
   steps: GuideStep[];
+  /** 'token': the token in Settings is the way here (saved, or the only way for this place). */
+  by?: 'token';
+  line?: Words;
   /** What it is for in this project: the repo on this tool, and the repo its pull requests go to when that is not it. */
   for?: { repo: string; into?: string; self: boolean };
   /** A sign-in started from the board or the terminal, while it waits or just ended. */
@@ -55,12 +60,14 @@ function forOf(bp: BoardPaths, m: ConnectionModule): ConnectionRow['for'] {
   return undefined;
 }
 
-function actionsOf(m: ConnectionModule, state: ConnectionState): ConnectionAction[] {
+function actionsOf(m: ConnectionModule, s: ConnectionStatus): ConnectionAction[] {
   if (m.how === 'soon') return [];
   const list: ConnectionAction[] = [];
-  // Only a tool that is here and signed out gets the button: missing, or not answering, the guide comes first.
-  if (m.signIn && state === 'not-connected') list.push({ id: 'sign-in', name: `Sign in with ${m.label}`, command: `squad connect ${m.name}` });
-  if (m.signOut && state === 'connected') list.push({ id: 'disconnect', name: 'Disconnect', command: `squad disconnect ${m.name}` });
+  // Only a tool that is here and signed out gets the button: missing, or not answering, the guide comes first. When the
+  // token is the way here, Settings is: no sign-in and no Disconnect.
+  const token = s.by === 'token';
+  if (m.signIn && s.state === 'not-connected' && !token) list.push({ id: 'sign-in', name: `Sign in with ${m.codePage?.name ?? m.label}`, command: `squad connect ${m.name}` });
+  if (m.signOut && s.state === 'connected' && !token) list.push({ id: 'disconnect', name: 'Disconnect', command: `squad disconnect ${m.name}` });
   list.push({ id: 'check', name: 'Check again', command: 'squad connect --status' });
   return list;
 }
@@ -77,12 +84,16 @@ async function rowOf(bp: BoardPaths, m: ConnectionModule): Promise<ConnectionRow
     can: m.can,
     ...(m.next ? { next: m.next } : {}),
     ...(m.tracker ? { tracker: m.tracker } : {}),
+    ...(m.codePage ? { codePage: m.codePage } : {}),
+    ...(m.ownSignIn ? { ownSignIn: true } : {}),
     state: s.state,
     ...(s.account ? { account: s.account } : {}),
     steps: s.steps,
+    ...(s.by ? { by: s.by } : {}),
+    ...(s.line ? { line: s.line } : {}),
     ...(there ? { for: there } : {}),
     ...(flow ? { flow } : {}),
-    actions: actionsOf(m, s.state),
+    actions: actionsOf(m, s),
   };
 }
 
@@ -121,14 +132,25 @@ export function cancelSignIn(name: string): SignInFlow {
   return f;
 }
 
-/** Disconnect: signs the tool out on this computer, for the account signed in now. */
+/** Whose sign-in Disconnect ends, and the page the code is typed on, for the terminal's own words. */
+export function connectionInfo(name: string): { label: string; ownSignIn: boolean; codePage?: CodePage } {
+  const m = moduleFor(name);
+  return { label: m.label, ownSignIn: Boolean(m.ownSignIn), ...(m.codePage ? { codePage: m.codePage } : {}) };
+}
+
+/**
+ * Disconnect: signs the tool out on this computer, for the account signed in now. A sign-in that is squad-kit's own
+ * ends for squad-kit only; the tool's own sign-in ends for every app that uses it.
+ */
 export async function disconnect(bp: BoardPaths, name: string): Promise<{ line: string }> {
   const m = moduleFor(name);
   if (!m.signOut) throw new BoardActionError(`${m.label} has nothing to sign out of here.`);
   m.forget?.();
   const s = await m.status(bp.root);
+  if (s.by === 'token') throw new BoardActionError(`${m.label} is connected with the token saved in Settings. Change it there.`);
   if (s.state !== 'connected' || !s.account) throw new BoardActionError(`${m.label} is not signed in on this computer.`);
   await m.signOut(s.account);
   m.forget?.();
+  if (m.ownSignIn) return { line: `squad-kit is signed out of ${m.label} on this computer, as ${s.account}. Your other sign-ins on this computer stay as they are.` };
   return { line: `${m.label} is signed out on this computer, as ${s.account}. Every app that uses its tool here is signed out too.` };
 }

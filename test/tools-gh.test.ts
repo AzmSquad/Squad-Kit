@@ -66,7 +66,7 @@ describe("GitHub's tool on the Tools page", () => {
     fs.mkdirSync(azure);
     fs.writeFileSync(path.join(azure, 'package.json'), '{}');
     execSync('git init -q -b main && git remote add origin https://dev.azure.com/o/p/_git/r', { cwd: azure });
-    expect(kindsOf(azure).kinds).toEqual(['web']);
-    expect(linesFor([{ place: '.', kinds: ['web'], platforms: ['web'] }], book, 'mac').some((l) => l.id === 'gh')).toBe(false);
+    expect(kindsOf(azure).kinds).toEqual(['web', 'azure']);
+    expect(linesFor([{ place: '.', kinds: ['web', 'azure'], platforms: ['web'] }], book, 'mac').some((l) => l.id === 'gh')).toBe(false);
   });
 });

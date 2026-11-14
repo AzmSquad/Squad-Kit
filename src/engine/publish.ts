@@ -90,7 +90,7 @@ function mergeHere(bp: BoardPaths, id: string, why: string): { clash: boolean } 
 async function publishTo(bp: BoardPaths, t: Ticket, target: Target, host: RepoHost): Promise<{ clash: boolean }> {
   const ticketId = t.id;
   const branch = t.branch!;
-  const env = host.gitEnv();
+  const env = await host.gitEnv();
   // squad-kit's own code: the main repo, whose owner merges it, never squad-kit (engine/contribution).
   const into = (await host.contribution?.()) ?? null;
   if (host.pushable && !(await host.pushable())) {

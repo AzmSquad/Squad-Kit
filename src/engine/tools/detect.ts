@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { squadHome } from '../../core/home.js';
+import { ownAzureFolder, squadHome } from '../../core/home.js';
 import { CATALOG, OWN_SOURCES, type ManagedBy, type System, type ToolId } from './catalog.js';
 import { compareVersions } from './fit.js';
 import { mergePath, readLoginPath } from './login-path.js';
@@ -394,6 +394,22 @@ async function gh(h: DetectHost): Promise<Found> {
   return { state: 'missing', where: bin, ...(version ? { version } : {}), note: "GitHub's tool is here, but not signed in. Sign in once: open a terminal and run gh auth login." };
 }
 
+/** `az version --output json`: { "azure-cli": "2.88.0", … }. */
+export function azVersionOf(text: string): string | null {
+  return /"azure-cli"\s*:\s*"(\d+\.\d+(?:\.\d+)?)"/.exec(text)?.[1] ?? null;
+}
+
+/**
+ * Microsoft's Azure tool. Asked with squad-kit's own settings folder, never the person's ~/.azure (ADR-011). Whether
+ * squad-kit is signed in with it is the Connections page's to say.
+ */
+async function az(h: DetectHost, home: string): Promise<Found> {
+  const bin = onPath(h, 'az');
+  if (!bin) return missing();
+  const version = azVersionOf((await h.run(bin, ['version', '--output', 'json'], { timeoutMs: 20_000, env: { AZURE_CONFIG_DIR: ownAzureFolder(home), AZURE_CORE_COLLECT_TELEMETRY: 'false' } })).out);
+  return { state: 'found', where: bin, ...(version ? { version } : {}) };
+}
+
 /**
  * Every tool in the catalog that this computer can have, checked side by side. Git and the AI tool are checked by
  * "Is your computer ready?" (engine/computer-ready.ts) whenever the page is read, so they are not kept here.
@@ -426,6 +442,7 @@ export async function detectAll(h: DetectHost = realHost(), home = squadHome()):
     safe('android-studio', () => androidStudio(h)),
     safe('docker', () => docker(h)),
     safe('gh', () => gh(h)),
+    safe('az', () => az(h, home)),
   ]);
   return { at: new Date().toISOString(), system: h.system, tools: Object.fromEntries([x, ...found]) };
 }

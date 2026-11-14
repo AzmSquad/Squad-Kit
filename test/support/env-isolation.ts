@@ -47,6 +47,9 @@ for (const tool of ['pbcopy', 'xclip', 'xsel', 'wl-copy', 'termux-clipboard-set'
 fs.writeFileSync(path.join(standIns, 'gh'), '#!/bin/sh\necho "not signed in (test)" >&2\nexit 1\n', { mode: 0o755 });
 process.env.GH_CONFIG_DIR = path.join(standIns, 'gh-config');
 fs.mkdirSync(process.env.GH_CONFIG_DIR, { recursive: true });
+// Nor with Microsoft's: this az answers nothing, and squad-kit's own az folder is inside the test's home (ADR-011). A
+// test that wants az puts its own made-up one first on the PATH.
+fs.writeFileSync(path.join(standIns, 'az'), "#!/bin/sh\necho \"ERROR: Please run 'az login' to setup account. (test)\" >&2\nexit 1\n", { mode: 0o755 });
 process.env.PATH = `${standIns}${path.delimiter}${process.env.PATH ?? ''}`;
 
 // A locale for git, as a person's terminal has. Started with none (an app opened from the Dock, an editor's test

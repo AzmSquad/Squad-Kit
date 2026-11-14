@@ -297,7 +297,7 @@ async function removeRemote(bp: BoardPaths, t: Ticket): Promise<string[]> {
     }
   }
   try {
-    await netGitLater(target.dir, ['push', target.remote, '--delete', branch], { env: host?.gitEnv() ?? {} });
+    await netGitLater(target.dir, ['push', target.remote, '--delete', branch], { env: (await host?.gitEnv()) ?? {} });
     notes.push(`Deleted ${branch} on ${target.remote}`);
   } catch (err) {
     // Gone there already: a teammate deleted it, or an earlier try did.
@@ -347,7 +347,7 @@ async function leaveNote(bp: BoardPaths, t: Ticket, by: string, at: string): Pro
   if (!target || !repo || repo !== target.dir) return [];
   const branch = branchOf(t);
   const host = repoHostFor(bp, target.url);
-  const env = host?.gitEnv() ?? {};
+  const env = (await host?.gitEnv()) ?? {};
   const ref = `refs/remotes/${target.remote}/${branch}`;
   try {
     await netGitLater(target.dir, ['fetch', '--quiet', target.remote, `+refs/heads/${branch}:${ref}`], { env });
