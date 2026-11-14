@@ -6,6 +6,7 @@ import { Hono } from 'hono';
 import { EMAIL, SITE, fakeJira, type FakeJiraOptions } from './fakes/jira.js';
 import { jiraTrackerModule } from '../src/modules/jira/module.js';
 import { jiraConnection } from '../src/modules/jira/connection.js';
+import { useAtlassianApp } from '../src/modules/jira/atlassian-app.js';
 import { DEFAULT_CONFIG, loadConfig, saveConfig, type SquadConfig } from '../src/core/config.js';
 import { buildPaths } from '../src/core/paths.js';
 import { loadSecrets } from '../src/core/secrets.js';
@@ -34,7 +35,11 @@ function mod(opts: FakeJiraOptions = {}) {
 afterEach(() => {
   vi.unstubAllGlobals();
   jiraConnection.forget?.();
+  useAtlassianApp(null);
 });
+
+/** A build without squad-kit's Atlassian app: Jira connects by token only. */
+const tokenOnly = () => useAtlassianApp({ clientId: 'ATLASSIAN_CLIENT_ID_NOT_SET' });
 
 describe('Jira settings', () => {
   it('a pasted issue link fills the site and the project, and the Scrum board is picked for sprints', async () => {
@@ -135,10 +140,14 @@ describe('the saved token goes only to the host it was saved for', () => {
     expect(m.open(root)).toBeNull();
     expect(m.read(root)).toMatchObject({ values: { site: 'other.atlassian.net' }, hasSecret: false, note: "The team's Jira site is now other.atlassian.net. Paste your token for it." });
     expect(await m.choices!({ site: 'other.atlassian.net', email: EMAIL }, root)).toEqual({});
+    const moved = { en: "The team's Jira site is now other.atlassian.net. Paste your token for it.", ar: 'موقع Jira للفريق صار other.atlassian.net. الصق رمزك له.' };
+    jiraConnection.forget?.();
+    expect(await jiraConnection.status(root)).toMatchObject({ state: 'not-connected', line: moved });
+    tokenOnly();
     jiraConnection.forget?.();
     const row = await jiraConnection.status(root);
     expect(row.state).toBe('not-connected');
-    expect(row.steps[0]!.text).toEqual({ en: "The team's Jira site is now other.atlassian.net. Paste your token for it.", ar: 'موقع Jira للفريق صار other.atlassian.net. الصق رمزك له.' });
+    expect(row.steps[0]!.text).toEqual(moved);
     expect(calls(fake)).toBe(before);
   });
 
@@ -229,6 +238,7 @@ describe('Jira on the Connections page and the lists route', () => {
     const fake = fakeJira();
     vi.stubGlobal('fetch', fake.fetch);
     const root = project();
+    tokenOnly();
     const before = await jiraConnection.status(root);
     expect(before.state).toBe('not-connected');
     expect(before.steps[0]!.link).toBe('https://id.atlassian.com/manage-profile/security/api-tokens');
