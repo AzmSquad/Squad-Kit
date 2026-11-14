@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.22] — 2026-11-14
+
 ### Added
 
 - **Sign in with Microsoft for Azure DevOps.** On the Connections page, Azure DevOps now signs in with a button, the way
