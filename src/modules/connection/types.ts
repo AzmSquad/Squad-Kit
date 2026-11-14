@@ -26,6 +26,8 @@ export interface GuideStep {
   done?: Words;
   /** The board page that helps with it: the Tools page's line. */
   page?: string;
+  /** A page on the tool's own site for this step, opened in a new tab. */
+  link?: string;
 }
 
 export interface ConnectionStatus {

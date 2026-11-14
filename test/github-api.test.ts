@@ -59,7 +59,7 @@ describe('connecting GitHub on the board', () => {
     const a = app();
     const form = await json<Form>(a.request('/api/v1/tracker'));
     expect(form).toMatchObject({ type: 'none', module: 'github', label: 'GitHub', values: { repo: 'octo/shop', from: 'issues' } });
-    expect(form.modules.map((m) => m.name)).toEqual(['azure', 'github']);
+    expect(form.modules.map((m) => m.name)).toEqual(['azure', 'github', 'jira']);
     expect((await json<Form>(a.request('/api/v1/tracker?module=azure'))).module).toBe('azure');
   });
 

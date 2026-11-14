@@ -26,9 +26,9 @@ function shown(field: SetupField, values: Record<string, string>): boolean {
   return !field.when || field.when.is.includes(values[field.when.key] ?? '');
 }
 
-async function ask(mod: TrackerModule, field: SetupField, values: Record<string, string>): Promise<string> {
+async function ask(root: string, mod: TrackerModule, field: SetupField, values: Record<string, string>): Promise<string> {
   if (field.secret) return password({ message: field.label, mask: '*' });
-  const options = field.options ?? (field.choice ? (await mod.choices?.(values))?.[field.key] : undefined);
+  const options = field.options ?? (field.choice ? (await mod.choices?.(values, root))?.[field.key] : undefined);
   // A list that only suggests is typed, with the first few named.
   if (options?.length && field.typed) return input({ message: `${field.label} (${options.slice(0, 5).map((o) => o.label).join(', ')}${options.length > 5 ? ', …' : ''})`, default: values[field.key] || options[0]!.value });
   if (options?.length) return select({ message: field.label, choices: options.map((o) => ({ name: o.label, value: o.value })), default: values[field.key] || options[0]!.value });
@@ -49,7 +49,7 @@ export async function setTrackerFromModule(root: string, mod: TrackerModule, fie
   };
   for (const field of mod.fields) {
     if (!interactive || field.key in given || field.more || !shown(field, values)) continue;
-    values[field.key] = await ask(mod, field, values);
+    values[field.key] = await ask(root, mod, field, values);
   }
   const steps = (await mod.setupSteps?.(values)) ?? [];
   if (steps.length) {

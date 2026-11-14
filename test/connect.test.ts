@@ -195,23 +195,23 @@ describe('Connections: GitHub sign-in through its own tool', () => {
     await expect(disconnect(bp, 'github')).rejects.toThrow('GitHub is not signed in on this computer.');
   });
 
-  it('every row: GitHub with what it is for, Jira coming next with no button, Azure DevOps signing in with Microsoft or a token', async () => {
+  it('every row: GitHub with what it is for, Jira by token with its sign-in coming next, Azure DevOps signing in with Microsoft or a token', async () => {
     const bp = project({ signedIn: true, self: true });
     const rows = (await connectionsOf(bp)).rows;
     // The test's own az answers nothing, so Microsoft's tool counts as not on this computer here.
     expect(rows.map((r) => [r.name, r.how, r.state])).toEqual([
       ['github', 'sign-in', 'connected'],
-      ['jira', 'soon', 'soon'],
+      ['jira', 'token', 'not-connected'],
       ['azure', 'sign-in', 'missing'],
     ]);
     expect(rows[0]!.for).toEqual({ repo: 'sara/squad-kit', into: 'AzmSquad/squad-kit', self: true });
     expect(rows[0]!.steps[1]!.done).toEqual({ en: 'Signed in as sara', ar: 'مسجّل باسم sara' });
-    expect(rows[1]!.actions).toEqual([]);
-    expect(rows[1]!.next?.en).toBe('Sign in with Atlassian');
+    expect(rows[1]).toMatchObject({ tracker: 'jira', next: { en: 'Sign in with Atlassian' } });
+    expect(rows[1]!.actions.map((a) => a.id)).toEqual(['check']);
     expect(rows[2]).toMatchObject({ tracker: 'azure', codePage: { name: 'Microsoft' }, ownSignIn: true });
     expect(rows[2]!.next).toBeUndefined();
     expect(rows[2]!.actions.map((a) => a.id)).toEqual(['check']);
-    await expect(startSignIn(bp, 'jira')).rejects.toThrow('Signing in to Jira comes in a next version.');
+    await expect(startSignIn(bp, 'jira')).rejects.toThrow('Jira connects with a token you paste, not a sign-in button.');
   });
 
   it('each button is one REST call: sign in, where it stands, cancel, disconnect', async () => {

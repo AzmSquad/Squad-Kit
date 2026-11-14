@@ -196,6 +196,6 @@ export interface TrackerModule {
   guess(remoteUrl: string): Record<string, string> | null;
   /** What this computer still needs before it can connect, for these values. Optional: none. */
   setupSteps?(values: Record<string, string>): Promise<SetupStep[]>;
-  /** The lists its choice fields pick from, for the values chosen so far. */
-  choices?(values: Record<string, string>): Promise<Record<string, SetupChoice[]>>;
+  /** The lists its choice fields pick from, for the values chosen so far. `root`: the project, for a sign-in saved there. */
+  choices?(values: Record<string, string>, root?: string): Promise<Record<string, SetupChoice[]>>;
 }

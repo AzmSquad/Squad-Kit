@@ -5,10 +5,10 @@ import { buildPaths, requireSquadRoot } from '../../core/paths.js';
 import { loadConfig, saveConfig, type SquadConfig, type TrackerType } from '../../core/config.js';
 import { loadSecrets, saveSecrets, mergeSecrets, type SquadSecrets } from '../../core/secrets.js';
 import { clientFor, overlayTrackerEnv } from '../../tracker/index.js';
-import { probeJiraConnectivity, probeAzureConnectivity } from '../../core/probes.js';
+import { probeAzureConnectivity } from '../../core/probes.js';
 import { skipExternalProbesInAutomation } from '../../core/ci-env.js';
 import { isInteractive } from '../../ui/tty.js';
-import { promptJiraCredentials, promptAzureCredentials } from './shared.js';
+import { promptAzureCredentials } from './shared.js';
 import { trackerModule } from '../../modules/registry.js';
 import { setTrackerFromModule } from './set-tracker-module.js';
 
@@ -26,12 +26,6 @@ function parseType(t: string | undefined): TrackerType {
     );
   }
   return t as TrackerType;
-}
-
-function jiraError(): Error {
-  return new Error(
-    `Jira configuration is incomplete. Set JIRA_HOST, JIRA_EMAIL, JIRA_API_TOKEN (or run \`squad config set tracker\` without --yes to enter credentials interactively).`,
-  );
 }
 
 function azureError(): Error {
@@ -74,9 +68,10 @@ export async function runConfigSetTracker(opts: ConfigSetTrackerOptions = {}): P
     })) as TrackerType;
   }
 
-  // A tracker that keeps no token of its own, or one given its settings, is set up from its module's fields.
+  // Every tracker is set up from its module's fields, as Settings draws them. Azure keeps the prompts it had before,
+  // unless it is given its settings.
   const mod = type === 'none' ? undefined : trackerModule(type);
-  if (mod && (opts.field?.length || !mod.fields.some((f) => f.secret))) {
+  if (mod && (opts.field?.length || type !== 'azure')) {
     await setTrackerFromModule(root, mod, opts.field, interactive);
     return;
   }
@@ -85,33 +80,6 @@ export async function runConfigSetTracker(opts: ConfigSetTrackerOptions = {}): P
 
   if (type === 'none') {
     nextTracker = { type: 'none' };
-  } else if (type === 'jira') {
-    if (interactive) {
-      ui.step('Jira Cloud credentials (stored in .squad/secrets.yaml — always git-ignored)');
-      const j = await promptJiraCredentials({ host: config.tracker.workspace });
-      const merged = mergeSecrets(baseSecrets, {
-        tracker: { jira: { host: j.host, email: j.email, token: j.token } },
-      });
-      saveSecrets(paths.secretsFile, merged);
-      nextTracker = { type: 'jira', workspace: j.host };
-      ui.success('Jira credentials saved');
-      ui.info('.squad/secrets.yaml updated (chmod 0600 on POSIX)');
-    } else {
-      const o = overlayTrackerEnv(baseSecrets);
-      const host = (
-        o.tracker?.jira?.host ??
-        process.env.JIRA_HOST ??
-        (config.tracker.type === 'jira' ? config.tracker.workspace : undefined)
-      )?.trim();
-      if (!host) {
-        throw jiraError();
-      }
-      const candidate: SquadConfig = { ...config, tracker: { type: 'jira', workspace: host } };
-      if (clientFor(candidate, o).error) {
-        throw jiraError();
-      }
-      nextTracker = { type: 'jira', workspace: host };
-    }
   } else if (type === 'azure') {
     if (interactive) {
       ui.step('Azure DevOps credentials (stored in .squad/secrets.yaml — always git-ignored)');
@@ -163,18 +131,7 @@ export async function runConfigSetTracker(opts: ConfigSetTrackerOptions = {}): P
 
   const reloaded = loadConfig(paths.configFile);
   const s = fs.existsSync(paths.secretsFile) ? loadSecrets(paths.secretsFile) : {};
-  if (reloaded.tracker.type === 'jira') {
-    const r = await probeJiraConnectivity(s, reloaded);
-    if (r.ok) {
-      ui.info('Jira connectivity check: OK');
-    } else {
-      ui.warning(
-        r.status !== undefined
-          ? `Jira connectivity check: HTTP ${r.status}`
-          : `Jira connectivity check failed: ${r.detail ?? 'unknown'}`,
-      );
-    }
-  } else if (reloaded.tracker.type === 'azure') {
+  if (reloaded.tracker.type === 'azure') {
     const r = await probeAzureConnectivity(s, reloaded);
     if (r.ok) {
       ui.info('Azure DevOps connectivity check: OK');
@@ -199,8 +156,7 @@ function printTrackerNextSteps(type: string): void {
     return;
   }
   ui.info('1) Verify with `squad doctor` — tracker checks should be green.');
-  const idHint = type === 'jira' ? 'JIRA-123' : 'azure-work-item-id';
-  ui.info(`2) Create a story: squad new-story <feature-slug> --id <${idHint}>`);
+  ui.info('2) Create a story: squad new-story <feature-slug> --id <azure-work-item-id>');
   ui.info('   squad-kit auto-fetches the title, description, and attachments into the intake.');
   ui.info('3) Review the generated intake.md, then run `squad new-plan --api` to generate the plan.');
 }

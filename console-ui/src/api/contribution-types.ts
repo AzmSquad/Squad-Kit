@@ -110,6 +110,7 @@ export interface GuideStep {
   command?: string;
   done?: Words;
   page?: string;
+  link?: string;
 }
 
 export interface SignInFlow {

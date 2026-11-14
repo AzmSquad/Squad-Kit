@@ -10,6 +10,7 @@ import { azureCodeHost } from './azure/code-host.js';
 import { githubCodeHost } from './github/code-host.js';
 import { githubPullPage } from './github/pull-page.js';
 import { githubTracker } from './github/module.js';
+import { jiraTracker } from './jira/module.js';
 import type { Speech, SpeechModule } from './speech/types.js';
 import { munsitSpeech } from './munsit/speech.js';
 import type { AiTool, ToolEvent } from './ai-tool/types.js';
@@ -32,7 +33,7 @@ import { azureConnection } from './azure/connection.js';
  * project's tracker" or "the code host of this repo" and never names a product.
  */
 
-export const TRACKERS: TrackerModule[] = [azureTracker, githubTracker];
+export const TRACKERS: TrackerModule[] = [azureTracker, githubTracker, jiraTracker];
 export const CODE_HOSTS: CodeHostModule[] = [azureCodeHost, githubCodeHost];
 export const PULL_REQUEST_PAGES: PullRequestPageModule[] = [githubPullPage];
 export const SPEECH: SpeechModule[] = [munsitSpeech];

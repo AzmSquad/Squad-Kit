@@ -92,7 +92,8 @@ function Row({ w }: { w: WorkItemRow }) {
   const act = useAct();
   return (
     <tr>
-      <td className="mono">
+      {/* A key like PAY-40 stays on one line. */}
+      <td className="mono" style={{ whiteSpace: 'nowrap' }}>
         <a href={w.url} target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
           {w.ref} <ExternalLink size={11} />
         </a>

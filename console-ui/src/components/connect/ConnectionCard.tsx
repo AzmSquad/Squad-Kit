@@ -34,6 +34,11 @@ function Guide({ row, lang, open, onCheck, checking }: { row: ConnectionRow; lan
             <span className="gh-n" aria-hidden="true">{i + 1}</span>
             <div>
               <span>{s.text[lang]}</span>
+              {s.link && (
+                <a href={s.link} target="_blank" rel="noreferrer" className="gh-link" dir="ltr">
+                  {s.link.replace(/^https:\/\//, '')}
+                </a>
+              )}
               {s.command && <Cmd text={s.command} always />}
               {s.done ? (
                 <span className="gh-done">

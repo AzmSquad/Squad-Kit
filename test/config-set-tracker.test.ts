@@ -8,6 +8,7 @@ import { SQUAD_DIR } from '../src/core/paths.js';
 import { loadConfig, saveConfig, type SquadConfig } from '../src/core/config.js';
 import { loadSecrets } from '../src/core/secrets.js';
 import * as tty from '../src/ui/tty.js';
+import { EMAIL, SITE, fakeJira } from './fakes/jira.js';
 
 vi.mock('@inquirer/prompts', () => ({
   select: vi.fn(),
@@ -53,25 +54,28 @@ afterEach(() => {
     process.env.CI = prevCi;
   }
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe('config set tracker', () => {
-  it('interactive jira: saves host, config, and secrets', async () => {
+  it('interactive jira: asks the module\'s fields, checks them with Jira, saves the site and project for the team and the sign-in apart', async () => {
     saveConfig(path.join(tmp, SQUAD_DIR, 'config.yaml'), baseConfig());
-    vi.mocked(select).mockResolvedValueOnce('jira' as never);
+    vi.stubGlobal('fetch', fakeJira('token1234567890').fetch);
+    vi.mocked(select).mockResolvedValueOnce('jira' as never).mockResolvedValueOnce('' as never);
     vi.mocked(input)
-      .mockResolvedValueOnce('my.atlassian.net')
-      .mockResolvedValueOnce('a@b.c');
+      .mockResolvedValueOnce('acme')
+      .mockResolvedValueOnce(EMAIL)
+      .mockResolvedValueOnce('PAY');
     vi.mocked(password).mockResolvedValueOnce('token1234567890');
 
     await runConfigSetTracker({});
 
     const c = loadConfig(path.join(tmp, SQUAD_DIR, 'config.yaml'));
-    expect(c.tracker.type).toBe('jira');
-    expect(c.tracker.workspace).toBe('my.atlassian.net');
+    expect(c.tracker).toEqual({ type: 'jira', workspace: SITE, project: 'PAY', options: { updates: 'on', board: '1', boardName: 'PAY board' } });
+    // The project list came with the token typed a moment before, in this terminal only.
+    expect(vi.mocked(input).mock.calls[2]![0].message).toBe('Project (PAY: Payments)');
     const s = loadSecrets(path.join(tmp, SQUAD_DIR, 'secrets.yaml'));
-    expect(s.tracker?.jira?.host).toBe('my.atlassian.net');
-    expect(s.tracker?.jira?.token).toBe('token1234567890');
+    expect(s.tracker?.jira).toEqual({ host: SITE, email: EMAIL, token: 'token1234567890' });
     if (process.platform !== 'win32' && fs.existsSync(path.join(tmp, SQUAD_DIR, 'secrets.yaml'))) {
       const mode = fs.statSync(path.join(tmp, SQUAD_DIR, 'secrets.yaml')).mode & 0o777;
       expect(mode).toBe(0o600);

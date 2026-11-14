@@ -79,6 +79,9 @@ const ISOLATED_VARS = [
   'GOOGLE_API_KEY',
   'SQUAD_PLANNER_API_KEY',
   'JIRA_API_TOKEN',
+  // The rest of a Jira sign-in from the environment: a developer's own site would reach a real Jira from a test.
+  'JIRA_HOST',
+  'JIRA_EMAIL',
   'AZURE_DEVOPS_PAT',
   // GitHub's tool reads these before its own sign-in: a developer's own would reach GitHub from a test.
   'GH_TOKEN',

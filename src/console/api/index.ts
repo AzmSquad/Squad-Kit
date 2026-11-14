@@ -47,7 +47,7 @@ export function mountApi(app: Hono, opts: MountApiOptions): void {
   mountSecretsApi(app, opts);
   mountPlannerAuthApi(app, opts);
   mountTrackerApi(app, opts);
-  mountTrackerChoices(app);
+  mountTrackerChoices(app, opts);
   mountDoctorApi(app, opts);
   mountCopyPlanPromptApi(app, opts);
   mountBoardApi(app, opts);

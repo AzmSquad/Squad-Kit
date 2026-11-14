@@ -4,6 +4,7 @@ import { guessTracker, trackerModule, TRACKERS } from '../../modules/registry.js
 import { findNestedRepos } from '../../engine/repos.js';
 import { git } from '../../engine/git.js';
 import { plainWords } from '../../core/for-people.js';
+import type { SquadPaths } from '../../core/paths.js';
 
 /**
  * The tracker part of Settings, drawn from the modules (ADR-002): the trackers there are, the chosen one's fields and
@@ -34,14 +35,17 @@ export async function trackerForm(root: string, savedType: string, asked?: strin
   };
 }
 
-/** GET only: the lists for the values picked so far, such as the boards a tracker has and their states. */
-export function mountTrackerChoices(app: Hono): void {
+/**
+ * GET only: the lists for the values picked so far, such as the boards a tracker has and their states. A secret is
+ * never in the address: a tracker that needs its token for the lists uses the one saved for the project.
+ */
+export function mountTrackerChoices(app: Hono, opts: { paths: SquadPaths }): void {
   app.get('/api/v1/tracker/choices', async (c) => {
     const mod = trackerModule(c.req.query('module'));
     if (!mod?.choices) return c.json({ lists: {} });
     const values = Object.fromEntries(mod.fields.filter((f) => !f.secret).map((f) => [f.key, c.req.query(f.key) ?? '']));
     try {
-      return c.json({ lists: await mod.choices(values) });
+      return c.json({ lists: await mod.choices(values, path.dirname(opts.paths.squadDir)) });
     } catch (err) {
       return c.json({ lists: {}, error: plainWords(err, 'Reading the tracker lists') });
     }
