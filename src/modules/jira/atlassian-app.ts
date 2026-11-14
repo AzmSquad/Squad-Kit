@@ -2,12 +2,12 @@
  * squad-kit's own Atlassian app, for "Sign in with Atlassian" (ADR-012): OAuth 2.0 (3LO). Atlassian asks for the app's
  * client secret on every code exchange and refresh, so those two go through squad-kit's sign-in helper at
  * auth.squad-kit.com (`auth-helper/` in squad-kit's repo), which keeps the secret and stores nothing. The client id is
- * public. Until the app is registered it is the placeholder, and Jira keeps the pasted token only.
+ * public. Without it (the placeholder), Jira keeps the pasted token only.
  */
 
 const NOT_SET = 'ATLASSIAN_CLIENT_ID_NOT_SET';
 /** squad-kit's Atlassian app (developer.atlassian.com). The same id is in auth-helper/wrangler.jsonc. */
-const CLIENT_ID: string = NOT_SET;
+const CLIENT_ID: string = 'ebxInlq1dxpw4jrSLlghUTsuJHaasD1C';
 
 const HELPER = 'https://auth.squad-kit.com';
 /** Where Atlassian sends the person back: the helper, which sends them on to squad-kit on 127.0.0.1. */

@@ -14,6 +14,6 @@
   "vars": {
     // Public: the Client ID of squad-kit's Atlassian app (developer.atlassian.com, the app's Settings). The same id is in
     // src/modules/jira/atlassian-app.ts. The secret is never here: `npx wrangler secret put ATLASSIAN_CLIENT_SECRET`.
-    "ATLASSIAN_CLIENT_ID": "ATLASSIAN_CLIENT_ID_NOT_SET"
+    "ATLASSIAN_CLIENT_ID": "ebxInlq1dxpw4jrSLlghUTsuJHaasD1C"
   }
 }

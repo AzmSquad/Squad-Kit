@@ -234,7 +234,7 @@ describe('Jira with the sign-in', () => {
   it('without a registered app, the sign-in is never used, even when one is on this computer', async () => {
     use(fakeAtlassian());
     signedIn();
-    useAtlassianApp({ fetch: fake.fetch });
+    useAtlassianApp({ clientId: 'ATLASSIAN_CLIENT_ID_NOT_SET', fetch: fake.fetch });
     expect(jiraTracker.open(project())).toBeNull();
   });
 });

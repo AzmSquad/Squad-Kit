@@ -12,6 +12,7 @@ import { mountConnectionsApi } from '../src/console/api/connections.js';
 import { forgetGhConnect, useConnectPace } from '../src/modules/github/connect.js';
 import { fakeGitHub, pathWithoutTools, type FakeGitHub } from './support/fake-github.js';
 import { forgetAzure } from './support/fake-azure.js';
+import { useAtlassianApp } from '../src/modules/jira/atlassian-app.js';
 
 /**
  * The Connections page's GitHub row: Sign in runs GitHub's own tool, `gh auth login`, reads its one-time code and page
@@ -195,23 +196,30 @@ describe('Connections: GitHub sign-in through its own tool', () => {
     await expect(disconnect(bp, 'github')).rejects.toThrow('GitHub is not signed in on this computer.');
   });
 
-  it('every row: GitHub with what it is for, Jira by token with its sign-in coming next, Azure DevOps signing in with Microsoft or a token', async () => {
+  it('every row: GitHub with what it is for, Jira signing in with Atlassian or a token, Azure DevOps signing in with Microsoft or a token', async () => {
     const bp = project({ signedIn: true, self: true });
     const rows = (await connectionsOf(bp)).rows;
     // The test's own az answers nothing, so Microsoft's tool counts as not on this computer here.
     expect(rows.map((r) => [r.name, r.how, r.state])).toEqual([
       ['github', 'sign-in', 'connected'],
-      ['jira', 'token', 'not-connected'],
+      ['jira', 'sign-in', 'not-connected'],
       ['azure', 'sign-in', 'missing'],
     ]);
     expect(rows[0]!.for).toEqual({ repo: 'sara/squad-kit', into: 'AzmSquad/squad-kit', self: true });
     expect(rows[0]!.steps[1]!.done).toEqual({ en: 'Signed in as sara', ar: 'مسجّل باسم sara' });
-    expect(rows[1]).toMatchObject({ tracker: 'jira', next: { en: 'Sign in with Atlassian' } });
-    expect(rows[1]!.actions.map((a) => a.id)).toEqual(['check']);
+    expect(rows[1]).toMatchObject({ tracker: 'jira', codePage: { name: 'Atlassian' }, ownSignIn: true });
+    expect(rows[1]!.next).toBeUndefined();
+    expect(rows[1]!.actions.map((a) => a.id)).toEqual(['sign-in', 'check']);
     expect(rows[2]).toMatchObject({ tracker: 'azure', codePage: { name: 'Microsoft' }, ownSignIn: true });
     expect(rows[2]!.next).toBeUndefined();
     expect(rows[2]!.actions.map((a) => a.id)).toEqual(['check']);
-    await expect(startSignIn(bp, 'jira')).rejects.toThrow('Jira connects with a token you paste, not a sign-in button.');
+    // Without squad-kit's Atlassian app (a build with the placeholder id), Jira takes the token only.
+    useAtlassianApp({ clientId: 'ATLASSIAN_CLIENT_ID_NOT_SET' });
+    try {
+      await expect(startSignIn(bp, 'jira')).rejects.toThrow('Jira connects with a token you paste, not a sign-in button.');
+    } finally {
+      useAtlassianApp(null);
+    }
   });
 
   it('each button is one REST call: sign in, where it stands, cancel, disconnect', async () => {
