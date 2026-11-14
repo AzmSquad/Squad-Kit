@@ -10,25 +10,6 @@ export interface ConfigSetCommonOpts {
   yes?: boolean;
 }
 
-export async function promptJiraCredentials(defaults: {
-  host?: string;
-} = {}): Promise<{ host: string; email: string; token: string }> {
-  const host = await input({
-    message: 'Jira workspace host (e.g. mycompany.atlassian.net):',
-    default: defaults.host ?? '',
-    validate: (v) => v.trim().length > 0 || 'host is required',
-  });
-  const email = await input({
-    message: 'Jira account email:',
-    validate: (v) => (/@/.test(v) ? true : 'must look like an email'),
-  });
-  const token = await password({
-    message: 'Jira API token (input hidden; create one at id.atlassian.com/manage-profile/security/api-tokens):',
-    validate: (v) => (v.length >= 10 ? true : 'token seems too short'),
-  });
-  return { host: host.trim(), email: email.trim(), token };
-}
-
 export async function promptAzureCredentials(defaults: {
   organization?: string;
   project?: string;

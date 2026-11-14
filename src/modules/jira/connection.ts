@@ -1,5 +1,6 @@
 import type { ConnectionModule, ConnectionStatus } from '../connection/types.js';
 import { jiraTracker } from './module.js';
+import { movedWords, readSaved } from './settings.js';
 
 /**
  * Jira on the Connections page: today an API token the person makes on their Atlassian account and pastes in Settings
@@ -31,7 +32,8 @@ const STEPS: ConnectionStatus['steps'] = [
 async function status(root: string): Promise<ConnectionStatus> {
   if (kept && kept.root === root && Date.now() - kept.at < KEEP_MS) return kept.status;
   const tracker = jiraTracker.open(root);
-  let s: ConnectionStatus = { state: 'not-connected', steps: STEPS };
+  const moved = readSaved(root)?.moved;
+  let s: ConnectionStatus = { state: 'not-connected', steps: moved ? [{ text: movedWords(moved) }, ...STEPS] : STEPS };
   if (tracker) {
     const account = await tracker.whoAmI().catch(() => null);
     if (account) s = { state: 'connected', account, steps: STEPS };
@@ -50,7 +52,7 @@ export const jiraConnection: ConnectionModule = {
   can: [
     { en: 'Pull stories, move them along and file bugs', ar: 'يسحب القصص ويحرّكها ويسجّل الأخطاء' },
     { en: 'Write questions, plans and pull request links on each story', ar: 'يكتب الأسئلة والخطط وروابط طلبات الدمج على كل قصة' },
-    { en: 'Send a breakdown as epics, stories and sub-tasks', ar: 'يرسل التقسيم كـ epics وstories وsub-tasks' },
+    { en: 'Send a breakdown as epics and stories', ar: 'يرسل التقسيم كـ epics وstories' },
   ],
   status,
   forget: () => (kept = null),

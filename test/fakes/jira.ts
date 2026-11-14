@@ -1,3 +1,5 @@
+import { adfProblem } from './adf-check.js';
+
 /**
  * Jira Cloud as far as squad-kit uses it, in memory, answering in the shapes of Atlassian's REST docs (platform v3 and
  * Agile 1.0). Site acme.atlassian.net, project PAY: epic PAY-10 "Booking", story PAY-40 "Hold a slot" under it in the
@@ -6,6 +8,7 @@
  * board 2 Kanban. Searches go only through POST /rest/api/3/search/jql, paged with nextPageToken; the old search is
  * gone (410). An attachment is a 303 to Atlassian's media host, which must get no sign-in.
  */
+
 
 type Adf = Record<string, unknown>;
 
@@ -27,6 +30,8 @@ interface Issue {
   rank: number;
   created: number;
   comments: Adf[];
+  /** Searches that do not find it yet. */
+  unseen?: number;
 }
 
 export interface FakeJiraOptions {
@@ -36,6 +41,23 @@ export interface FakeJiraOptions {
   steps?: boolean;
   /** The site has sub-tasks turned off. */
   noSubtask?: boolean;
+  /** The site has Initiative, a level above Epic (Jira Premium's plans). */
+  initiative?: boolean;
+  /** The site renamed its "Relates" link type, as an admin may: only a link that reads the same both ways is left. */
+  noRelates?: boolean;
+  /**
+   * Stories and Tasks follow their own workflow, a step at a time: To Do, In Progress, QA (in progress too), Done. 'way':
+   * QA goes on to Done; 'dead-end': QA only goes back. Bugs keep the usual workflow.
+   */
+  qa?: 'way' | 'dead-end';
+  /** The way to Done asks for a resolution on a screen: 'also' beside a plain way, 'only' as the one way. */
+  screen?: 'also' | 'only';
+  /** No Labels field on the create and edit screens. */
+  noLabels?: boolean;
+  /** The Acceptance Criteria field is on Story's create screen only, not its edit screen. */
+  criteriaOnCreateOnly?: boolean;
+  /** Jira's search catches up late: a new issue is missing from this many searches after it is made. */
+  lag?: number;
   /** No field called Acceptance Criteria on the site. */
   noCriteria?: boolean;
   /** This many more stories in the backlog, for paging. */
@@ -58,6 +80,7 @@ const TYPES = [
   { id: '10002', name: 'Task', subtask: false, hierarchyLevel: 0 },
   { id: '10004', name: 'Bug', subtask: false, hierarchyLevel: 0 },
   { id: '10003', name: 'Subtask', subtask: true, hierarchyLevel: -1 },
+  { id: '10005', name: 'Initiative', subtask: false, hierarchyLevel: 2 },
 ];
 const CATEGORY: Record<string, { id: number; key: string; colorName: string; name: string }> = {
   new: { id: 2, key: 'new', colorName: 'blue-gray', name: 'To Do' },
@@ -92,7 +115,7 @@ export interface FakeJira {
   token: string;
   issues: Map<string, Issue>;
   /** "source blocks target", "source relates to target". */
-  links: { type: string; source: string; target: string }[];
+  links: { id: string; type: string; source: string; target: string }[];
   /** Each request: method, address and whether it carried a sign-in. */
   requests: { method: string; url: string; signedIn: boolean }[];
   comments(key: string): string[];
@@ -106,11 +129,27 @@ export function fakeJira(token = 'secret', opts: FakeJiraOptions = {}): FakeJira
     ...(opts.review ? [{ id: '10001', name: 'In Review', cat: 'indeterminate' }] : []),
     { id: '10002', name: 'Done', cat: 'done' },
     { id: '10003', name: "Won't Do", cat: 'done' },
+    ...(opts.qa ? [{ id: '10004', name: 'QA', cat: 'indeterminate' }] : []),
   ];
-  const types = TYPES.filter((t) => !(opts.noSubtask && t.subtask));
+  /** Each type's workflow: its statuses in order, and where each one may go. */
+  const flowOf = (type: string): { names: string[]; to(from: string): string[] } => {
+    if (opts.qa && (type === 'Story' || type === 'Task')) {
+      const ways: Record<string, string[]> = { 'To Do': ['In Progress'], 'In Progress': ['QA', 'To Do'], QA: opts.qa === 'way' ? ['Done', 'In Progress'] : ['In Progress'], Done: ['To Do'] };
+      return { names: ['To Do', 'In Progress', 'QA', 'Done', "Won't Do"], to: (from) => [...(ways[from] ?? []), "Won't Do"].filter((n) => n !== from) };
+    }
+    const names = statuses.filter((x) => x.name !== 'QA').map((x) => x.name);
+    const line = names.filter((n) => n !== "Won't Do");
+    return {
+      names,
+      to: (from) => names.filter((n) => n !== from && (!opts.steps || n === "Won't Do" || Math.abs(line.indexOf(n) - line.indexOf(from)) === 1)),
+    };
+  };
+  const types = TYPES.filter((t) => !(opts.noSubtask && t.subtask) && (opts.initiative || t.name !== 'Initiative'));
+  const linkTypes = opts.noRelates ? LINK_TYPES.map((t) => (t.name === 'Relates' ? { ...t, name: 'Related work', inward: 'goes with', outward: 'goes with' } : t)) : LINK_TYPES;
+  let linkIds = 30000;
   const projects = [{ key: 'PAY', name: 'Payments' }, ...(opts.projects ?? [])];
   const issues = new Map<string, Issue>();
-  const links: FakeJira['links'] = [{ type: 'Blocks', source: 'PAY-41', target: 'PAY-44' }];
+  const links: FakeJira['links'] = [{ id: String(linkIds++), type: 'Blocks', source: 'PAY-41', target: 'PAY-44' }];
   const requests: FakeJira['requests'] = [];
   let counter = 0;
   const add = (i: Partial<Issue> & Pick<Issue, 'key' | 'type' | 'summary'>) =>
@@ -152,16 +191,25 @@ export function fakeJira(token = 'secret', opts: FakeJiraOptions = {}): FakeJira
     self: `https://${SITE}/rest/api/3/issue/${i.id}`,
     fields: { summary: i.summary, status: statusOf(i.status), priority: i.priority ? PRIORITIES.find((p) => p.name === i.priority) : null, issuetype: typeOf(i.type) },
   });
-  /** What each type's create and edit screen holds. */
-  const screen = (type: string) => ['summary', 'issuetype', 'project', 'description', 'labels', 'parent', 'priority', ...(type === 'Story' && !opts.noCriteria ? [CRITERIA] : [])];
+  /** What each type's create screen holds, and its edit screen. */
+  const screen = (type: string, edit = false) => [
+    'summary',
+    'issuetype',
+    'project',
+    'description',
+    ...(opts.noLabels ? [] : ['labels']),
+    'parent',
+    'priority',
+    ...(type === 'Story' && !opts.noCriteria && !(edit && opts.criteriaOnCreateOnly) ? [CRITERIA] : []),
+  ];
 
   function fieldsOf(i: Issue): Record<string, unknown> {
     const issuelinks = links
       .filter((l) => l.source === i.key || l.target === i.key)
-      .map((l, n) => {
-        const type = LINK_TYPES.find((t) => t.name === l.type)!;
+      .map((l) => {
+        const type = linkTypes.find((t) => t.name === l.type)!;
         // Seen from this issue: the other one is outward when this one is the source ("this blocks that").
-        return { id: String(20000 + n), type, ...(l.source === i.key ? { outwardIssue: brief(issues.get(l.target)!) } : { inwardIssue: brief(issues.get(l.source)!) }) };
+        return { id: l.id, type, ...(l.source === i.key ? { outwardIssue: brief(issues.get(l.target)!) } : { inwardIssue: brief(issues.get(l.source)!) }) };
       });
     const sprint = SPRINTS.find((s) => s.id === i.sprint);
     return {
@@ -191,16 +239,20 @@ export function fakeJira(token = 'secret', opts: FakeJiraOptions = {}): FakeJira
   /** The few JQL clauses squad-kit writes; anything else is an error, as Jira would say about a word it does not know. */
   function search(jql: string): Issue[] | string {
     const [where, order = ''] = jql.split(/ ORDER BY /i);
-    let list = [...issues.values()];
+    let list = [...issues.values()].filter((i) => !(i.unseen && i.unseen-- > 0));
     for (const clause of where!.split(/ AND /)) {
       let m: RegExpExecArray | null;
       if ((m = /^project = "?(\w+)"?$/.exec(clause))) list = list.filter((i) => i.key.startsWith(`${m![1]}-`));
       else if ((m = /^issuetype in \(([\d, ]+)\)$/.exec(clause))) {
         const ids = m[1]!.split(',').map((s) => s.trim());
         list = list.filter((i) => ids.includes(typeOf(i.type).id));
-      } else if ((m = /^sprint = (\d+)$/.exec(clause))) list = list.filter((i) => i.sprint === Number(m![1]));
+      } else if ((m = /^issuetype = (\d+)$/.exec(clause))) list = list.filter((i) => typeOf(i.type).id === m![1]);
+      else if ((m = /^sprint = (\d+)$/.exec(clause))) list = list.filter((i) => i.sprint === Number(m![1]));
       else if (clause === 'statusCategory != Done') list = list.filter((i) => statuses.find((s) => s.name === i.status)!.cat !== 'done');
-      else if ((m = /^labels = "([^"]+)"$/.exec(clause))) list = list.filter((i) => i.labels.includes(m![1]!));
+      else if ((m = /^labels = "((?:[^"\\]|\\.)+)"$/.exec(clause))) {
+        const label = m[1]!.replace(/\\(.)/g, '$1');
+        list = list.filter((i) => i.labels.includes(label));
+      }
       else return `Error in the JQL Query: the clause "${clause}" is not understood.`;
     }
     if (/created DESC/i.test(order)) return list.sort((a, b) => b.created - a.created);
@@ -208,12 +260,15 @@ export function fakeJira(token = 'secret', opts: FakeJiraOptions = {}): FakeJira
   }
 
   function steps(i: Issue) {
-    const at = statuses.findIndex((s) => s.name === i.status);
-    const flow = statuses.filter((s) => s.name !== "Won't Do");
-    const here = flow.findIndex((s) => s.name === i.status);
-    return statuses
-      .filter((s, n) => n !== at && (!opts.steps || s.name === "Won't Do" || Math.abs(flow.indexOf(s) - here) === 1))
-      .map((s) => ({ id: String(11 + statuses.indexOf(s) * 10), name: s.name, hasScreen: false, isGlobal: !opts.steps, isInitial: false, isAvailable: true, isConditional: false, isLooped: false, to: statusOf(s.name) }));
+    const step = (id: string, name: string, to: string, hasScreen = false) => ({ id, name, hasScreen, isGlobal: !opts.steps, isInitial: false, isAvailable: true, isConditional: false, isLooped: false, to: statusOf(to) });
+    return flowOf(i.type)
+      .to(i.status)
+      .flatMap((to) => {
+        const id = String(11 + statuses.findIndex((x) => x.name === to) * 10);
+        if (to !== 'Done' || !opts.screen) return [step(id, to, to)];
+        // The way to Done with a resolution screen: listed first, as Jira lists it.
+        return [step('91', 'Resolve', to, true), ...(opts.screen === 'also' ? [step(id, to, to)] : [])];
+      });
   }
 
   /** A parent fits Jira's hierarchy: one level up, a Sub-task always under a Story or Task. */
@@ -227,7 +282,12 @@ export function fakeJira(token = 'secret', opts: FakeJiraOptions = {}): FakeJira
 
   /** Sets fields as Jira checks them: on the type's screen, labels without spaces, a parent that fits. */
   function setFields(i: Issue, fields: Record<string, unknown>, isNew = false): Record<string, string> | null {
-    for (const k of Object.keys(fields)) if (!screen(i.type).includes(k)) return { [k]: `Field '${k}' cannot be set. It is not on the appropriate screen, or unknown.` };
+    for (const k of Object.keys(fields)) if (!screen(i.type, !isNew).includes(k)) return { [k]: `Field '${k}' cannot be set. It is not on the appropriate screen, or unknown.` };
+    for (const k of ['description', CRITERIA]) {
+      const problem = fields[k] && typeof fields[k] === 'object' ? adfProblem(fields[k]) : null;
+      if (problem) return { [k]: `Operation value must be an Atlassian Document (see the Atlassian Document Format): ${problem}` };
+    }
+    if (typeof fields.summary === 'string' && (fields.summary.length > 255 || /[\r\n]/.test(fields.summary))) return { summary: 'Summary must be less than 255 characters, on one line.' };
     const labels = fields.labels as string[] | undefined;
     const spaced = labels?.find((l) => /\s/.test(l));
     if (spaced) return { labels: `The label '${spaced}' contains spaces which is invalid.` };
@@ -244,20 +304,19 @@ export function fakeJira(token = 'secret', opts: FakeJiraOptions = {}): FakeJira
     return null;
   }
 
-  function update(i: Issue, upd: Record<string, { add?: unknown }[]>): Record<string, string> | null {
+  function update(i: Issue, upd: Record<string, { add?: unknown; remove?: unknown }[]>): Record<string, string> | null {
+    if (upd.labels && !screen(i.type, true).includes('labels')) return { labels: "Field 'labels' cannot be set. It is not on the appropriate screen, or unknown." };
     for (const op of upd.labels ?? []) {
+      if (op.remove !== undefined) {
+        i.labels = i.labels.filter((l) => l !== op.remove);
+        continue;
+      }
       const label = String(op.add);
       if (/\s/.test(label)) return { labels: `The label '${label}' contains spaces which is invalid.` };
       if (!i.labels.includes(label)) i.labels.push(label);
     }
-    for (const op of upd.issuelinks ?? []) {
-      const add = op.add as { type: { name: string }; inwardIssue?: { key: string }; outwardIssue?: { key: string } };
-      const other = add.inwardIssue?.key ?? add.outwardIssue?.key ?? '';
-      if (!issues.has(other)) return { issuelinks: `Issue ${other} does not exist.` };
-      if (!LINK_TYPES.some((t) => t.name === add.type.name)) return { issuelinks: `No issue link type named '${add.type.name}'.` };
-      // From this issue's side: an inward issue is the source ("that blocks this"); an outward one the target.
-      links.push(add.inwardIssue ? { type: add.type.name, source: other, target: i.key } : { type: add.type.name, source: i.key, target: other });
-    }
+    // squad-kit links issues through POST /issueLink only.
+    if (upd.issuelinks) return { issuelinks: 'This fake takes links only through POST /rest/api/3/issueLink.' };
     return null;
   }
 
@@ -298,7 +357,7 @@ export function fakeJira(token = 'secret', opts: FakeJiraOptions = {}): FakeJira
       return json({ maxResults: 50, startAt: 0, total: fields.length, fields });
     }
     if ((m = /^\/rest\/api\/3\/project\/(\w+)\/statuses$/.exec(p))) {
-      return json(types.map((t) => ({ self: '', id: t.id, name: t.name, subtask: t.subtask, statuses: statuses.map((s) => ({ ...statusOf(s.name), description: '', iconUrl: '', untranslatedName: s.name })) })));
+      return json(types.map((t) => ({ self: '', id: t.id, name: t.name, subtask: t.subtask, statuses: flowOf(t.name).names.map((n) => ({ ...statusOf(n), description: '', iconUrl: '', untranslatedName: n })) })));
     }
     if (p === '/rest/api/3/project/search') {
       const all = projects.map((x, n) => ({ id: String(10000 + n), key: x.key, name: x.name, projectTypeKey: 'software', style: 'classic', simplified: false }));
@@ -310,7 +369,23 @@ export function fakeJira(token = 'secret', opts: FakeJiraOptions = {}): FakeJira
       const project = projects.find((x) => x.key === m![1]!.toUpperCase());
       return project ? json({ id: '10000', key: project.key, name: project.name, projectTypeKey: 'software', style: 'classic', simplified: false }) : no(404, [`No project could be found with key '${m[1]}'.`]);
     }
-    if (p === '/rest/api/3/issueLinkType') return json({ issueLinkTypes: LINK_TYPES.map((t) => ({ ...t, self: '' })) });
+    if (p === '/rest/api/3/issueLinkType') return json({ issueLinkTypes: linkTypes.map((t) => ({ ...t, self: '' })) });
+    if (p === '/rest/api/3/issueLink' && method === 'POST') {
+      // "outwardIssue <outward words> inwardIssue": PAY-41 blocks PAY-44.
+      const from = (body?.outwardIssue as { key?: string })?.key ?? '';
+      const to = (body?.inwardIssue as { key?: string })?.key ?? '';
+      const type = (body?.type as { name?: string })?.name ?? '';
+      if (!issues.has(from) || !issues.has(to)) return no(404, [`Issue ${issues.has(from) ? to : from} does not exist or you do not have permission to see it.`]);
+      if (!linkTypes.some((t) => t.name === type)) return no(404, [`No issue link type with name '${type}' found.`]);
+      links.push({ id: String(linkIds++), type, source: from, target: to });
+      return new Response(null, { status: 201 });
+    }
+    if ((m = /^\/rest\/api\/3\/issueLink\/(\d+)$/.exec(p)) && method === 'DELETE') {
+      const at = links.findIndex((l) => l.id === m![1]);
+      if (at < 0) return no(404, ['No issue link with this id exists.']);
+      links.splice(at, 1);
+      return json(undefined, 204);
+    }
     if (p === '/rest/agile/1.0/board') {
       const values = q.get('projectKeyOrId') === 'PAY' ? BOARDS.map((b) => ({ ...b, self: '', location: { projectKey: 'PAY', projectName: 'Payments' } })) : [];
       return json({ maxResults: 50, startAt: 0, total: values.length, isLast: true, values });
@@ -338,13 +413,21 @@ export function fakeJira(token = 'secret', opts: FakeJiraOptions = {}): FakeJira
       const made: Issue = { key, id: String(20000 + next), type: type.name, summary: '', description: null, status: 'To Do', labels: [], attachments: [], rank: ++counter, created: counter, comments: [] };
       const problem = setFields(made, Object.fromEntries(Object.entries(f).filter(([k]) => k !== 'project' && k !== 'issuetype')), true);
       if (problem) return no(400, [], problem);
+      if (opts.lag) made.unseen = opts.lag;
       issues.set(key, made);
       return json({ id: made.id, key, self: `https://${SITE}/rest/api/3/issue/${made.id}` }, 201);
+    }
+    if ((m = /^\/rest\/api\/3\/issue\/([A-Z]+-\d+)\/editmeta$/.exec(p))) {
+      const i = issues.get(m[1]!);
+      if (!i) return no(404, ['Issue does not exist or you do not have permission to see it.']);
+      return json({ fields: Object.fromEntries(screen(i.type, true).filter((f) => f !== 'project' && f !== 'issuetype').map((f) => [f, { required: false, name: f, key: f, operations: ['set'] }])) });
     }
     if ((m = /^\/rest\/api\/3\/issue\/([A-Z]+-\d+)(\/comment|\/transitions)?$/.exec(p))) {
       const i = issues.get(m[1]!);
       if (!i) return no(404, ['Issue does not exist or you do not have permission to see it.']);
       if (m[2] === '/comment' && method === 'POST') {
+        const problem = adfProblem(body?.body);
+        if (problem) return no(400, [], { comment: `Comment body is not valid Atlassian Document Format: ${problem}` });
         i.comments.push(body?.body as Adf);
         return json({ id: String(i.comments.length), body: body?.body }, 201);
       }
@@ -352,11 +435,12 @@ export function fakeJira(token = 'secret', opts: FakeJiraOptions = {}): FakeJira
       if (m[2] === '/transitions' && method === 'POST') {
         const step = steps(i).find((s) => s.id === (body?.transition as { id?: string })?.id);
         if (!step) return no(400, [`Transition id '${(body?.transition as { id?: string })?.id}' is not valid for this issue.`]);
+        if (step.hasScreen) return no(400, [], { resolution: 'Resolution is required.' });
         i.status = step.to.name;
         return json(undefined, 204);
       }
       if (method === 'PUT') {
-        const problem = setFields(i, (body?.fields ?? {}) as Record<string, unknown>) ?? update(i, (body?.update ?? {}) as Record<string, { add?: unknown }[]>);
+        const problem = setFields(i, (body?.fields ?? {}) as Record<string, unknown>) ?? update(i, (body?.update ?? {}) as Record<string, { add?: unknown; remove?: unknown }[]>);
         return problem ? no(400, [], problem) : json(undefined, 204);
       }
       if (method === 'GET') return json(view(i, q.get('fields')));

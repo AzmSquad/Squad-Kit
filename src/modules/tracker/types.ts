@@ -71,6 +71,11 @@ export interface TrackerLevels {
   process: string;
   /** The project the items go into, for "Into project RoomFlow". */
   project?: string;
+  /**
+   * Levels the tracker cannot nest under the epic above them: those items are linked to their epic instead. 'feature':
+   * every feature; 'story': a story straight under its epic. Left out: everything nests.
+   */
+  linked?: ('feature' | 'story')[];
 }
 
 /** A new item. squad-kit writes Markdown; the module turns it into the tracker's own format. */

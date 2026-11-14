@@ -7,6 +7,7 @@ import type { BrdRef, BreakdownLevel, BreakdownView } from '../api/requirements-
 import { allStories, findPart, leftOutAsk, needExample, pluralType, refWords, sendCountWords, sendStep, sendStepWords, type SendPlanned } from '../lib/requirements';
 import { actionError, rememberSendPlan, reqFileUrl, sendPlanOf, useReqAct, useSendPreview } from '../lib/requirementsData';
 import { shellQuote } from '../lib/text';
+import { featurePlace, storyPlace } from '../lib/send-words';
 import { readFile, type PickedFile } from './dialogs';
 import { Cmd, Modal, Written } from './ui';
 import { useDraft } from '../lib/drafts';
@@ -327,9 +328,7 @@ export function SendDialog({ v, onClose }: { v: BreakdownView; onClose(): void }
             </button>
           ) : (
             <>
-              <button className="btn" onClick={onClose}>
-                Cancel
-              </button>
+              <button className="btn" onClick={onClose}>Cancel</button>
               {failed ? (
                 <button className="btn pri" onClick={() => void send()} disabled={act.isPending}>
                   <RotateCcw size={14} /> Send again
@@ -367,13 +366,13 @@ export function SendDialog({ v, onClose }: { v: BreakdownView; onClose(): void }
             {p.counts.features.all > 0 && (
               <div className="rq-li">
                 <b>{p.counts.features.all}</b>
-                {pluralType(p.levels.feature)}, each under its epic
+                {pluralType(p.levels.feature)}, each {featurePlace(p.levels)}
                 <span>{sendCountWords(p.counts.features, p.first)}</span>
               </div>
             )}
             <div className="rq-li">
               <b>{p.counts.stories.all}</b>
-              {pluralType(p.levels.story)}, each under its {p.counts.storiesUnderEpic ? (p.counts.features.all ? 'feature or epic' : 'epic') : 'feature'}
+              {pluralType(p.levels.story)}, each {storyPlace(p.levels, p.counts)}
               <span>{p.first ? 'with "done when" as acceptance criteria' : sendCountWords(p.counts.stories, false)}</span>
             </div>
             {(p.first ? p.counts.links : p.links) > 0 && (

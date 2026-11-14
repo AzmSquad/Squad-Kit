@@ -131,6 +131,13 @@ describe('what Send to the tracker will do', () => {
     expect(tracker.log).toEqual([]);
   });
 
+  it('says which levels the tracker links to their epic instead of nesting them', async () => {
+    breakdown();
+    tracker = demoTracker({ levels: { project: 'RoomFlow', epic: 'Epic', feature: 'Epic', story: 'Story', process: 'company-managed', linked: ['feature'] } });
+    projectTracker = tracker;
+    expect((await sendPreview(bp, 'BR-1')).levels).toEqual({ epic: 'Epic', feature: 'Epic', story: 'Story', process: 'company-managed', linked: ['feature'] });
+  });
+
   it('offers only a tracker that can make items', async () => {
     breakdown();
     expect(breakdownView(bp, 'BR-1', 'subscription').tracker).toMatchObject({ module: 'azure', label: 'Azure DevOps' });

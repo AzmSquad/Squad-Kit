@@ -4,4 +4,4 @@ export { runConfigSetTracker, type ConfigSetTrackerOptions } from './set-tracker
 export { runConfigUnsetPlanner, type ConfigUnsetPlannerOptions } from './unset-planner.js';
 export { runConfigUnsetTracker, type ConfigUnsetTrackerOptions } from './unset-tracker.js';
 export { runConfigRemoveCredential, type ConfigRemoveCredentialOptions, type CredentialSection } from './remove-credential.js';
-export { mergePlannerKeyIntoSecrets, newPlannerBlock, promptJiraCredentials, promptAzureCredentials } from './shared.js';
+export { mergePlannerKeyIntoSecrets, newPlannerBlock, promptAzureCredentials } from './shared.js';

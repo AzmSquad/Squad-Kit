@@ -106,6 +106,51 @@ describe('Jira settings', () => {
   });
 });
 
+describe('the saved token goes only to the host it was saved for', () => {
+  const saved = async (m: ReturnType<typeof mod>['m']) => {
+    const root = project();
+    await m.save(root, { site: SITE, email: EMAIL, token: 'secret' });
+    return root;
+  };
+  const calls = (fake: ReturnType<typeof fakeJira>) => fake.requests.length;
+
+  it('the lists while the site is typed: no call with it to a half-typed, misspelled or other host', async () => {
+    const { m, fake } = mod();
+    const root = await saved(m);
+    const before = calls(fake);
+    for (const site of ['acme.atlas', 'acme.atlassian.ne', 'acmee.atlassian.net', 'jira.mycorp.com', 'evil.example']) {
+      expect(await m.choices!({ site, email: EMAIL, project: 'PAY' }, root)).toEqual({});
+    }
+    expect(calls(fake)).toBe(before);
+    expect((await m.choices!({ site: 'acme', email: EMAIL }, root)).project).toHaveLength(1);
+  });
+
+  it("a commit that changes the team's site: nobody's token goes there, and Settings and Connections say what to do", async () => {
+    vi.stubGlobal('fetch', fakeJira().fetch);
+    const { m, fake } = mod();
+    const root = await saved(m);
+    saveConfig(buildPaths(root).configFile, { ...loadConfig(buildPaths(root).configFile), tracker: { ...tracker(root), workspace: 'other.atlassian.net' } });
+    const before = calls(fake);
+    expect(m.open(root)).toBeNull();
+    expect(m.read(root)).toMatchObject({ values: { site: 'other.atlassian.net' }, hasSecret: false, note: "The team's Jira site is now other.atlassian.net. Paste your token for it." });
+    expect(await m.choices!({ site: 'other.atlassian.net', email: EMAIL }, root)).toEqual({});
+    jiraConnection.forget?.();
+    const row = await jiraConnection.status(root);
+    expect(row.state).toBe('not-connected');
+    expect(row.steps[0]!.text).toEqual({ en: "The team's Jira site is now other.atlassian.net. Paste your token for it.", ar: 'موقع Jira للفريق صار other.atlassian.net. الصق رمزك له.' });
+    expect(calls(fake)).toBe(before);
+  });
+
+  it('saving a new site with the token left empty never carries the old token there', async () => {
+    const { m, fake } = mod();
+    const root = await saved(m);
+    const before = calls(fake);
+    await expect(m.save(root, { site: 'other.atlassian.net', email: EMAIL, token: '' })).rejects.toThrow('Paste your Jira API token for other.atlassian.net.');
+    expect(fake.requests.slice(before)).toEqual([]);
+    expect(tracker(root).workspace).toBe(SITE);
+  });
+});
+
 describe('a Jira setup from squad-kit 0.x', () => {
   it('reads with the saved site, email and token, asks nothing again, and writes once saved', async () => {
     const { m, fake } = mod();
@@ -129,13 +174,16 @@ describe('a Jira setup from squad-kit 0.x', () => {
     expect(m.read(root).note).toBeUndefined();
   });
 
-  it('a 0.x project key is kept, and JIRA_* variables still work as in 0.x', async () => {
+  it('a 0.x project key is kept, and JIRA_* variables still work, a token in JIRA_API_TOKEN going only to JIRA_HOST', async () => {
     const { m } = mod();
     const root = project({ type: 'jira', workspace: SITE, project: 'pay' });
     expect(m.open(root)).toBeNull();
     expect(m.read(root).hasSecret).toBe(false);
     process.env.JIRA_EMAIL = EMAIL;
     process.env.JIRA_API_TOKEN = 'secret';
+    // A token without the host it is for goes nowhere.
+    expect(m.open(root)).toBeNull();
+    process.env.JIRA_HOST = SITE;
     const t = m.open(root)!;
     expect(t.refOf('40')).toBe('PAY-40');
     expect((await t.list()).length).toBeGreaterThan(0);

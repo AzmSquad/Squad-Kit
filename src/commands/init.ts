@@ -7,6 +7,7 @@ import { buildPaths, SQUAD_DIR, NOT_A_PROJECT_FOLDER, isOwnFolder } from '../cor
 import { ensureGitignore } from '../core/gitignore.js';
 import {
   DEFAULT_PLANNER_MAX_OUTPUT_TOKENS,
+  loadConfig,
   saveConfig,
   type SquadConfig,
   type TrackerType,
@@ -22,9 +23,10 @@ import {
   runConfigSetPlanner,
   runConfigSetTracker,
   mergePlannerKeyIntoSecrets,
-  promptJiraCredentials,
   promptAzureCredentials,
 } from './config/index.js';
+import { setTrackerFromModule } from './config/set-tracker-module.js';
+import { trackerModule } from '../modules/registry.js';
 
 export interface InitOptions {
   agents?: string;
@@ -127,21 +129,7 @@ export async function runInit(opts: InitOptions): Promise<void> {
   let trackerWorkspace = opts.trackerWorkspace?.trim() || undefined;
   let trackerProject = opts.trackerProject?.trim() || undefined;
 
-  if (allowSecretPrompts && answers.tracker === 'jira') {
-    ui.step('Jira Cloud credentials (stored in .squad/secrets.yaml — always git-ignored)');
-
-    const { host, email, token } = await promptJiraCredentials({ host: trackerWorkspace });
-
-    const base = loadSecrets(paths.secretsFile);
-    const merged = mergeSecrets(base, {
-      tracker: { jira: { host: host.trim(), email: email.trim(), token } },
-    });
-    saveSecrets(paths.secretsFile, merged);
-
-    trackerWorkspace = host.trim();
-    ui.success('Jira credentials saved');
-    ui.info('.squad/secrets.yaml updated (chmod 0600 on POSIX)');
-  } else if (allowSecretPrompts && answers.tracker === 'azure') {
+  if (allowSecretPrompts && answers.tracker === 'azure') {
     ui.step('Azure DevOps credentials (stored in .squad/secrets.yaml — always git-ignored)');
     const a = await promptAzureCredentials({ organization: trackerWorkspace, project: trackerProject });
     const base = loadSecrets(paths.secretsFile);
@@ -275,13 +263,14 @@ export async function runInit(opts: InitOptions): Promise<void> {
     }
   }
 
-  const trackerConfig: SquadConfig['tracker'] = { type: answers.tracker };
-  if (answers.tracker === 'jira' || answers.tracker === 'azure') {
+  // Jira is set up the way Settings' Save and check does it, once the project's files are there (below).
+  const trackerConfig: SquadConfig['tracker'] = { type: answers.tracker === 'jira' ? 'none' : answers.tracker };
+  if (answers.tracker === 'azure') {
     if (trackerWorkspace) trackerConfig.workspace = trackerWorkspace;
     if (trackerProject) trackerConfig.project = trackerProject;
   }
 
-  const config: SquadConfig = {
+  let config: SquadConfig = {
     version: 1,
     project: { name: answers.name, primaryLanguage: answers.language, projectRoots: ['.'] },
     tracker: trackerConfig,
@@ -301,6 +290,7 @@ export async function runInit(opts: InitOptions): Promise<void> {
   );
 
   saveConfig(paths.configFile, config);
+  if (answers.tracker === 'jira') config = await setUpJira(root, { site: trackerWorkspace, project: trackerProject, interactive: allowSecretPrompts });
 
   if (ensureGitignore(paths.root)) {
     ui.info('Updated .gitignore with squad-managed patterns (e.g. .squad/secrets.yaml).');
@@ -369,6 +359,22 @@ function installAgent(root: string, agent: AgentName, overwrite: boolean): void 
   const dest = path.join(root, config.subdir);
   if (!fs.existsSync(src)) return;
   copyTree(src, dest, overwrite);
+}
+
+/**
+ * Jira as Save and check sets it up: its fields (asked in a terminal, or from --tracker-workspace and
+ * --tracker-project with the saved or JIRA_* sign-in), checked with Jira first. When it cannot be checked yet, the
+ * project has no tracker and the next step is said; nothing half set up is written.
+ */
+async function setUpJira(root: string, o: { site?: string; project?: string; interactive: boolean }): Promise<SquadConfig> {
+  const fields = [...(o.site ? [`site=${o.site}`] : []), ...(o.project ? [`project=${o.project}`] : [])];
+  try {
+    await setTrackerFromModule(root, trackerModule('jira')!, fields, o.interactive);
+  } catch (err) {
+    ui.warning(`Jira is not set up yet: ${(err as Error).message}`);
+    ui.info('Set it up in Settings, or run: squad config set tracker --type jira');
+  }
+  return loadConfig(buildPaths(root).configFile);
 }
 
 function renderSquadReadme(config: SquadConfig): string {

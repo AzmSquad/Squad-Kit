@@ -24,10 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the project and its Scrum board when there is only one, and keeps the token on this computer. The Backlog shows the
   project's stories, tasks and bugs in Jira's own order, on the running sprint (else the next, else the newest).
   Pulling a story brings its text, acceptance criteria, epic, the stories it is blocked by and its files. squad-kit
-  moves it along the project's own workflow (In Review when the workflow has one, Done once the work is merged), writes
-  the squad's questions, plans and pull request links on it, adds the release as a label and files bugs. A breakdown
-  goes to Jira as Epics, Stories under them and Sub-tasks under those, with "is blocked by" links for the order.
-  Terminal: `squad config set tracker --type jira`.
+  moves it along the project's own workflow (In Review once its work is merged when the workflow has one, and Done
+  once released; without In Review, Done once merged), writes the squad's questions, plans and pull request links on
+  it, adds the release as a label and files bugs. Your token only ever goes to the site it was saved for. A breakdown
+  goes to Jira with every story a real Story, ready for a sprint: epics and features as Epics, a feature linked to its
+  epic and labelled with its name (Jira puts no Epic under an Epic), or, where the site has Initiative above Epic,
+  epics as Initiatives with the features' Epics under them. "Is blocked by" links keep the order. Terminal: `squad
+  config set tracker --type jira`.
 - **Jira on the Connections page** is a token you paste, with the steps to make one and a link to Atlassian's token
   page. Sign in with Atlassian is shown as coming next.
 
@@ -36,7 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A Jira setup from squad-kit 0.x (site, email and token) works as it is: squad-kit reads Jira with it and asks for
   nothing again. It only writes to Jira once you press Save and check in Settings, after picking the project if it had
   none.
-- `squad config set tracker` sets Jira up from the same fields as Settings, with its project and board.
+- `squad config set tracker` and `squad init --tracker jira` set Jira up from the same fields as Settings, with its
+  project and board, checked with Jira first.
 
 ## [1.3.21] — 2026-11-13
 

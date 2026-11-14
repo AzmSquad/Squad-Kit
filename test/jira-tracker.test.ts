@@ -6,6 +6,7 @@ import { EMAIL, SITE, fakeJira, type FakeJiraOptions } from './fakes/jira.js';
 import { trackerContract, trackerCreateContract } from './contracts/tracker.js';
 import { JiraClient } from '../src/modules/jira/client.js';
 import { JiraTracker } from '../src/modules/jira/tracker.js';
+import { siteOf } from '../src/modules/jira/refs.js';
 import type { JiraSettings } from '../src/modules/jira/settings.js';
 import { ModuleError, mayPassSoon, refusedForGood } from '../src/modules/errors.js';
 import { sprintToShow } from '../src/modules/tracker/sprints.js';
@@ -28,8 +29,9 @@ trackerContract('Jira Cloud', () => {
 });
 
 trackerCreateContract('Jira Cloud', () => jira().tracker);
-trackerCreateContract('Jira Cloud without an Acceptance Criteria field', () => jira({ noCriteria: true }).tracker);
-trackerCreateContract('Jira Cloud with In Review, a step at a time', () => jira({ review: true, steps: true }).tracker);
+trackerCreateContract('Jira Cloud with Initiative above Epic', () => jira({ initiative: true }).tracker);
+trackerCreateContract('Jira Cloud without an Acceptance Criteria field or sub-tasks', () => jira({ noCriteria: true, noSubtask: true }).tracker);
+trackerCreateContract('Jira Cloud with In Review, a step at a time, and its Relates link renamed', () => jira({ review: true, steps: true, noRelates: true }).tracker);
 
 describe('Jira refs', () => {
   const { tracker } = jira();
@@ -42,6 +44,8 @@ describe('Jira refs', () => {
     expect(tracker.parseRef(`https://${SITE}/jira/software/projects/PAY/boards/1?selectedIssue=PAY-41`)).toBe('PAY-41');
     expect(tracker.parseRef('AB#40')).toBeNull();
     expect(tracker.parseRef('PAY-0')).toBeNull();
+    expect([siteOf('acme'), siteOf(`https://${SITE}/browse/PAY-4`), siteOf('jira.mycorp.com')]).toEqual([SITE, SITE, 'jira.mycorp.com']);
+    expect([siteOf(`${SITE}:8443`), siteOf('10.0.0.5'), siteOf('https://1.2.3.4/browse/PAY-4'), siteOf('[::1]'), siteOf('acme .net')]).toEqual([null, null, null, null, null]);
     expect(tracker.refOf('PAY-40')).toBe('PAY-40');
     expect(tracker.refOf('40')).toBe('PAY-40');
   });
@@ -192,34 +196,74 @@ describe('Jira writes', () => {
     const { tracker, fake } = jira();
     const bug = await tracker.fileBug({ title: 'Slot never frees', steps: 'Hold a slot\n\nWait 11 minutes', severity: 'stops-work', tags: ['v1.3.22'], related: ['PAY-40'] });
     expect(bug).toMatchObject({ type: 'Bug', isBug: true, priority: 1, tags: ['v1.3.22'] });
-    expect(fake.links).toContainEqual({ type: 'Relates', source: bug.id, target: 'PAY-40' });
+    expect(fake.links).toContainEqual(expect.objectContaining({ type: 'Relates', source: bug.id, target: 'PAY-40' }));
   });
 
-  it('a breakdown: Epic, then a Story under it, then a Sub-task under that; a story straight under an epic is a Story', async () => {
+  it('a breakdown without a level above Epic: epics and features are Epics, a feature linked to its epic, and every story a Story the backlog lists', async () => {
     const { tracker, fake } = jira();
-    expect(await tracker.levels()).toEqual({ epic: 'Epic', feature: 'Story', story: 'Subtask', process: 'company-managed', project: 'Payments' });
+    expect(await tracker.levels()).toEqual({ epic: 'Epic', feature: 'Epic', story: 'Story', process: 'company-managed', project: 'Payments', linked: ['feature'] });
     const epic = await tracker.createItem({ level: 'epic', title: 'Front desk', markdown: 'x', tags: ['BR 1'] });
-    const alone = await tracker.createItem({ level: 'story', title: 'Check in', markdown: 'x', parent: epic.id });
-    expect(alone.type).toBe('Story');
     expect(fake.issues.get(epic.id)!.labels).toEqual(['BR-1']);
     const feature = await tracker.createItem({ level: 'feature', title: 'Paying', markdown: 'x', parent: epic.id });
-    const story = await tracker.createItem({ level: 'story', title: 'Pay by card', markdown: 'As a guest…', acceptance: '**Given** a card', parent: feature.id, tags: ['BR-1'] });
-    expect(story.type).toBe('Subtask');
+    // Jira puts no Epic under an Epic: the feature sits beside its epic, linked and labelled with its name.
+    expect(fake.issues.get(feature.id)).toMatchObject({ type: 'Epic', labels: ['epic-front-desk'] });
+    expect(fake.issues.get(feature.id)!.parent).toBeUndefined();
+    expect(fake.links).toContainEqual(expect.objectContaining({ type: 'Relates', source: feature.id, target: epic.id }));
+    const story = await tracker.createItem({ level: 'story', title: 'Pay by card', markdown: 'As a guest…', acceptance: 'Given a card', parent: feature.id, tags: ['BR-1'] });
+    const alone = await tracker.createItem({ level: 'story', title: 'Check in', markdown: 'x', parent: epic.id });
+    expect([story.type, alone.type]).toEqual(['Story', 'Story']);
+    expect([fake.issues.get(story.id)!.parent, fake.issues.get(alone.id)!.parent]).toEqual([feature.id, epic.id]);
+    expect(JSON.stringify(fake.issues.get(story.id)!.criteria)).toContain('Given a card');
+    expect((await tracker.get(story.id)).parents.map((p) => [p.id, p.type])).toEqual([
+      [feature.id, 'Epic'],
+      [epic.id, 'Epic'],
+    ]);
+    // Every story sent can be built: the backlog lists it.
+    expect((await tracker.list()).map((r) => r.id)).toEqual(expect.arrayContaining([story.id, alone.id]));
     expect(await tracker.findMade({ level: 'story', tag: 'BR-1', mark: 'As a guest' })).toMatchObject({ id: story.id });
     expect(await tracker.findMade({ level: 'story', tag: 'BR-1', mark: 'nothing like it' })).toBeNull();
   });
 
-  it('a feature story with the criteria field gets them there; a site without sub-tasks says so before a story goes under a feature', async () => {
+  it('a feature moved to another epic: the old link and label go, the new ones come, and sending again changes nothing', async () => {
     const { tracker, fake } = jira();
+    const first = await tracker.createItem({ level: 'epic', title: 'Front desk', markdown: 'x' });
+    const second = await tracker.createItem({ level: 'epic', title: 'Billing', markdown: 'x' });
+    const feature = await tracker.createItem({ level: 'feature', title: 'Paying', markdown: 'x', parent: first.id });
+    const story = await tracker.createItem({ level: 'story', title: 'Pay by card', markdown: 'x', parent: feature.id });
+    await tracker.updateItem(feature.id, { parent: second.id });
+    expect(fake.issues.get(feature.id)!.labels).toEqual(['epic-billing']);
+    expect(fake.links.filter((l) => l.source === feature.id).map((l) => l.target)).toEqual([second.id]);
+    expect((await tracker.get(story.id)).parents.map((p) => p.id)).toEqual([feature.id, second.id]);
+    const before = fake.requests.length;
+    await tracker.updateItem(feature.id, { title: 'Paying', parent: second.id });
+    expect(fake.requests.slice(before).filter((r) => r.method !== 'GET').map((r) => r.method)).toEqual(['PUT']);
+    expect(fake.links.filter((l) => l.source === feature.id)).toHaveLength(1);
+  });
+
+  it('a breakdown with Initiative above Epic: Initiative, Epic, Story nest, and a story straight under an initiative is linked to it', async () => {
+    const { tracker, fake } = jira({ initiative: true });
+    expect(await tracker.levels()).toMatchObject({ epic: 'Initiative', feature: 'Epic', story: 'Story', linked: ['story'] });
     const epic = await tracker.createItem({ level: 'epic', title: 'Front desk', markdown: 'x' });
-    const feature = await tracker.createItem({ level: 'story', title: 'Check in', markdown: 'Text', acceptance: 'Given a guest', parent: epic.id });
-    expect(JSON.stringify(fake.issues.get(feature.id)!.criteria)).toContain('Given a guest');
-    expect(JSON.stringify(fake.issues.get(feature.id)!.description)).not.toContain('Given a guest');
-    const bare = jira({ noSubtask: true }).tracker;
-    expect((await bare.levels()).story).toBe('Story');
-    const e = await bare.createItem({ level: 'epic', title: 'E', markdown: 'x' });
-    const f = await bare.createItem({ level: 'feature', title: 'F', markdown: 'x', parent: e.id });
-    await expect(bare.createItem({ level: 'story', title: 'S', markdown: 'x', parent: f.id })).rejects.toThrow(/has no Sub-task issue type/);
+    const feature = await tracker.createItem({ level: 'feature', title: 'Paying', markdown: 'x', parent: epic.id });
+    expect(fake.issues.get(feature.id)).toMatchObject({ type: 'Epic', parent: epic.id, labels: [] });
+    const alone = await tracker.createItem({ level: 'story', title: 'Check in', markdown: 'x', parent: epic.id });
+    expect(fake.issues.get(alone.id)).toMatchObject({ type: 'Story', labels: ['epic-front-desk'] });
+    expect((await tracker.get(alone.id)).parents.map((p) => [p.id, p.type])).toEqual([[epic.id, 'Initiative']]);
+    // Moved under a feature: Jira's parent now, and the link and label to the initiative go.
+    await tracker.updateItem(alone.id, { parent: feature.id });
+    expect(fake.issues.get(alone.id)).toMatchObject({ parent: feature.id, labels: [] });
+    expect(fake.links.filter((l) => l.source === alone.id)).toEqual([]);
+    expect((await tracker.get(alone.id)).parents.map((p) => p.id)).toEqual([feature.id, epic.id]);
+  });
+
+  it("no item is ever a sub-task, and a bug relating to a story is not taken for its parent", async () => {
+    const { tracker, fake } = jira();
+    const epic = await tracker.createItem({ level: 'epic', title: 'E', markdown: 'x' });
+    const feature = await tracker.createItem({ level: 'feature', title: 'F', markdown: 'x', parent: epic.id });
+    const story = await tracker.createItem({ level: 'story', title: 'S', markdown: 'x', parent: feature.id });
+    expect([...fake.issues.values()].filter((i) => i.type === 'Subtask').map((i) => i.key)).toEqual(['PAY-45']);
+    const bug = await tracker.fileBug({ title: 'B', steps: 'x', severity: 'small', tags: [], related: [story.id] });
+    expect((await tracker.get(bug.id)).parents).toEqual([]);
   });
 
   it('set up before this version: reads work, every write waits as a sign-in problem with the way to connect again', async () => {
@@ -268,5 +312,109 @@ describe('Jira errors, in the shared way', () => {
     await tracker.list();
     await tracker.get('PAY-40');
     expect(fake.requests.every((r) => !r.url.includes('secret'))).toBe(true);
+  });
+});
+
+describe('Jira workflows that are not straight', () => {
+  it('takes a sideways step (In Progress to QA) when that is the only way on, and Bugs keep their own workflow', async () => {
+    const { tracker, fake } = jira({ qa: 'way' });
+    expect(await tracker.moveTo('PAY-40', 'closed')).toBe('Done');
+    expect(fake.requests.filter((r) => r.method === 'POST' && r.url.endsWith('/transitions'))).toHaveLength(3);
+    expect(await tracker.moveTo('PAY-42', 'closed')).toBe('Done');
+  });
+
+  it("says plainly when the workflow has no way on, and that is not sent again", async () => {
+    const { tracker, fake } = jira({ qa: 'dead-end' });
+    const err = await tracker.moveTo('PAY-40', 'closed').catch((e: unknown) => e);
+    expect((err as Error).message).toBe("Jira's workflow has no way from QA to Done; move PAY-40 in Jira.");
+    expect(refusedForGood(err)).toBe(true);
+    expect(fake.issues.get('PAY-40')!.status).toBe('QA');
+  });
+
+  it('prefers a way without a screen, and words a step Jira refuses for a missing field', async () => {
+    const plain = jira({ screen: 'also' });
+    expect(await plain.tracker.moveTo('PAY-41', 'closed')).toBe('Done');
+    const only = jira({ screen: 'only' });
+    const err = await only.tracker.moveTo('PAY-41', 'closed').catch((e: unknown) => e);
+    expect((err as Error).message).toBe('Jira needs more than squad-kit can fill in to move PAY-41 to Done (resolution: Resolution is required). Move it in Jira.');
+    expect(refusedForGood(err)).toBe(true);
+  });
+});
+
+describe('Jira, the careful parts', () => {
+  it('a breakdown item made seconds before a cut is found on a second look, after a wait', async () => {
+    const { tracker, waits } = jira({ lag: 1 });
+    const made = await tracker.createItem({ level: 'epic', title: 'Front desk', markdown: 'Made by squad-kit for BR-1 E-1', tags: ['BR-1'] });
+    expect(await tracker.findMade({ level: 'epic', tag: 'BR-1', mark: 'BR-1 E-1' })).toMatchObject({ id: made.id });
+    expect(waits).toEqual([5000]);
+  });
+
+  it('labels only where the screens have them; a title is one line of at most 255 characters', async () => {
+    const { tracker, fake } = jira({ noLabels: true });
+    const epic = await tracker.createItem({ level: 'epic', title: `Front\ndesk ${'x'.repeat(300)}`, markdown: 'x', tags: ['BR-1'] });
+    expect(fake.issues.get(epic.id)!.summary).toMatch(/^Front desk x+$/);
+    expect(fake.issues.get(epic.id)!.summary).toHaveLength(255);
+    const feature = await tracker.createItem({ level: 'feature', title: 'Paying', markdown: 'x', parent: epic.id });
+    expect(fake.issues.get(feature.id)!.labels).toEqual([]);
+    expect(fake.links).toContainEqual(expect.objectContaining({ type: 'Relates', source: feature.id, target: epic.id }));
+    // Sent again: the link is there already, so nothing is linked twice.
+    await tracker.updateItem(feature.id, { parent: epic.id });
+    expect(fake.links.filter((l) => l.source === feature.id)).toHaveLength(1);
+    const bug = await tracker.fileBug({ title: 'B', steps: 'x', severity: 'small', tags: ['v1'], related: [] });
+    expect(fake.issues.get(bug.id)!.labels).toEqual([]);
+  });
+
+  it('every link goes through the issue link call, never an edit', async () => {
+    const { tracker, fake } = jira();
+    await tracker.linkDepends('PAY-44', ['PAY-40']);
+    expect(fake.requests.filter((r) => r.method === 'POST' && r.url.endsWith('/rest/api/3/issueLink'))).toHaveLength(1);
+    expect(fake.links).toContainEqual(expect.objectContaining({ type: 'Blocks', source: 'PAY-40', target: 'PAY-44' }));
+    expect((await tracker.get('PAY-44')).dependsOn.map((d) => d.ref)).toEqual(['PAY-41', 'PAY-40']);
+  });
+
+  it('an update sets what the edit screen has: criteria only on the create screen go in the text', async () => {
+    const { tracker, fake } = jira({ criteriaOnCreateOnly: true });
+    await tracker.updateItem('PAY-40', { markdown: 'Hold it longer.', acceptance: 'Given 20 minutes' });
+    expect(JSON.stringify(fake.issues.get('PAY-40')!.description)).toContain('Given 20 minutes');
+  });
+
+  it('JQL: quotes and backslashes in a label are escaped, and a project key that is not one never reaches a query', async () => {
+    const { tracker } = jira();
+    const made = await tracker.createItem({ level: 'epic', title: 'E', markdown: 'mark-1', tags: ['BR"1\\x'] });
+    expect(await tracker.findMade({ level: 'epic', tag: 'BR"1\\x', mark: 'mark-1' })).toMatchObject({ id: made.id });
+    const odd = jira({}, { project: 'PAY" OR project = "OPS' });
+    await expect(odd.tracker.list()).rejects.toThrow('is not a Jira project key');
+    expect(odd.fake.requests.filter((r) => r.url.includes('/search'))).toEqual([]);
+  });
+});
+
+describe('Jira client answers that are not Jira data', () => {
+  const access = { site: SITE, email: EMAIL, token: 'secret' };
+  const seen: string[] = [];
+  const answer = (res: () => Response) =>
+    (async (input: string | URL | Request) => {
+      seen.push(String(input));
+      return res();
+    }) as typeof fetch;
+
+  it('a web page instead of data (a proxy or a sign-in page) is said plainly', async () => {
+    const client = new JiraClient(access, answer(() => new Response('<html><body>Log in</body></html>', { status: 200, headers: { 'content-type': 'text/html' } })));
+    await expect(client.call('GET', '/rest/api/3/myself')).rejects.toThrow(`${SITE} answered with a web page instead of Jira's data.`);
+  });
+
+  it('a site that moved: one call, not followed, said with where it sends', async () => {
+    seen.length = 0;
+    const client = new JiraClient(access, answer(() => new Response(null, { status: 302, headers: { location: 'https://new.atlassian.net/rest/api/3/myself' } })));
+    const err = await client.call('GET', '/rest/api/3/myself').catch((e: unknown) => e);
+    expect((err as Error).message).toBe(`Jira at ${SITE} sends squad-kit to new.atlassian.net. If your site moved, enter the new one in Settings.`);
+    expect(refusedForGood(err)).toBe(true);
+    expect(seen).toEqual([`https://${SITE}/rest/api/3/myself`]);
+  });
+
+  it('only paths on the site: an address on another host is refused before any call', async () => {
+    seen.length = 0;
+    const client = new JiraClient(access, answer(() => new Response('{}')));
+    await expect(client.call('GET', 'https://evil.example/steal')).rejects.toThrow('A Jira call takes a path on the site');
+    expect(seen).toEqual([]);
   });
 });

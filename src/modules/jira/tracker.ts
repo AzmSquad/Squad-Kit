@@ -18,11 +18,12 @@ import { markdownToAdf } from './adf-write.js';
 import type { JiraClient } from './client.js';
 import { JiraContext, type Status } from './context.js';
 import { createIssue, fileBugIssue, findMadeIssue, linkBlockedBy, updateIssue } from './create.js';
+import { itemAbove } from './epic-links.js';
 import { levelsOf } from './levels.js';
-import { parseRef, projectOfKey, refOf } from './refs.js';
+import { jqlText, parseRef, projectOfKey, refOf } from './refs.js';
 import { blockedBy, labelOf, rowFields, rowOf, type RawIssue } from './rows.js';
 import type { JiraSettings } from './settings.js';
-import { goalOf, nextStep, rankOf } from './states.js';
+import { goalName, goalOf, nextStep, rankOf } from './states.js';
 
 /**
  * Jira Cloud as a squad-kit tracker: a project's stories, tasks and bugs in its backlog's rank order, a board's sprints,
@@ -37,6 +38,15 @@ const CRITERIA = /^[ \t]*(?:#{1,6}[ \t]*|\*\*)?(?:done when|acceptance criteria)
 function splitCriteria(text: string): { description: string; acceptance: string } {
   const at = CRITERIA.exec(text);
   return at ? { description: text.slice(0, at.index).trim(), acceptance: text.slice(at.index + at[0].length).trim() } : { description: text, acceptance: '' };
+}
+
+/** Steps on the way, sideways ones included, before squad-kit says the workflow has no way on. */
+const MAX_HOPS = 6;
+
+interface RawTransition {
+  id: string;
+  hasScreen?: boolean;
+  to: { name: string; statusCategory?: { key?: string } };
 }
 
 interface RawSprint {
@@ -108,7 +118,7 @@ export class JiraTracker implements Tracker {
     if (sprint !== undefined && !(Number.isInteger(sprint) && sprint > 0)) throw new ModuleError(`"${opts.sprint}" is not a Jira sprint.`, 'not-found');
     const standard = (await this.ctx.types(project)).filter((t) => t.level === 0 && !t.subtask).map((t) => t.id);
     const where = [
-      `project = "${project}"`,
+      `project = ${jqlText(project)}`,
       standard.length ? `issuetype in (${standard.join(', ')})` : 'issuetype in standardIssueTypes()',
       sprint ? `sprint = ${sprint}` : '',
       opts.includeDone ? '' : 'statusCategory != Done',
@@ -128,11 +138,12 @@ export class JiraTracker implements Tracker {
     const description = adfToMarkdown(issue.fields.description);
     const criteria = fields.criteria ? adfToMarkdown(issue.fields[fields.criteria.id]) : '';
     const text = criteria ? { description, acceptance: criteria } : splitCriteria(description);
-    // The feature and epic above it, nearest first: Jira gives the parent; its own parent is asked for.
+    // The feature and epic above it, nearest first: Jira's parent, or the epic it is linked to; then the one above that.
     const parents: TrackerItem['parents'] = [];
-    for (let p = issue.fields.parent; p && parents.length < 3; ) {
-      parents.push({ id: p.key, type: p.fields?.issuetype?.name ?? '', title: p.fields?.summary ?? '' });
-      p = (await this.client.call<RawIssue>('GET', `/rest/api/3/issue/${encodeURIComponent(p.key)}?fields=parent`).catch(() => null))?.fields.parent;
+    for (let p = itemAbove(issue); p && parents.length < 3; ) {
+      parents.push({ id: p.key, type: p.type, title: p.title });
+      const next = await this.client.call<RawIssue>('GET', `/rest/api/3/issue/${encodeURIComponent(p.key)}?fields=parent,summary,issuetype,labels,issuelinks`).catch(() => null);
+      p = next ? itemAbove(next) : null;
     }
     return {
       ...rowOf(issue, fields, (k) => this.client.browseUrl(k)),
@@ -153,22 +164,36 @@ export class JiraTracker implements Tracker {
     return [];
   }
 
-  /** Forward only, through the workflow's own transitions, a step at a time when it has no direct way. */
+  /**
+   * Forward only, through the workflow's own transitions, a step at a time when it has no direct way. A workflow with
+   * no way on says so plainly: the person moves it in Jira.
+   */
   async moveTo(id: string, stage: ItemStage, opts: { merged?: boolean } = {}): Promise<string | null> {
     this.ctx.writing();
     const key = this.key(id);
     const path = `/rest/api/3/issue/${encodeURIComponent(key)}`;
     const issue = await this.client.call<RawIssue>('GET', `${path}?fields=status,issuetype`);
     let now: Status = { name: issue.fields.status?.name ?? '', category: issue.fields.status?.statusCategory?.key ?? '' };
-    const goal = goalOf(stage, await this.ctx.statuses(projectOfKey(key), issue.fields.issuetype?.name ?? ''), opts.merged);
+    const workflow = await this.ctx.statuses(projectOfKey(key), issue.fields.issuetype?.name ?? '');
+    const goal = goalOf(stage, workflow, opts.merged);
+    const visited = new Set([now.name]);
     let moved: string | null = null;
-    for (let hop = 0; hop < 4 && rankOf(now) < goal; hop += 1) {
-      const raw = await this.client.call<{ transitions?: { id: string; to: { name: string; statusCategory?: { key?: string } } }[] }>('GET', `${path}/transitions`);
-      const step = nextStep((raw?.transitions ?? []).map((t) => ({ id: t.id, to: { name: t.to.name, category: t.to.statusCategory?.key ?? '' } })), now, goal);
+    for (let hop = 0; hop < MAX_HOPS && rankOf(now) < goal; hop += 1) {
+      const raw = await this.client.call<{ transitions?: RawTransition[] }>('GET', `${path}/transitions`);
+      const steps = (raw?.transitions ?? []).map((t) => ({ id: t.id, to: { name: t.to.name, category: t.to.statusCategory?.key ?? '' }, screen: Boolean(t.hasScreen) }));
+      const step = nextStep(steps, now, goal, visited);
       if (!step) break;
-      await this.client.call('POST', `${path}/transitions`, { transition: { id: step.id } });
+      await this.client.call('POST', `${path}/transitions`, { transition: { id: step.id } }).catch((err: unknown) => {
+        if (!(err instanceof ModuleError) || err.status !== 400) throw err;
+        const why = err.message.replace(/^Jira said no: /, '').replace(/\.$/, '');
+        throw new ModuleError(`Jira needs more than squad-kit can fill in to move ${key} to ${step.to.name} (${why}). Move it in Jira.`, 'other', 400);
+      });
       now = step.to;
+      visited.add(now.name);
       moved = step.to.name;
+    }
+    if (rankOf(now) < goal) {
+      throw new ModuleError(`Jira's workflow has no way from ${now.name} to ${goalName(workflow, goal)}; move ${key} in Jira.`, 'other', 422);
     }
     return moved;
   }

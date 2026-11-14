@@ -20,6 +20,15 @@ function text(t: string, marks: Mark[]): AdfNode[] {
   return t ? [{ type: 'text', text: t, ...(marks.length ? { marks } : {}) }] : [];
 }
 
+/**
+ * The marks inside another one, as Jira takes them: never the same mark twice (a link in a link keeps the outer one),
+ * and code only with a link.
+ */
+function withMark(marks: Mark[], mark: Mark): Mark[] {
+  if (mark.type === 'code') return [...marks.filter((x) => x.type === 'link'), mark];
+  return marks.some((x) => x.type === mark.type || x.type === 'code') ? marks : [...marks, mark];
+}
+
 /** One line of Markdown as ADF text nodes, the earliest mark first, its inside read again for marks within. */
 function inlineOf(line: string, marks: Mark[] = []): AdfNode[] {
   let best: { at: number; m: RegExpExecArray; rule: (typeof INLINE)[number] } | null = null;
@@ -29,7 +38,7 @@ function inlineOf(line: string, marks: Mark[] = []): AdfNode[] {
   }
   if (!best) return text(line, marks);
   const { at, m, rule } = best;
-  const inside = [...marks, rule.mark(m)];
+  const inside = withMark(marks, rule.mark(m));
   return [
     ...text(line.slice(0, at), marks),
     ...(rule.plain ? text(rule.inner(m), inside) : inlineOf(rule.inner(m), inside)),
@@ -110,7 +119,11 @@ function blocksOf(md: string): AdfNode[] {
       const quoted: string[] = [];
       for (; i < all.length && /^\s*>/.test(all[i]!); i += 1) quoted.push(all[i]!.replace(/^\s*>\s?/, ''));
       i -= 1;
-      out.push({ type: 'blockquote', content: blocksOf(quoted.join('\n')).filter((b) => b.type === 'paragraph' || b.type.endsWith('List') || b.type === 'codeBlock') });
+      // A quote holds paragraphs, lists and code: a heading in it becomes a paragraph, and an empty quote is left out.
+      const inQuote = blocksOf(quoted.join('\n'))
+        .map((b) => (b.type === 'heading' ? { type: 'paragraph', content: b.content ?? [] } : b))
+        .filter((b) => b.type === 'paragraph' || b.type.endsWith('List') || b.type === 'codeBlock');
+      if (inQuote.length) out.push({ type: 'blockquote', content: inQuote });
     } else {
       if (items.length) flush();
       para.push(line);

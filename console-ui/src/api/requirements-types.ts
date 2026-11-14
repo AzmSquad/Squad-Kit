@@ -308,8 +308,8 @@ export interface SendLevelCount {
 /** What Send to <tracker> will do, for the dialog: GET /api/v1/requirements/:id/send. Nothing is sent by it. */
 export interface SendPreview {
   tracker: { module: string; label: string; project?: string };
-  /** The item types this project uses for each level ("User Story" or "Product Backlog Item"), and its process. */
-  levels: { epic: string; feature: string; story: string; process: string };
+  /** The item types this project uses for each level ("User Story" or "Product Backlog Item"), and its process. Linked: levels that sit beside their epic, linked to it. */
+  levels: { epic: string; feature: string; story: string; process: string; linked?: ('feature' | 'story')[] };
   counts: {
     epics: SendLevelCount;
     features: SendLevelCount;

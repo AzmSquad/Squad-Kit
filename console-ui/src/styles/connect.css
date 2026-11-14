@@ -29,6 +29,8 @@
 .gh-muted { color: var(--muted); font-size: 13px; }
 .gh-small { font-size: 12px; color: var(--muted); }
 .gh-link { color: var(--accent); font-weight: 600; font-size: 12.5px; }
+/* A long address on its own line, broken anywhere so it never runs out of the card, in either direction. */
+.gh-url { display: block; max-width: 100%; overflow-wrap: anywhere; }
 .gh-guide { border-top: 1px dashed var(--line-strong); padding-top: 10px; display: flex; flex-direction: column; gap: 9px; }
 .gh-guide summary { list-style: none; cursor: pointer; font-size: 12.5px; font-weight: 600; color: var(--muted); display: flex; gap: 6px; align-items: center; }
 .gh-guide summary::-webkit-details-marker { display: none; }

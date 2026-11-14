@@ -58,7 +58,7 @@ export async function sendPreview(bp: BoardPaths, id: string): Promise<SendPrevi
   const project = levels.project ?? sendTargetOf(bp)?.project;
   return {
     tracker: { module: tracker.name, label: tracker.label, ...(project ? { project } : {}) },
-    levels: { epic: levels.epic, feature: levels.feature, story: levels.story, process: levels.process },
+    levels: { epic: levels.epic, feature: levels.feature, story: levels.story, process: levels.process, ...(levels.linked?.length ? { linked: levels.linked } : {}) },
     counts: plan.counts,
     items: plan.items.length,
     // One for each "S-5 needs S-4", as counts.links counts them.

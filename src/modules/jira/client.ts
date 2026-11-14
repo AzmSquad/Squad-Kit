@@ -68,11 +68,17 @@ export class JiraClient {
     return `${this.base}/browse/${key}`;
   }
 
-  async call<T>(method: string, url: string, body?: unknown, again = true): Promise<T> {
-    const full = url.startsWith('https://') ? url : `${this.base}${url}`;
+  /** Waits a while, as Jira asks; tests give their own pace. */
+  wait(ms: number): Promise<void> {
+    return (this.opts.pause ?? ((t) => new Promise((r) => setTimeout(r, t))))(ms);
+  }
+
+  /** A call to the site's own API. Only a path on the site: the sign-in never goes to another host. */
+  async call<T>(method: string, path: string, body?: unknown, again = true): Promise<T> {
+    if (!path.startsWith('/')) throw new Error(`A Jira call takes a path on the site, not "${path}".`);
     let res: Response;
     try {
-      res = await this.http(full, {
+      res = await this.http(`${this.base}${path}`, {
         method,
         headers: { authorization: authHeader(this.access), accept: 'application/json', ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },
         body: body === undefined ? undefined : JSON.stringify(body),
@@ -86,8 +92,8 @@ export class JiraClient {
     if (res.status === 429) {
       const wait = Number(res.headers.get('retry-after') ?? '');
       if (again && Number.isFinite(wait) && wait <= SHORT_WAIT_S) {
-        await (this.opts.pause ?? ((ms) => new Promise((r) => setTimeout(r, ms))))(Math.max(0, wait) * 1000);
-        return this.call<T>(method, url, body, false);
+        await this.wait(Math.max(0, wait) * 1000);
+        return this.call<T>(method, path, body, false);
       }
       const after = Number.isFinite(wait) && wait > 0 ? ` Try again in ${Math.ceil(wait)} seconds.` : ' Try again in a minute.';
       throw new ModuleError(`Jira asked squad-kit to slow down: too many calls just now.${after}`, 'too-many', 429);
@@ -98,8 +104,31 @@ export class JiraClient {
     } catch {
       throw new ModuleError(`Jira at ${this.access.site} stopped answering half-way. Check the connection, then try again.`, 'offline');
     }
-    if (res.status >= 300) throw this.failure(method, url, res.status, text);
-    return (text ? JSON.parse(text) : null) as T;
+    if (res.status >= 300 && res.status < 400) {
+      // A site that moved, or something in between that sends squad-kit elsewhere: never followed with the sign-in.
+      const to = res.headers.get('location');
+      let host = '';
+      try {
+        host = to ? new URL(to, this.base).host : '';
+      } catch {
+        // An address that is not one: said without it.
+      }
+      writeLog({ level: 'warn', text: `Jira at ${this.access.site} sent HTTP ${res.status} to ${host || 'nowhere'} for ${method} ${path.replace(/\?.*$/, '')}` });
+      throw new ModuleError(
+        `Jira at ${this.access.site} sends squad-kit ${host && host !== this.access.site ? `to ${host}` : 'somewhere else'}. If your site moved, enter the new one in Settings.`,
+        'not-found',
+        res.status,
+      );
+    }
+    if (res.status >= 400) throw this.failure(method, path, res.status, text);
+    if (!text) return null as T;
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      // A sign-in page or a proxy's page answered instead of Jira.
+      writeLog({ level: 'warn', text: `Jira at ${this.access.site} answered ${method} ${path.replace(/\?.*$/, '')} with a page, not data: ${text.slice(0, 80).replace(/\s+/g, ' ')}` });
+      throw new ModuleError(`${this.access.site} answered with a web page instead of Jira's data. A sign-in page or a network proxy may be in the way. Check the site in Settings.`, 'other');
+    }
   }
 
   private failure(method: string, url: string, status: number, text: string): ModuleError {

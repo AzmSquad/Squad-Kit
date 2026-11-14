@@ -1,6 +1,6 @@
 {
   "console-ui/src/api/types.ts": 1485,
-  "console-ui/src/components/BreakdownDialogs.tsx": 824,
+  "console-ui/src/components/BreakdownDialogs.tsx": 823,
   "console-ui/src/components/BreakdownTree.tsx": 854,
   "console-ui/src/components/Usage.tsx": 616,
   "console-ui/src/components/dialogs.tsx": 878,

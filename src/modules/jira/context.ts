@@ -1,5 +1,7 @@
 import { ModuleError } from '../errors.js';
 import type { JiraClient } from './client.js';
+import { projectOf } from './refs.js';
+import { typeLevel } from './rows.js';
 import type { JiraSettings } from './settings.js';
 
 /**
@@ -75,10 +77,12 @@ export class JiraContext {
     if (this.settings.readOnly) throw new ModuleError(READ_ONLY, 'sign-in');
   }
 
-  /** The project's key; a setup without one says where to pick it. */
+  /** The project's key, checked before it goes into a query; a setup without one says where to pick it. */
   project(): string {
-    if (!this.settings.project) throw new ModuleError(NO_PROJECT);
-    return this.settings.project;
+    const key = this.settings.project;
+    if (!key) throw new ModuleError(NO_PROJECT);
+    if (projectOf(key) !== key) throw new ModuleError(`"${key}" is not a Jira project key. ${NO_PROJECT}`);
+    return key;
   }
 
   fields(): Promise<SiteFields> {
@@ -105,8 +109,7 @@ export class JiraContext {
         id: String(t.id),
         name: t.name,
         subtask: Boolean(t.subtask),
-        // An older answer without levels: sub-tasks below, Epic above, the rest in between.
-        level: typeof t.hierarchyLevel === 'number' ? t.hierarchyLevel : t.subtask ? -1 : /^epic$/i.test(t.name) ? 1 : 0,
+        level: typeLevel(t),
       }));
     });
   }
@@ -120,6 +123,22 @@ export class JiraContext {
       );
       return page?.fields ?? page?.results ?? [];
     });
+  }
+
+  /** The fields an issue's edit screen has now: what an update may set. */
+  editFields(key: string): Promise<string[]> {
+    return this.once(`edit/${key}`, async () => {
+      const meta = await this.client.call<{ fields?: Record<string, unknown> }>('GET', `/rest/api/3/issue/${encodeURIComponent(key)}/editmeta`);
+      return Object.keys(meta?.fields ?? {});
+    });
+  }
+
+  /**
+   * Links two issues through Jira's issue link call: `from` reads the link type's outward words to `to` ("PAY-41 blocks
+   * PAY-44", "PAY-50 relates to PAY-10"). Which side Jira shows them on is checked on the first real site (ADR-010).
+   */
+  async link(type: string, from: string, to: string): Promise<void> {
+    await this.client.call('POST', '/rest/api/3/issueLink', { type: { name: type }, outwardIssue: { key: from }, inwardIssue: { key: to } });
   }
 
   /** The statuses of a type's workflow in a project, in Jira's order. */

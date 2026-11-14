@@ -3,7 +3,15 @@ import type { SiteFields } from './context.js';
 
 /** A Jira issue as squad-kit lists it: key, type, summary, status, priority, story points, sprint, labels and assignee. */
 
-interface RawLink {
+export interface RawType {
+  id?: string;
+  name?: string;
+  subtask?: boolean;
+  hierarchyLevel?: number;
+}
+
+export interface RawLink {
+  id?: string;
   type?: { name?: string; inward?: string; outward?: string };
   inwardIssue?: LinkedIssue;
   outwardIssue?: LinkedIssue;
@@ -11,7 +19,13 @@ interface RawLink {
 
 interface LinkedIssue {
   key: string;
-  fields?: { summary?: string; status?: { name?: string } };
+  fields?: { summary?: string; status?: { name?: string }; issuetype?: RawType };
+}
+
+/** Where a type sits in Jira's hierarchy: 1 Epic, 0 Story, -1 Sub-task, 2 above Epic. An answer without levels goes by name. */
+export function typeLevel(t: Pick<RawType, 'name' | 'subtask' | 'hierarchyLevel'> | undefined): number {
+  if (typeof t?.hierarchyLevel === 'number') return t.hierarchyLevel;
+  return t?.subtask ? -1 : /^epic$/i.test(t?.name ?? '') ? 1 : 0;
 }
 
 export interface RawIssue {
@@ -19,14 +33,14 @@ export interface RawIssue {
   key: string;
   fields: {
     summary?: string;
-    issuetype?: { id?: string; name?: string; subtask?: boolean; hierarchyLevel?: number };
+    issuetype?: RawType;
     status?: { name?: string; statusCategory?: { key?: string } };
     priority?: { name?: string } | null;
     labels?: string[];
     assignee?: { displayName?: string } | null;
     description?: unknown;
     attachment?: { filename: string; content: string; size?: number }[];
-    parent?: { key: string; fields?: { summary?: string; issuetype?: { name?: string } } };
+    parent?: LinkedIssue;
     issuelinks?: RawLink[];
     [field: string]: unknown;
   };

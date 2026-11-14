@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { adfToMarkdown, type AdfNode } from '../src/modules/jira/adf-read.js';
 import { markdownToAdf } from '../src/modules/jira/adf-write.js';
+import { adfProblem } from './fakes/adf-check.js';
 
 /** Jira's ADF read as Markdown for the squad, and squad-kit's Markdown written as ADF for Jira. */
 
@@ -121,6 +122,31 @@ describe('Markdown to ADF', () => {
       p(t('use open_hours and 2*3*4')),
     ]);
     expect(markdownToAdf('')).toEqual(doc(p()));
+  });
+
+  it('writes only marks Jira takes: code only with a link, never the same mark twice', () => {
+    expect(markdownToAdf('**run `npm test` now**').content![0]!.content).toEqual([t('run ', 'strong'), t('npm test', 'code'), t(' now', 'strong')]);
+    expect(markdownToAdf('[see `README`](https://acme.test)').content![0]!.content).toEqual([
+      { type: 'text', text: 'see ', marks: [{ type: 'link', attrs: { href: 'https://acme.test' } }] },
+      { type: 'text', text: 'README', marks: [{ type: 'link', attrs: { href: 'https://acme.test' } }, { type: 'code' }] },
+    ]);
+    expect(markdownToAdf('*a _b_ c*').content![0]!.content).toEqual([t('a ', 'em'), t('b', 'em'), t(' c', 'em')]);
+  });
+
+  it('a heading in a quote becomes a paragraph there, and an empty quote is left out', () => {
+    expect(markdownToAdf('> ## Rule\n> Keep Friday closed.').content).toEqual([{ type: 'blockquote', content: [p(t('Rule')), p(t('Keep Friday closed.'))] }]);
+    expect(markdownToAdf('>\n\nAfter').content).toEqual([p(t('After'))]);
+  });
+
+  it('every text squad-kit writes is ADF Jira takes', () => {
+    const texts = [
+      '**Plan approved**\n\n1. Given a day\n2. Then it is saved',
+      '## Questions\n\n- **Who** sets the hours?\n  - the *owner*, with `admin` rights\n- [The spec](https://acme.test/spec)',
+      '> **Note** with `code` and [a **bold** link](https://acme.test)\n> - a list in a quote\n\n```\nnpm test\n```',
+      '***both***, __under__, `a*b*c`, a_b_c, 2 * 3 * 4',
+      '# \n\n- \n\n> \n',
+    ];
+    for (const md of texts) expect(adfProblem(markdownToAdf(md)), md).toBeNull();
   });
 
   it('reads back as the Markdown it came from', () => {

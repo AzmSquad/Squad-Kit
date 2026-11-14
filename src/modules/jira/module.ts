@@ -2,7 +2,7 @@ import { ModuleError } from '../errors.js';
 import type { SetupChoice, TrackerModule } from '../tracker/types.js';
 import { JiraClient } from './client.js';
 import { projectOf, siteOf } from './refs.js';
-import { FIELDS, formValues, readSaved, readSettings, savedSignIn, writeSettings } from './settings.js';
+import { FIELDS, formValues, movedWords, readSaved, readSettings, savedSignIn, tokenFor, writeSettings } from './settings.js';
 import { JiraTracker } from './tracker.js';
 
 /** Jira in the tracker list: its settings, the projects and boards Settings picks from, and the save that checks them. */
@@ -13,10 +13,14 @@ interface Board {
   type?: string;
 }
 
-/** The sign-in for these values: what the form has, else what is saved on this computer. */
+/**
+ * The sign-in for these values: what the form has, else what is saved. The saved token goes only to the host it was
+ * saved for: a half-typed site, another site, or a host typed in the form get no call with it.
+ */
 function accessOf(values: Record<string, string | undefined>, root?: string): { site?: string; email?: string; token?: string } {
   const own = root ? savedSignIn(root) : {};
-  return { site: siteOf(values.site) ?? own.site, email: values.email?.trim() || own.email, token: values.token?.trim() || own.token };
+  const site = siteOf(values.site) ?? (root ? readSaved(root)?.site : undefined) ?? own.site;
+  return { site, email: values.email?.trim() || own.email, token: values.token?.trim() || tokenFor(site, own) };
 }
 
 async function projectsOf(client: JiraClient): Promise<{ key: string; name: string }[]> {
@@ -65,7 +69,7 @@ async function checked(http: typeof fetch | undefined, root: string, values: Rec
   const access = accessOf(values, root);
   if (!access.site) throw new ModuleError('Enter your Jira site, like yourcompany.atlassian.net. A link to any Jira page works too.');
   if (!access.email || !access.email.includes('@')) throw new ModuleError('Enter the email you sign in to Atlassian with.');
-  if (!access.token) throw new ModuleError('Paste your Jira API token. Make one at id.atlassian.com, under Security, API tokens.');
+  if (!access.token) throw new ModuleError(`Paste your Jira API token for ${access.site}. Make one at id.atlassian.com, under Security, API tokens.`);
   const client = new JiraClient({ site: access.site, email: access.email, token: access.token }, http);
   await new JiraTracker(client, { site: access.site, email: access.email, token: access.token, readOnly: true }).whoAmI();
   const typed = values.project?.trim();
@@ -103,7 +107,8 @@ async function choicesFor(http: typeof fetch | undefined, values: Record<string,
   return lists;
 }
 
-function noteOf(readOnly: boolean, project: string | undefined): string | undefined {
+function noteOf(readOnly: boolean, project: string | undefined, moved?: string): string | undefined {
+  if (moved) return movedWords(moved).en;
   if (readOnly) return `Set up before this version: squad-kit only reads Jira for now. ${project ? 'Press' : 'Pick the project the stories come from, then press'} Save and check to let it update Jira.`;
   return project ? undefined : 'Pick the project the stories come from, then press Save and check.';
 }
@@ -123,7 +128,7 @@ export function jiraTrackerModule(http?: typeof fetch): TrackerModule {
     read(root) {
       const saved = readSaved(root);
       if (!saved) return { values: {}, hasSecret: false };
-      const note = noteOf(saved.readOnly, saved.project);
+      const note = noteOf(saved.readOnly, saved.project, saved.moved);
       return { values: formValues(saved), hasSecret: Boolean(saved.token), ...(note ? { note } : {}) };
     },
     async save(root, values) {

@@ -35,7 +35,7 @@ function Guide({ row, lang, open, onCheck, checking }: { row: ConnectionRow; lan
             <div>
               <span>{s.text[lang]}</span>
               {s.link && (
-                <a href={s.link} target="_blank" rel="noreferrer" className="gh-link" dir="ltr">
+                <a href={s.link} target="_blank" rel="noreferrer" className="gh-link gh-url" dir="ltr">
                   {s.link.replace(/^https:\/\//, '')}
                 </a>
               )}

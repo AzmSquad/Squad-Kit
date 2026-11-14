@@ -15,13 +15,18 @@ function urlOf(text: string): URL | null {
   }
 }
 
-/** The site's host from what a person typed or pasted: "acme", "acme.atlassian.net" or any Jira link on it. */
+/**
+ * The site's host from what a person typed or pasted: "acme", "acme.atlassian.net" or any Jira link on it. A name only:
+ * no port and no IP address, as Jira Cloud has neither.
+ */
 export function siteOf(text: string | undefined): string | null {
   const t = (text ?? '').trim();
   if (!t || /\s/.test(t)) return null;
-  const host = urlOf(t)?.hostname.toLowerCase() ?? '';
+  const url = urlOf(t);
+  if (!url || url.port || /^\d+(\.\d+){3}$/.test(url.hostname)) return null;
+  const host = url.hostname.toLowerCase();
   if (/^[a-z0-9-]+$/.test(host)) return `${host}.atlassian.net`;
-  return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(host) ? host : null;
+  return /^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z][a-z0-9-]*$/.test(host) ? host : null;
 }
 
 /** The issue key in a Jira link: /browse/PAY-40, or ?selectedIssue=PAY-40 on a board. */
@@ -61,4 +66,9 @@ export function refOf(id: string, project?: string): string {
 /** The project an issue key belongs to. */
 export function projectOfKey(key: string): string {
   return key.split('-')[0]!.toUpperCase();
+}
+
+/** A value as a JQL string: in quotes, with its backslashes and quotes escaped. */
+export function jqlText(value: string): string {
+  return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
