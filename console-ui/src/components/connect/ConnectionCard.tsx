@@ -108,7 +108,7 @@ function Disconnect({ row, lang, onClose }: { row: ConnectionRow; lang: Lang; on
     <div className="modal-veil" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal gh-code" role="alertdialog" aria-modal="true" aria-label={w.head(row.label)} dir={lang === 'ar' ? 'rtl' : 'ltr'} lang={lang}>
         <h2>{w.head(row.label)}</h2>
-        <p className="gh-muted">{row.ownSignIn ? w.own(row.label, row.account ?? '') : w.body(row.label, row.account ?? '')}</p>
+        <p className="gh-muted">{row.ownSignIn ? w.own(row.label, row.signedIn?.as) : w.body(row.label, row.account ?? '')}</p>
         <div className="gh-row">
           <button
             className="btn sm danger"

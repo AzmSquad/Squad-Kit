@@ -411,7 +411,11 @@ async function az(h: DetectHost): Promise<Found> {
     const version = azVersionOf((await h.run(bin, ['version', '--output', 'json'], { timeoutMs: 20_000, env: { AZURE_CONFIG_DIR: dir, AZURE_CORE_COLLECT_TELEMETRY: 'false' } })).out);
     return { state: 'found', where: bin, ...(version ? { version } : {}) };
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // Windows may still hold a file of it for a moment (EBUSY): the system clears its temp folder later.
+    }
   }
 }
 

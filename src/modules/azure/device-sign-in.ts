@@ -1,8 +1,9 @@
 import type { ChildProcess } from 'node:child_process';
+import { whenExited } from '../../engine/process-group.js';
 import type { SignInFlow } from '../connection/types.js';
 import { azAccounts, azLastLine, clearAzFolder, runAz, startAz, stopAz } from './az.js';
-import { orgTenant } from './tenant.js';
-import { forgetMicrosoftTokens, personalOrg } from './token.js';
+import { forgetTenants, orgTenant } from './tenant.js';
+import { forgetMicrosoftTokens, personalOrgSignIn } from './token.js';
 
 /**
  * "Sign in with Microsoft": runs Microsoft's own tool, `az login --use-device-code`, with squad-kit's own settings
@@ -48,11 +49,13 @@ export function startMicrosoftSignIn(org: string | undefined, done: () => void):
   if (flow?.state === 'waiting' && alive(flow.child)) return Promise.resolve(shown(flow));
   const f: Running = { state: 'waiting', startedAt: new Date().toISOString() };
   flow = f;
+  // The directory asked afresh: a remembered "no answer" from a minute ago must not send the sign-in to the wrong place.
+  if (org) forgetTenants(org);
   starting = (org ? orgTenant(org) : Promise.resolve(null))
     .then((t) => {
       if (f.state !== 'waiting') return shown(f);
       if (t?.kind === 'personal') {
-        Object.assign(f, { state: 'failed', line: `${personalOrg(org!)} Sign in with Microsoft cannot reach it.` });
+        Object.assign(f, { state: 'failed', line: personalOrgSignIn(org!) });
         return shown(f);
       }
       return run(f, ['login', '--use-device-code', '--allow-no-subscriptions', ...(t?.kind === 'entra' ? ['--tenant', t.tenant] : []), '--output', 'none'], done);
@@ -150,6 +153,13 @@ export function microsoftSignInNow(): SignInFlow | null {
  * in their own folder, are never touched.
  */
 export async function signOutOfMicrosoft(): Promise<void> {
+  // A sign-in still waiting would write its account in after the clear: it is stopped first, and its end waited for.
+  const waiting = flow?.state === 'waiting' && alive(flow.child) ? flow.child! : null;
+  if (waiting) {
+    const gone = whenExited(waiting);
+    cancelMicrosoftSignIn();
+    await Promise.race([gone, new Promise((r) => setTimeout(r, 8000))]);
+  }
   await runAz(['account', 'clear'], 30_000);
   clearAzFolder();
   forgetMicrosoftTokens();

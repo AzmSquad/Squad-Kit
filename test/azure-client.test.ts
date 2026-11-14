@@ -158,6 +158,24 @@ describe('Azure helpers', () => {
     expect(parseAzureRemote('https://github.com/a/b.git')).toBeNull();
   });
 
+  it('never takes another host for Azure: a name with a port, a path or more after it is not Azure, and gets no sign-in', async () => {
+    const lookalikes = ['https://intranet-box:8443/x.visualstudio.com/p/_git/r', 'https://contoso.visualstudio.com.evil.example/p/_git/r', 'https://dev.azure.com.evil.example/o/p/_git/r', 'https://dev.azure.com:8443/o/p/_git/r'];
+    let asked = 0;
+    const bearer = async () => {
+      asked++;
+      return 'made-up';
+    };
+    for (const url of lookalikes) {
+      expect(parseAzureRemote(url), url).toBeNull();
+      expect(await gitAuthEnv({ pat: 'secret' }, url), url).toEqual({});
+      expect(await gitAuthEnv({ bearer }, url), url).toEqual({});
+    }
+    expect(asked).toBe(0);
+    // The real ones still sign in, each on its own host.
+    expect((await gitAuthEnv({ pat: 'secret' }, 'https://contoso.visualstudio.com/Shop/_git/orders')).GIT_CONFIG_KEY_0).toBe('http.https://contoso.visualstudio.com/.extraheader');
+    expect((await gitAuthEnv({ bearer }, 'https://sara@dev.azure.com/o/p/_git/r')).GIT_CONFIG_KEY_1).toBe('http.https://dev.azure.com/.extraheader');
+  });
+
   it('gives git the token through env vars only for Azure https remotes', async () => {
     const env = await gitAuthEnv({ pat: 'secret' }, 'https://dev.azure.com/momenysr/Mawid/_git/Mawid');
     expect(env.GIT_CONFIG_KEY_0).toBe('http.https://dev.azure.com/.extraheader');

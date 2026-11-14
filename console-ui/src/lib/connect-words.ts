@@ -52,7 +52,8 @@ export const CONNECT = {
       head: (label: string) => `Disconnect ${label}?`,
       body: (label: string, account: string) =>
         `This signs ${label}'s own tool out on this computer, as ${account}, for every app that uses it, not only squad-kit. You can sign in again at any time.`,
-      own: (label: string, account: string) => `This signs squad-kit out of ${label} on this computer, as ${account}. Your other sign-ins on this computer stay as they are. You can sign in again at any time.`,
+      own: (label: string, account?: string) =>
+        `This signs squad-kit out of ${label} on this computer${account ? `, as ${account}` : ''}. Your other sign-ins on this computer stay as they are. You can sign in again at any time.`,
       yes: 'Disconnect',
       no: 'Keep it',
     },
@@ -101,7 +102,8 @@ export const CONNECT = {
     off: {
       head: (label: string) => `تفصل ${label}؟`,
       body: (label: string, account: string) => `هذا يسجّل خروج أداة ${label} الرسمية على هذا الجهاز، باسم ${account}، لكل تطبيق يستخدمها، مو بس squad-kit. تقدر تسجّل الدخول مرة ثانية في أي وقت.`,
-      own: (label: string, account: string) => `هذا يسجّل خروج squad-kit من ${label} على هذا الجهاز، باسم ${account}. باقي تسجيلاتك على هذا الجهاز تبقى مثل ما هي. تقدر تسجّل الدخول مرة ثانية في أي وقت.`,
+      own: (label: string, account?: string) =>
+        `هذا يسجّل خروج squad-kit من ${label} على هذا الجهاز${account ? `، باسم ${account}` : ''}. باقي تسجيلاتك على هذا الجهاز تبقى مثل ما هي. تقدر تسجّل الدخول مرة ثانية في أي وقت.`,
       yes: 'افصل',
       no: 'خلّه',
     },

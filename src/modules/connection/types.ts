@@ -32,8 +32,13 @@ export interface GuideStep {
 
 export interface ConnectionStatus {
   state: ConnectionState;
-  /** Who is signed in: when connected, and when a sign-in that Disconnect can end is there but does not work here. */
+  /** Who is signed in, when connected. */
   account?: string;
+  /**
+   * For a sign-in of squad-kit's own (`ownSignIn`): one is left in its folder, which Disconnect ends, whatever else is
+   * true here (a token used instead, its tool gone, no access). `as`: its account, when its tool says.
+   */
+  signedIn?: { as?: string };
   steps: GuideStep[];
   /**
    * For a sign-in that also takes a pasted token: 'token' when the token is the way here, because one is saved (it

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { privateFolder } from '../../core/home.js';
+import { privateFolder, readyPrivateFolder } from '../../core/home.js';
 import { OWN_GROUP, endGroup, track } from '../../engine/process-group.js';
 
 /**
@@ -22,12 +22,9 @@ export function azFolder(): string {
   return privateFolder(AZ_FOLDER);
 }
 
-/** The environment az runs with: squad-kit's own folder, made private on first use. */
+/** The environment az runs with: squad-kit's own folder, a real private folder (never a link followed elsewhere). */
 export function azEnv(): NodeJS.ProcessEnv {
-  const dir = azFolder();
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  // Only this person may read it, whoever made it first.
-  if (!WINDOWS) fs.chmodSync(dir, 0o700);
+  const dir = readyPrivateFolder(AZ_FOLDER);
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     AZURE_CONFIG_DIR: dir,
@@ -136,7 +133,7 @@ export function signInLeft(): boolean {
   }
 }
 
-/** Empties squad-kit's own az folder: its accounts and az's saved tokens. Nothing of the person's is in it. */
+/** Empties squad-kit's own az folder: its accounts and az's saved tokens. A link standing there is removed, never followed. */
 export function clearAzFolder(): void {
   fs.rmSync(azFolder(), { recursive: true, force: true });
 }

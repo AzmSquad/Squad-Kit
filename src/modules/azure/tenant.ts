@@ -54,7 +54,8 @@ export async function orgTenant(org: string, http: typeof fetch = fetch): Promis
   return t;
 }
 
-/** A test asks again. */
-export function forgetTenants(): void {
-  kept.clear();
+/** Ask again: for one organization (a sign-in starting), or for all (Check again, a test). */
+export function forgetTenants(org?: string): void {
+  if (org) kept.delete(org.toLowerCase());
+  else kept.clear();
 }

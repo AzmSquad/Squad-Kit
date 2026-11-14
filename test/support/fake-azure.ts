@@ -29,9 +29,11 @@ case "$1 $2" in
     if [ ! -f "$P" ]; then echo "ERROR: Please run 'az login' to setup account." >&2; exit 1; fi
     if [ -f "$D/refuse" ]; then echo "ERROR: AADSTS50020: User account from identity provider does not exist in tenant." >&2; exit 1; fi
     if [ -f "$D/offline" ]; then echo "ERROR: HTTPSConnectionPool(host='login.microsoftonline.com', port=443): Max retries exceeded (Failed to establish a new connection)" >&2; exit 1; fi
+    # The token is read first, then the wait: an answer that is old by the time it arrives, as a real one can be.
+    T="$(cat "$D/token" 2>/dev/null || echo ${MS_TOKEN})"
     if [ -f "$D/slow" ]; then sleep 1; fi
     E=$(( $(date +%s) + $(cat "$D/life" 2>/dev/null || echo 3600) ))
-    printf '{\\n  "accessToken": "%s",\\n  "expiresOn": "2026-11-14 01:30:00.000000",\\n  "expires_on": %s,\\n  "tokenType": "Bearer"\\n}\\n' "$(cat "$D/token" 2>/dev/null || echo ${MS_TOKEN})" "$E"
+    printf '{\\n  "accessToken": "%s",\\n  "expiresOn": "2026-11-14 01:30:00.000000",\\n  "expires_on": %s,\\n  "tokenType": "Bearer"\\n}\\n' "$T" "$E"
     exit 0;;
   "account clear") rm -f "$P"; exit 0;;
   "login --use-device-code")

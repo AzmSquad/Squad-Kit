@@ -15,6 +15,8 @@ export const DEVOPS_RESOURCE = '499b84ac-1321-427f-aa17-267ca6975798';
 const EARLY_MS = 5 * 60_000;
 /** A failed request is answered from memory this long. */
 const FAILED_MS = 60_000;
+/** A token az gave this recently is as fresh as az can make it: a refusal then is about access, not age. */
+const FRESH_MS = 60_000;
 
 export type TokenAnswer =
   | { ok: true; token: string; until: number }
@@ -26,7 +28,8 @@ export type TokenAnswer =
 
 type Failed = Extract<TokenAnswer, { ok: false }>;
 
-const tokens = new Map<string, { token: string; until: number }>();
+/** Each directory's token, until when it lasts, and when az gave it. */
+const tokens = new Map<string, { token: string; until: number; at: number }>();
 const failed = new Map<string, { at: number; answer: Failed }>();
 const asking = new Map<string, Promise<TokenAnswer>>();
 /** Moves on with every forget: a request already on its way when it was forgotten is never kept. */
@@ -57,11 +60,13 @@ async function ask(tenant: string | undefined): Promise<TokenAnswer> {
   }
 }
 
+const keyOf = (tenant?: string) => (tenant && isTenant(tenant) ? tenant : '');
+
 /** A token for this directory (or az's own default one), from memory while it has more than a few minutes left. */
 export function microsoftToken(tenant?: string): Promise<TokenAnswer> {
-  const key = tenant && isTenant(tenant) ? tenant : '';
+  const key = keyOf(tenant);
   const t = tokens.get(key);
-  if (t && Date.now() < t.until - EARLY_MS) return Promise.resolve({ ok: true, ...t });
+  if (t && Date.now() < t.until - EARLY_MS) return Promise.resolve({ ok: true, token: t.token, until: t.until });
   const no = failed.get(key);
   if (no && Date.now() - no.at < FAILED_MS) return Promise.resolve(no.answer);
   const now = asking.get(key);
@@ -70,15 +75,31 @@ export function microsoftToken(tenant?: string): Promise<TokenAnswer> {
   const answer: Promise<TokenAnswer> = ask(key || undefined).then((a) => {
     // Forgotten on the way (a sign-in, a sign-out, a refused token): this answer is old. Ask again.
     if (asked !== generation) return microsoftToken(tenant);
-    if (a.ok) tokens.set(key, { token: a.token, until: a.until });
-    else failed.set(key, { at: Date.now(), answer: a });
+    if (a.ok) tokens.set(key, { token: a.token, until: a.until, at: Date.now() });
+    // Not signed in is never remembered: the profile file says so at once, and a new sign-in shows straight away.
+    else if (a.why !== 'signed-out') failed.set(key, { at: Date.now(), answer: a });
     return a;
   });
   asking.set(key, answer);
-  void answer.finally(() => {
+  const clean = () => {
     if (asking.get(key) === answer) asking.delete(key);
-  });
+  };
+  answer.then(clean, clean);
   return answer;
+}
+
+/**
+ * Azure DevOps refused this token for this directory. True when one more try is worth it: the token was kept a while
+ * (it may have ended early on Microsoft's side), so that one token, and only it, is dropped and the next call asks az.
+ * A token az gave under a minute ago is as new as az makes it: the refusal is about access, and nothing is retried.
+ */
+function refusedToken(tenant: string | undefined, token: string): boolean {
+  const key = keyOf(tenant);
+  const t = tokens.get(key);
+  if (t?.token !== token) return true;
+  if (Date.now() - t.at < FRESH_MS) return false;
+  tokens.delete(key);
+  return true;
 }
 
 /** Forget every token and every failure, and any request on its way: after a sign-in, a sign-out, or a refused token. */
@@ -98,6 +119,8 @@ const AGAIN = 'Sign in with Microsoft again on the Connections page (squad conne
 
 /** The words when an organization is backed by personal Microsoft accounts. */
 export const personalOrg = (org: string) => `This organization, ${org}, uses personal Microsoft accounts, so it needs a token. Paste one in Settings.`;
+/** The same, when a sign-in was asked for: why it cannot work first, then what to do. */
+export const personalOrgSignIn = (org: string) => `This organization, ${org}, uses personal Microsoft accounts, so Sign in with Microsoft cannot reach it. It needs a token: paste one in Settings.`;
 
 /** The words for a call that has no token, by why. */
 function noToken(org: string, why: Failed['why'] | 'personal'): ModuleError {
@@ -107,12 +130,19 @@ function noToken(org: string, why: Failed['why'] | 'personal'): ModuleError {
   return new ModuleError(`squad-kit has no Microsoft sign-in for ${org}. ${AGAIN}`, 'sign-in');
 }
 
-/**
- * The token for one organization: its own directory's when Azure DevOps says which, else az's default one. `fresh`:
- * Azure DevOps refused the one kept, so it is forgotten and asked for again.
- */
-export async function bearerFor(org: string, fresh = false): Promise<string> {
-  if (fresh) forgetMicrosoftTokens();
+/** The directory az is asked about for an organization: its own when Azure DevOps says which, else az's default. */
+async function tenantFor(org: string): Promise<string | undefined> {
+  const t = await orgTenant(org);
+  return t.kind === 'entra' ? t.tenant : undefined;
+}
+
+/** Azure DevOps refused this token for this organization: whether one more try with a new one is worth it. */
+export async function refusedFor(org: string, token: string): Promise<boolean> {
+  return refusedToken(await tenantFor(org), token);
+}
+
+/** The token for one organization: its own directory's when Azure DevOps says which, else az's default one. */
+export async function bearerFor(org: string): Promise<string> {
   const t = await orgTenant(org);
   if (t.kind === 'personal') throw noToken(org, 'personal');
   const a = await microsoftToken(t.kind === 'entra' ? t.tenant : undefined);

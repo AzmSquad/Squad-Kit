@@ -147,6 +147,8 @@ export interface ConnectionRow {
   /** 'token': the token in Settings is the way here. */
   by?: 'token';
   line?: Words;
+  /** A sign-in of squad-kit's own left here, which Disconnect ends; `as` when its name is known. */
+  signedIn?: { as?: string };
   for?: { repo: string; into?: string; self: boolean };
   flow?: SignInFlow;
   actions: { id: 'sign-in' | 'disconnect' | 'check'; name: string; command: string }[];

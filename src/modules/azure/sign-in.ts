@@ -5,7 +5,7 @@ import { loadSecrets } from '../../core/secrets.js';
 import { overlayTrackerEnv } from '../../tracker/env-overlay.js';
 import { writeLog } from '../../core/app-log.js';
 import { Azure, parseAzureRemote, type AzureTarget } from './client.js';
-import { bearerFor, signedInWithMicrosoft } from './token.js';
+import { bearerFor, refusedFor, signedInWithMicrosoft } from './token.js';
 
 /**
  * Which sign-in an Azure DevOps call uses (ADR-011). A token saved for the project (Settings, or AZURE_DEVOPS_PAT) wins:
@@ -24,9 +24,23 @@ export function azurePlace(root: string): { organization?: string; project?: str
 }
 
 /** The sign-in for one organization: the saved token, else the Microsoft sign-in, else none. */
-export function signInFor(organization: string, pat?: string): Pick<AzureTarget, 'pat' | 'bearer'> | null {
+export function signInFor(organization: string, pat?: string): Pick<AzureTarget, 'pat' | 'bearer' | 'refused'> | null {
   if (pat) return { pat };
-  return signedInWithMicrosoft() ? { bearer: (fresh) => bearerFor(organization, fresh) } : null;
+  return signedInWithMicrosoft() ? { bearer: () => bearerFor(organization), refused: (token) => refusedFor(organization, token) } : null;
+}
+
+/** Azure DevOps' own git hosts: a sign-in header is only ever made for one of these, never for any other address. */
+const AZURE_HOST = /^(?:dev\.azure\.com|[a-z0-9-]+\.visualstudio\.com)$/i;
+
+/** The Azure DevOps host of an https remote, or null for any other address (another host, a port, no https). */
+function azureHttpsHost(remoteUrl: string): string | null {
+  if (!/^https:\/\//i.test(remoteUrl) || !parseAzureRemote(remoteUrl)) return null;
+  try {
+    const host = new URL(remoteUrl).host;
+    return AZURE_HOST.test(host) ? host : null;
+  } catch {
+    return null;
+  }
 }
 
 /** The Azure client for a project folder, when its tracker is Azure and it has a sign-in. */
@@ -44,8 +58,8 @@ export function azureForProject(root: string): Azure | null {
  * never falls back to their own Azure sign-in; with no token to be had, git then stops with a plain sign-in failure.
  */
 export async function gitAuthEnv(auth: Pick<AzureTarget, 'pat' | 'bearer'>, remoteUrl: string): Promise<Record<string, string>> {
-  if (!/^https:\/\//i.test(remoteUrl) || !parseAzureRemote(remoteUrl)) return {};
-  const host = new URL(remoteUrl).host;
+  const host = azureHttpsHost(remoteUrl);
+  if (!host) return {};
   if (auth.pat) {
     return {
       GIT_CONFIG_COUNT: '1',
