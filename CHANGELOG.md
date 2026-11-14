@@ -22,9 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   page, a sign-in Atlassian ended (unused for 90 days, or removed), and a network that cannot reach Atlassian just now
   (never taken as a sign-out). Disconnect works offline and tells you where to remove squad-kit on your Atlassian
   account too (Connected apps).
-- **A privacy page** for the website (draft): what squad-kit keeps on your computer, and how to remove it.
-
-Sign in with Atlassian shows once squad-kit's Atlassian app is registered; until then Jira keeps the token way.
+- **A privacy page** at squad-kit.com/privacy: what squad-kit keeps on your computer, what the sign-in helper does,
+  and how to remove it.
+- **The guide covers Jira and the Connections page** (`docs/console.md`): Jira's settings, what squad-kit does in
+  Jira, and signing in to GitHub, Azure DevOps and Jira.
 
 ## [1.3.22] — 2026-11-14
 

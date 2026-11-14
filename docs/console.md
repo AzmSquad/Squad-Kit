@@ -100,7 +100,7 @@ On the board:
   on this project, and a step bar. A ticket over the limit of tickets at once says "Next in line: starts when a
   slot is free". A slow step says "Taking longer than usual".
 - **All tickets**, **Mine** and **Bugs** filter the cards. **Search tickets** finds one.
-- **New ticket** writes a ticket in plain words. **Pull from** your tracker (Azure DevOps or GitHub) brings in an item
+- **New ticket** writes a ticket in plain words. **Pull from** your tracker (Azure DevOps, GitHub or Jira) brings in an item
   (or **Connect a tracker**, when there is none). Under the track (Full or Express), **Write new tests** is on by default.
   Turn it off for a demo, a small text or colour change, or a project with no tests yet: the plan and the Builder add no
   new tests and the Reviewer does not ask for them, while squad-kit still runs your project's own checks (tests, lint,
@@ -642,13 +642,14 @@ REST (under `/p/<project>/api/v1`):
 
 Upload a requirements document (a BRD) and the Analyst breaks it into epics, features and stories. You review it
 as a **tree** (the main view, with a side panel to edit each part) or a **map** (boxes and lines, for presenting),
-approve it, send it to your tracker (Azure DevOps or GitHub) if you like, and press **Build continuously**. A breakdown
+approve it, send it to your tracker (Azure DevOps, GitHub or Jira) if you like, and press **Build continuously**. A breakdown
 waiting for your answers shows in **Waiting for you** and in the sidebar's count. The whole flow is in
 [From a BRD to a built product](requirements.md).
 
 ## Other pages
 
-- **Backlog**: your tracker's sprint, in backlog order (a GitHub Project's own order, or the newest issues first).
+- **Backlog**: your tracker's sprint, in backlog order (Jira's own order, a GitHub Project's own order, or the newest
+  issues first).
   **Start** puts an item on the board.
 - **Waiting for you**: this project's cards, all of them.
 - **Releases**: the next release, ready to read and release, and every past release with its notes and the
@@ -724,6 +725,30 @@ REST (under `/p/<project>/api/v1`): `GET /tools`, `POST /tools/check`, `POST /to
 `{ "licenses": ["android-sdk-license", ...] }` (every license you were shown), and `POST /tools/<tool>/update` with the
 body `{ "ok": true }`. Without the OK, the update call answers with the warning and changes nothing; without the Accept,
 Get it for the Android phone tools answers why and gets nothing.
+
+### Connections
+
+**Connections**, at the top of the Tools page, lists the outside tools this project works with and signs you in to
+them. squad-kit keeps no password. Each row says what it is for, whether you are signed in and as whom, and the same
+step as a terminal command.
+
+- **GitHub**: **Sign in with GitHub** runs GitHub's own tool (`gh`): a short code to type on GitHub's page.
+- **Azure DevOps**: **Sign in with Microsoft** runs Microsoft's own tool (`az`), kept apart from any Microsoft sign-in
+  of yours: a short code to type on Microsoft's page, then pick your work account. An organization on personal
+  Microsoft accounts can't sign in this way; it needs a token.
+- **Jira**: **Sign in with Atlassian** opens Atlassian's page, where you pick your Jira site and press **Accept**. The
+  sign-in stays on this computer, in squad-kit's own folder that the agents can't read, and renews by itself while you
+  work. If Atlassian gives squad-kit several sites, you pick one on the row. Atlassian asks every app for a secret during
+  sign-in, so a small helper at `auth.squad-kit.com` adds squad-kit's secret and sends you straight back to squad-kit; it
+  keeps nothing ([Privacy](https://squad-kit.com/privacy/)).
+- **Use a token instead** opens Settings, where a token you paste is used before any sign-in.
+- **Disconnect** signs squad-kit out on this computer, even without a network. For Jira, also remove squad-kit under
+  Connected apps in your Atlassian account (the row links to it).
+
+Terminal: `squad connect` (every tool and its state), `squad connect jira` (`--site <site>` to pick one),
+`squad disconnect jira`, and the same for `github` and `azure`. REST (under `/p/<project>/api/v1`): `GET /connections`,
+`POST /connections/<name>/sign-in` (and `GET` for its progress, `POST …/sign-in/cancel`), `POST /connections/<name>/site`
+with the body `{ "site": "yourcompany.atlassian.net" }`, and `POST /connections/<name>/disconnect`.
 
 ### iPhone pictures
 
@@ -1057,9 +1082,11 @@ Terminal: `squad config set quality best`, `squad agent builder`, `squad agent b
 - **Desktop notices**: on or off, for this browser. **Turn on** says at once that the browser is asking; if the
   browser doesn't answer, it says how to allow notices for the page (and, on a Mac, in System Settings ›
   Notifications). When they are on, it sends one test notice.
-- **Tracker**: where stories come from. Pick **Azure DevOps** or **GitHub**, fill in what it asks, then **Save and
-  check**: squad-kit checks the settings with the tracker before it saves them, and the Status row says who is signed in.
-  - **Azure DevOps**: organization, project and a token, which stays on this computer.
+- **Tracker**: where stories come from. Pick **Azure DevOps**, **GitHub** or **Jira**, fill in what it asks, then **Save
+  and check**: squad-kit checks the settings with the tracker before it saves them, and the Status row says who is
+  signed in.
+  - **Azure DevOps**: organization and project. Sign in with Microsoft on the [Connections](#connections) page, or paste
+    a token here, which stays on this computer and is used first.
   - **GitHub**: squad-kit signs in with GitHub's own tool, `gh`, and keeps no token. When gh is missing or not signed in,
     the steps show above the settings: install GitHub's tool (cli.github.com), `gh auth login`, and for a Project
     `gh auth refresh -s project` (Issues alone never need that right). Pick the **Repository** (your project's own, from
@@ -1084,10 +1111,28 @@ Terminal: `squad config set quality best`, `squad agent builder`, `squad agent b
   - **Set up before 1.3.21?** A project that had GitHub as its tracker before only reads it: pulling works, but no
     move, comment, bug or breakdown goes to GitHub until you press **Save and check** once (or run the command below).
     Settings says "Connect again to let squad-kit update GitHub." The updates wait meanwhile and go once you connect.
+  - **Jira** (Jira Cloud): the **Site** (`yourcompany.atlassian.net`, or paste any Jira link and the site and project
+    fill in), then **Sign in with Atlassian** on the [Connections](#connections) page, or your **Email** and an **API
+    token** from your Atlassian account (id.atlassian.com, Security, API tokens). A token saved here is used first, and it
+    goes only to the site it was saved for: when the team's site changes, Settings asks for a token for the new site.
+    Then the **Project** (pick one, or type its key, like `PAY`) and **Sprints from**: the board whose sprints the
+    Backlog shows, the best fit picked for you, or None. The Backlog shows the project's stories, tasks and bugs in
+    Jira's own order, on the running sprint. Items show as `PAY-40` and become tickets of the same name. Pulling one
+    brings its text, its acceptance criteria (Jira's Acceptance Criteria field when the project has one), its epic, what
+    blocks it and its files. squad-kit moves an item forward along your own workflow, by Jira's status groups (To Do, In
+    Progress, Done), never back: to a review status such as In Review when the workflow has one, and never to a parked
+    one (Blocked, On hold, Waiting for…). Questions, answers, plans and pull request links are comments on the item, and
+    a reported bug becomes a Bug. **Send to Jira** on a breakdown makes real Stories under Epics: with a level above Epic
+    (such as Initiative), epics become that and features become Epics; without one, epics and features are both Epics,
+    and a feature's Epic links to its epic ("relates to") with the label `epic-<name>`.
+  - **Set up with squad-kit 0.x?** A Jira project from 0.x only reads Jira (pulling works) until you press **Save and
+    check** once, then squad-kit updates it too.
   - Terminal: `squad config set tracker` asks for each setting;
     `squad config set tracker --type github --field repo=owner/name from=project board=2` sets them at once
     (also `labels=`, `assignee=`, `view=`, `status=`, `anyone=yes`, and `stage-in-progress=` and so on for the Status
     of each step). `squad doctor` checks the same sign-in: gh found, signed in, and the Projects right for a Project.
+    For Jira: `squad connect jira`, then `squad config set tracker --type jira --field site=yourcompany.atlassian.net
+    project=PAY`.
 - **How you pay for Claude**: squad-kit finds out (subscription or API key); change it here if it is wrong. With an
   API key: a budget per ticket and per month. Terminal: `squad config set payment`, `squad config set budget`.
 - **Also read** and **Also write**, for engineers, where the guard runs: files or folders outside its copy that the
