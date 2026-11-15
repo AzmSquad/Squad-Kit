@@ -51,6 +51,10 @@ export interface BoardPaths {
   consoleFile: string;
   pidFile: string;
   secretsFile: string;
+  /** `.squad/studio/`: the sketches and design systems the team shares through git. */
+  studioDir: string;
+  /** This computer's part of the Studio: thumbnails and AI Designer chats. */
+  studioLocalDir: string;
   /** Where everything lived before layout 2. Only the move reads it. */
   legacyDir: string;
 }
@@ -95,6 +99,8 @@ export function boardPaths(squadDir: string): BoardPaths {
     consoleFile: path.join(localDir, 'console.json'),
     pidFile: path.join(localDir, 'squad.pid'),
     secretsFile: path.join(localDir, 'secrets.yaml'),
+    studioDir: path.join(squad, 'studio'),
+    studioLocalDir: path.join(localDir, 'studio'),
     legacyDir: path.join(squad, 'board'),
   };
 }
