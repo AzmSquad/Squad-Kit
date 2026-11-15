@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,8 +12,10 @@ import {
   CHANGED_ELSEWHERE,
   addVariant,
   checkStudioStamp,
+  defaultDesignSystemOf,
   pickVariant,
   readChat,
+  readDefaultDesignSystem,
   readDesignSystem,
   readSketch,
   readStudio,
@@ -46,6 +48,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   if (oldHome === undefined) delete process.env.SQUAD_KIT_HOME;
   else process.env.SQUAD_KIT_HOME = oldHome;
   chooseProject(null);
@@ -77,7 +80,7 @@ const PAYMENT_DESKTOP = '<main><h1>Payment</h1><button class="btn">Pay now</butt
 
 /** Done when 1's work: Brand v1 with its colours and a button, and Checkout on Brand v1 with Payment drawn for desktop. */
 function saveBrandAndCheckout(paths: BoardPaths = bp) {
-  const brand = saveDesignSystem(paths, { name: 'Brand', isDefault: true, tokens: BRAND_TOKENS, components: { button: BUTTON } });
+  const brand = saveDesignSystem(paths, { name: 'Brand', tokens: BRAND_TOKENS, components: { button: BUTTON } });
   const sketch = saveSketch(paths, { name: 'Checkout', designSystem: { id: 'brand', version: 1 }, frames: ['desktop'], screens: [{ name: 'Payment' }] });
   const drawn = addVariant(paths, 'checkout', 'payment', { frames: { desktop: PAYMENT_DESKTOP }, madeBy: 'person' }, sketch.stamp);
   return { brand, sketch: drawn };
@@ -99,7 +102,10 @@ describe('done when 1: the layout in .squad/studio/', () => {
       'sketches/checkout/sketch.yaml',
     ]);
     const read = (rel: string) => fs.readFileSync(path.join(bp.studioDir, rel), 'utf8');
-    expect(yaml.load(read('design-systems/brand/system.yaml'))).toEqual({ name: 'Brand', default: true, version: 1 });
+    expect(yaml.load(read('design-systems/brand/system.yaml'))).toEqual({ name: 'Brand', default: true, version: 1, madeAt: expect.any(String) });
+    expect(Number.isNaN(Date.parse((yaml.load(read('design-systems/brand/system.yaml')) as { madeAt: string }).madeAt))).toBe(false);
+    // The first design system made is the project's default.
+    expect(readStudio(bp).defaultDesignSystem).toBe('brand');
     expect(JSON.parse(read('design-systems/brand/v1/tokens.json'))).toEqual(BRAND_TOKENS);
     expect(read('design-systems/brand/v1/components/button.html')).toBe(BUTTON);
     expect(yaml.load(read('sketches/checkout/sketch.yaml'))).toEqual({ name: 'Checkout', designSystem: { id: 'brand', version: 1 }, frames: ['desktop'] });
@@ -130,7 +136,7 @@ describe('done when 1: the layout in .squad/studio/', () => {
     const { brand } = saveBrandAndCheckout();
     const files = snapshot(bp.studioDir);
     const v1 = snapshot(path.join(bp.studioDir, 'design-systems/brand/v1'));
-    const same = saveDesignSystem(bp, { id: 'brand', name: 'Brand', isDefault: true, tokens: BRAND_TOKENS, components: { button: BUTTON } }, brand.stamp);
+    const same = saveDesignSystem(bp, { id: 'brand', name: 'Brand', tokens: BRAND_TOKENS, components: { button: BUTTON } }, brand.stamp);
     expect(same.stamp).toBe(brand.stamp);
     expect(snapshot(bp.studioDir)).toEqual(files);
 
@@ -220,7 +226,9 @@ describe('done when 4: a teammate gets the same work through git', () => {
       expect(read.sketches[0]!.stamp).toBe(two.stamp);
       expect(read.sketches[0]!.screens[0]).toMatchObject({ name: 'Payment', chosen: 2 });
       expect(read.sketches[0]!.screens[0]!.variants.map((v) => v.version)).toEqual([1, 2]);
-      expect(read.designSystems[0]).toMatchObject({ name: 'Brand', version: 1, isDefault: true });
+      expect(read.designSystems[0]).toMatchObject({ name: 'Brand', version: 1, markedDefault: true, madeAt: mine.designSystems[0]!.madeAt });
+      expect(read.defaultDesignSystem).toBe('brand');
+      expect(read.designSystems[0]!.stamp).toBe(mine.designSystems[0]!.stamp);
       expect(readThumbnail(theirs, 'checkout', 'payment', 1)).toBeNull();
       expect(readChat(theirs, 'checkout', 'talk')).toBeNull();
       expect(fs.existsSync(theirs.studioLocalDir)).toBe(false);
@@ -243,6 +251,97 @@ describe('done when 4: a teammate gets the same work through git', () => {
   });
 });
 
+describe('the one default design system (AB-158.1)', () => {
+  /** Saves with the clock at `at`, so which one is older is plain. Only Date is faked: the Studio lock still waits for real. */
+  const madeAt = <T>(at: string, save: () => T): T => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(at));
+    try {
+      return save();
+    } finally {
+      vi.useRealTimers();
+    }
+  };
+  const systemYaml = (paths: BoardPaths, id: string) => yaml.load(fs.readFileSync(path.join(designSystemDir(paths, id), 'system.yaml'), 'utf8')) as Record<string, unknown>;
+
+  it('a second design system leaves Brand as the default, and saving either one never moves the mark', () => {
+    const { brand } = saveBrandAndCheckout();
+    const ocean = saveDesignSystem(bp, { name: 'Ocean', tokens: { colors: { primary: '#0ea5e9' } } });
+    expect(ocean.markedDefault).toBe(false);
+    expect(systemYaml(bp, 'ocean')).toMatchObject({ name: 'Ocean', default: false, version: 1 });
+    expect(readStudio(bp).defaultDesignSystem).toBe('brand');
+
+    const ocean2 = saveDesignSystem(bp, { id: 'ocean', name: 'Ocean sea', tokens: { colors: { primary: '#0284c7' } } }, ocean.stamp);
+    const brand2 = saveDesignSystem(bp, { id: 'brand', name: 'Brand', tokens: { colors: { primary: '#16a34a' } } }, brand.stamp);
+    expect(ocean2).toMatchObject({ version: 2, markedDefault: false, madeAt: ocean.madeAt });
+    expect(brand2).toMatchObject({ version: 2, markedDefault: true, madeAt: brand.madeAt });
+    expect(readStudio(bp).defaultDesignSystem).toBe('brand');
+    expect(readDefaultDesignSystem(bp)).toBe('brand');
+  });
+
+  it("reads the older of two teammates' first design systems as the default once git merges them, without writing", () => {
+    // Here: Brand, the first one in this project, made second.
+    madeAt('2026-11-10T10:00:00.000Z', () => saveDesignSystem(bp, { name: 'Brand', tokens: { colors: {} } }));
+    // A teammate, on their own computer and folder: Ocean, their first one, made the day before.
+    const theirHome = fs.mkdtempSync(path.join(os.tmpdir(), 'squad-studio-mate-'));
+    try {
+      process.env.SQUAD_KIT_HOME = theirHome;
+      const theirs = boardPaths(path.join(tmp, 'teammate', '.squad'));
+      madeAt('2026-11-09T10:00:00.000Z', () => saveDesignSystem(theirs, { name: 'Ocean', tokens: { colors: {} } }));
+      expect(systemYaml(theirs, 'ocean')).toMatchObject({ default: true });
+      // The merge brings their folder in beside ours.
+      fs.cpSync(designSystemDir(theirs, 'ocean'), designSystemDir(bp, 'ocean'), { recursive: true });
+    } finally {
+      process.env.SQUAD_KIT_HOME = home;
+      fs.rmSync(theirHome, { recursive: true, force: true });
+    }
+
+    const files = snapshot(bp.studioDir);
+    const read = readStudio(bp);
+    expect(read.designSystems.map((d) => [d.id, d.markedDefault])).toEqual([['brand', true], ['ocean', true]]);
+    expect(read.defaultDesignSystem).toBe('ocean');
+    expect(readDefaultDesignSystem(bp)).toBe('ocean');
+    // Both marks stay as git brought them: reading settles the tie and writes nothing.
+    expect(snapshot(bp.studioDir)).toEqual(files);
+    expect(systemYaml(bp, 'brand')).toMatchObject({ default: true });
+  });
+
+  it('with none marked reads the oldest as the default, and changes no file on disk', async () => {
+    madeAt('2026-11-10T10:00:00.000Z', () => saveDesignSystem(bp, { name: 'Brand', tokens: {} }));
+    madeAt('2026-11-09T10:00:00.000Z', () => saveDesignSystem(bp, { name: 'Ocean', tokens: {} }));
+    // A hand edit takes the mark off Brand: now none is marked.
+    const brandFile = path.join(designSystemDir(bp, 'brand'), 'system.yaml');
+    fs.writeFileSync(brandFile, fs.readFileSync(brandFile, 'utf8').replace('default: true', 'default: false'));
+    const files = snapshot(bp.studioDir);
+
+    expect(readStudio(bp).defaultDesignSystem).toBe('ocean');
+    expect(readDefaultDesignSystem(bp)).toBe('ocean');
+    const app = new Hono();
+    mountStudioApi(app, { paths: buildPaths(bp.root) });
+    const body = (await (await app.request('/api/v1/studio')).json()) as { defaultDesignSystem: string; designSystems: { id: string; isDefault: boolean; markedDefault: boolean }[] };
+    expect(body.defaultDesignSystem).toBe('ocean');
+    expect(body.designSystems.map((d) => [d.id, d.isDefault, d.markedDefault])).toEqual([['brand', false, false], ['ocean', true, false]]);
+    expect(snapshot(bp.studioDir)).toEqual(files);
+  });
+
+  it('on equal times picks the lower id, counts a time it cannot read as made last, and has none with no design systems', () => {
+    const at = '2026-11-09T10:00:00.000Z';
+    expect(defaultDesignSystemOf([{ id: 'ocean', markedDefault: true, madeAt: at }, { id: 'brand', markedDefault: true, madeAt: at }])).toBe('brand');
+    expect(defaultDesignSystemOf([{ id: 'brand', markedDefault: false, madeAt: 'someday' }, { id: 'ocean', markedDefault: false, madeAt: at }])).toBe('ocean');
+    expect(defaultDesignSystemOf([{ id: 'ocean', markedDefault: false, madeAt: at }, { id: 'brand', markedDefault: true, madeAt: '2026-12-01T00:00:00.000Z' }])).toBe('brand');
+    expect(defaultDesignSystemOf([])).toBeNull();
+    expect(readDefaultDesignSystem(bp)).toBeNull();
+    expect(fs.existsSync(bp.studioDir)).toBe(false);
+  });
+
+  it('reads a made time typed without quotes the same as squad-kit writes it', () => {
+    saveDesignSystem(bp, { name: 'Brand', tokens: {} });
+    const file = path.join(designSystemDir(bp, 'brand'), 'system.yaml');
+    fs.writeFileSync(file, 'name: Brand\ndefault: true\nversion: 1\nmadeAt: 2026-11-09T10:00:00.000Z\n');
+    expect(readDesignSystem(bp, 'brand')!.madeAt).toBe('2026-11-09T10:00:00.000Z');
+  });
+});
+
 describe('done when 5: a project with no Studio work stays exactly as it was', () => {
   it('opens and reads the Studio with no folder made and every file outside .squad/studio/ untouched', async () => {
     seedDemoBoard(bp, { speed: 1000 });
@@ -255,8 +354,8 @@ describe('done when 5: a project with no Studio work stays exactly as it was', (
     mountStudioApi(app, { paths: buildPaths(bp.root) });
     const r = await app.request('/api/v1/studio');
     expect(r.status).toBe(200);
-    expect(await r.json()).toEqual({ designSystems: [], sketches: [] });
-    expect(readStudio(bp)).toEqual({ designSystems: [], sketches: [], broken: [] });
+    expect(await r.json()).toEqual({ designSystems: [], defaultDesignSystem: null, sketches: [] });
+    expect(readStudio(bp)).toEqual({ designSystems: [], defaultDesignSystem: null, sketches: [], broken: [] });
     expect(readDesignSystem(bp, 'brand')).toBeNull();
     expect(readSketch(bp, 'checkout')).toBeNull();
 

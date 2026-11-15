@@ -6,16 +6,21 @@ import { act } from './act.js';
 
 /**
  * What the project's Studio holds, as this computer's squad-kit reads it from `.squad/studio/`: every design system
- * and sketch with its change stamp, versions, screens, variants and chosen variant. Read-only, and reading makes no
- * folder, so opening the Studio writes nothing (AB-127.1). The HTML stays in the files; this lists what is there.
+ * and sketch with its change stamp, versions, screens, variants and chosen variant, and the one default design system.
+ * Read-only, and reading makes no folder, so opening the Studio writes nothing (AB-127.1). The HTML stays in the files;
+ * this lists what is there.
  */
 
-function designSystemRow(ds: DesignSystem) {
+function designSystemRow(ds: DesignSystem, defaultId: string | null) {
   return {
     id: ds.id,
     name: ds.name,
-    isDefault: ds.isDefault,
+    /** The project's one default, worked out on read (AB-158.1): only one row is ever true. */
+    isDefault: ds.id === defaultId,
+    /** What its own system.yaml says; two can be marked after a merge. */
+    markedDefault: ds.markedDefault,
     version: ds.version,
+    madeAt: ds.madeAt,
     stamp: ds.stamp,
     versions: ds.versions.map((v) => ({ version: v.version, tokens: v.tokens, components: Object.keys(v.components) })),
   };
@@ -45,7 +50,8 @@ export function mountStudioApi(app: Hono, opts: { paths: SquadPaths }): void {
     act(c, () => {
       const studio = readStudio(bp);
       return {
-        designSystems: studio.designSystems.map(designSystemRow),
+        designSystems: studio.designSystems.map((ds) => designSystemRow(ds, studio.defaultDesignSystem)),
+        defaultDesignSystem: studio.defaultDesignSystem,
         sketches: studio.sketches.map(sketchRow),
         ...(studio.broken.length ? { broken: studio.broken } : {}),
       };

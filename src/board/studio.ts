@@ -44,9 +44,12 @@ import {
 /** `system.yaml`. */
 interface SystemFile {
   name: string;
+  /** The default mark (AB-158.1): written only on the first design system made in the project, never moved by a save. */
   default: boolean;
   /** The current version. */
   version: number;
+  /** When it was made, for working out the default when there are none or several marked. */
+  madeAt: string;
 }
 
 /** `sketch.yaml`. */
@@ -89,9 +92,14 @@ export interface DesignSystemVersion {
 export interface DesignSystem {
   id: string;
   name: string;
-  isDefault: boolean;
+  /**
+   * What its own system.yaml says. Two can be marked after a merge, or none after a hand edit: the project's one
+   * default is worked out by defaultDesignSystemOf, never by this alone.
+   */
+  markedDefault: boolean;
   /** The current version. */
   version: number;
+  madeAt: string;
   versions: DesignSystemVersion[];
   /** A fingerprint of every shared file in the folder; every change must bring the one it read. */
   stamp: string;
@@ -130,6 +138,8 @@ export interface BrokenStudioItem {
 
 export interface StudioContents {
   designSystems: DesignSystem[];
+  /** The project's one default design system's id, worked out on read (AB-158.1), or null when it has none. */
+  defaultDesignSystem: string | null;
   sketches: Sketch[];
   broken: BrokenStudioItem[];
 }
@@ -333,10 +343,16 @@ function positive(x: unknown): x is number {
   return typeof x === 'number' && Number.isInteger(x) && x >= 1;
 }
 
+/** A time as written: squad-kit writes text, and a time typed without quotes reads back as a date. */
+function timeText(x: unknown): string {
+  if (x instanceof Date) return Number.isNaN(x.getTime()) ? '' : x.toISOString();
+  return typeof x === 'string' ? x : '';
+}
+
 function readSystemFile(file: string): SystemFile {
   const raw = readYamlFile(file);
   if (!isPlain(raw) || typeof raw.name !== 'string' || !positive(raw.version)) throw problem(`The design system file ${file}`);
-  return { name: raw.name, default: raw.default === true, version: raw.version };
+  return { name: raw.name, default: raw.default === true, version: raw.version, madeAt: timeText(raw.madeAt) };
 }
 
 function readSketchFile(file: string): SketchFile {
@@ -361,7 +377,7 @@ function readScreenFile(file: string): ScreenFile {
 
 function readVariantMeta(file: string): VariantMetaFile {
   const raw = fs.existsSync(file) ? readYamlFile(file) : {};
-  const meta: VariantMetaFile = { madeAt: isPlain(raw) && typeof raw.madeAt === 'string' ? raw.madeAt : '' };
+  const meta: VariantMetaFile = { madeAt: isPlain(raw) ? timeText(raw.madeAt) : '' };
   if (isPlain(raw) && typeof raw.madeBy === 'string') meta.madeBy = raw.madeBy;
   if (isPlain(raw) && typeof raw.note === 'string') meta.note = raw.note;
   return meta;
@@ -390,7 +406,25 @@ export function readDesignSystem(bp: BoardPaths, id: string): DesignSystem | nul
     tokens: readTokens(tokensFile(bp, id, version)),
     components: htmlFiles(componentsDir(bp, id, version)),
   }));
-  return { id, name: system.name, isDefault: system.default, version: system.version, versions, stamp: stamp ?? '' };
+  return { id, name: system.name, markedDefault: system.default, version: system.version, madeAt: system.madeAt, versions, stamp: stamp ?? '' };
+}
+
+/** A made time to compare: one that cannot be read counts as made last. */
+function madeTime(madeAt: string): number {
+  const t = Date.parse(madeAt);
+  return Number.isNaN(t) ? Number.POSITIVE_INFINITY : t;
+}
+
+/**
+ * The project's one default design system (AB-158.1): the oldest one marked default; when none is marked, the oldest
+ * one; on equal times, the lower id. It holds on any files git brings in, such as two teammates' first design systems
+ * merged into one project, and it only reads: nothing is written to settle a tie.
+ */
+export function defaultDesignSystemOf(systems: Pick<DesignSystem, 'id' | 'markedDefault' | 'madeAt'>[]): string | null {
+  const marked = systems.filter((s) => s.markedDefault);
+  const pool = marked.length ? marked : systems;
+  const oldest = [...pool].sort((a, b) => madeTime(a.madeAt) - madeTime(b.madeAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))[0];
+  return oldest?.id ?? null;
 }
 
 function readScreen(bp: BoardPaths, sketch: string, id: string): SketchScreen {
@@ -420,9 +454,12 @@ function idsIn(dir: string): string[] {
   return folders(dir).filter((id) => STUDIO_ID.test(id));
 }
 
-/** Every design system and sketch in the project, each with its change stamp. A file that cannot be read is listed in `broken`. */
+/**
+ * Every design system and sketch in the project, each with its change stamp, and the one default design system. A file
+ * that cannot be read is listed in `broken`. Reading writes nothing and makes no folder.
+ */
 export function readStudio(bp: BoardPaths): StudioContents {
-  const out: StudioContents = { designSystems: [], sketches: [], broken: [] };
+  const out: StudioContents = { designSystems: [], defaultDesignSystem: null, sketches: [], broken: [] };
   for (const id of idsIn(designSystemsDir(bp))) {
     try {
       const ds = readDesignSystem(bp, id);
@@ -439,7 +476,22 @@ export function readStudio(bp: BoardPaths): StudioContents {
       out.broken.push({ kind: 'sketch', id, problem: (err as Error).message });
     }
   }
+  out.defaultDesignSystem = defaultDesignSystemOf(out.designSystems);
   return out;
+}
+
+/** The project's default design system's id, the same answer readStudio gives, for later stories (a new sketch, "Make default", delete). */
+export function readDefaultDesignSystem(bp: BoardPaths): string | null {
+  const systems: DesignSystem[] = [];
+  for (const id of idsIn(designSystemsDir(bp))) {
+    try {
+      const ds = readDesignSystem(bp, id);
+      if (ds) systems.push(ds);
+    } catch {
+      // A design system that cannot be read is not the default; readStudio lists it as broken.
+    }
+  }
+  return defaultDesignSystemOf(systems);
 }
 
 /* ── Changes ────────────────────────────────────────────── */
@@ -536,16 +588,21 @@ export interface DesignSystemInput {
   /** Left out, it is made from the name. */
   id?: string;
   name: string;
-  isDefault?: boolean;
   tokens?: Record<string, unknown>;
   /** Component id → its HTML. */
   components?: Record<string, string>;
 }
 
+/** Another design system is already saved in the project, readable or not. */
+function otherDesignSystemSaved(bp: BoardPaths, id: string): boolean {
+  return idsIn(designSystemsDir(bp)).some((other) => other !== id && fs.existsSync(designSystemFile(bp, other)));
+}
+
 /**
- * Saves a design system. With no stamp it is new: version 1 with its tokens and components. With the stamp the caller
- * read, its name and default are saved, and tokens or components that differ from the current version become the next
- * version; saved versions never change.
+ * Saves a design system. With no stamp it is new: version 1 with its tokens and components, marked default only when
+ * no other design system is saved yet (AB-158.1). With the stamp the caller read, its name is saved, and tokens or
+ * components that differ from the current version become the next version; saved versions never change, and the
+ * default mark and the made time stay as they were.
  */
 export function saveDesignSystem(bp: BoardPaths, input: DesignSystemInput, stamp: string | null = null): DesignSystem {
   const name = checkedName(input.name, 'design system');
@@ -566,7 +623,9 @@ export function saveDesignSystem(bp: BoardPaths, input: DesignSystemInput, stamp
       for (const [c, html] of Object.entries(nextComponents)) files[componentFile(bp, id, version, c)] = html;
       writeNewVersion(designSystemVersionDir(bp, id, version), files);
     }
-    const system: SystemFile = { name, default: input.isDefault ?? before?.isDefault ?? false, version };
+    const system: SystemFile = before
+      ? { name, default: before.markedDefault, version, madeAt: before.madeAt || new Date().toISOString() }
+      : { name, default: !otherDesignSystemSaved(bp, id), version, madeAt: new Date().toISOString() };
     writeShared(designSystemFile(bp, id), dumpYaml(system));
     return readDesignSystem(bp, id)!;
   });

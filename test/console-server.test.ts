@@ -200,21 +200,29 @@ describe('console server studio', () => {
       const res = await fetch(`${baseUrl}/api/v1/studio`, { headers: { authorization: `Bearer ${TOKEN}` } });
       expect(res.status).toBe(200);
       return (await res.json()) as {
-        designSystems: { id: string; name: string; version: number; stamp: string; versions: { version: number; components: string[] }[] }[];
+        designSystems: { id: string; name: string; version: number; stamp: string; isDefault: boolean; markedDefault: boolean; versions: { version: number; components: string[] }[] }[];
+        defaultDesignSystem: string | null;
         sketches: { id: string; stamp: string; designSystem: unknown; frames: string[]; screens: { id: string; chosen: number; variants: { version: number; frames: string[] }[] }[] }[];
       };
     };
-    expect(await get()).toEqual({ designSystems: [], sketches: [] });
+    expect(await get()).toEqual({ designSystems: [], defaultDesignSystem: null, sketches: [] });
     expect(fs.existsSync(bp.studioDir)).toBe(false);
 
-    saveDesignSystem(bp, { name: 'Brand', isDefault: true, tokens: { colors: { primary: '#2563eb' } }, components: { button: '<button>Pay</button>' } });
+    saveDesignSystem(bp, { name: 'Brand', tokens: { colors: { primary: '#2563eb' } }, components: { button: '<button>Pay</button>' } });
+    const ocean = saveDesignSystem(bp, { name: 'Ocean', tokens: { colors: { primary: '#0ea5e9' } } });
     const sketch = saveSketch(bp, { name: 'Checkout', designSystem: { id: 'brand', version: 1 }, frames: ['desktop'], screens: [{ name: 'Payment' }] });
     const one = addVariant(bp, 'checkout', 'payment', { frames: { desktop: '<main>A</main>' } }, sketch.stamp);
     const two = addVariant(bp, 'checkout', 'payment', { frames: { desktop: '<main>B</main>' }, choose: true }, one.stamp);
 
     const body = await get();
     const read = readStudio(bp);
-    expect(body.designSystems).toMatchObject([{ id: 'brand', name: 'Brand', version: 1, stamp: read.designSystems[0]!.stamp, versions: [{ version: 1, components: ['button'] }] }]);
+    expect(body.designSystems).toMatchObject([
+      { id: 'brand', name: 'Brand', version: 1, isDefault: true, markedDefault: true, stamp: read.designSystems[0]!.stamp, versions: [{ version: 1, components: ['button'] }] },
+      { id: 'ocean', name: 'Ocean', version: 1, isDefault: false, markedDefault: false, stamp: ocean.stamp, versions: [{ version: 1, components: [] }] },
+    ]);
+    // The first one made is the default, named once and marked on one row only.
+    expect(body.defaultDesignSystem).toBe('brand');
+    expect(body.designSystems.filter((d) => d.isDefault)).toHaveLength(1);
     expect(body.sketches).toMatchObject([{ id: 'checkout', stamp: two.stamp, designSystem: { id: 'brand', version: 1 }, frames: ['desktop'], screens: [{ id: 'payment', chosen: 2, variants: [{ version: 1, frames: ['desktop'] }, { version: 2, frames: ['desktop'] }] }] }]);
     expect(body.sketches[0]!.stamp).not.toBe(one.stamp);
     // The HTML stays in the files; the list names what is there.
