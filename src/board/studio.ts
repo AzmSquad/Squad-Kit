@@ -1,37 +1,48 @@
 import fs from 'node:fs';
-import path from 'node:path';
-import { createHash } from 'node:crypto';
-import yaml from 'js-yaml';
 import type { BoardPaths } from './store.js';
 import { isPlain } from './shape.js';
 import {
-  STUDIO_ID,
-  VERSION_DIR,
   chatFile,
   checkedStudioId,
   componentFile,
-  componentsDir,
-  designSystemDir,
   designSystemFile,
   designSystemVersionDir,
   designSystemsDir,
   frameFile,
   screenDir,
   screenFile,
-  screensDir,
-  sketchDir,
   sketchFile,
-  sketchesDir,
-  studioLockFile,
   thumbnailFile,
   tokensFile,
   variantDir,
   variantMetaFile,
 } from './studio-paths.js';
+import { dumpYaml, idsIn, plainFile, sha1, versionsIn, writeNewVersion, writeShared } from './studio-files.js';
+import { holdStudio } from './studio-lock.js';
+import {
+  SCREEN_STATUSES,
+  readDesignSystem,
+  readScreenFile,
+  readSketch,
+  readSketchFile,
+  studioStamp,
+  type DesignSystem,
+  type ScreenFile,
+  type ScreenStatus,
+  type Sketch,
+  type SketchFile,
+  type StudioItem,
+  type StudioKind,
+  type SystemFile,
+  type VariantMetaFile,
+} from './studio-read.js';
 
 /**
- * The Studio's store (AB-128.1): sketches and design systems saved inside the project, in `.squad/studio/`, so the
- * team gets them through git the way it gets tickets. Every Studio save, read and delete goes through this module.
+ * The Studio's store (AB-128.2): sketches and design systems saved inside the project, in `.squad/studio/`, so the
+ * team gets them through git the way it gets tickets. Every Studio save, read and delete goes through this module:
+ * later Studio stories import from here only. Its parts: studio-paths.ts (every location, from BoardPaths),
+ * studio-read.ts (the saved shapes, the reads and the default design system), studio-files.ts (listing, the change
+ * stamp and writing) and studio-lock.ts (one change at a time per project).
  *
  * Each item (one design system, one sketch) is its own folder of plain YAML, JSON and HTML. Versions (v1, v2 …) only
  * grow: a saved version is never written again, so every variant stays pickable. Each item is read back with a change
@@ -39,460 +50,27 @@ import {
  * reload" when the files have changed since (AB-129.1), here, in another tab, or through a git pull.
  */
 
-/* ── Saved shapes ───────────────────────────────────────── */
-
-/** `system.yaml`. */
-interface SystemFile {
-  name: string;
-  /** The default mark (AB-158.1): written only on the first design system made in the project, never moved by a save. */
-  default: boolean;
-  /** The current version. */
-  version: number;
-  /** When it was made, for working out the default when there are none or several marked. */
-  madeAt: string;
-}
-
-/** `sketch.yaml`. */
-interface SketchFile {
-  name: string;
-  designSystem: { id: string; version: number } | null;
-  /** The frames each screen is drawn in: desktop, tablet, mobile … */
-  frames: string[];
-}
-
-export const SCREEN_STATUSES = ['draft', 'ready'] as const;
-export type ScreenStatus = (typeof SCREEN_STATUSES)[number];
-
-/** `screen.yaml`. */
-interface ScreenFile {
-  name: string;
-  order: number;
-  status: ScreenStatus;
-  /** The chosen variant's version, or null before the first one is drawn. */
-  chosen: number | null;
-}
-
-/** `v1/meta.yaml` beside a variant's frames. */
-interface VariantMetaFile {
-  madeAt: string;
-  /** Who drew it: a person or the AI Designer. */
-  madeBy?: string;
-  note?: string;
-}
-
-/* ── What a read gives back ─────────────────────────────── */
-
-export interface DesignSystemVersion {
-  version: number;
-  tokens: Record<string, unknown>;
-  /** Component id → its HTML. */
-  components: Record<string, string>;
-}
-
-export interface DesignSystem {
-  id: string;
-  name: string;
-  /**
-   * What its own system.yaml says. Two can be marked after a merge, or none after a hand edit: the project's one
-   * default is worked out by defaultDesignSystemOf, never by this alone.
-   */
-  markedDefault: boolean;
-  /** The current version. */
-  version: number;
-  madeAt: string;
-  versions: DesignSystemVersion[];
-  /** A fingerprint of every shared file in the folder; every change must bring the one it read. */
-  stamp: string;
-}
-
-export interface ScreenVariant extends VariantMetaFile {
-  version: number;
-  /** Frame id → its HTML. */
-  frames: Record<string, string>;
-}
-
-export interface SketchScreen {
-  id: string;
-  name: string;
-  order: number;
-  status: ScreenStatus;
-  chosen: number | null;
-  variants: ScreenVariant[];
-}
-
-export interface Sketch {
-  id: string;
-  name: string;
-  designSystem: { id: string; version: number } | null;
-  frames: string[];
-  screens: SketchScreen[];
-  stamp: string;
-}
-
-/** A file in `.squad/studio/` that could not be read (a merge both people changed, a broken edit). */
-export interface BrokenStudioItem {
-  kind: StudioKind;
-  id: string;
-  problem: string;
-}
-
-export interface StudioContents {
-  designSystems: DesignSystem[];
-  /** The project's one default design system's id, worked out on read (AB-158.1), or null when it has none. */
-  defaultDesignSystem: string | null;
-  sketches: Sketch[];
-  broken: BrokenStudioItem[];
-}
-
-export type StudioKind = 'design-system' | 'sketch';
-
-export interface StudioItem {
-  kind: StudioKind;
-  id: string;
-}
-
-/* ── Files ──────────────────────────────────────────────── */
-
-/** Names a save is still writing (`… .tmp`) and hidden files (.DS_Store) are not part of the Studio. */
-function counts(name: string): boolean {
-  return !name.startsWith('.') && !name.endsWith('.tmp');
-}
-
-function readYamlFile(file: string): unknown {
-  const text = fs.readFileSync(file, 'utf8');
-  try {
-    return yaml.load(text);
-  } catch {
-    throw problem(`The file ${file}`);
-  }
-}
-
-function folders(dir: string): string[] {
-  if (!fs.existsSync(dir)) return [];
-  return fs
-    .readdirSync(dir, { withFileTypes: true })
-    .filter((e) => e.isDirectory() && counts(e.name))
-    .map((e) => e.name)
-    .sort();
-}
-
-/** The version folders in a folder, oldest first. */
-function versionsIn(dir: string): number[] {
-  return folders(dir)
-    .map((name) => VERSION_DIR.exec(name)?.[1])
-    .filter((n): n is string => n !== undefined)
-    .map(Number)
-    .sort((a, b) => a - b);
-}
-
-/** The `<id>.html` files in a folder, by id. */
-function htmlFiles(dir: string): Record<string, string> {
-  if (!fs.existsSync(dir)) return {};
-  const out: Record<string, string> = {};
-  for (const name of fs.readdirSync(dir).sort()) {
-    const id = name.endsWith('.html') ? name.slice(0, -'.html'.length) : '';
-    if (STUDIO_ID.test(id) && fs.statSync(path.join(dir, name)).isFile()) out[id] = fs.readFileSync(path.join(dir, name), 'utf8');
-  }
-  return out;
-}
-
-function sha1(data: string | Buffer): string {
-  return createHash('sha1').update(data).digest('hex');
-}
-
-/** Every shared file in an item's folder, as paths inside it with `/`, sorted by name. */
-function sharedFiles(dir: string, inside = ''): string[] {
-  if (!fs.existsSync(dir)) return [];
-  const out: string[] = [];
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (!counts(e.name)) continue;
-    const rel = inside ? `${inside}/${e.name}` : e.name;
-    if (e.isDirectory()) out.push(...sharedFiles(path.join(dir, e.name), rel));
-    else if (e.isFile()) out.push(rel);
-  }
-  return out.sort();
-}
-
-/**
- * The change stamp of an item's folder: a short fingerprint of every shared file's name and text, sorted by name.
- * It comes from the files alone, so the same files give the same stamp on every computer, and any change (here, in
- * another tab, or through a git pull) gives a new one. Null when the item has no files.
- */
-export function stampOfFolder(dir: string): string | null {
-  const files = sharedFiles(dir);
-  if (!files.length) return null;
-  const h = createHash('sha1');
-  for (const rel of files) h.update(`${rel}\n${sha1(fs.readFileSync(path.join(dir, ...rel.split('/'))))}\n`);
-  return h.digest('hex').slice(0, 16);
-}
-
-export function studioItemDir(bp: BoardPaths, item: StudioItem): string {
-  return item.kind === 'design-system' ? designSystemDir(bp, item.id) : sketchDir(bp, item.id);
-}
-
-/** The item's change stamp now, or null when it is not in the project. */
-export function studioStamp(bp: BoardPaths, item: StudioItem): string | null {
-  return stampOfFolder(studioItemDir(bp, item));
-}
-
-/**
- * Writes through a temp file, the way the store does, so a reader never sees half a file. A file whose text is
- * unchanged is left alone, so a save that changes nothing makes no change in git. Folders appear only here.
- */
-function writeShared(file: string, text: string | Buffer): void {
-  if (fs.existsSync(file) && fs.readFileSync(file).equals(Buffer.from(text))) return;
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, text);
-  fs.renameSync(tmp, file);
-}
-
-/**
- * Writes a whole new version folder (v1, v2 …) at once: its files go into a temp folder that is then renamed, so a
- * reader sees all of the version or none of it. A saved version is never written again.
- */
-function writeNewVersion(dir: string, files: Record<string, string>): void {
-  if (fs.existsSync(dir)) throw new Error(`${path.basename(dir)} is already saved, and a saved version never changes. Reload and save again.`);
-  const tmp = `${dir}.${process.pid}.tmp`;
-  fs.rmSync(tmp, { recursive: true, force: true });
-  try {
-    for (const [file, text] of Object.entries(files)) {
-      const inTmp = path.join(tmp, path.relative(dir, file));
-      fs.mkdirSync(path.dirname(inTmp), { recursive: true });
-      fs.writeFileSync(inTmp, text, 'utf8');
-    }
-    fs.mkdirSync(tmp, { recursive: true });
-    fs.renameSync(tmp, dir);
-  } catch (err) {
-    fs.rmSync(tmp, { recursive: true, force: true });
-    throw err;
-  }
-}
-
-function dumpYaml(data: unknown): string {
-  return yaml.dump(JSON.parse(JSON.stringify(data)), { lineWidth: 110, noRefs: true });
-}
-
-/* ── The project's Studio lock ──────────────────────────── */
-
-/** Longer than any Studio change takes: an older lock was left by a run that ended. */
-const LOCK_LEFT_MS = 30_000;
-/** How long a change waits for another one to finish. */
-const LOCK_WAIT_MS = 5_000;
-/** Locks this process holds now, so a change inside a change does not wait for itself. */
-const holding = new Set<string>();
-
-function lockLeftBehind(file: string): boolean {
-  let held: { pid?: number; at?: string };
-  try {
-    held = JSON.parse(fs.readFileSync(file, 'utf8')) as typeof held;
-  } catch {
-    // Being written right now, or gone: not left behind unless it is old.
-    try {
-      return Date.now() - fs.statSync(file).mtimeMs > LOCK_LEFT_MS;
-    } catch {
-      return false;
-    }
-  }
-  if (!held.pid || (held.at && Date.now() - Date.parse(held.at) > LOCK_LEFT_MS)) return true;
-  if (held.pid === process.pid) return !holding.has(file);
-  try {
-    process.kill(held.pid, 0);
-    return false;
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === 'ESRCH';
-  }
-}
-
-/** Runs `fn` while holding the project's Studio lock, shared by the console and terminal commands. */
-function holdStudio<T>(bp: BoardPaths, fn: () => T): T {
-  const file = studioLockFile(bp);
-  if (holding.has(file)) return fn();
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const started = Date.now();
-  for (;;) {
-    try {
-      fs.writeFileSync(file, JSON.stringify({ pid: process.pid, at: new Date().toISOString() }), { encoding: 'utf8', flag: 'wx' });
-      break;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-      if (lockLeftBehind(file)) {
-        fs.rmSync(file, { force: true });
-        continue;
-      }
-      if (Date.now() - started > LOCK_WAIT_MS) throw new Error('The Studio is saving something else right now. Try again in a moment.');
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
-    }
-  }
-  holding.add(file);
-  try {
-    return fn();
-  } finally {
-    holding.delete(file);
-    fs.rmSync(file, { force: true });
-  }
-}
-
-/* ── Reading ────────────────────────────────────────────── */
-
-function problem(what: string): Error {
-  return new Error(`${what} could not be read. Nothing is lost. An engineer can look at it.`);
-}
-
-function positive(x: unknown): x is number {
-  return typeof x === 'number' && Number.isInteger(x) && x >= 1;
-}
-
-/** A time as written: squad-kit writes text, and a time typed without quotes reads back as a date. */
-function timeText(x: unknown): string {
-  if (x instanceof Date) return Number.isNaN(x.getTime()) ? '' : x.toISOString();
-  return typeof x === 'string' ? x : '';
-}
-
-function readSystemFile(file: string): SystemFile {
-  const raw = readYamlFile(file);
-  if (!isPlain(raw) || typeof raw.name !== 'string' || !positive(raw.version)) throw problem(`The design system file ${file}`);
-  return { name: raw.name, default: raw.default === true, version: raw.version, madeAt: timeText(raw.madeAt) };
-}
-
-function readSketchFile(file: string): SketchFile {
-  const raw = readYamlFile(file);
-  if (!isPlain(raw) || typeof raw.name !== 'string') throw problem(`The sketch file ${file}`);
-  const ds = raw.designSystem;
-  const designSystem = isPlain(ds) && typeof ds.id === 'string' && STUDIO_ID.test(ds.id) && positive(ds.version) ? { id: ds.id, version: ds.version } : null;
-  const frames = Array.isArray(raw.frames) ? raw.frames.filter((f): f is string => typeof f === 'string' && STUDIO_ID.test(f)) : [];
-  return { name: raw.name, designSystem, frames };
-}
-
-function readScreenFile(file: string): ScreenFile {
-  const raw = readYamlFile(file);
-  if (!isPlain(raw) || typeof raw.name !== 'string') throw problem(`The screen file ${file}`);
-  return {
-    name: raw.name,
-    order: typeof raw.order === 'number' && Number.isFinite(raw.order) ? raw.order : 0,
-    status: (SCREEN_STATUSES as readonly unknown[]).includes(raw.status) ? (raw.status as ScreenStatus) : 'draft',
-    chosen: positive(raw.chosen) ? raw.chosen : null,
-  };
-}
-
-function readVariantMeta(file: string): VariantMetaFile {
-  const raw = fs.existsSync(file) ? readYamlFile(file) : {};
-  const meta: VariantMetaFile = { madeAt: isPlain(raw) ? timeText(raw.madeAt) : '' };
-  if (isPlain(raw) && typeof raw.madeBy === 'string') meta.madeBy = raw.madeBy;
-  if (isPlain(raw) && typeof raw.note === 'string') meta.note = raw.note;
-  return meta;
-}
-
-function readTokens(file: string): Record<string, unknown> {
-  if (!fs.existsSync(file)) return {};
-  let raw: unknown;
-  try {
-    raw = JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch {
-    throw problem(`The tokens file ${file}`);
-  }
-  if (!isPlain(raw)) throw problem(`The tokens file ${file}`);
-  return raw;
-}
-
-/** One design system with all its versions, or null when the project has none by that id. */
-export function readDesignSystem(bp: BoardPaths, id: string): DesignSystem | null {
-  const file = designSystemFile(bp, id);
-  if (!fs.existsSync(file)) return null;
-  const stamp = stampOfFolder(designSystemDir(bp, id));
-  const system = readSystemFile(file);
-  const versions = versionsIn(designSystemDir(bp, id)).map((version) => ({
-    version,
-    tokens: readTokens(tokensFile(bp, id, version)),
-    components: htmlFiles(componentsDir(bp, id, version)),
-  }));
-  return { id, name: system.name, markedDefault: system.default, version: system.version, madeAt: system.madeAt, versions, stamp: stamp ?? '' };
-}
-
-/** A made time to compare: one that cannot be read counts as made last. */
-function madeTime(madeAt: string): number {
-  const t = Date.parse(madeAt);
-  return Number.isNaN(t) ? Number.POSITIVE_INFINITY : t;
-}
-
-/**
- * The project's one default design system (AB-158.1): the oldest one marked default; when none is marked, the oldest
- * one; on equal times, the lower id. It holds on any files git brings in, such as two teammates' first design systems
- * merged into one project, and it only reads: nothing is written to settle a tie.
- */
-export function defaultDesignSystemOf(systems: Pick<DesignSystem, 'id' | 'markedDefault' | 'madeAt'>[]): string | null {
-  const marked = systems.filter((s) => s.markedDefault);
-  const pool = marked.length ? marked : systems;
-  const oldest = [...pool].sort((a, b) => madeTime(a.madeAt) - madeTime(b.madeAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))[0];
-  return oldest?.id ?? null;
-}
-
-function readScreen(bp: BoardPaths, sketch: string, id: string): SketchScreen {
-  const screen = readScreenFile(screenFile(bp, sketch, id));
-  const variants = versionsIn(screenDir(bp, sketch, id)).map((version) => {
-    const frames = htmlFiles(variantDir(bp, sketch, id, version));
-    return { version, ...readVariantMeta(variantMetaFile(bp, sketch, id, version)), frames };
-  });
-  return { id, ...screen, variants };
-}
-
-/** One sketch with its screens and every variant, or null when the project has none by that id. */
-export function readSketch(bp: BoardPaths, id: string): Sketch | null {
-  const file = sketchFile(bp, id);
-  if (!fs.existsSync(file)) return null;
-  const stamp = stampOfFolder(sketchDir(bp, id));
-  const sketch = readSketchFile(file);
-  const screens = folders(screensDir(bp, id))
-    .filter((s) => STUDIO_ID.test(s) && fs.existsSync(screenFile(bp, id, s)))
-    .map((s) => readScreen(bp, id, s))
-    .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
-  return { id, ...sketch, screens, stamp: stamp ?? '' };
-}
-
-/** The ids of the items of one kind in the project. Reading never makes a folder. */
-function idsIn(dir: string): string[] {
-  return folders(dir).filter((id) => STUDIO_ID.test(id));
-}
-
-/**
- * Every design system and sketch in the project, each with its change stamp, and the one default design system. A file
- * that cannot be read is listed in `broken`. Reading writes nothing and makes no folder.
- */
-export function readStudio(bp: BoardPaths): StudioContents {
-  const out: StudioContents = { designSystems: [], defaultDesignSystem: null, sketches: [], broken: [] };
-  for (const id of idsIn(designSystemsDir(bp))) {
-    try {
-      const ds = readDesignSystem(bp, id);
-      if (ds) out.designSystems.push(ds);
-    } catch (err) {
-      out.broken.push({ kind: 'design-system', id, problem: (err as Error).message });
-    }
-  }
-  for (const id of idsIn(sketchesDir(bp))) {
-    try {
-      const sk = readSketch(bp, id);
-      if (sk) out.sketches.push(sk);
-    } catch (err) {
-      out.broken.push({ kind: 'sketch', id, problem: (err as Error).message });
-    }
-  }
-  out.defaultDesignSystem = defaultDesignSystemOf(out.designSystems);
-  return out;
-}
-
-/** The project's default design system's id, the same answer readStudio gives, for later stories (a new sketch, "Make default", delete). */
-export function readDefaultDesignSystem(bp: BoardPaths): string | null {
-  const systems: DesignSystem[] = [];
-  for (const id of idsIn(designSystemsDir(bp))) {
-    try {
-      const ds = readDesignSystem(bp, id);
-      if (ds) systems.push(ds);
-    } catch {
-      // A design system that cannot be read is not the default; readStudio lists it as broken.
-    }
-  }
-  return defaultDesignSystemOf(systems);
-}
+export {
+  SCREEN_STATUSES,
+  defaultDesignSystemOf,
+  readDefaultDesignSystem,
+  readDesignSystem,
+  readSketch,
+  readStudio,
+  studioItemDir,
+  studioStamp,
+  type BrokenStudioItem,
+  type DesignSystem,
+  type DesignSystemVersion,
+  type ScreenStatus,
+  type ScreenVariant,
+  type Sketch,
+  type SketchScreen,
+  type StudioContents,
+  type StudioItem,
+  type StudioKind,
+} from './studio-read.js';
+export { stampOfFolder } from './studio-files.js';
 
 /* ── Changes ────────────────────────────────────────────── */
 
@@ -595,7 +173,7 @@ export interface DesignSystemInput {
 
 /** Another design system is already saved in the project, readable or not. */
 function otherDesignSystemSaved(bp: BoardPaths, id: string): boolean {
-  return idsIn(designSystemsDir(bp)).some((other) => other !== id && fs.existsSync(designSystemFile(bp, other)));
+  return idsIn(designSystemsDir(bp)).some((other) => other !== id && plainFile(designSystemFile(bp, other)));
 }
 
 /**
@@ -662,7 +240,7 @@ export function saveSketch(bp: BoardPaths, input: SketchInput, stamp: string | n
   const ds = input.designSystem ?? null;
   if (ds) {
     checkedStudioId(ds.id);
-    if (!Number.isInteger(ds.version) || ds.version < 1 || !fs.existsSync(tokensFile(bp, ds.id, ds.version))) {
+    if (!Number.isInteger(ds.version) || ds.version < 1 || !plainFile(tokensFile(bp, ds.id, ds.version))) {
       throw new Error(`This project has no design system "${ds.id}" version ${ds.version}.`);
     }
   }
@@ -678,7 +256,7 @@ export function saveSketch(bp: BoardPaths, input: SketchInput, stamp: string | n
     writeShared(sketchFile(bp, id), dumpYaml(sketch));
     for (const s of screens) {
       const file = screenFile(bp, id, s.id);
-      const before = fs.existsSync(file) ? readScreenFile(file) : null;
+      const before = plainFile(file) ? readScreenFile(file) : null;
       const screen: ScreenFile = { name: s.name, order: s.order, status: s.status, chosen: before?.chosen ?? null };
       writeShared(file, dumpYaml(screen));
     }
@@ -698,7 +276,7 @@ export interface VariantInput {
 function existingScreen(bp: BoardPaths, sketch: string, screen: string): ScreenFile {
   checkedStudioId(screen);
   const file = screenFile(bp, sketch, screen);
-  if (!fs.existsSync(file)) throw new Error(`The sketch "${sketch}" has no screen "${screen}".`);
+  if (!plainFile(file)) throw new Error(`The sketch "${sketch}" has no screen "${screen}".`);
   return readScreenFile(file);
 }
 
@@ -763,7 +341,7 @@ export interface StudioChat {
 /** An AI Designer chat about a sketch. Like thumbnails, it stays on this computer and is not part of any stamp. */
 export function saveChat(bp: BoardPaths, sketch: string, chat: string, contents: StudioChat): string {
   checkedStudioId(sketch);
-  if (!fs.existsSync(sketchFile(bp, sketch))) throw new Error(`This project has no sketch "${sketch}".`);
+  if (!plainFile(sketchFile(bp, sketch))) throw new Error(`This project has no sketch "${sketch}".`);
   if (contents.screen !== undefined) checkedStudioId(contents.screen);
   if (!Array.isArray(contents.messages)) throw new Error('A chat is a list of messages.');
   const file = chatFile(bp, sketch, chat);

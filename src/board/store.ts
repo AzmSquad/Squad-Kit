@@ -12,6 +12,7 @@ import { pauseClock, trackStage, waitsNow } from './clock.js';
 import { clearStaleStop, oldStop } from './stale-stop.js';
 import { dropOldChecked, showOutsideStep } from './outside-step.js';
 import { hasMergeMarks, isPlain, wrongField, type FieldShape } from './shape.js';
+import { cached } from './read-cache.js';
 import { decisionDoc, lessonsDoc, parseDecisionDoc, parseLessonsDoc, parseProjectDoc, parseReleaseDoc, parseStackDoc, projectDoc, readTicketDocs, releaseDoc, stackDoc, ticketDocs, type TicketDocInput } from './docs.js';
 
 /**
@@ -139,22 +140,6 @@ function readYaml<T>(file: string): T | undefined {
 
 function readText(file: string): string | undefined {
   return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : undefined;
-}
-
-/** Reads are cached by the files' change times, so a board with thousands of tickets stays fast. */
-const cache = new Map<string, { stamp: string; value: unknown }>();
-
-function stampOf(files: string[]): string {
-  return files.map((f) => (fs.existsSync(f) ? `${fs.statSync(f).mtimeMs}:${fs.statSync(f).size}` : '-')).join('|');
-}
-
-function cached<T>(key: string, files: string[], read: () => T): T {
-  const stamp = stampOf(files);
-  const hit = cache.get(key);
-  if (hit && hit.stamp === stamp) return structuredClone(hit.value) as T;
-  const value = read();
-  cache.set(key, { stamp, value });
-  return structuredClone(value);
 }
 
 /* ── Board settings ─────────────────────────────────────── */

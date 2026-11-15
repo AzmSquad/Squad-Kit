@@ -414,6 +414,29 @@ describe('a stale save is refused (AB-129.1)', () => {
   });
 });
 
+describe('a symbolic link under .squad/studio/', () => {
+  it('is neither read nor counted in the stamp, so a read never leaves the Studio folder', () => {
+    const { brand, sketch } = saveBrandAndCheckout();
+    const outside = path.join(tmp, 'outside');
+    fs.mkdirSync(outside, { recursive: true });
+    fs.writeFileSync(path.join(outside, 'secret.html'), '<p>not the Studio</p>');
+    fs.writeFileSync(path.join(outside, 'system.yaml'), 'name: Elsewhere\ndefault: true\nversion: 1\n');
+    // A link to a file beside the saved ones, and a link to a whole folder as if it were a design system.
+    fs.symlinkSync(path.join(outside, 'secret.html'), path.join(bp.studioDir, 'design-systems/brand/v1/components/secret.html'));
+    fs.symlinkSync(path.join(outside, 'secret.html'), path.join(bp.studioDir, 'sketches/checkout/screens/payment/v1/mobile.html'));
+    fs.symlinkSync(outside, path.join(bp.studioDir, 'design-systems/elsewhere'));
+
+    const read = readStudio(bp);
+    expect(read.designSystems.map((d) => d.id)).toEqual(['brand']);
+    expect(read.designSystems[0]!.versions[0]!.components).toEqual({ button: BUTTON });
+    expect(read.designSystems[0]!.stamp).toBe(brand.stamp);
+    expect(read.sketches[0]!.screens[0]!.variants[0]!.frames).toEqual({ desktop: PAYMENT_DESKTOP });
+    expect(read.sketches[0]!.stamp).toBe(sketch.stamp);
+    expect(readDesignSystem(bp, 'elsewhere')).toBeNull();
+    expect(read.defaultDesignSystem).toBe('brand');
+  });
+});
+
 describe('a broken Studio file', () => {
   it('is listed as broken, and the rest still reads', () => {
     saveBrandAndCheckout();
