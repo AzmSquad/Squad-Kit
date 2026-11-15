@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.23] — 2026-11-15
+
 ### Added
 
 - **Sign in with Atlassian for Jira.** On the Connections page, Jira now signs in with a button: squad-kit gives you
