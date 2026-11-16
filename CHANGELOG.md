@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The "things need you" bar steps aside while a ticket is open** (#26). It listed other tickets above the one you
   were working on, or a "need you" chip in a narrow window. The sidebar's Waiting for you and the lead button keep the
   count, and the bar comes back when you close the ticket.
+- **The Contributing banner says Merged only when squad-kit's main repo does.** A merge in your own copy or on your
+  computer now stops at Pull request, since the owner has not seen it yet. Before, such a story could show Owner's
+  review and Merged done while its pull request was still open.
 
 ### Changed
 

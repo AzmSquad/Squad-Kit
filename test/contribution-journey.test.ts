@@ -124,6 +124,23 @@ describe('the journey of a contribution', () => {
     expect(storyStep(story('SK-1', { pr: PR, mergedAt: '2026-11-13T11:40:00Z', contribution: { ...sent, state: 'merged' } }))).toBe(6);
   });
 
+  it("Owner's review and Merged come only from the main repo, never from a merge in the person's copy or here", () => {
+    const merged = '2026-11-13T11:40:00Z';
+    const contributor = { repo: 'azmsquad/squad-kit', own: false };
+    const maintainer = { repo: 'azmsquad/squad-kit', own: true };
+    const inCopy = { ...PR, repo: 'sara/squad-kit' };
+    const inMain = { ...PR, repo: 'AzmSquad/squad-kit' };
+    // A pull request merged in the person's own copy: the owner has not seen it, so it stays at Pull request.
+    expect(storyStep(story('SK-1', { pr: inCopy, mergedAt: merged }), contributor)).toBe(3);
+    // Merged in the main repo itself: only its maintainers can, and that is the merge.
+    expect(storyStep(story('SK-1', { pr: inMain, mergedAt: merged }), contributor)).toBe(6);
+    // Merged and released on this computer with no pull request: a contributor's still goes as one; a maintainer's is done.
+    expect(storyStep(story('SK-1', { stage: 'done', mergedAt: merged }), contributor)).toBe(3);
+    expect(storyStep(story('SK-1', { stage: 'done', mergedAt: merged }), maintainer)).toBe(6);
+    // The main repo unknown: the stricter answer.
+    expect(storyStep(story('SK-1', { pr: inMain, mergedAt: merged }))).toBe(3);
+  });
+
   it('another project has no journey', async () => {
     undo.push(fakeGh('missing'));
     const bp = clone('https://github.com/sara/app.git', { name: 'app' });
