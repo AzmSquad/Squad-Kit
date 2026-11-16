@@ -18,7 +18,7 @@ export function Banners({ children }: { children: ReactNode }) {
   const ticket = useRouterState({ select: (s) => (s.location.search as { ticket?: string }).ticket });
   const phone = useMedia(PHONE);
   const narrow = useNarrow();
-  const chips = useChips(path);
+  const chips = useChips(path, Boolean(ticket));
   const drawer = path.startsWith('/board') && Boolean(ticket);
   const [open, setOpen] = useState(false);
   // Each ticket opened starts folded again.
@@ -57,7 +57,7 @@ interface Chip {
 }
 
 /** A few words for each banner showing now, in the same order as the banners: three fit a phone's width. */
-function useChips(path: string): Chip[] {
+function useChips(path: string, ticketOpen: boolean): Chip[] {
   const update = useUpdate().data;
   const limit = useUsageLimit().data;
   const board = useBoard().data;
@@ -66,9 +66,10 @@ function useChips(path: string): Chip[] {
   if (u) chips.push({ key: 'update', text: u, tone: update?.progress.state === 'failed' ? 'you' : 'acc' });
   if (limit?.pause && limit.text) chips.push({ key: 'limit', text: 'Usage limit', tone: 'you' });
   if (board?.ready && board.console?.outdated) chips.push({ key: 'restart', text: 'Restart to update', tone: 'you' });
-  // The one number of what needs you (lib/waiting-count), as in the banner and the side menu.
+  // The one number of what needs you (lib/waiting-count), as in the banner and the side menu. Not with a ticket open: the
+  // banner steps aside then (#26), and the side menu keeps the count.
   const count = useWaitingCount();
-  const waiting = board?.ready && !path.startsWith('/inbox') ? count : 0;
+  const waiting = board?.ready && !path.startsWith('/inbox') && !ticketOpen ? count : 0;
   if (waiting) chips.push({ key: 'waiting', text: `${waiting} need${waiting === 1 ? 's' : ''} you`, tone: 'you' });
   return chips;
 }
