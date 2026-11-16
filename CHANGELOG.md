@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.24] — 2026-11-16
+
 ### Fixed
 
 - **An open ticket scrolls as one page** (#25). Its tabs no longer show in a small box: the title and the steps
