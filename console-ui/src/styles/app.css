@@ -1165,7 +1165,7 @@ ul.ticketnotes .grow, .addnote .grow { flex: 1; }
 .rm-banner { flex: none; margin: 16px 28px 0; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .rm-banner .grow { flex: 1; min-width: 200px; }
 .rm-cmd { margin-top: 8px; }
-.calm .rm-cmd .term { font-size: 12px; color: var(--term-ink); }
+.calm .rm-cmd .term { font-size: 12px; color: var(--text); }
 .calm .rm-cmd .term span { font-size: inherit; color: inherit; }
 .calm .rm-cmd .term b { display: inline; font-size: inherit; }
 

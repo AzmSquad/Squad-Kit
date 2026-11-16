@@ -8,7 +8,9 @@ gone. The 0.x commands still ship; see the
 [CHANGELOG](https://github.com/AzmSquad/squad-kit/blob/main/CHANGELOG.md) for 0.x history.
 
 squad-kit is one app for all your projects. It runs on your computer and opens in your browser. Every button
-in it also has a terminal command: turn on **Show commands** in the sidebar to see each one beside its button.
+in it also has a terminal command: turn on **Show commands** in the sidebar to see a small **>_** beside each button.
+Point at it to see the command; press it to copy it, and a note says which command was copied. A command that is a
+step itself (install a tool, sign in from a terminal) shows in full, with its own copy button.
 
 ## Open it
 

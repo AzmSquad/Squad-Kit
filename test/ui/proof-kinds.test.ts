@@ -185,7 +185,8 @@ describe('a Test line that stays as it is', () => {
     const box = page.querySelector('.kindkeeps input') as any;
     expect(box.checked).toBe(true);
     expect(page.body.textContent).toContain('its test passes before and after');
-    expect(page.querySelector('.kindmenu .mcmd')?.textContent).toContain('squad prove MA-21 2 test --keeps');
+    // The command is a small >_ chip (#27): it carries the command, shown when pointed at and copied when pressed.
+    expect(page.querySelector('.kindmenu .mcmd .term')?.getAttribute('aria-label')).toContain('squad prove MA-21 2 test --keeps');
     await click(box);
     expect(sent).toEqual([{ url: '/p/mawid/api/v1/tickets/MA-21/prove', body: { line: 2, kind: 'test', keeps: false } }]);
   });

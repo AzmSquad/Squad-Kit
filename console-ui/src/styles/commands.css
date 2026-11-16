@@ -1,0 +1,14 @@
+/* Command chips (components/ui.tsx Cmd, #27). A command reads as code to copy, never as a button to press. A command
+   that is the step itself shows in full, light, with a small copy button; the terminal twin of a button is a small ">_"
+   chip that copies it. A terminal's own output (.app-out, .hn-out) stays dark: that one is a terminal. */
+.term { gap: 8px; height: 28px; padding: 0 3px 0 10px; border-radius: 7px; background: var(--surface-2); color: var(--text); border: 1px solid var(--line); }
+.term b { color: var(--accent); }
+.term button { width: 22px; height: 22px; border-radius: 5px; background: var(--text); color: var(--surface); }
+.term button:hover { color: var(--accent-ink); background: var(--accent); }
+.term:not(:has(button)), code.term { padding-inline-end: 10px; }
+
+/* The twin: the chip is its own copy button. */
+.term.term-icon { gap: 0; padding: 0 8px; cursor: pointer; font-weight: 600; flex: none; }
+.term.term-icon b { font-weight: 650; }
+.term.term-icon:hover { background: var(--surface); border-color: var(--line-strong); }
+.term.term-icon:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

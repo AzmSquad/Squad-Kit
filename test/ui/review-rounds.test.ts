@@ -98,10 +98,10 @@ describe('the review on the Changes tab', () => {
     expect(page.querySelectorAll('.rv-go')).toHaveLength(1);
     await act(async () => go.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })));
     expect(page.querySelector('.rv-why input')!.getAttribute('placeholder')).toBe('Why you go past it. It goes in the pull request too.');
-    expect(page.querySelector('.rv-why .term')!.textContent).toContain('squad review MA-21 --past 3 --reason "<why>"');
+    expect(page.querySelector('.rv-why .term')!.getAttribute('aria-label')).toContain('squad review MA-21 --past 3 --reason "<why>"');
     expect(page.querySelector('.rv-pr.no')!.textContent).toContain('Not in pull request 7 yet: Azure DevOps said no to this.');
     expect(page.querySelector('.rv-pr.no')!.textContent).toContain('Write it again');
-    expect(page.querySelector('.rv-pr.no .term')!.textContent).toContain('squad review MA-21 --write');
+    expect(page.querySelector('.rv-pr.no .term')!.getAttribute('aria-label')).toContain('squad review MA-21 --write');
   });
 
   it('an open note whose place a later change touched says so: the Reviewer calls it next round', async () => {

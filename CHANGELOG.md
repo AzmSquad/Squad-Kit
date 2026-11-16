@@ -13,11 +13,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scroll away, the top row and the tabs stay in place, and the action bar stays at the bottom, on one row. In a
   narrower panel, Bring in the newest work, Ask the Analyst and Propose a change are under **More**; Stop and Take
   over always show. Scrolled down, the top row shows the ticket's title and step. On a short window, the step line
-  shows only the current step's note (point at a step for its whole note) and the Contributing banner is one thin
-  line. On a 13-inch laptop, what you can read goes from about 38% of the window to 70%.
+  shows only the current step's note (point at a step for its whole note). On a 13-inch laptop, what you can read goes
+  from about 38% of the window to 70%.
+- **The Contributing banner is one line at any size** (#25). Its second line shows when you point at the title. Short
+  of room, finished steps keep only their tick and the next ones a circle, and the step it is at keeps its name; point
+  at a step for its name.
 - **The "things need you" bar steps aside while a ticket is open** (#26). It listed other tickets above the one you
-  were working on. The sidebar's Waiting for you and the lead button keep the count, and the bar comes back when you
-  close the ticket.
+  were working on, or a "need you" chip in a narrow window. The sidebar's Waiting for you and the lead button keep the
+  count, and the bar comes back when you close the ticket.
+
+### Changed
+
+- **Commands no longer look like buttons** (#27). A button's terminal command is now a small **>_** beside it: point
+  at it to see the command, press it to copy it, and the note says which command was copied. A command that is a step
+  itself shows in full, light, with a small copy button. Only real buttons are dark now.
 
 ## [1.3.23] — 2026-11-15
 
