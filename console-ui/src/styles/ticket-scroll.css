@@ -1,0 +1,65 @@
+/* One scroll for the open ticket (pages/drawer/scroll.ts). The whole panel scrolls as one page: the top row with the
+   id and the buttons stays at the top, the tabs stop right under it, and the action bar stays at the bottom. The title
+   and the steps scroll away, so what you read gets the height, whatever the screen. */
+.drawer { overflow-y: auto; overscroll-behavior: contain; scroll-padding-top: calc(var(--dtop-h, 56px) + 48px); scroll-padding-bottom: 80px; }
+.drawer > .dtop { position: sticky; top: 0; z-index: 4; flex: none; padding: 16px 28px 10px; background: var(--surface); }
+.drawer.past > .dtop { box-shadow: 0 1px 0 var(--line); }
+.drawer > .dh { padding: 0 28px 14px; }
+.drawer > .dh h2 { margin-top: 4px; }
+.drawer > .tabs { position: sticky; top: var(--dtop-h, 56px); z-index: 3; margin-top: 0; background: var(--surface); }
+.drawer > .db { flex: 1 0 auto; overflow: visible; min-height: 0; }
+.drawer > .df { position: sticky; bottom: 0; z-index: 3; margin-top: auto; }
+
+/* The title scrolled away: the top row shows it, with the step, in place of the links and labels. */
+.drawer.past > .dtop > :not(.idtag, .dmini, .dacts) { display: none; }
+.dmini { display: flex; align-items: center; gap: 10px; flex: 1 1 0; min-width: 0; animation: fade 0.18s ease-out; }
+.dmini b { font-size: 14px; font-weight: 650; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.dmini-step { flex: none; font-size: 12px; font-weight: 600; color: var(--accent); background: var(--accent-soft); padding: 2px 9px; border-radius: 99px; white-space: nowrap; }
+.dmini-step.you { color: var(--you-ink); background: var(--you-soft); }
+/* Ask a question keeps its icon only there, so the title has the room; its name stays for screen readers. */
+.drawer.past > .dtop .askbtn-t { display: none; }
+
+/* A step's note is at most two lines; the whole note shows when you point at the step. An empty one takes no room. */
+.drawer .ts .tnote { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.drawer .ts .tnote:empty { display: none; }
+
+/* The action bar stays one row. Its less-used buttons (pages/drawer/MoreActions.tsx) sit in it while there is room, and
+   fold under More in a narrower panel; Stop and Take over always show. */
+.df-more { display: contents; }
+.df-more-btn { display: none; }
+.df-extra { display: contents; }
+.df-more:not(:has(.df-extra > *)) { display: none; }
+@container drawer (max-width: 1280px) {
+  .drawer > .df .note:not(.warn) { display: none; }
+}
+@container drawer (max-width: 1060px) {
+  .df-more { display: inline-flex; position: relative; }
+  .df-more-btn { display: inline-flex; }
+  .df-extra { display: none; position: absolute; bottom: calc(100% + 8px); inset-inline-start: 0; z-index: 6; flex-direction: column; align-items: stretch; gap: 4px; min-width: 220px; padding: 6px; border-radius: 12px; background: var(--surface); box-shadow: var(--pop-shadow), 0 0 0 1px var(--line); }
+  .df-extra.open { display: flex; }
+  .df-extra > .btn { justify-content: flex-start; border: 0; box-shadow: none; white-space: nowrap; }
+  .df-extra > .btn:hover { background: var(--surface-2); }
+}
+
+@container drawer (max-width: 640px) {
+  .drawer > .dtop { padding: 12px 18px 8px; }
+  .drawer > .dh { padding: 0 18px 12px; }
+}
+
+/* A short window (a 13-inch laptop, a small Windows laptop, a browser with many bars): everything around the reading
+   area starts compact. */
+@media (max-height: 860px) {
+  .drawer > .dtop { padding-top: 12px; padding-bottom: 8px; }
+  .drawer > .dh h2 { font-size: 23px; margin: 2px 0 2px; }
+  .drawer .track { margin-top: 12px; }
+  .drawer .ts { gap: 5px; }
+  .drawer .ts .tnote { display: none; }
+  .drawer .ts.cur .tnote:not(.twait, :empty) { display: -webkit-box; -webkit-line-clamp: 1; }
+  .drawer > .dh { padding-bottom: 8px; }
+  .drawer > .df { padding-top: 10px; padding-bottom: 10px; }
+  /* The Contributing banner: one thin line. */
+  div.jr { padding-top: 5px; padding-bottom: 5px; }
+  div.jr .jr-t img { width: 22px; height: 22px; }
+  div.jr .jr-t small { display: none; }
+  div.jr li { padding-top: 2px; padding-bottom: 2px; }
+}

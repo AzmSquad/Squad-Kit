@@ -25,19 +25,20 @@ export function AskButton({ t }: { t: Ticket }) {
   const show = () => popups.open(t.id);
   if (t.chat?.open) {
     return (
-      <button className="btn sm askbtn" onClick={show} title={`The chat with the ${AGENT_TITLE[t.chat.with]} is open`}>
-        <MessageCircle size={14} /> Open the chat
+      <button className="btn sm askbtn" aria-label="Open the chat" onClick={show} title={`The chat with the ${AGENT_TITLE[t.chat.with]} is open`}>
+        <MessageCircle size={14} /> <span className="askbtn-t">Open the chat</span>
       </button>
     );
   }
   return (
     <button
       className="btn sm askbtn"
+      aria-label="Ask a question"
       disabled={act.isPending}
       title={`The ${who} answers. ${t.id} stays where it is.`}
       onClick={() => act.mutate({ path: `/api/v1/tickets/${t.id}/chat/start`, body: { ask: true } }, { onSuccess: show })}
     >
-      <MessageCircle size={14} /> Ask a question
+      <MessageCircle size={14} /> <span className="askbtn-t">Ask a question</span>
     </button>
   );
 }

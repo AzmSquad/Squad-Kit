@@ -45,6 +45,8 @@ import { OutdatedBanner } from './drawer/Outdated';
 import { StoryTab } from './drawer/StoryTab';
 import { ActivityTab, PlanTab, ProofTab } from './drawer/Tabs';
 import { DeveloperTab } from './drawer/DeveloperTab';
+import { MiniTitle } from './drawer/MiniTitle';
+import { useTicketScroll } from './drawer/scroll';
 
 type Tab = 'now' | 'story' | 'plan' | 'activity' | 'conversation' | 'proof' | 'changes' | 'cost' | 'developer';
 
@@ -58,6 +60,7 @@ export function TicketDrawer({ id, tab: start, onClose }: { id: string; tab?: Dr
   // Hand over and Propose a change live in the ⋯ menu, so the header stays one row at any width.
   const [menuDialog, setMenuDialog] = useState<'hand-over' | 'outside' | 'propose' | null>(null);
   const [tab, setTab] = useState<Tab>(start ?? 'now');
+  const { panel, top, past, onScroll } = useTicketScroll(id, tab);
   useEffect(() => setTab(start ?? 'now'), [id, start]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !document.querySelector('.modal') && onClose();
@@ -73,7 +76,8 @@ export function TicketDrawer({ id, tab: start, onClose }: { id: string; tab?: Dr
   return (
     <>
       <div className="veil" onClick={onClose} />
-      <aside className={`drawer ${ticketFull ? 'full' : ''}`} aria-label={t ? `${t.id} ${t.title}` : 'Ticket'}>
+      {/* One scroll: the top row and the tabs stay, the title and the steps scroll away (drawer/scroll.ts). */}
+      <aside ref={panel} onScroll={onScroll} className={`drawer ${ticketFull ? 'full' : ''} ${past ? 'past' : ''}`} aria-label={t ? `${t.id} ${t.title}` : 'Ticket'}>
         {!t ? (
           <div className="center">
             {ticket.isError ? (
@@ -87,66 +91,67 @@ export function TicketDrawer({ id, tab: start, onClose }: { id: string; tab?: Dr
           </div>
         ) : (
           <>
-            <div className="dh">
-              <div className="dtop">
-                <span className="idtag">{t.id}</span>
-                {t.source.type !== 'manual' &&
-                  (t.source.url ? (
-                    <a className="src" href={t.source.url} target="_blank" rel="noreferrer">
-                      <Download size={14} /> {t.source.itemType ?? 'Item'} {t.source.ref} <ExternalLink size={12} />
-                    </a>
-                  ) : (
-                    <span className="src">
-                      <Download size={14} /> From {t.source.ref}
-                    </span>
-                  ))}
-                {t.pr && (
-                  <a className="src" href={t.pr.url} target="_blank" rel="noreferrer">
-                    <GitPullRequest size={14} /> Pull request {t.pr.id} <ExternalLink size={12} />
+            <div className="dtop" ref={top}>
+              <span className="idtag">{t.id}</span>
+              {past && <MiniTitle t={t} />}
+              {t.source.type !== 'manual' &&
+                (t.source.url ? (
+                  <a className="src" href={t.source.url} target="_blank" rel="noreferrer">
+                    <Download size={14} /> {t.source.itemType ?? 'Item'} {t.source.ref} <ExternalLink size={12} />
                   </a>
+                ) : (
+                  <span className="src">
+                    <Download size={14} /> From {t.source.ref}
+                  </span>
+                ))}
+              {t.pr && (
+                <a className="src" href={t.pr.url} target="_blank" rel="noreferrer">
+                  <GitPullRequest size={14} /> Pull request {t.pr.id} <ExternalLink size={12} />
+                </a>
+              )}
+              {t.kind === 'bug' && <span className="prio">Bug{t.foundIn ? ` found in ${t.foundIn}` : ''}</span>}
+              {t.priority === 'high' && t.kind !== 'bug' && <span className="prio">High priority</span>}
+              <OutsideLabel t={t} />
+              <NoNewTestsLabel t={t} />
+              <span className="grow" />
+              {/* The actions stay together: when the row is too narrow, they move under the id as one group. */}
+              <span className="dacts">
+                {/* Ask a question, in every state: questions only, and the story stays where it is. */}
+                <AskButton t={t} />
+                {t.waiting?.kind === 'proof' && (
+                  <Link to="/tickets/$id/proof" params={{ id: t.id }} className="iconbtn" aria-label="Open the proof page">
+                    <ExternalLink size={15} />
+                  </Link>
                 )}
-                {t.kind === 'bug' && <span className="prio">Bug{t.foundIn ? ` found in ${t.foundIn}` : ''}</span>}
-                {t.priority === 'high' && t.kind !== 'bug' && <span className="prio">High priority</span>}
-                <OutsideLabel t={t} />
-                <NoNewTestsLabel t={t} />
-                <span className="grow" />
-                {/* The actions stay together: when the row is too narrow, they move under the id as one group. */}
-                <span className="dacts">
-                  {/* Ask a question, in every state: questions only, and the story stays where it is. */}
-                  <AskButton t={t} />
-                  {t.waiting?.kind === 'proof' && (
-                    <Link to="/tickets/$id/proof" params={{ id: t.id }} className="iconbtn" aria-label="Open the proof page">
-                      <ExternalLink size={15} />
-                    </Link>
-                  )}
-                  <button className="iconbtn" onClick={() => report.open({ ticket: t.id })} aria-label="Report a problem" title="Report a problem">
-                    <LifeBuoy size={15} />
-                  </button>
-                  <TicketMenu
-                    t={t}
-                    onDeleted={onClose}
-                    items={[
-                      ...((isMine(t, me) || !me) && canPropose(t) && !t.takenOver?.free
-                        ? [{ key: 'propose', label: <><PencilLine size={15} /> {shipped(t) ? 'Ask for a change…' : 'Propose a change…'}</>, onPick: () => setMenuDialog('propose') }]
-                        : []),
-                      ...(canWorkOutside(t, me, liveBoard) ? [{ key: 'outside', label: <><MessagesSquare size={15} /> Work in another AI tool…</>, onPick: () => setMenuDialog('outside') }] : []),
-                      ...(canHandOver(t, me) ? [{ key: 'hand-over', label: <><ArrowRightLeft size={15} /> Hand over…</>, onPick: () => setMenuDialog('hand-over') }] : []),
-                    ]}
-                  />
-                  <button
-                    className="iconbtn fullbtn"
-                    onClick={toggleTicketFull}
-                    aria-pressed={ticketFull}
-                    aria-label={ticketFull ? 'Back to the side panel' : 'Full width'}
-                    title={ticketFull ? 'Back to the side panel' : 'Full width'}
-                  >
-                    {ticketFull ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-                  </button>
-                  <button className="iconbtn" onClick={onClose} aria-label="Close">
-                    <X size={16} />
-                  </button>
-                </span>
-              </div>
+                <button className="iconbtn" onClick={() => report.open({ ticket: t.id })} aria-label="Report a problem" title="Report a problem">
+                  <LifeBuoy size={15} />
+                </button>
+                <TicketMenu
+                  t={t}
+                  onDeleted={onClose}
+                  items={[
+                    ...((isMine(t, me) || !me) && canPropose(t) && !t.takenOver?.free
+                      ? [{ key: 'propose', label: <><PencilLine size={15} /> {shipped(t) ? 'Ask for a change…' : 'Propose a change…'}</>, onPick: () => setMenuDialog('propose') }]
+                      : []),
+                    ...(canWorkOutside(t, me, liveBoard) ? [{ key: 'outside', label: <><MessagesSquare size={15} /> Work in another AI tool…</>, onPick: () => setMenuDialog('outside') }] : []),
+                    ...(canHandOver(t, me) ? [{ key: 'hand-over', label: <><ArrowRightLeft size={15} /> Hand over…</>, onPick: () => setMenuDialog('hand-over') }] : []),
+                  ]}
+                />
+                <button
+                  className="iconbtn fullbtn"
+                  onClick={toggleTicketFull}
+                  aria-pressed={ticketFull}
+                  aria-label={ticketFull ? 'Back to the side panel' : 'Full width'}
+                  title={ticketFull ? 'Back to the side panel' : 'Full width'}
+                >
+                  {ticketFull ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+                </button>
+                <button className="iconbtn" onClick={onClose} aria-label="Close">
+                  <X size={16} />
+                </button>
+              </span>
+            </div>
+            <div className="dh">
               {menuDialog === 'hand-over' && <HandOverDialog t={t} onClose={() => setMenuDialog(null)} />}
               {menuDialog === 'outside' && <OutsideDialog t={t} onClose={() => setMenuDialog(null)} />}
               {menuDialog === 'propose' && <ProposeChange t={t} onClose={() => setMenuDialog(null)} />}

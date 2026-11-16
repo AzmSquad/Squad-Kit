@@ -148,8 +148,10 @@ export function Tracker({ ticket }: { ticket: Ticket }) {
       {TRACK.map((s, i) => {
         const cls = i < at ? 'done' : i === at ? `cur ${mode}` : '';
         const note = notes.get(s.stage);
+        // A short window shows only the current step's note: pointing at a step shows its whole note.
+        const full = [note === 'your turn' ? '' : note, waits.get(s.stage)].filter(Boolean).join(', ');
         return (
-          <div key={s.stage} className={`ts ${cls}`}>
+          <div key={s.stage} className={`ts ${cls}`} title={full || undefined}>
             <span className="nd">{i < at ? <Check size={12} strokeWidth={3} /> : null}</span>
             {s.name}
             {i === at && (

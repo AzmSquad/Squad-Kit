@@ -130,7 +130,11 @@ A new project shows a **Setting up your project** card while the Architect reads
 
 Click a card to open it on the right. **Ask a question** is at the top of every ticket, in every state (see
 [Chat](#chat)). The button next to Close makes it **Full width** (the choice is remembered in this browser); **Hand
-over** and **Propose a change** are in the **⋯** menu, and Propose a change is also on the bottom bar. At the top: the
+over** and **Propose a change** are in the **⋯** menu, and Propose a change is also on the bottom bar. The whole drawer
+scrolls as one page: the title and steps scroll away, the row with the ticket's id and buttons and the tabs stay at the
+top (scrolled down, that row shows the title and the step), and the bottom bar stays at the bottom, on one row. In a
+narrow drawer its less-used buttons are under **More**; Stop and Take over always show. On a short window the steps
+show only the current step's note: point at a step for its whole note. At the top: the
 ticket's name and title, links to its tracker item and
 pull request, who made it, its **owner** (when they cannot work on it, **Take it** moves it to you, with a reason;
 terminal: `squad take-back <ticket> --reason "…"`), its track (Full, Express or Builds by itself) and its repo. A row of

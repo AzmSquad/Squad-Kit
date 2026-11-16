@@ -22,6 +22,7 @@ import { langProps, typedDir } from '../../lib/lang';
 import { ToolBlockCard } from '../../components/ToolBlock';
 import { SendAsPr } from '../../components/SendAsPr';
 import { GatePills } from './Proof';
+import { MoreActions } from './MoreActions';
 
 /* ── Working, ready, released ──────────────────────────── */
 
@@ -187,12 +188,15 @@ export function WorkingPanel({ t }: { t: Ticket }) {
           </button>
         )}
         {canTakeOver(t) && <TakeOverButton t={t} />}
-        <BringInButton t={t} />
-        {/* Asking never stops the work: the chat runs beside it. Ask a question and Open the chat are at the top; the
-            Analyst gets its own button only while someone else answers those. */}
-        {!t.chat?.open && !t.takenOver && !shipped(t) && asks !== 'analyst' && <TalkButton t={t} agent="analyst" label="Ask the Analyst" />}
-        {(isMine(t, me) || !me) && <ProposeChangeButton t={t} />}
-        <span className="note">{t.live ? (reach === 'down' ? 'Not updating: squad-kit has stopped.' : 'Updates live as the squad works.') : ''}</span>
+        <MoreActions>
+          <BringInButton t={t} />
+          {/* Asking never stops the work: the chat runs beside it. Ask a question and Open the chat are at the top; the
+              Analyst gets its own button only while someone else answers those. */}
+          {!t.chat?.open && !t.takenOver && !shipped(t) && asks !== 'analyst' && <TalkButton t={t} agent="analyst" label="Ask the Analyst" />}
+          {(isMine(t, me) || !me) && <ProposeChangeButton t={t} />}
+        </MoreActions>
+        {/* "Updates live" only where there is room (the Now card says it too); "Not updating" always. */}
+        <span className={`note ${reach === 'down' ? 'warn' : ''}`}>{t.live ? (reach === 'down' ? 'Not updating: squad-kit has stopped.' : 'Updates live as the squad works.') : ''}</span>
         <span className="grow" />
         <Cmd text={t.waitsToStart ? `squad start ${t.id}` : t.live && t.stage !== 'release' ? `squad stop ${t.id}` : commandFor(t)} />
       </div>
