@@ -1,22 +1,32 @@
 /* A contribution to squad-kit's own code: the bar on every page, the assistant, and a story's pull request. */
 
 /* ── The bar: where it is, from set up to the owner's merge ── */
-.jr { flex: none; display: flex; align-items: center; gap: 18px; padding: 9px 24px; background: var(--accent-soft); border-bottom: 1px solid color-mix(in srgb, var(--accent) 22%, transparent); min-width: 0; }
+.jr { container: jr / inline-size; flex: none; display: flex; align-items: center; gap: 18px; padding: 9px 24px; background: var(--accent-soft); border-bottom: 1px solid color-mix(in srgb, var(--accent) 22%, transparent); min-width: 0; }
 .jr-t { display: flex; align-items: center; gap: 10px; flex: none; min-width: 0; }
-.jr-t img { width: 30px; height: 30px; border-radius: 8px; flex: none; }
-.jr-t b { display: block; font-size: 13.5px; font-weight: 650; }
-.jr-t small { display: block; font-size: 12px; color: var(--muted); }
-.jr ol { list-style: none; display: flex; gap: 4px; margin-inline-start: auto; flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
+.jr-t img { width: 26px; height: 26px; border-radius: 7px; flex: none; }
+.jr-t b { display: block; font-size: 13.5px; font-weight: 650; white-space: nowrap; }
+.jr ol { list-style: none; display: flex; gap: 4px; margin-inline-start: auto; justify-content: flex-end; min-width: 0; }
 .jr li { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--dim); padding: 4px 9px; border-radius: 99px; white-space: nowrap; }
-.jr li span { width: 16px; height: 16px; border-radius: 99px; box-shadow: inset 0 0 0 1.5px var(--line-strong); display: grid; place-items: center; flex: none; }
+.jr li .jr-d { width: 16px; height: 16px; border-radius: 99px; box-shadow: inset 0 0 0 1.5px var(--line-strong); display: grid; place-items: center; flex: none; }
 .jr li.d { color: var(--accent); }
-.jr li.d span { background: var(--accent); box-shadow: none; color: var(--accent-ink); }
+.jr li.d .jr-d { background: var(--accent); box-shadow: none; color: var(--accent-ink); }
 .jr li.n { color: var(--you-ink); background: var(--you-soft); box-shadow: inset 0 0 0 1px var(--you-line); }
-.jr li.n span { box-shadow: inset 0 0 0 2px var(--you); }
+.jr li.n .jr-d { box-shadow: inset 0 0 0 2px var(--you); }
 .jr li.x { color: var(--bug); background: var(--bug-soft); }
-.jr li.x span { background: var(--bug); box-shadow: none; color: var(--surface); }
-@media (max-width: 1100px) { .jr-t small { display: none; } }
-@media (max-width: 760px) { .jr { flex-wrap: wrap; padding: 8px 12px; gap: 8px; } .jr ol { margin-inline-start: 0; justify-content: flex-start; } }
+.jr li.x .jr-d { background: var(--bug); box-shadow: none; color: var(--surface); }
+/* One line at any size (#25). Short of room, finished and coming steps keep only their mark and the step it is at keeps
+   its name; narrower still, only the step it is at shows, with how far it is ("3/6"). Pointing at a step shows its name. */
+.jr-of { display: none; color: var(--muted); font-weight: 600; }
+@container jr (max-width: 1120px) {
+  .jr { gap: 12px; }
+  .jr li:not([aria-current]) { padding: 4px 3px; }
+  .jr li:not([aria-current]) .jr-l { display: none; }
+}
+@container jr (max-width: 560px) {
+  .jr li:not([aria-current]) { display: none; }
+  .jr-of { display: inline; }
+}
+@media (max-width: 760px) { .jr { padding: 8px 12px; } }
 
 /* ── The assistant: what is ready, what squad-kit can do, each with its button ── */
 .as-top { height: auto; padding-top: 16px; padding-bottom: 14px; }

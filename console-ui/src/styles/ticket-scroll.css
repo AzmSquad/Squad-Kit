@@ -57,9 +57,8 @@
   .drawer .ts.cur .tnote:not(.twait, :empty) { display: -webkit-box; -webkit-line-clamp: 1; }
   .drawer > .dh { padding-bottom: 8px; }
   .drawer > .df { padding-top: 10px; padding-bottom: 10px; }
-  /* The Contributing banner: one thin line. */
+  /* The Contributing banner: a thinner line. */
   div.jr { padding-top: 5px; padding-bottom: 5px; }
   div.jr .jr-t img { width: 22px; height: 22px; }
-  div.jr .jr-t small { display: none; }
   div.jr li { padding-top: 2px; padding-bottom: 2px; }
 }
