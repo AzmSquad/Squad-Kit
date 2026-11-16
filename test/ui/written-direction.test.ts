@@ -516,6 +516,12 @@ describe('a ticket at work and at a stop', () => {
     expect(one('.ybar').getAttribute('dir')).toBeNull();
     expect(one('.ybar .yid').getAttribute('dir')).toBeNull();
   });
+
+  it('the Waiting for you banner steps aside while a ticket is open (#26)', async () => {
+    await show(() => h(ProjectWaiting), '/board?ticket=SK-12');
+    await wait();
+    expect(all('.ybar')).toEqual([]);
+  });
 });
 
 describe('a breakdown', () => {

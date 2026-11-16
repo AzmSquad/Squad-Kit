@@ -57,13 +57,15 @@ function useAppWaiting() {
 export function ProjectWaiting() {
   const board = useBoard();
   const path = useRouterState({ select: (s) => s.location.pathname });
+  // An open ticket gets the room (#26): the bar steps aside, and the sidebar and the lead button keep the count.
+  const ticketOpen = useRouterState({ select: (s) => Boolean((s.location.search as { ticket?: string }).ticket) || /\/tickets\/[^/]+\/proof/.test(s.location.pathname) });
   const data = board.data?.ready ? board.data : null;
   const items = useMemo<Item[]>(() => (data?.tickets ?? []).filter(needsYou).map((t) => ({ key: t.id, since: waitingSince(t), ticket: t })), [data]);
   // A breakdown whose Analyst has questions waits for you too (components/BreakdownWaits).
   const breakdowns = useBreakdownWaits();
   useTabTitle(data?.meta.project, waitingCount(data?.tickets ?? [], breakdowns.length));
   useDesktopNotices();
-  if (path.startsWith('/inbox')) return null;
+  if (path.startsWith('/inbox') || ticketOpen) return null;
   return <WaitingBanner items={items} breakdowns={breakdowns} />;
 }
 

@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   over always show. Scrolled down, the top row shows the ticket's title and step. On a short window, the step line
   shows only the current step's note (point at a step for its whole note) and the Contributing banner is one thin
   line. On a 13-inch laptop, what you can read goes from about 38% of the window to 70%.
+- **The "things need you" bar steps aside while a ticket is open** (#26). It listed other tickets above the one you
+  were working on. The sidebar's Waiting for you and the lead button keep the count, and the bar comes back when you
+  close the ticket.
 
 ## [1.3.23] — 2026-11-15
 

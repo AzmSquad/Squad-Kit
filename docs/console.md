@@ -84,7 +84,8 @@ On every page of a project:
 
 - **The Waiting for you banner**, at the top: the first two things that need you, each with its button
   (Answer, Review spec, Check proof, Decide), and "and N more". The browser tab shows the count: "(2) roomflow".
-  Everything else, the squad handles.
+  While a ticket is open the banner steps aside, so the ticket gets the room; the sidebar's **Waiting for you** keeps
+  the count. Everything else, the squad handles.
 - **Desktop notices**, if you turn them on (the banner asks once; Settings › Desktop notices changes it): one
   notice for each new question, approval, proof or stop. No sound. Clicking a notice opens the ticket.
 - **Claude's usage limit**: when it is reached, a banner says when the squad carries on, by itself. **Try now**
