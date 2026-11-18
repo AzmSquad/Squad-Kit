@@ -37,7 +37,8 @@ function clone(origin: string, pkg: object = SELF) {
   fs.writeFileSync(path.join(project, 'test/architecture/file-size-caps.json'), JSON.stringify({ 'src/cli.ts': 900, 'src/board/types.ts': 1301 }));
   fs.writeFileSync(path.join(project, 'test/architecture/rest-commands.json'), JSON.stringify({ commands: { a: 'squad a', b: 'squad b', c: 'squad c' } }));
   sh('git add -A && git commit -qm start', project);
-  sh(`git remote add origin ${origin} && git config url.${remote}.insteadOf ${origin} && git push -q origin main`, project);
+  // pushInsteadOf too: in squad-kit's guard (a story on squad-kit's own code) a push is checked by the address it was given.
+  sh(`git remote add origin ${origin} && git config url.${remote}.insteadOf ${origin} && git config url.${remote}.pushInsteadOf ${origin} && git push -q origin main`, project);
   const bp = boardPaths(path.join(project, '.squad'));
   writeMeta(bp, {
     project: 'squad-kit',

@@ -580,11 +580,11 @@ export interface SpawnProjectOptions {
 
 /**
  * What a guarded command gets on top of the scrubbed base: every tool keeps its downloads in the project's cache home,
- * never the person's own caches, as in the agent's shell, and a story's command pushes nowhere. A command squad-kit runs
- * outside the guard by its one rule (outsideTheGuard in engine/checks.ts) gets the same.
+ * never the person's own caches, and a story's command pushes only into a temp folder, never the project (noPushEnv).
+ * A command squad-kit runs outside the guard by its one rule (outsideTheGuard in engine/checks.ts) gets the same.
  */
 export function guardEnv(guard: GuardSpec | undefined, cwd: string): Record<string, string> {
-  return { ...(guard?.cache ? cacheHomeEnv(guard.cache, { wall: 'project', cwd }) : {}), ...(guard?.noPush ? noPushEnv() : {}) };
+  return { ...(guard?.cache ? cacheHomeEnv(guard.cache, { wall: 'project', cwd }) : {}), ...(guard?.noPush ? noPushEnv(process.env, { keep: [guard.root, guard.cwd] }) : {}) };
 }
 
 /**

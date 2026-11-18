@@ -988,9 +988,12 @@ Engineers see each refused site under For engineers on Harness → Safety, and i
 allow a site the project truly needs (on Strict).
 
 Every agent, including the ones that only read, is also refused your keys and sign-ins through its file tools. A push from
-an agent or from a story's own command goes nowhere, while squad-kit's own push works. Two limits: a remote with its own push
-address set in git keeps it, and a command that clears the setting could push if it found a working key, which is why the
-keys stay hidden.
+an agent or from a story's own command goes nowhere, while squad-kit's own push works. The one place it may still go is a
+temp folder, never the project itself: a project's tests often push to a throwaway repo there, and the guard lets them
+write there anyway. When a test pushes anywhere else, the checks stop with one plain sentence ("A test tried to push code
+outside a temp folder, and squad-kit blocked it"), count no failed try and don't send the Builder; Continue anyway and
+Fix it yourself are on the card. Two limits: a remote with its own push address set in git keeps it, and a command that
+clears the setting could push if it found a working key, which is why the keys stay hidden.
 
 **Guard for the project's own commands**: the Builder writes the code the tests run, so squad-kit runs the project's
 own tests, lint, build, setup, app and release pipeline in a guard of its own, on Mac and Linux. They work normally,

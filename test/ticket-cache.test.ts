@@ -133,7 +133,7 @@ describe("the Builder's package downloads", () => {
     const run = h.calls[0]!;
     // A squad-kit the agent starts goes to a home of its copy's own (own-home.ts), and in its sandbox it knows it is in a
     // guard, so squad-kit's own tests that cannot nest a sandbox skip there.
-    expect(run.env).toEqual({ ...noPushEnv(), ...ownHomeEnv(wt, cache), SQUAD_KIT_IN_GUARD: '1', ...cacheHomeEnv(cache, { wall: 'agent' }) });
+    expect(run.env).toEqual({ ...noPushEnv(process.env, { keep: [bp.root, wt] }), ...ownHomeEnv(wt, cache), SQUAD_KIT_IN_GUARD: '1', ...cacheHomeEnv(cache, { wall: 'agent' }) });
     expect(run.env).toMatchObject({
       XDG_CACHE_HOME: path.join(cache, 'xdg'),
       PIP_CACHE_DIR: path.join(cache, 'pip'),
@@ -162,10 +162,10 @@ describe("the Builder's package downloads", () => {
     const wt = building('AP-1', 'one.txt');
     await squad().review('AP-1').catch(() => undefined);
     // No sandbox, no guard: the flag is not there.
-    expect(h.calls[0]!.env).toEqual({ ...noPushEnv(), ...ownHomeEnv(wt) });
+    expect(h.calls[0]!.env).toEqual({ ...noPushEnv(process.env, { keep: [bp.root, wt] }), ...ownHomeEnv(wt) });
     h.support = { available: false, why: 'socat is not installed' };
     await squad().runBuilder('AP-1', 'Build it', false, 'build');
-    expect(h.calls.at(-1)!.env).toEqual({ ...noPushEnv(), ...ownHomeEnv(wt) });
+    expect(h.calls.at(-1)!.env).toEqual({ ...noPushEnv(process.env, { keep: [bp.root, wt] }), ...ownHomeEnv(wt) });
     expect(fs.existsSync(path.join(shared(), 'nuget'))).toBe(false);
   });
 });

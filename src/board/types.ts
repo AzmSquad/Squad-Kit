@@ -177,7 +177,7 @@ export interface StuckChoice {
    * no when squad-kit saved the accepted change. 'gate-cant-run': a gate the team added could not run at all, which
    * says nothing about the code.
    */
-  kind?: 'weakened' | 'no-tests' | 'bad-proof' | 'guard' | 'broken' | 'not-shown' | 'hook' | 'gate-cant-run' | 'owner-notes' | 'owner-closed';
+  kind?: 'weakened' | 'no-tests' | 'bad-proof' | 'guard' | 'push' | 'broken' | 'not-shown' | 'hook' | 'gate-cant-run' | 'owner-notes' | 'owner-closed';
   /** The team's gates this stop is about (board/additions.ts). */
   added?: { id: string; name: string }[];
   /** For failed checks: which ones failed (for weakened tests: what was weakened), so continuing past them is remembered for them. */

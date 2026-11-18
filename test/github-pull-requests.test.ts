@@ -55,7 +55,8 @@ function setUp(repo: string, pkg: object = { name: 'app' }): void {
   fs.writeFileSync(path.join(project, '.gitignore'), '.squad/\n');
   sh('git add -A && git commit -qm start', project);
   const url = `https://github.com/${repo}.git`;
-  sh(`git remote add origin ${url} && git config url.${remote}.insteadOf ${url} && git push -q origin main`, project);
+  // pushInsteadOf too: in squad-kit's guard (a story on squad-kit's own code) a push is checked by the address it was given.
+  sh(`git remote add origin ${url} && git config url.${remote}.insteadOf ${url} && git config url.${remote}.pushInsteadOf ${url} && git push -q origin main`, project);
   bp = boardPaths(path.join(project, '.squad'));
   writeMeta(bp, {
     project: 'App',

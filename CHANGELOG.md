@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A project's tests can push to a throwaway repo in a temp folder** (#28). A story's commands push nowhere, and that
+  also refused a test's push to a bare repo it made in a temp folder, so on squad-kit's own code every story failed its
+  checks and the Builder spent 3 tries "fixing" tests that were not broken. A push into a temp folder now goes through,
+  never into the project itself. A test that pushes anywhere else stops the checks with one plain sentence ("A test
+  tried to push code outside a temp folder, and squad-kit blocked it"), counts no failed try and does not send the
+  Builder; Continue anyway and Fix it yourself are on the card. The agents are told a refused push is squad-kit's, not
+  a bug to work around.
+
 ## [1.3.24] — 2026-11-16
 
 ### Fixed

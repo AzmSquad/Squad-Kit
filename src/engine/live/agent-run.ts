@@ -156,7 +156,7 @@ export const agentRunPart = {
       // An Android app: the agent's own builds and checks find squad-kit's Android tools too (android-env.ts).
       // A squad-kit the agent starts lands in a home of its copy's own (own-home.ts), never on this board. In its sandbox
       // it is inside a guard, as the project's own commands are: what cannot nest there skips (SQUAD_KIT_IN_GUARD).
-      env: { ...noPushEnv(), ...ownHomeEnv(opts.cwd, cache), ...(sandbox ? { [IN_GUARD]: '1' } : {}), ...(sandbox && cache ? cacheHomeEnv(cache, { wall: 'agent', cwd: opts.cwd }) : {}), ...(android ? androidCommandEnv(sandbox && cache ? { cache } : {}) : {}), ...(key ? copyDbEnv(opts.cwd) : {}) },
+      env: { ...noPushEnv(process.env, { keep: [this.bp.root, opts.cwd] }), ...ownHomeEnv(opts.cwd, cache), ...(sandbox ? { [IN_GUARD]: '1' } : {}), ...(sandbox && cache ? cacheHomeEnv(cache, { wall: 'agent', cwd: opts.cwd }) : {}), ...(android ? androidCommandEnv(sandbox && cache ? { cache } : {}) : {}), ...(key ? copyDbEnv(opts.cwd) : {}) },
       ...(instructions ? { instructions } : {}),
       level: lv.level,
       ...(effort ? { effort } : {}),

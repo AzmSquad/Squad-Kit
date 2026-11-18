@@ -104,7 +104,8 @@ beforeEach(() => {
   sh(`git init -q --bare -b main ${remote}`, tmp);
   sh(`git init -q -b main && git remote add origin ${AZURE_URL}`, project);
   // The repo says Azure; git really talks to the local bare repo.
-  sh(`git config url.${remote}.insteadOf ${AZURE_URL}`, project);
+  // pushInsteadOf too: in squad-kit's guard (a story on squad-kit's own code) a push is checked by the address it was given.
+  sh(`git config url.${remote}.insteadOf ${AZURE_URL} && git config url.${remote}.pushInsteadOf ${AZURE_URL}`, project);
   fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ name: 'mawid', version: '0.0.0' }, null, 2));
   sh('git add -A && git -c user.name=t -c user.email=t@t commit -qm start', project);
   fs.mkdirSync(path.join(project, '.squad'), { recursive: true });

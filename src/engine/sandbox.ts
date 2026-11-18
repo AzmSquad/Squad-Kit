@@ -151,16 +151,37 @@ export const PRIVATE = ['.ssh', '.aws', '.gnupg', '.config/gh', '.azure', '.kube
 /** Addresses a push can go to. A remote with its own push address set in git keeps it, as git leaves that one alone. */
 const PUSH_ADDRESSES = ['/', '.', 'file://', 'https://', 'http://', 'ssh://', 'git://', 'git@'];
 
+/** The temp folders a push may still go to, each as itself and, when it is a link (/tmp on a Mac), as its real path. */
+function pushTemp(): string[] {
+  return withReal([os.tmpdir(), ...(process.platform === 'win32' ? [] : ['/tmp'])]);
+}
+
+/** A folder as a push address prefix: with its last slash, so /tmp never matches /tmpfoo. */
+function asPrefix(dir: string): string {
+  const d = dir.replace(/\\/g, '/').replace(/\/+$/, '');
+  return `${d}/`;
+}
+
 /**
  * The environment that sends every push from an agent or a story's own command nowhere, and leaves fetching alone. Only
  * they get it: squad-kit's own pushes do not. It stands behind the deny rules and the hidden keys, and a command that
  * clears it still has no keys to push with.
+ *
+ * A push into a temp folder still goes through: a project's tests often push to a throwaway repo there, and the guard
+ * lets every command write anywhere in a temp folder anyway. git takes the longest address that matches, so the temp
+ * folder (rewritten to itself) wins over "/", and `keep` (the project's own folders: its checkout and the ticket's copy)
+ * wins over the temp folder, for a project that lives in one. Whatever else is local stays behind the guard's write rules.
  */
-export function noPushEnv(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+export function noPushEnv(env: NodeJS.ProcessEnv = process.env, o: { keep?: string[]; temp?: string[] } = {}): Record<string, string> {
   const from = Number(env.GIT_CONFIG_COUNT) || 0;
-  const out: Record<string, string> = { GIT_CONFIG_COUNT: String(from + PUSH_ADDRESSES.length) };
-  PUSH_ADDRESSES.forEach((address, i) => {
-    out[`GIT_CONFIG_KEY_${from + i}`] = 'url.squad-kit-no-push://.pushInsteadOf';
+  const rules: [string, string][] = PUSH_ADDRESSES.map((address) => ['squad-kit-no-push://', address]);
+  for (const t of (o.temp ?? pushTemp()).map(asPrefix)) rules.push([t, t], [`file://${t}`, `file://${t}`]);
+  for (const k of withReal(o.keep ?? []).map((d) => d.replace(/\\/g, '/').replace(/\/+$/, ''))) {
+    if (k) rules.push(['squad-kit-no-push://', k], ['squad-kit-no-push://', `file://${k}`]);
+  }
+  const out: Record<string, string> = { GIT_CONFIG_COUNT: String(from + rules.length) };
+  rules.forEach(([to, address], i) => {
+    out[`GIT_CONFIG_KEY_${from + i}`] = `url.${to}.pushInsteadOf`;
     out[`GIT_CONFIG_VALUE_${from + i}`] = address;
   });
   return out;

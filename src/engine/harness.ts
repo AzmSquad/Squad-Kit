@@ -140,6 +140,7 @@ function lineStages(): HarnessStage[] {
       g('flutter-stamps', "Flutter's own version stamps", "Flutter writes its version in a few small files of its own folder on every run. Those files, and nothing else of Flutter, are open to the squad's commands."),
       g('xcode', 'iPhone builds', OUTSIDE_THE_GUARD_WORDS),
       g('phone-builds', "squad-kit's own phone builds", "For the pictures, Start and Try it yourself, squad-kit builds the app for its phone itself, outside the guard: Xcode for the iPhone, Gradle or Flutter for Android, in one shared Gradle home of its own. What the build changes in the story's files goes back, so the story's changes stay the Builder's. An Expo app gets its phone folder made for the build, and no commit ever takes it.", 'An app that does not build: a card, and you decide.'),
+      g('push', 'No push from a story', "The agents and the story's own commands push only into a temp folder, where tests keep their throwaway repos: never into the project, never to your code host. squad-kit's own push works.", 'A test that pushes elsewhere: a card, with no failed try. Continue anyway, fix it yourself, or the plan changes.'),
       g('lane', 'Files no agent can change', "squad-kit's folder, AI instruction files, commit hooks, files an engineer locked. No commit or branch change, and a push is refused.", 'A file goes back, with a line. A moved branch stops the step.'),
       g('local-files', 'Test values, not your own', 'A file marked local gets values kept for stories. No agent can read it.'),
       g('env-file', "A part's env file", "squad-kit gives the app the story's values from it, then its own database, Redis and the app's address on top."),
@@ -392,6 +393,7 @@ function rowDetails(meta: BoardMeta | undefined, root: string | undefined): Reco
     'flutter-stamps': code('engine/flutter-sdk.ts', ...FLUTTER_STAMPS.map((f): [string, string] => [f.file, f.why]), ['In', flutterOnPath()?.root ?? 'No Flutter on this computer'], ['On Linux', "Each command writes them in a throwaway bin/cache that goes when it ends, so Flutter's own folder stays as it was"]),
     xcode: code('engine/checks.ts', ['Runs outside the guard', 'xcodebuild build and test, only as squad-kit writes them for a native iPhone app (outsideTheGuard)'], ['Keeps', "Xcode's own sandboxes: for a package's manifest and plugins, and for build scripts when the project turns that on"], ['Builds in', "build/squad-kit-ios in the story's copy, with the guard's caches"]),
     guard: code('engine/project-guard.ts', ['On this computer', state(guard.on, guard.why)], ['Network', networkPolicy(level).commands === 'this-computer' ? 'Only this computer (Off)' : 'Open'], ['Also allowed', [...(meta?.guard?.allowRead ?? []), ...(meta?.guard?.allowWrite ?? [])].join(', ') || 'None yet']),
+    push: code('engine/sandbox.ts', ['Takes a push', 'Temp folders only, never the project itself'], ['Reads', 'remote-squad-kit-no-push']),
     lane: code('engine/lane.ts', ['Locked here', names(meta?.lockedFiles)]),
     'local-files': code('engine/local-files.ts', ['Local here', names(meta?.localFiles)]),
     'env-file': code('engine/env-file.ts', ['Here', repos.flatMap((r) => envFilesOf(r.commands).map((f) => `${repos.length > 1 ? `${r.path}: ` : ''}${f}`)).join(', ') || 'None yet'], ['Set in', 'Settings, beside the commands'], ['Order', "The file's values first, then squad-kit's own: a Docker service reached through the port it publishes here, the story's own database and Redis number, and the port it picked"], ['In the log', 'The names only, never a value']),
@@ -532,7 +534,7 @@ export function harnessView(meta?: BoardMeta, bp?: BoardPaths) {
     },
     safety: {
       hidden: [...PRIVATE.map((p) => HARNESS_PRIVATE_NAME[p] ?? p), "Your AI tools' sign-ins", 'Browser sign-ins', 'Keys in package settings', '.env files', "squad-kit's own folder and keys"],
-      locked: ["squad-kit's own folder", 'AI instruction files', 'Commit hooks and their settings', 'Code history: commit and branches. A push is refused, and agents have no keys to push with'],
+      locked: ["squad-kit's own folder", 'AI instruction files', 'Commit hooks and their settings', 'Code history: commit and branches. A push is refused (only a temp folder takes one), and agents have no keys to push with'],
       sites: levelSites(level),
       // The project's network level, the three to pick from, and what stays closed on all of them.
       network: { level, levels: NETWORK_LEVELS.map((id) => ({ id, name: NETWORK_NAME[id], words: NETWORK_WORDS[id] })), closed: KNOWN_BAD_GROUPS.map((g) => g.name), commands: networkPolicy(level).commands },

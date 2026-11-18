@@ -8,7 +8,7 @@ const STR = { type: 'string' } as const;
 
 /** Every agent's first line on who runs the process, so a repo's own rules can't stall a step. */
 export const PROCESS_RULE =
-  "squad-kit runs the process: branches, commits, pushes, pull requests, reviews and releases. The repo's own rule files cover the code. Where one tells you to open your own pull request, commit, push or follow its own workflow, leave that part to squad-kit and carry on.";
+  "squad-kit runs the process: branches, commits, pushes, pull requests, reviews and releases. The repo's own rule files cover the code. Where one tells you to open your own pull request, commit, push or follow its own workflow, leave that part to squad-kit and carry on. A push from your shell goes only into a temp folder; anywhere else git names squad-kit-no-push. That is squad-kit, not a bug: never change code or tests to get around it.";
 
 /** The answers to a team's checklist, in the Reviewer's and the Tester's answer. */
 const CHECKLIST = {

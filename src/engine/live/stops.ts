@@ -16,6 +16,7 @@ import {
   guardBlockedDetail,
   type GuardSpec,
 } from '../project-guard.js';
+import { GUARD_BLOCKED_PUSH } from '../push-refused.js';
 import { checkLane, watchLane, type Lane } from '../lane.js';
 import { hookFiles, isHookFile } from '../hook-files.js';
 import { checkTools, toolsHold } from '../tools/index.js';
@@ -119,6 +120,41 @@ export const stopsPart = {
         };
         x.waiting = { kind: 'stuck', summary: docker ? 'Docker was blocked; an engineer can allow it' : 'A file was blocked; an engineer can allow it' };
         addActivity(x, 'squad', docker ? "A check tried to use Docker, which is not open to the project's own commands" : 'A check needed a file outside its copy, and squad-kit blocked it');
+      });
+    } catch {
+      // The ticket was removed while it ran.
+    }
+  },
+
+  /**
+   * A test failed because the guard refused its push: a story's commands push only into a temp folder. It says nothing
+   * about the code, so no try is counted and the Builder is not sent to "fix" a test that is not broken. The person sees
+   * one plain sentence; engineers get the check, its command and what it printed.
+   */
+  pushStop(this: LiveSquad, id: string, check: string, command: string, output: string): void {
+    this.log('warn', `Guard refused a push in ${check}: ${command}`, id);
+    try {
+      this.update(id, (x) => {
+        if (x.takenOver || (x.chat?.open && !x.chat.beside)) return;
+        x.live = false;
+        x.squad = null;
+        delete x.clock;
+        x.retryPhase = 'test';
+        x.status = 'Stopped: a push was blocked';
+        x.stuck = {
+          gate: 'checks',
+          kind: 'push',
+          checks: [check],
+          question: GUARD_BLOCKED_PUSH,
+          detail: `${check} (${command}):\n${tail(output, 30)}`,
+          options: [
+            { do: 'continue', name: 'Continue anyway', note: 'Go on with this check failing, for example after an engineer ran it outside squad-kit and it passed. Write why: it shows on the ticket, the pull request and the release notes.' },
+            ...(x.worktree && fs.existsSync(x.worktree) ? [{ do: 'yourself' as const, name: 'Fix it yourself', note: "Open the ticket's copy in your editor and make the test push only into a temp folder. Then the checks, review and proof run again." }] : []),
+            { do: 'plan', name: 'Send it back to the plan', note: 'The Spec writer rewrites the plan so it does not need the push.' },
+          ],
+        };
+        x.waiting = { kind: 'stuck', summary: 'A test tried to push code, and squad-kit blocked it' };
+        addActivity(x, 'squad', `A test tried to push code outside a temp folder, and squad-kit blocked it (${check}). Not a failed try`);
       });
     } catch {
       // The ticket was removed while it ran.

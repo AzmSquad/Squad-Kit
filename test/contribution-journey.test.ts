@@ -38,7 +38,8 @@ function clone(origin: string, pkg: object = SELF): BoardPaths {
   sh('git init -q -b main', project);
   fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify(pkg));
   sh('git add -A && git commit -qm start', project);
-  sh(`git remote add origin ${origin} && git config url.${remote}.insteadOf ${origin} && git push -q origin main`, project);
+  // pushInsteadOf too: in squad-kit's guard (a story on squad-kit's own code) a push is checked by the address it was given.
+  sh(`git remote add origin ${origin} && git config url.${remote}.insteadOf ${origin} && git config url.${remote}.pushInsteadOf ${origin} && git push -q origin main`, project);
   const bp = boardPaths(path.join(project, '.squad'));
   writeMeta(bp, {
     project: 'squad-kit',
@@ -155,7 +156,7 @@ describe('the journey of a contribution', () => {
     gh?.done();
     github({ copy: true });
     sh('git remote set-url origin https://github.com/sara/squad-kit.git', project);
-    sh(`git config url.${path.join(tmp, 'remote.git')}.insteadOf https://github.com/sara/squad-kit.git`, project);
+    sh(`git config url.${path.join(tmp, 'remote.git')}.insteadOf https://github.com/sara/squad-kit.git && git config url.${path.join(tmp, 'remote.git')}.pushInsteadOf https://github.com/sara/squad-kit.git`, project);
     // Kept a minute: asked again only once forgotten (after Make my copy or Bring it up to date).
     expect((await journeyOf(bp)).at).toBe(0);
     forgetSetUp(bp);
@@ -219,7 +220,7 @@ describe('the journey of a contribution', () => {
     undo.push(fakeGh('ready'));
     const bp = clone('https://github.com/AzmSquad/squad-kit.git');
     // The copy GitHub makes is reached in the same folder too: nothing goes to the real GitHub.
-    sh(`git config --add url.${path.join(tmp, 'remote.git')}.insteadOf https://github.com/sara/squad-kit.git`, project);
+    sh(`git config --add url.${path.join(tmp, 'remote.git')}.insteadOf https://github.com/sara/squad-kit.git && git config --add url.${path.join(tmp, 'remote.git')}.pushInsteadOf https://github.com/sara/squad-kit.git`, project);
     github();
     const r = await setUpForMe(bp);
     expect(r.line).toBe(
@@ -236,7 +237,7 @@ describe('the journey of a contribution', () => {
   it('Do both for me: the copy is made but GitHub refuses the sync: the copy is said, with the reason, never hidden', async () => {
     undo.push(fakeGh('ready'));
     const bp = clone('https://github.com/AzmSquad/squad-kit.git');
-    sh(`git config --add url.${path.join(tmp, 'remote.git')}.insteadOf https://github.com/sara/squad-kit.git`, project);
+    sh(`git config --add url.${path.join(tmp, 'remote.git')}.insteadOf https://github.com/sara/squad-kit.git && git config --add url.${path.join(tmp, 'remote.git')}.pushInsteadOf https://github.com/sara/squad-kit.git`, project);
     github({ behind: 3, syncRefused: true });
     const r = await setUpForMe(bp);
     expect(r.line).toMatch(/^Made your own copy, sara\/squad-kit\. origin is your copy now, and upstream is AzmSquad\/squad-kit\. It was not brought up to date: GitHub could not bring main of your copy up to date/);

@@ -23,6 +23,7 @@ const { deniedTools } = await import('../src/modules/claude/direct.js');
 const { claudeRunOptions } = await import('../src/modules/claude/index.js');
 const { agentPrivatePlaces, guardSupport, ticketGuard, projectGuardFor, spawnProject } = await import('../src/engine/project-guard.js');
 const { noPushEnv } = await import('../src/engine/sandbox.js');
+const { PUSH_REFUSED } = await import('../src/engine/push-refused.js');
 const { makeNewProject } = await import('../src/engine/new-project.js');
 const { readMeta, writeMeta } = await import('../src/board/store.js');
 const { LiveSquad } = await import('../src/engine/live.js');
@@ -93,12 +94,40 @@ describe('a push', () => {
     sh(`git init -q -b main && git -c user.name=t -c user.email=t@t commit -q --allow-empty -m one && git remote add origin "${remote}"`, work);
   });
 
-  const noPush = (more: NodeJS.ProcessEnv = {}) => ({ ...process.env, ...more, ...noPushEnv({ ...more }) });
+  const noPush = (more: NodeJS.ProcessEnv = {}, o: Parameters<typeof noPushEnv>[1] = {}) => ({ ...process.env, ...more, ...noPushEnv({ ...more }, o) });
   const heads = () => sh('git for-each-ref refs/heads', remote);
 
-  it.each(['origin', '../remote.git', 'https://example.invalid/a.git', 'ssh://example.invalid/a.git', 'git@example.invalid:a.git'])('to %s is refused', (to) => {
-    expect(() => sh(`git push "${to}" main`, work, noPush())).toThrow();
+  it.each(['../remote.git', 'https://example.invalid/a.git', 'ssh://example.invalid/a.git', 'git@example.invalid:a.git'])('to %s is refused', (to) => {
+    expect(() => sh(`git push "${to}" main`, work, noPush())).toThrow(/squad-kit-no-push/);
     expect(heads()).toBe('');
+  });
+
+  it("to a throwaway repo in a temp folder goes through, as a project's own tests push there", () => {
+    sh('git push -q origin main', work, noPush());
+    sh(`git push -q "file://${remote}" main:other`, work, noPush());
+    expect(heads()).toContain('refs/heads/main');
+    expect(heads()).toContain('refs/heads/other');
+  });
+
+  it('to a folder outside the temp folders is refused', () => {
+    // The same repo, as if the temp folders were somewhere else.
+    expect(() => sh('git push origin main', work, noPush({}, { temp: [path.join(tmp, 'elsewhere')] }))).toThrow(/squad-kit-no-push/);
+    expect(heads()).toBe('');
+  });
+
+  it('into the project itself is refused, even when it lives in a temp folder', () => {
+    for (const to of ['origin', `file://${remote}`]) expect(() => sh(`git push "${to}" main`, work, noPush({}, { keep: [remote] }))).toThrow(/squad-kit-no-push/);
+    expect(heads()).toBe('');
+  });
+
+  it('the refusal is what the checks read as "squad-kit blocked a push"', () => {
+    let said = '';
+    try {
+      sh('git push https://example.invalid/a.git main', work, noPush());
+    } catch (e) {
+      said = String((e as { stderr?: string }).stderr);
+    }
+    expect(said).toMatch(PUSH_REFUSED);
   });
 
   it('squad-kit own git, with no such setting, still pushes', () => {
@@ -115,7 +144,7 @@ describe('a push', () => {
     const env = noPush({ GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.abbrev', GIT_CONFIG_VALUE_0: '12' });
     expect(env.GIT_CONFIG_KEY_0).toBe('core.abbrev');
     expect(sh('git config core.abbrev', work, env)).toBe('12');
-    expect(() => sh('git push origin main', work, env)).toThrow();
+    expect(() => sh('git push https://example.invalid/a.git main', work, env)).toThrow();
   });
 
   it('a story command run through the one gate gets it, and the release pipeline does not', async () => {
@@ -131,9 +160,10 @@ describe('a push', () => {
         child.stdout!.on('data', (d) => (out += String(d)));
         child.on('close', () => resolve(out));
       });
-    expect(await run(undefined)).toBe('none');
+    // Unguarded, it gets only what was already there (inside squad-kit's own guard, a story on squad-kit's own code).
+    expect(await run(undefined)).toBe(process.env.GIT_CONFIG_COUNT ?? 'none');
     if (!guardSupport().on) return;
-    expect(await run(story)).toBe(String(Object.keys(noPushEnv({})).filter((k) => k.startsWith('GIT_CONFIG_KEY_')).length));
+    expect(await run(story)).toBe(String(Object.keys(noPushEnv({}, { keep: [story.root, story.cwd] })).filter((k) => k.startsWith('GIT_CONFIG_KEY_')).length));
     expect(await run(release)).toBe('none');
   });
 });
