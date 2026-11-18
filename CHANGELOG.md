@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.25] — 2026-11-18
+
 ### Fixed
 
 - **A project's tests can push to a throwaway repo in a temp folder** (#28). A story's commands push nowhere, and that
