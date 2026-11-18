@@ -3,7 +3,6 @@ import { Link } from '@tanstack/react-router';
 import {
   ArrowRightLeft,
   Code,
-  Download,
   ExternalLink,
   GitPullRequest,
   LifeBuoy,
@@ -17,6 +16,7 @@ import { useBoard, useTicket } from '../lib/data';
 import { partNames } from '../lib/overview';
 import { usePrefs } from '../lib/prefs';
 import { Tracker, Written, ago } from '../components/ui';
+import { TrackerMark, pulledFrom } from '../components/TrackerMark';
 import { ConversationTab } from '../components/Conversation';
 import { ChangesTab } from '../components/Changes';
 import { OutsideDialog, OutsideLabel, canWorkOutside } from '../components/Outside';
@@ -96,12 +96,12 @@ export function TicketDrawer({ id, tab: start, onClose }: { id: string; tab?: Dr
               {past && <MiniTitle t={t} />}
               {t.source.type !== 'manual' &&
                 (t.source.url ? (
-                  <a className="src" href={t.source.url} target="_blank" rel="noreferrer">
-                    <Download size={14} /> {t.source.itemType ?? 'Item'} {t.source.ref} <ExternalLink size={12} />
+                  <a className="src" href={t.source.url} target="_blank" rel="noreferrer" title={pulledFrom(t.source.type, true)} aria-label={`${t.source.itemType ?? 'Item'} ${t.source.ref ?? ''}. ${pulledFrom(t.source.type, true)}`}>
+                    <TrackerMark type={t.source.type} /> {t.source.itemType ?? 'Item'} {t.source.ref} <ExternalLink size={12} />
                   </a>
                 ) : (
-                  <span className="src">
-                    <Download size={14} /> From {t.source.ref}
+                  <span className="src" title={pulledFrom(t.source.type, false)}>
+                    <TrackerMark type={t.source.type} /> From {t.source.ref}
                   </span>
                 ))}
               {t.pr && (

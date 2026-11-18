@@ -138,8 +138,8 @@ scrolls as one page: the title and steps scroll away, the row with the ticket's 
 top (scrolled down, that row shows the title and the step), and the bottom bar stays at the bottom, on one row. In a
 narrow drawer its less-used buttons are under **More**; Stop and Take over always show. On a short window the steps
 show only the current step's note: point at a step for its whole note. At the top: the
-ticket's name and title, links to its tracker item and
-pull request, who made it, its **owner** (when they cannot work on it, **Take it** moves it to you, with a reason;
+ticket's name and title, links to its tracker item (with the tracker's own small mark: Azure DevOps, Jira or GitHub;
+point at it for where it came from) and pull request, who made it, its **owner** (when they cannot work on it, **Take it** moves it to you, with a reason;
 terminal: `squad take-back <ticket> --reason "…"`), its track (Full, Express or Builds by itself) and its repo. A row of
 steps shows how far it is. Under each finished step is how long the squad itself worked there, from its agents' own
 steps: a wait for your answers or approval, for another story, for a free place, and a chat are not counted. A long wait

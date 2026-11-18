@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Builder; Continue anyway and Fix it yourself are on the card. The agents are told a refused push is squad-kit's, not
   a bug to work around.
 
+### Changed
+
+- **A pulled story's link shows its tracker's mark** (#29). At the top of an open ticket, the link to the story on its
+  tracker started with a download icon, which read as "download a file". It now starts with the tracker's own small
+  mark (Azure DevOps, Jira or GitHub, a plain link for any other), and pointing at it says where the story came from:
+  "Pulled from Azure DevOps. Opens it there."
+
 ## [1.3.24] — 2026-11-16
 
 ### Fixed
