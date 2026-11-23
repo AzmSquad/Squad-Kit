@@ -88,3 +88,21 @@ describe('reading what an app says', () => {
     expect(busyIn('Error: That port is already in use.\nPort 8000 is in use')).toBe(8000);
   });
 });
+
+describe("the Squad lead's Start the app card (Nov 17 demo)", () => {
+  it('starts the only app when the lead names it with a plain word, and still refuses a wrong name among several', async () => {
+    const { appForCard } = await import('../src/engine/lead/cards.js');
+    const one = meta({ project: 'project', commands: { start: 'npm run dev', url: 'http://localhost:3000' } });
+    expect(appForCard(one, 'app').name).toBe('project');
+    expect(appForCard(one, 'the app').name).toBe('project');
+    expect(appForCard(one).name).toBe('project');
+    const two = meta({
+      repos: [
+        { path: 'web', base: 'main', remote: '', commands: { start: 'npm run dev', url: 'http://localhost:3000' } },
+        { path: 'api', base: 'main', remote: '', commands: { start: 'npm start', url: 'http://localhost:4000' } },
+      ],
+    });
+    expect(appForCard(two, 'api').repo).toBe('api');
+    expect(() => appForCard(two, 'app')).toThrow('There is no app called "app"');
+  });
+});
