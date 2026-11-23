@@ -9,6 +9,7 @@ import { boardPaths, readMeta, writeMeta, type BoardPaths } from '../src/board/s
 import { AppRunner, portTaken, stopApps, appRunner } from '../src/engine/run-app.js';
 import { GUARD_BLOCKED_DOCKER, guardSupport } from '../src/engine/project-guard.js';
 import { freePort } from './support/tiny-app.js';
+import { recentLines } from '../src/core/app-log.js';
 
 import { inGuard } from './support/in-guard.js';
 /**
@@ -301,6 +302,10 @@ describe('your apps run from squad-kit’s own copy of main', () => {
     expect(s.error).toBe('squad-kit could not set up roomflow.');
     expect(s.detail).toContain('process.exit(3)');
     expect(s.detail).toContain('npm ERR! network');
+    // And it is in squad-kit's log, where the Squad lead and a problem report look for it.
+    const logged = recentLines(60_000).join('\n');
+    expect(logged).toContain('Run app: roomflow did not start: squad-kit could not set up roomflow.');
+    expect(logged).toContain('npm ERR! network');
   }, 30_000);
 
   it('a crash while starting fails with one plain sentence, what it printed is for engineers, and a taken port is said the same way', async () => {
