@@ -5,7 +5,7 @@ import { scheduleSquad } from '../../board/schedule.js';
 import type { RepoInfo, Ticket } from '../../board/types.js';
 import { DOING } from '../plain-doing.js';
 import { runCommand, tail, type CheckResult } from '../checks.js';
-import { addWorktree, changedTracked, putBackTracked, writeChangesOf } from '../git.js';
+import { addWorktree, changedTracked, putBackTracked, setAsideStrayCopy, writeChangesOf } from '../git.js';
 import * as P from '../prompts.js';
 import { repoFor, reposOf } from '../repos.js';
 import { partsOf, repoLabel } from '../../board/parts.js';
@@ -34,6 +34,19 @@ export const workspacePart = {
     const meta = this.meta();
     let t = readTicket(this.bp, id)!;
     const repo = repoFor(meta, t);
+    // A copy git has lost for good (#34): its folder is moved aside and a new copy is made, from the ticket's branch
+    // when it has one, so no agent works where nothing can be saved.
+    if (t.worktree && fs.existsSync(t.worktree) && !t.copies?.length) {
+      this.mendCopy(t);
+      const aside = setAsideStrayCopy(path.join(root, repo.path), t.worktree);
+      if (aside) {
+        this.log('warn', `The copy at ${t.worktree} had lost its link to the repo for good, so squad-kit moved it to ${aside} and makes a new one`, id);
+        t = this.update(id, (x) => {
+          delete x.worktree;
+          addActivity(x, 'squad', `This ticket's copy of the code had lost its link to the project's git, so nothing could be saved from it. squad-kit kept its files at ${aside} and made a new copy.`);
+        });
+      }
+    }
     if (t.worktree && fs.existsSync(t.worktree)) {
       this.mendCopy(t);
       rewireStoryDb(this.bp, id, t.worktree, repo.path);
@@ -56,6 +69,7 @@ export const workspacePart = {
     const fetched = dep ? undefined : await fetchBase(this.bp, t);
     const wt: { dir: string; branch: string; baseCommit: string; pushed?: string; from?: string } = await this.makingCopy(id, (how) => (dep ? addWorktreeOn(this.bp, t, dep, at, how) : addWorktree(path.join(root, repo.path), id, repo.base, fetched, at, how)));
     const named = repo.path === '.' ? 'the project' : (repoLabel(meta, repo.path) ?? repo.path);
+    if ('setAside' in wt && wt.setAside) this.log('warn', `A copy from an earlier set-up of the project was in the way, so squad-kit moved it to ${wt.setAside}`, id);
     t = this.update(id, (x) => {
       x.worktree = wt.dir;
       if (at) x.storyDir = path.dirname(at);
