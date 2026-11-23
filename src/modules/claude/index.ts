@@ -1,3 +1,4 @@
+import { writeLog } from '../../core/app-log.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -5,7 +6,7 @@ import { AcpStartError, runAcp, type AcpLaunch } from '../../engine/acp-runner.j
 import type { AgentResult, AgentRun, AiTool } from '../ai-tool/types.js';
 import { claudeBinary, claudeEnv, costSoFar, deniedTools, describeTool, ownWords, passing, plainError, runClaude, sessionExists, toolVersion, type RunOptions } from './direct.js';
 import { claudeLimit } from './limit.js';
-import { CLAUDE_ENV, claudeBlocked, claudePrivateFiles, claudeSandbox, claudeSandboxSupport, withCap } from './sandbox.js';
+import { CLAUDE_ENV, claudeBlocked, claudePrivateFiles, claudeSandbox, claudeSandboxSupport, sandboxFailedIn, withCap } from './sandbox.js';
 import { claudeBilling, claudeResume } from './billing.js';
 
 /**
@@ -230,7 +231,11 @@ export const claudeTool: AiTool = {
   blocked: claudeBlocked,
   async run(r) {
     const opts = claudeRunOptions(r);
-    const done = (res: AgentResult) => withCap(withLimit(res), r.caps);
+    const done = (res: AgentResult) => {
+      // Every shell command refused before it ran (#35): the next run goes without Claude Code's sandbox.
+      if (r.sandbox && sandboxFailedIn(`${res.text}\n${res.error ?? ''}\n${res.detail ?? ''}\n${JSON.stringify(res.structured ?? '')}`)) writeLog({ level: 'warn', text: `Claude Code's sandbox cannot run shell commands on this Linux (nested user namespaces are refused), so the next runs go without it` });
+      return withCap(withLimit(res), r.caps);
+    };
     if (r.direct || !acpAdapterPath()) return done(await runClaude(opts));
     try {
       return done(await runClaudeAcp({ ...opts, ...(r.logDir ? { logDir: r.logDir } : {}) }));

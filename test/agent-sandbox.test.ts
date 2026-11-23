@@ -5,7 +5,7 @@ import path from 'node:path';
 import { runAcp } from '../src/engine/acp-runner.js';
 import { claudeLaunch, claudeRunOptions, claudeTool } from '../src/modules/claude/index.js';
 import { claudeBinary, runClaude } from '../src/modules/claude/direct.js';
-import { claudeBlocked, claudeSandbox, sandboxSupportOn, withCap, type SandboxHost } from '../src/modules/claude/sandbox.js';
+import { claudeBlocked, claudeSandbox, claudeSandboxSupport, sandboxFailedIn, sandboxSupportOn, withCap, type SandboxHost } from '../src/modules/claude/sandbox.js';
 import { PACKAGE_HOSTS, blockedLine, packageCacheEnv, parseHosts, sandboxAsk } from '../src/engine/sandbox.js';
 import { readConversation } from '../src/engine/conversations.js';
 import { checkAgentSandbox } from '../src/commands/doctor-engine.js';
@@ -268,6 +268,20 @@ describe('a computer without the sandbox', () => {
     });
     // Installed, but this Linux does not let programs make their own sandbox.
     expect(sandboxSupportOn(host({ bwrapWorks: () => false }))).toMatchObject({ available: false, why: 'bubblewrap cannot make a sandbox on this Linux' });
+    // bwrap starts, but Ubuntu's AppArmor refuses the user namespace Claude Code's seccomp step makes inside it (#35).
+    expect(sandboxSupportOn(host({ nestedUsernsWorks: () => false }))).toMatchObject({ available: false, fix: expect.stringContaining('apparmor_restrict_unprivileged_userns=0') });
+    expect(sandboxSupportOn(host({ nestedUsernsWorks: () => true })).available).toBe(true);
+  });
+
+  it("turns the sandbox off for later runs once a run's shell was refused the way #35 was", () => {
+    const said = 'Every shell command fails before it runs (Bash returned: "apply-seccomp: write /proc/self/setgroups (nested userns is capability-restricted; caller must provide CAP_SYS_ADMIN): Permission denied")';
+    // On a computer with no sandbox at all there is nothing to turn off.
+    const was = claudeSandboxSupport().available;
+    expect(sandboxFailedIn('npm test failed: 3 tests')).toBe(false);
+    expect(sandboxFailedIn(said)).toBe(was);
+    expect(claudeSandboxSupport().available).toBe(false);
+    if (was) expect(claudeSandboxSupport().why).toContain('user namespace');
+    expect(sandboxFailedIn(said)).toBe(false);
   });
 
   it('has a row in squad doctor', () => {

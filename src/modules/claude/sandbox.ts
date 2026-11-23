@@ -79,7 +79,18 @@ export interface SandboxHost {
   has(program: string): boolean;
   /** True when bubblewrap can really make a sandbox (some Linux setups forbid it). */
   bwrapWorks(): boolean;
+  /**
+   * False when a user namespace cannot be made inside bubblewrap's, as Claude Code's seccomp step does (#35). Ubuntu's
+   * AppArmor allows bwrap its own, yet refuses one nested in it: every shell command then fails before it runs.
+   */
+  nestedUsernsWorks?(): boolean;
 }
+
+/** Ubuntu's restriction, in squad-kit's words: what is wrong, and the one change that fixes it. */
+export const NESTED_USERNS = {
+  why: "Claude Code's sandbox cannot start on this Linux: it refuses a user namespace inside bubblewrap's (AppArmor restricts unprivileged user namespaces), so every shell command would fail before it runs",
+  fix: 'squad-kit runs the shell without that sandbox, behind its own guard. To have it back, allow unprivileged user namespaces: sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0',
+};
 
 /** Whether Claude Code's sandbox runs on this computer, with the same needs Claude Code checks at start. */
 export function sandboxSupportOn(h: SandboxHost): SandboxSupport {
@@ -100,6 +111,7 @@ export function sandboxSupportOn(h: SandboxHost): SandboxSupport {
       fix: 'Allow unprivileged user namespaces for bwrap (on Ubuntu 24.04 this needs an AppArmor profile for it)',
     };
   }
+  if (h.nestedUsernsWorks && !h.nestedUsernsWorks()) return { available: false, ...NESTED_USERNS };
   return { available: true, why: "Claude Code's sandbox (bubblewrap)" };
 }
 
@@ -122,11 +134,39 @@ function bwrapWorks(): boolean {
   }
 }
 
+/**
+ * A user namespace inside bubblewrap's, the way Claude Code's seccomp step makes one. Only the refusal #35 reported
+ * counts as "no": any other trouble with this look (no unshare, an odd /proc) leaves the answer to bwrapWorks.
+ */
+function nestedUsernsWorks(): boolean {
+  if (!onPath('unshare')) return true;
+  try {
+    execFileSync('bwrap', ['--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--unshare-net', '--', 'unshare', '--user', '--map-root-user', 'true'], { stdio: ['ignore', 'ignore', 'pipe'], timeout: 5000 });
+    return true;
+  } catch (err) {
+    return !NESTED_REFUSED.test(String((err as { stderr?: unknown }).stderr ?? ''));
+  }
+}
+
+/** What Linux says when a nested user namespace is refused: the setgroups write, or Claude Code's own apply-seccomp line. */
+const NESTED_REFUSED = /setgroups[^\n]*(Permission denied|Operation not permitted)|nested userns is capability-restricted|apply-seccomp:[^\n]*(Permission denied|Operation not permitted)/i;
+
 let support: SandboxSupport | null = null;
 
 /** This computer's answer, found once. */
 export function claudeSandboxSupport(): SandboxSupport {
-  return (support ??= sandboxSupportOn({ platform: process.platform, release: os.release(), has: onPath, bwrapWorks }));
+  return (support ??= sandboxSupportOn({ platform: process.platform, release: os.release(), has: onPath, bwrapWorks, nestedUsernsWorks }));
+}
+
+/**
+ * A run whose shell failed the way #35 did, though the look at start said yes: the sandbox is off for the rest of this
+ * squad-kit's life, so the next run's commands run (behind squad-kit's own guard) instead of failing again. True when
+ * it turned it off now.
+ */
+export function sandboxFailedIn(said: string): boolean {
+  if (support?.available === false || !NESTED_REFUSED.test(said)) return false;
+  support = { available: false, ...NESTED_USERNS };
+  return true;
 }
 
 /* ── What it refused ─────────────────────────────────────── */
