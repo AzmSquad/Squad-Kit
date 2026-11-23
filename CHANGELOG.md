@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A ticket's copy is never reused when git has lost it** (#34). When a project was set up again in the same folder,
+  the copy of an earlier ticket with the same key was kept and reused: its link to git pointed at nothing, so nothing
+  could be saved, Looks right failed every time, and the Builder worked on old code. A copy that is not this repo's is
+  now moved aside (its files are kept, never deleted) and a new one is made, and an open ticket whose copy git lost
+  for good gets a new copy the next time it runs, with a line on the ticket that says where the old files went.
+- **squad-kit no longer stops your editor** (#36). After a step, squad-kit stops programs left running in its copies,
+  and it took VS Code's extension hosts and language servers for leftovers when a copy was open in it, about 20 times
+  an hour. What an editor runs (VS Code and its forks, JetBrains IDEs, Zed, Sublime Text) is now left alone.
+- **A project's problem report holds only that project's log** (#40). It also held the lines of every other project,
+  with their errors, commands and folders. The report for the whole app still holds them all.
+- **The Squad lead's and the Tester's near misses still work** (#38). The Squad lead often asked for a story with
+  `story` instead of `id` and for its notes with `kind` instead of `what`, and got less to answer from. Those names are
+  now read as meant. A Tester's step that names its action as a field (`{ "click": { … } }`, `{ "press": "enter" }`)
+  is taken when it can only mean one thing, and key names like "enter" or "esc" are understood. The step's description
+  now says the 500-character limit and every key it takes.
+- **Why Run app failed is in squad-kit's log.** It was kept only in the board's memory, so the Squad lead answered
+  "squad-kit has no error saved for it" and a problem report had nothing. The reason and what the app printed are now
+  logged as an error.
+- **The Squad lead's Start the app works with one app.** The lead named the app "app" where the project's one app is
+  called by the project's name, and the button said "There is no app called app". With one app, it starts that app.
+- **/healthz keeps answering during an update** (#39). While "Update now" replaced squad-kit's files, the running app
+  failed to read its own version and logged an error. It now answers with the version that runs.
+
 ## [1.3.25] — 2026-11-18
 
 ### Fixed
