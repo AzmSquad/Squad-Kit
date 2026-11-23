@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
-import { addWorktree, git, setAsideStrayCopy, worktreeRoot } from '../src/engine/git.js';
+import { addWorktree, git, worktreeRoot } from '../src/engine/git.js';
+import { clearStrayCopy, setAsideStrayCopy } from '../src/engine/stray-copy.js';
 
 let tmp: string;
 let project: string;
@@ -36,21 +37,21 @@ describe('a copy left from an earlier set-up of the project (#34)', () => {
     freshRepo('SqliteStorageTest.php');
     expect(git(old.dir, ['rev-parse', '--git-dir'], { allowFail: true })).toBe('');
 
+    const aside = await clearStrayCopy(project, 'TLP-1');
+    expect(aside).toBeTruthy();
     const made = await addWorktree(project, 'TLP-1', 'main');
     expect(made.dir).toBe(old.dir);
-    expect(made.setAside).toBeTruthy();
-    expect(fs.existsSync(path.join(made.setAside!, 'MysqlStorageTest.php'))).toBe(true);
+    expect(fs.existsSync(path.join(aside!, 'MysqlStorageTest.php'))).toBe(true);
     expect(fs.existsSync(path.join(made.dir, 'SqliteStorageTest.php'))).toBe(true);
     expect(fs.existsSync(path.join(made.dir, 'MysqlStorageTest.php'))).toBe(false);
     expect(git(made.dir, ['rev-parse', '--git-dir'], { allowFail: true })).not.toBe('');
-    expect(path.dirname(path.dirname(made.setAside!))).toBe(worktreeRoot(project));
+    expect(path.dirname(path.dirname(aside!))).toBe(worktreeRoot(project));
   });
 
   it("leaves this repo's own copy where it is", async () => {
     freshRepo('a.txt');
     const wt = await addWorktree(project, 'TLP-2', 'main');
     expect(setAsideStrayCopy(project, wt.dir)).toBeNull();
-    const again = await addWorktree(project, 'TLP-2', 'main');
-    expect(again.setAside).toBeUndefined();
+    expect(await clearStrayCopy(project, 'TLP-2')).toBeNull();
   });
 });

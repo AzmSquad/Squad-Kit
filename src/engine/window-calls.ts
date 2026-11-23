@@ -50,3 +50,46 @@ export function commandField(v: unknown, depth = 0): string | null {
   }
   return null;
 }
+
+/** The names agents give keys, as squad-kit's browser takes them: "enter" and "Return" are Enter, "Esc" is Escape. */
+const KEY_NAMES: Record<string, string> = {
+  enter: 'Enter', return: 'Enter', tab: 'Tab', escape: 'Escape', esc: 'Escape', backspace: 'Backspace', delete: 'Delete', del: 'Delete',
+  space: 'Space', ' ': 'Space', spacebar: 'Space', arrowup: 'ArrowUp', up: 'ArrowUp', arrowdown: 'ArrowDown', down: 'ArrowDown',
+  arrowleft: 'ArrowLeft', left: 'ArrowLeft', arrowright: 'ArrowRight', right: 'ArrowRight', home: 'Home', end: 'End',
+  pageup: 'PageUp', pagedown: 'PageDown',
+};
+
+export function keyName(raw: string): string {
+  const shift = /^shift\s*\+\s*/i.exec(raw);
+  const rest = shift ? raw.slice(shift[0].length) : raw;
+  const name = rest.length === 1 ? rest : (KEY_NAMES[rest.trim().toLowerCase()] ?? rest.trim());
+  return shift ? `Shift+${name}` : name;
+}
+
+const ACTIONS = ['goto', 'click', 'fill', 'select', 'check', 'uncheck', 'press', 'hover', 'wait'];
+
+/**
+ * A step with the slips put right that can only mean one thing (#38): an action named as a field whose value is its
+ * target (`{ "click": { "role": "button", … } }`), a page (`goto`), a key (`press`) or the words to click, hover, check
+ * or wait for; and a key's usual name ("enter", "esc"). Anything else is left as it is, for the window to say.
+ */
+export function fixStep(raw: Record<string, unknown>): Record<string, unknown> {
+  const s = { ...raw };
+  const named = s.action === undefined ? ACTIONS.find((k) => k in s) : undefined;
+  if (named) {
+    const held = s[named];
+    const text = typeof held === 'string' && held.trim() !== '' ? held : undefined;
+    const fixed =
+      held && typeof held === 'object' && !Array.isArray(held) && s.target === undefined ? { target: held }
+      : text && named === 'goto' && s.path === undefined ? { path: text }
+      : text && named === 'press' && s.key === undefined ? { key: text }
+      : text && ['click', 'hover', 'check', 'uncheck', 'wait'].includes(named) && s.target === undefined ? { target: { text } }
+      : null;
+    if (fixed) {
+      delete s[named];
+      Object.assign(s, { action: named }, fixed);
+    }
+  }
+  if (typeof s.key === 'string') s.key = keyName(s.key);
+  return s;
+}

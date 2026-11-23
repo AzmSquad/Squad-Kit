@@ -757,7 +757,7 @@ function copyLink(dir: string): string | null {
 }
 
 /** The copy of this repo in this folder as git knows it: its own git folder. Null for anything else, which is not git's to remove. */
-function copyGitDir(root: string, dir: string): string | null {
+export function copyGitDir(root: string, dir: string): string | null {
   if (!fs.lstatSync(path.join(dir, '.git'), { throwIfNoEntry: false })?.isFile()) return null;
   const own = git(dir, ['rev-parse', '--absolute-git-dir'], { allowFail: true });
   const common = git(root, ['rev-parse', '--git-common-dir'], { allowFail: true });
@@ -849,49 +849,28 @@ export async function makeCopy(root: string, dir: string, flags: string[], from:
 }
 
 /**
- * A copy folder this repo does not know (#34): its `.git` file points at a git folder that is gone, or at another
- * repo's, as when the project was set up again in the same place. git cannot work in it and its code may be old, so it
- * is moved aside (never deleted: its files may be someone's work) and a new copy can be made. Gives where it went, or
- * null when the folder is not there, is this repo's copy, or could be linked to it again.
- */
-export function setAsideStrayCopy(root: string, dir: string): string | null {
-  if (!fs.lstatSync(path.join(dir, '.git'), { throwIfNoEntry: false })?.isFile()) return null;
-  if (copyGitDir(root, dir)) return null;
-  if (repairCopyLink(root, dir) && copyGitDir(root, dir)) return null;
-  const aside = path.join(path.dirname(dir), '.set-aside', `${path.basename(dir)}-${new Date().toISOString().replace(/[:.]/g, '-')}`);
-  fs.mkdirSync(path.dirname(aside), { recursive: true });
-  fs.renameSync(dir, aside);
-  return aside;
-}
-
-/**
  * The ticket's copy of the code. A branch pushed from another computer is where its work so far is, so the copy
  * starts from it, not from the base; `pushed` says so. With `remote`, a new copy starts from the newest base. Half a
  * copy from a crash or a Stop goes first, and a new one is made.
  */
-export function addWorktree(projectRoot: string, ticketId: string, base: string, remote?: string, at?: string, how: CopyHow = {}): Promise<{ dir: string; branch: string; baseCommit: string; pushed?: string; setAside?: string }> {
+export function addWorktree(projectRoot: string, ticketId: string, base: string, remote?: string, at?: string, how: CopyHow = {}): Promise<{ dir: string; branch: string; baseCommit: string; pushed?: string }> {
   const dir = at ?? path.join(worktreeRoot(projectRoot), ticketId.toLowerCase());
   const branch = `squad/${ticketId.toLowerCase()}`;
   return copyTurn(dir, async () => {
     let baseCommit = git(projectRoot, ['rev-parse', base]);
     await clearHalfCopy(projectRoot, dir, how.signal);
-    // A copy left from an earlier set-up of this project in the same place is never reused: it is not this repo's.
-    const setAside = setAsideStrayCopy(projectRoot, dir) ?? undefined;
-    const made = await (async () => {
-      if (copyIsWhole(dir)) return { dir, branch, baseCommit };
-      const exists = git(projectRoot, ['rev-parse', '--verify', `refs/heads/${branch}`], { allowFail: true });
-      const pushed = exists ? null : pushedBranch(projectRoot, branch);
-      if (!exists && !pushed && remote) baseCommit = latestBase(projectRoot, base, remote).sha;
-      if (exists) await makeCopy(projectRoot, dir, [], branch, how);
-      // No tracking: nothing here reads it, and writing it is what two copies at once could trip over, after the branch is made.
-      else await makeCopy(projectRoot, dir, ['--no-track', '-b', branch], pushed ?? baseCommit, how, { branch, start: git(projectRoot, ['rev-parse', pushed ?? baseCommit]) });
-      // Xcode's build folder in the copy is squad-kit's own: never the story's work.
-      keepOwnBuildsOut(dir);
-      if (!pushed) return { dir, branch, baseCommit };
-      // Where the ticket left the base, so its changes are measured from there and not against newer work in the base.
-      return { dir, branch, baseCommit: git(projectRoot, ['merge-base', base, pushed], { allowFail: true }) || baseCommit, pushed: pushed.replace(/^refs\/remotes\//, '') };
-    })();
-    return setAside ? { ...made, setAside } : made;
+    if (copyIsWhole(dir)) return { dir, branch, baseCommit };
+    const exists = git(projectRoot, ['rev-parse', '--verify', `refs/heads/${branch}`], { allowFail: true });
+    const pushed = exists ? null : pushedBranch(projectRoot, branch);
+    if (!exists && !pushed && remote) baseCommit = latestBase(projectRoot, base, remote).sha;
+    if (exists) await makeCopy(projectRoot, dir, [], branch, how);
+    // No tracking: nothing here reads it, and writing it is what two copies at once could trip over, after the branch is made.
+    else await makeCopy(projectRoot, dir, ['--no-track', '-b', branch], pushed ?? baseCommit, how, { branch, start: git(projectRoot, ['rev-parse', pushed ?? baseCommit]) });
+    // Xcode's build folder in the copy is squad-kit's own: never the story's work.
+    keepOwnBuildsOut(dir);
+    if (!pushed) return { dir, branch, baseCommit };
+    // Where the ticket left the base, so its changes are measured from there and not against newer work in the base.
+    return { dir, branch, baseCommit: git(projectRoot, ['merge-base', base, pushed], { allowFail: true }) || baseCommit, pushed: pushed.replace(/^refs\/remotes\//, '') };
   });
 }
 

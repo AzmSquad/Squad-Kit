@@ -33,7 +33,7 @@ import {
 } from './shots.js';
 import { readWorkbook, sheetsText, type Sheet } from './spreadsheet.js';
 import { READ_ROWS_DEF, readRowsCall, type RowsReader } from './proof-kinds/rows.js';
-import { commandField, extraFields, gotoPaths, hugeValue, outsideApp } from './window-calls.js';
+import { commandField, extraFields, fixStep, gotoPaths, hugeValue, outsideApp } from './window-calls.js';
 import type { PhoneSize } from '../modules/phone/types.js';
 import type { PhoneAsk, PhoneRun, PhoneShot } from './phone/session.js';
 
@@ -519,42 +519,13 @@ export function pageCall(raw: Record<string, unknown>, tool: string, more: strin
   return { ask: { ...ask, steps } };
 }
 
-/** The names agents give keys, as squad-kit's browser takes them: "enter" and "Return" are Enter, "Esc" is Escape. */
-const KEY_NAMES: Record<string, string> = {
-  enter: 'Enter', return: 'Enter', tab: 'Tab', escape: 'Escape', esc: 'Escape', backspace: 'Backspace', delete: 'Delete', del: 'Delete',
-  space: 'Space', ' ': 'Space', spacebar: 'Space', arrowup: 'ArrowUp', up: 'ArrowUp', arrowdown: 'ArrowDown', down: 'ArrowDown',
-  arrowleft: 'ArrowLeft', left: 'ArrowLeft', arrowright: 'ArrowRight', right: 'ArrowRight', home: 'Home', end: 'End',
-  pageup: 'PageUp', pagedown: 'PageDown',
-};
-
-export function keyName(raw: string): string {
-  const shift = /^shift\s*\+\s*/i.exec(raw);
-  const rest = shift ? raw.slice(shift[0].length) : raw;
-  const name = rest.length === 1 ? rest : (KEY_NAMES[rest.trim().toLowerCase()] ?? rest.trim());
-  return shift ? `Shift+${name}` : name;
-}
-
 /** One step as squad-kit takes it: its part of the page moved into "target" when it was named on the step itself. */
 function stepCall(raw: unknown, n: number): { step: Record<string, unknown> } | WrongShape {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { wrong: `step ${n} is not an object`, help: `A step looks like ${EXAMPLES.step}.` };
-  const s = { ...(raw as Record<string, unknown>) };
-  // { "click": { "role": "button", … } } or { "press": "Enter" }: the action named as a field (#38). squad-kit takes it
-  // when what it holds can only mean one thing; otherwise it says the right shape.
+  const s = fixStep(raw as Record<string, unknown>);
+  // { "fill": "…" }: the action named as a field, where what it holds could mean more than one thing.
   const named = s.action === undefined ? Object.keys(s).find((k) => ACTION_KEYS.includes(k)) : undefined;
   if (named) {
-    const held = s[named];
-    const asTarget = held && typeof held === 'object' && !Array.isArray(held) && s.target === undefined;
-    const asText = typeof held === 'string' && held.trim() !== '';
-    const fixed: Record<string, unknown> | null =
-      asTarget ? { target: held }
-      : asText && named === 'goto' && s.path === undefined ? { path: held }
-      : asText && named === 'press' && s.key === undefined ? { key: held }
-      : asText && ['click', 'hover', 'check', 'uncheck', 'wait'].includes(named) && s.target === undefined ? { target: { text: held } }
-      : null;
-    if (fixed) {
-      delete s[named];
-      return stepCall({ action: named, ...s, ...fixed }, n);
-    }
     const value = named === 'fill' || named === 'select' ? ', "value": "Sprint review"' : '';
     return { wrong: `step ${n} names its action as a field ("${named}")`, help: `Give it as "action", with the part of the page inside "target": { "action": "${named}", "target": { "role": "textbox", "name": "Title" }${value} }.` };
   }
@@ -564,7 +535,6 @@ function stepCall(raw: unknown, n: number): { step: Record<string, unknown> } | 
     s.target = Object.fromEntries(loose.map((k) => [k, s[k]]));
     for (const k of loose) delete s[k];
   }
-  if (typeof s.key === 'string') s.key = keyName(s.key);
   const extra = Object.keys(s).find((k) => !STEP_KEYS.includes(k));
   if (extra) {
     const help = ['for', 'until', 'selector', 'element'].includes(extra) ? `Name what to wait for or act on inside "target": { "action": "wait", "target": { "text": "Booked" } }.` : `A step takes only these fields. Use: ${EXAMPLES.step}.`;
