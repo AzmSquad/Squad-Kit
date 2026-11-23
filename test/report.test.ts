@@ -283,6 +283,18 @@ describe('Report a problem', () => {
     expect(files['log/squad-kit.log']).not.toContain('two days ago');
   });
 
+  it("holds this project's log lines and squad-kit's own, never another project's (#40)", () => {
+    writeLog({ level: 'error', project: 'burhan-backend', ticket: 'BTB-1', text: 'docker compose -f /home/dev/work/thepass/docker-compose.dev.yml failed' });
+    writeLog({ level: 'info', text: 'squad-kit 1.3.26 started on port 4571' });
+    const log = unzipped(zip(reportEntries({ bp, ticket: id, versions: VERSIONS })))['log/squad-kit.log']!;
+    expect(log).toContain('Stopped at build: Claude Code is not logged in');
+    expect(log).toContain('squad-kit 1.3.26 started');
+    expect(log).not.toContain('thepass');
+    expect(log).not.toContain('BTB-1');
+    // The whole app's report still holds every project's lines.
+    expect(unzipped(zip(reportEntries({ projects: [], versions: VERSIONS })))['log/squad-kit.log']).toContain('BTB-1');
+  });
+
   it('never holds secrets.yaml, console.json, a .env file, a token or a password', () => {
     const files = unzipped(zip(reportEntries({ bp, ticket: id, versions: VERSIONS })));
     expect(Object.keys(files).some((n) => isSecretFile(n))).toBe(false);
