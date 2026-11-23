@@ -3,6 +3,7 @@ import path from 'node:path';
 import { addActivity, listDecisions, readTicket, writeDecision, writeMeta } from '../../board/store.js';
 import { wayOptions } from '../../board/actions.js';
 import { pushBlockedByGuard } from '../push-refused.js';
+import { envBlocked } from '../env-blockers.js';
 import { scheduleSquad } from '../../board/schedule.js';
 import type { OldFailure, ProjectCommands, Ticket } from '../../board/types.js';
 import { CHECK_DOING, DOING } from '../plain-doing.js';
@@ -224,6 +225,9 @@ export const checksPart = {
         const named = (r: CheckResult) => (several ? `${c.label}: ${r.name}` : r.name);
         const pushed = pushBlockedByGuard(ran, (r) => (t.checksContinued ?? []).includes(named(r)));
         if (pushed) return this.pushStop(id, named(pushed), pushed.command, pushed.output);
+        // Docker not running, a missing PHP driver, a program not installed: once, with the fix, never the Builder (#37).
+        const env = envBlocked(ran.filter((r) => !(t.checksContinued ?? []).includes(named(r))));
+        if (env) return this.envStop(id, named(env.result), env.result.command, env.result.output, env.blocker);
       }
       for (const r of ran.map((x) => (several ? { ...x, part: c.label } : x))) {
         results.push(r);

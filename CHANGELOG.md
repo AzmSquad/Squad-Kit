@@ -29,6 +29,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   logged as an error.
 - **The Squad lead's Start the app works with one app.** The lead named the app "app" where the project's one app is
   called by the project's name, and the button said "There is no app called app". With one app, it starts that app.
+- **Stops once when this computer is missing something** (#37). When Docker is not running, PHP has no database
+  driver for the tests, or a check's own program is not installed, the ticket now stops once and says what to install
+  or start, with Try again, Continue anyway and Send it back to the plan. Before, the Builder was sent back to "fix" it,
+  try after try. No try is counted.
+- **The Builder's shell works on Ubuntu** (#35). Ubuntu's AppArmor lets bubblewrap start but refuses the user
+  namespace Claude Code's sandbox makes inside it, so every shell command failed while setup said the tool works.
+  squad-kit now checks for that at start, and if a run still meets it, the next runs go without that sandbox (behind
+  squad-kit's own guard). The Harness page and `squad doctor` say why, with the one setting that brings it back.
+- **The chat panel leaves room to type beside an attachment** (#30). The attachment takes its own row above the text.
+- **An attachment you have not sent stays when you open the chat full size** (#31).
+- **A question card stays where it came in the talk** (#32). New messages show below it, and while it is out of view a
+  slim bar under the talk says the story waits for your answer and takes you to it. The "new messages" button no
+  longer covers it.
 - **/healthz keeps answering during an update** (#39). While "Update now" replaced squad-kit's files, the running app
   failed to read its own version and logged an error. It now answers with the version that runs.
 

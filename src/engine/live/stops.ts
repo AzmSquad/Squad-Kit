@@ -17,6 +17,7 @@ import {
   type GuardSpec,
 } from '../project-guard.js';
 import { GUARD_BLOCKED_PUSH } from '../push-refused.js';
+import type { EnvBlocker } from '../env-blockers.js';
 import { checkLane, watchLane, type Lane } from '../lane.js';
 import { hookFiles, isHookFile } from '../hook-files.js';
 import { checkTools, toolsHold } from '../tools/index.js';
@@ -155,6 +156,40 @@ export const stopsPart = {
         };
         x.waiting = { kind: 'stuck', summary: 'A test tried to push code, and squad-kit blocked it' };
         addActivity(x, 'squad', `A test tried to push code outside a temp folder, and squad-kit blocked it (${check}). Not a failed try`);
+      });
+    } catch {
+      // The ticket was removed while it ran.
+    }
+  },
+
+  /**
+   * A check failed for a reason outside the code (#37): Docker not running, a missing PHP driver, a program not
+   * installed. It stops once with what to install or start: no try is counted, and the Builder is not sent to "fix" it.
+   */
+  envStop(this: LiveSquad, id: string, check: string, command: string, output: string, blocker: EnvBlocker): void {
+    this.log('warn', `Stopped at test: ${blocker.what} (${check}: ${command})`, id);
+    try {
+      this.update(id, (x) => {
+        if (x.takenOver || (x.chat?.open && !x.chat.beside)) return;
+        x.live = false;
+        x.squad = null;
+        delete x.clock;
+        x.retryPhase = 'test';
+        x.status = `Stopped: ${blocker.what}`;
+        x.stuck = {
+          gate: 'checks',
+          kind: 'environment',
+          checks: [check],
+          question: blocker.words,
+          detail: `${check} (${command}):\n${tail(output, 30)}`,
+          options: [
+            { do: 'retry', name: 'Try again', note: 'After you installed or started what is missing. The checks run again; nothing is rebuilt.' },
+            { do: 'continue', name: 'Continue anyway', note: 'Go on with this check failing, for example after an engineer ran it outside squad-kit and it passed. Write why: it shows on the ticket, the pull request and the release notes.' },
+            { do: 'plan', name: 'Send it back to the plan', note: 'The Spec writer rewrites the plan so it does not need it.' },
+          ],
+        };
+        x.waiting = { kind: 'stuck', summary: `${blocker.what}; the checks cannot run` };
+        addActivity(x, 'squad', `${blocker.what}, so ${check} cannot pass whatever the code does. Not a failed try`);
       });
     } catch {
       // The ticket was removed while it ran.
