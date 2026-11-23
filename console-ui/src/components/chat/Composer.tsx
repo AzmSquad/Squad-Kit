@@ -17,6 +17,12 @@ import { readFile, type PickedFile } from '../dialogs';
 import { AGENT_TITLE, type ChatSize } from './parts';
 import type { Pending } from './Sending';
 
+/**
+ * Files picked and not sent yet, by ticket. The text draft lives in useDraft; files are too big for browser storage, so
+ * they stay in memory until sent, removed, or the page reloads: opening the chat full size keeps them.
+ */
+const pickedFiles = new Map<string, PickedFile[]>();
+
 /* ── Typing box ────────────────────────────────────────── */
 
 const MAX_FILE = 10 * 1024 * 1024;
@@ -53,7 +59,15 @@ export function Composer({
   const { toast } = usePrefs();
   const c = t.chat!;
   const who = AGENT_TITLE[c.with];
-  const [files, setFiles] = useState<PickedFile[]>([]);
+  // The picked files go with the draft, so the small panel and the full-size chat share them (#31).
+  const [files, setPicked] = useState<PickedFile[]>(() => pickedFiles.get(t.id) ?? []);
+  const setFiles = (next: PickedFile[] | ((now: PickedFile[]) => PickedFile[])) =>
+    setPicked((now) => {
+      const v = typeof next === 'function' ? next(now) : next;
+      if (v.length) pickedFiles.set(t.id, v);
+      else pickedFiles.delete(t.id);
+      return v;
+    });
   const [drag, setDrag] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const d = detect(text);
@@ -130,7 +144,7 @@ export function Composer({
                 <div className="cpicked">
                   {files.map((f, i) => (
                     <span key={i} className="chip">
-                      {f.preview ? <img src={f.preview} alt="" /> : <Paperclip size={12} />} {f.name}
+                      {f.preview ? <img src={f.preview} alt="" /> : <Paperclip size={12} />} <span className="cname" title={f.name}>{f.name}</span>
                       <button className="iconbtn" aria-label={`Remove ${f.name}`} onClick={() => setFiles(files.filter((_, k) => k !== i))}>
                         <X size={11} />
                       </button>

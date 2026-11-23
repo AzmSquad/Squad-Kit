@@ -29,6 +29,7 @@ import { ChatHeader } from './chat/ChatHeader';
 import { Drafting, type Pending, Sending } from './chat/Sending';
 import { AgentMessage, SquadNote, Thinking, YouMessage } from './chat/Messages';
 import { Composer } from './chat/Composer';
+import { CardSlot, WaitsBar, useCardPlace, useCardSeen } from './chat/CardInPlace';
 
 /* ── The talk ──────────────────────────────────────────── */
 
@@ -37,8 +38,8 @@ import { Composer } from './chat/Composer';
  * One chat with one agent, in four sizes: a popup over any page, the full-screen Conversations page, a phone, and the
  * old side panel. Replies come from the agent's real session; while it works you see what it reads and its working
  * steps, and its words appear as they are written: the reply so far while it comes, then the rest, at a reading pace.
- * Answers that were already here show whole. When the story waits for you, its decision card closes the talk, with
- * the board's own buttons. Only your buttons move the ticket on.
+ * Answers that were already here show whole. When the story waits for you, its decision card sits where it came in
+ * the talk, with the board's own buttons. Only your buttons move the ticket on.
  */
 export function ChatView({ id, size, onOpenDoc, onFull, onPanel }: { id: string; size: ChatSize; onOpenDoc(d: OpenDoc): void; onFull?(): void; onPanel?(): void }) {
   const ticket = useTicket(id);
@@ -82,6 +83,11 @@ export function ChatView({ id, size, onOpenDoc, onFull, onPanel }: { id: string;
   useEffect(() => {
     if (c) popups.seen(id, messages.length);
   }, [c, id, messages.length]);
+
+  // The question card stays where it came in the talk (#32), with a slim bar while it is out of view.
+  const waitsNow = t ? decideKind(t) !== null || pressedLately(t.id) : false;
+  const cardAt = useCardPlace(id, waitsNow, messages.length);
+  const card = useCardSeen();
 
   if (!t) return <div className="cempty">{ticket.isError ? `No ticket ${id}.` : 'Loading…'}</div>;
   // What the story waits on you for closes the talk, or the card of the press you just made.
@@ -135,7 +141,12 @@ export function ChatView({ id, size, onOpenDoc, onFull, onPanel }: { id: string;
           <div className="ccol" ref={stick.contentRef}>
             {c.open && size !== 'pop' && <div className="cnote-pill">{opening}</div>}
             {messages.map((m, i) => {
-              const line = i === newAt ? <NewLine /> : null;
+              const line = (
+                <>
+                  {decide && i === cardAt && <CardSlot slot={card.ref}>{decide}</CardSlot>}
+                  {i === newAt && <NewLine />}
+                </>
+              );
               if (m.who === 'squad') return <Fragment key={i}>{line}<SquadNote t={t} m={m} last={i === messages.length - 1} onAsk={() => focus()} /></Fragment>;
               if (m.who === 'you') return <Fragment key={i}>{line}<YouMessage t={t} m={m} fresh={fresh(m)} onOpenDoc={onOpenDoc} onReply={(q) => focus(q)} /></Fragment>;
               const prev = messages[i - 1];
@@ -169,10 +180,11 @@ export function ChatView({ id, size, onOpenDoc, onFull, onPanel }: { id: string;
               c.thinking && messages.at(-1)?.note !== 'waits' && <Thinking role={c.with} steps={stepsFor(lastYou?.at ?? messages.at(-1)?.at)} hasMessage={Boolean(lastYou)} />
             )}
             <SplitDone t={t} />
-            {decide}
+            {decide && cardAt >= messages.length && <CardSlot slot={card.ref}>{decide}</CardSlot>}
           </div>
           <ToBottom s={stick} />
         </div>
+        <WaitsBar id={t.id} show={Boolean(decide) && !card.seen} card={card.el} />
         {c.open ? (
           <Composer t={t} size={size} text={text} setText={setText} input={input} onSent={() => stick.toBottom()} sendRef={sendRef} setPending={setPending} box={box} onBoxCancel={cancelBox} />
         ) : box ? (
