@@ -356,6 +356,10 @@ describe('what it may read', () => {
       expect((await pressTool(opts, 'read_records', { what: 'secrets' })).isError).toBe(true);
       expect(textOf(await pressTool(opts, 'read_board'))).toContain('SK-139 "Search by case number"');
       expect((await pressTool(opts, 'read_story', { id: 'SK-139', path: '/etc/passwd' })).isError).toBe(true);
+      // The names it reaches for by mistake (#38) still read the record.
+      expect(textOf(await pressTool(opts, 'read_story', { story: 'SK-139' }))).toContain('SK-139');
+      expect((await pressTool(opts, 'read_records', { kind: 'notes' })).isError).toBeFalsy();
+      expect((await pressTool(opts, 'read_logs', { id: 'SK-139' })).isError).toBeFalsy();
       expect((await pressTool(opts, 'take_screenshots', { shots: [{ page: '/' }] })).isError).toBe(true);
       return { structured: goodAnswer() };
     };

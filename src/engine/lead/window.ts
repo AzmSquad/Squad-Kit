@@ -61,6 +61,31 @@ const DEFS: Record<LeadRead, Omit<ToolDef, 'name'>> = {
   },
 };
 
+/**
+ * Names the lead often reaches for instead of the real field (read_logs takes "story", so read_story gets "story" too).
+ * Each is read as the real field when the real one is not given, so a near miss still reads the record.
+ */
+const ALIASES: Partial<Record<LeadRead, Record<string, string>>> = {
+  read_story: { story: 'id', ticket: 'id', key: 'id' },
+  read_decision: { decision: 'id' },
+  read_records: { kind: 'what', record: 'what', records: 'what', type: 'what', name: 'what' },
+  read_logs: { id: 'story', ticket: 'story' },
+  read_guide: { name: 'page', id: 'page' },
+};
+
+/** The call's fields with any known alias moved to its real name; an alias never wins over the real field. */
+export function withAliases(name: LeadRead, a: Record<string, unknown>): Record<string, unknown> {
+  const map = ALIASES[name];
+  if (!map) return a;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(a)) {
+    const real = map[k];
+    if (real === undefined) out[k] = v;
+    else if (a[real] === undefined && out[real] === undefined) out[real] = v;
+  }
+  return out;
+}
+
 const text = (t: string): ToolResult => ({ content: [{ type: 'text', text: t }] });
 
 /** What the lead read, marked as data. */
@@ -130,7 +155,8 @@ export class LeadWindow extends AgentWindow {
     else if (name === 'ask_api') this.lead.onStep({ text: `Asked the API ${String(a.method ?? 'GET').toUpperCase()} ${page(a.path)} in its own copy`, kind: 'app' });
   }
 
-  private async read(name: LeadRead, a: Record<string, unknown>): Promise<ToolResult> {
+  private async read(name: LeadRead, given: Record<string, unknown>): Promise<ToolResult> {
+    const a = withAliases(name, given);
     const bp = this.lead.bp;
     const allowed: Record<LeadRead, string[]> = { read_board: [], read_story: ['id'], read_decision: ['id'], read_records: ['what'], read_logs: ['story'], read_guide: ['page'] };
     const extra = Object.keys(a).find((k) => !allowed[name].includes(k));
