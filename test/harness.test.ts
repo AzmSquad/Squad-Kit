@@ -183,7 +183,7 @@ const STOPS_PER_FILE: Record<string, number> = {
   'live/review.ts': 1,
   'live/screens.ts': 6,
   'live/shoot.ts': 3,
-  'live/stops.ts': 5,
+  'live/stops.ts': 6,
   'live/workspace.ts': 1,
   'publish.ts': 4,
   'sync.ts': 1,

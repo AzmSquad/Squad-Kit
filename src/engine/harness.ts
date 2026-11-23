@@ -154,6 +154,7 @@ function lineStages(): HarnessStage[] {
       g('no-tests', 'No tests, no green', 'No tests never means a green pass. Lint, build and the app starting must still pass.', 'Asked once per project: add tests, or go on without.'),
       g('test-change', 'Test commands stay strong', 'A new test command stays only if it passes and runs at least as many tests.', "If squad-kit can't tell, you choose."),
       g('tool-missing', "A missing tool is not the Builder's", "A check that fails only because a tool is missing (the Android SDK, Java, Xcode, a program the command runs) says nothing about the code. squad-kit looks at this computer's tools again and runs the checks once more: no try counts, and the Builder is never asked.", "Still missing: the story waits for it with the Tools page's line and goes on by itself once it is there, or a card says what to install."),
+      g('environment', 'Something outside the code', "A check that fails because Docker is not running, a driver is missing or a program is not installed says nothing about the code. The story stops once and says what to install or start: no try counts, and the Builder is never sent to fix it.", 'A card: try again once it is there, continue anyway with a reason, or the plan changes.'),
       g('gate-cant-run', "A check that can't run", "One of your team's gates that can't run, or a file of additions that can't be read, says nothing about the code. It never counts against the story, and it is never dropped without a word.", "It retries by itself, then a card: try again, let an engineer look, or go on with a reason. On Builds by itself it waits for a person."),
     ]),
     stage('review', 'Review', "A Reviewer that never saw the build reads the Builder's work.", on(squad('Reviewer')), [
@@ -374,6 +375,7 @@ function rowDetails(meta: BoardMeta | undefined, root: string | undefined): Reco
     'first-run': code('engine/onboard.ts', ['Runs', run('setup', 'test', 'start')], ['See it in', 'The Overview page']),
     overview: code('board/first-run.ts', ['See it in', 'The Overview page']),
     'gate-cant-run': code('engine/gate-run.ts', ['File', '.squad/harness.yaml']),
+    environment: code('engine/env-blockers.ts', ['Reads', 'Docker is not running, a missing PHP driver or extension, a program not installed'], ['Stops', 'Once, with no try counted']),
     'tool-missing': code('engine/tool-missing.ts', ['Reads', 'No Android SDK found, JAVA_HOME is not set, xcrun: error, command not found'], ['Runs again', 'Once, with no try counted']),
     'project-rules': code('engine/repos.ts', ['Reads', (root ? rulesFiles(root).map((f) => f.slice(root.length + 1)) : []).join(', ') || 'None found yet']),
     'brd-questions': code('engine/breakdown-job.ts', ['Limit', `${MAX_QUESTIONS} questions`]),
