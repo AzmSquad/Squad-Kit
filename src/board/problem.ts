@@ -64,7 +64,7 @@ function title(t: Ticket): string {
   if (s.kind === 'owner-notes') return 'The owner asked for changes';
   if (s.kind === 'owner-closed') return 'The pull request was closed';
   if (s.kind === 'hook') return s.added ? "Your team's check said no" : "The project's own check said no";
-  if (s.gate === 'checks') return s.kind === 'weakened' ? 'The tests were made weaker' : s.kind === 'no-tests' ? 'No tests to check the work' : s.kind === 'guard' ? 'A file was blocked' : s.kind === 'push' ? 'A push was blocked' : 'The checks still fail';
+  if (s.gate === 'checks') return s.kind === 'weakened' ? 'The tests were made weaker' : s.kind === 'no-tests' ? 'No tests to check the work' : s.kind === 'guard' ? 'A file was blocked' : s.kind === 'push' ? 'A push was blocked' : s.kind === 'environment' ? 'Something this computer is missing' : 'The checks still fail';
   if (s.gate === 'review') return 'The review is still open';
   if (s.gate === 'proof') return s.kind === 'bad-proof' ? 'The screenshots did not pass the check' : s.kind === 'broken' ? 'A "done when" is not working yet' : s.kind === 'not-shown' ? 'A "done when" is not shown yet' : 'No screenshots yet';
   if (s.gate === 'merge') return 'The change clashes with newer code';

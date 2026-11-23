@@ -252,7 +252,7 @@ export interface StuckChoice {
   /** 'cap': the step reached its turn or spend cap; Give it more or Stop. */
   gate?: 'checks' | 'review' | 'proof' | 'merge' | 'cap';
   /** Why the gate stopped, when it is not a plain failure. 'guard': a project command needed a file squad-kit's guard blocked; 'push': a test tried to push outside a temp folder. */
-  kind?: 'weakened' | 'no-tests' | 'bad-proof' | 'guard' | 'push' | 'broken' | 'not-shown' | 'hook' | 'gate-cant-run' | 'owner-notes' | 'owner-closed';
+  kind?: 'weakened' | 'no-tests' | 'bad-proof' | 'guard' | 'push' | 'environment' | 'broken' | 'not-shown' | 'hook' | 'gate-cant-run' | 'owner-notes' | 'owner-closed';
   /** The plain reasons, one per line: "test/booking.test.ts was deleted (4 tests)". */
   points?: string[];
   /** The ticket stopped between two steps at its budget, or the month's. */
