@@ -16,7 +16,8 @@ import { reposOf } from './repos.js';
  * leftover, and squad-kit stops it.
  *
  * Never touched: a process anywhere else, the copies Your apps run from (they live elsewhere, see run-app.ts), this
- * squad-kit and what it runs now, and a program on a terminal of the person's own.
+ * squad-kit and what it runs now, a program on a terminal of the person's own, and what an editor the person opened
+ * on a copy runs there (VS Code's extension hosts and language servers, a JetBrains IDE).
  *
  * macOS and Linux read the working folder from lsof or /proc. Windows has no reliable way to read another process's
  * working folder without native code, so there no leftover is found by its folder: squad-kit relies on stopping each
@@ -216,6 +217,38 @@ export function ownedBySquadKit(pid: number): boolean {
   return pid <= 1 || ownedNow(processes()).has(pid);
 }
 
+/**
+ * An editor's own program: VS Code and its forks, the JetBrains IDEs, Zed, Sublime Text. A person who opens a ticket's
+ * copy in one starts its extension hosts and language servers there, with no terminal, and they are theirs (#36).
+ */
+const EDITOR = /(^|[/\\])(code|code-insiders|code-oss|codium|vscodium|cursor|windsurf|Code Helper[^/\\]*|Cursor Helper[^/\\]*|Electron|idea|pycharm|webstorm|phpstorm|goland|rider|clion|rubymine|datagrip|rustrover|fleet|zed|zed-editor|sublime_text)(\.exe)?(\s|$)/i;
+/** Where editors keep the programs their extensions run. */
+const EDITOR_HOME = /[/\\]\.(vscode|vscode-insiders|vscode-server|vscode-oss|cursor|cursor-server|windsurf|windsurf-server|vscodium)[/\\]|[/\\]JetBrains[/\\]|\/(Visual Studio Code|Cursor|Windsurf|VSCodium)[^/]*\.app\/|\/snap\/code(-insiders)?\//;
+
+export function isEditorProgram(command: string): boolean {
+  return EDITOR.test(command) || EDITOR_HOME.test(command);
+}
+
+/** The processes an editor started, itself included: never a leftover, whatever folder they work in. */
+export function editorProcesses(rows: Proc[]): Set<number> {
+  const byPid = new Map(rows.map((r) => [r.pid, r]));
+  const out = new Set<number>();
+  for (const r of rows) {
+    const chain: number[] = [];
+    let editor = false;
+    for (let p: Proc | undefined = r; p && p.pid > 1 && !chain.includes(p.pid); p = byPid.get(p.ppid)) {
+      if (out.has(p.pid) || isEditorProgram(p.command)) {
+        out.add(p.pid);
+        editor = true;
+        break;
+      }
+      chain.push(p.pid);
+    }
+    if (editor) for (const pid of chain) out.add(pid);
+  }
+  return out;
+}
+
 export interface LookOptions {
   /** Folders inside `dirs` to leave alone: the copies of steps running now, of a ticket taken over. */
   busy?: string[];
@@ -231,7 +264,9 @@ export function leftoversIn(dirs: string[], opts: LookOptions = {}): Leftover[] 
   // A program on a terminal is the person's own (a shell in the copy, a tool they run there); this squad-kit's own
   // terminal is the one exception, as the programs it starts may share it.
   const mine = rows.find((r) => r.pid === process.pid)?.tty ?? '';
-  const maybe = rows.filter((r) => !owned.has(r.pid) && (!r.tty || r.tty === mine));
+  // And a program an editor runs is the person's too: VS Code's extension hosts and language servers have no terminal.
+  const editors = editorProcesses(rows);
+  const maybe = rows.filter((r) => !owned.has(r.pid) && !editors.has(r.pid) && (!r.tty || r.tty === mine));
   const cwds = workingFolders(maybe.map((r) => r.pid));
   const found = maybe
     .map((r) => ({ ...r, cwd: cwds.get(r.pid) ?? '' }))
