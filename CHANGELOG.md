@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.26] — 2026-11-23
+
 ### Fixed
 
 - **A ticket's copy is never reused when git has lost it** (#34). When a project was set up again in the same folder,
