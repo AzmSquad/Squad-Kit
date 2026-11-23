@@ -121,7 +121,11 @@
 .csize-pop .cyou .cmd { font-size: 13.5px; font-weight: 500; }
 .csize-pop .cacts { display: none; }
 .csize-pop .ccomp { padding: 9px 10px 11px; border-top: 1px solid var(--line); }
-.csize-pop .cbox { display: flex; align-items: flex-end; gap: 6px; padding: 7px 7px 7px 11px; border-radius: 12px; }
+.csize-pop .cbox { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px; padding: 7px 7px 7px 11px; border-radius: 12px; }
+/* An attachment takes its own row above the text, so the text field stays there to type in (#30). */
+.csize-pop .cbox .cpicked { flex-basis: 100%; margin: 0 0 4px; }
+.csize-pop .cpicked .chip { max-width: 100%; min-width: 0; }
+.csize-pop .cpicked .chip .cname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .csize-pop .cta { flex: 1; min-width: 0; font-size: 13px; padding: 3px 0; min-height: 22px; }
 .csize-pop .crow { flex: none; margin: 0; gap: 2px; }
 .csize-pop .clchip { display: none; }

@@ -21,3 +21,9 @@
 .talkhere > .chat-v { flex: 1; min-height: 0; }
 /* A file opened from it, at the page's top level: over the popups and their heads, under any dialog, like the popups' own. */
 .talkhere-doc > .cdoc { position: fixed; top: 10px; bottom: 10px; inset-inline-end: 10px; z-index: 47; margin: 0; box-shadow: var(--pop-shadow); }
+
+/* The question card in its place in the talk, and the slim bar that points to it while it is out of view (#32). */
+.ccard-slot { scroll-margin: 12px; }
+.cwaits-bar { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 5px 12px; border: 0; border-top: 1px solid var(--line); background: var(--you-soft); color: var(--text); font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.cwaits-bar:hover { background: color-mix(in srgb, var(--you-soft) 70%, var(--you) 10%); }
+.cwaits-bar:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
