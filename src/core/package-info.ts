@@ -24,7 +24,24 @@ export function changelogBlobUrl(repositoryUrl: string | undefined, version: str
   return `${base}/blob/v${version}/CHANGELOG.md`;
 }
 
+/** The last read that worked: what this running squad-kit is. */
+let lastRead: InstalledPackage | undefined;
+
+/**
+ * squad-kit's own package. While an update replaces its files under the running app, they can be gone for a moment
+ * (#39): the last read that worked answers then, as that is still the version running, and /healthz never fails for it.
+ */
 export function readInstalledPackage(): InstalledPackage {
+  try {
+    lastRead = readPackageNow();
+    return lastRead;
+  } catch (err) {
+    if (lastRead) return lastRead;
+    throw err;
+  }
+}
+
+function readPackageNow(): InstalledPackage {
   const root = packageRoot();
   const pkgFile = path.join(root, 'package.json');
   const pkg = JSON.parse(fs.readFileSync(pkgFile, 'utf8')) as {
