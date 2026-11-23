@@ -153,6 +153,11 @@ export function recentLines(ms: number, now = Date.now(), maxBytes = 3 * 1024 * 
   return lines.slice(from);
 }
 
+/** The project a line is about, as {@link logLine} wrote it; "app" for squad-kit itself, undefined for a line it did not write. */
+export function lineProject(line: string): string | undefined {
+  return /^\S+ (?:info|warn|error)\s+\[([^\]]*)\]/.exec(line)?.[1];
+}
+
 /** The last `n` lines of the log, across days. */
 export function tailLines(n: number): string[] {
   const out: string[] = [];

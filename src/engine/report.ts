@@ -5,7 +5,7 @@ import path from 'node:path';
 import yaml from 'js-yaml';
 import { squadHome } from '../core/home.js';
 import { readInstalledPackage } from '../core/package-info.js';
-import { recentLines, writeLog } from '../core/app-log.js';
+import { lineProject, recentLines, writeLog } from '../core/app-log.js';
 import { isSecretFile, knownSecrets, localFileSecrets, scrubSecrets } from '../core/scrub.js';
 import { readProjects } from '../core/projects.js';
 import { zip, type ZipEntry } from '../core/zip.js';
@@ -99,6 +99,15 @@ export function reportFolder(): string {
 
 function slug(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'project';
+}
+
+/** The name the log tags this project's lines with: the board's own name, as writeLog is given it. */
+function logProject(bp: BoardPaths): string {
+  try {
+    return (boardExists(bp) ? readMeta(bp).project?.trim() : '') || 'app';
+  } catch {
+    return 'app';
+  }
 }
 
 function projectOf(bp: BoardPaths | undefined): string | undefined {
@@ -262,8 +271,12 @@ export function reportEntries(input: ReportInput): ZipEntry[] {
   }
   const pause = readPause();
   if (pause) add('usage-limit.json', `${JSON.stringify({ ...pause, endedOrDue: Date.parse(pause.until) <= now }, null, 2)}\n`, 'the last usage-limit wait');
-  const lines = recentLines(DAY, now);
-  add('log/squad-kit.log', lines.length ? `${lines.join('\n')}\n` : 'Nothing was logged in the last 24 hours.\n', "squad-kit's own log for the last 24 hours");
+  // A project's report holds its own lines and squad-kit's, never another project's (#40): a report about one client's
+  // project must not carry another's errors, commands or folders.
+  const own = bp ? logProject(bp) : undefined;
+  const lines = recentLines(DAY, now).filter((l) => own === undefined || [own, 'app'].includes(lineProject(l) ?? ''));
+  const whose = own === undefined ? '' : ` (${own}'s lines and squad-kit's own)`;
+  add('log/squad-kit.log', lines.length ? `${lines.join('\n')}\n` : 'Nothing was logged in the last 24 hours.\n', `squad-kit's own log for the last 24 hours${whose}`);
 
   const note = input.note?.trim();
   const readme = [
