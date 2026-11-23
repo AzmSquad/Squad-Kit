@@ -5,9 +5,9 @@ import net from 'node:net';
 import path from 'node:path';
 import { findApp, isUp, projectApps, type ProjectApp } from '../board/apps.js';
 import { readMeta, type BoardPaths } from '../board/store.js';
-import { writeLog } from '../core/app-log.js';
 import type { RepoInfo } from '../board/types.js';
 import { runCommand, tail } from './checks.js';
+import { logAppFailure } from './app-failure-log.js';
 import { DOCKER_STOP_MS, DOCKER_WAIT_MS, composeRun, dockerGuard } from './compose-run.js';
 import { dockerBlockedWords, guardSupport, projectGuardFor, spawnProject, type GuardSpec } from './project-guard.js';
 import { GitStopped, NoRoomForCopy, clearHalfCopy, copyIsWhole, copyTurn, gitLater, gitRecords, latestBase, makeCopy, type CopyHow } from './git.js';
@@ -669,24 +669,8 @@ export class AppRunner {
     run.error = error;
     if (more.detail) run.detail = more.detail;
     if (more.busy) run.busy = more.busy;
-    this.logFailure(run);
+    logAppFailure(this.bp, this.runs, run);
     this.leaveIfIdle();
-  }
-
-  /**
-   * Why an app did not start, in squad-kit's log too: before, it lived only in the board's memory, so the Squad lead
-   * and a problem report found nothing after a failed start (the Nov 17 demo). The detail is what engineers read.
-   */
-  private logFailure(run: Run): void {
-    try {
-      const repo = [...this.runs.entries()].find(([, r]) => r === run)?.[0];
-      const name = repo === undefined ? 'The app' : (projectApps(readMeta(this.bp)).find((a) => a.repo === repo)?.name ?? repo);
-      const busy = run.busy ? ` Port ${run.busy.port} is held${run.busy.program ? ` by ${run.busy.program}` : ''}.` : '';
-      const detail = run.detail?.trim() ? ` | ${tail(run.detail, 30)}` : '';
-      writeLog({ level: 'error', project: readMeta(this.bp).project, text: `Run app: ${name} did not start: ${run.error ?? 'no reason given'}${busy}${detail}` });
-    } catch {
-      // Logging never fails the work it describes.
-    }
   }
 
   /** The running product is free again once none of Your apps runs. */
@@ -835,13 +819,7 @@ export class AppRunner {
       ended = true;
       exited();
       this.record(app.repo, (rec) => delete rec.pid);
-      if (run.state === 'running' && !signal.aborted) {
-        run.state = 'failed';
-        run.error = 'It stopped by itself.';
-        run.detail = `${command}\n${tail(printed, 30)}`;
-        this.logFailure(run);
-        this.leaveIfIdle();
-      }
+      if (run.state === 'running' && !signal.aborted) this.fail(run, 'It stopped by itself.', { detail: `${command}\n${tail(printed, 30)}` });
     };
     child.once('error', (err) => {
       printed += `\n${err.message}`;

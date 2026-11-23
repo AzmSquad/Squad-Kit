@@ -21,8 +21,9 @@ vi.mock('../src/modules/registry.js', async (orig) => ({
   shotBrowser: () => h.browser!,
 }));
 
-const { AgentWindow, ALL_TOOLS, keyName, MISTAKES_TO_STOP, tooManyMistakesWords, tooManyWords } = await import('../src/engine/window.js');
+const { AgentWindow, ALL_TOOLS, MISTAKES_TO_STOP, tooManyMistakesWords, tooManyWords } = await import('../src/engine/window.js');
 const { openWindow, closeWindow, windowAccess } = await import('../src/engine/window-server.js');
+const { keyName } = await import('../src/engine/window-calls.js');
 
 let tmp: string;
 let fake: FakeBrowser;

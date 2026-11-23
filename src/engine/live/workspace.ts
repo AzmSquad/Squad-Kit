@@ -5,7 +5,8 @@ import { scheduleSquad } from '../../board/schedule.js';
 import type { RepoInfo, Ticket } from '../../board/types.js';
 import { DOING } from '../plain-doing.js';
 import { runCommand, tail, type CheckResult } from '../checks.js';
-import { addWorktree, changedTracked, putBackTracked, setAsideStrayCopy, writeChangesOf } from '../git.js';
+import { addWorktree, changedTracked, putBackTracked, writeChangesOf } from '../git.js';
+import { clearStrayCopy, setAsideStrayCopy } from '../stray-copy.js';
 import * as P from '../prompts.js';
 import { repoFor, reposOf } from '../repos.js';
 import { partsOf, repoLabel } from '../../board/parts.js';
@@ -67,9 +68,11 @@ export const workspacePart = {
     const dep = dependencyToStartFrom(this.bp, t);
     const at = meta.repos?.length ? storyCopyDir(root, id, repo.path) : undefined;
     const fetched = dep ? undefined : await fetchBase(this.bp, t);
+    // A copy an earlier set-up of the project left where this one goes is never reused (#34).
+    const stray = dep ? null : await clearStrayCopy(path.join(root, repo.path), id, at);
+    if (stray) this.log('warn', `A copy from an earlier set-up of the project was in the way, so squad-kit moved it to ${stray}`, id);
     const wt: { dir: string; branch: string; baseCommit: string; pushed?: string; from?: string } = await this.makingCopy(id, (how) => (dep ? addWorktreeOn(this.bp, t, dep, at, how) : addWorktree(path.join(root, repo.path), id, repo.base, fetched, at, how)));
     const named = repo.path === '.' ? 'the project' : (repoLabel(meta, repo.path) ?? repo.path);
-    if ('setAside' in wt && wt.setAside) this.log('warn', `A copy from an earlier set-up of the project was in the way, so squad-kit moved it to ${wt.setAside}`, id);
     t = this.update(id, (x) => {
       x.worktree = wt.dir;
       if (at) x.storyDir = path.dirname(at);
