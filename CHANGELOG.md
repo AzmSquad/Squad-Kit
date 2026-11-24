@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.33] — 2026-11-24
+
+### Added
+
+- **The Backlog shows each story under its feature and epic.** When the tracker keeps its work under epics and
+  features (Azure DevOps parent links, GitHub sub-issues, Jira parents), the Backlog's new Tree view puts every story
+  and bug under them, in the backlog's own order, with the items under no epic last. An epic or a feature folds to
+  hide what is under it and shows how many of its items are merged. List is the plain backlog, and a tracker with no
+  epics or features keeps it. In a terminal, `squad backlog` prints the tree and `squad backlog --flat` the list.
+- **The list never waits for the tree.** An epic in a project this account cannot see is left out and the rest of
+  the tree stays; a tree that takes over 5 seconds comes with the next look; each tree is read again at most once a
+  minute.
+
 ## [1.3.32] — 2026-11-24
 
 ### Fixed
