@@ -48,8 +48,38 @@ export interface ConnectionStatus {
   by?: 'token';
   /** One plain line for this case: "Signed in as …, which has no access to …". */
   line?: Words;
-  /** The sign-in reaches several places and this project has none yet: the person picks one (`pickSite`). */
-  pick?: { site: string; name: string }[];
+  /**
+   * The sign-in reaches several places and this project has none yet: the person picks one (`pickSite`). `where`: the
+   * line under its name (the site when not given).
+   */
+  pick?: { site: string; name: string; where?: string }[];
+  /**
+   * This row also takes the address of the project's place, pasted from the browser (`pickSite` with it): when the list
+   * does not have it, or to change it. `now`: the place in use, said on a connected row.
+   */
+  address?: AddressAsk;
+  /** A token pasted on this row (`saveToken`): its steps with real links, and open at once when it is the only way here. */
+  token?: TokenAsk;
+}
+
+/** The pasted address of a place: an example of one, and where to copy it from. */
+export interface AddressAsk {
+  now?: string;
+  example: string;
+  where: Words;
+}
+
+/** The token form on a row: the place's address when it has none yet, and the token. */
+export interface TokenAsk {
+  steps: GuideStep[];
+  /** The address the form starts with: the place in use or found, else empty. */
+  address?: string;
+  /** Open at once: the token is the only way for this place. */
+  open?: boolean;
+  /** Why a token here, in one line. */
+  why: Words;
+  /** The terminal's way to save it: a secret is never typed into a command. */
+  command: string;
 }
 
 /** The page the one-time code is typed on, when it is not the tool's own: Microsoft's, for Azure DevOps. */
@@ -122,4 +152,6 @@ export interface ConnectionModule {
   localSignIn?(root: string): { as?: string } | 'token' | null;
   /** Picks one of the places the sign-in reaches (`ConnectionStatus.pick`) for projects that have none of their own. */
   pickSite?(root: string, site: string): Promise<{ line: string }>;
+  /** Saves a token pasted on the row (`ConnectionStatus.token`) with the place's address, then checks it. */
+  saveToken?(root: string, input: { address?: string; token: string }): Promise<{ line: string }>;
 }

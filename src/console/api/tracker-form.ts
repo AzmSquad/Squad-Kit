@@ -17,7 +17,7 @@ export async function trackerForm(root: string, savedType: string, asked?: strin
   const dirs = [root, ...findNestedRepos(root).map((r) => path.join(root, r.path))];
   const guessed = guessTracker(dirs.map((d) => git(d, ['config', '--get', 'remote.origin.url'], { allowFail: true })));
   const mod = trackerModule(asked) ?? saved ?? guessed?.module ?? TRACKERS[0]!;
-  const read = mod === saved ? mod.read(root) : { values: {} as Record<string, string>, hasSecret: false };
+  const read: ReturnType<typeof mod.read> = mod === saved ? mod.read(root) : { values: {}, hasSecret: false };
   const guess = guessed?.module === mod ? guessed.values : {};
   const values = Object.fromEntries(mod.fields.filter((f) => !f.secret).map((f) => [f.key, read.values[f.key] || guess[f.key] || '']));
   const steps = mod.setupSteps ? await mod.setupSteps(values).catch(() => []) : [];
@@ -29,7 +29,8 @@ export async function trackerForm(root: string, savedType: string, asked?: strin
     fields: mod.fields,
     values,
     hasToken: read.hasSecret,
-    ...('note' in read && read.note ? { note: read.note } : {}),
+    ...(read.note ? { note: read.note } : {}),
+    ...(read.signedIn ? { signedIn: true } : {}),
     steps,
     modules: TRACKERS.map((m) => ({ name: m.name, label: m.label })),
   };

@@ -2,7 +2,7 @@ import path from 'node:path';
 import { readMeta, type BoardPaths } from '../board/store.js';
 import { BoardActionError } from '../board/actions/errors.js';
 import { CONNECTIONS, connectionModule } from '../modules/registry.js';
-import type { CodePage, ConnectionModule, ConnectionState, ConnectionStatus, GuideStep, SignInFlow, Words } from '../modules/connection/types.js';
+import type { AddressAsk, CodePage, ConnectionModule, ConnectionState, ConnectionStatus, GuideStep, SignInFlow, TokenAsk, Words } from '../modules/connection/types.js';
 import { git } from './git.js';
 import { reposOf } from './repos.js';
 import { selfRepo, selfUpstream } from './self-project.js';
@@ -40,7 +40,11 @@ export interface ConnectionRow {
   /** Where on the tool's own site squad-kit's access can be taken away too. */
   revokeAt?: { link: string; words: Words };
   /** The places the sign-in reaches, to pick this project's from. */
-  pick?: { site: string; name: string }[];
+  pick?: { site: string; name: string; where?: string }[];
+  /** The place's address, pasted: when the list does not have it, or to change the one in use (`now`). */
+  address?: AddressAsk;
+  /** A token pasted on this row, with its steps. */
+  token?: TokenAsk;
   /** What it is for in this project: the repo on this tool, and the repo its pull requests go to when that is not it. */
   for?: { repo: string; into?: string; self: boolean };
   /** A sign-in started from the board or the terminal, while it waits or just ended. */
@@ -109,6 +113,8 @@ async function rowOf(bp: BoardPaths, m: ConnectionModule): Promise<ConnectionRow
     ...(s.line ? { line: s.line } : {}),
     ...(s.signedIn ? { signedIn: s.signedIn } : {}),
     ...(s.pick?.length ? { pick: s.pick } : {}),
+    ...(m.pickSite && s.address ? { address: s.address } : {}),
+    ...(m.saveToken && s.token ? { token: s.token } : {}),
     ...(there ? { for: there } : {}),
     ...(flow ? { flow } : {}),
     actions: actionsOf(m, s),
@@ -152,13 +158,25 @@ export function cancelSignIn(name: string): SignInFlow {
 
 /**
  * Picks the place a sign-in reaches for projects that have none of their own yet: one of the row's `pick` list, by its
- * name there (a Jira site). In a terminal, `squad connect <tool> --site <site>`, or a number from the list.
+ * name there (a Jira site, an Azure DevOps organization/project), or a pasted address where the row takes one. In a
+ * terminal, `squad connect <tool> --site <site>`, or a number from the list.
  */
 export async function pickSite(bp: BoardPaths, name: string, site: string): Promise<{ line: string }> {
   const m = moduleFor(name);
   if (!m.pickSite) throw new BoardActionError(`${m.label} has nothing to pick here.`);
   if (!site?.trim()) throw new BoardActionError('Say which one to use.');
   return m.pickSite(bp.root, site.trim());
+}
+
+/**
+ * A token pasted on the row, with the address of the place when it has none yet: checked, then saved for this project on
+ * this computer. In a terminal, `squad config set tracker`: a secret is never typed into a command.
+ */
+export async function saveToken(bp: BoardPaths, name: string, input: { address?: string; token?: string }): Promise<{ line: string }> {
+  const m = moduleFor(name);
+  if (!m.saveToken) throw new BoardActionError(`${m.label} takes its token in Settings.`);
+  if (!input.token?.trim()) throw new BoardActionError('Paste the token first.');
+  return m.saveToken(bp.root, { ...(input.address?.trim() ? { address: input.address.trim() } : {}), token: input.token });
 }
 
 /** Whose sign-in Disconnect ends, and the page the code is typed on, for the terminal's own words. */

@@ -93,7 +93,7 @@ export function TrackerSettings() {
           {inUse && s.user ? (
             <span className="pill ok">Connected as {s.user}</span>
           ) : inUse ? (
-            <span className="pill bug">{s.error ?? (!hasSecret ? 'Not connected' : s.hasToken ? 'Not connected' : 'Needs a token')}</span>
+            <span className="pill bug">{s.error ?? (!hasSecret || s.hasToken || s.signedIn ? 'Not connected' : 'Needs a token')}</span>
           ) : (
             <span className="pill wait">Not set up</span>
           )}

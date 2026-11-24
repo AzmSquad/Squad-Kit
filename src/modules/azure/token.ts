@@ -118,9 +118,9 @@ export function signedInWithMicrosoft(): boolean {
 const AGAIN = 'Sign in with Microsoft again on the Connections page (squad connect azure), or paste a token in Settings.';
 
 /** The words when an organization is backed by personal Microsoft accounts. */
-export const personalOrg = (org: string) => `This organization, ${org}, uses personal Microsoft accounts, so it needs a token. Paste one in Settings.`;
+export const personalOrg = (org: string) => `This organization, ${org}, uses personal Microsoft accounts, so it needs a token. Paste one on the Connections page.`;
 /** The same, when a sign-in was asked for: why it cannot work first, then what to do. */
-export const personalOrgSignIn = (org: string) => `This organization, ${org}, uses personal Microsoft accounts, so Sign in with Microsoft cannot reach it. It needs a token: paste one in Settings.`;
+export const personalOrgSignIn = (org: string) => `This organization, ${org}, uses personal Microsoft accounts, so Sign in with Microsoft cannot reach it. It needs a token: paste one on the Connections page (or squad config set tracker).`;
 
 /** The words for a call that has no token, by why. */
 function noToken(org: string, why: Failed['why'] | 'personal'): ModuleError {

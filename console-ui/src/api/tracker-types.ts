@@ -51,6 +51,8 @@ export interface TrackerStatus {
   hasToken: boolean;
   /** One plain line about the saved settings, such as that squad-kit only reads the tracker for now. */
   note?: string;
+  /** Signed in on the Connections page instead: no token is needed. */
+  signedIn?: boolean;
   user?: string;
   error?: string;
   /** How an item is written on the connected tracker, like AB#40. */

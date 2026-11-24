@@ -231,18 +231,21 @@ describe('Connections: Sign in with Microsoft through its own tool, in squad-kit
     devops = fakeDevOps({ orgs: { 'personal-org': ZEROS } });
     const row = await azureRow(bp);
     expect(row).toMatchObject({ state: 'not-connected', by: 'token' });
-    expect(row.line?.en).toBe('This organization, personal-org, uses personal Microsoft accounts, so it needs a token. Paste one in Settings.');
-    expect(row.line?.ar).toBe('هذي المنظمة، personal-org، تستخدم حسابات Microsoft شخصية، فتحتاج رمز. الصقه في الإعدادات.');
-    expect(row.steps.map((s) => s.command)).toEqual([undefined, undefined, 'squad config set tracker']);
+    expect(row.line?.en).toBe('This organization, personal-org, uses personal Microsoft accounts, so it needs a token. Make one with the steps below and paste it here.');
+    expect(row.line?.ar).toBe('هذي المنظمة، personal-org، تستخدم حسابات Microsoft شخصية، فتحتاج رمز. سوّه بالخطوات تحت والصقه هنا.');
+    expect(row.steps.map((s) => s.command)).toEqual([undefined, undefined, undefined, 'squad config set tracker']);
+    // The token form is open on the row at once, with the organization's own tokens page and its address filled in.
+    expect(row.token).toMatchObject({ open: true, address: 'dev.azure.com/personal-org/Shop', command: 'squad config set tracker' });
+    expect(row.token?.steps[0]?.link).toBe('https://dev.azure.com/personal-org/_usersSettings/tokens');
     expect(row.actions.map((a) => a.id)).toEqual(['check']);
     const f = await startSignIn(bp, 'azure');
-    expect(f).toMatchObject({ state: 'failed', line: 'This organization, personal-org, uses personal Microsoft accounts, so Sign in with Microsoft cannot reach it. It needs a token: paste one in Settings.' });
+    expect(f).toMatchObject({ state: 'failed', line: 'This organization, personal-org, uses personal Microsoft accounts, so Sign in with Microsoft cannot reach it. It needs a token: paste one on the Connections page (or squad config set tracker).' });
     expect(az!.calls().some((c) => c.startsWith('login'))).toBe(false);
     // With no az here either: still the token's steps, never "install Microsoft's tool".
     process.env.PATH = pathWithoutTools(fs.mkdtempSync(path.join(tmp, 'bin-')));
     const bare = await azureRow(bp);
     expect(bare).toMatchObject({ state: 'not-connected', by: 'token' });
-    expect(bare.steps.map((s) => s.command)).toEqual([undefined, undefined, 'squad config set tracker']);
+    expect(bare.steps.map((s) => s.command)).toEqual([undefined, undefined, undefined, 'squad config set tracker']);
   });
 
   it('signed in with an account that cannot reach the organization: plain words, and Sign in again', async () => {
@@ -471,7 +474,7 @@ describe('Connections: Sign in with Microsoft through its own tool, in squad-kit
     const answerWith = (status: number) =>
       vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ message: 'made up' }), { status }));
     answerWith(404);
-    expect(await azureRow(bp)).toMatchObject({ state: 'not-connected', by: 'token', line: { en: 'squad-kit could not find the organization contoso on Azure DevOps. Check its name in Settings.' } });
+    expect(await azureRow(bp)).toMatchObject({ state: 'not-connected', by: 'token', line: { en: "squad-kit could not find the organization contoso on Azure DevOps. Paste your board's address again." } });
     answerWith(400);
     expect((await azureRow(bp)).line?.en).toBe('Azure DevOps answered with an error just now. Press Check again in a moment; an engineer can see why in the log.');
     answerWith(503);
@@ -577,7 +580,7 @@ describe('Azure DevOps calls and git with the Microsoft token', () => {
     const bp = project('personal-org');
     devops = fakeDevOps({ orgs: { 'personal-org': ZEROS } });
     signedIn();
-    await expect(azureTracker.open(bp.root)!.whoAmI()).rejects.toMatchObject({ kind: 'sign-in', message: 'This organization, personal-org, uses personal Microsoft accounts, so it needs a token. Paste one in Settings.' });
+    await expect(azureTracker.open(bp.root)!.whoAmI()).rejects.toMatchObject({ kind: 'sign-in', message: 'This organization, personal-org, uses personal Microsoft accounts, so it needs a token. Paste one on the Connections page.' });
   });
 
   it('the Connections row before any project settings: connected as the Microsoft account', async () => {

@@ -1,7 +1,7 @@
 import type { Hono } from 'hono';
 import type { SquadPaths } from '../../core/paths.js';
 import { boardPaths } from '../../board/store.js';
-import { cancelSignIn, connectionsOf, disconnect, pickSite, signInNow, startSignIn } from '../../engine/connections.js';
+import { cancelSignIn, connectionsOf, disconnect, pickSite, saveToken, signInNow, startSignIn } from '../../engine/connections.js';
 import type { SignInFlow } from '../../modules/connection/types.js';
 import { act, body } from './app.js';
 
@@ -43,6 +43,15 @@ export function mountConnectionsApi(app: Hono, opts: { paths: SquadPaths }): voi
   app.post('/api/v1/connections/:name/site', async (c) => {
     const b = await body<{ site?: unknown } | null>(c);
     return act(c, () => pickSite(bp, c.req.param('name'), typeof b?.site === 'string' ? b.site : ''));
+  });
+
+  // A token pasted on the row, with the place's address: checked, then saved on this computer. Never in the address bar or
+  // a log; in a terminal, `squad config set tracker`.
+  app.post('/api/v1/connections/:name/token', async (c) => {
+    const b = await body<{ address?: unknown; token?: unknown } | null>(c);
+    return act(c, () =>
+      saveToken(bp, c.req.param('name'), { ...(typeof b?.address === 'string' ? { address: b.address } : {}), ...(typeof b?.token === 'string' ? { token: b.token } : {}) }),
+    );
   });
 
   // `squad disconnect github`: signs the tool out on this computer, for every app that uses it.

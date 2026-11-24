@@ -63,3 +63,11 @@
 .gh-pick li > div { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .gh-pick b { font-weight: 600; overflow-wrap: anywhere; }
 .gh-pick small { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+
+/* The place's address, pasted: when the list does not have it, or to change the one in use. */
+.gh-addr { display: flex; flex-direction: column; gap: 6px; }
+.gh-addr .input { flex: 1; min-width: 0; font-size: 13px; }
+.gh-place { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 13px; }
+.gh-place b { font-weight: 650; overflow-wrap: anywhere; }
+.gh-place .grow { flex: 1; }
+.gh-plain { background: none; border: 0; padding: 0; cursor: pointer; font: inherit; font-weight: 600; font-size: 12.5px; }

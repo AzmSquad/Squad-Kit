@@ -152,8 +152,12 @@ export interface ConnectionRow {
   signedIn?: { as?: string };
   /** Where on the tool's own site squad-kit's access can be taken away too, said with Disconnect. */
   revokeAt?: { link: string; words: Words };
-  /** The sign-in reaches several places (Jira sites) and this project has none yet: pick one. */
-  pick?: { site: string; name: string }[];
+  /** The sign-in reaches several places (Jira sites, Azure DevOps projects) and this project has none yet: pick one. */
+  pick?: { site: string; name: string; where?: string }[];
+  /** The place's address, pasted from the browser: when the list does not have it, or to change the one in use (`now`). */
+  address?: { now?: string; example: string; where: Words };
+  /** A token pasted on this row: its steps with real links, the address it starts with, open at once when it is the only way. */
+  token?: { steps: GuideStep[]; address?: string; open?: boolean; why: Words; command: string };
   for?: { repo: string; into?: string; self: boolean };
   flow?: SignInFlow;
   actions: { id: 'sign-in' | 'disconnect' | 'check'; name: string; command: string }[];

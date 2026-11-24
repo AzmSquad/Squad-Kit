@@ -104,18 +104,37 @@ export interface DevOpsCall {
  * (as the real one does for a HEAD of its address), its connectionData with the person's name for the made-up Microsoft token or any token, and
  * anything else with `answer` or a 404. `access: false`: the Microsoft account is not in the organization.
  */
-export function fakeDevOps(o: { orgs?: Record<string, string>; access?: boolean; tokens?: string[]; offline?: boolean; answer?: (c: DevOpsCall) => unknown } = {}) {
+export function fakeDevOps(
+  o: {
+    orgs?: Record<string, string>;
+    access?: boolean;
+    tokens?: string[];
+    offline?: boolean;
+    answer?: (c: DevOpsCall) => unknown;
+    /** Each organization's projects (default: contoso has Shop); the account is a member of `member` (default: all of them). */
+    projects?: Record<string, string[]>;
+    member?: string[];
+  } = {},
+) {
   const orgs = o.orgs ?? { contoso: TENANT };
+  const projects = o.projects ?? { contoso: ['Shop'] };
   const calls: DevOpsCall[] = [];
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
   vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
     const u = new URL(url);
     const headers = (init.headers ?? {}) as Record<string, string>;
     const auth = headers.authorization ?? headers.Authorization;
-    if (u.host !== 'dev.azure.com') throw new Error(`Not a call to the fake Azure DevOps: ${url}`);
+    if (u.host !== 'dev.azure.com' && u.host !== 'app.vssps.visualstudio.com') throw new Error(`Not a call to the fake Azure DevOps: ${url}`);
     const c: DevOpsCall = { url, ...(auth ? { auth } : {}) };
     calls.push(c);
     if (o.offline) throw new TypeError('fetch failed');
+    // Who the Microsoft token belongs to, and the organizations that account is a member of.
+    if (u.host === 'app.vssps.visualstudio.com') {
+      if (!auth?.startsWith('Bearer ') || !(o.tokens ?? [MS_TOKEN]).includes(auth.slice(7))) return new Response('', { status: 401 });
+      if (u.pathname === '/_apis/profile/profiles/me') return json({ id: 'sara-id', displayName: 'Sara Ahmed' });
+      if (u.pathname === '/_apis/accounts' && u.searchParams.get('memberId') === 'sara-id') return json({ count: 1, value: (o.member ?? Object.keys(projects)).map((accountName) => ({ accountName })) });
+      return json({ message: 'Not found' }, 404);
+    }
     const tenant = orgs[decodeURIComponent(u.pathname.split('/')[1] ?? '')];
     if (!tenant) return new Response('', { status: 404 });
     // The organization's own address, with no sign-in: 401 and its directory, as the real one answers a HEAD.
@@ -124,7 +143,17 @@ export function fakeDevOps(o: { orgs?: Record<string, string>; access?: boolean;
     if (!known) return new Response('', { status: 401 });
     if (u.pathname.endsWith('/_apis/connectionData')) return json({ authenticatedUser: { providerDisplayName: auth.startsWith('Basic ') ? 'Sara (token)' : 'Sara Ahmed' } });
     const a = o.answer?.(c);
-    return a === undefined ? json({ message: 'Not found' }, 404) : json(a);
+    if (a !== undefined) return json(a);
+    // The organization's projects, and one project by its name, as Azure DevOps names it.
+    const org = decodeURIComponent(u.pathname.split('/')[1] ?? '');
+    const p = /^\/[^/]+\/_apis\/projects(?:\/([^/]+))?$/.exec(u.pathname);
+    if (p) {
+      const list = projects[org] ?? [];
+      if (!p[1]) return json({ count: list.length, value: list.map((name) => ({ name, state: 'wellFormed' })) });
+      const name = list.find((x) => x.toLowerCase() === decodeURIComponent(p[1]!).toLowerCase());
+      return name ? json({ id: `${name}-id`, name }) : json({ message: 'TF200016: The following project does not exist' }, 404);
+    }
+    return json({ message: 'Not found' }, 404);
   });
   return { calls, done: () => vi.unstubAllGlobals() };
 }

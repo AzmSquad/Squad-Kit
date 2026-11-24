@@ -241,8 +241,15 @@ export const azureTracker: TrackerModule = {
     const config = loadConfig(paths.configFile);
     const values: Record<string, string> = config.tracker.type === 'azure' ? { organization: config.tracker.workspace ?? '', project: config.tracker.project ?? '' } : {};
     const hasSecret = Boolean(loadSecrets(paths.secretsFile).tracker?.azure?.pat || process.env.AZURE_DEVOPS_PAT);
-    // Both here: the token is used (ADR-011), and Settings says so.
-    return { values, hasSecret, ...(hasSecret && signedInWithMicrosoft() ? { note: 'The token saved here is used, not your Microsoft sign-in.' } : {}) };
+    // Both here: the token is used (ADR-011), and Settings says so. Signed in alone: no token is needed, and Settings
+    // never says one is: the project is picked on the Connections page.
+    const microsoft = signedInWithMicrosoft();
+    if (hasSecret && microsoft) return { values, hasSecret, note: 'The token saved here is used, not your Microsoft sign-in.' };
+    if (microsoft) {
+      const picked = Boolean(values.organization && values.project);
+      return { values, hasSecret, signedIn: true, note: `You are signed in with Microsoft, so no token is needed.${picked ? '' : ' Pick your project on the Connections page.'}` };
+    }
+    return { values, hasSecret };
   },
   save(root, values) {
     const organization = values.organization?.trim().replace(/^https:\/\/dev\.azure\.com\//, '').replace(/\/.*$/, '');

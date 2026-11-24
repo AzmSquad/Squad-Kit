@@ -49,8 +49,10 @@ export function BacklogPage() {
               <div>
                 <b>Connect a tracker</b>
                 <span>
-                  {data?.error ?? 'Connect your tracker in Settings, and your stories and bugs show up here.'}{' '}
-                  <Link to="/settings" style={{ fontWeight: 600 }}>Open Settings</Link>
+                  {data?.error ?? 'Sign in to your tracker on the Connections page, and your stories and bugs show up here.'}{' '}
+                  <Link to="/connections" style={{ fontWeight: 600 }}>Open Connections</Link>
+                  {' · '}
+                  <Link to="/settings" hash="tracker" style={{ fontWeight: 600 }}>Settings</Link>
                 </span>
               </div>
             </div>

@@ -22,8 +22,11 @@ export function connectionLines(rows: ConnectionRow[]): string[] {
     lines.push('', `  ${kleur.bold(r.label)}  ${STATE[r.state]}${r.account && r.state === 'connected' ? ` as ${r.account}` : ''}`, grey(`    ${r.what.en}`));
     if (r.for) lines.push(`    For ${r.for.repo}${r.for.into && r.for.into !== r.for.repo ? `: pull requests into ${r.for.into}` : ''}`);
     if (r.line) lines.push(`    ${r.line.en}`);
+    if (r.address?.now) lines.push(`    Stories from ${r.address.now}`);
     r.pick?.forEach((p, i) => lines.push(`      ${i + 1}. ${p.name} (${p.site})`));
     if (r.pick?.length) lines.push(`    Pick one: ${kleur.green(`squad connect ${r.name} --site <site>`)}`);
+    if (r.address && r.state !== 'connected') lines.push(`    ${r.pick?.length ? 'Not in the list? ' : ''}Paste its address: ${kleur.green(`squad connect ${r.name} --site ${r.address.example}`)}`);
+    if (r.token?.open) lines.push(`    Or paste a token: ${kleur.green(r.token.command)}`);
     if (r.state !== 'connected') r.steps.forEach((s, i) => lines.push(`    ${i + 1}. ${s.text.en}${s.command ? `: ${kleur.green(s.command)}` : ''}${s.done ? grey(` (${s.done.en})`) : ''}`));
     for (const a of r.actions.filter((x) => x.id !== 'check')) lines.push(`    ${a.name}: ${kleur.green(a.command)}`);
   }
@@ -64,9 +67,14 @@ export async function runConnect(name: string | undefined, opts: { status?: bool
     return;
   }
   const rowOf = async () => (await connectionsOf(bp)).rows.find((r) => r.name === name);
-  // Signed in already, with only the place left to pick: no new sign-in.
+  // Signed in already, with only the place left to pick or paste: no new sign-in.
   const before = opts.site ? await rowOf() : undefined;
   if (before?.pick?.length) return pickOne(bp, name, before, opts.site);
+  if (opts.site && before?.address) {
+    ui.success((await pickSite(bp, name, opts.site)).line);
+    // The place is set; a sign-in follows only when one is still needed.
+    if (!(await rowOf())?.actions.some((a) => a.id === 'sign-in')) return;
+  }
   // Ctrl-C stops the tool's sign-in from the start, also while it is still getting its code: the tool leads its own
   // group, so it would not stop with this terminal by itself.
   const stop = () => {
@@ -113,6 +121,12 @@ export async function runConnect(name: string | undefined, opts: { status?: bool
   if (now?.state !== 'done') throw new Error(now?.line ?? 'The sign-in did not finish.');
   const row = await rowOf();
   if (row?.pick?.length) return pickOne(bp, name, row, opts.site);
+  // Signed in, with the place still to give: never "Connected" before squad-kit reaches it.
+  if (row && row.state !== 'connected') {
+    ui.info(row.line?.en ?? 'Signed in. Pick the place next.');
+    if (row.address) out(`  Paste its address: ${kleur.green(`squad connect ${name} --site ${row.address.example}`)}`);
+    return;
+  }
   ui.success(`Connected${row?.account ? ` as ${row.account}` : ''}.`);
 }
 

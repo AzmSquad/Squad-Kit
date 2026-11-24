@@ -81,6 +81,7 @@
     "POST /api/v1/connections/:name/sign-in": "squad connect [tool]",
     "POST /api/v1/connections/:name/disconnect": "squad disconnect <tool>",
     "POST /api/v1/connections/:name/site": "squad connect [tool] --site <site>",
+    "POST /api/v1/connections/:name/token": "squad config set tracker",
     "POST /api/v1/tickets/:id/try": "squad try <ticket>",
     "POST /api/v1/tickets/:id/try/stop": "squad try <ticket> --stop",
     "POST /api/v1/releases/:v/release": "squad release [version]",

@@ -6,7 +6,9 @@ import { CONNECT } from '../../lib/connect-words';
 import { useAct } from '../../lib/data';
 import type { Lang } from '../../lib/first-story';
 import { Cmd } from '../ui';
+import { AddressBox, PlaceNow } from './AddressBox';
 import { SitePick } from './SitePick';
+import { TokenForm } from './TokenForm';
 
 /** A tool's tile: its initials on a color of its own, by its place on the page. */
 const TONES = ['ink', 'blue', 'sky'] as const;
@@ -140,8 +142,10 @@ export function ConnectionCard({ row, at, lang, onSignIn, onCheck, checking }: {
   const connected = row.state === 'connected';
   const signIn = row.actions.find((a) => a.id === 'sign-in');
   const tone = connected ? 'ok' : row.state === 'soon' ? 'soon' : 'no';
+  // What is left here is the person's to do now: sign in to the tool the project uses, or pick its place.
+  const focus = !connected && (Boolean(row.pick?.length) || (row.for && row.how === 'sign-in'));
   return (
-    <section className={`gh-conn ${row.for && !connected && row.how === 'sign-in' ? 'focus' : ''}`} aria-label={row.label}>
+    <section className={`gh-conn ${focus ? 'focus' : ''}`} aria-label={row.label}>
       <div className="gh-hd">
         <Tile label={row.label} at={at} />
         <div>
@@ -162,6 +166,7 @@ export function ConnectionCard({ row, at, lang, onSignIn, onCheck, checking }: {
               <button className="btn sm" onClick={() => setOff(true)}>{w.disconnect}</button>
             )}
           </div>
+          {row.address?.now && <PlaceNow row={row} lang={lang} />}
           <ul className="gh-can">
             {row.can.map((c) => (
               <li key={c.en}>
@@ -170,7 +175,14 @@ export function ConnectionCard({ row, at, lang, onSignIn, onCheck, checking }: {
               </li>
             ))}
           </ul>
-          {(row.how === 'token' || row.by === 'token') && <InSettings line={row.by === 'token' ? w.byToken : w.tokenInSettings(row.label)} lang={lang} />}
+          {row.token ? (
+            <>
+              {row.by === 'token' && <p className="gh-small">{w.byTokenHere}</p>}
+              <TokenForm key={row.token.address ?? ''} row={row} lang={lang} />
+            </>
+          ) : (
+            (row.how === 'token' || row.by === 'token') && <InSettings line={row.by === 'token' ? w.byToken : w.tokenInSettings(row.label)} lang={lang} />
+          )}
         </>
       ) : row.how === 'soon' ? (
         <>
@@ -207,15 +219,36 @@ export function ConnectionCard({ row, at, lang, onSignIn, onCheck, checking }: {
               <Cmd text={signIn.command} />
             </div>
           )}
+          {/* The place's address, pasted: open when it is what is left to do here, folded under a sign-in button. When the
+              token is the way here, the token form holds the address: no second box. */}
+          {row.address && row.by !== 'token' && (
+            <details className="gh-guide" open={!signIn}>
+              <summary>
+                <ChevronDown size={14} aria-hidden="true" />
+                {row.pick?.length ? w.place.notInList : w.place.paste}
+              </summary>
+              <AddressBox row={row} lang={lang} />
+            </details>
+          )}
+          {/* A sign-in that also takes a token: on this row when the tool takes it here, else in Settings. */}
+          {row.token ? <TokenForm key={row.token.address ?? ''} row={row} lang={lang} /> : row.tracker && (row.by === 'token' ? <InSettings lang={lang} /> : <TokenInstead lang={lang} />)}
           {/* A sign-in left behind that does not work here (no access, its tool gone) can still be ended. */}
           {row.actions.some((a) => a.id === 'disconnect') && (
             <div className="gh-row">
               <button className="btn sm" onClick={() => setOff(true)}>{w.disconnect}</button>
             </div>
           )}
-          {/* A sign-in that also takes a token: the token is the way here, or the other way. */}
-          {row.tracker && (row.by === 'token' ? <InSettings lang={lang} /> : <TokenInstead lang={lang} />)}
-          <Guide row={row} lang={lang} open={row.state === 'missing' || row.state === 'unknown' || row.by === 'token'} onCheck={onCheck} checking={checking} />
+          {/* The token form already holds the steps when the token is the way here: no second list of them, but Check again. */}
+          {row.token && row.by === 'token' ? (
+            <div className="gh-row">
+              <button className="btn sm" disabled={checking} onClick={onCheck}>
+                <RefreshCw size={13} /> {w.check}
+              </button>
+              <Cmd text="squad connect --status" />
+            </div>
+          ) : (
+            <Guide row={row} lang={lang} open={row.state === 'missing' || row.state === 'unknown' || row.by === 'token'} onCheck={onCheck} checking={checking} />
+          )}
         </>
       )}
       {off && <Disconnect row={row} lang={lang} onClose={() => setOff(false)} />}

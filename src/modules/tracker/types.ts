@@ -193,8 +193,11 @@ export interface TrackerModule {
   fields: SetupField[];
   /** The tracker for a project folder, or null when it is not set up or has no sign-in saved. */
   open(root: string): Tracker | null;
-  /** What is saved now (secrets only say whether they are there), and one plain line about it for Settings. */
-  read(root: string): { values: Record<string, string>; hasSecret: boolean; note?: string };
+  /**
+   * What is saved now (secrets only say whether they are there), and one plain line about it for Settings. `signedIn`:
+   * signed in on the Connections page instead, so no token is needed.
+   */
+  read(root: string): { values: Record<string, string>; hasSecret: boolean; note?: string; signedIn?: boolean };
   /** Saves the settings; secrets left empty keep the saved ones. It may check them with the tracker first. */
   save(root: string, values: Record<string, string | undefined>): void | Promise<void>;
   /** Settings read from a git remote that lives on this product, for a project not set up yet. */
