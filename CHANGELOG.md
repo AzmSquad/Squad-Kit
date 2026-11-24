@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.38] — 2026-11-24
+
+### Fixed
+
+- **Run opens the iPhone window on Xcode 27.** squad-kit opened Apple's window by the name "Simulator", and Xcode 27
+  has no app by that name: its Device Hub shows the simulators now. The window opens by bundle id, Simulator first,
+  else the Device Hub, and a run there ends by its Stop or the idle shutdown, never by a guess about the window.
+- **No "Use the web version now" for an app with no web version.** A start command that runs the app on a phone
+  (`flutter run -d iPhone`) with no web address counted as a web version, and that path ran the phone build inside
+  squad-kit's guard, where Xcode cannot write its own log folder.
+- **Your own Run never waits for a busy computer.** Only a story's pictures wait for room before the phone starts.
+- **The Squad lead never sends a project manager to an engineer for squad-kit's own trouble** (a build, the phone, a
+  folder squad-kit could not write): it says what failed and what to press. Engineer reports stay for the project's
+  own code, servers and accounts.
+
 ## [1.3.37] — 2026-11-24
 
 ### Changed
