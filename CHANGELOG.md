@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **An open story no longer breaks while you scroll it.** On a narrower window, where the story's top row takes two
+  lines, scrolling just past the title could show "This page ran into a problem". The top row shows the title once it
+  scrolls away and got shorter; the browser moved the page to keep your place, the title came back into view, and the
+  row flipped back and forth until the page gave up. The row now keeps its height with the title, so nothing under it
+  moves, and it decides with that full height, so one scroll gives one answer. Slow trackpad scrolling no longer
+  bounces back to the top there either.
+
 ## [1.3.26] — 2026-11-23
 
 ### Fixed

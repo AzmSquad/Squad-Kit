@@ -12,6 +12,8 @@
 
 /* The title scrolled away: the top row shows it, with the step, in place of the links and labels. */
 .drawer.past > .dtop > :not(.idtag, .dmini, .dacts) { display: none; }
+/* It keeps the height it had with them, so the page under it never moves when the title comes or goes (drawer/top-row.ts). */
+.drawer.past > .dtop { min-height: var(--dtop-full, 0px); }
 .dmini { display: flex; align-items: center; gap: 10px; flex: 1 1 0; min-width: 0; animation: fade 0.18s ease-out; }
 .dmini b { font-size: 14px; font-weight: 650; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .dmini-step { flex: none; font-size: 12px; font-weight: 600; color: var(--accent); background: var(--accent-soft); padding: 2px 9px; border-radius: 99px; white-space: nowrap; }
