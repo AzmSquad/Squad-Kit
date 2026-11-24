@@ -168,7 +168,7 @@ describe('the Tester and the check agree it cannot be shown', () => {
     expect(checkRuns()[0]!.prompt).toContain(`The Tester says this cannot be shown on a screen: ${REASON}`);
     expect(testerRuns()).toHaveLength(1);
     expect(checkRuns()).toHaveLength(1);
-    expect(lines(id)).toContain('Checked the screenshots: 1 met, 1 not on a screen');
+    expect(lines(id)).toContain('Looked at the pictures of each "done when": 1 shown working, 1 not on a screen');
     expect(lines(id)).toContain(`"Done when" 2 is not on a screen: ${PART}`);
     // Builds by itself accepts it and merges it.
     expect(t.squad?.phase).toBe('accept');

@@ -31,6 +31,28 @@ describe('the lock rules', () => {
     expect(aboutWhatSomeoneSees(line('the booking is stored as paid', 'a customer', 'they click Pay'))).toBe(false);
   });
 
+  it("leaves a line the checks or the Reviewer prove with the Analyst's kind, whatever its words", () => {
+    // A new Flutter app's story: "show", "screen" and "one page" here are no screen to take a picture of.
+    const checks = { given: 'the new app', when: 'the developer runs the code checks and the automatic tests', then: 'the code checks show no issues, and all tests pass, including one test that checks the name is shown and the screen reads right to left' };
+    const review = { given: 'the pull request for this story', when: 'the Reviewer reads it', then: 'one exact Flutter version is pinned, no signing keys are included, and the README explains setup in under one page' };
+    expect(aboutWhatSomeoneSees(checks)).toBe(false);
+    expect(aboutWhatSomeoneSees(review)).toBe(false);
+    expect(aboutWhatSomeoneSees(line('تنجح كل الاختبارات ويظهر الاسم في الشاشة'))).toBe(false);
+    expect(aboutWhatSomeoneSees({ given: 'الطلب', when: 'يقرأ المراجع الكود', then: 'لا توجد مفاتيح في الصفحة' })).toBe(false);
+    // What no picture of squad-kit's can show: the home screen's icon name, turning the phone.
+    expect(aboutWhatSomeoneSees({ given: 'the app is installed', when: 'the developer looks at the home screen and then turns the phone sideways', then: 'the name under the app icon is Rooms, and the screen stays upright' })).toBe(false);
+    expect(aboutWhatSomeoneSees(line('يظهر اسم التطبيق تحت الأيقونة في الشاشة الرئيسية'))).toBe(false);
+    // The app on a phone is still a picture, the Reviewer's or anyone's; the lines that open it too.
+    expect(aboutWhatSomeoneSees({ given: 'the app', when: 'the reviewer opens it on the phone', then: 'the screen shows the name in the middle' })).toBe(true);
+    expect(aboutWhatSomeoneSees(line('the app opens with no errors and shows one screen with the name in the middle'))).toBe(true);
+    const out = proposedProofs([
+      { ...checks, proof: { kind: 'test', why: 'The widget test and the code checks prove it.' } },
+      { ...review, proof: { kind: 'none', why: 'The Reviewer reads the settings and the README.' } },
+    ]);
+    expect(out[0]!.proof).toEqual({ kind: 'test', why: 'The widget test and the code checks prove it.' });
+    expect(out[1]!.proof).toEqual({ kind: 'none', why: 'The Reviewer reads the settings and the README.' });
+  });
+
   it("takes the Analyst's kinds, locks what someone sees, and never takes a lock from an agent", () => {
     const out = proposedProofs([
       { ...line('I see Paid and my receipt number'), proof: { kind: 'data', why: 'The table shows it.', locked: false } },

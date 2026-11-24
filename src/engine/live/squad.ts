@@ -154,6 +154,12 @@ export class LiveSquad {
    * checks step simply runs them.
    */
   builderRuns = new Map<string, Map<string, Map<string, { tree: string; run: CheckResult; at: number }>>>();
+  /**
+   * The checks step's passing runs in a ticket's copy, by the copy's folder, with the copy's code they ran on (`tree`).
+   * The Tester's run_checks in the proof gets them instead of running the same checks on the same code (checksKnown).
+   * Kept in memory only.
+   */
+  checksRuns = new Map<string, Map<string, { tree: string; runs: CheckResult[] }>>();
 
   constructor(public bp: BoardPaths) {}
 

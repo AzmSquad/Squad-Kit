@@ -202,6 +202,7 @@ export const checksPart = {
     });
     const mark = sleepMark();
     const results: (CheckResult & { part?: string })[] = [...setups];
+    this.checksRuns.delete(id);
     // The copy each project check ran in, for a failed test to run on main's code.
     const ranIn = new Map<CheckResult, CopyOf>();
     for (const c of changed.length ? changed : copies.slice(0, 1)) {
@@ -219,7 +220,10 @@ export const checksPart = {
       const hookLane = await watchLane(c.dir, hookFiles(c.dir));
       if (!t.testChange?.repo || t.testChange.repo === c.repo.path) commands = await this.tryTestChange(id, c.dir, commands, guard, mark);
       const had = passed?.get(c) ?? [];
+      const tree = await treeOf(c.dir);
       const ran = whole(c.dir, commands, had) ? had : await runChecks(c.dir, commands, onStart, { ...this.commandWatch(id), ...(guard ? { guard } : {}) }, undefined, had);
+      // All passed on this very code: the Tester's run_checks in the proof gets this result instead of running them again.
+      if (tree && ran.length && ran.every((r) => r.ok && !r.ended) && (await treeOf(c.dir)) === tree) this.checksRuns.set(id, new Map([...(this.checksRuns.get(id) ?? []), [c.dir, { tree, runs: ran }]]));
       const hooksBack = (await checkLane(hookLane)).restored;
       if (hooksBack.length) this.update(id, (x) => addActivity(x, 'squad', `The project's checks changed the check that runs on every save (${hooksBack.slice(0, 6).join(', ')}); squad-kit put it back. Changing that check stays with you or an engineer`));
       // A check that needed a file outside its copy, which the guard blocked: one plain sentence, not a failed try.

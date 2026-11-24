@@ -118,14 +118,15 @@ describe('one phone at a time', () => {
     expect(slept.filter((ms) => ms === desk.BUSY_LOOK_MS).length).toBe(3);
   });
 
-  it('a high load is busy too; after the longest wait it goes ahead, as a story never fails over it', async () => {
+  it('a high load is busy too; after a short wait it goes ahead, as a story never fails over it', async () => {
     const f = fakePhone();
     load = 40;
     expect(await desk.tooBusy()).toBe('load 40.0 on 10 cores');
     const logs: string[] = [];
     await desk.withPhone(f.module, 'phone', async () => undefined, { say, log: (t) => logs.push(t) });
     expect(lines[0]).toBe('The computer is busy. squad-kit waits a moment before starting the iPhone.');
-    expect(slept.filter((ms) => ms === desk.BUSY_LOOK_MS).length).toBe(Math.ceil(desk.BUSY_WAIT_MS / desk.BUSY_LOOK_MS));
+    // A load that lasts does not go down by waiting: 2 minutes, not the 10 low memory gets.
+    expect(slept.filter((ms) => ms === desk.BUSY_LOOK_MS).length).toBe(Math.ceil(desk.LOAD_WAIT_MS / desk.BUSY_LOOK_MS));
     expect(logs.some((l) => l.includes('boots its iPhone anyway'))).toBe(true);
     expect(f.devices[0]!.state).toBe('booted');
     expect(desk.freeMemoryOf('Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:      4707.\nPages active:  272303.\nPages inactive:  271008.\nPages speculative:  557.\n')).toBe((4707 + 271008 + 557) * 16384);
@@ -156,6 +157,21 @@ describe('shutting down', () => {
     const down = await desk.idleNow(f.module, Date.now() + desk.IDLE_MS + 1000);
     expect(down).toEqual([f.devices[0]!.id]);
     expect(f.devices[0]!.state).toBe('shutdown');
+  });
+
+  it("after a story's proof it shuts down a minute later, not ten: an idle phone on a busy computer shows crash reports", async () => {
+    const f = fakePhone();
+    await desk.withPhone(f.module, 'phone', async () => undefined);
+    expect(await desk.idleNow(f.module, Date.now() + 30_000, desk.AFTER_PROOF_MS)).toEqual([]);
+    expect(await desk.idleNow(f.module, Date.now() + desk.AFTER_PROOF_MS + 1000, desk.AFTER_PROOF_MS)).toEqual([f.devices[0]!.id]);
+    expect(f.devices[0]!.state).toBe('shutdown');
+    // Asked while a story uses it: nothing is armed, and the story's own turn keeps it.
+    let during = '';
+    await desk.withPhone(f.module, 'phone', async () => {
+      desk.proofDone();
+      during = f.devices[0]!.state;
+    });
+    expect(during).toBe('booted');
   });
 
   it('when the board stops, its own phone shuts down; one in use is left and said so', async () => {

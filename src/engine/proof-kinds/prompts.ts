@@ -33,8 +33,14 @@ const KINDS_ASK = `- proof, for each "done when": how the person will see it is 
   keeps: true only for a test line that keeps something that already works ("Paid bookings stay as they are"): its
   test passes before the change and after it. Leave it out for a line the story changes or adds.
   Pick the lightest proof that truly shows the line: a picture only where someone sees a change. A line about what
-  someone sees is always screen. why: one short plain line for a project manager, like "Other apps will call this, so
-  the answer itself is the proof." It may be empty for screen.`;
+  someone sees is always screen. A line whose result is that the tests or code checks pass is test, and one the
+  Reviewer checks by reading the code or the settings is none, with what it reads.
+  squad-kit's pictures are of the app's own screens on one device: a page in its browser, or a phone app on its own
+  iPhone or Android phone, opened fresh and tapped through. They cannot show the phone's home screen or app icon,
+  turning the phone, two phones at once, or anything outside the app. Keep a screen line to what such a picture shows,
+  and write the rest as a line of its own, proved by test or none.
+  why: one short plain line for a project manager, like "Other apps will call this, so the answer itself is the
+  proof." It may be empty for screen.`;
 
 /** The same for a project with no app to start (board/apps.ts hasAppToStart): only a test, or nothing to show. */
 const NO_APP_ASK = `- proof, for each "done when": how the person will see it is done, and why in one plain line. This project has no

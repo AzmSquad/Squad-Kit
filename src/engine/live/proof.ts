@@ -9,6 +9,7 @@ import { runsAsProduct } from '../../board/parts.js';
 import { CapReached } from '../caps.js';
 import { productPlan } from '../product-run.js';
 import { picturesWay } from '../phone/plan.js';
+import { proofDone } from '../phone/turn.js';
 import { LimitReached } from '../usage-limit.js';
 import { explainError } from '../../board/problem.js';
 import { CutOff } from '../interrupt.js';
@@ -53,8 +54,10 @@ export const proofPart = {
     try {
       await this.proofOnce(id);
     } finally {
-      // The proof is over, however it ended: the app kept for it stops (a Builder's fix stops it before it starts).
+      // The proof is over, however it ended: the app kept for it stops (a Builder's fix stops it before it starts), and
+      // squad-kit's phone shuts down soon, unless another story or a person takes it.
       await this.dropKept(id).catch(() => undefined);
+      proofDone();
     }
   },
 
@@ -154,14 +157,14 @@ export const proofPart = {
       }
       if (judged.broken.length || other.broken.length) return this.notWorking(id, [...judged.broken, ...other.broken], [...judged.notShown, ...other.open]);
       // A Test line squad-kit could not prove is on the same card, so Continue anyway never passes it unseen.
-      if (judged.notShown.length) return this.cannotShow(id, [...judged.notShown, ...other.open], true, this.listNoes.get(id));
+      if (judged.notShown.length) return this.cannotShow(id, [...judged.notShown, ...other.open], judged.retakes, this.listNoes.get(id));
       // Every "done when" ended as not on a screen: nothing shows the work, so the person decides.
       if (judged.offScreen.length === doneWhenCount(now)) return this.cannotShow(id, [...judged.offScreen, ...other.open], false, this.listNoes.get(id));
     }
     if (other.broken.length) return this.notWorking(id, other.broken, other.open);
     if (other.open.length) return void this.update(id, (x) => kindsStop(x, other.open));
     // A no on a team's list that is on goes the same way as a "done when" not shown.
-    if (this.listNoes.get(id)?.length) return this.cannotShow(id, [], true, this.listNoes.get(id));
+    if (this.listNoes.get(id)?.length) return this.cannotShow(id, [], MAX_RETAKES, this.listNoes.get(id));
     this.update(id, (x) => {
       x.proof = (x.proof ?? []).filter((p) => p.after);
       const shots = x.proof;
@@ -237,11 +240,13 @@ export const proofPart = {
       const v = verdict(x, n);
       return !v || v.shows === 'not-shown' || (v.shows === 'off-screen' && !reasonOf(x, n));
     };
+    let retakes = 0;
     for (let retake = 1; retake <= MAX_RETAKES; retake += 1) {
       const x = readTicket(this.bp, id)!;
       const open = numbers.filter((n) => isOpen(x, n));
       const noes = this.listNoes.get(id) ?? [];
       if (!open.length && !noes.length) break;
+      retakes = retake;
       const asks = [...noes.map((no) => `Your team's checklist "${no.list}" asks: ${no.question} You answered no${no.why ? ` (${no.why})` : ''}. Look again, show it if you can, and answer this question again in "checklist".`), ...open.map((n) => {
         const v = verdict(x, n);
         const text = criterionText(x, n)!;
@@ -262,7 +267,7 @@ export const proofPart = {
       const fresh = [...before].filter(([n, seen]) => had(y, n) !== seen).map(([n]) => n);
       for (const [n, v] of await this.checkPictures(id, toCheck(y, fresh))) verdicts.set(n, v);
     }
-    const out: ProofJudged = { broken: [], notShown: [], offScreen: [] };
+    const out: ProofJudged = { broken: [], notShown: [], offScreen: [], retakes };
     this.update(id, (x) => {
       const stays: OffScreen[] = [];
       for (const n of numbers) {
@@ -307,6 +312,8 @@ interface ProofJudged {
   broken: OpenRow[];
   notShown: OpenRow[];
   offScreen: OpenRow[];
+  /** How many retakes the Tester had. */
+  retakes: number;
 }
 
 /** One round of screenshots: the pictures that failed squad-kit's check, what was taken, the Tester's plain words and its technical trouble. */

@@ -12,18 +12,28 @@ import { everyPhone } from './which.js';
  * One phone at a time, gently. squad-kit boots one of its own devices at a time, iPhone or Android, shared by every
  * story through a queue in this process and a lock file between squad-kit processes. Before booting it looks at the
  * computer's free memory and load, and when the computer is busy it waits and says so, never failing a story over it.
- * A device shuts down after 10 minutes unused, and when the board stops, with what it started beside it (Android's
- * own adb server, only when squad-kit started it). Something else may keep a device up (an open Simulator window
- * boots it again after it shuts down): squad-kit then leaves it, and never fights it.
+ * A device shuts down after 10 minutes unused, a minute after a story's proof, and when the board stops, with what it
+ * started beside it (Android's own adb server, only when squad-kit started it). Something else may keep a device up (an
+ * open Simulator window boots it again after it shuts down): squad-kit then leaves it, and never fights it.
  */
 
 /** Unused this long, squad-kit's phone shuts down. */
 export const IDLE_MS = 10 * 60_000;
+/**
+ * After a story's proof, it shuts down this soon unless a story or a person takes it: a phone left up idle on a busy
+ * computer can have its own parts stopped by the system's watchdog, and macOS then shows their crash reports.
+ */
+export const AFTER_PROOF_MS = 60_000;
 /** Below this much free memory (free, inactive and speculative pages), the computer is too busy to boot a phone. */
 export const MIN_FREE_BYTES = 2 * 1024 ** 3;
 /** How often squad-kit looks again while the computer is busy, and how long it waits at most before it goes ahead. */
 export const BUSY_LOOK_MS = 15_000;
 export const BUSY_WAIT_MS = 10 * 60_000;
+/**
+ * A high load alone: it waits this long at most. Low memory is worth waiting for, but a load that lasts (builds and
+ * tests elsewhere) rarely goes down by waiting: a story once waited all 10 minutes at load 30, then the phone came up fine.
+ */
+export const LOAD_WAIT_MS = 2 * 60_000;
 /** How often squad-kit looks at the lock another squad-kit holds. */
 const LOCK_LOOK_MS = 2000;
 /** How long after a shutdown squad-kit looks whether something booted the device again. */
@@ -337,18 +347,22 @@ async function lockTurn(home: string, word: string, o: TurnOptions): Promise<voi
   }
 }
 
-/** Waits while the computer is busy, saying so once; after BUSY_WAIT_MS it goes ahead, as a story never fails over it. */
+/**
+ * Waits while the computer is busy, saying so once; after BUSY_WAIT_MS for low memory, or LOAD_WAIT_MS for a high load
+ * alone, it goes ahead, as a story never fails over it.
+ */
 async function waitForRoom(word: string, o: TurnOptions): Promise<void> {
   let why = await tooBusy();
   if (!why) return;
   o.say?.(busyWords(word));
   o.log?.(`The computer is busy (${why}), so squad-kit waits before booting its ${word}`);
-  for (let look = 0; why && look < Math.ceil(BUSY_WAIT_MS / BUSY_LOOK_MS); look += 1) {
+  let waited = 0;
+  for (; why && waited < (why.includes('memory') ? BUSY_WAIT_MS : LOAD_WAIT_MS); waited += BUSY_LOOK_MS) {
     if (o.signal?.aborted) throw new Error(STOPPED);
     await host.sleep(BUSY_LOOK_MS, o.signal);
     why = await tooBusy();
   }
-  if (why) o.log?.(`The computer is still busy (${why}) after ${Math.round(BUSY_WAIT_MS / 60_000)} minutes: squad-kit boots its ${word} anyway`);
+  if (why) o.log?.(`The computer is still busy (${why}) after ${Math.round(waited / 60_000)} minutes: squad-kit boots its ${word} anyway`);
 }
 
 /**
@@ -423,18 +437,23 @@ function phonesWith(phone?: PhoneModule): PhoneModule[] {
   return phone && !all.includes(phone) ? [phone, ...all] : all;
 }
 
-/** The idle shutdown: when nothing used squad-kit's phone for IDLE_MS, it shuts down, iPhone or Android. */
-function armIdle(): void {
+/** The idle shutdown: when nothing used squad-kit's phone for `ms` (IDLE_MS), it shuts down, iPhone or Android. */
+function armIdle(ms = IDLE_MS): void {
   if (idle) clearTimeout(idle);
-  idle = setTimeout(() => void idleNow().catch(() => undefined), IDLE_MS);
+  idle = setTimeout(() => void idleNow(undefined, Date.now(), ms).catch(() => undefined), ms);
   idle.unref?.();
+}
+
+/** A story's proof is over: squad-kit's phone shuts down in AFTER_PROOF_MS, unless a story or a person uses it by then. */
+export function proofDone(): void {
+  if (!inTurn && !hold) armIdle(AFTER_PROOF_MS);
 }
 
 /** One phone or several, as a list: every phone squad-kit runs when none is named. */
 const listOf = (phones?: PhoneModule | PhoneModule[]): PhoneModule[] => (Array.isArray(phones) ? phones : phones ? [phones] : everyPhone());
 
-/** Shuts down squad-kit's phones nobody used for IDLE_MS, in a turn of their own. Returns the ids shut down. */
-export function idleNow(phones?: PhoneModule | PhoneModule[], now = Date.now()): Promise<string[]> {
+/** Shuts down squad-kit's phones nobody used for `unused` (IDLE_MS), in a turn of their own. Returns the ids shut down. */
+export function idleNow(phones?: PhoneModule | PhoneModule[], now = Date.now(), unused = IDLE_MS): Promise<string[]> {
   const run = queue.then(async () => {
     const home = squadHome();
     // A person's app open on the phone is no idle phone.
@@ -452,7 +471,7 @@ export function idleNow(phones?: PhoneModule | PhoneModule[], now = Date.now()):
             continue;
           }
           const last = Date.parse(used[d.id] ?? '');
-          if (Number.isFinite(last) && now - last < IDLE_MS) continue;
+          if (Number.isFinite(last) && now - last < unused) continue;
           if (await shutDownGently(phone, d.id)) down.push(d.id);
         }
         // With none of its devices up, what the phone started beside them ends too (Android's own adb server).

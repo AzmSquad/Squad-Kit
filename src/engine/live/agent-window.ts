@@ -18,10 +18,15 @@ import { AGENTS, type AgentRole } from '../agents.js';
 import { appCopyOf, copiesOf, workFolder } from '../copies.js';
 import { productPlan, startProduct, stopProduct, waitWords } from '../product-run.js';
 import { treeOf } from '../lane.js';
-import { ownCheckEnded, ranFor, runsFor } from '../../board/clock.js';
+import { ownCheckEnded, ranFor, runsFor, stepDoing } from '../../board/clock.js';
 import { folderOf, projectCopies } from '../leftovers.js';
 import { checksToRunHere } from '../tools/android-builds.js';
 import type { LiveSquad } from './squad.js';
+
+/** The story's line when the checks' result stands for a run_checks after the checks step. */
+const KNOWN_LINE = 'The checks already passed on this same code in the checks step, so they do not run again for the Tester';
+/** What the agent reads above that result. */
+const KNOWN_NOTE = 'squad-kit ran this in the checks step on this very code, and nothing changed since, so this is that result: it did not run it again.';
 
 /** The window: squad-kit's own tools for one agent run, and the checks and apps behind them. */
 export const agentWindowPart = {
@@ -64,6 +69,8 @@ export const agentWindowPart = {
    */
   windowChecks(this: LiveSquad, id: string, cwd: string, repo?: string, noted = false): WindowChecks {
     const guard = this.guardFor(cwd, id);
+    // What the card said before a check of another's step (the Tester's): it says it again once the check ends.
+    let was = '';
     return {
       cwd,
       // A project the Builder is setting up may say how by now. Android builds skipped here don't run (tools/android-builds.ts).
@@ -71,6 +78,7 @@ export const agentWindowPart = {
       ...(guard ? { guard } : {}),
       onStart: (name) =>
         this.update(id, (x) => {
+          if (!x.clock?.running) was = x.status ?? '';
           x.status = OWN_CHECK_DOING[name];
           runsFor(x, name, x.status);
         }),
@@ -78,11 +86,30 @@ export const agentWindowPart = {
       onEnd: (name, ok, alone) =>
         this.update(id, (x) => {
           if (noted) ownCheckEnded(x, name, ok, alone);
-          else ranFor(x, name);
+          else {
+            ranFor(x, name);
+            if (was) {
+              stepDoing(x, was);
+              x.status = was;
+            }
+          }
           if (x.clock?.doing) x.status = x.clock.doing;
         }),
-      ...(noted ? { onRun: (run: { names: CheckName[]; only?: string }) => this.noteRun(id, cwd, run) } : {}),
+      ...(noted ? { onRun: (run: { names: CheckName[]; only?: string }) => this.noteRun(id, cwd, run) } : { known: (names: CheckName[], commands: Partial<Record<CheckName, string>>) => this.checksKnown(id, cwd, names, commands) }),
     };
+  },
+
+  /**
+   * The checks step's passing runs of these checks in the copy `cwd`, when its code is still the very code they ran on
+   * and each command is the same: the run_checks of a step after it (the Tester's) gets them, and nothing runs again.
+   * Null otherwise, and the checks run as usual.
+   */
+  async checksKnown(this: LiveSquad, id: string, cwd: string, names: CheckName[], commands: Partial<Record<CheckName, string>>): Promise<CheckRun[] | null> {
+    const had = this.checksRuns.get(id)?.get(cwd);
+    const runs = names.map((n) => had?.runs.find((r) => r.name === n && r.command === commands[n]?.trim()));
+    if (!had || !names.length || runs.some((r) => !r) || (await treeOf(cwd)) !== had.tree) return null;
+    this.update(id, (x) => addActivity(x, 'tester', KNOWN_LINE));
+    return runs.map((r) => ({ name: r!.name as CheckName, command: r!.command, ok: true, output: r!.output, seconds: r!.seconds, note: KNOWN_NOTE }));
   },
 
   /**

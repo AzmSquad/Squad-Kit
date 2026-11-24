@@ -4,7 +4,10 @@ import type { CriterionProof, ProofKind } from './proof-kind.js';
 /**
  * squad-kit's own rules for how a "done when" is proved. They are code, never an agent's word:
  *
- * 1. A line about what someone sees keeps its picture: squad-kit locks it to Screen.
+ * 1. A line about what someone sees keeps its picture: squad-kit locks it to Screen. Not a line whose result is that the
+ *    tests or code checks pass (the checks prove it), nor one the Reviewer proves by reading the code: there "the checks
+ *    show no issues" or "a README under one page" is no screen. Nor one about what no picture of squad-kit's can show
+ *    (the home screen, the app icon, turning the phone). Such a line keeps the kind the Analyst gave it.
  * 2. A story that changes screen files keeps at least one picture: when no line is Screen, the line most about a screen
  *    is locked to Screen (lockForScreens, at the proof, from the files the story changed).
  *
@@ -40,10 +43,25 @@ const AWAY = /\b(?:api|endpoint|call|request|response|json|status code|http|data
 const SEES_AR = /(?:يشوف|تشوف|أشوف|نشوف|يشوفون|يشوفوا|يرى|ترى|أرى|نرى|يظهر|تظهر|يبان|تبان|الشاشة|شاشة|الصفحة|صفحة|الزر|زر |يضغط|أضغط|تضغط|نافذة)/;
 const MAYBE_AR = /(?:يعرض|تعرض|رسالة|قائمة|أيقونة|لون)/;
 const AWAY_AR = /(?:API|قاعدة البيانات|جدول|يتحفظ|تتحفظ|يحفظ|تحفظ|يتخزن|سجل|طلب|إيميل|بريد)/;
+/** A result that the tests or code checks pass: the checks prove it, whatever the tests look at. */
+const CHECKS = /\b(?:tests? (?:pass|passes|passed|are green|run green)|code checks?|static analysis|analy[sz]er|lint(?:er|s)?)\b/i;
+const CHECKS_AR = /(?:(?:تنجح|تمر|نجاح) (?:كل |جميع )?الاختبارات|الاختبارات (?:تنجح|تمر|ناجحة)|فحص الكود)/;
+/** What squad-kit's pictures cannot show: the phone's home screen and app icon, turning the phone. The Analyst says how. */
+const CANT_SHOW = /\b(?:home ?screen|app icon|under the (?:app(?:'s)? )?icon|icon name|rotat(?:e|es|ed|ing|ion)|(?:turns?|turned|turning) (?:the )?(?:phone|device|tablet)|sideways)\b/i;
+const CANT_SHOW_AR = /(?:الشاشة الرئيسية|أيقونة التطبيق|تحت الأيقونة|تدوير|يدير الجوال|يلف الجوال)/;
+/** An action that is the Reviewer reading the work: the Reviewer proves it in the code. */
+const REVIEWER_READS = /\breviewers? (?:reads?|reviews?|looks? through)\b|\bcode review\b|\breads? the (?:code|pull request|diff|changes|settings|files?|readme)\b/i;
+const REVIEWER_READS_AR = /(?:المراجع يقرأ|يقرأ المراجع|يراجع المراجع|مراجعة الكود|يقرأ الكود)/;
 
-/** True when the line is about what someone sees: its result ("then"), never its action, so "when I click Pay" alone is not. */
-export function aboutWhatSomeoneSees(c: Pick<Criterion, 'then'>): boolean {
+/**
+ * True when the line is about what someone sees: its result ("then"), never its action, so "when I click Pay" alone is
+ * not. A line the checks or the Reviewer prove is not, whatever its words.
+ */
+export function aboutWhatSomeoneSees(c: Pick<Criterion, 'then'> & Partial<Pick<Criterion, 'given' | 'when'>>): boolean {
   const then = c.then ?? '';
+  const when = c.when ?? '';
+  if (CHECKS.test(then) || CHECKS_AR.test(then) || REVIEWER_READS.test(when) || REVIEWER_READS_AR.test(when)) return false;
+  if (CANT_SHOW.test(`${when} ${then}`) || CANT_SHOW_AR.test(`${when} ${then}`)) return false;
   if (SEES.test(then) || SEES_AR.test(then)) return true;
   return (MAYBE.test(then) && !AWAY.test(then)) || (MAYBE_AR.test(then) && !AWAY_AR.test(then));
 }

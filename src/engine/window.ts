@@ -75,23 +75,17 @@ const MAX_IMAGE_BYTES = 4_500_000;
 export const MAX_IMAGE_BYTES_SENT = 16_000_000;
 
 /** True for the bytes of a PNG file. */
-function isPng(b: Buffer): boolean {
-  return b.length > 8 && b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
-}
+const isPng = (b: Buffer): boolean => b.length > 8 && b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
 
 /** What i_am_stuck keeps of each field, and the most it takes at all. */
 const STUCK_KEEP = 2000;
 const HUGE = 20_000;
 
 /** The plain stop the person sees when the agent kept asking for what it may not do. */
-export function tooManyWords(who: string): string {
-  return `The ${who} kept asking for things it may not do, so squad-kit stopped it.`;
-}
+export const tooManyWords = (who: string): string => `The ${who} kept asking for things it may not do, so squad-kit stopped it.`;
 
 /** The plain stop the person sees when the agent kept calling squad-kit's tools in the wrong shape. */
-export function tooManyMistakesWords(who: string): string {
-  return `The ${who} kept using squad-kit's tools the wrong way, so squad-kit ended this step. Press Try again to try once more.`;
-}
+export const tooManyMistakesWords = (who: string): string => `The ${who} kept using squad-kit's tools the wrong way, so squad-kit ended this step. Press Try again to try once more.`;
 
 export interface WindowApp {
   /** The story's own copy of the code: the app runs from here. */
@@ -152,6 +146,8 @@ export interface WindowChecks {
    * comes back, when anything does, is told what ran once every check of the run ran to its end; never for a run cut off.
    */
   onRun?(run: { names: CheckName[]; only?: string }): Promise<((ran: CheckRun[]) => Promise<void>) | undefined>;
+  /** These checks' result on this very code, when squad-kit has it already (the checks step's): then nothing runs. */
+  known?(names: CheckName[], commands: Partial<Record<CheckName, string>>): Promise<CheckRun[] | null>;
   /** A story with several parts: each part's own checks, by the part's id. run_checks must then say which. */
   parts?(): Record<string, WindowChecks>;
 }
@@ -1347,6 +1343,9 @@ export class AgentWindow {
     const names = (which ? [which] : CHECK_NAMES).filter((n) => commands[n]?.trim());
     if (!names.length) return null;
     const done = (async () => {
+      // Run on this very code already, and passed: that result, and nothing runs (WindowChecks.known).
+      const known = only ? null : await c.known?.(names, commands).catch(() => null);
+      if (known) return known;
       // No server squad-kit left in another copy may hold a port the tests need.
       await this.s.beforeStart?.().catch(() => undefined);
       // What the run is, for the checks step: squad-kit may note the copy's code now (WindowChecks.onRun).

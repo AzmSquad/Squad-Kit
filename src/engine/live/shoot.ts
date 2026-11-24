@@ -183,7 +183,8 @@ export const shootPart = {
   /**
    * The Tester's words for the person (a picture's note, why a "done when" shows on no screen): its plain sentences
    * stay, and each technical one goes to the app log (shots.ts plainParts), so "390 px" or "1280 wide" never hides a
-   * note. A note with nothing plain left says so in the activity; an ask that is not allowed is refused and counted.
+   * note. A note with nothing plain left is left out, with no line for the person; an ask that is not allowed is refused
+   * and counted.
    */
   plainNote(this: LiveSquad, win: AgentWindow, text: string): string {
     const said = text.trim();
@@ -196,8 +197,7 @@ export const shootPart = {
     const { kept, left } = plainParts(said, technicalWords);
     // Its technical words go to the app log, not to the activity.
     if (left) this.log('info', `Left out of the Tester's note: ${left.slice(0, 600)}`, win.ticket);
-    if (kept) return kept.slice(0, 600);
-    this.update(win.ticket, (x) => addActivity(x, 'tester', 'The Tester wrote something technical, so it stays out of the proof.'));
-    return '';
+    // Nothing plain left: the note is left out, and the log has it. A person has nothing to do with it.
+    return kept ? kept.slice(0, 600) : '';
   },
 };

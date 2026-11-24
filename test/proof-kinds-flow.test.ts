@@ -320,11 +320,11 @@ describe('a planned proof is never dropped quietly', () => {
 
   it("says what squad-kit's check looked at: the screenshots before, the proof with kinds", () => {
     const rows = (kind?: string) => [{ criterion: 'a', before: '', after: 'x', beforeLabel: '', afterLabel: '', shows: 'met' as const, ...(kind ? { kind: kind as 'test' } : {}) }];
-    expect(checkedLine({ criteria: [c('a')], proof: rows() }, [])).toBe('Checked the screenshots: each "done when" on a screen is met');
-    expect(checkedLine({ criteria: [c('a')], proof: rows() }, ['1 not shown yet'])).toBe('Checked the screenshots: 1 met, 1 not shown yet');
-    expect(checkedLine({ criteria: [c('a', 'api')], proof: rows('api') }, [])).toBe('Checked the proof: each "done when" it shows is met');
+    expect(checkedLine({ criteria: [c('a')], proof: rows() }, [])).toBe('Looked at the pictures: each "done when" on a screen works');
+    expect(checkedLine({ criteria: [c('a')], proof: rows() }, ['1 not shown yet'])).toBe('Looked at the pictures of each "done when": 1 shown working, 1 not shown yet');
+    expect(checkedLine({ criteria: [c('a', 'api')], proof: rows('api') }, [])).toBe('Looked at the proof: each "done when" it shows works');
     // A Test row is squad-kit's run, not the check's: it is not counted.
-    expect(checkedLine({ criteria: [c('a', 'test')], proof: rows('test') }, ['1 not shown yet'])).toBe('Checked the proof: 0 met, 1 not shown yet');
+    expect(checkedLine({ criteria: [c('a', 'test')], proof: rows('test') }, ['1 not shown yet'])).toBe('Looked at the proof of each "done when": 0 shown working, 1 not shown yet');
   });
 });
 

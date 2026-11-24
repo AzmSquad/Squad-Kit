@@ -8,7 +8,7 @@ import { Lightbox } from '../components/Lightbox';
 import { GatePill as Gate, NoNewTestsLabel, NotCheckedNote, OldFailuresNote } from '../components/Gates';
 import { checksWords, noShotsText, proofWords } from '../lib/gates';
 import { AlsoChanged, MorePictures, OffScreenList, PicturesNote, VerdictIcon, VerdictTag } from '../components/Verdict';
-import { isApiProof, proofViewer, verdictClass, verdictNote } from '../lib/verdict';
+import { afterAt, isApiProof, oneLabel, onePicture, proofViewer, verdictClass, verdictNote } from '../lib/verdict';
 import { pageOf, pagesOf, waitsAtReview } from '../lib/review';
 import { YourCheck } from '../components/YourCheck';
 import { AskButton } from '../components/AskQuestion';
@@ -99,8 +99,8 @@ export function ProofPage() {
                 </p>
               )}
               <PicturesNote t={t} />
-              {isApiProof(shot.after) ? <ApiProof file={shot.after} {...(shot.note ? { note: shot.note } : {})} /> : <div className="ba">
-                <div className={shot.beforeDevice ? 'ondevice' : undefined}>
+              {isApiProof(shot.after) ? <ApiProof file={shot.after} {...(shot.note ? { note: shot.note } : {})} /> : <div className={`ba${onePicture(shot) ? ' one' : ''}`}>
+                {!onePicture(shot) && <div className={shot.beforeDevice ? 'ondevice' : undefined}>
                   <div className="cap">
                     <Written text={shot.beforeLabel} />
                   </div>
@@ -108,19 +108,19 @@ export function ProofPage() {
                     <img src={assetUrl(`/api/v1/proof/${shot.before}`)} alt={`${shot.criterion}, ${shot.beforeLabel}`} />
                   </button>
                   {shot.beforeDevice && <small className="shotdevice">{shot.beforeDevice}</small>}
-                </div>
+                </div>}
                 <div className={shot.device ? 'ondevice' : undefined}>
                   <div className="cap">
-                    <Written text={shot.afterLabel} />
+                    <Written text={onePicture(shot) ? oneLabel(shot) : shot.afterLabel} />
                   </div>
-                  <button className="zoom" onClick={() => setZoom(at + 1)} aria-label={`Open ${shot.afterLabel} full size`}>
+                  <button className="zoom" onClick={() => setZoom(afterAt(shot, at))} aria-label={`Open ${shot.afterLabel} full size`}>
                     <img src={assetUrl(`/api/v1/proof/${shot.after}`)} alt={`${shot.criterion}, ${shot.afterLabel}`} />
                   </button>
                   {shot.device && <small className="shotdevice">{shot.device}</small>}
                 </div>
               </div>}
               {shot.note && !isApiProof(shot.after) && <Written as="p" className="note" text={shot.note} />}
-              <MorePictures shot={shot} first={at + 2} onOpen={setZoom} />
+              <MorePictures shot={shot} first={afterAt(shot, at) + 1} onOpen={setZoom} />
             </>
           ) : (
             <p className="note">Nothing to compare.</p>

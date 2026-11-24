@@ -110,9 +110,9 @@ describe('the proof through the window', () => {
       expect.objectContaining({ criterion: 'The booking shows as Confirmed', after: `${id.toLowerCase()}-after-1.png`, page: '/book?done=1', note: 'Sara’s booking for Monday shows as Confirmed.' }),
       expect.objectContaining({ criterion: 'He is told it is taken', after: `${id.toLowerCase()}-after-2.png`, page: '/book' }),
     ]);
-    // A technical note never reaches the person: it stays in the activity.
+    // A technical note never reaches the person, nor a line about it: the log has it.
     expect(t.proof![1]!.note).toBeUndefined();
-    expect(lines().some((l) => l.startsWith('The Tester wrote something technical, so it stays out of the proof'))).toBe(true);
+    expect(lines().some((l) => /technical/.test(l))).toBe(false);
     // The Tester only read and used the window; no browser was let out of the sandbox for it.
     const run = calls[0]!;
     expect(run.sandbox).toBeDefined();

@@ -456,7 +456,7 @@ function demoTickets(user: string): Ticket[] {
       },
       activity: log([
         [3, 'tester', 'Still not working after 2 rounds: "done when" 2'],
-        [4, 'reviewer', 'Checked the screenshots: 1 met, 1 not working yet, 1 not shown yet'],
+        [4, 'reviewer', 'Looked at the pictures of each "done when": 1 shown working, 1 not working yet, 1 not shown yet'],
         [12, 'builder', 'Fixed what the screenshots showed'],
         [20, 'tester', 'The screenshots show one "done when" not working yet, so the Builder fixes it: "done when" 2: At phone width the results list runs off the right edge.'],
       ]),
@@ -516,7 +516,7 @@ function demoTickets(user: string): Ticket[] {
       },
       activity: log([
         [3, 'tester', 'Could not show "done when" 2 on a screen after 2 more tries'],
-        [4, 'reviewer', 'Checked the screenshots: 1 met, 1 not shown yet'],
+        [4, 'reviewer', 'Looked at the pictures of each "done when": 1 shown working, 1 not shown yet'],
         [8, 'tester', 'The screenshots do not show "done when" 2 clearly yet, so the Tester takes it again (try 2 of 2)'],
         [11, 'tester', 'The screenshots do not show "done when" 2 clearly yet, so the Tester takes it again (try 1 of 2)'],
       ]),

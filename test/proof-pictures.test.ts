@@ -50,7 +50,7 @@ const P = await import('../src/engine/prompts.js');
 const { shotSizeOf } = await import('../src/engine/proof-check.js');
 const { pagesOf, proofPages, rowPictures } = await import('../src/board/at-review.js');
 const ui = await import('../console-ui/src/lib/review.js');
-const { proofViewer } = await import('../console-ui/src/lib/verdict.js');
+const { afterAt, proofViewer } = await import('../console-ui/src/lib/verdict.js');
 const { readTicketDocs, ticketDocs } = await import('../src/board/docs.js');
 const { whatHappened } = await import('../src/board/happened.js');
 
@@ -663,6 +663,20 @@ describe('what happened and the board', () => {
     expect(pictures.map((p) => p.caption)).toEqual(['One · Before', 'One · After', 'One · The long case.', 'One · Picture 3', 'Two · New screen', 'Two · After']);
   });
 
+  it('a new screen, whose before is its after, is one picture: never the same one twice', () => {
+    const rows: ProofShot[] = [
+      { criterion: 'One', before: 'a.png', after: 'a.png', beforeLabel: 'New screen', afterLabel: 'After', device: 'iPhone 18 Pro', page: '/', more: [{ after: 'b.png' }] },
+      { criterion: 'Two', before: 'c.png', after: 'd.png', beforeLabel: 'Before', afterLabel: 'After' },
+    ];
+    const { pictures, starts } = proofViewer(rows, (f) => `/p/${f}`);
+    expect(pictures.map((p) => p.caption)).toEqual(['One · New screen', 'One · Picture 2', 'Two · Before', 'Two · After']);
+    expect(starts).toEqual([0, 2]);
+    expect([afterAt(rows[0]!, 0), afterAt(rows[1]!, 2)]).toEqual([0, 3]);
+    // A phone app's "/" is the screen it opens on: no "Page /" under it. A web page keeps its page.
+    expect(ui.pageOf(rows[0]!)).toBe('');
+    expect(ui.pageOf({ page: '/' })).toBe('/');
+  });
+
   it('the proof panel, the full page and the stop show the extras as a row of thumbnails', async () => {
     vi.stubGlobal('sessionStorage', { getItem: () => 'tok' });
     vi.stubGlobal('window', { location: { pathname: '/' } });
@@ -684,8 +698,8 @@ describe('what happened and the board', () => {
     expect(renderToStaticMarkup(createElement(MorePictures, { shot: { ...shot, more: undefined }, first: 2, onOpen: () => {} }))).toBe('');
     // Both places use it, in the viewer's own order, and the stop uses the panel's rows.
     const read = (f: string) => fs.readFileSync(new URL(`../console-ui/src/${f}`, import.meta.url), 'utf8');
-    expect(read('pages/Proof.tsx')).toContain('<MorePictures shot={shot} first={at + 2} onOpen={setZoom} />');
-    expect(codeAt('console-ui/src/pages/TicketDrawer.tsx', 'console-ui/src/pages/drawer')).toContain('<MorePictures shot={p} first={starts[k]! + 2} onOpen={setZoom} />');
+    expect(read('pages/Proof.tsx')).toContain('<MorePictures shot={shot} first={afterAt(shot, at) + 1} onOpen={setZoom} />');
+    expect(codeAt('console-ui/src/pages/TicketDrawer.tsx', 'console-ui/src/pages/drawer')).toContain('<MorePictures shot={p} first={afterAt(p, starts[k]!) + 1} onOpen={setZoom} />');
     expect(codeAt('console-ui/src/pages/TicketDrawer.tsx', 'console-ui/src/pages/drawer')).toContain('<ProofShots t={t} />');
     expect(read('styles/verdict.css')).toContain('.proofmore-row');
     vi.unstubAllGlobals();

@@ -124,11 +124,11 @@ export const pictureCheckPart = {
   },
 
   /**
-   * The Tester could not show a "done when" on a screen, after its last retake, or none of them can be shown (`retook`
-   * false): a plain stop, and the product is not touched. The ways out are Take the screenshots again, Continue anyway
-   * and Send it back to the plan.
+   * The Tester could not show a "done when" on a screen, after the retakes it had (`retook`, how many), or none of them
+   * can be shown (`retook` false): a plain stop, and the product is not touched. The ways out are Take the screenshots
+   * again, Continue anyway and Send it back to the plan.
    */
-  cannotShow(this: LiveSquad, id: string, rows: OpenRow[], retook = true, noes: ListNo[] = []): void {
+  cannotShow(this: LiveSquad, id: string, rows: OpenRow[], retook: number | false = MAX_RETAKES, noes: ListNo[] = []): void {
     const stop = rows.length ? notShownStop(rows) : { question: "The Tester still answers no on your team's checklist.", points: [] };
     const listWords = noes.map((n) => `Your team's checklist "${n.list}": ${n.question}${n.why ? ` (${n.why})` : ''}`);
     this.update(id, (x) => {
@@ -140,7 +140,7 @@ export const pictureCheckPart = {
       x.gates = { ...(x.gates ?? { checks: 'pass', review: 'pass' }), proof: 'fail' } as Ticket['gates'];
       const listOnly = !rows.length;
       x.status = listOnly ? "A no on your team's checklist" : 'The screenshots do not show it yet';
-      addActivity(x, 'tester', listOnly ? `The Tester still answers no on your team's checklist after ${MAX_RETAKES} more tries` : retook ? `Could not show ${rows.map((r) => `"done when" ${r.criterion}`).join(', ')} on a screen after ${MAX_RETAKES} more tries` : 'Every "done when" ended as not on a screen, so the screenshots do not show the work');
+      addActivity(x, 'tester', listOnly ? `The Tester still answers no on your team's checklist after ${MAX_RETAKES} more tries` : retook !== false ? `Could not show ${rows.map((r) => `"done when" ${r.criterion}`).join(', ')} on a screen${retook ? ` after ${retook} more ${retook === 1 ? 'try' : 'tries'}` : ''}` : 'Every "done when" ended as not on a screen, so the screenshots do not show the work');
       x.stuck = { gate: 'proof', kind: 'not-shown', question: stop.question, points: [...stop.points, ...listWords], options: wayOptions({ gate: 'proof', kind: 'not-shown' }) };
       x.waiting = { kind: 'stuck', summary: `${x.status}: needs one decision` };
     });

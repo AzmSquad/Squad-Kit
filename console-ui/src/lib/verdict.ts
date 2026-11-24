@@ -41,13 +41,23 @@ export const isSavedProof = (file: string): boolean => /\.(api|rows|test|none)\.
 /** What the picture viewer shows in place of a saved answer, so its places stay in order. */
 const NO_PICTURE = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="200"><text x="24" y="100" font-family="sans-serif" font-size="20">A saved proof, not a picture</text></svg>')}`;
 
+/** A row whose before is its after, as a new screen has nothing before it: one picture, never the same one twice. */
+export const onePicture = (r: Pick<ProofShot, 'before' | 'after'>): boolean => !r.before || r.before === r.after;
+
+/** Where a row's main picture is in the viewer, from the row's first: its more pictures follow it. */
+export const afterAt = (r: Pick<ProofShot, 'before' | 'after'>, first: number): number => first + (onePicture(r) ? 0 : 1);
+
+/** The label over a row's one picture: "New screen", or the after's own. */
+export const oneLabel = (r: Pick<ProofShot, 'before' | 'beforeLabel' | 'afterLabel'>): string => (r.before ? r.beforeLabel : r.afterLabel);
+
 export function proofViewer(rows: ProofShot[], rawSrc: (file: string) => string): { pictures: { src: string; caption: string }[]; starts: number[] } {
   const src = (file: string) => (isSavedProof(file) ? NO_PICTURE : rawSrc(file));
   const pictures: { src: string; caption: string }[] = [];
   const starts: number[] = [];
   for (const r of rows) {
     starts.push(pictures.length);
-    pictures.push({ src: src(r.before), caption: `${r.criterion} · ${r.beforeLabel}` }, { src: src(r.after), caption: `${r.criterion} · ${r.afterLabel}` });
+    if (!onePicture(r)) pictures.push({ src: src(r.before), caption: `${r.criterion} · ${r.beforeLabel}` });
+    pictures.push({ src: src(r.after), caption: `${r.criterion} · ${onePicture(r) ? oneLabel(r) : r.afterLabel}` });
     (r.more ?? []).forEach((m, i) => pictures.push({ src: src(m.after), caption: `${r.criterion} · ${m.note || `Picture ${i + 2}`}` }));
   }
   return { pictures, starts };

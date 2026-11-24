@@ -17,12 +17,14 @@ export function savedWords(files: string[], rejected: number): string {
 }
 
 /**
- * squad-kit's check of the proof, in the activity: "Checked the screenshots: 2 met, 1 not shown yet" as before, and on a
- * spec with kinds "Checked the proof", counting only what the check looked at: pictures, answers and rows.
+ * squad-kit's check of the proof, in the activity: 'Looked at the pictures of each "done when": 2 shown working, 1 not
+ * shown yet', and on a spec with kinds "the proof", counting only what the check looked at: pictures, answers and rows.
+ * About the pictures, so it never reads as the code's review.
  */
 export function checkedLine(x: Pick<Ticket, 'criteria' | 'proof'>, open: string[]): string {
   const kinds = hasKinds(x);
   const met = (x.proof ?? []).filter((p) => p.shows === 'met' && (!kinds || !p.kind || ['screen', 'api', 'data'].includes(p.kind))).length;
-  if (open.length) return `Checked the ${kinds ? 'proof' : 'screenshots'}: ${[`${met} met`, ...open].join(', ')}`;
-  return kinds ? 'Checked the proof: each "done when" it shows is met' : 'Checked the screenshots: each "done when" on a screen is met';
+  // About the pictures and the proof, never the code: the code's review said its own.
+  if (open.length) return `Looked at the ${kinds ? 'proof' : 'pictures'} of each "done when": ${[`${met} shown working`, ...open].join(', ')}`;
+  return kinds ? 'Looked at the proof: each "done when" it shows works' : 'Looked at the pictures: each "done when" on a screen works';
 }

@@ -68,7 +68,6 @@ export const DID_LINES: Record<string, [RegExp, string]> = {
   release: [/^Released in /, 'Sent out'],
   watchdog: [/^Looks stuck: /, 'Flagged'],
   'step-up': [/^Runs on .*after \d+ failed tr/, 'Moved up on'],
-  'plain-words': [/^The Tester wrote something technical/, 'Kept words out of the proof on'],
   interrupted: [/^Carried on.* after (a restart|the computer slept)|^The computer slept|^Resumed after sleep/, 'Carried on after it on'],
   blips: [/^The connection or the AI service had a problem/, 'Waited on'],
   leftovers: [/^Stopped (a program|\d+ programs) left running/, 'Stopped programs on'],

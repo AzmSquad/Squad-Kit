@@ -10,7 +10,7 @@ import { Lightbox } from '../../components/Lightbox';
 import { GatePill, NotCheckedNote, OldFailuresNote } from '../../components/Gates';
 import { checksWords, noGateRan, noShotsText, overrideWhat, proofLead, proofWords } from '../../lib/gates';
 import { AlsoChanged, MorePictures, OffScreenList, VerdictIcon, VerdictTag } from '../../components/Verdict';
-import { isApiProof, proofViewer, verdictClass, verdictNote } from '../../lib/verdict';
+import { afterAt, isApiProof, oneLabel, onePicture, proofViewer, verdictClass, verdictNote } from '../../lib/verdict';
 import { YourCheck } from '../../components/YourCheck';
 import { pageOf } from '../../lib/review';
 import { useDraft } from '../../lib/drafts';
@@ -77,24 +77,24 @@ export function ProofShots({ t }: { t: Ticket }) {
               Page <code>{pageOf(p)}</code>
             </p>
           )}
-          {isApiProof(p.after) ? <ApiProof file={p.after} {...(p.note ? { note: p.note } : {})} /> : <div className="proofmini">
-            <div className={p.beforeDevice ? 'ondevice' : undefined}>
+          {isApiProof(p.after) ? <ApiProof file={p.after} {...(p.note ? { note: p.note } : {})} /> : <div className={`proofmini${onePicture(p) ? ' one' : ''}`}>
+            {!onePicture(p) && <div className={p.beforeDevice ? 'ondevice' : undefined}>
               <Written as="small" text={p.beforeLabel} />
               <button className="zoom" onClick={() => setZoom(starts[k]!)} aria-label={`Open ${p.beforeLabel} full size`}>
                 <img src={assetUrl(`/api/v1/proof/${p.before}`)} alt={`${p.criterion}, ${p.beforeLabel}`} />
               </button>
               {p.beforeDevice && <small className="shotdevice">{p.beforeDevice}</small>}
-            </div>
+            </div>}
             <div className={p.device ? 'ondevice' : undefined}>
-              <Written as="small" text={p.afterLabel} />
-              <button className="zoom" onClick={() => setZoom(starts[k]! + 1)} aria-label={`Open ${p.afterLabel} full size`}>
+              <Written as="small" text={onePicture(p) ? oneLabel(p) : p.afterLabel} />
+              <button className="zoom" onClick={() => setZoom(afterAt(p, starts[k]!))} aria-label={`Open ${p.afterLabel} full size`}>
                 <img src={assetUrl(`/api/v1/proof/${p.after}`)} alt={`${p.criterion}, ${p.afterLabel}`} />
               </button>
               {p.device && <small className="shotdevice">{p.device}</small>}
             </div>
           </div>}
           {p.more?.length && p.why && p.note ? <Written as="p" className="note proofmore-main" text={p.note} /> : null}
-          <MorePictures shot={p} first={starts[k]! + 2} onOpen={setZoom} />
+          <MorePictures shot={p} first={afterAt(p, starts[k]!) + 1} onOpen={setZoom} />
         </div>
       ))}
       <OffScreenList t={t} />

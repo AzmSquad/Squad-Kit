@@ -4,7 +4,7 @@ import { assetUrl } from '../../api/client';
 import type { ProofShot, Ticket } from '../../api/types';
 import { KEEPS_PROOF, rowKind, shortProof } from '../../lib/proof-kinds';
 import { pageOf } from '../../lib/review';
-import { proofViewer, verdictClass, verdictNote } from '../../lib/verdict';
+import { afterAt, oneLabel, onePicture, proofViewer, verdictClass, verdictNote } from '../../lib/verdict';
 import { langProps } from '../../lib/lang';
 import { ApiProof } from '../ApiProof';
 import { Lightbox } from '../Lightbox';
@@ -57,6 +57,8 @@ function Block({ p, i, first, onOpen }: { p: ProofShot; i: number; first: number
 }
 
 function Pictures({ p, first, onOpen }: { p: ProofShot; first: number; onOpen(at: number): void }) {
+  // A new screen: its one picture, not the same one as before and after.
+  const one = onePicture(p);
   return (
     <>
       {pageOf(p) && (
@@ -64,22 +66,25 @@ function Pictures({ p, first, onOpen }: { p: ProofShot; first: number; onOpen(at
           Page <code>{pageOf(p)}</code>
         </p>
       )}
-      <div className="proofmini">
-        <div className={p.beforeDevice ? 'ondevice' : undefined}>
-          <Written as="small" text={p.beforeLabel} />
-          <button className="zoom" onClick={() => onOpen(first)} aria-label={`Open ${p.beforeLabel} full size`}>
-            <img src={assetUrl(`/api/v1/proof/${p.before}`)} alt={`${p.criterion}, ${p.beforeLabel}`} />
-          </button>
-        </div>
+      <div className={`proofmini${one ? ' one' : ''}`}>
+        {!one && (
+          <div className={p.beforeDevice ? 'ondevice' : undefined}>
+            <Written as="small" text={p.beforeLabel} />
+            <button className="zoom" onClick={() => onOpen(first)} aria-label={`Open ${p.beforeLabel} full size`}>
+              <img src={assetUrl(`/api/v1/proof/${p.before}`)} alt={`${p.criterion}, ${p.beforeLabel}`} />
+            </button>
+          </div>
+        )}
         <div className={p.device ? 'ondevice' : undefined}>
-          <Written as="small" text={p.afterLabel} />
-          <button className="zoom" onClick={() => onOpen(first + 1)} aria-label={`Open ${p.afterLabel} full size`}>
-            <img src={assetUrl(`/api/v1/proof/${p.after}`)} alt={`${p.criterion}, ${p.afterLabel}`} />
+          <Written as="small" text={one ? oneLabel(p) : p.afterLabel} />
+          <button className="zoom" onClick={() => onOpen(afterAt(p, first))} aria-label={`Open ${one ? oneLabel(p) : p.afterLabel} full size`}>
+            <img src={assetUrl(`/api/v1/proof/${p.after}`)} alt={`${p.criterion}, ${one ? oneLabel(p) : p.afterLabel}`} />
           </button>
+          {one && p.device && <small className="shotdevice">{p.device}</small>}
         </div>
       </div>
       {p.note && <Written as="p" className="cap" text={p.note} />}
-      <MorePictures shot={p} first={first + 2} onOpen={onOpen} />
+      <MorePictures shot={p} first={afterAt(p, first) + 1} onOpen={onOpen} />
     </>
   );
 }

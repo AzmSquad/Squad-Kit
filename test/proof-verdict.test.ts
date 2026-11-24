@@ -242,7 +242,7 @@ describe('the proof shows each "done when" is met', () => {
     expect(t.proof?.find((p) => p.criterion === 'The booking shows as Confirmed')?.shows).toBe('met');
     expect(builderRuns()[0]!.prompt).toContain('"Done when" 2 (He is told it is taken): The picture shows the booking form with no message at all.');
     expect(t.squad?.phase).toBe('test');
-    expect(lines(id)).toContain('Checked the screenshots: 1 met, 1 not working yet');
+    expect(lines(id)).toContain('Looked at the pictures of each "done when": 1 shown working, 1 not working yet');
   });
 
   it('not shown: the Tester takes it again in its own conversation, told what to show; then met passes, and the Builder is never called', async () => {
@@ -296,7 +296,7 @@ describe('the proof shows each "done when" is met', () => {
     expect(t.proof?.find((p) => p.criterion === 'He is told it is taken')).toMatchObject({ shows: 'not-shown', why: 'The day view is not in the picture.' });
     expect(t.retryPhase).toBe('proof');
     expect(t.clock).toBeUndefined();
-    expect(lines(id)).toContain('Checked the screenshots: 1 met, 1 not shown yet');
+    expect(lines(id)).toContain('Looked at the pictures of each "done when": 1 shown working, 1 not shown yet');
     // Builds by itself never accepts it.
     await squad().step(id, 'accept');
     t = ticket(id);

@@ -32,17 +32,22 @@ const { addWorktree } = await import('./support/copy.js');
 const { tailLines } = await import('../src/core/app-log.js');
 const { liveNow } = await import('../src/board/now.js');
 const { quickNpx } = await import('./support/fake-playwright.js');
+const { AgentWindow } = await import('../src/engine/window.js');
+const { openWindow, closeWindow, windowAccess } = await import('../src/engine/window-server.js');
 
 type Squad = {
   runBuilder(id: string, prompt: string, resume: boolean, step?: string): Promise<void>;
   checks(id: string): Promise<void>;
   workspace(id: string): Promise<Ticket>;
+  windowBase(id: string, role: string, cwd: string): object;
+  windowChecks(id: string, cwd: string): import('../src/engine/window.js').WindowChecks;
 };
 
 const REUSED = 'The checks already passed on this same code when squad-kit ran them for the Builder, so they do not run again';
 const TESTS_REUSED = 'The tests already passed on this same code when squad-kit ran them for the Builder, so they do not run again. squad-kit is running the other checks';
 const LINT_REUSED = 'The code check already passed on this same code when squad-kit ran it for the Builder, so it does not run again. squad-kit is running the other checks';
 const RUNNING = 'squad-kit is running the project checks';
+const FOR_TESTER = 'The checks already passed on this same code in the checks step, so they do not run again for the Tester';
 /** Each check writes its name to runs.txt in the copy, which git ignores: running it is no change of the code. */
 const TEST = 'echo test >> runs.txt; echo "Tests  3 passed"';
 const LINT = 'echo lint >> runs.txt; echo tidy';
@@ -524,5 +529,50 @@ describe.skipIf(process.platform === 'win32')('one test file on its own', () => 
     await s.checks(a.id);
     expect(runs(a.copy)).toEqual(['test', 'lint', 'one-file', 'test', 'lint']);
     expect(lines(a.id)).not.toContain(REUSED);
+  });
+});
+
+describe.skipIf(process.platform === 'win32')("the checks step's run, for the Tester's proof", () => {
+  /** One run_checks of the Tester in the proof, in a window as the proof gives it: run_checks in the story's copy. */
+  const ask = async (s: Squad, id: string, copy: string, args: object) => {
+    const w = new AgentWindow({ ...(s.windowBase(id, 'tester', copy) as Pick<import('../src/engine/window.js').WindowSetup, 'ticket' | 'proofDir' | 'say'>), step: 'proof', who: 'Tester', tools: ['run_checks', 'i_am_stuck'], checks: s.windowChecks(id, copy), prefix: `${id.toLowerCase()}-after` });
+    openWindow(w);
+    try {
+      return textOf(await callTool(await windowAccess(w), 'run_checks', args));
+    } finally {
+      await closeWindow(w);
+    }
+  };
+
+  it('passed on this same code: the Tester gets that result, nothing runs again, and the card says what it did before', async () => {
+    const a = story();
+    const s = squad();
+    edit(a.copy);
+    await s.checks(a.id);
+    expect(runs(a.copy)).toEqual(['test', 'lint']);
+    updateTicket(bp, a.id, (x) => (x.status = 'Tester is taking after screenshots'));
+    const said = await ask(s, a.id, a.copy, {});
+    expect(said).toContain('test: passed');
+    expect(said).toContain('lint: passed');
+    expect(said).toContain('it did not run it again');
+    expect(runs(a.copy)).toEqual(['test', 'lint']);
+    expect(lines(a.id)).toContain(FOR_TESTER);
+    // One test file is the Tester's own question: it runs.
+    expect(await ask(s, a.id, a.copy, { only: 'rooms.test.js' })).toContain('test');
+    expect(runs(a.copy).length).toBe(3);
+    // The card says again what the Tester was doing once a check it ran ends.
+    expect(get(a.id).status).toBe('Tester is taking after screenshots');
+  });
+
+  it('not after the code changed: the checks run as usual', async () => {
+    const a = story();
+    const s = squad();
+    edit(a.copy);
+    await s.checks(a.id);
+    edit(a.copy, 'four rooms\n');
+    const said = await ask(s, a.id, a.copy, {});
+    expect(said).not.toContain('it did not run it again');
+    expect(runs(a.copy)).toEqual(['test', 'lint', 'test', 'lint']);
+    expect(lines(a.id)).not.toContain(FOR_TESTER);
   });
 });

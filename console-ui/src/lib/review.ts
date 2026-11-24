@@ -15,10 +15,12 @@ export function waitsAtReview(t: Pick<Ticket, 'waiting' | 'stage' | 'stuck'>): b
 }
 
 /** A page in the app as the proof names it: "/test/sign-up", never a host. Empty when it names none. */
-export function pageOf(shot: Pick<ProofShot, 'page'>): string {
+export function pageOf(shot: Pick<ProofShot, 'page'> & { device?: string | undefined }): string {
   const p = shot.page?.trim() ?? '';
   if (!p) return '';
   const bare = p.replace(/^[a-z]+:\/\/[^/]+/i, '');
+  // A phone app's "/" is the screen it opens on: no page to name.
+  if (shot.device && (bare === '/' || bare === '')) return '';
   return bare.startsWith('/') ? bare : `/${bare}`;
 }
 

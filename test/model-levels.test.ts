@@ -269,6 +269,15 @@ describe('the live squad steps up after any failed Builder run', () => {
     ]);
   });
 
+  it("the Reviewer's look at the proof's pictures runs on the review's own level: it is no second opinion on the code", async () => {
+    const id = building('Room photos');
+    updateTicket(bp, id, (x) => (x.fails = 1));
+    answers.push({ checks: [] });
+    await (squad() as unknown as { runAgent(o: object): Promise<unknown> }).runAgent({ role: 'reviewer', step: 'proof-check', levelStep: 'review', ticket: id, cwd: tmp, sessionId: 'p1', prompt: 'Look at the pictures', permissions: ['read'] });
+    expect(calls.at(-1)).toMatchObject({ model: 'opus', effort: 'high' });
+    expect(runLines(id)).toEqual(['reviewer: Runs on Opus (strongest, high effort)']);
+  });
+
   it("counts the Builder's own failed run, but not a Stop", async () => {
     const id = building('Opening hours');
     updateTicket(bp, id, (x) => (x.reviewNotes = ['Use the shared clock.']));

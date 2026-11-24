@@ -108,8 +108,9 @@ export const agentRunPart = {
     const ticket = key ? readTicket(this.bp, key) : null;
     const levelStep = opts.levelStep ?? opts.step ?? 'chat';
     const on = { quality: this.meta().quality, express: ticket?.track === 'express', fails: ticket?.fails };
-    // The Reviewer is never on a weaker level than the Builder whose work it checks.
-    const floor = opts.role === 'reviewer' ? { builder: builderLevel(on, readAgent(this.bp, 'builder').levels, personLevels()) } : {};
+    // The Reviewer is never on a weaker level than the Builder whose work it checks. Its look at the proof's pictures is
+    // no second opinion on the code: it runs on the review's own level.
+    const floor = opts.role === 'reviewer' && opts.step !== 'proof-check' ? { builder: builderLevel(on, readAgent(this.bp, 'builder').levels, personLevels()) } : {};
     const lv = resolveLevel({ role: opts.role, step: levelStep, ...on, ...floor }, agent.levels, personLevels());
     const effort = effortOn(tool, lv.effort);
     if (key && levelStep !== 'chat') this.update(key, (x) => addActivity(x, opts.role, `Runs on ${describeLevel(lv, tool)}`));

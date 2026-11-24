@@ -57,16 +57,16 @@
 .kindwhyask .input { flex: 1; min-width: 0; height: 30px; font-size: 12.5px; }
 
 /* The proof: one block per "done when", two by two. */
-.kindgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+.kindgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr)); gap: 12px; margin-bottom: 12px; }
 .kindgrid .pf { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; animation: kindrise 0.4s ease both; animation-delay: calc(var(--i) * 90ms); }
 @keyframes kindrise { from { opacity: 0; transform: translateY(8px); } }
 .kindgrid .pf.broken { border-color: color-mix(in srgb, var(--bug) 45%, transparent); }
 .kindgrid .pf.notshown { border-color: var(--you-line); }
-.kindgrid .pf .ph { display: flex; align-items: flex-start; gap: 8px; }
+.kindgrid .pf .ph { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px 8px; }
 .kindgrid .pf .ph > svg { margin-top: 2px; color: var(--accent); flex: none; }
 .kindgrid .pf .ph > svg.vx { color: var(--bug); }
 .kindgrid .pf .ph > svg.vq { color: var(--you); }
-.kindgrid .pf .ph b { font-size: 13.5px; font-weight: 650; flex: 1; line-height: 1.35; min-width: 0; }
+.kindgrid .pf .ph b { font-size: 13.5px; font-weight: 650; flex: 1 1 220px; line-height: 1.35; min-width: 0; }
 .kindgrid .pf .cap { font-size: 12px; color: var(--muted); margin: 0; }
 .kindgrid .pf .verdictnote { font-size: 12.5px; margin: -2px 0 0; color: var(--muted); }
 .kindgrid .pf.broken .verdictnote { color: var(--bug); }
