@@ -15,7 +15,7 @@ import { OWN_GROUP, track } from './process-group.js';
 import { PACKAGE_CACHES, PRIVATE, gitPlaces, networkPolicy, noPushEnv, packageCacheEnv, projectCacheDir, projectNetwork, ticketCacheDir } from './sandbox.js';
 import type { NetworkLevel } from '../board/types.js';
 import { cacheHomeEnv, homeCachePlace, ownFolder, storiesCacheDir } from './cache-home.js';
-import { flutterOnPath, flutterStampFolders, flutterStampRegexes } from './flutter-sdk.js';
+import { flutterOnPath, guardStamps, stampRoots } from './flutter-sdk.js';
 
 /**
  * squad-kit's own guard for the project's own commands: the checks (test, lint, build), the app's start, the setup
@@ -267,7 +267,7 @@ export function buildGuard(o: { cwd: string; root: string; cache?: string; extra
     noWrite: [...new Set(withReal([...squadOwnFiles(), ...gitPlaces(real(o.cwd))]))],
     noConnect: [...new Set(withReal(runtimeSockets(home, o.platform)))],
     ...(o.cache ? { cache: real(o.cache) } : {}),
-    ...(flutter ? { writeExactly: flutterStampRegexes(real(flutter)), writeExactlyIn: flutterStampFolders(real(flutter)) } : {}),
+    ...guardStamps(stampRoots(flutter, real(o.cwd))),
     ...(o.allow ? { allow: { ...(o.allow.allowRead ? { allowRead: withReal(o.allow.allowRead.map((p) => allowPath(p, home))) } : {}), ...(o.allow.allowWrite ? { allowWrite: withReal(o.allow.allowWrite.map((p) => allowPath(p, home))) } : {}) } } : {}),
     ...(networkPolicy(o.network ?? projectNetwork(o.root), [], o.platform).commands === 'this-computer' ? { offline: true } : {}),
   };

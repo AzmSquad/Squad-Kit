@@ -9,7 +9,7 @@ import { squadHome, squadHomes } from '../core/home.js';
 import { boardPaths, readMeta, type BoardPaths } from '../board/store.js';
 import type { NetworkLevel } from '../board/types.js';
 import { KNOWN_BAD, RECOMMENDED, knownBadGroup } from './network-lists.js';
-import { flutterOnPath, flutterStampGlobs } from './flutter-sdk.js';
+import { flutterOnPath, flutterStampGlobs, stampRoots } from './flutter-sdk.js';
 
 /**
  * The Builder's and the Tester's shell commands run in their AI tool's sandbox, where it has one: they write only in
@@ -298,7 +298,7 @@ export function sandboxAsk(o: SandboxFor): SandboxAsk {
   // Flutter's version stamps in its own folder, each exactly: the AI tool's sandbox takes a glob for the one a run names.
   const flutter = o.flutter === undefined ? flutterOnPath()?.root : o.flutter;
   return {
-    write: [...new Set([...withReal([o.proof]), ...own, ...temp, ...caches, ...(flutter ? flutterStampGlobs(flutter) : [])])],
+    write: [...new Set([...withReal([o.proof]), ...own, ...temp, ...caches, ...stampRoots(flutter, o.cwd).flatMap(flutterStampGlobs)])],
     noRead: [...new Set([...PRIVATE.map((p) => path.join(home, p)), ...withReal(squadHomes(home)), ...o.secrets, ...env])],
     // The step's own folders, inside squad-kit's: its copy, its proof folder, its package cache, its attachments.
     // And squad-kit's Android SDK, Java and shared Gradle home, read only, for an Android build in the shell.

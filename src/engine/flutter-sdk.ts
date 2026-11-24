@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { fvmFlutterRoot } from './fvm-sdk.js';
 
 /**
  * The person's Flutter, as the project's commands and the agents' shell find it, and the few files in its folder that
@@ -47,6 +48,28 @@ export function flutterStampRegexes(root: string): string[] {
 /** The same as paths for an AI tool's sandbox, which takes a glob for the one named by the run. */
 export function flutterStampGlobs(root: string): string[] {
   return FLUTTER_STAMPS.map((s) => path.join(root, s.glob));
+}
+
+/** A folder's real path, or the path itself when it is not there (yet). */
+const realOr = (p: string) => {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return p;
+  }
+};
+
+/**
+ * The Flutter folders whose stamps open for a command in a copy: the person's Flutter on the PATH, and the one FVM runs
+ * for the copy's pin (fvm-sdk.ts), each by its real path.
+ */
+export function stampRoots(flutter: string | null | undefined, cwd: string, env: NodeJS.ProcessEnv = process.env): string[] {
+  return [...new Set([flutter, fvmFlutterRoot(cwd, env)].filter((r): r is string => Boolean(r)).map(realOr))];
+}
+
+/** The guard's single files to write for those Flutters, and their folders. Empty when there are none. */
+export function guardStamps(roots: string[]): { writeExactly?: string[]; writeExactlyIn?: string[] } {
+  return roots.length ? { writeExactly: roots.flatMap(flutterStampRegexes), writeExactlyIn: [...new Set(roots.flatMap(flutterStampFolders))] } : {};
 }
 
 /**

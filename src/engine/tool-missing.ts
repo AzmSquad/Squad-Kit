@@ -11,6 +11,8 @@ export const TOOL_MISSING: { what: string; says: RegExp }[] = [
   // An SDK that builds apps but lacks the version a project's Gradle asks for, and may not download it (a person's own,
   // like Android Studio's): Android's own Gradle plugin says so in these words.
   { what: 'a part of the Android SDK', says: /Failed to find Build Tool revision|Failed to find target with hash string|No installed build tools found|failed to find target android-\d|licen[cs]es? for (?:package|the following SDK components)[^\n]*not accepted/i },
+  // FVM inside the guard when squad-kit could not get the pinned Flutter first (fvm-sdk.ts): no code change brings it.
+  { what: 'the Flutter version this project pins', says: /Flutter SDK: SDK Version : \S+ is not installed|Failed to install Flutter SDK|Failed to retrieve Flutter SDK releases/ },
   { what: 'Java', says: /JAVA_HOME is not set|Unable to locate a Java Runtime|No Java runtime present/ },
   { what: 'Xcode', says: /xcrun: error:/ },
   // A shell that finds no such program: "zsh: command not found: flutter", "sh: 1: flutter: not found".

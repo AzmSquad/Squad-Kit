@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`fvm flutter` works in the project's checks.** A project that pins its Flutter with FVM failed every check: inside
+  squad-kit's guard FVM could not download the pinned Flutter, as its folder is outside the story's copy and stays
+  read only. Before a check that runs fvm, squad-kit now gets that version itself, outside the guard, with
+  `fvm install <version>` (the version read from the project's .fvmrc, run from the home folder), then the checks find
+  it installed, and only that Flutter's own version stamps open in the guard, as for the Flutter on the PATH. The
+  Builder's shell gets the same stamps. When FVM still can't get it, the check says so as a missing tool, with no try
+  counted, instead of sending the Builder to fix it.
+
 ## [1.3.31] — 2026-11-24
 
 ### Fixed

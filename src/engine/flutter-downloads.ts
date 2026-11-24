@@ -8,6 +8,7 @@ import { OWN_GROUP, endGroup, track, whenExited } from './process-group.js';
 import { projectEnv } from './project-guard.js';
 import { flutterOnPath } from './flutter-sdk.js';
 import { kindsOf, type Platform } from './tools/kinds.js';
+import { fvmInstall, runsFvm } from './fvm-sdk.js';
 
 /**
  * Flutter's own downloads, done by squad-kit outside the guard. Flutter keeps what it downloads for each phone (the
@@ -94,11 +95,14 @@ export type FlutterDownloads = 'done' | 'had' | 'not-needed' | 'failed';
  * for, by squad-kit, once. 'had' when they were done before, 'not-needed' when the command or the folder needs none.
  */
 export async function flutterDownloads(dir: string, command: string, o: { env?: NodeJS.ProcessEnv; signal?: AbortSignal; onOutput?(): void; platform?: NodeJS.Platform; home?: string } = {}): Promise<FlutterDownloads> {
+  if (!runsFlutter(command) && !runsFvm(command)) return 'not-needed';
+  const env = o.env ?? projectEnv();
+  // A pinned Flutter that FVM runs: FVM gets it first, outside the guard, and its downloads come from it (fvm-sdk.ts).
+  const pinned = await fvmInstall(dir, command, { env, ...(o.signal ? { signal: o.signal } : {}), ...(o.onOutput ? { onOutput: o.onOutput } : {}), ...(o.home ? { home: o.home } : {}) });
   if (!runsFlutter(command)) return 'not-needed';
   const { kinds, platforms } = kindsOf(dir);
   const args = kinds.includes('flutter') ? precacheArgs(platforms, o.platform, command) : null;
-  const env = o.env ?? projectEnv();
-  const flutter = args ? flutterOnPath(env) : null;
+  const flutter = !args ? null : pinned ? { program: path.join(pinned, 'bin', 'flutter'), root: pinned } : flutterOnPath(env);
   if (!args || !flutter) return 'not-needed';
   const key = [flutter.root, engineOf(flutter.root), ...args].join('\n');
   if (done.has(key)) return 'had';
