@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.29] — 2026-11-24
+
 ### Fixed
 
 - **A story that waits for a tool says so, everywhere.** A story whose build check builds the Android app waited for
