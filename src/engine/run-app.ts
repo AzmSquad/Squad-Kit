@@ -88,6 +88,9 @@ export interface PhoneAppView {
 }
 
 /** One plain line for a phone app's state, from its plan and its run: shared by Your apps and Try it yourself. */
+/** A phone app has a web version only with a start command and a web address: "flutter run -d iPhone" alone is no web. */
+export const hasWebVersion = (app: { start?: string; url?: string }): boolean => Boolean(app.start?.trim() && app.url?.trim());
+
 export function phoneAppView(plan: PhoneStartPlan, web: boolean, open?: PhoneOpen, on = false): PhoneAppView {
   return { word: plan.word, ready: plan.ready, ...(plan.why ? { why: plan.why } : {}), ...(plan.link ? { link: plan.link } : {}), languages: plan.languages, web, ...(on ? { on: true } : {}), ...(open ? { run: open.view() } : {}) };
 }
@@ -485,7 +488,7 @@ export class AppRunner {
     const dir = appCopyDir(this.bp, app);
     const p = this.phoneOf(app);
     const on = Boolean(run?.onPhone && (run.state === 'starting' || run.state === 'running'));
-    const base = { ...app, dir, ...(p ? { phone: phoneAppView(p.plan, Boolean(app.start), run?.phone, on) } : {}) };
+    const base = { ...app, dir, ...(p ? { phone: phoneAppView(p.plan, hasWebVersion(app), run?.phone, on) } : {}) };
     if (run) {
       const at = run.address ?? app.url;
       return {
@@ -566,7 +569,7 @@ export class AppRunner {
         if (!run.child) exit();
         settle();
       });
-    return { ...app, dir: appCopyDir(this.bp, app), state: 'starting', step: 'update', startedAt: run.startedAt, up: false, ...(p ? { phone: phoneAppView(p.plan, Boolean(app.start), undefined, onPhone) } : {}) };
+    return { ...app, dir: appCopyDir(this.bp, app), state: 'starting', step: 'update', startedAt: run.startedAt, up: false, ...(p ? { phone: phoneAppView(p.plan, hasWebVersion(app), undefined, onPhone) } : {}) };
   }
 
   /**

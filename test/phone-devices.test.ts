@@ -102,6 +102,26 @@ describe('the iPhone simulator module', () => {
     expect(languageArgs()).toEqual([]);
   });
 
+  it("opens a person's window by bundle id: Simulator, else Xcode 27's Device Hub, which has no app named Simulator", async () => {
+    const devices = JSON.stringify({ devices: { 'com.apple.CoreSimulator.SimRuntime.iOS-27-2': [{ udid: ID, name: 'squad-kit iPhone', state: 'Booted', isAvailable: true }] } });
+    const xcode27 = recorded({
+      [`open -b com.apple.iphonesimulator --args -CurrentDeviceUDID ${ID}`]: { ok: false, out: '', err: 'Unable to find application with bundle identifier com.apple.iphonesimulator' },
+      'xcrun simctl list devices -j': { ok: true, out: devices, err: '' },
+      'pgrep -f /Simulator\\.app/': { ok: false, out: '', err: '' },
+    });
+    const sim = iosSimulatorWith(xcode27.run, 'darwin');
+    await sim.openWindow(ID);
+    expect(xcode27.ran.filter((c) => c.startsWith('open '))).toEqual([`open -b com.apple.iphonesimulator --args -CurrentDeviceUDID ${ID}`, `open -b com.apple.dt.Devices --args -CurrentDeviceUDID ${ID}`]);
+    expect(xcode27.ran.some((c) => c.includes('open -a'))).toBe(false);
+    // The Device Hub starts itself again under another program: the device being up is enough, never a guess.
+    expect(await sim.windowShows(ID)).toBe(true);
+    const neither = recorded({
+      [`open -b com.apple.iphonesimulator --args -CurrentDeviceUDID ${ID}`]: { ok: false, out: '', err: 'not found' },
+      [`open -b com.apple.dt.Devices --args -CurrentDeviceUDID ${ID}`]: { ok: false, out: '', err: 'not found either' },
+    });
+    await expect(iosSimulatorWith(neither.run, 'darwin').openWindow(ID)).rejects.toThrow('squad-kit could not open the iPhone window.');
+  });
+
   it('a device already up, or already down, is fine', async () => {
     const r = recorded({
       [`xcrun simctl boot ${ID}`]: { ok: false, out: '', err: 'Unable to boot device in current state: Booted' },

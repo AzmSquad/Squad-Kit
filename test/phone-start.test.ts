@@ -137,6 +137,12 @@ describe('Start in Your apps, for an iPhone app on a Mac', () => {
     expect(s.phone?.run?.ended).toBe('You closed the iPhone window, so squad-kit stopped the app.');
   });
 
+  it('a start command that runs the app on a phone, with no web address, is no web version: no "Use the web version now"', async () => {
+    writeMeta(bp, { ...readMeta(bp), commands: { test: 'flutter test', start: 'fvm flutter run -d iPhone' } });
+    const [app] = await new AppRunner(bp).status();
+    expect(app!.phone?.web).toBe(false);
+  });
+
   it("with Xcode missing, Start opens the web version, and says why with the Tools page line; asking for the phone says the same", async () => {
     found({ xcode: { state: 'missing' }, simulator: { state: 'missing' } });
     const web = await tinyApp();

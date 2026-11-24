@@ -407,7 +407,8 @@ async function turn<T>(phone: PhoneModule, size: PhoneSize, job: (turn: PhoneTur
     }
     let fresh = false;
     if (states.get(device.id) !== 'booted') {
-      await waitForRoom(word, o);
+      // A person who pressed Run or Try it yourself wants the app now: only a story's pictures wait for room.
+      if (!o.person) await waitForRoom(word, o);
       if (o.signal?.aborted) throw new Error(STOPPED);
       o.say?.(`Starting squad-kit's ${word}, ${aboutWords(stepSeconds('boot', home, phone))}`);
       const t0 = Date.now();

@@ -132,6 +132,15 @@ describe('one phone at a time', () => {
     expect(desk.freeMemoryOf('Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:      4707.\nPages active:  272303.\nPages inactive:  271008.\nPages speculative:  557.\n')).toBe((4707 + 271008 + 557) * 16384);
   });
 
+  it("a person's own Run never waits for a busy computer: only a story's pictures do", async () => {
+    const f = fakePhone();
+    load = 60;
+    await desk.withPhone(f.module, 'phone', async () => undefined, { say, person: true });
+    expect(lines[0]).toBe("Starting squad-kit's iPhone, about a minute");
+    expect(slept.filter((ms) => ms === desk.BUSY_LOOK_MS)).toEqual([]);
+    expect(f.devices[0]!.state).toBe('booted');
+  });
+
   it('waits its turn while another squad-kit on this computer holds the phone, and says so once', async () => {
     const f = fakePhone();
     const other = 999_991;
