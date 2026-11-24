@@ -15,6 +15,7 @@ import { TOOLS_CHECKING, waitsForTools } from './wait-words.js';
 const numbered = (xs: string[]) => xs.map((s, i) => `${i + 1}. ${s}`).join(' ');
 
 function stateWords(l: ToolLine): string {
+  if (l.state === 'ready') return `it is here${l.version ? `, ${l.version}` : ''}`;
   if (l.state === 'too-old') return `${l.version ?? 'the one here'} is too old: it needs ${l.needs} or newer${l.why ? ` (${l.why})` : ''}`;
   if (l.state === 'getting') return 'squad-kit is getting it now';
   if (l.state === 'updating') return 'squad-kit is updating it now';
@@ -64,6 +65,7 @@ export function toolWaitFacts(bp: BoardPaths, t: Ticket): string[] {
     out.push(`- ${l.name}: ${stateWords(l)}.${l.note ? ` ${l.note}` : ''}`);
     for (const w of waysFor(l)) out.push(`  ${w}`);
   }
+  if (block.steps?.length) out.push(`The person adds them in their own Android Studio: ${numbered(block.steps)}`);
   if (block.skip) out.push(`Or go around it: ${block.skip.label} (board action skip_android). ${block.skip.note}`);
   out.push(`Its line on the Tools page: ${block.link}.`);
   return out;

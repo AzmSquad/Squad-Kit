@@ -87,4 +87,6 @@ export interface ToolBlock {
   checking?: true;
   /** Another way on: skip what waits for the tool (the checks that build the Android app), with what that means. */
   skip?: { label: string; note: string; command: string };
+  /** The steps that bring what is missing, when they are the person's: an SDK of theirs that lacks a piece. */
+  steps?: string[];
 }

@@ -76,6 +76,7 @@
 .tl-block .grow { flex: 0; }
 .tl-block-acts { display: flex; gap: 8px; flex-wrap: wrap; }
 .tl-skip-note { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
+.tl-block-steps { margin: 6px 0 2px; padding-left: 18px; display: flex; flex-direction: column; gap: 2px; }
 
 @media (max-width: 640px) {
   .tl-body { margin-left: 0; }

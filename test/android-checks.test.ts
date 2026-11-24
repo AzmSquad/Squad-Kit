@@ -285,6 +285,37 @@ describe('a missing tool is not the Builder\'s', () => {
       expect(w?.skip).toBeUndefined();
     });
 
+    it("an SDK that lacks a piece the project's Flutter builds with: the story names it, with Android Studio's steps", async () => {
+      const t = waiting();
+      const { toolWaitOf } = await import('../src/engine/tools/hold.js');
+      // Android Studio's SDK with Android 17 only, and the Flutter 3.47.9 this copy pins with FVM.
+      const studio = path.join(tmp, 'studio-sdk');
+      fs.mkdirSync(path.join(studio, 'platforms', 'android-37.0'), { recursive: true });
+      writeFound({ at: new Date().toISOString(), system: 'mac', tools: { ...FLUTTER_HERE, android: { state: 'found', version: 'Android 17', where: studio } } }, home);
+      const fvmCache = path.join(tmp, 'fvm-versions');
+      const ext = path.join(fvmCache, '3.47.9', 'packages', 'flutter_tools', 'gradle', 'src', 'main', 'kotlin', 'FlutterExtension.kt');
+      fs.mkdirSync(path.dirname(ext), { recursive: true });
+      fs.writeFileSync(ext, 'val compileSdkVersion: Int = 36\nval ndkVersion: String = "28.2.13676358"\n');
+      fs.writeFileSync(path.join(wt, '.fvmrc'), JSON.stringify({ flutter: '3.47.9' }));
+      vi.stubEnv('FVM_CACHE_PATH', fvmCache);
+      try {
+        const w = toolWaitOf(bp, readTicket(bp, t.id)!).toolWait;
+        expect(w).toMatchObject({
+          action: 'checks',
+          text: "squad-kit can't run this story's checks yet: your Android SDK lacks Android 16 (API 36) and the NDK 28.2.13676358, which Flutter needs to build the app.",
+          status: "Waits for Android 16 (API 36) and the NDK 28.2.13676358 in the Android SDK. Goes on by itself once they're there",
+          link: '/tools#android',
+        });
+        expect(w?.steps).toContain('On the SDK Tools tab, tick Show Package Details, open NDK (Side by side), and tick 28.2.13676358.');
+        // Added in Android Studio: the story goes on.
+        fs.mkdirSync(path.join(studio, 'platforms', 'android-36'), { recursive: true });
+        fs.mkdirSync(path.join(studio, 'ndk', '28.2.13676358'), { recursive: true });
+        expect(toolWaitOf(bp, readTicket(bp, t.id)!).toolWait).toBeUndefined();
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
+
     it("a person's own SDK that builds apps (Android Studio's) is enough for the build check: no wait", async () => {
       const t = waiting();
       const { toolsHold } = await import('../src/engine/tools/hold.js');

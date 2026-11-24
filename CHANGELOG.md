@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **An Android SDK that lacks what Flutter builds with is named, with the steps.** Flutter builds the Android app
+  against one Android platform and asks its Gradle plugin for one NDK (Android 16 and the NDK 28.2.13676358 for Flutter
+  3.47), and an SDK from Android Studio often has neither: the build check failed, and the Builder found it out over
+  its tries. squad-kit now reads what the project's Flutter needs (the version FVM pins, else the one on the PATH), and
+  a story whose build check would need a missing piece waits with a line that names it, with Android Studio's own steps
+  to add it; the Tools page's Android line and the Squad lead say the same. A build that still stops for a missing NDK
+  is a missing tool, with no try counted.
+
 ## [1.3.34] — 2026-11-24
 
 ### Fixed

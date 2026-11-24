@@ -26,6 +26,13 @@ export function ToolBlockCard({ block }: { block: ToolBlock }) {
         <span>
           {block.text} {block.checking ? 'It goes on in a moment.' : `Nothing failed: it goes on by itself once ${many ? "they're" : "it's"} there.`}
         </span>
+        {block.steps && (
+          <ol className="tl-block-steps">
+            {block.steps.map((s) => (
+              <li key={s}>{s}</li>
+            ))}
+          </ol>
+        )}
         {block.skip && <span className="tl-skip-note">{block.skip.label}: {block.skip.note}</span>}
       </div>
       <span className="grow" />

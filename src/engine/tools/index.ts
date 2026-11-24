@@ -13,7 +13,8 @@ import { choosePhone, IPHONE_ONLY, type PhoneSystem } from './which-phone.js';
 import type { PlaceKinds, Platform } from './kinds.js';
 import { placesWithKinds } from './places.js';
 import { CANT_HERE, GOES_ON, TOOLS_CHECKING } from './wait-words.js';
-import { androidChecks, androidSkip, withAndroidChecks } from './android-builds.js';
+import { androidChecks, androidRepoDir, androidSkip, withAndroidChecks } from './android-builds.js';
+import { sdkLacksHere } from './flutter-android.js';
 import { addUpdateLooks, startUpdate, updateGuess, updateLookOf, updateWarning } from './update.js';
 
 /**
@@ -101,6 +102,8 @@ export interface ToolBlock {
   checking?: true;
   /** Another way on: skip what waits for the tool (the checks that build the Android app), with what that means. */
   skip?: { label: string; note: string; command: string };
+  /** The steps that bring what is missing, when they are the person's: an SDK of theirs that lacks a piece. */
+  steps?: string[];
 }
 
 /* ── this computer's tools, kept and checked again ─────── */
@@ -324,7 +327,7 @@ export async function projectTools(bp: BoardPaths): Promise<ToolsView> {
     checking: Boolean(running),
     summary: projectWords(places),
     places,
-    lines: withAndroidChecks(lines, extra, { meta, book, skip: androidSkip(bp) }),
+    lines: withAndroidChecks(lines, extra, { meta, book, skip: androidSkip(bp), lacks: meta && extra.length ? sdkLacksHere(androidRepoDir(bp, meta)) : null }),
     getting: gettingNow(),
   };
 }

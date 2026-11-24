@@ -1,6 +1,9 @@
 import type { BoardPaths } from '../../board/store.js';
 import type { Ticket } from '../../board/types.js';
+import path from 'node:path';
 import { androidChecks, androidSkip, canSkipAndroid, SKIP_ANDROID } from './android-builds.js';
+import { piecesWords, sdkLacksHere, studioStepsFor } from './flutter-android.js';
+import { ACTION_DOING } from './catalog.js';
 import { androidLines, blockedBy, blockOf, checkSoon, foundNow, LOOK_AGAIN_MS, metaOf, placesFor, waitsForTools, type ToolAction, type ToolBlock } from './index.js';
 
 /**
@@ -34,10 +37,26 @@ export function commandsBlock(bp: BoardPaths, t: Pick<Ticket, 'repo' | 'parts' |
   if (!book) return null;
   const builds = Boolean(book.tools.android?.builds);
   const lines = androidLines(placesFor(bp, () => meta, t), book).filter((l) => l.state !== 'ready' && !(l.id === 'android' && builds));
-  if (!lines.length) return null;
+  const skip = canSkipAndroid(checks) && !androidSkip(bp) ? { skip: { label: SKIP_ANDROID.label, note: SKIP_ANDROID.note, command: SKIP_ANDROID.command } } : {};
   // While a story waits, squad-kit looks again by itself now and then, so it goes on once the tool is there.
+  if (lines.length) {
+    checkSoon(LOOK_AGAIN_MS);
+    return { ...blockOf(action, lines), ...skip };
+  }
+  // The SDK is here, and lacks a piece the project's Flutter builds with: named, with Android Studio's steps.
+  const here = sdkLacksHere(t.worktree ?? path.join(bp.root, t.repo ?? '.'));
+  if (!here) return null;
   checkSoon(LOOK_AGAIN_MS);
-  return { ...blockOf(action, lines), ...(canSkipAndroid(checks) && !androidSkip(bp) ? { skip: { label: SKIP_ANDROID.label, note: SKIP_ANDROID.note, command: SKIP_ANDROID.command } } : {}) };
+  const what = piecesWords(here.lacks);
+  return {
+    action,
+    tools: [{ id: 'android', name: 'Android SDK', state: 'missing' }],
+    text: `squad-kit can't ${ACTION_DOING[action]} yet: your Android SDK lacks ${what}, which Flutter needs to build the app.`,
+    status: `Waits for ${what} in the Android SDK. Goes on by itself once ${here.lacks.length === 1 ? "it's" : "they're"} there`,
+    link: '/tools#android',
+    ...(here.own ? {} : { steps: studioStepsFor(here.lacks) }),
+    ...skip,
+  };
 }
 
 /**

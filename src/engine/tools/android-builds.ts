@@ -7,6 +7,7 @@ import { reposOf } from '../repos.js';
 import { ACTION_WORDS, type ToolAction } from './catalog.js';
 import type { FoundBook } from './detect.js';
 import type { ToolLine } from './index.js';
+import { piecesWords, studioStepsFor, type SdkPiece } from './flutter-android.js';
 
 /**
  * A project's own checks that build its Android app (`flutter build apk`, `./gradlew assembleDebug`) need Android's
@@ -49,6 +50,12 @@ export function androidChecks(meta: BoardMeta, repo?: string): { name: 'test' | 
     .flatMap((r) => (['test', 'lint', 'build'] as const).map((name) => ({ name, command: r.commands[name]?.trim() ?? '' })))
     .filter((c) => usesAndroid(c.command))
     .map((c) => ({ ...c, skippable: withoutAndroidBuild(c.command) !== undefined }));
+}
+
+/** The folder of the first repo whose checks build the Android app: where its Flutter is pinned. */
+export function androidRepoDir(bp: BoardPaths, meta: BoardMeta): string {
+  const r = reposOf(meta).find((x) => ['test', 'lint', 'build'].some((n) => usesAndroid(x.commands[n as 'test'])));
+  return path.join(bp.root, r?.path ?? '.');
 }
 
 /** Skip Android builds is offered only when it takes out the Android builds alone: every such check can lose them. */
@@ -139,7 +146,7 @@ const inOrder = (xs: ToolAction[]) => (Object.keys(ACTION_WORDS) as ToolAction[]
  * checks, and stopping them while they are missing, unless a person's own SDK builds apps already, or Android builds
  * are skipped here. `extra`: those two lines as an Android project needs them, for a project whose phone is not Android.
  */
-export function withAndroidChecks(lines: ToolLine[], extra: ToolLine[], o: { meta: BoardMeta | null; book: FoundBook | null; skip: AndroidSkip | null }): ToolLine[] {
+export function withAndroidChecks(lines: ToolLine[], extra: ToolLine[], o: { meta: BoardMeta | null; book: FoundBook | null; skip: AndroidSkip | null; lacks?: { lacks: SdkPiece[]; own: boolean } | null }): ToolLine[] {
   const checks = o.meta ? androidChecks(o.meta) : [];
   if (!checks.length) return lines;
   // A skip that can't take every Android build out leaves those checks waiting for the tools as before.
@@ -151,12 +158,16 @@ export function withAndroidChecks(lines: ToolLine[], extra: ToolLine[], o: { met
     const at = out.findIndex((l) => l.id === id);
     const base = at >= 0 ? out[at]! : extra.find((l) => l.id === id);
     if (!base) continue;
-    const enough = base.state === 'ready' || (id === 'android' && builds);
+    // The SDK is here, but lacks a piece the project's Flutter builds with (flutter-android.ts): said, with the steps.
+    const lacks = id === 'android' && (base.state === 'ready' || builds) ? o.lacks : null;
+    const enough = (base.state === 'ready' || (id === 'android' && builds)) && !lacks;
     const line: ToolLine = {
       ...base,
       priority: skip ? base.priority : 'required',
       actions: inOrder([...base.actions, 'checks']),
       blocks: inOrder([...base.blocks.filter((a) => a !== 'checks'), ...(!skip && !enough ? (['checks'] as const) : [])]),
+      ...(lacks ? { note: [`Your Android SDK lacks ${piecesWords(lacks.lacks)}, which Flutter needs to build the app.`, base.note].filter(Boolean).join(' ') } : {}),
+      ...(lacks && !lacks.own ? { studioSteps: studioStepsFor(lacks.lacks) } : {}),
       ...(id === 'android' && o.skip ? { skipped: { by: o.skip.by, at: o.skip.at, command: UNSKIP_ANDROID.command } } : {}),
       // Offered whenever it can take the Android builds out: also when the tools are here and the build still can't run.
       ...(id === 'android' && !o.skip && offer ? { skip: { command: SKIP_ANDROID.command } } : {}),
