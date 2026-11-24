@@ -40,6 +40,11 @@ export function withoutAndroidBuild(command: string): string | null | undefined 
   return kept.some((p) => !CD.test(p)) ? kept.join(' && ') : null;
 }
 
+/** A command that only builds the Android app, with nothing else in it: squad-kit runs that check outside its guard (checks.ts). */
+export function onlyAndroidBuild(command: string): boolean {
+  return usesAndroid(command) && withoutAndroidBuild(command) === null;
+}
+
 /**
  * The checks of the project, or of one story's repo, whose command builds an Android app, and whether Skip Android
  * builds can take that build out and leave the rest of the check (its tests, its code check) as it is.

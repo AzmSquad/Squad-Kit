@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A check that builds the Android app passes.** Flutter's Android build compiles Flutter's own Gradle plugin in
+  Flutter's folder, which squad-kit's guard keeps read only, so the build check stopped with "The settings are not yet
+  available for build" on every Flutter app. A check that only builds the Android app (`flutter build apk`,
+  `./gradlew assembleDebug`, with nothing else in it) now runs outside the guard, as Xcode's builds and squad-kit's own
+  Android phone builds already do: in the story's copy only, after squad-kit's own downloads, in squad-kit's shared
+  Gradle home and with no Gradle helper left running. The tests, the code check, the setup and the agents stay inside
+  the guard. The Harness page says so.
+
 ## [1.3.35] — 2026-11-24
 
 ### Fixed

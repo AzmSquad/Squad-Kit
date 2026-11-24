@@ -458,6 +458,13 @@ describe("Xcode's own builds, by the one rule", () => {
     expect(outsideTheGuard(project, xcode, g)).toBe(false);
   });
 
+  it('a check that only builds the Android app runs outside it too, as squad-kit\'s own phone builds do; with anything more, inside', () => {
+    const g = { ...guardOf(), noPush: true };
+    for (const c of ['fvm flutter build apk --debug', 'flutter build appbundle', './gradlew assembleDebug', 'cd android && ./gradlew assembleDebug']) expect(outsideTheGuard(copy, c, g), c).toBe(true);
+    for (const c of ['flutter test && flutter build apk', './gradlew test', 'flutter build apk; curl x', 'flutter build web']) expect(outsideTheGuard(copy, c, g), c).toBe(false);
+    expect(outsideTheGuard(project, 'flutter build apk', g)).toBe(false);
+  });
+
   it.runIf(onMac)("run outside it, in the copy, with the guard's caches and no push; anything else stays in", async () => {
     // A stand-in for Xcode: it writes where the guard keeps commands out, and says what it was given.
     const bin = path.join(base, 'bin');

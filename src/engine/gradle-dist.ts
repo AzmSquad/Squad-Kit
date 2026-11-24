@@ -7,6 +7,7 @@ import { pipeline } from 'node:stream/promises';
 import { writeLog } from '../core/app-log.js';
 import { usesAndroid } from './android-env.js';
 import { gradleHome } from './tools/android.js';
+import { onlyAndroidBuild } from './tools/android-builds.js';
 
 /**
  * The Gradle a project's wrapper asks for, got by squad-kit before a check that builds the Android app. The wrapper
@@ -27,6 +28,16 @@ export const GRADLE_GET_MS = 30 * 60_000;
 /** A limit for one check: the Android build's own (ANDROID_CHECK_MS, ANDROID_SILENT_MS) when it builds the app, else the usual. */
 export function limitFor(command: string, usual: number, android: number): number {
   return usesAndroid(command) ? Math.max(usual, android) : usual;
+}
+
+/**
+ * An Android build check that runs outside the guard (checks.ts outsideTheGuard): in squad-kit's own shared Gradle home,
+ * as its phone builds, never the one the guarded commands share, whose Gradle helpers run in the guard and can't build
+ * there; and with no helper left behind (8 GB each for a Flutter app).
+ */
+export function outsideEnv(command: string): Record<string, string> {
+  if (!onlyAndroidBuild(command)) return {};
+  return { GRADLE_USER_HOME: gradleHome(), GRADLE_OPTS: [process.env.GRADLE_OPTS?.trim(), '-Dorg.gradle.daemon=false'].filter(Boolean).join(' ') };
 }
 
 /** Only Gradle's own distributions, as its wrapper names them. */

@@ -11,7 +11,8 @@ import { kindsOf, type Platform } from './tools/kinds.js';
 import { fvmInstall, runsFvm } from './fvm-sdk.js';
 import { gradleDownloads } from './gradle-dist.js';
 
-export { ANDROID_CHECK_MS, ANDROID_SILENT_MS, limitFor } from './gradle-dist.js';
+export { ANDROID_CHECK_MS, ANDROID_SILENT_MS, limitFor, outsideEnv } from './gradle-dist.js';
+export { onlyAndroidBuild } from './tools/android-builds.js';
 
 /**
  * Flutter's own downloads, done by squad-kit outside the guard. Flutter keeps what it downloads for each phone (the

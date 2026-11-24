@@ -6,7 +6,7 @@ import type { ProjectCommands } from '../board/types.js';
 import { writeLog } from '../core/app-log.js';
 import { healEnv, healedBefore, rememberHealed } from './cache-home.js';
 import { failedTests, testAlone } from './failed-tests.js';
-import { ANDROID_CHECK_MS, ANDROID_SILENT_MS, flutterDownloads, limitFor } from './flutter-downloads.js';
+import { ANDROID_CHECK_MS, ANDROID_SILENT_MS, flutterDownloads, limitFor, onlyAndroidBuild, outsideEnv } from './flutter-downloads.js';
 import { KILL_AFTER_MS, endGroup, whenExited } from './process-group.js';
 import { appPortVariables } from './port-vars.js';
 import { guardBlockedPath, guardEnv, homeCachesRefused, spawnProject, type GuardSpec } from './project-guard.js';
@@ -87,18 +87,18 @@ export interface CommandResult {
 }
 
 /** The rule outsideTheGuard keeps, for people: on the Harness page. */
-export const OUTSIDE_THE_GUARD_WORDS = "Xcode can't start inside squad-kit's guard, so squad-kit runs Xcode's builds and tests outside it, for the checks, the phone pictures and Start, under Xcode's own protections. Everything else the squad runs stays inside the guard.";
+export const OUTSIDE_THE_GUARD_WORDS = "Xcode can't start inside squad-kit's guard, so squad-kit runs Xcode's builds and tests outside it, for the checks, the phone pictures and Start, under Xcode's own protections. A check that only builds the Android app runs outside it too, as squad-kit's own Android phone builds already do: Flutter's Android build writes in Flutter's own folder, which the guard keeps read only. Everything else the squad runs stays inside the guard.";
 
 /**
- * The one rule for a command squad-kit runs outside its guard: Xcode's builds and tests, in exactly the form squad-kit
- * makes them for a native iPhone app (ownXcodeCommand in engine/find-commands.ts). Xcode starts sandboxes of its own, for
- * a package's manifest and plugins, and for build scripts when the project turns that on, and those cannot start inside
- * squad-kit's guard (seen on a Mac). So squad-kit runs these outside it, in the copy the guard was made for and nowhere
- * else, with the guard's environment and caches, under Xcode's own sandboxes: squad-kit never turns those off. Every
- * other command stays in the guard, and so do the agents' own commands.
+ * The one rule for a command squad-kit runs outside its guard: Xcode's builds and tests as squad-kit makes them for a
+ * native iPhone app (ownXcodeCommand), whose own sandboxes (a package's manifest and plugins, build scripts) cannot start
+ * inside squad-kit's guard; and a check that only builds the Android app (onlyAndroidBuild), whose Flutter writes in
+ * its own read-only folder, as squad-kit's own phone builds already run outside it (engine/phone/build.ts). In the copy
+ * the guard was made for and nowhere else, with the guard's environment and caches; Xcode keeps its own sandboxes on.
+ * Every other command stays in the guard, and so do the agents' own commands.
  */
 export function outsideTheGuard(cwd: string, command: string, guard: GuardSpec | undefined): boolean {
-  if (!guard || !ownXcodeCommand(command)) return false;
+  if (!guard || !(ownXcodeCommand(command) || onlyAndroidBuild(command))) return false;
   try {
     return fs.realpathSync(cwd) === guard.cwd;
   } catch {
@@ -120,12 +120,12 @@ export function outsideTheGuard(cwd: string, command: string, guard: GuardSpec |
  * Xcode's own builds run outside the guard by the one rule above (outsideTheGuard).
  */
 export async function runCommand(cwd: string, command: string, timeoutMs = CHECK_MS, watch: CommandWatch = {}): Promise<CommandResult> {
-  if (outsideTheGuard(cwd, command, watch.guard)) {
-    // Xcode's own builds: outside the guard by its one rule, with the guard's environment and nothing else of it.
-    const { guard, ...rest } = watch;
-    return { ...(await runCommand(cwd, command, timeoutMs, { ...rest, env: { ...guardEnv(guard, cwd), ...watch.env } })), outsideGuard: true };
-  }
   if (watch.guard) await flutterDownloads(cwd, command, { ...(watch.signal ? { signal: watch.signal } : {}), ...(watch.onOutput ? { onOutput: watch.onOutput } : {}) });
+  if (outsideTheGuard(cwd, command, watch.guard)) {
+    // Outside the guard by its one rule, with the guard's environment and nothing else of it (an Android build: its own Gradle home).
+    const { guard, ...rest } = watch;
+    return { ...(await runCommand(cwd, command, timeoutMs, { ...rest, env: { ...guardEnv(guard, cwd), ...outsideEnv(command), ...watch.env } })), outsideGuard: true };
+  }
   const homes = ownHomes(command, watch.guard);
   const set = (env: Record<string, string> | null): CommandWatch => (env ? { ...watch, env: { ...watch.env, ...env } } : watch);
   const first = await runOnce(cwd, command, timeoutMs, set(homes.env(homes.before)));
