@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.32] — 2026-11-24
+
 ### Fixed
 
 - **`fvm flutter` works in the project's checks.** A project that pins its Flutter with FVM failed every check: inside
