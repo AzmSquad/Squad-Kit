@@ -25,6 +25,8 @@ type Issue = {
   parent?: string;
   blockedBy: string[];
   pr?: boolean;
+  /** Moved, or in an organization this sign-in may not see: a query that reads it fails as a whole. */
+  hidden?: boolean;
 };
 
 type Item = { id: string; issue: string; status?: string; iteration?: string; priority?: string; points?: number; archived?: boolean };
@@ -204,6 +206,25 @@ export function fakeGithub(opts: FakeGithubOptions = {}): FakeGithub {
             },
           },
         };
+      }
+      case 'SquadTree': {
+        // Each listed issue with the issues above it, three levels up; the top one's parent is not asked for.
+        const up = (k: string | undefined, depth: number): unknown => {
+          const p = k ? issues.get(k) : undefined;
+          return p ? { ...row(p), ...(depth < 3 ? { parent: up(p.parent, depth + 1) } : {}) } : null;
+        };
+        const out: Record<string, Record<string, unknown>> = {};
+        for (const part of query.split(/(?=r\d+: repository\()/).slice(1)) {
+          const r = /^(r\d+): repository\(owner: "([^"]+)", name: "([^"]+)"\)/.exec(part)!;
+          const repo = `${r[2]}/${r[3]}`.toLowerCase();
+          out[r[1]!] = {};
+          for (const i of part.matchAll(/(i\d+): issue\(number: (\d+)\)/g)) {
+            const own = issues.get(key(Number(i[2]), repo));
+            if (own?.hidden) throw new ModuleError(`GitHub said: Could not resolve to an Issue with the number of ${i[2]}.`);
+            out[r[1]!]![i[1]!] = own ? { parent: up(own.parent, 1) } : null;
+          }
+        }
+        return out;
       }
       case 'SquadIssueTypes':
         return { repository: { issueTypes: { nodes: types.map((name) => ({ id: `IT_${name}`, name, isEnabled: true })) } } };

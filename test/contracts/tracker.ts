@@ -61,6 +61,17 @@ export function trackerContract(name: string, make: () => TrackerFixture): void 
       expect(fs.existsSync(await tracker.download(item.attachments[0]!.url, file))).toBe(true);
     });
 
+    it('puts the backlog under its epics and features, when it reads them', async () => {
+      const { tracker, story } = make();
+      if (!tracker.tree) return;
+      const rows = await tracker.list();
+      const above = (await tracker.get(story)).parents[0]!;
+      const tree = await tracker.tree(rows);
+      expect(tree.above[story]).toBe(above.id);
+      expect(tree.groups.find((g) => g.id === above.id)).toMatchObject({ title: above.title, ref: tracker.refOf(above.id) });
+      expect(tree.groups.map((g) => g.id)).not.toContain(story);
+    });
+
     it('moves an item forward only', async () => {
       const { tracker, story } = make();
       expect(await tracker.moveTo(story, 'in-progress')).toBeTruthy();
@@ -127,6 +138,30 @@ export function trackerCreateContract(name: string, make: () => Tracker): void {
       expect(got.parents.map((p) => p.id)).toEqual([feature.id, epic.id]);
       expect(got.tags).toEqual(expect.arrayContaining(['squad-kit', 'BR-1']));
       expect(`${got.description}\n${got.acceptanceCriteria}`).toContain('I hold it');
+    });
+
+    it('reads a story under its feature and epic as the backlog tree, and an item with no parent on its own', async () => {
+      const tracker = make();
+      if (!tracker.tree) return;
+      const levels = await tracker.levels();
+      const epic = await tracker.createItem({ level: 'epic', title: 'Booking', markdown: 'x' });
+      const feature = await tracker.createItem({ level: 'feature', title: 'Holding', markdown: 'x', parent: epic.id });
+      const story = await tracker.createItem({ level: 'story', title: 'Hold a slot', markdown: 'x', parent: feature.id });
+      const loose = await tracker.createItem({ level: 'story', title: 'Show the version', markdown: 'x' });
+      const tree = await tracker.tree([story, loose]);
+      expect(tree.above[story.id]).toBe(feature.id);
+      expect(tree.above[loose.id]).toBeUndefined();
+      const group = (id: string) => tree.groups.find((g) => g.id === id);
+      expect(group(feature.id)).toMatchObject({ title: 'Holding', ref: tracker.refOf(feature.id), type: levels.feature });
+      // Where the tracker cannot nest a feature under its epic, the feature is linked to it instead: not its parent.
+      if (levels.linked?.includes('feature')) {
+        expect(tree.above[feature.id]).toBeUndefined();
+        expect(group(epic.id)).toBeUndefined();
+      } else {
+        expect(tree.above[feature.id]).toBe(epic.id);
+        expect(group(epic.id)).toMatchObject({ title: 'Booking', level: 'epic', type: levels.epic });
+      }
+      expect(tree.groups.every((g) => ['epic', 'feature'].includes(g.level))).toBe(true);
     });
 
     it('changes an item, and a new parent replaces the old one', async () => {

@@ -11,6 +11,7 @@ import type {
   TrackerItemChange,
   TrackerItemRow,
   TrackerLevels,
+  TrackerTree,
   TrackerModule,
 } from '../tracker/types.js';
 import { Azure, AzureError, PROCESS_TYPES, processOf, type PatchOp, type StateCategory, type WorkItemRow } from './client.js';
@@ -18,6 +19,7 @@ import { parseAzureRemote } from './hosts.js';
 import { azureForProject } from './sign-in.js';
 import { signedInWithMicrosoft } from './token.js';
 import { markdownToHtml } from './markdown.js';
+import { azureTree } from './tree.js';
 
 /** Azure Boards as a squad-kit tracker. */
 
@@ -71,6 +73,11 @@ export class AzureTracker implements Tracker {
 
   async list(opts: { sprint?: string; includeDone?: boolean } = {}): Promise<TrackerItemRow[]> {
     return (await this.az.listWorkItems({ ...(opts.sprint ? { sprintPath: opts.sprint } : {}), ...(opts.includeDone ? { includeDone: true } : {}) })).map(row);
+  }
+
+  /** Each item's parent link, up to the epics: Azure's own Epic › Feature › Story. */
+  tree(rows: TrackerItemRow[]): Promise<TrackerTree> {
+    return azureTree(this.az, rows, row);
   }
 
   async get(id: string): Promise<TrackerItem> {

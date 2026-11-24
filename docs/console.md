@@ -657,7 +657,10 @@ waiting for your answers shows in **Waiting for you** and in the sidebar's count
 
 - **Backlog**: your tracker's sprint, in backlog order (Jira's own order, a GitHub Project's own order, or the newest
   issues first).
-  **Start** puts an item on the board.
+  **Start** puts an item on the board. When the tracker has epics and features above the items (Azure DevOps parent
+  links, GitHub sub-issues, Jira parents), **Tree** shows each item under them, with how many of each epic's and
+  feature's items are merged; fold one to hide what is under it. **List** is the plain list. Terminal: `squad backlog`
+  (the tree), `squad backlog --flat` (the list).
 - **Waiting for you**: this project's cards, all of them.
 - **Releases**: the next release, ready to read and release, and every past release with its notes and the
   bugs found after it. A release whose push was refused says why in plain words. **It reached it another way** closes

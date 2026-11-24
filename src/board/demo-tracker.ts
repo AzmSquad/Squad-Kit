@@ -10,7 +10,9 @@ import type {
   TrackerItemChange,
   TrackerItemRow,
   TrackerLevels,
+  TrackerTree,
 } from '../modules/tracker/types.js';
+import { walkUp, type AboveItem } from '../modules/tracker/tree.js';
 
 /**
  * A tracker kept in memory, for the scripted squad and the tests: nothing goes over the network. By default it looks
@@ -119,6 +121,23 @@ export class DemoTracker implements Tracker {
     return [...this.items.values()]
       .filter((w) => w.type !== this.lv.epic && w.type !== this.lv.feature && (opts.includeDone || w.state !== 'Closed'))
       .map((w) => this.row(w));
+  }
+
+  /** The epics and features above the listed items, from each item's parent. */
+  async tree(rows: TrackerItemRow[]): Promise<TrackerTree> {
+    const first: Record<string, string> = {};
+    for (const r of rows) {
+      const p = this.items.get(r.id)?.parent;
+      if (p) first[r.id] = p;
+    }
+    return walkUp(rows, first, async (ids) => {
+      const found = new Map<string, AboveItem>();
+      for (const id of ids) {
+        const w = this.items.get(id);
+        if (w) found.set(id, { row: this.row(w), ...(w.parent ? { parent: w.parent } : {}) });
+      }
+      return found;
+    });
   }
 
   async get(id: string): Promise<TrackerItem> {

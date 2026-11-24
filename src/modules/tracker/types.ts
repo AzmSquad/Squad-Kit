@@ -24,6 +24,19 @@ export interface TrackerItemRow {
 /** A backlog. `more`: the tracker had more than it reads at once, and the rest is not in this list. */
 export type ItemList = TrackerItemRow[] & { more?: boolean };
 
+/** An epic or a feature above backlog items: a branch of the backlog's tree. Its type is the tracker's own word. */
+export interface TrackerGroup extends TrackerItemRow {
+  level: 'epic' | 'feature';
+}
+
+/** How a backlog's items nest under epics and features. */
+export interface TrackerTree {
+  /** The item right above each item that has one, by id: the listed items' and the groups' own. */
+  above: Record<string, string>;
+  /** The epics and features above the listed items that are not listed themselves, in no set order. */
+  groups: TrackerGroup[];
+}
+
 export interface TrackerItem extends TrackerItemRow {
   description: string;
   acceptanceCriteria: string;
@@ -120,6 +133,11 @@ export interface Tracker {
   sprints(): Promise<Sprint[]>;
   /** Stories and bugs, in backlog order; a sprint's items when given its path. */
   list(opts?: { sprint?: string; includeDone?: boolean }): Promise<ItemList>;
+  /**
+   * The epics and features above these items, and what sits under what, up to three levels up. Optional: without it,
+   * or when nothing has a parent, the backlog is a flat list.
+   */
+  tree?(rows: TrackerItemRow[]): Promise<TrackerTree>;
   get(id: string): Promise<TrackerItem>;
   /** Saves an attachment to a file and returns its path. */
   download(url: string, file: string): Promise<string>;

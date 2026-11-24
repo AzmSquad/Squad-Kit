@@ -12,6 +12,7 @@ import type {
   TrackerItemChange,
   TrackerItemRow,
   TrackerLevels,
+  TrackerTree,
 } from '../tracker/types.js';
 import { adfToMarkdown } from './adf-read.js';
 import { markdownToAdf } from './adf-write.js';
@@ -24,6 +25,7 @@ import { jqlText, parseRef, projectOfKey, refOf } from './refs.js';
 import { blockedBy, labelOf, rowFields, rowOf, type RawIssue } from './rows.js';
 import type { JiraSettings } from './settings.js';
 import { goalName, goalOf, nextStep, rankOf } from './states.js';
+import { jiraTree } from './tree.js';
 
 /**
  * Jira Cloud as a squad-kit tracker: a project's stories, tasks and bugs in its backlog's rank order, a board's sprints,
@@ -128,6 +130,11 @@ export class JiraTracker implements Tracker {
     const rows: ItemList = found.issues.map((i) => rowOf(i, fields, (k) => this.client.browseUrl(k)));
     if (found.more) rows.more = true;
     return rows;
+  }
+
+  /** Jira's parents: each issue's epic, and an initiative above it where the plan has one. */
+  tree(rows: TrackerItemRow[]): Promise<TrackerTree> {
+    return jiraTree(this.ctx, rows);
   }
 
   async get(id: string): Promise<TrackerItem> {

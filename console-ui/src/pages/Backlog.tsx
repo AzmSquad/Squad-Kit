@@ -1,17 +1,42 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
-import { Bug, ExternalLink, Play, Plug } from 'lucide-react';
+import { List, ListTree, Plug } from 'lucide-react';
 import { api } from '../api/client';
-import type { BacklogResponse, TrackerStatus, WorkItemRow } from '../api/types';
-import { useAct } from '../lib/data';
-import { isolated, langProps } from '../lib/lang';
+import type { BacklogResponse, TrackerStatus } from '../api/types';
+import { folded, nestBacklog } from '../lib/backlog-tree';
+import { isolated } from '../lib/lang';
 import { shellQuote } from '../lib/text';
-import { Cmd, STAGE_NAME, Written } from '../components/ui';
+import { Cmd } from '../components/ui';
+import { GroupRow, ItemRow, LooseRow } from '../components/BacklogRows';
+import '../styles/backlog.css';
 
-/** The sprint's stories and bugs from the project's tracker. Starting one makes it a ticket the squad works on. */
+/** This browser's choices: the tree or the list, and the epics and features folded. Storage may say no. */
+const VIEW_KEY = 'sk.backlogView';
+const FOLD_KEY = 'sk.backlogFolded';
+function stored(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function store(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // A private window: the choice lasts for this visit.
+  }
+}
+
+/**
+ * The sprint's stories and bugs from the project's tracker, under their epics and features when the tracker has them
+ * (Tree), or as a plain list (List). Starting one makes it a ticket the squad works on.
+ */
 export function BacklogPage() {
   const [sprint, setSprint] = useState<string | undefined>(undefined);
+  const [flat, setFlat] = useState(stored(VIEW_KEY) === 'list');
+  const [closed, setClosed] = useState<Set<string>>(() => new Set((stored(FOLD_KEY) ?? '').split('\n').filter(Boolean)));
   const backlog = useQuery({
     queryKey: ['backlog', sprint ?? ''],
     queryFn: () => api<BacklogResponse>(`/api/v1/backlog${sprint ? `?sprint=${encodeURIComponent(sprint)}` : ''}`),
@@ -21,6 +46,21 @@ export function BacklogPage() {
   const label = useQuery({ queryKey: ['tracker'], queryFn: () => api<TrackerStatus>('/api/v1/tracker') }).data?.label ?? 'the tracker';
   const chosen = sprint ?? data?.sprint;
   const sprintName = data?.sprints.find((s) => s.path === chosen)?.name;
+  const nested = Boolean(data?.tree);
+  const asTree = nested && !flat;
+  const lines = useMemo(() => nestBacklog(data?.items ?? [], asTree ? data?.tree : undefined), [data, asTree]);
+  const pickView = (list: boolean) => {
+    setFlat(list);
+    store(VIEW_KEY, list ? 'list' : 'tree');
+  };
+  const fold = (id: string) =>
+    setClosed((was) => {
+      const next = new Set(was);
+      if (!next.delete(id)) next.add(id);
+      store(FOLD_KEY, [...next].join('\n'));
+      return next;
+    });
+  const command = [`squad backlog`, sprintName ? `--sprint ${shellQuote(sprintName)}` : '', nested && flat ? '--flat' : ''].filter(Boolean).join(' ');
   return (
     <>
       <div className="top">
@@ -36,8 +76,18 @@ export function BacklogPage() {
             <option value="all">Everything open</option>
           </select>
         )}
+        {nested && (
+          <div className="seg bl-view" role="group" aria-label="View">
+            <button className={asTree ? 'on' : ''} aria-pressed={asTree} onClick={() => pickView(false)}>
+              <ListTree size={14} /> Tree
+            </button>
+            <button className={!asTree ? 'on' : ''} aria-pressed={!asTree} onClick={() => pickView(true)}>
+              <List size={14} /> List
+            </button>
+          </div>
+        )}
         <span className="grow" />
-        <Cmd text={sprintName ? `squad backlog --sprint ${shellQuote(sprintName)}` : 'squad backlog'} />
+        <Cmd text={command} />
       </div>
       <div className="scroll">
         <div className="page">
@@ -63,13 +113,14 @@ export function BacklogPage() {
           ) : (
             <>
               <p className="note" style={{ marginBottom: 12 }}>
-                {data.items.length} open {data.items.length === 1 ? 'item' : 'items'} in {sprintName ?? 'the backlog'}, in backlog order. Start one and the squad picks it up; {label} follows along.
+                {data.items.length} open {data.items.length === 1 ? 'item' : 'items'} in {sprintName ?? 'the backlog'}
+                {asTree ? ', under their epics and features, in backlog order.' : ', in backlog order.'} Start one and the squad picks it up; {label} follows along.
                 {data.capped && ' There are more: only the first 500 are shown. Pick a sprint here, or a view or Status in Settings, to see the rest.'}
               </p>
               <table className="table">
                 <thead>
                   <tr>
-                    <th style={{ width: 80 }}>ID</th>
+                    <th style={{ width: 90 }}>ID</th>
                     <th>Title</th>
                     <th style={{ width: 70 }}>Points</th>
                     <th style={{ width: 100 }}>On {label}</th>
@@ -77,9 +128,13 @@ export function BacklogPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.items.map((w) => (
-                    <Row key={w.id} w={w} />
-                  ))}
+                  {lines.map((l) => {
+                    if (l.kind === 'loose') return <LooseRow key="loose" />;
+                    if (folded(l, closed)) return null;
+                    if (l.kind === 'group') return <GroupRow key={l.group.id} g={l.group} depth={l.depth} items={l.items} open={!closed.has(l.group.id)} onFold={() => fold(l.group.id)} />;
+                    const f = l.hasUnder ? { open: !closed.has(l.item.id), onFold: () => fold(l.item.id) } : undefined;
+                    return <ItemRow key={l.item.id} w={l.item} {...(asTree ? { depth: l.depth } : {})} {...(f ? { fold: f } : {})} />;
+                  })}
                 </tbody>
               </table>
             </>
@@ -87,42 +142,5 @@ export function BacklogPage() {
         </div>
       </div>
     </>
-  );
-}
-
-function Row({ w }: { w: WorkItemRow }) {
-  const act = useAct();
-  return (
-    <tr>
-      {/* A key like PAY-40 stays on one line. */}
-      <td className="mono" style={{ whiteSpace: 'nowrap' }}>
-        <a href={w.url} target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-          {w.ref} <ExternalLink size={11} />
-        </a>
-      </td>
-      <td {...langProps(w.title)}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-          {w.isBug && <span className="pill bug" style={{ padding: '2px 8px' }}><Bug size={12} /> Bug</span>}
-          <Written style={{ fontWeight: 600 }} text={w.title} />
-        </span>
-      </td>
-      <td>{w.points ?? ''}</td>
-      <td>{w.state}</td>
-      <td>
-        {w.ticket ? (
-          <Link to="/board" search={{ ticket: w.ticket.id }} style={{ color: 'var(--muted)' }}>
-            <b className="mono" style={{ color: 'var(--text)' }}>{w.ticket.id}</b> {w.ticket.stage === 'done' ? 'Released' : STAGE_NAME[w.ticket.stage]}
-          </Link>
-        ) : (
-          <button
-            className="btn sm pri"
-            disabled={act.isPending}
-            onClick={() => act.mutate({ path: `/api/v1/backlog/${encodeURIComponent(w.id)}/start`, done: `${w.ref} is on the board. The Analyst is reading it.` })}
-          >
-            <Play size={13} /> Start
-          </button>
-        )}
-      </td>
-    </tr>
   );
 }

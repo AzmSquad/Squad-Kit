@@ -26,6 +26,8 @@ interface Issue {
   points?: number;
   sprint?: number;
   parent?: string;
+  /** In a project this account cannot browse: searches that name it fail, and it cannot be read. */
+  hidden?: boolean;
   criteria?: Adf | string | null;
   attachments: { id: string; filename: string; size: number }[];
   rank: number;
@@ -268,6 +270,12 @@ export function fakeJira(token = 'secret', opts: FakeJiraOptions = {}): FakeJira
         // Jira's text search: every word in the text, whatever the case.
         const words = m[1]!.replace(/\\(.)/g, '$1').toLowerCase().split(/\s+/);
         list = list.filter((i) => words.every((w) => JSON.stringify(i.description ?? '').toLowerCase().includes(w)));
+      } else if ((m = /^key in \((.+)\)$/.exec(clause))) {
+        const keys = m[1]!.split(',').map((k) => k.trim().replace(/^"|"$/g, ''));
+        // Jira refuses the whole search over one key it does not have, or this account may not see.
+        const gone = keys.find((k) => !issues.get(k) || issues.get(k)!.hidden);
+        if (gone) return `An issue with key '${gone}' does not exist for field 'key'.`;
+        list = list.filter((i) => keys.includes(i.key));
       } else if ((m = /^labels = "((?:[^"\\]|\\.)+)"$/.exec(clause))) {
         const label = m[1]!.replace(/\\(.)/g, '$1');
         list = list.filter((i) => i.labels.includes(label));
@@ -460,7 +468,7 @@ export function fakeJira(token = 'secret', opts: FakeJiraOptions = {}): FakeJira
     }
     if ((m = /^\/rest\/api\/3\/issue\/([A-Z]+-\d+)(\/comment|\/transitions)?$/.exec(p))) {
       const i = issues.get(m[1]!);
-      if (!i) return no(404, ['Issue does not exist or you do not have permission to see it.']);
+      if (!i || i.hidden) return no(404, ['Issue does not exist or you do not have permission to see it.']);
       if (m[2] === '/comment' && method === 'POST') {
         const problem = adfProblem(body?.body);
         if (problem) return no(400, [], { comment: `Comment body is not valid Atlassian Document Format: ${problem}` });

@@ -1,0 +1,18 @@
+/* The Backlog as a tree: epics and features over their stories, as on the Requirements page. */
+
+.bl-t { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.bl-fold { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 6px; color: var(--muted); flex: none; }
+.bl-fold:hover { background: var(--surface-2); color: var(--text); }
+.bl-lv { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 6px; font-size: 11.5px; font-weight: 600; flex: none; white-space: nowrap; }
+.bl-lv.epic { background: var(--text); color: var(--surface); }
+.bl-lv.feature { background: var(--accent-soft); color: var(--accent); }
+.bl-gt { font-weight: 650; }
+.bl-group.epic td { background: var(--lane); }
+.bl-group.epic .bl-gt { font-size: 14.5px; }
+.bl-dim { color: var(--muted); }
+.bl-prog { display: inline-flex; align-items: center; gap: 10px; font-size: 12.5px; white-space: nowrap; }
+.bl-bar { width: 84px; height: 6px; border-radius: 99px; background: var(--line); overflow: hidden; flex: none; }
+.bl-bar i { display: block; height: 100%; border-radius: 99px; background: var(--accent); }
+.table .bl-loose td { background: var(--lane); font-size: 12px; font-weight: 650; color: var(--muted); padding: 8px 12px; }
+.bl-view { display: inline-flex; margin-left: 4px; }
+.bl-view button { display: inline-flex; align-items: center; gap: 6px; }

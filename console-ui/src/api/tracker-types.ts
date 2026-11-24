@@ -73,7 +73,8 @@ export interface WorkItemRow {
   tags: string[];
   url: string;
   isBug?: boolean;
-  ticket: { id: string; stage: Stage; status: string } | null;
+  /** Its ticket on the board; `merged`: its work is in the base. */
+  ticket: { id: string; stage: Stage; status: string; merged?: boolean } | null;
 }
 
 export interface Sprint {
@@ -93,4 +94,18 @@ export interface BacklogResponse {
   /** The tracker had more than it reads at once: only these are shown. */
   capped?: boolean;
   items: WorkItemRow[];
+  /** How the items nest, when the tracker has epics and features above them. Left out: a flat list. */
+  tree?: BacklogTree;
+}
+
+/** An epic or feature above backlog items. `type` is the tracker's own word (Epic, Feature, Initiative). */
+export interface BacklogGroup extends Omit<WorkItemRow, 'ticket'> {
+  level: 'epic' | 'feature';
+}
+
+export interface BacklogTree {
+  /** The item right above each item that has one, by id: the items' and the groups' own. */
+  above: Record<string, string>;
+  /** The epics and features above the items that are not items themselves, in no set order. */
+  groups: BacklogGroup[];
 }

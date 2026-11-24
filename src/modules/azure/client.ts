@@ -466,7 +466,7 @@ export class Azure {
     return { id: raw.pullRequestId, status: raw.status, url: `${this.projUrl}/_git/${encodeURIComponent(repo)}/pullrequest/${raw.pullRequestId}` };
   }
 
-  private row(w: RawItem): WorkItemRow {
+  row(w: RawItem): WorkItemRow {
     const f = w.fields ?? {};
     const points = f['Microsoft.VSTS.Scheduling.StoryPoints'] ?? f['Microsoft.VSTS.Scheduling.Effort'];
     return {
@@ -484,7 +484,7 @@ export class Azure {
   }
 }
 
-const ROW_FIELDS = [
+export const ROW_FIELDS = [
   'System.Id',
   'System.WorkItemType',
   'System.Title',
@@ -539,7 +539,7 @@ export function processOf(types: string[]): AzureProcess | null {
   return null;
 }
 
-interface RawItem {
+export interface RawItem {
   id: number;
   fields?: Record<string, unknown>;
   relations?: { rel: string; url: string; attributes?: { name?: string; resourceSize?: number } }[];

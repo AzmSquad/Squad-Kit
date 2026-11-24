@@ -64,8 +64,6 @@ import { squadRunsElsewhere } from '../board/lock.js';
 import { demoFolder, seedDemoBoard } from '../board/demo.js';
 import { repoFor } from '../engine/repos.js';
 import { projectApps } from '../board/apps.js';
-import { trackerFor } from '../modules/registry.js';
-import { sprintToShow } from '../modules/tracker/sprints.js';
 import { openInEditor, ticketChanges } from '../engine/changes.js';
 import { AGENTS, STEPS, readAgent, writeAgent, type AgentRole } from '../engine/agents.js';
 import { corePrompts } from '../engine/core-prompts.js';
@@ -1211,30 +1209,6 @@ export async function runStartTicket(ticketId: string): Promise<void> {
 }
 
 /** The sprint's open stories and bugs on the tracker, with the ticket each one became. */
-export async function runBacklog(opts: { sprint?: string; all?: boolean }): Promise<void> {
-  const bp = board();
-  const tracker = trackerFor(bp);
-  if (!tracker) throw new Error('No tracker is set up for this project. Run: squad config set tracker');
-  const sprints = tracker.abilities.sprints ? await tracker.sprints() : [];
-  const wanted = opts.sprint?.toLowerCase();
-  const sprint = opts.all ? undefined : wanted ? sprints.find((s) => s.name.toLowerCase() === wanted || s.path.toLowerCase() === wanted) : (sprintToShow(sprints) ?? undefined);
-  if (wanted && !sprint) throw new Error(`No sprint called "${opts.sprint}". Sprints: ${sprints.map((s) => s.name).join(', ')}`);
-  const items = await tracker.list(sprint ? { sprint: sprint.path } : {});
-  const tickets = listTickets(bp).filter((t) => t.source.type === tracker.name);
-  out();
-  out(`  ${kleur.bold('Backlog')} ${kleur.gray(`${sprint ? sprint.name : 'everything open'} · ${items.length} open${items.more ? ` · only the first ${items.length} shown` : ''}`)}`);
-  out();
-  const w = Math.min(60, Math.max(10, ...items.map((i) => i.title.length)));
-  for (const i of items) {
-    const t = tickets.find((x) => x.source.id === i.id || x.source.ref === i.ref);
-    const title = i.title.length > w ? `${i.title.slice(0, w - 1)}…` : i.title.padEnd(w);
-    const kind = i.isBug ? kleur.red('bug ') : '    ';
-    const where = t ? kleur.gray(`${t.id} ${t.stage === 'done' ? 'released' : STAGE_NAME[t.stage]}`) : cmd(`squad pull ${i.id}`);
-    out(`  ${id(i.id.padStart(5))}  ${kind}${title}  ${kleur.gray(String(i.points ?? '').padStart(2))}  ${kleur.gray(i.state.padEnd(9))} ${where}`);
-  }
-  out();
-}
-
 export async function runPull(ref: string): Promise<void> {
   const bp = board();
   const t = await pullTicket(bp, ref);

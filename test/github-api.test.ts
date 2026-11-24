@@ -87,8 +87,12 @@ describe('connecting GitHub on the board', () => {
     const backlog = await json<{ connected: boolean; sprints: { current: boolean }[]; items: { ref: string; state: string }[] }>(a.request('/api/v1/backlog'));
     expect(backlog.connected).toBe(true);
     expect(backlog.items.map((i) => `${i.ref} ${i.state}`)).toEqual(['#40 Todo']);
-    const all = await json<{ items: { ref: string }[] }>(a.request('/api/v1/backlog?sprint=all'));
+    type Tree = { above: Record<string, string>; groups: { id: string; ref: string; level: string; type: string }[] };
+    const all = await json<{ items: { ref: string }[]; tree?: Tree }>(a.request('/api/v1/backlog?sprint=all'));
     expect(all.items.map((i) => i.ref)).toEqual(['#40', 'octo/api#7']);
+    // Sub-issues: #40 sits under the feature #11, under the epic #10. The other repo's issue has no parent.
+    expect(all.tree?.above).toEqual({ 'octo/shop#40': 'octo/shop#11', 'octo/shop#11': 'octo/shop#10' });
+    expect(all.tree?.groups.map((g) => `${g.ref} ${g.type} ${g.level}`).sort()).toEqual(['#10 Epic epic', '#11 Feature feature']);
     const started = await json<{ id: string; source: { ref: string } }>(a.request(`/api/v1/backlog/${encodeURIComponent('octo/api#7')}/start`, { method: 'POST' }));
     expect(started).toMatchObject({ id: 'GH-OCTO-API-7', source: { ref: 'octo/api#7' } });
     expect(readTicket(boardPaths(path.join(tmp, '.squad')), 'GH-OCTO-API-7')?.trackerQueue).toEqual([{ kind: 'started' }]);
@@ -97,6 +101,34 @@ describe('connecting GitHub on the board', () => {
     expect(own).toMatchObject({ id: 'GH-40', source: { ref: '#40', id: 'octo/shop#40' } });
     const listed = await json<{ items: { ref: string; ticket: { id: string } | null }[] }>(a.request('/api/v1/backlog'));
     expect(listed.items).toMatchObject([{ ref: '#40', ticket: { id: 'GH-40' } }]);
+  });
+
+  it('prints the same tree in the terminal, and a plain list with --flat', async () => {
+    const a = app();
+    await put(a, { module: 'github', repo: 'octo/shop', from: 'project', board: '2' });
+    const { runBacklog } = await import('../src/commands/backlog.js');
+    const printed: string[] = [];
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation((s: string | Uint8Array) => (printed.push(String(s)), true));
+    const cwd = process.cwd();
+    try {
+      process.chdir(tmp);
+      await runBacklog({ all: true });
+      const tree = printed.join('').replace(/\x1b\[[0-9;]*m/g, '').split('\n').map((l) => l.trimEnd());
+      expect(tree.filter((l) => /#10|#11|#40|#7|Not in an epic/.test(l)).map((l) => l.replace(/\s+/g, ' ').trim().split(' ').slice(0, 2).join(' '))).toEqual([
+        'EPIC #10',
+        'FEATURE #11',
+        '#40 Hold',
+        'Not in',
+        'octo/api#7 Rate',
+      ]);
+      printed.length = 0;
+      await runBacklog({ all: true, flat: true });
+      expect(printed.join('')).not.toMatch(/EPIC|Not in an epic/);
+      expect(printed.join('')).toContain('Hold a slot');
+    } finally {
+      process.chdir(cwd);
+      write.mockRestore();
+    }
   });
 
   it('says when only the first items are shown, and when a setup from before only reads', async () => {

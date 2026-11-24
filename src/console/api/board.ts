@@ -71,7 +71,7 @@ import type { AgentName, PlanComment, PlanEdit, Ticket } from '../../board/types
 import { repoFor, reposOf } from '../../engine/repos.js';
 import type { ProjectCommands, Release } from '../../board/types.js';
 import { aiTool, speechModule, trackerFor, trackerModule, TRACKERS } from '../../modules/registry.js';
-import { sprintToShow } from '../../modules/tracker/sprints.js';
+import { backlogView } from './backlog.js';
 import { trackerForm } from './tracker-form.js';
 import type { Tracker } from '../../modules/tracker/types.js';
 import { allowedFile, chatSummaries, dispositionOf, mimeOf, readConversation, ticketConversations, ticketFolders } from '../../engine/conversations.js';
@@ -202,29 +202,8 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
 
   app.get('/api/v1/backlog', async (c) => {
     const status = await trackerStatus();
-    const tracker = status.tracker;
-    if (!tracker) return c.json({ connected: false, error: status.error ?? null, sprints: [], items: [] });
-    try {
-      const sprints = tracker.abilities.sprints ? await tracker.sprints() : [];
-      const asked = c.req.query('sprint');
-      const sprint = asked === 'all' ? null : (sprints.find((s) => s.path === asked) ?? sprintToShow(sprints));
-      const items = await tracker.list(sprint ? { sprint: sprint.path } : {});
-      const onBoard = new Map(listTickets(bp).filter((t) => t.source.type === tracker.name).map((t) => [t.source.id ?? tracker.parseRef(t.source.ref ?? ''), t]));
-      return c.json({
-        connected: true,
-        user: status.user,
-        sprints,
-        sprint: sprint?.path ?? 'all',
-        // The tracker had more than it reads at once: the page says only these are shown.
-        ...(items.more ? { capped: true } : {}),
-        items: items.map((w) => {
-          const t = onBoard.get(w.id);
-          return { ...w, ticket: t ? { id: t.id, stage: t.stage, status: t.status } : null };
-        }),
-      });
-    } catch (err) {
-      return c.json({ connected: true, error: plainWords(err, 'Reading the backlog'), sprints: [], items: [] });
-    }
+    if (!status.tracker) return c.json({ connected: false, error: status.error ?? null, sprints: [], items: [] });
+    return c.json(await backlogView(bp, status.tracker, status.user, c.req.query('sprint')));
   });
 
   app.post('/api/v1/backlog/:id/start', async (c) =>

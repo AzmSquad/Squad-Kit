@@ -99,6 +99,7 @@ export function fakeAzureDevOps(token = 'secret', opts: FakeAzureOptions = {}): 
         'System.Description': w.description,
         'System.Tags': w.tags.join('; '),
         'System.IterationPath': w.sprint ?? 'Mawid',
+        ...(w.parent ? { 'System.Parent': w.parent } : {}),
         ...(w.priority ? { 'Microsoft.VSTS.Common.Priority': w.priority } : {}),
         ...(w.acceptance ? { [CRITERIA]: w.acceptance } : {}),
       },
@@ -172,7 +173,12 @@ export function fakeAzureDevOps(token = 'secret', opts: FakeAzureOptions = {}): 
       const ids = [...items].filter(([, w]) => ['User Story', 'Bug'].includes(w.type) && w.state !== 'Closed' && (!sprint || w.sprint === sprint)).map(([id]) => ({ id }));
       return json({ workItems: ids });
     }
-    if (method === 'POST' && /workitemsbatch/.test(path)) return json({ value: (body as { ids: number[] }).ids.map(raw) });
+    if (method === 'POST' && /workitemsbatch/.test(path)) {
+      const b = body as { ids: number[]; errorPolicy?: string };
+      const missing = b.ids.find((id) => !items.has(id));
+      if (missing && b.errorPolicy !== 'omit') return json({ message: `TF401232: Work item ${missing} does not exist.` }, 404);
+      return json({ value: b.ids.map((id) => (items.has(id) ? raw(id) : null)) });
+    }
     if (method === 'GET' && /_apis\/wit\/workitemtypes$/.test(path)) {
       return json({
         value: Object.keys(types).map((name) => ({

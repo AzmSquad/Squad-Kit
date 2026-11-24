@@ -13,6 +13,7 @@ import type {
   TrackerItemChange,
   TrackerItemRow,
   TrackerLevels,
+  TrackerTree,
 } from '../tracker/types.js';
 import { ModuleError } from '../errors.js';
 import { attachmentsOf, hostedFile, textOf } from './body.js';
@@ -24,6 +25,7 @@ import { byTeam, fromRest, rowOf, typeOf, type IssueNode, type RestIssue, type V
 import { idOf, parseRef, refOf, splitRepo, ticketName } from './refs.js';
 import type { GithubSettings } from './settings.js';
 import { forwardTo, isFinished } from './states.js';
+import { githubTree } from './tree.js';
 
 /**
  * GitHub as a squad-kit tracker: stories from a repo's Issues, or from a Project board. A board's Status options are
@@ -135,6 +137,11 @@ export class GithubTracker implements Tracker {
     const priority = priorityOf(valueOf(values, board.priority?.id)?.name, board.priority?.options ?? []);
     const sprint = valueOf(values, board.iteration?.id)?.title;
     return { ...(state ? { state } : {}), ...(points !== undefined ? { points } : {}), ...(priority ? { priority } : {}), ...(sprint ? { sprint } : {}) };
+  }
+
+  /** Sub-issues: each issue's parent, up to three levels. */
+  tree(rows: TrackerItemRow[]): Promise<TrackerTree> {
+    return githubTree(this.ctx.calls, rows, this.settings.repo);
   }
 
   async get(id: string): Promise<TrackerItem> {

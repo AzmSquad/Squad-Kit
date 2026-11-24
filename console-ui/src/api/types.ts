@@ -870,7 +870,7 @@ export interface DecisionsResponse {
   lessons: Lesson[];
 }
 
-export type { BacklogResponse, Sprint, TrackerStatus, WorkItemRow } from './tracker-types';
+export type { BacklogGroup, BacklogResponse, BacklogTree, Sprint, TrackerStatus, WorkItemRow } from './tracker-types';
 
 export interface AgentInfo {
   role: 'analyst' | 'architect' | 'builder' | 'reviewer' | 'tester';
