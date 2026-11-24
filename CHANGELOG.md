@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.28] — 2026-11-24
+
 ### Fixed
 
 - **The Overview shows where a new project really is when its stories come from your tracker.** On a project with no
