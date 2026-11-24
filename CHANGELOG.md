@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.39] — 2026-11-24
+
+### Added
+
+- **Flutter tests prove a "done when".** A Test line on a Flutter app runs its one test by name (`flutter test
+  --plain-name`, through FVM when the project does), reads its result, and Flutter's tests are counted. A test the
+  story added that cannot even load on main's code, because what it tests did not exist there, counts as failing before
+  the change; one main already had still proves nothing that way.
+- **Pictures on both phones.** An app built for the iPhone and Android, with both phones' tools ready and the phone
+  left on automatic, gets its proof pictures on both: the Tester takes each one on the iPhone, and on Android too where
+  a "done when" names Android or both phones, iPhone pictures first, as one phone runs at a time. The Android app is
+  built before the Tester starts, and its phone comes up at its first picture. Each picture names its device.
+- **The phone's own moves in the pictures:** the home screen with the app's icon and its name, its pages, and the phone
+  turned sideways, through Maestro on the iPhone and Android. A phone turned for a picture is turned back after it.
+  The plan now asks for pictures of these, and only a real notification or call is left to another proof.
+- **Where the code is, on the Changes tab:** the squad's copy and its branch, until it reaches your folder, and Open
+  pull request once there is one.
+
+### Changed
+
+- **A planned picture squad-kit can't take is a calm row, not a red stop.** When the Tester and squad-kit's check
+  agree a planned picture can't be taken here, the proof is ready for you with that row in amber, "Picture not taken",
+  and why. You decide at Looks right. Red stays for a picture that shows the app broken; a planned answer or rows not
+  made still stop. The self-build track never accepts such a story by itself.
+- **"Not on a screen" as a kind is now "Checked by the Reviewer"**, which is what it means. The old name still works
+  in `squad prove`.
+- **One simulator of each size.** When squad-kit makes a new iPhone or iPad simulator of its own, it removes the one it
+  replaces, by its saved id, when it is not running. It never removes a simulator it did not make.
+
+### Fixed
+
+- **Closing the Device Hub window stops the app**, as closing Simulator does (Xcode 27).
+- **No Android pictures where they can't be taken:** when another program's adb server runs (Flutter's, Android
+  Studio's), Maestro cannot tap squad-kit's Android phone through it, so the pictures stay on the iPhone instead of
+  waiting for a phone that never answers.
+
 ## [1.3.38] — 2026-11-24
 
 ### Fixed
