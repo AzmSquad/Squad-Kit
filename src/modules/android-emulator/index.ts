@@ -13,19 +13,8 @@ import { PhoneError, type AppOnPhone, type PhoneDevice, type PhoneModel, type Ph
  * A hidden emulator cannot show a window later: for a person it starts again from the snapshot, with its window.
  */
 
-export interface Ran {
-  ok: boolean;
-  out: string;
-  err: string;
-  /** What it printed, as bytes, when asked for (a picture). */
-  bytes?: Buffer;
-}
-
-/** Runs one program and gives what it printed. Tests give a made-up one. */
-export type AndroidRun = (file: string, args: string[], o: { env: NodeJS.ProcessEnv; timeoutMs?: number; input?: string; binary?: boolean }) => Promise<Ran>;
-
-/** Starts the emulator on its own, beside squad-kit, writing what it prints to a log file. Gives its process number. */
-export type AndroidSpawn = (file: string, args: string[], o: { env: NodeJS.ProcessEnv; log: string }) => number;
+import type { AndroidRun, AndroidSpawn, Ran } from './types.js';
+export type { AndroidRun, AndroidSpawn, Ran } from './types.js';
 
 /** What the module reads of this computer. Tests give a made-up one. */
 export interface AndroidHost {
@@ -656,6 +645,12 @@ export function androidEmulatorWith(o: AndroidSetup = {}): PhoneModule {
       for (let i = 0; i < 10 && host.alive(kept.pid); i += 1) await host.sleep(500);
       if (host.alive(kept.pid) && ADB_SERVER.test(host.commandOf(kept.pid) ?? '')) host.kill(kept.pid, 'SIGTERM');
       forgetAdb();
+    },
+    async foreignAdb() {
+      // Another adb server (Flutter's, Android Studio's) has none of squad-kit's keys: Maestro, which reaches phones
+      // through it, cannot tap squad-kit's phone then. Seen on a Mac on 2026-11-24.
+      const kept = readAdb();
+      return !(await host.portFree(ADB_PORT)) && !(kept && (await adbIsOurs(kept)));
     },
     async windowShows(id) {
       const r = runningOf(exact(id));

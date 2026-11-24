@@ -101,6 +101,10 @@ export interface PhoneModule {
   devices(): Promise<PhoneDevice[]>;
   /** Makes a new device, and gives its id. */
   create(name: string, model: string, runtime: string): Promise<string>;
+  /** Removes one of squad-kit's own devices, by its exact id, for good. Only one squad-kit made and replaced. */
+  remove?(id: string): Promise<void>;
+  /** Android: another program's adb server runs here, so squad-kit's phone cannot be tapped through it. */
+  foreignAdb?(): Promise<boolean>;
   /** Starts a device hidden, with no window, and waits until it is up. */
   boot(id: string, o?: { timeoutMs?: number; signal?: AbortSignal }): Promise<void>;
   /** Puts a built app on a device, in place of the one there. */

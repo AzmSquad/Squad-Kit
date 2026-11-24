@@ -1,5 +1,6 @@
 import { addActivity, now, readMeta, readTicket, requireTicket, updateTicket, type BoardPaths } from './store.js';
-import type { AgentQuestion, Ticket } from './types.js';
+import type { AgentQuestion, ProofShot, Ticket } from './types.js';
+import { hasKinds } from './proof-rows.js';
 import type { Decided, DecidedBy } from './requirements-types.js';
 import { BoardActionError, acceptInTurn, holdingSave, CHECKOUT_WAITS, acceptProof, changeAfterRelease, openChange, proposeChange, saveBeforeAccept, shipped } from './actions.js';
 import { isMerged, refuseBeforeDependency } from './depends.js';
@@ -259,8 +260,9 @@ export function acceptByItself(bp: BoardPaths, id: string): Ticket {
     });
   }
   // Never with a "done when" the screenshots do not show met: the person checks the proof and decides. Not on a screen
-  // is not one of those: the Tester and squad-kit's check agreed it cannot be shown.
-  const open = (t.proof ?? []).filter((p) => p.shows && p.shows !== 'met' && p.shows !== 'off-screen');
+  // is not one of those: the Tester and squad-kit's check agreed it cannot be shown. A planned picture not taken is.
+  const notTaken = (p: ProofShot) => hasKinds(t) && (p.kind ?? 'screen') === 'screen';
+  const open = (t.proof ?? []).filter((p) => p.shows && p.shows !== 'met' && (p.shows !== 'off-screen' || notTaken(p)));
   if (open.length) {
     const broken = open.some((p) => p.shows === 'broken');
     return updateTicket(bp, id, (x) => {

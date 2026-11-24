@@ -153,13 +153,15 @@ async function runOne(host: KindsHost, t: Ticket, n: number, test: NamedTest, ou
   const snapshot = fs.readFileSync(path.join(host.dir, test.file));
   host.update((x) => (x.status = `Running the test of "done when" ${n} on the story's code`));
   const now = await host.run(how.command, TEST_MS);
+  let newTest = false;
   const main = await host.onMain(async (dir, run) => {
     const to = path.join(dir, test.file);
+    newTest = !fs.existsSync(to);
     fs.mkdirSync(path.dirname(to), { recursive: true });
     fs.writeFileSync(to, snapshot);
     return run(how.command, TEST_MS);
   });
-  const v = judgeTest(test, now, main, t.criteria?.[n - 1]?.proof?.keeps === true);
+  const v = judgeTest(test, now, main, t.criteria?.[n - 1]?.proof?.keeps === true, newTest);
   host.log(`Ran the test of "done when" ${n} (${how.command}): on main ${v.proof?.before}, on the story's code ${v.proof?.after}`);
   const file = saveRecord(host.bp, t.id, n, 'test', { criterion: text, test, whole: how.whole, story: runRecord(now, how.command), main: runRecord(main, how.command) });
   if (v.shows !== 'met') (v.toBuilder ? out.broken : out.open).push({ criterion: n, text, why: v.why });
@@ -204,12 +206,20 @@ export async function provedByKind(host: KindsHost, testerRan = true): Promise<K
 }
 
 /**
- * squad-kit's check said a planned proof cannot be made (a picture, an answer or rows): that is never accepted quietly
- * as Not on a screen. It is not shown yet, and after the retakes the person decides on the card.
+ * squad-kit's check said a planned proof cannot be made. A planned answer or rows not made is not shown yet, and after
+ * the retakes the person decides on the card. A planned picture the Tester and the check agree cannot be taken here
+ * (a real notification, a call) is no stop: it is a picture not taken, with why, and the person decides at Looks right,
+ * calmly. Red stays for a picture that shows the app broken.
  */
 export function plannedProof<V extends { shows: string; why: string; advice: string }>(t: Ticket, n: number, v: V | null): V | null {
-  if (!v || !hasKinds(t) || v.shows !== 'off-screen') return v;
+  if (!v || !hasKinds(t) || v.shows !== 'off-screen' || (kindOf(t, n) ?? 'screen') === 'screen') return v;
   return { ...v, shows: 'not-shown', why: `${KIND_NAMES[kindOf(t, n) ?? 'screen']} was planned, and the Tester could not make it: ${v.why}`.slice(0, 600), advice: '' };
+}
+
+/** How many planned pictures were not taken, for the story's line: "Proof ready to check: 1 picture not taken". */
+export function picturesNotTaken(t: Ticket): number {
+  if (!hasKinds(t)) return 0;
+  return (t.proof ?? []).filter((p) => p.shows === 'off-screen' && (p.kind ?? 'screen') === 'screen').length;
 }
 
 /** A Test or Not on a screen line squad-kit could not prove by itself: a plain stop, and the person decides. */

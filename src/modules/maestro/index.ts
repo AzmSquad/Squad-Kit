@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { StepFailure, type BrowserStep, type BrowserTarget } from '../browser/types.js';
 import { PhoneError } from '../phone/types.js';
-import type { PhoneDriver, PhoneDriverModule, PhoneDriverStart } from '../phone-driver/types.js';
+import { isPhoneMove, type PhoneDriver, type PhoneDriverModule, type PhoneDriverStart, type PhoneMove } from '../phone-driver/types.js';
 
 /**
  * Maestro taps through a phone app for squad-kit's pictures. One Maestro runs per booted device, in its own MCP mode
@@ -184,6 +184,14 @@ const PRESSED = new Set(['button', 'link', 'tab', 'menuitem', 'checkbox', 'switc
 
 /** Keys a phone has, in Maestro's words. Others are typed, or have no key on a phone. */
 const KEYS: Record<string, string> = { Enter: 'Enter', Backspace: 'Backspace', Delete: 'Backspace' };
+/** The phone's own buttons and moves (phone-driver/types.ts PHONE_MOVES), as Maestro does them. */
+const MOVES: Record<PhoneMove, string> = {
+  Home: '- pressKey: Home',
+  SwipeLeft: '- swipe:\n    direction: LEFT',
+  SwipeRight: '- swipe:\n    direction: RIGHT',
+  Landscape: '- setOrientation: LANDSCAPE_LEFT',
+  Portrait: '- setOrientation: PORTRAIT',
+};
 
 const q = (s: string) => JSON.stringify(s);
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -432,9 +440,10 @@ export async function openMaestro(o: PhoneDriverStart, spawnIt: MaestroSpawn = r
           const key = step.key ?? 'Enter';
           // Escape puts the keyboard away, the nearest a phone has; with no keyboard up there is nothing to do.
           if (key === 'Escape') return (await keyboardUp(left())) ? run(appId, '- hideKeyboard', left()) : undefined;
+          if (isPhoneMove(key)) return run(appId, MOVES[key], left());
           if (KEYS[key]) return run(appId, `- pressKey: ${KEYS[key]}`, left());
           if (/^(Shift\+)?[A-Za-z0-9]$/.test(key) || key === 'Space') return run(appId, `- inputText: ${q(key === 'Space' ? ' ' : key.slice(-1))}`, left());
-          throw new StepFailure('other', `a phone has no ${key} key: use Enter, Backspace, Escape (it hides the keyboard), a letter or a digit`);
+          throw new StepFailure('other', `a phone has no ${key} key: use Enter, Backspace, Escape (it hides the keyboard), a letter or a digit, or the phone's own Home, SwipeLeft, SwipeRight, Landscape and Portrait`);
         }
         case 'wait': {
           if (!step.target) await sleep(Math.min(step.ms ?? 0, 5000));

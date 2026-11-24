@@ -7,6 +7,15 @@ import type { BrowserStep } from '../browser/types.js';
  * (browser/types.ts), so squad-kit says why in the same plain words as for a web page.
  */
 
+/**
+ * The phone's own buttons and moves, as the key of a "press" step: Home shows the home screen (the app's icon and its
+ * name), SwipeLeft and SwipeRight turn its pages, Landscape turns the phone sideways and Portrait turns it back. Every
+ * tapping tool does them, on the iPhone and Android alike.
+ */
+export const PHONE_MOVES = ['Home', 'SwipeLeft', 'SwipeRight', 'Landscape', 'Portrait'] as const;
+export type PhoneMove = (typeof PHONE_MOVES)[number];
+export const isPhoneMove = (key: string | undefined): key is PhoneMove => (PHONE_MOVES as readonly string[]).includes(key ?? '');
+
 export interface PhoneDriverStart {
   /** The device, by its exact id: the tool never picks one itself. */
   device: string;

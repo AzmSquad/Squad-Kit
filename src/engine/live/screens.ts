@@ -14,6 +14,7 @@ import { treeOf } from '../lane.js';
 import { startStep } from '../../board/clock.js';
 import { WEB_VERSION, picturesWay, untilGot, type PicturesWay } from '../phone/plan.js';
 import { PhoneSession, PhoneUnavailable } from '../phone/session.js';
+import { bothPhones } from '../phone/both.js';
 import { StepError } from '../../board/problem.js';
 import { folderOf, projectCopies } from '../leftovers.js';
 import type { LiveSquad } from './squad.js';
@@ -151,10 +152,13 @@ export const screensPart = {
         if (!beside) x.status = text;
       });
     const session = new PhoneSession({ cwd: way.dir, kind: way.kind, system: way.system, tools: way.tools, say, log: (text) => this.log('info', text, id), ...(signal ? { signal } : {}) });
+    // An app built for both phones: its pictures on the other one too (phone/both.ts). Built now, up at its first picture.
+    const other = way.also && !beside ? new PhoneSession({ cwd: way.dir, kind: way.kind, system: way.also, tools: way.tools, sizes: ['phone'], say, log: (text) => this.log('info', text, id), ...(signal ? { signal } : {}) }) : null;
     // Building the app and starting the phone are the step working, not hanging.
     const beat = setInterval(() => this.dog.beat(beside?.job ?? id), 20_000);
     try {
       await session.ready();
+      await other?.build();
     } catch (err) {
       if (signal?.aborted) throw err;
       if (err instanceof PhoneUnavailable) throw new StepError(err.message, err.detail);
@@ -170,7 +174,7 @@ export const screensPart = {
       // No app to start for a browser: the phone itself. A copy of the code as it was has nothing to check.
       tools: beside ? ['take_screenshots', 'look_at_page', 'i_am_stuck'] : ['take_screenshots', 'look_at_page', 'run_checks', 'i_am_stuck'],
       ...(beside ? {} : { checks: this.windowChecks(id, cwd) }),
-      phone: session,
+      phone: other ? bothPhones(session, other, way.also!) : session,
       prefix: `${id.toLowerCase()}-${when}`,
       ...(signal ? { signal } : {}),
     });

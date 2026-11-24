@@ -120,6 +120,10 @@ export function fakePhone(o: { devices?: PhoneDevice[]; notHere?: string | null;
       devices.push({ id, name, state: 'shutdown', runtime });
       return id;
     },
+    async remove(id) {
+      calls.push(`remove ${id}`);
+      devices.splice(devices.findIndex((d) => d.id === id), 1);
+    },
     async boot(id) {
       calls.push(`boot ${id}`);
       find(id).state = 'booted';

@@ -7,7 +7,8 @@ import type { CriterionProof, ProofKind } from './proof-kind.js';
  * 1. A line about what someone sees keeps its picture: squad-kit locks it to Screen. Not a line whose result is that the
  *    tests or code checks pass (the checks prove it), nor one the Reviewer proves by reading the code: there "the checks
  *    show no issues" or "a README under one page" is no screen. Nor one about what no picture of squad-kit's can show
- *    (the home screen, the app icon, turning the phone). Such a line keeps the kind the Analyst gave it.
+ *    (a real notification or call). Such a line keeps the kind the Analyst gave it. The home screen with the app's icon,
+ *    and the phone turned sideways, are pictures (Maestro's Home and Landscape).
  * 2. A story that changes screen files keeps at least one picture: when no line is Screen, the line most about a screen
  *    is locked to Screen (lockForScreens, at the proof, from the files the story changed).
  *
@@ -21,7 +22,7 @@ import type { CriterionProof, ProofKind } from './proof-kind.js';
 /** In the order the menu shows them. */
 export const PROOF_KINDS: ProofKind[] = ['screen', 'data', 'api', 'test', 'none'];
 
-export const KIND_NAMES: Record<ProofKind, string> = { screen: 'Screen', api: 'API call', data: 'Data', test: 'Test', none: 'Not on a screen' };
+export const KIND_NAMES: Record<ProofKind, string> = { screen: 'Screen', api: 'API call', data: 'Data', test: 'Test', none: 'Checked by the Reviewer' };
 
 /** The rule's own words under a locked line. */
 export const SEES_WHY = 'About what someone sees, so it needs a picture';
@@ -46,9 +47,9 @@ const AWAY_AR = /(?:API|قاعدة البيانات|جدول|يتحفظ|تتحف
 /** A result that the tests or code checks pass: the checks prove it, whatever the tests look at. */
 const CHECKS = /\b(?:tests? (?:pass|passes|passed|are green|run green)|code checks?|static analysis|analy[sz]er|lint(?:er|s)?)\b/i;
 const CHECKS_AR = /(?:(?:تنجح|تمر|نجاح) (?:كل |جميع )?الاختبارات|الاختبارات (?:تنجح|تمر|ناجحة)|فحص الكود)/;
-/** What squad-kit's pictures cannot show: the phone's home screen and app icon, turning the phone. The Analyst says how. */
-const CANT_SHOW = /\b(?:home ?screen|app icon|under the (?:app(?:'s)? )?icon|icon name|rotat(?:e|es|ed|ing|ion)|(?:turns?|turned|turning) (?:the )?(?:phone|device|tablet)|sideways)\b/i;
-const CANT_SHOW_AR = /(?:الشاشة الرئيسية|أيقونة التطبيق|تحت الأيقونة|تدوير|يدير الجوال|يلف الجوال)/;
+/** What no picture of squad-kit's can show: a real notification or call. The Analyst says how. */
+const CANT_SHOW = /\b(?:push notifications?|notifications? (?:arrives?|shows? up|pops? up)|(?:phone|incoming) calls?)\b/i;
+const CANT_SHOW_AR = /(?:إشعار|اتصال وارد)/;
 /** An action that is the Reviewer reading the work: the Reviewer proves it in the code. */
 const REVIEWER_READS = /\breviewers? (?:reads?|reviews?|looks? through)\b|\bcode review\b|\breads? the (?:code|pull request|diff|changes|settings|files?|readme)\b/i;
 const REVIEWER_READS_AR = /(?:المراجع يقرأ|يقرأ المراجع|يراجع المراجع|مراجعة الكود|يقرأ الكود)/;

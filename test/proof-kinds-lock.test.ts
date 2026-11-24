@@ -39,9 +39,10 @@ describe('the lock rules', () => {
     expect(aboutWhatSomeoneSees(review)).toBe(false);
     expect(aboutWhatSomeoneSees(line('تنجح كل الاختبارات ويظهر الاسم في الشاشة'))).toBe(false);
     expect(aboutWhatSomeoneSees({ given: 'الطلب', when: 'يقرأ المراجع الكود', then: 'لا توجد مفاتيح في الصفحة' })).toBe(false);
-    // What no picture of squad-kit's can show: the home screen's icon name, turning the phone.
-    expect(aboutWhatSomeoneSees({ given: 'the app is installed', when: 'the developer looks at the home screen and then turns the phone sideways', then: 'the name under the app icon is Rooms, and the screen stays upright' })).toBe(false);
-    expect(aboutWhatSomeoneSees(line('يظهر اسم التطبيق تحت الأيقونة في الشاشة الرئيسية'))).toBe(false);
+    // The home screen's icon name and the phone turned sideways are pictures now; a real notification is not.
+    expect(aboutWhatSomeoneSees({ given: 'the app is installed', when: 'the developer looks at the home screen and then turns the phone sideways', then: 'the name under the app icon is Rooms, and the screen stays upright' })).toBe(true);
+    expect(aboutWhatSomeoneSees(line('a push notification shows the new booking'))).toBe(false);
+    expect(aboutWhatSomeoneSees(line('يظهر إشعار بالحجز الجديد'))).toBe(false);
     // The app on a phone is still a picture, the Reviewer's or anyone's; the lines that open it too.
     expect(aboutWhatSomeoneSees({ given: 'the app', when: 'the reviewer opens it on the phone', then: 'the screen shows the name in the middle' })).toBe(true);
     expect(aboutWhatSomeoneSees(line('the app opens with no errors and shows one screen with the name in the middle'))).toBe(true);

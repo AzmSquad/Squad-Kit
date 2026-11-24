@@ -2,7 +2,7 @@ import path from 'node:path';
 import { phoneDriver } from '../../modules/registry.js';
 import { StepFailure, type BrowserStep } from '../../modules/browser/types.js';
 import { PhoneError, type AppOnPhone, type PhoneModule, type PhoneSize } from '../../modules/phone/types.js';
-import type { PhoneDriver } from '../../modules/phone-driver/types.js';
+import { isPhoneMove, type PhoneDriver } from '../../modules/phone-driver/types.js';
 import { MAX_PAUSE_MS, failureWords, oneWay, stepWords, trimSnapshot, type FailedShot, type ShotAsk } from '../shots.js';
 import { BuildFailed, buildForPhone, type PhoneKind } from './build.js';
 import { ownDevice, phonesHome, type OwnDevice } from './devices.js';
@@ -195,6 +195,11 @@ export class PhoneSession {
     return this.phone.label;
   }
 
+  /** The phone's word for people: "iPhone", "Android phone". */
+  get word(): string {
+    return this.phone.words.phone;
+  }
+
   /** The real device of each size, for the pictures' labels: { phone: "iPhone 16 Pro" }. Known once ready. */
   labels(): Partial<Record<PhoneSize, string>> {
     return Object.fromEntries(Object.entries(this.devices).map(([k, d]) => [k, d!.model])) as Partial<Record<PhoneSize, string>>;
@@ -223,13 +228,32 @@ export class PhoneSession {
     return this.readying;
   }
 
+  /**
+   * The app built for this phone, and nothing else: the second phone of an app built for both is built before the
+   * Tester's clock starts, and comes up at its first picture. Throws PhoneUnavailable.
+   */
+  async build(): Promise<void> {
+    try {
+      await this.built();
+    } catch (err) {
+      if (this.s.signal?.aborted || this.closed) throw new Error(STOPPED);
+      if (err instanceof BuildFailed || err instanceof PhoneError) throw new PhoneUnavailable(err.message, err.detail);
+      throw err;
+    }
+  }
+
+  private async built(): Promise<void> {
+    if (this.app) return;
+    const o = this.s;
+    let app = o.app;
+    if (!app) app = (await buildForPhone(o.cwd, o.kind, { system: o.system ?? 'ios', phone: this.phone, say: o.say, ...(o.log ? { log: o.log } : {}), ...(o.signal ? { signal: o.signal } : {}) })).app;
+    this.app = { path: app, info: await this.phone.appInfo(app) };
+  }
+
   private async getReady(): Promise<void> {
     const o = this.s;
     try {
-      let app = o.app;
-      if (!app) app = (await buildForPhone(o.cwd, o.kind, { system: o.system ?? 'ios', phone: this.phone, say: o.say, ...(o.log ? { log: o.log } : {}), ...(o.signal ? { signal: o.signal } : {}) })).app;
-      const info = await this.phone.appInfo(app);
-      this.app = { path: app, info };
+      await this.built();
       for (const size of this.sizes) this.devices[size] = await ownDevice(this.phone, size, o.runtime ? { runtime: o.runtime } : {});
       // The phone comes up now, with the app and Maestro ready, so the first picture does not wait for them.
       await withPhone(this.phone, this.sizes[0]!, async (turn) => {
@@ -305,6 +329,7 @@ export class PhoneSession {
       let driver: PhoneDriver | null = null;
       let at = 0;
       let step: BrowserStep | null = null;
+      const turned = (ask.steps ?? []).some((x) => x.action === 'press' && x.key === 'Landscape');
       const open = async (p: string) => {
         if (p === '/' || !p.trim()) return;
         const scheme = app.info.schemes[0];
@@ -337,7 +362,7 @@ export class PhoneSession {
           }
           // The keyboard a field brings up goes away only when it covers the part a step needs (maestro/index.ts).
           driver = await this.tapped(id, appId, driver, step, ms);
-          typed = step.action === 'fill' || (step.action === 'press' && step.key !== 'Escape' && step.key !== 'Enter');
+          typed = step.action === 'fill' || (step.action === 'press' && step.key !== 'Escape' && step.key !== 'Enter' && !isPhoneMove(step.key));
         }
         at = 0;
         step = null;
@@ -346,10 +371,13 @@ export class PhoneSession {
         await settle(driver);
         if (!picture) return { page, snapshot: trimSnapshot(await driver.screenText(10_000)), device, ...(said ? { said } : {}) };
         const png = await within(this.phone.screenshot(id), 30_000, 'taking the picture');
+        // A phone turned for this picture is turned back, so the next one starts upright.
+        if (turned) await driver.act(appId, { action: 'press', key: 'Portrait' }, 15_000).catch(() => undefined);
         if (!png.length) return { step: 0, what: 'save the picture', why: 'the phone gave no picture', plain: 'squad-kit could not save the picture.', page, snapshot: '' };
         return { png, page, device, ...(said ? { said } : {}) };
       } catch (err) {
         if (c.signal?.aborted || this.s.signal?.aborted || this.closed) throw new Error(STOPPED);
+        if (turned && driver) await driver.act(appId, { action: 'press', key: 'Portrait' }, 15_000).catch(() => undefined);
         return failed(step, at, err, page, driver, c.stepMs);
       }
     }, this.turnOptions());

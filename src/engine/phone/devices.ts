@@ -98,9 +98,13 @@ export async function ownDevice(phone: PhoneModule, size: PhoneSize, o: { runtim
   const name = ownName(phone, size);
   const id = await phone.create(name, model.id, runtime.id);
   const made: OwnDevice = { phone: phone.name, size, id, name, model: model.name, runtime: runtime.version, runtimeId: runtime.id, createdAt: new Date().toISOString() };
+  // One device of each size: the one this replaces, squad-kit's own by its saved id, goes when it is not running. A
+  // device asked on another system stays, to be used again for it.
+  const old = wanted ? [] : saved.filter((d) => d.size === size && here.get(d.id)?.state === 'shutdown');
+  for (const d of old) await phone.remove?.(d.id).catch(() => undefined);
   // This phone's saved devices that are gone from this computer leave the list; the others stay, to be used again, and
   // so do the other phone's.
-  saveDevices([...savedDevices(home).filter((d) => (moduleOf(d) !== phone.name || here.has(d.id)) && d.id !== id), made], home);
+  saveDevices([...savedDevices(home).filter((d) => (moduleOf(d) !== phone.name || here.has(d.id)) && d.id !== id && !old.some((o) => o.id === d.id)), made], home);
   return { ...made, state: 'shutdown' };
 }
 

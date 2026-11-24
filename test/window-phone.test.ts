@@ -26,6 +26,7 @@ const { PhoneSession, NO_LINKS, closeDrivers } = await import('../src/engine/pho
 const desk = await import('../src/engine/phone/turn.js');
 const { shotSizeOf } = await import('../src/engine/proof-check.js');
 const { stepWords } = await import('../src/engine/shots.js');
+const { bothPhones } = await import('../src/engine/phone/both.js');
 
 let tmp: string;
 let lines: string[];
@@ -108,6 +109,38 @@ describe("the phone's tools", () => {
     expect(item.page!.description).toContain('This app has no links of its own');
     expect(Object.keys(item)).toEqual(['page', 'steps', 'size', 'language']);
     expect(tools.find((t) => t.name === 'look_at_page')!.description).toContain('gives back what the screen shows as text');
+    await w.close();
+  });
+
+  it('a picture of the phone turned sideways turns it back after, so the next picture starts upright', async () => {
+    const s = session();
+    await s.ready();
+    const r = await s.shoot({ page: '/', steps: [{ action: 'press', key: 'Home' }, { action: 'press', key: 'Landscape' }] }, { deadline: Date.now() + 30_000, stepMs: 5000 });
+    expect(r).toMatchObject({ device: 'iPhone 18 Pro' });
+    expect(tapped.filter((x) => /Home|Landscape|Portrait|Escape/.test(x)).map((x) => x.replace(/^[^:]+: /, ''))).toEqual(['press Home', 'press Landscape', 'press Portrait']);
+    const shots = windowWith(s).listTools().find((t) => t.name === 'take_screenshots')!;
+    expect(JSON.stringify(shots.inputSchema)).toContain('Home shows the home screen');
+  });
+
+  it('an app built for both phones: shots go to the iPhone by its sizes and to Android by "android", each labelled', async () => {
+    const ios = fakePhone();
+    const android = fakeAndroid();
+    const first = new PhoneSession({ cwd: tmp, kind: 'flutter', tools: { maestro: '/sk/maestro' }, app: app(), say: (t) => lines.push(t) }, ios.module);
+    const second = new PhoneSession({ cwd: tmp, kind: 'flutter', system: 'android', sizes: ['phone'], tools: { maestro: '/sk/maestro' }, app: path.join(tmp, 'app-debug.apk'), say: (t) => lines.push(t) }, android.module);
+    await second.build();
+    // Built only: the Android phone comes up at its first picture.
+    expect(android.calls.filter((c) => c.startsWith('boot'))).toEqual([]);
+    const both = bothPhones(first, second, 'android');
+    await both.ready();
+    expect(both.sizes).toEqual(['phone', 'tablet', 'android']);
+    expect(both.labels()).toMatchObject({ phone: 'iPhone 18 Pro', android: 'Android phone' });
+    const w = windowWith(both);
+    const shots = w.listTools().find((t) => t.name === 'take_screenshots')!;
+    expect(shots.description).toContain('iPhone simulator and Android emulator');
+    const a = await both.shoot({ page: '/' }, { deadline: Date.now() + 30_000, stepMs: 5000 });
+    const b = await both.shoot({ page: '/', size: 'android' as never }, { deadline: Date.now() + 30_000, stepMs: 5000 });
+    expect([a, b].map((r) => (r as { device: string }).device)).toEqual(['iPhone 18 Pro', 'Pixel 9']);
+    expect((both.labels() as Record<string, string>).android).toBe('Pixel 9');
     await w.close();
   });
 

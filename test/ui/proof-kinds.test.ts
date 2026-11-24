@@ -88,7 +88,7 @@ describe('the chips in the spec', () => {
     const text = page.body.textContent;
     expect(text).toContain('Screen');
     expect(text).toContain('Data');
-    expect(text).toContain('Not on a screen');
+    expect(text).toContain('Checked by the Reviewer');
     expect(text).toContain(SEES);
     expect(text).toContain('Nothing new on a screen: the bookings table shows it.');
     expect(page.querySelectorAll('.pkind.k-data').length).toBe(1);
@@ -109,15 +109,15 @@ describe('the chips in the spec', () => {
     await show(lines(spec()));
     await click(buttons().find((b) => b.getAttribute('aria-label')?.includes('"done when" 1')));
     const opts = buttons().filter((b) => b.getAttribute('role') === 'menuitemradio');
-    expect(opts.filter((b) => b.disabled).map((b) => b.textContent)).toEqual(expect.arrayContaining([expect.stringContaining('Data'), expect.stringContaining('API call'), expect.stringContaining('Test'), expect.stringContaining('Not on a screen')]));
+    expect(opts.filter((b) => b.disabled).map((b) => b.textContent)).toEqual(expect.arrayContaining([expect.stringContaining('Data'), expect.stringContaining('API call'), expect.stringContaining('Test'), expect.stringContaining('Checked by the Reviewer')]));
     expect(opts.find((b) => b.textContent.includes('Screen'))!.disabled).toBe(false);
     expect(page.body.textContent).toContain(K.LOCK_NOTE);
   });
 
-  it('Not on a screen asks for a reason first', async () => {
+  it('Checked by the Reviewer asks for a reason first', async () => {
     await show(lines(spec()));
     await click(buttons().find((b) => b.getAttribute('aria-label')?.includes('"done when" 2')));
-    await click(buttons().find((b) => b.getAttribute('role') === 'menuitemradio' && b.textContent.includes('Not on a screen')));
+    await click(buttons().find((b) => b.getAttribute('role') === 'menuitemradio' && b.textContent.includes('Checked by the Reviewer')));
     expect(sent).toEqual([]);
     const input = page.querySelector('.kindwhyask input');
     expect(input).toBeTruthy();
@@ -170,7 +170,7 @@ describe('the Proof tab and the chat card', () => {
 
   it('the spec card has each line with its kind', async () => {
     await show(() => h(Body, { t: spec(), kind: 'spec' }));
-    expect([...page.querySelectorAll('.pkind')].map((x: any) => x.textContent)).toEqual(['Screen', 'Data', 'Not on a screen']);
+    expect([...page.querySelectorAll('.pkind')].map((x: any) => x.textContent)).toEqual(['Screen', 'Data', 'Checked by the Reviewer']);
   });
 });
 
@@ -210,7 +210,7 @@ describe('a Test line that stays as it is', () => {
 
   it('the spec card shows it on the line', async () => {
     await show(() => h(Body, { t: spec({ criteria: kept }), kind: 'spec' }));
-    expect([...page.querySelectorAll('.pkind')].map((x: any) => x.textContent)).toEqual(['Screen', 'Test · stays as it is', 'Not on a screen']);
+    expect([...page.querySelectorAll('.pkind')].map((x: any) => x.textContent)).toEqual(['Screen', 'Test · stays as it is', 'Checked by the Reviewer']);
   });
 
   it('the short words when it fails on main, and the command', () => {

@@ -323,6 +323,17 @@ describe("adb's server", () => {
     expect(killed).toEqual([]);
   });
 
+  it("says when another program's adb server is in the way of tapping its phone, and not for its own", async () => {
+    const p = phone();
+    expect(await p.foreignAdb!()).toBe(false);
+    adbServer = { pid: 555, command: '/Users/pm/Library/Android/sdk/platform-tools/adb -L tcp:5037 fork-server server --reply-fd 4' };
+    expect(await p.foreignAdb!()).toBe(true);
+    adbServer = null;
+    const id = await upAndDown(p);
+    expect(await p.foreignAdb!()).toBe(false);
+    await p.shutdown(id);
+  });
+
   it("the person's own adb server, running before, is used as it is and never stopped", async () => {
     adbServer = { pid: 555, command: '/Users/pm/Library/Android/sdk/platform-tools/adb -L tcp:5037 fork-server server --reply-fd 4' };
     const p = phone();

@@ -599,7 +599,7 @@ export function testCount(output: string): number | null {
     if (m) total = (total ?? 0) + Number(m[1]);
   }
   if (total !== null) return total;
-  const m = text.match(/(\d+)\s+passing/i) ?? text.match(/Passed:\s+(\d+)/i) ?? text.match(/(\d+)\s+passed/i);
+  const m = text.match(/(\d+)\s+passing/i) ?? text.match(/Passed:\s+(\d+)/i) ?? text.match(/(\d+)\s+passed/i) ?? text.match(/\+(\d+)(?:\s+~\d+)?(?:\s+-\d+)?:\s+(?:All tests passed|Some tests failed)/);
   return m ? Number(m[1]) : null;
 }
 

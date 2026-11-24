@@ -21,7 +21,8 @@ export function kindsOpen(t: Pick<Ticket, 'waiting' | 'specApproved' | 'live' | 
 export function kindNamed(said: string): ProofKind | null {
   const s = String(said ?? '').trim().toLowerCase();
   const plain = s.replace(/[\s_-]+/g, ' ');
-  return PROOF_KINDS.find((k) => k === s || KIND_NAMES[k].toLowerCase() === plain) ?? (plain === 'api' ? 'api' : null);
+  // "Not on a screen" is what Checked by the Reviewer was called before.
+  return PROOF_KINDS.find((k) => k === s || KIND_NAMES[k].toLowerCase() === plain) ?? (plain === 'api' ? 'api' : plain === 'not on a screen' ? 'none' : null);
 }
 
 /**

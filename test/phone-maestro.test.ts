@@ -139,6 +139,12 @@ describe('Maestro, one per phone', () => {
     expect(exactly('Total (SAR) 1.5*')).toBe('Total \\(SAR\\) 1\\.5\\*');
   });
 
+  it("the phone's own moves: the home screen, its pages, and turning the phone, on the iPhone and Android alike", async () => {
+    const d = await open();
+    for (const key of ['Home', 'SwipeLeft', 'SwipeRight', 'Landscape', 'Portrait']) await d.act('dev.test.app', step({ action: 'press', key }), 3000);
+    expect(f.flows.map(body)).toEqual(['- pressKey: Home', '- swipe:\n    direction: LEFT', '- swipe:\n    direction: RIGHT', '- setOrientation: LANDSCAPE_LEFT', '- setOrientation: PORTRAIT']);
+  });
+
   it('a part not on the screen fails fast, in the same plain words as the browser', async () => {
     const d = await open();
     const t0 = Date.now();

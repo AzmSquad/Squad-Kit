@@ -70,9 +70,28 @@ export function ChangesTab({ t }: { t: Ticket }) {
               ? 'Read from its saved work. The copy was removed after the release.'
               : 'The squad builds in its own copy of the code, so your folder stays yours. These changes reach your folder after Looks right.'}
           </p>
+          {/* Where the code is now, said plainly: the squad's copy and its branch, until it reaches your folder. */}
+          {c?.from === 'copy' && t.worktree && (
+            <p className="note changes-where">
+              The squad&apos;s copy: <code dir="ltr">{t.worktree}</code>
+              {t.branch ? (
+                <>
+                  , on the branch <code dir="ltr">{t.branch}</code>
+                </>
+              ) : null}
+              .
+            </p>
+          )}
         </div>
         <span className="grow" />
-        <OpenInEditor t={t} />
+        <div className="changes-acts">
+          {t.pr && (
+            <a className="btn sm" href={t.pr.url} target="_blank" rel="noreferrer">
+              <ExternalLink size={13} /> Open pull request {t.pr.id}
+            </a>
+          )}
+          <OpenInEditor t={t} />
+        </div>
       </div>
       <ReviewRounds t={t} />
       {changes.isLoading && <p className="note">Reading the changes…</p>}

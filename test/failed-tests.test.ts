@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { failedTests, fileAlone, inChanged, testAlone, testKey, testTitle, wholeNamePattern, type FailedTest } from '../src/engine/failed-tests.js';
+import { testCount } from '../src/engine/checks.js';
 
 /**
  * The failed tests a check's output names, and the command that runs one of them on its own with the project's own
@@ -399,6 +400,28 @@ describe('one test file the Builder asks for', () => {
     expect(fileAlone(dir, 'npx vitest run', '/etc/hosts')).toBeNull();
     expect(fileAlone(dir, 'npx vitest run', 'src/missing.test.ts')).toBeNull();
     expect(fileAlone(dir, 'npx vitest run', 'tests/a.spec.ts')).toEqual({ tool: 'vitest', command: "npx vitest run 'tests/a.spec.ts'" });
+  });
+});
+
+describe('Flutter, run plainly or through FVM', () => {
+  const FLUTTER = `00:01 +0: loading /app/test/import_rules_test.dart
+00:02 +2: import rules every forbidden sample is caught
+00:02 +2 -1: import rules reports the file, the line and the bad import [E]
+  Expected: contains 'lib/features/home/home.dart:3'
+00:03 +3 -1: Some tests failed.`;
+
+  it('one named test of a file, by its whole name, the way the project runs it', () => {
+    write('pubspec.yaml', 'name: app\n');
+    write('test/import_rules_test.dart', '');
+    expect(fileAlone(dir, 'flutter test', 'test/import_rules_test.dart', 'import rules reports the bad import')).toEqual({ tool: 'flutter', command: "flutter test 'test/import_rules_test.dart' --plain-name 'import rules reports the bad import'" });
+    expect(fileAlone(dir, 'fvm flutter test', 'test/import_rules_test.dart')).toEqual({ tool: 'flutter', command: "fvm flutter test 'test/import_rules_test.dart'" });
+  });
+
+  it("reads its failed tests, and a file that did not load names none; counts its tests", () => {
+    expect(failedTests(FLUTTER)).toEqual([{ tool: 'flutter', file: '', name: 'import rules reports the file, the line and the bad import' }]);
+    expect(failedTests('00:01 +0 -1: loading /app/test/a_test.dart [E]\n  Failed to load "/app/test/a_test.dart": Compilation failed\n00:01 +0 -1: Some tests failed.')).toEqual([]);
+    expect(testCount('00:04 +7: All tests passed!')).toBe(7);
+    expect(testCount(FLUTTER)).toBe(3);
   });
 });
 

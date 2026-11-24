@@ -62,6 +62,9 @@
 @keyframes kindrise { from { opacity: 0; transform: translateY(8px); } }
 .kindgrid .pf.broken { border-color: color-mix(in srgb, var(--bug) 45%, transparent); }
 .kindgrid .pf.notshown { border-color: var(--you-line); }
+.kindgrid .pf.nottaken { border-color: var(--you-line); background: var(--you-soft); }
+.kindgrid .pf.nottaken .verdictnote { color: var(--you-ink); }
+.verdict.nottaken { color: var(--you-ink); background: color-mix(in srgb, var(--you) 22%, transparent); }
 .kindgrid .pf .ph { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px 8px; }
 .kindgrid .pf .ph > svg { margin-top: 2px; color: var(--accent); flex: none; }
 .kindgrid .pf .ph > svg.vx { color: var(--bug); }

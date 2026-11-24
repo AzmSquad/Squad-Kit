@@ -11,7 +11,7 @@ import path from 'node:path';
  * a command: every word taken from it is quoted, so a test's name can never run anything.
  */
 
-export type TestTool = 'playwright' | 'vitest' | 'jest' | 'pytest' | 'go';
+export type TestTool = 'playwright' | 'vitest' | 'jest' | 'pytest' | 'go' | 'flutter';
 
 export interface FailedTest {
   tool: TestTool;
@@ -129,6 +129,21 @@ function pytestFailed(lines: string[]): FailedTest[] | null {
 }
 
 /** go test: each "--- FAIL" of a whole test, with the package its FAIL line names. A package that did not build is not all. */
+/**
+ * Flutter's (and Dart's) "00:02 +3 -1: reports the bad import [E]": the test's whole name, groups first, joined by a
+ * space. Run on one file, it prints no file: the file is the one asked for. A file that did not load names no test.
+ */
+function flutterFailed(lines: string[]): FailedTest[] {
+  const out: FailedTest[] = [];
+  for (const line of lines) {
+    const m = line.match(/^\s*(?:\d+:\d+\s+)?\+\d+(?:\s+~\d+)?\s+-\d+:\s+(.+?)\s+\[E\]\s*$/);
+    if (!m || /^loading\s/.test(m[1]!)) continue;
+    const at = m[1]!.match(/^(\S+\.dart):\s+(.+)$/);
+    out.push({ tool: 'flutter', file: at ? at[1]! : '', name: at ? at[2]! : m[1]! });
+  }
+  return out;
+}
+
 function goFailed(lines: string[]): FailedTest[] | null {
   const out: FailedTest[] = [];
   let pending: { name: string; file: string }[] = [];
@@ -166,7 +181,7 @@ export function failedTests(output: string): FailedTest[] {
   // Without its colors, as checks.ts reads it: some tools print them even when asked not to.
   const lines = output.replace(/\x1b\[[0-9;]*m/g, '').replace(/\r/g, '').split('\n');
   const found: FailedTest[] = [];
-  for (const read of [playwrightFailed, vitestFailed, jestFailed, pytestFailed, goFailed]) {
+  for (const read of [playwrightFailed, vitestFailed, jestFailed, pytestFailed, goFailed, flutterFailed]) {
     const some = read(lines);
     if (some === null) return [];
     found.push(...some);
@@ -344,6 +359,8 @@ interface ToolRun {
   carry: string[];
   /** Playwright and Vitest projects it names, so a test of one project runs in it. */
   projects: string[];
+  /** Flutter run through FVM ("fvm flutter test"): one test runs the same way, on the project's own Flutter. */
+  fvm?: boolean;
 }
 
 /** The settings each tool is given that one test needs as well. Others (which files, how to report) are left out. */
@@ -353,6 +370,7 @@ const CARRY: Record<TestTool, { value: string[]; flag: string[] }> = {
   jest: { value: ['-c', '--config', '--rootDir', '--selectProjects', '--env'], flag: ['-i', '--runInBand'] },
   pytest: { value: ['-c', '--rootdir', '-p', '--ds', '--dc', '-o', '--confcutdir'], flag: [] },
   go: { value: ['-tags'], flag: ['-race'] },
+  flutter: { value: [], flag: [] },
 };
 
 /** The test tool a part of the chain runs. 'other' for a program that is none; null when squad-kit cannot tell. */
@@ -387,9 +405,12 @@ function toolRunOf(words0: string[]): ToolRun | 'other' | null {
   else if (program === 'pytest' || program === 'py.test') [tool, args] = ['pytest', words.slice(1)];
   else if (/^python(\d+(\.\d+)?)?$/.test(program) && words[1] === '-m' && words[2] === 'pytest') [tool, args] = ['pytest', words.slice(3)];
   else if (program === 'go' && words[1] === 'test') [tool, args] = ['go', words.slice(2)];
+  else if (program === 'flutter' && words[1] === 'test') [tool, args] = ['flutter', words.slice(2)];
+  const fvm = program === 'fvm' && words[1] === 'flutter' && words[2] === 'test';
+  if (fvm) [tool, args] = ['flutter', words.slice(3)];
   // Getting a tool ready, or looking at the code, runs no test: "playwright install", "go vet".
   if (!tool && ((program === 'playwright' && words[1] === 'install') || (program === 'go' && ['vet', 'build', 'fmt'].includes(words[1] ?? '')))) return 'other';
-  if (!tool) return MAY_RUN_ANYTHING.has(program) || TOOL_BINS.has(program) || program === 'go' ? null : 'other';
+  if (!tool) return MAY_RUN_ANYTHING.has(program) || TOOL_BINS.has(program) || program === 'go' || program === 'flutter' || program === 'fvm' ? null : 'other';
   const carry: string[] = [];
   const projects: string[] = [];
   const { value, flag } = CARRY[tool];
@@ -405,7 +426,7 @@ function toolRunOf(words0: string[]): ToolRun | 'other' | null {
       else carry.push(tool === 'go' || name.startsWith('--') ? `${name}=${quoted(v)}` : `${name} ${quoted(v)}`);
     }
   }
-  return { tool, env, carry, projects };
+  return { tool, env, carry, projects, ...(fvm ? { fvm } : {}) };
 }
 
 /** The test tools a test command runs, in order. Null when squad-kit cannot be sure what it runs. */
@@ -424,6 +445,7 @@ function toolRuns(dir: string, command: string): (ToolRun | 'other')[] | null {
 /** The tool is really there in this folder, so running it never downloads anything. The Python to run pytest with. */
 function installed(dir: string, tool: TestTool): { python?: string } | null {
   if (tool === 'go') return fs.existsSync(path.join(dir, 'go.mod')) ? {} : null;
+  if (tool === 'flutter') return fs.existsSync(path.join(dir, 'pubspec.yaml')) ? {} : null;
   if (tool === 'pytest') {
     for (const venv of ['.venv', 'venv', 'env']) {
       if (fs.existsSync(path.join(dir, venv, 'bin', 'pytest')) && fs.existsSync(path.join(dir, venv, 'bin', 'python'))) return { python: `${venv}/bin/python` };
@@ -469,6 +491,9 @@ function commandFor(dir: string, run: ToolRun, t: Pick<FailedTest, 'file' | 'lin
       return `${env}npx jest${carry} ${quoted(exactly(t.file))}${t.name ? ` -t ${quoted(wholeNamePattern(t.name))}` : ''}`;
     case 'pytest':
       return `${env}${has.python} -m pytest${carry} ${quoted(t.name ? `${t.file}::${t.name}` : t.file)}`;
+    case 'flutter':
+      // Its whole name, as Flutter joins the groups and the test: --plain-name takes it as it is, not as a pattern.
+      return `${env}${run.fvm ? 'fvm ' : ''}flutter test${carry} ${quoted(t.file)}${t.name ? ` --plain-name ${quoted(t.name)}` : ''}`;
     case 'go': {
       const folder = t.pkg ? goFolder(dir, t.pkg) : null;
       if (!folder || !t.name) return null;

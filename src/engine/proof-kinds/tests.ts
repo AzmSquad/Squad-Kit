@@ -110,7 +110,7 @@ export function commandFor(dir: string, testCommand: string, t: NamedTest): { co
   if (file.tool === 'playwright') return { command: file.command, whole: !line };
   const parts = nameParts(t.name);
   if (!parts.length) return { command: file.command, whole: true };
-  const one = fileAlone(dir, testCommand, at, file.tool === 'pytest' ? parts.join('::') : file.tool === 'go' ? parts[0]! : parts.join(' > '));
+  const one = fileAlone(dir, testCommand, at, file.tool === 'pytest' ? parts.join('::') : file.tool === 'go' ? parts[0]! : file.tool === 'flutter' ? parts.join(' ') : parts.join(' > '));
   return { command: one?.command ?? file.command, whole: !one };
 }
 
@@ -122,7 +122,8 @@ export function namedFailed(r: CommandResult, t: Pick<NamedTest, 'file' | 'name'
   if (r.ended) return false;
   const want = new RegExp(wholeNamePattern(nameParts(t.name).join(' > ')));
   const file = t.file.replace(/^\.\//, '');
-  return failedTests(r.output).some((f) => Boolean(f.name) && want.test(nameParts(f.name!).join(' > ')) && (f.file.replace(/^\.\//, '') === file || file.endsWith(`/${f.file.replace(/^\.\//, '')}`) || f.file.endsWith(`/${file}`)));
+  // Flutter run on one file prints no file: that file is the one asked for.
+  return failedTests(r.output).some((f) => Boolean(f.name) && want.test(nameParts(f.name!).join(' > ')) && (!f.file || f.file.replace(/^\.\//, '') === file || file.endsWith(`/${f.file.replace(/^\.\//, '')}`) || f.file.endsWith(`/${file}`)));
 }
 
 /** How one run went: passed, failed on the test's own check, or nothing it can tell (it did not run that test). */
@@ -149,8 +150,17 @@ export interface TestVerdict {
  * already works ("stays as it is"), so met is passing on main and now, and failing on main is the problem the person
  * decides on: what it keeps did not work before.
  */
-export function judgeTest(t: NamedTest, now: CommandResult, main: CommandResult | null, keeps = false): TestVerdict {
-  const before = runOf(main, t);
+/** A test file that could not even load on main's code, for code missing there (Dart, TypeScript, Python). */
+const MISSING_BEFORE = /Compilation failed|Couldn't resolve the package|Error: Not found: '|isn't defined for the|Cannot find module|ERR_MODULE_NOT_FOUND|ModuleNotFoundError|ImportError: cannot import/i;
+
+/**
+ * `newTest`: the story added the test's file, so main never had it. When it then cannot even load on main's code for
+ * code missing there, what it tests did not exist before the change: that is failing before. A test file main had
+ * that cannot load there proves nothing, as before.
+ */
+export function judgeTest(t: NamedTest, now: CommandResult, main: CommandResult | null, keeps = false, newTest = false): TestVerdict {
+  const ran = runOf(main, t);
+  const before = ran === 'unknown' && newTest && main && !main.ok && !main.ended && MISSING_BEFORE.test(main.output) ? 'failed' : ran;
   const after = runOf(now, t);
   const proof: TestProof = { name: t.name, file: t.file, steps: t.steps, before, after, seconds: Math.round(now.seconds * 10) / 10, ...(keeps ? { keeps: true } : {}) };
   const named = `the test "${t.name || t.file}"`;

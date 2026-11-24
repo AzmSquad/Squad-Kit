@@ -120,7 +120,10 @@ export interface PhoneForPictures {
 function phoneToolsText(p: PhoneForPictures): string {
   const devices = Object.entries(p.labels).map(([size, name]) => `"${size}" is a real ${name}`).join(', ') || '"phone" is a real iPhone';
   const page = p.links.length ? `"/" is the app's start screen, and another path opens by the app's own link, like "/book"` : `"/", the app's start screen: this app has no links of its own, so each shot starts there and its steps reach the screen`;
-  return `The app runs on squad-kit's own phone: an iPhone simulator squad-kit runs itself, hidden (${devices}). Use
+  const both = p.labels.android || p.labels.iphone ? `\nThis app is built for both phones. Take each picture on the first one; take it on ${p.labels.android ? 'Android ("android")' : 'the iPhone ("iphone")'} too only
+for a "done when" that names that phone or both phones. Take the first phone's pictures first, then the others: one
+phone runs at a time, and each switch starts a phone.` : '';
+  return `The app runs on squad-kit's own phone, one it runs itself, hidden (${devices}).${both} Use
 squad-kit's tools, never a simulator, a browser or the app of your own (your shell only reads):
 - look_at_page: opens the app on the phone, does the steps, and gives back what the screen shows as text, the words of
   each part. Use it to find the words on the fields and buttons.

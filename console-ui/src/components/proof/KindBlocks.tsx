@@ -38,13 +38,15 @@ export function KindBlocks({ t }: { t: Ticket }) {
 function Block({ p, i, first, onOpen }: { p: ProofShot; i: number; first: number; onOpen(at: number): void }) {
   const kind = rowKind(p);
   const note = p.shows && p.shows !== 'met' ? verdictNote(p) : '';
+  // A planned picture squad-kit could not take: calm, with why, and you decide at Looks right. Red is for a broken app.
+  const notTaken = kind === 'screen' && p.shows === 'off-screen';
   return (
-    <section className={`pf ${verdictClass(p.shows)}`} style={{ ['--i' as string]: i }} {...langProps(p.criterion)}>
+    <section className={`pf ${notTaken ? 'nottaken' : verdictClass(p.shows)}`} style={{ ['--i' as string]: i }} {...langProps(p.criterion)}>
       <div className="ph">
-        <VerdictIcon shows={p.shows} />
+        <VerdictIcon shows={notTaken ? 'not-shown' : p.shows} />
         <Written as="b" text={p.criterion} />
         <KindChip kind={kind} keeps={p.test?.keeps} />
-        <VerdictTag shows={p.shows} />
+        {notTaken ? <span className="verdict nottaken">Picture not taken</span> : <VerdictTag shows={p.shows} />}
       </div>
       {note && <Written as="p" className="verdictnote" text={note} />}
       {kind === 'screen' && <Pictures p={p} first={first} onOpen={onOpen} />}

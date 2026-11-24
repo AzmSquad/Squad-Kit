@@ -18,7 +18,7 @@ const { boardPaths, readMeta, readTicket, updateTicket, writeMeta } = await impo
 const { seedDemoBoard } = await import('../src/board/demo.js');
 const actions = await import('../src/board/actions.js');
 const { judgeTest, commandFor, cleanNamed } = await import('../src/engine/proof-kinds/tests.js');
-const { keepNoneChecks, kindsStop, plannedProof, provedByKind } = await import('../src/engine/proof-kinds/flow.js');
+const { keepNoneChecks, kindsStop, picturesNotTaken, plannedProof, provedByKind } = await import('../src/engine/proof-kinds/flow.js');
 const { appNeeded, kindOf, picturesNeeded, testerLines, testerProves } = await import('../src/engine/proof-kinds/lines.js');
 const { kindsForTester, noneForReviewer, noPicturesPrompt } = await import('../src/engine/proof-kinds/prompts.js');
 const { checkedLine, savedWords, isSavedProof } = await import('../src/engine/proof-kinds/saved.js');
@@ -106,6 +106,10 @@ describe('a Test line: it must fail on main and pass now', () => {
     const t = { criterion: 2, file: 'tests/booking.test.ts', name: 'frees an unpaid slot', steps: ['a'] };
     // An import stopped it: it never ran, so it proves nothing.
     expect(judgeTest(t, run(true), run(false, IMPORT_FAILED))).toMatchObject({ shows: 'not-shown', toBuilder: false, proof: { before: 'unknown' } });
+    // Unless the story added the test, and what it imports was not there before: then it failed before the change.
+    expect(judgeTest(t, run(true), run(false, IMPORT_FAILED), false, true)).toMatchObject({ shows: 'met', proof: { before: 'failed', after: 'passed' } });
+    expect(judgeTest(t, run(true), run(false, 'Failed to load "test/a_test.dart": Compilation failed'), false, true).proof?.before).toBe('failed');
+    expect(judgeTest(t, run(true), { ok: false, output: IMPORT_FAILED, seconds: 300, ended: true }, false, true).proof?.before).toBe('unknown');
     // Another test of the file failed, not this one.
     expect(judgeTest(t, run(true), run(false, FAILED('keeps a paid slot'))).proof?.before).toBe('unknown');
     // The time ran out, or the tool is missing.
@@ -340,11 +344,13 @@ describe('a Not on a screen line: the Reviewer says what it checked', () => {
 });
 
 describe('the verdict per kind, and the old way', () => {
-  it('never takes a planned picture quietly as Not on a screen', () => {
+  it('a planned picture not taken is a calm row the person decides on; planned rows or an answer not made still stop', () => {
     const kinds = { criteria: [c('I see Paid', 'screen')] } as Ticket;
     const old = { criteria: [c('I see Paid')] } as Ticket;
     const off = { shows: 'off-screen', why: 'The app has no past bookings.', advice: '' };
-    expect(plannedProof(kinds, 1, off)).toMatchObject({ shows: 'not-shown', why: 'Screen was planned, and the Tester could not make it: The app has no past bookings.' });
+    expect(plannedProof(kinds, 1, off)).toEqual(off);
+    expect(plannedProof({ criteria: [c('the booking is saved', 'data')] } as Ticket, 1, off)).toMatchObject({ shows: 'not-shown', why: 'Data was planned, and the Tester could not make it: The app has no past bookings.' });
+    expect(picturesNotTaken({ criteria: [c('I see Paid', 'screen')], proof: [{ criterion: 'I see Paid', before: 'a.png', after: 'a.png', beforeLabel: 'New screen', afterLabel: 'After', kind: 'screen', shows: 'off-screen' }] } as Ticket)).toBe(1);
     expect(plannedProof(old, 1, off)).toEqual(off);
     expect(plannedProof(kinds, 1, null)).toBeNull();
   });

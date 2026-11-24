@@ -10,7 +10,7 @@ import { shellQuote } from './text';
 /** In the order the menu shows them. */
 export const KINDS: LineProofKind[] = ['screen', 'data', 'api', 'test', 'none'];
 
-export const KIND_NAME: Record<LineProofKind, string> = { screen: 'Screen', api: 'API call', data: 'Data', test: 'Test', none: 'Not on a screen' };
+export const KIND_NAME: Record<LineProofKind, string> = { screen: 'Screen', api: 'API call', data: 'Data', test: 'Test', none: 'Checked by the Reviewer' };
 
 export const KIND_SMALL: Record<LineProofKind, string> = {
   screen: 'Pictures before and after',

@@ -53,6 +53,21 @@ describe("squad-kit's own devices", () => {
     expect(savedDevices().map((d) => d.id)).toEqual([next.id]);
   });
 
+  it('keeps one device of each size: the one it replaces, its own by its saved id, is removed; nobody else\'s', async () => {
+    const theirs = { id: 'AAAAAAAA-0000-0000-0000-00000000000A', name: 'squad-kit iPhone', state: 'shutdown' as const, runtime: 'com.apple.CoreSimulator.SimRuntime.iOS-17-0' };
+    const f = fakePhone({ devices: [theirs] });
+    const first = await ownDevice(f.module, 'phone');
+    // Its system is gone from this Mac (Xcode removed it): squad-kit makes a new one, and its old one goes.
+    const saved = savedDevices()[0]!;
+    fs.writeFileSync(path.join(process.env.SQUAD_KIT_HOME!, 'phones', 'devices.json'), JSON.stringify({ devices: [{ ...saved, runtimeId: 'com.apple.CoreSimulator.SimRuntime.iOS-26-0' }] }));
+    const next = await ownDevice(f.module, 'phone');
+    expect(next.id).not.toBe(first.id);
+    expect(f.calls).toContain(`remove ${first.id}`);
+    expect(savedDevices().map((d) => d.id)).toEqual([next.id]);
+    // Somebody else's device with the very same name is never removed.
+    expect(f.calls.filter((c) => c.includes(theirs.id))).toEqual([]);
+  });
+
   it('makes them on the iOS asked for, with the iPad Air it can run there', async () => {
     const f = fakePhone();
     expect(await ownDevice(f.module, 'phone', { runtime: '18.2' })).toMatchObject({ model: 'iPhone 16 Pro', runtime: '18.2' });
@@ -107,14 +122,15 @@ describe('the iPhone simulator module', () => {
     const xcode27 = recorded({
       [`open -b com.apple.iphonesimulator --args -CurrentDeviceUDID ${ID}`]: { ok: false, out: '', err: 'Unable to find application with bundle identifier com.apple.iphonesimulator' },
       'xcrun simctl list devices -j': { ok: true, out: devices, err: '' },
-      'pgrep -f /Simulator\\.app/': { ok: false, out: '', err: '' },
+      'pgrep -f /(Simulator|DeviceHub)\\.app/': { ok: true, out: '89818', err: '' },
     });
     const sim = iosSimulatorWith(xcode27.run, 'darwin');
     await sim.openWindow(ID);
     expect(xcode27.ran.filter((c) => c.startsWith('open '))).toEqual([`open -b com.apple.iphonesimulator --args -CurrentDeviceUDID ${ID}`, `open -b com.apple.dt.Devices --args -CurrentDeviceUDID ${ID}`]);
     expect(xcode27.ran.some((c) => c.includes('open -a'))).toBe(false);
-    // The Device Hub starts itself again under another program: the device being up is enough, never a guess.
+    // The Device Hub runs as DeviceHub.app: closed by the person, the run ends, as with Simulator.
     expect(await sim.windowShows(ID)).toBe(true);
+    expect(xcode27.ran).toContain('pgrep -f /(Simulator|DeviceHub)\\.app/');
     const neither = recorded({
       [`open -b com.apple.iphonesimulator --args -CurrentDeviceUDID ${ID}`]: { ok: false, out: '', err: 'not found' },
       [`open -b com.apple.dt.Devices --args -CurrentDeviceUDID ${ID}`]: { ok: false, out: '', err: 'not found either' },

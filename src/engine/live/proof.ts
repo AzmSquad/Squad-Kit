@@ -33,7 +33,7 @@ import {
 import { PassingTrouble, technicalWords } from './shared.js';
 import type { LiveSquad } from './squad.js';
 import { appNeeded, picturesNeeded, testerLines } from '../proof-kinds/lines.js';
-import { kindsStop, lockScreenLines, plannedProof, provedByKind, type KindsHost } from '../proof-kinds/flow.js';
+import { kindsStop, lockScreenLines, picturesNotTaken, plannedProof, provedByKind, type KindsHost } from '../proof-kinds/flow.js';
 import { randomUUID } from 'node:crypto';
 import { CHECK_SILENT_MS, runCommand, type CommandWatch } from '../checks.js';
 import { copiesOf, workFolder } from '../copies.js';
@@ -180,8 +180,11 @@ export const proofPart = {
       if (x.track === 'auto') return acceptNext(x, 0.2, 1);
       x.live = false;
       x.stage = 'review';
-      x.status = 'Proof ready to check';
-      x.waiting = { kind: 'proof', summary: 'The proof is ready for you to check' };
+      // A picture not taken is said here, calmly: the person decides at Looks right, with why on its row.
+      const notTaken = picturesNotTaken(x);
+      const left = notTaken ? `: ${notTaken} ${notTaken === 1 ? 'picture' : 'pictures'} not taken` : '';
+      x.status = `Proof ready to check${left}`;
+      x.waiting = { kind: 'proof', summary: `The proof is ready for you to check${left}` };
       x.squad = null;
     });
   },

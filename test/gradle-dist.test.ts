@@ -81,7 +81,8 @@ describe("the Gradle a project's wrapper asks for", () => {
 
   it('a download that does not match its SHA-256 is thrown away, and the build downloads it itself', async () => {
     published = '0'.repeat(64);
-    expect(await gradleDownloads(copy, 'flutter build apk', { home })).toBe('failed');
+    // Never the person's own ~/.gradle: a Mac that has this Gradle already would say 'had'.
+    expect(await gradleDownloads(copy, 'flutter build apk', { home, env: { HOME: path.join(base, 'h') } })).toBe('failed');
     expect(fs.existsSync(path.join(home, 'caches', 'gradle', HASH_DIR))).toBe(false);
   });
 

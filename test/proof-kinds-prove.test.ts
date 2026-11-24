@@ -56,6 +56,7 @@ describe('squad prove: the person picks the kind before approving', () => {
     expect(fs.readFileSync(path.join(bp.ticketsDir, id, 'spec.md'), 'utf8')).toContain('   Proof: data');
     expect(t.activity.map((a) => a.text)).toContain('"Done when" 2 is proved by Data now');
     expect(kindNamed('API call')).toBe('api');
+    expect(kindNamed('Checked by the Reviewer')).toBe('none');
     expect(kindNamed('Not on a screen')).toBe('none');
     expect(kindNamed('nope')).toBeNull();
   });

@@ -14,14 +14,8 @@ export const WINDOW_APPS = [
   { id: 'com.apple.iphonesimulator', name: 'Simulator' },
   { id: 'com.apple.dt.Devices', name: 'Device Hub' },
 ];
-/** Simulator running, by where it lives. */
-const WINDOW_PROCESS = '/Simulator\\.app/';
-/**
- * The window app squad-kit opened last. The Device Hub starts itself again under another program, so whether its
- * window is still open cannot be told from outside: there, the device being up is enough, and a person's run ends by
- * its Stop or the idle shutdown, never by a guess.
- */
-let openedWith: string | null = null;
+/** The window app running, by where it lives: Simulator.app, or the Device Hub's DeviceHub.app (seen on Xcode 27.2). */
+const WINDOW_PROCESS = '/(Simulator|DeviceHub)\\.app/';
 
 /**
  * Apple's iPhone simulator, through Xcode's own `xcrun simctl`: squad-kit's devices are made, started hidden (never
@@ -141,6 +135,9 @@ export function iosSimulatorWith(run: SimRun, platform: NodeJS.Platform = proces
       if (!DEVICE_ID.test(id)) throw new PhoneError(`squad-kit could not make its ${name}.`, `xcrun simctl create gave "${id}"`);
       return id;
     },
+    async remove(id) {
+      await simctl(['delete', exact(id)], 'squad-kit could not remove its old iPhone simulator.', { timeoutMs: 120_000 });
+    },
     async boot(id, o = {}) {
       // Hidden: only the device starts, with no Simulator window. One already up is fine.
       await simctl(['boot', exact(id)], 'The iPhone simulator did not start.', { timeoutMs: o.timeoutMs ?? 300_000, ...(o.signal ? { signal: o.signal } : {}), fine: /current state: Booted/i });
@@ -191,10 +188,7 @@ export function iosSimulatorWith(run: SimRun, platform: NodeJS.Platform = proces
       const tried: string[] = [];
       for (const app of WINDOW_APPS) {
         const r = await run('open', ['-b', app.id, '--args', '-CurrentDeviceUDID', exact(id)], { timeoutMs: 60_000 });
-        if (r.ok) {
-          openedWith = app.id;
-          return;
-        }
+        if (r.ok) return;
         tried.push(`open -b ${app.id}: ${(r.err || r.out).trim().slice(-400)}`);
       }
       throw new PhoneError('squad-kit could not open the iPhone window.', tried.join('\n'));
@@ -203,7 +197,6 @@ export function iosSimulatorWith(run: SimRun, platform: NodeJS.Platform = proces
       // The device still up, and Apple's window app still open: only looked at, never touched.
       const up = devicesOf((await run('xcrun', ['simctl', 'list', 'devices', '-j'], { timeoutMs: 30_000 })).out).find((d) => d.id === exact(id))?.state === 'booted';
       if (!up) return false;
-      if (openedWith === 'com.apple.dt.Devices') return true;
       return (await run('pgrep', ['-f', WINDOW_PROCESS], { timeoutMs: 10_000 })).ok;
     },
   };

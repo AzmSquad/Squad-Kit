@@ -1381,10 +1381,10 @@ Now write the plan, as the Architect and the Spec writer.
   Pick the lightest proof that truly shows the line: a picture only where someone sees a change. A line about what
   someone sees is always screen. A line whose result is that the tests or code checks pass is test, and one the
   Reviewer checks by reading the code or the settings is none, with what it reads.
-  squad-kit's pictures are of the app's own screens on one device: a page in its browser, or a phone app on its own
-  iPhone or Android phone, opened fresh and tapped through. They cannot show the phone's home screen or app icon,
-  turning the phone, two phones at once, or anything outside the app. Keep a screen line to what such a picture shows,
-  and write the rest as a line of its own, proved by test or none.
+  squad-kit's pictures are of the app: a page in its browser, or a phone app on its own iPhone and Android phone (an
+  app built for both gets pictures on both), opened fresh and tapped through, with the phone's home screen (the app's
+  icon and name) and the phone turned sideways too. They cannot show a real notification, a call, or another app. Keep
+  a screen line to what such a picture shows, and write the rest as a line of its own, proved by test or none.
   why: one short plain line for a project manager, like "Other apps will call this, so the answer itself is the
   proof." It may be empty for screen.
 - decision: only if this ticket makes a technical choice later tickets must follow. Give 2 options you considered,
@@ -1427,10 +1427,10 @@ Write the whole plan again with this.
   Pick the lightest proof that truly shows the line: a picture only where someone sees a change. A line about what
   someone sees is always screen. A line whose result is that the tests or code checks pass is test, and one the
   Reviewer checks by reading the code or the settings is none, with what it reads.
-  squad-kit's pictures are of the app's own screens on one device: a page in its browser, or a phone app on its own
-  iPhone or Android phone, opened fresh and tapped through. They cannot show the phone's home screen or app icon,
-  turning the phone, two phones at once, or anything outside the app. Keep a screen line to what such a picture shows,
-  and write the rest as a line of its own, proved by test or none.
+  squad-kit's pictures are of the app: a page in its browser, or a phone app on its own iPhone and Android phone (an
+  app built for both gets pictures on both), opened fresh and tapped through, with the phone's home screen (the app's
+  icon and name) and the phone turned sideways too. They cannot show a real notification, a call, or another app. Keep
+  a screen line to what such a picture shows, and write the rest as a line of its own, proved by test or none.
   why: one short plain line for a project manager, like "Other apps will call this, so the answer itself is the
   proof." It may be empty for screen.
 - decision: only if this ticket makes a technical choice later tickets must follow. Give 2 options you considered,
@@ -1479,10 +1479,10 @@ Now write the plan, as the Architect and the Spec writer.
   Pick the lightest proof that truly shows the line: a picture only where someone sees a change. A line about what
   someone sees is always screen. A line whose result is that the tests or code checks pass is test, and one the
   Reviewer checks by reading the code or the settings is none, with what it reads.
-  squad-kit's pictures are of the app's own screens on one device: a page in its browser, or a phone app on its own
-  iPhone or Android phone, opened fresh and tapped through. They cannot show the phone's home screen or app icon,
-  turning the phone, two phones at once, or anything outside the app. Keep a screen line to what such a picture shows,
-  and write the rest as a line of its own, proved by test or none.
+  squad-kit's pictures are of the app: a page in its browser, or a phone app on its own iPhone and Android phone (an
+  app built for both gets pictures on both), opened fresh and tapped through, with the phone's home screen (the app's
+  icon and name) and the phone turned sideways too. They cannot show a real notification, a call, or another app. Keep
+  a screen line to what such a picture shows, and write the rest as a line of its own, proved by test or none.
   why: one short plain line for a project manager, like "Other apps will call this, so the answer itself is the
   proof." It may be empty for screen.
 - decision: only if this ticket makes a technical choice later tickets must follow. Give 2 options you considered,
@@ -1793,7 +1793,7 @@ Done when:
 1. Given a person with 3 bookings today, when they book again, then they see an error.
 2. Given a person with 2 bookings today, when they book again, then the booking is saved.
 
-The app runs on squad-kit's own phone: an iPhone simulator squad-kit runs itself, hidden ("home" is a real Home). Use
+The app runs on squad-kit's own phone, one it runs itself, hidden ("home" is a real Home). Use
 squad-kit's tools, never a simulator, a browser or the app of your own (your shell only reads):
 - look_at_page: opens the app on the phone, does the steps, and gives back what the screen shows as text, the words of
   each part. Use it to find the words on the fields and buttons.
@@ -2184,10 +2184,10 @@ Now write the spec, as the Analyst: what to build and how we know it is done. No
   Pick the lightest proof that truly shows the line: a picture only where someone sees a change. A line about what
   someone sees is always screen. A line whose result is that the tests or code checks pass is test, and one the
   Reviewer checks by reading the code or the settings is none, with what it reads.
-  squad-kit's pictures are of the app's own screens on one device: a page in its browser, or a phone app on its own
-  iPhone or Android phone, opened fresh and tapped through. They cannot show the phone's home screen or app icon,
-  turning the phone, two phones at once, or anything outside the app. Keep a screen line to what such a picture shows,
-  and write the rest as a line of its own, proved by test or none.
+  squad-kit's pictures are of the app: a page in its browser, or a phone app on its own iPhone and Android phone (an
+  app built for both gets pictures on both), opened fresh and tapped through, with the phone's home screen (the app's
+  icon and name) and the phone turned sideways too. They cannot show a real notification, a call, or another app. Keep
+  a screen line to what such a picture shows, and write the rest as a line of its own, proved by test or none.
   why: one short plain line for a project manager, like "Other apps will call this, so the answer itself is the
   proof." It may be empty for screen.
 - releaseNote: one line for release notes, like "**Dark mode.** Switch the dashboard to dark."
@@ -2213,10 +2213,10 @@ You and the person talked it through in this conversation. Now write the spec fr
   Pick the lightest proof that truly shows the line: a picture only where someone sees a change. A line about what
   someone sees is always screen. A line whose result is that the tests or code checks pass is test, and one the
   Reviewer checks by reading the code or the settings is none, with what it reads.
-  squad-kit's pictures are of the app's own screens on one device: a page in its browser, or a phone app on its own
-  iPhone or Android phone, opened fresh and tapped through. They cannot show the phone's home screen or app icon,
-  turning the phone, two phones at once, or anything outside the app. Keep a screen line to what such a picture shows,
-  and write the rest as a line of its own, proved by test or none.
+  squad-kit's pictures are of the app: a page in its browser, or a phone app on its own iPhone and Android phone (an
+  app built for both gets pictures on both), opened fresh and tapped through, with the phone's home screen (the app's
+  icon and name) and the phone turned sideways too. They cannot show a real notification, a call, or another app. Keep
+  a screen line to what such a picture shows, and write the rest as a line of its own, proved by test or none.
   why: one short plain line for a project manager, like "Other apps will call this, so the answer itself is the
   proof." It may be empty for screen.
 - releaseNote: one line for release notes, like "**Dark mode.** Switch the dashboard to dark."
@@ -2251,10 +2251,10 @@ Now write the spec, as the Analyst: what to build and how we know it is done. No
   Pick the lightest proof that truly shows the line: a picture only where someone sees a change. A line about what
   someone sees is always screen. A line whose result is that the tests or code checks pass is test, and one the
   Reviewer checks by reading the code or the settings is none, with what it reads.
-  squad-kit's pictures are of the app's own screens on one device: a page in its browser, or a phone app on its own
-  iPhone or Android phone, opened fresh and tapped through. They cannot show the phone's home screen or app icon,
-  turning the phone, two phones at once, or anything outside the app. Keep a screen line to what such a picture shows,
-  and write the rest as a line of its own, proved by test or none.
+  squad-kit's pictures are of the app: a page in its browser, or a phone app on its own iPhone and Android phone (an
+  app built for both gets pictures on both), opened fresh and tapped through, with the phone's home screen (the app's
+  icon and name) and the phone turned sideways too. They cannot show a real notification, a call, or another app. Keep
+  a screen line to what such a picture shows, and write the rest as a line of its own, proved by test or none.
   why: one short plain line for a project manager, like "Other apps will call this, so the answer itself is the
   proof." It may be empty for screen.
 - releaseNote: one line for release notes, like "**Dark mode.** Switch the dashboard to dark."

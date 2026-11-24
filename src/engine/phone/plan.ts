@@ -21,7 +21,7 @@ import { phoneFor } from './which.js';
  */
 
 export type PicturesWay =
-  | { way: 'phone'; kind: PhoneKind; dir: string; system: PhoneSystem; tools: TapTools }
+  | { way: 'phone'; kind: PhoneKind; dir: string; system: PhoneSystem; tools: TapTools; also?: PhoneSystem }
   | { way: 'web'; line: string; link: string }
   | { way: 'wait'; block: ToolBlock; getting?: true }
   | { way: 'browser' };
@@ -141,11 +141,26 @@ export async function picturesWay(bp: BoardPaths, story: StoryWhere, web: boolea
   // Only squad-kit's own tools are missing: it gets them now, and the pictures wait for that short download.
   if (block && getOwnTools(block)) return { way: 'wait', block: blockedBy(bp, 'pictures', story, app.system) ?? block, getting: true };
   const tools = block ? null : tapTools();
-  if (!block && tools && !phoneFor(app.system).notHere()) return { way: 'phone', ...app, tools };
+  if (!block && tools && !phoneFor(app.system).notHere()) {
+    const also = await secondPhone(bp, story, app);
+    return { way: 'phone', ...app, tools, ...(also ? { also } : {}) };
+  }
   // Ready by the tools' own lines, but no Maestro squad-kit can run: it counts as missing.
   const why: ToolBlock = block ?? { action: 'pictures', tools: [{ id: 'maestro', name: 'Maestro', state: 'missing' }], text: "squad-kit can't take the phone pictures yet: Maestro isn't on this computer.", status: 'Waits for Maestro on this computer. Goes on by itself once it\'s there', link: '/tools#maestro' };
   if (web) return { way: 'web', line: webLine(why, app.system), link: why.link };
   return { way: 'wait', block: why };
+}
+
+/**
+ * The other phone of an app built for both, for its pictures too: only when the project leaves the phone on automatic
+ * and that phone's tools are ready here. Otherwise none, and the pictures come from one phone as before.
+ */
+export async function secondPhone(bp: BoardPaths, story: StoryWhere | undefined, app: { dir: string; system: PhoneSystem }): Promise<PhoneSystem | undefined> {
+  const other: PhoneSystem = app.system === 'ios' ? 'android' : 'ios';
+  if (!phonesOf(kindsOf(app.dir)).includes(other) || metaOf(bp)?.phone || phoneFor(other).notHere()) return undefined;
+  if (blockedBy(bp, 'pictures', story, other)) return undefined;
+  // Another program's adb holds the port: the Android phone could start, but nothing could tap it. One phone, as before.
+  return (await phoneFor(other).foreignAdb?.().catch(() => true)) ? undefined : other;
 }
 
 /**
