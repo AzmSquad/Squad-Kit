@@ -25,7 +25,7 @@ function stateWords(l: ToolLine): string {
 /** What one tool line says the person can do about it, as facts with the board action that does it. */
 function waysFor(l: ToolLine): string[] {
   const out: string[] = [];
-  if (l.state === 'missing' && l.installer === 'squad-kit') {
+  if ((l.state === 'missing' || l.state === 'too-old') && l.installer === 'squad-kit') {
     const license = l.license && !l.license.accepted;
     out.push(
       license

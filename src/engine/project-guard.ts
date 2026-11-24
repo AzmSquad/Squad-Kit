@@ -1,4 +1,4 @@
-import { androidCommandEnv, androidReads, usesAndroid } from './android-env.js';
+import { androidCommandEnv, ownToolReads, usesAndroid } from './android-env.js';
 import { execFileSync, spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -261,8 +261,8 @@ export function buildGuard(o: { cwd: string; root: string; cache?: string; extra
     cwd: real(o.cwd),
     root: o.root,
     write: [...new Set(withReal([...(o.extraWrite ?? []), ...temp, ...writableCaches(home)]))],
-    // squad-kit's Android SDK, its Java and its shared Gradle home: read only, so an Android build finds them.
-    read: [...new Set(withReal([...(o.extraRead ?? []), ...androidReads()]))],
+    // squad-kit's Android SDK, its Java, its shared Gradle home and its own FVM: read only, so a command finds them.
+    read: [...new Set(withReal([...(o.extraRead ?? []), ...ownToolReads()]))],
     noRead: [...new Set(noRead)],
     noWrite: [...new Set(withReal([...squadOwnFiles(), ...gitPlaces(real(o.cwd))]))],
     noConnect: [...new Set(withReal(runtimeSockets(home, o.platform)))],

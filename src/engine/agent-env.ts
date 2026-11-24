@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { SUBSCRIPTION_WITHHELD_ENV_KEYS } from '../planner/runtimes/sdk-env.js';
+import { ownTool } from './tools/detect.js';
 
 /**
  * Node tools (npm, pnpm, vite) stall on networks with broken IPv6. Preferring IPv4 is not enough on its own: Node
@@ -53,6 +54,18 @@ export function noToolSignIn(): Record<string, string> {
   return { ...NO_SIGN_IN_ENV, GH_CONFIG_DIR: dirs.gh, AZURE_CONFIG_DIR: dirs.az };
 }
 
+/**
+ * squad-kit's own programs that the project's commands and the agents run by name, first on their PATH: its own FVM
+ * (engine/tools/get.ts), so `fvm` is the one squad-kit got, whatever FVM the person has.
+ */
+export function withOwnPrograms(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const fvm = ownTool('fvm');
+  if (!fvm) return env;
+  const dir = path.dirname(fvm.binary);
+  const rest = (env.PATH ?? '').split(path.delimiter).filter((d) => d && d !== dir);
+  return { ...env, PATH: [dir, ...rest].join(path.delimiter) };
+}
+
 /** The environment every agent process starts with, whichever AI tool it is. */
 export function childEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = withIpv4First({ ...process.env });
@@ -60,5 +73,5 @@ export function childEnv(): NodeJS.ProcessEnv {
   for (const key of Object.keys(env)) {
     if (SUBSCRIPTION_WITHHELD_ENV_KEYS.includes(key.toUpperCase()) || ENGINE_ONLY_ENV_KEYS.includes(key.toUpperCase())) delete env[key];
   }
-  return { ...env, ...noToolSignIn() };
+  return { ...withOwnPrograms(env), ...noToolSignIn() };
 }

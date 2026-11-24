@@ -22,7 +22,8 @@ export function toolWaitItems(bp: BoardPaths, seen: Set<string>): NeedsYouItem[]
     const prefix = `now.${t.id}`;
     const cards: LeadCard[] = [];
     for (const l of lines) {
-      if (l.state === 'missing' && l.installer === 'squad-kit' && !(l.license && !l.license.accepted)) cards.push(actionCard(`${prefix}.get_tool.${l.id}`, 'get_tool', { tool: l.id, why: `squad-kit gets ${l.name} itself${l.size ? `. It takes ${l.size}` : ''}.` }));
+      // squad-kit's own tools: Get it brings one, or a newer one beside the person's own that is too old (FVM).
+      if ((l.state === 'missing' || l.state === 'too-old') && l.installer === 'squad-kit' && !(l.license && !l.license.accepted)) cards.push(actionCard(`${prefix}.get_tool.${l.id}`, 'get_tool', { tool: l.id, why: `squad-kit gets ${l.name} itself${l.size ? `. It takes ${l.size}` : ''}.` }));
       if (l.update) cards.push(actionCard(`${prefix}.update_tool.${l.id}`, 'update_tool', { tool: l.id, why: l.update.warning }));
     }
     if (block.skip) cards.push(actionCard(`${prefix}.skip_android`, 'skip_android', { why: block.skip.note }));

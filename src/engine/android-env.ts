@@ -61,6 +61,15 @@ export function androidReads(home = squadHome()): string[] {
   return [sdk.sdk, ...(java ? [java.dir] : []), gradleHome(home)].filter((p) => fs.existsSync(p));
 }
 
+/**
+ * Everything of squad-kit's own folder a guarded command and an agent's sandbox may read: the Android pieces above,
+ * and squad-kit's own FVM (agent-env.ts puts it first on their PATH). Read only, never written.
+ */
+export function ownToolReads(home = squadHome()): string[] {
+  const fvm = ownTool('fvm', home);
+  return [...androidReads(home), ...(fvm && fs.existsSync(fvm.dir) ? [fvm.dir] : [])];
+}
+
 /** A project, or a story's parts, with an Android app: the agents' shell gets the Android environment. */
 export function hasAndroid(places: { kinds: string[]; platforms: string[] }[]): boolean {
   return places.some((p) => p.kinds.includes('android') || p.platforms.includes('android'));

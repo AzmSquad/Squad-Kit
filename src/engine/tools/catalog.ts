@@ -149,23 +149,11 @@ export const CATALOG: ToolEntry[] = [
     // FVM 3 brought the .fvmrc file a project pins its Flutter in. FVM 2 doesn't read it and runs another Flutter, so the
     // squad would build and test with a Flutter the project didn't pin. Seen on this team's own Mac with FVM 2.4.1.
     min: '3',
-    installer: 'you',
-    why: "it becomes part of your computer's own setup",
-    steps: {
-      mac: ['Open a terminal.', 'Run: brew install fvm. Without Homebrew, follow the steps on FVM\'s install page.', CHECK_AGAIN],
-      windows: ["Open FVM's install page and follow the steps for Windows.", OPEN_AGAIN],
-      linux: ["Open FVM's install page and follow the steps for Linux.", CHECK_AGAIN],
-    },
+    // squad-kit gets its own FVM, FVM's official ready-made release, in seconds and with no password: only squad-kit's
+    // commands use it, and an FVM of the person's own stays as it is.
+    installer: 'squad-kit',
     link: 'https://fvm.app/documentation/getting-started/installation',
-    // One FVM serves every project on the computer that pins its Flutter with it: updating it is asked first.
-    // Homebrew's own FVM had no ready-made build on 2026-11-24 (brew info: bottle false), so `brew upgrade fvm` builds it
-    // from the Dart source: a few GB and about half an hour. The time it took here is the next guess.
-    update: { reaches: 'every project that uses FVM', size: 'a few GB', seconds: 1800 },
-    // FVM's own Homebrew tap brings a ready-made Dart, so it takes minutes where Homebrew's own FVM compiles from source.
-    updateSteps: {
-      homebrew: ['Open a terminal.', 'Run: brew uninstall fvm', "Run: brew install leoafarias/fvm/fvm. It is FVM's own, and takes a few minutes.", CHECK_AGAIN],
-      all: ["Open FVM's install page.", 'Install the newest FVM the same way you installed yours.', CHECK_AGAIN],
-    },
+    getSeconds: 15,
   },
   {
     id: 'xcode',
@@ -375,6 +363,22 @@ export const OWN_SOURCES = {
     size: 349_832_427,
     /** Its usage numbers stay off, on every run. */
     env: { MAESTRO_CLI_NO_ANALYTICS: '1' },
+  },
+  /**
+   * FVM's own ready-made release from GitHub, pinned to one version by the SHA-256 GitHub publishes for each file
+   * (checked 2026-11-24). Each holds one program, fvm/fvm (fvm.exe on Windows).
+   */
+  fvm: {
+    version: '4.3.2',
+    base: 'https://github.com/btwld/fvm/releases/download/4.3.2/',
+    files: {
+      'mac-arm64': { file: 'fvm-4.3.2-macos-arm64.tar.gz', size: 3_513_655, sha256: 'c9b1e67e5ff4ddae4710669ff9aa312f750947f68fac5b15fc5d248fb4419342' },
+      'mac-x64': { file: 'fvm-4.3.2-macos-x64.tar.gz', size: 20_239_917, sha256: '66a4e7c8907ba6141eea13168af54be01f07258162ee1d0ed82299b37302e7d2' },
+      'linux-x64': { file: 'fvm-4.3.2-linux-x64.tar.gz', size: 3_955_775, sha256: '17dfced05f5b0cb32398dadd0691acc2bc458e8c4b0045a781cd5aa6c85f6ecb' },
+      'linux-arm64': { file: 'fvm-4.3.2-linux-arm64.tar.gz', size: 20_134_662, sha256: 'df05c7682eeac21b08939e7be131687dc3d54fd5575b5e4bca931717ddeb0a01' },
+      'windows-x64': { file: 'fvm-4.3.2-windows-x64.zip', size: 4_212_035, sha256: '97696d118ad35bf25dc91fd28c70bb3d77b6d1fee6658fbd744e838b5f81da4a' },
+      'windows-arm64': { file: 'fvm-4.3.2-windows-arm64.zip', size: 22_289_315, sha256: 'ea10b12a756d0b66476f303f47a1169c662c84b9a98a6debd7529ee564ec6869' },
+    },
   },
   java: {
     feature: 21,

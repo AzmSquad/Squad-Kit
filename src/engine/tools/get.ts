@@ -155,6 +155,26 @@ export function maestroSource(f: Fetch = fetch, system: System = systemOf()): To
   };
 }
 
+/**
+ * FVM's own ready-made release for this system and chip, pinned to one version and its published SHA-256. Its one
+ * program is fvm/fvm in the archive (fvm.exe on Windows).
+ */
+export function fvmSource(f: Fetch = fetch, system: System = systemOf(), arch: string = process.arch): ToolSource {
+  const v = OWN_SOURCES.fvm;
+  const key = `${system}-${arch === 'arm64' ? 'arm64' : 'x64'}` as keyof typeof v.files;
+  const pick = v.files[key];
+  if (!pick) throw new GetTrouble(`FVM has no ready-made release for this computer. The Tools page says how to install it.`);
+  return {
+    version: v.version,
+    file: pick.file,
+    pack: pick.file.endsWith('.zip') ? 'zip' : 'tar.gz',
+    size: pick.size,
+    sha256: async () => pick.sha256,
+    open: (signal) => download(f, `${v.base}${pick.file}`, 'FVM', signal),
+    binary: (dir) => findIn(dir, [['fvm', system === 'windows' ? 'fvm.exe' : 'fvm']]),
+  };
+}
+
 /** The newest Eclipse Temurin Java runtime of the line squad-kit uses, for this system and chip, from Adoptium's own API. */
 export async function javaSource(f: Fetch = fetch, system: System = systemOf(), arch: string = process.arch, signal?: AbortSignal): Promise<ToolSource> {
   const j = OWN_SOURCES.java;
@@ -189,6 +209,7 @@ export async function officialSource(id: ToolId, signal?: AbortSignal): Promise<
   if (id === 'maestro') return maestroSource();
   if (id === 'java') return javaSource(fetch, systemOf(), process.arch, signal);
   if (id === 'android') return androidSource({ system: systemOf() });
+  if (id === 'fvm') return fvmSource();
   throw new GetTrouble(`squad-kit does not get ${nameOf(id)} itself. The Tools page says how to install it.`);
 }
 

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **squad-kit gets FVM itself.** A project whose commands run fvm no longer needs you to install or update FVM: the FVM
+  line on the Tools page has Get it, like Java and Maestro. squad-kit downloads FVM's official ready-made release
+  (4.3.2, a few MB, checked against the SHA-256 FVM publishes) into its own folder, with no password, and puts it first
+  on the PATH of the project's commands and the agents' shell only. An FVM of your own stays as it is and is never
+  updated by squad-kit: the Homebrew Update for FVM from 1.3.29 is gone. The Squad lead offers Get it for a story that
+  waits for FVM.
+
 ## [1.3.33] — 2026-11-24
 
 ### Added

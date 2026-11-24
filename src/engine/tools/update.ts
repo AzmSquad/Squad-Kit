@@ -1,22 +1,20 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { squadHome } from '../../core/home.js';
 import { writeLog } from '../../core/app-log.js';
 import { OWN_GROUP, endGroup, track, whenExited } from '../process-group.js';
 import { toolEntry, type ManagedBy, type System, type ToolEntry, type ToolId } from './catalog.js';
-import { flutterVersionOf, fvmVersionOf, onPath, systemOf, type DetectHost, type Found, type FoundBook } from './detect.js';
+import { flutterVersionOf, systemOf, type DetectHost, type Found, type FoundBook } from './detect.js';
 import { compareVersions } from './fit.js';
 import { GetTrouble, measured, noteTime, setTrouble, startOne, type Getting } from './get.js';
 
 /**
- * Updating a tool you installed yourself, when squad-kit safely can, with the tool's own updater: Flutter with
- * `flutter upgrade`, never with --force, and FVM with Homebrew's `brew upgrade fvm` when Homebrew installed it. One copy
- * serves every project on the computer, so the page warns and asks first. squad-kit updates only a plain copy of
- * Flutter's own repository, on one of its channels, with no changes of its own, in a folder this person may change, and
- * not looked after by another tool; and only a Homebrew copy in a Homebrew folder this person may change. Any other copy
- * gets the steps to do it yourself.
+ * Updating a tool you installed yourself, when squad-kit safely can: Flutter for now, with Flutter's own
+ * `flutter upgrade`, never with --force. One Flutter serves every Flutter project on the computer, so the page warns
+ * and asks first. squad-kit updates only a plain copy of Flutter's own repository, on one of its channels, with no
+ * changes of its own, in a folder this person may change, and not looked after by another tool. Any other copy gets
+ * the steps to do it yourself. (FVM is squad-kit's own to get instead: Get it, engine/tools/get.ts.)
  */
 
 /* ── whether it is safe ─────────────────────────────────── */
@@ -67,50 +65,18 @@ export async function flutterUpdateLook(h: DetectHost, f: Found): Promise<NonNul
   return {};
 }
 
-/** The tools squad-kit updates with Homebrew when Homebrew installed them, by the formula's name. */
-const BREW_FORMULA: Partial<Record<ToolId, string>> = { fvm: 'fvm' };
-
-/** Homebrew's own folder above a copy it installed: "/opt/homebrew" for "/opt/homebrew/Cellar/fvm/2.4.1/bin/fvm". */
-const brewPrefixOf = (real: string) => /^(.*)\/Cellar\//.exec(real)?.[1];
-
-/**
- * Whether squad-kit can update this copy with Homebrew, with nothing run: Homebrew installed it, Homebrew is here, and
- * its folder is one this person may change. No reason means it can, after the person's OK.
- */
-export function brewUpdateLook(h: DetectHost, f: Found): NonNullable<Found['update']> | undefined {
-  if (f.state !== 'found' || !f.where) return undefined;
-  if (h.system === 'windows') return { cant: cant('on Windows, you update it yourself for now') };
-  if (f.managedBy !== 'homebrew') return { cant: cant('it was not installed with Homebrew, so you update it the way you installed it') };
-  const prefix = brewPrefixOf(h.real(f.where));
-  if (!prefix || (!h.exists(path.join(prefix, 'bin', 'brew')) && !onPath(h, 'brew'))) return { managedBy: 'homebrew', cant: cant('Homebrew is not where squad-kit can run it') };
-  // Homebrew for Intel Macs (in /usr/local) on an Apple chip has no ready-made builds: an update would compile the tool
-  // and its build tools (LLVM, Rust) from source, for hours. Seen on this team's own Mac on 2026-11-24.
-  if (h.system === 'mac' && (h.arch ?? process.arch) === 'arm64' && prefix === '/usr/local') {
-    return { managedBy: 'homebrew', cant: cant("your Homebrew is the one for Intel Macs, so on this Mac's Apple chip it has no ready-made builds and would compile it from source, which can take hours") };
-  }
-  if (!h.writable(path.join(prefix, 'Cellar'))) return { managedBy: 'homebrew', cant: cant("your Homebrew folder needs your computer's password to change") };
-  return { managedBy: 'homebrew' };
-}
-
 /** Whether squad-kit can update this tool's copy here, looked at again right before an update. */
 export async function updateLookOf(h: DetectHost, id: ToolId, f: Found): Promise<NonNullable<Found['update']> | undefined> {
-  if (id === 'flutter') return flutterUpdateLook(h, f);
-  if (BREW_FORMULA[id]) return brewUpdateLook(h, f);
-  return { cant: cant(`squad-kit doesn't update ${nameOf(id)}`) };
+  return id === 'flutter' ? flutterUpdateLook(h, f) : { cant: cant(`squad-kit doesn't update ${nameOf(id)}`) };
 }
 
-/** Adds whether squad-kit can update each tool it updates here. Never stops a check: a problem is a plain reason. */
+/** Adds whether squad-kit can update Flutter here, the one tool it updates. Never stops a check: a problem is a plain reason. */
 export async function addUpdateLooks(h: DetectHost, book: FoundBook): Promise<FoundBook> {
   const tools = { ...book.tools };
   const f = tools.flutter;
   if (f?.state === 'found') {
     const update = await flutterUpdateLook(h, f).catch(() => ({ cant: cant('it could not look inside your Flutter folder') }));
     if (update) tools.flutter = { ...f, update };
-  }
-  for (const id of Object.keys(BREW_FORMULA) as ToolId[]) {
-    const x = tools[id];
-    const update = x?.state === 'found' ? brewUpdateLook(h, x) : undefined;
-    if (x && update) tools[id] = { ...x, update };
   }
   return { ...book, tools };
 }
@@ -277,8 +243,6 @@ export async function updateTool(
   opts: { system?: System; run?: RunUpdate; signal?: AbortSignal; limitMs?: number; doctorMs?: number; version?: ReadVersion; onStep?(words: string): void } = {},
 ): Promise<{ seconds: number }> {
   const name = nameOf(id);
-  const formula = BREW_FORMULA[id];
-  if (formula) return updateWithBrew(id, formula, sdk, opts);
   if (id !== 'flutter') throw new GetTrouble(`squad-kit can't update ${name} itself. The Tools page shows the steps.`);
   const system = opts.system ?? systemOf();
   const bin = path.join(sdk, 'bin', system === 'windows' ? 'flutter.bat' : 'flutter');
@@ -350,86 +314,6 @@ export async function updateTool(
   } finally {
     clearTimeout(timer);
     clearTimeout(doctor);
-    opts.signal?.removeEventListener('abort', fromOutside);
-  }
-}
-
-/** Homebrew's lines and the step each starts, in plain words. Steps only go forward. */
-const BREW_STEPS: { test: RegExp; words: (name: string) => string }[] = [
-  { test: /^==> (?:Auto-updating|Updating) Homebrew/i, words: () => "Getting Homebrew's list of new versions" },
-  { test: /^==> (?:Fetching|Downloading)\b/i, words: (name) => `Downloading the new ${name}` },
-  // No ready-made build for this computer: Homebrew gets the source and builds it, which can take half an hour.
-  { test: /^==> (?:Cloning|Checking out)\b/i, words: (name) => `Homebrew is building the new ${name} from its source, which can take half an hour` },
-  { test: /^==> (?:Upgrading|Installing|Pouring)\b/i, words: (name) => `Installing the new ${name}` },
-  { test: /^==> (?:Summary|Caveats)\b|^🍺/i, words: (name) => `Checking the new ${name}` },
-];
-
-/** It runs with these: no hints, no colors, no questions, and no clean-up of other tools' old versions. */
-export const BREW_ENV = { HOMEBREW_NO_ENV_HINTS: '1', HOMEBREW_NO_INSTALL_CLEANUP: '1', HOMEBREW_NO_COLOR: '1', NONINTERACTIVE: '1', NO_COLOR: '1' } as const;
-
-/** The version a program says it is (`fvm --version`), with a short limit; null when it can't tell. */
-async function versionOf(bin: string, run: RunUpdate): Promise<string | null> {
-  const lines: string[] = [];
-  const r = await run(bin, ['--version'], { cwd: os.homedir(), env: { ...process.env, CI: 'true' }, signal: AbortSignal.timeout(VERSION_MS), onLine: (l) => lines.push(l) }).catch(() => ({ code: null, error: 'no' }));
-  return r.error ? null : fvmVersionOf(lines.join('\n'));
-}
-
-/**
- * Updates a copy Homebrew installed with Homebrew itself, `brew upgrade <formula>`, the Homebrew that installed it. It
- * may build the new version on this computer, which takes a few minutes. Throws a reason a person can read.
- */
-async function updateWithBrew(id: ToolId, formula: string, where: string, opts: { run?: RunUpdate; signal?: AbortSignal; limitMs?: number; onStep?(words: string): void }): Promise<{ seconds: number }> {
-  const name = nameOf(id);
-  const real = (() => {
-    try {
-      return fs.realpathSync(where);
-    } catch {
-      return where;
-    }
-  })();
-  const prefix = brewPrefixOf(real);
-  const own = prefix ? path.join(prefix, 'bin', 'brew') : '';
-  const brew = own && fs.existsSync(own) ? own : 'brew';
-  const run = opts.run ?? runner;
-  const limitMs = opts.limitMs ?? UPDATE_LIMIT_MS;
-  const stop = new AbortController();
-  const timer = setTimeout(() => stop.abort('time'), limitMs);
-  const fromOutside = () => stop.abort('stopped');
-  if (opts.signal?.aborted) fromOutside();
-  opts.signal?.addEventListener('abort', fromOutside, { once: true });
-  const before = await versionOf(where, run);
-  const started = Date.now();
-  let last = null as string | null;
-  let at = -1;
-  try {
-    const r = await run(brew, ['upgrade', formula], {
-      cwd: os.homedir(),
-      env: { ...process.env, ...BREW_ENV },
-      signal: stop.signal,
-      onLine: (raw) => {
-        const line = usefulLine(raw);
-        if (!line) return;
-        last = line;
-        const i = BREW_STEPS.findIndex((x) => x.test.test(line));
-        if (i > at) {
-          at = i;
-          opts.onStep?.(BREW_STEPS[i]!.words(name));
-        }
-      },
-    });
-    if (stop.signal.reason === 'time') throw new GetTrouble(`The update of ${name} took more than ${limitWords(limitMs)}, so squad-kit stopped it. Check the internet connection, then try again, or do it yourself with the steps.`);
-    if (stop.signal.aborted) throw new GetTrouble(`The update of ${name} was stopped before the end. Try again, or do it yourself with the steps.`);
-    if (r.error) {
-      writeLog({ level: 'warn', text: `Updating ${name}: could not start ${brew}: ${r.error}` });
-      throw new GetTrouble(`squad-kit could not start Homebrew to update ${name}. Do it yourself with the steps.`);
-    }
-    if (r.code !== 0) throw new GetTrouble(`The update of ${name} did not finish.${last ? ` Homebrew said: "${last}"` : ''} Try again, or do it yourself with the steps.`);
-    // Homebrew may finish with nothing newer to give ("already installed"): said, never a quiet success.
-    const after = await versionOf(where, run);
-    if (before && after && compareVersions(after, before) <= 0) throw new GetTrouble(`Homebrew finished, but ${name} is still ${after}: Homebrew had no newer ${name} to give here. Do it yourself with the steps.`);
-    return { seconds: (Date.now() - started) / 1000 };
-  } finally {
-    clearTimeout(timer);
     opts.signal?.removeEventListener('abort', fromOutside);
   }
 }

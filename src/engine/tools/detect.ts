@@ -307,8 +307,10 @@ async function cocoapods(h: DetectHost): Promise<Found> {
   return { state: 'found', where: bin, ...(version ? { version } : {}), ...(brew ? { managedBy: 'homebrew' as const } : {}) };
 }
 
-/** FVM, which runs the Flutter version a project pins. Homebrew's own copy links into its Cellar. */
-async function fvm(h: DetectHost): Promise<Found> {
+/** FVM, which runs the Flutter version a project pins: squad-kit's own, once got; else the person's, from the PATH. */
+async function fvm(h: DetectHost, home: string): Promise<Found> {
+  const own = ownTool('fvm', home);
+  if (own) return { state: 'found', version: own.version, where: own.binary, own: true };
   const bin = onPath(h, 'fvm');
   if (!bin) return missing();
   const r = await h.run(bin, ['--version'], { timeoutMs: 20_000, env: { CI: 'true' } });
@@ -468,7 +470,7 @@ export async function detectAll(h: DetectHost = realHost(), home = squadHome()):
   const x = await safe('xcode', () => xcode(h));
   const found = await Promise.all([
     safe('flutter', () => flutter(h)),
-    safe('fvm', () => fvm(h)),
+    safe('fvm', () => fvm(h, home)),
     safe('simulator', () => simulator(h, x[1].state === 'found')),
     safe('cocoapods', () => cocoapods(h)),
     safe('java', () => java(h, home)),

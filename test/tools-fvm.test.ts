@@ -1,22 +1,29 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { BoardPaths } from '../src/board/store.js';
 import type { DetectHost, Ran } from '../src/engine/tools/detect.js';
 import type { RunUpdate } from '../src/engine/tools/update.js';
+import type { ToolSource } from '../src/engine/tools/get.js';
 
 /**
- * FVM, which runs the Flutter version a project pins: squad-kit finds it and its version, a project that pins its
- * Flutter with it (a .fvmrc, or commands that run fvm) needs FVM 3 or newer, and a Homebrew copy that is too old is
- * updated with Homebrew itself, after the person's OK. The computer and Homebrew are made up: nothing real runs.
+ * FVM, which runs the Flutter version a project pins: squad-kit finds it and its version, commands that run fvm need
+ * FVM 3 or newer, and squad-kit gets its own FVM with Get it: FVM's official release, checked against its pinned
+ * SHA-256, used first by squad-kit's own commands, whatever FVM the person has. The computer is made up, and the
+ * download is a made-up archive: nothing real runs or downloads.
  */
 
 const { readMeta, writeMeta } = await import('../src/board/store.js');
 const { makeNewProject } = await import('../src/engine/new-project.js');
 const { detectAll, fvmVersionOf } = await import('../src/engine/tools/detect.js');
-const { BREW_ENV, brewUpdateLook, startUpdate, updateTool, useUpdateRun } = await import('../src/engine/tools/update.js');
-const { gettingNow, lastTrouble, setTrouble } = await import('../src/engine/tools/get.js');
+const { startUpdate, useUpdateRun } = await import('../src/engine/tools/update.js');
+const { fvmSource, getTool, gettingNow, noteTime, setTrouble } = await import('../src/engine/tools/get.js');
+const { ownTool } = await import('../src/engine/tools/detect.js');
+const { withOwnPrograms } = await import('../src/engine/agent-env.js');
+const { ownToolReads } = await import('../src/engine/android-env.js');
+const { zip } = await import('../src/core/zip.js');
 const tools = await import('../src/engine/tools/index.js');
 
 const CELLAR_FVM = '/usr/local/Cellar/fvm/2.4.1/bin/fvm';
@@ -94,20 +101,16 @@ describe('a project that pins its Flutter with FVM', () => {
     expect(tools.blockedBy(bp, 'build')).toBeNull();
   });
 
-  it('commands that run fvm need FVM 3 or newer: FVM 2 is too old, and squad-kit can update a Homebrew copy after your OK', async () => {
+  it("commands that run fvm need FVM 3 or newer: FVM 2 is too old, and squad-kit gets its own with Get it", async () => {
     pinned();
     writeMeta(bp, { ...readMeta(bp), commands: { test: 'fvm flutter test', lint: 'fvm flutter analyze' } });
     tools.useDetectHost(mac());
     await tools.checkTools();
     const v = await tools.projectTools(bp);
     const fvm = v.lines.find((l) => l.id === 'fvm')!;
-    expect(fvm).toMatchObject({ priority: 'required', state: 'too-old', version: '2.4.1', needs: '3', blocks: ['build', 'checks', 'start-app'], usedFor: 'Building, Checks, Start' });
-    expect(fvm.update).toEqual({
-      warning: 'This updates FVM for every project that uses FVM on this Mac, not only this one. Older projects may need small changes to build again. It downloads a few GB and takes about 30 minutes.',
-      seconds: 1800,
-      command: 'squad tools update fvm',
-    });
-    expect(fvm.steps).toEqual(['Open a terminal.', 'Run: brew uninstall fvm', "Run: brew install leoafarias/fvm/fvm. It is FVM's own, and takes a few minutes.", 'Come back here and press Check again.']);
+    expect(fvm).toMatchObject({ priority: 'required', state: 'too-old', version: '2.4.1', needs: '3', blocks: ['build', 'checks', 'start-app'], usedFor: 'Building, Checks, Start', installer: 'squad-kit', command: 'squad tools get fvm' });
+    // No update of the person's own FVM: squad-kit's own is the way, and theirs stays as it is.
+    expect(fvm.update).toBeUndefined();
     // A story waits before the Builder starts, with what is wrong in plain words.
     const b = tools.blockedBy(bp, 'build');
     expect(b).toMatchObject({ text: "squad-kit can't build this story yet: FVM 2.4.1 is too old: it needs 3 or newer.", status: "Waits for a newer FVM on this computer. Goes on by itself once it's there", link: '/tools#fvm' });
@@ -123,89 +126,61 @@ describe('a project that pins its Flutter with FVM', () => {
     expect(v.lines.find((l) => l.id === 'fvm')).toMatchObject({ state: 'ready', version: '3.2.1', blocks: [] });
   });
 
-  it("a copy Homebrew did not install, or a Homebrew folder that needs a password: the steps, and why squad-kit can't", () => {
-    const found = { state: 'found' as const, where: '/usr/local/bin/fvm', version: '2.4.1' };
-    expect(brewUpdateLook(mac({ brew: false }), found)).toEqual({ cant: "squad-kit can't update it here: it was not installed with Homebrew, so you update it the way you installed it." });
-    expect(brewUpdateLook(mac({ writable: false }), { ...found, managedBy: 'homebrew' })).toEqual({ managedBy: 'homebrew', cant: "squad-kit can't update it here: your Homebrew folder needs your computer's password to change." });
-    expect(brewUpdateLook(mac(), { ...found, managedBy: 'homebrew' })).toEqual({ managedBy: 'homebrew' });
-    // Homebrew for Intel Macs on an Apple chip would compile it from source for hours: no Update, FVM's own steps.
-    expect(brewUpdateLook(mac({ arch: 'arm64' }), { ...found, managedBy: 'homebrew' })).toEqual({
-      managedBy: 'homebrew',
-      cant: "squad-kit can't update it here: your Homebrew is the one for Intel Macs, so on this Mac's Apple chip it has no ready-made builds and would compile it from source, which can take hours.",
-    });
+});
+
+describe("squad-kit's own FVM", () => {
+  /** A made-up release archive in the real layout: one program, fvm/fvm. */
+  const archive = (() => {
+    const data = zip([{ name: 'fvm/fvm', data: '#!/bin/sh\necho 4.3.2\n' }, { name: 'fvm/src/LICENSE', data: 'MIT' }]);
+    return { data, sha: createHash('sha256').update(data).digest('hex') };
+  })();
+  const fake = (): ToolSource => ({
+    version: '4.3.2',
+    file: 'fvm-4.3.2-macos-arm64.zip',
+    pack: 'zip',
+    sha256: async () => archive.sha,
+    open: async () => ({ body: (async function* () { yield archive.data; })(), size: archive.data.length }),
+    binary: fvmSource(fetch, 'mac', 'arm64').binary,
+  });
+
+  it("takes FVM's official release for this system and chip, pinned to its published SHA-256", async () => {
+    const mac = fvmSource(fetch, 'mac', 'arm64');
+    expect(mac).toMatchObject({ version: '4.3.2', file: 'fvm-4.3.2-macos-arm64.tar.gz', pack: 'tar.gz', size: 3_513_655 });
+    expect(await mac.sha256(new AbortController().signal)).toBe('c9b1e67e5ff4ddae4710669ff9aa312f750947f68fac5b15fc5d248fb4419342');
+    expect(fvmSource(fetch, 'windows', 'x64')).toMatchObject({ file: 'fvm-4.3.2-windows-x64.zip', pack: 'zip' });
+    expect(fvmSource(fetch, 'linux', 'x64').file).toBe('fvm-4.3.2-linux-x64.tar.gz');
+  });
+
+  it('Get it puts it in squad-kit\'s own folder; then it is the FVM found, first on the commands\' PATH, and readable in the guard', async () => {
+    const home = process.env.SQUAD_KIT_HOME!;
+    const got = await getTool('fvm', fake(), { home, system: 'mac' });
+    expect(got.binary).toBe(path.join(home, 'tools', 'fvm', '4.3.2', 'fvm', 'fvm'));
+    expect(ownTool('fvm', home)).toMatchObject({ version: '4.3.2' });
+    // Found as squad-kit's own, whatever FVM the person has on the PATH.
+    expect((await detectAll(mac(), home)).tools.fvm).toEqual({ state: 'found', version: '4.3.2', where: got.binary, own: true });
+    const env = withOwnPrograms({ PATH: '/usr/local/bin:/usr/bin' });
+    expect(env.PATH).toBe([path.dirname(got.binary), '/usr/local/bin', '/usr/bin'].join(path.delimiter));
+    expect(ownToolReads(home)).toContain(path.join(home, 'tools', 'fvm', '4.3.2'));
   });
 });
 
-describe('updating FVM with Homebrew', () => {
-  it('runs brew upgrade fvm with the Homebrew that installed it, with no questions, and says each step', async () => {
-    let asked: { cmd: string; args: string[]; env: NodeJS.ProcessEnv } | null = null;
-    const seen: string[] = [];
-    let now = '2.4.1';
-    const run: RunUpdate = async (cmd, args, opts) => {
-      if (args[0] === '--version') {
-        opts.onLine(now);
-        return { code: 0 };
-      }
-      asked = { cmd, args, env: opts.env };
-      now = '4.3.2';
-      for (const l of ['==> Auto-updating Homebrew...', '==> Fetching fvm', '==> Downloading https://github.com/leoafarias/fvm/archive/4.3.2.tar.gz', '==> Cloning https://github.com/dart-lang/sdk.git', '==> Upgrading fvm', '  2.4.1 -> 4.3.2', '==> Summary', '🍺  /usr/local/Cellar/fvm/4.3.2: 8 files, 12MB']) opts.onLine(l);
-      return { code: 0 };
-    };
-    const r = await updateTool('fvm', '/usr/local/bin/fvm', { run, onStep: (w) => seen.push(w) });
-    expect(r.seconds).toBeGreaterThanOrEqual(0);
-    expect(asked!.args).toEqual(['upgrade', 'fvm']);
-    expect(asked!.env).toMatchObject(BREW_ENV);
-    expect(seen).toEqual(["Getting Homebrew's list of new versions", 'Downloading the new FVM', 'Homebrew is building the new FVM from its source, which can take half an hour', 'Installing the new FVM', 'Checking the new FVM']);
-  });
-
-  it("a failed update says Homebrew's last line, and the line keeps it as its trouble", async () => {
-    const run: RunUpdate = async (_c, args, opts) => {
-      if (args[0] === '--version') {
-        opts.onLine('2.4.1');
-        return { code: 0 };
-      }
-      opts.onLine('==> Fetching fvm');
-      opts.onLine('Error: fvm: Failed to download resource "dart-sdk"');
-      return { code: 1 };
-    };
-    await expect(updateTool('fvm', '/usr/local/bin/fvm', { run })).rejects.toThrow('The update of FVM did not finish. Homebrew said: "Error: fvm: Failed to download resource "dart-sdk"" Try again, or do it yourself with the steps.');
-    let done: () => void = () => undefined;
-    const ended = new Promise<void>((r) => (done = r));
-    const g = startUpdate('fvm', '/usr/local/bin/fvm', { run, after: () => done() });
-    expect(g).toMatchObject({ tool: 'fvm', name: 'FVM', step: 'update', words: 'Looking for the new FVM' });
-    await ended;
-    expect(gettingNow()).toBeNull();
-    expect(lastTrouble('fvm')).toContain('The update of FVM did not finish.');
-  });
-
+describe('an update that runs long', () => {
   it('past its usual time it says "longer than usual", never "about 10 s left" for half an hour', async () => {
-    const { noteTime } = await import('../src/engine/tools/get.js');
     // It took a second here last time, so this run is past its usual time at once.
-    noteTime('fvm-update', 1, process.env.SQUAD_KIT_HOME!);
+    noteTime('flutter-update', 1, process.env.SQUAD_KIT_HOME!);
     let release: () => void = () => undefined;
     const held = new Promise<void>((r) => (release = r));
-    const run: RunUpdate = async (_c, args, opts) => {
-      if (args[0] === '--version') {
-        opts.onLine('2.4.1');
-        return { code: 0 };
-      }
+    const run: RunUpdate = async () => {
       await held;
       return { code: 1 };
     };
     let done: () => void = () => undefined;
     const ended = new Promise<void>((r) => (done = r));
-    startUpdate('fvm', '/usr/local/bin/fvm', { run, after: () => done() });
+    startUpdate('flutter', '/Users/pm/flutter', { run, system: 'mac', version: async () => '3.27.3', after: () => done() });
     await new Promise((r) => setTimeout(r, 2300));
-    expect(gettingNow()).toMatchObject({ tool: 'fvm', longer: true, secondsLeft: 0 });
+    expect(gettingNow()).toMatchObject({ tool: 'flutter', longer: true, secondsLeft: 0 });
     release();
     await ended;
-  });
-
-  it('Homebrew with nothing newer to give: said, never a quiet success', async () => {
-    const run: RunUpdate = async (_c, args, opts) => {
-      opts.onLine(args[0] === '--version' ? '2.4.1' : 'Warning: fvm 2.4.1 already installed');
-      return { code: 0 };
-    };
-    await expect(updateTool('fvm', '/usr/local/bin/fvm', { run })).rejects.toThrow('Homebrew finished, but FVM is still 2.4.1: Homebrew had no newer FVM to give here. Do it yourself with the steps.');
+    setTrouble('flutter');
   });
 });
