@@ -89,6 +89,8 @@ export interface SetupState {
   approvedAt?: string;
   /** New project with a BRD: nothing was read and nothing was approved. The Analyst has the BRD. */
   fromBrd?: boolean;
+  /** A project with no code whose work started from stories, before anyone answered the first-run question. */
+  fromStories?: boolean;
 }
 
 function talkFile(bp: BoardPaths): string {
@@ -188,7 +190,10 @@ export function resetFrom(s: SetupState, id: SetupStepId): void {
   }
   delete s.readyAt;
   delete s.stopping;
-  if (from <= SETUP_STEPS.indexOf('read')) delete s.approvedAt;
+  if (from <= SETUP_STEPS.indexOf('read')) {
+    delete s.approvedAt;
+    delete s.fromStories;
+  }
   if (from <= SETUP_STEPS.indexOf('tests')) s.proof = { ...s.proof, tests: undefined };
   if (from <= SETUP_STEPS.indexOf('app')) s.proof = { ...s.proof, app: undefined };
 }

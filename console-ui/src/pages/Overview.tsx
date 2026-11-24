@@ -15,6 +15,7 @@ import { ChatMarkdown } from '../components/ChatMarkdown';
 import { useDraft } from '../lib/drafts';
 import { langProps, typedDir } from '../lib/lang';
 import { SelfNote } from '../components/SelfNote';
+import { OverviewStories } from '../components/OverviewStories';
 
 /**
  * The Overview, first in the sidebar. The first time it is the handover: what squad-kit found, how the code fits
@@ -110,7 +111,8 @@ export function OverviewPage() {
             v.handover !== 'reading' && (
               <div className="ob-row2">
                 <WhatItIs v={v} />
-                <Ideas v={v} onCreated={opened} onWrite={() => setWriting(true)} />
+                {/* The work started from stories: where they are, unless ideas from what the person said wait. */}
+                {v.stories && !v.ideas.some((x) => !x.ticket) ? <OverviewStories stories={v.stories} onWrite={() => setWriting(true)} /> : <Ideas v={v} onCreated={opened} onWrite={() => setWriting(true)} />}
               </div>
             )
           ) : (
@@ -344,7 +346,7 @@ function WhatItIs({ v }: { v: OverviewView }) {
       ) : (
         <p className="note">squad-kit has not read the project yet.</p>
       )}
-      {v.empty && <p>No code yet. The Architect picks the technology when your first story is planned, and saves it as a decision engineers can see.</p>}
+      {v.empty && <p>{v.stories ? `The first code comes with ${v.stories.open[0]!.id}, and this page fills in once it is merged.` : 'No code yet. The Architect picks the technology when your first story is planned, and saves it as a decision engineers can see.'}</p>}
       {(v.users || can.length > 0) && (
         <div className="ob-two">
           {v.users && (

@@ -23,6 +23,7 @@ import {
   type SetupStepId,
   type SetupStepState,
 } from './setup-state.js';
+import { openStories, startedFromStories, type OpenStories } from './started-from-stories.js';
 import { aiTool } from '../modules/registry.js';
 import { readAgent } from '../engine/agents.js';
 import { dropSetupCopies } from '../engine/onboard.js';
@@ -106,9 +107,14 @@ export interface SetupView {
   idea: boolean;
   /** New project with a BRD, until its first release: the BRD the Analyst has, where the work starts. */
   brd?: { id: string; title: string };
+  /** A project with no code whose work started from stories: the first-run question is over (started-from-stories.ts). */
+  started?: boolean;
   /** The project is squad-kit's own code: the one plain note that says so (engine/self-project.ts). */
   self?: string;
 }
+
+/** The overview step's note once the work started from stories, in place of the question nobody needs to answer. */
+const STARTED_NOTE = 'The work started from your stories';
 
 const again = (step: SetupStepId, label = 'Try again'): SetupWay => ({ do: 'again', step, label, command: `squad setup --again ${step}` });
 
@@ -154,13 +160,15 @@ export function setupView(bp: BoardPaths): SetupView | null {
     };
   }
   const idea = Boolean(readTalk(bp)?.idea);
+  // Still so after the first merge, when the setup counts as done (settleStartedFromStories).
+  const started = Boolean(s.fromStories) || startedFromStories(bp, meta);
   const steps: SetupStepView[] = s.steps
     .filter((st) => SETUP_STEPS.includes(st.id))
     .map((st) => ({
       id: st.id,
       label: st.id === 'read' && idea ? IDEA_READ[st.state === 'done' || st.state === 'now' ? st.state : 'todo'] : LABEL[st.id](tool, st.state),
       state: st.state,
-      note: st.note ?? (st.state === 'todo' || st.id === 'files' ? HINT[st.id] : undefined),
+      note: started && st.id === 'overview' ? STARTED_NOTE : (st.note ?? (st.state === 'todo' || st.id === 'files' ? HINT[st.id] : undefined)),
       ...(st.error ? { error: st.error } : {}),
       ...(st.output ? { output: st.output } : {}),
       ...(st.since ? { since: st.since } : {}),
@@ -180,7 +188,7 @@ export function setupView(bp: BoardPaths): SetupView | null {
     total: steps.length,
     ...(currentStep(s) ? { current: currentStep(s)!.id } : {}),
     ready: over && Boolean(meta.setup),
-    approved: Boolean(s.approvedAt),
+    approved: Boolean(s.approvedAt) || started,
     stopping: Boolean(s.stopping),
     reads: s.reads ?? [],
     quality: meta.quality ?? DEFAULT_QUALITY,
@@ -189,6 +197,7 @@ export function setupView(bp: BoardPaths): SetupView | null {
     empty: Boolean(meta.scan?.empty),
     idea,
     ...(brd ? { brd: { id: brd.id, title: brd.title } } : {}),
+    ...(started ? { started } : {}),
     ...(isSelfProject(bp, meta) ? { self: SELF_NOTE } : {}),
   };
 }
@@ -302,6 +311,8 @@ export interface OverviewView {
   setup?: { done: number; total: number; line: string };
   /** New project with a BRD, until its first release: there is nothing to check here yet, and the work starts there. */
   brd?: { id: string; title: string };
+  /** A project with no code yet: the stories open on the board, its real state until there is code to read. */
+  stories?: OpenStories;
   talk?: OverviewTalk;
   empty: boolean;
   /** On a project with no code: what the person said they want to build. */
@@ -340,8 +351,10 @@ export function overviewView(bp: BoardPaths): OverviewView {
   const proposed = rules.filter((r) => r.proposed).length;
   const sv = setupView(bp);
   const s = meta.setup;
+  // Stories on the board of a project with no code: the first-run question is over, so nothing waits here.
+  const started = Boolean(sv?.started);
   const handover: Handover =
-    s && !s.approvedAt ? (setupOver(s) ? 'ready' : 'reading') : proposed ? 'ready' : o.approved || s?.approvedAt ? 'approved' : sv ? 'reading' : 'none';
+    s && !s.approvedAt && !started ? (setupOver(s) ? 'ready' : 'reading') : proposed ? 'ready' : o.approved || s?.approvedAt || started ? 'approved' : sv ? 'reading' : 'none';
   const readAt = o.readAt ?? meta.scan?.at;
   const since = listTickets(bp)
     .map((t) => ({ id: t.id, title: t.title, at: mergedAt(t) }))
@@ -349,6 +362,9 @@ export function overviewView(bp: BoardPaths): OverviewView {
     .sort((a, b) => b.at.localeCompare(a.at))
     .slice(0, 8);
   const talk = readTalk(bp);
+  // Still so while the Architect reads a folder that started empty, so the page does not flash a project's cards.
+  const empty = Boolean(meta.scan?.empty) || (meta.scan?.status !== 'done' && meta.setup?.kind === 'empty' && !meta.setup.approvedAt);
+  const stories = empty ? openStories(bp) : undefined;
   return {
     project: meta.project,
     engine: meta.engine,
@@ -367,13 +383,13 @@ export function overviewView(bp: BoardPaths): OverviewView {
     proposed,
     ...(s?.proof ? { proof: s.proof } : {}),
     handover,
-    ...(o.approved ? { approved: o.approved } : s?.approvedAt && !s.fromBrd ? { approved: { by: meta.user.name, at: s.approvedAt } } : {}),
+    ...(o.approved ? { approved: o.approved } : s?.approvedAt && !s.fromBrd && !s.fromStories ? { approved: { by: meta.user.name, at: s.approvedAt } } : {}),
     since,
     ...(sv && !sv.ready && !sv.approved ? { setup: { done: sv.done, total: sv.total, line: setupLine(sv) } } : {}),
     ...(sv?.brd ? { brd: sv.brd } : {}),
+    ...(stories ? { stories } : {}),
     ...(talk ? { talk } : {}),
-    // Still so while the Architect reads a folder that started empty, so the page does not flash a project's cards.
-    empty: Boolean(meta.scan?.empty) || (meta.scan?.status !== 'done' && meta.setup?.kind === 'empty' && !meta.setup.approvedAt),
+    empty,
     ...(talk?.idea ? { idea: talk.idea } : {}),
     old: !fs.existsSync(path.join(bp.knowledgeDir, 'overview.md')) && meta.scan?.status === 'done',
     command: 'squad overview',
@@ -399,6 +415,7 @@ export function approveOverview(bp: BoardPaths): OverviewView {
   writeOverview(bp, { ...readOverview(bp), approved: { by, at } });
   if (meta.setup) {
     meta.setup.approvedAt = at;
+    delete meta.setup.fromStories;
     writeMeta(bp, meta);
   }
   const talk = readTalk(bp);

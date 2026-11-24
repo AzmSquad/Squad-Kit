@@ -45,7 +45,9 @@ export function SetupPage() {
                 <h2>{s.approved ? 'Your project is set up' : s.ready ? (s.empty ? 'Your new project is ready' : 'squad-kit knows your project now') : 'Getting to know your project'}</h2>
                 <p>
                   {s.ready || s.approved
-                    ? s.empty
+                    ? s.started
+                      ? 'The work started from your stories. See them on the board.'
+                      : s.empty
                       ? 'Tell the Architect what you want to build, on the Overview.'
                       : 'Check what it understood on the Overview, then start your first ticket.'
                     : s.kind === 'empty'

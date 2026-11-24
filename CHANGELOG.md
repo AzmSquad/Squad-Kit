@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Overview shows where a new project really is when its stories come from your tracker.** On a project with no
+  code yet, the Overview kept asking "What do you want to build?", with a badge of 1, even after a story was pulled from
+  Azure DevOps (or another tracker, or written by hand) and the squad was working on it. Once a story is on the board
+  that question is over: the Overview shows "Your stories", each with where it is and a way to it, says the first code
+  comes with the first one, and nothing waits for you there. The board's "One question for you" card and the badge go
+  too. Once the first code is merged, the question stays over. `squad overview` shows the same.
+
 ## [1.3.27] — 2026-11-24
 
 ### Fixed

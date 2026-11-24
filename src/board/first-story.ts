@@ -3,6 +3,7 @@ import { allKeys, allStories, listBreakdowns, nextKey, updateBreakdown } from '.
 import type { Breakdown, BreakdownEpic, BreakdownStory } from './requirements-types.js';
 import { isMerged } from './depends.js';
 import type { Ticket } from './types.js';
+import { settleStartedFromStories } from './started-from-stories.js';
 
 /**
  * A project with no code starts with one story squad-kit adds itself: "Set up the product". It picks the tools and makes a
@@ -75,11 +76,12 @@ function takeOut(x: Breakdown): void {
 /**
  * The first merge on a project that had no code. Stories stop picking the technology, and the next read of the code also
  * finds the parts. A first story that never started has nothing left to do, so it goes: the others no longer wait for it.
+ * A first-run question the stories made unneeded stays over.
  */
 export function firstCodeMerged(bp: BoardPaths): void {
   const meta = readMeta(bp);
   if (!meta.scan?.empty) return;
-  writeMeta(bp, { ...meta, scan: { ...meta.scan, empty: false, fromNothing: true } });
+  writeMeta(bp, { ...settleStartedFromStories(bp, meta), scan: { ...meta.scan, empty: false, fromNothing: true } });
   for (const b of listBreakdowns(bp)) {
     const first = firstStoryOf(b);
     if (first && !first.ticket) updateBreakdown(bp, b.id, takeOut);

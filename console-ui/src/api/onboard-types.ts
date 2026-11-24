@@ -1,4 +1,4 @@
-import type { ChatMessage, Quality } from './types';
+import type { ChatMessage, Quality, Stage } from './types';
 
 // The first run and the Overview. Mirrors src/board/setup-state.ts, src/board/overview.ts and src/board/first-run.ts.
 
@@ -69,6 +69,8 @@ export interface SetupView {
   idea: boolean;
   /** New project with a BRD, until its first release: the BRD the Analyst has. */
   brd?: { id: string; title: string };
+  /** A project with no code whose work started from stories: nothing was asked, and nothing waits for the person. */
+  started?: boolean;
   /** The project is squad-kit's own code: one plain note that says so. */
   self?: string;
 }
@@ -156,6 +158,8 @@ export interface OverviewView {
   setup?: { done: number; total: number; line: string };
   /** New project with a BRD, until its first release: there is nothing to check here yet, and the work starts there. */
   brd?: { id: string; title: string };
+  /** A project with no code yet: the stories open on the board, oldest first. The first one makes the first code. */
+  stories?: { from?: string; open: { id: string; title: string; stage: Stage }[] };
   talk?: OverviewTalk;
   empty: boolean;
   /** On a project with no code: what the person said they want to build. */

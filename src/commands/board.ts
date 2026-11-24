@@ -99,7 +99,7 @@ const id = (s: string) => kleur.bold(s);
 const amber = (s: string) => kleur.yellow(s);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-const STAGE_NAME: Record<Stage, string> = {
+export const STAGE_NAME: Record<Stage, string> = {
   tickets: 'Tickets',
   specs: 'Specs',
   implement: 'Implement',

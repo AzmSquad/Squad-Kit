@@ -21,7 +21,7 @@ import { SETUP_STEPS, readWords, type SetupStepId } from '../board/setup-state.j
 import { durationWords } from '../board/usual.js';
 import { squadRunsElsewhere } from '../board/lock.js';
 import { tick } from '../board/engine.js';
-import { board } from './board.js';
+import { STAGE_NAME, board } from './board.js';
 
 /**
  * The first run and the Overview in the terminal: `squad setup` shows the setup's steps with their times, and
@@ -254,6 +254,14 @@ export async function runOverview(opts: OverviewOptions): Promise<void> {
     v.rules.map((r) => `${r.id} ${r.title}${r.proposed ? kleur.yellow(' (proposed)') : ''}`),
   );
   list('Worth knowing', v.worth);
+  // A project with no code whose work started from stories: where they are, as on the page.
+  if (v.empty && v.stories && !v.brd && v.handover !== 'reading' && !v.ideas.some((x) => !x.ticket)) {
+    out(`  ${kleur.bold('Your stories')}${v.stories.from ? kleur.gray(`  from ${v.stories.from}`) : ''}`);
+    for (const t of v.stories.open.slice(0, 6)) out(`    ${t.id}  ${t.title}${kleur.gray(`  ${STAGE_NAME[t.stage]}`)}`);
+    if (v.stories.open.length > 6) out(kleur.gray(`    And ${v.stories.open.length - 6} more: squad backlog`));
+    out(kleur.gray(`  The first code comes with ${v.stories.open[0]!.id}. Follow it: squad watch ${v.stories.open[0]!.id}`));
+    out();
+  }
   if (v.ideas.length) {
     out(`  ${kleur.bold('Good first tickets')}`);
     v.ideas.forEach((i, n) => out(`    ${n + 1}. ${i.title}${i.ticket ? kleur.gray(` (${i.ticket})`) : ''}  ${cmd(`squad overview --idea ${n + 1}`)}`));
