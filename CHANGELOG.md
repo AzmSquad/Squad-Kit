@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.35] — 2026-11-24
+
 ### Fixed
 
 - **An Android SDK that lacks what Flutter builds with is named, with the steps.** Flutter builds the Android app
