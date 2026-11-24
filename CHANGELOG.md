@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.37] — 2026-11-24
+
+### Changed
+
+- **The proof takes only the pictures that prove something.** squad-kit's own rule locked every "done when" with a word
+  like "show", "screen" or "page" to a screenshot, so "the code checks show no issues and all tests pass" and "the
+  README explains setup in under one page" got pictures. A line whose result is that the tests or code checks pass, one
+  the Reviewer proves by reading the code, and one about the phone's home screen, the app icon or turning the phone is
+  no longer locked: it keeps the kind the Analyst gave it. The Analyst and the Express plan are told what squad-kit's
+  pictures can show (the app's own screens, on one device) and write the rest as a Test or Not on a screen line, so a
+  story no longer stops on pictures nobody could take.
+- **The Tester gets the checks' result instead of running them again.** In the proof, run_checks on code that has not
+  changed since the checks step passed answers with that step's result, and the story says so. One test file still runs.
+- **A high load alone waits 2 minutes before squad-kit starts its phone**, not 10: a load that lasts does not go down by
+  waiting. Low memory still waits up to 10 minutes.
+- **squad-kit's phone shuts down a minute after a story's proof**, unless another story or a person takes it, instead
+  of staying up 10 minutes. An idle simulator on a busy Mac can have its own parts stopped by the system, and macOS then
+  shows their crash reports.
+- **squad-kit's look at the proof's pictures runs on the review's own level.** It is no second opinion on the code, so
+  it is no longer raised to the Builder's level and effort after a failed try.
+
+### Fixed
+
+- After a check the Tester ran, the story's line says again what the Tester is doing, not "Checking that the app
+  builds".
+- "Could not show … after 2 more tries" is said only when those tries ran.
+
 ## [1.3.36] — 2026-11-24
 
 ### Fixed
