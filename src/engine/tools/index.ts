@@ -70,7 +70,7 @@ export interface ToolLine {
   seconds?: number;
   /** Android: the steps that make the person's own Android Studio enough instead, while it is here and lacks something. */
   studioSteps?: string[];
-  /** Android: the project's checks that build the Android app wait for it, and the person may skip them here instead. */
+  /** Android: the project's checks build the Android app, and the person may skip those builds here instead. */
   skip?: { command: string };
   /** Android: the person skipped those checks on this computer, who and when, and the command that turns them back on. */
   skipped?: { by: string; at: string; command: string };

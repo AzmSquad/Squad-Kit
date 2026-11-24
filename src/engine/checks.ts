@@ -6,7 +6,7 @@ import type { ProjectCommands } from '../board/types.js';
 import { writeLog } from '../core/app-log.js';
 import { healEnv, healedBefore, rememberHealed } from './cache-home.js';
 import { failedTests, testAlone } from './failed-tests.js';
-import { flutterDownloads } from './flutter-downloads.js';
+import { ANDROID_CHECK_MS, ANDROID_SILENT_MS, flutterDownloads, limitFor } from './flutter-downloads.js';
 import { KILL_AFTER_MS, endGroup, whenExited } from './process-group.js';
 import { appPortVariables } from './port-vars.js';
 import { guardBlockedPath, guardEnv, homeCachesRefused, spawnProject, type GuardSpec } from './project-guard.js';
@@ -200,7 +200,7 @@ function runOnce(cwd: string, command: string, timeoutMs: number, watch: Command
     const heard = () => {
       if (!watch.silentMs) return;
       clearTimeout(silent);
-      const ms = watch.silentMs;
+      const ms = limitFor(command, watch.silentMs, ANDROID_SILENT_MS);
       silent = setTimeout(() => end(`The command printed nothing for ${minutes(ms)}; it may be waiting in watch mode or for input.`), ms);
     };
     const keep = (chunk: Buffer) => {
@@ -211,7 +211,7 @@ function runOnce(cwd: string, command: string, timeoutMs: number, watch: Command
     child.stdout!.on('data', keep);
     child.stderr!.on('data', keep);
     heard();
-    const timer = setTimeout(() => end(`stopped after ${Math.round(timeoutMs / 60000)} minutes`), timeoutMs);
+    const timer = setTimeout(() => end(`stopped after ${Math.round(limitFor(command, timeoutMs, ANDROID_CHECK_MS) / 60000)} minutes`), limitFor(command, timeoutMs, ANDROID_CHECK_MS));
     const onStop = () => end(STOPPED);
     watch.signal?.addEventListener('abort', onStop, { once: true });
     let done = false;

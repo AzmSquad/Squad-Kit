@@ -9,6 +9,9 @@ import { projectEnv } from './project-guard.js';
 import { flutterOnPath } from './flutter-sdk.js';
 import { kindsOf, type Platform } from './tools/kinds.js';
 import { fvmInstall, runsFvm } from './fvm-sdk.js';
+import { gradleDownloads } from './gradle-dist.js';
+
+export { ANDROID_CHECK_MS, ANDROID_SILENT_MS, limitFor } from './gradle-dist.js';
 
 /**
  * Flutter's own downloads, done by squad-kit outside the guard. Flutter keeps what it downloads for each phone (the
@@ -95,8 +98,10 @@ export type FlutterDownloads = 'done' | 'had' | 'not-needed' | 'failed';
  * for, by squad-kit, once. 'had' when they were done before, 'not-needed' when the command or the folder needs none.
  */
 export async function flutterDownloads(dir: string, command: string, o: { env?: NodeJS.ProcessEnv; signal?: AbortSignal; onOutput?(): void; platform?: NodeJS.Platform; home?: string } = {}): Promise<FlutterDownloads> {
-  if (!runsFlutter(command) && !runsFvm(command)) return 'not-needed';
   const env = o.env ?? projectEnv();
+  // The Gradle an Android build's wrapper asks for: squad-kit gets it first, outside the guard (gradle-dist.ts).
+  await gradleDownloads(dir, command, { env, ...(o.signal ? { signal: o.signal } : {}), ...(o.onOutput ? { onOutput: o.onOutput } : {}), ...(o.home ? { home: o.home } : {}) });
+  if (!runsFlutter(command) && !runsFvm(command)) return 'not-needed';
   // A pinned Flutter that FVM runs: FVM gets it first, outside the guard, and its downloads come from it (fvm-sdk.ts).
   const pinned = await fvmInstall(dir, command, { env, ...(o.signal ? { signal: o.signal } : {}), ...(o.onOutput ? { onOutput: o.onOutput } : {}), ...(o.home ? { home: o.home } : {}) });
   if (!runsFlutter(command)) return 'not-needed';

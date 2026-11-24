@@ -109,7 +109,8 @@ describe('a new Flutter repo, before its first story', () => {
     found({ state: 'missing', builds: '/Users/pm/Library/Android/sdk', note: 'Your Android SDK lacks the command-line tools.' });
     const android = (await tools.projectTools(bp)).lines.find((l) => l.id === 'android')!;
     expect(android.blocks).toEqual([]);
-    expect(android.skip).toBeUndefined();
+    // Skip stays offered: the tools are here, and a build may still not run on this computer.
+    expect(android.skip).toEqual({ command: 'squad tools skip android' });
   });
 });
 

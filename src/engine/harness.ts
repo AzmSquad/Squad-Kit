@@ -11,6 +11,7 @@ import type { AgentRole } from './agents.js';
 import { BRD_READ_MS, BRD_WRITE_MS, LONGEST_READ_MS } from './breakdown-job.js';
 import { MAX_QUESTIONS } from './breakdown-prompts.js';
 import { CHECK_MS, CHECK_SILENT_MS, MAX_ALONE, OUTSIDE_THE_GUARD_WORDS } from './checks.js';
+import { ANDROID_CHECK_MS, ANDROID_SILENT_MS } from './gradle-dist.js';
 import { TURN_WAIT_MS } from './copy-turn.js';
 import { MAX_OLD, MAX_RUNS_ON_MAIN, ON_MAIN_MS } from './old-tests.js';
 import { SEEN_DAYS, WEEK_DAYS, harnessSeen, type Need, type Seen, type StoryLink } from './harness-seen.js';
@@ -263,6 +264,8 @@ function limitRows(meta?: BoardMeta): HarnessLimit[] {
     time({ BRD_WRITE_MS }, 'Writing a breakdown'),
     time({ CHECK_MS }, 'One check'),
     time({ CHECK_SILENT_MS }, 'A silent check', 'It prints nothing for this long.'),
+    time({ ANDROID_CHECK_MS }, 'A check that builds the Android app', 'Its first run downloads the libraries the app needs.'),
+    time({ ANDROID_SILENT_MS }, 'A silent Android build', 'Gradle prints nothing while it downloads.'),
     time({ APP_WAIT_MS }, 'Waiting for your app'),
     time({ TURN_WAIT_MS }, 'Tests and your app in one copy', 'One waits for the other, then it stops and says so.'),
     time({ KEPT_APP_MS }, 'Your app kept for the proof', 'After the review, while nothing uses it. Then it stops.'),

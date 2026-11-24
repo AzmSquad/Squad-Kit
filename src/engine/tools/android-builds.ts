@@ -158,7 +158,8 @@ export function withAndroidChecks(lines: ToolLine[], extra: ToolLine[], o: { met
       actions: inOrder([...base.actions, 'checks']),
       blocks: inOrder([...base.blocks.filter((a) => a !== 'checks'), ...(!skip && !enough ? (['checks'] as const) : [])]),
       ...(id === 'android' && o.skip ? { skipped: { by: o.skip.by, at: o.skip.at, command: UNSKIP_ANDROID.command } } : {}),
-      ...(id === 'android' && !o.skip && offer && !enough ? { skip: { command: SKIP_ANDROID.command } } : {}),
+      // Offered whenever it can take the Android builds out: also when the tools are here and the build still can't run.
+      ...(id === 'android' && !o.skip && offer ? { skip: { command: SKIP_ANDROID.command } } : {}),
     };
     if (at >= 0) out[at] = line;
     else out.push(line);

@@ -1,5 +1,5 @@
 import { gradleHome } from './tools/android.js';
-import { createHash } from 'node:crypto';
+import { wrapperDist } from './gradle-dist.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -306,31 +306,18 @@ function startHome(dir: string, home: string, env: NodeJS.ProcessEnv): void {
  * it is installed: theirs stays read only, the same program they run. Their downloaded zip stays behind.
  */
 function gradleWrapper(dir: string, cwd: string, home: string, env: NodeJS.ProcessEnv): void {
-  // At the top of a Gradle project, or in an app's android/ folder (Flutter, React Native).
-  let said = '';
-  for (const at of [cwd, path.join(cwd, 'android')]) {
-    try {
-      said = fs.readFileSync(path.join(at, 'gradle', 'wrapper', 'gradle-wrapper.properties'), 'utf8');
-      break;
-    } catch {
-      // Not here.
-    }
-  }
-  if (!said) return;
-  const value = (key: string) => new RegExp(`^${key}\\s*=\\s*(.+)$`, 'm').exec(said)?.[1]?.trim().replace(/\\(.)/g, '$1');
-  const url = value('distributionUrl');
-  // Only where the wrapper keeps them by default; a project that keeps its Gradle elsewhere has it already.
-  if (!url || (value('distributionBase') ?? 'GRADLE_USER_HOME') !== 'GRADLE_USER_HOME' || (value('distributionPath') ?? 'wrapper/dists') !== 'wrapper/dists') return;
-  const name = path.basename(url).replace(/\.zip$/, '');
-  // The wrapper's own name for the folder: the address's MD5 in base 36.
-  const hash = BigInt(`0x${createHash('md5').update(url).digest('hex')}`).toString(36);
-  const rel = path.join('wrapper', 'dists', name, hash);
-  const mine = path.join(dir, 'gradle', rel);
-  const ok = `${name}.zip.ok`;
+  const d = wrapperDist(cwd);
+  if (!d) return;
+  const mine = path.join(dir, 'gradle', d.rel);
   // The person's own Gradle home first, then the one squad-kit's own Android builds use (tools/android.ts gradleHome),
-  // which the guard opens for reading only.
-  const theirs = [path.join(env.GRADLE_USER_HOME ?? path.join(home, '.gradle'), rel), path.join(gradleHome(), rel)].find((p) => fs.existsSync(path.join(p, ok)));
-  if (fs.lstatSync(mine, { throwIfNoEntry: false }) || !theirs || !inside(dir, mine)) return;
+  // where squad-kit gets a Gradle for the checks too (gradle-dist.ts), which the guard opens for reading only.
+  const theirs = [path.join(env.GRADLE_USER_HOME ?? path.join(home, '.gradle'), d.rel), path.join(gradleHome(), d.rel)].find((p) => fs.existsSync(path.join(p, d.ok)));
+  if (!theirs || !inside(dir, mine)) return;
+  if (fs.lstatSync(mine, { throwIfNoEntry: false })) {
+    // A whole one is there already. A half one, from a build that downloaded it in the guard and stopped, makes way.
+    if (fs.existsSync(path.join(mine, d.ok))) return;
+    fs.rmSync(mine, { recursive: true, force: true });
+  }
   // The wrapper takes the one folder it finds there as Gradle.
   const unpacked = fs.readdirSync(theirs, { withFileTypes: true }).filter((e) => e.isDirectory());
   if (unpacked.length !== 1) return;
@@ -338,7 +325,7 @@ function gradleWrapper(dir: string, cwd: string, home: string, env: NodeJS.Proce
   madeWhole(mine, (part) => {
     fs.mkdirSync(part);
     fs.symlinkSync(path.join(theirs, unpacked[0]!.name), path.join(part, unpacked[0]!.name));
-    fs.copyFileSync(path.join(theirs, ok), path.join(part, ok));
+    fs.copyFileSync(path.join(theirs, d.ok), path.join(part, d.ok));
   });
 }
 

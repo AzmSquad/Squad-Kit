@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The first Android build check passes instead of being stopped as silent.** A check that builds the Android app
+  (`flutter build apk`) first downloads the Gradle its project asks for, a few hundred MB that print nothing, and
+  squad-kit stopped it after 5 quiet minutes, then sent the Builder to fix what no code change could. squad-kit now gets
+  that Gradle itself before the check, from Gradle's own site only, checked against the SHA-256 Gradle publishes, into
+  its shared Gradle home, where every story finds it. A check that builds the Android app also gets 40 minutes and 15
+  quiet minutes, as its first run downloads the app's libraries. A half Gradle that a stopped build left behind makes
+  way for the whole one.
+- **Skip Android builds is always there** on the Tools page's Android line for a project whose checks build the
+  Android app, also when Android's tools are ready and the build still can't run on this computer.
+
 ### Changed
 
 - **squad-kit gets FVM itself.** A project whose commands run fvm no longer needs you to install or update FVM: the FVM
