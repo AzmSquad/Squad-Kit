@@ -15,6 +15,8 @@ export interface ToolGetting {
   secondsLeft: number;
   /** An update: the step it is at, in plain words. */
   words?: string;
+  /** An update past the time it usually takes: still working, with no time left to guess. */
+  longer?: true;
 }
 
 export interface ToolLine {

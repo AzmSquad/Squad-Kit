@@ -24,10 +24,12 @@ let fvmVersion = '2.4.1';
 let ran: string[];
 
 /** A Mac with Flutter, and FVM from Homebrew: /usr/local/bin/fvm links into Homebrew's Cellar. */
-function mac(o: { brew?: boolean; writable?: boolean } = {}): DetectHost {
+function mac(o: { brew?: boolean; writable?: boolean; arch?: string } = {}): DetectHost {
   const files: Record<string, string> = { '/usr/local/bin/fvm': '', '/usr/local/bin/brew': '', '/sdk/flutter/bin/flutter': '', '/sdk/flutter/version': '3.47.9' };
   return {
     system: 'mac',
+    // An Intel Mac unless a test says: Homebrew in /usr/local is the right one for it.
+    arch: o.arch ?? 'x64',
     home: '/Users/pm',
     env: { PATH: '/usr/local/bin:/sdk/flutter/bin' },
     async run(cmd, args): Promise<Ran> {
@@ -101,11 +103,11 @@ describe('a project that pins its Flutter with FVM', () => {
     const fvm = v.lines.find((l) => l.id === 'fvm')!;
     expect(fvm).toMatchObject({ priority: 'required', state: 'too-old', version: '2.4.1', needs: '3', blocks: ['build', 'checks', 'start-app'], usedFor: 'Building, Checks, Start' });
     expect(fvm.update).toEqual({
-      warning: 'This updates FVM for every project that uses FVM on this Mac, not only this one. Older projects may need small changes to build again. It downloads about 300 MB and takes about 5 minutes.',
-      seconds: 300,
+      warning: 'This updates FVM for every project that uses FVM on this Mac, not only this one. Older projects may need small changes to build again. It downloads a few GB and takes about 30 minutes.',
+      seconds: 1800,
       command: 'squad tools update fvm',
     });
-    expect(fvm.steps).toEqual(['Open a terminal.', 'Run: brew upgrade fvm', 'Come back here and press Check again.']);
+    expect(fvm.steps).toEqual(['Open a terminal.', 'Run: brew uninstall fvm', "Run: brew install leoafarias/fvm/fvm. It is FVM's own, and takes a few minutes.", 'Come back here and press Check again.']);
     // A story waits before the Builder starts, with what is wrong in plain words.
     const b = tools.blockedBy(bp, 'build');
     expect(b).toMatchObject({ text: "squad-kit can't build this story yet: FVM 2.4.1 is too old: it needs 3 or newer.", status: "Waits for a newer FVM on this computer. Goes on by itself once it's there", link: '/tools#fvm' });
@@ -126,6 +128,11 @@ describe('a project that pins its Flutter with FVM', () => {
     expect(brewUpdateLook(mac({ brew: false }), found)).toEqual({ cant: "squad-kit can't update it here: it was not installed with Homebrew, so you update it the way you installed it." });
     expect(brewUpdateLook(mac({ writable: false }), { ...found, managedBy: 'homebrew' })).toEqual({ managedBy: 'homebrew', cant: "squad-kit can't update it here: your Homebrew folder needs your computer's password to change." });
     expect(brewUpdateLook(mac(), { ...found, managedBy: 'homebrew' })).toEqual({ managedBy: 'homebrew' });
+    // Homebrew for Intel Macs on an Apple chip would compile it from source for hours: no Update, FVM's own steps.
+    expect(brewUpdateLook(mac({ arch: 'arm64' }), { ...found, managedBy: 'homebrew' })).toEqual({
+      managedBy: 'homebrew',
+      cant: "squad-kit can't update it here: your Homebrew is the one for Intel Macs, so on this Mac's Apple chip it has no ready-made builds and would compile it from source, which can take hours.",
+    });
   });
 });
 
@@ -141,14 +148,14 @@ describe('updating FVM with Homebrew', () => {
       }
       asked = { cmd, args, env: opts.env };
       now = '4.3.2';
-      for (const l of ['==> Auto-updating Homebrew...', '==> Fetching fvm', '==> Downloading https://ghcr.io/v2/homebrew/core/fvm/blobs/sha256:1', '==> Upgrading fvm', '  2.4.1 -> 4.3.2', '==> Summary', '🍺  /usr/local/Cellar/fvm/4.3.2: 8 files, 12MB']) opts.onLine(l);
+      for (const l of ['==> Auto-updating Homebrew...', '==> Fetching fvm', '==> Downloading https://github.com/leoafarias/fvm/archive/4.3.2.tar.gz', '==> Cloning https://github.com/dart-lang/sdk.git', '==> Upgrading fvm', '  2.4.1 -> 4.3.2', '==> Summary', '🍺  /usr/local/Cellar/fvm/4.3.2: 8 files, 12MB']) opts.onLine(l);
       return { code: 0 };
     };
     const r = await updateTool('fvm', '/usr/local/bin/fvm', { run, onStep: (w) => seen.push(w) });
     expect(r.seconds).toBeGreaterThanOrEqual(0);
     expect(asked!.args).toEqual(['upgrade', 'fvm']);
     expect(asked!.env).toMatchObject(BREW_ENV);
-    expect(seen).toEqual(["Getting Homebrew's list of new versions", 'Downloading the new FVM', 'Installing the new FVM', 'Checking the new FVM']);
+    expect(seen).toEqual(["Getting Homebrew's list of new versions", 'Downloading the new FVM', 'Homebrew is building the new FVM from its source, which can take half an hour', 'Installing the new FVM', 'Checking the new FVM']);
   });
 
   it("a failed update says Homebrew's last line, and the line keeps it as its trouble", async () => {
@@ -169,6 +176,29 @@ describe('updating FVM with Homebrew', () => {
     await ended;
     expect(gettingNow()).toBeNull();
     expect(lastTrouble('fvm')).toContain('The update of FVM did not finish.');
+  });
+
+  it('past its usual time it says "longer than usual", never "about 10 s left" for half an hour', async () => {
+    const { noteTime } = await import('../src/engine/tools/get.js');
+    // It took a second here last time, so this run is past its usual time at once.
+    noteTime('fvm-update', 1, process.env.SQUAD_KIT_HOME!);
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((r) => (release = r));
+    const run: RunUpdate = async (_c, args, opts) => {
+      if (args[0] === '--version') {
+        opts.onLine('2.4.1');
+        return { code: 0 };
+      }
+      await held;
+      return { code: 1 };
+    };
+    let done: () => void = () => undefined;
+    const ended = new Promise<void>((r) => (done = r));
+    startUpdate('fvm', '/usr/local/bin/fvm', { run, after: () => done() });
+    await new Promise((r) => setTimeout(r, 2300));
+    expect(gettingNow()).toMatchObject({ tool: 'fvm', longer: true, secondsLeft: 0 });
+    release();
+    await ended;
   });
 
   it('Homebrew with nothing newer to give: said, never a quiet success', async () => {

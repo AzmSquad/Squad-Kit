@@ -114,7 +114,7 @@ function Progress({ g }: { g: ToolGetting }) {
       </div>
       {g.step === 'update' ? (
         <span>
-          {g.words ?? 'Updating'}, {left(g.secondsLeft)}. Steps that need {g.name} wait until it is done; everything else keeps working.
+          {g.words ?? 'Updating'}, {g.longer ? 'longer than usual, and still working' : left(g.secondsLeft)}. Steps that need {g.name} wait until it is done; everything else keeps working.
         </span>
       ) : (
         <span>

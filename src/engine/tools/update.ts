@@ -83,6 +83,11 @@ export function brewUpdateLook(h: DetectHost, f: Found): NonNullable<Found['upda
   if (f.managedBy !== 'homebrew') return { cant: cant('it was not installed with Homebrew, so you update it the way you installed it') };
   const prefix = brewPrefixOf(h.real(f.where));
   if (!prefix || (!h.exists(path.join(prefix, 'bin', 'brew')) && !onPath(h, 'brew'))) return { managedBy: 'homebrew', cant: cant('Homebrew is not where squad-kit can run it') };
+  // Homebrew for Intel Macs (in /usr/local) on an Apple chip has no ready-made builds: an update would compile the tool
+  // and its build tools (LLVM, Rust) from source, for hours. Seen on this team's own Mac on 2026-11-24.
+  if (h.system === 'mac' && (h.arch ?? process.arch) === 'arm64' && prefix === '/usr/local') {
+    return { managedBy: 'homebrew', cant: cant("your Homebrew is the one for Intel Macs, so on this Mac's Apple chip it has no ready-made builds and would compile it from source, which can take hours") };
+  }
   if (!h.writable(path.join(prefix, 'Cellar'))) return { managedBy: 'homebrew', cant: cant("your Homebrew folder needs your computer's password to change") };
   return { managedBy: 'homebrew' };
 }
@@ -353,6 +358,8 @@ export async function updateTool(
 const BREW_STEPS: { test: RegExp; words: (name: string) => string }[] = [
   { test: /^==> (?:Auto-updating|Updating) Homebrew/i, words: () => "Getting Homebrew's list of new versions" },
   { test: /^==> (?:Fetching|Downloading)\b/i, words: (name) => `Downloading the new ${name}` },
+  // No ready-made build for this computer: Homebrew gets the source and builds it, which can take half an hour.
+  { test: /^==> (?:Cloning|Checking out)\b/i, words: (name) => `Homebrew is building the new ${name} from its source, which can take half an hour` },
   { test: /^==> (?:Upgrading|Installing|Pouring)\b/i, words: (name) => `Installing the new ${name}` },
   { test: /^==> (?:Summary|Caveats)\b|^🍺/i, words: (name) => `Checking the new ${name}` },
 ];
@@ -449,7 +456,9 @@ export function startUpdate(
       const show = (words = g.words) => {
         const elapsed = (Date.now() - t0) / 1000;
         // Counted from the usual time; the bar never reaches the end before the update does.
-        g = { ...g, ...(words ? { words } : {}), done: Math.min(Math.round(elapsed), Math.round(guess * 0.95)), secondsLeft: Math.max(10, Math.round(guess - elapsed)) };
+        // Past its usual time it says so, and still working, never "about 10 s left" for half an hour.
+        const longer = elapsed > guess;
+        g = { ...g, ...(words ? { words } : {}), done: Math.min(Math.round(elapsed), Math.round(guess * 0.95)), secondsLeft: longer ? 0 : Math.max(10, Math.round(guess - elapsed)), ...(longer ? { longer: true as const } : {}) };
         set(g);
       };
       const tick = setInterval(() => show(), 1000);

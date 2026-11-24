@@ -29,7 +29,7 @@ const PRIORITY_WORDS = { required: 'Required', recommended: 'Recommended', optio
 const left = (s: number) => (s >= 90 ? `about ${Math.round(s / 60)} min left` : `about ${s} s left`);
 
 function progress(g: Getting): string {
-  if (g.step === 'update') return `${(g.words ?? 'updating').toLowerCase()}, ${left(g.secondsLeft)}`;
+  if (g.step === 'update') return `${(g.words ?? 'updating').toLowerCase()}, ${g.longer ? 'longer than usual, and still working' : left(g.secondsLeft)}`;
   const pct = g.total ? ` ${Math.min(99, Math.floor((g.done / g.total) * 100))}%,` : '';
   return g.step === 'unpack' ? `unpacking, ${left(g.secondsLeft)}` : `downloading,${pct} ${left(g.secondsLeft)}`;
 }

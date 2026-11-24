@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **An update that takes longer than usual says so.** Past its usual time, Update said "about 10 s left" for as long as
+  it ran. It now says it takes longer than usual and is still working. When Homebrew has no ready-made FVM for the
+  computer and builds it from its source, the line says that too, and the warning before Update says it downloads a
+  few GB and takes about half an hour.
+- **No Update offer that would take hours.** Homebrew for Intel Macs, in /usr/local, on a Mac with an Apple chip has no
+  ready-made builds, so `brew upgrade fvm` compiled Dart, LLVM and Rust from source. squad-kit no longer offers Update
+  there: the FVM line says why and gives FVM's own Homebrew steps (`brew uninstall fvm`, then
+  `brew install leoafarias/fvm/fvm`), which take a few minutes.
+
 ## [1.3.30] — 2026-11-24
 
 ### Fixed

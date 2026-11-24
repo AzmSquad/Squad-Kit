@@ -158,9 +158,12 @@ export const CATALOG: ToolEntry[] = [
     },
     link: 'https://fvm.app/documentation/getting-started/installation',
     // One FVM serves every project on the computer that pins its Flutter with it: updating it is asked first.
-    update: { reaches: 'every project that uses FVM', size: 'about 300 MB', seconds: 300 },
+    // Homebrew's own FVM had no ready-made build on 2026-11-24 (brew info: bottle false), so `brew upgrade fvm` builds it
+    // from the Dart source: a few GB and about half an hour. The time it took here is the next guess.
+    update: { reaches: 'every project that uses FVM', size: 'a few GB', seconds: 1800 },
+    // FVM's own Homebrew tap brings a ready-made Dart, so it takes minutes where Homebrew's own FVM compiles from source.
     updateSteps: {
-      homebrew: ['Open a terminal.', 'Run: brew upgrade fvm', CHECK_AGAIN],
+      homebrew: ['Open a terminal.', 'Run: brew uninstall fvm', "Run: brew install leoafarias/fvm/fvm. It is FVM's own, and takes a few minutes.", CHECK_AGAIN],
       all: ["Open FVM's install page.", 'Install the newest FVM the same way you installed yours.', CHECK_AGAIN],
     },
   },
