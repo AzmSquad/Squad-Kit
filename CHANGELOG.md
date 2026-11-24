@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.30] — 2026-11-24
+
+### Fixed
+
+- **Connecting Azure DevOps happens in one place, and says Connected only when it really is.** After Sign in with
+  Microsoft, the Azure DevOps card said Connected even when squad-kit did not know which organization and project the
+  stories come from (a project whose code is on GitHub, say), so nothing could be pulled until both were typed in
+  Settings, which also asked for a token that was not needed. The card now lists the projects the Microsoft account
+  reaches, to pick with one click (`squad connect azure --site <organization/project>` in a terminal), or takes the
+  board's address pasted from the browser. It says Connected only once squad-kit reaches that project, and says so
+  when a saved project is not there any more.
+- **The token way is on the same card**, with plain steps and a link to the organization's own tokens page. The token
+  is checked before it is saved, and the card opens it at once for an organization of personal Microsoft accounts.
+  A token that may not read the project list still connects.
+- **Settings no longer says "Needs a token" while squad-kit is signed in with Microsoft**, and the empty Backlog points
+  to Connections.
+
 ## [1.3.29] — 2026-11-24
 
 ### Fixed
