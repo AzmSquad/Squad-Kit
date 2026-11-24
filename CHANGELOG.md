@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.34] — 2026-11-24
+
 ### Fixed
 
 - **The first Android build check passes instead of being stopped as silent.** A check that builds the Android app
