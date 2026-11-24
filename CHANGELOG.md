@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.31] — 2026-11-24
+
 ### Fixed
 
 - **An update that takes longer than usual says so.** Past its usual time, Update said "about 10 s left" for as long as
