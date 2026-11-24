@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.36] — 2026-11-24
+
 ### Fixed
 
 - **A check that builds the Android app passes.** Flutter's Android build compiles Flutter's own Gradle plugin in
