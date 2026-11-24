@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.27] — 2026-11-24
+
 ### Fixed
 
 - **An open story no longer breaks while you scroll it.** On a narrower window, where the story's top row takes two
