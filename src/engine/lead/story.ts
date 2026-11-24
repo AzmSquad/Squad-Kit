@@ -7,6 +7,7 @@ import { readUsual } from '../../board/usual.js';
 import { costWords, totalOf } from '../../board/usage.js';
 import { readConversation } from '../conversations.js';
 import { scrubbed } from './notes.js';
+import { toolWaitFacts } from '../tools/wait-facts.js';
 
 /**
  * A story as the lead reads it, in plain text: its spec, plan, "done when", what is happening now, the activity, the
@@ -101,6 +102,8 @@ export function storyNow(bp: BoardPaths, t: Ticket): string[] {
   if (now.state === 'working' && now.time) lines.push(`Time on this step: ${now.time}.`);
   if (t.waiting) lines.push(`Waits for the person: ${t.waiting.summary}`);
   if (t.waitsToStart) lines.push('It waits for the person to press Start: nothing runs until then.');
+  // A tool missing or too old: what, why, the steps and the buttons, as the Tools page says it.
+  lines.push(...toolWaitFacts(bp, t));
   const s = now.slow;
   if (s) {
     lines.push(`${s.title}: ${s.text}`);

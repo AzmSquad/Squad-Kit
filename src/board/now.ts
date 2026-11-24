@@ -2,7 +2,7 @@ import { changesScreens } from './outside-step.js';
 import type { AgentName, QuietPort, Stage, StepClock, StepRun, Ticket, TimedStep, WaitingKind } from './types.js';
 import { HISTORY, WHO, runSeconds, stepSeconds } from './clock.js';
 import { durationWords, middle, minutesWords, rangeWords, usualOf, usualWords, type Usual, type UsualBook } from './usual.js';
-import { DOING, FIXING } from '../engine/plain-doing.js';
+import { DOING, FIXING, waitsForTools } from '../engine/plain-doing.js';
 
 /**
  * What is happening on a ticket right now, in plain words, worked out from the ticket's own record and the project's
@@ -171,7 +171,7 @@ function stateOf(t: Ticket): NowState {
   if (t.stage === 'done') return 'done';
   if (t.waiting || t.takenOver) return 'you';
   if (t.stopRequested) return 'stopping';
-  if (t.status.startsWith(QUEUED)) return 'queued';
+  if (t.status.startsWith(QUEUED) || waitsForTools(t.status)) return 'queued';
   if (t.stage === 'release') return 'ready';
   if (t.squad || t.live) return 'working';
   return 'idle';
@@ -371,7 +371,7 @@ function stageNotes(t: Ticket, state: NowState, book: UsualBook, at: number): Li
       const inStage = work ?? (st?.stage === t.stage ? (at - Date.parse(st.since)) / 1000 : undefined);
       if (state === 'you') note = 'your turn';
       else if (state === 'ready') note = t.release ? `in ${t.release}` : 'accepted';
-      else if (state === 'queued') note = 'next in line';
+      else if (state === 'queued') note = waitsForTools(t.status) ? 'waits for a tool' : 'next in line';
       else if (state === 'working' || state === 'stopping') note = inStage !== undefined ? `now · ${durationWords(inStage)}${s === 'test' ? builderRunWords(t) : ''}` : 'now';
     } else if (s === 'review') note = t.track === 'auto' ? 'accepted by itself' : 'you check proof';
     else if (s === 'release') note = t.track === 'auto' ? 'merges by itself' : 'on Looks right';
@@ -393,7 +393,7 @@ export function noteWhenWords(t: Ticket, now: Pick<LiveNow, 'state' | 'role' | '
     case 'you':
       return `No agent is running now, so nobody reads it yet. The squad reads it when it carries on, after you ${t.waiting ? YOUR_PART[t.waiting.kind] : 'give it back'}.`;
     case 'queued':
-      return 'No agent is running now, so nobody reads it yet. It is next in line: the squad reads it when a slot is free and its step starts.';
+      return waitsForTools(t.status) ? 'No agent is running now, so nobody reads it yet. It waits for a tool on this computer: the squad reads it when its step starts.' : 'No agent is running now, so nobody reads it yet. It is next in line: the squad reads it when a slot is free and its step starts.';
     case 'stopping':
       return 'The squad is stopping. It reads it when the work carries on.';
     case 'ready':
@@ -556,8 +556,8 @@ export function liveNow(t: Ticket, book: UsualBook, at = Date.now(), saving = fa
     return {
       ...base,
       line: t.status,
-      sentence: `It is next in line. It starts when a slot is free${m ? ` (${m[1]} of ${m[2]} busy)` : ''}.`,
-      next: 'Nothing is needed from you now.',
+      sentence: waitsForTools(t.status) ? `${t.status}. Nothing runs on it until then.` : `It is next in line. It starts when a slot is free${m ? ` (${m[1]} of ${m[2]} busy)` : ''}.`,
+      next: waitsForTools(t.status) ? 'The story says what is missing, with the link to it.' : 'Nothing is needed from you now.',
       noteWhen: noteWhenWords(t, { state }),
     };
   }

@@ -23,7 +23,7 @@ export const ON_ITS_OWN: string[] = [
 /** Level 2, after your OK: each is a card with a real button, the same as the board's. */
 export const AFTER_YOUR_OK: string[] = [
   'Create a story or a bug from the conversation; nothing starts until you say',
-  'Board actions: start or stop a story, give more time, take the pictures again, try again, start the app, get or update a tool',
+  'Board actions: start or stop a story, give more time, take the pictures again, try again, start the app, get or update a tool, skip Android builds on this computer',
   "Suggest an answer to an agent's question, for you to send",
   'Suggest a settings change, for you to save (technical settings only for engineers)',
 ];
@@ -41,6 +41,7 @@ export const ACTIONS: Record<LeadAction, { name: string; label: string; allowabl
   stop_story: { name: 'Stop the story', label: 'Stop' },
   get_tool: { name: 'Get a tool', label: 'Get it' },
   update_tool: { name: 'Update a tool', label: 'Update' },
+  skip_android: { name: 'Skip Android builds on this computer', label: 'Skip Android builds' },
   engineer: { name: 'Let an engineer look', label: 'Let an engineer look' },
 };
 

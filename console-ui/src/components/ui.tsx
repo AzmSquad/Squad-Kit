@@ -164,7 +164,7 @@ export function Tracker({ ticket }: { ticket: Ticket }) {
             <span className="nd">{i < at ? <Check size={12} strokeWidth={3} /> : null}</span>
             {s.name}
             {i === at && (
-              <span className="tag">{mode === 'you' ? 'Your turn' : ticket.now?.merging ? 'Working' : ticket.stage === 'release' ? 'Ready' : ticket.dependency?.way === 'wait' && !ticket.dependency.started && !ticket.squad ? 'Waiting' : 'Working'}</span>
+              <span className="tag">{mode === 'you' ? 'Your turn' : ticket.now?.merging ? 'Working' : ticket.stage === 'release' ? 'Ready' : (ticket.dependency?.way === 'wait' && !ticket.dependency.started && !ticket.squad) || ticket.toolWait ? 'Waiting' : 'Working'}</span>
             )}
             {notes.size > 0 && <span className="tnote">{i === at && note === 'your turn' ? '' : s.stage === 'release' && ticket.sendAs ? 'as a pull request' : (note ?? '')}</span>}
             {waits.has(s.stage) && <span className="tnote twait">{waits.get(s.stage)}</span>}

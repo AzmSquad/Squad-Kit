@@ -1,14 +1,17 @@
 import { Link } from '@tanstack/react-router';
-import { Loader2, Wrench } from 'lucide-react';
+import { Loader2, SkipForward, Wrench } from 'lucide-react';
 import { ToolLogo } from './ToolLogo';
+import { useAct } from '../lib/data';
 import type { ToolBlock } from '../api/types';
 import '../styles/tools.css';
 
 /**
  * The one message for a step a missing tool stops: what can't happen, why, and the way out, a link to the tool's line
- * on the Tools page ("/tools#flutter"). Nothing failed: the story goes on by itself once the tool is there.
+ * on the Tools page ("/tools#flutter"). Nothing failed: the story goes on by itself once the tool is there. When the
+ * person may go around it instead (the checks that build the Android app), the card offers that too, with what it means.
  */
 export function ToolBlockCard({ block }: { block: ToolBlock }) {
+  const act = useAct();
   const hash = block.link.split('#')[1];
   const many = block.tools.length > 1;
   return (
@@ -23,11 +26,24 @@ export function ToolBlockCard({ block }: { block: ToolBlock }) {
         <span>
           {block.text} {block.checking ? 'It goes on in a moment.' : `Nothing failed: it goes on by itself once ${many ? "they're" : "it's"} there.`}
         </span>
+        {block.skip && <span className="tl-skip-note">{block.skip.label}: {block.skip.note}</span>}
       </div>
       <span className="grow" />
-      <Link to="/tools" hash={hash} className="btn sm">
-        See what's needed
-      </Link>
+      <span className="tl-block-acts">
+        <Link to="/tools" hash={hash} className="btn sm">
+          See what's needed
+        </Link>
+        {block.skip && (
+          <button
+            className="btn sm"
+            title={block.skip.command}
+            disabled={act.isPending}
+            onClick={() => act.mutate({ path: '/api/v1/tools/android/skip', body: { skip: true }, done: 'Android builds are skipped on this computer. The story goes on in a moment.' })}
+          >
+            <SkipForward size={14} /> {block.skip.label}
+          </button>
+        )}
+      </span>
     </div>
   );
 }

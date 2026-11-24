@@ -30,7 +30,8 @@ import type { Lane } from '../lane.js';
 import { pauseClock, stepDoing } from '../../board/clock.js';
 import { queuedLine } from '../../board/now.js';
 import { firstOpenTicket, waitsForFirstWords } from '../../board/first-story.js';
-import { TOOLS_CHECKING, toolsHold, waitsForTools } from '../tools/index.js';
+import { TOOLS_CHECKING, waitsForTools } from '../tools/index.js';
+import { toolsHold } from '../tools/hold.js';
 import { LimitReached, activePause, limitText, type LimitPause } from '../usage-limit.js';
 import { forgetSaveTrouble } from '../save-trouble.js';
 import { fileTroubleWords, isDiskTrouble } from '../../core/file-trouble.js';
@@ -387,7 +388,7 @@ export class LiveSquad {
         // A Required tool missing or too old for this step (a Flutter app on a computer without Flutter): it waits with
         // the reason, and goes on by itself once the tool is there (engine/tools).
         const tools = first || pause ? null : (toolsHold(this.bp, t, this.phaseFor(t)) ?? this.picturesWait(t, this.phaseFor(t)));
-        if (!first && !pause && !tools && waitsForTools(t.status) && t.status !== TOOLS_CHECKING) this.toolsHere(t.id);
+        if (!first && !pause && !tools && waitsForTools(t.status) && t.status !== TOOLS_CHECKING) this.toolsHere(t.id, t.status);
         if (first) this.hold(t, waitsForFirstWords(first.id));
         else if (pause) this.hold(t, limitText(pause));
         else if (tools) this.waitForTools(t, tools);

@@ -1,6 +1,9 @@
 import type { ToolEvent } from '../modules/ai-tool/types.js';
 import { describeToolEvent } from '../modules/registry.js';
 
+// The card's line of a story that waits for a tool, for the board's own files (board/now.ts).
+export { waitsForTools } from './tools/wait-words.js';
+
 /**
  * What an agent is doing, in the person's words: the one place a tool call becomes a status line or a card's live line.
  * A browser test run says "Running the tests", and a search for a raw pattern says "Reading the code". The exact command

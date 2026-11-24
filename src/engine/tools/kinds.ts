@@ -12,7 +12,7 @@ import { remoteKind } from '../../modules/registry.js';
  * which phones it builds for from its folders. Its repo's remotes say where its code is kept, for the code host's tool.
  */
 
-export type ProjectKind = 'web' | 'flutter' | 'react-native' | 'ios' | 'android' | 'docker' | 'github' | 'azure';
+export type ProjectKind = 'web' | 'flutter' | 'react-native' | 'ios' | 'android' | 'docker' | 'fvm' | 'fvm-pin' | 'github' | 'azure';
 export type Platform = 'ios' | 'android' | 'web';
 
 export interface PlaceKinds {
@@ -103,6 +103,8 @@ export function kindsOf(dir: string): { kinds: ProjectKind[]; platforms: Platfor
     }
   }
   if (['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml'].some((f) => has(dir, f))) kinds.push('docker');
+  // The Flutter version is pinned with FVM: FVM 3's .fvmrc, or FVM 2's own folder. Its commands running fvm make 'fvm'.
+  if (has(dir, '.fvmrc') || has(dir, '.fvm', 'fvm_config.json')) kinds.push('fvm-pin');
   for (const kind of remoteUrls(dir).map(remoteKind)) if (kind && !kinds.includes(kind as ProjectKind)) kinds.push(kind as ProjectKind);
   return { kinds, platforms: [...platforms] };
 }

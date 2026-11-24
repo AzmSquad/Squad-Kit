@@ -175,6 +175,16 @@ describe("squad-kit's own Android devices", () => {
     expect(imagesIn('/s', 'arm64', list).map((r) => r.id)).toEqual(['system-images;android-36;google_apis;arm64-v8a', 'system-images;android-36;default;arm64-v8a']);
     expect(imagesIn('/s', 'x64', list).map((r) => r.id)).toEqual(['system-images;android-36;default;x86_64', 'system-images;android-34;google_apis_playstore;x86_64']);
   });
+
+  it("Android 17's folder has a minor number (android-37.0), as Android Studio's Device Manager makes it: its id keeps it", () => {
+    const list = (dir: string) =>
+      ({
+        [path.join('/s', 'system-images')]: ['android-37.0'],
+        [path.join('/s', 'system-images', 'android-37.0')]: ['google_apis_playstore'],
+        [path.join('/s', 'system-images', 'android-37.0', 'google_apis_playstore')]: ['arm64-v8a'],
+      })[dir] ?? [];
+    expect(imagesIn('/s', 'arm64', list)).toEqual([expect.objectContaining({ id: 'system-images;android-37.0;google_apis_playstore;arm64-v8a', version: '17' })]);
+  });
 });
 
 describe('starting and stopping', () => {

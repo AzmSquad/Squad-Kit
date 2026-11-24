@@ -20,6 +20,7 @@ import { productPlan, startProduct, stopProduct, waitWords } from '../product-ru
 import { treeOf } from '../lane.js';
 import { ownCheckEnded, ranFor, runsFor } from '../../board/clock.js';
 import { folderOf, projectCopies } from '../leftovers.js';
+import { checksToRunHere } from '../tools/android-builds.js';
 import type { LiveSquad } from './squad.js';
 
 /** The window: squad-kit's own tools for one agent run, and the checks and apps behind them. */
@@ -65,8 +66,8 @@ export const agentWindowPart = {
     const guard = this.guardFor(cwd, id);
     return {
       cwd,
-      // A project the Builder is setting up may say how by now.
-      commands: () => this.saveFoundCommands(id, cwd, repo),
+      // A project the Builder is setting up may say how by now. Android builds skipped here don't run (tools/android-builds.ts).
+      commands: () => checksToRunHere(this.bp, this.saveFoundCommands(id, cwd, repo)).commands,
       ...(guard ? { guard } : {}),
       onStart: (name) =>
         this.update(id, (x) => {

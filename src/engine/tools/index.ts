@@ -10,11 +10,11 @@ import { atLeast, PAIR_RULES, tooOld, updateRecommended } from './fit.js';
 import { clearHalfGets, firstGuess, gettingNow, GetTrouble, lastTrouble, startGets, type Getting, type ToolSource } from './get.js';
 import { acceptAndroid, androidAccepted, androidLicenses, freeBytes, roomTrouble, type License } from './android.js';
 import { choosePhone, IPHONE_ONLY, type PhoneSystem } from './which-phone.js';
-import { projectKinds, type PlaceKinds, type Platform } from './kinds.js';
-import { kindsOfCommands } from '../find-commands.js';
-import { reposOf } from '../repos.js';
-import { usesAndroid } from '../android-env.js';
-import { addUpdateLooks, flutterUpdateLook, startUpdate, updateGuess, updateWarning } from './update.js';
+import type { PlaceKinds, Platform } from './kinds.js';
+import { placesWithKinds } from './places.js';
+import { CANT_HERE, GOES_ON, TOOLS_CHECKING } from './wait-words.js';
+import { androidChecks, androidSkip, withAndroidChecks } from './android-builds.js';
+import { addUpdateLooks, startUpdate, updateGuess, updateLookOf, updateWarning } from './update.js';
 
 /**
  * What a project needs on this computer, for the Tools page and for the steps that need a tool: `projectTools` gives
@@ -68,6 +68,12 @@ export interface ToolLine {
   /** squad-kit gets it: how much room it takes ("about 20 GB") and about how long the first time takes, in seconds. */
   size?: string;
   seconds?: number;
+  /** Android: the steps that make the person's own Android Studio enough instead, while it is here and lacks something. */
+  studioSteps?: string[];
+  /** Android: the project's checks that build the Android app wait for it, and the person may skip them here instead. */
+  skip?: { command: string };
+  /** Android: the person skipped those checks on this computer, who and when, and the command that turns them back on. */
+  skipped?: { by: string; at: string; command: string };
 }
 
 export interface ToolsView {
@@ -93,6 +99,8 @@ export interface ToolBlock {
   link: string;
   /** Nothing is known yet: this computer is being checked. */
   checking?: true;
+  /** Another way on: skip what waits for the tool (the checks that build the Android app), with what that means. */
+  skip?: { label: string; note: string; command: string };
 }
 
 /* ── this computer's tools, kept and checked again ─────── */
@@ -157,7 +165,7 @@ export function checkTools(): Promise<FoundBook> {
 }
 
 /** How often squad-kit looks again by itself while a story waits for a tool. */
-const LOOK_AGAIN_MS = 10 * 60_000;
+export const LOOK_AGAIN_MS = 10 * 60_000;
 /** A story looked at checks again, at most this often. */
 const LOOKED_AT_MS = 60_000;
 
@@ -268,6 +276,7 @@ export function linesFor(places: PlaceKinds[], book: FoundBook | null, system: S
         ...(trouble && state !== 'ready' ? { trouble } : {}),
         ...(look && !look.cant ? { update: { warning: updateWarning(e, system, seconds), seconds, command: `squad tools update ${e.id}` } } : {}),
         ...(look?.cant ? { cantUpdate: look.cant } : {}),
+        ...(e.studioSteps && state === 'missing' && book?.tools['android-studio']?.state === 'found' ? { studioSteps: [...e.studioSteps] } : {}),
       };
     }
     out.push(line);
@@ -292,7 +301,7 @@ export function projectWords(places: PlaceKinds[]): string {
   return parts.length ? `This project has ${list(parts)}.` : 'squad-kit found no app here that needs more than every project needs.';
 }
 
-function metaOf(bp: BoardPaths): BoardMeta | null {
+export function metaOf(bp: BoardPaths): BoardMeta | null {
   try {
     return boardExists(bp) ? readMeta(bp) : null;
   } catch {
@@ -302,31 +311,33 @@ function metaOf(bp: BoardPaths): BoardMeta | null {
 
 /** The Tools page: what this project needs on this computer. The first time, it checks the computer first. */
 export async function projectTools(bp: BoardPaths): Promise<ToolsView> {
-  const places = projectKinds(bp.root, metaOf(bp));
+  const meta = metaOf(bp);
+  const places = placesWithKinds(bp.root, meta);
   const book = foundNow() ?? (await checkTools());
   const system = book.system ?? systemOf();
+  const lines = linesFor(places, book, system, readyNow(), phoneSystem(bp, 'pictures') ?? undefined);
+  // The project's own checks that build its Android app need Android's build tools, whatever its phone (android-builds.ts).
+  const extra = meta && androidChecks(meta).length ? androidLines(places, book) : [];
   return {
     system,
     checkedAt: book.at ?? null,
     checking: Boolean(running),
     summary: projectWords(places),
     places,
-    lines: linesFor(places, book, system, readyNow(), phoneSystem(bp, 'pictures') ?? undefined),
+    lines: withAndroidChecks(lines, extra, { meta, book, skip: androidSkip(bp) }),
     getting: gettingNow(),
   };
 }
 
+/** The Android and Java lines as an app built for Android needs them: for a check whose command builds one. */
+export function androidLines(places: PlaceKinds[], book: FoundBook): ToolLine[] {
+  const all = places.map((p) => ({ ...p, platforms: [...new Set([...p.platforms, 'android' as const])] }));
+  return linesFor(all.length ? all : [{ place: '.', kinds: ['android'], platforms: ['android'] }], book, book.system, undefined, 'android').filter((l) => l.id === 'android' || l.id === 'java');
+}
+
 /* ── what a block says ──────────────────────────────────── */
 
-export const TOOLS_CHECKING = "Checking this computer's tools for this story";
-const GOES_ON = (n: number) => `Goes on by itself once ${n === 1 ? "it's" : "they're"} there`;
-const CANT_HERE = "It can't go on on this computer";
-
-/** True for the card's line of a story that waits for a tool. */
-export function waitsForTools(status: string | undefined): boolean {
-  if (!status) return false;
-  return status === TOOLS_CHECKING || (status.startsWith('Waits for ') && (/\. Goes on by itself once (?:it's|they're) there$/.test(status) || status.endsWith(`. ${CANT_HERE}`)));
-}
+export { TOOLS_CHECKING, waitsForTools } from './wait-words.js';
 
 /** "about 40 seconds left", "about 2 minutes left". */
 function leftWords(seconds: number): string {
@@ -386,17 +397,12 @@ type StoryWhere = Pick<Ticket, 'parts' | 'repo' | 'worktree' | 'copies'>;
 const kindsKept = new Map<string, { at: number; places: PlaceKinds[] }>();
 const KINDS_MS = 15_000;
 
-function placesFor(bp: BoardPaths, meta: () => BoardMeta | null, story?: StoryWhere): PlaceKinds[] {
+export function placesFor(bp: BoardPaths, meta: () => BoardMeta | null, story?: StoryWhere): PlaceKinds[] {
   const key = JSON.stringify([bp.root, story?.worktree ?? null, story?.parts ?? null, story?.repo ?? null, story?.copies?.map((c) => c.dir) ?? null]);
   const k = kindsKept.get(key);
   if (k && Date.now() - k.at < KINDS_MS) return k.places;
-  const m = meta();
-  const places = projectKinds(bp.root, m, story);
-  // A new project with no files yet: its first story's saved commands say what kind of app it becomes.
-  if (!places.some((p) => p.kinds.some((k) => k !== 'github')) && m?.scan?.empty) {
-    const k = kindsOfCommands(m.commands ?? {});
-    if (k.kinds.length) places.push({ place: '.', ...k });
-  }
+  // A new repo with no files yet: its saved commands say what kind of app it becomes (places.ts).
+  const places = placesWithKinds(bp.root, meta(), story);
   if (kindsKept.size > 200) kindsKept.clear();
   kindsKept.set(key, { at: Date.now(), places });
   return places;
@@ -452,48 +458,6 @@ function iphoneReady(bp: BoardPaths, action: ToolAction, story?: StoryWhere): bo
   if (b.checking) return true;
   const pairs = new Set(PAIR_RULES.filter((r) => r.platform === 'ios').map((r) => r.tool));
   return !b.tools.some((t) => IPHONE_ONLY.includes(t.id) || (t.state === 'too-old' && pairs.has(t.id)));
-}
-
-/** The action a squad step needs its tools for. */
-const ACTION_OF: Record<string, ToolAction> = { build: 'build', unstick: 'build', test: 'checks' };
-
-/** What a story about to take a step waits for, if anything: the live squad holds it with this. */
-export function toolsHold(bp: BoardPaths, t: Ticket, phase: string): ToolBlock | null {
-  const action = ACTION_OF[phase];
-  return action ? (blockedBy(bp, action, t) ?? commandsBlock(bp, t, action)) : null;
-}
-
-/**
- * A build or a check whose own command builds an Android app (`flutter build apk`, `./gradlew assembleDebug`) needs
- * squad-kit's Android tools and Java 17 or newer, whatever kind of app the project is: it waits for them with the Tools
- * page's line while they are missing or too old.
- */
-export function commandsBlock(bp: BoardPaths, t: Pick<Ticket, 'repo' | 'parts' | 'worktree' | 'copies'>, action: ToolAction): ToolBlock | null {
-  if (action !== 'build' && action !== 'checks') return null;
-  const meta = metaOf(bp);
-  if (!meta) return null;
-  const commands = reposOf(meta)
-    .filter((r) => !t.repo || r.path === t.repo)
-    .flatMap((r) => [r.commands.test, r.commands.lint, r.commands.build]);
-  if (!commands.some((c) => usesAndroid(c))) return null;
-  const book = foundNow();
-  if (!book) return null;
-  const places = placesFor(bp, () => meta, t).map((p) => ({ ...p, platforms: [...new Set([...p.platforms, 'android' as const])] }));
-  const lines = linesFor(places.length ? places : [{ place: '.', kinds: ['android'], platforms: ['android'] }], book, book.system, undefined, 'android').filter((l) => (l.id === 'android' || l.id === 'java') && l.state !== 'ready');
-  return lines.length ? blockOf(action, lines) : null;
-}
-
-/**
- * A story read for the board: when it waits for a tool, what it waits for, with the link (never saved). Looking at
- * the story checks the computer again beside, so it goes on soon after the tool is installed.
- */
-export function toolWaitOf(bp: BoardPaths, t: Ticket, lookedAt = false): { toolWait?: ToolBlock } {
-  if (!waitsForTools(t.status)) return {};
-  if (lookedAt) checkSoon();
-  // A phone app's pictures wait for its phone tools at the proof (engine/phone/plan.ts).
-  const action = t.squad?.phase === 'proof' ? 'pictures' : (ACTION_OF[t.squad?.phase ?? ''] ?? 'build');
-  const b = blockedBy(bp, action, t);
-  return b ? { toolWait: b } : {};
 }
 
 /* ── Get it ─────────────────────────────────────────────── */
@@ -568,7 +532,7 @@ export async function acceptToolNow(id: string, ids: string[], o: { fetch?: type
 /* ── Update ─────────────────────────────────────────────── */
 
 /**
- * Update Flutter: squad-kit runs the tool's own update on your copy, beside everything else, only when that is safe and
+ * Update Flutter or FVM: squad-kit runs the tool's own update on your copy, beside everything else, only when that is safe and
  * only with your OK, as the update reaches every project that uses it. It looks at the folder once more right before,
  * and checks the computer again once it is done, so the line turns Ready and a story waiting for it goes on.
  */
@@ -586,7 +550,7 @@ export async function updateToolNow(bp: BoardPaths, id: string, opts: { ok?: boo
   if (!opts.ok) throw new Error(`${l.update.warning} squad-kit updates it only after you say OK.`);
   // Looked at again right before: the folder may have changed since the last check.
   const f = foundNow()?.tools[e.id];
-  const look = f ? await flutterUpdateLook(host(), f) : undefined;
+  const look = f ? await updateLookOf(host(), e.id, f) : undefined;
   if (!f?.where || !look || look.cant) throw new Error(`${look?.cant ?? "squad-kit can't update it here: it could not look inside its folder."} The Tools page shows the steps.`);
   return startUpdate(e.id, f.where, { after: () => void checkTools().catch(() => undefined) });
 }

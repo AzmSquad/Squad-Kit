@@ -4,6 +4,7 @@ import { addActivity, listDecisions, readTicket, writeDecision, writeMeta } from
 import { wayOptions } from '../../board/actions.js';
 import { pushBlockedByGuard } from '../push-refused.js';
 import { envBlocked } from '../env-blockers.js';
+import { checksToRunHere, skippedWords } from '../tools/android-builds.js';
 import { scheduleSquad } from '../../board/schedule.js';
 import type { OldFailure, ProjectCommands, Ticket } from '../../board/types.js';
 import { CHECK_DOING, DOING } from '../plain-doing.js';
@@ -156,7 +157,13 @@ export const checksPart = {
     // A project the Builder just set up says now how it is tested and run.
     for (const c of copiesOf(this.meta(), t)) this.saveFoundCommands(id, c.dir, c.repo.path);
     const meta = this.meta();
-    const copies = copiesOf(meta, t);
+    // Android builds skipped on this computer, as the person chose: those checks don't run (tools/android-builds.ts).
+    const skipped: string[] = [];
+    const copies = copiesOf(meta, t).map((c) => {
+      const here = checksToRunHere(this.bp, c.repo.commands);
+      skipped.push(...here.skipped);
+      return here.skipped.length ? { ...c, repo: { ...c.repo, commands: here.commands } } : c;
+    });
     const several = copies.length > 1;
     // Tests made weaker first: passing them would prove little, and only you can go past it.
     const weak: Weakening[] = [];
@@ -189,6 +196,7 @@ export const checksPart = {
       x.stage = 'test';
       x.live = true;
       x.gates = { checks: 'pending', review: x.gates?.review ?? 'pending', proof: 'pending' };
+      if (skipped.length) addActivity(x, 'squad', skippedWords(skipped));
       addActivity(x, 'tester', allReused ? CHECKS_PASSED_FOR_BUILDER : reused.length ? someFromBuilder(reused) : 'squad-kit is running the project checks');
       startStep(x, { who: 'squad', step: 'checks', limit: 15 });
     });

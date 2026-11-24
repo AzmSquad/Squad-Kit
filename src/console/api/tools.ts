@@ -4,13 +4,15 @@ import { boardPaths } from '../../board/store.js';
 import { acceptToolNow, checkTools, getToolNow, projectTools, toolLicense, updateToolNow } from '../../engine/tools/index.js';
 import type { ToolSource } from '../../engine/tools/get.js';
 import type { ToolId } from '../../engine/tools/catalog.js';
+import { skipToolNow } from '../../engine/tools/android-builds.js';
 import { act } from './act.js';
 
 /**
  * The Tools page, "What this project needs": the lines for this project on this computer, Check again, Get it for the
  * tools squad-kit gets itself, Accept for a tool whose maker's license comes first (Android's), and Update for your own
- * copy of a tool squad-kit can update safely. One call each, the same as `squad tools`, `squad tools check`, `squad
- * tools get <tool>`, `squad tools accept <tool>`, `squad tools update <tool>`.
+ * copy of a tool squad-kit can update safely, and Skip Android builds on this computer. One call each, the same as `squad
+ * tools`, `squad tools check`, `squad tools get <tool>`, `squad tools accept <tool>`, `squad tools update <tool>`,
+ * `squad tools skip android` and `squad tools unskip android`.
  */
 
 export function mountToolsApi(app: Hono, opts: { paths: SquadPaths; source?: (id: ToolId) => Promise<ToolSource>; fetch?: typeof fetch; free?: number | null }): void {
@@ -44,6 +46,16 @@ export function mountToolsApi(app: Hono, opts: { paths: SquadPaths; source?: (id
       const b = (await c.req.json().catch(() => ({}))) as { licenses?: unknown };
       const ids = Array.isArray(b?.licenses) ? b.licenses.map(String) : [];
       await acceptToolNow(c.req.param('tool'), ids, opts.fetch ? { fetch: opts.fetch } : {});
+      return projectTools(bp);
+    }),
+  );
+
+  // Skip Android builds: the checks that build the Android app don't run on this computer, and no story waits for Android's
+  // tools for them. { "skip": false } turns them back on. A story waiting for those tools goes on by itself.
+  app.post('/api/v1/tools/:tool/skip', (c) =>
+    act(c, async () => {
+      const b = (await c.req.json().catch(() => ({}))) as { skip?: unknown };
+      skipToolNow(bp, c.req.param('tool'), b?.skip !== false);
       return projectTools(bp);
     }),
   );

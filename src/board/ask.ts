@@ -4,6 +4,7 @@ import { WHO, slowAfter } from './clock.js';
 import { inAbout, type LiveNow } from './now.js';
 import { minutesWords, middle, usualOf, type Usual, type UsualBook } from './usual.js';
 import { costWords, totalOf } from './usage.js';
+import { waitsForTools } from '../engine/plain-doing.js';
 
 /**
  * "Ask about this ticket": status questions are answered at once from the ticket's live record, in the language of
@@ -226,6 +227,7 @@ export function noteWhenAr(t: Ticket, now: LiveNow): string {
     case 'you':
       return `${none} سيقرؤها الفريق عندما يتابع العمل، بعد ${t.waiting ? YOUR_PART_AR[t.waiting.kind] : YOUR_PART_AR.yours}.`;
     case 'queued':
+      if (waitsForTools(t.status)) return `${none} تنتظر أداة على هذا الجهاز: سيقرؤها الفريق عند بدء خطوتها.`;
       return `${none} التذكرة التالية في الدور: سيقرؤها الفريق عند توفر مكان وبدء خطوتها.`;
     case 'stopping':
       return 'الفريق يتوقف الآن، وسيقرؤها عند متابعة العمل.';
@@ -317,6 +319,7 @@ function problemLines(t: Ticket, now: LiveNow, book: UsualBook, lang: AskLang): 
 function stateAr(t: Ticket, now: LiveNow, lead = ''): string {
   switch (now.state) {
     case 'queued':
+      if (waitsForTools(t.status)) return `${lead}تنتظر أداة على هذا الجهاز، وتتابع وحدها عند توفرها. بطاقتها تقول ما ينقص.`;
       return `${lead}التذكرة التالية في الدور، وتبدأ عند توفر مكان.`;
     case 'stopping':
       return 'العمل يتوقف كما طلبت. كل ما أُنجز محفوظ.';
@@ -357,6 +360,7 @@ function whenLines(t: Ticket, now: LiveNow, book: UsualBook, lang: AskLang): str
     return ar ? [`غالبًا ${arIn(now.readyIn.seconds)}. بعدها سنطلب منك ${NEED_AR[what] ?? what}.`] : [`Probably ${inAbout(now.readyIn.seconds)}. Then you will be asked to ${what}.`];
   }
   if (now.state === 'you') return ar ? [`التذكرة بانتظارك الآن: تحتاج ${t.waiting ? YOUR_PART_AR[t.waiting.kind] : YOUR_PART_AR.yours}.`] : [`It is waiting for you now: ${lowerFirst(t.waiting?.summary ?? 'give it back when you are done')}.`];
+  if (now.state === 'queued' && waitsForTools(t.status)) return ar ? ['لم تبدأ خطوتها بعد: تنتظر أداة على هذا الجهاز، وتتابع وحدها عند توفرها. بطاقتها تقول ما ينقص.'] : [`${t.status}. Its step has not started yet: the story's card says what is missing.`];
   if (now.state === 'queued') return ar ? ['لم تبدأ خطوتها بعد: هي التالية في الدور، وتبدأ عند توفر مكان.'] : ['It is next in line, so its step has not started yet. It starts when a slot is free.'];
   if (now.state === 'ready') return ar ? [`جاهزة: العمل مقبول ويصدر مع ${t.release ?? 'النسخة القادمة'}.`] : [`It is ready: accepted, and it goes out with ${t.release ?? 'the next release'}.`];
   if (now.state === 'done') return ar ? [`صدرت${t.release ? ` في ${t.release}` : ''}.`] : [now.sentence];

@@ -20,6 +20,7 @@ import { afterPullRequest } from '../../board/auto.js';
 import { TURNS_BEFORE_BANNER } from './limits.js';
 import { BLIP_WAITS_MIN, held, type PassingTrouble, projectRoot } from './shared.js';
 import type { LiveSquad } from './squad.js';
+import { androidSkip } from '../tools/android-builds.js';
 
 /** Waiting: for a free place, a tool, a passing problem or the computer's sleep, and carrying on after a restart or trouble. */
 export const waitsPart = {
@@ -190,10 +191,11 @@ export const waitsPart = {
     return Boolean(rc.start?.trim() && rc.url?.trim());
   },
 
-  /** The tool a story waited for is here now: said once on the story, as it goes on. */
-  toolsHere(this: LiveSquad, id: string): void {
+  /** The tool a story waited for is here now, or the person skipped Android builds: said once on the story, as it goes on. */
+  toolsHere(this: LiveSquad, id: string, was = ''): void {
+    const skipped = /\bAndroid\b/.test(was) && Boolean(androidSkip(this.bp));
     try {
-      this.update(id, (x) => addActivity(x, 'squad', 'The tools it needs are on this computer now, so it goes on'));
+      this.update(id, (x) => addActivity(x, 'squad', skipped ? 'You skipped Android builds on this computer, so it goes on without the checks that build the Android app' : 'The tools it needs are on this computer now, so it goes on'));
     } catch {
       // The ticket was removed meanwhile.
     }

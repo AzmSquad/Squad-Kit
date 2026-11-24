@@ -33,6 +33,7 @@ import { allowsAlways, cleanContext, markWorking, newConversationId, requireConv
 import type { LeadAnswer, LeadCard, LeadContext, LeadConversation, LeadStep, LeadTurn } from './types.js';
 import { LeadWindow, type LeadWindowSetup } from './window.js';
 import type { RunningApp } from '../checks.js';
+import { waitsForTools } from '../tools/wait-words.js';
 
 /**
  * Asking the Squad lead. squad-kit answers at once itself when it can, cheapest first, with no AI: a refusal of what
@@ -128,7 +129,8 @@ function answerAtOnce(bp: BoardPaths, turn: LeadTurn, fresh: boolean, prefix: st
     const usual = readUsual(bp);
     const live = liveNow(t, usual);
     const a = answerAsk(t, live, usual, text);
-    const plain = a.instant && (['when', 'doing', 'next', 'cost'].includes(a.topic) || (a.topic === 'problem' && live.state === 'working' && !live.slow));
+    // A story that waits for a tool gets the lead's own answer, with the steps and the buttons (tools/wait-facts.ts).
+    const plain = a.instant && !waitsForTools(t.status) && (['when', 'doing', 'next', 'cost'].includes(a.topic) || (a.topic === 'problem' && live.state === 'working' && !live.slow));
     if (plain && a.lines.length) {
       step(`Read ${t.id}'s live record`, 'story');
       return { headline: a.lines[0]!, body: a.lines.slice(1).join('\n'), evidence: [], sources: [{ kind: 'story', ref: t.id, label: t.title }], cards: [], by: 'record' };

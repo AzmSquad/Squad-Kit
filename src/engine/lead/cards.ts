@@ -11,6 +11,7 @@ import type { BoardMeta, Ticket } from '../../board/types.js';
 import { waitKey } from '../../board/wait-key.js';
 import { appRunner } from '../run-app.js';
 import { getToolNow, updateToolNow } from '../tools/index.js';
+import { setSkipAndroid } from '../tools/android-builds.js';
 import { ACTIONS, ENGINEERS_ONLY, SETTINGS, isAllowable, isEngineer, neverAction, type Never } from './can.js';
 import { MAX_LEAD_CARDS } from './limits.js';
 import { engineerReport } from './report.js';
@@ -453,6 +454,9 @@ async function doAction(bp: BoardPaths, action: LeadAction, card: { story?: stri
     case 'update_tool':
       await updateToolNow(bp, card.tool ?? '', { ok: true });
       return `squad-kit is updating ${card.tool}. The Tools page shows how it goes.`;
+    case 'skip_android':
+      setSkipAndroid(bp, true);
+      return "Android builds are skipped on this computer: the checks that build the Android app don't run, and a story waiting for them goes on in a moment. The tests and the code check still run. Turn it back on from the Tools page.";
     case 'morning_brief':
       saveLeadRules(bp, { brief: true });
       return 'The morning brief is on: it shows under "This morning" each day.';

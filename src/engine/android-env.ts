@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { squadHome } from '../core/home.js';
-import { androidSdk, gradleHome, javaHome } from './tools/android.js';
+import { androidBuildSdk, gradleHome, javaHome } from './tools/android.js';
 import { ownTool } from './tools/detect.js';
 
 /**
@@ -27,7 +27,7 @@ export function usesAndroid(command: string | undefined): boolean {
  */
 export function androidCommandEnv(o: { cache?: string; home?: string } = {}): Record<string, string> {
   const home = o.home ?? squadHome();
-  const sdk = androidSdk(home);
+  const sdk = androidBuildSdk(home);
   if (!sdk) return {};
   const java = javaHome(home);
   const prefs = o.cache ? path.join(o.cache, 'android') : path.join(home, 'caches', 'android');
@@ -55,7 +55,7 @@ export function androidCommandEnv(o: { cache?: string; home?: string } = {}): Re
  * reading only. A person's own SDK is outside squad-kit's folder, and readable as it is.
  */
 export function androidReads(home = squadHome()): string[] {
-  const sdk = androidSdk(home);
+  const sdk = androidBuildSdk(home);
   if (!sdk) return [];
   const java = ownTool('java', home);
   return [sdk.sdk, ...(java ? [java.dir] : []), gradleHome(home)].filter((p) => fs.existsSync(p));

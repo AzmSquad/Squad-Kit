@@ -30,6 +30,7 @@ const { zip } = await import('../src/core/zip.js');
 const { mountToolsApi } = await import('../src/console/api/tools.js');
 const { toolsWith } = await import('../src/commands/tools.js');
 const tools = await import('../src/engine/tools/index.js');
+const { toolWaitOf } = await import('../src/engine/tools/hold.js');
 
 let tmp: string;
 let bp: BoardPaths;
@@ -217,7 +218,7 @@ describe('a story waits for its tools, and goes on by itself', () => {
     squad.tick();
     expect(readTicket(bp, t.id)!.activity.filter((a) => a.text.includes("isn't on this computer"))).toHaveLength(1);
     // The board reads it with what it waits for, and the link to its line.
-    expect(tools.toolWaitOf(bp, held).toolWait).toMatchObject({ action: 'build', link: '/tools#flutter', tools: [{ id: 'flutter', name: 'Flutter', state: 'missing' }] });
+    expect(toolWaitOf(bp, held).toolWait).toMatchObject({ action: 'build', link: '/tools#flutter', tools: [{ id: 'flutter', name: 'Flutter', state: 'missing' }] });
 
     // Flutter installed, Check again: the build starts by itself.
     hasFlutter = true;

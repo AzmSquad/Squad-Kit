@@ -155,6 +155,10 @@ describe('a missing tool is not the Builder\'s', () => {
     expect(toolMissing('ERROR: JAVA_HOME is not set and no java command could be found in your PATH.')?.what).toBe('Java');
     expect(toolMissing('The operation couldn’t be completed. Unable to locate a Java Runtime.')?.what).toBe('Java');
     expect(toolMissing('xcrun: error: unable to find utility "simctl"')?.what).toBe('Xcode');
+    // An SDK of the person's own that builds apps, without the version the project's Gradle asks for.
+    expect(toolMissing("> Failed to find Build Tool revision 34.0.0")?.what).toBe('a part of the Android SDK');
+    expect(toolMissing("Failed to find target with hash string 'android-35' in: /Users/pm/Library/Android/sdk")?.what).toBe('a part of the Android SDK');
+    expect(toolMissing('> Failed to install the following Android SDK packages as some licences have not been accepted.\n  License for package Android SDK Platform 35 not accepted.')?.what).toBe('a part of the Android SDK');
     expect(toolMissing('zsh: command not found: flutter')?.what).toBe('a program the command runs');
     expect(toolMissing('sh: 1: flutter: not found')?.what).toBe('a program the command runs');
     for (const test of ['Element not found: Text matching "Save"', 'Expected: 3 bookings\n  Actual: 2 bookings', 'image.png: not found in assets', 'FAILED: the booking test']) expect(toolMissing(test), test).toBeNull();
@@ -221,10 +225,96 @@ describe('a missing tool is not the Builder\'s', () => {
       expect(readTicket(bp, t0.id)!.squad?.phase).toBe('test');
       expect(builds()).toHaveLength(0);
       // The Tools page's line: Get it is one press away.
-      const { toolsHold } = await import('../src/engine/tools/index.js');
+      const { toolsHold } = await import('../src/engine/tools/hold.js');
       const hold = toolsHold(bp, readTicket(bp, t0.id)!, 'test');
       expect(hold?.tools.map((x) => x.id)).toEqual(['android', 'java']);
       expect(hold?.status).toBe("Waits for Android phone tools and Java on this computer. Goes on by itself once they're there");
+    });
+
+    /** Flutter, FVM 3 and Java are here: only Android's tools are missing. */
+    const FLUTTER_HERE = {
+      java: { state: 'found' as const, version: '19.0.2', where: '/jdk/bin/java' },
+      flutter: { state: 'found' as const, version: '3.47.9', where: '/sdk/flutter' },
+      fvm: { state: 'found' as const, version: '3.2.1', where: '/usr/local/bin/fvm' },
+    };
+    /** A story at its checks that waits for Android's tools, as AB-2098 did on a Mac with no Android SDK. */
+    const waiting = () => {
+      writeMeta(bp, { ...readMeta(bp), commands: { test: 'echo tests-ran > tests.txt && flutter build apk --debug', lint: 'true', build: 'fvm flutter build apk --debug' } });
+      writeFound({ at: new Date().toISOString(), system: 'mac', tools: { ...FLUTTER_HERE, android: { state: 'missing' } } }, home);
+      const t0 = built();
+      return updateTicket(bp, t0.id, (x) => {
+        x.squad = { phase: 'test', nextAt: new Date(0).toISOString() };
+        x.status = "Waits for Android phone tools on this computer. Goes on by itself once it's there";
+      });
+    };
+
+    it('the story says what it waits for, on its card and to the board: never "working"', async () => {
+      const t = waiting();
+      const { toolWaitOf } = await import('../src/engine/tools/hold.js');
+      const { liveNow } = await import('../src/board/now.js');
+      // The board's story: the card with the Tools page's line, and the way around it.
+      expect(toolWaitOf(bp, t).toolWait).toMatchObject({
+        action: 'checks',
+        link: '/tools#android',
+        tools: [{ id: 'android', state: 'missing' }],
+        skip: { label: 'Skip Android builds', command: 'squad tools skip android' },
+      });
+      // Its line on the board waits, with no clock running and no "usually 1 to 3 min".
+      const now = liveNow(t, {});
+      expect(now.state).toBe('queued');
+      expect(now.line).toBe("Waits for Android phone tools on this computer. Goes on by itself once it's there");
+      expect(now.sentence).toBe("Waits for Android phone tools on this computer. Goes on by itself once it's there. Nothing runs on it until then.");
+      expect(now.stages.find((s) => s.stage === 'test')?.note).toBe('waits for a tool');
+    });
+
+    it('Skip takes out only the Android build: never a test that runs on Android, nor a chain it cannot read', async () => {
+      const { canSkipAndroid, withoutAndroidBuild } = await import('../src/engine/tools/android-builds.js');
+      expect(withoutAndroidBuild('fvm flutter build apk --debug')).toBeNull();
+      expect(withoutAndroidBuild('cd android && ./gradlew assembleDebug')).toBeNull();
+      expect(withoutAndroidBuild('flutter test && flutter build appbundle')).toBe('flutter test');
+      expect(withoutAndroidBuild('npm test')).toBe('npm test');
+      // A test or a code check that runs on Android itself can't be skipped: it stays, and waits for the tools.
+      for (const c of ['./gradlew test', './gradlew lint', 'gradle test', 'flutter build apk; flutter test', 'flutter build apk || true']) expect(withoutAndroidBuild(c), c).toBeUndefined();
+      expect(canSkipAndroid([{ skippable: true }, { skippable: false }])).toBe(false);
+      // Such a project is never offered the skip, and still waits for the tools.
+      const t = waiting();
+      writeMeta(bp, { ...readMeta(bp), commands: { test: './gradlew test', build: './gradlew assembleDebug' } });
+      const { toolWaitOf } = await import('../src/engine/tools/hold.js');
+      const w = toolWaitOf(bp, readTicket(bp, t.id)!).toolWait;
+      expect(w?.tools.map((x) => x.id)).toEqual(['android']);
+      expect(w?.skip).toBeUndefined();
+    });
+
+    it("a person's own SDK that builds apps (Android Studio's) is enough for the build check: no wait", async () => {
+      const t = waiting();
+      const { toolsHold } = await import('../src/engine/tools/hold.js');
+      writeFound({ at: new Date().toISOString(), system: 'mac', tools: { ...FLUTTER_HERE, android: { state: 'missing', builds: '/Users/pm/Library/Android/sdk' } } }, home);
+      expect(toolsHold(bp, readTicket(bp, t.id)!, 'test')).toBeNull();
+      // The check runs with it, and may not download into it.
+      expect(androidCommandEnv()).toMatchObject({ ANDROID_HOME: '/Users/pm/Library/Android/sdk', 'ORG_GRADLE_PROJECT_android.builder.sdkDownload': 'false' });
+    });
+
+    it('Skip Android builds: the story goes on, its checks run without the Android build, and it says so', async () => {
+      const t = waiting();
+      const { toolsHold } = await import('../src/engine/tools/hold.js');
+      const { androidSkip, setSkipAndroid } = await import('../src/engine/tools/android-builds.js');
+      expect(toolsHold(bp, readTicket(bp, t.id)!, 'test')).not.toBeNull();
+      setSkipAndroid(bp, true);
+      expect(androidSkip(bp)).toMatchObject({ by: expect.any(String), at: expect.any(String) });
+      expect(toolsHold(bp, readTicket(bp, t.id)!, 'test')).toBeNull();
+      const squad = new LiveSquad(bp) as unknown as { checks(id: string): Promise<void> };
+      await squad.checks(t.id);
+      const after = readTicket(bp, t.id)!;
+      // The tests ran without their Android build, and the build check, only an Android build, did not run at all.
+      expect(fs.existsSync(path.join(wt, 'tests.txt'))).toBe(true);
+      expect(after.gates?.ran?.map((r) => `${r.name}: ${r.command}`)).toEqual(['test: echo tests-ran > tests.txt', 'lint: true']);
+      expect(after.activity.map((a) => a.text)).toContain(
+        'Android builds are skipped on this computer, as you chose, so the Android build did not run in 2 checks (echo tests-ran > tests.txt && flutter build apk --debug; fvm flutter build apk --debug). The tests and the code check still run. Turn it back on from the Tools page',
+      );
+      // Turned back on: the build check waits for its tools again.
+      setSkipAndroid(bp, false);
+      expect(androidSkip(bp)).toBeNull();
+      expect(toolsHold(bp, readTicket(bp, t.id)!, 'test')).not.toBeNull();
     });
   });
 });

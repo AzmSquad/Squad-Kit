@@ -9,6 +9,7 @@ import { proofWords } from './proof-words.js';
 import { allowsAlways } from './store.js';
 import type { NeedsYouItem, NewsItem, SquadNowItem } from './types.js';
 import { pressNeeded, releasedNews } from './waiting.js';
+import { toolWaitItems } from './tool-waits.js';
 
 /**
  * "Needs you", "What's new" and "The squad now", for the lead's popup, its page and the phone: one call each, from the
@@ -91,7 +92,7 @@ export function needsYou(bp: BoardPaths, at = Date.now()): NeedsYouItem[] {
   const seen = new Set(waiting.map((t) => t.id));
   // A slow step is no wait, but the person may give it more time: it shows too, unless "Always allow" gives it.
   const slow = listTickets(bp).filter((t) => !seen.has(t.id) && t.stage !== 'done' && !t.archived && t.quiet?.kind === 'long' && !t.waiting && !(t.quietSnoozedUntil && Date.parse(t.quietSnoozedUntil) > at));
-  return [...waiting, ...slow].map((t) => {
+  const items = [...waiting, ...slow].map((t) => {
     const now = liveNow(t, usual, at);
     const c = checkIn(t, now);
     const prefix = `now.${t.id}`;
@@ -99,6 +100,8 @@ export function needsYou(bp: BoardPaths, at = Date.now()): NeedsYouItem[] {
     if (c.kind === 'slow' && allowsAlways(bp, 'more_time')) cards = cards.map((x) => ({ ...x, byItself: 'Always allow is on: squad-kit gives it more time by itself.' }));
     return { id: `${prefix}.${c.kind}`, story: t.id, title: t.title, ...c, cards, open: openOf(t) };
   });
+  // A story that waits for a tool needs the person too: to install it, update it, or skip Android builds (tool-waits.ts).
+  return [...items, ...toolWaitItems(bp, new Set([...waiting, ...slow].map((t) => t.id)))];
 }
 
 /** "What's new": a released story with news, such as a decision that came after its plan. Never counted. */

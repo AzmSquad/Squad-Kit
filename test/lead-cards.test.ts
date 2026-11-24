@@ -169,6 +169,47 @@ describe('Always allow', () => {
     expect(readMeta(bp).lead).toEqual({ always: ['more_time', 'start_app'], brief: true });
   });
 
+  it('a story that waits for Android\'s build tools: the lead says it by itself, why, with Skip Android builds, and knows the steps', async () => {
+    const { writeFound } = await import('../src/engine/tools/detect.js');
+    const { androidSkip } = await import('../src/engine/tools/android-builds.js');
+    const { storyNow } = await import('../src/engine/lead/story.js');
+    writeMeta(bp, { ...readMeta(bp), commands: { test: 'flutter test', build: 'flutter build apk --debug' } });
+    writeFound(
+      {
+        at: new Date().toISOString(),
+        system: 'mac',
+        tools: {
+          flutter: { state: 'found', version: '3.47.9', where: '/sdk/flutter' },
+          java: { state: 'found', version: '19.0.2', where: '/jdk/bin/java' },
+          'android-studio': { state: 'found', where: '/Applications/Android Studio.app' },
+          android: { state: 'missing', note: 'Your Android SDK in /Users/pm/Library/Android/sdk lacks the build tools.' },
+        },
+      },
+      process.env.SQUAD_KIT_HOME!,
+    );
+    updateTicket(bp, 'SK-145', (t) => {
+      t.stage = 'test';
+      t.live = true;
+      t.waiting = null;
+      t.squad = { phase: 'test', nextAt: new Date().toISOString() };
+      t.status = "Waits for Android phone tools on this computer. Goes on by itself once it's there";
+    });
+    const item = needsYou(bp).find((x) => x.story === 'SK-145')!;
+    expect(item).toMatchObject({ kind: 'other', words: 'SK-145 waits for Android phone tools on this computer.', open: '/tools#android' });
+    expect(item.more).toContain("squad-kit can't run this story's checks yet: Android phone tools isn't on this computer.");
+    // Google's license is not accepted yet: no Get it from the lead, only the way around it.
+    expect(item.cards.map((c) => c.id)).toEqual(['now.SK-145.skip_android']);
+    // What the lead reads about the story: what is missing, Android Studio's own steps, and the button.
+    const facts = storyNow(bp, readTicket(bp, 'SK-145')!).join('\n');
+    expect(facts).toContain("It waits for a tool on this computer before it can run this story's checks");
+    expect(facts).toContain('Android SDK Command-line Tools (latest)');
+    expect(facts).toContain('Skip Android builds (board action skip_android)');
+    expect(facts).not.toContain('Time on this step');
+    await runCard(bp, 'now.SK-145.skip_android', { find: (x) => needsYou(bp).flatMap((n) => n.cards).find((c) => c.id === x) });
+    expect(androidSkip(bp)).not.toBeNull();
+    expect(needsYou(bp).find((x) => x.story === 'SK-145')).toBeUndefined();
+  });
+
   it('a card on the "Needs you" rail runs the same way', async () => {
     updateTicket(bp, 'SK-145', (t) => (t.quiet = { since: new Date().toISOString(), kind: 'long', detail: 'Still working' }));
     const item = needsYou(bp).find((x) => x.story === 'SK-145')!;

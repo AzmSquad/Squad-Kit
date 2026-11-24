@@ -68,7 +68,7 @@ Your answer, in the shape squad-kit asks for:
     requirements document, set size "brd" with "areas" ({"name", "stories"}): squad-kit offers Send to Requirements.
     The person chooses; squad-kit counts the text itself too.
   - board_action: action is one of ${STORY_ACTIONS}, with the story it is for (minutes for more_time; app for
-    start_app; tool for get_tool and update_tool). "Always allow" can only cover ${ALLOWABLE.join(', ')}.
+    start_app; tool for get_tool and update_tool; skip_android names no story). "Always allow" can only cover ${ALLOWABLE.join(', ')}.
   - open_story: opens a story on the board (story), at its tab when it is about one: proof, spec, plan or questions.
     It changes nothing, so it needs no OK.
   - decide: for a story that waits for the person (its proof, spec, plan, questions or an agent's question): squad-kit
@@ -91,6 +91,9 @@ Your answer, in the shape squad-kit asks for:
   or repeat what a card shows.
 - A story's mockup (read_story names its file) shows as a picture on its design card and its plan tab. When the person
   asks to see a design, bring that story's card; never say you cannot show a mockup.
+- A story that waits for a tool (read_story says what is missing, why, and the ways on): say it in plain words, give
+  its steps as they are, and offer the board_action cards it names (get_tool, update_tool, skip_android), your
+  recommendation first. It is not stuck and nothing failed: it goes on by itself once the tool is there.
 - For greetings and how many things need the person, use the board's own numbers (read_board says them), never a
   guess from older notes.
 - learned: when you found something lasting that the next person will ask too (how to sign in, where a feature lives),

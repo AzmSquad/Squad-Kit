@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A story that waits for a tool says so, everywhere.** A story whose build check builds the Android app waited for
+  Android's tools while its card showed it still testing, with a clock running and no reason. Its card now says what
+  it waits for, with the link to the tool's line, and the board shows it as waiting, never as working. squad-kit also
+  looks again by itself every 10 minutes, so it goes on once the tools are there.
+- **Android Studio's own SDK is enough for a check that builds the Android app.** squad-kit wanted the full phone kit
+  (command-line tools and a phone system) even for a plain build. An SDK that builds apps is used as it is for those
+  checks; the phone pieces are only for phone pictures and Try it yourself. While Android Studio is on the computer,
+  the Android line also shows the steps to add what its SDK lacks. A version the project's Gradle asks for and the SDK
+  lacks is a missing tool, never the Builder's to fix.
+- **Android 17 phones are recognised.** Android Studio keeps their phone system in a folder named android-37.0, which
+  squad-kit did not read, so an SDK with one still counted as having no phone.
+- **The Tools page knows a new project before it has files.** A project whose app lives in a folder of its own (a
+  Flutter repo with only its README) listed only Git, Claude Code and gh. Each repo with no app in its files yet now
+  takes what its saved commands run: Flutter, FVM, and Android's build tools for a check that builds the Android app.
+- **"Used for" on the GitHub tool's line said nothing.** It says Pull requests.
+
+### Added
+
+- **Skip Android builds.** A person who doesn't build for Android on this computer can skip the Android builds in the
+  project's checks, from the story's card, the Tools page, the Squad lead, or `squad tools skip android`. Only the build
+  is taken out (`flutter build apk` alone, or the end of `flutter test && flutter build apk`): the tests and the code
+  check still run, and a check that runs on Android itself (`./gradlew test`) is never skipped. The story says each time
+  what did not run, and `squad tools unskip android` turns it back on. The choice is kept on this computer only.
+- **FVM on the Tools page.** A project whose commands run fvm needs FVM 3 or newer: FVM 2 doesn't read the .fvmrc file
+  that pins the Flutter version, and runs another Flutter. squad-kit finds FVM and its version, a story waits with a
+  plain line while it is missing or too old, and a copy from Homebrew is updated with `brew upgrade fvm` when you press
+  Update (or `squad tools update fvm`), after the same warning as Flutter's; squad-kit checks the version after. A pin
+  beside plain `flutter` commands only recommends FVM.
+- **The Squad lead knows when a story waits for a tool.** It lists it in Needs you by itself, explains what is missing
+  and why when asked, gives the real steps (Android Studio's own included), and offers the buttons that move it on:
+  Get it, Update, or Skip Android builds. Each needs your press.
+
 ## [1.3.28] — 2026-11-24
 
 ### Fixed

@@ -170,7 +170,7 @@ export function avdName(name: string): string {
 }
 
 /** The image a system-images folder holds, as sdkmanager names it: "system-images;android-36;google_apis;arm64-v8a". */
-export function imageId(api: number, tag: string, abi: string): string {
+export function imageId(api: number | string, tag: string, abi: string): string {
   return `system-images;android-${api};${tag};${abi}`;
 }
 
@@ -184,12 +184,12 @@ export function imagesIn(sdk: string, arch: string, list: (dir: string) => strin
   const abi = abiFor(arch);
   const out: (PhoneRuntime & { api: number; rank: number })[] = [];
   for (const level of list(path.join(sdk, 'system-images'))) {
-    const api = Number(/^android-(\d+)$/.exec(level)?.[1]);
+    const api = Number(/^android-(\d+)(?:\.\d+)?$/.exec(level)?.[1]); // Android 17's folder is android-37.0: its id keeps that name.
     if (!api) continue;
     for (const tag of list(path.join(sdk, 'system-images', level))) {
       const rank = TAGS.indexOf(tag);
       if (rank < 0 || !list(path.join(sdk, 'system-images', level, tag)).includes(abi)) continue;
-      out.push({ id: imageId(api, tag, abi), version: VERSIONS[api] ?? String(api), models: MODELS, api, rank });
+      out.push({ id: imageId(level.slice('android-'.length), tag, abi), version: VERSIONS[api] ?? String(api), models: MODELS, api, rank });
     }
   }
   return out.sort((a, b) => b.api - a.api || a.rank - b.rank).map(({ id, version, models }) => ({ id, version, models }));

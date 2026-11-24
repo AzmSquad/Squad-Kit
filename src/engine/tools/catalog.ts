@@ -10,7 +10,7 @@ import type { Platform, ProjectKind } from './kinds.js';
 export type ToolAction = 'build' | 'checks' | 'pictures' | 'start-app' | 'try-it' | 'pull-request';
 export type Priority = 'required' | 'recommended' | 'optional';
 export type System = 'mac' | 'windows' | 'linux';
-export type ToolId = 'git' | 'ai-tool' | 'flutter' | 'xcode' | 'simulator' | 'cocoapods' | 'android' | 'maestro' | 'java' | 'android-studio' | 'docker' | 'gh' | 'az';
+export type ToolId = 'git' | 'ai-tool' | 'flutter' | 'fvm' | 'xcode' | 'simulator' | 'cocoapods' | 'android' | 'maestro' | 'java' | 'android-studio' | 'docker' | 'gh' | 'az';
 /** Another tool that looks after a copy you installed, and updates it itself. */
 export type ManagedBy = 'homebrew' | 'fvm' | 'snap';
 
@@ -62,6 +62,11 @@ export interface ToolEntry {
   size?: string;
   /** A line to read before the steps: "Android pictures and Start come in the next update". */
   note?: string;
+  /**
+   * Android: the steps that make the person's own Android Studio enough instead of Get it, shown while Android Studio is
+   * on this computer and its SDK lacks something.
+   */
+  studioSteps?: string[];
   /**
    * You installed it, and squad-kit can update your copy when that is safe, after you OK it: whose work it changes
    * beyond this project, how much it downloads, and how long it usually takes in seconds, until squad-kit measured it here.
@@ -129,6 +134,34 @@ export const CATALOG: ToolEntry[] = [
       all: ['Open a terminal.', 'Run: flutter upgrade', CHECK_AGAIN],
       homebrew: ['Open a terminal.', 'Run: brew upgrade --cask flutter', CHECK_AGAIN],
       fvm: ['Open a terminal.', 'Run: fvm install stable', 'Run: fvm global stable', CHECK_AGAIN],
+    },
+  },
+  {
+    id: 'fvm',
+    name: 'FVM',
+    gives: 'runs the Flutter version this project pins, the same one for everyone on the team',
+    // Commands that run fvm need it: the Builder's, the checks' and the app's start. A pin with no command that runs fvm
+    // (.fvmrc beside plain `flutter` commands) only recommends it.
+    needs: [
+      { kinds: ['fvm'], priority: 'required', for: ['build', 'checks', 'start-app'] },
+      { kinds: ['fvm-pin'], priority: 'recommended', for: ['build', 'checks', 'start-app'] },
+    ],
+    // FVM 3 brought the .fvmrc file a project pins its Flutter in. FVM 2 doesn't read it and runs another Flutter, so the
+    // squad would build and test with a Flutter the project didn't pin. Seen on this team's own Mac with FVM 2.4.1.
+    min: '3',
+    installer: 'you',
+    why: "it becomes part of your computer's own setup",
+    steps: {
+      mac: ['Open a terminal.', 'Run: brew install fvm. Without Homebrew, follow the steps on FVM\'s install page.', CHECK_AGAIN],
+      windows: ["Open FVM's install page and follow the steps for Windows.", OPEN_AGAIN],
+      linux: ["Open FVM's install page and follow the steps for Linux.", CHECK_AGAIN],
+    },
+    link: 'https://fvm.app/documentation/getting-started/installation',
+    // One FVM serves every project on the computer that pins its Flutter with it: updating it is asked first.
+    update: { reaches: 'every project that uses FVM', size: 'about 300 MB', seconds: 300 },
+    updateSteps: {
+      homebrew: ['Open a terminal.', 'Run: brew upgrade fvm', CHECK_AGAIN],
+      all: ["Open FVM's install page.", 'Install the newest FVM the same way you installed yours.', CHECK_AGAIN],
     },
   },
   {
@@ -208,6 +241,13 @@ export const CATALOG: ToolEntry[] = [
     size: 'about 20 GB',
     before: ['java'],
     with: ['maestro'],
+    // Android Studio's own menu names, the same on a Mac, Windows and Linux.
+    studioSteps: [
+      'Open Android Studio. Open the SDK Manager: Tools, then SDK Manager (on its welcome screen: More Actions, then SDK Manager).',
+      'On the SDK Tools tab, tick Android SDK Command-line Tools (latest), then press Apply.',
+      'Open the Device Manager (Tools, then Device Manager; on the welcome screen: More Actions, then Virtual Device Manager) and create a phone with Android 13 (API 33) or newer. That downloads its phone system.',
+      CHECK_AGAIN,
+    ],
   },
   {
     id: 'java',
@@ -289,6 +329,8 @@ export const KIND_WORDS: Record<ProjectKind, string> = {
   ios: 'an iPhone app',
   android: 'an Android app',
   docker: 'Docker files',
+  fvm: 'a Flutter version pinned with FVM',
+  'fvm-pin': 'a Flutter version pinned with FVM',
   github: 'code kept on GitHub',
   azure: 'code kept on Azure Repos',
 };

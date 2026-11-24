@@ -77,6 +77,14 @@ export function androidSdk(home = squadHome()): { sdk: string; own: boolean } | 
   return f?.state === 'found' && f.where ? { sdk: f.where, own: Boolean(f.own) } : null;
 }
 
+/** The SDK a command that builds the Android app uses: the phone's, else a person's own that builds apps (detect.ts). */
+export function androidBuildSdk(home = squadHome()): { sdk: string; own: boolean } | null {
+  const sdk = androidSdk(home);
+  if (sdk) return sdk;
+  const builds = readFound(home)?.tools.android?.builds;
+  return builds ? { sdk: builds, own: false } : null;
+}
+
 /** Where the Android phone's tools are, for the phone module: squad-kit's folder always, the SDK and Java once here. */
 export function androidPlace(home = squadHome()): PhoneTools {
   const sdk = androidSdk(home);
@@ -124,7 +132,8 @@ export function imageLevel(list: (dir: string) => string[], sdk: string, arch: s
   const abi = arch === 'arm64' ? 'arm64-v8a' : 'x86_64';
   let best = 0;
   for (const level of list(path.join(sdk, 'system-images'))) {
-    const api = Number(/^android-(\d+)$/.exec(level)?.[1]);
+    // From Android 17 the folder has a minor number too: android-37.0.
+    const api = Number(/^android-(\d+)(?:\.\d+)?$/.exec(level)?.[1]);
     if (api > best && list(path.join(sdk, 'system-images', level)).some((tag) => list(path.join(sdk, 'system-images', level, tag)).includes(abi))) best = api;
   }
   return best;
@@ -147,6 +156,15 @@ export function sdkLacks(h: { exists(p: string): boolean; list(dir: string): str
   if (!h.list(path.join(sdk, 'platforms')).some((p) => /^android-\d+/.test(p))) lacks.push('an Android platform');
   if (imageLevel(h.list, sdk, arch) < 33) lacks.push('an Android 13 or newer phone system');
   return lacks;
+}
+
+/**
+ * True when an SDK builds Android apps, though it may lack what the phone needs: the build tools and a platform, as
+ * Android Studio installs them. A check that builds the app (`flutter build apk`) needs no more.
+ */
+export function sdkBuilds(h: { exists(p: string): boolean; list(dir: string): string[] }, sdk: string, system: System): boolean {
+  const build = path.join(sdk, 'build-tools');
+  return h.list(build).some((v) => h.exists(path.join(build, v, system === 'windows' ? 'aapt2.exe' : 'aapt2'))) && h.list(path.join(sdk, 'platforms')).some((p) => /^android-\d+/.test(p));
 }
 
 /* ── Google's license ───────────────────────────────────── */

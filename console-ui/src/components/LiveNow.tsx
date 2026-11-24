@@ -77,7 +77,7 @@ export function CardLine({ t }: { t: Ticket }) {
 /** The Now tab while the squad works: one plain sentence, the step and its time, and what comes next. */
 export function NowCard({ t }: { t: Ticket }) {
   const n = t.now!;
-  const head = n.state === 'queued' ? 'Next in line' : n.state === 'stopping' ? 'Stopping' : 'Working';
+  const head = n.state === 'queued' ? (t.toolWait ? 'Waits for a tool' : 'Next in line') : n.state === 'stopping' ? 'Stopping' : 'Working';
   const [first, ...more] = (n.detail ?? '').split(' · ');
   return (
     <section className="nowcard" aria-label="What is happening now">

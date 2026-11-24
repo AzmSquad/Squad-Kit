@@ -305,7 +305,7 @@ program
 program
   .command('tools [action] [tool]')
   .description(
-    "What this project needs on this computer, the same as the Tools page. check: look again after installing something. get <tool>: squad-kit gets one of its own tools, like maestro, java or android. accept <tool>: read a tool maker's license and accept it (android needs it before get). update <tool>: squad-kit updates your own Flutter when it safely can, after a warning",
+    "What this project needs on this computer, the same as the Tools page. check: look again after installing something. get <tool>: squad-kit gets one of its own tools, like maestro, java or android. accept <tool>: read a tool maker's license and accept it (android needs it before get). update <tool>: squad-kit updates your own Flutter or FVM when it safely can, after a warning. skip android: the checks that build the Android app don't run on this computer (unskip android turns them back on)",
   )
   .option('-y, --yes', 'With accept or update: say yes without being asked')
   .action(wrapArgs(runTools));

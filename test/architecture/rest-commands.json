@@ -127,6 +127,7 @@
     "POST /api/v1/tools/:tool/get": "squad tools get <tool>",
     "POST /api/v1/tools/:tool/accept": "squad tools accept <tool>",
     "POST /api/v1/tools/:tool/update": "squad tools update <tool>",
+    "POST /api/v1/tools/:tool/skip": "squad tools skip <tool>",
     "POST /api/v1/requirements": "squad requirements add [file]",
     "PATCH /api/v1/requirements/:id": "squad requirements rename <id> [name...]",
     "DELETE /api/v1/requirements/:id": "squad requirements delete <id>",

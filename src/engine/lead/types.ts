@@ -57,6 +57,7 @@ export type LeadAction =
   | 'stop_story'
   | 'get_tool'
   | 'update_tool'
+  | 'skip_android'
   | 'engineer'
   | 'morning_brief';
 

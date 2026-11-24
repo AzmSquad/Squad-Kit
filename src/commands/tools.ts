@@ -7,13 +7,15 @@ import type { BoardPaths } from '../board/store.js';
 import { ACTION_WORDS } from '../engine/tools/catalog.js';
 import { acceptToolNow, checkTools, getToolNow, projectTools, toolLicense, updateToolNow, type LicenseView, type ToolLine, type ToolsView } from '../engine/tools/index.js';
 import { gettingNow, lastTrouble, type Getting } from '../engine/tools/get.js';
+import { skipToolNow } from '../engine/tools/android-builds.js';
 import { boardApi, type BoardApi } from './app.js';
 
 /**
  * `squad tools`: the Tools page in the terminal. What this project needs on this computer, `check` to look again after
  * installing something, `get <tool>` for the tools squad-kit gets itself, `accept <tool>` to read a tool maker's license
- * and accept it (Android's comes before its Get it), and `update <tool>` for your own copy of a tool squad-kit can
- * update safely, after the same warning and a yes. With the board open each command is the board's
+ * and accept it (Android's comes before its Get it), `update <tool>` for your own copy of a tool squad-kit can
+ * update safely, after the same warning and a yes, and `skip android` (or `unskip android`) for the checks that build the
+ * Android app on this computer. With the board open each command is the board's
  * own REST call, so both show the same; without it, the work runs here.
  */
 
@@ -65,6 +67,8 @@ export function printTools(v: ToolsView): void {
       out(kleur.gray(`      ${l.gives}. Used for: ${l.usedFor}`));
       if (l.blocks.length) out(kleur.yellow(`      Stops now: ${l.blocks.map((a) => ACTION_WORDS[a]).join(', ')}. Everything else keeps working.`));
       if (l.note) out(`      ${l.note}`);
+      if (l.skipped) out(kleur.gray(`      Android builds are skipped on this computer (${l.skipped.by}). Turn them back on: ${cmd(l.skipped.command)}`));
+      else if (l.skip) out(`      Or skip the checks that build the Android app on this computer: ${cmd(l.skip.command)}`);
       // Ready goes on only when an update is recommended: its steps follow.
       if ((l.state === 'ready' && !l.recommended) || l.state === 'not-here' || l.state === 'updating') continue;
       if (l.trouble) out(kleur.red(`      ${l.trouble}`));
@@ -215,10 +219,20 @@ export async function toolsWith(bp: BoardPaths, api: BoardApi | null, action: st
       return { ...v, getting: gettingNow(), lines: v.lines.map((x) => ({ ...x, ...(lastTrouble(x.id) ? { trouble: lastTrouble(x.id) } : {}) })) };
     }, id, `squad tools update ${id}`);
   }
-  throw new Error(`squad tools ${what}: there is no such action. Use squad tools, squad tools check, squad tools get <tool>, squad tools accept <tool>, or squad tools update <tool>.`);
+  if (what === 'skip' || what === 'unskip') {
+    if (!tool) throw new Error(`Say which, for example: squad tools ${what} android`);
+    const id = tool.trim().toLowerCase();
+    const skip = what === 'skip';
+    if (api) await api.call<ToolsView>('POST', `/tools/${encodeURIComponent(id)}/skip`, { skip });
+    else skipToolNow(bp, id, skip);
+    if (skip) ui.success(`Android builds are skipped for this project on this computer: the checks that build the Android app don't run. The tests and the code check still run. Turn it back on: ${cmd('squad tools unskip android')}`);
+    else ui.success('The checks that build the Android app run again on this computer.');
+    return true;
+  }
+  throw new Error(`squad tools ${what}: there is no such action. Use squad tools, squad tools check, squad tools get <tool>, squad tools accept <tool>, squad tools update <tool>, or squad tools skip android.`);
 }
 
-/** `squad tools [check | get <tool> | accept <tool> [--yes] | update <tool> [--yes]]` */
+/** `squad tools [check | get <tool> | accept <tool> [--yes] | update <tool> [--yes] | skip android | unskip android]` */
 export async function runTools(action: string | undefined, tool: string | undefined, opts: { yes?: boolean } = {}): Promise<void> {
   const { bp } = openBoard(buildPaths(requireSquadRoot()).squadDir);
   const ok = await toolsWith(bp, boardApi(bp), action, tool, { yes: Boolean(opts.yes) });

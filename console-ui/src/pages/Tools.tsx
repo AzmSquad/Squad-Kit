@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useRouterState } from '@tanstack/react-router';
-import { Check, CircleAlert, CircleArrowUp, Download, ExternalLink, FileText, Loader2, Minus, Pause, Plug, RefreshCw, TriangleAlert } from 'lucide-react';
+import { Check, CircleAlert, CircleArrowUp, Download, ExternalLink, FileText, Loader2, Minus, Pause, Plug, RefreshCw, SkipForward, TriangleAlert } from 'lucide-react';
 import { api } from '../api/client';
 import type { LicenseView, ToolGetting, ToolLine, ToolsView } from '../api/types';
 import { useAct } from '../lib/data';
@@ -18,7 +18,7 @@ import '../styles/tools.css';
  * recommend says so, with the steps to update it, and stops nothing. A story stopped by a tool links to its line here.
  */
 
-const ACTION_WORDS: Record<string, string> = { build: 'Building', checks: 'Checks', pictures: 'Phone pictures', 'start-app': 'Start', 'try-it': 'Try it yourself' };
+const ACTION_WORDS: Record<string, string> = { build: 'Building', checks: 'Checks', pictures: 'Phone pictures', 'start-app': 'Start', 'try-it': 'Try it yourself', 'pull-request': 'Pull requests' };
 /** What squad-kit can't do while a tool is missing, as the end of "squad-kit can't …". */
 const CANT_WORDS: Record<string, string> = {
   build: 'build stories',
@@ -26,6 +26,7 @@ const CANT_WORDS: Record<string, string> = {
   pictures: 'take phone pictures',
   'start-app': 'start the app on the phone',
   'try-it': 'let you try the app on the phone',
+  'pull-request': 'open the pull requests on the code host',
 };
 const GROUPS = [
   { priority: 'required', title: 'Required', sub: 'Without these, some steps cannot run. squad-kit stops only those steps.' },
@@ -316,8 +317,53 @@ function Line({ l, hit, busy, onCheck }: { l: ToolLine; hit: boolean; busy: bool
             </span>
           </div>
         )}
+        {l.studioSteps && (
+          <div className="tl-act">
+            <span>Or use your own Android Studio, which is on this computer:</span>
+            <ol>
+              {l.studioSteps.map((s) => (
+                <li key={s}>{s}</li>
+              ))}
+            </ol>
+          </div>
+        )}
+        <SkipLine l={l} busy={busy} />
       </div>
     </section>
+  );
+}
+
+/**
+ * Android: the project's own checks that build the Android app. While they wait for Android's tools, the person may skip
+ * them on this computer instead; once skipped, the line says so, with the way back.
+ */
+function SkipLine({ l, busy }: { l: ToolLine; busy: boolean }) {
+  const act = useAct<ToolsView>();
+  if (!l.skip && !l.skipped) return null;
+  const set = (skip: boolean) =>
+    act.mutate({ path: `/api/v1/tools/${encodeURIComponent(l.id)}/skip`, body: { skip }, done: skip ? 'Android builds are skipped on this computer' : 'The checks that build the Android app run again' });
+  return (
+    <div className="tl-act">
+      <span>
+        {l.skipped
+          ? `Android builds are skipped on this computer (${l.skipped.by}, ${ago(l.skipped.at)}): the checks that build the Android app don't run. The tests and the code check still run.`
+          : "Don't build for Android on this computer? Skip the checks that build the Android app. The tests and the code check still run."}
+      </span>
+      <span className="tl-row">
+        <button className="btn sm" disabled={busy || act.isPending} onClick={() => set(!l.skipped)}>
+          {l.skipped ? (
+            <>
+              <RefreshCw size={13} /> Build for Android again
+            </>
+          ) : (
+            <>
+              <SkipForward size={13} /> Skip Android builds
+            </>
+          )}
+        </button>
+        <Cmd text={l.skipped ? l.skipped.command : l.skip!.command} />
+      </span>
+    </div>
   );
 }
 

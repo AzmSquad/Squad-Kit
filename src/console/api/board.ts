@@ -107,7 +107,7 @@ import { lookAgain } from '../../engine/try-app.js';
 import { takeBack } from '../../engine/handover.js';
 import { plainWords } from '../../core/for-people.js';
 import { act } from './act.js';
-import { toolWaitOf } from '../../engine/tools/index.js';
+import { toolWaitOf } from '../../engine/tools/hold.js';
 import { confirmDatabase, databaseView, learnDatabase, makeTemplateBeside, setDatabaseOptions, type DatabaseChange } from '../../engine/story-db.js';
 import { bringBack, checkOutside, workOutside } from '../../board/outside.js';
 import { outsidePrompt } from '../../engine/outside-guide.js';

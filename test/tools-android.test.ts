@@ -369,11 +369,40 @@ describe('finding the Android tools', () => {
     const sdk = '/Users/pm/Library/Android/sdk';
     const c = complete(sdk);
     expect((await detectAll(host(c), home)).tools.android).toEqual({ state: 'found', version: 'Android 15', where: sdk, note: `Your own Android SDK in ${sdk}: squad-kit uses it as it is, and never changes it.` });
+    // It builds apps (build tools and a platform), but lacks what the phone needs: the checks that build the app use it.
     const lacking = host({ files: c.files.filter((f) => !f.endsWith('/emulator')), dirs: { ...c.dirs, [`${sdk}/system-images`]: [] } });
-    expect((await detectAll(lacking, home)).tools.android).toEqual({ state: 'missing', note: `Your Android SDK in ${sdk} lacks the emulator and an Android 13 or newer phone system. squad-kit gets its own instead, and leaves yours as it is.` });
+    expect((await detectAll(lacking, home)).tools.android).toEqual({
+      state: 'missing',
+      builds: sdk,
+      note: `Your Android SDK in ${sdk} lacks the emulator and an Android 13 or newer phone system. It builds the Android app, so the checks that build it run with it. For phone pictures and Try it yourself, squad-kit gets its own, and leaves yours as it is.`,
+    });
+    // No build tools either: nothing of it is used.
+    const bare = host({ files: c.files.filter((f) => !f.endsWith('/emulator') && !f.endsWith('/aapt2')), dirs: { ...c.dirs, [`${sdk}/system-images`]: [] } });
+    expect((await detectAll(bare, home)).tools.android).toEqual({
+      state: 'missing',
+      note: `Your Android SDK in ${sdk} lacks the emulator, the build tools and an Android 13 or newer phone system. For phone pictures and Try it yourself, squad-kit gets its own, and leaves yours as it is.`,
+    });
+    // Android Studio's first install: the build tools and a platform, no command-line tools and no phone system.
+    const studio = { files: [`${sdk}/platform-tools/adb`, `${sdk}/emulator/emulator`, `${sdk}/build-tools/36.0.0/aapt2`], dirs: { [sdk]: ['platform-tools'], [`${sdk}/build-tools`]: ['36.0.0'], [`${sdk}/platforms`]: ['android-36'] } };
+    expect((await detectAll(host(studio), home)).tools.android).toMatchObject({ state: 'missing', builds: sdk });
+    // Then its command-line tools and an Android 17 phone from its Device Manager, in android-37.0: everything is here.
+    const filled = host({
+      files: [...studio.files, `${sdk}/cmdline-tools/latest/bin/avdmanager`],
+      dirs: { ...studio.dirs, [`${sdk}/cmdline-tools`]: ['latest'], [`${sdk}/platforms`]: ['android-37.0'], [`${sdk}/system-images`]: ['android-37.0'], [`${sdk}/system-images/android-37.0`]: ['google_apis_playstore'], [`${sdk}/system-images/android-37.0/google_apis_playstore`]: ['arm64-v8a'] },
+    });
+    expect((await detectAll(filled, home)).tools.android).toMatchObject({ state: 'found', version: 'Android 17', where: sdk });
     // ANDROID_HOME first, on any system.
     const linux = complete('/opt/android');
     expect((await detectAll(host({ ...linux, system: 'linux', arch: 'x64', env: { PATH: '/x', ANDROID_HOME: '/opt/android' }, dirs: { ...linux.dirs, '/opt/android/system-images/android-35/google_apis': ['x86_64'] } }), home)).tools.android).toMatchObject({ state: 'found', where: '/opt/android' });
+  });
+
+  it("a check that builds the Android app uses a person's SDK that builds apps, as it is, when there is no other", () => {
+    writeFound({ at: new Date().toISOString(), system: 'mac', tools: { android: { state: 'missing', builds: '/Users/pm/Library/Android/sdk' } } }, home);
+    expect(android.androidBuildSdk(home)).toEqual({ sdk: '/Users/pm/Library/Android/sdk', own: false });
+    // The phone never uses it: it lacks what the phone needs.
+    expect(android.androidSdk(home)).toBeNull();
+    writeFound({ at: new Date().toISOString(), system: 'mac', tools: { android: { state: 'missing' } } }, home);
+    expect(android.androidBuildSdk(home)).toBeNull();
   });
 
   it("a build with the person's own SDK may not fetch anything into it; with squad-kit's own it may", () => {
