@@ -253,17 +253,17 @@ export interface StuckChoice {
   /** 'cap': the step reached its turn or spend cap; Give it more or Stop. */
   gate?: 'checks' | 'review' | 'proof' | 'merge' | 'cap';
   /** Why the gate stopped, when it is not a plain failure. 'guard': a project command needed a file squad-kit's guard blocked; 'push': a test tried to push outside a temp folder. */
-  kind?: 'weakened' | 'no-tests' | 'bad-proof' | 'guard' | 'push' | 'environment' | 'broken' | 'not-shown' | 'hook' | 'gate-cant-run' | 'owner-notes' | 'owner-closed';
+  kind?: 'weakened' | 'no-tests' | 'bad-proof' | 'guard' | 'push' | 'environment' | 'broken' | 'not-shown' | 'hook' | 'gate-cant-run' | 'owner-notes' | 'owner-closed' | 'pr-check';
   /** The plain reasons, one per line: "test/booking.test.ts was deleted (4 tests)". */
   points?: string[];
   /** The ticket stopped between two steps at its budget, or the month's. */
   budget?: 'ticket' | 'month';
-  /** "The Builder stopped". */
+  /** "The Builder stopped", and what is safe: "Nothing was merged or pushed." */
   title?: string;
-  /** What is safe: "Nothing was merged or pushed." */
   safe?: string[];
-  /** The exact error, for engineers. */
+  /** The exact error, for engineers; and where to see it, as a link on the card: a failed check on the code host. */
   detail?: string;
+  link?: { label: string; url: string };
 }
 
 export interface GateOverride {

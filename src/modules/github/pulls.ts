@@ -9,6 +9,8 @@ export interface RawPull {
   number: number;
   html_url: string;
   created_at?: string;
+  /** Moves on a push too. */
+  updated_at?: string;
   state: 'open' | 'closed';
   merged?: boolean;
   merged_at?: string | null;

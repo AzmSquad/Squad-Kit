@@ -199,7 +199,7 @@ describe("the team's own repo on GitHub", () => {
     expect(requireTicket(bp, id).mergedAt).toBeTruthy();
   });
 
-  it('a failed check found while it waits: said once, and the wait ends there', async () => {
+  it('a failed check found while it waits goes to the Builder, never only a line on the story', async () => {
     setUp('me/app');
     const id = accepted();
     let failed = false;
@@ -209,10 +209,11 @@ describe("the team's own repo on GitHub", () => {
     );
     await publishTicket(bp, id);
     failed = true;
-    await checkMerge(bp, id);
+    expect((await checkMerge(bp, id)).line).toBe("Builder is fixing what GitHub's check found. squad-kit sends the fix to the same pull request and merges once the checks pass.");
     const t = requireTicket(bp, id);
-    expect(t.status).toBe(`PR 7 is waiting in GitHub · ${t.release}`);
-    expect(t.activity[0]!.text).toMatch(/^Pull request 7 is open but not merged yet: GitHub's check "lint" failed/);
+    expect(t).toMatchObject({ stage: 'implement', live: true, status: "Builder is fixing what GitHub's check found", squad: { phase: 'fix' }, prCheck: { pr: 7, failed: ['lint'], rounds: 1, fixing: true } });
+    expect(t.changeRequest!.split('\n')[0]).toBe("Fix what GitHub's check found");
+    expect(t.activity.map((a) => a.text)).toContain('GitHub\'s check "lint" failed on pull request 7, so it is not merged yet');
     expect(mergeWait(t)).toBeNull();
   });
 
@@ -287,33 +288,37 @@ describe("the team's own repo on GitHub", () => {
     expect(listReleases(bp).flatMap((r) => r.tickets)).not.toContain(id);
   });
 
-  it('Check again after a stop merges it once it can; on Builds by itself the squad does', async () => {
+  it('a failed check right at Looks right goes to the Builder too; once it passes, it merges, on either track', async () => {
     setUp('me/app');
     const id = accepted();
     let failed = true;
-    own(
-      () => pullJson('me/app', 7, failed ? { mergeableState: 'unstable' } : { merged: exact('PUT', '/repos/me/app/pulls/7/merge').length > 0 }),
-      (c) => (c.path.includes('/check-runs') ? { body: { check_runs: [{ name: 'lint', status: 'completed', conclusion: failed ? 'failure' : 'success' }] } } : undefined),
-    );
+    const answers = () =>
+      own(
+        () => pullJson('me/app', 7, failed ? { mergeableState: 'unstable' } : { merged: exact('PUT', '/repos/me/app/pulls/7/merge').length > 0 }),
+        (c) => (c.path.includes('/check-runs') ? { body: { check_runs: [{ name: 'lint', status: 'completed', conclusion: failed ? 'failure' : 'success' }] } } : undefined),
+      );
+    answers();
     await publishTicket(bp, id);
-    expect(requireTicket(bp, id).status).toMatch(/^PR 7 is waiting in GitHub/);
-    expect(mergeWait(requireTicket(bp, id))).toBeNull();
+    expect(requireTicket(bp, id)).toMatchObject({ stage: 'implement', squad: { phase: 'fix' }, status: "Builder is fixing what GitHub's check found" });
+    // The fix round sent its fix to the same pull request, and the check passes now.
+    updateTicket(bp, id, (x) => {
+      Object.assign(x, { stage: 'release', live: false, squad: null, status: PR_HOST_WAITS });
+      x.prCheck!.fixing = false;
+    });
     failed = false;
-    expect(await checkMerge(bp, id)).toMatchObject({ found: 'merged', merged: [id], line: `Merged pull request 7 on GitHub now that it can merge. ${id} is merged.` });
+    expect(await checkMerge(bp, id)).toMatchObject({ found: 'merged', merged: [id] });
+    expect(requireTicket(bp, id).prCheck).toBeUndefined();
 
-    // Builds by itself: the squad's own look merges it once the check is fixed.
+    // Builds by itself: the same, and no wait for an approver is said over the Builder's fix.
     const auto = accepted();
     updateTicket(bp, auto, (x) => (x.track = 'auto'));
     failed = true;
-    own(
-      () => pullJson('me/app', 7, failed ? { mergeableState: 'unstable' } : { merged: exact('PUT', '/repos/me/app/pulls/7/merge').length > 0 }),
-      (c) => (c.path.includes('/check-runs') ? { body: { check_runs: [{ name: 'lint', status: 'completed', conclusion: failed ? 'failure' : 'success' }] } } : undefined),
-    );
+    gh!.done();
+    answers();
     await publishTicket(bp, auto);
-    expect(mergeWait(requireTicket(bp, auto))).toBe('pr');
-    expect(await recheckMerge(bp, auto)).toBe('waiting');
-    failed = false;
-    expect(await recheckMerge(bp, auto)).toBe('merged');
+    const t = requireTicket(bp, auto);
+    expect(t.status).toBe("Builder is fixing what GitHub's check found");
+    expect(mergeWait(t)).toBeNull();
   });
 
   it('a release never starts with a pull request still held back, and goes through its own pull request on a branch that takes only those', async () => {

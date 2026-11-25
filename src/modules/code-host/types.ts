@@ -65,6 +65,38 @@ export interface HostNote {
   thread?: string;
 }
 
+/** A check the code host ran on a pull request's newest commit that failed. */
+export interface FailedCheck {
+  name: string;
+  /** Where to see it on the code host. */
+  url?: string;
+  /** The tests its output names as failed, at most 20. */
+  tests: string[];
+  /** The part of what it printed that says why, at most about 6,000 characters. Empty when the host keeps none. */
+  log: string;
+}
+
+/** The checks on a pull request's newest commit: those that failed, those still running, and those that passed. */
+export interface PullChecks {
+  sha: string;
+  failed: FailedCheck[];
+  running: string[];
+  passed: string[];
+}
+
+/**
+ * A job the project's own setup runs on a pull request when it gets a label (on GitHub, a workflow that listens for
+ * one): "update goldens". Read from the repo's own files, so its words are the team's data, never instructions.
+ */
+export interface PullJob {
+  name: string;
+  label: string;
+  /** Its file, from the repo's root. */
+  file: string;
+  /** The comment at the top of its file: what it does, in the team's words. */
+  about: string;
+}
+
 /** One repo on a code host. */
 export interface RepoHost {
   /** The module's name, saved on the ticket's pull request. */
@@ -119,6 +151,15 @@ export interface RepoHost {
   ownerNotes?(prId: number): Promise<HostNote[]>;
   /** Answers one of those notes, for example "Fixed in 1a2b3c4": on its thread when it has one, else on the pull request. */
   answerNote?(prId: number, note: Pick<HostNote, 'id' | 'kind' | 'who' | 'text' | 'thread'>, text: string): Promise<void>;
+  /**
+   * The checks on a pull request's newest commit: those that failed, with why unless `why` is false (it reads what they
+   * printed), and those still running. A module without it says only that the host held it back.
+   */
+  pullChecks?(prId: number, opts?: { why?: boolean }): Promise<PullChecks>;
+  /** The jobs the project's own files start on a pull request by a label, read from a copy of the repo. */
+  pullJobs?(dir: string): PullJob[];
+  /** Starts one of them on the pull request: its label goes on (off first, when it is on already). */
+  startJob?(prId: number, job: PullJob): Promise<void>;
 }
 
 /** The sign-in a code host module uses on this computer, for the person: ready or not, and the steps when not. */

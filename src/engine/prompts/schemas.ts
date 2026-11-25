@@ -296,7 +296,8 @@ export const DESIGN_SCHEMA = {
 
 export const BUILD_SCHEMA = {
   type: 'object',
-  properties: { summary: STR, testsAdded: { type: 'integer' }, notes: STR, question: QUESTION, decided: DECIDED },
+  // job: on a fix for a code host's check, the label of one of the project's own pull request jobs it was offered.
+  properties: { summary: STR, testsAdded: { type: 'integer' }, notes: STR, question: QUESTION, decided: DECIDED, job: STR },
   required: ['summary'],
 };
 

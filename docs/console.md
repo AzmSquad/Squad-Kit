@@ -376,8 +376,12 @@ story's branch, opens the pull request into main, and merges it with a merge com
 goes, and your own main follows. squad-kit never waits for that in the step: while GitHub's checks run, a branch rule
 waits for a person's approval, or GitHub could not be reached just then (a laptop waking from sleep), the story says
 "Waits on the code host: its checks or an approval", and squad-kit looks again every few minutes and merges it then (or
-at once with **Check again**, which also merges one that stopped once it can). A failed check, a draft or a clash is said
-plainly on the story, and squad-kit never goes around a rule. Closed on GitHub while it waits, the story says so, with
+at once with **Check again**, which also merges one that stopped once it can). A failed check is squad-kit's to handle:
+it reads why (the failed tests and what the check printed), and the Builder fixes it in a normal fix round whose fix
+goes to the same pull request, or names one of the project's own jobs that a label starts on a pull request (such as one
+that makes golden pictures on Linux), which squad-kit then starts there. It merges once the checks pass. After two
+rounds, or for a draft, one plain card asks for an engineer, with a link to the check, and squad-kit still merges by
+itself once GitHub lets it. A clash gets the clash card, and squad-kit never goes around a rule. Closed on GitHub while it waits, the story says so, with
 **Send it again** and **Leave it closed**. A release never starts while one of its pull requests still waits; on a main
 that only takes pull requests, the release goes through its own pull request and waits up to 10 minutes for its checks. A branch rule that wants the newest main brings it in on
 GitHub once. When you can't push to the repo, the story merges on this computer instead, as with no code host, and says

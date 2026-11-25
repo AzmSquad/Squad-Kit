@@ -2544,6 +2544,9 @@ exports[`prompt texts > the answer shapes and fixed words 1`] = `
         "items": {
           "type": "string"
         }
+      },
+      "job": {
+        "type": "string"
       }
     },
     "required": [

@@ -304,8 +304,7 @@ export const TICKET_HOME = {
   dependency: 'project',
   breakdown: 'project',
   decided: 'project',
-  // Split: the questions' answers, the steps' titles and files inside the ticket's folder are the project's;
-  // the talk about a question, the steps' progress and voice notes stay here.
+  // Split: answers, step titles and files in the ticket's folder are the project's; talk, progress and voice notes stay here.
   questions: 'project',
   steps: 'project',
   attachments: 'project',
@@ -358,9 +357,10 @@ export const TICKET_HOME = {
   takenOver: 'local',
   outside: 'project',
   stuck: 'local',
-  // With the clash card it belongs to, and what this computer last heard from the code host.
+  // With the clash card it belongs to, and what this computer last heard from the code host and did about it.
   clashedPr: 'local',
   prClosed: 'local',
+  prCheck: 'local',
   contribution: 'local',
   changeRequest: 'local',
   agentQuestion: 'local',

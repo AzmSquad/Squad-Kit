@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.42] — 2026-11-25
+
+### Added
+
+- **A failed check on the pull request is squad-kit's to handle, not yours.** When GitHub's check fails on a story's
+  pull request, squad-kit reads why (the failed tests and what the check printed) and the Builder fixes it in a normal
+  fix round: the checks, the review, the proof and Looks right run as usual, and the fix goes to the same pull request.
+  When the fix is one of the project's own jobs that a label starts on a pull request (such as one that makes golden
+  pictures on Linux), the Builder names it and squad-kit starts it there. squad-kit merges once the checks pass. Only
+  after two rounds does a plain card ask for an engineer, with a link to the check, and squad-kit still merges by itself
+  once it passes. A draft or another hold on GitHub gets the same plain card. A story held back by an older version is
+  picked up on the next look.
+
+### Fixed
+
+- **A pull request just pushed to waits for its checks to start.** A fix sent to an older pull request could be merged
+  before GitHub started its checks on the new commit.
+
 ## [1.3.41] — 2026-11-25
 
 ### Added

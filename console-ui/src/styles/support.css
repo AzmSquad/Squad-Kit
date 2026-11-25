@@ -30,3 +30,4 @@
 @media (max-width: 760px) { .toast.err { flex-wrap: wrap; justify-content: flex-end; padding-right: 8px; } .toast.err .grow { flex-basis: calc(100% - 40px); } }
 .errcard-points { margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
 .errcard-points li { overflow-wrap: anywhere; margin-inline-start: 20px; }
+.errcard-link { display: inline-flex; align-items: center; gap: 5px; margin-top: 8px; font-size: 13.5px; font-weight: 600; color: var(--accent); }

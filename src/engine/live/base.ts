@@ -13,6 +13,7 @@ import { carriesOn, carryOnLine, carryOnPrompt } from '../interrupt.js';
 import { openStep, planKey } from './shared.js';
 import type { LiveSquad } from './squad.js';
 import { fixRound } from '../review-record/fix-round.js';
+import { nothingChanged, roundDone, roundStarts, roundWords } from '../pr-checks.js';
 
 /** Bringing main's new code into a ticket's copy, and the person's own fix. */
 export const basePart = {
@@ -160,24 +161,33 @@ export const basePart = {
   },
 
   async fixFromPerson(this: LiveSquad, id: string): Promise<void> {
+    // A fix for a check the code host failed on the pull request: its branch's newest commits come in first.
+    await roundStarts(this.bp, id);
     const t = await this.workspace(id);
+    const words = roundWords(t, this.bp);
     this.update(id, (x) => {
       x.stage = 'implement';
       x.live = true;
-      x.status = 'Builder is fixing what you found';
+      x.status = words?.status ?? 'Builder is fixing what you found';
       x.tries = 0;
       x.fails = 0;
       x.reviewRound = 0;
-      x.steps = [...(x.steps ?? []), { title: `Fix: ${x.changeRequest?.split('\n')[0] ?? 'what you found'}`, status: 'doing' }];
+      const first = x.changeRequest?.split('\n')[0];
+      x.steps = [...(x.steps ?? []), { title: words && first ? first : `Fix: ${first ?? 'what you found'}`, status: 'doing' }];
     });
-    await fixRound(this.bp, id, () => this.runBuilder(id, P.changeFixPrompt(t.changeRequest ?? ''), Boolean(t.sessions?.build)));
+    // The check's words are squad-kit's own, not the person's.
+    const ask = words ? `${t.changeRequest ?? ''}\n\nPrint ">> fix" first, then fix it and run the project's checks here again.` : P.changeFixPrompt(t.changeRequest ?? '');
+    await fixRound(this.bp, id, () => this.runBuilder(id, ask, Boolean(t.sessions?.build)));
+    // A check's fix that changed nothing: the project's job it named starts on the pull request, or the card says so.
+    if (await nothingChanged(this.bp, id)) return;
     this.update(id, (x) => {
       const last = x.steps?.[x.steps.length - 1];
       if (last) {
         last.status = 'done';
         last.live = undefined;
       }
-      addActivity(x, 'builder', 'Fixed what you found');
+      roundDone(x);
+      addActivity(x, 'builder', words?.done ?? 'Fixed what you found');
       x.changeRequest = undefined;
       x.stage = 'test';
       x.status = 'Running the project checks';

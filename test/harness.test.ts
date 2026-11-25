@@ -284,7 +284,7 @@ describe('gates', () => {
   const types = read('src/board/types.ts');
   const union = (after: string) => [...new RegExp(`${after}\\s*([^;]+);`).exec(types)![1]!.matchAll(/'([\w-]+)'/g)].map((m) => m[1]!);
   /** A name in the types whose row goes by another name. */
-  const ROW_OF: Record<string, string> = { hooks: 'hook', ticket: 'budget', month: 'budget', stuck: 'ways-out', yours: 'take-over' };
+  const ROW_OF: Record<string, string> = { hooks: 'hook', ticket: 'budget', month: 'budget', stuck: 'ways-out', yours: 'take-over', 'pr-check': 'pr-checks' };
 
   it('every gate and stop in the types has a row', () => {
     const named = [

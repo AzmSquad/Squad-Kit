@@ -34,7 +34,7 @@ interface Checks {
   failed: string[];
 }
 
-const FAILED = new Set(['failure', 'timed_out', 'cancelled', 'action_required', 'startup_failure']);
+export const FAILED = new Set(['failure', 'timed_out', 'cancelled', 'action_required', 'startup_failure']);
 
 /** The checks on a commit: GitHub's check runs and the older commit statuses. */
 async function checksOf(repo: string, sha: string): Promise<Checks> {
@@ -73,11 +73,12 @@ async function look(repo: string, n: number, settle = false): Promise<Look> {
   if (p.mergeable === false || st === 'dirty') return { pr: p, state: 'clash' };
   if (p.mergeable === null) return { pr: p, state: 'waiting', why: `GitHub is still working out whether pull request ${n} can merge.` };
   const checks = await checksOf(repo, p.head.sha);
-  if (checks.failed.length) return { pr: p, state: 'refused', why: `GitHub's check "${checks.failed[0]}" failed on pull request ${n}, so squad-kit did not merge it. Look at the check on GitHub, then merge it there or press Check again.` };
+  if (checks.failed.length) return { pr: p, state: 'refused', why: `GitHub's check "${checks.failed[0]}" failed on pull request ${n}, so squad-kit did not merge it.` };
   if (checks.pending.length) return { pr: p, state: 'waiting', why: `Pull request ${n} waits for its checks on GitHub (${checks.pending.slice(0, 3).join(', ')}).` };
   if (st === 'behind') return { pr: p, state: 'behind' };
   if (st === 'blocked') return { pr: p, state: 'waiting', why: `Pull request ${n} waits for what the branch rule on ${p.base.ref} asks, such as a person's approving review on GitHub.` };
-  const young = !checks.any && pace.now() - Date.parse(p.created_at ?? '') < pace.graceMs;
+  // New, or just pushed to (a fix sent to the same pull request): its checks may still be on their way.
+  const young = !checks.any && pace.now() - Math.max(Date.parse(p.created_at ?? '') || 0, Date.parse(p.updated_at ?? '') || 0) < pace.graceMs;
   if (young) return { pr: p, state: 'waiting', why: `Pull request ${n} is new: squad-kit gives its checks a moment to start.` };
   if (['clean', 'unstable', 'has_hooks'].includes(st)) return { pr: p, state: 'ready' };
   return { pr: p, state: 'waiting', why: `Pull request ${n} is not ready to merge on GitHub yet.` };
@@ -119,6 +120,8 @@ export async function mergePull(repo: string, n: number, message: string): Promi
     } catch (err) {
       // Someone pushed to the branch meanwhile: looked at again, once.
       if (err instanceof ModuleError && err.status === 409 && tries === 0) continue;
+      // Another merge into the base just now (several stories at once): a wait, and the next look merges it.
+      if (err instanceof ModuleError && err.status === 405 && /base branch was modified/i.test(err.message)) throw new ModuleError(`${p.base.ref} moved on GitHub just as squad-kit merged pull request ${n}: it merges on the next look.`, 'waiting');
       if (err instanceof ModuleError && err.status === 405) throw new ModuleError(`GitHub did not merge pull request ${n}: ${err.message.replace(/^GitHub said 405: /, '')}`, 'other', 405);
       throw err;
     }

@@ -4,6 +4,7 @@ import type { CriterionProof } from './proof-kind.js';
 import type { OffScreen, ProofShot } from './proof-rows.js';
 import type { TicketReview } from './review-types.js';
 import type { TicketContribution } from './contribution-types.js';
+import type { PrCheck } from './pr-check-types.js';
 
 /** The 7 stages a ticket moves through. `done` means released and off the board. */
 export type Stage = 'tickets' | 'specs' | 'implement' | 'test' | 'review' | 'release' | 'bugs' | 'done';
@@ -170,14 +171,13 @@ export interface StuckChoice {
   /** What stopped: a failed gate the person can continue past, a clash with the base branch, a step's cap, or any other error. */
   gate?: 'checks' | 'review' | 'proof' | 'merge' | 'cap';
   /**
-   * Why the gate stopped, when it is not a plain failure: tests made weaker, no tests at all, screenshots that failed
-   * squad-kit's check, a project command that needed a file outside its copy and squad-kit's guard blocked it,
-   * screenshots that show a "done when" does not work after the Builder's last round ('broken'), or a "done when" the
-   * Tester could not show on a screen after its last retake ('not-shown'). 'hook': the project's own commit hook said
-   * no when squad-kit saved the accepted change. 'gate-cant-run': a gate the team added could not run at all, which
-   * says nothing about the code.
+   * Why it stopped, when not a plain failure: tests made weaker, no tests, screenshots that failed squad-kit's check, a file
+   * the guard blocked, a "done when" broken or not shown after the last round, the commit hook said no at the save ('hook'),
+   * a team's gate could not run, the owner's notes or close, or a code host check the Builder could not fix ('pr-check').
    */
-  kind?: 'weakened' | 'no-tests' | 'bad-proof' | 'guard' | 'push' | 'environment' | 'broken' | 'not-shown' | 'hook' | 'gate-cant-run' | 'owner-notes' | 'owner-closed';
+  kind?: 'weakened' | 'no-tests' | 'bad-proof' | 'guard' | 'push' | 'environment' | 'broken' | 'not-shown' | 'hook' | 'gate-cant-run' | 'owner-notes' | 'owner-closed' | 'pr-check';
+  /** Where to see it, as a link on the card: the failed check on the code host. */
+  link?: { label: string; url: string };
   /** The team's gates this stop is about (board/additions.ts). */
   added?: { id: string; name: string }[];
   /** For failed checks: which ones failed (for weakened tests: what was weakened), so continuing past them is remembered for them. */
@@ -569,9 +569,8 @@ export interface Ticket extends TicketReview, TicketContribution {
   branch?: string;
   baseCommit?: string;
   /**
-   * Work was saved on its branch with the project's commit hooks saying no (the work so far, before the base came in or
-   * a hand over). They look only at what is staged, so at accept they run on the whole change, and this ends when they
-   * pass or when the person goes past them.
+   * Work was saved with the project's commit hooks saying no (before the base came in, or a hand over). They see only what
+   * is staged, so at accept they run on the whole change; this ends when they pass or the person goes past them.
    */
   hookOwed?: boolean;
   tries?: number;
@@ -594,13 +593,12 @@ export interface Ticket extends TicketReview, TicketContribution {
   stopRequested?: boolean;
   /** The pull request opened after the proof was accepted, on the code host module named in host. */
   pr?: { id: number; url: string; repo: string; host: string };
-  /**
-   * The pull request that clashed with the base, kept while the clash card waits: it stays open on the code host, and a
-   * person may settle the clash there and merge it (engine/merged-outside.ts).
-   */
+  /** The pull request that clashed with the base, kept while the clash card waits: a person may settle it there and merge. */
   clashedPr?: { id: number; url: string; repo: string; host: string };
   /** The pull request (its number) the code host closed without merging: said once on the ticket, not asked about by itself again. */
   prClosed?: number;
+  /** A check the code host failed on its pull request, handled by squad-kit itself (engine/pr-checks.ts). */
+  prCheck?: PrCheck;
   /** When the change went into the base branch. Accepted work merges right away, so later tickets build on it. */
   mergedAt?: string;
   /** Installing packages and running migrations in the person's own checkout, after the merge moved it. */

@@ -63,6 +63,7 @@ function title(t: Ticket): string {
   if (s.kind === 'gate-cant-run') return 'A check of your team could not run';
   if (s.kind === 'owner-notes') return 'The owner asked for changes';
   if (s.kind === 'owner-closed') return 'The pull request was closed';
+  if (s.kind === 'pr-check') return t.prCheck?.card === 'fix' ? "The pull request's check still fails" : 'The pull request is held back';
   if (s.kind === 'hook') return s.added ? "Your team's check said no" : "The project's own check said no";
   if (s.gate === 'checks') return s.kind === 'weakened' ? 'The tests were made weaker' : s.kind === 'no-tests' ? 'No tests to check the work' : s.kind === 'guard' ? 'A file was blocked' : s.kind === 'push' ? 'A push was blocked' : s.kind === 'environment' ? 'Something this computer is missing' : 'The checks still fail';
   if (s.gate === 'review') return 'The review is still open';

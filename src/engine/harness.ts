@@ -28,6 +28,7 @@ import { DEFAULT_QUALITY, QUALITIES, QUALITY_NOTE, QUALITY_PRESETS } from './lev
 import { BEFORE_SHOTS_MS, BLIP_WAITS_MIN, BUILD_STEP_MS, KEPT_APP_MS, MAX_CHECK_TRIES, MAX_REVIEW_ROUNDS, PROOF_STEP_MS, REVIEW_STEP_MS, WORDS_STEP_MS } from './live.js';
 import { MAX_NOTE_BYTES } from './media.js';
 import { OUTSIDE_LOOK_MS } from './merged-outside.js';
+import { CHECK_ROUNDS, JOB_START_MS, UNRUN_MS } from './pr-checks.js';
 import { LOOK_MS } from './contribution/look.js';
 import { WAIT_LIMIT_MS } from './product-lock.js';
 import { MIN_SIZE } from './proof-check.js';
@@ -189,6 +190,7 @@ function lineStages(): HarnessStage[] {
       g('merge', 'A clean merge', 'The latest code comes in first. A clash is never forced.', `The newest code comes in by itself, up to ${MAX_BASE_TRIES} times. Then a card.`),
       g('pull-request', 'Pull requests', `squad-kit opens and merges them. Waiting for an approver is a normal wait. One merged on the code host is noticed within ${OUTSIDE_LOOK_MS / 60_000} minutes, or at once with Check again.`, 'Try again, or let the release merge the work.'),
       y('owner-notes', "The owner's notes", "A pull request to someone else's repo (the one yours was copied from) waits for its owner: squad-kit never merges there. Notes from people who can change that repo come back to the story; nobody else's reach the Builder.", 'Fix these, or answer them yourself. The fix goes to the same pull request, and each note is answered with its commit.'),
+      g('pr-checks', "The code host's checks", `A check that fails on the pull request is read, and the Builder fixes it, or starts the project's own job for it (one a label starts). The fix goes to the same pull request, and it merges once the checks pass.`, `After ${CHECK_ROUNDS} tries, a card for an engineer. It still merges by itself once the check passes.`),
       g('owner-closed', 'Closed without merging', 'A pull request closed on the code host without merging, by its owner or while it waited, is said on the story. Nothing here changes.', 'Send it again, or leave it closed.'),
       g('checkout', 'Your own copy is safe', 'With changes in the same files, the merge waits. It never overwrites them.'),
     ]),
@@ -247,6 +249,7 @@ function limitRows(meta?: BoardMeta): HarnessLimit[] {
     tries({ MAX_RETAKES }, 'Retakes', 'For a "done when" the pictures don\'t show clearly.'),
     tries({ MAX_PROOF_ROUNDS: MAX_PROOF_ROUNDS - 1 }, 'Returns after a broken picture', 'To the Builder. Then you decide.'),
     tries({ MAX_BASE_TRIES }, 'Clash retries', 'While the code keeps moving.'),
+    tries({ CHECK_ROUNDS }, "Fixes for your code host's check", 'By the Builder, on a pull request. Then a card for an engineer.'),
     tries({ BLIP_WAITS_MIN: BLIP_WAITS_MIN.length }, 'Waits after a lost connection', `After ${BLIP_WAITS_MIN.join(', ')} minutes. Then a card.`),
     pics({ MAX_PICTURES_PER_DONE_WHEN }, 'Pictures for each "done when"', 'So each part can show.'),
     pics({ MAX_PICTURES }, 'Pictures in one proof step', 'Counting each one taken again.'),
@@ -282,6 +285,8 @@ function limitRows(meta?: BoardMeta): HarnessLimit[] {
     time({ RELEASE_PR_WAIT_MS }, "A release's own pull request", 'On a branch that only takes pull requests: the release waits this long for its checks, then Send again merges it.'),
     time({ MAX_LANDING_WAIT_MS }, 'Waiting for a story to merge', 'Before the newest code comes in.'),
     time({ TRACKER_LOOK_MS }, "Looking for new stories under a run's epic", 'They join only when you add them. A move of the epic your tracker refused is tried again then.'),
+    time({ JOB_START_MS }, 'A project job squad-kit started', "Before it counts as done when it doesn't show among the pull request's checks."),
+    time({ UNRUN_MS }, 'A failed check running again', 'On the newest commit of the pull request, before a card says it did not. No merge before it passes.'),
     time({ OUTSIDE_LOOK_MS }, 'Looking for merges on your code host', 'Pull requests merged there, outside squad-kit. Check again looks now.'),
     time({ WAIT_LIMIT_MS }, 'Waiting for the product'),
     time({ TRY_YIELDS_AFTER_MS }, 'Trying a story yourself', 'Once another story needs it.'),
@@ -440,6 +445,7 @@ function rowDetails(meta: BoardMeta | undefined, root: string | undefined): Reco
     merge: code('board/bring-in.ts', ['Limit', `${MAX_BASE_TRIES} tries`]),
     'pull-request': code('engine/sync.ts', ['Limit', `${min(NETWORK_GIT_MS)} to reach your code host`]),
     'owner-notes': code('engine/contribution/look.ts', ['Looks again', `Every ${min(LOOK_MS)}, and at once with Check again`], ['Terminal', 'squad pr <story>']),
+    'pr-checks': code('engine/pr-checks.ts', ['Tries', `${CHECK_ROUNDS} Builder rounds`], ['Reads', "The failed check's output on GitHub"]),
     'owner-closed': code('engine/contribution/look.ts'),
     checkout: code('board/auto.ts'),
     release: code('engine/release.ts', ['Runs', run('deploy')], ['Limit', min(PIPELINE_MS)]),

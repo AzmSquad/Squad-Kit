@@ -2,7 +2,8 @@ import { addActivity, listReleases, listTickets, readMeta, readTicket, requireTi
 import type { Ticket } from '../board/types.js';
 import { BoardActionError, ensureDraftRelease, pullRequestClashed } from '../board/actions.js';
 import { chooseBuild, isMerged, unmergedDeps, wakeIfReady } from '../board/depends.js';
-import { PR_HOST_WAITS, afterPullRequest, mergeWait } from '../board/auto.js';
+import { PR_HOST_WAITS, afterPullRequest, mergeWatch, onCheckCard } from '../board/auto.js';
+import { inCheckRound } from './pr-checks.js';
 import { mayPassSoon } from '../modules/errors.js';
 import { clearStaleStop } from '../board/stale-stop.js';
 import { isMine } from '../board/owner.js';
@@ -148,7 +149,7 @@ async function checkOwn(bp: BoardPaths, t: Ticket): Promise<Omit<MergeCheck, 'ti
     const look = await lookAtContribution(bp, t.id);
     return { found: look.found === 'notes' ? 'open' : look.found, line: look.line, merged: look.found === 'merged' ? [t.id] : [] };
   }
-  const wait = mergeWait(t);
+  const wait = mergeWatch(t);
   if (wait) return checkWait(bp, t, wait);
   if (!openPr(t) && !mayHaveClashedPr(bp, t)) return null;
   const target = repoTarget(bp, t);
@@ -214,6 +215,9 @@ async function checkWait(bp: BoardPaths, t: Ticket, wait: 'pr' | 'checkout'): Pr
     return { found: 'closed', line: `Pull request ${t.pr.id} was closed on ${host.label} without merging, so ${t.id} waits for you: send it again, or leave it closed.`, merged: [] };
   }
   const now = readTicket(bp, t.id);
+  // A check that failed there: the Builder is fixing it now, or the card says why it waits (engine/pr-checks.ts).
+  if (now && inCheckRound(now)) return { found: 'open', line: `${now.status}. squad-kit sends the fix to the same pull request and merges once the checks pass.`, merged: [] };
+  if (now && onCheckCard(now)) return { found: 'open', line: now.stuck!.question, merged: [] };
   if (wait === 'pr' && now?.status === PR_HOST_WAITS) return { found: 'open', line: `Pull request ${t.pr?.id ?? ''} still waits${host ? ` on ${host.label}` : ''}: its checks or an approval. squad-kit looks again by itself and merges it then.`, merged: [] };
   if (wait === 'pr') return { found: 'open', line: `Pull request ${t.pr?.id ?? ''} is still open${host ? ` on ${host.label}` : ''}, waiting for someone to approve it. Nothing changed.`, merged: [] };
   return { found: 'open', line: `Your own copy of ${base} still has changes in the same files. Save or undo them there, and ${t.id} goes in by itself.`, merged: [] };
@@ -300,7 +304,7 @@ export async function lookOutside(bp: BoardPaths): Promise<{ asked: number; merg
   const out = { asked: 0, merged: [] as string[] };
   if (meta.engine !== 'live') return out;
   for (const t of listTickets(bp)) {
-    if (!isMine(t, meta) || mergeWait(t)) continue;
+    if (!isMine(t, meta) || mergeWatch(t)) continue;
     const known = openPr(t);
     const key = `${bp.squadDir}\0${t.id}`;
     if (known ? t.prClosed === known.id : notFound.has(key) || !mayHaveClashedPr(bp, t)) continue;

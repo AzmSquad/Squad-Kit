@@ -1,8 +1,10 @@
-import type { CodeHostModule, Contribution, HostNote, MergeState, PullRequest, PullRequestReview, RepoHost } from '../code-host/types.js';
+import type { CodeHostModule, Contribution, HostNote, MergeState, PullChecks, PullJob, PullRequest, PullRequestReview, RepoHost } from '../code-host/types.js';
 import { ModuleError } from '../errors.js';
+import { pullChecksOf } from './failed-checks.js';
 import { githubForks } from './forks.js';
 import { mergePull, pullState } from './merge.js';
 import { answerOwnerNote, ownerNotesOf } from './owner-notes.js';
+import { labelJobsIn, startLabelJob } from './pull-jobs.js';
 import { repoName } from './pull-page.js';
 import { closePull, describePull, findPull, openPull } from './pulls.js';
 import { postReviewComments } from './review-comments.js';
@@ -113,6 +115,21 @@ class GitHubRepo implements RepoHost {
 
   async answerNote(prId: number, note: Pick<HostNote, 'id' | 'kind' | 'who' | 'text' | 'thread'>, text: string): Promise<void> {
     await answerOwnerNote(await this.prRepo(), prId, note, text);
+  }
+
+  async pullChecks(prId: number, opts: { why?: boolean } = {}): Promise<PullChecks> {
+    return pullChecksOf(await this.prRepo(), prId, opts.why !== false);
+  }
+
+  pullJobs(dir: string): PullJob[] {
+    return labelJobsIn(dir);
+  }
+
+  /** Only on a pull request of the team's own repo: one in someone else's is its owner's. */
+  async startJob(prId: number, job: PullJob): Promise<void> {
+    const w = await this.where();
+    if (w.into) throw new ModuleError(`Pull request ${prId} is in ${w.into.repo}: its owner runs its jobs, never squad-kit.`, 'other', 405);
+    await startLabelJob(w.repo, prId, job);
   }
 }
 

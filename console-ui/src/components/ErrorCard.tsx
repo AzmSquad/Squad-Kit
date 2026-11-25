@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { Check, Copy, PenLine, RotateCcw } from 'lucide-react';
+import { Check, Copy, ExternalLink, PenLine, RotateCcw } from 'lucide-react';
 import type { Ticket } from '../api/types';
 import { useAct } from '../lib/data';
 import { usePrefs } from '../lib/prefs';
@@ -135,18 +135,22 @@ export function StuckCard({ t, extra }: { t: Ticket; extra?: ReactNode }) {
         title={stuckTitle(t.stuck)}
         calm={t.stuck?.kind === 'no-tests' || t.stuck?.gate === 'cap'}
         what={
-          t.stuck?.points?.length ? (
-            <>
-              <Written as="div" text={t.stuck.question} />
+          <>
+            <Written as="div" text={t.stuck?.question ?? ''} />
+            {t.stuck?.points?.length ? (
               <ul className="errcard-points">
                 {t.stuck.points.map((p) => (
                   <Written as="li" key={p} text={p} />
                 ))}
               </ul>
-            </>
-          ) : (
-            <Written as="div" text={t.stuck?.question ?? ''} />
-          )
+            ) : null}
+            {/* Where to look: a failed check on the code host, for an engineer or anyone curious. */}
+            {t.stuck?.link && /^https:\/\//.test(t.stuck.link.url) && (
+              <a className="errcard-link" href={t.stuck.link.url} target="_blank" rel="noreferrer">
+                <ExternalLink size={13} aria-hidden="true" /> {t.stuck.link.label}
+              </a>
+            )}
+          </>
         }
         safe={t.stuck?.safe ?? ['Nothing was lost: the work so far is kept.']}
         ways={ways}

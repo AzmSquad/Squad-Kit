@@ -43,7 +43,7 @@ import { catchUp } from '../depends.js';
 import { projectCopies, runsEnded } from '../leftovers.js';
 import { CutOff, carriesOn, markInterrupted, sleepMark, sleptSince, type SleepMark } from '../interrupt.js';
 import { trackTask } from '../process-group.js';
-import { mergeWait, resumeAccept } from '../../board/auto.js';
+import { mergeWatch, resumeAccept } from '../../board/auto.js';
 import { breakdownJobs, holdBreakdownJob } from '../../board/requirements.js';
 import { breakdownStopped } from '../../board/requirements-actions.js';
 import { analystOverBudget, fillBuildQueue, placesLeft } from '../../board/requirements-build.js';
@@ -371,8 +371,9 @@ export class LiveSquad {
       if (wakeIfReady(this.bp, t)) continue;
       // Builds by itself: the change it waited for is settled, so it is accepted now (board/auto.ts).
       if (resumeAccept(this.bp, t)) continue;
-      // Builds by itself: a merge that waits for a pull request's approver or the person's checkout is looked at again.
-      if (mergeWait(t)) this.lookAtMerge(t.id);
+      // A merge that waits for a pull request's approver, its checks, or the person's checkout is looked at again; so is
+      // one at the card for a check that failed (engine/pr-checks.ts), which merges once it passes.
+      if (mergeWatch(t)) this.lookAtMerge(t.id);
       if (openChange(t)?.status === 'writing' && !this.running.has(`__change:${t.id}`)) this.launch(`__change:${t.id}`, () => this.writeChange(t.id));
       if (t.stopRequested) {
         this.stops.get(t.id)?.abort();

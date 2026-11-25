@@ -19,8 +19,8 @@ export interface Call {
   body?: Record<string, unknown>;
 }
 
-/** A REST answer, or 'offline': the connection drops, as on a laptop waking from sleep. */
-export type Answer = { status?: number; body?: unknown } | 'offline' | undefined;
+/** A REST answer (`text`: a plain text body, such as a job's output), or 'offline': the connection drops, as on a laptop waking from sleep. */
+export type Answer = { status?: number; body?: unknown; text?: string } | 'offline' | undefined;
 
 export interface FakeGitHub {
   calls: Call[];
@@ -95,7 +95,7 @@ export function fakeGitHub(answer: (c: Call) => Answer, o: { network?: string[][
     const a = unrelated(c, o.network ?? []) ?? answer(c) ?? { status: 404, body: { message: 'Not Found' } };
     if (a === 'offline') throw new TypeError('fetch failed');
     const status = a.status ?? 200;
-    return new Response(status === 204 ? null : JSON.stringify(a.body ?? {}), { status });
+    return new Response(status === 204 ? null : (a.text ?? JSON.stringify(a.body ?? {})), { status });
   });
   return {
     calls,

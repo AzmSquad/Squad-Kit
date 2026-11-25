@@ -58,6 +58,31 @@ export function mergeWait(t: Ticket | undefined | null): 'pr' | 'checkout' | nul
   return t.branch ? 'checkout' : null;
 }
 
+/** The card for a code host check the Builder could not fix (engine/pr-checks.ts): squad-kit still merges once it passes. */
+export function onCheckCard(t: Ticket): boolean {
+  return t.waiting?.kind === 'stuck' && t.stuck?.kind === 'pr-check' && Boolean(t.pr) && !t.contribution;
+}
+
+/**
+ * Held back by the code host for good, with no more said: before squad-kit handled that itself (1.3.41 and older), or on
+ * a code host that cannot say why (engine/pr-checks.ts). On GitHub, which says why, it is looked at again.
+ */
+const HELD_BEFORE = /^PR \d+ is waiting in .+ · /;
+const SAYS_WHY = new Set(['github']);
+
+/**
+ * mergeWait, and the pull requests the squad also keeps looking at: one at the card for a check the Builder could not
+ * fix, and one held back for good before squad-kit handled that, so it is handled now. A merge then takes the card away.
+ */
+export function mergeWatch(t: Ticket | undefined | null): 'pr' | 'checkout' | null {
+  const wait = mergeWait(t);
+  if (wait || !t || t.stage !== 'release' || isMerged(t) || t.squad || t.live || !t.pr || t.contribution || t.deleting || t.archived) return wait;
+  return onCheckCard(t) || (!t.waiting && heldBefore(t)) ? 'pr' : null;
+}
+
+/** Held back for good before squad-kit handled it (HELD_BEFORE): the next look tries the merge, and says why it can't. */
+export const heldBefore = (t: Pick<Ticket, 'status' | 'pr'>): boolean => HELD_BEFORE.test(t.status) && SAYS_WHY.has(t.pr?.host ?? '');
+
 /** The words for a merge wait, on the story and the card. */
 export function mergeWaitWords(wait: 'pr' | 'checkout', t?: Pick<Ticket, 'status'>): string {
   if (wait === 'checkout') return CHECKOUT_WAITS;
@@ -302,7 +327,9 @@ export function afterPullRequest(bp: BoardPaths, id: string, clash: boolean): vo
     return;
   }
   const t = readTicket(bp, id);
-  if (t?.track !== 'auto' || t.mergedAt || !t.pr || t.contribution) return;
+  // A failed check the Builder is fixing now, or the card for it (engine/pr-checks.ts), is no wait for an approver.
+  // Held back by the host for now (its checks run) is no wait for an approver either: the squad looks again by itself.
+  if (t?.track !== 'auto' || t.mergedAt || !t.pr || t.contribution || t.live || t.waiting || t.status === PR_HOST_WAITS) return;
   updateTicket(bp, id, (x) => {
     x.status = PR_WAITS;
     addActivity(x, 'release', `Pull request ${x.pr?.id ?? ''} waits for someone to approve it. That is a normal wait, not a failure`);

@@ -9,10 +9,11 @@ import { clearStaleStop } from '../board/stale-stop.js';
 import { forkHostFor, trackerFor } from '../modules/registry.js';
 import type { RepoHost } from '../modules/code-host/types.js';
 import { ModuleError, mayPassSoon } from '../modules/errors.js';
-import { MergeClash, baseTurn, fetchedTip, moveBase, netGitLater } from './git.js';
+import { MergeClash, baseTurn, fetchedTip, gitLater, moveBase, netGitLater } from './git.js';
 import { itemId, localSetupFor, mapAfterMerge, mergeLocally, noteOn, prItem, repoTarget, resolveItem, saidToEngineers, squadInside, targetHost } from './sync.js';
 import { sentToOwner } from './contribution/send.js';
 import { prDescription } from './review-record/pr-description.js';
+import { checksAgain, heldBack, startNamedJob } from './pr-checks.js';
 import { writeReview } from './review-record/write.js';
 
 /**
@@ -141,6 +142,11 @@ async function publishTo(bp: BoardPaths, t: Ticket, target: Target, host: RepoHo
   if (shots.length || found) await host.updateDescription(pr.id, describe(shots));
 
   const opened = pr;
+  // A fix sent to the same pull request for a check that failed there: the project's job the Builder named starts now.
+  if (found && !into) {
+    const head = await gitLater(t.worktree ?? target.dir, ['rev-parse', branch], { allowFail: true });
+    if (head) await startNamedJob(bp, ticketId, host, opened.id, head).catch(() => undefined);
+  }
   updateTicket(bp, ticketId, (x) => {
     x.pr = { id: opened.id, url: opened.url, repo: into?.into ?? host.repo, host: host.host };
     // The clash it had is settled, or a new pull request took the place of a closed one.
@@ -164,6 +170,8 @@ async function publishTo(bp: BoardPaths, t: Ticket, target: Target, host: RepoHo
   let waits = false;
   let held = false;
   try {
+    // A fix for a check that failed here: that check runs again on it, and passes, before the merge (engine/pr-checks.ts).
+    if (found && !(await checksAgain(bp, ticketId, host, opened.id))) throw new ModuleError(`Pull request ${opened.id} waits for its checks to run again on the fix on ${host.label}.`, 'waiting');
     await host.merge(opened.id, `Merge ${t.title} (${t.id})`);
     merged = true;
     const head = await fetchedTip(target.dir, target.remote, target.base, { env });
@@ -186,6 +194,7 @@ async function publishTo(bp: BoardPaths, t: Ticket, target: Target, host: RepoHo
       x.mergedAt = new Date().toISOString();
       // Merged: a stop it went past (a clash it settled, a pull request that did not open) is over.
       clearStaleStop(x);
+      delete x.prCheck;
       const ls = movedLocal ? localSetupFor(bp, x) : undefined;
       if (ls) x.localSetup = ls;
       x.status = `Merged into ${target.base} · goes out in ${x.release ?? 'the next release'}`;
@@ -201,6 +210,8 @@ async function publishTo(bp: BoardPaths, t: Ticket, target: Target, host: RepoHo
     }
   });
   if (merged) mapAfterMerge(bp);
+  // Held back for good (a failed check, a draft): squad-kit handles it, never only a line (engine/pr-checks.ts).
+  if (!merged && !waits && !clash) await heldBack(bp, ticketId, host, opened.id, why).catch(() => undefined);
   // The review goes in once the pull request is merged, so a thread can never hold it up. A pull request that waits
   // gets it when its merge is seen (recheckMerge, merged-outside.ts).
   if (merged) await writeReview(bp, ticketId, host, opened);

@@ -107,6 +107,8 @@ export function leaveClosed(bp: BoardPaths, id: string): Ticket {
  * was fixing wait for the person again. Changes `t` in place (inside an update).
  */
 export function fixRoundStopped(t: Ticket): void {
+  // A round on a code host's check that was given up: the next refusal is a new try (engine/pr-checks.ts).
+  if (t.prCheck) t.prCheck.fixing = false;
   const c = t.contribution;
   if (c?.state !== 'fixing') return;
   c.state = 'waiting';

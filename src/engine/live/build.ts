@@ -20,6 +20,7 @@ import { BUILD_STEP_MS } from './limits.js';
 import { type AgentAsk, openStep, PassingTrouble, planKey, planStepOf, WaitingForYou } from './shared.js';
 import type { LiveSquad } from './squad.js';
 import { picturesNeeded } from '../proof-kinds/lines.js';
+import { jobNamed } from '../pr-checks.js';
 
 /** The Builder's step. */
 export const buildPart = {
@@ -191,6 +192,9 @@ export const buildPart = {
     if (way?.answer) return this.runBuilder(id, way.answer, true, step, settled + 1, told);
     this.askIfNeeded(id, 'builder', way?.ask ?? asked);
     this.saveDecided(id, 'builder', r.structured);
+    // A fix for a code host's check: the project's own job it named as the fix, when it is one it was offered.
+    const job = (r.structured as { job?: unknown } | undefined)?.job;
+    if (job) this.update(id, (x) => jobNamed(x, job));
     // Approved while this step ran: it reaches the Builder now, at the end of the step, before anything else runs.
     const late = openChange(readTicket(this.bp, id)!);
     if (late && late.size !== 'big' && late.status === 'approved') await this.runBuilder(id, '', true, step);

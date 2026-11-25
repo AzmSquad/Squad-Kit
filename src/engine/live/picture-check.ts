@@ -140,7 +140,7 @@ export const pictureCheckPart = {
       x.gates = { ...(x.gates ?? { checks: 'pass', review: 'pass' }), proof: 'fail' } as Ticket['gates'];
       const listOnly = !rows.length;
       x.status = listOnly ? "A no on your team's checklist" : 'The screenshots do not show it yet';
-      addActivity(x, 'tester', listOnly ? `The Tester still answers no on your team's checklist after ${MAX_RETAKES} more tries` : retook !== false ? `Could not show ${rows.map((r) => `"done when" ${r.criterion}`).join(', ')} on a screen${retook ? ` after ${retook} more ${retook === 1 ? 'try' : 'tries'}` : ''}` : 'Every "done when" ended as not on a screen, so the screenshots do not show the work');
+      addActivity(x, 'tester', listOnly ? `The Tester still answers no on your team's checklist after ${MAX_RETAKES} more tries` : retook !== false ? `Could not show ${rows.map((r) => `"done when" ${r.criterion}`).join(', ')} ${retook ? `on a screen after ${retook} more ${retook === 1 ? 'try' : 'tries'}` : 'on a screen'}` : 'Every "done when" ended as not on a screen, so the screenshots do not show the work');
       x.stuck = { gate: 'proof', kind: 'not-shown', question: stop.question, points: [...stop.points, ...listWords], options: wayOptions({ gate: 'proof', kind: 'not-shown' }) };
       x.waiting = { kind: 'stuck', summary: `${x.status}: needs one decision` };
     });

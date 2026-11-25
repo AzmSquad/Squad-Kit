@@ -10,7 +10,8 @@ import { projectRoot } from './live.js';
 import { filesMoved, repoFor } from './repos.js';
 import { overviewAfterMerge } from '../board/overview.js';
 import { firstCodeMerged } from '../board/first-story.js';
-import { PR_HOST_WAITS, mergeWait } from '../board/auto.js';
+import { PR_HOST_WAITS, heldBefore, mergeWatch, onCheckCard } from '../board/auto.js';
+import { checksAgain, heldBack } from './pr-checks.js';
 import { isMine } from '../board/owner.js';
 import { clearStaleStop } from '../board/stale-stop.js';
 import { copyViews } from './copies.js';
@@ -273,7 +274,7 @@ export function opensPullRequest(bp: BoardPaths, t: Ticket): boolean {
  */
 export async function recheckMerge(bp: BoardPaths, id: string): Promise<'merged' | 'clash' | 'waiting' | 'closed'> {
   const t = readTicket(bp, id);
-  const wait = mergeWait(t);
+  const wait = mergeWatch(t);
   if (!t || !wait) return 'waiting';
   const base = repoFor(readMeta(bp), t).base;
   let line: string;
@@ -291,25 +292,29 @@ export async function recheckMerge(bp: BoardPaths, id: string): Promise<'merged'
     }
     if (state !== 'merged') {
       // The host says it can merge now (its checks passed, someone approved, or a blip cut the merge off): it merges.
-      // One the host held back (PR_HOST_WAITS) is asked too, so a refusal is said on the story once and the wait ends.
-      if (state !== 'mergeable' && t.status !== PR_HOST_WAITS) return 'waiting';
+      // One the host held back (PR_HOST_WAITS, or for good before squad-kit handled that) is asked too, so a refusal is
+      // handled once: the Builder fixes a failed check, or a plain card says why (engine/pr-checks.ts).
+      const asked = t.status === PR_HOST_WAITS || heldBefore(t);
+      if (state !== 'mergeable' && !asked) return 'waiting';
+      // A check that failed here must run again on the newest commit and pass, never only a clean state.
+      if (!(await checksAgain(bp, id, host, t.pr.id))) return 'waiting';
       const err = await host.merge(t.pr.id, `Merge ${t.title} (${t.id})`).then(() => null, (e: unknown) => e as Error);
       if (err instanceof ModuleError && err.kind === 'clash') return 'clash';
       if (err) {
-        // Only a no for good ends the wait: a computer that slept, a busy service or checks still running keep it.
-        if (!mayPassSoon(err) && t.status === PR_HOST_WAITS) heldBack(bp, id, t.pr.id, host.label, err.message);
+        // Only a no for good is handled: a computer that slept, a busy service or checks still running keep the wait.
+        if (!mayPassSoon(err) && asked) await heldBack(bp, id, host, t.pr.id, err.message);
         return 'waiting';
       }
     }
     moved = await followBase(bp, id, target, host);
     const pr = t.pr;
     review = () => writeReview(bp, id, host, pr);
-    line = t.status === PR_HOST_WAITS ? `Merged pull request ${t.pr.id} on ${host.label} once it was ready` : `Pull request ${t.pr.id} was approved and merged on ${host.label}`;
+    line = t.status === PR_HOST_WAITS || heldBefore(t) || onCheckCard(t) ? `Merged pull request ${t.pr.id} on ${host.label} once it was ready` : `Pull request ${t.pr.id} was approved and merged on ${host.label}`;
   } else {
     const dirs = copyViews(readMeta(bp), t).map((view) => path.join(projectRoot(bp), repoFor(readMeta(bp), view).path));
     const went = await baseTurn(dirs, () => {
       // Looked at again in its turn: an accept that went first may have merged it by now.
-      if (!mergeWait(readTicket(bp, id))) return false;
+      if (!mergeWatch(readTicket(bp, id))) return false;
       // A story across parts goes in everywhere. One already in is skipped, so a later look finishes the rest.
       for (const view of copyViews(readMeta(bp), t)) if (!mergeLocally(bp, view)?.moved) return false;
       return true;
@@ -322,7 +327,9 @@ export async function recheckMerge(bp: BoardPaths, id: string): Promise<'merged'
   updateTicket(bp, id, (x) => {
     if (x.mergedAt) return;
     x.mergedAt = new Date().toISOString();
+    // A card for a check that failed goes with it: the check passed, or someone merged it on the code host.
     clearStaleStop(x);
+    delete x.prCheck;
     const ls = moved ? localSetupFor(bp, x) : undefined;
     if (ls) x.localSetup = ls;
     x.status = `Merged into ${base} · goes out in ${x.release ?? 'the next release'}`;
@@ -350,15 +357,6 @@ export function closedWhileWaiting(bp: BoardPaths, id: string, pr: number, label
     x.stuck = { kind: 'owner-closed', question: `Pull request ${pr} was closed on ${label} without merging, so it is not in the code. Nothing here changed: the work stays on the story's branch.`, options: closedOptions() };
     x.waiting = { kind: 'stuck', summary: 'The pull request was closed without merging' };
     addActivity(x, 'release', `Pull request ${pr} was closed on ${label} without merging`);
-  });
-}
-
-/** A pull request the code host held back for good (a failed check, a draft): said once, and the squad stops looking. */
-function heldBack(bp: BoardPaths, id: string, pr: number, label: string, why: string): void {
-  updateTicket(bp, id, (x) => {
-    if (x.status !== PR_HOST_WAITS) return;
-    x.status = `PR ${pr} is waiting in ${label} · ${x.release ?? 'next release'}`;
-    addActivity(x, 'release', `Pull request ${pr} is open but not merged yet: ${why}`);
   });
 }
 
