@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.40] — 2026-11-25
+
+### Added
+
+- **Get them: the Android pieces Flutter needs, in one press.** When your own Android SDK (Android Studio's) lacks what
+  the project's Flutter builds with (a platform, the NDK), the Tools page's Android line and the waiting story offer
+  Get them: squad-kit gets its own Android tools with those pieces, into its own folder, with real progress, and builds
+  with them from then on. Your Android Studio is never changed. Google's license comes first, on your press, as before;
+  Android Studio's own steps stay as the other way. The Squad lead's Get it and `squad tools get android` do the same.
+- **Get it for the iPhone simulator.** When Xcode has no iPhone simulator, squad-kit gets it from Apple with Xcode's own
+  download (`xcodebuild -downloadPlatform iOS`), only on your press (about 8 GB), with its progress, and says plainly
+  when it did not finish.
+
+### Changed
+
+- **Xcode's line opens the App Store**, with its two steps: Get it there, then open Xcode once and press Agree. Apple
+  lets only you do these.
+
 ## [1.3.39] — 2026-11-24
 
 ### Added
