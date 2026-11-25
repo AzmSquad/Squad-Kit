@@ -30,6 +30,7 @@ import type { Decided } from '../requirements-types.js';
 import { isMediaNote } from '../../engine/media.js';
 import { BoardActionError, tellLater } from './errors.js';
 import { openChat } from './chat.js';
+import { heldItems, startsFromRun } from '../epic-held.js';
 
 export interface NewTicketInput {
   /** The ticket's name when it comes from a tracker (AB-80); otherwise the project key and a number. */
@@ -247,6 +248,9 @@ export async function startFromTracker(bp: BoardPaths, tracker: Tracker, ref: st
   if (!id) throw new BoardActionError(`"${ref}" is not a ${tracker.label} item.`);
   const existing = listTickets(bp).find((t) => t.source.type === tracker.name && (t.source.id === id || t.source.ref === tracker.refOf(id)));
   if (existing) throw new BoardActionError(`${tracker.refOf(id)} is already on the board as ${existing.id}.`);
+  // A story of a breakdown or a run starts from there, never twice.
+  const held = heldItems(bp, tracker).get(id);
+  if (held?.run) throw new BoardActionError(startsFromRun(tracker.refOf(id), held));
   let w;
   try {
     w = await tracker.get(id);

@@ -6,6 +6,8 @@ import { WARN_AT } from '../board/budget.js';
 import { MAX_CHECKLIST_QUESTIONS, MAX_RULES, MAX_RULE_CHARS, MAX_TYPED_CHARS, readHarness, ruleNote, type Addition } from '../board/additions.js';
 import { MAX_FOLDER_FILES, MAX_FOLDER_FILE_BYTES } from '../board/additions-folder.js';
 import { MAX_PARTS, partsOf, severalParts } from '../board/parts.js';
+import { MAX_RUN_STORIES } from '../board/epic-tree.js';
+import { TRACKER_LOOK_MS } from '../board/epic-run.js';
 import { parallelLimit } from '../core/settings.js';
 import type { AgentRole } from './agents.js';
 import { BRD_READ_MS, BRD_WRITE_MS, LONGEST_READ_MS } from './breakdown-job.js';
@@ -121,6 +123,7 @@ function lineStages(): HarnessStage[] {
       g('brd-questions', 'Only real gaps and clashes', `At most ${MAX_QUESTIONS} questions on a document, where it leaves a gap or disagrees with itself.`, 'A technical one goes back to the agent.'),
       y('brd-approve', 'You approve the breakdown', 'Nothing is built or sent to your tracker before that. Every story needs its "done when".', 'Approve is refused and says what to fix.'),
       g('brd-queue', 'Stories start in order', 'The next starts when what it needs is merged and a place is free.', 'Your budget, your AI limit or two stopped stories hold the queue, with a reason.'),
+      y('epic-run', 'A whole epic from your tracker', `Build all on an epic or a feature: its stories keep your tracker's structure, none added or split. The Analyst reads all of it and asks you once, you approve once, then each story builds and merges by itself, at most ${MAX_RUN_STORIES} in one run. A story changed in your tracker waits for you to read it again, a closed one leaves the run, and a new one joins only when you add it.`, 'squad-kit moves the epic and its features forward in your tracker. A move it cannot make is logged and stops nothing.'),
       g('first-story', 'A project with no code starts with one story', 'squad-kit adds Set up the product: it picks the tools and makes a first version. Nothing else starts until it merges, so every story builds on the same start.', 'Another ticket waits, and says which one it waits for.'),
     ]),
     stage('story', 'Story', 'The Analyst reads your story and asks only what it leaves open.', on(you('You answer'), skip('No questions'), skip('Approved before')), [
@@ -278,6 +281,7 @@ function limitRows(meta?: BoardMeta): HarnessLimit[] {
     time({ PIPELINE_MS }, 'Your after-release step', 'Inside the guard, after a release.'),
     time({ RELEASE_PR_WAIT_MS }, "A release's own pull request", 'On a branch that only takes pull requests: the release waits this long for its checks, then Send again merges it.'),
     time({ MAX_LANDING_WAIT_MS }, 'Waiting for a story to merge', 'Before the newest code comes in.'),
+    time({ TRACKER_LOOK_MS }, "Looking for new stories under a run's epic", 'They join only when you add them. A move of the epic your tracker refused is tried again then.'),
     time({ OUTSIDE_LOOK_MS }, 'Looking for merges on your code host', 'Pull requests merged there, outside squad-kit. Check again looks now.'),
     time({ WAIT_LIMIT_MS }, 'Waiting for the product'),
     time({ TRY_YIELDS_AFTER_MS }, 'Trying a story yourself', 'Once another story needs it.'),
@@ -286,6 +290,7 @@ function limitRows(meta?: BoardMeta): HarnessLimit[] {
     time({ RETRY_MS }, 'Looking again at your AI limit', "When your AI tool doesn't say when it ends."),
     size({ parallel: parallelLimit(meta?.parallel) }, 'Stories at once', 'Across your projects. Change it in Settings.'),
     size({ MAX_PARTS }, 'Parts of one product'),
+    size({ MAX_RUN_STORIES }, 'Stories in one run of an epic', 'The rest are left out, and Build all says so.'),
     size({ MAX_UPLOADS }, 'Files on one story'),
     size({ MAX_RULES }, 'Rules your team can add', 'Remove one to add another.'),
     size({ MAX_RULE_CHARS }, 'Characters in one rule', 'Agents read every rule at every step, so each stays short.'),
@@ -387,6 +392,7 @@ function rowDetails(meta: BoardMeta | undefined, root: string | undefined): Reco
     'brd-questions': code('engine/breakdown-job.ts', ['Limit', `${MAX_QUESTIONS} questions`]),
     'brd-approve': code('board/requirements-actions.ts', ['See it in', 'The Requirements page']),
     'brd-queue': code('board/requirements-build.ts', ['Places', `${parallelLimit(meta?.parallel)} at once`]),
+    'epic-run': code('board/epic-import.ts', ['While it builds', 'src/board/epic-run.ts'], ['The Analyst', 'src/engine/epic-fill.ts']),
     'first-story': code('board/first-story.ts'),
     questions: code('engine/question-filter.ts', ['Refused', Object.values(HARNESS_REFUSED).join(', ')], ['Tries', `${TECHNICAL_TRIES} back to its agent`]),
     spec: code('board/actions/approve.ts', ['See it in', tab('Spec')]),

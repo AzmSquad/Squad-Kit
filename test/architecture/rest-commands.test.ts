@@ -11,6 +11,7 @@ import { mountAppApi } from '../../src/console/api/app.js';
 import { mountUpdateApi } from '../../src/console/api/update.js';
 import { mountSupportApi } from '../../src/console/api/support.js';
 import { requirementsCommand } from '../../src/commands/requirements.js';
+import { backlogCommand } from '../../src/commands/backlog.js';
 
 /**
  * Design rule 3 (ADR-005): every action is one REST call, and every button has a terminal command. Each route that
@@ -86,12 +87,13 @@ function cliCommands(): Map<string, CliCommand> {
     else ts.forEachChild(n, visit);
   };
   visit(sf);
-  // `squad requirements` is built in its own file and added whole.
+  // `squad requirements` and `squad backlog` are built in their own files and added whole.
   const add = (c: Command, words: string[]) => {
     found.set(words.join(' '), { args: c.registeredArguments.length > 0, options: new Set(c.options.map((o) => o.long).filter((l): l is string => Boolean(l))) });
     for (const sub of c.commands) add(sub, [...words, sub.name()]);
   };
   add(requirementsCommand(), ['requirements']);
+  add(backlogCommand(), ['backlog']);
   return found;
 }
 

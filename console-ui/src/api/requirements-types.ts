@@ -27,11 +27,15 @@ export type StorySize = 'S' | 'M' | 'L';
 export type BreakdownLevel = 'epic' | 'feature' | 'story';
 
 export interface BreakdownSource {
-  /** The document inside the breakdown's folder ("source/RoomFlow BRD v2.docx"), or "source/pasted.md" for pasted text. */
+  /**
+   * The document inside the breakdown's folder ("source/RoomFlow BRD v2.docx"), "source/pasted.md" for pasted text, or
+   * "source/tracker.md" for an epic or feature from the tracker: a copy of its items' text.
+   */
   file: string;
-  /** The name the person sees: the file name without its folder. */
+  /** The name the person sees: the file name without its folder, or the tracker item ("AB#2001 Online booking"). */
   name: string;
-  kind: 'pdf' | 'docx' | 'markdown' | 'text' | 'pasted';
+  /** tracker: an epic or feature from the tracker, built story by story with the tracker's own structure. */
+  kind: 'pdf' | 'docx' | 'markdown' | 'text' | 'pasted' | 'tracker';
   bytes: number;
   /** PDF pages, or the parts squad-kit split a long text into. */
   pages?: number;
@@ -41,6 +45,9 @@ export interface BreakdownSource {
   extra?: string[];
   addedBy: string;
   addedAt: string;
+  /** kind tracker: the epic or feature it came from, and the tracker's name for people ("Azure DevOps"). */
+  /** `seen`: the ids of the stories that were in the run, so one the person took out never comes back as new. */
+  tracker?: { module: string; id: string; ref: string; url: string; type: string; label: string; seen?: string[] };
 }
 
 /** Where in the document a part comes from: section 3.4 "Holding a slot", page 7. */
@@ -98,6 +105,8 @@ export interface BreakdownStory {
   size: StorySize;
   /** Story keys it needs merged first. */
   dependsOn: string[];
+  /** A run from the tracker: where each need came from, the tracker's own links or the Analyst (with a Decided entry). */
+  needsFrom?: Record<string, 'tracker' | 'analyst'>;
   ref?: BrdRef;
   /** The ticket it became when it started (RO-24). */
   ticket?: string;
@@ -245,6 +254,10 @@ export interface BreakdownState {
   };
   /** What the Analyst used on this breakdown. */
   usage?: UsageLine[];
+  /** A run from the tracker: open stories under its epic or feature that are not in the run. They join only when the person adds them. */
+  trackerNew?: { id: string; ref: string; title: string }[];
+  /** A run from the tracker: how far squad-kit moved its epic and features there, by item id. Forward only. */
+  trackerMoved?: Record<string, 'in-progress' | 'resolved'>;
 }
 
 /** "38 stories, about $210 and 9 hours", from this project's own ticket history. */
@@ -329,12 +342,32 @@ export interface SendPreview {
   first: boolean;
 }
 
+/** What Build all on an epic or feature would run, for its dialog: GET /api/v1/backlog/:id/build. Nothing is made by it. */
+export interface EpicPreview {
+  root: { id: string; ref: string; title: string; type: string; level: 'epic' | 'feature'; url: string };
+  /**
+   * In the order they would build: the tracker's needs first, then its own order. `feature`: the title of the feature it
+   * sits under. `needs`: the refs of the stories in the run it needs first. `onBoard`: its ticket, when it is on the board
+   * already (it carries on there and counts toward the run).
+   */
+  stories: { id: string; ref: string; title: string; type: string; isBug: boolean; state: string; feature?: string; needs: string[]; inSprint?: boolean; onBoard?: string }[];
+  /** Closed, finished and empty items, and stories past the most one run takes, each with why. */
+  leftOut: { ref: string; title: string; why: string }[];
+  /** Asked with a sprint: its name and how many of the stories are in it. */
+  sprint?: { name: string; count: number };
+  /** A run of this item exists already: its breakdown id. */
+  run?: string;
+  /** How many stories build at once. */
+  atOnce: number;
+  estimate?: { minutes: number; costUsd?: number; rough: boolean };
+}
+
 /** One row of the Requirements list. */
 export interface BreakdownRow {
   id: string;
   title: string;
   status: BreakdownStatus;
-  source: { name: string; kind: BreakdownSource['kind'] };
+  source: { name: string; kind: BreakdownSource['kind']; tracker?: BreakdownSource['tracker'] };
   counts: BreakdownView['counts'];
   building: boolean;
   createdAt: string;

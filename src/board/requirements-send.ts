@@ -43,9 +43,15 @@ function firstSend(b: Breakdown, module: string): boolean {
   return !parts(b).some((p) => p.tracker?.module === module);
 }
 
+/** A run from the tracker is there already: its items are the team's, and squad-kit never writes its own words over them. */
+function alreadyInTracker(b: Breakdown): void {
+  if (b.source.kind === 'tracker') throw new BoardActionError(`${b.id} came from ${b.source.tracker?.label ?? 'the tracker'}: its items are there already, so there is nothing to send.`);
+}
+
 /** What Send to <tracker> will do, for the dialog and `--preview`. Nothing is sent. */
 export async function sendPreview(bp: BoardPaths, id: string): Promise<SendPreview> {
   const b = requireBreakdown(bp, id);
+  alreadyInTracker(b);
   const tracker = sendTracker(bp);
   if (!tracker) throw new BoardActionError(NO_TRACKER);
   const plan = planSend(b, tracker.name);
@@ -79,6 +85,7 @@ export function sending(s: { sync?: { status: string } }): boolean {
 export function requestSend(bp: BoardPaths, id: string): Breakdown {
   const b = requireBreakdown(bp, id);
   if (!isBreakdownMine(b, readMeta(bp))) throw new BoardActionError(`${b.id} is ${ownerOfBreakdown(b)}'s. Only their squad sends it.`);
+  alreadyInTracker(b);
   const tracker = sendTracker(bp);
   if (!tracker) throw new BoardActionError(NO_TRACKER);
   if (b.status !== 'approved' || !b.approved) throw new BoardActionError(`Approve ${b.id} first. Nothing is sent to ${tracker.label} before the breakdown is approved.`);

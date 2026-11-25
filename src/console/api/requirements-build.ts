@@ -4,11 +4,13 @@ import { BoardActionError } from '../../board/actions.js';
 import { breakdownWaits, viewBreakdown } from '../../board/requirements.js';
 import { setBuild } from '../../board/requirements-build.js';
 import { requestSend, sendPreview } from '../../board/requirements-send.js';
+import { addTrackerStories } from '../../board/epic-new.js';
+import { trackerFor } from '../../modules/registry.js';
 import { act } from './act.js';
 
 /**
- * Build continuously and Send to the tracker, one call per button like the rest of the Requirements page, and the
- * breakdowns that wait for the person, for Waiting for you on every page.
+ * Build continuously, Send to the tracker and Add to the run, one call per button like the rest of the Requirements
+ * page, and the breakdowns that wait for the person, for Waiting for you on every page.
  */
 async function body<T>(c: Context): Promise<T> {
   try {
@@ -38,4 +40,13 @@ export function mountBuildSendApi(app: Hono, bp: BoardPaths): void {
 
   // Send to the tracker, or Send changes: `squad requirements send BR-1`. The squad runs it; state.sync says how far.
   app.post('/api/v1/requirements/:id/send', (c) => act(c, () => view(requestSend(bp, c.req.param('id')).id)));
+
+  // Add to the run: the new stories under a run's epic on the tracker join it: `squad requirements add-new BR-1`.
+  app.post('/api/v1/requirements/:id/tracker-new', (c) =>
+    act(c, async () => {
+      const tracker = trackerFor(bp);
+      if (!tracker) throw new BoardActionError('No tracker is connected. Add it in Settings.');
+      return view((await addTrackerStories(bp, c.req.param('id'), tracker)).id);
+    }),
+  );
 }

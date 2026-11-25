@@ -131,6 +131,35 @@ describe('connecting GitHub on the board', () => {
     }
   });
 
+  it('builds a whole epic from its sub-issues: the preview, the run, and the same preview in the terminal', async () => {
+    const a = app();
+    await put(a, { module: 'github', repo: 'octo/shop', from: 'project', board: '2' });
+    const at = `/api/v1/backlog/${encodeURIComponent('#10')}/build`;
+    const preview = await json<{ root: { ref: string; level: string }; stories: { ref: string; feature?: string; needs: string[] }[] }>(a.request(at));
+    expect(preview.root).toMatchObject({ ref: '#10', level: 'epic' });
+    expect(preview.stories.map((s) => [s.ref, s.feature])).toEqual([['#40', 'Holding']]);
+    const { backlogCommand } = await import('../src/commands/backlog.js');
+    const printed: string[] = [];
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation((s: string | Uint8Array) => (printed.push(String(s)), true));
+    const cwd = process.cwd();
+    try {
+      process.chdir(tmp);
+      await backlogCommand().parseAsync(['build', '#10', '--preview'], { from: 'user' });
+      const text = printed.join('').replace(/\x1b\[[0-9;]*m/g, '');
+      expect(text).toContain('Build all of #10 Booking');
+      expect(text).toContain('1. #40 Hold a slot · Holding');
+      expect(text).toContain('squad backlog build #10');
+    } finally {
+      process.chdir(cwd);
+      write.mockRestore();
+    }
+    const run = await json<{ id: string }>(a.request(at, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }));
+    expect(run.id).toMatch(/^BR-\d+$/);
+    const view = await json<{ source: { kind: string; tracker: { label: string } }; epics: { features: { stories: { tracker: { ref: string } }[] }[] }[] }>(a.request(`/api/v1/requirements/${run.id}`));
+    expect(view.source).toMatchObject({ kind: 'tracker', tracker: { label: 'GitHub' } });
+    expect(view.epics[0]!.features[0]!.stories.map((x) => x.tracker.ref)).toEqual(['#40']);
+  });
+
   it('says when only the first items are shown, and when a setup from before only reads', async () => {
     state.fake = fakeGithub({ endless: true });
     const a = app();

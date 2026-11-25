@@ -2,7 +2,7 @@
  * Azure DevOps (Boards, Repos, Wiki) as far as squad-kit uses it, in memory. A fetch stand-in for the shared module
  * tests: one feature (10) with a story under it (40) in the current sprint, states New, Active, Resolved, Closed.
  * It makes work items of the types its process has, with fields, parent and dependency links, as Azure does: a type
- * or field the process lacks, a second parent and a link it already has are refused.
+ * or field the process lacks, a second parent and a link it already has are refused. A parent lists its children.
  */
 
 type Item = {
@@ -113,6 +113,8 @@ export function fakeAzureDevOps(token = 'secret', opts: FakeAzureOptions = {}): 
       ...(w.parent ? [{ rel: 'System.LinkTypes.Hierarchy-Reverse', url: `https://dev.azure.com/org/_apis/wit/workItems/${w.parent}` }] : []),
       ...(w.deps ?? []).map((d) => ({ rel: 'System.LinkTypes.Dependency-Reverse', url: `https://dev.azure.com/org/_apis/wit/workItems/${d}` })),
       ...(id === 40 ? [{ rel: 'AttachedFile', url: 'https://dev.azure.com/org/_apis/wit/attachments/a1', attributes: { name: 'hours.png', resourceSize: 4 } }] : []),
+      // The items under it: Azure shows a parent link from both ends.
+      ...[...items].filter(([, c]) => c.parent === id).map(([c]) => ({ rel: 'System.LinkTypes.Hierarchy-Forward', url: `https://dev.azure.com/org/_apis/wit/workItems/${c}` })),
     ];
   }
   /** Applies a JSON patch to an item, as Azure checks it. Returns a refusal message, or null. */

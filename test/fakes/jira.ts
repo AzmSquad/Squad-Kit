@@ -276,6 +276,9 @@ export function fakeJira(token = 'secret', opts: FakeJiraOptions = {}): FakeJira
         const gone = keys.find((k) => !issues.get(k) || issues.get(k)!.hidden);
         if (gone) return `An issue with key '${gone}' does not exist for field 'key'.`;
         list = list.filter((i) => keys.includes(i.key));
+      } else if ((m = /^parent = "?([A-Z][A-Z0-9_]*-\d+)"?$/.exec(clause))) {
+        const parent = m[1]!;
+        list = list.filter((i) => i.parent === parent);
       } else if ((m = /^labels = "((?:[^"\\]|\\.)+)"$/.exec(clause))) {
         const label = m[1]!.replace(/\\(.)/g, '$1');
         list = list.filter((i) => i.labels.includes(label));

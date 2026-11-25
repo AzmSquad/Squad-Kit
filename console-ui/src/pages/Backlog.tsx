@@ -49,6 +49,9 @@ export function BacklogPage() {
   const nested = Boolean(data?.tree);
   const asTree = nested && !flat;
   const lines = useMemo(() => nestBacklog(data?.items ?? [], asTree ? data?.tree : undefined), [data, asTree]);
+  // Build all on a group, but not inside a run of the epic above it: that run builds it already.
+  const running = new Set(data?.tree?.groups.filter((g) => g.run).map((g) => g.id));
+  const build = { sprint: chosen && chosen !== 'all' ? chosen : undefined, label };
   const pickView = (list: boolean) => {
     setFlat(list);
     store(VIEW_KEY, list ? 'list' : 'tree');
@@ -114,10 +117,10 @@ export function BacklogPage() {
             <>
               <p className="note" style={{ marginBottom: 12 }}>
                 {data.items.length} open {data.items.length === 1 ? 'item' : 'items'} in {sprintName ?? 'the backlog'}
-                {asTree ? ', under their epics and features, in backlog order.' : ', in backlog order.'} Start one and the squad picks it up; {label} follows along.
+                {asTree ? ', under their epics and features, in backlog order. Start one story, or press Build all on an epic or feature and the squad builds its stories one after another;' : ', in backlog order. Start one and the squad picks it up;'} {label} follows along.
                 {data.capped && ' There are more: only the first 500 are shown. Pick a sprint here, or a view or Status in Settings, to see the rest.'}
               </p>
-              <table className="table">
+              <table className="table bl-table">
                 <thead>
                   <tr>
                     <th style={{ width: 90 }}>ID</th>
@@ -131,7 +134,7 @@ export function BacklogPage() {
                   {lines.map((l) => {
                     if (l.kind === 'loose') return <LooseRow key="loose" />;
                     if (folded(l, closed)) return null;
-                    if (l.kind === 'group') return <GroupRow key={l.group.id} g={l.group} depth={l.depth} items={l.items} open={!closed.has(l.group.id)} onFold={() => fold(l.group.id)} />;
+                    if (l.kind === 'group') return <GroupRow key={l.group.id} g={l.group} depth={l.depth} items={l.items} open={!closed.has(l.group.id)} onFold={() => fold(l.group.id)} {...(l.under.some((id) => running.has(id)) ? {} : { build })} />;
                     const f = l.hasUnder ? { open: !closed.has(l.item.id), onFold: () => fold(l.item.id) } : undefined;
                     return <ItemRow key={l.item.id} w={l.item} {...(asTree ? { depth: l.depth } : {})} {...(f ? { fold: f } : {})} />;
                   })}

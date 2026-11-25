@@ -33,8 +33,31 @@ export interface TrackerGroup extends TrackerItemRow {
 export interface TrackerTree {
   /** The item right above each item that has one, by id: the listed items' and the groups' own. */
   above: Record<string, string>;
-  /** The epics and features above the listed items that are not listed themselves, in no set order. */
+  /**
+   * The epics and features above the listed items, in no set order: the ones not listed themselves, and listed ones that
+   * are epics or features (a tracker that lists them with the stories). A listed group shows as a group, not an item.
+   */
   groups: TrackerGroup[];
+}
+
+/**
+ * An item right under another, as children() reads it: its row, its own text as get() gives it, the items it needs
+ * first, and whether it is finished in the tracker (closed, done, resolved or removed).
+ */
+export interface TrackerChild extends TrackerItemRow {
+  description: string;
+  acceptanceCriteria: string;
+  reproSteps: string;
+  /** The ids of the items it needs first: its predecessor or "blocked by" links. */
+  needs: string[];
+  done: boolean;
+  /** It has items under it: a group, whatever its type says. Left out when the tracker's types say it already. */
+  hasChildren?: boolean;
+  /**
+   * Written by someone outside the team, on a project that takes stories only from the team: its words must never reach
+   * the agents.
+   */
+  outsider?: boolean;
 }
 
 export interface TrackerItem extends TrackerItemRow {
@@ -46,6 +69,10 @@ export interface TrackerItem extends TrackerItemRow {
   /** Items it builds on. */
   dependsOn: { ref: string; title: string; state: string }[];
   attachments: { name: string; url: string; size: number }[];
+  /** Finished in the tracker: its state is in the tracker's own closed, done, resolved or removed group. */
+  done?: boolean;
+  /** As for TrackerChild: written by someone outside the team, on a project that takes stories only from the team. */
+  outsider?: boolean;
 }
 
 export interface Sprint {
@@ -138,6 +165,11 @@ export interface Tracker {
    * or when nothing has a parent, the backlog is a flat list.
    */
   tree?(rows: TrackerItemRow[]): Promise<TrackerTree>;
+  /**
+   * Every item right under this one, finished ones too, in the tracker's own order: what an epic or a feature holds,
+   * for building a whole one. Optional: without it, a whole epic cannot be built from this tracker.
+   */
+  children?(id: string): Promise<TrackerChild[]>;
   get(id: string): Promise<TrackerItem>;
   /** Saves an attachment to a file and returns its path. */
   download(url: string, file: string): Promise<string>;

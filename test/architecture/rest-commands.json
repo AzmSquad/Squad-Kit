@@ -15,6 +15,7 @@
     "PUT /api/v1/apps/:name/commands": "squad app set [name] --start <command>",
     "PUT /api/v1/tracker": ["squad config set tracker", "squad config set tracker --type <name> --field <key=value...>"],
     "POST /api/v1/backlog/:id/start": "squad pull <ref>",
+    "POST /api/v1/backlog/:id/build": "squad backlog build <ref> --sprint <name>",
     "POST /api/v1/pull": "squad pull <ref>",
     "POST /api/v1/tickets/:id/status/ask": "squad ask <ticket> <question...>",
     "POST /api/v1/tickets": "squad new [title...]",
@@ -147,7 +148,8 @@
     "POST /api/v1/requirements/:id/items/:key/start": "squad requirements start <id> <story>",
     "POST /api/v1/requirements/:id/decided/:d": "squad requirements decided <id> <entry> [text...]",
     "POST /api/v1/requirements/:id/build": "squad requirements build <id>",
-    "POST /api/v1/requirements/:id/send": "squad requirements send <id>"
+    "POST /api/v1/requirements/:id/send": "squad requirements send <id>",
+    "POST /api/v1/requirements/:id/tracker-new": "squad requirements add-new <id>"
   },
   "allowed": [
     { "route": "POST /api/v1/connections/:name/sign-in/cancel", "reason": "Cancel on the board's sign-in code: stops the sign-in this board started. In the terminal, Ctrl-C stops squad connect." },

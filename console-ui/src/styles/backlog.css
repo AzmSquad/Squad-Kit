@@ -1,6 +1,8 @@
 /* The Backlog as a tree: epics and features over their stories, as on the Requirements page. */
 
-.bl-t { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.bl-t { display: inline-flex; align-items: center; gap: 8px; min-width: 0; padding-inline-start: calc(var(--bl-depth, 0) * 26px); }
+/* A row with nothing to fold lines its title up with the titles beside the folds (22px and the 8px gap). */
+.bl-t.bl-leaf { padding-inline-start: calc(var(--bl-depth, 0) * 26px + 30px); }
 .bl-fold { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 6px; color: var(--muted); flex: none; }
 .bl-fold:hover { background: var(--surface-2); color: var(--text); }
 .bl-lv { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 6px; font-size: 11.5px; font-weight: 600; flex: none; white-space: nowrap; }
@@ -16,3 +18,22 @@
 .table .bl-loose td { background: var(--lane); font-size: 12px; font-weight: 650; color: var(--muted); padding: 8px 12px; }
 .bl-view { display: inline-flex; margin-left: 4px; }
 .bl-view button { display: inline-flex; align-items: center; gap: 6px; }
+
+/* A phone: each row is a small card, so Start and Build all stay in reach. The ref and the tracker's state on top, the
+   title under them, then squad-kit's part. The points are left out. */
+@media (max-width: 760px) {
+  .bl-table thead { display: none; }
+  .bl-table tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 10px; padding-block: 10px; padding-inline: calc(6px + var(--bl-depth, 0) * 14px) 6px; border-bottom: 1px solid var(--line); }
+  .bl-table .bl-t, .bl-table .bl-t.bl-leaf { padding-inline-start: 0; }
+  .bl-table td { padding: 0; border: 0; min-width: 0; }
+  .bl-table td:nth-child(1) { grid-area: 1 / 1; }
+  .bl-table td:nth-child(2) { grid-area: 2 / 1 / 3 / 3; }
+  .bl-table td:nth-child(3) { display: none; }
+  .bl-table td:nth-child(4) { grid-area: 1 / 2; font-size: 12px; color: var(--muted); }
+  .bl-table td:nth-child(5) { grid-area: 3 / 1 / 4 / 3; }
+  .bl-table td:nth-child(5):empty { display: none; }
+  .bl-table tr.bl-group.epic { background: var(--lane); }
+  .bl-table .bl-t { flex-wrap: wrap; row-gap: 4px; }
+  .table .bl-loose td { grid-column: 1 / -1; padding: 0; background: none; }
+  .table tr.bl-loose { background: var(--lane); }
+}

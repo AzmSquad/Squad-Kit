@@ -345,9 +345,9 @@ export function needsLeft(v: Pick<BreakdownView, 'epics' | 'progress'>, story: B
   return story.dependsOn.filter((k) => !isMergedState(progress.get(k)?.state));
 }
 
-/** The tag of a stop, in the plan's words. */
-export function stopTag(stop: StoryProgress['stop']): string {
-  return stop === 'clash' ? 'Two parts clash' : stop === 'gap' ? 'Missing in the BRD' : stop === 'check' ? 'A check failed' : 'Needs you';
+/** The tag of a stop, in the plan's words. On a run from the tracker (`run`), in a story's words. */
+export function stopTag(stop: StoryProgress['stop'], run = false): string {
+  return stop === 'clash' ? (run ? 'Two stories clash' : 'Two parts clash') : stop === 'gap' ? (run ? 'Missing in the story' : 'Missing in the BRD') : stop === 'check' ? 'A check failed' : 'Needs you';
 }
 
 /** The first sentence of a longer text, for a one-line headline. */

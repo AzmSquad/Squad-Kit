@@ -176,6 +176,44 @@ send it out from **Releases** as always.
 Terminal: `squad requirements build BR-1 [--pause]`, `squad requirements start BR-1 S-4` (one story now),
 `squad decided RO-31` and `squad decided RO-31 d2 "…"`, `squad requirements decided BR-1 d3 "…"`.
 
+## Build a whole epic or feature from your tracker
+
+An epic or a feature your team wrote in Azure DevOps, GitHub or Jira can be built the same way, with no document.
+**Build all** on its row on the **Backlog** shows what would run: its open stories and bugs in the order they would
+build (what a story needs first, then your tracker's order), the ones on the board already (they carry on there), and
+the ones left out with why (closed, finished, or a feature with no open story). In a sprint you can run only the
+stories in that sprint.
+
+The run is a breakdown on **Requirements**, marked as coming from your tracker. Its parts are your tracker's own: no
+story is added, split or joined, and nothing is sent back. The Analyst reads all of it once and asks you only real gaps
+and clashes, all at once. Then it fills in what the stories lack: a "done when" for a story with none, a size, and a
+need your tracker does not have, each under **Decided for you** with its reason. A need from your tracker says so.
+
+You approve once, and **Build continuously** turns on by itself: each story builds and merges on its own, and stops only
+for what stops any story that builds by itself. Releasing stays yours.
+
+While it builds:
+
+- each story is read again just before it starts. Changed in your tracker since you approved, it takes the new words
+  and the queue waits until you read it and press **Build continuously** again. Closed there, it leaves the run, with a
+  line;
+- squad-kit moves the epic and its features forward in your tracker: in progress when their first story starts,
+  resolved when all their stories are merged (the epic above a feature's run only to in progress). A move your tracker
+  refuses is in the log and stops nothing;
+- every 10 minutes it looks for new stories under the epic. They never join by themselves: **Add to the run** adds
+  them, the Analyst fills them in, and they build once you read them.
+
+No item is built twice: a story another run (or a breakdown sent to your tracker) holds is left out, with which one;
+a story already on the board carries on on its ticket, and needs no "done when" to approve; **Start** on the Backlog
+refuses a story that sits in a run, and says which run to start it from. A story written by someone outside your team
+is left out, by its number only, unless the project takes stories from anyone.
+
+A paused run, or one whose stories are all merged, is still followed: its epic and features move on, and new stories
+under it still show. **Build all** on an item that has a run opens that run.
+
+One run holds at most 100 stories. Terminal: `squad backlog build AB#2001 [--sprint "Sprint 14"] [--preview]`,
+`squad requirements add-new BR-3`.
+
 ## Where it is kept
 
 - `.squad/requirements/BR-1/breakdown.yaml` holds the breakdown. The document, its text and its pictures sit beside

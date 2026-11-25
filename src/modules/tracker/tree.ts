@@ -27,7 +27,8 @@ export function groupLevel(type: string, hasGroupBelow: boolean): TrackerGroup['
 /**
  * The tree, from the item right above each listed item (`first`, by id) and a way to read items by id. `read` answers
  * with the items it found; one it cannot find (gone, or not readable with this sign-in) is left out, and what sits under
- * it shows on its own. A listed item above another listed item (a bug under a story) stays where it is listed.
+ * it shows on its own. A listed item above another listed item stays where it is listed (a bug under a story), unless it is
+ * an epic or a feature itself: a tracker that lists them with the stories (GitHub's Issues) gets them as groups too.
  */
 export async function walkUp(rows: TrackerItemRow[], first: Record<string, string>, read: (ids: string[]) => Promise<Map<string, AboveItem>>): Promise<TrackerTree> {
   const listed = new Set(rows.map((r) => r.id));
@@ -51,9 +52,20 @@ export async function walkUp(rows: TrackerItemRow[], first: Record<string, strin
   }
   // A link to an item that was not read (too far up, gone, or refused) is dropped, so nothing points nowhere.
   for (const [id, p] of Object.entries(above)) if (!listed.has(p) && !found.has(p)) delete above[id];
-  const withGroupBelow = new Set([...found.keys()].map((id) => above[id]).filter(Boolean));
-  const groups = [...found.values()].map(({ row }) => ({ ...row, level: groupLevel(row.type, withGroupBelow.has(row.id)) }));
+  const listedGroups = rows.filter((r) => listedGroup(r, rows.filter((c) => above[c.id] === r.id)));
+  const groupIds = new Set([...found.keys(), ...listedGroups.map((r) => r.id)]);
+  const withGroupBelow = new Set([...groupIds].map((id) => above[id]).filter(Boolean));
+  const groups = [...[...found.values()].map(({ row }) => row), ...listedGroups].map((row) => ({ ...row, level: groupLevel(row.type, withGroupBelow.has(row.id)) }));
   return { above, groups };
+}
+
+/**
+ * A listed item that is a group: an epic or a feature by its type, or, where the tracker has no such types (GitHub
+ * issues with no labels), an item that is not a bug with something under it that is not a bug either.
+ */
+function listedGroup(r: TrackerItemRow, under: TrackerItemRow[]): boolean {
+  if (!under.length) return false;
+  return /epic|feature|initiative|theme|portfolio/i.test(r.type) || (!r.isBug && under.some((c) => !c.isBug));
 }
 
 /** How long a backlog's tree is kept for the same items: the Backlog page asks again every few seconds. */

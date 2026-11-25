@@ -104,7 +104,7 @@ function sourcePath(f: unknown): string | null {
 }
 
 const STATUSES = new Set<string>(['reading', 'questions', 'drafting', 'ready', 'approved', 'failed']);
-const KINDS = new Set<string>(['pdf', 'docx', 'markdown', 'text', 'pasted']);
+const KINDS = new Set<string>(['pdf', 'docx', 'markdown', 'text', 'pasted', 'tracker']);
 
 const BREAKDOWN_FIELDS: Record<string, FieldShape> = { title: 'text', createdAt: 'text', createdBy: 'text', owner: 'text', summary: 'text', error: 'text', questions: 'objects', epics: 'objects', decided: 'objects', leftOut: 'objects', next: 'object', approved: 'object' };
 const QUESTION_FIELDS: Record<string, FieldShape> = { id: 'text', text: 'text', options: 'texts', inputOption: 'text', thread: 'objects' };
@@ -443,14 +443,15 @@ export function storiesIn(f: FoundItem): BreakdownStory[] {
 
 /**
  * A redo waiting or running rewrites a part: the words for that part ("E-2", or "the breakdown" for a whole redo) when
- * the story is inside it, else null. Such a story does not start until the redo is done, so the redo never rewrites a
- * story that is being built.
+ * the story is inside it, else null. The new stories of a run from the tracker are filled in by their keys ("S-7,S-8").
+ * Such a story does not start until the redo is done, so the redo never rewrites a story that is being built.
  */
 export function redoHolding(b: Breakdown, job: BreakdownJob | undefined, key: string): string | null {
   if (!jobBusy(job) || job!.step !== 'redo') return null;
   if (job!.item === b.id) return 'the breakdown';
   const target = findItem(b, job!.item ?? '');
-  return target && storiesIn(target).some((s) => s.key === itemKey(key)) ? target.item.key : null;
+  if (!target) return (job!.item ?? '').split(',').includes(itemKey(key)) ? itemKey(key) : null;
+  return storiesIn(target).some((s) => s.key === itemKey(key)) ? target.item.key : null;
 }
 
 /** The stories no ticket has yet that a redo made or changed: on an approved breakdown nobody has read them yet. */
@@ -522,19 +523,18 @@ export function loopWords(loop: string[]): string {
   return `That makes a loop: ${loop.slice(0, -1).map((k, i) => `${k} needs ${loop[i + 1]}`).join(', ')}. Take one need away.`;
 }
 
-/** What stops the breakdown from being approved, in plain words; empty when it is ready. */
-export function approveProblems(b: Breakdown): string[] {
+/** What stops it from being approved, in plain words; empty when ready. A story with a live ticket carries on there. */
+export function approveProblems(b: Breakdown, bp?: BoardPaths): string[] {
   const stories = allStories(b);
   if (!stories.length) return [`${b.id} has no stories yet. Add one, or ask the Analyst to.`];
   const out: string[] = [];
   const keys = new Set(stories.map((s) => s.story.key));
   for (const { story } of stories) {
-    if (!story.criteria.length) out.push(`${story.key} has no "done when" yet.`);
+    if (!story.criteria.length && !(bp && story.ticket && [readableTicket(bp, story.ticket)].some((t) => t && !t.deleting))) out.push(`${story.key} has no "done when" yet.`);
     for (const n of story.dependsOn) if (!keys.has(n)) out.push(`${story.key} needs ${n}, which is not in ${b.id}.`);
   }
   const loop = findLoop(b);
-  if (loop) out.push(loopWords(loop));
-  return out;
+  return loop ? [...out, loopWords(loop)] : out;
 }
 
 /* ── Story progress ─────────────────────────────────────── */
@@ -736,7 +736,7 @@ export function breakdownView(bp: BoardPaths, id: string, payment: Payment): Bre
     ...(tracker ? { tracker } : {}),
     mine: isBreakdownMine(b, meta),
     // What stops Approve breakdown, while there is something to approve.
-    problems: b.status === 'ready' ? approveProblems(b) : [],
+    problems: b.status === 'ready' ? approveProblems(b, bp) : [],
     ...(b.status === 'ready' || b.status === 'approved' ? { wholeRedo: wholeRedoWords(state) } : {}),
   };
 }
@@ -757,7 +757,7 @@ export function breakdownRows(bp: BoardPaths): BreakdownRow[] {
       id: b.id,
       title: b.title,
       status: strandedWords(b, state, meta) ? 'failed' : b.status,
-      source: { name: b.source.name, kind: b.source.kind },
+      source: { name: b.source.name, kind: b.source.kind, ...(b.source.tracker ? { tracker: b.source.tracker } : {}) },
       counts,
       building: Boolean(state.build?.on) || counts.building > 0,
       createdAt: b.createdAt,

@@ -8,6 +8,7 @@ import {
   isBreakdownMine,
   listBreakdowns,
   ownerOfBreakdown,
+  readBreakdown,
   readBreakdownState,
   redoHolding,
   requireBreakdown,
@@ -24,6 +25,8 @@ import { monthKey } from './usage.js';
 import { parallelLimit } from '../core/settings.js';
 import { limitText, type LimitPause } from '../engine/usage-limit.js';
 import { plainWords } from '../core/for-people.js';
+import type { Tracker } from '../modules/tracker/types.js';
+import { checkBeforeStart, followRuns, lookForNew, moveGroups, runTracker } from './epic-run.js';
 
 /**
  * Build continuously: the squad starts the next stories of an approved breakdown by itself, in the tree's order, as
@@ -118,6 +121,8 @@ export interface QueueRoom {
   pause: LimitPause | null;
   /** How the person pays: asked only when this month's budget is used up. */
   payment(): Promise<Payment>;
+  /** The tracker a run from the tracker reads; the project's own when left out. */
+  tracker?(): Tracker | null;
 }
 
 /** What one turn of the queue did to one breakdown. */
@@ -149,7 +154,16 @@ export function buildingBreakdowns(bp: BoardPaths, meta: Pick<BoardMeta, 'user'>
 export async function fillBuildQueue(bp: BoardPaths, room: QueueRoom): Promise<QueueTurn[]> {
   const meta = readMeta(bp);
   const turns: QueueTurn[] = [];
-  for (const b of buildingBreakdowns(bp, meta)) turns.push(await queueTurn(bp, b, meta, room));
+  for (const b of buildingBreakdowns(bp, meta)) {
+    turns.push(await queueTurn(bp, b, meta, room));
+    // A run from the tracker: its epic and features move forward there, and new stories under it are looked for.
+    const run = b.source.kind === 'tracker' ? readBreakdown(bp, b.id) : null;
+    if (run) {
+      await moveGroups(bp, run, room);
+      await lookForNew(bp, run, room);
+    }
+  }
+  await followRuns(bp, meta, new Set(turns.map((t) => t.id)), room);
   return turns;
 }
 
@@ -270,7 +284,7 @@ async function queueTurn(bp: BoardPaths, b: Breakdown, meta: BoardMeta, room: Qu
   let goOn = false;
   if (unreadable.length) held = { text: `The file of ${and(unreadable)} could not be read, so no new story starts. An engineer can look at it.`, for: 'waits' };
   // Nobody has read what the Analyst wrote after the approval, and building it costs real money.
-  else if (unread.length) held = { text: `The Analyst rewrote ${and(unread)} after you approved. No new story starts until you read ${unread.length === 1 ? 'it' : 'them'} and press Build continuously again.`, for: 'review' };
+  else if (unread.length) held = { text: `${b.source.kind === 'tracker' ? `${and(unread)} changed or joined` : `The Analyst rewrote ${and(unread)}`} after you approved. No new story starts until you read ${unread.length === 1 ? 'it' : 'them'} and press Build continuously again.`, for: 'review' };
   else if (!ready.length && redo) held = { text: `The Analyst is redoing ${redo}. Its stories start once the redo is done.`, for: 'waits' };
   else if (!ready.length) held = { text: [waitsWords(stories, tickets, deleted), deleted.length ? deletedWords(deleted) : ''].filter(Boolean).join(' '), for: 'waits' };
   else if (room.pause) held = { text: limitText(room.pause), for: 'limit' };
@@ -284,7 +298,15 @@ async function queueTurn(bp: BoardPaths, b: Breakdown, meta: BoardMeta, room: Qu
   if (!held) {
     const busy = stories.filter(({ story }) => working(tickets.get(story.key))).length;
     const places = Math.min(Math.min(parallelLimit(meta.parallel), meta.atOnce ?? Infinity) - busy, room.free());
-    for (const { story } of ready.slice(0, Math.max(0, places))) {
+    let next = ready.slice(0, Math.max(0, places));
+    // A run from the tracker reads each story again before it starts: changed there, it waits for you; closed, it leaves.
+    const tracker = next.length ? runTracker(bp, b, room) : null;
+    if (tracker) {
+      const checked = await checkBeforeStart(bp, b, next, tracker);
+      next = checked.start;
+      if (checked.held) held = { text: checked.held, for: checked.review ? 'review' : 'waits' };
+    }
+    for (const { story } of next) {
       try {
         const t = startStory(bp, b.id, story.key, { by: 'squad' });
         // Let go on past this month's budget: the story does not stop at its own budget card either.

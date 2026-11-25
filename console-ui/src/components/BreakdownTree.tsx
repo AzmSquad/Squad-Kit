@@ -29,6 +29,8 @@ import { Cmd, Place, Written } from './ui';
 import { clearDraft, draftKey, readDraft, useDraft, writeDraft } from '../lib/drafts';
 import { PROJECT } from '../api/client';
 import { isolated, langProps, typedDir } from '../lib/lang';
+import { fromTracker } from '../lib/epic-run';
+import { NeedChips, NeedFrom } from './epic/RunMarks';
 
 /**
  * The breakdown as a tree: epics, features and stories with their level, needs, place in the BRD and size, and once
@@ -42,9 +44,9 @@ const LEVEL_WORD: Record<BreakdownLevel, string> = { epic: 'Epic', feature: 'Fea
 export type TreeMode = 'plan' | 'build';
 
 /** The tree can be changed once written, for the owner, and not the part the Analyst is redoing. */
-export function canEdit(v: BreakdownView): boolean {
-  return v.mine && (v.status === 'ready' || v.status === 'approved');
-}
+export const canEdit = (v: BreakdownView): boolean => v.mine && (v.status === 'ready' || v.status === 'approved');
+/** A run from the tracker gets new parts there, never here (they come in as new stories to add). */
+export const canAdd = (v: BreakdownView): boolean => canEdit(v) && v.source.kind !== 'tracker';
 
 function redoing(v: BreakdownView): string | null {
   const j = v.state.job;
@@ -80,7 +82,7 @@ export function Tree({ v, mode, selected, open, onToggle, onSelect, onDecide, on
   // "+ Add a story" goes where the person is: under the chosen feature, or beside the chosen story.
   const storyUnder = sel ? (sel.level === 'epic' ? (sel.epic.features[0]?.key ?? sel.epic.key) : (sel.feature?.key ?? sel.epic.key)) : undefined;
   const featureUnder = sel?.epic.key;
-  const story = (s: BreakdownStory, depth: number) => <StoryRow key={s.key} s={s} p={progress.get(s.key)} depth={depth} mode={mode} selected={selected === s.key} onSelect={onSelect} onDecide={onDecide} />;
+  const story = (s: BreakdownStory, depth: number) => <StoryRow key={s.key} v={v} s={s} p={progress.get(s.key)} depth={depth} mode={mode} selected={selected === s.key} onSelect={onSelect} onDecide={onDecide} />;
   return (
     <section className={`rq-tree ${mode} ${v.epics.some((e) => storiesUnder(e).some((x) => x.tracker)) ? 'refs' : ''} ${onSelect ? '' : 'still'}`} aria-label="Breakdown">
       {v.epics.map((e) => {
@@ -108,7 +110,7 @@ export function Tree({ v, mode, selected, open, onToggle, onSelect, onDecide, on
         );
       })}
       {!v.epics.length && <p className="note rq-none">No epics yet.</p>}
-      {onAdd && canEdit(v) && (
+      {onAdd && canAdd(v) && (
         <div className="rq-adds">
           <button className="btn rq-addbtn" onClick={() => onAdd('epic')} title={`squad requirements add-item ${v.id} --title "…"`}>
             <Plus size={14} /> Add an epic
@@ -209,6 +211,7 @@ function StateLine({ p }: { p: StoryProgress | undefined }) {
 }
 
 function StoryRow({
+  v,
   s,
   p,
   depth,
@@ -217,6 +220,7 @@ function StoryRow({
   onSelect,
   onDecide,
 }: {
+  v: BreakdownView;
   s: BreakdownStory;
   p: StoryProgress | undefined;
   depth: number;
@@ -236,12 +240,7 @@ function StoryRow({
         <Written className="rq-t" title={s.title} text={s.title} />
         {mode === 'plan' && (
           <>
-            {s.dependsOn.slice(0, 2).map((n) => (
-              <span key={n} className="rq-need">
-                needs {n}
-              </span>
-            ))}
-            {s.dependsOn.length > 2 && <span className="rq-need">+{s.dependsOn.length - 2}</span>}
+            <NeedChips v={v} s={s} />
             {!s.criteria.length && <span className="rq-warn">No "done when" yet</span>}
             <span className="grow" />
             {s.ref?.section && <span className="rq-meta rq-from">{fromWords(s.ref.section)}</span>}
@@ -470,6 +469,7 @@ function StoryPanel({ v, f, onClose, onSelect, onAsk, onOpenRef, onOpenTicket }:
                     <b>{n}</b>
                     <Written text={titleOf(n)} />
                   </button>
+                  <NeedFrom v={v} s={s} n={n} />
                   {editable && (
                     <button aria-label={`${s.key} does not need ${n}`} onClick={() => setD((x) => ({ ...x, needs: x.needs.filter((y) => y !== n) }))}>
                       <X size={11} />
@@ -666,7 +666,7 @@ function GroupPanel({ v, f, onClose, onSelect, onAsk, onOpenRef, onOpenTicket, o
             ))}
           </div>
         )}
-        {canEdit(v) && (
+        {canAdd(v) && (
           <div className="rq-hereadds">
             {epic && (
               <button className="rq-link" onClick={() => onAdd('feature', item.key)}>
@@ -837,7 +837,7 @@ export function DecidedPanel({ v, onSelect, onOpenTicket, onClose }: { v: Breakd
           )}
         </div>
         <p className="rq-dlead">
-          Small choices the squad made where the BRD says nothing. Change one and {building ? 'it becomes a small change ticket' : 'the Analyst redoes the part it is about'}.
+          Small choices the squad made where {fromTracker(v) ? 'the stories say' : 'the BRD says'} nothing. Change one and {building ? 'it becomes a small change ticket' : 'the Analyst redoes the part it is about'}.
         </p>
         {shown.map((d) => (
           <DecidedEntry key={`${d.ticket ?? ''}${d.id}`} v={v} d={d} onSelect={onSelect} onOpenTicket={onOpenTicket} />

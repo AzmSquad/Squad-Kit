@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import type { BreakdownView } from '../api/requirements-types';
 import { useBoard } from '../lib/data';
 import { Written } from './ui';
+import { fromTracker } from '../lib/epic-run';
 import { MAP, chipKind, findPart, firstScale, firstSentence, fitScale, mapLayout, popPlace, stopTag, waitingOn, type MapBox } from '../lib/requirements';
 
 /**
@@ -160,7 +161,7 @@ export function BreakdownMap({ v, selected, onSelect, onDecide }: { v: Breakdown
                 <button className="rq-pop-x" aria-label="Close" onClick={() => setPop(null)}>
                   <X size={13} />
                 </button>
-                <div className="rq-pop-w">{[popBox.key, popP.ticket, stopTag(popP.stop)].filter(Boolean).join(' · ')}</div>
+                <div className="rq-pop-w">{[popBox.key, popP.ticket, stopTag(popP.stop, fromTracker(v))].filter(Boolean).join(' · ')}</div>
                 <Written as="div" className="rq-pop-t" text={headline} />
                 <div className="rq-pop-s">
                   {popWaits.length ? `${popWaits.join(', ')} ${popWaits.length === 1 ? 'waits' : 'wait'} for it. ` : ''}

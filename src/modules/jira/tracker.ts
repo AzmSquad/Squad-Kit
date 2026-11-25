@@ -8,13 +8,13 @@ import type {
   Sprint,
   Tracker,
   TrackerAbilities,
+  TrackerChild,
   TrackerItem,
   TrackerItemChange,
   TrackerItemRow,
   TrackerLevels,
   TrackerTree,
 } from '../tracker/types.js';
-import { adfToMarkdown } from './adf-read.js';
 import { markdownToAdf } from './adf-write.js';
 import type { JiraClient } from './client.js';
 import { JiraContext, type Status } from './context.js';
@@ -26,6 +26,8 @@ import { blockedBy, labelOf, rowFields, rowOf, type RawIssue } from './rows.js';
 import type { JiraSettings } from './settings.js';
 import { goalName, goalOf, nextStep, rankOf } from './states.js';
 import { jiraTree } from './tree.js';
+import { jiraChildren } from './children.js';
+import { issueText } from './text.js';
 
 /**
  * Jira Cloud as a squad-kit tracker: a project's stories, tasks and bugs in its backlog's rank order, a board's sprints,
@@ -34,13 +36,6 @@ import { jiraTree } from './tree.js';
  */
 
 const CAP = 500;
-const CRITERIA = /^[ \t]*(?:#{1,6}[ \t]*|\*\*)?(?:done when|acceptance criteria)(?:\*\*)?:?(?:\*\*)?[ \t]*$/im;
-
-/** A description with its "done when" part apart, for a project whose stories keep it in the text. */
-function splitCriteria(text: string): { description: string; acceptance: string } {
-  const at = CRITERIA.exec(text);
-  return at ? { description: text.slice(0, at.index).trim(), acceptance: text.slice(at.index + at[0].length).trim() } : { description: text, acceptance: '' };
-}
 
 /** Steps on the way, sideways ones included, before squad-kit says the workflow has no way on. */
 const MAX_HOPS = 6;
@@ -137,14 +132,17 @@ export class JiraTracker implements Tracker {
     return jiraTree(this.ctx, rows);
   }
 
+  /** The issues whose parent it is, in rank order. */
+  children(id: string): Promise<TrackerChild[]> {
+    return jiraChildren(this.ctx, this.key(id));
+  }
+
   async get(id: string): Promise<TrackerItem> {
     const key = this.key(id);
     const fields = await this.ctx.fields();
     const want = [...rowFields(fields), 'description', 'attachment', 'parent', 'issuelinks', ...(fields.criteria ? [fields.criteria.id] : [])];
     const issue = await this.client.call<RawIssue>('GET', `/rest/api/3/issue/${encodeURIComponent(key)}?fields=${want.join(',')}`);
-    const description = adfToMarkdown(issue.fields.description);
-    const criteria = fields.criteria ? adfToMarkdown(issue.fields[fields.criteria.id]) : '';
-    const text = criteria ? { description, acceptance: criteria } : splitCriteria(description);
+    const text = issueText(issue, fields);
     // The feature and epic above it, nearest first: Jira's parent, or the epic it is linked to; then the one above that.
     const parents: TrackerItem['parents'] = [];
     for (let p = await itemAbove(this.ctx, issue); p && parents.length < 3; ) {
@@ -160,6 +158,7 @@ export class JiraTracker implements Tracker {
       parents,
       dependsOn: blockedBy(issue.fields.issuelinks),
       attachments: (issue.fields.attachment ?? []).map((a) => ({ name: a.filename, url: a.content, size: a.size ?? 0 })),
+      done: issue.fields.status?.statusCategory?.key === 'done',
     };
   }
 

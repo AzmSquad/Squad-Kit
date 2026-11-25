@@ -9,7 +9,7 @@ import { asData } from './prompts.js';
 const STR = { type: 'string' } as const;
 const REF = { type: 'object', properties: { section: STR, title: STR, page: { type: 'number' } } } as const;
 const REFS = { type: 'array', maxItems: 4, items: REF } as const;
-const CRITERION = { type: 'object', properties: { given: STR, when: STR, then: STR }, required: ['given', 'when', 'then'] } as const;
+export const CRITERION = { type: 'object', properties: { given: STR, when: STR, then: STR }, required: ['given', 'when', 'then'] } as const;
 
 const STORY = {
   type: 'object',
@@ -27,7 +27,7 @@ const STORY = {
 } as const;
 
 /** Small choices made instead of asking: about a part (its key), or following from a question (its id). */
-const DECIDED = {
+export const DECIDED = {
   type: 'array',
   maxItems: 30,
   items: { type: 'object', properties: { text: STR, item: STR, question: STR }, required: ['text'] },
@@ -194,9 +194,9 @@ export interface StoriesAnswer {
 
 /* ── The brief ──────────────────────────────────────────── */
 
-const PLAIN = 'Write for a business analyst or project manager: plain words, short sentences, no jargon. Write in the language of the document.';
+export const PLAIN = 'Write for a business analyst or project manager: plain words, short sentences, no jargon. Write in the language of the document.';
 
-const READ_ONLY = `Do not write or change any files. Use your tools for reading files, finding files and searching inside them;
+export const READ_ONLY = `Do not write or change any files. Use your tools for reading files, finding files and searching inside them;
 in the shell only simple read commands work (like cat, ls, grep, head, wc). You may look at the project's code to see
 what is built already (it may be empty).`;
 
@@ -289,7 +289,7 @@ Follow each answer. Where an answer shapes a part, add a decided entry saying wh
 question id (for example "Staff mark a fee as paid at the desk from the case page.").`;
 }
 
-function decidedText(b: Pick<Breakdown, 'decided'>): string {
+export function decidedText(b: Pick<Breakdown, 'decided'>): string {
   if (!b.decided.length) return '';
   const lines = b.decided.map((d) => `- ${d.id}${d.item ? ` (${d.item})` : ''}: ${d.changed ? `${d.changed.text} (the person changed it from: ${d.text})` : d.text}`).join('\n');
   return `\n\n${asData('What was decided so far', lines)}\nKeep to these. Do not repeat them as new decided entries.`;

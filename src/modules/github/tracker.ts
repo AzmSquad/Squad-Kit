@@ -9,6 +9,7 @@ import type {
   Sprint,
   Tracker,
   TrackerAbilities,
+  TrackerChild,
   TrackerItem,
   TrackerItemChange,
   TrackerItemRow,
@@ -26,6 +27,7 @@ import { idOf, parseRef, refOf, splitRepo, ticketName } from './refs.js';
 import type { GithubSettings } from './settings.js';
 import { forwardTo, isFinished } from './states.js';
 import { githubTree } from './tree.js';
+import { githubChildren } from './children.js';
 
 /**
  * GitHub as a squad-kit tracker: stories from a repo's Issues, or from a Project board. A board's Status options are
@@ -144,6 +146,11 @@ export class GithubTracker implements Tracker {
     return githubTree(this.ctx.calls, rows, this.settings.repo);
   }
 
+  /** Its sub-issues, in their own order: only the team's, unless stories may come from anyone. */
+  children(id: string): Promise<TrackerChild[]> {
+    return githubChildren(this.ctx, id, (i) => this.wanted(i));
+  }
+
   async get(id: string): Promise<TrackerItem> {
     const issue = await this.ctx.detail(id);
     const board = await this.ctx.board();
@@ -161,6 +168,8 @@ export class GithubTracker implements Tracker {
         .filter(Boolean)
         .map((b) => ({ ref: this.refOf(idOf(b.repository.nameWithOwner, b.number)), title: b.title, state: b.state === 'OPEN' ? 'Open' : 'Closed' })),
       attachments: attachmentsOf(issue.body ?? ''),
+      done: issue.state !== 'OPEN',
+      ...(this.wanted(issue) ? {} : { outsider: true }),
     };
   }
 

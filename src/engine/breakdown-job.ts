@@ -1,9 +1,7 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { now, readMeta, readTicket, type BoardPaths } from '../board/store.js';
 import type { Breakdown, BreakdownEpic, BreakdownFeature, BreakdownJob, BreakdownLevel, BreakdownQuestion, BreakdownStory, BrdRef, DecidedBy } from '../board/requirements-types.js';
-import { breakdownDir, breakdownMediaDir } from '../board/requirements-paths.js';
+import { breakdownDir } from '../board/requirements-paths.js';
 import {
   addBreakdownActivity,
   allKeys,
@@ -19,20 +17,21 @@ import {
   updateJob,
 } from '../board/requirements.js';
 import { SKIP_CHOICE, breakdownStopped, findLoop, nextDecidedId, usualReadSeconds } from '../board/requirements-actions.js';
-import { DocumentError, prepareText, textParts } from '../board/requirements-text.js';
+import { DocumentError, prepareText } from '../board/requirements-text.js';
 import { withFirstStory, withoutFirstStory } from '../board/first-story.js';
-import { addRun, type UsageKey } from '../board/usage.js';
 import { StepError, explainError } from '../board/problem.js';
 import { writeLog } from '../core/app-log.js';
-import type { AgentUsage, ToolEvent } from '../modules/ai-tool/types.js';
-import { aiTool } from '../modules/registry.js';
-import { readAgent } from './agents.js';
-import { personLevels, resolveLevel } from './levels.js';
+import type { ToolEvent } from '../modules/ai-tool/types.js';
 import { LimitReached, limitText } from './usage-limit.js';
 import { CapReached } from './caps.js';
 import { TECHNICAL_STOP, ownWords } from './plain-stop.js';
 import * as B from './breakdown-prompts.js';
 import { sleepMark, sleptSince } from './interrupt.js';
+import { HeldAtBudget, Stopped, ask, documentFiles, setNow, goOn, type BreakdownJobDeps, type Ctx } from './breakdown-run.js';
+import { fillStep } from './epic-fill.js';
+import { epicReadPrompt } from './epic-prompts.js';
+
+export type { AnalystAsk, AnalystAnswer, BreakdownJobDeps } from './breakdown-run.js';
 
 /**
  * The Analyst's work on a breakdown, as a stored job: what it does next lives in this computer's state file
@@ -40,40 +39,12 @@ import { sleepMark, sleptSince } from './interrupt.js';
  * Steps: text (no AI), read (questions only for real gaps and clashes), reply ("Ask about this"), draft (an outline,
  * then the stories of each epic, saved one epic at a time) and redo (one part with the person's words).
  *
+ * A run from the tracker (ADR-013) reads its epic instead of a document and, instead of a draft, fills in what its
+ * stories lack (engine/epic-fill.ts): its structure stays the tracker's.
+ *
  * The run itself comes from the caller: the live squad runs the Analyst read only, with the breakdown's folder beside
  * the project; tests pass a fake.
  */
-
-/** One run of the Analyst for the job. */
-export interface AnalystAsk {
-  /** The Analyst's step, for its model level and the cost: questions while reading, spec while writing. */
-  step: 'questions' | 'spec';
-  prompt: string;
-  schema?: object;
-  /** A new conversation with this id; the read starts one, the rest carry on in it. */
-  sessionId?: string;
-  resume?: string;
-  timeoutMs: number;
-  /** How many times the person pressed Give it more on this step: each time doubles its caps. */
-  more?: number;
-  onTool?(e: ToolEvent): void;
-  onText?(text: string): void;
-}
-
-export interface AnalystAnswer {
-  text: string;
-  structured?: unknown;
-  sessionId?: string;
-  usage?: AgentUsage;
-}
-
-export interface BreakdownJobDeps {
-  run(ask: AnalystAsk): Promise<AnalystAnswer>;
-  /** Asked before every run: the words when this month's budget holds it, so nothing is cut in half. */
-  budgetHold?(): Promise<string | null>;
-  /** Aborted on Stop, and when the board closes. */
-  signal?: AbortSignal;
-}
 
 const MINUTE = 60_000;
 /** The longest a first read of a document may take, writing its outline or stories, and answering about a question. */
@@ -95,22 +66,6 @@ const READ_AGAIN = ' Try again reads the document from the first page, and uses 
 
 /** "Ask about this" got no answer, in the words a ticket's question gets (engine/live.ts). */
 const NO_ANSWER = 'Could not answer this time. Ask again in a moment.';
-
-class Stopped extends Error {}
-
-/** This month's budget holds the next run. Its message is the plain reason. */
-class HeldAtBudget extends Error {}
-
-/** What the Analyst used, on its model level, for the breakdown's own line. */
-function usageKey(bp: BoardPaths, step: string): UsageKey {
-  try {
-    const agent = readAgent(bp, 'analyst');
-    const lv = resolveLevel({ role: 'analyst', step, quality: readMeta(bp).quality }, agent.levels, personLevels());
-    return { role: 'analyst', step, level: lv.level, model: lv.model || aiTool(agent.tool)?.modelFor(lv.level) || '' };
-  } catch {
-    return { role: 'analyst', step, level: 'strongest', model: '' };
-  }
-}
 
 /* ── Turning the Analyst's answer into parts ───────────── */
 
@@ -192,20 +147,6 @@ function byFor(b: Breakdown) {
 
 /* ── Where the document is ──────────────────────────────── */
 
-function documentFiles(bp: BoardPaths, b: Breakdown): B.DocumentFiles {
-  const dir = breakdownDir(bp, b.id);
-  const media = breakdownMediaDir(bp, b.id);
-  // The Analyst must never be paid to read nothing, or to guess from a name.
-  if (b.source.kind === 'pdf' ? !fs.existsSync(path.join(dir, b.source.file)) : !textParts(dir).length) throw new DocumentError(`The document of ${b.id} is no longer in its folder. Add the BRD again.`);
-  return {
-    kind: b.source.kind,
-    ...(b.source.kind === 'pdf' ? { pdf: path.join(dir, b.source.file), ...(b.source.pages ? { pages: b.source.pages } : {}) } : {}),
-    parts: textParts(dir).map((p) => path.join(dir, p)),
-    ...(fs.existsSync(media) && fs.readdirSync(media).length ? { media } : {}),
-    extra: (b.source.extra ?? []).map((f) => path.join(dir, f)),
-  };
-}
-
 /** Which part or pages a tool call read: "text/part-03.md" is part 3; a PDF read with pages "18-25" reached page 25. */
 export function readUpTo(e: ToolEvent, kind: Breakdown['source']['kind']): number {
   const file = [e.input.file_path, e.input.path].find((p): p is string => typeof p === 'string') ?? '';
@@ -224,52 +165,6 @@ export function foundSoFar(text: string): { epics: number; features: number } | 
 }
 
 /* ── The job ────────────────────────────────────────────── */
-
-interface Ctx {
-  bp: BoardPaths;
-  id: string;
-  deps: BreakdownJobDeps;
-  project: string;
-}
-
-function goOn(ctx: Ctx): void {
-  if (ctx.deps.signal?.aborted || readBreakdownState(ctx.bp, ctx.id).job?.status === 'stopping') throw new Stopped();
-}
-
-function setNow(ctx: Ctx, text: string, more: Partial<BreakdownJob> = {}): void {
-  updateJob(ctx.bp, ctx.id, (j) => {
-    if (j.status === 'stopping') return;
-    Object.assign(j, { now: text, ...more });
-  });
-}
-
-/** One run of the Analyst; what it used goes on the breakdown's own line, and its conversation is kept for the next. */
-async function ask(ctx: Ctx, a: AnalystAsk): Promise<AnalystAnswer> {
-  goOn(ctx);
-  const held = await ctx.deps.budgetHold?.();
-  if (held) throw new HeldAtBudget(held);
-  const more = readBreakdownState(ctx.bp, ctx.id).capRaise ?? 0;
-  const key = usageKey(ctx.bp, a.step);
-  const kept = (run: { sessionId?: string; usage?: AgentUsage }) =>
-    updateBreakdownState(ctx.bp, ctx.id, (s) => {
-      s.usage = addRun(s.usage, key, run.usage);
-      // ACP may give a conversation a new id: the next step carries on in the one this run ended in.
-      const session = run.sessionId ?? a.sessionId;
-      if (session && (a.sessionId || a.resume || !s.sessions?.read)) s.sessions = { ...s.sessions, read: session };
-    });
-  let r: AnalystAnswer;
-  try {
-    r = await ctx.deps.run({ ...a, ...(more ? { more } : {}) });
-  } catch (err) {
-    // Stopped at a cap: what it used counts, and Give it more carries on in its conversation.
-    if (err instanceof CapReached && err.run) kept(err.run);
-    throw err;
-  }
-  kept(r);
-  if (more) updateBreakdownState(ctx.bp, ctx.id, (s) => delete s.capRaise);
-  goOn(ctx);
-  return r;
-}
 
 function counts(b: Breakdown): NonNullable<BreakdownJob['found']> {
   return { epics: b.epics.length, features: b.epics.reduce((n, e) => n + e.features.length, 0), stories: allStories(b).length };
@@ -303,7 +198,7 @@ async function readStep(ctx: Ctx, b: Breakdown, job: BreakdownJob): Promise<bool
   const session = job.more ? readBreakdownState(ctx.bp, ctx.id).sessions?.read : undefined;
   const r = await ask(ctx, {
     step: 'questions',
-    prompt: session ? B.carryOnPrompt() : B.readPrompt(ctx.project, b, docs),
+    prompt: session ? B.carryOnPrompt() : b.source.kind === 'tracker' ? epicReadPrompt(ctx.project, b, docs) : B.readPrompt(ctx.project, b, docs),
     schema: B.READ_SCHEMA,
     ...(session ? { resume: session } : { sessionId: randomUUID() }),
     timeoutMs: readLimitMs(b.source),
@@ -662,8 +557,9 @@ const STEPS: Record<BreakdownJob['step'], (ctx: Ctx, b: Breakdown, job: Breakdow
   text: textStep,
   read: readStep,
   reply: replyStep,
-  draft: draftStep,
-  redo: redoStep,
+  // A run from the tracker keeps its parts: the Analyst fills in what they lack, and a redo fills them in again.
+  draft: (ctx, b, job) => (b.source.kind === 'tracker' ? fillStep(ctx, b, job, BRD_WRITE_MS) : draftStep(ctx, b)),
+  redo: (ctx, b, job) => (b.source.kind === 'tracker' ? fillStep(ctx, b, job, BRD_WRITE_MS) : redoStep(ctx, b, job)),
 };
 
 /** A run that did not get through: the usage limit and the budget hold the job, Stop parks it, anything else is said in plain words. */

@@ -552,8 +552,8 @@ export function AddPartDialog({ v, level, under, onClose, onAdded }: { v: Breakd
 /** The parts left out on purpose, each with why, its place in the BRD, and Ask the Analyst to add it. */
 export function LeftOutDialog({ v, onClose, onOpenRef, onAsk }: { v: BreakdownView; onClose(): void; onOpenRef(ref: BrdRef): void; onAsk?(text: string): void }) {
   return (
-    <Modal title={`${v.leftOut.length} ${v.leftOut.length === 1 ? 'part' : 'parts'} left out`} onClose={onClose}>
-      <p>Parts of the BRD the breakdown leaves out on purpose, and why. Ask the Analyst to add one if it should be built.</p>
+    <Modal title={`${v.leftOut.length} ${v.source.kind === 'tracker' ? 'item' : 'part'}${v.leftOut.length === 1 ? '' : 's'} left out`} onClose={onClose}>
+      <p>{v.source.kind === 'tracker' ? `Items under ${v.source.tracker?.ref ?? 'it'} the run leaves out, and why.` : 'Parts of the BRD the breakdown leaves out on purpose, and why. Ask the Analyst to add one if it should be built.'}</p>
       <div className="rq-leftout">
         {v.leftOut.map((l, i) => (
           <div key={i} className="rq-lo">

@@ -6,6 +6,7 @@ import type {
   Sprint,
   Tracker,
   TrackerAbilities,
+  TrackerChild,
   TrackerItem,
   TrackerItemChange,
   TrackerItemRow,
@@ -140,6 +141,14 @@ export class DemoTracker implements Tracker {
     });
   }
 
+  /** The items whose parent it is, in the order they were made. Resolved and Closed ones are finished. */
+  async children(id: string): Promise<TrackerChild[]> {
+    this.item(id);
+    return [...this.items.values()]
+      .filter((w) => w.parent === String(id))
+      .map((w) => ({ ...this.row(w), description: w.description, acceptanceCriteria: w.acceptance, reproSteps: '', needs: [...w.dependsOn], done: w.state === 'Resolved' || w.state === 'Closed' }));
+  }
+
   async get(id: string): Promise<TrackerItem> {
     const w = this.item(id);
     const parents: TrackerItem['parents'] = [];
@@ -154,6 +163,7 @@ export class DemoTracker implements Tracker {
       parents,
       dependsOn: w.dependsOn.map((d) => this.item(d)).map((d) => ({ ref: this.refOf(d.id), title: d.title, state: d.state })),
       attachments: [],
+      done: w.state === 'Resolved' || w.state === 'Closed',
     };
   }
 

@@ -101,6 +101,8 @@ export interface BacklogResponse {
 /** An epic or feature above backlog items. `type` is the tracker's own word (Epic, Feature, Initiative). */
 export interface BacklogGroup extends Omit<WorkItemRow, 'ticket'> {
   level: 'epic' | 'feature';
+  /** Its run, when Build all was pressed on it: the breakdown's id, approved or not, Build continuously on, and where its stories are. */
+  run?: { id: string; approved: boolean; on: boolean; stories: number; merged: number; building: number; needsYou: number };
 }
 
 export interface BacklogTree {

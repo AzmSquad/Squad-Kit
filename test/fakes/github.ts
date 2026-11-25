@@ -3,7 +3,7 @@ import { withPlainErrors, type GithubCalls } from '../../src/modules/github/call
 
 /**
  * GitHub's Issues and Projects as far as squad-kit uses them, in memory: REST for issues, comments and labels, GraphQL
- * (by the operation's name) for issue details, sub-issues, "blocked by" and one Project board with Status, Iteration,
+ * (by the operation's name) for issue details, sub-issues (both ways), "blocked by" and one Project board with Status, Iteration,
  * Priority and Points fields. Repo octo/shop: epic #10, feature #11 under it, story #40 under that with an upload, in
  * the current iteration on board 2, Status Todo. #60 was written by someone outside the team. Like GitHub, a query that
  * asks for an issue's board places is refused without the Projects right.
@@ -225,6 +225,20 @@ export function fakeGithub(opts: FakeGithubOptions = {}): FakeGithub {
           }
         }
         return out;
+      }
+      case 'SquadChildren': {
+        // The sub-issues in the order they were added, with their text and what blocks each one.
+        const k = key(v.number as number, `${v.owner}/${v.name}`.toLowerCase());
+        if (!issues.get(k)) throw new ModuleError(`GitHub said: Could not resolve to an Issue with the number of ${v.number}.`);
+        const nodes = [...issues.values()]
+          .filter((i) => i.parent === k && !i.pr)
+          .map((i) => ({
+            ...row(i),
+            body: i.body,
+            subIssuesSummary: { total: [...issues.values()].filter((c) => c.parent === key(i.number, i.repo)).length },
+            blockedBy: { nodes: i.blockedBy.map((b) => ({ number: issues.get(b)!.number, repository: { nameWithOwner: issues.get(b)!.repo } })) },
+          }));
+        return { repository: { issue: { subIssues: { nodes } } } };
       }
       case 'SquadIssueTypes':
         return { repository: { issueTypes: { nodes: types.map((name) => ({ id: `IT_${name}`, name, isEnabled: true })) } } };

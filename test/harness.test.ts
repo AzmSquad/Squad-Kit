@@ -190,6 +190,7 @@ const STOPS_PER_FILE: Record<string, number> = {
   'publish.ts': 4,
   'sync.ts': 1,
   'contribution/look.ts': 2,
+  'epic-fill.ts': 2,
 };
 
 /** Times written where they are used, each with why it needs no row. */

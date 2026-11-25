@@ -44,7 +44,6 @@ import {
   answerAgent,
   saveReleaseNotes,
   skipQuestions,
-  startFromTracker,
   endStuckCommand,
   keepWaiting,
   restartStep,
@@ -71,7 +70,7 @@ import type { AgentName, PlanComment, PlanEdit, Ticket } from '../../board/types
 import { repoFor, reposOf } from '../../engine/repos.js';
 import type { ProjectCommands, Release } from '../../board/types.js';
 import { aiTool, speechModule, trackerFor, trackerModule, TRACKERS } from '../../modules/registry.js';
-import { backlogView } from './backlog.js';
+import { mountBacklogApi } from './backlog.js';
 import { trackerForm } from './tracker-form.js';
 import type { Tracker } from '../../modules/tracker/types.js';
 import { allowedFile, chatSummaries, dispositionOf, mimeOf, readConversation, ticketConversations, ticketFolders } from '../../engine/conversations.js';
@@ -200,19 +199,8 @@ export function mountBoardApi(app: Hono, opts: { paths: SquadPaths; control?: { 
     });
   });
 
-  app.get('/api/v1/backlog', async (c) => {
-    const status = await trackerStatus();
-    if (!status.tracker) return c.json({ connected: false, error: status.error ?? null, sprints: [], items: [] });
-    return c.json(await backlogView(bp, status.tracker, status.user, c.req.query('sprint')));
-  });
-
-  app.post('/api/v1/backlog/:id/start', async (c) =>
-    act(c, async () => {
-      const status = await trackerStatus();
-      if (!status.tracker) throw new Error(status.error ?? 'No tracker is connected. Add it in Settings.');
-      return startFromTracker(bp, status.tracker, c.req.param('id'));
-    }),
-  );
+  // The Backlog page: its list, Start, and Build all on an epic or a feature.
+  mountBacklogApi(app, bp, trackerStatus);
 
   app.get('/api/v1/board', (c) => {
     if (!boardExists(bp)) {

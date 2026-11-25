@@ -62,7 +62,7 @@ import {
   runStartTicket,
   runWatch,
 } from './commands/board.js';
-import { runBacklog } from './commands/backlog.js';
+import { backlogCommand } from './commands/backlog.js';
 import { runGuardAllow, runHosts, runNetwork } from './commands/sandbox.js';
 import { runEnvFile } from './commands/env-file.js';
 import { runConfigShow, runConfigSetPlanner, runConfigSetTracker, runConfigUnsetPlanner, runConfigUnsetTracker, runConfigRemoveCredential } from './commands/config/index.js';
@@ -684,11 +684,7 @@ program
   .command('pull <ref>')
   .description('Start a ticket from an Azure DevOps work item, for example 35 or AB#35')
   .action(wrapArgs(runPull));
-program.command('backlog').description("Show the sprint's stories and bugs from the tracker, under their epics and features when it has them")
-  .option('--sprint <name>', 'Which sprint, for example "Sprint 1" (default: the current one)')
-  .option('--all', 'Everything open, in every sprint')
-  .option('--flat', 'A plain list, without the epics and features above the items')
-  .action(wrapArgs(runBacklog));
+program.addCommand(backlogCommand());
 program.addCommand(requirementsCommand());
 
 program

@@ -7,6 +7,7 @@ import type {
   ItemStage,
   NewTrackerItem,
   Tracker,
+  TrackerChild,
   TrackerItem,
   TrackerItemChange,
   TrackerItemRow,
@@ -20,6 +21,7 @@ import { azureForProject } from './sign-in.js';
 import { signedInWithMicrosoft } from './token.js';
 import { markdownToHtml } from './markdown.js';
 import { azureTree } from './tree.js';
+import { azureChildren, finished } from './children.js';
 
 /** Azure Boards as a squad-kit tracker. */
 
@@ -80,6 +82,11 @@ export class AzureTracker implements Tracker {
     return azureTree(this.az, rows, row);
   }
 
+  /** The work items right under it (its child links), in backlog order. */
+  children(id: string): Promise<TrackerChild[]> {
+    return azureChildren(this.az, num(id), row);
+  }
+
   async get(id: string): Promise<TrackerItem> {
     const w = await this.az.getWorkItem(num(id));
     return {
@@ -90,6 +97,7 @@ export class AzureTracker implements Tracker {
       parents: w.parents.map((p) => ({ ...p, id: String(p.id) })),
       dependsOn: w.dependsOn.map((d) => ({ ref: `AB#${d.id}`, title: d.title, state: d.state })),
       attachments: w.attachments,
+      done: await finished(this.az, w),
     };
   }
 

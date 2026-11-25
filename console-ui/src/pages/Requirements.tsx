@@ -1,15 +1,13 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router';
-import { Check, FileText, ListTree, MessageCircle, Pause, Pencil, Play, Plus, Send, Trash2 } from 'lucide-react';
+import { Check, ListTree, MessageCircle, Pause, Pencil, Play, Plus, Send, Trash2 } from 'lucide-react';
 import type { BreakdownLevel, BreakdownRow, BreakdownView } from '../api/requirements-types';
 import {
   allStories,
   barParts,
-  basisWords,
   buildEstimate,
   builtWords,
   countWords,
-  estimateBits,
   findPart,
   firstSentence,
   jobBusy,
@@ -28,9 +26,12 @@ import { usePrefs } from '../lib/prefs';
 import { PHONE, useMedia } from '../lib/popups';
 import { shellQuote } from '../lib/text';
 import { Cmd, Written } from '../components/ui';
-import { langProps, typedDir } from '../lib/lang';
+import { typedDir } from '../lib/lang';
 import { CarryOn, ReadingCard, FailedCard, QuestionsView } from '../components/BreakdownRead';
 import { DecidedPanel, ItemPanel, Tree, canEdit } from '../components/BreakdownTree';
+import { InfoLine } from '../components/BreakdownInfo';
+import { RowSource, TrackerNew } from '../components/epic/RunMarks';
+import { fromTracker } from '../lib/epic-run';
 import { BreakdownMap } from '../components/BreakdownMap';
 import {
   AddBrdDialog,
@@ -110,7 +111,7 @@ export function RequirementsPage() {
             </div>
           ) : (
             <>
-              <p className="note rq-lead">Each BRD you add is one breakdown. Open one to edit it, approve it, send it or build it.</p>
+              <p className="note rq-lead">Each BRD you add is one breakdown, and so is each Build all from the Backlog. Open one to edit it, approve it, send it or build it.</p>
               <div className="rq-rows">
                 {rows.map((r) => (
                   <ListRow key={r.id} r={r} me={me} />
@@ -153,9 +154,7 @@ function RowLink({ r, chip, started }: { r: BreakdownRow; chip: { text: string; 
       <span className="rq-rid mono">{r.id}</span>
       <span className="rq-rname">
         <Written as="b" text={r.title} />
-        <span {...langProps(r.source.name)}>
-          <FileText size={12} aria-hidden="true" /> <Written text={r.source.name} />
-        </span>
+        <RowSource r={r} />
       </span>
       <span className="rq-rcount">{c.epics || c.stories ? countWords(c) : 'Not broken down yet'}</span>
       <span className="rq-rstate">
@@ -324,6 +323,7 @@ function Breakdown({ v, search, select, openTicket, setSearch, phone }: { v: Bre
         </div>
         {built && <InfoLine v={v} onDecided={() => setSearch({ item: undefined, decided: true })} onLeftOut={() => setDialog({ kind: 'leftout' })} onDoc={() => doc.open()} />}
         {v.status === 'approved' && <BuildRow v={v} />}
+        <TrackerNew v={v} />
         {v.status === 'ready' && v.mine && (v.problems?.length ?? 0) > 0 && (
           <div className="rq-probs" id="rq-probs" role="note">
             <b>Before you approve:</b>
@@ -387,7 +387,7 @@ function Breakdown({ v, search, select, openTicket, setSearch, phone }: { v: Bre
       {dialog?.kind === 'send' && <SendDialog v={v} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'ask' && <AskAnalystDialog v={v} item={dialog.item} text={dialog.text} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'add' && <AddPartDialog v={v} level={dialog.level} under={dialog.under} onClose={() => setDialog(null)} onAdded={(key) => select(key)} />}
-      {dialog?.kind === 'leftout' && <LeftOutDialog v={v} onClose={() => setDialog(null)} onOpenRef={doc.open} onAsk={askable ? (text) => setDialog({ kind: 'ask', item: v.id, text }) : undefined} />}
+      {dialog?.kind === 'leftout' && <LeftOutDialog v={v} onClose={() => setDialog(null)} onOpenRef={doc.open} onAsk={askable && !fromTracker(v) ? (text) => setDialog({ kind: 'ask', item: v.id, text }) : undefined} />}
       {dialog?.kind === 'delete' && (
         <DeleteBreakdownDialog id={v.id} title={v.title} sentTo={v.sent ? v.tracker?.label : undefined} onClose={() => setDialog(null)} onDeleted={() => void navigate({ to: '/requirements' })} />
       )}
@@ -446,7 +446,7 @@ function Actions({ v, onSend, onAsk, phone }: { v: BreakdownView; onSend(): void
   const act = useReqAct();
   if (!v.mine) return null;
   const busy = jobBusy(v.state.job);
-  const sendBtn = v.tracker && (
+  const sendBtn = v.tracker && !fromTracker(v) && (
     <button className="btn" onClick={onSend} disabled={v.state.sync?.status === 'running'} title={`squad requirements send ${v.id}`}>
       {!phone && <Send size={14} />} {v.sent ? 'Send changes' : `Send to ${v.tracker.label}`}
     </button>
@@ -463,9 +463,9 @@ function Actions({ v, onSend, onAsk, phone }: { v: BreakdownView; onSend(): void
           disabled={problems.length > 0 || busy || act.isPending}
           aria-describedby={problems.length ? 'rq-probs' : undefined}
           title={problems.length ? problems[0] : `squad requirements approve ${v.id}`}
-          onClick={() => act.mutate({ path: `${base(v.id)}/approve`, done: v.tracker ? 'Approved. Build continuously, start a story, or send it.' : 'Approved. Build continuously, or start one story.' })}
+          onClick={() => act.mutate({ path: `${base(v.id)}/approve`, done: fromTracker(v) ? 'Approved. It builds by itself now, in order of what each story needs.' : v.tracker ? 'Approved. Build continuously, start a story, or send it.' : 'Approved. Build continuously, or start one story.' })}
         >
-          <Check size={15} /> Approve breakdown
+          <Check size={15} /> {fromTracker(v) ? 'Approve and build' : 'Approve breakdown'}
         </button>
       </>
     );
@@ -496,62 +496,6 @@ function Actions({ v, onSend, onAsk, phone }: { v: BreakdownView; onSend(): void
         </button>
       )}
     </>
-  );
-}
-
-function plural(n: number, one: string, many = `${one}s`) {
-  return `${n} ${n === 1 ? one : many}`;
-}
-
-function whoWords(name: string, me: string | undefined): string {
-  return me && name.trim().toLowerCase() === me.trim().toLowerCase() ? 'you' : name;
-}
-
-function dayWords(iso: string): string {
-  const d = new Date(iso);
-  return d.toDateString() === new Date().toDateString() ? 'today' : `on ${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`;
-}
-
-/** Where it comes from, its size, the estimate, and links to what was decided and left out. */
-function InfoLine({ v, onDecided, onLeftOut, onDoc }: { v: BreakdownView; onDecided(): void; onLeftOut(): void; onDoc(): void }) {
-  const board = useBoard();
-  const me = board.data?.ready ? board.data.meta.user?.name : undefined;
-  const s = v.source;
-  const e = v.estimate;
-  const bits = estimateBits(e);
-  const c = v.counts;
-  const showEstimate = v.status === 'ready';
-  return (
-    <div className="rq-info">
-      <span>
-        From{' '}
-        <button className="rq-link" onClick={onDoc} title="Open the document">
-          <Written text={s.name} />
-        </button>
-        {s.kind === 'pdf' && s.pages ? `, ${plural(s.pages, 'page')}` : ''}
-        {s.pictures ? `, ${plural(s.pictures, 'picture')}` : ''}, added by <Written text={whoWords(s.addedBy, me)} /> {dayWords(s.addedAt)}
-      </span>
-      <span>
-        <b>{c.epics}</b> {c.epics === 1 ? 'epic' : 'epics'}, <b>{c.features}</b> {c.features === 1 ? 'feature' : 'features'}, <b>{c.stories}</b> {c.stories === 1 ? 'story' : 'stories'}
-      </span>
-      {showEstimate && e.stories > 0 && (
-        <span>
-          About {bits.cost && <><b>{bits.cost}</b> and </>}
-          <b>{bits.time}</b> to build, {e.parallel} at a time <span className="rq-dim">({basisWords(e)})</span>
-        </span>
-      )}
-      {v.decided.length > 0 && (
-        <button className="rq-link" onClick={onDecided}>
-          {v.decided.length} decided for you
-        </button>
-      )}
-      {v.leftOut.length > 0 && (
-        <button className="rq-link" onClick={onLeftOut}>
-          {plural(v.leftOut.length, 'part')} left out
-        </button>
-      )}
-      {v.sent && v.tracker && <span>Sent to {v.tracker.label}</span>}
-    </div>
   );
 }
 
@@ -689,7 +633,7 @@ function NeedsYouCards({ v, onDecide }: { v: BreakdownView; onDecide(ticket: str
         const why = t?.agentQuestion?.text ? firstSentence(t.agentQuestion.text) : t?.waiting?.summary;
         return (
           <div key={p.key} className="rq-youcard">
-            <div className="rq-pop-w">{[p.key, p.ticket, stopTag(p.stop)].filter(Boolean).join(' · ')}</div>
+            <div className="rq-pop-w">{[p.key, p.ticket, stopTag(p.stop, fromTracker(v))].filter(Boolean).join(' · ')}</div>
             <Written as="div" className="rq-youcard-t" text={`${s?.title ?? ''}${why ? `: ${why.charAt(0).toLowerCase()}${why.slice(1)}` : ''}`} />
             {p.ticket && (
               <button className="btn you" onClick={() => onDecide(p.ticket!)}>

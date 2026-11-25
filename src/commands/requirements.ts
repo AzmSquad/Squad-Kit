@@ -4,7 +4,6 @@ import kleur from 'kleur';
 import { Command } from 'commander';
 import { confirm, input, select, Separator } from '@inquirer/prompts';
 import * as ui from '../ui/index.js';
-import { isSquadExit } from '../core/cli-exit.js';
 import { readMeta, type BoardPaths } from '../board/store.js';
 import { BoardActionError, type AnswerInput, type UploadedFile } from '../board/actions.js';
 import type { Criterion } from '../board/types.js';
@@ -37,6 +36,8 @@ import { requestSend, sendPreview } from '../board/requirements-send.js';
 import { squadRunsElsewhere } from '../board/lock.js';
 import { tick } from '../board/engine.js';
 import { board } from './board.js';
+import { wrapArgs } from './wrap.js';
+import { addNewCommand, approvedWords, trackerNewLine } from './requirements-new.js';
 
 /**
  * `squad requirements …`: every button of the Requirements page, from the terminal. Each command is one engine call,
@@ -185,6 +186,7 @@ export function buildSendLines(v: BreakdownView): string[] {
   const b = v.state.build;
   if (b?.on) lines.push(kleur.cyan(`Building continuously, ${v.estimate.parallel} at a time: ${v.counts.merged} of ${v.counts.stories} merged, ${v.counts.building} building${v.counts.needsYou ? `, ${v.counts.needsYou} need you` : ''}`));
   if (b?.on && b.held) lines.push(kleur.yellow(b.held));
+  if (trackerNewLine(v)) lines.push(kleur.yellow(trackerNewLine(v)!));
   const s = v.state.sync;
   const to = v.tracker?.label ?? 'the tracker';
   if (s?.status === 'pending' || s?.status === 'running') lines.push(kleur.cyan(`Sending to ${to}: ${sendProgress(s)}`));
@@ -263,7 +265,7 @@ async function show(id: string, opts: { map?: boolean }): Promise<void> {
         out();
       }
       if (v.status === 'ready') {
-        const problems = approveProblems(v);
+        const problems = approveProblems(v, bp);
         for (const p of problems.slice(0, 5)) out(`  ${kleur.yellow('!')} ${p}`);
       }
     }
@@ -399,20 +401,7 @@ async function askOne(id: string, qid: string, words: string[]): Promise<void> {
 }
 
 /** Runs a command and prints the plain error, the way every other squad command does. */
-function run<A extends unknown[]>(fn: (...args: A) => Promise<void> | void) {
-  return async (...args: A) => {
-    try {
-      await fn(...args);
-    } catch (err) {
-      if (isSquadExit(err)) {
-        if (err.message.trim()) ui.info(err.message);
-        process.exit(err.exitCode);
-      }
-      ui.renderError(err);
-      process.exit(1);
-    }
-  };
-}
+const run = <A extends unknown[]>(fn: (...args: A) => Promise<void> | void) => wrapArgs(async (...args: A) => fn(...args));
 
 function more(value: string, previous: string[]): string[] {
   return [...previous, value];
@@ -527,7 +516,7 @@ export function requirementsCommand(): Command {
     .description('Approve the breakdown: nothing is built or sent before this')
     .action(run((id: string) => {
       const b = approveBreakdown(board(), id);
-      ui.success(`${b.id} is approved. Start a story: squad requirements start ${b.id} <story>`);
+      ui.success(approvedWords(board(), b));
     }));
   r.command('start <id> <story>')
     .description('Start one story now, as a ticket that builds by itself')
@@ -554,6 +543,7 @@ export function requirementsCommand(): Command {
       ui.info(`Follow it: squad requirements show ${b.id} --map    Pause: squad requirements build ${b.id} --pause`);
       warnIfNoSquad(bp, 'The squad builds');
     }));
+  addNewCommand(r);
   r.command('send <id>')
     .description('Send the breakdown to the tracker: epics, features and stories with their links (again: only what changed)')
     .option('--preview', 'Show what would be sent, and send nothing')

@@ -50,6 +50,17 @@ describe('the backlog tree, the same for every tracker', () => {
     expect(tree.groups.map((g) => g.id).sort()).toEqual(['10', '11']);
   });
 
+  it('takes listed epics and features as groups, where the tracker lists them with the stories', async () => {
+    const issue = (id: string, type = 'Issue', isBug = false) => ({ ...row(id, type), isBug });
+    const rows = [issue('1', 'Epic'), issue('2', 'Feature'), issue('4'), issue('5', 'Bug', true), issue('6'), issue('9'), issue('10')];
+    // 4 under the feature 2 under the epic 1; a bug under 4; 10, a plain issue with an issue under it, is a group too.
+    const tree = await walkUp(rows, { '4': '2', '2': '1', '5': '4', '9': '10' }, reader({}));
+    expect(tree.above).toEqual({ '4': '2', '2': '1', '5': '4', '9': '10' });
+    expect(tree.groups.map((g) => `${g.id} ${g.level}`).sort()).toEqual(['1 epic', '10 feature', '2 feature']);
+    const order = nestBacklog(rows, tree).map((l) => (l.kind === 'loose' ? '-- loose' : `${'  '.repeat(l.depth)}${l.kind === 'group' ? l.group.id : l.item.id}`));
+    expect(order).toEqual(['1', '  2', '    4', '      5', '10', '  9', '-- loose', '6']);
+  });
+
   it('names a group by its type, else by what sits under it', () => {
     expect(groupLevel('Epic', false)).toBe('epic');
     expect(groupLevel('Initiative', false)).toBe('epic');

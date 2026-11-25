@@ -164,6 +164,41 @@ export function trackerCreateContract(name: string, make: () => Tracker): void {
       expect(tree.groups.every((g) => ['epic', 'feature'].includes(g.level))).toBe(true);
     });
 
+    it('reads what sits right under an item, in order, with its text and needs, and says which are finished', async () => {
+      const tracker = make();
+      if (!tracker.children) return;
+      const levels = await tracker.levels();
+      const epic = await tracker.createItem({ level: 'epic', title: 'Front desk', markdown: 'Guests arrive and leave.' });
+      const feature = await tracker.createItem({ level: 'feature', title: 'Arrivals', markdown: 'x', parent: epic.id });
+      const checkIn = await tracker.createItem({
+        level: 'story',
+        title: 'Check in',
+        markdown: 'As a guest, I want to check in at the desk.',
+        acceptance: '**Given** a booking\n**When** I check in\n**Then** the room is mine',
+        parent: feature.id,
+      });
+      const pay = await tracker.createItem({ level: 'story', title: 'Pay', markdown: 'x', parent: feature.id });
+      const old = await tracker.createItem({ level: 'story', title: 'Old way in', markdown: 'x', parent: feature.id });
+      await tracker.linkDepends(pay.id, [checkIn.id]);
+      await tracker.moveTo(old.id, 'closed');
+      const under = await tracker.children(feature.id);
+      expect(under.map((c) => c.id)).toEqual([checkIn.id, pay.id, old.id]);
+      expect(under.map((c) => c.done)).toEqual([false, false, true]);
+      expect(under[0]).toMatchObject({ ref: tracker.refOf(checkIn.id), title: 'Check in', type: levels.story });
+      expect(under[1]!.needs).toEqual([checkIn.id]);
+      expect(under[0]!.needs).toEqual([]);
+      // The same text get() gives, so a later change in the tracker can be told from it.
+      const got = await tracker.get(checkIn.id);
+      expect([under[0]!.title, under[0]!.description, under[0]!.acceptanceCriteria, under[0]!.reproSteps]).toEqual([got.title, got.description, got.acceptanceCriteria, got.reproSteps]);
+      expect(`${got.description}\n${got.acceptanceCriteria}`).toContain('I check in');
+      // get() says whether an item is finished the same way.
+      expect(got.done).toBe(false);
+      expect((await tracker.get(old.id)).done).toBe(true);
+      expect(await tracker.children(checkIn.id)).toEqual([]);
+      // Where the tracker cannot nest a feature under its epic, the feature is linked to it instead: not under it.
+      if (!levels.linked?.includes('feature')) expect((await tracker.children(epic.id)).map((c) => c.id)).toEqual([feature.id]);
+    });
+
     it('changes an item, and a new parent replaces the old one', async () => {
       const tracker = make();
       const epic = await tracker.createItem({ level: 'epic', title: 'Booking', markdown: 'x' });

@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { listTickets, now, readMeta, readTicket, updateTicket, type BoardPaths } from './store.js';
+import { now, readMeta, readTicket, updateTicket, type BoardPaths } from './store.js';
 import { BoardActionError, MAX_UPLOADS, MAX_UPLOAD_BYTES, createTicket, saveUploads, type AnswerInput, type UploadedFile } from './actions.js';
 import type { Criterion, Quality, Ticket } from './types.js';
 import type { Breakdown, BreakdownEpic, BreakdownFeature, BreakdownJob, BreakdownLevel, BreakdownSource, BreakdownState, BreakdownStory, Decided, StorySize } from './requirements-types.js';
@@ -17,10 +17,8 @@ import {
   nextBreakdownId,
   nextKey,
   ownerOfBreakdown,
-  placeWords,
   readBreakdownState,
   redoHolding,
-  refWords,
   removeBreakdown,
   requireBreakdown,
   requireItem,
@@ -33,6 +31,7 @@ import {
   writeBreakdownState,
   findLoop,
   loopWords,
+  andWords,
   type FoundItem,
 } from './requirements.js';
 import { DocumentError, kindOf, prepareText, type PreparedText } from './requirements-text.js';
@@ -43,6 +42,9 @@ import { withFirstStory } from './first-story.js';
 import { linkTickets } from './requirements-sync.js';
 import { monthKey } from './usage.js';
 import { stepCaps } from '../engine/levels.js';
+import { storyAsk } from './story-ask.js';
+import { buildOnApproved, notFromTracker } from './epic-approve.js';
+import { ticketBefore } from './epic-held.js';
 
 /**
  * What a person does with a breakdown, one function each, so the board and the terminal do exactly the same: add a
@@ -414,8 +416,10 @@ function editable(bp: BoardPaths, id: string, key?: string): Breakdown {
   const job = readBreakdownState(bp, b.id).job;
   if (jobBusy(job) && job!.step === 'redo') {
     const target = job!.item === b.id ? null : findItem(b, job!.item ?? '');
-    const inside = !target || !key || target.item.key === itemKey(key) || storiesIn(target).some((s) => s.key === itemKey(key)) || (target.level === 'epic' && target.epic.features.some((f) => f.key === itemKey(key)));
-    if (inside) throw new BoardActionError(`The Analyst is redoing ${target ? target.item.key : 'the breakdown'}. Wait for it, or stop it.`);
+    // The new stories of a run from the tracker, filled in by their keys ("S-7,S-8"): only they wait.
+    const list = !target && job!.item !== b.id ? (job!.item ?? '').split(',') : null;
+    const inside = list ? !key || list.includes(itemKey(key)) : !target || !key || target.item.key === itemKey(key) || storiesIn(target).some((s) => s.key === itemKey(key)) || (target.level === 'epic' && target.epic.features.some((f) => f.key === itemKey(key)));
+    if (inside) throw new BoardActionError(`The Analyst is ${list ? `filling in ${andWords(list)}` : `redoing ${target ? target.item.key : 'the breakdown'}`}. Wait for it, or stop it.`);
   }
   return b;
 }
@@ -513,7 +517,7 @@ export interface NewItemInput extends ItemPatch {
 
 /** Adds an epic (nothing under), a feature (under an epic, as a feature) or a story (under an epic or a feature). */
 export function addItem(bp: BoardPaths, id: string, input: NewItemInput): { breakdown: Breakdown; key: string } {
-  const b0 = editable(bp, id, input.under);
+  const b0 = notFromTracker(editable(bp, id, input.under));
   const title = input.title?.trim();
   if (!title) throw new BoardActionError('A new part needs a title.');
   let key = '';
@@ -633,7 +637,7 @@ export function approveBreakdown(bp: BoardPaths, id: string): Breakdown {
   if (b0.status !== 'ready') throw new BoardActionError(`${b0.id} is not ready to approve yet.`);
   const busy = busyWords(b0, readBreakdownState(bp, b0.id).job);
   if (busy) throw new BoardActionError(busy);
-  const problems = approveProblems(b0);
+  const problems = approveProblems(b0, bp);
   if (problems.length) throw new BoardActionError(`${problems[0]}${problems.length > 1 ? ` (and ${problems.length - 1} more)` : ''} Fix it, then approve.`);
   const by = who(bp);
   const b = updateBreakdown(bp, b0.id, (x) => {
@@ -643,6 +647,7 @@ export function approveBreakdown(bp: BoardPaths, id: string): Breakdown {
     x.approved = { by, at: now() };
   });
   updateBreakdownState(bp, b.id, (s) => addBreakdownActivity(s, 'you', `Approved the breakdown: ${allStories(b).length} stories`));
+  buildOnApproved(bp, b, by);
   return b;
 }
 
@@ -709,25 +714,13 @@ export function deleteBreakdown(bp: BoardPaths, id: string): { ok: true; id: str
 
 /* ── Start one story ────────────────────────────────────── */
 
-function andWords(xs: string[]): string {
-  return xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`;
-}
-
-/**
- * A live ticket made for this story before, that the story does not name yet: a start cut off between making the
- * ticket and saving it on the story.
- */
-function madeBefore(bp: BoardPaths, b: Breakdown, key: string): Ticket | undefined {
-  return listTickets(bp).find((t) => t.breakdown?.id === b.id && t.breakdown.item === key && !t.deleting && !t.archived);
-}
-
 /**
  * Starts one story of an approved breakdown as a ticket on the Builds by itself track: its story and done-when come
  * approved with the breakdown, the small choices made about it come along, and it depends on the tickets of the
  * stories it needs. Only once everything it needs is merged, and not while the Analyst redoes the part it is in. A
  * story already sent to the tracker links its ticket to its item, so the item moves forward as a pulled ticket's does.
- * A ticket made for the story by a start that was cut off is used again, never made twice. `by`: the squad, when
- * Build continuously starts it.
+ * A ticket made for the story by a start that was cut off, or on the board already for its tracker item, is used again,
+ * never made twice. `by`: the squad, when Build continuously starts it.
  */
 export function startStory(bp: BoardPaths, id: string, key: string, opts: { by?: 'you' | 'squad' } = {}): Ticket {
   const b = mine(bp, id);
@@ -738,7 +731,7 @@ export function startStory(bp: BoardPaths, id: string, key: string, opts: { by?:
   const had = story.ticket ? readTicket(bp, story.ticket) : null;
   if (had && !had.deleting) throw new BoardActionError(`${story.key} started already, as ${had.id}.`);
   const ticketsOfNeeds = () => story.dependsOn.map((n) => findItem(b, n)?.story?.ticket).filter((t): t is string => Boolean(t && readTicket(bp, t)));
-  const before = madeBefore(bp, b, story.key);
+  const { ticket: before, line } = ticketBefore(bp, b, story) ?? {};
   if (before) {
     const deps = ticketsOfNeeds();
     if (deps.length && !before.dependsOn?.length) updateTicket(bp, before.id, (t) => (t.dependsOn = deps));
@@ -748,7 +741,7 @@ export function startStory(bp: BoardPaths, id: string, key: string, opts: { by?:
       for (const d of x.decided) if (d.item === story.key && !d.ticket) d.ticket = before.id;
     });
     if (story.tracker) linkTickets(bp, after);
-    updateBreakdownState(bp, b.id, (s) => addBreakdownActivity(s, 'squad', `${story.key} has its ticket ${before.id} from a start that was cut off: it carries on there`));
+    updateBreakdownState(bp, b.id, (s) => addBreakdownActivity(s, 'squad', line!));
     return readTicket(bp, before.id) ?? before;
   }
   const redo = redoHolding(b, readBreakdownState(bp, b.id).job, story.key);
@@ -761,11 +754,7 @@ export function startStory(bp: BoardPaths, id: string, key: string, opts: { by?:
   if (waits.length) throw new BoardActionError(`${story.key} starts after ${andWords(waits)} ${waits.length === 1 ? 'merges' : 'merge'}.`);
   const place = { story, epic: f.epic, ...(f.feature ? { feature: f.feature } : {}) };
   const decided = b.decided.filter((d) => d.item === story.key && !d.ticket).map((d, i) => ({ ...d, id: `d${i + 1}` }));
-  const ask = [
-    story.story || story.title,
-    `From ${b.id} › ${placeWords(place)}.`,
-    `In the BRD: ${[refWords(story.ref), b.source.name].filter(Boolean).join(', in ')}.`,
-  ].join('\n\n');
+  const ask = storyAsk(bp, b, place);
   const ticket = createTicket(bp, {
     title: story.title,
     ask,

@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react';
 import { Check, MessageCircle, Play, Plus, RotateCcw, Send, Square, Trash2 } from 'lucide-react';
 import { useNavigate } from '@tanstack/react-router';
 import type { BrdRef, BreakdownQuestion, BreakdownView } from '../api/requirements-types';
-import { SKIP_CHOICE, afterTitle, clockWords, jobBusy, readSteps, refShort, type ReadStep } from '../lib/requirements';
+import { SKIP_CHOICE, afterTitle, clockWords, jobBusy, readSteps, refShort, stopTag, type ReadStep } from '../lib/requirements';
 import { useReqAct } from '../lib/requirementsData';
 import { Cmd, ROLE_NAME, Written } from './ui';
 import { ErrorCard } from './ErrorCard';
 import { useDraft } from '../lib/drafts';
 import { langProps, typedDir } from '../lib/lang';
+import { fromTracker, runReadSteps, trackerLabel } from '../lib/epic-run';
 
 /**
  * The breakdown before there is one to edit: the Analyst reading the document live, its questions, and the card when
@@ -61,9 +62,10 @@ export function ReadingCard({ v }: { v: BreakdownView }) {
   const job = v.state.job;
   const busy = jobBusy(job);
   const now = useTick(5000, busy);
-  const steps = readSteps(v);
+  const run = fromTracker(v);
+  const steps = run ? runReadSteps(v) : readSteps(v);
   const stopping = job?.status === 'stopping';
-  const title = v.status === 'drafting' ? 'The Analyst is writing the breakdown' : 'The Analyst is reading your BRD';
+  const title = v.status === 'drafting' ? (run ? 'The Analyst is filling the gaps' : 'The Analyst is writing the breakdown') : run ? 'The Analyst is reading the stories' : 'The Analyst is reading your BRD';
   return (
     <section className="rq-card rq-reading" aria-label={title}>
       <div className="rq-reading-head">
@@ -117,7 +119,7 @@ export function FailedCard({ v }: { v: BreakdownView }) {
       calm={stopped}
       title={title}
       what={<Written as="div" text={afterTitle(v.error ?? v.state.job?.error ?? 'The read did not get through.', title)} />}
-      safe={['Your document is saved.', ...(v.epics.length ? ['What the Analyst wrote so far is kept.'] : [])]}
+      safe={[fromTracker(v) ? `Nothing changed in ${trackerLabel(v)}.` : 'Your document is saved.', ...(v.epics.length ? ['What the Analyst wrote so far is kept.'] : [])]}
       hint={<Cmd text={`squad requirements ${capped ? 'more' : 'retry'} ${v.id}`} />}
       ways={
         v.mine
@@ -176,7 +178,7 @@ export function QuestionsView({ v, onOpenRef }: { v: BreakdownView; onOpenRef(re
         <h2>The Analyst has {qs.length} {qs.length === 1 ? 'question' : 'questions'}</h2>
       </div>
       <p className="rq-qlead">
-        The rest of the BRD is clear.
+        {fromTracker(v) ? 'The rest is clear.' : 'The rest of the BRD is clear.'}
         {decided > 0 && ` The Analyst decided ${decided} small ${decided === 1 ? 'thing' : 'things'} itself and wrote each one down. You will see them in the breakdown and can change any of them.`}
       </p>
       {v.state.job?.status === 'failed' && v.state.job.step === 'reply' && (
@@ -239,18 +241,23 @@ function QuestionCard({
     setAsking(false);
   };
   const other = answer?.choice === 'Other';
+  const run = fromTracker(v);
   return (
     <fieldset className="rq-q">
       <legend className="sr-only">Question {n}</legend>
       <div className="rq-qtop">
-        <span className={`rq-tag ${q.kind === 'clash' ? 'clash' : 'gap'}`}>{q.kind === 'clash' ? 'Two parts clash' : 'Missing in the BRD'}</span>
+        <span className={`rq-tag ${q.kind === 'clash' ? 'clash' : 'gap'}`}>{stopTag(q.kind, run)}</span>
         <span className="rq-qsrc">
           {(q.refs ?? []).map((r, i) => (
             <span key={i}>
               {i > 0 && (i === (q.refs?.length ?? 0) - 1 ? ' and ' : ', ')}
-              <button className="rq-link" onClick={() => onOpenRef(r)} title="Open this place in the document">
+              {run ? (
                 <Written text={refShort(r)} />
-              </button>
+              ) : (
+                <button className="rq-link" onClick={() => onOpenRef(r)} title="Open this place in the document">
+                  <Written text={refShort(r)} />
+                </button>
+              )}
             </span>
           ))}
           {q.refs?.length && q.impact ? ' · ' : ''}
