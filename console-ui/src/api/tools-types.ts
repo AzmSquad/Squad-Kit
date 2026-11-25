@@ -53,6 +53,12 @@ export interface ToolLine {
   seconds?: number;
   /** Android: the steps that make the person's own Android Studio enough instead, while it is here and lacks something. */
   studioSteps?: string[];
+  /** Android: what the person's SDK lacks for the project's Flutter, in words: squad-kit gets them with its own tools. */
+  pieces?: string[];
+  /** How squad-kit gets it, when not into its own folder. */
+  getVia?: string;
+  /** The words on its link's button: "Open the App Store". */
+  linkLabel?: string;
   /** Android: the project's checks build the Android app, and the person may skip those builds here instead. */
   skip?: { command: string };
   /** Android: the person skipped those checks on this computer, who and when, and the command that turns them back on. */
@@ -89,4 +95,6 @@ export interface ToolBlock {
   skip?: { label: string; note: string; command: string };
   /** The steps that bring what is missing, when they are the person's: an SDK of theirs that lacks a piece. */
   steps?: string[];
+  /** squad-kit gets what is missing itself, on the Tools page's line: the steps are then the other way. */
+  get?: { label: string };
 }

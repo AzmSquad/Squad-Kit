@@ -11,6 +11,7 @@ import type { BoardMeta, Ticket } from '../../board/types.js';
 import { waitKey } from '../../board/wait-key.js';
 import { appRunner } from '../run-app.js';
 import { getToolNow, updateToolNow } from '../tools/index.js';
+import { flutterPieces } from '../tools/android-builds.js';
 import { setSkipAndroid } from '../tools/android-builds.js';
 import { ACTIONS, ENGINEERS_ONLY, SETTINGS, isAllowable, isEngineer, neverAction, type Never } from './can.js';
 import { MAX_LEAD_CARDS } from './limits.js';
@@ -449,7 +450,7 @@ async function doAction(bp: BoardPaths, action: LeadAction, card: { story?: stri
       return `${app.name} is ${s.state === 'running' ? `running at ${s.url}` : 'starting'}.`;
     }
     case 'get_tool':
-      getToolNow(card.tool ?? '');
+      getToolNow(card.tool ?? '', card.tool === 'android' ? { pieces: flutterPieces(bp) } : {});
       return `squad-kit is getting ${card.tool}. The Tools page shows how it goes.`;
     case 'update_tool':
       await updateToolNow(bp, card.tool ?? '', { ok: true });

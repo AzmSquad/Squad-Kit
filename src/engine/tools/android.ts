@@ -32,7 +32,18 @@ export interface AndroidPick {
   sizes: Record<string, number>;
 }
 
-export function androidPick(system: System, arch: string = process.arch): AndroidPick | null {
+/** About how big a piece a project's Flutter needs is, for the progress line: Google's sizes vary a little by version. */
+const PIECE_BYTES = (pkg: string) => (pkg.startsWith('ndk;') ? 1_100_000_000 : pkg.startsWith('platforms;') ? 70_000_000 : 100_000_000);
+
+/** What the project's Flutter needs besides: "platforms;android-36", "ndk;28.2.13676358". Got with the rest. */
+let pieces: string[] = [];
+
+/** The pieces the next Get of the Android tools adds, from the Tools page's Get them. */
+export function wantAndroidPieces(p: string[]): void {
+  pieces = p.filter((x) => /^(platforms;android-\d+(\.\d+)?|ndk;[\d.]+)$/.test(x));
+}
+
+export function androidPick(system: System, arch: string = process.arch, extra: string[] = pieces): AndroidPick | null {
   const chip: Chip | null = arch === 'arm64' ? 'arm64' : arch === 'x64' ? 'x64' : null;
   if (!chip || (system !== 'mac' && chip === 'arm64')) return null;
   const key = `${system}-${chip}` as keyof typeof A.tools;
@@ -41,8 +52,10 @@ export function androidPick(system: System, arch: string = process.arch): Androi
   const image = A.images[chip];
   const sizes: Record<string, number> = {};
   for (const [pkg, by] of Object.entries(A.packages) as [string, Record<string, number>][]) sizes[pkg] = by[key] ?? by[system] ?? by.all ?? 0;
+  const more = extra.filter((p) => !(p in sizes));
+  for (const p of more) sizes[p] = PIECE_BYTES(p);
   sizes[image.id] = image.size;
-  return { tools, packages: [...Object.keys(A.packages), image.id], image: image.id, sizes };
+  return { tools, packages: [...Object.keys(A.packages), ...more, image.id], image: image.id, sizes };
 }
 
 /** All of it, in bytes to download. */

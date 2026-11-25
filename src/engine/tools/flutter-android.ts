@@ -87,5 +87,8 @@ export function sdkLacksHere(dir: string, env: NodeJS.ProcessEnv = process.env):
 
 const list = (xs: string[]) => (xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
 
+/** The pieces as Google's sdkmanager names them: "platforms;android-36", "ndk;28.2.13676358". */
+export const packagesOf = (lacks: SdkPiece[]): string[] => lacks.map((l) => (l.kind === 'platform' ? `platforms;android-${l.version}` : `ndk;${l.version}`));
+
 /** The pieces, in plain words: "Android 16 (API 36) and the NDK 28.2.13676358". */
 export const piecesWords = (lacks: SdkPiece[]) => list(lacks.map((l) => l.words));

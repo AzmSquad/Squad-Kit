@@ -5,6 +5,7 @@ import { buildPaths, requireSquadRoot } from '../core/paths.js';
 import { openBoard } from '../board/move.js';
 import type { BoardPaths } from '../board/store.js';
 import { ACTION_WORDS } from '../engine/tools/catalog.js';
+import { flutterPieces } from '../engine/tools/android-builds.js';
 import { acceptToolNow, checkTools, getToolNow, projectTools, toolLicense, updateToolNow, type LicenseView, type ToolLine, type ToolsView } from '../engine/tools/index.js';
 import { gettingNow, lastTrouble, type Getting } from '../engine/tools/get.js';
 import { skipToolNow } from '../engine/tools/android-builds.js';
@@ -156,7 +157,7 @@ export async function toolsWith(bp: BoardPaths, api: BoardApi | null, action: st
       await api.call<ToolsView>('POST', `/tools/${encodeURIComponent(id)}/get`);
       return follow(read, id);
     }
-    getToolNow(id);
+    getToolNow(id, id === 'android' ? { pieces: flutterPieces(bp) } : {});
     ui.info('squad-kit is not open, so the download runs here. Keep this terminal open until it is done.');
     const ok = await follow(async () => {
       const v = await projectTools(bp);

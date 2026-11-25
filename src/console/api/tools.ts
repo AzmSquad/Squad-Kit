@@ -4,7 +4,7 @@ import { boardPaths } from '../../board/store.js';
 import { acceptToolNow, checkTools, getToolNow, projectTools, toolLicense, updateToolNow } from '../../engine/tools/index.js';
 import type { ToolSource } from '../../engine/tools/get.js';
 import type { ToolId } from '../../engine/tools/catalog.js';
-import { skipToolNow } from '../../engine/tools/android-builds.js';
+import { flutterPieces, skipToolNow } from '../../engine/tools/android-builds.js';
 import { act } from './act.js';
 
 /**
@@ -29,9 +29,11 @@ export function mountToolsApi(app: Hono, opts: { paths: SquadPaths; source?: (id
   );
 
   // Get it: the download runs beside everything else; the page follows it on the line until it is Ready.
+  // Android: what this project's Flutter needs and the person's own SDK lacks comes with squad-kit's own tools.
   app.post('/api/v1/tools/:tool/get', (c) =>
     act(c, () => {
-      getToolNow(c.req.param('tool'), { ...(opts.source ? { source: opts.source } : {}), ...(opts.free !== undefined ? { free: opts.free } : {}) });
+      const pieces = c.req.param('tool') === 'android' ? flutterPieces(bp) : [];
+      getToolNow(c.req.param('tool'), { ...(opts.source ? { source: opts.source } : {}), ...(opts.free !== undefined ? { free: opts.free } : {}), ...(pieces.length ? { pieces } : {}) });
       return projectTools(bp);
     }),
   );

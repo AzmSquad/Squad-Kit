@@ -26,6 +26,7 @@ export function ToolBlockCard({ block }: { block: ToolBlock }) {
         <span>
           {block.text} {block.checking ? 'It goes on in a moment.' : `Nothing failed: it goes on by itself once ${many ? "they're" : "it's"} there.`}
         </span>
+        {block.steps && block.get && <span className="tl-skip-note">Or add them yourself in Android Studio:</span>}
         {block.steps && (
           <ol className="tl-block-steps">
             {block.steps.map((s) => (
@@ -37,8 +38,9 @@ export function ToolBlockCard({ block }: { block: ToolBlock }) {
       </div>
       <span className="grow" />
       <span className="tl-block-acts">
-        <Link to="/tools" hash={hash} className="btn sm">
-          See what's needed
+        {/* Get them is on the Tools page's line, where Google's license comes first when it is not accepted yet. */}
+        <Link to="/tools" hash={hash} className={`btn sm${block.get ? ' pri' : ''}`}>
+          {block.get ? block.get.label : "See what's needed"}
         </Link>
         {block.skip && (
           <button

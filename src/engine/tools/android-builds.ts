@@ -7,7 +7,7 @@ import { reposOf } from '../repos.js';
 import { ACTION_WORDS, type ToolAction } from './catalog.js';
 import type { FoundBook } from './detect.js';
 import type { ToolLine } from './index.js';
-import { piecesWords, studioStepsFor, type SdkPiece } from './flutter-android.js';
+import { packagesOf, piecesWords, sdkLacksHere, studioStepsFor, type SdkPiece } from './flutter-android.js';
 
 /**
  * A project's own checks that build its Android app (`flutter build apk`, `./gradlew assembleDebug`) need Android's
@@ -61,6 +61,13 @@ export function androidChecks(meta: BoardMeta, repo?: string): { name: 'test' | 
 export function androidRepoDir(bp: BoardPaths, meta: BoardMeta): string {
   const r = reposOf(meta).find((x) => ['test', 'lint', 'build'].some((n) => usesAndroid(x.commands[n as 'test'])));
   return path.join(bp.root, r?.path ?? '.');
+}
+
+/** What the project's Flutter needs and the Android SDK lacks, as sdkmanager names them; none when nothing lacks. */
+export function flutterPieces(bp: BoardPaths): string[] {
+  const meta = readMeta(bp);
+  const lacks = androidChecks(meta).length ? sdkLacksHere(androidRepoDir(bp, meta)) : null;
+  return lacks && !lacks.own ? packagesOf(lacks.lacks) : [];
 }
 
 /** Skip Android builds is offered only when it takes out the Android builds alone: every such check can lose them. */
@@ -172,7 +179,7 @@ export function withAndroidChecks(lines: ToolLine[], extra: ToolLine[], o: { met
       actions: inOrder([...base.actions, 'checks']),
       blocks: inOrder([...base.blocks.filter((a) => a !== 'checks'), ...(!skip && !enough ? (['checks'] as const) : [])]),
       ...(lacks ? { note: [`Your Android SDK lacks ${piecesWords(lacks.lacks)}, which Flutter needs to build the app.`, base.note].filter(Boolean).join(' ') } : {}),
-      ...(lacks && !lacks.own ? { studioSteps: studioStepsFor(lacks.lacks) } : {}),
+      ...(lacks && !lacks.own ? { studioSteps: studioStepsFor(lacks.lacks), pieces: lacks.lacks.map((l) => l.words) } : {}),
       ...(id === 'android' && o.skip ? { skipped: { by: o.skip.by, at: o.skip.at, command: UNSKIP_ANDROID.command } } : {}),
       // Offered whenever it can take the Android builds out: also when the tools are here and the build still can't run.
       ...(id === 'android' && !o.skip && offer ? { skip: { command: SKIP_ANDROID.command } } : {}),

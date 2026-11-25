@@ -5,10 +5,11 @@ import { squadHome } from '../../core/home.js';
 import { computerReady, type ComputerReady } from '../computer-ready.js';
 import { gitVersion } from '../git.js';
 import { ACTION_DOING, ACTION_WORDS, CATALOG, KIND_WORDS, PLATFORM_WORDS, toolEntry, type Priority, type System, type ToolAction, type ToolEntry, type ToolId } from './catalog.js';
-import { detectAll, foundFile, readFound, realHost, systemOf, writeFound, type DetectHost, type Found, type FoundBook } from './detect.js';
+import { detectAll, foundFile, ownTool, readFound, realHost, systemOf, writeFound, type DetectHost, type Found, type FoundBook } from './detect.js';
 import { atLeast, PAIR_RULES, tooOld, updateRecommended } from './fit.js';
 import { clearHalfGets, firstGuess, gettingNow, GetTrouble, lastTrouble, startGets, type Getting, type ToolSource } from './get.js';
-import { acceptAndroid, androidAccepted, androidLicenses, freeBytes, roomTrouble, type License } from './android.js';
+import { acceptAndroid, androidAccepted, androidLicenses, freeBytes, roomTrouble, wantAndroidPieces, type License } from './android.js';
+import { startSimulatorGet } from './simulator-get.js';
 import { choosePhone, IPHONE_ONLY, type PhoneSystem } from './which-phone.js';
 import type { PlaceKinds, Platform } from './kinds.js';
 import { placesWithKinds } from './places.js';
@@ -71,6 +72,12 @@ export interface ToolLine {
   seconds?: number;
   /** Android: the steps that make the person's own Android Studio enough instead, while it is here and lacks something. */
   studioSteps?: string[];
+  /** Android: what the person's SDK lacks for the project's Flutter, in words; squad-kit gets them with its own tools. */
+  pieces?: string[];
+  /** How squad-kit gets it, when not into its own folder: "from Apple, with Xcode's own download". */
+  getVia?: string;
+  /** The words on its link's button: "Open the App Store". */
+  linkLabel?: string;
   /** Android: the project's checks build the Android app, and the person may skip those builds here instead. */
   skip?: { command: string };
   /** Android: the person skipped those checks on this computer, who and when, and the command that turns them back on. */
@@ -104,6 +111,8 @@ export interface ToolBlock {
   skip?: { label: string; note: string; command: string };
   /** The steps that bring what is missing, when they are the person's: an SDK of theirs that lacks a piece. */
   steps?: string[];
+  /** squad-kit gets what is missing itself, on the Tools page's line ("Get them"): the steps are then the other way. */
+  get?: { label: string };
 }
 
 /* ── this computer's tools, kept and checked again ─────── */
@@ -246,6 +255,8 @@ export function linesFor(places: PlaceKinds[], book: FoundBook | null, system: S
       actions: m.actions,
       command: e.installer === 'squad-kit' ? `squad tools get ${e.id}` : 'squad tools check',
       ...(e.installer === 'squad-kit' ? { seconds: firstGuess(e.id), ...(e.size ? { size: e.size } : {}) } : {}),
+      ...(e.getVia ? { getVia: e.getVia } : {}),
+      ...(e.linkLabel ? { linkLabel: e.linkLabel } : {}),
       ...(e.license ? { license: { accepted: accepted(e.id), command: `squad tools accept ${e.id}` } } : {}),
     };
     let line: ToolLine;
@@ -474,13 +485,22 @@ const fits = (e: ToolEntry | undefined, book: FoundBook | null): boolean => {
  * Get it: squad-kit gets a tool of its own, and what it needs with it when this computer has none, beside everything
  * else. Each one is checked again once it is in, so its line turns Ready.
  */
-export function getToolNow(id: string, opts: { source?: (id: ToolId) => Promise<ToolSource>; free?: number | null } = {}): Getting {
+export function getToolNow(id: string, opts: { source?: (id: ToolId) => Promise<ToolSource>; free?: number | null; pieces?: string[] } = {}): Getting {
   const e = toolEntry(id);
   if (!e) throw new Error(`squad-kit knows no tool called "${id}". See them all: squad tools`);
   if (e.installer !== 'squad-kit') throw new Error(`squad-kit can't get ${e.name} itself: ${e.why ?? 'you install it'}. The Tools page shows the steps.`);
   const book = foundNow();
   if (book?.tools[e.id]?.state === 'not-here') throw new Error(`squad-kit can't get ${e.name} here: it ${e.notHere ?? "can't run on this computer"}.`);
-  if (fits(e, book)) throw new Error(`${e.name}${book?.tools[e.id]?.version ? ` ${book.tools[e.id]!.version}` : ''} is here already, so there is nothing to get.`);
+  // The person's own Android SDK lacks what the project's Flutter needs: squad-kit gets its own, with those pieces, and
+  // leaves theirs as it is. Its own SDK fetches missing pieces itself as it builds.
+  const pieces = e.id === 'android' && !ownTool('android') ? (opts.pieces ?? []) : [];
+  if (fits(e, book) && !pieces.length) throw new Error(`${e.name}${book?.tools[e.id]?.version ? ` ${book.tools[e.id]!.version}` : ''} is here already, so there is nothing to get.`);
+  wantAndroidPieces(pieces);
+  // Apple's own download of the simulator, into Xcode: it needs Xcode, and has a room check of its own.
+  if (e.id === 'simulator') {
+    if (book?.tools.xcode?.state !== 'found') throw new Error('The iPhone simulator comes with Xcode: get Xcode first, then press Get it.');
+    return startSimulatorGet(() => void checkTools().catch(() => undefined));
+  }
   // Its maker's license is the person's to accept: Get it waits for their Accept, and squad-kit never gives it.
   if (e.license && !accepted(e.id)) throw new Error(`Google's license for the ${e.name} needs your Accept first. Read it on the Tools page and press Accept, or run: squad tools accept ${e.id}`);
   if (e.size) {

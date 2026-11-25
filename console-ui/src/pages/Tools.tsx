@@ -263,7 +263,7 @@ function Line({ l, hit, busy, onCheck }: { l: ToolLine; hit: boolean; busy: bool
         {needsYou && l.installer === 'squad-kit' && (
           <div className="tl-act">
             <span>
-              squad-kit gets it itself, into its own folder, with no password asked.
+              {l.getVia ?? 'squad-kit gets it itself, into its own folder, with no password asked.'}
               {l.size ? ` It takes ${l.size} on this computer${l.seconds ? `, and ${aboutMin(l.seconds)} the first time` : ''}.` : ''}
               {mustAccept ? " Google's license comes first: read it and accept it." : ''}
             </span>
@@ -307,8 +307,8 @@ function Line({ l, hit, busy, onCheck }: { l: ToolLine; hit: boolean; busy: bool
               </ol>
             )}
             <span className="tl-row">
-              <a className="btn sm" href={l.link} target="_blank" rel="noreferrer">
-                Official page <ExternalLink size={13} />
+              <a className={`btn sm${l.linkLabel ? ' pri' : ''}`} href={l.link} target="_blank" rel="noreferrer">
+                {l.linkLabel ?? 'Official page'} <ExternalLink size={13} />
               </a>
               <button className="btn sm" disabled={busy} onClick={onCheck}>
                 <RefreshCw size={13} /> Check again
@@ -317,6 +317,7 @@ function Line({ l, hit, busy, onCheck }: { l: ToolLine; hit: boolean; busy: bool
             </span>
           </div>
         )}
+        {l.pieces && l.pieces.length > 0 && !l.getting && <GetPieces l={l} busy={busy} />}
         {l.studioSteps && (
           <div className="tl-act">
             <span>Or use your own Android Studio, which is on this computer:</span>
@@ -330,6 +331,45 @@ function Line({ l, hit, busy, onCheck }: { l: ToolLine; hit: boolean; busy: bool
         <SkipLine l={l} busy={busy} />
       </div>
     </section>
+  );
+}
+
+/**
+ * Android: what the project's Flutter needs and the person's own SDK lacks. squad-kit gets them with its own Android
+ * tools, in one press (Google's license first, when not accepted yet), and the person's Android Studio stays as it is.
+ */
+function GetPieces({ l, busy }: { l: ToolLine; busy: boolean }) {
+  const act = useAct<ToolsView>();
+  const [reading, setReading] = useState(false);
+  const mustAccept = Boolean(l.license && !l.license.accepted);
+  return (
+    <div className="tl-act tl-pieces">
+      <span>Flutter needs these to build your app, and squad-kit gets them itself:</span>
+      <span className="tl-row">
+        {l.pieces!.map((p) => (
+          <i key={p} className="tl-piece">
+            {p}
+          </i>
+        ))}
+      </span>
+      <span className="tl-row">
+        {mustAccept ? (
+          <button className="btn pri sm" disabled={busy} onClick={() => setReading(true)}>
+            <FileText size={14} /> Read and accept Google's license
+          </button>
+        ) : (
+          <button className="btn pri sm" disabled={busy || act.isPending} onClick={() => act.mutate({ path: '/api/v1/tools/android/get', done: 'Getting what Flutter needs' })}>
+            <Download size={14} /> Get them
+          </button>
+        )}
+        <Cmd text="squad tools get android" />
+      </span>
+      <span className="tl-small">
+        They come with squad-kit's own Android tools{l.size ? `, ${l.size} on this computer` : ''}, into its own folder. Your Android Studio stays as it is.
+        {mustAccept ? " Google's license comes first, then Get them." : ''}
+      </span>
+      {reading && <LicenseRead l={l} onClose={() => setReading(false)} />}
+    </div>
   );
 }
 

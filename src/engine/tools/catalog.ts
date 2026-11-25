@@ -60,6 +60,12 @@ export interface ToolEntry {
   license?: true;
   /** How much room it takes once it is in, for its Get it: "about 20 GB". */
   size?: string;
+  /** squad-kit gets it only when the person presses Get it, never by itself: it is big, from its maker. */
+  pressOnly?: true;
+  /** How squad-kit gets it, for the line, when not into its own folder: "from Apple, with Xcode's own download". */
+  getVia?: string;
+  /** The words on its link's button: "Open the App Store". Left out: Official page. */
+  linkLabel?: string;
   /** A line to read before the steps: "Android pictures and Start come in the next update". */
   note?: string;
   /**
@@ -167,8 +173,9 @@ export const CATALOG: ToolEntry[] = [
     notHere: 'needs a Mac',
     installer: 'you',
     why: 'it comes from the App Store and needs your Apple ID',
-    steps: { mac: ['Open the App Store and get Xcode. It is free, and big: it can take an hour.', 'Open Xcode once and let it finish setting up.', CHECK_AGAIN] },
+    steps: { mac: ['Press Open the App Store, then Get. Xcode is free, and big: it can take an hour.', "Open Xcode once and press Agree. It asks for your Mac's password.", CHECK_AGAIN] },
     link: 'https://apps.apple.com/app/xcode/id497799835',
+    linkLabel: 'Open the App Store',
   },
   {
     id: 'simulator',
@@ -180,9 +187,11 @@ export const CATALOG: ToolEntry[] = [
     ],
     systems: ['mac'],
     notHere: 'needs a Mac',
-    installer: 'you',
-    why: 'it comes with Xcode, from Apple',
-    steps: { mac: ['Open Xcode.', 'Go to Xcode, then Settings, then Components.', 'Get the newest iOS.', CHECK_AGAIN] },
+    installer: 'squad-kit',
+    pressOnly: true,
+    getVia: "squad-kit gets it from Apple with Xcode's own download, with no password asked.",
+    size: 'about 8 GB',
+    getSeconds: 15 * 60,
     link: 'https://developer.apple.com/documentation/xcode/downloading-and-installing-additional-xcode-components',
   },
   {

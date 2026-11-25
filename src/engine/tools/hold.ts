@@ -54,7 +54,7 @@ export function commandsBlock(bp: BoardPaths, t: Pick<Ticket, 'repo' | 'parts' |
     text: `squad-kit can't ${ACTION_DOING[action]} yet: your Android SDK lacks ${what}, which Flutter needs to build the app.`,
     status: `Waits for ${what} in the Android SDK. Goes on by itself once ${here.lacks.length === 1 ? "it's" : "they're"} there`,
     link: '/tools#android',
-    ...(here.own ? {} : { steps: studioStepsFor(here.lacks) }),
+    ...(here.own ? {} : { steps: studioStepsFor(here.lacks), get: { label: 'Get them' } }),
     ...skip,
   };
 }

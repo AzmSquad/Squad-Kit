@@ -107,8 +107,9 @@ export function getOwnTools(block: ToolBlock): boolean {
   if (process.env.SQUAD_KIT_NO_AUTO_GET === '1' && !source) return false;
   if (block.checking || !block.tools.length) return false;
   if (!block.tools.every((x) => toolEntry(x.id)?.installer === 'squad-kit' && (x.state === 'missing' || x.state === 'getting'))) return false;
-  // A tool whose maker's license the person accepts (Android's) never comes by itself: Get it is the person's press.
-  if (block.tools.some((x) => toolEntry(x.id)?.license)) return false;
+  // A tool whose maker's license the person accepts (Android's) never comes by itself: Get it is the person's press. Nor
+  // a big one from its maker (the iPhone simulator, about 8 GB).
+  if (block.tools.some((x) => toolEntry(x.id)?.license || toolEntry(x.id)?.pressOnly)) return false;
   const now = gettingNow();
   if (now) return block.tools.some((x) => x.id === now.tool);
   if (block.tools.some((x) => lastTrouble(x.id))) return false;
