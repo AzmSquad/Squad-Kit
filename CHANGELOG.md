@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.41] — 2026-11-25
+
+### Added
+
+- **Build all: a whole Epic or Feature from the tracker, story after story.** On the Backlog's tree, Build all on an
+  epic or a feature shows what it would build, in order: what a story needs first, then the tracker's own order; the
+  stories already on the board carry on there, and closed ones are left out. The Analyst reads every story once and
+  asks only the real gaps and clashes, all at once; it writes a missing "done when" and adds a need the tracker lacks,
+  each marked. One approval turns Build continuously on: each story builds, is checked and merges by itself, up to the
+  "at once" setting, and stops only when it needs you. The epic and its features move forward in the tracker with their
+  stories. A story changed in the tracker after the approval waits for you; a new one shows on the run with Add to the
+  run; no story is ever built twice, by two runs or by Start on the Backlog. Releasing stays yours. Terminal:
+  `squad backlog build <ref>`, `squad requirements add-new <id>`. Azure DevOps, GitHub sub-issues and Jira.
+
+### Fixed
+
+- **GitHub Issues: the Backlog's tree.** The epics and features were listed as stories, so the tree did not show. They
+  show as epics and features now, and an issue with sub-issues counts as one when it has no label or type.
+
 ## [1.3.40] — 2026-11-25
 
 ### Added
