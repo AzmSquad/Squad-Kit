@@ -8,6 +8,8 @@ import yaml from 'js-yaml';
 import { buildPaths } from '../src/core/paths.js';
 import { startConsoleServer, type ConsoleServer } from '../src/console/server.js';
 import { resetPlannerAuthProbeCache } from '../src/console/api/planner-auth.js';
+import { boardPaths } from '../src/board/store.js';
+import { addVariant, readStudio, saveDesignSystem, saveSketch } from '../src/board/studio.js';
 
 /**
  * The suite deletes `CI` (see `test/support/env-isolation.ts`), so nothing else stops
@@ -33,11 +35,13 @@ vi.mock('../src/planner/runtimes/auth-probe.js', async (importOriginal) => {
 
 let server: ConsoleServer;
 let baseUrl: string;
+let squadDir: string;
 const TOKEN = 'a'.repeat(64);
 
 beforeAll(async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'squad-console-'));
   const paths = buildPaths(root);
+  squadDir = paths.squadDir;
   await mkdir(paths.squadDir, { recursive: true });
   await mkdir(paths.storiesDir, { recursive: true });
   await mkdir(paths.plansDir, { recursive: true });
@@ -186,6 +190,43 @@ describe('console server', () => {
     expect(Array.isArray(body.runs)).toBe(true);
     expect(body.storyCounts.total).toBeGreaterThanOrEqual(1);
     expect(body.stories.some((s) => s.feature === 'demo' && s.id === '01-pull')).toBe(true);
+  });
+});
+
+describe('console server studio', () => {
+  it('GET /api/v1/studio lists design systems and sketches with their change stamps, and makes no folder', async () => {
+    const bp = boardPaths(squadDir);
+    const get = async () => {
+      const res = await fetch(`${baseUrl}/api/v1/studio`, { headers: { authorization: `Bearer ${TOKEN}` } });
+      expect(res.status).toBe(200);
+      return (await res.json()) as {
+        designSystems: { id: string; name: string; version: number; stamp: string; isDefault: boolean; markedDefault: boolean; versions: { version: number; components: string[] }[] }[];
+        defaultDesignSystem: string | null;
+        sketches: { id: string; stamp: string; designSystem: unknown; frames: string[]; screens: { id: string; chosen: number; variants: { version: number; frames: string[] }[] }[] }[];
+      };
+    };
+    expect(await get()).toEqual({ designSystems: [], defaultDesignSystem: null, sketches: [] });
+    expect(fs.existsSync(bp.studioDir)).toBe(false);
+
+    saveDesignSystem(bp, { name: 'Brand', tokens: { colors: { primary: '#2563eb' } }, components: { button: '<button>Pay</button>' } });
+    const ocean = saveDesignSystem(bp, { name: 'Ocean', tokens: { colors: { primary: '#0ea5e9' } } });
+    const sketch = saveSketch(bp, { name: 'Checkout', designSystem: { id: 'brand', version: 1 }, frames: ['desktop'], screens: [{ name: 'Payment' }] });
+    const one = addVariant(bp, 'checkout', 'payment', { frames: { desktop: '<main>A</main>' } }, sketch.stamp);
+    const two = addVariant(bp, 'checkout', 'payment', { frames: { desktop: '<main>B</main>' }, choose: true }, one.stamp);
+
+    const body = await get();
+    const read = readStudio(bp);
+    expect(body.designSystems).toMatchObject([
+      { id: 'brand', name: 'Brand', version: 1, isDefault: true, markedDefault: true, stamp: read.designSystems[0]!.stamp, versions: [{ version: 1, components: ['button'] }] },
+      { id: 'ocean', name: 'Ocean', version: 1, isDefault: false, markedDefault: false, stamp: ocean.stamp, versions: [{ version: 1, components: [] }] },
+    ]);
+    // The first one made is the default, named once and marked on one row only.
+    expect(body.defaultDesignSystem).toBe('brand');
+    expect(body.designSystems.filter((d) => d.isDefault)).toHaveLength(1);
+    expect(body.sketches).toMatchObject([{ id: 'checkout', stamp: two.stamp, designSystem: { id: 'brand', version: 1 }, frames: ['desktop'], screens: [{ id: 'payment', chosen: 2, variants: [{ version: 1, frames: ['desktop'] }, { version: 2, frames: ['desktop'] }] }] }]);
+    expect(body.sketches[0]!.stamp).not.toBe(one.stamp);
+    // The HTML stays in the files; the list names what is there.
+    expect(JSON.stringify(body)).not.toContain('<main>');
   });
 });
 
